@@ -6,6 +6,7 @@ const DELEGATE_KEY = `0x${'11'.repeat(32)}`
 const DELEGATE = new Wallet(DELEGATE_KEY).address
 const TREASURY = `0x${'aa'.repeat(20)}`
 const MERCHANT = `0x${'bb'.repeat(20)}`
+const MERCHANT_TX = `0x${'f2'.repeat(32)}`
 
 const {
   mockAuthorize,
@@ -18,6 +19,8 @@ const {
   mockPrepareSweep,
   mockSignTyped,
   mockFetch,
+  mockListReceipts,
+  mockGetReceipt,
 } = vi.hoisted(() => ({
   mockAuthorize: vi.fn(),
   mockSign: vi.fn(),
@@ -29,9 +32,14 @@ const {
   mockPrepareSweep: vi.fn(),
   mockSignTyped: vi.fn(),
   mockFetch: vi.fn(),
+  mockListReceipts: vi.fn(),
+  mockGetReceipt: vi.fn(),
 }))
 
-vi.mock('@haven_ai/sdk', () => ({
+vi.mock('@haven_ai/sdk', async (importOriginal) => ({
+  // The REAL parseMerchantSettlement (#4119) decodes the resumed response's
+  // PAYMENT-RESPONSE header; only the client and the signing helpers are stubbed.
+  ...(await importOriginal<typeof import('@haven_ai/sdk')>()),
   HavenClient: class {
     resumeX402Payment = mockResume
     prepareSweep = mockPrepareSweep
@@ -47,6 +55,7 @@ vi.mock('../lib/haven-api.js', () => ({
     pollUntilSettled = mockPoll
     getMachinePaymentStatus = mockStatus
     getAgent = mockGetAgent
+    listReceipts = mockListReceipts
   },
 }))
 vi.mock('../lib/merchant-mcp.js', () => ({
@@ -64,15 +73,69 @@ vi.mock('ethers', async (importOriginal) => {
     ...actual,
     ethers: {
       ...actual.ethers,
-      JsonRpcProvider: class {},
+      JsonRpcProvider: class { getTransactionReceipt = mockGetReceipt },
       Contract: class { balanceOf = mockBalanceOf },
     },
   }
 })
 
-const { x402Delegation3009GraceResume, evaluateResumeMoneyProof } = await import(
+const { x402Delegation3009GraceResume, evaluateResumeMoneyProof, TIMING } = await import(
   './x402-delegation-3009-grace-resume.js'
 )
+const { ATTRIBUTION_WINDOW_MS } = await import('../lib/settlement-record.js')
+
+TIMING.receiptWaitMs = 60
+TIMING.receiptPollMs = 20
+
+/** The merchant's base64-JSON PAYMENT-RESPONSE header naming its settlement transaction. */
+const paymentResponse = (transaction: string) =>
+  Buffer.from(JSON.stringify({ success: true, transaction, network: 'eip155:84532' })).toString('base64')
+
+/** The resumed merchant response: served, with the settlement in PAYMENT-RESPONSE unless overridden. */
+const resumedResponse = (
+  headers: Record<string, string> = { 'PAYMENT-RESPONSE': paymentResponse(MERCHANT_TX) },
+  result: Record<string, unknown> = { content: [{ text: 'paid' }] },
+) => new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result }), { status: 200, headers })
+
+/** The leg's own recovery read: confirmed funding, no merchant retry yet. */
+const RECOVERY = {
+  ok: true,
+  status: 200,
+  data: { phase: 'funded_but_unsettled', next_action: 'retry_original_x402_request' },
+}
+
+/** After the resume: settled, with or without the #4119 record flag. */
+const settledStatus = (recorded: boolean) => ({
+  ok: true,
+  status: 200,
+  data: { payment_id: 'pay_2159', phase: 'settled', next_action: 'none', ...(recorded ? { merchant_settlement_recorded: true } : {}) },
+})
+
+/**
+ * The status stub is SEQUENCED by event (#4119 test trap): every read before
+ * the resume is the leg's own recovery read, `funded_but_unsettled` — which
+ * can never carry the record flag (agent-payment-status.ts) — and every read
+ * after it is the settled answer `afterResume` decides.
+ */
+function statusAroundResume(afterResume: () => ReturnType<typeof settledStatus>) {
+  mockStatus.mockImplementation(async () => (mockResume.mock.calls.length === 0 ? RECOVERY : afterResume()))
+}
+
+/** Drive a run on a fake clock so the REAL 45 s attribution window is exercised. */
+async function onFakeClock<T>(run: () => Promise<T>): Promise<T> {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+  try {
+    let done = false
+    const pending = run().finally(() => {
+      done = true
+    })
+    for (let step = 0; step < 2_000 && !done; step++) await vi.advanceTimersByTimeAsync(250)
+    if (!done) throw new Error('the run did not settle within 500 s of fake time')
+    return await pending
+  } finally {
+    vi.useRealTimers()
+  }
+}
 
 function ctx(over: Partial<ScenarioContext['cfg']> = {}): ScenarioContext {
   return {
@@ -89,6 +152,9 @@ function ctx(over: Partial<ScenarioContext['cfg']> = {}): ScenarioContext {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  // clearAllMocks keeps queued once-values; a run that failed before reading
+  // its "after" balances would leak them into the next test.
+  mockBalanceOf.mockReset()
   vi.stubGlobal('fetch', mockFetch)
   mockFetch.mockResolvedValue(new Response('payment required', { status: 402, headers: { 'PAYMENT-REQUIRED': 'x' } }))
   mockGetAgent.mockResolvedValue({ ok: true, data: { account_address: TREASURY } })
@@ -99,12 +165,14 @@ beforeEach(() => {
   mockSignTyped.mockResolvedValue('0xsigned')
   mockSign.mockResolvedValue({ ok: true, status: 200, data: {} })
   mockPoll.mockResolvedValue({ status: 'confirmed', tx_hash: '0xfunding' })
-  mockStatus.mockResolvedValue({
+  statusAroundResume(() => settledStatus(true))
+  mockResume.mockImplementation(async () => resumedResponse())
+  mockListReceipts.mockResolvedValue({
     ok: true,
     status: 200,
-    data: { phase: 'funded_but_unsettled', next_action: 'retry_original_x402_request' },
+    data: { receipts: [{ payment_id: 'pay_2159', tx_hash: '0xfunding', settlement_tx_hash: MERCHANT_TX }] },
   })
-  mockResume.mockResolvedValue(new Response(JSON.stringify({ result: { content: [{ text: 'paid' }] } }), { status: 200 }))
+  mockGetReceipt.mockResolvedValue({ status: 1, blockNumber: 45_212_857 })
   mockPrepareSweep.mockResolvedValue({ nothing_stranded: true })
   // treasury / merchant / delegate before, then each after resume.
   mockBalanceOf
@@ -139,26 +207,19 @@ describe('x402-delegation-3009-grace-resume (#2159)', () => {
   })
 
   it('fails if the resumed purchase does not debit treasury and credit merchant equally', async () => {
-    mockBalanceOf
-      .mockReset()
-      .mockResolvedValue(0n)
-      .mockResolvedValueOnce(1_000_000n)
-      .mockResolvedValueOnce(0n)
-      .mockResolvedValueOnce(0n)
-      .mockResolvedValueOnce(999_000n)
-      .mockResolvedValueOnce(500n)
-      .mockResolvedValueOnce(0n)
-      .mockResolvedValueOnce(999_000n)
-      .mockResolvedValueOnce(500n)
-      .mockResolvedValueOnce(0n)
-      .mockResolvedValueOnce(500n)
-    const now = vi.spyOn(Date, 'now')
-      .mockReturnValueOnce(0)
-      .mockReturnValueOnce(0)
-      .mockReturnValueOnce(0)
-      .mockReturnValueOnce(30_001)
-    const result = await x402Delegation3009GraceResume.run(ctx())
-    now.mockRestore()
+    // By address, so the proof's polling may read any number of times: the
+    // treasury pays 0.001, the merchant receives only 0.0005, and the other
+    // 0.0005 stays on the delegate — which the cleanup then finds and sweeps.
+    const reads = new Map<string, number>()
+    mockBalanceOf.mockReset().mockImplementation(async (address: string) => {
+      const n = reads.get(address) ?? 0
+      reads.set(address, n + 1)
+      if (address === TREASURY) return n === 0 ? 1_000_000n : 999_000n
+      return n === 0 ? 0n : 500n // merchant and delegate alike
+    })
+    // On the fake clock the money proof's REAL 30 s wait runs out; this used
+    // to spy `Date.now` call by call, which any new clock read (#4119) shifted.
+    const result = await onFakeClock(() => x402Delegation3009GraceResume.run(ctx()))
     expect(result.pass).toBe(false)
     expect(result.detail).toMatch(/money proof failed/)
     expect(mockPrepareSweep).toHaveBeenCalledOnce()
@@ -195,6 +256,95 @@ describe('x402-delegation-3009-grace-resume (#2159)', () => {
     expect(result.pass).toBe(false)
     expect(result.detail).toMatch(/post-funding recovery failed: status endpoint unavailable/)
     expect(mockPrepareSweep).toHaveBeenCalledOnce()
+  })
+})
+
+describe('Haven recorded the resumed merchant settlement (#4119)', () => {
+  it('passes, and the PASS line shows the recorded hash', async () => {
+    const result = await x402Delegation3009GraceResume.run(ctx())
+    expect(result.pass).toBe(true)
+    expect(result.detail).toContain(`merchant settlement recorded: ${MERCHANT_TX}`)
+    expect(result.detail).toMatch(/from PAYMENT-RESPONSE/)
+    expect(mockGetReceipt).toHaveBeenCalledWith(MERCHANT_TX)
+  })
+
+  it('FAILS when the settled status never carries merchant_settlement_recorded, naming the payment', async () => {
+    statusAroundResume(() => settledStatus(false))
+    const result = await onFakeClock(() => x402Delegation3009GraceResume.run(ctx()))
+    expect(result.pass).toBe(false)
+    expect(result.detail).toMatch(/did not record the merchant settlement of payment pay_2159/)
+    expect(result.detail).not.toMatch(/TypeError|is not a function/)
+  })
+
+  it('FAILS on a late record: absent until after anchor + 45 s, present afterwards', async () => {
+    // The anchor is the funding submit (signPayment): here the funding
+    // confirms BEFORE the resume, so a timestamp before the resume would not
+    // bound the sweep's 60 s floor.
+    let fundedAt = Number.NaN
+    mockSign.mockImplementation(async () => {
+      fundedAt = Date.now()
+      return { ok: true, status: 200, data: {} }
+    })
+    statusAroundResume(() => settledStatus(Date.now() > fundedAt + ATTRIBUTION_WINDOW_MS))
+    const result = await onFakeClock(() => x402Delegation3009GraceResume.run(ctx()))
+    expect(result.pass).toBe(false)
+    expect(result.detail).toMatch(/pay_2159/)
+  })
+
+  it('anchors on the funding submit: a resume that returns past the window is not attributable', async () => {
+    // Funding submit at t, resume returning at t + 50 s with the record
+    // already present: the #3888 sweep could have made it, so it is red.
+    mockResume.mockImplementation(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50_000))
+      return resumedResponse()
+    })
+    const result = await onFakeClock(() => x402Delegation3009GraceResume.run(ctx()))
+    expect(result.pass).toBe(false)
+    expect(result.detail).toMatch(/cannot be told apart from the #3888 sweep/)
+  })
+
+  it('FAILS when Haven recorded a DIFFERENT hash, beside a true flag', async () => {
+    mockListReceipts.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { receipts: [{ payment_id: 'pay_2159', settlement_tx_hash: `0x${'e9'.repeat(32)}` }] },
+    })
+    const result = await x402Delegation3009GraceResume.run(ctx())
+    expect(result.pass).toBe(false)
+    expect(result.detail).toMatch(/attributed another transaction to this payment/)
+  })
+
+  it('stays green on a case-only hash difference', async () => {
+    mockListReceipts.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { receipts: [{ payment_id: 'pay_2159', settlement_tx_hash: MERCHANT_TX.toUpperCase().replace('0X', '0x') }] },
+    })
+    const result = await x402Delegation3009GraceResume.run(ctx())
+    expect(result.pass).toBe(true)
+  })
+
+  it('falls back to the tool result _meta when PAYMENT-RESPONSE carries no transaction', async () => {
+    mockResume.mockImplementation(async () =>
+      resumedResponse({}, { content: [{ text: 'paid' }], _meta: { 'x402/payment-response': { success: true, transaction: MERCHANT_TX } } }),
+    )
+    const result = await x402Delegation3009GraceResume.run(ctx())
+    expect(result.pass).toBe(true)
+    expect(result.detail).toMatch(/from _meta/)
+  })
+
+  it('FAILS when the resumed response names no settlement transaction', async () => {
+    mockResume.mockImplementation(async () => resumedResponse({}))
+    const result = await x402Delegation3009GraceResume.run(ctx())
+    expect(result.pass).toBe(false)
+    expect(result.detail).toMatch(/named no settlement transaction/)
+  })
+
+  it('FAILS when the merchant settlement REVERTED on-chain', async () => {
+    mockGetReceipt.mockResolvedValue({ status: 0, blockNumber: 1 })
+    const result = await x402Delegation3009GraceResume.run(ctx())
+    expect(result.pass).toBe(false)
+    expect(result.detail).toMatch(/REVERTED on-chain/)
   })
 })
 

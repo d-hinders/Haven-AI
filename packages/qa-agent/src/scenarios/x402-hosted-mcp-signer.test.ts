@@ -5,8 +5,8 @@
  * green run that means less than a reader assumes. A hosted purchase can
  * succeed while the delegation-rail typed-data seam — the one #1138 broke — was
  * never touched at all, because a legacy-rail identity would produce a perfectly
- * happy v1 flow. And "the merchant said yes" is not "money moved": Haven relays
- * the facilitator's settlement hash but never watches that leg itself.
+ * happy v1 flow. And "the merchant said yes" is not "money moved", and money
+ * moving is not Haven having RECORDED the merchant settlement (#4119).
  *
  * Each test feeds the shape the scenario must reject. Network and chain seams
  * are mocked so the assertion logic is the only thing under test.
@@ -23,13 +23,16 @@ const BINDING_SIGNER = '0x' + 'bb'.repeat(20)
 const FUNDING_TX = '0x' + 'f1'.repeat(32)
 const MERCHANT_TX = '0x' + 'f2'.repeat(32)
 
-const { mockCallTool, mockGetAgent, mockBalanceOf, mockGetReceipt, mockSignX402 } = vi.hoisted(() => ({
-  mockCallTool: vi.fn(),
-  mockGetAgent: vi.fn(),
-  mockBalanceOf: vi.fn(),
-  mockGetReceipt: vi.fn(),
-  mockSignX402: vi.fn(),
-}))
+const { mockCallTool, mockGetAgent, mockBalanceOf, mockGetReceipt, mockSignX402, mockStatus, mockListReceipts } =
+  vi.hoisted(() => ({
+    mockCallTool: vi.fn(),
+    mockGetAgent: vi.fn(),
+    mockBalanceOf: vi.fn(),
+    mockGetReceipt: vi.fn(),
+    mockSignX402: vi.fn(),
+    mockStatus: vi.fn(),
+    mockListReceipts: vi.fn(),
+  }))
 
 vi.mock('@haven_ai/signer', () => ({
   createEdgeSigner: () => ({ delegateAddress: DELEGATE }),
@@ -38,6 +41,8 @@ vi.mock('@haven_ai/signer', () => ({
 vi.mock('../lib/haven-api.js', () => ({
   HavenApi: class {
     getAgent = mockGetAgent
+    getMachinePaymentStatus = mockStatus
+    listReceipts = mockListReceipts
   },
 }))
 vi.mock('ethers', async (importOriginal) => {
@@ -70,6 +75,9 @@ vi.mock('../lib/hosted-mcp.js', async (importOriginal) => {
 })
 
 const { x402HostedMcpSigner, TIMING } = await import('./x402-hosted-mcp-signer.js')
+const { SETTLED_NO_TOOL_REASON, REFUSED_HASH_REASON, ATTRIBUTION_WINDOW_MS } = await import(
+  '../lib/settlement-record.js'
+)
 
 // Real values would make each missing-receipt / non-converging-balance case sit
 // out a 60–90s wait.
@@ -107,7 +115,25 @@ const settled = (over: Record<string, unknown> = {}) => ({
   settled: true,
   settlement_tx_hash: MERCHANT_TX,
   result: { content: [{ text: 'VPN basic purchased' }] },
+  // #3764: the eip3009 settled arm's recorded (or nothing-posted) guidance.
+  next_action: 'none',
+  next_tool: null,
+  next_tool_omitted_reason: SETTLED_NO_TOOL_REASON,
   ...over,
+})
+
+/** `GET /machine-payments/:id/status`, with or without the #4119 record flag. */
+const status = (recorded: boolean) => ({
+  ok: true,
+  status: 200,
+  data: { payment_id: 'pay_hosted_1', phase: 'settled', next_action: 'none', ...(recorded ? { merchant_settlement_recorded: true } : {}) },
+})
+
+/** `GET /machine-payments/receipts` with this payment's row and its recorded hash. */
+const receipts = (settlementTxHash: string | null = MERCHANT_TX) => ({
+  ok: true,
+  status: 200,
+  data: { receipts: [{ payment_id: 'pay_hosted_1', tx_hash: FUNDING_TX, settlement_tx_hash: settlementTxHash }] },
 })
 
 function ctx(over: Partial<ScenarioContext['cfg']> = {}): ScenarioContext {
@@ -153,6 +179,8 @@ beforeEach(() => {
     data: { signature: '0xsig', x402_binding: 'b1', payment_header: 'hdr', accepted: {} },
   })
   mockGetReceipt.mockResolvedValue({ status: 1, blockNumber: 45_212_857 })
+  mockStatus.mockResolvedValue(status(true))
+  mockListReceipts.mockResolvedValue(receipts())
   balances()
 })
 
@@ -351,6 +379,8 @@ describe('the money proof', () => {
     expect(r.detail).toContain(FUNDING_TX)
     expect(r.detail).toContain(MERCHANT_TX)
     expect(r.detail).toMatch(/zero delegate residual/)
+    // #4119: the record is visible in the PASS line the live run prints.
+    expect(r.detail).toContain(`merchant settlement recorded: ${MERCHANT_TX}`)
   })
 })
 
@@ -458,5 +488,197 @@ describe('the request this leg actually sends (#1441)', () => {
     const human = (payCall![1] as Record<string, unknown>).max_amount_human
     expect(typeof human).toBe('string')
     expect(Number(human)).toBeGreaterThanOrEqual(1)
+  })
+})
+
+/**
+ * Drive a run on a fake clock: `Date.now` and `setTimeout` are fake, and the
+ * clock is advanced in steps until the run settles, so the REAL 45 s
+ * attribution window is what the late-record cases exercise.
+ */
+async function onFakeClock<T>(run: () => Promise<T>): Promise<T> {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+  try {
+    let done = false
+    const pending = run().finally(() => {
+      done = true
+    })
+    for (let step = 0; step < 2_000 && !done; step++) await vi.advanceTimersByTimeAsync(250)
+    if (!done) throw new Error('the run did not settle within 500 s of fake time')
+    return await pending
+  } finally {
+    vi.useRealTimers()
+  }
+}
+
+/** The time the settle call was made — the leg's #4119 anchor is taken just before it. */
+function settleAt(over: Record<string, unknown> = {}): { at: () => number } {
+  let at = Number.NaN
+  mockCallTool.mockImplementation(async (tool: string) => {
+    if (tool === 'haven_pay_mcp_tool') return quote()
+    if (tool === 'haven_settle_mcp_tool') {
+      at = Date.now()
+      return settled(over)
+    }
+    return { payment_id: 'pay_hosted_1', settled: true, settlement_tx_hash: MERCHANT_TX }
+  })
+  return { at: () => at }
+}
+
+/** The settle's retryable arm: the report tool named, hash prefilled, NO payment_header. */
+const reportToolArm = {
+  next_action: 'retry_with_explicit_context',
+  next_tool: 'mcp__haven__haven_report_settlement_evidence',
+  next_tool_name: 'haven_report_settlement_evidence',
+  next_tool_server_role: 'hosted',
+  next_arguments: { payment_id: 'pay_hosted_1', settlement_tx_hash: MERCHANT_TX },
+  next_tool_omitted_reason: undefined,
+}
+
+const reportCalls = () => mockCallTool.mock.calls.filter(([tool]) => tool === 'haven_report_settlement_evidence')
+
+describe('Haven recorded the merchant settlement (#4119)', () => {
+  it('FAILS when the status carries no merchant_settlement_recorded, naming the payment', async () => {
+    mockStatus.mockResolvedValue(status(false))
+    const r = await x402HostedMcpSigner.run(ctx())
+    expect(r.pass).toBe(false)
+    expect(r.detail).toMatch(/pay_hosted_1/)
+    expect(r.detail).toMatch(/not recorded, or was never posted/)
+    // The leg's own message, never a crash on a seam the old mocks lacked.
+    expect(r.detail).not.toMatch(/TypeError|is not a function/)
+  })
+
+  it('FAILS when the record is absent at settle-return and appears only later — the sweep must not rescue it', async () => {
+    mockStatus.mockResolvedValueOnce(status(false)).mockResolvedValue(status(true))
+    const r = await x402HostedMcpSigner.run(ctx())
+    expect(r.pass).toBe(false)
+    expect(r.detail).toMatch(/status read right after settle returned shows no record/)
+    expect(mockStatus).toHaveBeenCalledTimes(1)
+  })
+
+  it('reads the status BEFORE any on-chain read — at settle-return, not after the receipt waits', async () => {
+    await x402HostedMcpSigner.run(ctx())
+    expect(mockStatus.mock.invocationCallOrder[0]).toBeLessThan(mockGetReceipt.mock.invocationCallOrder[0])
+  })
+
+  it('FAILS on a late record: absent until after anchor + 45 s, present afterwards (report-tool arm)', async () => {
+    const settle = settleAt(reportToolArm)
+    mockStatus.mockImplementation(async () => status(Date.now() > settle.at() + ATTRIBUTION_WINDOW_MS))
+    const r = await onFakeClock(() => x402HostedMcpSigner.run(ctx()))
+    expect(r.pass).toBe(false)
+    expect(r.detail).toMatch(/pay_hosted_1/)
+    expect(r.detail).toMatch(/never showed the record inside the window/)
+  })
+
+  it('PASSES a record that appears inside the window after the follow-up (report-tool arm)', async () => {
+    const settle = settleAt(reportToolArm)
+    mockStatus.mockImplementation(async () => status(Date.now() > settle.at() + 10_000))
+    const r = await onFakeClock(() => x402HostedMcpSigner.run(ctx()))
+    expect(r.pass).toBe(true)
+  })
+
+  it('FAILS when Haven recorded a DIFFERENT hash than the one proved on-chain, beside a true flag', async () => {
+    mockListReceipts.mockResolvedValue(receipts('0x' + 'e9'.repeat(32)))
+    const r = await x402HostedMcpSigner.run(ctx())
+    expect(r.pass).toBe(false)
+    expect(r.detail).toMatch(/attributed another transaction to this payment/)
+    expect(r.detail).toMatch(/pay_hosted_1/)
+  })
+
+  it('compares the recorded hash case-insensitively — the writer stores LOWER(hash)', async () => {
+    const mixed = '0x' + 'F2'.repeat(32)
+    mockCallTool.mockImplementation(async (tool: string) =>
+      tool === 'haven_pay_mcp_tool' ? quote() : settled({ settlement_tx_hash: mixed }),
+    )
+    mockListReceipts.mockResolvedValue(receipts(MERCHANT_TX))
+    const r = await x402HostedMcpSigner.run(ctx())
+    expect(r.pass).toBe(true)
+  })
+
+  it('FAILS on the refused-hash arm even when the status DOES carry the flag', async () => {
+    mockCallTool.mockImplementation(async (tool: string) =>
+      tool === 'haven_pay_mcp_tool' ? quote() : settled({ next_tool_omitted_reason: REFUSED_HASH_REASON }),
+    )
+    const r = await x402HostedMcpSigner.run(ctx())
+    expect(r.pass).toBe(false)
+    expect(r.detail).toMatch(/REFUSED the merchant settlement of payment pay_hosted_1/)
+  })
+
+  it('FAILS on an unpinned omitted reason — recorded cannot be told from refused', async () => {
+    mockCallTool.mockImplementation(async (tool: string) =>
+      tool === 'haven_pay_mcp_tool' ? quote() : settled({ next_tool_omitted_reason: 'something new' }),
+    )
+    const r = await x402HostedMcpSigner.run(ctx())
+    expect(r.pass).toBe(false)
+    expect(r.detail).toMatch(/unpinned next_tool_omitted_reason/)
+  })
+
+  it('follows the report-tool arm with next_arguments PLUS the signed payment_header', async () => {
+    settleAt(reportToolArm)
+    const r = await x402HostedMcpSigner.run(ctx())
+    expect(r.pass).toBe(true)
+    expect(r.detail).toMatch(/via a follow-up haven_report_settlement_evidence/)
+    expect(reportCalls()).toHaveLength(1)
+    // The prefilled next_arguments never carry the header, and an eip3009
+    // report without it is refused before the chain is read.
+    expect(reportCalls()[0][1]).toEqual({
+      payment_id: 'pay_hosted_1',
+      settlement_tx_hash: MERCHANT_TX,
+      payment_header: 'hdr',
+    })
+  })
+
+  it('FAILS when the report-tool arm follow-up is refused, even with the flag present', async () => {
+    mockCallTool.mockImplementation(async (tool: string) => {
+      if (tool === 'haven_pay_mcp_tool') return quote()
+      if (tool === 'haven_settle_mcp_tool') return settled(reportToolArm)
+      return {
+        payment_id: 'pay_hosted_1',
+        settled: false,
+        code: 'SETTLEMENT_NOT_RECORDED',
+        refusal_reason: 'the transaction does not settle this payment',
+      }
+    })
+    const r = await x402HostedMcpSigner.run(ctx())
+    expect(r.pass).toBe(false)
+    expect(r.detail).toMatch(/refused the follow-up haven_report_settlement_evidence for payment pay_hosted_1/)
+    expect(r.detail).toMatch(/SETTLEMENT_NOT_RECORDED/)
+  })
+
+  it('FAILS when the follow-up is refused as a tool error', async () => {
+    mockCallTool.mockImplementation(async (tool: string) => {
+      if (tool === 'haven_pay_mcp_tool') return quote()
+      if (tool === 'haven_settle_mcp_tool') return settled(reportToolArm)
+      throw new HostedMcpToolError('haven_report_settlement_evidence', 'NOT_FOUND', 'payment not found')
+    })
+    const r = await x402HostedMcpSigner.run(ctx())
+    expect(r.pass).toBe(false)
+    expect(r.detail).toMatch(/was refused: NOT_FOUND/)
+  })
+
+  it('re-sends a retryable follow-up, bounded, and passes once Haven verifies it', async () => {
+    let reports = 0
+    mockCallTool.mockImplementation(async (tool: string) => {
+      if (tool === 'haven_pay_mcp_tool') return quote()
+      if (tool === 'haven_settle_mcp_tool') return settled(reportToolArm)
+      reports++
+      return reports < 2
+        ? { payment_id: 'pay_hosted_1', settled: false, code: 'SETTLEMENT_PENDING', retryable: true }
+        : { payment_id: 'pay_hosted_1', settled: true, settlement_tx_hash: MERCHANT_TX }
+    })
+    const r = await onFakeClock(() => x402HostedMcpSigner.run(ctx()))
+    expect(r.pass).toBe(true)
+    expect(reportCalls()).toHaveLength(2)
+  })
+
+  it('FAILS when the follow-up stays retryable — never waits past the bound for the sweep', async () => {
+    mockCallTool.mockImplementation(async (tool: string) => {
+      if (tool === 'haven_pay_mcp_tool') return quote()
+      if (tool === 'haven_settle_mcp_tool') return settled(reportToolArm)
+      return { payment_id: 'pay_hosted_1', settled: false, code: 'SETTLEMENT_PENDING', retryable: true }
+    })
+    const r = await onFakeClock(() => x402HostedMcpSigner.run(ctx()))
+    expect(r.pass).toBe(false)
+    expect(r.detail).toMatch(/still retryable after 4 attempt/)
   })
 })

@@ -24,17 +24,29 @@ const FUNDING_TX = '0x' + 'f1'.repeat(32)
 const MERCHANT_TX = '0x' + 'f2'.repeat(32)
 const CATALOG_ID = 'cat_nordshield_vpn_basic'
 
-const { mockCallTool, mockGetAgent, mockGetCatalog, mockBalanceOf, mockGetReceipt, mockSignX402, mockSign, mockFetch } =
-  vi.hoisted(() => ({
-    mockCallTool: vi.fn(),
-    mockGetAgent: vi.fn(),
-    mockGetCatalog: vi.fn(),
-    mockBalanceOf: vi.fn(),
-    mockGetReceipt: vi.fn(),
-    mockSignX402: vi.fn(),
-    mockSign: vi.fn(),
-    mockFetch: vi.fn(),
-  }))
+const {
+  mockCallTool,
+  mockGetAgent,
+  mockGetCatalog,
+  mockBalanceOf,
+  mockGetReceipt,
+  mockSignX402,
+  mockSign,
+  mockFetch,
+  mockStatus,
+  mockListReceipts,
+} = vi.hoisted(() => ({
+  mockCallTool: vi.fn(),
+  mockGetAgent: vi.fn(),
+  mockGetCatalog: vi.fn(),
+  mockBalanceOf: vi.fn(),
+  mockGetReceipt: vi.fn(),
+  mockSignX402: vi.fn(),
+  mockSign: vi.fn(),
+  mockFetch: vi.fn(),
+  mockStatus: vi.fn(),
+  mockListReceipts: vi.fn(),
+}))
 
 vi.mock('@haven_ai/signer', () => ({
   createEdgeSigner: () => ({ delegateAddress: DELEGATE }),
@@ -44,6 +56,8 @@ vi.mock('../lib/haven-api.js', () => ({
   HavenApi: class {
     getAgent = mockGetAgent
     getCatalog = mockGetCatalog
+    getMachinePaymentStatus = mockStatus
+    listReceipts = mockListReceipts
   },
 }))
 vi.mock('ethers', async (importOriginal) => {
@@ -76,6 +90,9 @@ vi.mock('../lib/hosted-mcp.js', async (importOriginal) => {
 })
 
 const { x402CatalogGuidedPurchase, TIMING } = await import('./x402-catalog-guided-purchase.js')
+const { SETTLED_NO_TOOL_REASON, REFUSED_HASH_REASON, ATTRIBUTION_WINDOW_MS } = await import(
+  '../lib/settlement-record.js'
+)
 
 // Real values would make each missing-receipt / non-converging-balance case
 // sit out a 60–90s wait.
@@ -152,7 +169,25 @@ const settled = (over: Record<string, unknown> = {}) => ({
     token_address: '0x' + '99'.repeat(20),
     source: 'active_delegations',
   },
+  // #3764: the eip3009 settled arm's recorded (or nothing-posted) guidance.
+  next_action: 'none',
+  next_tool: null,
+  next_tool_omitted_reason: SETTLED_NO_TOOL_REASON,
   ...over,
+})
+
+/** `GET /machine-payments/:id/status`, with or without the #4119 record flag. */
+const status = (recorded: boolean) => ({
+  ok: true,
+  status: 200,
+  data: { payment_id: 'pay_catalog_1', phase: 'settled', next_action: 'none', ...(recorded ? { merchant_settlement_recorded: true } : {}) },
+})
+
+/** `GET /machine-payments/receipts` with this payment's row and its recorded hash. */
+const receipts = (settlementTxHash: string | null = MERCHANT_TX) => ({
+  ok: true,
+  status: 200,
+  data: { receipts: [{ payment_id: 'pay_catalog_1', tx_hash: FUNDING_TX, settlement_tx_hash: settlementTxHash }] },
 })
 
 function ctx(over: Partial<ScenarioContext['cfg']> = {}): ScenarioContext {
@@ -200,6 +235,8 @@ beforeEach(() => {
     data: { signature: '0xsig', x402_binding: 'b1', payment_header: 'hdr', accepted: {} },
   })
   mockGetReceipt.mockResolvedValue({ status: 1, blockNumber: 45_212_857 })
+  mockStatus.mockResolvedValue(status(true))
+  mockListReceipts.mockResolvedValue(receipts())
   balances()
 })
 
@@ -700,6 +737,8 @@ describe('the money proof', () => {
     expect(r.detail).toContain(MERCHANT_TX)
     expect(r.detail).toContain(CATALOG_ID)
     expect(r.detail).toMatch(/zero delegate residual/)
+    // #4119: the record is in the PASS line.
+    expect(r.detail).toContain(`merchant settlement recorded: ${MERCHANT_TX}`)
   })
 })
 
@@ -895,5 +934,129 @@ describe('the erc7710 shape (#1547)', () => {
     const r = await x402CatalogGuidedPurchase.run(ctx())
     expect(r.pass).toBe(false)
     expect(r.detail).toMatch(/rail-labeled allowance/)
+  })
+})
+
+/** Drive a run on a fake clock so the REAL 45 s attribution window is exercised. */
+async function onFakeClock<T>(run: () => Promise<T>): Promise<T> {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+  try {
+    let done = false
+    const pending = run().finally(() => {
+      done = true
+    })
+    for (let step = 0; step < 2_000 && !done; step++) await vi.advanceTimersByTimeAsync(250)
+    if (!done) throw new Error('the run did not settle within 500 s of fake time')
+    return await pending
+  } finally {
+    vi.useRealTimers()
+  }
+}
+
+/** The settle's retryable arm: the report tool named, hash prefilled, NO payment_header. */
+const reportToolArm = {
+  next_action: 'retry_with_explicit_context',
+  next_tool: 'mcp__haven__haven_report_settlement_evidence',
+  next_tool_name: 'haven_report_settlement_evidence',
+  next_tool_server_role: 'hosted',
+  next_arguments: { payment_id: 'pay_catalog_1', settlement_tx_hash: MERCHANT_TX },
+  next_tool_omitted_reason: undefined,
+}
+
+/** Settle answers with `over`; the follow-up answers `report`. Records when settle was called. */
+function settleWith(over: Record<string, unknown>, report: () => unknown = () => ({ settled: true })) {
+  let at = Number.NaN
+  mockCallTool.mockImplementation(async (tool: string) => {
+    if (tool === 'haven_prepare_catalog_purchase') return prep()
+    if (tool === 'haven_settle_mcp_tool') {
+      at = Date.now()
+      return settled(over)
+    }
+    return report()
+  })
+  return { at: () => at }
+}
+
+const reportCalls = () => mockCallTool.mock.calls.filter(([tool]) => tool === 'haven_report_settlement_evidence')
+
+describe('eip3009 continuation: Haven recorded the merchant settlement (#4119)', () => {
+  it('FAILS when the status carries no merchant_settlement_recorded, naming the payment', async () => {
+    mockStatus.mockResolvedValue(status(false))
+    const r = await x402CatalogGuidedPurchase.run(ctx())
+    expect(r.pass).toBe(false)
+    expect(r.detail).toMatch(/pay_catalog_1/)
+    expect(r.detail).toMatch(/not recorded, or was never posted/)
+    expect(r.detail).not.toMatch(/TypeError|is not a function/)
+  })
+
+  it('FAILS when the record is absent at settle-return and appears only later', async () => {
+    mockStatus.mockResolvedValueOnce(status(false)).mockResolvedValue(status(true))
+    const r = await x402CatalogGuidedPurchase.run(ctx())
+    expect(r.pass).toBe(false)
+    expect(r.detail).toMatch(/status read right after settle returned shows no record/)
+  })
+
+  it('FAILS on a late record: absent until after anchor + 45 s, present afterwards (report-tool arm)', async () => {
+    const settle = settleWith(reportToolArm)
+    mockStatus.mockImplementation(async () => status(Date.now() > settle.at() + ATTRIBUTION_WINDOW_MS))
+    const r = await onFakeClock(() => x402CatalogGuidedPurchase.run(ctx()))
+    expect(r.pass).toBe(false)
+    expect(r.detail).toMatch(/pay_catalog_1/)
+    expect(r.detail).toMatch(/never showed the record inside the window/)
+  })
+
+  it('FAILS when Haven recorded a DIFFERENT hash, beside a true flag', async () => {
+    mockListReceipts.mockResolvedValue(receipts('0x' + 'e9'.repeat(32)))
+    const r = await x402CatalogGuidedPurchase.run(ctx())
+    expect(r.pass).toBe(false)
+    expect(r.detail).toMatch(/attributed another transaction to this payment/)
+  })
+
+  it('stays green on a case-only hash difference', async () => {
+    mockListReceipts.mockResolvedValue(receipts(MERCHANT_TX.toUpperCase().replace('0X', '0x')))
+    const r = await x402CatalogGuidedPurchase.run(ctx())
+    expect(r.pass).toBe(true)
+  })
+
+  it('FAILS on the refused-hash arm (no tool) even when the status DOES carry the flag', async () => {
+    settleWith({ next_tool_omitted_reason: REFUSED_HASH_REASON })
+    const r = await x402CatalogGuidedPurchase.run(ctx())
+    expect(r.pass).toBe(false)
+    expect(r.detail).toMatch(/REFUSED the merchant settlement of payment pay_catalog_1/)
+  })
+
+  it('FAILS when the report-tool arm follow-up is refused, even with the flag present', async () => {
+    settleWith(reportToolArm, () => ({
+      payment_id: 'pay_catalog_1',
+      settled: false,
+      code: 'SETTLEMENT_PROOF_HEADER_MISSING',
+      refusal_reason: 'the report carried no payment header',
+    }))
+    const r = await x402CatalogGuidedPurchase.run(ctx())
+    expect(r.pass).toBe(false)
+    expect(r.detail).toMatch(/refused the follow-up haven_report_settlement_evidence for payment pay_catalog_1/)
+  })
+
+  it('follows the report-tool arm with next_arguments PLUS the signed payment_header', async () => {
+    settleWith(reportToolArm)
+    const r = await x402CatalogGuidedPurchase.run(ctx())
+    expect(r.pass).toBe(true)
+    expect(reportCalls()).toHaveLength(1)
+    expect(reportCalls()[0][1]).toEqual({
+      payment_id: 'pay_catalog_1',
+      settlement_tx_hash: MERCHANT_TX,
+      payment_header: 'hdr',
+    })
+  })
+
+  it('never reads the settlement record on the erc7710 shape — its settlement IS the intent', async () => {
+    // The flag is absent by design on erc7710 (agent-payment-status.ts); a
+    // check there would red a correct direct settlement.
+    mockStatus.mockResolvedValue(status(false))
+    mockCallTool.mockImplementation(async (tool: string) =>
+      tool === 'haven_prepare_catalog_purchase' ? prep({ settlement_scheme: 'erc7710' }) : settled(),
+    )
+    await x402CatalogGuidedPurchase.run(ctx())
+    expect(mockStatus).not.toHaveBeenCalled()
   })
 })

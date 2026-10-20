@@ -38,7 +38,7 @@
  *     the merchant be recorded separately from the funding-transfer address, so
  *     a funding hop can never be read as a merchant payment.
  *
- * ## Three signals, not one — and the evidence row is only one of them
+ * ## Four signals, not one — and the evidence row is only one of them
  *
  * An earlier version of this comment claimed the evidence row alone lets a
  * reader tell funded-and-settled from funded-but-not-settled "without inferring
@@ -47,14 +47,22 @@
  *
  *   - **The evidence row** proves WHICH SCHEME funded this, and that the
  *     funding target and the merchant were recorded as distinct addresses.
- *   - **The merchant's HTTP status** proves whether it SETTLED. The evidence
- *     row cannot: Haven never observes a merchant-side settlement tx on either
- *     rail, since the facilitator settles outside Haven's view.
+ *   - **The merchant's settlement transaction** proves it SETTLED. The leg
+ *     reads it off the paid response (`PAYMENT-RESPONSE`, falling back to the
+ *     tool result's `_meta`) and requires its receipt on-chain with
+ *     `status === 1`.
+ *   - **Haven's record of that settlement (#4119).** The SDK reports the
+ *     merchant's transaction to Haven inside `client.fetch`, and Haven records
+ *     it only after verifying it on-chain. The status must carry
+ *     `merchant_settlement_recorded` within 45 s of the call, before the #3888
+ *     sweep could have made the record instead, and the receipt's hash must be
+ *     the one this leg proved (`lib/settlement-record.ts`). For five days every
+ *     such report was refused (#4061) while this leg printed PASS.
  *   - **The two balance reads** prove the money actually moved — the treasury
  *     went down by the amount, and nothing above the dust floor stayed on the
  *     delegate EOA.
  *
- * All three are needed. Any one of them alone can be satisfied by a payment
+ * All four are needed. Any one of them alone can be satisfied by a payment
  * that did something other than what this scenario claims to cover.
  *
  * ## Balances
@@ -118,7 +126,8 @@ import { HavenApi, type MachinePaymentReceipt } from '../lib/haven-api.js'
 import { merchant402Reason } from '../lib/merchant-402.js'
 import { freshPurchaseIdempotencyKey } from '../lib/run-idempotency.js'
 import { type Scenario, type ScenarioContext, pass, fail, skip } from './types.js'
-import { BASE_SEPOLIA_RPC, SEPOLIA_USDC, describeObserverRpc } from '../lib/chain.js'
+import { BASE_SEPOLIA_RPC, SEPOLIA_USDC, describeObserverRpc, waitForReceipt as waitForTxReceipt } from '../lib/chain.js'
+import { assertSdkSettlementRecorded, merchantSettlementHashFrom } from '../lib/settlement-record.js'
 
 // Circle's canonical Base Sepolia USDC (matches the SDK's CHAIN_USDC[84532]).
 const USDC_ABI = ['function balanceOf(address) view returns (uint256)'] as const
@@ -152,8 +161,12 @@ const DUST_FLOOR_ATOMIC = 10_000n // 0.01 USDC, 6 decimals
  * dead time to a scenario that otherwise completes in seconds. It therefore
  * needs eyes on the first live run it meets — which is what #2444's
  * `operator-verify` checklist exists to collect.
+ *
+ * `receiptWaitMs` (#4119) is how long the merchant settlement's on-chain
+ * receipt may take to reach the observer node — the same 60 s the hosted
+ * legs give theirs.
  */
-export const TIMING = { evidenceWaitMs: 20_000, pollIntervalMs: 2_000, deliveryWaitMs: 20_000 }
+export const TIMING = { evidenceWaitMs: 20_000, pollIntervalMs: 2_000, deliveryWaitMs: 20_000, receiptWaitMs: 60_000 }
 
 /**
  * How the delegate's post-settlement balance should be read (#2444).
@@ -251,7 +264,8 @@ export const x402Delegation3009: Scenario = {
   name: 'x402-delegation-3009',
   invariant:
     'A delegation-rail agent pays an EIP-3009-only merchant via the funding-leg bridge, ' +
-    'with the two legs reconciling to one intent and no stranding above the dust floor.',
+    'with the two legs reconciling to one intent, Haven recording the merchant settlement it verified ' +
+    'on-chain, and no stranding above the dust floor.',
   async run(ctx: ScenarioContext) {
     if (!ctx.cfg.demoMerchantUrl) {
       return skip('QA_DEMO_MERCHANT_URL not set — the 3009 bridge needs the dev demo-merchant')
@@ -302,6 +316,11 @@ export const x402Delegation3009: Scenario = {
     // buy_vpn basic (0.001 USDC) — the settling product.
     // storage_50gb is the merchant's verify-without-settle product and belongs
     // to the sweep scenario, not this one.
+    //
+    // #4119 anchor: taken immediately before the call that funds and settles,
+    // so the funding confirm — and the #3888 sweep's 60 s floor — cannot
+    // precede it.
+    const fetchAnchor = Date.now()
     const res = await client.fetch(
       mcpUrl,
       {
@@ -339,6 +358,16 @@ export const x402Delegation3009: Scenario = {
       return fail(`merchant tool returned an error: ${reason.slice(0, 140)}`)
     }
 
+    // #4119: the merchant's own settlement transaction, as the SDK read it.
+    const merchantSettlement = merchantSettlementHashFrom(res.headers, text)
+    if (!merchantSettlement) {
+      return fail(
+        'merchant served the tool but named no settlement transaction (no PAYMENT-RESPONSE transaction, no ' +
+          '_meta["x402/payment-response"].transaction) — the merchant leg cannot be proved on-chain',
+      )
+    }
+    const merchantHash = merchantSettlement.hash
+
     // ── The payment succeeded. Now prove it was the 3009 bridge. ────────────
     const receipt = await waitForReceipt(api, mcpUrl, baseline)
     if (!receipt) {
@@ -373,6 +402,33 @@ export const x402Delegation3009: Scenario = {
       )
     }
 
+    // ── Haven recorded the merchant settlement (#4119) ──────────────────────
+    // Inside the attribution window, before the slow on-chain reads below.
+    if (!receipt.payment_id) {
+      return fail('the evidence row carries no payment_id — Haven\'s settlement record cannot be read for it')
+    }
+    const record = await assertSdkSettlementRecorded(api, {
+      paymentId: receipt.payment_id,
+      merchantHash,
+      anchorMs: fetchAnchor,
+    })
+    if (!record.ok) return fail(record.detail)
+
+    // ── The merchant settlement landed on-chain ──────────────────────────────
+    const merchantReceipt = await waitForTxReceipt(provider, merchantHash, {
+      timeoutMs: TIMING.receiptWaitMs,
+      intervalMs: TIMING.pollIntervalMs,
+    })
+    if (!merchantReceipt) {
+      return fail(
+        `merchant settlement tx ${merchantHash} (from ${merchantSettlement.source}) has no receipt within ` +
+          `${TIMING.receiptWaitMs / 1000}s — the merchant reported a hash that did not land`,
+      )
+    }
+    if (merchantReceipt.status !== 1) {
+      return fail(`merchant settlement tx ${merchantHash} (from ${merchantSettlement.source}) REVERTED on-chain`)
+    }
+
     // ── The budget was actually metered (#946 AC: "budget correctly decremented").
     // The address checks above would pass just as happily for a funding hop that
     // never spent the delegation. Treasury USDC only moves through the
@@ -387,10 +443,10 @@ export const x402Delegation3009: Scenario = {
     }
 
     // ── Residuals: exact-amount funding should leave nothing behind. ────────
-    // The merchant's 200 says the facilitator ACCEPTED the header; it does not
-    // say the transfer has landed, and Haven never observes the merchant-side
-    // settlement tx. So an undelivered leg is polled out rather than being
-    // waved through as dust — see the header comment (#2444).
+    // The settlement receipt above proves the merchant transfer landed on the
+    // observer node, but the delegate's balance is read separately and can lag
+    // it (#2445). So an undelivered leg is polled out rather than being waved
+    // through as dust — see the header comment (#2444).
     const funded = treasuryBefore - treasuryAfter
     let residual = (await usdc.balanceOf(delegateAddress)) as bigint
     let verdict = classifyDelegateResidual({ residual, baseline: delegateBefore, funded })
@@ -433,13 +489,13 @@ export const x402Delegation3009: Scenario = {
       : ', 0 residual'
     return pass(
       `delegation-rail agent paid an EIP-3009 merchant via the funding bridge ` +
-        // `tx_hash` is the FUNDING redemption's hash, always. Haven never records
-        // a merchant-side settlement tx on either rail — the facilitator settles
-        // outside its view — so labelling it plainly "tx" would invite the wrong
-        // reading.
+        // `tx_hash` is the FUNDING redemption's hash, always; the merchant's
+        // own settlement is the separate hash recorded beside it (#4119), so
+        // labelling either plainly "tx" would invite the wrong reading.
         `(${receipt.amount_human ?? '?'} USDC, funding tx ${receipt.tx_hash ?? '?'}; ` +
         `treasury ${fmt(treasuryBefore)} → ${fmt(treasuryAfter)}, funded ${delegateAddress}, ` +
-        `merchant ${receipt.merchant_address})${dust}`,
+        `merchant ${receipt.merchant_address}; merchant settlement recorded: ${record.hash} ` +
+        `(block ${merchantReceipt.blockNumber}, from ${merchantSettlement.source}))${dust}`,
     )
   },
 }

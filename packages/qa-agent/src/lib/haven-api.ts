@@ -47,6 +47,15 @@ export interface MachinePaymentStatus {
   phase?: string
   next_action?: string
   message?: string
+  /**
+   * #4119: `true` only when Haven recorded an eip3009 payment's merchant
+   * settlement transaction, verified on-chain (`machine_metadata.
+   * merchant_settlement_tx_hash`). Absent, never `false`, when it is not
+   * recorded. Two writers set it: an agent-side settlement report, and the
+   * backend's #3888 sweep — which cannot record before the funding confirm
+   * plus 60 s (see `lib/settlement-record.ts`).
+   */
+  merchant_settlement_recorded?: boolean
 }
 
 export interface X402AuthorizeResult {
@@ -131,6 +140,13 @@ export interface MachinePaymentReceipt {
   payment_id?: string
   rail?: string
   tx_hash?: string
+  /**
+   * #4119: the merchant settlement transaction. On eip3009 the hash Haven
+   * RECORDED wins; with no record it falls back to the merchant's own
+   * unverified echo, so this field proves nothing on its own — read it only
+   * beside `merchant_settlement_recorded: true` on the payment status.
+   */
+  settlement_tx_hash?: string | null
   resource_url?: string
   merchant_address?: string | null
   /**

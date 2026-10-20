@@ -56,6 +56,8 @@ import {
   TIMEOUT_SHAPES,
   NEVER_LOAD_SHAPES,
   isTimeoutShaped,
+  timeoutEvidence,
+  npmSwallowedFlags,
   isHighLoad,
   readMachineLoad,
   runBattery,
@@ -1116,9 +1118,20 @@ describe('the gate output buffer (#3954)', () => {
 
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', '..')
 
-/** Run preflight.mjs as the builder does, in a child process. */
-const preflightCli = (args) =>
-  spawnSync(process.execPath, ['scripts/ci/preflight.mjs', ...args], { cwd: REPO, encoding: 'utf8' })
+/**
+ * Run preflight.mjs as the builder does, in a child process. The npm configs
+ * `npmSwallowedFlags` reads are dropped unless a test sets them, so a suite
+ * started as `npm test --all` does not change what these children do.
+ */
+const preflightCli = (args, extraEnv = {}) => {
+  const env = { ...process.env }
+  for (const k of ['all', 'list', 'static', 'base', 'verify_ruleset']) delete env[`npm_config_${k}`]
+  return spawnSync(process.execPath, ['scripts/ci/preflight.mjs', ...args], {
+    cwd: REPO,
+    encoding: 'utf8',
+    env: { ...env, ...extraEnv },
+  })
+}
 
 /** The `--list` output as [command, class] pairs, in printed order. */
 const listedClasses = (stdout) => {
@@ -1173,12 +1186,20 @@ describe('static and suite classes (#4175)', () => {
 
   // A test runner, a compiler or a build: what `static` promises a gate is not.
   const RUNNER = /\bnode --test\b|\bvitest\b|\bjest\b|\bplaywright\b|\btsc\b|\bnext build\b/
+  // A child-process call — not a regex's `.exec(` — and up to 200 characters of
+  // its arguments, where a spawned runner's name would be.
+  const SPAWN_CALL = /(?<![.\w])(?:spawn|spawnSync|exec|execSync|execFile|execFileSync|fork)\s*\(([\s\S]{0,200})/g
+  const SPAWNED_RUNNER = /['"`](?:[\w./-]*\/)?(?:npx\s+)?(?:vitest|jest|playwright|tsc)\b|['"`]--test['"`]|\bnode --test\b/
+  const fileRunsASuite = (src) =>
+    /from ['"](?:node:test|vitest)['"]/.test(src) ||
+    [...src.matchAll(SPAWN_CALL)].some((m) => SPAWNED_RUNNER.test(m[1]))
   const runsASuite = ({ piece, cwd }) => {
     if (RUNNER.test(piece)) return true
-    // `node x.mjs` / `tsx x.ts` over a file that is itself a test file.
+    // `node x.mjs` / `tsx x.ts` over a file that is itself a test file, or that
+    // spawns a runner.
     const file = /^(?:node|tsx) ([\w./-]+\.(?:mjs|js|ts))(?:\s|$)/.exec(piece)?.[1]
     if (!file) return false
-    return /from ['"](?:node:test|vitest)['"]/.test(readFileSync(path.join(REPO, cwd, file), 'utf8'))
+    return fileRunsASuite(readFileSync(path.join(REPO, cwd, file), 'utf8'))
   }
 
   test('lint:network-pins is a suite, though its name says lint', () => {
@@ -1209,6 +1230,25 @@ describe('static and suite classes (#4175)', () => {
     assert.deepEqual(resolvePieces('npm run check:route-modules'), [
       { piece: 'tsx scripts/generate-route-modules.ts --check', cwd: 'packages/backend' },
     ])
+  })
+
+  test('a wrapper that spawns a runner is seen; a regex .exec( or a comment is not', () => {
+    for (const src of [
+      "import { spawnSync } from 'node:child_process'\nspawnSync('npx', ['vitest', 'run'], { stdio: 'inherit' })",
+      "execSync('vitest run --reporter=dot')",
+      "spawnSync(process.execPath, ['--test', 'scripts/x.test.mjs'])",
+      "execFileSync('node_modules/.bin/tsc', ['--noEmit'])",
+      "execSync('node --test scripts/*.test.mjs')",
+    ]) {
+      assert.equal(fileRunsASuite(src), true, src)
+    }
+    for (const src of [
+      "// scans for vi.mock in vitest files\nconst m = /vitest/.exec(line)",
+      "execFileSync('git', ['ls-files', '*.test.ts'])",
+      "const files = glob('**/*.test.ts') // run by vitest in CI",
+    ]) {
+      assert.equal(fileRunsASuite(src), false, src)
+    }
   })
 
   test('a lint self-test is a suite: the :test rule sits above the lint rule', () => {
@@ -1309,6 +1349,9 @@ describe('static-first order and --static (#4175)', () => {
     const text = usage()
     assert.match(text, /^ {2}--static {10}run only the static ratchets/m)
     for (const code of Object.values(EXIT)) assert.match(text, new RegExp(`^exit ${code} `, 'm'))
+    assert.match(text, /Not a pass, and not\n {8}a reason to re-run until green/)
+    assert.match(text, /If it is not plainly load, file an issue and link it\n {8}next to the printed list/)
+    assert.match(text, /^Pass flags after `--`/m)
   })
 })
 
@@ -1328,6 +1371,31 @@ describe('argument parsing (#4175)', () => {
     assert.match(parseArgs(['--base=']).error, /needs a ref/)
     // Prototype keys are not flags.
     assert.deepEqual(parseArgs(['constructor']), { error: 'unknown argument: constructor' })
+  })
+
+  test('npmSwallowedFlags names the flags npm kept for itself', () => {
+    assert.deepEqual(npmSwallowedFlags({}), [])
+    assert.deepEqual(npmSwallowedFlags({ npm_config_user_agent: 'npm/10' }), [])
+    assert.deepEqual(
+      npmSwallowedFlags({ npm_config_static: 'true', npm_config_base: 'abc', npm_config_verify_ruleset: 'true' }),
+      ['--static', '--base=abc', '--verify-ruleset'],
+    )
+  })
+
+  test('`npm run preflight --static` (no --) is refused, not run as the full battery', () => {
+    // npm exports npm_config_static=true and passes no argument (measured with
+    // `npm run env --static`). With no argument the battery would run the
+    // default plan, suites and all.
+    const child = preflightCli([], { npm_config_static: 'true' })
+    assert.equal(child.status, EXIT.USAGE)
+    assert.equal(child.stdout, '', 'a refused run printed a plan')
+    assert.ok(
+      child.stderr.startsWith(
+        'preflight: npm kept --static for itself and did not pass it on.\n' +
+          'preflight: put flags after `--`: npm run preflight -- --static\n',
+      ),
+      child.stderr,
+    )
   })
 
   test('--statc --list exits 2 with the usage text and runs nothing', () => {
@@ -1390,6 +1458,29 @@ describe('timeout shapes (#4175)', () => {
     assert.equal(live.signal, 'SIGTERM')
     assert.equal(isTimeoutShaped(live), true)
     assert.equal(isTimeoutShaped({ ...live, signal: 'SIGKILL' }), false, 'only SIGTERM is timeout-shaped')
+  })
+
+  test('spawnSync killing a gate past maxBuffer, produced live, is not timeout-shaped', () => {
+    const live = runGate(
+      { command: `node -e "process.stdout.write('x'.repeat(4096))"`, jobs: ['fixture'] },
+      { maxBuffer: 1024 },
+    )
+    assert.equal(live.error, 'ENOBUFS')
+    assert.equal(live.signal, 'SIGTERM', 'spawnSync no longer kills with SIGTERM: the guard may be moot')
+    assert.equal(live.ok, false)
+    assert.equal(isTimeoutShaped(live), false)
+  })
+
+  test('timeoutEvidence keeps the naming line and the timeout line, bounded', () => {
+    const live = liveNodeTest("test('slow', { timeout: 20 }, () => new Promise((r) => setTimeout(r, 300)))")
+    const ev = timeoutEvidence(live.output)
+    assert.match(ev.at(-1), /^ {2}'test timed out after 20ms'$/)
+    assert.match(ev.at(-2), /^✖ slow \(/)
+    assert.deepEqual(timeoutEvidence(''), ['(no output)'])
+    assert.deepEqual(timeoutEvidence('a\nb\nc\nd\ne\nf\ng'), ['c', 'd', 'e', 'f', 'g'], 'tail fallback')
+    const many = Array.from({ length: 20 }, (_, i) => ` FAIL  t${i}\nError: Test timed out in 5000ms.`).join('\n')
+    assert.equal(timeoutEvidence(many).length, 8)
+    assert.equal(timeoutEvidence(`Error: Test timed out in 5000ms. ${'y'.repeat(500)}`)[0].length, 201)
   })
 
   test('a node --test assertion failure, produced live, is not timeout-shaped', () => {
@@ -1472,7 +1563,14 @@ describe('the load-aware re-run (#4175)', () => {
           const step = script[gate.command].shift()
           assert.ok(step, `runner called more often than scripted for ${gate.command}`)
           if (step.loadDuring !== undefined) machine.load = step.loadDuring
-          const result = { ...gate, ok: step.ok, status: step.ok ? 0 : 1, signal: null, output: step.output ?? '' }
+          const result = {
+            ...gate,
+            ok: step.ok,
+            status: step.ok ? 0 : step.signal ? null : 1,
+            signal: step.signal ?? null,
+            error: step.error ?? null,
+            output: step.output ?? '',
+          }
           if (step.loadAfter !== undefined) machine.load = step.loadAfter
           return result
         },
@@ -1503,6 +1601,27 @@ describe('the load-aware re-run (#4175)', () => {
       summary.err.join('\n'),
     )
     assert.ok(summary.err.some((l) => l.includes('red under load, green alone (exit 3, not a pass)')))
+    // The first run's evidence stays beside the gate: the line naming the
+    // test, then the timeout line, from the run the re-run superseded.
+    const at = summary.err.indexOf(
+      '!   npm run test -w packages/x  red under load 12.00 on 8 CPU(s), green alone at load 3.00 on 8 CPU(s)',
+    )
+    assert.deepEqual(summary.err.slice(at + 1), [
+      '!        FAIL  src/infra/__tests__/reconcile.test.ts > reconcile > settles once',
+      '!       Error: Test timed out in 5000ms.',
+    ])
+    // And says to investigate, not just to quote. Pinned whole: a phrase list
+    // let "Investigate before you quote it" go back to "Quote this list".
+    assert.equal(
+      summary.err.find((l) => l.includes('(exit 3, not a pass)')),
+      '\n! 1 gate(s) red under load, green alone (exit 3, not a pass).\n' +
+        '! Each was timeout-shaped and red with the load above the CPU count before it\n' +
+        '! started, then green re-run by itself. Investigate before you quote it: open\n' +
+        '! the timed-out test and look for work inside the timed body that is slow only\n' +
+        '! under contention. #4126 and #4134 were real defects of this shape (a cold\n' +
+        '! import inside a timed test). If it is not plainly load, file an issue and\n' +
+        '! link it next to this list in the PR body. Do not re-run until green.',
+    )
     assert.deepEqual(summary.out, [], 'a load-red run printed a green line')
     // The injected clock reached the result.
     assert.equal(outcome.results[0].seconds, '0.5')
@@ -1614,6 +1733,48 @@ describe('the load-aware re-run (#4175)', () => {
     assert.equal(calls.length, 2)
     assert.deepEqual(summary.out, ['\n✓ 2 gate(s) green.'])
     assert.deepEqual(summary.err, [])
+  })
+
+  test('a red run suppresses the DB-skip notice; exit 3 still prints it', () => {
+    const BANNER = 'REAL-DB SUITES SKIPPED (no database)'
+    const red = drive({
+      'npm run lint:a': [{ ok: false, output: 'lint:a: 1 new violation' }],
+      'npm run test -w packages/backend': [{ ok: true, output: BANNER }],
+    })
+    assert.equal(red.outcome.code, EXIT.RED)
+    assert.deepEqual(red.outcome.skippedDb.map((r) => r.command), ['npm run test -w packages/backend'])
+    const all = [...red.summary.out, ...red.summary.err].join('\n')
+    assert.equal(/real-DB suites SKIPPED/.test(all), false, 'the skip notice printed on a red run')
+
+    const loadRed = drive({
+      'npm run lint:a': [{ ok: false, output: VITEST_TEST_TIMEOUT }, { ok: true }],
+      'npm run test -w packages/backend': [{ ok: true, output: BANNER }],
+    })
+    assert.equal(loadRed.outcome.code, EXIT.RED_UNDER_LOAD)
+    assert.ok(loadRed.summary.err.includes('!   npm run test -w packages/backend'))
+  })
+
+  test('an all-green --static run says no suite ran', () => {
+    const { outcome } = drive({ 'npm run lint:a': [{ ok: true }], 'npm run lint:b': [{ ok: true }] })
+    assert.deepEqual(summarize(outcome, { staticOnly: true }).out, [
+      '\n✓ 2 static gate(s) green (static only: no suite ran).',
+    ])
+  })
+
+  test('a gate killed for output past maxBuffer (ENOBUFS) is red, not re-run, and says why', () => {
+    const { outcome, calls, summary } = drive(
+      { 'npm run test -w packages/backend': [{ ok: false, signal: 'SIGTERM', error: 'ENOBUFS', output: 'x' }] },
+      { load: 40 },
+    )
+    assert.deepEqual(calls, ['npm run test -w packages/backend'])
+    assert.equal(outcome.code, EXIT.RED)
+    assert.ok(
+      summary.err.includes(
+        '   ENOBUFS: its output passed GATE_OUTPUT_MAX_BUFFER and spawnSync killed it with\n' +
+          '   SIGTERM. Not a timeout and not re-run: the gate may well be green (#3954).',
+      ),
+      summary.err.join('\n'),
+    )
   })
 
   test("the DB-skip marker is read from the re-run's output for a re-run gate", () => {

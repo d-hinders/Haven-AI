@@ -303,6 +303,8 @@ everything".
 **Static ratchets run first, before any suite** — PR #4155 found a retired-rail hit
 in a test title (`3fa96047`) only at the end of a full run. Run them alone with
 `npm run preflight -- --static` (#4175); the battery also orders them first.
+Preflight exit 3 (red under load, green alone) is neither green nor a reason to
+re-run until green: investigate as the printed note says, and quote the list.
 
 Then run what the battery cannot: a live database (`docker compose up -d
 postgres`, or the backend suite skips its real-DB files), browser verification

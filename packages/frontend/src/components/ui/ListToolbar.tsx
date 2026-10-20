@@ -100,7 +100,7 @@ function schemaOf(facets: ListFacet[], sort: ListToolbarSort | undefined, period
   return {
     facets,
     sort: sort ? { values: sort.options.map((o) => o.value), defaultValue: state.sort ?? sort.options[0]?.value ?? '' } : undefined,
-    period: period ? { presets: period.presets, allowAllTime: period.allowAllTime, allowCustom: period.allowCustom, defaultValue: period.defaultValue } : undefined,
+    period: period ? { presets: period.presets, allowAllTime: period.allowAllTime, allowCustom: period.allowCustom, defaultValue: period.defaultValue ?? ((period.allowAllTime ?? true) ? {} : state.period) } : undefined,
   }
 }
 

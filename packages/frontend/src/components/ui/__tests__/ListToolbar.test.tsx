@@ -344,6 +344,24 @@ describe('ListToolbar — period without All time', () => {
     expect(screen.getByRole('status')).toHaveTextContent('3 agents')
     expect(screen.getByRole('button', { name: 'Period: Last 30 days' })).toHaveAttribute('data-active', 'false')
   })
+
+  it('Clear filters keeps the current period rather than an All time the list does not offer', async () => {
+    const user = userEvent.setup()
+    const onChange = vi.fn()
+    render(
+      <ListToolbar
+        noun={noun}
+        state={{ q: '', facets: { direction: ['in'] }, period: { preset: '7d' } }}
+        onChange={onChange}
+        filtering="server"
+        facets={[FACETS[1]]}
+        period={{ allowAllTime: false }}
+        count={{ shown: 1, total: 3 }}
+      />,
+    )
+    await user.click(screen.getByRole('button', { name: 'Clear filters' }))
+    expect(onChange).toHaveBeenLastCalledWith({ q: '', facets: { direction: [] }, period: { preset: '7d' } })
+  })
 })
 
 describe('ListToolbar — phone sheet', () => {

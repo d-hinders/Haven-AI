@@ -20,6 +20,7 @@
 
 import { applyGraders } from './graders.js'
 import { ALL_TOOL_NAMES, bareToolName } from './tools.js'
+import { redactUrls } from '../lib/chain.js'
 import type { AgentRunLog, EvalTask, GraderContext, GraderResult, ResolvedTask } from './types.js'
 
 /** One adapter lane. Hermes today; #3959 adds Claude Code. */
@@ -81,11 +82,12 @@ const SAFE_CODE = /^[a-z0-9_]{1,64}$/
 function safeToolName(recorded: string): string {
   const bare = bareToolName(recorded)
   if (KNOWN_TOOLS.has(bare)) return bare
-  return SAFE_NAME.test(bare) ? bare : '(unknown tool)'
+  // `sk_` is Haven's agent-key prefix: never print anything shaped like one.
+  return SAFE_NAME.test(bare) && !/^sk_/i.test(bare) ? bare : '(unknown tool)'
 }
 function safeErrorCode(code: string): string {
   const canonical = code.trim().toLowerCase()
-  return SAFE_CODE.test(canonical) ? canonical : '(unrecognised code)'
+  return SAFE_CODE.test(canonical) && !canonical.startsWith('sk_') ? canonical : '(unrecognised code)'
 }
 
 /** The public-safe tool trace of one session (see {@link TrialRecord.trace}). */
@@ -242,7 +244,7 @@ export async function runTaskTrials(
         pass: false,
         graders: [],
         wallMs: Date.now() - startedAt,
-        detail: `resolve failure: ${(err as Error).message.slice(0, 300)}`,
+        detail: `resolve failure: ${redactUrls(String((err as Error)?.message ?? err)).slice(0, 300)}`,
       }
       records.push(record)
       continue
@@ -258,7 +260,7 @@ export async function runTaskTrials(
         pass: false,
         graders: [],
         wallMs: Date.now() - startedAt,
-        detail: `adapter failure: ${(err as Error).message.slice(0, 300)}`,
+        detail: `adapter failure: ${redactUrls(String((err as Error)?.message ?? err)).slice(0, 300)}`,
         resolvedAmountAtomic: resolved.amountAtomic.toString(),
         startBlock: resolved.startedAtBlock,
       }

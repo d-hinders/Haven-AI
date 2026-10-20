@@ -282,3 +282,23 @@ describe('toolTrace — hostile names and codes never reach the public report ve
     expect(JSON.stringify(trace)).not.toMatch(/sk_agent_|0xabc|injected/)
   })
 })
+
+describe('failure details never carry the observer URL into the public report', () => {
+  it('redacts a URL in a resolve-failure detail', async () => {
+    const report = await runSuite({
+      tasks: [TASK],
+      resolveForTrial: async () => { throw new Error('missing response (requestUrl="https://base-sepolia.g.alchemy.com/v2/SECRETKEY123")') },
+      adapter: fakeAdapter('fake', async () => logWith([])),
+      trials: 1,
+    })
+    const detail = report.tasks[0]!.trials[0]!.detail
+    expect(detail).toMatch(/^resolve failure: /)
+    expect(detail).not.toContain('SECRETKEY123')
+  })
+
+  it('never prints an sk_-shaped name or code in a trace', async () => {
+    const { toolTrace } = await import('./runner.js')
+    const trace = toolTrace({ taskId: 't', trial: 1, calls: [{ name: 'sk_agent_abc', result: { ok: false, errorCode: 'sk_agent_abc' } }] } as unknown as AgentRunLog)
+    expect(trace).toEqual(['(unknown tool) ✗ (unrecognised code)'])
+  })
+})

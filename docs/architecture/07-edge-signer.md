@@ -539,8 +539,9 @@ account is permanently out of scope.
   (`haven_report_x402_outcome` / `haven_report_settlement_evidence`) carries
   the `payment_header` it retried with, after the merchant has used it: since
   #3925 an agent-reported EIP-3009 settlement is recorded only with that
-  header — the delegate's signature over its authorization nonce binds the
-  settlement to this payment — and since #4061 both report tools forward it.
+  header, and only when the payment's delegate signed it. Since #4061 both
+  report tools forward it, and a header lifted from another payment of the
+  same agent is refused: its nonce is that payment's derived nonce.
   The #3888 sweep records without one, from the nonce derived from the
   payment id.
 - The merchant receives the standard signed EIP-3009 payment header, never the

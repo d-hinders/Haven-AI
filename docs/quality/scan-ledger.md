@@ -1679,3 +1679,25 @@ again after the restore); `\b` in `git grep -E` misread again; a fresh
 worktree needs core built before backend suites that import it.
 
 **Disposition: pending owner decision** (C1, C2, C3, C4).
+
+**Disposition (owner, 2026-10-20): file all four and build them.** C1 →
+[#4118](https://github.com/d-hinders/Haven-AI/issues/4118) (`area:ci`,
+`area:docs`). C2 → #4119 (`area:qa`, `area:docs`; scope widened to all four
+EIP-3009 legs, reading `merchant_settlement_recorded` against the leg's own
+proven hash). C3 → #4120 (`area:sdk`, `area:ci`, `area:docs`, `money-path`;
+owner decisions the same day: a `PAYMENT-RESPONSE` header with no transaction
+beside a `_meta` settlement that has one is **accepted on both paths** with the
+`_meta` hash, so the hosted path changes; `merchant-completion.ts` and the new
+shared module join the money-path globs, `client.ts` stays off). C4 → #4121
+(`area:qa`, `area:docs`, `area:ci`). The spec reviews spawned two siblings:
+#4122 (`money-path`, `area:ci`, `area:docs`; `merchant-completion.ts` onto the
+runtime perimeter and the Merge Gate matcher's wildcard-only-token blind spot,
+landing before #4120) and #4123 (`money-path`, `area:mcp`, `area:docs`; the
+hosted retryable settlement-evidence arms never name `payment_header`). Each
+issue carries a spec-review verdict; no owner question remains open (#4120
+keeps one non-blocking follow-up question), so `pending-review` is lifted on
+all six. Filed with shipping requested.
+
+**Disposition upkeep (2026-10-20):** C1 → `shipped` via #4124 (`afcfac0eb`):
+the probe's sixth check asks `eth_getLogs` over `DEFAULT_LOGS_RANGE` = 500
+blocks, pinned to the sweepers' widest batch.

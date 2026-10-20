@@ -37,12 +37,16 @@ Haven is an agentic stablecoin payment wallet. Users create or link a Haven acco
 Before changing product UI, read these sources in order:
 
 1. `docs/product/README.md` for product doctrine, IA, money movement, accessibility, and closeout checks.
-2. `docs/product/design-system.md` for tokens, typography, cards, buttons, motion, and visual constraints.
+2. `docs/product/design-system.md` for tokens, typography, cards, buttons, motion, visual constraints, and the Patterns catalog.
 3. `docs/product/copy-guidelines.md` for user-facing wording and banned technical language.
 4. `docs/product/screen-recipes.md` for repeatable screen structures.
 5. `docs/product/design-review.md` before finishing UI work.
 
 If `/design-system` exists, inspect it before editing UX and reuse the visual language shown there.
+
+### Design System First
+
+Start with an existing [`/design-system` Pattern](docs/product/design-system.md#patterns). If none fits, extend the design system first in a separate slice, label the proposal as a **new pattern**, and obtain owner approval before a product page consumes it. Extracting a shape the product already ships, on the diff that writes its second copy, is Pattern Absorption, not a new pattern, and stays in the same PR; a new pattern is a composition with no shipped instance and no `/design-system` entry.
 
 ## UI Implementation Rules
 

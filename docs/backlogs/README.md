@@ -6,7 +6,7 @@ covers:
   - .github/ISSUE_TEMPLATE/loop-epic.md
   - .agents/skills/ship-next/SKILL.md
   - .github/CODEOWNERS
-last-verified: "2026-09-18"
+last-verified: "2026-10-20"
 ---
 
 # Backlogs moved to GitHub Issues
@@ -48,6 +48,10 @@ old YAML `scope:` field demanded. The **🔁 Loop task** issue template
 - **Scope** — one paragraph the implementer can act on without guessing: the
   change *and* its acceptance criteria.
 - **Files** — the file(s) the change should own (best-effort).
+- **Design system** — for `area:frontend`, the existing `/design-system`
+  Patterns it uses, every changed component and its other usages, and any
+  proposed **new pattern**'s separate, earlier design-system slice for owner
+  approval.
 - **Surface** — which `area:*` / `money-path` label(s) apply, so `ship-next`
   loads the right playbook (see `docs/contributing/ship-playbooks/README.md`).
 - **Money-path?** — whether it touches x402, machine-payments, payment-coverage,

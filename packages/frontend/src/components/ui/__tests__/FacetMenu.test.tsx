@@ -114,6 +114,42 @@ describe('FacetMenu — single-select', () => {
   })
 })
 
+describe('FacetMenu — no All row (allLabel: null, #4113)', () => {
+  const ARCHIVED: ListFacet = {
+    id: 'archived',
+    label: 'Archived',
+    allLabel: null,
+    defaultValue: ['hidden'],
+    options: [
+      { value: 'hidden', label: 'Hidden' },
+      { value: 'shown', label: 'Shown' },
+    ],
+  }
+
+  it('lists only the options, tints away from the default, and keeps the keyboard contract', async () => {
+    const user = userEvent.setup()
+    render(<Controlled facet={ARCHIVED} initial={['hidden']} />)
+    const trigger = screen.getByRole('button', { name: 'Archived: Hidden' })
+    expect(trigger).toHaveAttribute('data-active', 'false')
+    trigger.focus()
+    await user.keyboard('{ArrowDown}')
+    expect(screen.getAllByRole('menuitemradio').map((r) => r.textContent)).toEqual(['Hidden', 'Shown'])
+    expect(screen.getByRole('menuitemradio', { name: 'Hidden', checked: true })).toHaveFocus()
+    await user.keyboard('{ArrowDown}{Enter}')
+    const after = screen.getByRole('button', { name: 'Archived: Shown' })
+    expect(after).toHaveAttribute('data-active', 'true')
+    expect(after).toHaveFocus()
+  })
+
+  it('as pills there is no All pill, and the selected pill does not deselect to nothing', async () => {
+    const user = userEvent.setup()
+    render(<Controlled facet={{ ...ARCHIVED, rendering: 'pills' }} initial={['hidden']} />)
+    expect(screen.getAllByRole('button').map((b) => b.textContent)).toEqual(['Hidden', 'Shown'])
+    await user.click(screen.getByRole('button', { name: 'Hidden', pressed: true }))
+    expect(screen.getByRole('button', { name: 'Hidden', pressed: true })).toBeInTheDocument()
+  })
+})
+
 describe('FacetMenu — multi-select', () => {
   it('uses checkbox rows with counts, stays open while ticking, and summarises the trigger', async () => {
     const user = userEvent.setup()

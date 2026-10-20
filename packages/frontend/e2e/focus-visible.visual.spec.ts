@@ -143,8 +143,9 @@
  * interchangeable.
  *
  * That rule decides the one case where it was tempting to break it. **Restore
- * sits behind the "Removed (n)" disclosure**, so something has to open it
- * first, and the obvious move is `.click()`. It is opened with Tab + Enter
+ * sits on an archived card, and archived agents are hidden by default**
+ * (#4113's "Archived: Hidden" facet; the "Removed (n)" disclosure before it),
+ * so something has to show them first, and the obvious move is `.click()`. It is opened with Tab + Enter
  * instead, and this is not ceremony: `:focus-visible` is decided by the last
  * input MODALITY, so a mouse click anywhere in the run switches the document to
  * pointer modality, and a `.focus()` after it takes focus with NO ring at all.
@@ -1033,8 +1034,9 @@ test.describe('driven focus-state visual regression', () => {
       rowControls: ['Restore Archived agent to the list'],
       tone: 'brand',
       label: 'Restore to list',
-      // The only control of the nine that is not on screen at load.
-      behindRemovedDisclosure: true,
+      // The only control of the nine that is not on screen at load: archived
+      // agents are hidden by default (#4113).
+      behindArchivedFacet: true,
     },
   ] as const
 
@@ -1045,14 +1047,15 @@ test.describe('driven focus-state visual regression', () => {
       await seedAgents(page, [seeded.agent])
       await gotoDesktop(page, '/agents')
 
-      if ('behindRemovedDisclosure' in seeded && seeded.behindRemovedDisclosure) {
+      if ('behindArchivedFacet' in seeded && seeded.behindArchivedFacet) {
         // Tab + Enter, never `.click()` — see the modality note in the header.
-        // The count is asserted so a disclosure that stopped listing this agent
-        // fails HERE, rather than as a confusing tab-exhaustion error 80
-        // presses later.
-        const disclosure = page.getByRole('button', { name: /^Removed\b/ })
-        await expect(disclosure).toHaveCount(1)
-        await tabToTarget(page, disclosure, 'AgentPanel · Removed disclosure')
+        // Every seeded agent is archived, so the list's own "Show archived"
+        // (the every-agent-archived state, #4113) is the one way in; the count
+        // is asserted so a list that stopped offering it fails HERE, rather
+        // than as a confusing tab-exhaustion error 80 presses later.
+        const showArchived = page.getByRole('button', { name: 'Show archived', exact: true })
+        await expect(showArchived).toHaveCount(1)
+        await tabToTarget(page, showArchived, 'AgentPanel · Show archived')
         await page.keyboard.press('Enter')
       }
 
@@ -1114,9 +1117,9 @@ test.describe('driven focus-state visual regression', () => {
     await page.evaluate(() => document.fonts.ready)
     await page.waitForLoadState('networkidle')
 
-    const disclosure = page.getByRole('button', { name: /^Removed\b/ })
-    await expect(disclosure).toHaveCount(1)
-    await tabToTarget(page, disclosure, 'AgentPanel · Removed disclosure (390px)')
+    const showArchived = page.getByRole('button', { name: 'Show archived', exact: true })
+    await expect(showArchived).toHaveCount(1)
+    await tabToTarget(page, showArchived, 'AgentPanel · Show archived (390px)')
     await page.keyboard.press('Enter')
 
     const target = page.locator(`button[aria-label="${seeded.control}"]`)

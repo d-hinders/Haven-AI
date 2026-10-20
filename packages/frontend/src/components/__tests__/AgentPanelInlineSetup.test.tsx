@@ -230,7 +230,7 @@ function expectNothingElseOfTheSurface() {
   expect(screen.queryByTestId('agent-card')).not.toBeInTheDocument()
   expect(screen.queryByRole('button', { name: 'Connect agent' })).not.toBeInTheDocument()
   expect(countChip()).not.toBeInTheDocument()
-  expect(screen.queryByTestId('agent-list-toolbar')).not.toBeInTheDocument()
+  expect(screen.queryByTestId('list-toolbar')).not.toBeInTheDocument()
   expect(screen.queryByRole('heading', { name: 'Finalizing your agent…' })).not.toBeInTheDocument()
   expect(screen.queryByRole('status', { name: 'Finalizing agent setup' })).not.toBeInTheDocument()
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument()

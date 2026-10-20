@@ -65,6 +65,14 @@ export interface FacetUrlSpec {
   values?: readonly string[]
   /** Older keys read as this facet (never written). */
   aliases?: readonly string[]
+  /**
+   * The facet's "no filter" row (#4113). Omitted: "All". A string renames
+   * it. `null` means the facet HAS no All — a single-select facet whose
+   * every value is a real choice ("Archived: Hidden / Shown"); it needs a
+   * `defaultValue`, an explicit `all` in the URL reads as that default, and
+   * `[]` is never written.
+   */
+  allLabel?: string | null
 }
 
 export interface ListUrlSchema {
@@ -127,7 +135,7 @@ export function isAllTime(period: PeriodValue | undefined): boolean {
 function parseFacet(params: URLSearchParams, spec: FacetUrlSpec): string[] {
   const raw = firstOf(params, [spec.id, ...(spec.aliases ?? [])])
   if (raw === null) return [...(spec.defaultValue ?? [])]
-  if (raw === allValue) return []
+  if (raw === allValue) return spec.allLabel === null ? [...(spec.defaultValue ?? [])] : []
   const allowed = spec.values ? new Set(spec.values) : null
   const seen = new Set<string>()
   const values = raw
@@ -193,7 +201,8 @@ export function serializeListState(
     for (const alias of spec.aliases ?? []) next.delete(alias)
     const values = state.facets[spec.id] ?? []
     const defaults = spec.defaultValue ?? []
-    if (sameValues(values, defaults)) next.delete(spec.id)
+    // A facet without All has no `[]`: it reads as the default (#4113).
+    if (sameValues(values, defaults) || (values.length === 0 && spec.allLabel === null)) next.delete(spec.id)
     else if (values.length === 0) next.set(spec.id, allValue)
     else next.set(spec.id, values.join(','))
   }

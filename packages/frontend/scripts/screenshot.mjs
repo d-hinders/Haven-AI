@@ -1015,7 +1015,7 @@ export const FIXTURE_ORGANIZATIONS = [
 
 /**
  * #3542: the two HALF-REVOKED agents — credential ended in Haven (revoked) or
- * filed under Removed (archived), while the budget delegation is still
+ * been archived (Remove), while the budget delegation is still
  * redeemable on-chain, so `live_delegation_count` is 1 on each.
  *
  * Deliberately NOT part of `FIXTURE_AGENTS`: that list feeds the dashboard
@@ -4320,7 +4320,7 @@ export const SCENARIOS = {
 
   'half-revoked-agents': {
     description:
-      'Half-revoked agents (#3542) — a REVOKED agent and an ARCHIVED agent whose budget delegation is still live on-chain: the /agents list card with Finish revoking, the collapsed Removed toggle carrying its warning, the expanded Removed group, both agent detail pages with the warning callout above the budget card, and the account page summary that no longer says "Access revoked"',
+      'Half-revoked agents (#3542) — a REVOKED agent and an ARCHIVED agent whose budget delegation is still live on-chain: the /agents list card with Finish revoking, the hidden-archived callout carrying its warning (#4113), the archived card once Show archived is pressed, both agent detail pages with the warning callout above the budget card, and the account page summary that no longer says "Access revoked"',
     api(apiPath, method) {
       if (apiPath === '/agents' && method === 'GET') {
         return {
@@ -4341,7 +4341,7 @@ export const SCENARIOS = {
       return undefined
     },
     async run({ page, vp, shoot }) {
-      // ── /agents: list card, collapsed toggle, expanded Removed group ──────
+      // ── /agents: list card, the hidden-archived callout, archived shown ───
       await page.goto(`${BASE_URL}/agents`, { waitUntil: 'networkidle', timeout: 60_000 })
       await dismissMobileSidebar(page, vp)
 
@@ -4359,18 +4359,18 @@ export const SCENARIOS = {
       await finishDialog.getByRole('button', { name: 'Cancel' }).click()
       await finishDialog.waitFor({ state: 'detached', timeout: 20_000 })
 
-      // The toggle carries the warning while the group is COLLAPSED — that is
-      // the state the owner sees by default, and the whole reason for it.
-      const toggle = page.getByRole('button', { name: /Removed/ })
-      await toggle.getByText(/still has an active budget/).waitFor({ timeout: 20_000 })
-      await toggle.scrollIntoViewIfNeeded()
-      await shoot(toggle.locator('xpath=..'), 'removed-toggle-collapsed')
+      // The callout carries the warning while archived agents are HIDDEN
+      // (#4113's default) — the state the owner sees, and the whole reason for it.
+      const callout = page.getByTestId('hidden-active-budget-callout')
+      await callout.getByText(/still ha(s|ve) an active budget/).waitFor({ timeout: 20_000 })
+      await callout.scrollIntoViewIfNeeded()
+      await shoot(callout, 'hidden-archived-callout')
 
-      await toggle.click()
-      const removedGroup = page.getByRole('group', { name: 'Removed agents' })
-      await removedGroup.getByRole('button', { name: 'Finish revoking Old data-feed agent' }).waitFor({ timeout: 20_000 })
-      await removedGroup.scrollIntoViewIfNeeded()
-      await shoot(removedGroup, 'removed-expanded')
+      await callout.getByRole('button', { name: 'Show archived' }).click()
+      const archivedCard = page.getByTestId('agent-card').filter({ hasText: 'Old data-feed agent' })
+      await archivedCard.getByRole('button', { name: 'Finish revoking Old data-feed agent' }).waitFor({ timeout: 20_000 })
+      await archivedCard.scrollIntoViewIfNeeded()
+      await shoot(archivedCard, 'archived-shown-card')
 
       // ── Agent detail: the callout above the budget card ───────────────────
       for (const [id, label] of [

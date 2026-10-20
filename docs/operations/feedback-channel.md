@@ -6,6 +6,7 @@ covers:
   - packages/backend/src/infra/repositories/feedback.ts
   - packages/backend/src/modules/feedback/secret-check.ts
   - packages/backend/src/db/migrations/106_feedback.ts
+  - packages/backend/src/db/migrations/115_feedback_expires_at_fixed_window.ts
   - packages/cli/src/secret-check.ts
   - packages/backend/src/middleware/rate-limit.ts
   - packages/backend/src/platform/leader-lock.ts
@@ -46,10 +47,15 @@ without a decision refuses by construction, never by omission.
 
 ## Retention
 
-Seven days. Every row's `expires_at` defaults to `created_at + 7 days`
-(migration 106). **Every read filters `expires_at > NOW()`**, so the seven
-days hold even if the purge sweep lags — a read never serves an expired row,
-whether or not it has physically been deleted yet.
+Seven days. Every row's `expires_at` defaults to `created_at + 168 hours`
+(migration 106, made an elapsed 168 h by migration 115 — #4084). It is
+deliberately hours, not `INTERVAL '7 days'`: Postgres adds interval days as
+calendar days in the session `TimeZone`, and the backend does not pin that,
+so a day-based default gave 167 h or 169 h to rows written in a non-UTC
+session within a week of a DST change. **Every read filters
+`expires_at > NOW()`**, so the seven days hold even if the purge sweep lags —
+a read never serves an expired row, whether or not it has physically been
+deleted yet.
 
 The purge (`deleteExpiredFeedback`) runs on `index.ts`'s
 `FEEDBACK_SWEEP_INTERVAL_MS` (5 minutes), leader-gated through `runIfLeader`

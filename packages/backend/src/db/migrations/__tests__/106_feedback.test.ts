@@ -5,6 +5,12 @@
  * Pins: the table and its two indexes exist, `expires_at` defaults to seven
  * days out, `down()` drops exactly what `up()` created, and `up()` is
  * idempotent.
+ *
+ * Migration 115 (#4084) later moved the `expires_at` default from 106's
+ * calendar-day `INTERVAL '7 days'` to an elapsed `INTERVAL '168 hours'`, so
+ * every re-creation of the table here re-applies 115 to get back to head. The
+ * time-zone-pinned proof of the window lives in
+ * `115_feedback_expires_at_fixed_window.test.ts`.
  */
 import { afterAll, beforeAll, beforeEach, expect, it } from 'vitest'
 import { randomBytes, randomUUID } from 'node:crypto'
@@ -16,6 +22,7 @@ import {
   resetDb,
 } from '../../../infra/__tests__/helpers/db-harness.js'
 import { down, up, version } from '../106_feedback.js'
+import { up as up115 } from '../115_feedback_expires_at_fixed_window.js'
 
 async function run(step: typeof up): Promise<void> {
   const client = await db.connect()
@@ -52,6 +59,7 @@ describeDb(`migration ${version}`, () => {
   afterAll(async () => {
     // Leave the worker schema at head for the next file.
     await run(up)
+    await run(up115)
     await assertWorkerSchemaAtHead()
   })
 
@@ -95,5 +103,6 @@ describeDb(`migration ${version}`, () => {
     await run(up)
     await run(up)
     expect(await tableExists()).toBe(true)
+    await run(up115)
   })
 })

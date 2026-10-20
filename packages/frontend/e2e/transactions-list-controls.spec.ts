@@ -110,6 +110,32 @@ async function expectTapTarget(target: Locator, label: string) {
   expect(box!.height, `${label} is ${box!.height}px tall, under the 44px tap target`).toBeGreaterThanOrEqual(44)
 }
 
+/**
+ * The hit area, not the painted box (#4150): the `::after` overlay a control
+ * paints to reach 44px while rendering smaller — the way `Button` does. The
+ * overlay must exist, be 44px tall, and be LIVE: a point inside it but
+ * outside the painted box still hits the control.
+ */
+async function expectHitTarget(page: Page, target: Locator, label: string) {
+  const box = await target.boundingBox()
+  expect(box, `${label} has a box`).not.toBeNull()
+  const overlay = await target.evaluate((el) => {
+    const style = getComputedStyle(el, '::after')
+    return { height: parseFloat(style.height), content: style.content }
+  })
+  expect(overlay.content, `${label} draws a tap-target overlay`).not.toBe('none')
+  expect(overlay.height, `${label}: overlay is ${overlay.height}px tall, under 44px`).toBeGreaterThanOrEqual(44)
+  // 2px above the painted box: inside the overlay, outside the control.
+  const point = { x: box!.x + box!.width / 2, y: box!.y - 2 }
+  const hit = await target.evaluate((el, pt) => (document.elementFromPoint(pt.x, pt.y) as HTMLElement | null)?.closest('button') === el, point)
+  expect(hit, `${label}: the 44px overlay does not answer a tap at its own edge`).toBe(true)
+}
+
+/** `text-overflow: ellipsis` on the input, so a clipped placeholder ends in "…". */
+async function expectPlaceholderEllipsis(target: Locator, label: string) {
+  expect(await target.evaluate((el) => getComputedStyle(el).textOverflow), `${label} placeholder does not ellipsize`).toBe('ellipsis')
+}
+
 test.describe('transactions list controls — 375px', () => {
   test('every control is a 44px target, and the filter sheet stays on screen', async ({ page }) => {
     await open(page, 375, 812)
@@ -120,15 +146,25 @@ test.describe('transactions list controls — 375px', () => {
     const search = toolbar.getByRole('searchbox', { name: 'Search transactions' })
     const filters = toolbar.getByRole('button', { name: /^Filters/ })
     const exportCsv = toolbar.getByRole('button', { name: 'Export CSV' })
+    await expectPlaceholderEllipsis(search, 'Search input')
     for (const [control, label] of [
       [search, 'Search'],
       [filters, 'Filters'],
-      [exportCsv, 'Export CSV'],
     ] as const) {
       await expect(control).toBeVisible()
       await expectTapTarget(control, label)
       await expectInsideViewport(page, control, label)
     }
+    // Export CSV (#4150): the pattern owns its sizing — its own row on
+    // phone, hugging its content (never the full-width 44px row the mockup
+    // does not draw) — and its 44px target comes from the Button overlay.
+    await expect(exportCsv).toBeVisible()
+    await expectInsideViewport(page, exportCsv, 'Export CSV')
+    const filtersBox = await filters.boundingBox()
+    const exportBox = await exportCsv.boundingBox()
+    expect(exportBox!.y, 'Export CSV shares the search row').toBeGreaterThan(filtersBox!.y + filtersBox!.height)
+    expect(exportBox!.width, 'Export CSV is full-width on phone').toBeLessThan(150)
+    await expectHitTarget(page, exportCsv, 'Export CSV')
     expect(await expectNoHorizontalOverflow(page)).toMatchObject({ hasOverflow: false })
     await evidence(page, 'toolbar-375')
 
@@ -156,6 +192,13 @@ test.describe('transactions list controls — 375px', () => {
       await expectTapTarget(row, `Sheet row "${text}"`)
       await expectInsideViewport(page, row, `Sheet row "${text}"`)
     }
+    // The meta slot (#4150): the revoked agent's status shows beside its
+    // long name — the row wraps, the status never truncates away.
+    const revokedRow = sheet.locator('label').filter({ hasText: 'Lovable Dev preview deployment helper' })
+    await revokedRow.scrollIntoViewIfNeeded()
+    const status = revokedRow.getByText('Revoked')
+    await expect(status).toBeVisible()
+    expect(await status.evaluate((el) => el.scrollWidth > 0 && el.scrollWidth <= el.clientWidth), 'the meta slot is clipped').toBe(true)
     await evidence(page, 'sheet-375')
 
     // Live, as on desktop: the tap applies and reaches the URL at once.
@@ -191,6 +234,24 @@ test.describe('transactions list controls — desktop menus', () => {
       await page.keyboard.press('Escape')
       await expect(trigger).toBeFocused()
     }
+  })
+
+  test('a long selected label stays inside the facet row at 640px (#4150)', async ({ page }) => {
+    await open(page, 640, 900)
+    const toolbar = page.getByTestId('list-toolbar')
+    const initiator = toolbar.getByRole('button', { name: /^Initiator:/ })
+    await initiator.click()
+    await page.getByRole('menuitemradio', { name: /Lovable Dev preview deployment helper/ }).click()
+    await expect(initiator).toBeFocused()
+    // The trigger with the long selected label either fits the facet row or
+    // truncates inside it — it never stretches the row past its box.
+    const rowBox = await toolbar.getByTestId('list-toolbar-facets').boundingBox()
+    const box = await initiator.boundingBox()
+    expect(box, 'the Initiator trigger has a box').not.toBeNull()
+    expect(box!.x).toBeGreaterThanOrEqual(rowBox!.x)
+    expect(box!.y).toBeGreaterThanOrEqual(rowBox!.y)
+    expect(box!.x + box!.width, `the trigger ends at ${box!.x + box!.width}px, past the facet row`).toBeLessThanOrEqual(rowBox!.x + rowBox!.width + 1)
+    expect(await expectNoHorizontalOverflow(page)).toMatchObject({ hasOverflow: false })
   })
 
   test('an old ?search= link applies its search and rewrites the address to q', async ({ page }) => {

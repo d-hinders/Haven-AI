@@ -45,6 +45,19 @@ describe('list-controls copy', () => {
     expect(facetValueLabel(['unknown-id'], options)).toBe('1 selected')
   })
 
+  it('facet value with meta: excluded from the summary, included with includeMeta (#4150)', () => {
+    const options = [
+      { value: 'a1', label: 'Lovable Dev preview deployment helper', meta: 'Revoked' },
+      { value: 'a2', label: 'Atlas' },
+    ]
+    // The trigger summary reads the label alone.
+    expect(facetValueLabel(['a1'], options)).toBe('Lovable Dev preview deployment helper')
+    // The status-row chip spells the filter out in full.
+    expect(facetValueLabel(['a1'], options, 'All', true)).toBe('Lovable Dev preview deployment helper (Revoked)')
+    // An option without meta is unchanged either way.
+    expect(facetValueLabel(['a2'], options, 'All', true)).toBe('Atlas')
+  })
+
   it('period labels', () => {
     expect(periodLabel({})).toBe('All time')
     expect(periodLabel({ preset: '30d' })).toBe('Last 30 days')

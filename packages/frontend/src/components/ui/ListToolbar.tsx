@@ -77,6 +77,15 @@ export interface ListToolbarProps {
   searchDescription?: string
   /** Actions on the FILTERED list, such as Export CSV. Page actions stay in the header. */
   actions?: ReactNode
+  /**
+   * A clear generation owned by the page's list state (#4150). The page bumps
+   * it when ITS clear path runs — the no-match `ListNoMatch` Clear filters —
+   * so the search field drops a pending draft even when `q` was already
+   * empty and the value the field watches did not change. The toolbar's own
+   * epoch cannot reach a sibling the page renders. Each source is monotonic,
+   * so the sum only ever rises and the field never misses a bump.
+   */
+  searchEpoch?: number
   /** The count. `null` while the list loads. */
   count: ListCount | null
   /**
@@ -132,6 +141,7 @@ export function ListToolbar({
   searchDescription,
   actions,
   count,
+  searchEpoch = 0,
   layout = 'responsive',
 }: ListToolbarProps) {
   const phone = layout === 'phone'
@@ -144,9 +154,12 @@ export function ListToolbar({
   // Bumped when the toolbar itself clears the search (Clear filters, the
   // search chip), so the field drops its draft and any pending commit even
   // when q was already empty and the value it watches did not change.
-  const [searchEpoch, setSearchEpoch] = useState(0)
+  const [ownEpoch, setOwnEpoch] = useState(0)
+  // The page can bump `searchEpoch` too (the no-match Clear filters, #4150);
+  // both sources only ever rise, so the sum cannot alias one bump for another.
+  const fieldEpoch = ownEpoch + searchEpoch
   const clearAll = () => {
-    setSearchEpoch((n) => n + 1)
+    setOwnEpoch((n) => n + 1)
     onChange(clearedListState(state, schemaOf(facets, sort, period, state)))
   }
 
@@ -158,7 +171,7 @@ export function ListToolbar({
   const active: ActiveFilter[] = []
   if (state.q.trim()) {
     active.push({ key: 'q', label: `“${state.q.trim()}”`, inSheet: false, clear: () => {
-      setSearchEpoch((n) => n + 1)
+      setOwnEpoch((n) => n + 1)
       onChange({ ...state, q: '' })
     } })
   }
@@ -174,7 +187,7 @@ export function ListToolbar({
     if (sameValues(values, defaults)) continue
     active.push({
       key: facet.id,
-      label: `${facet.label}: ${facetValueLabel(values, facet.options, facet.allLabel ?? allOptionLabel)}`,
+      label: `${facet.label}: ${facetValueLabel(values, facet.options, facet.allLabel ?? allOptionLabel, true)}`,
       // Only facets the sheet shows count on "Filters (n)": a pill facet
       // sits outside the sheet, and a hidden one-option facet is in neither.
       inSheet: facet.rendering !== 'pills' && facet.options.length > 1,
@@ -210,7 +223,7 @@ export function ListToolbar({
           value={state.q}
           filtering={filtering}
           description={searchDescription}
-          epoch={searchEpoch}
+          epoch={fieldEpoch}
           onCommit={(q) => onChange({ ...state, q })}
         />
         {hasSheetContent && (
@@ -239,7 +252,7 @@ export function ListToolbar({
             )}
           </button>
         )}
-        {actions && <div className={`flex w-full items-center gap-2 ${phone ? '' : 'sm:w-auto'}`}>{actions}</div>}
+        {actions && <div className="flex items-center gap-2">{actions}</div>}
       </div>
 
       {hasSheetContent && (
@@ -289,12 +302,20 @@ export function ListToolbar({
                 key={filter.key}
                 className="inline-flex max-w-full items-center gap-1 rounded-full bg-[var(--v2-surface-2)] py-0.5 pl-2.5 pr-0.5 text-xs text-[var(--v2-ink)]"
               >
-                <span className="truncate">{filter.label}</span>
+                {/* `line-clamp-2` (+ `title` for pointer users): a chip whose
+                    label is longer than its row wraps instead of losing its
+                    tail — the status suffix stays visible with no hover
+                    (#4150). */}
+                <span className="line-clamp-2" title={filter.label}>
+                  {filter.label}
+                </span>
                 <button
                   type="button"
                   aria-label={`Remove ${filter.label}`}
                   onClick={filter.clear}
-                  className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[var(--v2-ink-3)] hover:bg-[var(--v2-border)] hover:text-[var(--v2-ink)] ${listFocusRing}`}
+                  // Painted 24px; the `::after` overlay gives the 44px phone
+                  // hit area the way `Button` does — vertical only (#4150).
+                  className={`relative flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[var(--v2-ink-3)] after:absolute after:inset-x-0 after:top-1/2 after:h-11 after:-translate-y-1/2 after:content-[''] hover:bg-[var(--v2-border)] hover:text-[var(--v2-ink)] ${listFocusRing}`}
                 >
                   <Icon icon={X} className="h-3 w-3" />
                 </button>
@@ -441,7 +462,7 @@ function ListSearchField({
             commit('')
           }
         }}
-        className="min-h-11 w-full rounded-md border border-[var(--v2-border-strong)] bg-[var(--v2-bg)] py-2 pl-9 pr-11 text-sm text-[var(--v2-ink)] placeholder:text-[var(--v2-ink-3)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 sm:min-h-[38px] sm:pr-9 [&::-webkit-search-cancel-button]:appearance-none"
+        className="min-h-11 w-full rounded-md border border-[var(--v2-border-strong)] bg-[var(--v2-bg)] py-2 pl-9 pr-11 text-ellipsis text-sm text-[var(--v2-ink)] placeholder:text-[var(--v2-ink-3)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 sm:min-h-[38px] sm:pr-9 [&::-webkit-search-cancel-button]:appearance-none"
       />
       {description && (
         <span id={descriptionId} className="sr-only">
@@ -579,7 +600,13 @@ function FilterSheet({
                         }
                         className={SHEET_INPUT_CLASSES}
                       />
-                      <span className="flex-1 truncate">{option.label}</span>
+                      {/* `line-clamp-2` + the `meta` slot (#4150): the row
+                          wraps and the status suffix always shows — no
+                          hover on a touch device. */}
+                      <span className="line-clamp-2 flex-1 text-ellipsis" title={option.label}>
+                        {option.label}
+                      </span>
+                      {option.meta && <span className="shrink-0 text-xs text-[var(--v2-ink-3)]">{option.meta}</span>}
                       {option.count !== undefined && (
                         <span className="text-xs tabular-nums text-[var(--v2-ink-3)]">{option.count}</span>
                       )}

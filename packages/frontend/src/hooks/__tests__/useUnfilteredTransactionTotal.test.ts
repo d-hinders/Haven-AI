@@ -40,7 +40,9 @@ describe('useUnfilteredTransactionTotal', () => {
     rerender({ filtered: true, feedTotal: 0, feedLoading: true })
     rerender({ filtered: true, feedTotal: 5, feedLoading: false })
     await waitFor(() => expect(mockGet).toHaveBeenCalledTimes(2))
-    // Never a cache bypass: the feed's own poll refreshes the server cache.
+    // Never a cache bypass: the feed's poll keeps the server cache fresh —
+    // its `fresh=1` covers only the accounts in the request's scope, which is
+    // enough, because a narrowed account was just refreshed by that poll.
     for (const call of mockGet.mock.calls) expect(call[0]).toBe(READ)
   })
 

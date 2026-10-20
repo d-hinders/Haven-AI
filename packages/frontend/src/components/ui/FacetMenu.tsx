@@ -10,6 +10,13 @@ import { sameValues, type FacetUrlSpec } from './list-url-codec'
 export interface ListFacetOption {
   value: string
   label: string
+  /**
+   * A non-truncating detail slot (#4150): a short suffix such as an agent's
+   * status ("Revoked") that the menu row, the phone-sheet row and the chip
+   * always show, even beside a label too long to finish. The trigger summary
+   * and `facetValueLabel` exclude it unless asked.
+   */
+  meta?: string
   /** Rows matching this value; shown on the right of a multi-select row. */
   count?: number
 }
@@ -104,18 +111,20 @@ export function FacetMenu({ facet, value, onChange, allLabel: allLabelOverride, 
     if (!multi) menu.close(true)
   }
 
-  const rows: { value: string | null; label: string; count?: number; checked: boolean }[] = []
+  const rows: { value: string | null; label: string; meta?: string; count?: number; checked: boolean }[] = []
   if (!multi && allLabel !== null) rows.push({ value: null, label: allLabel, checked: value.length === 0 })
   for (const option of facet.options) {
-    rows.push({ value: option.value, label: option.label, count: option.count, checked: value.includes(option.value) })
+    rows.push({ value: option.value, label: option.label, meta: option.meta, count: option.count, checked: value.includes(option.value) })
   }
 
   return (
-    <div ref={menu.wrapperRef} className="relative inline-flex">
+    <div ref={menu.wrapperRef} className="relative inline-flex min-w-0 max-w-full">
       <button {...menu.triggerProps} data-active={active} className={listTriggerClasses(active)}>
         <span className={active ? '' : 'text-[var(--v2-ink-3)]'}>{facet.label}:</span>
         {' '}
-        <span className="font-medium">{summary}</span>
+        {/* `min-w-0 truncate`: a long SELECTED label truncates inside the
+            facet row instead of stretching the trigger past it (#4150). */}
+        <span className="min-w-0 truncate font-medium">{summary}</span>
         <Icon
           icon={ChevronDown}
           className={`h-3.5 w-3.5 shrink-0 motion-safe:transition-transform ${menu.open ? 'rotate-180' : ''}`}
@@ -146,8 +155,15 @@ export function FacetMenu({ facet, value, onChange, allLabel: allLabelOverride, 
               className={listMenuItemClasses}
             >
               {multi ? <CheckboxMark checked={row.checked} /> : <RadioMark checked={row.checked} />}
-              <span className="truncate">{row.label}</span>
-              <span className="text-xs tabular-nums text-[var(--v2-ink-3)]">{row.count ?? ''}</span>
+              <span className="truncate" title={row.label}>
+                {row.label}
+              </span>
+              {/* `meta` (#4150) is the non-truncating detail slot: a status
+                  suffix the label's `truncate` may not leave room for. */}
+              <span className="flex items-center gap-2 text-xs text-[var(--v2-ink-3)]">
+                {row.meta && <span className="whitespace-nowrap">{row.meta}</span>}
+                <span className="tabular-nums">{row.count ?? ''}</span>
+              </span>
             </button>
           ))}
         </div>

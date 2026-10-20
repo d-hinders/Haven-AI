@@ -621,8 +621,12 @@ function FilterSheet({
 }
 
 function SheetGroup({ legend, children }: { legend: string; children: ReactNode }) {
+  // `min-w-0`: a fieldset's default `min-width` is `min-content`, so one long
+  // option ("Quarterly procurement and vendor reconciliation agent") widened
+  // the group past a 375px sheet and its row never truncated (#4111,
+  // `e2e/transactions-list-controls.spec.ts`).
   return (
-    <fieldset className="border-b border-[var(--v2-border)] py-2 last:border-b-0">
+    <fieldset className="min-w-0 border-b border-[var(--v2-border)] py-2 last:border-b-0">
       <legend className="px-2.5 pb-1 pt-2 v2-text-meta font-medium text-[var(--v2-ink-3)]">
         {legend}
       </legend>

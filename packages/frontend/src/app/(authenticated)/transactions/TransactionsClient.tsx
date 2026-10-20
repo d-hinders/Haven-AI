@@ -1,27 +1,41 @@
 'use client'
 
-import { useMemo, useState } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext'
 import { useContacts } from '@/hooks/useContacts'
 import { resolveChainOrNull } from '@/lib/chains'
+import { agentStatusPresentation } from '@/lib/payment-status'
 import { useTransactionFilters } from '@/hooks/useTransactionFilters'
 import { browserTimeZone, useTransactionsFeed } from '@/hooks/useTransactionsFeed'
-import { Select } from '@/components/ui/Select'
+import { useUnfilteredTransactionTotal } from '@/hooks/useUnfilteredTransactionTotal'
 import {
   buildTransactionScopeSubtitle,
   buildTransactionSummary,
 } from '@/lib/transaction-scope'
-import type { AggregatedTransaction, TransactionFilterState } from '@/types/transactions'
+import type {
+  AggregatedTransaction,
+  TransactionFilterState,
+  TransactionFilterTokenOption,
+} from '@/types/transactions'
 import { buildCsvFilename, downloadCsv } from '@/lib/transaction-csv'
 import { api, ApiRequestError } from '@/lib/api'
-import FilterBar from '@/components/transactions/FilterBar'
 import TransactionsTable from '@/components/transactions/TransactionsTable'
 import TransactionDetailPanel from '@/components/transactions/TransactionDetailPanel'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { ListNoMatch, ListToolbar } from '@/components/ui/ListToolbar'
+import type { ListFacet } from '@/components/ui/FacetMenu'
+import type { ListCount, ListNoun } from '@/components/ui/list-controls-copy'
+import {
+  clearedListState,
+  isAllTime,
+  type ListState,
+  type ListUrlSchema,
+} from '@/components/ui/list-url-codec'
+import { useListUrlState } from '@/components/ui/useListUrlState'
 
 /**
  * What the export tells the user when it does not hand back a file.
@@ -90,55 +104,72 @@ function chainName(chainId: number): string {
   return resolveChainOrNull(chainId)?.name ?? `Chain ${chainId}`
 }
 
-/** `YYYY-MM-DD` — the custom range's calendar-date shape, as the API takes it. */
-const CALENDAR_DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+/** The short chain name the option labels carry: "Base", not "Base Chain". */
+function chainLabel(chainId: number): string {
+  const chain = resolveChainOrNull(chainId)
+  return chain ? chain.name.replace(/\s+Chain$/, '') : `Chain ${chainId}`
+}
+
+function tokenLabel(token: TransactionFilterTokenOption): string {
+  return token.isNative
+    ? `Native ${token.symbol} (${chainLabel(token.chainId)})`
+    : `${token.symbol} (${chainLabel(token.chainId)})`
+}
+
+const transactionNoun: ListNoun = { one: 'transaction', other: 'transactions' }
 
 /**
- * A calendar date that EXISTS — the same roundtrip the server's period parser
- * applies (`Date.UTC` clamps `2026-02-31` forward to March 3, so shape alone
- * is not existence).
+ * The page URL's keys (#4111, the list-controls codec). Every key keeps the
+ * name and value format it had under `FilterBar`, except search: it is
+ * written as `q` now, and the old `search` key is still READ, so a link
+ * from before the move keeps its search. No facet lists its `values`: the
+ * account, agent and token options load asynchronously, and a value read
+ * before they arrive must survive. Direction's two values are fixed.
  */
-function isRealCalendarDate(value: string): boolean {
-  if (!CALENDAR_DATE_RE.test(value)) return false
-  const [year, month, dayOfMonth] = value.split('-').map(Number)
-  const asUtc = new Date(Date.UTC(year, month - 1, dayOfMonth))
-  return (
-    asUtc.getUTCFullYear() === year &&
-    asUtc.getUTCMonth() === month - 1 &&
-    asUtc.getUTCDate() === dayOfMonth
-  )
+const transactionsUrlSchema: ListUrlSchema = {
+  search: { aliases: ['search'] },
+  facets: [
+    { id: 'accountId' },
+    { id: 'agentId' },
+    { id: 'tokenKey' },
+    { id: 'direction', values: ['in', 'out'] },
+    { id: 'chainId' },
+  ],
+  period: { allowCustom: true },
 }
 
 /**
- * Read a custom `from`/`to` pair off the URL, or nothing.
- *
- * Both dates must exist, be well-formed and ordered — the server refuses a
- * lone, non-existent or reversed pair with a 400, and a shared/deployed link
- * must not land the user on a broken feed. Degrading to "no Period filter"
- * keeps the page honest about what it can honour.
+ * The toolbar's state as the filters the feed and the export send. A
+ * network that is not a positive integer is dropped here, as the URL
+ * reader before #4111 dropped it.
  */
-function customRangeFromParams(
-  fromParam: string | null,
-  toParam: string | null,
-): { from?: string; to?: string } {
-  if (
-    fromParam !== null &&
-    toParam !== null &&
-    isRealCalendarDate(fromParam) &&
-    isRealCalendarDate(toParam) &&
-    fromParam <= toParam
-  ) {
-    return { from: fromParam, to: toParam }
+function listStateToFilters(state: ListState): TransactionFilterState {
+  const first = (id: string): string | undefined => state.facets[id]?.[0]
+  const direction = first('direction')
+  const chainId = Number(first('chainId'))
+  const search = state.q.trim()
+  const period = state.period ?? {}
+  return {
+    accountId: first('accountId'),
+    agentId: first('agentId'),
+    tokenKey: first('tokenKey'),
+    direction: direction === 'in' || direction === 'out' ? direction : undefined,
+    chainId: Number.isInteger(chainId) && chainId > 0 ? chainId : undefined,
+    search: search || undefined,
+    period: period.preset,
+    from: period.from && period.to ? period.from : undefined,
+    to: period.from && period.to ? period.to : undefined,
   }
-  return {}
 }
 
 /**
- * Serialize the filter state for the page URL and the export request — the
- * same dimensions, the same spellings, so the address bar names exactly what
- * the server filtered (#4095).
+ * The export request's query: the API's own parameter names, which are NOT
+ * the page URL's (#4111). The URL writes search as `q`; the backend reads
+ * `search`, and this builder is the one place that says so, so renaming a
+ * URL key can never drop a filter from the file. The list request has its
+ * twin in `useTransactionsFeed`'s `toQueryString`.
  */
-function filtersToParams(filters: TransactionFilterState): URLSearchParams {
+function filtersToApiParams(filters: TransactionFilterState): URLSearchParams {
   const params = new URLSearchParams()
   if (filters.accountId) params.set('accountId', filters.accountId)
   if (filters.agentId) params.set('agentId', filters.agentId)
@@ -157,34 +188,31 @@ function filtersToParams(filters: TransactionFilterState): URLSearchParams {
 }
 
 export default function TransactionsClient() {
-  const router = useRouter()
   const searchParams = useSearchParams()
   const { user } = useAuth()
   const { resolveAddress } = useContacts()
   const [selectedTx, setSelectedTx] = useState<AggregatedTransaction | null>(null)
   const [exporting, setExporting] = useState(false)
   const [exportNotice, setExportNotice] = useState<ExportNotice | null>(null)
-  const [filters, setFilters] = useState<TransactionFilterState>(() => {
-    const direction = searchParams.get('direction')
-    const period = searchParams.get('period')
-    const chainId = Number(searchParams.get('chainId'))
-    return {
-      accountId: searchParams.get('accountId') ?? undefined,
-      agentId: searchParams.get('agentId') ?? undefined,
-      tokenKey: searchParams.get('tokenKey') ?? undefined,
-      direction: direction === 'in' || direction === 'out' ? direction : undefined,
-      chainId: Number.isInteger(chainId) && chainId > 0 ? chainId : undefined,
-      search: searchParams.get('search') ?? undefined,
-      period:
-        period === '7d' || period === '30d' || period === '90d' ? period : undefined,
-      ...customRangeFromParams(searchParams.get('from'), searchParams.get('to')),
-    }
-  })
+  // #4111: every filter dimension lives in the URL through the list-controls
+  // codec — a shared link (or a refresh) lands on the same filtered feed the
+  // sender saw (#4095), and back/forward re-seeds it.
+  const [listState, setListState] = useListUrlState(transactionsUrlSchema, { filtering: 'server' })
+  const filters = useMemo(() => listStateToFilters(listState), [listState])
+
+  // A link from before #4111 names the search `search`. It is read as `q`
+  // already; rewriting the address once makes the URL converge on one name.
+  const hasLegacySearchKey = searchParams?.has('search') ?? false
+  useEffect(() => {
+    if (hasLegacySearchKey) setListState(listState)
+    // Once per legacy link: the rewrite removes the key it keys on.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasLegacySearchKey])
+
   const {
     accounts,
     agents,
     tokens,
-    loading: filtersLoading,
     error: filtersError,
   } = useTransactionFilters()
   const {
@@ -203,21 +231,77 @@ export default function TransactionsClient() {
 
   const userAccounts = user?.accounts ?? []
   const hasAccounts = userAccounts.length > 0
-  const hasActiveFilters = Boolean(
-    filters.accountId ||
-      filters.agentId ||
-      filters.tokenKey ||
-      filters.direction ||
-      filters.chainId !== undefined ||
-      filters.search?.trim() ||
-      filters.period ||
-      (filters.from && filters.to),
-  )
+  // Active means "differs from the page default" (#4110), and this page's
+  // default is unfiltered: no search, every facet All, All time — the same
+  // rule the toolbar applies to its chips and count.
+  const hasActiveFilters =
+    listState.q.trim() !== '' ||
+    Object.values(listState.facets).some((values) => values.length > 0) ||
+    !isAllTime(listState.period)
+  const unfilteredTotal = useUnfilteredTransactionTotal({
+    filtered: hasActiveFilters,
+    feedTotal: total,
+    retryKey: JSON.stringify(filters),
+  })
 
-  // Every network by default; the network dropdown narrows to one (#620).
-  // There is no active chain to follow since #3719.
+  // Every network by default; the Network facet narrows to one (#620). There
+  // is no active chain to follow since #3719. With one network the facet
+  // has one option, and the toolbar hides it.
   const chainIds = Array.from(new Set(userAccounts.map((s) => s.chain_id))).sort((a, b) => a - b)
-  const showNetworkFilter = chainIds.length > 1
+  const accountChainCount = new Set(accounts.map((account) => account.chainId)).size
+
+  // Agents in the order `FilterBar` listed them: active, paused, the rest;
+  // a status other than Active is named, since a revoked agent's history
+  // still lives here.
+  const agentRank = (status: string) => (status === 'active' ? 0 : status === 'paused' ? 1 : 2)
+  const sortedAgents = [...agents].sort(
+    (a, b) => agentRank(a.status) - agentRank(b.status) || a.name.localeCompare(b.name),
+  )
+  const facets: ListFacet[] = [
+    {
+      id: 'accountId',
+      label: 'Account',
+      options: accounts.map((account) => ({
+        value: account.id,
+        // Two accounts can share a name across networks; the network tells
+        // them apart, as the token options already do.
+        label: accountChainCount > 1 ? `${account.name} (${chainLabel(account.chainId)})` : account.name,
+      })),
+    },
+    {
+      id: 'agentId',
+      label: 'Initiator',
+      options: [
+        { value: 'user', label: 'User (manual)' },
+        ...sortedAgents.map((agent) => ({
+          value: agent.id,
+          label:
+            agent.status === 'active'
+              ? agent.name
+              : `${agent.name} (${agentStatusPresentation(agent.status).label})`,
+        })),
+      ],
+    },
+    {
+      id: 'tokenKey',
+      label: 'Token',
+      options: tokens.map((token) => ({ value: token.key, label: tokenLabel(token) })),
+    },
+    {
+      id: 'direction',
+      label: 'Direction',
+      values: ['in', 'out'],
+      options: [
+        { value: 'in', label: 'Incoming' },
+        { value: 'out', label: 'Outgoing' },
+      ],
+    },
+    {
+      id: 'chainId',
+      label: 'Network',
+      options: chainIds.map((id) => ({ value: String(id), label: chainName(id) })),
+    },
+  ]
 
   // #4095: direction and network are SERVER-side filters now — the browser
   // filtered the loaded page in memory, which quietly disagreed with the
@@ -262,30 +346,27 @@ export default function TransactionsClient() {
   // bucket rule.
   const summary = useMemo(() => buildTransactionSummary(transactions), [transactions])
   const showSummary = hasActiveFilters && transactions.length > 0
-  const handleFilterChange = (nextFilters: TransactionFilterState) => {
-    setFilters(nextFilters)
+  const handleListChange = (next: ListState) => {
+    setListState(next)
     // Both notices name the filters as the thing to change; leaving one up
     // once the user has makes it assert something no longer true.
     setExportNotice(null)
-
-    // #4095: every filter dimension lives in the URL — a shared link (or a
-    // refresh) lands on the same filtered feed the sender saw.
-    const query = filtersToParams(nextFilters).toString()
-    router.replace(query ? `/transactions?${query}` : '/transactions', { scroll: false })
   }
 
+  // Clear filters returns to the page default, the same state the toolbar's
+  // own Clear filters reaches.
   const handleClearFilters = () => {
-    handleFilterChange({})
+    handleListChange(clearedListState(listState, transactionsUrlSchema))
   }
 
   // The backend generates the file (#2871): it sees the whole filtered result
   // set, where the browser only ever had the pages it had loaded. Every
-  // filter the bar applies goes on the query — the same `filtersToParams` the
-  // page URL and the list request use (#4095), plus the `tz` the server cuts
-  // a custom range's calendar days in — so the file and the on-screen rows
-  // agree.
+  // filter the toolbar applies goes on the query, in the API's parameter
+  // names (`filtersToApiParams`, separate from the URL codec since #4111),
+  // plus the `tz` the server cuts a custom range's calendar days in — so the
+  // file and the on-screen rows agree.
   const handleExportCsv = async () => {
-    const params = filtersToParams(filters)
+    const params = filtersToApiParams(filters)
     if (filters.from && filters.to) params.set('tz', browserTimeZone())
 
     setExporting(true)
@@ -339,11 +420,23 @@ export default function TransactionsClient() {
   }
 
   // Gated on the server's total for the FETCHED filter scope. Since #4095
-  // every FilterBar dimension — direction, network, search and Period
+  // every filter dimension — direction, network, search and Period
   // included — rides the list request, so `total` counts exactly the set the
   // export will write: an enabled button cannot produce a no-row file unless
   // an explorer leg failed, and that outage has its own notice below.
   const canExport = !loadingInitial && total > 0
+
+  // #4111: the standard count, both numbers from the server. Unfiltered it
+  // is the feed's total; filtered, "{shown} of {total}" against the
+  // server's unfiltered total — never loaded rows against a server figure.
+  const count: ListCount | null = loadingInitial
+    ? null
+    : !hasActiveFilters
+      ? { shown: total, total }
+      : unfilteredTotal === null
+        ? null
+        : { shown: total, total: unfilteredTotal }
+  const showNoMatch = hasActiveFilters && !loadingInitial && !error && transactions.length === 0
 
   return (
     <div className="max-w-6xl">
@@ -383,64 +476,39 @@ export default function TransactionsClient() {
         </div>
       )}
 
-      <FilterBar
-        filters={filters}
-        accounts={accounts}
-        agents={agents}
-        tokens={tokens}
-        loading={filtersLoading}
-        error={filtersError}
-        onChange={handleFilterChange}
-        onExport={() => void handleExportCsv()}
-        exporting={exporting}
-        canExport={canExport}
+      <ListToolbar
+        noun={transactionNoun}
+        state={listState}
+        onChange={handleListChange}
+        filtering="server"
+        facets={facets}
+        period={{ allowCustom: true }}
+        searchDescription="by name, agent or address"
+        count={count}
+        actions={
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => void handleExportCsv()}
+            disabled={!canExport || exporting}
+            aria-busy={exporting}
+            className="min-h-11 w-full sm:min-h-0 sm:w-auto"
+          >
+            {exporting ? 'Preparing…' : 'Export CSV'}
+          </Button>
+        }
       />
 
-      {showNetworkFilter && (
-        <div className="mt-3 flex items-center gap-2">
-          <label htmlFor="tx-network" className="text-xs font-medium text-[var(--v2-ink-3)]">
-            Network
-          </label>
-          <Select
-            id="tx-network"
-            aria-label="Filter transactions by network"
-            value={filters.chainId === undefined ? 'all' : String(filters.chainId)}
-            onChange={(e) => {
-              // #4095: the scope rides the list request as `chainId` now —
-              // through `handleFilterChange` so it lands in the URL and clears
-              // any export notice, like every other filter.
-              handleFilterChange({
-                ...filters,
-                chainId: e.target.value === 'all' ? undefined : Number(e.target.value),
-              })
-            }}
-            className="max-w-[200px]"
-          >
-            <option value="all">All networks</option>
-            {chainIds.map((id) => (
-              <option key={id} value={String(id)}>
-                {chainName(id)}
-              </option>
-            ))}
-          </Select>
-        </div>
+      {filtersError && (
+        <p role="alert" className="mt-2 text-xs text-[var(--v2-danger)]">
+          {filtersError}
+        </p>
       )}
 
-      <div className="mt-5 mb-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--v2-ink-3)]">
-          <span>
-            {loadingInitial ? (
-              'Loading transactions...'
-            ) : (
-              <>
-                <span className="v2-tabular">{transactions.length}</span> transaction
-                {transactions.length !== 1 ? 's' : ''}
-              </>
-            )}
-          </span>
+      {(showSummary || (!loadingInitial && truncated)) && (
+        <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--v2-ink-3)]">
           {showSummary ? (
             <>
-              <span aria-hidden="true">·</span>
               <span>
                 <span className="v2-tabular font-medium text-[var(--v2-success)]">{summary.received}</span> received
               </span>
@@ -459,44 +527,45 @@ export default function TransactionsClient() {
               {hasMore ? <span className="text-[var(--v2-ink-3)]">(loaded results)</span> : null}
             </>
           ) : null}
+          {/*
+            #2882/#2884: `total` counts what the explorers returned, not what
+            the account holds — each source is read only up to a fixed page
+            budget. This line qualifies the toolbar's count, so it sits
+            directly beneath it rather than floating above the table.
+
+            Hedged on purpose. The feed stops at the budget when a source has
+            more, and a failed leg is unknown rather than capped, so "may not
+            be" is true in every state at no cost. It corrects the SCREEN; the
+            downloaded CSV carries no such note, which is recorded on the PR.
+          */}
+          {!loadingInitial && truncated && (
+            <div className="w-full">
+              Counts and exports cover the transactions loaded here, which may
+              not be your full history.
+            </div>
+          )}
         </div>
-        {!loadingInitial && hasMore && transactions.length > 0 && (
-          <span className="text-xs text-[var(--v2-ink-3)]">
-            Showing <span className="v2-tabular">{transactions.length.toLocaleString('en-US')}</span> of <span className="v2-tabular">{total.toLocaleString('en-US')}</span>
-          </span>
-        )}
-        {/*
-          #2882/#2884: `total` counts what the explorers returned, not what
-          the account holds — each source is read only up to a fixed page
-          budget. This line qualifies that count, so it lives inside the count
-          row rather than floating above the table.
+      )}
 
-          Hedged on purpose. The feed stops at the budget when a source has
-          more, and a failed leg is unknown rather than capped, so "may not
-          be" is true in every state at no cost. It corrects the SCREEN; the
-          downloaded CSV carries no such note, which is recorded on the PR.
-        */}
-        {!loadingInitial && truncated && (
-          <div className="w-full text-xs text-[var(--v2-ink-3)]">
-            Counts and exports cover the transactions loaded here, which may
-            not be your full history.
-          </div>
+      <Card hover={false} className="mt-3">
+        {showNoMatch ? (
+          // The standard no-match state (#4110): it sits where the rows were
+          // and leaves the toolbar in place, so the cause stays editable.
+          <ListNoMatch noun={transactionNoun} onClear={handleClearFilters} />
+        ) : (
+          <TransactionsTable
+            transactions={transactions}
+            loading={loadingInitial}
+            error={error}
+            onRefresh={() => void refresh()}
+            resolveAddress={resolveAddress}
+            accountNamesByAddress={accountNamesByAddress}
+            hasActiveFilters={hasActiveFilters}
+            onClearFilters={handleClearFilters}
+            variant="page"
+            onSelect={setSelectedTx}
+          />
         )}
-      </div>
-
-      <Card hover={false}>
-        <TransactionsTable
-          transactions={transactions}
-          loading={loadingInitial}
-          error={error}
-          onRefresh={() => void refresh()}
-          resolveAddress={resolveAddress}
-          accountNamesByAddress={accountNamesByAddress}
-          hasActiveFilters={hasActiveFilters}
-          onClearFilters={handleClearFilters}
-          variant="page"
-          onSelect={setSelectedTx}
-        />
       </Card>
 
       <TransactionDetailPanel

@@ -52,7 +52,7 @@ function toQueryString(
   if (filters.accountId) params.set('accountId', filters.accountId)
   if (filters.agentId) params.set('agentId', filters.agentId)
   if (filters.tokenKey) params.set('tokenKey', filters.tokenKey)
-  // #4095: every FilterBar dimension rides the request now — the browser
+  // #4095: every filter dimension rides the request now — the browser
   // filtered direction and network over the loaded page only, so the list,
   // its count and the CSV export could disagree. The server applies all of
   // them before paging.

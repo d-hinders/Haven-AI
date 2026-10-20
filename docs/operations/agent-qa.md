@@ -519,8 +519,10 @@ check (`packages/qa-agent/src/lib/settlement-record.ts`):
 
 - **The record.** `GET /machine-payments/:id/status` must carry
   `merchant_settlement_recorded: true`. Absent fails the leg with a message
-  naming the payment id and both causes: the report was refused, or the backend
-  answered it `retryable` (the merchant tx was not yet visible to its node).
+  naming the payment id. On the SDK legs it names both causes: the report was
+  refused, or the backend answered it `retryable` (the merchant tx was not yet
+  visible to its node). On the hosted no-tool arm it says the settle's report
+  was not recorded, or was never posted.
 - **The same transaction.** The receipt's `settlement_tx_hash` must equal,
   case-insensitively, the hash the leg proved on-chain. On its own the receipt
   hash proves nothing — with no record it falls back to the merchant's
@@ -532,7 +534,7 @@ check (`packages/qa-agent/src/lib/settlement-record.ts`):
   before `haven_settle_mcp_tool` — and a record must be seen within **45 s** of
   it: the 60 s floor less a 15 s margin. `-grace-resume` anchors on its funding
   submit (`signPayment`) instead, because its funding confirms BEFORE the
-  resume by design; the whole leg runs in about 8–12 s on dev. A record first
+  resume by design; the whole leg runs in about 7–12 s on dev. A record first
   seen after the window fails the leg — the window is never extended to wait
   for the sweep.
 - **SDK legs source the hash themselves**, from the paid response's
@@ -554,8 +556,15 @@ The flake risk is stated, not hidden: the backend checks the transaction once
 per report with no wait, and the SDK posts once and swallows a `retryable`
 answer by design. A merchant transaction not yet visible to the backend's node
 at report time is therefore a red on the SDK-direct legs that is not a Haven
-regression. Owner decision on #4119: the legs stay strict; if that red appears
-in practice, the fix is an SDK change that surfaces the outcome.
+regression. The #4119 spec (spec-review correction 3) keeps the SDK legs
+strict: if that red recurs, the fix is in the SDK — surface
+`settlementEvidenceOutcome` on the local `fetch` / `resumeX402Payment` path —
+never a re-post from the leg.
+
+A second residual is bounded and rare: on the hosted report-tool arm, a
+follow-up Haven accepts but whose status read lands after the 45 s deadline is
+red although the leg's own report made the record. It is left strict on
+purpose.
 
 #### The hosted-MCP leg (`x402-hosted-mcp-signer`, #1154)
 

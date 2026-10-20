@@ -1060,3 +1060,38 @@ describe('eip3009 continuation: Haven recorded the merchant settlement (#4119)',
     expect(mockStatus).not.toHaveBeenCalled()
   })
 })
+
+describe('eip3009 continuation: the attribution window on the no-tool arm (#4119 review)', () => {
+  const late = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+  it('FAILS when settle returns past the 45 s window, even with the record present', async () => {
+    mockCallTool.mockImplementation(async (tool: string) => {
+      if (tool === 'haven_prepare_catalog_purchase') return prep()
+      await late(ATTRIBUTION_WINDOW_MS + 5_000)
+      return settled()
+    })
+    const r = await onFakeClock(() => x402CatalogGuidedPurchase.run(ctx()))
+    expect(r.pass).toBe(false)
+    expect(r.detail).toMatch(/cannot be told apart from the #3888 sweep/)
+  })
+
+  it('FAILS when an unreadable first read is followed by a recorded read that lands past the window', async () => {
+    mockStatus
+      .mockResolvedValueOnce({ ok: false, status: 503, data: {} })
+      .mockImplementation(async () => {
+        await late(ATTRIBUTION_WINDOW_MS + 5_000)
+        return status(true)
+      })
+    const r = await onFakeClock(() => x402CatalogGuidedPurchase.run(ctx()))
+    expect(r.pass).toBe(false)
+    expect(r.detail).toMatch(/cannot be told apart from the #3888 sweep/)
+  })
+
+  it('FAILS on a retryable follow-up whose code is not SETTLEMENT_PENDING', async () => {
+    settleWith(reportToolArm, () => ({ payment_id: 'pay_catalog_1', settled: false, retryable: true, code: 'DELIVERED_UNSETTLED' }))
+    const r = await onFakeClock(() => x402CatalogGuidedPurchase.run(ctx()))
+    expect(r.pass).toBe(false)
+    expect(r.detail).toMatch(/DELIVERED_UNSETTLED/)
+    expect(reportCalls()).toHaveLength(1)
+  })
+})

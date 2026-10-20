@@ -58,11 +58,11 @@
  * The anchor differs from `x402-delegation-3009`'s, deliberately. There the
  * call that funds is the call that settles, so a timestamp before it precedes
  * the funding confirm. Here the funding confirms BEFORE the resume, by design,
- * so a timestamp before `resumeX402Payment` would not bound the #3888 sweep's
- * 60 s floor at all. The anchor is therefore taken immediately before the
- * funding submit (`signPayment`), the latest instant the confirm cannot
- * precede. The whole leg runs in 8–12 s on dev (qa-dev runs of 2026-10-19 and
- * 10-20), well inside the 45 s window.
+ * so a timestamp before `resumeX402Payment` does not guarantee a bound on the
+ * #3888 sweep's 60 s floor. The anchor is therefore taken immediately before
+ * the funding submit (`signPayment`), the latest instant the confirm cannot
+ * precede. The whole leg runs in about 7–12 s on dev (eight qa-dev runs,
+ * 2026-10-15 to 10-20), well inside the 45 s window.
  */
 
 import { HavenClient, buildSweepTypedData, signUserOpTypedDataForDelegation } from '@haven_ai/sdk'

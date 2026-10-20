@@ -682,3 +682,78 @@ describe('Haven recorded the merchant settlement (#4119)', () => {
     expect(r.detail).toMatch(/still retryable after 4 attempt/)
   })
 })
+
+describe('the attribution window on the no-tool arm, and the pinned retryable code (#4119 review)', () => {
+  const late = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+  it('FAILS when settle returns past the 45 s window, even with the record present', async () => {
+    mockCallTool.mockImplementation(async (tool: string) => {
+      if (tool === 'haven_pay_mcp_tool') return quote()
+      await late(ATTRIBUTION_WINDOW_MS + 5_000)
+      return settled()
+    })
+    const r = await onFakeClock(() => x402HostedMcpSigner.run(ctx()))
+    expect(r.pass).toBe(false)
+    expect(r.detail).toMatch(/cannot be told apart from the #3888 sweep/)
+  })
+
+  it('FAILS when an unreadable first read is followed by a recorded read that lands past the window', async () => {
+    mockStatus
+      .mockResolvedValueOnce({ ok: false, status: 503, data: {} })
+      .mockImplementation(async () => {
+        await late(ATTRIBUTION_WINDOW_MS + 5_000)
+        return status(true)
+      })
+    const r = await onFakeClock(() => x402HostedMcpSigner.run(ctx()))
+    expect(r.pass).toBe(false)
+    expect(r.detail).toMatch(/cannot be told apart from the #3888 sweep/)
+  })
+
+  it('retries an unreadable first read inside the window', async () => {
+    mockStatus.mockResolvedValueOnce({ ok: false, status: 503, data: {} }).mockResolvedValue(status(true))
+    const r = await onFakeClock(() => x402HostedMcpSigner.run(ctx()))
+    expect(r.pass).toBe(true)
+  })
+
+  it('FAILS on a retryable follow-up whose code is not SETTLEMENT_PENDING', async () => {
+    mockCallTool.mockImplementation(async (tool: string) => {
+      if (tool === 'haven_pay_mcp_tool') return quote()
+      if (tool === 'haven_settle_mcp_tool') return settled(reportToolArm)
+      return { payment_id: 'pay_hosted_1', settled: false, retryable: true, code: 'DELIVERED_UNSETTLED' }
+    })
+    const r = await onFakeClock(() => x402HostedMcpSigner.run(ctx()))
+    expect(r.pass).toBe(false)
+    expect(r.detail).toMatch(/refused the follow-up haven_report_settlement_evidence for payment pay_hosted_1: DELIVERED_UNSETTLED/)
+    expect(reportCalls()).toHaveLength(1)
+  })
+
+  it('re-reads the receipts once after a 5xx, inside the window', async () => {
+    mockListReceipts.mockResolvedValueOnce({ ok: false, status: 503, data: {} }).mockResolvedValue(receipts())
+    const r = await onFakeClock(() => x402HostedMcpSigner.run(ctx()))
+    expect(r.pass).toBe(true)
+    expect(mockListReceipts).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not re-read the receipts once the window has no room left', async () => {
+    // Settle returns at anchor + 44 s: the record is read inside the window,
+    // but a 5xx receipts read then has no 2 s left for a second try.
+    mockCallTool.mockImplementation(async (tool: string) => {
+      if (tool === 'haven_pay_mcp_tool') return quote()
+      await late(ATTRIBUTION_WINDOW_MS - 1_000)
+      return settled()
+    })
+    mockListReceipts.mockResolvedValueOnce({ ok: false, status: 503, data: {} }).mockResolvedValue(receipts())
+    const r = await onFakeClock(() => x402HostedMcpSigner.run(ctx()))
+    expect(r.pass).toBe(false)
+    expect(r.detail).toMatch(/receipts returned HTTP 503/)
+    expect(mockListReceipts).toHaveBeenCalledTimes(1)
+  })
+
+  it('FAILS when the receipts read stays 5xx — one re-read, not a loop', async () => {
+    mockListReceipts.mockResolvedValue({ ok: false, status: 503, data: {} })
+    const r = await onFakeClock(() => x402HostedMcpSigner.run(ctx()))
+    expect(r.pass).toBe(false)
+    expect(r.detail).toMatch(/receipts returned HTTP 503/)
+    expect(mockListReceipts).toHaveBeenCalledTimes(2)
+  })
+})

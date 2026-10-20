@@ -43,10 +43,16 @@
  * A merchant transaction not yet visible to the backend's node at report time
  * is answered `retryable`. The SDK cannot surface that answer (it swallows the
  * outcome by design) and posts once, so on the SDK-direct legs that case is a
- * red that is not a Haven regression. Decided on #4119: the legs stay strict;
- * if that red appears in practice, the fix is an SDK change that surfaces the
- * outcome. The hosted legs can see `retryable` and follow it
- * ({@link assertHostedSettlementRecorded}).
+ * red that is not a Haven regression. The #4119 spec (spec-review correction
+ * 3) keeps the SDK legs strict: if that red recurs, the fix is in the SDK —
+ * surface `settlementEvidenceOutcome` on the local `fetch` /
+ * `resumeX402Payment` path — never a re-post from the leg. The hosted legs
+ * can see `retryable` and follow it ({@link assertHostedSettlementRecorded}).
+ *
+ * A second, bounded residual: a hosted follow-up report that Haven accepts
+ * but whose status read lands after the deadline is red although the leg's
+ * own report made the record. It needs a slow follow-up near the end of the
+ * window, so it is rare, and it is left strict on purpose.
  */
 
 import { parseMerchantSettlement } from '@haven_ai/sdk'
@@ -203,9 +209,22 @@ function lateDetail(paymentId: string, anchorMs: number, read: RecordRead): stri
   )
 }
 
-/** The recorded hash must be the transaction this leg proved, in any letter case. */
-async function recordedHashMatches(api: HavenApi, paymentId: string, merchantHash: string): Promise<string | null> {
-  const { ok, status, data } = await api.listReceipts(25)
+/**
+ * The recorded hash must be the transaction this leg proved, in any letter
+ * case. A 5xx on the receipts read is re-read once, and only while the window
+ * leaves room for it — the same tolerance the status reads give a failed read.
+ */
+async function recordedHashMatches(
+  api: HavenApi,
+  paymentId: string,
+  merchantHash: string,
+  deadlineMs: number,
+): Promise<string | null> {
+  let { ok, status, data } = await api.listReceipts(25)
+  if (!ok && status >= 500 && Date.now() + RECORD_POLL_INTERVAL_MS < deadlineMs) {
+    await sleep(RECORD_POLL_INTERVAL_MS)
+    ;({ ok, status, data } = await api.listReceipts(25))
+  }
   if (!ok) return `GET /machine-payments/receipts returned HTTP ${status} — the recorded hash of payment ${paymentId} is unreadable`
   const row = data?.receipts?.find((receipt) => receipt.payment_id === paymentId)
   if (!row) return `no receipt row for payment ${paymentId} among the agent's newest 25 — the recorded hash is unreadable`
@@ -244,7 +263,7 @@ export async function assertSdkSettlementRecorded(
         'visible to its node) and the SDK, which posts once, did not retry',
     }
   }
-  const mismatch = await recordedHashMatches(api, args.paymentId, args.merchantHash)
+  const mismatch = await recordedHashMatches(api, args.paymentId, args.merchantHash, deadline)
   if (mismatch) return { ok: false, detail: mismatch }
   return { ok: true, hash: args.merchantHash, via: "the SDK's own settlement report" }
 }
@@ -307,7 +326,7 @@ export async function assertHostedSettlementRecorded(
           'settlement report was not recorded, or was never posted. A record that appears later is not that report',
       }
     }
-    const mismatch = await recordedHashMatches(api, paymentId, args.merchantHash)
+    const mismatch = await recordedHashMatches(api, paymentId, args.merchantHash, deadline)
     if (mismatch) return { ok: false, detail: mismatch }
     return { ok: true, hash: args.merchantHash, via: "the settle's own settlement report" }
   }
@@ -372,7 +391,7 @@ export async function assertHostedSettlementRecorded(
         `record inside the window (${describeRead(record.last)})`,
     }
   }
-  const mismatch = await recordedHashMatches(api, paymentId, args.merchantHash)
+  const mismatch = await recordedHashMatches(api, paymentId, args.merchantHash, deadline)
   if (mismatch) return { ok: false, detail: mismatch }
   return { ok: true, hash: args.merchantHash, via: `a follow-up ${REPORT_TOOL} carrying payment_header` }
 }

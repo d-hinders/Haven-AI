@@ -71,7 +71,12 @@ jobs:
       group: agent-evals-claude-code
       cancel-in-progress: false
     steps:
+      # No git token left in .git/config: nothing in this job talks to the
+      # remote after checkout (only a local `git rev-parse`), and the token is
+      # not among the secrets the transcript redactor loads (#4137).
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Decide the slice
         id: slice
@@ -258,7 +263,8 @@ jobs:
       # fails. Every `secrets.*` this workflow references is passed here, by
       # name (guarded by scripts/ci/agent-evals-workspace-deps.test.mjs); the
       # two fallbacks are redacted only when set as secrets, so the variables
-      # of the same name stay readable.
+      # of the same name stay readable. The upload must stay the VERY NEXT
+      # step, and no other step may touch the staging or upload directory.
       - name: Redact the session transcripts (fail-closed)
         id: redact
         if: always()

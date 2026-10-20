@@ -185,46 +185,96 @@ test('the redact step runs always() with id redact, and the sessions upload is g
   assert.match(redactRun, /npm run evals:redact -w packages\/qa-agent --/, 'the redact step no longer runs the qa-agent redactor')
   assert.ok(sessionsUpload, 'agent-evals.yml has no agent-evals-sessions-<run_id> upload — update this guard')
   assert.equal(fieldOf(sessionsUpload, 'if'), "always() && steps.redact.outputs.clean == 'true'", 'the sessions upload is not gated on the redactor clean scan')
-  assert.ok(steps.indexOf(redact) < steps.indexOf(sessionsUpload), 'the sessions upload runs before the redactor')
+  // Nothing may run between the clean scan and the upload: a step there
+  // could copy raw streams into the upload directory after the scan.
+  assert.equal(steps.indexOf(sessionsUpload), steps.indexOf(redact) + 1, 'the sessions upload is not the step immediately after the redact step')
 })
+
+const REDACT_OUT = redactRun.match(/--out="\$RUNNER_TEMP\/([^"]+)"/)?.[1]
+const REDACT_STAGE = redactRun.match(/--stage="\$RUNNER_TEMP\/([^"]+)"/)?.[1]
 
 test('the sessions upload keeps 3 days and uploads the redactor upload directory only', () => {
   assert.ok(sessionsUpload, 'no sessions upload step — update this guard')
   assert.equal(fieldOf(sessionsUpload, 'retention-days'), '3')
-  const out = redactRun.match(/--out="\$RUNNER_TEMP\/([^"]+)"/)?.[1]
-  assert.ok(out, 'the redactor has no --out="$RUNNER_TEMP/..." upload directory')
-  assert.deepEqual(uploadPaths(sessionsUpload), [`\${{ runner.temp }}/${out}`])
-  const stage = redactRun.match(/--stage="\$RUNNER_TEMP\/([^"]+)"/)?.[1]
-  assert.ok(stage && stage !== out, 'the redactor must stage into a directory other than the upload directory')
+  assert.ok(REDACT_OUT, 'the redactor has no --out="$RUNNER_TEMP/..." upload directory')
+  assert.deepEqual(uploadPaths(sessionsUpload), [`\${{ runner.temp }}/${REDACT_OUT}`])
+  assert.ok(REDACT_STAGE && REDACT_STAGE !== REDACT_OUT, 'the redactor must stage into a directory other than the upload directory')
 })
 
-test('no upload path names the raw claude-sessions streams', () => {
+test('no other step names the staging or upload directory', () => {
+  assert.ok(REDACT_OUT && REDACT_STAGE, 'the redactor has no --stage/--out — update this guard')
+  for (const step of steps) {
+    if (step === redact || step === sessionsUpload) continue
+    const text = step.join('\n')
+    assert.ok(!text.includes(REDACT_OUT) && !text.includes(REDACT_STAGE), `a step other than the redactor and the sessions upload names its directories: ${step[0].trim()}`)
+  }
+})
+
+// Every upload path is on an allowlist: the four report files, and the
+// redactor's upload directory. A glob added anywhere (a raw stream, a
+// `${{ runner.temp }}/*.jsonl`) fails here.
+const REPORT_FILES = ['evals-report.json', 'evals-report.json.summary.md', 'evals-report.json.summary.txt', 'evals-report.json.sessions.json']
+
+test('every upload path is on the allowlist, and none names the raw claude-sessions streams', () => {
   assert.ok(uploadSteps.length >= 2, 'expected the report and sessions uploads — update this guard')
+  const allowed = new Set([...REPORT_FILES, `\${{ runner.temp }}/${REDACT_OUT}`])
   for (const step of uploadSteps) {
-    for (const p of uploadPaths(step)) assert.ok(!/claude-sessions/.test(p), `an upload path names the raw session streams: ${p}`)
+    for (const p of uploadPaths(step)) {
+      assert.ok(!/claude-sessions/.test(p), `an upload path names the raw session streams: ${p}`)
+      assert.ok(allowed.has(p), `an upload path is not on the allowlist: ${p}`)
+    }
+  }
+})
+
+// Every way a step can reach a secret: `secrets.NAME` and `secrets['NAME']`
+// (GitHub contexts and secret names are case-insensitive, so matched that
+// way and compared uppercased). A whole-object
+// reference (`toJSON(secrets)`, `${{ secrets }}`) is refused outright: it
+// would hand a step every secret, past the redactor's inventory.
+const SECRET_REF = /\bsecrets\s*(?:\.\s*([A-Za-z0-9_]+)|\[\s*['"]([A-Za-z0-9_]+)['"]\s*\])/gi
+const secretRefs = (text) => [...text.matchAll(SECRET_REF)].map((m) => (m[1] ?? m[2]).toUpperCase())
+
+test('no step references the secrets object as a whole', () => {
+  for (const line of live) {
+    for (const expr of line.matchAll(/\$\{\{([\s\S]*?)\}\}/g)) {
+      assert.ok(!/\bsecrets\b(?!\s*[.[])/i.test(expr[1]), `a whole-object secrets reference: ${line.trim()}`)
+    }
   }
 })
 
 test('every secret the workflow references is passed to the redactor, by name', () => {
   assert.ok(redact, 'no redact step — update this guard')
-  const referenced = [...new Set([...live.join('\n').matchAll(/secrets\.([A-Z0-9_]+)/g)].map((m) => m[1]))].sort()
-  const required = listFlag('required')
-  const optional = listFlag('optional')
+  const referenced = [...new Set(secretRefs(live.join('\n')))].sort()
+  const required = listFlag('required').map((n) => n.toUpperCase())
+  const optional = listFlag('optional').map((n) => n.toUpperCase())
   assert.ok(required.length > 0, 'the redactor gets no --required secret names')
   for (const name of referenced) {
     assert.ok(required.includes(name) || optional.includes(name), `secrets.${name} is referenced but not passed to the redactor (--required or --optional)`)
     assert.ok(
-      redact.some((line) => new RegExp(`^\\s+${name}: \\$\\{\\{ secrets\\.${name} \\}\\}\\s*$`).test(line)),
+      redact.some((line) => new RegExp(`^\\s+${name}: \\$\\{\\{ secrets\\.${name} \\}\\}\\s*$`, 'i').test(line)),
       `the redact step env does not set ${name} from secrets.${name}`,
     )
   }
   // Optional is only for a `vars.X || secrets.X` fallback: a secret the job
   // reads directly must be REQUIRED, so an empty one refuses.
-  const direct = referenced.filter((name) => live.some((line) => line.includes(`secrets.${name}`) && !line.includes(`vars.${name} || secrets.${name}`) && !redact.includes(line)))
+  const direct = new Set(
+    live
+      .filter((line) => !redact.includes(line))
+      .flatMap((line) => {
+        const fallbacks = [...line.matchAll(/vars\.([A-Za-z0-9_]+)\s*\|\|\s*secrets\.([A-Za-z0-9_]+)/gi)].filter((m) => m[1].toUpperCase() === m[2].toUpperCase()).map((m) => m[2].toUpperCase())
+        return secretRefs(line).filter((name) => !fallbacks.includes(name))
+      }),
+  )
   for (const name of direct) assert.ok(required.includes(name), `secrets.${name} is read directly, so it must be --required, not --optional`)
   for (const name of ['CLAUDE_CODE_OAUTH_TOKEN', 'AGENT_EVALS_API_KEY', 'AGENT_EVALS_DELEGATE_KEY', 'QA_RPC_URL_BASE_SEPOLIA']) {
     assert.ok(required.includes(name), `${name} must be a required redactor secret`)
   }
+})
+
+test('the checkout does not persist the git token', () => {
+  const checkout = steps.find((s) => s.some((line) => /uses: actions\/checkout@/.test(line)))
+  assert.ok(checkout, 'no actions/checkout step — update this guard')
+  assert.equal(fieldOf(checkout, 'persist-credentials'), 'false')
 })
 
 test('the evals job keeps environment: agent-evals', () => {

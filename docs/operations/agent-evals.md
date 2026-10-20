@@ -346,9 +346,10 @@ lane's eval-agent keys are secrets of the protected **`agent-evals` GitHub
 environment** (owner = required reviewer) — NEVER repository secrets, NEVER
 in code or fixtures. The one exception to "environment only" is the observer
 RPC URL, `QA_RPC_URL_BASE_SEPOLIA`, a **repository** secret shared with
-`qa-dev.yml` and `qa-balances.yml`. No secret goes into an artifact: the only
-artifact built from the session streams is the redacted, scanned copy (see
-*The session transcripts artifact* below). Every job in `.github/workflows/agent-evals.yml`
+`qa-dev.yml` and `qa-balances.yml`. The only artifact built from the session
+streams is the redacted copy, and it uploads only when its scan finds none of
+the loaded secrets in the forms the redactor knows (see *The session
+transcripts artifact* below, including what it cannot rule out). Every job in `.github/workflows/agent-evals.yml`
 declares that environment, so each run waits
 for the owner's approval before any secret reaches a runner. The env
 inventory:
@@ -415,30 +416,42 @@ packages/qa-agent`) and uploads the result as
   which are kept). The step prints how many secrets it loaded, by name.
 - It redacts into a staging directory, prints a per-class count of what it
   found in the raw input (numbers only, the positive control), then rescans
-  the staged copy with an independent detector for every class. Only a clean
-  scan moves the files to the upload directory and sets `clean=true`, and the
-  upload step is gated on `steps.redact.outputs.clean == 'true'`.
+  the staged copy with a separate detector for every class. The scanner shares
+  no code path with the redaction rules: it builds its exact-value detectors
+  from the raw secret values itself (a lowercased substring search over the
+  decoded strings and their JSON-escaped forms, its own URL splitter, and a
+  base64 decode of every base64-looking run), and it treats ANY nested
+  `result` as a merchant body, which is broader than the redactor's
+  predicate. A needle built wrong or a rule that stops redacting is therefore
+  a scan hit. Only a clean scan moves the files to the upload directory and
+  sets `clean=true`, and the upload step is gated on
+  `steps.redact.outputs.clean == 'true'`, which is the step right after it.
+  No other step names the staging or upload directory, and every upload path
+  is on a fixed allowlist (the guard checks all three).
+- The checkout runs with `persist-credentials: false`: no git token is left in
+  `.git/config`, and nothing in the job talks to the remote after checkout.
 - A scan hit means the redactor is wrong: nothing moves, the step prints
   `::error::` with each class and its count (never a value), and the job
   fails. The report artifact has already uploaded.
 - A line that fails `JSON.parse` (a stream cut off by a timeout's SIGKILL)
-  takes the string rules; it is never copied raw.
+  has its `\uXXXX` escapes decoded, then takes the string rules; it is never
+  copied raw.
 
 Each redaction replaces the whole value, prefix included, with
 `[REDACTED:<class>]`:
 
 | Class | What goes |
 |---|---|
-| `secret-exact` | each loaded secret value, raw and JSON-escaped; the delegate key case-insensitively, with and without `0x` (it has a tx hash's shape, so only its exact value goes) |
-| `rpc-key` | the key-bearing segments of a URL-shaped secret (path segments and query values of 12+ characters, the `secretSegments` rule); the host stays, so the URL keeps its shape |
+| `secret-exact` | each loaded secret value, raw and JSON-escaped, plus its base64 and base64url renderings at every byte alignment, and the body of an `sk_agent_` / `sk-ant-` key without its prefix; the delegate key case-insensitively, with and without `0x` (it has a tx hash's shape, so only its exact value goes); a REQUIRED URL secret with no key-bearing segment, whole |
+| `rpc-key` | the key-bearing parts of a URL-shaped secret: path segments, query keys and values, and the fragment, of 12+ characters and without a colon (the `secretSegments` rule), plus the basic-auth password (and a 12+ username). Public network slugs (`base-sepolia` and the like) are skipped. The host stays, so the URL keeps its shape |
 | `agent-key` | any `sk_agent_…` key, this agent's or another's |
 | `anthropic-key` | any `sk-ant-…` value |
-| `auth-header` | `Authorization` values and `Bearer …` anywhere; header names case-insensitive |
+| `auth-header` | `Authorization` values and `Bearer …` anywhere. Key names everywhere are compared lowercased with `_` and `-` removed, so `paymentHeader`, `PAYMENT-SIGNATURE` and `delegationSignature` all match |
 | `payment-header` | `payment_header`, `PAYMENT-SIGNATURE`, `X-PAYMENT` values |
 | `siwx-header` | `sign_in_with_x_header`, `SIGN-IN-WITH-X` values |
-| `signature` | `signature` (and `*_signature`) string values, and any `0x` + 130-hex (65-byte) signature anywhere |
+| `signature` | string values of any key ending in `signature`, and any `0x` + 130-hex (65-byte) signature anywhere |
 | `b64-json` | `eyJ…` base64-JSON blobs (x402 headers, JWTs) |
-| `merchant-body` | the merchant's paid response: every string and number inside the `result` of a paid-completion envelope (the object that carries `payment_id`), and any `merchant_body` value. Keys, nesting, booleans and MCP block `type`s stay |
+| `merchant-body` | the merchant's paid response: every string and number inside any `result` in a tool result of `haven_complete_mcp_tool` / `haven_settle_mcp_tool` (keyed off the `tool_use` id, because the complete tool's `data` carries no `payment_id`), and inside any `result` beside `payment_id` or `settlement_tx_hash`; any `merchant_body` value; and the body a refusal echoes after `Merchant response:`. Keys, nesting, booleans and MCP block `type`s stay |
 
 **Reading a transcript.** Download it with `gh run download <run_id> -n
 agent-evals-sessions-<run_id>` (a signed-in account; the artifact list itself
@@ -449,8 +462,17 @@ envelope, re-serialized after redaction. Kept on purpose: tool names, the
 `payment_id`, idempotency keys, addresses, tx hashes, amounts, the agent's
 text and the variable URLs (hosted MCP, backend, merchants). A marker says
 which class removed a value. A line that was cut off mid-way stays cut off;
-when it held a paid-completion envelope, everything from the merchant
-`result` to the end of the line is one `merchant-body` marker.
+everything from its first nested `result`, `merchant_body` or
+`Merchant response:` to the end of the line is one `merchant-body` marker.
+
+**What the redaction cannot rule out.** It removes the loaded secrets in the
+forms above and the pattern classes; it cannot prove a secret is absent in a
+form it does not know: percent-encoded or hex-encoded, split across lines or
+strings, reversed or otherwise transformed, or a mixed-case rendering of the
+delegate key inside base64. The agent under test cannot produce such forms on
+its own (it has no Bash, file or web tool, only the two Haven servers), so
+they could only come from a server's own output. The agent's own text is kept
+as it is, so it can restate a merchant's paid content in its own words.
 
 **What the report does show for a failure.** The job summary lists every
 failed trial with a **tool trace**: the session's tool calls in order, as bare

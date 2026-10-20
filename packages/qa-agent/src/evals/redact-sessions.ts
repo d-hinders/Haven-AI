@@ -17,10 +17,15 @@
  *     envelope inside a `tool_result` text block, is parsed, redacted and
  *     re-serialized in place); a line that does NOT parse (a stream truncated
  *     by SIGKILL) goes through the string rules. No line is ever copied raw.
- *  3. SCAN the staged output with a SEPARATE set of detectors, one per rule
- *     class (exact values and every pattern class, not only the exact
- *     values). The detectors are independent code from the redaction rules,
- *     so a rule that stops redacting is caught by its detector.
+ *  3. SCAN the staged output with a SEPARATE detector per rule class. The
+ *     scanner shares no code path with the redactor's rules: it builds its
+ *     exact-value detectors from the raw secret values itself (a lowercased
+ *     substring search over decoded strings and their JSON-escaped forms, its
+ *     own URL splitter, a base64 DECODE of every base64-looking run), and it
+ *     finds a merchant body with a different, broader predicate (any nested
+ *     `result`) than the redactor's (the paid tool's results, or a `result`
+ *     beside `payment_id` / `settlement_tx_hash`). A rule that stops
+ *     redacting, or a needle built wrong, is caught by the scan.
  *  4. MOVE to the upload directory only on a clean scan. Any hit moves
  *     nothing, names each class and its count (never a value), and fails.
  *
@@ -72,6 +77,22 @@ function escapeRe(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
+/** The paid MCP tools whose results carry the merchant's paid body. */
+const PAID_TOOL = /(?:^|__)haven_(?:complete|settle)_mcp_tool$/
+
+/**
+ * Decode `\uXXXX` escapes (at any escape level) that stand for a printable
+ * character other than a quote or a backslash, so an escaped `sk_agent_`
+ * on a line that cannot be parsed is seen as `sk_agent_`. Structure
+ * characters stay escaped.
+ */
+function decodeUnicodeEscapes(text: string): string {
+  return text.replace(/\\{1,8}u([0-9a-fA-F]{4})/g, (whole, hex: string) => {
+    const code = Number.parseInt(hex, 16)
+    return code >= 0x20 && code < 0x7f && code !== 0x22 && code !== 0x5c ? String.fromCharCode(code) : whole
+  })
+}
+
 // ── Secrets ────────────────────────────────────────────────────────────────
 
 /** One string the transcripts must not carry, as a global regex. */
@@ -80,17 +101,43 @@ interface Needle {
   re: RegExp
 }
 
+/** A loaded secret as the environment gave it (trimmed). The scanner reads only these. */
+export interface RawSecret {
+  name: string
+  value: string
+  required: boolean
+}
+
 export interface LoadedSecrets {
   /** Names whose values were loaded (required plus the optional ones set). */
   loaded: string[]
   /** Optional names that were empty, so nothing is redacted for them. */
   optionalUnset: string[]
-  /** URL-shaped secrets with no key-bearing segment: kept whole, by design. */
+  /** OPTIONAL URL-shaped secrets with no key-bearing segment: kept whole, with a warning. */
   urlsWithoutKey: string[]
+  /** The redactor's needles. */
   needles: Needle[]
+  /** The values themselves, for the scanner's own detectors. */
+  raw: RawSecret[]
 }
 
 export type LoadSecretsResult = { ok: true; secrets: LoadedSecrets } | { ok: false; missing: string[] }
+
+/**
+ * Network slugs that pass the 12+ character rule but are public, never a key:
+ * redacting them would blank the chain name out of every RPC error #4138 reads.
+ */
+const NETWORK_SLUGS = new Set([
+  'base-sepolia',
+  'base_sepolia',
+  'base-mainnet',
+  'base_mainnet',
+  'polygon-amoy',
+  'optimism-sepolia',
+  'arbitrum-sepolia',
+  'ethereum-sepolia',
+  'eth-sepolia-testnet',
+])
 
 /**
  * The key-like pieces of an endpoint URL: path segments, query keys and
@@ -98,8 +145,8 @@ export type LoadSecretsResult = { ok: true; secrets: LoadedSecrets } | { ok: fal
  * rule as `secretSegments` in `packages/backend/src/infra/chain/rpc-transport.ts`
  * (#3371, #3391), which `scrubTransportErrorSecrets` uses: never the host, so
  * the URL keeps its shape. qa-agent cannot import the backend, so this is a
- * copy of the rule, plus the basic-auth password, which that rule leaves to
- * its callers.
+ * copy of the rule, plus the basic-auth userinfo (which that rule leaves to
+ * its callers), minus the public network slugs above.
  */
 export function urlKeySegments(url: string): string[] {
   let parsed: URL
@@ -112,7 +159,7 @@ export function urlKeySegments(url: string): string[] {
     ...parsed.pathname.split('/'),
     ...parsed.search.replace(/^\?/, '').split(/[&=]/),
     parsed.hash.slice(1),
-  ].filter((part) => part.length >= 12 && !part.includes(':'))
+  ].filter((part) => part.length >= 12 && !part.includes(':') && !NETWORK_SLUGS.has(part.toLowerCase()))
   if (parsed.password) parts.push(parsed.password)
   if (parsed.username.length >= 12) parts.push(parsed.username)
   return [...new Set(parts)]
@@ -134,22 +181,63 @@ function escapedForms(s: string): string[] {
   return [...new Set([s, once, twice])]
 }
 
-function needlesFor(value: string): Needle[] {
+/**
+ * The base64 and base64url renderings of `value` at each of the three byte
+ * alignments it can have inside a longer blob: only the characters that
+ * encode the value's own bytes, so the blob around it does not matter.
+ */
+function base64Forms(value: string): string[] {
+  const bytes = Buffer.from(value, 'utf8')
+  const forms: string[] = []
+  for (let k = 0; k < 3; k++) {
+    const encoded = Buffer.concat([Buffer.alloc(k), bytes]).toString('base64').replace(/=+$/, '')
+    const start = Math.ceil((8 * k) / 6)
+    const end = Math.floor((8 * (k + bytes.length)) / 6)
+    const core = encoded.slice(start, end)
+    if (core.length >= 16) forms.push(core, core.replace(/\+/g, '-').replace(/\//g, '_'))
+  }
+  return [...new Set(forms)]
+}
+
+const PREFIXED_KEY = /^(?:sk_agent_|sk-ant-)(.+)$/
+
+function exactNeedles(forms: string[]): Needle[] {
+  return [...new Set(forms)]
+    .filter((f) => f.length > 0)
+    .sort((a, b) => b.length - a.length)
+    .flatMap((f) => escapedForms(f).map((form) => ({ cls: 'secret-exact' as const, re: new RegExp(escapeRe(form), 'g') })))
+}
+
+function needlesFor(value: string, required: boolean): Needle[] {
   // A 32-byte hex key (the delegate key) has the shape of a tx hash, which
   // the transcripts must keep: only ITS exact value goes, case-insensitively,
   // with and without `0x`.
   const hex = value.match(/^(?:0x)?([0-9a-fA-F]{64})$/)
-  if (hex) return [{ cls: 'secret-exact', re: new RegExp(`(?:0x)?${hex[1]}`, 'gi') }]
+  if (hex) {
+    const body = hex[1]
+    return [
+      { cls: 'secret-exact', re: new RegExp(`(?:0x)?${body}`, 'gi') },
+      ...exactNeedles([`0x${body.toLowerCase()}`, body.toLowerCase(), body.toUpperCase()].flatMap(base64Forms)),
+    ]
+  }
   // A URL-shaped secret (the RPC URL, or a fallback URL set as a secret)
   // keeps its shape: only its key-bearing segments go, and the host never
-  // does. A URL with no such segment carries no key under that rule, so
-  // nothing is removed (the caller warns, by name).
+  // does. A REQUIRED URL with no such segment is redacted whole (the key may
+  // sit where the rule cannot see it); an optional one is kept, with a warning.
   if (isHttpUrl(value)) {
-    return urlKeySegments(value)
-      .sort((a, b) => b.length - a.length)
-      .flatMap((seg) => escapedForms(seg).map((form) => ({ cls: 'rpc-key' as const, re: new RegExp(escapeRe(form), 'g') })))
+    const segments = urlKeySegments(value)
+    if (segments.length > 0) {
+      return segments
+        .sort((a, b) => b.length - a.length)
+        .flatMap((seg) => [seg, ...base64Forms(seg)])
+        .flatMap((seg) => escapedForms(seg).map((form) => ({ cls: 'rpc-key' as const, re: new RegExp(escapeRe(form), 'g') })))
+    }
+    return required ? exactNeedles([value, ...base64Forms(value)]) : []
   }
-  return escapedForms(value).map((form) => ({ cls: 'secret-exact' as const, re: new RegExp(escapeRe(form), 'g') }))
+  // The value, its base64 forms, and (for an `sk_agent_` / `sk-ant-` key)
+  // its body without the prefix, so a stripped prefix does not save it.
+  const body = value.match(PREFIXED_KEY)?.[1]
+  return exactNeedles([value, ...base64Forms(value), ...(body && body.length >= 12 ? [body, ...base64Forms(body)] : [])])
 }
 
 /**
@@ -166,17 +254,20 @@ export function loadSecrets(
   if (required.length === 0) return { ok: false, missing: ['(no required secret names were given)'] }
   if (missing.length > 0) return { ok: false, missing }
   const optionalSet = optional.filter((name) => valueOf(name) !== '')
-  const loaded = [...required, ...optionalSet]
-  const values = [...new Set(loaded.map(valueOf))]
+  const raw: RawSecret[] = [
+    ...required.map((name) => ({ name, value: valueOf(name), required: true })),
+    ...optionalSet.map((name) => ({ name, value: valueOf(name), required: false })),
+  ]
   // Longest first, so a secret that contains another is removed whole.
-  values.sort((a, b) => b.length - a.length)
+  const ordered = [...raw].sort((a, b) => b.value.length - a.value.length)
   return {
     ok: true,
     secrets: {
-      loaded,
+      loaded: raw.map((s) => s.name),
       optionalUnset: optional.filter((name) => valueOf(name) === ''),
-      urlsWithoutKey: loaded.filter((name) => isHttpUrl(valueOf(name)) && urlKeySegments(valueOf(name)).length === 0),
-      needles: values.flatMap(needlesFor),
+      urlsWithoutKey: raw.filter((s) => !s.required && isHttpUrl(s.value) && urlKeySegments(s.value).length === 0).map((s) => s.name),
+      needles: ordered.flatMap((s) => needlesFor(s.value, s.required)),
+      raw,
     },
   }
 }
@@ -187,43 +278,52 @@ export function loadSecrets(
 // rules (a pattern anywhere in any string). In a parsed line the key rules
 // run first on each field; every remaining string, and every key, gets the
 // string rules. An unparseable line gets only the string rules, which include
-// text forms of the key rules.
+// text forms of the key rules. Key names are compared lowercased with `_` and
+// `-` removed, so `paymentHeader`, `PAYMENT-SIGNATURE` and `x_payment` match.
 
-const PAYMENT_KEY = /^(?:payment[_-]header|payment[_-]signature|x[_-]payment)$/i
-const SIWX_KEY = /^(?:sign[_-]in[_-]with[_-]x(?:[_-]header)?)$/i
-const AUTH_KEY = /^(?:authorization|proxy[_-]authorization)$/i
-const SIGNATURE_KEY = /^(?:.*[_-])?signature$/i
-const MERCHANT_BODY_KEY = /^merchant[_-]body$/i
+const normKey = (key: string) => key.toLowerCase().replace(/[_-]/g, '')
+const PAYMENT_KEYS = new Set(['paymentheader', 'paymentsignature', 'xpayment'])
+const SIWX_KEYS = new Set(['signinwithx', 'signinwithxheader'])
+const AUTH_KEYS = new Set(['authorization', 'proxyauthorization'])
 
 /** MCP content-block discriminators kept inside a stripped merchant body. */
 const MCP_CONTENT_TYPES = new Set(['text', 'image', 'audio', 'resource', 'resource_link'])
 
-/** Which class, if any, a field's NAME assigns to its value. */
+/** Which class, if any, a field's NAME assigns to its (string) value. */
 function keyClass(key: string, value: unknown): RedactionClass | undefined {
   if (value === null || value === undefined || isMarker(value)) return undefined
-  const isString = typeof value === 'string'
-  if (PAYMENT_KEY.test(key) && isString) return 'payment-header'
-  if (SIWX_KEY.test(key) && isString) return 'siwx-header'
-  if (AUTH_KEY.test(key) && isString) return 'auth-header'
-  if (SIGNATURE_KEY.test(key) && isString) return 'signature'
-  if (MERCHANT_BODY_KEY.test(key)) return 'merchant-body'
+  const k = normKey(key)
+  if (k === 'merchantbody') return 'merchant-body'
+  if (typeof value !== 'string') return undefined
+  if (PAYMENT_KEYS.has(k)) return 'payment-header'
+  if (SIWX_KEYS.has(k)) return 'siwx-header'
+  if (AUTH_KEYS.has(k)) return 'auth-header'
+  if (k.endsWith('signature')) return 'signature'
   return undefined
 }
 
 // Text forms of the key rules, for unparseable lines and free text: the key
-// (quoted or not, at any JSON escape level), a `:` or `=`, then the value up
-// to the next delimiter. A value that is already a marker is left alone.
+// (quoted or not, at up to 8 JSON escape levels), a `:` or `=`, then the
+// value up to the next delimiter. A value that is already a marker is left
+// alone. Every repetition is bounded, so a hostile line stays linear.
+const Q = `(?:\\\\{0,8}["'])?`
+const VALUE = `[^\\s"'\\\\,;}\\]]+`
+const textKeyRule = (cls: RedactionClass, key: string, valuePrefix = '') => ({
+  cls,
+  re: new RegExp(`(${key}${Q}\\s{0,8}[:=]\\s{0,8}${Q})(?!\\[REDACTED:)${valuePrefix}${VALUE}`, 'gi'),
+})
 const TEXT_KEY_RULES: Array<{ cls: RedactionClass; re: RegExp }> = [
-  { cls: 'payment-header', re: /((?:\\*["'])?\b(?:payment[_-]header|payment[_-]signature|x[_-]payment)(?:\\*["'])?\s*[:=]\s*(?:\\*["'])?)(?!\[REDACTED:)[^\s"'\\,;}\]]+/gi },
-  { cls: 'siwx-header', re: /((?:\\*["'])?\b(?:sign[_-]in[_-]with[_-]x(?:[_-]header)?)(?:\\*["'])?\s*[:=]\s*(?:\\*["'])?)(?!\[REDACTED:)[^\s"'\\,;}\]]+/gi },
-  { cls: 'auth-header', re: /((?:\\*["'])?\b(?:proxy[_-])?authorization(?:\\*["'])?\s*[:=]\s*(?:\\*["'])?)(?!\[REDACTED:)(?![A-Za-z]+\s+\[REDACTED:)(?:[A-Za-z][A-Za-z0-9-]*\s+)?[^\s"'\\,;}\]]+/gi },
-  { cls: 'signature', re: /((?:\\*["'])?\b(?:[A-Za-z0-9]+[_-])*signature(?:\\*["'])?\s*[:=]\s*(?:\\*["'])?)(?!\[REDACTED:)(?!null\b)[^\s"'\\,;}\]]+/gi },
+  textKeyRule('payment-header', '\\b(?:payment[_-]?header|payment[_-]?signature|x[_-]?payment)'),
+  textKeyRule('siwx-header', '\\bsign[_-]?in[_-]?with[_-]?x(?:[_-]?header)?'),
+  textKeyRule('auth-header', '\\b(?:proxy[_-]?)?authorization', '(?![A-Za-z]{1,32}\\s{1,8}\\[REDACTED:)(?:[A-Za-z][A-Za-z0-9-]{0,31}\\s{1,8})?'),
+  // No prefix before `signature`: any key that ENDS in it, matched linearly.
+  textKeyRule('signature', 'signature', '(?!null\\b)'),
 ]
 
 /** The pattern rules, in application order. */
 const PATTERN_RULES: Array<{ cls: RedactionClass; re: RegExp }> = [
   // `Bearer <token>` anywhere, the scheme word included.
-  { cls: 'auth-header', re: /\bBearer\s+[A-Za-z0-9._~+/=-]+/gi },
+  { cls: 'auth-header', re: /\bBearer\s{1,8}[A-Za-z0-9._~+/=-]+/gi },
   { cls: 'anthropic-key', re: /sk-ant-[A-Za-z0-9_-]*/g },
   { cls: 'agent-key', re: /sk_agent_[A-Za-z0-9_-]*/g },
   // A base64(url) blob of JSON (x402 headers, JWTs), with any `.`-joined
@@ -232,6 +332,11 @@ const PATTERN_RULES: Array<{ cls: RedactionClass; re: RegExp }> = [
   // A 65-byte signature (`0x` + 130 hex) or anything longer.
   { cls: 'signature', re: /0x[0-9a-fA-F]{130,}/g },
 ]
+
+/** A merchant body echoed in a refusal message (`paid-mcp-completion.ts`, MERCHANT_REJECTED_AFTER_FUNDING). */
+const MERCHANT_RESPONSE_LABEL = /Merchant response:\s{0,8}/i
+/** A `result` key at up to 8 escape levels (group 1: the backslashes). */
+const RESULT_KEY = /(\\{0,8})"result\1"\s{0,8}:\s{0,8}/g
 
 export interface RedactOptions {
   secrets: LoadedSecrets
@@ -246,6 +351,8 @@ export interface RedactOptions {
 class Redactor {
   readonly counts = zeroCounts()
   private readonly on: (cls: RedactionClass) => boolean
+  /** `tool_use.id` → tool name, from the assistant lines seen so far in this file. */
+  private readonly toolNames = new Map<string, string>()
 
   constructor(private readonly opts: RedactOptions) {
     this.on = (cls) => !opts.disabled?.has(cls)
@@ -260,34 +367,48 @@ class Redactor {
   }
 
   /** The string rules: secrets, then the text key rules, then the patterns. */
-  strings(text: string): string {
+  strings(text: string, resultLine = false): string {
     let out = text
     for (const needle of this.opts.secrets.needles) out = this.replace(out, needle.cls, needle.re)
     out = this.replace(out, 'auth-header', PATTERN_RULES[0].re)
-    out = this.merchantBodyText(out)
+    out = this.merchantBodyText(out, resultLine)
     for (const rule of TEXT_KEY_RULES) out = this.replace(out, rule.cls, rule.re, true)
     for (const rule of PATTERN_RULES.slice(1)) out = this.replace(out, rule.cls, rule.re)
     return out
   }
 
   /**
-   * An unparseable line that carries a paid-completion envelope (a
-   * `payment_id` key) cannot be walked, so from its merchant `result` (or a
-   * `merchant_body`) value to the end of the line is replaced: a truncated
-   * line loses its tail rather than leak the paid body.
+   * Text that cannot be walked: from the first merchant-body carrier to the
+   * end of the text becomes one marker, so a cut-off line loses its tail
+   * rather than leak a paid body. The carriers are a `result` key (except the
+   * stream's own top-level `result` on a `{"type":"result"}` line), a
+   * `merchant_body` key, and a refusal's `Merchant response:` echo.
    */
-  private merchantBodyText(text: string): string {
+  private merchantBodyText(text: string, resultLine: boolean): string {
     if (!this.on('merchant-body')) return text
-    const hasPaymentId = /(\\*)"payment_id\1"\s*:/.test(text)
-    const re = hasPaymentId ? /(\\*)"(result|merchant[_-]body)\1"\s*:\s*/i : /(\\*)"(merchant[_-]body)\1"\s*:\s*/i
-    const m = re.exec(text)
-    if (!m) return text
-    const start = m.index + m[0].length
-    const rest = text.slice(start)
-    const q = m[1]
-    if (rest.startsWith(`${q}"${marker('merchant-body')}`)) return text
+    const cuts: Array<{ at: number; tail: string }> = []
+    for (const m of text.matchAll(RESULT_KEY)) {
+      if (resultLine && m[1] === '') continue
+      const q = m[1]
+      const at = m.index + m[0].length
+      if (!text.startsWith(`${q}"${marker('merchant-body')}`, at)) cuts.push({ at, tail: `${q}"${marker('merchant-body')}${q}"` })
+      break
+    }
+    const body = /(\\{0,8})"merchant[_-]?body\1"\s{0,8}:\s{0,8}/i.exec(text)
+    if (body) {
+      const q = body[1]
+      const at = body.index + body[0].length
+      if (!text.startsWith(`${q}"${marker('merchant-body')}`, at)) cuts.push({ at, tail: `${q}"${marker('merchant-body')}${q}"` })
+    }
+    const label = MERCHANT_RESPONSE_LABEL.exec(text)
+    if (label) {
+      const at = label.index + label[0].length
+      if (!text.startsWith(marker('merchant-body'), at)) cuts.push({ at, tail: marker('merchant-body') })
+    }
+    if (cuts.length === 0) return text
+    const first = cuts.reduce((a, b) => (b.at < a.at ? b : a))
     this.counts['merchant-body'] += 1
-    return `${text.slice(0, start)}${q}"${marker('merchant-body')}${q}"`
+    return `${text.slice(0, first.at)}${first.tail}`
   }
 
   /** Strip a merchant's paid body: every string/number leaf goes; keys, nesting and flags stay. */
@@ -309,16 +430,20 @@ class Redactor {
     return value
   }
 
-  /** Walk a parsed value structurally. */
-  value(value: unknown): unknown {
-    if (typeof value === 'string') return this.stringValue(value)
-    if (Array.isArray(value)) return value.map((v) => this.value(v))
+  /**
+   * Walk a parsed value structurally. `paid`: this value sits inside the
+   * result of `haven_complete_mcp_tool` / `haven_settle_mcp_tool`, so every
+   * `result` in it is the merchant's paid body (`paid-mcp-completion.ts`:
+   * `data.result` on both tools, with or without `payment_id`).
+   */
+  value(value: unknown, paid = false): unknown {
+    if (typeof value === 'string') return this.stringValue(value, paid)
+    if (Array.isArray(value)) return value.map((v) => this.value(v, paid))
     if (value === null || typeof value !== 'object') return value
     const obj = value as Record<string, unknown>
-    // A hosted paid-completion envelope (`haven_complete_mcp_tool` /
-    // `haven_settle_mcp_tool`, `paid-mcp-completion.ts`) carries the
-    // merchant's paid result as `result` next to `payment_id`.
-    const paidEnvelope = Object.hasOwn(obj, 'payment_id') && Object.hasOwn(obj, 'result')
+    // Outside the tool keying: a `result` beside `payment_id` or
+    // `settlement_tx_hash` is a paid-completion envelope all the same.
+    const paidEnvelope = Object.hasOwn(obj, 'result') && (paid || Object.hasOwn(obj, 'payment_id') || Object.hasOwn(obj, 'settlement_tx_hash'))
     const out: Record<string, unknown> = {}
     for (const [key, member] of Object.entries(obj)) {
       const safeKey = this.strings(key)
@@ -332,19 +457,31 @@ class Redactor {
         out[safeKey] = marker(cls)
         continue
       }
-      out[safeKey] = this.value(member)
+      out[safeKey] = this.value(member, paid)
     }
     return out
   }
 
   /** A string leaf: nested JSON is parsed and walked; anything else takes the string rules. */
-  private stringValue(text: string): string {
+  private stringValue(text: string, paid: boolean): string {
     const nested = parseMaybeJson(text)
     if (nested !== undefined && typeof nested === 'object' && nested !== null) {
       const indent = text.match(/\n( +)\S/)?.[1].length ?? 0
-      return JSON.stringify(this.value(nested), null, indent || undefined)
+      return JSON.stringify(this.value(nested, paid), null, indent || undefined)
     }
     return this.strings(text)
+  }
+
+  /** Remember which tool each `tool_use` id names; true when this line answers a paid tool. */
+  private trackTools(line: unknown): boolean {
+    const content = (line as { message?: { content?: unknown } })?.message?.content
+    if (!Array.isArray(content)) return false
+    let paid = false
+    for (const block of content as Array<Record<string, unknown>>) {
+      if (block?.type === 'tool_use' && typeof block.id === 'string' && typeof block.name === 'string') this.toolNames.set(block.id, block.name)
+      if (block?.type === 'tool_result' && typeof block.tool_use_id === 'string' && PAID_TOOL.test(this.toolNames.get(block.tool_use_id) ?? '')) paid = true
+    }
+    return paid
   }
 
   line(line: string): string {
@@ -354,9 +491,10 @@ class Redactor {
       parsed = JSON.parse(line)
     } catch {
       // Not JSON (a stream cut off by SIGKILL): string rules, never raw.
-      return this.strings(line)
+      return this.strings(decodeUnicodeEscapes(line), /^\{"type":"result"/.test(line))
     }
-    return JSON.stringify(this.value(parsed))
+    const paid = this.trackTools(parsed)
+    return JSON.stringify(this.value(parsed, paid))
   }
 }
 
@@ -372,44 +510,134 @@ export function redactSessionText(raw: string, opts: RedactOptions): { text: str
 
 // ── The scan ───────────────────────────────────────────────────────────────
 //
-// Deliberately NOT the redaction rules run again: an independent detector per
-// class, so a rule that stops redacting is caught by its detector (B2). The
-// detectors mirror the acceptance grep on #4137 and the key rules above.
+// NOT the redaction rules run again. Each class has its own detector, and the
+// exact-value classes are built here from the raw secret values with
+// different code from the redactor's needles, so a needle built wrong (a lost
+// `i` flag, a missed escape form) is still caught. The pattern detectors
+// mirror the acceptance grep on #4137.
 
+const D_Q = `\\\\{0,8}["']?`
+const detectKey = (cls: RedactionClass, key: string, extra = '') => ({
+  cls,
+  re: new RegExp(`${key}${D_Q}\\s{0,8}[:=]\\s{0,8}${D_Q}(?!\\[REDACTED:)${extra}[A-Za-z0-9{[]`, 'gi'),
+})
 const DETECT_TEXT: Array<{ cls: RedactionClass; re: RegExp }> = [
   { cls: 'agent-key', re: /sk_agent_/g },
   { cls: 'anthropic-key', re: /sk-ant-/g },
-  { cls: 'auth-header', re: /\bBearer\s+[A-Za-z0-9]/gi },
-  { cls: 'auth-header', re: /\bauthorization\\*["']?\s*[:=]\s*\\*["']?(?!\[REDACTED:)(?![A-Za-z]+\s+\[REDACTED:)[A-Za-z0-9]/gi },
-  { cls: 'payment-header', re: /\b(?:payment[_-]header|payment[_-]signature|x[_-]payment)\\*["']?\s*[:=]\s*\\*["']?(?!\[REDACTED:)[A-Za-z0-9]/gi },
-  { cls: 'siwx-header', re: /\bsign[_-]in[_-]with[_-]x(?:[_-]header)?\\*["']?\s*[:=]\s*\\*["']?(?!\[REDACTED:)[A-Za-z0-9]/gi },
+  { cls: 'auth-header', re: /\bBearer\s{1,8}[A-Za-z0-9]/gi },
+  detectKey('auth-header', '\\bauthorization', '(?![A-Za-z]{1,32}\\s{1,8}\\[REDACTED:)'),
+  detectKey('payment-header', '\\b(?:payment[_-]?header|payment[_-]?signature|x[_-]?payment)'),
+  detectKey('siwx-header', '\\bsign[_-]?in[_-]?with[_-]?x(?:[_-]?header)?'),
   { cls: 'signature', re: /0x[0-9a-fA-F]{130}/g },
-  { cls: 'signature', re: /\b(?:[A-Za-z0-9]+[_-])*signature\\*["']?\s*[:=]\s*\\*["']?(?!\[REDACTED:)(?!null\b)[A-Za-z0-9{[]/gi },
+  detectKey('signature', 'signature', '(?!null\\b)'),
   { cls: 'b64-json', re: /eyJ[A-Za-z0-9_-]{20,}/g },
-  { cls: 'merchant-body', re: /merchant[_-]body\\*"\s*:(?!\s*\\*"\[REDACTED:)(?!\s*null\b)/gi },
+  { cls: 'merchant-body', re: /merchant[_-]?body\\{0,8}"\s{0,8}:(?!\s{0,8}\\{0,8}"\[REDACTED:)(?!\s{0,8}null\b)/gi },
+  { cls: 'merchant-body', re: /Merchant response:(?!\s{0,8}\[REDACTED:merchant-body\])\s{0,8}\S/gi },
 ]
 
+/** The scanner's own exact-value probe, built from the raw values. */
+interface Probe {
+  cls: 'secret-exact' | 'rpc-key'
+  /** Lowercased strings, any of which is a hit. */
+  forms: string[]
+  /** Values to look for inside DECODED base64 runs (lowercased). */
+  decoded: string[]
+}
+
+/** The scanner's URL splitter: every 12+ token between URL delimiters that is not a host or a slug. */
+function scannerUrlTokens(url: string): string[] {
+  return url
+    .split(/[/?&=#@:]+/)
+    .filter((t) => t.length >= 12 && !t.includes('.'))
+    .filter((t) => !['base-sepolia', 'base_sepolia', 'base-mainnet', 'base_mainnet', 'polygon-amoy', 'optimism-sepolia', 'arbitrum-sepolia', 'ethereum-sepolia', 'eth-sepolia-testnet'].includes(t.toLowerCase()))
+}
+
+function escapeLevels(s: string): string[] {
+  const out = [s]
+  let cur = s
+  for (let i = 0; i < 2; i++) {
+    cur = JSON.stringify(cur).slice(1, -1)
+    out.push(cur)
+  }
+  return out
+}
+
+function buildProbes(raw: RawSecret[]): Probe[] {
+  const probes: Probe[] = []
+  for (const s of raw) {
+    const v = s.value
+    if (/^(0x)?[0-9a-f]{64}$/i.test(v)) {
+      const body = v.toLowerCase().replace(/^0x/, '')
+      probes.push({ cls: 'secret-exact', forms: [body], decoded: [body] })
+      continue
+    }
+    if (/^https?:\/\//i.test(v)) {
+      const tokens = scannerUrlTokens(v)
+      if (tokens.length > 0) {
+        probes.push({ cls: 'rpc-key', forms: tokens.flatMap(escapeLevels).map((t) => t.toLowerCase()), decoded: tokens.map((t) => t.toLowerCase()) })
+      } else if (s.required) {
+        probes.push({ cls: 'secret-exact', forms: escapeLevels(v).map((t) => t.toLowerCase()), decoded: [v.toLowerCase()] })
+      }
+      continue
+    }
+    const stripped = v.replace(/^sk_agent_|^sk-ant-/, '')
+    const values = stripped !== v && stripped.length >= 12 ? [v, stripped] : [v]
+    probes.push({ cls: 'secret-exact', forms: values.flatMap(escapeLevels).map((t) => t.toLowerCase()), decoded: values.map((t) => t.toLowerCase()) })
+  }
+  return probes
+}
+
+/** Every base64(url)-looking run of 16+ characters, decoded at each of the four character offsets. */
+function decodedRuns(text: string): string[] {
+  const out: string[] = []
+  for (const m of text.matchAll(/[A-Za-z0-9+/_-]{16,}/g)) {
+    const run = m[0].replace(/-/g, '+').replace(/_/g, '/')
+    for (let s = 0; s < 4; s++) {
+      // Node decodes a trailing partial group, so an unpadded tail keeps its bytes.
+      const part = run.slice(s)
+      if (part.length >= 16) out.push(Buffer.from(part, 'base64').toString('latin1').toLowerCase())
+    }
+  }
+  return out
+}
+
+/**
+ * The scanner's merchant-body predicate, deliberately broader than the
+ * redactor's: ANY `result` below a line's top level (only the stream's own
+ * `{"type":"result","result":…}` field is the agent's text). Haven tools
+ * emit `result` only on the two paid tools, so an unstripped one anywhere is
+ * a hit, whatever the tool keying or the sibling fields said.
+ */
 class Scanner {
   readonly counts = zeroCounts()
+  private readonly probes: Probe[]
 
-  constructor(private readonly secrets: LoadedSecrets) {}
+  constructor(secrets: LoadedSecrets) {
+    this.probes = buildProbes(secrets.raw)
+  }
 
   private hit(cls: RedactionClass, n = 1) {
     this.counts[cls] += n
   }
 
-  text(text: string) {
-    for (const needle of this.secrets.needles) {
-      const n = text.match(new RegExp(needle.re.source, needle.re.flags))?.length ?? 0
-      if (n) this.hit(needle.cls, n)
+  text(text: string, resultLine = false) {
+    const lower = text.toLowerCase()
+    const runs = decodedRuns(text)
+    for (const probe of this.probes) {
+      let n = 0
+      for (const form of probe.forms) if (form && lower.includes(form)) n += 1
+      for (const want of probe.decoded) if (want.length >= 12 && runs.some((r) => r.includes(want))) n += 1
+      if (n) this.hit(probe.cls, n)
     }
     for (const rule of DETECT_TEXT) {
       const n = text.match(rule.re)?.length ?? 0
       if (n) this.hit(rule.cls, n)
     }
-    if (/(\\*)"payment_id\1"\s*:/.test(text)) {
-      const n = text.match(/(\\*)"result\1"\s*:(?!\s*\\*"\[REDACTED:merchant-body\])/g)?.length ?? 0
-      if (n) this.hit('merchant-body', n)
+    for (const m of text.matchAll(/(\\{0,8})"result\1"\s{0,8}:/g)) {
+      if (resultLine && m[1] === '') continue
+      let at = m.index + m[0].length
+      for (let i = 0; i < 8 && /\s/.test(text[at] ?? ''); i++) at++
+      if (!text.startsWith(`${m[1]}"${marker('merchant-body')}`, at)) this.hit('merchant-body')
     }
   }
 
@@ -423,7 +651,7 @@ class Scanner {
     return 0
   }
 
-  value(value: unknown) {
+  value(value: unknown, top = false) {
     if (typeof value === 'string') {
       const nested = parseMaybeJson(value)
       if (nested !== undefined && typeof nested === 'object' && nested !== null) this.value(nested)
@@ -436,25 +664,24 @@ class Scanner {
     }
     if (value === null || typeof value !== 'object') return
     const obj = value as Record<string, unknown>
-    const paidEnvelope = Object.hasOwn(obj, 'payment_id') && Object.hasOwn(obj, 'result')
+    const agentResult = top && obj.type === 'result'
     for (const [key, member] of Object.entries(obj)) {
       this.text(key)
       if (member === null || member === undefined) continue
-      if (paidEnvelope && key === 'result') {
+      if (key === 'result' && !agentResult) {
         const n = this.bodyLeaks(member)
         if (n) this.hit('merchant-body', n)
-        // The keys inside still get every other detector.
-        this.value(member)
-        continue
       }
-      const unredacted = !isMarker(member)
-      if (unredacted && typeof member === 'string') {
-        if (/^(?:payment[_-]header|payment[_-]signature|x[_-]payment)$/i.test(key)) this.hit('payment-header')
-        else if (/^sign[_-]in[_-]with[_-]x(?:[_-]header)?$/i.test(key)) this.hit('siwx-header')
-        else if (/^(?:proxy[_-])?authorization$/i.test(key)) this.hit('auth-header')
+      const k = key.toLowerCase().split(/[-_]/).join('')
+      if (!isMarker(member)) {
+        if (k === 'merchantbody') this.hit('merchant-body')
+        if (typeof member === 'string') {
+          if (k === 'paymentheader' || k === 'paymentsignature' || k === 'xpayment') this.hit('payment-header')
+          else if (k === 'signinwithx' || k === 'signinwithxheader') this.hit('siwx-header')
+          else if (k === 'authorization' || k === 'proxyauthorization') this.hit('auth-header')
+          else if (k.endsWith('signature')) this.hit('signature')
+        }
       }
-      if (unredacted && typeof member === 'string' && /^(?:.*[_-])?signature$/i.test(key) && !/^payment[_-]signature$/i.test(key)) this.hit('signature')
-      if (unredacted && /^merchant[_-]body$/i.test(key)) this.hit('merchant-body')
       this.value(member)
     }
   }
@@ -465,10 +692,13 @@ class Scanner {
     try {
       parsed = JSON.parse(line)
     } catch {
-      this.text(line)
+      const resultLine = /^\{"type":"result"/.test(line)
+      this.text(line, resultLine)
+      const decoded = decodeUnicodeEscapes(line)
+      if (decoded !== line) this.text(decoded, resultLine)
       return
     }
-    this.value(parsed)
+    this.value(parsed, true)
   }
 }
 

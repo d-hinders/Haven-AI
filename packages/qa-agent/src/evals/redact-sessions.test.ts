@@ -63,6 +63,10 @@ const SURVIVORS = {
 
 // ── Canaries, one per class (foreign values unless the class is a loaded secret) ──
 
+const API_KEY_BODY = API_KEY.slice('sk_agent_'.length)
+const API_KEY_B64 = Buffer.from(API_KEY).toString('base64').replace(/=+$/, '')
+const API_KEY_B64_OFFSET1 = Buffer.from(`x${API_KEY}yz`).toString('base64') // the key at byte offset 1 of a longer blob
+const OAUTH_B64URL = Buffer.from(OAUTH).toString('base64url')
 const B64_PAYMENT = Buffer.from('payment-canary-synthetic-0123456789').toString('base64') // not eyJ: isolates the class
 const B64_SIWX = Buffer.from('siwx-canary-synthetic-0123456789').toString('base64')
 const B64_JSON = Buffer.from(JSON.stringify({ transaction: TX_HASH, synthetic: 'b64-canary' })).toString('base64')
@@ -79,8 +83,13 @@ interface Canary {
 
 const CANARIES: Record<RedactionClass, Canary> = {
   'secret-exact': {
-    needles: [DELEGATE_HEX, DELEGATE_HEX.toUpperCase()],
-    obj: { note: `key ${DELEGATE} and ${DELEGATE_HEX.toUpperCase()} again` },
+    needles: [DELEGATE_HEX, DELEGATE_HEX.toUpperCase(), API_KEY_BODY, API_KEY_B64],
+    obj: {
+      note: `key ${DELEGATE} and ${DELEGATE_HEX.toUpperCase()} again`,
+      // The prefix-stripped body and base64 renderings of loaded secrets.
+      stripped: `body ${API_KEY_BODY} only`,
+      encoded: `${API_KEY_B64} / ${API_KEY_B64_OFFSET1} / ${OAUTH_B64URL}`,
+    },
   },
   'rpc-key': { needles: [RPC_KEY], obj: { error: `HTTP request failed. URL: ${RPC} status 429` } },
   'agent-key': { needles: ['sk_agent_'], obj: { note: 'a foreign key sk_agent_FOREIGNsynthetic9876543210zyxw appeared' } },
@@ -400,4 +409,174 @@ describe('runRedaction', () => {
       for (const value of ALL_SECRET_VALUES) expect(f.logs.join('\n')).not.toContain(value)
     })
   }
+})
+
+// ── Review round 1 (#4137): complete-shape bodies, scan independence, hardening ──
+
+const PAID_TOOL_USE = (id: string, tool: string) =>
+  JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id, name: `mcp__haven-eval__${tool}`, input: { payment_id: PAYMENT_ID } }] } })
+const TOOL_RESULT = (id: string, data: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
+  JSON.stringify({
+    type: 'user',
+    message: { content: [{ type: 'tool_result', tool_use_id: id, is_error: false, content: [{ type: 'text', text: JSON.stringify(envelope(data), null, 2) }] }] },
+    ...extra,
+  })
+const MERCHANT_RESULT = { content: [{ type: 'text', text: 'MERCHANT-PAID-CANARY delivered' }], structuredContent: { code: 'MERCHANT-PAID-CANARY-code' } }
+
+/** `haven_complete_mcp_tool`'s two arms (`paid-mcp-completion.ts`): no top-level payment_id on either. */
+const COMPLETE_HAPPY = { status: 200, ok: true, result: MERCHANT_RESULT, settlement_tx_hash: null }
+const COMPLETE_EVIDENCE = {
+  status: 200,
+  ok: true,
+  result: MERCHANT_RESULT,
+  settlement_tx_hash: TX_HASH,
+  next_action: 'none',
+  next_tool_name: 'haven_report_settlement_evidence',
+  next_arguments: { payment_id: PAYMENT_ID, settlement_tx_hash: TX_HASH },
+  agent_summary: { summary: { payment_id: PAYMENT_ID, status: 'settled' } },
+}
+/** A shape with NO sibling the generic rule keys on: only the tool keying can see it. */
+const COMPLETE_BARE = { status: 200, ok: true, result: MERCHANT_RESULT }
+
+describe('merchant-body: haven_complete_mcp_tool and refusal echoes', () => {
+  for (const [arm, data] of [['happy', COMPLETE_HAPPY], ['evidence', COMPLETE_EVIDENCE], ['bare', COMPLETE_BARE]] as const) {
+    for (const tool of ['haven_complete_mcp_tool', 'haven_settle_mcp_tool']) {
+      it(`${tool} ${arm} arm: data.result is stripped, keyed off the tool; the flow survives`, () => {
+        const raw = [PAID_TOOL_USE('tu_c', tool), TOOL_RESULT('tu_c', data, { tool_use_result: [{ type: 'text', text: JSON.stringify(envelope(data)) }] })].join('\n')
+        expect(scanSessionText(raw, secrets())['merchant-body']).toBeGreaterThan(0)
+        const { text, counts } = redactSessionText(raw, { secrets: secrets() })
+        expect(text).not.toContain('MERCHANT-PAID-CANARY')
+        expect(counts['merchant-body']).toBeGreaterThan(0)
+        const line = JSON.parse(text.split('\n')[1])
+        const inner = JSON.parse(line.message.content[0].content[0].text).data
+        expect(inner.result).toEqual({ content: [{ type: 'text', text: marker('merchant-body') }], structuredContent: { code: marker('merchant-body') } })
+        expect(inner.status).toBe(200)
+        if (arm === 'evidence') expect(deepFind(inner, 'next_tool_name')).toBe('haven_report_settlement_evidence')
+        expect(scanSessionText(text, secrets())).toEqual(Object.fromEntries(REDACTION_CLASSES.map((c) => [c, 0])))
+      })
+    }
+  }
+
+  it('without the tool_use line, a result beside settlement_tx_hash is still stripped', () => {
+    const { text } = redactSessionText(TOOL_RESULT('tu_missing', COMPLETE_HAPPY), { secrets: secrets() })
+    expect(text).not.toContain('MERCHANT-PAID-CANARY')
+  })
+
+  it('the scan predicate is broader than the redactor: an unkeyed bare result still fails the run', async () => {
+    // No tool_use line and no sibling field: the redactor cannot know it is
+    // paid, so it stays — and the scan's "any nested result" predicate catches it.
+    const raw = TOOL_RESULT('tu_missing', COMPLETE_BARE)
+    expect(redactSessionText(raw, { secrets: secrets() }).text).toContain('MERCHANT-PAID-CANARY')
+    const root = await mkdtemp(join(tmpdir(), 'redact-4137-bare-'))
+    await writeFile(join(root, 'claude-sessions.t.trial1.jsonl'), raw)
+    const result = await runRedaction({ inPrefix: join(root, 'claude-sessions'), stageDir: join(root, 's'), outDir: join(root, 'u'), required: REQUIRED, optional: OPTIONAL, env: ENV, log: () => {} })
+    expect(result.clean).toBe(false)
+    expect(result.scanCounts['merchant-body']).toBeGreaterThan(0)
+    expect(await ls(join(root, 'u'))).toBe('missing')
+  })
+
+  it('a non-paid tool result without result keeps every field', () => {
+    const raw = [PAID_TOOL_USE('tu_g', 'haven_get_payment_status'), TOOL_RESULT('tu_g', { payment_id: PAYMENT_ID, status: 'settled', tx_hash: TX_HASH })].join('\n')
+    expect(redactSessionText(raw, { secrets: secrets() }).text).toBe(raw)
+  })
+
+  const REFUSAL = {
+    success: false,
+    code: 'MERCHANT_REJECTED_AFTER_FUNDING',
+    message: `Merchant rejected the payment after funding (HTTP 500). Merchant response: ${JSON.stringify({ content: [{ text: 'MERCHANT-PAID-CANARY refusal' }] })}`,
+    next_tool_name: 'haven_get_payment_status',
+  }
+  for (const position of POSITIONS) {
+    it(`strips the merchant body echoed in a refusal message at ${position}`, () => {
+      const raw = lineAt(position, REFUSAL)
+      const { text } = redactSessionText(raw, { secrets: secrets() })
+      expect(text).not.toContain('MERCHANT-PAID-CANARY')
+      expect(text).toContain(`Merchant response: ${marker('merchant-body')}`)
+      if (position !== 'unparseable') expect(text).toContain('haven_get_payment_status')
+      expect(scanSessionText(text, secrets())['merchant-body']).toBe(0)
+      expect(scanSessionText(raw, secrets())['merchant-body']).toBeGreaterThan(0)
+    })
+  }
+})
+
+describe('the scan does not reuse the redactor needles', () => {
+  const raw = lineAt('nested-text', { ...CANARIES['secret-exact'].obj, ...CANARIES['rpc-key'].obj })
+
+  it('with the needles emptied, the scan still finds secret-exact and rpc-key', () => {
+    const broken = { ...secrets(), needles: [] }
+    const { text } = redactSessionText(raw, { secrets: broken })
+    const counts = scanSessionText(text, broken)
+    expect(counts['secret-exact']).toBeGreaterThan(0)
+    expect(counts['rpc-key']).toBeGreaterThan(0)
+  })
+
+  it('with the case-insensitive flag lost (M1), the uppercase delegate key is still found', () => {
+    const s = secrets()
+    const broken = { ...s, needles: s.needles.map((n) => ({ ...n, re: new RegExp(n.re.source, n.re.flags.replace('i', '')) })) }
+    const { text } = redactSessionText(raw, { secrets: broken })
+    expect(text).toContain(DELEGATE_HEX.toUpperCase())
+    expect(scanSessionText(text, broken)['secret-exact']).toBeGreaterThan(0)
+  })
+
+  it('a base64 rendering the needles missed is found by decoding', () => {
+    const blob = Buffer.from(`zz${API_KEY}`).toString('base64')
+    const broken = { ...secrets(), needles: [] }
+    expect(scanSessionText(JSON.stringify({ blob }), broken)['secret-exact']).toBeGreaterThan(0)
+  })
+})
+
+describe('hardening', () => {
+  it('matches camelCase and squashed key names', () => {
+    const raw = JSON.stringify({ paymentHeader: B64_PAYMENT, paymentSignature: B64_PAYMENT, delegationSignature: SIG_KEYED, signInWithX: B64_SIWX, merchantBody: 'MERCHANT-PAID-CANARY' })
+    const { text } = redactSessionText(raw, { secrets: secrets() })
+    expect(JSON.parse(text)).toEqual({
+      paymentHeader: marker('payment-header'),
+      paymentSignature: marker('payment-header'),
+      delegationSignature: marker('signature'),
+      signInWithX: marker('siwx-header'),
+      merchantBody: marker('merchant-body'),
+    })
+    const cut = redactSessionText(`{"x": "paymentHeader": "${B64_PAYMENT}", "delegationSignature": "${SIG_KEYED}"`, { secrets: secrets() }).text
+    expect(cut).not.toContain(B64_PAYMENT)
+    expect(cut).not.toContain(SIG_KEYED)
+  })
+
+  it('decodes \\uXXXX on an unparseable line before the rules and the scan', () => {
+    const raw = lineAt('unparseable', { note: 'x' }).replace('\\"x\\"', '\\"sk\\\\u005fagent\\\\u005fFOREIGNsynthetic9876543210\\"')
+    expect(raw).toContain('u005f')
+    expect(scanSessionText(raw, secrets())['agent-key']).toBeGreaterThan(0)
+    const { text } = redactSessionText(raw, { secrets: secrets() })
+    expect(text).not.toContain('FOREIGNsynthetic9876543210')
+    expect(scanSessionText(text, secrets())['agent-key']).toBe(0)
+  })
+
+  it('rpc-key skips public network slugs', () => {
+    const key = 'DrpcKey0123456789abcdef'
+    const s = secrets({ ...ENV, QA_RPC_URL_BASE_SEPOLIA: `https://lb.drpc.example/base-sepolia/${key}` })
+    expect(urlKeySegments(`https://lb.drpc.example/base-sepolia/${key}`)).toEqual([key])
+    const { text } = redactSessionText(JSON.stringify({ e: `chain base-sepolia via https://lb.drpc.example/base-sepolia/${key}` }), { secrets: s })
+    expect(JSON.parse(text).e).toBe(`chain base-sepolia via https://lb.drpc.example/base-sepolia/${marker('rpc-key')}`)
+    expect(scanSessionText(text, s)).toEqual(Object.fromEntries(REDACTION_CLASSES.map((c) => [c, 0])))
+  })
+
+  it('a REQUIRED URL secret with no key segment is redacted whole', () => {
+    const s = secrets({ ...ENV, QA_RPC_URL_BASE_SEPOLIA: 'https://rpc.example.test' })
+    expect(s.urlsWithoutKey).toEqual([])
+    const { text } = redactSessionText(JSON.stringify({ e: 'fetch https://rpc.example.test failed' }), { secrets: s })
+    expect(JSON.parse(text).e).toBe(`fetch ${marker('secret-exact')} failed`)
+    expect(scanSessionText(text, s)['secret-exact']).toBe(0)
+    expect(scanSessionText(JSON.stringify({ e: 'https://rpc.example.test' }), s)['secret-exact']).toBeGreaterThan(0)
+  })
+
+  it('stays linear: a hostile 200 KB line redacts and scans in under 2 s', () => {
+    const chunk = `${'\\'.repeat(40)}"signature${'\\'.repeat(9)}: ${'a-'.repeat(200)} "result" ${' '.repeat(50)}authorization${'\\'.repeat(30)} sk_agent_ eyJ${'A'.repeat(30)} `
+    const hostile = chunk.repeat(Math.ceil(200_000 / chunk.length)).slice(0, 200_000)
+    const structural = JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', content: hostile }] } })
+    const started = Date.now()
+    for (const line of [hostile, structural]) {
+      const { text } = redactSessionText(line, { secrets: secrets() })
+      scanSessionText(text, secrets())
+    }
+    expect(Date.now() - started).toBeLessThan(2000)
+  })
 })

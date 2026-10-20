@@ -12,8 +12,8 @@
 // Usage:
 //   npm run docs:coupling                               # what CI runs (strict)
 //   node scripts/docs/coupling-gate.mjs                 # advisory only
-//   node scripts/docs/coupling-gate.mjs --changed a,b   # explicit file list
-//   BASE_SHA=… HEAD_SHA=… node scripts/docs/coupling-gate.mjs   # CI
+//   node scripts/docs/coupling-gate.mjs --changed=a,b   # explicit file list
+//   BASE_SHA=… HEAD_SHA=… node scripts/docs/coupling-gate.mjs --strict   # CI contract job
 //
 // With no `--changed` and no BASE_SHA the candidate set is the working tree:
 // committed-vs-origin/dev PLUS staged, unstaged and untracked files. Committed

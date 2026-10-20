@@ -844,7 +844,15 @@ you need the reasoning. Never edit one without the other — CI will not let you
   runtime (#4122 — `MerchantCompletion.retryRequest` decides, after the funding
   leg has moved USDC, whether the merchant accepted or the payment is a rejection
   after funding, and reports the settlement hash Haven records; three commits
-  changed it with no perimeter file beside them). The SDK client stays off
+  changed it with no perimeter file beside them); `packages/sdk/src/merchant-answer.ts`
+  joins them as runtime too (#4120 — the ONE post-funding merchant-answer
+  decision shared by the hosted `completeX402MerchantCall` and the local
+  `MerchantCompletion.retryRequest`: after the funding leg has moved USDC it
+  decides accepted vs `MERCHANT_REJECTED_AFTER_FUNDING` and which settlement
+  hash Haven records; the decision moved OUT of the listed
+  `merchant-completion.ts` into this module in the same PR, and the move would
+  otherwise have taken it off the perimeter — the #3283 accident-of-location
+  rule). The SDK client stays off
   deliberately (#3283): it only wires these guards in, and listing it would put
   every SDK transport change on the runtime list. Each SDK file is written here
   as its full path, because the parity test in `scripts/ci/money-path.test.mjs`

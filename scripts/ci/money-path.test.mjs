@@ -544,6 +544,27 @@ describe('money-path list stays in one piece', () => {
     )
   })
 
+  test('the shared post-funding merchant-answer decision is RUNTIME money-path — a change to it gates promotion (#4120)', () => {
+    // The #4122 shape, one hop over: #4120 moved the accepted/rejected-after-
+    // funding decision OUT of the listed merchant-completion.ts into the new
+    // packages/sdk/src/merchant-answer.ts (owner decision 2 on #4120 — the
+    // module is tracked by its own issue), shared by the hosted
+    // completeX402MerchantCall and the local MerchantCompletion.retryRequest.
+    // Without this pin the move would have taken the decision off the
+    // perimeter silently. Runtime, not control: qa-dev's x402-delegation-3009
+    // legs drive the local path through client.fetch / resumeX402Payment and
+    // the hosted legs drive completeX402MerchantCall through the deployed
+    // server. Mutation: move the glob to controlGlobs (or drop it) and this
+    // fails by name.
+    const f = 'packages/sdk/src/merchant-answer.ts'
+    assert.ok(trackedFiles().includes(f), `${f} no longer exists — repoint this pin`)
+    assert.ok(
+      moneyPathFiles([f], loadMoneyPathGlobs()).length === 1,
+      `${f} must be matched by a RUNTIME money-path glob — it decides a funded payment's ` +
+        'merchant outcome and which settlement hash Haven records (#4120)',
+    )
+  })
+
   test('the SDK client stays off the money-path list — it only wires the guards in (#3283, #4122)', () => {
     // A deliberate decision, recorded by #3283 and re-taken by the owner on
     // #4120 (2026-10-20): client.ts calls the listed guards and
@@ -616,8 +637,9 @@ describe('money-path list stays in one piece', () => {
       // binding check (userop-binding) and the signing-surface guard moved in
       // by #3283 (delegate-account, direct-payment-guard, redemption-guard,
       // settlement-child), joined by the task/sub-budget guards (#3661), are
-      // spend authority, and merchant-completion (#4122) decides a funded
-      // payment's merchant outcome; those nine files ARE on the runtime list.
+      // spend authority, merchant-completion (#4122) decides a funded
+      // payment's merchant outcome, and merchant-answer.ts (#4120) is the one
+      // shared copy of that decision; those ten files ARE on the runtime list.
       // The rest is transport — client.ts among it, pinned off above.
       // The doc covers all four because the CASP perimeter question (does
       // Haven hold or move funds?) still applies to what they ship. Widening

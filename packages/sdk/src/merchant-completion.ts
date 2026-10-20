@@ -16,13 +16,11 @@ import {
 } from './mcp-merchant-transport.js'
 import type { CapturedMerchantResponse } from './mcp-merchant-transport.js'
 import {
-  MCP_X402_PAYMENT_RESPONSE_META_KEY,
   X402_RETRY_REJECTED_STATUS,
-  encodeMcpSettlementReceipt,
-  extractMcpPaymentRequired,
   mcpSettlementFromToolResult,
 } from './mcp-merchant-transport.js'
 import { x402PaymentHeaderNamesSent, x402PaymentHeaderNamesFor } from './x402.js'
+import { decidePostFundingMerchantAnswer } from './merchant-answer.js'
 import { buildExplorerUrl, x402PayerAddress } from './x402-protocol.js'
 import { paymentStateStatusCode } from './payment-state.js'
 import { decodeBase64Json } from './base64.js'
@@ -227,28 +225,22 @@ export class MerchantCompletion {
     // the funding leg moved money, and a merchant that mixes dialects (HTTP-402
     // challenge, profile-style refusal on the paid answer) must still be seen.
     // The content-type gate inside readToolResult keeps binary/streaming paid
-    // resources unbuffered.
+    // resources unbuffered — that gate stays HERE, per caller (#4120 D2).
     const toolResult = retryResponse.ok ? await this.merchantTransport.readToolResult(retryResponse) : undefined
-    const inBandChallenge = toolResult ? extractMcpPaymentRequired(toolResult) : undefined
     const metaSettlement = toolResult ? mcpSettlementFromToolResult(toolResult) : undefined
-    // #4062: the settlement receipt is read BEFORE the rejection decision —
-    // a PAYMENT-RESPONSE header, or the _meta settlement's own transaction,
-    // is the only thing that keeps a tool-error answer from being a rejection
-    // after funding. A plain `isError: true` tool result (no challenge, no
-    // receipt) means the merchant neither delivered nor settled: the funding
-    // leg already moved the USDC, so it is stranded on the delegate and this
-    // must be the rejection-after-funding reconciliation event, never a
-    // success. A tool error beside a reported hash is different — the money
-    // moved, so the errored result below is delivered as evidence.
     const headerReceipt = retryResponse.headers.get('PAYMENT-RESPONSE')
-    const receiptSettlement = parseMerchantSettlement(headerReceipt ?? null)
-    const reportedSettlementTxHash =
-      receiptSettlement.settlementTxHash ??
-      (typeof metaSettlement?.transaction === 'string' ? metaSettlement.transaction : undefined)
-    const plainToolErrorAfterFunding =
-      toolResult?.isError === true && inBandChallenge === undefined && !reportedSettlementTxHash
-    const inBandRejection =
-      inBandChallenge !== undefined || metaSettlement?.success === false || plainToolErrorAfterFunding
+    // #4120: the verdict, the settlement hash and the protocol receipt are the
+    // ONE shared post-funding merchant-answer decision (`merchant-answer.ts`)
+    // — the local hash rule (header transaction, falling back to the `_meta`
+    // settlement's) is the rule both paths now use, per owner decision 1.
+    const answer = decidePostFundingMerchantAnswer({
+      toolResult,
+      httpOk: retryResponse.ok,
+      paymentResponseHeader: headerReceipt ?? undefined,
+      metaSettlement,
+    })
+    const reportedSettlementTxHash = answer.settlementTxHash
+    const inBandRejection = answer.inBandRejection
     if (!retryResponse.ok || inBandRejection) {
       const merchant = await captureMerchantResponse(retryResponse)
       await this.recordRetryRejected({
@@ -281,16 +273,11 @@ export class MerchantCompletion {
       )
     }
 
-    // #3155 review S1: the `_meta` settlement is the receipt when there is no
-    // header, re-encoded so the one existing decoder reads both forms. The
-    // PAYMENT-RESPONSE header itself was read before the rejection gate above
-    // (#4062) — reused here, never re-read.
-    const protocolReceiptHeader = headerReceipt ?? (metaSettlement ? encodeMcpSettlementReceipt(metaSettlement) : undefined)
-    const protocolReceiptHeaderName = headerReceipt
-      ? 'PAYMENT-RESPONSE'
-      : metaSettlement
-        ? `_meta.${MCP_X402_PAYMENT_RESPONSE_META_KEY}`
-        : undefined
+    // The receipt the shared decision derived: the PAYMENT-RESPONSE header as
+    // sent, or the `_meta` settlement re-encoded so the one existing decoder
+    // reads both forms. Read before the rejection gate above (#4062) — reused
+    // here, never re-read.
+    const { protocolReceiptHeader, protocolReceiptHeaderName } = answer
     // The same settlement the gate saw: the header's parse, falling back to
     // the _meta transaction when the header carried none.
     const merchantSettlement = {

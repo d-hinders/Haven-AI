@@ -25,6 +25,7 @@ covers:
   - packages/sdk/src/connector-channel.ts
   - packages/sdk/src/mcp-merchant-transport.ts
   - packages/sdk/src/merchant-egress.ts
+  - packages/sdk/src/merchant-answer.ts
   - packages/sdk/src/merchant-completion.ts
   - packages/sdk/src/receipt.ts
   - packages/sdk/src/edge.ts
@@ -4186,6 +4187,29 @@ runtime compatibility.
 > `deliverMerchantPayment` choke point. Scope of this note: the acceptance
 > gate in `client.ts`/`merchant-completion.ts` and the refusal message;
 > `last-verified` is bumped to 2026-10-19 for exactly this coverage.
+
+> **Re-verified #4120 (2026-10-20 — one shared post-funding merchant-answer
+> decision; the hosted hash rule becomes the local rule):** the
+> accepted/rejected-after-funding verdict, the settlement hash and the
+> protocol receipt now live in ONE module,
+> `packages/sdk/src/merchant-answer.ts` (added to this doc's `covers:` here),
+> called by both `completeX402MerchantCall` and `MerchantCompletion.retryRequest`.
+> On the D1 input — a `PAYMENT-RESPONSE` header with no transaction (or an
+> empty header) beside a `_meta` settlement that has one — the HOSTED path now
+> behaves as the local path always has: an `isError` answer beside a `_meta`
+> settlement is accepted (evidence, not `MERCHANT_REJECTED_AFTER_FUNDING`);
+> without `isError` the result carries the `_meta` settlement hash, the #3764
+> second report is posted with it, and an erc7710 completion anchors on it. A
+> header WITH a transaction still wins over a different `_meta` transaction on
+> both paths. The D2 divergence is PRESERVED per caller: a 200 `text/plain`
+> `isError` body is still parsed (and rejected) on the hosted path and never
+> read (so accepted) on the local path — only the verdict moved, not the
+> parsing. No tool added, renamed or re-shaped; no argument, schema,
+> strict/permissive split, tool-NAME set, version-skew or consent-hash
+> contract moves: `completeX402MerchantCall`'s return shape, the evidence
+> header names, the local `x402_retry_rejected_after_funding` 402 and the
+> report ordering are all unchanged. The backend still verifies every reported
+> hash on-chain before recording it. `last-verified` already reads 2026-10-20.
 
 > **Re-verified #3030 (2026-09-21, request validation slice 2):** the two
 > covered files this diff touches, `routes/transactions.ts` and

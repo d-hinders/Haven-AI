@@ -66,6 +66,7 @@ covers:
   - packages/frontend/e2e/table-container-collapse.spec.ts
   - packages/frontend/e2e/transaction-title-measure.spec.ts
   - packages/frontend/scripts/design-lint.mjs
+  - packages/frontend/design-lint-baseline.json
   - packages/frontend/scripts/evidence-viewports.mjs
   - packages/frontend/scripts/full-page-capture.mjs
   - packages/frontend/src/__tests__/compiled-colour-utilities.test.ts

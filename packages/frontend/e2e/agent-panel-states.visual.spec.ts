@@ -152,9 +152,9 @@ test.describe('agent panel empty states and card banners', () => {
     await expect(callout).toHaveScreenshot('agentpanel-hidden-active-budget-callout-desktop.png', SNAPSHOT_OPTIONS)
     await expect(page.getByRole('link', { name: agent.name })).toHaveCount(0)
 
-    await callout.getByRole('button', { name: 'Show archived' }).click()
+    await callout.getByRole('button', { name: 'Show archived', exact: true }).click()
     await expect(callout).toHaveCount(0)
-    await expect(page.getByRole('button', { name: 'Archived: Shown' })).toHaveCount(1)
+    await expect(page.getByRole('button', { name: 'Archived: Shown', exact: true })).toHaveCount(1)
     const card = page.getByTestId('agent-card').filter({ has: page.getByRole('button', { name: `Finish revoking ${agent.name}` }) })
     await expect(card).toHaveCount(1)
     await expect(card).toHaveScreenshot('agentcard-half-removed-desktop.png', SNAPSHOT_OPTIONS)
@@ -185,7 +185,7 @@ test.describe('agent panel empty states and card banners', () => {
       const toolbar = page.getByTestId('list-toolbar')
       await expect(toolbar).toHaveCount(1)
       await expect(page.getByTestId('list-toolbar-count')).toHaveText('1 of 2 agents')
-      await expect(toolbar.getByRole('button', { name: 'Remove Status: Active' })).toHaveCount(1)
+      await expect(toolbar.getByRole('button', { name: 'Remove Status: Active', exact: true })).toHaveCount(1)
       await expect(toolbar).toHaveScreenshot(`agentpanel-list-toolbar-${viewport.slug}.png`, SNAPSHOT_OPTIONS)
     })
   }

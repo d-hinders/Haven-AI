@@ -1053,7 +1053,7 @@ test.describe('driven focus-state visual regression', () => {
         // (the every-agent-archived state, #4113) is the one way in; the count
         // is asserted so a list that stopped offering it fails HERE, rather
         // than as a confusing tab-exhaustion error 80 presses later.
-        const showArchived = page.getByRole('button', { name: 'Show archived' })
+        const showArchived = page.getByRole('button', { name: 'Show archived', exact: true })
         await expect(showArchived).toHaveCount(1)
         await tabToTarget(page, showArchived, 'AgentPanel · Show archived')
         await page.keyboard.press('Enter')
@@ -1117,7 +1117,7 @@ test.describe('driven focus-state visual regression', () => {
     await page.evaluate(() => document.fonts.ready)
     await page.waitForLoadState('networkidle')
 
-    const showArchived = page.getByRole('button', { name: 'Show archived' })
+    const showArchived = page.getByRole('button', { name: 'Show archived', exact: true })
     await expect(showArchived).toHaveCount(1)
     await tabToTarget(page, showArchived, 'AgentPanel · Show archived (390px)')
     await page.keyboard.press('Enter')

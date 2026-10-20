@@ -445,6 +445,10 @@ export const dashboardOverview = {
       gross: { usd: 74.0, eur: 67.34, sek: 796.4 },
       net: { usd: 48.1, eur: 43.77, sek: 517.66 },
       approx: true,
+      // #4165: what the server now sends for re-priced USDC — dollars in USD
+      // (no ≈), converted in EUR and SEK.
+      approxByCurrency: { usd: false, eur: true, sek: true },
+      unpricedByCurrency: { usd: false, eur: false, sek: false },
       payments: 21,
       distinctMerchants: 5,
       budgetStops: 3,
@@ -521,6 +525,8 @@ export const dashboardOverview = {
           gross: { usd: 50.0, eur: 45.5, sek: 538.0 },
           net: { usd: 32.5, eur: 29.58, sek: 349.7 },
           approx: true,
+          approxByCurrency: { usd: false, eur: true, sek: true },
+          unpricedByCurrency: { usd: false, eur: false, sek: false },
           payments: 14,
           refusals: { budget: 2, scope: 1, failed: 1, haven: 0 },
         },

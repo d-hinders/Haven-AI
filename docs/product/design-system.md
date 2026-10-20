@@ -832,8 +832,8 @@ rate AND the conversion changed the number:
 - **A booked figure never carries it** — book-time `convertedAmount` is the
   value struck when the payment happened.
 - **A token shown in the currency it is pegged to never carries it** — USDC in
-  USD is dollars. The peg is a registry fact (`CoreTokenConfig.pegged` in
-  `packages/core/src/chains.ts`), never a guess from the symbol.
+  USD is dollars. The peg is a fact in the shared chain registry
+  (`CoreTokenConfig.pegged`), never a guess from the symbol.
 - Otherwise — a re-priced figure in another display currency (kr, €), or a
   token that floats — **totals and the detail panel** carry it: the account
   summary card, the Activity tab's result line, the dashboard's 30-day spend

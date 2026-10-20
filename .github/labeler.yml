@@ -97,6 +97,7 @@
           - "packages/frontend/src/lib/signer.ts"
           - "packages/sdk/src/delegate-account.ts"
           - "packages/sdk/src/direct-payment-guard.ts"
+          - "packages/sdk/src/merchant-completion.ts"
           - "packages/sdk/src/redemption-guard.ts"
           - "packages/sdk/src/settlement-child.ts"
           - "packages/sdk/src/sub-budget-guards.ts"

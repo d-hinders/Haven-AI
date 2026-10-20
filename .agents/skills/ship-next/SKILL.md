@@ -832,14 +832,26 @@ you need the reasoning. Never edit one without the other — CI will not let you
   authority — the SDK entry point was listed; the edge-signer package that
   actually holds the delegate key material was on no list at all, and is the
   stronger case of the two — #1896);
-- `packages/sdk/src/delegate-account.ts`, `direct-payment-guard.ts`,
-  `redemption-guard.ts`, `settlement-child.ts` and `userop-binding.ts` (the
-  delegate key's signing-surface guard, moved out of `packages/signer/` into the
-  SDK by #3283, and the #3271 binding check both packages import — their
-  location is not what makes them spend authority); `task-budget-guards.ts` and
-  `sub-budget-guards.ts` join them on the same rule (#3661 — the signer's own
-  checks on task and sub-budget children before it signs; both arrived after
-  #3283);
+- `packages/sdk/src/delegate-account.ts`, `packages/sdk/src/direct-payment-guard.ts`,
+  `packages/sdk/src/redemption-guard.ts`, `packages/sdk/src/settlement-child.ts`
+  and `packages/sdk/src/userop-binding.ts` (the delegate key's signing-surface
+  guard, moved out of `packages/signer/` into the SDK by #3283, and the #3271
+  binding check both packages import — their location is not what makes them
+  spend authority); `packages/sdk/src/task-budget-guards.ts` and
+  `packages/sdk/src/sub-budget-guards.ts` join them on the same rule (#3661 — the
+  signer's own checks on task and sub-budget children before it signs; both
+  arrived after #3283); `packages/sdk/src/merchant-completion.ts` joins them as
+  runtime (#4122 — `MerchantCompletion.retryRequest` decides, after the funding
+  leg has moved USDC, whether the merchant accepted or the payment is a rejection
+  after funding, and reports the settlement hash Haven records; three commits
+  changed it with no perimeter file beside them). The SDK client stays off
+  deliberately (#3283): it only wires these guards in, and listing it would put
+  every SDK transport change on the runtime list. Each SDK file is written here
+  as its full path, because the parity test in `scripts/ci/money-path.test.mjs`
+  matches a token against the end of a glob as literal text: a bare file name
+  names nothing, a wildcard inside a token is not a pattern (a package-wide
+  spelling names no file under it), and a token that is only wildcards after
+  its first segment names nothing (#4122);
 - `packages/core/src/machine-payment-lifecycle.ts` (the machine-payment domain
   actually lives here since #987 — the `domain/machine-payment-lifecycle.ts` line
   above guards the backend re-export shim, not the code — #1905);
@@ -852,9 +864,10 @@ you need the reasoning. Never edit one without the other — CI will not let you
   #2051's merchant-steerable cap bypass. Runtime `globs`, not control: the
   hosted MCP deploys from `dev` and the money-flow harness drives it through
   `QA_HOSTED_MCP_URL`, so a green run really does cover it — the argument the
-  frontend decision surfaces could not make. Scoped to `src/**` on a measured
-  3-of-113-commits delta for the package's README/Dockerfile/config files —
-  the command and window are in the JSON note);
+  frontend decision surfaces could not make. Scoped to
+  `packages/mcp-server/src/**` on a measured 3-of-113-commits delta for the
+  package's README/Dockerfile/config files — the command and window are in the
+  JSON note);
 - `packages/demo-merchant-mcp/src/**` (the demo merchant's settlement surface —
   #3098. `x402.ts` verifies the buyer's authorization and submits it on-chain,
   and the prod instance runs on Base mainnet; the CASP guardrails doc had
@@ -863,7 +876,7 @@ you need the reasoning. Never edit one without the other — CI will not let you
   unlabelled, #2979/PR #2982 labelled only because it also touched
   `mcp-server/src/**`. Runtime `globs`, not control: it deploys from `dev` on
   Railway and the money-flow harness pays it through `QA_DEMO_MERCHANT_URL`.
-  Scoped to `src/**` like the hosted MCP entry);
+  Scoped to `packages/demo-merchant-mcp/src/**` like the hosted MCP entry);
 - `db/migrations/`;
 - the safeguard's own control surface — `scripts/release-bump.mjs`,
   `scripts/release-version-order.mjs` (the forward-only version rule #2580 lifted

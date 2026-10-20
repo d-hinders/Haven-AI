@@ -13,8 +13,9 @@
  * The STATES still matter, and they are still reachable through the product's
  * own resolution path: `AuthContext` hydrates the hybrid signer set from the
  * (mocked) owner-scoped read, `useAccountSigners` / `pickSigningPath` resolve
- * it, and the account page's "Backup & recovery" card (`AccountSignersCard`)
- * renders the outcome for a user who is about to sign:
+ * it, and the account page's "Who can approve" section (`AccountSignersCard`
+ * renders under it — #4166 removed the card's own "Backup & recovery"
+ * heading) renders the outcome for a user who is about to sign:
  *
  * - READY with a passkey (no wallet prompt at all);
  * - "Connect your account owner wallet…" plus `WalletConnectAction`'s
@@ -103,16 +104,17 @@ async function shoot(page: Page, name: string) {
   await page.screenshot({ path: `${process.env.PROBE_SHOTS_DIR}/${name}.png` })
 }
 
-/** The Backup & recovery card, once the account page has rendered it. */
+/** The account page's signer card, once the account page has rendered it. */
 async function openRecoveryCard(page: Page) {
   await page.goto(ACCOUNT_PAGE)
   await page.evaluate(() => document.fonts.ready)
   // #4097 moved AccountSignersCard into the Security & details tab — the
   // default view is the Activity tab, so the card is not on the page until
-  // the tab is opened. The accessible name carries the Needs-attention dot
-  // suffix, hence the regex.
+  // the tab is opened. #4166 removed the card's own "Backup & recovery"
+  // heading (the page's "Who can approve" section heading and intro are now
+  // the one copy above the card), so anchor on that heading instead.
   await page.getByRole('tab', { name: /Security & details/ }).click()
-  await expect(page.getByRole('heading', { name: 'Backup & recovery' })).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByRole('heading', { name: 'Who can approve' })).toBeVisible({ timeout: 20_000 })
 }
 
 test('a marker-less hybrid user is OFFERED the passkey signer — ready, no wallet prompt — with the cross-device hint (#1969)', async ({

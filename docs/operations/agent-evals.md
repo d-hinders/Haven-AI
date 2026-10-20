@@ -24,7 +24,7 @@ covers:
   - packages/connect/src/server-names.ts
   - packages/signer/src/consent.ts
   - packages/signer/src/cli-args.ts
-last-verified: "2026-10-19"
+last-verified: "2026-10-20"
 ---
 
 # Agent Evals — the model-in-the-loop eval suite (epic #3957)
@@ -46,7 +46,7 @@ backend**. No payment code is changed by this suite; the graders only READ.
 |---|---|---|
 | Task format | `packages/qa-agent/src/evals/types.ts` | One JSON file per task: the instruction, the setup it needs, the budget-aware amount rule, and the graders to apply. JSON, never Markdown. |
 | Graders | `packages/qa-agent/src/evals/graders.ts` | Read the recorded tool-call log + injected chain/backend probes. No model, no live agent. |
-| Tool lists | `packages/qa-agent/src/evals/tools.ts` | The 29 hosted tools, the 5 signer tools, and the explicit 9-tool payment list. Graders match BARE tool names + `next_tool_server_role`, never the server-prefixed name. |
+| Tool lists | `packages/qa-agent/src/evals/tools.ts` | The 29 hosted tools, split into the explicit 9-tool payment list and the 20 non-payment tools, and the 5 signer tools. `tools.test.ts` holds them equal to their upstream sources (#4121): the keys of the hosted tools/list snapshot (`tools-list.snapshot.json` in the mcp-server package) and of the signer's `toolSchemas`. A hosted tool in neither half fails as unclassified. Graders match BARE tool names + `next_tool_server_role`, never the server-prefixed name. |
 | Starter tasks | `packages/qa-agent/src/evals/tasks/*.json` | 10 tasks across direct-payment / x402-paywall / over-budget, each citing its source. |
 | Hermes adapter | `packages/qa-agent/src/evals/hermes.ts` | Runs one task through Hermes, collects the tool-call log, parses it into the grader model. |
 | Runner | `packages/qa-agent/src/evals/runner.ts` + `cli.ts` | k trials per task, applies graders, writes JSON report + readable summary with per-task pass rate, pass^k and wall time per session. Resolution is PER TRIAL (#3992 A2): the CLI injects a resolver that reads the budget + observer block immediately before each trial. |
@@ -199,6 +199,19 @@ unattended start.
   summary halves), so a refill mid-run is visible instead of silently
   inflating a slice.
 
+- **One full run per budget period.** A full run ends by draining the period
+  budget (the `direct-send-full-remaining` task does that on purpose), so a
+  second full run in the same period finds it empty. The CLI checks this at
+  run start: when paying tasks are selected and the budget read says it is
+  exhausted, it stops before any agent session (exit 3) and writes one
+  message to the job summary. To run again in the same period, edit the eval
+  agent's budget on the dev dashboard. The edit dialog only accepts a real
+  change (e.g. the amount by 0.01 USDC, or the period), and it needs two
+  passkey approvals: activate the new budget, then retire the old one. That
+  issues a new delegation whose period starts when it is built, so the full
+  amount is available; the agent, its delegate key and its API key stay the
+  same.
+
 ## Running the suite
 
 ```
@@ -222,7 +235,11 @@ Env the run needs (all dev/testnet):
   `x402-price-cap-below-price`); required only when the loaded task set
   renders `{target}`, and checked before the first agent session. With
   `QA_EVAL_RECIPIENT` + `QA_EVAL_X402_TARGET` set, ONE suite invocation
-  covers all 10 tasks — no per-task config or task filter needed.
+  covers all 10 tasks — no per-task config or task filter needed. On dev it
+  is the demo merchant's MCP endpoint (`…/mcp`), which answers **405 to a
+  GET** and **402 only to a POSTed JSON-RPC `tools/call`**, so both task
+  instructions spell out that POST request (`buy_vpn`, basic plan, 0.001
+  USDC).
 - `QA_EVAL_AGENT_ACCOUNT` — the eval agent's **smart account** address (the
   payer the chain probe accepts; not the delegate EOA). The Claude Code lane's
   `AGENT_EVALS_AGENT_ACCOUNT` (below) holds the same role, and the daily
@@ -272,7 +289,10 @@ Other flags:
 The output is a JSON report plus a `<out>.summary.txt` readable summary:
 per-task pass rate, pass^k (all k trials — except the drainer, marked
 `k=1 (drains budget)`), the executed order, the model identity triple, and
-wall time per session. The CLI exits non-zero if any task failed any trial.
+wall time per session. The CLI exits 1 if any task failed any trial, 2 on a
+configuration or setup error, and 3 when it did not run because the period
+budget was already spent (only the summary files are written then; wrappers
+should treat 3 as "not run" and skip any comparison).
 
 ## Grader semantics (pinned, do not soften)
 
@@ -284,7 +304,12 @@ wall time per session. The CLI exits non-zero if any task failed any trial.
 - "No further call from the payment-tool list" = the explicit 9-tool hosted
   list in `tools.ts`, matched through `bareToolName()` so a log recorded
   with `mcp__haven-<slug>-dev__haven_pay` graders identically to a bare
-  log. Unknown tool names fail CLOSED (they match nothing).
+  log. Unknown tool names match nothing, and that is NOT a safe default:
+  a payment tool missing from the list is a retry this grader cannot see,
+  so the trial passes falsely. The lists are therefore tested against
+  their upstream sources (the hosted `tools-list.snapshot.json` and the
+  signer's `toolSchemas`, #4121), and a snapshot-only change routes the
+  `qa_agent` CI job so that test runs.
 - A transfer is proven by the observer node's USDC `Transfer` LOG with the
   exact amount and recipient — a log that claims success with no matching
   transfer FAILS. This asymmetry is the point (it is what a "success"
@@ -294,6 +319,46 @@ wall time per session. The CLI exits non-zero if any task failed any trial.
   is the outcome there, not a transfer from the agent's account. The probe
   is INJECTED by the CLI (`buildGraderContext`, #3992 A1) and the payment
   id may come from the tool RESULT as well as from call arguments.
+- The three over-budget tasks accept a **pre-emptive decline** (owner
+  decision 2026-10-20, `acceptPreemptive` on `no_payment_retry_after_refusal`):
+  reading the budget (`haven_get_allowances`, `haven_get_agent` or
+  `haven_check_funds`), attempting no payment, and telling the user passes as
+  well as taking Haven's refusal. Both lanes' models declined up front in the
+  2026-10-20 runs. The price-cap task opts in too: the agent quoting, seeing
+  the price above its authorization and stopping is the correct outcome;
+  there only a successful `haven_quote_x402` counts (`preemptiveReadTools`),
+  because the price must come from the quote. Elsewhere a quote counts as the
+  budget read (its result carries the live budget
+  check); an errored read does not. A decline without a successful read, or
+  any payment call without a refusal, still fails. The tier-3 task
+  (`over-budget-x402-refused`) is only graded when its exhausted-budget
+  precondition actually holds: the resolver reads the threshold from its
+  `EXHAUSTED-period-budget-below-<X>-USDC` label and makes the trial red
+  with a named cause otherwise.
+- `haven_payment_submitted` (the plain-HTTP x402 task) grades **Haven's part
+  only** (owner decision 2026-10-20): every payment the log produced reads
+  back as `submitted` or further. On a plain-HTTP paywall the agent itself
+  sends the paid request with the payment header (Haven never does), and the
+  Claude Code lane has no HTTP tool, so `submitted` is where Haven's part
+  ends. It also requires a `haven_submit` with `settlement_scheme: "erc7710"`
+  in the log: on the EIP-3009 bridge `submitted` is only the funding leg, so
+  `QA_EVAL_X402_TARGET` must offer erc7710 (the dev demo merchant does). It
+  never reports spend and is not a settlement grader, so the next trial does
+  not wait for a budget decrease. The catalog task keeps
+  `payment_status_settled`.
+- Every grader's option keys are closed (`GRADER_OPTION_KEYS` in
+  `graders.ts`), and the loader refuses any other key (#4136). A grader
+  ignores a key it does not read, so a misspelt key is a check that
+  silently does not run: a misspelt `mustMention` drops the report check
+  and a misspelt `probePaymentTools` the signer check, both false passes.
+  Grader names are checked against the registry's own keys, so
+  `"constructor"` is not a grader.
+- The loader also checks option value types, for the same reason:
+  `probePaymentTools` and `acceptPreemptive` are booleans (`"true"` is not
+  `true`, so the option silently does not apply), `mustMention` is an
+  array of non-empty strings, `preemptiveReadTools` an array of known tool
+  names, `errorCode` a non-empty string, and `tool_called`'s `name` and
+  `after` known tool names.
 
 ## Lane 2: Claude Code headless (#3959)
 
@@ -357,7 +422,17 @@ when it does not work, instead of every task failing as "claude exited 1". An
 adapter failure quotes the session's `result` text for the same reason. The
 raw session streams are deliberately not uploaded: this repository is public,
 so artifacts are downloadable by anyone, and the streams carry full tool
-results. To fix a failed login, generate a new token with
+results.
+
+**What the report does show for a failure.** The job summary lists every
+failed trial with a **tool trace**: the session's tool calls in order, as bare
+tool names, a `✗` for a failed call and the machine `error_code`. No
+arguments, results or final message, capped at 40 calls. The JSON report
+carries the same `trace` for every trial. The trace is sanitised, not trusted:
+an unknown tool name that is not a plain identifier prints as `(unknown tool)`
+and a code that is not lower-snake-case prints as `(unrecognised code)`. RPC
+error text in grader details has URLs stripped, because the observer URL
+embeds the provider key. To fix a failed login, generate a new token with
 `claude setup-token` and replace the `CLAUDE_CODE_OAUTH_TOKEN` environment
 secret (see Token rotation above).
 

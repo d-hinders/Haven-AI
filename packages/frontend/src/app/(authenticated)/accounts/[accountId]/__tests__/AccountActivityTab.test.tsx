@@ -249,7 +249,7 @@ describe('AccountActivityTab — result line and paging (#4098)', () => {
     expect(loadMore).toHaveBeenCalledTimes(1)
   })
 
-  it('says "N matching" when a filter narrows the set', () => {
+  it('says the server count, not "N matching", when a filter narrows the set (#4098 owner decision)', () => {
     urlQuery.value = 'search=coffee'
     feedMock.mockImplementation(() => ({
       ...DEFAULT_FEED,
@@ -260,15 +260,10 @@ describe('AccountActivityTab — result line and paging (#4098)', () => {
     }))
     renderTab()
 
-    expect(countLine(/^3 matching$/)).toBeInTheDocument()
-    // The unfiltered paging line is not what a narrowed set says.
-    expect(
-      screen.queryByText((_, element) =>
-        element instanceof HTMLElement && element.tagName === 'P'
-          ? /Showing 2 of/.test(element.textContent ?? '')
-          : false,
-      ),
-    ).not.toBeInTheDocument()
+    // The Transactions page's result line: "Showing X of Y" while more pages
+    // remain — filtered or not, `total` is the server's filtered count.
+    expect(countLine(/Showing 2 of 3/)).toBeInTheDocument()
+    expect(document.body.textContent).not.toContain('matching')
   })
 
   it('qualifies the counts instead of claiming completeness when the feed is capped', () => {
@@ -317,7 +312,7 @@ describe('AccountActivityTab — empty states (#4098)', () => {
     expect(onReceive).toHaveBeenCalledTimes(1)
   })
 
-  it('shows "Nothing matches these filters" with Clear filters when a filter matches nothing', () => {
+  it('shows "No activity matches these filters" with Clear filters when a filter matches nothing', () => {
     urlQuery.value = 'search=coffee'
     feedMock.mockImplementation(() => ({
       ...DEFAULT_FEED,
@@ -328,7 +323,8 @@ describe('AccountActivityTab — empty states (#4098)', () => {
     }))
     renderTab()
 
-    expect(screen.getByText('Nothing matches these filters')).toBeInTheDocument()
+    expect(screen.getByText('No activity matches these filters')).toBeInTheDocument()
+    expect(screen.getByText('Adjust or clear filters to widen the history.')).toBeInTheDocument()
     expect(screen.queryByText('No activity yet')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }))
     expect(mockReplace).toHaveBeenCalledWith('/accounts/safe-1', expect.anything())

@@ -13778,8 +13778,9 @@ export const openapiSpec = {
       },
       // ── Grouped dashboard activity (#3824) ─────────────────────────────
       //
-      // One row per agent + token + counterparty + user-local day + outcome
-      // + activityType, computed in memory over the dashboard's merged feed
+      // One row per agent + token + counterparty (+ the sending account on
+      // outbound rows, #4117) + user-local day + outcome + activityType,
+      // computed in memory over the dashboard's merged feed
       // (explorer window + synthesized x402 rows) — not a database table.
       // `status` is the DERIVED outcome (confirmed | pending | failed, from
       // `isError` / `paymentFlowStatus` / `paymentProofStatus`); the
@@ -13821,7 +13822,8 @@ export const openapiSpec = {
           source: { type: ['string', 'null'], description: "The newest member's source, e.g. `x402`." },
           x402ResourceUrl: { type: ['string', 'null'], description: 'The newest member’s x402 resource URL, when it is an x402 payment.' },
           to: { type: 'string', description: 'The newest member’s raw `to` field — the merchant address on outbound payments, the account’s own address on deposits.' },
-          merchantName: { type: ['string', 'null'], description: 'Contact or receipt-merchant name resolved for the counterparty, else the name of the user\'s own account a transfer went to (#4099); null otherwise (always null on deposits).' },
+          merchantName: { type: ['string', 'null'], description: 'Contact or receipt-merchant name resolved for the counterparty, else the name of the user\'s own account on the other side of a transfer between two of their accounts (#4099); null otherwise. On a deposit it is set only for a transfer from another of the user\'s own accounts, and that deposit is its own group.' },
+          fromAccountName: { type: 'string', description: 'Outbound groups only (#4117): the label of the user\'s own account the money left — a contact name saved for it first, else the account\'s own name. Every member of the group left that one account. Absent on deposits and when no name resolves.' },
           activityType: { type: ['string', 'null'], description: "The activity class, e.g. `delegate_sweep`; null for plain transfers and x402 payments." },
           direction: { type: 'string', enum: ['in', 'out'] },
           status: { type: 'string', enum: ['confirmed', 'pending', 'failed'], description: 'The DERIVED outcome: isError → failed; a paymentFlowStatus of confirming_merchant/needs_attention or a non-terminal paymentProofStatus → pending; else confirmed.' },

@@ -1,7 +1,10 @@
 /**
- * #4099 — a send to another of the user's own accounts is named by that
- * account in the dashboard activity feed instead of "New recipient". The
- * receiving side stays a deposit until the frontend half reads the name.
+ * #4099 — a transfer between two of the user's own accounts is named by the
+ * other account on both sides of the dashboard activity feed, instead of
+ * "New recipient" (sender) or an anonymous "Deposit" (receiver).
+ *
+ * #4117 — an outbound group carries the account its money left
+ * (`fromAccountName`), and the key splits outbound groups by that account.
  *
  * Pure grouping behaviour over in-memory rows: no database involved.
  */
@@ -68,13 +71,66 @@ describe('own-account transfers in the activity feed (#4099)', () => {
     expect(result[0].merchantName).toBe('Reserve')
   })
 
-  it('the receiving side stays an unnamed deposit, grouped with the day’s other deposits', async () => {
-    // Naming it waits for the frontend half (the client's inbound label must
-    // read merchantName first); until then a separate named inbound group
-    // would render as a second "Deposit" row.
+  it('names the receiving side by the sending own account', async () => {
+    const result = await groups([
+      row({
+        direction: 'in',
+        from: MY_ACCOUNT,
+        to: RESERVE,
+        accountId: 'acc-reserve',
+        accountAddress: RESERVE,
+        accountName: 'Reserve',
+      }),
+    ])
+    expect(result[0]).toMatchObject({ direction: 'in', merchantName: 'My account' })
+  })
+
+  it('a transfer in from an own account gets its own group; the day’s other deposits stay one unnamed group', async () => {
     const result = await groups([
       row({ direction: 'in', from: STRANGER, to: MY_ACCOUNT }),
+      row({ direction: 'in', from: '0x' + 'ef'.repeat(20), to: MY_ACCOUNT }),
       row({ direction: 'in', from: RESERVE, to: MY_ACCOUNT }),
+    ])
+    expect(result).toHaveLength(2)
+    const named = result.find((g) => g.merchantName === 'Reserve')
+    const deposits = result.find((g) => g.merchantName === null)
+    expect(named).toMatchObject({ count: 1, direction: 'in' })
+    expect(deposits).toMatchObject({ count: 2, direction: 'in' })
+  })
+
+  it('an inbound group key never collides with an outbound one to the same address', async () => {
+    // Direction is not part of the group key; the `own:` prefix keeps a send
+    // TO the reserve and a transfer FROM it as two rows.
+    const result = await groups([
+      row({ direction: 'out', from: MY_ACCOUNT, to: RESERVE }),
+      row({ direction: 'in', from: RESERVE, to: MY_ACCOUNT }),
+    ])
+    expect(result.map((g) => [g.direction, g.merchantName]).sort()).toEqual([
+      ['in', 'Reserve'],
+      ['out', 'Reserve'],
+    ])
+  })
+
+  it('the receiving side prefers a contact name for the sending own account, like the send side', async () => {
+    const result = await groups(
+      [row({ direction: 'in', from: RESERVE, to: MY_ACCOUNT })],
+      (address) => (address.toLowerCase() === RESERVE.toLowerCase() ? 'Savings (contact)' : null),
+    )
+    expect(result[0].merchantName).toBe('Savings (contact)')
+  })
+
+  it('a contact name alone never names a deposit — only an own-account sender is named', async () => {
+    const result = await groups(
+      [row({ direction: 'in', from: STRANGER, to: MY_ACCOUNT })],
+      (address) => (address.toLowerCase() === STRANGER ? 'Some contact' : null),
+    )
+    expect(result[0]).toMatchObject({ merchantName: null })
+  })
+
+  it('an inbound row from an own account\'s address on another chain stays an unnamed deposit', async () => {
+    const result = await groups([
+      row({ direction: 'in', from: STRANGER, to: MY_ACCOUNT, chainId: 8453 }),
+      row({ direction: 'in', from: RESERVE, to: MY_ACCOUNT, chainId: 8453 }),
     ])
     expect(result).toHaveLength(1)
     expect(result[0]).toMatchObject({ count: 2, merchantName: null })
@@ -93,5 +149,51 @@ describe('own-account transfers in the activity feed (#4099)', () => {
   it('the lookup is chain-scoped: the same address on another chain is not that account', async () => {
     const result = await groups([row({ to: RESERVE, chainId: 8453 })])
     expect(result[0].merchantName).toBeNull()
+  })
+
+  it('the sent-from account rides an outbound group (#4117) and never a deposit', async () => {
+    const result = await groups([
+      row({ direction: 'out', to: STRANGER, accountId: 'acc-reserve', accountAddress: RESERVE, accountName: 'Reserve' }),
+      row({ direction: 'in', from: STRANGER, to: MY_ACCOUNT }),
+    ])
+    expect(result.find((g) => g.direction === 'out')?.fromAccountName).toBe('Reserve')
+    expect(result.find((g) => g.direction === 'in')).not.toHaveProperty('fromAccountName')
+  })
+
+  it('names the sent-from account with a saved contact first, like the receiving side (#4117)', async () => {
+    const result = await groups(
+      [row({ direction: 'out', to: STRANGER, accountId: 'acc-reserve', accountAddress: RESERVE, accountName: 'Reserve' })],
+      (address) => (address.toLowerCase() === RESERVE.toLowerCase() ? 'Savings (contact)' : null),
+    )
+    expect(result[0].fromAccountName).toBe('Savings (contact)')
+  })
+
+  it('two own accounts\' unattributed sends to one recipient on one day are two groups, each naming its sender (#4117)', async () => {
+    // Same chain, token, day, outcome and no agent: before #4117 the key
+    // could not tell the senders apart and merged them into one group.
+    const result = await groups([
+      row({ direction: 'out', to: STRANGER }),
+      row({ direction: 'out', to: STRANGER, from: RESERVE, accountId: 'acc-reserve', accountAddress: RESERVE, accountName: 'Reserve' }),
+    ])
+    expect(result).toHaveLength(2)
+    expect(result.map((g) => [g.fromAccountName, g.count]).sort()).toEqual([
+      ['My account', 1],
+      ['Reserve', 1],
+    ])
+  })
+
+  it('one account\'s sends to one recipient still group together (#4117)', async () => {
+    const result = await groups([row({ direction: 'out', to: STRANGER }), row({ direction: 'out', to: STRANGER })])
+    expect(result).toHaveLength(1)
+    expect(result[0]).toMatchObject({ count: 2, fromAccountName: 'My account' })
+  })
+
+  it('deposits into two different own accounts on one day stay one unnamed group (#4117 splits outbound only)', async () => {
+    const result = await groups([
+      row({ direction: 'in', from: STRANGER, to: MY_ACCOUNT }),
+      row({ direction: 'in', from: STRANGER, to: RESERVE, accountId: 'acc-reserve', accountAddress: RESERVE, accountName: 'Reserve' }),
+    ])
+    expect(result).toHaveLength(1)
+    expect(result[0]).toMatchObject({ count: 2, merchantName: null })
   })
 })

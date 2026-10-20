@@ -167,6 +167,7 @@ const boundary: ClientBoundary = {
     './direct-payment-guard.js', // #3283: the signing-surface allowlist signForData runs
     './haven-api-transport.js',
     './mcp-merchant-transport.js',
+    './merchant-answer.js', // #4120: the shared post-funding merchant-answer decision both paths consume
     './merchant-completion.js',
     './merchant-egress.js', // #3747
     './payment-mappers.js',

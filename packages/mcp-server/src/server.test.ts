@@ -69,6 +69,8 @@ describe('buildHostedMcpServer', () => {
         'haven_open_task_budget',
         'haven_close_task_budget',
         'haven_get_task_budget',
+        // #4107:
+        'haven_check_token_safety',
       ].sort(),
     )
 

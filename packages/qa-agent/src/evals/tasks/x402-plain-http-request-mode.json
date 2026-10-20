@@ -3,17 +3,30 @@
   "title": "x402 paywall on a plain-HTTP endpoint, request mode end to end",
   "category": "x402-paywall",
   "tier": 1,
-  "instruction": "Fetch the paid resource at {target} (a plain-HTTP x402 endpoint). It will answer 402 Payment Required: get a quote, replay the request the way the quote tells you, and bring me the actual response body. Do not pay twice for the same request.",
-  "requires": ["delegation-agent-open-budget", "funded-period-budget", "plain-http-x402-target"],
-  "amount": { "rule": "fraction_of_remaining", "fraction": "1/4" },
+  "instruction": "Buy the basic VPN plan over plain HTTP x402. The paid request is: POST {target} with headers \"Content-Type: application/json\" and \"Accept: application/json, text/event-stream\", and this JSON body: {\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"buy_vpn\",\"arguments\":{\"plan\":\"basic\"}}}. A plain GET is not the request; the endpoint only answers POST. It answers 402 Payment Required: get a quote for that exact request, replay the request the way the quote tells you, and complete the payment through Haven (sign and submit it); then tell me the payment id and the next step the merchant needs. Do not pay twice for the same request.",
+  "requires": [
+    "delegation-agent-open-budget",
+    "funded-period-budget",
+    "plain-http-x402-target"
+  ],
+  "amount": {
+    "rule": "fraction_of_remaining",
+    "fraction": "1/4"
+  },
   "graders": [
-    { "name": "x402_request_mode_replay", "options": {} },
-    { "name": "payment_status_settled", "options": {} }
+    {
+      "name": "x402_request_mode_replay",
+      "options": {}
+    },
+    {
+      "name": "haven_payment_submitted",
+      "options": {}
+    }
   ],
   "expectTransfer": false,
   "source": {
     "kind": "bug-report",
     "ref": "docs/bug-reports/2026-10-08T114910Z-manual-qa-dev-3739-request-mode.md",
-    "note": "Goals B+C: haven_quote_x402 returns request-mode next_arguments (url, method, headers, body — NO payment_required) and the agent replays them verbatim; goal D: the same idempotency key replays to the same payment_id with 'Do NOT pay again'. The demo merchant answers a sessionless tools/call with the 402."
+    "note": "Graded on Haven's part only (owner decision 2026-10-20): on a plain-HTTP paywall the agent itself sends the paid request with the payment header, and the Claude Code lane has no HTTP tool, so the task passes once Haven has the payment signed and submitted (haven_payment_submitted). The instruction spells out the POST request (method, headers, JSON-RPC tools/call body for buy_vpn basic, 0.001 USDC), exactly as the manual QA sent it: {target} is the demo merchant's MCP endpoint, which answers 405 to a GET by design (packages/demo-merchant-mcp/src/http.ts), so \"fetch {target}\" failed every trial of the first full run (2026-10-20). Goals B+C: haven_quote_x402 returns request-mode next_arguments (url, method, headers, body — NO payment_required) and the agent replays them verbatim; goal D: the same idempotency key replays to the same payment_id with 'Do NOT pay again'. The demo merchant answers a sessionless tools/call with the 402."
   }
 }

@@ -6687,6 +6687,60 @@ export const SCENARIOS = {
       await shoot(page.locator('main').first(), 'page')
     },
   },
+  'dashboard-own-account-transfer': {
+    description:
+      '#4099: a transfer between two of the user\'s own accounts on the dashboard\'s Activity card — the send reads "Savings" (the receiving account), the money arriving reads "From Savings" (the sending account, not "Deposit"; owner decision 2026-10-20), and an outside deposit on the same day still reads "Deposit". #4117: every send\'s subtitle names the account the money left ("From Operating wallet"), never a fixed "From My account". The shared fixture has one account and no inbound row, so none of this is reachable from a route capture.',
+    api(apiPath) {
+      const savings = {
+        ...FIXTURE_ACCOUNT,
+        id: 'safe-savings',
+        name: 'Savings',
+        account_address: '0x2222222222222222222222222222222222222222',
+        is_default: false,
+      }
+      if (apiPath === '/auth/me') {
+        return { ...FIXTURE_USER, accounts: [{ ...FIXTURE_ACCOUNT }, savings] }
+      }
+      if (apiPath === '/dashboard/overview') {
+        const [base] = FIXTURE_OVERVIEW.activity
+        const at = (secondsBefore) => new Date(Date.parse(base.latestAt) - secondsBefore * 1000).toISOString()
+        // Single, exact payments: the fixture group's floored count would read "×3+" on rows that are one transfer each.
+        const plainTransfer = { ...base, count: 1, countIsFloor: undefined, agentId: null, agentName: null, source: null, x402ResourceUrl: null }
+        return {
+          ...FIXTURE_OVERVIEW,
+          activity: [
+            // The money arriving in Operating wallet from Savings: named by the sender.
+            { ...plainTransfer, direction: 'in', to: FIXTURE_ACCOUNT.account_address, merchantName: 'Savings', sumAtomic: '50000000', approxAmount: '538.0000', latestAt: at(60) },
+            // Operating wallet's own send to Savings: named by the receiver.
+            { ...plainTransfer, direction: 'out', to: savings.account_address, merchantName: 'Savings', fromAccountName: FIXTURE_ACCOUNT.name, sumAtomic: '20000000', approxAmount: '215.2000', latestAt: at(120) },
+            // An outside deposit the same day: still the generic word.
+            { ...plainTransfer, direction: 'in', to: FIXTURE_ACCOUNT.account_address, merchantName: null, sumAtomic: '10000000', approxAmount: '107.6000', latestAt: at(180) },
+            // The agent's x402 payment, sent from the same account (#4117).
+            { ...base, fromAccountName: FIXTURE_ACCOUNT.name },
+          ],
+        }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.addInitScript((userId) => {
+        window.localStorage.setItem(`haven-onboarding-complete-dismissed:${userId}`, '1')
+      }, FIXTURE_USER.id)
+      await page.goto(`${BASE_URL}/dashboard`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+      // Positive controls: the money arriving reads "From Savings", the send "Savings".
+      await page.getByText('From Savings', { exact: true }).first().waitFor({ timeout: 30_000 })
+      await page.getByText('Savings', { exact: true }).first().waitFor({ timeout: 10_000 })
+      // #4117: the send's subtitle names the account the money left.
+      await page.getByText(`From ${FIXTURE_ACCOUNT.name}`, { exact: true }).first().waitFor({ timeout: 10_000 })
+      if (await page.getByText('From My account', { exact: false }).count()) {
+        throw new Error('#4117: a fixed "From My account" subtitle rendered')
+      }
+      // Negative control: the outside deposit keeps "Deposit".
+      await page.getByText('Deposit', { exact: true }).first().waitFor({ timeout: 10_000 })
+      await shoot(page.locator('main').first(), 'page')
+    },
+  },
   'dashboard-sub-cent': {
     description:
       '#3897: a week of sub-cent agent payments — the count-form summary and "<$0.01" in the spending half and the activity row, never "$0.00" (the agent caption\'s sub-cent form is unit-tested, not shown here: the shared budget read is not sub-cent)',

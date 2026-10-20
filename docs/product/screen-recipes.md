@@ -36,6 +36,7 @@ covers:
   - packages/backend/src/routes/agents.ts
   - packages/frontend/src/app/(authenticated)/accounts/[accountId]/AccountDetailClient.tsx
   - packages/frontend/src/hooks/useTransactionsFeed.ts
+  - packages/frontend/src/hooks/useUnfilteredTransactionTotal.ts
   - packages/connect/src/**
   - packages/backend/src/routes/agent-connection-setups.ts
   - packages/backend/src/rails/sweep.ts
@@ -385,7 +386,9 @@ Structure:
    row) with a network dropdown beside it (only offered when more than one
    chain is listed, starting on the user's own network); then category pills
    with "Verified only" and "Show test merchants" beside them. Test content
-   has one control — the checkbox — and no category pill.
+   has one control — the checkbox — and no category pill. These move onto the
+   [List controls](design-system.md#list-controls--listtoolbar-facetmenu-periodpicker-4110) pattern with #4114 (category stays a pill facet; the network
+   facet's default stays the user's chain), gaining URL state.
 3. Merchant page: header (monogram/logo, name, category, website, networks,
    Verified — with the funding action, when shown, below the text until
    `xl` and on its right-hand side from there),
@@ -493,6 +496,10 @@ Structure:
 3. The card grid, filtered and sorted by the toolbar.
 4. Zero-result state inside the list area (`No agents match these filters`) owning the reset action — the bar's own reset steps back so the screen offers one — and the toolbar stays visible so the user can see what they filtered on. The `not recorded` MCP note above the list follows the filtered set: a filter that hides the only unrecorded card hides the note.
 5. Removed agents stay behind their own toggle and are never in the filtered set.
+
+The toolbar above moves onto the
+[List controls](design-system.md#list-controls--listtoolbar-facetmenu-periodpicker-4110) pattern with #4113, which replaces the toggle-button facets with menu
+facets and the sort select with a Sort chip. New list controls use the pattern.
 
 First agent (#4065): a user with no agents — archived and revoked rows count as
 agents, so this is `agents.length === 0` — gets the connect flow inline instead
@@ -657,8 +664,11 @@ Activity card also carries deposits, sweeps, failed and pending rows.
 preview renders `GET /dashboard/overview`'s `activity` groups — one row per
 group under user-local day headings, at most eight rows over the rolling
 last seven days. The title is the counterparty through `counterpartyLabel`'s
-no-address mode (merchant site, receipt name, "Deposit", "New recipient" —
-never a truncated address); the subtitle is the agent's name; a group of N
+no-address mode (merchant site, receipt name, "Deposit" or — for a transfer
+from another of the user's own accounts — "From <account>" (#4099), "New
+recipient" — never a truncated address); the subtitle is the agent's name, plus
+"From <account>" — the account the money left — on a send when the user has
+more than one account and a name came back (#4117); a group of N
 renders "×N" ("×N+" when the count is a floor). The 5-row `transactions`
 preview is removed from the wire (#3858) — no dashboard surface reads it.
 
@@ -706,10 +716,23 @@ Use for full lists of payments and account activity.
 
 Structure:
 1. Page header with concise description.
-2. Filter controls for account, status, type, and time where useful.
+2. The [List controls](design-system.md#list-controls--listtoolbar-facetmenu-periodpicker-4110)
+   toolbar (#4111), filtering on the server (#4095), so the rows, the count
+   and the CSV are the same set: search, then the Account, Initiator, Token,
+   Direction and Network facets (each hidden while it has a single option)
+   and Period (Last 7 / 30 / 90 days, All time, or a custom range), with
+   Export CSV in the actions slot. The status row carries a removable chip
+   per active filter, Clear filters, and the standard count — "{n}
+   transactions", or "{shown} of {total} transactions" filtered, both server
+   figures. The URL keeps the keys it had before #4111 except search,
+   written as `q` with the old `search` still read; the export request builds its own API
+   parameters, apart from the URL codec. Sorting stays on the column
+   headers. The account page's planned Activity tab moves with #4130.
 3. The full-page `TransactionsTable` variant for `/transactions`; card/compact
    variants are valid for scoped histories on account and agent detail.
-4. Empty state inside the table that preserves the current filters.
+4. A filtered list with no rows shows the standard no-match state
+   (`ListNoMatch`) where the rows were, below the toolbar; the table's own
+   empty state covers a history with nothing in it yet.
 
 Money and risk clarity:
 - **List rows show the user's currency, never the token (#3805, #3811).** The
@@ -729,7 +752,9 @@ Money and risk clarity:
 - **List rows show no addresses (#3810, #3811).** The counterparty half of
   every row — `From -> To` line included — renders through
   `counterpartyLabel`'s no-address mode: the merchant's hostname, the source
-  title, a resolved name, "Deposit", or "New recipient". A raw address never
+  title, a resolved name, "Deposit" (every deposit here — "From <account>" for
+  a transfer from another own account is the dashboard Activity card's alone,
+  #4099), or "New recipient". A raw address never
   ellipsises into a list row; the detail drawer is where the full address
   lives.
 - Use external links for details, but do not make hashes the primary labels.
@@ -740,7 +765,7 @@ Money and risk clarity:
   `total` counts what was returned, not what the account holds. When the
   response reports `truncated`, every
   claim on the screen softens together — the page subtitle ("Recent activity"
-  rather than "All activity"), a caveat line inside the count row, and the
+  rather than "All activity"), a caveat line beneath the toolbar's count, and the
   end-of-list string ("End of what's loaded" rather than "You've reached the
   end"). Softening one and leaving the others is worse than softening none:
   the louder claim is the one the reader believes. The same rule binds any
@@ -859,20 +884,53 @@ Money and risk clarity:
 
 Use for a Haven account or wallet detail surface.
 
-Structure:
-1. Header with account name, network, and key actions.
-2. Balance card.
-3. Agent access or budgets connected to this account.
-4. Scoped transaction history.
-5. Advanced details section for Haven wallet address and explorer link. Show
-   modules only if a real advanced module-management surface exists. (A
-   required-approval-threshold element belonged here until
+Structure (#4097, epic #4093 — the page is the full record of one account;
+the dashboard stays the inbox and the summary, and this page repeats none of
+it):
+
+1. Header with the account name, its badges in the metadata line, and key
+   actions. "Test network" shows on testnets only (no network marker on
+   Base); "Default account" shows only with two or more accounts. Send is
+   primary once the account holds money; an empty account makes Receive
+   primary and disables Send.
+2. One summary card, three columns stacking on a phone:
+   - **Balance** — one figure in the user's currency.
+   - **Holdings** — each token with its amount at full precision under a
+     small "Amount" label. One token shows no value (it would repeat the
+     balance); a non-USD display currency shows the rate instead ("1 USDC =
+     9,50 kr"); two or more tokens each show their value.
+   - **Last 30 days** — Money in and Money out as two figures, the rolling
+     `[now − 30×24h, now)` window read from the account's transaction feed.
+     When the feed is capped at its explorer window the figures carry the
+     partial-data qualifier instead of claiming completeness (#2882).
+3. One tab row, owned by the page's `?tab=` (Activity default, Agents,
+   Security & details). Only the Agents tab carries a count; Security &
+   details carries a warning dot when only one signer can approve.
+   - **Activity** — the account's transaction feed (#4098 owns this tab's
+     final shape).
+   - **Agents** — one budget-snapshot summary line, then every active agent
+     drawn with the shared agent row (#4096). Revoked agents are not listed;
+     one line says how many are hidden and links to the Agents page's
+     revoked facet.
+   - **Security & details** — "Who can approve": the ONLY place in the app
+     that can add or remove a signer or run recovery (`AccountSignersCard`
+     renders here; Settings' Signers section lists signers without add or
+     remove flows). With one signer a warning sits above the list and the
+     tab carries its dot. Account details below: short address with copy and
+     explorer link, network, created date.
+
+   (A required-approval-threshold element belonged on this page until
    [#2848](https://github.com/d-hinders/Haven-AI/issues/2848) removed it: the
    approvers surface it described was already deleted by
    [#1989](https://github.com/d-hinders/Haven-AI/issues/1989), and no live
    screen renders a threshold. The delegation rail's `AccountSignersCard` is a
    different concept — the account's signer set, not a Safe owner threshold —
    and is not a substitute for it.)
+
+Removed with #4097: the #3333 "Receiving USDC" off-ramp panel (cash-out
+returns later as a saved destination inside Send, when a merchant partner
+needs it), the "Agent access" card, the "Token balances" table, "Advanced
+account details", and the 10-row transactions preview.
 
 Money and risk clarity:
 - Primary UX uses `Haven account` or `Haven wallet`.

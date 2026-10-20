@@ -125,6 +125,13 @@
  *     `status === 1`, delegate residual UNCHANGED (a delta, so an earlier
  *     leg's dust cannot make this one red for someone else's reason), and
  *     the settled amount within `max_amount`.
+ *   - **eip3009: Haven recorded the merchant settlement (#4119).** The same
+ *     check as `x402-hosted-mcp-signer`, read right after settle returns
+ *     (`lib/settlement-record.ts`): `merchant_settlement_recorded` on the
+ *     status, the receipt's hash equal to the one proved on-chain, and the
+ *     settle's evidence guidance followed — a retryable report re-sent with
+ *     the leg's own `payment_header`, any refusal red. On dev this leg takes
+ *     erc7710, so the continuation's unit tests are this check's evidence.
  *
  * ## Fail vs. skip
  *
@@ -162,6 +169,7 @@ import {
 import { type Scenario, type ScenarioContext, pass, fail, skip } from './types.js'
 import { BASE_SEPOLIA_RPC, SEPOLIA_USDC, waitForReceipt as waitForReceiptOn } from '../lib/chain.js'
 import { freshPurchaseIdempotencyKey } from '../lib/run-idempotency.js'
+import { assertHostedSettlementRecorded } from '../lib/settlement-record.js'
 
 const USDC_ABI = ['function balanceOf(address) view returns (uint256)'] as const
 
@@ -284,7 +292,8 @@ export const x402CatalogGuidedPurchase: Scenario = {
   invariant:
     'The guided catalog purchase path (#1305) completes end to end: catalog discovery → ' +
     'haven_prepare_catalog_purchase → local signer signs via payment_id only → settle by ' +
-    'payment_id with no merchant context re-sent → structured summary + post-purchase allowance.',
+    'payment_id with no merchant context re-sent → structured summary + post-purchase allowance; ' +
+    'on the eip3009 continuation, Haven records the merchant settlement it verified on-chain.',
   async run(ctx: ScenarioContext) {
     if (!ctx.cfg.demoMerchantUrl) {
       return skip('QA_DEMO_MERCHANT_URL not set — the guided catalog leg needs the dev demo-merchant')
@@ -775,7 +784,10 @@ export const x402CatalogGuidedPurchase: Scenario = {
     // ── 7. Settle by payment_id ONLY — #1307 rehydration must serve the rest ──
     //      No merchant_url/tool_name/arguments/mcp_transport: if settlement
     //      needs them re-threaded, the guided path failed.
+    // #4119 anchor: immediately before the call that submits the funding, so
+    // the funding confirm — and the sweep's 60 s floor — cannot precede it.
     let settle: HostedSettleMcpToolResult
+    const settleAnchor = Date.now()
     try {
       settle = await timed('settle', () =>
         hosted.callTool<HostedSettleMcpToolResult>('haven_settle_mcp_tool', {
@@ -800,6 +812,33 @@ export const x402CatalogGuidedPurchase: Scenario = {
           `${settle.funding_tx_hash ?? 'none'} — #1307 rehydration may not have found the stored MCP call context`,
       )
     }
+
+    // ── 7a. The two legs' hashes, then Haven's record of the merchant one ───
+    //      (#4119). The record check is the first I/O after settle returns: on
+    //      the recorded arm the status read must be the one at settle-return.
+    //      The hash checks are pure and come first because the record is
+    //      matched against the merchant hash; step 9 proves both on-chain.
+    const fundingHash = settle.funding_tx_hash
+    const merchantHash = settle.settlement_tx_hash
+    if (!fundingHash) return fail('settle reported settled:true with no funding_tx_hash — the funding leg is unevidenced')
+    if (!merchantHash) {
+      return fail(
+        'settle reported settled:true with no settlement_tx_hash — the merchant leg cannot be verified on-chain',
+      )
+    }
+    if (fundingHash.toLowerCase() === merchantHash.toLowerCase()) {
+      return fail(
+        `funding and settlement report the SAME tx ${fundingHash} — the two-leg bridge collapsed to one hop`,
+      )
+    }
+    const record = await assertHostedSettlementRecorded(api, hosted, {
+      paymentId: prep.payment_id,
+      settle,
+      paymentHeader,
+      merchantHash,
+      anchorMs: settleAnchor,
+    })
+    if (!record.ok) return fail(record.detail)
 
     // ── 8. The post-purchase allowance block (#1310) ─────────────────────────
     if (!('allowance' in settle) || settle.allowance === undefined) {
@@ -827,20 +866,7 @@ export const x402CatalogGuidedPurchase: Scenario = {
         : `remaining allowance rail=${settle.allowance.rail}`
 
     // ── 9. Both on-chain legs, not just the merchant saying yes ──────────────
-    const fundingHash = settle.funding_tx_hash
-    const merchantHash = settle.settlement_tx_hash
-    if (!fundingHash) return fail('settle reported settled:true with no funding_tx_hash — the funding leg is unevidenced')
-    if (!merchantHash) {
-      return fail(
-        'settle reported settled:true with no settlement_tx_hash — the merchant leg cannot be verified on-chain',
-      )
-    }
-    if (fundingHash.toLowerCase() === merchantHash.toLowerCase()) {
-      return fail(
-        `funding and settlement report the SAME tx ${fundingHash} — the two-leg bridge collapsed to one hop`,
-      )
-    }
-
+    // The hashes were checked at 7a.
     const fundingReceipt = await waitForReceipt(provider, fundingHash)
     if (!fundingReceipt) return fail(`funding tx ${fundingHash} has no receipt on Base Sepolia`)
     if (fundingReceipt.status !== 1) return fail(`funding tx ${fundingHash} REVERTED on-chain`)
@@ -893,7 +919,8 @@ export const x402CatalogGuidedPurchase: Scenario = {
       `guided catalog purchase (${entry.name}, catalog_id ${entry.id}) settled via payment_id-only ` +
         `continuation: funding ${fundingHash} (block ${fundingReceipt.blockNumber}), merchant ${merchantHash} ` +
         `(block ${merchantReceipt.blockNumber}); treasury ${fmt(treasuryBefore)} → ${fmt(treasuryAfter)}, zero ` +
-        `delegate residual${carried}; ${allowanceNote}; intent ${prep.payment_id}; ` +
+        `delegate residual${carried}; merchant settlement recorded: ${record.hash} (via ${record.via}); ` +
+        `${allowanceNote}; intent ${prep.payment_id}; ` +
         `timings ms (#1348 telemetry): prepare=${stepMs.prepare ?? '?'} sign=${stepMs.sign ?? '?'} ` +
         `settle=${stepMs.settle ?? '?'} total=${Date.now() - scenarioStart}`,
     )

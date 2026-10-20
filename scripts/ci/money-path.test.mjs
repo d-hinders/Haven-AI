@@ -101,11 +101,25 @@ const NUL = '\u0000'
 
 /**
  * Does a backend-relative prose token name this repo-root-relative glob?
- * Suffix match, with `*` treated as a single path segment's wildcard so
- * `rails/delegation-*.ts` covers `packages/backend/src/rails/delegation-*.ts`.
+ * Suffix match at a path boundary: `rails/delegation-*.ts` names
+ * `packages/backend/src/rails/delegation-*.ts` because the glob ENDS in that
+ * token. A wildcard inside a token is not a pattern (#4122) — it is compared as
+ * the literal text, so `packages/sdk/src/**` names that one glob string and no
+ * file under it.
  */
 function tokenNamesGlob(token, glob) {
   const needle = token.replace(/\/$/, '')
+  // A token whose segments after the first are ALL wildcards names nothing
+  // (#4122), and neither does a token that is a wildcard alone (`*/`, `**/`
+  // once the trailing slash is stripped). `src/**` — the tail of a
+  // `packages/mcp-server/src/**` entry — used to be read as a pattern and
+  // matched every `packages/<pkg>/src/<file>`. Six of the eight SDK globs were
+  // "named" by it alone, and so was a file that does not exist, so leaving an
+  // SDK file out of the Merge Gate could never go red. Without this return
+  // `src/**` would still name the two `.../src/**` package globs by suffix.
+  const segments = needle.split('/')
+  const tail = segments.length > 1 ? segments.slice(1) : segments
+  if (tail.every((s) => /^\*+$/.test(s))) return false
   const stripped = glob.replace(/\/\*\*$/, '')
   // Anchor every match at a path boundary. A bare `endsWith` would let a token
   // satisfy any glob merely ENDING in those characters, so two canonical globs
@@ -115,12 +129,11 @@ function tokenNamesGlob(token, glob) {
   const boundedEnd = (haystack) => haystack === needle || haystack.endsWith(`/${needle}`)
   if (boundedEnd(stripped) || boundedEnd(glob)) return true
 
-  // Wildcards on the TOKEN side: prose says `rails/delegation-*.ts`, the
-  // canonical glob is the same pattern under packages/backend/src/.
-  if (needle.includes('*')) {
-    const pattern = needle.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^/]*')
-    if (new RegExp(`(?:^|/)${pattern}$`).test(stripped)) return true
-  }
+  // No wildcards on the TOKEN side (#4122). A branch here read a token's `*`
+  // as a pattern, so `packages/sdk/src/**` or `sdk/src/*` named all nine SDK
+  // globs, `src/*.ts` and `routes/*.ts` ten each, and the prose could blind
+  // the reverse direction with one sentence. Every pattern the Merge Gate
+  // writes is matched by the boundary-anchored suffix test above.
 
   // Wildcards on the GLOB side: prose may name a concrete file that only a
   // pattern covers — `infra/relayer-balance-monitor.ts` is matched solely by
@@ -178,7 +191,10 @@ describe('money-path list stays in one piece', () => {
       [],
       'SKILL.md names money-path files absent from .github/money-path-globs.json. ' +
         'Add them to the JSON and to labeler.yml — prose that the machinery does not ' +
-        'know about is the exact drift #1030 closed.',
+        'know about is the exact drift #1030 closed. If a listed token is only ' +
+        'wildcards after its first segment (`src/**`, `signer/**`) or a wildcard ' +
+        'alone, it names nothing by design (#4122): write the full path instead, ' +
+        'do not add it to the JSON.',
     )
   })
 
@@ -208,6 +224,39 @@ describe('money-path list stays in one piece', () => {
         'that prose, not this JSON, so a perimeter missing from it is a perimeter ' +
         'the human half of the union cannot apply (#1892).',
     )
+  })
+
+  test('a wildcard in a token is not a pattern, and a wildcard-only token names nothing (#4122)', () => {
+    // The Merge Gate parity test above could not fail for an SDK file. The
+    // prose token `src/**` (the tail of the mcp-server and demo-merchant
+    // entries) matched every `packages/<pkg>/src/<file>` on a token-wildcard
+    // branch (now deleted), so six of the eight SDK globs were "named" by it alone, and so
+    // were packages/sdk/src/client.ts and a file that does not exist.
+    // Mutations: re-add a token-side pattern branch to tokenNamesGlob and the
+    // `packages/sdk/src/**` assertion fails; drop the wildcard-only early
+    // return and the `src/**`-against-a-package-glob and `**/` assertions fail.
+    assert.equal(tokenNamesGlob('src/**', 'packages/sdk/src/client.ts'), false)
+    assert.equal(tokenNamesGlob('src/**', 'packages/sdk/src/does-not-exist.ts'), false)
+    assert.equal(tokenNamesGlob('src/**', 'packages/mcp-server/src/**'), false)
+    assert.equal(tokenNamesGlob('x/*', 'packages/backend/src/x/a.ts'), false)
+    // A wildcard inside a longer token is not a pattern either.
+    assert.equal(tokenNamesGlob('packages/sdk/src/**', 'packages/sdk/src/client.ts'), false)
+    assert.equal(tokenNamesGlob('sdk/src/*', 'packages/sdk/src/client.ts'), false)
+    assert.equal(tokenNamesGlob('src/*.ts', 'packages/sdk/src/client.ts'), false)
+    assert.equal(tokenNamesGlob('routes/*.ts', 'packages/backend/src/routes/x402.ts'), false)
+    assert.equal(tokenNamesGlob('*/', 'packages/sdk/src/client.ts'), false)
+    assert.equal(tokenNamesGlob('**/', 'packages/sdk/src/client.ts'), false)
+    assert.equal(tokenNamesGlob('**/', 'packages/signer/**'), false)
+    assert.equal(tokenNamesGlob('rails/delegation-*.ts', 'packages/backend/src/rails/delegation-*.ts'), true)
+    assert.equal(tokenNamesGlob('packages/mcp-server/src/**', 'packages/mcp-server/src/**'), true)
+    assert.equal(tokenNamesGlob('mcp-server/src/**', 'packages/mcp-server/src/**'), true)
+
+    // The same through a fixture Merge Gate list: a package entry whose prose
+    // says "scoped to `src/**`" must not name an SDK file it never mentions.
+    const fixture = '- `packages/mcp-server/src/**` (the hosted MCP surface. Scoped to `src/**`);\n'
+    const tokens = listedTokens(fixture)
+    assert.deepEqual(tokens, ['packages/mcp-server/src/**', 'src/**'])
+    assert.equal(tokens.some((t) => tokenNamesGlob(t, 'packages/sdk/src/merchant-completion.ts')), false)
   })
 
   test('the two lists are disjoint — a glob belongs to exactly one', () => {
@@ -474,6 +523,65 @@ describe('money-path list stays in one piece', () => {
     }
   })
 
+  test('the SDK merchant-answer decision is RUNTIME money-path — a change to it gates promotion (#4122)', () => {
+    // MerchantCompletion.retryRequest decides, after the funding leg has moved
+    // USDC, whether the merchant accepted or the payment is a rejection after
+    // funding, and reports the settlement hash Haven records. It matched no
+    // glob: of the 17 commits that touched it since the facade refactor
+    // 399b1c00f, three touched no perimeter file and went unlabelled
+    // (4e52d4b35, fefd9dc45, 98e1c9cc8). Runtime, not control: qa-dev's
+    // x402-delegation-3009 and x402-delegation-3009-grace-resume legs drive
+    // retryRequest through client.fetch / resumeX402Payment. The labeler and
+    // SKILL.md pins read the UNION of both lists, so without this test the
+    // glob could drift into controlGlobs silently. Mutation: move the glob to
+    // controlGlobs (or drop it) and this fails by name.
+    const f = 'packages/sdk/src/merchant-completion.ts'
+    assert.ok(trackedFiles().includes(f), `${f} no longer exists — repoint this pin`)
+    assert.ok(
+      moneyPathFiles([f], loadMoneyPathGlobs()).length === 1,
+      `${f} must be matched by a RUNTIME money-path glob — it decides a funded payment's ` +
+        'merchant outcome, and the money-flow harness exercises it (#4122)',
+    )
+  })
+
+  test('the shared post-funding merchant-answer decision is RUNTIME money-path — a change to it gates promotion (#4120)', () => {
+    // The #4122 shape, one hop over: #4120 moved the accepted/rejected-after-
+    // funding decision OUT of the listed merchant-completion.ts into the new
+    // packages/sdk/src/merchant-answer.ts (owner decision 2 on #4120 — the
+    // module is tracked by its own issue), shared by the hosted
+    // completeX402MerchantCall and the local MerchantCompletion.retryRequest.
+    // Without this pin the move would have taken the decision off the
+    // perimeter silently. Runtime, not control: qa-dev's x402-delegation-3009
+    // legs drive the local path through client.fetch / resumeX402Payment and
+    // the hosted legs drive completeX402MerchantCall through the deployed
+    // server. Mutation: move the glob to controlGlobs (or drop it) and this
+    // fails by name.
+    const f = 'packages/sdk/src/merchant-answer.ts'
+    assert.ok(trackedFiles().includes(f), `${f} no longer exists — repoint this pin`)
+    assert.ok(
+      moneyPathFiles([f], loadMoneyPathGlobs()).length === 1,
+      `${f} must be matched by a RUNTIME money-path glob — it decides a funded payment's ` +
+        'merchant outcome and which settlement hash Haven records (#4120)',
+    )
+  })
+
+  test('the SDK client stays off the money-path list — it only wires the guards in (#3283, #4122)', () => {
+    // A deliberate decision, recorded by #3283 and re-taken by the owner on
+    // #4120 (2026-10-20): client.ts calls the listed guards and
+    // merchant-completion.ts, and listing it would put every SDK transport
+    // change on the runtime list. If it starts deciding spend itself, list the
+    // deciding code as its own file; do not delete this pin to list client.ts.
+    // Mutation: add packages/sdk/src/client.ts to `globs` and this fails.
+    const f = 'packages/sdk/src/client.ts'
+    assert.ok(trackedFiles().includes(f), `${f} no longer exists — drop this pin`)
+    const all = [...loadMoneyPathGlobs(), ...loadMoneyPathControlGlobs()]
+    assert.equal(
+      moneyPathFiles([f], all).length,
+      0,
+      `a money-path glob now matches ${f}, which #3283 and #4122 deliberately left off the list`,
+    )
+  })
+
   test('the deliberately off-list neighbours stay off — scope a glob down, do not widen to the module (#3661)', () => {
     // #3661 chose FILE-level globs for modules/payments/: the rest of the
     // module is the refusal record (which by design cannot change the
@@ -529,15 +637,17 @@ describe('money-path list stays in one piece', () => {
       // binding check (userop-binding) and the signing-surface guard moved in
       // by #3283 (delegate-account, direct-payment-guard, redemption-guard,
       // settlement-child), joined by the task/sub-budget guards (#3661), are
-      // spend authority, and those files ARE on the runtime list; the rest is
-      // transport.
+      // spend authority, merchant-completion (#4122) decides a funded
+      // payment's merchant outcome, and merchant-answer.ts (#4120) is the one
+      // shared copy of that decision; those ten files ARE on the runtime list.
+      // The rest is transport — client.ts among it, pinned off above.
       // The doc covers all four because the CASP perimeter question (does
       // Haven hold or move funds?) still applies to what they ship. Widening
       // any of these to `globs` is an owner decision: every SDK/connector/CLI/
       // local-runtime PR would then owe a covering QA run.
       // A DOC_ONLY entry whose files are ALL on the list is stale and fails
       // below — an exclusion must exclude something.
-      ['packages/sdk/src/**', 'client library; only signer.ts, userop-binding.ts, the #3283 signing guard and the #3661 budget guards are on the runtime list — see #3098'],
+      ['packages/sdk/src/**', 'client library; only signer.ts, userop-binding.ts, the #3283 signing guard, the #3661 budget guards and merchant-completion.ts (#4122) are on the runtime list — see #3098'],
       ['packages/cli/src/**', 'client CLI; not deployed by Haven — see #3098'],
       ['packages/connect/src/**', 'the dashboard\'s connector, runs on the user\'s machine — see #3098'],
       ['packages/mcp/src/**', 'the local MCP runtime, runs in the agent\'s process — see #3098'],

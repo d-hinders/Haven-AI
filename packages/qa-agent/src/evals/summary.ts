@@ -35,6 +35,18 @@ export function renderMarkdownSummary(report: EvalReport): string {
     const cost = costs.length > 0 ? usd(costs.reduce((a, b) => a + b, 0) / costs.length) : '—'
     lines.push(`| ${t.id} | ${t.category} | ${rate} | ${passK} | ${ms(t.medianSessionMs)} | ${cost} |`)
   }
+  // Failed trials, with the public-safe tool trace (names + error codes
+  // only), so a failure can be diagnosed from the run page itself.
+  const failed = report.tasks.flatMap((t) => t.trials.filter((r) => !r.pass).map((r) => ({ t, r })))
+  if (failed.length > 0) {
+    lines.push('')
+    lines.push('**Failed trials**')
+    lines.push('')
+    for (const { t, r } of failed) {
+      lines.push(`- \`${t.id}\` trial ${r.trial}: ${r.detail}`)
+      if (r.trace) lines.push(`  - tools: ${r.trace.length ? r.trace.map((s) => `\`${s}\``).join(' → ') : '(no tool calls)'}`)
+    }
+  }
   lines.push('')
   // Model identity in EVERY report (#3992 C): absent values say so instead
   // of disappearing — an unpinned model change must never read as a

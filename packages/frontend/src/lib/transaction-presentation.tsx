@@ -39,9 +39,10 @@ export function transactionTitle(tx: AggregatedTransaction): string {
 
 /**
  * Who initiated the row (#2097). "You" is reserved for human-initiated
- * payments (`initiatedBy === 'human'`); agent rows render the agent identity;
- * inbound rows carry no initiator; and missing attribution renders as
- * explicit "Unknown" — never "You".
+ * payments (`initiatedBy === 'human'`, an owner send recorded at submit,
+ * #4099); agent rows render the agent identity; inbound rows carry no
+ * initiator, bar an agent's delegate sweep; and missing attribution renders
+ * as explicit "Unknown" — never "You".
  */
 export function transactionInitiator(tx: AggregatedTransaction): string {
   // Delegate sweeps are agent-attributed regardless of direction — they read
@@ -93,7 +94,10 @@ export function transactionMovement(
  * surfaces, so every `truncate()` fallback is replaced by calm copy — a sweep
  * reads "Returned from <agent>", an x402 row without a recorded resource URL
  * falls back to its source title ("Agent payment"), an inbound row reads
- * "Deposit", and an address nothing resolves (no own-account name, no
+ * "Deposit" — or "From <account>" when the backend named its sender
+ * (`resolvedName`, only a transfer from another of the user's own accounts,
+ * #4099) — and an address
+ * nothing resolves (no own-account name, no
  * contact, no pre-resolved counterparty name) reads "New recipient" rather
  * than `0xA873…DD35`. `options.resolvedName` carries a name resolved
  * server-side for the counterparty (the activity groups' `merchantName`,
@@ -123,7 +127,14 @@ export function counterpartyLabel(
         'Agent payment'
       )
     }
-    if (tx.direction === 'in') return 'Deposit'
+    // #4099 (owner decision, 2026-10-20): a server-resolved sender name — only
+    // a transfer from another of the user's own accounts — reads "From
+    // <account>", so the title says the money LEFT that account (a bare name
+    // reads as the account that received it). Every other deposit carries
+    // none and stays "Deposit".
+    if (tx.direction === 'in') {
+      return options.resolvedName ? `From ${options.resolvedName}` : 'Deposit'
+    }
 
     const address = tx.to
     const addressKey = address.toLowerCase()

@@ -17,6 +17,10 @@ import {
 } from '@/components/ui/DropdownMenu'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { FilterPill } from '@/components/ui/FilterPill'
+import { FacetMenu, type ListFacet } from '@/components/ui/FacetMenu'
+import { ListNoMatch, ListToolbar } from '@/components/ui/ListToolbar'
+import { PeriodPicker } from '@/components/ui/PeriodPicker'
+import { clearedListState, type ListState, type PeriodValue } from '@/components/ui/list-url-codec'
 import { Monogram } from '@/components/ui/Monogram'
 import { MerchantCard } from '@/components/marketplace/MerchantCard'
 import { ComingSoonMerchants } from '@/components/marketplace/ComingSoonMerchants'
@@ -579,6 +583,231 @@ const DS_LEDGER_ROWS = [
   { id: 'l3', at: new Date(Date.now() - 26 * 3_600_000).toISOString(), title: 'api.vendor.com', description: 'Research assistant', value: '36.00' },
 ]
 
+// ── List controls (#4110, epic #4108) ─────────────────────────────────────
+// Sample data for the ListToolbar showcase. Rows are filtered in memory, so
+// the count is the applied result exactly as a browser-filtered page wires it.
+
+const DS_LIST_NOUN = { one: 'agent', other: 'agents' }
+
+const DS_LIST_AGENTS = [
+  { id: 'a1', name: 'Agent naming', status: 'active', budget: 'recurring', seen: 3 },
+  { id: 'a2', name: 'Atlas', status: 'active', budget: 'recurring', seen: 1 },
+  { id: 'a3', name: 'Demo agent', status: 'paused', budget: 'none', seen: 5 },
+  { id: 'a4', name: 'Lovable Dev', status: 'active', budget: 'one_time', seen: 2 },
+  { id: 'a5', name: 'Research assistant', status: 'revoked', budget: 'none', seen: 4 },
+]
+
+const DS_LIST_SORT = {
+  options: [
+    { value: 'name', label: 'Name' },
+    { value: 'seen', label: 'Recently seen' },
+  ],
+}
+
+function dsListFacets(rows: typeof DS_LIST_AGENTS): ListFacet[] {
+  const count = (key: 'status' | 'budget', value: string) => rows.filter((r) => r[key] === value).length
+  return [
+    {
+      id: 'status',
+      label: 'Status',
+      selection: 'multi',
+      values: ['active', 'paused', 'revoked'],
+      options: [
+        { value: 'active', label: 'Active', count: count('status', 'active') },
+        { value: 'paused', label: 'Paused', count: count('status', 'paused') },
+        { value: 'revoked', label: 'Revoked', count: count('status', 'revoked') },
+      ],
+    },
+    {
+      id: 'budget',
+      label: 'Budget',
+      values: ['recurring', 'one_time', 'none'],
+      options: [
+        { value: 'recurring', label: 'Recurring budget' },
+        { value: 'one_time', label: 'One-time budget' },
+        { value: 'none', label: 'No budget' },
+      ],
+    },
+    // One account: a single possible value, so the facet is hidden.
+    { id: 'account', label: 'Account', options: [{ value: 'acc-1', label: 'My account' }] },
+  ]
+}
+
+const DS_LIST_EMPTY: ListState = { q: '', facets: { status: [], budget: [], account: [] }, sort: 'name' }
+
+function dsApplyListState(state: ListState) {
+  const q = state.q.trim().toLowerCase()
+  return DS_LIST_AGENTS.filter(
+    (r) =>
+      (!q || r.name.toLowerCase().includes(q)) &&
+      (state.facets.status.length === 0 || state.facets.status.includes(r.status)) &&
+      (state.facets.budget.length === 0 || state.facets.budget.includes(r.budget)),
+  ).sort((a, b) => (state.sort === 'seen' ? a.seen - b.seen : a.name.localeCompare(b.name)))
+}
+
+/** One live, browser-filtered list: toolbar, rows, and the shared no-match. */
+function ListControlsExample({
+  initial = DS_LIST_EMPTY,
+  layout,
+  loading = false,
+  testId,
+}: {
+  initial?: ListState
+  layout?: 'responsive' | 'phone'
+  loading?: boolean
+  testId: string
+}) {
+  const [state, setState] = useState<ListState>(initial)
+  const rows = dsApplyListState(state)
+  const facets = dsListFacets(DS_LIST_AGENTS)
+  return (
+    <div className="space-y-3" data-testid={testId}>
+      <ListToolbar
+        noun={DS_LIST_NOUN}
+        state={state}
+        onChange={setState}
+        filtering="browser"
+        facets={facets}
+        sort={DS_LIST_SORT}
+        searchDescription="By name or delegate address"
+        count={loading ? null : { shown: rows.length, total: DS_LIST_AGENTS.length }}
+        layout={layout}
+      />
+      {/* ListNoMatch sits where the rows were — in place of the list card, not inside it. */}
+      {!loading && rows.length === 0 ? (
+        <ListNoMatch noun={DS_LIST_NOUN} onClear={() => setState(clearedListState(state, { facets }))} />
+      ) : (
+        <Card hover={false} className="overflow-hidden">
+          <div className="divide-y divide-[var(--v2-border)]" aria-busy={loading || undefined}>
+            {loading
+              ? [0, 1, 2].map((i) => (
+                  <div key={i} className="flex items-center gap-3 px-4 py-3">
+                    <Skeleton className="h-4 w-40" />
+                    <Skeleton className="ml-auto h-5 w-14" />
+                  </div>
+                ))
+              : rows.map((row) => (
+                  <Row
+                    key={row.id}
+                    title={row.name}
+                    subtitle={row.budget === 'none' ? 'No budget' : 'Has a budget'}
+                    trailing={
+                      <StatusBadge tone={row.status === 'active' ? 'success' : 'neutral'}>
+                        {row.status[0].toUpperCase() + row.status.slice(1)}
+                      </StatusBadge>
+                    }
+                  />
+                ))}
+          </div>
+        </Card>
+      )}
+    </div>
+  )
+}
+
+/**
+ * A server-filtered list: the search commits once per 300 ms pause, so the
+ * request counter moves once per pause, never per keystroke. Transactions-
+ * shaped: Export CSV in the actions slot, a Period with a custom range.
+ */
+function ServerListControlsExample() {
+  const [state, setState] = useState<ListState>({ q: '', facets: { chainId: [], direction: [] }, period: { preset: '30d' } })
+  const [requests, setRequests] = useState(1)
+  const { toast } = useToast()
+  return (
+    <div className="space-y-2" data-testid="ds-list-controls-server">
+      <ListToolbar
+        noun={{ one: 'transaction', other: 'transactions' }}
+        state={state}
+        onChange={(next) => {
+          setState(next)
+          setRequests((n) => n + 1)
+        }}
+        filtering="server"
+        facets={[
+          {
+            id: 'chainId',
+            label: 'Network',
+            options: [
+              { value: '8453', label: 'Base' },
+              { value: '84532', label: 'Base Sepolia' },
+            ],
+          },
+          {
+            id: 'direction',
+            label: 'Direction',
+            options: [
+              { value: 'in', label: 'Incoming' },
+              { value: 'out', label: 'Outgoing' },
+            ],
+          },
+        ]}
+        period={{ allowCustom: true }}
+        actions={
+          <Button variant="ghost" size="sm" onClick={() => toast.info('Exports the filtered list')}>
+            Export CSV
+          </Button>
+        }
+        count={{ shown: 12, total: 60 }}
+      />
+      <p className="text-xs text-[var(--v2-ink-3)]" data-testid="ds-list-controls-requests">
+        Requests sent: {requests}
+      </p>
+    </div>
+  )
+}
+
+/** FacetMenu and PeriodPicker on their own: pills, and the Analytics period. */
+function FacetPrimitivesExample() {
+  const [category, setCategory] = useState<string[]>([])
+  const [network, setNetwork] = useState<string[]>(['8453'])
+  const [period, setPeriod] = useState<PeriodValue>({ preset: '30d' })
+  return (
+    <div className="flex flex-col gap-4" data-testid="ds-list-controls-primitives">
+      <FacetMenu
+        facet={{
+          id: 'category',
+          label: 'Category',
+          rendering: 'pills',
+          options: [
+            { value: 'ai', label: 'AI' },
+            { value: 'api', label: 'API' },
+            { value: 'data', label: 'Data' },
+            { value: 'storage', label: 'Storage' },
+          ],
+        }}
+        value={category}
+        onChange={setCategory}
+      />
+      <div className="flex flex-wrap items-center gap-2">
+        <FacetMenu
+          facet={{
+            id: 'chainId',
+            label: 'Network',
+            defaultValue: ['8453'],
+            options: [
+              { value: '8453', label: 'Base' },
+              { value: '84532', label: 'Base Sepolia' },
+            ],
+          }}
+          value={network}
+          onChange={setNetwork}
+        />
+        <PeriodPicker value={period} onChange={setPeriod} allowAllTime={false} defaultValue={{ preset: '30d' }} align="left" />
+      </div>
+    </div>
+  )
+}
+
+function ListControlsState({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="space-y-2">
+      <p className="max-w-3xl text-xs leading-relaxed text-[var(--v2-ink-3)]">{label}</p>
+      {children}
+    </div>
+  )
+}
+
 function Section({
   title,
   description,
@@ -679,7 +908,7 @@ export default function DesignSystemPage() {
       <PageHeader
         eyebrow="Internal reference"
         title="Haven design system"
-        subtitle="The source of truth for Haven UI. Compose what's here before inventing new visual treatments — and add a new entry here in the same PR if you do."
+        subtitle="The source of truth for Haven UI. Compose what's here before inventing new visual treatments. A new pattern lands here first, in its own owner-approved slice; extracting a shape the product already ships lands here in the same PR."
         actions={
           <Button variant="ghost" size="sm" onClick={() => toast.info('Use shared primitives before adding a new pattern.')}>
             Show toast
@@ -706,10 +935,12 @@ export default function DesignSystemPage() {
               shared primitive.
             </li>
             <li>
-              <span className="font-medium text-[var(--v2-ink)]">3. Add new entries in the same PR.</span> If
-              the system genuinely lacks what you need — a new colour token, a new primitive, a new pattern
-              — add it here alongside the implementation. Reviewers gate this: a PR that introduces a new
-              UI shape without updating this page should be sent back.
+              <span className="font-medium text-[var(--v2-ink)]">3. New patterns first, extractions in the same PR.</span>{' '}
+              A composition with no shipped instance and no entry here is a new pattern: it lands on this
+              page first, in its own owner-approved design-system slice, before any page uses it. Extracting
+              a shape the product already ships, on the diff that writes its second copy, stays in that same
+              PR (Pattern Absorption). Reviewers gate this: a PR that introduces a new UI shape without an
+              entry here should be sent back.
             </li>
             <li>
               <span className="font-medium text-[var(--v2-ink)]">4. Mind the copy conventions.</span> See the
@@ -2574,6 +2805,45 @@ export default function DesignSystemPage() {
               ? `Opened "${dsLedgerOpened}" — the account page opens the shared TransactionDetailPanel from this row.`
               : 'Click a row (or press Enter) — the account page opens the shared TransactionDetailPanel from the row.'}
           </p>
+        </div>
+      </Section>
+
+      <Section
+        testId="ds-list-controls"
+        title="List controls — ListToolbar, FacetMenu, PeriodPicker"
+        description="The one pattern for search, filters, sort, period, count and no-match on every list (#4110, epic #4108). A page declares its noun, facets, optional Sort and Period, and an actions slot; the toolbar owns layout, keyboard, the phone sheet, chips, count and copy. State lives in the URL through list-url-codec + useListUrlState. Full rules: the List controls section of design-system.md."
+      >
+        <div className="grid gap-6">
+          <ListControlsState label="Default — browser-filtered, every keystroke re-renders the rows; Status is multi-select, Budget single-select, Sort is a chip (this list has no sortable headers). Account has one value, so it is hidden.">
+            <ListControlsExample testId="ds-list-controls-default" />
+          </ListControlsState>
+          <ListControlsState label="Filtered — a removable chip per filter, Clear filters, and “{shown} of {total}”, announced politely.">
+            <ListControlsExample
+              testId="ds-list-controls-filtered"
+              initial={{ ...DS_LIST_EMPTY, q: 'at', facets: { ...DS_LIST_EMPTY.facets, status: ['active'] } }}
+            />
+          </ListControlsState>
+          <ListControlsState label="No match — the shared ListNoMatch state sits where the rows were; the toolbar stays so the user can edit what caused it.">
+            <ListControlsExample testId="ds-list-controls-no-match" initial={{ ...DS_LIST_EMPTY, q: 'zzz' }} />
+          </ListControlsState>
+          <ListControlsState label="Loading — the count is a placeholder until the list answers.">
+            <ListControlsExample testId="ds-list-controls-loading" loading />
+          </ListControlsState>
+          <ListControlsState label="Phone — below 640px (forced here with layout=&quot;phone&quot;) the facets collapse into “Filters (n)”. The bottom sheet applies each tap live; its footer only closes and names the applied count.">
+            <div className="max-w-[375px]">
+              <ListControlsExample
+                testId="ds-list-controls-phone"
+                layout="phone"
+                initial={{ ...DS_LIST_EMPTY, facets: { ...DS_LIST_EMPTY.facets, status: ['active'] } }}
+              />
+            </div>
+          </ListControlsState>
+          <ListControlsState label="Server-filtered — the search commits once per 300ms pause (Enter at once, Escape clears), so one request per pause. Export CSV sits in the actions slot; Period offers a custom range.">
+            <ServerListControlsExample />
+          </ListControlsState>
+          <ListControlsState label="FacetMenu and PeriodPicker on their own — a pill facet (toggle buttons, aria-pressed) for a short category list, a single-select menu whose page default is not All (untinted at its default; tinted once changed), and the Analytics period: presets only, no All time, untinted at its 30-day default. Menu rows draw RadioMark (menuitemradio) or CheckboxMark (menuitemcheckbox).">
+            <FacetPrimitivesExample />
+          </ListControlsState>
         </div>
       </Section>
 

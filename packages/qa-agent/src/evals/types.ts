@@ -209,6 +209,7 @@ export interface GraderContext {
 export type GraderName =
   | 'transfer_settled'
   | 'payment_status_settled'
+  | 'haven_payment_submitted'
   | 'no_payment_retry_after_refusal'
   | 'agent_status_before_payment'
   | 'x402_request_mode_replay'

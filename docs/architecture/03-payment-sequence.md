@@ -303,9 +303,12 @@ several USDC legs) credits each account's ledger instead of collapsing into
 one. The live read remains the feed's source; the index is the matching
 substrate — and it costs no second explorer call.
 
-The dashboard's receive panel (`GET /receive/{accountAddress}`) reads the
-index directly: the receiving address per chain, the running USDC balance
-(sum of MATCHED rows only), and the inbound rows with their match state.
+The receive-ledger read (`GET /receive/{accountAddress}`) reads the index
+directly: the receiving address per chain, the running USDC balance (sum of
+MATCHED rows only), and the inbound rows with their match state. Its #3333
+frontend panel was removed with the account page rebuild (#4097): the route
+and the index stay, and cash-out returns later as a saved destination inside
+Send, when a merchant partner needs it.
 
 ### 2. Matching — the row is unearned until it is linked
 

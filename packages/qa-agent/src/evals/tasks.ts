@@ -4,10 +4,10 @@
  * A task file is JSON — never Markdown (#3958's obligation list) — one file
  * per task under `src/evals/tasks/`. Loading validates the file against the
  * `EvalTask` shape AND its own internal coherence (graders exist in the
- * registry, over-budget tasks actually go over, transfer-expecting tasks
- * name a transfer grader): a task file that parses but means nothing would
- * otherwise pass silently and fail only on the partner's machine, three
- * hours into a nightly run.
+ * registry and carry only the option keys they read, over-budget tasks
+ * actually go over, transfer-expecting tasks name a transfer grader): a
+ * task file that parses but means nothing would otherwise pass silently and
+ * fail only on the partner's machine, three hours into a nightly run.
  *
  * Resolution is the budget-aware half (#3958 § 4, re-scoped per-trial by
  * #3992 A2): the amount comes from a LIVE read of the remaining period
@@ -26,9 +26,9 @@
 import { readdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { GRADERS } from './graders.js'
-import { HOSTED_TOOLS, PAYMENT_TOOLS, SIGNER_TOOLS } from './tools.js'
-import type { EvalTask, ResolvedTask } from './types.js'
+import { GRADER_OPTION_KEYS, GRADERS } from './graders.js'
+import { ALL_TOOL_NAMES, HOSTED_TOOLS, PAYMENT_TOOLS, SIGNER_TOOLS } from './tools.js'
+import type { EvalTask, GraderName, ResolvedTask } from './types.js'
 
 const TASKS_DIR = join(fileURLToPath(import.meta.url), '..', 'tasks')
 
@@ -63,6 +63,63 @@ export function fractionOfRemaining(remaining: bigint, fraction: string): bigint
   return (remaining * num) / den
 }
 
+/**
+ * One grader's options (#4136). Every grader's option keys are closed
+ * (`GRADER_OPTION_KEYS`): a grader ignores a key it does not read, so a
+ * misspelt key is a check that silently does not run — a false pass, and so
+ * is a wrongly typed value, so the value types are checked too. Tool names
+ * (`tool_called`'s `name` / `after`, `preemptiveReadTools`) must be known
+ * bare names (`ALL_TOOL_NAMES`).
+ */
+function validateGraderOptions(grader: { name: GraderName; options?: unknown }, file: string): string | null {
+  const { name, options } = grader
+  if (options === undefined) {
+    return name === 'tool_called' ? `${file}: tool_called needs options.name — the tool it grades` : null
+  }
+  if (typeof options !== 'object' || options === null || Array.isArray(options)) {
+    return `${file}: ${name} options must be an object`
+  }
+  const allowed = GRADER_OPTION_KEYS[name]
+  const unknown = Object.keys(options).filter((k) => !allowed.includes(k))
+  if (unknown.length > 0) {
+    return (
+      `${file}: ${name} has unknown option key(s) ${unknown.map((k) => JSON.stringify(k)).join(', ')} — ` +
+      `it reads only ${allowed.length > 0 ? allowed.map((k) => JSON.stringify(k)).join(', ') : 'no options'}; ` +
+      `an ignored key is a check that silently does not run`
+    )
+  }
+  const o = options as Record<string, unknown>
+  // Value types: a wrongly typed value is as silent as a misspelt key —
+  // `probePaymentTools: "true"` is not `=== true`, so the signer check never
+  // runs; a non-array `mustMention` crashes or matches nothing.
+  const nonEmptyString = (v: unknown): boolean => typeof v === 'string' && v.length > 0
+  const isToolName = (v: unknown): boolean => typeof v === 'string' && ALL_TOOL_NAMES.includes(v)
+  for (const key of ['errorCode', 'name', 'after'] as const) {
+    if (key in o && !nonEmptyString(o[key])) {
+      return `${file}: ${name} options.${key} must be a non-empty string, got ${JSON.stringify(o[key])}`
+    }
+  }
+  for (const key of ['probePaymentTools', 'acceptPreemptive'] as const) {
+    if (key in o && typeof o[key] !== 'boolean') {
+      return `${file}: ${name} options.${key} must be a boolean, got ${JSON.stringify(o[key])} — any other value silently does not apply the option`
+    }
+  }
+  if ('mustMention' in o && (!Array.isArray(o.mustMention) || !o.mustMention.every(nonEmptyString))) {
+    return `${file}: ${name} options.mustMention must be an array of non-empty strings, got ${JSON.stringify(o.mustMention)}`
+  }
+  if ('preemptiveReadTools' in o && (!Array.isArray(o.preemptiveReadTools) || o.preemptiveReadTools.length === 0 || !o.preemptiveReadTools.every(isToolName))) {
+    return `${file}: ${name} options.preemptiveReadTools must be a non-empty array of known bare tool names (tools.ts ALL_TOOL_NAMES), got ${JSON.stringify(o.preemptiveReadTools)}`
+  }
+  if (name !== 'tool_called') return null
+  if (!isToolName(o.name)) {
+    return `${file}: tool_called options.name must be a known bare tool name (tools.ts ALL_TOOL_NAMES), got ${JSON.stringify(o.name)}`
+  }
+  if (o.after !== undefined && !isToolName(o.after)) {
+    return `${file}: tool_called options.after must be a known bare tool name (tools.ts ALL_TOOL_NAMES), got ${JSON.stringify(o.after)}`
+  }
+  return null
+}
+
 /** Structural + coherence validation. Returns the error string, or null. */
 export function validateTask(raw: unknown, file: string): string | null {
   if (typeof raw !== 'object' || raw === null) return `${file}: not a JSON object`
@@ -90,7 +147,10 @@ export function validateTask(raw: unknown, file: string): string | null {
   if (!Array.isArray(graders) || graders.length === 0) return `${file}: graders must be a non-empty array`
   for (const g of graders) {
     if (typeof g?.name !== 'string') return `${file}: every grader needs a string name`
-    if (!(g.name in GRADERS)) return `${file}: unknown grader "${g.name}" — the registry is closed; extend graders.ts deliberately`
+    // Own keys only: `in` would accept Object.prototype names ("constructor").
+    if (!Object.hasOwn(GRADERS, g.name)) return `${file}: unknown grader "${g.name}" — the registry is closed; extend graders.ts deliberately`
+    const optionsError = validateGraderOptions(g as { name: GraderName; options?: unknown }, file)
+    if (optionsError) return optionsError
   }
   const source = t.source as Record<string, unknown> | undefined
   if (typeof source?.kind !== 'string' || !['bug-report', 'scenario', 'issue'].includes(source.kind as string)) {
@@ -115,6 +175,9 @@ export function validateTask(raw: unknown, file: string): string | null {
     const requires = t.requires
     if (!Array.isArray(requires) || !requires.some((r) => typeof r === 'string' && r.startsWith('EXHAUSTED'))) {
       return `${file}: tier 3 must declare its exhausted-budget precondition in "requires" (an EXHAUSTED-… entry) — the tier exists for tasks whose setup IS a spent budget`
+    }
+    if (exhaustedThresholdAtomic(t as unknown as EvalTask) === undefined) {
+      return `${file}: tier 3's EXHAUSTED requires entry must read EXHAUSTED-period-budget-below-<X>-USDC — the resolver verifies that bound at run time, and a label it cannot parse would switch the check off`
     }
     if (t.expectTransfer) {
       return `${file}: tier 3 expects an exhausted budget — it cannot also expect a transfer_settled outcome`
@@ -301,9 +364,27 @@ export async function resolveTask(
   }
 }
 
-/** Counts the tests pin, so a copied list fails loudly instead of silently. */
+/**
+ * The list sizes, as a readable count. They catch no drift on their own: they
+ * are computed from the lists in `tools.ts`, so they move with them. The drift
+ * check is the set equality against the upstream sources in `tools.test.ts`.
+ */
 export const TOOL_COUNTS = {
   hosted: HOSTED_TOOLS.length,
   signer: SIGNER_TOOLS.length,
   payment: PAYMENT_TOOLS.length,
 } as const
+
+/**
+ * The threshold a tier-3 task's `EXHAUSTED-period-budget-below-<X>-USDC`
+ * precondition names, in atomic USDC (6 decimals). Undefined when the task
+ * declares no such bound.
+ */
+export function exhaustedThresholdAtomic(task: EvalTask): bigint | undefined {
+  if (task.tier !== 3) return undefined
+  for (const r of task.requires) {
+    const m = /^EXHAUSTED-period-budget-below-(\d+)(?:\.(\d{1,6}))?-USDC$/.exec(r)
+    if (m) return BigInt(m[1]!) * 1_000_000n + BigInt((m[2] ?? '').padEnd(6, '0') || '0')
+  }
+  return undefined
+}

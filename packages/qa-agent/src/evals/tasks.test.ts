@@ -23,8 +23,9 @@ import {
   shuffleWithinTiers,
   validateTask,
 } from './tasks.js'
+import { GRADER_OPTION_KEYS } from './graders.js'
 import { HOSTED_TOOLS, SIGNER_TOOLS } from './tools.js'
-import type { EvalTask } from './types.js'
+import type { EvalTask, GraderName } from './types.js'
 
 const TASKS_DIR = join(fileURLToPath(import.meta.url), '..', 'tasks')
 
@@ -56,7 +57,7 @@ describe('the starter task set (read from disk)', () => {
   it('every referenced grader exists in the closed registry', async () => {
     const { tasks } = await loadTasks(TASKS_DIR)
     for (const t of tasks) {
-      for (const g of t.graders) expect(g.name).toMatch(/^(transfer_settled|payment_status_settled|no_payment_retry_after_refusal|agent_status_before_payment|x402_request_mode_replay|tool_called)$/)
+      for (const g of t.graders) expect(g.name).toMatch(/^(transfer_settled|payment_status_settled|haven_payment_submitted|no_payment_retry_after_refusal|agent_status_before_payment|x402_request_mode_replay|tool_called)$/)
     }
   })
 
@@ -139,6 +140,111 @@ describe('validateTask — the coherence rules', () => {
   })
 })
 
+describe('validateTask — grader options are closed (#4136)', () => {
+  // An over-budget base that carries both graders with options.
+  const base = {
+    id: 'test-task',
+    title: 'T',
+    category: 'over-budget',
+    instruction: 'Pay {amount} to {recipient}.',
+    requires: [],
+    amount: { rule: 'remaining_period_budget', delta_atomic: '1000000' },
+    graders: [
+      { name: 'no_payment_retry_after_refusal', options: { mustMention: ['budget'], acceptPreemptive: true } },
+      { name: 'tool_called', options: { name: 'haven_get_allowances' } },
+    ],
+    expectTransfer: false,
+    source: { kind: 'scenario', ref: 'x.ts', note: 'n' },
+  }
+  const withGraders = (graders: unknown[]) => ({ ...structuredClone(base), graders })
+  const refusalGrader = (options: Record<string, unknown>) => withGraders([{ name: 'no_payment_retry_after_refusal', options }])
+
+  it('accepts the well-formed base', () => {
+    expect(validateTask(structuredClone(base), 'x.json')).toBeNull()
+  })
+
+  it.each(Object.keys(GRADER_OPTION_KEYS) as GraderName[])('rejects an unknown option key on %s', (name) => {
+    const options: Record<string, unknown> = { misspeltKey: true }
+    if (name === 'tool_called') options.name = 'haven_get_allowances'
+    const t = withGraders([{ name, options }])
+    expect(validateTask(t, 'x.json')).toContain('unknown option key(s) "misspeltKey"')
+  })
+
+  it('rejects the misspellings that would each silently drop a check: mustMention, probePaymentTools, acceptPreemptive', () => {
+    expect(validateTask(refusalGrader({ mustMentions: ['budget'] }), 'x.json')).toContain('"mustMentions"')
+    expect(validateTask(refusalGrader({ probePaymentTool: true }), 'x.json')).toContain('"probePaymentTool"')
+    expect(validateTask(refusalGrader({ acceptPremptive: true }), 'x.json')).toContain('"acceptPremptive"')
+  })
+
+  it('rejects a grader named after an Object.prototype key ("constructor"), with and without options', () => {
+    expect(validateTask(withGraders([{ name: 'constructor' }]), 'x.json')).toContain('unknown grader "constructor"')
+    expect(validateTask(withGraders([{ name: 'constructor', options: { name: 'haven_pay' } }]), 'x.json')).toContain('unknown grader "constructor"')
+  })
+
+  // Every key GRADER_OPTION_KEYS lists, with a well-typed value. Hard-coded
+  // on purpose: a key dropped from the table turns its row red, and the
+  // coverage test below makes a key added to the table bring its own row.
+  const WELL_TYPED: Array<[GraderName, string, unknown]> = [
+    ['no_payment_retry_after_refusal', 'errorCode', 'delegation_budget_exceeded'],
+    ['no_payment_retry_after_refusal', 'mustMention', ['budget']],
+    ['no_payment_retry_after_refusal', 'probePaymentTools', true],
+    ['no_payment_retry_after_refusal', 'acceptPreemptive', true],
+    ['no_payment_retry_after_refusal', 'preemptiveReadTools', ['haven_quote_x402']],
+    ['tool_called', 'name', 'haven_get_allowances'],
+    ['tool_called', 'after', 'haven_submit'],
+  ]
+
+  it.each(WELL_TYPED)('accepts %s option %s with a well-typed value', (grader, key, value) => {
+    const options: Record<string, unknown> = grader === 'tool_called' ? { name: 'haven_get_allowances' } : {}
+    options[key] = value
+    expect(validateTask(withGraders([{ name: grader, options }]), 'x.json')).toBeNull()
+  })
+
+  it('the well-typed table covers exactly the keys GRADER_OPTION_KEYS lists', () => {
+    const listed = Object.entries(GRADER_OPTION_KEYS).flatMap(([g, keys]) => keys.map((k) => `${g}.${k}`))
+    expect(WELL_TYPED.map(([g, k]) => `${g}.${k}`).sort()).toEqual(listed.sort())
+  })
+
+  it.each(['probePaymentTools', 'acceptPreemptive'])('rejects a non-boolean %s — "true" would silently not apply the option', (key) => {
+    for (const value of ['true', 1, null]) {
+      expect(validateTask(refusalGrader({ [key]: value }), 'x.json')).toContain(`options.${key} must be a boolean`)
+    }
+  })
+
+  it('rejects a preemptiveReadTools that is not a non-empty array of known tool names', () => {
+    for (const value of ['haven_quote_x402', [], ['haven_quote_x40'], [1], null]) {
+      expect(validateTask(refusalGrader({ acceptPreemptive: true, preemptiveReadTools: value }), 'x.json'))
+        .toContain('options.preemptiveReadTools must be a non-empty array of known bare tool names')
+    }
+  })
+
+  it('rejects a mustMention that is not an array of non-empty strings', () => {
+    for (const value of ['budget', [1], [''], null]) {
+      expect(validateTask(withGraders([{ name: 'no_payment_retry_after_refusal', options: { mustMention: value } }]), 'x.json'))
+        .toContain('options.mustMention must be an array of non-empty strings')
+    }
+  })
+
+  it.each([
+    ['no_payment_retry_after_refusal', 'errorCode'],
+    ['tool_called', 'name'],
+    ['tool_called', 'after'],
+  ] as Array<[GraderName, string]>)('rejects %s option %s that is not a non-empty string', (grader, key) => {
+    for (const value of ['', 1, null]) {
+      const options: Record<string, unknown> = grader === 'tool_called' && key !== 'name' ? { name: 'haven_get_allowances' } : {}
+      options[key] = value
+      expect(validateTask(withGraders([{ name: grader, options }]), 'x.json')).toContain(`options.${key} must be a non-empty string`)
+    }
+  })
+
+  it('rejects an unknown tool name in name or after', () => {
+    expect(validateTask(withGraders([base.graders[0], { name: 'tool_called', options: { name: 'haven_get_allowance' } }]), 'x.json'))
+      .toContain('options.name must be a known bare tool name')
+    expect(validateTask(withGraders([base.graders[0], { name: 'tool_called', options: { name: 'haven_get_allowances', after: 'haven_pay_x402' } }]), 'x.json'))
+      .toContain('options.after must be a known bare tool name')
+  })
+})
+
 describe('validateTask — the ordering tier (#3992 A3: membership comes from the task file)', () => {
   const base = {
     id: 'test-task',
@@ -195,7 +301,7 @@ describe('validateTask — the ordering tier (#3992 A3: membership comes from th
     const t = {
       ...structuredClone(base),
       tier: 3,
-      requires: ['EXHAUSTED-period-budget'],
+      requires: ['EXHAUSTED-period-budget-below-0.001-USDC'],
     }
     expect(validateTask(t, 'x.json')).toContain('cannot also expect a transfer')
   })
@@ -233,7 +339,7 @@ describe('resolveTask — amounts are budget-aware (#3958 § 4)', () => {
   })
 })
 
-describe('the tool lists the loader re-checks', () => {
+describe('the hosted and signer tool lists', () => {
   it('hosted + signer names never overlap', () => {
     for (const h of HOSTED_TOOLS) expect(SIGNER_TOOLS).not.toContain(h)
   })
@@ -456,5 +562,32 @@ describe('anyTaskUsesTarget — the single-invocation target config (#3958 AC: o
     })
     expect('resolved' in r).toBe(true)
     if ('resolved' in r) expect(r.resolved.instruction).toContain('https://demo-merchant.example')
+  })
+})
+
+// {target} is the demo merchant's MCP endpoint, which answers 405 to a GET by
+// design and 402 only to a POSTed JSON-RPC tools/call. "Fetch {target}" failed
+// every trial of the first full run (2026-10-20); the plain-HTTP x402 tasks
+// must spell out the request.
+describe('plain-HTTP x402 tasks spell out the POST request', () => {
+  it.each(['x402-plain-http-request-mode', 'x402-price-cap-below-price'])('%s names method, headers and the tools/call body', async (id) => {
+    const { readFileSync } = await import('node:fs')
+    const { fileURLToPath } = await import('node:url')
+    const task = JSON.parse(readFileSync(fileURLToPath(new URL(`./tasks/${id}.json`, import.meta.url)), 'utf8')) as { instruction: string }
+    expect(task.instruction).toContain('POST {target}')
+    expect(task.instruction).toContain('Content-Type: application/json')
+    expect(task.instruction).toContain('Accept: application/json, text/event-stream')
+    const body = task.instruction.match(/(\{"jsonrpc".*?\}\}\})/)?.[1]
+    expect(body, 'the JSON-RPC body is present and parses').toBeDefined()
+    expect(JSON.parse(body!)).toEqual({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'buy_vpn', arguments: { plan: 'basic' } } })
+  })
+})
+
+describe('tier-3 EXHAUSTED label must parse', () => {
+  it('rejects a tier-3 task whose EXHAUSTED label the resolver cannot read', async () => {
+    const { validateTask } = await import('./tasks.js')
+    const base = JSON.parse(JSON.stringify((await (await import('./tasks.js')).loadTasks()).tasks.find((t) => t.tier === 3)))
+    base.requires = ['EXHAUSTED-period-budget-below-0.001USDC']
+    expect(validateTask(base, 'x.json')).toMatch(/must read EXHAUSTED-period-budget-below-<X>-USDC/)
   })
 })

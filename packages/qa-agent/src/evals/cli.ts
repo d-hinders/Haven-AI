@@ -53,6 +53,7 @@ import {
   loadTasks,
   resolveTask,
   selectTaskSequence,
+  exhaustedThresholdAtomic,
 } from './tasks.js'
 import {
   renderSummary,
@@ -104,6 +105,31 @@ function parseHumanAmountToAtomic(amount: unknown): bigint | undefined {
   // refuse it rather than silently truncating.
   if (frac.length > USDC_DECIMALS) return undefined
   return BigInt(`${whole}${frac6}`)
+}
+
+/**
+ * The run-start budget check. A full run ends by draining the period budget
+ * (the tier-2 drainer), so a second run in the same period starts on an empty
+ * budget and every task fails at resolve — 28 identical red trials that say
+ * nothing about the agent (2026-10-20, run 39428253905). When the selected
+ * tasks need a funded budget and the read says it is exhausted, stop before
+ * any agent session with one message that says what to do.
+ *
+ * Returns undefined when the run may go ahead.
+ */
+export function budgetPreflightMessage(
+  tasks: Array<Pick<EvalTask, 'tier'>>,
+  read: { remaining: bigint } | { error: string },
+): string | undefined {
+  const needsFunds = tasks.some((t) => (t.tier ?? 1) !== 3)
+  if (!needsFunds || !('error' in read)) return undefined
+  if (!/exhausted/i.test(read.error)) return undefined
+  return (
+    'The eval agent\'s period budget is already spent, so no task that pays can run. ' +
+    'A full run drains it on purpose (the "spend everything" task), so a second run in the same period finds it empty. ' +
+    'Wait for the next period refill, or edit the eval agent\'s budget on the dev dashboard to start a new period now (the dashboard needs a real change, e.g. the amount by 0.01 USDC, and two passkey approvals), then run again. ' +
+    `Budget read: ${read.error}`
+  )
 }
 
 export function buildGraderContext(deps: { api: HavenApi; provider: BlockNumberSource }): Omit<GraderContext, 'resolved'> {
@@ -259,6 +285,18 @@ export function createPerTrialResolver(deps: PerTrialResolverDeps): PerTrialReso
     }
     const startedAtBlock = await deps.blockNumber()
     const remaining = lastRemaining
+    // A tier-3 task's setup IS an exhausted budget: verify it at run time
+    // instead of trusting the tier order. If the drainer did not actually
+    // drain (it failed, its spend has not landed, or a Daily refill came
+    // mid-run), the trial is red with a named cause — otherwise an agent
+    // declining a purchase that would have fit could pass, and a correct
+    // agent that paid would fail.
+    const exhaustedBelow = exhaustedThresholdAtomic(task)
+    if (exhaustedBelow !== undefined && remaining !== undefined && remaining >= exhaustedBelow) {
+      throw new Error(
+        `tier-3 precondition not met: remaining budget ${remaining} atomic is not below ${exhaustedBelow} (${task.requires.find((r) => r.startsWith('EXHAUSTED'))}) — the budget was not exhausted when this task ran`,
+      )
+    }
     const r = await resolveTask(task, {
       budget: async () => ({ remaining }),
       recipient: deps.recipient,
@@ -368,6 +406,16 @@ async function main() {
   const budgetSource: BudgetSourceFor = async (use) => {
     const read = await readOnchainBudget(api, 'USDC', use)
     return 'error' in read ? read : { remaining: read.remaining }
+  }
+
+  // Run-start budget check: stop with one clear message instead of a run of
+  // identical resolve failures when the period budget is already spent.
+  const preflight = budgetPreflightMessage(selected, await budgetSource('floor'))
+  if (preflight) {
+    console.log(`::error::${preflight}`)
+    await writeFile(resolve(`${outPath}.summary.md`), `## Agent evals: not run\n\n${preflight}\n`)
+    await writeFile(resolve(`${outPath}.summary.txt`), `Agent evals: not run. ${preflight}\n`)
+    process.exit(3)
   }
 
   const provider = observerProvider()

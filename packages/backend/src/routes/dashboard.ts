@@ -578,8 +578,9 @@ export default async function dashboardRoutes(
         currency,
         now: now.getTime(),
         resolveMerchantName,
-        // #4099: a send to another of the user's accounts names that
-        // account instead of reading "New recipient".
+        // #4099: a transfer between two of the user's accounts names the
+        // other account on both sides — instead of "New recipient" on the
+        // send and "Deposit" on the receipt.
         resolveOwnAccountName: ownAccountNameResolver(accounts),
       })
 

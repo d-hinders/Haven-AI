@@ -156,6 +156,16 @@ export async function proveUsdcTransfer(
   }
 }
 
+/**
+ * Strip URLs from an RPC error before it reaches a grader detail: ethers v6
+ * errors can serialise the request URL, and the observer URL
+ * (`QA_RPC_URL_BASE_SEPOLIA`) embeds the provider API key. Grader details
+ * land in the eval report, a public artifact (this repo is public).
+ */
+export function redactUrls(text: string): string {
+  return text.replace(/\b(?:https?|wss?):\/\/[^\s"'<>)]+/gi, '<url redacted>')
+}
+
 /** The minimal log + height surface {@link proveUsdcTransferSince} reads. */
 export interface LogReader {
   getBlockNumber(): Promise<number>
@@ -211,7 +221,7 @@ export async function proveUsdcTransferSince(
     try {
       head = await provider.getBlockNumber()
     } catch (err) {
-      last = `getBlockNumber failed: ${(err as Error)?.message ?? err}`
+      last = `getBlockNumber failed: ${redactUrls(String((err as Error)?.message ?? err))}`
     }
     if (head !== undefined) {
       try {
@@ -239,7 +249,7 @@ export async function proveUsdcTransferSince(
           ? `${near.size} Transfer(s) from that payer to that payee, none of exactly ${expected.amount}; ${scanned}`
           : `no Transfer from that payer to that payee; ${scanned}`
       } catch (err) {
-        last = `getLogs failed: ${(err as Error)?.message ?? err}`
+        last = `getLogs failed: ${redactUrls(String((err as Error)?.message ?? err))}`
       }
     }
     if (Date.now() >= deadline) {
@@ -281,7 +291,7 @@ export async function waitForDisabled(
       if ((await read(delegationHash)) === true) return { ok: true }
       last = 'disabledDelegations returned false'
     } catch (err) {
-      last = `read failed: ${(err as Error)?.message ?? err}`
+      last = `read failed: ${redactUrls(String((err as Error)?.message ?? err))}`
     }
     if (Date.now() >= deadline) {
       return { ok: false, error: `delegation ${delegationHash} is not disabled on-chain after ${Math.round(timeoutMs / 1000)}s (${last}; observer: ${describeObserverRpc()})` }

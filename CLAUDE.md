@@ -322,6 +322,8 @@ from branches; `@haven_ai/core` is workspace-private.
 
 ## UI Surface Hierarchy
 
+Build product UI from the documented [`/design-system` Patterns](docs/product/design-system.md#patterns). If no pattern fits, extend the design system in its own slice and obtain owner approval before a page consumes the new pattern.
+
 No nested filled cards. To group content inside a `Card`, use `Card.Section` or
 `Card.Section divided`; list items use `Row`. Tinted surfaces
 (`--v2-surface`, `--v2-surface-2`) are reserved for callouts, table headers

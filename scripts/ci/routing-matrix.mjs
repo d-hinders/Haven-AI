@@ -193,6 +193,12 @@ export const ROUTING_MATRIX = [
     why: 'Must NOT be swallowed by the packages/mcp/* rule listed above it — the shared prefix is the ordering mistake that would silently stop routing mcp-server.',
   },
   {
+    files: ['packages/mcp-server/src/tools-list.snapshot.json'],
+    expect: ['code', 'mcp_server', 'qa_agent'],
+    kind: CONTRACT,
+    why: 'The hosted tools/list snapshot (#4121). qa-agent\'s tools.test.ts holds the eval graders\' copy of the hosted tool names equal to this file, and only qa_agent_checks runs it. qa-agent does not depend on mcp-server, so the dependency table cannot carry it; without this arm a snapshot-only change never runs the test that exists to catch it. Any other packages/mcp-server/ file still routes mcp_server alone (the tools.ts row above).',
+  },
+  {
     files: ['packages/cli/src/index.ts'],
     expect: ['code', 'cli'],
     kind: CONTRACT,

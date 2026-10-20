@@ -76,7 +76,7 @@ covers:
   - packages/backend/src/modules/ops/**
   - packages/backend/src/middleware/ops-auth.ts
   - packages/ops/**
-last-verified: "2026-10-19"
+last-verified: "2026-10-20"
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -1209,8 +1209,9 @@ anything else exists — which is when the backup-signer recommendation
 (#908→#1153) matters most.
 **The frontend now uses the account-scoped surface exclusively (#1089):**
 `AccountSignersCard` is the single home for backup & recovery, rendered on the
-account page for any `delegator_hybrid` account — including one with zero
-agents — and no longer duplicated on the agent page. The agent-scoped route
+account page's **Security & details** tab (#4097) for any `delegator_hybrid`
+account — including one with zero agents — and no longer duplicated on the
+agent page. The agent-scoped route
 stays live server-side (it is the same shared implementation below, just
 resolved differently) but has no remaining frontend caller.
 The two surfaces differ only in how the account is resolved: agent lookup
@@ -3456,6 +3457,31 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > this note: that acceptance gate. Nothing else in this document was
 > re-verified; `last-verified` is bumped to 2026-10-19 for exactly this
 > coverage.
+
+> **Re-verified #4120 (2026-10-20 — one shared post-funding merchant-answer
+> decision; the hosted hash rule becomes the local rule).** The diff touches
+> one file in this document's coverage list, `packages/sdk/src/client.ts`, and
+> none of its authority, custody or signing surfaces. The shared decision the
+> diff extracts now lives in a new SDK module (`merchant-answer.ts`) that both
+> the hosted call and the local retry call; that module and the local-path
+> twin in `merchant-completion.ts` are outside this document's coverage list,
+> as the #4062 note above already records for the twin. On the D1 input — a
+> `PAYMENT-RESPONSE` header with no transaction (or an empty header) beside a
+> `_meta` settlement that has one — the HOSTED path now behaves as the local
+> path always has: an `isError` answer beside a `_meta` settlement is accepted
+> (delivered as evidence, not `MERCHANT_REJECTED_AFTER_FUNDING`); without
+> `isError` the result carries the `_meta` settlement hash, the #3764 second
+> report is posted with it, and an erc7710 (`noFundingLeg`) completion anchors
+> its evidence on it. A header WITH a transaction still wins over a different
+> `_meta` transaction on both paths. The 200 `text/plain` `isError` divergence
+> stays per caller (hosted parses and rejects; local never reads and accepts).
+> No signature is produced or consumed, nothing becomes signable, no spend
+> decision moves: the flipped cases classify a merchant answer to a call the
+> funding leg already paid for, and the backend still verifies every reported
+> hash on-chain before recording it — a wrong or hostile hash is a refused
+> report, not a recorded settlement. Scope of this note: the shared acceptance
+> gate. Nothing else in this document was re-verified; `last-verified` is
+> bumped to 2026-10-20 for exactly this coverage.
 
 > **Re-verified #4026 (2026-10-16 — own-account recipients in the owner send
 > flow).** The diff touches one file in this document's coverage list,

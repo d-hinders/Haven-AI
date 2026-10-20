@@ -13,19 +13,20 @@
  * - filters that live in the URL NEXT TO `?tab=activity` (#4097's shell
  *   makes Activity the default tab, so a filtered link is
  *   `/accounts/<id>?search=…` and reproduces the view on any machine);
- * - a result line that never lies about scope: "Showing 14 of 55" while
- *   paging the unfiltered ledger, "N matching" while a filter narrows it,
- *   with `total` and the in/out totals both taken from the SERVER over the
- *   filtered set (#4095) — never summed off whatever page happens to be
- *   loaded — and a qualifier, not a completeness claim, when the feed is
- *   capped at the explorer window (#2882);
+ * - a result line that never lies about scope — the Transactions page's own
+ *   line: "N transactions" from the server, or "Showing X of Y" while more
+ *   pages remain, with `total` and the in/out totals both taken from the
+ *   SERVER over the filtered set (#4095) — never summed off whatever page
+ *   happens to be loaded — and a qualifier, not a completeness claim, when
+ *   the feed is capped at the explorer window (#2882);
  * - rows grouped by day in #4096's ledger mode (`TransactionActivityRow`
  *   with `onOpen`, `TransactionActivityDayHeader`), "Load more" for the next
  *   page, and the shared `TransactionDetailPanel` on row open — click or
  *   Enter/Space, the row is a whole-row button;
  * - two distinct empty states: "No activity yet" with a Receive button for
- *   an account with no history, and "Nothing matches these filters" with a
- *   way to clear them when a filter matches nothing.
+ *   an account with no history, and "No activity matches these filters" /
+ *   "Adjust or clear filters to widen the history." with a way to clear
+ *   them when a filter matches nothing.
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
@@ -293,15 +294,12 @@ export default function AccountActivityTab({
         <p className="text-sm text-[var(--v2-ink-3)]">
           {!loadingInitial && total === 0 ? null : loadingInitial ? (
             'Loading activity…'
-          ) : hasActiveFilters ? (
-            // A filter narrows the set: the server's filtered count is the
-            // result, not a page position in it.
-            <>
-              <span className="v2-tabular">{total.toLocaleString('en-US')}</span> matching
-              {truncated ? ' (of what Haven could load)' : ''}
-            </>
           ) : (
-            // Unfiltered: paging position against the account's whole feed.
+            // The Transactions page's result line (#4098's owner decision):
+            // the loaded-page position "Showing X of Y" while more pages
+            // remain, otherwise the server's count as "N transactions".
+            // Filtered or not, `total` is the server's count of the filtered
+            // set — the line describes the same set the rows and the CSV do.
             hasMore ? (
               <>
                 Showing{' '}
@@ -381,8 +379,8 @@ export default function AccountActivityTab({
                 account with no history has a next action of its own. */}
             {hasActiveFilters ? (
               <EmptyState
-                title="Nothing matches these filters"
-                body="No transactions in this account match the filters above."
+                title="No activity matches these filters"
+                body="Adjust or clear filters to widen the history."
                 className="py-8"
                 action={
                   <Button variant="ghost" size="sm" onClick={handleClearFilters}>

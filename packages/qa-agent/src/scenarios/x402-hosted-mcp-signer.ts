@@ -41,7 +41,7 @@
  *
  * A merchant round-trip succeeding proves very little on its own — the same
  * green would appear if the agent had silently taken the legacy rail, or if the
- * signer had never been consulted. Four discriminators:
+ * signer had never been consulted. Five discriminators:
  *
  *   - **The quote must be v2 — and compact.** `x402.expected.typed_data_hash`
  *     present ⇒ the delegation-rail context, and `signature_scheme:
@@ -58,8 +58,16 @@
  *   - **Both on-chain legs must have succeeded.** The funding redemption and the
  *     merchant settlement are two distinct transactions with `status === 1`.
  *     Fetching both receipts is what separates "the merchant said yes" from
- *     "money moved" — Haven never observes the merchant's settlement itself, so
- *     the hash it relays back is the only handle on that leg.
+ *     "money moved".
+ *   - **Haven must have RECORDED the merchant settlement (#4119).** Money
+ *     moving is not the record the receipts headline and the accounting feed
+ *     book under: for five days every settlement report was refused (#4061)
+ *     while this leg printed PASS. Read right after settle returns, inside the
+ *     45 s window the #3888 sweep cannot reach (`lib/settlement-record.ts`):
+ *     the status must carry `merchant_settlement_recorded`, the receipt's
+ *     hash must be the one proved on-chain, and the settle's evidence
+ *     guidance is followed — a retryable report is re-sent with the leg's
+ *     own `payment_header`, and any refusal is red.
  *   - **Zero residual.** Exact-amount funding means a settled payment leaves the
  *     delegate EOA at exactly zero. Not "below the sweep floor" — that
  *     tolerance belongs to `x402-delegation-3009`, whose merchant may verify
@@ -84,6 +92,7 @@ import {
 import { type Scenario, type ScenarioContext, pass, fail, skip } from './types.js'
 import { BASE_SEPOLIA_RPC, SEPOLIA_USDC, waitForReceipt as waitForReceiptOn } from '../lib/chain.js'
 import { freshPurchaseIdempotencyKey } from '../lib/run-idempotency.js'
+import { assertHostedSettlementRecorded } from '../lib/settlement-record.js'
 
 const USDC_ABI = ['function balanceOf(address) view returns (uint256)'] as const
 
@@ -128,8 +137,8 @@ export const x402HostedMcpSigner: Scenario = {
   name: 'x402-hosted-mcp-signer',
   invariant:
     'The default topology (hosted MCP + local edge signer) completes a delegation-rail x402 ' +
-    'payment: a v2 expected context is signed locally, both on-chain legs succeed, and the ' +
-    'delegate is left with zero residual.',
+    'payment: a v2 expected context is signed locally, both on-chain legs succeed, Haven records ' +
+    'the merchant settlement it verified on-chain, and the delegate is left with zero residual.',
   async run(ctx: ScenarioContext) {
     if (!ctx.cfg.demoMerchantUrl) {
       return skip('QA_DEMO_MERCHANT_URL not set — the hosted leg needs the dev demo-merchant')
@@ -336,7 +345,11 @@ export const x402HostedMcpSigner: Scenario = {
     const paymentHeader = (signed.data as SignX402Data).payment_header
 
     // ── 4. Hosted settle: relay the funding signature and deliver the header ─
+    // #4119 anchor: taken immediately before the call that submits the
+    // funding, so the funding confirm — and with it the sweep's 60 s floor —
+    // cannot precede it.
     let settle: HostedSettleMcpToolResult
+    const settleAnchor = Date.now()
     try {
       settle = await hosted.callTool<HostedSettleMcpToolResult>('haven_settle_mcp_tool', {
         payment_id: quote.payment_id,
@@ -377,6 +390,18 @@ export const x402HostedMcpSigner: Scenario = {
           'to one hop, or one hash was echoed for both',
       )
     }
+
+    // ── 5a. Haven recorded the merchant settlement (#4119) ──────────────────
+    //      Before any other I/O: the status read on the recorded arm must be
+    //      the one at settle-return.
+    const record = await assertHostedSettlementRecorded(api, hosted, {
+      paymentId: quote.payment_id,
+      settle,
+      paymentHeader,
+      merchantHash,
+      anchorMs: settleAnchor,
+    })
+    if (!record.ok) return fail(record.detail)
 
     const fundingReceipt = await waitForReceipt(provider, fundingHash)
     if (!fundingReceipt) return fail(`funding tx ${fundingHash} has no receipt on Base Sepolia`)
@@ -443,7 +468,8 @@ export const x402HostedMcpSigner: Scenario = {
         `(v${expected.auth.version} context, typed data signed locally by ${delegateAddress}): ` +
         `funding ${fundingHash} (block ${fundingReceipt.blockNumber}), merchant ${merchantHash} ` +
         `(block ${merchantReceipt.blockNumber}); treasury ${fmt(treasuryBefore)} → ${fmt(treasuryAfter)}, ` +
-        `zero delegate residual${carried}; intent ${quote.payment_id}`,
+        `zero delegate residual${carried}; merchant settlement recorded: ${record.hash} (via ${record.via}); ` +
+        `intent ${quote.payment_id}`,
     )
   },
 }

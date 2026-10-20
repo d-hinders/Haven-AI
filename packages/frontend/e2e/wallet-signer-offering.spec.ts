@@ -107,6 +107,11 @@ async function shoot(page: Page, name: string) {
 async function openRecoveryCard(page: Page) {
   await page.goto(ACCOUNT_PAGE)
   await page.evaluate(() => document.fonts.ready)
+  // #4097 moved AccountSignersCard into the Security & details tab — the
+  // default view is the Activity tab, so the card is not on the page until
+  // the tab is opened. The accessible name carries the Needs-attention dot
+  // suffix, hence the regex.
+  await page.getByRole('tab', { name: /Security & details/ }).click()
   await expect(page.getByRole('heading', { name: 'Backup & recovery' })).toBeVisible({ timeout: 20_000 })
 }
 

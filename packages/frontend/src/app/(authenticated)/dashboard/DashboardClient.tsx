@@ -522,6 +522,10 @@ export default function DashboardClient() {
       noPaymentsYet={firstAgentPaymentKnown && !hasFirstAgentPayment}
       onReceive={() => openHeroAction('receive')}
       onSend={() => openHeroAction('send')}
+      // #4167: the ONE primary-button rule — Send primary once any account
+      // holds USDC (`usdcFunded`), Receive primary with Send disabled when
+      // known empty, Send primary while the read is loading or failed.
+      usdcFunded={usdcFunded}
       // #3902: one primary funding action — while the guide's step 1 is the
       // active step, its "Add funds" is the primary one and the card's
       // "Receive" steps back.
@@ -640,6 +644,9 @@ export default function DashboardClient() {
       <ReceiveDialog
         open={receiveOpen}
         account={selectedActionAccount}
+        // #4167: with several accounts the dialog's card is a picker, so a
+        // wrong pre-pick is one switch away; one account renders no card.
+        accounts={accounts}
         onClose={() => setReceiveOpen(false)}
       />
 

@@ -34,6 +34,21 @@ covers:
 last-verified: "2026-10-16"
 ---
 
+> **Re-verified #4167 (2026-10-20, Receive dialog clean-up):** this diff
+> touched one file in this document's coverage list,
+> `packages/frontend/src/components/ReceiveDialog.tsx`. The change is present-
+> tational — the #4094 dialog loses its old Deposit-address chrome (the
+> "On-chain receive" chip, the "Show QR code" toggle in favour of an inline
+> QR, the "View on explorer" button, the "Before you send" box), gains an
+> account picker when the caller offers several accounts, and the dashboard
+> money card follows #4167's one primary-button rule. The claim §
+> `NEXT_PUBLIC_COINBASE_ONRAMP_APP_ID` in the Playwright builds makes about
+> this file is unchanged: the id is still read at module scope
+> (`process.env.NEXT_PUBLIC_COINBASE_ONRAMP_APP_ID`), so the build-time gate
+> and every CI surface that sets the literal behave exactly as written.
+> #1844/#3478 gating is untouched. Nothing else in this document was
+> re-verified, and `last-verified` is not bumped.
+
 > **Re-verified #4118 (2026-10-20, `eth_getLogs` probe line):** this diff
 > touched one file in this document's coverage list,
 > `scripts/ci/rpc-conformance.mjs`, which gains a sixth check (`eth_getLogs`

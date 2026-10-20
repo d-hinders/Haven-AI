@@ -358,7 +358,7 @@ describe('DashboardClient', () => {
     expect(screen.getByText('Stopped by budget')).toBeInTheDocument()
   })
 
-  it('makes "Receive" the primary action, ahead of "Send" (#3897, #4094)', () => {
+  it('makes "Send" the primary action once funded, "Receive" ghost (#4167)', () => {
     mockBaseState([], { onboardingProgress: { hasFirstAgentPayment: true } })
     render(<DashboardClient />)
 
@@ -368,8 +368,37 @@ describe('DashboardClient', () => {
       .map((button) => button.textContent)
     expect(actions).toEqual(['Receive', 'Send'])
     // Primary is the brand fill; the secondary is the ghost outline.
-    expect(within(balance).getByRole('button', { name: 'Receive' }).className).toContain('bg-[var(--v2-brand)]')
-    expect(within(balance).getByRole('button', { name: 'Send' }).className).not.toContain(
+    expect(within(balance).getByRole('button', { name: 'Send' }).className).toContain('bg-[var(--v2-brand)]')
+    expect(within(balance).getByRole('button', { name: 'Receive' }).className).not.toContain(
+      'bg-[var(--v2-brand)]',
+    )
+  })
+
+  it('keeps "Send" primary and enabled while the balance is loading or failed to read (#4167)', () => {
+    // No overview yet (and the fixture's balance read mid-flight): the
+    // funding state is UNKNOWN — never read as empty, so the card does not
+    // flip to Receive primary on a load-shaped condition. The account page
+    // keeps the same rule (`AccountDetailClient.tsx`).
+    mockBaseState([], {
+      accounts: [
+        {
+          accountId: 'safe-1',
+          chainId: 8453,
+          isTestnet: false,
+          usdcBalanceAtomic: null,
+          usdcDecimals: 6,
+          funded: null,
+          needs_backup_recommendation: false,
+          usdcPace7dAtomic: '0',
+        },
+      ],
+    })
+    render(<DashboardClient />)
+
+    const balance = screen.getByRole('region', { name: 'Balance' })
+    expect(within(balance).getByRole('button', { name: 'Send' }).className).toContain('bg-[var(--v2-brand)]')
+    expect(within(balance).getByRole('button', { name: 'Send' })).toBeEnabled()
+    expect(within(balance).getByRole('button', { name: 'Receive' }).className).not.toContain(
       'bg-[var(--v2-brand)]',
     )
   })
@@ -872,36 +901,48 @@ describe('DashboardClient', () => {
     expect(within(spending).queryByText('Payments')).not.toBeInTheDocument()
   })
 
-  it('shows exactly one primary money action while step 1 is the active step: the money card\'s "Receive" steps back (#3902, #4094)', () => {
+  it('shows exactly one primary money action while step 1 is the active step: the money card\'s buttons step back (#3902, #4167)', () => {
     mockBaseState([], { accounts: [{ ...FUNDED_ACCOUNT, usdcBalanceAtomic: '0', funded: false }] })
     render(<DashboardClient />)
     expect(screen.getByText('Onboarding guide')).toBeInTheDocument()
     // Step 1's own "Add funds" is the guide's primary (DashboardOnboardingGuide.test);
-    // the money card's "Receive" renders ghost beside it.
+    // the money card's "Receive" renders ghost beside a DISABLED Send — the
+    // account is known empty, so it cannot send anyway (#4167).
     const balance = screen.getByRole('region', { name: 'Balance' })
     const receive = within(balance).getByRole('button', { name: 'Receive' })
     expect(receive.className).not.toContain('bg-[var(--v2-brand)]')
     expect(receive.className).toContain('border-[var(--v2-border-strong)]')
+    const send = within(balance).getByRole('button', { name: 'Send' })
+    expect(send).toBeDisabled()
+    expect(send.className).not.toContain('bg-[var(--v2-brand)]')
   })
 
-  it('makes the money card\'s "Receive" primary again once step 1 is done or the guide is hidden (#3902, #4094)', () => {
-    // Funded: step 1 is done, so the guide (still showing) no longer asks for funds.
+  it('follows the one primary-button rule once step 1 is done or the guide is hidden (#3902, #4167)', () => {
+    // Funded: step 1 is done, so the guide (still showing) no longer asks for
+    // funds — and #4167's rule makes SEND the primary, not Receive.
     mockBaseState([], { accounts: [FUNDED_ACCOUNT] })
     const funded = render(<DashboardClient />)
     expect(screen.getByText('Onboarding guide')).toBeInTheDocument()
+    const fundedBalance = screen.getByRole('region', { name: 'Balance' })
     expect(
-      within(screen.getByRole('region', { name: 'Balance' })).getByRole('button', { name: 'Receive' }).className,
+      within(fundedBalance).getByRole('button', { name: 'Send' }).className,
     ).toContain('bg-[var(--v2-brand)]')
+    expect(
+      within(fundedBalance).getByRole('button', { name: 'Receive' }).className,
+    ).not.toContain('bg-[var(--v2-brand)]')
     funded.unmount()
 
-    // Unfunded but the guide hidden: the money card's button is the only one.
+    // Unfunded but the guide hidden: the money card's Receive is the primary
+    // — and Send is disabled, not ghost-enabled (#4167).
     window.localStorage.setItem('haven-setup-guide-hidden:user-1', '0')
     mockBaseState([], { accounts: [{ ...FUNDED_ACCOUNT, usdcBalanceAtomic: '0', funded: false }] })
     render(<DashboardClient />)
     expect(screen.queryByText('Onboarding guide')).not.toBeInTheDocument()
+    const balance = screen.getByRole('region', { name: 'Balance' })
     expect(
-      within(screen.getByRole('region', { name: 'Balance' })).getByRole('button', { name: 'Receive' }).className,
+      within(balance).getByRole('button', { name: 'Receive' }).className,
     ).toContain('bg-[var(--v2-brand)]')
+    expect(within(balance).getByRole('button', { name: 'Send' })).toBeDisabled()
   })
 
   /**

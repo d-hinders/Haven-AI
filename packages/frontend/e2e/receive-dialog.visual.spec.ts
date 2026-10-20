@@ -133,8 +133,11 @@ const VARIANTS: readonly Variant[] = [
       // The faucet card, naming the account's own chain — Base Sepolia.
       await expect(dialog.getByText(FAUCET_HEADING)).toHaveCount(1)
       await expect(
-        dialog.getByText('Send USDC on Base Sepolia only.'),
+        dialog.getByText('Send USDC on Base Sepolia only. It arrives in about a minute and shows in Activity.'),
       ).toHaveCount(1)
+      // The QR is INLINE (#4167): the capture waits for the image, never the
+      // skeleton.
+      await expect(dialog.getByAltText('QR code for Operations on Base Sepolia')).toBeVisible()
       // The variant's point: the onramp is hidden DESPITE the configured id.
       await expect(dialog.getByRole('button', { name: ONRAMP_BUTTON })).toHaveCount(0)
     },
@@ -144,7 +147,8 @@ const VARIANTS: readonly Variant[] = [
     chainId: 8453,
     async assert(dialog) {
       await expect(dialog.getByRole('button', { name: ONRAMP_BUTTON })).toHaveCount(1)
-      await expect(dialog.getByText('Send USDC on Base only.')).toHaveCount(1)
+      await expect(dialog.getByText('Send USDC on Base only. It arrives in about a minute and shows in Activity.')).toHaveCount(1)
+      await expect(dialog.getByAltText('QR code for Operations on Base')).toBeVisible()
       // And the faucet is gone with the testnet — not stacked under the onramp.
       await expect(dialog.getByText(FAUCET_HEADING)).toHaveCount(0)
     },

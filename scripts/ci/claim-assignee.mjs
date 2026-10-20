@@ -25,8 +25,9 @@
 //     no field at all.
 //
 // So a claim must be unambiguous, while anything that reads like a release is
-// taken as one — for human comments. A bot's comment is narrowed to the one
-// merge-time shape (#3177, `botReleaseLine`); see that function.
+// taken as one — for human comments. A bot's comment is narrowed to the
+// merge-time shape (#3177) and the two per-claimant shapes (#4176,
+// `botReleaseLine`); see that function.
 //
 // ## Why the marker must begin its line
 //
@@ -157,15 +158,71 @@ function withdrawnLine(t) {
 }
 
 /**
- * The one shape of bot comment the projection honours (#3177): the merge-time
- * release posted by `claim-release-on-merge.yml`, which always names the PR
- * that landed the work. A bot cannot claim — it owns no work — and a bot
- * release that names no PR is not the workflow's, so both are ignored. Human
- * comments are unaffected: this predicate is consulted only for `authorType
- * === 'Bot'`.
+ * The two per-claimant bot release shapes (#4176). Each releases the claims of
+ * the people it NAMES, not the whole issue — unlike the merge-time line, whose
+ * issue is closed and whose workflow unassigns everyone:
+ *
+ *   Path A (a merged PR that only says `Refs #N`; the issue stays open):
+ *     🔓 RELEASE #N — claim of `login` — PR #P merged (…) … — posted automatically on a `Refs` merge (#4176).
+ *   Path B (an issue closed by hand, with no merge behind the close):
+ *     🔓 RELEASE #N — claims of `a`, `b` — … — posted automatically on a hand close (#4176).
+ *
+ * The claimants are backticked logins, never `@login`: a bot line that pinged
+ * every claimant would notify people already subscribed to the thread they
+ * claimed on. A Path A line must name its PR; a Path B line must not name one.
+ */
+export const REFS_RELEASE_MARK = 'posted automatically on a `Refs` merge (#4176)'
+export const CLOSE_RELEASE_MARK = 'posted automatically on a hand close (#4176)'
+const PER_CLAIMANT = /^🔓\s*RELEASE\s+#(\d{1,6})\s+—\s+claims?\s+of\s+(`[A-Za-z0-9-]+`(?:\s*,\s*`[A-Za-z0-9-]+`)*)\s+—\s/
+const NAMES_PR = /\bPR\s*#\d{1,6}\b/i
+
+/**
+ * `{ issue, claimants, path }` for a line in one of the two per-claimant
+ * shapes above, else null. Takes the raw line; quoted and fenced lines are the
+ * caller's to skip (`botReleasesClaim` does).
+ */
+export function botReleaseClaimants(line) {
+  const t = undecorate(line)
+  const m = t.match(PER_CLAIMANT)
+  if (!m) return null
+  const path = t.includes(REFS_RELEASE_MARK) && NAMES_PR.test(t) ? 'refs'
+    : t.includes(CLOSE_RELEASE_MARK) && !NAMES_PR.test(t) ? 'close'
+      : null
+  if (!path) return null
+  const claimants = [...m[2].matchAll(/`([A-Za-z0-9-]+)`/g)].map((x) => x[1])
+  return { issue: Number(m[1]), claimants, path }
+}
+
+/**
+ * Does this bot comment release `holder`'s claim of `issue` in one of the
+ * per-claimant shapes? Quoted and fenced lines are skipped, as `parse` skips
+ * them. Logins compare case-insensitively.
+ */
+export function botReleasesClaim({ body, issue, holder }) {
+  const who = String(holder ?? '').toLowerCase()
+  let inFence = false
+  for (const line of String(body ?? '').split('\n')) {
+    if (/^\s*(?:```|~~~)/.test(line)) {
+      inFence = !inFence
+      continue
+    }
+    if (inFence || isQuoted(line)) continue
+    const r = botReleaseClaimants(line)
+    if (r && r.issue === issue && r.claimants.some((c) => c.toLowerCase() === who)) return true
+  }
+  return false
+}
+
+/**
+ * The bot comment shapes the projection honours: the merge-time release
+ * posted by `claim-release-on-merge.yml` (#3177), which always names the PR
+ * that landed the work, and the two per-claimant shapes above (#4176). A bot
+ * cannot claim — it owns no work — and a bot release that names no PR and is
+ * not a Path B line is not a workflow's, so both are ignored. Human comments
+ * are unaffected: this predicate is consulted only for `authorType === 'Bot'`.
  */
 export function botReleaseLine(line) {
-  return releaseLine(line) && /\bPR\s*#\d{1,6}\b/i.test(undecorate(line))
+  return releaseLine(line) && (NAMES_PR.test(undecorate(line)) || botReleaseClaimants(line) !== null)
 }
 
 /**
@@ -198,7 +255,7 @@ export function parse({ body, onIssue = null, channelIssue = CHANNEL_ISSUE, auth
     }
     if (inFence || isQuoted(line)) continue
 
-    // A bot may only release, and only in the merge-time shape. The bare-issue
+    // A bot may only release, and only in a workflow's shape. The bare-issue
     // fallback below is also closed to it: a bot line that names no issue says
     // nothing the projection should act on.
     const isClaim = fromBot ? false : claimLine(line)

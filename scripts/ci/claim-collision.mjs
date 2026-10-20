@@ -92,7 +92,7 @@
 // read in full (~14 REST pages today) because staleness needs the old claim,
 // not just the recent ones.
 
-import { parse } from './claim-assignee.mjs'
+import { parse, botReleasesClaim } from './claim-assignee.mjs'
 import { CHANNEL_ISSUE } from './coordination-channel.mjs'
 
 export { CHANNEL_ISSUE }
@@ -163,14 +163,23 @@ export function holderClaim({ holder, issue, comments, channelIssue = CHANNEL_IS
   let firstClaim = null
   let releasedAfter = false
   let lastActivityAt = null
+  const isBot = (c) => String(c.authorType ?? 'User') === 'Bot'
   const mine = comments
-    .filter((c) => sameLogin(c.author, holder))
+    .filter((c) => sameLogin(c.author, holder) || isBot(c))
     .slice()
     .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
   for (const c of mine) {
-    // Only the holder's OWN lines are parsed here, so the merge-time bot
-    // release (#3177) is not seen — it does not need to be: that workflow
-    // unassigns everyone itself, and a closed issue is skipped before this.
+    if (isBot(c)) {
+      // A bot release that NAMES this holder (#4176's per-claimant shapes)
+      // ends their hold. It matters for the `Refs`-merge release, which leaves
+      // the issue OPEN: without it the collision check would report the
+      // released author as holding for up to a day. A bot line is never a
+      // claim and never activity. The merge-time line (#3177) names nobody and
+      // is still not seen here — that workflow unassigns everyone itself, and
+      // a closed issue is skipped before this.
+      if (claim && botReleasesClaim({ body: c.body, issue, holder })) releasedAfter = true
+      continue
+    }
     const r = parse({ body: c.body, onIssue: c.onIssue ?? null, channelIssue })
     if (r.claim.includes(issue)) {
       claim = c
@@ -320,7 +329,13 @@ function parseJsonStrict(text, what) {
   return JSON.parse(t)
 }
 
-async function readComments({ gh, repo, issue }) {
+/**
+ * Every comment of one thread, with what the holder rule needs: author,
+ * `createdAt`, the thread it was posted on, `author_association` and
+ * `user.type`. Shared with `release-on-merge.mjs` (#4176), so both read claims
+ * the same way.
+ */
+export async function readComments({ gh, repo, issue }) {
   const pages = parseJsonStrict(await gh(['api', '--paginate', '--slurp', `repos/${repo}/issues/${issue}/comments?per_page=100`]), `comments of #${issue}`) ?? []
   const out = []
   for (const page of Array.isArray(pages) ? pages : []) {

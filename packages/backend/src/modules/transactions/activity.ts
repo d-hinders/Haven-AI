@@ -11,8 +11,10 @@
  * database table and never becomes one.
  *
  * Group key — agent + token + counterparty + user-local day + outcome +
- * activityType. Two deliberate extensions to #3824's stated key, both stated
- * here so the PR can carry them:
+ * activityType, with the sending account inside the counterparty half on
+ * outbound rows (#4117, at `counterpartyKey`). Two further deliberate
+ * extensions to #3824's stated key, both stated here so the PR can carry
+ * them:
  *
  * - **token** (`chainId` + `tokenAddress`, with symbol/decimals): a group
  *   serves ONE `sumAtomic` in ONE `tokenSymbol` at ONE `decimals` — summing
@@ -243,12 +245,17 @@ export function activityOutcome(tx: {
  * Outbound x402 rows name the RESOURCE when one was recorded (the sharpest
  * per-payment counterparty identity — two resources at one merchant are two
  * activity rows), else the merchant address. Every other outbound row groups
- * by the far-side address.
+ * by the far-side address. Every outbound key also carries the sending
+ * account (#4117), so one group has one sender and can name it: without it,
+ * two own accounts' unattributed sends to one recipient on one day merged.
+ * Inbound rows stay unsplit — their day's deposits are one group whichever
+ * account received them.
  */
 function counterpartyKey(tx: EnrichedTransaction, fromOwnAccount: boolean): string {
   if (tx.direction === 'in') return fromOwnAccount ? `own:${tx.from.toLowerCase()}` : 'deposit'
-  if (tx.source === 'x402' && tx.x402ResourceUrl) return tx.x402ResourceUrl
-  return tx.to.toLowerCase()
+  const counterparty =
+    tx.source === 'x402' && tx.x402ResourceUrl ? tx.x402ResourceUrl : tx.to.toLowerCase()
+  return `out:${tx.accountId}:${counterparty}`
 }
 
 /**
@@ -279,6 +286,13 @@ export interface DashboardActivityGroup {
    * deposit.
    */
   merchantName: string | null
+  /**
+   * #4117: the label of the user's own account the group's money LEFT — a
+   * contact name saved for it first, the account's own name otherwise (the
+   * order the receiving side's "From <account>" uses). Outbound groups only;
+   * absent on deposits and when no name resolves.
+   */
+  fromAccountName?: string
   activityType: string | null
   direction: 'in' | 'out'
   status: ActivityOutcome
@@ -440,6 +454,17 @@ export async function buildActivityGroups(
         activityType: sample.activityType ?? null,
         direction: sample.direction,
         status: activityOutcome(sample),
+      }
+
+      // #4117: the outbound key carries the sending account, so every member
+      // left the same one and the sample names it. A contact saved for that
+      // account is what the first lookup is for — the route prefetches
+      // receipt names for outbound `to` addresses only, so a receipt name
+      // applies here only incidentally.
+      if (sample.direction === 'out') {
+        const fromAccountName =
+          resolveMerchantName?.(sample.accountAddress) ?? (sample.accountName || null)
+        if (fromAccountName) wire.fromAccountName = fromAccountName
       }
 
       // Fiat sum: book-time when EVERY member converted (they were all struck

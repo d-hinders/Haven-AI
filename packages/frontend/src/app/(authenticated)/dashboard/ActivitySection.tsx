@@ -20,7 +20,8 @@ type ActivityGroup = ApiSchema<'DashboardActivityGroup'>
  * The dashboard's merchant-first activity list (#3810, epic #3801).
  *
  * The rows are #3824's server-side groups (agent + counterparty + token +
- * user-local day + outcome + activityType, capped at 8 over the ROLLING last
+ * user-local day + outcome + activityType, outbound groups split by sending
+ * account too (#4117), capped at 8 over the ROLLING last
  * 7 days — 24h × 7, the owner decision #3975), so the list is: day headings,
  * one row per group, "×N" when a group bundles more than one payment. The
  * old 5-row `transactions` preview left the wire in #3858 — nothing has read
@@ -51,10 +52,11 @@ type ActivityGroup = ApiSchema<'DashboardActivityGroup'>
  * when the money came from another of the user's own accounts (#4099) —
  * "New recipient" when
  * nothing resolves, "Agent payment" for an x402 row without a resource URL,
- * "Returned from <agent>" for sweeps. The SUBTITLE is the agent's name; the
- * movement's "From My account" half is dropped when the user has exactly one
- * account (everything necessarily comes from it) and shown when there are
- * several. Inbound rows name no receiving account: a group does not carry
+ * "Returned from <agent>" for sweeps. The SUBTITLE is the agent's name; on an
+ * outbound row it adds "From <account>", the account the money left
+ * (`fromAccountName`, #4117), when the user has several accounts — dropped
+ * with exactly one (everything necessarily comes from it), and when no name
+ * came back (an older backend). Inbound rows name no receiving account: a group does not carry
  * which account received, so "To My account" would be a guess — the title
  * ("Deposit", or "From <account>") and the success tone carry the
  * direction already.
@@ -270,12 +272,14 @@ function ActivityRow({
   const countLabel =
     group.count > 1 ? `×${group.count}${group.countIsFloor ? '+' : ''}` : undefined
 
-  // Subtitle: the agent's name; "From My account" appears only when the user
-  // has more than one account (see the section docblock for the one-account
-  // and inbound decisions).
+  // Subtitle: the agent's name; "From <account>" — the account the money
+  // left — appears only when the user has more than one account (see the
+  // section docblock for the one-account and inbound decisions).
   const subtitleParts: string[] = []
   if (group.agentName) subtitleParts.push(group.agentName)
-  if (accountCount > 1 && group.direction === 'out') subtitleParts.push('From My account')
+  if (accountCount > 1 && group.direction === 'out' && group.fromAccountName) {
+    subtitleParts.push(`From ${group.fromAccountName}`)
+  }
   const description = subtitleParts.length > 0 ? subtitleParts.join(' · ') : undefined
 
   // Amounts are #3805's currency mode: book-time `convertedAmount` plain,

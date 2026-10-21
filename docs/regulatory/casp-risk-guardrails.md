@@ -1026,16 +1026,24 @@ runtime list now, and `money-path.test.mjs` fails when a package-wide entry
 here is on neither list unless it is named **doc-only with its reason**:
 `packages/cli/src/**`, `packages/connect/src/**` and `packages/mcp/src/**` are
 client packages the deployed harness never runs, and `packages/sdk/src/**` is
-doc-only apart from the nine files on the runtime list. Eight are there because
-they are spend authority — `signer.ts` (the signing schemes), `userop-binding.ts`
-(the #3271 binding check), the signing-surface guard #3283 moved in from the
-signer (`delegate-account.ts`, `direct-payment-guard.ts`, `redemption-guard.ts`,
-`settlement-child.ts`), and the signer's checks on task and sub-budget children
-(`task-budget-guards.ts`, `sub-budget-guards.ts`, #3661). The ninth,
-`merchant-completion.ts` (#4122), decides after the funding leg has moved USDC
-whether the merchant accepted or the payment is a rejection after funding, and
-reports the settlement hash Haven records. The harness does build and drive the
-SDK; the rest of it is transport, and `client.ts`, which only wires those files
+doc-only apart from its files on the runtime list (`globs` in
+[`.github/money-path-globs.json`](../../.github/money-path-globs.json); not
+counted here, so a new entry cannot leave a stale number, #4193). Most are there
+because they are spend authority — `signer.ts` (the signing schemes),
+`userop-binding.ts` (the #3271 binding check), the signing-surface guard #3283
+moved in from the signer (`delegate-account.ts`, `direct-payment-guard.ts`,
+`redemption-guard.ts`, `settlement-child.ts`), and the signer's checks on task
+and sub-budget children (`task-budget-guards.ts`, `sub-budget-guards.ts`,
+#3661). The rest decide a funded payment's merchant answer.
+`merchant-completion.ts` (#4122): `MerchantCompletion.retryRequest` decides
+after the funding leg has moved USDC whether the merchant accepted or the
+payment is a rejection after funding, and reports the settlement hash Haven
+records. `merchant-answer.ts` (#4120, PR #4153) is the one post-funding
+merchant-answer decision shared by the hosted `completeX402MerchantCall` and
+the local `MerchantCompletion.retryRequest`; the decision moved out of
+`merchant-completion.ts` into it in the same PR, and the move would otherwise
+have taken it off the perimeter (the #3283 accident-of-location rule). The
+harness does build and drive the SDK; the rest of it is transport, and `client.ts`, which only wires those files
 in, is pinned off the list by name (#3283, #4122). Since #3173
 `packages/sdk/src/edge-signing.ts` is spend authority by the same reasoning —
 it is the viem-based implementation of `addressFromKey` / `signHash` /
@@ -1327,14 +1335,15 @@ route at all.
 **The money-path list did not need widening, and #1826's blocker dissolves on
 inspection.** The issue held that this doc "binds its `covers:` maintenance to
 one reference", so a path absent from
-[`ship-next`'s money-path list](../../.agents/skills/ship-next/SKILL.md) could
+[`ship-next`'s money-path list](../../.agents/skills/ship-next/references/money-path-perimeter.md) could
 not be added without widening that list first. The binding above is a **floor,
 not a ceiling** — it says adding a file *to the money-path list* without adding
 it here re-opens the hole; it never said this list may contain nothing else.
 Empirically it already contains a great deal else: `connect/**`, `mcp/**`,
-most of `sdk/**` (the money-path list names nine `sdk/src/` files: the signing
-schemes, the signing-surface guard, the budget guards and the post-funding
-merchant-answer decision), `routes/passkeys.ts`,
+most of `sdk/**` (the money-path list names only the `sdk/src/` files that are
+the signing schemes, the signing-surface guard, the budget guards, or the
+post-funding merchant-answer decision — `merchant-completion.ts` and the shared
+`merchant-answer.ts`), `routes/passkeys.ts`,
 `routes/catalog.ts`, `routes/accounting-feed.ts`, `routes/accounting.ts` and
 `config.ts` — none of them on that list. `signer/**`, `mcp-server/**` and
 `demo-merchant-mcp/**` were in the same position when #1826 was decided and

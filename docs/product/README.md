@@ -105,8 +105,9 @@ down beside Deposit address so step 1's is the one primary Add funds.
 On `/agents`, a user with no agents gets the connect flow itself, inline, in
 place of an empty state (#4065): the card "Connect your first agent" with the
 same steps as the connect dialog. While it shows, the page hides what would be
-empty or competing — the count chip, the header Connect agent, the toolbar and
-the list — so the one setup action is the screen. See
+empty or competing — the header Connect agent, the list summary's count, the
+toolbar and the list — so the one setup action is the screen. (The page has no
+"Agents N" count chip since #4209; the summary line owns the count.) See
 [screen-recipes.md](./screen-recipes.md) § Agent List.
 
 ---

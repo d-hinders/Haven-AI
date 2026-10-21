@@ -30,6 +30,15 @@
  * controls, so the WCAG 2.4.7 failure being guarded lands on destructive
  * actions rather than cosmetic ones.
  *
+ * ── #4209: the card's footer action row is gone ───────────────────────────────
+ *
+ * The rebuilt `AgentCard` has no footer action row. Its controls are now the
+ * stretched name link, the ⋯ menu trigger (and the menu it opens, whose items
+ * differ by state), and at most one call to action. The AgentCard tests below
+ * capture those; the inventory and the row measurements further down are the
+ * record of the retired row, kept because their lessons (Linux metrics wrap
+ * what macOS does not, #1909) are the reusable part.
+ *
  * ── Granularity: one test per control, one capture per test ──────────────────
  *
  * The issue asks this to be decided rather than assumed, and the first thing to
@@ -648,31 +657,6 @@ function agentState(overrides: Record<string, unknown>) {
 }
 
 /**
- * Assert the action row holds EXACTLY these controls, in this order.
- *
- * Seeding a state is not the same as rendering the branch. `status: 'paused'`
- * reaching the API mock says nothing about which of `AgentCard`'s five mutually
- * exclusive footer branches ran — a fixture field the component ignores would
- * leave the row on the default branch and the capture would be a duplicate of
- * an existing baseline, silently. The row's full control set is the observable
- * that distinguishes them, and it is asserted as a SET-with-order rather than a
- * `toBeVisible()` on the one target, so a control appearing that should not
- * (an `Edit` button surviving #3168's fork removal) fails too.
- *
- * Accessible names, not text: two of these controls read "Remove" and are told
- * apart only by their agent, which is exactly the ambiguity `aria-label` exists
- * to resolve.
- */
-async function expectRowControls(row: Locator, expected: readonly string[], label: string) {
-  const names = await row.getByRole('button').evaluateAll((els) =>
-    els.map((el) => el.getAttribute('aria-label') ?? el.textContent?.trim() ?? ''),
-  )
-  expect(names, `${label}: this is not the footer branch the fixture was seeding`).toEqual([
-    ...expected,
-  ])
-}
-
-/**
  * Assert every control in the captured row renders on ONE line (#1909).
  *
  * This exists because the platform that judges is not the platform that
@@ -757,19 +741,21 @@ for (const viewport of [DESKTOP, { width: 390, height: 844 }]) {
     // navigate away nor open a confirm dialog. This fixture set leaves the
     // pause call unmocked (599), so the failed mutation only toasts and the
     // card stays put: exactly the no-navigation contract this step pins.
-    await card.getByRole('button', { name: `Pause ${testAgent.name}` }).click()
+    // #4209: Pause and Remove live in the card's ⋯ menu — the trigger is a
+    // sibling control above the stretched link, so it opens the menu and
+    // never navigates.
+    const menuTrigger = card.getByRole('button', { name: `Actions for ${testAgent.name}` })
+    await menuTrigger.click()
+    expect(new URL(page.url()).pathname).toBe('/agents')
+    await page.getByRole('menuitem', { name: 'Pause payments' }).click()
     expect(new URL(page.url()).pathname).toBe('/agents')
     await expect(page.getByRole('dialog')).toHaveCount(0)
 
-    await card.getByRole('button', { name: `Remove ${testAgent.name}` }).click()
+    await menuTrigger.click()
+    await page.getByRole('menuitem', { name: 'Remove' }).click()
     expect(new URL(page.url()).pathname).toBe('/agents')
     await expect(page.getByRole('heading', { name: `Remove ${testAgent.name}?` })).toBeVisible()
     await page.keyboard.press('Escape')
-
-    const copyMcpName = card.getByRole('button', { name: 'Copy MCP server name' })
-    await copyMcpName.click()
-    expect(new URL(page.url()).pathname).toBe('/agents')
-    await expect(card.getByRole('button', { name: 'MCP server name copied' })).toBeVisible()
 
     const nameLink = card.getByRole('link', { name: testAgent.name, exact: true })
     await nameLink.focus()
@@ -885,58 +871,23 @@ test.describe('driven focus-state visual regression', () => {
     })
   }
 
-  // ── AgentCard action row — the live Pause control ─────────────────────────
+  // ── AgentCard controls (#4209) ─────────────────────────────────────────────
   //
-  // On `/agents`, because `AgentCard` renders nowhere else — it is NOT on
-  // `/design-system`, which is why the blocking visual gate has never seen it
-  // in any state, resting included. #1831 said so; this closes the focus half
-  // only, and the resting half is filed separately.
-  //
-  // #2258: `Revoke` was a legacy Safe control and is deleted with the retired
-  // agent-management surface. `Pause` stays for live delegation agents;
-  // #3550 moved navigation to the stretched name link and removed Details, so
-  // this loop captures Pause only. The baseline captures the row with the live
-  // `Remove` control.
-  const rowControls = [
-    { slug: 'pause', label: 'Pause', tone: 'brand' },
-  ] as const
+  // On `/agents`, the one place `AgentCard` renders. The rebuilt card has no
+  // footer action row: its controls are the stretched name link, the ⋯ menu
+  // trigger, the menu's items (which differ by state), and at most one call
+  // to action. Each is reached by real Tab, as the header explains.
 
-  for (const control of rowControls) {
-    test(`agent card action row — ${control.label} focus indicator (${control.tone})`, async ({ page }) => {
-      await seedOneOrganization(page)
-      await gotoDesktop(page, '/agents')
+  test('agent card ⋯ menu trigger — focus indicator', async ({ page }) => {
+    await gotoDesktop(page, '/agents')
 
-      const target = page.locator(`button[aria-label="${control.label} ${testAgent.name}"]`)
-      await expect(target).toHaveCount(1)
-      await expect(target).toBeVisible()
-
-      // The action row, located by its stable testid rather than the
-      // control's parent: the round-3 rework (#3164) wraps each `|` with the
-      // button it introduces below `lg` (S9, no dangling pipes on a wrapped
-      // line), so a button's parent is a grouping span, not the row. The
-      // testid survives such re-groupings; the old "own parent" walk did not
-      // (measured: the resume/remove-delegation driven captures failed their
-      // control-set assertions against a span in the round-3 baseline run).
-      const actionRow = page.getByTestId('agent-card-actions')
-      await expect(actionRow).toHaveCount(1)
-      await expectRowControlsUnwrapped(actionRow, `AgentCard action row · ${control.label}`)
-
-      await tabToTarget(page, target, `AgentCard action row · ${control.label}`)
-      await expectFocusedAndIndicated(page, target, `AgentCard action row · ${control.label}`)
-
-      // The ROW, not the control: these rings are `ring-2` with no offset on a
-      // compact text action, so ~2px of every ring falls outside the control's
-      // own box. The transparent 44px tap-target pseudo-element changes hit
-      // testing without painting pixels, so a control-sized capture would
-      // still clip the indicator it exists to photograph. The row also holds
-      // the neighbouring controls, so a ring bleeding into its neighbour is
-      // visible here and would not be in a tighter crop.
-      await expect(actionRow).toHaveScreenshot(
-        `focus-agentcard-actions-${control.slug}-desktop.png`,
-        SNAPSHOT_OPTIONS,
-      )
-    })
-  }
+    const card = page.getByTestId('agent-card')
+    const target = card.getByRole('button', { name: `Actions for ${testAgent.name}` })
+    await expect(target).toHaveCount(1)
+    await tabToTarget(page, target, 'AgentCard ⋯ menu trigger')
+    await expectFocusedAndIndicated(page, target, 'AgentCard ⋯ menu trigger')
+    await expect(card).toHaveScreenshot('focus-agentcard-menu-trigger-desktop.png', SNAPSHOT_OPTIONS)
+  })
 
   test('agent card name link — focus rings the whole card', async ({ page }) => {
     await gotoDesktop(page, '/agents')
@@ -952,96 +903,54 @@ test.describe('driven focus-state visual regression', () => {
     await expect(card).toHaveScreenshot('focus-agentcard-name-link-desktop.png', SNAPSHOT_OPTIONS)
   })
 
-  // ── AgentCard's other four footer branches — four more controls (#1873) ─
-  //
-  // One seeded agent per test, one control per test, one capture per test. The
-  // `rowControls` field is the branch assertion: it is what says the fixture
-  // reached the intended branch rather than merely carrying the intended field.
-  const seededControls = [
+  test('agent card call to action — focus indicator (Finish setup)', async ({ page }) => {
+    const agent = agentState({ id: 'agent-pending', name: 'Pending agent', status: 'pending_approval' })
+    await seedAgents(page, [agent])
+    await gotoDesktop(page, '/agents')
+
+    const card = page.getByTestId('agent-card')
+    const target = card.getByTestId('agent-card-cta').getByRole('link', { name: 'Finish setup' })
+    await expect(target).toHaveCount(1)
+    await tabToTarget(page, target, 'AgentCard CTA · Finish setup')
+    await expectFocusedAndIndicated(page, target, 'AgentCard CTA · Finish setup')
+    await expect(card).toHaveScreenshot('focus-agentcard-cta-desktop.png', SNAPSHOT_OPTIONS)
+  })
+
+  // The menu's items by state. The item list is the branch assertion: it is
+  // what says the fixture reached the intended state rather than merely
+  // carrying the intended field (#1873's rule, carried from the footer row).
+  const seededMenus = [
     {
-      slug: 'resume',
+      slug: 'active',
+      agent: agentState({ id: 'agent-delegation', name: 'Delegation agent' }),
+      items: ['Pause payments', 'Move to organization', 'Remove'],
+    },
+    {
+      slug: 'paused',
       agent: agentState({ id: 'agent-paused', name: 'Paused agent', status: 'paused' }),
-      control: 'Resume Paused agent',
-      // #2264: Remove, not Revoke — same rail branch as the row above.
-      // #3164: Move joins every operational row.
-      rowControls: [
-        'Move Paused agent to an organization',
-        'Resume Paused agent',
-        'Remove Paused agent',
-      ],
-      tone: 'brand',
-      label: 'Resume from pause',
+      items: ['Resume payments', 'Move to organization', 'Remove'],
     },
     {
-      slug: 'remove-delegation',
-      // Delegation agents have no Safe AllowanceModule to tear down, so Revoke
-      // is hidden and Remove IS the shutdown (#1402). That substitution is
-      // visible in `rowControls` and is the branch's signature.
-      //
-      // #2264 retired the caveat that used to stand here. This seed inherited
-      // `testAgent`'s AllowanceModule-shaped `allowances` (atomic
-      // `allowance_amount`), which a real `delegator_hybrid` agent cannot
-      // carry; the shared fixture now holds the DERIVED delegation projection
-      // (`rails/delegation-budget-view.ts` — human-formatted amount, period in
-      // minutes), so the inherited row is the right shape and the template is
-      // safe to copy for a capture that reads the budget section too.
-      //
-      // The `account_type` override is now a no-op against the live-rail
-      // default and is KEPT deliberately: this capture's subject is the
-      // delegation branch, and a seed that states its own branch does not
-      // depend on a default staying put.
-      agent: agentState({
-        id: 'agent-delegation',
-        name: 'Delegation agent',
-        account_type: 'delegator_hybrid',
-      }),
-      control: 'Remove Delegation agent',
-      // #3164: Move joins every operational row.
-      rowControls: [
-        'Move Delegation agent to an organization',
-        'Pause Delegation agent',
-        'Remove Delegation agent',
-      ],
-      tone: 'danger',
-      label: 'Remove (delegation)',
+      // `archived_at: null` is load-bearing: an archived agent offers Restore.
+      slug: 'revoked',
+      agent: agentState({ id: 'agent-revoked', name: 'Revoked agent', status: 'revoked', archived_at: null }),
+      items: ['Remove from list'],
     },
     {
-      slug: 'remove-revoked',
-      // `archived_at: null` is load-bearing: the revoked branch is
-      // `isRevoked && !isArchived`, and an archived agent renders Restore
-      // instead. The two Remove controls are DIFFERENT elements in different
-      // branches with different neighbours, which is why they get two captures.
-      agent: agentState({
-        id: 'agent-revoked',
-        name: 'Revoked agent',
-        status: 'revoked',
-        archived_at: null,
-      }),
-      control: 'Remove Revoked agent',
-      rowControls: ['Remove Revoked agent'],
-      tone: 'danger',
-      label: 'Remove (revoked)',
-    },
-    {
-      slug: 'restore',
+      slug: 'archived',
       agent: agentState({
         id: 'agent-archived',
         name: 'Archived agent',
         status: 'revoked',
         archived_at: '2026-05-06T10:00:00.000Z',
       }),
-      control: 'Restore Archived agent to the list',
-      rowControls: ['Restore Archived agent to the list'],
-      tone: 'brand',
-      label: 'Restore to list',
-      // The only control of the nine that is not on screen at load: archived
-      // agents are hidden by default (#4113).
+      items: ['Restore to list'],
       behindArchivedFacet: true,
     },
   ] as const
 
-  for (const seeded of seededControls) {
-    test(`agent card action row — ${seeded.label} focus indicator (${seeded.tone})`, async ({
+  for (const seeded of seededMenus) {
+    test(`agent card ⋯ menu — ${seeded.slug}: opens by keyboard, focuses its first item, Escape returns focus`, async ({
       page,
     }) => {
       await seedAgents(page, [seeded.agent])
@@ -1049,108 +958,63 @@ test.describe('driven focus-state visual regression', () => {
 
       if ('behindArchivedFacet' in seeded && seeded.behindArchivedFacet) {
         // Tab + Enter, never `.click()` — see the modality note in the header.
-        // Every seeded agent is archived, so the list's own "Show archived"
-        // (the every-agent-archived state, #4113) is the one way in; the count
-        // is asserted so a list that stopped offering it fails HERE, rather
-        // than as a confusing tab-exhaustion error 80 presses later.
         const showArchived = page.getByRole('button', { name: 'Show archived', exact: true })
         await expect(showArchived).toHaveCount(1)
         await tabToTarget(page, showArchived, 'AgentPanel · Show archived')
         await page.keyboard.press('Enter')
       }
 
-      const target = page.locator(`button[aria-label="${seeded.control}"]`)
-      await expect(target).toHaveCount(1)
-      await expect(target).toBeVisible()
+      const trigger = page.getByRole('button', { name: `Actions for ${seeded.agent.name}` })
+      await expect(trigger).toHaveCount(1)
+      await tabToTarget(page, trigger, `AgentCard ⋯ menu · ${seeded.slug}`)
+      await page.keyboard.press('Enter')
 
-      // Stable testid — see the pause loop above for why the parent walk
-      // cannot be used anymore (the S9 pipe-grouping spans).
-      const actionRow = page.getByTestId('agent-card-actions')
-      await expect(actionRow).toHaveCount(1)
-      await expectRowControls(
-        actionRow,
-        seeded.rowControls,
-        `AgentCard action row · ${seeded.label}`,
-      )
-      await expectRowControlsUnwrapped(actionRow, `AgentCard action row · ${seeded.label}`)
+      const menu = page.getByRole('menu')
+      await expect(menu.getByRole('menuitem')).toHaveText([...seeded.items])
+      await expect(menu.getByRole('menuitem').first()).toBeFocused()
+      await expect(menu).toHaveScreenshot(`focus-agentcard-menu-${seeded.slug}-desktop.png`, SNAPSHOT_OPTIONS)
 
-      await tabToTarget(page, target, `AgentCard action row · ${seeded.label}`)
-      await expectFocusedAndIndicated(page, target, `AgentCard action row · ${seeded.label}`)
-
-      await expect(actionRow).toHaveScreenshot(
-        `focus-agentcard-actions-${seeded.slug}-desktop.png`,
-        SNAPSHOT_OPTIONS,
-      )
+      await page.keyboard.press('Escape')
+      await expect(menu).toHaveCount(0)
+      await expect(trigger).toBeFocused()
     })
   }
 
   /**
-   * The archived row at 390px — GEOMETRY ONLY, deliberately no capture (#1909).
-   *
-   * #1909 pinned `Restore to list` with `whitespace-nowrap`, and the argument
-   * against doing that is overflow at the width where this row is tightest. The
-   * budget was measured before choosing: row content width 300px, gap 8px,
-   * label 77px pinned, and the sentence beside it 340px unwrapped with a 53px
-   * `min-content` — so 300 - 77 - 8 - 53 leaves 162px of slack and the sentence
-   * absorbs the reflow. That reasoning shipped as a comment in `AgentCard.tsx`,
-   * and **a comment is not a check**: it is arithmetic about the one width this
-   * fix makes a correctness claim about, run by nobody. This closes it.
-   *
-   * No `toHaveScreenshot`, on purpose. This file does not claim mobile pixels —
-   * #1797's rule is that a desktop proof may not be reused at a width it was
-   * not taken at, and the honest way to honour that is to assert the invariant
-   * that actually matters here (does the row overflow, is the label one line)
-   * rather than to mint a mobile baseline this file has no coverage argument
-   * for. Overflow is a boolean, not a pixel count, so it needs no baseline and
-   * carries none of the platform-metrics caveat the captures do.
+   * The narrowest card at 390px — GEOMETRY ONLY, deliberately no capture
+   * (#1909's rule: this file does not claim mobile pixels). The archived,
+   * half-revoked card carries the most at once: the badge, the warning, the
+   * helper line, the Finish revoking CTA and the ⋯ trigger. Overflow is a
+   * boolean, so it needs no baseline.
    */
-  test('agent card action row — the archived branch does not overflow at 390px', async ({
+  test('agent card — the archived half-revoked card does not overflow at 390px', async ({
     page,
   }) => {
     const mobile = VIEWPORTS.find((vp) => vp.width < DESKTOP_MIN_VIEWPORT_WIDTH)
     if (!mobile) throw new Error('focus gate: no viewport below the desktop breakpoint')
 
-    const seeded = seededControls.find((s) => s.slug === 'restore')!
-    await seedAgents(page, [seeded.agent])
+    const agent = agentState({
+      id: 'agent-half',
+      name: 'Half-removed agent',
+      status: 'revoked',
+      archived_at: '2026-05-06T10:00:00.000Z',
+      live_delegation_count: 1,
+    })
+    await seedAgents(page, [agent])
     await page.setViewportSize({ width: mobile.width, height: mobile.height })
-    await page.goto('/agents')
+    await page.goto('/agents?archived=shown')
     await page.evaluate(() => document.fonts.ready)
     await page.waitForLoadState('networkidle')
 
-    const showArchived = page.getByRole('button', { name: 'Show archived', exact: true })
-    await expect(showArchived).toHaveCount(1)
-    await tabToTarget(page, showArchived, 'AgentPanel · Show archived (390px)')
-    await page.keyboard.press('Enter')
+    const card = page.getByTestId('agent-card')
+    await expect(card).toHaveCount(1)
+    const cta = card.getByRole('button', { name: `Finish revoking ${agent.name}` })
+    await expect(cta).toBeVisible()
+    await expect(card.getByRole('button', { name: `Actions for ${agent.name}` })).toBeVisible()
+    await expectRowControlsUnwrapped(card.getByTestId('agent-card-cta'), 'AgentCard CTA @ 390px')
 
-    const target = page.locator(`button[aria-label="${seeded.control}"]`)
-    await expect(target).toHaveCount(1)
-    await expect(target).toBeVisible()
-
-    // Same stable testid as the desktop captures — the parent walk broke
-    // when the S9 pipe-grouping spans landed (see the pause loop above).
-    const actionRow = page.getByTestId('agent-card-actions')
-    await expect(actionRow).toHaveCount(1)
-
-    // The label is atomic at this width too — the whole point of pinning it.
-    await expectRowControlsUnwrapped(actionRow, 'AgentCard action row · Restore to list @ 390px')
-
-    const overflow = await actionRow.evaluate((rowEl) => {
-      const card = rowEl.parentElement as HTMLElement
-      if (!card) throw new Error('the archived action row has no AgentCard parent')
-      return {
-        row: rowEl.scrollWidth - rowEl.clientWidth,
-        card: card.scrollWidth - card.clientWidth,
-        rowContentWidth: rowEl.clientWidth,
-      }
-    })
-    expect(
-      overflow.row,
-      `the pinned "Restore to list" label overflowed its action row at ${mobile.width}px ` +
-        `(row content width ${overflow.rowContentWidth}px). This is the failure mode ` +
-        `\`whitespace-nowrap\` was measured against in #1909 — re-measure the budget ` +
-        `before widening the label or the sentence beside it.`,
-    ).toBe(0)
-    expect(overflow.card, `the archived card overflowed at ${mobile.width}px`).toBe(0)
+    const overflow = await card.evaluate((el) => el.scrollWidth - el.clientWidth)
+    expect(overflow, `the archived half-revoked card overflowed at ${mobile.width}px`).toBe(0)
   })
 
   // ── List controls triggers (#4110) ───────────────────────────────────────

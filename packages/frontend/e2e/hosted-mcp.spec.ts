@@ -21,9 +21,11 @@
  * This list used to name HostedConnectCard and the useAgentLastSeen polling
  * hook. Both were deleted in #1813: the card lost its only call site when #345
  * retired CreateAgentModal, and the hook existed solely to drive that card's
- * live "Connected" banner. The last-seen VALUE is still rendered, by
- * components/agent-panel/AgentCard.tsx straight off the agent payload — what
- * went away is a second, polling implementation nothing reached.
+ * live "Connected" banner. The last-seen VALUE is still rendered straight off
+ * the agent payload — the agent page's header meta, and since #4209 the
+ * `/agents` card's footer ("Connected <time ago>", for an agent that has not
+ * paid yet) — what went away is a second, polling implementation nothing
+ * reached. Nothing below asserts the value's wording.
  *
  * E2E tests (Playwright) verify the integrated page-level behaviour that
  * only manifests when the full Next.js app, routing, and mocked Haven API
@@ -48,7 +50,7 @@ test.describe('Hosted MCP — in-budget path', () => {
     await seedAuthenticatedSession(page)
   })
 
-  test('agents page renders agent list, allowances, and "Connect agent" CTA', async ({ page }) => {
+  test('agents page renders agent list, budget, and "Connect agent" CTA', async ({ page }) => {
     const browserErrors = collectBrowserErrors(page)
 
     await page.goto('/agents')
@@ -60,10 +62,13 @@ test.describe('Hosted MCP — in-budget path', () => {
     // At least one agent is shown (the mocked "Research agent")
     await expect(page.getByText('Research agent')).toBeVisible()
 
-    // The agent's allowance is shown. The allowance row renders the symbol
-    // twice (token chip + formatted amount), so pin to the first match —
-    // same pattern as the connected-state test below.
-    await expect(page.getByText(/USDC/).first()).toBeVisible()
+    // The agent's budget block renders, settled (#4209: the dashboard row's
+    // `AgentBudget`, joined from the overview). Not its words: the fixture's
+    // budget window is pinned to the visual harness's frozen clock, and this
+    // spec runs on the real one, where the read is past its period and the
+    // caption is the honest em dash.
+    await expect(page.getByTestId('agent-card-budget')).toBeVisible()
+    await expect(page.getByTestId('agent-card-budget-loading')).toHaveCount(0)
 
     // Primary CTA is present — clicking it opens the ConnectAgentModal
     await expect(page.getByRole('button', { name: 'Connect agent', exact: true })).toBeVisible()

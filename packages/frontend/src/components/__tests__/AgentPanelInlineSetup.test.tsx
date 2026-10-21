@@ -89,6 +89,18 @@ vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(),
 }))
 
+// #4209: the cards join the dashboard's reads; this suite does not exercise
+// that join, so the reads settle empty.
+vi.mock('@/hooks/useDashboardOverview', () => ({
+  useDashboardOverview: () => ({ data: null, loading: false, error: 'unavailable', refetch: vi.fn() }),
+}))
+vi.mock('@/hooks/useBudgetRemaining', () => ({
+  useBudgetRemaining: () => ({ data: null, loading: false, error: null, refetch: vi.fn() }),
+}))
+vi.mock('@/hooks/useAttentionDismissals', () => ({
+  useAttentionDismissals: () => ({ dismissedIds: new Set<string>(), dismiss: vi.fn() }),
+}))
+
 vi.mock('@/hooks/useAgentConnectionSetupStatus', () => ({
   useAgentConnectionSetupStatus: (setupId: string | null, options: { enabled?: boolean }) =>
     mockUseAgentConnectionSetupStatus(setupId, options),
@@ -201,14 +213,21 @@ function setAgentsList(list: unknown[], extra: Record<string, unknown> = {}) {
 
 const inlineFlow = () => screen.queryByRole('region', { name: 'Connect your first agent' })
 
-/** The header's "Agents N" count chip (its text is split across a span). */
-const countChip = () =>
-  screen.queryByText(
-    (_content, element) =>
-      element?.tagName === 'DIV' &&
-      element.firstElementChild?.tagName === 'SPAN' &&
-      /^Agents\s*\d+$/.test(element.textContent?.trim() ?? ''),
-  )
+/**
+ * #4209: the count lives on the list summary line, not a header chip — the
+ * "Agents N" chip is gone at every state, so a chip matcher could only ever
+ * say no. The summary count is the one count, and it hides with the list.
+ */
+const summaryCount = () => screen.queryByTestId('list-toolbar-count')
+
+/** The header's ⋯ menu trigger (#4209), present while the inline flow shows. */
+const headerMenu = () => screen.queryByRole('button', { name: 'More agent actions' })
+
+/** Open the header ⋯ menu and pick one of its items. */
+function chooseHeaderMenuItem(name: string) {
+  fireEvent.click(screen.getByRole('button', { name: 'More agent actions' }))
+  fireEvent.click(screen.getByRole('menuitem', { name }))
+}
 
 function pressEscape() {
   act(() => {
@@ -225,11 +244,11 @@ async function startSetup() {
   })
 }
 
-/** The surface the latch must keep hidden: chip, header button, list, placeholder. */
+/** The surface the latch must keep hidden: header button, count, list, placeholder. */
 function expectNothingElseOfTheSurface() {
   expect(screen.queryByTestId('agent-card')).not.toBeInTheDocument()
   expect(screen.queryByRole('button', { name: 'Connect agent' })).not.toBeInTheDocument()
-  expect(countChip()).not.toBeInTheDocument()
+  expect(summaryCount()).not.toBeInTheDocument()
   expect(screen.queryByTestId('list-toolbar')).not.toBeInTheDocument()
   expect(screen.queryByRole('heading', { name: 'Finalizing your agent…' })).not.toBeInTheDocument()
   expect(screen.queryByRole('status', { name: 'Finalizing agent setup' })).not.toBeInTheDocument()
@@ -261,7 +280,7 @@ afterEach(() => {
 })
 
 describe('AgentPanel inline first-agent flow (#4065)', () => {
-  it('replaces the empty state for a user with no agents, without the chip or the header button', () => {
+  it('replaces the empty state for a user with no agents, without a count or the header button', () => {
     render(<AgentPanel />)
 
     const flow = inlineFlow()
@@ -270,12 +289,16 @@ describe('AgentPanel inline first-agent flow (#4065)', () => {
     expect(within(flow!).getByText('Step 1 of 3', { exact: false })).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'No agents yet' })).not.toBeInTheDocument()
     expect(screen.queryByText('Set up with your AI agent')).not.toBeInTheDocument()
-    // Owner decision 2026-10-19: no "Agents 0" chip, no header Connect agent.
-    expect(countChip()).not.toBeInTheDocument()
+    // Owner decision 2026-10-19: no count, no header Connect agent.
+    expect(summaryCount()).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Connect agent' })).not.toBeInTheDocument()
-    // Labels and Organizations stay.
-    expect(screen.getByRole('button', { name: 'Labels' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Organizations' })).toBeInTheDocument()
+    // The page header (#4209) still renders, and its ⋯ menu stays, holding
+    // Labels and Organizations.
+    expect(screen.getByRole('heading', { level: 1, name: 'Agents' })).toBeInTheDocument()
+    expect(headerMenu()).toBeInTheDocument()
+    fireEvent.click(headerMenu()!)
+    expect(screen.getByRole('menuitem', { name: 'Labels' })).toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: 'Organizations' })).toBeInTheDocument()
   })
 
   it('has no Cancel on step 1 — the one action is Set agent budget', () => {
@@ -328,8 +351,8 @@ describe('AgentPanel inline first-agent flow (#4065)', () => {
 
     expect(inlineFlow()).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Connect agent' })).toBeInTheDocument()
-    // The chip matcher can say yes: with agents it finds the chip.
-    expect(countChip()).toHaveTextContent('1')
+    // The count matcher can say yes: with agents the summary line counts them.
+    expect(summaryCount()).toHaveTextContent('1 agent')
   })
 })
 
@@ -356,7 +379,7 @@ describe('the latch: inline stays mounted until the user leaves (#4065)', () => 
     expect(inlineFlow()).not.toBeInTheDocument()
     expect(screen.getByTestId('agent-card')).toHaveTextContent('Research agent')
     expect(screen.getByRole('button', { name: 'Connect agent' })).toBeInTheDocument()
-    expect(countChip()).toHaveTextContent('1')
+    expect(summaryCount()).toHaveTextContent('1 agent')
   })
 
   it('a non-silent list refresh keeps an unlatched step 2 as typed — no skeleton, no remount', () => {
@@ -557,7 +580,7 @@ describe('Escape never resets the inline flow (#4065)', () => {
   ])('Escape that closes the %s manager leaves the flow as it was', (button, dialogName) => {
     render(<AgentPanel />)
     fireEvent.change(screen.getByLabelText('Agent name'), { target: { value: 'Research agent' } })
-    fireEvent.click(screen.getByRole('button', { name: button }))
+    chooseHeaderMenuItem(button)
     expect(screen.getByRole('dialog', { name: dialogName })).toBeInTheDocument()
 
     pressEscape()

@@ -44,6 +44,11 @@ import LabelsManagerModal from '@/components/LabelsManagerModal'
 import { LabelChipRow } from '@/components/haven/LabelChip'
 import DelegationBudgetCard, { DELEGATION_BUDGET_CARD_ID } from '@/components/DelegationBudgetCard'
 import AgentPassportCard from '@/components/AgentPassportCard'
+import {
+  MCP_NOT_RECORDED_NOTE,
+  McpServerName,
+  hasUnrecordedMcpServerName,
+} from '@/components/agent-panel/McpServerName'
 import PaymentCredentialsModal from '@/components/PaymentCredentialsModal'
 import { RemoveAgentDialog } from '@/components/agent-panel/RemoveAgentDialog'
 import { ReplaceSigningKeyModal } from '@/components/agent-panel/ReplaceSigningKeyModal'
@@ -891,7 +896,7 @@ export default function AgentDetailClient({ agentId }: Props) {
       </div>
 
       {/* #3697: the page's optional and account-level items — the Agent
-          Passport row, the tax declaration row (rendered only when company
+          Passport row, the MCP server name row (#4209), the tax declaration row (rendered only when company
           details are VIES-valid; the toggle owns its own row and divider) and
           the Backup & recovery pointer — as ONE quiet card at the bottom. The
           detail-page section rule (#3692): the heading sits above the card;
@@ -909,6 +914,29 @@ export default function AgentDetailClient({ agentId }: Props) {
             agentId={agentId}
             agentRevoked={isRevoked}
           />
+
+          {/* #4209: the MCP server name moved here from the `/agents` card
+              (#1878) — which hosted+signer pair this agent is wired as, with
+              its copy button and tooltip. The `not recorded` note (#2043)
+              moved with it: visible text beside the bare label, never a
+              tooltip, and only when this agent has no recorded name. */}
+          <Card.Section divided>
+            <div className="px-4 py-4 md:px-6 md:py-5" data-testid="mcp-server-name-row">
+              <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-1">
+                <h3 className="text-base font-semibold text-[var(--v2-ink)]">MCP server name</h3>
+                <McpServerName value={currentAgent.mcp_server_name} />
+              </div>
+              {hasUnrecordedMcpServerName([currentAgent]) ? (
+                <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-3)]">
+                  {MCP_NOT_RECORDED_NOTE}
+                </p>
+              ) : (
+                <p className="mt-1 text-xs text-[var(--v2-ink-3)]">
+                  The name this agent&apos;s Haven servers have in its MCP config.
+                </p>
+              )}
+            </div>
+          </Card.Section>
 
           <TaxDeclarationToggle
             agentId={agentId}

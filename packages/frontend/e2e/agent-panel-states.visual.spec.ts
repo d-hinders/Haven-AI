@@ -1,12 +1,19 @@
 /**
  * Resting-state visual regression for AgentPanel and AgentCard.
  *
+ * #4209: the card reads its budget, badge and last payment from the
+ * dashboard's two reads, joined by agent id. `seedAgents` serves those too
+ * when a test passes them; otherwise the shared mock's overview (which knows
+ * only the fixture agent) answers, and a seeded agent it does not know reads
+ * as unknown usage — an em dash.
+ *
  * The legacy Safe rail is intentionally absent from this fixture: since #2413
  * the agent list is delegation-only, so no legacy account reaches this panel.
  */
 import { expect, test, type Page } from '@playwright/test'
 import { VISUAL_SKIP_REASON, VISUAL_SPECS_ENABLED } from './support/visual-mode'
 import {
+  dashboardOverview,
   mockHavenApi,
   seedAuthenticatedSession,
   testAgent,
@@ -19,7 +26,11 @@ const SNAPSHOT_OPTIONS = {
   threshold: 0.02,
 } as const
 
-async function seedAgents(page: Page, agents: unknown[]) {
+async function seedAgents(
+  page: Page,
+  agents: unknown[],
+  dashboard?: { overviewAgents: unknown[]; budgetReads: unknown[] },
+) {
   await page.route('**/api/**', async (route) => {
     const request = route.request()
     const path = new URL(request.url()).pathname.replace(/^\/api/, '')
@@ -31,8 +42,95 @@ async function seedAgents(page: Page, agents: unknown[]) {
       })
       return
     }
+    if (dashboard && request.method() === 'GET' && path === '/dashboard/overview') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ...dashboardOverview, agents: dashboard.overviewAgents }),
+      })
+      return
+    }
+    if (dashboard && request.method() === 'GET' && path === '/dashboard/budget-remaining') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ budgets: dashboard.budgetReads }),
+      })
+      return
+    }
     await route.fallback()
   })
+}
+
+// The card's footer and the budget caption both read the clock; pin it so a
+// baseline cannot drift on a calendar boundary (see product-routes' header).
+const FROZEN_NOW = new Date('2026-09-01T12:00:00.000Z')
+const TOKEN = '0xddafbb505ad214d7b80b1f830fccc89b60fb7a83'
+const ZERO_WINDOW = {
+  gross: { usd: 0, eur: 0, sek: 0 },
+  net: { usd: 0, eur: 0, sek: 0 },
+  approx: false,
+  payments: 0,
+  refusals: { budget: 0, scope: 0, failed: 0, haven: 0 },
+}
+
+function budget(n: number, budgetAtomic: string) {
+  return {
+    id: `9d1f4c0a-0000-4000-8000-00000000010${n}`,
+    delegationHash: `0x${String(n).repeat(64)}`,
+    chainId: 8453,
+    tokenAddress: TOKEN,
+    tokenSymbol: 'USDC',
+    decimals: 6,
+    budgetAtomic,
+    periodSeconds: 86_400,
+    startDate: '2026-08-20T10:00:00.000Z',
+    expiresAt: '2027-08-20T10:00:00.000Z',
+    periodEnd: '2026-09-02T10:00:00.000Z',
+  }
+}
+
+function read(agentId: string, n: number, budgetAtomic: string, usedAtomic: string) {
+  return {
+    agent_id: agentId,
+    chain_id: 8453,
+    delegation_hash: `0x${String(n).repeat(64)}`,
+    token_address: TOKEN,
+    token_symbol: 'USDC',
+    token_decimals: 6,
+    budget_atomic: budgetAtomic,
+    read_at: '2026-09-01T11:00:00.000Z',
+    period_end: '2026-09-02T10:00:00.000Z',
+    remaining_atomic: String(BigInt(budgetAtomic) - BigInt(usedAtomic)),
+    remaining_from_chain: true,
+    used_atomic: usedAtomic,
+    sub_budget_spend: [],
+  }
+}
+
+function overviewEntry(
+  agent: { id: string; name: string; status: string },
+  overrides: Record<string, unknown> = {},
+) {
+  return {
+    id: agent.id,
+    name: agent.name,
+    status: agent.status,
+    accountId: testAgent.account_id,
+    accountName: testAgent.account_name,
+    accountChainId: 8453,
+    allowances: [],
+    budgets: [],
+    receivedSubBudgets: [],
+    stats: { d7: ZERO_WINDOW, d30: ZERO_WINDOW, lastPaymentAt: null, lastCounterparty: null },
+    ...overrides,
+  }
+}
+
+function lastPaid(at: string, counterparty: Record<string, unknown>) {
+  return {
+    stats: { d7: ZERO_WINDOW, d30: ZERO_WINDOW, lastPaymentAt: at, lastCounterparty: counterparty },
+  }
 }
 
 async function settle(page: Page) {
@@ -158,6 +256,96 @@ test.describe('agent panel empty states and card banners', () => {
     const card = page.getByTestId('agent-card').filter({ has: page.getByRole('button', { name: `Finish revoking ${agent.name}` }) })
     await expect(card).toHaveCount(1)
     await expect(card).toHaveScreenshot('agentcard-half-removed-desktop.png', SNAPSHOT_OPTIONS)
+  })
+
+  /**
+   * #4209: every card state the approved mockup (version 4) draws, on one
+   * desktop frame — the badge only when an agent needs attention, the
+   * dashboard's budget meter and caption, one footer line (never an address),
+   * one CTA, and the ⋯ menu. Also the alignment rule: cards stretch to their
+   * row and the footer sits on `mt-auto`, so footers line up.
+   */
+  test('agent cards — every mockup state, footers aligned across each row', async ({ page }) => {
+    await page.clock.setFixedTime(FROZEN_NOW)
+    await page.setViewportSize({ width: 1280, height: 2200 })
+    const a = {
+      atlas: agentState({ id: 'agent-atlas', name: 'claude-eval', labels: [{ id: 'l1', name: 'research', color: 'blue' }] }),
+      spent: agentState({ id: 'agent-spent', name: 'Lovable Dev' }),
+      setup: agentState({ id: 'agent-setup', name: 'Demo agent', status: 'pending_approval', mcp_last_seen_at: '2026-09-01T10:00:00.000Z' }),
+      paused: agentState({ id: 'agent-paused', name: 'Siri', status: 'paused' }),
+      travel: agentState({
+        id: 'agent-travel',
+        name: 'Travel agent',
+        labels: ['travel', 'ops', 'q4', 'eu'].map((name, i) => ({ id: `t${i}`, name, color: 'green' })),
+      }),
+      stranded: agentState({ id: 'agent-stranded', name: 'Atlas', has_stranded_funds: true }),
+      helper: agentState({ id: 'agent-helper', name: 'Helper' }),
+      revoked: agentState({ id: 'agent-revoked', name: 'Codex test agent 1', status: 'revoked' }),
+      halfRemoved: agentState({ id: 'agent-half', name: 'sub-3328', status: 'revoked', archived_at: '2026-06-01T00:00:00Z', live_delegation_count: 1 }),
+      archived: agentState({ id: 'agent-archived', name: 'gate-3028', status: 'revoked', archived_at: '2026-06-01T00:00:00Z' }),
+    }
+    await seedAgents(page, Object.values(a), {
+      overviewAgents: [
+        overviewEntry(a.atlas, { budgets: [budget(1, '3000000')], ...lastPaid('2026-08-31T16:00:00.000Z', { source: 'x402', merchantName: null, x402ResourceUrl: 'https://api.bitrefill.com/v1/buy', to: testAgent.delegate_address }) }),
+        overviewEntry(a.spent, { budgets: [budget(2, '5000000')], ...lastPaid('2026-08-30T12:00:00.000Z', { source: 'x402', merchantName: 'Ampersend', x402ResourceUrl: null, to: null }) }),
+        overviewEntry(a.setup),
+        overviewEntry(a.paused, { budgets: [budget(3, '12000000')], ...lastPaid('2026-08-26T12:00:00.000Z', { source: 'direct', merchantName: null, x402ResourceUrl: null, to: testAgent.delegate_address }) }),
+        overviewEntry(a.travel, { budgets: [budget(4, '200000000'), budget(5, '50000000')] }),
+        overviewEntry(a.stranded, { budgets: [budget(6, '1000000')] }),
+        overviewEntry(a.helper, { receivedSubBudgets: [{ parentAgentId: 'agent-atlas', parentAgentName: 'claude-eval', open: true }] }),
+        overviewEntry({ ...a.halfRemoved, status: 'active' }),
+        overviewEntry({ ...a.archived, status: 'active' }),
+      ],
+      budgetReads: [
+        read('agent-atlas', 1, '3000000', '1200000'),
+        read('agent-spent', 2, '5000000', '5000000'),
+        read('agent-paused', 3, '12000000', '0'),
+        read('agent-travel', 4, '200000000', '58000000'),
+        read('agent-travel', 5, '50000000', '0'),
+        read('agent-stranded', 6, '1000000', '1000000'),
+      ],
+    })
+    await page.goto('/agents?archived=shown')
+    await settle(page)
+
+    const grid = page.getByTestId('agent-card-grid')
+    await expect(grid.getByTestId('agent-card')).toHaveCount(10)
+    // Settled: no skeleton left on any card.
+    await expect(grid.getByTestId('agent-card-budget-loading')).toHaveCount(0)
+    // The footer never prints an address (to-only reads "Last paid …" alone).
+    await expect(grid.getByTestId('agent-card-footer').filter({ hasText: /0x[0-9a-f]{4}/i })).toHaveCount(0)
+    await expect(grid.getByText('Last paid 20h ago · api.bitrefill.com')).toHaveCount(1)
+    // One CTA per card that needs a next step, and only those.
+    const ctas = await grid.getByTestId('agent-card-cta').allInnerTexts()
+    expect(ctas.map((label) => label.trim()).sort()).toEqual(['Finish revoking', 'Finish setup', 'Recover funds'])
+
+    // Footers line up across every two-card row, and so do the cards.
+    const cards = await grid.getByTestId('agent-card').all()
+    for (let i = 0; i + 1 < cards.length; i += 2) {
+      const [left, right] = [cards[i]!, cards[i + 1]!]
+      const [lb, rb] = [await left.boundingBox(), await right.boundingBox()]
+      const [lf, rf] = [
+        await left.getByTestId('agent-card-footer').boundingBox(),
+        await right.getByTestId('agent-card-footer').boundingBox(),
+      ]
+      expect(lb!.y).toBeCloseTo(rb!.y, 0)
+      expect(lb!.height).toBeCloseTo(rb!.height, 0)
+      expect(lf!.y).toBeCloseTo(rf!.y, 0)
+    }
+
+    await expect(grid).toHaveScreenshot('agentpanel-card-states-desktop.png', SNAPSHOT_OPTIONS)
+
+    // The ⋯ menu, open, and painted above the card below it.
+    await page.getByRole('button', { name: 'Actions for claude-eval' }).click()
+    const menu = page.getByRole('menu')
+    await expect(menu.getByRole('menuitem')).toHaveText(['Pause payments', 'Remove'])
+    const menuBox = await menu.boundingBox()
+    const topmost = await page.evaluate(
+      ({ x, y }) => document.elementFromPoint(x, y)?.closest('[role="menu"]') !== null,
+      { x: menuBox!.x + menuBox!.width / 2, y: menuBox!.y + menuBox!.height - 4 },
+    )
+    expect(topmost).toBe(true)
+    await expect(menu).toHaveScreenshot('agentcard-menu-open-desktop.png', SNAPSHOT_OPTIONS)
   })
 
   /**

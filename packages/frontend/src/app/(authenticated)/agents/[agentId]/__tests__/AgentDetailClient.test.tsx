@@ -166,6 +166,7 @@ import { AGENT_PAUSED_BODY, AGENT_PAUSED_TITLE } from '@/lib/agent-pause-copy'
 import { HALF_REVOKED_TITLE } from '@/lib/half-revoked'
 import { AgentRow, type DashboardAgent } from '@/components/haven/AgentRow'
 import AgentDetailClient from '../AgentDetailClient'
+import { MCP_NOT_RECORDED_NOTE } from '@/components/agent-panel/McpServerName'
 
 const VIES_VALID_ROW = {
   legal_name: 'Acme AB',
@@ -489,6 +490,36 @@ describe('AgentDetailClient last-activity metadata', () => {
     })
     render(<AgentDetailClient agentId="agent-1" />)
     expect(screen.getByRole('banner')).toHaveTextContent('Created 1mo ago · No activity yet')
+  })
+
+  // #4209: the MCP server name moved here from the `/agents` card, with its
+  // copy button, and the `not recorded` note (#2043) moved with it.
+  describe('MCP server name (#4209)', () => {
+    function withMcpName(value: string | null) {
+      const base = mockUseAgents()
+      mockUseAgents.mockReturnValue({
+        ...base,
+        agents: base.agents.map((a: Record<string, unknown>) => ({ ...a, mcp_server_name: value })),
+      })
+    }
+
+    it('shows the recorded name with a copy button, and no not-recorded note', () => {
+      withMcpName('haven-research')
+      render(<AgentDetailClient agentId="agent-1" />)
+      const row = screen.getByTestId('mcp-server-name-row')
+      expect(row).toHaveTextContent('MCP server name')
+      expect(row).toHaveTextContent('haven-research')
+      expect(within(row).getByRole('button', { name: /copy mcp server name/i })).toBeInTheDocument()
+      expect(screen.queryByText(MCP_NOT_RECORDED_NOTE)).toBeNull()
+    })
+
+    it('says "not recorded" and explains it in visible text, not a tooltip', () => {
+      withMcpName(null)
+      render(<AgentDetailClient agentId="agent-1" />)
+      const row = screen.getByTestId('mcp-server-name-row')
+      expect(within(row).getByText('not recorded')).toBeInTheDocument()
+      expect(within(row).getByText(MCP_NOT_RECORDED_NOTE)).toBeInTheDocument()
+    })
   })
 
   it('shows the description as the header subtitle (#3694)', () => {
@@ -1048,9 +1079,11 @@ describe('AgentDetailClient last-activity metadata', () => {
     const card = screen
       .getByTestId('identity-settings-section')
       .querySelector('.rounded-\\[10px\\]') as HTMLElement
-    // The card's direct rows are the passport row and the Backup section —
-    // exactly two, so the tax row's divider left no orphan and no gap.
-    expect(card.children.length).toBe(2)
+    // The card's direct rows are the passport row, the MCP server name row
+    // (#4209) and the Backup section — exactly three, so the tax row's
+    // divider left no orphan and no gap.
+    expect(card.children.length).toBe(3)
+    expect(card.children[1]).toHaveTextContent('MCP server name')
     expect(card.textContent).not.toContain('Tax declaration')
 
     // ...and the non-valid VIES state hides it too.

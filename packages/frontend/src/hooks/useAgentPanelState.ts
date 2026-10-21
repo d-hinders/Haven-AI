@@ -184,7 +184,6 @@ export function useAgentPanelState() {
     if (finalizeTimedOut && agents.length > 0) setFinalizeTimedOut(false)
   }, [agents.length, finalizeTimedOut])
 
-  const visibleAgents = useMemo(() => agents.filter((agent) => !agent.archived_at), [agents])
   const removedAgents = useMemo(() => agents.filter((agent) => Boolean(agent.archived_at)), [agents])
 
   useEffect(() => {
@@ -282,7 +281,6 @@ export function useAgentPanelState() {
     agents,
     loading,
     error,
-    visibleAgents,
     removedAgents,
     connectAgentOpen,
     setConnectAgentOpen,

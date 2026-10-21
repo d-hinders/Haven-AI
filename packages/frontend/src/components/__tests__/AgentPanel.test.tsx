@@ -4,6 +4,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const mockUseAuth = vi.hoisted(() => vi.fn())
 const mockUseAgents = vi.hoisted(() => vi.fn())
 const mockUseOrganizations = vi.hoisted(() => vi.fn())
+// #4209: the cards join the dashboard's two reads. Controllable, so a test
+// can resolve the agents list first and the overview later.
+const mockUseDashboardOverview = vi.hoisted(() => vi.fn())
+const mockUseBudgetRemaining = vi.hoisted(() => vi.fn())
 
 vi.mock('@/context/AuthContext', () => ({
   useAuth: () => mockUseAuth(),
@@ -18,6 +22,16 @@ vi.mock('@/hooks/useAgents', () => ({
 // `mockUseOrganizations` directly (default: none, loading settled).
 vi.mock('@/hooks/useOrganizations', () => ({
   useOrganizations: () => mockUseOrganizations(),
+}))
+
+vi.mock('@/hooks/useDashboardOverview', () => ({
+  useDashboardOverview: () => mockUseDashboardOverview(),
+}))
+vi.mock('@/hooks/useBudgetRemaining', () => ({
+  useBudgetRemaining: () => mockUseBudgetRemaining(),
+}))
+vi.mock('@/hooks/useAttentionDismissals', () => ({
+  useAttentionDismissals: () => ({ dismissedIds: new Set<string>(), dismiss: vi.fn() }),
 }))
 
 vi.mock('next/navigation', () => ({
@@ -73,6 +87,48 @@ vi.mock('../agent-panel/RemoveAgentDialog', () => ({
 import AgentPanel from '../AgentPanel'
 import { MCP_NOT_RECORDED_NOTE } from '../agent-panel/McpServerName'
 
+const ZERO_WINDOW = {
+  gross: { usd: 0, eur: 0, sek: 0 },
+  net: { usd: 0, eur: 0, sek: 0 },
+  approx: false,
+  payments: 0,
+  refusals: { budget: 0, scope: 0, failed: 0, haven: 0 },
+}
+
+/** The dashboard overview's entry for an agent: `budgets` live, no payments. */
+function overviewAgent(id: string, budgets: unknown[] = []) {
+  return {
+    id,
+    name: 'Research agent',
+    status: 'active',
+    accountId: 'safe-1',
+    accountName: 'Main account',
+    accountChainId: 100,
+    allowances: [],
+    budgets,
+    receivedSubBudgets: [],
+    stats: { d7: ZERO_WINDOW, d30: ZERO_WINDOW, lastPaymentAt: null, lastCounterparty: null },
+  }
+}
+
+function setOverview(
+  agents: unknown[] | null,
+  { loading = false, budgetLoading = false }: { loading?: boolean; budgetLoading?: boolean } = {},
+) {
+  mockUseDashboardOverview.mockReturnValue({
+    data: agents === null ? null : { agents, accounts: [] },
+    loading,
+    error: null,
+    refetch: vi.fn(),
+  })
+  mockUseBudgetRemaining.mockReturnValue({
+    data: budgetLoading ? null : { budgets: [] },
+    loading: budgetLoading,
+    error: null,
+    refetch: vi.fn(),
+  })
+}
+
 const SAFE = {
   id: 'safe-1',
   name: 'Main account',
@@ -118,6 +174,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   mockUseAuth.mockReturnValue({ user: { accounts: [SAFE] } })
   setAgents([])
+  setOverview([])
   mockUseOrganizations.mockReturnValue({
     organizations: [],
     loading: false,
@@ -170,21 +227,16 @@ describe('AgentPanel rail affordances', () => {
     expect(screen.getByRole('status', { name: 'Loading agents' })).toHaveAttribute('aria-busy', 'true')
   })
 
-  it('keeps the delegation connect entry point and agent budget readable', () => {
-    setAgents([agent({ allowances: [{
-      id: 'allowance-1',
-      agent_id: 'agent-1',
-      token_address: '0x3333333333333333333333333333333333333333',
-      token_symbol: 'USDC',
-      allowance_amount: '1000000',
-      reset_period_min: 1440,
-    }] })])
+  it('keeps the connect entry point, and the card reads its budget from the dashboard overview (#4209)', () => {
+    setAgents([agent()])
+    setOverview([overviewAgent('agent-1')])
 
     render(<AgentPanel />)
 
-    expect(screen.getAllByRole('button', { name: 'Connect agent' }).length).toBeGreaterThan(0)
+    expect(screen.getByRole('button', { name: 'Connect agent' })).toBeInTheDocument()
     expect(screen.getByText('Research agent')).toBeInTheDocument()
-    expect(screen.getByText('1.00')).toBeInTheDocument()
+    // The overview's entry has no live budget: the dashboard row's own words.
+    expect(screen.getByTestId('agent-card-budget')).toHaveTextContent('No budget')
   })
 
   it('shows a retry state instead of claiming there are no agents when the list fails', () => {
@@ -245,8 +297,8 @@ describe('AgentPanel rail affordances', () => {
     render(<AgentPanel />)
     fireEvent.click(screen.getByRole('button', { name: 'Show archived' }))
 
-    expect(screen.getByRole('button', { name: 'Restore Old agent to the list' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /^Pause/ })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for Old agent' }))
+    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Restore to list'])
   })
 
   it('a list whose every agent is archived says so and offers Show archived, not a Clear filters that changes nothing', () => {
@@ -419,30 +471,20 @@ describe('AgentPanel list toolbar (#3165, on ListToolbar since #4113)', () => {
     expect(screen.getByText('Alpha')).toBeInTheDocument()
   })
 
-  it('the MCP "not recorded" note follows the filtered list, not every agent', () => {
+  // #4209: the MCP name left the card, so its `not recorded` note left the
+  // list with it — both live on the agent detail page now
+  // (AgentDetailClient.test.tsx). The note's text is the positive control:
+  // the same matcher finds it there.
+  it('no longer explains "not recorded" above the list — the MCP name is on the agent page', () => {
     setAgents([
       agent({ id: 'a1', name: 'Alpha', mcp_server_name: null, mcp_last_seen_at: '2026-09-01T00:00:00Z' }),
       agent({ id: 'a2', name: 'Bravo', mcp_server_name: 'claude-desktop' }),
     ])
     render(<AgentPanel />)
-    expect(screen.getByText(MCP_NOT_RECORDED_NOTE)).toBeInTheDocument()
-    fireEvent.change(screen.getByRole('searchbox', { name: 'Search agents' }), { target: { value: 'bravo' } })
-    // Alpha (the unrecorded one) is filtered out, so the note explaining its
-    // label has nothing on the page to explain. Mutation: gate the predicate
-    // on every agent again → red.
+    expect(screen.getAllByTestId('agent-card')).toHaveLength(2)
     expect(screen.queryByText(MCP_NOT_RECORDED_NOTE)).toBeNull()
-  })
-
-  it('the MCP note ignores a hidden archived agent', () => {
-    setAgents([
-      agent({ id: 'a1', name: 'Alpha', mcp_server_name: 'claude-desktop' }),
-      agent({ id: 'a2', name: 'Old', mcp_server_name: null, mcp_last_seen_at: '2026-09-01T00:00:00Z', archived_at: '2026-06-01T00:00:00Z' }),
-    ])
-    render(<AgentPanel />)
-    expect(screen.queryByText(MCP_NOT_RECORDED_NOTE)).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: 'Archived: Hidden' }))
-    fireEvent.click(screen.getByRole('menuitemradio', { name: 'Shown' }))
-    expect(screen.getByText(MCP_NOT_RECORDED_NOTE)).toBeInTheDocument()
+    expect(screen.queryByText('not recorded')).toBeNull()
+    expect(screen.queryByText('claude-desktop')).toBeNull()
   })
 
   it('no toolbar on an empty list — the inline first-agent flow owns that screen', () => {
@@ -506,16 +548,27 @@ describe('AgentPanel across accounts (#3719)', () => {
     account_id: TREASURY.id, account_name: TREASURY.name, account_chain_id: TREASURY.chain_id,
   })
 
-  it('lists every account’s agents, each naming its account and chain', () => {
+  it('lists every account’s agents, each naming its account — and no network, which the account carries (#4209)', () => {
     mockUseAuth.mockReturnValue({ user: { accounts: [OPERATING, TREASURY] } })
     setAgents([onOperating, onTreasury])
 
     render(<AgentPanel />)
 
-    expect(screen.getByRole('link', { name: 'Research agent' })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Payroll agent' })).toBeInTheDocument()
-    expect(screen.getByText((_, el) => el?.tagName === 'P' && el.textContent === 'Account: Operating · Base')).toBeInTheDocument()
-    expect(screen.getByText((_, el) => el?.tagName === 'P' && el.textContent === 'Account: Treasury · Base Sepolia')).toBeInTheDocument()
+    const research = screen.getByRole('link', { name: 'Research agent' }).closest('[data-testid="agent-card"]') as HTMLElement
+    const payroll = screen.getByRole('link', { name: 'Payroll agent' }).closest('[data-testid="agent-card"]') as HTMLElement
+    expect(within(research).getByText('Operating')).toBeInTheDocument()
+    expect(within(payroll).getByText('Treasury')).toBeInTheDocument()
+    expect(research.textContent).not.toMatch(/Base/)
+    expect(payroll.textContent).not.toMatch(/Base Sepolia/)
+  })
+
+  it('names no account on a card when the user has only one', () => {
+    mockUseAuth.mockReturnValue({ user: { accounts: [OPERATING] } })
+    setAgents([onOperating])
+
+    render(<AgentPanel />)
+
+    expect(within(screen.getByTestId('agent-card')).queryByText('Operating')).toBeNull()
   })
 
   it('offers the Account filter with two or more accounts', () => {
@@ -536,5 +589,121 @@ describe('AgentPanel across accounts (#3719)', () => {
     // Non-vacuity: the toolbar rendered its built-in facets.
     expect(screen.getByRole('button', { name: /^Status:/ })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /^Account:/ })).toBeNull()
+  })
+})
+
+describe('AgentPanel page header (#4209)', () => {
+  it('renders the page header with Connect agent and a ⋯ menu holding Labels and Organizations', () => {
+    setAgents([agent()])
+    render(<AgentPanel />)
+
+    expect(screen.getByRole('heading', { level: 1, name: 'Agents' })).toBeInTheDocument()
+    expect(screen.getByText(/You approve each budget yourself/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Connect agent' })).toBeInTheDocument()
+    // The Labels and Organizations BUTTONS are gone; they are menu items now.
+    expect(screen.queryByRole('button', { name: 'Labels' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Organizations' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'More agent actions' }))
+    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Labels', 'Organizations'])
+  })
+
+  it('has no "Agents N" count chip: the summary line owns the count', () => {
+    setAgents([agent(), agent({ id: 'agent-2', name: 'Bravo' })])
+    render(<AgentPanel />)
+
+    expect(screen.getByTestId('list-toolbar-count')).toHaveTextContent('2 agents')
+    expect(
+      screen.queryByText((_, el) => el?.tagName === 'DIV' && /^Agents\s*\d+$/.test(el.textContent?.trim() ?? '')),
+    ).toBeNull()
+  })
+
+  it('opens the Labels and Organizations managers from the ⋯ menu', () => {
+    setAgents([agent()])
+    render(<AgentPanel />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'More agent actions' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Labels' }))
+    expect(screen.getByRole('dialog', { name: 'Manage labels' })).toBeInTheDocument()
+  })
+
+  it('the no-account state keeps the title and offers no Connect agent', () => {
+    mockUseAuth.mockReturnValue({ user: { accounts: [] } })
+    render(<AgentPanel />)
+
+    expect(screen.getByRole('heading', { level: 1, name: 'Agents' })).toBeInTheDocument()
+    expect(screen.getByText('Create a Haven account to manage agents')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Connect agent' })).toBeNull()
+  })
+})
+
+describe('AgentPanel cards join the dashboard reads (#4209)', () => {
+  const BUDGET = {
+    id: 'budget-1',
+    delegationHash: `0x${'11'.repeat(32)}`,
+    chainId: 100,
+    tokenAddress: '0x3333333333333333333333333333333333333333',
+    tokenSymbol: 'USDC',
+    decimals: 6,
+    budgetAtomic: '3000000',
+    periodSeconds: 86_400,
+    startDate: '2026-10-01T00:00:00.000Z',
+    expiresAt: '2099-01-01T00:00:00.000Z',
+    periodEnd: '2099-01-01T00:00:00.000Z',
+  }
+
+  /**
+   * The staggered case the overview's own loading flag makes possible: the
+   * agents list resolves first, the overview later. Until it does, every card
+   * shows a skeleton — never "No budget", which would state a fact the page
+   * does not have yet — and no badge.
+   */
+  it('never reads "No budget" before the overview resolves', () => {
+    setAgents([agent()])
+    setOverview(null, { loading: true })
+    const { rerender } = render(<AgentPanel />)
+
+    expect(screen.getByTestId('agent-card-budget-loading')).toBeInTheDocument()
+    expect(screen.queryByText('No budget')).toBeNull()
+    expect(screen.queryByTestId('agent-status-chip')).toBeNull()
+
+    // The overview lands; the budget reads are still in flight.
+    setOverview([overviewAgent('agent-1')], { budgetLoading: true })
+    rerender(<AgentPanel />)
+    expect(screen.getByTestId('agent-card-budget-loading')).toBeInTheDocument()
+    expect(screen.queryByText('No budget')).toBeNull()
+
+    // Both settled: the agent really has no budget, and now it says so.
+    setOverview([overviewAgent('agent-1')])
+    rerender(<AgentPanel />)
+    expect(screen.queryByTestId('agent-card-budget-loading')).toBeNull()
+    expect(screen.getByTestId('agent-card-budget')).toHaveTextContent('No budget')
+    expect(screen.getByTestId('agent-status-chip')).toHaveTextContent('Needs setup')
+  })
+
+  it('joins each card to its own overview entry by agent id', () => {
+    setAgents([agent({ id: 'a1', name: 'Alpha' }), agent({ id: 'a2', name: 'Bravo' })])
+    setOverview([overviewAgent('a2', [BUDGET]), overviewAgent('a1')])
+    render(<AgentPanel />)
+
+    const alpha = screen.getByRole('link', { name: 'Alpha' }).closest('[data-testid="agent-card"]') as HTMLElement
+    const bravo = screen.getByRole('link', { name: 'Bravo' }).closest('[data-testid="agent-card"]') as HTMLElement
+    expect(within(alpha).getByTestId('agent-card-budget')).toHaveTextContent('No budget')
+    expect(within(bravo).getByTestId('agent-card-budget')).not.toHaveTextContent('No budget')
+  })
+
+  it('a failed overview leaves usage unknown — an em dash, never "No budget"', () => {
+    setAgents([agent()])
+    mockUseDashboardOverview.mockReturnValue({ data: null, loading: false, error: 'boom', refetch: vi.fn() })
+    render(<AgentPanel />)
+
+    expect(screen.getByTestId('agent-card-budget')).toHaveTextContent('—')
+    expect(screen.queryByText('No budget')).toBeNull()
+  })
+
+  it('stretches cards to their row: the grid no longer aligns them to the top', () => {
+    setAgents([agent({ id: 'a1', name: 'Alpha' }), agent({ id: 'a2', name: 'Bravo', status: 'paused' })])
+    render(<AgentPanel />)
+
+    expect(screen.getByTestId('agent-card-grid').className).not.toMatch(/\bitems-start\b/)
   })
 })

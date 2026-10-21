@@ -25,10 +25,11 @@
  *
  * ## Where the explanation lives, and why not here (#2043)
  *
- * The card shows the bare `not recorded` label and nothing else. The sentence
- * that explains it is hoisted to ONE note above the agent list
- * (`MCP_NOT_RECORDED_NOTE`, rendered by `AgentPanel` only when some listed
- * agent is unrecorded) — see that constant for the reasoning.
+ * The component shows the bare `not recorded` label and nothing else. The
+ * sentence that explains it is visible text beside it
+ * (`MCP_NOT_RECORDED_NOTE`) — see that constant for the reasoning. Since
+ * #4209 the name lives on the agent detail page, not the `/agents` card, and
+ * the note moved with it.
  */
 
 import { CopyButton } from '@/components/ui/CopyButton'
@@ -40,8 +41,9 @@ export function signerNameFor(hosted: string): string {
 }
 
 /**
- * The `not recorded` explanation, shown ONCE above the agent list as visible
- * text — not per card, and not in a `Tooltip` (#2043).
+ * The `not recorded` explanation, shown as visible text beside the label —
+ * not in a `Tooltip` (#2043). Since #4209 that is the agent detail page's MCP
+ * server name row; it was once a note above the `/agents` card list.
  *
  * ### Why it cannot stay in a tooltip
  *
@@ -90,7 +92,7 @@ export function hasUnrecordedMcpServerName(
 export function McpServerName({ value }: { value: string | null | undefined }) {
   if (!value) {
     // Bare label, no tooltip. The explanation is `MCP_NOT_RECORDED_NOTE`,
-    // above the list — see there for why (#2043).
+    // visible beside it — see there for why (#2043).
     return <span className="text-xs text-[var(--v2-ink-3)]">not recorded</span>
   }
 

@@ -66,6 +66,8 @@ import { budgetCaption, type BudgetCaptionRow } from '@/lib/budget-caption'
 import type { DashboardBudgetRemaining, DashboardOverview } from '@/lib/dashboard-attention'
 import { timeAgo, truncate } from '@/lib/format'
 import type { DashboardAgentPreview } from '@/types/dashboard'
+import { AgentCard, type AgentCardDashboard } from '@/components/agent-panel/AgentCard'
+import type { Agent } from '@/hooks/useAgents'
 import DashboardOnboardingGuide, { SetupCompleteLine } from '@/components/DashboardOnboardingGuide'
 
 import { WalletPopover } from '@/components/WalletButton'
@@ -572,6 +574,43 @@ const DS_AGENT_NO_BUDGET: DashboardAgentPreview = {
     lastCounterparty: null,
   },
 }
+
+// #4209: the `/agents` card, from the SAME dashboard fixtures the agent row
+// reads — the card joins the overview by agent id, as `AgentPanel` does.
+const DS_CARD_AGENT = {
+  id: DS_AGENT.id,
+  name: DS_AGENT.name,
+  description: null,
+  delegate_address: '0x2222222222222222222222222222222222222222',
+  account_id: 'acct-1',
+  account_address: '0x1111111111111111111111111111111111111111',
+  account_name: 'Main account',
+  account_chain_id: 8453,
+  account_type: 'delegator_hybrid',
+  status: 'active',
+  created_at: new Date(DS_AGENT_NOW - 60 * 86_400_000).toISOString(),
+  allowances: [],
+  labels: [{ id: 'ds-label-research', name: 'research', color: 'blue' }],
+  organization_id: null,
+  tax_declaration_enabled: false,
+} as unknown as Agent
+const DS_CARD_ARCHIVED = {
+  ...DS_CARD_AGENT,
+  id: '33333333-3333-4333-8333-333333333333',
+  name: 'gate-3028',
+  status: 'revoked',
+  archived_at: new Date(DS_AGENT_NOW - 30 * 86_400_000).toISOString(),
+  labels: [],
+} as unknown as Agent
+const DS_CARD_DASHBOARD: AgentCardDashboard = {
+  ready: true,
+  agent: DS_AGENT,
+  budgetRemaining: DS_AGENT_BUDGET_REMAINING,
+  attentionItems: [],
+  nowMs: DS_AGENT_NOW,
+}
+const DS_CARD_NOOP = () => {}
+const DS_CARD_NOOP_ASYNC = async () => {}
 
 // The ledger showcase's rows — timestamps RELATIVE TO NOW so the day helpers
 // bucket them under live "Today" / "Yesterday" headings, exactly as the
@@ -4064,6 +4103,29 @@ export default function DesignSystemPage() {
             “No payments yet”). The dashboard renders the same rows unchanged: its Agents section
             imports this component since #4096.
           </p>
+        </div>
+      </Section>
+
+      {/* #4209: the `/agents` card, rebuilt on the agent row's pieces. */}
+      <Section
+        title="Agent card (/agents)"
+        description="The Agents page card (#4209, epic #4207) on the entity-card shell (entityCardClassName, a stretched name link): an sm decorative Monogram, the name, ONE StatusBadge only when the agent needs attention (agentBadge, plus Archived and Revoked), label chips, and a ⋯ DropdownMenu — a sibling control raised above the stretched link (§ Cards). The body is the agent row's own AgentBudget, joined from the dashboard overview by agent id, so an agent's meter reads identically on both surfaces; a skeleton while the reads load, never “No budget”. At most one call to action (Finish setup, Set budget, Recover funds, Finish revoking), and one footer line pinned with mt-auto: “Last paid … · merchant” (never an address), “Connected …”, or “No payments yet”. Revoked and archived cards draw no meter. Open the ⋯ to see the actions."
+      >
+        <div className="grid max-w-3xl gap-4 lg:grid-cols-2">
+          {[DS_CARD_AGENT, DS_CARD_ARCHIVED].map((agent) => (
+            <AgentCard
+              key={agent.id}
+              agent={agent}
+              dashboard={{ ...DS_CARD_DASHBOARD, agent: agent.archived_at ? null : DS_AGENT }}
+              onPause={DS_CARD_NOOP}
+              onResume={DS_CARD_NOOP}
+              onRevokeCredential={DS_CARD_NOOP_ASYNC}
+              onArchive={DS_CARD_NOOP_ASYNC}
+              onRestore={DS_CARD_NOOP}
+              onMoveToOrganization={DS_CARD_NOOP}
+              busyAction={null}
+            />
+          ))}
         </div>
       </Section>
 

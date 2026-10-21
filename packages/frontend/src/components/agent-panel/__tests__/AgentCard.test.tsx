@@ -1,16 +1,25 @@
 /**
- * #1402: the action-row visibility matrix. RemoveAgentDialog.test.tsx proves
- * the dialog's internal state machine; this file pins WHICH control renders
- * for each {status, account_type, archived_at} combination, so dropping a
- * gate (e.g. !isArchived) or inverting the rail check cannot ship silently.
+ * #4209: the `/agents` card rebuilt on the dashboard's budget pieces.
+ *
+ * Pins, per mockup state (version 4), what the card says and which controls
+ * it offers: the one badge (the dashboard's `agentBadge` plus Archived and
+ * Revoked), the dashboard row's own `AgentBudget`, the footer's three arms
+ * (never a raw address), the ONE call to action, and the ⋯ menu that holds
+ * every other action. RemoveAgentDialog.test.tsx proves the dialog itself.
  */
-import { describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import type { Agent } from '@/hooks/useAgents'
 import { AGENT_PAUSED_BODY, AGENT_PAUSED_TITLE } from '@/lib/agent-pause-copy'
 import { STRANDED_FUNDS_TITLE, strandedFundsCause } from '@/lib/stranded-funds-copy'
-import { agentStatusPresentation } from '@/lib/payment-status'
 import { DELEGATION_BUDGET_CARD_ID } from '@/components/DelegationBudgetCard'
+import { AgentRow, type DashboardAgent } from '@/components/haven/AgentRow'
+import {
+  computeAttentionItems,
+  type DashboardBudgetRemaining,
+  type DashboardOverview,
+} from '@/lib/dashboard-attention'
+import type { AgentCardDashboard } from '../AgentCard'
 
 /** Escape a copy string for use inside a text-matching RegExp. */
 function escapeRe(value: string): string {
@@ -23,7 +32,23 @@ vi.mock('../RemoveAgentDialog', () => ({
   ),
 }))
 
-const { AgentCard } = await import('../AgentCard')
+vi.mock('../../MoveAgentModal', () => ({
+  default: () => <div data-testid="move-agent-modal" />,
+}))
+
+const { AgentCard, agentCardBadge } = await import('../AgentCard')
+
+const NOW = Date.parse('2026-10-10T12:00:00.000Z')
+const TOKEN = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+const ARCHIVED = '2026-06-01T00:00:00Z'
+
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(NOW)
+})
+afterEach(() => {
+  vi.useRealTimers()
+})
 
 function agentFixture(overrides: Partial<Agent> = {}): Agent {
   return {
@@ -45,23 +70,116 @@ function agentFixture(overrides: Partial<Agent> = {}): Agent {
   } as Agent
 }
 
+const ZERO_WINDOW = {
+  gross: { usd: 0, eur: 0, sek: 0 },
+  net: { usd: 0, eur: 0, sek: 0 },
+  approx: false,
+  payments: 0,
+  refusals: { budget: 0, scope: 0, failed: 0, haven: 0 },
+}
+
+function makeBudget(
+  overrides: Partial<DashboardAgent['budgets'][number]> = {},
+): DashboardAgent['budgets'][number] {
+  return {
+    id: 'budget-1',
+    delegationHash: `0x${'11'.repeat(32)}`,
+    chainId: 84532,
+    tokenAddress: TOKEN,
+    tokenSymbol: 'USDC',
+    decimals: 6,
+    budgetAtomic: '3000000',
+    periodSeconds: 86_400,
+    startDate: '2026-10-01T00:00:00.000Z',
+    expiresAt: '2027-01-01T00:00:00.000Z',
+    periodEnd: '2026-10-11T00:00:00.000Z',
+    ...overrides,
+  }
+}
+
+function overviewAgent(overrides: Partial<DashboardAgent> = {}): DashboardAgent {
+  return {
+    id: 'agent-1',
+    name: 'Research agent',
+    status: 'active',
+    accountId: 'safe-1',
+    accountName: 'Main account',
+    accountChainId: 84532,
+    allowances: [],
+    budgets: [makeBudget()],
+    receivedSubBudgets: [],
+    stats: { d7: ZERO_WINDOW, d30: ZERO_WINDOW, lastPaymentAt: null, lastCounterparty: null },
+    ...overrides,
+  } as DashboardAgent
+}
+
+function makeRead(
+  overrides: Partial<DashboardBudgetRemaining['budgets'][number]> = {},
+): DashboardBudgetRemaining['budgets'][number] {
+  return {
+    agent_id: 'agent-1',
+    chain_id: 84532,
+    delegation_hash: `0x${'11'.repeat(32)}`,
+    token_address: TOKEN,
+    token_symbol: 'USDC',
+    token_decimals: 6,
+    budget_atomic: '3000000',
+    read_at: '2026-10-10T11:00:00.000Z',
+    period_end: '2026-10-11T00:00:00.000Z',
+    remaining_atomic: '1800000',
+    remaining_from_chain: true,
+    used_atomic: '1200000',
+    sub_budget_spend: [],
+    ...overrides,
+  }
+}
+
+/** The card's dashboard slice, computed the way `AgentPanel` computes it. */
+function dashboardFor(
+  agent: DashboardAgent | null,
+  reads: DashboardBudgetRemaining['budgets'] = agent ? [makeRead({ agent_id: agent.id })] : [],
+  { ready = true }: { ready?: boolean } = {},
+): AgentCardDashboard {
+  const budgetRemaining = { budgets: reads } as DashboardBudgetRemaining
+  const overview = { agents: agent ? [agent] : [], accounts: [] } as unknown as DashboardOverview
+  return {
+    ready,
+    agent,
+    budgetRemaining,
+    attentionItems: computeAttentionItems({
+      overview,
+      budgetRemaining,
+      accountNames: {},
+      dismissedIds: new Set(),
+    }),
+    nowMs: NOW,
+  }
+}
+
 function renderCard(
   agent: Agent,
   {
+    dashboard = dashboardFor(overviewAgent({ id: agent.id, name: agent.name, status: agent.status as DashboardAgent['status'] })),
     busyAction = null,
     organizations = [],
+    showAccountName = false,
   }: {
+    dashboard?: AgentCardDashboard
     busyAction?: import('@/hooks/useAgentPanelState').AgentBusyAction
     organizations?: import('@/hooks/useOrganizations').Organization[]
+    showAccountName?: boolean
   } = {},
 ) {
   const onRestore = vi.fn()
   const onPause = vi.fn()
-  const { container } = render(
+  const onResume = vi.fn()
+  const utils = render(
     <AgentCard
       agent={agent}
+      dashboard={dashboard}
+      showAccountName={showAccountName}
       onPause={onPause}
-      onResume={vi.fn()}
+      onResume={onResume}
       onRevokeCredential={vi.fn().mockResolvedValue(undefined)}
       onArchive={vi.fn().mockResolvedValue(undefined)}
       onRestore={onRestore}
@@ -70,572 +188,492 @@ function renderCard(
       organizations={organizations}
     />,
   )
-  return { onRestore, onPause, container }
+  return { onRestore, onPause, onResume, ...utils }
 }
 
-/**
- * #2195: the stranded-funds notice on this card and the recoverable-funds
- * banner on `/agents/[agentId]` describe ONE reconciliation event, one click
- * apart, and used to say it in two different sentences with two different
- * titles. The core clause now comes from `lib/stranded-funds-copy.ts`.
- *
- * These assertions compare the render against that module ON PURPOSE — the
- * claim under test is "this surface renders the SHARED clause", so importing
- * it is what makes a re-divergence fail. The independently-restated literal
- * lives where it belongs: `stranded-funds-copy.test.ts` pins the words, and
- * `e2e/agent-panel-states.visual.spec.ts` pins the title.
- */
-describe('AgentCard stranded-funds notice (#2195)', () => {
-  it('uses the shared title and the shared cause clause', () => {
-    renderCard(agentFixture({ has_stranded_funds: true } as Partial<Agent>))
-    expect(screen.getByText(STRANDED_FUNDS_TITLE)).toBeTruthy()
-    expect(screen.getByText(new RegExp(escapeRe(strandedFundsCause(null))))).toBeTruthy()
+function openMenu(name = 'Research agent') {
+  fireEvent.click(screen.getByRole('button', { name: `Actions for ${name}` }))
+  return screen.getByRole('menu')
+}
+
+function menuItemNames(name = 'Research agent'): string[] {
+  const menu = openMenu(name)
+  return within(menu).getAllByRole('menuitem').map((item) => item.textContent ?? '')
+}
+
+const ORG = { id: 'org-1', name: 'Ops', parent_id: null } as unknown as import('@/hooks/useOrganizations').Organization
+
+describe('AgentCard head', () => {
+  it('links the whole card to the agent page through the name, with nothing interactive inside the link', () => {
+    renderCard(agentFixture())
+    const link = screen.getByRole('link', { name: 'Research agent' })
+    expect(link.getAttribute('href')).toBe('/agents/agent-1')
+    expect(link.querySelector('a, button')).toBeNull()
+  })
+
+  it('draws the agent monogram, hidden from assistive tech, and no robot tile', () => {
+    renderCard(agentFixture())
+    const card = screen.getByTestId('agent-card')
+    const mark = card.querySelector('[aria-hidden="true"]')
+    expect(mark?.textContent).toBe('RA')
+    expect(card.querySelector('.lucide-bot')).toBeNull()
+  })
+
+  it('names the account only when the user has two or more', () => {
+    const { unmount } = renderCard(agentFixture())
+    expect(screen.queryByText('Main account')).toBeNull()
+    unmount()
+    renderCard(agentFixture(), { showAccountName: true })
+    expect(screen.getByText('Main account')).toBeTruthy()
+  })
+
+  it('no longer prints the network, the MCP name, the description or "Last activity"', () => {
+    renderCard(
+      agentFixture({ description: 'Finds papers', mcp_server_name: 'haven-research', mcp_last_seen_at: '2026-10-10T10:00:00.000Z' }),
+      { showAccountName: true },
+    )
+    const text = screen.getByTestId('agent-card').textContent ?? ''
+    expect(text).not.toMatch(/Base Sepolia/)
+    expect(text).not.toMatch(/haven-research|MCP/)
+    expect(text).not.toMatch(/Finds papers/)
+    expect(text).not.toMatch(/Last activity/)
+  })
+})
+
+/** #3197: the labels wrapper renders only when labels exist. */
+describe('AgentCard label chips (#3167, #3197)', () => {
+  it('renders no labels wrapper for an unlabelled agent', () => {
+    const { container } = renderCard(agentFixture())
+    expect(container.querySelector('[data-testid="agent-card-labels"]')).toBeNull()
+  })
+
+  it('shows up to three labels, then "+N"', () => {
+    const labels = ['travel', 'ops', 'q4', 'eu'].map((name, i) => ({ id: `l${i}`, name, color: 'blue' }))
+    renderCard(agentFixture({ labels } as Partial<Agent>))
+    const card = screen.getByTestId('agent-card')
+    expect(screen.getByTestId('agent-card-labels')).toBeTruthy()
+    expect(within(card).getByText('travel')).toBeTruthy()
+    expect(within(card).queryByText('eu')).toBeNull()
+    expect(within(card).getByText('+1')).toBeTruthy()
+  })
+})
+
+describe('AgentCard badge: the dashboard agentBadge plus Archived and Revoked', () => {
+  const chip = () => screen.queryByTestId('agent-status-chip')?.textContent ?? null
+
+  it('active with room left: no badge', () => {
+    renderCard(agentFixture())
+    expect(chip()).toBeNull()
+  })
+
+  it('≥ 90% used: "N% used"', () => {
+    const agent = overviewAgent()
+    renderCard(agentFixture(), {
+      dashboard: dashboardFor(agent, [makeRead({ used_atomic: '2850000', remaining_atomic: '150000' })]),
+    })
+    expect(chip()).toBe('95% used')
+  })
+
+  it('pending_approval: "Needs setup"', () => {
+    const agent = overviewAgent({ status: 'pending_approval', budgets: [] })
+    renderCard(agentFixture({ status: 'pending_approval' }), { dashboard: dashboardFor(agent, []) })
+    expect(chip()).toBe('Needs setup')
+  })
+
+  it('active with no usable budget: "Needs setup"', () => {
+    const agent = overviewAgent({ budgets: [] })
+    renderCard(agentFixture(), { dashboard: dashboardFor(agent, []) })
+    expect(chip()).toBe('Needs setup')
+  })
+
+  it('paused: "Paused"', () => {
+    const agent = overviewAgent({ status: 'paused' })
+    renderCard(agentFixture({ status: 'paused' }), { dashboard: dashboardFor(agent) })
+    expect(chip()).toBe('Paused')
+  })
+
+  it('revoked: "Revoked", without an overview entry', () => {
+    renderCard(agentFixture({ status: 'revoked' }), { dashboard: dashboardFor(null) })
+    expect(chip()).toBe('Revoked')
+  })
+
+  it('archived: "Archived" — archive outranks the lifecycle status', () => {
+    renderCard(agentFixture({ status: 'revoked', archived_at: ARCHIVED }), { dashboard: dashboardFor(null) })
+    expect(chip()).toBe('Archived')
+    expect(agentCardBadge({ status: 'active', archived_at: ARCHIVED }, dashboardFor(overviewAgent({ budgets: [] }), []))?.label).toBe('Archived')
+  })
+
+  it('shows no badge while the dashboard reads are in flight', () => {
+    const agent = overviewAgent({ budgets: [] })
+    renderCard(agentFixture(), { dashboard: dashboardFor(agent, [], { ready: false }) })
+    expect(chip()).toBeNull()
   })
 
   /**
-   * The information-richness half of #2195, made structural.
-   *
-   * `has_stranded_funds` is a bare SQL `EXISTS(...)` in both agent-row reads
-   * (`repositories/agents.ts`), so this surface can prove the state exists and
-   * nothing more. It must not borrow the detail banner's count or amount — it
-   * has neither — so its clause is the count-free one.
+   * The point of reading `agentBadge`: one agent, one badge, on the
+   * dashboard row and on this card.
    */
-  it('makes no claim it cannot support: no count, no amount, from a boolean EXISTS', () => {
-    renderCard(agentFixture({ has_stranded_funds: true } as Partial<Agent>))
-    const notice = screen.getByText(STRANDED_FUNDS_TITLE).parentElement as HTMLElement
-    const text = notice.textContent ?? ''
-    expect(text).toContain('At least one payment')
-    expect(text).not.toMatch(/\bA payment was\b/)
-    expect(text).not.toMatch(/\d+ payments were/)
-    expect(text).not.toMatch(/USDC/)
+  it('gives each agent the same badge the dashboard row gives it', () => {
+    const cases: Array<{ agent: DashboardAgent; reads: DashboardBudgetRemaining['budgets'] }> = [
+      { agent: overviewAgent(), reads: [makeRead()] },
+      { agent: overviewAgent(), reads: [makeRead({ used_atomic: '3000000', remaining_atomic: '0' })] },
+      { agent: overviewAgent({ budgets: [] }), reads: [] },
+      { agent: overviewAgent({ status: 'pending_approval', budgets: [] }), reads: [] },
+      { agent: overviewAgent({ status: 'paused' }), reads: [makeRead()] },
+    ]
+    for (const { agent, reads } of cases) {
+      const dashboard = dashboardFor(agent, reads)
+      const row = render(
+        <AgentRow
+          agent={agent}
+          budgetRemaining={dashboard.budgetRemaining}
+          attentionItems={dashboard.attentionItems}
+          accountNames={{}}
+          accountCount={1}
+          nowMs={NOW}
+        />,
+      )
+      const rowBadge = row.container.querySelector('p > span.rounded-full, p > span[class*="rounded-full"]')?.textContent ?? null
+      row.unmount()
+      const card = renderCard(agentFixture({ status: agent.status as Agent['status'] }), { dashboard })
+      expect(chip(), `status ${agent.status}`).toBe(rowBadge)
+      card.unmount()
+    }
   })
-
-  it('shows nothing when the agent has no open reconciliation event', () => {
-    renderCard(agentFixture())
-    expect(screen.queryByText(STRANDED_FUNDS_TITLE)).toBeNull()
-  })
-
-  it('keeps the recovery instruction plain text inside the stretched-link card', () => {
-    renderCard(agentFixture({ has_stranded_funds: true } as Partial<Agent>))
-    const copy = screen.getByText(/Open the agent to recover these funds\./)
-    expect(copy).toBeInTheDocument()
-    expect(copy.closest('a')).toBeNull()
-    expect(screen.queryByText('View agent to recover these funds.')).toBeNull()
-  })
-
 })
 
-/**
- * #2216: both of this card's notices are `ApprovalRequiredBanner`, not two
- * hand-rolled copies of its shape.
- *
- * ── What is asserted here, and what is deliberately not ─────────────────────
- *
- * The defect was a COLOUR one — title and body painted `--v2-warning` where
- * the primitive keeps prose in `--v2-ink` / `--v2-ink-2` and reserves the tint
- * for the icon badge. jsdom resolves no stylesheet, so a colour claim cannot
- * be made honestly in this file; it is made where it can be, against computed
- * style on a real render, in `e2e/agent-panel-states.visual.spec.ts`.
- *
- * What IS user-experienced and checkable here is the structural half, and it
- * is not a proxy for the colour: the hand-rolled notices titled themselves
- * with a `<p>`, so a screen-reader user got two untitled paragraphs where the
- * agent-detail banners for the same two facts announce headings. Asserting the
- * heading role is therefore a claim about the accessibility tree in its own
- * right — and it happens to be unsatisfiable without the primitive, which is
- * what makes it the adoption guard too.
- *
- * The `<p>` absence assertion is the other half. Without it a card that
- * rendered the primitive AND kept a hand-rolled copy beside it would pass:
- * the heading would be found and the old paragraph would still be on screen.
- */
-describe('AgentCard warning callouts use the shared primitive (#2216)', () => {
-  const CALLOUTS = [
-    { label: 'paused', title: 'Paused in Haven', overrides: { status: 'paused' } },
-    {
-      label: 'stranded',
-      title: STRANDED_FUNDS_TITLE,
-      overrides: { has_stranded_funds: true },
-    },
-  ] as const
+describe('AgentCard budget body: the dashboard row’s own AgentBudget', () => {
+  it('reads exactly what the dashboard row reads for the same agent', () => {
+    const agent = overviewAgent()
+    const dashboard = dashboardFor(agent)
+    const row = render(
+      <AgentRow
+        agent={agent}
+        budgetRemaining={dashboard.budgetRemaining}
+        attentionItems={dashboard.attentionItems}
+        accountNames={{}}
+        accountCount={1}
+        nowMs={NOW}
+      />,
+    )
+    const rowMeter = row.getByRole('progressbar')
+    const rowLabel = rowMeter.getAttribute('aria-label')
+    const rowCaption = rowMeter.parentElement?.parentElement?.textContent ?? ''
+    row.unmount()
 
-  for (const callout of CALLOUTS) {
-    it(`titles the ${callout.label} notice with a heading, as ApprovalRequiredBanner does`, () => {
-      renderCard(agentFixture(callout.overrides as Partial<Agent>))
-      expect(screen.getByRole('heading', { name: callout.title })).toBeTruthy()
+    renderCard(agentFixture(), { dashboard })
+    const budget = screen.getByTestId('agent-card-budget')
+    const meter = within(budget).getByRole('progressbar')
+    expect(meter.getAttribute('aria-label')).toBe(rowLabel)
+    expect(rowCaption).toContain(budget.textContent ?? '∅')
+    expect(budget.textContent).toMatch(/1\.20\sof\s3\.00\sUSDC/)
+  })
+
+  it('several budgets: "+N budgets", as the dashboard says it', () => {
+    const agent = overviewAgent({
+      budgets: [makeBudget(), makeBudget({ id: 'budget-2', delegationHash: `0x${'22'.repeat(32)}` })],
     })
+    renderCard(agentFixture(), {
+      dashboard: dashboardFor(agent, [
+        makeRead(),
+        makeRead({ delegation_hash: `0x${'22'.repeat(32)}`, used_atomic: '0', remaining_atomic: '3000000' }),
+      ]),
+    })
+    expect(screen.getByTestId('agent-card-budget').textContent).toMatch(/\+1 budget/)
+  })
 
-    it(`leaves no hand-rolled ${callout.label} copy beside it`, () => {
-      const { container } = renderCard(agentFixture(callout.overrides as Partial<Agent>))
-      const paragraphTitles = Array.from(container.querySelectorAll('p')).filter(
-        (p) => (p.textContent ?? '').trim() === callout.title,
-      )
-      expect(
-        paragraphTitles.length,
-        `the ${callout.label} notice is still titled by a <p> — either the primitive was ` +
-          `not adopted, or a hand-rolled copy survives beside it`,
-      ).toBe(0)
+  it('received sub-budget: says which agent it came from, never "No budget"', () => {
+    const agent = overviewAgent({
+      budgets: [],
+      receivedSubBudgets: [{ parentAgentId: 'agent-9', parentAgentName: 'Research bot', open: true }],
+    } as Partial<DashboardAgent>)
+    renderCard(agentFixture(), { dashboard: dashboardFor(agent, []) })
+    expect(screen.getByTestId('agent-card-budget').textContent).toBe("Spends from Research bot's budget")
+    expect(screen.queryByRole('link', { name: 'Set budget' })).toBeNull()
+  })
+
+  it('no budget: "No budget" and the card’s one CTA, Set budget', () => {
+    renderCard(agentFixture(), { dashboard: dashboardFor(overviewAgent({ budgets: [] }), []) })
+    expect(screen.getByTestId('agent-card-budget').textContent).toBe('No budget')
+    const cta = within(screen.getByTestId('agent-card-cta')).getByRole('link', { name: 'Set budget' })
+    expect(cta.getAttribute('href')).toBe(`/agents/agent-1#${DELEGATION_BUDGET_CARD_ID}`)
+  })
+
+  it('while the reads load: a skeleton, never "No budget"', () => {
+    renderCard(agentFixture(), { dashboard: dashboardFor(overviewAgent({ budgets: [] }), [], { ready: false }) })
+    expect(screen.getByTestId('agent-card-budget-loading')).toBeTruthy()
+    expect(screen.queryByText('No budget')).toBeNull()
+    expect(screen.queryByRole('link', { name: 'Set budget' })).toBeNull()
+  })
+
+  it('a failed overview: an em dash, never a meter and never "No budget"', () => {
+    renderCard(agentFixture(), { dashboard: dashboardFor(null) })
+    expect(screen.getByTestId('agent-card-budget').textContent).toBe('—')
+    expect(screen.queryByRole('progressbar')).toBeNull()
+  })
+
+  it('revoked and archived cards draw no meter, and say why', () => {
+    const { unmount } = renderCard(agentFixture({ status: 'revoked' }), { dashboard: dashboardFor(null) })
+    expect(screen.queryByTestId('agent-card-budget')).toBeNull()
+    expect(screen.queryByRole('progressbar')).toBeNull()
+    expect(screen.getByText('Network access already revoked')).toBeTruthy()
+    unmount()
+
+    // An archived agent can still be in the overview (it filters on status
+    // only) — the card still draws no meter for it.
+    renderCard(agentFixture({ archived_at: ARCHIVED }), { dashboard: dashboardFor(overviewAgent()) })
+    expect(screen.queryByTestId('agent-card-budget')).toBeNull()
+    expect(screen.queryByRole('progressbar')).toBeNull()
+    expect(screen.getByText(/restoring never re-enables spending/i)).toBeTruthy()
+  })
+})
+
+describe('AgentCard footer: one line, never a raw address', () => {
+  const footer = () => screen.getByTestId('agent-card-footer').textContent
+
+  function paid(counterparty: NonNullable<DashboardAgent['stats']>['lastCounterparty']) {
+    return overviewAgent({
+      stats: {
+        d7: ZERO_WINDOW,
+        d30: ZERO_WINDOW,
+        lastPaymentAt: '2026-10-09T16:00:00.000Z',
+        lastCounterparty: counterparty,
+      },
     })
   }
 
-  /**
-   * The stacked case, because the two notices are independent (an agent can
-   * accumulate stranded funds while active and then be paused) and a
-   * per-notice assertion cannot see a card that adopted the primitive for one
-   * and left the other hand-rolled — which is precisely the inconsistency
-   * #2216 says a partial fix would create INSIDE one card.
-   */
-  it('adopts it for BOTH notices at once, not one of the two', () => {
-    const { container } = renderCard(
-      agentFixture({ status: 'paused', has_stranded_funds: true } as Partial<Agent>),
-    )
-    const headings = Array.from(container.querySelectorAll('h3')).map((h) =>
-      (h.textContent ?? '').trim(),
-    )
-    // The agent's own name is an `h3` too, so it is expected here — listing it
-    // rather than filtering it out keeps this an exact-set assertion, which is
-    // what fails when a third untitled notice appears.
-    expect(headings).toEqual(['Research agent', 'Paused in Haven', STRANDED_FUNDS_TITLE])
+  it('merchantName: "Last paid 20h ago · <name>"', () => {
+    renderCard(agentFixture(), {
+      dashboard: dashboardFor(paid({ source: 'x402', merchantName: 'Bitrefill', x402ResourceUrl: 'https://api.bitrefill.com/x', to: '0x' + '33'.repeat(20) })),
+    })
+    expect(footer()).toBe('Last paid 20h ago · Bitrefill')
+  })
+
+  it('no name: the host of the x402 resource', () => {
+    renderCard(agentFixture(), {
+      dashboard: dashboardFor(paid({ source: 'x402', merchantName: null, x402ResourceUrl: 'https://api.bitrefill.com/v1/buy', to: '0x' + '33'.repeat(20) })),
+    })
+    expect(footer()).toBe('Last paid 20h ago · api.bitrefill.com')
+  })
+
+  it('to-only: no merchant at all — the address never prints', () => {
+    const to = '0x' + '33'.repeat(20)
+    renderCard(agentFixture(), {
+      dashboard: dashboardFor(paid({ source: 'direct', merchantName: null, x402ResourceUrl: null, to })),
+    })
+    expect(footer()).toBe('Last paid 20h ago')
+    expect(screen.getByTestId('agent-card').textContent).not.toMatch(/0x[0-9a-f]{4}/i)
+  })
+
+  it('never paid but connected: "Connected <time ago>"', () => {
+    renderCard(agentFixture({ mcp_last_seen_at: '2026-10-10T10:00:00.000Z' }))
+    expect(footer()).toBe('Connected 2h ago')
+  })
+
+  it('otherwise: "No payments yet", the dashboard’s words', () => {
+    renderCard(agentFixture())
+    expect(footer()).toBe('No payments yet')
+  })
+
+  it('an agent the overview does not cover never claims "No payments yet"', () => {
+    renderCard(agentFixture({ status: 'revoked' }), { dashboard: dashboardFor(null) })
+    expect(footer()).toBe('')
+  })
+
+  it('pins the footer to the bottom of a column card', () => {
+    renderCard(agentFixture())
+    expect(screen.getByTestId('agent-card').className).toMatch(/\bflex-col\b/)
+    expect(screen.getByTestId('agent-card-footer').className).toMatch(/\bmt-auto\b/)
+  })
+})
+
+describe('AgentCard ⋯ menu: every action that is not the CTA', () => {
+  it('active: Pause payments and Remove; Move only when an organization exists (#3222)', () => {
+    const { unmount } = renderCard(agentFixture())
+    expect(menuItemNames()).toEqual(['Pause payments', 'Remove'])
+    unmount()
+    renderCard(agentFixture(), { organizations: [ORG] })
+    expect(menuItemNames()).toEqual(['Pause payments', 'Move to organization', 'Remove'])
+  })
+
+  it('paused: Resume payments, not Pause', () => {
+    renderCard(agentFixture({ status: 'paused' }))
+    expect(menuItemNames()).toEqual(['Resume payments', 'Remove'])
+  })
+
+  it('pending_approval: Remove in the menu; Finish setup is the CTA, to the budget card', () => {
+    renderCard(agentFixture({ status: 'pending_approval' }), {
+      dashboard: dashboardFor(overviewAgent({ status: 'pending_approval', budgets: [] }), []),
+    })
+    const cta = within(screen.getByTestId('agent-card-cta')).getByRole('link', { name: 'Finish setup' })
+    expect(cta.getAttribute('href')).toBe(`/agents/agent-1#${DELEGATION_BUDGET_CARD_ID}`)
+    expect(menuItemNames()).toEqual(['Remove'])
+  })
+
+  it('revoked: Remove from list only', () => {
+    renderCard(agentFixture({ status: 'revoked' }), { dashboard: dashboardFor(null) })
+    expect(menuItemNames()).toEqual(['Remove from list'])
+  })
+
+  it('archived: Restore to list only — even for an active agent', () => {
+    renderCard(agentFixture({ archived_at: ARCHIVED }))
+    expect(menuItemNames()).toEqual(['Restore to list'])
+  })
+
+  /** #3717: one click, no confirm dialog. */
+  it('Pause payments pauses directly', () => {
+    const { onPause } = renderCard(agentFixture())
+    fireEvent.click(within(openMenu()).getByRole('menuitem', { name: 'Pause payments' }))
+    expect(onPause).toHaveBeenCalledWith(expect.objectContaining({ id: 'agent-1' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('Resume payments resumes', () => {
+    const { onResume } = renderCard(agentFixture({ status: 'paused' }))
+    fireEvent.click(within(openMenu()).getByRole('menuitem', { name: 'Resume payments' }))
+    expect(onResume).toHaveBeenCalledTimes(1)
+  })
+
+  it('Remove opens RemoveAgentDialog; it is not mounted before that', () => {
+    renderCard(agentFixture())
+    expect(screen.queryByTestId('remove-agent-dialog')).toBeNull()
+    fireEvent.click(within(openMenu()).getByRole('menuitem', { name: 'Remove' }))
+    expect(screen.getByTestId('remove-agent-dialog').getAttribute('data-mode')).toBe('remove')
+  })
+
+  it('Remove from list opens the same dialog for a revoked agent', () => {
+    renderCard(agentFixture({ status: 'revoked' }), { dashboard: dashboardFor(null) })
+    fireEvent.click(within(openMenu()).getByRole('menuitem', { name: 'Remove from list' }))
+    expect(screen.getByTestId('remove-agent-dialog').getAttribute('data-mode')).toBe('remove')
+  })
+
+  it('Move to organization opens MoveAgentModal', () => {
+    renderCard(agentFixture(), { organizations: [ORG] })
+    expect(screen.queryByTestId('move-agent-modal')).toBeNull()
+    fireEvent.click(within(openMenu()).getByRole('menuitem', { name: 'Move to organization' }))
+    expect(screen.getByTestId('move-agent-modal')).toBeTruthy()
+  })
+
+  it('Restore to list restores', () => {
+    const { onRestore } = renderCard(agentFixture({ status: 'revoked', archived_at: ARCHIVED }), { dashboard: dashboardFor(null) })
+    fireEvent.click(within(openMenu()).getByRole('menuitem', { name: 'Restore to list' }))
+    expect(onRestore).toHaveBeenCalledTimes(1)
+  })
+
+  it('Escape closes the menu and returns focus to its trigger', () => {
+    renderCard(agentFixture())
+    const trigger = screen.getByRole('button', { name: 'Actions for Research agent' })
+    fireEvent.click(trigger)
+    expect(screen.getByRole('menu')).toBeTruthy()
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.queryByRole('menu')).toBeNull()
+    expect(document.activeElement).toBe(trigger)
+  })
+
+  it('the menu trigger and the CTA sit outside the stretched link, separately focusable', () => {
+    renderCard(agentFixture({ status: 'pending_approval' }), {
+      dashboard: dashboardFor(overviewAgent({ status: 'pending_approval', budgets: [] }), []),
+    })
+    const trigger = screen.getByRole('button', { name: 'Actions for Research agent' })
+    const cta = screen.getByRole('link', { name: 'Finish setup' })
+    for (const control of [trigger, cta]) {
+      expect(control.closest('a[href="/agents/agent-1"]')).toBeNull()
+      expect(control.closest('[class*="z-[var(--v2-z-content)]"]')).not.toBeNull()
+    }
+  })
+
+  it('disables the trigger and says what is happening while an action runs', () => {
+    renderCard(agentFixture(), { busyAction: 'pause' })
+    expect((screen.getByRole('button', { name: 'Actions for Research agent' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByRole('status').textContent).toBe('Pausing…')
+    // The stretched name link stays live.
+    expect(screen.getByRole('link', { name: 'Research agent' }).getAttribute('href')).toBe('/agents/agent-1')
   })
 })
 
 /**
- * #2230: the paused notice's WORDS, not just its shape.
- *
- * #2216 made this card and the agent-detail banner agree on `tone` for the
- * same fact, on the argument that leaving one fact rendered two ways across
- * the link the card itself provides is the #2195 defect. The bodies still
- * disagreed — "Existing NETWORK PERMISSIONS stay in place" here, "Existing
- * WALLET RULES stay in place" there. The detail page's wording was TAKEN
- * rather than a third written; `lib/agent-pause-copy.ts` records why.
- *
- * These assertions compare the render against that module on purpose, exactly
- * as the #2195 block above does: the claim under test is "this surface renders
- * the SHARED sentence", so importing it is what makes a re-divergence fail.
- * The independently-restated literals live in `agent-pause-copy.test.ts`, and
- * the detail page's half is asserted in its own test file — one surface
- * proving it reads the module says nothing about the other.
+ * #2195: the stranded-funds notice and the detail page's banner describe one
+ * event, so the title and cause clause are the shared ones. The list knows
+ * only that funds are stranded — no count, no amount.
  */
-describe('AgentCard paused notice copy (#2230)', () => {
-  it('renders the shared title and the shared body', () => {
-    renderCard(agentFixture({ status: 'paused' } as Partial<Agent>))
+describe('AgentCard recoverable funds (#2195)', () => {
+  it('keeps the notice with the shared title and count-free cause clause', () => {
+    renderCard(agentFixture({ has_stranded_funds: true } as Partial<Agent>))
+    expect(screen.getByRole('heading', { name: STRANDED_FUNDS_TITLE })).toBeTruthy()
+    const text = screen.getByText(new RegExp(escapeRe(strandedFundsCause(null)))).textContent ?? ''
+    expect(text).toContain('At least one payment')
+    expect(text).not.toMatch(/\d+ payments were|USDC/)
+    expect(screen.getByText(/Open the agent to recover these funds\./).closest('a')).toBeNull()
+  })
+
+  it('offers Recover funds as the card’s one CTA, to the agent page', () => {
+    renderCard(agentFixture({ has_stranded_funds: true } as Partial<Agent>))
+    const cta = within(screen.getByTestId('agent-card-cta')).getByRole('link', { name: 'Recover funds' })
+    expect(cta.getAttribute('href')).toBe('/agents/agent-1')
+  })
+
+  it('shows nothing when there is no open reconciliation event', () => {
+    renderCard(agentFixture())
+    expect(screen.queryByText(STRANDED_FUNDS_TITLE)).toBeNull()
+    expect(screen.queryByTestId('agent-card-cta')).toBeNull()
+  })
+})
+
+/** #2230 / #2216: the paused notice is the detail page's banner, shared. */
+describe('AgentCard paused notice (#2230)', () => {
+  it('renders the shared title and body as a titled banner', () => {
+    renderCard(agentFixture({ status: 'paused' }))
     expect(screen.getByRole('heading', { name: AGENT_PAUSED_TITLE })).toBeTruthy()
     expect(screen.getByText(new RegExp(escapeRe(AGENT_PAUSED_BODY)))).toBeTruthy()
   })
 
-  /**
-   * #3717: pause is ONE click on this card. There is no confirm dialog to
-   * keep in the same register anymore — it was removed with the owner's
-   * 2026-10-07 decision — so the honest account of what the click did is the
-   * banner above, and the click itself goes straight to `onPause`. The
-   * non-vacuity probe flips: instead of proving a dialog opened before an
-   * absence check, this proves the click FIRED before asserting no dialog
-   * exists at all.
-   */
-  it('pauses directly on click — no confirm dialog stands between', () => {
-    const { onPause, container } = renderCard(agentFixture())
-    fireEvent.click(screen.getByRole('button', { name: 'Pause Research agent' }))
-    expect(onPause).toHaveBeenCalledTimes(1)
-    expect(onPause).toHaveBeenCalledWith(expect.objectContaining({ id: 'agent-1' }))
-    // No pause dialog anywhere on the card, not even closed.
-    expect(screen.queryByRole('heading', { name: /Pause Research agent\?/ })).toBeNull()
-    // And the click did not route through anything that would have opened one.
-    expect((container.textContent ?? '') + (document.body.textContent ?? '')).not.toMatch(/network permissions/i)
+  it('titles both notices with headings at once — no hand-rolled copy beside them', () => {
+    const { container } = renderCard(agentFixture({ status: 'paused', has_stranded_funds: true } as Partial<Agent>))
+    const headings = Array.from(container.querySelectorAll('h3')).map((h) => (h.textContent ?? '').trim())
+    expect(headings).toEqual(['Research agent', AGENT_PAUSED_TITLE, STRANDED_FUNDS_TITLE])
   })
 })
 
-describe('AgentCard action-row matrix (#1402)', () => {
-  it('active delegation agent: linked name, Remove shown, Safe Revoke hidden', () => {
-    renderCard(agentFixture())
-    const actions = [
-      screen.getByRole('button', { name: 'Pause Research agent' }),
-      screen.getByRole('button', { name: 'Remove Research agent' }),
-    ]
-    for (const action of actions) {
-      // Hand-rolled text actions have their own non-overlapping 44px target.
-      expect(action.className).toContain('min-h-11')
-      expect(action.className).toContain('min-w-11')
-    }
-    expect(screen.getByRole('link', { name: 'Research agent' })).toHaveAttribute(
-      'href',
-      '/agents/agent-1',
-    )
-    expect(screen.queryByRole('button', { name: /Open details/ })).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Edit Research agent' })).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Revoke Research agent' })).toBeNull()
-  })
+describe('AgentCard half-revoked (#3542)', () => {
+  const MARKER = /its budget is still active/i
 
-  it('keeps the stretched name link live while an action is in flight', () => {
-    renderCard(agentFixture(), { busyAction: 'pause' })
-    const link = screen.getByRole('link', { name: 'Research agent' })
-    expect(link).toHaveAttribute('href', '/agents/agent-1')
-    expect(link.className).toContain('after:absolute')
-    expect(link).not.toHaveAttribute('aria-disabled')
-  })
-
-  it('renders no interactive descendant inside the stretched name link', () => {
-    const { container } = renderCard(agentFixture({ labels: [
-      { id: 'label-1', name: 'prod', color: 'brand' },
-    ] } as Partial<Agent>))
-    const link = screen.getByRole('link', { name: 'Research agent' })
-    expect(link.querySelector('a, button')).toBeNull()
-    expect(container.querySelector('a a, a button')).toBeNull()
-  })
-
-  it('keeps the live delegation budget row and does not render the historical meter', () => {
-    const { container } = renderCard(
-      agentFixture({
-        allowances: [{
-          id: 'allowance-1',
-          agent_id: 'agent-1',
-          token_address: '0x' + '33'.repeat(20),
-          token_symbol: 'USDC',
-          allowance_amount: '1000000',
-          reset_period_min: 1440,
-        }],
-      } as Partial<Agent>),
-    )
-
-    expect(screen.getByText('Enforced on-chain')).toBeInTheDocument()
-    expect(container.querySelector('.allowance-fill')).toBeNull()
-  })
-
-  // #2413 collapsed the Remove/Unlink fork: no legacy agent is listed, so
-  // "Unlink" had no record left to name.
-  it('revoked-not-archived agent: Remove, no Restore', () => {
-    renderCard(agentFixture({ status: 'revoked' }))
-    expect(screen.getByText('Network access already revoked')).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Remove Research agent' })).toBeTruthy()
-    expect(screen.queryByRole('button', { name: /Unlink/ })).toBeNull()
-    expect(screen.queryByRole('button', { name: /Restore/ })).toBeNull()
-  })
-
-  it('archived agent: Restore only — no Remove, no Revoke, and the restore promise is stated', () => {
-    const { onRestore } = renderCard(
-      agentFixture({ status: 'revoked', archived_at: '2026-06-01T00:00:00Z' }),
-    )
-    expect(screen.queryByRole('button', { name: 'Remove Research agent' })).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Revoke Research agent' })).toBeNull()
-    expect(screen.getByText(/restoring never re-enables spending/i)).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: 'Restore Research agent to the list' }))
-    expect(onRestore).toHaveBeenCalled()
-  })
-
-  it('archived active legacy agent: Restore only — archive state outranks lifecycle status', () => {
-    renderCard(
-      agentFixture({
-        status: 'active',
-        account_type: 'legacy_safe' as Agent['account_type'],
-        archived_at: '2026-06-01T00:00:00Z',
-      }),
-    )
-    expect(screen.queryByRole('button', { name: 'Unlink Research agent' })).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Remove Research agent' })).toBeNull()
-    expect(screen.getByRole('button', { name: 'Restore Research agent to the list' })).toBeTruthy()
-  })
-
-  it('Remove opens the dialog; it is not mounted before that', () => {
-    renderCard(agentFixture())
-    expect(screen.queryByTestId('remove-agent-dialog')).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: 'Remove Research agent' }))
-    expect(screen.getByTestId('remove-agent-dialog')).toBeTruthy()
-  })
-})
-
-/**
- * #3542 (D): "revoked" is only half true while a budget delegation is still
- * redeemable on-chain. The card must say so and offer the one action that ends
- * it, for revoked AND archived agents — and say nothing new when the count is 0.
- */
-describe('AgentCard half-revoked marker (#3542)', () => {
-  const ARCHIVED = '2026-06-01T00:00:00Z'
-  const MARKER = /its budget is still active on.chain/i
-
-  it('revoked + live budget: warning marker replaces "Network access already revoked", with Finish revoking', () => {
-    renderCard(agentFixture({ status: 'revoked', live_delegation_count: 1 }))
+  it('revoked + live budget: the marker replaces "Network access already revoked", with Finish revoking as the CTA', () => {
+    renderCard(agentFixture({ status: 'revoked', live_delegation_count: 1 }), { dashboard: dashboardFor(null) })
     expect(screen.getByText(MARKER)).toBeTruthy()
     expect(screen.queryByText('Network access already revoked')).toBeNull()
-    expect(screen.getByRole('button', { name: 'Finish revoking Research agent' })).toBeTruthy()
-    // Remove stays: it runs the same budget-first sequence.
-    expect(screen.getByRole('button', { name: 'Remove Research agent' })).toBeTruthy()
+    expect(within(screen.getByTestId('agent-card-cta')).getByRole('button', { name: 'Finish revoking Research agent' })).toBeTruthy()
   })
 
-  it('revoked + count 0 (or absent): unchanged — no marker, no Finish revoking', () => {
-    for (const live of [0, undefined]) {
-      const { unmount } = render(
-        <AgentCard
-          agent={agentFixture({ status: 'revoked', live_delegation_count: live })}
-          onPause={vi.fn()}
-          onResume={vi.fn()}
-          onRevokeCredential={vi.fn()}
-          onArchive={vi.fn()}
-          onRestore={vi.fn()}
-          onMoveToOrganization={vi.fn()}
-          busyAction={null}
-        />,
-      )
-      expect(screen.queryByText(MARKER)).toBeNull()
-      expect(screen.queryByRole('button', { name: /Finish revoking/ })).toBeNull()
-      expect(screen.getByText('Network access already revoked')).toBeTruthy()
-      unmount()
-    }
+  it('revoked + count 0: no marker, no Finish revoking', () => {
+    renderCard(agentFixture({ status: 'revoked', live_delegation_count: 0 }), { dashboard: dashboardFor(null) })
+    expect(screen.queryByText(MARKER)).toBeNull()
+    expect(screen.queryByRole('button', { name: /Finish revoking/ })).toBeNull()
   })
 
   it('an active agent with live budgets is NOT half-revoked', () => {
-    renderCard(agentFixture({ status: 'active', live_delegation_count: 2 }))
+    renderCard(agentFixture({ live_delegation_count: 2 }))
     expect(screen.queryByText(MARKER)).toBeNull()
-    expect(screen.queryByRole('button', { name: /Finish revoking/ })).toBeNull()
   })
 
-  it('archived + live budget: marker and Finish revoking sit beside Restore, and the restore promise is not repeated', () => {
-    renderCard(
-      agentFixture({ status: 'revoked', archived_at: ARCHIVED, live_delegation_count: 1 }),
-    )
+  it('archived + live budget: marker, Finish revoking, and the restore helper that does not promise the budget ended', () => {
+    renderCard(agentFixture({ status: 'revoked', archived_at: ARCHIVED, live_delegation_count: 1 }), { dashboard: dashboardFor(null) })
     expect(screen.getByText(MARKER)).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Finish revoking Research agent' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Restore Research agent to the list' })).toBeTruthy()
-    // "restoring never re-enables spending" would read as the budget being dead.
     expect(screen.queryByText(/restoring never re-enables spending/i)).toBeNull()
     expect(screen.getByText(/restoring to the list does not end its budget/i)).toBeTruthy()
+    expect(menuItemNames()).toEqual(['Restore to list'])
   })
 
-  it('archived + count 0: unchanged', () => {
-    renderCard(agentFixture({ status: 'revoked', archived_at: ARCHIVED, live_delegation_count: 0 }))
-    expect(screen.queryByText(MARKER)).toBeNull()
-    expect(screen.queryByRole('button', { name: /Finish revoking/ })).toBeNull()
-    expect(screen.getByText(/restoring never re-enables spending/i)).toBeTruthy()
-  })
-
-  it('Finish revoking opens the dialog in finish mode (not remove mode)', () => {
-    renderCard(agentFixture({ status: 'revoked', live_delegation_count: 1 }))
+  it('Finish revoking opens the dialog in finish mode', () => {
+    renderCard(agentFixture({ status: 'revoked', live_delegation_count: 1 }), { dashboard: dashboardFor(null) })
     fireEvent.click(screen.getByRole('button', { name: 'Finish revoking Research agent' }))
     expect(screen.getByTestId('remove-agent-dialog').getAttribute('data-mode')).toBe('finish')
   })
 
   it('an unlinked agent gets the marker and NO action', () => {
-    renderCard(
-      agentFixture({ status: 'revoked', account_id: null, live_delegation_count: 1 }),
-    )
+    renderCard(agentFixture({ status: 'revoked', account_id: null, live_delegation_count: 1 }), { dashboard: dashboardFor(null) })
     expect(screen.getByText(MARKER)).toBeTruthy()
     expect(screen.getByText(/cannot end it from here/i)).toBeTruthy()
     expect(screen.queryByRole('button', { name: /Finish revoking/ })).toBeNull()
-
-    // Archived and unlinked: same.
-    renderCard(
-      agentFixture({
-        id: 'agent-2',
-        name: 'Other agent',
-        status: 'revoked',
-        archived_at: ARCHIVED,
-        account_id: null,
-        live_delegation_count: 1,
-      }),
-    )
-    expect(screen.queryByRole('button', { name: /Finish revoking/ })).toBeNull()
-  })
-})
-
-/**
- * #3197: the labels wrapper must not render for an unlabelled agent.
- *
- * The #3167 card wrapped `LabelChipRow` in an unconditional `mt-1.5` div.
- * The row returns null when the list is empty, but the wrapper did not — its
- * margin stayed in the DOM and every unlabelled card gained a ~6px gap under
- * the description, which is exactly what the old comment claimed could not
- * happen. The guard is the one the detail page's label row already uses
- * (`AgentDetailClient`), asserted here structurally: the wrapper's absence,
- * not its margin — jsdom resolves no stylesheet, so the pixel claim is
- * measured where it can be, by the regenerated `agents-list-mobile.png`
- * baseline (its fixture agent is unlabelled).
- */
-describe('AgentCard label chips (#3167, #3197)', () => {
-  it('renders no labels wrapper and no mt-1.5 box for an unlabelled agent', () => {
-    const { container } = renderCard(agentFixture())
-    expect(screen.queryByTestId('agent-label-chips')).toBeNull()
-    expect(container.querySelector('div.mt-1\\.5')).toBeNull()
-  })
-
-  it('keeps the spaced wrapper when the agent carries labels', () => {
-    renderCard(
-      agentFixture({
-        labels: [
-          {
-            id: 'label-1',
-            name: 'finance',
-            color: 'debit',
-            created_at: '2026-05-01T00:00:00Z',
-          },
-        ],
-      }),
-    )
-    expect(screen.getByTestId('agent-label-chips')).toBeTruthy()
-    expect(screen.getByText('finance')).toBeTruthy()
-  })
-})
-
-describe('AgentCard organization actions (#3222 re-review)', () => {
-  const ORG = {
-    id: 'org-1',
-    parent_organization_id: null,
-    name: 'Tech Agents',
-    created_at: '2026-05-01T00:00:00Z',
-    updated_at: '2026-05-01T00:00:00Z',
-    agent_count: 1,
-  }
-
-  it('offers Move only when the user has an organization to move to', () => {
-    renderCard(agentFixture())
-    expect(screen.queryByRole('button', { name: 'Move Research agent to an organization' })).toBeNull()
-  })
-
-  it('offers Move once an organization exists', () => {
-    renderCard(agentFixture(), { organizations: [ORG] })
-    expect(screen.getByRole('button', { name: 'Move Research agent to an organization' })).toBeInTheDocument()
-  })
-
-  it('hides the operational separators below lg, where a wrapped row stranded them (S9)', () => {
-    const { container } = renderCard(agentFixture({ status: 'paused' }), { organizations: [ORG] })
-    const row = container.querySelector('[data-testid="agent-card-actions"]') as HTMLElement
-    const pipes = [...row.querySelectorAll('span')].filter((el) => el.textContent === '|')
-    expect(pipes.length).toBe(1)
-    for (const pipe of pipes) {
-      expect(pipe.className).toMatch(/(^|\s)hidden(\s|$)/)
-      expect(pipe.className).toMatch(/(^|\s)lg:inline(\s|$)/)
-    }
-    expect(row.className).toMatch(/gap-x-4/)
-    expect(row.className).toMatch(/lg:gap-2/)
-  })
-})
-
-/**
- * #3945: the action row used to be `isActive ? Pause : Resume`, so every
- * non-active status — `pending_approval` included — was offered "Resume from
- * pause", a dead end: the backend's RESUME_AGENT_SQL only flips rows
- * `WHERE status = 'paused'`. And the status pill printed the raw enum
- * (`pending_approval`) where the dashboard row says "Needs setup". This block
- * pins the status-keyed affordance matrix and the shared label source.
- */
-describe('AgentCard status-keyed actions and chip (#3945)', () => {
-  const FINISH_SETUP_HREF = `/agents/agent-1#${DELEGATION_BUDGET_CARD_ID}`
-
-  it('pending_approval: no Pause, no Resume — a Finish setup link to the budget card', () => {
-    renderCard(agentFixture({ status: 'pending_approval' }))
-    expect(screen.queryByRole('button', { name: 'Resume Research agent' })).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Pause Research agent' })).toBeNull()
-    expect(screen.getByRole('link', { name: 'Finish setup' })).toHaveAttribute(
-      'href',
-      FINISH_SETUP_HREF,
-    )
-  })
-
-  it('pending_approval: the chip reads "Needs setup", never the raw enum', () => {
-    renderCard(agentFixture({ status: 'pending_approval' }))
-    expect(screen.getByTestId('agent-status-chip')).toHaveTextContent('Needs setup')
-    expect(document.body.textContent).not.toContain('pending_approval')
-  })
-
-  it('active: Pause, not Resume', () => {
-    renderCard(agentFixture({ status: 'active' }))
-    expect(screen.getByRole('button', { name: 'Pause Research agent' })).toBeTruthy()
-    expect(screen.queryByRole('button', { name: 'Resume Research agent' })).toBeNull()
-  })
-
-  it('paused: Resume, not Pause', () => {
-    renderCard(agentFixture({ status: 'paused' }))
-    expect(screen.getByRole('button', { name: 'Resume Research agent' })).toBeTruthy()
-    expect(screen.queryByRole('button', { name: 'Pause Research agent' })).toBeNull()
-  })
-
-  it('revoked: neither Pause nor Resume nor Finish setup', () => {
-    renderCard(agentFixture({ status: 'revoked' }))
-    expect(screen.queryByRole('button', { name: 'Pause Research agent' })).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Resume Research agent' })).toBeNull()
-    expect(screen.queryByRole('link', { name: 'Finish setup' })).toBeNull()
-  })
-
-  /**
-   * The raw-enum half of #3945, checked for EVERY status the schema allows
-   * (`packages/core/src/api-types.ts` `Agent.status`: active | paused |
-   * pending_approval | revoked). Scoped to the CHIP on purpose: the English
-   * copy on a revoked card legitimately uses the words ("Network access
-   * already revoked"), and "active on-chain" appears in the half-revoked
-   * marker — the claim under test is that no STATUS VALUE renders, i.e. the
-   * chip never prints the enum, not that the words can never appear. The one
-   * multi-word enum, `pending_approval`, is also asserted absent from the
-   * whole card, since no legitimate copy contains it.
-   */
-  it('no raw status value on the chip for every schema status', () => {
-    for (const status of ['active', 'paused', 'pending_approval', 'revoked'] as const) {
-      const { unmount } = render(
-        <AgentCard
-          agent={agentFixture({ status })}
-          onPause={vi.fn()}
-          onResume={vi.fn()}
-          onRevokeCredential={vi.fn()}
-          onArchive={vi.fn()}
-          onRestore={vi.fn()}
-          onMoveToOrganization={vi.fn()}
-          busyAction={null}
-        />,
-      )
-      const chip = screen.queryByTestId('agent-status-chip')
-      if (status === 'active') {
-        // Active agents render no chip at all — and therefore no raw value.
-        expect(chip).toBeNull()
-      } else {
-        expect(chip).not.toBeNull()
-        expect(chip?.textContent).toBe(agentStatusPresentation(status).label)
-        expect(chip?.textContent).not.toBe(status)
-      }
-      expect(document.body.textContent).not.toContain('pending_approval')
-      unmount()
-    }
-  })
-})
-
-// #3988: the budget block never reads "No budget" for a grant holder, and a
-// ZERO-capped budget is no authority (#3897) — all three through the shared
-// `lib/agent-budget.ts` helper, which the assertions compare against on
-// purpose (the claim under test is "this surface renders the SHARED line").
-describe('AgentCard budget block (#3988)', () => {
-  it('reads the shared received-budget line for a grant holder with no own budget', () => {
-    renderCard(
-      agentFixture({
-        allowances: [],
-        receivedSubBudgets: [
-          { parent_agent_id: 'p1', parent_agent_name: 'Agent naming', open: true },
-        ],
-      } as Partial<Agent>),
-    )
-    expect(screen.getByText('Spends from Agent naming\'s budget')).toBeTruthy()
-    expect(document.body.textContent).not.toContain('No budget')
-  })
-
-  it('joins several parents with "and", budgets plural', () => {
-    renderCard(
-      agentFixture({
-        allowances: [],
-        receivedSubBudgets: [
-          { parent_agent_id: 'p1', parent_agent_name: 'Agent naming', open: true },
-          { parent_agent_id: 'p2', parent_agent_name: 'Ops agent', open: true },
-        ],
-      } as Partial<Agent>),
-    )
-    expect(screen.getByText("Spends from Agent naming and Ops agent's budgets")).toBeTruthy()
-  })
-
-  it('reads "No budget" when there is neither a positive cap nor an open grant', () => {
-    renderCard(agentFixture({ allowances: [], receivedSubBudgets: [] }))
-    expect(screen.getByText('No budget')).toBeTruthy()
-  })
-
-  it('a zero-cap budget reads "No budget" even with an absent grant list', () => {
-    renderCard(
-      agentFixture({
-        allowances: [{ id: 'z', agent_id: 'agent-1', token_address: '0x0', token_symbol: 'USDC', allowance_amount: '0', reset_period_min: 1440 }],
-        receivedSubBudgets: undefined,
-      } as unknown as Partial<Agent>),
-    )
-    expect(screen.getByText('No budget')).toBeTruthy()
   })
 })

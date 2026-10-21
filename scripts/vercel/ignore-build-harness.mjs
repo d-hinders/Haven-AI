@@ -21,6 +21,25 @@ const REPO_ROOT = join(HERE, '..', '..')
 export const BUILD = 1
 export const SKIP = 0
 
+/**
+ * Resolves on a later turn of the event loop. Register it as an `afterEach` in
+ * every file that uses this harness (#4192).
+ *
+ * The harness spawns git and sh synchronously, and vitest runs synchronous
+ * tests and hooks back to back without the worker's event loop ever turning.
+ * The worker's `onTaskUpdate` reports to the main process are RPC calls with
+ * a fixed 60 s reply timer (birpc's default, which vitest 3.2 does not expose).
+ * The reply arrives on time but cannot be read while the loop is blocked, so a
+ * file whose synchronous tests add up to more than 60 s (the ops file takes
+ * about 150 s locally) fails with `[vitest-worker]: Timeout calling
+ * "onTaskUpdate"` although every test passed. A macrotask between tests lets
+ * the loop read the pending replies, so a timer only fires if a SINGLE test
+ * blocks for 60 s.
+ */
+export function yieldToEventLoop() {
+  return new Promise((resolve) => setTimeout(resolve, 0))
+}
+
 /** The `ignoreCommand` string from a project's vercel.json. */
 export function readIgnoreCommand(projectRoot) {
   return JSON.parse(readFileSync(join(projectRoot, 'vercel.json'), 'utf8')).ignoreCommand

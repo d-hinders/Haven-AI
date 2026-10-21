@@ -34,6 +34,19 @@ covers:
 last-verified: "2026-10-16"
 ---
 
+> **Re-verified #4192 (2026-10-21, ignore-step tests yield between cases):**
+> this diff touched two files in this document's coverage list,
+> `scripts/vercel/ignore-build-harness.mjs` and
+> `packages/frontend/src/lib/__tests__/vercel-ignore-build.test.ts`. The
+> harness gains `yieldToEventLoop`, which both ignore-step test files register
+> as an `afterEach`. The harness spawns git synchronously, so without it a file
+> that runs longer than 60 s blocks the vitest worker's event loop past the
+> 60 s timer of its `onTaskUpdate` RPC. vitest then reports an unhandled error
+> and exits 1 although every test passed. No assertion, watched path or script
+> behaviour changed, and the claims this document makes about the step and its
+> test stand as written. Nothing else in this document was re-verified, and
+> `last-verified` is not bumped.
+
 > **Re-verified #4167 (2026-10-20, Receive dialog clean-up):** this diff
 > touched one file in this document's coverage list,
 > `packages/frontend/src/components/ReceiveDialog.tsx`. The change is present-

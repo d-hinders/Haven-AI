@@ -2042,6 +2042,17 @@ authority, and the same scope note holds.
 > settlement sections were NOT re-read (the diff touches no file that
 > implements them); `last-verified` is not bumped.
 
+> **Re-verified #4192 (2026-10-21, ignore-step test yields between
+> cases):** the change touches `packages/ops` in one test file only,
+> `src/__tests__/vercel-ignore-build.test.ts`, which now registers the
+> shared ignore-build test harness's new `yieldToEventLoop` as an
+> `afterEach`. A turn of the event loop between cases keeps vitest's worker
+> RPC from timing out. No assertion, watched path or
+> ignore-build behaviour changes, and no client method, read, reveal, sign-in
+> navigation or backend file changes, so the no-rail-authority claim above
+> holds verbatim. Scope of this re-read: this section only; `last-verified`
+> is not bumped.
+
 ## 9. Owner CLI sessions — the device-code login (#2526)
 
 `haven login` mints an owner session through a browser approval rather than a

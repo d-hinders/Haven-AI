@@ -16,6 +16,18 @@ covers:
 last-verified: "2026-10-06"
 ---
 
+> **Re-verified #4192 (2026-10-21, ignore-step tests yield between cases):**
+> this diff touched `scripts/vercel/ignore-build-harness.mjs` and
+> `packages/ops/src/__tests__/vercel-ignore-build.test.ts`. The harness gains
+> `yieldToEventLoop`, which the ops test registers as an `afterEach`. The
+> harness spawns git synchronously, and the ops file runs for about 150 s
+> locally, so without a turn of the event loop between cases the vitest
+> worker's `onTaskUpdate` RPC outlasted its 60 s timer. vitest then reported
+> an unhandled error and `npm run test -w packages/ops` exited 1 with every
+> test passing. No assertion, watched path or script behaviour changed, so the
+> Ignored Build Step paragraph in § 1 stands as written. Nothing else in this
+> document was re-verified, and `last-verified` is not bumped.
+
 > **Re-verified #3913 (2026-10-19, after the toggle):** only the "Skipped - Not
 > affected" records paragraph and step 4 of § 1 changed; step 4 now names
 > the setting's required value. The paragraph now records that the setting was seen

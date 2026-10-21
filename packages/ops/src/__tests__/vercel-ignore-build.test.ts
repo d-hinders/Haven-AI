@@ -21,10 +21,15 @@ import {
   parseIgnoreCommand,
   readIgnoreCommand,
   rmSync,
+  yieldToEventLoop,
 } from '../../../../scripts/vercel/ignore-build-harness.mjs'
 
 const PACKAGE_ROOT = join(__dirname, '..', '..')
 const ignoreCommand: string = readIgnoreCommand(PACKAGE_ROOT)
+
+// Every case below spawns git synchronously; without a turn of the event loop
+// between them the file outlasts vitest's 60 s RPC timer (#4192).
+afterEach(yieldToEventLoop)
 
 let r: ReturnType<typeof makeRepo>
 

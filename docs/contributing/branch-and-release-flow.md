@@ -388,10 +388,10 @@ do not restate them here.
 
 **The prod bar, as a list.** A promotion PR must satisfy **19** required
 contexts — the 15 that every PR into `dev` also meets, plus four that are
-required on `main` only. (`dev`'s own list will grow by contexts that judge
-`dev` alone — **External intake gate**, #4200, pending on the *Dev merge*
-ruleset — which do not count toward `main`'s 19; see the ruleset inventory in
-`autonomous-pr-loop.md`.)
+required on `main` only. (`dev` also requires contexts that judge `dev`
+alone — **External intake gate**, #4200, on the *Dev merge* ruleset, so `dev`
+requires 16 — and those do not count toward `main`'s 19; see the ruleset
+inventory in `autonomous-pr-loop.md`.)
 
 - **`gate`** — only `dev` or `hotfix/*` may merge into `main`.
 - **`qa-freshness`** — a green money-flow QA run must cover the promoted

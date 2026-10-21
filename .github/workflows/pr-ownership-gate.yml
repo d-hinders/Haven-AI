@@ -54,9 +54,9 @@ name: PR ownership gate
 #
 # Making this a REQUIRED context is a ruleset change, not a workflow change:
 # add "PR ownership gate" to the *Haven automerge rules* required status
-# checks. That ruleset targets BOTH `dev` and `main`, so it becomes the 16th
-# required context on `dev` and the 20th on `main` (the 17th on `dev` if the
-# `dev`-only External intake gate, #4200, is required first). Until then the check runs
+# checks. That ruleset targets BOTH `dev` and `main`, so it becomes the 17th
+# required context on `dev` (after the `dev`-only External intake gate, #4200)
+# and the 20th on `main`. Until then the check runs
 # and reports on every PR but does not block. The ruleset inventory in
 # docs/contributing/autonomous-pr-loop.md records the state and names the
 # counts to update.

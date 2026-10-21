@@ -263,7 +263,7 @@ describe('the workflow shape', () => {
     assert.match(yml, /concurrency:\n  group: external-intake-gate-\$\{\{ github\.event\.pull_request\.number \}\}\n  cancel-in-progress: true/)
   })
 
-  test('the job is named "External intake gate" (the context the ruleset will require)', () => {
+  test('the job is named "External intake gate" (the context the Dev merge ruleset requires)', () => {
     assert.match(yml, /\n    name: External intake gate\n/)
   })
 

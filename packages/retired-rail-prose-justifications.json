@@ -182,5 +182,23 @@
       "category": "test-instrument",
       "note": "3009-only merchant -> 3009 on BOTH rails, byte-identical option; a test assertion."
     }
+  },
+  "packages/frontend/src/app/(authenticated)/design-system/page.tsx": {
+    "stays-readable": {
+      "category": "ui-affordance",
+      "note": "The phrase matches but the referent is accessibility: a screen reader still announces the Monogram initials when `decorative` is off (#4210) — a UI affordance, not a rail, account or history claim."
+    }
+  },
+  "packages/frontend/src/components/ui/Monogram.tsx": {
+    "stays-readable": {
+      "category": "ui-affordance",
+      "note": "The phrase matches but the referent is accessibility: a screen reader still announces the Monogram initials when `decorative` is off (#4210) — a UI affordance, not a rail, account or history claim."
+    }
+  },
+  "packages/frontend/src/components/ui/__tests__/Monogram.test.tsx": {
+    "stays-readable": {
+      "category": "ui-affordance",
+      "note": "The phrase matches but the referent is accessibility: a screen reader still announces the Monogram initials when `decorative` is off (#4210) — a UI affordance, not a rail, account or history claim."
+    }
   }
 }

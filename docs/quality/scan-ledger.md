@@ -1857,3 +1857,32 @@ exist at the SHA); a static census of imports in test bodies is not a census
 of cold loads.
 
 **Disposition: pending owner decision** (C1, C2, C3).
+
+**Disposition (owner, 2026-10-21): file all three.** The owner's answers in
+the captain's session were "1. a, 2. stäng av, 3. ja filera alla tre, 4. ja":
+option (a) for C1, turn the analytics off for C2, file all three, and merge
+the scan PR (#4202, `91257f4c2`).
+
+- C1 → [#4215](https://github.com/d-hinders/Haven-AI/issues/4215)
+  (`money-path`, `area:sdk`, `area:qa`, `area:docs`). The SDK retries the local
+  path's EIP-3009 settlement report when Haven answers `retryable`. This
+  revisits #3764's D2; a refusal is still never retried.
+- C2 → [#4216](https://github.com/d-hinders/Haven-AI/issues/4216)
+  (`area:backend`, `area:frontend`, `area:docs`). The smart-accounts-kit
+  analytics are turned off in backend, scripts and frontend. The dashboard's
+  other third-party telemetry (`pulse.walletconnect.org`,
+  `cca-lite.coinbase.com`) is a possible follow-up for the owner, not in scope.
+- C3 → [#4217](https://github.com/d-hinders/Haven-AI/issues/4217)
+  (`area:backend`, `area:docs`). A backend test net refuses non-loopback
+  connections and fails the test.
+
+Each issue carries a spec-review verdict, all three "ready after corrections".
+Main changes per issue:
+- #4215 gained the hosted-twin evidence that dev answers an immediate report
+  `retryable`.
+- #4216 resolved the browser mechanism to a bundler define.
+- #4217's stub criterion was corrected to the seam each file actually dials
+  through.
+
+No owner question remains open, so `pending-review` is lifted on all three.
+They were filed to the backlog; shipping was not requested with the filing.

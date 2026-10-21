@@ -27,7 +27,12 @@ import {
   parseIgnoreCommand,
   readIgnoreCommand,
   rmSync,
+  yieldToEventLoop,
 } from '../../../../../scripts/vercel/ignore-build-harness.mjs'
+
+// The rule cases spawn git synchronously; without a turn of the event loop
+// between them the file can outlast vitest's 60 s RPC timer (#4192).
+afterEach(yieldToEventLoop)
 
 const FRONTEND = join(__dirname, '..', '..', '..')
 const ignoreCommand: string = readIgnoreCommand(FRONTEND)

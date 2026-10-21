@@ -84,6 +84,101 @@ export const LIST_TOOL_INVOCATIONS_FOR_AGENTS_SQL = `SELECT id, agent_id, tool_n
        ORDER BY created_at DESC
        LIMIT $2 OFFSET $3`
 
+// ── Filtered single-agent read (#4229) ───────────────────────────────────────
+//
+// Same population as `LIST_TOOL_INVOCATIONS_FOR_AGENT_SQL` under the OPTIONAL
+// filter set of the `kind=tool_calls` read. Fixed shape with `($n IS NULL OR
+// …)` predicates so `db-schema-smoke` can PREPARE it; `q` searches the tool
+// name and the error code.
+
+export const LIST_TOOL_INVOCATIONS_FOR_AGENT_FILTERED_SQL = `SELECT id, tool_name, payment_id, result_status, next_action, error_code,
+              status_code, created_at
+       FROM agent_tool_invocations
+       WHERE agent_id = $1
+         AND ($2::text IS NULL OR result_status = $2)
+         AND ($3::text IS NULL OR created_at >= $3::timestamptz)
+         AND ($4::text IS NULL OR created_at < $4::timestamptz)
+         AND ($5::text IS NULL OR tool_name ILIKE '%' || $5 || '%'
+              OR error_code ILIKE '%' || $5 || '%')
+         AND ($6::uuid IS NULL OR payment_id = $6::uuid)
+       ORDER BY created_at DESC
+       LIMIT $7 OFFSET $8`
+
+/**
+ * The filtered population's totals: `total_count` counts EVERY filter
+ * (status included — the page's `total`), while `error_count` counts the
+ * population WITHOUT the status filter — the summary-line number stays
+ * stable while the caller flips the status selection. One round trip
+ * serves both.
+ */
+export const COUNT_TOOL_INVOCATIONS_FOR_AGENT_FILTERED_SQL = `SELECT COUNT(*) FILTER (WHERE $2::text IS NULL OR result_status = $2) AS total_count,
+              COUNT(*) FILTER (WHERE result_status = 'error') AS error_count
+       FROM agent_tool_invocations
+       WHERE agent_id = $1
+         AND ($3::text IS NULL OR created_at >= $3::timestamptz)
+         AND ($4::text IS NULL OR created_at < $4::timestamptz)
+         AND ($5::text IS NULL OR tool_name ILIKE '%' || $5 || '%'
+              OR error_code ILIKE '%' || $5 || '%')
+         AND ($6::uuid IS NULL OR payment_id = $6::uuid)`
+
+/**
+ * The optional filter set behind `kind=tool_calls`. `status` is a raw
+ * `result_status` ('ok' | 'error' | 'denied'). `from`/`to` are ISO bounds —
+ * inclusive `from`, exclusive `to`. `q` is the trimmed search term (tool
+ * name, error code). `paymentId` narrows to the calls of one payment.
+ */
+export interface AgentToolInvocationFilter {
+  status: string | null
+  from: string | null
+  to: string | null
+  q: string | null
+  paymentId: string | null
+}
+
+function filteredInvocationArgs(agentId: string, filter: AgentToolInvocationFilter): unknown[] {
+  return [agentId, filter.status, filter.from, filter.to, filter.q, filter.paymentId]
+}
+
+/** The count statement has no WHERE status arm — $2 is the status FILTER for the page total. */
+function invocationCountArgs(agentId: string, filter: AgentToolInvocationFilter): unknown[] {
+  return filteredInvocationArgs(agentId, filter)
+}
+
+/** NOT tenant-scoped — the caller must have verified agent ownership. */
+export async function listToolInvocationsForAgentFiltered(
+  agentId: string,
+  filter: AgentToolInvocationFilter,
+  limit: number,
+  offset: number,
+  db: Executor = pool,
+): Promise<AgentToolInvocationRow[]> {
+  const result = await db.query<AgentToolInvocationRow>(
+    LIST_TOOL_INVOCATIONS_FOR_AGENT_FILTERED_SQL,
+    [...filteredInvocationArgs(agentId, filter), limit, offset],
+  )
+  return result.rows
+}
+
+/**
+ * Same gating contract as `listToolInvocationsForAgentFiltered`. Returns the
+ * filtered population's total and its error count WITHOUT the status filter
+ * (the summary-line number — see `COUNT_TOOL_INVOCATIONS_FOR_AGENT_FILTERED_SQL`).
+ */
+export async function countToolInvocationsForAgentFiltered(
+  agentId: string,
+  filter: AgentToolInvocationFilter,
+  db: Executor = pool,
+): Promise<{ total: number; errorCount: number }> {
+  const result = await db.query<{ total_count: string; error_count: string }>(
+    COUNT_TOOL_INVOCATIONS_FOR_AGENT_FILTERED_SQL,
+    invocationCountArgs(agentId, filter),
+  )
+  return {
+    total: Number(result.rows[0]?.total_count ?? 0),
+    errorCount: Number(result.rows[0]?.error_count ?? 0),
+  }
+}
+
 /** NOT tenant-scoped — the caller must have verified agent ownership. */
 export async function listToolInvocationsForAgent(
   agentId: string,

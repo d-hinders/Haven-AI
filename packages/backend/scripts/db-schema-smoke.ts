@@ -340,6 +340,8 @@ import {
 } from '../src/infra/repositories/dashboard.js'
 import {
   LIST_AGENT_PAYMENTS_SQL,
+  LIST_AGENT_PAYMENTS_FILTERED_SQL,
+  COUNT_AGENT_PAYMENTS_FILTERED_SQL,
   LIST_FEED_PAYMENTS_SQL,
   SUM_AGENT_SPEND_ALL_TIME_SQL,
   SUM_AGENT_SPEND_TODAY_SQL,
@@ -347,6 +349,8 @@ import {
 import {
   LIST_TOOL_INVOCATIONS_FOR_AGENT_SQL,
   LIST_TOOL_INVOCATIONS_FOR_AGENTS_SQL,
+  LIST_TOOL_INVOCATIONS_FOR_AGENT_FILTERED_SQL,
+  COUNT_TOOL_INVOCATIONS_FOR_AGENT_FILTERED_SQL,
 } from '../src/infra/repositories/agent-tool-invocations.js'
 import {
   LIST_AGENT_NAMES_FOR_USER_SQL,
@@ -537,9 +541,16 @@ const QUERIES: SmokeQuery[] = [
   // #3977: the today window is parameterised — the route derives the caller's
   // local-day bounds and passes them as $2/$3, which PREPARE type-checks.
   { name: 'agent-activity: spend today (parameterised local day)', sql: SUM_AGENT_SPEND_TODAY_SQL },
+  // #4229: the kinded read. The nullable-parameter predicates are part of the
+  // checked surface — PREPARE type-checks every `$n::t IS NULL OR …` arm.
+  { name: 'agent-activity: filtered single-agent payments (page)', sql: LIST_AGENT_PAYMENTS_FILTERED_SQL },
+  { name: 'agent-activity: filtered single-agent payments (count)', sql: COUNT_AGENT_PAYMENTS_FILTERED_SQL },
   // One statement, two surfaces (#1179) — the dashboard and the activity feed.
   { name: 'agent-tool-invocations: read for agent', sql: LIST_TOOL_INVOCATIONS_FOR_AGENT_SQL },
   { name: 'agent-tool-invocations: read for agent set', sql: LIST_TOOL_INVOCATIONS_FOR_AGENTS_SQL },
+  // #4229: the kind=tool_calls read — page + the total/error-count pair.
+  { name: 'agent-tool-invocations: filtered read for agent (page)', sql: LIST_TOOL_INVOCATIONS_FOR_AGENT_FILTERED_SQL },
+  { name: 'agent-tool-invocations: filtered counts (total + error)', sql: COUNT_TOOL_INVOCATIONS_FOR_AGENT_FILTERED_SQL },
   { name: 'agents: name map for activity feed', sql: LIST_AGENT_NAMES_FOR_USER_SQL },
   {
     // Every authenticated agent request runs this, and it is where

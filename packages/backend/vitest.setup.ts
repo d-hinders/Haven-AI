@@ -2,6 +2,7 @@
 // its first tracked call, so the opt-out must precede any test importing it.
 import './src/telemetry/kit-analytics-off.js'
 import { applyTestEnvDefaults } from './src/infra/__tests__/helpers/test-env.js'
+import { installTestNetworkNet, registerNetHooks } from './src/infra/__tests__/helpers/test-network-net.js'
 import { workerSchemaName } from './src/infra/__tests__/helpers/worker-schema.js'
 
 // Default matches `docker compose up -d postgres` AND the ci.yml service
@@ -19,6 +20,29 @@ import { workerSchemaName } from './src/infra/__tests__/helpers/worker-schema.js
 // `vitest.global-setup.ts` needs the same ones (#2622) and a second copy of
 // them is the divergence this file's own comment above warns about.
 applyTestEnvDefaults()
+
+// The network net (#4217): a backend test must not dial the real network.
+// Every connection whose RESOLVED address is not loopback is refused and
+// recorded, and the hooks turn each record into a red — in `afterEach` for
+// the test that dialed, in this file's `afterAll` for a dial that landed after
+// its test ended — so code that swallows the connection error cannot hide it.
+// Installed after the env defaults because it admits `DATABASE_URL`'s host.
+// The rule, the exemption list and how to add to it:
+// docs/contributing/testing-strategy.md § "No real network (#4217)".
+installTestNetworkNet()
+registerNetHooks()
+
+// TEST-ONLY, and #4216 owns the real decision: the owner turned the
+// smart-accounts kit's analytics off (2026-10-21). The kit posts to
+// mm-sdk-analytics.api.cx.metamask.io unless `CI` or `DO_NOT_TRACK` is set,
+// and GitHub Actions sets `CI` — so only a local run with `CI` unset posts,
+// and the net above (which never exempts that host) would turn those posts
+// into reds. This line keeps the suite's own runs off until #4216
+// lands its mechanism for the server, scripts and tests; it does not cover
+// any of those outside vitest. `=`, not `??=`: an inherited blank or `0` is
+// not nullish and would leave analytics on. The kit latches its decision at
+// its first tracked call, which is always after setup files run.
+process.env.DO_NOT_TRACK = '1'
 
 // Explorer history routing is env-driven: with ALCHEMY_HISTORY_API_KEY set
 // (a production value copied into a local `.env`), every Base history read

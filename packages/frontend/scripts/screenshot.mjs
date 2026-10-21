@@ -4587,6 +4587,31 @@ export const SCENARIOS = {
       await shoot(block, 'block')
     },
   },
+  'design-system-monogram-leading': {
+    description:
+      'The Monogram and PageHeader leading sections on /design-system — the xs size, decorative marks and the leading slot (#4210)',
+    // Element capture for the same reason as design-system-buttons: both
+    // sections sit below Chromium's full-page surface cap, where a route
+    // capture comes back blank (#4210's first design review).
+    api() {
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/design-system`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+      for (const [testId, heading, name] of [
+        ['ds-monogram', 'Monogram', 'monogram'],
+        ['ds-pageheader-leading', 'PageHeader leading', 'pageheader-leading'],
+      ]) {
+        const section = page.getByTestId(testId)
+        // The section's own h2, not just the testid: a capture that raced the
+        // paint would be evidence of nothing.
+        await section.getByRole('heading', { name: heading, exact: true }).waitFor({ timeout: 20_000 })
+        await section.scrollIntoViewIfNeeded()
+        await shoot(section, name)
+      }
+    },
+  },
   'transactions-detail-network': {
     description:
       'The /transactions detail drawer for the first fixture row — its Network row now renders the NetworkPill (#3670)',

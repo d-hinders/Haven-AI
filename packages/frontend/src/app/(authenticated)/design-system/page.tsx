@@ -3880,13 +3880,24 @@ export default function DesignSystemPage() {
 
       <Section
         title="Monogram"
-        description="Initials-in-a-circle avatar, or the entity's logo when it has one. Promoted to components/ui on its third copy (#3079): the /contacts Initials avatar, the marketplace card and the merchant header all drew the same circle. sm (36px) for lists and cards, md (48px) for a page header. Since #4066 the initials variant is tinted from the entity's NAME — one of six muted avatar tints picked by a pure hash of the trimmed name, so the same entity keeps the same colour everywhere and neighbouring rows are told apart at a glance. Assigned by name, never by index, and never from a status or --v2-series-* chart colour (the hexes are disjoint from both)."
+        testId="ds-monogram"
+        description="Initials-in-a-circle avatar, or the entity's logo when it has one. Promoted to components/ui on its third copy (#3079): the /contacts Initials avatar, the marketplace card and the merchant header all drew the same circle. xs (32px), sized for the agent row's 2rem mark track (#4210; agents adopt it in #4208), sm (36px) for lists and cards, md (48px) for a page header. `decorative` sets aria-hidden for a caller that prints the name beside the mark; without it the initials stay readable. Initials are taken by visible character, so a flag or a joined emoji never renders half of one; a name that starts with an emoji shows that emoji alone. Since #4066 the initials variant is tinted from the entity's NAME — one of six muted avatar tints picked by a pure hash of the trimmed name, so the same entity keeps the same colour everywhere and neighbouring rows are told apart at a glance. Assigned by name, never by index, and never from a status or --v2-series-* chart colour (the hexes are disjoint from both)."
       >
         <div className="flex flex-wrap items-center gap-4">
           {MONOGRAM_TINT_EXAMPLES.map((name) => (
             <Monogram key={name} name={name} />
           ))}
           <Monogram name="Haven Demo Store" size="md" />
+        </div>
+        <div className="mt-4 flex flex-wrap items-center gap-4">
+          <span className="flex items-center gap-3">
+            <Monogram name="Research agent" size="xs" decorative />
+            <span className="v2-text-body text-[var(--v2-ink)]">Research agent</span>
+          </span>
+          <span className="flex items-center gap-3">
+            <Monogram name="🤖 Shopping bot" size="xs" decorative />
+            <span className="v2-text-body text-[var(--v2-ink)]">🤖 Shopping bot</span>
+          </span>
         </div>
       </Section>
 
@@ -4074,6 +4085,27 @@ export default function DesignSystemPage() {
                   ⋮
                 </Button>
               </>
+            }
+          />
+        </div>
+      </Section>
+
+      <Section
+        title="PageHeader leading"
+        testId="ds-pageheader-leading"
+        description="A mark before the title, centred on it (#4210, epic #4207) — built for an agent's Monogram (#4208), so the detail header can carry the same mark as the agent's row. No product page passes it yet. The title prints beside it, so the mark is passed `decorative`. Optional and additive — a PageHeader without `leading` renders exactly as before."
+      >
+        <div className="max-w-2xl">
+          <PageHeader
+            back={{ href: '/agents', label: 'Agents' }}
+            leading={<Monogram name="Research agent" size="md" decorative />}
+            title="Research agent"
+            meta="My account · Created 3 weeks ago · Active 2h ago"
+            inlineActions
+            actions={
+              <Button variant="ghost" size="sm" aria-label="More actions">
+                ⋮
+              </Button>
             }
           />
         </div>

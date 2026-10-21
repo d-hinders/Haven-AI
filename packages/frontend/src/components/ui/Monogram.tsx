@@ -16,7 +16,9 @@ import { avatarTint } from '@/lib/avatar-tint'
  * colour. Logos are untinted.
  *
  * `alt=""` on the logo: the name is always printed beside the avatar, so the
- * image is decorative to a screen reader. A plain `<img>` rather than
+ * image is decorative to a screen reader. The initials variant stays readable
+ * by default; `decorative` hides the whole mark (`aria-hidden`) for a caller
+ * that prints the name beside it and would otherwise be read twice (#4210). A plain `<img>` rather than
  * `next/image` because merchant logos are external and not known ahead of
  * time — `next/image`'s static domain allowlist would have to widen per row.
  */
@@ -40,19 +42,27 @@ export function Monogram({
   name,
   logoUrl = null,
   size = 'sm',
+  decorative = false,
 }: {
   name: string
   logoUrl?: string | null
-  /** `sm` — a 36px list/card avatar; `md` — a 48px page-header avatar. */
-  size?: 'sm' | 'md'
+  /**
+   * `xs` — a 32px avatar sized for the agent row's `2rem` mark track, the width
+   * `DirectionMark compact` shares (#4210); `sm` — a 36px list/card avatar;
+   * `md` — a 48px page-header avatar.
+   */
+  size?: 'xs' | 'sm' | 'md'
+  /** Hide the mark from assistive tech: the caller prints the name beside it. */
+  decorative?: boolean
 }) {
-  const box = size === 'md' ? 'h-12 w-12' : 'h-9 w-9'
+  const box = size === 'md' ? 'h-12 w-12' : size === 'xs' ? 'h-8 w-8' : 'h-9 w-9'
   if (logoUrl) {
     return (
       // eslint-disable-next-line @next/next/no-img-element -- see the docblock
       <img
         src={logoUrl}
         alt=""
+        aria-hidden={decorative || undefined}
         className={`${box} flex-shrink-0 rounded-full border border-[var(--v2-border)] object-cover`}
       />
     )
@@ -60,6 +70,7 @@ export function Monogram({
   const tint = TINT_CLASSES[avatarTint(name)]
   return (
     <div
+      aria-hidden={decorative || undefined}
       className={`flex ${box} flex-shrink-0 items-center justify-center rounded-full border border-[var(--v2-border)] ${tint.bg}`}
     >
       <span className={`${size === 'md' ? 'text-sm' : 'text-xs'} font-semibold ${tint.ink}`}>

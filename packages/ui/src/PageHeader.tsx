@@ -38,6 +38,14 @@ export type PageHeaderProps = {
    * skeleton, a not-found card) uses `BackLink` directly with the same values.
    */
   back?: { href: string; label: string }
+  /**
+   * A mark drawn before the title and centred on it (#4210, epic #4207) —
+   * built for an agent's `Monogram` (#4208), so the detail header can carry
+   * the same mark as the agent's row. The title prints beside it, so pass a
+   * decorative mark.
+   * Optional and additive: without it the header renders exactly as before.
+   */
+  leading?: ReactNode
 }
 
 export function PageHeader({
@@ -48,6 +56,7 @@ export function PageHeader({
   actions,
   inlineActions = false,
   back,
+  leading,
 }: PageHeaderProps) {
   const rowClass = `flex gap-4 sm:flex-row sm:items-center sm:justify-between ${
     inlineActions ? 'flex-row items-start justify-between' : 'flex-col'
@@ -58,7 +67,14 @@ export function PageHeader({
         {eyebrow && (
           <p className="v2-text-meta text-[var(--v2-ink-3)] uppercase tracking-wider mb-1">{eyebrow}</p>
         )}
-        <h1 className="v2-text-h1 text-[var(--v2-ink)]">{title}</h1>
+        {leading ? (
+          <div className="flex items-center gap-3">
+            <span className="flex flex-shrink-0">{leading}</span>
+            <h1 className="v2-text-h1 min-w-0 text-[var(--v2-ink)]">{title}</h1>
+          </div>
+        ) : (
+          <h1 className="v2-text-h1 text-[var(--v2-ink)]">{title}</h1>
+        )}
         {subtitle && (
           <p className="mt-2 v2-text-body text-[var(--v2-ink-2)] max-w-2xl">{subtitle}</p>
         )}

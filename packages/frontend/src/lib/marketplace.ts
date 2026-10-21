@@ -697,15 +697,37 @@ export function needsUnpinnedBudget(assetTransferMethods: string | null): boolea
     .includes('erc7710')
 }
 
+const graphemes =
+  typeof Intl !== 'undefined' && 'Segmenter' in Intl
+    ? new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+    : null
+
+function characters(text: string): string[] {
+  return graphemes ? Array.from(graphemes.segment(text), (s) => s.segment) : Array.from(text)
+}
+
+/** A pictograph or flag letter: an emoji, as opposed to a letter or digit. */
+const EMOJI = /\p{Extended_Pictographic}|\p{Regional_Indicator}/u
+
 /**
- * Initials for a merchant with no logo — two letters from the first two
- * words of its name, or the first two letters of a one-word name. Same shape
- * as the `Initials` avatar on `/contacts`, the one other place Haven renders
- * a named-entity monogram.
+ * Initials for a named entity with no logo — two letters from the first and
+ * last words of its name, or the first two letters of a one-word name. A name
+ * that starts with an emoji shows that emoji alone, since an emoji beside a
+ * letter crowds a 32px mark (owner decision, 2026-10-21:
+ * https://github.com/d-hinders/Haven-AI/issues/4210#issuecomment-6315168790).
+ * The helper behind `Monogram`.
  */
 export function merchantInitials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean)
+  // Visible characters, not UTF-16 code units (#4210): agent names are
+  // user-typed, and `'😀Bot'[0]` is half a surrogate pair. Graphemes keep a
+  // flag or a ZWJ family whole; `Array.from` (code points) is the fallback
+  // where `Intl.Segmenter` is missing — never a lone surrogate either way.
+  const parts = name.trim().split(/\s+/).filter(Boolean).map(characters)
+  const lead = parts[0]?.[0]
+  if (lead && EMOJI.test(lead)) return lead
   const initials =
-    parts.length >= 2 ? `${parts[0]![0]}${parts[parts.length - 1]![0]}` : (parts[0] ?? '?').slice(0, 2)
+    parts.length >= 2
+      ? `${parts[0]![0]}${parts[parts.length - 1]![0]}`
+      : (parts[0] ?? ['?']).slice(0, 2).join('')
   return initials.toUpperCase()
 }

@@ -644,6 +644,37 @@ describe('merchantInitials', () => {
   it('takes the first two letters of a one-word name', () => {
     expect(merchantInitials('Minifetch')).toBe('MI')
   })
+
+  // #4210: agent names are user-typed, and a UTF-16 index splits a surrogate pair.
+  it('never returns a lone surrogate for a name that starts with or contains an emoji', () => {
+    const loneSurrogate = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/
+    expect(merchantInitials('Research 🤖')).toBe('R🤖')
+    expect(merchantInitials('🤖')).toBe('🤖')
+    for (const name of ['😀Bot', '🤖 Research agent', 'Research 🤖', '🤖', 'a😀b', '🇺🇸 Bot', '👨‍👩‍👧']) {
+      expect(merchantInitials(name)).not.toMatch(loneSurrogate)
+    }
+  })
+
+  it('keeps a multi-code-point character whole — a flag, a ZWJ family, a skin tone', () => {
+    expect(merchantInitials('Bot 🇺🇸')).toBe('B🇺🇸')
+    expect(merchantInitials('Team 👨‍👩‍👧')).toBe('T👨‍👩‍👧')
+    expect(merchantInitials('Ok 👍🏽')).toBe('O👍🏽')
+  })
+
+  // Owner decision (2026-10-21, https://github.com/d-hinders/Haven-AI/issues/4210#issuecomment-6315168790):
+  // an emoji-led name shows the emoji alone.
+  it('shows the emoji alone when the name starts with one', () => {
+    expect(merchantInitials('😀Bot')).toBe('😀')
+    expect(merchantInitials('🤖 Research agent')).toBe('🤖')
+    expect(merchantInitials('🇺🇸 Bot')).toBe('🇺🇸')
+    expect(merchantInitials('👨‍👩‍👧')).toBe('👨‍👩‍👧')
+    expect(merchantInitials('👍🏽Bot')).toBe('👍🏽')
+  })
+
+  it('keeps letters and digits as initials — only an emoji takes the whole mark', () => {
+    expect(merchantInitials('1inch Exchange')).toBe('1E')
+    expect(merchantInitials('Émile Zola')).toBe('ÉZ')
+  })
 })
 
 describe('freshness', () => {

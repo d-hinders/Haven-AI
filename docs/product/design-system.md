@@ -238,7 +238,7 @@ The ordered set the chart primitives (`ui/StackedBarChart`, `ui/AreaChart`) pain
 | `--v2-avatar-5` (rose) | `#9c2759` | `#fbe2ec` | `#f193bd` | `#381b2b` |
 | `--v2-avatar-6` (steel) | `#2e5d8f` | `#d5e3f1` | `#93c1ea` | `#152639` |
 
-Six muted tints for the `Monogram` initials avatar (the `-soft` ground carries the initials, the ink is the initials colour). Assigned **by hashing the entity's name** (`lib/avatar-tint.ts` — djb2 mod 6 over the trimmed name, a pure function, so the same merchant or contact keeps the same tint everywhere, in light and dark, and SSR hydration agrees). Unlike the series palette there is deliberately **no order contract** — assignment is by name, never by index — which is exactly why the family is separate from `--v2-series-*`: the series contract forbids hashing, the charts own those hexes, and an avatar must not collide with a chart colour on the same screen. The avatar hexes are also disjoint from every status and brand hex (asserted in `theme-tokens.test.ts`), so a tint never reads as success, warning, danger or debit.
+Six muted tints for the `Monogram` initials avatar (the `-soft` ground carries the initials, the ink is the initials colour). Assigned **by hashing the entity's name** (`lib/avatar-tint.ts` — djb2 mod 6 over the trimmed name, a pure function, so the same merchant or contact (and agent, from #4208) keeps the same tint everywhere, in light and dark, and SSR hydration agrees). Unlike the series palette there is deliberately **no order contract** — assignment is by name, never by index — which is exactly why the family is separate from `--v2-series-*`: the series contract forbids hashing, the charts own those hexes, and an avatar must not collide with a chart colour on the same screen. The avatar hexes are also disjoint from every status and brand hex (asserted in `theme-tokens.test.ts`), so a tint never reads as success, warning, danger or debit.
 
 Each ink clears 4.5:1 on its own ground in both themes (in `CONTRAST_PAIRS`, unlike the series stops' 3:1 non-text bar — initials are text), and the six grounds and six inks stay pairwise separable (a minimum CIE76 ΔE is pinned in the same test). Do not reach for a `-soft` semantic tint, `brand-soft` or a series stop for an avatar — `Monogram` owns this family.
 
@@ -679,6 +679,13 @@ Use `components/ui/PageHeader.tsx` on authenticated pages instead of hand-rolled
   branch of the page with no `PageHeader` (loading, not found) renders
   `BackLink` directly, so every state has the same way back. Additive — a
   `PageHeader` without `back` renders exactly as before.
+- Optional `leading` mark before the title
+  ([#4210](https://github.com/d-hinders/Haven-AI/issues/4210), epic #4207),
+  vertically centred on the title — built for an agent's `Monogram` (#4208),
+  so the detail header can carry the same mark as the agent's row; no product
+  page passes it yet. The title prints beside it, so pass the mark
+  `decorative`. Additive — a `PageHeader` without `leading` renders exactly as
+  before.
 - Right-side actions that wrap on narrow viewports — and **stack onto their own
   row below `sm`**, which is right for a row of labelled buttons and wrong for a
   single icon-only control.
@@ -698,6 +705,28 @@ Use `components/ui/PageHeader.tsx` on authenticated pages instead of hand-rolled
   the primitive owns what to do about it.
 
 Do not use marketing hero typography for normal authenticated pages.
+
+### Monogram
+
+`components/ui/Monogram.tsx` is the initials-in-a-circle avatar, or the
+entity's logo when it has one — merchants and contacts today, agents from
+#4208. Sizes:
+
+- `xs` — 32px, sized for the agent row's `2rem` mark track, the width
+  `DirectionMark compact` shares
+  ([#4210](https://github.com/d-hinders/Haven-AI/issues/4210)); no product
+  page uses it yet.
+- `sm` (default) — 36px, for lists and cards.
+- `md` — 48px, for a page header.
+
+The initials variant is readable to a screen reader by default; the logo is
+`alt=""`. Pass `decorative` (`aria-hidden` on the root) where the name always
+prints beside the mark, so it is not read twice. `Monogram` takes initials by
+visible character (grapheme), so a user-typed name that starts with an emoji
+or a flag never renders half of one (where the browser has `Intl.Segmenter`,
+as every current one does; the fallback still never splits a surrogate pair).
+A name that starts with an emoji shows that emoji alone, never an emoji beside
+a letter ([owner decision on #4210](https://github.com/d-hinders/Haven-AI/issues/4210#issuecomment-6315168790), 2026-10-21). Tints are the avatar family above.
 
 ### Detail-page section rule (#3692)
 

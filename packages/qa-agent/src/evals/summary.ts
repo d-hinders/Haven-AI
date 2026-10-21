@@ -21,6 +21,10 @@ export function renderMarkdownSummary(report: EvalReport): string {
   lines.push(`## Agent evals — ${report.adapter}`)
   lines.push('')
   lines.push(`${report.generatedAt} · ${report.trialsPerTask} trial(s) per task · pass^k on **${report.tasksPassingAll}/${report.tasksRun}** tasks`)
+  if (report.taskFilter !== undefined) {
+    lines.push('')
+    lines.push(`**Task filter (#4218):** \`${report.taskFilter.join('`, `')}\` — a FILTERED run; the pass^k line above is NOT a whole-suite green.`)
+  }
   lines.push('')
   lines.push(`Executed order: ${report.order.join(' → ')}${report.shuffleSeed !== undefined ? ` (shuffle seed ${report.shuffleSeed})` : ''}`)
   lines.push('')

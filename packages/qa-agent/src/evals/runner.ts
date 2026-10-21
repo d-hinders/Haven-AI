@@ -140,6 +140,12 @@ export interface EvalReport {
    */
   order: string[]
   shuffleSeed?: number
+  /**
+   * The `--task=<id>…` filter the run selected, when one was used (#4218).
+   * Absent for an unfiltered run. The summaries state it, so a "pass^k on
+   * 1/1 tasks" line does not read as a whole-suite green.
+   */
+  taskFilter?: string[]
   tasks: TaskReport[]
   /** Tasks that produced a usable verdict. */
   tasksRun: number
@@ -198,6 +204,8 @@ export interface RunSuiteOptions {
   trialCountFor?: (task: EvalTask) => number
   /** The `--shuffle=<seed>` the executed order came from, echoed into the report. */
   shuffleSeed?: number
+  /** The `--task=<id>…` filter, echoed into the report (#4218). */
+  taskFilter?: string[]
   /** Where the hosted MCP leg ran, echoed into the report (#3959). */
   hostedMcp?: HostedMcpInfo
   /** Grader probes live here (chain/backend), injected per suite. */
@@ -326,6 +334,7 @@ export async function runSuite(opts: RunSuiteOptions): Promise<EvalReport> {
     trialsPerTask: opts.trials,
     order: opts.tasks.map((t) => t.id),
     ...(opts.shuffleSeed !== undefined ? { shuffleSeed: opts.shuffleSeed } : {}),
+    ...(opts.taskFilter !== undefined ? { taskFilter: [...opts.taskFilter] } : {}),
     tasks,
     tasksRun: tasks.length,
     tasksPassingAll: tasks.filter((t) => t.passAll).length,
@@ -338,6 +347,9 @@ export function renderSummary(report: EvalReport): string {
   const lines: string[] = []
   lines.push(`Agent evals — ${report.adapter} — ${report.generatedAt}`)
   lines.push(`Trials per task: ${report.trialsPerTask}; pass^k on ${report.tasksPassingAll}/${report.tasksRun} tasks`)
+  if (report.taskFilter !== undefined) {
+    lines.push(`Task filter: ${report.taskFilter.join(', ')} — a FILTERED run, not a whole-suite green (#4218).`)
+  }
   lines.push(`Executed order: ${report.order.join(' → ')}${report.shuffleSeed !== undefined ? ` (shuffle seed ${report.shuffleSeed})` : ''}`)
   lines.push(
     `Model: ${report.model ?? 'not reported'}; inference server build: ${report.inferenceServerBuild ?? 'not reported'}; harness version: ${report.harnessVersion ?? 'not reported'}`,

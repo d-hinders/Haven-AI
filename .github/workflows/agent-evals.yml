@@ -27,9 +27,11 @@ name: Agent evals — Claude Code lane
 # trigger, so nothing else queues a run that waits for the
 # owner's approval. Choose `subset` (5 tasks; boots `packages/mcp-server`
 # from this checkout against the dev backend) or `full` (all tasks, against
-# the deployed dev stack). Error bodies produced by `packages/backend` stay
-# dev-deployed either way; the report says so. Guarded by
-# scripts/ci/agent-evals-workspace-deps.test.mjs.
+# the deployed dev stack) — or set `tasks` to a comma-separated list of
+# kebab-case task ids to run EXACTLY those, with no `--limit`, whatever the
+# suite (validated in the slice step before it is used; #4218). Error bodies
+# produced by `packages/backend` stay dev-deployed either way; the report
+# says so. Guarded by scripts/ci/agent-evals-workspace-deps.test.mjs.
 #
 # `claude -p` is limited to the Haven MCP tools ONLY, in the open, in
 # QA_EVAL_CLAUDE_CODE_COMMAND below: `--allowedTools` names the two Haven
@@ -42,12 +44,16 @@ on:
   workflow_dispatch:
     inputs:
       suite:
-        description: 'Which slice to run'
+        description: 'Which slice to run (sizing is ignored when tasks is set; the suite still picks the hosted MCP source)'
         type: choice
         default: 'subset'
         options:
           - subset
           - full
+      tasks:
+        description: 'Optional comma-separated task ids to run exactly (e.g. x402-eip3009-bridge-vpn-legacy); empty = the suite slice'
+        type: string
+        default: ''
       trials:
         description: 'Trials per task (cost pilot: 1)'
         type: string
@@ -83,18 +89,40 @@ jobs:
         env:
           INPUT_SUITE: ${{ github.event.inputs.suite || 'subset' }}
           INPUT_TRIALS: ${{ github.event.inputs.trials || '1' }}
+          INPUT_TASKS: ${{ github.event.inputs.tasks || '' }}
         run: |
           set -euo pipefail
           MODE="$INPUT_SUITE"
           TRIALS="$INPUT_TRIALS"
+          TASKS="$INPUT_TASKS"
+          # #4218: the optional tasks input is validated BEFORE anything is
+          # written to $GITHUB_OUTPUT or echoed — an unvalidated echo is a
+          # workflow-command injection surface (the qa-dev.yml pattern).
+          if [ -n "$TASKS" ]; then
+            # Whole-string checks — NOT grep, which matches per line and lets
+            # a crafted multi-line input pass on one matching line.
+            if [[ "$TASKS" == *[![:print:]]* ]]; then
+              echo "::error::tasks input contains control characters — rejected (#4218)."
+              exit 1
+            fi
+            if [[ ! "$TASKS" =~ ^[a-z0-9-]+(,[a-z0-9-]+)*$ ]]; then
+              echo "::error::tasks input must be a comma-separated list of kebab-case task ids matching ^[a-z0-9-]+(,[a-z0-9-]+)*\$ — rejected (#4218)."
+              exit 1
+            fi
+          fi
+          # A task filter replaces the slice: no --limit whatever the suite
+          # (the suite still picks the hosted MCP source below).
           LIMIT_ARG=''
-          if [ "$MODE" = 'subset' ]; then LIMIT_ARG='--limit=5'; fi
+          if [ -z "$TASKS" ] && [ "$MODE" = 'subset' ]; then LIMIT_ARG='--limit=5'; fi
           HOSTED_COMMIT="$(git rev-parse HEAD)"
+          FILTER_NOTE='no task filter'
+          if [ -n "$TASKS" ]; then FILTER_NOTE="tasks=$TASKS (no --limit)"; fi
           echo "mode=$MODE" >> "$GITHUB_OUTPUT"
           echo "trials=$TRIALS" >> "$GITHUB_OUTPUT"
           echo "limit_arg=$LIMIT_ARG" >> "$GITHUB_OUTPUT"
+          echo "task_filter=$TASKS" >> "$GITHUB_OUTPUT"
           echo "head_sha=$HOSTED_COMMIT" >> "$GITHUB_OUTPUT"
-          echo "::notice::agent-evals mode=$MODE trials=$TRIALS $LIMIT_ARG; hosted MCP: $([ "$MODE" = 'subset' ] && echo "commit $HOSTED_COMMIT (this checkout)" || echo 'the deployed dev stack')"
+          echo "::notice::agent-evals mode=$MODE trials=$TRIALS $FILTER_NOTE; hosted MCP: $([ "$MODE" = 'subset' ] && echo "commit $HOSTED_COMMIT (this checkout)" || echo 'the deployed dev stack')"
 
       - uses: actions/setup-node@v4
         with:
@@ -230,12 +258,22 @@ jobs:
           MODE: ${{ steps.slice.outputs.mode }}
           TRIALS: ${{ steps.slice.outputs.trials }}
           LIMIT_ARG: ${{ steps.slice.outputs.limit_arg }}
+          TASKS: ${{ steps.slice.outputs.task_filter }}
           HOSTED_COMMIT: ${{ steps.slice.outputs.head_sha }}
           DEV_HOSTED_MCP_URL: ${{ vars.QA_HOSTED_MCP_URL || secrets.QA_HOSTED_MCP_URL }}
         run: |
           set -o pipefail
           if [ "$MODE" = 'subset' ]; then SOURCE=pr-checkout; HOSTED_URL='http://127.0.0.1:8788/v1'; else SOURCE=dev-deployed; HOSTED_URL="$DEV_HOSTED_MCP_URL"; fi
-          npm run evals -w packages/qa-agent -- --trials="$TRIALS" $LIMIT_ARG --out="$GITHUB_WORKSPACE/evals-report.json" --hosted-mcp-source="$SOURCE" --hosted-mcp-commit="$HOSTED_COMMIT" --hosted-mcp-url="$HOSTED_URL"
+          # #4218: a task filter replaces the slice — "--task=$TASKS" quoted
+          # and NO --limit, whatever the suite; an empty filter emits no
+          # --task argument at all.
+          FILTER_ARGS=()
+          if [ -n "$TASKS" ]; then
+            FILTER_ARGS+=("--task=$TASKS")
+          elif [ -n "$LIMIT_ARG" ]; then
+            FILTER_ARGS+=("$LIMIT_ARG")
+          fi
+          npm run evals -w packages/qa-agent -- --trials="$TRIALS" "${FILTER_ARGS[@]}" --out="$GITHUB_WORKSPACE/evals-report.json" --hosted-mcp-source="$SOURCE" --hosted-mcp-commit="$HOSTED_COMMIT" --hosted-mcp-url="$HOSTED_URL"
 
       - name: Append the results table to the job summary
         if: always() && hashFiles('evals-report.json.summary.md') != ''

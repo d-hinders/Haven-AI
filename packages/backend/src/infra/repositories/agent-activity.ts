@@ -134,6 +134,174 @@ export const LIST_AGENT_PAYMENTS_SQL = `SELECT pi.id,
        ORDER BY pi.created_at DESC
        LIMIT $2 OFFSET $3`
 
+// ── Single-agent activity, filtered (#4229) ──────────────────────────────────
+//
+// The same population as `LIST_AGENT_PAYMENTS_SQL` under an OPTIONAL filter
+// set: every predicate is `($n IS NULL OR …)`, so one fixed-shape statement
+// serves every combination — a runtime-assembled WHERE is a statement
+// `db-schema-smoke` cannot PREPARE (see the spend-stats note below). The
+// unfiltered read stays on `LIST_AGENT_PAYMENTS_SQL` verbatim, so omitting
+// the filters serves today's byte-identical response.
+
+/**
+ * The `status` filter's derived arm: `needs_attention` is NOT a
+ * `payment_intents` status — it is `machinePaymentLifecycle`'s derived state,
+ * which is set exactly when a machine rail's confirmed payment carries an
+ * open `merchant_retry_rejected_after_payment` reconciliation event. The
+ * route supplies the rails set (`MACHINE_PAYMENT_RAILS`) as $3 so the SQL
+ * mirrors the domain derivation without restating it here.
+ */
+export const LIST_AGENT_PAYMENTS_FILTERED_SQL = `SELECT pi.id,
+              us.id AS account_id,
+              COALESCE(us.account_address, pi.account_address) AS account_address,
+              us.name AS account_name,
+              COALESCE(pi.chain_id, us.chain_id, ${DEFAULT_CHAIN_ID}) AS chain_id,
+              pi.token_symbol,
+              pi.token_address,
+              pi.amount_raw,
+              pi.amount_human,
+              pi.to_address,
+              pi.status,
+              pi.tx_hash,
+              pi.machine_metadata->>'merchant_settlement_tx_hash' AS settlement_tx_hash,
+              pi.machine_metadata->>'settlement_scheme' AS settlement_scheme,
+              COALESCE(pi.payment_rail, pi.source, 'direct') AS source,
+              COALESCE(pi.payment_resource_url, pi.x402_resource_url) AS x402_resource_url,
+              COALESCE(pi.merchant_address, pi.x402_merchant_address) AS x402_merchant_address,
+              mpe.proof_status AS payment_proof_status,
+              mpe.delivery_reference AS delivery_reference,
+              pi.payment_rail,
+              pi.payment_resource_url,
+              pi.merchant_address,
+              pi.execution_rail,
+              pi.delegation_hash,
+              pi.created_at,
+              pi.confirmed_at,
+              mpre.event_type AS payment_reconciliation_event_type
+       FROM payment_intents pi
+       LEFT JOIN smart_accounts us
+         ON us.user_id = pi.user_id
+        AND LOWER(us.account_address) = LOWER(pi.account_address)
+        AND pi.chain_id IS NOT NULL
+        AND us.chain_id = pi.chain_id
+       LEFT JOIN machine_payment_evidence mpe ON mpe.payment_intent_id = pi.id
+       LEFT JOIN machine_payment_reconciliation_events mpre
+         ON mpre.payment_intent_id = pi.id
+        AND mpre.status = 'open'
+        AND mpre.event_type = 'merchant_retry_rejected_after_payment'
+       WHERE pi.agent_id = $1
+         AND ($2::text IS NULL
+              OR pi.status = $2
+              OR ($2 = 'pending' AND pi.status IN ('pending_signature', 'submitted'))
+              OR ($2 = 'needs_attention' AND mpre.event_type IS NOT NULL
+                  AND COALESCE(pi.payment_rail, pi.source, 'direct') = ANY($3::text[])
+                  AND pi.status IN ('confirmed', 'executed')))
+         AND ($4::text IS NULL OR pi.created_at >= $4::timestamptz)
+         AND ($5::text IS NULL OR pi.created_at < $5::timestamptz)
+         AND ($6::text IS NULL OR pi.x402_resource_url ILIKE '%' || $6 || '%'
+              OR pi.merchant_address ILIKE '%' || $6 || '%'
+              OR pi.to_address ILIKE '%' || $6 || '%'
+              OR EXISTS (SELECT 1 FROM contacts c
+                         WHERE c.user_id = pi.user_id
+                           AND LOWER(c.address) = LOWER(pi.to_address)
+                           AND c.name ILIKE '%' || $6 || '%'))
+         AND ($7::uuid IS NULL OR pi.id = $7::uuid)
+       ORDER BY pi.created_at DESC
+       LIMIT $8 OFFSET $9`
+
+/**
+ * The filtered population's total — the COUNT twin of
+ * `LIST_AGENT_PAYMENTS_FILTERED_SQL` with the same predicates minus the
+ * page. A separate statement rather than `COUNT(*) OVER ()` on the page
+ * query: an offset past the end returns zero rows, and the total must
+ * survive that (`hasMore` is computed from it).
+ */
+export const COUNT_AGENT_PAYMENTS_FILTERED_SQL = `SELECT COUNT(*)
+       FROM payment_intents pi
+       LEFT JOIN machine_payment_evidence mpe ON mpe.payment_intent_id = pi.id
+       LEFT JOIN machine_payment_reconciliation_events mpre
+         ON mpre.payment_intent_id = pi.id
+        AND mpre.status = 'open'
+        AND mpre.event_type = 'merchant_retry_rejected_after_payment'
+       WHERE pi.agent_id = $1
+         AND ($2::text IS NULL
+              OR pi.status = $2
+              OR ($2 = 'pending' AND pi.status IN ('pending_signature', 'submitted'))
+              OR ($2 = 'needs_attention' AND mpre.event_type IS NOT NULL
+                  AND COALESCE(pi.payment_rail, pi.source, 'direct') = ANY($3::text[])
+                  AND pi.status IN ('confirmed', 'executed')))
+         AND ($4::text IS NULL OR pi.created_at >= $4::timestamptz)
+         AND ($5::text IS NULL OR pi.created_at < $5::timestamptz)
+         AND ($6::text IS NULL OR pi.x402_resource_url ILIKE '%' || $6 || '%'
+              OR pi.merchant_address ILIKE '%' || $6 || '%'
+              OR pi.to_address ILIKE '%' || $6 || '%'
+              OR EXISTS (SELECT 1 FROM contacts c
+                         WHERE c.user_id = pi.user_id
+                           AND LOWER(c.address) = LOWER(pi.to_address)
+                           AND c.name ILIKE '%' || $6 || '%'))
+         AND ($7::uuid IS NULL OR pi.id = $7::uuid)`
+
+/**
+ * The optional filter set behind `GET /agent-activity/:id/activity?kind=…`.
+ * `status` is the ROUTE's translated value: `'confirmed'` for the UI's
+ * `sent`, the derived `'needs_attention'` for attention, or a raw
+ * `payment_intents` status. `rails` is `MACHINE_PAYMENT_RAILS` as an array.
+ * `from`/`to` are ISO bounds — inclusive `from`, exclusive `to`. `q` is the
+ * trimmed search term (merchant resource URL, merchant/recipient address, or
+ * the owner's contact name for the recipient). `paymentId` narrows to one.
+ */
+export interface AgentPaymentActivityFilter {
+  status: string | null
+  rails: string[]
+  from: string | null
+  to: string | null
+  q: string | null
+  paymentId: string | null
+}
+
+function filteredPaymentArgs(agentId: string, filter: AgentPaymentActivityFilter): unknown[] {
+  return [
+    agentId,
+    filter.status,
+    filter.rails,
+    filter.from,
+    filter.to,
+    filter.q,
+    filter.paymentId,
+  ]
+}
+
+/**
+ * NOT tenant-scoped — see the file header. The caller must have confirmed the
+ * agent belongs to the requesting user before calling this.
+ */
+export async function listAgentPaymentsFiltered(
+  agentId: string,
+  filter: AgentPaymentActivityFilter,
+  limit: number,
+  offset: number,
+  db: Executor = pool,
+): Promise<ActivityPaymentRow[]> {
+  const result = await db.query<ActivityPaymentRow>(LIST_AGENT_PAYMENTS_FILTERED_SQL, [
+    ...filteredPaymentArgs(agentId, filter),
+    limit,
+    offset,
+  ])
+  return result.rows
+}
+
+/** Same gating contract as `listAgentPaymentsFiltered`. Returns the filtered population's total. */
+export async function countAgentPaymentsFiltered(
+  agentId: string,
+  filter: AgentPaymentActivityFilter,
+  db: Executor = pool,
+): Promise<number> {
+  const result = await db.query<{ count: string }>(COUNT_AGENT_PAYMENTS_FILTERED_SQL, [
+    ...filteredPaymentArgs(agentId, filter),
+  ])
+  return Number(result.rows[0]?.count ?? 0)
+}
+
 // #2055: `LIST_AGENT_APPROVALS_SQL` / `listAgentApprovals` are gone with
 // `approval_requests` — the activity feed is payments + tool invocations.
 

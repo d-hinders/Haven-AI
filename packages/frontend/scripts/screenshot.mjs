@@ -2084,7 +2084,38 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
     return { activity: FIXTURE_AGENT_ACTIVITY, pending_approvals: FIXTURE_AGENT_STATS.pending_approvals }
   }
   if (pathname.endsWith('/activity') && pathname.startsWith('/agent-activity/')) {
-    return { activity: FIXTURE_AGENT_ACTIVITY }
+    // #4229: the kinded read is pageable and filterable, so the capture
+    // fixture honours kind, status and offset — a filtered capture never
+    // bakes in mixed or unfiltered rows. Omitting kind serves the legacy
+    // merged list, unchanged. (from/to/q/paymentId are not capture inputs.)
+    const query = new URLSearchParams(apiPath.split('?')[1] ?? '')
+    const kind = query.get('kind')
+    if (!kind) return { activity: FIXTURE_AGENT_ACTIVITY }
+    const status = query.get('status')
+    const offset = Number(query.get('offset')) || 0
+    const paymentStatuses = new Set(['sent', 'pending', 'failed', 'needs_attention'])
+    const rows = FIXTURE_AGENT_ACTIVITY.filter((row) => (kind === 'payments' ? row.type === 'payment' : row.type === 'mcp_tool_call'))
+    const filtered = rows.filter((row) => {
+      if (!status) return true
+      if (kind === 'tool_calls') return row.result_status === status
+      if (!paymentStatuses.has(status)) return true
+      if (status === 'sent') return row.status === 'confirmed'
+      if (status === 'pending') return row.status === 'pending_signature' || row.status === 'submitted'
+      if (status === 'failed') return row.status === 'failed'
+      return row.payment_attention_reason != null
+    })
+    const page = filtered.slice(offset)
+    const body = {
+      activity: page,
+      total: filtered.length,
+      hasMore: offset + page.length < filtered.length,
+    }
+    // The summary-line count ignores the status filter (same contract as the
+    // route), so it stays stable while the status selection flips.
+    if (kind === 'tool_calls') {
+      body.counts = { error: rows.filter((row) => row.result_status === 'error').length }
+    }
+    return body
   }
   if (pathname.endsWith('/stats') && pathname.startsWith('/agent-activity/')) {
     return FIXTURE_AGENT_STATS

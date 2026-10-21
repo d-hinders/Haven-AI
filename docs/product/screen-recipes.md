@@ -492,11 +492,16 @@ Money and risk clarity:
 
 ## Agent List
 
-Use for `/agents`: every managed agent as a card, with the list controls above it (#3165). The list spans every account the user has — there is no global active account narrowing it (#3719) — so each card names its account with the chain as the secondary half (`Account: Treasury · Base`).
+Use for `/agents`: every managed agent as a card, with the list controls above it (#3165). The list spans every account the user has — there is no global active account narrowing it (#3719) — so when the user has two or more accounts each card names its account (the network is the account's, so the card does not repeat it, #4209).
 
 Structure:
-1. Header with the count and the primary action (Connect agent), plus Labels and
-   Organizations.
+1. `PageHeader`, as on Accounts (#4209): the title and subtitle, **Connect
+   agent** as the primary action level with the title, and a ⋯ menu
+   (`EllipsisVertical`, the agent page's overflow icon) holding **Labels** and
+   **Organizations**. No count chip — the list summary line owns the count. The
+   header renders inside `AgentPanel`, beside the state it reads. With no Haven
+   account the page shows the title and the "Create a Haven account" empty
+   state, and no Connect agent.
 2. Toolbar: the [List controls](design-system.md#list-controls--listtoolbar-facetmenu-periodpicker-4110)
    pattern (#4113), browser-filtered: search ("Search agents";
    name, description and delegate address, as its screen-reader description),
@@ -515,16 +520,51 @@ Structure:
    (plural for more), with **Show archived**, which sets Archived to Shown
    (omitted when every agent is archived, where the empty state offers it). A
    hidden group never hides redeemable spend authority.
-4. The card grid, filtered and sorted by the toolbar. Archived cards, once
-   shown, keep their archived treatment (Restore to list, no operational
-   actions).
+4. The card grid, filtered and sorted by the toolbar. Cards stretch to the
+   tallest in their row and pin their footer with `mt-auto`, so footers line
+   up across a row, as on `/accounts` (#4209, owner decision 2026-10-21,
+   reversing #2237's `items-start`). Archived cards, once shown, keep their
+   archived treatment (Restore to list, no operational actions).
 5. A filter that empties the list shows the pattern's no-match state
    where the cards were, and the toolbar stays. An UNFILTERED
    list can be empty too — every agent archived — and there Clear filters
    would change nothing, so it says "All your agents are archived" and offers
-   Show archived instead. The `not recorded` MCP note above the list follows
-   the filtered set: a filter that hides the only unrecorded card hides the
-   note, and so does Archived: Hidden.
+   Show archived instead.
+
+The card (#4209, mockup version 4 on epic #4207), on the entity-card shell
+with a stretched name link:
+- **Head:** the agent's `Monogram` (`sm`, decorative), the name, one
+  `StatusBadge` only when the agent needs attention, up to three label chips
+  then "+N", and a ⋯ menu. The badge is the dashboard row's (`agentBadge`:
+  "Needs setup", "Paused", "N% used" at 90% or more) plus "Archived" and
+  "Revoked"; a healthy active agent shows none. The account name prints only
+  with two or more accounts.
+- **Body:** the dashboard row's own `AgentBudget` — meter, caption, "+N
+  budgets", the received-sub-budget line, "No budget" — joined from the
+  dashboard overview and budget reads by agent id (`GET /agents` carries no
+  usage). A skeleton while those load, never "No budget"; an em dash if the
+  overview failed. Revoked and archived cards draw no meter and say why
+  ("Network access already revoked"; "History stays readable; restoring never
+  re-enables spending", or "Restoring to the list does not end its budget"
+  while a budget is live). The paused notice, the recoverable-funds notice and
+  the half-revoked callout stay on the card.
+- **One call to action, by state:** Finish revoking (a live budget after
+  revoke or archive, #3542), else Recover funds (stranded funds — the list
+  knows only that they exist, so it uses the agent page's own action, to the
+  same recovery flow, rather than a count-aware "Review the N payments"),
+  else Finish setup
+  (`pending_approval`), else Set budget (active, no usable budget).
+- **⋯ menu:** Pause payments or Resume payments, Move to organization (only
+  when organizations exist), and Remove; Remove from list for a revoked agent;
+  Restore to list for an archived one.
+- **Footer, one line:** "Last paid {age} · {merchant}" — the merchant's name,
+  else the x402 resource host, never an address — else "Connected {age}"
+  (`mcp_last_seen_at`; "Last seen {age}" for an agent the overview does not
+  cover, which can no longer connect), else "No payments yet". An agent the
+  overview does not cover (revoked) never claims "No payments yet". The dashboard rows keep
+  #3989's "Last paid" with no merchant.
+- **Not on the card:** the MCP server name (on the agent page since #4209),
+  the description, the network, and a separate "Last activity" stamp.
 
 Archived agents (`archived_at` set, #1402) and Status "Revoked" are separate
 axes: a revoked agent that is not archived is listed, and matched by Status:
@@ -550,9 +590,9 @@ of an empty state (see Connect And Approve Agent for the inline container).
   approval in flight). Before a setup exists (steps 1 and 2) it shows only while
   the list is empty, so an agent created elsewhere — another tab, an agent-led
   link — replaces it with the list on the next poll.
-- While it shows, nothing else of the list surface renders: no count chip, no
-  header "Connect agent", no organization tree, no toolbar, no cards, no
-  placeholders. Labels and Organizations stay in the header.
+- While it shows, nothing else of the list surface renders: no header "Connect
+  agent", no organization tree, no toolbar or count, no cards, no
+  placeholders. The header's ⋯ menu (Labels, Organizations) stays.
 - Leaving it shows the list when an agent now exists. With the list still empty
   (a setup cancelled or expired before the connector registered) a fresh flow
   replaces it, starter budget seeded again — except right after an approval:
@@ -568,7 +608,7 @@ of an empty state (see Connect And Approve Agent for the inline container).
 
 Rules:
 - Filter state lives in the URL through the pattern's URL codec (`?q=…&status=active,paused&budget=none&archived=shown&sort=seen`; the comma is percent-encoded on the wire), so a view is shareable and survives reload; `?setup=` and other parameters on the page are preserved in both directions (closing the setup modal drops only `setup`). The cards follow every keystroke and only a search's URL write waits for a 300 ms pause. No `archived` key means Hidden. Unknown values for the fixed facets (Status, Budget, Archived) are dropped from a pasted link; Account and Organization ids are kept until their options load, so a shared link survives the fetch.
-- A facet is registered as data (`AgentFacet` in `lib/agent-list-filters.ts`: id, options, predicate, match mode, and optionally selection, default and `allLabel`; `toListFacet` hands it to the toolbar), so the labels facet (#3167), the organization facet (#3164) and the account facet (#3719) plug in without a toolbar change. The account facet is registered only when the user has more than one account; its options use the same `name · chain` shape as the card. Facet counts answer "how many if I pick this" — a facet's own selection is excluded from its counts, and the multi-select rows show them.
+- A facet is registered as data (`AgentFacet` in `lib/agent-list-filters.ts`: id, options, predicate, match mode, and optionally selection, default and `allLabel`; `toListFacet` hands it to the toolbar), so the labels facet (#3167), the organization facet (#3164) and the account facet (#3719) plug in without a toolbar change. The account facet is registered only when the user has more than one account; its options name the account with its chain (`Treasury · Base`); the card prints the account name alone (#4209). Facet counts answer "how many if I pick this" — a facet's own selection is excluded from its counts, and the multi-select rows show them.
 - The budget facet offers what `GET /agents` can prove about authority (#3988): recurring, one-time, received, none. The first two are the agent's OWN budget cap (a zero cap is no authority, #3897); `received` marks a grant holder — an agent spending through an open sub-budget another agent granted it, which the server verifies against the whole redemption chain (`receivedSubBudgets[].open`) and which never classifies as `none`. Exhausted, near-limit and pending-signature still need a server field and are not offered, because an option that can never match reads as "no agent is near its limit".
 - Sort keys: name, recently seen (`mcp_last_seen_at`, never-seen last), newest, largest budget (largest single allowance in its own token units — the row carries no price, so this is deliberately unit-blind; a grant holder, whose amount the row does not carry, ranks above zero-capped agents but below any known positive amount).
 - Filtering is client-side over the loaded list; the API is unpaginated, so this holds until an account has enough agents for `GET /agents` itself to need paging.
@@ -648,6 +688,12 @@ done, and how to stop it (#3691, epic). Sections, in order:
    within the user's LOCAL day — the hook sends the browser's IANA zone and
    the route cuts the day in it, defaulting to UTC (#3977). MCP tool calls, if the agent has any,
    render directly under the table as part of this section.
+6. Identity and settings — one quiet card of rows: the Agent Passport, the
+   **MCP server name** (#4209, moved here from the `/agents` card): the
+   hosted+signer pair the agent is wired as, with a copy button and a tooltip
+   naming both servers, or the bare `not recorded` label with its explanation
+   as visible text beside it, never a tooltip (#2043); then the tax declaration row (when shown)
+   and the Backup & recovery pointer.
 
 Money and risk clarity:
 - The budget section leads: it is the reason to open an agent at all. The

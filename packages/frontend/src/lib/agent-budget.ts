@@ -3,8 +3,9 @@ import type { Agent } from '@/hooks/useAgents'
 /**
  * The ONE owner of "does this agent have a budget, and what does the line
  * say" (#3988). Every budget-authority DISPLAY surface reads it — the
- * dashboard row (`AgentsSection`), Needs-you (`dashboard-attention`), the
- * `/agents` card (`AgentCard`), the Budget facet and Largest-budget sort
+ * dashboard row (`AgentsSection`, and through its `AgentBudget` the
+ * `/agents` card since #4209), Needs-you (`dashboard-attention`), the Budget
+ * facet and Largest-budget sort
  * (`agent-list-filters`), and the account detail page — so no surface keeps
  * its own `allowances.length` copy that drifts when the wire gains a second
  * kind of budget. The rule it encodes (#3802/#3897/#3983 lineage): a ZERO cap
@@ -76,19 +77,6 @@ export function receivedBudgetLine(
 /** Does the agent hold at least one budget with a positive cap? */
 export function hasConfiguredAllowances(agent: Pick<Agent, 'allowances'>): boolean {
   return (agent.allowances ?? []).some((a) => hasPositiveAllowance(a.allowance_amount))
-}
-
-/**
- * The budget line for an `Agent`-shaped row (the `/agents` card, the Budget
- * facet, the account detail page): the received-budget line when the agent's
- * own budgets are absent or all zero-capped, else `null` (the caller renders
- * its own-budget view).
- */
-export function agentReceivedBudgetLine(
-  agent: Pick<Agent, 'allowances' | 'receivedSubBudgets'>,
-): string | null {
-  if (hasConfiguredAllowances(agent)) return null
-  return receivedBudgetLine(agent.receivedSubBudgets)
 }
 
 /**

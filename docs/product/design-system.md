@@ -59,8 +59,6 @@ covers:
   - packages/frontend/src/components/EnvBadge.tsx
   - packages/frontend/src/components/__tests__/WalletButton.test.tsx
   - packages/frontend/e2e/accounts-card-tap-target.mobile.spec.ts
-  - packages/frontend/e2e/agent-card-fit-measure.spec.ts
-  - packages/frontend/e2e/agent-card-mcp-chip-measure.spec.ts
   - packages/frontend/e2e/marketing-cta-focus.spec.ts
   - packages/frontend/e2e/mobile-nav-layering.mobile.spec.ts
   - packages/frontend/e2e/mobile-nav-tap-target.mobile.spec.ts
@@ -208,7 +206,7 @@ Use `.v2-brand-gradient-text` for the production app wordmark. In product UI, do
 |---|---|---|---|---|
 | `--v2-success` | `#047857` | `#34d399` | `--v2-success-soft` `#ecfdf5` / `#12312a` | Settled, confirmed, incoming |
 | `--v2-debit` | `#0369a1` | `#38bdf8` | `--v2-debit-soft` `#f0f9ff` / `#0e2a3a` | Outgoing / sent money (sibling to success; never a warning) |
-| `--v2-warning` | `#b54708` | `#fcd34d` | `--v2-warning-soft` `#fef3c7` / `#33260e` | 402 Payment Required, pending review; environment identity — the `DEV` chip (`EnvBadge`) and the dev install's icon badge; a paused agent's status markers — `AgentCard`'s header pill (`:146`) and bot tile (`:94`), the same fact on two surfaces (#2764) |
+| `--v2-warning` | `#b54708` | `#fcd34d` | `--v2-warning-soft` `#fef3c7` / `#33260e` | 402 Payment Required, pending review; environment identity — the `DEV` chip (`EnvBadge`) and the dev install's icon badge; a paused agent's status marker — the "Paused" `StatusBadge` that `agentBadge` gives both the dashboard's agent row and the `/agents` card, one fact in one voice (#2764; since #4209 the card's bot tile and its separate pill are gone) |
 | `--v2-danger` | `#b42318` | `#f87171` | `--v2-danger-soft` `#fef2f2` / `#3a1512` | Failed, destructive |
 
 Same rule as v1: **never repurpose a semantic color**.
@@ -1697,14 +1695,16 @@ jsdom cannot evaluate the pseudo-element's stacking or hit testing.
 
 **A card in a grid has to fit its track, and by default it cannot ([#2251](https://github.com/d-hinders/Haven-AI/issues/2251)).** This is the card sibling of the `truncate`d-table-cell rule under *Transaction tables* below, and it has the same shape: a `truncate` descendant is `white-space: nowrap`, so its min-content is the whole string, and a container that is never allowed to go below its min-content grows instead of ellipsising.
 
-What makes it a *grid* rule is where the "never allowed" comes from. A grid item's `min-width` defaults to `auto`, which resolves to its min-content — and an implicit `auto` column takes its minimum from that. Tailwind's `grid-cols-N` is `repeat(N, minmax(0, 1fr))`, whose explicit `0` overrides it, so **a responsive grid is safe at the breakpoint where its columns are declared and unsafe below it**. `/agents` is `grid items-start gap-4 lg:grid-cols-2`: correct at `lg` and up, and below `lg` its single implicit column was sized by the widest card's min-content. At 390 that put a 488.3px card in a 342px track — clipped rather than scrollable, because `main` is `overflow-x: auto` inside an `overflow-hidden` parent, so `documentElement.scrollWidth` stayed 390. The shared `expectNoHorizontalOverflow()` helper still sees it, on its `main#main-content` reading (#1779): measured `contentOverflowBy: 122` before the fix and `0` after. It was the SEED that was missing, not the assertion — the standing `/agents` mobile check is green on the shared fixture because that leaves `mcp_server_name` absent, and the `not recorded` branch is a 66px label with nothing to truncate.
+What makes it a *grid* rule is where the "never allowed" comes from. A grid item's `min-width` defaults to `auto`, which resolves to its min-content — and an implicit `auto` column takes its minimum from that. Tailwind's `grid-cols-N` is `repeat(N, minmax(0, 1fr))`, whose explicit `0` overrides it, so **a responsive grid is safe at the breakpoint where its columns are declared and unsafe below it**. `/agents` was `grid items-start gap-4 lg:grid-cols-2` (`grid gap-4 lg:grid-cols-2` since #4209): correct at `lg` and up, and below `lg` its single implicit column was sized by the widest card's min-content. At 390 that put a 488.3px card in a 342px track — clipped rather than scrollable, because `main` is `overflow-x: auto` inside an `overflow-hidden` parent, so `documentElement.scrollWidth` stayed 390. The shared `expectNoHorizontalOverflow()` helper still sees it, on its `main#main-content` reading (#1779): measured `contentOverflowBy: 122` before the fix and `0` after. It was the SEED that was missing, not the assertion — the standing `/agents` mobile check is green on the shared fixture because that leaves `mcp_server_name` absent, and the `not recorded` branch is a 66px label with nothing to truncate.
 
 Two things follow for anyone building one:
 
 - **Put `min-w-0` on the grid item itself.** It is what stops one card's content setting every sibling's width, and it is invisible until some real value gets long enough.
 - **`min-w-0` has to reach the truncating element without a gap.** On `/agents` there were already three of them — the header's `flex-1` block, the MCP row, `McpServerName`'s wrapper — and the chain still failed, because `Tooltip` renders its non-`block` trigger as a bare `<span className="inline-flex">` with no `min-width: 0` and no `className` passthrough. One un-shrinkable link defeats every `min-w-0` above it. When a `truncate` element sits inside a wrapper you do not control, give that wrapper the `min-w-0` from its parent.
 
-Both halves are needed and neither is sufficient: with only the card's `min-w-0` the card fits the track and the chip spills out of the card instead. Proven by rendered geometry, not by a class assertion or a baseline, in `e2e/agent-card-fit-measure.spec.ts` — the numbers, the per-seed floors and the mutation results live in that file's docstring.
+Both halves are needed and neither is sufficient: with only the card's `min-w-0` the card fits the track and the chip spills out of the card instead. This was proven by rendered geometry in `e2e/agent-card-fit-measure.spec.ts`, retired by #4209 with the MCP chip it measured (the spec's history is in git); the card keeps its own `min-w-0`, and the rule stands for every grid of cards.
+
+> **Superseded by #4209.** The `/agents` card no longer shows the MCP name or a separate "Last activity" stamp, so the decision below — "the MCP wiring outranks the last-activity stamp on a narrow card" — no longer has a card to apply to, and its two measure specs were retired. It is kept as the record of how a narrow card's priorities were measured.
 
 **Fitting the track does not fit the header — what a narrow card drops is a product decision ([#2325](https://github.com/d-hinders/Haven-AI/issues/2325)).** The grid-track rule above stopped `/agents` cards growing past their column; the space the card then had to divide exposed the next defect in the same header row. At 390 the card's header row is 300px, and it splits: bot tile 36 + gap 12 + the name/account/MCP block (`min-w-0 flex-1`) 121.2 + gap 12 + the `ml-auto shrink-0` "Last activity" stamp **118.8**. The stamp takes 40% of the row and cannot yield, so the MCP chip inside the block gets **38.5px** — which ellipsises even a short slug: `haven-research` measures **113px** and renders as `haven…` on every card, the opposite of what #1878 added the chip for.
 
@@ -1714,7 +1714,22 @@ The decision taken: **the MCP wiring outranks the last-activity stamp on a narro
 
 **Why the breakpoint is `sm` and not the width the short slug needs.** Below `sm` the wrap is unconditional, so between roughly 466 and 639 a card whose slug is short takes a line it did not strictly need — the review pass on this change measured that band and asked whether the breakpoint should move down into it. It should not, and the answer is a measurement rather than a preference. Sweeping the UNWRAPPED layout: `haven-research` (natural 113px) renders whole from 466 up, but a 34-character slug (natural 258px) is still cut to **148.5px at 500** and **208.5px at 560**, and only renders whole from **639**. So 640 is the width at which the unwrapped header stops truncating a long slug too, not a convenient default; moving it down to spare the short slug its extra line would hand the 466-639 band back to this same defect, for exactly the agents whose names are hardest to tell apart. What the band actually costs is one line of vertical space on a short-slug card, against no slug being truncated anywhere below `sm` — the same trade as the wrap itself. Pinned by the spec's 500px arm.
 
-Proven by rendered geometry in `e2e/agent-card-mcp-chip-measure.spec.ts`: at 390 the chip must render at least its own `scrollWidth` (re-measured at runtime, so the bar is not a literal tuned to one renderer) and the stamp's top must sit at or below the block's bottom; a 768 control arm pins the breakpoint in both directions. Mutation-proven by reverting the two classes: the 390 arm goes red on the mechanism guard (measured on the revert: stamp top 263px against block bottom 347px, and the chip 38.5px of its 113px natural width) while the 768 control stays green. `e2e/agent-card-fit-measure.spec.ts` stays green alongside — the width handed to the block comes from the stamp's own line, not from letting the card overflow its track again.
+Proven, until #4209 retired it with the chip, by rendered geometry in `e2e/agent-card-mcp-chip-measure.spec.ts`: at 390 the chip must render at least its own `scrollWidth` (re-measured at runtime, so the bar is not a literal tuned to one renderer) and the stamp's top must sit at or below the block's bottom; a 768 control arm pins the breakpoint in both directions. Mutation-proven by reverting the two classes: the 390 arm goes red on the mechanism guard (measured on the revert: stamp top 263px against block bottom 347px, and the chip 38.5px of its 113px natural width) while the 768 control stays green. `e2e/agent-card-fit-measure.spec.ts` stayed green alongside — the width handed to the block comes from the stamp's own line, not from letting the card overflow its track again.
+
+### Agent card (`/agents`, #4209)
+
+`agent-panel/AgentCard.tsx` is built from the agent row's pieces rather than its own:
+the stretched name-link shell above, a decorative `sm` `Monogram`, ONE `StatusBadge`
+(`agentBadge` from `haven/AgentRow` plus Archived and Revoked), `LabelChipRow`, the
+row's exported `AgentBudget` for the body, and a ⋯ `DropdownMenu` as the sibling
+control. The card is `flex flex-col` and its one-line footer sits on `mt-auto`;
+the panel's grid does NOT use `items-start`, so cards stretch to the tallest in
+their row and footers line up, as on `/accounts`. That reverses #2237, whose
+`items-start` kept one wrapping title from padding its neighbour (owner decision
+2026-10-21: aligned footers win). Every footer is one 16px line, empty included,
+so a card with nothing true to say still lines up. An open menu raises its card
+above the next one (`has-[[aria-expanded=true]]:z-…`). Shown on `/design-system`
+→ *Agent card (/agents)*.
 
 ### Agent label chips (#3167)
 
@@ -2058,11 +2073,10 @@ only place it renders (the pill no longer opens for a ready user).
 **Reach for it instead of a semantic tone when nothing has failed.** There is no
 `--v2-info` family, and `--v2-warning` is scoped to 402/pending-review, to
 environment identity — the `DEV` chip and the dev install's icon badge (§ 1) —
-and to a paused agent's status MARKERS, the pill and bot tile in `AgentCard`. It
-is not for a paused agent's prose: that card's own comment argues the tone
-belongs on a marker rather than a paragraph, which is a narrower claim than the
-enumeration and is why the two read as contradicting each other until you check
-(#2764). So
+and to a paused agent's status MARKER, the "Paused" badge on the agent row and
+`AgentCard` (#4209). It is not for a paused agent's prose: the tone belongs on a
+marker rather than a paragraph, which is why the card's paused notice is the
+neutral `ApprovalRequiredBanner` (#2764). So
 the honest options for "legible but not alarming" are this or plain muted text.
 Muted text is the right weight for mild friction — the #1097 "passkey may be on
 another device" hint (shown on every owner-signing flow since #3825) is
@@ -2131,9 +2145,9 @@ Use `components/ui/Tooltip.tsx` for brief clarification that ELABORATES on somet
 
 Tooltips must not hide essential instructions, money/risk information, or the only copy of a raw address that the user must copy. If the value is required to complete the task, show it inline. #2017 is the worked example: an explanation a user needs in order to judge whether they still control their account was moved out of a tooltip and into visible text, and that decision stands.
 
-**Reachability, and its one deliberate limit (#2038).** The trigger takes focus and a tap only when it is nobody else's control — nothing focusable inside it, and no interactive element around it. Where the trigger already is (or sits inside) a button, link, or composite `role="link"` card, the primitive stays out of the way: adding a tab stop would nest one inside a single control, and adding a tap-toggle would fire alongside that control's own action and strand a bubble over whatever the tap opened. `AgentCard` no longer uses that composite-card structure: its stretched name link and `McpServerName` tooltip are siblings, and the tooltip trigger is raised above the overlay, so it keeps its normal keyboard and tap reachability.
+**Reachability, and its one deliberate limit (#2038).** The trigger takes focus and a tap only when it is nobody else's control — nothing focusable inside it, and no interactive element around it. Where the trigger already is (or sits inside) a button, link, or composite `role="link"` card, the primitive stays out of the way: adding a tab stop would nest one inside a single control, and adding a tap-toggle would fire alongside that control's own action and strand a bubble over whatever the tap opened. `AgentCard` no longer uses that composite-card structure (#3550), and since #4209 `McpServerName` is not on the card at all: it lives on the agent detail page's MCP server name row, a standalone trigger with its normal keyboard and tap reachability.
 
-**Essential vs elaboration, worked on one component (#2043).** `McpServerName` carried BOTH kinds and is the clearest test the codebase has. Its `not recorded` branch held a 169-character explanation of an ABSENCE — there was no visible value for it to elaborate, and its whole job was to stop a user concluding their agent is broken. That is essential, so it moved to visible text: one sentence above the agent list, rendered only when some listed agent is unrecorded, following #2017's shape rather than inventing a second one. Its recorded branch kept its tooltip, and the difference is not a matter of degree:
+**Essential vs elaboration, worked on one component (#2043).** `McpServerName` carried BOTH kinds and is the clearest test the codebase has. Its `not recorded` branch held a 169-character explanation of an ABSENCE — there was no visible value for it to elaborate, and its whole job was to stop a user concluding their agent is broken. That is essential, so it moved to visible text, following #2017's shape rather than inventing a second one: one sentence above the agent list, rendered only when some listed agent was unrecorded — and since #4209, when the name moved to the agent detail page, beside the `not recorded` label on that page's MCP server name row. Its recorded branch kept its tooltip, and the difference is not a matter of degree:
 
 | ask | essential | elaboration |
 |---|---|---|
@@ -2788,7 +2802,8 @@ produced:
 - a `Tooltip` trigger inside a composite `role="link"` cannot be made focusable because
   the composite owns the tab stop — visible only in context. `AgentCard` was the original
   #2038 example; #3550 retired that structure by making the stretched name link and
-  tooltip siblings, so the live rendered check now proves the tooltip remains reachable;
+  tooltip siblings, and #4209 moved the tooltip to the agent detail page, where the
+  live rendered check (`tooltip-reachability*.spec.ts`) now proves it reachable;
 - the `wrong_wallet` gate state
   ([#2073](https://github.com/d-hinders/Haven-AI/issues/2073)) is illustrated on
   this page by hand-built markup rather than by `OnchainActionGate`, so its

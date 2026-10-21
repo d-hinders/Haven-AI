@@ -27,6 +27,19 @@ vi.mock('@/hooks/useAgents', () => ({
   useAgents: () => mockUseAgents(),
 }))
 
+// #4209: the cards join the dashboard's reads. These files do not exercise
+// that join (`AgentPanel.test.tsx` does, with its own controllable mocks), so
+// the reads settle empty: a failed overview, no budget reads, no dismissals.
+vi.mock('@/hooks/useDashboardOverview', () => ({
+  useDashboardOverview: () => ({ data: null, loading: false, error: 'unavailable', refetch: vi.fn() }),
+}))
+vi.mock('@/hooks/useBudgetRemaining', () => ({
+  useBudgetRemaining: () => ({ data: null, loading: false, error: null, refetch: vi.fn() }),
+}))
+vi.mock('@/hooks/useAttentionDismissals', () => ({
+  useAttentionDismissals: () => ({ dismissedIds: new Set<string>(), dismiss: vi.fn() }),
+}))
+
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn(), prefetch: vi.fn() }),
   // #3165: the list toolbar mirrors its state to the URL.

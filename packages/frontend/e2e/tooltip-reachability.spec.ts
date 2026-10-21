@@ -11,7 +11,7 @@
  * (the unit suite). **This is the only assertion in the repo that fails on
  * long content specifically.**
  *
- * ## Why `/agents` and not a `/design-system` demo
+ * ## Why the agent page and not a `/design-system` demo
  *
  * #1924's rule: a showcase would measure whatever the showcase author wrote,
  * not what the product passes. So the label under test has to be one a real
@@ -22,7 +22,9 @@
  * This test used to hover `McpServerName`'s null branch, whose 169-character
  * sentence was the longest label any caller passed. **#2043 deleted that
  * tooltip**: the copy explained an absence, it was essential rather than
- * elaboration, and it belongs as visible text above the agent list now.
+ * elaboration, and it belongs as visible text (above the agent list until
+ * #4209 moved the MCP name to the agent detail page; beside the label there
+ * now).
  *
  * The primitive's width contract did not change with it, so the test moves to
  * the longest label the product **can** pass rather than disappearing. That is
@@ -84,6 +86,7 @@ import {
   dismissMobileSidebar,
   mockHavenApi,
   seedAuthenticatedSession,
+  serveAgentDetailResponses,
   testAgent,
   unexpectedBrowserErrors,
 } from './fixtures/haven-api'
@@ -151,7 +154,12 @@ test.describe('Tooltip width and keyboard reach (#2038)', () => {
   }) => {
     const browserErrors = collectBrowserErrors(page)
 
-    // Registered after `mockHavenApi`, so this handler wins for `/agents`.
+    // The agent page's own reads (passport, activity, delegate balance,
+    // company details), so the browser-error census below stays empty.
+    await serveAgentDetailResponses(page, testAgent.id)
+    // Registered after both, so this handler wins for `/agents` —
+    // the list read the agent page resolves its agent from (#4209 moved the
+    // MCP name off the `/agents` card and onto that page).
     await page.route('**/api/agents', async (route) => {
       await route.fulfill({
         status: 200,
@@ -163,8 +171,8 @@ test.describe('Tooltip width and keyboard reach (#2038)', () => {
     })
 
     await page.setViewportSize({ width: NARROW_WIDTHS[0], height: 800 })
-    await page.goto('/agents')
-    const trigger = page.getByText(MAX_LENGTH_SERVER_NAME).first()
+    await page.goto(`/agents/${testAgent.id}`)
+    const trigger = page.getByTestId('mcp-server-name-row').getByText(MAX_LENGTH_SERVER_NAME)
     await expect(trigger).toBeVisible()
 
     for (const width of NARROW_WIDTHS) {

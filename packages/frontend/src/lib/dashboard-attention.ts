@@ -127,7 +127,7 @@ export const DISMISSIBLE_ATTENTION_KINDS: ReadonlySet<AttentionItemKind> = new S
 export { hasPositiveCap }
 
 /** A usable budget: a live delegation budget with a cap above zero, or an open received sub-budget. */
-function hasUsableBudget(agent: DashboardAgent): boolean {
+export function hasUsableBudget(agent: DashboardAgent): boolean {
   return (
     (agent.budgets ?? []).some((budget) => hasPositiveCap(budget.budgetAtomic)) ||
     receivedBudgetLine(agent.receivedSubBudgets) !== null

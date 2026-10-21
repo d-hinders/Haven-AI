@@ -12,8 +12,8 @@
  * `table-layout: fixed` and one shared `colgroup` (`OFFER_COLUMN_LAYOUT`,
  * `OffersTable.tsx`), and the colSpan cell lost its horizontal padding — so
  * the nested table spans the row's full width and its columns are decided by
- * the same declaration as the outer table's. A measure spec (the
- * `agent-card-fit-measure.spec.ts` pattern) is the honest gate for that: a
+ * the same declaration as the outer table's. A measure spec (the pattern
+ * `agent-card-fit-measure.spec.ts` set, retired with its card in #4209) is the honest gate for that: a
  * full-page screenshot could pass with the misalignment in it (and the
  * pixel budget would absorb a 1px column shift), while these assertions read
  * the geometry itself. Rows stay in the DOM while the disclosure is

@@ -1,6 +1,6 @@
 'use client'
 
-import { Archive, CircleAlert, Clock, LoaderCircle, Network, Plus, Tag } from 'lucide-react'
+import { Archive, CircleAlert, Clock, EllipsisVertical, LoaderCircle, Plus } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { useCallback, useMemo, useState } from 'react'
 import { useAuth } from '@/context/AuthContext'
@@ -8,6 +8,10 @@ import { setupIdFromSearch } from '@/lib/discovery'
 import { DEFAULT_CHAIN_ID } from '@/lib/chains'
 import { useAgentPanelState } from '@/hooks/useAgentPanelState'
 import { useAgentListFilters } from '@/hooks/useAgentListFilters'
+import { useAttentionDismissals } from '@/hooks/useAttentionDismissals'
+import { useBudgetRemaining } from '@/hooks/useBudgetRemaining'
+import { useDashboardOverview } from '@/hooks/useDashboardOverview'
+import { computeAttentionItems } from '@/lib/dashboard-attention'
 import {
   ARCHIVED_FACET,
   BUILT_IN_FACETS,
@@ -24,16 +28,26 @@ import { AgentOrganizationTree } from './agent-panel/AgentOrganizationTree'
 import ConnectAgentModal from './ConnectAgentModal'
 import LabelsManagerModal from './LabelsManagerModal'
 import OrganizationsManagerModal from './OrganizationsManagerModal'
-import { AgentCard } from './agent-panel/AgentCard'
-import { MCP_NOT_RECORDED_NOTE, hasUnrecordedMcpServerName } from './agent-panel/McpServerName'
-import { BotIcon } from './agent-panel/agent-display'
+import { AgentCard, type AgentCardDashboard } from './agent-panel/AgentCard'
 import { isHalfRevoked } from '@/lib/half-revoked'
 import { Button } from './ui/Button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from './ui/DropdownMenu'
+import { PageHeader } from './ui/PageHeader'
+import { BotIcon } from './agent-panel/agent-display'
 import { EmptyState } from './ui/EmptyState'
 import { Skeleton } from './ui/Skeleton'
 import { InlineAgentSetup } from './connect-agent/InlineAgentSetup'
 
 const agentNoun: ListNoun = { one: 'agent', other: 'agents' }
+
+const AGENTS_TITLE = 'Agents'
+const AGENTS_SUBTITLE =
+  'Agents pay for things up to a budget you set. You approve each budget yourself, and anything over it is refused on-chain.'
 
 /**
  * #3542's guarantee, carried from the "Removed" toggle it lived on (#4113):
@@ -46,7 +60,7 @@ export function hiddenActiveBudgetTitle(n: number): string {
 }
 
 /**
- * The agents panel's shell: header, list layout, empty states, and modals.
+ * The agents page: its header, list layout, empty states, and modals.
  *
  * All state and orchestration live in `useAgentPanelState` (#989) so the flow
  * logic is testable without rendering the panel; the card pieces live in
@@ -59,7 +73,6 @@ export default function AgentPanel() {
     agents,
     loading,
     error: agentsError,
-    visibleAgents,
     removedAgents,
     finalizingAgent,
     finalizeTimedOut,
@@ -187,14 +200,59 @@ export default function AgentPanel() {
   const showInlineSetup =
     panel.inlineSetupLatched || (panel.inlineSetupEligible && !activeResumeSetupId)
 
+  // #4209: the cards draw an agent's budget, badge and last payment exactly as
+  // the dashboard row does, from the same two reads (`GET /agents` carries no
+  // used or remaining figures) — joined by agent id, as `AccountDetailClient`
+  // does. Dismissals are read only (no overview accounts passed), so this
+  // page never runs the dashboard's one-time legacy-key migration.
+  const { data: overview, loading: overviewLoading } = useDashboardOverview()
+  const { data: budgetRemaining, loading: budgetRemainingLoading } = useBudgetRemaining()
+  const { dismissedIds } = useAttentionDismissals()
+  const accountNames = useMemo(
+    () => Object.fromEntries(panel.accounts.map((account) => [account.id, account.name])),
+    [panel.accounts],
+  )
+  const attentionItems = useMemo(
+    () =>
+      overview
+        ? computeAttentionItems({
+            overview,
+            budgetRemaining: budgetRemaining ?? null,
+            accountNames,
+            dismissedIds: new Set(dismissedIds),
+          })
+        : [],
+    [overview, budgetRemaining, accountNames, dismissedIds],
+  )
+  const overviewAgentsById = useMemo(
+    () => new Map((overview?.agents ?? []).map((agent) => [agent.id, agent])),
+    [overview],
+  )
+  // Settled = the first read finished, either way. A failed overview leaves
+  // every card's usage unknown (an em dash), never "No budget"; the budget
+  // reads settle the same way the dashboard's `budgetRemainingReady` does.
+  const dashboardReady =
+    (overview !== null || !overviewLoading) && (budgetRemaining !== null || !budgetRemainingLoading)
+  const nowMs = Date.now()
+  const dashboardFor = (agentId: string): AgentCardDashboard => ({
+    ready: dashboardReady,
+    agent: overviewAgentsById.get(agentId) ?? null,
+    budgetRemaining: budgetRemaining ?? null,
+    attentionItems,
+    nowMs,
+  })
+
   if (!accountAddress) {
-  
-  return (
-      <EmptyState
-        icon={<BotIcon size={20} />}
-        title="Create a Haven account to manage agents"
-        body="Agents need a Haven account before they can receive a credential and rules."
-      />
+    // No Connect agent here: there is no account to connect one to.
+    return (
+      <div>
+        <PageHeader title={AGENTS_TITLE} subtitle={AGENTS_SUBTITLE} />
+        <EmptyState
+          icon={<BotIcon size={20} />}
+          title="Create a Haven account to manage agents"
+          body="Agents need a Haven account before they can receive a credential and rules."
+        />
+      </div>
     )
   }
 
@@ -217,57 +275,48 @@ export default function AgentPanel() {
         </div>
       )}
 
-      {/* Header */}
-      {/* #3164 review: this row WRAPS. Adding the header's Organizations
-          button (#3164) grew the action cluster (Labels · Organizations ·
-          Connect agent) to ~335px, which no longer shares one
-          `justify-between` line with the count chip inside the ~345px
-          content box a 393px viewport leaves — measured as
-          `contentScrollWidth` 435 vs 393 on the `navigation.mobile` gate
-          (42px overflow, deterministic). The card action rows were NOT the
-          offender: the widest of them measures ~255px here and fits with
-          room to spare. `flex-wrap` drops the cluster to its own line below
-          the chip instead of overflowing, and the cluster itself wraps at
-          the narrowest supported width (320) for the same reason — its
-          natural width exceeds a 320px screen's content box. Desktop is
-          untouched: the two clusters fit one line there with hundreds of px
-          to spare, so nothing ever wraps at `lg` and up. `gap-y-2` spaces
-          the wrapped lines; without it the cluster sits flush under the
-          chip. */}
-      <div className="flex flex-wrap items-center justify-between gap-y-2 mb-4">
-        {/* #4065 (owner decision 2026-10-19): no "Agents 0" chip and no
-            header Connect agent while the inline flow shows — the flow IS the
-            way to connect, and a second entry would open the modal over it.
-            Labels and Organizations stay. */}
-        {!showInlineSetup && (
-          <div className="flex items-center gap-1">
-            <div className="px-3 py-1.5 rounded-lg text-xs font-medium bg-[var(--v2-surface-2)] text-[var(--v2-ink)]">
-              Agents
-              <span className="ml-1 text-[var(--v2-ink-3)]">
-                {visibleAgents.length}
-              </span>
-            </div>
+      {/* #4209: the page header lives here, not in the route, so the state
+          it reads stays in `useAgentPanelState`. Like Accounts: the primary
+          action level with the title, and the occasional management tasks
+          (Labels, Organizations) in a ⋯ menu beside it — the same
+          `EllipsisVertical` trigger the agent page uses. No count chip: the
+          list summary line owns the count.
+
+          #4065 (owner decision 2026-10-19): no Connect agent while the inline
+          first-agent flow shows — the flow IS the way to connect, and a
+          second entry would open the modal over it. The ⋯ menu stays. */}
+      <PageHeader
+        title={AGENTS_TITLE}
+        subtitle={AGENTS_SUBTITLE}
+        actions={
+          <div className="flex items-center gap-2">
+            {!showInlineSetup && (
+              <Button onClick={() => panel.setConnectAgentOpen(true)}>
+                <Icon icon={Plus} className="h-4 w-4" />
+                Connect agent
+              </Button>
+            )}
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                aria-label="More agent actions"
+                className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md border border-[var(--v2-border)] bg-[var(--v2-bg)] text-[var(--v2-ink-2)] transition-colors hover:border-[var(--v2-border-strong)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
+              >
+                <Icon icon={EllipsisVertical} className="h-4 w-4" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent>
+                <DropdownMenuItem onSelect={() => panel.setLabelsManagerOpen(true)}>
+                  Labels
+                </DropdownMenuItem>
+                {/* #3164: the organization manager — create/rename/move/delete.
+                    The tree above the list appears once one exists. */}
+                <DropdownMenuItem onSelect={() => panel.setOrganizationsManagerOpen(true)}>
+                  Organizations
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
-        )}
-        <div className="flex flex-wrap items-center gap-2">
-          <Button onClick={() => panel.setLabelsManagerOpen(true)} size="sm" variant="tertiary">
-            <Icon icon={Tag} className="h-3.5 w-3.5" />
-            Labels
-          </Button>
-          {/* #3164: the organization manager — create/rename/move/delete. The
-              tree above the list appears once at least one organization exists. */}
-          <Button onClick={() => panel.setOrganizationsManagerOpen(true)} size="sm" variant="tertiary">
-            <Icon icon={Network} className="h-3.5 w-3.5" />
-            Organizations
-          </Button>
-          {!showInlineSetup && (
-            <Button onClick={() => panel.setConnectAgentOpen(true)} size="sm">
-              <Icon icon={Plus} className="h-3.5 w-3.5" />
-              Connect agent
-            </Button>
-          )}
-        </div>
-      </div>
+        }
+      />
 
       {showInlineSetup ? (
         // #4065: the existing connect flow, inline, for a user with no agents
@@ -363,7 +412,8 @@ export default function AgentPanel() {
                   className="bg-[var(--v2-bg)] border border-[var(--v2-border)] rounded-[10px] p-5"
                 >
                   <div className="flex items-center gap-3 mb-4">
-                    <Skeleton className="w-9 h-9 rounded-xl" />
+                    {/* The card's round `Monogram` (#4209). */}
+                    <Skeleton className="w-9 h-9 rounded-full" />
                     <div className="space-y-2">
                       <Skeleton variant="text" className="h-3 w-32" />
                       <Skeleton variant="text" className="h-2 w-48" />
@@ -434,27 +484,6 @@ export default function AgentPanel() {
           {/* Agent list */}
           {agents.length > 0 && (
             <div className="space-y-4">
-              {/*
-                #2043: the `not recorded` explanation, ONCE, as visible text, and
-                only when a card on screen actually says `not recorded`.
-
-                #2017's shape (PR #2039), matched rather than re-invented — see
-                `MCP_NOT_RECORDED_NOTE` for why this copy cannot live in the
-                `Tooltip` it came from, and why the OTHER tooltip in the same
-                component stays.
-
-                The predicate reads the cards that are RENDERED, not every agent
-                Haven holds: the FILTERED list (#3165), so a filter that hides
-                the only `not recorded` card hides the note — and so do
-                archived agents while "Archived: Hidden" (#4113); "Shown"
-                reveals both together, which is the honest pairing.
-              */}
-              {hasUnrecordedMcpServerName(listFilters.filtered) && (
-                <p className="text-xs leading-relaxed text-[var(--v2-ink-3)]">
-                  {MCP_NOT_RECORDED_NOTE}
-                </p>
-              )}
-
               {/* #4113: the pattern's no-match state when a filter emptied the
                   list. An untouched list can be empty too — every agent
                   archived — and Clear filters would change nothing there, so
@@ -478,7 +507,10 @@ export default function AgentPanel() {
                 ))}
 
               {listFilters.filtered.length > 0 && (
-                <div className="grid items-start gap-4 lg:grid-cols-2">
+                // #4209: no `items-start` — cards stretch to the tallest in
+                // their row, so the footers (`mt-auto`) line up, as on
+                // `/accounts`. Reverses #2237's choice (owner, 2026-10-21).
+                <div data-testid="agent-card-grid" className="grid gap-4 lg:grid-cols-2">
                   {listFilters.filtered.map((agent) => {
                     const agentChainId = agent.account_chain_id ?? DEFAULT_CHAIN_ID
 
@@ -486,6 +518,8 @@ export default function AgentPanel() {
                       <AgentCard
                         key={agent.id}
                         agent={agent}
+                        dashboard={dashboardFor(agent.id)}
+                        showAccountName={panel.accounts.length > 1}
                         onPause={panel.handlePause}
                         onResume={panel.handleResume}
                         onRevokeCredential={panel.revokeAgentCredential}

@@ -423,11 +423,12 @@ const ROUTES: ProductRoute[] = [
    * detail page — the screen the demo lingers on and the composition this
    * issue tunes. See the header for why these two ship mobile-only.
    *
-   * `/agents` needs no `frozenRelativeTime` by measurement: the e2e fixture
-   * agent carries no `mcp_last_seen_at`, so `formatAgentLastActivity` renders
-   * the STATIC string "No activity yet" — there is no relative timestamp to
-   * pin, and the freeze stays on as cheap insurance for anything else on the
-   * shell that might read the clock.
+   * `/agents` reads the clock since #4209: the card's footer is "Last paid
+   * <time ago>" off the dashboard overview's `stats.lastPaymentAt`, and its
+   * budget caption says when the period refills. Both render against the
+   * frozen clock here, which is what makes the baseline stable; the fixture's
+   * payment sits AFTER `FROZEN_NOW`, so `timeAgo` reads its "just now" floor
+   * rather than a value that ages.
    *
    * `/agents/agent-research` renders its pins inside the fixture-seeded
    * content: `Created` is `timeAgo` off the agent's fixed `created_at`

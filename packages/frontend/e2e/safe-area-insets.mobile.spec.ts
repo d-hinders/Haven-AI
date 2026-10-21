@@ -102,11 +102,16 @@ const VIEWPORT = { width: 390, height: 844 }
  * 390x844 again with the same two rows. So `/dashboard` and `/agents` carry
  * the geometry, and `/transactions` carries the not-overflowing half of the
  * readback — the day its fixture grows past the viewport, this row goes red
- * and is promoted back.
+ * and is promoted back. `/agents` stopped overflowing with #4209: its header
+ * actions collapsed into Connect agent + ⋯ and the card became the compact
+ * dashboard-row shape, so the fixture's one agent fits 390x844 again. It now
+ * carries the not-overflowing half with `/transactions`; `readyTestId` makes
+ * that "fits" a claim about a page whose card has RENDERED (its header alone
+ * would pass the 30-character content wait), not about one still loading.
  */
 const ROUTES = [
   { path: '/dashboard', overflows: true },
-  { path: '/agents', overflows: true },
+  { path: '/agents', overflows: false, readyTestId: 'agent-card' },
   { path: '/transactions', overflows: false },
 ] as const
 
@@ -305,7 +310,8 @@ test.describe('safe-area insets — nothing under the notch or the home indicato
     expect(await page.evaluate(() => navigator.maxTouchPoints)).toBeGreaterThan(0)
   })
 
-  for (const { path: route, overflows } of ROUTES) {
+  for (const { path: route, overflows, ...rest } of ROUTES) {
+    const readyTestId = 'readyTestId' in rest ? rest.readyTestId : undefined
     test(`${route}: the shell reserves both bands and puts no control in them`, async ({
       page,
     }) => {
@@ -392,6 +398,7 @@ test.describe('safe-area insets — nothing under the notch or the home indicato
           { message: `${route} must render content into #main-content`, timeout: 15_000 },
         )
         .toBeGreaterThan(30)
+      if (readyTestId) await expect(page.getByTestId(readyTestId).first()).toBeVisible({ timeout: 15_000 })
 
       const atEnd = await controlsUnderIndicatorAtScrollEnd(page, INSET_BOTTOM)
       expect(atEnd.scrolled, 'the authenticated shell must expose #main-content').toBe(true)

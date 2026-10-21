@@ -73,7 +73,7 @@
 // closing keywords to pull-request descriptions and commit messages — and no
 // automation in this repository closes an issue. Every `gh issue` call under
 // `.github/`, `scripts/`, `.claude/` and `.agents/` is `list`, `edit`, `create`
-// or `comment` (docs-audit, promotion-digest, db-concurrency-proof, qa-dev);
+// or `comment` (docs-audit, db-concurrency-proof, qa-dev);
 // there is no `gh issue close`, no `issues.update`, and no `actions/github-script`
 // anywhere in the repository. The six workflows holding `issues: write` use it
 // to create or comment. Branch names are not parsed by anything.

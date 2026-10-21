@@ -59,10 +59,8 @@ Pieces:
 > live step, so an OPEN issue can already be implemented and on `dev` (#2276). What's actually in **prod** is
 > tracked separately (issue state is not overloaded with promotion state): each
 > `dev → main` promotion cuts a **prod GitHub Release** (`.github/workflows/release.yml`)
-> with auto-generated notes, and the **pending-promotion digest**
-> (`.github/workflows/promotion-digest.yml`) keeps a single pinned "📦 Pending
-> promotion" issue listing what's on `dev` but not yet in prod — refreshed on
-> every merge to `dev`, on every promotion, and daily. The `main..dev` compare is the same view on demand. Full details: [`branch-and-release-flow.md`](branch-and-release-flow.md).
+> with auto-generated notes, and what's on `dev` but not yet in prod is the
+> `main...dev` compare. Full details: [`branch-and-release-flow.md`](branch-and-release-flow.md).
 
 ## Quickstart
 
@@ -401,8 +399,8 @@ Without this, `ship-next` can open PRs but cannot auto-merge them.
 1. **Settings → General → Default branch: set to `dev`.** This is what makes
    `Closes #<n>` close issues on the **dev-merge** (closed = implemented). `main`
    stays the protected prod branch (GitFlow-style: prod is a non-default branch).
-   Prod promotion is tracked by the release + pending-promotion-digest workflows,
-   not by issue state.
+   Prod promotion is tracked by the release workflow and the `main...dev`
+   compare, not by issue state.
 2. **Settings → General → Pull Requests:**
    - ☑ **Allow auto-merge** (required, or the auto-merge step is a no-op).
    - ☑ **Automatically delete head branches** (housekeeping).

@@ -31,7 +31,7 @@ covers:
   - packages/frontend/vercel.json
   - packages/frontend/src/lib/__tests__/vercel-ignore-build.test.ts
   - scripts/vercel/**
-last-verified: "2026-10-16"
+last-verified: "2026-10-21"
 ---
 
 > **Re-verified #4192 (2026-10-21, ignore-step tests: event-loop yield and
@@ -1506,3 +1506,18 @@ project owner — collaborators have Viewer access, not env-var write access.
 > override validation and the `money-flow` job's conclusion are unchanged, so
 > the freshness-gate statements above still hold. The rest of this document was
 > not re-read for it, and `last-verified` is not bumped.
+
+> **Re-verified #4216 (2026-10-21 — kit analytics off at boot):**
+> `packages/backend/src/index.ts` is the covered file in this diff, and the
+> change is its import ORDER: `src/telemetry/kit-analytics-off.ts` is now the
+> first import, setting `process.env.DO_NOT_TRACK = '1'` before anything in
+> the process can load `@metamask/smart-accounts-kit` (whose analytics post
+> from the first tracked call and latch once). No route, module list,
+> enforced-module entry, start command, health probe or required environment
+> variable this document describes moved — `PORT`, `DATABASE_URL`, the ops
+> surface and the boot checks are untouched; the only behavioral delta is the
+> absence of an outbound telemetry post. The same module is imported by
+> `vitest.setup.ts` and the kit-reaching `scripts/*.ts`, and the deployed
+> process takes this path (Railway starts `node packages/backend/dist/index.js`).
+> Scope of this note: the one new first import; `last-verified` is bumped to
+> 2026-10-21 for exactly this coverage.

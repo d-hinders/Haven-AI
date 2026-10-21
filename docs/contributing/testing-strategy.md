@@ -14,7 +14,8 @@ covers:
   - scripts/lint-budget-liveness.mjs
   - scripts/lint-budget-liveness-baseline.json
   - packages/backend/db-mock-baseline.json
-last-verified: "2026-09-16"
+  - packages/backend/scripts/record-kit-analytics-connections.mjs
+last-verified: "2026-10-21"
 ---
 
 # Backend testing strategy: the real-database rule
@@ -730,6 +731,25 @@ The 205 orphaned worker schemas are a local catalog-bloat cost (each adds ~37
 tables and ~130 indexes to every `pg_class` scan) that CI's fresh service
 container never pays; pruning them is a developer-database housekeeping matter,
 not a harness change.
+
+## Third-party telemetry: the setup file pins DO_NOT_TRACK (#4216)
+
+`vitest.setup.ts` imports `src/telemetry/kit-analytics-off.ts` as its first
+import, which sets `process.env.DO_NOT_TRACK = '1'` for the whole suite. Why a
+setup-file line and not per-test env: `@metamask/smart-accounts-kit` latches
+its analytics decision once, at the first tracked function call — an opt-out
+that arrives after that latch is inert, and any test may make the first one.
+The mechanism is proven with a real tracked kit call in
+`src/telemetry/__tests__/kit-analytics-off.test.ts`: with a fetch stub
+installed BEFORE the kit is imported (openapi-fetch captures `globalThis.fetch`
+at module evaluation) and `CI`/`DO_NOT_TRACK` deleted (GitHub Actions' `CI=true`
+would otherwise disable the kit by itself), a fresh module graph records 0
+posts to `mm-sdk-analytics.api.cx.metamask.io` with the mechanism and ≥1
+without it. The same recorder shape — committed at
+`packages/backend/scripts/record-kit-analytics-connections.mjs` — can be
+preloaded over the whole suite (`NODE_OPTIONS="--import
+./scripts/record-kit-analytics-connections.mjs"`, with `CI` unset) to confirm
+zero connections across all test files.
 
 ## The ratchet
 

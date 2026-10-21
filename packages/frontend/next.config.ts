@@ -34,6 +34,18 @@ const GENERATING_PHASES = new Set<string>([PHASE_PRODUCTION_BUILD, PHASE_DEVELOP
 
 const nextConfig: NextConfig = {
   output: 'standalone',
+  // #4216: turn @metamask/smart-accounts-kit analytics off in the browser
+  // bundle. Next inlines each `env` entry as a define, so the kit's
+  // `process.env?.DO_NOT_TRACK` read compiles to the literal "1" in the client
+  // chunk — which its `isAnalyticsDisabled()` treats as off — and the runtime
+  // read disappears entirely (checked over `next build` output by
+  // `scripts/check-kit-analytics-define.mjs`; the check fails if the define is
+  // removed). A define needs no operator step on Vercel, sends no global
+  // do-not-track signal to other scripts on the page, and does not depend on
+  // call order.
+  env: {
+    DO_NOT_TRACK: '1',
+  },
   // `@haven_ai/core` is a private workspace package (epic #980, #983). It ships
   // a built `dist`, so Next can resolve it as-is — this entry exists so the
   // dashboard keeps building if core ever exposes untranspiled source, and so

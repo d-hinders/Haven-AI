@@ -1,3 +1,6 @@
+// Third-party analytics off for the whole suite (#4216): the kit latches at
+// its first tracked call, so the opt-out must precede any test importing it.
+import './src/telemetry/kit-analytics-off.js'
 import { applyTestEnvDefaults } from './src/infra/__tests__/helpers/test-env.js'
 import { workerSchemaName } from './src/infra/__tests__/helpers/worker-schema.js'
 

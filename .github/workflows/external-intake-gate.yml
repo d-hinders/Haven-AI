@@ -1,0 +1,93 @@
+name: External intake gate
+
+# A pull request into `dev` cannot merge while it is external, or while it
+# closes an open external issue, until a maintainer accepts that item by
+# removing its `external` label (#4200 part C). External = an author who is
+# neither a maintainer (`author_association` OWNER/MEMBER/COLLABORATOR) nor a
+# Bot; accepted = a maintainer-actor `unlabeled: external` event on the item.
+# Neither is read from the label alone. Decision logic and tests:
+# `scripts/ci/external-intake-gate.mjs`; definitions:
+# `scripts/ci/external-intake.mjs`.
+#
+# ## The incident
+#
+# #4107, 2026-10-21: a vendor pitch (`NONE`) was claimed by a partner pipeline,
+# built and self-merged as PR #4148 (`Closes #4107`) with no review, then
+# reverted in PR #4195. Nothing between a filed issue and a merged PR asked who
+# wrote the issue.
+#
+# ## What passes
+#
+# - A maintainer's or Bot's PR that closes no open, unaccepted external issue.
+# - A DRAFT PR — the check re-runs on `ready_for_review`.
+# - A PR into any branch other than `dev`.
+# - `Refs #n` and plain mentions: only closing keywords and linked references
+#   are gated (the same `fetchCandidates` set as the PR ownership gate).
+# - Closed candidates.
+#
+# ## Why `pull_request_target`, and why that is safe here
+#
+# The PR ownership gate's reasoning, unchanged: the judge must be `dev`'s copy
+# of the script, not the PR's, so the workflow runs from the default branch and
+# its checkout has no `ref:`. `permissions` are read-only, the PR's code is never
+# checked out or executed, and the payload supplies only routing (number, draft,
+# base) — standing is read live through the API. Like that gate, this workflow
+# cannot run on the PR that adds it.
+#
+# `labeled` / `unlabeled` are triggers so accepting the PR itself re-runs the
+# check. Accepting an ISSUE does not re-trigger the PRs that close it; the
+# failure text says to re-run the check or edit the PR.
+#
+# ## Fail closed, and the exit code is the verdict
+#
+# A read that errors fails the check with the error in the log; re-run after a
+# transient error. `shell: bash` + `set -o pipefail` keep exit 1 through `tee`.
+#
+# ## Operator step (owner)
+#
+# Making this REQUIRED is a ruleset change: add "External intake gate" to the
+# *Dev merge* ruleset (22449193), the one ruleset that targets `dev` alone.
+# Not *Dev gate* (18134280): that one targets `main`, where this check always
+# passes. Until then it reports on every PR but does not block. The ruleset inventory in
+# docs/contributing/autonomous-pr-loop.md records the state.
+
+on:
+  pull_request_target:
+    types: [opened, edited, synchronize, reopened, ready_for_review, labeled, unlabeled]
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+# One run per PR at a time: label and body edits land on the same head sha, so
+# without this an earlier red could complete after a later green.
+concurrency:
+  group: external-intake-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  intake:
+    name: External intake gate
+    if: github.repository == 'd-hinders/Haven-AI'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # Default checkout on pull_request_target = the DEFAULT branch (`dev`):
+      # the judge is dev's copy of the script, never the PR's. Do not add
+      # `ref:` here.
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+      - name: Judge the pull request and the issues it would close
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        # The payload is read from the file GitHub provides — never
+        # interpolated. `shell: bash` runs `bash --noprofile --norc -eo
+        # pipefail {0}`, so `| tee` cannot turn exit 1 green.
+        shell: bash
+        run: |
+          set -o pipefail
+          node scripts/ci/external-intake-gate.mjs --event "$GITHUB_EVENT_PATH" | tee -a "$GITHUB_STEP_SUMMARY"

@@ -45,3 +45,13 @@
 - name: "operator-verify"
   color: "d93f0b"
   description: "Issue outlives the merge: an operator step is outstanding — use `Refs #<n>`, not `Closes`"
+
+# Not a surface label: a marker for intake from outside the maintainers (#4200).
+# `.github/workflows/external-intake-label.yml` adds it to an issue or PR whose
+# author is neither a maintainer (OWNER/MEMBER/COLLABORATOR) nor a Bot; a
+# maintainer REMOVING it is the acceptance. It is not the control — the
+# External intake gate check and the agent refusal decide from the author and
+# the events, so a missing label never un-blocks anything.
+- name: "external"
+  color: "e99695"
+  description: "From outside the maintainers — not built or merged until a maintainer removes this label"

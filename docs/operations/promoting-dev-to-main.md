@@ -184,8 +184,9 @@ so this is a rule to point at rather than a question to ask the release runner.
       these at 90 days); the fix is to renew it and re-run that job, never to
       cut another version.
 - [ ] **The prod bar is green.** A promotion PR must satisfy **19** required
-      contexts: the 15 that every PR into `dev` also meets, plus four required on
-      `main` only —
+      contexts: the 15 that every PR into `dev` also meets (a `dev`-only
+      context such as the pending **External intake gate**, #4200, is not
+      among them), plus four required on `main` only —
       - `gate` — refuses anything but `dev` / `hotfix/*`;
       - `qa-freshness` — refuses without a green money-flow run covering the
         promoted money-path code (the item above);

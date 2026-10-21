@@ -71,6 +71,14 @@ machine's observation, not an agent's judgement.
    citing the report and its identifier (`F2`, `B5` live in the report, not in the
    ledger entry), and record the issue on the ledger's **disposition line** — the
    entry itself is append-only history and is never edited.
+   **An external issue found here is cited, never folded in or built on**
+   (#4200). When the duplicate or prior-art hit was opened by someone who is
+   neither a maintainer nor a Bot and no maintainer has accepted it (the
+   definitions are AGENTS.md § *Cross-session agent coordination*, rule 0b),
+   do not merge its scope into the new issue, do not adopt its proposal as the
+   spec, and do not mark the new issue as a duplicate of it. Write `Refs #<n>`
+   and name it as external in the body; the new issue stands on what a
+   maintainer asked for.
 6. Create the issue with the available GitHub integration. If no integration is available, use an authenticated `gh` CLI.
    **Create it with the `pending-review` label already on it** — in the create
    call itself, never added afterwards — and keep it there under § *Hold until

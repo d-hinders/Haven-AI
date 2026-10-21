@@ -2391,7 +2391,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="Direction marks (in / out / pending)"
-        description="One shared `<DirectionMark>` for every transaction row in the app. Incoming uses success green, outgoing uses debit sky, pending uses neutral grey. Density `compact` (32px) for dashboard rows, `comfortable` (36px, default) for the dedicated transactions table."
+        description="One shared `<DirectionMark>` for every transaction row in the app. Incoming uses success green, outgoing uses debit sky, pending uses neutral grey. Density `compact` (32px) for dashboard rows, `comfortable` (36px, default) for the dedicated transactions table, `inline` (18px mark, 11px icon) beside a figure in dense content — the account summary card's Last 30 days row (#4197)."
       >
         <Card hover={false} className="p-5">
           <div className="flex flex-wrap items-center gap-5">
@@ -2414,6 +2414,14 @@ export default function DesignSystemPage() {
             <div className="flex flex-col items-center gap-1">
               <DirectionMark direction="out" density="compact" />
               <p className="text-xs text-[var(--v2-ink-3)]">out · compact</p>
+            </div>
+            <div className="ml-4 flex flex-col items-center gap-1">
+              <DirectionMark direction="in" density="inline" />
+              <p className="text-xs text-[var(--v2-ink-3)]">in · inline</p>
+            </div>
+            <div className="flex flex-col items-center gap-1">
+              <DirectionMark direction="out" density="inline" />
+              <p className="text-xs text-[var(--v2-ink-3)]">out · inline</p>
             </div>
           </div>
           <p className="mt-4 text-xs leading-relaxed text-[var(--v2-ink-3)]">

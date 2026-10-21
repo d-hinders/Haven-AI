@@ -942,19 +942,28 @@ it):
    - **Balance** — one figure in the user's currency.
    - **Holdings** — a header row: the column label on the left and a small
      "Amount" label on the right (#4166, mockup v9); each token row carries a
-     quiet monogram mark and the symbol on the left with its full-precision
-     amount right-aligned under the "Amount" label — never inline after the
-     symbol. One token shows no value (it would repeat the balance); a
-     non-USD display currency shows the rate instead ("1 USDC = 9,50 kr");
-     two or more tokens each show their value. The header row is the summary
-     card's own anatomy — it is not a shared pattern.
-   - **Last 30 days** — Money in and Money out SIDE BY SIDE (#4166, mockup
-     v9), not stacked, so the three columns' contents end at about the same
-     height (the acceptance bar: at 1280 px the columns' content blocks
-     differ by at most 24 px), as two figures in the rolling
-     `[now − 30×24h, now)` window read from the account's transaction feed.
-     When the feed is capped at its explorer window the figures carry the
-     partial-data qualifier instead of claiming completeness (#2882).
+     quiet monogram mark and the symbol on the left with its amount
+     right-aligned under the "Amount" label — never inline after the symbol.
+     The amount shows at most 4 decimals, rounded DOWN by truncating the
+     decimal string (never through floats), keeping the wire's 2-decimal
+     minimum; a non-zero amount under 0.0001 reads "<0.0001"; the served
+     amount (up to 6 decimals) is the figure's tooltip (#4197). One token
+     shows no value (it would repeat the balance); a non-USD display currency
+     shows the rate instead ("1 USDC = 9,50 kr"); two or more tokens each
+     show their value. The header row is the summary card's own anatomy — it
+     is not a shared pattern.
+   - **Last 30 days** — ONE row under the title (#4197): an inline in-arrow
+     and the Money-in figure, then an out-arrow and the Money-out figure
+     (replacing #4166's label row, so the column is no taller than Balance
+     and Holdings — the acceptance bar stands: at 1280 px the three columns'
+     content blocks differ by at most 24 px). Each figure carries sr-only
+     text ("Money in" / "Money out") before the amount — a screen reader
+     hears "Money in ≈ $19.99" — and the arrow's icon carries the tooltip
+     with the same words. At 375px the pairs fit on one line or wrap
+     cleanly. The figures come from the rolling `[now − 30×24h, now)` window
+     read from the account's transaction feed. When the feed is capped at
+     its explorer window the figures carry the partial-data qualifier
+     instead of claiming completeness (#2882).
 3. One tab row, owned by the page's `?tab=` (Activity default, Agents,
    Security & details). Only the Agents tab carries a count; Security &
    details carries a warning dot when only one signer can approve.

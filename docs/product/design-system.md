@@ -1622,6 +1622,24 @@ into one "×N" row; a full ledger needs one row per transaction, and gets it:
   separation (`divide-y` on the list), so a day still reads stronger than a row. Both
   ledgers draw it: the account page's Activity tab and the dashboard's Activity card.
 
+### Direction marks — `DirectionMark` ([#4197](https://github.com/d-hinders/Haven-AI/issues/4197))
+
+One shared `<DirectionMark>` for every in/out/pending direction in the app: incoming uses
+success green, outgoing uses debit sky, pending uses neutral grey. Three densities:
+
+- `comfortable` (default): 36px mark, 16px icon — the dedicated `/transactions` table.
+- `compact`: 32px mark, 14px icon — dashboard rows, on the same rhythm as agent rows.
+- `inline`: 18px mark, 11px icon — small enough to sit BESIDE a figure in dense
+  content; the account summary card's Last 30 days row (an in-arrow and the Money-in
+  figure, then an out-arrow and the Money-out figure) is the first use.
+
+The mark is always `aria-hidden`. The accessible name is the CALLER's job: sr-only text
+before the figure ("Money in" / "Money out" on the account page), so a screen reader
+hears "Money in ≈ $19.99" when the mark applies. A tooltip belongs on the mark, through
+`ui/Tooltip` — never around the figure: `Amount` already draws the "≈" with its own
+`title`, and two tooltips would stack. Don't hand-draw the icon or inline a copy of the
+markup; pick a density, and add a new direction state to the component itself.
+
 ### Cards (`Card`)
 
 `bg-white border border-[var(--v2-border)] rounded-[10px] shadow-card`. Padding by use: `p-7` standard, `p-5` compact, `p-7 md:p-10` hero‑adjacent.
@@ -2099,6 +2117,8 @@ Reachability is the SYMPTOM, not the test. A tooltip the primitive can make reac
 A standalone trigger takes the same `focus-visible` ring as every other focusable control (`ring-2` + `ring-brand/80`) — this primitive is what made it focusable, so a bare browser outline beside `Table`'s and `Sidebar`'s rings on the same page would be its own defect. A touch also suppresses the mouse path for one second, not forever: browsers emit compatibility `mouseenter` shortly after a tap, which otherwise reopened a bubble the tap had just closed, but a permanent latch would kill hover on a touchscreen laptop after one incidental tap.
 
 **Width.** The bubble wraps inside `max-w-[min(20rem,calc(100vw-1rem))]` and is clamped back inside the viewport with an 8px gutter after layout. It was `whitespace-nowrap` with no cap until #2038: a 169-character label rendered 988px wide on a 320px screen. No pixel gate could see it, because a tooltip that is not open is in no screenshot.
+
+**Named exception — icon-only direction figures (#4197, owner decision 2026-10-21).** The account summary card's Last 30 days row carries "Money in" / "Money out" ONLY on the direction icon's tooltip — by the rule above, that would be barred. The owner chose icon-only there deliberately, and it is recorded as the standing exception: the meaning is carried four ways (the arrow's direction, its in/out colour, the tooltip, and sr-only text before each figure), the row is a two-figure summary rather than an instruction the user must act on, and the words sit one tab stop away on the icon trigger. It is an exception to the essential-information bar, not a licence: essential instructions and money/risk copy still never live only in a tooltip.
 
 ### List controls — `ListToolbar`, `FacetMenu`, `PeriodPicker` ([#4110](https://github.com/d-hinders/Haven-AI/issues/4110))
 

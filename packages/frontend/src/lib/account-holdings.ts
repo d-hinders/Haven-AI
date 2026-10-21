@@ -12,6 +12,13 @@
  *   that the balance does not already say.
  * - Two or more tokens each show their value.
  *
+ * **SUPERSEDED 2026-10-21 by #4197 (display only).** The Holdings amount is
+ * no longer rendered at full precision: it shows at most 4 decimals, rounded
+ * down by truncating the decimal string (`holdingDisplayAmount`), with the
+ * served amount carried in the figure's tooltip. The rule below still
+ * describes what the WIRE carries — the `amount` field stays the exact
+ * `formatted` string; only the display changed.
+ *
  * The freshness markers (#3295) are NOT decided here: the caller keeps
  * rendering `BalanceFreshnessIndicator` beside whatever these helpers
  * produce, exactly as the old token table did.
@@ -99,4 +106,29 @@ export function holdingRows(
 export function holdingRateLine(row: HoldingRow, currency: DisplayCurrency): string | null {
   if (row.rate == null) return null
   return `1 ${row.symbol} = ${formatFiat(row.rate, currency)}`
+}
+
+/**
+ * The Holdings figure as RENDERED (#4197): at most 4 decimals, rounded down
+ * by TRUNCATING THE DECIMAL STRING — never through floats, which land
+ * `0.57` at `0.5699` via `Math.floor(parseFloat('0.57') * 1e4) / 1e4`. The
+ * wire's 2-decimal minimum ("42.00") is kept as served; only a longer
+ * fraction is cut. A non-zero amount under 0.0001 reads "<0.0001", never
+ * "0.0000" — and a zero read renders as served, since "<0.0001" would claim
+ * a hidden remainder a zero does not have. The caller carries `row.amount`
+ * (the served string, up to 6 decimals) in the figure's tooltip.
+ */
+export function holdingDisplayAmount(formatted: string): string {
+  const dot = formatted.indexOf('.')
+  if (dot === -1) return formatted
+  const intPart = formatted.slice(0, dot)
+  const frac = formatted.slice(dot + 1)
+  if (!/[1-9]/.test(intPart) && !/[1-9]/.test(frac)) return formatted
+  const intIsZero = /^0+$/.test(intPart)
+  if (intIsZero && /^0{4}/.test(frac)) return '<0.0001'
+  if (frac.length <= 4) return formatted
+  // Trailing zeros the truncation exposes are trimmed back to the wire's
+  // 2-decimal minimum — the same shape `formatTokenValue` serves.
+  const cut = frac.slice(0, 4).replace(/0+$/, '').padEnd(2, '0')
+  return `${intPart}.${cut}`
 }

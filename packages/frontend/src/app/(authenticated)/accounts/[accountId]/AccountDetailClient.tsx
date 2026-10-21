@@ -16,12 +16,16 @@
  * - **Summary card.** Three columns in one card, stacking on a phone:
  *   Balance (one figure), Holdings (a header row — "Holdings" left, a small
  *   "Amount" label right — with each token's mark and symbol on the left and
- *   its full-precision amount right-aligned; one token shows no value, a
- *   non-USD display currency shows the rate, two or more show values —
- *   `lib/account-holdings.ts` owns those rules), and Last 30 days (Money in
- *   and Money out side by side — `hooks/useAccountMoneyFlow.ts`). The
- *   side-by-side figures and the right-aligned amounts are mockup v9
- *   (#4166): the three columns' contents then end at about the same height.
+ *   its amount right-aligned at MOST 4 decimals, rounded down by string
+ *   truncation, the served amount in the figure's tooltip (#4197); one token
+ *   shows no value, a non-USD display currency shows the rate, two or more
+ *   show values — `lib/account-holdings.ts` owns those rules), and Last 30
+ *   days (ONE row under the title (#4197): an inline in-arrow and the Money-in
+ *   figure, then an out-arrow and the Money-out figure — each figure named by
+ *   sr-only text and its arrow's tooltip — `hooks/useAccountMoneyFlow.ts`).
+ *   The right-aligned amounts are mockup v9 (#4166); the one-row direction
+ *   figures replace #4166's label row so the columns end at about the same
+ *   height.
  * - **Agents tab.** Every active agent drawn with #4096's shared `AgentRow`
  *   from the same dashboard overview the dashboard reads (filtered by
  *   `accountId`), plus one budget-snapshot summary line
@@ -98,6 +102,7 @@ import {
   AgentRow,
   Amount,
   BalanceFreshnessIndicator,
+  DirectionMark,
   ExternalDetailsLink,
 } from '@/components/haven'
 import { getExplorerUrlOrNull, resolveChainOrNull, DEFAULT_CHAIN_ID } from '@/lib/chains'
@@ -106,7 +111,7 @@ import { getExplorerUrlOrNull, resolveChainOrNull, DEFAULT_CHAIN_ID } from '@/li
 // rendered `13 000,50 kr` for the same figure.
 import { formatFiat, formatLongDate, truncate, timeAgo } from '@/lib/format'
 import { isTestnetChain } from '@/lib/marketplace'
-import { holdingRows, holdingRateLine } from '@/lib/account-holdings'
+import { holdingDisplayAmount, holdingRows, holdingRateLine } from '@/lib/account-holdings'
 import { agentSpendSummaryLine } from '@/lib/agent-spend-summary'
 import { computeAttentionItems } from '@/lib/dashboard-attention'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
@@ -483,9 +488,12 @@ export default function AccountDetailClient() {
           {/* Holdings — the token rules live in lib/account-holdings.ts. The
               mockup-v9 anatomy (#4166): "Holdings" on the left of the header
               row with a small "Amount" column label on the right, and each
-              token's full-precision amount right-aligned under it — the
-              amount no longer runs inline after the symbol. The mark is a
-              quiet monogram disc (the token's initial), not a brand logo. */}
+              token's amount right-aligned under it — the amount no longer
+              runs inline after the symbol. #4197: the amount renders at most
+              4 decimals, rounded DOWN by string truncation
+              (`holdingDisplayAmount`), with the served amount (up to 6
+              decimals) in the figure's title. The mark is a quiet monogram
+              disc (the token's initial), not a brand logo. */}
           <section aria-label="Holdings" className="p-5 sm:p-6">
             <div className="flex items-baseline justify-between">
               <p className="text-sm font-medium text-[var(--v2-ink-2)]">Holdings</p>
@@ -517,7 +525,12 @@ export default function AccountDetailClient() {
                           </span>
                         </span>
                         <span className="font-mono text-sm text-[var(--v2-ink)] v2-tabular">
-                          {row.amount}
+                          {/* #4197: at most 4 decimals, rounded down by
+                              string truncation; the title carries the
+                              amount AS SERVED (up to 6 decimals). The title
+                              sits on its own inner span so it does not
+                              bleed onto the freshness marker beside it. */}
+                          <span title={row.amount}>{holdingDisplayAmount(row.amount)}</span>
                           {/* #3295: this token's read failed — the amount is
                               the last-known balance, and the row says how old
                               it is. Never an unmarked figure. */}
@@ -548,10 +561,14 @@ export default function AccountDetailClient() {
             )}
           </section>
 
-          {/* Last 30 days — Money in and Money out SIDE BY SIDE (#4166,
-              mockup v9), not stacked: the card's three columns then end at
-              about the same height instead of the figures hanging below the
-              label in one long column. */}
+          {/* Last 30 days — ONE row under the title (#4197): an inline
+              in-arrow and the Money-in figure, then an out-arrow and the
+              Money-out figure, replacing #4166's label row so the column is
+              no taller than Balance and Holdings. The mark is `aria-hidden`;
+              each figure is named by sr-only text BEFORE the amount (a
+              screen reader hears "Money in ≈ $19.99"), and the tooltip lives
+              on the ICON — not around `Amount`, whose "≈" already draws its
+              own title. The two focusable icon triggers are accepted. */}
           <section aria-label="Last 30 days" className="p-5 sm:p-6">
             <p className="text-sm font-medium text-[var(--v2-ink-2)]">Last 30 days</p>
             {moneyFlow.loading ? (
@@ -572,19 +589,21 @@ export default function AccountDetailClient() {
                 </Button>
               </div>
             ) : (
-              <div className="mt-2 grid grid-cols-2 gap-4">
-                <div>
-                  <p className="text-xs text-[var(--v2-ink-3)]">Money in</p>
-                  <p className="mt-0.5">
-                    <Amount amount={moneyFlow.moneyIn} currency={currency} approx={moneyFlow.approxIn} />
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs text-[var(--v2-ink-3)]">Money out</p>
-                  <p className="mt-0.5">
-                    <Amount amount={moneyFlow.moneyOut} currency={currency} approx={moneyFlow.approxOut} />
-                  </p>
-                </div>
+              <div className="mt-2 flex flex-wrap items-center gap-x-5 gap-y-1">
+                <span className="flex items-center gap-1.5">
+                  <Tooltip label="Money in">
+                    <DirectionMark direction="in" density="inline" />
+                  </Tooltip>
+                  <span className="sr-only">Money in</span>
+                  <Amount amount={moneyFlow.moneyIn} currency={currency} approx={moneyFlow.approxIn} />
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <Tooltip label="Money out">
+                    <DirectionMark direction="out" density="inline" />
+                  </Tooltip>
+                  <span className="sr-only">Money out</span>
+                  <Amount amount={moneyFlow.moneyOut} currency={currency} approx={moneyFlow.approxOut} />
+                </span>
               </div>
             )}
             {/* #4165: rows the totals could not value are said in words,

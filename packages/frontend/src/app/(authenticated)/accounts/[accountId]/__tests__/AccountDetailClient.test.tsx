@@ -354,19 +354,132 @@ describe('AccountDetailClient', () => {
       expect(within(headerRow as HTMLElement).getByText('Amount')).toBeInTheDocument()
       // The token amount is its own right-aligned cell in a justified row —
       // not inline text after the symbol ("USDC 8.225255", the old shape).
+      // #4197: it renders at most 4 decimals (string truncation) and carries
+      // the served amount in its title; the mono cell is the outer span.
       const amount = within(section).getByText('42.00')
-      expect(amount).toHaveClass('font-mono')
+      expect(amount).toHaveAttribute('title', '42.00')
+      expect(amount.parentElement).toHaveClass('font-mono')
       const row = amount.closest('div')
       expect(row).toHaveClass('justify-between')
       expect(within(row as HTMLElement).getByText('USDC')).toBeInTheDocument()
     })
 
-    it('Money in and Money out sit side by side in a two-column grid', () => {
+    it('Money in and Money out sit on ONE row beside their direction icons (#4197)', () => {
       render(<AccountDetailClient />)
       const section = screen.getByRole('region', { name: 'Last 30 days' })
-      const grid = within(section).getByText('Money in').closest('.grid')
-      expect(grid).not.toBeNull()
-      expect(grid).toHaveClass('grid-cols-2')
+      // The two pairs share a single wrapping row — #4166's two-column grid
+      // and its label row are gone. The sr-only name's PARENT is its pair.
+      const inPair = within(section).getByText('Money in').parentElement
+      const outPair = within(section).getByText('Money out').parentElement
+      expect(inPair).not.toBeNull()
+      expect(outPair).not.toBeNull()
+      expect(inPair!.parentElement).toBe(outPair!.parentElement)
+      expect(inPair!.parentElement).toHaveClass('flex-wrap')
+    })
+
+    describe('the summary card follow-up (#4197)', () => {
+      it('each Last 30 days figure is named by sr-only text before the amount, beside a VISIBLE arrow', () => {
+        render(<AccountDetailClient />)
+        const section = screen.getByRole('region', { name: 'Last 30 days' })
+        // The name is sr-only text — asserting `getByText('Money in')` alone
+        // would pass on it without proving anything is visible.
+        const inName = within(section).getByText('Money in')
+        expect(inName).toHaveClass('sr-only')
+        const outName = within(section).getByText('Money out')
+        expect(outName).toHaveClass('sr-only')
+        // The visible affordance is the inline direction mark itself.
+        const inArrow = section.querySelector('svg.lucide-arrow-down')
+        const outArrow = section.querySelector('svg.lucide-arrow-up')
+        expect(inArrow).toBeVisible()
+        expect(outArrow).toBeVisible()
+        // The figures follow the "≈" rule unchanged, one per direction.
+        const inPair = inName.parentElement
+        const outPair = outName.parentElement
+        expect(within(inPair as HTMLElement).getByText('$120.00')).toBeInTheDocument()
+        expect(within(outPair as HTMLElement).getByText('$45.00')).toBeInTheDocument()
+      })
+
+      it('the arrow icon carries the tooltip; Amount is not wrapped in one', () => {
+        render(<AccountDetailClient />)
+        const section = screen.getByRole('region', { name: 'Last 30 days' })
+        // The trigger is the tooltip wrapper around the mark — focusable, per
+        // the accepted tab stops.
+        const inTrigger = section.querySelector('svg.lucide-arrow-down')!.closest('span[tabindex="0"]')
+        expect(inTrigger).not.toBeNull()
+        fireEvent.mouseEnter(inTrigger as Element)
+        expect(screen.getByRole('tooltip')).toHaveTextContent('Money in')
+        fireEvent.mouseLeave(inTrigger as Element)
+        const outTrigger = section.querySelector('svg.lucide-arrow-up')!.closest('span[tabindex="0"]')
+        expect(outTrigger).not.toBeNull()
+        fireEvent.mouseEnter(outTrigger as Element)
+        expect(screen.getByRole('tooltip')).toHaveTextContent('Money out')
+        // The figures carry no second tooltip: `Amount`'s own "≈" title would
+        // stack with the icon's. The pair spans hold no title.
+        const inPair = within(section).getByText('Money in').closest('span')
+        expect(inPair).not.toHaveAttribute('title')
+      })
+
+      it('Holdings renders at most 4 decimals, rounded down, with the served amount in the tooltip', () => {
+        mockUsePortfolio.mockReturnValue({
+          totalUsd: 8.23,
+          totalEur: 7.6,
+          totalSek: 80,
+          breakdown: [
+            {
+              symbol: 'USDC',
+              balance: '8225255',
+              formatted: '8.225255',
+              usdValue: 8.23,
+              eurValue: 7.6,
+              sekValue: 80,
+            },
+          ],
+          loading: false,
+          error: null,
+          refetch: vi.fn(),
+        })
+        render(<AccountDetailClient />)
+        const section = screen.getByRole('region', { name: 'Holdings' })
+        // 8.225255 renders as 8.2252 — truncated, never 8.2253 — and the title
+        // carries the amount AS SERVED (up to 6 decimals).
+        expect(within(section).getByText('8.2252')).toHaveAttribute('title', '8.225255')
+        expect(within(section).queryByText('8.225255')).toBeNull()
+      })
+
+      it('a two-token account truncates each figure, "<0.0001" for a dust read', () => {
+        mockUsePortfolio.mockReturnValue({
+          totalUsd: 8.23,
+          totalEur: 7.6,
+          totalSek: 80,
+          breakdown: [
+            {
+              symbol: 'USDC',
+              balance: '8225255',
+              formatted: '8.225255',
+              usdValue: 8.23,
+              eurValue: 7.6,
+              sekValue: 80,
+            },
+            {
+              symbol: 'DAI',
+              balance: '50',
+              formatted: '0.00005',
+              usdValue: 0,
+              eurValue: 0,
+              sekValue: 0,
+            },
+          ],
+          loading: false,
+          error: null,
+          refetch: vi.fn(),
+        })
+        render(<AccountDetailClient />)
+        const section = screen.getByRole('region', { name: 'Holdings' })
+        expect(within(section).getByText('8.2252')).toHaveAttribute('title', '8.225255')
+        // A non-zero amount under 0.0001 reads "<0.0001", not "0.00"; the
+        // served amount is still the tooltip.
+        expect(within(section).getByText('<0.0001')).toHaveAttribute('title', '0.00005')
+      })
     })
 
     it('the Security & details tab carries ONE heading and ONE intro sentence', () => {

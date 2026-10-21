@@ -163,6 +163,23 @@ export interface ResolvedTask {
    * trial, so a trial's evidence can never see an earlier trial's transfer.
    */
   startedAtBlock?: number
+  /**
+   * The eval agent's delegate EOA (`GET /machine-payments/agent`
+   * `delegate_address`), snapshotted at resolve time for the EIP-3009
+   * bridge task (#4205). On the bridge Haven's own funding transfer goes to
+   * this EOA, so the settlement-shape grader pins `settlement_address` to
+   * it and the stranded-balance grader reads its USDC balance.
+   */
+  delegateEoa?: string
+  /**
+   * The delegate EOA's USDC balance (atomic) read at RESOLVE time —
+   * immediately before the trial, by the same snapshot as
+   * {@link delegateEoa} — NOT a historical `balanceOf` replayed later
+   * (#4205): earlier stranded funds may already sit on the EOA, so the
+   * stranded-balance grader compares a delta against THIS reading, taken
+   * at the moment the trial started.
+   */
+  delegateEoaBalanceBeforeAtomic?: string
 }
 
 /**
@@ -203,6 +220,35 @@ export interface GraderContext {
   probePaymentStatus?: (paymentId: string) => Promise<
     { ok: true; status: string; amountAtomic?: string } | { ok: false; error: string }
   >
+  /**
+   * Machine-payment status probe (the EIP-3009 bridge task, #4205): the
+   * `GET /machine-payments/:id/status` projection, polled by the probe
+   * implementation until `merchant_settlement_recorded` turns true or a
+   * bounded window (~3 min — the #3888 sweeper records 60–180 s after
+   * funding when the agent's own settle did not) expires. `recorded: false`
+   * is a definitive answer, not an error: the merchant was funded but not
+   * proven paid.
+   */
+  probeMerchantSettlement?: (paymentId: string) => Promise<{ ok: true; recorded: boolean } | { ok: false; error: string }>
+  /**
+   * Receipt probe (#4205): the `GET /machine-payments/receipts` row matched
+   * by `payment_id`, or `null` when no row exists for it. The row carries
+   * `settlement_scheme` / `settlement_address` / `merchant_address` — the
+   * three signals the settlement-shape grader asserts.
+   */
+  probeReceipt?: (
+    paymentId: string,
+  ) => Promise<
+    | { ok: true; row: { settlement_scheme?: string | null; settlement_address?: string | null; merchant_address?: string | null } | null }
+    | { ok: false; error: string }
+  >
+  /**
+   * USDC balance probe for the delegate EOA (#4205): the AFTER reading of
+   * the stranded-balance grader, read only once the merchant settlement is
+   * recorded. The BEFORE reading is the resolve-time snapshot on the
+   * resolved task, never a historical balance.
+   */
+  probeDelegateBalance?: (address: string) => Promise<{ ok: true; atomic: string } | { ok: false; error: string }>
 }
 
 /** The graders a task file may name. The registry is closed on purpose. */
@@ -214,3 +260,6 @@ export type GraderName =
   | 'agent_status_before_payment'
   | 'x402_request_mode_replay'
   | 'tool_called'
+  | 'merchant_settlement_recorded'
+  | 'eip3009_settlement_shape'
+  | 'nothing_stranded_on_delegate'

@@ -54,6 +54,7 @@ import {
   resolveTask,
   selectTaskSequence,
   exhaustedThresholdAtomic,
+  taskNeedsDelegateSnapshot,
 } from './tasks.js'
 import {
   renderSummary,
@@ -65,7 +66,8 @@ import {
 } from './runner.js'
 import { renderMarkdownSummary } from './summary.js'
 import { compareAgainstBaseline, formatCompareVerdict, parseCompareReport } from './compare.js'
-import { observerProvider, describeObserverRpc, USDC_DECIMALS } from '../lib/chain.js'
+import { observerProvider, describeObserverRpc, ERC20_BALANCE_ABI, SEPOLIA_USDC, USDC_DECIMALS } from '../lib/chain.js'
+import { ethers } from 'ethers'
 import { HavenApi } from '../lib/haven-api.js'
 import { readOnchainBudget, type BudgetUse } from '../lib/delegation-budget.js'
 import { loadQaConfig } from '../config.js'
@@ -87,10 +89,18 @@ export interface BlockNumberSource {
 
 /**
  * The grader probes, built once per run and injected into the runner
- * (#3992 A1): BOTH probes now live here. `probePaymentStatus` reads the
- * payment object off the dev backend — without it the
- * `payment_status_settled` grader failed every live trial by construction.
+ * (#3992 A1). `probePaymentStatus` reads the payment object off the dev
+ * backend — without it the `payment_status_settled` grader failed every
+ * live trial by construction. The EIP-3009 bridge task (#4205) adds three
+ * more: the machine-payment status projection (polled — the #3888 sweeper
+ * records the merchant settlement 60–180 s after funding), the receipts
+ * row, and the delegate EOA's live USDC balance.
  */
+
+/** How long the merchant-settlement probe polls before giving up (~3 min, #3888's 60–180 s window). */
+export const MERCHANT_SETTLEMENT_POLL_MS = 180_000
+const MERCHANT_SETTLEMENT_POLL_INTERVAL_MS = 5_000
+
 /**
  * Parse a payment record's human amount (`amount`, e.g. "0.001") into atomic
  * units at USDC's 6 decimals (#4091). Strict decimal string parsing — no
@@ -132,7 +142,13 @@ export function budgetPreflightMessage(
   )
 }
 
-export function buildGraderContext(deps: { api: HavenApi; provider: BlockNumberSource }): Omit<GraderContext, 'resolved'> {
+export function buildGraderContext(deps: {
+  api: HavenApi
+  provider: BlockNumberSource
+  /** Injectable delay for the settlement poll (tests). */
+  sleep?: (ms: number) => Promise<void>
+}): Omit<GraderContext, 'resolved'> {
+  const sleep = deps.sleep ?? defaultSleep
   return {
     probeTransfer: async (expected) => {
       const { proveUsdcTransferSince } = await import('../lib/chain.js')
@@ -151,6 +167,42 @@ export function buildGraderContext(deps: { api: HavenApi; provider: BlockNumberS
       // absent → undefined (the guard falls back to any-decrease).
       const amountAtomic = parseHumanAmountToAtomic((res.data as { amount?: unknown }).amount)?.toString()
       return { ok: true, status: res.data.status, ...(amountAtomic !== undefined ? { amountAtomic } : {}) }
+    },
+    // #4205: the merchant-settlement signal is POLLED, not read once — the
+    // #3888 sweeper records the settlement 60–180 s after funding when the
+    // agent's own settle did not, so an immediate read would red a correct
+    // run. A window that closes without the flag is a definitive
+    // `recorded: false`, and a persistent read error is the error it was.
+    probeMerchantSettlement: async (paymentId) => {
+      const deadline = Date.now() + MERCHANT_SETTLEMENT_POLL_MS
+      let lastError: string | undefined
+      for (;;) {
+        const res = await deps.api.getMachinePaymentStatus(paymentId)
+        if (res.ok && res.data.merchant_settlement_recorded === true) return { ok: true, recorded: true }
+        if (!res.ok) {
+          lastError = `HTTP ${res.status} reading machine-payment status for ${paymentId}: backend rejected the read`
+        }
+        if (Date.now() > deadline) {
+          return lastError !== undefined ? { ok: false, error: lastError } : { ok: true, recorded: false }
+        }
+        await sleep(MERCHANT_SETTLEMENT_POLL_INTERVAL_MS)
+      }
+    },
+    probeReceipt: async (paymentId) => {
+      const res = await deps.api.listReceipts(25)
+      if (!res.ok) {
+        return { ok: false, error: `HTTP ${res.status} reading machine-payment receipts: backend rejected the read` }
+      }
+      return { ok: true, row: (res.data.receipts ?? []).find((r) => r.payment_id === paymentId) ?? null }
+    },
+    probeDelegateBalance: async (address) => {
+      try {
+        const usdc = new ethers.Contract(SEPOLIA_USDC, [...ERC20_BALANCE_ABI], deps.provider as never)
+        const atomic: bigint = await usdc.balanceOf(address)
+        return { ok: true, atomic: atomic.toString() }
+      } catch (error) {
+        return { ok: false, error: `balanceOf(${address}) failed: ${String((error as Error)?.message ?? error).slice(0, 200)}` }
+      }
     },
   }
 }
@@ -174,6 +226,16 @@ export interface PerTrialResolverDeps {
   consistencyPollMs?: number
   /** Injectable delay for tests. */
   sleep?: (ms: number) => Promise<void>
+  /**
+   * The resolve-time delegate EOA snapshot (#4205): the agent's delegate
+   * address (`GET /machine-payments/agent` `delegate_address`) and its live
+   * USDC balance, read immediately before the trial. Only consulted for
+   * tasks whose graders need it (`taskNeedsDelegateSnapshot`) — the other
+   * tasks' hot path gains no extra reads. Absent (or failing) for a task
+   * that needs it → the trial's graders fail with that named cause rather
+   * than silently grading against a missing snapshot.
+   */
+  delegateSnapshot?: () => Promise<{ delegateEoa: string; balanceAtomic: bigint } | { error: string }>
 }
 
 export interface PerTrialResolver {
@@ -305,6 +367,17 @@ export function createPerTrialResolver(deps: PerTrialResolverDeps): PerTrialReso
       startedAtBlock,
     })
     if ('error' in r) throw new Error(r.error)
+    // The resolve-time delegate EOA snapshot (#4205): read ONLY when this
+    // task's graders need it, and at THIS moment — the stranded-balance
+    // grader compares a delta against the trial's own start, never a
+    // historical balance. A failing snapshot is a red trial with the cause,
+    // same contract as the budget read.
+    if (taskNeedsDelegateSnapshot(task) && deps.delegateSnapshot) {
+      const snap = await deps.delegateSnapshot()
+      if ('error' in snap) throw new Error(`delegate EOA snapshot failed for task ${task.id}: ${snap.error}`)
+      r.resolved.delegateEoa = snap.delegateEoa
+      r.resolved.delegateEoaBalanceBeforeAtomic = snap.balanceAtomic.toString()
+    }
     return r.resolved
   }
 
@@ -420,13 +493,30 @@ async function main() {
 
   const provider = observerProvider()
   // Per-trial resolution (#3992 A2): the block and the budget are read
-  // immediately before each trial, never once at launch.
+  // immediately before each trial, never once at launch. The EIP-3009
+  // bridge task (#4205) additionally snapshots the delegate EOA and its
+  // USDC balance at the same moment — its stranded-balance grader is a
+  // delta against the trial's own start.
+  const delegateSnapshot = async (): Promise<{ delegateEoa: string; balanceAtomic: bigint } | { error: string }> => {
+    const agent = await api.getAgent()
+    if (!agent.ok) return { error: `HTTP ${agent.status} reading GET /machine-payments/agent` }
+    const delegate = agent.data.delegate_address
+    if (!delegate) return { error: 'agent identity carries no delegate_address' }
+    try {
+      const usdc = new ethers.Contract(SEPOLIA_USDC, [...ERC20_BALANCE_ABI], provider as never)
+      const atomic: bigint = await usdc.balanceOf(delegate)
+      return { delegateEoa: delegate, balanceAtomic: atomic }
+    } catch (error) {
+      return { error: `balanceOf(${delegate}) failed: ${String((error as Error)?.message ?? error).slice(0, 200)}` }
+    }
+  }
   const resolver = createPerTrialResolver({
     readBudget: budgetSource,
     blockNumber: () => provider.getBlockNumber(),
     recipient,
     x402Target,
     agentAccount,
+    delegateSnapshot,
   })
 
   // The lane switch (#3959): `claude-code` runs the SAME task files and

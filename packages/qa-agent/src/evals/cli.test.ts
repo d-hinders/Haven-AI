@@ -156,7 +156,7 @@ describe('A2 false pass: a trial that paid nothing cannot pass on an earlier tra
   })
 })
 
-// ── A2, false failures: production sequencing over the 10 starter tasks ────
+// ── A2, false failures: production sequencing over the 11 starter tasks ────
 
 const paying = new Set([
   'direct-send-get-agent-first',
@@ -165,6 +165,7 @@ const paying = new Set([
   'direct-send-full-remaining',
   'x402-catalog-guided-purchase',
   'x402-plain-http-request-mode',
+  'x402-eip3009-bridge-vpn-legacy',
 ])
 
 function successLogFor(taskId: string): AgentRunLog {
@@ -183,6 +184,14 @@ function successLogFor(taskId: string): AgentRunLog {
         call(`${DEV_PREFIX}haven_pay_x402_quote`, { args: { url: 'https://merchant.example/mcp' } }),
         call(`${DEV_PREFIX}haven_pay_mcp_tool`, { result: { ok: true, paymentId: 'p-3' } }),
       ], 'Replayed and got the body.')
+    case 'x402-eip3009-bridge-vpn-legacy':
+      // The fast hosted bridge flow: intent → sign → settle (the agent found
+      // it; the graders re-prove it from backend/chain probes).
+      return log(taskId, 1, [
+        call(`${DEV_PREFIX}haven_pay_mcp_tool`, { result: { ok: true, paymentId: 'p-3009' } }),
+        call(`${DEV_PREFIX}haven_sign_x402`),
+        call(`${DEV_PREFIX}haven_settle_mcp_tool`, { result: { ok: true, paymentId: 'p-3009' } }),
+      ], 'Bought the legacy plan through the hosted bridge flow.')
     case 'direct-send-full-remaining':
       return log(taskId, 1, [call(`${DEV_PREFIX}haven_send`), call(`${DEV_PREFIX}haven_submit`, { result: { ok: true } }), call(`${DEV_PREFIX}haven_get_allowances`)], 'Sent everything.')
     default:
@@ -230,7 +239,7 @@ describe('A2 false failures: runSuite with the CLI resolver over a simulated bud
     }
   }
 
-  it('the 10 starter tasks x 3 trials: every success trial resolves a payable slice; the drainer resolves the non-zero remaining at its start', async () => {
+  it('the 11 starter tasks x 3 trials: every success trial resolves a payable slice; the drainer resolves the non-zero remaining at its start', async () => {
     const { tasks, invalid } = await loadTasks(TASKS_DIR)
     expect(invalid).toEqual([])
     const sim = simulatedBudget()
@@ -611,7 +620,7 @@ describe('#4091: the guard deducts the ACTUAL settled spend, flagged or not', ()
 // ── A3: ordering tiers, the once-only drainer ──────────────────────────────
 
 describe('A3: the drainer runs after every tier-1 task, before the exhausted-budget task, exactly once', () => {
-  it('the real 10-task set: tier order, drainer k=1, tier-3 k=3, "k=1 (drains budget)" in the report', async () => {
+  it('the real 11-task set: tier order, drainer k=1, tier-3 k=3, "k=1 (drains budget)" in the report', async () => {
     const { tasks, invalid } = await loadTasks(TASKS_DIR)
     expect(invalid).toEqual([])
     const calls: string[] = []
@@ -637,6 +646,7 @@ describe('A3: the drainer runs after every tier-1 task, before the exhausted-bud
       'over-budget-check-status-no-retry',
       'over-budget-direct-refused',
       'x402-catalog-guided-purchase',
+      'x402-eip3009-bridge-vpn-legacy',
       'x402-plain-http-request-mode',
       'x402-price-cap-below-price',
       'direct-send-full-remaining',

@@ -335,7 +335,22 @@ export function selectTaskSequence(
   return opts.shuffleSeed !== undefined ? shuffleWithinTiers(limited, opts.shuffleSeed) : limited
 }
 
-/** Resolve the task against a live budget read. */
+/**
+ * True when a task's graders need the resolve-time delegate EOA snapshot
+ * (#4205): the settlement-shape grader pins `settlement_address` to the
+ * delegate EOA and the stranded-balance grader compares against the
+ * resolve-time balance. The resolver reads `GET /machine-payments/agent`
+ * and one `balanceOf` ONLY for such tasks, so the other tasks' hot path
+ * gains no extra reads.
+ */
+export const taskNeedsDelegateSnapshot = (task: EvalTask): boolean =>
+  task.graders.some((g) => g.name === 'eip3009_settlement_shape' || g.name === 'nothing_stranded_on_delegate')
+
+/**
+ * Resolve the task against a live budget read. The optional delegate EOA
+ * fields (#4205) are the resolve-time snapshot the EIP-3009 bridge task's
+ * graders read — the runner captures them immediately before the trial.
+ */
 export async function resolveTask(
   task: EvalTask,
   opts: {
@@ -344,6 +359,8 @@ export async function resolveTask(
     x402Target?: string
     agentAccount?: string
     startedAtBlock?: number
+    delegateEoa?: string
+    delegateEoaBalanceBeforeAtomic?: string
   },
 ): Promise<{ resolved: ResolvedTask } | { error: string }> {
   const read = await opts.budget()
@@ -360,6 +377,10 @@ export async function resolveTask(
       recipient: opts.recipient,
       agentAccount: opts.agentAccount,
       startedAtBlock: opts.startedAtBlock,
+      ...(opts.delegateEoa !== undefined ? { delegateEoa: opts.delegateEoa } : {}),
+      ...(opts.delegateEoaBalanceBeforeAtomic !== undefined
+        ? { delegateEoaBalanceBeforeAtomic: opts.delegateEoaBalanceBeforeAtomic }
+        : {}),
     },
   }
 }

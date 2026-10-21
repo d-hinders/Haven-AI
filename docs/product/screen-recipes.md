@@ -19,6 +19,7 @@ covers:
   - packages/frontend/src/components/ui/Input.tsx
   - packages/ui/**
   - packages/frontend/src/components/ui/PageHeader.tsx
+  - packages/frontend/src/components/ui/Monogram.tsx
   - packages/frontend/src/components/ui/SegmentedControl.tsx
   - packages/frontend/src/components/ui/Skeleton.tsx
   - packages/ui/src/StatTile.tsx
@@ -42,7 +43,7 @@ covers:
   - packages/backend/src/rails/sweep.ts
   - packages/backend/src/routes/machine-payments.ts
   - packages/sdk/src/sweep.ts
-last-verified: "2026-10-20"
+last-verified: "2026-10-21"
 ---
 
 # Haven Screen Recipes
@@ -576,7 +577,8 @@ Rules:
 Use for `/agents/[agentId]`: one managed agent — what it can spend, what it has
 done, and how to stop it (#3691, epic). Sections, in order:
 
-1. `PageHeader` with the agent name, the description as `subtitle`, and the
+1. `PageHeader` with a decorative, name-hashed `Monogram` before the agent name,
+   the description as `subtitle`, and the
    `meta` line — wallet · network · Created {age} · Last activity {age} (or
    "No activity yet"; last activity is `mcp_last_seen_at`). Labels sit under
    it. The actions slot: the status badge (renders nothing while active),

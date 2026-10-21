@@ -105,7 +105,7 @@ covers:
   - packages/frontend/src/components/connect-agent/CopyBlock.tsx
   - packages/frontend/src/components/connect-agent/SetupStates.tsx
   - packages/frontend/src/components/haven/DirectionMark.tsx
-last-verified: 2026-10-20
+last-verified: 2026-10-21
 ---
 
 # Haven Design System
@@ -681,9 +681,8 @@ Use `components/ui/PageHeader.tsx` on authenticated pages instead of hand-rolled
   `PageHeader` without `back` renders exactly as before.
 - Optional `leading` mark before the title
   ([#4210](https://github.com/d-hinders/Haven-AI/issues/4210), epic #4207),
-  vertically centred on the title — built for an agent's `Monogram` (#4208),
-  so the detail header can carry the same mark as the agent's row; no product
-  page passes it yet. The title prints beside it, so pass the mark
+  vertically centred on the title. Agent detail passes the same name-hashed
+  `Monogram` as the shared agent row (#4208). The title prints beside it, so pass the mark
   `decorative`. Additive — a `PageHeader` without `leading` renders exactly as
   before.
 - Right-side actions that wrap on narrow viewports — and **stack onto their own
@@ -712,10 +711,9 @@ Do not use marketing hero typography for normal authenticated pages.
 entity's logo when it has one — merchants and contacts today, agents from
 #4208. Sizes:
 
-- `xs` — 32px, sized for the agent row's `2rem` mark track, the width
+- `xs` — 32px, used by the shared agent row's `2rem` mark track, the width
   `DirectionMark compact` shares
-  ([#4210](https://github.com/d-hinders/Haven-AI/issues/4210)); no product
-  page uses it yet.
+  ([#4210](https://github.com/d-hinders/Haven-AI/issues/4210)).
 - `sm` (default) — 36px, for lists and cards.
 - `md` — 48px, for a page header.
 
@@ -1612,7 +1610,8 @@ with a count and a warning dot.
 
 The dashboard's agent row, lifted out of `AgentsSection` into
 `haven/AgentRow.tsx` so the account page's Agents tab draws agents exactly as the
-dashboard does: the BudgetMeter with its caption, the labelled "Last paid" time on the
+dashboard does: a name-hashed `Monogram` (`xs`, decorative) as the leading mark,
+the BudgetMeter with its caption, the labelled "Last paid" time on the
 caption line ([#3989](https://github.com/d-hinders/Haven-AI/issues/3989)), the badge
 (`agentBadge`: Needs setup / Paused / N% used), and the received-sub-budget or "No
 budget" line ([#3803](https://github.com/d-hinders/Haven-AI/issues/3803)).

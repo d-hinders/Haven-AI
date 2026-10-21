@@ -3881,7 +3881,7 @@ export default function DesignSystemPage() {
       <Section
         title="Monogram"
         testId="ds-monogram"
-        description="Initials-in-a-circle avatar, or the entity's logo when it has one. Promoted to components/ui on its third copy (#3079): the /contacts Initials avatar, the marketplace card and the merchant header all drew the same circle. xs (32px), sized for the agent row's 2rem mark track (#4210; agents adopt it in #4208), sm (36px) for lists and cards, md (48px) for a page header. `decorative` sets aria-hidden for a caller that prints the name beside the mark; without it the initials stay readable. Initials are taken by visible character, so a flag or a joined emoji never renders half of one; a name that starts with an emoji shows that emoji alone. Since #4066 the initials variant is tinted from the entity's NAME — one of six muted avatar tints picked by a pure hash of the trimmed name, so the same entity keeps the same colour everywhere and neighbouring rows are told apart at a glance. Assigned by name, never by index, and never from a status or --v2-series-* chart colour (the hexes are disjoint from both)."
+        description="Initials-in-a-circle avatar, or the entity's logo when it has one. Promoted to components/ui on its third copy (#3079): the /contacts Initials avatar, the marketplace card and the merchant header all drew the same circle. xs (32px) for the agent row's 2rem mark track (#4208), sm (36px) for lists and cards, md (48px) for a page header. `decorative` sets aria-hidden for a caller that prints the name beside the mark; without it the initials stay readable. Initials are taken by visible character, so a flag or a joined emoji never renders half of one; a name that starts with an emoji shows that emoji alone. Since #4066 the initials variant is tinted from the entity's NAME — one of six muted avatar tints picked by a pure hash of the trimmed name, so the same entity keeps the same colour everywhere and neighbouring rows are told apart at a glance. Assigned by name, never by index, and never from a status or --v2-series-* chart colour (the hexes are disjoint from both)."
       >
         <div className="flex flex-wrap items-center gap-4">
           {MONOGRAM_TINT_EXAMPLES.map((name) => (
@@ -4036,7 +4036,7 @@ export default function DesignSystemPage() {
           account page will pass from the same overview. */}
       <Section
         title="Agent row (shared)"
-        description="The dashboard's agent row (#4096, epic #4093), lifted out of AgentsSection into haven/AgentRow: the BudgetMeter with its caption, the labelled “Last paid” time on the caption line (#3989), the badge (agentBadge: Needs setup / Paused / N% used), and the received-sub-budget or “No budget” line (#3803). Its props are the dashboard wire shapes (DashboardAgent, DashboardBudgetRemaining) and the budget caption reads in the budget's own token, “1.20 of 3.00 USDC” (#4165: no rate, no “≈”) — the account page reads the SAME overview (it lists all agents) and passes its slices straight through, so both surfaces draw the identical row. AgentBudget is exported beside it for a caller that wants the budget block without the row chrome."
+        description="The dashboard's agent row (#4096, epic #4093), lifted out of AgentsSection into haven/AgentRow: a name-hashed xs Monogram leading mark (#4208), the BudgetMeter with its caption, the labelled “Last paid” time on the caption line (#3989), the badge (agentBadge: Needs setup / Paused / N% used), and the received-sub-budget or “No budget” line (#3803). Its props are the dashboard wire shapes (DashboardAgent, DashboardBudgetRemaining) and the budget caption reads in the budget's own token, “1.20 of 3.00 USDC” (#4165: no rate, no “≈”) — the account page reads the SAME overview (it lists all agents) and passes its slices straight through, so both surfaces draw the identical row. AgentBudget is exported beside it for a caller that wants the budget block without the row chrome."
       >
         <div className="max-w-xl space-y-4">
           <Card hover={false} className="overflow-hidden">
@@ -4093,7 +4093,7 @@ export default function DesignSystemPage() {
       <Section
         title="PageHeader leading"
         testId="ds-pageheader-leading"
-        description="A mark before the title, centred on it (#4210, epic #4207) — built for an agent's Monogram (#4208), so the detail header can carry the same mark as the agent's row. No product page passes it yet. The title prints beside it, so the mark is passed `decorative`. Optional and additive — a PageHeader without `leading` renders exactly as before."
+        description="A mark before the title, centred on it (#4210, epic #4207). Agent detail passes the same name-hashed Monogram as the shared agent row (#4208). The title prints beside it, so the mark is passed `decorative`. Optional and additive — a PageHeader without `leading` renders exactly as before."
       >
         <div className="max-w-2xl">
           <PageHeader

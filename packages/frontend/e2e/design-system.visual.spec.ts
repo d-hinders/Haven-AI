@@ -657,6 +657,39 @@ test.describe('design-system visual regression', () => {
       await expect(sample).toHaveCount(1)
       await expectShowcaseClip(sample, vp.height, 'the StatTile inline sample', `design-system-stat-tile-inline-${vp.name}${schemeSuffix}.png`, SAMPLE_MAX_DIFF_PIXELS)
     })
+
+    // #4208: these are the two standing examples for the agent identity mark.
+    // The first protects the compact row-sized Monogram, including the emoji
+    // grapheme case; the second protects its title alignment in PageHeader.
+    test(`/design-system Monogram agent-row sample renders pixel-stable (${vp.name})`, async ({ page }, testInfo) => {
+      const scheme = schemeOf(testInfo)
+      const schemeSuffix = scheme === 'dark' ? '-dark' : ''
+      await page.setViewportSize({ width: vp.width, height: vp.height })
+      await page.goto('/design-system')
+      await page.evaluate(() => document.fonts.ready)
+      await page.waitForLoadState('networkidle')
+
+      const sample = page.getByTestId('ds-monogram')
+      await expect(sample).toHaveCount(1)
+      await expect(sample.locator('[aria-hidden="true"].h-8.w-8')).toHaveCount(2)
+      await expect(sample.getByText('Research agent', { exact: true })).toBeVisible()
+      await expectShowcaseClip(sample, vp.height, 'the Monogram sample', `design-system-monogram-${vp.name}${schemeSuffix}.png`, SAMPLE_MAX_DIFF_PIXELS)
+    })
+
+    test(`/design-system PageHeader leading sample renders pixel-stable (${vp.name})`, async ({ page }, testInfo) => {
+      const scheme = schemeOf(testInfo)
+      const schemeSuffix = scheme === 'dark' ? '-dark' : ''
+      await page.setViewportSize({ width: vp.width, height: vp.height })
+      await page.goto('/design-system')
+      await page.evaluate(() => document.fonts.ready)
+      await page.waitForLoadState('networkidle')
+
+      const sample = page.getByTestId('ds-pageheader-leading')
+      await expect(sample).toHaveCount(1)
+      await expect(sample.getByRole('heading', { name: 'Research agent', exact: true })).toHaveCount(1)
+      await expect(sample.locator('[aria-hidden="true"].h-12.w-12')).toHaveCount(1)
+      await expectShowcaseClip(sample, vp.height, 'the PageHeader leading sample', `design-system-pageheader-leading-${vp.name}${schemeSuffix}.png`, SAMPLE_MAX_DIFF_PIXELS)
+    })
   }
 
   /**
@@ -688,6 +721,8 @@ test.describe('design-system visual regression', () => {
     ['activity row sample', (p) => p.getByTestId('ds-activity-row')],
     ['AreaChart sparkline sample', (p) => p.getByTestId('ds-area-chart-sparkline')],
     ['StatTile inline sample', (p) => p.getByTestId('ds-stat-tile-inline')],
+    ['Monogram sample', (p) => p.getByTestId('ds-monogram')],
+    ['PageHeader leading sample', (p) => p.getByTestId('ds-pageheader-leading')],
   ]
 
   const FRACTIONAL_SPACERS_PX = [0.25, 0.5, 0.75]

@@ -649,6 +649,9 @@ describe('AccountDetailClient', () => {
       render(<AccountDetailClient />)
 
       expect(screen.getByText('Research agent')).toBeInTheDocument()
+      const agentRow = screen.getByRole('link', { name: /Research agent/ })
+      expect(agentRow.firstElementChild).toHaveAttribute('aria-hidden', 'true')
+      expect(agentRow.firstElementChild).toHaveTextContent('RA')
       // The tab count: 1 agent, rendered beside the tab label.
       const tab = screen.getByRole('tab', { name: /Agents/ })
       expect(within(tab).getByText('1')).toBeInTheDocument()

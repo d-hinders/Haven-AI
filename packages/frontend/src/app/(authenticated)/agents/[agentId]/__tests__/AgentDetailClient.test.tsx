@@ -164,6 +164,7 @@ vi.mock('@/components/transactions/TransactionsTable', () => ({
 
 import { AGENT_PAUSED_BODY, AGENT_PAUSED_TITLE } from '@/lib/agent-pause-copy'
 import { HALF_REVOKED_TITLE } from '@/lib/half-revoked'
+import { AgentRow, type DashboardAgent } from '@/components/haven/AgentRow'
 import AgentDetailClient from '../AgentDetailClient'
 
 const VIES_VALID_ROW = {
@@ -357,6 +358,72 @@ describe('AgentDetailClient last-activity metadata', () => {
     expect(screen.getByRole('heading', { level: 1, name: 'Research agent' })).toBeInTheDocument()
     expect(screen.getByText('Last activity 2h ago')).toBeInTheDocument()
     expect(screen.queryByText('Connected')).not.toBeInTheDocument()
+  })
+
+  it('uses the same decorative initials and tint in the shared row and detail header (#4208)', () => {
+    const dashboardAgent: DashboardAgent = {
+      id: 'agent-1',
+      name: 'Research agent',
+      status: 'active',
+      accountId: 'safe-1',
+      accountName: 'Main account',
+      accountChainId: 8453,
+      allowances: [],
+      budgets: [],
+      receivedSubBudgets: [],
+      stats: {
+        d7: {
+          gross: { usd: 0, eur: 0, sek: 0 },
+          net: { usd: 0, eur: 0, sek: 0 },
+          approx: false,
+          payments: 0,
+          refusals: { budget: 0, scope: 0, failed: 0, haven: 0 },
+        },
+        d30: {
+          gross: { usd: 0, eur: 0, sek: 0 },
+          net: { usd: 0, eur: 0, sek: 0 },
+          approx: false,
+          payments: 0,
+          refusals: { budget: 0, scope: 0, failed: 0, haven: 0 },
+        },
+        lastPaymentAt: null,
+        lastCounterparty: null,
+      },
+    }
+
+    render(
+      <>
+        <AgentRow
+          agent={dashboardAgent}
+          budgetRemaining={null}
+          attentionItems={[]}
+          accountNames={{}}
+          accountCount={1}
+          nowMs={Date.parse('2026-06-01T12:00:00Z')}
+        />
+        <AgentDetailClient agentId="agent-1" />
+      </>,
+    )
+
+    const row = screen.getByRole('link', {
+      name: 'Research agent No budget No payments yet',
+    })
+    const rowMark = row.firstElementChild as HTMLElement
+    const header = screen.getByRole('banner')
+    const headerMark = header.querySelector<HTMLElement>('[aria-hidden="true"].h-12')
+
+    expect(headerMark).not.toBeNull()
+    expect(rowMark).toHaveAttribute('aria-hidden', 'true')
+    expect(headerMark).toHaveAttribute('aria-hidden', 'true')
+    expect(rowMark).toHaveTextContent('RA')
+    expect(headerMark).toHaveTextContent('RA')
+    expect(headerMark?.className.match(/bg-\[var\(--v2-avatar-[^)]+-soft\)\]/)?.[0]).toBe(
+      rowMark.className.match(/bg-\[var\(--v2-avatar-[^)]+-soft\)\]/)?.[0],
+    )
+    expect(headerMark?.firstElementChild?.className.match(/text-\[var\(--v2-avatar-[^)]+\)\]/)?.[0]).toBe(
+      rowMark.firstElementChild?.className.match(/text-\[var\(--v2-avatar-[^)]+\)\]/)?.[0],
+    )
+    expect(screen.getAllByRole('heading', { level: 1, name: 'Research agent' })).toHaveLength(1)
   })
 
   // #3694: the "About this agent" card's four facts moved into the header's

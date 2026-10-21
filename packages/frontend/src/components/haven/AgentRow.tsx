@@ -22,8 +22,9 @@
 
 import Link from 'next/link'
 import { Fragment, type ReactNode } from 'react'
-import { Bot, ChevronRight } from 'lucide-react'
+import { ChevronRight } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
+import { Monogram } from '@/components/ui/Monogram'
 import { StatusBadge, type StatusTone } from '@/components/ui/StatusBadge'
 import { BudgetMeter } from './BudgetMeter'
 import type { AttentionRuleItem, DashboardBudgetRemaining, DashboardOverview } from '@/lib/dashboard-attention'
@@ -254,13 +255,12 @@ export function AgentRow({
     // row keeps its badge beside the name instead of wrapping under it.
     <Link
       href={`/agents/${agent.id}`}
-      className="grid grid-cols-[2rem_minmax(0,1fr)_1rem] items-center gap-x-3 px-5 py-3.5 transition-colors hover:bg-[var(--v2-surface-hover)] [grid-template-areas:'icon_name_chev'_'icon_body_chev']"
+      className="grid grid-cols-[2rem_minmax(0,1fr)_1rem] items-center gap-x-3 px-5 py-3.5 transition-colors hover:bg-[var(--v2-surface-hover)] [grid-template-areas:'icon_name_chev'_'icon_body_chev'] [&>:first-child]:[grid-area:icon]"
     >
-      {/* Robot mark matches the sidebar's "agents" icon so the dashboard and
-          nav read as the same system (carried from the old section). */}
-      <span aria-hidden="true" className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-[var(--v2-brand-soft)] text-[var(--v2-brand)] [grid-area:icon]">
-        <Icon icon={Bot} className="h-4 w-4" />
-      </span>
+      {/* A specific agent carries its name-hashed identity mark; category-level
+          "agents" surfaces keep the robot icon (#4208). Keep this as the direct
+          first child: the money-card layout guard locates rows through it. */}
+      <Monogram name={agent.name} size="xs" decorative />
       {/* flex-wrap (#3908): on a narrow row the badge drops under the name
           rather than squeezing the name to a few letters. */}
       <p className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-sm font-medium text-[var(--v2-ink)] [grid-area:name]">

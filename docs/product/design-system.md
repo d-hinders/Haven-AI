@@ -723,7 +723,8 @@ The initials variant is readable to a screen reader by default; the logo is
 `alt=""`. Pass `decorative` (`aria-hidden` on the root) where the name always
 prints beside the mark, so it is not read twice. `Monogram` takes initials by
 visible character (grapheme), so a user-typed name that starts with an emoji
-or a flag never renders half of one. Tints are the avatar family above.
+or a flag never renders half of one (where the browser has `Intl.Segmenter`,
+as every current one does; the fallback still never splits a surrogate pair). Tints are the avatar family above.
 
 ### Detail-page section rule (#3692)
 

@@ -47,7 +47,7 @@ export function Monogram({
   name: string
   logoUrl?: string | null
   /**
-   * `xs` — a 32px avatar on the agent row's `2rem` mark track, the width
+   * `xs` — a 32px avatar sized for the agent row's `2rem` mark track, the width
    * `DirectionMark compact` shares (#4210); `sm` — a 36px list/card avatar;
    * `md` — a 48px page-header avatar.
    */

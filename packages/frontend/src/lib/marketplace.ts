@@ -697,11 +697,6 @@ export function needsUnpinnedBudget(assetTransferMethods: string | null): boolea
     .includes('erc7710')
 }
 
-/**
- * Initials for a named entity with no logo — two letters from the first and
- * last words of its name, or the first two letters of a one-word name. The
- * helper behind `Monogram`.
- */
 const graphemes =
   typeof Intl !== 'undefined' && 'Segmenter' in Intl
     ? new Intl.Segmenter(undefined, { granularity: 'grapheme' })
@@ -711,6 +706,11 @@ function characters(text: string): string[] {
   return graphemes ? Array.from(graphemes.segment(text), (s) => s.segment) : Array.from(text)
 }
 
+/**
+ * Initials for a named entity with no logo — two letters from the first and
+ * last words of its name, or the first two letters of a one-word name. The
+ * helper behind `Monogram`.
+ */
 export function merchantInitials(name: string): string {
   // Visible characters, not UTF-16 code units (#4210): agent names are
   // user-typed, and `'😀Bot'[0]` is half a surrogate pair. Graphemes keep a

@@ -235,6 +235,15 @@ These are stated so nobody counts them as proven:
   first). Each survives its own mutation for that reason.
 - `recover`'s `ps -o pid,command -g <pgid>` hint selects by process group on
   macOS; on Linux procps, use `ps -eo pid,pgid,command | awk '$2 == <pgid>'`.
+- **`verify` refuses the builder's tree only from evidence it can read.** It
+  refuses when `--builder` names this root, or when the author's
+  `prove-red-<issue>-mutate.json` in `$SCRATCH` records this root. With no
+  author result in `$SCRATCH` and a wrong `--builder`, it cannot tell, and runs.
+  Pass the builder's real path.
+- **Children run in their own process group**, so a kill aimed at
+  `prove-red`'s own group (a harness timeout, for example) does not reach them.
+  The journalled group id covers this: `recover` refuses while that group is
+  alive and prints how to inspect and stop it.
 
 ## When not to use it
 

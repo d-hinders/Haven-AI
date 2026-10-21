@@ -209,6 +209,33 @@ function decodeRevertReason(data: unknown): string {
   return Buffer.from(bytes, 'hex').toString('utf8')
 }
 
+/**
+ * The fetch failure as it may be kept: each error's `name` and `code` down the
+ * `cause` chain, and no message text. undici's own errors can quote the URL
+ * they were given ("Failed to parse URL from https://user:pass@…"), and vitest
+ * prints a thrown error's causes, so a raw cause would put the credentialed
+ * URL in a public CI log through the back door `probeEndpointLabel` closes.
+ */
+export function transportCauseSummary(cause: unknown): Error {
+  const links: string[] = []
+  let current: unknown = cause
+  for (let depth = 0; depth < 4 && current !== undefined && current !== null; depth += 1) {
+    if (typeof current === 'object') {
+      const { name, code } = current as { name?: unknown; code?: unknown }
+      links.push(
+        [typeof name === 'string' ? name : 'Error', typeof code === 'string' ? `(${code})` : '']
+          .filter(Boolean)
+          .join(' '),
+      )
+      current = (current as { cause?: unknown }).cause
+    } else {
+      links.push(typeof current)
+      break
+    }
+  }
+  return new Error(`transport failure: ${links.join(' ← ') || 'unknown'} (message text withheld: it can carry the RPC URL)`)
+}
+
 async function rpc(rpcUrl: string, method: string, params: unknown[]): Promise<unknown> {
   let response: Response
   try {
@@ -219,7 +246,9 @@ async function rpc(rpcUrl: string, method: string, params: unknown[]): Promise<u
       signal: AbortSignal.timeout(15_000),
     })
   } catch (cause) {
-    throw new EnforcerProbeTransportError(`${method} failed to reach ${probeEndpointLabel(rpcUrl)}`, { cause })
+    throw new EnforcerProbeTransportError(`${method} failed to reach ${probeEndpointLabel(rpcUrl)}`, {
+      cause: transportCauseSummary(cause),
+    })
   }
   if (!response.ok) {
     // 429/5xx are the endpoint, not the enforcer. The HTTP status is

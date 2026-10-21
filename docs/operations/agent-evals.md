@@ -33,7 +33,7 @@ The agent evals run a REAL model agent against the dev environment and grade
 what it actually did: its tool-call log, the dev backend, and Base Sepolia.
 This is the layer the deterministic money-flow harness (`docs/operations/agent-qa.md`)
 deliberately does not cover — that harness has no LLM in it. Slice 1 (#3958)
-builds the harness-neutral core: the task format, the graders, ~10 starter
+builds the harness-neutral core: the task format, the graders, ~11 starter
 tasks and the Hermes runner. Slice 2 (#3959) adds a Claude Code adapter that
 reuses the task format and graders unchanged.
 
@@ -47,7 +47,7 @@ backend**. No payment code is changed by this suite; the graders only READ.
 | Task format | `packages/qa-agent/src/evals/types.ts` | One JSON file per task: the instruction, the setup it needs, the budget-aware amount rule, and the graders to apply. JSON, never Markdown. |
 | Graders | `packages/qa-agent/src/evals/graders.ts` | Read the recorded tool-call log + injected chain/backend probes. No model, no live agent. |
 | Tool lists | `packages/qa-agent/src/evals/tools.ts` | The 29 hosted tools, split into the explicit 9-tool payment list and the 20 non-payment tools, and the 5 signer tools. `tools.test.ts` holds them equal to their upstream sources (#4121): the keys of the hosted tools/list snapshot (`tools-list.snapshot.json` in the mcp-server package) and of the signer's `toolSchemas`. A hosted tool in neither half fails as unclassified. Graders match BARE tool names + `next_tool_server_role`, never the server-prefixed name. |
-| Starter tasks | `packages/qa-agent/src/evals/tasks/*.json` | 10 tasks across direct-payment / x402-paywall / over-budget, each citing its source. |
+| Starter tasks | `packages/qa-agent/src/evals/tasks/*.json` | 11 tasks across direct-payment / x402-paywall / over-budget, each citing its source. |
 | Hermes adapter | `packages/qa-agent/src/evals/hermes.ts` | Runs one task through Hermes, collects the tool-call log, parses it into the grader model. |
 | Runner | `packages/qa-agent/src/evals/runner.ts` + `cli.ts` | k trials per task, applies graders, writes JSON report + readable summary with per-task pass rate, pass^k and wall time per session. Resolution is PER TRIAL (#3992 A2): the CLI injects a resolver that reads the budget + observer block immediately before each trial. |
 | Compare | `packages/qa-agent/src/evals/compare.ts` | The regression-only compare (#3992 D): the new report vs earlier comparable reports, alerting only after two consecutive pass^k failures on a 5-of-7 baseline. |
@@ -186,7 +186,7 @@ unattended start.
   it — `PERIODS` in `packages/frontend/src/components/haven/DelegationBudgetCard.tsx`),
   sized so the tiered run fits inside one refill: the tier-1 slices shrink
   geometrically, the drainer takes the rest once, and the tier-3 refusal
-  tasks spend nothing — the full 10-task run moves a bounded fraction over
+  tasks spend nothing — the full 11-task run moves a bounded fraction over
   the initial remaining budget.
 - **There is no "reset period budget" action.** Editing a budget builds a
   NEW delegation and needs the owner's passkey signatures, so it cannot run
@@ -230,16 +230,27 @@ Env the run needs (all dev/testnet):
   graders expect the money to reach (rendered into `{recipient}`). Address
   tasks only — the x402 URL tasks read `QA_EVAL_X402_TARGET`, because one
   env var cannot be both an address and an HTTP target.
-- `QA_EVAL_X402_TARGET` — the HTTP URL rendered into `{target}` by the two
-  plain-HTTP x402 tasks (`x402-plain-http-request-mode`,
-  `x402-price-cap-below-price`); required only when the loaded task set
-  renders `{target}`, and checked before the first agent session. With
-  `QA_EVAL_RECIPIENT` + `QA_EVAL_X402_TARGET` set, ONE suite invocation
-  covers all 10 tasks — no per-task config or task filter needed. On dev it
-  is the demo merchant's MCP endpoint (`…/mcp`), which answers **405 to a
-  GET** and **402 only to a POSTed JSON-RPC `tools/call`**, so both task
-  instructions spell out that POST request (`buy_vpn`, basic plan, 0.001
-  USDC).
+- `QA_EVAL_X402_TARGET` — the HTTP URL rendered into `{target}` by the three
+  x402 URL tasks (`x402-plain-http-request-mode`,
+  `x402-price-cap-below-price`, `x402-eip3009-bridge-vpn-legacy`); required
+  only when the loaded task set renders `{target}`, and checked before the
+  first agent session. With `QA_EVAL_RECIPIENT` + `QA_EVAL_X402_TARGET` set,
+  ONE suite invocation covers all 11 tasks — no per-task config or task
+  filter needed. On dev it is the demo merchant's MCP endpoint (`…/mcp`),
+  which answers **405 to a GET** and **402 only to a POSTed JSON-RPC
+  `tools/call`**, so the two plain-HTTP task instructions spell out that
+  POST request (`buy_vpn`, basic plan, 0.001 USDC). The bridge task uses the
+  same endpoint as an MCP MERCHANT: `{target}` must also serve the
+  EIP-3009-only `legacy` VPN plan (`buy_vpn` `{"plan":"legacy"}`, 0.001
+  USDC) — its `requires` label `mcp-merchant-eip3009-target` stands for that
+  provisioning, and the plan has no catalog row, so the instruction names
+  merchant and tool instead of a `catalog_id`. A PINNED budget refuses the
+  bridge task with 403 BEFORE any funding (`delegation-authorize.ts:483`),
+  so its open-budget precondition (`delegation-agent-open-budget`) is real:
+  a pinned-budget run reds the task without spending. The eval is the
+  SECOND buyer of `vpn_legacy` (after `packages/qa-agent/src/scenarios/
+  x402-hosted-mcp-signer.ts`, which proves the same hosted path without an
+  agent in it).
 - `QA_EVAL_AGENT_ACCOUNT` — the eval agent's **smart account** address (the
   payer the chain probe accepts; not the delegate EOA). The Claude Code lane's
   `AGENT_EVALS_AGENT_ACCOUNT` (below) holds the same role, and the daily
@@ -346,6 +357,29 @@ should treat 3 as "not run" and skip any comparison).
   never reports spend and is not a settlement grader, so the next trial does
   not wait for a budget decrease. The catalog task keeps
   `payment_status_settled`.
+- The EIP-3009 bridge task (`x402-eip3009-bridge-vpn-legacy`, #4205) covers
+  the **fast hosted flow** — `haven_pay_mcp_tool` → `haven_sign_x402` →
+  `haven_settle_mcp_tool`, which delivers the header to the merchant from
+  the hosted server — and grades three backend/chain signals, never the
+  agent's reply: `merchant_settlement_recorded` on
+  `GET /machine-payments/:id/status` (polled ~3 min: the #3888 sweeper
+  records 60–180 s after funding, and on eip3009 a `confirmed`
+  `GET /payments/:id` is only the FUNDING intent — treasury → delegate — so
+  `payment_status_settled` alone proves nothing about the merchant); the
+  `GET /machine-payments/receipts` row's two-leg shape
+  (`settlement_scheme === 'eip3009'`, `settlement_address` = the delegate
+  EOA, `merchant_address` different — an erc7710 settlement cannot pass);
+  and no USDC stranded on the delegate EOA, as a delta against a
+  RESOLVE-TIME balance snapshot (`ResolvedTask.
+  delegateEoaBalanceBeforeAtomic`, read by the resolver immediately before
+  the trial — earlier stranded funds may already sit there, so a historical
+  `balanceOf` would misattribute them) whose AFTER read is gated on the
+  merchant settlement being recorded. The task also keeps
+  `payment_status_settled` so the runner's budget-consistency guard deducts
+  its spend before the tier-2 drainer runs. NOT covered by this task: the
+  decomposed tools (`haven_x402_sign_header` / `haven_submit` /
+  `haven_complete_mcp_tool`) and the `MERCHANT_REJECTED_AFTER_FUNDING`
+  sweep guidance.
 - Every grader's option keys are closed (`GRADER_OPTION_KEYS` in
   `graders.ts`), and the loader refuses any other key (#4136). A grader
   ignores a key it does not read, so a misspelt key is a check that
@@ -565,8 +599,8 @@ unless "usage credits" (extra usage) is turned on in claude.ai Settings →
 Usage; that page also shows the plan usage the runs consume. Do not set
 `ANTHROPIC_API_KEY` in this job: it takes precedence over the OAuth token and
 would bill the API instead. Measured on the first pilot (2026-10-19, Sonnet,
-5 tasks × 1 trial): about $0.08 per session estimated, so a full 10 × 3 run
-is roughly $2.40 of estimated usage. Sources: support.claude.com articles
+5 tasks × 1 trial): about $0.08 per session estimated, so a full 11 × 3 run
+is roughly $2.65 of estimated usage. Sources: support.claude.com articles
 15036540 (Agent SDK with your plan) and 12429409 (extra usage), and
 code.claude.com/docs/en/costs.
 

@@ -57,7 +57,7 @@ describe('the starter task set (read from disk)', () => {
   it('every referenced grader exists in the closed registry', async () => {
     const { tasks } = await loadTasks(TASKS_DIR)
     for (const t of tasks) {
-      for (const g of t.graders) expect(g.name).toMatch(/^(transfer_settled|payment_status_settled|haven_payment_submitted|no_payment_retry_after_refusal|agent_status_before_payment|x402_request_mode_replay|tool_called)$/)
+      for (const g of t.graders) expect(g.name).toMatch(/^(transfer_settled|payment_status_settled|haven_payment_submitted|no_payment_retry_after_refusal|agent_status_before_payment|x402_request_mode_replay|tool_called|merchant_settlement_recorded|eip3009_settlement_shape|nothing_stranded_on_delegate)$/)
     }
   })
 
@@ -456,6 +456,7 @@ describe('the tiered run order (#3992 A3)', () => {
       'over-budget-check-status-no-retry',
       'over-budget-direct-refused',
       'x402-catalog-guided-purchase',
+      'x402-eip3009-bridge-vpn-legacy',
       'x402-plain-http-request-mode',
       'x402-price-cap-below-price',
       'direct-send-full-remaining',
@@ -532,10 +533,11 @@ describe('anyTaskUsesTarget — the single-invocation target config (#3958 AC: o
     expect(anyTaskUsesTarget(tasks)).toBe(false)
   })
 
-  it('the real task dir: exactly the two x402 URL tasks use {target}, and the loader validates them', async () => {
+  it('the real task dir: exactly the three x402 URL tasks use {target}, and the loader validates them', async () => {
     const { tasks, invalid } = await loadTasks(TASKS_DIR)
     expect(invalid).toEqual([])
     expect(tasks.filter((t) => t.instruction.includes('{target}')).map((t) => t.id).sort()).toEqual([
+      'x402-eip3009-bridge-vpn-legacy',
       'x402-plain-http-request-mode',
       'x402-price-cap-below-price',
     ])

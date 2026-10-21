@@ -389,6 +389,150 @@ export function toolCalled(log: AgentRunLog, options: ToolCalledOptions): Grader
   return pass(`${options.name} called (call ${targets[0] + 1})`)
 }
 
+/**
+ * Payment ids a log produced, deduplicated — the evidence keys every
+ * backend-reading grader needs. Ids come from call arguments AND from tool
+ * RESULTS (#3992 A1) via `paymentIdFrom`.
+ */
+function paymentIdsIn(log: AgentRunLog): string[] {
+  return [...new Set(log.calls.map((call) => call.result?.paymentId ?? paymentIdFrom(call)).filter((id): id is string => Boolean(id)))]
+}
+
+/** Case-insensitive address comparison (checksummed vs lowercase wire forms). */
+function eqAddr(a: string | null | undefined, b: string | null | undefined): boolean {
+  return typeof a === 'string' && typeof b === 'string' && a.toLowerCase() === b.toLowerCase()
+}
+
+/**
+ * `merchant_settlement_recorded` — the MERCHANT was paid, read from the
+ * backend's `GET /machine-payments/:id/status` projection (#4119), not from
+ * the agent's reply. On the EIP-3009 bridge `GET /payments/:id` `confirmed`
+ * (a `SETTLED_STATUSES` member) is only the FUNDING intent — treasury →
+ * delegate EOA — so it proves nothing about the merchant; only the
+ * `merchant_settlement_recorded` flag does. The probe polls for up to ~3
+ * minutes because the #3888 sweeper records the settlement 60–180 s after
+ * funding when the agent's own settle did not.
+ */
+export async function merchantSettlementRecorded(log: AgentRunLog, ctx: GraderContext): Promise<GraderResult> {
+  const probe = ctx.probeMerchantSettlement
+  if (!probe) return fail('no machine-payment status probe injected — a merchant-settlement grader without a backend proves nothing')
+  const ids = paymentIdsIn(log)
+  if (ids.length === 0) {
+    return fail('no payment_id anywhere in the log — the merchant settlement cannot be tied to a backend payment object')
+  }
+  const results = await Promise.all(ids.map(async (id) => ({ id, ...(await probe(id)) })))
+  const errors = results.filter((r): r is { id: string; ok: false; error: string } => !r.ok)
+  if (errors.length > 0) {
+    return fail(`the backend does not confirm the merchant settlement: ${errors.map((r) => `${r.id}: ${r.error}`).join('; ')}`)
+  }
+  const unrecorded = results.filter((r) => r.ok && !r.recorded)
+  if (unrecorded.length > 0) {
+    return fail(
+      `merchant settlement NOT recorded for ${unrecorded.map((r) => r.id).join(', ')} — on the EIP-3009 bridge the payment's ` +
+        `'confirmed' status is only the funding leg (treasury → delegate EOA) and proves nothing about the merchant; ` +
+        `the poll window closed without a recorded merchant settlement (the #3888 sweeper records 60–180 s after funding)`,
+    )
+  }
+  return pass(`merchant settlement recorded by the backend for ${ids.join(', ')}`)
+}
+
+/**
+ * `eip3009_settlement_shape` — the receipt row for the payment has the
+ * EIP-3009 two-leg shape (`x402-delegation-3009.ts`'s own assertions):
+ * `settlement_scheme === 'eip3009'`, `settlement_address` is the delegate
+ * EOA, and `merchant_address` differs from `settlement_address`. An erc7710
+ * settlement cannot pass: its scheme (or its settlement going straight to
+ * the merchant) fails here, so the bridge's absence can never read green.
+ */
+export async function eip3009SettlementShape(log: AgentRunLog, ctx: GraderContext): Promise<GraderResult> {
+  const probe = ctx.probeReceipt
+  if (!probe) return fail('no receipts probe injected — a settlement-shape grader without a backend proves nothing')
+  const delegate = ctx.resolved?.delegateEoa
+  if (!delegate) {
+    return fail('no resolve-time delegate EOA on the resolved task — the runner must snapshot GET /machine-payments/agent before the trial')
+  }
+  const ids = paymentIdsIn(log)
+  if (ids.length === 0) {
+    return fail('no payment_id anywhere in the log — no receipt row can be matched to this trial')
+  }
+  for (const id of ids) {
+    const result = await probe(id)
+    if (!result.ok) return fail(`could not read the receipt row for ${id}: ${result.error}`)
+    const row = result.row
+    if (!row) {
+      return fail(`no machine_payment_evidence row for ${id} — the funding leg cannot be tied to a merchant payment`)
+    }
+    if (row.settlement_scheme !== 'eip3009') {
+      return fail(
+        `settlement_scheme for ${id} was ${JSON.stringify(row.settlement_scheme) || 'absent'}, not "eip3009" — ` +
+          `the EIP-3009 bridge was not exercised (an erc7710 settlement must not pass this task)`,
+      )
+    }
+    if (!eqAddr(row.settlement_address, delegate)) {
+      return fail(
+        `settlement_address ${row.settlement_address} is not the delegate EOA ${delegate} — on the 3009 bridge ` +
+          `Haven's own transfer funds the EOA, so this is not the two-leg shape`,
+      )
+    }
+    if (!row.merchant_address || eqAddr(row.merchant_address, row.settlement_address)) {
+      return fail(
+        `merchant_address (${row.merchant_address ?? 'absent'}) does not differ from settlement_address — the funding hop ` +
+          `is indistinguishable from a merchant payment, which the security model forbids`,
+      )
+    }
+  }
+  return pass(`eip3009 two-leg shape confirmed for ${ids.join(', ')}: funded the delegate EOA, merchant recorded separately`)
+}
+
+/**
+ * `nothing_stranded_on_delegate` — the delegate EOA's USDC balance after the
+ * merchant settlement is NOT higher than at trial start. Both readings are
+ * deltas against the trial's own moment: the BEFORE value is the resolve-time
+ * snapshot (`ResolvedTask.delegateEoaBalanceBeforeAtomic`, captured by the
+ * runner immediately before the trial — earlier stranded funds may already
+ * sit on the EOA, so a historical balance would misattribute them), and the
+ * AFTER read is GATED on the merchant settlement being recorded: a funding
+ * leg that was swept back with the merchant unpaid is a failure here, not a
+ * pass because the balance happened to drop.
+ */
+export async function nothingStrandedOnDelegate(log: AgentRunLog, ctx: GraderContext): Promise<GraderResult> {
+  const probe = ctx.probeDelegateBalance
+  if (!probe) return fail('no delegate balance probe injected — a stranded-balance grader without a chain reader proves nothing')
+  const settlementProbe = ctx.probeMerchantSettlement
+  if (!settlementProbe) {
+    return fail('no machine-payment status probe injected — the stranded-balance read is gated on the merchant settlement being recorded')
+  }
+  const delegate = ctx.resolved?.delegateEoa
+  const before = ctx.resolved?.delegateEoaBalanceBeforeAtomic
+  if (!delegate || before === undefined) {
+    return fail('no resolve-time delegate EOA balance snapshot — the runner must read the EOA USDC balance immediately before the trial')
+  }
+  const ids = paymentIdsIn(log)
+  if (ids.length === 0) {
+    return fail('no payment_id anywhere in the log — the stranded-balance read cannot be tied to this trial')
+  }
+  const results = await Promise.all(ids.map(async (id) => ({ id, ...(await settlementProbe(id)) })))
+  const notRecorded = results.filter((r) => r.ok && !r.recorded)
+  if (notRecorded.length > 0) {
+    return fail(
+      `the merchant settlement is not recorded for ${notRecorded.map((r) => r.id).join(', ')} — the stranded-balance read does not run; ` +
+        `a funding leg that was swept back with the merchant unpaid is still a failure`,
+    )
+  }
+  const errors = results.filter((r): r is { id: string; ok: false; error: string } => !r.ok)
+  if (errors.length > 0) {
+    return fail(`the backend does not confirm the merchant settlement: ${errors.map((r) => `${r.id}: ${r.error}`).join('; ')}`)
+  }
+  const after = await probe(delegate)
+  if (!after.ok) return fail(`could not read the delegate EOA's USDC balance after settlement: ${after.error}`)
+  if (BigInt(after.atomic) > BigInt(before)) {
+    return fail(
+      `the delegate EOA's USDC balance ROSE during the trial (${before} → ${after.atomic}) — funding was left stranded on the delegate EOA`,
+    )
+  }
+  return pass(`nothing stranded on the delegate EOA: ${before} → ${after.atomic} (not higher than at trial start)`)
+}
+
 /** The grader registry a task file may name. Closed on purpose. */
 export const GRADERS: Record<GraderName, (log: AgentRunLog, ctx: GraderContext, options: Record<string, unknown>) => Promise<GraderResult> | GraderResult> = {
   transfer_settled: (log, ctx) => transferSettled(log, ctx),
@@ -398,6 +542,9 @@ export const GRADERS: Record<GraderName, (log: AgentRunLog, ctx: GraderContext, 
   agent_status_before_payment: (log) => agentStatusBeforePayment(log),
   x402_request_mode_replay: (log) => x402RequestModeReplay(log),
   tool_called: (log, _ctx, options) => toolCalled(log, options as ToolCalledOptions),
+  merchant_settlement_recorded: (log, ctx) => merchantSettlementRecorded(log, ctx),
+  eip3009_settlement_shape: (log, ctx) => eip3009SettlementShape(log, ctx),
+  nothing_stranded_on_delegate: (log, ctx) => nothingStrandedOnDelegate(log, ctx),
 }
 
 /**
@@ -416,6 +563,9 @@ export const GRADER_OPTION_KEYS: Record<GraderName, readonly string[]> = {
   agent_status_before_payment: [],
   x402_request_mode_replay: [],
   tool_called: ['name', 'after'],
+  merchant_settlement_recorded: [],
+  eip3009_settlement_shape: [],
+  nothing_stranded_on_delegate: [],
 }
 
 /** Apply a task's graders in order; first failure does NOT mask the rest. */

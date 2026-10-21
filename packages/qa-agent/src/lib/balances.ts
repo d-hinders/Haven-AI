@@ -82,7 +82,7 @@ export const TREASURY_FALLBACK_FLOOR_ATOMIC = 1_000_000n
  * the Hermes lane's eval agent carries a **3 USDC Daily** budget
  * (`allowance_amount: 3000000`, `reset_period_min: 1440`, checked 2026-10-15),
  * and the Claude Code lane is provisioned to the same size — both lanes run
- * the same 10-task suite, and its drainer (`direct-send-full-remaining`) can
+ * the same 11-task suite, and its drainer (`direct-send-full-remaining`) can
  * spend the WHOLE remaining budget in one night, so one night's budget is the
  * Daily allowance itself.
  *

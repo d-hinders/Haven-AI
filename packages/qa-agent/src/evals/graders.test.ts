@@ -10,13 +10,16 @@ import { describe, expect, it } from 'vitest'
 import {
   agentStatusBeforePayment,
   applyGraders,
+  eip3009SettlementShape,
+  merchantSettlementRecorded,
   noPaymentRetryAfterRefusal,
+  nothingStrandedOnDelegate,
   paymentStatusSettled,
   toolCalled,
   transferSettled,
   x402RequestModeReplay,
 } from './graders.js'
-import type { AgentRunLog, RecordedToolCall, ResolvedTask, EvalTask } from './types.js'
+import type { AgentRunLog, GraderContext, RecordedToolCall, ResolvedTask, EvalTask } from './types.js'
 
 const DEV_PREFIX = 'mcp__haven-eval-dev__'
 
@@ -535,5 +538,176 @@ describe('the 2026-10-20 full-run traces now pass their tasks', () => {
       {},
     )
     expect(results.every((g) => g.pass)).toBe(true)
+  })
+})
+
+// ── #4205: the EIP-3009 bridge task's three signals ─────────────────────────
+//
+// Each reads backend/chain evidence only, never the agent's reply. The four
+// failure scenarios the issue pins: an erc7710 payment, a funded-but-
+// merchant-unpaid payment, a stranded balance, and a funded-then-swept-back
+// payment with the merchant unpaid.
+
+const DELEGATE_EOA = '0x' + '33'.repeat(20)
+const MERCHANT = '0x' + '44'.repeat(20)
+
+const BRIDGE_RESOLVED: ResolvedTask = {
+  ...RESOLVED,
+  task: { ...RESOLVED.task, id: 'x402-eip3009-bridge-vpn-legacy', category: 'x402-paywall', expectTransfer: false },
+  delegateEoa: DELEGATE_EOA,
+  delegateEoaBalanceBeforeAtomic: '1000',
+}
+
+/** The hosted bridge flow's log: intent (payment id), sign, settle. */
+function bridgeLog(): AgentRunLog {
+  return log(
+    [
+      call(`${DEV_PREFIX}haven_pay_mcp_tool`, { result: { ok: true, paymentId: 'p-3009' } }),
+      call(`${DEV_PREFIX}haven_sign_x402`),
+      call(`${DEV_PREFIX}haven_settle_mcp_tool`, { result: { ok: true, paymentId: 'p-3009' } }),
+    ],
+    'Bought the legacy plan through the hosted bridge flow.',
+  )
+}
+
+type ReceiptRow = { settlement_scheme?: string | null; settlement_address?: string | null; merchant_address?: string | null }
+
+const eip3009Receipt = (over: Partial<ReceiptRow> = {}) => async (): Promise<{ ok: true; row: ReceiptRow }> => ({
+  ok: true,
+  row: { settlement_scheme: 'eip3009', settlement_address: DELEGATE_EOA, merchant_address: MERCHANT, ...over },
+})
+
+describe('merchant_settlement_recorded — the merchant was proven paid, never the funding leg', () => {
+  it('passes when the backend records the merchant settlement', async () => {
+    const result = await merchantSettlementRecorded(bridgeLog(), {
+      resolved: BRIDGE_RESOLVED,
+      probeMerchantSettlement: async () => ({ ok: true, recorded: true }),
+    })
+    expect(result.pass).toBe(true)
+  })
+
+  it('FAILS a funded-but-merchant-unpaid payment, even though GET /payments/:id reads confirmed (the funding intent)', async () => {
+    const ctx: GraderContext = {
+      resolved: BRIDGE_RESOLVED,
+      probeMerchantSettlement: async () => ({ ok: true, recorded: false }),
+      // The old signal still passes on its own — which is exactly why the
+      // new one exists: on eip3009 'confirmed' is treasury → delegate only.
+      probePaymentStatus: async () => ({ ok: true, status: 'confirmed' }),
+    }
+    const settled = await paymentStatusSettled(bridgeLog(), ctx)
+    expect(settled.pass).toBe(true)
+    const merchant = await merchantSettlementRecorded(bridgeLog(), ctx)
+    expect(merchant.pass).toBe(false)
+    expect(merchant.detail).toContain('funding leg')
+  })
+
+  it('fails when the status read errors', async () => {
+    const result = await merchantSettlementRecorded(bridgeLog(), {
+      resolved: BRIDGE_RESOLVED,
+      probeMerchantSettlement: async () => ({ ok: false, error: 'HTTP 503' }),
+    })
+    expect(result.pass).toBe(false)
+    expect(result.detail).toContain('HTTP 503')
+  })
+
+  it('fails with no probe or no payment id — the grader proves nothing by construction', async () => {
+    expect((await merchantSettlementRecorded(bridgeLog(), { resolved: BRIDGE_RESOLVED })).pass).toBe(false)
+    expect(
+      (await merchantSettlementRecorded(log([call(`${DEV_PREFIX}haven_get_allowances`)]), {
+        resolved: BRIDGE_RESOLVED,
+        probeMerchantSettlement: async () => ({ ok: true, recorded: true }),
+      })).pass,
+    ).toBe(false)
+  })
+})
+
+describe('eip3009_settlement_shape — the two-leg shape, so an erc7710 payment cannot pass', () => {
+  it('passes on the eip3009 shape: funded the delegate EOA, merchant recorded separately', async () => {
+    const result = await eip3009SettlementShape(bridgeLog(), {
+      resolved: BRIDGE_RESOLVED,
+      probeReceipt: eip3009Receipt(),
+    })
+    expect(result.pass).toBe(true)
+  })
+
+  it('FAILS an erc7710 payment — the scheme is the wrong one', async () => {
+    const result = await eip3009SettlementShape(bridgeLog(), {
+      resolved: BRIDGE_RESOLVED,
+      probeReceipt: eip3009Receipt({ settlement_scheme: 'erc7710' }),
+    })
+    expect(result.pass).toBe(false)
+    expect(result.detail).toContain('erc7710')
+  })
+
+  it('fails when the settlement did not go to the delegate EOA, or merchant equals settlement', async () => {
+    const wrongFunding = await eip3009SettlementShape(bridgeLog(), {
+      resolved: BRIDGE_RESOLVED,
+      probeReceipt: eip3009Receipt({ settlement_address: '0x' + '55'.repeat(20) }),
+    })
+    expect(wrongFunding.pass).toBe(false)
+    expect(wrongFunding.detail).toContain('two-leg shape')
+    const merged = await eip3009SettlementShape(bridgeLog(), {
+      resolved: BRIDGE_RESOLVED,
+      probeReceipt: eip3009Receipt({ merchant_address: DELEGATE_EOA }),
+    })
+    expect(merged.pass).toBe(false)
+    expect(merged.detail).toContain('security model')
+  })
+
+  it('fails when no receipt row matches the payment, or the resolve-time delegate EOA is missing', async () => {
+    const noRow = await eip3009SettlementShape(bridgeLog(), {
+      resolved: BRIDGE_RESOLVED,
+      probeReceipt: async () => ({ ok: true, row: null }),
+    })
+    expect(noRow.pass).toBe(false)
+    expect(noRow.detail).toContain('no machine_payment_evidence row')
+    const noSnapshot = await eip3009SettlementShape(bridgeLog(), { resolved: RESOLVED, probeReceipt: eip3009Receipt() })
+    expect(noSnapshot.pass).toBe(false)
+    expect(noSnapshot.detail).toContain('delegate EOA')
+  })
+})
+
+describe('nothing_stranded_on_delegate — no funding left on the delegate EOA, gated on the merchant being paid', () => {
+  it('passes when the balance did not rise (equal or lower), once the merchant settlement is recorded', async () => {
+    for (const after of ['1000', '900']) {
+      const result = await nothingStrandedOnDelegate(bridgeLog(), {
+        resolved: BRIDGE_RESOLVED,
+        probeMerchantSettlement: async () => ({ ok: true, recorded: true }),
+        probeDelegateBalance: async () => ({ ok: true, atomic: after }),
+      })
+      expect(result.pass, `after=${after}`).toBe(true)
+    }
+  })
+
+  it('FAILS a stranded balance: the funding leg landed and the merchant never pulled it', async () => {
+    const result = await nothingStrandedOnDelegate(bridgeLog(), {
+      resolved: BRIDGE_RESOLVED,
+      probeMerchantSettlement: async () => ({ ok: true, recorded: true }),
+      probeDelegateBalance: async () => ({ ok: true, atomic: '2000' }),
+    })
+    expect(result.pass).toBe(false)
+    expect(result.detail).toContain('stranded')
+  })
+
+  it('FAILS a funded-then-swept-back payment with the merchant unpaid — the drop proves nothing', async () => {
+    const result = await nothingStrandedOnDelegate(bridgeLog(), {
+      resolved: BRIDGE_RESOLVED,
+      probeMerchantSettlement: async () => ({ ok: true, recorded: false }),
+      probeDelegateBalance: async () => ({ ok: true, atomic: '0' }),
+    })
+    expect(result.pass).toBe(false)
+    expect(result.detail).toContain('swept back')
+  })
+
+  it('fails without the probes or the resolve-time before-snapshot — never grades on a historical balance', async () => {
+    const noProbe = await nothingStrandedOnDelegate(bridgeLog(), { resolved: BRIDGE_RESOLVED })
+    expect(noProbe.pass).toBe(false)
+    const noSnapshot = await nothingStrandedOnDelegate(bridgeLog(), {
+      resolved: RESOLVED,
+      probeMerchantSettlement: async () => ({ ok: true, recorded: true }),
+      probeDelegateBalance: async () => ({ ok: true, atomic: '0' }),
+    })
+    expect(noSnapshot.pass).toBe(false)
+    expect(noSnapshot.detail).toContain('resolve-time')
   })
 })

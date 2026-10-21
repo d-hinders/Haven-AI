@@ -1,0 +1,4 @@
+{"type":"test:start","name":"one","nesting":0}
+{"type":"test:pass","name":"one","nesting":0,"testType":"test"}
+{"type":"test:start","name":"two","nesting":0}
+{"type":"test:pass","name":"two","nesting":0,"testType":"test"}

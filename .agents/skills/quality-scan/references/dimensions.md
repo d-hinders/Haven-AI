@@ -76,19 +76,23 @@ import("./scripts/ci/qa-freshness.mjs").then(async (q) => {
 })'
 # Budget (below): 5 census mutations, one per file, newest landing first,
 # plus up to 2 targeted probes — never promise the whole sample. Per mutation:
-# back up, invert or delete the condition the guard names in its own title,
-# run that file, restore, prove.
-cp <prod-file> "$SCRATCH/backup" && sed -i '' 's/<guarded condition>/<inverted>/' <prod-file>
-npx vitest run <test-file> 2>&1 | grep -E 'Tests |Test Files'
-cp "$SCRATCH/backup" <prod-file> && git diff --quiet -- <prod-file> && echo restored
+# invert or delete the condition the guard names in its own title. Save the
+# output above to $SCRATCH/census-<scan>.txt, write one `census` cell per
+# sampled file (plus the probes) to $SCRATCH/prove-red-<scan>-cells.json, then:
+node scripts/ci/prove-red.mjs census --issue <scan> --candidates "$SCRATCH/census-<scan>.txt"
 ```
 
+[prove-red](../../prove-red/SKILL.md) § *census* picks the sample, runs each
+cell against a green baseline, restores and verifies it, and prints the block-1
+table; the cell schema and the classes are there, not here.
+
 Clean: every mutation fails the guard's own assertion (a compile or SQL red
-does not count; see Budget). A survivor is reported with one of the three
+does not count; see Budget). A survivor is reported with one of the four
 diagnoses the repo already uses — *weak test* (asserts something
 the mutation does not touch), *dead code* (the mutated line is unreachable),
-or *not load-bearing at the tested condition* (the guard holds elsewhere) —
-never as a bare count. On `893d74f6`: 9 candidate files; the control mutation
+*not load-bearing at the tested condition* (the guard holds elsewhere), or
+*shadowed* (the named guard stays green while another test catches the
+mutation) — never as a bare count. On `893d74f6`: 9 candidate files; the control mutation
 (#2483's `you should append --json` → `you may append`) took
 `agent-connection-setups.test.ts` from 107 passed to 1 failed; 1 of 1 caught.
 

@@ -1,0 +1,2 @@
+{"type":"test:start","name":"c.test.mjs","nesting":0}
+{"type":"test:fail","name":"c.test.mjs","nesting":0,"testType":"test","error":{"code":"ERR_TEST_FAILURE","failureType":"testCodeFailure","causeName":null,"causeCode":null,"message":"test failed"}}

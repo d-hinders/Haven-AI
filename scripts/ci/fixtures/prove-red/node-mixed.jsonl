@@ -1,0 +1,14 @@
+{"type":"test:start","name":"suite one","nesting":0}
+{"type":"test:start","name":"passes","nesting":1}
+{"type":"test:pass","name":"passes","nesting":1,"testType":"test"}
+{"type":"test:start","name":"fails assert","nesting":1}
+{"type":"test:fail","name":"fails assert","nesting":1,"testType":"test","error":{"code":"ERR_TEST_FAILURE","failureType":"testCodeFailure","causeName":"AssertionError","causeCode":"ERR_ASSERTION","message":"Expected values to be strictly equal:"}}
+{"type":"test:start","name":"inner","nesting":1}
+{"type":"test:start","name":"deep","nesting":2}
+{"type":"test:fail","name":"deep","nesting":2,"testType":"test","error":{"code":"ERR_TEST_FAILURE","failureType":"testCodeFailure","causeName":"TypeError","causeCode":null,"message":"boom"}}
+{"type":"test:fail","name":"inner","nesting":1,"testType":"suite","error":{"code":"ERR_TEST_FAILURE","failureType":"subtestsFailed","causeName":null,"causeCode":null,"message":"1 subtest failed"}}
+{"type":"test:fail","name":"suite one","nesting":0,"testType":"suite","error":{"code":"ERR_TEST_FAILURE","failureType":"subtestsFailed","causeName":null,"causeCode":null,"message":"2 subtests failed"}}
+{"type":"test:start","name":"top","nesting":0}
+{"type":"test:pass","name":"top","nesting":0,"testType":"test"}
+{"type":"test:start","name":"skipped","nesting":0}
+{"type":"test:pass","name":"skipped","nesting":0,"testType":"test","skip":true}

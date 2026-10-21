@@ -199,8 +199,9 @@ If tracking cannot be checked, disclose that limit and mark novelty unverified.
    which states the command, the sample and what clean looks like, so the
    number is quotable as evidence or as a `Probed clean` baseline:
    1. **Guard falsifiability by execution** — mutate what a sampled guard
-      claims to pin and run it; report survivors with one of three diagnoses
-      (weak test / dead code / not load-bearing at the tested condition). This
+      claims to pin and run it; report survivors with one of four diagnoses
+      (weak test / dead code / not load-bearing at the tested condition /
+      shadowed), running the cells with `prove-red census`. This
       is the #1602 *guard effectiveness* dimension made executable, under its
       ledger name (#2307, #2044, #2444).
    2. **Contract-doc `covers:` completeness** — paths the body cites vs the

@@ -919,3 +919,32 @@ test('#3425: a reference GitHub reports AND the text carries is not called manua
   assert.doesNotMatch(v.evidence, /manual connection/)
   assert.doesNotMatch(renderReport([v]), /MANUAL CONNECTION/)
 })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #4235 — the informational `landed-partial` label (owner decision B,
+// 2026-10-21) is written by `release-on-merge.mjs` on a `Refs`-only merge and
+// is NOT read here: a later `Closes #N` PR needs no label removal. And the
+// refusal tells the author to re-run the check after removing the label, since
+// the required job never runs on an issue label change.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('#4235: a closing reference to an issue labelled `landed-partial` is not a violation; twin `operator-verify` is', () => {
+  const body = 'Finishes the remaining modules.\n\nCloses #3031'
+  assert.deepEqual(findViolations({ body, labelsByIssue: { 3031: ['money-path', 'landed-partial'] } }), [])
+  const [v] = findViolations({ body, labelsByIssue: { 3031: ['money-path', OPERATOR_VERIFY_LABEL] } })
+  assert.equal(v.signal, 'label')
+})
+
+test('#4235: the refusal says to re-run the check after removing the label', () => {
+  const report = renderReport(findViolations({ body: 'Closes #99', labelsByIssue: { 99: [OPERATOR_VERIFY_LABEL] } }))
+  const tail = report.split('\n').slice(-4).join('\n')
+  assert.equal(
+    tail,
+    [
+      'If the issue is NOT in operator-verify mode, remove the `operator-verify`',
+      'label (or the sentence quoted above) rather than silencing this check.',
+      'Then re-run this check: removing a label does not re-run it (it runs on a',
+      'pull-request open, push, reopen or edit only).',
+    ].join('\n'),
+  )
+})

@@ -510,6 +510,8 @@ export function renderReport(violations) {
     'See .agents/skills/ship-next/SKILL.md § Commit And Pull Request, step 7.',
     'If the issue is NOT in operator-verify mode, remove the `operator-verify`',
     'label (or the sentence quoted above) rather than silencing this check.',
+    'Then re-run this check: removing a label does not re-run it (it runs on a',
+    'pull-request open, push, reopen or edit only).',
   )
   return lines.join('\n')
 }

@@ -9,9 +9,9 @@ import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { decide, apply, fetchInputs, fetchCandidates, fetchChannel, prFromPayload, AUTO_RELEASE_MARK, CLOSE_WINDOW_MS, decideRefs, decideClose, claimsToRelease, refsReleaseLine, closeReleaseLine, prepareMerge, applyMerge, prepareClose, applyPerClaimant, fetchRefsInputs, closerFromTimeline, closeDeferral, CLOSE_EVENT_TOLERANCE_MS, EPIC_LABEL } from './release-on-merge.mjs'
+import { decide, apply, fetchInputs, fetchCandidates, fetchChannel, prFromPayload, AUTO_RELEASE_MARK, CLOSE_WINDOW_MS, decideRefs, decideClose, claimsToRelease, refsReleaseLine, closeReleaseLine, prepareMerge, applyMerge, prepareClose, applyPerClaimant, fetchRefsInputs, closerFromTimeline, closeDeferral, CLOSE_EVENT_TOLERANCE_MS, EPIC_LABEL, LANDED_PARTIAL_LABEL, applyLabels } from './release-on-merge.mjs'
 import { parse, botReleaseClaimants } from './claim-assignee.mjs'
-import { parseRefsRefs } from './operator-verify-close-guard.mjs'
+import { parseRefsRefs, findViolations, OPERATOR_VERIFY_LABEL } from './operator-verify-close-guard.mjs'
 import { readFileSync } from 'node:fs'
 import { CHANNEL_ISSUE } from './coordination-channel.mjs'
 
@@ -1030,5 +1030,245 @@ describe('#4176 review: only the workflows\' account can release, and epics are 
     const prepared = await prepareMerge({ pr: { ...mergedPr, number: 4131, author: 'AntonioSaaranen', authorType: 'User' }, gh, repo: 'o/r', log: () => {} })
     assert.deepEqual(prepared.decision.releases, [], 'GitHub did not close it')
     assert.deepEqual(prepared.refs.releases.map((r) => r.issue), [4122])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #4235 — Path A also adds the informational `landed-partial` label (owner
+// decision B, 2026-10-21) to each open, non-epic, non-channel `Refs` target
+// authored by a maintainer, whether or not the PR author held a claim. The
+// fixtures are the live cases measured on #4235; every negative is paired
+// with a positive twin that differs only in the guarded field.
+// ---------------------------------------------------------------------------
+
+describe('#4235: a `Refs`-only merge labels the landed issue `landed-partial`', () => {
+  const REPO = 'd-hinders/Haven-AI'
+  const LABEL = { add: [], skipped: [] }
+  /** A `Refs` candidate as `fetchRefsInputs` reads it back (labels + author fields). */
+  const refsIssue = (number, over = {}) => ({ number, state: 'open', closedAt: null, assignees: [], labels: [], author: 'AntonioSaaranen', authorType: 'User', authorAssociation: 'COLLABORATOR', ...over })
+  const addsLabel = (d, n) => d.labels.add.some((l) => l.issue === n && l.label === LANDED_PARTIAL_LABEL)
+  // PR #4222 (PhilipEriksson) merged into dev as 01ffaa494, `Refs #4215`.
+  const pr4222 = { number: 4222, merged: true, mergedAt: '2026-10-21T14:11:20Z', author: 'PhilipEriksson', authorType: 'User', mergeCommit: '01ffaa494aaaaaaa', base: 'dev', defaultBranch: 'dev' }
+  const philipClaim4215 = said('PhilipEriksson', '🔒 CLAIM #4215 — branch `feat/4215-x`', '2026-10-21T09:00:00Z', 4215)
+
+  test('the label name is not `operator-verify`', () => {
+    assert.equal(LANDED_PARTIAL_LABEL, 'landed-partial')
+    assert.notEqual(LANDED_PARTIAL_LABEL, OPERATOR_VERIFY_LABEL)
+  })
+
+  test('#4215/#4222 (open, the author holds a claim): the label, AND the release line byte-identical to the live one', () => {
+    const d = decideRefs({ pr: pr4222, refsIssues: [refsIssue(4215, { labels: ['money-path', 'area:sdk', 'area:docs', 'area:qa'] })], commentsByIssue: { 4215: [philipClaim4215] } })
+    assert.deepEqual(d.labels, { add: [{ issue: 4215, label: 'landed-partial' }], skipped: [] })
+    // The line github-actions[bot] posted on #4215 at 2026-10-21T14:11:24Z.
+    // REFS_RELEASE_MARK is parsed by the projection, so the label is reported
+    // outside this line and the line itself does not change.
+    const live = '🔓 RELEASE #4215 — claim of `PhilipEriksson` — PR #4222 merged (`01ffaa49`, into `dev`) and references the issue with `Refs`, so it stays open for its operator step — posted automatically on a `Refs` merge (#4176).'
+    assert.deepEqual(d.releases, [{ issue: 4215, body: live, unassign: ['PhilipEriksson'] }])
+    assert.deepEqual(botReleaseClaimants(live), { issue: 4215, claimants: ['PhilipEriksson'], path: 'refs' })
+    assert.doesNotMatch(live, /landed-partial/)
+  })
+
+  test('#4123/#4133 shape (no claim by the PR author): the label, and no release line', () => {
+    const pr4133 = { ...pr4222, number: 4133, author: 'AntonioSaaranen', mergeCommit: '55ef0d264aaaaaaa' }
+    // PhilipEriksson claimed and released at 07:13:48Z / 07:15:19Z; the PR author never claimed.
+    const comments = [said('PhilipEriksson', '🔒 CLAIM #4123 — branch `x`', '2026-10-21T07:13:48Z', 4123), said('PhilipEriksson', '🔓 RELEASE #4123 — abandoned: already built in #4133', '2026-10-21T07:15:19Z', 4123)]
+    const d = decideRefs({ pr: pr4133, refsIssues: [refsIssue(4123, { labels: ['money-path', 'area:mcp', 'area:docs'] })], commentsByIssue: { 4123: comments } })
+    assert.deepEqual(d.releases, [], 'nothing to release: the author held no claim')
+    assert.match(d.skipped[0].reason, /no unreleased claim of it by AntonioSaaranen/)
+    assert.deepEqual(d.labels, { add: [{ issue: 4123, label: 'landed-partial' }], skipped: [] }, 'labelled anyway — the label does not wait on a claim')
+  })
+
+  test('an epic `Refs` → no label; twin without `epic` → label', () => {
+    const args = { pr: pr4222, commentsByIssue: {} }
+    const epic = decideRefs({ ...args, refsIssues: [refsIssue(3957, { labels: ['area:qa', 'epic'] })] })
+    assert.deepEqual(epic.labels, LABEL)
+    assert.ok(addsLabel(decideRefs({ ...args, refsIssues: [refsIssue(3957, { labels: ['area:qa'] })] }), 3957))
+  })
+
+  test('a closed issue → no label; twin open → label', () => {
+    const args = { pr: pr4222, commentsByIssue: {} }
+    assert.deepEqual(decideRefs({ ...args, refsIssues: [refsIssue(4111, { state: 'closed', closedAt: '2026-10-19T00:00:00Z' })] }).labels, LABEL)
+    assert.ok(addsLabel(decideRefs({ ...args, refsIssues: [refsIssue(4111)] }), 4111))
+  })
+
+  test('the channel, a pull-request number and an unreadable number → no label; twin issue → label', () => {
+    const args = { pr: pr4222, commentsByIssue: {} }
+    assert.deepEqual(decideRefs({ ...args, refsIssues: [refsIssue(CHANNEL_ISSUE)] }).labels, LABEL)
+    assert.deepEqual(decideRefs({ ...args, refsIssues: [refsIssue(4130, { isPullRequest: true })] }).labels, LABEL)
+    assert.deepEqual(decideRefs({ ...args, refsIssues: [{ number: 9999, unreadable: true, assignees: [] }] }).labels, LABEL)
+    assert.ok(addsLabel(decideRefs({ ...args, refsIssues: [refsIssue(4130)] }), 4130))
+  })
+
+  test('#3645 shape (a bot-authored standing issue, as measured: Bot, CONTRIBUTOR) → no label', () => {
+    // `gh api repos/d-hinders/Haven-AI/issues/3645` → user github-actions[bot], type Bot, author_association CONTRIBUTOR.
+    const d = decideRefs({ pr: pr4222, refsIssues: [refsIssue(3645, { author: 'github-actions[bot]', authorType: 'Bot', authorAssociation: 'CONTRIBUTOR', labels: ['documentation'] })], commentsByIssue: {} })
+    assert.deepEqual(d.labels.add, [])
+    assert.match(d.labels.skipped[0].reason, /not authored by a maintainer \(github-actions\[bot\], Bot, CONTRIBUTOR\)/)
+  })
+
+  test('a bot issue author → no label even with a trusted association; twin `User` → label (only the type differs)', () => {
+    const args = { pr: pr4222, commentsByIssue: {} }
+    assert.deepEqual(decideRefs({ ...args, refsIssues: [refsIssue(3645, { authorType: 'Bot', authorAssociation: 'MEMBER' })] }).labels.add, [])
+    assert.ok(addsLabel(decideRefs({ ...args, refsIssues: [refsIssue(3645, { authorType: 'User', authorAssociation: 'MEMBER' })] }), 3645))
+  })
+
+  test('a non-maintainer (`CONTRIBUTOR`) issue author → no label; twin `COLLABORATOR` → label', () => {
+    const args = { pr: pr4222, commentsByIssue: {} }
+    assert.deepEqual(decideRefs({ ...args, refsIssues: [refsIssue(4300, { authorAssociation: 'CONTRIBUTOR' })] }).labels.add, [])
+    assert.ok(addsLabel(decideRefs({ ...args, refsIssues: [refsIssue(4300, { authorAssociation: 'COLLABORATOR' })] }), 4300))
+    for (const authorAssociation of ['OWNER', 'MEMBER', 'collaborator']) {
+      assert.ok(addsLabel(decideRefs({ ...args, refsIssues: [refsIssue(4300, { authorAssociation })] }), 4300), authorAssociation)
+    }
+  })
+
+  test('author fields that were not read fail closed: no type → no label; twin with `User` → label', () => {
+    const args = { pr: pr4222, commentsByIssue: {} }
+    const { authorType, ...noType } = refsIssue(4300)
+    assert.deepEqual(decideRefs({ ...args, refsIssues: [noType] }).labels.add, [])
+    assert.ok(addsLabel(decideRefs({ ...args, refsIssues: [{ ...noType, authorType: 'User' }] }), 4300))
+  })
+
+  test('a bot-authored PR that `Refs` an open maintainer issue → no label; twin authored by a `User` → label', () => {
+    const args = { refsIssues: [refsIssue(4215)], commentsByIssue: { 4215: [] } }
+    assert.deepEqual(decideRefs({ ...args, pr: { ...pr4222, author: 'dependabot[bot]', authorType: 'Bot' } }).labels, LABEL)
+    assert.ok(addsLabel(decideRefs({ ...args, pr: { ...pr4222, author: 'dependabot[bot]', authorType: 'User' } }), 4215))
+  })
+
+  test('unmerged and a promotion → no label; twin merged into the default branch → label', () => {
+    const args = { refsIssues: [refsIssue(4215)], commentsByIssue: {} }
+    assert.deepEqual(decideRefs({ ...args, pr: { ...pr4222, merged: false } }).labels, LABEL)
+    assert.deepEqual(decideRefs({ ...args, pr: { ...pr4222, base: 'main' } }).labels, LABEL)
+    assert.ok(addsLabel(decideRefs({ ...args, pr: pr4222 }), 4215))
+  })
+
+  test('already labelled → no add, a reason instead; twin unlabelled → add', () => {
+    const args = { pr: pr4222, commentsByIssue: {} }
+    const present = decideRefs({ ...args, refsIssues: [refsIssue(4215, { labels: ['area:sdk', 'landed-partial'] })] })
+    assert.deepEqual(present.labels.add, [])
+    assert.match(present.labels.skipped[0].reason, /already carries `landed-partial`/)
+    assert.ok(addsLabel(decideRefs({ ...args, refsIssues: [refsIssue(4215, { labels: ['area:sdk'] })] }), 4215))
+  })
+
+  // The merge run end to end, with a recorder for every read and write.
+  const runGh = ({ body = '', title = 't', commits = [], closing = [], issues = {}, comments = {} }) => {
+    const calls = []
+    const gh = async (args, opts = {}) => {
+      calls.push({ args, input: opts.input ?? null })
+      if (args[0] === 'api' && args[1] === 'graphql') {
+        const q = args.find((a) => a.startsWith('query=')) ?? ''
+        if (/closingIssuesReferences/.test(q)) return JSON.stringify({ title, closingIssuesReferences: { nodes: closing.map((number) => ({ number })) } })
+        if (/commits\(/.test(q)) return JSON.stringify({ nodes: commits.map((m) => ({ commit: { oid: 'abc', message: m } })), pageInfo: { hasNextPage: false } })
+        if (/title body/.test(q)) return JSON.stringify({ title, body })
+      }
+      if (args[0] === 'api' && args.includes('--paginate')) {
+        const n = Number(args[args.length - 1].match(/issues\/(\d+)\//)[1])
+        return JSON.stringify([(comments[n] ?? []).map(rest)])
+      }
+      if (args[0] === 'api' && /^repos\/[^/]+\/[^/]+\/issues\/\d+$/.test(args[1])) {
+        const n = Number(args[1].split('/').pop())
+        return JSON.stringify(issues[n] ?? { state: 'open', closed_at: null, assignees: [], labels: [], user: { login: 'AntonioSaaranen', type: 'User' }, author_association: 'COLLABORATOR' })
+      }
+      return ''
+    }
+    const labelWrites = () => calls.filter((c) => c.args[0] === 'api' && c.args.includes('POST') && /\/labels$/.test(c.args.find((a) => a.startsWith('repos/')) ?? ''))
+    const addLabelFlags = () => calls.filter((c) => c.args.includes('--add-label'))
+    return { gh, calls, labelWrites, addLabelFlags }
+  }
+  const restIssue = (over = {}) => ({ state: 'open', closed_at: null, assignees: [], labels: [], user: { login: 'AntonioSaaranen', type: 'User' }, author_association: 'COLLABORATOR', ...over })
+  const run = async (fixture, pr = pr4222) => {
+    const r = runGh(fixture)
+    const prepared = await prepareMerge({ pr, gh: r.gh, repo: REPO, log: () => {} })
+    await applyMerge(prepared, { gh: r.gh, repo: REPO, prNumber: pr.number, log: () => {} })
+    return { ...r, prepared }
+  }
+
+  test('the write: one REST add-labels call per issue, the label on stdin, nothing else labelled', async () => {
+    const { labelWrites, addLabelFlags, prepared } = await run({ body: 'Refs #4215', issues: { 4215: restIssue() }, comments: { 4215: [philipClaim4215] } })
+    assert.deepEqual(prepared.refs.labels.add, [{ issue: 4215, label: 'landed-partial' }])
+    assert.deepEqual(labelWrites().map((c) => [c.args, JSON.parse(c.input)]), [[['api', '--method', 'POST', 'repos/d-hinders/Haven-AI/issues/4215/labels', '--input', '-'], { labels: ['landed-partial'] }]])
+    assert.equal(addLabelFlags().length, 0)
+  })
+
+  test('idempotent: a re-run on an issue that already carries the label makes ZERO label writes; twin unlabelled → exactly one', async () => {
+    const line = refsReleaseLine({ issue: 4215, author: 'PhilipEriksson', pr: 4222, where: '`01ffaa49`, into `dev`' })
+    const rerun = await run({ body: 'Refs #4215', issues: { 4215: restIssue({ labels: [{ name: 'landed-partial' }] }) }, comments: { 4215: [philipClaim4215, botSaid(line, '2026-10-21T14:11:24Z', 4215)] } })
+    assert.equal(rerun.labelWrites().length, 0)
+    assert.equal(rerun.addLabelFlags().length, 0)
+    assert.equal(rerun.calls.filter((c) => c.args[0] === 'issue' && c.args[1] === 'comment').length, 0, 'and no second release line')
+    const first = await run({ body: 'Refs #4215', issues: { 4215: restIssue() }, comments: { 4215: [philipClaim4215, botSaid(line, '2026-10-21T14:11:24Z', 4215)] } })
+    assert.equal(first.labelWrites().length, 1)
+  })
+
+  test('a bot-authored PR reads no `Refs` and writes no label (the `prepareMerge` gate); twin `User` → one label write', async () => {
+    const fixture = { body: 'Refs #4215', issues: { 4215: restIssue() } }
+    const bot = await run(fixture, { ...pr4222, author: 'dependabot[bot]', authorType: 'Bot' })
+    assert.equal(bot.labelWrites().length, 0)
+    assert.ok(!bot.calls.some((c) => (c.args.find((a) => a.startsWith('query=')) ?? '').includes('title body')), 'its `Refs` references are not read')
+    const user = await run(fixture, { ...pr4222, author: 'dependabot[bot]', authorType: 'User' })
+    assert.equal(user.labelWrites().length, 1)
+  })
+
+  test('#2876/#2887: a plain mention is not a candidate; twin with `Refs` → labelled', async () => {
+    // PR #2887's body, verbatim: "Prod's key is part of #2876." — no `Refs`.
+    assert.deepEqual(parseRefsRefs("Prod's key is part of #2876.", { repo: REPO }), [])
+    const mention = await run({ body: "Prod's key is part of #2876.", issues: { 2876: restIssue({ user: { login: 'd-hinders', type: 'User' }, author_association: 'OWNER' }) } })
+    assert.deepEqual(mention.prepared.refs.labels, LABEL)
+    assert.equal(mention.labelWrites().length, 0)
+    const refs = await run({ body: "Prod's key is part of Refs #2876.", issues: { 2876: restIssue({ user: { login: 'd-hinders', type: 'User' }, author_association: 'OWNER' }) } })
+    assert.deepEqual(refs.labelWrites().map((c) => c.args[3]), ['repos/d-hinders/Haven-AI/issues/2876/labels'])
+  })
+
+  test('an issue this merge CLOSED is the merge path\'s and is not labelled; the `Refs`-only one beside it is', async () => {
+    const { labelWrites } = await run({
+      closing: [4120],
+      body: 'Closes #4120\nRefs #4120\nRefs #4122',
+      issues: { 4120: restIssue({ state: 'closed', closed_at: '2026-10-21T14:11:21Z' }), 4122: restIssue() },
+    })
+    assert.deepEqual(labelWrites().map((c) => c.args[3]), ['repos/d-hinders/Haven-AI/issues/4122/labels'])
+  })
+
+  test('a refused label write is logged, never thrown, and the releases still go out', async () => {
+    const r = runGh({ body: 'Refs #4215', issues: { 4215: restIssue() }, comments: { 4215: [philipClaim4215] } })
+    const gh = async (args, opts) => {
+      if (args.includes('POST')) throw new Error('HTTP 403')
+      return r.gh(args, opts)
+    }
+    const logs = []
+    const prepared = await prepareMerge({ pr: pr4222, gh, repo: REPO, log: () => {} })
+    const done = await applyMerge(prepared, { gh, repo: REPO, prNumber: 4222, log: (l) => logs.push(l) })
+    assert.ok(logs.some((l) => /could not label #4215 `landed-partial` \(skipped\): HTTP 403/.test(l)))
+    assert.deepEqual(done.map((x) => x.kind), ['comment', 'unassign'])
+  })
+
+  test('applyLabels writes only `add`, logs every skip', async () => {
+    const calls = []
+    const logs = []
+    const done = await applyLabels({ add: [{ issue: 1, label: 'landed-partial' }], skipped: [{ issue: 2, reason: 'already carries `landed-partial` — not adding it twice' }] }, { gh: async (a) => { calls.push(a); return '{}' }, repo: 'o/r', log: (l) => logs.push(l) })
+    assert.deepEqual(calls.map((a) => a[3]), ['repos/o/r/issues/1/labels'])
+    assert.deepEqual(done, [{ kind: 'label', issue: 1, label: 'landed-partial' }])
+    assert.ok(logs.some((l) => /no label on #2: already carries/.test(l)))
+  })
+
+  test('fetchRefsInputs reads the author fields; fetchCandidates (the ownership gate\'s input) does not', async () => {
+    const { gh } = runGh({ body: 'Refs #3645\nRefs #4215', closing: [4215], issues: { 3645: restIssue({ user: { login: 'github-actions[bot]', type: 'Bot' }, author_association: 'CONTRIBUTOR' }), 4215: restIssue() } })
+    const { refsIssues } = await fetchRefsInputs({ gh, repo: REPO, prNumber: 4222 })
+    assert.deepEqual(refsIssues.map((i) => [i.number, i.author, i.authorType, i.authorAssociation]), [[3645, 'github-actions[bot]', 'Bot', 'CONTRIBUTOR'], [4215, 'AntonioSaaranen', 'User', 'COLLABORATOR']])
+    const { closingIssues } = await fetchCandidates({ gh, repo: REPO, prNumber: 4222 })
+    assert.deepEqual(Object.keys(closingIssues[0]).sort(), ['assignees', 'closedAt', 'number', 'state'])
+  })
+
+  test('#3221/#3031 partial delivery: `landed-partial` applied, and the later #3404-shape closing PR gets NO close-guard violation', async () => {
+    // PR #3221 (AntonioSaaranen, merged 2026-09-22) narrowed #3031 to one
+    // module and wrote `Refs #3031`; PR #3404 later closed it with `Closes #3031`.
+    const pr3221 = { ...pr4222, number: 3221, author: 'AntonioSaaranen', mergeCommit: 'c7d0431daaaaaaaa' }
+    const issue3031 = restIssue({ user: { login: 'd-hinders', type: 'User' }, author_association: 'OWNER', labels: [{ name: 'money-path' }, { name: 'area:backend' }, { name: 'area:sdk' }] })
+    const { prepared, labelWrites } = await run({ title: 'feat(x402): enforce the request schema on routes/x402.ts (Refs #3031)', body: 'Refs #3031 — epic #3028 slice 3, **narrowed**', issues: { 3031: issue3031 } }, pr3221)
+    assert.deepEqual(prepared.refs.labels.add, [{ issue: 3031, label: 'landed-partial' }])
+    assert.equal(labelWrites().length, 1)
+    // The later closing PR, #3404's shape: title and body carry `Closes #3031`.
+    const closer = { title: 'feat(backend): money-path slice 3/4 — payments, agent-delegations, machine-payments join enforcedModules (Closes #3031)', body: 'Closes #3031', closingRefs: [3031] }
+    assert.deepEqual(findViolations({ ...closer, labelsByIssue: { 3031: ['money-path', 'area:backend', 'area:sdk', LANDED_PARTIAL_LABEL] } }), [])
+    // Twin — the instrument can say yes: the same PR against `operator-verify` is refused.
+    assert.equal(findViolations({ ...closer, labelsByIssue: { 3031: ['money-path', 'area:backend', 'area:sdk', OPERATOR_VERIFY_LABEL] } }).length, 1)
   })
 })

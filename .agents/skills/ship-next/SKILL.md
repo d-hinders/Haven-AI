@@ -38,6 +38,15 @@ Accept one source:
   Never clear this blocker yourself: removing `external` is a human
   maintainer's decision, and an agent never adds, removes or edits that label
   or the `[external] ` prefix, whoever asks.
+- it carries **`landed-partial`** (#4235): part or all has landed — read the
+  merged PR before building. `release-on-merge.mjs` adds it on a `Refs`-only
+  merge, so the issue is open by design and a merged PR, not an open one, holds
+  the work. In the queue and `epic=` modes, skip it and take the next
+  candidate. For a specified issue, read that PR's body and the issue's latest
+  comments: if what is left is an operator step, or nothing, stop and report
+  what landed and what is outstanding (*Closeout*, operator-verify mode); if
+  the merged PR names code scope it did not build, build only that remainder,
+  and say in your PR body which merged PR landed the rest.
 
 If every remaining candidate is blocked, stop and report the dependency chain instead
 of forcing the lowest number.
@@ -62,7 +71,14 @@ Before selecting new work, find any open pull request linked to the issue. Searc
 for the issue number rather than the keyword (`gh pr list --search "<issue>"`): an
 operator-verify pull request deliberately carries **no** closing keyword (step 7 of
 *Commit And Pull Request*), so a `Closes #<issue>` lookup alone reports "no in-flight
-work" on exactly the pull requests whose issue is still open by design.
+work" on exactly the pull requests whose issue is still open by design. Run it a
+second time for merged ones (`gh pr list --state merged --search "<issue>"`):
+`gh pr list` lists open pull requests only by default, and `--state all` would add
+closed-unmerged ones. A merged PR that `Refs` the issue means part or all of it has
+landed — read that PR and the issue's `landed-partial` label before building. A
+search hit is a prompt to open the PR and read how it references the issue (`Refs`
+or a plain mention), not proof: the search is fuzzy, where the bot's `Refs` parse
+(`parseRefsRefs`) is precise (#4235).
 
 - If it is waiting on CI or has a fixable failure, finish that pull request.
 - If it is waiting on a user decision, migration review, or UX decision, stop and report the blocker.
@@ -89,7 +105,11 @@ for overlap:
   branch activity) whose name references this issue or surface — the main
   pushed-branch check, since sessions no longer link branches (#3425);
 - the candidate issue's assignee and latest comments;
-- `gh pr list --search "<issue-number>"`;
+- `gh pr list --search "<issue-number>"`, and again with `--state merged` — a
+  merged PR that `Refs` the issue means part or all of it has landed: read that
+  PR and the issue's `landed-partial` label before building. A hit is a prompt
+  to open the PR and read how it references the issue (`Refs` or a plain
+  mention), not proof (#4235);
 - the tail of the standing coordination channel,
   [#3193](https://github.com/d-hinders/Haven-AI/issues/3193) (its predecessor #1289 is
   read-only history — a `#1289` link in an old comment is that, not a live channel).
@@ -167,7 +187,11 @@ keywords in title and commits, released only if GitHub closed it by that merge)
 and unassigns everyone; it repeats the line on #3193 when a claim for that issue
 is anywhere in the channel. On a `Refs`-only merge (#4176, operator-verify mode)
 the same run releases your claim, and only yours, on each issue the PR
-references with `Refs #N`: the issue stays open for its operator step. On any
+references with `Refs #N`: the issue stays open for its operator step. It also
+adds the informational `landed-partial` label to each such issue that is open,
+not an epic and written by a maintainer, whether or not you claimed it (#4235);
+no check reads that label, so a later `Closes #N` PR needs no removal, and it
+does not replace the `operator-verify` label you apply by hand. On any
 other close (#4176), `claim-release-on-close.yml` releases every unreleased
 claim on the issue. Release by hand only when you abandon the work — then every
 place you claimed:
@@ -1047,4 +1071,6 @@ operator can run (funded testnet keys, vendor dashboards, live end-to-end runs):
    "code merged".
 4. When the operator confirms (or pastes the output), verify it matches the expected
    evidence, tick the checklist, remove the `operator-verify` label, and close with
-   the evidence links.
+   the evidence links. To find landed issues still waiting for that evidence,
+   `gh issue list --label landed-partial --state open` lists every open issue a
+   merged PR references with `Refs` (#4235; the label can stay on at close).

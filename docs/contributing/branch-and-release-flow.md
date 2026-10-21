@@ -168,6 +168,7 @@ resyncs and 1 divergence.
 | open, with an open PR | in progress |
 | **closed** | **implemented and on `dev`** (the dev-merge fired `Closes #`) |
 | open, labelled `operator-verify` | **implemented and on `dev`**, waiting on a human step — its PR wrote `Refs #<n>` on purpose (#2276) |
+| open, labelled `landed-partial` | **part or all on `dev`** — a merged PR references it with `Refs #<n>`; the merge-time release workflow adds the label to open, non-epic, maintainer-authored issues (#4235). Read that PR before building; no check reads the label, so a later `Closes #<n>` needs no removal |
 
 Issue state tracks **implementation**, never prod. Don't reopen an issue to mean
 "not in prod yet" — that's what the promotion tracking below is for. For an

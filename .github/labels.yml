@@ -42,6 +42,16 @@
   color: "d93f0b"
   description: "Issue outlives the merge: an operator step is outstanding — use `Refs #<n>`, not `Closes`"
 
+# Not a surface label: INFORMATIONAL, and no check reads it (#4235, owner
+# decision B). `scripts/ci/release-on-merge.mjs` adds it on a `Refs`-only merge
+# to each open, non-epic, maintainer-authored issue the PR references, so a
+# landed issue is visibly landed. Unlike `operator-verify` the close guard
+# ignores it: a later `Closes #<n>` PR needs no label removal. ship-next and
+# AGENTS.md read it as "part or all has landed — read the merged PR first".
+- name: "landed-partial"
+  color: "c2e0c6"
+  description: "A merged PR references this with `Refs`: part or all has landed — read that PR before building"
+
 # Not a surface label: a marker for intake from outside the maintainers (#4200).
 # `.github/workflows/external-intake-label.yml` adds it to an issue or PR whose
 # author is neither a maintainer (OWNER/MEMBER/COLLABORATOR) nor a Bot; a

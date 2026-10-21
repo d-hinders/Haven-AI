@@ -106,6 +106,26 @@
 // ownership gate imports `fetchCandidates`, and a `Refs` number there would
 // fail the gate for every PR that `Refs` somebody else's issue.
 //
+// ## Path A also marks the issue landed: `landed-partial` (#4235)
+//
+// A `Refs`-only merge leaves the issue open with nothing machine-readable
+// saying part of it landed: measured on 2026-10-21, four open issues had a
+// merged `Refs` PR and no label (#3019, #3933, #4123, #4215), and the
+// in-flight check (`gh pr list --search`, open PRs only) could not see them.
+// So the same run adds the informational label `LANDED_PARTIAL_LABEL` to each
+// `Refs` candidate that is open, not an epic, not the channel, not a pull
+// request, and AUTHORED BY A MAINTAINER (`author_association` in
+// `TRUSTED_ASSOCIATIONS`, `user.type` `User`) — whether or not the PR author
+// held a claim of it. Option B of #4235's owner decision (2026-10-21): this is
+// NOT `operator-verify`, and the close guard never reads it, so a later
+// `Closes #N` PR needs no label removal. `operator-verify` stays the label a
+// session applies by hand when the PR opens. The decision carries it in its
+// own `labels` field (`{ add, skipped }`), so a decision with no release still
+// says `releases: []`. Idempotent: an issue that already carries the label
+// gets no write. A bot-authored PR labels nothing (see `decideRefs`). The
+// label is left on when the issue closes: it is harmless there, and the sweep
+// (`gh issue list --label landed-partial --state open`) reads open issues only.
+//
 // ## Path B: a close with no merge behind it (#4176)
 //
 // `.github/workflows/claim-release-on-close.yml` runs `--close-event` on
@@ -338,6 +358,22 @@ export function claimsToRelease({ issue, comments, only = null, channelIssue = C
 export const EPIC_LABEL = 'epic'
 const isEpic = (issue) => (issue?.labels ?? []).some((l) => String(l).toLowerCase() === EPIC_LABEL)
 
+/**
+ * The informational label Path A adds on a `Refs`-only merge (#4235, owner
+ * decision B). Not `operator-verify`: the close guard does not read this one.
+ * `.github/labels.yml` declares it.
+ */
+export const LANDED_PARTIAL_LABEL = 'landed-partial'
+const carriesLabel = (issue, name) => (issue?.labels ?? []).some((l) => String(l).toLowerCase() === name)
+/**
+ * Authored by a maintainer: `author_association` OWNER / MEMBER / COLLABORATOR
+ * and a person. `authorType` must read `User`; a missing one (an author field
+ * that was not fetched) fails closed — unlike `isTrustedPerson`, which reads
+ * comments whose type the REST shape always carries.
+ */
+const isMaintainerAuthored = (issue) =>
+  TRUSTED_ASSOCIATIONS.has(String(issue?.authorAssociation ?? '').toUpperCase()) && issue?.authorType === 'User'
+
 const claimantList = (logins) => `${logins.length === 1 ? 'claim' : 'claims'} of ${logins.map((l) => `\`${l}\``).join(', ')}`
 
 /** Path A's line. Pinned by test; `botReleaseClaimants` parses it. */
@@ -357,21 +393,34 @@ export function closeReleaseLine({ issue, claimants, closer }) {
  * issue stays open for its operator step; other sessions' claims and
  * assignees are untouched.
  *
+ * It also decides the `landed-partial` label (#4235), in its own `labels`
+ * field and independently of any claim: `labels.add` lists each candidate that
+ * is open, not an epic, not the channel, not a pull request, authored by a
+ * maintainer, and not already labelled; `labels.skipped` says why an open,
+ * non-epic candidate gets no write (a non-maintainer or bot author, or the
+ * label is already there). Every other skip is in `skipped`, as before.
+ *
  * @param {object} o
  * @param {object} o.pr                 as for `decide`
- * @param {{number:number, state?:string, assignees?:string[], labels?:string[], isPullRequest?:boolean, unreadable?:boolean}[]} o.refsIssues
+ * @param {{number:number, state?:string, assignees?:string[], labels?:string[], author?:string, authorType?:string, authorAssociation?:string, isPullRequest?:boolean, unreadable?:boolean}[]} o.refsIssues
  *        from `fetchRefsInputs` — the merge path's releases already excluded
  * @param {Record<number, object[]>} o.commentsByIssue  each open issue's comments (`readComments`)
  * @param {object[]} [o.channelComments] the channel's comments (`readComments`)
- * @returns {{releases: {issue:number, body:string|null, unassign:string[]}[], channel: {body:string}|null, skipped: {issue:number, reason:string}[]}}
+ * @returns {{releases: {issue:number, body:string|null, unassign:string[]}[], channel: {body:string}|null, skipped: {issue:number, reason:string}[], labels: {add: {issue:number, label:string}[], skipped: {issue:number, reason:string}[]}}}
  *          `body: null` means that thread already carries this release (a re-run)
  */
 export function decideRefs({ pr, refsIssues, commentsByIssue = {}, channelComments = [], channelIssue = CHANNEL_ISSUE }) {
-  const none = { releases: [], channel: null, skipped: [] }
+  const none = { releases: [], channel: null, skipped: [], labels: { add: [], skipped: [] } }
   if (!pr || pr.merged !== true) return none
   if (!Number.isInteger(pr.number) || pr.number <= 0) return none
   if (pr.defaultBranch && pr.base !== pr.defaultBranch) return none
-  // A bot author (dependabot) holds no claim.
+  // A bot author (dependabot) holds no claim. A DECISION for the label too
+  // (#4235, partner review 2026-10-21), not an accident of this early return:
+  // a bot-authored PR never adds `landed-partial`, whatever it `Refs` — none
+  // of the last 200 merged `dev` PRs (since 2026-10-10) had a bot author
+  // (measured on #4235's review), and
+  // a bot's `Refs` line is not a person saying part of the issue landed.
+  // `prepareMerge` makes the same decision before any read.
   if (!(pr.authorType === undefined || pr.authorType === 'User') || !pr.author) return none
 
   const sha = typeof pr.mergeCommit === 'string' && /^[0-9a-f]{7,40}$/i.test(pr.mergeCommit) ? pr.mergeCommit.slice(0, 8) : null
@@ -380,6 +429,7 @@ export function decideRefs({ pr, refsIssues, commentsByIssue = {}, channelCommen
   const releases = []
   const skipped = []
   const channelLines = []
+  const labels = { add: [], skipped: [] }
   for (const issue of refsIssues ?? []) {
     const n = Number(issue?.number)
     if (!Number.isInteger(n) || n <= 0 || n === channelIssue) continue
@@ -404,6 +454,15 @@ export function decideRefs({ pr, refsIssues, commentsByIssue = {}, channelCommen
       skipped.push({ issue: n, reason: `is labelled \`${EPIC_LABEL}\` — a slice's \`Refs\` does not release an epic's claim` })
       continue
     }
+    // The label (#4235) is decided BEFORE the claim check: an issue whose
+    // `Refs` PR was built without a claim (the #4123/#4133 shape) landed too.
+    if (!isMaintainerAuthored(issue)) {
+      labels.skipped.push({ issue: n, reason: `not authored by a maintainer (${issue.author ?? 'unknown author'}, ${issue.authorType ?? 'no type'}, ${issue.authorAssociation ?? 'no association'}) — no \`${LANDED_PARTIAL_LABEL}\` label` })
+    } else if (carriesLabel(issue, LANDED_PARTIAL_LABEL)) {
+      labels.skipped.push({ issue: n, reason: `already carries \`${LANDED_PARTIAL_LABEL}\` — not adding it twice` })
+    } else {
+      labels.add.push({ issue: n, label: LANDED_PARTIAL_LABEL })
+    }
     const comments = [...(commentsByIssue[n] ?? []), ...(channelComments ?? [])]
     const { onIssue, onChannel } = claimsToRelease({ issue: n, comments, only: [pr.author], channelIssue })
     if (onIssue.length === 0 && onChannel.length === 0) {
@@ -414,7 +473,7 @@ export function decideRefs({ pr, refsIssues, commentsByIssue = {}, channelCommen
     releases.push({ issue: n, body: onIssue.length ? body : null, unassign: [pr.author] })
     if (onChannel.length) channelLines.push(body)
   }
-  return { releases, channel: channelLines.length ? { body: channelLines.join('\n') } : null, skipped }
+  return { releases, channel: channelLines.length ? { body: channelLines.join('\n') } : null, skipped, labels }
 }
 
 /**
@@ -620,7 +679,11 @@ async function readCommitMessages({ gh, vars }) {
   throw new Error('more than 500 commits on this pull request; refusing to read a partial list')
 }
 
-/** Read EVERY candidate back: state, when it closed, who is assigned now. */
+/**
+ * Read EVERY candidate back: state, when it closed, who is assigned now. With
+ * `labels` (Path A only) also its labels and its author fields — who wrote it,
+ * their account type and `author_association` — for the `landed-partial` rule.
+ */
 async function readBack({ gh, repo, numbers, labels = false }) {
   const out = []
   for (const n of numbers) {
@@ -633,7 +696,14 @@ async function readBack({ gh, repo, numbers, labels = false }) {
         closedAt: issue?.closed_at ?? null,
         ...(issue?.pull_request ? { isPullRequest: true } : {}),
         // Path A only: `fetchCandidates`' output (the ownership gate's input) is unchanged.
-        ...(labels ? { labels: (issue?.labels ?? []).map((l) => (typeof l === 'string' ? l : l?.name)).filter(Boolean) } : {}),
+        ...(labels
+          ? {
+              labels: (issue?.labels ?? []).map((l) => (typeof l === 'string' ? l : l?.name)).filter(Boolean),
+              author: issue?.user?.login ?? null,
+              authorType: issue?.user?.type ?? null,
+              authorAssociation: issue?.author_association ?? null,
+            }
+          : {}),
       })
     } catch {
       out.push({ number: n, assignees: [], unreadable: true })
@@ -910,6 +980,9 @@ export async function prepareMerge({ pr, gh, repo, channelIssue = CHANNEL_ISSUE,
   const first = decide({ pr, closingIssues, channelIssue })
   let refsInputs = { refsIssues: [], commentsByIssue: {} }
   let refsError = null
+  // Decided, not incidental (#4235): a bot-authored PR gets no Path A at all —
+  // no release (a bot holds no claim) and no `landed-partial` label — so its
+  // `Refs` references are not even read. `decideRefs` returns empty for it too.
   if (pr.authorType === undefined || pr.authorType === 'User') {
     try {
       refsInputs = await fetchRefsInputs({ gh, repo, prNumber: pr.number, exclude: first.releases.map((r) => r.issue) })
@@ -928,8 +1001,38 @@ export async function prepareMerge({ pr, gh, repo, channelIssue = CHANNEL_ISSUE,
 }
 
 /**
+ * Add the labels Path A decided (`decideRefs`' `labels`, #4235). One REST
+ * write per issue — `POST /repos/{repo}/issues/{n}/labels`, body on stdin —
+ * and none for an issue the decision skipped (already labelled, or not a
+ * maintainer's). The REST call, not `gh issue edit --add-label`: `gh issue
+ * edit` resolves the name first and refuses one the repository lacks (its
+ * `could not add label: '%s' not found`), while the add-labels endpoint is
+ * widely reported to create a missing label — NOT measured here, and GitHub's
+ * reference page does not say. It matters at most once: on the merge that
+ * ships this code, `labels.yml`'s sync runs on the same push and may not have
+ * created the label yet. If the write is refused there, it is logged like any
+ * other refusal (never thrown) and the next `Refs` merge labels as designed;
+ * the sync sets the colour and description either way.
+ */
+export async function applyLabels(labels, { gh, repo, log = console.log }) {
+  const done = []
+  for (const s of labels?.skipped ?? []) log(`  no label on #${s.issue}: ${s.reason}`)
+  for (const { issue, label } of labels?.add ?? []) {
+    try {
+      await gh(['api', '--method', 'POST', `repos/${repo}/issues/${issue}/labels`, '--input', '-'], { input: JSON.stringify({ labels: [label] }) })
+      log(`  labelled #${issue} \`${label}\``)
+      done.push({ kind: 'label', issue, label })
+    } catch (e) {
+      log(`  could not label #${issue} \`${label}\` (skipped): ${e?.message ?? e}`)
+    }
+  }
+  return done
+}
+
+/**
  * Post what `prepareMerge` decided. The channel lines of both paths go out as
- * ONE comment (`apply`'s `channelExtra`); Path A's issue threads after.
+ * ONE comment (`apply`'s `channelExtra`); Path A's issue threads after, then
+ * Path A's labels.
  */
 export async function applyMerge({ decision, refs, channelBodies }, { gh, repo, prNumber, channelIssue = CHANNEL_ISSUE, log = console.log }) {
   const channelExtra = refs?.channel?.body ?? null
@@ -937,6 +1040,7 @@ export async function applyMerge({ decision, refs, channelBodies }, { gh, repo, 
   if (decision.releases.length === 0 && decision.skipped.length === 0 && !channelExtra) log('This merge closed no issue — nothing to release.')
   else done.push(...(await apply(decision, { gh, repo, prNumber, channelIssue, channelBodies, channelExtra, log })))
   if (refs && (refs.releases.length || refs.skipped.length)) done.push(...(await applyPerClaimant(refs, { gh, repo, channelIssue, channel: false, log })))
+  if (refs?.labels) done.push(...(await applyLabels(refs.labels, { gh, repo, log })))
   return done
 }
 

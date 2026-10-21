@@ -58,7 +58,6 @@ import {
   isTimeoutShaped,
   timeoutEvidence,
   npmSwallowedFlags,
-  isHighLoad,
   readMachineLoad,
   runBattery,
   summarize,
@@ -1523,19 +1522,10 @@ describe('timeout shapes (#4175)', () => {
   })
 })
 
+// `isHighLoad` and its two tests are gone with #4191: the load no longer gates
+// the re-run, so there is no threshold left to pin. The zero-reading case is
+// covered where it now matters, in the any-load tests below.
 describe('load reading (#4175)', () => {
-  test('high means strictly above the CPU count', () => {
-    assert.equal(isHighLoad({ load: 8.01, cpus: 8 }), true)
-    assert.equal(isHighLoad({ load: 8, cpus: 8 }), false)
-    assert.equal(isHighLoad({ load: 3, cpus: 8 }), false)
-  })
-
-  test('a zero reading on either side never reads as high (Windows, empty os.cpus())', () => {
-    assert.equal(isHighLoad({ load: 0, cpus: 8 }), false)
-    assert.equal(isHighLoad({ load: 0, cpus: 0 }), false)
-    assert.equal(isHighLoad({ load: 5, cpus: 0 }), false)
-  })
-
   test('readMachineLoad reads the 1-minute average and the CPU count', () => {
     const sample = readMachineLoad()
     assert.equal(typeof sample.load, 'number')
@@ -1596,7 +1586,7 @@ describe('the load-aware re-run (#4175)', () => {
     assert.deepEqual([outcome.red, outcome.redAlone], [[], []])
     assert.ok(
       summary.err.includes(
-        '!   npm run test -w packages/x  red under load 12.00 on 8 CPU(s), green alone at load 3.00 on 8 CPU(s)',
+        '!   npm run test -w packages/x  red at load 12.00 on 8 CPU(s), green alone at load 3.00 on 8 CPU(s)',
       ),
       summary.err.join('\n'),
     )
@@ -1604,7 +1594,7 @@ describe('the load-aware re-run (#4175)', () => {
     // The first run's evidence stays beside the gate: the line naming the
     // test, then the timeout line, from the run the re-run superseded.
     const at = summary.err.indexOf(
-      '!   npm run test -w packages/x  red under load 12.00 on 8 CPU(s), green alone at load 3.00 on 8 CPU(s)',
+      '!   npm run test -w packages/x  red at load 12.00 on 8 CPU(s), green alone at load 3.00 on 8 CPU(s)',
     )
     assert.deepEqual(summary.err.slice(at + 1), [
       '!        FAIL  src/infra/__tests__/reconcile.test.ts > reconcile > settles once',
@@ -1615,8 +1605,8 @@ describe('the load-aware re-run (#4175)', () => {
     assert.equal(
       summary.err.find((l) => l.includes('(exit 3, not a pass)')),
       '\n! 1 gate(s) red under load, green alone (exit 3, not a pass).\n' +
-        '! Each was timeout-shaped and red with the load above the CPU count before it\n' +
-        '! started, then green re-run by itself. Investigate before you quote it: open\n' +
+        '! Each was timeout-shaped and red, then green re-run by itself; the loads are\n' +
+        '! evidence, not the reason it was re-run. Investigate before you quote it: open\n' +
         '! the timed-out test and look for work inside the timed body that is slow only\n' +
         '! under contention. #4126 and #4134 were real defects of this shape (a cold\n' +
         '! import inside a timed test). If it is not plainly load, file an issue and\n' +
@@ -1641,7 +1631,7 @@ describe('the load-aware re-run (#4175)', () => {
     assert.ok(
       summary.err.includes(
         '── npm run test -w packages/x  → reddens: npm run test -w packages/x job\n' +
-          '   red under load 12.00 on 8 CPU(s), red alone at load 4.00 on 8 CPU(s)',
+          '   red at load 12.00 on 8 CPU(s), red alone at load 4.00 on 8 CPU(s)',
       ),
       summary.err.join('\n'),
     )
@@ -1658,26 +1648,79 @@ describe('the load-aware re-run (#4175)', () => {
     assert.deepEqual(outcome.red.map((r) => r.command), ['npm run test -w packages/x'])
   })
 
-  test('a timeout-shaped red at load equal to the CPU count is not re-run', () => {
-    const { outcome, calls } = drive({ 'npm run test -w packages/x': [{ ok: false, output: VITEST_TEST_TIMEOUT }] }, {
-      load: 8,
-    })
-    assert.deepEqual(calls, ['npm run test -w packages/x'])
-    assert.equal(outcome.code, EXIT.RED)
-    assert.deepEqual(outcome.red.map((r) => r.command), ['npm run test -w packages/x'])
+  test('a red that is not timeout-shaped is never re-run, at any load (#4191)', () => {
+    // An assertion (a NEVER_LOAD_SHAPE) and a plain red that is neither shape.
+    for (const output of [VITEST_ASSERTION, 'lint:a: 1 new violation']) {
+      for (const load of [0, 0.5, 4, 8, 8.01, 40]) {
+        const { outcome, calls } = drive({ 'npm run test -w packages/x': [{ ok: false, output }] }, { load })
+        assert.deepEqual(calls, ['npm run test -w packages/x'], `re-run at load ${load}: ${output}`)
+        assert.equal(outcome.code, EXIT.RED)
+        assert.deepEqual(outcome.red.map((r) => r.command), ['npm run test -w packages/x'])
+      }
+    }
+  })
+
+  test('a timeout-shaped red at 0.8x the CPU count is queued and re-run (#4191)', () => {
+    const { outcome, calls, samples } = drive(
+      { 'npm run test -w packages/x': [{ ok: false, output: VITEST_TEST_TIMEOUT, loadAfter: 3 }, { ok: true }] },
+      { load: 0.8 * 8 },
+    )
+    assert.deepEqual(calls, ['npm run test -w packages/x', 'npm run test -w packages/x'])
+    assert.equal(outcome.results[0].queued, true)
+    // The reading is still taken and kept, as evidence.
+    assert.deepEqual(samples, [6.4, 3])
+    assert.deepEqual(outcome.greenAlone.map((r) => [r.load, r.rerun.load]), [[6.4, 3]])
+    // Green alone is exit 3, never a pass.
+    assert.equal(outcome.code, EXIT.RED_UNDER_LOAD)
+  })
+
+  test("#4191's observed reds (11.78, 9.36, 9.18 on 12 CPUs) are all re-run", () => {
+    const { outcome, calls } = drive({
+      'npm run test -w packages/ops': [{ ok: false, output: VITEST_RPC_TIMEOUT, loadAfter: 9.36 }, { ok: true }],
+      'npm run test -w packages/backend': [{ ok: false, output: VITEST_TEST_TIMEOUT, loadAfter: 9.18 }, { ok: true }],
+      'npm run test -w packages/frontend': [{ ok: false, output: VITEST_RPC_TIMEOUT }, { ok: true }],
+    }, { load: 11.78, cpus: 12 })
+    assert.equal(calls.length, 6)
+    assert.deepEqual(
+      outcome.greenAlone.map((r) => [r.command, r.load]),
+      [
+        ['npm run test -w packages/ops', 11.78],
+        ['npm run test -w packages/backend', 9.36],
+        ['npm run test -w packages/frontend', 9.18],
+      ],
+    )
+    assert.equal(outcome.code, EXIT.RED_UNDER_LOAD)
+  })
+
+  // Was "at load equal to the CPU count is not re-run", which pinned the
+  // `load > cpus` gate that #4191 removed. Inverted, and widened to the low
+  // end, including the zero reading Windows gives.
+  test('a timeout-shaped red is re-run at any load, the CPU count and zero included (#4191)', () => {
+    for (const load of [0, 2, 8]) {
+      const { outcome, calls } = drive(
+        { 'npm run test -w packages/x': [{ ok: false, output: VITEST_TEST_TIMEOUT }, { ok: false, output: VITEST_TEST_TIMEOUT }] },
+        { load },
+      )
+      assert.deepEqual(calls, ['npm run test -w packages/x', 'npm run test -w packages/x'], `load ${load}`)
+      assert.equal(outcome.code, EXIT.RED)
+      assert.deepEqual(outcome.redAlone.map((r) => r.command), ['npm run test -w packages/x'])
+    }
   })
 
   test("load is read BEFORE the gate starts, so the gate's own workers do not count", () => {
     // The machine is quiet (2 on 8 CPUs) until the gate's own pool lifts the
     // 1-minute average to 20, and the average is still 20 when it ends. A
-    // reading taken at the end would call that other agents' load.
+    // reading taken at the end would record that as the load it started under.
+    // Since #4191 the reading decides nothing, so the gate is re-run either
+    // way; what is pinned is which reading is recorded.
     const { outcome, calls, samples } = drive(
-      { 'npm run test -w packages/x': [{ ok: false, output: VITEST_TEST_TIMEOUT, loadDuring: 20 }] },
+      { 'npm run test -w packages/x': [{ ok: false, output: VITEST_TEST_TIMEOUT, loadDuring: 20 }, { ok: true }] },
       { load: 2 },
     )
-    assert.deepEqual(samples, [2])
-    assert.deepEqual(calls, ['npm run test -w packages/x'])
-    assert.equal(outcome.code, EXIT.RED)
+    assert.deepEqual(samples, [2, 20])
+    assert.deepEqual(calls, ['npm run test -w packages/x', 'npm run test -w packages/x'])
+    assert.deepEqual(outcome.greenAlone.map((r) => [r.load, r.rerun.load]), [[2, 20]])
+    assert.equal(outcome.code, EXIT.RED_UNDER_LOAD)
   })
 
   test('each queued gate is re-run exactly once, after the last selected gate', () => {
@@ -1722,7 +1765,7 @@ describe('the load-aware re-run (#4175)', () => {
     assert.equal(mixed.outcome.code, EXIT.RED)
     // The forgiven gate is still listed beside the red one, never folded away.
     assert.ok(
-      mixed.summary.err.some((l) => l.startsWith('!   npm run test -w packages/b  red under load 12.00')),
+      mixed.summary.err.some((l) => l.startsWith('!   npm run test -w packages/b  red at load 12.00')),
       mixed.summary.err.join('\n'),
     )
   })

@@ -1113,7 +1113,7 @@ describe('the gate output buffer (#3954)', () => {
 })
 
 // ── #4175: static/suite classes, static-first order, --static, flag refusal,
-//    and the load-aware re-run ────────────────────────────────────────────────
+//    and the timeout re-run    ────────────────────────────────────────────────
 
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', '..')
 
@@ -1533,7 +1533,7 @@ describe('load reading (#4175)', () => {
   })
 })
 
-describe('the load-aware re-run (#4175)', () => {
+describe('the timeout-shaped re-run, at any load (#4175, #4191)', () => {
   /**
    * Drive `runBattery` with a scripted runner, a modelled machine and a clock.
    * Each command maps to the attempts it will make, in order. An attempt can
@@ -1574,7 +1574,7 @@ describe('the load-aware re-run (#4175)', () => {
     return { outcome, calls, samples, summary: summarize(outcome) }
   }
 
-  test('a timeout-shaped red above the CPU count, green alone: its own group, exit 3', () => {
+  test('a timeout-shaped red, green alone: its own group, exit 3', () => {
     const { outcome, calls, samples, summary } = drive({
       'npm run test -w packages/x': [{ ok: false, output: VITEST_TEST_TIMEOUT, loadAfter: 3 }, { ok: true }],
     })
@@ -1590,7 +1590,7 @@ describe('the load-aware re-run (#4175)', () => {
       ),
       summary.err.join('\n'),
     )
-    assert.ok(summary.err.some((l) => l.includes('red under load, green alone (exit 3, not a pass)')))
+    assert.ok(summary.err.some((l) => l.includes('timed out, green alone (exit 3, not a pass)')))
     // The first run's evidence stays beside the gate: the line naming the
     // test, then the timeout line, from the run the re-run superseded.
     const at = summary.err.indexOf(
@@ -1604,7 +1604,7 @@ describe('the load-aware re-run (#4175)', () => {
     // let "Investigate before you quote it" go back to "Quote this list".
     assert.equal(
       summary.err.find((l) => l.includes('(exit 3, not a pass)')),
-      '\n! 1 gate(s) red under load, green alone (exit 3, not a pass).\n' +
+      '\n! 1 gate(s) timed out, green alone (exit 3, not a pass).\n' +
         '! Each was timeout-shaped and red, then green re-run by itself; the loads are\n' +
         '! evidence, not the reason it was re-run. Investigate before you quote it: open\n' +
         '! the timed-out test and look for work inside the timed body that is slow only\n' +
@@ -1612,7 +1612,7 @@ describe('the load-aware re-run (#4175)', () => {
         '! import inside a timed test). If it is not plainly load, file an issue and\n' +
         '! link it next to this list in the PR body. Do not re-run until green.',
     )
-    assert.deepEqual(summary.out, [], 'a load-red run printed a green line')
+    assert.deepEqual(summary.out, [], 'an exit-3 run printed a green line')
     // The injected clock reached the result.
     assert.equal(outcome.results[0].seconds, '0.5')
   })
@@ -1639,7 +1639,7 @@ describe('the load-aware re-run (#4175)', () => {
     assert.ok(summary.err.some((l) => l.includes('Hook timed out in 10000ms.')))
   })
 
-  test('an assertion failure at high load is not re-run', () => {
+  test('an assertion failure is not re-run, even at load 40', () => {
     const { outcome, calls } = drive({ 'npm run test -w packages/x': [{ ok: false, output: VITEST_ASSERTION }] }, {
       load: 40,
     })
@@ -1696,12 +1696,14 @@ describe('the load-aware re-run (#4175)', () => {
   // `load > cpus` gate that #4191 removed. Inverted, and widened to the low
   // end, including the zero reading Windows gives.
   test('a timeout-shaped red is re-run at any load, the CPU count and zero included (#4191)', () => {
-    for (const load of [0, 2, 8]) {
+    // `cpus: 0` is an empty `os.cpus()` (some containers): no CPU count is no
+    // reason to skip the re-run either.
+    for (const [load, cpus] of [[0, 8], [2, 8], [8, 8], [0, 0], [3, 0]]) {
       const { outcome, calls } = drive(
         { 'npm run test -w packages/x': [{ ok: false, output: VITEST_TEST_TIMEOUT }, { ok: false, output: VITEST_TEST_TIMEOUT }] },
-        { load },
+        { load, cpus },
       )
-      assert.deepEqual(calls, ['npm run test -w packages/x', 'npm run test -w packages/x'], `load ${load}`)
+      assert.deepEqual(calls, ['npm run test -w packages/x', 'npm run test -w packages/x'], `load ${load} on ${cpus} CPU(s)`)
       assert.equal(outcome.code, EXIT.RED)
       assert.deepEqual(outcome.redAlone.map((r) => r.command), ['npm run test -w packages/x'])
     }

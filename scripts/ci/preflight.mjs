@@ -36,8 +36,8 @@
 //   node scripts/ci/preflight.mjs --base=<ref> # diff against something else
 //   node scripts/ci/preflight.mjs --static     # only the static ratchets, then stop
 //
-// Static entries run first (#4175), and a red that is timeout-shaped while the
-// machine was loaded is re-run alone at the end: see `runBattery`.
+// Static entries run first (#4175), and a timeout-shaped red is re-run alone at
+// the end, at any load: see `runBattery`.
 //
 // Dependency-free (no YAML parser), like everything in this directory, so it
 // runs from a bare checkout and its self-test runs in `ci_config_checks`.
@@ -861,7 +861,7 @@ export const TIMEOUT_SHAPES = Object.freeze([
  * What stays out: a plain `Error` or `TypeError` thrown NEXT TO a timeout (an
  * `afterAll` that tears down what a timed-out `beforeAll` never built is the
  * common one). Such a gate can be re-run, and if it is green alone it lands in
- * the "red under load, green alone" group with exit 3, never in a pass.
+ * the "timed out, green alone" group with exit 3, never in a pass.
  */
 export const NEVER_LOAD_SHAPES = Object.freeze([
   /\bAssertionError\b/,
@@ -907,7 +907,7 @@ export function readMachineLoad() {
 }
 
 /**
- * Run the selected gates in order, then re-run the load-shaped reds alone.
+ * Run the selected gates in order, then re-run the timeout-shaped reds alone.
  *
  * Exported, with the runner, the load reader and the clock injected, so
  * `preflight.test.mjs` drives it with no real gate and no real load.
@@ -1040,7 +1040,7 @@ export function summarize({ code, results, red, redAlone, greenAlone, skippedDb 
 
   if (greenAlone.length > 0) {
     err.push(
-      `\n! ${greenAlone.length} gate(s) red under load, green alone (exit ${EXIT.RED_UNDER_LOAD}, not a pass).\n` +
+      `\n! ${greenAlone.length} gate(s) timed out, green alone (exit ${EXIT.RED_UNDER_LOAD}, not a pass).\n` +
         '! Each was timeout-shaped and red, then green re-run by itself; the loads are\n' +
         '! evidence, not the reason it was re-run. Investigate before you quote it: open\n' +
         '! the timed-out test and look for work inside the timed body that is slow only\n' +
@@ -1207,7 +1207,7 @@ async function main(argv) {
     onStart: (gate, phase) => {
       if (phase === 'rerun' && !announcedRerun) {
         announcedRerun = true
-        console.log('\npreflight: re-running the load-shaped reds alone:')
+        console.log('\npreflight: re-running the timeout-shaped reds alone:')
       }
       // TTY only: `\r` does not overwrite in a pipe, so a redirected run would
       // carry a duplicate half-line for every gate.

@@ -81,7 +81,9 @@ describe('a dial that lands after its test ended fails the file (#4217)', () => 
             '--reporter=json',
             `--outputFile=${reportPath}`,
           ],
-          { cwd: PACKAGE_ROOT, encoding: 'utf-8' },
+          // spawnSync blocks this worker's event loop, so the vitest timeout below
+          // cannot fire: bound the child here instead.
+          { cwd: PACKAGE_ROOT, encoding: 'utf-8', timeout: 80_000 },
         )
         expect(fs.existsSync(reportPath), `child vitest wrote no report:\n${result.stdout}\n${result.stderr}`).toBe(true)
         const report = JSON.parse(fs.readFileSync(reportPath, 'utf8')) as JsonReport

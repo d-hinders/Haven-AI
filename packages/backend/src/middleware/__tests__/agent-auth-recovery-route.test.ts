@@ -197,6 +197,16 @@ describeDb('agent auth decides the recovery exemption from the matched route', (
       expect(res.body.nothing_stranded).toBe(true)
     })
 
+    it(`${aKey(status)} still recovers when the sweep/prepare request-target carries a fragment`, async () => {
+      // The router matches /machine-payments/sweep/prepare; request.url keeps
+      // the `#x`. Only a decision made from the MATCHED route accepts this —
+      // any comparison against the request-target string refuses it.
+      const key = await seedAgent(status)
+      const res = await rawPost(app, '/machine-payments/sweep/prepare#x', key)
+      expect(res.statusCode).toBe(200)
+      expect(res.body.nothing_stranded).toBe(true)
+    })
+
     it(`${aKey(status)} still reaches the real POST /machine-payments/sweep/submit`, async () => {
       const key = await seedAgent(status)
       const res = await rawPost(app, '/machine-payments/sweep/submit', key, {

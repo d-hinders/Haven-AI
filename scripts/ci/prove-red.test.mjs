@@ -500,6 +500,7 @@ const log = process.env.PR_FIXTURE_BUILD_LOG
 const n = log && existsSync(log) ? readFileSync(log, 'utf8').split('\\n').filter(Boolean).length : 0
 if (log) appendFileSync(log, createHash('sha256').update(src).digest('hex') + '\\n')
 if (process.env.PR_FIXTURE_FAIL_BUILD_AT === String(n + 1)) process.exit(1)
+if (process.env.PR_FIXTURE_BUILD_PID) appendFileSync(process.env.PR_FIXTURE_BUILD_PID, process.pid + '\\n')
 if (process.env.PR_FIXTURE_BUILD_SLEEP && String(src).includes('>=')) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Number(process.env.PR_FIXTURE_BUILD_SLEEP))
 mkdirSync('dist', { recursive: true })
 writeFileSync('dist/index.mjs', src)
@@ -843,6 +844,25 @@ describe('signals and recover', { concurrency: 4 }, () => {
       assert.equal(result(repo).cells.length, 1, 'the second cell never started')
     })
   }
+
+  test('SIGINT during the mutant build stops the whole build, restores and rebuilds', async () => {
+    const repo = makeRepo(WORKSPACE)
+    execFileSync('npm', ['run', 'build', '-w', 'packages/a'], { cwd: repo.wt, env: cleanEnv({}), stdio: 'ignore' })
+    writeCells(repo, [WORKSPACE_CELLS[0]])
+    const buildLog = path.join(repo.dir, 'build.log')
+    const pids = path.join(repo.dir, 'build.pids')
+    const p = start(repo, MUTATE, { env: { PR_FIXTURE_BUILD_LOG: buildLog, PR_FIXTURE_BUILD_SLEEP: '60000', PR_FIXTURE_BUILD_PID: pids } })
+    await waitFor(() => existsSync(pids) && readFileSync(pids, 'utf8').split('\n').filter(Boolean).length >= 2, 'the mutant build')
+    const mutantBuild = Number(readFileSync(pids, 'utf8').split('\n').filter(Boolean)[1])
+    const t0 = Date.now()
+    p.child.kill('SIGINT')
+    const r = await p.done
+    assert.equal(r.code, 130, r.out)
+    assert.ok(Date.now() - t0 < 30000, `took ${Date.now() - t0} ms: the sleeping build was not stopped`)
+    assert.throws(() => process.kill(mutantBuild, 0), /ESRCH/, 'the mutant build process is gone')
+    assert.equal(readFileSync(path.join(repo.wt, 'packages/a/dist/index.mjs'), 'utf8'), A_SRC)
+    assert.ok(!existsSync(repo.journal))
+  })
 
   async function killedMidCell(opts) {
     const repo = makeRepo({}, opts)

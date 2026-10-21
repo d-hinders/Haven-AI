@@ -791,11 +791,17 @@ by a net, not by review.
 **A refusal is a red, not a swallow.** The refused connection fails with an
 `ECONNREFUSED`-coded error, so the code under test takes its ordinary
 transport-failure branch — and the net records it. Its `afterEach` fails the
-test that was running; its file-level `afterAll` fails the file for a dial
-that landed after its test ended. Both are registered by `vitest.setup.ts`,
-so they run after a file's own hooks. The message names the host, port and
-test file — never a path or query, because RPC and bundler URLs carry API
-keys and CI logs are public.
+test that was running; its file-level `afterAll` first yields 50 ms (150 ms
+when the kit's analytics could post, on a timer `vi.useFakeTimers()` cannot
+freeze) and then fails the file for any dial that landed after its test
+ended — a `setTimeout(0)`, a `setImmediate`, a fire-and-forget write. The
+bound is that window: a dial scheduled to fire later than that after the
+file's last hook is not reliably seen, because the file's hooks have run and
+its worker may already be gone; a test that schedules work that far out
+should await it. Both hooks are registered by
+`vitest.setup.ts`, so they run after a file's own hooks. The message names
+the host, port and test file — never a path or query, because RPC and
+bundler URLs carry API keys and CI logs are public.
 
 **Fixing a red:** stub the seam the dial goes through, at the module that
 fetches — for book-time FX that is
@@ -815,13 +821,20 @@ when that RPC is unreachable. The smart-accounts kit's analytics host
 (`mm-sdk-analytics.api.cx.metamask.io`) is never exempt: the owner decided
 those posts go off (#4216). Until #4216 lands its mechanism, `vitest.setup.ts`
 sets `DO_NOT_TRACK=1` for the suite — a test-only line; GitHub Actions' `CI`
-does the same in CI.
+does the same in CI. **#4216 must remove that line before measuring its own
+mechanism**: while it stands, every backend run reads 0 posts whatever #4216
+does, so a suite-level proof taken with it in place is vacuous.
 
 **Out of reach, by design:** child processes a test spawns outside vitest
 (`ops-probe-standalone.test.ts`'s `npx tsx`) and `vitest.global-setup.ts`,
 which runs in the main process before any worker exists. A child *vitest*
-loads `vitest.setup.ts` and so runs under the net. The self-test is
-`src/infra/__tests__/helpers/__tests__/test-network-net.test.ts`.
+loads `vitest.setup.ts` and so runs under the net. Also unpatched, with no
+source caller today: a `worker_threads` Worker (its own realm, with its own
+`net`), UDP (`dgram`), and c-ares queries made through a `new dns.Resolver()`
+/ `new dns.promises.Resolver()` instance rather than the module functions.
+The self-tests are `src/infra/__tests__/helpers/__tests__/test-network-net.test.ts`
+and, for the file-level red (a child vitest over disposable fixtures),
+`test-network-net-late-dial.test.ts` beside it.
 
 ## The ratchet
 

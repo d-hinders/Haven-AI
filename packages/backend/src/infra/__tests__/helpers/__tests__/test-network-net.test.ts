@@ -121,8 +121,10 @@ describe('policy (pure)', () => {
     expect(kitAnalyticsMayPost({ DO_NOT_TRACK: '1' })).toBe(false)
     expect(kitAnalyticsMayPost({ DO_NOT_TRACK: 'YES' })).toBe(false)
     expect(kitAnalyticsMayPost({ DO_NOT_TRACK: '0', CI: '' })).toBe(true)
-    // vitest.setup.ts turns it off for the suite (#4216 owns the real mechanism).
-    expect(kitAnalyticsMayPost(process.env)).toBe(false)
+    // vitest.setup.ts's own DO_NOT_TRACK line turns it off for the suite —
+    // asserted with CI removed, because GitHub Actions' CI=true would make
+    // this pass with the line deleted (#4216 owns the real mechanism).
+    expect(kitAnalyticsMayPost({ ...process.env, CI: undefined })).toBe(false)
   })
 
   it('admits the database host by name, and ignores a Unix-socket directory', () => {
@@ -134,7 +136,7 @@ describe('policy (pure)', () => {
 
   it('formats a refusal as host and port only', () => {
     const message = formatRefusals(
-      [{ host: 'rpc.example-provider.io', port: 443, via: 'connect', testFile: THIS_FILE, testName: 'a test' }],
+      [{ host: 'rpc.example-provider.io', port: 443, via: 'connect', stage: 'name', testFile: THIS_FILE, testName: 'a test' }],
       'test',
     )
     expect(message).toContain('rpc.example-provider.io:443 via connect, in ' + THIS_FILE + ' during "a test"')
@@ -160,7 +162,12 @@ describe('interception (live, in this worker)', () => {
     const cause = (err as { cause: Error }).cause
     expect(cause.message).toContain('example.com:443')
     expect(cause.message).not.toMatch(/SECRET4217|secret-path/)
-    expect(takeRefusals()).toMatchObject([{ host: 'example.com', port: 443, via: 'connect', testFile: THIS_FILE }])
+    // stage 'name': refused on the hostname before any resolver ran — so the
+    // result does not depend on what this machine's DNS answers, and a slow
+    // NXDOMAIN (#3969) can never cost a test its timeout.
+    expect(takeRefusals()).toMatchObject([
+      { host: 'example.com', port: 443, via: 'connect', stage: 'name', testFile: THIS_FILE },
+    ])
   })
 
   it('refuses https.get to a public host on 443', async () => {
@@ -172,7 +179,7 @@ describe('interception (live, in this worker)', () => {
   it('refuses fetch to a public IP literal on 443 — no lookup happens, so connect itself checks', async () => {
     const err = await fetch('https://1.1.1.1/').catch((e: unknown) => e)
     expect((err as { cause?: unknown }).cause).toBeInstanceOf(TestNetworkRefusalError)
-    expect(takeRefusals()).toMatchObject([{ host: '1.1.1.1', port: 443, via: 'connect' }])
+    expect(takeRefusals()).toMatchObject([{ host: '1.1.1.1', port: 443, via: 'connect', stage: 'address' }])
   })
 
   it('refuses an IPv4-mapped public address and a private one', async () => {
@@ -190,9 +197,19 @@ describe('interception (live, in this worker)', () => {
       const socket = net.connect({ host: 'pinned.example', port: 443, lookup: publicAnswer as never, autoSelectFamily })
       expect(await settle(socket)).toBeInstanceOf(TestNetworkRefusalError)
     }
+    // A MIXED answer is refused too: one public address in the set is enough,
+    // because autoSelectFamily may connect to any of them.
+    const mixedAnswer = (_h: string, _opts: unknown, cb: (...a: unknown[]) => void) =>
+      cb(null, [
+        { address: '127.0.0.1', family: 4 },
+        { address: '93.184.215.14', family: 4 },
+      ])
+    const mixed = net.connect({ host: 'mixed.example', port: 443, lookup: mixedAnswer as never, autoSelectFamily: true })
+    expect(await settle(mixed)).toBeInstanceOf(TestNetworkRefusalError)
     expect(takeRefusals()).toMatchObject([
-      { host: 'pinned.example', port: 443 },
-      { host: 'pinned.example', port: 443 },
+      { host: 'pinned.example', port: 443, stage: 'address' },
+      { host: 'pinned.example', port: 443, stage: 'address' },
+      { host: 'mixed.example', port: 443, stage: 'address' },
     ])
   })
 

@@ -42,6 +42,9 @@ registerNetHooks()
 // any of those outside vitest. `=`, not `??=`: an inherited blank or `0` is
 // not nullish and would leave analytics on. The kit latches its decision at
 // its first tracked call, which is always after setup files run.
+// #4216 MUST REMOVE THIS LINE before measuring its own mechanism: while it
+// stands, every backend run reads 0 analytics posts whatever #4216 does, so a
+// suite-level proof taken with it in place is vacuous.
 process.env.DO_NOT_TRACK = '1'
 
 // Explorer history routing is env-driven: with ALCHEMY_HISTORY_API_KEY set

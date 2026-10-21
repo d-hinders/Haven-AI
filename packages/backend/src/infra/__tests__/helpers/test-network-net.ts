@@ -66,6 +66,16 @@
  * query, because RPC and bundler URLs carry API keys and CI logs are public.
  * The net only ever sees host and port, so that holds by construction.
  *
+ * **The late-dial bound.** The file-level `afterAll` first yields for
+ * `LATE_DIAL_WAIT_MS` (50 ms), or `KIT_FLUSH_WAIT_MS` (150 ms) when the kit's
+ * analytics could post, on a timer that `vi.useFakeTimers()` cannot freeze.
+ * A dial the file schedules within that window — a `setTimeout(0)`, a
+ * `setImmediate`, a fire-and-forget write a few ticks deep — fails the file.
+ * One that fires LATER than the window after the file's last hook is not
+ * reliably seen: the file's hooks have all run, and its worker may already be
+ * gone. That is the honest limit of a per-file net; a test that schedules
+ * work that far out should await it.
+ *
  * ## How it is installed
  *
  * Plain property assignment, not `vi.spyOn` / `vi.stubGlobal`: backend files
@@ -78,9 +88,14 @@
  * in `ops-probe-standalone.test.ts`) and `vitest.global-setup.ts`, which runs
  * in the main process before any worker exists. A child vitest
  * (`db-harness-schema-guard.test.ts`) loads `vitest.setup.ts` and is covered.
+ * Also unpatched, with no source caller today: a `worker_threads` Worker (its
+ * own realm, with its own `net`), UDP (`dgram`), and c-ares queries made
+ * through a `new dns.Resolver()` / `new dns.promises.Resolver()` instance
+ * rather than the module functions. Add them here when one appears.
  */
 import dns from 'node:dns'
 import { syncBuiltinESMExports } from 'node:module'
+import { setTimeout as sleep } from 'node:timers/promises'
 import net from 'node:net'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -132,6 +147,12 @@ export interface NetRefusal {
   port: number | null
   /** Which interception point saw it. */
   via: 'connect' | 'dns.lookup' | 'dns.promises.lookup' | 'dns.resolveTxt' | 'dns.promises.resolveTxt'
+  /**
+   * `name`: refused on the hostname, before any resolver was consulted (a
+   * system-resolver name that is not local or admitted). `address`: refused
+   * on the address — an IP-literal host, or what a lookup answered.
+   */
+  stage: 'name' | 'address'
   /** The test file running when it was recorded, relative to the package root. */
   testFile: string | null
   /** The test running when it was recorded; `null` between tests or in a hook. */
@@ -237,6 +258,14 @@ export function kitAnalyticsMayPost(env: NodeJS.ProcessEnv = process.env): boole
  */
 export const KIT_FLUSH_WAIT_MS = 150
 
+/**
+ * How long the file-level `afterAll` always yields before its last drain, so
+ * a dial scheduled a tick after the file's last test (`setTimeout(0)`,
+ * `setImmediate`, a fire-and-forget write) is recorded and fails the file.
+ * Without it a `DO_NOT_TRACK=1` run never yielded, and such a dial was lost.
+ */
+export const LATE_DIAL_WAIT_MS = 50
+
 // ── Recording ───────────────────────────────────────────────────────────────
 
 function currentTest(): { testFile: string | null; testName: string | null } {
@@ -267,8 +296,13 @@ export class TestNetworkRefusalError extends Error {
   }
 }
 
-function record(host: string, port: number | null, via: NetRefusal['via']): TestNetworkRefusalError {
-  const refusal: NetRefusal = { host: normalizeHost(host), port, via, ...currentTest() }
+function record(
+  host: string,
+  port: number | null,
+  via: NetRefusal['via'],
+  stage: NetRefusal['stage'],
+): TestNetworkRefusalError {
+  const refusal: NetRefusal = { host: normalizeHost(host), port, via, stage, ...currentTest() }
   state().refusals.push(refusal)
   return new TestNetworkRefusalError(refusal)
 }
@@ -352,7 +386,7 @@ function guardConnectLookup(inner: LookupFn, system: boolean, port: number | nul
         return undefined
       }
       if (verdict === 'refuse') {
-        process.nextTick(callback, record(hostname, port, 'connect'))
+        process.nextTick(callback, record(hostname, port, 'connect', 'name'))
         return undefined
       }
     }
@@ -362,7 +396,7 @@ function guardConnectLookup(inner: LookupFn, system: boolean, port: number | nul
       if (admitted(hostname) || (addresses.length > 0 && addresses.every(isLocalAddress))) {
         return callback(null, address, family)
       }
-      return callback(record(hostname, port, 'connect'))
+      return callback(record(hostname, port, 'connect', 'address'))
     })
   }
 }
@@ -377,7 +411,7 @@ function guardSystemLookup(inner: LookupFn, via: NetRefusal['via']): LookupFn {
     }
     const verdict = systemNameVerdict(hostname)
     if (verdict === 'resolve') return inner.call(this, hostname, options, callback)
-    const err = verdict === 'not-found' ? notFound(hostname) : record(hostname, null, via)
+    const err = verdict === 'not-found' ? notFound(hostname) : record(hostname, null, via, 'name')
     process.nextTick(callback, err)
     return {}
   }
@@ -393,7 +427,7 @@ function guardPromiseResolver<A extends unknown[], R>(
     if (typeof hostname !== 'string') return await inner(hostname, ...rest)
     const verdict = allowLocalNames ? systemNameVerdict(hostname) : resolverVerdict(hostname)
     if (verdict === 'resolve') return await inner(hostname, ...rest)
-    throw verdict === 'not-found' ? notFound(hostname) : record(hostname, null, via)
+    throw verdict === 'not-found' ? notFound(hostname) : record(hostname, null, via, 'name')
   }
 }
 
@@ -416,7 +450,7 @@ function guardCallbackResolveTxt(
     if (typeof hostname !== 'string') return inner.call(this, hostname, callback)
     const verdict = resolverVerdict(hostname)
     if (verdict === 'resolve') return inner.call(this, hostname, callback)
-    const err = verdict === 'not-found' ? notFound(hostname) : record(hostname, null, 'dns.resolveTxt')
+    const err = verdict === 'not-found' ? notFound(hostname) : record(hostname, null, 'dns.resolveTxt', 'name')
     process.nextTick(callback, err, [])
     return {}
   }
@@ -479,7 +513,7 @@ export function installTestNetworkNet(env: NodeJS.ProcessEnv = process.env): voi
       if (admitted(host) || isLocalAddress(host)) {
         return originalConnect.apply(this, args as Parameters<typeof originalConnect>)
       }
-      const err = record(host, port, 'connect')
+      const err = record(host, port, 'connect', 'address')
       process.nextTick(() => this.destroy(err))
       return this
     }
@@ -532,7 +566,11 @@ export function registerNetHooks(): void {
     if (refusals.length > 0) throw new Error(formatRefusals(refusals, 'test'))
   })
   afterAll(async () => {
-    if (kitAnalyticsMayPost()) await new Promise((resolve) => setTimeout(resolve, KIT_FLUSH_WAIT_MS))
+    // Always yield, so a dial scheduled a tick after the last test lands
+    // before the final drain. `node:timers/promises`, not the global
+    // `setTimeout`: a file that leaves `vi.useFakeTimers()` on would freeze
+    // the global one and hang this hook until `hookTimeout`.
+    await sleep(kitAnalyticsMayPost() ? KIT_FLUSH_WAIT_MS : LATE_DIAL_WAIT_MS)
     const refusals = takeRefusals()
     if (refusals.length > 0) throw new Error(formatRefusals(refusals, 'file'))
   })

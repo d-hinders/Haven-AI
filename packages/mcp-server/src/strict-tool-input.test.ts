@@ -130,10 +130,6 @@ const VALID_ARGS: Record<StrictInputToolName, Record<string, unknown>> = {
   // #3518: the read-by-id handler calls haven.getTaskBudget('tb_1') — the
   // stubbed Haven answers `{}`, which the loop tolerates downstream.
   haven_get_task_budget: { task_budget_id: 'tb_1' },
-  // #4107: reaches the handler, which fetches the operator's free preview (the
-  // GET the "still accepts its own arguments" loop observes); the stub answers
-  // `{}`, which the check-unavailable envelope tolerates downstream.
-  haven_check_token_safety: { token: '0x4200000000000000000000000000000000000006' },
 }
 
 /**
@@ -219,9 +215,6 @@ const SMUGGLED_KEY: Record<StrictInputToolName, string> = {
   // #3723: the SDK's camelCase spelling — the same crossover-key class as the
   // other by-id reads; this tool takes the snake_case id only.
   haven_get_receipt: 'paymentId',
-  // #4107: a key that looks like it steers the check but is not one of the
-  // three knobs the tool forwards to the operator's gate.
-  haven_check_token_safety: 'expected_verdict',
 }
 
 let fetches: string[]
@@ -643,7 +636,7 @@ describe('#2348 — the crossover keys are the LOCAL surface\'s real spellings',
     ]) {
       expect(Object.keys(STRICT_INPUT_TOOLS)).toContain(tool)
     }
-    expect(Object.keys(STRICT_INPUT_TOOLS)).toHaveLength(28)
+    expect(Object.keys(STRICT_INPUT_TOOLS)).toHaveLength(27)
     // And the two deliberate exclusions, as a literal list for the same reason.
     expect(Object.keys(PERMISSIVE_INPUT_TOOLS).sort()).toEqual(
       ['haven_get_agent', 'haven_get_allowances'],

@@ -19,7 +19,6 @@
  *   #2811  plain-HTTP x402                    -> tools/plain-http-x402.ts
  *   #2812  paid-MCP completion                -> tools/paid-mcp-completion.ts
  *   #3329  task budgets                       -> tools/task-budgets.ts
- *   #4107  token-safety check                 -> tools/token-safety.ts
  *
  * This module is now a THIN compatibility/composition facade: it keeps the
  * `createToolHandlers` composition root (the one place every entry imports),
@@ -39,7 +38,6 @@ import { createPaidMcpCompletionHandlers } from './tools/paid-mcp-completion.js'
 import { createPlainHttpX402Handlers } from './tools/plain-http-x402.js'
 import { createStateDirectRecoveryHandlers } from './tools/state-direct-recovery.js'
 import { createTaskBudgetHandlers } from './tools/task-budgets.js'
-import { createTokenSafetyHandlers } from './tools/token-safety.js'
 import { HostedToolError } from './tools/support/errors.js'
 
 // #2807: the parsing seam throws through the SUPPORT module's HostedToolError
@@ -105,11 +103,6 @@ export {
   TASK_BUDGET_TOOLS,
   type TaskBudgetToolName,
 } from './tools/task-budgets.js'
-export {
-  createTokenSafetyHandlers,
-  TOKEN_SAFETY_TOOLS,
-  type TokenSafetyToolName,
-} from './tools/token-safety.js'
 
 export function createToolHandlers(haven: HavenClient): HostedToolHandlers {
   return {
@@ -155,10 +148,5 @@ export function createToolHandlers(haven: HavenClient): HostedToolHandlers {
     // are owned by the capability module and composed in here. Same
     // one-directional guarantee as the spreads above.
     ...createTaskBudgetHandlers(haven),
-
-    // #4107: the advisory token-safety check — haven_check_token_safety — is
-    // owned by the capability module and composed in here. Same one-directional
-    // guarantee as the spreads above.
-    ...createTokenSafetyHandlers(haven),
   }
 }

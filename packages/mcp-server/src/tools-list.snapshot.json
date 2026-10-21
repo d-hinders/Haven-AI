@@ -27,37 +27,6 @@
         "$schema": "http://json-schema.org/draft-07/schema#"
       }
     },
-    "haven_check_token_safety": {
-      "description": "Advisory pre-trade token-safety check for a Base token, via the FREE preview endpoint of the x402-data-api operator (Grey Ridge). Returns the operator decision (go/hold/block), verdict, risk_score and flags (honeypot sell-simulation, transfer tax, admin controls, Uniswap v3 liquidity vs notional_usd) for side buy or sell. Makes NO payment and blocks nothing: information, not policy — an unavailable check is NOT a pass, and no Haven path consults this automatically. The operator paid gate for any Base ERC-20 (same shape; ~$0.008 USDC per the operator, the 402 your quote fetches is authoritative) runs through the standard rail, never this tool: haven_quote_x402 { url } with the /gate/swap URL in paid_gate.url, then haven_pay_x402_quote { url, max_amount_human }, under your normal budget and authority gates. token is a 0x Base address or an operator demo alias (usdc, weth, cbbtc, aero, degen).",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "token": {
-            "type": "string",
-            "minLength": 1
-          },
-          "side": {
-            "type": "string",
-            "enum": [
-              "buy",
-              "sell"
-            ],
-            "default": "buy"
-          },
-          "notional_usd": {
-            "type": "number",
-            "exclusiveMinimum": 0,
-            "maximum": 1000000,
-            "default": 100
-          }
-        },
-        "required": [
-          "token"
-        ],
-        "additionalProperties": false,
-        "$schema": "http://json-schema.org/draft-07/schema#"
-      }
-    },
     "haven_close_task_budget": {
       "description": "End a task budget early, releasing its unspent cap back to the agent's own budget. Pass task_budget_id. A never-signed or already-expired budget ends immediately with { task_budget, status: \"closed\" }; otherwise returns { task_budget, sign_data, next_action } — sign, then relay with haven_submit (task_budget_id); signer_compatibility carries the recovery route if the signer predates task budgets.",
       "inputSchema": {

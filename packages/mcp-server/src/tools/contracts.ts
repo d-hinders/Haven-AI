@@ -107,9 +107,6 @@ export type HostedToolName =
   | 'haven_open_task_budget'
   | 'haven_close_task_budget'
   | 'haven_get_task_budget'
-  // #4107: the advisory pre-trade token-safety check — free preview, never a
-  // spend; the operator's paid gate runs through the generic x402 rail.
-  | 'haven_check_token_safety'
 
 /**
  * #2282: the hosted MCP tool boundary spells arguments in **snake_case**
@@ -326,21 +323,6 @@ export const toolSchemas = {
   // rows the agent summary now lists with `status`.
   haven_get_task_budget: {
     task_budget_id: z.string().min(1),
-  },
-  // #4107: exactly the three knobs forwarded to the operator's gate —
-  // everything else (operator, endpoint, free-preview default) is fixed by the
-  // tool. side/notional_usd default server-side so a bare { token } call is
-  // the operator's own default shape (buy, $100).
-  haven_check_token_safety: {
-    token: z
-      .string()
-      .min(1)
-      .refine(
-        (v) => /^0x[0-9a-fA-F]{40}$/.test(v) || /^[a-z][a-z0-9-]{0,29}$/.test(v),
-        'token must be a 0x-prefixed 20-byte Base address, or one of the operator\'s demo aliases (usdc, weth, cbbtc, aero, degen)',
-      ),
-    side: z.enum(['buy', 'sell']).default('buy'),
-    notional_usd: z.number().positive().max(1_000_000).default(100),
   },
   haven_pay_mcp_tool: {
     // #1271: the exact MCP endpoint OR a base merchant URL — a non-402 probe
@@ -1108,12 +1090,6 @@ export const STRICT_INPUT_TOOLS = {
   haven_get_task_budget:
     'This tool declares task_budget_id only; which budget is read is never inferred from ' +
     'anything else, so an undeclared key is refused rather than dropped.',
-  // #4107: token, side and notional_usd are forwarded verbatim to the
-  // operator's gate; a stripped extra key would let the caller believe it
-  // pinned something the operator never received.
-  haven_check_token_safety:
-    'This tool forwards exactly token, side and notional_usd to the operator\'s gate; an ' +
-    'undeclared key is refused rather than dropped.',
 } as const satisfies Partial<Record<HostedToolName, string>>
 
 export type StrictInputToolName = keyof typeof STRICT_INPUT_TOOLS
@@ -1527,20 +1503,6 @@ const DISCOVER_TOOLS_DESCRIPTION = composeDescription({
     ' For an MCP entry with a spending cap in mind, prefer haven_prepare_catalog_purchase with its catalog_id.',
 })
 
-const CHECK_TOKEN_SAFETY_DESCRIPTION = [
-  'Advisory pre-trade token-safety check for a Base token, via the FREE preview endpoint of ' +
-  'the x402-data-api operator (Grey Ridge). Returns the operator decision (go/hold/block), ' +
-  'verdict, risk_score and flags (honeypot sell-simulation, transfer tax, admin controls, ' +
-  'Uniswap v3 liquidity vs notional_usd) for side buy or sell.',
-  'Makes NO payment and blocks nothing: information, not policy — an unavailable check is ' +
-  'NOT a pass, and no Haven path consults this automatically.',
-  'The operator paid gate for any Base ERC-20 (same shape; ~$0.008 USDC per the operator, ' +
-  'the 402 your quote fetches is authoritative) runs through the standard rail, never this ' +
-  'tool: haven_quote_x402 { url } with the /gate/swap URL in paid_gate.url, then ' +
-  'haven_pay_x402_quote { url, max_amount_human }, under your normal budget and authority gates.',
-  'token is a 0x Base address or an operator demo alias (usdc, weth, cbbtc, aero, degen).',
-].join(' ')
-
 export const toolDescriptions: Record<HostedToolName, string> = {
   haven_get_agent: composeDescription(sharedDescriptions.getAgent),
   haven_get_allowances: composeDescription(sharedDescriptions.getAllowances),
@@ -1572,7 +1534,6 @@ export const toolDescriptions: Record<HostedToolName, string> = {
   haven_open_task_budget: OPEN_TASK_BUDGET_DESCRIPTION,
   haven_close_task_budget: CLOSE_TASK_BUDGET_DESCRIPTION,
   haven_get_task_budget: GET_TASK_BUDGET_DESCRIPTION,
-  haven_check_token_safety: CHECK_TOKEN_SAFETY_DESCRIPTION,
 }
 
 export interface ToolSuccess<T> {

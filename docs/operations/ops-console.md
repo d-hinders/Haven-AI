@@ -26,8 +26,8 @@ last-verified: "2026-10-06"
 > unhandled error and `npm run test -w packages/ops` exits 1 with every test
 > passing. Second, on macOS the harness resolves the real git once (`xcrun -f
 > git`) and puts its directory first on PATH, skipping the slow `/usr/bin/git`
-> shim. That cut the ops file from 135-153 s to about 25 s run alone. No
-> assertion, watched path or script behaviour changed, so the Ignored Build
+> shim. That cut the ops file from 135-153 s to about 25 s run alone at idle
+> load. No assertion, watched path or script behaviour changed, so the Ignored Build
 > Step paragraph in § 1 stands as written. Nothing else in this document was
 > re-verified, and `last-verified` is not bumped.
 

@@ -34,7 +34,7 @@ export const SKIP = 0
  * `[vitest-worker]: Timeout calling "onTaskUpdate"` although every test
  * passed. On macOS, before `GIT` below skipped the xcrun shim, the ops file
  * took 135-153 s alone and the frontend file 74-79 s. With it they take
- * about 25 s and 15 s, but a slower or loaded machine, or the plain-`git`
+ * about 25 s and 15 s at idle load, but a slower or loaded machine, or the plain-`git`
  * fallback, can still push a file past 60 s. A macrotask between tests lets
  * the loop read the pending replies, so a timer only fires if a SINGLE test
  * blocks for 60 s.
@@ -167,7 +167,9 @@ export function hermeticEnv(extra = {}) {
   }
   // See GIT: the ignore script's own git calls skip the macOS shim too. A
   // PATH a test passes in `extra` still wins.
-  if (GIT_BIN_DIR) env.PATH = env.PATH ? `${GIT_BIN_DIR}:${env.PATH}` : GIT_BIN_DIR
+  // With no PATH at all the child keeps the system default rather than a PATH
+  // that holds only the git directory (no `sh` there).
+  if (GIT_BIN_DIR && env.PATH) env.PATH = `${GIT_BIN_DIR}:${env.PATH}`
   return Object.assign(env, { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' }, extra)
 }
 

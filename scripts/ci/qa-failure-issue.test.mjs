@@ -96,7 +96,7 @@ function baseEnv() {
   return e
 }
 
-function run(scenario, env = {}, logs = [], extraArgs = null) {
+function run(scenario, env = {}, logs = [], extraArgs = null, { timeout = 60_000 } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'qa-failure-issue-'))
   makeStub(dir)
   const log = join(dir, 'gh.log')
@@ -109,8 +109,9 @@ function run(scenario, env = {}, logs = [], extraArgs = null) {
   const result = spawnSync(process.execPath, [SCRIPT, ...argv], {
     encoding: 'utf8',
     // A hung window read must not hang the suite: past this the run is killed
-    // and its status is null, which every test reads as a failure.
-    timeout: 20_000,
+    // and its status is null, which every test reads as a failure. Generous
+    // by default (a loaded machine is slow); the hang test passes a short one.
+    timeout,
     env: {
       ...baseEnv(),
       PATH: `${dir}:${process.env.PATH}`,
@@ -889,6 +890,8 @@ describe('qa-failure-issue: the last-green → first-red window (#4236)', () => 
       { open: null, closed: 2769, window: fixture({ hang: ['run list'] }) },
       { ...ACTIONS_ENV, QA_FAILURE_WINDOW_CALL_TIMEOUT_MS: '2000' },
       [MASKED_502],
+      null,
+      { timeout: 20_000 },
     )
     assert.equal(result.status, 0, result.stderr)
     assert.ok(Date.now() - t0 < 15_000, 'bounded by the per-call timeout, not by the stub')
@@ -935,11 +938,48 @@ describe('qa-failure-issue: the last-green → first-red window (#4236)', () => 
     assert.deepEqual(calls.filter((c) => String(c[1]).includes(`/runs/${AFTER}/`)), [])
   })
 
-  test('a run-level success with no money-flow job is not the last green', () => {
+  test('a run-level success with no money-flow job is not the last green: the read is unavailable, never a silent refusal', () => {
     const NOJOB = 39420000002
     const rows = [...FIXTURE_ROWS, deployRow(NOJOB, RED_SHA, '2026-10-20T12:15:00Z', '2026-10-20T12:17:00Z', 'success')]
     const w = windowOf(fixture({ rows, jobs: { [GREEN_ID]: MF('success'), [NOJOB]: [{ name: 'gate', conclusion: 'success' }] } }))
-    assert.deepEqual([w.lastGreen.id, w.firstRed.id], [GREEN_ID, RED_ID])
+    assert.equal(windowLine(w), "window: unavailable (run 39420000002 lists no 'money-flow' job)")
+    // A jobs answer that is not a list is the same: unavailable, not a refusal.
+    const notList = windowOf(fixture({ rows, jobs: { [GREEN_ID]: MF('success'), [NOJOB]: 'x' } }))
+    assert.equal(windowLine(notList), 'window: unavailable (the jobs of run 39420000002 are not a list)')
+  })
+
+  test('a green at the failing commit itself is the last green: 0 PRs, no compare read, nobody mentioned', () => {
+    // A re-dispatch or a second deploy at the same SHA went green, then red:
+    // `compare/{sha}...{sha}` is `identical`, which admits it.
+    const SAME = 39420000006
+    const rows = [...FIXTURE_ROWS, deployRow(SAME, RED_SHA, '2026-10-20T12:13:00Z', '2026-10-20T12:18:00Z', 'success')]
+    const calls = []
+    const w = windowOf(fixture({ rows, jobs: { [GREEN_ID]: MF('success'), [SAME]: MF('success') }, ancestry: { [RED_SHA]: 'identical' } }), { calls })
+    assert.deepEqual([w.lastGreen.id, w.firstRed.id], [SAME, RED_ID])
+    assert.equal(windowLine(w, { mention: true }), "window: 0 PRs — first red is at the last green's commit (no code change; flake, provider or environment)")
+    assert.equal(mentionable(w, 'unclassified'), false)
+    assert.deepEqual(calls.filter((c) => /\/compare\/[0-9a-f]+\.\.\.[0-9a-f]+$/.test(c[1] ?? '')), [], 'no window compare read')
+  })
+
+  test('only completed runs are candidates: an in-progress run is never read', () => {
+    // Replayed from 39423256338 while RED_ID (whose money-flow job had
+    // already ended) was still in progress: it is no candidate either way.
+    const calls = []
+    const w = windowOf(fixture({
+      jobs: { [GREEN_ID]: MF('success'), [RED_ID]: MF('success') },
+      compare: { [`${GREEN_SHA}...${LATER_SHA}`]: { status: 'ahead', total_commits: 2, commits: [commit(RED_SHA, [GREEN_SHA], 'x (#4144)'), commit(LATER_SHA, [RED_SHA], 'y (#4146)')] } },
+      files: { [RED_SHA]: FILES_4144, [LATER_SHA]: ['packages/frontend/src/app/page.tsx'] },
+    }), { calls, current: { id: 39423256338, sha: LATER_SHA } })
+    assert.deepEqual([w.lastGreen.id, w.firstRed.id], [GREEN_ID, 39423256338])
+    assert.deepEqual(calls.filter((c) => String(c[1]).includes(`/runs/${RED_ID}/`)), [])
+  })
+
+  test('a window that renders badly is one unavailable line; the comment still lands', () => {
+    const seen = []
+    const gh = (args) => (seen.push(args), args[1] === 'list' ? JSON.stringify([{ number: 3 }]) : '')
+    upsertStandingIssue({ gh, trigger: 't', runUrl: 'u', when: 'w', readWindow: () => ({ status: 'ok', prs: null }), log: () => {} })
+    assert.match(lastParagraph(seen.find((a) => a[1] === 'comment')), /^window: unavailable \(Cannot read properties of null/)
+    assert.ok(seen.some((a) => a[1] === 'edit'))
   })
 
   test('a green feature-branch dispatch between a dev green and a dev red is skipped', () => {
@@ -992,7 +1032,12 @@ describe('qa-failure-issue: the last-green → first-red window (#4236)', () => 
     const diverged = windowOf(fixture({ compare: { [key]: { status: 'diverged', total_commits: 1, commits: [commit(RED_SHA, [GREEN_SHA], 'x (#1)')] } } }))
     assert.equal(windowLine(diverged), "window: unavailable (compare 84f347f0a...aa818795d is 'diverged', not 'ahead')")
     const cut = windowOf(fixture({ compare: { [key]: { status: 'ahead', total_commits: 400, commits: [commit(RED_SHA, ['d'.repeat(40)], 'x (#1)')] } } }))
-    assert.equal(windowLine(cut), 'window: unavailable (the first-parent chain leaves the compare page (400 commits; the API lists at most 250))')
+    assert.equal(windowLine(cut), 'window: unavailable (the first-parent line leaves the compare page (400 commits; the API lists 1))')
+    // Every commit listed, yet the first-parent line misses last green: a different failure, said differently.
+    const off = windowOf(fixture({ compare: { [key]: { status: 'ahead', total_commits: 1, commits: [commit(RED_SHA, ['d'.repeat(40)], 'x (#1)')] } } }))
+    assert.equal(windowLine(off), 'window: unavailable (the first-parent line from aa818795d does not reach 84f347f0a)')
+    const none = windowOf(fixture({ compare: { [key]: { status: 'ahead', total_commits: 1, commits: null } } }))
+    assert.equal(windowLine(none), 'window: unavailable (the compare read returned no commit list)')
   })
 
   test('the mention is gated on the run class and on what the single PR touches (captain decision 2026-10-21)', () => {
@@ -1045,7 +1090,7 @@ describe('qa-failure-issue: the last-green → first-red window (#4236)', () => 
     // Time, not calls: a clock that jumps past the budget stops the walk the same way.
     let t = 0
     const slow = computeWindow({ gh: fakeGh(fixture()), repo: 'r', current: current(), now: () => (t += 50_000), ms: 120_000 })
-    assert.equal(slow.status, 'open-ended')
+    assert.equal(slow.reason, 'no admitted money-flow success within the lookup time budget (120 s, 2 calls made)')
     // Budget spent after the compare: the PR is listed, its files unread, nobody mentioned.
     const late = windowOf(fixture(), { budget: { calls: 4 } })
     assert.equal(late.prs[0].note, 'files not read: lookup budget spent')

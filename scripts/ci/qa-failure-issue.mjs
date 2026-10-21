@@ -447,7 +447,14 @@ export const WINDOW_CALL_TIMEOUT_MS = 30_000
 export const WINDOW_CALL_BUDGET = 80
 export const WINDOW_BUDGET_MS = 120_000
 
-class LookupBudgetSpent extends Error {}
+class LookupBudgetSpent extends Error {
+  constructor(kind, used, ms) {
+    super(kind === 'calls' ? `lookup budget spent (${used} calls)` : `lookup time budget spent (${Math.round(ms / 1000)} s, ${used} calls made)`)
+    this.kind = kind
+    this.used = used
+    this.ms = ms
+  }
+}
 
 const sha9 = (sha) => String(sha ?? '').slice(0, 9)
 
@@ -477,7 +484,8 @@ function budgeted(gh, { calls, ms, callMs, now }) {
   let used = 0
   const call = (args) => {
     const left = deadline - now()
-    if (used >= calls || left <= 0) throw new LookupBudgetSpent(`lookup budget spent (${used} calls)`)
+    if (used >= calls) throw new LookupBudgetSpent('calls', used, ms)
+    if (left <= 0) throw new LookupBudgetSpent('time', used, ms)
     used += 1
     try {
       return gh(args, Math.min(callMs, left))
@@ -580,9 +588,13 @@ export function computeWindow({
       if (conclusions.has(id)) return conclusions.get(id).jobs
       try {
         const parsed = parseJson(call(jobsQueryArgs(repo, id)), `jobs of run ${id}`)
-        const jobs = Array.isArray(parsed?.jobs) ? parsed.jobs : null
-        conclusions.set(id, { jobs, conclusion: moneyFlowJobConclusion(jobs) })
-        return jobs
+        if (!Array.isArray(parsed?.jobs)) throw new Error(`the jobs of run ${id} are not a list`)
+        // Every qa-dev run lists its money-flow job, skipped or not: one
+        // missing means the read is not what it claims, not a refusal.
+        const conclusion = moneyFlowJobConclusion(parsed.jobs)
+        if (conclusion === null) throw new Error(`run ${id} lists no '${MONEY_FLOW_JOB}' job`)
+        conclusions.set(id, { jobs: parsed.jobs, conclusion })
+        return parsed.jobs
       } catch (err) {
         readError = err
         return null
@@ -633,12 +645,16 @@ export function computeWindow({
   if (!red) return { status: 'unavailable', reason: 'no red money-flow state derived' }
   const firstRed = endpoint(red.firstFailure)
   if (red.openEnded) {
-    const reason = spent
-      ? `no admitted money-flow success within the lookup budget (${call.used()} calls)`
-      : `no admitted money-flow success among the newest ${rows.length} qa-dev runs`
+    const reason = !spent
+      ? `no admitted money-flow success among the newest ${rows.length} qa-dev runs`
+      : spent.kind === 'calls'
+        ? `no admitted money-flow success within the lookup budget (${spent.used} calls)`
+        : `no admitted money-flow success within the lookup time budget (${Math.round(spent.ms / 1000)} s, ${spent.used} calls made)`
     return { status: 'open-ended', reason, firstRed }
   }
   const lastGreen = endpoint(red.lastSuccess)
+  // Green and red at one commit: nothing changed in code between them.
+  if (lastGreen.sha === firstRed.sha) return { status: 'ok', lastGreen, firstRed, prs: [] }
 
   let compare
   try {
@@ -653,12 +669,20 @@ export function computeWindow({
     return { status: 'unavailable', reason: err instanceof LookupBudgetSpent ? `${err.message} before the compare read` : err.message }
   }
   if (compare?.status !== 'ahead') return { status: 'unavailable', reason: `compare ${sha9(lastGreen.sha)}...${sha9(firstRed.sha)} is '${compare?.status}', not 'ahead'` }
-  const bySha = new Map((compare.commits ?? []).map((c) => [c.sha, c]))
+  if (!Array.isArray(compare.commits)) return { status: 'unavailable', reason: 'the compare read returned no commit list' }
+  const bySha = new Map(compare.commits.map((c) => [c.sha, c]))
+  // Every commit of the range is listed unless the range is longer than the page.
+  const complete = !(Number(compare.total_commits) > compare.commits.length)
   const chain = []
   for (let sha = firstRed.sha; sha !== lastGreen.sha; ) {
     const c = bySha.get(sha)
     if (!c || chain.length > bySha.size) {
-      return { status: 'unavailable', reason: `the first-parent chain leaves the compare page (${compare.total_commits} commits; the API lists at most 250)` }
+      return {
+        status: 'unavailable',
+        reason: complete
+          ? `the first-parent line from ${sha9(firstRed.sha)} does not reach ${sha9(lastGreen.sha)}`
+          : `the first-parent line leaves the compare page (${compare.total_commits} commits; the API lists ${compare.commits.length})`,
+      }
     }
     chain.push(c)
     sha = c.parents?.[0]
@@ -762,6 +786,7 @@ export function windowLine(window, { mention = false } = {}) {
       return `window: open-ended — ${md(window.reason)}; first red so far ${endpointText(window.firstRed)}, so the break may be older`
     case 'ok': {
       const n = window.prs.length
+      if (n === 0) return "window: 0 PRs — first red is at the last green's commit (no code change; flake, provider or environment)"
       const prs = window.prs
         .map((p) => `${p.number ? `#${p.number}` : `\`${sha9(p.sha)}\` (no PR in subject)`} by ${authorText(p.author, mention && n === 1)} (${touchesText(p)})`)
         .join('; ')
@@ -799,20 +824,30 @@ export function upsertStandingIssue({ gh = defaultGh, trigger, runUrl, when, cla
 
   // The window (#4236) is read after the label and before the issue lookups,
   // and a throw is a window line, never a lost comment or reopen.
-  let window
-  try {
-    window = readWindow()
-  } catch (err) {
-    window = { status: 'unavailable', reason: scrubLine(String(err?.message ?? err), 160) }
-  }
-  if (window) log(windowLine(window))
   // The mention is keyed on the episode's opening event: the reopen comment,
   // or the body when the issue is created. A failure while the issue is
   // already open recomputes the window and names the author without `@`.
-  const mention = mentionable(window, classification?.runClass ?? 'unclassified')
-  const parts = { trigger, runUrl, when, classification, window }
-  const body = buildBody(parts)
-  const comment = buildComment(parts)
+  // Reading AND rendering are guarded: a malformed window is one
+  // "unavailable" line, never a lost body, comment or reopen.
+  const render = (window, mention) => {
+    const parts = { trigger, runUrl, when, classification, window }
+    return {
+      body: buildBody(parts),
+      comment: buildComment(parts),
+      openingBody: buildBody({ ...parts, mention }),
+      openingComment: buildComment({ ...parts, mention }),
+      line: windowLine(window),
+    }
+  }
+  let r
+  try {
+    const window = readWindow()
+    r = render(window, mentionable(window, classification?.runClass ?? 'unclassified'))
+  } catch (err) {
+    r = render({ status: 'unavailable', reason: scrubLine(String(err?.message ?? err), 160) }, false)
+  }
+  if (r.line) log(r.line)
+  const { body, comment } = r
 
   const open = firstNumber(
     gh(['issue', 'list', '--label', LABEL, '--state', 'open', '--limit', '1', '--json', 'number']),
@@ -834,12 +869,12 @@ export function upsertStandingIssue({ gh = defaultGh, trigger, runUrl, when, cla
   if (closed !== null) {
     gh(['issue', 'reopen', String(closed)])
     gh(['issue', 'edit', String(closed), '--body', body])
-    gh(['issue', 'comment', String(closed), '--body', buildComment({ ...parts, mention })])
+    gh(['issue', 'comment', String(closed), '--body', r.openingComment])
     log(`Reopened the standing qa-failure issue #${closed}`)
     return { action: 'reopened', number: closed }
   }
 
-  const created = gh(['issue', 'create', '--label', LABEL, '--title', ISSUE_TITLE, '--body', buildBody({ ...parts, mention })])
+  const created = gh(['issue', 'create', '--label', LABEL, '--title', ISSUE_TITLE, '--body', r.openingBody])
   log(`Created the standing qa-failure issue: ${String(created).trim()}`)
   return { action: 'created', number: null }
 }

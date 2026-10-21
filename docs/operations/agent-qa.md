@@ -7,6 +7,7 @@ covers:
   - .github/workflows/qa-dev.yml
   - .github/workflows/qa-balances.yml
   - scripts/ci/qa-failure-issue.mjs
+  - scripts/ci/dev-push-health.mjs
   - scripts/ci/qa-balance-issue.mjs
   - scripts/ci/qa-retry.mjs
   - scripts/ci/qa-freshness.mjs
@@ -1578,8 +1579,9 @@ the body:
   green share a commit, the post-deploy run wins.
 - **First red** is the oldest such run after it whose `money-flow` job failed,
   or this run. A `schedule` or `workflow_dispatch` endpoint is labelled
-  "(schedule; dev tip, deploy not verified)", because its SHA is `dev`'s tip
-  when the run started, not necessarily the deployed commit.
+  "(`<event>`; dev tip, deploy not verified)", for example "(schedule; dev tip,
+  deploy not verified)", because its SHA is `dev`'s tip when the run started,
+  not necessarily the deployed commit.
 - **The PRs** are the first-parent chain from first red back to last green.
   The compare API lists every commit in the range, a merged branch's own
   commits included, so the chain is walked through `parents[0]`. Each PR is
@@ -1591,10 +1593,15 @@ The line can also read:
 
 - "window: not a dev run (…)": a dispatch from another branch or with a
   `haven_api_url` override. Nothing is computed for it.
-- "window: unavailable (…)": a failed or timed-out read, a compare that is not
-  `ahead`, or a chain longer than the compare page.
-- "window: open-ended — …": no green within the newest 300 runs or within the
-  lookup budget, so the break may be older.
+- "window: 0 PRs — first red is at the last green's commit (…)": green and
+  red at one commit, so no code changed between them. Read it as a flake, the
+  provider or the environment. Nobody is mentioned.
+- "window: unavailable (…)": a failed or timed-out read, a jobs answer that is
+  not a list or lists no `money-flow` job, a compare that is not `ahead`, or a
+  first-parent line that leaves the compare page or does not reach last green.
+- "window: open-ended — …": no green within the newest 300 runs, or within the
+  lookup budget of calls or of time (the reason says which), so the break may
+  be older.
 
 Every `gh` call has a 30 s bound, and one lookup is capped at 80 calls and
 120 s. The failure step runs inside the `money-flow` job, which holds the
@@ -1912,8 +1919,10 @@ request before proposing a mechanism.
 
 Whatever the class, read the issue's `window:` line before bisecting by hand. It
 names the last green run, the first red run and the first-parent PRs between them
-(#4236). One PR that touches the harness or a money-path file is the first suspect,
-and its author is mentioned on the episode's first comment. Several PRs, or an
+(#4236). One PR that touches the harness or a money-path file is the first suspect.
+Its author is mentioned on the episode's first comment only when the run class is
+`haven`, `harness` or `unclassified` (the gate in
+[Automated failure reporting](#automated-failure-reporting)). Several PRs, or an
 `open-ended` or `unavailable` window, leave the bisect to you; see
 [Automated failure reporting](#automated-failure-reporting) for what each form means.
 

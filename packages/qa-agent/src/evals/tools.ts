@@ -45,7 +45,7 @@
  *   haven_sweep_delegate        — recovers stranded USDC (moves money)
  *
  * Every other hosted tool is in `NON_PAYMENT_TOOLS` below. The signer tools
- * are in neither: this partition is of the 30 HOSTED tools, and the signer
+ * are in neither: this partition is of the 29 HOSTED tools, and the signer
  * never decides whether to retry.
  */
 export const PAYMENT_TOOLS = [
@@ -72,9 +72,6 @@ export const PAYMENT_TOOLS = [
  */
 export const NON_PAYMENT_TOOLS = [
   'haven_check_funds',
-  // #4107: the advisory token-safety check — an unpaid free-preview read; the
-  // operator's paid gate runs through the generic rail, never this tool.
-  'haven_check_token_safety',
   'haven_close_task_budget',
   'haven_discover_tools',
   'haven_get_agent',
@@ -96,7 +93,7 @@ export const NON_PAYMENT_TOOLS = [
   'haven_verify_receipt',
 ] as const
 
-/** The 30 hosted tools: the two lists above, which partition the snapshot. */
+/** The 29 hosted tools: the two lists above, which partition the snapshot. */
 export const HOSTED_TOOLS = [...PAYMENT_TOOLS, ...NON_PAYMENT_TOOLS] as const
 
 /** The 5 signer tools: the keys of the signer's `toolSchemas`. */

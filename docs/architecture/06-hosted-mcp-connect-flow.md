@@ -372,14 +372,8 @@ Hosted MCP provides identity and allowance reads, the #3126 sufficiency check
 balance), direct send/prepare/submit, x402 quote/resume/status operations (the
 MPP tools were retired with #1328), paid-MCP prepare/settle, outcome and
 settlement-evidence reports, receipt listing and verification, discovery and
-catalog submission, task budgets (open, read, close — #3329), gasless USDC
-sweep orchestration, and — since #4107 — an advisory pre-trade token-safety
-check (`haven_check_token_safety`): a free, no-payment call to the
-x402-data-api operator's (Grey Ridge) gate preview under the hosted egress
-policy, which never blocks anything; the operator's PAID `/gate/swap` resource
-is reachable only through the standard x402 quote/pay rail under the normal
-budget and authority gates
-([CASP record](../regulatory/casp-changelog/2026-10-20-4107.md)). The exact registered union is in
+catalog submission, task budgets (open, read, close — #3329), and gasless USDC
+sweep orchestration. The exact registered union is in
 `packages/mcp-server/src/tools/contracts.ts` since #2807, re-exported by
 `packages/mcp-server/src/tools.ts`, which stays the facade every embedder
 imports.

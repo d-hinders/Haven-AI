@@ -481,13 +481,10 @@ const PRE_TRIM_BASELINE_BYTES = 30_609
  * 1092.2068…, pinned at the two-decimal ceiling (1092.21). Shrink-only from
  * here.
  */
-// #4107: 32,578 = 31,674 + 904 — one new tool (haven_check_token_safety,
-// 904 bytes), its description below the prior mean.
-const MAX_TOTAL_BYTES = 32_578
-// Mean pin: #4107 — one new tool (haven_check_token_safety, 904 bytes, below
-// the prior mean) — 32,578 / 30 = 1085.9333…, pinned at the two-decimal
-// ceiling (1085.94). Shrink-only from here.
-const MAX_MEAN_BYTES = 1085.94
+const MAX_TOTAL_BYTES = 31_674
+// Mean pin: round 28 (#4061 block above): 31,674 / 29 = 1092.2068…, pinned
+// at the two-decimal ceiling (1092.21). Shrink-only from here.
+const MAX_MEAN_BYTES = 1092.21
 
 describe('tool description payload (#1591)', () => {
   it(`served descriptions average ≤${MAX_MEAN_BYTES} UTF-8 bytes (pre-trim total was ${PRE_TRIM_BASELINE_BYTES})`, () => {

@@ -77,9 +77,9 @@ describe('the tool lists against their upstream sources', () => {
 })
 
 describe('the list sizes (a readable count; the drift check is above)', () => {
-  it('counts 30 hosted tools', () => {
-    expect(HOSTED_TOOLS).toHaveLength(30)
-    expect(TOOL_COUNTS.hosted).toBe(30)
+  it('counts 29 hosted tools', () => {
+    expect(HOSTED_TOOLS).toHaveLength(29)
+    expect(TOOL_COUNTS.hosted).toBe(29)
   })
 
   it('counts 5 signer tools', () => {

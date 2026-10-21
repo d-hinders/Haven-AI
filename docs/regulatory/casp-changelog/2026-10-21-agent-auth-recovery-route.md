@@ -1,9 +1,10 @@
 - **agent auth decides the recovery exemption from the matched route.** This
   narrows an agent-key authorization decision in
-  `packages/backend/src/middleware/agentAuth.ts`. It also makes the
-  unauthenticated catalogue read in `packages/backend/src/routes/catalog.ts`
-  fail closed in the same way. No payment, signing, custody or relay code
-  moved. The perimeter narrows.
+  `packages/backend/src/middleware/agentAuth.ts`. It also removes a
+  request-target fallback from the unauthenticated catalogue predicate in
+  `packages/backend/src/routes/catalog.ts` (defence in depth, no behaviour
+  change; see below). No payment, signing, custody or relay code moved. The
+  perimeter narrows.
   What the exemption is. A paused, pending, archived or revoked agent key
   stays usable for one operation, sweep recovery:
   `POST /machine-payments/sweep/prepare` and
@@ -15,7 +16,7 @@
   `/sweep/prepare` or `/sweep/submit`? It did not ask which route the
   router had matched. Every agent-key route plugin runs the middleware:
   x402, payments, machine-payments, task-budgets, sub-budgets,
-  reconciliation events, catalogue and tax declaration. On any of them, a
+  reconciliation events, catalogue, merchants and tax declaration. On any of them, a
   paused, pending, archived or revoked key passed agent auth when its
   request-target ended in either suffix. That held even when the suffix
   sat in a fragment, which the router ignores when it matches a route. So
@@ -42,8 +43,12 @@
   recover the delegate signature, and move funds only delegate → the
   agent's own account. Haven holds no key and signs no spend.
   `isPublicCatalogRead` likewise drops its fallback to the request-target
-  string. A request with no matched route is not a public read and takes
-  the credential path.
+  string. For real traffic that fallback could not be reached: the predicate
+  runs in a plugin `onRequest` hook, and a request that matches no route gets
+  the root 404 before any plugin hook runs. A probe of the real catalogue and
+  merchants plugins gave identical answers before and after for every target.
+  The change is defence in depth: the predicate no longer reads the
+  request-target at all.
   Tested against real Postgres on a listening server with raw HTTP/1.1
   request-targets
   (`src/middleware/__tests__/agent-auth-recovery-route.test.ts`). Paused,
@@ -54,7 +59,8 @@
   in `agentAuth.test.ts` pin the method half of the key, and pin that each
   entry is a registered operation of `routes/machine-payments.ts` in
   `ROUTE_MODULE_BY_OPERATION`. A case in `catalog.test.ts` pins the
-  fail-closed catalogue predicate. Each of these mutations reddens a test:
+  catalogue predicate without its fallback (called with a request object, not
+  through the router). Each of these mutations reddens a test:
   restoring the suffix test; exempting every POST; dropping the method from
   the key; never exempting (recovery broken); renaming one entry's prefix;
   re-adding request-target leniency only on the archived branch, or only

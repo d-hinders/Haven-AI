@@ -105,7 +105,12 @@ neither a maintainer nor a Bot, not accepted by a maintainer removing its
 issue is done (its PR closed it via `Closes #`). One deliberate exception, and it
 reads as ready when it is not: an issue labelled **`operator-verify`** has merged
 code and is waiting on a human step, so its PR wrote `Refs #<n>` and the merge left
-it open (#2276).
+it open (#2276). Its machine-applied sibling is **`landed-partial`** (#4235): the
+merge-time release workflow adds it on every `Refs`-only merge to the open,
+non-epic, maintainer-authored issues the PR references, so part or all of such an
+issue has landed even when nobody applied `operator-verify`. The loop skips it and
+reads the merged PR first; no check reads it, so a later `Closes #<n>` PR needs no
+label removal.
 
 You don't have to hand-write those issues. **Capture is its own step:**
 [`new-task "<description>"`](../../.agents/skills/new-task/SKILL.md) turns a one-line
@@ -146,7 +151,9 @@ keys, a live end-to-end run — the code half ships and the issue must stay OPEN
 `Closes` is a GitHub keyword, so writing "this issue stays open" in the body does
 not survive the merge: #2268 said so three times, in the issue, in its release
 comment and in PR #2272's own body, and the merge closed it anyway. Such a PR
-writes **`Refs #<n>`** and the issue carries the **`operator-verify`** label. That
+writes **`Refs #<n>`** and the issue carries the **`operator-verify`** label,
+applied by hand when the PR opens (the merge then also adds the informational
+`landed-partial`, which nothing enforces). That
 is enforced, not merely conventional — `scripts/ci/operator-verify-close-guard.mjs`
 runs inside the required *Docs front-matter & agent skills* check and fails a pull
 request whose closing keyword targets a labelled issue, or one the pull request

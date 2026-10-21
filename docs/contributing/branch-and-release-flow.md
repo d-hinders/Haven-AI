@@ -9,7 +9,7 @@ covers:
   - scripts/release-version-constants.mjs
   - scripts/ci/qa-freshness.mjs
   - .github/workflows/publish.yml
-last-verified: "2026-10-09"
+last-verified: "2026-10-21"
 ---
 
 # Branch & release flow
@@ -168,6 +168,7 @@ resyncs and 1 divergence.
 | open, with an open PR | in progress |
 | **closed** | **implemented and on `dev`** (the dev-merge fired `Closes #`) |
 | open, labelled `operator-verify` | **implemented and on `dev`**, waiting on a human step — its PR wrote `Refs #<n>` on purpose (#2276) |
+| open, labelled `landed-partial` | **part or all on `dev`** — a merged PR references it with `Refs #<n>` (#4235). Read that PR before building. Which issues get the label, and the fact that no check reads it, are in AGENTS.md § *Cross-session agent coordination* (*Release what you drop*) |
 
 Issue state tracks **implementation**, never prod. Don't reopen an issue to mean
 "not in prod yet" — that's what the promotion tracking below is for. For an

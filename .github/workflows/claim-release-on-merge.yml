@@ -63,8 +63,16 @@ name: Release the claim on merge
 #   unreleased claim of it, and an issue labelled `epic` is skipped (captain
 #   decision on #4176's review). A close that no merge caused is released by
 #   `claim-release-on-close.yml`.
-# - It never touches the channel's assignees, never closes or labels anything, and
-#   never fails the build: a failed read or a refused write is logged, exit 0.
+# - The one label it writes is the informational `landed-partial` (#4235,
+#   owner decision B): on a `Refs`-only merge, added to each referenced issue
+#   that is open, not an epic, not the channel (current or retired) and authored by a maintainer,
+#   whether or not the PR author held a claim; never on a bot-authored PR, and
+#   never twice (an issue that already carries it gets no write). No check
+#   reads it — the close guard reads `operator-verify`, which this workflow
+#   never adds or removes.
+# - It never touches the channel's assignees, never closes anything, adds no
+#   other label and removes none, and never fails the build: a failed read or a
+#   refused write is logged, exit 0.
 #
 # ## Trust boundary
 #
@@ -82,7 +90,7 @@ on:
     types: [closed]
 
 permissions:
-  issues: write        # comment + unassign
+  issues: write        # comment + unassign + the `landed-partial` label
   pull-requests: read  # closingIssuesReferences
 
 jobs:

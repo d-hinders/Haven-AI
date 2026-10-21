@@ -7,6 +7,7 @@ covers:
   - packages/backend/src/infra/__tests__/helpers/test-env.ts
   - packages/backend/scripts/reap-test-schemas.mjs
   - packages/backend/src/infra/__tests__/helpers/db-availability.ts
+  - packages/backend/src/infra/__tests__/helpers/test-network-net.ts
   - packages/backend/vitest.setup.ts
   - packages/backend/vitest.global-setup.ts
   - scripts/db-mock-ratchet.mjs
@@ -750,6 +751,90 @@ without it. The same recorder shape — committed at
 preloaded over the whole suite (`NODE_OPTIONS="--import
 ./scripts/record-kit-analytics-connections.mjs"`, with `CI` unset) to confirm
 zero connections across all test files.
+
+## No real network (#4217)
+
+> **A backend test must not dial the real network** — not directly, not
+> through the code under test, not from a fire-and-forget write that outlives
+> the test.
+
+The rule was earned by #3963's two `dev` reds: in #3969 and #3974 a test
+reached a live host and ran past vitest's 5000 ms `testTimeout` on the CI
+runner. Each was fixed at its own site, and two more files kept dialing
+`api.coingecko.com` unnoticed (quality scan 2026-10-21, C3) — green, because
+the price capture degrades to `null` by design. A dial whose failure is
+swallowed is invisible to the test's own assertions, so the rule is enforced
+by a net, not by review.
+
+**The net** (`src/infra/__tests__/helpers/test-network-net.ts`, installed by
+`vitest.setup.ts` in every worker):
+
+- **Refuses** every outbound connection whose *resolved* address is not the
+  local machine — `127.0.0.0/8`, `::1`, their IPv4-mapped forms, and the
+  unspecified `0.0.0.0` / `::`. Private, link-local and CGNAT ranges are other
+  machines and are refused too. It wraps `net.Socket.prototype.connect`, which
+  built-in `fetch`, `node:http(s)`, `pg` and raw `net` all go through,
+  checks IP-literal hosts there directly, and wraps the lookup a connection
+  uses — the caller's own `lookup` option when it brings one (the SSRF guard
+  pins its address that way), including the `all: true` form.
+- **Refuses lookups of non-local names before a query leaves**: `dns.lookup`,
+  `dns.promises.lookup`, and the c-ares `resolveTxt` (callback and promise).
+  #3969 was a slow NXDOMAIN, which opens no connection at all.
+- **Answers reserved names locally.** A system-resolver lookup of `*.test`,
+  `*.invalid` or `*.example` (RFC 2606 / 6761) gets `ENOTFOUND` without a
+  query and without a red — that is the answer real DNS would give.
+  `example.com` is a real domain and is refused like any other.
+- **Allows** Unix sockets, loopback, and the host in `DATABASE_URL`, admitted
+  by name so a contributor whose Postgres runs on another machine is not
+  refused by their own configuration (CI's is `localhost`).
+
+**A refusal is a red, not a swallow.** The refused connection fails with an
+`ECONNREFUSED`-coded error, so the code under test takes its ordinary
+transport-failure branch — and the net records it. Its `afterEach` fails the
+test that was running; its file-level `afterAll` first yields 50 ms (150 ms
+when the kit's analytics could post, on a timer `vi.useFakeTimers()` cannot
+freeze) and then fails the file for any dial that landed after its test
+ended — a `setTimeout(0)`, a `setImmediate`, a fire-and-forget write. The
+bound is that window: a dial scheduled to fire later than that after the
+file's last hook is not reliably seen, because the file's hooks have run and
+its worker may already be gone; a test that schedules work that far out
+should await it. Both hooks are registered by
+`vitest.setup.ts`, so they run after a file's own hooks. The message names
+the host, port and test file — never a path or query, because RPC and
+bundler URLs carry API keys and CI logs are public.
+
+**Fixing a red:** stub the seam the dial goes through, at the module that
+fetches — for book-time FX that is
+`vi.mock('…/infra/fiat-values.js', async (importOriginal) => ({ ...actual, getBookTimeCapture: async () => null }))`,
+as `mpp/__tests__/delivery-reference.test.ts` does — or point the code at a
+loopback server the test starts. Do not catch the error in the test: the
+net has already recorded the dial.
+
+**Adding an exemption** is for a test whose point *is* the live dial. Add an
+entry to `NET_EXEMPTIONS` in the net's file — the file path, a reason, and
+the hosts it may reach — and justify it in the PR body. An exemption is
+scoped to its hosts: every other host is refused inside that file too. The
+list has one entry, `routes/__tests__/non-custody-onchain-enforcer.contract.test.ts`,
+scoped to the RPC host `resolveProbeRpcUrl()` returns, because it proves CASP
+Red Line #4 against the enforcers deployed on Base Sepolia and must fail in CI
+when that RPC is unreachable. The smart-accounts kit's analytics host
+(`mm-sdk-analytics.api.cx.metamask.io`) is never exempt: the owner decided
+those posts go off (#4216), and the `kit-analytics-off` import described in
+the section above keeps the kit silent for the whole suite. If a file
+removes that opt-out, the net refuses the kit's posts and fails the file; its
+`afterAll` then waits 150 ms instead of 50 ms, which covers the kit's 100 ms
+batch timer.
+
+**Out of reach, by design:** child processes a test spawns outside vitest
+(`ops-probe-standalone.test.ts`'s `npx tsx`) and `vitest.global-setup.ts`,
+which runs in the main process before any worker exists. A child *vitest*
+loads `vitest.setup.ts` and so runs under the net. Also unpatched, with no
+source caller today: a `worker_threads` Worker (its own realm, with its own
+`net`), UDP (`dgram`), and c-ares queries made through a `new dns.Resolver()`
+/ `new dns.promises.Resolver()` instance rather than the module functions.
+The self-tests are `src/infra/__tests__/helpers/__tests__/test-network-net.test.ts`
+and, for the file-level red (a child vitest over disposable fixtures),
+`test-network-net-late-dial.test.ts` beside it.
 
 ## The ratchet
 

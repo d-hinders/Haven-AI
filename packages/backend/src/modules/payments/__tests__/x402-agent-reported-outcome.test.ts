@@ -32,13 +32,27 @@
  * re-asserts one of its cases so a report that "succeeds" by marking
  * everything reported cannot pass this file.
  */
-import { beforeAll, beforeEach, expect, it } from 'vitest'
+import { beforeAll, beforeEach, expect, it, vi } from 'vitest'
 import db from '../../../db.js'
 import { describeDb, initDbHarness, resetDb } from '../../../infra/__tests__/helpers/db-harness.js'
 import { getAgentPaymentStatus } from '../agent-payment-status.js'
 import { handleReconciliationEvent } from '../../mpp/reconciliation.js'
 import { attachEvidenceHandler } from '../../mpp/evidence.js'
 import { type AgentContext } from '../../../middleware/agentAuth.js'
+
+// #4217: the evidence write captures book-time FX through
+// `getBookTimeCapture`, which fetches CoinGecko over the network. Seven of
+// this file's tests reach it, and they passed with the dial refused because
+// the capture degrades to `null` by design — which is why the test network
+// net fails a test for the dial itself (docs/contributing/testing-strategy.md
+// § "No real network (#4217)"). `null` is the module's own pricing-outage
+// answer and this file asserts nothing about FX, so the stub is
+// semantics-preserving — the same seam `mpp/__tests__/delivery-reference.test.ts`
+// stubs.
+vi.mock('../../../infra/fiat-values.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../infra/fiat-values.js')>()),
+  getBookTimeCapture: async () => null,
+}))
 
 let seq = 0
 

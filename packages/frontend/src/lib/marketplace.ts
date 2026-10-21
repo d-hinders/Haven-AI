@@ -698,14 +698,17 @@ export function needsUnpinnedBudget(assetTransferMethods: string | null): boolea
 }
 
 /**
- * Initials for a merchant with no logo — two letters from the first two
- * words of its name, or the first two letters of a one-word name. Same shape
- * as the `Initials` avatar on `/contacts`, the one other place Haven renders
- * a named-entity monogram.
+ * Initials for a named entity with no logo — two letters from the first and
+ * last words of its name, or the first two letters of a one-word name. The
+ * helper behind `Monogram`, which draws merchants, contacts and agents.
  */
 export function merchantInitials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean)
+  // Code points, not UTF-16 code units (#4210): agent names are user-typed, and
+  // `'😀Bot'[0]` is half a surrogate pair. `Array.from` iterates code points.
+  const parts = name.trim().split(/\s+/).filter(Boolean).map((part) => Array.from(part))
   const initials =
-    parts.length >= 2 ? `${parts[0]![0]}${parts[parts.length - 1]![0]}` : (parts[0] ?? '?').slice(0, 2)
+    parts.length >= 2
+      ? `${parts[0]![0]}${parts[parts.length - 1]![0]}`
+      : (parts[0] ?? ['?']).slice(0, 2).join('')
   return initials.toUpperCase()
 }

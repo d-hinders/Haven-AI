@@ -644,6 +644,18 @@ describe('merchantInitials', () => {
   it('takes the first two letters of a one-word name', () => {
     expect(merchantInitials('Minifetch')).toBe('MI')
   })
+
+  // #4210: agent names are user-typed, and a UTF-16 index splits a surrogate pair.
+  it('never returns a lone surrogate for a name that starts with or contains an emoji', () => {
+    const loneSurrogate = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/
+    expect(merchantInitials('😀Bot')).toBe('😀B')
+    expect(merchantInitials('🤖 Research agent')).toBe('🤖A')
+    expect(merchantInitials('Research 🤖')).toBe('R🤖')
+    expect(merchantInitials('🤖')).toBe('🤖')
+    for (const name of ['😀Bot', '🤖 Research agent', 'Research 🤖', '🤖', 'a😀b']) {
+      expect(merchantInitials(name)).not.toMatch(loneSurrogate)
+    }
+  })
 })
 
 describe('freshness', () => {

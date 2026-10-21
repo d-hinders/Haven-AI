@@ -4,7 +4,7 @@ import { ArrowDown, ArrowUp, Bot, Check, Circle, CirclePause, CreditCard, Ellips
 import { MobileTabBar } from '@/components/sidebar/MobileTabBar'
 import { baseNavItems } from '@/components/sidebar/Sidebar'
 import { Icon } from '@/components/ui/Icon'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
@@ -817,6 +817,10 @@ function PagedListExample() {
   const total = 49
   const [loaded, setLoaded] = useState(25)
   const [loading, setLoading] = useState(false)
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => () => {
+    if (timer.current) clearTimeout(timer.current)
+  }, [])
   return (
     <div data-testid="ds-list-controls-paging">
       <Card hover={false} className="overflow-hidden">
@@ -834,7 +838,7 @@ function PagedListExample() {
         loading={loading}
         onShowMore={() => {
           setLoading(true)
-          setTimeout(() => {
+          timer.current = setTimeout(() => {
             setLoaded((n) => Math.min(total, n + 25))
             setLoading(false)
           }, 600)

@@ -56,7 +56,7 @@ vi.mock('@/hooks/useTransactionFilters', () => ({
     agents: [],
     tokens: [],
     loading: false,
-    error: null,
+    error: feedState.filtersError,
   }),
 }))
 
@@ -80,7 +80,7 @@ const TX = {
 }
 
 const { feedState } = vi.hoisted(() => ({
-  feedState: { partialFailure: false, truncated: false, empty: false, hasMore: false, loadingMore: false, total: 1, loadMore: vi.fn() },
+  feedState: { partialFailure: false, truncated: false, empty: false, hasMore: false, loadingMore: false, total: 1, loadMore: vi.fn(), filtersError: null as string | null },
 }))
 
 vi.mock('@/hooks/useTransactionsFeed', () => ({
@@ -116,6 +116,7 @@ beforeEach(() => {
   feedState.loadingMore = false
   feedState.total = 1
   feedState.loadMore = vi.fn()
+  feedState.filtersError = null
 })
 
 async function exportNoticeRegion(): Promise<HTMLElement> {
@@ -268,6 +269,18 @@ describe('TransactionsClient — CSV export (#2871)', () => {
     expect(
       screen.getByTestId('list-summary').compareDocumentPosition(hedge) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy()
+    // …and before the table card: nothing renders between it and the line.
+    expect(screen.getByTestId('list-controls').nextElementSibling).toBe(hedge)
+  })
+
+  it('keeps the truncated hedge under the summary line when the filter options fail too (#4196)', async () => {
+    feedState.truncated = true
+    feedState.filtersError = 'Filter options could not load.'
+    render(<TransactionsClient />)
+
+    const hedge = await screen.findByText(/Counts and exports cover the transactions loaded here/i)
+    expect(screen.getByTestId('list-controls').nextElementSibling).toBe(hedge)
+    expect(hedge.compareDocumentPosition(screen.getByText('Filter options could not load.')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     // Hedged, not flat: an account holding exactly one window on an
     // Etherscan-shaped leg would make a flat claim false.
     expect(screen.getByText(/may\s+not be your full history/i)).toBeInTheDocument()

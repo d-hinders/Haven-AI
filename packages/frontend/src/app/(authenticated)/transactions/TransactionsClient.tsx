@@ -528,12 +528,6 @@ export default function TransactionsClient() {
         }
       />
 
-      {filtersError && (
-        <p role="alert" className="mt-2 text-xs text-[var(--v2-danger)]">
-          {filtersError}
-        </p>
-      )}
-
       {/*
         #2882/#2884: `total` counts what the explorers returned, not what
         the account holds — each source is read only up to a fixed page
@@ -549,6 +543,14 @@ export default function TransactionsClient() {
         <p className="mt-1 px-0.5 text-xs text-[var(--v2-ink-3)]">
           Counts and exports cover the transactions loaded here, which may
           not be your full history.
+        </p>
+      )}
+
+      {/* After the hedge, so the hedge stays under the count it
+          qualifies (#4196). */}
+      {filtersError && (
+        <p role="alert" className="mt-2 text-xs text-[var(--v2-danger)]">
+          {filtersError}
         </p>
       )}
 

@@ -2152,9 +2152,10 @@ above the list; the card is never repeated inside a parent card.
    slot and never builds the line, so "filtered" is decided once, inside the
    toolbar. The count keeps one place whether or not a filter is active.
 
-Under the summary line, in this order: the hedges that qualify it (the
-`truncated` note, `UNPRICED_TOTALS_NOTE`), then page callouts (the Agents
-hidden-budget banner), then the list. On Marketplace the line sits above the
+Under the summary line, in this order: the hedges that qualify it
+(`UNPRICED_TOTALS_NOTE` for the totals, then the `truncated` note for the
+count), then page callouts and alerts (the Agents hidden-budget banner, a
+filter-options load error), then the list. On Marketplace the line sits above the
 card grid and Coming soon.
 
 **Active means "differs from the page's default".** One rule decides the

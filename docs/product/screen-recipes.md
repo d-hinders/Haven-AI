@@ -760,7 +760,8 @@ Structure:
    page is loaded. The URL keeps the keys it had before #4111 except search,
    written as `q` with the old `search` still read; the export request builds its own API
    parameters, apart from the URL codec. Sorting stays on the column
-   headers. The account page's planned Activity tab moves with #4130.
+   headers. The account page's Activity tab uses the same toolbar and codec
+   (#4130).
 3. The full-page `TransactionsTable` variant for `/transactions`; card/compact
    variants are valid for scoped histories on account and agent detail.
 4. A filtered list with no rows shows the standard no-match state

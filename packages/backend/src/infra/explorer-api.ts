@@ -287,7 +287,7 @@ export const EXPLORER_PAGE_SIZE = 50
  *   per account behind a 30-second per-account cache, which is what keeps the
  *   dashboard fan-out (every account on every uncached load) inside the
  *   free-tier budgets. Paginating only the export path would still put the
- *   fan-out behind the dashboard's own Load more button, so the budget is
+ *   fan-out behind the dashboard's own Show more paging button, so the budget is
  *   paid on the list route too and both paths see the same rows.
  *
  * When the budget is spent the leg reports `hasMore: true` — a capped read

@@ -159,20 +159,6 @@ function listStateToFilters(state: ListState): TransactionFilterState {
 }
 
 /**
- * One feed row in the ledger — #4096's ledger mode, the account page's own
- * copy (#4166): the title is WHO WAS PAID — `counterpartyLabel` in the
- * dashboard's no-address mode, the merchant or counterparty first — with the
- * agent as the subtitle, exactly the dashboard row's anatomy. The shared
- * `transactionTitle` ("Agent payment by …") stays untouched for
- * `/transactions`, the agent page and the detail panel.
- *
- * The movement line is gone with it: the page fixes the account, so its
- * "From <this account> →" half repeated the page on every row (#4166 — done
- * here in the row's props, not in the shared helper). What the movement line
- * used to say is carried by the row itself — the counterparty is the title,
- * the fixed account is the page — and the agent moves into the subtitle.
- */
-/**
  * One figure on the list summary line: the short visible label ("In") so the
  * line fits a phone beside the count (#4108 follow-up to #4196), and the full
  * name ("Money in") for screen readers, read before the amount — the naming
@@ -187,6 +173,20 @@ function TotalFigure({ short, name, children }: { short: string; name: string; c
   )
 }
 
+/**
+ * One feed row in the ledger — #4096's ledger mode, the account page's own
+ * copy (#4166): the title is WHO WAS PAID — `counterpartyLabel` in the
+ * dashboard's no-address mode, the merchant or counterparty first — with the
+ * agent as the subtitle, exactly the dashboard row's anatomy. The shared
+ * `transactionTitle` ("Agent payment by …") stays untouched for
+ * `/transactions`, the agent page and the detail panel.
+ *
+ * The movement line is gone with it: the page fixes the account, so its
+ * "From <this account> →" half repeated the page on every row (#4166 — done
+ * here in the row's props, not in the shared helper). What the movement line
+ * used to say is carried by the row itself — the counterparty is the title,
+ * the fixed account is the page — and the agent moves into the subtitle.
+ */
 function ActivityLedgerRow({
   tx,
   resolveAddress,

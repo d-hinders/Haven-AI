@@ -28,8 +28,10 @@
  * NOW() - 60 s`, and its tick runs at boot and then every 120 s, so a sweep
  * record lands 60–180 s after the funding confirm, never earlier. A client
  * report, by contrast, finishes before the call that triggers it returns: the
- * SDK awaits its one settlement report inside `MerchantCompletion.retryRequest`,
- * and the hosted settle posts its report inside the settle call.
+ * SDK awaits its settlement report — retried while Haven answers `retryable`
+ * (#4215), still inside the call — inside
+ * `MerchantCompletion.retryRequest`, and the hosted settle posts its report
+ * inside the settle call.
  *
  * So each leg takes an anchor — a runner timestamp the funding confirm cannot
  * precede — and a record observed within {@link ATTRIBUTION_WINDOW_MS} of it
@@ -41,13 +43,16 @@
  *
  * The backend checks the settlement transaction once per report, with no wait.
  * A merchant transaction not yet visible to the backend's node at report time
- * is answered `retryable`. The SDK cannot surface that answer (it swallows the
- * outcome by design) and posts once, so on the SDK-direct legs that case is a
- * red that is not a Haven regression. The #4119 spec (spec-review correction
- * 3) keeps the SDK legs strict: if that red recurs, the fix is in the SDK —
- * surface `settlementEvidenceOutcome` on the local `fetch` /
- * `resumeX402Payment` path — never a re-post from the leg. The hosted legs
- * can see `retryable` and follow it ({@link assertHostedSettlementRecorded}).
+ * is answered `retryable`. Since #4215 the SDK retries that answer on its
+ * bounded `EVIDENCE_RETRY_DELAYS_MS` schedule (four attempts over ~7 s), so a
+ * short visibility lag no longer reds the SDK-direct legs. A red now means the
+ * transaction was still invisible through the last attempt (or the report was
+ * refused outright) — a red that is not a Haven regression only in the same
+ * narrow sense as before. The outcome is still swallowed by design (D1): the
+ * leg cannot see which of the two happened. The #4119 spec (spec-review
+ * correction 3) keeps the SDK legs strict: a refusal red is investigated, not
+ * absorbed — never a re-post from the leg. The hosted legs can see `retryable`
+ * and follow it ({@link assertHostedSettlementRecorded}).
  *
  * A second, bounded residual: a hosted follow-up report that Haven accepts
  * but whose status read lands after the deadline is red although the leg's
@@ -242,7 +247,8 @@ async function recordedHashMatches(
 
 /**
  * SDK-direct legs (`x402-delegation-3009`, `-grace-resume`): the SDK posted
- * its one settlement report inside the call that returned. Call this right
+ * its settlement report inside the call that returned — retried on
+ * `retryable` under the bounded schedule since #4215. Call this right
  * after that call; `anchorMs` is a runner timestamp taken before the funding
  * confirm could happen.
  */
@@ -260,7 +266,7 @@ export async function assertSdkSettlementRecorded(
         `Haven did not record the merchant settlement of payment ${args.paymentId} within ` +
         `${seconds(ATTRIBUTION_WINDOW_MS)} of the submitting call (${describeRead(record.last)}): the SDK's ` +
         'settlement report was refused, or the backend answered it retryable (the merchant tx was not yet ' +
-        'visible to its node) and the SDK, which posts once, did not retry',
+        'visible to its node) through every bounded retry (#4215)',
     }
   }
   const mismatch = await recordedHashMatches(api, args.paymentId, args.merchantHash, deadline)

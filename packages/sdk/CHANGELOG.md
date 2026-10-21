@@ -17,6 +17,22 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ### Changed
 
+- **The local EIP-3009 settlement-evidence report is retried while Haven
+  answers `retryable` (#4215).** On the local path (`fetch`,
+  `payX402Quote`, `resumeX402Payment`), the merchant's settlement report in
+  `MerchantCompletion.retryRequest` is re-posted — same body — while Haven
+  answers 503 `settlement_unobservable`, on the existing
+  `EVIDENCE_RETRY_DELAYS_MS` schedule: four attempts over ~7 s of backoff.
+  This adds worst-case latency to a completed local purchase of up to 7 s of
+  backoff plus 3 round trips, each bounded only by `requestTimeout` (30 s).
+  Any refusal (a 409, the `settlement_proof_header_missing` refusal, a
+  validation error, a transport failure with no HTTP status) is still one
+  attempt, the outcome stays swallowed, and the caller-visible result of a
+  completed purchase does not change. The hosted path keeps its one-attempt
+  report (D2) and its retryable handoff (D1). Local `@haven_ai/mcp` and
+  `@haven_ai/connect` runtimes pick this up only through their own releases
+  (both pin `@haven_ai/sdk` exactly).
+
 - **The agent runbook says "a passkey", never a platform name (#4168).** Step 1
   of the sequence and the signup hand-off script in `HAVEN_AGENT_RUNBOOK_MD`
   drop "(Face ID / Touch ID)" after "a passkey", following the copy rule that

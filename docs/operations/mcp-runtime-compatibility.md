@@ -544,6 +544,31 @@ last-verified: "2026-10-21"
 >   skill's plain-HTTP settlement guidance now points at
 >   `haven_report_x402_outcome`'s `payment_response`, #3727).
 
+> **#4215 (2026-10-21, the local EIP-3009 settlement report is retried on a
+> retryable answer):** on the LOCAL path (`fetch` / `payX402Quote` /
+> `resumeX402Payment` → `MerchantCompletion.retryRequest`), the merchant's
+> settlement-evidence report is no longer one attempt: it is retried while
+> Haven answers `retryable` (503 `settlement_unobservable`) under the bounded
+> `EVIDENCE_RETRY_DELAYS_MS` schedule — four attempts over ~7 s of backoff,
+> each attempt additionally bounded only by `requestTimeout` (30 s). Any
+> refusal — a 409, the #4061 `settlement_proof_header_missing` refusal, a
+> validation error, a transport failure with no HTTP status — still ends the
+> loop on the first attempt. This revisits #3764's D2 for the local path only
+> (owner decision on #4215): the qa-dev EIP-3009 legs showed the backend's
+> node sees the merchant transaction only seconds after the funding confirm,
+> and a swallowed one-shot 503 red them against #4144's 45 s record window.
+> **D2 on the HOSTED path is unchanged** (`completeX402MerchantCall` still
+> posts once and maps a retryable answer to the
+> `haven_report_settlement_evidence` handoff), the outcome stays swallowed on
+> the local path (D1), and the caller-visible result of a completed purchase
+> does not change — worst case it returns ~7 s later.
+> - **Local `@haven_ai/mcp` users get this only with an `@haven_ai/mcp`
+>   release** (it pins `@haven_ai/sdk` exactly), and **connect-installed
+>   local runtimes only with an `@haven_ai/connect` release** (same exact
+>   pin) — upgrading the SDK alone does nothing for them.
+> - **Hosted delivery is unchanged and picks nothing up**; no hosted deploy
+>   is implicated.
+
 > **Re-verified #3770 (2026-10-08, delivery-quality report):** the hosted
 > surface gains one tool, `haven_report_delivery_quality { payment_id, quality,
 > note? }` — the agent's evidence-only verdict on what a settled payment

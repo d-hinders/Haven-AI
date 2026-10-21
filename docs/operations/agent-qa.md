@@ -521,8 +521,9 @@ check (`packages/qa-agent/src/lib/settlement-record.ts`):
   `merchant_settlement_recorded: true`. Absent fails the leg with a message
   naming the payment id. On the SDK legs it names both causes: the report was
   refused, or the backend answered it `retryable` (the merchant tx was not yet
-  visible to its node). On the hosted no-tool arm it says the settle's report
-  was not recorded, or was never posted.
+  visible to its node) through every bounded retry (#4215). On the hosted
+  no-tool arm it says the settle's report was not recorded, or was never
+  posted.
 - **The same transaction.** The receipt's `settlement_tx_hash` must equal,
   case-insensitively, the hash the leg proved on-chain. On its own the receipt
   hash proves nothing — with no record it falls back to the merchant's
@@ -553,13 +554,13 @@ check (`packages/qa-agent/src/lib/settlement-record.ts`):
   is retryable, inside the window. Any refusal is red.
 
 The flake risk is stated, not hidden: the backend checks the transaction once
-per report with no wait, and the SDK posts once and swallows a `retryable`
-answer by design. A merchant transaction not yet visible to the backend's node
-at report time is therefore a red on the SDK-direct legs that is not a Haven
-regression. The #4119 spec (spec-review correction 3) keeps the SDK legs
-strict: if that red recurs, the fix is in the SDK — surface
-`settlementEvidenceOutcome` on the local `fetch` / `resumeX402Payment` path —
-never a re-post from the leg.
+per report with no wait. On the SDK-direct legs the SDK retries a `retryable`
+answer on its bounded `EVIDENCE_RETRY_DELAYS_MS` schedule — four attempts over
+~7 s, inside the window — since #4215, so a short visibility lag no longer reds
+them; a red now means the transaction was still invisible to the backend's node
+through the last attempt, or the report was refused outright. The #4119 spec
+(spec-review correction 3) keeps the SDK legs strict: a red is investigated,
+not absorbed — never a re-post from the leg.
 
 A second residual is bounded and rare: on the hosted report-tool arm, a
 follow-up Haven accepts but whose status read lands after the 45 s deadline is

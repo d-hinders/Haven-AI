@@ -15,6 +15,7 @@ covers:
   - packages/frontend/src/components/EditAgentModal.tsx
   - packages/frontend/src/components/DashboardOnboardingGuide.tsx
   - packages/frontend/src/components/haven/**
+  - packages/frontend/src/app/(authenticated)/agents/[agentId]/AgentDetailClient.tsx
   - packages/frontend/src/components/transactions/TransactionsTable.tsx
   - packages/frontend/src/components/ui/Input.tsx
   - packages/ui/**

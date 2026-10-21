@@ -33,6 +33,7 @@ covers:
   - packages/frontend/src/components/sidebar/**
   - packages/frontend/src/components/haven/TransactionActivityRow.tsx
   - packages/frontend/src/components/haven/AgentRow.tsx
+  - packages/frontend/src/app/(authenticated)/agents/[agentId]/AgentDetailClient.tsx
   - packages/frontend/src/app/(authenticated)/dashboard/AgentsSection.tsx
   - packages/frontend/src/components/ui/Tabs.tsx
   - packages/ui/src/Tabs.tsx

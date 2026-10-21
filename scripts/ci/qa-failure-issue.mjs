@@ -28,6 +28,11 @@
 // that merely carries the label — and fails closed: an unreadable lookup
 // throws before any write.
 //
+// And the half nobody could read off the issue (#4236): each failure's body and
+// comment name the last-green → first-red WINDOW and the PRs in it, and the
+// opening comment of an episode @-mentions a single PR's author under a gate
+// (see § The last-green → first-red window, below).
+//
 // `gh` is called through an injectable runner so the test can drive this exact
 // entry point with a recording stub on PATH and assert which calls were REACHED
 // (ship-next § Implement step 5: presence in source is not reachability). The
@@ -44,6 +49,20 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { byAttempt, scrubFull } from './qa-retry.mjs'
 import { BOT_AUTHOR } from './standing-issue-upsert.mjs'
+// `evaluate` is aliased: qa-freshness.mjs exports a different `evaluate` (its
+// promotion verdict), and a reader of this file should never have to guess which.
+import { evaluate as evaluateJobWindow, prOf } from './dev-push-health.mjs'
+import {
+  BRANCH_LABELLED_EVENTS,
+  EVIDENCE_EVENTS,
+  MONEY_FLOW_JOB,
+  jobsQueryArgs,
+  loadMoneyPathGlobs,
+  moneyFlowJobConclusion,
+  moneyPathFiles,
+  preFilterHarnessCandidates,
+  selectGreenRun,
+} from './qa-freshness.mjs'
 
 export const LABEL = 'qa-failure'
 export const LABEL_COLOR = 'b60205'
@@ -315,7 +334,8 @@ export function readFinalAttempt(files, read = (f) => readFileSync(f, 'utf8')) {
 }
 
 /** The body: latest failure only. History lives in the comments. */
-export function buildBody({ trigger, runUrl, when, classification = null }) {
+export function buildBody({ trigger, runUrl, when, classification = null, window = null, mention = false }) {
+  const line = windowLine(window, { mention })
   return [
     'The deterministic money-flow QA run (`qa-dev.yml`) is failing. This is the **one standing**',
     '`qa-failure` issue (#2767): each new failure rewrites this body and adds a comment, and the',
@@ -326,6 +346,7 @@ export function buildBody({ trigger, runUrl, when, classification = null }) {
     `- **Trigger:** \`${trigger}\``,
     `- **Run:** ${runUrl}`,
     `- **When:** ${when}`,
+    ...(line ? [`- **Window:** ${line.replace(/^window: /, '')}`] : []),
     '',
     ...classificationSection(classification),
     '',
@@ -339,13 +360,14 @@ export function buildBody({ trigger, runUrl, when, classification = null }) {
   ].join('\n')
 }
 
-export function buildComment({ trigger, runUrl, when, classification = null }) {
+export function buildComment({ trigger, runUrl, when, classification = null, window = null, mention = false }) {
+  const line = windowLine(window, { mention })
   const cls = classification ? classification.runClass : 'unclassified'
   const legs = classification?.legs?.length ? ` — legs: ${classification.legs.map((l) => `\`${l.leg}\` ${l.class}`).join(', ')}` : ''
   // The body is rewritten per failure; the comment is the thread's history, so
   // earlier attempts' classes are recorded here too.
   const earlier = (classification?.earlier ?? []).map((e) => `attempt ${e.attempt} \`${e.runClass}\``)
-  return `\`qa-dev\` failure at ${when} (trigger: \`${trigger}\`), class \`${cls}\`${legs}${earlier.length ? `; earlier: ${earlier.join(', ')}` : ''} — ${runUrl}`
+  return `\`qa-dev\` failure at ${when} (trigger: \`${trigger}\`), class \`${cls}\`${legs}${earlier.length ? `; earlier: ${earlier.join(', ')}` : ''} — ${runUrl}${line ? `\n\n${line}` : ''}`
 }
 
 /**
@@ -371,6 +393,410 @@ export function runUrlFromEnv(env = process.env) {
   return server && repo && id ? `${server}/${repo}/actions/runs/${id}` : ''
 }
 
+// ── The last-green → first-red window (#4236) ─────────────────────────────
+//
+// The comment that lands on every failure used to name the trigger and the
+// class, and no suspect: on 2026-10-20 the money-flow job went red at
+// `aa818795d` (#4144, one PR after the green at `84f347f0a`) and the first
+// issue attributing it was filed 23.7 h after #2769 reopened. The bot now
+// names the window itself:
+//
+//   - LAST GREEN is the newest qa-dev run, created before this one, that
+//     `selectGreenRun` admits: an evidence event, a branch-labelled event on
+//     `dev`, a commit in this run's history, and a `money-flow` JOB success —
+//     never a run-level `success`, which a gate-skipped run also has. Rows
+//     `preFilterHarnessCandidates` drops are never read. Ancestry comes from
+//     the compare API: the job's checkout is depth 1, so `findGreenRun`'s
+//     `git merge-base` would refuse every row.
+//   - FIRST RED is the oldest run after it whose `money-flow` job failed (rules
+//     1-3 passed too), or this run. `dev-push-health.mjs`'s `evaluate` derives
+//     both: only a DECISIVE conclusion moves the state, so `skipped` and
+//     `cancelled` never count. This run is red by construction: the step runs
+//     inside the failing `money-flow` job, whose conclusion is not final yet.
+//   - The PRs are the FIRST-PARENT chain from first red back to last green.
+//     The compare API lists every commit in the range, a merged branch's
+//     own commits included, so the chain is walked through `parents[0]`; a
+//     status other than `ahead`, or a chain that leaves the compare page, is
+//     "unavailable". One `commits/{sha}` read per PR says whether it touches a
+//     money-path file (`moneyPathFiles`) or the harness (`packages/qa-agent/`).
+//
+// Recomputed on every failure, never read back from the issue body. Every
+// `gh` call carries a time bound and the lookup has a total budget (calls and
+// time): the money-flow job has no `timeout-minutes` and holds the
+// `qa-dev-money-flow` concurrency group. Any failed or timed-out read makes
+// the window "unavailable"; nothing here can stop the upsert below.
+
+/** The harness package: a PR touching it can redden the run without touching Haven. */
+export const HARNESS_PREFIX = 'packages/qa-agent/'
+
+/**
+ * Run classes whose failure may be a code change (captain decision on #4236,
+ * 2026-10-21). `provider` and `rate_limit` are outages or the harness's own
+ * volume and `preflight` is a resource floor: none is the PR author's to fix,
+ * so they never @-mention. `mixed` is not here either.
+ */
+export const MENTION_CLASSES = new Set(['haven', 'harness', 'unclassified'])
+
+/** qa-dev runs one lookup lists. 150 were created in the first 28 h of the 2026-10-20 episode. */
+export const WINDOW_RUN_LIMIT = 300
+
+/** Time bound on each `gh` call of the window lookup. */
+export const WINDOW_CALL_TIMEOUT_MS = 30_000
+
+/** Total budget of one window lookup, in calls and in time. Past it the window is "open-ended". */
+export const WINDOW_CALL_BUDGET = 80
+export const WINDOW_BUDGET_MS = 120_000
+
+class LookupBudgetSpent extends Error {
+  constructor(kind, used, ms) {
+    super(kind === 'calls' ? `lookup budget spent (${used} calls)` : `lookup time budget spent (${Math.round(ms / 1000)} s, ${used} calls made)`)
+    this.kind = kind
+    this.used = used
+    this.ms = ms
+  }
+}
+
+const sha9 = (sha) => String(sha ?? '').slice(0, 9)
+
+/**
+ * Whether THIS run tested dev: `selectGreenRun`'s event and branch rules,
+ * applied to the red side, plus the green step's own rule (a dispatch with a
+ * `haven_api_url` override tested another backend). From the env alone, so a
+ * run that is not dev's spends no `gh` call. Returns the reason it is not, or null.
+ */
+export function notDevReason(env = process.env) {
+  const event = env.GITHUB_EVENT_NAME ?? ''
+  if (!EVIDENCE_EVENTS.includes(event)) return `event '${event || 'missing'}'`
+  if (env.QA_HAVEN_API_URL_OVERRIDE) return 'dispatch with a haven_api_url override'
+  if (BRANCH_LABELLED_EVENTS.includes(event) && env.GITHUB_REF !== 'refs/heads/dev') {
+    return `${event} from '${env.GITHUB_REF ?? ''}'`
+  }
+  return null
+}
+
+/** `gh` with a per-call time bound, for the window lookup only. */
+const windowGh = (args, timeout) =>
+  execFileSync('gh', args, { encoding: 'utf8', timeout, killSignal: 'SIGKILL', maxBuffer: 32 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] })
+
+/** A `gh` runner that spends from one budget; every call gets min(per-call bound, time left). */
+function budgeted(gh, { calls, ms, callMs, now }) {
+  const deadline = now() + ms
+  let used = 0
+  const call = (args) => {
+    const left = deadline - now()
+    if (used >= calls) throw new LookupBudgetSpent('calls', used, ms)
+    if (left <= 0) throw new LookupBudgetSpent('time', used, ms)
+    used += 1
+    try {
+      return gh(args, Math.min(callMs, left))
+    } catch (err) {
+      const what = `\`gh ${args.slice(0, 2).join(' ')}\``
+      if (err?.code === 'ETIMEDOUT' || err?.signal === 'SIGKILL') throw new Error(`${what} timed out after ${Math.round(Math.min(callMs, left) / 1000)} s`)
+      const detail = String(err?.stderr || err?.message || err).trim().split('\n')[0]
+      throw new Error(`${what} failed: ${scrubLine(detail, 120)}`)
+    }
+  }
+  call.used = () => used
+  return call
+}
+
+function parseJson(text, what) {
+  try {
+    return JSON.parse(text)
+  } catch {
+    throw new Error(`unparseable ${what}`)
+  }
+}
+
+/** A `gh run list` row in the REST run shape `evaluate` reads, with only the money-flow job. */
+function asEvaluatedRun(row, conclusion) {
+  return {
+    id: Number(row.databaseId),
+    head_sha: row.headSha,
+    created_at: row.createdAt,
+    conclusion: row.conclusion,
+    event: row.event,
+    jobs: conclusion === null || conclusion === undefined ? [] : [{ name: MONEY_FLOW_JOB, conclusion }],
+  }
+}
+
+const endpoint = (run) => ({ id: run.id, sha: run.head_sha, event: run.event })
+
+/**
+ * Compute the window for the current (failing) run. Never throws for a read:
+ * the caller turns a throw into "unavailable", and so does `readQaWindow`.
+ *
+ * @param {object} o
+ * @param {(args: string[], timeoutMs: number) => string} o.gh
+ * @param {string} o.repo
+ * @param {{id: string|number, sha: string, event: string}} o.current
+ */
+export function computeWindow({
+  gh,
+  repo,
+  current,
+  now = Date.now,
+  calls = WINDOW_CALL_BUDGET,
+  ms = WINDOW_BUDGET_MS,
+  callMs = WINDOW_CALL_TIMEOUT_MS,
+  globs = loadMoneyPathGlobs(),
+}) {
+  const call = budgeted(gh, { calls, ms, callMs, now })
+  let rows
+  try {
+    rows = parseJson(
+      call([
+        'run', 'list', '--repo', repo, '--workflow', 'qa-dev.yml', '--limit', String(WINDOW_RUN_LIMIT),
+        '--json', 'databaseId,displayTitle,createdAt,startedAt,updatedAt,headSha,event,headBranch,status,conclusion',
+      ]),
+      '`gh run list` output',
+    )
+  } catch (err) {
+    return { status: 'unavailable', reason: err.message }
+  }
+  if (!Array.isArray(rows)) return { status: 'unavailable', reason: '`gh run list` did not return a list' }
+
+  const self = rows.find((r) => String(r?.databaseId) === String(current.id))
+  const createdAt = self?.createdAt ?? new Date(now()).toISOString()
+  const at = Date.parse(createdAt)
+  // Only runs created before this one, and finished: an in-progress run has
+  // no decisive money-flow job. The pre-filter runs BEFORE any jobs read.
+  const { kept } = preFilterHarnessCandidates(
+    rows.filter((r) => r?.status === 'completed' && String(r?.databaseId) !== String(current.id) && Date.parse(r?.createdAt) <= at),
+  )
+  const ordered = [...kept].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
+
+  const ancestry = new Map()
+  const conclusions = new Map()
+  let readError = null
+  const io = {
+    // Is `sha` in the failing commit's history? `compare/{sha}...{current}`:
+    // `ahead` or `identical` is yes, `behind` or `diverged` is no. A failed
+    // read throws (selectGreenRun does not catch it), so it is "unavailable",
+    // not a refusal that would quietly push the window further back.
+    isAncestorOfHead: (sha) => {
+      if (!ancestry.has(sha)) {
+        const status = call(['api', `repos/${repo}/compare/${sha}...${current.sha}?per_page=1`, '--jq', '.status']).trim()
+        if (!['ahead', 'identical', 'behind', 'diverged'].includes(status)) throw new Error(`unexpected compare status '${status}'`)
+        ancestry.set(sha, status === 'ahead' || status === 'identical')
+      }
+      return ancestry.get(sha)
+    },
+    // selectGreenRun swallows a jobsFor throw as "unreadable"; the error is
+    // kept and rethrown below, so a failed read is never a silent refusal.
+    jobsFor: (id) => {
+      if (conclusions.has(id)) return conclusions.get(id).jobs
+      try {
+        const parsed = parseJson(call(jobsQueryArgs(repo, id)), `jobs of run ${id}`)
+        if (!Array.isArray(parsed?.jobs)) throw new Error(`the jobs of run ${id} are not a list`)
+        // Every qa-dev run lists its money-flow job, skipped or not: one
+        // missing means the read is not what it claims, not a refusal.
+        const conclusion = moneyFlowJobConclusion(parsed.jobs)
+        if (conclusion === null) throw new Error(`run ${id} lists no '${MONEY_FLOW_JOB}' job`)
+        conclusions.set(id, { jobs: parsed.jobs, conclusion })
+        return parsed.jobs
+      } catch (err) {
+        readError = err
+        return null
+      }
+    },
+  }
+  const admit = (candidates) => {
+    readError = null
+    const result = selectGreenRun(candidates, io)
+    if (readError) throw readError
+    return result.run
+  }
+
+  // Newest first. A row whose jobs were read passed rules 1-3 (dev evidence);
+  // a row refused before that is not dev's and plays no part.
+  const evaluated = [asEvaluatedRun({ databaseId: current.id, headSha: current.sha, createdAt, conclusion: 'failure', event: current.event }, 'failure')]
+  let green = null
+  let spent = null
+  try {
+    for (let i = 0; i < ordered.length; i += 1) {
+      const row = ordered[i]
+      const admitted = admit([row])
+      if (admitted) {
+        green = admitted
+        // Prefer a deployment_status run at the same commit (its SHA is the
+        // deployed one by construction): selectGreenRun's own tie-break.
+        if (green.event !== 'deployment_status') {
+          const same = ordered.slice(i + 1).filter((r) => r.headSha === green.headSha)
+          if (same.length) {
+            try {
+              green = admit([green, ...same]) ?? green
+            } catch (err) {
+              if (!(err instanceof LookupBudgetSpent)) throw err
+            }
+          }
+        }
+        break
+      }
+      if (conclusions.has(row.databaseId)) evaluated.push(asEvaluatedRun(row, conclusions.get(row.databaseId).conclusion))
+    }
+  } catch (err) {
+    if (!(err instanceof LookupBudgetSpent)) return { status: 'unavailable', reason: err.message }
+    spent = err
+  }
+  if (green) evaluated.push(asEvaluatedRun(green, 'success'))
+
+  const red = evaluateJobWindow(evaluated).red.find((r) => r.job === MONEY_FLOW_JOB)
+  if (!red) return { status: 'unavailable', reason: 'no red money-flow state derived' }
+  const firstRed = endpoint(red.firstFailure)
+  if (red.openEnded) {
+    const reason = !spent
+      ? `no admitted money-flow success among the newest ${rows.length} qa-dev runs`
+      : spent.kind === 'calls'
+        ? `no admitted money-flow success within the lookup budget (${spent.used} calls)`
+        : `no admitted money-flow success within the lookup time budget (${Math.round(spent.ms / 1000)} s, ${spent.used} calls made)`
+    return { status: 'open-ended', reason, firstRed }
+  }
+  const lastGreen = endpoint(red.lastSuccess)
+  // Green and red at one commit: nothing changed in code between them.
+  if (lastGreen.sha === firstRed.sha) return { status: 'ok', lastGreen, firstRed, prs: [] }
+
+  let compare
+  try {
+    compare = parseJson(
+      call([
+        'api', `repos/${repo}/compare/${lastGreen.sha}...${firstRed.sha}`, '--jq',
+        '{status, total_commits, commits: [.commits[] | {sha, parents: [.parents[].sha], login: .author.login, type: .author.type, name: .commit.author.name, message: .commit.message}]}',
+      ]),
+      'compare output',
+    )
+  } catch (err) {
+    return { status: 'unavailable', reason: err instanceof LookupBudgetSpent ? `${err.message} before the compare read` : err.message }
+  }
+  if (compare?.status !== 'ahead') return { status: 'unavailable', reason: `compare ${sha9(lastGreen.sha)}...${sha9(firstRed.sha)} is '${compare?.status}', not 'ahead'` }
+  if (!Array.isArray(compare.commits)) return { status: 'unavailable', reason: 'the compare read returned no commit list' }
+  const bySha = new Map(compare.commits.map((c) => [c.sha, c]))
+  // Every commit of the range is listed unless the range is longer than the page.
+  const complete = !(Number(compare.total_commits) > compare.commits.length)
+  const chain = []
+  for (let sha = firstRed.sha; sha !== lastGreen.sha; ) {
+    const c = bySha.get(sha)
+    if (!c || chain.length > bySha.size) {
+      return {
+        status: 'unavailable',
+        reason: complete
+          ? `the first-parent line from ${sha9(firstRed.sha)} does not reach ${sha9(lastGreen.sha)}`
+          : `the first-parent line leaves the compare page (${compare.total_commits} commits; the API lists ${compare.commits.length})`,
+      }
+    }
+    chain.push(c)
+    sha = c.parents?.[0]
+  }
+  chain.reverse()
+
+  const prs = []
+  for (const c of chain) {
+    const pr = {
+      number: prOf({ head_commit: { message: c.message } }),
+      sha: c.sha,
+      author: { login: c.login ?? null, name: c.name ?? null, bot: c.type === 'Bot' || /\[bot\]$/.test(c.login ?? '') },
+      moneyPath: null,
+      harness: null,
+      note: null,
+    }
+    try {
+      const parsed = parseJson(call(['api', `repos/${repo}/commits/${c.sha}`, '--jq', '{files: [.files[].filename]}']), `files of ${sha9(c.sha)}`)
+      const files = Array.isArray(parsed?.files) ? parsed.files : []
+      pr.moneyPath = moneyPathFiles(files, globs)
+      pr.harness = files.some((f) => f.startsWith(HARNESS_PREFIX))
+      // The commit API lists at most 300 files: past that, "no" is not proven.
+      if (files.length >= 300) pr.note = 'file list cut at 300'
+    } catch (err) {
+      if (!(err instanceof LookupBudgetSpent)) return { status: 'unavailable', reason: err.message }
+      pr.note = 'files not read: lookup budget spent'
+    }
+    prs.push(pr)
+  }
+  return { status: 'ok', lastGreen, firstRed, prs }
+}
+
+/**
+ * The window for this Actions run, or null outside Actions (no GITHUB_RUN_ID):
+ * no `gh` call is made then, which keeps the CLI tests hermetic. A run that is
+ * not dev's is reported as such with no call either. Never throws.
+ */
+export function readQaWindow(env = process.env, { gh = windowGh, now = Date.now } = {}) {
+  if (!env.GITHUB_RUN_ID || !env.GITHUB_REPOSITORY) return null
+  const why = notDevReason(env)
+  if (why) return { status: 'not-dev', reason: why }
+  if (!env.GITHUB_SHA) return { status: 'unavailable', reason: 'GITHUB_SHA is not set' }
+  const callMs = Number(env.QA_FAILURE_WINDOW_CALL_TIMEOUT_MS) > 0 ? Number(env.QA_FAILURE_WINDOW_CALL_TIMEOUT_MS) : WINDOW_CALL_TIMEOUT_MS
+  try {
+    return computeWindow({
+      gh,
+      repo: env.GITHUB_REPOSITORY,
+      current: { id: env.GITHUB_RUN_ID, sha: env.GITHUB_SHA, event: env.GITHUB_EVENT_NAME },
+      now,
+      callMs,
+    })
+  } catch (err) {
+    return { status: 'unavailable', reason: scrubLine(String(err?.message ?? err), 160) }
+  }
+}
+
+/** `deployment_status` is the only event whose SHA is the deployed commit by construction. */
+function endpointText(e) {
+  const base = `\`${sha9(e.sha)}\` (run ${e.id})`
+  return e.event === 'deployment_status' ? base : `${base} (${e.event}; dev tip, deploy not verified)`
+}
+
+function touchesText(pr) {
+  if (pr.moneyPath === null) return pr.note ?? 'files not read'
+  const n = pr.moneyPath.length
+  const money = n === 0
+    ? 'touches no money-path file'
+    : `touches ${n} money-path file${n === 1 ? '' : 's'}: ${pr.moneyPath.slice(0, 3).map((f) => `\`${f}\``).join(', ')}${n > 3 ? ', …' : ''}`
+  return `${money}; ${pr.harness ? 'touches the harness' : 'does not touch the harness'}${pr.note ? ` (${pr.note})` : ''}`
+}
+
+function authorText(a, mention) {
+  if (!a.login) return `an author with no GitHub account (${md(a.name ?? 'unknown')})`
+  return mention ? `@${a.login}` : a.login
+}
+
+/**
+ * Whether the window's author is @-mentioned (captain decision on #4236,
+ * 2026-10-21): only a single-PR window whose PR touches a money-path file or
+ * the harness, for a run class that can be a code change, by a human author.
+ * The CALLER also keys it on the episode's first comment (reopen) or the body
+ * (create): a later failure in the same episode names the author without `@`.
+ */
+export function mentionable(window, runClass) {
+  if (window?.status !== 'ok' || window.prs.length !== 1) return false
+  if (!MENTION_CLASSES.has(runClass)) return false
+  const [pr] = window.prs
+  if (!pr.author.login || pr.author.bot) return false
+  return (pr.moneyPath?.length ?? 0) > 0 || pr.harness === true
+}
+
+/** The one window line, for the body and the comment alike. Null when there is no window (outside Actions). */
+export function windowLine(window, { mention = false } = {}) {
+  if (!window) return null
+  switch (window.status) {
+    case 'not-dev':
+      return `window: not a dev run (${md(window.reason)}) — nothing computed, nobody mentioned`
+    case 'unavailable':
+      return `window: unavailable (${md(window.reason)})`
+    case 'open-ended':
+      return `window: open-ended — ${md(window.reason)}; first red so far ${endpointText(window.firstRed)}, so the break may be older`
+    case 'ok': {
+      const n = window.prs.length
+      if (n === 0) return "window: 0 PRs — first red is at the last green's commit (no code change; flake, provider or environment)"
+      const prs = window.prs
+        .map((p) => `${p.number ? `#${p.number}` : `\`${sha9(p.sha)}\` (no PR in subject)`} by ${authorText(p.author, mention && n === 1)} (${touchesText(p)})`)
+        .join('; ')
+      return `window: last green ${endpointText(window.lastGreen)} → first red ${endpointText(window.firstRed)}: ${n} PR${n === 1 ? '' : 's'} — ${prs}`
+    }
+    default:
+      return `window: unavailable (unknown state)`
+  }
+}
+
 const defaultGh = (args) => execFileSync('gh', args, { encoding: 'utf8' })
 
 function firstNumber(json) {
@@ -387,10 +813,7 @@ function firstNumber(json) {
  * Upsert the standing issue. Returns { action, number } where action is one of
  * 'updated' | 'reopened' | 'created', so the workflow log states what happened.
  */
-export function upsertStandingIssue({ gh = defaultGh, trigger, runUrl, when, classification = null, log = console.log }) {
-  const body = buildBody({ trigger, runUrl, when, classification })
-  const comment = buildComment({ trigger, runUrl, when, classification })
-
+export function upsertStandingIssue({ gh = defaultGh, trigger, runUrl, when, classification = null, readWindow = () => null, log = console.log }) {
   // Ensure the label exists (labels.yml owns only the surface taxonomy). A
   // failure here (already exists, transient API error) must not stop the upsert.
   try {
@@ -398,6 +821,33 @@ export function upsertStandingIssue({ gh = defaultGh, trigger, runUrl, when, cla
   } catch {
     // tolerated
   }
+
+  // The window (#4236) is read after the label and before the issue lookups,
+  // and a throw is a window line, never a lost comment or reopen.
+  // The mention is keyed on the episode's opening event: the reopen comment,
+  // or the body when the issue is created. A failure while the issue is
+  // already open recomputes the window and names the author without `@`.
+  // Reading AND rendering are guarded: a malformed window is one
+  // "unavailable" line, never a lost body, comment or reopen.
+  const render = (window, mention) => {
+    const parts = { trigger, runUrl, when, classification, window }
+    return {
+      body: buildBody(parts),
+      comment: buildComment(parts),
+      openingBody: buildBody({ ...parts, mention }),
+      openingComment: buildComment({ ...parts, mention }),
+      line: windowLine(window),
+    }
+  }
+  let r
+  try {
+    const window = readWindow()
+    r = render(window, mentionable(window, classification?.runClass ?? 'unclassified'))
+  } catch (err) {
+    r = render({ status: 'unavailable', reason: scrubLine(String(err?.message ?? err), 160) }, false)
+  }
+  if (r.line) log(r.line)
+  const { body, comment } = r
 
   const open = firstNumber(
     gh(['issue', 'list', '--label', LABEL, '--state', 'open', '--limit', '1', '--json', 'number']),
@@ -419,12 +869,12 @@ export function upsertStandingIssue({ gh = defaultGh, trigger, runUrl, when, cla
   if (closed !== null) {
     gh(['issue', 'reopen', String(closed)])
     gh(['issue', 'edit', String(closed), '--body', body])
-    gh(['issue', 'comment', String(closed), '--body', comment])
+    gh(['issue', 'comment', String(closed), '--body', r.openingComment])
     log(`Reopened the standing qa-failure issue #${closed}`)
     return { action: 'reopened', number: closed }
   }
 
-  const created = gh(['issue', 'create', '--label', LABEL, '--title', ISSUE_TITLE, '--body', body])
+  const created = gh(['issue', 'create', '--label', LABEL, '--title', ISSUE_TITLE, '--body', r.openingBody])
   log(`Created the standing qa-failure issue: ${String(created).trim()}`)
   return { action: 'created', number: null }
 }
@@ -496,7 +946,7 @@ function main() {
   }
   // Attempt logs as arguments (the workflow passes qa-run.attempt-*.log).
   const classification = readFinalAttempt(args)
-  const result = upsertStandingIssue({ trigger, runUrl: url, when, classification })
+  const result = upsertStandingIssue({ trigger, runUrl: url, when, classification, readWindow: () => readQaWindow(process.env) })
   console.log(JSON.stringify(result))
 }
 

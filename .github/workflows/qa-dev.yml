@@ -65,8 +65,9 @@ name: QA — money-flow (dev)
 #
 # This run is the promotion signal that dev-gate.yml's freshness gate reads before
 # allowing dev → main. On failure it upserts the ONE standing `qa-failure` issue
-# (#2767, scripts/ci/qa-failure-issue.mjs); on a full-coverage green of dev it
-# closes that issue (#4069).
+# (#2767, scripts/ci/qa-failure-issue.mjs), naming the last-green → first-red
+# window and its PRs (#4236); on a full-coverage green of dev it closes that
+# issue (#4069).
 on:
   workflow_dispatch:
     inputs:
@@ -161,6 +162,20 @@ jobs:
     concurrency:
       group: qa-dev-money-flow
       cancel-in-progress: false
+    # Job-level, so it REPLACES the top-level block for this job only (#4236):
+    # the three top-level grants are restated unchanged, and `actions: read` is
+    # added here rather than at the top because only this job's failure step
+    # needs it. It lists qa-dev's own runs and reads their jobs to name the
+    # last-green → first-red window (scripts/ci/qa-failure-issue.mjs) — the
+    # same grant dev-push-health.yml declares for the same reads. The `gate`
+    # job keeps the top-level block and gains nothing. No `pull-requests` grant:
+    # the window's PR author comes from the compare API's commit data, which
+    # `contents: read` covers.
+    permissions:
+      contents: read
+      issues: write
+      deployments: read
+      actions: read
     # Read by scripts/ci/qa-failure-issue.mjs's trigger line (both issue steps).
     # Empty outside deployment_status; nothing secret.
     env:
@@ -335,7 +350,15 @@ jobs:
         if: failure()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # #4236: a dispatch with an override tested another backend, so the
+          # script reports "window: not a dev run" and reads nothing — the
+          # same rule the green step above applies. Passed through env, never
+          # interpolated into the shell.
+          QA_HAVEN_API_URL_OVERRIDE: ${{ github.event.inputs.haven_api_url }}
         # The attempt logs the money-flow step kept (#3338) are classified into the
         # issue (#3337). If the run failed before the harness, the glob stays
-        # unmatched and the issue says "no harness log".
+        # unmatched and the issue says "no harness log". The script also names
+        # the last-green → first-red window and its PRs (#4236); every read is
+        # time-bounded and budgeted, and an unreadable window is one
+        # "window: unavailable" line, never a lost comment or reopen.
         run: node scripts/ci/qa-failure-issue.mjs qa-run.attempt-*.log

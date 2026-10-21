@@ -532,9 +532,11 @@ describe('money-path list stays in one piece', () => {
   })
 
   test('the SDK merchant-answer decision is RUNTIME money-path — a change to it gates promotion (#4122)', () => {
-    // MerchantCompletion.retryRequest decides, after the funding leg has moved
-    // USDC, whether the merchant accepted or the payment is a rejection after
-    // funding, and reports the settlement hash Haven records. It matched no
+    // MerchantCompletion.retryRequest makes the paid retry after the funding
+    // leg has moved USDC, acts on the answer (the merchant accepted, or the
+    // payment is a rejection after funding; the decision itself is
+    // merchant-answer.ts since #4120) and reports the settlement hash Haven
+    // records. It matched no
     // glob: of the 17 commits that touched it since the facade refactor
     // 399b1c00f, three touched no perimeter file and went unlabelled
     // (4e52d4b35, fefd9dc45, 98e1c9cc8). Runtime, not control: qa-dev's
@@ -548,7 +550,7 @@ describe('money-path list stays in one piece', () => {
     assert.ok(trackedFiles().includes(f), `${f} no longer exists — repoint this pin`)
     assert.ok(
       moneyPathFiles([f], loadMoneyPathGlobs()).length === 1,
-      `${f} must be matched by a RUNTIME money-path glob — it decides a funded payment's ` +
+      `${f} must be matched by a RUNTIME money-path glob — it acts on a funded payment's ` +
         'merchant outcome, and the money-flow harness exercises it (#4122)',
     )
   })
@@ -656,7 +658,7 @@ describe('money-path list stays in one piece', () => {
       // local-runtime PR would then owe a covering QA run.
       // A DOC_ONLY entry whose files are ALL on the list is stale and fails
       // below — an exclusion must exclude something.
-      ['packages/sdk/src/**', 'client library; only signer.ts, userop-binding.ts, the #3283 signing guard, the #3661 budget guards and merchant-completion.ts (#4122) are on the runtime list — see #3098'],
+      ['packages/sdk/src/**', 'client library; only signer.ts, userop-binding.ts, the #3283 signing guard, the #3661 budget guards, merchant-completion.ts (#4122) and merchant-answer.ts (#4120) are on the runtime list — see #3098'],
       ['packages/cli/src/**', 'client CLI; not deployed by Haven — see #3098'],
       ['packages/connect/src/**', 'the dashboard\'s connector, runs on the user\'s machine — see #3098'],
       ['packages/mcp/src/**', 'the local MCP runtime, runs in the agent\'s process — see #3098'],

@@ -197,10 +197,10 @@ SDK by #3283, with the #3271 binding check both packages import; their location 
 not what makes them spend authority. The task and sub-budget guards join them on
 the same rule (#3661): the signer's own checks on task and sub-budget children
 before it signs. `merchant-completion.ts` joins as runtime (#4122):
-`MerchantCompletion.retryRequest` decides, after the funding leg has moved USDC,
-whether the merchant accepted or the payment is a rejection after funding, and
-reports the settlement hash Haven records. `merchant-answer.ts` joins as runtime
-too (#4120): the one post-funding merchant-answer decision shared by the hosted
+`MerchantCompletion.retryRequest` makes the paid retry after the funding leg has
+moved USDC, acts on the answer (the merchant accepted, or the payment is a
+rejection after funding) and reports the settlement hash Haven records.
+`merchant-answer.ts` joins as runtime too (#4120): the one post-funding merchant-answer decision shared by the hosted
 `completeX402MerchantCall` and the local `MerchantCompletion.retryRequest`. The
 decision moved out of `merchant-completion.ts` into this module in the same PR,
 and the move would otherwise have taken it off the perimeter (the #3283

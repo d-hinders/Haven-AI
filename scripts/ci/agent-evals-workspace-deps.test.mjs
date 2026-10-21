@@ -312,3 +312,44 @@ test('the claude tool allowlist is unchanged', () => {
     'Bash,BashOutput,KillShell,Read,Edit,Write,NotebookEdit,Glob,Grep,WebFetch,WebSearch,TodoWrite,Task,SlashCommand,ExitPlanMode,Skill,Workflow,ToolSearch,Monitor,CronCreate,CronDelete,CronList,ScheduleWakeup,SendMessage,ListAgents,TaskStop,EnterWorktree,ExitWorktree,PushNotification'
   assert.ok(live.some((line) => line.trim() === `--disallowedTools ${DENY}`), 'the --disallowedTools list changed')
 })
+
+// ── #4218: the optional tasks input travels through an env var and is ──────
+// validated BEFORE anything is written or echoed; the run step passes
+// "--task=$TASKS" quoted and emits no --limit when it is set.
+
+test('no run: block inlines inputs.tasks — it travels through an env var', () => {
+  for (const step of steps) {
+    const runIdx = step.findIndex((line) => /^\s+run:/.test(line))
+    if (runIdx === -1) continue
+    const body = step.slice(runIdx).join('\n')
+    assert.ok(!/inputs\.tasks/i.test(body), `a run: block inlines inputs.tasks (workflow-command injection surface): ${step[0].trim()}`)
+  }
+})
+
+test('the slice step validates the tasks input before it writes GITHUB_OUTPUT or echoes the notice', () => {
+  const slice = stepNamed(/Decide the slice/)
+  assert.ok(slice, 'agent-evals.yml has no "Decide the slice" step — update this guard')
+  const runIdx = slice.findIndex((line) => /^\s+run:/.test(line))
+  assert.ok(runIdx !== -1, 'the slice step has no run: block')
+  const body = slice.slice(runIdx)
+  const control = body.findIndex((line) => line.includes('*[![:print:]]*'))
+  const regex = body.findIndex((line) => line.includes('^[a-z0-9-]+(,[a-z0-9-]+)*$'))
+  const firstWrite = body.findIndex((line) => line.includes('GITHUB_OUTPUT') || line.includes('::notice::'))
+  assert.ok(control !== -1, 'the slice step does not reject control characters in the tasks input')
+  assert.ok(regex !== -1, 'the slice step does not whole-string match the tasks input against ^[a-z0-9-]+(,[a-z0-9-]+)*$')
+  assert.ok(firstWrite !== -1, 'the slice step never writes its outputs — update this guard')
+  assert.ok(control < firstWrite && regex < firstWrite, 'the slice step writes GITHUB_OUTPUT / echoes the notice BEFORE validating the tasks input')
+  assert.ok(!body.some((line) => /\bgrep\b/.test(line)), 'the tasks validation uses [[ =~ ]], not grep')
+  assert.ok(body.some((line) => line.includes('task_filter=')), 'the slice step does not export the validated filter (task_filter)')
+  assert.ok(body.some((line) => /::notice::.*\$FILTER_NOTE/.test(line)), 'the run notice does not print the task filter')
+})
+
+test('the run step passes --task=$TASKS quoted and NO --limit when tasks is set', () => {
+  const run = stepNamed(/Run the eval slice/)
+  assert.ok(run, 'agent-evals.yml has no "Run the eval slice" step — update this guard')
+  const body = run.join('\n')
+  assert.ok(/TASKS:\s*\$\{\{\s*steps\.slice\.outputs\.task_filter\s*\}\}/.test(body), 'the run step does not read the task filter through the env var')
+  assert.ok(body.includes('FILTER_ARGS+=("--task=$TASKS")'), 'the run step does not pass "--task=$TASKS" quoted when tasks is set')
+  assert.ok(body.includes('"${FILTER_ARGS[@]}"'), 'the run step does not expand the filter args array')
+  assert.ok(!/\$LIMIT_ARG(?!\})/.test(body) || body.includes('elif [ -n "$LIMIT_ARG" ]'), 'the LIMIT_ARG handling changed — a task filter must emit no --limit')
+})

@@ -83,7 +83,9 @@ and read the budget with exhaustion tolerated (`exhausted-ok` — an exhausted
 read is their expected setup, not an error). `--shuffle=<seed>` shuffles
 WITHIN tiers only (deterministic per seed, recorded in the report);
 `--limit` slices the canonical order BEFORE any shuffle, so the workflow's
-5-task subset is stable.
+5-task subset is stable, and `--task=<id>[,…]` selects tasks BY ID from the
+same canonical set — tier order and any `--shuffle` are preserved (#4218,
+see Other flags).
 
 **Consistency guard:** before resolving each trial, the resolver waits
 (bounded, 120s default) until the backend budget read reflects the previous
@@ -235,8 +237,10 @@ Env the run needs (all dev/testnet):
   `x402-price-cap-below-price`, `x402-eip3009-bridge-vpn-legacy`); required
   only when the loaded task set renders `{target}`, and checked before the
   first agent session. With `QA_EVAL_RECIPIENT` + `QA_EVAL_X402_TARGET` set,
-  ONE suite invocation covers all 11 tasks — no per-task config or task
-  filter needed. On dev it is the demo merchant's MCP endpoint (`…/mcp`),
+  ONE suite invocation covers all 11 tasks — no per-task config needed (a
+  task-by-id filter, `--task`, is a deliberate slice rather than per-task
+  config; see Other flags). On dev it is the demo merchant's MCP endpoint
+  (`…/mcp`),
   which answers **405 to a GET** and **402 only to a POSTed JSON-RPC
   `tools/call`**, so the two plain-HTTP task instructions spell out that
   POST request (`buy_vpn`, basic plan, 0.001 USDC). The bridge task uses the
@@ -289,6 +293,17 @@ Other flags:
   executed order are recorded in the report. `--limit` is applied to the
   canonical order BEFORE the shuffle, so the 5-task subset is the same
   with or without a shuffle.
+- `--task=<id>[,<id>…]` — run EXACTLY the named task ids (#4218), filtered
+  from the canonical (tiered) set: tier order and any `--shuffle=<seed>`
+  still apply, a repeated id runs once, and NO prerequisite is added
+  implicitly — `--task=over-budget-x402-refused` alone runs WITHOUT the
+  drainer, and the resolver's tier-3 precondition then decides. Mutually
+  exclusive with `--limit`; refused with exit 2 — before any eval env is
+  read, so a typo is never hidden behind a budget exit 3 — on an unknown
+  id, an empty value, an empty list element, a repeated flag, or `--limit`.
+  The report and both summaries record the filter, so a "pass^k on 1/1
+  tasks" line never reads as a whole-suite green. The `agent-evals`
+  workflow exposes the same filter via its optional `tasks` input.
 - `--compare-with=<path1>,<path2>,… --new-report=<path>` — the regression-only
   compare (#3992 D): reads the new report plus the earlier ones, compares
   only reports of the same lane/adapter/model/trials-per-task, and exits
@@ -616,7 +631,7 @@ install runs before the eval step.
 **The workflow** (`.github/workflows/agent-evals.yml`) runs **only when the
 owner starts it** with the Run workflow button (owner decision 2026-10-19:
 no schedule and no pull_request trigger, so nothing queues a run that waits
-for the owner's approval). Two choices:
+for the owner's approval). Two suite choices, plus an optional task filter:
 
 - **subset**: 5 tasks. It builds and boots `packages/mcp-server` from the
   checked-out commit (it runs locally against `HAVEN_API_URL`, see
@@ -625,6 +640,16 @@ for the owner's approval). Two choices:
   hosted MCP commit it ran against and states that backend error bodies stay
   dev-deployed.
 - **full**: every task, against the deployed dev stack.
+- **tasks** (optional input): a comma-separated list of task ids, e.g.
+  `x402-eip3009-bridge-vpn-legacy` — runs EXACTLY those tasks with no
+  `--limit`, whatever the `suite` is (the suite still decides the hosted MCP
+  source). The slice step validates it before use: control characters
+  rejected, whole-string kebab-case (`^[a-z0-9-]+(,[a-z0-9-]+)*$`), nothing
+  written to `$GITHUB_OUTPUT` or echoed before both pass. The cheap way to
+  prove ONE task end to end: dispatch with `tasks=<id>` and `trials=3` (the
+  `trials` input defaults to `1`) — a filtered run instead of a whole
+  budget period. A filtered run's summary states the filter, so "pass^k on
+  1/1 tasks" does not read as a whole-suite green.
 
 Either way the run waits for the environment approval. It is NOT a required
 check on `dev` or `main`.

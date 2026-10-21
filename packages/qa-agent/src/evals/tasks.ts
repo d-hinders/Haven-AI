@@ -325,13 +325,30 @@ export function shuffleWithinTiers(tasks: EvalTask[], seed: number): EvalTask[] 
  * CANONICAL order (so the workflow's 5-task subset is the same with or
  * without a shuffle) → an optional `--shuffle=<seed>` applied WITHIN tiers
  * only. Returns the executed order; the caller records it in the report.
+ *
+ * `taskIds` (#4218) filters the canonical set by id INSTEAD of slicing it,
+ * so a selected subset keeps the tier order (and the within-tier shuffle):
+ * the drainer still runs after the tier-1 tasks and before the tier-3
+ * ones, and — critically — no prerequisite is added implicitly (a tier-3
+ * id selected alone runs without the drainer; the resolver's tier-3
+ * precondition then decides). A repeated id runs once. The CLI validates
+ * the ids first (`parseTaskSelection`); an id that matches nothing is
+ * dropped here.
  */
 export function selectTaskSequence(
   tasks: EvalTask[],
-  opts: { limit?: number; shuffleSeed?: number } = {},
+  opts: { limit?: number; shuffleSeed?: number; taskIds?: string[] } = {},
 ): EvalTask[] {
   const canonical = orderTasksForSequence(tasks)
-  const limited = opts.limit !== undefined ? canonical.slice(0, opts.limit) : canonical
+  let selected = canonical
+  if (opts.taskIds !== undefined) {
+    // Membership filter over the CANONICAL list: the selection keeps tier
+    // order (and the within-tier shuffle) whatever order the ids arrive in,
+    // and canonical's unique ids make a repeated id run once.
+    const wanted = new Set(opts.taskIds)
+    selected = canonical.filter((t) => wanted.has(t.id))
+  }
+  const limited = opts.limit !== undefined ? selected.slice(0, opts.limit) : selected
   return opts.shuffleSeed !== undefined ? shuffleWithinTiers(limited, opts.shuffleSeed) : limited
 }
 

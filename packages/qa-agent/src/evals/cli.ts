@@ -16,6 +16,14 @@
  *   --limit=N        run only the FIRST N tasks in the canonical (tiered)
  *                    order — chosen BEFORE any `--shuffle`, so the 5-task
  *                    cost-pilot / PR-subset slice is stable (#3992 B).
+ *   --task=<id>[,…]  run EXACTLY the named task ids (#4218), filtered from
+ *                    the canonical (tiered) set — tier order and any
+ *                    `--shuffle` still apply, a repeated id runs once, and
+ *                    NO prerequisite is added implicitly (a tier-3 id
+ *                    alone runs without the drainer). Mutually exclusive
+ *                    with `--limit`; refused with exit 2 (before any eval
+ *                    env is needed) on an unknown id, an empty value, an
+ *                    empty list element, a repeated flag, or `--limit`.
  *   --shuffle=SEED   shuffle the task order WITHIN tiers only; the seed and
  *                    the executed order are recorded in the report (#3992 B).
  *
@@ -140,6 +148,52 @@ export function budgetPreflightMessage(
     'Wait for the next period refill, or edit the eval agent\'s budget on the dev dashboard to start a new period now (the dashboard needs a real change, e.g. the amount by 0.01 USDC, and two passkey approvals), then run again. ' +
     `Budget read: ${read.error}`
   )
+}
+
+/**
+ * The parsed `--task=<id>[,<id>…]` selection (#4218), or the refusal. A
+ * union so the caller can `process.exit(2)` on `{ error }` and spread
+ * `taskIds` into `selectTaskSequence` otherwise.
+ */
+export type TaskSelection = { limit?: number; taskIds?: string[] } | { error: string }
+
+/**
+ * Parse the `--task=` selection against the loaded task set (#4218). PURE:
+ * `main()` calls it BEFORE `loadQaConfig()`, the env checks and the budget
+ * preflight, so a typo'd id exits 2 with the named value and needs no eval
+ * env — it is never hidden behind a budget exit 3. Refusals, each naming
+ * the bad value:
+ *   - an id that matches no task file;
+ *   - `--task=` (empty) or a list with an empty element (`--task=a,`);
+ *   - a repeated `--task=` flag;
+ *   - `--task` together with `--limit`.
+ * Only the exact `--task=` prefix is a filter — `--tasks=` is an unknown
+ * flag, not one. Surrounding whitespace on ids is trimmed; a repeated id is
+ * allowed and runs once (selectTaskSequence dedupes).
+ */
+export function parseTaskSelection(args: string[], tasks: EvalTask[]): TaskSelection {
+  const flags = args.filter((a) => a.startsWith('--task='))
+  if (flags.length > 1) {
+    return { error: `--task given ${flags.length} times (${flags.join(' ')}) — pass ONE comma-separated list` }
+  }
+  const raw = flags[0]?.split('=').slice(1).join('=')
+  if (raw === undefined) return {}
+  if (args.some((a) => a.startsWith('--limit='))) {
+    return { error: `--task and --limit are mutually exclusive (got ${flags[0]}) — a task selection needs no limit` }
+  }
+  if (raw.trim() === '') {
+    return { error: '--task= is empty — name at least one task id (run --list for them)' }
+  }
+  const ids = raw.split(',').map((s) => s.trim())
+  if (ids.some((id) => id.length === 0)) {
+    return { error: `--task has an empty id in "${raw}" — name a comma-separated list of task ids` }
+  }
+  const known = new Set(tasks.map((t) => t.id))
+  const unknown = [...new Set(ids.filter((id) => !known.has(id)))]
+  if (unknown.length > 0) {
+    return { error: `--task names no task file: ${unknown.map((id) => `"${id}"`).join(', ')} — run --list for the ids` }
+  }
+  return { taskIds: [...new Set(ids)] }
 }
 
 export function buildGraderContext(deps: {
@@ -456,6 +510,16 @@ async function main() {
     }
   }
 
+  // The --task selection (#4218): parsed BEFORE loadQaConfig() and every
+  // env check, so a typo'd id exits 2 naming it and needs no eval env — it
+  // is never hidden behind a budget exit 3.
+  const selection = parseTaskSelection(args, tasks)
+  if ('error' in selection) {
+    console.error(`--task: ${selection.error}`)
+    process.exit(2)
+  }
+  const taskIds = 'taskIds' in selection ? selection.taskIds : undefined
+
   const cfg = loadQaConfig()
   const apiKey = env('QA_EVAL_AGENT_API_KEY')
   const recipient = env('QA_EVAL_RECIPIENT')
@@ -463,7 +527,7 @@ async function main() {
   // The x402 URL tasks render {target}, not {recipient}: an address and an
   // HTTP target cannot be one env var. Required only when a loaded task
   // actually renders it, and checked BEFORE the first agent session.
-  const selected = selectTaskSequence(tasks, { limit, shuffleSeed })
+  const selected = selectTaskSequence(tasks, { limit, shuffleSeed, ...(taskIds ? { taskIds } : {}) })
   const x402Target = process.env.QA_EVAL_X402_TARGET?.trim() || undefined
   if (anyTaskUsesTarget(selected) && !x402Target) {
     console.error('Missing QA_EVAL_X402_TARGET — a loaded task renders {target} (the x402 URL tasks); see docs/operations/agent-evals.md.')
@@ -554,7 +618,10 @@ async function main() {
   // number and the report marks it "k=1 (drains budget)".
   const trialCountFor = (task: EvalTask): number => (task.tier === 2 ? 1 : trials)
 
-  console.log(`Running ${selected.length} tasks (order: ${selected.map((t) => t.id).join(' → ')}) — tier-1 tasks × ${trials} trials, the drainer × 1, via ${adapter.name}.`)
+  // "the drainer × 1" only when a drainer is actually selected (#4218) — a
+  // filtered tier-1-only run must not claim one.
+  const drainerNote = selected.some((t) => t.tier === 2) ? ', the drainer × 1' : ''
+  console.log(`Running ${selected.length} tasks (order: ${selected.map((t) => t.id).join(' → ')}) — tier-1 tasks × ${trials} trials${drainerNote}, via ${adapter.name}.`)
   console.log(`Observer: ${describeObserverRpc()}; chain evidence reads from each trial's own start block.`)
   const report = await runSuite({
     tasks: selected,
@@ -563,6 +630,7 @@ async function main() {
     trials,
     trialCountFor,
     shuffleSeed,
+    ...(taskIds ? { taskFilter: taskIds } : {}),
     hostedMcp,
     graderContext: buildGraderContext({ api, provider }),
   })

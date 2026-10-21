@@ -507,6 +507,27 @@ describe('selectTaskSequence — tier order, limit BEFORE shuffle, shuffle withi
     expect(seededShuffle(items, 8)).not.toEqual(seededShuffle(items, 9))
   })
 
+  // #4218: the --task filter selects from the CANONICAL set, so a filtered
+  // selection keeps the tier order, shuffles within tiers, and runs a
+  // repeated id once.
+  it('#4218: taskIds filter the canonical set — tier order kept, duplicates run once', () => {
+    const filtered = selectTaskSequence(tasks, { taskIds: ['exhausted', 't1-b', 'drainer', 't1-b'] })
+    expect(filtered.map((t) => t.id)).toEqual(['t1-b', 'drainer', 'exhausted'])
+  })
+
+  it('#4218: a filtered selection still shuffles WITHIN tiers only', () => {
+    const filtered = selectTaskSequence(tasks, { taskIds: ['exhausted', 't1-b', 't1-a', 'drainer'], shuffleSeed: 7 })
+    expect(filtered.map((t) => t.tier ?? 1)).toEqual([...filtered.map((t) => t.tier ?? 1)].sort((a, b) => a - b))
+    expect([...filtered].sort((a, b) => a.id.localeCompare(b.id)).map((t) => t.id)).toEqual(['drainer', 'exhausted', 't1-a', 't1-b'])
+    expect(filtered[filtered.length - 1].id).toBe('exhausted')
+  })
+
+  it('#4218: the real set — over-budget-x402-refused alone selects exactly it, with no drainer', async () => {
+    const { tasks } = await loadTasks(TASKS_DIR)
+    expect(selectTaskSequence(tasks, { taskIds: ['over-budget-x402-refused'] }).map((t) => t.id)).toEqual(['over-budget-x402-refused'])
+    expect(selectTaskSequence(tasks, { taskIds: ['over-budget-x402-refused'] }).some((t) => t.tier === 2)).toBe(false)
+  })
+
   it('shuffleWithinTiers never moves a task across its tier boundary', () => {
     const shuffled = shuffleWithinTiers(tasks, 31337)
     expect(shuffled.filter((t) => t.tier === 1).map((t) => t.id)).toEqual(shuffled.filter((t) => t.tier === 1).map((t) => t.id))

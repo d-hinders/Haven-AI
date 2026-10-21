@@ -14,7 +14,8 @@ import { fileURLToPath } from 'node:url'
 import { applyGraders } from './graders.js'
 import { parseHermesSessionLog } from './hermes.js'
 import { renderSummary, runSuite, type EvalAdapter } from './runner.js'
-import { buildGraderContext, createPerTrialResolver, type BlockNumberSource } from './cli.js'
+import { renderMarkdownSummary } from './summary.js'
+import { buildGraderContext, createPerTrialResolver, parseTaskSelection, type BlockNumberSource } from './cli.js'
 import { selectTaskSequence, loadTasks } from './tasks.js'
 import { HavenApi } from '../lib/haven-api.js'
 import type { BudgetUse } from '../lib/delegation-budget.js'
@@ -614,6 +615,126 @@ describe('#4091: the guard deducts the ACTUAL settled spend, flagged or not', ()
     expect(trials[0].pass).toBe(true)
     expect(trials[1].pass).toBe(true)
     expect(trials[1].detail ?? '').not.toContain('budget consistency timeout')
+  })
+})
+
+// ── #4218: --task selects eval tasks by id ─────────────────────────────────
+
+describe('parseTaskSelection — the pure --task filter (#4218)', () => {
+  it('no --task flag: no filter, no error', async () => {
+    const { tasks } = await loadTasks(TASKS_DIR)
+    expect(parseTaskSelection(['--trials=3'], tasks)).toEqual({})
+  })
+
+  it('one id selects exactly that task — over-budget-x402-refused alone, with NO drainer', async () => {
+    const { tasks } = await loadTasks(TASKS_DIR)
+    const selection = parseTaskSelection(['--task=over-budget-x402-refused'], tasks)
+    expect('error' in selection).toBe(false)
+    if (!('error' in selection)) {
+      expect(selection.taskIds).toEqual(['over-budget-x402-refused'])
+      expect(selectTaskSequence(tasks, selection).map((t) => t.id)).toEqual(['over-budget-x402-refused'])
+    }
+  })
+
+  it('a tier-1 id, the drainer and the tier-3 id keep TIER order however they are listed', async () => {
+    const { tasks } = await loadTasks(TASKS_DIR)
+    const selection = parseTaskSelection(['--task=over-budget-x402-refused,x402-price-cap-below-price,direct-send-full-remaining'], tasks)
+    expect('error' in selection).toBe(false)
+    if (!('error' in selection)) {
+      expect(selectTaskSequence(tasks, selection).map((t) => t.id)).toEqual([
+        'x402-price-cap-below-price',
+        'direct-send-full-remaining',
+        'over-budget-x402-refused',
+      ])
+    }
+  })
+
+  it('surrounding whitespace on ids is trimmed', async () => {
+    const { tasks } = await loadTasks(TASKS_DIR)
+    const selection = parseTaskSelection(['--task= over-budget-x402-refused , direct-send-full-remaining '], tasks)
+    expect('error' in selection).toBe(false)
+    if (!('error' in selection)) expect(selection.taskIds).toEqual(['over-budget-x402-refused', 'direct-send-full-remaining'])
+  })
+
+  it('a duplicate id runs once', async () => {
+    const { tasks } = await loadTasks(TASKS_DIR)
+    const selection = parseTaskSelection(['--task=over-budget-x402-refused,over-budget-x402-refused'], tasks)
+    expect('error' in selection).toBe(false)
+    if (!('error' in selection)) expect(selection.taskIds).toEqual(['over-budget-x402-refused'])
+  })
+
+  it('refuses an id that matches no task file, naming it', async () => {
+    const { tasks } = await loadTasks(TASKS_DIR)
+    expect(parseTaskSelection(['--task=over-budget-x402-refuce'], tasks)).toEqual({ error: expect.stringContaining('"over-budget-x402-refuce"') })
+  })
+
+  it('refuses --task= (empty)', async () => {
+    const { tasks } = await loadTasks(TASKS_DIR)
+    expect(parseTaskSelection(['--task='], tasks)).toEqual({ error: expect.stringContaining('empty') })
+  })
+
+  it('refuses a list with an empty element (--task=a,)', async () => {
+    const { tasks } = await loadTasks(TASKS_DIR)
+    expect(parseTaskSelection(['--task=over-budget-x402-refused,'], tasks)).toEqual({ error: expect.stringContaining('empty id') })
+  })
+
+  it('refuses a repeated --task= flag', async () => {
+    const { tasks } = await loadTasks(TASKS_DIR)
+    expect(parseTaskSelection(['--task=over-budget-x402-refused', '--task=direct-send-full-remaining'], tasks)).toEqual({
+      error: expect.stringContaining('ONE comma-separated list'),
+    })
+  })
+
+  it('refuses --task together with --limit', async () => {
+    const { tasks } = await loadTasks(TASKS_DIR)
+    expect(parseTaskSelection(['--task=over-budget-x402-refused', '--limit=5'], tasks)).toEqual({
+      error: expect.stringContaining('mutually exclusive'),
+    })
+  })
+
+  it('accepts only the exact --task= prefix: --tasks= is an unknown flag, not a filter', async () => {
+    const { tasks } = await loadTasks(TASKS_DIR)
+    const selection = parseTaskSelection(['--tasks=over-budget-x402-refused'], tasks)
+    expect(selection).toEqual({})
+  })
+})
+
+describe('#4218: a tier-3-only selection does not route around the tier-3 precondition', () => {
+  it('selected alone with the budget above the threshold: every trial is red with the named cause, passAll is false (the CLI exits 1 on it)', async () => {
+    const { tasks, invalid } = await loadTasks(TASKS_DIR)
+    expect(invalid).toEqual([])
+    const selected = selectTaskSequence(tasks, { taskIds: ['over-budget-x402-refused'] })
+    expect(selected.map((t) => t.id)).toEqual(['over-budget-x402-refused'])
+    const resolver = createPerTrialResolver({
+      // Above the EXHAUSTED-period-budget-below-<X>-USDC threshold: the
+      // precondition is NOT met and the drainer was never run (it was not
+      // selected — selection adds no prerequisite implicitly).
+      readBudget: async () => ({ remaining: 300_000n }),
+      blockNumber: async () => 1,
+      recipient: '0x' + '22'.repeat(20),
+      x402Target: 'https://merchant.example/mcp',
+      agentAccount: '0x' + '11'.repeat(20),
+    })
+    const report = await runSuite({
+      tasks: selected,
+      resolveForTrial: resolver.resolve,
+      adapter: {
+        name: 'fake',
+        runTask: async () => {
+          throw new Error('no agent session may run for an unmet precondition')
+        },
+      },
+      trials: 3,
+      taskFilter: ['over-budget-x402-refused'],
+    })
+    const taskReport = report.tasks[0]
+    expect(taskReport.passAll).toBe(false)
+    for (const trial of taskReport.trials) expect(trial.detail).toContain('tier-3 precondition not met')
+    // And the report records the filter, so the summaries can say this was
+    // not a whole-suite green.
+    expect(report.taskFilter).toEqual(['over-budget-x402-refused'])
+    expect(renderSummary(report)).toContain('FILTERED run')
+    expect(renderMarkdownSummary(report)).toContain('Task filter (#4218)')
   })
 })
 

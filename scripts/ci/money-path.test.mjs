@@ -532,9 +532,11 @@ describe('money-path list stays in one piece', () => {
   })
 
   test('the SDK merchant-answer decision is RUNTIME money-path — a change to it gates promotion (#4122)', () => {
-    // MerchantCompletion.retryRequest decides, after the funding leg has moved
-    // USDC, whether the merchant accepted or the payment is a rejection after
-    // funding, and reports the settlement hash Haven records. It matched no
+    // MerchantCompletion.retryRequest makes the paid retry after the funding
+    // leg has moved USDC, acts on the answer (the merchant accepted, or the
+    // payment is a rejection after funding; the decision itself is
+    // merchant-answer.ts since #4120) and reports the settlement hash Haven
+    // records. It matched no
     // glob: of the 17 commits that touched it since the facade refactor
     // 399b1c00f, three touched no perimeter file and went unlabelled
     // (4e52d4b35, fefd9dc45, 98e1c9cc8). Runtime, not control: qa-dev's
@@ -548,7 +550,7 @@ describe('money-path list stays in one piece', () => {
     assert.ok(trackedFiles().includes(f), `${f} no longer exists — repoint this pin`)
     assert.ok(
       moneyPathFiles([f], loadMoneyPathGlobs()).length === 1,
-      `${f} must be matched by a RUNTIME money-path glob — it decides a funded payment's ` +
+      `${f} must be matched by a RUNTIME money-path glob — it acts on a funded payment's ` +
         'merchant outcome, and the money-flow harness exercises it (#4122)',
     )
   })

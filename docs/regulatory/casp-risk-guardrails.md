@@ -1035,7 +1035,7 @@ moved in from the signer (`delegate-account.ts`, `direct-payment-guard.ts`,
 `redemption-guard.ts`, `settlement-child.ts`), and the signer's checks on task
 and sub-budget children (`task-budget-guards.ts`, `sub-budget-guards.ts`,
 #3661). `merchant-completion.ts` (#4122) and `merchant-answer.ts` (#4120,
-PR #4153) settle a funded payment's merchant answer.
+PR #4153) decide a funded payment's merchant answer.
 `MerchantCompletion.retryRequest` makes the paid retry after the funding leg
 has moved USDC, acts on the answer (the merchant accepted, or the payment is a
 rejection after funding) and reports the settlement hash Haven records.
@@ -1344,8 +1344,8 @@ Empirically it already contains a great deal else: `connect/**`, `mcp/**`,
 most of `sdk/**` (the money-path list names only the `sdk/src/` files that are
 the signing schemes, the #3271 binding check, the signing-surface guard, the
 budget guards, or the post-funding merchant-answer decision —
-`merchant-completion.ts` and the shared `merchant-answer.ts`), `routes/passkeys.ts`,
-`routes/catalog.ts`, `routes/accounting-feed.ts`, `routes/accounting.ts` and
+`merchant-completion.ts` and the shared `merchant-answer.ts`),
+`routes/passkeys.ts`, `routes/catalog.ts`, `routes/accounting-feed.ts`, `routes/accounting.ts` and
 `config.ts` — none of them on that list. `signer/**`, `mcp-server/**` and
 `demo-merchant-mcp/**` were in the same position when #1826 was decided and
 have since joined it (`packages/signer/**`; `src/**` for the other two, #2300

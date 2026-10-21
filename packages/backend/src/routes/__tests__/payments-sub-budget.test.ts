@@ -30,6 +30,18 @@ vi.mock('../../infra/chain/delegation-budget-reader.js', () => ({
 vi.mock('../../db.js', () => ({
   default: { query: (...a: unknown[]) => mockQuery(...a) },
 }))
+// #4217: the four period-budget refusals below record a `payment_refusals`
+// row through `recordRefusalFireAndForget` → `writeRefusal`, which prices the
+// amount with `getFiatValuesForTokenAmount` — a CoinGecko fetch, detached, so
+// its failure is logged and never thrown. They passed with the dial refused,
+// which is why the test network net fails a test for the dial itself
+// (docs/contributing/testing-strategy.md § "No real network (#4217)"). The
+// all-null triple is that helper's own outage answer, and this file asserts
+// nothing about the ledger's fiat columns.
+vi.mock('../../infra/fiat-values.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../infra/fiat-values.js')>()),
+  getFiatValuesForTokenAmount: async () => ({ usd: null, eur: null, sek: null }),
+}))
 vi.mock('../../rails/hybrid-provisioning.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../rails/hybrid-provisioning.js')>()
   return { ...actual, computeHybridAccountAddress: (...a: unknown[]) => mockCompute(...a) }

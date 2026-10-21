@@ -17,12 +17,13 @@ export const TEST_MERCHANT_NOTE =
  * where a user is one paste away from a real payment, as a wrapping line —
  * a `StatusBadge` is a one-line stadium and clipped the sentence at 390.
  *
- * #3981: the shared `PageHeader` cannot hold the Monogram/logo, its `title`
- * is a plain string with no badge slot, and its `subtitle`/`meta` render
- * inside a `<p>` (the chips and warning paragraphs would be invalid nesting)
- * — so the header STAYS, aligned with `PageHeader`'s type scale and spacing,
- * and gains its `actions` slot: "Set a budget for this merchant" renders on
- * the right, the way `PageHeader` places actions (#4003 wording).
+ * #3981: the shared `PageHeader` now has a leading slot for the Monogram/logo,
+ * but its `title` is a plain string with no inline badge slot, and its
+ * `subtitle`/`meta` render inside a `<p>` (the chips and warning paragraphs
+ * would be invalid nesting). The custom header therefore STAYS, aligned with
+ * `PageHeader`'s type scale and spacing, and gains its `actions` slot: "Set a
+ * budget for this merchant" renders on the right, the way `PageHeader` places
+ * actions (#4003 wording).
  *
  * #4015: the actions sit BELOW the text until `xl` (1280px) — at 1024 the
  * side-by-side row left the merchant's text about 262px — and the text

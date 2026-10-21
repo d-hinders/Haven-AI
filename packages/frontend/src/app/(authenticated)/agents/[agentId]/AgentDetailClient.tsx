@@ -59,6 +59,7 @@ import {
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { Monogram } from '@/components/ui/Monogram'
 import { BackLink } from '@haven_ai/ui/BackLink'
 import { Row } from '@/components/ui/Row'
 import { StatusBadge } from '@/components/ui/StatusBadge'
@@ -533,6 +534,7 @@ export default function AgentDetailClient({ agentId }: Props) {
     <div className="max-w-5xl">
       <PageHeader
         back={{ href: '/agents', label: 'Agents' }}
+        leading={<Monogram name={currentAgent.name} size="md" decorative />}
         title={currentAgent.name}
         subtitle={currentAgent.description || undefined}
         // #3694: the identity row that was the "About this agent" card —

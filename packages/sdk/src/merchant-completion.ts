@@ -307,15 +307,23 @@ export class MerchantCompletion {
     // #3764: the funding report above anchors Haven's row on the FUNDING tx.
     // The merchant's OWN settlement transaction — parsed just above into the
     // local receipt — is a SECOND report through the same evidence endpoint,
-    // exactly one attempt (D2), so the backend's #3475 branch can verify the
-    // delegate → merchant transfer and record it beside the funding hash.
-    // Gated like the hosted path: well-formed, non-zero, and DIFFERENT from
-    // the funding hash in any letter case (the backend compares
-    // case-insensitively — a checksummed copy of the funding hash is not a
-    // settlement). The outcome is swallowed by design (D1), exactly like the
-    // funding outcome on this path (#1620): the local receipt already shows
-    // the settlement (above), and nothing here may change the
-    // caller-visible result of a completed purchase.
+    // so the backend's #3475 branch can verify the delegate → merchant
+    // transfer and record it beside the funding hash. Gated like the hosted
+    // path: well-formed, non-zero, and DIFFERENT from the funding hash in any
+    // letter case (the backend compares case-insensitively — a checksummed
+    // copy of the funding hash is not a settlement). The outcome is swallowed
+    // by design (D1), exactly like the funding outcome on this path (#1620):
+    // the local receipt already shows the settlement (above), and nothing
+    // here may change the caller-visible result of a completed purchase.
+    // #4215: unlike the hosted path (D2, one attempt), the LOCAL report is
+    // retried while Haven answers `retryable` (503) — the qa-dev EIP-3009
+    // legs showed the backend's node sees the merchant tx only seconds after
+    // the funding confirm, and a swallowed one-shot 503 red the legs. The
+    // reuse goes through `reportEvidence`, so the bounded
+    // `EVIDENCE_RETRY_DELAYS_MS` schedule applies: four attempts over ~7 s,
+    // well inside the legs' 45 s window. Any refusal — a 409, a proof-header
+    // refusal, a validation error, a transport failure with no status — ends
+    // the loop, exactly as everywhere else this endpoint is called.
     const settlementCandidate = merchantSettlement.settlementTxHash
     if (
       settlementCandidate &&
@@ -326,7 +334,18 @@ export class MerchantCompletion {
       // #4061: WITH the header this retry sent — since #3925 it is the
       // nonce proof the backend records the settlement against, and a
       // settlement report without it is refused.
-      await this.reportSettlementEvidenceOnce(receipt.paymentId, settlementCandidate, receipt.paymentHeader)
+      // #4215: through `reportEvidence`, whose loop re-attempts while the
+      // backend answers `retryable` (503) under the bounded
+      // `EVIDENCE_RETRY_DELAYS_MS` schedule. The gate above already excluded
+      // the zero marker, so — unlike the public `reportSettlementEvidence` —
+      // this reuse adds NO throw path out of a completed purchase; every
+      // failure answers an outcome that is swallowed (D1).
+      await this.reportEvidence({
+        paymentId: receipt.paymentId,
+        rail: 'x402',
+        txHash: settlementCandidate,
+        ...settlementProofFields(receipt.paymentHeader),
+      })
     }
 
     await this.reportMerchantReceipt(receipt.paymentId, retryResponse)
@@ -717,10 +736,11 @@ export class MerchantCompletion {
   }
 
   /**
-   * ONE evidence attempt — the body of `reportEvidence`'s loop above, and the
-   * whole of the #3764 settlement report below. A 503 answers `retryable`
-   * immediately; the caller decides whether to sleep and re-attempt
-   * (`reportEvidence`) or hand the outcome to its consumer (#3764 D2).
+   * ONE evidence attempt — the body of `reportEvidence`'s loop above. A 503
+   * answers `retryable` immediately; the caller decides whether to sleep and
+   * re-attempt (`reportEvidence`, and — #4215 — the local settlement report
+   * in `retryRequest`) or hand the outcome to its consumer (#3764 D2, the
+   * hosted settlement report).
    */
   private async postEvidenceOnce(body: Record<string, unknown>): Promise<EvidenceReportOutcome> {
     try {
@@ -812,15 +832,18 @@ export class MerchantCompletion {
 
   /**
    * #3764: report the merchant's OWN EIP-3009 settlement transaction right
-   * after a completed purchase — the second leg of a payment that already has
-   * a funding-evidence row. Same endpoint and payload shape as
+   * after a completed hosted purchase — the second leg of a payment that
+   * already has a funding-evidence row. Same endpoint and payload shape as
    * `reportSettlementEvidence` above, but with #3764's D2 budget: exactly ONE
    * attempt, no `EVIDENCE_RETRY_DELAYS_MS` backoff. The resource is already
    * paid for and delivered, so a retryable answer must not stretch the
    * completed purchase — the HOSTED tools hand the outcome to the agent
-   * (`settlementEvidenceOutcome` → `haven_report_settlement_evidence`), and
-   * the local caller swallows it by design (D1). Callers validate the hash
-   * before this call (well-formed, non-zero, different from the funding hash
+   * (`settlementEvidenceOutcome` → `haven_report_settlement_evidence`). Since
+   * #4215 this ONE-attempt form serves the HOSTED path only
+   * (`completeX402MerchantCall`); the local `retryRequest` posts the same
+   * report through `reportEvidence`, whose bounded loop re-attempts while
+   * Haven answers `retryable`. Callers validate the hash before this call
+   * (well-formed, non-zero, different from the funding hash
    * case-insensitively), so there is no client-side refusal here — the
    * backend verifies on-chain and is the only judge.
    *

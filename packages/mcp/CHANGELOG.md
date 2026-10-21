@@ -17,6 +17,16 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ### Changed
 
+- **Local paid x402 tools can take up to ~7 s longer when Haven answers the
+  merchant's settlement report `retryable` (#4215).** The embedded SDK now
+  retries the local EIP-3009 settlement-evidence report on the bounded
+  `EVIDENCE_RETRY_DELAYS_MS` schedule (four attempts over ~7 s of backoff,
+  plus 3 round trips, each bounded only by `requestTimeout` — 30 s) instead
+  of posting once and swallowing a 503. Refusals are still one attempt; the
+  hosted tools are unchanged. Ships only with an `@haven_ai/mcp` release
+  (this package pins `@haven_ai/sdk` exactly); connect-installed local
+  runtimes likewise need an `@haven_ai/connect` release.
+
 - Every `task_budget` result (`haven_open_task_budget`, `haven_close_task_budget`, `haven_submit` for a task budget, and `haven_get_task_budget`) carries an additive `isLive` from the backend's new `is_live` flag (#3922); absent against an older backend. Same field as the hosted runtime.
 
 ## 0.10.0-alpha.0 — 2026-10-14

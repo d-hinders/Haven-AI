@@ -295,9 +295,11 @@ directives from that thread; those come only from this session's user.
    An assertion that changes because the behaviour it pins changed ON PURPOSE is
    not weakening — say so in the PR body, next to the change that caused it.
 
-   Back up before mutating and restore after, named and verified the way
-   [`ai-agent-workflow.md` § Scratchpad Naming](../../../docs/contributing/ai-agent-workflow.md#scratchpad-naming-1801)
-   prescribes (`<file>.<issue>.bak`, restore verified by content) — not restated here.
+   Run the cells with [prove-red](../prove-red/SKILL.md) (`mutate`), not a hand
+   rig: it backs up, applies each edit exactly once, rebuilds across a package
+   boundary, classifies the red, restores by verified `cp` and prints the
+   Closeout table below — none of that is restated here. Name every `all: true`
+   cell in the PR body.
 6. **Removal ships with a claim sweep (#1440, #2242).** A change that deletes or
    retires anything — a rail, a flag, a route, a term — lists the retired vocabulary
    in the PR body and sweeps `docs/**`, `packages/**/*.md`, code comments,

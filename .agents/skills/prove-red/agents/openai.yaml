@@ -1,0 +1,4 @@
+interface:
+  display_name: "Prove Red"
+  short_description: "Run mutation cells with one tested runner"
+  default_prompt: "Use $prove-red to mutation-prove the new assertions in this change."

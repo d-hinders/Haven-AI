@@ -43,12 +43,12 @@ name: External intake gate
 # A read that errors fails the check with the error in the log; re-run after a
 # transient error. `shell: bash` + `set -o pipefail` keep exit 1 through `tee`.
 #
-# ## Operator step (owner)
+# ## Required on `dev`
 #
-# Making this REQUIRED is a ruleset change: add "External intake gate" to the
-# *Dev merge* ruleset (22449193), the one ruleset that targets `dev` alone.
-# Not *Dev gate* (18134280): that one targets `main`, where this check always
-# passes. Until then it reports on every PR but does not block. The ruleset inventory in
+# "External intake gate" is a required context of the *Dev merge* ruleset
+# (22449193), the one ruleset that targets `dev` alone — applied by the owner
+# on 2026-10-21. Not *Dev gate* (18134280): that one targets `main`, where this
+# check always passes. The ruleset inventory in
 # docs/contributing/autonomous-pr-loop.md records the state.
 
 on:

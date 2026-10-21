@@ -14,9 +14,9 @@ Do not burn fixed-timeout `sleep` loops against `gh pr checks`.
   no checks run and no merge ever comes (read `mergeStateStatus`, don't wait), and
   a required check failing means auto-merge simply never fires.
 - **Editing the pull-request body re-runs the checks that read it** —
-  *Docs front-matter & agent skills* (a required context on `dev`, so it blocks
-  the merge while it runs), *PR ownership gate* and *External intake gate*
-  (neither required on `dev` yet, per the ruleset inventory in
+  *Docs front-matter & agent skills* and *External intake gate* (both required
+  on `dev`, so each blocks the merge while it runs) and *PR ownership gate*
+  (not required on `dev` yet, per the ruleset inventory in
   `autonomous-pr-loop.md`). A merge attempted right
   after the last body edit — filling the verdict lines, say — is refused until
   the re-run finishes. Fill the body before the final CI wait, or wait the

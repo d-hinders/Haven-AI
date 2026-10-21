@@ -437,10 +437,11 @@ Without this, `ship-next` can open PRs but cannot auto-merge them.
      (#3179):** add **PR ownership gate** (`.github/workflows/pr-ownership-gate.yml`)
      to this ruleset's required contexts — it fails a PR that would close an
      issue another session holds. Because *Haven automerge rules* targets both
-     branches, that makes it the **16th** required context on `dev` and the
-     **20th** on `main`. Until the owner adds it, the check runs and reports on
-     every PR but does not block; this list, the *Effective per branch* table
-     below (15 / 19), `branch-and-release-flow.md` § Promotion to production ("19 … the 15")
+     branches, that makes it the **17th** required context on `dev` (after the
+     `dev`-only External intake gate, below) and the **20th** on `main`. Until
+     the owner adds it, the check runs and reports on every PR but does not
+     block; this list, the *Effective per branch* table below (16 / 19),
+     `branch-and-release-flow.md` § Promotion to production ("19 … the 15")
      and `promoting-dev-to-main.md` ("19 … the 15") all describe the counts AS
      APPLIED — update all four when the step is done. The workflow uses `pull_request_target` so the default branch's copy of the script judges (it therefore cannot run on the PR that adds it); once the context is required, a PR for which the workflow does not run at all would have no check run and could not merge — a different failure than red, worth knowing when reading a stuck PR.
 
@@ -494,28 +495,24 @@ Without this, `ship-next` can open PRs but cannot auto-merge them.
      `pull_request` rule with `allowed_merge_methods: ["squash"]` and
      `required_approving_review_count: 0`, plus block-deletion and
      block-force-push. **No status checks of its own** except the `dev`-only
-     ones (External intake gate, pending — below) — the shared ruleset
+     ones (External intake gate — below) — the shared ruleset
      already carries the rest, and adding those here would be a second copy to
      drift. It exists only because merge methods intersect and *Haven automerge
      rules* cannot be narrowed without taking `main` down with it: squash-only
      on `dev` had to be expressed on a `dev`-only ruleset. (Its "require Copilot
      review" checkbox is ticked and inert while the approval count is zero.)
-     **Pending operator step (#4200):** add **External intake gate**
-     (`.github/workflows/external-intake-gate.yml`) to THIS ruleset's required
-     contexts — it fails a PR into `dev` that is external, or that closes an
-     open external issue, until a maintainer accepts it. It belongs here, not on
-     *Haven automerge rules*, because it judges `dev` only (it passes every
-     other base), and not on *Dev gate*, which targets `main`. That makes it a
-     required context on `dev` and on `dev` alone: **16** on `dev` (17 with
-     the pending PR ownership gate), `main` unchanged. Until the owner adds it,
-     the check runs and reports on every PR but does not block. Leave *Require
-     branches to be up to date* **unticked** on the new rule: the booleans union,
-     so ticking it would re-impose the up-to-date gate on `dev` that O1 turned
-     off. When the step
-     is done, update the *Effective per branch* table below,
-     `branch-and-release-flow.md` § Promotion to production and
-     `promoting-dev-to-main.md` ("the 15 that every PR into `dev` also meets"
-     becomes 15 of `dev`'s 16).
+     **Required: External intake gate (#4200)**
+     (`.github/workflows/external-intake-gate.yml`), applied to THIS ruleset by
+     the owner on 2026-10-21 and read back from `rules/branches/dev` the same
+     day (16 contexts, `strict` false on both rules). It fails a PR into `dev`
+     that is external, or that closes an open external issue, until a
+     maintainer accepts it. It lives here, not on *Haven automerge rules*,
+     because it judges `dev` only (it passes every other base), and not on
+     *Dev gate*, which targets `main`. So it is required on `dev` alone:
+     **16** on `dev`, `main` unchanged. *Require branches to be up to date* is
+     **unticked** on this rule and must stay so: the booleans union, so
+     ticking it would re-impose the up-to-date gate on `dev` that O1 turned
+     off.
    - **"Dev gate"** (targets `main` only) — reinforces the pull-request and
      force-push protections on `main`, and carries the strict up-to-date policy,
      one merge-method rule of its own, and **four** required checks. It carries
@@ -569,7 +566,7 @@ Without this, `ship-next` can open PRs but cannot auto-merge them.
 
    | | `dev` | `main` |
    |---|---|---|
-   | Required contexts | **15** (all from *Haven automerge rules*; two more are pending — **PR ownership gate**, #3179, on *Haven automerge rules*, and **External intake gate**, #4200, on *Dev merge*; see One-time setup) | **19** (those 15 + `gate`, `qa-freshness`, Design visual regression, Frontend browser smoke; 20 once the PR ownership gate step is applied) |
+   | Required contexts | **16** (15 from *Haven automerge rules* + **External intake gate**, #4200, from *Dev merge*; a 17th, **PR ownership gate**, #3179, is pending — see One-time setup) | **19** (those 15 + `gate`, `qa-freshness`, Design visual regression, Frontend browser smoke; 20 once the PR ownership gate step is applied) |
    | Branch must be up to date | **no** | **yes** |
    | Allowed merge method | **squash only** | **merge commit only** |
 

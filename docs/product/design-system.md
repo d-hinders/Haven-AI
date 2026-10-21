@@ -2167,10 +2167,12 @@ above the list; the card is never repeated inside a parent card.
    Clear filters keeps it.
 4. **List summary line**, outside the card (#4196): the count on the right,
    and the page's own totals, when it has any, on the left — the account
-   Activity tab's "Money in · Money out", Transactions' filtered "N received ·
-   N sent · N failed". The page passes its figures in the toolbar's `summary`
-   slot and never builds the line, so "filtered" is decided once, inside the
-   toolbar. The count keeps one place whether or not a filter is active.
+   Activity tab's "In · Out" (short visible labels, so the line fits a phone
+   beside the count; sr-only "Money in" / "Money out" before each figure),
+   Transactions' filtered "N received · N sent · N failed". The page passes
+   its figures in the toolbar's `summary` slot and never builds the line, so
+   "filtered" is decided once, inside the toolbar. The count keeps one place
+   whether or not a filter is active.
 
 Under the summary line, in this order: the hedges that qualify it
 (`UNPRICED_TOTALS_NOTE` for the totals, then the `truncated` note for the

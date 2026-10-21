@@ -700,12 +700,23 @@ export function needsUnpinnedBudget(assetTransferMethods: string | null): boolea
 /**
  * Initials for a named entity with no logo — two letters from the first and
  * last words of its name, or the first two letters of a one-word name. The
- * helper behind `Monogram`, which draws merchants, contacts and agents.
+ * helper behind `Monogram`.
  */
+const graphemes =
+  typeof Intl !== 'undefined' && 'Segmenter' in Intl
+    ? new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+    : null
+
+function characters(text: string): string[] {
+  return graphemes ? Array.from(graphemes.segment(text), (s) => s.segment) : Array.from(text)
+}
+
 export function merchantInitials(name: string): string {
-  // Code points, not UTF-16 code units (#4210): agent names are user-typed, and
-  // `'😀Bot'[0]` is half a surrogate pair. `Array.from` iterates code points.
-  const parts = name.trim().split(/\s+/).filter(Boolean).map((part) => Array.from(part))
+  // Visible characters, not UTF-16 code units (#4210): agent names are
+  // user-typed, and `'😀Bot'[0]` is half a surrogate pair. Graphemes keep a
+  // flag or a ZWJ family whole; `Array.from` (code points) is the fallback
+  // where `Intl.Segmenter` is missing — never a lone surrogate either way.
+  const parts = name.trim().split(/\s+/).filter(Boolean).map(characters)
   const initials =
     parts.length >= 2
       ? `${parts[0]![0]}${parts[parts.length - 1]![0]}`

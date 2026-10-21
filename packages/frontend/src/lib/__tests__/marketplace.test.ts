@@ -652,9 +652,15 @@ describe('merchantInitials', () => {
     expect(merchantInitials('🤖 Research agent')).toBe('🤖A')
     expect(merchantInitials('Research 🤖')).toBe('R🤖')
     expect(merchantInitials('🤖')).toBe('🤖')
-    for (const name of ['😀Bot', '🤖 Research agent', 'Research 🤖', '🤖', 'a😀b']) {
+    for (const name of ['😀Bot', '🤖 Research agent', 'Research 🤖', '🤖', 'a😀b', '🇺🇸 Bot', '👨‍👩‍👧']) {
       expect(merchantInitials(name)).not.toMatch(loneSurrogate)
     }
+  })
+
+  it('keeps a multi-code-point character whole — a flag, a ZWJ family, a skin tone', () => {
+    expect(merchantInitials('🇺🇸 Bot')).toBe('🇺🇸B')
+    expect(merchantInitials('👨‍👩‍👧')).toBe('👨‍👩‍👧')
+    expect(merchantInitials('👍🏽Bot')).toBe('👍🏽B')
   })
 })
 

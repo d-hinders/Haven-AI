@@ -3880,7 +3880,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="Monogram"
-        description="Initials-in-a-circle avatar, or the entity's logo when it has one. Promoted to components/ui on its third copy (#3079): the /contacts Initials avatar, the marketplace card and the merchant header all drew the same circle. xs (32px) for the agent row's 2rem mark track (#4210), sm (36px) for lists and cards, md (48px) for a page header. `decorative` sets aria-hidden for a caller that prints the name beside the mark; without it the initials stay readable. Initials are taken by code point, so a name that starts with an emoji never renders half a surrogate pair. Since #4066 the initials variant is tinted from the entity's NAME — one of six muted avatar tints picked by a pure hash of the trimmed name, so the same entity keeps the same colour everywhere and neighbouring rows are told apart at a glance. Assigned by name, never by index, and never from a status or --v2-series-* chart colour (the hexes are disjoint from both)."
+        description="Initials-in-a-circle avatar, or the entity's logo when it has one. Promoted to components/ui on its third copy (#3079): the /contacts Initials avatar, the marketplace card and the merchant header all drew the same circle. xs (32px), sized for the agent row's 2rem mark track (#4210; agents adopt it in #4208), sm (36px) for lists and cards, md (48px) for a page header. `decorative` sets aria-hidden for a caller that prints the name beside the mark; without it the initials stay readable. Initials are taken by visible character, so a name that starts with an emoji or a flag never renders half of one. Since #4066 the initials variant is tinted from the entity's NAME — one of six muted avatar tints picked by a pure hash of the trimmed name, so the same entity keeps the same colour everywhere and neighbouring rows are told apart at a glance. Assigned by name, never by index, and never from a status or --v2-series-* chart colour (the hexes are disjoint from both)."
       >
         <div className="flex flex-wrap items-center gap-4">
           {MONOGRAM_TINT_EXAMPLES.map((name) => (
@@ -4091,7 +4091,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="PageHeader leading"
-        description="A mark before the title, centred on the title's line (#4210, epic #4207) — an agent's Monogram, so the detail header carries the same mark as the agent's row. The title prints beside it, so the mark is passed `decorative`. Optional and additive — a PageHeader without `leading` renders exactly as before."
+        description="A mark before the title, centred on it (#4210, epic #4207) — built for an agent's Monogram (#4208), so the detail header can carry the same mark as the agent's row. No product page passes it yet. The title prints beside it, so the mark is passed `decorative`. Optional and additive — a PageHeader without `leading` renders exactly as before."
       >
         <div className="max-w-2xl">
           <PageHeader

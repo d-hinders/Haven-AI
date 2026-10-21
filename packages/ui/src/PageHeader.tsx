@@ -39,9 +39,10 @@ export type PageHeaderProps = {
    */
   back?: { href: string; label: string }
   /**
-   * A mark drawn before the title, centred on the title's line (#4210, epic
-   * #4207) — an agent's `Monogram`, so the detail header carries the same mark
-   * as the agent's row. The title prints beside it, so pass a decorative mark.
+   * A mark drawn before the title and centred on it (#4210, epic #4207) —
+   * built for an agent's `Monogram` (#4208), so the detail header can carry
+   * the same mark as the agent's row. The title prints beside it, so pass a
+   * decorative mark.
    * Optional and additive: without it the header renders exactly as before.
    */
   leading?: ReactNode

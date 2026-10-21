@@ -6,6 +6,7 @@ import {
   noMatchTitle,
   periodLabel,
   searchPlaceholder,
+  showMoreLabel,
   showResultsLabel,
 } from '../list-controls-copy'
 
@@ -22,6 +23,15 @@ describe('list-controls copy', () => {
     expect(countLabel(noun, { shown: 12, total: 60 }, true)).toBe('12 of 60 transactions')
     expect(countLabel(noun, { shown: 1, total: 1 }, false)).toBe('1 transaction')
     expect(countLabel(noun, { shown: 500, total: 500, cappedAt: 500 }, true)).toBe('Showing the first 500 transactions')
+  })
+
+  it('paging: "Show N more" with N = min(page size, remaining), "Show more" when nothing is left to count (#4196)', () => {
+    expect(showMoreLabel(75, 25)).toBe('Show 25 more')
+    expect(showMoreLabel(25, 25)).toBe('Show 25 more')
+    expect(showMoreLabel(24, 25)).toBe('Show 24 more')
+    expect(showMoreLabel(1, 25)).toBe('Show 1 more')
+    expect(showMoreLabel(0, 25)).toBe('Show more')
+    expect(showMoreLabel(-3, 25)).toBe('Show more')
   })
 
   it('phone footer names the applied result', () => {

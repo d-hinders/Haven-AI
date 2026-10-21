@@ -426,6 +426,14 @@ describe('MerchantGrid', () => {
     fireEvent.click(screen.getByRole('menuitemradio', { name: 'Shown' }))
   })
 
+  it('puts the count on the list summary line, above the card grid (#4196)', () => {
+    render(<MerchantGrid merchants={[merchant()]} loading={false} error={null} onSubmit={vi.fn()} />)
+    const line = screen.getByTestId('list-summary')
+    expect(within(line).getByTestId('list-toolbar-count')).toHaveTextContent(/^1 merchant$/)
+    const card = screen.getByText('Merchant One')
+    expect(line.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
   it('renders the ListToolbar with the search field (leading icon) inside it', () => {
     render(<MerchantGrid merchants={[merchant()]} loading={false} error={null} onSubmit={vi.fn()} />)
     const toolbar = screen.getByTestId('list-toolbar')

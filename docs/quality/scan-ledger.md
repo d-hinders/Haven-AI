@@ -1701,3 +1701,149 @@ all six. Filed with shipping requested.
 **Disposition upkeep (2026-10-20):** C1 → `shipped` via #4124 (`afcfac0eb`):
 the probe's sixth check asks `eth_getLogs` over `DEFAULT_LOGS_RANGE` = 500
 blocks, pinned to the sweepers' widest batch.
+
+## 2026-10-21 — whole repo, weighted to the landings since 2026-10-19 (owner request 2026-10-21, no scope named)
+
+Full report: [`docs/bug-reports/quality-scan-2026-10-21-whole-repo.md`](../bug-reports/quality-scan-2026-10-21-whole-repo.md).
+The report holds the file:line evidence; this entry stays path-free. Measured
+on `origin/dev` @ `8cc3717c8` by one agent in an `npm ci`'d worktree, one
+heavy job at a time, with core, the SDK, the signer and the local MCP built.
+The window is `595b43c07..8cc3717c8` → 55 first-parent landings. Seven
+mutations were run behind `cp` backups, each restored with `cp` and checked
+with `cmp` and `git diff --quiet`. A measurement preload that refuses and
+records non-loopback connections ran outside the tree. Real-DB runs used a
+disposable database, dropped at the end. GitHub was read-only. No MCP or dev
+call was made.
+
+**Excluded this run:** every prior finding and candidate, whatever its
+disposition. None is re-surfaced. C1 sits beside the 2026-10-19 C2 (#4119,
+`shipped` via #4144): C2 was the qa-dev legs not checking Haven's record of
+the merchant settlement; C1 is what that check found once it ran. None of the
+re-measured figures worsened materially.
+
+**Structural findings:** none in the examined sample. A "tests depend on the
+machine" pattern (cold imports, real network, wall clock) was weighed and
+refused: the repo has a recorded decision to keep vitest's 5000 ms default
+and accept load-proportional costs (#2319, #2329, #2354), and only the
+network mechanism has an executed census (C3).
+
+**Improvement candidates (one PR each), pending owner decision:**
+- C1 — the SDK's one-shot EIP-3009 merchant-settlement report rarely
+  records, and qa-dev has been red on every `money-flow` run since #4144
+  started requiring it. From #4144's own deploy (2026-10-20 12:21Z) to the
+  scheduled run at the scan SHA: 21 failure, 1 cancelled, 0 success (the 24
+  hours before: 11 success, 0 failure). Every failure names the SDK-direct
+  legs. In 7 of those jobs the SDK legs recorded within the window 4 times in
+  28 attempts, and the hosted leg's first report 1 time in 14 (it passes
+  through the agent's guided follow-up). The SDK's local path posts the report
+  once and discards the outcome by design (#3764 D1/D2), and #4144's PR body
+  named this residual and said the fix belongs in the SDK. The standing
+  tracker #2769 carries 21 bot comments in the period and none from a person;
+  no claim names the red. Whether dev answered `retryable` or refused, and
+  whether the passive sweep recorded later, are not determinable from the
+  tree. Untracked as a remedy. Money-path by file (the SDK's merchant
+  completion module).
+- C2 — the backend's delegation builders send MetaMask SDK analytics to a
+  third-party host, and nothing in the tree turns it off. Under the preload,
+  31 of the 428 backend test files run opened 87 connections to the kit's
+  analytics endpoint; with `DO_NOT_TRACK=1` the same `src/modules` run opened
+  0 (was 11 files / 37). The kit (1.6.0) disables itself only on `CI` or a
+  do-not-track signal, and `DO_NOT_TRACK` resolves in 0 tracked files. The
+  payload, read from the kit's source: function name, scope type, caveat
+  names, SDK version, a random id, platform and, in a browser, the page's
+  hostname; no address or amount. Callers: 7 backend files and the
+  frontend's passkey signing (read, not executed). The deployed environment
+  is not determinable. Untracked.
+- C3 — the backend's "a test body must not dial the real network" rule
+  (written once, in a test comment, after #3969 and #3974 turned `dev` red
+  twice on 2026-10-14) is enforced by no net, and 2 test files (11 tests) still
+  dial the price API: 12 connections at the scan SHA, all harmless to refuse.
+  The preload, in refusing mode, is the net's prototype: 425 of the 428 files
+  behaved as before; the 3 reds are an environment role grant, the SSRF guard's
+  loopback-pinned hostnames (match the resolved address) and the deliberate
+  live-chain contract test (exempt it by name). Untracked.
+- Notes, not proposed: a heuristic census of cold dynamic imports in test
+  bodies (105 sites / 43 files; controls find the #4126 and #4134 sites at
+  their parents, but the one remaining site sampled ran warm in 50 ms); 11
+  files with wall-clock-bound assertions (#4189 fixed the one that reddened
+  `dev` twice in the window); adding or reverting one hosted tool edited the
+  same 8 existing test or test-support files (#4148, #4195; deliberate literal
+  pins); one stale "28 hosted tool names" docblock.
+
+**Dispositions observed (upkeep the ledger lacked):** 2026-10-19 C2 → #4119
+closed 2026-10-20 via PR #4144 (`aa818795d`) → `shipped`. 2026-10-19 C3 →
+#4120 closed via PR #4153 (`688b5c8dc`) → `shipped`. 2026-10-19 C4 → #4121
+closed via PR #4140 (`5bb6d4ae7`) → `shipped`, re-verified by execution (M5
+below). The spec-review siblings: #4122 closed via PR #4131 (`44ce131a9`);
+#4123 open, its build #4133 landed with `Refs`, awaiting a live check.
+
+**Probed clean** (block → examined / partial / not examined → command → number, all at `8cc3717c8`):
+- sizing → examined → the 09-22 command pinned with `git ls-tree`/`git show`;
+  the control at `595b43c07` reproduces backend 112,970 / 146,150. Now: backend
+  113,538 / 147,443; qa-agent 14,550 / 12,678 (+14.6 % / +20.4 %); frontend
+  71,713 / 73,900 (+5.6 % / +6.3 %); sdk 18,678 / 20,769; mcp-server 13,332 /
+  24,360; the rest within a few percent of 10-19.
+- block 1 (guard falsifiability) → examined. The census script → 8 candidate
+  test files over 1 of the last 20 landings (the #4148 revert, the only
+  money-path landing among them), 7 of them existing at the SHA. Five census
+  mutations, one per file → **5 caught** (hosted strict schema 31 red of 213;
+  registry missing-handler 2 of 10; blank description 2 of 9; issue reference
+  in a description, byte length unchanged, 1 of 3; a 30th hosted tool in the
+  snapshot 2 of 130, the 10-19 M7 that was 79 / 79 green). Two probes →
+  **both caught**: the handler-side strict parse, the second copy of the
+  first guard, 27 of 213; a count-only pin in the claim-release tests (the
+  pin itself stayed green, 6 sibling tests of 94 caught the mutation). Census
+  files exercised: 5 of 8.
+- block 2 (`covers:` completeness) → examined. The reference loop under bash
+  with `set -f`, each miss confirmed with the strict gate → 18 across 6 of 8
+  (unchanged since 09-25); 2 raw misses were glob strings.
+  `npm run docs:covers-gaps` → 129 pairs / 35 docs (unchanged).
+- block 3 (stale numbers) → partial. Positive control 3 / 3. The 25 newest
+  shards → 9 figure lines, 0 with a command (10-19: 11 / 1). Two shard
+  figures re-derived and matching. One stale docblock (notes). `any` 38,
+  db-mock gauge 54 / 270 / 57, guard scripts 71, non-spawning self-tests 25 of
+  74, zod 0 (all unchanged).
+- block 4 (retired vocabulary) → examined. Positive control 36 shards. 196
+  files, 46 historical / 150 live (10-19: 195 / 46 / 149; +1 live, a frontend
+  fixture carrying the always-0 compat field). Ratchet green, 30 / 28 (10-19:
+  32 / 30). Code half unchanged. The reverted tool's name survives in 3 files,
+  all history.
+- block 5 (merge-method drift) → examined. Since 2026-10-19T00:00:00Z → 0
+  merge-commit / 78 squash (clean); the window 0 / 55. Since
+  2026-08-10T00:00:00Z → 282 / 1,210 of 1,495.
+- block 6 (nets with holes) → examined, all four halves → copy lint 60
+  unscanned / 4 with hits (10-19: 56 / 4); money perimeter 32 / 20
+  (unchanged); visual gate 16 of 28 (10-19: 15); docs boundary 41 (10-19: 39;
+  two new ship-next references); freshness-gate exit branches unchanged.
+  Probes beyond the reference: the connection recorder (C2, C3) and the qa-dev
+  job read (C1).
+- incident clustering → examined. Issues created since 2026-10-19T00:00:00Z
+  → 60 (6 open / 54 closed). By hand: account page 12, list controls 12,
+  process hardening, preflight and claims 11, the 10-19 candidates 6, agent
+  evals 6, tests timing out under load 2, settlement follow-ons 2, other 9.
+  The untracked recurring mechanism is C1.
+- workflow archaeology → examined. `ci.yml` newest 100 → 67 / 18 / 15; 9 with
+  attempt > 1, all feature branches. `dev` 42 → 29 / 3 / 10: the hung-receipt
+  wall-clock test twice (fixed by #4189) and one TS2304 crossing. Failed jobs:
+  visual regression 6, browser smoke 5, frontend checks 4, QA agent checks 3.
+  qa-dev at the `money-flow` job level: C1.
+- comment archaeology → TODO / FIXME / HACK / XXX → 0 (control `import` →
+  2,098 files).
+- live exercise → not taken (a tree scan by brief).
+- SKILL step 3's unnumbered probes → fat controllers: not examined.
+  Data-layer coverage: not examined as a census (db-mock gauge; 428 backend
+  test files run against a real database). Validation and contract
+  enforcement: not examined. Cross-package duplication: partial (the hosted
+  tool-roster census only).
+- Novelty: the tracker was searched per candidate; the ledger and bug
+  reports were grepped for each candidate's terms. Bug-report bodies were not
+  otherwise re-read.
+
+Instrument lessons: a connection recorder that refuses by hostname misreads
+a test that pins a hostname to a local server; one backend suite needs a
+role-creating database owner; batched analytics posts cannot be attributed to
+a test; the block-1 census can return a deleted test file (count files that
+exist at the SHA); a static census of imports in test bodies is not a census
+of cold loads.
+
+**Disposition: pending owner decision** (C1, C2, C3).

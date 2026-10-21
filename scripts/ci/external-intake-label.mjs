@@ -27,7 +27,7 @@ export function intakeComment({ kind, author }) {
     `This ${what} was opened by @${author}, who is not one of Haven's maintainers, so it is marked \`${EXTERNAL_LABEL}\`.`,
     '',
     `Haven does not take outside contributions: it will not be built or merged until a maintainer accepts it by removing the \`${EXTERNAL_LABEL}\` label. ` +
-      `Until then the required **External intake gate** check fails on ${kind === 'pr' ? 'it' : 'any pull request that closes it'}.`,
+      `Until then the **External intake gate** check fails on ${kind === 'pr' ? 'it' : 'any pull request that closes it'}.`,
     '',
     'Posted by the external intake workflow (#4200).',
   ].join('\n')

@@ -123,6 +123,15 @@ lifts it says why in the same comment as the last decision or the verdict
 that leaves the label on reports, to its user, exactly which questions it is
 waiting for (step 9), so the hold is never silent.
 
+**External intake carries it too (#4200).** `external-intake-label.yml` adds
+`pending-review` (with `external`) to an issue opened by someone who is neither
+a maintainer nor a Bot. There, the label's absence does NOT make the issue
+ready: an external issue stays unclaimable until a maintainer accepts it by
+removing `external` (AGENTS.md § *Cross-session agent coordination*, rule 0b),
+whatever else it carries. After acceptance, `pending-review` comes off like any
+other issue's — once the § *Issue review* has run on it, by the session that
+runs it, or by the maintainer.
+
 **Put it back** the moment a new owner question appears on an issue nobody has
 claimed yet — a review finding that needs a ruling, a scope gap the code
 cannot answer. An issue that is waiting for the owner is not ready, whatever
@@ -436,7 +445,9 @@ spec is right once:
 Report readiness on those terms. Do not present adding `code-quality` as the
 step that makes an issue ready or pickable. Until those terms hold the issue
 carries `pending-review` (§ *Hold until ready*); a label never makes an issue
-ready, but its absence is what tells every other session it may start.
+ready, but its absence is what tells every other session it may start — except
+on external intake, which also needs a maintainer's acceptance (§ *Hold until
+ready*).
 
 **How work actually gets picked up (measured 2026-09-25).** Partners and
 sessions claim issues through the `🔒 CLAIM` protocol in

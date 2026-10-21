@@ -36,8 +36,8 @@
 //   node scripts/ci/preflight.mjs --base=<ref> # diff against something else
 //   node scripts/ci/preflight.mjs --static     # only the static ratchets, then stop
 //
-// Static entries run first (#4175), and a red that is timeout-shaped while the
-// machine was loaded is re-run alone at the end: see `runBattery`.
+// Static entries run first (#4175), and a timeout-shaped red is re-run alone at
+// the end, at any load: see `runBattery`.
 //
 // Dependency-free (no YAML parser), like everything in this directory, so it
 // runs from a bare checkout and its self-test runs in `ci_config_checks`.
@@ -861,7 +861,7 @@ export const TIMEOUT_SHAPES = Object.freeze([
  * What stays out: a plain `Error` or `TypeError` thrown NEXT TO a timeout (an
  * `afterAll` that tears down what a timed-out `beforeAll` never built is the
  * common one). Such a gate can be re-run, and if it is green alone it lands in
- * the "red under load, green alone" group with exit 3, never in a pass.
+ * the "timed out, green alone" group with exit 3, never in a pass.
  */
 export const NEVER_LOAD_SHAPES = Object.freeze([
   /\bAssertionError\b/,
@@ -884,48 +884,46 @@ export function isTimeoutShaped(result) {
 
 /**
  * The 1-minute load average and the CPU count, read immediately BEFORE a gate
- * starts.
+ * starts. Evidence only: the reading is recorded and printed beside a re-run
+ * gate, and it decides nothing (#4191).
  *
- * Before, not after: a reading at the end of a gate mostly measures that gate's
- * own workers. The reading before still carries the decaying tail of the
- * PREVIOUS gate, which is this battery's own load, not another agent's. That
- * tail RARELY exceeds the CPU count by itself: a runner's default pool is
- * smaller than the machine (vitest and `node --test` both size theirs below the
- * CPU count), but the load average counts runnable threads, not pool slots, so
- * a pool whose workers each run several busy threads can push it over. The
- * cost of that mistake is bounded: a re-run that is green alone exits 3
- * instead of 1, never 0, so a red is never turned into a pass.
+ * It used to gate the re-run (`load > cpus`), and that missed the reds it
+ * existed for: on 2026-10-20 three timeout-shaped reds started at 11.78, 9.36
+ * and 9.18 on 12 CPUs, none was re-run, and the battery exited 1 over reds that
+ * were green by hand. A reading before the start mostly carries the decaying
+ * tail of the PREVIOUS gate, and it does not predict the contention during the
+ * run: a vitest suite that starts at 9 on 12 cores passes its core count once
+ * its own pool spins up. A reading at the end would mostly measure that gate's
+ * own workers, so neither end is a predictor. `ops-probe-standalone.test.ts`
+ * measured the same thing from the other side: sibling vitest workers, not the
+ * load average, are what slows a timed test.
  *
  * Platform: `os.loadavg()` is `[0, 0, 0]` on Windows, and `os.cpus()` can be
- * empty in some containers. `isHighLoad` treats a zero on either side as "not
- * high", so neither platform ever triggers a re-run.
+ * empty in some containers. Neither matters now that the reading gates
+ * nothing; it prints as `0.00 on N CPU(s)`.
  */
 export function readMachineLoad() {
   return { load: loadavg()[0], cpus: cpus().length }
 }
 
 /**
- * Load strictly above the CPU count. At or below it, a red is just red.
- *
- * `count > 0` is the zero guard: with no CPU count every reading would exceed
- * it. A zero LOAD (Windows) can never exceed a positive count.
- */
-export function isHighLoad({ load, cpus: count }) {
-  return count > 0 && load > count
-}
-
-/**
- * Run the selected gates in order, then re-run the load-shaped reds alone.
+ * Run the selected gates in order, then re-run the timeout-shaped reds alone.
  *
  * Exported, with the runner, the load reader and the clock injected, so
  * `preflight.test.mjs` drives it with no real gate and no real load.
  *
- * A gate is queued for a re-run only when it is red, its output is
- * timeout-shaped (`isTimeoutShaped`), AND the load read before it started was
- * above the CPU count (`isHighLoad`). After the LAST selected gate, each queued
- * gate runs once more, by itself, with the load read again before it starts.
- * "Alone" means alone in this battery: other agents on the machine still run,
- * which is why the second reading is kept and printed.
+ * A gate is queued for a re-run when it is red and its output is
+ * timeout-shaped (`isTimeoutShaped`), whatever the load (#4191). A red that is
+ * not timeout-shaped is never queued, at any load. After the LAST selected
+ * gate, each queued gate runs once more, by itself. The load is read before
+ * every attempt, re-runs included, and both readings are kept and printed as
+ * evidence; neither decides anything (`readMachineLoad`). "Alone" means alone
+ * in this battery: other agents on the machine still run.
+ *
+ * Why no load condition: the cost of a looser predicate is bounded by the exit
+ * code. A re-run that is green alone exits `EXIT.RED_UNDER_LOAD` (3), never 0,
+ * so a forgiven red stays visible; a timeout that recurs alone is red (1). The
+ * price is one extra run of a gate that times out for real.
  *
  * The groups:
  * - `red`: red, not queued;
@@ -956,7 +954,7 @@ export function runBattery(
   const results = []
   for (const gate of gates) {
     const first = attempt(gate, 'first')
-    const queued = !first.ok && isTimeoutShaped(first) && isHighLoad(first)
+    const queued = !first.ok && isTimeoutShaped(first)
     results.push({ gate, ...first, queued, rerun: null })
   }
   for (const entry of results) {
@@ -1027,7 +1025,7 @@ export function summarize({ code, results, red, redAlone, greenAlone, skippedDb 
     for (const f of redAlone) {
       err.push(
         `── ${f.command}  → reddens: ${f.jobs.join(', ')}\n` +
-          `   red under load ${describeLoad(f)}, red alone at load ${describeLoad(f.rerun)}`,
+          `   red at load ${describeLoad(f)}, red alone at load ${describeLoad(f.rerun)}`,
       )
       err.push(tail(f.rerun.output))
       err.push('')
@@ -1042,16 +1040,16 @@ export function summarize({ code, results, red, redAlone, greenAlone, skippedDb 
 
   if (greenAlone.length > 0) {
     err.push(
-      `\n! ${greenAlone.length} gate(s) red under load, green alone (exit ${EXIT.RED_UNDER_LOAD}, not a pass).\n` +
-        '! Each was timeout-shaped and red with the load above the CPU count before it\n' +
-        '! started, then green re-run by itself. Investigate before you quote it: open\n' +
+      `\n! ${greenAlone.length} gate(s) timed out, green alone (exit ${EXIT.RED_UNDER_LOAD}, not a pass).\n` +
+        '! Each was timeout-shaped and red, then green re-run by itself; the loads are\n' +
+        '! evidence, not the reason it was re-run. Investigate before you quote it: open\n' +
         '! the timed-out test and look for work inside the timed body that is slow only\n' +
         '! under contention. #4126 and #4134 were real defects of this shape (a cold\n' +
         '! import inside a timed test). If it is not plainly load, file an issue and\n' +
         '! link it next to this list in the PR body. Do not re-run until green.',
     )
     for (const g of greenAlone) {
-      err.push(`!   ${g.command}  red under load ${describeLoad(g)}, green alone at load ${describeLoad(g.rerun)}`)
+      err.push(`!   ${g.command}  red at load ${describeLoad(g)}, green alone at load ${describeLoad(g.rerun)}`)
       for (const line of timeoutEvidence(g.output)) err.push(`!       ${line}`)
     }
   }
@@ -1128,13 +1126,13 @@ export function usage() {
     '  --base=<ref>      diff against <ref> instead of origin/dev',
     '  --verify-ruleset  additionally compare against the live branch ruleset (needs gh)',
     '',
-    'Static gates run first. A red that is timeout-shaped while the load average is',
-    'above the CPU count is re-run alone after the last gate.',
+    'Static gates run first. A timeout-shaped red is re-run alone after the last gate,',
+    'at any load; the load before each run is printed as evidence only.',
     '',
     `exit ${EXIT.GREEN}  every gate green`,
     `exit ${EXIT.RED}  a gate is red`,
     `exit ${EXIT.USAGE}  a usage error: an unknown argument, or --base= with no ref`,
-    `exit ${EXIT.RED_UNDER_LOAD}  the only reds were red under load and green alone. Not a pass, and not`,
+    `exit ${EXIT.RED_UNDER_LOAD}  the only reds timed out and were green alone. Not a pass, and not`,
     '        a reason to re-run until green: open the timed-out test and look for work in',
     '        the timed body that is slow only under contention (#4126 and #4134 were real',
     '        defects of this shape). If it is not plainly load, file an issue and link it',
@@ -1209,7 +1207,7 @@ async function main(argv) {
     onStart: (gate, phase) => {
       if (phase === 'rerun' && !announcedRerun) {
         announcedRerun = true
-        console.log('\npreflight: re-running the load-shaped reds alone:')
+        console.log('\npreflight: re-running the timeout-shaped reds alone:')
       }
       // TTY only: `\r` does not overwrite in a pipe, so a redirected run would
       // carry a duplicate half-line for every gate.

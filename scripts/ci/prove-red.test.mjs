@@ -30,6 +30,7 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  statSync,
   symlinkSync,
   unlinkSync,
   writeFileSync,
@@ -45,6 +46,7 @@ import {
   classify,
   closeoutTable,
   FAMILIES,
+  groupAlive,
   inferRunner,
   normalizeNodeEvents,
   normalizePlaywrightJson,
@@ -355,7 +357,7 @@ describe('census selection', () => {
         '| # | Guard file | Mutation | Baseline → mutant |',
         '|---|---|---|---|',
         '| M1 | `t7.test.mjs` | invert t7 (`src/guard.mjs`) | 2 → **1 failed**: caught |',
-        '| M2 | `t6.test.mjs` | invert t6 (`src/guard.mjs`) | 2 → **2 passed: survivor** — diagnosis required (weak test / dead code / not load-bearing at the tested condition / shadowed) |',
+        '| M2 | `t6.test.mjs` | invert t6 (`src/guard.mjs`) | 2 → **2 passed: survivor** — diagnosis required (weak test / dead code / not load-bearing at the tested condition / shadowed — caught by a test outside this file) |',
         '| M3 | `t5.test.mjs` | invert t5 (`src/guard.mjs`) | 2 → **1 failed: shadowed** — red only in t5 accepts one |',
         '| M4 | `t4.test.mjs` | invert t4 (`src/guard.mjs`) | 2 → **mutation-red** (the mutant run reported 1 tests, the baseline 2) — not counted; fix the mutation and re-run |',
         '| M5 | `t3.test.mjs` | invert t3 (`src/guard.mjs`) | **refused**: the unmutated test is red |',
@@ -419,9 +421,10 @@ mark('ran:${prefix}')
 describe('${prefix}', () => {
   test('refuses zero', async () => {
     if (allowed(0)) {
-      if (process.env.PR_FIXTURE_HANG) { mark('mutant-started'); await new Promise((r) => setTimeout(r, 4000)) }
+      if (process.env.PR_FIXTURE_HANG) { mark('mutant-started'); await new Promise((r) => setTimeout(r, Number(process.env.PR_FIXTURE_HANG))) }
       if (process.env.PR_FIXTURE_STAGE) execFileSync('git', ['add', '-A'])
       if (process.env.PR_FIXTURE_CORRUPT) writeFileSync(process.env.PR_FIXTURE_CORRUPT, 'corrupted\\n')
+      if (process.env.PR_FIXTURE_HANDEDIT) writeFileSync('src/guard.mjs', 'hand edit\\n')
     } else if (process.env.PR_FIXTURE_TOUCH) writeFileSync(process.env.PR_FIXTURE_TOUCH, 'written by the baseline run\\n')
     assert.equal(allowed(0), false)
   })
@@ -429,7 +432,7 @@ describe('${prefix}', () => {
 })
 `
 
-function makeRepo(extraFiles = {}, { worktree = true } = {}) {
+function makeRepo(extraFiles = {}, { worktree = true, modes = {}, symlinks = {} } = {}) {
   const dir = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'prove-red-')))
   tmpRoots.push(dir)
   const main = path.join(dir, 'main')
@@ -438,6 +441,8 @@ function makeRepo(extraFiles = {}, { worktree = true } = {}) {
     mkdirSync(path.dirname(path.join(main, f)), { recursive: true })
     writeFileSync(path.join(main, f), c)
   }
+  for (const [f, m] of Object.entries(modes)) chmodSync(path.join(main, f), m)
+  for (const [f, target] of Object.entries(symlinks)) symlinkSync(target, path.join(main, f))
   g(main, 'init', '-q', '-b', 'main')
   g(main, 'config', 'user.email', 'prove-red@example.com')
   g(main, 'config', 'user.name', 'prove-red')
@@ -472,7 +477,7 @@ const run = (repo, args, opts) => start(repo, args, opts).done
 const ranCount = (repo) => (existsSync(repo.log) ? readFileSync(repo.log, 'utf8').split('\n').filter((l) => l.startsWith('ran:')).length : 0)
 const fileOf = (repo, f = 'src/guard.mjs') => readFileSync(path.join(repo.wt, f), 'utf8')
 const result = (repo, mode = 'mutate') => JSON.parse(readFileSync(path.join(repo.scratch, `prove-red-1-${mode}.json`), 'utf8'))
-async function waitFor(pred, what, ms = 20000) {
+async function waitFor(pred, what, ms = 60000) {
   const t0 = Date.now()
   while (!pred()) {
     if (Date.now() - t0 > ms) throw new Error(`timed out waiting for ${what}`)
@@ -495,6 +500,7 @@ const log = process.env.PR_FIXTURE_BUILD_LOG
 const n = log && existsSync(log) ? readFileSync(log, 'utf8').split('\\n').filter(Boolean).length : 0
 if (log) appendFileSync(log, createHash('sha256').update(src).digest('hex') + '\\n')
 if (process.env.PR_FIXTURE_FAIL_BUILD_AT === String(n + 1)) process.exit(1)
+if (process.env.PR_FIXTURE_BUILD_SLEEP && String(src).includes('>=')) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Number(process.env.PR_FIXTURE_BUILD_SLEEP))
 mkdirSync('dist', { recursive: true })
 writeFileSync('dist/index.mjs', src)
 `,
@@ -509,6 +515,7 @@ const WORKSPACE_CELLS = [
   baseCell({ id: 'B1', guard: 'twice doubles', test: 'packages/b/b.test.mjs', file: 'packages/b/src/b.mjs', edits: [{ find: 'n * 2', replace: 'n * 3' }], expect_red: ['twice doubles'] }),
 ]
 
+describe('end to end in throwaway repos', { concurrency: true }, () => {
 describe('end to end, one guardrail per incident (#4234)', { concurrency: 4 }, () => {
   test('control: a clean cell is caught, restored, and leaves nothing behind', async () => {
     const repo = makeRepo()
@@ -525,20 +532,23 @@ describe('end to end, one guardrail per incident (#4234)', { concurrency: 4 }, (
   })
 
   test('incident 1: a tree with uncommitted, untracked or staged changes is refused before any cell', async () => {
-    for (const [label, dirty] of [
+    const variants = [
       ['modified', (wt) => writeFileSync(path.join(wt, 'guard.test.mjs'), fixtureTest() + '// edit\n')],
       ['untracked', (wt) => writeFileSync(path.join(wt, 'notes.txt'), 'x')],
       ['staged', (wt) => (writeFileSync(path.join(wt, 'notes.txt'), 'x'), g(wt, 'add', 'notes.txt'))],
-    ]) {
-      const repo = makeRepo()
-      writeCells(repo, [baseCell()])
-      dirty(repo.wt)
-      const r = await run(repo, MUTATE)
-      assert.equal(r.code, 2, `${label}: ${r.out}`)
-      assert.match(r.out, /not clean and committed/, label)
-      assert.equal(ranCount(repo), 0, `${label}: no test ran`)
-      assert.equal(fileOf(repo), GUARD_SRC)
-    }
+    ]
+    await Promise.all(
+      variants.map(async ([label, dirty]) => {
+        const repo = makeRepo()
+        writeCells(repo, [baseCell()])
+        dirty(repo.wt)
+        const r = await run(repo, MUTATE)
+        assert.equal(r.code, 2, `${label}: ${r.out}`)
+        assert.match(r.out, /not clean and committed/, label)
+        assert.equal(ranCount(repo), 0, `${label}: no test ran`)
+        assert.equal(fileOf(repo), GUARD_SRC)
+      }),
+    )
   })
 
   test('incident 1: a mutation staged during the run fails the restore check and exits 3', async () => {
@@ -551,6 +561,39 @@ describe('end to end, one guardrail per incident (#4234)', { concurrency: 4 }, (
     assert.equal(g(repo.wt, 'diff', '--cached', '--name-only').trim(), 'src/guard.mjs', 'the staged mutant is reported, not hidden')
     assert.equal(g(repo.wt, 'rev-list', '--count', 'HEAD').trim(), '1', 'nothing was committed')
     assert.ok(existsSync(repo.journal), 'the journal is kept')
+    const cell = result(repo).cells[0]
+    assert.equal(cell.class, 'caught', 'the measured class survives the failed restore')
+    assert.match(cell.restoreFailed, /index holds a staged change \(src\/guard\.mjs\)/)
+  })
+
+  test('a file edited by someone else during the run is not overwritten by the restore — exit 3, edit kept', async () => {
+    const repo = makeRepo()
+    writeCells(repo, [baseCell()])
+    const r = await run(repo, MUTATE, { env: { PR_FIXTURE_HANDEDIT: '1' } })
+    assert.equal(r.code, 3, r.out)
+    assert.match(r.out, /changed during the run — it matches neither the mutant prove-red wrote nor the original.*nothing was overwritten/s)
+    assert.equal(fileOf(repo), 'hand edit\n')
+    assert.ok(existsSync(repo.journal), 'the journal is kept')
+  })
+
+  test('the restore keeps the file mode (a 100755 file stays executable)', async () => {
+    const repo = makeRepo({}, { modes: { 'src/guard.mjs': 0o755 } })
+    assert.match(g(repo.wt, 'ls-files', '-s', 'src/guard.mjs'), /^100755 /)
+    writeCells(repo, [baseCell()])
+    const r = await run(repo, MUTATE)
+    assert.equal(r.code, 0, r.out)
+    assert.equal(statSync(path.join(repo.wt, 'src/guard.mjs')).mode & 0o777, 0o755)
+    assert.equal(g(repo.wt, 'status', '--porcelain'), '')
+  })
+
+  test('a symlinked file and a file that is not valid UTF-8 are refused before any run', async () => {
+    const repo = makeRepo({ 'src/latin1.mjs': Buffer.concat([Buffer.from('export const s = "'), Buffer.from([0xff]), Buffer.from('"\n')]) }, { symlinks: { 'src/link.mjs': 'guard.mjs' } })
+    writeCells(repo, [baseCell({ file: 'src/link.mjs' }), baseCell({ id: 'C2', file: 'src/latin1.mjs', edits: [{ find: 'export const s', replace: 'export let s' }] })])
+    const r = await run(repo, MUTATE)
+    assert.equal(r.code, 2, r.out)
+    assert.match(r.out, /C1: file src\/link\.mjs is a symlink/)
+    assert.match(r.out, /C2: file src\/latin1\.mjs is not valid UTF-8/)
+    assert.equal(ranCount(repo), 0)
   })
 
   test('incident 2: a find that occurs twice is refused before any run', async () => {
@@ -583,7 +626,12 @@ describe('end to end, one guardrail per incident (#4234)', { concurrency: 4 }, (
     assert.equal(r.code, 0, r.out)
     assert.deepEqual(result(repo).cells.map((c) => [c.id, c.class]), [['A1', 'caught'], ['B1', 'caught']])
     assert.match(r.out, /build: npm run build -w packages\/a \(mutant\).*build: npm run build -w packages\/a \(restored\)/s)
-    assert.deepEqual(readFileSync(buildLog, 'utf8').split('\n').filter(Boolean), [sha(A_SRC.replace('n > 0', 'n >= 0')), sha(A_SRC)], 'built the mutant, then the original — and nothing for B1')
+    assert.deepEqual(
+      readFileSync(buildLog, 'utf8').split('\n').filter(Boolean),
+      [sha(A_SRC), sha(A_SRC.replace('n > 0', 'n >= 0')), sha(A_SRC)],
+      'built the original for the baseline, the mutant, then the original again — and nothing for B1',
+    )
+    assert.match(r.out, /build: npm run build -w packages\/a \(baseline\).*build: npm run build -w packages\/a \(mutant\)/s)
     assert.equal(readFileSync(dist, 'utf8'), A_SRC)
   })
 
@@ -592,7 +640,7 @@ describe('end to end, one guardrail per incident (#4234)', { concurrency: 4 }, (
     execFileSync('npm', ['run', 'build', '-w', 'packages/a'], { cwd: repo.wt, env: cleanEnv({}), stdio: 'ignore' })
     writeCells(repo, [WORKSPACE_CELLS[0]])
     const buildLog = path.join(repo.dir, 'build.log')
-    const r = await run(repo, MUTATE, { env: { PR_FIXTURE_BUILD_LOG: buildLog, PR_FIXTURE_FAIL_BUILD_AT: '2' } })
+    const r = await run(repo, MUTATE, { env: { PR_FIXTURE_BUILD_LOG: buildLog, PR_FIXTURE_FAIL_BUILD_AT: '3' } })
     assert.equal(r.code, 3, r.out)
     assert.match(r.out, /post-restore rebuild of packages\/a failed.*dist\/ may still hold the mutant build/s)
     assert.equal(JSON.parse(readFileSync(repo.journal, 'utf8')).buildDirty, true)
@@ -616,6 +664,31 @@ describe('end to end, one guardrail per incident (#4234)', { concurrency: 4 }, (
     assert.ok(!existsSync(path.join(repo.scratch, 'guard.mjs.1.author.C1.bak')), 'no backup was taken')
     assert.equal(ranCount(repo), 1, 'the mutant never ran')
     assert.equal(fileOf(repo), GUARD_SRC)
+  })
+
+  test('incident 4: a stale dist cannot make a comment-only mutation read as caught — the baseline reads a fresh build', async () => {
+    const repo = makeRepo(WORKSPACE)
+    execFileSync('npm', ['run', 'build', '-w', 'packages/a'], { cwd: repo.wt, env: cleanEnv({}), stdio: 'ignore' })
+    // The source then breaks the guard and is committed; dist/ still holds the good build.
+    writeFileSync(path.join(repo.wt, 'packages/a/src/index.mjs'), A_SRC.replace('n > 0', 'n >= 0'))
+    g(repo.wt, 'commit', '-qam', 'break the guard without rebuilding')
+    writeCells(repo, [{ ...WORKSPACE_CELLS[0], edits: [{ find: 'export const limit', replace: '// comment only\nexport const limit' }] }])
+    const r = await run(repo, MUTATE)
+    assert.equal(r.code, 1, r.out)
+    const c = result(repo).cells[0]
+    assert.equal(c.class, 'refused', `a fresh baseline build exposes the broken source: ${c.detail}`)
+    assert.match(c.detail, /unmutated test is red/)
+  })
+
+  test('incident 4: a package that does not build unmutated refuses the cell before its baseline', async () => {
+    const repo = makeRepo(WORKSPACE)
+    writeCells(repo, [WORKSPACE_CELLS[0]])
+    const r = await run(repo, MUTATE, { env: { PR_FIXTURE_BUILD_LOG: path.join(repo.dir, 'build.log'), PR_FIXTURE_FAIL_BUILD_AT: '1' } })
+    assert.equal(r.code, 1, r.out)
+    const c = result(repo).cells[0]
+    assert.equal(c.class, 'refused')
+    assert.match(c.detail, /packages\/a does not build unmutated/)
+    assert.equal(c.backup, undefined, 'nothing was mutated')
   })
 
   test('incident 5: a mutation that breaks compilation is mutation-red, not caught', async () => {
@@ -730,10 +803,12 @@ describe('end to end, one guardrail per incident (#4234)', { concurrency: 4 }, (
     const repo = makeRepo()
     writeCells(repo, [baseCell()])
     writeFileSync(repo.lock, JSON.stringify({ pid: process.pid }))
+    writeFileSync(repo.journal, '{}')
     let r = await run(repo, MUTATE)
     assert.equal(r.code, 2, r.out)
-    assert.match(r.out, new RegExp(`another prove-red run \\(pid ${process.pid}\\) holds`))
+    assert.match(r.out, new RegExp(`another prove-red run \\(pid ${process.pid}\\) holds`), 'the lock is taken before the journal is read')
     unlinkSync(repo.lock)
+    unlinkSync(repo.journal)
     r = await run(repo, MUTATE, { env: { SCRATCH: '' } })
     assert.equal(r.code, 2, r.out)
     assert.match(r.out, /SCRATCH is not set/)
@@ -752,11 +827,15 @@ describe('signals and recover', { concurrency: 4 }, () => {
     test(`${sig} mid-cell restores the file and exits ${code}`, async () => {
       const repo = makeRepo()
       writeCells(repo, [baseCell(), baseCell({ id: 'C2' })])
-      const p = start(repo, MUTATE, { env: { PR_FIXTURE_HANG: '1' } })
+      // The mutant test would hang for 60 s: the run ending well before that
+      // proves the signal reached the test's whole process group.
+      const p = start(repo, MUTATE, { env: { PR_FIXTURE_HANG: '60000' } })
       await waitFor(() => existsSync(repo.log) && readFileSync(repo.log, 'utf8').includes('mutant-started'), 'the mutant run')
       assert.equal(fileOf(repo), GUARD_SRC.replace('n > 0', 'n >= 0'), 'the mutant is in place when the signal lands')
+      const t0 = Date.now()
       p.child.kill(sig)
       const r = await p.done
+      assert.ok(Date.now() - t0 < 30000, `the run took ${Date.now() - t0} ms to stop: the hanging test was not killed`)
       assert.equal(r.code, code, r.out)
       assert.equal(fileOf(repo), GUARD_SRC)
       assert.equal(g(repo.wt, 'status', '--porcelain'), '')
@@ -765,31 +844,65 @@ describe('signals and recover', { concurrency: 4 }, () => {
     })
   }
 
-  async function killedMidCell() {
-    const repo = makeRepo()
+  async function killedMidCell(opts) {
+    const repo = makeRepo({}, opts)
     writeCells(repo, [baseCell()])
-    const p = start(repo, MUTATE, { env: { PR_FIXTURE_HANG: '1' } })
+    const p = start(repo, MUTATE, { env: { PR_FIXTURE_HANG: '3000' } })
     await waitFor(() => existsSync(repo.log) && readFileSync(repo.log, 'utf8').includes('mutant-started'), 'the mutant run')
     p.child.kill('SIGKILL')
     const r = await p.done
     assert.equal(r.signal, 'SIGKILL')
     assert.equal(fileOf(repo), GUARD_SRC.replace('n > 0', 'n >= 0'), 'kill -9 left the mutant')
     assert.ok(existsSync(repo.journal))
+    const pg = JSON.parse(readFileSync(repo.journal, 'utf8')).childPgid
+    assert.ok(Number.isInteger(pg), 'the in-flight test run is journalled by its process group')
+    await waitFor(() => !groupAlive(pg), 'the orphaned test run to finish')
     return repo
   }
+
+  test('kill -9 during the mutant build: recover refuses while the orphaned build runs, then restores source and build', async () => {
+    const repo = makeRepo(WORKSPACE)
+    execFileSync('npm', ['run', 'build', '-w', 'packages/a'], { cwd: repo.wt, env: cleanEnv({}), stdio: 'ignore' })
+    writeCells(repo, [WORKSPACE_CELLS[0]])
+    const buildLog = path.join(repo.dir, 'build.log')
+    const env = { PR_FIXTURE_BUILD_LOG: buildLog, PR_FIXTURE_BUILD_SLEEP: '8000' }
+    const p = start(repo, MUTATE, { env })
+    await waitFor(() => existsSync(buildLog) && readFileSync(buildLog, 'utf8').split('\n').filter(Boolean).length >= 2, 'the mutant build')
+    p.child.kill('SIGKILL')
+    await p.done
+    const pg = JSON.parse(readFileSync(repo.journal, 'utf8')).childPgid
+    assert.ok(Number.isInteger(pg) && groupAlive(pg), `the orphaned build is still running: ${readFileSync(repo.journal, 'utf8')} ${readFileSync(buildLog, 'utf8')}`)
+    const early = await run(repo, ['recover'], { env })
+    assert.equal(early.code, 3, early.out)
+    assert.match(early.out, new RegExp(`process group ${pg} from the killed run is still running`))
+    assert.equal(readFileSync(path.join(repo.wt, 'packages/a/src/index.mjs'), 'utf8'), A_SRC.replace('n > 0', 'n >= 0'), 'nothing was restored')
+    await waitFor(() => !groupAlive(pg), 'the orphaned build to finish')
+    const rec = await run(repo, ['recover'], { env })
+    assert.equal(rec.code, 0, rec.out)
+    assert.equal(readFileSync(path.join(repo.wt, 'packages/a/src/index.mjs'), 'utf8'), A_SRC)
+    assert.equal(readFileSync(path.join(repo.wt, 'packages/a/dist/index.mjs'), 'utf8'), A_SRC, 'the build is the original again')
+  })
 
   test('kill -9 mid-cell: the next run refuses, recover restores from the journal and verifies the sha256', async () => {
     const repo = await killedMidCell()
     const again = await run(repo, MUTATE)
     assert.equal(again.code, 2, again.out)
     assert.match(again.out, /left .*prove-red\.journal\.json/)
+    assert.match(again.out, /removed a stale lock/, 'the next run takes the lock first, breaking the dead one')
     const rec = await run(repo, ['recover'])
     assert.equal(rec.code, 0, rec.out)
-    assert.match(rec.out, /removed a stale lock/)
     assert.match(rec.out, /restored src\/guard\.mjs from .*\(sha256 verified\)/)
     assert.equal(fileOf(repo), GUARD_SRC)
     assert.ok(!existsSync(repo.journal))
     assert.equal((await run(repo, ['recover'])).code, 0, 'a second recover has nothing to do')
+  })
+
+  test('recover keeps the file mode of a 100755 file', async () => {
+    const repo = await killedMidCell({ modes: { 'src/guard.mjs': 0o755 } })
+    const rec = await run(repo, ['recover'])
+    assert.equal(rec.code, 0, rec.out)
+    assert.equal(statSync(path.join(repo.wt, 'src/guard.mjs')).mode & 0o777, 0o755)
+    assert.equal(g(repo.wt, 'status', '--porcelain'), '')
   })
 
   test('recover with a journal whose backup is gone exits 3 and restores nothing', async () => {
@@ -827,7 +940,8 @@ describe('verify: the reviewer\'s own root and own cells, failing closed', { con
     const repo = reviewRepo()
     assert.equal((await run(repo, MUTATE)).code, 0)
     writeCells(repo, [reviewerCell], 'prove-red-1-review-cells.json')
-    const r = await run(repo, VERIFY(repo), { cwd: repo.review })
+    const head = g(repo.review, 'rev-parse', 'HEAD').trim()
+    const r = await run(repo, [...VERIFY(repo), '--expect-head', head], { cwd: repo.review })
     assert.equal(r.code, 0, r.out)
     assert.deepEqual(result(repo, 'verify').cells.map((c) => [c.id, c.origin, c.class]), [['C1', 'author', 'caught'], ['R1', 'review', 'caught']])
     assert.match(r.out, /\| C1 \|.*caught: 1 of 2 red \(guard > refuses zero\) @ `[0-9a-f]+` \| prove-red verify: caught.* \| reproduced \|/)
@@ -860,6 +974,22 @@ describe('verify: the reviewer\'s own root and own cells, failing closed', { con
       assert.match(r.out, expected, label)
       assert.equal(ranCount(repo), 0, `${label}: nothing ran`)
     }
+  })
+
+  test('verify refuses a HEAD other than --expect-head, and an author result produced in this same root', async () => {
+    const repo = reviewRepo()
+    writeCells(repo, [reviewerCell], 'prove-red-1-review-cells.json')
+    g(repo.main, 'commit', '-q', '--allow-empty', '-m', 'another commit')
+    const other = g(repo.main, 'rev-parse', 'HEAD').trim()
+    let r = await run(repo, [...VERIFY(repo), '--expect-head', other], { cwd: repo.review })
+    assert.equal(r.code, 2, r.out)
+    assert.match(r.out, /not the --expect-head/)
+    assert.equal((await run(repo, MUTATE, { cwd: repo.review })).code, 0, 'the author ran mutate in the review root')
+    const before = ranCount(repo)
+    r = await run(repo, VERIFY(repo), { cwd: repo.review })
+    assert.equal(r.code, 2, r.out)
+    assert.match(r.out, /was produced in this same root/)
+    assert.equal(ranCount(repo), before, 'nothing ran')
   })
 
   test('verify refuses the builder\'s own tree and a missing --builder', async () => {
@@ -899,4 +1029,5 @@ describe('census end to end', () => {
     assert.match(r.out, /7 caught, 0 survived, 0 shadowed, 0 mutation-red, 0 refused, 0 not run\./)
     assert.match(r.out, /Out of budget, not run: X2, P3\./)
   })
+})
 })

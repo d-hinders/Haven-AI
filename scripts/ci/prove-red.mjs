@@ -39,8 +39,10 @@
 //      packages into another checkout
 //
 // Exit codes: 0 every cell caught (census: every selected cell ran);
-// 1 a cell was not caught, or was refused at its baseline; 2 refused before
-// anything was mutated; 3 a restore, rebuild or clean-tree check failed — the
+// 1 a cell was not caught, or was refused at its baseline; 2 refused with
+// nothing left mutated — before any cell, or after earlier cells ran and were
+// restored (a later baseline wrote into the tree, an unexpected error with no
+// journal pending); 3 a restore, rebuild or clean-tree check failed — the
 // journal is kept, run `recover`; 128+n interrupted by signal n and restored.
 //
 // Everything that decides (schema, edits, classification, census selection,
@@ -50,9 +52,11 @@
 import { execFileSync, spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import {
+  chmodSync,
   closeSync,
   copyFileSync,
   existsSync,
+  linkSync,
   lstatSync,
   openSync,
   readFileSync,
@@ -496,7 +500,7 @@ export function censusTable(selection, resultsById, { head, declared }) {
       counts[r.class] = (counts[r.class] ?? 0) + 1
       const b = r.baseline?.total ?? '?'
       if (r.class === 'caught') cell = `${b} → **${r.failed} failed**: caught`
-      else if (r.class === 'survived') cell = `${b} → **${r.total} passed: survivor** — diagnosis required (weak test / dead code / not load-bearing at the tested condition / shadowed)`
+      else if (r.class === 'survived') cell = `${b} → **${r.total} passed: survivor** — diagnosis required (weak test / dead code / not load-bearing at the tested condition / shadowed — caught by a test outside this file)`
       else if (r.class === 'shadowed') cell = `${b} → **${r.failed} failed: shadowed** — ${r.detail}`
       else if (r.class === 'mutation-red') cell = `${b} → **mutation-red** (${r.detail}) — not counted; fix the mutation and re-run`
       else cell = `**${r.class}**: ${r.detail}`
@@ -598,7 +602,7 @@ function pidAlive(pid) {
 
 /** O_EXCL pid lock at `<git-dir>/prove-red.lock`; a lock whose pid is dead is broken and reported. */
 function acquireLock(lockPath) {
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
       const fd = openSync(lockPath, 'wx')
       writeSync(fd, JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }))
@@ -613,8 +617,33 @@ function acquireLock(lockPath) {
         throw refuse(`${lockPath} exists but is unreadable; if no prove-red run is active in this tree, delete it`)
       }
       if (holder && Number.isInteger(holder.pid) && pidAlive(holder.pid)) throw refuse(`another prove-red run (pid ${holder.pid}) holds ${lockPath}`)
+      // Break it race-free: whoever wins the atomic rename owns the stale file,
+      // then re-reads what it actually moved. If a live run took the lock
+      // between our read and the rename, put it back (link refuses to clobber).
+      const token = `${lockPath}.stale.${process.pid}.${Date.now()}`
+      try {
+        renameSync(lockPath, token)
+      } catch (err) {
+        if (err.code === 'ENOENT') continue
+        throw err
+      }
+      let moved = null
+      try {
+        moved = JSON.parse(readFileSync(token, 'utf8'))
+      } catch {
+        // unreadable: treat as stale
+      }
+      if (moved && Number.isInteger(moved.pid) && pidAlive(moved.pid)) {
+        try {
+          linkSync(token, lockPath)
+        } catch {
+          // someone else holds a new lock now; either way we do not
+        }
+        rmSync(token, { force: true })
+        throw refuse(`another prove-red run (pid ${moved.pid}) holds ${lockPath}`)
+      }
+      rmSync(token, { force: true })
       say(`prove-red: removed a stale lock left by pid ${holder?.pid ?? '?'}, which is no longer running`)
-      rmSync(lockPath, { force: true })
     }
   }
   throw refuse(`could not take ${lockPath}`)
@@ -697,10 +726,10 @@ function prepare(ctx, cells) {
   } catch {
     throw refuse('the tree has no commit; commit the assertions under test first')
   }
-  if (existsSync(ctx.journalPath))
-    throw refuse(`a previous prove-red run left ${ctx.journalPath} (a mutant source or build may still be in place); run \`node scripts/ci/prove-red.mjs recover\` first`)
   acquireLock(ctx.lockPath)
   ctx.lockHeld = true
+  if (existsSync(ctx.journalPath))
+    throw refuse(`a previous prove-red run left ${ctx.journalPath} (a mutant source or build may still be in place); run \`node scripts/ci/prove-red.mjs recover\` first`)
   const nm = nodeModulesProblems(root)
   if (nm.length) throw refuse(`node_modules resolves outside this tree:\n  ${nm.join('\n  ')}`)
   const dirty = porcelain(root)
@@ -720,7 +749,21 @@ function prepare(ctx, cells) {
       if (!bin) errors.push(`${cell.id}: no ${runner} binary under node_modules/.bin; run \`npm ci\` in this tree`)
     }
     if (!tracked.has(cell.file)) continue
-    const applied = applyEdits(readFileSync(path.join(root, cell.file), 'utf8'), cell)
+    const abs = path.join(root, cell.file)
+    if (lstatSync(abs).isSymbolicLink()) {
+      errors.push(`${cell.id}: file ${cell.file} is a symlink; mutate the file it points at, inside the tree, by its own path`)
+      continue
+    }
+    if (!inside(realpathSync(abs), root)) {
+      errors.push(`${cell.id}: file ${cell.file} resolves to ${realpathSync(abs)}, outside this tree`)
+      continue
+    }
+    const bytes = readFileSync(abs)
+    if (!Buffer.from(bytes.toString('utf8'), 'utf8').equals(bytes)) {
+      errors.push(`${cell.id}: file ${cell.file} is not valid UTF-8, so an edit would rewrite bytes the cell never named`)
+      continue
+    }
+    const applied = applyEdits(bytes.toString('utf8'), cell)
     if (!applied.ok) errors.push(`${cell.id}: ${applied.error}`)
     const backup = backupPath(ctx, cell)
     if (existsSync(backup)) errors.push(`${cell.id}: a backup from an earlier run is still at ${backup}; inspect it and delete it before re-running`)
@@ -742,13 +785,37 @@ function childEnv(extra = {}) {
   return env
 }
 
+/** Signal a child's whole process group (children run detached, as group leaders). */
+function killGroup(pid, sig) {
+  try {
+    process.kill(-pid, sig)
+  } catch {
+    // already gone
+  }
+}
+
+export function groupAlive(pgid) {
+  try {
+    process.kill(-pgid, 0)
+    return true
+  } catch (e) {
+    return e.code === 'EPERM'
+  }
+}
+
+/**
+ * Run a child in its own process group, so a signal (or the timeout) reaches
+ * everything it spawned — `npm run build` forks the real build. While a cell is
+ * in flight the group id is journalled: after a kill -9 of prove-red the group
+ * may still be writing a mutant build, and `recover` refuses until it is gone.
+ */
 function spawnLogged(ctx, cmd, args, { cwd, env, logFile, timeoutMs }) {
   return new Promise((resolve) => {
     const fd = openSync(logFile, 'w')
     let timedOut = false
     let child
     try {
-      child = spawn(cmd, args, { cwd, env, stdio: ['ignore', fd, fd] })
+      child = spawn(cmd, args, { cwd, env, stdio: ['ignore', fd, fd], detached: true })
     } catch (e) {
       closeSync(fd)
       resolve({ code: null, signal: null, timedOut, error: e.message })
@@ -756,19 +823,31 @@ function spawnLogged(ctx, cmd, args, { cwd, env, logFile, timeoutMs }) {
     }
     closeSync(fd)
     ctx.child = child
-    const timer = setTimeout(() => {
-      timedOut = true
-      child.kill('SIGTERM')
-      setTimeout(() => child.kill('SIGKILL'), 5000).unref()
-    }, timeoutMs)
-    child.on('error', (e) => {
+    if (ctx.current && child.pid) {
+      ctx.current.journal.childPgid = child.pid
+      writeJournal(ctx, ctx.current.journal)
+    }
+    const done = () => {
       clearTimeout(timer)
       ctx.child = null
+      if (ctx.current && ctx.current.journal.childPgid === child.pid) {
+        delete ctx.current.journal.childPgid
+        writeJournal(ctx, ctx.current.journal)
+      }
+    }
+    const timer = setTimeout(() => {
+      timedOut = true
+      killGroup(child.pid, 'SIGTERM')
+      setTimeout(() => killGroup(child.pid, 'SIGKILL'), 5000).unref()
+    }, timeoutMs)
+    child.on('error', (e) => {
+      done()
       resolve({ code: null, signal: null, timedOut, error: e.message })
     })
     child.on('close', (code, signal) => {
-      clearTimeout(timer)
-      ctx.child = null
+      // The leader exited; anything it left behind in its group goes with it.
+      killGroup(child.pid, 'SIGTERM')
+      done()
       resolve({ code, signal, timedOut })
     })
   })
@@ -831,6 +910,20 @@ const summarize = (r) => ({ total: r.tests.length, passed: r.tests.filter((t) =>
 
 async function runCell(ctx, cell, origin) {
   const res = { cell, origin, class: null, detail: null, red: [], total: 0, failed: 0 }
+  const pkg = rebuildPackage(cell)
+  if (pkg) {
+    // The baseline must read a build of the UNMUTATED source: a stale dist/
+    // can pass the baseline while a fresh build of any mutant — even a
+    // comment-only one — goes red, which would read as caught.
+    ctx.phase = 'build-baseline'
+    const b = await build(ctx, pkg, 'baseline')
+    if (ctx.interrupted) return { ...res, class: 'interrupted', detail: 'interrupted during the baseline build; nothing was mutated' }
+    if (!b.ok) {
+      const detail = `packages/${pkg} does not build unmutated (see ${b.logFile}); a cell needs a fresh baseline build`
+      say(`[${cell.id}] refused: ${detail}`)
+      return { ...res, class: 'refused', detail }
+    }
+  }
   say(`[${cell.id}] baseline: ${cell.test} (${inferRunner(cell)})`)
   ctx.phase = 'baseline'
   const baseline = await runTest(ctx, cell, 'baseline')
@@ -859,7 +952,7 @@ async function runCell(ctx, cell, origin) {
     rmSync(backup, { force: true })
     throw refuse(`${cell.id}: the backup at ${backup} did not verify; nothing was mutated`)
   }
-  const pkg = rebuildPackage(cell)
+  const fileMode = statSync(abs).mode & 0o7777
   const journal = {
     version: 1,
     pid: process.pid,
@@ -872,6 +965,7 @@ async function runCell(ctx, cell, origin) {
     backup,
     origSha,
     mutantSha,
+    fileMode,
     rebuildPackage: pkg,
     phase: 'mutated',
     buildDirty: false,
@@ -879,7 +973,7 @@ async function runCell(ctx, cell, origin) {
   // The journal is written BEFORE the mutant, so a kill between the two leaves
   // a journal whose file still matches origSha — `recover` restores nothing.
   writeJournal(ctx, journal)
-  ctx.current = { cell, abs, backup, origSha, pkg, journal }
+  ctx.current = { cell, abs, backup, origSha, mutantSha, fileMode, pkg, journal }
   writeFileSync(abs, mutant)
   Object.assign(res, { backup, origSha, mutantSha, rebuilt: pkg })
   try {
@@ -907,7 +1001,15 @@ async function runCell(ctx, cell, origin) {
     }
   } finally {
     ctx.phase = 'restore'
-    await restoreCurrent(ctx)
+    try {
+      await restoreCurrent(ctx)
+    } catch (e) {
+      // Keep what the cell measured; the restore failure is recorded beside it.
+      if (!res.class) Object.assign(res, { class: 'refused', detail: 'the run stopped before the cell was classified' })
+      res.restoreFailed = e.message
+      e.cellResult = res
+      throw e
+    }
   }
   say(`[${cell.id}] ${outcome(res)}`)
   return res
@@ -917,7 +1019,13 @@ async function runCell(ctx, cell, origin) {
 async function restoreCurrent(ctx) {
   const cur = ctx.current
   if (!cur) return
-  const { cell, abs, backup, origSha, pkg, journal } = cur
+  const { cell, abs, backup, origSha, mutantSha, fileMode, pkg, journal } = cur
+  const now = existsSync(abs) ? sha256File(abs) : null
+  if (now !== mutantSha && now !== origSha)
+    throw restoreFailed(
+      `${cell.id}: ${cell.file} changed during the run — it matches neither the mutant prove-red wrote nor the original (sha256 ${now ?? 'missing file'}). ` +
+        'Refused; nothing was overwritten. The journal is kept: reconcile by hand, then run recover.',
+    )
   if (!existsSync(backup) || sha256File(backup) !== origSha)
     throw restoreFailed(
       `${cell.id}: the backup ${backup} is missing or no longer matches the original's sha256, so nothing was restored and ${cell.file} still holds the mutant. ` +
@@ -925,10 +1033,12 @@ async function restoreCurrent(ctx) {
     )
   try {
     copyFileSync(backup, abs)
+    chmodSync(abs, fileMode) // the backup carries scratch's mode, not the file's (a 100755 script would lose its x bit)
   } catch (e) {
     throw restoreFailed(`${cell.id}: copying ${backup} over ${cell.file} failed (${e.code ?? e.message}); the journal is kept, run recover`)
   }
   if (sha256File(abs) !== origSha) throw restoreFailed(`${cell.id}: ${cell.file} does not match the original's sha256 after the restore; the journal is kept, run recover`)
+  if ((statSync(abs).mode & 0o7777) !== fileMode) throw restoreFailed(`${cell.id}: ${cell.file} did not get its mode ${fileMode.toString(8)} back; the journal is kept, run recover`)
   journal.phase = 'restored'
   writeJournal(ctx, journal)
   if (journal.buildDirty) {
@@ -943,14 +1053,23 @@ async function restoreCurrent(ctx) {
     writeJournal(ctx, journal)
   }
   const dirty = porcelain(ctx.root)
-  if (dirty.length)
-    throw restoreFailed(
-      `${cell.id}: the source is restored (sha256 verified) but the tree is not clean: ${dirty.join(', ')}. ` +
-        'A staged entry means the run put a change in the index (for example `git add -A`): prove-red never commits, and nothing may be committed until `git diff --cached` is inspected. The journal is kept; recover clears it once the tree is clean.',
-    )
+  if (dirty.length) throw restoreFailed(`${cell.id}: the source is restored (sha256 and mode verified) but the tree is not clean: ${dirty.join(', ')}. ${dirtyHint(ctx.root)} The journal is kept; recover clears it once the tree is clean.`)
   rmSync(backup, { force: true })
   rmSync(ctx.journalPath, { force: true })
   ctx.current = null
+}
+
+/** What a non-empty porcelain after a verified restore means, from git's own answer. */
+function dirtyHint(root) {
+  const staged = nulList(git(root, ['diff', '--cached', '--name-only', '-z']))
+  const parts = []
+  if (staged.length)
+    parts.push(`The index holds a staged change (${staged.join(', ')}) — the run put it there, for example with \`git add -A\`; prove-red never commits, and nothing may be committed until \`git diff --cached\` is inspected.`)
+  const worktree = nulList(git(root, ['diff', '--name-only', '-z']))
+  if (worktree.length) parts.push(`The working tree differs from the index (${worktree.join(', ')}) in content or mode; see \`git diff\`.`)
+  const untracked = nulList(git(root, ['ls-files', '--others', '--exclude-standard', '-z']))
+  if (untracked.length) parts.push(`Untracked files appeared (${untracked.join(', ')}).`)
+  return parts.join(' ')
 }
 
 function installSignals(ctx) {
@@ -960,7 +1079,7 @@ function installSignals(ctx) {
         ctx.interrupted = sig
         process.stderr.write(`prove-red: ${sig} received — restoring before exit; a second signal does not abort the restore\n`)
       }
-      if (ctx.child && ctx.phase !== 'build-restore') ctx.child.kill('SIGTERM')
+      if (ctx.child && ctx.phase !== 'build-restore') killGroup(ctx.child.pid, 'SIGTERM')
     })
   }
 }
@@ -995,7 +1114,12 @@ async function runAll(ctx, list) {
   ctx.results = []
   for (const { cell, origin } of list) {
     if (ctx.interrupted) break
-    ctx.results.push(await runCell(ctx, cell, origin))
+    try {
+      ctx.results.push(await runCell(ctx, cell, origin))
+    } catch (e) {
+      if (e.cellResult) ctx.results.push(e.cellResult)
+      throw e
+    }
   }
   return ctx.results
 }
@@ -1025,16 +1149,30 @@ async function modeVerify(ctx, opts) {
   const checks = evaluate(facts).checks.filter((c) => ['root-exists', 'is-repo', 'toplevel-is-root', 'registered-at-own-path', 'distinct-from-builder'].includes(c.id))
   const failed = checks.filter((c) => c.ok !== true)
   if (failed.length) throw refuse(`this is not a reviewer's own root (review-isolation): ${failed.map((c) => `${c.id}: ${c.detail}`).join('; ')}`)
-
-  prepare(ctx, [...authorCells, ...reviewCells])
-  const results = await runAll(ctx, [...authorCells.map((cell) => ({ cell, origin: 'author' })), ...reviewCells.map((cell) => ({ cell, origin: 'review' }))])
+  if (opts.expectHead) {
+    const head = git(ctx.root, ['rev-parse', 'HEAD']).trim()
+    let want = null
+    try {
+      want = git(ctx.root, ['rev-parse', '--verify', `${opts.expectHead}^{commit}`]).trim()
+    } catch {
+      throw refuse(`--expect-head ${opts.expectHead} does not name a commit in this root`)
+    }
+    if (head !== want) throw refuse(`this root's HEAD is ${head}, not the --expect-head ${want}; the verdict would describe another commit`)
+  }
   const authorById = new Map()
   const authorResult = path.join(ctx.scratch, `prove-red-${ctx.issue}-mutate.json`)
+  let authorRun = null
   try {
-    for (const c of JSON.parse(readFileSync(authorResult, 'utf8')).cells) authorById.set(c.id, c)
+    authorRun = JSON.parse(readFileSync(authorResult, 'utf8'))
   } catch {
     // no author result: the column says so
   }
+  if (authorRun?.root && authorRun.root === ctx.root)
+    throw refuse(`${authorResult} was produced in this same root (${ctx.root}); verify runs in the reviewer's own root, not where the author ran mutate`)
+  for (const c of authorRun?.cells ?? []) authorById.set(c.id, c)
+
+  prepare(ctx, [...authorCells, ...reviewCells])
+  const results = await runAll(ctx, [...authorCells.map((cell) => ({ cell, origin: 'author' })), ...reviewCells.map((cell) => ({ cell, origin: 'review' }))])
   writeResult(ctx, results)
   say('')
   say(closeoutTable(results, { mode: 'verify', head: ctx.head, authorById }))
@@ -1088,6 +1226,10 @@ async function modeRecover(ctx) {
   }
   if (j.root !== ctx.root) throw restoreFailed(`the journal belongs to ${j.root}, not ${ctx.root}; nothing was restored`)
   Object.assign(ctx, { scratch: path.dirname(j.backup), issue: j.issue, role: j.role })
+  if (Number.isInteger(j.childPgid) && groupAlive(j.childPgid))
+    throw restoreFailed(
+      `recover: process group ${j.childPgid} from the killed run is still running and may still write the mutant into the tree or its build; nothing was restored. Wait for it, or stop it with \`kill -TERM -- -${j.childPgid}\`, then run recover again.`,
+    )
   const abs = path.join(ctx.root, j.file)
   const current = existsSync(abs) ? sha256File(abs) : null
   let copy = false
@@ -1102,6 +1244,7 @@ async function modeRecover(ctx) {
     )
   if (copy) {
     copyFileSync(j.backup, abs)
+    if (Number.isInteger(j.fileMode)) chmodSync(abs, j.fileMode)
     if (sha256File(abs) !== j.origSha) throw restoreFailed(`recover: ${j.file} does not match the original's sha256 after the copy`)
     say(`recover: restored ${j.file} from ${j.backup} (sha256 verified)`)
   }
@@ -1115,7 +1258,7 @@ async function modeRecover(ctx) {
     say(`recover: rebuilt packages/${j.rebuildPackage}`)
   }
   const dirty = porcelain(ctx.root)
-  if (dirty.length) throw restoreFailed(`recover: the source is restored but the tree is not clean: ${dirty.join(', ')}; inspect \`git diff --cached\`. The journal is kept.`)
+  if (dirty.length) throw restoreFailed(`recover: the source is restored but the tree is not clean: ${dirty.join(', ')}. ${dirtyHint(ctx.root)} The journal is kept.`)
   rmSync(j.backup, { force: true })
   rmSync(ctx.journalPath, { force: true })
   say('recover: tree restored and clean; journal cleared')
@@ -1126,11 +1269,11 @@ async function modeRecover(ctx) {
 // CLI
 // ---------------------------------------------------------------------------
 
-const USAGE = `usage: node scripts/ci/prove-red.mjs <mutate|verify|census|recover> [--issue <n>] [--cells <path>] [--review-cells <path>] [--builder <tree>] [--candidates <file>] [--scratch <dir>] [--timeout <seconds>]`
+const USAGE = `usage: node scripts/ci/prove-red.mjs <mutate|verify|census|recover> [--issue <n>] [--cells <path>] [--review-cells <path>] [--builder <tree>] [--expect-head <sha>] [--candidates <file>] [--scratch <dir>] [--timeout <seconds>]`
 
 export function parseArgs(argv) {
   const opts = { mode: argv[0], timeout: 600 }
-  const takes = { '--issue': 'issue', '--cells': 'cells', '--review-cells': 'reviewCells', '--builder': 'builder', '--candidates': 'candidates', '--scratch': 'scratch', '--timeout': 'timeout' }
+  const takes = { '--expect-head': 'expectHead', '--issue': 'issue', '--cells': 'cells', '--review-cells': 'reviewCells', '--builder': 'builder', '--candidates': 'candidates', '--scratch': 'scratch', '--timeout': 'timeout' }
   for (let i = 1; i < argv.length; i += 1) {
     const key = takes[argv[i]]
     if (!key) throw new Error(`unknown argument ${argv[i]}`)
@@ -1168,7 +1311,15 @@ async function main(argv) {
     if (opts.mode === 'verify') return await modeVerify(ctx, opts)
     return await modeCensus(ctx, opts)
   } catch (e) {
-    if (!(e instanceof Stop)) throw e
+    if (!(e instanceof Stop)) {
+      const pending = ctx.journalPath && existsSync(ctx.journalPath)
+      process.stderr.write(
+        `prove-red ${opts.mode}: unexpected error — ${e.stack ?? e}\n` +
+          (pending ? `A journal is pending at ${ctx.journalPath}: run \`node scripts/ci/prove-red.mjs recover\` before any test.\n` : 'No journal is pending, so nothing is left mutated.\n'),
+      )
+      if (ctx.scratch && ctx.results.length) writeResult(ctx, ctx.results, { stopped: String(e.message ?? e), exit: pending ? EXIT.RESTORE_FAILED : EXIT.REFUSED })
+      return pending ? EXIT.RESTORE_FAILED : EXIT.REFUSED
+    }
     process.stderr.write(`prove-red ${opts.mode}: ${e.code === EXIT.REFUSED ? 'REFUSED' : 'RESTORE FAILED'} — ${e.message}\n`)
     if (ctx.scratch && ctx.results.length) writeResult(ctx, ctx.results, { stopped: e.message, exit: e.code })
     return e.code

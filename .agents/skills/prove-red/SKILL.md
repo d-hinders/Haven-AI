@@ -23,14 +23,14 @@ the cells someone writes. That is why `verify` demands a reviewer-authored file.
 ```bash
 export SCRATCH=<your session scratchpad>      # required; the runner never guesses one
 node scripts/ci/prove-red.mjs mutate  --issue <n>                          # author: run your cells
-node scripts/ci/prove-red.mjs verify  --issue <n> --builder <builder-tree>  # reviewer: author's cells + your own
+node scripts/ci/prove-red.mjs verify  --issue <n> --builder <builder-tree> --expect-head <sha>  # reviewer
 node scripts/ci/prove-red.mjs census  --issue <scan-id> --candidates <file> # quality-scan block 1
 node scripts/ci/prove-red.mjs recover                                      # after a kill or an exit 3
 ```
 
-Run it from inside the tree being mutated. `--cells <path>` and
-`--review-cells <path>` override the default cells paths below; `--timeout
-<seconds>` bounds each test run (default 600).
+Run it from inside the tree being mutated. `--scratch <dir>` stands in for
+`$SCRATCH`; `--cells <path>` and `--review-cells <path>` override the default
+cells paths below; `--timeout <seconds>` bounds each test run (default 600).
 
 ## Cells
 
@@ -69,8 +69,13 @@ precondition never refuses a reviewer over its own cells.
   [quality-scan `dimensions.md` § 1, *Budget*](../quality-scan/references/dimensions.md)
   (`probe-second-copy`, `probe-count-only`), or `other`. `census`, probes and
   `other` need a `note` naming the mutation. The families are defined there, not
-  here; the self-test holds the four slugs equal to that section, so a new family
-  lands in all four homes `reviewer.md` names, and in the runner.
+  here. They live in four places — ship-next *Implement* step 5,
+  [`ai-agent-workflow.md`](../../../docs/contributing/ai-agent-workflow.md)'s
+  preflight item, `reviewer.md`'s must-check item and `ai-review-patterns.md` —
+  and a new family goes into all four together (`reviewer.md` asks the same of
+  its three trap lists). The self-test holds the runner's four slugs equal to
+  the `ai-review-patterns.md` section, so a family added there fails CI until it
+  is added here too.
 - `runner` is inferred (`*.test.mjs` → `node --test`, `packages/<pkg>/**/*.test.ts`
   → vitest, `*.spec.ts` → Playwright); set it when the path misleads. Unknown keys
   are refused, so a typo cannot silently drop a field.
@@ -82,8 +87,11 @@ file in a collapsed block and the reviewer writes it to its own `$SCRATCH`.
 ## What a run requires (exit 2, nothing touched)
 
 The tree is clean **and committed** — the assertions under test included, so each
-result is bound to a commit; it is not the main checkout that worktrees hang off;
-no `node_modules` symlink resolves outside the tree (run `npm ci` in a fresh
+result is bound to a commit; it is not the main checkout that worktrees hang off
+(a main checkout with no linked worktrees — a standalone `git clone` made for
+review — is allowed); each cell's `file` is a regular tracked file inside the
+tree, not a symlink, and valid UTF-8 (an edit to any other bytes would rewrite
+bytes the cell never named); no `node_modules` symlink resolves outside the tree (run `npm ci` in a fresh
 worktree); no journal from an earlier run is pending; no other `prove-red` holds
 the tree's lock (`$(git rev-parse --git-dir)/prove-red.lock`, `O_EXCL`); every
 edit applies exactly once; no backup from an earlier run is in the way. The
@@ -96,23 +104,31 @@ one tree at once — the runner cannot see it.
 
 ## Per cell
 
-1. Run the target test **unmutated**; refuse the cell unless it is green and
-   reports every `expect_red` test, and refuse the run if that test wrote into the
-   tree.
+1. When step 4 will rebuild, build the **unmutated** package first and refuse the
+   cell if it does not build, so the baseline never reads a stale `dist/`. Then
+   run the target test unmutated; refuse the cell unless it is green and reports
+   every `expect_red` test, and refuse the run if that test wrote into the tree.
 2. Back up to `$SCRATCH/<file>.<issue>.<role>.<cell>.bak` (`role` is `author` or
-   `review`) and verify its sha256; journal the cell in the tree's git dir.
+   `review`) and verify its sha256; journal the cell — hashes and file mode — in
+   the tree's git dir.
 3. Apply the edits; assert `git diff --numstat` and `git status` name only that file.
 4. When the mutated file's `packages/<pkg>/` differs from the test's — or a
    Playwright cell mutates app source — run `npm run build -w packages/<pkg>`.
+   A test that reads its **own** package's `dist/` is not rebuilt for; give such
+   a cell a test in another package, or build by hand around it.
 5. Run only the target test file, in a fresh process (Playwright with
    `--retries=0`), and classify.
-6. Restore by `cp` from the verified backup, check the sha256, **rebuild again if
-   step 4 ran** (`dist/` is gitignored, so `git status` cannot see a mutant build;
+6. Refuse the restore (exit 3, nothing overwritten) if the file no longer holds
+   the mutant the runner wrote — someone edited it during the run. Otherwise
+   restore by `cp` from the verified backup and put the file mode back, check the
+   sha256 and the mode, **rebuild again if step 4 ran** (`dist/` is gitignored, so `git status` cannot see a mutant build;
    the journal marks the tree dirty until this build succeeds), then require an
    empty `git status --porcelain`.
 
-It never stages, commits, pushes, or runs `git checkout`, `stash` or `restore`,
-and it never inverts an edit.
+Every test run and build runs in its own process group, journalled while a cell
+is in flight, so a signal or a timeout reaches what it spawned. It never stages,
+commits, pushes, or runs `git checkout`, `stash` or `restore`, and it never
+inverts an edit.
 
 ## Classes
 
@@ -127,6 +143,9 @@ Assertion-type is `ERR_ASSERTION` for `node --test`, an `AssertionError` for
 vitest, an `expect(` failure for Playwright. One caveat the runner cannot see past:
 `expect(fn).toThrow(/X/)` turns a thrown non-assertion error into an assertion
 failure, so a SQL error inside such a test reads as caught — check the message.
+A run with both kinds of failure is **caught** when any `expect_red` test failed on
+an assertion, whatever else threw; with no named assertion red, a non-assertion
+failure anywhere makes it **mutation-red**, not shadowed.
 
 ## Exit codes and the Closeout table
 
@@ -134,7 +153,7 @@ failure, so a SQL error inside such a test reads as caught — check the message
 |---|---|
 | 0 | every cell caught (`census`: every sampled cell ran to a class) |
 | 1 | at least one cell survived, was shadowed, was mutation-red, or was refused at its baseline |
-| 2 | refused before anything was mutated |
+| 2 | refused with nothing left mutated — before any cell, or after earlier cells ran and were restored (a later baseline wrote into the tree; an unexpected error with no journal pending) |
 | 3 | a restore, rebuild or clean-tree check failed; the journal is kept — run `recover` before any test |
 | 129 / 130 / 143 | SIGHUP / SIGINT / SIGTERM, after a verified restore |
 
@@ -151,7 +170,9 @@ ran), then exit; a second signal does not abort the restore. `kill -9` leaves th
 mutant and the journal: the next run refuses, and `recover` restores **only** when
 the file still matches the journalled mutant hash and the backup still matches the
 original's. A hand edit after the kill, or a missing backup, exits 3 and nothing is
-overwritten. Recover from an exit 3 the same way; if the message names a staged
+overwritten. So does a journalled process group that is still running — the test
+or build the killed run started can still write a mutant build; wait for it, or
+stop it with the `kill` command the message prints, then recover again. Recover from an exit 3 the same way; if the message names a staged
 change, inspect `git diff --cached` before anything else.
 
 ## `verify` (reviewers)
@@ -165,7 +186,9 @@ run the author's cells alone and read as a review.
 It runs only in your own root: the one `review-isolation.mjs` ACCEPTED with
 `--builder` ([`reviewer.md`](../haven-agent-workflow/references/reviewer.md)
 § *Before anything else*); pass the same `--builder`, and the runner refuses a
-root that is the builder's tree or not registered at its own path. Its edits are
+root that is the builder's tree or not registered at its own path, a HEAD other
+than `--expect-head`, and an author result file (`prove-red-<issue>-mutate.json`)
+produced in this same root. Its edits are
 the one exception to the reviewer's read-only posture, and every one is restored
 before it exits 0 or 1. An exit 3 keeps the root. `verify` does not run `npm ci`:
 a vitest or Playwright cell refuses without `node_modules` in the root, so run it
@@ -186,9 +209,12 @@ ledger. A survivor's diagnosis is still the author's; the table leaves the slot.
 
 Supported: the runner forces `--retries=0` (a retry that passes would report a
 flaky red as green) and rebuilds the app for a cell that mutates app source. Set
-the environment the built run needs — `CI=1` and the placeholders — as
-[`frontend.md` § mutation cells](../../../docs/contributing/ship-playbooks/frontend.md)
-describes; the runner passes it through.
+the environment the built run needs — `CI=1` and the `NEXT_PUBLIC_*`
+placeholders the frontend's `test:e2e:*:built` scripts set — and the runner passes
+it through.
+[`frontend.md` § 4 Verification](../../../docs/contributing/ship-playbooks/frontend.md#4-verification)
+says why those scripts rebuild every time, why mutation cells use `--retries=0`,
+and what a cell costs.
 
 ## When not to use it
 

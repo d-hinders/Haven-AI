@@ -1521,3 +1521,18 @@ project owner — collaborators have Viewer access, not env-var write access.
 > process takes this path (Railway starts `node packages/backend/dist/index.js`).
 > Scope of this note: the one new first import; `last-verified` is bumped to
 > 2026-10-21 for exactly this coverage.
+
+> **Re-verified #4236 (2026-10-21 — the qa-failure window):** `qa-dev.yml`'s
+> `money-flow` job gains a job-level `permissions:` block. It restates the
+> top-level `contents: read`, `issues: write` and `deployments: read` and
+> adds `actions: read`, which the failure step uses to list qa-dev's own runs
+> and read their jobs. With that, the standing `qa-failure` issue names the
+> last-green → first-red window and its PRs (agent-qa.md § *Automated failure
+> reporting*). The failure step also passes the dispatch's `haven_api_url`
+> input through env, so a run against another backend reads "window: not a
+> dev run". The `gate` job, its top-level grants, the triggers, the #1047
+> override validation, Coverage completeness, the green step and the
+> `money-flow` job's conclusion are unchanged, so the freshness-gate
+> statements above still hold. `qa-freshness.mjs` is imported by the
+> reporter, not edited. The rest of this document was not re-read for it,
+> and `last-verified` is not bumped.

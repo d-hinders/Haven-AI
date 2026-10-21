@@ -1561,6 +1561,59 @@ than `dev`, never closes it, while a scheduled or post-deploy green — or a pla
 dispatch on `dev` — does. A failed close is a workflow warning, so an issue-API
 error never turns a green run red. Do not close it by hand; the next failure reopens it.
 
+**The window line (#4236).** Each failure's body and comment also carry one
+`window:` line naming where the red episode started, so the suspect is in the
+thread from its first comment. On 2026-10-20 the first issue attributing a red
+(#4215) came 23.7 h after #2769 reopened, for a one-PR window. The script
+recomputes the line on every failure from the API and never reads it back from
+the body:
+
+- **Last green** is the newest qa-dev run created before this one that
+  `qa-freshness.mjs`'s `selectGreenRun` admits. The run has an evidence event,
+  a branch-labelled event on `dev`, a commit in the failing commit's history
+  (checked through the compare API, because the job's checkout is depth 1),
+  and a `money-flow` **job** success. A run-level `success` is not enough,
+  since a gate-skipped run has one, and the rows `preFilterHarnessCandidates`
+  drops are never read. When a `schedule` green and a `deployment_status`
+  green share a commit, the post-deploy run wins.
+- **First red** is the oldest such run after it whose `money-flow` job failed,
+  or this run. A `schedule` or `workflow_dispatch` endpoint is labelled
+  "(schedule; dev tip, deploy not verified)", because its SHA is `dev`'s tip
+  when the run started, not necessarily the deployed commit.
+- **The PRs** are the first-parent chain from first red back to last green.
+  The compare API lists every commit in the range, a merged branch's own
+  commits included, so the chain is walked through `parents[0]`. Each PR is
+  marked for whether it touches a money-path file (the runtime perimeter
+  `moneyPathFiles` matches) and whether it touches the harness
+  (`packages/qa-agent/`), from one `commits/{sha}` read per PR.
+
+The line can also read:
+
+- "window: not a dev run (…)": a dispatch from another branch or with a
+  `haven_api_url` override. Nothing is computed for it.
+- "window: unavailable (…)": a failed or timed-out read, a compare that is not
+  `ahead`, or a chain longer than the compare page.
+- "window: open-ended — …": no green within the newest 300 runs or within the
+  lookup budget, so the break may be older.
+
+Every `gh` call has a 30 s bound, and one lookup is capped at 80 calls and
+120 s. The failure step runs inside the `money-flow` job, which holds the
+`qa-dev-money-flow` concurrency group and has no `timeout-minutes`. No window
+outcome can stop the body edit, the comment or the reopen.
+
+**The mention** (captain decision on #4236, 2026-10-21) names the author with
+`@` exactly once per episode: in the reopen comment, or in the body when the
+issue is created. It needs all of these:
+
+- the window is one PR, by a human author;
+- that PR touches a money-path file or the harness;
+- the run class is `haven`, `harness` or `unclassified`. A `provider`,
+  `rate_limit`, `preflight` or `mixed` run is not the author's to fix.
+
+A later failure while the issue is open recomputes the line and names the
+author without `@`. The job's `actions: read` grant (job-level, restating the
+other three) is what lets it list the runs.
+
 ### The dev → main freshness gate
 
 `dev-gate.yml` adds a **`qa-freshness`** job: a promotion PR (`dev → main`) passes
@@ -1841,7 +1894,7 @@ everything else is `unclassified`, never a guess. Read the class before reading 
 | `preflight` | the run-level `✗ preflight:` line, and the resource line above it that failed its floor | The harness stopped before any leg ran. #2485: the merchant settlement wallet's gas below its floor. 2026-10-01 → 10-05 (#3631): the delegation treasury at 0.0 USDC, about 40 failing runs. | Top up or fix the named resource; no leg result exists to read. |
 | `harness` | the message of a JS runtime error (`… is not a function`, `… is not defined`, `Cannot read properties of undefined`) — the harness prints `err.message`, never the error's name, so a relayed body quoting `TypeError` does not count — or the run-level `✗ harness crashed:` line | The harness itself threw. No failure in the 40-run sample below carries this signature. A harness defect does not always announce itself: #2443's second failure was intra-attempt contamination between scenarios, and this classifier records it as `unclassified`. | Fix the harness; the product may be fine. |
 | `rate_limit` | `Rate limit exceeded: max <n> x402 payments per hour`, however the leg relays it (`authorize failed (429)`, the SDK's `settleX402Erc7710 failed:`, a hosted `API_ERROR`, a bare FAIL line, `(HTTP 429: …)`); checked first, ahead of every other class (#3541) | Haven's own per-agent x402 cap (`max_x402_per_hour`, default 100, a sliding one-hour window) working as designed, out-run by the harness's own volume. Run 36840685285: about four hand dispatches plus post-deploy runs in an hour on the one QA identity, ten x402 legs refused; attempt 2 passed about 30 s later. Only that body: Haven's other limiters — `moneyPathRateLimit`'s 429 (`Rate limit exceeded, retry in 1 minute`) and `Relayer budget exceeded` — land in `haven` when relayed as `failed (429)`, and in `unclassified` when the status is lost (the SDK, the sweep scenario). | Never a product defect. Stop hand-dispatching runs back to back; the window slides, so the in-step retry often clears it, and a further hand dispatch should be spaced out. |
-| `haven` | the leg's own Haven API call answered `… failed (4xx)` | Haven refused a request the leg expected to succeed. | Read the Haven change that landed before the run. |
+| `haven` | the leg's own Haven API call answered `… failed (4xx)` | Haven refused a request the leg expected to succeed. | Read the Haven change that landed before the run: the issue's `window:` line names the PRs between the last green and the first red, and which of them touch a money-path file or the harness ([the window line](#automated-failure-reporting), #4236). |
 | `unclassified` | none of the above — including the backend's masked `activate failed (502): Could not deploy the account for this budget` and timeouts on a Haven endpoint | Could be the provider underneath or Haven; the masked message does not say. | Read the run log and the backend log for that window. Do not re-dispatch it away: if it recurs, it is a finding. |
 
 The run takes its legs' class when they agree and is `mixed` (with a count per class)
@@ -1856,6 +1909,13 @@ appeared only in an earlier attempt.
 If nothing below matches, the cause may simply be somewhere this session
 cannot look — see [What this session cannot see, and what to ask for](#what-this-session-cannot-see-and-what-to-ask-for) for the artifacts to
 request before proposing a mechanism.
+
+Whatever the class, read the issue's `window:` line before bisecting by hand. It
+names the last green run, the first red run and the first-parent PRs between them
+(#4236). One PR that touches the harness or a money-path file is the first suspect,
+and its author is mentioned on the episode's first comment. Several PRs, or an
+`open-ended` or `unavailable` window, leave the bisect to you; see
+[Automated failure reporting](#automated-failure-reporting) for what each form means.
 
 ### `ERR_MODULE_NOT_FOUND ... @haven_ai/sdk/dist/index.js`
 

@@ -216,6 +216,26 @@ it through.
 says why those scripts rebuild every time, why mutation cells use `--retries=0`,
 and what a cell costs.
 
+## Known limits
+
+These are stated so nobody counts them as proven:
+
+- **The stale-lock break is race-checked, not race-tested.** A dead holder's
+  lock is renamed away, re-read and, if its holder turns out to be alive, linked
+  back; when even that fails (a third run took a fresh lock in between) the
+  runner warns that two runs may be active. No fixture reproduces that
+  interleaving deterministically.
+- **Killing a child's whole process group on a signal is defence in depth.**
+  `node --test` and `npm` forward signals to their own children, so no test can
+  tell the group kill from a leader-only kill; the observable halves — children
+  run detached, and `recover` waits for a journalled group — are tested.
+- **Some checks are backstops behind earlier ones**: the sha256 and mode checks
+  after the copy (the backup is verified before it), and the one-file `numstat`
+  check after the mutation (a baseline that writes into the tree is refused
+  first). Each survives its own mutation for that reason.
+- `recover`'s `ps -o pid,command -g <pgid>` hint selects by process group on
+  macOS; on Linux procps, use `ps -eo pid,pgid,command | awk '$2 == <pgid>'`.
+
 ## When not to use it
 
 A mutation that belongs in CI forever — a test that imports a mutant copy of an

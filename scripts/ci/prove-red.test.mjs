@@ -413,7 +413,7 @@ const g = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8', e
 const GUARD_SRC = 'export function allowed(n) {\n  return n > 0\n}\n'
 const fixtureTest = (prefix = 'guard') => `import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
-import { appendFileSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, writeFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { allowed } from './src/guard.mjs'
 const mark = (m) => { if (process.env.PR_FIXTURE_LOG) appendFileSync(process.env.PR_FIXTURE_LOG, m + '\\n') }
@@ -421,7 +421,12 @@ mark('ran:${prefix}')
 describe('${prefix}', () => {
   test('refuses zero', async () => {
     if (allowed(0)) {
-      if (process.env.PR_FIXTURE_HANG) { mark('mutant-started'); await new Promise((r) => setTimeout(r, Number(process.env.PR_FIXTURE_HANG))) }
+      if (process.env.PR_FIXTURE_HANG) {
+        // Block until the self-test releases us (a file appears), never on a
+        // timer: a contended machine must not end the hang before the signal.
+        mark('mutant-started')
+        for (let i = 0; i < 6000 && !existsSync(process.env.PR_FIXTURE_HANG); i += 1) await new Promise((r) => setTimeout(r, 50))
+      }
       if (process.env.PR_FIXTURE_STAGE) execFileSync('git', ['add', '-A'])
       if (process.env.PR_FIXTURE_CORRUPT) writeFileSync(process.env.PR_FIXTURE_CORRUPT, 'corrupted\\n')
       if (process.env.PR_FIXTURE_HANDEDIT) writeFileSync('src/guard.mjs', 'hand edit\\n')
@@ -477,7 +482,7 @@ const run = (repo, args, opts) => start(repo, args, opts).done
 const ranCount = (repo) => (existsSync(repo.log) ? readFileSync(repo.log, 'utf8').split('\n').filter((l) => l.startsWith('ran:')).length : 0)
 const fileOf = (repo, f = 'src/guard.mjs') => readFileSync(path.join(repo.wt, f), 'utf8')
 const result = (repo, mode = 'mutate') => JSON.parse(readFileSync(path.join(repo.scratch, `prove-red-1-${mode}.json`), 'utf8'))
-async function waitFor(pred, what, ms = 60000) {
+async function waitFor(pred, what, ms = 120000) {
   const t0 = Date.now()
   while (!pred()) {
     if (Date.now() - t0 > ms) throw new Error(`timed out waiting for ${what}`)
@@ -485,6 +490,16 @@ async function waitFor(pred, what, ms = 60000) {
   }
 }
 const MUTATE = ['mutate', '--issue', '1']
+const releaseFile = (repo) => path.join(repo.dir, 'release')
+const release = (repo) => writeFileSync(releaseFile(repo), 'go\n')
+/** Stop an orphaned process group; it may already be gone (ESRCH), which is fine. */
+function stopGroup(pg) {
+  try {
+    process.kill(-pg, 'SIGTERM')
+  } catch (e) {
+    if (e.code !== 'ESRCH') throw e
+  }
+}
 
 // Fixture workspace for incident 4: packages/b's tests import packages/a's
 // BUILT output, the way tsup-built workspace packages are consumed.
@@ -501,7 +516,12 @@ const n = log && existsSync(log) ? readFileSync(log, 'utf8').split('\\n').filter
 if (log) appendFileSync(log, createHash('sha256').update(src).digest('hex') + '\\n')
 if (process.env.PR_FIXTURE_FAIL_BUILD_AT === String(n + 1)) process.exit(1)
 if (process.env.PR_FIXTURE_BUILD_PID) appendFileSync(process.env.PR_FIXTURE_BUILD_PID, process.pid + '\\n')
-if (process.env.PR_FIXTURE_BUILD_SLEEP && String(src).includes('>=')) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Number(process.env.PR_FIXTURE_BUILD_SLEEP))
+// A mutant build blocks until the self-test releases it (a file appears) — capped, so a crashed test cannot leave it forever.
+if (process.env.PR_FIXTURE_BUILD_BLOCK && String(src).includes('>=')) {
+  let i = 0
+  for (; i < 6000 && !existsSync(process.env.PR_FIXTURE_BUILD_BLOCK); i += 1) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50)
+  if (i === 6000) process.exit(1)
+}
 mkdirSync('dist', { recursive: true })
 writeFileSync('dist/index.mjs', src)
 `,
@@ -828,15 +848,16 @@ describe('signals and recover', { concurrency: 4 }, () => {
     test(`${sig} mid-cell restores the file and exits ${code}`, async () => {
       const repo = makeRepo()
       writeCells(repo, [baseCell(), baseCell({ id: 'C2' })])
-      // The mutant test would hang for 60 s: the run ending well before that
-      // proves the signal reached the test's whole process group.
-      const p = start(repo, MUTATE, { env: { PR_FIXTURE_HANG: '60000' } })
+      // The mutant test hangs until released, and this test never releases it:
+      // the run ending at all proves the signal reached the test's process group.
+      const p = start(repo, MUTATE, { env: { PR_FIXTURE_HANG: releaseFile(repo) } })
       await waitFor(() => existsSync(repo.log) && readFileSync(repo.log, 'utf8').includes('mutant-started'), 'the mutant run')
       assert.equal(fileOf(repo), GUARD_SRC.replace('n > 0', 'n >= 0'), 'the mutant is in place when the signal lands')
       const t0 = Date.now()
       p.child.kill(sig)
       const r = await p.done
-      assert.ok(Date.now() - t0 < 30000, `the run took ${Date.now() - t0} ms to stop: the hanging test was not killed`)
+      release(repo)
+      assert.ok(Date.now() - t0 < 120000, `the run took ${Date.now() - t0} ms to stop: the hanging test was not killed`)
       assert.equal(r.code, code, r.out)
       assert.equal(fileOf(repo), GUARD_SRC)
       assert.equal(g(repo.wt, 'status', '--porcelain'), '')
@@ -851,14 +872,15 @@ describe('signals and recover', { concurrency: 4 }, () => {
     writeCells(repo, [WORKSPACE_CELLS[0]])
     const buildLog = path.join(repo.dir, 'build.log')
     const pids = path.join(repo.dir, 'build.pids')
-    const p = start(repo, MUTATE, { env: { PR_FIXTURE_BUILD_LOG: buildLog, PR_FIXTURE_BUILD_SLEEP: '60000', PR_FIXTURE_BUILD_PID: pids } })
+    const p = start(repo, MUTATE, { env: { PR_FIXTURE_BUILD_LOG: buildLog, PR_FIXTURE_BUILD_BLOCK: releaseFile(repo), PR_FIXTURE_BUILD_PID: pids } })
     await waitFor(() => existsSync(pids) && readFileSync(pids, 'utf8').split('\n').filter(Boolean).length >= 2, 'the mutant build')
     const mutantBuild = Number(readFileSync(pids, 'utf8').split('\n').filter(Boolean)[1])
     const t0 = Date.now()
     p.child.kill('SIGINT')
     const r = await p.done
+    release(repo)
     assert.equal(r.code, 130, r.out)
-    assert.ok(Date.now() - t0 < 30000, `took ${Date.now() - t0} ms: the sleeping build was not stopped`)
+    assert.ok(Date.now() - t0 < 120000, `took ${Date.now() - t0} ms: the blocked build was not stopped`)
     assert.throws(() => process.kill(mutantBuild, 0), /ESRCH/, 'the mutant build process is gone')
     assert.equal(readFileSync(path.join(repo.wt, 'packages/a/dist/index.mjs'), 'utf8'), A_SRC)
     assert.ok(!existsSync(repo.journal))
@@ -867,7 +889,7 @@ describe('signals and recover', { concurrency: 4 }, () => {
   async function killedMidCell(opts) {
     const repo = makeRepo({}, opts)
     writeCells(repo, [baseCell()])
-    const p = start(repo, MUTATE, { env: { PR_FIXTURE_HANG: '60000' } })
+    const p = start(repo, MUTATE, { env: { PR_FIXTURE_HANG: releaseFile(repo) } })
     await waitFor(() => existsSync(repo.log) && readFileSync(repo.log, 'utf8').includes('mutant-started'), 'the mutant run')
     p.child.kill('SIGKILL')
     const r = await p.done
@@ -876,7 +898,8 @@ describe('signals and recover', { concurrency: 4 }, () => {
     assert.ok(existsSync(repo.journal))
     const pg = JSON.parse(readFileSync(repo.journal, 'utf8')).childPgid
     assert.ok(Number.isInteger(pg), 'the in-flight test run is journalled by its process group')
-    process.kill(-pg, 'SIGTERM') // the operator's step the recover refusal prints
+    release(repo) // the orphaned test may now finish; it is still running until it does
+    stopGroup(pg) // the operator's step the recover refusal prints
     await waitFor(() => !groupAlive(pg), 'the orphaned test run to stop')
     return repo
   }
@@ -886,7 +909,10 @@ describe('signals and recover', { concurrency: 4 }, () => {
     execFileSync('npm', ['run', 'build', '-w', 'packages/a'], { cwd: repo.wt, env: cleanEnv({}), stdio: 'ignore' })
     writeCells(repo, [WORKSPACE_CELLS[0]])
     const buildLog = path.join(repo.dir, 'build.log')
-    const env = { PR_FIXTURE_BUILD_LOG: buildLog, PR_FIXTURE_BUILD_SLEEP: '60000' }
+    // The mutant build blocks until released, so it is guaranteed alive while
+    // recover is asserted to refuse; releasing it lets the orphan write its
+    // mutant dist, which is exactly what recover must then rebuild over.
+    const env = { PR_FIXTURE_BUILD_LOG: buildLog, PR_FIXTURE_BUILD_BLOCK: releaseFile(repo) }
     const p = start(repo, MUTATE, { env })
     await waitFor(() => existsSync(buildLog) && readFileSync(buildLog, 'utf8').split('\n').filter(Boolean).length >= 2, 'the mutant build')
     p.child.kill('SIGKILL')
@@ -897,8 +923,11 @@ describe('signals and recover', { concurrency: 4 }, () => {
     assert.equal(early.code, 3, early.out)
     assert.match(early.out, new RegExp(`process group ${pg} from the killed run is still running`))
     assert.equal(readFileSync(path.join(repo.wt, 'packages/a/src/index.mjs'), 'utf8'), A_SRC.replace('n > 0', 'n >= 0'), 'nothing was restored')
-    process.kill(-pg, 'SIGTERM') // the step the refusal names
-    await waitFor(() => !groupAlive(pg), 'the orphaned build to stop')
+    assert.match(early.out, new RegExp(`ps -o pid,command -g ${pg}`))
+    assert.ok(groupAlive(pg), 'still blocked: nothing released it yet')
+    release(repo)
+    await waitFor(() => !groupAlive(pg), 'the released orphan to finish')
+    assert.equal(readFileSync(path.join(repo.wt, 'packages/a/dist/index.mjs'), 'utf8'), A_SRC.replace('n > 0', 'n >= 0'), 'the orphan wrote its mutant build after the kill')
     const rec = await run(repo, ['recover'], { env })
     assert.equal(rec.code, 0, rec.out)
     assert.equal(readFileSync(path.join(repo.wt, 'packages/a/src/index.mjs'), 'utf8'), A_SRC)

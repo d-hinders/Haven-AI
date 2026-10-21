@@ -637,7 +637,18 @@ function acquireLock(lockPath) {
         try {
           linkSync(token, lockPath)
         } catch {
-          // someone else holds a new lock now; either way we do not
+          // A third run took a fresh lock between our rename and the link-back.
+          // Its lock stands; say so, because the live holder we moved is now
+          // running without one.
+          let now = null
+          try {
+            now = JSON.parse(readFileSync(lockPath, 'utf8'))
+          } catch {
+            // unreadable or gone
+          }
+          process.stderr.write(
+            `prove-red: warning — while breaking a lock, pid ${moved.pid} turned out to be alive and its lock could not be put back; ${lockPath} is now held by pid ${now?.pid ?? '?'}. Two runs may be active in this tree: stop one.\n`,
+          )
         }
         rmSync(token, { force: true })
         throw refuse(`another prove-red run (pid ${moved.pid}) holds ${lockPath}`)
@@ -1228,7 +1239,8 @@ async function modeRecover(ctx) {
   Object.assign(ctx, { scratch: path.dirname(j.backup), issue: j.issue, role: j.role })
   if (Number.isInteger(j.childPgid) && groupAlive(j.childPgid))
     throw restoreFailed(
-      `recover: process group ${j.childPgid} from the killed run is still running and may still write the mutant into the tree or its build; nothing was restored. Wait for it, or stop it with \`kill -TERM -- -${j.childPgid}\`, then run recover again.`,
+      `recover: process group ${j.childPgid} from the killed run is still running and may still write the mutant into the tree or its build; nothing was restored. ` +
+        `See what it is with \`ps -o pid,command -g ${j.childPgid}\`; wait for it, or stop it with \`kill -TERM -- -${j.childPgid}\`, then run recover again.`,
     )
   const abs = path.join(ctx.root, j.file)
   const current = existsSync(abs) ? sha256File(abs) : null

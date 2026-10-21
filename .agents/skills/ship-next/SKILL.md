@@ -43,10 +43,20 @@ Accept one source:
   merge, so the issue is open by design and a merged PR, not an open one, holds
   the work. In the queue and `epic=` modes, skip it and take the next
   candidate. For a specified issue, read that PR's body and the issue's latest
-  comments: if what is left is an operator step, or nothing, stop and report
-  what landed and what is outstanding (*Closeout*, operator-verify mode); if
-  the merged PR names code scope it did not build, build only that remainder,
-  and say in your PR body which merged PR landed the rest.
+  comments, then take exactly one of three branches:
+  - what is left is an operator step, or nothing: stop and report what landed
+    and what is outstanding (*Closeout*, operator-verify mode);
+  - the merged PR names code scope of the issue it did not build: build only
+    that remainder, and say in your PR body which merged PR landed the rest;
+  - the merged PR only **cites** the issue and none of its scope landed (`Refs`
+    is also used as a citation — #4235's spec review found PR #4006's
+    `Refs #4005 (panel), #4004 (budget answer), epic #3077.`): build the issue
+    normally, and say so in your PR body.
+
+  In the third branch the label is a false positive. Any session that has read
+  the merged PR and found none of the issue's scope landed may remove
+  `landed-partial`, with a one-line comment on the issue naming the PR and
+  saying why. Nothing else reads the label, so removing it changes no check.
 
 If every remaining candidate is blocked, stop and report the dependency chain instead
 of forcing the lowest number.
@@ -1072,5 +1082,8 @@ operator can run (funded testnet keys, vendor dashboards, live end-to-end runs):
 4. When the operator confirms (or pastes the output), verify it matches the expected
    evidence, tick the checklist, remove the `operator-verify` label, and close with
    the evidence links. To find landed issues still waiting for that evidence,
-   `gh issue list --label landed-partial --state open` lists every open issue a
-   merged PR references with `Refs` (#4235; the label can stay on at close).
+   `gh issue list --label landed-partial --state open` lists the open issues the
+   merge-time workflow labelled (#4235; the label can stay on at close). Not every
+   one waits on an operator step, and the list misses epics, non-maintainer or
+   bot-authored issues, bot-authored PRs, the second and later numbers of a
+   list-form `Refs #a, #b`, and merges before #4235.

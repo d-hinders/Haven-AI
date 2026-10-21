@@ -125,6 +125,14 @@
 // gets no write. A bot-authored PR labels nothing (see `decideRefs`). The
 // label is left on when the issue closes: it is harmless there, and the sweep
 // (`gh issue list --label landed-partial --state open`) reads open issues only.
+// A retired channel (`RETIRED_CHANNEL_ISSUES`, #1289) is never labelled either.
+//
+// A race, stated rather than guarded: a PR that both closes #N and `Refs` it
+// leaves #N to the merge path only when the read-back already sees #N closed
+// by this merge. If GitHub's close lands after that read (it is read once,
+// ~30 s after the merge; measured +1…+2 s, see above), #N reads open, Path A
+// labels it, and the closed issue keeps a `landed-partial` it never needed —
+// harmless, since no check reads the label.
 //
 // ## Path B: a close with no merge behind it (#4176)
 //
@@ -182,7 +190,7 @@
 
 import { parse, REFS_RELEASE_MARK, CLOSE_RELEASE_MARK } from './claim-assignee.mjs'
 import { holderClaim, readComments, sameLogin, isWorkflowBotComment, TRUSTED_ASSOCIATIONS } from './claim-collision.mjs'
-import { CHANNEL_ISSUE } from './coordination-channel.mjs'
+import { CHANNEL_ISSUE, RETIRED_CHANNEL_ISSUES } from './coordination-channel.mjs'
 import { parseClosingRefs, parseRefsRefs, commitsFromGraphQL } from './operator-verify-close-guard.mjs'
 
 export { CHANNEL_ISSUE, REFS_RELEASE_MARK, CLOSE_RELEASE_MARK }
@@ -456,7 +464,9 @@ export function decideRefs({ pr, refsIssues, commentsByIssue = {}, channelCommen
     }
     // The label (#4235) is decided BEFORE the claim check: an issue whose
     // `Refs` PR was built without a claim (the #4123/#4133 shape) landed too.
-    if (!isMaintainerAuthored(issue)) {
+    if (RETIRED_CHANNEL_ISSUES.includes(n)) {
+      labels.skipped.push({ issue: n, reason: `is a retired coordination channel — no \`${LANDED_PARTIAL_LABEL}\` label` })
+    } else if (!isMaintainerAuthored(issue)) {
       labels.skipped.push({ issue: n, reason: `not authored by a maintainer (${issue.author ?? 'unknown author'}, ${issue.authorType ?? 'no type'}, ${issue.authorAssociation ?? 'no association'}) — no \`${LANDED_PARTIAL_LABEL}\` label` })
     } else if (carriesLabel(issue, LANDED_PARTIAL_LABEL)) {
       labels.skipped.push({ issue: n, reason: `already carries \`${LANDED_PARTIAL_LABEL}\` — not adding it twice` })

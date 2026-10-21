@@ -13,7 +13,7 @@ import { decide, apply, fetchInputs, fetchCandidates, fetchChannel, prFromPayloa
 import { parse, botReleaseClaimants } from './claim-assignee.mjs'
 import { parseRefsRefs, findViolations, OPERATOR_VERIFY_LABEL } from './operator-verify-close-guard.mjs'
 import { readFileSync } from 'node:fs'
-import { CHANNEL_ISSUE } from './coordination-channel.mjs'
+import { CHANNEL_ISSUE, RETIRED_CHANNEL_ISSUES } from './coordination-channel.mjs'
 
 const CLI = fileURLToPath(new URL('./release-on-merge.mjs', import.meta.url))
 
@@ -1097,6 +1097,15 @@ describe('#4235: a `Refs`-only merge labels the landed issue `landed-partial`', 
     assert.deepEqual(decideRefs({ ...args, refsIssues: [refsIssue(4130, { isPullRequest: true })] }).labels, LABEL)
     assert.deepEqual(decideRefs({ ...args, refsIssues: [{ number: 9999, unreadable: true, assignees: [] }] }).labels, LABEL)
     assert.ok(addsLabel(decideRefs({ ...args, refsIssues: [refsIssue(4130)] }), 4130))
+  })
+
+  test('a retired channel (#1289) → no label, with a reason; twin issue number → label', () => {
+    const args = { pr: pr4222, commentsByIssue: {} }
+    assert.ok(RETIRED_CHANNEL_ISSUES.includes(1289))
+    const retired = decideRefs({ ...args, refsIssues: [refsIssue(1289)] })
+    assert.deepEqual(retired.labels.add, [])
+    assert.match(retired.labels.skipped[0].reason, /retired coordination channel/)
+    assert.ok(addsLabel(decideRefs({ ...args, refsIssues: [refsIssue(1290)] }), 1290))
   })
 
   test('#3645 shape (a bot-authored standing issue, as measured: Bot, CONTRIBUTOR) → no label', () => {

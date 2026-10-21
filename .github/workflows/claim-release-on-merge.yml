@@ -65,7 +65,7 @@ name: Release the claim on merge
 #   `claim-release-on-close.yml`.
 # - The one label it writes is the informational `landed-partial` (#4235,
 #   owner decision B): on a `Refs`-only merge, added to each referenced issue
-#   that is open, not an epic, not the channel and authored by a maintainer,
+#   that is open, not an epic, not the channel (current or retired) and authored by a maintainer,
 #   whether or not the PR author held a claim; never on a bot-authored PR, and
 #   never twice (an issue that already carries it gets no write). No check
 #   reads it — the close guard reads `operator-verify`, which this workflow

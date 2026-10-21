@@ -197,8 +197,8 @@ export function getTokensForChain(chainId: number): Record<string, FrontendToken
  * Moved here from `lib/safe-tx.ts` (#2848, epic #1440): it was that file's
  * one shared export, a generic per-chain token list with nothing Safe about
  * it, and the rest of the file was retired Safe signing plumbing deleted
- * with the rail. Consumers: `DelegationSendModal` and
- * `useAgentConnectionSetup` (`agent-panel/agent-display`'s token helpers went
+ * with the rail. Consumers: `DelegationSendModal`, `useAgentConnectionSetup`
+ * and `lib/marketplace` (`agent-panel/agent-display`'s token helpers went
  * with the card's configured-allowance row, #4209).
  */
 export function getChainTokens(chainId: number): Record<string, { address: Address | null; decimals: number }> {

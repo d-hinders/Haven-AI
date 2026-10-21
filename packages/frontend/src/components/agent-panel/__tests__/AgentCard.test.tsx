@@ -634,7 +634,7 @@ describe('AgentCard recoverable funds (#2195)', () => {
     expect(screen.queryByText(/Open the agent to recover these funds/)).toBeNull()
   })
 
-  it('offers Recover funds as the card’s one CTA, to the agent page', () => {
+  it('offers Recover funds as the card’s one CTA, to the recovery flow', () => {
     renderCard(agentFixture({ has_stranded_funds: true } as Partial<Agent>))
     // The agent page's own Recover funds goes to the sweep flow; so does this.
     const cta = within(screen.getByTestId('agent-card-cta')).getByRole('link', { name: 'Recover funds' })

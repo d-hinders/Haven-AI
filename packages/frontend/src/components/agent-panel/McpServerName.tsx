@@ -50,8 +50,8 @@ export function signerNameFor(hosted: string): string {
  * It used to be a 169-character `Tooltip` label on the `not recorded` span.
  * #2038 made `Tooltip` reachable by keyboard and touch where the trigger is
  * nobody else's control. The old null-name tooltip was not a good fit: its
- * explanation was essential copy, not elaboration, and belongs visibly above
- * the agent list. The recorded-name branch below is different: it elaborates
+ * explanation was essential copy, not elaboration, and belongs in visible
+ * text. The recorded-name branch below is different: it elaborates
  * a value already on screen and remains reachable beside its sibling
  * `CopyButton`.
  *
@@ -61,16 +61,15 @@ export function signerNameFor(hosted: string): string {
  * ("do not hide essential instructions") therefore rules the tooltip out on
  * content grounds even where reachability is available.
  *
- * ### Why once, above the list, and only sometimes
+ * ### Where, and only sometimes
  *
  * This is #2017's shape (PR #2039, `AccountDetailClient`'s
- * `UNKNOWN_APPROVER_NOTE`): one visible sentence beside the list, rendered
- * only when some row is actually in the state it explains. Matching it rather
- * than inventing a second shape is deliberate — two idioms for one problem is
- * the divergence #2195 and #2216 were filed to clean up. Per card would repeat
- * a 200-character sentence in a two-column grid where the overwhelming
- * majority of cards are in this state; unconditionally would explain a label
- * that is not on screen.
+ * `UNKNOWN_APPROVER_NOTE`): one visible sentence, rendered only when the
+ * label it explains is actually on screen. Until #4209 that was once above
+ * the `/agents` list (a per-card copy would have repeated a 200-character
+ * sentence across a two-column grid); since #4209 the name lives on the agent
+ * detail page, one agent at a time, and the note sits beside its `not
+ * recorded` label there.
  */
 export const MCP_NOT_RECORDED_NOTE =
   'Not recorded means Haven has no MCP server name for that agent. Haven records the name when an agent connects with a current version of the connector — agents connected earlier keep working exactly as they are, and only the label is missing.'
@@ -79,7 +78,7 @@ export const MCP_NOT_RECORDED_NOTE =
  * Does any of these agents render the `not recorded` label?
  *
  * The predicate lives beside the component that decides what "unrecorded"
- * means, so the note above the list and the label inside the card cannot drift
+ * means, so the note and the label it explains cannot drift
  * apart — the failure mode is a note explaining a label nobody can see, or a
  * label with no note. Same falsiness test as the component's own branch.
  */

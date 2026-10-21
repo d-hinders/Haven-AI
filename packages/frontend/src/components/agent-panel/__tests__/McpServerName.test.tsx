@@ -76,10 +76,9 @@ describe('McpServerName', () => {
 
   /**
    * #2043: the null branch carries the LABEL and nothing else. Its
-   * explanation is hoisted to one note above the list (`AgentPanel`), because
-   * The agent name is now a real link, but this label remains plain text, so
-   * no tooltip here is reachable by keyboard or touch — see
-   * `MCP_NOT_RECORDED_NOTE`.
+   * explanation is visible text beside it — on the agent detail page's MCP
+   * server name row since #4209 — because this label is plain text and a
+   * tooltip on it would hide essential copy; see `MCP_NOT_RECORDED_NOTE`.
    */
   it('puts no explanation behind a hover a keyboard or touch user cannot perform', () => {
     render(<McpServerName value={null} />)
@@ -88,7 +87,7 @@ describe('McpServerName', () => {
     fireEvent.mouseEnter(label)
     expect(document.querySelector('[role="tooltip"]')).toBeNull()
     // The sentence is not merely un-tooltipped, it is not in this component
-    // at all — one home for it, above the list.
+    // at all — one home for it, beside the label on the agent page.
     expect(document.body.textContent).not.toContain(MCP_NOT_RECORDED_NOTE)
   })
 

@@ -4160,7 +4160,7 @@ export const SCENARIOS = {
 
   'agents-multi-account': {
     description:
-      'The /agents list for a user with TWO accounts (#3719): every agent shows, each row names its account and chain, and the Account filter is offered — there is no global active account narrowing the list',
+      'The /agents list for a user with TWO accounts (#3719): every agent shows, each card names its account (the network is the account's, #4209), and the Account filter is offered — there is no global active account narrowing the list',
     // The shared fixture has one account, so the filter (registered only with
     // more than one) and a row on a second account are unreachable without
     // this. Two endpoints, and they agree: `/auth/me` serves both accounts and
@@ -4196,8 +4196,7 @@ export const SCENARIOS = {
       for (const name of ['Research agent', 'Data-feed agent']) {
         await page.getByText(name, { exact: true }).first().waitFor({ timeout: 20_000 })
       }
-      // Positive control: the second account's row label is on screen. Not
-      // `exact`: the row reads "Account: Treasury · Base" across three nodes.
+      // Positive control: the second account's name is on its card.
       await page.getByText(/Treasury/).first().waitFor({ timeout: 20_000 })
       await shoot(page.locator('main').first(), 'list')
 

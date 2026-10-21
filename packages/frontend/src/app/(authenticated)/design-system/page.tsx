@@ -798,7 +798,10 @@ function ServerListControlsExample() {
         // (#4196) — the account Activity tab's shape.
         summary={
           <>
-            Money in <Amount amount={1240} currency="USD" /> · Money out <Amount amount={312.5} currency="USD" />
+            <span aria-hidden="true">In</span>
+            <span className="sr-only">Money in</span> <Amount amount={1240} currency="USD" /> ·{' '}
+            <span aria-hidden="true">Out</span>
+            <span className="sr-only">Money out</span> <Amount amount={312.5} currency="USD" />
           </>
         }
       />

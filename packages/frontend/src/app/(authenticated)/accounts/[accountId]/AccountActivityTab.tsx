@@ -30,7 +30,7 @@
  *   matches nothing, and "No activity yet" with a Receive button for an
  *   account with no history.
  */
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { Amount, type AmountCurrency } from '@/components/haven/Amount'
 import {
@@ -172,6 +172,21 @@ function listStateToFilters(state: ListState): TransactionFilterState {
  * used to say is carried by the row itself — the counterparty is the title,
  * the fixed account is the page — and the agent moves into the subtitle.
  */
+/**
+ * One figure on the list summary line: the short visible label ("In") so the
+ * line fits a phone beside the count (#4108 follow-up to #4196), and the full
+ * name ("Money in") for screen readers, read before the amount — the naming
+ * the account summary card uses (#4197).
+ */
+function TotalFigure({ short, name, children }: { short: string; name: string; children: ReactNode }) {
+  return (
+    <span data-testid="activity-total">
+      <span aria-hidden="true">{short}</span>
+      <span className="sr-only">{name}</span> {children}
+    </span>
+  )
+}
+
 function ActivityLedgerRow({
   tx,
   resolveAddress,
@@ -440,10 +455,13 @@ export default function AccountActivityTab({
           // — no figure is better than a wrong one; the feed's own error
           // state carries the retry story.
           <span data-testid="activity-totals">
-            Money in{' '}
-            <Amount amount={moneyTotals.moneyIn} currency={currency} approx={moneyTotals.approxIn} /> ·
-            Money out{' '}
-            <Amount amount={moneyTotals.moneyOut} currency={currency} approx={moneyTotals.approxOut} />
+            <TotalFigure short="In" name="Money in">
+              <Amount amount={moneyTotals.moneyIn} currency={currency} approx={moneyTotals.approxIn} />
+            </TotalFigure>{' '}
+            ·{' '}
+            <TotalFigure short="Out" name="Money out">
+              <Amount amount={moneyTotals.moneyOut} currency={currency} approx={moneyTotals.approxOut} />
+            </TotalFigure>
           </span>
         ) : undefined}
         actions={

@@ -530,7 +530,15 @@ describe('AccountActivityTab — rows and the detail panel (#4098)', () => {
     renderTab()
 
     const line = screen.getByTestId('list-summary')
-    expect(within(line).getByTestId('activity-totals')).toHaveTextContent(/^Money in .* · Money out /)
+    // Visible "In · Out" so the line fits a phone; each figure keeps its full
+    // name for screen readers, read before the amount (#4108, after #4196).
+    const [moneyIn, moneyOut] = within(line).getAllByTestId('activity-total')
+    expect(within(moneyIn).getByText('In')).toHaveAttribute('aria-hidden', 'true')
+    expect(within(moneyIn).getByText('Money in')).toHaveClass('sr-only')
+    expect(within(moneyOut).getByText('Out')).toHaveAttribute('aria-hidden', 'true')
+    expect(within(moneyOut).getByText('Money out')).toHaveClass('sr-only')
+    // The sr-only name comes before the figure it names.
+    expect(moneyIn.textContent).toMatch(/^InMoney in \$/)
     expect(line.firstElementChild).toContainElement(within(line).getByTestId('activity-totals'))
     expect(line.lastElementChild).toBe(screen.getByTestId('list-toolbar-count'))
     expect(within(screen.getByTestId('list-summary')).getByTestId('list-toolbar-count')).toHaveTextContent('2 transactions')
@@ -543,7 +551,8 @@ describe('AccountActivityTab — rows and the detail panel (#4098)', () => {
     renderTab()
 
     expect(screen.getByText('Some amounts couldn’t be valued and aren’t included.')).toBeInTheDocument()
-    expect(screen.getByText(/Money out/)).toHaveTextContent('Money out —')
+    const moneyOut = screen.getAllByTestId('activity-total')[1]
+    expect(moneyOut).toHaveTextContent('OutMoney out —')
     expect(screen.queryByText(/\u2248/)).not.toBeInTheDocument()
   })
 

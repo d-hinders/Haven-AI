@@ -108,31 +108,48 @@ const SIG = `0x${'cd'.repeat(65)}`
 
 let seq = 0
 
-/** A user, its bound smart account on Base, and one agent with the given status. */
-async function seedAgent(status: 'active' | 'paused' | 'revoked'): Promise<string> {
+type SeedKind = 'active' | 'paused' | 'revoked' | 'pending_approval' | 'archived'
+
+/**
+ * A user, its bound smart account on Base, and one agent. `archived` is an
+ * ACTIVE agent with `archived_at` set — the status alone would authenticate
+ * it, so the archived branch is the one under test.
+ */
+async function seedAgent(kind: SeedKind): Promise<string> {
+  const status = kind === 'archived' ? 'active' : kind
+  const archivedAt = kind === 'archived' ? new Date().toISOString() : null
   seq += 1
-  const apiKey = `sk_agent_recovery_route_${status}_${seq}_${Date.now()}`
+  const apiKey = `sk_agent_recovery_route_${kind}_${seq}_${Date.now()}`
   const user = await db.query<{ id: string }>(
     `INSERT INTO users (email, password_hash) VALUES ($1, 'x') RETURNING id`,
-    [`recovery-route-${status}-${seq}-${Date.now()}@test.example`],
+    [`recovery-route-${kind}-${seq}-${Date.now()}@test.example`],
   )
   const account = await db.query<{ id: string }>(
     `INSERT INTO smart_accounts (user_id, account_address, chain_id) VALUES ($1, $2, 8453) RETURNING id`,
     [user.rows[0].id, SAFE],
   )
   await db.query(
-    `INSERT INTO agents (user_id, account_id, name, delegate_address, api_key_hash, api_key_prefix, status)
-     VALUES ($1, $2, 'Recovery route agent', $3, $4, 'sk_agent_rec', $5)`,
-    [user.rows[0].id, account.rows[0].id, DELEGATE, createHash('sha256').update(apiKey).digest('hex'), status],
+    `INSERT INTO agents (user_id, account_id, name, delegate_address, api_key_hash, api_key_prefix, status, archived_at)
+     VALUES ($1, $2, 'Recovery route agent', $3, $4, 'sk_agent_rec', $5, $6)`,
+    [user.rows[0].id, account.rows[0].id, DELEGATE, createHash('sha256').update(apiKey).digest('hex'), status, archivedAt],
   )
   return apiKey
 }
 
-/** The refusal each status gets on any non-recovery route. */
-const REFUSAL: Record<'paused' | 'revoked', { statusCode: number; error: string }> = {
+type RetiredKind = Exclude<SeedKind, 'active'>
+
+/** The refusal each non-active key gets on any non-recovery route. */
+const REFUSAL: Record<RetiredKind, { statusCode: number; error: string }> = {
   paused: { statusCode: 403, error: 'agent_paused' },
+  pending_approval: { statusCode: 403, error: 'agent_pending_approval' },
+  archived: { statusCode: 401, error: 'Invalid or revoked API key' },
   revoked: { statusCode: 401, error: 'Invalid or revoked API key' },
 }
+
+const RETIRED_KINDS: readonly RetiredKind[] = ['paused', 'pending_approval', 'archived', 'revoked']
+
+/** "a paused key", "an archived key" — the test titles read as sentences. */
+const aKey = (kind: RetiredKind): string => `${/^[aeiou]/.test(kind) ? 'an' : 'a'} ${kind} key`
 
 describeDb('agent auth decides the recovery exemption from the matched route', () => {
   let app: FastifyInstance
@@ -155,9 +172,9 @@ describeDb('agent auth decides the recovery exemption from the matched route', (
     expect(res.body).toEqual({ reached: '/x402/authorize', agent_status: 'active' })
   })
 
-  for (const status of ['paused', 'revoked'] as const) {
+  for (const status of RETIRED_KINDS) {
     for (const suffix of ['/sweep/prepare', '/sweep/submit']) {
-      it(`a ${status} key is refused on the spend route when the request-target carries #${suffix}`, async () => {
+      it(`${aKey(status)} is refused on the spend route when the request-target carries #${suffix}`, async () => {
         const key = await seedAgent(status)
         const res = await rawPost(app, `/x402/authorize#${suffix}`, key)
         expect(res.body.reached, 'the spend route must not be reached').toBeUndefined()
@@ -166,21 +183,21 @@ describeDb('agent auth decides the recovery exemption from the matched route', (
       })
     }
 
-    it(`a ${status} key is refused on the plain spend route`, async () => {
+    it(`${aKey(status)} is refused on the plain spend route`, async () => {
       const key = await seedAgent(status)
       const res = await rawPost(app, '/x402/authorize', key)
       expect(res.statusCode).toBe(REFUSAL[status].statusCode)
       expect(res.body.error).toBe(REFUSAL[status].error)
     })
 
-    it(`a ${status} key still recovers through the real POST /machine-payments/sweep/prepare`, async () => {
+    it(`${aKey(status)} still recovers through the real POST /machine-payments/sweep/prepare`, async () => {
       const key = await seedAgent(status)
       const res = await rawPost(app, '/machine-payments/sweep/prepare', key)
       expect(res.statusCode).toBe(200)
       expect(res.body.nothing_stranded).toBe(true)
     })
 
-    it(`a ${status} key still reaches the real POST /machine-payments/sweep/submit`, async () => {
+    it(`${aKey(status)} still reaches the real POST /machine-payments/sweep/submit`, async () => {
       const key = await seedAgent(status)
       const res = await rawPost(app, '/machine-payments/sweep/submit', key, {
         signature: SIG,

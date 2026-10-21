@@ -35,6 +35,7 @@ named where they belong below.
 
 | Date | Decision | Refs |
 |---|---|---|
+| 2026-10-21 | The pending-promotion digest issue is retired; pending work is the `main...dev` compare | #666 |
 | 2026-10-17 | Phone navigation floats: the tab bar is a floating pill, and the More sheet a floating card that covers it with its own ✕; the bar labels `/transactions` "Activity" | #4058 (supersedes #4053's "stops at the bar's top edge") |
 | 2026-10-17 | The phone More menu is a bottom sheet over the tab bar; its theme control is three-way (Light / Dark / System), superseding #2953 for the phone | #4053 (supersedes #2820's drawer) |
 | 2026-10-09 | Any of the three maintainers merges a promotion; test a partner merge before changing any rule | #3798, PR #3794 |
@@ -56,6 +57,22 @@ named where they belong below.
 | 2026-07-12 | Session rail retired outright; AllowanceModule import-only | #834 (AllowanceModule half superseded) |
 | — | Approval-queue history readability waived | #2021, #2055 |
 | — | Historical: POC scope and phased roadmap | — |
+
+---
+
+## 2026-10-21 — retire the pending-promotion digest (#666)
+
+Owner decision, 2026-10-21: the "📦 Pending promotion: dev → main" issue
+(#666) was not being used, so it is closed and the workflow that kept it,
+`promotion-digest.yml`, is deleted with its metrics script and tests.
+Closing the issue alone would not have held — the workflow upserted on every
+push to `dev` and would have opened a fresh one. What is awaiting promotion is
+now the `main...dev` compare (or `git log --first-parent origin/main..origin/dev`);
+`branch-and-release-flow.md` § *What's in prod vs. pending* holds the rule. The
+two #2767 filing-bar figures it printed go with it: #3248 had already reverted
+the rule they measured. `scripts/ci/standing-issue-upsert.mjs` stays — the
+docs staleness audit still upserts through it — and the `promotion` label is
+removed from `.github/labels.yml`.
 
 ---
 

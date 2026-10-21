@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-// Bot-ownership upsert for the two standing digest issues (#3341).
+// Bot-ownership upsert for a standing digest issue (#3341).
 //
-// promotion-digest.yml and docs-audit.yml both upsert a standing issue by
-// selecting on something a human can also set, then overwriting that issue's
-// body:
+// docs-audit.yml upserts a standing issue; when this was written,
+// promotion-digest.yml did too (retired 2026-10-21). Both selected on
+// something a human can also set, then overwrote that issue's body:
 //
 //   - promotion-digest.yml took the first open issue carrying the `promotion`
 //     label. #3262 — the prod RPC swap procedure, labelled `promotion` by its
@@ -39,21 +39,21 @@
 //
 // `gh` is injectable so the test drives this exact entry point with a
 // recording stub (the qa-failure-issue.mjs / claim-collision.mjs pattern).
-// The body arrives on STDIN, not argv: a promotion digest can grow past
+// The body arrives on STDIN, not argv: a digest body can grow past
 // GitHub's own limits, and a single exec-argv entry is capped far below what
 // a body that size needs.
 //
 // Usage:
 //   printf '%s' "$body" | node scripts/ci/standing-issue-upsert.mjs \
-//     --title '📦 Pending promotion: dev → main' \
+//     --title 'Docs staleness audit (weekly)' \
 //     --author 'app/github-actions' \
-//     --list-args '--label promotion --state open' \
-//     [--repo d-hinders/Haven-AI] [--label promotion]
+//     --list-args '--label documentation --state open --json' \
+//     [--repo d-hinders/Haven-AI] [--label documentation]
 //
 // Keep a `--label` inside --list-args. Measured 2026-09-26 on this repo:
 // `gh issue list --author app/github-actions` resolves the app login on the
 // label-filtered list path and matches NOTHING without a label (search path —
-// there it wants the `github-actions[bot]` form). Both call sites pass a
+// there it wants the `github-actions[bot]` form). The call site passes a
 // label, and the exact author+title filter below is the authority either way;
 // this note only explains a future empty result that "should" have matched.
 

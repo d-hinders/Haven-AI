@@ -30,10 +30,6 @@
   color: "b60205"
   description: "Payments, agent authority, allowances, migrations — loads money.md (characterization + CASP)"
 
-- name: "promotion"
-  color: "1d76db"
-  description: "Tracks dev → prod promotion (used by the pending-promotion digest)"
-
 # Not a surface label: a MERGE-TIME control. `Closes #<n>` is a GitHub keyword
 # that closes the issue on merge whatever the pull-request body says elsewhere,
 # so ship-next's operator-verify mode — "the code lands, the issue stays open

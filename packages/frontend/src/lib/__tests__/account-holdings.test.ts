@@ -6,7 +6,7 @@
  * through to the caller.
  */
 import { describe, expect, it } from 'vitest'
-import { holdingRows, holdingRateLine } from '../account-holdings'
+import { holdingDisplayAmount, holdingRows, holdingRateLine } from '../account-holdings'
 import { formatFiat } from '@/lib/format'
 import type { PortfolioBreakdown } from '@/types/transactions'
 
@@ -94,5 +94,49 @@ describe('holdingRows (#4097)', () => {
     const rows = holdingRows([token({ formatted: '1200.00', balanceFreshness: stale })], 'USD')
     expect(rows[0].amount).toBe('1200.00')
     expect(rows[0].balanceFreshness).toEqual(stale)
+  })
+})
+
+describe('holdingDisplayAmount (#4197)', () => {
+  // The five owner examples, verbatim from the issue.
+  it.each([
+    ['8.225255', '8.2252'],
+    ['0.99999', '0.9999'],
+    ['0.57', '0.57'],
+    ['42.00', '42.00'],
+    ['0.00005', '<0.0001'],
+  ])('%s renders as %s', (served, displayed) => {
+    expect(holdingDisplayAmount(served)).toBe(displayed)
+  })
+
+  it('rounds DOWN by string truncation, never through floats (0.57 is not 0.5699)', () => {
+    // The float path the issue bars: Math.floor(parseFloat('0.57') * 1e4) / 1e4
+    // lands at 0.5699. String truncation cannot.
+    expect(holdingDisplayAmount('0.570009')).toBe('0.57')
+    expect(holdingDisplayAmount('1.999999')).toBe('1.9999')
+    expect(holdingDisplayAmount('12.345679')).toBe('12.3456')
+  })
+
+  it('keeps the 2-decimal minimum — trailing zeros the cut exposes trim back to it', () => {
+    expect(holdingDisplayAmount('42.00')).toBe('42.00')
+    expect(holdingDisplayAmount('12.50')).toBe('12.50')
+    expect(holdingDisplayAmount('10.00005')).toBe('10.00')
+    expect(holdingDisplayAmount('1.230049')).toBe('1.23')
+  })
+
+  it('a non-zero amount below 0.0001 reads "<0.0001", never "0.0000"', () => {
+    expect(holdingDisplayAmount('0.000099')).toBe('<0.0001')
+    // 0.0001 itself is exactly at the threshold and renders as served.
+    expect(holdingDisplayAmount('0.0001')).toBe('0.0001')
+    expect(holdingDisplayAmount('0.00010')).toBe('0.0001')
+  })
+
+  it('a zero read renders as served — "<0.0001" would claim a hidden remainder', () => {
+    expect(holdingDisplayAmount('0.00')).toBe('0.00')
+    expect(holdingDisplayAmount('0')).toBe('0')
+  })
+
+  it('an integer-shaped wire string passes through untouched', () => {
+    expect(holdingDisplayAmount('42')).toBe('42')
   })
 })

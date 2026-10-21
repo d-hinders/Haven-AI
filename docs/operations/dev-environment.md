@@ -503,7 +503,7 @@ persisted for weeks**, each invisible to every gate in the repo (#1131):
   relayed call failed upstream;
 - its Railway **Source** was connected to the **`main`** branch, not `dev`. So a service
   in the dev environment was serving *production* code — and because `main` had not
-  moved since 2026-06-26 (317 commits behind `dev`; see the pending-promotion issue),
+  moved since 2026-06-26 (317 commits behind `dev` at the time),
   auto-deploy had nothing to fire on and the build silently aged. Its commit predated
   SDK Base-Sepolia x402 support (`6d4d647`, 2026-06-28), so x402 payments failed with
   `No compatible payment option found in x402 requirements` — an error that reads like

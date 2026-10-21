@@ -54,7 +54,6 @@
     "scripts/docs/coupling-gate.mjs"
   ],
   "docs/contributing/autonomous-pr-loop.md": [
-    ".github/workflows/promotion-digest.yml",
     ".github/workflows/release.yml",
     "packages/backend/src/infra/__tests__/helpers/__tests__/harness-call-budget.test.ts",
     "scripts/ci/operator-verify-close-guard.mjs",

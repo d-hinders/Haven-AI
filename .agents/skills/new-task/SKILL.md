@@ -15,7 +15,7 @@ issue filed around it skips the measurement rule, the prior-art sweep, the
 backlog default and the § *Issue review* pass, and every one of those exists
 because an issue filed without it went wrong. Exempt: issues that CI workflows
 and scripts open by themselves (for example `guard-freshness`'s `ci-health`
-issue, or the `docs-audit` and `promotion-digest` workflows), which record a
+issue, or the `docs-audit` workflow), which record a
 machine's observation, not an agent's judgement.
 
 ## Workflow

@@ -8,6 +8,7 @@ covers:
   - .github/workflows/docs-coupling.yml
   - .agents/skills/haven-agent-workflow/references/doc-reviewer.md
   - scripts/ci/review-isolation.mjs
+  - scripts/ci/standing-issue-upsert.mjs
   - .vale.ini
   - .lychee.toml
   - .markdownlint.json
@@ -147,7 +148,7 @@ backend vitest job, so a PR touching no backend surface never runs it.
 | Link health | lychee (`.lychee.toml`) | Advisory (`continue-on-error`) |
 | Markdown hygiene | markdownlint-cli2 (`.markdownlint.json`) | Advisory |
 | Product-copy terminology | Vale (`.vale.ini`, scoped to `docs/product/**` so engineering docs may say "Safe", "AllowanceModule", "signer") | Advisory |
-| Weekly staleness audit | `scripts/docs/audit-staleness.mjs`, `docs-audit.yml` Mondays 06:00 UTC | Advisory (upserts one tracking issue) |
+| Weekly staleness audit | `scripts/docs/audit-staleness.mjs`, `docs-audit.yml` Mondays 06:00 UTC | Advisory (upserts one tracking issue, selected by bot author plus exact title through `scripts/ci/standing-issue-upsert.mjs`, so a human issue is never adopted — #3341) |
 | Doc-health JSON for the ops console ([#3511](https://github.com/d-hinders/Haven-AI/issues/3511)) | `scripts/docs/doc-health.mjs [--out <path>] [--generated-at <ISO>]`: per-doc owner, status, `last-verified` and flags (`no-front-matter`, `no-owner`, `empty-covers`, and `unverified-90d`, which is age only and not the commit-based audit above) over the validator's population minus `docs/archive/**`, plus the governed package docs | Report only (for the ops app's `prebuild`, [#3515](https://github.com/d-hinders/Haven-AI/issues/3515); never gates) |
 | `haven-doc-reviewer` | [`doc-reviewer.md`](../../.agents/skills/haven-agent-workflow/references/doc-reviewer.md); binds its verdict to the reviewed head via `scripts/ci/review-isolation.mjs` | Advisory, except a wrong claim (now-wrong, or newly written by the diff) about custody, signing, spend authority or money movement: **blocking** in any doc, whether or not it is `contract: true` (#4174) |
 

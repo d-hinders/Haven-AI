@@ -724,7 +724,9 @@ The initials variant is readable to a screen reader by default; the logo is
 prints beside the mark, so it is not read twice. `Monogram` takes initials by
 visible character (grapheme), so a user-typed name that starts with an emoji
 or a flag never renders half of one (where the browser has `Intl.Segmenter`,
-as every current one does; the fallback still never splits a surrogate pair). Tints are the avatar family above.
+as every current one does; the fallback still never splits a surrogate pair).
+A name that starts with an emoji shows that emoji alone, never an emoji beside
+a letter ([owner decision on #4210](https://github.com/d-hinders/Haven-AI/issues/4210#issuecomment-6315168790), 2026-10-21). Tints are the avatar family above.
 
 ### Detail-page section rule (#3692)
 

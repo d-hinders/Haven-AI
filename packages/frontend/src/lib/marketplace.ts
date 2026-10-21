@@ -706,10 +706,16 @@ function characters(text: string): string[] {
   return graphemes ? Array.from(graphemes.segment(text), (s) => s.segment) : Array.from(text)
 }
 
+/** A pictograph or flag letter: an emoji, as opposed to a letter or digit. */
+const EMOJI = /\p{Extended_Pictographic}|\p{Regional_Indicator}/u
+
 /**
  * Initials for a named entity with no logo — two letters from the first and
- * last words of its name, or the first two letters of a one-word name. The
- * helper behind `Monogram`.
+ * last words of its name, or the first two letters of a one-word name. A name
+ * that starts with an emoji shows that emoji alone, since an emoji beside a
+ * letter crowds a 32px mark (owner decision, 2026-10-21:
+ * https://github.com/d-hinders/Haven-AI/issues/4210#issuecomment-6315168790).
+ * The helper behind `Monogram`.
  */
 export function merchantInitials(name: string): string {
   // Visible characters, not UTF-16 code units (#4210): agent names are
@@ -717,6 +723,8 @@ export function merchantInitials(name: string): string {
   // flag or a ZWJ family whole; `Array.from` (code points) is the fallback
   // where `Intl.Segmenter` is missing — never a lone surrogate either way.
   const parts = name.trim().split(/\s+/).filter(Boolean).map(characters)
+  const lead = parts[0]?.[0]
+  if (lead && EMOJI.test(lead)) return lead
   const initials =
     parts.length >= 2
       ? `${parts[0]![0]}${parts[parts.length - 1]![0]}`

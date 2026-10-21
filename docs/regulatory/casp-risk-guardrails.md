@@ -1034,17 +1034,18 @@ because they are spend authority — `signer.ts` (the signing schemes),
 moved in from the signer (`delegate-account.ts`, `direct-payment-guard.ts`,
 `redemption-guard.ts`, `settlement-child.ts`), and the signer's checks on task
 and sub-budget children (`task-budget-guards.ts`, `sub-budget-guards.ts`,
-#3661). The rest decide a funded payment's merchant answer.
-`merchant-completion.ts` (#4122): `MerchantCompletion.retryRequest` decides
-after the funding leg has moved USDC whether the merchant accepted or the
-payment is a rejection after funding, and reports the settlement hash Haven
-records. `merchant-answer.ts` (#4120, PR #4153) is the one post-funding
-merchant-answer decision shared by the hosted `completeX402MerchantCall` and
-the local `MerchantCompletion.retryRequest`; the decision moved out of
+#3661). `merchant-completion.ts` (#4122) and `merchant-answer.ts` (#4120,
+PR #4153) settle a funded payment's merchant answer.
+`MerchantCompletion.retryRequest` makes the paid retry after the funding leg
+has moved USDC, acts on the answer (the merchant accepted, or the payment is a
+rejection after funding) and reports the settlement hash Haven records.
+`merchant-answer.ts` is the one post-funding merchant-answer decision it shares
+with the hosted `completeX402MerchantCall`; the decision moved out of
 `merchant-completion.ts` into it in the same PR, and the move would otherwise
-have taken it off the perimeter (the #3283 accident-of-location rule). The
-harness does build and drive the SDK; the rest of it is transport, and `client.ts`, which only wires those files
-in, is pinned off the list by name (#3283, #4122). Since #3173
+have taken it off the perimeter (the #1892 accident-of-location rule, as #3283
+applied it to the SDK). The harness does build and drive the SDK; everything
+else in it is transport, and `client.ts`, which only wires those files in, is
+pinned off the list by name (#3283, #4122). Since #3173
 `packages/sdk/src/edge-signing.ts` is spend authority by the same reasoning —
 it is the viem-based implementation of `addressFromKey` / `signHash` /
 `verifySignature` the shipped signer actually calls, pinned byte-equivalent to
@@ -1341,9 +1342,9 @@ not a ceiling** — it says adding a file *to the money-path list* without addin
 it here re-opens the hole; it never said this list may contain nothing else.
 Empirically it already contains a great deal else: `connect/**`, `mcp/**`,
 most of `sdk/**` (the money-path list names only the `sdk/src/` files that are
-the signing schemes, the signing-surface guard, the budget guards, or the
-post-funding merchant-answer decision — `merchant-completion.ts` and the shared
-`merchant-answer.ts`), `routes/passkeys.ts`,
+the signing schemes, the #3271 binding check, the signing-surface guard, the
+budget guards, or the post-funding merchant-answer decision —
+`merchant-completion.ts` and the shared `merchant-answer.ts`), `routes/passkeys.ts`,
 `routes/catalog.ts`, `routes/accounting-feed.ts`, `routes/accounting.ts` and
 `config.ts` — none of them on that list. `signer/**`, `mcp-server/**` and
 `demo-merchant-mcp/**` were in the same position when #1826 was decided and

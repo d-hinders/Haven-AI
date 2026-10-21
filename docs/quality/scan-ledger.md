@@ -1874,15 +1874,20 @@ the scan PR (#4202, `91257f4c2`).
   `cca-lite.coinbase.com`) is a possible follow-up for the owner, not in scope.
 - C3 → [#4217](https://github.com/d-hinders/Haven-AI/issues/4217)
   (`area:backend`, `area:docs`). A backend test net refuses non-loopback
-  connections and fails the test.
+  connections and fails the test or file that made them; the two files that
+  dial the price API are stubbed.
 
 Each issue carries a spec-review verdict, all three "ready after corrections".
 Main changes per issue:
-- #4215 gained the hosted-twin evidence that dev answers an immediate report
-  `retryable`.
-- #4216 resolved the browser mechanism to a bundler define.
+- #4215 gained the hosted-twin evidence that dev answers the hosted leg's
+  immediate report `retryable`; the SDK legs' own answer stays the
+  builder's first step.
+- #4216 established that a bundler define reaches the kit in the browser
+  bundle (a runtime variable does not) and recommends it, non-binding; the
+  builder decides the mechanism.
 - #4217's stub criterion was corrected to the seam each file actually dials
   through.
 
 No owner question remains open, so `pending-review` is lifted on all three.
-They were filed to the backlog; shipping was not requested with the filing.
+They were filed to the backlog (no `code-quality`); shipping was not
+requested with the filing.

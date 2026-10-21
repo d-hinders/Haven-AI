@@ -119,7 +119,7 @@ const SCENARIOS: Scenario[] = [
       // phone's "Filters" button.
       await expect(page.getByTestId('list-toolbar')).toHaveCount(1)
       await expect(page.getByRole('group', { name: 'Category' })).toBeVisible()
-      await expect(page.getByTestId('list-toolbar-count')).toContainText('merchants')
+      await expect(page.getByTestId('list-summary').getByTestId('list-toolbar-count')).toContainText('merchants')
       if ((page.viewportSize()?.width ?? 0) >= 640) {
         await expect(page.getByRole('button', { name: 'Network: Base Sepolia' })).toBeVisible()
         await expect(page.getByRole('button', { name: 'Test merchants: Shown' })).toBeVisible()

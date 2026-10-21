@@ -184,9 +184,11 @@ test.describe('agent panel empty states and card banners', () => {
 
       const toolbar = page.getByTestId('list-toolbar')
       await expect(toolbar).toHaveCount(1)
-      await expect(page.getByTestId('list-toolbar-count')).toHaveText('1 of 2 agents')
+      // #4196: the count sits on the list summary line, outside the card; the
+      // capture takes the card and the line together.
+      await expect(page.getByTestId('list-summary').getByTestId('list-toolbar-count')).toHaveText('1 of 2 agents')
       await expect(toolbar.getByRole('button', { name: 'Remove Status: Active', exact: true })).toHaveCount(1)
-      await expect(toolbar).toHaveScreenshot(`agentpanel-list-toolbar-${viewport.slug}.png`, SNAPSHOT_OPTIONS)
+      await expect(page.getByTestId('list-controls')).toHaveScreenshot(`agentpanel-list-toolbar-${viewport.slug}.png`, SNAPSHOT_OPTIONS)
     })
   }
 

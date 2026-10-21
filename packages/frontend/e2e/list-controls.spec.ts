@@ -118,9 +118,10 @@ test.describe('list controls — layout', () => {
 
     await expect(sheet.getByRole('button', { name: 'Show 3 agents' })).toBeVisible()
     await paused.check()
-    // Live: the toolbar's count behind the sheet moved with the tap.
+    // Live: the count behind the sheet — on the list summary line (#4196) —
+    // moved with the tap.
     await expect(sheet.getByRole('button', { name: 'Show 4 agents' })).toBeVisible()
-    await expect(phone.getByTestId('list-toolbar-count')).toHaveText('4 of 5 agents')
+    await expect(phone.getByTestId('list-summary').getByTestId('list-toolbar-count')).toHaveText('4 of 5 agents')
     await sheet.getByRole('button', { name: 'Show 4 agents' }).click()
     await expect(sheet).toBeHidden()
     await expect(phone.getByRole('button', { name: 'Filters (1)' })).toBeFocused()
@@ -195,9 +196,14 @@ test.describe('list controls — layout', () => {
     await page.keyboard.press('Escape')
 
     await expect(page.getByTestId('ds-list-controls-no-match')).toContainText('No agents match these filters')
-    await expect(page.getByTestId('ds-list-controls-filtered').getByTestId('list-toolbar-count')).toHaveText('1 of 5 agents')
+    await expect(
+      page.getByTestId('ds-list-controls-filtered').getByTestId('list-summary').getByTestId('list-toolbar-count'),
+    ).toHaveText('1 of 5 agents')
+    // #4196: no filter, no status row; the paging button sits below its card.
+    await expect(page.getByTestId('ds-list-controls-default').getByTestId('list-toolbar-status')).toHaveCount(0)
+    await expect(page.getByTestId('ds-list-controls-paging').getByRole('button', { name: 'Show 24 more' })).toBeVisible()
     if (EVIDENCE) {
-      for (const state of ['default', 'filtered', 'no-match', 'loading', 'phone', 'server', 'primitives']) {
+      for (const state of ['default', 'filtered', 'no-match', 'loading', 'phone', 'server', 'paging', 'primitives']) {
         await evidence(page.getByTestId(`ds-list-controls-${state}`), `${state}-desktop`)
       }
     }

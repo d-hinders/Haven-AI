@@ -501,8 +501,10 @@ Structure:
    the multi-select facets from the page's registry (Status, Budget, and
    Account and Organization when registered), **Archived** (single-select,
    Hidden / Shown, no All row, Hidden by default), and a **Sort: Name** chip.
-   Its status row carries a removable chip per active filter, Clear filters and
-   the count — "3 agents", or "1 of 3 agents" while filtered. Below `sm` the
+   While a filter is active its status row carries a removable chip per
+   active filter and Clear filters; the count sits on the pattern's list
+   summary line below the card (#4196) — "3 agents", or "1 of 3 agents" while
+   filtered. Below `sm` the
    facets and the sort sit in the pattern's Filters sheet. The page adds no
    control or string to it.
 3. A warning callout under the toolbar (#3542, carried over by #4113) while
@@ -748,13 +750,18 @@ Structure:
    Direction and Network facets (each hidden while it has a single option)
    and Period (Last 7 / 30 / 90 days, All time, or a custom range), with
    Export CSV in the actions slot (content-width on phone — its own row
-   after search and Filters, #4150). The status row carries a removable chip
-   per active filter, Clear filters, and the standard count — "{n}
-   transactions", or "{shown} of {total} transactions" filtered, both server
-   figures. The URL keeps the keys it had before #4111 except search,
+   after search and Filters, #4150). While a filter is active the status row
+   carries a removable chip per active filter and Clear filters. The list
+   summary line below the card (#4196) carries the standard count on the
+   right — "{n} transactions", or "{shown} of {total} transactions" filtered,
+   both server figures — and, filtered, the "N received · N sent · N failed"
+   totals on the left. The next page is "Show N more" below the table card
+   (the pattern's paging rule); nothing renders under the list once every
+   page is loaded. The URL keeps the keys it had before #4111 except search,
    written as `q` with the old `search` still read; the export request builds its own API
    parameters, apart from the URL codec. Sorting stays on the column
-   headers. The account page's planned Activity tab moves with #4130.
+   headers. The account page's Activity tab uses the same toolbar and codec
+   (#4130).
 3. The full-page `TransactionsTable` variant for `/transactions`; card/compact
    variants are valid for scoped histories on account and agent detail.
 4. A filtered list with no rows shows the standard no-match state
@@ -796,9 +803,10 @@ Money and risk clarity:
   `total` counts what was returned, not what the account holds. When the
   response reports `truncated`, every
   claim on the screen softens together — the page subtitle ("Recent activity"
-  rather than "All activity"), a caveat line beneath the toolbar's count, and the
-  end-of-list string ("End of what's loaded" rather than "You've reached the
-  end"). Softening one and leaving the others is worse than softening none:
+  rather than "All activity") and a caveat line beneath the count's summary
+  line. Since #4196 a fully loaded list ends with its last row and no
+  end-of-list string, so there is no third claim to soften. Softening one and
+  leaving the other is worse than softening none:
   the louder claim is the one the reader believes. The same rule binds any
   other surface fed by the same hook — the account detail page's transaction
   count included. Hedge the wording ("may not be your full history"); the
@@ -960,7 +968,9 @@ it):
    Security & details). Only the Agents tab carries a count; Security &
    details carries a warning dot when only one signer can approve.
    - **Activity** — the account's transaction feed (#4098 owns this tab's
-     final shape).
+     final shape), on the list-controls pattern: "Money in · Money out" for
+     the filtered set on the left of the list summary line, the count on the
+     right (#4196), and "Show N more" below the ledger card.
    - **Agents** — one budget-snapshot summary line, then every active agent
      drawn with the shared agent row (#4096). Revoked agents are not listed;
      one line says how many are hidden and links to the Agents page's

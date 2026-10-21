@@ -166,14 +166,14 @@ describe('Agents list controls (#4113)', () => {
 
     await user.click(screen.getByRole('menuitemcheckbox', { name: /Paused/, checked: true }))
     expect(cards()).toEqual(['Alpha', 'Bravo'])
-    expect(screen.getByTestId('list-toolbar-count')).toHaveTextContent('2 of 3 agents')
+    expect(within(screen.getByTestId('list-summary')).getByTestId('list-toolbar-count')).toHaveTextContent('2 of 3 agents')
   })
 
   it('active filters show as removable chips; Clear filters resets them and keeps the sort', async () => {
     const user = userEvent.setup()
     render(<AgentPanel />)
     expect(screen.queryByRole('button', { name: 'Clear filters' })).toBeNull()
-    expect(screen.getByTestId('list-toolbar-count')).toHaveTextContent('3 agents')
+    expect(within(screen.getByTestId('list-summary')).getByTestId('list-toolbar-count')).toHaveTextContent('3 agents')
 
     await user.click(screen.getByRole('button', { name: 'Sort: Name' }))
     await user.click(screen.getByRole('menuitemradio', { name: 'Newest' }))

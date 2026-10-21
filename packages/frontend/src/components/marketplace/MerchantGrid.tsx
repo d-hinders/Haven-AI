@@ -366,8 +366,9 @@ export function MerchantGrid({
       ) : (
         // #4052: either group may be empty on its own (a search for one
         // coming-soon merchant leaves no cards); the empty state above is
-        // for when BOTH are.
-        <div className="flex flex-col gap-6">
+        // for when BOTH are. `mt-3` spaces it from the list summary line
+        // (#4196), the gap the no-match state above already keeps.
+        <div className="mt-3 flex flex-col gap-6">
           {payable.length > 0 && (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {payable.map((merchant) => (

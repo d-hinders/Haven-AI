@@ -21,6 +21,8 @@ import {
   periodPresetLabels,
   countLabel,
   facetValueLabel,
+  loadingMoreLabel,
+  showMoreLabel,
   filtersButtonLabel,
   noMatchTitle,
   periodLabel,
@@ -86,8 +88,18 @@ export interface ListToolbarProps {
    * so the sum only ever rises and the field never misses a bump.
    */
   searchEpoch?: number
-  /** The count. `null` while the list loads. */
+  /**
+   * The count. `null` while the list loads. It renders on the list summary
+   * line below the toolbar, and the phone sheet's footer names it too.
+   */
   count: ListCount | null
+  /**
+   * The page's totals for the list summary line (#4196) — "Money in · Money
+   * out", or Transactions' "N received · N sent" — drawn on the left of the
+   * line, the count on the right. Pass the figures only; the toolbar owns
+   * the line, so "filtered" is decided once, here.
+   */
+  summary?: ReactNode
   /**
    * `responsive` (the default) collapses to the phone layout below `sm`.
    * `phone` always uses it — for a narrow container on a wide screen, and for
@@ -118,11 +130,13 @@ function schemaOf(facets: ListFacet[], sort: ListToolbarSort | undefined, period
  * so search, filters, sort, period, count and no-match look and behave the
  * same everywhere. Pages declare WHAT they filter; this owns HOW.
  *
- * Desktop anatomy (one card, directly above the list):
+ * Desktop anatomy (one card, then one line, directly above the list):
  * 1. search, then the actions slot (Export CSV);
  * 2. facets, then Sort and Period on the right; a pill facet gets its own row;
- * 3. the status row: removable chips for each active filter, Clear filters,
- *    and the count on the right, announced politely.
+ * 3. the status row, only while a filter is active: removable chips for each
+ *    active filter and Clear filters;
+ * 4. outside the card, the list summary line (#4196): the page's `summary`
+ *    totals on the left, the count on the right, announced politely.
  *
  * Below `sm` (640px) the facet row collapses into a "Filters (n)" button
  * that opens a bottom sheet with 44px rows. **Filters in the sheet apply
@@ -141,6 +155,7 @@ export function ListToolbar({
   searchDescription,
   actions,
   count,
+  summary,
   searchEpoch = 0,
   layout = 'responsive',
 }: ListToolbarProps) {
@@ -211,92 +226,94 @@ export function ListToolbar({
   const hasSheetContent = menuFacets.length > 0 || Boolean(sort && sort.options.length > 1) || Boolean(period)
 
   return (
-    <div
-      role="search"
-      aria-label={`Filter ${noun.other}`}
-      data-testid="list-toolbar"
-      className="flex flex-col gap-3 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] p-3 shadow-card sm:p-4"
-    >
-      <div className="flex flex-wrap items-center gap-2">
-        <ListSearchField
-          noun={noun}
-          value={state.q}
-          filtering={filtering}
-          description={searchDescription}
-          epoch={fieldEpoch}
-          onCommit={(q) => onChange({ ...state, q })}
-        />
+    <div className="flex flex-col gap-3" data-testid="list-controls">
+      <div
+        role="search"
+        aria-label={`Filter ${noun.other}`}
+        data-testid="list-toolbar"
+        className="flex flex-col gap-3 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] p-3 shadow-card sm:p-4"
+      >
+        <div className="flex flex-wrap items-center gap-2">
+          <ListSearchField
+            noun={noun}
+            value={state.q}
+            filtering={filtering}
+            description={searchDescription}
+            epoch={fieldEpoch}
+            onCommit={(q) => onChange({ ...state, q })}
+          />
+          {hasSheetContent && (
+            <button
+              ref={filtersButtonRef}
+              type="button"
+              aria-haspopup="dialog"
+              aria-expanded={sheetOpen}
+              aria-label={filtersButtonLabel(sheetCount)}
+              onClick={() => setSheetOpen(true)}
+              className={`inline-flex min-h-11 items-center gap-2 rounded-md border px-3 text-sm ${phone ? '' : 'sm:hidden'} ${listFocusRing} ${
+                sheetCount > 0
+                  ? 'border-brand/30 bg-[var(--v2-brand-soft)] text-[var(--v2-brand)]'
+                  : 'border-[var(--v2-border)] bg-[var(--v2-bg)] text-[var(--v2-ink-2)]'
+              }`}
+            >
+              <Icon icon={SlidersHorizontal} className="h-4 w-4" />
+              <span>Filters</span>
+              {sheetCount > 0 && (
+                <span
+                  aria-hidden="true"
+                  className="min-w-[18px] rounded-full bg-[var(--v2-brand)] px-1.5 text-center v2-text-meta font-semibold leading-[18px] text-[var(--v2-ink-on-brand)]"
+                >
+                  {sheetCount}
+                </span>
+              )}
+            </button>
+          )}
+          {actions && <div className="flex items-center gap-2">{actions}</div>}
+        </div>
+
         {hasSheetContent && (
-          <button
-            ref={filtersButtonRef}
-            type="button"
-            aria-haspopup="dialog"
-            aria-expanded={sheetOpen}
-            aria-label={filtersButtonLabel(sheetCount)}
-            onClick={() => setSheetOpen(true)}
-            className={`inline-flex min-h-11 items-center gap-2 rounded-md border px-3 text-sm ${phone ? '' : 'sm:hidden'} ${listFocusRing} ${
-              sheetCount > 0
-                ? 'border-brand/30 bg-[var(--v2-brand-soft)] text-[var(--v2-brand)]'
-                : 'border-[var(--v2-border)] bg-[var(--v2-bg)] text-[var(--v2-ink-2)]'
-            }`}
-          >
-            <Icon icon={SlidersHorizontal} className="h-4 w-4" />
-            <span>Filters</span>
-            {sheetCount > 0 && (
-              <span
-                aria-hidden="true"
-                className="min-w-[18px] rounded-full bg-[var(--v2-brand)] px-1.5 text-center v2-text-meta font-semibold leading-[18px] text-[var(--v2-ink-on-brand)]"
-              >
-                {sheetCount}
-              </span>
+          <div className={`hidden flex-wrap items-center gap-2 ${phone ? '' : 'sm:flex'}`} data-testid="list-toolbar-facets">
+            {menuFacets.map((facet) => (
+              <FacetMenu
+                key={facet.id}
+                facet={facet}
+                value={state.facets[facet.id] ?? []}
+                onChange={(values) => setFacet(facet.id, values)}
+              />
+            ))}
+            <span className="flex-1" />
+            {sort && (
+              <FacetMenu
+                facet={{ id: 'sort', label: 'Sort', options: sort.options }}
+                value={state.sort ? [state.sort] : []}
+                onChange={(values) => values[0] && onChange({ ...state, sort: values[0] })}
+                allLabel={null}
+                align="right"
+              />
             )}
-          </button>
+            {period && (
+              <PeriodPicker
+                value={state.period ?? {}}
+                onChange={setPeriod}
+                presets={period.presets}
+                allowAllTime={allowAllTime}
+                defaultValue={period.defaultValue}
+                allowCustom={period.allowCustom}
+              />
+            )}
+          </div>
         )}
-        {actions && <div className="flex items-center gap-2">{actions}</div>}
-      </div>
 
-      {hasSheetContent && (
-        <div className={`hidden flex-wrap items-center gap-2 ${phone ? '' : 'sm:flex'}`} data-testid="list-toolbar-facets">
-          {menuFacets.map((facet) => (
-            <FacetMenu
-              key={facet.id}
-              facet={facet}
-              value={state.facets[facet.id] ?? []}
-              onChange={(values) => setFacet(facet.id, values)}
-            />
-          ))}
-          <span className="flex-1" />
-          {sort && (
-            <FacetMenu
-              facet={{ id: 'sort', label: 'Sort', options: sort.options }}
-              value={state.sort ? [state.sort] : []}
-              onChange={(values) => values[0] && onChange({ ...state, sort: values[0] })}
-              allLabel={null}
-              align="right"
-            />
-          )}
-          {period && (
-            <PeriodPicker
-              value={state.period ?? {}}
-              onChange={setPeriod}
-              presets={period.presets}
-              allowAllTime={allowAllTime}
-              defaultValue={period.defaultValue}
-              allowCustom={period.allowCustom}
-            />
-          )}
-        </div>
-      )}
+        {pillFacets.map((facet) => (
+          <div key={facet.id} className="-mx-3 overflow-x-auto px-3 sm:mx-0 sm:overflow-visible sm:px-0">
+            <FacetMenu facet={facet} value={state.facets[facet.id] ?? []} onChange={(values) => setFacet(facet.id, values)} />
+          </div>
+        ))}
 
-      {pillFacets.map((facet) => (
-        <div key={facet.id} className="-mx-3 overflow-x-auto px-3 sm:mx-0 sm:overflow-visible sm:px-0">
-          <FacetMenu facet={facet} value={state.facets[facet.id] ?? []} onChange={(values) => setFacet(facet.id, values)} />
-        </div>
-      ))}
-
-      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[var(--v2-border)] pt-3">
-        {filtered ? (
-          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+        {/* The status row exists only to hold what is active (#4196): with no
+            filter there is no row and no divider. */}
+        {filtered && (
+          <div className="flex min-w-0 flex-wrap items-center gap-1.5 border-t border-[var(--v2-border)] pt-3" data-testid="list-toolbar-status">
             {active.map((filter) => (
               <span
                 key={filter.key}
@@ -325,14 +342,39 @@ export function ListToolbar({
               {clearFiltersLabel}
             </Button>
           </div>
-        ) : (
-          <span />
         )}
+
+        {sheetOpen && (
+          <FilterSheet
+            noun={noun}
+            state={state}
+            count={count}
+            facets={menuFacets}
+            sort={sort}
+            period={period}
+            onFacet={setFacet}
+            onSort={(value) => onChange({ ...state, sort: value })}
+            onPeriod={setPeriod}
+            onClear={clearAll}
+            onClose={closeSheet}
+            closeOnWide={!phone}
+          />
+        )}
+      </div>
+
+      {/* The list summary line (#4196): outside the search card, directly
+          above the list. The count keeps one place whether or not a filter is
+          active; `ml-auto` holds it right when the totals wrap or are absent. */}
+      <div
+        data-testid="list-summary"
+        className="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-0.5 text-[13px] text-[var(--v2-ink-2)]"
+      >
+        {summary ? <div className="min-w-0">{summary}</div> : null}
         <span
           role="status"
           aria-live="polite"
           data-testid="list-toolbar-count"
-          className="text-[13px] tabular-nums text-[var(--v2-ink-3)]"
+          className="ml-auto tabular-nums text-[var(--v2-ink-3)]"
         >
           {count ? (
             countLabel(noun, count, filtered)
@@ -341,23 +383,6 @@ export function ListToolbar({
           )}
         </span>
       </div>
-
-      {sheetOpen && (
-        <FilterSheet
-          noun={noun}
-          state={state}
-          count={count}
-          facets={menuFacets}
-          sort={sort}
-          period={period}
-          onFacet={setFacet}
-          onSort={(value) => onChange({ ...state, sort: value })}
-          onPeriod={setPeriod}
-          onClear={clearAll}
-          onClose={closeSheet}
-          closeOnWide={!phone}
-        />
-      )}
     </div>
   )
 }
@@ -775,5 +800,40 @@ export function ListNoMatch({ noun, onClear }: { noun: ListNoun; onClear: () => 
         </Button>
       }
     />
+  )
+}
+
+/**
+ * The paging rule (#4196): a paged list's card ends with its last row, and
+ * the next page is one ghost button centred below the card — "Show 25 more",
+ * N being what the next page adds. Nothing renders once every page is loaded:
+ * the list ending is the end. A truncated read keeps the page's own hedge
+ * under the summary line; this button says nothing about it.
+ *
+ * `loaded` and `total` must be one source's figures (the feed's loaded rows
+ * and its server total), so N never mixes two reads.
+ */
+export function ListShowMore({
+  loaded,
+  total,
+  pageSize,
+  hasMore,
+  loading,
+  onShowMore,
+}: {
+  loaded: number
+  total: number
+  pageSize: number
+  hasMore: boolean
+  loading: boolean
+  onShowMore: () => void
+}) {
+  if (!hasMore) return null
+  return (
+    <div className="mt-4 flex justify-center" data-testid="list-show-more">
+      <Button variant="ghost" onClick={onShowMore} disabled={loading} aria-busy={loading || undefined}>
+        {loading ? loadingMoreLabel : showMoreLabel(total - loaded, pageSize)}
+      </Button>
+    </div>
   )
 }

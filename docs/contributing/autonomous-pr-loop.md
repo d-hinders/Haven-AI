@@ -5,6 +5,7 @@ covers:
   - .github/CODEOWNERS
   - .github/workflows/dev-gate.yml
   - .github/workflows/pr-ownership-gate.yml
+  - .github/workflows/external-intake-gate.yml
   - scripts/ci/dev-push-health.mjs
   - .github/ISSUE_TEMPLATE/loop-task.md
   - .github/ISSUE_TEMPLATE/loop-epic.md
@@ -97,9 +98,12 @@ overlap, or stuck CI.
 
 The queue is always **GitHub issues** — nothing is tracked in the repo. Issue
 state *is* the backlog state: an open issue with no PR, no live claim or work
-overlap, and no `pending-review` label is ready (`pending-review` means its spec
-review or an owner decision is still outstanding — `new-task` § *Hold until
-ready*), an open issue with an open Haven PR is in flight, and a closed
+overlap, no `pending-review` label, and not external intake is ready
+(`pending-review` means its spec review or an owner decision is still
+outstanding — `new-task` § *Hold until ready*; external intake — an author
+neither a maintainer nor a Bot, not accepted by a maintainer removing its
+`external` label — is never ready, whatever its labels say: AGENTS.md §
+*Cross-session agent coordination*, rule 0b, #4200), an open issue with an open Haven PR is in flight, and a closed
 issue is done (its PR closed it via `Closes #`). One deliberate exception, and it
 reads as ready when it is not: an issue labelled **`operator-verify`** has merged
 code and is waiting on a human step, so its PR wrote `Refs #<n>` and the merge left
@@ -489,12 +493,29 @@ Without this, `ship-next` can open PRs but cannot auto-merge them.
    - **"Dev merge"** (targets `dev` only, added 2026-09-07 by O1) — a single
      `pull_request` rule with `allowed_merge_methods: ["squash"]` and
      `required_approving_review_count: 0`, plus block-deletion and
-     block-force-push. **No status checks of its own** — the shared ruleset
-     already carries those, and adding them here would be a second copy to
+     block-force-push. **No status checks of its own** except the `dev`-only
+     ones (External intake gate, pending — below) — the shared ruleset
+     already carries the rest, and adding those here would be a second copy to
      drift. It exists only because merge methods intersect and *Haven automerge
      rules* cannot be narrowed without taking `main` down with it: squash-only
      on `dev` had to be expressed on a `dev`-only ruleset. (Its "require Copilot
      review" checkbox is ticked and inert while the approval count is zero.)
+     **Pending operator step (#4200):** add **External intake gate**
+     (`.github/workflows/external-intake-gate.yml`) to THIS ruleset's required
+     contexts — it fails a PR into `dev` that is external, or that closes an
+     open external issue, until a maintainer accepts it. It belongs here, not on
+     *Haven automerge rules*, because it judges `dev` only (it passes every
+     other base), and not on *Dev gate*, which targets `main`. That makes it a
+     required context on `dev` and on `dev` alone: **16** on `dev` (17 with
+     the pending PR ownership gate), `main` unchanged. Until the owner adds it,
+     the check runs and reports on every PR but does not block. Leave *Require
+     branches to be up to date* **unticked** on the new rule: the booleans union,
+     so ticking it would re-impose the up-to-date gate on `dev` that O1 turned
+     off. When the step
+     is done, update the *Effective per branch* table below,
+     `branch-and-release-flow.md` § Promotion to production and
+     `promoting-dev-to-main.md` ("the 15 that every PR into `dev` also meets"
+     becomes 15 of `dev`'s 16).
    - **"Dev gate"** (targets `main` only) — reinforces the pull-request and
      force-push protections on `main`, and carries the strict up-to-date policy,
      one merge-method rule of its own, and **four** required checks. It carries
@@ -548,7 +569,7 @@ Without this, `ship-next` can open PRs but cannot auto-merge them.
 
    | | `dev` | `main` |
    |---|---|---|
-   | Required contexts | **15** (all from *Haven automerge rules*; a 16th, **PR ownership gate**, is pending — #3179, see One-time setup) | **19** (those 15 + `gate`, `qa-freshness`, Design visual regression, Frontend browser smoke; 20 once the pending step is applied) |
+   | Required contexts | **15** (all from *Haven automerge rules*; two more are pending — **PR ownership gate**, #3179, on *Haven automerge rules*, and **External intake gate**, #4200, on *Dev merge*; see One-time setup) | **19** (those 15 + `gate`, `qa-freshness`, Design visual regression, Frontend browser smoke; 20 once the PR ownership gate step is applied) |
    | Branch must be up to date | **no** | **yes** |
    | Allowed merge method | **squash only** | **merge commit only** |
 

@@ -252,7 +252,7 @@ export default function TransactionsTable({
   const colSpan = columns.length
   const sortTooltip = `Sorts the ${transactions.length} loaded transaction${
     transactions.length === 1 ? '' : 's'
-  } — use Load more to widen the set`
+  } — use Show more below the list to widen the set`
   const directionOf = (col: SortColumn): 'asc' | 'desc' | null =>
     sort.column === col ? sort.direction : null
 

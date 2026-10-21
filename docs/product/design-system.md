@@ -839,7 +839,7 @@ rate AND the conversion changed the number:
   (`CoreTokenConfig.pegged`), never a guess from the symbol.
 - Otherwise — a re-priced figure in another display currency (kr, €), or a
   token that floats — **totals and the detail panel** carry it: the account
-  summary card, the Activity tab's result line, the dashboard's 30-day spend
+  summary card, the Activity tab's totals on its list summary line, the dashboard's 30-day spend
   (the server applies the rule per currency, `approxByCurrency`), budget
   captions in fiat, and `TransactionDetailPanel`.
 
@@ -2133,7 +2133,7 @@ All of it lives in `packages/frontend/src/components/ui/`:
 
 | Module | What it is |
 |---|---|
-| `ListToolbar.tsx` | The toolbar, the phone sheet, and `ListNoMatch` |
+| `ListToolbar.tsx` | The toolbar, its list summary line, the phone sheet, `ListNoMatch`, and `ListShowMore` |
 | `FacetMenu.tsx` | One facet as a chip menu or as pills; `RadioMark` / `CheckboxMark` |
 | `PeriodPicker.tsx` | The one Period control, for the toolbar and the Analytics header |
 | `list-url-codec.ts` | Pure parse/serialize of `ListState` to and from the URL |
@@ -2141,13 +2141,15 @@ All of it lives in `packages/frontend/src/components/ui/`:
 | `list-controls-copy.ts` | Every string the pattern shows |
 | `list-menu.ts` | The shared menu-button keyboard contract and viewport clamp |
 
-`/design-system` → **List controls** shows every state: default, filtered, no
-match, loading, phone, server-filtered, and the two primitives on their own.
+`/design-system` → **List controls** shows every state: default (no status
+row, the count alone on the summary line), filtered, no match, loading, phone,
+server-filtered with page totals on the summary line, paging, and the two
+primitives on their own.
 
 #### Anatomy
 
-One card (`rounded-[10px]`, `p-4`, `shadow-card`) directly above the list,
-never repeated inside a parent card.
+One card (`rounded-[10px]`, `p-4`, `shadow-card`), then one line, directly
+above the list; the card is never repeated inside a parent card.
 
 1. **Search**, then the **actions slot**: actions on the *filtered list*, such
    as Export CSV. Page actions (Connect agent, Add contact) stay in the page
@@ -2159,9 +2161,22 @@ never repeated inside a parent card.
    `Button`'s tap-target overlay.
 2. **Facets**, then **Sort** and **Period** on the right. A pill facet gets its
    own row.
-3. **Status row**: one removable chip per active filter, **Clear filters**, and
-   the count on the right. Sort is a view choice, not a filter: it gets no chip
-   and Clear filters keeps it.
+3. **Status row**, only while a filter is active (#4196): one removable chip per
+   active filter and **Clear filters**. With no active filter there is no row
+   and no divider. Sort is a view choice, not a filter: it gets no chip and
+   Clear filters keeps it.
+4. **List summary line**, outside the card (#4196): the count on the right,
+   and the page's own totals, when it has any, on the left — the account
+   Activity tab's "Money in · Money out", Transactions' filtered "N received ·
+   N sent · N failed". The page passes its figures in the toolbar's `summary`
+   slot and never builds the line, so "filtered" is decided once, inside the
+   toolbar. The count keeps one place whether or not a filter is active.
+
+Under the summary line, in this order: the hedges that qualify it
+(`UNPRICED_TOTALS_NOTE` for the totals, then the `truncated` note for the
+count), then page callouts and alerts (the Agents hidden-budget banner, a
+filter-options load error), then the list. On Marketplace the line sits above the
+card grid and Coming soon.
 
 **Active means "differs from the page's default".** One rule decides the
 trigger's tint, the chip, the count on **Filters (n)** (the active filters the
@@ -2261,6 +2276,27 @@ facets (#4116).
   the facet row truncates inside it (`max-w-full` on the trigger) instead of
   stretching it.
 
+#### Paging (#4196)
+
+One rule for every paged list (today the account Activity tab and
+Transactions, both 25 per page):
+
+- the list card ends with its last row — no button, divider or footer band
+  inside it;
+- the next page is `ListShowMore`: a default-size ghost button centred below
+  the card, labelled "Show {n} more", where n is what the next page adds,
+  min(page size, total − loaded), from the feed's own loaded rows and server
+  total;
+- "Show more" when the server still reports more but the totals leave nothing
+  to count (a poll moved the total between reads); "Loading…", disabled, while
+  the page fetches;
+- once every page is loaded, nothing renders below the list. A truncated read
+  is said by its hedge under the summary line, not here.
+
+The dashboard's **Needs attention** expand (`NeedsYou.tsx`) is a local
+disclosure over rows already loaded, not a paged list, and is out of this
+rule's scope.
+
 #### URL state
 
 `useListUrlState(schema, { filtering })` mirrors `ListState` to the URL with
@@ -2290,7 +2326,8 @@ backend.
 |---|---|
 | Search placeholder | "Search {things}". What it matches goes in `searchDescription`, read to screen readers, not in the placeholder |
 | Facet trigger | "{Label}: {value}", "All" when unset |
-| Count | "{n} {things}" unfiltered; "{shown} of {total} {things}" filtered; "Showing the first {n} {things}" when the server capped the read |
+| Count (summary line, right) | "{n} {things}" unfiltered; "{shown} of {total} {things}" filtered; "Showing the first {n} {things}" when the server capped the read |
+| Paging | "Show {n} more", n = min(page size, total − loaded); "Show more" when the server reports more but the totals leave nothing; "Loading…" while fetching |
 | No match | "No {things} match these filters" / "Try a different search, or clear filters to see everything." + Clear filters |
 | Period | "Last 7 days", "Last 30 days", "Last 90 days", "All time", "Custom range" |
 | Clear | "Clear filters" |
@@ -2298,7 +2335,9 @@ backend.
 | Phone | "Filters" with a count badge; its accessible name is "Filters (n)". Footer "Show {n} {things}" |
 
 On a server-paged list both count numbers come from the server: a count never
-mixes loaded rows with a server total. The count is a polite live region.
+mixes loaded rows with a server total. The count is a polite live region
+(`role="status"`, `data-testid="list-toolbar-count"`) on the summary line. The
+toolbar keeps its `count` prop for the phone sheet's footer as well.
 `ListNoMatch` sits where the rows were and never replaces the toolbar. A list
 with *nothing yet* keeps its own empty state ("No contacts yet").
 

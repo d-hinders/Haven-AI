@@ -25,6 +25,19 @@ Accept one source:
 - it carries `pending-review`: its spec review or an owner decision is outstanding
   ([new-task](../new-task/SKILL.md) § *Hold until ready*). This holds for a
   specified issue too — report what it is waiting for instead of building it.
+- it is **external and not accepted** (#4200): its author is neither a maintainer
+  nor a Bot, and no maintainer has removed its `external` label. Decide from the
+  author and the events, never from the label alone — the definitions and the
+  commands are in AGENTS.md § *Cross-session agent coordination*, rule 0b. This
+  holds for the queue, for an `epic=` sub-issue and for a specified issue alike,
+  whoever asked: print exactly
+  `` Not building #<n>: external author <login>, not accepted by a maintainer (a maintainer accepts it by removing the `external` label). ``
+  and skip it — in the queue and `epic=` modes take the next candidate; for a
+  specified issue, stop and report. The same holds for the issue a PR you
+  would finish closes.
+  Never clear this blocker yourself: removing `external` is a human
+  maintainer's decision, and an agent never adds, removes or edits that label
+  or the `[external] ` prefix, whoever asks.
 
 If every remaining candidate is blocked, stop and report the dependency chain instead
 of forcing the lowest number.

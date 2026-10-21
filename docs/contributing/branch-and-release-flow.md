@@ -456,7 +456,7 @@ the next promotion may conflict with it.
   [`main...dev` compare](https://github.com/d-hinders/Haven-AI/compare/main...dev),
   or `git log --first-parent --oneline origin/main..origin/dev` locally. There is
   no standing tracker issue: the pending-promotion digest (#666, kept by
-  `promotion-digest.yml`) went unread and was retired on 2026-10-21; the compare
+  `promotion-digest.yml`) was not being used and was retired on 2026-10-21; the compare
   is the same view on demand.
 
 ## Workflows in this flow

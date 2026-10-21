@@ -32,6 +32,9 @@ import { fileURLToPath } from 'node:url'
 import { selectDigestIssue } from './standing-issue-upsert.mjs'
 
 const SCRIPT = fileURLToPath(new URL('./standing-issue-upsert.mjs', import.meta.url))
+// Historical fixture: the retired promotion digest (#666, workflow deleted
+// 2026-10-21) is the case #3262 lost its body to, so the tests keep its title
+// and `promotion` label to replay that incident. docs-audit.yml is the live caller.
 const DIGEST_TITLE = '📦 Pending promotion: dev → main'
 const BOT = 'app/github-actions'
 

@@ -80,22 +80,22 @@ const TX = {
 }
 
 const { feedState } = vi.hoisted(() => ({
-  feedState: { partialFailure: false, truncated: false, empty: false },
+  feedState: { partialFailure: false, truncated: false, empty: false, hasMore: false, loadingMore: false, total: 1, loadMore: vi.fn() },
 }))
 
 vi.mock('@/hooks/useTransactionsFeed', () => ({
   browserTimeZone: () => 'Europe/Stockholm',
   useTransactionsFeed: () => ({
     transactions: feedState.empty ? [] : [TX],
-    total: feedState.empty ? 0 : 1,
+    total: feedState.empty ? 0 : feedState.total,
     loadingInitial: false,
-    loadingMore: false,
-    hasMore: false,
+    loadingMore: feedState.loadingMore,
+    hasMore: feedState.hasMore,
     error: null,
     partialFailure: feedState.partialFailure,
     truncated: feedState.truncated,
     failedAccountIds: [],
-    loadMore: vi.fn(),
+    loadMore: feedState.loadMore,
     refresh: vi.fn(),
   }),
 }))
@@ -112,6 +112,10 @@ beforeEach(() => {
   feedState.partialFailure = false
   feedState.truncated = false
   feedState.empty = false
+  feedState.hasMore = false
+  feedState.loadingMore = false
+  feedState.total = 1
+  feedState.loadMore = vi.fn()
 })
 
 async function exportNoticeRegion(): Promise<HTMLElement> {
@@ -258,9 +262,12 @@ describe('TransactionsClient — CSV export (#2871)', () => {
     feedState.truncated = true
     render(<TransactionsClient />)
 
+    const hedge = await screen.findByText(/Counts and exports cover the transactions loaded here/i)
+    // It qualifies the count, so it sits directly under the summary line
+    // (#4196) and before the list.
     expect(
-      await screen.findByText(/Counts and exports cover the transactions loaded here/i),
-    ).toBeInTheDocument()
+      screen.getByTestId('list-summary').compareDocumentPosition(hedge) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
     // Hedged, not flat: an account holding exactly one window on an
     // Etherscan-shaped leg would make a flat claim false.
     expect(screen.getByText(/may\s+not be your full history/i)).toBeInTheDocument()
@@ -354,7 +361,7 @@ describe('TransactionsClient — URL and export params (#4111)', () => {
   it('reads the standard count: unfiltered, then filtered against the unfiltered total', async () => {
     urlState.query = ''
     const { unmount } = render(<TransactionsClient />)
-    expect(screen.getByTestId('list-toolbar-count')).toHaveTextContent(/^1 transaction$/)
+    expect(within(screen.getByTestId('list-summary')).getByTestId('list-toolbar-count')).toHaveTextContent(/^1 transaction$/)
     // Unfiltered, the feed's total is the figure: nothing extra is read.
     expect(mockGet).not.toHaveBeenCalled()
     unmount()
@@ -362,7 +369,7 @@ describe('TransactionsClient — URL and export params (#4111)', () => {
     urlState.query = 'accountId=safe-1'
     render(<TransactionsClient />)
     await waitFor(() =>
-      expect(screen.getByTestId('list-toolbar-count')).toHaveTextContent(/^1 of 40 transactions$/),
+      expect(within(screen.getByTestId('list-summary')).getByTestId('list-toolbar-count')).toHaveTextContent(/^1 of 40 transactions$/),
     )
     // Both numbers are server figures: the unfiltered one comes from one
     // filter-free read.
@@ -400,7 +407,7 @@ describe('TransactionsClient — URL and export params (#4111)', () => {
     expect(screen.queryByRole('button', { name: /^Remove Network/ })).toBeNull()
     // Unfiltered once repaired: the count is the plain total.
     await waitFor(() =>
-      expect(screen.getByTestId('list-toolbar-count')).toHaveTextContent(/^1 transaction$/),
+      expect(within(screen.getByTestId('list-summary')).getByTestId('list-toolbar-count')).toHaveTextContent(/^1 transaction$/),
     )
   })
 
@@ -411,5 +418,57 @@ describe('TransactionsClient — URL and export params (#4111)', () => {
     const page = document.body.textContent ?? ''
     expect(page).toMatch(/0\s*sent/)
     expect(page).not.toMatch(/\d\s*received/)
+  })
+
+  it('puts the filtered totals on the left of the list summary line, the count on the right (#4196)', async () => {
+    urlState.query = 'accountId=safe-1'
+    render(<TransactionsClient />)
+
+    const line = screen.getByTestId('list-summary')
+    expect(within(line).getByTestId('transactions-totals')).toHaveTextContent(/received/)
+    expect(line.lastElementChild).toBe(screen.getByTestId('list-toolbar-count'))
+    await waitFor(() =>
+      expect(within(screen.getByTestId('list-summary')).getByTestId('list-toolbar-count')).toHaveTextContent(/^1 of 40 transactions$/),
+    )
+  })
+
+  it('unfiltered, the summary line holds the count alone and the toolbar draws no status row (#4196)', () => {
+    urlState.query = ''
+    render(<TransactionsClient />)
+
+    expect(screen.queryByTestId('transactions-totals')).not.toBeInTheDocument()
+    expect(screen.getByTestId('list-summary').textContent).toBe('1 transaction')
+    expect(screen.queryByTestId('list-toolbar-status')).not.toBeInTheDocument()
+  })
+
+  it('pages with "Show N more", N = min(25, remaining), and calls the feed (#4196)', () => {
+    urlState.query = ''
+    feedState.hasMore = true
+    feedState.total = 60
+    const { unmount } = render(<TransactionsClient />)
+    fireEvent.click(screen.getByRole('button', { name: 'Show 25 more' }))
+    expect(feedState.loadMore).toHaveBeenCalledTimes(1)
+    unmount()
+
+    feedState.total = 10
+    render(<TransactionsClient />)
+    expect(screen.getByRole('button', { name: 'Show 9 more' })).toBeInTheDocument()
+  })
+
+  it('says "Loading…" while fetching, and nothing below the list once every page is loaded (#4196)', () => {
+    urlState.query = ''
+    feedState.hasMore = true
+    feedState.loadingMore = true
+    feedState.total = 60
+    const { unmount } = render(<TransactionsClient />)
+    expect(screen.getByRole('button', { name: 'Loading…' })).toBeDisabled()
+    unmount()
+
+    feedState.hasMore = false
+    feedState.loadingMore = false
+    feedState.total = 1
+    render(<TransactionsClient />)
+    expect(screen.queryByTestId('list-show-more')).not.toBeInTheDocument()
+    expect(document.body.textContent).not.toMatch(/reached the end|End of what/)
   })
 })

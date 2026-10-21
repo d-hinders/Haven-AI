@@ -18,7 +18,7 @@ import {
 import { EmptyState } from '@/components/ui/EmptyState'
 import { FilterPill } from '@/components/ui/FilterPill'
 import { FacetMenu, type ListFacet } from '@/components/ui/FacetMenu'
-import { ListNoMatch, ListToolbar } from '@/components/ui/ListToolbar'
+import { ListNoMatch, ListShowMore, ListToolbar } from '@/components/ui/ListToolbar'
 import { PeriodPicker } from '@/components/ui/PeriodPicker'
 import { clearedListState, type ListState, type PeriodValue } from '@/components/ui/list-url-codec'
 import { Monogram } from '@/components/ui/Monogram'
@@ -794,9 +794,59 @@ function ServerListControlsExample() {
           </Button>
         }
         count={{ shown: 12, total: 60 }}
+        // The page's totals join the list summary line, left of the count
+        // (#4196) — the account Activity tab's shape.
+        summary={
+          <>
+            Money in <Amount amount={1240} currency="USD" /> · Money out <Amount amount={312.5} currency="USD" />
+          </>
+        }
       />
       <p className="text-xs text-[var(--v2-ink-3)]" data-testid="ds-list-controls-requests">
         Requests sent: {requests}
+      </p>
+    </div>
+  )
+}
+
+/**
+ * The paging rule (#4196): the card ends with its last row and "Show N more"
+ * sits centred below it. Drawn with three rows standing in for a page of 25.
+ */
+function PagedListExample() {
+  const total = 49
+  const [loaded, setLoaded] = useState(25)
+  const [loading, setLoading] = useState(false)
+  return (
+    <div data-testid="ds-list-controls-paging">
+      <Card hover={false} className="overflow-hidden">
+        <div className="divide-y divide-[var(--v2-border)]">
+          {['Research agent', 'Invoice agent', 'Travel agent'].map((name) => (
+            <Row key={name} title={name} subtitle="Has a budget" />
+          ))}
+        </div>
+      </Card>
+      <ListShowMore
+        loaded={loaded}
+        total={total}
+        pageSize={25}
+        hasMore={loaded < total}
+        loading={loading}
+        onShowMore={() => {
+          setLoading(true)
+          setTimeout(() => {
+            setLoaded((n) => Math.min(total, n + 25))
+            setLoading(false)
+          }, 600)
+        }}
+      />
+      <p className="mt-3 text-xs text-[var(--v2-ink-3)]">
+        Loaded {loaded} of {total}.{' '}
+        {loaded >= total ? (
+          <button type="button" className="text-[var(--v2-brand)] underline-offset-2 hover:underline" onClick={() => setLoaded(25)}>
+            Reset the example
+          </button>
+        ) : null}
       </p>
     </div>
   )
@@ -2922,10 +2972,10 @@ export default function DesignSystemPage() {
         description="The one pattern for search, filters, sort, period, count and no-match on every list (#4110, epic #4108). A page declares its noun, facets, optional Sort and Period, and an actions slot; the toolbar owns layout, keyboard, the phone sheet, chips, count and copy. State lives in the URL through list-url-codec + useListUrlState. Full rules: the List controls section of design-system.md."
       >
         <div className="grid gap-6">
-          <ListControlsState label="Default — browser-filtered, every keystroke re-renders the rows; Status is multi-select, Budget single-select, Sort is a chip (this list has no sortable headers). Account has one value, so it is hidden.">
+          <ListControlsState label="Default — browser-filtered, every keystroke re-renders the rows; Status is multi-select, Budget single-select, Sort is a chip (this list has no sortable headers). Account has one value, so it is hidden. No filter is active, so there is no status row: the count sits on the list summary line below the card.">
             <ListControlsExample testId="ds-list-controls-default" />
           </ListControlsState>
-          <ListControlsState label="Filtered — a removable chip per filter, Clear filters, and “{shown} of {total}”, announced politely.">
+          <ListControlsState label="Filtered — the status row appears to hold a removable chip per filter and Clear filters; the count stays on the summary line and reads “{shown} of {total}”, announced politely.">
             <ListControlsExample
               testId="ds-list-controls-filtered"
               initial={{ ...DS_LIST_EMPTY, q: 'at', facets: { ...DS_LIST_EMPTY.facets, status: ['active'] } }}
@@ -2947,8 +2997,11 @@ export default function DesignSystemPage() {
               />
             </div>
           </ListControlsState>
-          <ListControlsState label="Server-filtered — the search commits once per 300ms pause (Enter at once, Escape clears), so one request per pause. Export CSV sits in the actions slot; Period offers a custom range.">
+          <ListControlsState label="Server-filtered, with totals — the search commits once per 300ms pause (Enter at once, Escape clears), so one request per pause. Export CSV sits in the actions slot; Period offers a custom range. The page's totals (summary) sit on the left of the summary line, the count on the right.">
             <ServerListControlsExample />
+          </ListControlsState>
+          <ListControlsState label="Paging — a paged list's card ends with its last row; “Show N more” (N = what the next page adds, at most the page size) is a ghost button centred below the card, “Loading…” while it fetches, and nothing once every page is loaded.">
+            <PagedListExample />
           </ListControlsState>
           <ListControlsState label="FacetMenu and PeriodPicker on their own — a pill facet (toggle buttons, aria-pressed) for a short category list, a single-select menu whose page default is not All (untinted at its default; tinted once changed), and the Analytics period: presets only, no All time, untinted at its 30-day default. Menu rows draw RadioMark (menuitemradio) or CheckboxMark (menuitemcheckbox).">
             <FacetPrimitivesExample />

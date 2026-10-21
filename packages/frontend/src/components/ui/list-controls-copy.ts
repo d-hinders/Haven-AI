@@ -47,6 +47,19 @@ export function countLabel(noun: ListNoun, count: ListCount, filtered: boolean):
   return `${count.shown} of ${count.total} ${nounFor(noun, count.total)}`
 }
 
+/**
+ * The paging button below a paged list (#4196): "Show 25 more", where N is
+ * what the next page adds — the page size, or fewer on the last page. When
+ * the server still reports more but the totals say nothing is left (a poll
+ * moved the total between reads), it says "Show more" rather than "Show 0
+ * more".
+ */
+export function showMoreLabel(remaining: number, pageSize: number): string {
+  const n = Math.min(pageSize, remaining)
+  return n > 0 ? `Show ${n} more` : 'Show more'
+}
+export const loadingMoreLabel = 'Loading…'
+
 /** The phone footer: closes the sheet and names the APPLIED result. */
 export function showResultsLabel(noun: ListNoun, count: ListCount | null | undefined): string {
   if (!count) return 'Show results'

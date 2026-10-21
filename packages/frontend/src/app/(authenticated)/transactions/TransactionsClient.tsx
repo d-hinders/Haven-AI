@@ -29,7 +29,7 @@ import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { PageHeader } from '@/components/ui/PageHeader'
-import { ListNoMatch, ListToolbar } from '@/components/ui/ListToolbar'
+import { ListNoMatch, ListShowMore, ListToolbar } from '@/components/ui/ListToolbar'
 import type { ListFacet } from '@/components/ui/FacetMenu'
 import type { ListCount, ListNoun } from '@/components/ui/list-controls-copy'
 import {
@@ -104,6 +104,9 @@ function hasCsvRecords(csv: string): boolean {
 }
 
 const transactionNoun: ListNoun = { one: 'transaction', other: 'transactions' }
+
+/** One page of the feed, and what "Show N more" adds (#4196). */
+const TRANSACTIONS_PAGE_SIZE = 25
 
 /**
  * The page URL's keys (#4111, the list-controls codec). Every key keeps the
@@ -221,7 +224,7 @@ export default function TransactionsClient() {
     truncated,
     loadMore,
     refresh,
-  } = useTransactionsFeed(filters, 25)
+  } = useTransactionsFeed(filters, TRANSACTIONS_PAGE_SIZE)
 
   const userAccounts = user?.accounts ?? []
   const hasAccounts = userAccounts.length > 0
@@ -485,6 +488,32 @@ export default function TransactionsClient() {
         period={{ allowCustom: true }}
         searchDescription="by name, agent or address"
         count={count}
+        summary={showSummary ? (
+          // A Direction filter already fixes one half, so only the other
+          // is shown — never "0 received" under Direction: Outgoing.
+          <span data-testid="transactions-totals" className="inline-flex flex-wrap items-baseline gap-x-1.5">
+            {[
+              filters.direction !== 'out' ? (
+                <span key="received">
+                  <span className="v2-tabular font-medium text-[var(--v2-success)]">{summary.received}</span> received
+                </span>
+              ) : null,
+              filters.direction !== 'in' ? (
+                <span key="sent">
+                  <span className="v2-tabular font-medium text-[var(--v2-debit)]">{summary.sent}</span> sent
+                </span>
+              ) : null,
+              summary.failed > 0 ? (
+                <span key="failed">
+                  <span className="v2-tabular font-medium text-[var(--v2-danger)]">{summary.failed}</span> failed
+                </span>
+              ) : null,
+            ]
+              .filter((part) => part !== null)
+              .flatMap((part, i) => (i === 0 ? [part] : [<span key={`sep-${i}`} aria-hidden="true">·</span>, part]))}
+            {hasMore ? <span className="text-[var(--v2-ink-3)]">(loaded results)</span> : null}
+          </span>
+        ) : undefined}
         searchEpoch={searchEpoch}
         actions={
           <Button
@@ -505,52 +534,22 @@ export default function TransactionsClient() {
         </p>
       )}
 
-      {(showSummary || (!loadingInitial && truncated)) && (
-        <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--v2-ink-3)]">
-          {showSummary ? (
-            // A Direction filter already fixes one half, so only the other
-            // is shown — never "0 received" under Direction: Outgoing.
-            <>
-              {[
-                filters.direction !== 'out' ? (
-                  <span key="received">
-                    <span className="v2-tabular font-medium text-[var(--v2-success)]">{summary.received}</span> received
-                  </span>
-                ) : null,
-                filters.direction !== 'in' ? (
-                  <span key="sent">
-                    <span className="v2-tabular font-medium text-[var(--v2-debit)]">{summary.sent}</span> sent
-                  </span>
-                ) : null,
-                summary.failed > 0 ? (
-                  <span key="failed">
-                    <span className="v2-tabular font-medium text-[var(--v2-danger)]">{summary.failed}</span> failed
-                  </span>
-                ) : null,
-              ]
-                .filter((part) => part !== null)
-                .flatMap((part, i) => (i === 0 ? [part] : [<span key={`sep-${i}`} aria-hidden="true">·</span>, part]))}
-              {hasMore ? <span className="text-[var(--v2-ink-3)]">(loaded results)</span> : null}
-            </>
-          ) : null}
-          {/*
-            #2882/#2884: `total` counts what the explorers returned, not what
-            the account holds — each source is read only up to a fixed page
-            budget. This line qualifies the toolbar's count, so it sits
-            directly beneath it rather than floating above the table.
+      {/*
+        #2882/#2884: `total` counts what the explorers returned, not what
+        the account holds — each source is read only up to a fixed page
+        budget. This line qualifies the count, so it sits directly beneath
+        the summary line (#4196) rather than floating above the table.
 
-            Hedged on purpose. The feed stops at the budget when a source has
-            more, and a failed leg is unknown rather than capped, so "may not
-            be" is true in every state at no cost. It corrects the SCREEN; the
-            downloaded CSV carries no such note, which is recorded on the PR.
-          */}
-          {!loadingInitial && truncated && (
-            <div className="w-full">
-              Counts and exports cover the transactions loaded here, which may
-              not be your full history.
-            </div>
-          )}
-        </div>
+        Hedged on purpose. The feed stops at the budget when a source has
+        more, and a failed leg is unknown rather than capped, so "may not
+        be" is true in every state at no cost. It corrects the SCREEN; the
+        downloaded CSV carries no such note, which is recorded on the PR.
+      */}
+      {!loadingInitial && truncated && (
+        <p className="mt-1 px-0.5 text-xs text-[var(--v2-ink-3)]">
+          Counts and exports cover the transactions loaded here, which may
+          not be your full history.
+        </p>
       )}
 
       {showNoMatch ? (
@@ -586,25 +585,15 @@ export default function TransactionsClient() {
         accountNamesByAddress={accountNamesByAddress}
       />
 
-      {transactions.length > 0 && (
-        <div className="mt-5 flex items-center justify-center">
-          {hasMore ? (
-            <Button
-              variant="ghost"
-              onClick={() => void loadMore()}
-              disabled={loadingMore}
-              className="min-w-36"
-            >
-              {loadingMore ? 'Loading…' : 'Load more'}
-            </Button>
-          ) : (
-            <span className="text-xs text-[var(--v2-ink-3)]">
-              {truncated
-                ? 'End of what\u2019s loaded'
-                : 'You\u2019ve reached the end'}
-            </span>
-          )}
-        </div>
+      {!showNoMatch && !loadingInitial && !error && (
+        <ListShowMore
+          loaded={transactions.length}
+          total={total}
+          pageSize={TRANSACTIONS_PAGE_SIZE}
+          hasMore={hasMore}
+          loading={loadingMore}
+          onShowMore={() => void loadMore()}
+        />
       )}
     </div>
   )

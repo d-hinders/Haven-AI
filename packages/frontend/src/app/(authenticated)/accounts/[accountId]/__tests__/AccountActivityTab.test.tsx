@@ -3,7 +3,7 @@
  * written to the URL next to the page's `tab` through the list-controls
  * codec, the standard `ListToolbar` (with the Account facet absent — the
  * page fixes the account), the standard count and no-match copy, paging
- * through "Load more", the row-to-panel open by mouse and keyboard, the
+ * through "Show N more" below the card (#4196), the row-to-panel open by mouse and keyboard, the
  * truncated-history honesty, and the CSV export carrying the fixed account
  * plus the active filters.
  *
@@ -376,7 +376,7 @@ describe('AccountActivityTab — result count (#4130)', () => {
   it('says the server count for the unfiltered ledger', () => {
     renderTab()
 
-    expect(screen.getByTestId('list-toolbar-count')).toHaveTextContent('2 transactions')
+    expect(within(screen.getByTestId('list-summary')).getByTestId('list-toolbar-count')).toHaveTextContent('2 transactions')
   })
 
   it('says "{shown} of {total}" against the ACCOUNT total when a filter narrows the set', async () => {
@@ -397,7 +397,7 @@ describe('AccountActivityTab — result count (#4130)', () => {
       expect(mockGet).toHaveBeenCalledWith('/transactions?offset=0&limit=1&accountId=safe-1'),
     )
     await waitFor(() =>
-      expect(screen.getByTestId('list-toolbar-count')).toHaveTextContent('3 of 5 transactions'),
+      expect(within(screen.getByTestId('list-summary')).getByTestId('list-toolbar-count')).toHaveTextContent('3 of 5 transactions'),
     )
     expect(document.body.textContent).not.toContain('matching')
   })
@@ -486,7 +486,7 @@ describe('AccountActivityTab — rows and the detail panel (#4098)', () => {
     expect(screen.getByTestId('detail-panel')).toHaveTextContent('panel:0xdef')
   })
 
-  it('calls the feed for the next page on Load more', () => {
+  it('pages with "Show N more" below the list card, N being what the next page adds (#4196)', () => {
     const loadMore = vi.fn()
     feedMock.mockImplementation(() => ({
       ...DEFAULT_FEED,
@@ -497,8 +497,26 @@ describe('AccountActivityTab — rows and the detail panel (#4098)', () => {
     }))
     renderTab()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Load more' }))
+    // 2 loaded of 5: the next page adds 3.
+    const button = screen.getByRole('button', { name: 'Show 3 more' })
+    // Outside the card: the card ends with its last row.
+    const card = ledgerRows()[0].closest('.shadow-card')
+    expect(card).not.toBeNull()
+    expect(card).not.toContainElement(button)
+    fireEvent.click(button)
     expect(loadMore).toHaveBeenCalledTimes(1)
+  })
+
+  it('reads "Loading…" while the next page fetches, and renders nothing once every page is loaded (#4196)', () => {
+    feedMock.mockImplementation(() => ({ ...DEFAULT_FEED, total: 5, hasMore: true, loadingMore: true, loadMore: vi.fn(), refresh: vi.fn() }))
+    const { unmount } = renderTab()
+    expect(screen.getByRole('button', { name: 'Loading…' })).toBeDisabled()
+    unmount()
+
+    feedMock.mockImplementation(() => ({ ...DEFAULT_FEED, total: 2, hasMore: false, loadMore: vi.fn(), refresh: vi.fn() }))
+    renderTab()
+    expect(screen.queryByTestId('list-show-more')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Show .*more$/ })).not.toBeInTheDocument()
   })
 
   it('shows the server-side in/out totals for the filtered set', () => {
@@ -506,6 +524,18 @@ describe('AccountActivityTab — rows and the detail panel (#4098)', () => {
 
     expect(screen.getByText(/Money in/)).toBeInTheDocument()
     expect(screen.getByText(/Money out/)).toBeInTheDocument()
+  })
+
+  it('draws the totals on the left of the list summary line, the count on the right (#4196)', () => {
+    renderTab()
+
+    const line = screen.getByTestId('list-summary')
+    expect(within(line).getByTestId('activity-totals')).toHaveTextContent(/^Money in .* · Money out /)
+    expect(line.firstElementChild).toContainElement(within(line).getByTestId('activity-totals'))
+    expect(line.lastElementChild).toBe(screen.getByTestId('list-toolbar-count'))
+    expect(within(screen.getByTestId('list-summary')).getByTestId('list-toolbar-count')).toHaveTextContent('2 transactions')
+    // Unfiltered: the toolbar draws no status row.
+    expect(screen.queryByTestId('list-toolbar-status')).not.toBeInTheDocument()
   })
 
   it('says in words when some rows could not be valued, and shows "—" for an unknown total (#4165)', () => {

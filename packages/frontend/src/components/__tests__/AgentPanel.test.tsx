@@ -221,7 +221,7 @@ describe('AgentPanel rail affordances', () => {
     expect(screen.queryByRole('button', { name: /Removed/ })).toBeNull()
     expect(document.getElementById('removed-agent-list')).toBeNull()
     // The count is the default view: archived agents are not in it.
-    expect(screen.getByTestId('list-toolbar-count')).toHaveTextContent('1 agent')
+    expect(within(screen.getByTestId('list-summary')).getByTestId('list-toolbar-count')).toHaveTextContent('1 agent')
   })
 
   it('Archived: Shown lists archived agents alongside the others, and the count includes them', () => {
@@ -236,7 +236,7 @@ describe('AgentPanel rail affordances', () => {
     expect(screen.getByText('Old agent')).toBeInTheDocument()
     expect(screen.getByText('Research agent')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Remove Archived: Shown' })).toBeInTheDocument()
-    expect(screen.getByTestId('list-toolbar-count')).toHaveTextContent('2 of 2 agents')
+    expect(within(screen.getByTestId('list-summary')).getByTestId('list-toolbar-count')).toHaveTextContent('2 of 2 agents')
   })
 
   it('an archived card keeps its archived treatment when shown: Restore to list, no operational actions', () => {
@@ -401,7 +401,7 @@ describe('AgentPanel list toolbar (#3165, on ListToolbar since #4113)', () => {
     fireEvent.change(screen.getByRole('searchbox', { name: 'Search agents' }), { target: { value: 'brav' } })
     expect(screen.queryByText('Alpha')).toBeNull()
     expect(screen.getByText('Bravo')).toBeInTheDocument()
-    expect(screen.getByTestId('list-toolbar-count')).toHaveTextContent('1 of 2 agents')
+    expect(within(screen.getByTestId('list-summary')).getByTestId('list-toolbar-count')).toHaveTextContent('1 of 2 agents')
   })
 
   it('a zero-result filter shows the standard no-match state and never hides the toolbar', () => {
@@ -412,7 +412,7 @@ describe('AgentPanel list toolbar (#3165, on ListToolbar since #4113)', () => {
     // The toolbar must survive the zero state (mutation: gate it on the
     // filtered length → this line goes red).
     expect(screen.getByTestId('list-toolbar')).toBeInTheDocument()
-    expect(screen.getByTestId('list-toolbar-count')).toHaveTextContent('0 of 1 agent')
+    expect(within(screen.getByTestId('list-summary')).getByTestId('list-toolbar-count')).toHaveTextContent('0 of 1 agent')
     // The no-match state's Clear filters (the status row has its own too).
     const clears = screen.getAllByRole('button', { name: 'Clear filters' })
     fireEvent.click(clears[clears.length - 1])

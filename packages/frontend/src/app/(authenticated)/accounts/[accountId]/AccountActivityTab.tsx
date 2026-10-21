@@ -22,9 +22,10 @@
  *   explorer window;
  * - rows grouped by day in #4096's ledger mode (`TransactionActivityRow`
  *   with `onOpen`, `TransactionActivityDayHeader`), merchant-first row
- *   titles with the agent as the subtitle (#4166), "Load more" for the next
- *   page, and the shared `TransactionDetailPanel` on row open — click or
- *   Enter/Space, the row is a whole-row button;
+ *   titles with the agent as the subtitle (#4166), the shared
+ *   `TransactionDetailPanel` on row open — click or Enter/Space, the row is
+ *   a whole-row button — and "Show N more" below the card for the next page
+ *   (#4196, `ListShowMore`);
  * - two distinct empty states: the standard no-match state when a filter
  *   matches nothing, and "No activity yet" with a Receive button for an
  *   account with no history.
@@ -40,7 +41,7 @@ import {
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { EmptyState } from '@/components/ui/EmptyState'
-import { ListNoMatch, ListToolbar } from '@/components/ui/ListToolbar'
+import { ListNoMatch, ListShowMore, ListToolbar } from '@/components/ui/ListToolbar'
 import type { ListFacet } from '@/components/ui/FacetMenu'
 import type { ListCount, ListNoun } from '@/components/ui/list-controls-copy'
 import {
@@ -105,6 +106,9 @@ interface AccountActivityTabProps {
 }
 
 const transactionNoun: ListNoun = { one: 'transaction', other: 'transactions' }
+
+/** One page of the feed, and what "Show N more" adds (#4196). */
+const ACTIVITY_PAGE_SIZE = 25
 
 /**
  * The tab's URL keys (#4130, the list-controls codec), alongside the page's
@@ -263,7 +267,7 @@ export default function AccountActivityTab({
     truncated,
     loadMore,
     refresh: refreshFeed,
-  } = useTransactionsFeed(feedFilters, 25)
+  } = useTransactionsFeed(feedFilters, ACTIVITY_PAGE_SIZE)
   const moneyTotals = useActivityMoneyTotals(feedFilters, currency)
   const { agents, tokens, error: filtersError } = useTransactionFilters()
 
@@ -406,6 +410,7 @@ export default function AccountActivityTab({
         ? null
         : { shown: total, total: unfilteredTotal }
   const showNoMatch = hasActiveFilters && !loadingInitial && !error && transactions.length === 0
+  const showTotals = !loadingInitial && !moneyTotals.loading && !moneyTotals.error && total > 0
 
   // The page bumps `refreshKey` after a send or receive lands; the ledger
   // and its totals re-read rather than waiting for the next poll. The guard
@@ -429,6 +434,18 @@ export default function AccountActivityTab({
         period={{ allowCustom: true }}
         searchDescription="by name, agent or address"
         count={count}
+        summary={showTotals ? (
+          // The money the filtered set moved, from the same server-side walk
+          // the count describes. Hidden while loading and after a failed read
+          // — no figure is better than a wrong one; the feed's own error
+          // state carries the retry story.
+          <span data-testid="activity-totals">
+            Money in{' '}
+            <Amount amount={moneyTotals.moneyIn} currency={currency} approx={moneyTotals.approxIn} /> ·
+            Money out{' '}
+            <Amount amount={moneyTotals.moneyOut} currency={currency} approx={moneyTotals.approxOut} />
+          </span>
+        ) : undefined}
         actions={
           <Button
             variant="ghost"
@@ -442,6 +459,24 @@ export default function AccountActivityTab({
           </Button>
         }
       />
+
+      {/* The hedges that qualify the summary line sit directly under it
+          (#4196), before any callout. */}
+      {/* #4165: rows the totals could not value are said in words, never
+          folded into a "≈" — the mark means converted, nothing else. */}
+      {showTotals && moneyTotals.unpriced ? (
+        <p className="mt-1 px-0.5 text-xs text-[var(--v2-ink-3)]">{UNPRICED_TOTALS_NOTE}</p>
+      ) : null}
+      {/* #2882: `total` counts what the explorers returned, not what the
+          wallet holds — each source is read only up to a fixed page budget.
+          This qualifies the count, hedged on purpose: the feed stops at the
+          budget when a source has more, and a failed leg is unknown rather
+          than capped, so "may not be" is true in every state at no cost. */}
+      {!loadingInitial && truncated && (
+        <p className="mt-1 px-0.5 text-xs text-[var(--v2-ink-3)]">
+          Counts and totals cover the history Haven could load, which may not be your full history.
+        </p>
+      )}
 
       {filtersError && (
         <p role="alert" className="mt-2 text-xs text-[var(--v2-danger)]">
@@ -476,36 +511,6 @@ export default function AccountActivityTab({
         </div>
       )}
 
-      {/* ── The money the filtered set moved, from the same server-side walk
-          the toolbar's count describes. Hidden while loading and after a
-          failed read — no figure is better than a wrong one; the feed's own
-          error state carries the retry story. */}
-      {!loadingInitial && !moneyTotals.loading && !moneyTotals.error && total > 0 && (
-        <>
-          <p className="mt-3 text-sm text-[var(--v2-ink-2)]">
-            Money in{' '}
-            <Amount amount={moneyTotals.moneyIn} currency={currency} approx={moneyTotals.approxIn} /> ·
-            Money out{' '}
-            <Amount amount={moneyTotals.moneyOut} currency={currency} approx={moneyTotals.approxOut} />
-          </p>
-          {/* #4165: rows the totals could not value are said in words, never
-              folded into a "≈" — the mark means converted, nothing else. */}
-          {moneyTotals.unpriced ? (
-            <p className="mt-1 text-xs text-[var(--v2-ink-3)]">{UNPRICED_TOTALS_NOTE}</p>
-          ) : null}
-        </>
-      )}
-      {/* #2882: `total` counts what the explorers returned, not what the
-          wallet holds — each source is read only up to a fixed page budget.
-          This qualifies the toolbar's count, hedged on purpose: the feed
-          stops at the budget when a source has more, and a failed leg is
-          unknown rather than capped, so "may not be" is true in every state
-          at no cost. */}
-      {!loadingInitial && truncated && (
-        <p className="mt-3 text-xs text-[var(--v2-ink-3)]">
-          Counts and totals cover the history Haven could load, which may not be your full history.
-        </p>
-      )}
 
       {showNoMatch ? (
         // The standard no-match state (#4110): it sits where the rows were —
@@ -582,16 +587,20 @@ export default function AccountActivityTab({
                   ))}
                 </div>
               ))}
-              {hasMore ? (
-                <div className="flex justify-center px-5 py-4">
-                  <Button variant="ghost" size="sm" onClick={() => void loadMore()} disabled={loadingMore}>
-                    {loadingMore ? 'Loading…' : 'Load more'}
-                  </Button>
-                </div>
-              ) : null}
             </div>
           )}
         </Card>
+      )}
+
+      {!showNoMatch && !loadingInitial && !error && (
+        <ListShowMore
+          loaded={transactions.length}
+          total={total}
+          pageSize={ACTIVITY_PAGE_SIZE}
+          hasMore={hasMore}
+          loading={loadingMore}
+          onShowMore={() => void loadMore()}
+        />
       )}
 
       <TransactionDetailPanel

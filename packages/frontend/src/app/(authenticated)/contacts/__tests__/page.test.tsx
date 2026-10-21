@@ -157,7 +157,7 @@ describe('ContactsPage', () => {
 
     render(<ContactsPage />)
 
-    expect(screen.getByTestId('list-toolbar-count')).toHaveTextContent(/^2 contacts$/)
+    expect(within(screen.getByTestId('list-summary')).getByTestId('list-toolbar-count')).toHaveTextContent(/^2 contacts$/)
 
     fireEvent.change(screen.getByRole('searchbox', { name: 'Search contacts' }), {
       target: { value: '2222' },
@@ -166,7 +166,7 @@ describe('ContactsPage', () => {
     // Browser filtering: every keystroke re-renders the list.
     expect(screen.getByText('Acme Services')).toBeInTheDocument()
     expect(screen.queryByText('Gnosis Vendor')).not.toBeInTheDocument()
-    expect(screen.getByTestId('list-toolbar-count')).toHaveTextContent(/^1 of 2 contacts$/)
+    expect(within(screen.getByTestId('list-summary')).getByTestId('list-toolbar-count')).toHaveTextContent(/^1 of 2 contacts$/)
   })
 
   it('offers the network facet only with more than one chain, and filters with it', async () => {
@@ -215,7 +215,7 @@ describe('ContactsPage', () => {
     expect(screen.getByRole('searchbox', { name: 'Search contacts' })).toHaveValue('gnosis')
     expect(screen.getByText('Gnosis Vendor')).toBeInTheDocument()
     expect(screen.queryByText('Acme Services')).not.toBeInTheDocument()
-    expect(screen.getByTestId('list-toolbar-count')).toHaveTextContent(/^1 of 2 contacts$/)
+    expect(within(screen.getByTestId('list-summary')).getByTestId('list-toolbar-count')).toHaveTextContent(/^1 of 2 contacts$/)
   })
 
   it('drops a chainId that is not a network id instead of showing it as a filter', async () => {
@@ -227,7 +227,7 @@ describe('ContactsPage', () => {
 
     await waitFor(() => expect(window.location.search).toBe(''))
     expect(screen.queryByRole('button', { name: /^Remove Network/ })).toBeNull()
-    expect(screen.getByTestId('list-toolbar-count')).toHaveTextContent(/^1 contact$/)
+    expect(within(screen.getByTestId('list-summary')).getByTestId('list-toolbar-count')).toHaveTextContent(/^1 contact$/)
   })
 
   it('shows the standard no-match state, and its Clear filters returns to the default', async () => {

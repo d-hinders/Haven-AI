@@ -3,11 +3,19 @@ import userEvent from '@testing-library/user-event'
 import { useMemo, useState } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ListFacet } from '../FacetMenu'
-import { ListNoMatch, ListToolbar, type ListToolbarProps } from '../ListToolbar'
+import { ListNoMatch, ListShowMore, ListToolbar, type ListToolbarProps } from '../ListToolbar'
 import type { ListCount } from '../list-controls-copy'
 import type { ListState } from '../list-url-codec'
 
 const noun = { one: 'agent', other: 'agents' }
+
+/**
+ * The count, where #4196 puts it: on the list summary line below the
+ * toolbar's card, never inside the `role="search"` card.
+ */
+function summaryCount() {
+  return within(screen.getByTestId('list-summary')).getByRole('status')
+}
 
 const FACETS: ListFacet[] = [
   {
@@ -259,7 +267,7 @@ describe('ListToolbar — facets, chips and count', () => {
   it('unfiltered: no chips, no Clear filters, the count reads "{n} {things}"', () => {
     render(<BrowserList />)
     expect(screen.queryByRole('button', { name: 'Clear filters' })).not.toBeInTheDocument()
-    expect(screen.getByRole('status')).toHaveTextContent('3 agents')
+    expect(summaryCount()).toHaveTextContent('3 agents')
   })
 
   it('filtered: a removable chip per filter, Clear filters, and "{shown} of {total}"', async () => {
@@ -269,7 +277,7 @@ describe('ListToolbar — facets, chips and count', () => {
         initial={{ ...EMPTY, q: 'a', facets: { status: ['active'], direction: [], account: ['acc-1'] }, period: { preset: '30d' } }}
       />,
     )
-    expect(screen.getByRole('status')).toHaveTextContent('2 of 3 agents')
+    expect(summaryCount()).toHaveTextContent('2 of 3 agents')
     expect(screen.getByRole('button', { name: 'Remove “a”' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Remove Status: Active' })).toBeInTheDocument()
     // The hidden one-option facet still gets its chip: it is the only way out.
@@ -281,14 +289,54 @@ describe('ListToolbar — facets, chips and count', () => {
 
     await user.click(screen.getByRole('button', { name: 'Clear filters' }))
     expect(screen.queryByRole('button', { name: /^Remove/ })).not.toBeInTheDocument()
-    expect(screen.getByRole('status')).toHaveTextContent('3 agents')
+    expect(summaryCount()).toHaveTextContent('3 agents')
     expect(screen.getByRole('searchbox', { name: 'Search agents' })).toHaveValue('')
+  })
+
+  it('unfiltered: no status row and no divider; the count sits on the summary line, outside the search card (#4196)', () => {
+    render(<BrowserList />)
+    expect(screen.queryByTestId('list-toolbar-status')).not.toBeInTheDocument()
+    const card = screen.getByRole('search', { name: 'Filter agents' })
+    // Nothing in the card carries the status row's divider.
+    expect(card.querySelector('.border-t')).toBeNull()
+    expect(within(card).queryByRole('status')).not.toBeInTheDocument()
+    expect(within(card).queryByTestId('list-summary')).not.toBeInTheDocument()
+    const count = screen.getByTestId('list-toolbar-count')
+    expect(count).toBe(summaryCount())
+    expect(count).toHaveAttribute('role', 'status')
+    expect(count).toHaveAttribute('aria-live', 'polite')
+    // The summary line follows the card directly.
+    expect(card.nextElementSibling).toBe(screen.getByTestId('list-summary'))
+  })
+
+  it('filtered: the status row holds only the chips and Clear filters, never the count (#4196)', () => {
+    render(<BrowserList initial={{ ...EMPTY, facets: { status: ['active'], direction: [], account: [] } }} />)
+    const status = screen.getByTestId('list-toolbar-status')
+    expect(within(status).getByRole('button', { name: 'Remove Status: Active' })).toBeInTheDocument()
+    expect(within(status).getByRole('button', { name: 'Clear filters' })).toBeInTheDocument()
+    expect(within(status).queryByRole('status')).not.toBeInTheDocument()
+    expect(within(status).queryByTestId('list-toolbar-count')).not.toBeInTheDocument()
+    expect(status).toHaveClass('border-t')
+    expect(summaryCount()).toHaveTextContent('2 of 3 agents')
+  })
+
+  it('the summary slot draws the page totals on the left of the count; without it the count stands alone (#4196)', () => {
+    const { rerender } = render(
+      <ListToolbar noun={noun} state={EMPTY} onChange={() => {}} filtering="server" count={{ shown: 3, total: 3 }} summary={<span>Money in $10.00</span>} />,
+    )
+    const line = screen.getByTestId('list-summary')
+    expect(line.textContent).toBe('Money in $10.003 agents')
+    expect(line.firstElementChild).toHaveTextContent('Money in $10.00')
+    expect(line.lastElementChild).toBe(screen.getByTestId('list-toolbar-count'))
+    rerender(<ListToolbar noun={noun} state={EMPTY} onChange={() => {}} filtering="server" count={{ shown: 3, total: 3 }} />)
+    expect(screen.getByTestId('list-summary').children).toHaveLength(1)
+    expect(screen.getByTestId('list-summary').textContent).toBe('3 agents')
   })
 
   it('the count announces politely, says "Showing the first N" when capped, and is a placeholder while loading', () => {
     const capped: ListCount = { shown: 500, total: 500, cappedAt: 500 }
     const { rerender } = render(<ListToolbar noun={noun} state={EMPTY} onChange={() => {}} filtering="server" count={capped} />)
-    const status = screen.getByRole('status')
+    const status = summaryCount()
     expect(status).toHaveAttribute('aria-live', 'polite')
     expect(status).toHaveTextContent('Showing the first 500 agents')
     rerender(<ListToolbar noun={noun} state={EMPTY} onChange={() => {}} filtering="server" count={null} />)
@@ -342,7 +390,7 @@ describe('ListToolbar — page defaults', () => {
     expect(screen.getByRole('button', { name: 'Network: Base' })).toHaveAttribute('data-active', 'false')
     expect(screen.getByRole('button', { name: 'Period: Last 30 days' })).toHaveAttribute('data-active', 'false')
     expect(screen.queryByRole('button', { name: /^Remove/ })).not.toBeInTheDocument()
-    expect(screen.getByRole('status')).toHaveTextContent('3 agents')
+    expect(summaryCount()).toHaveTextContent('3 agents')
     expect(screen.getByRole('button', { name: 'Filters' })).toBeInTheDocument()
   })
 
@@ -413,7 +461,7 @@ describe('ListToolbar — a facet with no All row (allLabel: null, #4113)', () =
     expect(trigger).toHaveAttribute('data-active', 'false')
     expect(screen.queryByRole('button', { name: /^Remove/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Clear filters' })).not.toBeInTheDocument()
-    expect(screen.getByRole('status')).toHaveTextContent('3 agents')
+    expect(summaryCount()).toHaveTextContent('3 agents')
 
     await user.click(trigger)
     expect(screen.getAllByRole('menuitemradio').map((r) => r.textContent)).toEqual(['Hidden', 'Shown'])
@@ -490,7 +538,7 @@ describe('ListToolbar — period without All time', () => {
       />,
     )
     expect(screen.queryByRole('button', { name: /^Remove Period/ })).not.toBeInTheDocument()
-    expect(screen.getByRole('status')).toHaveTextContent('3 agents')
+    expect(summaryCount()).toHaveTextContent('3 agents')
     expect(screen.getByRole('button', { name: 'Period: Last 30 days' })).toHaveAttribute('data-active', 'false')
   })
 
@@ -532,7 +580,7 @@ describe('ListToolbar — phone sheet', () => {
     expect(onChange).toHaveBeenLastCalledWith({ ...EMPTY, facets: { ...EMPTY.facets, status: ['paused'] } })
     expect(within(sheet).getByRole('checkbox', { name: /Paused/, checked: true })).toBeInTheDocument()
     expect(within(sheet).getByRole('button', { name: 'Show 1 agent' })).toBeInTheDocument()
-    expect(screen.getByRole('status')).toHaveTextContent('1 of 3 agents')
+    expect(summaryCount()).toHaveTextContent('1 of 3 agents')
 
     await user.click(within(sheet).getByRole('radio', { name: 'Outgoing', checked: false }))
     expect(within(sheet).getByRole('radio', { name: 'Outgoing', checked: true })).toBeInTheDocument()
@@ -653,5 +701,40 @@ describe('ListNoMatch', () => {
     expect(screen.getByText('Try a different search, or clear filters to see everything.')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Clear filters' }))
     expect(onClear).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('ListShowMore (#4196)', () => {
+  function renderMore(props: Partial<Parameters<typeof ListShowMore>[0]> = {}) {
+    const onShowMore = vi.fn()
+    const utils = render(
+      <ListShowMore loaded={25} total={49} pageSize={25} hasMore loading={false} onShowMore={onShowMore} {...props} />,
+    )
+    return { ...utils, onShowMore }
+  }
+
+  it('says what the next page adds: the page size, or the remainder on the last page', () => {
+    const { rerender, onShowMore } = renderMore({ loaded: 25, total: 100 })
+    fireEvent.click(screen.getByRole('button', { name: 'Show 25 more' }))
+    expect(onShowMore).toHaveBeenCalledTimes(1)
+    rerender(<ListShowMore loaded={25} total={49} pageSize={25} hasMore loading={false} onShowMore={onShowMore} />)
+    expect(screen.getByRole('button', { name: 'Show 24 more' })).toBeInTheDocument()
+  })
+
+  it('says "Show more" when the server reports more but the totals say nothing is left', () => {
+    renderMore({ loaded: 49, total: 49 })
+    expect(screen.getByRole('button', { name: 'Show more' })).toBeInTheDocument()
+  })
+
+  it('reads "Loading…" and is disabled while the next page fetches', () => {
+    renderMore({ loading: true })
+    const button = screen.getByRole('button', { name: 'Loading…' })
+    expect(button).toBeDisabled()
+    expect(button).toHaveAttribute('aria-busy', 'true')
+  })
+
+  it('renders nothing once every page is loaded', () => {
+    const { container } = renderMore({ loaded: 49, total: 49, hasMore: false })
+    expect(container).toBeEmptyDOMElement()
   })
 })

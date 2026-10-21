@@ -1732,26 +1732,35 @@ network mechanism has an executed census (C3).
   records, and qa-dev has been red on every `money-flow` run since #4144
   started requiring it. From #4144's own deploy (2026-10-20 12:21Z) to the
   scheduled run at the scan SHA: 21 failure, 1 cancelled, 0 success (the 24
-  hours before: 11 success, 0 failure). Every failure names the SDK-direct
-  legs. In 7 of those jobs the SDK legs recorded within the window 4 times in
-  28 attempts, and the hosted leg's first report 1 time in 14 (it passes
-  through the agent's guided follow-up). The SDK's local path posts the report
+  hours before: 17 success, 2 failure, neither on a settlement-record check;
+  `gh run list --workflow qa-dev.yml --created '2026-10-19T00:00:00Z..2026-10-21T12:00:00Z' --limit 500`,
+  then each run's `money-flow` job). Every failure names the SDK-direct legs.
+  Over all 21 failed jobs (42 attempts) the SDK legs recorded within the
+  window 10 times in 84 attempts (71 of 74 failures "did not record", 2 rate
+  limit, 1 "already settled"), and of the hosted leg's 41 passes 39 went
+  through the agent's guided follow-up, 2 through the settle's own report. The SDK's local path posts the report
   once and discards the outcome by design (#3764 D1/D2), and #4144's PR body
   named this residual and said the fix belongs in the SDK. The standing
   tracker #2769 carries 21 bot comments in the period and none from a person;
   no claim names the red. Whether dev answered `retryable` or refused, and
   whether the passive sweep recorded later, are not determinable from the
   tree. Untracked as a remedy. Money-path by file (the SDK's merchant
-  completion module).
+  completion module). *Corrected in review:* the baseline was first written
+  as 11 success / 0 failure, from a run listing without `--limit` (20 newest
+  runs), and the record counts came from a 7-job sample only.
 - C2 — the backend's delegation builders send MetaMask SDK analytics to a
   third-party host, and nothing in the tree turns it off. Under the preload,
   31 of the 428 backend test files run opened 87 connections to the kit's
   analytics endpoint; with `DO_NOT_TRACK=1` the same `src/modules` run opened
   0 (was 11 files / 37). The kit (1.6.0) disables itself only on `CI` or a
   do-not-track signal, and `DO_NOT_TRACK` resolves in 0 tracked files. The
-  payload, read from the kit's source: function name, scope type, caveat
-  names, SDK version, a random id, platform and, in a browser, the page's
-  hostname; no address or amount. Callers: 7 backend files and the
+  payload, read from the kit's source: an initialization event with the
+  session fields (SDK version, a random id, platform and, in a browser, the
+  page's hostname), then per call the function name and its parameters
+  (scope type and caveat names for a delegation; implementation, two
+  booleans and the chain id for a smart account; the chain id for the
+  enforcer client and its amount read); no address or amount. The kit tracks
+  22 names (a multi-line regex over its build). Callers: 7 backend files and the
   frontend's passkey signing (read, not executed). The deployed environment
   is not determinable. Untracked.
 - C3 — the backend's "a test body must not dial the real network" rule
@@ -1759,7 +1768,7 @@ network mechanism has an executed census (C3).
   twice on 2026-10-14) is enforced by no net, and 2 test files (11 tests) still
   dial the price API: 12 connections at the scan SHA, all harmless to refuse.
   The preload, in refusing mode, is the net's prototype: 425 of the 428 files
-  behaved as before; the 3 reds are an environment role grant, the SSRF guard's
+  passed under it (no baseline run was compared); the 3 reds are an environment role grant, the SSRF guard's
   loopback-pinned hostnames (match the resolved address) and the deliberate
   live-chain contract test (exempt it by name). Untracked.
 - Notes, not proposed: a heuristic census of cold dynamic imports in test
@@ -1773,8 +1782,9 @@ network mechanism has an executed census (C3).
 **Dispositions observed (upkeep the ledger lacked):** 2026-10-19 C2 → #4119
 closed 2026-10-20 via PR #4144 (`aa818795d`) → `shipped`. 2026-10-19 C3 →
 #4120 closed via PR #4153 (`688b5c8dc`) → `shipped`. 2026-10-19 C4 → #4121
-closed via PR #4140 (`5bb6d4ae7`) → `shipped`, re-verified by execution (M5
-below). The spec-review siblings: #4122 closed via PR #4131 (`44ce131a9`);
+closed via PR #4140 (`5bb6d4ae7`) → `shipped`, re-verified by execution (the
+30th-hosted-tool mutation below). The spec-review siblings: #4122 closed by
+hand 2026-10-20 after PR #4131 (`44ce131a9`, `Refs`) landed;
 #4123 open, its build #4133 landed with `Refs`, awaiting a live check.
 
 **Probed clean** (block → examined / partial / not examined → command → number, all at `8cc3717c8`):

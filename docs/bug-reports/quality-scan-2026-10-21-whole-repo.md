@@ -74,7 +74,8 @@ the end, `git status --porcelain` → 0 lines before the report was written.
 disposition. None is re-surfaced. C1 below sits beside the 2026-10-19 C2
 (#4119, `shipped` via #4144) and is not that candidate: C2 was the qa-dev
 legs not checking the record; C1 is what the check found once it ran — the
-SDK's own report does not land, on 21 of 21 runs. The re-measurable deltas
+SDK's own report fails to land within 45 s on at least one SDK leg in every
+one of the 21 failed runs. The re-measurable deltas
 are in §5. None worsened materially.
 
 ## 1. Structural findings
@@ -91,16 +92,24 @@ three mechanisms only the network one has a census that executed (§2 C3,
 
 ## 2. Improvement candidates (one PR each) — pending the owner's word
 
-### C1 — the SDK's one-shot EIP-3009 settlement report recorded in 5 of 42 qa-dev attempts, and qa-dev has been red on every money-flow run since #4144 asserted it
+### C1 — the SDK's one-shot EIP-3009 settlement report recorded in 5 of 42 leg attempts (3 legs × 14 attempts in 7 jobs), and qa-dev has been red on every money-flow run since #4144 asserted it
 
 - **Observed (qa-dev, job level).** `#4144` (`aa818795d`, 2026-10-20
   12:18Z) made the EIP-3009 legs require Haven's own record of the merchant
   settlement within 45 s. It touched only `packages/qa-agent` and two docs
   (`git show --stat aa818795d` → 14 files).
-  - Before it: 2026-10-19T12:00Z → 2026-10-20T12:07Z, `money-flow` ran 11
-    times → 11 `success` (`gh run list --workflow qa-dev.yml --created
-    '2026-10-19T12:00:00Z..2026-10-20T12:18:00Z'`, then each run's
-    `money-flow` job conclusion).
+  - Before it: 2026-10-19T12:00Z → 2026-10-20T12:18Z, `money-flow` ran 19
+    times → **17 `success`, 2 `failure`**, neither on a settlement-record
+    check, which did not exist yet (all qa-dev runs via
+    `gh run list --workflow qa-dev.yml --created '2026-10-19T00:00:00Z..2026-10-21T12:00:00Z' --limit 500`
+    → 392, then `gh api repos/d-hinders/Haven-AI/actions/runs/<id>/jobs?filter=all`,
+    the job named `money-flow`). The two: job 118121333550 (10-19 14:36Z,
+    `cf88627c2`; `merchant-locked-budget` activate 502 "Could not deploy the
+    account" on both attempts, and on attempt 2 `x402-delegation-3009-grace-resume`
+    "already settled") and job 118454912090 (10-20 04:29Z, `3b8314aac`;
+    attempt 1 `x402-hosted-mcp-signer` `MERCHANT_REJECTED_AFTER_FUNDING`,
+    attempt 2 `sub-budget-redemption` "Delegation-rail authorization failed
+    (bundler or RPC)").
   - From its own deploy (run on `aa818795d`, 12:21Z) to the scheduled run at
     the scan SHA (job 119120448025, 2026-10-21 08:29Z): **21 failure, 1
     cancelled, 0 success**. The newest `money-flow` success is 12:07Z on
@@ -111,15 +120,27 @@ three mechanisms only the network one has a census that executed (§2 C3,
     `x402-delegation-3009-grace-resume`, class `unclassified`. No claim on
     #3193 names the red; #4119's only comment since its merge is the release
     line.
-  - In the 7 jobs read below (14 attempts), the two SDK legs recorded
-    within the window **4 times in 28**: `x402-delegation-3009` 1 of 14,
-    `-grace-resume` 3 of 14. 23 failures read "Haven did not record the
+  - All 21 failed jobs (42 attempts), each job's log read
+    (`gh api …/actions/jobs/<job>/logs | grep -E '• x402-(delegation-3009(-grace-resume)?|hosted-mcp-signer) … '`):
+    `x402-delegation-3009` 1 PASS / 41 FAIL, `-grace-resume` 9 PASS / 33
+    FAIL, so the two SDK legs recorded within the window **10 times in 84**.
+    Of the 74 SDK-leg failures, 71 read "Haven did not record the merchant
+    settlement … within 45s", 2 were the x402 rate limit ("max 100 x402
+    payments per hour", one of them a 429 on authorize) and 1 "already
+    settled". The hosted leg: 41 PASS / 1 FAIL (the rate limit); of the 41
+    PASS lines, 39 read "via a follow-up" and 2 "via the settle's own
+    settlement report".
+  - The sample first read, 7 of those jobs (the first after #4144,
+    118623690650, plus the 6 newest; 14 attempts): the two SDK legs recorded
+    **4 times in 28** (`x402-delegation-3009` 1 of 14, `-grace-resume` 3 of
+    14) and the hosted first report 1 time in 14, together 5 of 42 leg
+    attempts. Its 23 "not recorded" failures read "Haven did not record the
     merchant settlement of payment … within 45s … the SDK's settlement report
     was refused, or the backend answered it retryable (the merchant tx was
     not yet visible to its node) and the SDK, which posts once, did not
     retry"; 1 was a grace-resume `post-funding recovery failed`
     (`gh api …/actions/jobs/<job>/logs | grep '• x402-delegation-3009'`).
-- **Observed (the hosted leg, same runs).** The hosted leg passes, and its
+- **Observed (the hosted leg, the 7-job sample).** The hosted leg passes, and its
   PASS line says how the record landed
   (`packages/qa-agent/src/lib/settlement-record.ts:268`, `:331`, `:396`). In 7
   jobs (118623690650, 118912293104, 118918109755, 118919373960,
@@ -154,7 +175,7 @@ three mechanisms only the network one has a census that executed (§2 C3,
   paths send the header in the tree (`client.ts:2032-2037`,
   `merchant-completion.ts:326-329`). Which arm dev answered is not
   determinable without dev logs, which were not read. That the same report
-  sometimes records (4 of 28 SDK attempts, 1 of 14 hosted) fits a race with
+  sometimes records (10 of 84 SDK attempts, 2 of 41 hosted passes) fits a race with
   the merchant's transaction better than a refusal, which would never
   record; it does not prove it. Whether the #3888
   sweep later recorded those settlements (it ticks ≥ 60 s after the funding
@@ -162,7 +183,7 @@ three mechanisms only the network one has a census that executed (§2 C3,
 - **Expected benefit.** qa-dev's `money-flow` job can go green again, so the
   freshness gate has a run to admit. And an SDK-local EIP-3009 purchase gets
   its merchant record at purchase time, not only from the sweep: on the
-  hosted path the client's first report recorded 1 time in 14.
+  hosted path the client's first report recorded in 2 of 41 passes.
 - **Scope.** One PR, an owner decision first. Either bound a retry on a
   `retryable` answer on the local path (the funding report already has
   `EVIDENCE_RETRY_DELAYS_MS`), which revisits #3764 D2; or surface the
@@ -196,15 +217,26 @@ three mechanisms only the network one has a census that executed (§2 C3,
   `DO_NOT_TRACK=1` → 0 such connections (was 11 files / 37), 168 / 168 files
   green.
 - **Why.** `@metamask/smart-accounts-kit` 1.6.0 (`package-lock.json`) wraps
-  `createDelegation`, `createOpenDelegation`, `toMetaMaskSmartAccount`,
-  `createCaveatEnforcerClient` and six other exports in
-  `trackSmartAccountsKitFunctionCall`, which batches events to that endpoint
-  (`dist/chunk-TNGQTVSY.mjs:1780`). It disables itself only when `CI`,
+  22 tracked names in `trackSmartAccountsKitFunctionCall`, which batches
+  events to that endpoint (`dist/chunk-TNGQTVSY.mjs:1780`): 18 in the main
+  and actions builds, among them `createDelegation`, `createOpenDelegation`,
+  `toMetaMaskSmartAccount`, `createCaveatEnforcerClient` and
+  `getErc20PeriodTransferEnforcerAvailableAmount`, plus 4
+  `experimental.DelegationStorageClient.*` (python regex
+  `trackSmartAccountsKitFunctionCall\(\s*"([\w.]+)"` over `dist/**/*.mjs`
+  → 22; a single-line grep finds 10, missing the 8 multi-line calls in
+  `dist/chunk-AZYTTGON.mjs:537-907` and the 4 in `dist/experimental/index.mjs`). It disables itself only when `CI`,
   `DO_NOT_TRACK`, `navigator.doNotTrack` or `window.doNotTrack` is `1`,
-  `yes` or `true` (`:1877-1892`). Payload, read from the same file: the
-  function name, `hasInheritance`, the scope type and caveat names, plus
+  `yes` or `true` (`:1877-1892`). Payload, read from the kit's source: a
+  `smart_accounts_kit_initialized` event carrying the session fields —
   `sdk_version`, a random `anon_id`, the platform and, in a browser, the
-  page's hostname (`:1611-1650`, `:2068-2100`). No address or amount.
+  page's hostname (`chunk-TNGQTVSY.mjs:1611-1650`, `:1835-1850`); then, per
+  call, the function name and its parameters: for `createDelegation` /
+  `createOpenDelegation`, `hasInheritance`, the scope type and caveat names
+  (`:2068-2100`); for `toMetaMaskSmartAccount`, the implementation,
+  `hasAddress` and `hasEnvironment` (booleans) and `chainId`
+  (`dist/index.mjs:237-242`); for `createCaveatEnforcerClient`, `chainId`
+  (`:401-403`), as for the enforcer amount read. No address or amount.
   CI never sees it: GitHub Actions sets `CI=true`.
 - **Callers in the tree** (whole token, non-test,
   `git grep -l -P '(?<![\w-])\Q<fn>\E(?![\w-])' 8cc3717c8 -- 'packages/*/src/*' ':!*.test.ts' ':!*.test.tsx' ':!*__tests__*'`):
@@ -273,7 +305,8 @@ three mechanisms only the network one has a census that executed (§2 C3,
   `vitest.global-setup.ts` carry no network net; `MockAgent` resolves in 1
   file repo-wide, a frontend test.
 - **What a net would trip today** (the recorder in refusing mode is its
-  prototype). Of the 428 files, 425 behaved as before. 3 went red:
+  prototype). Of the 428 files, 425 passed under the refusing recorder (no
+  baseline run was compared). 3 went red:
   - `ops-readonly-role.test.ts`, 20 tests — "permission denied to create
     role", the disposable database's owner role. Environment, not network.
   - `ssrf-guard.real-transport.test.ts`, 5 tests — it pins `.test` hostnames
@@ -330,7 +363,9 @@ three mechanisms only the network one has a census that executed (§2 C3,
   own test. Their comments say the literal lists are deliberate
   anti-vacuity pins. No drift incident since #4140.
 - `tools-contracts.test.ts:33` says "The 28 hosted tool names" above a list
-  the test holds at 29 (stale since #3770, before this window).
+  the test holds at 29 (stale since #3788, which Closes #3770, before this
+  window: `git show 41e4d6483^:packages/mcp-server/src/tools-contracts.test.ts | grep -c "^  'haven_"`
+  → 28, at `41e4d6483` → 29).
 
 ## 3. Context for tracked work (not new items)
 
@@ -350,8 +385,8 @@ three mechanisms only the network one has a census that executed (§2 C3,
 - 2026-10-19 **C4** → #4121 closed 2026-10-20 via PR #4140 (`5bb6d4ae7`) →
   **`shipped`**. Re-verified by execution: this run's M5 is the 10-19 M7
   re-run, 2 red of 130 where 10-19 read 79 / 79 green.
-- The spec reviews' siblings: #4122 closed 2026-10-20 via PR #4131
-  (`44ce131a9`); #4123 open (§3).
+- The spec reviews' siblings: #4122 closed by hand 2026-10-20 after PR
+  #4131 (`44ce131a9`, `Refs`) landed; #4123 open (§3).
 - 2026-10-19 C1 → `shipped`, already recorded.
 
 ## 5. Coverage record (block → examined / partial / not examined → command → result)
@@ -516,6 +551,25 @@ three mechanisms only the network one has a census that executed (§2 C3,
   Write the output to a file, then filter.
 - A static census of imports inside a test body is not a census of cold
   loads (§2 notes).
+
+### Review corrections (PR #4202, before merge)
+
+Corrected in place after the independent review of `c97197ea6`; each figure
+was re-run before it was written:
+
+- C1's pre-#4144 baseline was "11 runs → 11 success", from a
+  `gh run list --created` with no `--limit` (20 newest runs). Re-measured
+  with `--limit 500`: 19 `money-flow` jobs → 17 success, 2 failure.
+- C1's "5 of 42 qa-dev attempts" is 5 of 42 *leg* attempts in a 7-job
+  sample; the full count over all 21 failed jobs (SDK legs 10 of 84; hosted
+  first report 2 of 41 passes) was added.
+- C2's "six other exports" (10 names, from a single-line grep) is 22 tracked
+  names; the payload list now covers the initialization event,
+  `toMetaMaskSmartAccount` and the enforcer client, not only the delegation
+  builders.
+- The stale docblock dates from #3788, not #3770; #4122 was closed by hand,
+  not by #4131; "21 of 21 runs" and "425 behaved as before" were reworded to
+  what was measured.
 
 ## 7. Decisions requested
 

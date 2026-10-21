@@ -76,7 +76,8 @@ covers:
   - packages/backend/src/modules/ops/**
   - packages/backend/src/middleware/ops-auth.ts
   - packages/ops/**
-last-verified: "2026-10-20"
+  - packages/frontend/scripts/check-kit-analytics-define.mjs
+last-verified: "2026-10-21"
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -3548,3 +3549,24 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > Scope of this re-read: the three edits above and §5 (copy rules), which
 > quotes no platform name; nothing else in this document was re-read for it,
 > and `last-verified` is not bumped.
+
+> **Decision recorded (#4216, 2026-10-21 — third-party kit analytics are OFF
+> in both runtimes).** `@metamask/smart-accounts-kit` 1.6.0 posts usage
+> analytics to `https://mm-sdk-analytics.api.cx.metamask.io/` from the first
+> of its tracked functions that runs (owner decision: turned off). In the
+> backend, `src/telemetry/kit-analytics-off.ts` sets
+> `process.env.DO_NOT_TRACK = '1'` and is imported FIRST by `src/index.ts`,
+> `vitest.setup.ts` and the kit-reaching `scripts/*.ts` — the kit latches its
+> decision once, at the first tracked call, so the opt-out must precede that
+> latch. In the frontend, `next.config.ts` inlines `DO_NOT_TRACK: '1'` as a
+> bundler define, so the client chunk carries the literal `"1"` where the
+> kit's `process.env?.DO_NOT_TRACK` read was (checked over `next build`
+> output by `packages/frontend/scripts/check-kit-analytics-define.mjs`, which
+> fails if the define is removed). Nothing about signing, authority or the
+> prepare/submit split moved: the delegations, smart-account calls and
+> signatures the kit produces are byte-identical — only its outbound
+> telemetry egress is switched off. `lib/delegationPasskeySigner.ts` itself is
+> untouched; the dynamic import and `toMetaMaskSmartAccount` call are
+> unchanged. Proofs: `src/telemetry/__tests__/kit-analytics-off.test.ts`
+> (0 posts with the mechanism, ≥1 without it) and the committed
+> `scripts/record-kit-analytics-connections.mjs` net over the backend suite.

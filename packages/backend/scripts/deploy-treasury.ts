@@ -7,6 +7,8 @@
  * Env: PILOT_OWNER_PRIVATE_KEY (treasury owner), PILOT_BUNDLER_URL, PILOT_RPC_URL?
  * Arg: the treasury address to deploy (defaults to the DoD account).
  */
+// #4216: kit analytics off before anything here can load @metamask/smart-accounts-kit.
+import '../src/telemetry/kit-analytics-off.js'
 import { createPublicClient, http, type Address, type Hex } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import { baseSepolia } from 'viem/chains'

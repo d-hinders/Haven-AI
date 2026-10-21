@@ -10,6 +10,8 @@
  *
  * Run: npm run pilot:exit-proof -w @haven/backend
  */
+// #4216: kit analytics off before anything here can load @metamask/smart-accounts-kit.
+import '../src/telemetry/kit-analytics-off.js'
 import { ethers } from 'ethers'
 import { createPublicClient, http, type Hex } from 'viem'
 import { baseSepolia } from 'viem/chains'

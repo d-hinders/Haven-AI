@@ -8,6 +8,8 @@
  *
  * TESTNET PILOT USE ONLY: keys are throwaway, generated per run.
  */
+// #4216: kit analytics off before anything here can load @metamask/smart-accounts-kit.
+import '../src/telemetry/kit-analytics-off.js'
 import { createHash } from 'node:crypto'
 import { createPublicClient, toHex, zeroAddress, type Hex } from 'viem'
 import { toWebAuthnAccount } from 'viem/account-abstraction'

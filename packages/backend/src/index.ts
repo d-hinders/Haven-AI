@@ -1,3 +1,6 @@
+// Third-party analytics off before anything in this process can load
+// @metamask/smart-accounts-kit (#4216) — must stay the first import.
+import './telemetry/kit-analytics-off.js'
 // config.ts loads dotenv and validates required env vars — import first
 import { config } from './config.js'
 import { httpErrorHandler } from './infra/http-error-handler.js'

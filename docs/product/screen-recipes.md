@@ -550,16 +550,18 @@ with a stretched name link:
   the half-revoked callout stay on the card.
 - **One call to action, by state:** Finish revoking (a live budget after
   revoke or archive, #3542), else Recover funds (stranded funds — the list
-  knows only that they exist, so it names the agent page's action rather than
-  a count-aware "Review the N payments"), else Finish setup
+  knows only that they exist, so it uses the agent page's own action, to the
+  same recovery flow, rather than a count-aware "Review the N payments"),
+  else Finish setup
   (`pending_approval`), else Set budget (active, no usable budget).
 - **⋯ menu:** Pause payments or Resume payments, Move to organization (only
   when organizations exist), and Remove; Remove from list for a revoked agent;
   Restore to list for an archived one.
 - **Footer, one line:** "Last paid {age} · {merchant}" — the merchant's name,
   else the x402 resource host, never an address — else "Connected {age}"
-  (`mcp_last_seen_at`), else "No payments yet". An agent the overview does not
-  cover (revoked) never claims "No payments yet". The dashboard rows keep
+  (`mcp_last_seen_at`; "Last seen {age}" for an agent the overview does not
+  cover, which can no longer connect), else "No payments yet". An agent the
+  overview does not cover (revoked) never claims "No payments yet". The dashboard rows keep
   #3989's "Last paid" with no merchant.
 - **Not on the card:** the MCP server name (on the agent page since #4209),
   the description, the network, and a separate "Last activity" stamp.

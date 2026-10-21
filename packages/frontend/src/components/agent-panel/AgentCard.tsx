@@ -82,14 +82,22 @@ export function agentCardBadge(
   if (agent.archived_at) return { label: 'Archived', tone: 'neutral' }
   if (agent.status === 'revoked') return agentStatusPresentation('revoked')
   if (!dashboard.ready || !dashboard.agent) return null
-  return agentBadge(dashboard.agent, dashboard.attentionItems, dashboard.budgetRemaining)
+  // The LIST's status, not the overview's: Pause and Resume update the list
+  // at once while the overview refreshes on its own 10 s poll, and the badge
+  // must agree with the paused banner and the menu beside it.
+  return agentBadge(
+    { ...dashboard.agent, status: agent.status as DashboardAgent['status'] },
+    dashboard.attentionItems,
+    dashboard.budgetRemaining,
+  )
 }
 
 /**
  * The footer's one line. "Last paid 20h ago · api.bitrefill.com" when the
  * agent has paid (the merchant label never prints an address); "Connected
- * 2h ago" when it never paid but has connected; "No payments yet", the
- * dashboard's words, otherwise. Null when there is nothing true to say: an
+ * 2h ago" when it never paid but has connected ("Last seen" for an agent the
+ * overview does not cover); "No payments yet", the dashboard's words,
+ * otherwise. Null when there is nothing true to say: an
  * agent the overview does not cover (revoked) has unknown payments, so it
  * never reads "No payments yet".
  */
@@ -103,7 +111,12 @@ export function agentCardFooter(
     const paid = `Last paid ${timeAgo(stats.lastPaymentAt)}`
     return merchant ? `${paid} · ${merchant}` : paid
   }
-  if (agent.mcp_last_seen_at) return `Connected ${timeAgo(agent.mcp_last_seen_at)}`
+  if (agent.mcp_last_seen_at) {
+    // Outside the overview (a revoked agent) payments are unknown and the
+    // credential can no longer connect, so "Connected" would read as live.
+    const seen = timeAgo(agent.mcp_last_seen_at)
+    return dashboard.agent ? `Connected ${seen}` : `Last seen ${seen}`
+  }
   return dashboard.agent ? 'No payments yet' : null
 }
 
@@ -196,8 +209,9 @@ export function AgentCard({
     // The list knows only THAT funds are stranded (`has_stranded_funds` is
     // an EXISTS), not how many payments, so the count-aware "Review the N
     // payments" label (`reviewStrandedPaymentsLabel`) cannot be honest here.
-    // The card names the agent page's own action instead and goes there.
-    <Button size="sm" href={`/agents/${agent.id}`}>
+    // The card uses the agent page's own action — label AND destination, the
+    // recovery flow — so one name never leads to two places.
+    <Button size="sm" href={`/agents/${agent.id}/sweep`}>
       Recover funds
     </Button>
   ) : isPending ? (
@@ -235,7 +249,10 @@ export function AgentCard({
       // a grid row (the panel's grid stretches cards to the tallest). An open
       // ⋯ menu lifts its card above the next one, which the panel would
       // otherwise paint over it.
-      className={`${entityCardClassName({ muted: isRevoked || isArchived, linked: true })} flex min-w-0 flex-col has-[[aria-expanded=true]]:z-[var(--v2-z-content)]`}
+      // Revoked and archived cards fade — they are inert — except a
+      // half-revoked one: its budget is still live, and its Finish revoking
+      // CTA must not read as disabled.
+      className={`${entityCardClassName({ muted: (isRevoked || isArchived) && !halfRevoked, linked: true })} flex min-w-0 flex-col has-[[aria-expanded=true]]:z-[var(--v2-z-content)]`}
     >
       <div className="flex items-start gap-3">
         <Monogram name={agent.name} size="sm" decorative />
@@ -280,9 +297,11 @@ export function AgentCard({
             </span>
           ) : null}
           <DropdownMenu>
+            {/* Never disabled: an item chosen from the keyboard hands focus
+                back to this trigger, and a disabled one would drop it to
+                the body. While an action runs, the ITEMS are disabled. */}
             <DropdownMenuTrigger
               aria-label={`Actions for ${agent.name}`}
-              disabled={isBusy}
               className={MENU_TRIGGER_CLASS}
             >
               <Icon icon={EllipsisVertical} className="h-4 w-4" />
@@ -295,6 +314,7 @@ export function AgentCard({
                   <DropdownMenuItem
                     key={item.key}
                     onSelect={item.onSelect}
+                    disabled={isBusy}
                     tone={item.danger ? 'danger' : 'default'}
                   >
                     {item.label}
@@ -342,8 +362,9 @@ export function AgentCard({
           <ApprovalRequiredBanner title={STRANDED_FUNDS_TITLE} tone="warning" density="compact">
             {/* #2195: the shared title and cause clause. The count is `null`:
                 `has_stranded_funds` is an EXISTS, so the card knows the state
-                and not its size; the agent page holds the list. */}
-            <span>{strandedFundsCause(null)} Open the agent to recover these funds.</span>
+                and not its size; the agent page holds the list. The way there
+                is the card's Recover funds CTA, so the body does not repeat it. */}
+            <span>{strandedFundsCause(null)}</span>
           </ApprovalRequiredBanner>
         )}
 

@@ -932,7 +932,7 @@ export default function AgentDetailClient({ agentId }: Props) {
                 </p>
               ) : (
                 <p className="mt-1 text-xs text-[var(--v2-ink-3)]">
-                  The name this agent&apos;s Haven servers have in its MCP config.
+                  The name of this agent&apos;s Haven servers in its MCP config.
                 </p>
               )}
             </div>

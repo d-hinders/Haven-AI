@@ -303,6 +303,19 @@ describe('AgentCard badge: the dashboard agentBadge plus Archived and Revoked', 
     expect(agentCardBadge({ status: 'active', archived_at: ARCHIVED }, dashboardFor(overviewAgent({ budgets: [] }), []))?.label).toBe('Archived')
   })
 
+  it('reads the LIST status: a just-paused agent is badged "Paused" before the overview catches up', () => {
+    // The overview still says active (its 10 s poll has not run); the list
+    // already says paused, as do the banner and the menu.
+    renderCard(agentFixture({ status: 'paused' }), { dashboard: dashboardFor(overviewAgent({ status: 'active' })) })
+    expect(chip()).toBe('Paused')
+    expect(screen.getByRole('heading', { name: AGENT_PAUSED_TITLE })).toBeTruthy()
+  })
+
+  it('and a just-resumed agent loses its "Paused" badge at once', () => {
+    renderCard(agentFixture({ status: 'active' }), { dashboard: dashboardFor(overviewAgent({ status: 'paused' })) })
+    expect(chip()).toBeNull()
+  })
+
   it('shows no badge while the dashboard reads are in flight', () => {
     const agent = overviewAgent({ budgets: [] })
     renderCard(agentFixture(), { dashboard: dashboardFor(agent, [], { ready: false }) })
@@ -480,6 +493,13 @@ describe('AgentCard footer: one line, never a raw address', () => {
     expect(footer()).toBe('')
   })
 
+  it('a revoked agent that connected reads "Last seen", never "Connected"', () => {
+    renderCard(agentFixture({ status: 'revoked', mcp_last_seen_at: '2026-10-10T10:00:00.000Z' }), {
+      dashboard: dashboardFor(null),
+    })
+    expect(footer()).toBe('Last seen 2h ago')
+  })
+
   it('pins the footer to the bottom of a column card', () => {
     renderCard(agentFixture())
     expect(screen.getByTestId('agent-card').className).toMatch(/\bflex-col\b/)
@@ -582,10 +602,17 @@ describe('AgentCard ⋯ menu: every action that is not the CTA', () => {
     }
   })
 
-  it('disables the trigger and says what is happening while an action runs', () => {
-    renderCard(agentFixture(), { busyAction: 'pause' })
-    expect((screen.getByRole('button', { name: 'Actions for Research agent' }) as HTMLButtonElement).disabled).toBe(true)
+  it('keeps the trigger focusable, disables the items and says what is happening while an action runs', () => {
+    const { onPause } = renderCard(agentFixture(), { busyAction: 'pause' })
     expect(screen.getByRole('status').textContent).toBe('Pausing…')
+    // The trigger stays enabled so a keyboard user's focus returns to it.
+    const trigger = screen.getByRole('button', { name: 'Actions for Research agent' }) as HTMLButtonElement
+    expect(trigger.disabled).toBe(false)
+    fireEvent.click(trigger)
+    const items = within(screen.getByRole('menu')).getAllByRole('menuitem') as HTMLButtonElement[]
+    expect(items.every((item) => item.disabled)).toBe(true)
+    fireEvent.click(items[0]!)
+    expect(onPause).not.toHaveBeenCalled()
     // The stretched name link stays live.
     expect(screen.getByRole('link', { name: 'Research agent' }).getAttribute('href')).toBe('/agents/agent-1')
   })
@@ -603,13 +630,15 @@ describe('AgentCard recoverable funds (#2195)', () => {
     const text = screen.getByText(new RegExp(escapeRe(strandedFundsCause(null)))).textContent ?? ''
     expect(text).toContain('At least one payment')
     expect(text).not.toMatch(/\d+ payments were|USDC/)
-    expect(screen.getByText(/Open the agent to recover these funds\./).closest('a')).toBeNull()
+    // The CTA below is the way to the agent page; the body does not repeat it.
+    expect(screen.queryByText(/Open the agent to recover these funds/)).toBeNull()
   })
 
   it('offers Recover funds as the card’s one CTA, to the agent page', () => {
     renderCard(agentFixture({ has_stranded_funds: true } as Partial<Agent>))
+    // The agent page's own Recover funds goes to the sweep flow; so does this.
     const cta = within(screen.getByTestId('agent-card-cta')).getByRole('link', { name: 'Recover funds' })
-    expect(cta.getAttribute('href')).toBe('/agents/agent-1')
+    expect(cta.getAttribute('href')).toBe('/agents/agent-1/sweep')
   })
 
   it('shows nothing when there is no open reconciliation event', () => {
@@ -642,6 +671,14 @@ describe('AgentCard half-revoked (#3542)', () => {
     expect(screen.getByText(MARKER)).toBeTruthy()
     expect(screen.queryByText('Network access already revoked')).toBeNull()
     expect(within(screen.getByTestId('agent-card-cta')).getByRole('button', { name: 'Finish revoking Research agent' })).toBeTruthy()
+  })
+
+  it('fades revoked and archived cards, but never a half-revoked one with live spend authority', () => {
+    const { unmount } = renderCard(agentFixture({ status: 'revoked', live_delegation_count: 0 }), { dashboard: dashboardFor(null) })
+    expect(screen.getByTestId('agent-card').className).toMatch(/\bopacity-80\b/)
+    unmount()
+    renderCard(agentFixture({ status: 'revoked', archived_at: ARCHIVED, live_delegation_count: 1 }), { dashboard: dashboardFor(null) })
+    expect(screen.getByTestId('agent-card').className).not.toMatch(/\bopacity-80\b/)
   })
 
   it('revoked + count 0: no marker, no Finish revoking', () => {

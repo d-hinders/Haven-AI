@@ -877,11 +877,21 @@ test.describe('driven focus-state visual regression', () => {
   // footer action row: its controls are the stretched name link, the ⋯ menu
   // trigger, the menu's items (which differ by state), and at most one call
   // to action. Each is reached by real Tab, as the header explains.
+  //
+  // The card's footer ("Last paid 12d ago · …") and budget caption read the
+  // clock, so every whole-card capture freezes it — at the instant the shared
+  // fixture's budget windows are pinned to (product-routes' FROZEN_NOW) —
+  // or the baseline would go stale the day after it was generated.
+  const AGENT_CARD_FROZEN_NOW = new Date('2026-09-01T12:00:00.000Z')
 
   test('agent card ⋯ menu trigger — focus indicator', async ({ page }) => {
+    await page.clock.setFixedTime(AGENT_CARD_FROZEN_NOW)
     await gotoDesktop(page, '/agents')
 
     const card = page.getByTestId('agent-card')
+    // The freeze is asserted, not assumed: the fixture's last payment sits
+    // after the frozen instant, so the footer reads `timeAgo`'s floor.
+    await expect(card.getByTestId('agent-card-footer')).toHaveText(/^Last paid just now/)
     const target = card.getByRole('button', { name: `Actions for ${testAgent.name}` })
     await expect(target).toHaveCount(1)
     await tabToTarget(page, target, 'AgentCard ⋯ menu trigger')
@@ -890,6 +900,7 @@ test.describe('driven focus-state visual regression', () => {
   })
 
   test('agent card name link — focus rings the whole card', async ({ page }) => {
+    await page.clock.setFixedTime(AGENT_CARD_FROZEN_NOW)
     await gotoDesktop(page, '/agents')
 
     const card = page.getByTestId('agent-card')
@@ -906,6 +917,7 @@ test.describe('driven focus-state visual regression', () => {
   test('agent card call to action — focus indicator (Finish setup)', async ({ page }) => {
     const agent = agentState({ id: 'agent-pending', name: 'Pending agent', status: 'pending_approval' })
     await seedAgents(page, [agent])
+    await page.clock.setFixedTime(AGENT_CARD_FROZEN_NOW)
     await gotoDesktop(page, '/agents')
 
     const card = page.getByTestId('agent-card')

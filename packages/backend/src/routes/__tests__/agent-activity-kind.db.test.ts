@@ -6,7 +6,7 @@
  * single populations, and the refusals — not about rows in isolation. The
  * request-validation module is registered ENFORCED exactly as production
  * wires it (#3030), so the spec's new parameters are exercised on the wire.
- * Zero mocks.
+ * One mock: the serve-time price read (below), so no test dials CoinGecko.
  *
  * The legacy-shape fixture below pins the EXACT key sets the route emitted
  * before #4229: omitting `kind` (with or without filters in the query) must
@@ -14,7 +14,18 @@
  * those keys — the byte-identical contract, asserted structurally because
  * approx pricing makes the VALUES environment-dependent, not the SHAPE.
  */
-import { afterAll, beforeAll, beforeEach, expect, it } from 'vitest'
+// #4217: `serveTimeAmount` prices each payment row through
+// `getServeTimeFiatValues`, a CoinGecko fetch, and six of this file's tests
+// reached it. The all-null triple is that helper's own outage answer, which
+// the route already serves as an unknown amount, and this file asserts the
+// SHAPE, never a price, so the stub changes no assertion. The test network
+// net fails a test that dials (docs/contributing/testing-strategy.md
+// § "No real network (#4217)").
+vi.mock('../../infra/fiat-values.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../infra/fiat-values.js')>()),
+  getServeTimeFiatValues: async () => ({ usd: null, eur: null, sek: null }),
+}))
+import { afterAll, beforeAll, beforeEach, expect, it, vi } from 'vitest'
 import { randomUUID } from 'node:crypto'
 import Fastify, { type FastifyInstance } from 'fastify'
 import fastifyJwt from '@fastify/jwt'

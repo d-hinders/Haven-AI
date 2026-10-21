@@ -1899,7 +1899,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="Surface hierarchy — no nested filled cards"
-        description="One tinted surface per surface tier. Don't reach for a grey inner wrapper to 'group' siblings inside a Card — use Card.Section (white-on-white hairline) or Card.Section divided (row list). Tinted surfaces are reserved for callouts, table headers, anchor cards, chips, code blocks, and overlay surfaces."
+        description="One tinted surface per surface tier. Don't reach for a grey inner wrapper to 'group' siblings inside a Card — use Card.Section (white-on-white hairline) or Card.Section divided (row list). Tinted surfaces are reserved for callouts, table headers, day bands on day-grouped lists, anchor cards, chips, code blocks, and overlay surfaces."
       >
         <div className="grid gap-5 lg:grid-cols-2">
           {/* ❌ Anti-pattern */}
@@ -2989,7 +2989,7 @@ export default function DesignSystemPage() {
           into a "×N" row. */}
       <Section
         title="Activity ledger (day-grouped)"
-        description="TransactionActivityRow's ledger mode (#4096, epic #4093): one row per transaction, grouped under TransactionActivityDayHeader bands (“Today”, “Yesterday”, then short dates). Day groups are separated by a full-width --v2-border hairline; rows within one day by an inset --v2-border-subtle hairline that starts at the text column (insetDivider on every row after a day's first, #4165) — the un-merged counterpart of the dashboard's merged preview, which folds same agent / same merchant / same day into one ×N row. A ledger row with onOpen becomes a button: click or Enter/Space opens the shared TransactionDetailPanel, exactly as the account page's Activity tab will."
+        description="TransactionActivityRow's ledger mode (#4096, epic #4093): one row per transaction, grouped under the tinted TransactionActivityDayHeader day bands (“Today”, “Yesterday”, then short dates) — the second sanctioned band after Card.Header, on the table-header tokens with a full-width --v2-border hairline below (#4225). Rows within one day are separated by an inset --v2-border-subtle hairline that starts at the text column (insetDivider on every row after a day's first, #4165) — the un-merged counterpart of the dashboard's merged preview, which folds same agent / same merchant / same day into one ×N row. A ledger row with onOpen becomes a button: click or Enter/Space opens the shared TransactionDetailPanel, exactly as the account page's Activity tab will."
       >
         <div className="max-w-xl">
           <Card hover={false} className="overflow-hidden">

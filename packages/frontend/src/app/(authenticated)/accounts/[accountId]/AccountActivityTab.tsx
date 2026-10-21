@@ -539,7 +539,7 @@ export default function AccountActivityTab({
           <ListNoMatch noun={transactionNoun} onClear={handleClearFilters} />
         </div>
       ) : (
-        <Card hover={false} className="mt-3">
+        <Card hover={false} className="mt-3 overflow-hidden">
           {loadingInitial ? (
             <div className="divide-y divide-[var(--v2-border)]" role="status" aria-busy="true" aria-label="Loading activity">
               {[0, 1, 2].map((item) => (

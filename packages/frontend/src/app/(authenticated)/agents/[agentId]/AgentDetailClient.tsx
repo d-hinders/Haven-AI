@@ -110,9 +110,9 @@ function activityWalletName(item: PaymentActivityItem, fallbackName: string): st
 
 // Adapts the agent activity feed (payments + approvals) into the shape the
 // shared TransactionsTable expects, so the agent detail screen reuses the
-// same primitive — and the same tinted header band — as the other
-// transaction surfaces. Approval items without a tx hash render with no
-// external link via `explorerUrl: null`.
+// same primitive — the same tinted header band, and the same tinted day band
+// on day-grouped lists (#4225) — as the other transaction surfaces. Approval
+// items without a tx hash render with no external link via `explorerUrl: null`.
 function activityToTransaction(
   item: PaymentActivityItem,
   agentName: string,

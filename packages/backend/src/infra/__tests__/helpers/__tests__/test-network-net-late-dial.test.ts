@@ -14,7 +14,8 @@
  *   FAIL its file, name its own host, and say the dial happened outside any
  *   test, so the record is not blamed on the test that already finished.
  *   Until the afterAll yielded on every run, all three stayed green whenever
- *   `DO_NOT_TRACK=1` was set, which `vitest.setup.ts` always sets.
+ *   `DO_NOT_TRACK=1` was set, which every suite run has (#4216's
+ *   `kit-analytics-off`, loaded first by `vitest.setup.ts`).
  * - One fixture leaves `vi.useFakeTimers()` on and dials nothing. It must
  *   PASS. If the afterAll waited on the global `setTimeout`, the fake clock
  *   would freeze it until `hookTimeout` and this test would time out.

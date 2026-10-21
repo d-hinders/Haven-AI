@@ -819,11 +819,11 @@ scoped to the RPC host `resolveProbeRpcUrl()` returns, because it proves CASP
 Red Line #4 against the enforcers deployed on Base Sepolia and must fail in CI
 when that RPC is unreachable. The smart-accounts kit's analytics host
 (`mm-sdk-analytics.api.cx.metamask.io`) is never exempt: the owner decided
-those posts go off (#4216). Until #4216 lands its mechanism, `vitest.setup.ts`
-sets `DO_NOT_TRACK=1` for the suite — a test-only line; GitHub Actions' `CI`
-does the same in CI. **#4216 must remove that line before measuring its own
-mechanism**: while it stands, every backend run reads 0 posts whatever #4216
-does, so a suite-level proof taken with it in place is vacuous.
+those posts go off (#4216), and the `kit-analytics-off` import described in
+the section above keeps the kit silent for the whole suite. If a file
+removes that opt-out, the net refuses the kit's posts and fails the file; its
+`afterAll` then waits 150 ms instead of 50 ms, which covers the kit's 100 ms
+batch timer.
 
 **Out of reach, by design:** child processes a test spawns outside vitest
 (`ops-probe-standalone.test.ts`'s `npx tsx`) and `vitest.global-setup.ts`,

@@ -121,9 +121,10 @@ describe('policy (pure)', () => {
     expect(kitAnalyticsMayPost({ DO_NOT_TRACK: '1' })).toBe(false)
     expect(kitAnalyticsMayPost({ DO_NOT_TRACK: 'YES' })).toBe(false)
     expect(kitAnalyticsMayPost({ DO_NOT_TRACK: '0', CI: '' })).toBe(true)
-    // vitest.setup.ts's own DO_NOT_TRACK line turns it off for the suite —
-    // asserted with CI removed, because GitHub Actions' CI=true would make
-    // this pass with the line deleted (#4216 owns the real mechanism).
+    // The suite runs with the kit's opt-out in effect: vitest.setup.ts loads
+    // #4216's kit-analytics-off first, which sets DO_NOT_TRACK=1. Asserted
+    // with CI removed, because GitHub Actions' CI=true would make this pass
+    // with that import deleted.
     expect(kitAnalyticsMayPost({ ...process.env, CI: undefined })).toBe(false)
   })
 

@@ -29,23 +29,11 @@ applyTestEnvDefaults()
 // Installed after the env defaults because it admits `DATABASE_URL`'s host.
 // The rule, the exemption list and how to add to it:
 // docs/contributing/testing-strategy.md § "No real network (#4217)".
+// The kit's analytics host is never exempt: the first import above
+// (#4216's `kit-analytics-off`) keeps the kit silent, and if anything turned it
+// back on, the net would refuse its posts and fail the file.
 installTestNetworkNet()
 registerNetHooks()
-
-// TEST-ONLY, and #4216 owns the real decision: the owner turned the
-// smart-accounts kit's analytics off (2026-10-21). The kit posts to
-// mm-sdk-analytics.api.cx.metamask.io unless `CI` or `DO_NOT_TRACK` is set,
-// and GitHub Actions sets `CI` — so only a local run with `CI` unset posts,
-// and the net above (which never exempts that host) would turn those posts
-// into reds. This line keeps the suite's own runs off until #4216
-// lands its mechanism for the server, scripts and tests; it does not cover
-// any of those outside vitest. `=`, not `??=`: an inherited blank or `0` is
-// not nullish and would leave analytics on. The kit latches its decision at
-// its first tracked call, which is always after setup files run.
-// #4216 MUST REMOVE THIS LINE before measuring its own mechanism: while it
-// stands, every backend run reads 0 analytics posts whatever #4216 does, so a
-// suite-level proof taken with it in place is vacuous.
-process.env.DO_NOT_TRACK = '1'
 
 // Explorer history routing is env-driven: with ALCHEMY_HISTORY_API_KEY set
 // (a production value copied into a local `.env`), every Base history read

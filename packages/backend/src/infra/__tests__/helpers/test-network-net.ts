@@ -241,9 +241,13 @@ export function isExemptDial(testFile: string | null, host: string): boolean {
 /**
  * Would the smart-accounts kit post analytics in this environment? Mirrors the
  * kit's own `isAnalyticsDisabled` (the only opt-out it has: `CI` or
- * `DO_NOT_TRACK` set to `1` / `yes` / `true`), so the file-level flush wait
- * below costs nothing when the kit is off — which it is in every run that
- * goes through `vitest.setup.ts`.
+ * `DO_NOT_TRACK` set to `1` / `yes` / `true`). `vitest.setup.ts` first loads
+ * #4216's `src/telemetry/kit-analytics-off.ts`, which sets `DO_NOT_TRACK=1`, so
+ * this is `false` in every ordinary file and the longer flush wait below costs
+ * nothing. It can still be `true` in a file that strips the opt-out
+ * (`delete process.env.DO_NOT_TRACK`, or `process.env = { … }` without it;
+ * backend tests do replace `process.env`), and that is the case the longer
+ * wait exists for: the kit could then latch ON and post on its batch timer.
  */
 export function kitAnalyticsMayPost(env: NodeJS.ProcessEnv = process.env): boolean {
   const on = (v: string | undefined) => v === '1' || ['yes', 'true'].includes((v ?? '').toLowerCase())
@@ -253,8 +257,9 @@ export function kitAnalyticsMayPost(env: NodeJS.ProcessEnv = process.env): boole
 /**
  * The kit batches its posts on a 100 ms timer (`Sender`, `baseTimeoutMs`), so
  * a post caused by a file's last test can land after that test's `afterEach`.
- * The file-level `afterAll` waits this long first — only when the kit could
- * post at all (`kitAnalyticsMayPost`).
+ * The file-level `afterAll` waits this long instead of `LATE_DIAL_WAIT_MS`
+ * when the kit could post at all (`kitAnalyticsMayPost`) — with #4216's
+ * opt-out loaded, only in a file that removed it.
  */
 export const KIT_FLUSH_WAIT_MS = 150
 

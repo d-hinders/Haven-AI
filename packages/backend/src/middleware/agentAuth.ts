@@ -83,10 +83,31 @@ export function registerAgentLastSeenHook(app: FastifyInstance, db?: QueryableLi
   })
 }
 
-/** Recovery is the one agent-key operation that remains valid after pause/revoke. */
+/**
+ * The sweep recovery routes, as `METHOD pattern` of the route that MATCHED
+ * (mount prefix included). Recovery is the one agent-key operation that
+ * remains valid after pause/revoke/archive, so this set is the whole of that
+ * exemption.
+ */
+export const SWEEP_RECOVERY_ROUTES: ReadonlySet<string> = new Set([
+  'POST /machine-payments/sweep/prepare',
+  'POST /machine-payments/sweep/submit',
+])
+
+/**
+ * Decided from the route the router matched — `request.routeOptions.url` is
+ * the registered pattern — and the method, never from the request-target
+ * string: `request.url` is what the client sent, which is not always the path
+ * the router matched on, and only the matched route says which handler runs.
+ *
+ * The middleware runs as an `onRequest` hook of the route modules, i.e. after
+ * routing, so the matched route is known here. A request that matched no
+ * route has no pattern and is never recovery.
+ */
 function isSweepRecoveryRequest(request: FastifyRequest): boolean {
-  const path = request.url.split('?', 1)[0]
-  return path.endsWith('/sweep/prepare') || path.endsWith('/sweep/submit')
+  const pattern = request.routeOptions.url
+  if (pattern === undefined) return false
+  return SWEEP_RECOVERY_ROUTES.has(`${request.method} ${pattern}`)
 }
 
 // ── Middleware ─────────────────────────────────────────────────────

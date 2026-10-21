@@ -8,7 +8,7 @@
 import { execFileSync, spawnSync } from 'node:child_process'
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, isAbsolute, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -30,9 +30,12 @@ export const SKIP = 0
  * The worker's `onTaskUpdate` reports to the main process are RPC calls with
  * a fixed 60 s reply timer (birpc's default, which vitest 3.2 does not expose).
  * The reply arrives on time but cannot be read while the loop is blocked, so a
- * file whose synchronous tests add up to more than 60 s (the ops file takes
- * about 150 s locally) fails with `[vitest-worker]: Timeout calling
- * "onTaskUpdate"` although every test passed. A macrotask between tests lets
+ * file whose synchronous tests add up to more than 60 s fails with
+ * `[vitest-worker]: Timeout calling "onTaskUpdate"` although every test
+ * passed. On macOS, before `GIT` below skipped the xcrun shim, the ops file
+ * took 135-153 s alone and the frontend file 74-79 s. With it they take
+ * about 25 s and 15 s, but a slower or loaded machine, or the plain-`git`
+ * fallback, can still push a file past 60 s. A macrotask between tests lets
  * the loop read the pending replies, so a timer only fires if a SINGLE test
  * blocks for 60 s.
  */
@@ -123,6 +126,33 @@ export function isWatched(watched, path) {
 }
 
 /**
+ * The git binary the harness spawns (#4192). On macOS `/usr/bin/git` is the
+ * xcrun shim, which forwards every call to the selected developer tools: measured
+ * inside a vitest worker it costs about 75-120 ms a spawn, against under 10 ms
+ * for the binary it forwards to. The ignore-step cases spawn git dozens of
+ * times each, so the shim alone put them at vitest's 5 s test timeout under
+ * modest load. So on darwin the real binary is resolved once (`xcrun -f git`)
+ * and used for the harness's own spawns, and `hermeticEnv` puts its directory
+ * first on PATH, so the git calls the ignore script makes through `sh` skip
+ * the shim too. That directory holds git and developer tools but none of the
+ * other commands the script runs (`sed`, `cat`, `env`, `test`, `echo`).
+ * Anywhere else, or when xcrun is missing or fails, this is plain `git` on
+ * the inherited PATH, exactly as before.
+ */
+export const GIT = resolveGit()
+const GIT_BIN_DIR = GIT === 'git' ? undefined : dirname(GIT)
+
+function resolveGit() {
+  if (process.platform !== 'darwin') return 'git'
+  try {
+    const path = execFileSync('xcrun', ['-f', 'git'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
+    return isAbsolute(path) ? path : 'git'
+  } catch {
+    return 'git'
+  }
+}
+
+/**
  * The environment every git and sh spawn gets: no inherited `GIT_*` (a git
  * hook exports GIT_DIR / GIT_INDEX_FILE, which would point these commands at
  * the HOST repository), no global or system git config, and no VERCEL_* or
@@ -135,6 +165,9 @@ export function hermeticEnv(extra = {}) {
   for (const key of Object.keys(env)) {
     if (/^(GIT_|VERCEL_)/.test(key) || /_FORCE_BUILD$/.test(key) || key === 'IGNORE_BUILD_DEV_URL') delete env[key]
   }
+  // See GIT: the ignore script's own git calls skip the macOS shim too. A
+  // PATH a test passes in `extra` still wins.
+  if (GIT_BIN_DIR) env.PATH = env.PATH ? `${GIT_BIN_DIR}:${env.PATH}` : GIT_BIN_DIR
   return Object.assign(env, { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' }, extra)
 }
 
@@ -146,7 +179,7 @@ export function hermeticEnv(extra = {}) {
  */
 export function makeRepo({ project, command, watchContent = /** @type {string | undefined} */ (undefined) }) {
   const repo = mkdtempSync(join(tmpdir(), `${project}-ignore-`))
-  const git = (...args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8', env: hermeticEnv() }).trim()
+  const git = (...args) => execFileSync(GIT, args, { cwd: repo, encoding: 'utf8', env: hermeticEnv() }).trim()
   git('init', '-q', '-b', 'dev')
   git('config', 'user.email', 'test@example.com')
   git('config', 'user.name', 'test')
@@ -201,8 +234,8 @@ export function makeRepo({ project, command, watchContent = /** @type {string | 
    */
   const shallowClone = ({ withOrigin = false, depth = 1 } = {}) => {
     const dir = mkdtempSync(join(tmpdir(), `${project}-ignore-shallow-`))
-    execFileSync('git', ['clone', '-q', '--depth', String(depth), `file://${repo}`, dir], { env: hermeticEnv() })
-    if (!withOrigin) execFileSync('git', ['remote', 'remove', 'origin'], { cwd: dir, env: hermeticEnv() })
+    execFileSync(GIT, ['clone', '-q', '--depth', String(depth), `file://${repo}`, dir], { env: hermeticEnv() })
+    if (!withOrigin) execFileSync(GIT, ['remote', 'remove', 'origin'], { cwd: dir, env: hermeticEnv() })
     return dir
   }
 

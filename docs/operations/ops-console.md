@@ -16,17 +16,20 @@ covers:
 last-verified: "2026-10-06"
 ---
 
-> **Re-verified #4192 (2026-10-21, ignore-step tests yield between cases):**
-> this diff touched `scripts/vercel/ignore-build-harness.mjs` and
-> `packages/ops/src/__tests__/vercel-ignore-build.test.ts`. The harness gains
-> `yieldToEventLoop`, which the ops test registers as an `afterEach`. The
-> harness spawns git synchronously, and the ops file runs for about 150 s
-> locally, so without a turn of the event loop between cases the vitest
-> worker's `onTaskUpdate` RPC outlasted its 60 s timer. vitest then reported
-> an unhandled error and `npm run test -w packages/ops` exited 1 with every
-> test passing. No assertion, watched path or script behaviour changed, so the
-> Ignored Build Step paragraph in § 1 stands as written. Nothing else in this
-> document was re-verified, and `last-verified` is not bumped.
+> **Re-verified #4192 (2026-10-21, ignore-step tests: event-loop yield and
+> real git):** this diff touched `scripts/vercel/ignore-build-harness.mjs`
+> and `packages/ops/src/__tests__/vercel-ignore-build.test.ts`. Two
+> test-only changes. First, the harness gains `yieldToEventLoop`, which the
+> ops test registers as an `afterEach`. The harness spawns git synchronously,
+> so a file that runs past 60 s without a turn of the event loop outlasts the
+> 60 s timer of the vitest worker's `onTaskUpdate` RPC. vitest then reports an
+> unhandled error and `npm run test -w packages/ops` exits 1 with every test
+> passing. Second, on macOS the harness resolves the real git once (`xcrun -f
+> git`) and puts its directory first on PATH, skipping the slow `/usr/bin/git`
+> shim. That cut the ops file from 135-153 s to about 25 s run alone. No
+> assertion, watched path or script behaviour changed, so the Ignored Build
+> Step paragraph in § 1 stands as written. Nothing else in this document was
+> re-verified, and `last-verified` is not bumped.
 
 > **Re-verified #3913 (2026-10-19, after the toggle):** only the "Skipped - Not
 > affected" records paragraph and step 4 of § 1 changed; step 4 now names

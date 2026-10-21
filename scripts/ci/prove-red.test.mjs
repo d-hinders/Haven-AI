@@ -867,7 +867,7 @@ describe('signals and recover', { concurrency: 4 }, () => {
   async function killedMidCell(opts) {
     const repo = makeRepo({}, opts)
     writeCells(repo, [baseCell()])
-    const p = start(repo, MUTATE, { env: { PR_FIXTURE_HANG: '3000' } })
+    const p = start(repo, MUTATE, { env: { PR_FIXTURE_HANG: '60000' } })
     await waitFor(() => existsSync(repo.log) && readFileSync(repo.log, 'utf8').includes('mutant-started'), 'the mutant run')
     p.child.kill('SIGKILL')
     const r = await p.done
@@ -876,7 +876,8 @@ describe('signals and recover', { concurrency: 4 }, () => {
     assert.ok(existsSync(repo.journal))
     const pg = JSON.parse(readFileSync(repo.journal, 'utf8')).childPgid
     assert.ok(Number.isInteger(pg), 'the in-flight test run is journalled by its process group')
-    await waitFor(() => !groupAlive(pg), 'the orphaned test run to finish')
+    process.kill(-pg, 'SIGTERM') // the operator's step the recover refusal prints
+    await waitFor(() => !groupAlive(pg), 'the orphaned test run to stop')
     return repo
   }
 
@@ -885,7 +886,7 @@ describe('signals and recover', { concurrency: 4 }, () => {
     execFileSync('npm', ['run', 'build', '-w', 'packages/a'], { cwd: repo.wt, env: cleanEnv({}), stdio: 'ignore' })
     writeCells(repo, [WORKSPACE_CELLS[0]])
     const buildLog = path.join(repo.dir, 'build.log')
-    const env = { PR_FIXTURE_BUILD_LOG: buildLog, PR_FIXTURE_BUILD_SLEEP: '8000' }
+    const env = { PR_FIXTURE_BUILD_LOG: buildLog, PR_FIXTURE_BUILD_SLEEP: '60000' }
     const p = start(repo, MUTATE, { env })
     await waitFor(() => existsSync(buildLog) && readFileSync(buildLog, 'utf8').split('\n').filter(Boolean).length >= 2, 'the mutant build')
     p.child.kill('SIGKILL')
@@ -896,7 +897,8 @@ describe('signals and recover', { concurrency: 4 }, () => {
     assert.equal(early.code, 3, early.out)
     assert.match(early.out, new RegExp(`process group ${pg} from the killed run is still running`))
     assert.equal(readFileSync(path.join(repo.wt, 'packages/a/src/index.mjs'), 'utf8'), A_SRC.replace('n > 0', 'n >= 0'), 'nothing was restored')
-    await waitFor(() => !groupAlive(pg), 'the orphaned build to finish')
+    process.kill(-pg, 'SIGTERM') // the step the refusal names
+    await waitFor(() => !groupAlive(pg), 'the orphaned build to stop')
     const rec = await run(repo, ['recover'], { env })
     assert.equal(rec.code, 0, rec.out)
     assert.equal(readFileSync(path.join(repo.wt, 'packages/a/src/index.mjs'), 'utf8'), A_SRC)

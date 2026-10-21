@@ -598,7 +598,14 @@ describe('AgentPanel page header (#4209)', () => {
     render(<AgentPanel />)
 
     expect(screen.getByRole('heading', { level: 1, name: 'Agents' })).toBeInTheDocument()
-    expect(screen.getByText(/You approve each budget yourself/)).toBeInTheDocument()
+    // #4065 (owner decision 2026-10-19): "yourself", not "with your
+    // passkey" — an account can approve with a wallet signer too. Moved here
+    // from the route's page test with the header (#4209).
+    expect(
+      screen.getByText(
+        'Agents pay for things up to a budget you set. You approve each budget yourself, and anything over it is refused on-chain.',
+      ),
+    ).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Connect agent' })).toBeInTheDocument()
     // The Labels and Organizations BUTTONS are gone; they are menu items now.
     expect(screen.queryByRole('button', { name: 'Labels' })).toBeNull()

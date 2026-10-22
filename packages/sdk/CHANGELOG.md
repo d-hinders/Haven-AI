@@ -17,6 +17,8 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ### Changed
 
+- **Under `merchantEgress`, a redirect to another origin no longer carries the caller's headers (#4244).** The manual GET-redirect follower re-sent the original request headers on every hop, so an `Authorization`, `Cookie`, API key or payment header supplied for one merchant reached any origin that merchant redirected to. A hop that changes origin (scheme, host or port) now carries only `accept`, `accept-language`, `user-agent` and `x402-wallet`; once dropped, headers are not restored on a later hop. Same-origin redirects are unchanged, and nothing changes without a policy. No update needed for the hosted path, which takes the change on deploy.
+
 - **The local EIP-3009 settlement-evidence report is retried while Haven
   answers `retryable` (#4215).** On the local path (`fetch`,
   `payX402Quote`, `resumeX402Payment`), the merchant's settlement report in

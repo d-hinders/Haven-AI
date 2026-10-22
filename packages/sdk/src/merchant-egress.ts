@@ -53,7 +53,10 @@ export interface MerchantEgressPolicy {
   /**
    * How many GET redirects may be followed; EVERY hop is re-asserted against
    * `assertUrl` before it connects. A redirect on any other method is
-   * refused outright. `undefined` = no redirect following.
+   * refused outright. A hop to a different origin carries only the
+   * transport's cross-origin header allow-list (#4244): credentials and other
+   * caller headers stay with the origin they were sent to.
+   * `undefined` = no redirect following.
    */
   maxGetRedirects?: number
   /** Per-use timeouts (ms). The effective deadline is `min(this, merchantTimeout)`. */

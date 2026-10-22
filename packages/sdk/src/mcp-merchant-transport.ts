@@ -69,6 +69,33 @@ export interface CapturedMerchantResponse {
 
 type MerchantFetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>
 
+/**
+ * #4244: the caller headers a redirect hop may carry to a DIFFERENT origin.
+ * The platform `fetch` drops `Authorization` on a cross-origin redirect; the
+ * manual follower in `fetchUnderPolicy` replaced it and has to do the same
+ * itself. It goes further than the Fetch spec: a caller's header was supplied
+ * for the origin it addressed (a merchant API key, a cookie, a payment
+ * header), so everything not on this list is dropped. What stays describes
+ * the request, not its credentials: content negotiation, the client name, and
+ * `x402-wallet` (a public address the SDK itself adds).
+ */
+const CROSS_ORIGIN_REDIRECT_HEADERS: ReadonlySet<string> = new Set([
+  'accept',
+  'accept-language',
+  'user-agent',
+  'x402-wallet',
+])
+
+/** #4244: `headers` reduced to `CROSS_ORIGIN_REDIRECT_HEADERS`; accepts every `HeadersInit` shape. */
+function crossOriginRedirectHeaders(headers: HeadersInit | undefined): Headers {
+  const kept = new Headers()
+  // `Headers` iteration yields lower-cased names whatever shape came in.
+  for (const [name, value] of new Headers(headers)) {
+    if (CROSS_ORIGIN_REDIRECT_HEADERS.has(name)) kept.set(name, value)
+  }
+  return kept
+}
+
 export interface McpMerchantTransportOptions {
   merchantTimeout?: number
   fetch?: MerchantFetch
@@ -144,8 +171,9 @@ export class McpMerchantTransport {
    * #3747: the policy path. Every URL — the initial request and each redirect
    * hop — is `assertUrl`-checked BEFORE it connects; redirects run `manual`
    * so nothing is ever followed un-checked; GET redirects are followed up to
-   * `maxGetRedirects` (a redirect on any other method is refused); response
-   * bodies are capped WHILE being read, not after buffering. The timeout
+   * `maxGetRedirects` (a redirect on any other method is refused); a hop to
+   * another origin carries only `CROSS_ORIGIN_REDIRECT_HEADERS` (#4244);
+   * response bodies are capped WHILE being read, not after buffering. The timeout
    * signal spans the WHOLE redirect chain, and `MerchantTimeoutError`
    * classification is preserved.
    */
@@ -163,6 +191,9 @@ export class McpMerchantTransport {
     const signal = init.signal ? AbortSignal.any([init.signal, timeoutSignal]) : timeoutSignal
     const maxRedirects = egress.maxGetRedirects ?? 0
     let currentUrl = url
+    // #4244: the init the NEXT request goes out with — `init` until a hop
+    // crosses origin, then with its headers reduced (and never restored).
+    let hopInit = init
     let hops = 0
     try {
       while (true) {
@@ -170,7 +201,7 @@ export class McpMerchantTransport {
         // caller-supplied `redirect: 'follow'` cannot win; the ONE override
         // allowed is the stricter 'error' (discovery, the #3739 probe).
         const response = await this.fetchImpl(currentUrl, {
-          ...init,
+          ...hopInit,
           redirect: init.redirect === 'error' ? 'error' : 'manual',
           signal,
         })
@@ -220,6 +251,11 @@ export class McpMerchantTransport {
         } catch (err) {
           // Mid-flight: the chain's earlier requests were already sent.
           throw asRefusal(err, next, false)
+        }
+        // #4244: headers addressed to one origin never follow a redirect to
+        // another. Compared hop to hop, as the Fetch spec does.
+        if (new URL(next).origin !== new URL(currentUrl).origin) {
+          hopInit = { ...hopInit, headers: crossOriginRedirectHeaders(hopInit.headers) }
         }
         hops++
         currentUrl = next

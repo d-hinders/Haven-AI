@@ -2333,9 +2333,15 @@ Since #1716 both surfaces also accept the same optional
 `domain_verified` / `verified_payable` badge fields on each entry — added to
 BOTH surfaces together, so the skew-flat claim holds unchanged. Since #2978,
 `verified` is not a pure provenance filter: `verified=verified` returns any
-entry, operator-curated or self-submitted, whose endpoint Haven watched
-answer a live quote probe (`verified_payable === true`); `verified=operator`
-still filters on provenance alone. The result is still read-only discovery
+entry, whatever its source, whose endpoint Haven watched answer a live quote
+probe (`verified_payable === true`); `verified=operator` still filters on
+provenance alone. Since #4245 `source` has a third value, `bazaar`, for rows
+the x402 Bazaar discovery cron wrote (only when a deployment enables
+discovery): seller-chosen name and description, no operator review, no
+ownership proof. Before #4245 those rows were labelled `operator`. The value
+is additive, and there is no skew: every published SDK's `verified=operator`
+already keeps `source === 'operator'` only, so it excludes `bazaar` rows on
+both surfaces. The result is still read-only discovery
 metadata: catalog prices are indicative hints, never payment authority.
 `verified_payable` means the endpoint answered a live probe; `domain_verified`
 is the separate, stronger claim that ownership of the domain was proven —

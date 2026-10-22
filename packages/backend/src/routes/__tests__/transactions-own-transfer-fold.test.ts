@@ -149,6 +149,21 @@ describeDb('opt-in own-account transfer folding (#4265, real DB)', () => {
     expectMatchesSpec('GET', '/transactions', body)
   })
 
+  it('filters a folded row by token as normal', async () => {
+    const native = await get('/transactions?fresh=1&foldOwnTransfers=1&tokenKey=8453:native')
+    const otherToken = await get(
+      `/transactions?fresh=1&foldOwnTransfers=1&tokenKey=8453:0x${'33'.repeat(20)}`,
+    )
+
+    expect(native.statusCode).toBe(200)
+    expect(native.json()).toMatchObject({
+      total: 1,
+      transactions: [{ ownTransfer: { toAccountId: ACCOUNT_B_ID } }],
+    })
+    expect(otherToken.statusCode).toBe(200)
+    expect(otherToken.json().total).toBe(0)
+  })
+
   it('does not fold a per-account request even when the flag is present', async () => {
     const response = await get(
       `/transactions?fresh=1&accountId=${ACCOUNT_A_ID}&foldOwnTransfers=1`,

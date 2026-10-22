@@ -1039,7 +1039,7 @@ export class HavenClient {
   }
 
   /**
-   * Fetch one curated catalog entry by id (#1306).
+   * Fetch one catalog entry by id (#1306).
    *
    * Chain-scoped for free by the backend's SQL when the client is
    * agent-authenticated (#1299): an unknown id and an id curated for a

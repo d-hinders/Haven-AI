@@ -1260,7 +1260,7 @@ const PREPARE_CATALOG_PURCHASE_DESCRIPTION = composeDescription({
 
 const QUOTE_CATALOG_PURCHASE_DESCRIPTION = composeDescription({
   summary:
-    'Read the live x402 price for one curated catalog entry without creating any payment, approval, signature, or funding.',
+    'Read the live x402 price for one catalog entry without creating any payment, approval, signature, or funding.',
   behavior:
     'Informational only. Use before haven_prepare_catalog_purchase to choose a cap — and always when the user stated no cap (cap at this quoted amount, never an invented number). Catalog prices are indicative; amount/amount_atomic here are the live merchant quote. A degraded row without MCP metadata: use haven_pay_mcp_tool manually instead.',
   nextActionGuidance:

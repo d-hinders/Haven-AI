@@ -139,10 +139,18 @@ inverts an edit.
 | **shadowed** | red on assertions, but in no `expect_red` test: another test caught it, so the named guard is not what pins the behaviour | no |
 | **mutation-red** | red for the mutation's own reason — compile, import or SQL error, a non-assertion throw in a named test, a timeout, or a different test count | no — fix the mutation and re-run |
 
-Assertion-type is `ERR_ASSERTION` for `node --test`, an `AssertionError` for
-vitest, an `expect(` failure for Playwright. One caveat the runner cannot see past:
+Assertion-type is `ERR_ASSERTION` for `node --test`, an `expect(` failure for
+Playwright, and for vitest (`VITEST_ASSERTION_SHAPE`, #4284) an `AssertionError`
+or the frontend's idiom: a jest-dom matcher (`Error: expect(element)…`), a
+`getBy*` (`TestingLibraryElementError`), or a `findBy*` / `waitFor` timeout
+(a plain `Error:` with the query library's "Unable to find …" or "Found …"
+message). Only the recorded stems count; an unrecorded query shape reads as an
+error, so a new one is added with a recorded fixture case. Caveats the runner cannot see past:
 `expect(fn).toThrow(/X/)` turns a thrown non-assertion error into an assertion
 failure, so a SQL error inside such a test reads as caught — check the message.
+A jest-dom matcher handed a non-element (`expect(undefined).toHaveClass(…)`) and a
+`getBy*` used as setup rather than as the observation also read as assertion: the
+runner sees only the failure message, not which line meant to assert.
 A run with both kinds of failure is **caught** when any `expect_red` test failed on
 an assertion, whatever else threw; with no named assertion red, a non-assertion
 failure anywhere makes it **mutation-red**, not shadowed.

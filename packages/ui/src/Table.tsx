@@ -71,10 +71,10 @@
  * deterministically (stage with the sidebar in layout vs `display:none`, at a
  * fixed viewport, on the since-retired `/transactions` table, #4266):
  * `/transactions` was SAME-STAGE at 768/1024/1100/1279/1280,
- * so no mount transition can change its column set. The `/design-system`
- * showcase DIFFERS between roughly 1040 and 1279 — pre-mount container 1034
- * shows seven columns where the settled 794 shows five. Accepted there: it is
- * an internal showcase route, and the whole page shifts 240px in the same
+ * so no mount transition could change its column set. The `/design-system`
+ * transactions showcase (retired with the table, #4266) DIFFERED between
+ * roughly 1040 and 1279 — pre-mount container 1034 showed seven columns where
+ * the settled 794 showed five. Accepted there: it was an internal showcase route, and the whole page shifts 240px in the same
  * frame anyway. Worth knowing before keying a NEW surface on the container,
  * because the mechanism generalises even though this instance is benign.
  *

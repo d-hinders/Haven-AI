@@ -35,8 +35,8 @@
  *
  * `/dashboard` is the post-login landing screen and the densest composition of
  * shared primitives in the product; `/transactions` is the money-history screen
- * and the `Table` primitive's only product consumer at scale. Neither had a
- * pixel of coverage.
+ * and was then the `Table` primitive's only product consumer at scale (it
+ * renders the shared ledger since #4266). Neither had a pixel of coverage.
  *
  * **`/agents` and `/agents/agent-research` are covered from #2733**, plus the
  * URL-seeded filtered list `agents-list-filtered` (#3165); all three ship
@@ -301,8 +301,8 @@ const ANCHOR_TIMEOUT_MS = 60_000
  * as a render/compile problem before suspecting the fixture.
  *
  * Per route rather than one global floor, because the floor has to sit under
- * the route's real content and `/transactions` legitimately renders 320
- * characters while `/settings` renders an order of magnitude more (1,407 when
+ * the route's real content and `/transactions` rendered 320 characters on the
+ * retired table (338 on the ledger, #4266) while `/settings` renders an order of magnitude more (1,407 when
  * measured; see the table note).
  *
  * Per AXIS as well, not just per route (#2817): a responsive layout carries

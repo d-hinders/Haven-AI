@@ -37,7 +37,10 @@
 //   node scripts/ci/preflight.mjs --static     # only the static ratchets, then stop
 //
 // Static entries run first (#4175), and a timeout-shaped red is re-run alone at
-// the end, at any load: see `runBattery`.
+// the end, at any load: see `runBattery`. A gate that goes SILENT is another
+// matter: it is killed with its whole process group and reported as a STALL —
+// a red that is never re-run, because a gate that hung once hangs again
+// (#4276): see `runGate`.
 //
 // Dependency-free (no YAML parser), like everything in this directory, so it
 // runs from a bare checkout and its self-test runs in `ci_config_checks`.
@@ -57,7 +60,7 @@
 // — and it SAYS SO when it cannot run rather than reporting a pass.
 
 import { readFileSync, readdirSync } from 'node:fs'
-import { execFileSync, spawnSync } from 'node:child_process'
+import { execFileSync, spawn, spawnSync } from 'node:child_process'
 import { cpus, loadavg } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -573,7 +576,9 @@ export const DB_SKIP_MARKER = /real-DB suites SKIPPED/i
  * prints ~1.47 MB and preflight reported it red while the same command run
  * directly passed (#3954). 64 MiB — the value the `git diff`/`status` reads in
  * `changedSurfaces` already use — is far above any real suite's chatter but
- * still bounded, so a runaway gate cannot balloon memory without limit.
+ * still bounded, so a runaway gate cannot balloon memory without limit. Async
+ * `spawn` has no `maxBuffer`; the byte counter in `runGate` enforces this cap
+ * now (#4276).
  */
 export const GATE_OUTPUT_MAX_BUFFER = 64 * 1024 * 1024
 
@@ -748,6 +753,72 @@ export function selectGates(plan, surfaces) {
   return plan.filter((g) => g.alwaysRuns || g.surfaces.some((s) => surfaces.includes(s)))
 }
 
+// ── The silence watchdog's knobs (#4276) ─────────────────────────────────────
+//
+// A gate that writes NOTHING — to stdout or stderr — for longer than
+// DEFAULT_SILENCE_MS is hung as far as this battery can tell, and is killed
+// with its whole process group: SIGTERM, then SIGKILL after
+// DEFAULT_KILL_GRACE_MS. Both are `*_MS` knobs in milliseconds, overridable by
+// env (PREFLIGHT_SILENCE_MS / PREFLIGHT_KILL_GRACE_MS) for the self-test's
+// sub-second runs, following #4271's `test:local` wrapper — the approach is
+// that wrapper's; the shapes differ (it is a CLI that owns process.exit and
+// tees output to the terminal, this resolves a result the battery groups), so
+// the two keep their own watchdogs rather than share a helper.
+//
+// The DEFAULT must clear the longest silent stretch of a GREEN gate: `tsc`
+// (`typecheck`) and `next build` print nothing until they finish (ci.yml's
+// "Frontend checks" job, timeout-minutes: 15, steps `Type-check frontend` and
+// `Build frontend`), so their whole green duration IS the silent stretch.
+// MEASURED 2026-10-22 — CI (d-hinders/Haven-AI runner): `next build` 66s, 96s,
+// 101s, 102s across runs 39805394988/39806037196/39806729710/39808051403, and
+// `typecheck` 15-24s; locally (32-core) `next build` 42s, `typecheck` 10s.
+// Worst observed silent stretch ≈ 102s; 900s ≈ 8.8x that. A stall costs the
+// threshold once; a false stall costs a red, so err high.
+export const DEFAULT_SILENCE_MS = 900_000
+export const DEFAULT_KILL_GRACE_MS = 5_000
+
+// The watchdog polls at this interval; a stall is measured within ~POLL_MS of
+// the threshold, and `lastOutputAt` resets on every chunk in either pipe.
+const POLL_MS = 100
+
+function envMs(name, fallback) {
+  const raw = process.env[name]
+  if (raw === undefined || raw === '') return fallback
+  const n = Number(raw)
+  if (!Number.isInteger(n) || n <= 0) {
+    throw new Error(
+      `preflight: ${name} must be a positive integer of milliseconds, got ${JSON.stringify(raw)}`,
+    )
+  }
+  return n
+}
+
+// The process groups of the gates currently running, so a signal to PREFLIGHT
+// itself can reach them. `detached: true` lifts each gate out of the
+// terminal's foreground process group — without the handlers `main` installs,
+// Ctrl-C would kill the battery and leave the hung gate running (#4276).
+const runningGroups = new Set()
+
+/**
+ * SIGTERM, then SIGKILL, to every running gate's process group. No grace
+ * here: preflight is already dying, so there is nothing to wait for — the
+ * same immediate TERM-then-KILL `test:local`'s own signal handler uses.
+ */
+export function killRunningGateGroups() {
+  for (const pid of [...runningGroups]) {
+    for (const signal of ['SIGTERM', 'SIGKILL']) {
+      try {
+        process.kill(-pid, signal)
+      } catch (err) {
+        if (err.code !== 'ESRCH') throw err
+      }
+    }
+  }
+}
+
+/** The exit code a SIGINT/SIGTERM death reports (the shell's 128+n convention). */
+export const SIGNAL_EXIT_CODES = Object.freeze({ SIGINT: 130, SIGTERM: 143 })
+
 /**
  * Run one gate, from the repository root, with the environment as-is.
  *
@@ -781,30 +852,159 @@ export function selectGates(plan, surfaces) {
  * rather than guarded.
  *
  * Output is captured (not inherited) because the battery matches gate output
- * for the real-DB skip marker and prints a tail per red gate — so the child
- * must be given a generous `maxBuffer` (GATE_OUTPUT_MAX_BUFFER), not the
- * 1 MiB default that killed a verbose backend suite mid-run (#3954).
+ * for the real-DB skip marker and prints a tail per red gate — and it is
+ * bounded by GATE_OUTPUT_MAX_BUFFER, not the 1 MiB default that killed a
+ * verbose backend suite mid-run (#3954).
+ *
+ * ── Async, detached, watched (#4276) ─────────────────────────────────────────
+ *
+ * `runGate` is ASYNC: it `spawn`s the gate rather than `spawnSync`ing it, so
+ * the battery can observe the gate WHILE it runs. Two things only an async
+ * spawn can do:
+ *
+ * - **The silence watchdog.** A gate that writes nothing — to stdout or
+ *   stderr — for longer than PREFLIGHT_SILENCE_MS (default 900000) is hung as
+ *   far as this battery can tell; the incident behind #4276 was a session that
+ *   waited ~75 minutes on a run that had stopped writing output. The
+ *   watchdog kills the gate's WHOLE PROCESS GROUP — SIGTERM, then SIGKILL
+ *   PREFLIGHT_KILL_GRACE_MS later — and resolves the gate with `stalled: true`
+ *   and `silentFor` naming the measured silent stretch. A stall is a plain red
+ *   (exit 1) and is NEVER re-run alone: a gate that hung once hangs again, and
+ *   a killed `node --test` even prints `Interrupted while running:`, which
+ *   reads as a timeout shape — so `isTimeoutShaped` tests `stalled` first.
+ *
+ * - **The byte counter.** Async `spawn` has no `maxBuffer`; the counter below
+ *   emulates it. Output past GATE_OUTPUT_MAX_BUFFER ends the gate with
+ *   SIGTERM, exactly as `spawnSync` did, reported as `error: 'ENOBUFS'` —
+ *   still a distinct, non-timeout outcome (#3954).
+ *
+ * The gate is spawned `detached` — its own process-group leader, pgid == pid —
+ * so the watchdog's kill (and a SIGINT/SIGTERM to preflight itself, see
+ * `killRunningGateGroups`) reaches the whole tree: a gate is a `sh -c`
+ * invocation, and its grandchildren — a test runner's workers — inherit the
+ * group. POSIX process groups only; accepted residue, like the rest of the
+ * battery's POSIX-only surface. A process that LEAVES the group (`setsid`, a
+ * detached grandchild) is its own group and is not reached.
  */
-export function runGate(gate, { maxBuffer = GATE_OUTPUT_MAX_BUFFER } = {}) {
-  const result = spawnSync(gate.command, {
-    cwd: ROOT,
-    shell: true,
-    stdio: ['ignore', 'pipe', 'pipe'],
-    encoding: 'utf8',
-    maxBuffer,
+export async function runGate(gate, { maxBuffer = GATE_OUTPUT_MAX_BUFFER, silenceMs, graceMs } = {}) {
+  const silence = silenceMs ?? envMs('PREFLIGHT_SILENCE_MS', DEFAULT_SILENCE_MS)
+  const grace = graceMs ?? envMs('PREFLIGHT_KILL_GRACE_MS', DEFAULT_KILL_GRACE_MS)
+  return await new Promise((resolve) => {
+    // detached: the gate becomes its own process-group leader (pgid == pid),
+    // so the watchdog — and a signal to preflight itself — can kill the whole
+    // tree, a shell's grandchildren included.
+    const child = spawn(gate.command, {
+      cwd: ROOT,
+      shell: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      detached: true,
+    })
+    runningGroups.add(child.pid)
+
+    const chunks = []
+    let bytes = 0
+    let overBuffer = false
+    let lastOutputAt = Date.now()
+    let exited = false
+    // Exactly one outcome — normal exit, ENOBUFS, stall — settles the gate.
+    // `killPending` latches a watchdog/buffer kill IN FLIGHT, so the close
+    // handler of a gate that is being killed cannot resolve first with a plain
+    // `signal: 'SIGTERM'` and erase the flag; `settled` makes settle final.
+    let killPending = false
+    let settled = false
+    let watchdog = null
+    let killTimer = null
+    const settle = (result) => {
+      if (settled) return
+      settled = true
+      if (watchdog) clearInterval(watchdog)
+      if (killTimer) clearTimeout(killTimer)
+      if (child.pid) runningGroups.delete(child.pid)
+      resolve(result)
+    }
+    const killGroup = (signal) => {
+      if (!child.pid) return
+      try {
+        process.kill(-child.pid, signal)
+      } catch (err) {
+        if (err.code !== 'ESRCH') throw err
+      }
+    }
+    const collected = () => Buffer.concat(chunks).toString('utf8').trimEnd()
+    const result = () => ({
+      ...gate,
+      ok: exited && child.exitCode === 0,
+      status: child.exitCode,
+      // Set when the gate was ENDED by a signal instead of exiting (`status`
+      // is then null). An external SIGTERM counts as timeout-shaped; the
+      // watchdog's and the byte counter's own SIGTERMs are flagged (`stalled`,
+      // `error: 'ENOBUFS'`) and checked first: see `isTimeoutShaped`.
+      signal: child.signalCode ?? null,
+      error: null,
+      output: collected(),
+      stalled: false,
+      silentFor: null,
+      silenceMs: silence,
+    })
+
+    child.stdout.on('data', (chunk) => {
+      lastOutputAt = Date.now()
+      chunks.push(chunk)
+      if (killPending || overBuffer) return
+      bytes += chunk.length
+      if (bytes > maxBuffer) {
+        // Async `spawn` has no `maxBuffer`; the counter emulates it. spawnSync
+        // ended an over-buffer gate with SIGTERM itself (#3954's shape) — so
+        // does this, then reports the same distinct `error: 'ENOBUFS'`.
+        overBuffer = true
+        killPending = true
+        killGroup('SIGTERM')
+        killTimer = setTimeout(() => {
+          killGroup('SIGKILL')
+          settle({ ...result(), ok: false, status: null, signal: 'SIGTERM', error: 'ENOBUFS' })
+        }, grace)
+      }
+    })
+    child.stderr.on('data', (chunk) => {
+      lastOutputAt = Date.now()
+      chunks.push(chunk)
+    })
+
+    // The watchdog. POLLED, not a single timer: every chunk resets
+    // `lastOutputAt`, so a gate that writes at least once per threshold is
+    // never stalled, however long it runs. `exited` keeps a gate that finished
+    // between polls from being killed on its way out.
+    watchdog = setInterval(() => {
+      if (settled || killPending || overBuffer || exited) return
+      const silentFor = Date.now() - lastOutputAt
+      if (silentFor <= silence) return
+      killPending = true
+      killGroup('SIGTERM')
+      killTimer = setTimeout(() => {
+        killGroup('SIGKILL')
+        settle({ ...result(), ok: false, status: null, signal: 'SIGTERM', stalled: true, silentFor })
+      }, grace)
+    }, POLL_MS)
+
+    child.on('error', (err) => {
+      // The spawn itself failed (ENOENT and friends): spawnSync reported the
+      // code on `result.error` with a null status — the same shape here.
+      exited = true
+      settle({ ...result(), ok: false, status: null, error: err.code ?? 'ERR_CHILD_PROCESS' })
+    })
+    child.on('close', () => {
+      exited = true
+      if (killPending) return
+      settle(result())
+    })
+
+    // A gate whose spawn failed has no pid and no 'error' may arrive; the
+    // promise must still settle.
+    if (!child.pid) {
+      exited = true
+      settle({ ...result(), ok: false, status: null, error: 'ERR_CHILD_PROCESS' })
+    }
   })
-  return {
-    ...gate,
-    ok: result.status === 0,
-    status: result.status,
-    // Set when the gate was ENDED by a signal instead of exiting (`status` is
-    // then null). SIGTERM counts as timeout-shaped: see `isTimeoutShaped`.
-    signal: result.signal ?? null,
-    // `ENOBUFS` when the output passed `maxBuffer`: spawnSync then kills the
-    // gate with SIGTERM itself, which must not read as a timeout.
-    error: result.error?.code ?? null,
-    output: `${result.stdout ?? ''}${result.stderr ?? ''}`.trimEnd(),
-  }
 }
 
 /**
@@ -836,6 +1036,12 @@ export const EXIT = Object.freeze({ GREEN: 0, RED: 1, USAGE: 2, RED_UNDER_LOAD: 
  * silently disabling the re-run. vitest is not installed where that suite runs
  * (`ci_config_checks` has no workspace install), so its strings are pinned as
  * fixtures copied from the installed dist, with the version above.
+ *
+ * NOT a shape: a silence-watchdog STALL (`result.stalled`, checked FIRST below)
+ * and an over-buffer ENOBUFS (`result.error`) — the battery's own kills. Both
+ * are reds that are never re-run: a gate that hung once hangs again, and the
+ * killed `node --test` would print `Interrupted while running:` — a shape
+ * above — so the flag, not the output, must decide (#4276).
  *
  * Not a shape: `signal: 'SIGTERM'` in a file's failure details. Only the TAP
  * reporter prints it; the default (spec) reporter that the battery's pipes get
@@ -875,7 +1081,12 @@ export const NEVER_LOAD_SHAPES = Object.freeze([
 /** A red whose output says it ran out of time, and says nothing else. */
 export function isTimeoutShaped(result) {
   if (result.ok) return false
-  // spawnSync's own SIGTERM for output past `maxBuffer` (#3954's shape).
+  // A silence-watchdog stall is its own outcome, never a re-run candidate: the
+  // flag is checked before the signal test and the output patterns because a
+  // killed `node --test` prints `Interrupted while running:` — a shape below
+  // — and must not read as a load timeout (#4276).
+  if (result.stalled) return false
+  // The byte counter's own SIGTERM for output past `maxBuffer` (#3954's shape).
   if (result.error === 'ENOBUFS') return false
   const output = result.output ?? ''
   if (NEVER_LOAD_SHAPES.some((r) => r.test(output))) return false
@@ -910,7 +1121,9 @@ export function readMachineLoad() {
  * Run the selected gates in order, then re-run the timeout-shaped reds alone.
  *
  * Exported, with the runner, the load reader and the clock injected, so
- * `preflight.test.mjs` drives it with no real gate and no real load.
+ * `preflight.test.mjs` drives it with no real gate and no real load. ASYNC:
+ * the injected `run` may be sync or async — `await` accepts both — because
+ * `runGate` is (#4276).
  *
  * A gate is queued for a re-run when it is red and its output is
  * timeout-shaped (`isTimeoutShaped`), whatever the load (#4191). A red that is
@@ -936,15 +1149,15 @@ export function readMachineLoad() {
  * one whose first, timed-out run printed the banner but whose re-run did not is
  * not.
  */
-export function runBattery(
+export async function runBattery(
   gates,
   { run = runGate, readLoad = readMachineLoad, now = Date.now, onStart = () => {}, onResult = () => {} } = {},
 ) {
-  const attempt = (gate, phase) => {
+  const attempt = async (gate, phase) => {
     onStart(gate, phase)
     const sample = readLoad()
     const started = now()
-    const result = run(gate)
+    const result = await run(gate)
     const seconds = ((now() - started) / 1000).toFixed(1)
     const attempted = { ...result, phase, seconds, load: sample.load, cpus: sample.cpus }
     onResult(attempted)
@@ -953,12 +1166,12 @@ export function runBattery(
 
   const results = []
   for (const gate of gates) {
-    const first = attempt(gate, 'first')
+    const first = await attempt(gate, 'first')
     const queued = !first.ok && isTimeoutShaped(first)
     results.push({ gate, ...first, queued, rerun: null })
   }
   for (const entry of results) {
-    if (entry.queued) entry.rerun = attempt(entry.gate, 'rerun')
+    if (entry.queued) entry.rerun = await attempt(entry.gate, 'rerun')
   }
 
   const red = results.filter((r) => !r.ok && !r.queued)
@@ -1007,14 +1220,17 @@ export function summarize({ code, results, red, redAlone, greenAlone, skippedDb 
   const err = []
   const tail = (output) => (output ?? '').split('\n').slice(-25).join('\n')
 
+  const stalled = results.filter((r) => r.stalled)
   if (red.length > 0 || redAlone.length > 0) {
     err.push(`\n✗ ${red.length + redAlone.length} of ${results.length} gate(s) red:\n`)
     for (const f of red) {
+      if (f.stalled) continue // the stall block below speaks for these
       err.push(`── ${f.command}  → reddens: ${f.jobs.join(', ')}`)
       if (f.error === 'ENOBUFS') {
         err.push(
-          '   ENOBUFS: its output passed GATE_OUTPUT_MAX_BUFFER and spawnSync killed it with\n' +
-            '   SIGTERM. Not a timeout and not re-run: the gate may well be green (#3954).',
+          '   ENOBUFS: its output passed GATE_OUTPUT_MAX_BUFFER and preflight ended it with\n' +
+            '   SIGTERM (async spawn has no maxBuffer; the byte counter keeps #3954 distinct).\n' +
+            '   Not a timeout and not re-run: the gate may well be green.',
         )
       } else if (f.error) {
         err.push(`   spawn error: ${f.error}`)
@@ -1030,7 +1246,35 @@ export function summarize({ code, results, red, redAlone, greenAlone, skippedDb 
       err.push(tail(f.rerun.output))
       err.push('')
     }
-  } else if (greenAlone.length === 0) {
+  }
+
+  // A STALL is the silence watchdog's red (#4276): the gate wrote nothing for
+  // longer than the threshold, so the battery killed its whole process group.
+  // It is exit 1 like any other red — the frozen EXIT set stays frozen — but
+  // it is called out, with the measured silent stretch, because it must not
+  // read as load (exit 3's territory) and must never be re-run alone. A stalled
+  // gate is IN `red` (it is never queued), so this only prints beside reds.
+  if (stalled.length > 0) {
+    err.push(
+      `\n✗ ${stalled.length} gate(s) STALLED — silent past the threshold, killed with their process group:\n` +
+        '! A gate that writes no output for PREFLIGHT_SILENCE_MS is hung as far as this\n' +
+        '! battery can tell. It was killed (SIGTERM, then SIGKILL) with its whole process\n' +
+        '! group, and it is NOT re-run: a gate that hung once hangs again (#4276). If the\n' +
+        '! gate is silent by design and green (typecheck, `next build`), raise\n' +
+        '! PREFLIGHT_SILENCE_MS with a reason; it defaults above the measured silent\n' +
+        '! stretch of every green gate.',
+    )
+    for (const s of stalled) {
+      err.push(`✗   ${s.command}  → reddens: ${s.jobs.join(', ')}`)
+      err.push(
+        `!       STALL: silent for ${s.silentFor}ms (threshold ${s.silenceMs}ms); killed its process group.`,
+      )
+      err.push(tail(s.output))
+      err.push('')
+    }
+  }
+
+  if (red.length === 0 && redAlone.length === 0 && greenAlone.length === 0) {
     out.push(
       staticOnly
         ? `\n✓ ${results.length} static gate(s) green (static only: no suite ran).`
@@ -1130,7 +1374,10 @@ export function usage() {
     'at any load; the load before each run is printed as evidence only.',
     '',
     `exit ${EXIT.GREEN}  every gate green`,
-    `exit ${EXIT.RED}  a gate is red`,
+    `exit ${EXIT.RED}  a gate is red. This includes a STALL: a gate silent past`,
+    '        PREFLIGHT_SILENCE_MS was killed with its whole process group and is',
+    '        reported as a stall naming the silent duration — never re-run alone,',
+    '        because a gate that hung once hangs again (#4276).',
     `exit ${EXIT.USAGE}  a usage error: an unknown argument, or --base= with no ref`,
     `exit ${EXIT.RED_UNDER_LOAD}  the only reds timed out and were green alone. Not a pass, and not`,
     '        a reason to re-run until green: open the timed-out test and look for work in',
@@ -1203,7 +1450,16 @@ async function main(argv) {
   }
 
   let announcedRerun = false
-  const outcome = runBattery(selected, {
+  // Gates run detached — outside the terminal's foreground process group — so
+  // a Ctrl-C that kills the battery would otherwise leave the (possibly hung)
+  // gate running (#4276). Empty every running gate's group on the way out.
+  for (const sig of ['SIGINT', 'SIGTERM']) {
+    process.on(sig, () => {
+      killRunningGateGroups()
+      process.exit(SIGNAL_EXIT_CODES[sig])
+    })
+  }
+  const outcome = await runBattery(selected, {
     onStart: (gate, phase) => {
       if (phase === 'rerun' && !announcedRerun) {
         announcedRerun = true
@@ -1216,7 +1472,8 @@ async function main(argv) {
     onResult: (r) => {
       const mark = r.ok ? '✓' : '✗'
       const alone = r.phase === 'rerun' ? ', alone' : ''
-      console.log(`  ${mark} ${r.command}  (${r.seconds}s, load ${describeLoad(r)}${alone})`)
+      const stall = r.stalled ? `, STALL: silent ${r.silentFor}ms` : ''
+      console.log(`  ${mark} ${r.command}  (${r.seconds}s, load ${describeLoad(r)}${stall}${alone})`)
     },
   })
   const { out, err } = summarize(outcome, { staticOnly: opts.static })

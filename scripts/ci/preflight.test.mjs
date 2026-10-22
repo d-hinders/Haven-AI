@@ -45,6 +45,8 @@ import {
   ACTIONS_DIR,
   parseWorkflowCommands,
   DB_SKIP_MARKER,
+  DEFAULT_SILENCE_MS,
+  DEFAULT_KILL_GRACE_MS,
   GATE_RULES,
   GATE_SHAPED_ANYWHERE,
   literalHead,
@@ -57,6 +59,8 @@ import {
   NEVER_LOAD_SHAPES,
   isTimeoutShaped,
   timeoutEvidence,
+  killRunningGateGroups,
+  SIGNAL_EXIT_CODES,
   npmSwallowedFlags,
   readMachineLoad,
   runBattery,
@@ -1089,14 +1093,14 @@ describe('the gate map file', () => {
 })
 
 describe('the gate output buffer (#3954)', () => {
-  test('a gate whose own output exceeds 1 MiB is not killed and its output is captured', () => {
+  test('a gate whose own output exceeds 1 MiB is not killed and its output is captured', async () => {
     // The backend suite prints ~1.47 MB; under Node's default 1 MiB
     // `maxBuffer`, `spawnSync` killed it mid-run (~34 s in) and preflight
     // reported the gate red while the same command run directly passed.
     // The buffer the battery passes must therefore exceed that measured
     // chatter — assert against 1.5 MiB, and against the constant itself.
     const emitted = Math.round(1.5 * 1024 * 1024)
-    const result = runGate({
+    const result = await runGate({
       command: `node -e "process.stdout.write('x'.repeat(${emitted}))"`,
       jobs: ['ci'],
     })
@@ -1149,7 +1153,7 @@ const listedClasses = (stdout) => {
  * Real `node --test` output, captured the way the battery captures it: through
  * `runGate`, from a fixture file in a scratch directory.
  */
-const liveNodeTest = (body) => {
+const liveNodeTest = async (body) => {
   const dir = mkdtempSync(path.join(tmpdir(), 'preflight-live-'))
   try {
     const file = path.join(dir, 'fixture.test.mjs')
@@ -1157,7 +1161,9 @@ const liveNodeTest = (body) => {
     // `env -u NODE_TEST_CONTEXT`: this suite runs under `node --test`, and a
     // child that inherits the variable skips its files ("run() is being called
     // recursively") and exits 0 — a green that is about nothing.
-    return runGate({ command: `env -u NODE_TEST_CONTEXT node --test "${file}"`, jobs: ['fixture'] })
+    // `return await`, not `return`: the await must stay INSIDE the try, or the
+    // finally removes the fixture dir while the gate is still running.
+    return await runGate({ command: `env -u NODE_TEST_CONTEXT node --test "${file}"`, jobs: ['fixture'] })
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
@@ -1433,8 +1439,8 @@ describe('timeout shapes (#4175)', () => {
     }
   })
 
-  test('a node --test timeout, produced live, is timeout-shaped', () => {
-    const live = liveNodeTest("test('slow', { timeout: 20 }, () => new Promise((r) => setTimeout(r, 300)))")
+  test('a node --test timeout, produced live, is timeout-shaped', async () => {
+    const live = await liveNodeTest("test('slow', { timeout: 20 }, () => new Promise((r) => setTimeout(r, 300)))")
     assert.equal(live.ok, false, live.output)
     assert.match(live.output, /'test timed out after 20ms'/)
     assert.equal(isTimeoutShaped(live), true)
@@ -1449,10 +1455,10 @@ describe('timeout shapes (#4175)', () => {
     skip: !(Number(process.versions.node.split('.')[0]) >= 24 &&
       Number(process.versions.node.split('.')[0]) < 25) &&
       `the interrupted-runner TAP shape is only printed by the pinned node (>=24 <25); this is ${process.versions.node}`,
-  }, () => {
+  }, async () => {
     // The file's test sends SIGTERM to the runner (its parent), which is what an
     // outer timeout does to a gate.
-    const live = liveNodeTest(
+    const live = await liveNodeTest(
       "test('runner killed', () => { process.kill(process.ppid, 'SIGTERM'); return new Promise((r) => setTimeout(r, 1500)) })",
     )
     assert.equal(live.ok, false, live.output)
@@ -1460,27 +1466,33 @@ describe('timeout shapes (#4175)', () => {
     assert.equal(isTimeoutShaped(live), true)
   })
 
-  test("a gate whose shell is ended by SIGTERM, produced live, is timeout-shaped", () => {
-    const live = runGate({ command: 'kill -TERM $$', jobs: ['fixture'] })
+  test("a gate whose shell is ended by SIGTERM, produced live, is timeout-shaped", async () => {
+    const live = await runGate({ command: 'kill -TERM $$', jobs: ['fixture'] })
     assert.equal(live.status, null)
     assert.equal(live.signal, 'SIGTERM')
+    assert.equal(live.stalled, false, 'an external SIGTERM is not a watchdog stall')
     assert.equal(isTimeoutShaped(live), true)
     assert.equal(isTimeoutShaped({ ...live, signal: 'SIGKILL' }), false, 'only SIGTERM is timeout-shaped')
   })
 
-  test('spawnSync killing a gate past maxBuffer, produced live, is not timeout-shaped', () => {
-    const live = runGate(
+  test('preflight ending a gate past maxBuffer, produced live, is not timeout-shaped', async () => {
+    // Async `spawn` has no `maxBuffer`; the byte counter in `runGate` enforces
+    // the same bound and reports the same distinct `error: 'ENOBUFS'` —
+    // SIGTERM, like `spawnSync`'s own over-buffer kill, never a timeout, and
+    // never a watchdog stall (#3954, #4276).
+    const live = await runGate(
       { command: `node -e "process.stdout.write('x'.repeat(4096))"`, jobs: ['fixture'] },
       { maxBuffer: 1024 },
     )
     assert.equal(live.error, 'ENOBUFS')
-    assert.equal(live.signal, 'SIGTERM', 'spawnSync no longer kills with SIGTERM: the guard may be moot')
+    assert.equal(live.signal, 'SIGTERM', "preflight's byte counter ends the gate with SIGTERM, as spawnSync did")
+    assert.equal(live.stalled, false)
     assert.equal(live.ok, false)
     assert.equal(isTimeoutShaped(live), false)
   })
 
-  test('timeoutEvidence keeps the naming line and the timeout line, bounded', () => {
-    const live = liveNodeTest("test('slow', { timeout: 20 }, () => new Promise((r) => setTimeout(r, 300)))")
+  test('timeoutEvidence keeps the naming line and the timeout line, bounded', async () => {
+    const live = await liveNodeTest("test('slow', { timeout: 20 }, () => new Promise((r) => setTimeout(r, 300)))")
     const ev = timeoutEvidence(live.output)
     // Node 22's TAP serializes the failure as `  error: 'test timed out …'`;
     // the pinned line (>= 24) as the bare quoted line. Both keep the evidence
@@ -1497,8 +1509,8 @@ describe('timeout shapes (#4175)', () => {
     assert.equal(timeoutEvidence(`Error: Test timed out in 5000ms. ${'y'.repeat(500)}`)[0].length, 201)
   })
 
-  test('a node --test assertion failure, produced live, is not timeout-shaped', () => {
-    const live = liveNodeTest("test('eq', () => { assert.equal(1, 2) })")
+  test('a node --test assertion failure, produced live, is not timeout-shaped', async () => {
+    const live = await liveNodeTest("test('eq', () => { assert.equal(1, 2) })")
     assert.equal(live.ok, false)
     // `AssertionError [ERR_ASSERTION]: …` on the pinned line (>= 24), the TAP
     // `code: 'ERR_ASSERTION'` key on node 22 (#4272) — the fixture must be an
@@ -1540,6 +1552,190 @@ describe('timeout shapes (#4175)', () => {
   })
 })
 
+// ── The silence watchdog (#4276) ─────────────────────────────────────────────
+//
+// Every live test here runs a REAL gate with sub-second knobs and carries its
+// own `{ timeout }`: a watchdog removed by a future edit must fail RED, not
+// hang the `ci_config_checks` job (5-minute budget, no workspace install).
+// The stalling fixtures also carry a self-cap `process.exit`, so a removed
+// watchdog leaves nothing hung behind a failed red either.
+describe('the silence watchdog (#4276)', () => {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+  /** True once `process.kill(pid, 0)` stops finding the process (ESRCH). */
+  const untilDead = async (pid, ms) => {
+    const deadline = Date.now() + ms
+    for (;;) {
+      try {
+        process.kill(pid, 0)
+      } catch {
+        return true
+      }
+      if (Date.now() > deadline) return false
+      await sleep(25)
+    }
+  }
+
+  /** The contents of `file` as soon as it exists, else null after `ms`. */
+  const untilFile = async (file, ms) => {
+    const deadline = Date.now() + ms
+    for (;;) {
+      try {
+        return readFileSync(file, 'utf8')
+      } catch {}
+      if (Date.now() > deadline) return null
+      await sleep(25)
+    }
+  }
+
+  /**
+   * A gate that writes one line, spawns a grandchild that registers its pid
+   * and then sleeps, and goes silent forever. The grandchild is spawned
+   * WITHOUT `detached`: it stays in the gate's process group, so it is
+   * exactly the "outlives its parent" case the group kill exists for. (A
+   * `setsid`/detached escapee is stated residue in `runGate`'s comment.)
+   */
+  const hangFixture = (dir) => {
+    const pidFile = path.join(dir, 'grandchild.pid')
+    const gc = path.join(dir, 'grandchild.mjs')
+    writeFileSync(
+      gc,
+      [
+        `import { writeFileSync } from 'node:fs'`,
+        `writeFileSync(${JSON.stringify(pidFile)}, String(process.pid))`,
+        `setTimeout(() => {}, 60_000)`,
+        ``,
+      ].join('\n'),
+    )
+    const hang = path.join(dir, 'hang.mjs')
+    writeFileSync(
+      hang,
+      [
+        `import { spawn } from 'node:child_process'`,
+        `spawn(process.execPath, [${JSON.stringify(gc)}], { stdio: 'ignore' })`,
+        `console.log('gate alive; silent from here')`,
+        `setTimeout(() => process.exit(9), 5000) // self-cap: fails red, never hangs`,
+        ``,
+      ].join('\n'),
+    )
+    return { pidFile, command: `node ${JSON.stringify(hang)}` }
+  }
+
+  test('a gate silent past the threshold is killed with its process group, grandchild included', { timeout: 10_000 }, async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'preflight-stall-'))
+    try {
+      const { pidFile, command } = hangFixture(dir)
+      const result = await runGate({ command, jobs: ['fixture'] }, { silenceMs: 300, graceMs: 100 })
+      assert.equal(result.stalled, true, JSON.stringify({ ...result, output: result.output.slice(0, 200) }))
+      assert.ok(result.silentFor >= 300, `silentFor=${result.silentFor}`)
+      assert.ok(result.silentFor < 5000, `the self-cap must not fire first: silentFor=${result.silentFor}`)
+      assert.equal(result.ok, false)
+      assert.equal(result.status, null, 'killed, not exited')
+      assert.equal(result.signal, 'SIGTERM')
+      assert.equal(isTimeoutShaped(result), false, 'a stall is its own outcome, never a re-run candidate')
+      // The grandchild outlives its parent the moment the group is signalled;
+      // it must be dead afterwards.
+      const gpid = Number(await untilFile(pidFile, 3000))
+      assert.ok(gpid > 0, 'the grandchild never registered its pid')
+      assert.ok(await untilDead(gpid, 3000), 'the grandchild survived the process-group kill')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test('the stall flag is checked before the SIGTERM test and the output patterns', () => {
+    // A killed `node --test` prints `Interrupted while running:` — a shape in
+    // TIMEOUT_SHAPES — and the watchdog's kill is a SIGTERM; either alone
+    // would read as a load timeout. The flag decides first (#4276).
+    for (const output of ['\nInterrupted while running:\n', VITEST_TEST_TIMEOUT, 'Error: Test timed out in 5000ms.']) {
+      assert.equal(
+        isTimeoutShaped({ ok: false, signal: 'SIGTERM', stalled: true, silentFor: 900, output }),
+        false,
+        JSON.stringify(output),
+      )
+    }
+    // And without the flag, the very same shapes are still timeout-shaped.
+    assert.equal(isTimeoutShaped({ ok: false, signal: 'SIGTERM', stalled: false, output: '\nInterrupted while running:\n' }), true)
+  })
+
+  test('runBattery runs a real stalling node --test gate exactly once — never re-run alone', { timeout: 15_000 }, async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'preflight-stall-'))
+    try {
+      // A gate that prints its TAP header and then hangs — the hang holds the
+      // event loop with an open handle, the way a test awaiting an RPC that
+      // never answers does; a bare never-resolving promise does NOT hang the
+      // runner (node drains and reports "event loop has already resolved").
+      const file = path.join(dir, 'hang.test.mjs')
+      writeFileSync(file, `import { test } from 'node:test'\ntest('hangs', () => new Promise(() => { setInterval(() => {}, 1e6) }))\n`)
+      const phases = []
+      const calls = []
+      const outcome = await runBattery([{ command: `env -u NODE_TEST_CONTEXT node --test "${file}"`, jobs: ['fixture'] }], {
+        run: (gate) => {
+          calls.push(gate.command)
+          return runGate(gate, { silenceMs: 300, graceMs: 100 })
+        },
+        onStart: (gate, phase) => phases.push(phase),
+      })
+      assert.deepEqual(phases, ['first'], 'a stalled gate must not be re-run alone')
+      assert.equal(calls.length, 1)
+      const first = outcome.results[0]
+      assert.equal(first.stalled, true)
+      assert.equal(first.queued, false, 'a stall is never queued for the solo re-run')
+      assert.equal(first.rerun, null)
+      assert.equal(outcome.code, EXIT.RED)
+      if (/Interrupted while running:/.test(first.output)) {
+        assert.equal(isTimeoutShaped(first), false, 'the stall flag outranks the shape the killed runner printed')
+      }
+      const { err } = summarize(outcome)
+      assert.match(err.join('\n'), /STALLED/)
+      assert.match(err.join('\n'), new RegExp(`silent for ${first.silentFor}ms`))
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test('a gate that writes at least once per threshold is never stalled, past several thresholds', { timeout: 10_000 }, async () => {
+    // Writes every ~80ms for ~640ms: six windows of 100ms, three of 200ms —
+    // far past several thresholds of each size.
+    const command = `for i in 1 2 3 4 5 6 7 8; do echo tick; sleep 0.08; done`
+    for (const silenceMs of [100, 200]) {
+      const result = await runGate({ command, jobs: ['fixture'] }, { silenceMs, graceMs: 100 })
+      assert.equal(result.stalled, false, `stalled at silenceMs=${silenceMs}: ${JSON.stringify(result)}`)
+      assert.equal(result.ok, true, result.output)
+      assert.equal((result.output.match(/tick/g) ?? []).length, 8, 'all output captured')
+    }
+  })
+
+  test('SIGINT to preflight kills the running gate process group: the grandchild is dead', { timeout: 10_000 }, async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'preflight-stall-'))
+    try {
+      const { pidFile, command } = hangFixture(dir)
+      // Far above the test's own timeout: only the signal path below may end
+      // this gate, so a removed handler fails red instead of passing late.
+      const pending = runGate({ command, jobs: ['fixture'] }, { silenceMs: 60_000, graceMs: 60_000 })
+      const gpid = Number(await untilFile(pidFile, 3000))
+      assert.ok(gpid > 0, 'the grandchild never registered its pid')
+      killRunningGateGroups()
+      const result = await pending
+      assert.equal(result.ok, false)
+      assert.ok(await untilDead(gpid, 3000), 'the grandchild survived a SIGINT to preflight')
+      // The wiring in main() exits with the shell's 128+n code.
+      assert.equal(SIGNAL_EXIT_CODES.SIGINT, 130)
+      assert.equal(SIGNAL_EXIT_CODES.SIGTERM, 143)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test('the knobs default above every measured silent stretch and are env-overridable', () => {
+    // The floor is the measurement in the PR: `next build` and `tsc` print
+    // nothing until they finish. Pinned as a floor so a silent regression in
+    // the default cannot land unnoticed; the measurement itself is evidence.
+    assert.ok(DEFAULT_SILENCE_MS >= 600_000, `DEFAULT_SILENCE_MS=${DEFAULT_SILENCE_MS}`)
+    assert.ok(DEFAULT_KILL_GRACE_MS > 0)
+  })
+})
+
 // `isHighLoad` and its two tests are gone with #4191: the load no longer gates
 // the re-run, so there is no threshold left to pin. The zero-reading case is
 // covered where it now matters, in the any-load tests below.
@@ -1558,12 +1754,12 @@ describe('the timeout-shaped re-run, at any load (#4175, #4191)', () => {
    * move the machine's load at its start (`loadDuring`, the gate's own
    * workers) or at its end (`loadAfter`, what the next reading sees).
    */
-  const drive = (script, { load = 12, cpus = 8 } = {}) => {
+  const drive = async (script, { load = 12, cpus = 8 } = {}) => {
     const machine = { load, cpus }
     const calls = []
     const samples = []
     let clock = 0
-    const outcome = runBattery(
+    const outcome = await runBattery(
       Object.keys(script).map((command) => ({ command, jobs: [`${command} job`] })),
       {
         run: (gate) => {
@@ -1577,6 +1773,9 @@ describe('the timeout-shaped re-run, at any load (#4175, #4191)', () => {
             status: step.ok ? 0 : step.signal ? null : 1,
             signal: step.signal ?? null,
             error: step.error ?? null,
+            stalled: step.stalled ?? false,
+            silentFor: step.silentFor ?? null,
+            silenceMs: step.silenceMs ?? null,
             output: step.output ?? '',
           }
           if (step.loadAfter !== undefined) machine.load = step.loadAfter
@@ -1592,8 +1791,8 @@ describe('the timeout-shaped re-run, at any load (#4175, #4191)', () => {
     return { outcome, calls, samples, summary: summarize(outcome) }
   }
 
-  test('a timeout-shaped red, green alone: its own group, exit 3', () => {
-    const { outcome, calls, samples, summary } = drive({
+  test('a timeout-shaped red, green alone: its own group, exit 3', async () => {
+    const { outcome, calls, samples, summary } = await drive({
       'npm run test -w packages/x': [{ ok: false, output: VITEST_TEST_TIMEOUT, loadAfter: 3 }, { ok: true }],
     })
     assert.equal(outcome.code, EXIT.RED_UNDER_LOAD)
@@ -1635,8 +1834,8 @@ describe('the timeout-shaped re-run, at any load (#4175, #4191)', () => {
     assert.equal(outcome.results[0].seconds, '0.5')
   })
 
-  test('the same gate red again alone is red, exit 1', () => {
-    const { outcome, calls, summary } = drive({
+  test('the same gate red again alone is red, exit 1', async () => {
+    const { outcome, calls, summary } = await drive({
       'npm run test -w packages/x': [
         { ok: false, output: VITEST_TEST_TIMEOUT, loadAfter: 4 },
         { ok: false, output: VITEST_HOOK_TIMEOUT },
@@ -1657,8 +1856,8 @@ describe('the timeout-shaped re-run, at any load (#4175, #4191)', () => {
     assert.ok(summary.err.some((l) => l.includes('Hook timed out in 10000ms.')))
   })
 
-  test('an assertion failure is not re-run, even at load 40', () => {
-    const { outcome, calls } = drive({ 'npm run test -w packages/x': [{ ok: false, output: VITEST_ASSERTION }] }, {
+  test('an assertion failure is not re-run, even at load 40', async () => {
+    const { outcome, calls } = await drive({ 'npm run test -w packages/x': [{ ok: false, output: VITEST_ASSERTION }] }, {
       load: 40,
     })
     assert.deepEqual(calls, ['npm run test -w packages/x'])
@@ -1666,11 +1865,11 @@ describe('the timeout-shaped re-run, at any load (#4175, #4191)', () => {
     assert.deepEqual(outcome.red.map((r) => r.command), ['npm run test -w packages/x'])
   })
 
-  test('a red that is not timeout-shaped is never re-run, at any load (#4191)', () => {
+  test('a red that is not timeout-shaped is never re-run, at any load (#4191)', async () => {
     // An assertion (a NEVER_LOAD_SHAPE) and a plain red that is neither shape.
     for (const output of [VITEST_ASSERTION, 'lint:a: 1 new violation']) {
       for (const load of [0, 0.5, 4, 8, 8.01, 40]) {
-        const { outcome, calls } = drive({ 'npm run test -w packages/x': [{ ok: false, output }] }, { load })
+        const { outcome, calls } = await drive({ 'npm run test -w packages/x': [{ ok: false, output }] }, { load })
         assert.deepEqual(calls, ['npm run test -w packages/x'], `re-run at load ${load}: ${output}`)
         assert.equal(outcome.code, EXIT.RED)
         assert.deepEqual(outcome.red.map((r) => r.command), ['npm run test -w packages/x'])
@@ -1678,8 +1877,8 @@ describe('the timeout-shaped re-run, at any load (#4175, #4191)', () => {
     }
   })
 
-  test('a timeout-shaped red at 0.8x the CPU count is queued and re-run (#4191)', () => {
-    const { outcome, calls, samples } = drive(
+  test('a timeout-shaped red at 0.8x the CPU count is queued and re-run (#4191)', async () => {
+    const { outcome, calls, samples } = await drive(
       { 'npm run test -w packages/x': [{ ok: false, output: VITEST_TEST_TIMEOUT, loadAfter: 3 }, { ok: true }] },
       { load: 0.8 * 8 },
     )
@@ -1692,8 +1891,8 @@ describe('the timeout-shaped re-run, at any load (#4175, #4191)', () => {
     assert.equal(outcome.code, EXIT.RED_UNDER_LOAD)
   })
 
-  test("#4191's observed reds (11.78, 9.36, 9.18 on 12 CPUs) are all re-run", () => {
-    const { outcome, calls } = drive({
+  test("#4191's observed reds (11.78, 9.36, 9.18 on 12 CPUs) are all re-run", async () => {
+    const { outcome, calls } = await drive({
       'npm run test -w packages/ops': [{ ok: false, output: VITEST_RPC_TIMEOUT, loadAfter: 9.36 }, { ok: true }],
       'npm run test -w packages/backend': [{ ok: false, output: VITEST_TEST_TIMEOUT, loadAfter: 9.18 }, { ok: true }],
       'npm run test -w packages/frontend': [{ ok: false, output: VITEST_RPC_TIMEOUT }, { ok: true }],
@@ -1713,11 +1912,11 @@ describe('the timeout-shaped re-run, at any load (#4175, #4191)', () => {
   // Was "at load equal to the CPU count is not re-run", which pinned the
   // `load > cpus` gate that #4191 removed. Inverted, and widened to the low
   // end, including the zero reading Windows gives.
-  test('a timeout-shaped red is re-run at any load, the CPU count and zero included (#4191)', () => {
+  test('a timeout-shaped red is re-run at any load, the CPU count and zero included (#4191)', async () => {
     // `cpus: 0` is an empty `os.cpus()` (some containers): no CPU count is no
     // reason to skip the re-run either.
     for (const [load, cpus] of [[0, 8], [2, 8], [8, 8], [0, 0], [3, 0]]) {
-      const { outcome, calls } = drive(
+      const { outcome, calls } = await drive(
         { 'npm run test -w packages/x': [{ ok: false, output: VITEST_TEST_TIMEOUT }, { ok: false, output: VITEST_TEST_TIMEOUT }] },
         { load, cpus },
       )
@@ -1727,13 +1926,13 @@ describe('the timeout-shaped re-run, at any load (#4175, #4191)', () => {
     }
   })
 
-  test("load is read BEFORE the gate starts, so the gate's own workers do not count", () => {
+  test("load is read BEFORE the gate starts, so the gate's own workers do not count", async () => {
     // The machine is quiet (2 on 8 CPUs) until the gate's own pool lifts the
     // 1-minute average to 20, and the average is still 20 when it ends. A
     // reading taken at the end would record that as the load it started under.
     // Since #4191 the reading decides nothing, so the gate is re-run either
     // way; what is pinned is which reading is recorded.
-    const { outcome, calls, samples } = drive(
+    const { outcome, calls, samples } = await drive(
       { 'npm run test -w packages/x': [{ ok: false, output: VITEST_TEST_TIMEOUT, loadDuring: 20 }, { ok: true }] },
       { load: 2 },
     )
@@ -1743,8 +1942,8 @@ describe('the timeout-shaped re-run, at any load (#4175, #4191)', () => {
     assert.equal(outcome.code, EXIT.RED_UNDER_LOAD)
   })
 
-  test('each queued gate is re-run exactly once, after the last selected gate', () => {
-    const { calls, samples, outcome } = drive({
+  test('each queued gate is re-run exactly once, after the last selected gate', async () => {
+    const { calls, samples, outcome } = await drive({
       'npm run lint:a': [{ ok: true, loadAfter: 13 }],
       'npm run test -w packages/b': [{ ok: false, output: VITEST_RPC_TIMEOUT, loadAfter: 14 }, { ok: true, loadAfter: 6 }],
       'npm run test -w packages/c': [{ ok: true, loadAfter: 15 }],
@@ -1770,15 +1969,15 @@ describe('the timeout-shaped re-run, at any load (#4175, #4191)', () => {
     assert.equal(outcome.code, EXIT.RED_UNDER_LOAD)
   })
 
-  test('never exit 0 while a green-alone group exists, and a plain red still wins', () => {
-    const onlyLoad = drive({
+  test('never exit 0 while a green-alone group exists, and a plain red still wins', async () => {
+    const onlyLoad = await drive({
       'npm run lint:a': [{ ok: true }],
       'npm run test -w packages/b': [{ ok: false, output: VITEST_TEST_TIMEOUT }, { ok: true }],
     })
     assert.equal(onlyLoad.outcome.code, EXIT.RED_UNDER_LOAD)
     assert.notEqual(onlyLoad.outcome.code, EXIT.GREEN)
 
-    const mixed = drive({
+    const mixed = await drive({
       'npm run lint:a': [{ ok: false, output: 'lint:a: 1 new violation' }],
       'npm run test -w packages/b': [{ ok: false, output: VITEST_TEST_TIMEOUT }, { ok: true }],
     })
@@ -1790,17 +1989,17 @@ describe('the timeout-shaped re-run, at any load (#4175, #4191)', () => {
     )
   })
 
-  test('all green is exit 0 and prints the green line', () => {
-    const { outcome, calls, summary } = drive({ 'npm run lint:a': [{ ok: true }], 'npm run lint:b': [{ ok: true }] })
+  test('all green is exit 0 and prints the green line', async () => {
+    const { outcome, calls, summary } = await drive({ 'npm run lint:a': [{ ok: true }], 'npm run lint:b': [{ ok: true }] })
     assert.equal(outcome.code, EXIT.GREEN)
     assert.equal(calls.length, 2)
     assert.deepEqual(summary.out, ['\n✓ 2 gate(s) green.'])
     assert.deepEqual(summary.err, [])
   })
 
-  test('a red run suppresses the DB-skip notice; exit 3 still prints it', () => {
+  test('a red run suppresses the DB-skip notice; exit 3 still prints it', async () => {
     const BANNER = 'REAL-DB SUITES SKIPPED (no database)'
-    const red = drive({
+    const red = await drive({
       'npm run lint:a': [{ ok: false, output: 'lint:a: 1 new violation' }],
       'npm run test -w packages/backend': [{ ok: true, output: BANNER }],
     })
@@ -1809,7 +2008,7 @@ describe('the timeout-shaped re-run, at any load (#4175, #4191)', () => {
     const all = [...red.summary.out, ...red.summary.err].join('\n')
     assert.equal(/real-DB suites SKIPPED/.test(all), false, 'the skip notice printed on a red run')
 
-    const loadRed = drive({
+    const loadRed = await drive({
       'npm run lint:a': [{ ok: false, output: VITEST_TEST_TIMEOUT }, { ok: true }],
       'npm run test -w packages/backend': [{ ok: true, output: BANNER }],
     })
@@ -1817,15 +2016,15 @@ describe('the timeout-shaped re-run, at any load (#4175, #4191)', () => {
     assert.ok(loadRed.summary.err.includes('!   npm run test -w packages/backend'))
   })
 
-  test('an all-green --static run says no suite ran', () => {
-    const { outcome } = drive({ 'npm run lint:a': [{ ok: true }], 'npm run lint:b': [{ ok: true }] })
+  test('an all-green --static run says no suite ran', async () => {
+    const { outcome } = await drive({ 'npm run lint:a': [{ ok: true }], 'npm run lint:b': [{ ok: true }] })
     assert.deepEqual(summarize(outcome, { staticOnly: true }).out, [
       '\n✓ 2 static gate(s) green (static only: no suite ran).',
     ])
   })
 
-  test('a gate killed for output past maxBuffer (ENOBUFS) is red, not re-run, and says why', () => {
-    const { outcome, calls, summary } = drive(
+  test('a gate killed for output past maxBuffer (ENOBUFS) is red, not re-run, and says why', async () => {
+    const { outcome, calls, summary } = await drive(
       { 'npm run test -w packages/backend': [{ ok: false, signal: 'SIGTERM', error: 'ENOBUFS', output: 'x' }] },
       { load: 40 },
     )
@@ -1833,30 +2032,50 @@ describe('the timeout-shaped re-run, at any load (#4175, #4191)', () => {
     assert.equal(outcome.code, EXIT.RED)
     assert.ok(
       summary.err.includes(
-        '   ENOBUFS: its output passed GATE_OUTPUT_MAX_BUFFER and spawnSync killed it with\n' +
-          '   SIGTERM. Not a timeout and not re-run: the gate may well be green (#3954).',
+        '   ENOBUFS: its output passed GATE_OUTPUT_MAX_BUFFER and preflight ended it with\n' +
+          '   SIGTERM (async spawn has no maxBuffer; the byte counter keeps #3954 distinct).\n' +
+          '   Not a timeout and not re-run: the gate may well be green.',
       ),
       summary.err.join('\n'),
     )
   })
 
-  test("the DB-skip marker is read from the re-run's output for a re-run gate", () => {
+  test('a stall beside a green-alone gate is exit 1: plain red wins over RED_UNDER_LOAD', async () => {
+    const { outcome, calls, summary } = await drive({
+      'npm run test -w packages/x': [{ ok: false, output: VITEST_TEST_TIMEOUT }, { ok: true }],
+      'npm run typecheck -w packages/y': [{ ok: false, signal: 'SIGTERM', stalled: true, silentFor: 912_000, silenceMs: 900_000, output: '' }],
+    })
+    assert.equal(outcome.code, EXIT.RED, 'a stall is never exit 3 territory')
+    assert.equal(calls.filter((c) => c === 'npm run typecheck -w packages/y').length, 1, 'the stalled gate ran once')
+    assert.deepEqual(calls, [
+      'npm run test -w packages/x',
+      'npm run typecheck -w packages/y',
+      'npm run test -w packages/x',
+    ], 'only the timeout-shaped red is re-run, after the last gate')
+    const joined = [...summary.out, ...summary.err].join('\n')
+    assert.match(joined, /STALLED — silent past the threshold/)
+    assert.match(joined, /silent for 912000ms \(threshold 900000ms\)/)
+    assert.match(joined, /NOT re-run/)
+    assert.ok(summary.err.some((l) => l.startsWith('!   npm run test -w packages/x')), 'the green-alone gate still lists')
+  })
+
+  test("the DB-skip marker is read from the re-run's output for a re-run gate", async () => {
     const BANNER = 'REAL-DB SUITES SKIPPED (no database)'
     // The timed-out first run printed the banner; the green re-run did not.
-    const cleared = drive({
+    const cleared = await drive({
       'npm run test -w packages/backend': [{ ok: false, output: `${BANNER}\n${VITEST_TEST_TIMEOUT}` }, { ok: true, output: 'ok' }],
     })
     assert.deepEqual(cleared.outcome.skippedDb, [])
 
     // The first run did not; the green re-run skipped the database.
-    const skipped = drive({
+    const skipped = await drive({
       'npm run test -w packages/backend': [{ ok: false, output: VITEST_TEST_TIMEOUT }, { ok: true, output: BANNER }],
     })
     assert.deepEqual(skipped.outcome.skippedDb.map((r) => r.command), ['npm run test -w packages/backend'])
     assert.ok(skipped.summary.err.includes('!   npm run test -w packages/backend'), 'the skip is not reported')
 
     // A gate that was not re-run is read from its one output.
-    const plain = drive({ 'npm run test -w packages/backend': [{ ok: true, output: BANNER }] })
+    const plain = await drive({ 'npm run test -w packages/backend': [{ ok: true, output: BANNER }] })
     assert.deepEqual(plain.outcome.skippedDb.map((r) => r.command), ['npm run test -w packages/backend'])
     assert.ok(plain.summary.out.includes('!   npm run test -w packages/backend'))
   })

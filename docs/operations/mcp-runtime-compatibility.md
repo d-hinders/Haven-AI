@@ -80,7 +80,7 @@ covers:
   - scripts/ci/check-stale-client-compat.mjs
   - packages/mcp-server/src/next-arguments-corpus.json
   - packages/mcp-server/src/tool-contract-snapshot.test.ts
-last-verified: "2026-10-21"
+last-verified: "2026-10-22"
 ---
 
 > **Contract change (#4107 reverted, 2026-10-21, one hosted tool removed):
@@ -4381,6 +4381,10 @@ Message text and one next-step reason only. When a merchant refuses with `reason
 - Haven's wording is keyed on `reason_code`; it does not read the merchant's `recovery` field.
 
 No tool, schema, refusal code or consent-hash change. A local client on an older `@haven_ai/mcp` keeps the old "retry after" text until it updates.
+
+### erc7710 authorize refuses a `merchantPayTo` that differs from `payTo` (#4243)
+
+Backend only. On the erc7710 shape (`payTo` = the merchant) `POST /x402/authorize` now answers 400 when the body carries a `merchantPayTo` that differs from `payTo`, and the intent records `payTo` as the merchant. No current client is affected: `@haven_ai/sdk`'s erc7710 path, the hosted MCP tools and the local runtime send the merchant as `payTo` and no `merchantPayTo`, and the EIP-3009 funding leg (`payTo` = the delegate EOA, `merchantPayTo` = the merchant) is unchanged. The one skewed caller it reaches is a pre-#1360 SDK that sends a stale delegate address as `payTo` with `merchantPayTo` and no `settlementScheme`: it used to fall through to the erc7710 selector and now gets the 400 before anything is built. No tool, schema shape, refusal code or consent-hash change.
 
 ### Detecting skew before a payment (#1155)
 

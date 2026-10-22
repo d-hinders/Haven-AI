@@ -5395,7 +5395,10 @@ export type components = {
             url: string;
             /** @example 0x1111111111111111111111111111111111111111 */
             payTo: string;
-            /** @example 0x1111111111111111111111111111111111111111 */
+            /**
+             * @description EIP-3009 funding leg only: the real merchant, when payTo is the agent delegate EOA (the funding target). On erc7710 direct settlement payTo IS the merchant; omit merchantPayTo, or send it equal to payTo. A different value is refused with 400 (#4243), since the settlement child pays payTo and the recorded merchant must be the address that is paid.
+             * @example 0x1111111111111111111111111111111111111111
+             */
             merchantPayTo?: string;
             /** @description Atomic token amount from the x402 challenge. Digits only; the route additionally refuses zero (`isPositiveDecimalAtomicAmount`), which JSON Schema does not express. */
             amount: string;

@@ -2030,6 +2030,37 @@ export async function serveAgentDetailResponses(
       return
     }
 
+    // #4260: the agent Spending hero's right half (Last 30 days) renders
+    // only from the overview's per-agent stats, and the shared overview
+    // lists no researched agent — so no capture showed it. Served HERE and
+    // not in the shared `dashboardOverview`, whose agents list every
+    // dashboard baseline photographs. Ages are pinned against the visual
+    // harness's frozen clock (2026-09-01T12:00Z): "1d ago".
+    if (path === '/dashboard/overview') {
+      await fulfillJson(route, {
+        ...dashboardOverview,
+        activity: dashboardOverview.activity.map((group) => withServedApprox(group, 12.5)),
+        agents: [
+          ...dashboardOverview.agents,
+          {
+            ...dashboardOverview.agents[0],
+            id: agentId,
+            stats: {
+              ...dashboardOverview.agents[0].stats,
+              d30: {
+                ...dashboardOverview.agents[0].stats.d30,
+                gross: { usd: 1.42, eur: 1.29, sek: 15.28 },
+                net: { usd: 1.42, eur: 1.29, sek: 15.28 },
+                payments: 48,
+              },
+              lastPaymentAt: '2026-08-31T09:40:00.000Z',
+            },
+          },
+        ],
+      })
+      return
+    }
+
     return route.fallback()
   })
 }

@@ -458,7 +458,9 @@ const ROUTES: ProductRoute[] = [
     path: '/agents/agent-research',
     slug: 'agent-detail-research',
     minChars: 700,
-    viewports: ['mobile'],
+    // #4260: desktop too — the Spending hero's two halves sit side by side
+    // only at `lg`, the composition the mobile stack never shows.
+    viewports: ['mobile', 'desktop'],
     anchor: (page: Page) => page.getByRole('heading', { name: 'Research agent', exact: true }),
     frozenRelativeTime: '4mo ago',
     /** Serves the four detail-page reads the shared fixture falls through on. */

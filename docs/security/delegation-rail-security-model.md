@@ -3604,3 +3604,18 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > caption and liveness notes, this run of card notes); nothing else in this
 > document was re-read for it, and `last-verified` is bumped to 2026-10-22
 > for exactly this coverage.
+
+> **Re-verified unchanged (#4260, 2026-10-22, Last 30 days at the
+> secondary-figure size):** this diff touches one covered file,
+> display-layer: `components/DelegationBudgetCard.tsx`. Only the hero's
+> right half (`LastThirtyDays`) and its loading skeleton change: the spent
+> figure, payment count and last-paid age render as three labelled figures
+> at 20px, and the merchant label moves to its own "Last paid to …" line.
+> The figures read the same overview stats as before, through the same
+> #4209 merchant helper (never an address). No budget row, caption, meter,
+> menu, confirm, signing, edit or revoke path moves; no fetch or write is
+> added or removed. No new spender, no new authority grant, no custody
+> change (Red Line #4: the chain remains the only spend authority). Scope
+> of this re-read: the card diff above and the previous note's card
+> display claims; nothing else in this document was re-read for it, and
+> `last-verified` stays 2026-10-22.

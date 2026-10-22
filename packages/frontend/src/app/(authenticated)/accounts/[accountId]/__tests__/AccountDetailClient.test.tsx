@@ -798,6 +798,40 @@ describe('AccountDetailClient', () => {
       expect(screen.getByText('$45.00')).toBeInTheDocument()
     })
 
+    it('sets both figures at the secondary-figure size beside figure-density marks (#4260)', () => {
+      render(<AccountDetailClient />)
+      const section = screen.getByRole('region', { name: 'Last 30 days' })
+      // The class is on the Amount span itself — a wrapper's text-* never
+      // resizes the figure (#4259).
+      const moneyIn = within(section).getByText('$120.00')
+      const moneyOut = within(section).getByText('$45.00')
+      for (const figure of [moneyIn, moneyOut]) {
+        expect(figure).toHaveClass('text-xl')
+        expect(figure).not.toHaveClass('text-sm')
+      }
+      // The mark is the 24px figure box, on the rendered mark span.
+      for (const icon of ['svg.lucide-arrow-down', 'svg.lucide-arrow-up']) {
+        const mark = section.querySelector(icon)!.closest('span[aria-hidden="true"]')
+        expect(mark).toHaveClass('h-6', 'w-6', 'rounded-[7px]')
+        expect(mark).not.toHaveClass('h-[18px]')
+      }
+      // The sr-only names still sit before each figure, in its pair.
+      expect(within(section).getByText('Money in').parentElement).toContainElement(moneyIn)
+      expect(within(section).getByText('Money out').parentElement).toContainElement(moneyOut)
+    })
+
+    it('while loading, the skeleton is one 28px row of two bars (#4260)', () => {
+      mockUseAccountMoneyFlow.mockReturnValue({
+        ...mockUseAccountMoneyFlow(),
+        loading: true,
+      })
+      render(<AccountDetailClient />)
+      const skeleton = screen.getByRole('status', { name: 'Loading the last 30 days' })
+      expect(skeleton).toHaveClass('flex', 'h-7')
+      expect(skeleton).not.toHaveClass('space-y-2')
+      expect(skeleton.children).toHaveLength(2)
+    })
+
     it('carries the partial-data indicator when the feed is capped', () => {
       mockUseAccountMoneyFlow.mockReturnValue({
         ...mockUseAccountMoneyFlow(),

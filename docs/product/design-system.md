@@ -606,7 +606,7 @@ Authenticated app pages use compact product typography utilities from `@haven_ai
 | `.v2-text-display` | 40 / 48px | 600 | -0.02em | Rare app hero display, not ordinary dashboards |
 | `.v2-text-h1` | 28 / 34px | 600 | -0.015em | PageHeader title |
 | `.v2-text-h2` | 20 / 28px | 600 | -0.01em | Major section titles |
-| `Amount size="md"` (`text-xl`) | 20 / 28px | 600 | 0 | Secondary figure, 20px — a figure beside a headline, such as the Last 30 days figures once #4260 lands; pair it with `DirectionMark density="figure"` (#4259). Set on `Amount`'s own span: a wrapper's `text-*` never resizes the figure |
+| `Amount size="md"` (`text-xl`) | 20 / 28px | 600 | 0 | Secondary figure, 20px — a figure beside a headline: the Last 30 days figures on the account summary card and the agent Spending hero (#4260); pair it with `DirectionMark density="figure"` (#4259). Set on `Amount`'s own span: a wrapper's `text-*` never resizes the figure |
 | `.v2-text-h3` | 16 / 24px | 600 | 0 | Card and panel titles |
 | `.v2-text-body` | 14 / 22px | 400 | 0 | Main app body copy |
 | `.v2-text-meta` | 12 / 18px | 400 | 0 | Labels, captions, metadata |
@@ -1010,6 +1010,15 @@ truncation, and the tiles stack. Tiles carrying only short counts — the
 dashboard money card's payments / merchants / stopped by budget (#3897) —
 stay three across at every width. The figure still carries no colour in any state — the card
 tile's contract, at a smaller scale.
+
+**Hand-built where a figure is money (#4260).** The agent Spending hero's Last
+30 days (`DelegationBudgetCard.tsx`, `LastThirtyDays`) is this three-across
+composition — Spent, Payments and Last paid, a small label above each — built
+by hand rather than from `StatTile`, deliberately: `StatTile.value` is a
+`string` and cannot carry an `Amount` (its "≈" and currency mode), and
+`StatTile` lives in `packages/ui`, shared with ops. Its values sit at the
+secondary-figure size (20px, `Amount size="md"`), not the inline tile's
+`text-base`; a long value wraps inside its cell, never truncates.
 
 ### Money panel (#3807)
 
@@ -1680,7 +1689,8 @@ success green, outgoing uses debit sky, pending uses neutral grey. Four densitie
 - `comfortable` (default): 36px mark, 16px icon — the dedicated `/transactions` table.
 - `compact`: 32px mark, 14px icon — dashboard rows, on the same rhythm as agent rows.
 - `figure`: 24px mark, 14px icon, 7px radius — beside a 20px secondary figure
-  (`Amount size="md"`), such as the Last 30 days In/Out pair once #4260 lands
+  (`Amount size="md"`), such as the account summary card's Last 30 days In/Out
+  pair (#4260)
   (#4259; the account summary card uses `inline` until then).
 - `inline`: 18px mark, 11px icon — the size for a mark in dense inline text, where a
   line of body copy sets the height.

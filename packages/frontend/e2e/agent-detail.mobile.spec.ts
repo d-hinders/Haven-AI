@@ -390,4 +390,46 @@ test.describe('agent detail at 390px (#2733)', () => {
     // The page made no unexpected API noise while being measured.
     expect(unexpectedBrowserErrors(errors)).toEqual([])
   })
+
+  test('the Spending hero\'s Last 30 days fits 375px: three figures, merchant line, no overflow (#4260)', async ({ page }) => {
+    const errors = collectBrowserErrors(page)
+    await page.clock.setFixedTime(FROZEN_NOW)
+    await mockHavenApi(page)
+    await serveAgentDetailResponses(page, 'agent-research')
+    await seedAuthenticatedSession(page)
+
+    await page.setViewportSize({ width: 375, height: MOBILE_HEIGHT })
+    await page.goto('/agents/agent-research')
+    await expect(page.getByRole('heading', { name: 'Research agent', exact: true })).toBeVisible({
+      timeout: 60_000,
+    })
+    await dismissMobileSidebar(page)
+
+    // Non-vacuity: the fixture's overview stats reached the hero, so the
+    // three figures and the merchant line are on the page.
+    const figures = page.locator('dl').filter({ has: page.locator('dt', { hasText: 'Spent' }) })
+    await expect(figures).toBeVisible()
+    await expect(figures.locator('dt')).toHaveText(['Spent', 'Payments', 'Last paid'])
+    await expect(figures.locator('dd').nth(1)).toHaveText('48')
+    await expect(figures.locator('dd').nth(2)).toHaveText('1d ago')
+    await expect(page.getByText('Last paid to research.example')).toBeVisible()
+
+    // Every figure stays inside the column: no cell's content is wider than
+    // its cell, and no cell sticks out of the grid.
+    const clipped = await figures.evaluate((dl) => {
+      const grid = dl.getBoundingClientRect()
+      return Array.from(dl.querySelectorAll('dd')).flatMap((dd) => {
+        const cell = dd.getBoundingClientRect()
+        const out: string[] = []
+        if (dd.scrollWidth > dd.clientWidth + 1) out.push(`${dd.textContent} overflows its cell`)
+        if (cell.right > grid.right + 1 || cell.left < grid.left - 1) out.push(`${dd.textContent} leaves the grid`)
+        return out
+      })
+    })
+    expect(clipped).toEqual([])
+
+    const overflow = await expectNoHorizontalOverflow(page)
+    expect(overflow).toMatchObject({ hasOverflow: false })
+    expect(unexpectedBrowserErrors(errors)).toEqual([])
+  })
 })

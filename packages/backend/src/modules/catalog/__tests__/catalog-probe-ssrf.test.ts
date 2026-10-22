@@ -214,7 +214,11 @@ describe('the guarded catalog transport (#4281)', () => {
   it('rejects a non-string body instead of sending it', async () => {
     const transport = vi.fn<PinnedTransport>(async () => challenge402)
     const guarded = createGuardedCatalogFetch({ resolver: publicResolver, transport })
-    await expect(guarded('https://api.merchant.example/paid', { method: 'POST', body: new Uint8Array([1]) })).rejects.toThrow()
+    const outcome = await guarded('https://api.merchant.example/paid', { method: 'POST', body: new Uint8Array([1]) }).then(
+      () => 'resolved',
+      () => 'rejected',
+    )
+    expect(outcome).toBe('rejected')
     expect(transport).not.toHaveBeenCalled()
   })
 })

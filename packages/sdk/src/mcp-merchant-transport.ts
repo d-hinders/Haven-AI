@@ -806,17 +806,36 @@ export function encodeMcpSettlementReceipt(settlement: McpX402SettlementMeta): s
 }
 
 /** #3155: the request body parsed as a JSON-RPC `tools/call` with an object `params`, else undefined. */
-/** #4257: whether a request body carries an x402 payment in `params._meta` (any JSON-RPC method). */
+/**
+ * #4257: whether a request body carries an x402 payment in `params._meta`,
+ * on any JSON-RPC method. Reads a string body, a `Uint8Array`/`ArrayBuffer`
+ * body decoded as UTF-8, and a batch array (paid when any element is). Fail
+ * safe in the old direction: a body it cannot read (a stream, form data,
+ * bytes that are not UTF-8 JSON) is not treated as paid, so it follows as
+ * the platform did.
+ */
 function bodyCarriesX402Payment(body: unknown): boolean {
-  if (typeof body !== 'string') return false
+  let text: string
+  if (typeof body === 'string') text = body
+  else if (body instanceof Uint8Array || body instanceof ArrayBuffer) {
+    try {
+      text = new TextDecoder('utf-8', { fatal: true }).decode(body)
+    } catch {
+      return false
+    }
+  } else return false
   let request: unknown
   try {
-    request = JSON.parse(body)
+    request = JSON.parse(text)
   } catch {
     return false
   }
-  return isRecord(request) && isRecord(request.params) && isRecord(request.params._meta) &&
-    request.params._meta[MCP_X402_PAYMENT_META_KEY] !== undefined
+  return Array.isArray(request) ? request.some(messageCarriesX402Payment) : messageCarriesX402Payment(request)
+}
+
+function messageCarriesX402Payment(message: unknown): boolean {
+  return isRecord(message) && isRecord(message.params) && isRecord(message.params._meta) &&
+    message.params._meta[MCP_X402_PAYMENT_META_KEY] !== undefined
 }
 
 function parseJsonRpcToolsCall(body: unknown): (Record<string, unknown> & { params: Record<string, unknown> }) | undefined {

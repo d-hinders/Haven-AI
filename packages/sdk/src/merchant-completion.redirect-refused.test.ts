@@ -8,7 +8,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { McpMerchantTransport } from './mcp-merchant-transport.js'
 import { MerchantCompletion } from './merchant-completion.js'
-import { MerchantEgressRefusedError } from './merchant-egress.js'
+import { MerchantEgressRefusedError, type MerchantEgressPolicy } from './merchant-egress.js'
 import type { X402PaymentOption, X402PaymentRequired, X402Receipt } from './types.js'
 
 const paidUrl = 'https://a.dev/paid'
@@ -50,10 +50,11 @@ async function settle<T>(p: Promise<T>): Promise<{ ok: true; value: T } | { ok: 
   }
 }
 
-function completionWith(answer: (url: string) => Response | Promise<Response>) {
+function completionWith(answer: (url: string) => Response | Promise<Response>, egress?: MerchantEgressPolicy) {
   const calls: string[] = []
   const transport = new McpMerchantTransport({
     merchantTimeout: 10_000,
+    ...(egress ? { egress } : {}),
     fetch: async (input) => {
       const url = String(input)
       calls.push(url)
@@ -100,7 +101,11 @@ describe('MerchantCompletion.retryRequest — a refused redirect on the paid del
       expect.objectContaining({
         paymentId: 'pay_1',
         eventType: 'merchant_retry_rejected_after_payment',
-        details: expect.objectContaining({ retry_status: 307, refusal: 'redirect_cross_origin_body' }),
+        details: expect.objectContaining({
+          retry_status: 307,
+          refusal: 'redirect_cross_origin_body',
+          redirect_location: elsewhere,
+        }),
       }),
     )
     expect(calls).toEqual([paidUrl])
@@ -117,6 +122,26 @@ describe('MerchantCompletion.retryRequest — a refused redirect on the paid del
     expect((err as Error).message).toContain('erc7710 has no funding leg')
     expect((err as Error).message).toContain('Do not pay again')
     expect(post).toHaveBeenCalledTimes(1)
+  })
+
+  it('a refusal before the paid request was sent is re-thrown as it was, unrecorded', async () => {
+    const original = new MerchantEgressRefusedError('the URL is not allowed', paidUrl, 'url_not_allowed', true)
+    const refuseAll: MerchantEgressPolicy = {
+      assertUrl() {
+        throw original
+      },
+    }
+    const { completion, post, calls } = completionWith(redirectElsewhere, refuseAll)
+    const result = await settle(
+      completion.retryRequest(paidUrl, { method: 'POST', body: '{"q":1}' }, paymentRequired, receiptFor(accepted3009)),
+    )
+    expect(result.ok).toBe(false)
+    const err = result.ok ? undefined : result.error
+    expect(err).toBe(original)
+    expect(err).toMatchObject({ beforeRequest: true, refusal: 'url_not_allowed' })
+    expect((err as Error).message).not.toContain('delivered')
+    expect(post).not.toHaveBeenCalled()
+    expect(calls).toEqual([])
   })
 
   it('any other delivery failure is re-thrown as it was, unrecorded', async () => {

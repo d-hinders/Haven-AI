@@ -561,6 +561,50 @@ describe('McpMerchantTransport WITHOUT a policy — the transport follows redire
     expect(sentHeaders(fetchSpy.calls[1].init)).toEqual({ accept: 'application/json' })
   })
 
+  it('a batch body with an x402 payment in any element is paid: a cross-origin 307 is refused', async () => {
+    const fetchSpy = recordingFetch((url) =>
+      url === 'https://a.dev/mcp'
+        ? new Response(null, { status: 307, headers: { location: 'https://b.dev/mcp' } })
+        : okText('arrived'),
+    )
+    const body = JSON.stringify([
+      { jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} },
+      { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 't', _meta: { 'x402/payment': { p: 1 } } } },
+    ])
+    const result = await settle(transportWith(undefined, fetchSpy).fetch('https://a.dev/mcp', { method: 'POST', body }))
+    expect(result.ok).toBe(false)
+    expect(result.ok ? undefined : result.error).toMatchObject({ refusal: 'redirect_cross_origin_body' })
+    expect(fetchSpy.calls).toHaveLength(1)
+  })
+
+  it('a byte body (Uint8Array or ArrayBuffer) with an x402 payment in _meta is paid: a cross-origin 307 is refused', async () => {
+    const json = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { _meta: { 'x402/payment': { p: 1 } } } })
+    const bytes = new TextEncoder().encode(json)
+    for (const body of [bytes, bytes.buffer.slice(0) as ArrayBuffer]) {
+      const fetchSpy = recordingFetch((url) =>
+        url === 'https://a.dev/mcp'
+          ? new Response(null, { status: 307, headers: { location: 'https://b.dev/mcp' } })
+          : okText('arrived'),
+      )
+      const result = await settle(transportWith(undefined, fetchSpy).fetch('https://a.dev/mcp', { method: 'POST', body }))
+      expect(result.ok).toBe(false)
+      expect(result.ok ? undefined : result.error).toMatchObject({ refusal: 'redirect_cross_origin_body' })
+      expect(fetchSpy.calls).toHaveLength(1)
+    }
+  })
+
+  it('a body it cannot read (bytes that are not UTF-8 JSON) is not treated as paid, and follows', async () => {
+    const fetchSpy = recordingFetch((url) =>
+      url === 'https://a.dev/mcp'
+        ? new Response(null, { status: 307, headers: { location: 'https://b.dev/mcp' } })
+        : okText('arrived'),
+    )
+    const body = new Uint8Array([0xff, 0xfe, 0x00])
+    const result = await settle(transportWith(undefined, fetchSpy).fetch('https://a.dev/mcp', { method: 'POST', body }))
+    expect(result.ok).toBe(true)
+    expect(fetchSpy.calls.map((c) => c.url)).toEqual(['https://a.dev/mcp', 'https://b.dev/mcp'])
+  })
+
   it('a 302 POST becomes a body-less GET, and the body headers go with the body', async () => {
     const fetchSpy = recordingFetch((url) =>
       url === 'https://a.dev/start'

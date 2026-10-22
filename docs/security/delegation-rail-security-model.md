@@ -67,6 +67,7 @@ covers:
   - packages/frontend/src/hooks/useAccountOperationGate.ts
   - packages/frontend/src/components/DelegationSendModal.tsx
   - packages/frontend/src/components/DelegationBudgetCard.tsx
+  - packages/frontend/src/components/haven/BudgetMeter.tsx
   - packages/qa-agent/src/pilot/delegation-budget-spike.ts
   - packages/backend/src/modules/passport/attestation.ts
   - packages/backend/src/modules/passport/revocation.ts
@@ -77,7 +78,7 @@ covers:
   - packages/backend/src/middleware/ops-auth.ts
   - packages/ops/**
   - packages/frontend/scripts/check-kit-analytics-define.mjs
-last-verified: "2026-10-21"
+last-verified: "2026-10-22"
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -2343,8 +2344,14 @@ signer imports:
   delegated by this key's own account. The signer checks it against the
   Haven-signed expected context; the SDK checks it against the merchant's own
   402 (payee, amount, token, chain, advertised facilitators).
-- **The EIP-3009 merchant header**, against the recorded binding, and **the
-  sweep home**, against Haven's recovery binding (see residual 2).
+- **The EIP-3009 merchant header**, against the recorded binding, and only
+  from a binding minted for a funding leg (#4242). The binding records which
+  of the two x402 shapes above was signed; a settlement-child binding is
+  refused, because no funding leg put that amount in the delegate EOA the
+  header spends from. `haven_sign_x402` refuses a settlement child before
+  signing it. Since #4248 a settlement-child binding is retired at mint and
+  never held, so the signer keeps no payment context for it. And **the sweep home**, against Haven's recovery binding (see
+  residual 2).
 - **A task-budget child `Delegation` (#3329)** — a self-delegation: delegator
   AND delegate are this key's own delegate account, authority is the agent's
   budget delegation (never ROOT), an `erc20TransferAmount` cap on the expected
@@ -3583,3 +3590,30 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > unchanged. Proofs: `src/telemetry/__tests__/kit-analytics-off.test.ts`
 > (0 posts with the mechanism, ≥1 without it) and the committed
 > `scripts/record-kit-analytics-connections.mjs` net over the backend suite.
+
+> **Re-verified unchanged (#4226, 2026-10-22, agent detail tabs and the
+> Spending hero):** this diff touches two covered files, display-layer:
+> `components/DelegationBudgetCard.tsx` and `components/haven/BudgetMeter.tsx`
+> (the latter brought under this document by the same change; corrected by
+> #4249). The card is rebuilt on the
+> dashboard's money-card pattern (budgets left, Last 30 days right, one
+> `Card.Section divided`, stacked below `lg`); each budget's caption moves to
+> the shared `budgetCaptionFor` `row` style — the same text the dashboard row
+> renders, with one test pinning the two surfaces identical — and a paused
+> agent adds the shared pause line under the caption with a muted meter.
+> Stop moves into a per-budget ⋯ menu beside Edit: the menu item's only
+> action is `setConfirmOpen(true)`, so the same confirm still stands between
+> the click and the signature, one irreversible action per menu. "No budget
+> yet" becomes a collapsed needs-setup state that still opens the grant form
+> (and the `?grant=` prefill), `#delegation-budget-card` survives, the
+> statsLoading skeleton is display-only, and `BudgetMeter` gains a `tone`
+> prop whose `brand` default renders the exact className it rendered before.
+> No signing, edit, revoke or confirm path moves; no fetch or write is added
+> or removed; the #3717/#3166 refusal explanations, the failed-signer-load
+> retry and the #3812 owner-wallet notice stand. No new spender, no new
+> authority grant, no custody change (Red Line #4: the chain remains the
+> only spend authority). Scope of this re-read: the card diff above and the
+> sections whose claims rest on the card's display of budget state (§3's
+> caption and liveness notes, this run of card notes); nothing else in this
+> document was re-read for it, and `last-verified` is bumped to 2026-10-22
+> for exactly this coverage.

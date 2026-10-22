@@ -53,7 +53,8 @@ describe('the three palette blocks of globals.css', () => {
   it('every colour-valued token in :root is redeclared in both dark blocks', () => {
     const lightColours = colourValued(blocks.light)
     // 44 since #3670 removed --v2-chain-gnosis; 46 since #4063 added the
-    // tab-bar pill pair; 58 since #4066 added the avatar tints. A floor, not
+    // tab-bar pill pair; 58 since #4066 added the avatar tints; 59 since
+    // #4237 added the tab bar's capsule indicator. A floor, not
     // an inventory — the exact census is the THEME_TOKENS test below.
     expect(lightColours.length).toBeGreaterThanOrEqual(44)
     for (const darkName of ['mediaDark', 'explicitDark'] as const) {

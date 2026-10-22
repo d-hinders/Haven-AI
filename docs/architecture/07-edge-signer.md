@@ -90,7 +90,8 @@ The edge signer ships as **`@haven_ai/signer`** in two layers:
      signer's own account (never ROOT). It then returns the funding signature
      plus a process-local
      `x402_binding` that records the authenticated funding-intent and
-     merchant-header context returned by hosted MCP.
+     merchant-header context returned by hosted MCP, plus which of the two
+     shapes it signed (#4242).
    - `signDelegationTypedData(typedData)` → a verbatim primitive: signs
      whatever typed data it is handed. The allowlist that decides WHAT may be
      signed lives in the MCP tool layer (#3272, below); an embedder calling
@@ -98,7 +99,16 @@ The edge signer ships as **`@haven_ai/signer`** in two layers:
    - `buildX402PaymentHeader(paymentRequired, x402Binding)` → the EIP-3009
      merchant payment header for the merchant leg of an x402 payment, after
      consuming the recorded binding and checking the merchant challenge against
-     it. Reuses the SDK's `selectStandardPaymentOption` +
+     it. Only a funding-leg binding builds a header (#4242): a binding minted
+     for an erc7710 settlement child is refused, because that payment has no
+     funding leg to back a delegate-EOA transfer. Since #4248 such a binding is
+     retired the moment it is minted and never held, so no payment context
+     outlives the call that signed the child; the refusal is the structured
+     `NO_FUNDING_LEG` (`next_action: sign_and_submit_payment`, no tool, a
+     `next_tool_omitted_reason` per site: here, submit the child signature the
+     agent already holds to `haven_submit` with `settlement_scheme: 'erc7710'`;
+     on `haven_sign_x402`, sign the child with `haven_sign` first). No tool is
+     named because the signer's own next-step targets declare only `haven_get_payment_status`, and the refusal does not hold the signature argument a `haven_submit` step would need. Reuses the SDK's `selectStandardPaymentOption` +
      `toStandardPaymentRequirements` + the `x402` library. Since #3888 the
      authorization's nonce is not the library's random draw: the signer
      overwrites it with `deriveX402PaymentNonce(expected.paymentId)` on the
@@ -471,7 +481,10 @@ hosted:  haven_report_settlement_evidence { payment_id, settlement_tx_hash }
 The signer's step is the same tool, but what it signs is not: on the bridge the
 signature funds the delegate EOA, here it IS the settlement child. There is no
 funding transaction and therefore no `haven_x402_sign_header` step — see the
-custody note below on who assembles the header on this scheme.
+custody note below on who assembles the header on this scheme. Since #4242 the
+signer enforces this rather than leaving it to guidance: `haven_x402_sign_header`
+refuses a settlement-child binding, and `haven_sign_x402` refuses a settlement
+child before signing it.
 
 `haven_sign_x402` creates the short-lived merchant authorization before funding
 confirms, so call `haven_settle_mcp_tool` promptly. If the payment window
@@ -559,7 +572,7 @@ account is permanently out of scope.
 - The edge signer refuses to build the merchant header unless the caller first
   signed the funding hash with a Haven-authenticated `x402.expected`; the
   resulting binding is process-local and is consumed after one successful
-  merchant header. The fresh `payment_required` must match the authenticated
+  merchant header. Only a funding-leg binding qualifies (#4242). The fresh `payment_required` must match the authenticated
   funding-intent amount, merchant, resource URL, asset, and network.
 - Startup (#3173): the signer imports `@haven_ai/sdk/edge`, never the SDK
   barrel, and loads `x402/schemes` only on the merchant-header leg, so no

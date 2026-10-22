@@ -83,6 +83,15 @@ covers:
 last-verified: "2026-10-21"
 ---
 
+> **Re-verified unchanged (#4244, 2026-10-22, merchant-transport only).**
+> `packages/sdk/src/mcp-merchant-transport.ts` and `merchant-egress.ts` are on
+> this contract's cover list. Under a merchant-egress policy, a GET redirect
+> hop that changes origin now sends only an allow-list of caller headers
+> (`accept`, `accept-language`, `user-agent`, `x402-wallet`); same-origin hops
+> and the no-policy path are unchanged. No tool is added, renamed or
+> re-shaped; no strict schema, consent hash, version-skew rule or signing
+> input moves. `last-verified` is not re-stamped: this block is the scope.
+
 > **Contract change (#4107 reverted, 2026-10-21, one hosted tool removed):
 > `haven_check_token_safety` is gone.** PR #4148 added it on 2026-10-20; it
 > reached `dev` and hosted dev only, never `main`, and is reverted whole on
@@ -1423,6 +1432,31 @@ last-verified: "2026-10-21"
 > backend's `funding-leg-signer-shape.contract.test.ts` pins. Installed
 > signers keep the old x402 arm until upgraded. Nothing else in this document
 > was re-verified in this pass.
+>
+> **Recent re-verification (#4248):** the #4242 refusal is now the
+> structured `NO_FUNDING_LEG` (it was `SIGNING_ERROR`), with
+> `next_action: sign_and_submit_payment` and a `next_tool_omitted_reason`,
+> on both `haven_x402_sign_header` and `haven_sign_x402`. `haven_sign_x402`
+> now checks the expected-context version before the settlement-child
+> refusal, so an out-of-date signer gets `UNSUPPORTED_EXPECTED_CONTEXT_VERSION`
+> (#1143 ordering) whatever the typed data is. A settlement-child binding is
+> retired at mint and no longer held in memory. No tool, argument,
+> description or version set changes, so the handshake and consent hash do
+> not move. Skew: no released signer emitted the #4242 `SIGNING_ERROR`, and
+> hosted code branches on neither code. Nothing else in this document was
+> re-verified in this pass.
+>
+> **Recent re-verification (#4242):** the signer's x402 binding now records
+> which shape was signed, and `haven_x402_sign_header` builds an EIP-3009
+> header only from a funding-leg binding; a settlement-child binding is
+> refused (`SIGNING_ERROR`) and retired. `haven_sign_x402` refuses a
+> settlement child before signing. Three tool descriptions changed; no tool,
+> argument or version set changes, so the handshake and consent hash do not
+> move. Skew: hosted guidance already routes erc7710 to `haven_sign` +
+> `haven_submit { settlement_scheme: 'erc7710' }`, which is unchanged, so a
+> new signer against the current backend refuses nothing it is sent on a
+> live path. Installed signers keep the old behaviour until upgraded. Nothing
+> else in this document was re-verified in this pass.
 >
 > **Recent re-verification (#3283):** the allowlist above moved into
 > `@haven_ai/sdk` (`assertBoundDirectPaymentUserOp` and friends, exported from

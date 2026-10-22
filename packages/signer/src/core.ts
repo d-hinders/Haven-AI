@@ -36,6 +36,7 @@ import {
   type X402PaymentRequired,
   type X402PaymentOption,
 } from '@haven_ai/sdk/edge'
+import { HavenNoFundingLegRefusedError } from './no-funding-leg.js'
 
 /**
  * The edge signer core.
@@ -201,6 +202,9 @@ export interface EdgeSignerOptions {
   agentId?: string
 }
 
+// #4242: re-exported from its own module (#4248) so existing imports keep working.
+export { NO_FUNDING_LEG_MESSAGE } from './no-funding-leg.js'
+
 export function createEdgeSigner(
   delegateKey: string,
   options: EdgeSignerOptions = {},
@@ -213,6 +217,26 @@ export function createEdgeSigner(
       `Invalid delegate key: ${err instanceof Error ? err.message : String(err)}`,
     )
   }
+  /**
+   * #4242: the x402 arm signs two shapes, and only one of them has a funding
+   * leg: a funding-leg UserOp moves the quoted amount to this signer's
+   * delegate EOA, which an EIP-3009 merchant header then spends. An erc7710
+   * settlement child has no funding leg — the treasury pays the merchant
+   * through the child itself — so nothing backs a delegate-EOA header for it.
+   * The expected context alone cannot tell the two apart (it carries no
+   * scheme), so the signing branch records the shape it verified.
+   *
+   * #4248: this map holds FUNDING LEGS ONLY. A settlement-child binding is
+   * retired as `no_funding_leg` the moment it is minted and never stored, so
+   * no payment context outlives the call that signed the child (#4242 kept it
+   * until a header attempt that the supported erc7710 flow never makes). Every
+   * entry here is therefore one `buildX402PaymentHeader` may build from, and
+   * holding a child here would be exactly the #4242 defect — which is what the
+   * header-time tests catch. Kept out of `X402ExpectedPayment` on purpose: that
+   * type is the Haven-signed binding message, and the shape is a local fact
+   * about what this signer just signed.
+   */
+  type X402BindingRail = 'funding_leg' | 'settlement_child'
   const x402Bindings = new Map<string, X402ExpectedPayment>()
   /**
    * #2291: why a binding this process once held is gone. A binding is
@@ -225,7 +249,15 @@ export function createEdgeSigner(
    * The reason is recorded, not just the fact, because the exit paths are not
    * equivalent: a binding retired by the WINDOW check produced no header at
    * all, so telling that caller to "retry with the header you already have"
-   * would be a confident lie (review finding). Three outcomes, three remedies.
+   * would be a confident lie (review finding). Each outcome has its own remedy;
+   * #4242 adds the settlement-child refusal, which also built no header. Since
+   * #4248 a settlement child is retired here at mint time, so this map — not a
+   * stored binding — is what keeps `haven_x402_sign_header` answering the
+   * erc7710 misuse with the no-funding-leg remedy. Past the bound below it
+   * degrades to the unknown-binding refusal, which still builds nothing.
+   * Settlement children now share that bound with `header_built` and
+   * `window_expired`, so under erc7710 volume a stale re-use of those falls
+   * back to the unknown-binding remedy sooner; nothing is built either way.
    *
    * Ids only. The payment context is still deleted with the map entry, so this
    * changes nothing about what the signer retains — a retired id is an opaque
@@ -233,7 +265,7 @@ export function createEdgeSigner(
    * without limit; the oldest ids fall off, which degrades a stale re-use back
    * to the unknown-binding message rather than to a wrong one.
    */
-  type RetiredBindingReason = 'header_built' | 'window_expired'
+  type RetiredBindingReason = 'header_built' | 'window_expired' | 'no_funding_leg'
   const retiredX402Bindings = new Map<string, RetiredBindingReason>()
   const RETIRED_BINDING_MEMORY = 64
   function retireX402Binding(id: string, reason: RetiredBindingReason): void {
@@ -294,7 +326,9 @@ export function createEdgeSigner(
       // the treasury — re-derive the meaning from the caveats and refuse if it
       // disagrees with the declaration. A backend could otherwise declare one
       // payee and pin another, and the pair would bind perfectly.
+      let rail: X402BindingRail
       if (isSettlementChildTypedData(typedData)) {
+        rail = 'settlement_child'
         // A network this signer cannot map is its OWN failure, not a chain
         // mismatch. Folding it into the comparison (as `?? -1` did) refused
         // correctly but reported "expected chain -1", sending a reader after a
@@ -328,6 +362,7 @@ export function createEdgeSigner(
         // does not need it — a non-ROOT authority must resolve on-chain to a
         // delegation made TO this account, which only its owner can sign.
       } else if (isPackedUserOperationTypedData(typedData)) {
+        rail = 'funding_leg'
         // #3281 (epic #3284): the binding above proves Haven DECLARED these
         // bytes — but a compromised binding key can declare anything. So the
         // funding leg must also be the ONE shape a funding leg is: the #3271
@@ -362,7 +397,12 @@ export function createEdgeSigner(
         typedData as Parameters<typeof account.signTypedData>[0],
       )
       const x402Binding = randomUUID()
-      x402Bindings.set(x402Binding, { ...expected })
+      if (rail === 'funding_leg') {
+        x402Bindings.set(x402Binding, { ...expected })
+      } else {
+        // #4248: nothing to hold — no header is ever built for a child.
+        retireX402Binding(x402Binding, 'no_funding_leg')
+      }
       return { signature, x402Binding }
     },
 
@@ -370,8 +410,8 @@ export function createEdgeSigner(
       paymentRequired: X402PaymentRequired,
       x402Binding: string,
     ): Promise<X402HeaderResult> {
-      const expected = x402Bindings.get(x402Binding)
-      if (!expected) {
+      const binding = x402Bindings.get(x402Binding)
+      if (!binding) {
         // #2291: two different situations, two different remedies. Conflating
         // them sent a reporter hunting a binding-lookup bug that did not
         // exist — the caller HAD signed, seconds earlier, with a one-shot that
@@ -387,6 +427,9 @@ export function createEdgeSigner(
               'the same idempotency_key.',
           )
         }
+        if (retired === 'no_funding_leg') {
+          throw new HavenNoFundingLegRefusedError('header')
+        }
         if (retired === 'window_expired') {
           throw new HavenSigningError(
             'This x402 binding was retired because its payment window closed before a merchant ' +
@@ -401,6 +444,10 @@ export function createEdgeSigner(
             'bindings live in memory only — re-sign to mint a fresh one.',
         )
       }
+      // #4242: only a funding leg backs a delegate-EOA EIP-3009 header, and
+      // since #4248 only funding legs are ever stored (see `x402Bindings`), so
+      // a settlement child is answered by the retired branch above.
+      const expected = binding
       // No header is built on either window path — the window closed first —
       // so the binding is retired with the precise remedy (#3173 review: the
       // post-load re-check must retire too, or the binding dangles in memory

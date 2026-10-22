@@ -123,7 +123,7 @@ describe('Sidebar', () => {
     // Dashboard sits UNDER the Overview header, not above it (the pre-#2947
     // ungrouped shape #3024 described as the interim). Scoped to the rail's
     // `<nav>`, not `getByRole` — the mobile tab bar renders its own
-    // "Dashboard" link too.
+    // "Home" link too (#4237; the bar's label for /dashboard).
     const overview = screen.getByText('Overview', { selector: 'p' })
     const dashboard = document.querySelector('nav[aria-label="All sections"] a[href="/dashboard"]')!
     const money = screen.getByText('Money', { selector: 'p' })

@@ -12,6 +12,8 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { EllipsisVertical } from 'lucide-react'
+import { Icon } from './ui/Icon'
 import { isAddress, parseUnits, formatUnits } from 'viem'
 import type { Address } from 'viem'
 import { useDelegationBudget, type DelegationBudget, type GrantInput, type GrantResult } from '@/hooks/useDelegationBudget'
@@ -26,16 +28,27 @@ import IssueSubBudgetModal from './IssueSubBudgetModal'
 import ConfirmDialog from './ConfirmDialog'
 import { delegationIsLive, eligibleSubBudgetParents, subBudgetEndLabel } from '@/lib/sub-budget'
 import { receivedGrantStatusNote } from '@/lib/agent-budget'
+import { agentMerchantLabel } from '@/lib/agent-merchant-label'
+import { AGENT_PAUSED_SHORT } from '@/lib/agent-pause-copy'
+import { usePreferences } from '@/hooks/usePreferences'
 import { Card } from './ui/Card'
 import { Skeleton } from './ui/Skeleton'
 import { Button } from './ui/Button'
 import { Input } from './ui/Input'
 import { Select } from './ui/Select'
 import { Row } from './ui/Row'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from './ui/DropdownMenu'
 import { useToast } from './ui/Toast'
+import { Amount, type AmountCurrency } from '@/components/haven/Amount'
 import { BudgetMeter, NoticeRow, truncateAddress } from '@/components/haven'
-import { timeUntil } from '@/lib/format'
+import { timeAgo, timeUntil } from '@/lib/format'
 import { budgetCaption, budgetPeriodWords, budgetReservedNote, type BudgetCaption } from '@/lib/budget-caption'
+import type { DashboardAgentStats } from '@/types/dashboard'
 
 interface TokenOption {
   address: string
@@ -67,6 +80,26 @@ interface Props {
    * The backend refuses build/activate for a revoked agent anyway.
    */
   retired?: 'revoked' | 'archived'
+  /**
+   * #4226: the agent's status as the page sees it. `paused` greys the meters
+   * and adds the shared pause line under each caption (as the dashboard row
+   * does) — the caption itself is unchanged.
+   */
+  agentStatus?: string
+  /**
+   * #4226: the dashboard overview's per-agent stats block — the Last 30 days
+   * column's spent figure, payment count and last-paid line (the same source
+   * #4209's card footer reads, read the way the account page reads the
+   * overview). Absent/null — an agent the overview does not cover, a revoked
+   * one among them — renders no column.
+   */
+  stats?: DashboardAgentStats | null
+  /**
+   * #4226: the overview read is still in flight. A skeleton column reserves
+   * the shape so arrival is not a layout jump; with `stats` present this is
+   * ignored.
+   */
+  statsLoading?: boolean
 }
 
 /**
@@ -81,7 +114,23 @@ export const DELEGATION_BUDGET_CARD_ID = 'delegation-budget-card'
 // option instead of silently desyncing the Select from the state it shows).
 const PERIODS = [86_400, 604_800, 2_592_000] as const
 
-export default function DelegationBudgetCard({ agentId, chainId, tokens, agentName, onBudgetChange, retired }: Props) {
+export default function DelegationBudgetCard({
+  agentId,
+  chainId,
+  tokens,
+  agentName,
+  onBudgetChange,
+  retired,
+  agentStatus,
+  stats,
+  statsLoading,
+}: Props) {
+  const { currency } = usePreferences()
+  // #4226: `paused` greys the meters and adds the shared pause line under
+  // each caption. Keyed on the status STRING, never on "not active" — a
+  // pending_approval agent is not paused, and a retired agent comes through
+  // `retired` with its own copy.
+  const isPaused = agentStatus === 'paused'
   // #3695: this card is the one caller that asks for remaining-this-period —
   // the meter on each row is drawn from it.
   const { budgets, grant, editBudget, revoke, busy, ready, budgetsError, reload, signersError, reloadSigners, signersLoading, passkeyElsewhere } =
@@ -461,12 +510,24 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, agentNa
   // gated below on knowing the current budgets — stays reachable. #3802:
   // "active" here is the owner predicate (see above) — an expired-only row
   // counts as no active budget, so the form shows.
-  const showForm = !hasActive || formOpen
+  // #4226: both entry states are now COLLAPSED — budgets listed show "Add
+  // budget" at the foot; none shows "No budget yet." with Set budget — and
+  // the form opens on either (or on a `?grant=` prefill), per mockup v2.
+  // A FAILED read is the exception (#2473's contract): an unknown list must
+  // never read as "you have no budget", so the form stays open exactly as it
+  // did when it was the section's content.
+  const showForm = formOpen || Boolean(budgetsError)
 
   return (
     <section className="mt-6">
       <SpendingHeading retired={retired} />
-      <Card hover={false} className="p-5 md:p-6">
+      {/* #4226: the dashboard money-card pattern (design-system.md, #3897) —
+          budgets on the left, Last 30 days on the right as a divided section,
+          stacked below `lg`. The card itself carries no padding: the halves
+          own it, so the right hairline runs edge-to-edge at `lg`. */}
+      <Card hover={false} className="overflow-hidden">
+        <div className="grid lg:grid-cols-2">
+          <section aria-label="Budgets" className="min-w-0 p-5 sm:p-6">
 
       {/* A failed signer-set fetch must be retryable (#1079) — without it the
           card is stranded at ready=false with no way out. */}
@@ -556,6 +617,7 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, agentNa
               agentName={agentName}
               chainId={chainId}
               openTaskBudgets={openTaskBudgets}
+              paused={isPaused}
               onRevoke={handleRevoke}
               onEdit={retired ? undefined : setEditing}
               busy={busy}
@@ -578,9 +640,22 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, agentNa
         ) : null
       ) : tokens.length > 0 && !showForm ? (
         <div className="mt-3">
-          <Button ref={addBudgetRef} size="sm" variant="ghost" onClick={openForm}>
-            Add budget
-          </Button>
+          {hasActive ? (
+            <Button ref={addBudgetRef} size="sm" variant="ghost" onClick={openForm}>
+              Add budget
+            </Button>
+          ) : (
+            // #4226: needs setup — "No budget yet" with Set budget (mockup
+            // v2). The form opens on the button, or expanded straight away on
+            // a `?grant=` prefill; the received-grants nuance lives on the
+            // form's own line when it opens.
+            <div>
+              <p className="text-sm text-[var(--v2-ink-muted)]">No budget yet.</p>
+              <Button ref={addBudgetRef} size="sm" variant="ghost" className="mt-2" onClick={openForm}>
+                Set budget
+              </Button>
+            </div>
+          )}
         </div>
       ) : tokens.length > 0 ? (
         <div className={hasActive ? 'mt-4 space-y-2' : 'space-y-2'}>
@@ -757,6 +832,30 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, agentNa
         </Card.Section>
       ) : null}
 
+        </section>
+
+        {/* #4226: the hero's right half — the Last 30 days from the
+            dashboard overview's per-agent stats, the source #4209's card
+            footer reads. Revoked and archived agents are not in the
+            overview, so a retired card renders no column at all; their
+            history is under Activity. */}
+        {!retired && (stats || statsLoading) ? (
+          <Card.Section divided className="min-w-0 lg:border-t-0 lg:border-l p-5 sm:p-6">
+            {stats ? (
+              <LastThirtyDays stats={stats} currency={currency} />
+            ) : (
+              <div role="status" aria-busy="true" aria-label="Loading the last 30 days">
+                <Skeleton className="h-4 w-24" />
+                <div className="mt-3 space-y-2">
+                  <Skeleton className="h-9 w-36" />
+                  <Skeleton className="h-4 w-28" />
+                </div>
+              </div>
+            )}
+          </Card.Section>
+        ) : null}
+      </div>
+
       {subBudgetParents.length > 0 && issuingSubBudget ? (
         <IssueSubBudgetModal
           open
@@ -913,12 +1012,18 @@ function ReplacedBudgetNotice({
   )
 }
 
+// The ⋯ trigger class — the same quiet icon button the page header's menu
+// uses, sized to the 44px tap-target overlay.
+const MENU_TRIGGER_CLASS =
+  'inline-flex min-h-11 min-w-11 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-hover)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 disabled:cursor-not-allowed disabled:opacity-50'
+
 function BudgetRow({
   budget,
   tokens,
   agentName,
   chainId,
   openTaskBudgets,
+  paused,
   onRevoke,
   onEdit,
   busy,
@@ -932,6 +1037,8 @@ function BudgetRow({
   chainId: number
   /** Open, unexpired task budgets across the agent (#3329) — filtered to this row's parent below. */
   openTaskBudgets: TaskBudget[]
+  /** #4226: the agent is paused — greyed meter and the shared pause line. */
+  paused: boolean
   onRevoke: (hash: string) => void | Promise<void>
   /** Opens the edit-in-place flow (#3166) for THIS row; absent on a retired agent (#3549). */
   onEdit?: (budget: DelegationBudget) => void
@@ -966,7 +1073,7 @@ function BudgetRow({
     .filter((tb) => tb.parent_delegation_hash === budget.delegation_hash)
     .reduce((sum, tb) => sum + BigInt(tb.max_atomic), 0n)
 
-  const usage = budgetCaptionFor(budget, chainId, t?.symbol ?? '')
+  const usage = budgetCaptionFor(budget, chainId, t?.symbol ?? '', 'row')
 
   return (
     <div className="flex items-start justify-between gap-3 py-3">
@@ -989,17 +1096,31 @@ function BudgetRow({
           </p>
         ) : null}
         {usage.kind === 'meter' ? (
-          <div className="mt-2 max-w-sm">
-            <BudgetMeter usedPercent={usage.usedPercent} label={usage.label} caption={usage.caption} />
+          // #4226: the meter spans its column — the hero's money-card grid
+          // already constrains the row, so the old `max-w-sm` is gone.
+          <div className="mt-2">
+            <BudgetMeter
+              usedPercent={usage.usedPercent}
+              label={usage.label}
+              caption={usage.caption}
+              tone={paused ? 'muted' : usage.usedPercent >= 90 ? 'warning' : 'brand'}
+            />
           </div>
         ) : usage.kind === 'expired' || usage.kind === 'unknown' || usage.kind === 'refilled-updating' || usage.kind === 'not-started' ? (
           <p className="mt-2 text-xs text-[var(--v2-ink-3)]">{usage.caption}</p>
         ) : null}
+        {/* #4226: paused — the shared short pause line UNDER the caption, the
+            dashboard row's own placement (AgentRow); the caption text itself
+            is unchanged. The line names the state the greyed meter implies. */}
+        {paused ? <p className="mt-1 text-xs text-[var(--v2-ink-3)]">{AGENT_PAUSED_SHORT}</p> : null}
       </div>
       {/* #3166: Edit changes this budget's limits in place — same slot, same
           agent key, new owner-signed delegation. It is hidden while a
           lifecycle action is busy, exactly like Stop, and requires a
-          reachable signer like every affordance that asks for one. */}
+          reachable signer like every affordance that asks for one.
+          #4226: Stop moves into the per-budget ⋯ menu beside Edit — one
+          irreversible action per menu, and its confirm still stands between
+          the click and the signature. */}
       <div className="flex shrink-0 items-center gap-1">
         {onEdit ? (
           <Button
@@ -1012,15 +1133,20 @@ function BudgetRow({
             Edit
           </Button>
         ) : null}
-        <Button
-          size="sm"
-          variant="ghost"
-          onClick={() => setConfirmOpen(true)}
-          disabled={busy || !ready}
-          aria-label={`Stop budget ${amount} ${t?.symbol ?? ''} ${periodLabel}`.replace(/\s+/g, ' ')}
-        >
-          Stop budget
-        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            aria-label={`Budget options ${amount} ${t?.symbol ?? ''} ${periodLabel}`.replace(/\s+/g, ' ')}
+            disabled={busy || !ready}
+            className={MENU_TRIGGER_CLASS}
+          >
+            <Icon icon={EllipsisVertical} className="h-4 w-4" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="right">
+            <DropdownMenuItem tone="danger" onSelect={() => setConfirmOpen(true)}>
+              Stop budget…
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
       <ConfirmDialog
@@ -1044,6 +1170,53 @@ function BudgetRow({
   )
 }
 
+/**
+ * The hero's right half (#4226): the agent's Last 30 days from the dashboard
+ * overview's per-agent stats — the spent figure in the user's display
+ * currency (the same `Amount` currency mode the account summary card and the
+ * dashboard's own figures read), the payment count, and the "Last paid …"
+ * line with #4209's merchant label (name → x402 host → nothing, never an
+ * address). All-time latest payment: `lastPaymentAt` is not windowed on the
+ * wire, matching the card footer's read.
+ */
+function LastThirtyDays({
+  stats,
+  currency,
+}: {
+  stats: DashboardAgentStats
+  currency: AmountCurrency
+}) {
+  const d30 = stats.d30
+  const gross = currency === 'EUR' ? d30.gross.eur : currency === 'SEK' ? d30.gross.sek : d30.gross.usd
+  // #4165: the per-currency "≈" DECISION, from the one rule — fall back to
+  // the window's overall flag when an older backend omits the split.
+  const approx = d30.approxByCurrency?.[currency.toLowerCase() as 'usd' | 'eur' | 'sek'] ?? d30.approx
+  const merchant = agentMerchantLabel(stats.lastCounterparty)
+  return (
+    <div>
+      <p className="text-sm font-medium text-[var(--v2-ink-2)]">Last 30 days</p>
+      {d30.payments === 0 ? (
+        <p className="mt-2 text-sm text-[var(--v2-ink-3)]">No payments in the last 30 days.</p>
+      ) : (
+        <>
+          <p className="mt-2 text-3xl font-semibold tracking-tight text-[var(--v2-ink)] v2-tabular">
+            <Amount amount={gross} currency={currency} approx={approx} />
+          </p>
+          <p className="mt-1 text-sm text-[var(--v2-ink-3)] v2-tabular">
+            {d30.payments} {d30.payments === 1 ? 'payment' : 'payments'}
+          </p>
+        </>
+      )}
+      {stats.lastPaymentAt ? (
+        <p className="mt-1 text-sm text-[var(--v2-ink-3)]">
+          Last paid {timeAgo(stats.lastPaymentAt)}
+          {merchant ? ` · ${merchant}` : ''}
+        </p>
+      ) : null}
+    </div>
+  )
+}
+
 type BudgetUsage = BudgetCaption
 
 /**
@@ -1058,7 +1231,12 @@ type BudgetUsage = BudgetCaption
  * A null `remaining_from_chain` is "no figure on the row", which renders
  * nothing at all rather than a zero.
  */
-function budgetCaptionFor(budget: DelegationBudget, chainId: number, symbol: string): BudgetUsage {
+function budgetCaptionFor(
+  budget: DelegationBudget,
+  chainId: number,
+  symbol: string,
+  style: 'full' | 'row' = 'full',
+): BudgetUsage {
   let hasParseableAmounts = true
   try {
     BigInt(budget.budget_atomic)
@@ -1090,7 +1268,9 @@ function budgetCaptionFor(budget: DelegationBudget, chainId: number, symbol: str
       chainId,
     },
     // #1995: the clock enters as a value — the helper never reads it itself.
-    { nowMs: Date.now() },
+    // #4226: the hero asks for the dashboard row's compact wording — the
+    // same `style: 'row'` caption, so the two surfaces cannot drift.
+    { nowMs: Date.now(), style },
   )
 }
 

@@ -109,6 +109,11 @@ last-verified: 2026-10-21
 
 # Haven Design System
 
+> Re-verified 2026-10-22 for #4237: the navigation bullets (floating tab bar —
+> the concentric-capsule indicator, the pill's `p-1` inset, the bar-only
+> "Home" label and the relaxed one-active-idiom rule for the bar). This note
+> covers those passages only.
+
 > Re-verified 2026-10-19 for #4063: the navigation bullets (floating tab bar —
 > the dark pill's own token pair and the re-measured ratios — and active
 > idiom). This note covers those passages only.
@@ -161,6 +166,7 @@ All tokens live as CSS custom properties at `:root` in `packages/ui/src/tokens.c
 |---|---|---|---|
 | `--v2-bg` | `#ffffff` | `#12151c` | Page background |
 | `--v2-surface` | `#f6f9fc` | `#191d26` | Alternating section bands, card hover backgrounds |
+| `--v2-table-header-bg` / `--v2-table-header-ink` | `#f6f9fc` / `#5d6c85` | `#191d26` / `#97a3b6` | Table headers and the day bands on day-grouped lists (`TransactionActivityDayHeader`, #4225) — the second sanctioned band, for list groups, not card titles |
 | `--v2-surface-2` | `#eef2f7` | `#20252f` | Disabled states, deeper card stacking |
 | `--v2-surface-code` | `#0b1120` | `#0b1120` | Dark code blocks (deliberately **not** re-tinted in dark — content keeps its own colours) |
 | `--v2-surface-hover` | `#f0f4f9` | `#232837` | Sidebar/user-menu row hover and subtle interactive shells |
@@ -641,10 +647,10 @@ in the same PR (Pattern Absorption, #901).
 The authenticated app uses one stable product shell:
 
 - Sidebar: 240px desktop rail at `lg` and above, white surface, subtle active tint, and a 2px brand accent bar on the active route. Below `lg` the rail is `hidden` (still in the DOM — the visual specs wait on its `User menu` kebab as a "shell has mounted" signal).
-- **Below `lg`, navigation is the floating tab bar plus the More sheet** ([#2731](https://github.com/d-hinders/Haven-AI/issues/2731), [#4053](https://github.com/d-hinders/Haven-AI/issues/4053), [#4058](https://github.com/d-hinders/Haven-AI/issues/4058)). Primary is a five-cell pill — Dashboard, Agents, Activity (the bar's label for `/transactions`; the rail and the page keep "Transactions"), Accounts, and More, which opens a floating card holding everything else. Properties worth knowing before touching it:
-  - **A floating pill** (#4058, dark lift #4063): `rounded-full`, a 1px token edge and `shadow-popover`, inset `max(12px, inset)` from the sides, `--v2-tab-bar-bottom` (`max(12px, inset)`) above the bottom edge, capped at `max-w-md` and centred. The pill paints from its own token pair, `--v2-tab-bar-bg` / `--v2-tab-bar-border` — **solid** and opaque, with no `backdrop-filter`: the owner chose near-solid over glass, and at 95% opacity page text ghosted through behind the labels. In light mode the pair aliases `--v2-bg` / `--v2-border` exactly and the popover shadow lifts the pill. In dark mode both blocks redeclare it — fill `--v2-surface-2` (`#20252f`) and edge `--v2-border-strong` (`#3a4152`) — because the dark shadow is black on near-black: against `--v2-bg` the dark edge measures **1.79:1** (up from `--v2-border`'s 1.41:1) and the fill 1.19:1, so the pill reads as a distinct surface. `--v2-tab-bar-h` is its outer height (62px). It stays the `fixed` `<nav data-mobile-tab-bar>` itself — specs select it that way. Each cell is a full rectangle for hit-testing (Chromium hit-tests `border-radius`, so a rounded cell has dead corners); the active shape is painted by an inner `[data-tab-indicator]` span — `rounded-2xl`, not a full capsule, because a capsule crossed the letters of "Dashboard" at 390px.
+- **Below `lg`, navigation is the floating tab bar plus the More sheet** ([#2731](https://github.com/d-hinders/Haven-AI/issues/2731), [#4053](https://github.com/d-hinders/Haven-AI/issues/4053), [#4058](https://github.com/d-hinders/Haven-AI/issues/4058), [#4237](https://github.com/d-hinders/Haven-AI/issues/4237)). Primary is a five-cell pill — Home (the bar's label for `/dashboard`; the rail, the page `h1` and the route keep "Dashboard"), Agents, Activity (the bar's label for `/transactions`; the rail and the page keep "Transactions"), Accounts, and More, which opens a floating card holding everything else. Properties worth knowing before touching it:
+  - **A floating pill** (#4058, dark lift #4063, concentric capsule #4237): `rounded-full`, a 1px token edge and `shadow-popover`, inset `max(12px, inset)` from the sides, `--v2-tab-bar-bottom` (`max(12px, inset)`) above the bottom edge, capped at `max-w-md` and centred. The pill paints from its own token pair, `--v2-tab-bar-bg` / `--v2-tab-bar-border` — **solid** and opaque, with no `backdrop-filter`: the owner chose near-solid over glass, and at 95% opacity page text ghosted through behind the labels. In light mode the pair aliases `--v2-bg` / `--v2-border` exactly and the popover shadow lifts the pill. In dark mode both blocks redeclare it — fill `--v2-surface-2` (`#20252f`) and edge `--v2-border-strong` (`#3a4152`) — because the dark shadow is black on near-black: against `--v2-bg` the dark edge measures **1.79:1** (up from `--v2-border`'s 1.41:1) and the fill 1.19:1, so the pill reads as a distinct surface. `--v2-tab-bar-h` is its outer height (62px): 52px cells, `p-1` (4px) on every side and the 1px border. It stays the `fixed` `<nav data-mobile-tab-bar>` itself — specs select it that way. Each cell is a full rectangle for hit-testing (Chromium hit-tests `border-radius`, so a rounded cell has dead corners); the active shape is painted by an inner `[data-tab-indicator]` span — a full capsule, concentric with the pill: it is set in by the same 5px on every side (the `p-1` padding plus the border), so its 26px radius follows the pill's 31px curve. #4058 had it `rounded-2xl` because a capsule crossed the letters of "Dashboard"; #4237 pairs the capsule with the bar-only "Home" label (`TAB_LABELS`), which keeps the curved ends off the landing tab's label instead.
   - **Tabs are selected from `baseNavItems` by ROUTE, never by index.** The bar's order differs from the rail's, so a positional read reorders the bar the next time an entry is inserted.
-  - **One active idiom** ([#2818](https://github.com/d-hinders/Haven-AI/issues/2818), [#4058](https://github.com/d-hinders/Haven-AI/issues/4058)): the active cell is brand ink on a rounded `--v2-brand-soft` indicator bounded by a 1px inset brand **outline** — `SegmentedControl`'s selected option ([#4056](https://github.com/d-hinders/Haven-AI/issues/4056)) — replacing the 2px top rail a floating pill has nowhere to hang; rail and sheet rows keep their brand tint. The outline carries the accessibility weight rather than decorating: measured against `--v2-bg`, `--v2-brand` is 6.29:1 (light) / 8.65:1 (dark) — and 7.27:1 against the dark pill's lifted fill (`--v2-surface-2`, #4063) — while the indicator fill alone is 1.12:1 (light on `--v2-bg`) / 1.10:1 (dark on the pill fill), and `--v2-brand` against `--v2-ink-3` only **1.18:1** (light) / 1.32 (dark) — hue with no luminance, so brand ink *alone* would fail WCAG 1.4.1 in greyscale and for a colour-blind user. The outline — a non-colour cue — is what carries the selection on the lifted pill. An outline, not `ring-inset`, so every cell's focus ring stays the outset `ring-2`. `aria-current="page"` remains the programmatic cue.
+  - **The bar's active idiom is its own: a neutral concentric capsule** ([#4237](https://github.com/d-hinders/Haven-AI/issues/4237), owner decision 2026-10-21, Revolut-style). The active cell is `--v2-ink` + semibold on a `rounded-full` `--v2-tab-bar-indicator` fill with NO outline; inactive cells and More stay `--v2-ink-3` + medium. This deliberately relaxes the **one active idiom** rule ([#2818](https://github.com/d-hinders/Haven-AI/issues/2818)) for the bar: the More sheet's rows keep their `--v2-brand-soft` + brand ink, and `SegmentedControl`'s selected option is untouched. The two idioms are never on screen together — the sheet covers the bar while open (`design-system.md` § *More sheet*) — and co-visibility was #2818's failure case. The fill is a SUPPLEMENTARY cue, recorded here with its measured ratios: it reads 1.12:1 on the light pill (`#eef2f7` on `#ffffff`) and 1.18:1 on the dark pill (`#2b3140` on `#20252f`) — a subtle neutral fill cannot reach WCAG 1.4.11's 3:1 without becoming the heavy block the owner declined (and dark `--v2-surface-2` equals the pill fill outright, 1.00:1). Selection is carried by three cues on the cell: `--v2-ink` vs `--v2-ink-3` (3.05:1 light, 2.50:1 dark — in dark mode the 600-vs-500 weight is load-bearing), the weight step, and `aria-current="page"`. Both text states clear 4.5:1 on their grounds (`CONTRAST_PAIRS`: ink on `tab-bar-indicator` 14.44 light / 11.68 dark; ink-3 on `tab-bar-bg` 5.32 light / 5.52 dark). The focus ring stays the outset `ring-2 ring-brand/80` on the indicator.
   - **More is a cell of the bar, and only opens** (#4053, #4058). Until #4053 it was a sibling painted over the bar on `--v2-z-nav-toggle`, because #2820's full-screen drawer covered the bar. Since #4058 its name is the constant *Open sidebar* (with `aria-expanded`) and its label always "More": the sheet covers the cell, and *Close sidebar* belongs to the sheet's ✕ alone — two buttons with that name would break the harness under Playwright's strict mode.
 - **The More sheet** (#4053, `components/sidebar/MoreSheet.tsx`) replaced #2820's full-screen drawer — the desktop rail stretched to the screen. Since #4058 it is a floating card over the floating bar.
   - **Geometry:** a card `max(8px, inset)` in from the sides and the bottom, `rounded-3xl`, capped at `max-w-lg` and centred; it covers the tab bar. Sized to its content up to a max height, scrolling inside beyond that. Its scrim dims everything from below the status-bar band (§ *Safe areas*) to the viewport **bottom**, edge to edge — no scrim edge across the pill, no undimmed strip.
@@ -1638,15 +1644,20 @@ into one "×N" row; a full ledger needs one row per transaction, and gets it:
   into local calendar-day groups — "Today", "Yesterday", then short dates ("17 May") —
   keeping the caller's order (a newest-first feed yields newest day first) and merging
   nothing.
-- `TransactionActivityDayHeader` renders the quiet band above each bucket, the same
-  heading style the dashboard's activity list draws above its merged rows; a `partial`
+- `TransactionActivityDayHeader` renders the tinted day band above each bucket — the
+  second sanctioned band after `Card.Header`, on the table-header tokens
+  (`--v2-table-header-bg` / `--v2-table-header-ink`) with a full-width hairline below
+  and the label uppercased by CSS (#4225). A `band={false}` prop keeps the plain
+  label for the dashboard's first day, where the Activity card's own tinted
+  `Card.Header` sits directly above. A `partial`
   flag marks a bucket whose day is cut by a window boundary ([#3975](https://github.com/d-hinders/Haven-AI/issues/3975)).
 - **Row dividers ([#4165](https://github.com/d-hinders/Haven-AI/issues/4165), owner
   decision 2026-10-20):** rows of the SAME day are separated by an inset hairline —
   `insetDivider` on every row after a day's first draws a 1px `--v2-border-subtle` line
   along the row's top edge, starting at the text column (padding + direction mark +
   gap) and ending at the row's padding. Day groups keep their full-width `--v2-border`
-  separation (`divide-y` on the list), so a day still reads stronger than a row. Both
+  separation (`divide-y` on the list) — and since #4225 the day band itself ends in
+  the same hairline — so a day still reads stronger than a row. Both
   ledgers draw it: the account page's Activity tab and the dashboard's Activity card.
 
 ### Direction marks — `DirectionMark` ([#4197](https://github.com/d-hinders/Haven-AI/issues/4197))
@@ -2468,8 +2479,9 @@ Use `components/transactions/TransactionsTable.tsx` for full transaction history
 Use `TransactionActivityRow` for compact dashboard previews and, in its ledger mode
 (#4096), a full day-grouped transaction ledger — the account page's Activity tab is
 its first consumer (#4097), one row per transaction opening the shared
-`TransactionDetailPanel`. Agent detail keeps `TransactionsTable` for its compact
-card-nested history.
+`TransactionDetailPanel`. The agent page's Activity tab is the second (#4226):
+the agent's own payments in the same ledger pieces, with the "by <agent>"
+title and the movement line dropped — the page fixes both.
 
 **Merchant-first titles (#3810).** The dashboard's activity list reads
 `counterpartyLabel` in `lib/transaction-presentation.tsx` with the opt-in

@@ -100,7 +100,7 @@ async function seedUserWithAgent(): Promise<{ userId: string; agentId: string }>
 
 async function seedIntent(
   seed: { userId: string; agentId: string },
-  opts: { status: string; createdAt: string; paymentRail?: string | null; source?: string },
+  opts: { status: string; createdAt: string; paymentRail?: string | null; source?: string; tokenAddress?: string },
 ): Promise<string> {
   const n = ++seq
   const result = await db.query<{ id: string }>(
@@ -112,26 +112,27 @@ async function seedIntent(
        usd_value, eur_value, sek_value
      ) VALUES (
        $1, $2, $3, 'USDC',
-       '0x036cbd53842c5426634e7929541ec2318f3dcf7e',
+       $11,
        $4, $5, $6,
        '0x00000000000000000000000000000000000000d1', 1, $7,
        $8, $9::timestamptz, $10::timestamptz, NOW() + INTERVAL '10 minutes', 84532,
-       $11, $12, 'delegation',
+       $12, $13, 'delegation',
        '1', '0.9', '10.76'
      ) RETURNING id`,
     [
-      seed.agentId,
-      seed.userId,
-      `0x${String(4e12 + n).padStart(40, '0').slice(-40)}`,
-      `0x${String(n).padStart(40, '2').slice(-40)}`,
-      `${3000000 + n}`,
-      String(n),
-      `0x${String(n).padStart(64, 'd')}`,
-      opts.status,
-      opts.createdAt,
-      opts.status === 'confirmed' ? opts.createdAt : null,
-      opts.source ?? 'api',
-      opts.paymentRail ?? null,
+      seed.agentId, // $1
+      seed.userId, // $2
+      `0x${String(4e12 + n).padStart(40, '0').slice(-40)}`, // $3
+      `0x${String(n).padStart(40, '2').slice(-40)}`, // $4
+      `${3000000 + n}`, // $5
+      String(n), // $6
+      `0x${String(n).padStart(64, 'd')}`, // $7
+      opts.status, // $8
+      opts.createdAt, // $9
+      opts.status === 'confirmed' ? opts.createdAt : null, // $10
+      opts.tokenAddress ?? '0x036cbd53842c5426634e7929541ec2318f3dcf7e', // $11
+      opts.source ?? 'api', // $12
+      opts.paymentRail ?? null, // $13
     ],
   )
   return result.rows[0].id
@@ -339,6 +340,46 @@ describeDb('GET /agent-activity/:id/activity — the kinded read (#4229, real DB
     const errors = await get(seed.userId, `/agent-activity/${seed.agentId}/activity?kind=tool_calls&status=error`)
     expect(errors.json().total).toBe(1)
     expect(errors.json().activity[0]).toMatchObject({ result_status: 'error', error_code: 'budget_exhausted' })
+  })
+
+  it('token narrows the kinded payments read — case-insensitive, and a token nothing paid in matches nothing', async () => {
+    const { seed } = await seedPopulation()
+    const OTHER = '0x1111111111111111111111111111111111111111'
+    await seedIntent(seed, { status: 'confirmed', createdAt: '2026-07-10T06:18:00Z', tokenAddress: OTHER })
+
+    // The registry address: everything but the seeded other-token payment.
+    const usdc = await get(
+      seed.userId,
+      `/agent-activity/${seed.agentId}/activity?kind=payments&token=0x036cbd53842c5426634e7929541ec2318f3dcf7e`,
+    )
+    expect(usdc.json().total).toBe(3)
+    // Rows leave canonicalized (checksummed) — compare case-insensitively.
+    expect(usdc.json().activity.every((row: { token_address: string }) => row.token_address.toLowerCase() === '0x036cbd53842c5426634e7929541ec2318f3dcf7e')).toBe(true)
+
+    // Case-insensitive on BOTH queries (#4249): the CHECKSUMMED form — a real
+    // mixed-case one; `0x1111…` checksums to itself and proved nothing —
+    // matches the lowercase rows. `total` comes from the count query, so the
+    // LIST query is pinned by the rows it returns.
+    const checksummed = await get(
+      seed.userId,
+      `/agent-activity/${seed.agentId}/activity?kind=payments&token=0x036CbD53842c5426634e7929541eC2318f3dCF7e`,
+    )
+    expect(checksummed.json().total).toBe(3)
+    expect(checksummed.json().activity).toHaveLength(3)
+    const upper = await get(
+      seed.userId,
+      `/agent-activity/${seed.agentId}/activity?kind=payments&token=0X1111111111111111111111111111111111111111`,
+    )
+    expect(upper.json().total).toBe(1)
+    expect(upper.json().activity).toHaveLength(1)
+
+    // A token nobody paid in: an honest empty page, not an error.
+    const none = await get(
+      seed.userId,
+      `/agent-activity/${seed.agentId}/activity?kind=payments&token=0x${'ff'.repeat(20)}`,
+    )
+    expect(none.json().total).toBe(0)
+    expect(none.json().activity).toEqual([])
   })
 
   it('paymentId narrows either population to that payment', async () => {

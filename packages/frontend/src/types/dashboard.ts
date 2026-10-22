@@ -9,4 +9,5 @@ import type { ApiSchema } from '@haven_ai/core'
 
 export type DashboardAgentAllowance = ApiSchema<'DashboardAgentAllowance'>
 export type DashboardAgentPreview = ApiSchema<'DashboardAgentPreview'>
+export type DashboardAgentStats = ApiSchema<'DashboardAgentStats'>
 export type DashboardOverviewResponse = ApiSchema<'DashboardOverviewResponse'>

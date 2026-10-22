@@ -206,8 +206,9 @@ export const LIST_AGENT_PAYMENTS_FILTERED_SQL = `SELECT pi.id,
                            AND LOWER(c.address) = LOWER(pi.to_address)
                            AND c.name ILIKE '%' || $6 || '%'))
          AND ($7::uuid IS NULL OR pi.id = $7::uuid)
+         AND ($8::text IS NULL OR LOWER(pi.token_address) = LOWER($8::text))
        ORDER BY pi.created_at DESC
-       LIMIT $8 OFFSET $9`
+       LIMIT $9 OFFSET $10`
 
 /**
  * The filtered population's total — the COUNT twin of
@@ -239,7 +240,8 @@ export const COUNT_AGENT_PAYMENTS_FILTERED_SQL = `SELECT COUNT(*)
                          WHERE c.user_id = pi.user_id
                            AND LOWER(c.address) = LOWER(pi.to_address)
                            AND c.name ILIKE '%' || $6 || '%'))
-         AND ($7::uuid IS NULL OR pi.id = $7::uuid)`
+         AND ($7::uuid IS NULL OR pi.id = $7::uuid)
+         AND ($8::text IS NULL OR LOWER(pi.token_address) = LOWER($8::text))`
 
 /**
  * The optional filter set behind `GET /agent-activity/:id/activity?kind=…`.
@@ -249,6 +251,9 @@ export const COUNT_AGENT_PAYMENTS_FILTERED_SQL = `SELECT COUNT(*)
  * `from`/`to` are ISO bounds — inclusive `from`, exclusive `to`. `q` is the
  * trimmed search term (merchant resource URL, merchant/recipient address, or
  * the owner's contact name for the recipient). `paymentId` narrows to one.
+ * `token` is the ERC-20 contract address, compared case-insensitively
+ * (#4226's Activity-tab Token facet — the tab's population is the agent's own
+ * payments, which the transactions feed's `tokenKey` cannot reach).
  */
 export interface AgentPaymentActivityFilter {
   status: string | null
@@ -257,6 +262,7 @@ export interface AgentPaymentActivityFilter {
   to: string | null
   q: string | null
   paymentId: string | null
+  token: string | null
 }
 
 function filteredPaymentArgs(agentId: string, filter: AgentPaymentActivityFilter): unknown[] {
@@ -268,6 +274,7 @@ function filteredPaymentArgs(agentId: string, filter: AgentPaymentActivityFilter
     filter.to,
     filter.q,
     filter.paymentId,
+    filter.token,
   ]
 }
 

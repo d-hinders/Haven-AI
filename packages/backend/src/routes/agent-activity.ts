@@ -192,6 +192,10 @@ function paymentFilter(query: Record<string, string>): AgentPaymentActivityFilte
     to: query.to ?? null,
     q: query.q?.trim() ? query.q.trim() : null,
     paymentId: query.paymentId ?? null,
+    // #4226: the Activity tab's Token facet — an ERC-20 address. A native
+    // token is not a payment rail here (budgets are metered per ERC-20), so
+    // an address is the whole vocabulary; anything else matches nothing.
+    token: query.token?.trim() ? query.token.trim() : null,
   }
 }
 
@@ -217,7 +221,8 @@ export default async function agentActivityRoutes(
   // GET /agent-activity/:id/activity — paginated payment + MCP tool-call
   // history (#2055: the approval half is gone with the table).
   // #4229: WITH `kind` the route serves ONE population — filtered by
-  // `status`/`from`/`to`/`q`/`paymentId`, paged by `limit`/`offset`, and
+  // `status`/`from`/`to`/`q`/`paymentId` (and `token`, #4226's Activity-tab
+  // facet, payments only), paged by `limit`/`offset`, and
   // measured (`total`/`hasMore`, plus `counts.error` for tool calls). WITHOUT
   // `kind` it serves today's merged window untouched: both sources each
   // capped at `limit`, one `offset` walking both, no total — filters are
@@ -233,6 +238,7 @@ export default async function agentActivityRoutes(
       to?: string
       q?: string
       paymentId?: string
+      token?: string
     }
   }>('/:id/activity', async (request, reply) => {
     const { sub } = request.user as { sub: string }

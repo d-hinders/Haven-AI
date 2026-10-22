@@ -16,8 +16,9 @@
  *     plain node) and the same test cross-checks the two paths against each
  *     other, so neither can drift alone.
  *
- * Scope note: exactly the colour-valued tokens (58 as of #4066 — 46 after
- * #4063's pill pair, plus the 12 avatar stops) — the 26 with `-rgb`
+ * Scope note: exactly the colour-valued tokens (59 as of #4237 — 58 after
+ * #4066's avatar tints, plus the tab bar's concentric-capsule indicator) —
+ * the 26 with `-rgb`
  * channel twins are listed by their hex form (the channel form is pinned to
  * the hex by `design-token-alpha.test.ts`); `--v2-safe-*` (env() lengths),
  * the shadows/gradients and every non-colour token are out of scope here.
@@ -55,6 +56,10 @@ export const THEME_TOKENS: TokenSpec[] = [
   // black on near-black. Light aliases `--v2-bg` / `--v2-border` exactly.
   { name: 'tab-bar-bg', light: '#ffffff', dark: '#20252f' },
   { name: 'tab-bar-border', light: '#e6ebf1', dark: '#3a4152' },
+  // The active tab's concentric capsule (#4237): set in from the pill by the
+  // same 5px on every side. Light aliases `--v2-surface-2`; dark is a step
+  // LIGHTER than `--v2-surface-2`, which equals the pill fill there (1.00:1).
+  { name: 'tab-bar-indicator', light: '#eef2f7', dark: '#2b3140' },
   // Brand — lightened/desaturated for dark; #4f46e5 fails AA on a dark ground.
   { name: 'brand', light: '#4f46e5', dark: '#a5acff' },
   { name: 'brand-strong', light: '#4338ca', dark: '#b7bcff' },
@@ -136,6 +141,14 @@ export const CONTRAST_PAIRS: ContrastPair[] = [
   { fg: 'ink-3', bg: 'surface-2', min: 4.5 },
   { fg: 'ink-on-brand', bg: 'brand', min: 4.5 },
   { fg: 'table-header-ink', bg: 'table-header-bg', min: 4.5 },
+  // The tab bar (#4237): the active cell's ink on the capsule fill, and the
+  // inactive ink on the pill — the two text states of the bar, both ≥ 4.5:1
+  // in both themes. (The fill itself vs the pill — 1.12 light / 1.18 dark —
+  // is a SUPPLEMENTARY cue recorded in MobileTabBar's comment, not an
+  // acceptance pair: a subtle neutral fill cannot reach 3:1 without becoming
+  // the heavy block the owner declined.)
+  { fg: 'ink', bg: 'tab-bar-indicator', min: 4.5 },
+  { fg: 'ink-3', bg: 'tab-bar-bg', min: 4.5 },
   { fg: 'brand', bg: 'brand-soft', min: 3 },
   { fg: 'success', bg: 'success-soft', min: 3 },
   { fg: 'debit', bg: 'debit-soft', min: 3 },

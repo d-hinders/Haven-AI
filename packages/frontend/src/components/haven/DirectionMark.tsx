@@ -2,7 +2,7 @@ import { ArrowDown, ArrowUp, Clock } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import type { TransactionActivityDirection } from './TransactionActivityRow'
 
-type Density = 'comfortable' | 'compact' | 'inline'
+type Density = 'comfortable' | 'compact' | 'figure' | 'inline'
 
 /**
  * Single source of truth for the in/out/pending direction icon used in
@@ -14,10 +14,13 @@ type Density = 'comfortable' | 'compact' | 'inline'
  *   dedicated `/transactions` table.
  * - `compact`: 32px mark, 14px icon — matches the dashboard's <Row>
  *   primitive so transaction rows sit on the same rhythm as agent rows.
- * - `inline`: 18px mark, 11px icon — small enough to sit BESIDE a figure in
- *   dense content (the account summary card's Last 30 days row, #4197).
- *   Still `aria-hidden`: the name is the caller's sr-only text, and any
- *   tooltip lives on the mark through `ui/Tooltip`.
+ * - `figure`: 24px mark, 14px icon — sits beside a 20px secondary figure
+ *   (`Amount size="md"`), such as a Last 30 days In/Out pair (#4259).
+ * - `inline`: 18px mark, 11px icon — the size for a mark in dense inline
+ *   text, where a line of body copy sets the height.
+ *
+ * Every density is `aria-hidden`: the name is the caller's sr-only text, and
+ * any tooltip lives on the mark through `ui/Tooltip`.
  */
 export function DirectionMark({
   direction,
@@ -38,11 +41,17 @@ export function DirectionMark({
   const sizeClass =
     density === 'compact'
       ? 'h-8 w-8 rounded-[10px]'
-      : density === 'inline'
-        ? 'h-[18px] w-[18px] rounded-[6px]'
-        : 'h-9 w-9 rounded-[10px]'
+      : density === 'figure'
+        ? 'h-6 w-6 rounded-[7px]'
+        : density === 'inline'
+          ? 'h-[18px] w-[18px] rounded-[6px]'
+          : 'h-9 w-9 rounded-[10px]'
   const iconSizeClass =
-    density === 'compact' ? 'h-3.5 w-3.5' : density === 'inline' ? 'h-[11px] w-[11px]' : 'h-4 w-4'
+    density === 'compact' || density === 'figure'
+      ? 'h-3.5 w-3.5'
+      : density === 'inline'
+        ? 'h-[11px] w-[11px]'
+        : 'h-4 w-4'
 
   return (
     <span

@@ -229,13 +229,22 @@ export function DropdownMenuItem({
       type="button"
       role="menuitem"
       disabled={disabled}
-      onClick={() => {
+      onClick={(event) => {
         if (disabled) return
+        const panel = event.currentTarget.closest('[role="menu"]')
         // Close first so any modal the handler opens can take focus.
         setOpen(false)
         onSelect()
-        // Restore focus to the trigger if the action didn't move it.
-        setTimeout(() => triggerRef.current?.focus(), 0)
+        // Restore focus to the trigger only if the action didn't move it
+        // (#4259): focus left on <body> (the panel unmounted under it) or still
+        // inside the closed panel. A Modal's dialog or a field the action
+        // focused keeps its focus — restoring unconditionally pulled it away.
+        setTimeout(() => {
+          const active = document.activeElement
+          if (!active || active === document.body || panel?.contains(active)) {
+            triggerRef.current?.focus()
+          }
+        }, 0)
       }}
       className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50 ${toneClasses}`}
     >

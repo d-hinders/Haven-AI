@@ -52,6 +52,18 @@ describe('Amount (#853)', () => {
     expect(el.className).toContain('text-2xl')
   })
 
+  it('size="md" puts the 20px secondary-figure scale on the span itself (#4259)', () => {
+    const el = renderAmount({ value: '42.00', symbol: 'USDC', direction: 'out', size: 'md' })
+    expect(el.className).toContain('text-xl')
+    expect(el.className).not.toContain('text-sm')
+    expect(el.className).not.toContain('text-2xl')
+  })
+
+  it('size="sm" stays the default row scale', () => {
+    expect(renderAmount({ value: '1.00' }).className).toContain('text-sm')
+    expect(renderAmount({ value: '1.00', size: 'sm' }).className).toContain('text-sm')
+  })
+
   it('omits the symbol cleanly when not provided', () => {
     const el = renderAmount({ value: '1.5', direction: 'out' })
     expect(el.textContent).toBe('-1.5')

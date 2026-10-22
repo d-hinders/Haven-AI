@@ -1440,7 +1440,16 @@ describe('timeout shapes (#4175)', () => {
     assert.equal(isTimeoutShaped(live), true)
   })
 
-  test('a node --test runner cancelled by SIGTERM, produced live, is timeout-shaped', () => {
+  test('a node --test runner cancelled by SIGTERM, produced live, is timeout-shaped', {
+    // The shape lives in the runner's own words (`Interrupted while running:`),
+    // which the pinned line prints (node >= 24 < 25, what .nvmrc and engines
+    // and CI run). Measured on node 22 and on 26.7, the killed runner there
+    // exits 1 with only `TAP version 13` on stdout — no shape to detect, and
+    // nothing for this test to prove. Skip rather than assert less (#4272).
+    skip: !(Number(process.versions.node.split('.')[0]) >= 24 &&
+      Number(process.versions.node.split('.')[0]) < 25) &&
+      `the interrupted-runner TAP shape is only printed by the pinned node (>=24 <25); this is ${process.versions.node}`,
+  }, () => {
     // The file's test sends SIGTERM to the runner (its parent), which is what an
     // outer timeout does to a gate.
     const live = liveNodeTest(
@@ -1473,8 +1482,14 @@ describe('timeout shapes (#4175)', () => {
   test('timeoutEvidence keeps the naming line and the timeout line, bounded', () => {
     const live = liveNodeTest("test('slow', { timeout: 20 }, () => new Promise((r) => setTimeout(r, 300)))")
     const ev = timeoutEvidence(live.output)
-    assert.match(ev.at(-1), /^ {2}'test timed out after 20ms'$/)
-    assert.match(ev.at(-2), /^✖ slow \(/)
+    // Node 22's TAP serializes the failure as `  error: 'test timed out …'`;
+    // the pinned line (>= 24) as the bare quoted line. Both keep the evidence
+    // tail's last line as the timeout line (#4272).
+    assert.match(ev.at(-1), /^ {2}(?:error: )?'test timed out after 20ms'$/)
+    // The line that names the timed-out test: `✖ slow (…)` in the spec output
+    // the pinned line's pipes get, `not ok 1 - slow` in the TAP that node 22
+    // and 26.x pipes get (#4272). Either way the evidence keeps it.
+    assert.match(ev.at(-2), /^(?:✖ slow \(|not ok 1 - slow)/)
     assert.deepEqual(timeoutEvidence(''), ['(no output)'])
     assert.deepEqual(timeoutEvidence('a\nb\nc\nd\ne\nf\ng'), ['c', 'd', 'e', 'f', 'g'], 'tail fallback')
     const many = Array.from({ length: 20 }, (_, i) => ` FAIL  t${i}\nError: Test timed out in 5000ms.`).join('\n')
@@ -1485,7 +1500,10 @@ describe('timeout shapes (#4175)', () => {
   test('a node --test assertion failure, produced live, is not timeout-shaped', () => {
     const live = liveNodeTest("test('eq', () => { assert.equal(1, 2) })")
     assert.equal(live.ok, false)
-    assert.match(live.output, /AssertionError \[ERR_ASSERTION\]/)
+    // `AssertionError [ERR_ASSERTION]: …` on the pinned line (>= 24), the TAP
+    // `code: 'ERR_ASSERTION'` key on node 22 (#4272) — the fixture must be an
+    // assertion failure either way, so the `false` below means something.
+    assert.match(live.output, /ERR_ASSERTION/)
     assert.equal(isTimeoutShaped(live), false)
   })
 

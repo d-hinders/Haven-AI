@@ -284,6 +284,17 @@ describe('McpMerchantTransport under a policy — redirect hops and caller heade
     expect(sentHeaders(fetchSpy.calls[1].init)).toEqual(sentHeaders({ headers: CALLER_HEADERS }))
   })
 
+  it('a same-origin hop from a non-normalised URL (upper-case host, default port) keeps every caller header', async () => {
+    const fetchSpy = recordingFetch((url) =>
+      url === 'https://A.dev:443/start'
+        ? new Response(null, { status: 302, headers: { location: '/next' } })
+        : okText('arrived'),
+    )
+    await transportWith(ALLOW_FIXTURES, fetchSpy).fetch('https://A.dev:443/start', { headers: CALLER_HEADERS })
+    expect(fetchSpy.calls.map((c) => c.url)).toEqual(['https://A.dev:443/start', 'https://a.dev/next'])
+    expect(sentHeaders(fetchSpy.calls[1].init)).toEqual(sentHeaders({ headers: CALLER_HEADERS }))
+  })
+
   it('a cross-origin hop drops credentials and every caller header outside the allow-list', async () => {
     const fetchSpy = recordingFetch((url) =>
       url === 'https://a.dev/start'

@@ -149,6 +149,10 @@ export const SCAN_FILES = [
   // it lived one level up in `components/`.
   'packages/frontend/src/lib/transaction-labels.ts',
   'packages/frontend/src/lib/transaction-presentation.tsx',
+  // #4227: the Tool calls tab's row labels ("Checked a payment", "Quoted a
+  // paid API") and the error-code words — extracted UI copy living outside
+  // SCAN_DIRS, exactly like the label modules above.
+  'packages/frontend/src/lib/tool-call-labels.ts',
   // The dashboard's 7-day summary sentences (#3807) — fixed templates built
   // from the overview's own figures; every branch's exact output is pinned by
   // its unit test. Lives in lib/ so the pure function is testable, so it is

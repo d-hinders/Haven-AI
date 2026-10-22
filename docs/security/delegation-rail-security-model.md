@@ -3580,7 +3580,8 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > **Re-verified unchanged (#4226, 2026-10-22, agent detail tabs and the
 > Spending hero):** this diff touches two covered files, display-layer:
 > `components/DelegationBudgetCard.tsx` and `components/haven/BudgetMeter.tsx`
-> (added to `covers:` by the same change; corrected by #4249). The card is rebuilt on the
+> (the latter brought under this document by the same change; corrected by
+> #4249). The card is rebuilt on the
 > dashboard's money-card pattern (budgets left, Last 30 days right, one
 > `Card.Section divided`, stacked below `lg`); each budget's caption moves to
 > the shared `budgetCaptionFor` `row` style — the same text the dashboard row

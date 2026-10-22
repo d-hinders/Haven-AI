@@ -7,6 +7,12 @@
  * funding-leg binding at header time. Every context below is a VALID v3 Haven
  * binding (digest committed, payer = this signer), so a refusal can only come
  * from the rail check.
+ *
+ * #4248 (the #4247 review's follow-ups): the `{ payment_id }` path of the
+ * early refusal, the refusal's typed next step and the #1143 version-first
+ * ordering. A settlement child is never held as a live binding: since every
+ * held binding builds a header, the header-time test above is what fails if a
+ * child is ever stored again.
  */
 import { describe, expect, it } from 'vitest'
 import { hashTypedData } from 'viem'
@@ -183,7 +189,7 @@ describe('x402 binding rail (#4242)', () => {
       } as never)) as ToolPayload & { code?: string; message?: string; data?: unknown }
       expect(header.success).toBe(false)
       expect(header.message).toBe(NO_FUNDING_LEG_MESSAGE)
-      expect(header.code).toBe('SIGNING_ERROR')
+      expect(header.code).toBe('NO_FUNDING_LEG')
       expect(header.data).toBeUndefined()
     })
   })
@@ -215,7 +221,7 @@ describe('x402 binding rail (#4242)', () => {
         } as never)) as ToolPayload & { code?: string; message?: string; data?: unknown }
         expect(result.success).toBe(false)
         expect(result.message).toBe(NO_FUNDING_LEG_MESSAGE)
-        expect(result.code).toBe('SIGNING_ERROR')
+        expect(result.code).toBe('NO_FUNDING_LEG')
         expect(result.data).toBeUndefined()
         expect(childSignings).toBe(0)
       })
@@ -223,5 +229,107 @@ describe('x402 binding rail (#4242)', () => {
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
+  })
+  // ── #4248 ──────────────────────────────────────────────────────────────
+
+  /** A handler set whose sign-context fetch serves `body` for any payment_id. */
+  function handlersWithContext(s: ReturnType<typeof signer>, body: Record<string, unknown>) {
+    return createToolHandlers(s, {
+      signContext: {
+        loadIdentity: async () => ({ apiKey: 'sk_agent_test_4248', apiUrl: 'https://haven.test' }),
+        fetchImpl: (async () => new Response(JSON.stringify(body), { status: 200 })) as typeof fetch,
+      },
+    })
+  }
+
+  /** Counts every x402-arm signing call, so a refusal's position is observable. */
+  function countingSigner() {
+    const s = signer()
+    const counter = { signings: 0 }
+    const sign = s.signX402FundingTypedData.bind(s)
+    s.signX402FundingTypedData = (...args) => {
+      counter.signings += 1
+      return sign(...args)
+    }
+    return { s, counter }
+  }
+
+  it('haven_sign_x402 { payment_id } refuses a fetched settlement child before signing it', async () => {
+    // The hosted erc7710 next_arguments are { payment_id } — the typed data
+    // arrives from the fetch, not the arguments. #4247 only drove the
+    // typed_data-argument form (reviewer cell R3 survived on this path).
+    const td = ownChild()
+    const expected = await bind(CHILD_QUOTE, td, CHILD_PAYLOAD_HASH)
+    await inWindow(async () => {
+      const { s, counter } = countingSigner()
+      const handlers = handlersWithContext(s, {
+        payment_id: expected.paymentId,
+        sign_data: { hash: expected.payloadHash, typed_data: td },
+        x402_expected: wire(expected),
+        payment_required: paymentRequiredFor(CHILD_QUOTE),
+      })
+      const result = (await handlers.haven_sign_x402({ payment_id: expected.paymentId } as never)) as ToolPayload & {
+        code?: string
+        message?: string
+        data?: unknown
+      }
+      expect(result.success).toBe(false)
+      expect(result.code).toBe('NO_FUNDING_LEG')
+      expect(result.message).toBe(NO_FUNDING_LEG_MESSAGE)
+      expect(result.data).toBeUndefined()
+      expect(counter.signings).toBe(0)
+    })
+  })
+
+  it('the refusal carries the next-step family: a next_action, no tool, and why not', async () => {
+    const td = ownChild()
+    const expected = await bind(CHILD_QUOTE, td, CHILD_PAYLOAD_HASH)
+    await inWindow(async () => {
+      const handlers = createToolHandlers(signer())
+      const signed = (await handlers.haven_sign({
+        payload_hash: expected.payloadHash,
+        typed_data: td,
+        x402_expected: wire(expected),
+      } as never)) as ToolPayload & { data?: { x402_binding?: string } }
+      const viaHeader = (await handlers.haven_x402_sign_header({
+        payment_required: paymentRequiredFor(CHILD_QUOTE),
+        x402_binding: signed.data?.x402_binding,
+      } as never)) as Record<string, unknown>
+      const viaOneShot = (await handlers.haven_sign_x402({
+        payload_hash: expected.payloadHash,
+        typed_data: td,
+        x402_expected: wire(expected),
+        payment_required: paymentRequiredFor(CHILD_QUOTE),
+      } as never)) as Record<string, unknown>
+      for (const refusal of [viaHeader, viaOneShot]) {
+        expect(refusal.code).toBe('NO_FUNDING_LEG')
+        expect(refusal.next_action).toBe('sign_and_submit_payment')
+        expect(refusal.next_tool).toBeUndefined()
+        expect(refusal.next_tool_name).toBeUndefined()
+        expect(refusal.next_tool_omitted_reason).toEqual(expect.stringContaining("settlement_scheme 'erc7710'"))
+      }
+    })
+  })
+
+  it('haven_sign_x402 answers an unsupported context version with the version refusal, not the rail one', async () => {
+    // #1143 ordering: version skew is decided before any shape question, as
+    // signX402FundingTypedData already orders it. Version 99 is above this
+    // signer's ceiling, so the remedy is "update the signer".
+    const td = ownChild()
+    const expected = await bind(CHILD_QUOTE, td, CHILD_PAYLOAD_HASH)
+    const skewed = wire(expected)
+    skewed.auth = { ...skewed.auth, version: 99 as never }
+    await inWindow(async () => {
+      const { s, counter } = countingSigner()
+      const result = (await createToolHandlers(s).haven_sign_x402({
+        payload_hash: expected.payloadHash,
+        typed_data: td,
+        x402_expected: skewed,
+        payment_required: paymentRequiredFor(CHILD_QUOTE),
+      } as never)) as ToolPayload & { code?: string; message?: string }
+      expect(result.success).toBe(false)
+      expect(result.code).toBe('UNSUPPORTED_EXPECTED_CONTEXT_VERSION')
+      expect(counter.signings).toBe(0)
+    })
   })
 })

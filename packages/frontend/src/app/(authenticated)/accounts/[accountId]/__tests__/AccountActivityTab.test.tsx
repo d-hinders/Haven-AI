@@ -752,3 +752,53 @@ describe('AccountActivityTab — refresh after a send (#4098)', () => {
     expect(totalsRefresh).toHaveBeenCalledTimes(1)
   })
 })
+
+describe('AccountActivityTab — the row badge (#4288)', () => {
+  function renderWithRow(overrides: Partial<AggregatedTransaction>) {
+    feedMock.mockImplementation(() => ({
+      ...DEFAULT_FEED,
+      transactions: [tx(overrides)],
+      total: 1,
+      loadMore: vi.fn(),
+      refresh: vi.fn(),
+    }))
+    renderTab()
+  }
+
+  it('labels a failed on-chain payment "Failed" — the amount is not left red and unnamed', () => {
+    // A production-shaped row: the 9 Jul "Cloud vendor" shape — an errored
+    // outbound transfer with no lifecycle and no wire badge, which the old
+    // `transactionStatus(tx) ?? tx.statusBadge` chain left unlabelled.
+    renderWithRow({
+      direction: 'out',
+      isError: true,
+      paymentFlowStatus: null,
+      statusBadge: undefined,
+    })
+
+    expect(screen.getByText('Failed')).toBeInTheDocument()
+  })
+
+  it('labels a machine payment still confirming "Confirming"', () => {
+    renderWithRow({ direction: 'out', paymentFlowStatus: 'confirming_merchant' })
+
+    expect(screen.getByText('Confirming')).toBeInTheDocument()
+  })
+
+  it('labels a needs-attention machine payment "Needs attention"', () => {
+    renderWithRow({ direction: 'out', paymentFlowStatus: 'needs_attention' })
+
+    expect(screen.getByText('Needs attention')).toBeInTheDocument()
+  })
+
+  it('labels a delegate sweep "Recovered"', () => {
+    renderWithRow({
+      direction: 'in',
+      activityType: 'delegate_sweep',
+      agentName: 'Research assistant',
+      paymentId: 'sweep-id',
+    })
+
+    expect(screen.getByText('Recovered')).toBeInTheDocument()
+  })
+})

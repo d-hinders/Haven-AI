@@ -1,6 +1,6 @@
 import { FastifyInstance } from 'fastify'
 import { authMiddleware } from '../middleware/auth.js'
-import { getChainData, shouldMarkApprox } from '@haven_ai/core'
+import { getChainData, shouldMarkApprox, tokenPeg } from '@haven_ai/core'
 import {
   countFailedIntents7d,
   findPortfolioSnapshots,
@@ -133,6 +133,12 @@ export function accumulateGroup(
   // in `route-modules.generated.ts` (#3803 round-2).
   const groupPricing = pricing.get(group.chain_key + ':' + group.token_key)
   const rate = groupPricing?.rates ?? null
+  // #4288: a token PEGGED to the bucket's currency is that currency — the
+  // registry's `tokenPeg` is a fact, so a NULL-booked USDC row re-prices at
+  // exactly 1.0 in the USD bucket, not at CoinGecko's ≈0.9998 `usd` quote,
+  // and a missing quote no longer marks a peg it could have priced. A float
+  // (ETH, anything unknown) still uses the market rate, or nothing.
+  const peg = tokenPeg(group.chain_key, groupPricing?.symbol ?? null)
   const buckets = [
     { key: 'usd', currency: 'USD', grossKey: 'grossUsd', netKey: 'netUsd' },
     { key: 'eur', currency: 'EUR', grossKey: 'grossEur', netKey: 'netEur' },
@@ -142,7 +148,7 @@ export function accumulateGroup(
     const fallback = Number(group[`fb_${bucket.key}_${suffix}`] ?? '0')
     if (fallback <= 0) continue
     target.approx = true
-    const perToken = rate?.[bucket.key] ?? null
+    const perToken = peg === bucket.currency ? 1.0 : (rate?.[bucket.key] ?? null)
     if (perToken == null) {
       // #4165: no rate means no figure — the row is left out of the sum and
       // the bucket says so, never a "≈" standing in for "couldn't price".

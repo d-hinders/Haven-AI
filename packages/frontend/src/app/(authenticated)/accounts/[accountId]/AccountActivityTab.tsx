@@ -73,7 +73,7 @@ import {
 import {
   counterpartyLabel,
   transactionFiat,
-  transactionStatus,
+  transactionRowBadge,
 } from '@/lib/transaction-presentation'
 import { timeAgo } from '@/lib/format'
 import type { AggregatedTransaction, TransactionFilterState } from '@/types/transactions'
@@ -201,7 +201,7 @@ function ActivityLedgerRow({
   /** #4165: the same-day inset hairline, on every row after a day's first. */
   insetDivider: boolean
 }) {
-  const badge = transactionStatus(tx) ?? tx.statusBadge
+  const badge = transactionRowBadge(tx)
   const fiat = transactionFiat(tx, 'row')
   return (
     <TransactionActivityRow

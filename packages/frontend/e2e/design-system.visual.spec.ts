@@ -76,6 +76,13 @@ const VIEWPORTS = SHARED_VIEWPORTS as ReadonlyArray<{
   height: number
 }>
 
+// #4288: the ledger capture's clock. The day buckets are LOCAL days and no
+// project or config sets a timezone, so the spec pins one; the freeze sits
+// 06:00 local (≥ 3 h past midnight) so `DS_LEDGER_ROWS`' two recent rows
+// bucket under the same "Today" band and the inset divider renders.
+const LEDGER_TZ = 'Europe/Stockholm'
+const FROZEN_LEDGER_NOW = new Date('2026-10-20T06:00:00+02:00')
+
 /**
  * The app shell's sidebar — the other half of the chrome (#1820), located
  * structurally and for the same reason the (since #4029 deleted) top bar
@@ -632,6 +639,10 @@ test.describe('design-system visual regression', () => {
       await expectShowcaseClip(sample, vp.height, 'the activity row sample', `design-system-activity-row-${vp.name}${schemeSuffix}.png`, SAMPLE_MAX_DIFF_PIXELS)
     })
 
+    // #4288: the day-grouped ledger — the same-day inset divider is the one
+    // layout the ds-activity-row clip cannot show. Captured in the
+    // clock-frozen describe BELOW (the ledger needs a pinned timezone, which
+    // cannot vary per test inside this viewport loop).
     test(`/design-system AreaChart sparkline sample renders pixel-stable (${vp.name})`, async ({ page }, testInfo) => {
       const scheme = schemeOf(testInfo)
       const schemeSuffix = scheme === 'dark' ? '-dark' : ''
@@ -691,6 +702,40 @@ test.describe('design-system visual regression', () => {
       await expectShowcaseClip(sample, vp.height, 'the PageHeader leading sample', `design-system-pageheader-leading-${vp.name}${schemeSuffix}.png`, SAMPLE_MAX_DIFF_PIXELS)
     })
   }
+
+  // #4288: the day-grouped ledger — the same-day inset divider is the one
+  // layout the ds-activity-row clip cannot show. `DS_LEDGER_ROWS` stamps its
+  // timestamps from `Date.now()` at module load, so the capture needs a
+  // FROZEN clock, set BEFORE `goto`, at least 3 hours past local midnight
+  // (else l1 and l2 fall on different days and no inset divider renders) —
+  // with the timezone pinned, because `playwright.config.ts` sets none and
+  // the day buckets are LOCAL days. A separate describe, because the
+  // timezone is a context option and this viewport loop declares its own.
+  test.describe('clock-frozen ledger (#4288)', () => {
+    test.use({ timezoneId: LEDGER_TZ })
+
+    for (const vp of VIEWPORTS) {
+      test(`/design-system activity ledger sample renders pixel-stable (${vp.name})`, async ({ page }, testInfo) => {
+        const scheme = schemeOf(testInfo)
+        const schemeSuffix = scheme === 'dark' ? '-dark' : ''
+        await page.clock.setFixedTime(FROZEN_LEDGER_NOW)
+        await page.setViewportSize({ width: vp.width, height: vp.height })
+        await page.goto('/design-system')
+        await page.evaluate(() => document.fonts.ready)
+        await page.waitForLoadState('networkidle')
+
+        const ledger = page.getByTestId('ds-activity-ledger')
+        await expect(ledger).toHaveCount(1)
+        // The point of the freeze: l1 and l2 share one day, so the second
+        // renders WITH its same-day inset divider. If the clock were free
+        // (or frozen too near midnight) the two would split across day bands
+        // and the divider would vanish.
+        await expect(ledger.getByText('Today')).toHaveCount(1)
+        await expect(ledger.getByRole('button', { name: 'storage.provider.io' })).toHaveCount(1)
+        await expectShowcaseClip(ledger, vp.height, 'the activity ledger sample', `design-system-activity-ledger-${vp.name}${schemeSuffix}.png`, SAMPLE_MAX_DIFF_PIXELS)
+      })
+    }
+  })
 
   /**
    * ── The #3441 guard: content above a showcase sample cannot move its clip ──

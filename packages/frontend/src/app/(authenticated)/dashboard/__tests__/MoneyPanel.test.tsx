@@ -72,6 +72,8 @@ function agent(id: string, name: string, d30NetUsd: number): DashboardAgentPrevi
 function overview(overrides: {
   d30NetUsd: number
   d30NetSek?: number
+  /** #4288: the pre-sweep gross the "—" test reads; omitted = 0. */
+  d30GrossUsd?: number
   d30Approx?: boolean
   /** #4165: the server's per-currency "≈" decision; omitted = an older backend. */
   d30ApproxByCurrency?: { usd: boolean; eur: boolean; sek: boolean }
@@ -105,7 +107,7 @@ function overview(overrides: {
         budgetStops: 0,
       },
       d30: {
-        gross: { usd: 0, eur: 0, sek: 0 },
+        gross: { usd: overrides.d30GrossUsd ?? 0, eur: 0, sek: 0 },
         net: { usd: overrides.d30NetUsd, eur: 0, sek: overrides.d30NetSek ?? 0 },
         approx: overrides.d30Approx ?? false,
         ...(overrides.d30ApproxByCurrency ? { approxByCurrency: overrides.d30ApproxByCurrency } : {}),
@@ -217,6 +219,32 @@ describe('MoneyPanel — spending breakdown reconciles with the headline (#3807 
     expect(spending).not.toHaveTextContent('$0.00')
     expect(within(spending).getByText('\u2014')).toBeInTheDocument()
     expect(spending).not.toHaveTextContent('\u2248')
+  })
+
+  it('priced rows that net to 0 through sweep netting render "$0.00" plus the note, not an em dash (#4288)', () => {
+    // Partly unpriced AND gross > 0: rows were priced (gross carries the
+    // pre-sweep fiat), the netting only zeroed the NET. The total was
+    // decided, it just nets to nothing — "—" would claim the window was
+    // unknown. The old net-based test rendered "—" here.
+    render(
+      <MoneyPanel
+        {...baseProps}
+        overview={overview({
+          d30NetUsd: 0,
+          d30GrossUsd: 25,
+          d30Approx: true,
+          d30ApproxByCurrency: { usd: false, eur: false, sek: false },
+          d30UnpricedByCurrency: { usd: true, eur: false, sek: false },
+          agents: [],
+        })}
+      />,
+    )
+
+    const spending = screen.getByText('Agent spending, last 30 days').parentElement!
+    expect(spending).toHaveTextContent('$0.00')
+    expect(spending).not.toHaveTextContent('\u2248$0.00')
+    expect(screen.getByText('Some amounts couldn’t be valued and aren’t included.')).toBeInTheDocument()
+    expect(within(spending).queryByText('\u2014')).not.toBeInTheDocument()
   })
 
   it('renders no remainder row when the agent rows already account for the total', () => {

@@ -37,7 +37,8 @@ import type {
   X402FundingSignatureResult,
   X402FundingTypedData,
 } from './core.js'
-import { NO_FUNDING_LEG_MESSAGE } from './core.js'
+import { assertSupportedBindingVersion, SUPPORTED_X402_EXPECTED_VERSIONS } from './core.js'
+import { HavenNoFundingLegRefusedError } from './no-funding-leg.js'
 import {
   fetchDirectSignContext,
   fetchTaskBudgetSignContext,
@@ -1021,7 +1022,7 @@ export function createToolHandlers(
                   'is a DELEGATION — signing it grants a third party authority to move funds — so ' +
                   'it is only ever signed against a Haven-signed context that the caveats are ' +
                   'verified against. Call this tool with { payment_id } instead (the signer then ' +
-                  'fetches and verifies the context itself), or use haven_sign_x402.',
+                  'fetches and verifies the context itself).',
               )
             }
             // #3272: the allowlist. This branch signs EXACTLY ONE shape — a
@@ -1126,16 +1127,31 @@ export function createToolHandlers(
           )
         }
         // 1. Sign the funding leg (records the binding + checks expiry/context).
+        const expected = toExpectedX402(expectedRaw)
         const fundingTypedData = fetched?.typedData ?? resolveTypedData(args)
+        // #4248: version skew first (#1143), exactly as `signX402FundingTypedData`
+        // orders it — a context this signer cannot read gets the STRUCTURED
+        // version-mismatch refusal and its update fallback, whatever shape the
+        // typed data has. Without this, the early refusal below answered an
+        // out-of-date signer with the no-funding-leg remedy instead.
+        if (expected.auth) {
+          assertSupportedBindingVersion(
+            expected.auth.version,
+            SUPPORTED_X402_EXPECTED_VERSIONS,
+            'x402 expected context',
+          )
+        }
         // #4242: this tool's second step builds an EIP-3009 merchant header
         // from the delegate EOA, which only a funding leg pays for. An erc7710
         // settlement child has none, so refuse before signing anything rather
         // than sign the child and then refuse its header. `buildX402PaymentHeader`
-        // enforces the same rule on its own; this only stops it earlier.
+        // enforces the same rule on its own; this only stops it earlier. It
+        // covers the `{ payment_id }` path too: `fundingTypedData` is the
+        // fetched context's typed data there (#4248 pins that).
         if (fundingTypedData && isSettlementChildTypedData(fundingTypedData)) {
-          throw new HavenSigningError(NO_FUNDING_LEG_MESSAGE)
+          throw new HavenNoFundingLegRefusedError('one_shot')
         }
-        const funding = await signFundingLeg(signer, toExpectedX402(expectedRaw), fundingTypedData)
+        const funding = await signFundingLeg(signer, expected, fundingTypedData)
         // 2. Build the merchant EIP-3009 header against that binding — local, no network.
         //    #1355: prefer the PaymentRequired the context fetch carried (same
         //    Haven read the signing bytes came from — one less blob an agent
@@ -1472,6 +1488,18 @@ function normalizeError(err: unknown): ToolFailure {
       ...(err.next_tool_server_role ? { next_tool_server_role: err.next_tool_server_role } : {}),
       ...(err.next_arguments ? { next_arguments: err.next_arguments } : {}),
       ...(err.next_tool_omitted_reason ? { next_tool_omitted_reason: err.next_tool_omitted_reason } : {}),
+    }
+  }
+  if (err instanceof HavenNoFundingLegRefusedError) {
+    // #4248: the #4242 settlement-child refusal, structured like the others.
+    // Checked BEFORE the `HavenSigningError` branch below since this class
+    // extends it. Nothing was signed on either site that throws it.
+    return {
+      success: false,
+      code: err.code,
+      message: err.message,
+      next_action: err.next_action,
+      ...nextStepWireFields(err.step),
     }
   }
   if (err instanceof HavenSiwxRefusedError) {

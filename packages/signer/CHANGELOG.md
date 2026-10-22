@@ -27,6 +27,14 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ### Changed
 
+- The #4242 settlement-child refusal is now structured: code `NO_FUNDING_LEG`
+  (it was a plain `SIGNING_ERROR`), `next_action: sign_and_submit_payment`, and
+  a `next_tool_omitted_reason` naming the erc7710 remedy (#4248).
+  `haven_sign_x402` checks the expected-context version first, so a skewed
+  context gets `UNSUPPORTED_EXPECTED_CONTEXT_VERSION` rather than the
+  settlement-child refusal. A settlement-child binding is retired when it is
+  minted and is no longer held in memory. No update needed.
+
 - `haven_sign_x402`'s description now ends the plain-HTTP flow with the report:
   after retrying the merchant, call `haven_report_x402_outcome` with the same
   `payment_header` (#4061). Haven records the merchant settlement only with

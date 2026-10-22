@@ -229,6 +229,16 @@ last-verified: "2026-10-21"
 > name, meaning, surface, or where it is set. Nothing else in this file's
 > coverage was touched; this note is the only edit.
 
+> **Re-verified #4293 (2026-10-22):** `playwright.config.ts` gains
+> `use.timezoneId: 'UTC'` and `TZ: 'UTC'` in `webServer.env`, so every e2e and
+> visual run renders local times in UTC whatever the host's zone (the same pin
+> goes into `scripts/screenshot.mjs`'s browser context and dev-server spawn).
+> `TZ` here is a process setting for the test server only: no app environment
+> variable is added, renamed or moved, nothing reads it by name, and no build
+> surface this document describes changes. The other `webServer.env` entries
+> and the projects are untouched. Nothing else in this file's coverage was
+> re-verified; `last-verified` is not bumped.
+
 > **Re-verified #3577 (2026-10-02):** `playwright.config.ts`'s dark-project
 > `testMatch` gains `dev-agent-pages.visual.spec.ts` — For developers and For
 > agents join the pixel gate with the same seed-before-navigation dark

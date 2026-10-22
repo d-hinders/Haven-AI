@@ -1022,7 +1022,7 @@ export function createToolHandlers(
                   'is a DELEGATION — signing it grants a third party authority to move funds — so ' +
                   'it is only ever signed against a Haven-signed context that the caveats are ' +
                   'verified against. Call this tool with { payment_id } instead (the signer then ' +
-                  'fetches and verifies the context itself), or use haven_sign_x402.',
+                  'fetches and verifies the context itself).',
               )
             }
             // #3272: the allowlist. This branch signs EXACTLY ONE shape — a

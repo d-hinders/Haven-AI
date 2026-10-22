@@ -310,7 +310,7 @@ describe('x402 binding rail (#4242)', () => {
       for (const [refusal, reason] of [
         [
           viaHeader,
-          "submit the settlement-child signature you already hold from haven_sign to haven_submit with settlement_scheme 'erc7710' — it returns the payment_header; do not sign again, and an erc7710 payment has no EIP-3009 header step",
+          "submit the settlement-child signature you already hold from haven_sign to haven_submit with settlement_scheme 'erc7710' — it returns the payment_header; do not sign again unless you no longer hold it (haven_sign { payment_id } re-signs the same child), and an erc7710 payment has no EIP-3009 header step",
         ],
         [
           viaOneShot,
@@ -377,5 +377,5 @@ describe('x402 binding rail (#4242)', () => {
       expect((refusal as Error).message).toMatch(/^x402 funding binding is required before signing a merchant header\./)
       expect((refusal as { code?: string }).code).toBe('SIGNING_ERROR')
     })
-  })
+  }, 30_000) // 65 mints, each signs and verifies; the 5 s default times out under load
 })

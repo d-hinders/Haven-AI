@@ -38,7 +38,7 @@ export type NoFundingLegSite = 'header' | 'one_shot'
 /** The `next_tool_omitted_reason` per site. The test pins each as a literal, not via this map. */
 export const NO_FUNDING_LEG_NEXT_STEP_REASONS: Readonly<Record<NoFundingLegSite, string>> = {
   header:
-    "submit the settlement-child signature you already hold from haven_sign to haven_submit with settlement_scheme 'erc7710' — it returns the payment_header; do not sign again, and an erc7710 payment has no EIP-3009 header step",
+    "submit the settlement-child signature you already hold from haven_sign to haven_submit with settlement_scheme 'erc7710' — it returns the payment_header; do not sign again unless you no longer hold it (haven_sign { payment_id } re-signs the same child), and an erc7710 payment has no EIP-3009 header step",
   one_shot:
     "sign the settlement child with haven_sign { payment_id }, then call haven_submit with that signature and settlement_scheme 'erc7710' — it returns the payment_header; an erc7710 payment has no EIP-3009 header step",
 }

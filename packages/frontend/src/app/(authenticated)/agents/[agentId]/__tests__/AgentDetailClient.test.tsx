@@ -1227,7 +1227,8 @@ describe('AgentDetailClient last-activity metadata', () => {
     expect(screen.queryByText('No agent budget set')).not.toBeInTheDocument()
     expect(screen.queryByText('Spend from')).not.toBeInTheDocument()
     // The page itself offers no budget entry point; the card does (its own
-    // #3549 tests pin Add budget present on a live agent, absent on a retired one).
+    // #3549 tests pin the rows' Add budget menu item present on a live agent,
+    // absent on a retired one — #4261).
     expect(screen.queryByRole('button', { name: /Add budget|Update budget/ })).not.toBeInTheDocument()
   })
 
@@ -1638,12 +1639,14 @@ describe('AgentDetailClient last-activity metadata', () => {
   })
 
   // #3549: since #3695 the page has no budget entry point of its own — Add
-  // budget lives in the Spending card, which hides it for a retired agent.
+  // budget lives in the Spending card, which hides it for a retired agent
+  // (as a row ⋯ menu item since #4261).
   // So the page's half of the gate is handing the card the right `retired`
   // state (the it.each below, incl. the archived-but-not-revoked shape
   // ARCHIVE_AGENT_SQL allows: an UNLINKED agent with no live budget), and the
-  // card's half is pinned in DelegationBudgetCard.test.tsx with Add budget
-  // asserted present on a live agent and absent on a retired one.
+  // card's half is pinned in DelegationBudgetCard.test.tsx with the Add
+  // budget menu item asserted present on a live agent and absent on a
+  // retired one.
   it('an archived agent is offered no Update budget anywhere on the page (#3549)', () => {
     mockAgentWith({ account_id: null, status: 'active', archived_at: '2026-06-01T00:00:00Z' })
     render(<AgentDetailClient agentId="agent-1" />)

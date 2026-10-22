@@ -662,10 +662,12 @@ rule). `?grant=` keeps working alongside `?tab=`. Sections, in order:
    the detail-page section rule in design-system.md). The hero is the
    dashboard money-card pattern (#4226): a `Card` with `Card.Section divided` —
    budgets on the left, **Last 30 days** on the right, stacked below `lg`.
-   Each budget is one row — amount, period, recipient or merchant, Edit and a
-   per-budget ⋯ menu whose one item is **Stop budget** (the irreversible
-   action gets the menu; its confirm still stands between the click and the
-   signature) — each measured by a meter that spans its column and captioned
+   Each budget is one row — amount, period, recipient or merchant and a
+   per-budget ⋯ menu whose items are **Edit budget**, **Add budget** and
+   **Stop budget** (the first two open their controls; the irreversible action
+   sits last, behind a separator, and its confirm still stands between the
+   click and the signature) — each measured by a meter that spans its column
+   and captioned
    by the shared budget-caption helper in the dashboard ROW style (#3806):
    "0.40 of 3.00 USDC · per day · refills in 24h" at two decimals, then the
    earlier of the refill and the expiry ("refills in 45m" / "refills Thu
@@ -699,8 +701,11 @@ rule). `?grant=` keeps working alongside `?tab=`. Sections, in order:
    Last 30 days column; its history is under Activity.
    **Add budget is collapsed once a budget exists**: with no budget the
    section reads "No budget yet." with a "Set budget" control that opens the
-   grant form; once one exists, adding another is an "Add budget" control
-   that opens the form in place (Cancel collapses it), never a permanent
+   grant form; once one exists, adding another is the rows' ⋯ menu "Add
+   budget" item (#4261 — no button under the list), which opens the form in
+   place (Cancel collapses it and returns focus to the row's trigger; after a
+   `?grant=` prefill, which has no origin, focus goes to the first row's
+   trigger, or to Set budget when there are no rows), never a permanent
    second form — unless `?grant=` asks for the form, in which case it opens
    expanded. Sharing part of an existing budget with another agent lives
    INSIDE the Add budget panel — a quiet line and an "Issue sub-budget"

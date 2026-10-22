@@ -55,10 +55,10 @@ const ANCHOR_TIMEOUT_MS = 60_000
 const FROZEN_NOW = new Date('2026-09-17T18:00:00.000Z')
 
 /**
- * Open the agent's budget card and click its Edit affordance. The card's
- * Edit button names the budget it edits (`Edit budget 250 USDC per week`,
- * DelegationBudgetCard) — matched by prefix so a viem formatting nit in the
- * amount cannot rename the test's anchor out from under it.
+ * Open the agent's budget card and open its Edit modal. #4261: Edit budget is
+ * the active row's ⋯ menu item — the trigger is matched by prefix so a viem
+ * formatting nit in the amount cannot rename the test's anchor out from under
+ * it, and the menu item inside is what opens the modal.
  */
 async function openEditBudgetModal(page: Page) {
   await page.goto('/agents/agent-research')
@@ -67,11 +67,19 @@ async function openEditBudgetModal(page: Page) {
   })
   await dismissMobileSidebar(page)
 
-  const editButton = page.getByRole('button', { name: /^Edit budget / })
-  await expect(editButton).toBeVisible()
-  await editButton.click()
+  await page.getByRole('button', { name: /^Budget options/ }).click()
+  await page.getByRole('menuitem', { name: 'Edit budget' }).click()
   const dialog = page.getByRole('dialog', { name: 'Edit budget' })
   await expect(dialog).toHaveCount(1)
+  // Park the pointer ON the primary button. The blessed baseline was
+  // captured through the old flow — clicking the card's Edit button — and
+  // the pointer that click left behind came to rest over the modal's
+  // primary button, baking its :hover fill (--v2-brand-strong at the
+  // disabled opacity) into the capture. The ⋯-menu path opens the dialog
+  // without that pointer overlap, so the hover must be re-applied
+  // deliberately: moving the pointer off the dialog renders the resting
+  // --v2-brand fill (#958FEF) and moves the baseline (#8E87DF expected).
+  await dialog.getByRole('button', { name: 'Review changes' }).hover()
   return dialog
 }
 

@@ -3657,3 +3657,27 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > Scope of this re-read: the card diff above and the previous notes' card
 > display claims; nothing else in this document was re-read for it, and
 > `last-verified` stays 2026-10-22.
+
+> **Re-verified unchanged (#4261, 2026-10-22, Edit/Add budget into each
+> budget's ⋯ menu):** this diff touches one covered file, display-layer:
+> `components/DelegationBudgetCard.tsx`. The per-budget menu now holds Edit
+> budget (`onEdit`, the #3166 modal — unchanged), Add budget (`openForm`,
+> the collapsed grant form — unchanged) and Stop budget…; the visible Edit
+> button and the list's Add budget button are gone. The Stop item's only
+> action is still `setConfirmOpen(true)`, so the #3717 confirm still stands
+> between the click and the signature. The trigger is now disabled only
+> while `busy`: with no reachable signer the menu opens and the Stop item
+> is the disabled element, while Edit and Add open controls that gate their
+> own signature behind the #3812/#3812-style connect hints (the form's
+> `notReadyHint` and the modal's review-step hint) — a dead menu item does
+> not become a new spending path, and nothing signs without `ready`. Focus
+> plumbing (collapse returning to the originating trigger via a
+> `data-budget-trigger` lookup, a `?grant=` prefill falling back to the
+> first row's trigger or Set budget, then the section heading) moves no
+> state. No signing, edit, revoke or confirm path moves; no fetch or write
+> is added or removed. No new spender, no new authority grant, no custody
+> change (Red Line #4: the chain remains the only spend authority). Scope
+> of this re-read: the card diff above and the sections whose claims rest
+> on the card's affordances (this run of card notes, the #3812 owner-wallet
+> notice); nothing else in this document was re-read for it, and
+> `last-verified` stays 2026-10-22.

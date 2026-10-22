@@ -23,7 +23,6 @@ export type CounterpartyFields = Pick<
 >
 
 export function transactionTitle(tx: AggregatedTransaction): string {
-  if (tx.titleOverride) return tx.titleOverride
   if (isDelegateSweep(tx)) return 'Agent funds swept back'
   if (tx.direction === 'in') return 'Received payment'
 
@@ -68,8 +67,6 @@ export function transactionMovement(
   accountNamesByAddress?: Map<string, string>,
   options?: { noAddress?: boolean },
 ) {
-  if (tx.movementOverride) return tx.movementOverride
-
   if (isDelegateSweep(tx)) {
     return (
       <TransactionMovement

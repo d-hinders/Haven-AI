@@ -523,9 +523,8 @@ describe('safeRequest (#4281)', () => {
     })
     expect(post).toMatchObject({ ok: false, reason: 'redirect_on_post' })
 
-    const hops = vi.fn<PinnedTransport>()
-      .mockResolvedValueOnce(redirect)
-      .mockResolvedValueOnce(payment402)
+    // Answer by host, not by call order: the first host redirects, the target pays.
+    const hops = vi.fn<PinnedTransport>(async (req) => (req.url.hostname === 'other.example' ? payment402 : redirect))
     const get = await safeRequest('https://api.merchant.example/paid', { method: 'GET', body: null }, { resolver: publicResolver, transport: hops })
     expect(get).toMatchObject({ ok: true, status: 402, finalUrl: 'https://other.example/paid' })
     expect(hops).toHaveBeenCalledTimes(2)

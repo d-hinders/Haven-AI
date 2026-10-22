@@ -1,25 +1,31 @@
 /**
- * `/transactions` rows survive a starved CONTAINER while the viewport stands
- * still (#1999, retargeted to the ledger in #4266).
+ * Two container-keyed layouts, each tested with the viewport held FIXED and
+ * the container itself resized (#1999) — the only shape of test that can tell
+ * a container query from a viewport query on this shell, where container
+ * width is a sawtooth function of viewport width:
  *
- * WHAT WAS DELETED, AND WHY. This spec pinned the `Table` primitive's column
- * collapse (seven columns -> three at a 717px container, back at 718px) and
- * the sticky `thead` pinning through the container wrapper (#1772). Both
- * subjects belonged to the `/transactions` table, which the shared ledger
- * replaced: there are no columns to collapse and no header to pin, so those
- * two tests have nothing left to read on this route. (The `Table` primitive
- * itself still serves other pages; it is not what `/transactions` renders.)
+ *     viewport   390   767   768   900   1023  1024  1279  1280
+ *     container  340   717   718   850   973   718   973   974
  *
- * WHAT REMAINS is the same idea in the ledger's terms. A ledger row lays out
- * on the VIEWPORT breakpoint (`sm:` two-column grid), so a narrow container at
- * a wide viewport is the case where the row cannot rely on its breakpoint to
- * save it: the title must give way (truncate), the amount must keep its one
- * line, and nothing may push the row past its container. The viewport is held
- * FIXED and the ledger's own box is resized — the only shape of test that can
- * tell a row that adapts to its box from one that adapts to the window.
+ * 1. The `Table` primitive's column collapse (`revealAt`, `tableColumnClass`).
+ *    Its `/transactions` consumer is gone (#4266: the shared ledger replaced
+ *    the table), so the guard now reads the live consumer of the `xl` stage —
+ *    the analytics Agents table, whose Share and Top merchant columns reveal
+ *    at a 974px container. A `@container v2table` query with no named
+ *    container ancestor stays hidden at EVERY width, silently; jsdom cannot
+ *    evaluate container queries, so this real-browser read is the guard.
+ *    (The sticky-`thead` leg is not carried over: no `Table` consumer pins its
+ *    head any more.)
+ *
+ * 2. `/transactions` ledger rows survive a starved container. A ledger row
+ *    lays out on the VIEWPORT breakpoint (`sm:` two-column grid), so a narrow
+ *    container at a wide viewport is the case where the row cannot rely on
+ *    its breakpoint: the title must give way (truncate), the amount must keep
+ *    its one line, and nothing may push the row past its container.
  */
 import { expect, test, type Page } from '@playwright/test'
 import { mockHavenApi, seedAuthenticatedSession } from './fixtures/haven-api'
+import { analyticsOverview } from './fixtures/analytics-overview'
 
 const ROW = '[data-testid="transactions-ledger"] [role="button"][aria-haspopup="dialog"]'
 
@@ -107,4 +113,86 @@ test('/transactions: a starved ledger truncates titles and keeps amounts whole w
     starved.some((r) => r.titleTruncated),
     'no title truncated in a 220px container — the row is not adapting to its box',
   ).toBe(true)
+})
+
+/**
+ * The analytics Agents table — the `xl` stage's consumer. Anchored on its
+ * own header text, never on the first `<table>` (a page may render others).
+ */
+async function readAgentsTable(page: Page) {
+  return page.evaluate(() => {
+    const visible = (el: Element) => el.getClientRects().length > 0
+    const table = Array.from(document.querySelectorAll('table')).find(
+      (t) => visible(t) && (t.querySelector('thead')?.textContent ?? '').includes('Budget used'),
+    )
+    if (!table) return { columns: ['NO TABLE'], bodyCells: -1, containerWidth: -1 }
+    const headRow = table.querySelector('thead tr')
+    const columns = headRow
+      ? Array.from(headRow.children).filter(visible).map((th) => (th.textContent ?? '').trim())
+      : []
+    const bodyRow = Array.from(table.querySelectorAll('tbody tr')).find(visible)
+    const bodyCells = bodyRow ? Array.from(bodyRow.children).filter(visible).length : -1
+    const container = table.parentElement
+    return {
+      columns,
+      bodyCells,
+      containerWidth: container ? +container.getBoundingClientRect().width.toFixed(1) : -1,
+    }
+  })
+}
+
+async function setAgentsTableContainerWidth(page: Page, px: number) {
+  await page.evaluate((width) => {
+    const table = Array.from(document.querySelectorAll('table')).find(
+      (t) => t.getClientRects().length > 0 && (t.querySelector('thead')?.textContent ?? '').includes('Budget used'),
+    )
+    const container = table?.parentElement
+    if (!container || !container.className.includes('container-type')) {
+      throw new Error('no inline-size container found around the Agents table')
+    }
+    container.style.width = `${width}px`
+  }, px)
+  // Container queries re-evaluate on the next layout; two frames is ample.
+  await page.waitForTimeout(250)
+}
+
+test('Table primitive: the xl collapse follows the CONTAINER while the viewport stands still', async ({
+  page,
+}) => {
+  test.slow()
+  await mockHavenApi(page)
+  // The shared fixture does not serve the analytics overview; serve the
+  // populated body the analytics visual spec photographs, after
+  // `mockHavenApi` so LIFO matching reaches it first (its idiom, verbatim).
+  await page.route('**/api/**', async (route) => {
+    const request = route.request()
+    const path = new URL(request.url()).pathname.replace(/^\/api/, '')
+    if (request.method() !== 'GET' || path !== '/analytics/overview') {
+      await route.fallback()
+      return
+    }
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(analyticsOverview) })
+  })
+  await seedAuthenticatedSession(page)
+  await page.setViewportSize({ width: 1600, height: 900 })
+  await page.goto('/analytics')
+  await expect(page.getByRole('columnheader', { name: 'Budget used' })).toBeVisible({ timeout: 60_000 })
+
+  // 974px: exactly the `xl` stage — every column, header and body together.
+  await setAgentsTableContainerWidth(page, 974)
+  const atStage = await readAgentsTable(page)
+  expect(atStage.containerWidth, 'the container really is 974px wide').toBe(974)
+  expect(atStage.columns).toContain('Share')
+  expect(atStage.columns).toContain('Top merchant')
+  expect(atStage.bodyCells, 'the body row carries every column the header shows').toBe(atStage.columns.length)
+
+  // 973px: one pixel under — Share and Top merchant drop from header AND body,
+  // though the 1600px viewport is far past `xl`.
+  await setAgentsTableContainerWidth(page, 973)
+  const under = await readAgentsTable(page)
+  expect(under.containerWidth).toBe(973)
+  expect(under.columns).not.toContain('Share')
+  expect(under.columns).not.toContain('Top merchant')
+  expect(under.columns.length).toBe(atStage.columns.length - 2)
+  expect(under.bodyCells, 'the body drops the same two cells').toBe(atStage.bodyCells - 2)
 })

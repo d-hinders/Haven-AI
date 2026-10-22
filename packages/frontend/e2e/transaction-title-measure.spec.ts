@@ -5,7 +5,7 @@
  *
  * The `/design-system` "Transaction tables" showcase this spec used to measure
  * was retired with the table itself (#4266); only the `/transactions` leg
- * remains. Assert the property, not a string: no title stacks past two lines.
+ * remains. Assert the property, not a string: no title stacks past one line.
  */
 import { expect, test } from '@playwright/test'
 import { dashboardTransaction, mockHavenApi, seedAuthenticatedSession } from './fixtures/haven-api'
@@ -22,7 +22,7 @@ type TitleReading = {
   lines: number
   rowHeight: number
   hasBadge: boolean
-  truncated: boolean
+  spills: boolean
 }
 
 /**
@@ -61,7 +61,7 @@ async function readTitles(page: import('@playwright/test').Page): Promise<TitleR
           ),
           // The title box extends past the row's right edge: it must
           // truncate, never spill.
-          truncated: titleRect.right > rowRect.right + 1,
+          spills: titleRect.right > rowRect.right + 1,
         }
       })
       .filter((r): r is TitleReading => r !== null)
@@ -94,7 +94,7 @@ test('/transactions: row titles truncate to one line and stay inside the row acr
           hasMore: false,
           partialFailure: false,
           failedAccountIds: [],
-          truncated: false,
+          spills: false,
         }),
       })
       return
@@ -127,7 +127,7 @@ test('/transactions: row titles truncate to one line and stay inside the row acr
         reading.lines,
         `@${width}px: "${reading.text}" wraps to ${reading.lines} lines`,
       ).toBeLessThanOrEqual(MAX_TITLE_LINES)
-      expect(reading.truncated, `@${width}px: "${reading.text}" spills past the row`).toBe(false)
+      expect(reading.spills, `@${width}px: "${reading.text}" spills past the row`).toBe(false)
     }
   }
 })

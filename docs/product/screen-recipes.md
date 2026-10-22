@@ -1013,7 +1013,7 @@ Money and risk clarity:
   #4165; the rule is `shouldMarkApprox`, see `design-system.md` § Amount:
   currency mode).
 - **List rows show no addresses (#3810, #3811).** The counterparty half of
-  every row — `From -> To` line included — renders through
+  every row renders through
   `counterpartyLabel`'s no-address mode: the merchant's hostname, the source
   title, a resolved name, "Deposit", "From <account>" for a transfer from
   another of the user's own accounts (#4099 — the dashboard reads the server's
@@ -1052,15 +1052,16 @@ Money and risk clarity:
   hostname.
 - The row's subline names who acted and, with two or more accounts, the
   account — never a `From … -> To …` line (#4266). Only a move between the
-  user's own accounts draws an arrow: "You · <from> → <to>".
+  user's own accounts draws an arrow: "You · <from> → <to>", or "Your
+  accounts · <from> → <to>" when no owner send was recorded (#2097).
 - **The detail drawer is where users verify (#3811).** Addresses and hashes
   render IN FULL there — never ellipsised — and every address carries the
   one copy affordance (`CopyButton`, "Copy address"); the explorer link
   stays beside it. The headline is the user's currency figure with the
   token amount beside it, signless (owner decision 2026-10-09, #3811): the
   currency figure carries the sign.
-- The row keeps the amount on the right with the time under it at every
-  width; the explorer link lives in `TransactionDetailPanel`, not on the row.
+- The amount sits on the right at `sm` and up and rides under the title
+  below `sm`; the time sits under the amount at every width; the explorer link lives in `TransactionDetailPanel`, not on the row.
   There are no columns to collapse and no sorting (#4266 — date order only).
 
 ## Analytics

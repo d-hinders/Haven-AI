@@ -59,8 +59,9 @@ export function TransactionActivityRow({
   statusTone?: StatusTone
   /**
    * Badges after the status badge, on the same wrapping title line (#4266):
-   * the `/transactions` ledger's per-payment `AccountingBadge`, which links
-   * to `/accounting` and stops its own click from opening the row.
+   * the `/transactions` ledger's per-payment `AccountingBadge`, as a plain
+   * pill (`interactive={false}`) — a control nested in the row button is
+   * invalid ARIA.
    */
   extraBadges?: ReactNode
   timestamp?: string
@@ -68,8 +69,9 @@ export function TransactionActivityRow({
   details?: TransactionActivityDetail[]
   action?: ReactNode
   /**
-   * `comfortable` (default) is the roomier row; the transactions ledger uses `compact`.
-   * `compact` is the dashboard preview, tightened so the agents and
+   * `comfortable` (default) is the roomier row. `compact` is used by the
+   * dashboard preview and by the ledgers (/transactions, the account and agent
+   * Activity tabs) — tightened so the dashboard's agents and
    * transactions columns sit on the same rhythm. Compact truncates the
    * description line to one line rather than hiding it — the ledgers' subline
    * (who acted, the account) relies on it showing.
@@ -137,9 +139,9 @@ export function TransactionActivityRow({
     ? 'gap-3 px-4 py-3 sm:px-5 sm:py-0 sm:h-[72px]'
     : 'gap-3 px-4 py-4 sm:px-5'
   // Ledger mode (#4096): the row itself is the control — a div carrying
-  // button semantics, not a nested <button>, because `details` and `action`
-  // may contain links (an explorer anchor) and a button must not nest
-  // interactive elements. Enter and Space activate, per the button role.
+  // button semantics. A ledger row must contain no controls (design-system
+  // § Transaction ledger, #4266): a control nested in a button is invalid
+  // ARIA. Enter and Space activate, per the button role.
   const interactiveProps = onOpen
     ? {
         role: 'button' as const,
@@ -147,9 +149,9 @@ export function TransactionActivityRow({
         'aria-haspopup': 'dialog' as const,
         onClick: () => onOpen(),
         onKeyDown: (event: React.KeyboardEvent) => {
-          // Only the row's own key presses (#4266): Enter on a link inside it
-          // (an accounting badge, an explorer anchor) follows that link and
-          // must not also open the panel.
+          // Only the row's own key presses (#4266) — defensive: nothing inside
+          // a ledger row should take focus, but a key press that does arrive
+          // from a descendant must not also open the panel.
           if (event.target !== event.currentTarget) return
           if (event.key === 'Enter' || event.key === ' ') {
             event.preventDefault()

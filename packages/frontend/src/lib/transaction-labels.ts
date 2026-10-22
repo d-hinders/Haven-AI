@@ -15,10 +15,10 @@ export function isMachinePaymentSource(source?: string | null): boolean {
 /**
  * Primary title for a machine-payment transaction row (#2357).
  *
- * This string leads the row people scan — the dashboard activity list
- * (`DashboardClient.tsx`), the transactions ledger (`TransactionsClient.tsx`),
- * the side panel heading (`TransactionDetailPanel.tsx`) and the agent detail
- * activity feed (`AgentDetailClient.tsx`) — so it follows
+ * This string heads the detail drawer (`TransactionDetailPanel.tsx`, through
+ * `transactionTitle`) and is `counterpartyLabel`'s fallback title for a list
+ * row with no resource hostname (the dashboard and the ledgers, #4266) — so
+ * it follows
  * `docs/product/copy-guidelines.md` § Core principle: write for users, not for
  * the protocol. It is deliberately NOT the same call as
  * `settlementSchemeLabel` in `transaction-presentation.tsx`, which returns raw

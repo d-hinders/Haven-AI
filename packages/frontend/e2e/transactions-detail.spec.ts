@@ -47,7 +47,8 @@ test.describe('transaction history — x402 display + detail panel', () => {
     await expect(panel).toBeVisible()
     // x402-specific body: resource hostname (not the full URL) + merchant.
     // The section heading carries the protocol name since #2357; the panel's
-    // own title is the row's user-facing "Agent payment by …".
+    // own title is `transactionTitle`'s "Agent payment by …" (the row's title is the
+    // resource host since #4266).
     await expect(panel.getByText('x402 payment', { exact: true })).toBeVisible()
     await expect(panel.getByText('Resource', { exact: true })).toBeVisible()
     await expect(panel.getByText('research.example')).toBeVisible()

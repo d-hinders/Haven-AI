@@ -306,8 +306,9 @@ const ANCHOR_TIMEOUT_MS = 60_000
  * measured; see the table note).
  *
  * Per AXIS as well, not just per route (#2817): a responsive layout carries
- * less text at 390 than at 1280 — `/transactions` measured 246 characters on the retired table (299 on the ledger, #4266) at
- * the mobile width against 320 at desktop, on this harness — so a floor set
+ * less text at 390 than at 1280 — `/transactions` measured 246 characters on the retired table at
+ * the mobile width against 320 at desktop (the ledger: 299 against 338,
+ * #4266), on this harness — so a floor set
  * from the desktop measurement fails every mobile run of the same route.
  * `minCharsMobile` overrides `minChars` on the mobile axis only, and is set
  * FROM MEASUREMENT like the desktop numbers: `/transactions` mobile gets 240
@@ -345,14 +346,6 @@ type ProductRoute = {
    * static strings omit it.
    */
   frozenRelativeTime?: string
-  /**
-   * Set when the mobile layout hides every element that renders the fixture's
-   * relative timestamp (#2817, measured): the pin is then asserted on the
-   * desktop axis only. `page.clock.setFixedTime` stays global either way — a
-   * hidden timestamp cannot drift a pixel, and a freeze failure would have
-   * nothing visible to fail on at that width.
-   */
-  frozenRelativeTimeHiddenOnMobile?: boolean
   /**
    * Register `serveAgentDetailResponses` for this route — the detail-page
    * reads (`passport`, `delegate-balance`, per-agent activity/stats) that the
@@ -695,10 +688,7 @@ test.describe('product-route visual regression', () => {
           )
         await expectNoSkeletons(main, route.path)
 
-        if (
-          route.frozenRelativeTime &&
-          !(axis === 'mobile' && route.frozenRelativeTimeHiddenOnMobile)
-        ) {
+        if (route.frozenRelativeTime) {
           await expect(
             main.getByText(route.frozenRelativeTime, { exact: true }).first(),
             `${route.path}: the frozen clock is not in effect — expected the ` +

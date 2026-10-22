@@ -4,8 +4,10 @@
  * Per-transaction accounting badge (#2870, epic #2858 slice 12).
  *
  * Shows the feed's state for ONE payment where the user already looks — the
- * `/transactions` ledger row (#4266) and the detail drawer — and links to `/accounting`,
- * where the row can be re-synced or checked against the provider. Reads the
+ * `/transactions` ledger row (#4266) and the detail drawer. In the drawer it
+ * links to `/accounting`, where the row can be re-synced or checked against
+ * the provider, and carries the failure reason on hover/focus; on a ledger row
+ * it is the plain pill (`interactive={false}`) — the row is itself a button. Reads the
  * `accounting` object the list endpoint joins per row; renders nothing when
  * it is absent, which is how the backend says "feature off, no connection,
  * or this payment was never fed" (the absence is the contract, not a null).
@@ -17,6 +19,7 @@
  *                     the provider made)
  *   pending         → "Feeding…"       (neutral — in flight)
  *   failed/skipped  → "Not fed"        (warning), the reason on hover/focus
+ *                                      where the badge is interactive
  *
  * No "Booked in <Provider>" state: the ledger stores no verify result, so the
  * list cannot say it truthfully. The `/accounting` page's live read-back is
@@ -66,7 +69,7 @@ const TONE: Record<TransactionAccounting['status'], StatusTone> = {
 }
 
 /**
- * Where the link form sits inside something clickable (a detail row), the
+ * Defensive: should the link form ever sit inside something clickable, the
  * click must stop here, and not only for the mouse: Enter on an `<a>` fires
  * a synthetic click that bubbles to the parent's `onClick`. A ledger row
  * (a whole-row `role="button"`) never gets the link form — it passes
@@ -93,7 +96,7 @@ export interface AccountingBadgeProps {
 /**
  * The hidden state is decided BEFORE any hook runs: the catalog hook needs
  * `LocaleProvider`, and a row without `accounting` must cost nothing — not a
- * provider lookup, not a render — wherever the table is mounted.
+ * provider lookup, not a render — wherever the ledger is mounted.
  */
 export function AccountingBadge({ accounting, className = '', interactive = true }: AccountingBadgeProps) {
   if (!accounting) return null

@@ -319,21 +319,37 @@ export function transactionDayGroups<T>(
 }
 
 /**
- * A ledger's day-group heading — the same quiet band the dashboard's
- * activity list draws above its merged rows (`px-4 pt-3 pb-1 … sm:px-5`),
- * so the account page's ledger and the dashboard's preview read as one
- * system. `partial` marks a bucket whose day is cut by a window boundary
- * (the #3975 analytics rule) as "(partial)".
+ * A ledger's day-group heading — the tinted day band, the second sanctioned
+ * band after `Card.Header` (owner decision on #4225, 2026-10-21). Built on
+ * the table-header tokens (`--v2-table-header-bg` / `--v2-table-header-ink`,
+ * the same values as `--v2-surface`) with a full-width hairline below; the
+ * label is uppercased by CSS (`text-transform`, never `toUpperCase()`, so
+ * DOM text keeps matching "Today"). Every list that groups by day bands its
+ * headings — except the dashboard's first day, where the Activity card's own
+ * tinted `Card.Header` sits directly above and `band={false}` keeps today's
+ * plain label so two bands of one tint never stack.
+ *
+ * `partial` marks a bucket whose day is cut by a window boundary (the #3975
+ * analytics rule) as "(partial)".
  */
 export function TransactionActivityDayHeader({
   label,
   partial = false,
+  band = true,
 }: {
   label: string
   partial?: boolean
+  /** The tinted band; `false` keeps the pre-#4225 plain label (dashboard's first day). */
+  band?: boolean
 }) {
   return (
-    <p className="px-4 pt-3 pb-1 text-xs font-medium text-[var(--v2-ink-3)] sm:px-5">
+    <p
+      className={
+        band
+          ? 'border-b border-[var(--v2-border)] bg-[var(--v2-table-header-bg)] px-4 pt-3 pb-1 text-xs font-medium uppercase tracking-wider text-[var(--v2-table-header-ink)] sm:px-5'
+          : 'px-4 pt-3 pb-1 text-xs font-medium text-[var(--v2-ink-3)] sm:px-5'
+      }
+    >
       {partial ? `${label} (partial)` : label}
     </p>
   )

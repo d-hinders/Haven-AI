@@ -23,7 +23,7 @@
  * automatic and derived (agent revoke -> passport revoke), so there is
  * nothing here for a button to do.
  *
- * #3697: this is a ROW in the agent page's "Identity and settings" card, not
+ * #4228: this is a ROW in the agent page's Settings tab, not
  * a standalone Card — the caller owns the card and the dividers between rows,
  * so every state below (loading, load error, issued, not issued) renders
  * inside one padded row block. `data-testid="agent-passport-row"` is the

@@ -1,6 +1,6 @@
 'use client'
 
-import { ArrowRight, EllipsisVertical } from 'lucide-react'
+import { EllipsisVertical } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
@@ -36,16 +36,9 @@ import EditAgentModal from '@/components/EditAgentModal'
 import LabelsManagerModal from '@/components/LabelsManagerModal'
 import { LabelChipRow } from '@/components/haven/LabelChip'
 import DelegationBudgetCard, { DELEGATION_BUDGET_CARD_ID } from '@/components/DelegationBudgetCard'
-import AgentPassportCard from '@/components/AgentPassportCard'
-import {
-  MCP_NOT_RECORDED_NOTE,
-  McpServerName,
-  hasUnrecordedMcpServerName,
-} from '@/components/agent-panel/McpServerName'
 import PaymentCredentialsModal from '@/components/PaymentCredentialsModal'
 import { RemoveAgentDialog } from '@/components/agent-panel/RemoveAgentDialog'
 import { ReplaceSigningKeyModal } from '@/components/agent-panel/ReplaceSigningKeyModal'
-import { TaxDeclarationToggle } from '@/components/agent-panel/TaxDeclarationToggle'
 import { useAgentPassport } from '@/hooks/useAgentPassport'
 import {
   DropdownMenu,
@@ -60,10 +53,10 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { Tabs } from '@/components/ui/Tabs'
 import { Monogram } from '@/components/ui/Monogram'
 import { BackLink } from '@haven_ai/ui/BackLink'
-import { Row } from '@/components/ui/Row'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Skeleton } from '@/components/ui/Skeleton'
 import AgentActivityTab from './AgentActivityTab'
+import AgentSettingsTab from './AgentSettingsTab'
 import AgentToolCallsTab from './AgentToolCallsTab'
 import {
   ApprovalRequiredBanner,
@@ -721,13 +714,13 @@ export default function AgentDetailClient({ agentId }: Props) {
         />
       </div>
 
-      {/* #3426: the per-agent x402 tax declaration opt-in moved into the
-          "Identity and settings" card below (#3697) — the toggle owns its own
-          row and divider there. The opt-in is settings, not authority: it
-          changes no budget, no rule, and no key. */}
+      {/* #3426: the per-agent x402 tax declaration opt-in lives on the
+          Settings tab (#4228) — the toggle owns its own row and divider
+          there. The opt-in is settings, not authority: it changes no budget,
+          no rule, and no key. */}
 
-      {/* #3697: the old standalone Backup & recovery card moved into the
-          "Identity and settings" card below — same link, new wording. */}
+      {/* #1089: the Backup & recovery pointer lives on the Settings tab
+          (#4228) — an account capability, pointed at, not copied. */}
 
       {/* #3696: the two stat cards ("All-time transactions" / "Today") are
           gone for good — #3696 moved their figures into the Activity header's
@@ -786,74 +779,23 @@ export default function AgentDetailClient({ agentId }: Props) {
         </div>
       ) : null}
 
-      {/* ── Settings tab (#4226): today's Identity and settings card,
-          unchanged — #4228 rebuilds it. */}
+      {/* ── Settings tab (#4228): one Card of divided rows — connection,
+          credentials, labels, tax, passport — plus the account-level
+          Backup & recovery pointer. The modals stay page-owned so the ⋮
+          menu opens the same flows. */}
       {activeTab === 'settings' ? (
         <div className="mt-6" data-testid="agent-settings-section">
-      {/* #3697: the page's optional and account-level items — the Agent
-          Passport row, the MCP server name row (#4209), the tax declaration row (rendered only when company
-          details are VIES-valid; the toggle owns its own row and divider) and
-          the Backup & recovery pointer — as ONE quiet card at the bottom. The
-          detail-page section rule (#3692): the heading sits above the card;
-          the card holds the rows. Each row renders its own `Card.Section`
-          divided wrapper so a hidden row leaves no orphan divider. */}
-      <section className="mt-6" data-testid="identity-settings-section">
-        <div className="mb-4">
-          <h2 className="text-base font-semibold text-[var(--v2-ink)]">Identity and settings</h2>
-          <p className="mt-1 text-sm text-[var(--v2-ink-3)]">
-            Optional records and account-level settings for this agent.
-          </p>
-        </div>
-        <Card hover={false}>
-          <AgentPassportCard
-            agentId={agentId}
-            agentRevoked={isRevoked}
-          />
-
-          {/* #4209: the MCP server name moved here from the `/agents` card
-              (#1878) — which hosted+signer pair this agent is wired as, with
-              its copy button and tooltip. The `not recorded` note (#2043)
-              moved with it: visible text beside the bare label, never a
-              tooltip, and only when this agent has no recorded name. */}
-          <Card.Section divided>
-            <div className="px-4 py-4 md:px-6 md:py-5" data-testid="mcp-server-name-row">
-              <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-1">
-                <h3 className="text-base font-semibold text-[var(--v2-ink)]">MCP server name</h3>
-                <McpServerName value={currentAgent.mcp_server_name} />
-              </div>
-              {hasUnrecordedMcpServerName([currentAgent]) ? (
-                <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-3)]">
-                  {MCP_NOT_RECORDED_NOTE}
-                </p>
-              ) : (
-                <p className="mt-1 text-xs text-[var(--v2-ink-3)]">
-                  The name of this agent&apos;s Haven servers in its MCP config.
-                </p>
-              )}
-            </div>
-          </Card.Section>
-
-          <TaxDeclarationToggle
-            agentId={agentId}
-            taxDeclarationEnabled={currentAgent.tax_declaration_enabled}
+          <AgentSettingsTab
+            agent={currentAgent}
+            account={account ? { id: account.id, name: account.name } : null}
+            isRevoked={isRevoked}
+            canManageCredentials={canManageCredentials}
+            canEditDetails={canEditDetails}
+            onOpenCredentials={() => setCredentialsOpen(true)}
+            onOpenReplaceKey={() => setReplaceKeyOpen(true)}
+            onOpenEditAgent={openEditAgent}
             onAgentsChanged={() => void refetch()}
           />
-
-          {/* #1089: backup & recovery moved to the account page — it's an
-              account capability, not an agent one. This is a pointer, not a
-              second copy of the controls. */}
-          {account ? (
-            <Card.Section divided>
-              <Row
-                href={`/accounts/${account.id}`}
-                title="Backup & recovery"
-                subtitle={`Managed on ${account.name}: it covers every agent on it`}
-                trailing={<Icon icon={ArrowRight} className="h-4 w-4 text-[var(--v2-ink-3)]" />}
-              />
-            </Card.Section>
-          ) : null}
-        </Card>
-      </section>
         </div>
       ) : null}
 

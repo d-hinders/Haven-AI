@@ -128,7 +128,9 @@ function CardSection({
 /**
  * The grey header band on a card — title on a `--v2-surface` tint with a
  * hairline bottom border. The canonical way to give a Card (or a padding-0
- * card with a row list) a titled header; never hand-roll the band.
+ * card with a row list) a titled header; never hand-roll the band. The day
+ * band (`TransactionActivityDayHeader`) is the second sanctioned band — for
+ * day-grouped lists, not card titles (#4225).
  *
  * Assumes the parent Card has no top padding and `overflow-hidden` (so the
  * band's corners clip to the card radius). For a standalone header on a card

@@ -763,7 +763,7 @@ which this rule does not touch).
   visible Edit, Stop or Add button competes with the rows; the row's identity
   rides on the trigger's `aria-label` ("Budget options 250 USDC per week").
   Choosing Add opens the form in place. A section with **no rows** has no menu
-  to carry the add, so it keeps a visible primary add (Set budget). The
+  to carry the add, so it keeps a visible add (Set budget, a ghost button). The
   `/design-system` specimen shows both states.
 
 ### BudgetMeter (#3692)

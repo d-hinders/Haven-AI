@@ -3350,7 +3350,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="Section with row actions in ⋯ (manage pattern)"
-        description="How a detail-page section manages a list (#3695; owner decision 4 on #4258, 2026-10-22, landed in the design system by #4259 and to be adopted by the agent page's Spending section in #4261). The heading and one-line description sit ABOVE the card. Each row's ⋯ menu holds that row's actions (Edit budget, then Stop budget… under a separator, danger tone) AND the section's add (Add budget) — no visible Edit, Stop or Add buttons compete with the rows, and the row's identity rides on the trigger's aria-label. Choosing Add opens the form in place. A section with no rows has no menu to hold the add, so it keeps a visible primary add (Set budget). This replaced the action-footer pattern, and then the visible row buttons it gave way to."
+        description="How a detail-page section manages a list (#3695; owner decision 4 on #4258, 2026-10-22, landed in the design system by #4259 and to be adopted by the agent page's Spending section in #4261). The heading and one-line description sit ABOVE the card. Each row's ⋯ menu holds that row's actions (Edit budget, then Stop budget… under a separator, danger tone) AND the section's add (Add budget) — no visible Edit, Stop or Add buttons compete with the rows, and the row's identity rides on the trigger's aria-label. Choosing Add opens the form in place. A section with no rows has no menu to hold the add, so it keeps a visible add (Set budget, a ghost button). This replaced the action-footer pattern, and then the visible row buttons it gave way to."
       >
         <div className="grid gap-5 lg:grid-cols-2">
           <div>
@@ -3363,7 +3363,7 @@ export default function DesignSystemPage() {
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium text-[var(--v2-ink)]">250 USDC per week</p>
                   <p className="truncate text-xs text-[var(--v2-ink-muted)]">to any recipient</p>
-                  <div className="mt-2 max-w-sm">
+                  <div className="mt-2">
                     <BudgetMeter
                       usedPercent={25}
                       label="USDC budget used"
@@ -3374,7 +3374,7 @@ export default function DesignSystemPage() {
                 <DropdownMenu>
                   <DropdownMenuTrigger
                     aria-label="Budget options 250 USDC per week"
-                    className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-hover)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
+                    className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-hover)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <Icon icon={EllipsisVertical} className="h-4 w-4" />
                   </DropdownMenuTrigger>
@@ -3397,9 +3397,7 @@ export default function DesignSystemPage() {
             </p>
             <Card hover={false} className="p-5 md:p-6">
               <p className="text-sm text-[var(--v2-ink-muted)]">No budget yet.</p>
-              <div className="mt-3">
-                <Button size="sm">Set budget</Button>
-              </div>
+              <Button size="sm" variant="ghost" className="mt-2">Set budget</Button>
             </Card>
           </div>
         </div>

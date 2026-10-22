@@ -969,12 +969,20 @@ describe('signals and recover', { concurrency: 4 }, () => {
     await waitFor(() => existsSync(pids) && readFileSync(pids, 'utf8').split('\n').filter(Boolean).length >= 2, 'the mutant build')
     const mutantBuild = Number(readFileSync(pids, 'utf8').split('\n').filter(Boolean)[1])
     const t0 = Date.now()
+    // Pins pidExited's polarity: the blocked build is alive here, whatever its reaping.
+    assert.equal(pidExited(mutantBuild), false, 'the blocked mutant build is alive before the signal')
     p.child.kill('SIGINT')
     const r = await p.done
     // Before the release: a build that survived the signal is still blocked
     // here, so it never exits; after it, a survivor would finish by itself.
-    // The short poll covers the SIGTERM landing (#4297).
-    const exited = await waitFor(() => pidExited(mutantBuild), 'the mutant build to exit', 5000).then(() => true, () => false)
+    // The short poll is for hosts with no /proc, where only the reap says gone (#4297).
+    const exited = await waitFor(() => pidExited(mutantBuild), 'the mutant build to exit', 5000).then(
+      () => true,
+      (e) => {
+        if (/^timed out/.test(e.message)) return false
+        throw e
+      },
+    )
     release(repo)
     assert.equal(r.code, 130, r.out)
     assert.ok(Date.now() - t0 < 120000, `took ${Date.now() - t0} ms: the blocked build was not stopped`)

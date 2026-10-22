@@ -3641,6 +3641,23 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > display claims; nothing else in this document was re-read for it, and
 > `last-verified` stays 2026-10-22.
 
+> **Re-verified unchanged (#4274, 2026-10-22, hero reads net + Activity
+> summary count):** this diff touches one covered file, display-layer:
+> `components/DelegationBudgetCard.tsx` (the hero's `LastThirtyDays` now
+> reads `d30.net` — the same #3803 net figure the dashboard's money card
+> and agents section read — with an unpriced-bucket-with-net-0 rendering
+> "—", `Amount amount={null}`, and no new unpriced note) and, outside this
+> document's coverage, `AgentActivityTab.tsx` (its ListToolbar `summary`
+> prop removed per owner decision (a) — no "Out <total>" figure; the
+> toolbar's count stands alone). No budget row, caption, meter, menu,
+> confirm, signing, edit or revoke path moves; no fetch or write is added
+> or removed; the read stays a display-only projection of the overview wire
+> the card already carried. No new spender, no new authority grant, no
+> custody change (Red Line #4: the chain remains the only spend authority).
+> Scope of this re-read: the card diff above and the previous notes' card
+> display claims; nothing else in this document was re-read for it, and
+> `last-verified` stays 2026-10-22.
+
 > **Re-verified unchanged (#4261, 2026-10-22, Edit/Add budget into each
 > budget's ⋯ menu):** this diff touches one covered file, display-layer:
 > `components/DelegationBudgetCard.tsx`. The per-budget menu now holds Edit

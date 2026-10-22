@@ -2061,8 +2061,11 @@ export async function serveAgentDetailResponses(
               ...dashboardOverview.agents[0].stats,
               d30: {
                 ...dashboardOverview.agents[0].stats.d30,
+                // #4274: gross and net differ, so the refreshed
+                // agent-detail-research-* baseline proves the hero reads the
+                // net window (1.05), not the gross one (1.42) it used to.
                 gross: { usd: 1.42, eur: 1.29, sek: 15.28 },
-                net: { usd: 1.42, eur: 1.29, sek: 15.28 },
+                net: { usd: 1.05, eur: 0.95, sek: 11.3 },
                 payments: 48,
               },
               lastPaymentAt: '2026-08-31T09:40:00.000Z',

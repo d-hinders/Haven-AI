@@ -416,9 +416,12 @@ describe('AgentDetailClient last-activity metadata', () => {
 
     expect(screen.queryByText('All-time transactions')).not.toBeInTheDocument()
     expect(screen.queryByText('Confirmed agent payments')).not.toBeInTheDocument()
-    // The tab's summary: "Out" and the server's total — the count, not a
-    // money claim the read does not serve.
-    expect(screen.getByTestId('activity-total')).toHaveTextContent('37')
+    // #4274 (owner decision (a)): the toolbar's count stands alone — the old
+    // "Out <total>" summary repeated it and, beside the account tab's money
+    // In/Out, read as an amount. Assert the count itself, and that no
+    // visible "Out" figure rides beside it.
+    expect(screen.getByTestId('list-toolbar-count')).toHaveTextContent('37')
+    expect(screen.queryByText('Out')).not.toBeInTheDocument()
   })
 
   it('links under the list to the agent-filtered transactions view (#4226)', () => {
@@ -2159,8 +2162,10 @@ describe('AgentDetailClient tabs and the Activity tab (#4226)', () => {
       expect(screen.getByRole('menuitemradio', { name: 'Failed' })).toBeInTheDocument()
       expect(screen.getByText('Token:')).toBeInTheDocument()
       expect(screen.getByText('Period:')).toBeInTheDocument()
-      // The summary line: "Out" and the server's total.
-      expect(screen.getByTestId('activity-total')).toHaveTextContent('0')
+      // The summary line's count is the toolbar's own (#4274): no "Out"
+      // figure beside it — the count stands alone.
+      expect(screen.getByTestId('list-toolbar-count')).toHaveTextContent('0')
+      expect(screen.queryByText('Out')).not.toBeInTheDocument()
     } finally {
       mockRegistryTokens.splice(1)
     }

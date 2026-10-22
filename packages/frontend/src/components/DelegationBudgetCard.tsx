@@ -1249,12 +1249,18 @@ function BudgetRow({
 
 /**
  * The hero's right half (#4226): the agent's Last 30 days from the dashboard
- * overview's per-agent stats — the spent figure in the user's display
- * currency (the same `Amount` currency mode the account summary card and the
- * dashboard's own figures read), the payment count, and the "Last paid …"
+ * overview's per-agent stats — #3803's NET figure in the user's display
+ * currency (the same booked-or-repriced, sweep-netted number the dashboard's
+ * money card and per-agent rows read, so the two surfaces cannot disagree —
+ * #4274), the payment count, and the "Last paid …"
  * line with #4209's merchant label (name → x402 host → nothing, never an
  * address). All-time latest payment: `lastPaymentAt` is not windowed on the
  * wire, matching the card footer's read.
+ *
+ * Unpriced follows the dashboard's per-agent rows, not its headline: a
+ * bucket the server could not price with net 0 renders "—" (`Amount
+ * amount={null}`, #4274), but the hero carries no unpriced note — that note
+ * is account-level, and the dashboard's per-agent rows have none either.
  *
  * #4260: three labelled figures across the column at the secondary-figure
  * size (20px, `Amount size="md"`), the dashboard money card's three-figure
@@ -1271,10 +1277,18 @@ function LastThirtyDays({
   currency: AmountCurrency
 }) {
   const d30 = stats.d30
-  const gross = currency === 'EUR' ? d30.gross.eur : currency === 'SEK' ? d30.gross.sek : d30.gross.usd
+  // #4274: the NET window, the same figure the dashboard's money card
+  // (`MoneyPanel.tsx` per-agent rows) and agents section read — never the
+  // gross window, which the two surfaces would then disagree on.
+  const net = currency === 'EUR' ? d30.net.eur : currency === 'SEK' ? d30.net.sek : d30.net.usd
   // #4165: the per-currency "≈" DECISION, from the one rule — fall back to
   // the window's overall flag when an older backend omits the split.
   const approx = d30.approxByCurrency?.[currency.toLowerCase() as 'usd' | 'eur' | 'sek'] ?? d30.approx
+  // #4274: a bucket the server could not price and nothing booked nets to —
+  // the figure is unknown, "—" — never a fabricated $0.00. The unpriced NOTE
+  // stays account-level (dashboard headline only); the per-agent rows carry
+  // none, and neither does the hero.
+  const unpriced = d30.unpricedByCurrency?.[currency.toLowerCase() as 'usd' | 'eur' | 'sek'] ?? false
   const merchant = agentMerchantLabel(stats.lastCounterparty)
   return (
     <div>
@@ -1296,7 +1310,7 @@ function LastThirtyDays({
             <div className="min-w-0">
               <dt className="text-xs text-[var(--v2-ink-3)]">Spent</dt>
               <dd className="mt-0.5 break-words text-[var(--v2-ink)]">
-                <Amount amount={gross} currency={currency} approx={approx} size="md" />
+                <Amount amount={unpriced && net === 0 ? null : net} currency={currency} approx={approx} size="md" />
               </dd>
             </div>
             <div className="min-w-0">

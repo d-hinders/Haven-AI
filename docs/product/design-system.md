@@ -606,6 +606,7 @@ Authenticated app pages use compact product typography utilities from `@haven_ai
 | `.v2-text-display` | 40 / 48px | 600 | -0.02em | Rare app hero display, not ordinary dashboards |
 | `.v2-text-h1` | 28 / 34px | 600 | -0.015em | PageHeader title |
 | `.v2-text-h2` | 20 / 28px | 600 | -0.01em | Major section titles |
+| `Amount size="md"` (`text-xl`) | 20 / 28px | 600 | 0 | Secondary figure, 20px — a figure beside a headline: the Last 30 days figures on the account summary card and the agent Spending hero (#4260); pair it with `DirectionMark density="figure"` (#4259). Set on `Amount`'s own span: a wrapper's `text-*` never resizes the figure |
 | `.v2-text-h3` | 16 / 24px | 600 | 0 | Card and panel titles |
 | `.v2-text-body` | 14 / 22px | 400 | 0 | Main app body copy |
 | `.v2-text-meta` | 12 / 18px | 400 | 0 | Labels, captions, metadata |
@@ -758,6 +759,17 @@ which this rule does not touch).
 - The `PageHeader`'s own `meta` line (above) carries the entity's quiet
   identity row — account, network, created, last activity — so the section
   headings below stay about their sections.
+- **Manage pattern: row actions in ⋯** (#3695; rewritten by #4259 under the
+  [owner decisions of 2026-10-22 on #4258](https://github.com/d-hinders/Haven-AI/issues/4258)).
+  A section that manages a list — the agent page's Spending section, to be
+  adopted there by #4261 — puts each
+  row's actions AND the section's add in that row's ⋯ `DropdownMenu`: Edit
+  budget, Add budget, a separator, then Stop budget… in the danger tone. No
+  visible Edit, Stop or Add button competes with the rows; the row's identity
+  rides on the trigger's `aria-label` ("Budget options 250 USDC per week").
+  Choosing Add opens the form in place. A section with **no rows** has no menu
+  to carry the add, so it keeps a visible add (Set budget, a ghost button). The
+  `/design-system` specimen shows both states.
 
 ### BudgetMeter (#3692)
 
@@ -840,10 +852,14 @@ the component), and optionally `approx`. It formats through
 `Intl.NumberFormat` — so `9,09 kr`, `$0.96` and `0,88 €` are byte-for-byte
 the formatter's output, NBSPs included.
 
-**Under a cent (#3897, owner decision 2026-10-12):** a non-zero figure with
-`|value| < 0.005`, which would round to `0.00`, renders `<$0.01` (`<0,01 kr`,
-`<0,01 €`); the sign still comes from the caller (`-<$0.01` in activity,
-`≈<0,01 kr of 10,00 kr` in a SEK budget caption). Zero stays `$0.00`. The rule lives
+**Under a cent (owner decision 2026-10-22, superseding #3897's "<$0.01"):** a
+non-zero figure with `|value| < 0.005` (`isSubCent`) renders with EXACTLY 4
+decimals in the currency's own format — `$0.0010`, `$0.0049`, `0,0010 kr`,
+`0,0010 €` — and one that would still show `0.0000` (`|value| < 0.00005`)
+renders `<$0.0001` (`<0,0001 kr`, `<0,0001 €`). The sign still comes from the
+caller (`-$0.0040` in activity, `≈0,0040 kr of 10,00 kr` in a SEK budget
+caption). Zero stays `$0.00`; everything from `0.005` up rounds at 2 decimals
+as before. The rule lives
 in `formatFiatDisplay`, not `formatFiat`, which also drives the balance
 count-up, the "since yesterday" line and /accounts and keeps plain rounding.
 `Amount`'s currency mode, the budget caption's fiat mode and the dashboard
@@ -998,6 +1014,15 @@ truncation, and the tiles stack. Tiles carrying only short counts — the
 dashboard money card's payments / merchants / stopped by budget (#3897) —
 stay three across at every width. The figure still carries no colour in any state — the card
 tile's contract, at a smaller scale.
+
+**Hand-built where a figure is money (#4260).** The agent Spending hero's Last
+30 days (`DelegationBudgetCard.tsx`, `LastThirtyDays`) is this three-across
+composition — Spent, Payments and Last paid, a small label above each — built
+by hand rather than from `StatTile`, deliberately: `StatTile.value` is a
+`string` and cannot carry an `Amount` (its "≈" and currency mode), and
+`StatTile` lives in `packages/ui`, shared with ops. Its values sit at the
+secondary-figure size (20px, `Amount size="md"`), not the inline tile's
+`text-base`; a long value wraps inside its cell, never truncates.
 
 ### Money panel (#3807)
 
@@ -1662,14 +1687,16 @@ into one "×N" row; a full ledger needs one row per transaction, and gets it:
 
 ### Direction marks — `DirectionMark` ([#4197](https://github.com/d-hinders/Haven-AI/issues/4197))
 
-One shared `<DirectionMark>` for every in/out/pending direction in the app: incoming uses
-success green, outgoing uses debit sky, pending uses neutral grey. Three densities:
+One shared `<DirectionMark>` for every in/out/pending/move direction in the app: incoming uses
+success green, outgoing uses debit sky, pending uses neutral grey. Four densities:
 
 - `comfortable` (default): 36px mark, 16px icon — the dedicated `/transactions` table.
 - `compact`: 32px mark, 14px icon — dashboard rows, on the same rhythm as agent rows.
-- `inline`: 18px mark, 11px icon — small enough to sit BESIDE a figure in dense
-  content; the account summary card's Last 30 days row (an in-arrow and the Money-in
-  figure, then an out-arrow and the Money-out figure) is the first use.
+- `figure`: 24px mark, 14px icon, 7px radius — beside a 20px secondary figure
+  (`Amount size="md"`), such as the account summary card's Last 30 days In/Out
+  pair (#4260). Added by #4259.
+- `inline`: 18px mark, 11px icon — the size for a mark in dense inline text, where a
+  line of body copy sets the height.
 
 The mark is always `aria-hidden`. The accessible name is the CALLER's job: sr-only text
 before the figure ("Money in" / "Money out" on the account page), so a screen reader
@@ -1677,6 +1704,35 @@ hears "Money in ≈ $19.99" when the mark applies. A tooltip belongs on the mark
 `ui/Tooltip` — never around the figure: `Amount` already draws the "≈" with its own
 `title`, and two tooltips would stack. Don't hand-draw the icon or inline a copy of the
 markup; pick a density, and add a new direction state to the component itself.
+
+`move` (#4264, owner decision 2026-10-22, mockup version 2): a two-way lucide
+`ArrowLeftRight` on the same neutral grey ground as pending — a transfer between your
+own accounts is neither income nor spend. A `move` row passes no sign to `Amount`,
+exactly like pending.
+
+### Technical details disclosure (#4264)
+
+Technical terms are allowed on technical disclosure surfaces (§ Vocabulary, voice,
+accessibility), and a **"Technical details" disclosure is a markup pattern, not a
+component** — a native `<details>`/`<summary>`, closed by default:
+
+- `<details className="group">` — the `group` class is what lets the chevron key off
+  the open state;
+- `<summary>` is a full-width row: `flex cursor-pointer select-none list-none
+  items-center justify-between [&::-webkit-details-marker]:hidden`, with the label
+  ("Technical details") leading and the marker trailing. The label carries the
+  affordance — never a bare "Show"/"Hide" toggle whose state is only implied;
+- the marker is a lucide `ChevronDown` with `transition-transform
+  group-open:rotate-180` — the same group-open rotation rule as § Arrows. Never a raw
+  glyph, and never no marker at all;
+- the content uses the panel's detail rows — the label/value `dl` rows the rest of the
+  panel already renders (`dt` ink-3 label, `dd` ink-2 value), so the opened block reads
+  as part of the panel, not a bolted-on sub-card.
+
+The hand-rolled `<details>` uses that predate the pattern (`ErrorBoundary`,
+`settings/SignersSection.tsx`, `marketplace/OffersTable.tsx`, `connect-agent/*`, and
+the account signers card's text-only "Show address" toggle, which has no marker and
+does not match) are NOT migrated here. A new technical disclosure is written this way.
 
 ### Cards (`Card`)
 

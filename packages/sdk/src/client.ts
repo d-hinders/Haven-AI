@@ -976,7 +976,8 @@ export class HavenClient {
        * periodic 402 probe, or a self-submitted row that also passed
        * domain-ownership proof. It is not a provenance filter; `'operator'`
        * still filters on provenance (`source === 'operator'`) regardless of
-       * badge state, and `'any'` (the default) returns the merged listing.
+       * badge state — so it excludes self-submitted and Bazaar-discovered
+       * rows (#4245) — and `'any'` (the default) returns the merged listing.
        */
       verified?: 'any' | 'verified' | 'operator'
     } = {},
@@ -1038,10 +1039,10 @@ export class HavenClient {
   }
 
   /**
-   * Fetch one curated catalog entry by id (#1306).
+   * Fetch one catalog entry by id (#1306).
    *
    * Chain-scoped for free by the backend's SQL when the client is
-   * agent-authenticated (#1299): an unknown id and an id curated for a
+   * agent-authenticated (#1299): an unknown id and an id listed for a
    * DIFFERENT chain than this agent's both 404 identically — this method does
    * not (and must not) re-filter by chain in JS. Read-only, like
    * {@link discoverTools}.

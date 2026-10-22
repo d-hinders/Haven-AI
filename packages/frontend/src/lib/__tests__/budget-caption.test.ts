@@ -218,18 +218,32 @@ describe('states', () => {
     expect(caption.caption.match(/≈/g)).toHaveLength(1)
   })
 
-  it('a used amount under a cent reads "<$0.01", never "$0.00" (#3897)', () => {
+  it('a used amount under a cent reads 4 decimals, "<$0.0001" below 0.00005, never "$0.00" (2026-10-22, superseding #3897)', () => {
     // 3 atomic units of USDC (0.000003) at $1 — the "≈$0.00 of $0.00" class
     // reported on dev, which the display helper now renders honestly. USDC in
-    // USD carries no ≈ since #4165.
-    const caption = budgetCaption(row({ usedAtomic: '3', budgetAtomic: '4000' }), {
+    // USD carries no ≈ since #4165. 0.000003 is below the 0.00005 floor, so
+    // the figure is "<$0.0001" (was "<$0.01" under #3897); the budget itself
+    // (30 atomic = 0.00003) stays under the floor too, so both figures are "<".
+    const caption = budgetCaption(row({ usedAtomic: '3', budgetAtomic: '30' }), {
       nowMs: ANCHOR_NOW,
       timeZone: 'UTC',
       rate: { currency: 'USD', perToken: 1 },
     })
     expect(caption.kind).toBe('meter')
     if (caption.kind !== 'meter') return
-    expect(caption.caption).toBe('<$0.01 of <$0.01 used this period · refills in 3h')
+    expect(caption.caption).toBe('<$0.0001 of <$0.0001 used this period · refills in 3h')
+  })
+
+  it('a used amount at or above 0.00005 reads exactly 4 decimals in the caption', () => {
+    // 4900 atomic units of USDC (0.0049) at $1: 4 decimals, the currency's own format.
+    const caption = budgetCaption(row({ usedAtomic: '4900', budgetAtomic: '4000000' }), {
+      nowMs: ANCHOR_NOW,
+      timeZone: 'UTC',
+      rate: { currency: 'USD', perToken: 1 },
+    })
+    expect(caption.kind).toBe('meter')
+    if (caption.kind !== 'meter') return
+    expect(caption.caption).toBe('$0.0049 of $4.00 used this period · refills in 3h')
   })
 })
 

@@ -120,6 +120,16 @@ jobs:
       - name: Design-lint guard self-test
         run: node --test packages/frontend/scripts/design-lint.test.mjs
 
+      # #4271: the test:local watchdog wrapper's self-test. Like design-lint's
+      # (#2728) it lives under packages/frontend/scripts, outside that package's
+      # vitest glob, so without this step it would run NOWHERE. Dependency-free
+      # (node builtins only — no `npm ci`, no vitest import; the case drives a
+      # stub, not vitest), so it belongs here with its siblings and inside this
+      # job's 5-minute budget. The wrapper itself is the local way to run the
+      # frontend suite scoped to a diff (ship-next § Acceptance Gate).
+      - name: test-local watchdog self-test
+        run: node --test packages/frontend/scripts/test-local.test.mjs
+
       # #1526: internal @haven_ai/* ranges must match how the consuming package
       # RESOLVES them — published packages pin a concrete version, private
       # workspace consumers use "*". Belongs on EVERY PR for the same reason as

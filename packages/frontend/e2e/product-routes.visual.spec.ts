@@ -59,7 +59,10 @@
  * nothing else measured, desktop adds a second re-bless tax on the repo's
  * hottest screen without a defect pointing at it, and the overflow class a
  * desktop baseline would catch is guarded by boolean measurement in
- * `agent-detail.mobile.spec.ts` (#1858's standing argument).
+ * `agent-detail.mobile.spec.ts` (#1858's standing argument). #4260 adds the
+ * desktop axis for `agent-detail-research` only: the Spending hero's two
+ * halves sit side by side only at `lg`, a composition the mobile stack never
+ * shows. `agents-list` and `agents-list-filtered` stay mobile-only.
  *
  * **`/accounts` was rejected on fixture fidelity (#2225) — superseded 2026-09-10
  * by #2817, which adds this route MOBILE-only.** The rejection was written
@@ -190,7 +193,8 @@ const VIEWPORTS = SHARED_VIEWPORTS as ReadonlyArray<{
  *
  * #2733 inverts that choice for the two routes it adds: the mobile
  * composition is the thing that issue tunes and the thing nothing else
- * measured, so those two ship MOBILE-only (see the header note above).
+ * measured, so those two ship MOBILE-only (see the header note above;
+ * #4260 later added desktop for the detail route).
  *
  * #2817 (2026-09-10) extends it once more: `/dashboard`, `/transactions` and
  * `/accounts` also carry MOBILE now — the bottom tab bar (#2805) makes the
@@ -328,8 +332,9 @@ type ProductRoute = {
    * mobile baseline to a route that already ships desktop — flipping it would
    * silently DROP the desktop PNG. The loop below emits one test per listed
    * axis and the snapshot stays `${slug}-${axis}.png`, so no existing PNG
-   * moves. `/dashboard` and `/transactions` carry both axes; `/accounts`
-   * ships mobile-only (see the header for both decisions).
+   * moves. `/dashboard`, `/transactions` and `/agents/agent-research`
+   * (#4260) carry both axes; `/accounts` ships mobile-only (see the header
+   * for these decisions).
    */
   viewports?: ReadonlyArray<'desktop' | 'mobile'>
   /** The route's own H1 — present only once the client component has data. */
@@ -432,9 +437,10 @@ const ROUTES: ProductRoute[] = [
    *
    * `/agents/agent-research` renders its pins inside the fixture-seeded
    * content: `Created` is `timeAgo` off the agent's fixed `created_at`
-   * (4mo at `FROZEN_NOW`, from the 2026-05-02 fixture timestamp) and
-   * `Last activity` is the passport/activity rows' own static content —
-   * `4mo ago` is the frozen-clock literal this route's determinism hangs on.
+   * (4mo at `FROZEN_NOW`, from the 2026-05-02 fixture timestamp) — `4mo ago`
+   * is the frozen-clock literal this route's determinism hangs on. The header's
+   * `Last activity` reads the agent's `mcp_last_seen_at` (1h at `FROZEN_NOW`,
+   * #4283), and the hero's Last paid and the Activity row both read 1d.
    */
   {
     path: '/agents',
@@ -458,7 +464,9 @@ const ROUTES: ProductRoute[] = [
     path: '/agents/agent-research',
     slug: 'agent-detail-research',
     minChars: 700,
-    viewports: ['mobile'],
+    // #4260: desktop too — the Spending hero's two halves sit side by side
+    // only at `lg`, the composition the mobile stack never shows.
+    viewports: ['mobile', 'desktop'],
     anchor: (page: Page) => page.getByRole('heading', { name: 'Research agent', exact: true }),
     frozenRelativeTime: '4mo ago',
     /** Serves the four detail-page reads the shared fixture falls through on. */
@@ -548,6 +556,83 @@ async function expectNoSkeletons(region: Locator, label: string) {
     `${label}: still rendering skeleton placeholders — the capture would bake in ` +
       `a mid-load frame and then match it forever`,
   ).toHaveCount(0)
+}
+
+/**
+ * #4283: park the phone tab bar at the END of the page for a mobile full-page
+ * capture, and prove it covers no content.
+ *
+ * The bar is `position: fixed`, and `unclipScrollShell` only un-clips
+ * `#main-content` and its ancestors, so in a `fullPage` PNG the bar paints at
+ * the FIRST viewport's bottom edge — over whatever content sits there (the
+ * agent hero's figures, a dashboard "Needs attention" row). `<main>` already
+ * reserves a bottom band for the bar (`AuthenticatedShell`'s
+ * `max-lg:pb-[calc(1.5rem+var(--v2-tab-bar-h)+var(--v2-tab-bar-bottom))]`),
+ * so the bar is moved into that band at the document's end: still
+ * photographed, covering nothing — and only when it covers something, so a
+ * page that already ends above it keeps its fixed bar byte-for-byte. `position: absolute; bottom: …` would NOT
+ * do it — it resolves against the viewport-sized initial containing block and
+ * lands back at the first viewport's bottom — so the bar gets a pixel `top`,
+ * corrected once against where it actually painted.
+ *
+ * The live bar is found by its computed `position: fixed`, which excludes the
+ * presentational copy `/design-system` renders with the same attribute. Unlike
+ * `assertClearOfTabBar` (design-system.visual.spec.ts) there is no "no bar →
+ * pass" fallback: below `lg` exactly one live bar must exist.
+ */
+async function parkTabBarAtPageEnd(page: Page, label: string): Promise<void> {
+  const result = await page.evaluate(() => {
+    const live = Array.from(document.querySelectorAll<HTMLElement>('[data-mobile-tab-bar]')).filter((el) => {
+      const cs = getComputedStyle(el)
+      return cs.position === 'fixed' && cs.display !== 'none' && !el.closest('[inert]')
+    })
+    const main = document.getElementById('main-content')
+    let contentBottom = 0
+    for (const child of Array.from(main?.children ?? [])) {
+      const r = child.getBoundingClientRect()
+      if (r.height > 0) contentBottom = Math.max(contentBottom, r.bottom + window.scrollY)
+    }
+    if (live.length !== 1) return { live: live.length, parked: false, barTop: 0, barBottom: 0, docHeight: 0, visibility: '', contentBottom }
+    const bar = live[0]
+    const rect = bar.getBoundingClientRect()
+    // Park only when the bar actually sits over content: a page that ends
+    // above it (every one-viewport capture) keeps the fixed bar untouched, so
+    // its baseline does not move on a compositing difference (fixed vs
+    // absolute rasterises the bar's shadow differently).
+    const parked = rect.top + window.scrollY < contentBottom
+    if (parked) {
+      const bottomGap = window.innerHeight - rect.bottom
+      const target = document.documentElement.scrollHeight - rect.height - bottomGap
+      bar.style.setProperty('position', 'absolute', 'important')
+      bar.style.setProperty('bottom', 'auto', 'important')
+      bar.style.setProperty('top', `${target}px`, 'important')
+      // A positioned ancestor offsets `top`; measure where it painted and correct once.
+      const painted = bar.getBoundingClientRect().top + window.scrollY
+      bar.style.setProperty('top', `${target + (target - painted)}px`, 'important')
+    }
+    const after = bar.getBoundingClientRect()
+    return {
+      live: 1,
+      parked,
+      barTop: after.top + window.scrollY,
+      barBottom: after.bottom + window.scrollY,
+      docHeight: document.documentElement.scrollHeight,
+      visibility: getComputedStyle(bar).visibility,
+      contentBottom,
+    }
+  })
+  expect(result.live, `${label}: exactly one live (fixed) phone tab bar renders below lg`).toBe(1)
+  expect(
+    result.barTop,
+    `${label}: the tab bar's top (${result.barTop}px) sits above the end of the page content ` +
+      `(${result.contentBottom}px) — the full-page capture would paint the bar over content (#4283)`,
+  ).toBeGreaterThanOrEqual(result.contentBottom - 0.5)
+  // Still photographed: visible, and inside the captured document.
+  expect(result.visibility, `${label}: the tab bar is hidden`).toBe('visible')
+  expect(
+    result.barBottom,
+    `${label}: the tab bar ends at ${result.barBottom}px, outside the ${result.docHeight}px document`,
+  ).toBeLessThanOrEqual(result.docHeight + 0.5)
 }
 
 test.describe('product-route visual regression', () => {
@@ -644,6 +729,7 @@ test.describe('product-route visual regression', () => {
         // letting it stand as a baseline — a pixel gate whose baseline is empty
         // compares white to white forever.
         await unclipScrollShell(page)
+        if (axis === 'mobile') await parkTabBarAtPageEnd(page, `${route.path} · ${axis}`)
         const devicePixelRatio = await page.evaluate(() => window.devicePixelRatio)
         await assertCaptureNotBlank(await page.screenshot({ fullPage: true }), {
           label: `${route.path} · ${axis}`,

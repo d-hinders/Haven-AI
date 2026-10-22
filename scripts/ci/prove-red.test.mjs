@@ -203,6 +203,43 @@ describe('classifier over recorded runner output', () => {
     )
     assert.equal(classify({ baseline: greenOf(r), mutant: r, expectRed: ['suite one > fails expect'] }).class, 'caught')
   })
+  test('vitest (#4284): the frontend idiom — jest-dom, getBy*, findBy* — is assertion; a code throw is not', () => {
+    // Recorded verbatim from vitest 3.2.4 + jsdom (ANSI kept): the jest-dom
+    // message has colour codes between `Error: ` and `expect(`, so this case
+    // also proves the vitest path strips ANSI before classifying.
+    const r = normalizeVitestJson(readJson('vitest-frontend-idiom.json'), 1)
+    assert.deepEqual(
+      r.tests.map((x) => [x.name, x.kind]),
+      [
+        ['frontend idiom > jest-dom matcher fails', 'assertion'],
+        ['frontend idiom > getBy finds nothing', 'assertion'],
+        ['frontend idiom > findBy times out', 'assertion'],
+        ['frontend idiom > findByRole times out', 'assertion'],
+        ['frontend idiom > findByRole with a name times out', 'assertion'],
+        ['frontend idiom > findByLabelText times out', 'assertion'],
+        ['frontend idiom > findBy finds several', 'assertion'],
+        ['frontend idiom > waitFor getBy finds several', 'assertion'],
+        ['frontend idiom > findByLabelText label without control', 'assertion'],
+        ['frontend idiom > async waitFor getByRole after an await', 'assertion'],
+        // Code throws: each mentions a stem somewhere but not at the start,
+        // or is close to one without being it — pins the anchor, the
+        // grouping and each stem's exact text.
+        ['frontend idiom > plain Error', 'error'],
+        ['frontend idiom > code throw starting Found', 'error'],
+        ['frontend idiom > Error mentioning expect( later', 'error'],
+        ['frontend idiom > code throw wrapping an assertion stem', 'error'],
+        ['frontend idiom > code throw wrapping a TestingLibraryElementError', 'error'],
+        ['frontend idiom > code throw starting Unable to find', 'error'],
+        ['frontend idiom > code throw about a labelled widget', 'error'],
+        ['frontend idiom > code throw starting expectation', 'error'],
+        ['frontend idiom > TypeError', 'error'],
+      ],
+    )
+    assert.equal(
+      classify({ baseline: greenOf(r), mutant: r, expectRed: ['frontend idiom > jest-dom matcher fails'] }).class,
+      'caught',
+    )
+  })
   test('incident 5: the SQL-error shape in vitest is mutation-red', () => {
     const mutant = normalizeVitestJson(readJson('vitest-sql-error.json'), 1)
     assert.deepEqual(mutant.tests.map((x) => [x.name, x.kind]), [['owner join holds', 'error'], ['other', null]])
@@ -457,6 +494,12 @@ function makeRepo(extraFiles = {}, { worktree = true, modes = {}, symlinks = {} 
   if (worktree) {
     wt = path.join(dir, 'wt')
     g(main, 'worktree', 'add', '-q', wt, '-b', 'wt')
+    // `git worktree add` honours the caller's umask when it checks the files
+    // out: under umask 0002 a 100755 blob lands as 0775 (#4272). Re-apply the
+    // requested modes in the worktree so a fixture's mode is exactly what the
+    // test asked for, whatever the shell's umask. Git tracks only the execute
+    // bit, which this does not change, so the tree stays clean.
+    for (const [f, m] of Object.entries(modes)) chmodSync(path.join(wt, f), m)
   }
   const scratch = path.join(dir, 'scratch')
   mkdirSync(scratch)

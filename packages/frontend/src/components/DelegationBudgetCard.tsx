@@ -846,9 +846,14 @@ export default function DelegationBudgetCard({
             ) : (
               <div role="status" aria-busy="true" aria-label="Loading the last 30 days">
                 <Skeleton className="h-4 w-24" />
-                <div className="mt-3 space-y-2">
-                  <Skeleton className="h-9 w-36" />
-                  <Skeleton className="h-4 w-28" />
+                {/* #4260: three label-and-value pairs, the shape of the figures. */}
+                <div className="mt-2.5 grid grid-cols-3 gap-3">
+                  {[0, 1, 2].map((i) => (
+                    <div key={i} className="space-y-1.5">
+                      <Skeleton className="h-3 w-12" />
+                      <Skeleton className="h-6 w-16" />
+                    </div>
+                  ))}
                 </div>
               </div>
             )}
@@ -1172,12 +1177,25 @@ function BudgetRow({
 
 /**
  * The hero's right half (#4226): the agent's Last 30 days from the dashboard
- * overview's per-agent stats — the spent figure in the user's display
- * currency (the same `Amount` currency mode the account summary card and the
- * dashboard's own figures read), the payment count, and the "Last paid …"
+ * overview's per-agent stats — #3803's NET figure in the user's display
+ * currency (the same booked-or-repriced, sweep-netted number the dashboard's
+ * money card and per-agent rows read, so the two surfaces cannot disagree —
+ * #4274), the payment count, and the "Last paid …"
  * line with #4209's merchant label (name → x402 host → nothing, never an
  * address). All-time latest payment: `lastPaymentAt` is not windowed on the
  * wire, matching the card footer's read.
+ *
+ * Unpriced follows the dashboard's per-agent rows, not its headline: a
+ * bucket the server could not price with net 0 renders "—" (`Amount
+ * amount={null}`, #4274), but the hero carries no unpriced note — that note
+ * is account-level, and the dashboard's per-agent rows have none either.
+ *
+ * #4260: three labelled figures across the column at the secondary-figure
+ * size (20px, `Amount size="md"`), the dashboard money card's three-figure
+ * row built by hand — `StatTile.value` is a `string` and cannot carry an
+ * `Amount` (its "≈" and currency mode), and `StatTile` lives in
+ * `packages/ui`, shared with ops. The merchant sits on its own line below,
+ * with no divider. A long figure wraps inside its cell; nothing truncates.
  */
 function LastThirtyDays({
   stats,
@@ -1187,32 +1205,60 @@ function LastThirtyDays({
   currency: AmountCurrency
 }) {
   const d30 = stats.d30
-  const gross = currency === 'EUR' ? d30.gross.eur : currency === 'SEK' ? d30.gross.sek : d30.gross.usd
+  // #4274: the NET window, the same figure the dashboard's money card
+  // (`MoneyPanel.tsx` per-agent rows) and agents section read — never the
+  // gross window, which the two surfaces would then disagree on.
+  const net = currency === 'EUR' ? d30.net.eur : currency === 'SEK' ? d30.net.sek : d30.net.usd
   // #4165: the per-currency "≈" DECISION, from the one rule — fall back to
   // the window's overall flag when an older backend omits the split.
   const approx = d30.approxByCurrency?.[currency.toLowerCase() as 'usd' | 'eur' | 'sek'] ?? d30.approx
+  // #4274: a bucket the server could not price and nothing booked nets to —
+  // the figure is unknown, "—" — never a fabricated $0.00. The unpriced NOTE
+  // stays account-level (dashboard headline only); the per-agent rows carry
+  // none, and neither does the hero.
+  const unpriced = d30.unpricedByCurrency?.[currency.toLowerCase() as 'usd' | 'eur' | 'sek'] ?? false
   const merchant = agentMerchantLabel(stats.lastCounterparty)
   return (
     <div>
       <p className="text-sm font-medium text-[var(--v2-ink-2)]">Last 30 days</p>
       {d30.payments === 0 ? (
-        <p className="mt-2 text-sm text-[var(--v2-ink-3)]">No payments in the last 30 days.</p>
+        <>
+          <p className="mt-2 text-sm text-[var(--v2-ink-3)]">No payments in the last 30 days.</p>
+          {/* An older payment still says when, and to whom. */}
+          {stats.lastPaymentAt ? (
+            <p className="mt-1 text-sm text-[var(--v2-ink-3)]">
+              Last paid {timeAgo(stats.lastPaymentAt)}
+              {merchant ? ` to ${merchant}` : ''}
+            </p>
+          ) : null}
+        </>
       ) : (
         <>
-          <p className="mt-2 text-3xl font-semibold tracking-tight text-[var(--v2-ink)] v2-tabular">
-            <Amount amount={gross} currency={currency} approx={approx} />
-          </p>
-          <p className="mt-1 text-sm text-[var(--v2-ink-3)] v2-tabular">
-            {d30.payments} {d30.payments === 1 ? 'payment' : 'payments'}
-          </p>
+          <dl className="mt-2.5 grid grid-cols-3 gap-3">
+            <div className="min-w-0">
+              <dt className="text-xs text-[var(--v2-ink-3)]">Spent</dt>
+              <dd className="mt-0.5 break-words text-[var(--v2-ink)]">
+                <Amount amount={unpriced && net === 0 ? null : net} currency={currency} approx={approx} size="md" />
+              </dd>
+            </div>
+            <div className="min-w-0">
+              <dt className="text-xs text-[var(--v2-ink-3)]">Payments</dt>
+              <dd className="mt-0.5 break-words text-xl font-semibold text-[var(--v2-ink)] v2-tabular">
+                {d30.payments}
+              </dd>
+            </div>
+            <div className="min-w-0">
+              <dt className="text-xs text-[var(--v2-ink-3)]">Last paid</dt>
+              <dd className="mt-0.5 break-words text-xl font-semibold text-[var(--v2-ink)]">
+                {stats.lastPaymentAt ? timeAgo(stats.lastPaymentAt) : '—'}
+              </dd>
+            </div>
+          </dl>
+          {merchant ? (
+            <p className="mt-2.5 break-words text-xs text-[var(--v2-ink-3)]">Last paid to {merchant}</p>
+          ) : null}
         </>
       )}
-      {stats.lastPaymentAt ? (
-        <p className="mt-1 text-sm text-[var(--v2-ink-3)]">
-          Last paid {timeAgo(stats.lastPaymentAt)}
-          {merchant ? ` · ${merchant}` : ''}
-        </p>
-      ) : null}
     </div>
   )
 }

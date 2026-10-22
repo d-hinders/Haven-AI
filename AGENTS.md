@@ -115,7 +115,10 @@ npm run preflight -- --static  # only the static ratchets your diff selects, the
 Static ratchets run first. `--static` runs only the static ratchets your diff
 selects (`--static --all` runs all of them), then stops. A timeout-shaped red is
 re-run alone at the end, at any load; the load read before each run is printed as
-evidence only (#4191). A red that is not timeout-shaped is never re-run. When the
+evidence only (#4191). A red that is not timeout-shaped is never re-run. A gate
+that goes SILENT — no output for `PREFLIGHT_SILENCE_MS` — is killed with its whole
+process group and reported as a STALL: a plain red (exit 1) that is never re-run,
+because a gate that hung once hangs again (#4276). When the
 re-run reds are the only reds and each is green alone, preflight exits 3: not
 green, and not a reason to re-run until green. Open the timed-out test and look for
 work in the timed body that is slow only under contention (#4126 and #4134 were real

@@ -621,7 +621,7 @@ tool schema accepts the real hosted quote shape.
 #### The guided catalog purchase leg (`x402-catalog-guided-purchase`, #1312)
 
 Epic #1305 shipped the GUIDED entry point — `haven_prepare_catalog_purchase` —
-so a coding agent starts from a curated `catalog_id` instead of hand-copying a
+so a coding agent starts from a `catalog_id` instead of hand-copying a
 `merchant_url`/`tool_name`/`tool_arguments` triple, and finishes without ever
 re-threading `payment_required`/`merchant_url`/`tool_name`/`arguments`/
 `mcp_transport` between tool calls. #1306–#1310 landed and unit-proved the five

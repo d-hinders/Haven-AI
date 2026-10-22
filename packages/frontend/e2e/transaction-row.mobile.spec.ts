@@ -36,8 +36,10 @@ import {
  * Widths swept inside the mobile project. A GEOMETRY sweep (rectangles, not
  * pixels), so resizing away from Pixel 5's 393 costs nothing. 320 is the
  * narrowest phone still in the support matrix and where every number is worst.
+ * 768 is the tablet width where long account names still overran the subline
+ * (#4266 design review: 39px clipped at 768).
  */
-const WIDTHS = [320, 390, 393] as const
+const WIDTHS = [320, 390, 393, 768] as const
 
 const ROW = '[data-testid="transactions-ledger"] [role="button"][aria-haspopup="dialog"]'
 
@@ -94,6 +96,10 @@ type Movement = {
   arrowAlone: boolean
   parts: number
   rowOverflow: number
+  /** The subline box's own overflow: it clips (`truncate`), so the row never shows it. */
+  sublineOverflow: number
+  /** How far the "to" half's box runs past the subline box's right edge. */
+  toOverrun: number
 }
 
 async function readMovements(page: Page): Promise<Movement[]> {
@@ -119,11 +125,19 @@ async function readMovements(page: Page): Promise<Movement[]> {
         return r.top < arrowRect.bottom && arrowRect.top < r.bottom
       })
       const row = arrow.closest(rowSelector) as HTMLElement
+      // The subline is the `truncate` div the movement sits in. It clips its
+      // own overflow, so the row's scroll width cannot see a destination cut
+      // mid-word (#4266 design review) — measure the box itself.
+      const subline = arrowRow.closest('div') as HTMLElement
+      const sublineRect = subline.getBoundingClientRect()
+      const toRect = to ? to.getBoundingClientRect() : sublineRect
       return {
         arrowWidth: +arrowRect.width.toFixed(1),
         arrowAlone,
         parts: parts.length,
         rowOverflow: row.scrollWidth - row.clientWidth,
+        sublineOverflow: subline.scrollWidth - subline.clientWidth,
+        toOverrun: +(toRect.right - sublineRect.right).toFixed(1),
       }
     })
   }, ROW)
@@ -155,6 +169,8 @@ test('/transactions: an own-transfer ledger row keeps its movement arrow beside 
       expect(movement.arrowWidth, `@${width}px: arrow squeezed to nothing`).toBeGreaterThan(4)
       expect(movement.arrowAlone, `@${width}px: arrow orphaned on its own line`).toBe(false)
       expect(movement.rowOverflow, `@${width}px: row scrolls horizontally`).toBeLessThanOrEqual(0)
+      expect(movement.sublineOverflow, `@${width}px: the subline clips its content`).toBeLessThanOrEqual(0)
+      expect(movement.toOverrun, `@${width}px: the destination runs past the subline`).toBeLessThanOrEqual(1)
     }
   }
 

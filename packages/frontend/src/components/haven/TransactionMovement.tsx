@@ -42,15 +42,18 @@ export function TransactionMovement({
 }) {
   if (bare) {
     return (
-      <span className="inline-flex flex-wrap items-center gap-x-1.5 gap-y-1">
-        <span className="flex min-w-0 items-end gap-x-1.5">
-          <span className="min-w-0">{from}</span>
+      // Each name may shrink to an ellipsis (#4266 design review): the
+      // ledger's compact subline is a one-line `truncate` box, and an
+      // inline box that cannot shrink is hard-clipped there, mid-word.
+      <span className="inline-flex min-w-0 max-w-full flex-wrap items-center gap-x-1.5 gap-y-1">
+        <span className="flex min-w-0 max-w-full items-end gap-x-1.5">
+          <span className="min-w-0 truncate">{from}</span>
           <span aria-hidden="true" className="shrink-0">
             →
           </span>
           <span className="sr-only">to</span>
         </span>
-        <span className="min-w-0">{to}</span>
+        <span className="min-w-0 max-w-full truncate">{to}</span>
       </span>
     )
   }

@@ -171,7 +171,9 @@ test.describe('Tooltip width and keyboard reach (#2038)', () => {
     })
 
     await page.setViewportSize({ width: NARROW_WIDTHS[0], height: 800 })
-    await page.goto(`/agents/${testAgent.id}`)
+    // #4226 moved the Identity-and-settings card behind the Settings tab, so
+    // the row only exists in the DOM there — the tab is part of the contract.
+    await page.goto(`/agents/${testAgent.id}?tab=settings`)
     const trigger = page.getByTestId('mcp-server-name-row').getByText(MAX_LENGTH_SERVER_NAME)
     await expect(trigger).toBeVisible()
 

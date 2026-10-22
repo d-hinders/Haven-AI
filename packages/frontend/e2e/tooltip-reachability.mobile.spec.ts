@@ -105,7 +105,9 @@ test.describe('Tooltip on touch (#2038)', () => {
       })
     })
 
-    await page.goto(`/agents/${testAgent.id}`)
+    // #4226 moved the Identity-and-settings card behind the Settings tab, so
+    // the row only exists in the DOM there — the tab is part of the contract.
+    await page.goto(`/agents/${testAgent.id}?tab=settings`)
     await dismissMobileSidebar(page)
 
     const row = page.getByTestId('mcp-server-name-row')

@@ -79,12 +79,11 @@ test.describe('retired agent budget card visual regression (#3549)', () => {
 
       const card = page.locator('#delegation-budget-card')
       await expect(card).toHaveCount(1)
-      // The active budget is still listed, and Stop still ends it.
+      // The active budget is still listed, and Stop still ends it — from the
+      // per-budget ⋯ menu now (#4226): the trigger is the menu button, and
+      // the item inside it is what opens the confirm.
       await expect(card.getByText(/250 USDC per week/)).toBeVisible()
-      // The row button's accessible name is its aria-label ("Stop budget 250
-      // USDC per week"), so an exact-text match can never resolve; anchor on
-      // the label prefix instead (CI #3721: toHaveCount received 0).
-      await expect(card.getByRole('button', { name: /^Stop budget/ })).toHaveCount(1)
+      await expect(card.getByRole('button', { name: /^Budget options/ })).toHaveCount(1)
       // Nothing that grants authority.
       await expect(card.getByText(state.reason)).toBeVisible()
       await expect(card.getByRole('button', { name: 'Set budget' })).toHaveCount(0)

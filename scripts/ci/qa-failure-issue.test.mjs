@@ -14,10 +14,33 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { ISSUE_TITLE, LABEL, CLASSES, buildBody, buildComment, classifyLog, closeStandingIssue, md, readFinalAttempt, triggerLine, upsertStandingIssue } from './qa-failure-issue.mjs'
+import { ISSUE_TITLE, LABEL, CLASSES, MENTION_CLASSES, buildBody, buildComment, classifyLog, closeStandingIssue, computeWindow, md, mentionable, notDevReason, readFinalAttempt, readQaWindow, triggerLine, upsertStandingIssue, windowLine } from './qa-failure-issue.mjs'
 import { BOT_AUTHOR } from './standing-issue-upsert.mjs'
 
 const SCRIPT = fileURLToPath(new URL('./qa-failure-issue.mjs', import.meta.url))
+
+/**
+ * Answers the window reads (#4236) from `scn.window`. Self-contained (no
+ * closure): its source is also written into the CLI stub, so the CLI and the
+ * in-process tests answer from one responder. Keys are the `gh` path, so a
+ * test names the call it fails or hangs by a substring of it.
+ */
+function respondWindow(args, scn) {
+  const w = (scn && scn.window) || {}
+  const key = args[0] === 'run' ? 'run list' : String(args[1])
+  if ((w.fail || []).some((k) => key.includes(k))) return { fail: `HTTP 502 for ${key}` }
+  if ((w.hang || []).some((k) => key.includes(k))) return { hang: true }
+  if (args[0] === 'run' && args[1] === 'list') return { out: JSON.stringify(w.rows || []) }
+  let m = /\/compare\/([0-9a-f]+)\.\.\.([0-9a-f]+)\?per_page=1$/.exec(key)
+  if (m) return { out: `${(w.ancestry || {})[m[1]] || 'ahead'}\n` }
+  m = /\/actions\/runs\/(\d+)\/jobs$/.exec(key)
+  if (m) return { out: JSON.stringify({ jobs: (w.jobs || {})[m[1]] || [] }) }
+  m = /\/compare\/([0-9a-f]+\.\.\.[0-9a-f]+)$/.exec(key)
+  if (m) return { out: JSON.stringify((w.compare || {})[m[1]] || { status: 'diverged', commits: [] }) }
+  m = /\/commits\/([0-9a-f]+)$/.exec(key)
+  if (m) return { out: JSON.stringify({ files: (w.files || {})[m[1]] || [] }) }
+  return { fail: `no stub for ${key}` }
+}
 
 /**
  * A `gh` stub. Every invocation appends its argv (one JSON line) to $GH_LOG and
@@ -51,6 +74,14 @@ if (args[0] === 'issue' && args[1] === 'create') {
   process.stdout.write('https://github.com/d-hinders/Haven-AI/issues/999\\n')
   process.exit(0)
 }
+if (args[0] === 'run' || args[0] === 'api') {
+  // The window reads (#4236), answered by the same responder the in-process tests use.
+  const r = (${respondWindow.toString()})(args, scenario)
+  if (r.hang) { setTimeout(() => process.exit(0), 25000); return }
+  if (r.fail) { process.stderr.write(r.fail + '\\n'); process.exit(1) }
+  process.stdout.write(r.out)
+  process.exit(0)
+}
 process.exit(0)
 `,
   )
@@ -65,7 +96,7 @@ function baseEnv() {
   return e
 }
 
-function run(scenario, env = {}, logs = [], extraArgs = null) {
+function run(scenario, env = {}, logs = [], extraArgs = null, { timeout = 60_000 } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'qa-failure-issue-'))
   makeStub(dir)
   const log = join(dir, 'gh.log')
@@ -77,6 +108,10 @@ function run(scenario, env = {}, logs = [], extraArgs = null) {
   const argv = extraArgs ?? [...files, join(dir, 'qa-run.attempt-*.log')]
   const result = spawnSync(process.execPath, [SCRIPT, ...argv], {
     encoding: 'utf8',
+    // A hung window read must not hang the suite: past this the run is killed
+    // and its status is null, which every test reads as a failure. Generous
+    // by default (a loaded machine is slow); the hang test passes a short one.
+    timeout,
     env: {
       ...baseEnv(),
       PATH: `${dir}:${process.env.PATH}`,
@@ -171,6 +206,22 @@ describe('qa-failure-issue: one standing issue', () => {
     const { result, calls } = run({ open: 12 }, { TRIGGER: '', RUN_URL: '' })
     assert.equal(result.status, 2)
     assert.equal(calls.length, 0)
+  })
+
+  // Characterization (#4236), written before the window existed: outside
+  // Actions (no GITHUB_RUN_ID) the comment is byte-for-byte what it was, the
+  // body carries no window line, and the only gh calls are the upsert's own.
+  test('characterization: without GITHUB_RUN_ID the comment is unchanged and no lookup beyond the upsert runs', () => {
+    const { result, calls } = run({ open: 12 })
+    assert.equal(result.status, 0, result.stderr)
+    const comment = sub(calls, 'issue', 'comment')[0]
+    assert.equal(
+      comment[comment.indexOf('--body') + 1],
+      '`qa-dev` failure at 2026-09-08 12:00 UTC (trigger: `workflow_dispatch — started by tester`), class `unclassified` — https://github.com/d-hinders/Haven-AI/actions/runs/1',
+    )
+    const edit = sub(calls, 'issue', 'edit')[0]
+    assert.doesNotMatch(edit[edit.indexOf('--body') + 1], /window/i)
+    assert.deepEqual(calls.map((c) => c.slice(0, 2).join(' ')), ['label create', 'issue list', 'issue edit', 'issue comment'])
   })
 
   test('body names the run, the trigger and the standing-issue contract', () => {
@@ -716,5 +767,357 @@ describe('qa-failure-issue: rate_limit class (#3541)', () => {
     const body = buildBody({ trigger: 'workflow_dispatch', runUrl: 'https://example.invalid/run', when: 'now', classification: classifyLog(PHRASINGS['bare FAIL (3009 / sweep)']) })
     assert.match(body, /`rate_limit`/)
     assert.match(body, /space out hand dispatches/)
+  })
+})
+
+// ── The last-green → first-red window (#4236) ────────────────────────────────
+// The fixture is the 2026-10-20 episode, read from the live API (run list,
+// jobs, compare and commit files) at 2026-10-21: green run 39419894807 at
+// 84f347f0a, red run 39421603625 at aa818795d, one PR between (#4144), 12 of
+// its 14 files under packages/qa-agent/. The rows keep the decoys that episode
+// really had: gate-only `in_progress` runs at both SHAs, a 6 s gate-skipped
+// success, and a red run created AFTER the failing one.
+const GREEN_SHA = '84f347f0a15004dd385510886a1fbfd262558461'
+const RED_SHA = 'aa818795df264505e455a1224bbdddadcf97d8b0'
+const OLDER_SHA = '70cee1d51f6a68e9372fb34495c4bfbcd066d03d'
+const LATER_SHA = 'bde4d598e43415337bf8520bdd3319d3c9c21726'
+const RED_ID = 39421603625
+const GREEN_ID = 39419894807
+const deployRow = (id, sha, createdAt, updatedAt, conclusion, state = 'success', status = 'completed') => ({
+  databaseId: id, headSha: sha, event: 'deployment_status', headBranch: 'dev', status, conclusion,
+  createdAt, startedAt: createdAt, updatedAt,
+  displayTitle: `post-deploy ${sha} → Haven AI / dev (${state})`,
+})
+const FIXTURE_ROWS = [
+  deployRow(39423256338, LATER_SHA, '2026-10-20T12:34:03Z', '2026-10-20T12:45:32Z', 'failure'),
+  deployRow(RED_ID, RED_SHA, '2026-10-20T12:21:15Z', '2026-10-20T12:31:22Z', '', 'success', 'in_progress'),
+  deployRow(39421375894, GREEN_SHA, '2026-10-20T12:19:26Z', '2026-10-20T12:19:32Z', 'success', 'in_progress'),
+  deployRow(39421285101, RED_SHA, '2026-10-20T12:18:40Z', '2026-10-20T12:18:46Z', 'success', 'in_progress'),
+  deployRow(GREEN_ID, GREEN_SHA, '2026-10-20T12:07:26Z', '2026-10-20T12:12:39Z', 'success'),
+  deployRow(39419560133, OLDER_SHA, '2026-10-20T12:04:44Z', '2026-10-20T12:04:50Z', 'success'),
+  deployRow(39418972077, OLDER_SHA, '2026-10-20T12:00:05Z', '2026-10-20T12:08:26Z', 'success'),
+]
+const FILES_4144 = [
+  'docs/architecture/04-x402-payment-sequence.md', 'docs/operations/agent-qa.md',
+  'packages/qa-agent/src/lib/haven-api.ts', 'packages/qa-agent/src/lib/hosted-mcp.ts',
+  'packages/qa-agent/src/lib/settlement-record.test.ts', 'packages/qa-agent/src/lib/settlement-record.ts',
+  'packages/qa-agent/src/scenarios/x402-catalog-guided-purchase.test.ts', 'packages/qa-agent/src/scenarios/x402-catalog-guided-purchase.ts',
+  'packages/qa-agent/src/scenarios/x402-delegation-3009-grace-resume.test.ts', 'packages/qa-agent/src/scenarios/x402-delegation-3009-grace-resume.ts',
+  'packages/qa-agent/src/scenarios/x402-delegation-3009.test.ts', 'packages/qa-agent/src/scenarios/x402-delegation-3009.ts',
+  'packages/qa-agent/src/scenarios/x402-hosted-mcp-signer.test.ts', 'packages/qa-agent/src/scenarios/x402-hosted-mcp-signer.ts',
+]
+const commit = (sha, parents, message, login = 'AntonioSaaranen', type = 'User') => ({ sha, parents, login, type, name: login, message })
+const MF = (conclusion) => [{ name: 'gate', conclusion: 'success' }, { name: 'money-flow', conclusion }]
+const fixture = (over = {}) => ({
+  rows: FIXTURE_ROWS,
+  jobs: { [GREEN_ID]: MF('success'), 39418972077: MF('success') },
+  compare: {
+    [`${GREEN_SHA}...${RED_SHA}`]: {
+      status: 'ahead', total_commits: 1,
+      commits: [commit(RED_SHA, [GREEN_SHA], 'test(qa-agent): EIP-3009 legs assert Haven recorded the merchant settlement (#4144)\n\nbody (#4119)')],
+    },
+  },
+  files: { [RED_SHA]: FILES_4144 },
+  ...over,
+})
+const FIXTURE_LINE = 'window: last green `84f347f0a` (run 39419894807) → first red `aa818795d` (run 39421603625): 1 PR — #4144 by AntonioSaaranen (touches no money-path file; touches the harness)'
+const FIXTURE_MENTION = FIXTURE_LINE.replace('by AntonioSaaranen', 'by @AntonioSaaranen')
+const ACTIONS_ENV = {
+  GITHUB_RUN_ID: String(RED_ID), GITHUB_REPOSITORY: 'd-hinders/Haven-AI', GITHUB_EVENT_NAME: 'deployment_status',
+  GITHUB_SHA: RED_SHA, GITHUB_REF: 'refs/heads/dev',
+}
+
+/** In-process `gh` for the window: the shared responder, recording every call. */
+function fakeGh(window, calls = []) {
+  const gh = (args) => {
+    calls.push(args)
+    const r = respondWindow(args, { window })
+    if (r.fail || r.hang) throw Object.assign(new Error(r.fail ?? 'hang'), { stderr: r.fail ?? '' })
+    return r.out
+  }
+  return gh
+}
+const current = (over = {}) => ({ id: RED_ID, sha: RED_SHA, event: 'deployment_status', ...over })
+const windowOf = (window, opts = {}) => computeWindow({ gh: fakeGh(window, opts.calls), repo: 'd-hinders/Haven-AI', current: current(opts.current), ...opts.budget })
+const lastParagraph = (call) => call[call.indexOf('--body') + 1].split('\n\n').at(-1)
+const bodyOf = (call) => call[call.indexOf('--body') + 1]
+const bodyWindow = (call) => bodyOf(call).split('\n').find((l) => l.startsWith('- **Window:**'))
+
+describe('qa-failure-issue: the last-green → first-red window (#4236)', () => {
+  test('CLI, reopen: the fixture names #4144, its author and what it touches — mentioned once, in the reopen comment', () => {
+    const { result, calls } = run({ open: null, closed: 2769, window: fixture() }, ACTIONS_ENV, [MASKED_502])
+    assert.equal(result.status, 0, result.stderr)
+    assert.equal(sub(calls, 'issue', 'reopen').length, 1)
+    assert.equal(lastParagraph(sub(calls, 'issue', 'comment')[0]), FIXTURE_MENTION)
+    // The body carries the same window, with no `@`: the body is rewritten on every failure.
+    assert.equal(bodyWindow(sub(calls, 'issue', 'edit')[0]), `- **Window:** ${FIXTURE_LINE.replace(/^window: /, '')}`)
+    // preFilterHarnessCandidates runs before any jobs read: the gate-only
+    // `in_progress` decoys and the 6 s gate-skipped success are never read.
+    assert.deepEqual(calls.filter((c) => /\/runs\/(39421375894|39421285101|39419560133)\/jobs/.test(c[1] ?? '')), [])
+    assert.equal(calls.filter((c) => /\/jobs$/.test(c[1] ?? '')).length, 1, 'one jobs read: the green')
+    // The window is read after the label is ensured and before the issue lookups.
+    assert.deepEqual(calls[0].slice(0, 3), ['label', 'create', LABEL])
+    assert.ok(calls.findIndex((c) => c[0] === 'run') < calls.findIndex((c) => c[0] === 'issue'))
+  })
+
+  test('CLI, a later failure while the issue is open: the window is recomputed and the author named without @', () => {
+    const { result, calls } = run({ open: 2769, window: fixture() }, ACTIONS_ENV, [MASKED_502])
+    assert.equal(result.status, 0, result.stderr)
+    assert.equal(sub(calls, 'run', 'list').length, 1, 'recomputed from the API, not read back from the body')
+    assert.equal(lastParagraph(sub(calls, 'issue', 'comment')[0]), FIXTURE_LINE)
+    assert.doesNotMatch(bodyOf(sub(calls, 'issue', 'edit')[0]), /@AntonioSaaranen/)
+  })
+
+  test('CLI, create: the mention is in the body of the new issue', () => {
+    const { result, calls } = run({ open: null, closed: null, window: fixture() }, ACTIONS_ENV, [MASKED_502])
+    assert.equal(result.status, 0, result.stderr)
+    assert.equal(bodyWindow(sub(calls, 'issue', 'create')[0]), `- **Window:** ${FIXTURE_MENTION.replace(/^window: /, '')}`)
+  })
+
+  test('CLI: a gh call that exits non-zero yields "window: unavailable", and the reopen and comment still happen', () => {
+    const { result, calls } = run({ open: null, closed: 2769, window: fixture({ fail: ['/jobs'] }) }, ACTIONS_ENV, [MASKED_502])
+    assert.equal(result.status, 0, result.stderr)
+    assert.equal(sub(calls, 'issue', 'reopen').length, 1)
+    assert.equal(
+      lastParagraph(sub(calls, 'issue', 'comment')[0]),
+      'window: unavailable (`gh api repos/d-hinders/Haven-AI/actions/runs/39419894807/jobs` failed: HTTP 502 for repos/d-hinders/Haven-AI/actions/runs/39419894807/jobs)',
+    )
+  })
+
+  test('CLI: a gh call that hangs past its time bound yields "window: unavailable", and the reopen and comment still happen', () => {
+    const t0 = Date.now()
+    const { result, calls } = run(
+      { open: null, closed: 2769, window: fixture({ hang: ['run list'] }) },
+      { ...ACTIONS_ENV, QA_FAILURE_WINDOW_CALL_TIMEOUT_MS: '2000' },
+      [MASKED_502],
+      null,
+      { timeout: 20_000 },
+    )
+    assert.equal(result.status, 0, result.stderr)
+    assert.ok(Date.now() - t0 < 15_000, 'bounded by the per-call timeout, not by the stub')
+    assert.equal(sub(calls, 'issue', 'reopen').length, 1)
+    assert.equal(lastParagraph(sub(calls, 'issue', 'comment')[0]), 'window: unavailable (`gh run list` timed out after 2 s)')
+  })
+
+  test('CLI: a failing run that is not dev\'s reads "window: not a dev run" and makes no window call', () => {
+    for (const [env, why] of [
+      [{ GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_REF: 'refs/heads/feat/x' }, "workflow_dispatch from 'refs/heads/feat/x'"],
+      [{ GITHUB_EVENT_NAME: 'workflow_dispatch', QA_HAVEN_API_URL_OVERRIDE: 'https://x.up.railway.app' }, 'dispatch with a haven_api_url override'],
+      [{ GITHUB_EVENT_NAME: 'repository_dispatch' }, "event 'repository_dispatch'"],
+    ]) {
+      const { result, calls } = run({ open: null, closed: 2769, window: fixture() }, { ...ACTIONS_ENV, ...env }, [MASKED_502])
+      assert.equal(result.status, 0, result.stderr)
+      assert.deepEqual(calls.filter((c) => c[0] === 'run' || c[0] === 'api'), [], why)
+      assert.equal(lastParagraph(sub(calls, 'issue', 'comment')[0]), `window: not a dev run (${why}) — nothing computed, nobody mentioned`)
+    }
+  })
+
+  test('no GITHUB_RUN_ID: no window and no window call (in-process too)', () => {
+    let called = 0
+    assert.equal(readQaWindow({ ...ACTIONS_ENV, GITHUB_RUN_ID: '' }, { gh: () => { called += 1; return '[]' } }), null)
+    assert.equal(called, 0)
+    assert.equal(notDevReason({ GITHUB_EVENT_NAME: 'schedule', GITHUB_REF: 'refs/heads/dev' }), null)
+  })
+
+  test('a run whose money-flow job was skipped (run-level success) is not the last green', () => {
+    const SKIP = 39420000001
+    const rows = [...FIXTURE_ROWS, { ...deployRow(SKIP, RED_SHA, '2026-10-20T12:15:00Z', '2026-10-20T12:17:00Z', 'success') }]
+    const w = windowOf(fixture({ rows, jobs: { [GREEN_ID]: MF('success'), [SKIP]: MF('skipped') } }))
+    assert.equal(w.status, 'ok')
+    assert.deepEqual([w.lastGreen.id, w.firstRed.id], [GREEN_ID, RED_ID])
+  })
+
+  test('a run created after the failing one is never read (a re-run attempt keeps its old created_at)', () => {
+    // A green at the failing commit, created after it: as last green it would
+    // make the window empty (compare `identical`), so it must not be a candidate.
+    const AFTER = 39430000000
+    const rows = [deployRow(AFTER, RED_SHA, '2026-10-20T13:00:00Z', '2026-10-20T13:06:00Z', 'success'), ...FIXTURE_ROWS]
+    const calls = []
+    const w = windowOf(fixture({ rows, jobs: { [GREEN_ID]: MF('success'), [AFTER]: MF('success') } }), { calls })
+    assert.equal(windowLine(w), FIXTURE_LINE)
+    assert.deepEqual(calls.filter((c) => String(c[1]).includes(`/runs/${AFTER}/`)), [])
+  })
+
+  test('a run-level success with no money-flow job is not the last green: the read is unavailable, never a silent refusal', () => {
+    const NOJOB = 39420000002
+    const rows = [...FIXTURE_ROWS, deployRow(NOJOB, RED_SHA, '2026-10-20T12:15:00Z', '2026-10-20T12:17:00Z', 'success')]
+    const w = windowOf(fixture({ rows, jobs: { [GREEN_ID]: MF('success'), [NOJOB]: [{ name: 'gate', conclusion: 'success' }] } }))
+    assert.equal(windowLine(w), "window: unavailable (run 39420000002 lists no 'money-flow' job)")
+    // A jobs answer that is not a list is the same: unavailable, not a refusal.
+    const notList = windowOf(fixture({ rows, jobs: { [GREEN_ID]: MF('success'), [NOJOB]: 'x' } }))
+    assert.equal(windowLine(notList), 'window: unavailable (the jobs of run 39420000002 are not a list)')
+  })
+
+  test('a green at the failing commit itself is the last green: 0 PRs, no compare read, nobody mentioned', () => {
+    // A re-dispatch or a second deploy at the same SHA went green, then red:
+    // `compare/{sha}...{sha}` is `identical`, which admits it.
+    const SAME = 39420000006
+    const rows = [...FIXTURE_ROWS, deployRow(SAME, RED_SHA, '2026-10-20T12:13:00Z', '2026-10-20T12:18:00Z', 'success')]
+    const calls = []
+    const w = windowOf(fixture({ rows, jobs: { [GREEN_ID]: MF('success'), [SAME]: MF('success') }, ancestry: { [RED_SHA]: 'identical' } }), { calls })
+    assert.deepEqual([w.lastGreen.id, w.firstRed.id], [SAME, RED_ID])
+    assert.equal(windowLine(w, { mention: true }), "window: 0 PRs — first red is at the last green's commit (no code change; flake, provider or environment)")
+    assert.equal(mentionable(w, 'unclassified'), false)
+    assert.deepEqual(calls.filter((c) => /\/compare\/[0-9a-f]+\.\.\.[0-9a-f]+$/.test(c[1] ?? '')), [], 'no window compare read')
+  })
+
+  test('only completed runs are candidates: an in-progress run is never read', () => {
+    // Replayed from 39423256338 while RED_ID (whose money-flow job had
+    // already ended) was still in progress: it is no candidate either way.
+    const calls = []
+    const w = windowOf(fixture({
+      jobs: { [GREEN_ID]: MF('success'), [RED_ID]: MF('success') },
+      compare: { [`${GREEN_SHA}...${LATER_SHA}`]: { status: 'ahead', total_commits: 2, commits: [commit(RED_SHA, [GREEN_SHA], 'x (#4144)'), commit(LATER_SHA, [RED_SHA], 'y (#4146)')] } },
+      files: { [RED_SHA]: FILES_4144, [LATER_SHA]: ['packages/frontend/src/app/page.tsx'] },
+    }), { calls, current: { id: 39423256338, sha: LATER_SHA } })
+    assert.deepEqual([w.lastGreen.id, w.firstRed.id], [GREEN_ID, 39423256338])
+    assert.deepEqual(calls.filter((c) => String(c[1]).includes(`/runs/${RED_ID}/`)), [])
+  })
+
+  test('a window that renders badly is one unavailable line; the comment still lands', () => {
+    const seen = []
+    const gh = (args) => (seen.push(args), args[1] === 'list' ? JSON.stringify([{ number: 3 }]) : '')
+    upsertStandingIssue({ gh, trigger: 't', runUrl: 'u', when: 'w', readWindow: () => ({ status: 'ok', prs: null }), log: () => {} })
+    assert.match(lastParagraph(seen.find((a) => a[1] === 'comment')), /^window: unavailable \(Cannot read properties of null/)
+    assert.ok(seen.some((a) => a[1] === 'edit'))
+  })
+
+  test('a green feature-branch dispatch between a dev green and a dev red is skipped', () => {
+    const FEAT = 39420000003
+    const feat = { ...deployRow(FEAT, RED_SHA, '2026-10-20T12:15:00Z', '2026-10-20T12:20:00Z', 'success'), event: 'workflow_dispatch', headBranch: 'feat/x', displayTitle: 'QA — money-flow (dev)' }
+    const w = windowOf(fixture({ rows: [...FIXTURE_ROWS, feat], jobs: { [GREEN_ID]: MF('success'), [FEAT]: MF('success') } }))
+    assert.deepEqual([w.lastGreen.id, w.firstRed.id], [GREEN_ID, RED_ID])
+  })
+
+  test('a green at a commit outside the failing commit\'s history is skipped', () => {
+    const OFF = 39420000004
+    const OFF_SHA = 'ffffffffffffffffffffffffffffffffffffffff'
+    const rows = [...FIXTURE_ROWS, deployRow(OFF, OFF_SHA, '2026-10-20T12:15:00Z', '2026-10-20T12:20:00Z', 'success')]
+    const w = windowOf(fixture({ rows, jobs: { [GREEN_ID]: MF('success'), [OFF]: MF('success') }, ancestry: { [OFF_SHA]: 'diverged' } }))
+    assert.deepEqual([w.lastGreen.id, w.firstRed.id], [GREEN_ID, RED_ID])
+  })
+
+  test('a later red in the same episode names the same window: first red is the oldest dev red after the green', () => {
+    // Replayed from run 39423256338 (bde4d598e, 12:34): by then RED_ID had completed red.
+    const rows = FIXTURE_ROWS.map((r) => (r.databaseId === RED_ID ? { ...r, status: 'completed', conclusion: 'failure' } : r))
+    const w = windowOf(fixture({ rows, jobs: { [GREEN_ID]: MF('success'), [RED_ID]: MF('failure') } }), { current: { id: 39423256338, sha: LATER_SHA } })
+    assert.equal(windowLine(w), FIXTURE_LINE)
+  })
+
+  test('the PRs are the first-parent chain: a merged branch\'s own commits are not listed; several PRs mention nobody', () => {
+    const A = 'a'.repeat(40), SIDE = 'b'.repeat(40), M = 'c'.repeat(40)
+    const compare = {
+      status: 'ahead', total_commits: 4,
+      commits: [
+        commit(A, [GREEN_SHA], 'feat(backend): one (#5001)', 'alice'),
+        commit(SIDE, [GREEN_SHA], 'wip on a branch', 'bob'),
+        commit(M, [A, SIDE], 'Merge pull request #5002 from x/y', 'bob'),
+        commit(RED_SHA, [M], 'test(qa-agent): three (#5003)', 'carol'),
+      ],
+    }
+    const files = { [A]: ['packages/backend/src/routes/payments.ts'], [M]: ['packages/frontend/src/app/page.tsx'], [RED_SHA]: ['packages/qa-agent/src/run.ts'] }
+    const w = windowOf(fixture({ compare: { [`${GREEN_SHA}...${RED_SHA}`]: compare }, files }))
+    assert.equal(
+      windowLine(w, { mention: true }),
+      'window: last green `84f347f0a` (run 39419894807) → first red `aa818795d` (run 39421603625): 3 PRs — ' +
+        '#5001 by alice (touches 1 money-path file: `packages/backend/src/routes/payments.ts`; does not touch the harness); ' +
+        '`ccccccccc` (no PR in subject) by bob (touches no money-path file; does not touch the harness); ' +
+        '#5003 by carol (touches no money-path file; touches the harness)',
+    )
+    assert.equal(mentionable(w, 'unclassified'), false)
+  })
+
+  test('a compare status other than ahead, or a chain that leaves the compare page, is unavailable', () => {
+    const key = `${GREEN_SHA}...${RED_SHA}`
+    const diverged = windowOf(fixture({ compare: { [key]: { status: 'diverged', total_commits: 1, commits: [commit(RED_SHA, [GREEN_SHA], 'x (#1)')] } } }))
+    assert.equal(windowLine(diverged), "window: unavailable (compare 84f347f0a...aa818795d is 'diverged', not 'ahead')")
+    const cut = windowOf(fixture({ compare: { [key]: { status: 'ahead', total_commits: 400, commits: [commit(RED_SHA, ['d'.repeat(40)], 'x (#1)')] } } }))
+    assert.equal(windowLine(cut), 'window: unavailable (the first-parent line leaves the compare page (400 commits; the API lists 1))')
+    // Every commit listed, yet the first-parent line misses last green: a different failure, said differently.
+    const off = windowOf(fixture({ compare: { [key]: { status: 'ahead', total_commits: 1, commits: [commit(RED_SHA, ['d'.repeat(40)], 'x (#1)')] } } }))
+    assert.equal(windowLine(off), 'window: unavailable (the first-parent line from aa818795d does not reach 84f347f0a)')
+    const none = windowOf(fixture({ compare: { [key]: { status: 'ahead', total_commits: 1, commits: null } } }))
+    assert.equal(windowLine(none), 'window: unavailable (the compare read returned no commit list)')
+  })
+
+  test('the mention is gated on the run class and on what the single PR touches (captain decision 2026-10-21)', () => {
+    const w = windowOf(fixture())
+    for (const cls of CLASSES) assert.equal(mentionable(w, cls), MENTION_CLASSES.has(cls), cls)
+    assert.deepEqual([...MENTION_CLASSES].sort(), ['harness', 'haven', 'unclassified'])
+    const frontend = windowOf(fixture({ files: { [RED_SHA]: ['packages/frontend/src/app/page.tsx'] } }))
+    assert.equal(mentionable(frontend, 'unclassified'), false, 'a one-PR window touching only the frontend')
+    const money = windowOf(fixture({ files: { [RED_SHA]: ['packages/backend/src/routes/payments.ts'] } }))
+    assert.equal(mentionable(money, 'haven'), true, 'a one-PR window touching a money-path file')
+    const bot = windowOf(fixture({ compare: { [`${GREEN_SHA}...${RED_SHA}`]: { status: 'ahead', total_commits: 1, commits: [commit(RED_SHA, [GREEN_SHA], 'chore: bump (#9)', 'dependabot[bot]', 'Bot')] } } }))
+    assert.equal(mentionable(bot, 'unclassified'), false, 'a bot author')
+    assert.equal(mentionable({ status: 'unavailable', reason: 'x' }, 'unclassified'), false)
+  })
+
+  test('in the upsert: a provider-class or frontend-only one-PR window reopens with no @', () => {
+    const issueGh = (seen) => (args) => {
+      seen.push(args)
+      if (args[1] === 'list') return JSON.stringify(args.includes('closed') ? [{ number: 2769 }] : [])
+      return ''
+    }
+    for (const [window, classification] of [
+      [fixture(), classifyLog(PROVIDER_MULTILINE)],
+      [fixture({ files: { [RED_SHA]: ['packages/frontend/src/app/page.tsx'] } }), classifyLog(MASKED_502)],
+    ]) {
+      const seen = []
+      upsertStandingIssue({ gh: issueGh(seen), trigger: 't', runUrl: 'u', when: 'w', classification, readWindow: () => windowOf(window), log: () => {} })
+      const comment = seen.find((a) => a[1] === 'comment')
+      assert.match(lastParagraph(comment), /^window: last green .* by AntonioSaaranen \(/)
+      assert.doesNotMatch(lastParagraph(comment), /@/)
+    }
+  })
+
+  test('a readWindow that throws is one unavailable line; the comment still lands', () => {
+    const seen = []
+    const gh = (args) => (seen.push(args), args[1] === 'list' ? JSON.stringify([{ number: 3 }]) : '')
+    upsertStandingIssue({ gh, trigger: 't', runUrl: 'u', when: 'w', readWindow: () => { throw new Error('boom') }, log: () => {} })
+    assert.equal(lastParagraph(seen.find((a) => a[1] === 'comment')), 'window: unavailable (boom)')
+  })
+
+  test('the lookup budget: past it the window is open-ended (calls) and PR files are marked unread', () => {
+    // Every row a long red: no green inside a 4-call budget.
+    const reds = Array.from({ length: 6 }, (_, i) => deployRow(39400000000 + i, `${i}`.repeat(40), `2026-10-20T0${i}:00:00Z`, `2026-10-20T0${i}:05:00Z`, 'failure'))
+    const jobs = Object.fromEntries(reds.map((r) => [r.databaseId, MF('failure')]))
+    const w = windowOf({ rows: [...FIXTURE_ROWS.slice(0, 2), ...reds], jobs }, { budget: { calls: 4 } })
+    assert.equal(
+      windowLine(w),
+      'window: open-ended — no admitted money-flow success within the lookup budget (4 calls); first red so far `555555555` (run 39400000005), so the break may be older',
+    )
+    // Time, not calls: a clock that jumps past the budget stops the walk the same way.
+    let t = 0
+    const slow = computeWindow({ gh: fakeGh(fixture()), repo: 'r', current: current(), now: () => (t += 50_000), ms: 120_000 })
+    assert.equal(slow.reason, 'no admitted money-flow success within the lookup time budget (120 s, 2 calls made)')
+    // Budget spent after the compare: the PR is listed, its files unread, nobody mentioned.
+    const late = windowOf(fixture(), { budget: { calls: 4 } })
+    assert.equal(late.prs[0].note, 'files not read: lookup budget spent')
+    assert.match(windowLine(late), /#4144 by AntonioSaaranen \(files not read: lookup budget spent\)$/)
+    assert.equal(mentionable(late, 'unclassified'), false)
+  })
+
+  test('endpoints: a deployment_status green is preferred at the same commit; a schedule endpoint is labelled', () => {
+    const SCHED = 39420000005
+    const sched = { ...deployRow(SCHED, GREEN_SHA, '2026-10-20T12:14:00Z', '2026-10-20T12:18:00Z', 'success'), event: 'schedule', displayTitle: 'QA — money-flow (dev)' }
+    const w = windowOf(fixture({ rows: [...FIXTURE_ROWS, sched], jobs: { [GREEN_ID]: MF('success'), [SCHED]: MF('success') } }))
+    assert.equal(w.lastGreen.id, GREEN_ID, 'the post-deploy run at the same SHA wins the tie')
+    const onlySched = windowOf(fixture({ rows: [...FIXTURE_ROWS.filter((r) => r.databaseId !== GREEN_ID), sched], jobs: { [SCHED]: MF('success') } }), { current: { event: 'schedule' } })
+    assert.equal(
+      windowLine(onlySched),
+      'window: last green `84f347f0a` (run 39420000005) (schedule; dev tip, deploy not verified) → first red `aa818795d` (run 39421603625) (schedule; dev tip, deploy not verified): 1 PR — #4144 by AntonioSaaranen (touches no money-path file; touches the harness)',
+    )
+  })
+
+  test('qa-dev.yml: the money-flow job restates its grants with actions: read; the failure step passes the override through env', () => {
+    const wf = readFileSync(fileURLToPath(new URL('../../.github/workflows/qa-dev.yml', import.meta.url)), 'utf8')
+    const job = wf.slice(wf.indexOf('\n  money-flow:\n'))
+    assert.match(job, /\n {4}permissions:\n {6}contents: read\n {6}issues: write\n {6}deployments: read\n {6}actions: read\n/)
+    assert.doesNotMatch(wf, /pull-requests:/)
+    // The top-level block is unchanged, so the gate job gains nothing.
+    assert.match(wf, /\npermissions:\n {2}contents: read\n {2}issues: write\n(?: {2}#[^\n]*\n)* {2}deployments: read\n\njobs:/)
+    const step = wf.slice(wf.indexOf('- name: Update the standing qa-failure issue'))
+    assert.match(step, /QA_HAVEN_API_URL_OVERRIDE: \$\{\{ github\.event\.inputs\.haven_api_url \}\}/)
   })
 })

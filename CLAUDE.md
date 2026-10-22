@@ -379,7 +379,9 @@ one-liner as a backlog issue, and is the route for **every** issue an agent
 files — never a bare `gh issue create` — with a mandatory review on each;
 `release` ships one production release, with or without a version bump;
 `quality-scan` reports structural findings, bounded improvement candidates, and
-coverage limits, then stops for a decision.
+coverage limits, then stops for a decision; `prove-red` runs the mutation cells
+those workflows and reviewers require, with one tested runner instead of a
+hand rig.
 
 ### How shipping is governed (#1025)
 

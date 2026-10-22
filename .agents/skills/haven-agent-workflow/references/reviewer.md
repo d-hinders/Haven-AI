@@ -70,8 +70,10 @@ worktrees whose directory is gone, and these all had live ones.
 **Two cases where the root STAYS even though it is clean**, because someone is
 about to stand in it:
 
-- a **blocked** verdict, or a guard refusal — the captain is going to re-make or
-  inspect the tree, and deleting it turns a blocked pass into a lost one;
+- a **blocked** verdict, a guard refusal, or a `prove-red verify` exit 3 — the
+  captain is going to re-make, inspect or `recover` the tree (that journal lives
+  in the root's git dir, so removing the root removes it), and deleting it turns
+  a blocked pass into a lost one;
 - any finding you could not fully verify and flagged as such, if you named the
   root as where the evidence sits.
 
@@ -79,7 +81,10 @@ Say which you did. "Root removed" and "root kept, blocked on X" are both
 verdict-carrying facts; silence is the thing that leaves them behind.
 
 Default posture:
-- Read only unless the captain explicitly asks for a patch.
+- Read only unless the captain explicitly asks for a patch. One carve-out:
+  `prove-red verify` ([prove-red](../../prove-red/SKILL.md) § *verify*) mutates
+  and restores files in your own review root, and only there; it needs a cells
+  file you wrote, and refuses to run without one.
 - Prioritize bugs, security risks, behavioral regressions, unclear money movement, confusing agent authority, and missing tests.
 - Findings come first, ordered by severity, with file and line references.
 - If there are no serious findings, say that clearly and mention residual risk or test gaps.

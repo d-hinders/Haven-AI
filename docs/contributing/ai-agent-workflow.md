@@ -384,7 +384,7 @@ Measured in one working session: **477 entries**, containing `Sidebar.bak`, `Sid
 
 | purpose | write | not |
 |---|---|---|
-| mutation backup | `Sidebar.tsx.1766.bak` | `Sidebar.bak` |
+| mutation backup (`<file>.<issue>.<role>.<cell>.bak`, written by [prove-red](../../.agents/skills/prove-red/SKILL.md)) | `Sidebar.tsx.1766.author.M1.bak` | `Sidebar.bak` |
 | PR body | `pr-1766.md` | `pr.md` |
 | captured output | `1766-typecheck.txt` | `out.txt` |
 

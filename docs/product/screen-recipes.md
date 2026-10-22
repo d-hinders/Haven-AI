@@ -616,7 +616,12 @@ Rules:
 ## Agent Detail
 
 Use for `/agents/[agentId]`: one managed agent — what it can spend, what it has
-done, and how to stop it (#3691, epic). Sections, in order:
+done, and how to stop it (#3691, epic). The page is the header, the banner
+slot, the Spending hero, then tabs (#4226): **Activity** (the default),
+**Tool calls** and **Settings** — `Tabs` keyed by `?tab=`, an unknown value
+falling back to Activity, no counts on the tab row; switching tabs writes only
+the tab into the URL, which clears the tab's filters (the account page's
+rule). `?grant=` keeps working alongside `?tab=`. Sections, in order:
 
 1. `PageHeader` with a decorative, name-hashed `Monogram` before the agent name,
    the description as `subtitle`, and the
@@ -646,49 +651,78 @@ done, and how to stop it (#3691, epic). Sections, in order:
 3. No separate "About this agent" card: its facts are the header's `meta`.
 4. Spending — the ONE budget surface (#3695): heading "Spending" and a
    one-line description (budgets are enforced on-chain) ABOVE the card (see
-   the detail-page section rule in design-system.md). The card holds one row
-   per active budget — amount, period, recipient or merchant, Edit and Stop —
-   each measured by `BudgetMeter`, captioned by the shared budget-caption
-   helper (#3806): "{used} of {budget} {token} used this period" at two
-   decimals, then the earlier of the refill and the expiry ("refills in 45m"
-   / "refills Thu 14:02" / "refills 14 Nov"; "expires …" when the budget ends
-   first). The refill is anchored on the row's `start_date`, never on the
-   wall clock. When the chain read failed or the read's period has already
-   ended, the row shows no meter and says usage couldn't be read — never
-   "0 used", and the old amount is never paired with the next refill; a
-   future `start_date` (a re-key's dormant steady grant) shows when it
-   starts. Quiet note lines under the caption come from the helper too:
-   "incl. … by {agent}" for sub-agents that spent and "… reserved for task
-   budgets".
-   **Add budget is collapsed once a budget exists**: with no budget the grant
-   form is the section's content, headed "Set its first budget"; once one
-   exists, adding another is an "Add budget" control that opens the form in
-   place (Cancel collapses it), never a permanent second form — unless
-   `?grant=` asks for the form, in which case it opens expanded. Sharing part
-   of an existing budget with another agent lives INSIDE the Add budget
-   panel — a quiet line and an "Issue sub-budget" button below the grant
-   form, shown only while the panel is open (#3716) — never as a permanent
-   card row; the Sub-agent budgets list of issued slices stays on the card,
-   outside the panel. A revoked or removed agent's section is read-only plus
-   Stop (#3549). The one read-only budget summary on the page is the
-   **Received budgets** block (#3988): when the agent RECEIVES sub-budget
-   grants (not closed), the card lists each — the granting agent's name, the
-   amount per period and its end ("ends …", "ended"; a pending grant reads
-   "waiting for the sharing agent to sign it", a closing one "closing") —
-   inside the same card, with no actions: closing a grant is the granting
-   agent's owner's move. When the agent holds received grants and no budget
-   of its own, the grant form's heading still reads "Set its first budget"
-   but its line says the agent spends through the received budgets below —
-   it must never imply the agent cannot pay.
-5. Activity — heading and description above the card, payments-only rows
-   (`TransactionsTable` in card variant), empty state "No activity yet". The
-   header's right side carries the counts summary — "{n} today · {m} all
-   time · View in Transactions", the link to `/transactions?agentId={id}` —
-   in place of stat cards (#3696); "{n} today" counts on `confirmed_at`
-   within the user's LOCAL day — the hook sends the browser's IANA zone and
-   the route cuts the day in it, defaulting to UTC (#3977). MCP tool calls, if the agent has any,
-   render directly under the table as part of this section.
-6. Identity and settings — one quiet card of rows: the Agent Passport, the
+   the detail-page section rule in design-system.md). The hero is the
+   dashboard money-card pattern (#4226): a `Card` with `Card.Section divided` —
+   budgets on the left, **Last 30 days** on the right, stacked below `lg`.
+   Each budget is one row — amount, period, recipient or merchant, Edit and a
+   per-budget ⋯ menu whose one item is **Stop budget** (the irreversible
+   action gets the menu; its confirm still stands between the click and the
+   signature) — each measured by a meter that spans its column and captioned
+   by the shared budget-caption helper in the dashboard ROW style (#3806):
+   "0.40 of 3.00 USDC · per day · refills in 24h" at two decimals, then the
+   earlier of the refill and the expiry ("refills in 45m" / "refills Thu
+   14:02" / "refills 14 Nov"; "expires …" when the budget ends first). The
+   refill is anchored on the row's `start_date`, never on the wall clock.
+   When the chain read failed or the read's period has already ended, the row
+   shows no meter and says usage couldn't be read — never "0 used", and the
+   old amount is never paired with the next refill; a future `start_date` (a
+   re-key's dormant steady grant) shows when it starts. Quiet note lines
+   under the caption come from the helper too: "incl. … by {agent}" for
+   sub-agents that spent and "… reserved for task budgets". A paused agent
+   greys the meters and adds the shared pause line under each caption
+   ("Payments paused in Haven — its budget is still live on-chain."); the
+   caption itself is unchanged. A budget at or past 90% used renders the
+   warning meter. **Last 30 days** comes from the dashboard overview's
+   per-agent stats — the spent figure in the display currency, the payment
+   count, and "Last paid {age} · {merchant}" where the merchant label is
+   #4209's helper (name → x402 host → nothing, never an address). A revoked
+   or otherwise uncovered agent is not in the overview, so it renders no
+   Last 30 days column; its history is under Activity.
+   **Add budget is collapsed once a budget exists**: with no budget the
+   section reads "No budget yet." with a "Set budget" control that opens the
+   grant form; once one exists, adding another is an "Add budget" control
+   that opens the form in place (Cancel collapses it), never a permanent
+   second form — unless `?grant=` asks for the form, in which case it opens
+   expanded. Sharing part of an existing budget with another agent lives
+   INSIDE the Add budget panel — a quiet line and an "Issue sub-budget"
+   button below the grant form, shown only while the panel is open (#3716) —
+   never as a permanent card row; the Sub-agent budgets list of issued slices
+   stays on the card, outside the panel. A revoked or removed agent's
+   section is read-only plus Stop (#3549). The one read-only budget summary
+   on the page is the **Received budgets** block (#3988): when the agent
+   RECEIVES sub-budget grants (not closed), the card lists each — the
+   granting agent's name, the amount per period and its end ("ends …",
+   "ended"; a pending grant reads "waiting for the sharing agent to sign it",
+   a closing one "closing") — inside the same card, with no actions: closing
+   a grant is the granting agent's owner's move. When the agent holds
+   received grants and no budget of its own, the grant form's heading still
+   reads "Set its first budget" but its line says the agent spends through
+   the received budgets below — it must never imply the agent cannot pay.
+5. Tabs and Activity (#4226): below the hero, the tab row (no counts), then
+   the tab's panel. **Activity** — the agent's OWN payments (`payment_intents`,
+   failed and pending included — deliberately NOT the wallet-scoped
+   transactions feed, a different population that would drop payments refused
+   before they reached the chain) drawn with the shared ledger pieces:
+   `TransactionActivityRow` in ledger mode, merchant-first, under
+   `TransactionActivityDayHeader` day bands; the row's "by <agent>" title and
+   "From … →" movement line are GONE — the page fixes the agent and the
+   wallet, so neither repeats on a row. The standard toolbar rides on the
+   card: search, a **Status** facet (All, Sent, Pending, Failed, Needs
+   attention), **Token** and **Period** — all server-filtered on the kinded
+   read (#4229, plus its `token` parameter). The summary line reads "Out"
+   with the server's total (a count, never a money sum the read does not
+   serve), `ListShowMore` sits below the card, and a row opens the shared
+   transaction detail panel. Under the list: "See in Transactions"
+   (`/transactions?agentId={id}`). Empty states: "No payments yet" — and for
+   an agent still in setup, "Once you set a budget, every payment this agent
+   makes shows here." When recoverable-funds payments exist, the Activity tab
+   carries a warning dot, "Review the payment(s)" selects the tab and scrolls
+   to it (never one payment's panel — #2196's rule), and the affected rows
+   carry the Needs attention badge while the Status facet can narrow to them.
+   **Tool calls** and **Settings** hold today's content unchanged (the MCP
+   tool calls panel; the Identity and settings card) until #4227 and #4228.
+6. Identity and settings — the Settings tab's content (#4226): one quiet card
+   of rows: the Agent Passport, the
    **MCP server name** (#4209, moved here from the `/agents` card): the
    hosted+signer pair the agent is wired as, with a copy button and a tooltip
    naming both servers, or the bare `not recorded` label with its explanation
@@ -705,13 +739,23 @@ Money and risk clarity:
 
 ## Agent Activity
 
-Use for recent payments, declined requests, and agent events.
+Use for the agent page's Activity tab (#4226): the agent's own payments —
+confirmed, pending and failed alike — in one ledger. The population is the
+agent's `payment_intents` (the kinded read, #4229), NOT the wallet-scoped
+transactions feed: that feed serves a different set and would drop payments
+refused before they reached the chain.
 
 Structure:
-1. Header with agent name and current status.
-2. Compact filter or status tabs if the list is long.
-3. Transaction/activity rows grouped by recent time.
-4. Empty state with the next useful action.
+1. The standard toolbar on the card: search, a Status facet (All, Sent,
+   Pending, Failed, Needs attention), Token and Period — server-filtered.
+2. `TransactionActivityRow` ledger rows, merchant-first, under
+   `TransactionActivityDayHeader` day bands (#4225). No "by <agent>" title and
+   no "From … →" movement line: the page fixes the agent and the wallet, so
+   neither repeats on a row. A row opens the shared transaction detail panel.
+3. The summary line ("Out" and the server's total) and `ListShowMore` below
+   the card; "See in Transactions" under the list.
+4. Empty state with the next useful action ("No payments yet"; for an agent
+   still in setup, the budget pointer).
 
 Money and risk clarity:
 - Each row shows the user's currency (through `<Amount>`'s currency mode —
@@ -722,10 +766,12 @@ Money and risk clarity:
   `counterpartyLabel`'s no-address mode, the same helper the transactions
   page feeds (#3810, #3811).
 - Technical hashes stay in detail surfaces.
-- Use a card/compact `TransactionsTable` when the agent history needs semantic
-  columns, sorting, or pagination. Use `TransactionActivityRow` for a short,
-  non-sortable preview. Lead with `Agent payment`, `Machine payment`, `Payment
-  rejected`, or similar human event copy, not a raw recipient address.
+- Use `TransactionActivityRow` in ledger mode for the agent's payments — the
+  shared row, the day bands and the toolbar are the account tab's pieces, so
+  the two ledgers read as one system. `TransactionsTable` is for surfaces that
+  need semantic columns and sorting (the wallet feed); the agent's own ledger
+  is not one of them. Lead with the merchant (`counterpartyLabel`'s no-address
+  mode), not a raw recipient address.
 - Put recipient, source, and links in row metadata or detail actions.
 
 **One window for every "last 7 days" (#3975).** The dashboard's time windows

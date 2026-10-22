@@ -41,6 +41,9 @@ flight**, and a **closed** issue is **done** (its PR closed it via
 `Closes #`). Exception: an open issue labelled **`operator-verify`** is already
 implemented and on `dev` — its PR wrote `Refs #<n>` so the merge would leave a
 human's outstanding step a home (#2276). It is not ready work; don't queue it.
+An open issue labelled **`landed-partial`** has a merged PR that references it
+with `Refs #<n>` — the merge-time release workflow adds the label (#4235) — so
+part or all of it has landed: read that PR before building any of it.
 
 ## Writing a loop-ready issue
 

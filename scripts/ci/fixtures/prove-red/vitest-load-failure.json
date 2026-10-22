@@ -1,0 +1,12 @@
+{
+  "numTotalTests": 0,
+  "success": false,
+  "testResults": [
+    {
+      "name": "<fixture>/vt/b.test.ts",
+      "status": "failed",
+      "message": "Cannot find module './nope' imported from '<fixture>/vt/b.test.ts'",
+      "assertionResults": []
+    }
+  ]
+}

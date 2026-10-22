@@ -62,7 +62,7 @@ function makeValidFixture() {
     );
   }
 
-  for (const command of ["new-task", "ship-next", "haven-reset", "quality-scan", "release"]) {
+  for (const command of ["new-task", "ship-next", "haven-reset", "quality-scan", "release", "prove-red"]) {
     const suffix =
       command === "ship-next"
         ? " When invoked through /loop, complete exactly one issue and stop."

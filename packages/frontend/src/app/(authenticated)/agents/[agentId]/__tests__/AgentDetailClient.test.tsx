@@ -11,27 +11,56 @@ const {
   mockUseAuth,
   mockUseAgents,
   mockUseAgentActivity,
+  mockUseAgentPaymentLedger,
   mockUseDelegateBalance,
   mockUseAgentPassport,
+  mockUseDashboardOverview,
 } = vi.hoisted(() => ({
   mockUseAuth: vi.fn(),
   mockUseAgents: vi.fn(),
   mockUseAgentActivity: vi.fn(),
+  mockUseAgentPaymentLedger: vi.fn(),
   mockUseDelegateBalance: vi.fn(),
   mockUseAgentPassport: vi.fn(),
+  mockUseDashboardOverview: vi.fn(),
 }))
 
-const { mockRouterPush } = vi.hoisted(() => ({ mockRouterPush: vi.fn() }))
+const { mockRouterPush, mockRouterReplace } = vi.hoisted(() => ({
+  mockRouterPush: vi.fn(),
+  mockRouterReplace: vi.fn(),
+}))
 
-const { mockUseCompanyDetails } = vi.hoisted(() => ({ mockUseCompanyDetails: vi.fn() }))
+const { mockUseCompanyDetails, mockRegistryTokens } = vi.hoisted(() => ({
+  mockUseCompanyDetails: vi.fn(),
+  // #4226: the token registry the Token facet reads. Default: one token —
+  // facets with a single option render nothing (ListToolbar's rule), so a
+  // test that wants the Token trigger seeds a second entry and restores.
+  mockRegistryTokens: [
+    {
+      key: '100:0x036cbd53842c5426634e7929541ec2318f3dcf7e',
+      symbol: 'USDC',
+      address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+      chainId: 100,
+      isNative: false,
+    },
+  ] as Array<{ key: string; symbol: string; address?: string; chainId: number; isNative: boolean }>,
+}))
+
+vi.mock('@/hooks/useTransactionFilters', () => ({
+  useTransactionFilters: () => ({ tokens: mockRegistryTokens }),
+}))
 
 vi.mock('@/hooks/useCompanyDetails', () => ({
   useCompanyDetails: () => mockUseCompanyDetails(),
 }))
 
 // #1402: the component navigates to /agents after a completed remove.
+// #4226: the page owns `?tab=` through `useSearchParams`, read from the real
+// URL so a tab test seeds it with `window.history.replaceState`.
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ push: mockRouterPush, replace: vi.fn(), back: vi.fn(), prefetch: vi.fn() }),
+  useRouter: () => ({ push: mockRouterPush, replace: mockRouterReplace, back: vi.fn(), prefetch: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(typeof window === 'undefined' ? '' : window.location.search),
+  usePathname: () => typeof window === 'undefined' ? '/' : window.location.pathname,
 }))
 
 // The dialog's own sequence is proven in RemoveAgentDialog.test.tsx. Here only
@@ -73,8 +102,19 @@ vi.mock('@/hooks/useAgentActivity', async () => {
   return {
     ...actual,
     useAgentActivity: () => mockUseAgentActivity(),
+    // #4226: the Activity tab's paged reader — the page tests assert on the
+    // rendered rows, so the reader is the mock surface, not `api`.
+    useAgentPaymentLedger: () => mockUseAgentPaymentLedger(),
   }
 })
+
+vi.mock('@/hooks/useDashboardOverview', () => ({
+  useDashboardOverview: () => mockUseDashboardOverview(),
+}))
+
+vi.mock('@/hooks/useContacts', () => ({
+  useContacts: () => ({ resolveAddress: () => null }),
+}))
 
 vi.mock('@/hooks/useDelegateBalance', () => ({
   useDelegateBalance: (...args: unknown[]) => mockUseDelegateBalance(...args),
@@ -193,6 +233,34 @@ function openAgentMenu(): string[] {
   return screen.getAllByRole('menuitem').map((item) => item.textContent ?? '')
 }
 
+/**
+ * #4226: seeds the Activity tab's paged reader. Rows here are the tab's own
+ * render input; `total` is #4229's server figure.
+ */
+function mockLedgerWith(
+  payments: Array<Record<string, unknown>>,
+  total: number = payments.length,
+  extra: Record<string, unknown> = {},
+) {
+  mockUseAgentPaymentLedger.mockReturnValue({
+    payments,
+    total,
+    hasMore: false,
+    loading: false,
+    loadingMore: false,
+    error: null,
+    loadMore: vi.fn(),
+    refresh: vi.fn(),
+    ...extra,
+  })
+}
+
+/** Seeds `?tab=settings` — the Identity and settings content's new home. */
+function renderOnSettingsTab(ui: React.ReactElement) {
+  window.history.replaceState(null, '', '/agents/agent-1?tab=settings')
+  return render(ui)
+}
+
 describe('AgentDetailClient last-activity metadata', () => {
   beforeEach(() => {
     vi.useFakeTimers()
@@ -231,6 +299,26 @@ describe('AgentDetailClient last-activity metadata', () => {
       stats: null,
       loading: false,
     })
+    // #4226: the Activity tab's reader — empty and idle unless a test seeds
+    // rows. `loadMore`/`refresh` are fns so a stray call cannot crash.
+    mockUseAgentPaymentLedger.mockReturnValue({
+      payments: [],
+      total: 0,
+      hasMore: false,
+      loading: false,
+      loadingMore: false,
+      error: null,
+      loadMore: vi.fn(),
+      refresh: vi.fn(),
+    })
+    // Default: the overview answers nothing — the hero renders no Last 30
+    // days column. Hero-column tests override this.
+    mockUseDashboardOverview.mockReturnValue({
+      data: null,
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    })
     // Default: delegate wallet is empty, so recovery UI stays hidden.
     mockUseDelegateBalance.mockReturnValue({
       balance: null,
@@ -256,6 +344,8 @@ describe('AgentDetailClient last-activity metadata', () => {
 
   afterEach(() => {
     vi.useRealTimers()
+    // #4226: tab tests seed the URL; reset it so the next render starts clean.
+    window.history.replaceState(null, '', '/agents/agent-1')
   })
 
   /**
@@ -283,13 +373,13 @@ describe('AgentDetailClient last-activity metadata', () => {
   })
 
   /**
-   * #3696: the two stat cards are gone. Their figures read as the summary
-   * line on the Activity section header, drawn from the SAME `stats` source
-   * the cards used (all_time/today are per-token aggregates summed by
-   * tx_count). The "All-time transactions" label no longer appearing is the
-   * check that fails on the pre-slice tree — the card carried that label.
+   * #3696 moved the stat cards' figures into the Activity header's summary
+   * line; #4226 replaced that header with the tab's own toolbar figures —
+   * the count line and the "Out {total}" summary, both from #4229's `total`
+   * over the FILTERED set. The retired labels no longer appearing is the
+   * check that fails on the pre-slice tree.
    */
-  it('folds the stat cards into the Activity header summary line (#3696)', () => {
+  it('replaces the stat-card figures with the Activity tab\'s server count (#4226)', () => {
     mockUseAgentActivity.mockReturnValue({
       activity: [],
       stats: {
@@ -299,27 +389,32 @@ describe('AgentDetailClient last-activity metadata', () => {
       },
       loading: false,
     })
+    mockLedgerWith([], 37)
+
     render(<AgentDetailClient agentId="agent-1" />)
 
-    expect(screen.getByText(/1 today · 37 all time/)).toBeInTheDocument()
     expect(screen.queryByText('All-time transactions')).not.toBeInTheDocument()
     expect(screen.queryByText('Confirmed agent payments')).not.toBeInTheDocument()
+    // The tab's summary: "Out" and the server's total — the count, not a
+    // money claim the read does not serve.
+    expect(screen.getByTestId('activity-total')).toHaveTextContent('37')
   })
 
-  it('links the Activity summary line to the agent-filtered transactions view (#3696)', () => {
+  it('links under the list to the agent-filtered transactions view (#4226)', () => {
     render(<AgentDetailClient agentId="agent-1" />)
 
-    const link = screen.getByRole('link', { name: 'View in Transactions' })
+    const link = screen.getByRole('link', { name: 'See in Transactions' })
     expect(link).toHaveAttribute('href', '/transactions?agentId=agent-1')
   })
 
   /**
-   * #3696: no unit test exists for McpToolCallsPanel itself, so its placement
-   * contract is asserted at page level: the panel renders INSIDE the
-   * #agent-activity anchor section (the #2196 scroll target) and BELOW the
-   * transactions table in DOM order.
+   * #3696 put the MCP panel directly under the table in the one Activity
+   * section; #4226 moves it to its own Tool calls TAB, out of Activity —
+   * nothing renders in the tab it does not belong to. Placement contract
+   * asserted structurally: the panel lives in the tool-calls panel and the
+   * Activity section (the #2196 scroll target) does not exist on this tab.
    */
-  it('renders the MCP tool calls panel inside the Activity section, below the table (#3696)', () => {
+  it('renders the MCP tool calls panel in the Tool calls tab, out of Activity (#4226)', () => {
     mockUseAgentActivity.mockReturnValue({
       activity: [
         {
@@ -338,19 +433,16 @@ describe('AgentDetailClient last-activity metadata', () => {
       stats: null,
       loading: false,
     })
+    window.history.replaceState(null, '', '/agents/agent-1?tab=tool-calls')
+
     render(<AgentDetailClient agentId="agent-1" />)
 
-    const section = document.getElementById('agent-activity')
-    expect(section).not.toBeNull()
-
+    const panel = screen.getByTestId('agent-tool-calls-section')
     const panelHeading = screen.getByText('MCP tool calls')
-    expect(section!.contains(panelHeading)).toBe(true)
-
-    // DOM order: the mocked table's marker precedes the panel heading.
-    const table = screen.getByText('Transactions table')
-    expect(
-      table.compareDocumentPosition(panelHeading) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy()
+    expect(panel.contains(panelHeading)).toBe(true)
+    // Out of the Activity tab: its section (and the #2196 anchor with it)
+    // does not exist while Tool calls is showing.
+    expect(document.getElementById('agent-activity')).toBeNull()
   })
 
   it('renders last activity in the header meta without a default connected badge', () => {
@@ -505,7 +597,7 @@ describe('AgentDetailClient last-activity metadata', () => {
 
     it('shows the recorded name with a copy button, and no not-recorded note', () => {
       withMcpName('haven-research')
-      render(<AgentDetailClient agentId="agent-1" />)
+      renderOnSettingsTab(<AgentDetailClient agentId="agent-1" />)
       const row = screen.getByTestId('mcp-server-name-row')
       expect(row).toHaveTextContent('MCP server name')
       expect(row).toHaveTextContent('haven-research')
@@ -515,7 +607,7 @@ describe('AgentDetailClient last-activity metadata', () => {
 
     it('says "not recorded" and explains it in visible text, not a tooltip', () => {
       withMcpName(null)
-      render(<AgentDetailClient agentId="agent-1" />)
+      renderOnSettingsTab(<AgentDetailClient agentId="agent-1" />)
       const row = screen.getByTestId('mcp-server-name-row')
       expect(within(row).getByText('not recorded')).toBeInTheDocument()
       expect(within(row).getByText(MCP_NOT_RECORDED_NOTE)).toBeInTheDocument()
@@ -814,78 +906,77 @@ describe('AgentDetailClient last-activity metadata', () => {
     expect(text).not.toContain('12.00')
   })
 
-  it('uses the activity row wallet name for historical payment movement', () => {
-    mockUseAgentActivity.mockReturnValue({
-      activity: [
-        {
-          type: 'payment',
-          id: 'payment-1',
-          agent_id: 'agent-1',
-          token: 'USDC',
-          token_address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
-          amount_raw: '10000',
-          amount: '0.01',
-          to: '0x2222222222222222222222222222222222222222',
-          status: 'confirmed',
-          tx_hash: '0x72d03a8ff551e443c118c93c54d32260941deb613e51fcd2733cd3455e8fa1a1',
-          source: 'x402',
-          x402_resource_url: 'https://api.example.com/data',
-          x402_merchant_address: '0x2222222222222222222222222222222222222222',
-          chain_id: 8453,
-          account_id: 'safe-old',
-          account_address: '0x4444444444444444444444444444444444444444',
-          account_name: 'Previous wallet',
-          explorer_url: null,
-          confirmed_at: '2026-05-08T11:49:59Z',
-          created_at: '2026-05-08T11:49:00Z',
-        },
-      ],
-      stats: null,
-      loading: false,
-    })
+  it('shows the historical wallet name in the detail panel, not on the row (#4226)', () => {
+    mockLedgerWith([
+      {
+        type: 'payment',
+        id: 'payment-1',
+        agent_id: 'agent-1',
+        token: 'USDC',
+        token_address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+        amount_raw: '10000',
+        amount: '0.01',
+        to: '0x2222222222222222222222222222222222222222',
+        status: 'confirmed',
+        tx_hash: '0x72d03a8ff551e443c118c93c54d32260941deb613e51fcd2733cd3455e8fa1a1',
+        source: 'x402',
+        x402_resource_url: 'https://api.example.com/data',
+        x402_merchant_address: '0x2222222222222222222222222222222222222222',
+        chain_id: 8453,
+        account_id: 'safe-old',
+        account_address: '0x4444444444444444444444444444444444444444',
+        account_name: 'Previous wallet',
+        explorer_url: null,
+        confirmed_at: '2026-05-08T11:49:59Z',
+        created_at: '2026-05-08T11:49:00Z',
+      },
+    ])
 
     render(<AgentDetailClient agentId="agent-1" />)
 
-    expect(screen.getAllByText('Previous wallet').length).toBeGreaterThan(0)
+    // The row's title is WHO WAS PAID — the merchant — and the "From
+    // <wallet> →" movement line is gone with it (#4226).
     expect(screen.getByText('api.example.com')).toBeInTheDocument()
+    expect(screen.queryByText(/From Previous wallet/)).not.toBeInTheDocument()
+    // The historical wallet name survives in the detail surface: opening the
+    // row shows which wallet the money left (the panel's own subtitle).
+    fireEvent.click(screen.getByText('api.example.com'))
+    expect(screen.getAllByText(/Previous wallet/).length).toBeGreaterThan(0)
   })
 
   it('does not fall back to the current wallet name when historical activity has only an address', () => {
-    mockUseAgentActivity.mockReturnValue({
-      activity: [
-        {
-          type: 'payment',
-          id: 'payment-1',
-          agent_id: 'agent-1',
-          token: 'USDC',
-          token_address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
-          amount_raw: '10000',
-          amount: '0.01',
-          to: '0x2222222222222222222222222222222222222222',
-          status: 'confirmed',
-          tx_hash: '0x72d03a8ff551e443c118c93c54d32260941deb613e51fcd2733cd3455e8fa1a1',
-          source: 'x402',
-          x402_resource_url: 'https://api.example.com/data',
-          x402_merchant_address: '0x2222222222222222222222222222222222222222',
-          chain_id: 8453,
-          account_id: null,
-          account_address: '0x4444444444444444444444444444444444444444',
-          account_name: null,
-          explorer_url: null,
-          confirmed_at: '2026-05-08T11:49:59Z',
-          created_at: '2026-05-08T11:49:00Z',
-        },
-      ],
-      stats: null,
-      loading: false,
-    })
+    mockLedgerWith([
+      {
+        type: 'payment',
+        id: 'payment-1',
+        agent_id: 'agent-1',
+        token: 'USDC',
+        token_address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+        amount_raw: '10000',
+        amount: '0.01',
+        to: '0x2222222222222222222222222222222222222222',
+        status: 'confirmed',
+        tx_hash: '0x72d03a8ff551e443c118c93c54d32260941deb613e51fcd2733cd3455e8fa1a1',
+        source: 'x402',
+        x402_resource_url: 'https://api.example.com/data',
+        x402_merchant_address: '0x2222222222222222222222222222222222222222',
+        chain_id: 8453,
+        account_id: null,
+        account_address: '0x4444444444444444444444444444444444444444',
+        account_name: null,
+        explorer_url: null,
+        confirmed_at: '2026-05-08T11:49:59Z',
+        created_at: '2026-05-08T11:49:00Z',
+      },
+    ])
 
     render(<AgentDetailClient agentId="agent-1" />)
 
-    // #3811: list rows carry no addresses — the unnamed-wallet fallback is
-    // the kind, not `Haven wallet 0x4444…4444`.
-    expect(screen.getAllByText('Haven wallet').length).toBeGreaterThan(0)
-    expect(screen.queryByText('Haven wallet 0x4444…4444')).not.toBeInTheDocument()
+    // #3811: list rows carry no addresses — an unnamed historical wallet
+    // never reads as `Haven wallet 0x4444…4444`, and no address text
+    // surfaces on the row at all (#4226: no movement line either).
+    expect(screen.queryByText(/Haven wallet 0x4444/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/0x4444/)).not.toBeInTheDocument()
   })
 
   // #3811, amended by #3950: the activity rows adopt the shared rules — the
@@ -894,8 +985,7 @@ describe('AgentDetailClient last-activity metadata', () => {
   // `approx_amount` rendered PLAIN (the `≈` mark lives only on the detail
   // panel now) — or an em dash when unpriced, never 0.
   it('renders the activity rows without addresses and the serve-time figure without the "≈" mark', () => {
-    mockUseAgentActivity.mockReturnValue({
-      activity: [
+    mockLedgerWith([
         {
           type: 'payment',
           id: 'payment-1',
@@ -919,29 +1009,26 @@ describe('AgentDetailClient last-activity metadata', () => {
           confirmed_at: '2026-05-08T11:49:59Z',
           created_at: '2026-05-08T11:49:00Z',
         },
-      ],
-      stats: null,
-      loading: false,
-    })
+    ])
 
     render(<AgentDetailClient agentId="agent-1" />)
 
     // No truncated address anywhere in the rows…
     expect(screen.queryByText('0x2222…2222')).not.toBeInTheDocument()
     // …the unresolvable counterparty reads as calm copy, and the serve-time
-    // figure renders plain — no `≈` on list rows (#3950). The `startsWith`
-    // match is the negative half too: a `≈ `-prefixed figure fails it.
+    // figure renders plain — no `≈` on list rows (#3950) — through the shared
+    // currency formatter (per-currency locale, so the decimal mark follows
+    // the currency, not the test runner's locale).
     expect(screen.getAllByText('New recipient').length).toBeGreaterThan(0)
-    expect(
-      screen.getAllByText((_, element) =>
-        (element?.textContent ?? '').replace(/\u00a0/g, ' ').trim().startsWith('0.11 SEK'),
-      ).length,
-    ).toBeGreaterThan(0)
+    // The serve-time figure renders PLAIN — no `≈` on list rows (#3950, the
+    // one rule's row kind short-circuits it) — through the shared currency
+    // formatter: per-currency locale ("kr" for SEK), signed by direction.
+    expect(screen.queryByText('≈')).not.toBeInTheDocument()
+    expect(screen.getByText(/-0[.,]11 kr/)).toBeInTheDocument()
   })
 
   it('renders an unpriced activity row as an em dash, never 0', () => {
-    mockUseAgentActivity.mockReturnValue({
-      activity: [
+    mockLedgerWith([
         {
           type: 'payment',
           id: 'payment-1',
@@ -966,10 +1053,7 @@ describe('AgentDetailClient last-activity metadata', () => {
           confirmed_at: '2026-05-08T11:49:59Z',
           created_at: '2026-05-08T11:49:00Z',
         },
-      ],
-      stats: null,
-      loading: false,
-    })
+    ])
 
     render(<AgentDetailClient agentId="agent-1" />)
 
@@ -1033,7 +1117,7 @@ describe('AgentDetailClient last-activity metadata', () => {
 
   it('points a delegation agent at the account page instead of rendering signer controls', () => {
     mockDelegationAgent()
-    render(<AgentDetailClient agentId="agent-1" />)
+    renderOnSettingsTab(<AgentDetailClient agentId="agent-1" />)
 
     const link = screen.getByRole('link', { name: /Backup & recovery/ })
     expect(link).toHaveAttribute('href', '/accounts/safe-1')
@@ -1049,7 +1133,7 @@ describe('AgentDetailClient last-activity metadata', () => {
   it('groups the passport row, the tax row and Backup & recovery into one Identity and settings card (#3697)', () => {
     mockUseCompanyDetails.mockReturnValue({ status: 'ready', details: VIES_VALID_ROW })
     mockDelegationAgent()
-    render(<AgentDetailClient agentId="agent-1" />)
+    renderOnSettingsTab(<AgentDetailClient agentId="agent-1" />)
 
     const section = screen.getByTestId('identity-settings-section')
     // Exactly ONE card in the section — no standalone Passport or Tax card.
@@ -1073,7 +1157,7 @@ describe('AgentDetailClient last-activity metadata', () => {
     // 'off' — the flag-off answer the route gives when HAVEN_OWNER_COMPANY_DETAILS is unset.
     mockUseCompanyDetails.mockReturnValue({ status: 'off', details: null })
     mockDelegationAgent()
-    render(<AgentDetailClient agentId="agent-1" />)
+    renderOnSettingsTab(<AgentDetailClient agentId="agent-1" />)
 
     expect(screen.queryByTestId('tax-declaration-row')).not.toBeInTheDocument()
     const card = screen
@@ -1092,7 +1176,7 @@ describe('AgentDetailClient last-activity metadata', () => {
     expect(screen.queryByTestId('tax-declaration-row')).not.toBeInTheDocument()
   })
 
-  it('orders the page: header, banner slot, Spending, Activity, Identity and settings (#3697)', () => {
+  it('orders the page: header, banner slot, Spending hero, tabs, Activity (#4226)', () => {
     mockDelegationAgent()
     render(<AgentDetailClient agentId="agent-1" />)
 
@@ -1100,18 +1184,19 @@ describe('AgentDetailClient last-activity metadata', () => {
     const banner = screen.getByTestId('agent-banner-slot')
     const budget = document.getElementById('delegation-budget-card')
     const activity = document.getElementById('agent-activity')
-    const identity = screen.getByTestId('identity-settings-section')
     expect(header).toBeTruthy()
     expect(budget).toBeTruthy()
     expect(activity).toBeTruthy()
 
-    // Each pair FOLLOWING in document order — the section rule's final page
-    // shape, asserted structurally rather than by pixel position.
+    // Each pair FOLLOWING in document order — mockup v2's stack: header,
+    // banners, the Spending hero, then the tab row and its Activity panel.
+    // Identity and settings is no longer page-level: it is the Settings tab.
+    const tablist = screen.getByRole('tablist', { name: 'Agent' })
     const pairs: [Element, Element][] = [
       [header!, banner],
       [banner, budget!],
-      [budget!, activity!],
-      [activity!, identity],
+      [budget!, tablist],
+      [tablist, activity!],
     ]
     for (const [before, after] of pairs) {
       expect(
@@ -1119,6 +1204,12 @@ describe('AgentDetailClient last-activity metadata', () => {
         `${before.nodeName} must precede ${after.nodeName}`,
       ).toBeTruthy()
     }
+    // The hero leads — the reason to open an agent at all. (The card itself
+    // is mocked at this level; its states are DelegationBudgetCard's tests.)
+    expect(screen.getByText('DelegationBudgetCard')).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Activity', selected: true })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Tool calls', selected: false })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Settings', selected: false })).toBeInTheDocument()
   })
 
   it('reads the delegate balance for REVOKED agents too — the recovery banner must reach them (#1403)', () => {
@@ -1403,13 +1494,14 @@ describe('AgentDetailClient last-activity metadata', () => {
     mockUseAgents.mockReturnValue({ ...mockUseAgents(), unarchiveAgent })
     render(<AgentDetailClient agentId="agent-1" />)
     // The live region is mounted, empty, BEFORE the restore — only its text
-    // changes, which is what makes the announcement reliable.
-    expect(screen.getByRole('status')).toHaveTextContent('')
+    // changes, which is what makes the announcement reliable. Scoped to the
+    // header: the Activity tab's toolbar carries its own status region now.
+    expect(within(screen.getByRole('banner')).getByRole('status')).toHaveTextContent('')
     openAgentMenu()
     fireEvent.click(screen.getByRole('menuitem', { name: 'Restore to list' }))
     const trigger = screen.getByRole('button', { name: 'Agent options' })
     expect(trigger).toBeDisabled()
-    expect(screen.getByRole('status')).toHaveTextContent('Restoring…')
+    expect(within(screen.getByRole('banner')).getByRole('status')).toHaveTextContent('Restoring…')
     fireEvent.click(trigger)
     expect(screen.queryByRole('menuitem', { name: 'Restore to list' })).not.toBeInTheDocument()
     release()
@@ -1710,5 +1802,298 @@ describe('AgentDetailClient first-budget token options (#2473)', () => {
     // no token address in the registry and cannot be granted.
     expect(tokens.map((t) => t.symbol)).not.toContain('ETH')
     expect(tokens.every((t) => /^0x[0-9a-fA-F]{40}$/.test(t.address))).toBe(true)
+  })
+})
+
+describe('AgentDetailClient tabs and the Activity tab (#4226)', () => {
+  beforeEach(() => {
+    mockUseAuth.mockReturnValue({ user: { accounts: [SAFE] } })
+    mockUseAgents.mockReturnValue({
+      agents: [
+        {
+          id: 'agent-1',
+          name: 'Research agent',
+          description: null,
+          delegate_address: '0x2222222222222222222222222222222222222222',
+          account_id: 'safe-1',
+          account_address: SAFE.account_address,
+          account_name: 'Main account',
+          status: 'active',
+          created_at: '2026-05-01T00:00:00Z',
+          mcp_last_seen_at: '2026-06-01T10:00:00Z',
+          allowances: [],
+          labels: [],
+          account_type: 'delegator_hybrid',
+        },
+      ],
+      loading: false,
+      pauseAgent: vi.fn(),
+      resumeAgent: vi.fn(),
+      revokeAgent: vi.fn(),
+      refetch: vi.fn(),
+    })
+    mockUseAgentActivity.mockReturnValue({ activity: [], stats: null, loading: false })
+    mockUseAgentPaymentLedger.mockReturnValue({
+      payments: [],
+      total: 0,
+      hasMore: false,
+      loading: false,
+      loadingMore: false,
+      error: null,
+      loadMore: vi.fn(),
+      refresh: vi.fn(),
+    })
+    mockUseDashboardOverview.mockReturnValue({ data: null, loading: false, error: null, refetch: vi.fn() })
+    mockUseDelegateBalance.mockReturnValue({
+      balance: null,
+      hasStranded: false,
+      hasRecoverableUsdc: false,
+      hasBelowMinimumUsdc: false,
+      loading: false,
+      refetch: vi.fn(),
+    })
+    mockUseAgentPassport.mockReturnValue({
+      passport: null,
+      standing: null,
+      loading: false,
+      issuing: false,
+      issueError: null,
+      issuePassport: vi.fn(),
+      refetch: vi.fn(),
+    })
+    mockUseCompanyDetails.mockReturnValue({ status: 'off', details: null })
+    mockRouterPush.mockClear()
+    mockRouterReplace.mockClear()
+  })
+
+  afterEach(() => {
+    window.history.replaceState(null, '', '/agents/agent-1')
+  })
+
+  /** One kinded-read payment row the tab renders (merchant-first, no addresses). */
+  function ledgerRow(overrides: Record<string, unknown> = {}) {
+    return {
+      type: 'payment' as const,
+      id: 'p1',
+      agent_id: 'agent-1',
+      token: 'USDC',
+      token_address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+      amount: '0.40',
+      amount_raw: '400000',
+      to: '0x9999999999999999999999999999999999999999',
+      status: 'confirmed' as const,
+      tx_hash: '0x' + 'f1'.repeat(32),
+      source: 'x402',
+      x402_resource_url: 'https://api.merchant.com/purchase',
+      explorer_url: 'https://basescan.org/tx/0xf1',
+      created_at: '2026-05-30T09:30:00Z',
+      ...overrides,
+    }
+  }
+
+  it('defaults to the Activity tab, and the URL carries no tab parameter', () => {
+    render(<AgentDetailClient agentId="agent-1" />)
+    expect(screen.getByRole('tab', { name: 'Activity', selected: true })).toBeInTheDocument()
+    expect(window.location.search).toBe('')
+  })
+
+  it('an unknown ?tab= falls back to Activity', () => {
+    window.history.replaceState(null, '', '/agents/agent-1?tab=yesterday')
+    render(<AgentDetailClient agentId="agent-1" />)
+    expect(screen.getByRole('tab', { name: 'Activity', selected: true })).toBeInTheDocument()
+    expect(screen.queryByTestId('agent-tool-calls-section')).toBeNull()
+  })
+
+  it('switching tabs writes ONLY the tab into the URL — the tab filters clear with it', () => {
+    window.history.replaceState(null, '', '/agents/agent-1?tab=tool-calls&status=failed')
+    render(<AgentDetailClient agentId="agent-1" />)
+    fireEvent.click(screen.getByRole('tab', { name: 'Activity' }))
+    // Back to Activity: no parameter at all — the seeded facet goes with it,
+    // the account page's rule.
+    expect(mockRouterReplace).toHaveBeenCalledWith('/agents/agent-1', { scroll: false })
+  })
+
+  it('the tabs carry no counts', () => {
+    mockLedgerWith([ledgerRow()], 1)
+    render(<AgentDetailClient agentId="agent-1" />)
+    for (const name of ['Activity', 'Tool calls', 'Settings']) {
+      expect(screen.getByRole('tab', { name })).not.toHaveTextContent(/[0-9]/)
+    }
+  })
+
+  it('the Activity tab renders the ledger rows with day bands, and no by-agent title or movement line', () => {
+    mockLedgerWith([ledgerRow(), ledgerRow({ id: 'p2', amount: '1.10', created_at: '2026-05-31T18:00:00Z' })], 2)
+    render(<AgentDetailClient agentId="agent-1" />)
+    // Merchant-first titles: the x402 host, never the address, never the agent.
+    expect(screen.getAllByText('api.merchant.com')).toHaveLength(2)
+    // Day bands: two distinct days render two band headers (en-GB short month).
+    expect(screen.getByText('30 May')).toBeInTheDocument()
+    expect(screen.getByText('31 May')).toBeInTheDocument()
+    // The removed row anatomy: no "by <agent>" title, no "From … →" movement.
+    expect(document.body.textContent).not.toContain('by Research agent')
+    expect(document.body.textContent).not.toMatch(/From [^]*→/)
+    expect(document.body.textContent).not.toContain('0x9999999999999999999999999999999999999999')
+  })
+
+  it('a failed payment appears in the Activity tab', () => {
+    mockLedgerWith([ledgerRow({ id: 'pf', status: 'failed', tx_hash: null })], 1)
+    render(<AgentDetailClient agentId="agent-1" />)
+    expect(screen.getByText('api.merchant.com')).toBeInTheDocument()
+    expect(screen.getByText('Failed')).toBeInTheDocument()
+  })
+
+  it('the toolbar offers the Status facet with Needs attention, plus Token and Period', () => {
+    // A single-option facet renders nothing (ListToolbar's rule), so the
+    // Token trigger needs a second registry entry.
+    mockRegistryTokens.push({
+      key: '8453:0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+      symbol: 'USDC',
+      address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+      chainId: 8453,
+      isNative: false,
+    })
+    try {
+      render(<AgentDetailClient agentId="agent-1" />)
+      // Facet triggers read "Label:" (FacetMenu's trigger anatomy).
+      fireEvent.click(screen.getByText('Status:'))
+      expect(screen.getByRole('menuitemradio', { name: 'Needs attention' })).toBeInTheDocument()
+      expect(screen.getByRole('menuitemradio', { name: 'Failed' })).toBeInTheDocument()
+      expect(screen.getByText('Token:')).toBeInTheDocument()
+      expect(screen.getByText('Period:')).toBeInTheDocument()
+      // The summary line: "Out" and the server's total.
+      expect(screen.getByTestId('activity-total')).toHaveTextContent('0')
+    } finally {
+      mockRegistryTokens.splice(1)
+    }
+  })
+
+  it('the needs-setup empty state points at the budget', () => {
+    mockUseAgents.mockReturnValue({
+      agents: [
+        {
+          id: 'agent-1',
+          name: 'Research agent',
+          description: null,
+          delegate_address: '0x2222222222222222222222222222222222222222',
+          account_id: 'safe-1',
+          account_address: SAFE.account_address,
+          account_name: 'Main account',
+          status: 'pending_approval',
+          created_at: '2026-05-01T00:00:00Z',
+          mcp_last_seen_at: null,
+          allowances: [],
+          labels: [],
+          account_type: 'delegator_hybrid',
+        },
+      ],
+      loading: false,
+      pauseAgent: vi.fn(),
+      resumeAgent: vi.fn(),
+      revokeAgent: vi.fn(),
+      refetch: vi.fn(),
+    })
+    render(<AgentDetailClient agentId="agent-1" />)
+    expect(screen.getByText('No payments yet')).toBeInTheDocument()
+    expect(screen.getByText('Once you set a budget, every payment this agent makes shows here.')).toBeInTheDocument()
+  })
+
+  describe('review-the-payment navigation (#2196 retargeted)', () => {
+    function mockRecoverable(usdc: string, usdcAtomic: string) {
+      mockUseDelegateBalance.mockReturnValue({
+        balance: {
+          delegate_address: '0x2222222222222222222222222222222222222222',
+          account_address: SAFE.account_address,
+          chain_id: 8453,
+          eth: '0',
+          eth_atomic: '0',
+          usdc,
+          usdc_atomic: usdcAtomic,
+          usdc_address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+          sweep_min_usdc: '0.01',
+        },
+        hasStranded: true,
+        hasRecoverableUsdc: true,
+        loading: false,
+        refetch: vi.fn(),
+      })
+    }
+
+    function unsettledRow(id: string, amount: string) {
+      return {
+        type: 'payment' as const,
+        id,
+        agent_id: 'agent-1',
+        token: 'USDC',
+        token_address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+        amount,
+        to: '0x9999999999999999999999999999999999999999',
+        status: 'confirmed' as const,
+        tx_hash: '0x' + id.padEnd(64, 'a'),
+        source: 'x402',
+        explorer_url: 'https://basescan.org/tx/0x' + id,
+        payment_flow_status: 'needs_attention' as const,
+        payment_attention_reason: 'merchant_retry_rejected_after_payment' as const,
+        created_at: '2026-05-30T00:00:00Z',
+      }
+    }
+
+    it('Review the payment selects the Activity tab, then scrolls to it', () => {
+      const scrollIntoView = vi.fn()
+      window.HTMLElement.prototype.scrollIntoView = scrollIntoView
+      mockRecoverable('8.00', '8000000')
+      mockUseAgentActivity.mockReturnValue({
+        activity: [unsettledRow('1', '8.00')],
+        stats: null,
+        loading: false,
+      })
+      window.history.replaceState(null, '', '/agents/agent-1?tab=settings')
+      render(<AgentDetailClient agentId="agent-1" />)
+
+      fireEvent.click(screen.getByRole('button', { name: 'Review the payment' }))
+      // The tab is selected by URL first; the scroll effect fires once the
+      // Activity panel is mounted.
+      expect(mockRouterReplace).toHaveBeenCalledWith('/agents/agent-1?tab=activity', { scroll: false })
+    })
+
+    it('the Activity tab carries a warning dot while unsettled payments exist', () => {
+      mockUseAgentActivity.mockReturnValue({
+        activity: [unsettledRow('1', '8.00')],
+        stats: null,
+        loading: false,
+      })
+      render(<AgentDetailClient agentId="agent-1" />)
+      const activityTab = screen.getByRole('tab', { name: /Activity/ })
+      expect(within(activityTab).getByText('Needs attention')).toBeInTheDocument()
+    })
+
+    it('no unsettled payments, no warning dot on the Activity tab', () => {
+      render(<AgentDetailClient agentId="agent-1" />)
+      const activityTab = screen.getByRole('tab', { name: /Activity/ })
+      expect(within(activityTab).queryByText('Needs attention')).toBeNull()
+    })
+
+    it('the affected rows carry the Needs attention badge in the Activity tab', () => {
+      // A payment INTENT whose status is needs_attention presents as the
+      // badge (the status map has no such key, so the label is the
+      // humanised status — the same read the wallet feed's rows get).
+      mockUseAgentPaymentLedger.mockReturnValue({
+        payments: [ledgerRow({ id: 'pn', status: 'needs_attention', payment_attention_reason: 'merchant_retry_rejected_after_payment', payment_flow_status: 'needs_attention' })],
+        total: 1,
+        hasMore: false,
+        loading: false,
+        loadingMore: false,
+        error: null,
+        loadMore: vi.fn(),
+        refresh: vi.fn(),
+      })
+      mockUseAgentActivity.mockReturnValue({
+        activity: [ledgerRow({ id: 'pn', status: 'needs_attention', payment_attention_reason: 'merchant_retry_rejected_after_payment', payment_flow_status: 'needs_attention' })],
+        stats: null,
+        loading: false,
+      })
+      render(<AgentDetailClient agentId="agent-1" />)
+      // One on the tab's warning dot, one on the affected row.
+      expect(screen.getAllByText('Needs attention').length).toBeGreaterThanOrEqual(2)
+    })
   })
 })

@@ -152,8 +152,10 @@ function singleHeader(value: string | string[] | undefined): string | undefined 
 
 export function isPublicCatalogRead(request: FastifyRequest): boolean {
   if (request.method !== 'GET') return false
-  const path = request.routeOptions?.url ?? request.url.split('?')[0]
-  if (!PUBLIC_GET_ROUTES.has(path)) return false
+  // The MATCHED route's pattern, never the request-target string: a request
+  // that matched no route is not a public read, and takes the credential path.
+  const path = request.routeOptions?.url
+  if (path === undefined || !PUBLIC_GET_ROUTES.has(path)) return false
   const authHeader = request.headers.authorization
   const xApiKey = singleHeader(request.headers['x-api-key'])
   return !authHeader && xApiKey === undefined

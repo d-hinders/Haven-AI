@@ -1,0 +1,20 @@
+{
+  "numTotalTests": 1,
+  "success": true,
+  "testResults": [
+    {
+      "name": "<fixture>/vt/c.test.ts",
+      "status": "passed",
+      "message": "",
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "title": "only",
+          "fullName": "only",
+          "status": "passed",
+          "failureMessages": []
+        }
+      ]
+    }
+  ]
+}

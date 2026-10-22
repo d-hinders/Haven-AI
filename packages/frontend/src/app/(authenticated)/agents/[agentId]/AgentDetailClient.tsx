@@ -2,22 +2,19 @@
 
 import { ArrowRight, EllipsisVertical } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
-import { useMemo, useState } from 'react'
-import { useRouter } from 'next/navigation'
-import Link from 'next/link'
+import { useEffect, useMemo, useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext'
 import { useAgents } from '@/hooks/useAgents'
 import {
   useAgentActivity,
   isPaymentActivityItem,
   isMcpToolCallActivityItem,
-  type PaymentActivityItem,
   type McpToolCallActivityItem,
 } from '@/hooks/useAgentActivity'
+import { useDashboardOverview } from '@/hooks/useDashboardOverview'
 import { useDelegateBalance } from '@/hooks/useDelegateBalance'
 import { getChainConfig, DEFAULT_CHAIN_ID } from '@/lib/chains'
-import { paymentSourceTitle } from '@/lib/transaction-labels'
-import { activityCounterparty, counterpartyLabel } from '@/lib/transaction-presentation'
 import { timeAgo } from '@/lib/format'
 import { formatAgentLastActivity, formatAgentLastActivityTitle } from '@/lib/agent-last-seen'
 import { AGENT_PAUSED_BODY, AGENT_PAUSED_TITLE } from '@/lib/agent-pause-copy'
@@ -36,8 +33,6 @@ import {
 } from '@/lib/stranded-funds-copy'
 import {
   agentStatusPresentation,
-  paymentStatusPresentation,
-  failedOrRejectedStatus,
 } from '@/lib/payment-status'
 import EditAgentModal from '@/components/EditAgentModal'
 import LabelsManagerModal from '@/components/LabelsManagerModal'
@@ -64,111 +59,22 @@ import {
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { Tabs } from '@/components/ui/Tabs'
 import { Monogram } from '@/components/ui/Monogram'
 import { BackLink } from '@haven_ai/ui/BackLink'
 import { Row } from '@/components/ui/Row'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Skeleton } from '@/components/ui/Skeleton'
-import TransactionsTable from '@/components/transactions/TransactionsTable'
+import AgentActivityTab from './AgentActivityTab'
 import {
   ApprovalRequiredBanner,
-  TransactionMovement,
 } from '@/components/haven'
-import type { AggregatedTransaction } from '@/types/transactions'
 
-function activityTitle(item: PaymentActivityItem, agentName?: string): string {
-  const sourceTitle = paymentSourceTitle(item.source)
-  if (sourceTitle) {
-    return agentName ? `${sourceTitle} by ${agentName}` : sourceTitle
-  }
-  // #2120: the `'approval'` row title and the `'rejected'` status title went
-  // with the queue — no backend route can emit either (see the decision note
-  // in `lib/payment-status.ts`), and the narrowed types now say so.
-  if (item.status === 'failed') return 'Payment failed'
-  return 'Agent payment'
-}
+/** The page's tabs; `activity` is the default and the unknown-value fallback. */
+type AgentTab = 'activity' | 'tool-calls' | 'settings'
 
-// #3811: the counterparty half of the movement is the SHARED helper's
-// no-address mode — the same label the transactions table and the dashboard
-// read (the merchant's hostname for x402, the source title, "New recipient")
-// — so a raw address never surfaces in an agent's activity rows.
-function activityMovement(item: PaymentActivityItem, walletName: string) {
-  const recipient = counterpartyLabel(activityCounterparty(item), undefined, undefined, {
-    noAddress: true,
-  })
-
-  return <TransactionMovement from={walletName} to={recipient} />
-}
-
-function activityWalletName(item: PaymentActivityItem, fallbackName: string): string {
-  if (item.account_name) return item.account_name
-  // #3811: list rows carry no addresses — an unnamed wallet falls back to
-  // the kind, not to `Haven wallet 0x1234…abcd`.
-  if (item.account_address) return 'Haven wallet'
-  return fallbackName
-}
-
-// Adapts the agent activity feed (payments + approvals) into the shape the
-// shared TransactionsTable expects, so the agent detail screen reuses the
-// same primitive — the same tinted header band, and the same tinted day band
-// on day-grouped lists (#4225) — as the other transaction surfaces. Approval
-// items without a tx hash render with no external link via `explorerUrl: null`.
-function activityToTransaction(
-  item: PaymentActivityItem,
-  agentName: string,
-  walletName: string,
-): AggregatedTransaction {
-  // #2120: was `activityStatusPresentation`, which merged an approval-status
-  // family into this lookup. Activity rows carry `payment_intents.status` and
-  // nothing else since #2055, so the merge had no second family left to merge.
-  const status = paymentStatusPresentation(item.status)
-  const isError = failedOrRejectedStatus(item.status)
-  const createdMs = new Date(item.created_at).getTime()
-  const rowWalletName = activityWalletName(item, walletName)
-  return {
-    hash: item.tx_hash ?? `activity-${item.type}-${item.id}`,
-    type: 'erc20',
-    from: item.account_address ?? '',
-    to: item.to,
-    value: item.amount_raw ?? '0',
-    valueFormatted: item.amount,
-    asset: item.token,
-    // #3824/#3811: the activity rows' only fiat, struck in the user's
-    // `currency_preference` — the shared table's currency mode reads it
-    // through `transactionFiat`.
-    approxAmount: item.approx_amount ?? null,
-    approxCurrency: item.approx_currency ?? undefined,
-    decimals: 0,
-    direction: 'out',
-    timestamp: Number.isFinite(createdMs) ? Math.floor(createdMs / 1000) : 0,
-    // #3129: `null`, not `0`. This row is synthesized from an activity record,
-    // which carries no block — the same "unknown" the backend's x402 row now
-    // reports, so the two producers of a blockless row agree. Nothing in the
-    // frontend reads `blockNumber` (it is required by the wire type, not
-    // rendered), so this changes no pixel; it removes the last producer still
-    // claiming block zero for a row that has no block.
-    blockNumber: null,
-    isError,
-    tokenAddress: item.token_address ?? undefined,
-    agentName,
-    source: item.source as AggregatedTransaction['source'],
-    x402ResourceUrl: item.x402_resource_url ?? null,
-    x402MerchantAddress: item.x402_merchant_address ?? null,
-    deliveryReference: item.delivery_reference ?? null,
-    chainId: item.chain_id ?? 0,
-    accountId: item.account_id ?? '',
-    accountAddress: item.account_address ?? '',
-    accountName: rowWalletName,
-    agentId: item.agent_id,
-    paymentId: item.id,
-    paymentProofStatus: item.payment_proof_status ?? null,
-    paymentFlowStatus: item.payment_flow_status ?? null,
-    paymentAttentionReason: item.payment_attention_reason ?? null,
-    statusBadge: { label: status.label, tone: status.tone },
-    titleOverride: activityTitle(item, agentName),
-    movementOverride: activityMovement(item, rowWalletName),
-    explorerUrl: item.explorer_url,
-  }
+function agentTabFromUrl(raw: string | null): AgentTab {
+  return raw === 'tool-calls' || raw === 'settings' ? raw : 'activity'
 }
 
 function mcpToolCallTone(resultStatus: string): 'success' | 'warning' | 'danger' | 'neutral' {
@@ -277,6 +183,8 @@ type PendingAction = 'pause' | 'resume' | 'restore' | null
 export default function AgentDetailClient({ agentId }: Props) {
   const { user } = useAuth()
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const activeTab = agentTabFromUrl(searchParams.get('tab'))
   const {
     agents,
     loading,
@@ -302,18 +210,17 @@ export default function AgentDetailClient({ agentId }: Props) {
       return null
     }
   }, [chainId])
-  const { activity, stats, loading: activityLoading } = useAgentActivity(agent?.id ?? null)
+  const { activity, loading: activityLoading } = useAgentActivity(agent?.id ?? null)
+  // #4226: the hero's Last 30 days reads the dashboard overview — the same
+  // source #4209's card footer uses, the way the account page reads it. A
+  // revoked (or otherwise uncovered) agent is not in the response; the hero
+  // then renders no column at all.
+  const { data: overview, loading: overviewLoading } = useDashboardOverview()
+  const overviewAgent = overview?.agents.find((item) => item.id === agentId) ?? null
 
-  // #3696: the figures the former stat cards showed, now read as the summary
-  // line on the Activity section header. Same `stats` source — all_time/today
-  // rows are per-token aggregates, so tx_count is summed across them; 0 until
-  // the stats response lands (the cards rendered '0' the same way).
-  const allTimeTransactions = stats
-    ? stats.all_time.reduce((sum, item) => sum + item.tx_count, 0)
-    : 0
-  const todayTransactions = stats
-    ? stats.today.reduce((sum, item) => sum + item.tx_count, 0)
-    : 0
+  // #3696: the figures the former stat cards showed are GONE with the old
+  // Activity header — the tab's own toolbar count (#4226) replaced them, and
+  // the per-token `stats` aggregate has no reader left on this page.
   const unsettledPayments = useMemo(
     () => activity
       .filter(isPaymentActivityItem)
@@ -348,10 +255,39 @@ export default function AgentDetailClient({ agentId }: Props) {
     setEditOpen(false)
   }
   // #2196: scroll-don't-open — see AGENT_ACTIVITY_SECTION_ID.
-  const scrollToActivity = () => {
-    document
-      .getElementById(AGENT_ACTIVITY_SECTION_ID)
-      ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  // #4226: "Review the payment(s)" now selects the Activity tab first (the
+  // rows live behind it) and scrolls once the panel is mounted. A pending
+  // flag survives the router round-trip: the effect fires on the tab change,
+  // finds the section, scrolls, and only then stands down.
+  const [scrollToActivityPending, setScrollToActivityPending] = useState(false)
+  useEffect(() => {
+    if (!scrollToActivityPending || activeTab !== 'activity') return
+    const target = document.getElementById(AGENT_ACTIVITY_SECTION_ID)
+    if (!target) return
+    setScrollToActivityPending(false)
+    target.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [scrollToActivityPending, activeTab])
+  const reviewStrandedPayments = () => {
+    setScrollToActivityPending(true)
+    if (activeTab !== 'activity') {
+      router.replace(`/agents/${encodeURIComponent(agentId)}?tab=activity`, { scroll: false })
+    }
+  }
+  const scrollToActivity = reviewStrandedPayments
+
+  // #4226: the page owns `?tab=` (the account page's pattern). `activity` is
+  // the default and carries no parameter; the replace names ONLY the tab, so
+  // switching tabs clears the tab's filters — the same rule the account page
+  // applies. `?grant=` is the budget card's own parameter and is read from
+  // the window there, so it survives until consumed regardless of the tab.
+  const handleTabChange = (tab: AgentTab) => {
+    if (tab === activeTab) return
+    router.replace(
+      tab === 'activity'
+        ? `/agents/${encodeURIComponent(agentId)}`
+        : `/agents/${encodeURIComponent(agentId)}?tab=${tab}`,
+      { scroll: false },
+    )
   }
   const [pendingAction, setPendingAction] = useState<PendingAction>(null)
   const [removeOpen, setRemoveOpen] = useState(false)
@@ -816,6 +752,9 @@ export default function AgentDetailClient({ agentId }: Props) {
           agentName={currentAgent.name}
           onBudgetChange={refetch}
           retired={isRevoked ? 'revoked' : isArchived ? 'archived' : undefined}
+          agentStatus={currentAgent.status}
+          stats={overviewAgent?.stats ?? null}
+          statsLoading={overviewLoading}
         />
       </div>
 
@@ -828,73 +767,63 @@ export default function AgentDetailClient({ agentId }: Props) {
           "Identity and settings" card below — same link, new wording. */}
 
       {/* #3696: the two stat cards ("All-time transactions" / "Today") are
-          gone — their figures read as the summary line on the Activity section
-          header below. #2106 already removed the third tile: the
-          "Pending approvals" counter was fed by a backend constant of 0
-          (`routes/agent-activity.ts` — "pending approvals are structurally
-          zero — the queue died with the AllowanceModule rail"). Rendered as a
-          counter it told the user a queue exists and happens to be empty; on
-          the delegation rail no queue exists at all — an out-of-budget payment
-          REVERTS on-chain, it is never held for approval. A tile that can only
-          ever read 0 is removed rather than re-labelled. The wire field
-          survives per the #2055 compatibility convention; nothing in the UI
-          reads it. */}
+          gone for good — #3696 moved their figures into the Activity header's
+          summary line; #4226 replaced that header with the tab's own toolbar
+          count, which describes the FILTERED set from #4229's `total`.
+          #2106's rule stands: nothing renders a counter that can only read 0.
+          The wire field survives per the #2055 compatibility convention. */}
 
-      <div className="mt-6 space-y-6">
-          <div id={AGENT_ACTIVITY_SECTION_ID} className="scroll-mt-24">
-            {/* #3696: the section header carries the counts the stat cards
-                used to show. The `stats` source is unchanged — all_time/today
-                are per-token aggregates, so tx_count is summed across them. */}
-            <div className="mb-4 flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
-              <div>
-                <h2 className="text-base font-semibold text-[var(--v2-ink)]">Activity</h2>
-                {/* #2120: was "Payments and approval requests from this agent." This list
-                    has been payments-only since #2055 removed the approval feed entries,
-                    so the subtitle promised a row kind the section can never show. */}
-                <p className="mt-1 text-sm text-[var(--v2-ink-3)]">Payments made by this agent.</p>
-              </div>
-              <p className="text-sm text-[var(--v2-ink-3)] v2-tabular">
-                {todayTransactions} today · {allTimeTransactions} all time ·{' '}
-                <Link
-                  href={`/transactions?agentId=${agentId}`}
-                  className="font-medium text-[var(--v2-ink)] underline decoration-[var(--v2-divider)] underline-offset-4 hover:decoration-[var(--v2-ink)]"
-                >
-                  View in Transactions
-                </Link>
-              </p>
-            </div>
-            <Card hover={false}>
-              <TransactionsTable
-                transactions={activity.filter(isPaymentActivityItem).map((item) =>
-                  activityToTransaction(item, currentAgent.name, walletName),
-                )}
-                loading={activityLoading}
-                error={null}
-                onRefresh={() => {}}
-                hasActiveFilters={false}
-                variant="card"
-                density="compact"
-                columns={['direction', 'activity', 'fromTo', 'date', 'amount', 'link']}
-                emptyState={{
-                  title: 'No activity yet',
-                  body: 'Payments for this agent will appear here.',
-                }}
-              />
-            </Card>
-
-            {/* #3696: the panel is part of the Activity section — directly
-                under the table — rather than a sibling of it. Its audit-trail
-                wording is unchanged. */}
-            <div className="mt-6">
-              <McpToolCallsPanel
-                items={activity.filter(isMcpToolCallActivityItem)}
-                loading={activityLoading}
-              />
-            </div>
-          </div>
-
+      {/* #4226: the tab row — the page owns `?tab=` (activity default,
+          tool-calls, settings; an unknown value falls back to Activity). No
+          counts: the numbers a reader wants (the toolbar's) live on the
+          panels, not the tabs. The Activity tab carries the amber dot while
+          unsettled payments exist — the same condition the recoverable-funds
+          banner above reads, so the dot is the banner's rows, named where
+          they live. */}
+      <div className="mt-6">
+        <Tabs
+          tabs={[
+            { value: 'activity', label: 'Activity', warningDot: unsettledPayments.length > 0 },
+            { value: 'tool-calls', label: 'Tool calls' },
+            { value: 'settings', label: 'Settings' },
+          ]}
+          value={activeTab}
+          onChange={handleTabChange}
+          ariaLabel="Agent"
+        />
       </div>
 
+      {/* ── Activity tab: the agent's own payments, failed and pending
+          included, drawn with the shared ledger pieces over #4229's kinded
+          read. NOT the wallet-scoped transactions feed — that is a different
+          population and would drop payments refused before they reached the
+          chain (routes/transactions.ts). */}
+      {activeTab === 'activity' ? (
+        <div id={AGENT_ACTIVITY_SECTION_ID} className="mt-6 scroll-mt-24" data-testid="agent-activity-section">
+          <AgentActivityTab
+            agentId={agentId}
+            agentName={currentAgent.name}
+            walletName={walletName}
+            needsSetup={currentAgent.status === 'pending_approval'}
+          />
+        </div>
+      ) : null}
+
+      {/* ── Tool calls tab (#4226): today's MCP tool-call audit panel,
+          unchanged — #4227 rebuilds it. */}
+      {activeTab === 'tool-calls' ? (
+        <div className="mt-6" data-testid="agent-tool-calls-section">
+          <McpToolCallsPanel
+            items={activity.filter(isMcpToolCallActivityItem)}
+            loading={activityLoading}
+          />
+        </div>
+      ) : null}
+
+      {/* ── Settings tab (#4226): today's Identity and settings card,
+          unchanged — #4228 rebuilds it. */}
+      {activeTab === 'settings' ? (
+        <div className="mt-6" data-testid="agent-settings-section">
       {/* #3697: the page's optional and account-level items — the Agent
           Passport row, the MCP server name row (#4209), the tax declaration row (rendered only when company
           details are VIES-valid; the toggle owns its own row and divider) and
@@ -959,6 +888,8 @@ export default function AgentDetailClient({ agentId }: Props) {
           ) : null}
         </Card>
       </section>
+        </div>
+      ) : null}
 
       {removeOpen && currentAgent ? (
         <RemoveAgentDialog

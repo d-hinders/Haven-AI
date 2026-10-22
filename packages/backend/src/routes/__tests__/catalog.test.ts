@@ -9,7 +9,7 @@ vi.mock('../../db.js', () => ({
   default: { query: (...args: unknown[]) => mockQuery(...args) },
 }))
 
-import catalogRoutes, { VALID_RAILS } from '../catalog.js'
+import catalogRoutes, { VALID_RAILS, isPublicCatalogRead } from '../catalog.js'
 import { openapiSpec } from '../../openapi/spec.js'
 import { installRequestValidation } from '../../openapi/request-validation.js'
 
@@ -136,6 +136,20 @@ describe('catalog routes', () => {
     // reasoned about — if this is ever made public too, this case says so.
     const res = await app.inject({ method: 'HEAD', url: '/catalog' })
     expect(res.statusCode).toBe(401)
+  })
+
+  it('the public read is decided from the matched route: an unmatched request is never public', () => {
+    // No matched route → no pattern. The request-target alone (here a path
+    // that IS in the public set) must not make the read public.
+    const unmatched = {
+      method: 'GET',
+      url: '/catalog',
+      routeOptions: {},
+      headers: {},
+    } as unknown as Parameters<typeof isPublicCatalogRead>[0]
+    expect(isPublicCatalogRead(unmatched)).toBe(false)
+    const matched = { ...unmatched, routeOptions: { url: '/catalog' } } as typeof unmatched
+    expect(isPublicCatalogRead(matched)).toBe(true)
   })
 
   it('still refuses an unauthenticated caller on every OTHER catalogue route (#2530)', async () => {

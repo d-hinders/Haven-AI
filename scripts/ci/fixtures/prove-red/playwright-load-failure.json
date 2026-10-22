@@ -1,0 +1,17 @@
+{
+  "suites": [],
+  "errors": [
+    {
+      "message": "Error: Cannot find module '<fixture>/pw/nope.mjs' imported from <fixture>/pw/b.spec.mjs"
+    },
+    {
+      "message": "Error: No tests found."
+    }
+  ],
+  "stats": {
+    "expected": 0,
+    "unexpected": 0,
+    "skipped": 0,
+    "flaky": 0
+  }
+}

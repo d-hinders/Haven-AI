@@ -8,15 +8,23 @@ import {
 import { machinePaymentLifecycle } from '../domain/machine-payment-lifecycle.js'
 import { agentExistsForUser, listAgentNamesForUser } from '../infra/repositories/agents.js'
 import {
-  listToolInvocationsForAgent,
-  listToolInvocationsForAgents,
-} from '../infra/repositories/agent-tool-invocations.js'
-import {
   listAgentPayments,
+  listAgentPaymentsFiltered,
+  countAgentPaymentsFiltered,
   listFeedPayments,
   sumAgentSpendAllTime,
   sumAgentSpendToday,
+  type ActivityPaymentRow,
+  type AgentPaymentActivityFilter,
 } from '../infra/repositories/agent-activity.js'
+import {
+  listToolInvocationsForAgent,
+  listToolInvocationsForAgentFiltered,
+  countToolInvocationsForAgentFiltered,
+  listToolInvocationsForAgents,
+  type AgentToolInvocationFilter,
+  type AgentToolInvocationRow,
+} from '../infra/repositories/agent-tool-invocations.js'
 import {
   isValidActivityTimeZone,
   localDayBounds,
@@ -24,6 +32,7 @@ import {
   resolveTransactionCurrency,
   serveTimeAmount,
 } from '../modules/transactions/index.js'
+import { MACHINE_PAYMENT_RAILS } from '@haven_ai/core'
 
 /**
  * Route options — the production register passes none.
@@ -53,6 +62,153 @@ async function approxCurrencyFor(userId: string): Promise<TransactionCurrency> {
   }
 }
 
+// ── The kinded read (#4229) ──────────────────────────────────────────────────
+//
+// The per-agent activity read is pageable and filterable per population when
+// `kind` is given. Omitting `kind` serves today's merged response untouched —
+// byte-identical, filters included, so an old caller (and the old backend a
+// new caller may hit: the query schema has no `additionalProperties: false`)
+// sees exactly the shape it has always seen.
+
+/** The `status` vocabularies per `kind`; a value from the other kind is a 400. */
+const PAYMENT_STATUS_FILTERS = new Set(['sent', 'pending', 'failed', 'needs_attention'])
+const TOOL_CALL_STATUS_FILTERS = new Set(['ok', 'error', 'denied'])
+
+/**
+ * ISO bounds: a date (`2026-07-10`) or a full date-time with zone/offset.
+ * `from` is inclusive, `to` exclusive — the caller passes the window's end as
+ * the next window's start, so adjacent periods tile without overlap. The
+ * regex keeps a lenient-but-not-ISO string away from Postgres's timestamptz
+ * cast (a cast error would surface as a 500, not the 400 it deserves).
+ */
+const ISO_BOUND_RE =
+  /^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?$/
+
+function parseIsoBound(value: string | undefined): string | null | 'invalid' {
+  if (value === undefined) return null
+  if (!ISO_BOUND_RE.test(value) || Number.isNaN(Date.parse(value))) return 'invalid'
+  return value
+}
+
+/**
+ * The one payment-entry builder the per-agent paths share, so the kinded read
+ * and the legacy merged read emit IDENTICAL rows. The feed route keeps its
+ * own agent-labelled copy — its extra fields are its own wire contract.
+ */
+function toPaymentEntry(
+  p: ActivityPaymentRow,
+  approxAmount: Awaited<ReturnType<typeof serveTimeAmount>>,
+  currency: TransactionCurrency,
+) {
+  const lifecycle = machinePaymentLifecycle({
+    rail: p.source,
+    paymentStatus: p.status,
+    paymentProofStatus: p.payment_proof_status,
+    reconciliationEventType: p.payment_reconciliation_event_type,
+  })
+
+  return ({
+    type: 'payment' as const,
+    id: p.id,
+    token: p.token_symbol,
+    amount_raw: p.amount_raw,
+    amount: p.amount_human,
+    // #3824: the serve-time amount in `approx_currency` (the user's
+    // preference), null when the token has no usable quote — never 0.
+    approx_amount: approxAmount,
+    approx_currency: currency,
+    to: toCanonicalAddress(p.to_address),
+    status: p.status,
+    // #3763: `tx_hash` keeps its FUNDING meaning (Haven's sponsored
+    // UserOp, account → delegate). The merchant's settlement travels
+    // beside it, named, when one is recorded — and `explorer_url`
+    // headlines it: the merchant names the settlement, so the
+    // activity feed links the SAME transaction the merchant shows,
+    // falling back to the funding leg when nothing is recorded.
+    tx_hash: p.tx_hash,
+    funding_tx_hash: p.tx_hash,
+    settlement_tx_hash: p.settlement_tx_hash,
+    settlement_scheme: p.settlement_scheme,
+    payment_id: p.id,
+    payment_proof_status: p.payment_proof_status,
+    payment_flow_status: lifecycle.paymentFlowStatus,
+    payment_attention_reason: lifecycle.paymentAttentionReason,
+    source: p.source ?? 'direct',
+    x402_resource_url: p.x402_resource_url,
+    x402_merchant_address: toCanonicalAddress(p.x402_merchant_address),
+    // #3778: the non-secret delivery pointer, when one was reported —
+    // the owner's "a deliverable exists" signal on the activity row.
+    delivery_reference: p.delivery_reference ?? null,
+    chain_id: p.chain_id,
+    token_address: toCanonicalAddress(p.token_address),
+    account_id: p.account_id,
+    account_address: toCanonicalAddress(p.account_address),
+    account_name: p.account_name,
+    // #3763: headlines the settlement when one is recorded, else the
+    // funding leg. Null exactly when both are null — for a payment
+    // row that means tx_hash is null (settlement implies a confirmed
+    // funding), which keeps the spec's "null when no transaction"
+    // contract honest under its new wording.
+    explorer_url: (p.settlement_tx_hash ?? p.tx_hash)
+      ? getExplorerUrl(p.chain_id, 'tx', (p.settlement_tx_hash ?? p.tx_hash) as string)
+      : null,
+    // #799: which on-chain mechanism moved the money, and (session rail)
+    // WHICH period-session the intent was pinned to — makes the #769
+    // lazy rollover observable to the owner without DB access.
+    execution_rail: p.execution_rail,
+    // #829: which delegation authorized a delegation-rail payment.
+    delegation_hash: p.delegation_hash,
+    confirmed_at: p.confirmed_at,
+    created_at: p.created_at,
+  })
+}
+
+/** The one tool-call-entry builder, shared by both per-agent reads. */
+function toToolCallEntry(inv: AgentToolInvocationRow) {
+  return {
+    type: 'mcp_tool_call' as const,
+    id: inv.id,
+    tool_name: inv.tool_name,
+    payment_id: inv.payment_id,
+    result_status: inv.result_status,
+    next_action: inv.next_action,
+    error_code: inv.error_code,
+    status_code: inv.status_code,
+    created_at: inv.created_at,
+  }
+}
+
+/**
+ * Normalizes the query's optional filters into the repository shape: the UI's
+ * `sent` is `payment_intents`' `confirmed`, whitespace around `q` is not
+ * part of the search term, and an empty string filters nothing.
+ */
+function paymentFilter(query: Record<string, string>): AgentPaymentActivityFilter {
+  const rawStatus = query.status ?? null
+  return {
+    status: rawStatus === 'sent' ? 'confirmed' : rawStatus,
+    rails: Array.from(MACHINE_PAYMENT_RAILS),
+    from: query.from ?? null,
+    to: query.to ?? null,
+    q: query.q?.trim() ? query.q.trim() : null,
+    paymentId: query.paymentId ?? null,
+    // #4226: the Activity tab's Token facet — an ERC-20 address. A native
+    // token is not a payment rail here (budgets are metered per ERC-20), so
+    // an address is the whole vocabulary; anything else matches nothing.
+    token: query.token?.trim() ? query.token.trim() : null,
+  }
+}
+
+function toolCallFilter(query: Record<string, string>): AgentToolInvocationFilter {
+  return {
+    status: query.status ?? null,
+    from: query.from ?? null,
+    to: query.to ?? null,
+    q: query.q?.trim() ? query.q.trim() : null,
+    paymentId: query.paymentId ?? null,
+  }
+}
+
 export default async function agentActivityRoutes(
   app: FastifyInstance,
   options: AgentActivityRouteOptions = {},
@@ -64,18 +220,85 @@ export default async function agentActivityRoutes(
 
   // GET /agent-activity/:id/activity — paginated payment + MCP tool-call
   // history (#2055: the approval half is gone with the table).
+  // #4229: WITH `kind` the route serves ONE population — filtered by
+  // `status`/`from`/`to`/`q`/`paymentId` (and `token`, #4226's Activity-tab
+  // facet, payments only), paged by `limit`/`offset`, and
+  // measured (`total`/`hasMore`, plus `counts.error` for tool calls). WITHOUT
+  // `kind` it serves today's merged window untouched: both sources each
+  // capped at `limit`, one `offset` walking both, no total — filters are
+  // ignored there, so the legacy shape is byte-identical for legacy callers.
   app.get<{
     Params: { id: string }
-    Querystring: { limit?: string; offset?: string }
+    Querystring: {
+      limit?: string
+      offset?: string
+      kind?: string
+      status?: string
+      from?: string
+      to?: string
+      q?: string
+      paymentId?: string
+      token?: string
+    }
   }>('/:id/activity', async (request, reply) => {
     const { sub } = request.user as { sub: string }
     const { id } = request.params
-    const limit = Math.min(Number((request.query as Record<string, string>).limit) || 30, 100)
-    const offset = Number((request.query as Record<string, string>).offset) || 0
+    const query = request.query as Record<string, string>
+    const limit = Math.min(Number(query.limit) || 30, 100)
+    const offset = Number(query.offset) || 0
 
     // Verify agent belongs to user
     if (!(await agentExistsForUser(id, sub))) {
       return reply.code(404).send({ error: 'Agent not found' })
+    }
+
+    const kind =
+      query.kind === 'payments' ? 'payments' : query.kind === 'tool_calls' ? 'tool_calls' : undefined
+
+    if (kind) {
+      // A `status` value from the OTHER kind's vocabulary is a client bug —
+      // answer 400 rather than silently serving an unfiltered population.
+      const status = query.status ?? null
+      const allowedStatuses = kind === 'payments' ? PAYMENT_STATUS_FILTERS : TOOL_CALL_STATUS_FILTERS
+      if (status && !allowedStatuses.has(status)) {
+        return reply.code(400).send({ error: `status ${status} does not apply to kind ${kind}` })
+      }
+      const from = parseIsoBound(query.from)
+      const to = parseIsoBound(query.to)
+      if (from === 'invalid' || to === 'invalid') {
+        return reply.code(400).send({ error: 'invalid period bound' })
+      }
+
+      // #3824: the approx amounts are struck in the user's preferred currency —
+      // one read per request, same as the legacy read.
+      const currency = await approxCurrencyFor(sub)
+
+      if (kind === 'payments') {
+        const filter = paymentFilter(query)
+        const [rows, total] = await Promise.all([
+          listAgentPaymentsFiltered(id, filter, limit, offset),
+          countAgentPaymentsFiltered(id, filter),
+        ])
+        const approxAmounts = await Promise.all(
+          rows.map((p) => serveTimeAmount(p.token_symbol, p.amount_human, currency)),
+        )
+        const activity = rows.map((p, i) => toPaymentEntry(p, approxAmounts[i], currency))
+        return { activity, total, hasMore: offset + activity.length < total }
+      }
+
+      const filter = toolCallFilter(query)
+      const [rows, counts] = await Promise.all([
+        listToolInvocationsForAgentFiltered(id, filter, limit, offset),
+        countToolInvocationsForAgentFiltered(id, filter),
+      ])
+      return {
+        activity: rows.map(toToolCallEntry),
+        total: counts.total,
+        hasMore: offset + rows.length < counts.total,
+        // The summary-line number: counted WITHOUT the status filter, so it
+        // stays stable while the caller flips the status selection.
+        counts: { error: counts.errorCount },
+      }
     }
 
     // #3824: the approx amounts are struck in the user's preferred currency —
@@ -101,80 +324,8 @@ export default async function agentActivityRoutes(
 
     // Merge and sort by created_at desc
     const activity = [
-      ...payments.map((p, i) => {
-        const lifecycle = machinePaymentLifecycle({
-          rail: p.source,
-          paymentStatus: p.status,
-          paymentProofStatus: p.payment_proof_status,
-          reconciliationEventType: p.payment_reconciliation_event_type,
-        })
-
-        return ({
-          type: 'payment' as const,
-          id: p.id,
-          token: p.token_symbol,
-          amount_raw: p.amount_raw,
-          amount: p.amount_human,
-          // #3824: the serve-time amount in `approx_currency` (the user's
-          // preference), null when the token has no usable quote — never 0.
-          approx_amount: approxAmounts[i],
-          approx_currency: currency,
-          to: toCanonicalAddress(p.to_address),
-          status: p.status,
-          // #3763: `tx_hash` keeps its FUNDING meaning (Haven's sponsored
-          // UserOp, account → delegate). The merchant's settlement travels
-          // beside it, named, when one is recorded — and `explorer_url`
-          // headlines it: the merchant names the settlement, so the
-          // activity feed links the SAME transaction the merchant shows,
-          // falling back to the funding leg when nothing is recorded.
-          tx_hash: p.tx_hash,
-          funding_tx_hash: p.tx_hash,
-          settlement_tx_hash: p.settlement_tx_hash,
-          settlement_scheme: p.settlement_scheme,
-          payment_id: p.id,
-          payment_proof_status: p.payment_proof_status,
-          payment_flow_status: lifecycle.paymentFlowStatus,
-          payment_attention_reason: lifecycle.paymentAttentionReason,
-          source: p.source ?? 'direct',
-          x402_resource_url: p.x402_resource_url,
-          x402_merchant_address: toCanonicalAddress(p.x402_merchant_address),
-          // #3778: the non-secret delivery pointer, when one was reported —
-          // the owner's "a deliverable exists" signal on the activity row.
-          delivery_reference: p.delivery_reference ?? null,
-          chain_id: p.chain_id,
-          token_address: toCanonicalAddress(p.token_address),
-          account_id: p.account_id,
-          account_address: toCanonicalAddress(p.account_address),
-          account_name: p.account_name,
-          // #3763: headlines the settlement when one is recorded, else the
-          // funding leg. Null exactly when both are null — for a payment
-          // row that means tx_hash is null (settlement implies a confirmed
-          // funding), which keeps the spec's "null when no transaction"
-          // contract honest under its new wording.
-          explorer_url: (p.settlement_tx_hash ?? p.tx_hash)
-            ? getExplorerUrl(p.chain_id, 'tx', (p.settlement_tx_hash ?? p.tx_hash) as string)
-            : null,
-          // #799: which on-chain mechanism moved the money, and (session rail)
-          // WHICH period-session the intent was pinned to — makes the #769
-          // lazy rollover observable to the owner without DB access.
-          execution_rail: p.execution_rail,
-          // #829: which delegation authorized a delegation-rail payment.
-          delegation_hash: p.delegation_hash,
-          confirmed_at: p.confirmed_at,
-          created_at: p.created_at,
-        })
-      }),
-      ...invocations.map((inv) => ({
-        type: 'mcp_tool_call' as const,
-        id: inv.id,
-        tool_name: inv.tool_name,
-        payment_id: inv.payment_id,
-        result_status: inv.result_status,
-        next_action: inv.next_action,
-        error_code: inv.error_code,
-        status_code: inv.status_code,
-        created_at: inv.created_at,
-      })),
+      ...payments.map((p, i) => toPaymentEntry(p, approxAmounts[i], currency)),
+      ...invocations.map((inv) => toToolCallEntry(inv)),
     ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
 
     return { activity }

@@ -2188,6 +2188,8 @@ export type paths = {
         /**
          * One agent's payments and tool calls, newest first.
          * @description A heterogeneous list discriminated by `type`: payment or mcp_tool_call. (#2262: the third branch, `approval`, is gone — #2055 dropped `approval_requests` and this handler merges `payment_intents` and the MCP tool-call audit log, with no third source.) **Read the pagination carefully — it is approximate by construction.** `limit` is applied to EACH of the two sources separately and the results are then merged and sorted, so this route can return up to twice `limit` entries, and `offset` walks each source independently rather than the merged sequence. (The combined feed below merges the same way but then truncates to `limit`, so the two routes do NOT paginate identically.) Treat the list as a recent-activity window, not as a stable paged sequence.
+         *
+         *     **One population at a time (#4229).** When `kind` is given the route serves exactly that population — `payments` or `tool_calls` — filtered by `status`, `from`/`to`, `q` and `paymentId`, paged by `limit`/`offset` over the FILTERED sequence, and measured: the response adds `total` (the filtered population's size, ignoring `limit`/`offset`) and `hasMore` (`offset` + returned < `total`). `kind=tool_calls` also adds `counts.error` — the population's error count WITHOUT the `status` filter applied, so the summary line stays stable while the status selection flips. `from` is inclusive and `to` exclusive; `q` is a substring match — for payments over the merchant resource URL, the merchant/recipient address and the owner's contact name for the recipient, for tool calls over the tool name and error code; `paymentId` narrows to that one payment (a tool call links to its payment). `status` has one vocabulary per kind — `sent | pending | failed | needs_attention` for payments (`needs_attention` is the derived state: a machine-rail payment with an open merchant-retry-rejected reconciliation event) and `ok | error | denied` for tool calls; a value from the other kind's vocabulary is a 400. Omitting `kind` serves the legacy merged window described above and IGNORES every filter, so a legacy caller's response is unchanged and a new caller against an old backend (which does not reject unknown query parameters) simply gets the unfiltered merged shape.
          */
         get: operations["getAgentActivity"];
         put?: never;
@@ -16488,6 +16490,20 @@ export interface operations {
                 /** @description Capped at 100. */
                 limit?: number;
                 offset?: number;
+                /** @description Serve ONE population instead of the merged window. Adds total/hasMore to the response (plus counts.error for tool_calls). Omitted: the legacy merged read, filters ignored. */
+                kind?: "payments" | "tool_calls";
+                /** @description Requires kind. Payments: sent (confirmed), pending (awaiting signature or submitted), failed, needs_attention (a machine-rail payment with an open merchant-retry-rejected reconciliation event). Tool calls: ok, error, denied. A value from the other kind is a 400. */
+                status?: "sent" | "pending" | "failed" | "needs_attention" | "ok" | "error" | "denied";
+                /** @description Requires kind. Inclusive ISO lower bound on created_at — a date or a full date-time. A non-ISO value is a 400. */
+                from?: string;
+                /** @description Requires kind. EXCLUSIVE ISO upper bound on created_at — a date or a full date-time; pass the next period's start so adjacent windows tile. A non-ISO value is a 400. */
+                to?: string;
+                /** @description Requires kind. Case-insensitive substring search. Payments: the merchant resource URL, the merchant/recipient address, and the owner's contact name for the recipient. Tool calls: the tool name and the error code. */
+                q?: string;
+                /** @description Requires kind. Narrows to that one payment (kind=payments) or to the calls recorded against it (kind=tool_calls). */
+                paymentId?: string;
+                /** @description Requires kind=payments. The ERC-20 token contract address, matched case-insensitively against payment_intents.token_address (#4226 — the agent Activity tab's Token facet; the population is the agent's own payments, which the wallet-scoped transactions feed does not serve). Any other value matches nothing. */
+                token?: string;
             };
             header?: never;
             path: {
@@ -16498,7 +16514,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Merged activity, newest first. */
+            /** @description Merged activity, newest first — or, with `kind`, one filtered population with its total and hasMore. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -16575,6 +16591,30 @@ export interface operations {
                             /** @description Feed only. */
                             agent_name?: string;
                         })[];
+                        /** @description Present when `kind` is given: the filtered population's size, ignoring limit/offset. */
+                        total?: number;
+                        /** @description Present when `kind` is given: offset + returned rows < total. */
+                        hasMore?: boolean;
+                        /** @description Present when kind=tool_calls. */
+                        counts?: {
+                            /** @description The population's tool calls with result_status error, counted WITHOUT the status filter — the summary line stays stable while the status selection flips. */
+                            error: number;
+                        };
+                    };
+                };
+            };
+            /** @description A query parameter is off-spec (kind/status enum, limit/offset bounds), or `status` belongs to the other kind, or `from`/`to` is not ISO. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
                     };
                 };
             };

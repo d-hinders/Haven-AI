@@ -1,4 +1,3 @@
-import type { ReactNode } from 'react'
 import type { ApiSchema } from '@haven_ai/core'
 import type { StatusTone } from '@/components/ui/StatusBadge'
 
@@ -6,7 +5,7 @@ import type { StatusTone } from '@/components/ui/StatusBadge'
  * Wire shapes come from `@haven_ai/core`'s generated API types (#984) — the
  * OpenAPI spec is the single source; nothing here restates a response field.
  * This module keeps the frontend's established names as aliases, plus the
- * frontend-ONLY derived types (presentation overrides, client-side filter
+ * frontend-ONLY derived types (presentation state, client-side filter
  * state) that extend the wire shapes rather than replacing them.
  */
 
@@ -58,18 +57,6 @@ export interface AggregatedTransaction extends ApiSchema<'Transaction'> {
    * through `TransactionsTable` so the table stays a single primitive.
    */
   statusBadge?: { label: string; tone: StatusTone }
-  /**
-   * Optional title override. When provided, replaces the rule-based title
-   * the table would otherwise compute from direction / source / agentName.
-   */
-  titleOverride?: string
-  /**
-   * Optional from → to override for the From/To cell. When provided,
-   * replaces the address-resolution path. Use sparingly — only when the
-   * caller already has richer context than the table can resolve (e.g.
-   * x402 hostname + tooltip).
-   */
-  movementOverride?: ReactNode
   /**
    * Optional override for the external-link cell. `null` hides the link
    * entirely (e.g. approval items without a tx hash). Undefined falls back

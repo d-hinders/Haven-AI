@@ -1424,6 +1424,18 @@ last-verified: "2026-10-21"
 > signers keep the old x402 arm until upgraded. Nothing else in this document
 > was re-verified in this pass.
 >
+> **Recent re-verification (#4242):** the signer's x402 binding now records
+> which shape was signed, and `haven_x402_sign_header` builds an EIP-3009
+> header only from a funding-leg binding; a settlement-child binding is
+> refused (`SIGNING_ERROR`) and retired. `haven_sign_x402` refuses a
+> settlement child before signing. Three tool descriptions changed; no tool,
+> argument or version set changes, so the handshake and consent hash do not
+> move. Skew: hosted guidance already routes erc7710 to `haven_sign` +
+> `haven_submit { settlement_scheme: 'erc7710' }`, which is unchanged, so a
+> new signer against the current backend refuses nothing it is sent on a
+> live path. Installed signers keep the old behaviour until upgraded. Nothing
+> else in this document was re-verified in this pass.
+>
 > **Recent re-verification (#3283):** the allowlist above moved into
 > `@haven_ai/sdk` (`assertBoundDirectPaymentUserOp` and friends, exported from
 > `@haven_ai/sdk/edge`). The signer imports it and wraps the SDK's

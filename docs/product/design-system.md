@@ -2474,8 +2474,9 @@ Use `components/transactions/TransactionsTable.tsx` for full transaction history
 Use `TransactionActivityRow` for compact dashboard previews and, in its ledger mode
 (#4096), a full day-grouped transaction ledger — the account page's Activity tab is
 its first consumer (#4097), one row per transaction opening the shared
-`TransactionDetailPanel`. Agent detail keeps `TransactionsTable` for its compact
-card-nested history.
+`TransactionDetailPanel`. The agent page's Activity tab is the second (#4226):
+the agent's own payments in the same ledger pieces, with the "by <agent>"
+title and the movement line dropped — the page fixes both.
 
 **Merchant-first titles (#3810).** The dashboard's activity list reads
 `counterpartyLabel` in `lib/transaction-presentation.tsx` with the opt-in

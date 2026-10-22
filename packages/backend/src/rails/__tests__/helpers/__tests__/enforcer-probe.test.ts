@@ -1,3 +1,4 @@
+import { inspect } from 'node:util'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   assertTestnetOnly,
@@ -12,6 +13,8 @@ import {
   SKIP_ACK_ENV,
   RPC_URL_ENV,
   DEFAULT_PROBE_RPC_URL,
+  probeEndpointLabel,
+  transportCauseSummary,
   unreachableMessage,
 } from '../enforcer-probe.js'
 
@@ -102,6 +105,99 @@ describe('a transport failure never reads as a verdict', () => {
     }
     expect(unreachableMessage('https://rpc.test', false)).toContain(SKIP_ACK_ENV)
     expect(unreachableMessage('https://rpc.test', true)).toContain(RPC_URL_ENV)
+  })
+})
+
+/**
+ * #4217: a paid endpoint carries its key in the URL, and these messages reach
+ * public CI logs. Only the host (and a non-default port) may be printed.
+ */
+const SECRET_RPC_URL = 'https://user:pass@rpc.example/v2/SECRETKEY?apikey=X'
+// Distinctive fragments only: the message's own prose says "a pass or a
+// breach", so a bare 'pass' would match the sentence, not the credential.
+const SECRET_PARTS = ['user:pass', 'pass@', '/v2/', 'SECRETKEY', 'apikey', '=X']
+
+function expectNoSecretParts(message: string): void {
+  for (const part of SECRET_PARTS) expect(message).not.toContain(part)
+}
+
+describe('the probe never prints its RPC URL, only the endpoint (#4217)', () => {
+  it('labels an endpoint by host, keeping a non-default port and dropping a default one', () => {
+    expect(probeEndpointLabel(SECRET_RPC_URL)).toBe('rpc.example')
+    expect(probeEndpointLabel('https://rpc.example:443/x')).toBe('rpc.example')
+    expect(probeEndpointLabel('http://127.0.0.1:8545/?key=1')).toBe('127.0.0.1:8545')
+    expect(probeEndpointLabel('not a url SECRETKEY')).toBe('(unparseable RPC URL)')
+  })
+
+  it('unreachableMessage names the host and none of the userinfo, path or query', () => {
+    for (const ci of [true, false]) {
+      const message = unreachableMessage(SECRET_RPC_URL, ci)
+      expect(message).toContain('could not reach rpc.example.')
+      expectNoSecretParts(message)
+    }
+  })
+
+  describe('transport errors', () => {
+    const request = {
+      rpcUrl: SECRET_RPC_URL,
+      enforcer: ('0x' + '11'.repeat(20)) as `0x${string}`,
+      terms: '0xdeadbeef' as `0x${string}`,
+      executionCallData: '0xfeed' as `0x${string}`,
+      delegator: ('0x' + 'aa'.repeat(20)) as `0x${string}`,
+      redeemer: ('0x' + 'bb'.repeat(20)) as `0x${string}`,
+    }
+
+    afterEach(() => {
+      vi.unstubAllGlobals()
+    })
+
+    it('a fetch that throws reports the host only', async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => {
+          throw new Error('ECONNREFUSED')
+        }),
+      )
+      const err = (await probeEnforcer(request).catch((e: unknown) => e)) as Error
+      expect(err).toBeInstanceOf(EnforcerProbeTransportError)
+      expect(err.message).toBe('eth_call failed to reach rpc.example')
+      expectNoSecretParts(err.message)
+    })
+
+    it("keeps the fetch failure's names and codes as the cause, never its message text", async () => {
+      // undici's own wording for a bad URL quotes the URL it was given, and
+      // its DNS cause names the host — vitest prints causes on a red.
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => {
+          throw new TypeError(`Failed to parse URL from ${SECRET_RPC_URL}`, {
+            cause: Object.assign(new Error(`getaddrinfo ENOTFOUND rpc.example (${SECRET_RPC_URL})`), {
+              code: 'ENOTFOUND',
+            }),
+          })
+        }),
+      )
+      const err = (await probeEnforcer(request).catch((e: unknown) => e)) as Error
+      expect(err).toBeInstanceOf(EnforcerProbeTransportError)
+      const cause = err.cause as Error
+      expect(cause.message).toContain('TypeError ← Error (ENOTFOUND)')
+      expect(cause.cause).toBeUndefined()
+      expectNoSecretParts(cause.message)
+      expectNoSecretParts(inspect(err, { depth: 10 }))
+    })
+
+    it('summarises a non-Error cause and an empty chain without throwing', () => {
+      expect(transportCauseSummary('boom').message).toContain('transport failure: string')
+      expect(transportCauseSummary(undefined).message).toContain('transport failure: unknown')
+    })
+
+    it('an HTTP error status reports the host only', async () => {
+      vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 429, json: async () => ({}) })))
+      const err = (await probeEnforcer(request).catch((e: unknown) => e)) as Error
+      expect(err).toBeInstanceOf(EnforcerProbeTransportError)
+      expect(err.message).toBe('eth_call → HTTP 429 from rpc.example')
+      expectNoSecretParts(err.message)
+    })
   })
 })
 

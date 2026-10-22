@@ -1752,6 +1752,9 @@ export async function serveAgentDetailResponses(
   await page.route('**/api/**', async (route) => {
     const request = route.request()
     const path = new URL(request.url()).pathname.replace(/^\/api/, '')
+    // #4229: the kinded activity read is filterable — the fixture needs the
+    // query string, not just the path.
+    const activityQuery = new URL(request.url()).searchParams
     if (request.method() !== 'GET') return route.fallback()
 
     if (path === '/agents') {
@@ -1863,6 +1866,87 @@ export async function serveAgentDetailResponses(
     }
 
     if (path === `/agent-activity/${agentId}/activity`) {
+      // #4229: the kinded read is pageable and filterable, so the fixture
+      // honours kind, status and offset — a filtered capture never bakes in
+      // mixed or unfiltered rows. Omitting kind serves the legacy merged
+      // list, unchanged. (from/to/q/paymentId are not fixture inputs; the
+      // capture suite never passes them.)
+      const activityKind = activityQuery.get('kind')
+      if (activityKind) {
+        const activityStatus = activityQuery.get('status')
+        const activityOffset = Number(activityQuery.get('offset')) || 0
+        const paymentRow = {
+          type: 'payment',
+          id: 'pay-e2e-1',
+          agent_id: agentId,
+          agent_name: testAgent.name,
+          token: 'USDC',
+          token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+          amount_raw: '25000000',
+          amount: '25.00',
+          // #3824: the serve-time amount at the served user's rate in their
+          // preference (#4166) — 25 USDC ≈ 269.00 SEK at the fixture's
+          // ~10.76 SEK/USD story; the USD session prices it at par.
+          ...serveTimeApproxSnake(25),
+          to: testRecipientAddress,
+          reason: null,
+          status: 'confirmed',
+          tx_hash: `0x${'a1'.repeat(32)}`,
+          source: 'x402',
+          x402_resource_url: 'https://api.example.dev/reports',
+          x402_merchant_address: testRecipientAddress,
+          chain_id: testSafe.chain_id,
+          account_id: testSafe.id,
+          account_address: testSafeAddress,
+          account_name: testSafe.name,
+          explorer_url: `https://sepolia.basescan.org/tx/0x${'a1'.repeat(32)}`,
+          confirmed_at: '2026-07-10T08:20:00.000Z',
+          payment_proof_status: 'payment_confirmed',
+          payment_flow_status: 'confirming_merchant',
+          payment_attention_reason: null,
+          created_at: '2026-07-10T08:18:00.000Z',
+        }
+        const toolCallRow = {
+          type: 'mcp_tool_call',
+          id: 'call-e2e-1',
+          agent_id: agentId,
+          agent_name: testAgent.name,
+          tool_name: 'haven_pay_x402_quote',
+          payment_id: 'pay-e2e-1',
+          result_status: 'ok',
+          next_action: 'settle',
+          error_code: null,
+          status_code: 200,
+          created_at: '2026-07-10T08:17:00.000Z',
+        }
+        const paymentStatuses = new Set(['sent', 'pending', 'failed', 'needs_attention'])
+        const rows: Array<Record<string, any>> =
+          activityKind === 'payments'
+            ? [paymentRow]
+            : [toolCallRow]
+        const filtered = rows.filter((row) => {
+          if (!activityStatus) return true
+          if (activityKind === 'tool_calls') return row.result_status === activityStatus
+          if (!paymentStatuses.has(activityStatus)) return true
+          if (activityStatus === 'sent') return row.status === 'confirmed'
+          if (activityStatus === 'pending') return row.status === 'pending_signature' || row.status === 'submitted'
+          if (activityStatus === 'failed') return row.status === 'failed'
+          return row.payment_attention_reason != null
+        })
+        const page = filtered.slice(activityOffset)
+        const body: Record<string, unknown> = {
+          activity: page,
+          total: filtered.length,
+          hasMore: activityOffset + page.length < filtered.length,
+        }
+        // The summary-line count ignores the status filter (same contract as
+        // the route), so it is stable while the status selection flips.
+        if (activityKind === 'tool_calls') {
+          body.counts = { error: rows.filter((row) => row.result_status === 'error').length }
+        }
+        await fulfillJson(route, body)
+        return
+      }
       await fulfillJson(route, {
         activity: [
           {

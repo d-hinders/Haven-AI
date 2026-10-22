@@ -1,0 +1,65 @@
+{
+  "numTotalTests": 5,
+  "success": false,
+  "testResults": [
+    {
+      "name": "<fixture>/vt/a.test.ts",
+      "status": "failed",
+      "message": "",
+      "assertionResults": [
+        {
+          "ancestorTitles": [
+            "suite one"
+          ],
+          "title": "passes",
+          "fullName": "suite one passes",
+          "status": "passed",
+          "failureMessages": []
+        },
+        {
+          "ancestorTitles": [
+            "suite one"
+          ],
+          "title": "fails expect",
+          "fullName": "suite one fails expect",
+          "status": "failed",
+          "failureMessages": [
+            "AssertionError: expected 1 to be 2 // Object.is equality"
+          ]
+        },
+        {
+          "ancestorTitles": [
+            "suite one"
+          ],
+          "title": "fails node assert",
+          "fullName": "suite one fails node assert",
+          "status": "failed",
+          "failureMessages": [
+            "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:"
+          ]
+        },
+        {
+          "ancestorTitles": [
+            "suite one",
+            "inner"
+          ],
+          "title": "deep",
+          "fullName": "suite one inner deep",
+          "status": "failed",
+          "failureMessages": [
+            "TypeError: boom"
+          ]
+        },
+        {
+          "ancestorTitles": [
+            "suite one"
+          ],
+          "title": "skipped",
+          "fullName": "suite one skipped",
+          "status": "skipped",
+          "failureMessages": []
+        }
+      ]
+    }
+  ]
+}

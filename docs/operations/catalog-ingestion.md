@@ -66,9 +66,9 @@ the page does not pretend otherwise. The Bazaar discovery cron
 (`catalog-discovery.ts`) goes through the same writer before its insert, so
 `merchant_catalog.merchant_id NOT NULL` holds by construction. Its rows carry
 `merchant_catalog.source = 'bazaar'` (migration 117, #4245) and are served as
-`source: 'bazaar'`, sorted after operator and ingestion rows: a third party's
-own name and description, which no operator reviewed and which have no
-ownership proof. Every other writer gets the column's `'operator'` default.
+`source: 'bazaar'`: a third party's own name and description, which no
+operator reviewed and which have no ownership proof. `GET /catalog` sorts them
+after operator and ingestion rows. Every other writer gets the column's `'operator'` default.
 
 ## Cadences and thresholds (module constants)
 

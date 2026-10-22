@@ -131,7 +131,12 @@ describe('foldOwnAccountTransfers (module internals, no HTTP)', () => {
   })
 
   it('does not fold a self-send or a missing leg', () => {
-    const self = ownTransferLegs({ from: ACCOUNT_A, to: ACCOUNT_A })
+    const self = ownTransferLegs({ from: ACCOUNT_A, to: ACCOUNT_A }).map((leg) => ({
+      ...leg,
+      accountId: 'account-a',
+      accountAddress: ACCOUNT_A,
+      accountName: 'Main account',
+    }))
     expect(foldOwnAccountTransfers(self, ownAccounts)).toEqual(self)
 
     const [outbound] = ownTransferLegs()

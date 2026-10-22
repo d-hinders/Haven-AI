@@ -167,8 +167,6 @@ export function foldOwnAccountTransfers(
   >()
 
   for (const [index, tx] of transactions.entries()) {
-    if (tx.from.toLowerCase() === tx.to.toLowerCase()) continue
-
     const source = accountsByLocation.get(accountLocationKey(tx.from, tx.chainId))
     const destination = accountsByLocation.get(accountLocationKey(tx.to, tx.chainId))
     if (!source || !destination || source.id === destination.id) continue

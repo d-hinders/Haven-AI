@@ -2811,6 +2811,9 @@ export const STALE_BUSY_DECLARATIONS = []
 async function newFixtureContext(browser, vp, scenario, { signedOut = false, colorScheme = 'light' } = {}) {
   const context = await browser.newContext({
     viewport: { width: vp.width, height: vp.height },
+    // #4293: local times render in UTC whatever the host's zone, matching
+    // the Playwright config and the fixtures' `tz: 'UTC'`.
+    timezoneId: 'UTC',
     deviceScaleFactor: DEVICE_SCALE_FACTOR,
     reducedMotion: 'reduce',
     // The OS-preference half of the scheme contract (#2929). The DETERMINISTIC
@@ -7072,7 +7075,7 @@ async function main() {
       server = spawn('npm', ['run', 'dev', '--', '--hostname', '127.0.0.1', '--port', String(port)], {
         cwd: ROOT,
         stdio: 'ignore',
-        env: { ...process.env, NEXT_TELEMETRY_DISABLED: '1' },
+        env: { ...process.env, NEXT_TELEMETRY_DISABLED: '1', TZ: 'UTC' }, // #4293: the server's zone matches the browser's
       })
       server.on('exit', (code) => {
         if (code && code !== 0 && code !== null) console.error(`dev server exited ${code}`)

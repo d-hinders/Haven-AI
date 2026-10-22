@@ -76,8 +76,9 @@ const VIEWPORTS = SHARED_VIEWPORTS as ReadonlyArray<{
   height: number
 }>
 
-// #4288: the ledger capture's clock. The day buckets are LOCAL days and no
-// project or config sets a timezone, so the spec pins one; the freeze sits
+// #4288: the ledger capture's clock. The day buckets are LOCAL days, so the
+// spec pins its own zone — a declared override of the config's UTC (#4293),
+// kept so these baselines do not move; the freeze sits
 // 06:00 local (≥ 3 h past midnight) so `DS_LEDGER_ROWS`' two recent rows
 // bucket under the same "Today" band and the inset divider renders.
 const LEDGER_TZ = 'Europe/Stockholm'
@@ -708,8 +709,8 @@ test.describe('design-system visual regression', () => {
   // timestamps from `Date.now()` at module load, so the capture needs a
   // FROZEN clock, set BEFORE `goto`, at least 3 hours past local midnight
   // (else l1 and l2 fall on different days and no inset divider renders) —
-  // with the timezone pinned, because `playwright.config.ts` sets none and
-  // the day buckets are LOCAL days. A separate describe, because the
+  // with the timezone pinned to LEDGER_TZ — overriding the config's UTC
+  // (#4293) — because the day buckets are LOCAL days. A separate describe, because the
   // timezone is a context option and this viewport loop declares its own.
   test.describe('clock-frozen ledger (#4288)', () => {
     test.use({ timezoneId: LEDGER_TZ })

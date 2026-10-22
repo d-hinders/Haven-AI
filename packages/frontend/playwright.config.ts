@@ -225,6 +225,13 @@ export default defineConfig({
   ],
   use: {
     baseURL,
+    // #4293: every capture and e2e run renders local times in UTC, whatever
+    // the host's zone — CI is UTC, a laptop is not, and a baseline
+    // regenerated off-CI otherwise bakes in a different wall clock (the
+    // dashboard-mobile "refills Thu 12:00" vs desktop "10:00", #4289). The
+    // server half is pinned in webServer.env below. The one spec-level
+    // override is the #4288 ledger capture (design-system.visual.spec.ts).
+    timezoneId: 'UTC',
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
@@ -244,6 +251,8 @@ export default defineConfig({
     reuseExistingServer: REUSE_EXISTING_SERVER,
     timeout: 120_000,
     env: {
+      // #4293: the server renders in the same zone as the browser (use.timezoneId).
+      TZ: 'UTC',
       NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: 'playwright-placeholder',
       NEXT_TELEMETRY_DISABLED: '1',
       HOSTNAME: '127.0.0.1',

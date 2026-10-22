@@ -1680,6 +1680,13 @@ describe('DelegationBudgetCard hero states (#4226)', () => {
     expect(screen.queryByText(/Last paid to/)).toBeNull()
   })
 
+  it('payments in the window but no last-payment time: Last paid reads a dash, never a fabricated age (#4260)', () => {
+    mockGet.mockReturnValue([heroBudget()])
+    render(<DelegationBudgetCard {...PROPS} stats={{ ...stats, lastPaymentAt: null }} />)
+    expect(figure('Last paid').textContent).toBe('—')
+    expect(figure('Payments').textContent).toBe('7')
+  })
+
   it('no payments in 30 days but an older one: the empty line, then when and to whom (#4260)', () => {
     mockGet.mockReturnValue([heroBudget()])
     render(<DelegationBudgetCard {...PROPS} stats={{ ...stats, d30: spendWindow(0, 0) }} />)

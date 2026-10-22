@@ -2040,8 +2040,10 @@ export async function serveAgentDetailResponses(
       await fulfillJson(route, {
         ...dashboardOverview,
         activity: dashboardOverview.activity.map((group) => withServedApprox(group, 12.5)),
+        // A spec that researches a shared-overview agent (`agent-e2e`) keeps
+        // one row per id: the researched agent replaces, never duplicates.
         agents: [
-          ...dashboardOverview.agents,
+          ...dashboardOverview.agents.filter((agent) => agent.id !== agentId),
           {
             ...dashboardOverview.agents[0],
             id: agentId,

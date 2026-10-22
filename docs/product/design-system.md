@@ -1690,8 +1690,7 @@ success green, outgoing uses debit sky, pending uses neutral grey. Four densitie
 - `compact`: 32px mark, 14px icon — dashboard rows, on the same rhythm as agent rows.
 - `figure`: 24px mark, 14px icon, 7px radius — beside a 20px secondary figure
   (`Amount size="md"`), such as the account summary card's Last 30 days In/Out
-  pair (#4260)
-  (#4259; the account summary card uses `inline` until then).
+  pair (#4260). Added by #4259.
 - `inline`: 18px mark, 11px icon — the size for a mark in dense inline text, where a
   line of body copy sets the height.
 

@@ -75,7 +75,8 @@ cross-origin rule:
   in rule 4. An API key, a cookie or an x402 payment header supplied for one
   merchant never reaches the origin it redirects to, and an `https` → `http`
   hop is a different origin.
-- A 307/308 that would re-send a request body to another origin is refused
+- A redirect that would re-send a request body to another origin (a 307/308,
+  or a 301/302 on a method other than POST) is refused
   mid-flight (`redirect_cross_origin_body`) only when the request carries a
   payment: the paid delivery (`deliverPayment`), or a body with an x402
   payment in `_meta["x402/payment"]`. That body can be a string, a
@@ -95,7 +96,14 @@ cross-origin rule:
 A refusal on the paid delivery is the funded, undelivered state on this path
 too (see Refusals). `MerchantCompletion.retryRequest` records it as
 `merchant_retry_rejected_after_payment`. The event's `retry_status` is the
-redirect status, and its `details` carry `refusal` and `redirect_location`.
+redirect status and `retry_body` is `null`. Its `details` carry `refusal` and
+one more key:
+- `redirect_location`, the redirect target, when the refusal names one:
+  `redirect_cross_origin_body`, `redirect_budget_exceeded`, or a hop that
+  `assertUrl` refused;
+- `refused_url`, the URL that answered with the redirect, otherwise:
+  `redirect_on_non_get`, `redirect_missing_location` or
+  `redirect_invalid_location`, when an embedder sets a policy.
 It then re-throws the refusal with the `payment_id`, and the local MCP
 answers with `haven_get_payment_status` as the
 next tool and "do not pay again".

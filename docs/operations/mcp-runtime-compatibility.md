@@ -87,7 +87,7 @@ last-verified: "2026-10-21"
 > `packages/mcp/**` is on this contract's cover list.
 >
 > When the embedded SDK refuses to re-send a paid request to a different
-> origin (a 307/308 from the merchant, refusal `redirect_cross_origin_body`),
+> origin (a body-keeping redirect from the merchant, refusal `redirect_cross_origin_body`),
 > the local paid tools now answer `MERCHANT_EGRESS_REFUSED` with:
 >
 > - `paymentId`;

@@ -404,10 +404,21 @@ haven_pay_x402_quote → haven_sign
 > MCP and SDK embedders have no URL policy: without `merchantEgress` the
 > client still reaches `http` to loopback and reserved
 > `.test`/`.localhost`/`.invalid`/`.example` fixtures, with no caps or per-use
-> budgets. Both sides share one redirect rule (#4244, #4257): a hop to another
-> origin carries only an allow-list of headers, so a paid GET or a 303 that
-> crosses origin is followed with the payment headers stripped and no body,
-> and a 307/308 that would re-send a paid body to another origin is refused.
+> budgets. Both sides share one header rule (#4244, #4257): a hop to another
+> origin carries only an allow-list of headers. Under the hosted policy only
+> GET redirects are followed at all, so any non-GET 3xx, a 303 answering a
+> paid POST included, is refused with `redirect_on_non_get`. Without a policy
+> the Fetch spec's rewrite applies:
+>
+> - A 301 or 302 rewrites a POST to a body-less GET.
+> - A 303 rewrites every method except GET and HEAD.
+> - Any other method keeps its method and body, so a PUT answered with a 302
+>   keeps its body.
+> - A paid GET, or a paid request rewritten to GET, that crosses origin is
+>   followed with the payment headers stripped and no body.
+> - A redirect that would re-send a paid body to another origin is refused:
+>   a 307/308, or a 301/302 on a non-POST method.
+>
 > On the local side a redirect refused during paid
 > delivery is recorded and reported as funded and undelivered, with
 > `haven_get_payment_status` as the next tool. Accepted residual on

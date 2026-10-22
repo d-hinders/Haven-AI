@@ -102,9 +102,9 @@ last-verified: "2026-10-22"
 >
 > On the transport, a hop to another origin now carries only the #4244 header
 > allow-list, and redirects are followed by the SDK with `redirect: 'manual'`.
-> `MerchantEgressRefusedError` gains `redirect_cross_origin_body` and four
-> optional fields (`redirectStatus`, `redirectTarget`, `paymentId`,
-> `settlementScheme`).
+> `MerchantEgressRefusedError` gains `redirect_cross_origin_body` and three
+> optional fields (`redirectStatus`, `redirectTarget`, `settlementScheme`); its
+> inherited `paymentId` is now filled in on a paid delivery.
 >
 > No tool is added, renamed or re-shaped. No strict schema, consent hash,
 > version-skew rule or signing input moves. `last-verified` is not

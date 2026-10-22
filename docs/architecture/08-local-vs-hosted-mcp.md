@@ -412,8 +412,9 @@ haven_pay_x402_quote → haven_sign
 >
 > - A 301 or 302 rewrites a POST to a body-less GET.
 > - A 303 rewrites every method except GET and HEAD.
-> - Every other case keeps both the method and the body: a PUT answered with a
->   301 or 302, and any request answered with a 307 or 308.
+> - Every other case keeps both the method and the body: a non-POST method
+>   (a PUT, say) answered with a 301 or 302, and any request answered with a
+>   307 or 308.
 > - A paid GET, or a paid request rewritten to GET, that crosses origin is
 >   followed with the payment headers stripped and no body.
 > - A redirect that would re-send a paid body to another origin is refused:

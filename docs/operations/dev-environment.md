@@ -770,8 +770,8 @@ Isolation rules that are non-negotiable for a payments product:
  > **Re-verified #4281 (2026-10-22):** the refresh probe in
  > `modules/catalog/merchant-catalog.ts` now sends every request through the
  > SSRF guard (`infra/http/ssrf-guard.ts`). That means https on the default
- > port only, a public resolved address only, 5 s and 256 KiB, and no
- > redirect on a POST. It still probes with the row's declared method and
+ > port only, a public resolved address only, a 15 s total deadline and a
+ > 256 KiB cap, and no redirect on a method that carries a body. It still probes with the row's declared method and
  > body example, and what a success records (`pay_to`,
  > `asset_transfer_methods`, `http_method`) is unchanged. Every catalog row
  > seeded by migrations is an https URL on a public host, so a local dev

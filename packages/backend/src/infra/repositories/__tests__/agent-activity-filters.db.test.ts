@@ -152,7 +152,7 @@ async function seedInvocation(
   )
 }
 
-const NO_FILTER: AgentPaymentActivityFilter = { status: null, rails: ['x402', 'mpp_demo', 'mpp_crypto', 'spt'], from: null, to: null, q: null, paymentId: null }
+const NO_FILTER: AgentPaymentActivityFilter = { status: null, rails: ['x402', 'mpp_demo', 'mpp_crypto', 'spt'], from: null, to: null, q: null, paymentId: null, token: null }
 
 const NO_TOOL_FILTER: AgentToolInvocationFilter = { status: null, from: null, to: null, q: null, paymentId: null }
 

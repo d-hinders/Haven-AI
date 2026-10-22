@@ -14,6 +14,7 @@
     "design:coupling:strict": "node scripts/design-system-coupling.mjs --strict --out=/dev/null",
     "screenshot": "node scripts/screenshot.mjs",
     "test": "npm --prefix ../core run build && vitest run",
+    "test:local": "node scripts/test-local.mjs",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "test:visual": "VISUAL_REGRESSION=1 playwright test .visual.spec.ts --project=chromium-desktop",

@@ -80,8 +80,23 @@ covers:
   - scripts/ci/check-stale-client-compat.mjs
   - packages/mcp-server/src/next-arguments-corpus.json
   - packages/mcp-server/src/tool-contract-snapshot.test.ts
-last-verified: "2026-10-21"
+last-verified: "2026-10-22"
 ---
+
+> **Re-verified unchanged (#4271, 2026-10-22, a new self-test step in
+> `ci_config_checks`).** The only covered file this diff touches is
+> `.github/workflows/ci.yml`: one step ADDED after the design-lint self-test
+> in `ci_config_checks` — `node --test
+> packages/frontend/scripts/test-local.test.mjs`, the dependency-free
+> self-test of the `test:local` watchdog wrapper (#4271; the test drives a
+> stub child, never vitest, and imports no package in this repo). No job,
+> env value, literal, condition or existing step moves, and no covered tool,
+> schema, `tools-list.snapshot.json` entry, description budget, channel,
+> dist-tag, release step or consent surface is touched by it. The wrapper
+> itself (`packages/frontend/scripts/test-local.mjs`) and its package.json
+> script are frontend-local and on no cover list. `last-verified` is
+> re-stamped to 2026-10-22 for this note; this block is the scope. Nothing
+> else in this document was re-verified.
 
 > **Re-verified unchanged (#4244, 2026-10-22, merchant-transport only).**
 > `packages/sdk/src/mcp-merchant-transport.ts` and `merchant-egress.ts` are on

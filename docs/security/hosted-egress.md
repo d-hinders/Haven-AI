@@ -95,15 +95,17 @@ cross-origin rule:
 
 A refusal on the paid delivery is the funded, undelivered state on this path
 too (see Refusals). `MerchantCompletion.retryRequest` records it as
-`merchant_retry_rejected_after_payment`. The event's `retry_status` is the
-redirect status and `retry_body` is `null`. Its `details` carry `refusal` and
-one more key:
+`merchant_retry_rejected_after_payment`. Without a policy the only refusal
+that can reach it is `redirect_cross_origin_body`. Every other refusal below
+fires only when an embedder sets `merchantEgress` on the local completion.
+The event's `retry_status` is the redirect status and `retry_body` is `null`.
+Its `details` carry `refusal` and one more key:
 - `redirect_location`, the redirect target, when the refusal names one:
-  `redirect_cross_origin_body`, `redirect_budget_exceeded`, or a hop that
-  `assertUrl` refused;
-- `refused_url`, the URL that answered with the redirect, otherwise:
-  `redirect_on_non_get`, `redirect_missing_location` or
-  `redirect_invalid_location`, when an embedder sets a policy.
+  `redirect_cross_origin_body`, and with a policy `redirect_budget_exceeded`
+  or a hop that `assertUrl` refused;
+- `refused_url`, the URL that answered with the redirect, otherwise (all
+  with a policy): `redirect_on_non_get`, `redirect_missing_location` or
+  `redirect_invalid_location`.
 It then re-throws the refusal with the `payment_id`, and the local MCP
 answers with `haven_get_payment_status` as the
 next tool and "do not pay again".

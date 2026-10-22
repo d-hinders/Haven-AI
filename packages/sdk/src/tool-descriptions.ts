@@ -193,7 +193,7 @@ export const toolDescriptions = {
       'Step 1 of a purchase: discover payable services from Haven\'s curated merchant catalog — names, prices, the next call.',
     selectionGuidance:
       'Use this when the user asks what the agent can buy, pay for, or which paid services exist — or when you need a resource URL for a service the user described. ' +
-      'Use verified=verified for entries Haven watched pass a live quote probe (any source) — domain_verified is the only ownership claim; never treat these badges as proof of merchant honesty, quality, or reliability. ' +
+      'Use verified=verified for entries Haven watched pass a live quote probe (any source; bazaar seller-asserted) — domain_verified is the only ownership claim; never treat these badges as proof of merchant honesty, quality, or reliability. ' +
       'Do NOT use for balance, budget, or spend-limit questions — use haven_get_allowances. ' +
       'Do NOT use to pay — each returned entry names the next tool to call.',
     behavior:

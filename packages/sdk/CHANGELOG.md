@@ -17,6 +17,11 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ### Changed
 
+- **`HavenCatalogEntry.source` gains a third value, `'bazaar'` (#4245)**, for catalog rows the x402
+  Bazaar discovery cron wrote (seller-asserted, no operator review). A consumer with an exhaustive
+  `switch` over `source` must add the case; `discoverTools({ verified: 'operator' })` already excludes
+  these rows, no update needed.
+
 - **The local EIP-3009 settlement-evidence report is retried while Haven
   answers `retryable` (#4215).** On the local path (`fetch`,
   `payX402Quote`, `resumeX402Payment`), the merchant's settlement report in

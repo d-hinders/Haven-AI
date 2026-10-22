@@ -27,34 +27,28 @@ test.describe('transaction history — x402 display + detail panel', () => {
 
     // History renders the row and the export affordance.
     await expect(page.getByRole('heading', { name: 'Transaction history' })).toBeVisible()
-    // #2357: the row title is user-facing copy now — the protocol name moved
-    // to the detail drawer's section heading, asserted below.
-    // #2834: scoped to the table. `getByText('Agent payment')` is a
-    // case-insensitive substring match, and the document <title> ("Haven,
-    // agent payments within your rules") contains it. Next's dev server
-    // renders that <title> into <body>, where Playwright's text engine
-    // reaches it and — first in DOM order — shadows the row, so the unscoped
-    // locator resolved to the hidden <title> and could never pass. The
-    // production build puts the <title> in <head> (out of the text engine's
-    // reach), which is why the same spec passed in CI. Scoping to the table
-    // binds the assertion to the row and makes it immune to the page title
-    // in either environment.
-    // #3763: the fixture now serves TWO agent-payment rows (recorded +
-    // unrecorded eip3009 settlement, so the visual baseline photographs both
-    // states) — the bare locator would strict-mode-violate on the pair. The
-    // row under test is the FIRST one (the recorded state): the click below
-    // already anchors on `.first()`, so the assertion and the open agree.
-    await expect(page.getByRole('table').getByText('Agent payment').first()).toBeVisible()
+    // #4266: the page is the shared ledger now, not a table. The row title is
+    // WHO WAS PAID — the x402 resource host, never "Agent payment" or an
+    // address — and the protocol name lives in the drawer's section heading,
+    // asserted below. Scoped to the ledger so the document <title> ("Haven,
+    // agent payments within your rules"), which Next's dev server renders
+    // into <body>, can never be what a text locator resolves to (#2834).
+    // The fixture serves TWO x402 rows (recorded + unrecorded eip3009
+    // settlement, #3763); the row under test is the FIRST, which the click
+    // below also anchors on.
+    const ledger = page.getByTestId('transactions-ledger')
+    await expect(ledger.getByText('research.example').first()).toBeVisible()
     await expect(page.getByRole('button', { name: 'Export CSV' })).toBeEnabled()
 
     // Clicking the row opens the per-type detail panel.
-    await page.getByRole('button', { name: /View details for/ }).first().click()
+    await ledger.locator('[role="button"][aria-haspopup="dialog"]').first().click()
 
     const panel = page.getByRole('dialog')
     await expect(panel).toBeVisible()
     // x402-specific body: resource hostname (not the full URL) + merchant.
     // The section heading carries the protocol name since #2357; the panel's
-    // own title is the row's user-facing "Agent payment by …".
+    // own title is `transactionTitle`'s "Agent payment by …" (the row's title is the
+    // resource host since #4266).
     await expect(panel.getByText('x402 payment', { exact: true })).toBeVisible()
     await expect(panel.getByText('Resource', { exact: true })).toBeVisible()
     await expect(panel.getByText('research.example')).toBeVisible()
@@ -72,9 +66,8 @@ test.describe('transaction history — x402 display + detail panel', () => {
     // desktop width — but described accurately now. The panel's own box is
     // asserted separately below (#1773).
     //
-    // #1772 is the mobile-width clipping of this same table. It does not fire
-    // here: at 1280px the table fits, and the mobile project asserts the route
-    // separately with that defect exempted by name.
+    // (#1772 was the mobile clipping of the retired table; the ledger has no
+    // table, and navigation.mobile.spec.ts asserts 375px separately.)
     expect(await expectNoHorizontalOverflow(page)).toMatchObject({
       hasOverflow: false,
       contentRegionFound: true,

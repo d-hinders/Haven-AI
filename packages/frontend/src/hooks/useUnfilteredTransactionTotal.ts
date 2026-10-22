@@ -18,6 +18,12 @@ interface Options {
    * ledger. Omitted on the all-accounts Transactions page.
    */
   accountId?: string
+  /**
+   * The Transactions page's own-transfer fold (#4265/#4266): the feed counts
+   * a move between the user's accounts once, so the denominator must too —
+   * else the count reads "40 of 41" on an unfiltered-equivalent scope.
+   */
+  foldOwnTransfers?: boolean
 }
 
 /**
@@ -51,6 +57,7 @@ export function useUnfilteredTransactionTotal({
   feedTotal,
   feedLoading,
   accountId,
+  foldOwnTransfers = false,
 }: Options): number | null {
   const [fetchedTotal, setFetchedTotal] = useState<number | null>(null)
 
@@ -66,7 +73,7 @@ export function useUnfilteredTransactionTotal({
     // "3 of 40" on a 40-row ledger.
     const query = accountId
       ? `/transactions?offset=0&limit=1&accountId=${encodeURIComponent(accountId)}`
-      : '/transactions?offset=0&limit=1'
+      : `/transactions?offset=0&limit=1${foldOwnTransfers ? '&foldOwnTransfers=1' : ''}`
     api
       .get<TransactionsFeedResponse>(query)
       .then((data) => {
@@ -79,7 +86,7 @@ export function useUnfilteredTransactionTotal({
     return () => {
       cancelled = true
     }
-  }, [filtered, feedTotal, feedLoading, accountId])
+  }, [filtered, feedTotal, feedLoading, accountId, foldOwnTransfers])
 
   return filtered ? fetchedTotal : feedTotal
 }

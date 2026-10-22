@@ -69,6 +69,10 @@ export function transactionFilterParams(filters: TransactionFilterState): URLSea
     params.set('from', filters.from)
     params.set('to', filters.to)
   }
+  // #4266: the fold is a projection, not a filter — but the list, the totals
+  // walk and the export must all ask for it, or In/Out count both legs of a
+  // move the list shows once.
+  if (filters.foldOwnTransfers) params.set('foldOwnTransfers', '1')
   return params
 }
 

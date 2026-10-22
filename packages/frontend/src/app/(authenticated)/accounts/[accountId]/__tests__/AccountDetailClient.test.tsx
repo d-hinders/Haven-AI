@@ -5,7 +5,7 @@
  * (active agents, hidden revoked count), and the Security & details tab
  * (AccountSignersCard + Account details). The removals are asserted too: no
  * off-ramp panel, no "Agent access" card, no "Token balances" table, no
- * "Advanced account details", no TransactionsTable.
+ * "Advanced account details", no transactions table (deleted with #4266).
  */
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'

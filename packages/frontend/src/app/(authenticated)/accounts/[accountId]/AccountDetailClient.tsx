@@ -46,7 +46,7 @@
  * - The "Agent access" card (superseded by the Agents tab), the "Token
  *   balances" table (superseded by Holdings), "Advanced account details"
  *   (superseded by Account details in the Security tab), and the 10-row
- *   `TransactionsTable` preview (the Activity tab renders the feed through
+ *   transactions-table preview, deleted with #4266 (the Activity tab renders the feed through
  *   the shared `TransactionActivityRow` instead; #4098 owns that tab).
  *
  * ## Tab ownership

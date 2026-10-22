@@ -147,9 +147,9 @@ function ownAccountSenderName(
  * #3824) — the groups expose no chain-scoped address map, so the client
  * cannot re-run the `accountNamesByAddress` lookup itself.
  *
- * The default mode is byte-identical to the pre-#3810 behaviour:
- * `TransactionsTable` and `TransactionDetailPanel` keep rendering truncated
- * addresses until #3811 retires them.
+ * The default mode is byte-identical to the pre-#3810 behaviour: the list
+ * rows pass `{ noAddress: true }` (#3811); `TransactionDetailPanel` keeps the
+ * default, where the full address is the point.
  */
 export function counterpartyLabel(
   tx: CounterpartyFields,

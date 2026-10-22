@@ -174,12 +174,6 @@
     "packages/sdk/src/skill-content.test.ts",
     "scripts/frontend-copy-lint.test.mjs"
   ],
-  "docs/product/design-review.md": [
-    "packages/frontend/src/components/transactions/TransactionsTable.tsx"
-  ],
-  "docs/product/README.md": [
-    "packages/frontend/src/components/transactions/TransactionsTable.tsx"
-  ],
   "docs/product/screen-recipes.md": [
     "packages/backend/src/index.ts",
     "packages/frontend/src/components/AccountSignersCard.tsx",

@@ -208,6 +208,9 @@ describe('AccountActivityTab — filters in the URL (#4098/#4130)', () => {
     renderTab()
 
     expect(seenFilters.value).toMatchObject({ search: 'coffee', direction: 'in', accountId: 'safe-1' })
+    // The per-account ledger keeps both legs of a move: it never asks for
+    // the all-accounts fold `/transactions` requests (#4266).
+    expect(seenFilters.value).not.toHaveProperty('foldOwnTransfers')
     // The toolbar echoes the seeded search as a removable chip; the Account
     // facet does not exist here — the page fixes the account.
     expect(screen.getByRole('button', { name: 'Remove “coffee”' })).toBeInTheDocument()

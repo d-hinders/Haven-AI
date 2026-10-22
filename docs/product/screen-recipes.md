@@ -24,7 +24,6 @@ covers:
   - packages/frontend/src/components/haven/**
   - packages/frontend/src/app/(authenticated)/agents/[agentId]/AgentDetailClient.tsx
   - packages/frontend/src/components/transactions/TransactionDetailPanel.tsx
-  - packages/frontend/src/components/transactions/TransactionsTable.tsx
   - packages/frontend/src/components/ui/Input.tsx
   - packages/ui/**
   - packages/frontend/src/components/ui/PageHeader.tsx
@@ -889,9 +888,8 @@ Money and risk clarity:
 - Technical hashes stay in detail surfaces.
 - Use `TransactionActivityRow` in ledger mode for the agent's payments — the
   shared row, the day bands and the toolbar are the account tab's pieces, so
-  the two ledgers read as one system. `TransactionsTable` is for surfaces that
-  need semantic columns and sorting (the wallet feed); the agent's own ledger
-  is not one of them. Lead with the merchant (`counterpartyLabel`'s no-address
+  the two ledgers read as one system, and `/transactions` is the same ledger.
+  Lead with the merchant (`counterpartyLabel`'s no-address
   mode), not a raw recipient address.
 - Put recipient, source, and links in row metadata or detail actions.
 
@@ -970,18 +968,31 @@ Structure:
    carries a removable chip per active filter and Clear filters. The list
    summary line below the card (#4196) carries the standard count on the
    right — "{n} transactions", or "{shown} of {total} transactions" filtered,
-   both server figures — and, filtered, the "N received · N sent · N failed"
-   totals on the left. The next page is "Show N more" below the table card
+   both server figures — and the "In <total> · Out <total>" money totals on
+   the left (per #4266; a Direction filter shows only its half). The next page is "Show N more" below the ledger card
    (the pattern's paging rule); nothing renders under the list once every
    page is loaded. The URL keeps the keys it had before #4111 except search,
-   written as `q` with the old `search` still read; the export request builds its own API
-   parameters, apart from the URL codec. Sorting stays on the column
-   headers. The account page's Activity tab uses the same toolbar and codec
-   (#4130).
-3. The full-page `TransactionsTable` variant for `/transactions`; card/compact
-   variants are valid for scoped histories on account and agent detail.
+   written as `q` with the old `search` still read; the export request builds its API
+   parameters with the list's own `transactionFilterParams`, apart from the
+   URL codec. Order is newest first by date, fixed —
+   there is no Sort chip and no column headers. The account page's Activity tab uses
+   the same toolbar and codec (#4130).
+3. The list is the shared ledger (per #4266): `TransactionActivityRow` in ledger
+   mode with `onOpen`, in compact density, under
+   `TransactionActivityDayHeader` day bands — the same anatomy the account and
+   agent Activity tabs use. Each row: the title is the counterparty
+   (merchant-first, `counterpartyLabel` no-address mode); the subline names who
+   acted ("You" or the agent) plus " · <account>" when the user has two or more
+   accounts; the badge is `transactionRowBadge(tx)` plus the accounting badge; the
+   amount sits right with the time under it. An own-account transfer (the
+   backend's `foldOwnTransfers=1`, #4265) reads "Moved between your accounts"
+   with `DirectionMark direction="move"`, the subline "You · <from> → <to>" (or
+   "Your accounts · …"), and an unsigned amount. The summary line carries
+   "In <total> · Out <total>" beside the count. No Initiator, From/To or link
+   columns. A row opens `TransactionDetailPanel`, where the full address and
+   explorer link live.
 4. A filtered list with no rows shows the standard no-match state
-   (`ListNoMatch`) where the rows were, below the toolbar; the table's own
+   (`ListNoMatch`) where the rows were, below the toolbar; the page's own
    empty state covers a history with nothing in it yet.
 
 Money and risk clarity:
@@ -993,10 +1004,8 @@ Money and risk clarity:
   break opportunity the otherwise-NBSP figure had, so approx-valued rows
   wrapped onto two lines; #4165 made it the one rule's answer for every
   row), and an unknown valuation as an em dash — never 0.
-  The `md`+ amount column is `whitespace-nowrap`: a money figure never
-  truncates (that hides digits) and never wraps — the auto-layout table
-  widens the column to the figure's min-content and the Activity column
-  (`max-w-0`) absorbs the difference. The token amount appears only where a
+  The amount is `whitespace-nowrap`: a money figure never truncates (that
+  hides digits) and never wraps — the title absorbs the difference. The token amount appears only where a
   budget is set and in the detail drawer; the `≈` mark lives beside it in
   the drawer, where it explains why the two figures differ — and only where
   the conversion changes the number: a re-priced figure in kr or €, or a
@@ -1004,16 +1013,17 @@ Money and risk clarity:
   #4165; the rule is `shouldMarkApprox`, see `design-system.md` § Amount:
   currency mode).
 - **List rows show no addresses (#3810, #3811).** The counterparty half of
-  every row — `From -> To` line included — renders through
+  every row renders through
   `counterpartyLabel`'s no-address mode: the merchant's hostname, the source
-  title, a resolved name, "Deposit" (every deposit here — "From <account>" for
-  a transfer from another own account is the dashboard Activity card's alone,
-  #4099), or "New recipient". A raw address never
+  title, a resolved name, "Deposit", "From <account>" for a transfer from
+  another of the user's own accounts (#4099 — the dashboard reads the server's
+  name, the ledgers the chain-keyed own-account map), or "New recipient". A raw address never
   ellipsises into a list row; the detail drawer is where the full address
   lives.
 - Use external links for details, but do not make hashes the primary labels.
-- Use `TransactionActivityRow` for short non-sortable previews such as
-  Dashboard. Use card/compact `TransactionsTable` for scoped sortable histories.
+- Use `TransactionActivityRow` for every transaction list: compact previews
+  such as Dashboard, and in ledger mode the full `/transactions` history and the
+  account and agent Activity tabs.
 - **Never present a capped list as a complete one (#2882).** The feed reads a
   bounded window per source per account — a fixed page budget (#2884) — so
   `total` counts what was returned, not what the account holds. When the
@@ -1027,9 +1037,9 @@ Money and risk clarity:
   other surface fed by the same hook — the account detail page's transaction
   count included. Hedge the wording ("may not be your full history"); the
   detection is not exact on every provider, and the reason lives in the code.
-- Use `Payment sent` (neutral), `Received payment`, and `Agent payment by [agent name]` before using technical transaction language. `Payment sent by you` is reserved for human-initiated payments only (#2097); a transaction with no attribution renders as `Payment sent` with an explicit unknown initiator — never `You`.
+- The ROW leads with the counterparty (above), never "Agent payment by …" (#4266). The detail drawer's title (`transactionTitle`) uses `Payment sent` (neutral), `Received payment`, and `Agent payment by [agent name]` before technical transaction language. `Payment sent by you` is reserved for human-initiated payments only (#2097); a transaction with no attribution renders as `Payment sent` with an explicit unknown initiator — never `You`.
 - For x402 payments, collapse the historical Safe-to-agent funding step into
-  one merchant-facing row such as `Agent payment by [agent name]`. On the
+  one merchant-facing row titled with the merchant's hostname. On the
   eip3009 bridge the funding leg is REAL and present on every payment (#946):
   the account funds the agent's delegate key first, then the delegate pays
   the merchant from the agent's signed authorization. The row still
@@ -1038,30 +1048,21 @@ Money and risk clarity:
   one is recorded, saying "Merchant settlement · Not recorded" when it is
   not (#3763). Scheme-less/legacy rows keep the single-transaction read. The
   row title deliberately does NOT name the protocol (#2357): `x402` rides on
-  the detail drawer's section heading, and the row's `From -> To` line
-  carries the resource hostname, so an x402 row and an ordinary agent payment
-  read the same at the title and are told apart by those two surfaces.
-- Show the money path as a compact `From [wallet/counterparty] -> To [wallet/counterparty]` line instead of repeating wallet, initiator, and counterparty in a separate metadata row.
+  the detail drawer's section heading, and the row title is the resource
+  hostname.
+- The row's subline names who acted and, with two or more accounts, the
+  account — never a `From … -> To …` line (#4266). Only a move between the
+  user's own accounts draws an arrow: "You · <from> → <to>", or "Your
+  accounts · <from> → <to>" when no owner send was recorded (#2097).
 - **The detail drawer is where users verify (#3811).** Addresses and hashes
   render IN FULL there — never ellipsised — and every address carries the
   one copy affordance (`CopyButton`, "Copy address"); the explorer link
   stays beside it. The headline is the user's currency figure with the
   token amount beside it, signless (owner decision 2026-10-09, #3811): the
   currency figure carries the sign.
-- Keep amount in its own cell **at `md` and up**; date and the external-details
-  link are separate columns or controls. Below `md` the amount column collapses
-  and the amount rides under the title inside the activity cell (#2734) — its
-  110px was coming straight off the title, which is the only flexible column,
-  and the title wrapped to three lines at 390px as a result.
-- Full history table sorting must use raw transaction values for amount sorting and `aria-sort` on sortable headers.
-- **Sorting is available at `md` and up only, and that is deliberate** (owner
-  decision 2026-09-09, #2790). Both sortable headers are `revealAt="md"` and
-  there is no sort control elsewhere, so a phone gets the default order —
-  newest first — and no way to change it. Do not read the absence as a defect,
-  and do not add a mobile sort control without taking it through #2736.
-- On mobile, preserve direction, activity/movement, amount, and the
-  external-details link. Secondary columns, including date and initiator, may
-  hide.
+- The amount sits on the right at `sm` and up and rides under the title
+  below `sm`; the time sits under the amount at every width; the explorer link lives in `TransactionDetailPanel`, not on the row.
+  There are no columns to collapse and no sorting (#4266 — date order only).
 
 ## Analytics
 

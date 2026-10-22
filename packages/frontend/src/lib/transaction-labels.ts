@@ -15,10 +15,10 @@ export function isMachinePaymentSource(source?: string | null): boolean {
 /**
  * Primary title for a machine-payment transaction row (#2357).
  *
- * This string leads the row people scan — the dashboard activity list
- * (`DashboardClient.tsx`), the transactions table (`TransactionsTable.tsx`),
- * the side panel heading (`TransactionDetailPanel.tsx`) and the agent detail
- * activity feed (`AgentDetailClient.tsx`) — so it follows
+ * This string heads the detail drawer (`TransactionDetailPanel.tsx`, through
+ * `transactionTitle`) and is `counterpartyLabel`'s fallback title for a list
+ * row with no resource hostname (the dashboard and the ledgers, #4266) — so
+ * it follows
  * `docs/product/copy-guidelines.md` § Core principle: write for users, not for
  * the protocol. It is deliberately NOT the same call as
  * `settlementSchemeLabel` in `transaction-presentation.tsx`, which returns raw
@@ -27,8 +27,8 @@ export function isMachinePaymentSource(source?: string | null): boolean {
  * guidelines allow technical vocabulary.
  *
  * - `x402` → "Agent payment". The row already carries the protocol's useful
- *   half elsewhere: the movement column resolves to the resource hostname
- *   (`counterpartyLabel`), and the detail drawer names the protocol in its
+ *   half elsewhere: the ledger row's title is the resource hostname
+ *   (`counterpartyLabel`, #4266), and the detail drawer names the protocol in its
  *   "x402 payment" section heading and shows Resource / Merchant / Settlement.
  *   The branch is kept rather than folded into `transactionTitle`'s generic
  *   `Agent payment by <name>` fallback, as defence against the TYPE contract:

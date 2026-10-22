@@ -35,8 +35,8 @@
  *
  * `/dashboard` is the post-login landing screen and the densest composition of
  * shared primitives in the product; `/transactions` is the money-history screen
- * and the `Table` primitive's only product consumer at scale. Neither had a
- * pixel of coverage.
+ * and was then the `Table` primitive's only product consumer at scale (it
+ * renders the shared ledger since #4266). Neither had a pixel of coverage.
  *
  * **`/agents` and `/agents/agent-research` are covered from #2733**, plus the
  * URL-seeded filtered list `agents-list-filtered` (#3165); all three ship
@@ -301,17 +301,18 @@ const ANCHOR_TIMEOUT_MS = 60_000
  * as a render/compile problem before suspecting the fixture.
  *
  * Per route rather than one global floor, because the floor has to sit under
- * the route's real content and `/transactions` legitimately renders 320
- * characters while `/settings` renders an order of magnitude more (1,407 when
+ * the route's real content and `/transactions` rendered 320 characters on the
+ * retired table (338 on the ledger, #4266) while `/settings` renders an order of magnitude more (1,407 when
  * measured; see the table note).
  *
  * Per AXIS as well, not just per route (#2817): a responsive layout carries
- * less text at 390 than at 1280 — `/transactions` measures 246 characters at
- * the mobile width against 320 at desktop, on this harness — so a floor set
+ * less text at 390 than at 1280 — `/transactions` measured 246 characters on the retired table at
+ * the mobile width against 320 at desktop (the ledger: 299 against 338,
+ * #4266), on this harness — so a floor set
  * from the desktop measurement fails every mobile run of the same route.
  * `minCharsMobile` overrides `minChars` on the mobile axis only, and is set
- * FROM MEASUREMENT like the desktop numbers: `/transactions` mobile gets 200
- * (measured 246), `/accounts` mobile gets 100 (measured 104 — matching the
+ * FROM MEASUREMENT like the desktop numbers: `/transactions` mobile gets 240
+ * (measured 299 on the ledger; 246 on the retired table), `/accounts` mobile gets 100 (measured 104 — matching the
  * header's historic 104-character measurement of this route). A floor above
  * the measured content is not strictness; it is a permanent red.
  */
@@ -345,14 +346,6 @@ type ProductRoute = {
    * static strings omit it.
    */
   frozenRelativeTime?: string
-  /**
-   * Set when the mobile layout hides every element that renders the fixture's
-   * relative timestamp (#2817, measured): the pin is then asserted on the
-   * desktop axis only. `page.clock.setFixedTime` stays global either way — a
-   * hidden timestamp cannot drift a pixel, and a freeze failure would have
-   * nothing visible to fail on at that width.
-   */
-  frozenRelativeTimeHiddenOnMobile?: boolean
   /**
    * Register `serveAgentDetailResponses` for this route — the detail-page
    * reads (`passport`, `delegate-balance`, per-agent activity/stats) that the
@@ -403,24 +396,25 @@ const ROUTES: ProductRoute[] = [
     path: '/transactions',
     slug: 'transactions',
     viewports: ['desktop', 'mobile'],
-    minChars: 250,
-    /** Measured at 390: the responsive layout renders 246 characters. */
-    minCharsMobile: 200,
+    minChars: 260,
+    /**
+     * Measured at 390 on the ledger (#4266): 299 characters (338 at 1280),
+     * `innerText` of `#main-content` on the structure-only harness. Floors
+     * sit below the measurement, as before the table was retired (250/200
+     * against 320/246).
+     */
+    minCharsMobile: 240,
     anchor: (page: Page) => page.getByRole('heading', { name: 'Transaction history' }),
     /**
      * `dashboardTransaction.timestamp` is 1779000000 (2026-05-17T06:40Z), which
      * is 3 months and change before `FROZEN_NOW` — `timeAgo`'s `${months}mo ago`
      * bucket. Pinned as a literal so a clock that stops being frozen fails HERE,
      * by name, rather than as a pixel diff on a date nobody can attribute.
+     * Asserted on BOTH axes since #4266: the ledger row prints the time under
+     * the amount at every width, where the table's mobile layout hid its date
+     * column (the old `frozenRelativeTimeHiddenOnMobile` exemption, #2817).
      */
     frozenRelativeTime: '3mo ago',
-    /**
-     * #2817, measured: below the table's 718px container stage the date
-     * column is collapsed and NO riding element carries the timestamp (the
-     * mobile page renders no `ago` string at all — read off this spec's own
-     * failure snapshot), so the pin is asserted on the desktop axis only.
-     */
-    frozenRelativeTimeHiddenOnMobile: true,
   },
 
   /**
@@ -694,10 +688,7 @@ test.describe('product-route visual regression', () => {
           )
         await expectNoSkeletons(main, route.path)
 
-        if (
-          route.frozenRelativeTime &&
-          !(axis === 'mobile' && route.frozenRelativeTimeHiddenOnMobile)
-        ) {
+        if (route.frozenRelativeTime) {
           await expect(
             main.getByText(route.frozenRelativeTime, { exact: true }).first(),
             `${route.path}: the frozen clock is not in effect — expected the ` +

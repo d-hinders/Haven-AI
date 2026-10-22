@@ -56,7 +56,6 @@ import {
   type PaymentActivityItem,
 } from '@/hooks/useAgentActivity'
 import { api } from '@/lib/api'
-import { machinePaymentLifecyclePresentation } from '@/lib/machine-payment-lifecycle'
 import {
   failedOrRejectedStatus,
   paymentStatusPresentation,
@@ -64,7 +63,7 @@ import {
 import {
   counterpartyLabel,
   transactionFiat,
-  transactionStatus,
+  transactionRowBadge,
 } from '@/lib/transaction-presentation'
 import { transactionTokenLabel } from '@/lib/transaction-filters'
 import { timeAgo } from '@/lib/format'
@@ -210,9 +209,10 @@ export function periodToBounds(period: PeriodValue | undefined): { from?: string
 
 /**
  * The adapter from a kinded-read activity row to the shape the shared ledger
- * and detail panel read. Carried over from the page's `TransactionsTable`
- * days (#2120, #3824, #3129 intact) — only the overrides are gone, with the
- * "by <agent>" title and the movement line they carried (#4226).
+ * and detail panel read. Carried over from the page's transactions-table
+ * days (#2120, #3824, #3129 intact; the table was deleted with #4266) —
+ * only the overrides are gone, with the "by <agent>" title and the movement
+ * line they carried (#4226).
  *
  * Exported (#4227): the Tool calls tab's payment link lands here and the
  * fetched payment row goes through this same adapter into the detail panel,
@@ -568,11 +568,11 @@ function AgentLedgerRow({
   /** #4165: the same-day inset hairline, on every row after a day's first. */
   insetDivider: boolean
 }) {
-  // The same precedence the wallet feed's rows read (`TransactionsTable`):
-  // the machine-payment lifecycle outranks the intent's own status, because a
+  // The one row-badge precedence (`transactionRowBadge`, #4266): the
+  // machine-payment lifecycle outranks the intent's own status, because a
   // stranded payment's intent is `confirmed` — its funding settled — and
   // only the lifecycle says it needs attention (#2196, #4249).
-  const badge = transactionStatus(tx) ?? machinePaymentLifecyclePresentation(tx) ?? tx.statusBadge
+  const badge = transactionRowBadge(tx)
   const fiat = transactionFiat(tx, 'row')
   return (
     <TransactionActivityRow

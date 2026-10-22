@@ -28,10 +28,41 @@ import type { ReactNode } from 'react'
 export function TransactionMovement({
   from,
   to,
+  bare = false,
 }: {
   from: ReactNode
   to: ReactNode
+  /**
+   * Drop the visible "From"/"To" words (#4266): a ledger subline reads
+   * "My account → Reserve" after the actor, where the words would repeat
+   * what the arrow says. The arrow then carries the direction for screen
+   * readers too, as an sr-only "to". Bare is ONE line that never wraps:
+   * each name shrinks to an ellipsis instead, because its host — the
+   * compact ledger subline — is a one-line box in a 72px row from `sm` up,
+   * where a wrapped line overflows the row (#1833).
+   */
+  bare?: boolean
 }) {
+  if (bare) {
+    return (
+      // One line, each name shrinking to an ellipsis (#4266 reviews) and
+      // carrying its full text as a `title` for when it is cut: an
+      // unshrinkable box is hard-clipped mid-word in the one-line subline,
+      // and a wrapping one overflows the fixed-height row at `sm`.
+      <span className="inline-flex min-w-0 max-w-full items-center gap-x-1.5">
+        <span className="min-w-0 truncate" title={typeof from === 'string' ? from : undefined}>
+          {from}
+        </span>
+        <span aria-hidden="true" className="shrink-0">
+          →
+        </span>
+        <span className="sr-only">to</span>
+        <span className="min-w-0 truncate" title={typeof to === 'string' ? to : undefined}>
+          {to}
+        </span>
+      </span>
+    )
+  }
   return (
     <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
       {/* `items-end`, not `items-center`: when the container is too narrow to

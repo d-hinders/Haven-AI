@@ -2,15 +2,13 @@
 
 import { ArrowRight, EllipsisVertical } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext'
 import { useAgents } from '@/hooks/useAgents'
 import {
   useAgentActivity,
   isPaymentActivityItem,
-  isMcpToolCallActivityItem,
-  type McpToolCallActivityItem,
 } from '@/hooks/useAgentActivity'
 import { useDashboardOverview } from '@/hooks/useDashboardOverview'
 import { useDelegateBalance } from '@/hooks/useDelegateBalance'
@@ -66,6 +64,7 @@ import { Row } from '@/components/ui/Row'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Skeleton } from '@/components/ui/Skeleton'
 import AgentActivityTab from './AgentActivityTab'
+import AgentToolCallsTab from './AgentToolCallsTab'
 import {
   ApprovalRequiredBanner,
 } from '@/components/haven'
@@ -75,72 +74,6 @@ type AgentTab = 'activity' | 'tool-calls' | 'settings'
 
 function agentTabFromUrl(raw: string | null): AgentTab {
   return raw === 'tool-calls' || raw === 'settings' ? raw : 'activity'
-}
-
-function mcpToolCallTone(resultStatus: string): 'success' | 'warning' | 'danger' | 'neutral' {
-  switch (resultStatus) {
-    case 'ok':
-      return 'success'
-    case 'denied':
-      return 'danger'
-    case 'error':
-      return 'warning'
-    default:
-      return 'neutral'
-  }
-}
-
-/**
- * Surfaces the agent_tool_invocations audit log produced when an MCP server
- * tags Haven API calls with X-Haven-MCP-Tool. Money-moving calls are still
- * shown in the transactions table above; this panel exists so read-only
- * tool calls (status checks, allowance reads) are also visible — that's
- * the user-facing piece of the issue #163 audit-log requirement.
- */
-function McpToolCallsPanel({
-  items,
-  loading,
-}: {
-  items: McpToolCallActivityItem[]
-  loading: boolean
-}) {
-  if (loading && items.length === 0) return null
-  if (!loading && items.length === 0) return null
-
-  return (
-    <div>
-      <div className="mb-4">
-        <h2 className="text-base font-semibold text-[var(--v2-ink)]">MCP tool calls</h2>
-        <p className="mt-1 text-sm text-[var(--v2-ink-3)]">
-          Tool invocations from an MCP-connected agent runtime. This list is an
-          audit trail, not a spending control.
-        </p>
-      </div>
-      <Card hover={false}>
-        <ul className="divide-y divide-[var(--v2-divider)]">
-          {items.map((item) => (
-            <li key={item.id} className="flex items-center justify-between gap-3 px-4 py-3">
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <code className="truncate text-sm font-medium text-[var(--v2-ink)]">{item.tool_name}</code>
-                  <StatusBadge tone={mcpToolCallTone(item.result_status)}>{item.result_status}</StatusBadge>
-                </div>
-                <p className="mt-1 text-xs text-[var(--v2-ink-3)]">
-                  {item.next_action ? `next: ${item.next_action}` : ''}
-                  {item.next_action && item.error_code ? ' · ' : ''}
-                  {item.error_code ? `error: ${item.error_code}` : ''}
-                  {!item.next_action && !item.error_code && item.payment_id
-                    ? `payment ${item.payment_id.slice(0, 8)}…`
-                    : ''}
-                </p>
-              </div>
-              <span className="shrink-0 text-xs text-[var(--v2-ink-3)]">{timeAgo(item.created_at)}</span>
-            </li>
-          ))}
-        </ul>
-      </Card>
-    </div>
-  )
 }
 
 interface Props {
@@ -185,6 +118,10 @@ export default function AgentDetailClient({ agentId }: Props) {
   const router = useRouter()
   const searchParams = useSearchParams()
   const activeTab = agentTabFromUrl(searchParams.get('tab'))
+  // #4227: a Tool-calls payment link lands here — `?tab=activity&paymentId=…`.
+  // Read once and handed to the Activity tab, which opens the payment's
+  // detail panel and then consumes it (clearPaymentLink).
+  const openPaymentId = searchParams.get('paymentId')
   const {
     agents,
     loading,
@@ -210,7 +147,10 @@ export default function AgentDetailClient({ agentId }: Props) {
       return null
     }
   }, [chainId])
-  const { activity, loading: activityLoading } = useAgentActivity(agent?.id ?? null)
+  // The merged read stays for the page's own consumers — the banners'
+  // attention filter and ReplaceSigningKeyModal's recent payments. The Tool
+  // calls tab (#4227) reads #4229's kinded population instead.
+  const { activity } = useAgentActivity(agent?.id ?? null)
   // #4226: the hero's Last 30 days reads the dashboard overview — the same
   // source #4209's card footer uses, the way the account page reads it. A
   // revoked (or otherwise uncovered) agent is not in the response; the hero
@@ -289,6 +229,29 @@ export default function AgentDetailClient({ agentId }: Props) {
       { scroll: false },
     )
   }
+  // #4227: the Tool calls tab's payment link — selects the Activity tab and
+  // carries the payment's id. Only the tab and the id are written; the
+  // Activity tab's own filters are the Activity tab's state and a tab switch
+  // clears them anyway (the rule above).
+  const openPayment = useCallback(
+    (paymentId: string) => {
+      router.replace(
+        `/agents/${encodeURIComponent(agentId)}?tab=activity&paymentId=${encodeURIComponent(paymentId)}`,
+        { scroll: false },
+      )
+    },
+    [agentId, router],
+  )
+  // #4227: the Activity tab consumed (or failed to open) the linked payment —
+  // strip ONLY the parameter, preserving the tab and the Activity tab's filter
+  // state, so a re-render or filter write cannot re-open the panel.
+  const clearPaymentLink = useCallback(() => {
+    if (typeof window === 'undefined') return
+    const url = new URL(window.location.href)
+    if (!url.searchParams.has('paymentId')) return
+    url.searchParams.delete('paymentId')
+    router.replace(`${url.pathname}${url.search}`, { scroll: false })
+  }, [router])
   const [pendingAction, setPendingAction] = useState<PendingAction>(null)
   const [removeOpen, setRemoveOpen] = useState(false)
   // #3542: the Remove dialog in finish mode — ends the remaining budget of a
@@ -797,7 +760,9 @@ export default function AgentDetailClient({ agentId }: Props) {
           included, drawn with the shared ledger pieces over #4229's kinded
           read. NOT the wallet-scoped transactions feed — that is a different
           population and would drop payments refused before they reached the
-          chain (routes/transactions.ts). */}
+          chain (routes/transactions.ts). openPaymentId/#4227: a Tool-calls
+          payment link landed here; the tab opens the shared detail panel for
+          it and clears the parameter. */}
       {activeTab === 'activity' ? (
         <div id={AGENT_ACTIVITY_SECTION_ID} className="mt-6 scroll-mt-24" data-testid="agent-activity-section">
           <AgentActivityTab
@@ -805,18 +770,19 @@ export default function AgentDetailClient({ agentId }: Props) {
             agentName={currentAgent.name}
             walletName={walletName}
             needsSetup={currentAgent.status === 'pending_approval'}
+            openPaymentId={activeTab === 'activity' ? openPaymentId : null}
+            onPaymentOpened={clearPaymentLink}
           />
         </div>
       ) : null}
 
-      {/* ── Tool calls tab (#4226): today's MCP tool-call audit panel,
-          unchanged — #4227 rebuilds it. */}
+      {/* ── Tool calls tab (#4227): the MCP audit log rebuilt — plain-language
+          labels with the raw tool name as code, day bands, ×N repeat folding
+          over the loaded list, server-filtered Result/Period/search on
+          #4229's kinded read, and a payment link per money-touching call. */}
       {activeTab === 'tool-calls' ? (
         <div className="mt-6" data-testid="agent-tool-calls-section">
-          <McpToolCallsPanel
-            items={activity.filter(isMcpToolCallActivityItem)}
-            loading={activityLoading}
-          />
+          <AgentToolCallsTab agentId={agentId} onOpenPayment={openPayment} />
         </div>
       ) : null}
 

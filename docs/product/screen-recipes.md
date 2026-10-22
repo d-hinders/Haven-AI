@@ -719,8 +719,9 @@ rule). `?grant=` keeps working alongside `?tab=`. Sections, in order:
    carries a warning dot, "Review the payment(s)" selects the tab and scrolls
    to it (never one payment's panel — #2196's rule), and the affected rows
    carry the Needs attention badge while the Status facet can narrow to them.
-   **Tool calls** and **Settings** hold today's content unchanged (the MCP
-   tool calls panel; the Identity and settings card) until #4227 and #4228.
+   **Tool calls** is the agent's MCP audit log (see **Agent Tool Calls**
+   below). **Settings** holds today's content unchanged (the Identity and
+   settings card) until #4228.
 6. Identity and settings — the Settings tab's content (#4226): one quiet card
    of rows: the Agent Passport, the
    **MCP server name** (#4209, moved here from the `/agents` card): the
@@ -736,6 +737,61 @@ Money and risk clarity:
   moves), never just a state name.
 - Remove copy states the on-chain fact: revoking takes effect whether or not
   Haven is reachable, and finish mode ends any remaining budget.
+
+## Agent Tool Calls
+
+Use for the agent page's Tool calls tab (#4227): the
+`agent_tool_invocations` audit log the backend writes when an MCP server tags
+Haven API calls with `X-Haven-MCP-Tool`. Read-only — an audit trail, not a
+spending control, and the tab's one-line intro says exactly that: "Calls from
+this agent's MCP runtime: an audit trail, not a spending control."
+
+Structure:
+1. The standard toolbar on the card: search (by tool), a **Result** facet
+   (All, OK, Error, Denied) and **Period** — all server-filtered on the
+   kinded read (#4229, `kind=tool_calls`). The summary line reads "N errors"
+   from #4229's `counts.error` (counted WITHOUT the status filter, so it
+   holds while the facet flips) beside the call count; when a filter is
+   applied the count compares the filtered population against the agent's
+   unfiltered one (#4196's rule).
+2. Generic `Row` list items under `TransactionActivityDayHeader` day bands —
+   NOT `TransactionActivityRow`, which needs an amount and a direction mark
+   an audit row does not have (a no-amount variant would be a design-system
+   extension). Each row leads with a plain-language label — one per name in
+   the closed allowlist `MCP_TOOL_NAMES` (`lib/tool-call-labels.ts`, kept in
+   sync with the backend): `haven_get_agent` → "Checked identity and
+   budget", `haven_quote_x402` → "Quoted a paid API", `haven_pay_x402_quote`
+   → "Paid a quote", `haven_get_allowances` → "Read budgets". The raw tool
+   name sits second, as `code`. A retired name in an old row falls back to
+   its raw name — the raw name is the one fact the log is certain of.
+3. Repeats fold: consecutive calls with the same tool, the same result and
+   the same day are one row with "×N". The fold is client-side over the
+   LOADED list, so loading more re-folds everything on screen and a run is
+   never split at a page boundary; the dashboard's server fold is a
+   different population and is not reused.
+4. Error and Denied rows carry a `StatusBadge` (`result_status` is
+   `ok | error | denied`) and the `error_code` in words
+   (`errorCodeLabel`'s map of Haven's own refusal codes; unknown codes
+   render as-is — the backend's `error` values are already sentences). OK
+   rows render no badge, so the failures are the things that read.
+5. A call with a `payment_id` links to that payment: the link selects the
+   Activity tab (`?tab=activity&paymentId=…`) and opens that payment's
+   shared `TransactionDetailPanel`, read by #4229's `paymentId` filter and
+   adapted by `activityToTransaction`. The parameter is consumed — stripped
+   once the panel is open — so a re-render or filter write cannot re-open
+   it.
+6. `ListShowMore` sits below the card, paging with #4229's `hasMore` and
+   `total`.
+
+Empty state: an agent with no tool calls gets "No tool calls" and a one-line
+reason ("When this agent's MCP runtime calls Haven, each call shows here.")
+— and the tab stays. A filtered read with no matches gets the standard
+no-match state with the toolbar still up.
+
+Row hairlines are the shared ones: the same-day inset (`--v2-border-subtle`,
+#4165's rule) inside a day band and `--v2-border` between bands — never the
+deleted `--v2-divider`, whose undefined token painted dividers bright in
+dark mode.
 
 ## Agent Activity
 

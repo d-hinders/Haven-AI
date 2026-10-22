@@ -292,3 +292,113 @@ export function useAgentPaymentLedger(
     refresh: () => fetchPage(0, false),
   }
 }
+
+// ── The Tool calls tab's paged, filtered reader (#4227) ─────────────────────
+//
+// Same shape as the payment ledger above, over #4229's `kind=tool_calls`
+// population: the agent's MCP tool invocations, filtered server-side by the
+// Result facet / Period / search. The summary line's error count rides
+// #4229's `counts.error` — counted WITHOUT the status filter, so it stays
+// stable while the caller flips the Result facet.
+
+/** The Tool calls tab's toolbar state as the reader's server filters. */
+export interface AgentToolCallLogFilters {
+  /** `ok | error | denied` — the Result facet. */
+  result?: string
+  /** Inclusive ISO lower bound (the Period facet). */
+  from?: string
+  /** Exclusive ISO upper bound. */
+  to?: string
+  /** The search term. */
+  q?: string
+}
+
+/** The page size the Tool calls tab pages by — the account tab's page size. */
+export const AGENT_TOOL_CALL_PAGE_SIZE = 25
+
+export function useAgentToolCallLog(
+  agentId: string | null,
+  filters: AgentToolCallLogFilters,
+  pageSize: number = AGENT_TOOL_CALL_PAGE_SIZE,
+) {
+  const [items, setItems] = useState<McpToolCallActivityItem[]>([])
+  const [total, setTotal] = useState(0)
+  const [hasMore, setHasMore] = useState(false)
+  /** #4229's `counts.error`: errors in the population WITHOUT the status filter. */
+  const [errorCount, setErrorCount] = useState(0)
+  const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const requestIdRef = useRef(0)
+
+  // Same rule as the payment ledger: the refetch key is the serialized filter
+  // SET, so an equal rebuild must not restart the list, a change must.
+  const filterKey = JSON.stringify(filters)
+
+  const fetchPage = useCallback(
+    async (offset: number, append: boolean) => {
+      if (!agentId) return
+      const requestId = ++requestIdRef.current
+      if (append) setLoadingMore(true)
+      try {
+        const params = new URLSearchParams({ kind: 'tool_calls', limit: String(pageSize), offset: String(offset) })
+        const parsed: AgentToolCallLogFilters = JSON.parse(filterKey)
+        if (parsed.result) params.set('status', parsed.result)
+        if (parsed.q) params.set('q', parsed.q)
+        if (parsed.from) params.set('from', parsed.from)
+        if (parsed.to) params.set('to', parsed.to)
+        const res = await api.get<{
+          activity: ActivityItem[]
+          total?: number
+          hasMore?: boolean
+          counts?: { error?: number }
+        }>(`/agent-activity/${agentId}/activity?${params.toString()}`)
+        if (requestIdRef.current !== requestId) return
+        // #4229's own rule, kept: filter by `type` defensively — an old
+        // backend answers the merged window and a fixture may answer loosely.
+        const rows = (res?.activity ?? []).filter(isMcpToolCallActivityItem)
+        setItems((current) => (append ? [...current, ...rows] : rows))
+        setTotal(res?.total ?? rows.length)
+        setHasMore(Boolean(res?.hasMore))
+        setErrorCount(res?.counts?.error ?? 0)
+        setError(null)
+      } catch (err) {
+        if (requestIdRef.current !== requestId) return
+        // A failed page keeps the rows already on screen (an append failing
+        // must not blank the list the user is reading) and says so.
+        if (!append) setItems([])
+        setHasMore(false)
+        setError(err instanceof Error ? err.message : 'Tool calls could not load')
+      } finally {
+        if (requestIdRef.current === requestId) {
+          setLoading(false)
+          setLoadingMore(false)
+        }
+      }
+    },
+    [agentId, filterKey, pageSize],
+  )
+
+  // A filter or agent change restarts the list; `loadMore` appends.
+  useEffect(() => {
+    setLoading(true)
+    void fetchPage(0, false)
+  }, [fetchPage])
+
+  const loadMore = useCallback(() => {
+    if (loadingMore) return
+    void fetchPage(items.length, true)
+  }, [fetchPage, loadingMore, items.length])
+
+  return {
+    items,
+    total,
+    hasMore,
+    errorCount,
+    loading,
+    loadingMore,
+    error,
+    loadMore,
+    refresh: () => fetchPage(0, false),
+  }
+}

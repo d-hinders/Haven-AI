@@ -1,11 +1,13 @@
 /**
- * DropdownMenuItem's focus restore (#4259). After `onSelect`, focus returns to
- * the trigger ONLY when the action left it nowhere — on `<body>`, because the
- * panel unmounted under the focused item, or still inside the closed panel.
- * An action that moved focus (a Modal's dialog, a field it focused) keeps it.
+ * DropdownMenuItem's focus restore (#4259). Focus goes back to the trigger
+ * before `onSelect` runs, so it ends on the trigger only when the action did
+ * not move it. An action that moved focus (a Modal's dialog, a field it
+ * focused) keeps it, and a Modal opened from an item returns focus to the
+ * trigger when it closes — never to `<body>`.
  *
- * Real timers throughout: the restore runs after a `setTimeout(0)`, and faking
- * the clock would let a test pass on an ordering no browser produces.
+ * Real timers throughout: the Modal focuses in an effect after the menu's
+ * commit, and faking the clock would let a test pass on an ordering no
+ * browser produces.
  */
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { useRef, useState } from 'react'
@@ -83,6 +85,19 @@ describe('DropdownMenuItem focus restore (#4259)', () => {
     await settle()
     expect(dialog).toContainElement(document.activeElement as HTMLElement)
     expect(trigger).not.toHaveFocus()
+  })
+
+  it('closing a Modal opened from an item returns focus to the trigger, not <body>', async () => {
+    render(<Harness />)
+    const trigger = openMenu()
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Open a modal' }))
+    await screen.findByRole('dialog')
+    await settle()
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(trigger).toHaveFocus()
   })
 
   it('Escape closes the menu and returns focus to the trigger, as before', async () => {

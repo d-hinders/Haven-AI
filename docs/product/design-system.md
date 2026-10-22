@@ -756,7 +756,8 @@ which this rule does not touch).
   headings below stay about their sections.
 - **Manage pattern: row actions in ⋯** (#3695; rewritten by #4259 under the
   [owner decisions of 2026-10-22 on #4258](https://github.com/d-hinders/Haven-AI/issues/4258)).
-  A section that manages a list — the agent page's Spending section — puts each
+  A section that manages a list — the agent page's Spending section, adopted
+  there by #4261 — puts each
   row's actions AND the section's add in that row's ⋯ `DropdownMenu`: Edit
   budget, Add budget, a separator, then Stop budget… in the danger tone. No
   visible Edit, Stop or Add button competes with the rows; the row's identity

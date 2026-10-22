@@ -58,31 +58,41 @@ hosted client's own outbound rule.
   time, so re-asserting is a no-op there.
 - Discovery (`discoverMerchantMcpUrl`) asserts the input origin before it
   fetches and reads its 64 KB document with the cap enforced while reading.
+- `haven_pay_x402_quote`'s request mode (#3739) makes its own unpaid probe
+  under the same policy: `assertUrl` before the fetch, the quote budgets
+  (15 s, 256 KiB while reading), and a STRICTER redirect rule —
+  `redirect: 'error'`, so no hop is followed at all.
 
 ## Without a policy (#4257)
 
 The SDK default, the local MCP, connect and every embedder that sets no
-`merchantEgress` get no URL check, no byte cap and no per-use budget. They do
-share the redirect rule, because the transport follows redirects itself on
-both paths:
+`merchantEgress` get no URL check, no byte cap and no per-use budget. The
+transport still follows redirects itself, so both paths share the
+cross-origin rule:
 
 - A hop to another origin (scheme, host or port, compared hop to hop) carries
   only `accept`, `accept-language`, `user-agent` and `x402-wallet`, exactly as
   in rule 4. An API key, a cookie or an x402 payment header supplied for one
   merchant never reaches the origin it redirects to, and an `https` → `http`
   hop is a different origin.
-- A hop that would re-send a request body to another origin (a 307/308 on a
-  POST) is refused mid-flight (`redirect_cross_origin_body`). A request body
-  can carry the payment itself: an MCP `tools/call` puts it in
-  `_meta["x402/payment"]`.
+- A 307/308 that would re-send a request body to another origin is refused
+  mid-flight (`redirect_cross_origin_body`) only when the request carries a
+  payment: the paid delivery (`deliverPayment`), or any body with an x402
+  payment in `_meta["x402/payment"]`. Every other request (MCP `initialize`,
+  quote probes, a plain `fetch` POST) follows that redirect with its body, as
+  the platform did, with the headers reduced.
 - Everything else is the platform's behaviour, kept as it was: up to 20 hops
-  (`NO_POLICY_MAX_REDIRECTS`), the Fetch spec's 301/302/303 rewrite to a
-  body-less GET, a 3xx without `Location` returned as the answer, and a
-  caller's `redirect: 'manual'` or `'error'` passed straight to the platform.
-- `haven_pay_x402_quote`'s request mode (#3739) makes its own unpaid probe
-  under the same policy: `assertUrl` before the fetch, the quote budgets
-  (15 s, 256 KiB while reading), and a STRICTER redirect rule —
-  `redirect: 'error'`, so no hop is followed at all.
+  (`NO_POLICY_MAX_REDIRECTS`); the Fetch spec's rewrite, in which a 301 or 302
+  rewrites only a POST to a body-less GET and a 303 rewrites every method
+  except GET and HEAD; a 3xx without `Location` returned as the answer; a
+  non-HTTP(S) `Location` failing with a `TypeError`; and a caller's
+  `redirect: 'manual'` or `'error'` passed straight to the platform.
+
+A refusal on the paid delivery is the funded, undelivered state on this path
+too (see Refusals): `MerchantCompletion.retryRequest` records it as
+`merchant_retry_rejected_after_payment` and re-throws it with the
+`payment_id`, and the local MCP answers with `haven_get_payment_status` as the
+next tool and "do not pay again".
 
 ## Refusals
 

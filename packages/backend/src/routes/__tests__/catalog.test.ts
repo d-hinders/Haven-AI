@@ -48,6 +48,9 @@ const ENTRY = {
   asset_transfer_methods: 'eip3009',
   status: 'active',
   verified_at: '2026-06-10T00:00:00.000Z',
+  // #4245: every real row carries it (migration 117, NOT NULL), and
+  // `serialize()` fails closed on a row that does not.
+  source: 'operator',
   created_at: '2026-06-01T00:00:00.000Z',
   updated_at: '2026-06-10T00:00:00.000Z',
 }
@@ -620,6 +623,94 @@ describe('catalog routes', () => {
       domain_verified: false,
       verified_payable: false,
     })
+  })
+
+  it('characterization (#4245): an operator row carrying the provenance column still serializes as source operator', async () => {
+    mockCatalogWithIngestion([{ ...ENTRY, source: 'operator' }])
+    const token = app.jwt.sign({ sub: 'usr-1', email: 'u@test.dev' })
+
+    const res = await app.inject({ method: 'GET', url: '/catalog', headers: { authorization: `Bearer ${token}` } })
+    expect(res.statusCode).toBe(200)
+    expect(res.json().entries[0]).toMatchObject({
+      id: CAT_ID,
+      source: 'operator',
+      domain_verified: false,
+      verified_payable: true,
+    })
+  })
+
+  // #4245: a row the Bazaar discovery cron wrote. The seller chose its name
+  // and description and no operator reviewed it, so the listing must not call
+  // it operator-curated. Mutation: restore `source: 'operator' as const` in
+  // `serialize()` and every assertion on `'bazaar'` below fails.
+  const BAZAAR_ENTRY = {
+    ...ENTRY,
+    id: '00000000-0000-4000-8000-0000000000b1',
+    name: 'Aardvark Data (self-described)',
+    resource_url: 'https://seller.example/paid',
+    protocol: 'http',
+    tool_name: null,
+    tool_arguments: null,
+    source: 'bazaar',
+  }
+
+  it('labels a Bazaar-discovered row source bazaar, with no ownership claim, sorted after ingestion rows (#4245)', async () => {
+    mockCatalogWithIngestion([BAZAAR_ENTRY, ENTRY], [
+      {
+        id: '00000000-0000-4000-8000-000000000002',
+        resource_url: 'https://directory.example.com/mcp',
+        name: 'Directory Summarizer',
+        description: 'A self-submitted payable service',
+        entrypoint: 'summarize',
+        last_verified_at: '2026-08-23T10:00:00.000Z',
+      },
+    ])
+    const token = app.jwt.sign({ sub: 'usr-1', email: 'u@test.dev' })
+
+    const res = await app.inject({ method: 'GET', url: '/catalog', headers: { authorization: `Bearer ${token}` } })
+    expect(res.statusCode).toBe(200)
+    const entries = res.json().entries
+    // The Bazaar row's name sorts first alphabetically; provenance still puts
+    // it last.
+    expect(entries.map((e: { source: string }) => e.source)).toEqual(['operator', 'ingestion', 'bazaar'])
+    expect(entries[2]).toMatchObject({
+      id: BAZAAR_ENTRY.id,
+      source: 'bazaar',
+      domain_verified: false,
+      // The refresh probe runs on every merchant_catalog row, so the payable
+      // badge keeps its #2978 meaning for a Bazaar row too.
+      verified_payable: true,
+    })
+  })
+
+  it('never labels a row read without the source column operator — it fails closed (#4245)', async () => {
+    // Mutation: flip `serialize()` back to `source === 'bazaar' ? 'bazaar' :
+    // 'operator'` and this row — one a SELECT returned without the column —
+    // is presented as operator-curated.
+    const { source: _omitted, ...withoutSource } = ENTRY
+    mockCatalogWithIngestion([withoutSource])
+    const token = app.jwt.sign({ sub: 'usr-1', email: 'u@test.dev' })
+
+    const res = await app.inject({ method: 'GET', url: '/catalog', headers: { authorization: `Bearer ${token}` } })
+    expect(res.statusCode).toBe(200)
+    expect(res.json().entries[0].source).not.toBe('operator')
+    expect(res.json().entries[0]).toMatchObject({ id: CAT_ID, source: 'bazaar', domain_verified: false })
+  })
+
+  it('keeps a Bazaar row source bazaar in the public shape and on the detail route (#4245)', async () => {
+    mockCatalogWithIngestion([BAZAAR_ENTRY])
+    const publicRes = await app.inject({ method: 'GET', url: '/catalog' })
+    expect(publicRes.statusCode).toBe(200)
+    expect(publicRes.json().entries[0]).toMatchObject({ id: BAZAAR_ENTRY.id, source: 'bazaar', domain_verified: false })
+
+    mockAgentLookupThen({ rows: [BAZAAR_ENTRY] })
+    const detail = await app.inject({
+      method: 'GET',
+      url: `/catalog/${BAZAAR_ENTRY.id}`,
+      headers: { 'x-api-key': AGENT_KEY },
+    })
+    expect(detail.statusCode).toBe(200)
+    expect(detail.json()).toMatchObject({ id: BAZAAR_ENTRY.id, source: 'bazaar' })
   })
 
   it('serves ingestion entries to agents too, and applies the rail filter (#1716)', async () => {

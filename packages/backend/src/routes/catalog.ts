@@ -5,8 +5,8 @@
  *   - the dashboard catalog page (JWT auth)
  *   - the `haven_discover_tools` MCP tool via the SDK (agent API key auth)
  *
- * The listing merges two sources, each with an honest provenance label
- * (epic #1717, #1715, #2978):
+ * The listing merges three provenances, each with an honest label
+ * (epic #1717, #1715, #2978, #4245):
  *   - operator-curated rows from `merchant_catalog` (`source: 'operator'`).
  *     `refreshCatalog` (`modules/catalog/merchant-catalog.ts`) probes every
  *     non-delisted row and expects a real 402 challenge, so `verified_payable`
@@ -19,7 +19,11 @@
  *     SSRF-hardened quote probe (`source: 'ingestion'`,
  *     `domain_verified`/`verified_payable` both true — exactly the badge
  *     claim the epic allows: "this merchant controls the domain and we
- *     watched this endpoint answer a real x402 quote").
+ *     watched this endpoint answer a real x402 quote");
+ *   - rows the Bazaar discovery cron wrote into `merchant_catalog`
+ *     (`source: 'bazaar'`, #4245): the seller chose the name and description,
+ *     and no operator reviewed them. Same refresh probe and badge rule as an
+ *     operator row, no ownership claim, and they sort last.
  *
  * Strictly read-only: nothing here creates payments, signatures, or any
  * state change.
@@ -210,9 +214,13 @@ export function serialize(row: CatalogRow & CatalogRowWithMerchant) {
     body_example: row.body_example ?? null,
     status: row.status,
     verified_at: row.verified_at,
-    source: 'operator' as const,
-    // #2978: no ownership proof runs for an operator row, so this badge must
-    // never claim one.
+    // #4245: from the row, never assumed, and fail closed: only a row that
+    // SAYS `'operator'` is labelled operator-curated. A row read without the
+    // column (a SELECT that omits it) gets the least-trusted label rather than
+    // the vouching one.
+    source: row.source === 'operator' ? ('operator' as const) : ('bazaar' as const),
+    // #2978: no ownership proof runs for an operator row — nor for a Bazaar
+    // row — so this badge must never claim one.
     domain_verified: false,
     // #2978: `refreshCatalog` (merchant-catalog.ts) probes every non-delisted
     // row and expects a real x402/MPP 402 challenge, exactly the observation
@@ -263,10 +271,15 @@ export function serializeIngestion(row: VerifiedCatalogListingRow) {
   }
 }
 
-/** One entry's provenance tag for the merged listing's ORDER BY. */
-const SOURCE_RANK: Record<'operator' | 'ingestion', number> = {
+/**
+ * One entry's provenance tag for the merged listing's ORDER BY. A Bazaar row
+ * sorts after a self-submitted one: both are third-party listings, but only
+ * the self-submitted one proved it controls its domain (#4245).
+ */
+const SOURCE_RANK: Record<'operator' | 'ingestion' | 'bazaar', number> = {
   operator: 0,
   ingestion: 1,
+  bazaar: 2,
 }
 
 /** One serialized catalog listing — operator row or ingestion row (shared with `routes/merchants.ts`). */

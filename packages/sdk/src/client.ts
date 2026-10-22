@@ -976,7 +976,8 @@ export class HavenClient {
        * periodic 402 probe, or a self-submitted row that also passed
        * domain-ownership proof. It is not a provenance filter; `'operator'`
        * still filters on provenance (`source === 'operator'`) regardless of
-       * badge state, and `'any'` (the default) returns the merged listing.
+       * badge state — so it excludes self-submitted and Bazaar-discovered
+       * rows (#4245) — and `'any'` (the default) returns the merged listing.
        */
       verified?: 'any' | 'verified' | 'operator'
     } = {},

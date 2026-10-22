@@ -17,6 +17,10 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ### Changed
 
+- **`HavenCatalogEntry.source` gains a third value, `'bazaar'` (#4245). BREAKING only for TypeScript code with an exhaustive `switch` over `source`.** It marks catalog rows the x402
+  Bazaar discovery cron wrote (seller-asserted, no operator review). A consumer with an exhaustive
+  `switch` over `source` must add the case; `discoverTools({ verified: 'operator' })` already excludes
+  these rows, no update needed.
 - **Under `merchantEgress`, a redirect to another origin no longer carries the caller's headers (#4244).** The manual GET-redirect follower re-sent the original request headers on every hop, so an `Authorization`, `Cookie`, API key or payment header supplied for one merchant reached any origin that merchant redirected to. A hop that changes origin (scheme, host or port) now carries only `accept`, `accept-language`, `user-agent` and `x402-wallet`; once dropped, headers are not restored on a later hop. Same-origin redirects are unchanged, and nothing changes without a policy. No update needed for the hosted path, which takes the change on deploy.
 
 - **The local EIP-3009 settlement-evidence report is retried while Haven

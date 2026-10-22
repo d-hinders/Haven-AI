@@ -10021,9 +10021,9 @@ export const openapiSpec = {
           verified_at: { anyOf: [{ type: 'string' }, { type: 'null' }] },
           source: {
             type: 'string',
-            enum: ['operator', 'ingestion'],
+            enum: ['operator', 'ingestion', 'bazaar'],
             description:
-              'Where the entry came from. `operator` = curated in migrations/scripts (the operator vouches for the listing; no domain-ownership proof runs). `ingestion` = self-submitted through the Verified Payable Directory (epic #1717) and passed domain-ownership proof plus the read-only quote probe.',
+              'Where the entry came from. `operator` = curated in migrations/scripts (the operator vouches for the listing; no domain-ownership proof runs). `ingestion` = self-submitted through the Verified Payable Directory (epic #1717) and passed domain-ownership proof plus the read-only quote probe. `bazaar` = written by the x402 Bazaar discovery cron (#4245, only when the deployment enables discovery): the seller chose the name and description and no operator reviewed them; no domain-ownership proof runs.',
           },
           domain_verified: {
             type: 'boolean',

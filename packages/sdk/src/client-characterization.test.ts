@@ -620,6 +620,33 @@ describe('catalog discovery + submission (#1716)', () => {
     routes.assertAllUsed()
   })
 
+  // #4245: a Bazaar-discovered row is neither operator-curated nor
+  // self-submitted. The provenance filter keeps operator rows only, so a
+  // `bazaar` row never passes `verified: 'operator'`, and its source is
+  // mapped through unchanged.
+  it('passes a bazaar source through and excludes it from verified=operator (#4245)', async () => {
+    const WITH_BAZAAR = {
+      entries: [
+        ...MIXED.entries,
+        {
+          ...MIXED.entries[1],
+          id: 'baz_1', name: 'Discovered API', resource_url: 'https://discovered.example/paid',
+          source: 'bazaar', verified_payable: true,
+        },
+      ],
+    }
+    const routes = installRoutes({
+      'GET https://haven.test/catalog': [() => json(WITH_BAZAAR), () => json(WITH_BAZAAR)],
+    })
+
+    const all = await client().discoverTools({})
+    expect(all.find((e) => e.id === 'baz_1')).toMatchObject({ source: 'bazaar', domainVerified: false })
+
+    const operator = await client().discoverTools({ verified: 'operator' })
+    expect(operator.map((e) => e.id)).toEqual(['cur_1'])
+    routes.assertAllUsed()
+  })
+
   // #2978: `verified=verified` filters on the badge (`verifiedPayable`), not
   // on provenance — an operator row that keeps passing its periodic 402
   // probe carries the badge just like a self-submitted, domain-proven one.

@@ -48,6 +48,9 @@ const ENTRY = {
   asset_transfer_methods: 'eip3009',
   status: 'active',
   verified_at: '2026-06-10T00:00:00.000Z',
+  // #4245: every real row carries it (migration 117, NOT NULL), and
+  // `serialize()` fails closed on a row that does not.
+  source: 'operator',
   created_at: '2026-06-01T00:00:00.000Z',
   updated_at: '2026-06-10T00:00:00.000Z',
 }
@@ -678,6 +681,20 @@ describe('catalog routes', () => {
       // badge keeps its #2978 meaning for a Bazaar row too.
       verified_payable: true,
     })
+  })
+
+  it('never labels a row read without the source column operator — it fails closed (#4245)', async () => {
+    // Mutation: flip `serialize()` back to `source === 'bazaar' ? 'bazaar' :
+    // 'operator'` and this row — one a SELECT returned without the column —
+    // is presented as operator-curated.
+    const { source: _omitted, ...withoutSource } = ENTRY
+    mockCatalogWithIngestion([withoutSource])
+    const token = app.jwt.sign({ sub: 'usr-1', email: 'u@test.dev' })
+
+    const res = await app.inject({ method: 'GET', url: '/catalog', headers: { authorization: `Bearer ${token}` } })
+    expect(res.statusCode).toBe(200)
+    expect(res.json().entries[0].source).not.toBe('operator')
+    expect(res.json().entries[0]).toMatchObject({ id: CAT_ID, source: 'bazaar', domain_verified: false })
   })
 
   it('keeps a Bazaar row source bazaar in the public shape and on the detail route (#4245)', async () => {

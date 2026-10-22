@@ -214,9 +214,11 @@ export function serialize(row: CatalogRow & CatalogRowWithMerchant) {
     body_example: row.body_example ?? null,
     status: row.status,
     verified_at: row.verified_at,
-    // #4245: from the row, never assumed. Only `'bazaar'` (migration 117's
-    // CHECK admits nothing else) is not operator-curated.
-    source: row.source === 'bazaar' ? ('bazaar' as const) : ('operator' as const),
+    // #4245: from the row, never assumed, and fail closed: only a row that
+    // SAYS `'operator'` is labelled operator-curated. A row read without the
+    // column (a SELECT that omits it) gets the least-trusted label rather than
+    // the vouching one.
+    source: row.source === 'operator' ? ('operator' as const) : ('bazaar' as const),
     // #2978: no ownership proof runs for an operator row — nor for a Bazaar
     // row — so this badge must never claim one.
     domain_verified: false,

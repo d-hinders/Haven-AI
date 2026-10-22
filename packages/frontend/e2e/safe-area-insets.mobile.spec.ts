@@ -483,7 +483,11 @@ test.describe('safe-area insets — nothing under the notch or the home indicato
     page,
   }) => {
     await page.goto('/transactions')
-    await page.getByRole('button', { name: /View details for/ }).first().click()
+    // #4266: a ledger row is the control (no per-row "View details for" button).
+    await page
+      .locator('[data-testid="transactions-ledger"] [role="button"][aria-haspopup="dialog"]')
+      .first()
+      .click()
     await expect(page.getByRole('dialog')).toBeVisible()
     await applyInsets(page)
 

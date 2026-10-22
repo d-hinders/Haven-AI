@@ -22,13 +22,14 @@
  * serves a LONG approx figure through a test-local route override (the
  * `area-chart-dot-measure.spec.ts` pattern: registered after `mockHavenApi`,
  * so it wins the route for that path alone) and asserts one line AND no
- * horizontal table overflow — the `whitespace-nowrap` cell must widen the
- * column, never push the table past its container.
+ * horizontal page overflow — a long figure must never push the ledger past
+ * its container (#4266: the retired table's nowrap column is now the ledger
+ * row's right-hand block, which sizes to content).
  *
  * Both widths the visual baselines render at are swept (1280 and 390), in
  * one spec file — the same self-sweep `area-chart-dot-measure.spec.ts` uses,
- * so the geometry holds on both stages of the row: the `md`+ column and the
- * narrow block under the title.
+ * so the geometry holds on both stages of the row: the `sm`+ right-hand column
+ * and the stacked block below `sm`.
  */
 import { expect, test, type Page } from '@playwright/test'
 import {
@@ -47,7 +48,7 @@ const LONG_APPROX_AMOUNT = '76543.2100'
 type AmountReading = { text: string; lines: number }
 
 /**
- * Every visible amount element in the table body, with its line count.
+ * Every visible amount element in the ledger, with its line count.
  *
  * Anchors on the rendered text, not on a class or a component name — the
  * trap `transaction-row.mobile.spec.ts` documents. The voice pattern is the
@@ -65,7 +66,7 @@ async function readAmounts(page: Page): Promise<AmountReading[]> {
     const visible = (el: Element) => el.getClientRects().length > 0
     const AMOUNT_TEXT = /^(?:[-+]?[\d.,\u00a0\u202f ]+\s*(?:USDC|ETH|USD|EUR|SEK|kr|€|\$)|[-+]?[$€]\s?[\d.,\u00a0\u202f ]+)\s*$/u
 
-    const matches = Array.from(document.querySelectorAll('tbody *')).filter((el) => {
+    const matches = Array.from(document.querySelectorAll('[data-testid="transactions-ledger"] *')).filter((el) => {
       if (!visible(el)) return false
       const text = (el.textContent ?? '').replace(/\u00a0/g, ' ').trim()
       if (!AMOUNT_TEXT.test(text)) return false
@@ -115,7 +116,7 @@ for (const width of WIDTHS) {
     }
   })
 
-  test(`a long approx amount stays on one line without overflowing the table at ${width}`, async ({
+  test(`a long approx amount stays on one line without overflowing the page at ${width}`, async ({
     page,
   }) => {
     // Test-local route override, registered AFTER `mockHavenApi`'s catch-all
@@ -167,9 +168,8 @@ for (const width of WIDTHS) {
     expect(long, JSON.stringify(amounts)).toBeTruthy()
     expect(long!.lines, `"${long!.text}" @ ${width}`).toBe(1)
 
-    // The nowrap column must WIDEN, not push the table past its container.
-    // (At 1280 the Activity column absorbs the difference; at 390 the
-    // amount rides under the title inside the flexible Activity cell.)
+    // The row must absorb the long figure (the title truncates), never push
+    // the page wider than the viewport.
     const overflow = await page.evaluate(
       () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
     )

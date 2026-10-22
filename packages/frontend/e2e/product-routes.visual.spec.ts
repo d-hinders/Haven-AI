@@ -306,12 +306,12 @@ const ANCHOR_TIMEOUT_MS = 60_000
  * measured; see the table note).
  *
  * Per AXIS as well, not just per route (#2817): a responsive layout carries
- * less text at 390 than at 1280 — `/transactions` measures 246 characters at
+ * less text at 390 than at 1280 — `/transactions` measured 246 characters on the retired table (299 on the ledger, #4266) at
  * the mobile width against 320 at desktop, on this harness — so a floor set
  * from the desktop measurement fails every mobile run of the same route.
  * `minCharsMobile` overrides `minChars` on the mobile axis only, and is set
- * FROM MEASUREMENT like the desktop numbers: `/transactions` mobile gets 200
- * (measured 246), `/accounts` mobile gets 100 (measured 104 — matching the
+ * FROM MEASUREMENT like the desktop numbers: `/transactions` mobile gets 240
+ * (measured 299 on the ledger; 246 on the retired table), `/accounts` mobile gets 100 (measured 104 — matching the
  * header's historic 104-character measurement of this route). A floor above
  * the measured content is not strictness; it is a permanent red.
  */
@@ -403,24 +403,25 @@ const ROUTES: ProductRoute[] = [
     path: '/transactions',
     slug: 'transactions',
     viewports: ['desktop', 'mobile'],
-    minChars: 250,
-    /** Measured at 390: the responsive layout renders 246 characters. */
-    minCharsMobile: 200,
+    minChars: 260,
+    /**
+     * Measured at 390 on the ledger (#4266): 299 characters (338 at 1280),
+     * `innerText` of `#main-content` on the structure-only harness. Floors
+     * sit below the measurement, as before the table was retired (250/200
+     * against 320/246).
+     */
+    minCharsMobile: 240,
     anchor: (page: Page) => page.getByRole('heading', { name: 'Transaction history' }),
     /**
      * `dashboardTransaction.timestamp` is 1779000000 (2026-05-17T06:40Z), which
      * is 3 months and change before `FROZEN_NOW` — `timeAgo`'s `${months}mo ago`
      * bucket. Pinned as a literal so a clock that stops being frozen fails HERE,
      * by name, rather than as a pixel diff on a date nobody can attribute.
+     * Asserted on BOTH axes since #4266: the ledger row prints the time under
+     * the amount at every width, where the table's mobile layout hid its date
+     * column (the old `frozenRelativeTimeHiddenOnMobile` exemption, #2817).
      */
     frozenRelativeTime: '3mo ago',
-    /**
-     * #2817, measured: below the table's 718px container stage the date
-     * column is collapsed and NO riding element carries the timestamp (the
-     * mobile page renders no `ago` string at all — read off this spec's own
-     * failure snapshot), so the pin is asserted on the desktop axis only.
-     */
-    frozenRelativeTimeHiddenOnMobile: true,
   },
 
   /**

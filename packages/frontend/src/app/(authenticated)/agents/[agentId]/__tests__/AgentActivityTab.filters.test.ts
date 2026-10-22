@@ -59,6 +59,10 @@ describe('listStateToFilters — the token half', () => {
     })
   })
 
+  it('no key while the registry loads holds nothing (#4249 review M1)', () => {
+    expect(listStateToFilters(state(), new Map(), true).tokenPending).toBe(false)
+  })
+
   it('an unresolved key while the registry loads holds the read', () => {
     expect(listStateToFilters(state('8453:0xdeadbeef'), new Map(), true).tokenPending).toBe(true)
   })

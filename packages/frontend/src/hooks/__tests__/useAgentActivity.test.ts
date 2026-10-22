@@ -204,6 +204,25 @@ describe('useAgentPaymentLedger', () => {
     expect(result.current.loading).toBe(true)
   })
 
+  it('holding the read retires a request already in flight (#4249 review N2)', async () => {
+    let resolveInFlight: (value: unknown) => void = () => {}
+    mockApiGet.mockImplementationOnce(() => new Promise((resolve) => { resolveInFlight = resolve }))
+
+    const { result, rerender } = renderHook(
+      ({ agentId }: { agentId: string | null }) => useAgentPaymentLedger(agentId, {}, 25),
+      { initialProps: { agentId: 'agent-1' as string | null } },
+    )
+    // The tab holds the read (a selected token not yet resolved) while the
+    // unfiltered request is still out.
+    rerender({ agentId: null })
+    await act(async () => {
+      resolveInFlight({ activity: [paymentRow('unfiltered')], total: 1, hasMore: false })
+    })
+    expect(result.current.payments).toEqual([])
+    expect(result.current.loading).toBe(true)
+    expect(mockApiGet).toHaveBeenCalledTimes(1)
+  })
+
   it('a late answer for superseded filters never overwrites the current list', async () => {
     let resolveStale: (value: unknown) => void = () => {}
     mockApiGet

@@ -30,8 +30,10 @@ const { mockRouterPush, mockRouterReplace } = vi.hoisted(() => ({
   mockRouterReplace: vi.fn(),
 }))
 
-const { mockUseCompanyDetails, mockRegistryTokens } = vi.hoisted(() => ({
+const { mockUseCompanyDetails, mockRegistryTokens, mockRegistryState } = vi.hoisted(() => ({
   mockUseCompanyDetails: vi.fn(),
+  // #4249 (review M1): whether the token registry is still loading.
+  mockRegistryState: { loading: false },
   // #4226: the token registry the Token facet reads. Default: one token —
   // facets with a single option render nothing (ListToolbar's rule), so a
   // test that wants the Token trigger seeds a second entry and restores.
@@ -47,7 +49,7 @@ const { mockUseCompanyDetails, mockRegistryTokens } = vi.hoisted(() => ({
 }))
 
 vi.mock('@/hooks/useTransactionFilters', () => ({
-  useTransactionFilters: () => ({ tokens: mockRegistryTokens }),
+  useTransactionFilters: () => ({ tokens: mockRegistryTokens, loading: mockRegistryState.loading }),
 }))
 
 vi.mock('@/hooks/useCompanyDetails', () => ({
@@ -206,6 +208,7 @@ import { AGENT_PAUSED_BODY, AGENT_PAUSED_TITLE } from '@/lib/agent-pause-copy'
 import { HALF_REVOKED_TITLE } from '@/lib/half-revoked'
 import { AgentRow, type DashboardAgent } from '@/components/haven/AgentRow'
 import AgentDetailClient from '../AgentDetailClient'
+import { DEFAULT_CHAIN_ID } from '@/lib/chains'
 import { MCP_NOT_RECORDED_NOTE } from '@/components/agent-panel/McpServerName'
 
 const VIES_VALID_ROW = {
@@ -1992,6 +1995,49 @@ describe('AgentDetailClient tabs and the Activity tab (#4226)', () => {
 
     afterEach(() => {
       mockRegistryTokens.splice(1)
+      mockRegistryState.loading = false
+    })
+
+    it('a selected token the loading registry has not resolved holds the read (#4249 review M1)', () => {
+      mockRegistryState.loading = true
+      window.history.replaceState(null, '', `/agents/agent-1?tokenKey=${encodeURIComponent(EURC.key)}`)
+      render(<AgentDetailClient agentId="agent-1" />)
+      expect(lastLedgerCall().agentId).toBeNull()
+    })
+
+    it('a loading registry holds nothing when no token is selected (#4249 review M1)', () => {
+      mockRegistryState.loading = true
+      render(<AgentDetailClient agentId="agent-1" />)
+      expect(lastLedgerCall().agentId).toBe('agent-1')
+    })
+
+    it('an agent whose chain is unknown is offered every chain — no default chain is guessed (#4249 review N1)', () => {
+      mockUseAuth.mockReturnValue({ user: { accounts: [] } })
+      const agents = mockUseAgents()
+      mockUseAgents.mockReturnValue({
+        ...agents,
+        agents: agents.agents.map((a: Record<string, unknown>) => ({ ...a, account_chain_id: null })),
+      })
+      const ON_DEFAULT = {
+        key: `${DEFAULT_CHAIN_ID}:0x0000000000000000000000000000000000000def`,
+        symbol: 'DEF',
+        address: '0x0000000000000000000000000000000000000def',
+        chainId: DEFAULT_CHAIN_ID,
+        isNative: false,
+      }
+      const original = mockRegistryTokens.slice()
+      mockRegistryTokens.splice(0, mockRegistryTokens.length, ON_DEFAULT, EURC)
+      try {
+        render(<AgentDetailClient agentId="agent-1" />)
+        const trigger = screen.queryByText('Token:')
+        expect(trigger).not.toBeNull()
+        fireEvent.click(trigger!)
+        const options = screen.getAllByRole('menuitemradio').map((el) => el.textContent ?? '')
+        expect(options.some((label) => label.includes('EURC'))).toBe(true)
+        expect(options.some((label) => label.includes('DEF'))).toBe(true)
+      } finally {
+        mockRegistryTokens.splice(0, mockRegistryTokens.length, ...original)
+      }
     })
 
     it('offers only ERC-20s on the agent chain — never a native token, never another chain', () => {

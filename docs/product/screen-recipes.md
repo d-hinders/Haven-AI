@@ -755,7 +755,9 @@ Structure:
    Token offers only ERC-20s on the agent's chain (when the page knows it):
    an agent payment is never in a native token. A selected token that does
    not resolve is sent as-is and matches nothing — never dropped into an
-   unfiltered read under a "Token: …" chip (#4249).
+   unfiltered read under a "Token: …" chip (#4249). With fewer than two
+   contract tokens to offer, the Token facet hides (a single option is no
+   choice — the toolbar's rule).
 2. `TransactionActivityRow` ledger rows, merchant-first, under
    `TransactionActivityDayHeader` day bands (#4225). No "by <agent>" title and
    no "From … →" movement line: the page fixes the agent and the wallet, so

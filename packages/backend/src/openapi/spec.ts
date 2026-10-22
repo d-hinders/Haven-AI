@@ -12328,7 +12328,11 @@ export const openapiSpec = {
         properties: {
           url: { type: 'string', format: 'uri' },
           payTo: address,
-          merchantPayTo: address,
+          merchantPayTo: {
+            ...address,
+            description:
+              'EIP-3009 funding leg only: the real merchant, when payTo is the agent delegate EOA (the funding target). On erc7710 direct settlement payTo IS the merchant; omit merchantPayTo, or send it equal to payTo. A different value is refused with 400 (#4243), since the settlement child pays payTo and the recorded merchant must be the address that is paid.',
+          },
           amount: {
             type: 'string',
             pattern: '^[0-9]+$',

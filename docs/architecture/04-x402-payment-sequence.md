@@ -2234,6 +2234,12 @@ existing SDKs gained delegation-rail merchant reach with no client change:
 | the merchant address | **erc7710 direct settlement** (unchanged) | the delegation chain, redeemed in-band |
 | the agent's own delegate EOA (+ required `merchantPayTo`) | **EIP-3009 fallback** | a standard header from the delegate EOA |
 
+On the erc7710 shape `merchantPayTo` is not part of the contract: the
+settlement child pays `payTo`, and the intent records `payTo` as the merchant.
+Authorize refuses with 400 a `merchantPayTo` that differs from `payTo` on that
+shape, so the ledger, receipts and accounting counterparty always name the
+address that was paid (#4243).
+
 **The erc7710 `X-PAYMENT` header is x402 v2-shaped (#1064):** alongside the
 scheme payload it ECHOES the accepted requirements entry (`accepted`:
 scheme/network/amount/payTo/asset/maxTimeoutSeconds +

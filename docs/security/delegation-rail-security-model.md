@@ -3578,8 +3578,10 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > `scripts/record-kit-analytics-connections.mjs` net over the backend suite.
 
 > **Re-verified unchanged (#4226, 2026-10-22, agent detail tabs and the
-> Spending hero):** this diff touches one covered file, display-layer:
-> `components/DelegationBudgetCard.tsx`. The card is rebuilt on the
+> Spending hero):** this diff touches two covered files, display-layer:
+> `components/DelegationBudgetCard.tsx` and `components/haven/BudgetMeter.tsx`
+> (the latter brought under this document by the same change; corrected by
+> #4249). The card is rebuilt on the
 > dashboard's money-card pattern (budgets left, Last 30 days right, one
 > `Card.Section divided`, stacked below `lg`); each budget's caption moves to
 > the shared `budgetCaptionFor` `row` style — the same text the dashboard row

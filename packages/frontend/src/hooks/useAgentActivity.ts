@@ -272,9 +272,14 @@ export function useAgentPaymentLedger(
 
   // A filter or agent change restarts the list; `loadMore` appends.
   useEffect(() => {
+    // #4249 (review N2): a null agent is the tab HOLDING the read (a selected
+    // token the registry has not resolved yet). Retire whatever is in flight,
+    // so a request that started under the previous filters cannot land its
+    // unfiltered rows beneath the held "Token: …" chip.
+    if (!agentId) requestIdRef.current += 1
     setLoading(true)
     void fetchPage(0, false)
-  }, [fetchPage])
+  }, [agentId, fetchPage])
 
   const loadMore = useCallback(() => {
     if (loadingMore) return

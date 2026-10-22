@@ -605,6 +605,19 @@ describe('McpMerchantTransport WITHOUT a policy — the transport follows redire
     expect(fetchSpy.calls.map((c) => c.url)).toEqual(['https://a.dev/mcp', 'https://b.dev/mcp'])
   })
 
+  it('a 302 on a paid PUT keeps the body, so crossing origin is refused', async () => {
+    const fetchSpy = recordingFetch((url) =>
+      url === 'https://a.dev/mcp'
+        ? new Response(null, { status: 302, headers: { location: 'https://b.dev/mcp' } })
+        : okText('arrived'),
+    )
+    const body = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { _meta: { 'x402/payment': { p: 1 } } } })
+    const result = await settle(transportWith(undefined, fetchSpy).fetch('https://a.dev/mcp', { method: 'PUT', body }))
+    expect(result.ok).toBe(false)
+    expect(result.ok ? undefined : result.error).toMatchObject({ refusal: 'redirect_cross_origin_body', redirectStatus: 302 })
+    expect(fetchSpy.calls).toHaveLength(1)
+  })
+
   it('a 302 POST becomes a body-less GET, and the body headers go with the body', async () => {
     const fetchSpy = recordingFetch((url) =>
       url === 'https://a.dev/start'

@@ -187,7 +187,7 @@ export class McpMerchantTransport {
   /**
    * `fetch`, plus whether this request is the paid delivery (#4257). A paid
    * delivery, or any body carrying an x402 payment in `_meta`, is never
-   * re-sent to another origin by a 307/308; without a policy every other
+   * re-sent to another origin by a redirect that keeps the body; without a policy every other
    * request follows that redirect as the platform would, headers reduced.
    */
   private async send(url: string, init: RequestInit, timeoutMs: number, maxBytes: number | undefined, paidDelivery: boolean): Promise<Response> {
@@ -264,7 +264,7 @@ export class McpMerchantTransport {
    * - A hop that would re-send a request body to another origin is refused
    *   under a policy (which follows GET alone, so this is unreachable there),
    *   and without one only when `carriesPayment`: the paid delivery, or a body
-   *   carrying an x402 payment in `_meta` (#4257). Any other 307/308 is
+   *   carrying an x402 payment in `_meta` (#4257). Any other body-keeping redirect is
    *   followed with its body, as the platform did, headers reduced.
    *
    * `onHop` sees every URL a request goes to, so the caller can name the hop
@@ -306,6 +306,7 @@ export class McpMerchantTransport {
           currentUrl,
           'redirect_on_non_get',
           false,
+          { redirectStatus: response.status },
         )
       }
       const location = response.headers.get('location')
@@ -317,6 +318,7 @@ export class McpMerchantTransport {
           currentUrl,
           'redirect_missing_location',
           false,
+          { redirectStatus: response.status },
         )
       }
       let next: string
@@ -329,6 +331,7 @@ export class McpMerchantTransport {
           currentUrl,
           'redirect_invalid_location',
           false,
+          { redirectStatus: response.status },
         )
       }
       // Fetch spec (and undici): a redirect to a non-HTTP(S) URL is a network error.
@@ -342,6 +345,7 @@ export class McpMerchantTransport {
           next,
           'redirect_budget_exceeded',
           false,
+          { redirectStatus: response.status, redirectTarget: next },
         )
       }
       if (policy) {
@@ -349,15 +353,15 @@ export class McpMerchantTransport {
           policy.assertUrl(next)
         } catch (err) {
           // Mid-flight: the chain's earlier requests were already sent.
-          throw asRefusal(err, next, false)
+          throw asRefusal(err, next, false, { redirectStatus: response.status, redirectTarget: next })
         }
       }
       hopInit = redirectedInit(hopInit, response.status)
       // #4244: headers addressed to one origin never follow a redirect to
       // another. Compared hop to hop, as the Fetch spec does.
       if (new URL(next).origin !== new URL(currentUrl).origin) {
-        // #4257: only a 307/308 keeps a body, and only off-policy (the policy
-        // follows GET alone). A paid request re-sent elsewhere would hand the
+        // #4257: a body survives only a 307/308, or a 301/302 on a method
+        // other than POST, and only off-policy (the policy follows GET alone). A paid request re-sent elsewhere would hand the
         // payment, or the paid call, to an origin it was not made for.
         if (hopInit.body != null && (policy || carriesPayment)) {
           throw new MerchantEgressRefusedError(
@@ -370,7 +374,7 @@ export class McpMerchantTransport {
             next,
             'redirect_cross_origin_body',
             false,
-            { redirectStatus: response.status },
+            { redirectStatus: response.status, redirectTarget: next },
           )
         }
         hopInit = { ...hopInit, headers: crossOriginRedirectHeaders(hopInit.headers) }
@@ -902,10 +906,15 @@ function isRedirectStatus(status: number): boolean {
  * `beforeRequest: true` (its contract is "nothing sent yet"), but a HOP check
  * runs after earlier requests of the same use were already sent.
  */
-function asRefusal(err: unknown, url: string, beforeRequest: boolean): unknown {
+function asRefusal(
+  err: unknown,
+  url: string,
+  beforeRequest: boolean,
+  redirect?: { redirectStatus: number; redirectTarget: string },
+): unknown {
   if (!(err instanceof MerchantEgressRefusedError)) return err
-  if (err.beforeRequest === beforeRequest) return err
-  return new MerchantEgressRefusedError(err.message, url, err.refusal, beforeRequest)
+  if (err.beforeRequest === beforeRequest && !redirect) return err
+  return new MerchantEgressRefusedError(err.message, url, err.refusal, beforeRequest, redirect)
 }
 
 /** Consume and preserve every diagnostic field of a failed merchant response. */

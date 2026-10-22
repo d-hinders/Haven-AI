@@ -73,6 +73,10 @@ function completionWith(answer: (url: string) => Response | Promise<Response>, e
   return { completion, post, calls }
 }
 
+/** The `details` of the one reconciliation event `post` was called with. */
+const recordedDetails = (post: ReturnType<typeof vi.fn>): Record<string, unknown> =>
+  ((post.mock.calls[0] as unknown[])[1] as { details: Record<string, unknown> }).details
+
 const redirectElsewhere = (url: string) =>
   url === paidUrl ? new Response(null, { status: 307, headers: { location: elsewhere } }) : new Response('elsewhere')
 
@@ -103,11 +107,13 @@ describe('MerchantCompletion.retryRequest — a refused redirect on the paid del
         eventType: 'merchant_retry_rejected_after_payment',
         details: expect.objectContaining({
           retry_status: 307,
+          retry_body: null,
           refusal: 'redirect_cross_origin_body',
           redirect_location: elsewhere,
         }),
       }),
     )
+    expect(recordedDetails(post)).not.toHaveProperty('refused_url')
     expect(calls).toEqual([paidUrl])
   })
 
@@ -122,6 +128,51 @@ describe('MerchantCompletion.retryRequest — a refused redirect on the paid del
     expect((err as Error).message).toContain('erc7710 has no funding leg')
     expect((err as Error).message).toContain('Do not pay again')
     expect(post).toHaveBeenCalledTimes(1)
+  })
+
+  it('under a policy, a redirect on a paid POST is refused at the answering URL: refused_url, not a redirect target', async () => {
+    const allowAll: MerchantEgressPolicy = { assertUrl() {}, maxGetRedirects: 3 }
+    const sameOrigin = (url: string) =>
+      url === paidUrl ? new Response(null, { status: 302, headers: { location: '/next' } }) : new Response('next')
+    const { completion, post, calls } = completionWith(sameOrigin, allowAll)
+    const result = await settle(
+      completion.retryRequest(paidUrl, { method: 'POST', body: '{"q":1}' }, paymentRequired, receiptFor(accepted3009)),
+    )
+    expect(result.ok).toBe(false)
+    const err = result.ok ? undefined : result.error
+    expect(err).toMatchObject({ refusal: 'redirect_on_non_get', beforeRequest: false, paymentId: 'pay_1', redirectStatus: 302 })
+    expect((err as MerchantEgressRefusedError).redirectTarget).toBeUndefined()
+    const message = (err as Error).message
+    expect(message).toContain('only GET redirects are followed')
+    expect(message).not.toContain('different origin')
+    expect(message).toContain('Do not pay again')
+    const details = recordedDetails(post)
+    expect(details).toMatchObject({ retry_status: 302, refusal: 'redirect_on_non_get', refused_url: paidUrl })
+    expect(details).not.toHaveProperty('redirect_location')
+    expect(calls).toEqual([paidUrl])
+  })
+
+  it('under a policy, a paid GET redirected to a refused URL records that URL as the redirect target', async () => {
+    const refuseB: MerchantEgressPolicy = {
+      assertUrl(u: string) {
+        if (u.startsWith('https://b.dev')) throw new MerchantEgressRefusedError('not allowed', u, 'url_not_allowed', true)
+      },
+      maxGetRedirects: 3,
+    }
+    const { completion, post, calls } = completionWith(
+      (url) => (url === paidUrl ? new Response(null, { status: 302, headers: { location: elsewhere } }) : new Response('b')),
+      refuseB,
+    )
+    const result = await settle(completion.retryRequest(paidUrl, undefined, paymentRequired, receiptFor(accepted3009)))
+    expect(result.ok).toBe(false)
+    const err = result.ok ? undefined : result.error
+    expect(err).toMatchObject({ refusal: 'url_not_allowed', beforeRequest: false, redirectTarget: elsewhere })
+    const message = (err as Error).message
+    expect(message).toContain(`delivered to ${paidUrl}, payment header included`)
+    expect(message).toContain(`a URL the egress policy does not allow (${elsewhere})`)
+    expect(recordedDetails(post)).toMatchObject({ refusal: 'url_not_allowed', redirect_location: elsewhere })
+    expect(recordedDetails(post)).not.toHaveProperty('refused_url')
+    expect(calls).toEqual([paidUrl])
   })
 
   it('a refusal before the paid request was sent is re-thrown as it was, unrecorded', async () => {

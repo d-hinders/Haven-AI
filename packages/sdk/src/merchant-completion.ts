@@ -223,7 +223,7 @@ export class MerchantCompletion {
       // undelivered state (#1300), recorded and re-thrown with the payment it
       // belongs to so the caller can never read it as "nothing happened".
       if (err instanceof MerchantEgressRefusedError && !err.beforeRequest) {
-        throw await this.paidDeliveryInterrupted(err, url, receipt, receipt.paymentHeader)
+        throw await this.paidDeliveryInterrupted(err, url, receipt, receipt.paymentHeader, retryInit?.body != null)
       }
       throw err
     }
@@ -537,6 +537,7 @@ export class MerchantCompletion {
     url: string,
     receipt: X402Receipt,
     paymentHeader: string,
+    hasBody: boolean,
   ): Promise<MerchantEgressRefusedError> {
     const scheme = x402PaymentHeaderNamesFor(paymentHeader).length > 1 ? 'eip3009' : 'erc7710'
     const status = err.redirectStatus ?? 0
@@ -555,13 +556,15 @@ export class MerchantCompletion {
         merchant_to: receipt.merchantTo,
         delegate_to: receipt.to,
         refusal: err.refusal,
-        redirect_location: err.url,
+        // The refusal's url is the redirect target only when it carries one;
+        // otherwise it is the URL that answered (a non-GET redirect, a missing
+        // or unresolvable Location), recorded under a neutral key.
+        ...(err.redirectTarget ? { redirect_location: err.redirectTarget } : { refused_url: err.url }),
       },
     })
     const what =
-      `The paid request was delivered to ${url}, payment header and body included, and the merchant answered ` +
-      `${status ? `HTTP ${status} ` : ''}with a redirect to a different origin (${err.url}). Haven did not follow it, ` +
-      `so the payment was not re-sent there. Do not pay again: `
+      `The paid request was delivered to ${url}, ${hasBody ? 'payment header and body' : 'payment header'} included, ` +
+      `and the merchant answered ${status ? `HTTP ${status} ` : ''}with a redirect${unfollowedRedirect(err)} Do not pay again: `
     const next =
       scheme === 'erc7710'
         ? 'erc7710 has no funding leg, so there is no delegate balance to strand or sweep. The merchant may still ' +
@@ -571,6 +574,7 @@ export class MerchantCompletion {
           'before anything else, and sweep the delegate only if no settlement appears.'
     return new MerchantEgressRefusedError(what + next, err.url, err.refusal, false, {
       redirectStatus: err.redirectStatus,
+      redirectTarget: err.redirectTarget,
       paymentId: receipt.paymentId,
       settlementScheme: scheme,
     })
@@ -1058,5 +1062,26 @@ export function parseProtocolReceiptHeader(value: string): Record<string, unknow
     } catch {
       return undefined
     }
+  }
+}
+
+/** #4257: why a paid request's redirect was not followed, worded per refusal (completes "…with a redirect"). */
+function unfollowedRedirect(err: MerchantEgressRefusedError): string {
+  const target = err.redirectTarget ?? err.url
+  switch (err.refusal) {
+    case 'redirect_cross_origin_body':
+      return ` to a different origin (${target}). Haven did not follow it, so the payment was not re-sent there.`
+    case 'redirect_on_non_get':
+      return '. Under the egress policy only GET redirects are followed, so Haven did not follow it and nothing was sent to the redirect target.'
+    case 'redirect_missing_location':
+      return ' that named no target (no Location header). Haven did not follow it.'
+    case 'redirect_invalid_location':
+      return ' whose Location header is not a resolvable URL. Haven did not follow it.'
+    case 'redirect_budget_exceeded':
+      return ` past the redirect budget. The chain stopped before ${target}, and nothing was sent there.`
+    case 'url_not_allowed':
+      return ` to a URL the egress policy does not allow (${target}). Haven did not follow it, so nothing was sent there.`
+    default:
+      return '. Haven did not follow it.'
   }
 }

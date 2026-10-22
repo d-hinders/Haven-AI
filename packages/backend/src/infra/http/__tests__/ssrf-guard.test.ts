@@ -488,11 +488,14 @@ describe('safeRequest (#4281)', () => {
   })
 
   it('never sends a body on a GET or HEAD', async () => {
-    const transport = vi.fn<PinnedTransport>(async () => payment402)
-    await safeRequest('https://api.merchant.example/paid', { method: 'GET', body: '{"a":1}' }, { resolver: publicResolver, transport })
-    const sent = transport.mock.calls[0]![0] as PinnedRequest
-    expect(sent.body).toBeNull()
-    expect(sent.headers['content-type']).toBeUndefined()
+    for (const method of ['GET', 'HEAD']) {
+      const transport = vi.fn<PinnedTransport>(async () => payment402)
+      await safeRequest('https://api.merchant.example/paid', { method, body: '{"a":1}' }, { resolver: publicResolver, transport })
+      const sent = transport.mock.calls[0]![0] as PinnedRequest
+      expect(sent.method).toBe(method)
+      expect(sent.body).toBeNull()
+      expect(sent.headers['content-type']).toBeUndefined()
+    }
   })
 
   it('drops an accept value that carries CR or LF', async () => {
@@ -517,6 +520,13 @@ describe('safeRequest (#4281)', () => {
       transport: transportReturning(redirect),
     })
     expect(put).toMatchObject({ ok: false, reason: 'redirect_on_non_get' })
+    for (const method of ['PATCH', 'DELETE']) {
+      const refused = await safeRequest('https://api.merchant.example/paid', { method, body: '{}' }, {
+        resolver: publicResolver,
+        transport: transportReturning(redirect),
+      })
+      expect(refused).toMatchObject({ ok: false, reason: 'redirect_on_non_get' })
+    }
     const post = await safeRequest('https://api.merchant.example/paid', { method: 'POST', body: '{}' }, {
       resolver: publicResolver,
       transport: transportReturning(redirect),

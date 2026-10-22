@@ -53,7 +53,7 @@ function rowFor(overrides: Partial<CatalogRow>): CatalogRow {
     tool_name: null, tool_arguments: null, price_display: '0.02 USDC', price_atomic: '20000',
     asset: 'USDC', network: 'eip155:8453', asset_transfer_methods: null,
     status: 'active', verified_at: null, consecutive_failures: 0,
-    created_at: '', updated_at: '',
+    created_at: '', updated_at: '', source: 'operator',
     ...overrides,
   } as CatalogRow
 }
@@ -84,7 +84,7 @@ describe('catalog probes do not reach the global fetch (#4281)', () => {
       query: async (sql: string, values?: unknown[]) => {
         queries.push([sql, values])
         if (sql.startsWith('SELECT')) {
-          return { rows: [rowFor({ id: 'cat-bazaar', source: 'bazaar', resource_url: 'https://metadata.internal.localhost/paid' } as Partial<CatalogRow>)] }
+          return { rows: [rowFor({ id: 'cat-bazaar', source: 'bazaar', resource_url: 'https://metadata.internal.localhost/paid' })] }
         }
         return { rows: [] }
       },
@@ -94,6 +94,24 @@ describe('catalog probes do not reach the global fetch (#4281)', () => {
     expect(globalFetch).not.toHaveBeenCalled()
     const miss = queries.find(([sql, v]) => sql.includes('consecutive_failures = $2') && v?.[0] === 'cat-bazaar')
     expect(miss?.[1]).toEqual(['cat-bazaar', 1, 'active'])
+  })
+
+  it('refreshCatalog with no transport injected guards an operator row too (one rule, no branch on source)', async () => {
+    const queries: Array<[string, unknown[] | undefined]> = []
+    const db: QueryableLike = {
+      query: async (sql: string, values?: unknown[]) => {
+        queries.push([sql, values])
+        if (sql.startsWith('SELECT')) {
+          return { rows: [rowFor({ id: 'cat-operator', source: 'operator', resource_url: 'https://127.0.0.1/paid' })] }
+        }
+        return { rows: [] }
+      },
+    }
+    const result = await refreshCatalog(db)
+    expect(result).toEqual({ verified: 0, degraded: 0 })
+    expect(globalFetch).not.toHaveBeenCalled()
+    const miss = queries.find(([sql, v]) => sql.includes('consecutive_failures = $2') && v?.[0] === 'cat-operator')
+    expect(miss?.[1]).toEqual(['cat-operator', 1, 'active'])
   })
 
   it('ingestDiscoveredCatalog probes a candidate through the guard, never through the index fetch', async () => {
@@ -211,6 +229,17 @@ describe('the guarded catalog transport (#4281)', () => {
     expect(response.status).toBe(204)
   })
 
+  it('rejects a Request input instead of reading only its URL', async () => {
+    const transport = vi.fn<PinnedTransport>(async () => challenge402)
+    const guarded = createGuardedCatalogFetch({ resolver: publicResolver, transport })
+    const outcome = await guarded(new Request('https://api.merchant.example/paid', { method: 'POST', body: 'x' })).then(
+      () => 'resolved',
+      () => 'rejected',
+    )
+    expect(outcome).toBe('rejected')
+    expect(transport).not.toHaveBeenCalled()
+  })
+
   it('rejects a non-string body instead of sending it', async () => {
     const transport = vi.fn<PinnedTransport>(async () => challenge402)
     const guarded = createGuardedCatalogFetch({ resolver: publicResolver, transport })
@@ -220,5 +249,31 @@ describe('the guarded catalog transport (#4281)', () => {
     )
     expect(outcome).toBe('rejected')
     expect(transport).not.toHaveBeenCalled()
+  })
+})
+
+describe('discovery through the resolver seam (#4281)', () => {
+  it('refuses a candidate whose name resolves into private space before any connection', async () => {
+    const candidate = 'https://seller.bazaar-listed.example/paid'
+    let indexPages = 0
+    const indexFetch = vi.fn(async (input: string | URL | Request) => {
+      if (String(input) === candidate) return payable402()
+      indexPages += 1
+      const items = indexPages === 1 ? [{ resource: candidate, type: 'http', accepts: X402_BODY.accepts }] : []
+      return new Response(JSON.stringify({ items }), { status: 200, headers: { 'content-type': 'application/json' } })
+    })
+    const transport = vi.fn<PinnedTransport>(async () => challenge402)
+    const db: QueryableLike = { query: async () => ({ rows: [] }) }
+    const merchants = { findOrCreateMerchantByHost: async () => ({ id: 'merchant-1' }) }
+    const result = await ingestDiscoveredCatalog(
+      db,
+      indexFetch as unknown as typeof fetch,
+      undefined,
+      merchants as never,
+      createGuardedCatalogFetch({ resolver: async () => [{ address: '10.20.30.40', family: 4 }], transport }),
+    )
+    expect(result).toMatchObject({ candidates: 1, failedProbe: 1, ingested: 0 })
+    expect(transport).not.toHaveBeenCalled()
+    expect(indexFetch.mock.calls.map(([url]) => String(url))).not.toContain(candidate)
   })
 })

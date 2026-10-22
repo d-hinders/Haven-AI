@@ -83,16 +83,31 @@ covers:
 last-verified: "2026-10-21"
 ---
 
-> **Re-verified unchanged (#4257, 2026-10-22, merchant-transport only).**
-> `packages/sdk/src/mcp-merchant-transport.ts` and `merchant-egress.ts` are on
-> this contract's cover list. Without a merchant-egress policy the transport
-> now follows redirects itself: a hop to another origin carries only the
-> #4244 header allow-list, and a hop that would re-send a request body to
-> another origin is refused with `MerchantEgressRefusedError`
-> (`redirect_cross_origin_body`, a new refusal reason). Everything else keeps
-> the platform's redirect behaviour. No tool is added, renamed or re-shaped;
-> no strict schema, consent hash, version-skew rule or signing input moves.
-> `last-verified` is not re-stamped: this block is the scope.
+> **Contract change, additive (#4257, 2026-10-22): the local MCP's paid-call failure envelope.**
+> `packages/mcp/**` is on this contract's cover list.
+>
+> When the embedded SDK refuses to re-send a paid request to a different
+> origin (a 307/308 from the merchant, refusal `redirect_cross_origin_body`),
+> the local paid tools now answer `MERCHANT_EGRESS_REFUSED` with:
+>
+> - `paymentId`;
+> - `status: merchant_unresponsive_after_funding`;
+> - `phase` and `next_action`: `funded_but_unsettled` / `sweep_stranded_funds`
+>   on EIP-3009, or `not_delivered` / `check_status_later` on erc7710;
+> - `next_tool: haven_get_payment_status` and `next_arguments: { payment_id }`.
+>
+> These are the fields the hosted #1300 treatment already returns. Before
+> this change no such refusal existed locally: the platform re-sent the
+> request.
+>
+> On the transport, a hop to another origin now carries only the #4244 header
+> allow-list, and redirects are followed by the SDK with `redirect: 'manual'`.
+> `MerchantEgressRefusedError` gains `redirect_cross_origin_body` and three
+> optional fields (`redirectStatus`, `paymentId`, `settlementScheme`).
+>
+> No tool is added, renamed or re-shaped. No strict schema, consent hash,
+> version-skew rule or signing input moves. `last-verified` is not
+> re-stamped: this block is the scope.
 
 > **Re-verified unchanged (#4244, 2026-10-22, merchant-transport only).**
 > `packages/sdk/src/mcp-merchant-transport.ts` and `merchant-egress.ts` are on

@@ -204,8 +204,8 @@ Before shipping a UI change, compare it against an existing v2 screen with the s
 - Where a generic `Table` has sortable headers, they need `aria-sort` and clear
   labels, and amount sorting must use raw numeric values, not formatted strings.
 - Mobile table views should collapse secondary metadata while preserving the
-  direction, activity/movement, amount, and external detail link. Date may move
-  to a detail surface.
+  row's primary label and figures; secondary detail may move to a detail
+  surface.
 
 ### Modals
 

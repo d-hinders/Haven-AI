@@ -66,12 +66,12 @@ const TONE: Record<TransactionAccounting['status'], StatusTone> = {
 }
 
 /**
- * The table row's `onClick` is a mouse convenience that opens the detail
- * drawer; the accessible path is the title button, a SIBLING of this link.
- * The click must still stop here, and not only for the mouse: Enter on an
- * `<a>` fires a synthetic click that bubbles to the row's `onClick`, which
- * would open the drawer under the navigation. There is no keydown stop any
- * more — the row has no key handler to cancel the link's own activation.
+ * Where the link form sits inside something clickable (a detail row), the
+ * click must stop here, and not only for the mouse: Enter on an `<a>` fires
+ * a synthetic click that bubbles to the parent's `onClick`. A ledger row
+ * (a whole-row `role="button"`) never gets the link form — it passes
+ * `interactive={false}` (#4266), because a control inside a button is
+ * invalid ARIA.
  */
 function stopRowActivation(event: MouseEvent) {
   event.stopPropagation()
@@ -80,6 +80,14 @@ function stopRowActivation(event: MouseEvent) {
 export interface AccountingBadgeProps {
   accounting?: TransactionAccounting | null
   className?: string
+  /**
+   * `false` renders the pill alone — no link to `/accounting`, no reason
+   * tooltip — for a host that is itself the control: the `/transactions`
+   * ledger row is a whole-row `role="button"`, and a link nested inside it
+   * is invalid ARIA (#4266). The row opens `TransactionDetailPanel`, whose
+   * Feed row carries the linked badge and the reason.
+   */
+  interactive?: boolean
 }
 
 /**
@@ -87,17 +95,19 @@ export interface AccountingBadgeProps {
  * `LocaleProvider`, and a row without `accounting` must cost nothing — not a
  * provider lookup, not a render — wherever the table is mounted.
  */
-export function AccountingBadge({ accounting, className = '' }: AccountingBadgeProps) {
+export function AccountingBadge({ accounting, className = '', interactive = true }: AccountingBadgeProps) {
   if (!accounting) return null
-  return <PresentAccountingBadge accounting={accounting} className={className} />
+  return <PresentAccountingBadge accounting={accounting} className={className} interactive={interactive} />
 }
 
 function PresentAccountingBadge({
   accounting,
   className,
+  interactive,
 }: {
   accounting: TransactionAccounting
   className: string
+  interactive: boolean
 }) {
   const t = useT()
 
@@ -118,6 +128,18 @@ function PresentAccountingBadge({
     (accounting.status === 'failed' || accounting.status === 'skipped') && accounting.error
       ? accounting.error
       : null
+
+  if (!interactive) {
+    return (
+      <span
+        className={`inline-flex ${className}`}
+        data-testid="accounting-badge"
+        data-status={accounting.status}
+      >
+        <StatusBadge tone={TONE[accounting.status]}>{label}</StatusBadge>
+      </span>
+    )
+  }
 
   const link = (
     <Link

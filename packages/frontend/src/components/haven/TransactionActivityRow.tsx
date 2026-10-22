@@ -70,8 +70,9 @@ export function TransactionActivityRow({
   /**
    * `comfortable` (default) is the roomier row; the transactions ledger uses `compact`.
    * `compact` is the dashboard preview, tightened so the agents and
-   * transactions columns sit on the same rhythm. Compact also hides the
-   * description line on the desktop layout.
+   * transactions columns sit on the same rhythm. Compact truncates the
+   * description line to one line rather than hiding it — the ledgers' subline
+   * (who acted, the account) relies on it showing.
    *
    * This used to say compact "matches the height of the shared `<Row>`
    * primitive (~56px)", which was wrong twice over and about the one property

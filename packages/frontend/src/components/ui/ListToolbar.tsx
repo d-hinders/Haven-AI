@@ -95,7 +95,7 @@ export interface ListToolbarProps {
   count: ListCount | null
   /**
    * The page's totals for the list summary line (#4196) — the account
-   * Activity tab's "In · Out", or Transactions' "N received · N sent" — drawn
+   * Activity tab's "In · Out", and Transactions' too (#4266) — drawn
    * on the left of the line, the count on the right. Pass the figures only;
    * the toolbar owns the line, so "filtered" is decided once, here.
    */

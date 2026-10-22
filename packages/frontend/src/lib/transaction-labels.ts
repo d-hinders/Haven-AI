@@ -27,8 +27,8 @@ export function isMachinePaymentSource(source?: string | null): boolean {
  * guidelines allow technical vocabulary.
  *
  * - `x402` → "Agent payment". The row already carries the protocol's useful
- *   half elsewhere: the movement column resolves to the resource hostname
- *   (`counterpartyLabel`), and the detail drawer names the protocol in its
+ *   half elsewhere: the ledger row's title is the resource hostname
+ *   (`counterpartyLabel`, #4266), and the detail drawer names the protocol in its
  *   "x402 payment" section heading and shows Resource / Merchant / Settlement.
  *   The branch is kept rather than folded into `transactionTitle`'s generic
  *   `Agent payment by <name>` fallback, as defence against the TYPE contract:

@@ -190,21 +190,29 @@ describe('TransactionsLedgerRow — what a row never says', () => {
 })
 
 describe('TransactionsLedgerRow — activation', () => {
-  it('click, Enter and Space open the panel; Enter on the accounting link does not', () => {
+  it('click, Enter and Space open the panel', () => {
+    const onOpen = vi.fn()
+    const row = renderRow(x402, { onOpen })
+    fireEvent.click(row)
+    fireEvent.keyDown(row, { key: 'Enter' })
+    fireEvent.keyDown(row, { key: ' ' })
+    expect(onOpen).toHaveBeenCalledTimes(3)
+  })
+
+  it('nests no control inside the row button — the accounting badge is a plain pill here', () => {
     const onOpen = vi.fn()
     const row = renderRow(
       tx({
         ...x402,
         paymentId: 'pay-1',
-        accounting: { status: 'pushed', provider: 'fortnox', externalRef: 'fortnox:supplierinvoice:11', error: null },
+        accounting: { status: 'failed', provider: 'fortnox', externalRef: null, error: 'Rejected' },
       }),
       { onOpen },
     )
-    fireEvent.click(row)
-    fireEvent.keyDown(row, { key: 'Enter' })
-    fireEvent.keyDown(row, { key: ' ' })
-    expect(onOpen).toHaveBeenCalledTimes(3)
-    fireEvent.keyDown(within(row).getByRole('link'), { key: 'Enter' })
-    expect(onOpen).toHaveBeenCalledTimes(3)
+    const badge = within(row).getByTestId('accounting-badge')
+    expect(badge).toHaveTextContent('Not fed')
+    expect(row.querySelectorAll('a, button, [role="button"], [tabindex]:not([tabindex="-1"])')).toHaveLength(0)
+    fireEvent.click(badge)
+    expect(onOpen).toHaveBeenCalledTimes(1)
   })
 })

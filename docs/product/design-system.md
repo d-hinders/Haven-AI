@@ -1766,7 +1766,7 @@ jsdom cannot evaluate the pseudo-element's stacking or hit testing.
 
 `Card` supports `elevation="flat" | "raised" | "anchor"` and `hover={false}`. Use `raised` only for the page's single most prominent surface (the dashboard money card, #3897), `anchor` for a second focal point where a page has one (the sweep page's "How to recover" card; the dashboard has none since #3910, when "Needs attention" became a normal card), and keep nested or data-dense cards flat.
 
-**A card in a grid has to fit its track, and by default it cannot ([#2251](https://github.com/d-hinders/Haven-AI/issues/2251)).** This is the card sibling of the `truncate`d-table-cell rule under *Transaction tables* below, and it has the same shape: a `truncate` descendant is `white-space: nowrap`, so its min-content is the whole string, and a container that is never allowed to go below its min-content grows instead of ellipsising.
+**A card in a grid has to fit its track, and by default it cannot ([#2251](https://github.com/d-hinders/Haven-AI/issues/2251)).** This is the card sibling of the `truncate`d-table-cell rule under *Table column collapse* below, and it has the same shape: a `truncate` descendant is `white-space: nowrap`, so its min-content is the whole string, and a container that is never allowed to go below its min-content grows instead of ellipsising.
 
 What makes it a *grid* rule is where the "never allowed" comes from. A grid item's `min-width` defaults to `auto`, which resolves to its min-content — and an implicit `auto` column takes its minimum from that. Tailwind's `grid-cols-N` is `repeat(N, minmax(0, 1fr))`, whose explicit `0` overrides it, so **a responsive grid is safe at the breakpoint where its columns are declared and unsafe below it**. `/agents` was `grid items-start gap-4 lg:grid-cols-2` (`grid gap-4 lg:grid-cols-2` since #4209): correct at `lg` and up, and below `lg` its single implicit column was sized by the widest card's min-content. At 390 that put a 488.3px card in a 342px track — clipped rather than scrollable, because `main` is `overflow-x: auto` inside an `overflow-hidden` parent, so `documentElement.scrollWidth` stayed 390. The shared `expectNoHorizontalOverflow()` helper still sees it, on its `main#main-content` reading (#1779): measured `contentOverflowBy: 122` before the fix and `0` after. It was the SEED that was missing, not the assertion — the standing `/agents` mobile check is green on the shared fixture because that leaves `mcp_server_name` absent, and the `not recorded` branch is a 66px label with nothing to truncate.
 
@@ -2285,7 +2285,8 @@ above the list; the card is never repeated inside a parent card.
    and the page's own totals, when it has any, on the left — the account
    Activity tab's "In · Out" (short visible labels, so the line fits a phone
    beside the count; sr-only "Money in" / "Money out" before each figure),
-   Transactions' filtered "N received · N sent · N failed". The page passes
+   and Transactions' "In · Out" too (#4266; a Direction filter shows only its
+   half). The page passes
    its figures in the toolbar's `summary` slot and never builds the line, so
    "filtered" is decided once, inside the toolbar. The count keeps one place
    whether or not a filter is active.
@@ -2494,7 +2495,11 @@ the accounting badge. An own-account transfer (the backend's `foldOwnTransfers=1
 #4265) reads "Moved between your accounts" with `DirectionMark direction="move"`
 and an unsigned amount. Its list summary line reads "In <total> · Out <total>"
 beside the count. There are no Initiator, From/To or link columns and no column
-sorting; filters, search and Sort live in `ListToolbar`.
+sorting; filters and search live in `ListToolbar`, and the order is date only,
+with no Sort. A ledger row is a whole-row `role="button"`, so nothing inside it
+may be a control — an interactive element nested in a button is invalid ARIA.
+The accounting badge renders as a plain pill there (`interactive={false}`); its
+`/accounting` link and reason live in the detail panel's Feed row.
 
 **Merchant-first titles (#3810).** The dashboard's activity list reads
 `counterpartyLabel` in `lib/transaction-presentation.tsx` with the opt-in
@@ -2508,7 +2513,7 @@ the money left (#4117), only when the user has more than one account and a
 name came back. A confirmed row carries no status badge — its
 direction is already the amount's sign and tone; only "Pending" and "Failed"
 name a state (#3897). `/transactions` reads the same mode (per #4266); `TransactionDetailPanel`
-passes no mode and keeps the truncated address until #3811 — the two supports on the same helper must not drift apart silently,
+passes no mode and renders the full address, where users verify (#3811) — the two supports on the same helper must not drift apart silently,
 which is what the characterization tests in
 `lib/__tests__/transaction-presentation.test.tsx` pin. Two row props exist for
 the grouped dashboard shape: `countLabel` renders the muted ×N beside the
@@ -2525,7 +2530,7 @@ The generic `Table` primitive (`components/ui/Table.tsx`) collapses secondary co
 
 A collapsing table has to **fit** at mobile widths, not scroll: the `overflow-x-auto` wrapper the `Table` primitive recommends for dense admin tables is mutually exclusive with `Table.Head sticky`, because `overflow-x: auto` forces the computed `overflow-y` to `auto` and the wrapper then becomes the sticky scroll ancestor. When such a table overflows, the cause is usually a `truncate`d cell — `truncate` is `white-space: nowrap`, and an auto-layout column can never be narrower than its min-content, so the untruncated text widens the table instead of ellipsising. Put `max-w-0` on the one flexible cell. Both findings, with their measured numbers, live in `components/ui/Table.tsx`'s docstring ([#1772](https://github.com/d-hinders/Haven-AI/issues/1772)).
 
-**Column collapse is keyed on the table's CONTAINER, not on the viewport, and it still takes more than one stage.** Two things step at `lg` and both take width: the sidebar rail goes from `hidden` to an in-flow column at `w-[240px]` (#4053; before that, a `fixed` drawer going `lg:static`) — border-box, so its 1px `border-r` is *inside* the 240 (`main` measures 784px at a 1024px viewport) — and the authenticated layout's `main` steps `p-6` to `lg:p-8`, 16px more across the pair. **240 + 16 = 256px** handed back in a single breakpoint, so the content available to a table is a **sawtooth** in viewport width, not a ramp. Attributing it to the sidebar alone is wrong and invites a reader who checks `Sidebar.tsx`, finds 240px, and discards the whole claim. Measured in real Chromium on the authenticated shell — the same numbers on every route, because they share it:
+**Column collapse is keyed on the table's CONTAINER, not on the viewport, and it still takes more than one stage.** Two things step at `lg` and both take width: the sidebar rail goes from `hidden` to an in-flow column at `w-[240px]` (#4053; before that, a `fixed` drawer going `lg:static`) — border-box, so its 1px `border-r` is *inside* the 240 (`main` measures 784px at a 1024px viewport) — and the authenticated layout's `main` steps `p-6` to `lg:p-8`, 16px more across the pair. **240 + 16 = 256px** handed back in a single breakpoint, so the content available to a table is a **sawtooth** in viewport width, not a ramp. Attributing it to the sidebar alone is wrong and invites a reader who checks `Sidebar.tsx`, finds 240px, and discards the whole claim. Measured in real Chromium on `/design-system`, `/transactions`, `/accounts/:id` and `/agents/:id` — the same numbers on all four, because they share the shell:
 
 | viewport | 390 | 767 | 768 | 900 | 1023 | 1024 | 1279 | 1280 |
 |---|---|---|---|---|---|---|---|---|

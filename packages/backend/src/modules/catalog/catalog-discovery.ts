@@ -17,7 +17,7 @@ import type { Executor } from '../../infra/transaction.js'
 import { findOrCreateMerchantByHost, merchantHostOf } from '../../infra/repositories/merchants.js'
 import { SUPPORTED_CHAIN_IDS } from '../../domain/chains.js'
 import {
-  guardedCatalogFetch,
+  guardedDiscoveryProbeFetch,
   probeCatalogEntry,
   type CatalogRow,
   type QueryableLike,
@@ -166,7 +166,7 @@ export async function ingestDiscoveredCatalog(
   // #4281: candidates are seller-listed URLs, so they are probed through the
   // SSRF guard, never through `fetchImpl`. That one reads only the Bazaar
   // index, whose URL is operator-configured (`CATALOG_DISCOVERY_URL`).
-  probeFetch: typeof fetch = guardedCatalogFetch,
+  probeFetch: typeof fetch = guardedDiscoveryProbeFetch,
 ): Promise<DiscoveryResult> {
   const result: DiscoveryResult = {
     scanned: 0,

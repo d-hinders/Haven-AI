@@ -19,7 +19,9 @@
  * non-delisted row. So the default transport here is `guardedCatalogFetch`:
  * the shared SSRF guard (`infra/http/ssrf-guard.ts`, #1712) classifies the
  * resolved address, pins the socket to it, and bounds the deadline, byte
- * count and redirects. One rule for every row: no branch on `source` to keep
+ * count and redirects. The refresh gets a 15 s deadline, enough for a
+ * sleeping merchant's cold start; a discovery candidate gets the ingestion
+ * probe's 5 s. One rule for every row: no branch on `source` to keep
  * correct. A refusal is a failed probe, never a crash.
  */
 // dep-lint-exempt: pool appears only as the default of the injectable QueryableLike executor (index.ts and tests inject their own); the probe-driven refresh/ingest updates it feeds await a catalog repository (beyond #999's ~100-line budget)
@@ -223,13 +225,28 @@ function assetSymbol(asset: string | undefined): string {
   return known[asset.toLowerCase()] ?? 'USDC'
 }
 
-/** Total budget for one catalog probe, redirects included (the ingestion probe's leg budget). */
-export const CATALOG_PROBE_TIMEOUT_MS = 5_000
+/**
+ * Total budget for one REFRESH probe, redirects included. The refresh
+ * re-probes listed merchants hourly, and a sleeping one (Railway serverless,
+ * e.g. the dev Demo-merchant) cold-starts on that probe: measured 3.8–5.0 s on
+ * 2026-10-22. The budget sits well above that, but stays bounded.
+ */
+export const CATALOG_REFRESH_PROBE_TIMEOUT_MS = 15_000
+/**
+ * Total budget for one DISCOVERY probe of a Bazaar candidate. Kept at the
+ * ingestion probe's leg budget (`probe.ts`, #1713): a candidate is an unknown,
+ * seller-listed URL, the same kind of target that budget was set for.
+ */
+export const CATALOG_DISCOVERY_PROBE_TIMEOUT_MS = 5_000
 /** Response cap for one catalog probe; a 402 challenge is a few KiB at most. */
 export const CATALOG_PROBE_MAX_BYTES = 256 * 1024
 
-/** Statuses a `Response` must be constructed without a body. */
-const NULL_BODY_STATUSES = new Set([101, 103, 204, 205, 304])
+/**
+ * Statuses a `Response` must be constructed without a body. The pinned
+ * transport never returns a 1xx (Node handles informational responses before
+ * the final one), so only these can arrive.
+ */
+const NULL_BODY_STATUSES = new Set([204, 205, 304])
 
 /**
  * A `fetch`-shaped transport that sends every request through the SSRF guard
@@ -243,7 +260,12 @@ const NULL_BODY_STATUSES = new Set([101, 103, 204, 205, 304])
  */
 export function createGuardedCatalogFetch(options: SafeFetchOptions = {}): typeof fetch {
   return (async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
-    const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
+    // A `Request` carries its own method, headers and body; reading only its
+    // URL would silently send something else. The probe never passes one.
+    if (typeof input !== 'string' && !(input instanceof URL)) {
+      throw new Error('guarded catalog probe takes a URL, not a Request')
+    }
+    const url = input.toString()
     const headers = new Headers(init?.headers)
     if (init?.body != null && typeof init.body !== 'string') {
       throw new Error('guarded catalog probe sends only a string body')
@@ -251,7 +273,7 @@ export function createGuardedCatalogFetch(options: SafeFetchOptions = {}): typeo
     const result = await safeRequest(
       url,
       { method: init?.method ?? 'GET', body: init?.body ?? null, accept: headers.get('accept') ?? undefined },
-      { timeoutMs: CATALOG_PROBE_TIMEOUT_MS, maxBytes: CATALOG_PROBE_MAX_BYTES, ...options },
+      { timeoutMs: CATALOG_REFRESH_PROBE_TIMEOUT_MS, maxBytes: CATALOG_PROBE_MAX_BYTES, ...options },
     )
     if (!result.ok) throw new Error(`catalog probe refused: ${result.reason}`)
     return new Response(NULL_BODY_STATUSES.has(result.status) ? null : result.body, {
@@ -261,8 +283,15 @@ export function createGuardedCatalogFetch(options: SafeFetchOptions = {}): typeo
   }) as typeof fetch
 }
 
-/** The production catalog-probe transport: every request through the SSRF guard. */
-export const guardedCatalogFetch: typeof fetch = createGuardedCatalogFetch()
+/** The production refresh transport: every request through the SSRF guard, refresh budget. */
+export const guardedCatalogFetch: typeof fetch = createGuardedCatalogFetch({
+  timeoutMs: CATALOG_REFRESH_PROBE_TIMEOUT_MS,
+})
+
+/** The production discovery-probe transport: the SSRF guard, ingestion budget. */
+export const guardedDiscoveryProbeFetch: typeof fetch = createGuardedCatalogFetch({
+  timeoutMs: CATALOG_DISCOVERY_PROBE_TIMEOUT_MS,
+})
 
 /**
  * Probe one catalog entry. MCP merchants are probed with a JSON-RPC

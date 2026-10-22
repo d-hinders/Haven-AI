@@ -77,8 +77,12 @@ cross-origin rule:
   hop is a different origin.
 - A 307/308 that would re-send a request body to another origin is refused
   mid-flight (`redirect_cross_origin_body`) only when the request carries a
-  payment: the paid delivery (`deliverPayment`), or any body with an x402
-  payment in `_meta["x402/payment"]`. Every other request (MCP `initialize`,
+  payment: the paid delivery (`deliverPayment`), or a body with an x402
+  payment in `_meta["x402/payment"]`. That body can be a string, a
+  `Uint8Array`/`ArrayBuffer` decoded as UTF-8 JSON, or a JSON-RPC batch with
+  any element carrying it. A body that cannot be read that way (a stream,
+  form data, bytes that are not UTF-8 JSON) is not treated as paid. Every
+  other request (MCP `initialize`,
   quote probes, a plain `fetch` POST) follows that redirect with its body, as
   the platform did, with the headers reduced.
 - Everything else is the platform's behaviour, kept as it was: up to 20 hops
@@ -89,9 +93,11 @@ cross-origin rule:
   `redirect: 'manual'` or `'error'` passed straight to the platform.
 
 A refusal on the paid delivery is the funded, undelivered state on this path
-too (see Refusals): `MerchantCompletion.retryRequest` records it as
-`merchant_retry_rejected_after_payment` and re-throws it with the
-`payment_id`, and the local MCP answers with `haven_get_payment_status` as the
+too (see Refusals). `MerchantCompletion.retryRequest` records it as
+`merchant_retry_rejected_after_payment`. The event's `retry_status` is the
+redirect status, and its `details` carry `refusal` and `redirect_location`.
+It then re-throws the refusal with the `payment_id`, and the local MCP
+answers with `haven_get_payment_status` as the
 next tool and "do not pay again".
 
 ## Refusals

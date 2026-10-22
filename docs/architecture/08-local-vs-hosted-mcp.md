@@ -405,8 +405,10 @@ haven_pay_x402_quote → haven_sign
 > client still reaches `http` to loopback and reserved
 > `.test`/`.localhost`/`.invalid`/`.example` fixtures, with no caps or per-use
 > budgets. Both sides share one redirect rule (#4244, #4257): a hop to another
-> origin carries only an allow-list of headers, and a paid request is never
-> re-sent to another origin. On the local side a redirect refused during paid
+> origin carries only an allow-list of headers, so a paid GET or a 303 that
+> crosses origin is followed with the payment headers stripped and no body,
+> and a 307/308 that would re-send a paid body to another origin is refused.
+> On the local side a redirect refused during paid
 > delivery is recorded and reported as funded and undelivered, with
 > `haven_get_payment_status` as the next tool. Accepted residual on
 > the hosted side: a public name whose DNS answer points at private space is

@@ -49,6 +49,15 @@
   --v2-tab-bar-bg: #ffffff;
   --v2-tab-bar-border: #e6ebf1;
 
+  /* The active tab's concentric capsule (#4237): the indicator span is set
+     inside the pill by the same 5px on every side (`p-1` padding + the 1px
+     border), so its 26px radius is concentric with the pill's 31px. Light
+     aliases `--v2-surface-2` — 1.12:1 on the white pill, deliberately a
+     SUPPLEMENTARY cue: selection is carried by ink, weight and
+     `aria-current` (see MobileTabBar). Hex so `THEME_TOKENS` and
+     `scripts/contrast-check.mjs` can measure it. */
+  --v2-tab-bar-indicator: #eef2f7;
+
   --v2-brand: #4f46e5;
   --v2-brand-strong: #4338ca;
   --v2-brand-soft: #eef2ff;
@@ -318,8 +327,10 @@
      pill, and the toast container lifts by the same sum so the payoff
      notification is not hidden behind the thing everyone is looking at.
 
-     `--v2-tab-bar-h` is the pill's OUTER height: 52px cells, `py-1` (4px)
-     above and below them and the 1px border — 62px. `--v2-tab-bar-bottom` is the gap
+     `--v2-tab-bar-h` is the pill's OUTER height: 52px cells, `p-1` (4px) on
+     every side and the 1px border — 62px. The side padding is also the
+     capsule indicator's inset (#4237): 4px padding + 1px border = 5px on
+     every side, concentric with the pill. `--v2-tab-bar-bottom` is the gap
      between the pill and the viewport bottom: 12px in a browser tab, and the
      home-indicator inset itself on a notched phone, where adding a gap ON TOP
      of the inset would float the pill visibly high. */
@@ -446,6 +457,12 @@
        block — the theme-tokens unit test holds the two sets equal. */
     --v2-tab-bar-bg: #20252f;
     --v2-tab-bar-border: #3a4152;
+
+    /* The active tab's concentric capsule (#4237): a step LIGHTER than
+       `--v2-surface-2`, which is identical to the pill fill here (1.00:1) —
+       this measures 1.18:1 on the pill, still a supplementary cue. Selection
+       is carried by ink, weight and `aria-current` (see MobileTabBar). */
+    --v2-tab-bar-indicator: #2b3140;
 
     --v2-brand: #a5acff;
     --v2-brand-rgb: 165 172 255;
@@ -594,6 +611,12 @@
      block — the theme-tokens unit test holds the two sets equal. */
   --v2-tab-bar-bg: #20252f;
   --v2-tab-bar-border: #3a4152;
+
+  /* The active tab's concentric capsule (#4237): a step LIGHTER than
+     `--v2-surface-2`, which is identical to the pill fill here (1.00:1) —
+     this measures 1.18:1 on the pill, still a supplementary cue. Selection
+     is carried by ink, weight and `aria-current` (see MobileTabBar). */
+  --v2-tab-bar-indicator: #2b3140;
 
   --v2-brand: #a5acff;
   --v2-brand-rgb: 165 172 255;

@@ -1433,6 +1433,19 @@ last-verified: "2026-10-21"
 > signers keep the old x402 arm until upgraded. Nothing else in this document
 > was re-verified in this pass.
 >
+> **Recent re-verification (#4248):** the #4242 refusal is now the
+> structured `NO_FUNDING_LEG` (it was `SIGNING_ERROR`), with
+> `next_action: sign_and_submit_payment` and a `next_tool_omitted_reason`,
+> on both `haven_x402_sign_header` and `haven_sign_x402`. `haven_sign_x402`
+> now checks the expected-context version before the settlement-child
+> refusal, so an out-of-date signer gets `UNSUPPORTED_EXPECTED_CONTEXT_VERSION`
+> (#1143 ordering) whatever the typed data is. A settlement-child binding is
+> retired at mint and no longer held in memory. No tool, argument,
+> description or version set changes, so the handshake and consent hash do
+> not move. Skew: no released signer emitted the #4242 `SIGNING_ERROR`, and
+> hosted code branches on neither code. Nothing else in this document was
+> re-verified in this pass.
+>
 > **Recent re-verification (#4242):** the signer's x402 binding now records
 > which shape was signed, and `haven_x402_sign_header` builds an EIP-3009
 > header only from a funding-leg binding; a settlement-child binding is

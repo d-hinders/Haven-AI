@@ -688,7 +688,8 @@ rule). `?grant=` keeps working alongside `?tab=`. Sections, in order:
    merchant label is #4209's helper (name → x402 host → nothing, never an
    address), and with no label the line is omitted. With no payments in the
    window it reads "No payments in the last 30 days.", followed by "Last paid
-   {age} to {merchant}" when an older payment exists. A revoked
+   {age}" (plus "to {merchant}" when there is a label) when an older payment
+   exists. With payments but no recorded time, Last paid reads "—". A revoked
    or otherwise uncovered agent is not in the overview, so it renders no
    Last 30 days column; its history is under Activity.
    **Add budget is collapsed once a budget exists**: with no budget the

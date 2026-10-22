@@ -42,6 +42,10 @@
  *   painted box IS the target and must clear the floor outright.
  * - **No horizontal overflow:** `expectNoHorizontalOverflow` (#1771), the
  *   two-metric union over the document and `#main-content`.
+ * - **Spending hero's Last 30 days at 375px (#4260):** a separate test at
+ *   375px, not 390 — the three labelled figures render (non-vacuity), no
+ *   figure is wider than its cell or leaves the grid, and the page does not
+ *   overflow horizontally.
  */
 
 import { expect, test, type Page } from '@playwright/test'

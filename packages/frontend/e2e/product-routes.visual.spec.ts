@@ -59,7 +59,10 @@
  * nothing else measured, desktop adds a second re-bless tax on the repo's
  * hottest screen without a defect pointing at it, and the overflow class a
  * desktop baseline would catch is guarded by boolean measurement in
- * `agent-detail.mobile.spec.ts` (#1858's standing argument).
+ * `agent-detail.mobile.spec.ts` (#1858's standing argument). #4260 adds the
+ * desktop axis for `agent-detail-research` only: the Spending hero's two
+ * halves sit side by side only at `lg`, a composition the mobile stack never
+ * shows. `agents-list` and `agents-list-filtered` stay mobile-only.
  *
  * **`/accounts` was rejected on fixture fidelity (#2225) — superseded 2026-09-10
  * by #2817, which adds this route MOBILE-only.** The rejection was written
@@ -190,7 +193,8 @@ const VIEWPORTS = SHARED_VIEWPORTS as ReadonlyArray<{
  *
  * #2733 inverts that choice for the two routes it adds: the mobile
  * composition is the thing that issue tunes and the thing nothing else
- * measured, so those two ship MOBILE-only (see the header note above).
+ * measured, so those two ship MOBILE-only (see the header note above;
+ * #4260 later added desktop for the detail route).
  *
  * #2817 (2026-09-10) extends it once more: `/dashboard`, `/transactions` and
  * `/accounts` also carry MOBILE now — the bottom tab bar (#2805) makes the
@@ -328,8 +332,9 @@ type ProductRoute = {
    * mobile baseline to a route that already ships desktop — flipping it would
    * silently DROP the desktop PNG. The loop below emits one test per listed
    * axis and the snapshot stays `${slug}-${axis}.png`, so no existing PNG
-   * moves. `/dashboard` and `/transactions` carry both axes; `/accounts`
-   * ships mobile-only (see the header for both decisions).
+   * moves. `/dashboard`, `/transactions` and `/agents/agent-research`
+   * (#4260) carry both axes; `/accounts` ships mobile-only (see the header
+   * for these decisions).
    */
   viewports?: ReadonlyArray<'desktop' | 'mobile'>
   /** The route's own H1 — present only once the client component has data. */

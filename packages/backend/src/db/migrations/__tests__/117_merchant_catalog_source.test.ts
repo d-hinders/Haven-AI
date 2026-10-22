@@ -91,10 +91,15 @@ describeDb('migration 117: merchant_catalog.source (#4245)', () => {
   it('refuses any value outside the closed vocabulary, including ingestion', async () => {
     const id = await seedOperatorRow(await seedMerchant())
     for (const value of ['ingestion', 'Bazaar', '']) {
-      await expect(
-        db.query(`UPDATE merchant_catalog SET source = $1 WHERE id = $2`, [value, id]),
-        value,
-      ).rejects.toMatchObject({ code: '23514' })
+      // Settled by hand so a write that SUCCEEDS fails the assertion below,
+      // not a matcher plumbing error.
+      const refusal = await db
+        .query(`UPDATE merchant_catalog SET source = $1 WHERE id = $2`, [value, id])
+        .then(
+          () => null,
+          (err: { code?: string }) => err,
+        )
+      expect(refusal?.code, value).toBe('23514')
     }
     await db.query(`UPDATE merchant_catalog SET source = 'bazaar' WHERE id = $1`, [id])
     expect(await sourceOf(id)).toBe('bazaar')

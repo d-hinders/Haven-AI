@@ -4,7 +4,7 @@ status: current
 covers:
   - packages/sdk/src/merchant-egress.ts
   - packages/sdk/src/merchant-discovery.ts
-last-verified: "2026-10-07"
+last-verified: "2026-10-22"
 ---
 
 # Hosted merchant egress — the string-level policy
@@ -28,6 +28,11 @@ hosted client's own outbound rule.
    against 1–3, up to 3 hops (`redirect: 'manual'`; nothing is ever followed
    un-checked). A redirect on any other method is refused — the paid POST is
    never followed, so a payment header is never sent to a redirect target.
+   A GET hop that changes origin (scheme, host or port, compared hop to hop)
+   carries only `accept`, `accept-language`, `user-agent` and `x402-wallet`.
+   `Authorization`, `Cookie`, API keys and any other caller header stay with
+   the origin they were supplied for, and are not restored if a later hop
+   returns there (#4244). Same-origin hops carry the request unchanged.
 5. **Bounded budgets per use**: quotes and MCP session setup 15 s, discovery
    5 s, paid delivery 300 s; response caps enforced **while reading** —
    256 KiB on quotes and MCP session setup, 64 KiB on discovery, 5 MiB on

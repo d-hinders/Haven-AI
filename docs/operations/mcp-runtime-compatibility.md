@@ -83,6 +83,15 @@ covers:
 last-verified: "2026-10-21"
 ---
 
+> **Re-verified unchanged (#4244, 2026-10-22, merchant-transport only).**
+> `packages/sdk/src/mcp-merchant-transport.ts` and `merchant-egress.ts` are on
+> this contract's cover list. Under a merchant-egress policy, a GET redirect
+> hop that changes origin now sends only an allow-list of caller headers
+> (`accept`, `accept-language`, `user-agent`, `x402-wallet`); same-origin hops
+> and the no-policy path are unchanged. No tool is added, renamed or
+> re-shaped; no strict schema, consent hash, version-skew rule or signing
+> input moves. `last-verified` is not re-stamped: this block is the scope.
+
 > **Contract change (#4107 reverted, 2026-10-21, one hosted tool removed):
 > `haven_check_token_safety` is gone.** PR #4148 added it on 2026-10-20; it
 > reached `dev` and hosted dev only, never `main`, and is reverted whole on

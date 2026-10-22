@@ -606,6 +606,7 @@ Authenticated app pages use compact product typography utilities from `@haven_ai
 | `.v2-text-display` | 40 / 48px | 600 | -0.02em | Rare app hero display, not ordinary dashboards |
 | `.v2-text-h1` | 28 / 34px | 600 | -0.015em | PageHeader title |
 | `.v2-text-h2` | 20 / 28px | 600 | -0.01em | Major section titles |
+| `Amount size="md"` (`text-xl`) | 20 / 28px | 600 | 0 | Secondary figure, 20px — a figure beside a headline, such as the Last 30 days figures once #4260 lands; pair it with `DirectionMark density="figure"` (#4259). Set on `Amount`'s own span: a wrapper's `text-*` never resizes the figure |
 | `.v2-text-h3` | 16 / 24px | 600 | 0 | Card and panel titles |
 | `.v2-text-body` | 14 / 22px | 400 | 0 | Main app body copy |
 | `.v2-text-meta` | 12 / 18px | 400 | 0 | Labels, captions, metadata |
@@ -758,6 +759,17 @@ which this rule does not touch).
 - The `PageHeader`'s own `meta` line (above) carries the entity's quiet
   identity row — account, network, created, last activity — so the section
   headings below stay about their sections.
+- **Manage pattern: row actions in ⋯** (#3695; rewritten by #4259 under the
+  [owner decisions of 2026-10-22 on #4258](https://github.com/d-hinders/Haven-AI/issues/4258)).
+  A section that manages a list — the agent page's Spending section, to be
+  adopted there by #4261 — puts each
+  row's actions AND the section's add in that row's ⋯ `DropdownMenu`: Edit
+  budget, Add budget, a separator, then Stop budget… in the danger tone. No
+  visible Edit, Stop or Add button competes with the rows; the row's identity
+  rides on the trigger's `aria-label` ("Budget options 250 USDC per week").
+  Choosing Add opens the form in place. A section with **no rows** has no menu
+  to carry the add, so it keeps a visible add (Set budget, a ghost button). The
+  `/design-system` specimen shows both states.
 
 ### BudgetMeter (#3692)
 
@@ -1663,13 +1675,15 @@ into one "×N" row; a full ledger needs one row per transaction, and gets it:
 ### Direction marks — `DirectionMark` ([#4197](https://github.com/d-hinders/Haven-AI/issues/4197))
 
 One shared `<DirectionMark>` for every in/out/pending direction in the app: incoming uses
-success green, outgoing uses debit sky, pending uses neutral grey. Three densities:
+success green, outgoing uses debit sky, pending uses neutral grey. Four densities:
 
 - `comfortable` (default): 36px mark, 16px icon — the dedicated `/transactions` table.
 - `compact`: 32px mark, 14px icon — dashboard rows, on the same rhythm as agent rows.
-- `inline`: 18px mark, 11px icon — small enough to sit BESIDE a figure in dense
-  content; the account summary card's Last 30 days row (an in-arrow and the Money-in
-  figure, then an out-arrow and the Money-out figure) is the first use.
+- `figure`: 24px mark, 14px icon, 7px radius — beside a 20px secondary figure
+  (`Amount size="md"`), such as the Last 30 days In/Out pair once #4260 lands
+  (#4259; the account summary card uses `inline` until then).
+- `inline`: 18px mark, 11px icon — the size for a mark in dense inline text, where a
+  line of body copy sets the height.
 
 The mark is always `aria-hidden`. The accessible name is the CALLER's job: sr-only text
 before the figure ("Money in" / "Money out" on the account page), so a screen reader

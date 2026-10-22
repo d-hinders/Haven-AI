@@ -43,6 +43,7 @@ import type { ReactNode } from 'react'
 
 const SIZE_CLASS = {
   sm: 'text-sm',
+  md: 'text-xl',
   lg: 'text-2xl',
 } as const
 
@@ -63,7 +64,12 @@ interface TokenAmountProps {
   direction?: AmountDirection
   /** Failed transactions render danger — the only red money ever gets. */
   failed?: boolean
-  /** `sm` for rows and tables (default); `lg` for detail-panel headlines. */
+  /**
+   * `sm` for rows and tables (default); `md` (20px) for a secondary figure
+   * beside a headline, such as Last 30 days (#4259); `lg` for detail-panel
+   * headlines. The size is on this span, so a wrapper's `text-*` never
+   * resizes the figure — pick it here, not with `className`.
+   */
   size?: keyof typeof SIZE_CLASS
   className?: string
 }

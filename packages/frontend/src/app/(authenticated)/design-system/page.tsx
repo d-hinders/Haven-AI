@@ -2140,6 +2140,11 @@ export default function DesignSystemPage() {
               <p><Amount value="12.00" symbol="USDC" direction="in" /> <span className="text-xs text-[var(--v2-ink-3)]">— incoming: the quiet success green</span></p>
               <p><Amount value="12.00" symbol="USDC" direction="out" /> <span className="text-xs text-[var(--v2-ink-3)]">— outgoing stays neutral; direction colour lives in DirectionMark</span></p>
               <p><Amount value="80.00" symbol="USDC" direction="out" failed /> <span className="text-xs text-[var(--v2-ink-3)]">— failed: the only red money gets</span></p>
+              <p className="flex items-center gap-2">
+                <DirectionMark direction="out" density="figure" />
+                <Amount value="42.00" symbol="USDC" direction="out" size="md" />{' '}
+                <span className="text-xs text-[var(--v2-ink-3)]">— size=&quot;md&quot; (20px) for a secondary figure, beside a DirectionMark figure</span>
+              </p>
               <p><Amount value="320.00" symbol="USDC" direction="out" size="lg" /> <span className="text-xs text-[var(--v2-ink-3)]">— size=&quot;lg&quot; for detail-panel headlines</span></p>
             </div>
           </Card>
@@ -2435,7 +2440,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="Direction marks (in / out / pending)"
-        description="One shared `<DirectionMark>` for every transaction row in the app. Incoming uses success green, outgoing uses debit sky, pending uses neutral grey. Density `compact` (32px) for dashboard rows, `comfortable` (36px, default) for the dedicated transactions table, `inline` (18px mark, 11px icon) beside a figure in dense content — the account summary card's Last 30 days row (#4197)."
+        description="One shared `<DirectionMark>` for every transaction row in the app. Incoming uses success green, outgoing uses debit sky, pending uses neutral grey. Density `compact` (32px) for dashboard rows, `comfortable` (36px, default) for the dedicated transactions table, `figure` (24px mark, 14px icon) beside a 20px secondary figure (Amount `md`, #4259), `inline` (18px mark, 11px icon) for a mark in dense inline text."
       >
         <Card hover={false} className="p-5">
           <div className="flex flex-wrap items-center gap-5">
@@ -2458,6 +2463,14 @@ export default function DesignSystemPage() {
             <div className="flex flex-col items-center gap-1">
               <DirectionMark direction="out" density="compact" />
               <p className="text-xs text-[var(--v2-ink-3)]">out · compact</p>
+            </div>
+            <div className="ml-4 flex flex-col items-center gap-1">
+              <DirectionMark direction="in" density="figure" />
+              <p className="text-xs text-[var(--v2-ink-3)]">in · figure</p>
+            </div>
+            <div className="flex flex-col items-center gap-1">
+              <DirectionMark direction="out" density="figure" />
+              <p className="text-xs text-[var(--v2-ink-3)]">out · figure</p>
             </div>
             <div className="ml-4 flex flex-col items-center gap-1">
               <DirectionMark direction="in" density="inline" />
@@ -3336,36 +3349,57 @@ export default function DesignSystemPage() {
       </Section>
 
       <Section
-        title="Section with a collapsed add (manage pattern)"
-        description="How a detail-page section manages a list (#3695, the agent page's Spending section). The heading and one-line description sit ABOVE the card; each row carries its own actions (Edit, Stop budget) beside the thing they change; and once one item exists, adding another is a collapsed control that opens the form in place — never a permanent second form competing with the rows. With no item yet, the form is the section's content. This replaced the action-footer pattern, whose buttons sat away from the data they affected."
+        title="Section with row actions in ⋯ (manage pattern)"
+        description="How a detail-page section manages a list (#3695; owner decision 4 on #4258, 2026-10-22, landed in the design system by #4259 and to be adopted by the agent page's Spending section in #4261). The heading and one-line description sit ABOVE the card. Each row's ⋯ menu holds that row's actions (Edit budget, then Stop budget… under a separator, danger tone) AND the section's add (Add budget) — no visible Edit, Stop or Add buttons compete with the rows, and the row's identity rides on the trigger's aria-label. Choosing Add opens the form in place. A section with no rows has no menu to hold the add, so it keeps a visible add (Set budget, a ghost button). This replaced the action-footer pattern, and then the visible row buttons it gave way to."
       >
-        <div>
-          <h3 className="v2-text-h3 text-[var(--v2-ink)]">Spending</h3>
-          <p className="mt-0.5 mb-3 text-sm text-[var(--v2-ink-muted)]">
-            What this agent can spend each period. Budgets are enforced on-chain: a payment over budget is declined before any money moves.
-          </p>
-          <Card hover={false} className="p-5 md:p-6">
-            <div className="flex items-start justify-between gap-3 py-3">
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium text-[var(--v2-ink)]">250 USDC per week</p>
-                <p className="truncate text-xs text-[var(--v2-ink-muted)]">to any recipient</p>
-                <div className="mt-2 max-w-sm">
-                  <BudgetMeter
-                    usedPercent={25}
-                    label="USDC budget used"
-                    caption={dsMeterCaption(DS_SPENDING_ROW)}
-                  />
+        <div className="grid gap-5 lg:grid-cols-2">
+          <div>
+            <h3 className="v2-text-h3 text-[var(--v2-ink)]">Spending</h3>
+            <p className="mt-0.5 mb-3 text-sm text-[var(--v2-ink-muted)]">
+              What this agent can spend each period. Budgets are enforced on-chain: a payment over budget is declined before any money moves.
+            </p>
+            <Card hover={false} className="p-5 md:p-6">
+              <div className="flex items-start justify-between gap-3 py-3">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium text-[var(--v2-ink)]">250 USDC per week</p>
+                  <p className="truncate text-xs text-[var(--v2-ink-muted)]">to any recipient</p>
+                  <div className="mt-2">
+                    <BudgetMeter
+                      usedPercent={25}
+                      label="USDC budget used"
+                      caption={dsMeterCaption(DS_SPENDING_ROW)}
+                    />
+                  </div>
                 </div>
+                <DropdownMenu>
+                  <DropdownMenuTrigger
+                    aria-label="Budget options 250 USDC per week"
+                    className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-hover)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <Icon icon={EllipsisVertical} className="h-4 w-4" />
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="right">
+                    <DropdownMenuItem onSelect={() => toast.info('Edit budget')}>Edit budget</DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => toast.info('Add budget')}>Add budget</DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem tone="danger" onSelect={() => toast.error('Stop budget (demo only)')}>
+                      Stop budget…
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
-              <div className="flex shrink-0 items-center gap-1">
-                <Button size="sm" variant="ghost">Edit</Button>
-                <Button size="sm" variant="ghost">Stop budget</Button>
-              </div>
-            </div>
-            <div className="mt-3">
-              <Button size="sm" variant="ghost">Add budget</Button>
-            </div>
-          </Card>
+            </Card>
+          </div>
+          <div>
+            <h3 className="v2-text-h3 text-[var(--v2-ink)]">Spending</h3>
+            <p className="mt-0.5 mb-3 text-sm text-[var(--v2-ink-muted)]">
+              What this agent can spend each period. Budgets are enforced on-chain: a payment over budget is declined before any money moves.
+            </p>
+            <Card hover={false} className="p-5 md:p-6">
+              <p className="text-sm text-[var(--v2-ink-muted)]">No budget yet.</p>
+              <Button size="sm" variant="ghost" className="mt-2">Set budget</Button>
+            </Card>
+          </div>
         </div>
       </Section>
 

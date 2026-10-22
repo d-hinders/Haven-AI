@@ -767,6 +767,18 @@ Isolation rules that are non-negotiable for a payments product:
  > `.env.dev.example`. Scope of this re-read: this bullet's catalog
  > paragraphs; nothing else in the document was re-read for it, and
  > `last-verified` is not bumped.
+ > **Re-verified #4281 (2026-10-22):** the refresh probe in
+ > `modules/catalog/merchant-catalog.ts` now sends every request through the
+ > SSRF guard (`infra/http/ssrf-guard.ts`). That means https on the default
+ > port only, a public resolved address only, 5 s and 256 KiB, and no
+ > redirect on a POST. It still probes with the row's declared method and
+ > body example, and what a success records (`pay_to`,
+ > `asset_transfer_methods`, `http_method`) is unchanged. Every catalog row
+ > seeded by migrations is an https URL on a public host, so a local dev
+ > refresh probes them as before. A row pointed at a local or http merchant
+ > now fails its probe. Scope of this re-read: this bullet's catalog
+ > paragraphs; nothing else in the document was re-read for it, and
+ > `last-verified` is not bumped.
  - **Owner company details (#3332)** — `HAVEN_OWNER_COMPANY_DETAILS` (strict
   boolean) gates `/user/company-details*`, the additive `parties.buyer`
   field on payment evidence/receipts, and the Settings → Company details

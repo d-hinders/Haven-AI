@@ -155,11 +155,13 @@ vi.mock('@/components/DelegationBudgetCard', () => ({
 }))
 
 vi.mock('@/components/PaymentCredentialsModal', () => ({
-  default: () => null,
+  default: ({ open }: { open: boolean }) =>
+    open ? <div data-testid="payment-credentials-modal" /> : null,
 }))
 
 vi.mock('@/components/agent-panel/ReplaceSigningKeyModal', () => ({
-  ReplaceSigningKeyModal: () => null,
+  ReplaceSigningKeyModal: ({ open }: { open: boolean }) =>
+    open ? <div data-testid="replace-signing-key-modal" /> : null,
 }))
 
 vi.mock('@/components/ConfirmDialog', () => ({
@@ -255,7 +257,7 @@ function mockLedgerWith(
   })
 }
 
-/** Seeds `?tab=settings` — the Identity and settings content's new home. */
+/** Seeds `?tab=settings` — the Settings tab's content (#4228). */
 function renderOnSettingsTab(ui: React.ReactElement) {
   window.history.replaceState(null, '', '/agents/agent-1?tab=settings')
   return render(ui)
@@ -585,8 +587,10 @@ describe('AgentDetailClient last-activity metadata', () => {
   })
 
   // #4209: the MCP server name moved here from the `/agents` card, with its
-  // copy button, and the `not recorded` note (#2043) moved with it.
-  describe('MCP server name (#4209)', () => {
+  // copy button, and the `not recorded` note (#2043) moved with it. #4228
+  // rebuilt the row as the Settings tab's Connection row — the testids and
+  // copy contracts stand; #4209's tests are retargeted, not duplicated.
+  describe('Connection row (#4209, retargeted #4228)', () => {
     function withMcpName(value: string | null) {
       const base = mockUseAgents()
       mockUseAgents.mockReturnValue({
@@ -599,8 +603,8 @@ describe('AgentDetailClient last-activity metadata', () => {
       withMcpName('haven-research')
       renderOnSettingsTab(<AgentDetailClient agentId="agent-1" />)
       const row = screen.getByTestId('mcp-server-name-row')
-      expect(row).toHaveTextContent('MCP server name')
-      expect(row).toHaveTextContent('haven-research')
+      expect(within(row).getByText('MCP server name')).toBeInTheDocument()
+      expect(within(row).getByText('haven-research')).toBeInTheDocument()
       expect(within(row).getByRole('button', { name: /copy mcp server name/i })).toBeInTheDocument()
       expect(screen.queryByText(MCP_NOT_RECORDED_NOTE)).toBeNull()
     })
@@ -611,6 +615,55 @@ describe('AgentDetailClient last-activity metadata', () => {
       const row = screen.getByTestId('mcp-server-name-row')
       expect(within(row).getByText('not recorded')).toBeInTheDocument()
       expect(within(row).getByText(MCP_NOT_RECORDED_NOTE)).toBeInTheDocument()
+    })
+
+    it('an agent never seen on MCP (no name, no last seen) reads No MCP connection recorded (#4228)', () => {
+      const base = mockUseAgents()
+      mockUseAgents.mockReturnValue({
+        ...base,
+        agents: base.agents.map((a: Record<string, unknown>) => ({
+          ...a,
+          mcp_server_name: null,
+          mcp_last_seen_at: null,
+        })),
+      })
+      renderOnSettingsTab(<AgentDetailClient agentId="agent-1" />)
+
+      const row = screen.getByTestId('mcp-server-name-row')
+      expect(within(row).getByText('No MCP connection recorded')).toBeInTheDocument()
+      // A null name alone is not "no connection" — the never-seen sentence is
+      // the only empty state, and it does NOT say "API key" (#4228).
+      expect(within(row).queryByText('not recorded')).toBeNull()
+      expect(within(row).queryByText(MCP_NOT_RECORDED_NOTE)).toBeNull()
+    })
+
+    it('an API-key agent gets the API-key line; an agent without a prefix does not (#4228)', () => {
+      const base = mockUseAgents()
+      mockUseAgents.mockReturnValue({
+        ...base,
+        agents: base.agents.map((a: Record<string, unknown>) => ({ ...a, api_key_prefix: 'haven_e2e' })),
+      })
+      // No prefix — no line (the prefix is all the agents read carries).
+      // Unmount first: RTL cleanup is manual in this file, and both renders
+      // would otherwise stand in the document.
+      const first = renderOnSettingsTab(<AgentDetailClient agentId="agent-1" />)
+      const row = screen.getByTestId('mcp-server-name-row')
+      expect(within(row).getByText('API key')).toBeInTheDocument()
+      expect(within(row).getByText('haven_e2e')).toBeInTheDocument()
+      first.unmount()
+      mockUseAgents.mockReturnValue({
+        ...base,
+        agents: base.agents.map((a: Record<string, unknown>) => ({ ...a, api_key_prefix: null })),
+      })
+      renderOnSettingsTab(<AgentDetailClient agentId="agent-1" />)
+      expect(screen.queryByText('API key')).not.toBeInTheDocument()
+    })
+
+    it('shows Last active from the MCP last-seen read (#4228)', () => {
+      renderOnSettingsTab(<AgentDetailClient agentId="agent-1" />)
+      // The fixture's mcp_last_seen_at is 2026-06-01T10:00:00Z against the
+      // frozen 12:00 clock — the same figure the header meta renders.
+      expect(screen.getByTestId('mcp-server-name-row').textContent).toContain('Last active 2h ago')
     })
   })
 
@@ -1120,54 +1173,115 @@ describe('AgentDetailClient last-activity metadata', () => {
     renderOnSettingsTab(<AgentDetailClient agentId="agent-1" />)
 
     const link = screen.getByRole('link', { name: /Backup & recovery/ })
-    expect(link).toHaveAttribute('href', '/accounts/safe-1')
+    // #4228: the pointer targets the account's Security & details tab.
+    expect(link).toHaveAttribute('href', '/accounts/safe-1?tab=security')
     // No enrollment controls on the agent page — those live only on the account page now.
     expect(screen.queryByRole('button', { name: /Add a backup/ })).not.toBeInTheDocument()
   })
 
-  // ── Identity and settings card (#3697) ──────────────────────────────────
-  // The page's optional and account-level items — the Agent Passport row, the
-  // tax declaration row (when VIES-valid) and the Backup & recovery pointer —
-  // are ONE quiet card at the bottom. No standalone Passport or Tax card.
+  // ── The Settings tab (#4228) ─────────────────────────────────────────────
+  // One Card of divided rows under "This agent" — connection, credentials,
+  // labels, tax, passport — plus the account-level pointer under
+  // "On {account name}". The rows open the page-owned modals; nothing here
+  // is a second copy of a flow.
 
-  it('groups the passport row, the tax row and Backup & recovery into one Identity and settings card (#3697)', () => {
+  it('renders the five sections in ONE card under This agent, plus the account card (#4228)', () => {
     mockUseCompanyDetails.mockReturnValue({ status: 'ready', details: VIES_VALID_ROW })
     mockDelegationAgent()
     renderOnSettingsTab(<AgentDetailClient agentId="agent-1" />)
 
-    const section = screen.getByTestId('identity-settings-section')
-    // Exactly ONE card in the section — no standalone Passport or Tax card.
+    const section = screen.getByTestId('agent-settings-section')
+    // Exactly TWO cards in the section: the agent rows, then the account-level one.
     const cards = section.querySelectorAll('.rounded-\\[10px\\]')
-    expect(cards.length).toBe(1)
-    const card = cards[0]
+    expect(cards.length).toBe(2)
+    const card = cards[0] as HTMLElement
 
-    // All three rows live inside that one card.
-    expect(within(card as HTMLElement).getByTestId('agent-passport-row')).toBeTruthy()
-    expect(within(card as HTMLElement).getByTestId('tax-declaration-row')).toBeTruthy()
+    expect(card.textContent).toContain('This agent')
+    expect(within(card).getByTestId('mcp-server-name-row')).toBeTruthy()
+    expect(within(card).getByTestId('payment-credentials-row')).toBeTruthy()
+    expect(within(card).getByTestId('labels-row')).toBeTruthy()
+    expect(within(card).getByTestId('tax-declaration-row')).toBeTruthy()
+    expect(within(card).getByTestId('agent-passport-row')).toBeTruthy()
+
+    // The account-level section carries the Backup & recovery pointer under
+    // its own "On {account name}" label — the label sits ABOVE the card, so
+    // the assertion scopes to the section, not the card.
+    const accountSection = screen.getByTestId('agent-account-section')
+    expect(accountSection.textContent).toContain('On Main account')
     expect(
-      within(card as HTMLElement).getByRole('link', { name: /Backup & recovery/ }),
-    ).toHaveAttribute('href', '/accounts/safe-1')
-
-    // The tax row keeps its own wording rules: the copy did not change, only
-    // the wrapper.
-    expect(within(card as HTMLElement).getByRole('checkbox')).toBeInTheDocument()
+      within(accountSection).getByRole('link', { name: /Backup & recovery/ }),
+    ).toHaveAttribute('href', '/accounts/safe-1?tab=security')
   })
 
-  it('hides the tax row without leaving a stray divider or empty gap (#3697)', () => {
+  it('opens the existing flows from the rows: credentials, replace key, edit labels (#4228)', () => {
+    mockDelegationAgent()
+    renderOnSettingsTab(<AgentDetailClient agentId="agent-1" />)
+
+    // Nothing is open on render.
+    expect(screen.queryByTestId('payment-credentials-modal')).toBeNull()
+    expect(screen.queryByTestId('replace-signing-key-modal')).toBeNull()
+    expect(screen.queryByTestId('edit-agent-modal')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'View' }))
+    expect(screen.getByTestId('payment-credentials-modal')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Replace signing key' }))
+    expect(screen.getByTestId('replace-signing-key-modal')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
+    expect(screen.getByTestId('edit-agent-modal')).toBeInTheDocument()
+  })
+
+  it('hides Payment credentials and Replace signing key for a REVOKED agent, and keeps Connection and Labels readable (#4228)', () => {
+    const base = mockUseAgents()
+    mockUseAgents.mockReturnValue({
+      ...base,
+      agents: base.agents.map((a: Record<string, unknown>) => ({ ...a, status: 'revoked' })),
+    })
+    renderOnSettingsTab(<AgentDetailClient agentId="agent-1" />)
+
+    expect(screen.queryByTestId('payment-credentials-row')).not.toBeInTheDocument()
+    expect(screen.getByTestId('mcp-server-name-row')).toBeInTheDocument()
+    expect(screen.getByTestId('labels-row')).toBeInTheDocument()
+    // The passport row keeps its OWN gate: it renders, and its Issue control
+    // is what AgentPassportCard hides for a revoked agent.
+    expect(screen.getByTestId('agent-passport-row')).toBeInTheDocument()
+  })
+
+  it('an ARCHIVED agent also loses the credential rows (#4228)', () => {
+    const base = mockUseAgents()
+    mockUseAgents.mockReturnValue({
+      ...base,
+      agents: base.agents.map((a: Record<string, unknown>) => ({
+        ...a,
+        status: 'active',
+        archived_at: '2026-05-20T00:00:00Z',
+      })),
+    })
+    renderOnSettingsTab(<AgentDetailClient agentId="agent-1" />)
+
+    expect(screen.queryByTestId('payment-credentials-row')).not.toBeInTheDocument()
+    expect(screen.getByTestId('mcp-server-name-row')).toBeInTheDocument()
+    expect(screen.getByTestId('labels-row')).toBeInTheDocument()
+    // Archived is not newly gated for the passport — its own gate is
+    // revoked-only, so the row (and its Issue control) still renders.
+    expect(screen.getByTestId('agent-passport-row')).toBeInTheDocument()
+  })
+
+  it('hides the tax row without leaving a stray divider or empty gap (#3697, retargeted #4228)', () => {
     // 'off' — the flag-off answer the route gives when HAVEN_OWNER_COMPANY_DETAILS is unset.
     mockUseCompanyDetails.mockReturnValue({ status: 'off', details: null })
     mockDelegationAgent()
     renderOnSettingsTab(<AgentDetailClient agentId="agent-1" />)
 
     expect(screen.queryByTestId('tax-declaration-row')).not.toBeInTheDocument()
+    // The agent card's direct children: the connection row, the credentials
+    // row, the labels row and the passport section — exactly four, so the
+    // tax row's divider left no orphan and no gap.
     const card = screen
-      .getByTestId('identity-settings-section')
+      .getByTestId('agent-settings-section')
       .querySelector('.rounded-\\[10px\\]') as HTMLElement
-    // The card's direct rows are the passport row, the MCP server name row
-    // (#4209) and the Backup section — exactly three, so the tax row's
-    // divider left no orphan and no gap.
-    expect(card.children.length).toBe(3)
-    expect(card.children[1]).toHaveTextContent('MCP server name')
+    expect(card.children.length).toBe(4)
     expect(card.textContent).not.toContain('Tax declaration')
 
     // ...and the non-valid VIES state hides it too.

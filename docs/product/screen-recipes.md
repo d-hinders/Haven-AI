@@ -13,6 +13,13 @@ covers:
   - packages/frontend/src/components/connect-agent/ConnectAgentFlow.tsx
   - packages/frontend/src/components/connect-agent/InlineAgentSetup.tsx
   - packages/frontend/src/components/EditAgentModal.tsx
+  - packages/frontend/src/components/PaymentCredentialsModal.tsx
+  - packages/frontend/src/components/AgentPassportCard.tsx
+  - packages/frontend/src/components/LabelsManagerModal.tsx
+  - packages/frontend/src/components/agent-panel/ReplaceSigningKeyModal.tsx
+  - packages/frontend/src/components/agent-panel/TaxDeclarationToggle.tsx
+  - packages/frontend/src/components/agent-panel/McpServerName.tsx
+  - packages/frontend/src/app/(authenticated)/agents/[agentId]/AgentSettingsTab.tsx
   - packages/frontend/src/components/DashboardOnboardingGuide.tsx
   - packages/frontend/src/components/haven/**
   - packages/frontend/src/app/(authenticated)/agents/[agentId]/AgentDetailClient.tsx
@@ -719,15 +726,42 @@ rule). `?grant=` keeps working alongside `?tab=`. Sections, in order:
    carries a warning dot, "Review the payment(s)" selects the tab and scrolls
    to it (never one payment's panel — #2196's rule), and the affected rows
    carry the Needs attention badge while the Status facet can narrow to them.
-   **Tool calls** and **Settings** hold today's content unchanged (the MCP
-   tool calls panel; the Identity and settings card) until #4227 and #4228.
-6. Identity and settings — the Settings tab's content (#4226): one quiet card
-   of rows: the Agent Passport, the
-   **MCP server name** (#4209, moved here from the `/agents` card): the
-   hosted+signer pair the agent is wired as, with a copy button and a tooltip
-   naming both servers, or the bare `not recorded` label with its explanation
-   as visible text beside it, never a tooltip (#2043); then the tax declaration row (when shown)
-   and the Backup & recovery pointer.
+   **Tool calls** holds today's MCP tool calls panel until #4227.
+6. Settings (#4228): the tab is two sections, mirroring the account page's
+   Security & details tab. Under a small **This agent** label, ONE `Card` of
+   `Card.Section divided` rows —
+   1. **Connection**: the **MCP server name** (#4209, moved here from the
+      `/agents` card) with its copy button and a tooltip naming the
+      hosted+signer pair, plus **Last active** (`mcp_last_seen_at`). The
+      `not recorded` label keeps #2043's rule: its explanation is visible
+      text beside it, never a tooltip. An agent with no name AND no
+      `mcp_last_seen_at` reads "**No MCP connection recorded**" — and does
+      NOT say "API key": a null name alone also means an MCP agent connected
+      before names were recorded. An agent with an API-key prefix gets an
+      **API key** line (the visible prefix half of the credential; the full
+      key is shown once at creation and in the credentials modal), in every
+      connection state.
+   2. **Payment credentials**: **View** (opens `PaymentCredentialsModal`) and
+      **Replace signing key** (`ReplaceSigningKeyModal`) — hidden for
+      revoked and archived agents, matching the header ⋮ menu's
+      `canManageCredentials`. The header ⋮ menu keeps every action (Edit
+      agent, Manage labels, Payment credentials, Replace signing key, Remove
+      agent), so each stays reachable both ways.
+   3. **Labels**: the chips plus **Edit**, which opens `EditAgentModal`
+      (where the agent's labels are set, #3167). `LabelsManagerModal`
+      manages the vocabulary itself and stays in the ⋮ menu. Readable in
+      every state; Edit follows the editor's own gate (not mounted when
+      revoked).
+   4. **Tax declaration**: `TaxDeclarationToggle`, rendered only when the
+      company details are VIES-valid (the toggle owns its row and divider;
+      the row is absent otherwise).
+   5. **Agent Passport**: `AgentPassportCard`'s content as a row. Its own
+      revoked-only gate stands — archived agents are not newly gated.
+
+   Under **On {account name}**, a linked row to the account's **Backup &
+   recovery** — the account's Security & details tab (`?tab=security`). A
+   pointer, not a second copy (#1089). The old standalone "Identity and
+   settings" section is gone; its tests moved with the rows.
 
 Money and risk clarity:
 - The budget section leads: it is the reason to open an agent at all. The

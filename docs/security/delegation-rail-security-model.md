@@ -2335,7 +2335,8 @@ signer imports:
   of the two x402 shapes above was signed; a settlement-child binding is
   refused, because no funding leg put that amount in the delegate EOA the
   header spends from. `haven_sign_x402` refuses a settlement child before
-  signing it. And **the sweep home**, against Haven's recovery binding (see
+  signing it. Since #4248 a settlement-child binding is retired at mint and
+  never held, so the signer keeps no payment context for it. And **the sweep home**, against Haven's recovery binding (see
   residual 2).
 - **A task-budget child `Delegation` (#3329)** — a self-delegation: delegator
   AND delegate are this key's own delegate account, authority is the agent's

@@ -100,8 +100,13 @@ The edge signer ships as **`@haven_ai/signer`** in two layers:
      merchant payment header for the merchant leg of an x402 payment, after
      consuming the recorded binding and checking the merchant challenge against
      it. Only a funding-leg binding builds a header (#4242): a binding minted
-     for an erc7710 settlement child is refused and retired, because that
-     payment has no funding leg to back a delegate-EOA transfer. Reuses the SDK's `selectStandardPaymentOption` +
+     for an erc7710 settlement child is refused, because that payment has no
+     funding leg to back a delegate-EOA transfer. Since #4248 such a binding is
+     retired the moment it is minted and never held, so no payment context
+     outlives the call that signed the child; the refusal is the structured
+     `NO_FUNDING_LEG` (`next_action: sign_and_submit_payment`, no tool, a
+     `next_tool_omitted_reason` naming `haven_sign` then `haven_submit` with
+     `settlement_scheme: 'erc7710'`). Reuses the SDK's `selectStandardPaymentOption` +
      `toStandardPaymentRequirements` + the `x402` library. Since #3888 the
      authorization's nonce is not the library's random draw: the signer
      overwrites it with `deriveX402PaymentNonce(expected.paymentId)` on the

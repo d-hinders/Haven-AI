@@ -181,6 +181,17 @@ export class McpMerchantTransport {
 
   /** Fetch a merchant with a settlement-sized timeout and caller cancellation. */
   async fetch(url: string, init: RequestInit = {}, timeoutMs = this.merchantTimeout, maxBytes?: number): Promise<Response> {
+    return this.send(url, init, timeoutMs, maxBytes, false)
+  }
+
+  /**
+   * `fetch`, plus whether this request is the paid delivery (#4257). A paid
+   * delivery, or any body carrying an x402 payment in `_meta`, is never
+   * re-sent to another origin by a 307/308; without a policy every other
+   * request follows that redirect as the platform would, headers reduced.
+   */
+  private async send(url: string, init: RequestInit, timeoutMs: number, maxBytes: number | undefined, paidDelivery: boolean): Promise<Response> {
+    const carriesPayment = paidDelivery || bodyCarriesX402Payment(init.body)
     if (!this.egress) {
       const timeoutSignal = AbortSignal.timeout(timeoutMs)
       const signal = init.signal ? AbortSignal.any([init.signal, timeoutSignal]) : timeoutSignal
@@ -192,7 +203,7 @@ export class McpMerchantTransport {
         if (init.redirect === 'manual' || init.redirect === 'error') {
           return await this.fetchImpl(url, { ...init, signal })
         }
-        return await this.followRedirects(url, init, signal, undefined)
+        return await this.followRedirects(url, init, signal, undefined, carriesPayment)
       } catch (err) {
         if (timeoutSignal.aborted) {
           throw new MerchantTimeoutError(`Merchant request timed out after ${timeoutMs}ms: ${url}`)
@@ -200,7 +211,7 @@ export class McpMerchantTransport {
         throw err
       }
     }
-    return this.fetchUnderPolicy(url, init, timeoutMs, maxBytes)
+    return this.fetchUnderPolicy(url, init, timeoutMs, maxBytes, carriesPayment)
   }
 
   /**
@@ -213,7 +224,7 @@ export class McpMerchantTransport {
    * signal spans the WHOLE redirect chain, and `MerchantTimeoutError`
    * classification is preserved.
    */
-  private async fetchUnderPolicy(url: string, init: RequestInit, timeoutMs: number, maxBytes?: number): Promise<Response> {
+  private async fetchUnderPolicy(url: string, init: RequestInit, timeoutMs: number, maxBytes: number | undefined, carriesPayment: boolean): Promise<Response> {
     const egress = this.egress as MerchantEgressPolicy
     // Before anything is sent: a refusal here means no request of this use
     // ever left.
@@ -226,7 +237,7 @@ export class McpMerchantTransport {
     const signal = init.signal ? AbortSignal.any([init.signal, timeoutSignal]) : timeoutSignal
     let finalUrl = url
     try {
-      const response = await this.followRedirects(url, init, signal, egress, (hopUrl) => {
+      const response = await this.followRedirects(url, init, signal, egress, carriesPayment, (hopUrl) => {
         finalUrl = hopUrl
       })
       return this.capResponse(response, finalUrl, maxBytes)
@@ -249,9 +260,12 @@ export class McpMerchantTransport {
    *   `NO_POLICY_MAX_REDIRECTS` hops, the Fetch spec's method/body rewrite,
    *   and a 3xx with no Location returned as the answer.
    * - On both, a hop to another origin carries only
-   *   `CROSS_ORIGIN_REDIRECT_HEADERS`, never restored on a later hop; and a hop
-   *   that would re-send a request body to another origin is refused, since a
-   *   body can carry the payment itself (the MCP `_meta["x402/payment"]`).
+   *   `CROSS_ORIGIN_REDIRECT_HEADERS`, never restored on a later hop.
+   * - A hop that would re-send a request body to another origin is refused
+   *   under a policy (which follows GET alone, so this is unreachable there),
+   *   and without one only when `carriesPayment`: the paid delivery, or a body
+   *   carrying an x402 payment in `_meta` (#4257). Any other 307/308 is
+   *   followed with its body, as the platform did, headers reduced.
    *
    * `onHop` sees every URL a request goes to, so the caller can name the hop
    * it was on when the chain stops.
@@ -261,6 +275,7 @@ export class McpMerchantTransport {
     init: RequestInit,
     signal: AbortSignal,
     policy: MerchantEgressPolicy | undefined,
+    carriesPayment: boolean,
     onHop?: (hopUrl: string) => void,
   ): Promise<Response> {
     const maxRedirects = policy ? (policy.maxGetRedirects ?? 0) : NO_POLICY_MAX_REDIRECTS
@@ -316,6 +331,10 @@ export class McpMerchantTransport {
           false,
         )
       }
+      // Fetch spec (and undici): a redirect to a non-HTTP(S) URL is a network error.
+      if (!policy && !/^https?:$/.test(new URL(next).protocol)) {
+        throw new TypeError(`fetch failed: the redirect from ${currentUrl} names a non-HTTP(S) URL`)
+      }
       if (hops >= maxRedirects) {
         if (!policy) throw new TypeError(`fetch failed: redirect count exceeded (${maxRedirects}) at ${currentUrl}`)
         throw new MerchantEgressRefusedError(
@@ -338,20 +357,26 @@ export class McpMerchantTransport {
       // another. Compared hop to hop, as the Fetch spec does.
       if (new URL(next).origin !== new URL(currentUrl).origin) {
         // #4257: only a 307/308 keeps a body, and only off-policy (the policy
-        // follows GET alone). Re-sending it elsewhere could hand the payment
-        // to an origin it was not made for.
-        if (hopInit.body != null) {
+        // follows GET alone). A paid request re-sent elsewhere would hand the
+        // payment, or the paid call, to an origin it was not made for.
+        if (hopInit.body != null && (policy || carriesPayment)) {
           throw new MerchantEgressRefusedError(
-            `Refusing the ${response.status} redirect from ${currentUrl} to ${next}: it would re-send the request body ` +
-              'to a different origin, and a request body can carry the payment itself. The request was already sent ' +
-              'to the first URL; nothing was sent to the redirect target.',
+            carriesPayment
+              ? `The ${response.status} redirect of a paid request from ${currentUrl} to ${next} was not followed: ` +
+                  'following it would re-send the paid request to a different origin. The paid request, payment ' +
+                  `header and body included, was already delivered to ${currentUrl}; nothing was sent to ${next}.`
+              : `Refusing the ${response.status} redirect from ${currentUrl} to ${next}: it would re-send the request body ` +
+                  'to a different origin. The request was already sent to the first URL; nothing was sent to the redirect target.',
             next,
             'redirect_cross_origin_body',
             false,
+            { redirectStatus: response.status },
           )
         }
         hopInit = { ...hopInit, headers: crossOriginRedirectHeaders(hopInit.headers) }
       }
+      // The 3xx body is never read; release it before the next hop.
+      await response.body?.cancel().catch(() => undefined)
       hops++
       currentUrl = next
     }
@@ -576,7 +601,7 @@ export class McpMerchantTransport {
     // #3118: a `tools/call` body additionally carries the payment in
     // `params._meta["x402/payment"]` (the official MCP profile). Any other
     // body is sent byte-for-byte as the caller gave it.
-    return this.fetch(url, withMcpPaymentMeta({ ...init, headers }, paymentHeader), this.budgetFor('delivery'), this.capFor('delivery'))
+    return this.send(url, withMcpPaymentMeta({ ...init, headers }, paymentHeader), this.budgetFor('delivery'), this.capFor('delivery'), true)
   }
 
   /**
@@ -781,6 +806,19 @@ export function encodeMcpSettlementReceipt(settlement: McpX402SettlementMeta): s
 }
 
 /** #3155: the request body parsed as a JSON-RPC `tools/call` with an object `params`, else undefined. */
+/** #4257: whether a request body carries an x402 payment in `params._meta` (any JSON-RPC method). */
+function bodyCarriesX402Payment(body: unknown): boolean {
+  if (typeof body !== 'string') return false
+  let request: unknown
+  try {
+    request = JSON.parse(body)
+  } catch {
+    return false
+  }
+  return isRecord(request) && isRecord(request.params) && isRecord(request.params._meta) &&
+    request.params._meta[MCP_X402_PAYMENT_META_KEY] !== undefined
+}
+
 function parseJsonRpcToolsCall(body: unknown): (Record<string, unknown> & { params: Record<string, unknown> }) | undefined {
   if (typeof body !== 'string') return undefined
   let request: unknown

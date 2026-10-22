@@ -122,6 +122,32 @@ describe('no-policy transport — redirect characterization (#4257)', () => {
     expect(seen[1].headers['x-api-key']).toBe('merchant-a-key')
   })
 
+  it('a 301 turns a POST into a GET', async () => {
+    routes.set('a /start', redirect(301, '/next'))
+    await transport().fetch(`${A}/start`, { method: 'POST', body: '{"x":1}' })
+    expect(seen[1]).toMatchObject({ method: 'GET', path: '/next', body: '' })
+  })
+
+  it('a 302 keeps a PUT a PUT, body included', async () => {
+    routes.set('a /start', redirect(302, '/next'))
+    await transport().fetch(`${A}/start`, { method: 'PUT', body: 'payload' })
+    expect(seen[1]).toMatchObject({ method: 'PUT', path: '/next', body: 'payload' })
+  })
+
+  it('a 303 keeps a HEAD a HEAD', async () => {
+    routes.set('a /start', redirect(303, '/next'))
+    await transport().fetch(`${A}/start`, { method: 'HEAD' })
+    expect(seen[1]).toMatchObject({ method: 'HEAD', path: '/next' })
+  })
+
+  it('a redirect to a non-HTTP(S) URL fails like the platform', async () => {
+    routes.set('a /start', redirect(302, 'data:text/plain,hello'))
+    const result = await settle(transport().fetch(`${A}/start`))
+    expect(result.ok).toBe(false)
+    expect(result.ok ? undefined : result.error).toBeInstanceOf(TypeError)
+    expect(seen).toHaveLength(1)
+  })
+
   it("a caller's redirect: 'manual' still gets the 3xx back unfollowed", async () => {
     routes.set('a /start', redirect(302, `${B}/next`))
     const response = await transport().fetch(`${A}/start`, { redirect: 'manual', headers: CALLER_HEADERS })
@@ -183,20 +209,47 @@ describe('no-policy transport — a cross-origin hop keeps credentials at their 
 
   it('a 303 that crosses origin follows as a GET with the headers reduced', async () => {
     routes.set('a /start', redirect(303, `${B}/next`))
-    await transport().fetch(`${A}/start`, { method: 'POST', headers: CALLER_HEADERS, body: '{"x":1}' })
+    const result = await settle(transport().fetch(`${A}/start`, { method: 'POST', headers: CALLER_HEADERS, body: '{"x":1}' }))
+    expect(result.ok).toBe(true)
     expect(at('b')[0]).toMatchObject({ method: 'GET', body: '' })
     expect(at('b')[0].headers['x-api-key']).toBeUndefined()
   })
 
-  it('a 307 that would re-send the body to another origin is refused before connecting there', async () => {
-    routes.set('a /start', redirect(307, `${B}/next`))
+  it('a 307 on a paid delivery is refused before connecting to the other origin', async () => {
+    routes.set('a /paid', redirect(307, `${B}/next`))
     const result = await settle(
-      transport().fetch(`${A}/start`, { method: 'POST', headers: CALLER_HEADERS, body: '{"payment":"signed-for-a"}' }),
+      transport().deliverPayment(`${A}/paid`, { method: 'POST', headers: CALLER_HEADERS, body: '{"q":1}' }, 'signed-for-a'),
     )
     expect(result.ok).toBe(false)
-    expect(result.ok ? undefined : result.error).toMatchObject({ refusal: 'redirect_cross_origin_body', beforeRequest: false })
-    expect(at('a')).toHaveLength(1)
+    expect(result.ok ? undefined : result.error).toMatchObject({
+      refusal: 'redirect_cross_origin_body',
+      beforeRequest: false,
+      redirectStatus: 307,
+    })
+    // The paid request, header and body included, did reach the first URL.
+    expect(at('a')[0]).toMatchObject({ method: 'POST', body: '{"q":1}' })
+    expect(at('a')[0].headers['payment-signature']).toBe('signed-for-a')
     expect(at('b')).toHaveLength(0)
+  })
+
+  it('a 307 whose body carries an x402 payment in _meta is refused on a plain fetch too', async () => {
+    routes.set('a /mcp', redirect(307, `${B}/mcp`))
+    const body = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 't', _meta: { 'x402/payment': { p: 1 } } } })
+    const result = await settle(transport().fetch(`${A}/mcp`, { method: 'POST', body }))
+    expect(result.ok).toBe(false)
+    expect(result.ok ? undefined : result.error).toMatchObject({ refusal: 'redirect_cross_origin_body', beforeRequest: false })
+    expect(at('b')).toHaveLength(0)
+  })
+
+  it('a 307 on an unpaid POST follows to the other origin with its body, as the platform did, headers reduced', async () => {
+    routes.set('a /start', redirect(307, `${B}/next`))
+    const result = await settle(
+      transport().fetch(`${A}/start`, { method: 'POST', headers: CALLER_HEADERS, body: '{"jsonrpc":"2.0","method":"initialize"}' }),
+    )
+    expect(result.ok).toBe(true)
+    expect(at('b')[0]).toMatchObject({ method: 'POST', body: '{"jsonrpc":"2.0","method":"initialize"}' })
+    expect(at('b')[0].headers['x-api-key']).toBeUndefined()
+    expect(at('b')[0].headers.authorization).toBeUndefined()
   })
 
   it('once stripped, a later hop back to the first origin does not regain them', async () => {

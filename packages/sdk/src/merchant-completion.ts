@@ -24,6 +24,7 @@ import { decidePostFundingMerchantAnswer } from './merchant-answer.js'
 import { buildExplorerUrl, x402PayerAddress } from './x402-protocol.js'
 import { paymentStateStatusCode } from './payment-state.js'
 import { decodeBase64Json } from './base64.js'
+import { MerchantEgressRefusedError } from './merchant-egress.js'
 import { X_TAX_DECLARATION_HEADER, withTaxDeclarationHeader, type TaxDeclarationHeaderResolver } from './client-tax-declaration.js'
 
 /**
@@ -208,12 +209,24 @@ export class MerchantCompletion {
     // between the challenge and this retry) and it SAYS nothing was settled,
     // re-initialize and resend the same header once instead of reporting a
     // 404 as a rejection after funding.
-    const retryResponse = await this.merchantTransport.deliverPaymentRecoveringSession(
-      url,
-      retryInit,
-      receipt.paymentHeader,
-      () => this.merchantTransport.initialize(url, initialInit),
-    )
+    let retryResponse: Response
+    try {
+      retryResponse = await this.merchantTransport.deliverPaymentRecoveringSession(
+        url,
+        retryInit,
+        receipt.paymentHeader,
+        () => this.merchantTransport.initialize(url, initialInit),
+      )
+    } catch (err) {
+      // #4257: a redirect refused AFTER the paid request was sent. The payment
+      // reached the merchant at `url` and nothing came back: the funded,
+      // undelivered state (#1300), recorded and re-thrown with the payment it
+      // belongs to so the caller can never read it as "nothing happened".
+      if (err instanceof MerchantEgressRefusedError && !err.beforeRequest) {
+        throw await this.paidDeliveryInterrupted(err, url, receipt, receipt.paymentHeader)
+      }
+      throw err
+    }
 
     // #3118: a profile merchant refuses under HTTP 200 with an `isError: true`
     // payment-required tool result or a `_meta["x402/payment-response"]` of
@@ -508,6 +521,57 @@ export class MerchantCompletion {
   // and MACHINE-PAYMENT-CHALLENGE was never produced by any other Haven
   // surface. Use the x402 flow (authorizeX402 / fetch / quoteX402 / payX402Quote)
   // for agent-to-merchant payments.
+
+  /**
+   * #4257: record a paid delivery that a refused redirect interrupted, and
+   * return the refusal re-thrown with its payment and an accurate account:
+   * the payment header (and the body) reached `url`, the merchant answered
+   * with a redirect Haven did not follow, and the merchant may still settle.
+   * The record is the same `merchant_retry_rejected_after_payment` event a
+   * non-2xx answer writes, so the payment reads as funded and undelivered.
+   */
+  private async paidDeliveryInterrupted(
+    err: MerchantEgressRefusedError,
+    url: string,
+    receipt: X402Receipt,
+    paymentHeader: string,
+  ): Promise<MerchantEgressRefusedError> {
+    const scheme = x402PaymentHeaderNamesFor(paymentHeader).length > 1 ? 'eip3009' : 'erc7710'
+    const status = err.redirectStatus ?? 0
+    await this.recordRetryRejected({
+      rail: 'x402',
+      paymentId: receipt.paymentId,
+      txHash: receipt.txHash,
+      resourceUrl: receipt.resourceUrl,
+      merchant: {
+        merchant_status: status,
+        merchant_status_text: 'redirect not followed',
+        merchant_headers: { location: err.url },
+        merchant_body: '',
+      },
+      details: {
+        merchant_to: receipt.merchantTo,
+        delegate_to: receipt.to,
+        refusal: err.refusal,
+      },
+    })
+    const what =
+      `The paid request was delivered to ${url}, payment header and body included, and the merchant answered ` +
+      `${status ? `HTTP ${status} ` : ''}with a redirect to a different origin (${err.url}). Haven did not follow it, ` +
+      `so the payment was not re-sent there. Do not pay again: `
+    const next =
+      scheme === 'erc7710'
+        ? 'erc7710 has no funding leg, so there is no delegate balance to strand or sweep. The merchant may still ' +
+          'redeem the settlement authorization within its window: check haven_get_payment_status after that window ' +
+          'and re-quote only if it shows no settlement.'
+        : 'the funding leg is confirmed on-chain and the merchant may still settle late. Check haven_get_payment_status ' +
+          'before anything else, and sweep the delegate only if no settlement appears.'
+    return new MerchantEgressRefusedError(what + next, err.url, err.refusal, false, {
+      redirectStatus: err.redirectStatus,
+      paymentId: receipt.paymentId,
+      settlementScheme: scheme,
+    })
+  }
 
   async recordRetryRejected(input: {
     rail: string

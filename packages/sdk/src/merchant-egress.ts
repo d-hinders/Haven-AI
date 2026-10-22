@@ -20,8 +20,9 @@ import { HavenError } from './types.js'
  *    per-use budget. Redirects are still followed by the transport (#4257),
  *    under the platform's rules (20 hops, the Fetch spec's method/body
  *    rewrite), plus the one rule both paths share: a hop to another origin
- *    carries only the cross-origin header allow-list, and a hop that would
- *    re-send a request body to another origin is refused.
+ *    carries only the cross-origin header allow-list. A paid request (the
+ *    delivery, or a body with an x402 payment in `_meta`) is never re-sent
+ *    to another origin by a 307/308; any other request follows as before.
  *  - The policy is network policy, not spend control. It never gates a
  *    payment's authority — the on-chain allowance stays the real control
  *    (CASP: off-chain policy is never the spend control).
@@ -78,8 +79,9 @@ export type MerchantEgressRefusalReason =
   | 'redirect_invalid_location'
   | 'redirect_budget_exceeded'
   /**
-   * #4257: a 307/308 would re-send the request body to another origin. Only
-   * reachable without a policy, which follows GET redirects alone.
+   * #4257: a 307/308 would re-send the request body to another origin. Under a
+   * policy (GET only) this is unreachable; without one it fires for a paid
+   * delivery, or a body carrying an x402 payment in `_meta`.
    */
   | 'redirect_cross_origin_body'
 
@@ -97,18 +99,29 @@ export class MerchantEgressRefusedError extends HavenError {
   readonly url: string
   readonly refusal: MerchantEgressRefusalReason
   readonly beforeRequest: boolean
+  /** #4257: the redirect status that was not followed, when a redirect was refused. */
+  readonly redirectStatus?: number
+  /**
+   * #4257: set when the refusal interrupted a PAID delivery and the local
+   * completion has re-thrown it with the payment it belongs to — the funded,
+   * undelivered state, never "nothing happened".
+   */
+  readonly settlementScheme?: 'eip3009' | 'erc7710'
 
   constructor(
     message: string,
     url: string,
     refusal: MerchantEgressRefusalReason,
     beforeRequest: boolean,
+    extra: { redirectStatus?: number; paymentId?: string; settlementScheme?: 'eip3009' | 'erc7710' } = {},
   ) {
-    super(message, MERCHANT_EGRESS_REFUSED_CODE, 400)
+    super(message, MERCHANT_EGRESS_REFUSED_CODE, 400, extra.paymentId)
     this.name = 'MerchantEgressRefusedError'
     this.url = url
     this.refusal = refusal
     this.beforeRequest = beforeRequest
+    this.redirectStatus = extra.redirectStatus
+    this.settlementScheme = extra.settlementScheme
   }
 }
 

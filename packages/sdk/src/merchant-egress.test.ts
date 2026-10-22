@@ -51,6 +51,15 @@ function recordingFetch(responder: (url: string, init?: RequestInit) => Response
 const okText = (body: string, init: ResponseInit = {}): Response =>
   new Response(body, { status: 200, ...init })
 
+/** Settle a promise, so a wrong outcome fails on an assertion rather than on a thrown error. */
+async function settleOf<T>(p: Promise<T>): Promise<{ ok: true; value: T } | { ok: false; error: unknown }> {
+  try {
+    return { ok: true, value: await p }
+  } catch (error) {
+    return { ok: false, error }
+  }
+}
+
 describe('isPublicHttpsMerchantUrl — the strict hosted string check', () => {
   it('allows https to a public host on any port', () => {
     expect(isPublicHttpsMerchantUrl('https://merchant.dev')).toBe(true)
@@ -225,6 +234,26 @@ describe('McpMerchantTransport under a policy — redirects', () => {
     // target was never contacted and never received the header.
     expect(fetchSpy.calls).toHaveLength(1)
     expect(fetchSpy.calls[0].url).toBe('https://a.dev/paid')
+  })
+})
+
+describe('McpMerchantTransport under a policy — the shared loop keeps the policy branches (#4257)', () => {
+  it('a Location-less 3xx is refused, not returned', async () => {
+    const fetchSpy = recordingFetch(() => new Response(null, { status: 302 }))
+    const result = await settleOf(transportWith(ALLOW_FIXTURES, fetchSpy).fetch('https://a.dev/start'))
+    expect(result.ok).toBe(false)
+    expect(result.ok ? undefined : result.error).toMatchObject({ refusal: 'redirect_missing_location', beforeRequest: false })
+  })
+
+  it('a policy without maxGetRedirects follows no redirect at all', async () => {
+    const { maxGetRedirects: _unset, ...noBudget } = ALLOW_FIXTURES
+    const fetchSpy = recordingFetch((url) =>
+      url === 'https://a.dev/start' ? new Response(null, { status: 302, headers: { location: '/next' } }) : okText('arrived'),
+    )
+    const result = await settleOf(transportWith(noBudget, fetchSpy).fetch('https://a.dev/start'))
+    expect(result.ok).toBe(false)
+    expect(result.ok ? undefined : result.error).toMatchObject({ refusal: 'redirect_budget_exceeded' })
+    expect(fetchSpy.calls).toHaveLength(1)
   })
 })
 
@@ -505,6 +534,20 @@ describe('McpMerchantTransport WITHOUT a policy — the transport follows redire
     expect(result.ok).toBe(false)
     expect(result.ok ? undefined : result.error).toMatchObject({ refusal: 'redirect_cross_origin_body', beforeRequest: false })
     expect(fetchSpy.calls.map((c) => c.url)).toEqual(['https://a.dev/mcp'])
+  })
+
+  it('a 308 to another origin on an unpaid POST follows with its body and the headers reduced', async () => {
+    const fetchSpy = recordingFetch((url) =>
+      url === 'https://a.dev/mcp'
+        ? new Response(null, { status: 308, headers: { location: 'https://b.dev/mcp' } })
+        : okText('arrived'),
+    )
+    const result = await settle(
+      transportWith(undefined, fetchSpy).fetch('https://a.dev/mcp', { method: 'POST', headers: CALLER_HEADERS, body: '{"q":1}' }),
+    )
+    expect(result.ok).toBe(true)
+    expect(fetchSpy.calls[1]).toMatchObject({ url: 'https://b.dev/mcp', init: { method: 'POST', body: '{"q":1}' } })
+    expect(sentHeaders(fetchSpy.calls[1].init)).toEqual({ accept: 'application/json' })
   })
 
   it('a 302 POST becomes a body-less GET, and the body headers go with the body', async () => {

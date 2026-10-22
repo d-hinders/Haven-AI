@@ -161,6 +161,7 @@ All tokens live as CSS custom properties at `:root` in `packages/ui/src/tokens.c
 |---|---|---|---|
 | `--v2-bg` | `#ffffff` | `#12151c` | Page background |
 | `--v2-surface` | `#f6f9fc` | `#191d26` | Alternating section bands, card hover backgrounds |
+| `--v2-table-header-bg` / `--v2-table-header-ink` | `#f6f9fc` / `#5d6c85` | `#191d26` / `#97a3b6` | Table headers and the day bands on day-grouped lists (`TransactionActivityDayHeader`, #4225) — the second sanctioned band, for list groups, not card titles |
 | `--v2-surface-2` | `#eef2f7` | `#20252f` | Disabled states, deeper card stacking |
 | `--v2-surface-code` | `#0b1120` | `#0b1120` | Dark code blocks (deliberately **not** re-tinted in dark — content keeps its own colours) |
 | `--v2-surface-hover` | `#f0f4f9` | `#232837` | Sidebar/user-menu row hover and subtle interactive shells |
@@ -1638,15 +1639,20 @@ into one "×N" row; a full ledger needs one row per transaction, and gets it:
   into local calendar-day groups — "Today", "Yesterday", then short dates ("17 May") —
   keeping the caller's order (a newest-first feed yields newest day first) and merging
   nothing.
-- `TransactionActivityDayHeader` renders the quiet band above each bucket, the same
-  heading style the dashboard's activity list draws above its merged rows; a `partial`
+- `TransactionActivityDayHeader` renders the tinted day band above each bucket — the
+  second sanctioned band after `Card.Header`, on the table-header tokens
+  (`--v2-table-header-bg` / `--v2-table-header-ink`) with a full-width hairline below
+  and the label uppercased by CSS (#4225). A `band={false}` prop keeps the plain
+  label for the dashboard's first day, where the Activity card's own tinted
+  `Card.Header` sits directly above. A `partial`
   flag marks a bucket whose day is cut by a window boundary ([#3975](https://github.com/d-hinders/Haven-AI/issues/3975)).
 - **Row dividers ([#4165](https://github.com/d-hinders/Haven-AI/issues/4165), owner
   decision 2026-10-20):** rows of the SAME day are separated by an inset hairline —
   `insetDivider` on every row after a day's first draws a 1px `--v2-border-subtle` line
   along the row's top edge, starting at the text column (padding + direction mark +
   gap) and ending at the row's padding. Day groups keep their full-width `--v2-border`
-  separation (`divide-y` on the list), so a day still reads stronger than a row. Both
+  separation (`divide-y` on the list) — and since #4225 the day band itself ends in
+  the same hairline — so a day still reads stronger than a row. Both
   ledgers draw it: the account page's Activity tab and the dashboard's Activity card.
 
 ### Direction marks — `DirectionMark` ([#4197](https://github.com/d-hinders/Haven-AI/issues/4197))

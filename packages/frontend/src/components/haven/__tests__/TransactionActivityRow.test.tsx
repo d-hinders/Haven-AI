@@ -144,4 +144,31 @@ describe('TransactionActivityDayHeader', () => {
     rerender(<TransactionActivityDayHeader label="Today" partial />)
     expect(screen.getByText('Today (partial)')).toBeInTheDocument()
   })
+
+  // #4225: the day band is the design system's second sanctioned band —
+  // pinned to the table-header tokens, with a full-width hairline below.
+  it('renders the tinted band on the table-header tokens with a hairline below', () => {
+    const { container } = render(<TransactionActivityDayHeader label="Today" />)
+    const band = screen.getByText('Today')
+    expect(band.className).toContain('bg-[var(--v2-table-header-bg)]')
+    expect(band.className).toContain('text-[var(--v2-table-header-ink)]')
+    expect(band.className).toContain('border-b')
+    expect(band.className).toContain('border-[var(--v2-border)]')
+  })
+
+  // Uppercase comes from CSS (text-transform), never from the DOM text —
+  // so "Today" stays matchable by text.
+  it('uppercases the label by CSS, not by mutating the text', () => {
+    render(<TransactionActivityDayHeader label="Today" />)
+    const band = screen.getByText('Today')
+    expect(band.className).toContain('uppercase')
+    expect(band.textContent).toBe('Today')
+  })
+
+  it('keeps the plain label when band={false} — the dashboard first day', () => {
+    render(<TransactionActivityDayHeader label="Today" band={false} />)
+    const band = screen.getByText('Today')
+    expect(band.className).not.toContain('bg-[var(--v2-table-header-bg)]')
+    expect(band.className).toContain('text-[var(--v2-ink-3)]')
+  })
 })

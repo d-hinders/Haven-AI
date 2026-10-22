@@ -1,7 +1,8 @@
 import { render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ApiSchema } from '@haven_ai/core'
-import { ActivitySection, activityDayLabel } from '../ActivitySection'
+import { ActivitySection } from '../ActivitySection'
+import { transactionDayKey, transactionDayLabel } from '@/components/haven'
 
 type ActivityGroup = ApiSchema<'DashboardActivityGroup'>
 
@@ -332,17 +333,67 @@ describe('ActivitySection (#3810)', () => {
   })
 })
 
-describe('activityDayLabel', () => {
-  it('names today and yesterday, and formats older days as a short date', () => {
+describe('the shared day helpers match the dropped local copies (#4225)', () => {
+  // ActivitySection used to carry its own `localDayKey` and `activityDayLabel`,
+  // word-for-word copies of the ledger's `transactionDayKey` /
+  // `transactionDayLabel`. The section now uses the shared helpers directly;
+  // this pins that their output is exactly what the local copies produced,
+  // so the swap cannot change a rendered heading. "(partial)" rides on top
+  // of the label and is pinned in the partial describe below.
+  it('transactionDayKey keys the local day; transactionDayLabel names it', () => {
     const today = new Date()
     const yesterday = new Date(today)
     yesterday.setDate(today.getDate() - 1)
     const lastWeek = new Date(today)
     lastWeek.setDate(today.getDate() - 7)
 
-    expect(activityDayLabel(formatDayKey(today))).toBe('Today')
-    expect(activityDayLabel(formatDayKey(yesterday))).toBe('Yesterday')
-    expect(activityDayLabel(formatDayKey(lastWeek))).toMatch(/^\d{1,2} \w+$/)
+    // The dropped `localDayKey`: the en-CA `YYYY-MM-DD` key.
+    const formatDayKey = (date: Date) => transactionDayKey(date.toISOString())
+    expect(formatDayKey(today)).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+
+    // The dropped `activityDayLabel`: today, yesterday, then en-GB short date.
+    expect(transactionDayLabel(formatDayKey(today))).toBe('Today')
+    expect(transactionDayLabel(formatDayKey(yesterday))).toBe('Yesterday')
+    expect(transactionDayLabel(formatDayKey(lastWeek))).toMatch(/^\d{1,2} \w+$/)
+  })
+
+  it('bands the second and later days, keeping the first day plain under the Card.Header (#4225)', () => {
+    const morning = new Date()
+    morning.setHours(1, 0, 0, 0)
+    const twoDaysAgo = new Date(morning.getTime() - 2 * 24 * 60 * 60 * 1000)
+    renderSection({
+      activity: [
+        group({ x402ResourceUrl: 'https://a.example/x', latestAt: morning.toISOString() }),
+        group({ x402ResourceUrl: 'https://b.example/x', latestAt: twoDaysAgo.toISOString() }),
+      ],
+    })
+
+    const headingPattern = /^(Today|Yesterday|\d{1,2} \w{3})$/
+    const headings = screen.getAllByText(headingPattern)
+    expect(headings).toHaveLength(2)
+    // First day: plain label — the Activity card's own tinted Card.Header
+    // sits directly above, so two bands of one tint never stack.
+    expect(headings[0].className).not.toContain('bg-[var(--v2-table-header-bg)]')
+    expect(headings[0].className).toContain('text-[var(--v2-ink-3)]')
+    // Later days: the tinted day band, on the table-header tokens.
+    expect(headings[1].className).toContain('bg-[var(--v2-table-header-bg)]')
+    expect(headings[1].className).toContain('text-[var(--v2-table-header-ink)]')
+    expect(headings[1].className).toContain('border-b')
+    expect(headings[1].className).toContain('uppercase')
+    // Uppercase is CSS-only — the DOM text stays matchable.
+    expect(headings[1].textContent).toMatch(headingPattern)
+  })
+
+  it('keeps the single-day preview plain first-day label (the kept Card.Header owns the tint)', () => {
+    renderSection({ activity: [group()] })
+    // With one day, the band is skipped entirely — the Activity card's own
+    // tinted Card.Header sits directly above, and the heading keeps the
+    // pre-#4225 plain-label styling via band={false}.
+    const heading = screen.getAllByText(/^(Today|Yesterday|\d{1,2} \w{3})$/)
+    expect(heading).toHaveLength(1)
+    expect(heading[0].tagName).toBe('P')
+    expect(heading[0].className).toContain('text-[var(--v2-ink-3)]')
+    expect(heading[0].className).not.toContain('bg-[var(--v2-table-header-bg)]')
   })
 })
 

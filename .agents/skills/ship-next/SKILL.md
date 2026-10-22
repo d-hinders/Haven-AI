@@ -369,6 +369,13 @@ Run checks proportionate to every changed surface:
 - `npm run preflight` for cross-package behavior;
 - browser verification or the required headless equivalent for UI changes.
 
+**Locally, the frontend vitest suite runs through `test:local`, scoped to the directories the diff touches (#4271).** `npm run test:local -w packages/frontend -- <paths…>` — package-relative paths, single worker (`--maxWorkers=1`), verbose reporter, core built first — wraps the run in a silence watchdog (default 5 min) and a wall-clock cap (default 30 min) that kill the whole process group on a hang, so a silent stall becomes a red exit naming the silent duration instead of a ~75-minute wait (the #4259 case, PR #4270: a whole-suite run stopped writing output one minute in, and killing it left a ~330 MB worker). The full frontend suite — what preflight's frontend gate runs — is left to CI: the builder deselects that gate locally and says so in the PR. A whole-suite run is CI's job, not `test:local`'s; the wrapper refuses without paths unless `--all` is passed. The order stays as it is: preflight first, review before the PR (owner decision 2026-10-22). Two rules ride along:
+
+- **Reviewers are dispatched while the scoped local run is going**, rather than after it.
+- **Reviewers do not run frontend vitest at the same time as the builder's run**, except through `test:local`. Competing jsdom workers are what turns tests red — the measured mechanism in the frontend playbook §4 (`:415`, #2319).
+
+And the wait rule itself, for every job: **never end a turn waiting on a single background job without first checking that it is still producing output.** It is stated once in [*waiting-on-ci*](references/waiting-on-ci.md), the home of the wait discipline — `test:local` is the vitest-shaped instance of it.
+
 Run the **repository's own required checks** locally before pushing, for fast feedback:
 
 - `npm run docs:check` and `npm run docs:test` when the diff touches any Markdown file, anything under `docs/` or `scripts/docs/`, or a root gravity file (`CLAUDE.md`, `README.md`, `AGENTS.md`, `ABOUT_HAVEN.md`);

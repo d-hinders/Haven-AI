@@ -622,6 +622,20 @@ describe('catalog routes', () => {
     })
   })
 
+  it('characterization (#4245): an operator row carrying the provenance column still serializes as source operator', async () => {
+    mockCatalogWithIngestion([{ ...ENTRY, source: 'operator' }])
+    const token = app.jwt.sign({ sub: 'usr-1', email: 'u@test.dev' })
+
+    const res = await app.inject({ method: 'GET', url: '/catalog', headers: { authorization: `Bearer ${token}` } })
+    expect(res.statusCode).toBe(200)
+    expect(res.json().entries[0]).toMatchObject({
+      id: CAT_ID,
+      source: 'operator',
+      domain_verified: false,
+      verified_payable: true,
+    })
+  })
+
   it('serves ingestion entries to agents too, and applies the rail filter (#1716)', async () => {
     mockCatalogWithIngestion([ENTRY], [
       {

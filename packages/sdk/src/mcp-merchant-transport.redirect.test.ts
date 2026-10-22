@@ -232,6 +232,16 @@ describe('no-policy transport — a cross-origin hop keeps credentials at their 
     expect(at('b')).toHaveLength(0)
   })
 
+  it('a 303 on a paid delivery follows to the other origin as a GET, without the payment', async () => {
+    routes.set('a /paid', redirect(303, `${B}/receipt`))
+    const result = await settle(
+      transport().deliverPayment(`${A}/paid`, { method: 'POST', body: '{"q":1}' }, 'signed-for-a'),
+    )
+    expect(result.ok).toBe(true)
+    expect(at('b')[0]).toMatchObject({ method: 'GET', path: '/receipt', body: '' })
+    expect(at('b')[0].headers['payment-signature']).toBeUndefined()
+  })
+
   it('a 307 whose body carries an x402 payment in _meta is refused on a plain fetch too', async () => {
     routes.set('a /mcp', redirect(307, `${B}/mcp`))
     const body = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 't', _meta: { 'x402/payment': { p: 1 } } } })

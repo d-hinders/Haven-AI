@@ -1280,25 +1280,23 @@ describe('x402 delegation-rail settlement (#830)', () => {
     expect(mockCreateIntent).not.toHaveBeenCalled()
   })
 
-  it('#1360 CHARACTERIZATION: WITHOUT the explicit scheme, a stale payTo routes to the erc7710 selector — why the SDK now always declares', async () => {
-    // This pins the pre-#1360 behavior the review derived from SQL: an
-    // omitted scheme means the shape alone decides, and a stale delegate
-    // address is indistinguishable from a merchant. The open-budget SQL
-    // (`recipient_address IS NULL` matches any toAddress) would then build a
-    // REAL settlement child to the stale address. Old SDKs still hit this
-    // path; if this test starts failing because the backend grew its own
-    // stale-address guard, that is an improvement — update it, don't delete.
+  it('#1360 CHARACTERIZATION: WITHOUT the explicit scheme, a stale payTo routes to the erc7710 shape — why the SDK now always declares', async () => {
+    // An omitted scheme means the shape alone decides, and a stale delegate
+    // address is indistinguishable from a merchant. Before #4243 this reached
+    // the erc7710 selector (and, on an open budget, would have built a REAL
+    // settlement child to the stale address). #4243's shape check now refuses
+    // it first, because the merchantPayTo the old SDK sends differs from the
+    // stale payTo: the improvement this test's earlier version anticipated.
     const staleDelegate = '0x' + '99'.repeat(20)
-    mockSelect.mockResolvedValue(null) // no delegation authorizes → 403, but the SELECTOR ran
+    mockSelect.mockResolvedValue(null)
     const res = await app.inject({
       method: 'POST', url: '/x402/authorize',
       headers: { authorization: 'Bearer sk_agent_test' },
       payload: authorizeBody({ payTo: staleDelegate, merchantPayTo: MERCHANT }),
     })
-    expect(res.statusCode).toBe(403)
-    expect(mockSelect).toHaveBeenCalledWith(
-      expect.anything(), expect.anything(), staleDelegate.toLowerCase(),
-    )
+    expect(res.statusCode).toBe(400)
+    expect(res.json().error).toMatch(/merchantPayTo, when sent, must equal payTo/)
+    expect(mockSelect).not.toHaveBeenCalled()
     expect(mockPrepareFunding).not.toHaveBeenCalled()
   })
 
@@ -1325,6 +1323,57 @@ describe('x402 delegation-rail settlement (#830)', () => {
       payload: authorizeBody({ settlementScheme: 'sudo' }),
     })
     expect(invalid.statusCode).toBe(400)
+  })
+
+  // ── #4243: on erc7710 the recorded merchant is the address the child pays ──
+  // The settlement child pins its transfer to `payTo`; the intent's
+  // `merchant_address` feeds evidence, receipts, the dashboard and the
+  // accounting counterparty. These pin which address lands there.
+  describe('erc7710 recorded merchant (#4243)', () => {
+    const OTHER = '0x' + 'ee'.repeat(20)
+    const budgetRow = {
+      delegation_hash: `0x${'12'.repeat(32)}`,
+      delegation_json: JSON.stringify(signedBudget),
+      recipient_address: null,
+    }
+    const authorize = (overrides: Record<string, unknown>) => {
+      mockSelect.mockResolvedValue(budgetRow)
+      mockCreateIntent.mockResolvedValue({ id: INTENT_ID, status: 'pending_signature', expires_at: 'x' })
+      return app.inject({
+        method: 'POST', url: '/x402/authorize',
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: authorizeBody(overrides),
+      })
+    }
+
+    it('CHARACTERIZATION: with no merchantPayTo, payTo is the recorded merchant', async () => {
+      const res = await authorize({})
+      expect(res.statusCode).toBe(201)
+      expect(mockCreateIntent).toHaveBeenCalledWith(expect.objectContaining({
+        merchantAddress: MERCHANT.toLowerCase(),
+        metadata: expect.objectContaining({ settlement_scheme: 'erc7710' }),
+      }))
+    })
+
+    it('CHARACTERIZATION: a merchantPayTo equal to payTo in any case is accepted and records payTo', async () => {
+      const res = await authorize({ merchantPayTo: MERCHANT.toUpperCase().replace('0X', '0x') })
+      expect(res.statusCode).toBe(201)
+      expect(mockCreateIntent).toHaveBeenCalledWith(expect.objectContaining({
+        merchantAddress: MERCHANT.toLowerCase(),
+      }))
+    })
+
+    it('refuses a merchantPayTo that differs from payTo with 400, before any selection or intent', async () => {
+      for (const extra of [{ settlementScheme: 'erc7710' }, {}]) {
+        mockSelect.mockClear()
+        mockCreateIntent.mockClear()
+        const res = await authorize({ merchantPayTo: OTHER, ...extra })
+        expect(res.statusCode).toBe(400)
+        expect(res.json().error).toMatch(/merchantPayTo, when sent, must equal payTo/)
+        expect(mockSelect).not.toHaveBeenCalled()
+        expect(mockCreateIntent).not.toHaveBeenCalled()
+      }
+    })
   })
 
   it('settle 400s a VALID signature from the WRONG key — and the intent survives (#1053 f3)', async () => {

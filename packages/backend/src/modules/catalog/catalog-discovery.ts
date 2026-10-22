@@ -227,11 +227,14 @@ export async function ingestDiscoveredCatalog(
     const merchant = await merchants.findOrCreateMerchantByHost(host, { name, description, category }, db)
 
     await db.query(
+      // #4245: `source = 'bazaar'` — the row's name and description are the
+      // seller's own words, and the listing must not present them as an
+      // operator's. Every other writer gets the column's `'operator'` default.
       `INSERT INTO merchant_catalog
          (name, description, category, resource_url, rail, protocol, tool_name,
           price_display, price_atomic, asset, network, asset_transfer_methods, status, verified_at, merchant_id,
-          pay_to)
-       VALUES ($1, $2, $3, $4, 'x402', 'http', NULL, $5, $6, $7, $8, $9, 'active', now(), $10, $11)
+          pay_to, source)
+       VALUES ($1, $2, $3, $4, 'x402', 'http', NULL, $5, $6, $7, $8, $9, 'active', now(), $10, $11, 'bazaar')
        ON CONFLICT DO NOTHING`,
       [
         name,

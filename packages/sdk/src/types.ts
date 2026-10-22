@@ -2700,9 +2700,11 @@ export interface HavenCatalogEntry {
    * (the operator vouches for the listing; the catalog refresh probe still
    * checks the endpoint, see `verifiedPayable`). `ingestion` = submitted
    * through the Verified Payable Directory and passed domain-ownership proof
-   * plus the read-only quote probe.
+   * plus the read-only quote probe. `bazaar` = written by the x402 Bazaar
+   * discovery cron (#4245): seller-chosen name and description, no operator
+   * review, no ownership proof.
    */
-  source: 'operator' | 'ingestion'
+  source: 'operator' | 'ingestion' | 'bazaar'
   /** True only for `ingestion` entries — the one ownership claim. See the epic's trust claim (never merchant honesty or quality). */
   domainVerified: boolean
   /**
@@ -2766,7 +2768,7 @@ export interface RawCatalogEntry {
   asset_transfer_methods?: string | null
   status: 'active' | 'degraded' | 'delisted'
   verified_at: string | null
-  source: 'operator' | 'ingestion'
+  source: 'operator' | 'ingestion' | 'bazaar'
   domain_verified: boolean
   verified_payable: boolean
   /** Absent from a backend older than #3078; null when the join resolved nothing. */

@@ -529,6 +529,19 @@ caveat, so the authority is still the signed caveat stack and nothing else.
 > `merchant-catalog.ts`/`merchants.ts` coverage it names; the rest of the
 > document was not re-read for it.
 
+> **Re-verified #4245 (2026-10-22):** #4245 adds `merchant_catalog.source`
+> (`'operator'` | `'bazaar'`, migration 117) and widens the `CatalogRow` type
+> in `merchant-catalog.ts`; in `sdk/src/client.ts` only a doc comment on
+> `discoverTools` changed. The payTo contract above is unchanged: the
+> merchant-locked budget's pin is still read from `pay_to` across the
+> merchant's active, verified offers, and `source` feeds no budget pin, no
+> caveat, and no authority path — it is a provenance label on the catalog
+> read. A Bazaar row's `pay_to` takes part in its merchant's funding target
+> exactly as before #4245 (a disagreeing offer still refuses the budget).
+> Scope of this re-read: the Merchant-locked budgets section and the
+> `merchant-catalog.ts`/`client.ts` coverage it names; the rest of the
+> document was not re-read for it, and `last-verified` is not bumped.
+
 Two limits are deliberate:
 - **Slot sharing.** A merchant-locked budget and a plain budget pinned to the
   same address share one `(agent, token, recipient)` slot. Activating either

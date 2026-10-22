@@ -223,6 +223,14 @@ test.describe('agent panel empty states and card banners', () => {
   test('agent card — revoked with a live budget shows the warning and Finish revoking', async ({ page }) => {
     const agent = agentState({ status: 'revoked', live_delegation_count: 1 })
     await seedAgents(page, [agent])
+    // The card's footer reads `timeAgo(lastPaymentAt)` off the shared mock's
+    // fixed 2026-10-09T09:41Z payment. Against the real clock the "Xd ago"
+    // text drifts across a day boundary (13d ago from 2026-10-22T09:41Z on)
+    // and the baseline goes stale — the dev-red of #3963. Pin the clock like
+    // the mockup-state test below; the fixture's payment then sits AFTER
+    // FROZEN_NOW, so the footer photographs timeAgo's "just now" floor,
+    // forever.
+    await page.clock.setFixedTime(FROZEN_NOW)
     await page.goto('/agents')
     await settle(page)
 
@@ -241,6 +249,11 @@ test.describe('agent panel empty states and card banners', () => {
       live_delegation_count: 1,
     })
     await seedAgents(page, [agentState({ id: 'agent-live', name: 'Atlas' }), agent])
+    // Same footer clock-drift as the revoked-card test above (#3963): the
+    // revealed card's footer reads the shared mock's fixed payment against
+    // the real clock. Pin it before navigation so the "Xd ago" text cannot
+    // cross a day boundary under the baseline.
+    await page.clock.setFixedTime(FROZEN_NOW)
     await page.goto('/agents')
     await settle(page)
 

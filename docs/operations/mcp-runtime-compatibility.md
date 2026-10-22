@@ -80,7 +80,7 @@ covers:
   - scripts/ci/check-stale-client-compat.mjs
   - packages/mcp-server/src/next-arguments-corpus.json
   - packages/mcp-server/src/tool-contract-snapshot.test.ts
-last-verified: "2026-10-21"
+last-verified: "2026-10-22"
 ---
 
 > **Re-verified unchanged (#4244, 2026-10-22, merchant-transport only).**
@@ -2367,9 +2367,15 @@ Since #1716 both surfaces also accept the same optional
 `domain_verified` / `verified_payable` badge fields on each entry — added to
 BOTH surfaces together, so the skew-flat claim holds unchanged. Since #2978,
 `verified` is not a pure provenance filter: `verified=verified` returns any
-entry, operator-curated or self-submitted, whose endpoint Haven watched
-answer a live quote probe (`verified_payable === true`); `verified=operator`
-still filters on provenance alone. The result is still read-only discovery
+entry, whatever its source, whose endpoint Haven watched answer a live quote
+probe (`verified_payable === true`); `verified=operator` still filters on
+provenance alone. Since #4245 `source` has a third value, `bazaar`, for rows
+the x402 Bazaar discovery cron wrote (only when a deployment enables
+discovery): seller-chosen name and description, no operator review, no
+ownership proof. Before #4245 those rows were labelled `operator`. The value
+is additive, and there is no skew: every published SDK's `verified=operator`
+already keeps `source === 'operator'` only, so it excludes `bazaar` rows on
+both surfaces. The result is still read-only discovery
 metadata: catalog prices are indicative hints, never payment authority.
 `verified_payable` means the endpoint answered a live probe; `domain_verified`
 is the separate, stronger claim that ownership of the domain was proven —
@@ -4403,6 +4409,10 @@ Message text and one next-step reason only. When a merchant refuses with `reason
 - Haven's wording is keyed on `reason_code`; it does not read the merchant's `recovery` field.
 
 No tool, schema, refusal code or consent-hash change. A local client on an older `@haven_ai/mcp` keeps the old "retry after" text until it updates.
+
+### erc7710 authorize refuses a `merchantPayTo` that differs from `payTo` (#4243)
+
+Backend only. On the erc7710 shape (`payTo` = the merchant) `POST /x402/authorize` now answers 400 when the body carries a `merchantPayTo` that differs from `payTo`, and the intent records `payTo` as the merchant. No current client is affected: `@haven_ai/sdk`'s erc7710 path, the hosted MCP tools and the local runtime send the merchant as `payTo` and no `merchantPayTo`, and the EIP-3009 funding leg (`payTo` = the delegate EOA, `merchantPayTo` = the merchant) is unchanged. The one skewed caller it reaches is a pre-#1360 SDK that sends a stale delegate address as `payTo` with `merchantPayTo` and no `settlementScheme`: it used to fall through to the erc7710 selector and now gets the 400 before anything is built. No tool, schema shape, refusal code or consent-hash change.
 
 ### Detecting skew before a payment (#1155)
 

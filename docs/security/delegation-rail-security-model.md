@@ -542,9 +542,10 @@ caveat, so the authority is still the signed caveat stack and nothing else.
 > `merchant-catalog.ts`/`client.ts` coverage it names; the rest of the
 > document was not re-read for it, and `last-verified` is not bumped.
 
-> **Re-verified #4245 follow-up (2026-10-22):** the follow-up only rewords the
-> `getCatalogEntry` doc comment in `sdk/src/client.ts` and two tool descriptions
-> ("curated" dropped). No code path, budget pin, caveat or authority changed.
+> **Re-verified #4245 follow-up (2026-10-22):** the follow-up only rewords text:
+> three catalog tool descriptions, the `CATALOG_ENTRY_NOT_FOUND` refusal message,
+> a `contracts.ts` comment and the `getCatalogEntry` doc comment in
+> `sdk/src/client.ts` ("curated" dropped). No code path, budget pin, caveat or authority changed.
 > Scope of this re-read: that comment and the `client.ts` coverage named above;
 > nothing else in this document was re-read for it.
 

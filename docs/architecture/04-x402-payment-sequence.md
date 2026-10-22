@@ -782,7 +782,7 @@ resends the SAME header on the new session on exactly that shape; a bare
 
 ## Guided Catalog Purchase Preflight (#1306)
 
-Before this guided path, the agent can read the curated catalog through
+Before this guided path, the agent can read the catalog through
 `GET /catalog` or `haven_discover_tools`. That discovery surface is still
 strictly read-only: `category` is matched case-insensitively after trim, while
 optional `search` normalizes whitespace, accepts at most eight words, and
@@ -877,7 +877,7 @@ Sequence:
 1. Load the catalog entry by `catalog_id` via `GET /catalog/:id`. Chain
    scoping comes free from the #1299 SQL (agent-authenticated reads add a
    `network = eip155:<agent.chain_id>` predicate) — an id that does not exist
-   and an id curated for a DIFFERENT chain both 404 identically; nothing is
+   and an id listed for a DIFFERENT chain both 404 identically; nothing is
    re-filtered in JS.
 2. Refuse before any merchant probe: a plain-HTTP row (`protocol !== 'mcp'`)
    hands off to `haven_quote_x402 { url: resource_url }` (#3423, checked

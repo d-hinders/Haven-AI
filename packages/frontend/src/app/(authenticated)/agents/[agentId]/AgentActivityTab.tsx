@@ -5,7 +5,7 @@
  * ledger — `payment_intents`, failed and pending included — drawn with the
  * shared ledger pieces (`TransactionActivityRow` ledger mode under
  * `TransactionActivityDayHeader` bands), the standard toolbar (search, Status,
- * Token, Period), the summary line and `ListShowMore`.
+ * Token, Period) and `ListShowMore`.
  *
  * The population is deliberately NOT the wallet-scoped transactions feed:
  * `routes/transactions.ts` serves a different set and would drop payments
@@ -430,17 +430,12 @@ export default function AgentActivityTab({
         period={{ allowCustom: true }}
         searchDescription="by merchant, recipient or contact"
         count={count}
-        summary={
-          loading ? undefined : (
-            // The tab's one figure: every row in this population is outgoing,
-            // so "Out" carries the count of the filtered set — #4229's total,
-            // not a money sum the read does not serve.
-            <span data-testid="activity-total">
-              <span aria-hidden="true">Out</span>
-              <span className="sr-only">Outgoing payments</span> {total}
-            </span>
-          )
-        }
+        // #4274 (owner decision, option (a)): no summary figure. "Out 4"
+        // beside the count read as an amount (the account tab's In/Out are
+        // money figures), and it repeated the count the toolbar already
+        // shows. The count alone is the List controls default for a page
+        // with no totals (#4196); there is no money total and no backend
+        // change — #4229's count read is unchanged.
       />
 
       {showNoMatch ? (

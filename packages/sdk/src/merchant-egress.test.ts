@@ -228,6 +228,88 @@ describe('McpMerchantTransport under a policy — redirects', () => {
   })
 })
 
+describe('McpMerchantTransport under a policy — redirect hops and caller headers (#4244)', () => {
+  const sentHeaders = (init?: RequestInit): Record<string, string> =>
+    Object.fromEntries(new Headers(init?.headers))
+
+  const CALLER_HEADERS = {
+    Authorization: 'Bearer merchant-a-token',
+    'Proxy-Authorization': 'Basic proxy',
+    Cookie: 'session=a',
+    'X-Api-Key': 'merchant-a-key',
+    'PAYMENT-SIGNATURE': 'signed-for-a',
+    Accept: 'application/json',
+    'User-Agent': 'haven-test',
+    'x402-wallet': '0x0000000000000000000000000000000000000001',
+  }
+
+  it('characterization: a same-origin GET redirect still carries every caller header', async () => {
+    const fetchSpy = recordingFetch((url) =>
+      url === 'https://a.dev/start'
+        ? new Response(null, { status: 302, headers: { location: '/next' } })
+        : okText('arrived'),
+    )
+    const transport = transportWith(ALLOW_FIXTURES, fetchSpy)
+    await transport.fetch('https://a.dev/start', { headers: CALLER_HEADERS })
+    expect(fetchSpy.calls.map((c) => c.url)).toEqual(['https://a.dev/start', 'https://a.dev/next'])
+    expect(sentHeaders(fetchSpy.calls[1].init)).toEqual(sentHeaders({ headers: CALLER_HEADERS }))
+  })
+
+  it('a cross-origin hop drops credentials and every caller header outside the allow-list', async () => {
+    const fetchSpy = recordingFetch((url) =>
+      url === 'https://a.dev/start'
+        ? new Response(null, { status: 302, headers: { location: 'https://b.dev/next' } })
+        : okText('arrived'),
+    )
+    const transport = transportWith(ALLOW_FIXTURES, fetchSpy)
+    await transport.fetch('https://a.dev/start', { headers: CALLER_HEADERS })
+    // The checked original still carries what the caller sent it.
+    expect(sentHeaders(fetchSpy.calls[0].init)).toMatchObject({ authorization: 'Bearer merchant-a-token' })
+    expect(sentHeaders(fetchSpy.calls[1].init)).toEqual({
+      accept: 'application/json',
+      'user-agent': 'haven-test',
+      'x402-wallet': '0x0000000000000000000000000000000000000001',
+    })
+  })
+
+  it('a different port is a different origin', async () => {
+    const fetchSpy = recordingFetch((url) =>
+      url === 'https://a.dev/start'
+        ? new Response(null, { status: 302, headers: { location: 'https://a.dev:8443/next' } })
+        : okText('arrived'),
+    )
+    const transport = transportWith(ALLOW_FIXTURES, fetchSpy)
+    await transport.fetch('https://a.dev/start', { headers: { Authorization: 'Bearer t' } })
+    expect(sentHeaders(fetchSpy.calls[1].init)).toEqual({})
+  })
+
+  it('strips headers given as a Headers object or as an array of pairs', async () => {
+    for (const headers of [
+      new Headers({ Authorization: 'Bearer t', Accept: 'text/plain' }),
+      [['Authorization', 'Bearer t'], ['Accept', 'text/plain']] as Array<[string, string]>,
+    ]) {
+      const fetchSpy = recordingFetch((url) =>
+        url === 'https://a.dev/start'
+          ? new Response(null, { status: 302, headers: { location: 'https://b.dev/next' } })
+          : okText('arrived'),
+      )
+      await transportWith(ALLOW_FIXTURES, fetchSpy).fetch('https://a.dev/start', { headers })
+      expect(sentHeaders(fetchSpy.calls[1].init)).toEqual({ accept: 'text/plain' })
+    }
+  })
+
+  it('once stripped, a later hop back to the first origin does not regain them', async () => {
+    const fetchSpy = recordingFetch((url) => {
+      if (url === 'https://a.dev/start') return new Response(null, { status: 302, headers: { location: 'https://b.dev/x' } })
+      if (url === 'https://b.dev/x') return new Response(null, { status: 302, headers: { location: 'https://a.dev/back' } })
+      return okText('arrived')
+    })
+    await transportWith(ALLOW_FIXTURES, fetchSpy).fetch('https://a.dev/start', { headers: { Authorization: 'Bearer t' } })
+    expect(fetchSpy.calls.map((c) => c.url)).toEqual(['https://a.dev/start', 'https://b.dev/x', 'https://a.dev/back'])
+    expect(sentHeaders(fetchSpy.calls[2].init)).toEqual({})
+  })
+})
+
 describe('McpMerchantTransport under a policy — the byte cap holds WHILE reading', () => {
   it('aborts an endless response mid-read with the cap error, without buffering it', async () => {
     // Pull-based: the source only produces when the (capped) read pulls, so a

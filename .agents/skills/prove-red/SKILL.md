@@ -143,7 +143,9 @@ Assertion-type is `ERR_ASSERTION` for `node --test`, an `expect(` failure for
 Playwright, and for vitest (`VITEST_ASSERTION_SHAPE`, #4284) an `AssertionError`
 or the frontend's idiom: a jest-dom matcher (`Error: expect(element)…`), a
 `getBy*` (`TestingLibraryElementError`), or a `findBy*` / `waitFor` timeout
-(`Error: Unable to find …`). Caveats the runner cannot see past:
+(a plain `Error:` with the query library's "Unable to find …" or "Found …"
+message). Only the recorded stems count; an unrecorded query shape reads as an
+error, so a new one is added with a recorded fixture case. Caveats the runner cannot see past:
 `expect(fn).toThrow(/X/)` turns a thrown non-assertion error into an assertion
 failure, so a SQL error inside such a test reads as caught — check the message.
 A jest-dom matcher handed a non-element (`expect(undefined).toHaveClass(…)`) and a

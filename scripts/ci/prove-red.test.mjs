@@ -215,8 +215,21 @@ describe('classifier over recorded runner output', () => {
         ['frontend idiom > getBy finds nothing', 'assertion'],
         ['frontend idiom > findBy times out', 'assertion'],
         ['frontend idiom > findByRole times out', 'assertion'],
+        ['frontend idiom > findByRole with a name times out', 'assertion'],
+        ['frontend idiom > findByLabelText times out', 'assertion'],
+        ['frontend idiom > findBy finds several', 'assertion'],
+        ['frontend idiom > waitFor getBy finds several', 'assertion'],
+        ['frontend idiom > findByLabelText label without control', 'assertion'],
+        // Code throws: each mentions a stem somewhere but not at the start,
+        // or is close to one without being it — pins the anchor, the
+        // grouping and each stem's exact text.
         ['frontend idiom > plain Error', 'error'],
         ['frontend idiom > Error mentioning expect( later', 'error'],
+        ['frontend idiom > code throw wrapping an assertion stem', 'error'],
+        ['frontend idiom > code throw wrapping a TestingLibraryElementError', 'error'],
+        ['frontend idiom > code throw starting Unable to find', 'error'],
+        ['frontend idiom > code throw about a labelled widget', 'error'],
+        ['frontend idiom > code throw starting expectation', 'error'],
         ['frontend idiom > TypeError', 'error'],
       ],
     )

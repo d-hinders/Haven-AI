@@ -235,16 +235,13 @@ for (const route of ['/transactions', '/design-system'] as const) {
  * `maxDiffPixelRatio` budget a whole row can move inside (#1805).
  */
 // `/transactions` only, and the omission is deliberate rather than an
-// oversight. #2734 names `/agents/agent-research` too, and the fix does reach
-// it — the agent detail renders THIS component with
-// `columns={['direction','activity','fromTo','date','amount','link']}`, so the
-// amount column it collapses is the same one. What is missing is a way to
-// DRIVE that route: `e2e/fixtures/haven-api.ts` serves no agent detail, and
-// `/agents/agent-research` exists only in the screenshot harness's fixtures.
-// Adding an agent to the shared e2e fixture is a change every other spec
-// inherits, and it is outside this issue's file list. Recorded as an
-// unasserted screen rather than covered by an assertion that cannot run; the
-// `/design-system` legs above exercise the component in a second context.
+// oversight. #2734 names `/agents/agent-research` too, and the fix reaches
+// the surfaces that still render this component — but since #4226 the agent
+// detail no longer renders `TransactionsTable` at all (its Activity tab is
+// `TransactionActivityRow` ledger rows), so there is no agent route left to
+// add here. Recorded as an unasserted screen rather than covered by an
+// assertion that cannot run; the `/design-system` legs above exercise the
+// component in a second context.
 for (const route of ['/transactions'] as const) {
 test(`${route}: the amount rides under the title below md, and the title stops wrapping to three lines (#2734)`, async ({
   page,

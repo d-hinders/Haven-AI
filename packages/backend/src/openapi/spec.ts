@@ -6066,6 +6066,12 @@ export const openapiSpec = {
             schema: { type: 'string', format: 'uuid' },
             description: 'Requires kind. Narrows to that one payment (kind=payments) or to the calls recorded against it (kind=tool_calls).',
           },
+          {
+            name: 'token',
+            in: 'query',
+            schema: { type: 'string' },
+            description: 'Requires kind=payments. The ERC-20 token contract address, matched case-insensitively against payment_intents.token_address (#4226 — the agent Activity tab\'s Token facet; the population is the agent\'s own payments, which the wallet-scoped transactions feed does not serve). Any other value matches nothing.',
+          },
         ],
         responses: {
           '200': {

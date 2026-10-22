@@ -176,3 +176,119 @@ export function useAgentActivity(agentId: string | null) {
 
   return { activity, stats, loading, refetch: fetchData }
 }
+
+// ── The Activity tab's paged, filtered payments reader (#4226) ───────────────
+//
+// The agent page's Activity tab renders the shared ledger over ONE pageable,
+// filterable population: the agent's own payments, failed and pending ones
+// included. That population lives behind #4229's kinded read
+// (`GET /agent-activity/:id/activity?kind=payments&…`), NOT behind the
+// wallet-scoped transactions feed — `routes/transactions.ts` is a different
+// population and would drop payments refused before they reached the chain.
+// The merged `useAgentActivity` above stays for everything else the page
+// reads (the banners' attention filter, ReplaceSigningKeyModal's recent
+// payments, the Tool-calls tab).
+
+/** The Activity tab's toolbar state as the reader's server filters. */
+export interface AgentPaymentLedgerFilters {
+  /** `sent | pending | failed | needs_attention` — the Status facet. */
+  status?: string
+  /** The ERC-20 token contract address — the Token facet. */
+  token?: string
+  /** Inclusive ISO lower bound (the Period facet, presets and custom alike). */
+  from?: string
+  /** Exclusive ISO upper bound. */
+  to?: string
+  /** The search term. */
+  q?: string
+}
+
+/**
+ * One page of the ledger, and what "Show N more" adds — the same page size
+ * the account Activity tab uses.
+ */
+export const AGENT_PAYMENT_LEDGER_PAGE_SIZE = 25
+
+export function useAgentPaymentLedger(
+  agentId: string | null,
+  filters: AgentPaymentLedgerFilters,
+  pageSize: number = AGENT_PAYMENT_LEDGER_PAGE_SIZE,
+) {
+  const [payments, setPayments] = useState<PaymentActivityItem[]>([])
+  const [total, setTotal] = useState(0)
+  const [hasMore, setHasMore] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const requestIdRef = useRef(0)
+
+  // The filters object is rebuilt every render by the tab's `useMemo`-less
+  // consumers, so the refetch key is the serialized filter SET, not the
+  // identity: an equal rebuild must not restart the list, a changed value
+  // must. (The fields are all strings, so JSON is exact.)
+  const filterKey = JSON.stringify(filters)
+
+  const fetchPage = useCallback(
+    async (offset: number, append: boolean) => {
+      if (!agentId) return
+      const requestId = ++requestIdRef.current
+      if (append) setLoadingMore(true)
+      try {
+        const params = new URLSearchParams({ kind: 'payments', limit: String(pageSize), offset: String(offset) })
+        const parsed: AgentPaymentLedgerFilters = JSON.parse(filterKey)
+        if (parsed.status) params.set('status', parsed.status)
+        if (parsed.token) params.set('token', parsed.token)
+        if (parsed.q) params.set('q', parsed.q)
+        if (parsed.from) params.set('from', parsed.from)
+        if (parsed.to) params.set('to', parsed.to)
+        const res = await api.get<{ activity: ActivityItem[]; total?: number; hasMore?: boolean }>(
+          `/agent-activity/${agentId}/activity?${params.toString()}`,
+        )
+        if (requestIdRef.current !== requestId) return
+        // #4229's own rule, kept: filter by `type` defensively until both
+        // sides of the kinded read are deployed — an old backend answers the
+        // merged window and a fixture may answer loosely.
+        const rows = (res?.activity ?? []).filter(isPaymentActivityItem)
+        setPayments((current) => (append ? [...current, ...rows] : rows))
+        setTotal(res?.total ?? rows.length)
+        setHasMore(Boolean(res?.hasMore))
+        setError(null)
+      } catch (err) {
+        if (requestIdRef.current !== requestId) return
+        // A failed page keeps the rows already on screen (an append failing
+        // must not blank the list the user is reading) and says so.
+        if (!append) setPayments([])
+        setHasMore(false)
+        setError(err instanceof Error ? err.message : 'Activity could not load')
+      } finally {
+        if (requestIdRef.current === requestId) {
+          setLoading(false)
+          setLoadingMore(false)
+        }
+      }
+    },
+    [agentId, filterKey, pageSize],
+  )
+
+  // A filter or agent change restarts the list; `loadMore` appends.
+  useEffect(() => {
+    setLoading(true)
+    void fetchPage(0, false)
+  }, [fetchPage])
+
+  const loadMore = useCallback(() => {
+    if (loadingMore) return
+    void fetchPage(payments.length, true)
+  }, [fetchPage, loadingMore, payments.length])
+
+  return {
+    payments,
+    total,
+    hasMore,
+    loading,
+    loadingMore,
+    error,
+    loadMore,
+    refresh: () => fetchPage(0, false),
+  }
+}

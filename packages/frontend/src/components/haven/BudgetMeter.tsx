@@ -26,6 +26,14 @@ export type BudgetMeterProps = {
    * Callers that omit it render exactly as before.
    */
   trailing?: ReactNode
+  /**
+   * #4226: the fill's state colour. `brand` (the default) is the token
+   * surface colour above; `warning` marks a budget at or past 90% used —
+   * the hero's warning meter; `muted` greys the bar for a paused agent,
+   * where the meter still measures but nothing can spend through it. The
+   * default renders exactly as before.
+   */
+  tone?: 'brand' | 'warning' | 'muted'
 }
 
 /**
@@ -41,8 +49,14 @@ export type BudgetMeterProps = {
  * above it (token value, percentage) belongs to the caller — it is tabular,
  * caller-specific typography, not part of the measurement.
  */
-export function BudgetMeter({ usedPercent, label, caption, trailing }: BudgetMeterProps) {
+export function BudgetMeter({ usedPercent, label, caption, trailing, tone = 'brand' }: BudgetMeterProps) {
   const used = Math.min(100, Math.max(0, usedPercent))
+  const fillClass =
+    tone === 'warning'
+      ? 'bg-warning'
+      : tone === 'muted'
+        ? 'bg-[var(--v2-ink-3)]'
+        : 'bg-[var(--v2-brand)]'
   return (
     <div>
       <div
@@ -57,7 +71,7 @@ export function BudgetMeter({ usedPercent, label, caption, trailing }: BudgetMet
           // The fill is a token surface colour, never a series colour: a
           // budget bar is a measurement of one delegation against its own
           // period, not a category to be keyed against a legend.
-          className="h-full rounded-full bg-[var(--v2-brand)]"
+          className={`h-full rounded-full ${fillClass}`}
           style={{ width: `${used}%` }}
         />
       </div>

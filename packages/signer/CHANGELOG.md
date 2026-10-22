@@ -15,6 +15,16 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+### Fixed
+
+- An x402 binding now records which shape the signer verified when minting it,
+  and `haven_x402_sign_header` builds an EIP-3009 merchant header only from a
+  funding-leg binding (#4242). A binding minted for an erc7710 settlement child
+  is refused and retired: that payment has no funding leg, and its merchant
+  header comes from `haven_submit` with `settlement_scheme: 'erc7710'`.
+  `haven_sign_x402` refuses a settlement child before signing anything.
+  Funding-leg payments are unchanged; no update needed.
+
 ### Changed
 
 - `haven_sign_x402`'s description now ends the plain-HTTP flow with the report:

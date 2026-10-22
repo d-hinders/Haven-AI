@@ -182,8 +182,9 @@ export async function ingestDiscoveredCatalog(
   result.scanned = resources.length
   if (resources.length === 0) return result
 
-  // Dedupe against everything already curated, including delisted entries, so
-  // discovery never resurrects a merchant an operator deliberately removed.
+  // Dedupe against everything already in merchant_catalog, including delisted
+  // entries, so discovery never resurrects a merchant an operator deliberately
+  // removed.
   const existingRows = await db.query(`SELECT resource_url FROM merchant_catalog`)
   const known = new Set(existingRows.rows.map((r) => r.resource_url))
 

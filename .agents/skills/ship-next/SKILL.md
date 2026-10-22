@@ -358,6 +358,9 @@ in a test title (`3fa96047`) only at the end of a full run. Run them alone with
 `npm run preflight -- --static` (#4175); the battery also orders them first.
 Preflight exit 3 (timed out, green alone) is neither green nor a reason to
 re-run until green: investigate as the printed note says, and quote the list.
+A STALL — a gate silent past `PREFLIGHT_SILENCE_MS`, killed with its process
+group — is exit 1 red and never re-run alone: a gate that hung once hangs
+again (#4276).
 
 Then run what the battery cannot: a live database (`docker compose up -d
 postgres`, or the backend suite skips its real-DB files), browser verification

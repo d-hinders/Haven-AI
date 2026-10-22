@@ -437,9 +437,10 @@ const ROUTES: ProductRoute[] = [
    *
    * `/agents/agent-research` renders its pins inside the fixture-seeded
    * content: `Created` is `timeAgo` off the agent's fixed `created_at`
-   * (4mo at `FROZEN_NOW`, from the 2026-05-02 fixture timestamp) and
-   * `Last activity` is the passport/activity rows' own static content —
-   * `4mo ago` is the frozen-clock literal this route's determinism hangs on.
+   * (4mo at `FROZEN_NOW`, from the 2026-05-02 fixture timestamp) — `4mo ago`
+   * is the frozen-clock literal this route's determinism hangs on. The header's
+   * `Last activity` reads the agent's `mcp_last_seen_at` (1h at `FROZEN_NOW`,
+   * #4283), and the hero's Last paid and the Activity row both read 1d.
    */
   {
     path: '/agents',
@@ -557,6 +558,61 @@ async function expectNoSkeletons(region: Locator, label: string) {
   ).toHaveCount(0)
 }
 
+/**
+ * #4283: park the phone tab bar at the END of the page for a mobile full-page
+ * capture, and prove it covers no content.
+ *
+ * The bar is `position: fixed`, and `unclipScrollShell` only un-clips
+ * `#main-content` and its ancestors, so in a `fullPage` PNG the bar paints at
+ * the FIRST viewport's bottom edge — over whatever content sits there (the
+ * agent hero's figures, a dashboard "Needs attention" row). `<main>` already
+ * reserves a bottom band for the bar (`AuthenticatedShell`'s
+ * `max-lg:pb-[calc(1.5rem+var(--v2-tab-bar-h)+var(--v2-tab-bar-bottom))]`),
+ * so the bar is moved into that band at the document's end: still
+ * photographed, covering nothing. `position: absolute; bottom: …` would NOT
+ * do it — it resolves against the viewport-sized initial containing block and
+ * lands back at the first viewport's bottom — so the bar gets a pixel `top`,
+ * corrected once against where it actually painted.
+ *
+ * The live bar is found by its computed `position: fixed`, which excludes the
+ * presentational copy `/design-system` renders with the same attribute. Unlike
+ * `assertClearOfTabBar` (design-system.visual.spec.ts) there is no "no bar →
+ * pass" fallback: below `lg` exactly one live bar must exist.
+ */
+async function parkTabBarAtPageEnd(page: Page, label: string): Promise<void> {
+  const result = await page.evaluate(() => {
+    const live = Array.from(document.querySelectorAll<HTMLElement>('[data-mobile-tab-bar]')).filter((el) => {
+      const cs = getComputedStyle(el)
+      return cs.position === 'fixed' && cs.display !== 'none' && !el.closest('[inert]')
+    })
+    if (live.length !== 1) return { live: live.length, barTop: 0, contentBottom: 0 }
+    const bar = live[0]
+    const rect = bar.getBoundingClientRect()
+    const bottomGap = window.innerHeight - rect.bottom
+    const target = document.documentElement.scrollHeight - rect.height - bottomGap
+    bar.style.setProperty('position', 'absolute', 'important')
+    bar.style.setProperty('bottom', 'auto', 'important')
+    bar.style.setProperty('top', `${target}px`, 'important')
+    // A positioned ancestor offsets `top`; measure where it painted and correct once.
+    const painted = bar.getBoundingClientRect().top + window.scrollY
+    bar.style.setProperty('top', `${target + (target - painted)}px`, 'important')
+
+    const main = document.getElementById('main-content')
+    let contentBottom = 0
+    for (const child of Array.from(main?.children ?? [])) {
+      const r = child.getBoundingClientRect()
+      if (r.height > 0) contentBottom = Math.max(contentBottom, r.bottom + window.scrollY)
+    }
+    return { live: 1, barTop: bar.getBoundingClientRect().top + window.scrollY, contentBottom }
+  })
+  expect(result.live, `${label}: exactly one live (fixed) phone tab bar renders below lg`).toBe(1)
+  expect(
+    result.barTop,
+    `${label}: the tab bar's top (${result.barTop}px) sits above the end of the page content ` +
+      `(${result.contentBottom}px) — the full-page capture would paint the bar over content (#4283)`,
+  ).toBeGreaterThanOrEqual(result.contentBottom - 0.5)
+}
+
 test.describe('product-route visual regression', () => {
   test.skip(
     !VISUAL_SPECS_ENABLED,
@@ -651,6 +707,7 @@ test.describe('product-route visual regression', () => {
         // letting it stand as a baseline — a pixel gate whose baseline is empty
         // compares white to white forever.
         await unclipScrollShell(page)
+        if (axis === 'mobile') await parkTabBarAtPageEnd(page, `${route.path} · ${axis}`)
         const devicePixelRatio = await page.evaluate(() => window.devicePixelRatio)
         await assertCaptureNotBlank(await page.screenshot({ fullPage: true }), {
           label: `${route.path} · ${axis}`,

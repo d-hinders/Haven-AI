@@ -138,9 +138,17 @@ describe('x402 binding rail (#4242)', () => {
     const expected = await bind(FUNDING_QUOTE, funding.typedData, funding.payloadHash)
     const s = signer()
     const signed = await s.signX402FundingTypedData(funding.typedData as never, expected as unknown as X402ExpectedPayment)
-    const header = await s.buildX402PaymentHeader(paymentRequiredFor(FUNDING_QUOTE) as never, signed.x402Binding)
-    expect(header.paymentHeader).toMatch(/^[A-Za-z0-9+/=]+$/)
-    expect(header.accepted.payTo).toBe(FUNDING_QUOTE.merchantTo)
+    // Caught and asserted, so a refusal fails this as an assertion, not as a stray throw.
+    let refusal: unknown
+    let header: Awaited<ReturnType<typeof s.buildX402PaymentHeader>> | undefined
+    try {
+      header = await s.buildX402PaymentHeader(paymentRequiredFor(FUNDING_QUOTE) as never, signed.x402Binding)
+    } catch (err) {
+      refusal = err
+    }
+    expect(refusal).toBeUndefined()
+    expect(header?.paymentHeader).toMatch(/^[A-Za-z0-9+/=]+$/)
+    expect(header?.accepted.payTo).toBe(FUNDING_QUOTE.merchantTo)
   })
 
   it('a settlement-child binding is refused at header time, and stays refused on retry', async () => {

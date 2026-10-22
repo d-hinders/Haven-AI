@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest'
 import { budgetCaption } from '@/lib/budget-caption'
 import { AGENT_PAUSED_SHORT } from '@/lib/agent-pause-copy'
+import { timeAgo } from '@/lib/format'
 import type { DashboardAgentStats } from '@/types/dashboard'
 
 // #3812: the in-flow connect/switch control reads wagmi and RainbowKit, which
@@ -1626,23 +1627,93 @@ describe('DelegationBudgetCard hero states (#4226)', () => {
     expect(meter.parentElement?.textContent).toBe((caption as { caption: string }).caption)
   })
 
-  it('the Last 30 days column shows spent, count and last paid from the overview stats', () => {
+  // #4260: the figure cell is the <dd> under the named <dt>.
+  const figure = (label: string) => {
+    const term = screen.getByText(label, { selector: 'dt' })
+    return term.nextElementSibling as HTMLElement
+  }
+
+  it('the Last 30 days column shows Spent, Payments and Last paid as three labelled figures (#4260)', () => {
     mockGet.mockReturnValue([heroBudget()])
     render(<DelegationBudgetCard {...PROPS} stats={stats} />)
     expect(screen.getByText('Last 30 days')).toBeTruthy()
-    expect(screen.getByText(/12\.50/)).toBeTruthy()
-    expect(screen.getByText('7 payments')).toBeTruthy()
-    expect(screen.getByText(/Last paid/)).toBeTruthy()
+    const grid = screen.getByText('Spent', { selector: 'dt' }).closest('dl')!
+    // Plain matchers over the class list, so a miss is an AssertionError.
+    expect([...grid.classList]).toEqual(expect.arrayContaining(['grid', 'grid-cols-3']))
+    expect(grid.querySelectorAll(':scope > div')).toHaveLength(3)
+    // Spent is Amount size="md": text-xl on the Amount span itself (#4259).
+    const spent = within(figure('Spent')).getByText(/12\.50/)
+    expect([...spent.classList]).toContain('text-xl')
+    expect([...spent.classList]).not.toContain('text-sm')
+    expect(figure('Payments').textContent).toBe('7')
+    expect([...figure('Payments').classList]).toContain('text-xl')
+    expect(figure('Last paid').textContent).toBe(timeAgo('2026-08-30T10:00:00Z'))
+    expect([...figure('Last paid').classList]).toContain('text-xl')
+    // The 30px headline the column used to carry is gone; the balance is the headline.
+    expect(grid.closest('section')?.querySelector('.text-3xl')).toBeNull()
+  })
+
+  it('the merchant sits on its own line below the figures, with no divider (#4260)', () => {
+    mockGet.mockReturnValue([heroBudget()])
+    render(<DelegationBudgetCard {...PROPS} stats={stats} />)
     // #4209's helper: the merchant NAME, else the x402 host — never the
     // recipient address the counterparty also carries.
-    expect(screen.getByText(/api\.bitrefill\.com/)).toBeTruthy()
+    const line = screen.getByText('Last paid to api.bitrefill.com')
+    expect(line.tagName).toBe('P')
+    expect(line.className).not.toMatch(/\bborder/)
+    expect(line.closest('dl')).toBeNull()
     expect(document.body.textContent).not.toContain('0x' + 'ab'.repeat(20))
+  })
+
+  it('with no merchant label the merchant line is omitted (#4260)', () => {
+    mockGet.mockReturnValue([heroBudget()])
+    render(
+      <DelegationBudgetCard
+        {...PROPS}
+        stats={{
+          ...stats,
+          lastCounterparty: { source: 'direct', x402ResourceUrl: null, to: '0x' + 'ab'.repeat(20), merchantName: null },
+        }}
+      />,
+    )
+    expect(figure('Last paid').textContent).toBe(timeAgo('2026-08-30T10:00:00Z'))
+    expect(screen.queryByText(/Last paid to/)).toBeNull()
+  })
+
+  it('payments in the window but no last-payment time: Last paid reads a dash, never a fabricated age (#4260)', () => {
+    mockGet.mockReturnValue([heroBudget()])
+    render(<DelegationBudgetCard {...PROPS} stats={{ ...stats, lastPaymentAt: null }} />)
+    expect(figure('Last paid').textContent).toBe('—')
+    expect(figure('Payments').textContent).toBe('7')
+  })
+
+  it('no payments in 30 days but an older one: the empty line, then when and to whom (#4260)', () => {
+    mockGet.mockReturnValue([heroBudget()])
+    render(<DelegationBudgetCard {...PROPS} stats={{ ...stats, d30: spendWindow(0, 0) }} />)
+    expect(screen.queryByText('No payments in the last 30 days.')).not.toBeNull()
+    expect(screen.queryByText(`Last paid ${timeAgo('2026-08-30T10:00:00Z')} to api.bitrefill.com`)).not.toBeNull()
+    expect(screen.queryByText('Spent', { selector: 'dt' })).toBeNull()
+  })
+
+  it('no payments in 30 days and never paid: the empty line alone (#4260)', () => {
+    mockGet.mockReturnValue([heroBudget()])
+    render(
+      <DelegationBudgetCard
+        {...PROPS}
+        stats={{ ...stats, d30: spendWindow(0, 0), lastPaymentAt: null, lastCounterparty: null }}
+      />,
+    )
+    expect(screen.queryByText('No payments in the last 30 days.')).not.toBeNull()
+    expect(screen.queryByText(/Last paid/)).toBeNull()
+    expect(screen.queryByText('Spent', { selector: 'dt' })).toBeNull()
   })
 
   it('while the overview read is in flight the column reserves its shape with a skeleton', () => {
     mockGet.mockReturnValue([heroBudget()])
     render(<DelegationBudgetCard {...PROPS} statsLoading />)
-    expect(screen.getByLabelText('Loading the last 30 days')).toBeTruthy()
+    const skeleton = screen.getByLabelText('Loading the last 30 days')
+    // #4260: three label-and-value bar pairs, the shape of the figures.
+    expect(skeleton.querySelector('.grid-cols-3')?.children).toHaveLength(3)
   })
 
   it('a retired agent renders no Last 30 days column, even when handed stats', () => {

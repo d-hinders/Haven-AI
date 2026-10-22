@@ -681,9 +681,15 @@ rule). `?grant=` keeps working alongside `?tab=`. Sections, in order:
    ("Payments paused in Haven — its budget is still live on-chain."); the
    caption itself is unchanged. A budget at or past 90% used renders the
    warning meter. **Last 30 days** comes from the dashboard overview's
-   per-agent stats — the spent figure in the display currency, the payment
-   count, and "Last paid {age} · {merchant}" where the merchant label is
-   #4209's helper (name → x402 host → nothing, never an address). A revoked
+   per-agent stats as three labelled figures across the column (#4260):
+   **Spent** in the display currency, **Payments** and **Last paid** {age},
+   each a small label over a 20px value (`Amount size="md"` for Spent), then
+   "Last paid to {merchant}" on its own line below, with no divider — the
+   merchant label is #4209's helper (name → x402 host → nothing, never an
+   address), and with no label the line is omitted. With no payments in the
+   window it reads "No payments in the last 30 days.", followed by "Last paid
+   {age}" (plus "to {merchant}" when there is a label) when an older payment
+   exists. With payments but no recorded time, Last paid reads "—". A revoked
    or otherwise uncovered agent is not in the overview, so it renders no
    Last 30 days column; its history is under Activity.
    **Add budget is collapsed once a budget exists**: with no budget the
@@ -1148,11 +1154,14 @@ it):
      shows the rate instead ("1 USDC = 9,50 kr"); two or more tokens each
      show their value. The header row is the summary card's own anatomy — it
      is not a shared pattern.
-   - **Last 30 days** — ONE row under the title (#4197): an inline in-arrow
-     and the Money-in figure, then an out-arrow and the Money-out figure
-     (replacing #4166's label row, so the column is no taller than Balance
-     and Holdings — the acceptance bar stands: at 1280 px the three columns'
-     content blocks differ by at most 24 px). Each figure carries sr-only
+   - **Last 30 days** — ONE row under the title (#4197): an in-arrow and the
+     Money-in figure, then an out-arrow and the Money-out figure (replacing
+     #4166's label row). Both figures sit at the secondary-figure size
+     (20px, `Amount size="md"`) beside the 24px `DirectionMark
+     density="figure"` (#4260); Balance stays the larger headline. The
+     acceptance bar stands: at 1280 px the three columns' content blocks
+     differ by at most 24 px. While loading, the skeleton is one row of the
+     figures' height, so the card does not jump. Each figure carries sr-only
      text ("Money in" / "Money out") before the amount — a screen reader
      hears "Money in ≈ $19.99" — and the arrow's icon carries the tooltip
      with the same words. At 375px the pairs fit on one line or wrap

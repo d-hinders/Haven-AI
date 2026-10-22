@@ -20,8 +20,9 @@
  *   truncation, the served amount in the figure's tooltip (#4197); one token
  *   shows no value, a non-USD display currency shows the rate, two or more
  *   show values — `lib/account-holdings.ts` owns those rules), and Last 30
- *   days (ONE row under the title (#4197): an inline in-arrow and the Money-in
- *   figure, then an out-arrow and the Money-out figure — each figure named by
+ *   days (ONE row under the title (#4197): an in-arrow and the Money-in
+ *   figure, then an out-arrow and the Money-out figure, both at the 20px
+ *   secondary-figure size beside `figure` marks (#4260) — each figure named by
  *   sr-only text and its arrow's tooltip — `hooks/useAccountMoneyFlow.ts`).
  *   The right-aligned amounts are mockup v9 (#4166); the one-row direction
  *   figures replace #4166's label row so the columns end at about the same
@@ -561,20 +562,29 @@ export default function AccountDetailClient() {
             )}
           </section>
 
-          {/* Last 30 days — ONE row under the title (#4197): an inline
+          {/* Last 30 days — ONE row under the title (#4197): a `figure`
               in-arrow and the Money-in figure, then an out-arrow and the
-              Money-out figure, replacing #4166's label row so the column is
-              no taller than Balance and Holdings. The mark is `aria-hidden`;
-              each figure is named by sr-only text BEFORE the amount (a
-              screen reader hears "Money in ≈ $19.99"), and the tooltip lives
-              on the ICON — not around `Amount`, whose "≈" already draws its
-              own title. The two focusable icon triggers are accepted. */}
+              Money-out figure. #4260 sets both at the secondary-figure size
+              (`Amount size="md"`, 20px, beside the 24px `figure` mark); the
+              Balance headline stays the larger figure. The mark is
+              `aria-hidden`; each figure is named by sr-only text BEFORE the
+              amount (a screen reader hears "Money in ≈ $19.99"), and the
+              tooltip lives on the ICON — not around `Amount`, whose "≈"
+              already draws its own title. The two focusable icon triggers
+              are accepted. */}
           <section aria-label="Last 30 days" className="p-5 sm:p-6">
             <p className="text-sm font-medium text-[var(--v2-ink-2)]">Last 30 days</p>
             {moneyFlow.loading ? (
-              <div className="mt-3 space-y-2" role="status" aria-busy="true" aria-label="Loading the last 30 days">
-                <div className="h-4 w-24 rounded bg-[var(--v2-surface-2)] animate-pulse" />
-                <div className="h-4 w-24 rounded bg-[var(--v2-surface-2)] animate-pulse" />
+              // #4260: one 28px row of two bars — the height of the figures
+              // row — so the card does not jump when they arrive.
+              <div
+                className="mt-2 flex h-7 items-center gap-x-5"
+                role="status"
+                aria-busy="true"
+                aria-label="Loading the last 30 days"
+              >
+                <div className="h-5 w-24 rounded bg-[var(--v2-surface-2)] animate-pulse" />
+                <div className="h-5 w-24 rounded bg-[var(--v2-surface-2)] animate-pulse" />
               </div>
             ) : moneyFlow.error ? (
               <div className="mt-2">
@@ -590,19 +600,19 @@ export default function AccountDetailClient() {
               </div>
             ) : (
               <div className="mt-2 flex flex-wrap items-center gap-x-5 gap-y-1">
-                <span className="flex items-center gap-1.5">
+                <span className="flex items-center gap-2">
                   <Tooltip label="Money in">
-                    <DirectionMark direction="in" density="inline" />
+                    <DirectionMark direction="in" density="figure" />
                   </Tooltip>
                   <span className="sr-only">Money in</span>
-                  <Amount amount={moneyFlow.moneyIn} currency={currency} approx={moneyFlow.approxIn} />
+                  <Amount amount={moneyFlow.moneyIn} currency={currency} approx={moneyFlow.approxIn} size="md" />
                 </span>
-                <span className="flex items-center gap-1.5">
+                <span className="flex items-center gap-2">
                   <Tooltip label="Money out">
-                    <DirectionMark direction="out" density="inline" />
+                    <DirectionMark direction="out" density="figure" />
                   </Tooltip>
                   <span className="sr-only">Money out</span>
-                  <Amount amount={moneyFlow.moneyOut} currency={currency} approx={moneyFlow.approxOut} />
+                  <Amount amount={moneyFlow.moneyOut} currency={currency} approx={moneyFlow.approxOut} size="md" />
                 </span>
               </div>
             )}

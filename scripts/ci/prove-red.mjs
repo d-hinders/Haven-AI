@@ -274,6 +274,22 @@ export function normalizeVitestJson(json, exitCode, timedOut = false) {
   return { exitCode, timedOut, tests, loadErrors }
 }
 
+/**
+ * A Playwright failure message (ANSI stripped) that is an assertion failing.
+ * Without a message: `Error: expect(…` (the `Timed out <n>ms waiting for
+ * expect(` form is kept as untested compatibility — no 1.60 runtime code emits
+ * it). With `expect(value, 'msg')` — the repo's style — Playwright prepends the
+ * message (`customMessage + "\n\n" + message`, #4294): `Error: <msg>\n\n
+ * expect(received|locator|page)…`, and `expect.poll(…, { message })` writes it
+ * twice: `Error: <msg>\n\n<msg>\n\nexpect(…`. The message is one or more
+ * non-blank lines; a message that itself holds a blank line cannot be told
+ * from a thrown error and reads as an error. The matcher subjects are the
+ * recorded ones, so a thrown error whose later text says `expect(foo)` stays
+ * an error.
+ */
+export const PLAYWRIGHT_ASSERTION_SHAPE =
+  /^Error: (?:(?:Timed out \d+ms waiting for )?expect\(|((?:[^\n]+\n)*?[^\n]+)\n\n(?:\1\n\n)?expect\((?:received|locator|page)\))/
+
 /** `playwright test --reporter=json` output → normalized result. Pure. */
 export function normalizePlaywrightJson(json, exitCode, timedOut = false) {
   const tests = []
@@ -289,7 +305,7 @@ export function normalizePlaywrightJson(json, exitCode, timedOut = false) {
         else {
           const last = (t.results ?? []).at(-1)
           const m = stripAnsi(last?.error?.message ?? '')
-          tests.push({ name, status: 'failed', kind: /^Error: (Timed out \d+ms waiting for )?expect\(/.test(m) ? 'assertion' : 'error', message: firstLine(m) })
+          tests.push({ name, status: 'failed', kind: PLAYWRIGHT_ASSERTION_SHAPE.test(m) ? 'assertion' : 'error', message: firstLine(m) })
         }
       }
     }

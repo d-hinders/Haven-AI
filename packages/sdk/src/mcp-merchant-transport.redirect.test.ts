@@ -59,6 +59,15 @@ const CALLER_HEADERS = {
   'x402-wallet': '0x0000000000000000000000000000000000000001',
 }
 
+/** Settle a promise, so a wrong outcome fails on an assertion rather than on a thrown error. */
+async function settle<T>(p: Promise<T>): Promise<{ ok: true; value: T } | { ok: false; error: unknown }> {
+  try {
+    return { ok: true, value: await p }
+  } catch (error) {
+    return { ok: false, error }
+  }
+}
+
 const transport = () => new McpMerchantTransport({ merchantTimeout: 10_000 })
 const at = (origin: 'a' | 'b') => seen.filter((s) => s.origin === origin)
 
@@ -122,7 +131,8 @@ describe('no-policy transport — redirect characterization (#4257)', () => {
 
   it("a caller's redirect: 'error' still rejects on the 3xx", async () => {
     routes.set('a /start', redirect(302, `${B}/next`))
-    await expect(transport().fetch(`${A}/start`, { redirect: 'error' })).rejects.toThrow()
+    const result = await settle(transport().fetch(`${A}/start`, { redirect: 'error' }))
+    expect(result.ok).toBe(false)
     expect(at('b')).toHaveLength(0)
   })
 
@@ -131,22 +141,25 @@ describe('no-policy transport — redirect characterization (#4257)', () => {
       res.writeHead(302)
       res.end()
     })
-    const response = await transport().fetch(`${A}/start`)
-    expect(response.status).toBe(302)
+    const result = await settle(transport().fetch(`${A}/start`))
+    expect(result).toMatchObject({ ok: true, value: { status: 302 } })
   })
 
   it('follows 20 redirects and refuses the 21st, as the platform does', async () => {
     for (let i = 0; i < 21; i += 1) routes.set(`a /h${i}`, redirect(302, `/h${i + 1}`))
-    await expect(transport().fetch(`${A}/h1`)).resolves.toMatchObject({ status: 200 })
-    await expect(transport().fetch(`${A}/h0`)).rejects.toThrow()
+    expect(await settle(transport().fetch(`${A}/h1`))).toMatchObject({ ok: true, value: { status: 200 } })
+    const over = await settle(transport().fetch(`${A}/h0`))
+    expect(over.ok).toBe(false)
+    expect(over.ok ? undefined : over.error).toBeInstanceOf(TypeError)
   })
 })
 
 describe('no-policy transport — a cross-origin hop keeps credentials at their origin (#4257)', () => {
   it('a cross-origin GET hop carries only the allow-listed headers', async () => {
     routes.set('a /start', redirect(302, `${B}/next`))
-    const response = await transport().fetch(`${A}/start`, { headers: CALLER_HEADERS })
-    expect(await response.text()).toBe('b-final')
+    const result = await settle(transport().fetch(`${A}/start`, { headers: CALLER_HEADERS }))
+    expect(result.ok).toBe(true)
+    expect(result.ok ? await result.value.text() : undefined).toBe('b-final')
     expect(at('a')[0].headers['x-api-key']).toBe('merchant-a-key')
     const sent = at('b')[0].headers
     expect(sent['x-api-key']).toBeUndefined()
@@ -177,9 +190,11 @@ describe('no-policy transport — a cross-origin hop keeps credentials at their 
 
   it('a 307 that would re-send the body to another origin is refused before connecting there', async () => {
     routes.set('a /start', redirect(307, `${B}/next`))
-    await expect(
+    const result = await settle(
       transport().fetch(`${A}/start`, { method: 'POST', headers: CALLER_HEADERS, body: '{"payment":"signed-for-a"}' }),
-    ).rejects.toMatchObject({ refusal: 'redirect_cross_origin_body', beforeRequest: false })
+    )
+    expect(result.ok).toBe(false)
+    expect(result.ok ? undefined : result.error).toMatchObject({ refusal: 'redirect_cross_origin_body', beforeRequest: false })
     expect(at('a')).toHaveLength(1)
     expect(at('b')).toHaveLength(0)
   })

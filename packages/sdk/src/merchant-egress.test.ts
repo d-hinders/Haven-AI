@@ -447,6 +447,15 @@ describe('characterization — WITHOUT a policy the transport is unchanged', () 
   })
 })
 
+/** Settle a promise, so a wrong outcome fails on an assertion rather than on a thrown error. */
+async function settle<T>(p: Promise<T>): Promise<{ ok: true; value: T } | { ok: false; error: unknown }> {
+  try {
+    return { ok: true, value: await p }
+  } catch (error) {
+    return { ok: false, error }
+  }
+}
+
 describe('McpMerchantTransport WITHOUT a policy — the transport follows redirects itself (#4257)', () => {
   const sentHeaders = (init?: RequestInit): Record<string, string> =>
     Object.fromEntries(new Headers(init?.headers))
@@ -486,13 +495,15 @@ describe('McpMerchantTransport WITHOUT a policy — the transport follows redire
         ? new Response(null, { status: 308, headers: { location: 'https://b.dev/mcp' } })
         : okText('arrived'),
     )
-    await expect(
+    const result = await settle(
       transportWith(undefined, fetchSpy).fetch('https://a.dev/mcp', {
         method: 'POST',
         headers: CALLER_HEADERS,
         body: '{"params":{"_meta":{"x402/payment":"signed-for-a"}}}',
       }),
-    ).rejects.toMatchObject({ refusal: 'redirect_cross_origin_body', beforeRequest: false })
+    )
+    expect(result.ok).toBe(false)
+    expect(result.ok ? undefined : result.error).toMatchObject({ refusal: 'redirect_cross_origin_body', beforeRequest: false })
     expect(fetchSpy.calls.map((c) => c.url)).toEqual(['https://a.dev/mcp'])
   })
 
@@ -525,7 +536,9 @@ describe('McpMerchantTransport WITHOUT a policy — the transport follows redire
     const fetchSpy = recordingFetch(() =>
       new Response(null, { status: 302, headers: { location: 'http://[bad' } }),
     )
-    await expect(transportWith(undefined, fetchSpy).fetch('https://a.dev/start')).rejects.toBeInstanceOf(TypeError)
+    const result = await settle(transportWith(undefined, fetchSpy).fetch('https://a.dev/start'))
+    expect(result.ok).toBe(false)
+    expect(result.ok ? undefined : result.error).toBeInstanceOf(TypeError)
     expect(fetchSpy.calls).toHaveLength(1)
   })
 })

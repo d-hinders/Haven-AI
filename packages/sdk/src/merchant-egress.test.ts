@@ -242,7 +242,19 @@ describe('McpMerchantTransport under a policy — the shared loop keeps the poli
     const fetchSpy = recordingFetch(() => new Response(null, { status: 302 }))
     const result = await settleOf(transportWith(ALLOW_FIXTURES, fetchSpy).fetch('https://a.dev/start'))
     expect(result.ok).toBe(false)
-    expect(result.ok ? undefined : result.error).toMatchObject({ refusal: 'redirect_missing_location', beforeRequest: false })
+    const error = result.ok ? undefined : result.error
+    expect(error).toMatchObject({ refusal: 'redirect_missing_location', beforeRequest: false, redirectStatus: 302 })
+    // It stopped at the answering URL: no redirect target was named.
+    expect((error as MerchantEgressRefusedError).redirectTarget).toBeUndefined()
+  })
+
+  it('an unresolvable Location is refused at the answering URL, with its status and no target', async () => {
+    const fetchSpy = recordingFetch(() => new Response(null, { status: 302, headers: { location: 'http://[bad' } }))
+    const result = await settleOf(transportWith(ALLOW_FIXTURES, fetchSpy).fetch('https://a.dev/start'))
+    expect(result.ok).toBe(false)
+    const error = result.ok ? undefined : result.error
+    expect(error).toMatchObject({ refusal: 'redirect_invalid_location', beforeRequest: false, redirectStatus: 302, url: 'https://a.dev/start' })
+    expect((error as MerchantEgressRefusedError).redirectTarget).toBeUndefined()
   })
 
   it('a policy without maxGetRedirects follows no redirect at all', async () => {
@@ -252,7 +264,11 @@ describe('McpMerchantTransport under a policy — the shared loop keeps the poli
     )
     const result = await settleOf(transportWith(noBudget, fetchSpy).fetch('https://a.dev/start'))
     expect(result.ok).toBe(false)
-    expect(result.ok ? undefined : result.error).toMatchObject({ refusal: 'redirect_budget_exceeded' })
+    expect(result.ok ? undefined : result.error).toMatchObject({
+      refusal: 'redirect_budget_exceeded',
+      redirectStatus: 302,
+      redirectTarget: 'https://a.dev/next',
+    })
     expect(fetchSpy.calls).toHaveLength(1)
   })
 })

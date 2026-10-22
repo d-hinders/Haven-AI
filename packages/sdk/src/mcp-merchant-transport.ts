@@ -809,7 +809,6 @@ export function encodeMcpSettlementReceipt(settlement: McpX402SettlementMeta): s
   return encodeBase64Json(settlement)
 }
 
-/** #3155: the request body parsed as a JSON-RPC `tools/call` with an object `params`, else undefined. */
 /**
  * #4257: whether a request body carries an x402 payment in `params._meta`,
  * on any JSON-RPC method. Reads a string body, a `Uint8Array`/`ArrayBuffer`
@@ -842,6 +841,7 @@ function messageCarriesX402Payment(message: unknown): boolean {
     message.params._meta[MCP_X402_PAYMENT_META_KEY] !== undefined
 }
 
+/** #3155: the request body parsed as a JSON-RPC `tools/call` with an object `params`, else undefined. */
 function parseJsonRpcToolsCall(body: unknown): (Record<string, unknown> & { params: Record<string, unknown> }) | undefined {
   if (typeof body !== 'string') return undefined
   let request: unknown

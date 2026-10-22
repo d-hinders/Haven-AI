@@ -525,12 +525,14 @@ export class MerchantCompletion {
   /**
    * #4257: record a paid delivery that a refused redirect interrupted, and
    * return the refusal re-thrown with its payment and an accurate account:
-   * the payment header (and the body) reached `url`, the merchant answered
-   * with a redirect Haven did not follow, and the merchant may still settle.
-   * The record is the same `merchant_retry_rejected_after_payment` event a
-   * non-2xx answer writes (its `retry_status` is the redirect status, plus
-   * `refusal` and `redirect_location`), so the payment reads as funded and
-   * undelivered.
+   * the payment header (and the body, when there is one) reached `url`, the
+   * merchant answered with a redirect Haven did not follow, and the merchant
+   * may still settle. The record is the same
+   * `merchant_retry_rejected_after_payment` event a non-2xx answer writes: its
+   * `retry_status` is the redirect status, `retry_body` is null, and `details`
+   * carry `refusal` plus `redirect_location` when the refusal names a redirect
+   * target, or `refused_url` (the URL that answered) otherwise. The payment
+   * reads as funded and undelivered.
    */
   private async paidDeliveryInterrupted(
     err: MerchantEgressRefusedError,

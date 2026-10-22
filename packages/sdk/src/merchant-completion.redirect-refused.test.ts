@@ -166,7 +166,7 @@ describe('MerchantCompletion.retryRequest — a refused redirect on the paid del
     const result = await settle(completion.retryRequest(paidUrl, undefined, paymentRequired, receiptFor(accepted3009)))
     expect(result.ok).toBe(false)
     const err = result.ok ? undefined : result.error
-    expect(err).toMatchObject({ refusal: 'url_not_allowed', beforeRequest: false, redirectTarget: elsewhere })
+    expect(err).toMatchObject({ refusal: 'url_not_allowed', beforeRequest: false, redirectTarget: elsewhere, redirectStatus: 302 })
     const message = (err as Error).message
     expect(message).toContain(`delivered to ${paidUrl}, payment header included`)
     expect(message).toContain(`a URL the egress policy does not allow (${elsewhere})`)

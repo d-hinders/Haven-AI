@@ -2330,8 +2330,13 @@ signer imports:
   delegated by this key's own account. The signer checks it against the
   Haven-signed expected context; the SDK checks it against the merchant's own
   402 (payee, amount, token, chain, advertised facilitators).
-- **The EIP-3009 merchant header**, against the recorded binding, and **the
-  sweep home**, against Haven's recovery binding (see residual 2).
+- **The EIP-3009 merchant header**, against the recorded binding, and only
+  from a binding minted for a funding leg (#4242). The binding records which
+  of the two x402 shapes above was signed; a settlement-child binding is
+  refused, because no funding leg put that amount in the delegate EOA the
+  header spends from. `haven_sign_x402` refuses a settlement child before
+  signing it. And **the sweep home**, against Haven's recovery binding (see
+  residual 2).
 - **A task-budget child `Delegation` (#3329)** — a self-delegation: delegator
   AND delegate are this key's own delegate account, authority is the agent's
   budget delegation (never ROOT), an `erc20TransferAmount` cap on the expected

@@ -180,9 +180,10 @@ describe('x402 binding rail (#4242)', () => {
       const header = (await handlers.haven_x402_sign_header({
         payment_required: paymentRequiredFor(CHILD_QUOTE),
         x402_binding: binding,
-      } as never)) as ToolPayload & { message?: string; data?: unknown }
+      } as never)) as ToolPayload & { code?: string; message?: string; data?: unknown }
       expect(header.success).toBe(false)
       expect(header.message).toBe(NO_FUNDING_LEG_MESSAGE)
+      expect(header.code).toBe('SIGNING_ERROR')
       expect(header.data).toBeUndefined()
     })
   })
@@ -211,9 +212,10 @@ describe('x402 binding rail (#4242)', () => {
           typed_data: td,
           x402_expected: wire(expected),
           payment_required: paymentRequiredFor(CHILD_QUOTE),
-        } as never)) as ToolPayload & { message?: string; data?: unknown }
+        } as never)) as ToolPayload & { code?: string; message?: string; data?: unknown }
         expect(result.success).toBe(false)
         expect(result.message).toBe(NO_FUNDING_LEG_MESSAGE)
+        expect(result.code).toBe('SIGNING_ERROR')
         expect(result.data).toBeUndefined()
         expect(childSignings).toBe(0)
       })

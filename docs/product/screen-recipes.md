@@ -719,6 +719,10 @@ rule). `?grant=` keeps working alongside `?tab=`. Sections, in order:
    carries a warning dot, "Review the payment(s)" selects the tab and scrolls
    to it (never one payment's panel — #2196's rule), and the affected rows
    carry the Needs attention badge while the Status facet can narrow to them.
+   The row badge reads the machine-payment lifecycle before the intent's own
+   status, the same precedence as the wallet feed's rows: a stranded
+   payment's intent is `confirmed` (its funding settled), so the status alone
+   would say Sent (#4249).
    **Tool calls** and **Settings** hold today's content unchanged (the MCP
    tool calls panel; the Identity and settings card) until #4227 and #4228.
 6. Identity and settings — the Settings tab's content (#4226): one quiet card
@@ -748,6 +752,10 @@ refused before they reached the chain.
 Structure:
 1. The standard toolbar on the card: search, a Status facet (All, Sent,
    Pending, Failed, Needs attention), Token and Period — server-filtered.
+   Token offers only ERC-20s on the agent's chain (when the page knows it):
+   an agent payment is never in a native token. A selected token that does
+   not resolve is sent as-is and matches nothing — never dropped into an
+   unfiltered read under a "Token: …" chip (#4249).
 2. `TransactionActivityRow` ledger rows, merchant-first, under
    `TransactionActivityDayHeader` day bands (#4225). No "by <agent>" title and
    no "From … →" movement line: the page fixes the agent and the wallet, so

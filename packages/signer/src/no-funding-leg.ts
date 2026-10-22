@@ -20,27 +20,42 @@ export const NO_FUNDING_LEG_MESSAGE =
  * only, which the signer's own instructions ("every signer refusal also
  * carries the next-step family") did not hold for.
  *
- * The step names no tool. The remedy is a signer call (`haven_sign`) or a
- * hosted call (`haven_submit`) whose arguments — the child signature, the
- * payment id — this refusal does not hold at either site, and a next step
- * never invents arguments. So it says why instead.
+ * The step names no tool, and says why instead. `SIGNER_NEXT_STEP_TARGETS`
+ * (next-step.ts) declares hosted targets only, so a signer-role step such as
+ * `haven_sign` cannot be built at all. At the `haven_sign_x402` site nothing
+ * was signed yet, so the next call IS that signer call. At the header site the
+ * child was already signed by `haven_sign`, so the next call would be the
+ * hosted `haven_submit` — but its argument is the child signature, which the
+ * agent holds and this signer does not keep. Each site therefore states its own
+ * remedy: re-sign at the one-shot site, submit the signature already held at
+ * the header site.
  */
 export const NO_FUNDING_LEG = 'NO_FUNDING_LEG' as const
+
+/** Where the refusal fired: `haven_x402_sign_header` (`header`) or `haven_sign_x402` (`one_shot`). */
+export type NoFundingLegSite = 'header' | 'one_shot'
+
+/** The `next_tool_omitted_reason` per site. The test pins each as a literal, not via this map. */
+export const NO_FUNDING_LEG_NEXT_STEP_REASONS: Readonly<Record<NoFundingLegSite, string>> = {
+  header:
+    "submit the settlement-child signature you already hold from haven_sign to haven_submit with settlement_scheme 'erc7710' — it returns the payment_header; do not sign again, and an erc7710 payment has no EIP-3009 header step",
+  one_shot:
+    "sign the settlement child with haven_sign { payment_id }, then call haven_submit with that signature and settlement_scheme 'erc7710' — it returns the payment_header; an erc7710 payment has no EIP-3009 header step",
+}
 
 export class HavenNoFundingLegRefusedError extends HavenSigningError {
   declare readonly code: typeof NO_FUNDING_LEG
   readonly next_action = AgentPaymentNextAction.SignAndSubmitPayment
   readonly step: NextStep
 
-  constructor() {
+  constructor(site: NoFundingLegSite) {
     super(NO_FUNDING_LEG_MESSAGE)
     ;(this as { code: string }).code = NO_FUNDING_LEG
     this.name = 'HavenNoFundingLegRefusedError'
     this.step = signerRefusalStep({
       nextAction: AgentPaymentNextAction.SignAndSubmitPayment,
       nextTool: null,
-      nextToolOmittedReason:
-        "sign the settlement child with haven_sign { payment_id }, then call haven_submit with that signature and settlement_scheme 'erc7710' — it returns the payment_header; an erc7710 payment has no EIP-3009 header step",
+      nextToolOmittedReason: NO_FUNDING_LEG_NEXT_STEP_REASONS[site],
     })
   }
 }

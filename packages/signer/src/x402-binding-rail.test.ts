@@ -301,12 +301,27 @@ describe('x402 binding rail (#4242)', () => {
         x402_expected: wire(expected),
         payment_required: paymentRequiredFor(CHILD_QUOTE),
       } as never)) as unknown as Record<string, unknown>
-      for (const refusal of [viaHeader, viaOneShot]) {
+      // Pinned exactly, as LITERALS: a substring match let an inverted
+      // instruction that kept the matched words pass (review cell V4), and
+      // comparing against the module's own exported constant would compare a
+      // mutated string with itself. Each site has its own remedy — the header
+      // site already holds a child signature to submit; the one-shot site
+      // signed nothing yet.
+      for (const [refusal, reason] of [
+        [
+          viaHeader,
+          "submit the settlement-child signature you already hold from haven_sign to haven_submit with settlement_scheme 'erc7710' — it returns the payment_header; do not sign again, and an erc7710 payment has no EIP-3009 header step",
+        ],
+        [
+          viaOneShot,
+          "sign the settlement child with haven_sign { payment_id }, then call haven_submit with that signature and settlement_scheme 'erc7710' — it returns the payment_header; an erc7710 payment has no EIP-3009 header step",
+        ],
+      ] as const) {
         expect(refusal.code).toBe('NO_FUNDING_LEG')
         expect(refusal.next_action).toBe('sign_and_submit_payment')
         expect(refusal.next_tool).toBeUndefined()
         expect(refusal.next_tool_name).toBeUndefined()
-        expect(refusal.next_tool_omitted_reason).toEqual(expect.stringContaining("settlement_scheme 'erc7710'"))
+        expect(refusal.next_tool_omitted_reason).toBe(reason)
       }
     })
   })
@@ -330,6 +345,37 @@ describe('x402 binding rail (#4242)', () => {
       expect(result.success).toBe(false)
       expect(result.code).toBe('UNSUPPORTED_EXPECTED_CONTEXT_VERSION')
       expect(counter.signings).toBe(0)
+    })
+  })
+
+  it('a retired child id answers NO_FUNDING_LEG within the 64-id bound, and the unknown-binding refusal once evicted', async () => {
+    // Settlement children are retired at mint, so they share the retired set's
+    // bound of 64. The 65th retirement evicts the oldest id: from then on it
+    // degrades to the unknown-binding refusal — still no header, only a less
+    // specific remedy.
+    const td = ownChild()
+    const expected = await bind(CHILD_QUOTE, td, CHILD_PAYLOAD_HASH)
+    const s = signer()
+    const challenge = paymentRequiredFor(CHILD_QUOTE) as never
+    await inWindow(async () => {
+      const mint = async () =>
+        (await s.signX402FundingTypedData(td as never, expected as unknown as X402ExpectedPayment)).x402Binding
+      const first = await mint()
+      for (let i = 1; i < 64; i++) await mint()
+      // 64 retired ids: the first is still remembered.
+      await expect(s.buildX402PaymentHeader(challenge, first)).rejects.toThrow(NO_FUNDING_LEG_MESSAGE)
+      await mint()
+      // 65th retirement: the first id fell off the bound.
+      let header: unknown
+      let refusal: unknown
+      try {
+        header = await s.buildX402PaymentHeader(challenge, first)
+      } catch (err) {
+        refusal = err
+      }
+      expect(header).toBeUndefined()
+      expect((refusal as Error).message).toMatch(/^x402 funding binding is required before signing a merchant header\./)
+      expect((refusal as { code?: string }).code).toBe('SIGNING_ERROR')
     })
   })
 })

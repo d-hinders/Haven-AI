@@ -255,6 +255,9 @@ export function createEdgeSigner(
    * stored binding — is what keeps `haven_x402_sign_header` answering the
    * erc7710 misuse with the no-funding-leg remedy. Past the bound below it
    * degrades to the unknown-binding refusal, which still builds nothing.
+   * Settlement children now share that bound with `header_built` and
+   * `window_expired`, so under erc7710 volume a stale re-use of those falls
+   * back to the unknown-binding remedy sooner; nothing is built either way.
    *
    * Ids only. The payment context is still deleted with the map entry, so this
    * changes nothing about what the signer retains — a retired id is an opaque
@@ -425,7 +428,7 @@ export function createEdgeSigner(
           )
         }
         if (retired === 'no_funding_leg') {
-          throw new HavenNoFundingLegRefusedError()
+          throw new HavenNoFundingLegRefusedError('header')
         }
         if (retired === 'window_expired') {
           throw new HavenSigningError(

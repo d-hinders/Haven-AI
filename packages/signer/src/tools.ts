@@ -1149,7 +1149,7 @@ export function createToolHandlers(
         // covers the `{ payment_id }` path too: `fundingTypedData` is the
         // fetched context's typed data there (#4248 pins that).
         if (fundingTypedData && isSettlementChildTypedData(fundingTypedData)) {
-          throw new HavenNoFundingLegRefusedError()
+          throw new HavenNoFundingLegRefusedError('one_shot')
         }
         const funding = await signFundingLeg(signer, expected, fundingTypedData)
         // 2. Build the merchant EIP-3009 header against that binding — local, no network.

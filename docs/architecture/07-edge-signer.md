@@ -105,8 +105,10 @@ The edge signer ships as **`@haven_ai/signer`** in two layers:
      retired the moment it is minted and never held, so no payment context
      outlives the call that signed the child; the refusal is the structured
      `NO_FUNDING_LEG` (`next_action: sign_and_submit_payment`, no tool, a
-     `next_tool_omitted_reason` naming `haven_sign` then `haven_submit` with
-     `settlement_scheme: 'erc7710'`). Reuses the SDK's `selectStandardPaymentOption` +
+     `next_tool_omitted_reason` per site: here, submit the child signature the
+     agent already holds to `haven_submit` with `settlement_scheme: 'erc7710'`;
+     on `haven_sign_x402`, sign the child with `haven_sign` first). No tool is
+     named because the signer's next-step targets are hosted-only. Reuses the SDK's `selectStandardPaymentOption` +
      `toStandardPaymentRequirements` + the `x402` library. Since #3888 the
      authorization's nonce is not the library's random draw: the signer
      overwrites it with `deriveX402PaymentNonce(expected.paymentId)` on the

@@ -16,7 +16,7 @@ export function isMachinePaymentSource(source?: string | null): boolean {
  * Primary title for a machine-payment transaction row (#2357).
  *
  * This string leads the row people scan — the dashboard activity list
- * (`DashboardClient.tsx`), the transactions table (`TransactionsTable.tsx`),
+ * (`DashboardClient.tsx`), the transactions ledger (`TransactionsClient.tsx`),
  * the side panel heading (`TransactionDetailPanel.tsx`) and the agent detail
  * activity feed (`AgentDetailClient.tsx`) — so it follows
  * `docs/product/copy-guidelines.md` § Core principle: write for users, not for

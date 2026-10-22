@@ -33,7 +33,7 @@ import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { Tabs } from '@/components/ui/Tabs'
 import { ThemeToggle } from '@/components/ui/ThemeToggle'
 import { Textarea } from '@/components/ui/Textarea'
-import { Table, tableColumnClass, tableHideFromClass } from '@/components/ui/Table'
+import { Table } from '@/components/ui/Table'
 import { SidePanel } from '@/components/ui/SidePanel'
 import { StepProgress } from '@/components/ui/StepProgress'
 import { DialogActions } from '@/components/ui/DialogActions'
@@ -81,7 +81,6 @@ import {
   ApprovalRequiredBanner,
   CredentialHandoffCard,
   DirectionMark,
-  ExternalDetailsLink,
   RiskExplainer,
   TransactionActivityDayHeader,
   TransactionActivityRow,
@@ -2078,7 +2077,7 @@ export default function DesignSystemPage() {
         <Card hover={false} className="max-w-sm p-4">
           {/*
             The REAL component, in `presentational` mode — not a hand-rolled
-            copy of it. The showcase's mirror of `TransactionsTable` taught this
+            copy of it. A hand-built showcase mirror of a screen taught this
             the expensive way: it kept teaching the pre-#2734 amount column for
             a merge, and #2792 was the issue that noticed. `presentational`
             swaps the fixed viewport placement for in-flow layout and drops the
@@ -2440,7 +2439,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="Direction marks (in / out / pending / move)"
-        description="One shared `<DirectionMark>` for every transaction row in the app. Incoming uses success green, outgoing uses debit sky, pending uses neutral grey, and a move between your own accounts uses the two-way arrow on the same neutral grey ground (#4264) — neither income nor spend, so like pending it passes no sign to `Amount`. Density `compact` (32px) for dashboard rows, `comfortable` (36px, default) for the dedicated transactions table, `figure` (24px mark, 14px icon) beside a 20px secondary figure (Amount `md`, #4259), `inline` (18px mark, 11px icon) for a mark in dense inline text."
+        description="One shared `<DirectionMark>` for every transaction row in the app. Incoming uses success green, outgoing uses debit sky, pending uses neutral grey, and a move between your own accounts uses the two-way arrow on the same neutral grey ground (#4264) — neither income nor spend, so like pending it passes no sign to `Amount`. Density `compact` (32px) for dashboard rows, `comfortable` (36px, default) for the roomier row, `figure` (24px mark, 14px icon) beside a 20px secondary figure (Amount `md`, #4259), `inline` (18px mark, 11px icon) for a mark in dense inline text."
       >
         <Card hover={false} className="p-5">
           <div className="flex flex-wrap items-center gap-5">
@@ -3157,273 +3156,6 @@ export default function DesignSystemPage() {
             <NoAllFacetExample />
           </ListControlsState>
         </div>
-      </Section>
-
-      <Section
-        title="Transaction history"
-        description="Tables render through the Table primitive: Table.Head (collapses when narrow, optional sticky), Table.HeaderCell (srLabel for icon columns, revealAt for container-keyed collapse), Table.SortableHeaderCell (aria-sort + focus-ring button + chevron), Table.Body (one row-border rule). Cell content stays plain <td>. Compact TransactionActivityRow remains for dashboard, account, and agent previews."
-      >
-        <Card hover={false} className="overflow-hidden">
-          <Table>
-            <Table.Head>
-              <tr>
-                <Table.HeaderCell srLabel="Direction" className="w-10" />
-                <Table.HeaderCell align="left">Activity</Table.HeaderCell>
-                {/* Initiator and Date reveal at the `xl` CONTAINER stage
-                    (974px), not the `md` one (718px) — #1827, re-keyed onto
-                    the container by #1999.
-                    MEASURED, Failed row title measure / lines / row height on
-                    the seven-columns-at-`md` layout this replaced: 71.1px / 5
-                    / 156 at 768px, 82.5px / 4 / 132 at 800px, 118px / 3 / 92
-                    at 900px, then 71.1px / 5 / 156 AGAIN at 1024px. The
-                    repeat is the whole point: TWO things step at `lg` and
-                    both take width — `Sidebar.tsx` goes `fixed` ->
-                    `lg:static` at `w-[240px]` (border-box, so its 1px
-                    `border-r` is INSIDE the 240, measured: `main` is 784px at
-                    a 1024px viewport), AND the authenticated layout's `main`
-                    steps `p-6` -> `lg:p-8`, which is 16px more across the
-                    pair. 240 + 16 = 256px handed back in one breakpoint.
-                    (#1827 wrote 241 + 16 = 257 here. The conclusion was
-                    right and the number was not; corrected from a direct
-                    reading of the sidebar box.) So the content available to
-                    this table is a SAWTOOTH in viewport width:
-
-                      viewport   390  767  768  900  1023  1024  1279  1280
-                      container  340  717  718  850   973   718   973   974
-
-                    which is why the stages are CONTAINER queries now. A
-                    container query does NOT make the second stage
-                    unnecessary — the container really is 718px at a 1024px
-                    viewport, so a single-stage reveal starves the title there
-                    exactly as before. What it removes is the need to
-                    rediscover the sawtooth to pick the viewport that clears
-                    both teeth: 974px is simply the width at which seven
-                    columns fit.
-                    Pinning the `md`+ columns the way `TransactionsTable` does
-                    was tried during #1774 and is NOT the answer — it grew
-                    desktop rows 85px -> 133px, because a 140px `From / To`
-                    wraps this showcase's longer names.
-                    What the two deferred columns cost is NOT the same, and
-                    the difference is worth naming rather than smoothing over.
-                    The DATE rides under the Amount between the `md` and `xl`
-                    stages. Below `md` it is dropped with the Amount column
-                    itself (#2792) — the narrow layout no longer carries it,
-                    which is what the component does too. It is hidden by
-                    `tableHideFromClass('xl')` so it can never disagree with
-                    the column it stands in for. The INITIATOR genuinely is
-                    dropped between the two stages. For two of the three demo
-                    rows that costs nothing visible, because the title already
-                    says it ("AGENT PAYMENT BY RESEARCH ASSISTANT" and
-                    "FAILED PAYMENT BY RESEARCH ASSISTANT"). What carries the
-                    initiator there is the trailing `by <agent>` clause,
-                    which `transactionTitle` in
-                    `lib/transaction-presentation.tsx` appends to whatever
-                    `paymentSourceTitle` returns — so the argument never rested
-                    on the protocol name, and it survives #2357 taking the
-                    protocol out of the title (this quote previously named it;
-                    #2448 re-based it). The MEASUREMENTS above are unaffected
-                    for the same reason they were taken on the Failed row:
-                    that title is "Failed payment by Research assistant" and
-                    #2357 did not touch it.
-                    SCOPE: "the title already says it" holds in the `md`->`xl`
-                    band, and since #2792 it holds below `md` as well. The
-                    reading quoted here was "Agent payme…" / "Failed payme…",
-                    measured on a 390px capture when the Activity cell was
-                    138px and the title ellipsised. Collapsing the Amount
-                    column took the cell to 248px and the title now WRAPS, so
-                    the `by <agent>` clause survives and the narrow layout no
-                    longer loses the initiator. Re-measured on the 390px
-                    capture of this branch rather than left as prose: the
-                    instrument moved, so the reading had to be retaken. Raised by
-                    `haven-design-reviewer` on #2448, against the rendered
-                    mobile capture rather than from the source.
-                    For the first row it is a real loss — a human-initiated payment's
-                    initiator ("You") rests on the cell, and nothing else on
-                    the row says so. That is an acceptable trade here (the
-                    narrow layout drops the initiator outright) but it IS a
-                    loss, and a showcase whose job is to teach the collapse
-                    pattern should not claim otherwise. The first demo row is
-                    deliberately a HUMAN-initiated payment (#2097: 'You' is
-                    reserved for `initiatedBy: 'human'`; agent rows carry the
-                    agent name) — the only shape for which the initiator cell
-                    may read 'You'.
-                    WHY THE DATE IS NOT HANDED BACK EARLIER. It was MEASURED,
-                    not judged: restoring the Date column at a 973px container
-                    (a 1024px viewport is 718px, but 1023px and 1279px are
-                    both 973px) put the Failed row back to 109.9px across
-                    THREE lines in a 108px row at 1024px under the old
-                    viewport keying, because 1024px is the bottom tooth. The
-                    container query answers the same question directly: 973px
-                    is one pixel short of the stage, 974px clears it.
-                    After: 141.7px / 2 / 100 at 768px and 1024px; 1280px is
-                    unchanged to the pixel, so no visual baseline moves.
-                    Gated by geometry in `e2e/transaction-title-measure.spec.ts`
-                    (the pixel gate renders 1280 and 390 only, so it cannot
-                    see any width this is about) and by
-                    `e2e/table-container-collapse.spec.ts`, which resizes the
-                    CONTAINER at a fixed viewport — the only assertion that
-                    can tell a container query from a viewport one. */}
-                <Table.HeaderCell align="left" revealAt="xl">Initiator</Table.HeaderCell>
-                <Table.HeaderCell align="left" revealAt="md">From / To</Table.HeaderCell>
-                <Table.SortableHeaderCell label="Date" direction="desc" onSort={() => toast.info('Sorts the loaded set')} revealAt="xl" />
-                {/* `revealAt="md"` renders identically today — the header row
-                    is already `display: none` below the md stage — but this
-                    document's own rule is "header and body must be converted
-                    together, always", and a body cell on a stage its header
-                    does not name is the #1774 shape one layer down. */}
-                <Table.SortableHeaderCell label="Amount" direction={null} onSort={() => toast.info('Sorts the loaded set')} align="right" revealAt="md" />
-                <Table.HeaderCell srLabel="External details" className="w-8" />
-              </tr>
-            </Table.Head>
-            <Table.Body>
-              {[
-                {
-                  title: 'Payment sent',
-                  from: 'Operating wallet',
-                  to: 'Acme Operations',
-                  initiator: 'You',
-                  date: '12m ago',
-                  value: '500.00',
-                  direction: 'out' as const,
-                  failed: false,
-                },
-                {
-                  title: 'Agent payment by Research assistant',
-                  from: 'Operating wallet',
-                  to: 'API provider',
-                  initiator: 'Research assistant',
-                  date: '1h ago',
-                  value: '12.00',
-                  direction: 'out' as const,
-                  failed: false,
-                },
-                {
-                  title: 'Failed payment by Research assistant',
-                  from: 'Operating wallet',
-                  to: 'unknown.vendor',
-                  initiator: 'Research assistant',
-                  date: '2h ago',
-                  value: '25.00',
-                  direction: 'out' as const,
-                  failed: true,
-                },
-              ].map((row) => (
-                <tr key={row.title}>
-                  {/* Narrow gutters below md mirror TransactionsTable (#1772).
-                      Without them this showcase rendered 375px wide inside a
-                      343px Card at 393px — clipped by the Card's
-                      `overflow-hidden`, i.e. the very defect the table below
-                      is meant to document the correct shape of. */}
-                  {/* The BELOW-md widths live on the `<td>`s, not on the
-                      header cells, and that distinction is the whole defect
-                      (#1774/#1750). `Table.Head` is `hidden md:table-header-group`,
-                      so below md the header row is `display: none` and its
-                      width declarations take no part in column sizing at all —
-                      putting `w-[110px]` on the Amount HEADER measured a
-                      byte-identical mobile layout (Activity still 13px at
-                      390px) while making desktop rows grow 85px -> 133px.
-                      `TransactionsTable` carries these widths on its `<td>`s
-                      (`w-9`/`w-[110px]`/`w-8`, and UNCONDITIONALLY — it stays
-                      fixed-width at desktop too, which is the one place this
-                      showcase deliberately diverges), which is why its
-                      `max-w-0` Activity cell lands on a healthy 106px at 390px
-                      while this showcase's collapsed to
-                      3.7px at 320px / 13px at 390px. `md:w-auto` hands the
-                      columns back to content sizing at md and up, so THESE
-                      widths contribute nothing to the desktop baseline. (The
-                      desktop capture does still move by a few pixels — from
-                      the `TransactionMovement` change, which alters the
-                      From/To column's min-content: the middle row measured
-                      85px -> 73px at 1280px. Attributing that to these classes
-                      would send the next reader to the wrong file.) */}
-                  <td className="w-9 px-2 py-4 align-middle md:w-auto md:px-4">
-                    <DirectionMark direction={row.direction} />
-                  </td>
-                  {/* `max-w-0` BELOW md ONLY. Unconditional, it squashed the
-                      Activity column on DESKTOP too — the visual-regression
-                      gate caught all three Activity titles ellipsised at
-                      1280px ("Recei…" / "Faile…" and so on, quoting the demo
-                      titles AS THEY READ AT THE TIME; #2357 has since changed
-                      two of the three, and the incident is about the width,
-                      not about any particular string).
-                      TransactionsTable survives it unconditionally because
-                      every other column there carries an explicit `w-[…]`, so
-                      the leftover flows to Activity; this showcase sizes its
-                      columns purely from content, so capping one collapses it.
-                      Do not drop the `md:` here. */}
-                  <td className="max-w-0 px-4 py-4 align-middle md:max-w-none">
-                    {/* `break-words` + `flex-wrap` mirror TransactionsTable
-                        below `md`. This said `truncate` until #2792, on the
-                        reasoning that wrapping "would teach a shape the real
-                        component does not have" — which was true when the
-                        component ellipsised below `md` and stopped being true
-                        when #2734 gave it `break-words` and a 248px cell. The
-                        premise inverted and the class did not follow it, which
-                        is how a showcase drifts while looking deliberate. */}
-                    {/* `md:flex-nowrap` for the same reason as `md:max-w-none`
-                        above: this showcase's desktop titles WRAP to two
-                        lines, so a wrapping flex row pushed the Failed badge
-                        onto a third and grew the page by 12px. The visual
-                        gate measured it — 17746 -> 17758 — after the first
-                        attempt at this fix. Desktop must not move at all. */}
-                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 md:flex-nowrap">
-                      {/* Wrap below md (matching the component), wrap at md
-                          and up (this showcase's own desktop shape). The `md:`
-                          half is untouched, so desktop stays byte-identical —
-                          only the narrow rendering changes, and it changes
-                          TOWARDS the component. */}
-                      <p
-                        className="break-words text-sm font-semibold text-[var(--v2-ink)] md:overflow-visible md:whitespace-normal md:text-clip"
-                        title={row.title}
-                      >
-                        {row.title}
-                      </p>
-                      {row.failed ? <StatusBadge tone="danger">Failed</StatusBadge> : null}
-                    </div>
-                    <div className={`mt-1 ${tableHideFromClass('md')}`}>
-                      <TransactionMovement from={row.from} to={row.to} />
-                    </div>
-                    {/* The amount, riding under the title while its own column
-                        is collapsed (#2792). LEFT-aligned, hanging under the
-                        start of the title — the rule in this document's own
-                        § Transaction tables, which #2734 shipped the other way
-                        first and a design review reversed: right alignment is
-                        a property of a column of numbers, and a stacked amount
-                        is not a column. */}
-                    <div className={`mt-1 text-sm ${tableHideFromClass('md')}`}>
-                      <Amount value={row.value} symbol="USDC" direction={row.direction} failed={row.failed} />
-                    </div>
-                  </td>
-                  <td className={`px-4 py-4 align-middle text-sm text-[var(--v2-ink-2)] ${tableColumnClass('xl')}`}>
-                    {row.initiator}
-                  </td>
-                  <td className={`px-4 py-4 align-middle ${tableColumnClass('md')}`}>
-                    <TransactionMovement from={row.from} to={row.to} />
-                  </td>
-                  <td className={`px-4 py-4 align-middle text-sm text-[var(--v2-ink-3)] ${tableColumnClass('xl')}`}>
-                    {row.date}
-                  </td>
-                  {/* Collapsed below `md`, in step with `TransactionsTable`
-                      (#2734/#2792). The 110px this column cost came straight
-                      out of Activity — the only flexible column — and that is
-                      what the showcase is here to demonstrate. The date rider
-                      goes with it, which is correct rather than incidental:
-                      the real table shows no date below `md` either, so the
-                      two now agree at every stage instead of at most of them. */}
-                  <td className={`px-4 py-4 align-middle text-right ${tableColumnClass('md')}`}>
-                    <p>
-                      <Amount value={row.value} symbol="USDC" direction={row.direction} failed={row.failed} />
-                    </p>
-                    <p className={`mt-1 text-xs text-[var(--v2-ink-3)] ${tableHideFromClass('xl')}`}>{row.date}</p>
-                  </td>
-                  <td className="w-8 px-2 py-4 align-middle text-right md:w-auto md:px-4">
-                    <ExternalDetailsLink href="#" />
-                  </td>
-                </tr>
-              ))}
-            </Table.Body>
-          </Table>
-        </Card>
       </Section>
 
       <Section

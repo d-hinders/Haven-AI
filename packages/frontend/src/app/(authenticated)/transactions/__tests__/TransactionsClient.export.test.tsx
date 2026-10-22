@@ -30,10 +30,14 @@ vi.mock('@/lib/api', async () => {
     },
   }
 })
-vi.mock('@/lib/transaction-csv', () => ({
-  downloadCsv: (...a: unknown[]) => mockDownloadCsv(...a),
-  buildCsvFilename: () => 'haven-transactions-20260911.csv',
-}))
+vi.mock('@/lib/transaction-csv', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/transaction-csv')>('@/lib/transaction-csv')
+  return {
+    ...actual,
+    downloadCsv: (...a: unknown[]) => mockDownloadCsv(...a),
+    buildCsvFilename: () => 'haven-transactions-20260911.csv',
+  }
+})
 vi.mock('next/navigation', () => ({
   usePathname: () => '/transactions',
   useSearchParams: () => new URLSearchParams(urlState.query),
@@ -79,11 +83,18 @@ const TX = {
   accountName: 'Main',
 }
 
+const { totalsRows } = vi.hoisted(() => ({
+  totalsRows: { rows: [] as Array<Record<string, unknown>> },
+}))
+
 const { feedState } = vi.hoisted(() => ({
   feedState: { partialFailure: false, truncated: false, empty: false, hasMore: false, loadingMore: false, total: 1, loadMore: vi.fn(), filtersError: null as string | null },
 }))
 
-vi.mock('@/hooks/useTransactionsFeed', () => ({
+vi.mock('@/hooks/useTransactionsFeed', async () => ({
+  // The real serializers (#4266): the page's export and totals requests
+  // go through the list's own `transactionFilterParams`.
+  ...(await vi.importActual<typeof import('@/hooks/useTransactionsFeed')>('@/hooks/useTransactionsFeed')),
   browserTimeZone: () => 'Europe/Stockholm',
   useTransactionsFeed: () => ({
     transactions: feedState.empty ? [] : [TX],
@@ -105,7 +116,15 @@ const TransactionsClient = (await import('../TransactionsClient')).default
 beforeEach(() => {
   mockGetText.mockReset()
   mockGet.mockReset()
-  mockGet.mockResolvedValue({ total: 40 })
+  // Two reads go through `api.get`: the unfiltered total behind
+  // "{shown} of {total}" (`limit=1`), and the In/Out totals walk (#4266),
+  // which pages the same folded feed the list shows.
+  mockGet.mockImplementation(async (url: string) =>
+    url.includes('limit=1&') || url.endsWith('limit=1') || url.includes('limit=1&foldOwnTransfers')
+      ? { total: 40 }
+      : { transactions: totalsRows.rows, total: totalsRows.rows.length, hasMore: false },
+  )
+  totalsRows.rows = []
   mockDownloadCsv.mockReset()
   urlState.query = 'accountId=safe-1'
   window.history.replaceState(null, '', '/transactions')
@@ -263,7 +282,7 @@ describe('TransactionsClient — CSV export (#2871)', () => {
     feedState.truncated = true
     render(<TransactionsClient />)
 
-    const hedge = await screen.findByText(/Counts and exports cover the transactions loaded here/i)
+    const hedge = await screen.findByText(/Counts, totals and exports cover the transactions loaded here/i)
     // It qualifies the count, so it sits directly under the summary line
     // (#4196) and before the list.
     expect(
@@ -278,7 +297,7 @@ describe('TransactionsClient — CSV export (#2871)', () => {
     feedState.filtersError = 'Filter options could not load.'
     render(<TransactionsClient />)
 
-    const hedge = await screen.findByText(/Counts and exports cover the transactions loaded here/i)
+    const hedge = await screen.findByText(/Counts, totals and exports cover the transactions loaded here/i)
     expect(screen.getByTestId('list-controls').nextElementSibling).toBe(hedge)
     expect(hedge.compareDocumentPosition(screen.getByText('Filter options could not load.')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     // Hedged, not flat: an account holding exactly one window on an
@@ -294,7 +313,7 @@ describe('TransactionsClient — CSV export (#2871)', () => {
     render(<TransactionsClient />)
 
     expect(
-      screen.queryByText(/Counts and exports cover the transactions loaded here/i),
+      screen.queryByText(/Counts, totals and exports cover the transactions loaded here/i),
     ).toBeNull()
     expect(screen.getByText('All activity across your accounts.')).toBeInTheDocument()
   })
@@ -375,9 +394,11 @@ describe('TransactionsClient — URL and export params (#4111)', () => {
     urlState.query = ''
     const { unmount } = render(<TransactionsClient />)
     expect(within(screen.getByTestId('list-summary')).getByTestId('list-toolbar-count')).toHaveTextContent(/^1 transaction$/)
-    // Unfiltered, the feed's total is the figure: nothing extra is read.
-    expect(mockGet).not.toHaveBeenCalled()
+    // Unfiltered, the feed's total is the figure: no count read is made
+    // (the In/Out totals walk is the only `api.get`, #4266).
+    expect(mockGet.mock.calls.filter(([url]) => String(url).includes('limit=1&') || String(url).endsWith('limit=1'))).toHaveLength(0)
     unmount()
+    mockGet.mockClear()
 
     urlState.query = 'accountId=safe-1'
     render(<TransactionsClient />)
@@ -385,9 +406,9 @@ describe('TransactionsClient — URL and export params (#4111)', () => {
       expect(within(screen.getByTestId('list-summary')).getByTestId('list-toolbar-count')).toHaveTextContent(/^1 of 40 transactions$/),
     )
     // Both numbers are server figures: the unfiltered one comes from one
-    // filter-free read.
-    expect(mockGet).toHaveBeenCalledTimes(1)
-    expect(mockGet).toHaveBeenCalledWith('/transactions?offset=0&limit=1')
+    // filter-free read — folded, as the list is (#4266), so a move between
+    // the user's accounts is one transaction in both numbers.
+    expect(mockGet).toHaveBeenCalledWith('/transactions?offset=0&limit=1&foldOwnTransfers=1')
   })
 
   it('shows the standard no-match state, and its Clear filters returns to the default', async () => {
@@ -424,13 +445,14 @@ describe('TransactionsClient — URL and export params (#4111)', () => {
     )
   })
 
-  it('shows only the direction half the Direction filter leaves open', () => {
+  it('shows only the direction half the Direction filter leaves open', async () => {
     urlState.query = 'direction=out'
     render(<TransactionsClient />)
 
-    const page = document.body.textContent ?? ''
-    expect(page).toMatch(/0\s*sent/)
-    expect(page).not.toMatch(/\d\s*received/)
+    const totals = await screen.findByTestId('transactions-totals')
+    expect(within(totals).getAllByTestId('transactions-total')).toHaveLength(1)
+    expect(totals).toHaveTextContent(/Money out/)
+    expect(totals).not.toHaveTextContent(/Money in/)
   })
 
   it('puts the filtered totals on the left of the list summary line, the count on the right (#4196)', async () => {
@@ -438,20 +460,35 @@ describe('TransactionsClient — URL and export params (#4111)', () => {
     render(<TransactionsClient />)
 
     const line = screen.getByTestId('list-summary')
-    expect(within(line).getByTestId('transactions-totals')).toHaveTextContent(/received/)
+    expect(await within(line).findByTestId('transactions-totals')).toHaveTextContent(/In.*Out/)
     expect(line.lastElementChild).toBe(screen.getByTestId('list-toolbar-count'))
     await waitFor(() =>
       expect(within(screen.getByTestId('list-summary')).getByTestId('list-toolbar-count')).toHaveTextContent(/^1 of 40 transactions$/),
     )
   })
 
-  it('unfiltered, the summary line holds the count alone and the toolbar draws no status row (#4196)', () => {
+  it('unfiltered, the summary line holds In and Out beside the count, and no status row (#4196, #4266)', async () => {
     urlState.query = ''
     render(<TransactionsClient />)
 
-    expect(screen.queryByTestId('transactions-totals')).not.toBeInTheDocument()
-    expect(screen.getByTestId('list-summary').textContent).toBe('1 transaction')
+    const totals = await screen.findByTestId('transactions-totals')
+    expect(within(totals).getAllByTestId('transactions-total')).toHaveLength(2)
+    expect(screen.getByTestId('list-summary').lastElementChild).toHaveTextContent('1 transaction')
     expect(screen.queryByTestId('list-toolbar-status')).not.toBeInTheDocument()
+  })
+
+  it('every request the page makes asks for the own-transfer fold (#4266)', async () => {
+    urlState.query = 'accountId=safe-1'
+    mockGetText.mockResolvedValue('\ufeffsettled_at\r\n"x"')
+    render(<TransactionsClient />)
+
+    await screen.findByTestId('transactions-totals')
+    fireEvent.click(exportButton())
+    await waitFor(() => expect(mockGetText).toHaveBeenCalledTimes(1))
+    expect(mockGetText.mock.calls[0][0]).toContain('foldOwnTransfers=1')
+    const reads = mockGet.mock.calls.map(([url]) => String(url))
+    expect(reads.length).toBeGreaterThan(0)
+    for (const url of reads) expect(url).toContain('foldOwnTransfers=1')
   })
 
   it('pages with "Show N more", N = min(25, remaining), and calls the feed (#4196)', () => {

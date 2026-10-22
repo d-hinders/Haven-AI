@@ -4,7 +4,7 @@
  * Per-transaction accounting badge (#2870, epic #2858 slice 12).
  *
  * Shows the feed's state for ONE payment where the user already looks — the
- * Transactions table row and the detail drawer — and links to `/accounting`,
+ * `/transactions` ledger row (#4266) and the detail drawer — and links to `/accounting`,
  * where the row can be re-synced or checked against the provider. Reads the
  * `accounting` object the list endpoint joins per row; renders nothing when
  * it is absent, which is how the backend says "feature off, no connection,

@@ -131,7 +131,7 @@ function indicatorClass(active: boolean): string {
 /**
  * `presentational` swaps the fixed viewport placement for in-flow layout so
  * `/design-system` can render THIS component rather than a hand-rolled copy of
- * it. The showcase's mirror of `TransactionsTable` drifted for exactly one
+ * it. A hand-built showcase mirror of a table once drifted for exactly one
  * merge and needed #2792 to notice — the same trade is not worth taking twice.
  * It is the `WalletPopover` pattern already used on that page.
  */

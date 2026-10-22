@@ -32,7 +32,7 @@ describe('StatusBadge (#2147)', () => {
 
   it('renders every machine-payment lifecycle label through the same one-line badge', () => {
     // Non-vacuity, and the reason the rule matters HERE rather than in the
-    // abstract: these are the labels `TransactionsTable` puts in the narrowest
+    // abstract: these are the labels the transaction ledger puts in the narrowest
     // column the app has. A new multi-word member added to
     // `MachinePaymentFlowStatus` inherits the guard instead of rediscovering
     // the wrap on a screenshot.

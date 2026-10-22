@@ -61,9 +61,9 @@ Use this checklist before finishing any Haven UI task. It is written for AI impl
 - Existing primitives in `packages/frontend/src/components/ui` are reused before adding new styles.
 - Haven-domain components in `packages/frontend/src/components/haven` are reused for agent budget, wallet identity, and risk explanations.
 - Authenticated pages use `PageHeader` unless the route has a deliberate special layout.
-- Dashboard compact previews use `TransactionActivityRow`. Semantic transaction
-  lists, including card/compact account and agent histories, use the appropriate
-  `TransactionsTable` variant.
+- Dashboard compact previews use `TransactionActivityRow`. Full transaction
+  lists, including `/transactions` and the account and agent Activity tabs, use
+  `TransactionActivityRow` in ledger mode under day bands.
 - Cards, buttons, inputs, shadows, radii, and typography match `docs/product/design-system.md`.
 - `Card elevation="raised"` is used only for prominent page-anchor surfaces, not ordinary cards.
 - The shared `Card` primitive's implemented `anchor` elevation is used only as
@@ -113,7 +113,7 @@ Any remaining matches should be deliberate technical disclosure, developer copy,
 - Loading regions that replace meaningful content use `role="status"`, `aria-busy`, and `aria-live` when practical.
 - Toasts supplement visible state and use the correct live-region tone.
 - Tooltips are available on hover and focus, are tap-openable where the trigger is not inside an interactive control, and do not hide essential instructions. A tooltip nested in a button, link, or composite card stays hover-only by design (#2038) — check that nothing essential is behind it.
-- Transaction tables preserve mobile readability and expose `aria-sort` on sortable headers.
+- Generic tables preserve mobile readability and expose `aria-sort` on sortable headers; transaction lists are ledger rows, not tables.
 
 ## Final Verification
 
@@ -175,15 +175,13 @@ Any remaining matches should be deliberate technical disclosure, developer copy,
 
 Re-verified 2026-09-30 (weekly docs audit #3413, at dev `5b5bd059`). No claim
 needed rewriting; every covered file still exists (all six named modals/cards,
-`TransactionActivityRow` in `components/haven/`, `TransactionsTable` in
-`components/transactions/`). Re-checked against the code: `RetiredRailNotice`
+`TransactionActivityRow` in `components/haven/`). Re-checked against the code: `RetiredRailNotice`
 is still absent from the frontend; `.v2-tabular` and the
 `prefers-reduced-motion: no-preference` gate are in `globals.css`; the `Card`
 primitive implements exactly the three elevations the checklist describes
 (`flat`/`raised`/`anchor`, with `anchor` still absent from the static
 design-system table as noted); `Tooltip` still carries the #2038 hover-only
-nesting rule; the shared `Table` emits `aria-sort` and the transactions table
-sorts amount on the raw `value` field, not the display string; the
+nesting rule; the shared `Table` emits `aria-sort`; the
 `delegator_hybrid` filtering lives in `useAgentPanelState` and the account/agent
 hooks as described. The intervening UI drift (#3442 token-label wrap, #3437
 releases wrap, #3482 faucet/onramp, #3408 receive side, #3198 agent labels,

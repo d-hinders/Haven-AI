@@ -174,42 +174,6 @@ vi.mock('@/components/ConfirmDialog', () => ({
   default: () => null,
 }))
 
-vi.mock('@/components/transactions/TransactionsTable', () => ({
-  default: ({
-    transactions = [],
-  }: {
-    transactions?: Array<{
-      hash: string
-      accountName?: string
-      movementOverride?: ReactNode
-      approxAmount?: string | null
-      approxCurrency?: string | null
-    }>
-  }) => (
-    <div>
-      <div>Transactions table</div>
-      {transactions.map((tx) => (
-        <div key={tx.hash}>
-          <span>{tx.accountName}</span>
-          {tx.movementOverride}
-          {/* #3811, amended by #3950: the stub mirrors the adapter's fiat
-              contract — the activity rows carry #3824's serve-time amount,
-              rendered PLAIN (the `≈` mark moved off list rows with the
-              #3950 owner decision), or an em dash when unpriced. The real
-              rendering is covered by the TransactionsTable tests. */}
-          {tx.approxAmount != null ? (
-            <span>
-              {tx.approxAmount} {tx.approxCurrency}
-            </span>
-          ) : (
-            <span>—</span>
-          )}
-        </div>
-      ))}
-    </div>
-  ),
-}))
-
 import { AGENT_PAUSED_BODY, AGENT_PAUSED_TITLE } from '@/lib/agent-pause-copy'
 import { HALF_REVOKED_TITLE } from '@/lib/half-revoked'
 import { AgentRow, type DashboardAgent } from '@/components/haven/AgentRow'

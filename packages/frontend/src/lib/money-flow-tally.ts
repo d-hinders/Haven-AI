@@ -60,9 +60,14 @@ function rowFiat(
   return null
 }
 
-/** Add one row to the tally; failed rows are skipped. */
+/**
+ * Add one row to the tally; failed rows are skipped, and so is a folded move
+ * between the user's own accounts (#4266): it left one account and entered
+ * another, so it is neither money in nor money out of the wallet set.
+ */
 export function tallyRow(tx: AggregatedTransaction, currency: AmountCurrency, tally: FlowTally): void {
   if (tx.isError) return
+  if (tx.ownTransfer) return
   const inbound = tx.direction === 'in'
   const fiat = rowFiat(tx, currency)
   if (!fiat) {

@@ -31,10 +31,9 @@ import { mockHavenApi, seedAuthenticatedSession } from './fixtures/haven-api'
 
 /**
  * Anchor on the TRANSACTION table, never on `querySelector('table')`.
- * `/design-system` renders the z-index token table earlier in the document,
- * and it is a `scrollable` table with no query container at all — a probe
- * that takes the first `<table>` measures that one and reports a confident
- * wrong answer. Trap 1 from `transaction-row.mobile.spec.ts`, one level up.
+ * A page may render other tables earlier in the document that are `scrollable`
+ * with no query container at all — a probe that takes the first `<table>`
+ * measures that one and reports a confident wrong answer. Trap 1 from `transaction-row.mobile.spec.ts`, one level up.
  */
 function transactionTable(): HTMLTableElement | null {
   return (
@@ -107,15 +106,6 @@ async function setContainerWidth(page: import('@playwright/test').Page, px: numb
 }
 
 const TX_COLUMNS = ['·', 'Activity', 'Initiator', 'From / To', 'Date', 'Amount', '·']
-const SHOWCASE_COLUMNS = [
-  'Direction',
-  'Activity',
-  'Initiator',
-  'From / To',
-  'Date',
-  'Amount',
-  'External details',
-]
 
 test('/transactions: the collapse follows the CONTAINER while the viewport stands still', async ({
   page,
@@ -159,54 +149,6 @@ test('/transactions: the collapse follows the CONTAINER while the viewport stand
   const atStage = await readShape(page)
   expect(atStage.columns, 'a 718px container is the md stage — header half').toEqual(TX_COLUMNS)
   expect(atStage.bodyCells, 'a 718px container is the md stage — body half').toBe(7)
-})
-
-test('/design-system: both stages are container-keyed, and the second one is not redundant', async ({
-  page,
-}) => {
-  test.slow()
-  await mockHavenApi(page)
-  await seedAuthenticatedSession(page)
-  await page.goto('/design-system')
-  await page.waitForSelector('tbody tr', { timeout: 60_000 })
-
-  // Deliberately a viewport BELOW `xl`. Under viewport keying the Initiator
-  // and Date columns could not appear here at all, whatever the container did.
-  await page.setViewportSize({ width: 900, height: 900 })
-  await page.waitForTimeout(400)
-
-  await setContainerWidth(page, 974)
-  const wide = await readShape(page)
-  expect(wide.columns, 'a 974px container reveals the xl stage at a 900px viewport').toEqual(
-    SHOWCASE_COLUMNS,
-  )
-  expect(wide.bodyCells, 'body half of the xl stage').toBe(7)
-
-  // 973px is the container a 1023px AND a 1279px viewport both produce, and it
-  // is one pixel short of the stage. This is the assertion that keeps the
-  // second stage honest: #1827 showed the seven-column layout starves the
-  // title below it.
-  await setContainerWidth(page, 973)
-  const mid = await readShape(page)
-  expect(mid.columns, 'a 973px container is one pixel short of the xl stage').toEqual([
-    'Direction',
-    'Activity',
-    'From / To',
-    'Amount',
-    'External details',
-  ])
-  expect(mid.bodyCells, 'the md stage keeps five cells in the body row').toBe(5)
-
-  // And the md stage, from the same fixed viewport.
-  await setContainerWidth(page, 717)
-  const narrow = await readShape(page)
-  // 4 -> 3 with #2792: the showcase's amount column now collapses below the md
-  // stage the way `TransactionsTable` does (#2734), so the narrow layout is
-  // direction / activity / link. This assertion IS the check that the two
-  // tables agree — it read 4 here and 3 on `/transactions` for as long as they
-  // did not.
-  expect(narrow.bodyCells, 'a 717px container collapses to the three-cell narrow layout').toBe(3)
-  expect(narrow.columns, 'and the header row collapses with it').toEqual([])
 })
 
 /**

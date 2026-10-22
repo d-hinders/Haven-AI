@@ -2,8 +2,8 @@
 
 /**
  * The account page's Activity tab (#4098, epic #4093): the account's FULL
- * transaction ledger, replacing the 10-row `TransactionsTable` preview the
- * page used to carry.
+ * transaction ledger, replacing the 10-row transactions-table preview the
+ * page used to carry (the table itself was deleted with #4266).
  *
  * What the tab owns, top to bottom:
  * - the standard list toolbar (#4130, epic #4108) — `ListToolbar` with the

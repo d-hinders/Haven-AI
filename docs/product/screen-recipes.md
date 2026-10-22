@@ -24,7 +24,6 @@ covers:
   - packages/frontend/src/components/haven/**
   - packages/frontend/src/app/(authenticated)/agents/[agentId]/AgentDetailClient.tsx
   - packages/frontend/src/components/transactions/TransactionDetailPanel.tsx
-  - packages/frontend/src/components/transactions/TransactionsTable.tsx
   - packages/frontend/src/components/ui/Input.tsx
   - packages/ui/**
   - packages/frontend/src/components/ui/PageHeader.tsx
@@ -889,9 +888,8 @@ Money and risk clarity:
 - Technical hashes stay in detail surfaces.
 - Use `TransactionActivityRow` in ledger mode for the agent's payments — the
   shared row, the day bands and the toolbar are the account tab's pieces, so
-  the two ledgers read as one system. `TransactionsTable` is for surfaces that
-  need semantic columns and sorting (the wallet feed); the agent's own ledger
-  is not one of them. Lead with the merchant (`counterpartyLabel`'s no-address
+  the two ledgers read as one system, and `/transactions` is the same ledger.
+  Lead with the merchant (`counterpartyLabel`'s no-address
   mode), not a raw recipient address.
 - Put recipient, source, and links in row metadata or detail actions.
 
@@ -971,17 +969,29 @@ Structure:
    summary line below the card (#4196) carries the standard count on the
    right — "{n} transactions", or "{shown} of {total} transactions" filtered,
    both server figures — and, filtered, the "N received · N sent · N failed"
-   totals on the left. The next page is "Show N more" below the table card
+   totals on the left. The next page is "Show N more" below the ledger card
    (the pattern's paging rule); nothing renders under the list once every
    page is loaded. The URL keeps the keys it had before #4111 except search,
    written as `q` with the old `search` still read; the export request builds its own API
-   parameters, apart from the URL codec. Sorting stays on the column
-   headers. The account page's Activity tab uses the same toolbar and codec
-   (#4130).
-3. The full-page `TransactionsTable` variant for `/transactions`; card/compact
-   variants are valid for scoped histories on account and agent detail.
+   parameters, apart from the URL codec. Order is the toolbar's Sort chip —
+   there are no column headers to sort by. The account page's Activity tab uses
+   the same toolbar and codec (#4130).
+3. The list is the shared ledger (per #4266): `TransactionActivityRow` in ledger
+   mode with `onOpen`, in compact density, under
+   `TransactionActivityDayHeader` day bands — the same anatomy the account and
+   agent Activity tabs use. Each row: the title is the counterparty
+   (merchant-first, `counterpartyLabel` no-address mode); the subline names who
+   acted ("You" or the agent) plus " · <account>" when the user has two or more
+   accounts; the badge is `transactionRowBadge(tx)` plus the accounting badge; the
+   amount sits right with the time under it. An own-account transfer (the
+   backend's `foldOwnTransfers=1`, #4265) reads "Moved between your accounts"
+   with `DirectionMark direction="move"`, the subline "You · <from> → <to>" (or
+   "Your accounts · …"), and an unsigned amount. The summary line carries
+   "In <total> · Out <total>" beside the count. No Initiator, From/To or link
+   columns. A row opens `TransactionDetailPanel`, where the full address and
+   explorer link live.
 4. A filtered list with no rows shows the standard no-match state
-   (`ListNoMatch`) where the rows were, below the toolbar; the table's own
+   (`ListNoMatch`) where the rows were, below the toolbar; the page's own
    empty state covers a history with nothing in it yet.
 
 Money and risk clarity:
@@ -993,10 +1003,8 @@ Money and risk clarity:
   break opportunity the otherwise-NBSP figure had, so approx-valued rows
   wrapped onto two lines; #4165 made it the one rule's answer for every
   row), and an unknown valuation as an em dash — never 0.
-  The `md`+ amount column is `whitespace-nowrap`: a money figure never
-  truncates (that hides digits) and never wraps — the auto-layout table
-  widens the column to the figure's min-content and the Activity column
-  (`max-w-0`) absorbs the difference. The token amount appears only where a
+  The amount is `whitespace-nowrap`: a money figure never truncates (that
+  hides digits) and never wraps — the title absorbs the difference. The token amount appears only where a
   budget is set and in the detail drawer; the `≈` mark lives beside it in
   the drawer, where it explains why the two figures differ — and only where
   the conversion changes the number: a re-priced figure in kr or €, or a
@@ -1012,8 +1020,9 @@ Money and risk clarity:
   ellipsises into a list row; the detail drawer is where the full address
   lives.
 - Use external links for details, but do not make hashes the primary labels.
-- Use `TransactionActivityRow` for short non-sortable previews such as
-  Dashboard. Use card/compact `TransactionsTable` for scoped sortable histories.
+- Use `TransactionActivityRow` for every transaction list: compact previews
+  such as Dashboard, and in ledger mode the full `/transactions` history and the
+  account and agent Activity tabs.
 - **Never present a capped list as a complete one (#2882).** The feed reads a
   bounded window per source per account — a fixed page budget (#2884) — so
   `total` counts what was returned, not what the account holds. When the

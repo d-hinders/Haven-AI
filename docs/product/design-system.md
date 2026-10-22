@@ -876,7 +876,7 @@ does not decide the mark: every caller passes `approx` from ONE rule,
 dashboard spend windows ask too. "≈" means a figure was converted at today's
 rate AND the conversion changed the number:
 
-- **A list row never carries it** (#3950) — the transactions table, the
+- **A list row never carries it** (#3950) — the transactions ledger, the
   account page's ledger and the dashboard's activity rows alike. Rows render
   the figure plain inside a `whitespace-nowrap` cell, so a money figure never
   wraps or truncates.
@@ -898,9 +898,8 @@ rate AND the conversion changed the number:
 because they have no price in the display currency says so in words — "Some
 amounts couldn’t be valued and aren’t included." (`UNPRICED_TOTALS_NOTE`,
 `lib/money-flow-tally.ts`) — and a total with nothing priceable renders `—`,
-never `≈ $0.00`. (The account page renders its feed through the
-`TransactionActivityRow` ledger since #4097, not `TransactionsTable`, whose
-callers are `/transactions` and the agent page.)
+never `≈ $0.00`. (Every transaction list — `/transactions`, the account page and the agent
+page — renders through the `TransactionActivityRow` ledger.)
 
 Unknown — `null` or a non-finite value — renders `—` in `--v2-ink-3`, never
 `0,00 kr`: existing callers turned unknown into zero, and this mode must not.
@@ -1697,7 +1696,7 @@ into one "×N" row; a full ledger needs one row per transaction, and gets it:
 One shared `<DirectionMark>` for every in/out/pending/move direction in the app: incoming uses
 success green, outgoing uses debit sky, pending uses neutral grey. Four densities:
 
-- `comfortable` (default): 36px mark, 16px icon — the dedicated `/transactions` table.
+- `comfortable` (default): 36px mark, 16px icon — the roomier row; `/transactions` and the Activity tabs use `compact`.
 - `compact`: 32px mark, 14px icon — dashboard rows, on the same rhythm as agent rows.
 - `figure`: 24px mark, 14px icon, 7px radius — beside a 20px secondary figure
   (`Amount size="md"`), such as the account summary card's Last 30 days In/Out
@@ -2342,7 +2341,7 @@ this layout in a narrow container on a wide screen.
   in the URL reads as that default. Its phone-sheet group has no All radio.
   The Sort chip is not this: it is a view choice and never tints.
 - A **Sort chip** appears only on lists without sortable column headers. Tables
-  that sort by header (`TransactionsTable`) keep header sort.
+  that sort by header keep header sort.
 
 #### Period
 
@@ -2478,73 +2477,24 @@ in its own reviewed commit, and the ratchet only ever shrinks. `packages/ops`
 is exempt (owner decision 2026-10-20), as are `packages/ui/src`, the
 `FilterPill` shim, and the `/design-system` demos.
 
-### Transaction tables
-
-Use `components/transactions/TransactionsTable.tsx` for full transaction history routes. It is a semantic sortable table:
-
-- Desktop columns: direction icon, Activity, Initiator, From/To, Date, Amount, external link.
-- **Initiator semantics (#2097):** the Initiator column reads the transaction record's explicit `initiatedBy` — the agent identity for agent-initiated rows, `You` only for `initiatedBy === 'human'` (set for an owner send recorded at submit since #4099; earlier owner sends stay `Unknown`), and an explicit unknown (`Unknown`) for un-attributed outbound rows; it never defaults to `You`. The detail panel's Initiator row shares the same helper (`transactionInitiator`).
-- Sticky header on desktop.
-- **A row click is convenience only; the title button is the accessible path
-  (#3554).** On a selectable table the `<tr>` keeps its native `row` role and an
-  `onClick` for the mouse, and the activity cell's title is a real `<button>`
-  ("View details for …") that opens the drawer on click, Enter and Space. The
-  accounting badge and the explorer link are SIBLINGS of that button, never
-  descendants of an element with `role="button"` — an interactive control nested
-  inside another is invalid ARIA. The row handler focuses the button before
-  opening, so the drawer's focus trap returns focus there on close. The links
-  keep a click stop, because Enter on an `<a>` fires a click that would bubble to
-  the row.
-- A narrow container hides secondary columns and keeps icon, activity and
-  external link readable. The amount stays readable too, but below `md` it is no
-  longer a column: it rides under the title inside the activity cell (#2734).
-- **A stacked amount hangs under the START of the title, never right-aligned.**
-  This is the rule both mobile transaction rows follow, written down here
-  because #2734 shipped the other way first and a design review reversed it:
-  right alignment is a property of a column of numbers, and a stacked amount is
-  not a column — aligning it right leaves one cell carrying two alignment rails.
-  How much indent that takes differs by component and is not part of the rule:
-  `TransactionActivityRow` needs `pl-11` because its `DirectionMark` is a
-  sibling in the same box, while `TransactionsTable`'s mark is its own `<td>`,
-  so its `px-4` content edge already is the title's text start.
-- The stacked amount is nested inside the **activity** cell, so a call site
-  passing `amount` without `activity` would lose the amount entirely below `md`.
-  All three call sites include both today.
-- **Sorting is a `md`+ affordance, by decision and not by omission** (owner
-  decision 2026-09-09, #2790). Date and Amount are sortable at `md` and up;
-  amount sorting uses the raw transaction value, never the formatted display
-  string. Both headers are `revealAt="md"` and there is no sort control outside
-  the header row, so below `md` the table offers no way to re-sort. (It is still
-  sorted — by the default below — it just cannot be changed.)
-
-  Written down because its absence looks like a bug to the next reader. What
-  makes it safe rather than merely accepted: the default is
-  `{ column: 'date', direction: 'desc' }` — newest first — and the sort state is
-  component-local, neither persisted nor in the URL, so a phone always lands on
-  a deterministic order and can never be stranded in an unexplained one. The
-  only path to a hidden active sort is narrowing the window below **768px**
-  mid-session — the viewport at which this shell's table container drops under
-  the 718px `md` stage. Note which number is which: 718px is the CONTAINER
-  stage, and the first draft of this sentence attached it to a window width,
-  contradicting the sawtooth measured two subsections below. "Desktop" was wrong
-  too — a tablet rotating landscape to portrait across 768px is the same event.
-  A resize does preserve the sort: `sort` is `useState` inside the table and the
-  collapse is pure container-query CSS, so nothing remounts and the rows keep
-  their order while the header is gone.
-
-  **Do not add a mobile sort control on suspicion.** The reason this is a
-  decision is that #2734 removed the last sortable header below `md` as a side
-  effect of collapsing the amount column, and the alternative considered and
-  rejected was bolting a sort button onto a screen the mobile epic (#2736) is
-  already reshaping. If a real need appears, it belongs with that epic.
-- Empty state renders inside the table with the correct column span.
+### Transaction ledger
 
 Use `TransactionActivityRow` for compact dashboard previews and, in its ledger mode
-(#4096), a full day-grouped transaction ledger — the account page's Activity tab is
-its first consumer (#4097), one row per transaction opening the shared
-`TransactionDetailPanel`. The agent page's Activity tab is the second (#4226):
-the agent's own payments in the same ledger pieces, with the "by <agent>"
-title and the movement line dropped — the page fixes both.
+(#4096), a full day-grouped transaction ledger — there is no transaction table.
+The account page's Activity tab is its first consumer (#4097), one row per
+transaction opening the shared `TransactionDetailPanel`. The agent page's
+Activity tab is the second (#4226): the agent's own payments in the same ledger
+pieces, with the "by <agent>" title and the movement line dropped — the page
+fixes both. The full `/transactions` history is the third (per #4266), on the
+same anatomy under `TransactionActivityDayHeader` bands in compact density: the
+title is the counterparty, the subline names who acted ("You" or the agent) plus
+" · <account>" when the user has two or more accounts, the amount carries the
+time under it, and the badge is `transactionRowBadge(tx)` plus
+the accounting badge. An own-account transfer (the backend's `foldOwnTransfers=1`,
+#4265) reads "Moved between your accounts" with `DirectionMark direction="move"`
+and an unsigned amount. Its list summary line reads "In <total> · Out <total>"
+beside the count. There are no Initiator, From/To or link columns and no column
+sorting; filters, search and Sort live in `ListToolbar`.
 
 **Merchant-first titles (#3810).** The dashboard's activity list reads
 `counterpartyLabel` in `lib/transaction-presentation.tsx` with the opt-in
@@ -2557,9 +2507,8 @@ subtitle is the agent's name; on a send it adds "From <account>", the account
 the money left (#4117), only when the user has more than one account and a
 name came back. A confirmed row carries no status badge — its
 direction is already the amount's sign and tone; only "Pending" and "Failed"
-name a state (#3897). The shared screens (`TransactionsTable`,
-`TransactionDetailPanel`) pass no mode and keep the truncated address until
-#3811 — the two supports on the same helper must not drift apart silently,
+name a state (#3897). `/transactions` reads the same mode (per #4266); `TransactionDetailPanel`
+passes no mode and keeps the truncated address until #3811 — the two supports on the same helper must not drift apart silently,
 which is what the characterization tests in
 `lib/__tests__/transaction-presentation.test.tsx` pin. Two row props exist for
 the grouped dashboard shape: `countLabel` renders the muted ×N beside the
@@ -2570,9 +2519,13 @@ unknown valuation an em dash). Rows group under user-local day headings ("Today"
 "Yesterday" / a short date); the server buckets the groups per day (#3824),
 the client only names the bucket.
 
-A collapsing table like this one has to **fit** at mobile widths, not scroll: the `overflow-x-auto` wrapper the `Table` primitive recommends for dense admin tables is mutually exclusive with `Table.Head sticky`, because `overflow-x: auto` forces the computed `overflow-y` to `auto` and the wrapper then becomes the sticky scroll ancestor. When such a table overflows, the cause is usually a `truncate`d cell — `truncate` is `white-space: nowrap`, and an auto-layout column can never be narrower than its min-content, so the untruncated text widens the table instead of ellipsising. Put `max-w-0` on the one flexible cell. Both findings, with their measured numbers, live in `components/ui/Table.tsx`'s docstring ([#1772](https://github.com/d-hinders/Haven-AI/issues/1772)).
+### Table column collapse
 
-**Column collapse is keyed on the table's CONTAINER, not on the viewport, and it still takes more than one stage.** Two things step at `lg` and both take width: the sidebar rail goes from `hidden` to an in-flow column at `w-[240px]` (#4053; before that, a `fixed` drawer going `lg:static`) — border-box, so its 1px `border-r` is *inside* the 240 (`main` measures 784px at a 1024px viewport) — and the authenticated layout's `main` steps `p-6` to `lg:p-8`, 16px more across the pair. **240 + 16 = 256px** handed back in a single breakpoint, so the content available to a table is a **sawtooth** in viewport width, not a ramp. Attributing it to the sidebar alone is wrong and invites a reader who checks `Sidebar.tsx`, finds 240px, and discards the whole claim. Measured in real Chromium on `/design-system`, `/transactions`, `/accounts/:id` and `/agents/:id` — the same numbers on all four, because they share the shell:
+The generic `Table` primitive (`components/ui/Table.tsx`) collapses secondary columns in a narrow container. No transaction surface renders one any more (per #4266); the rules below stay for the tables that do.
+
+A collapsing table has to **fit** at mobile widths, not scroll: the `overflow-x-auto` wrapper the `Table` primitive recommends for dense admin tables is mutually exclusive with `Table.Head sticky`, because `overflow-x: auto` forces the computed `overflow-y` to `auto` and the wrapper then becomes the sticky scroll ancestor. When such a table overflows, the cause is usually a `truncate`d cell — `truncate` is `white-space: nowrap`, and an auto-layout column can never be narrower than its min-content, so the untruncated text widens the table instead of ellipsising. Put `max-w-0` on the one flexible cell. Both findings, with their measured numbers, live in `components/ui/Table.tsx`'s docstring ([#1772](https://github.com/d-hinders/Haven-AI/issues/1772)).
+
+**Column collapse is keyed on the table's CONTAINER, not on the viewport, and it still takes more than one stage.** Two things step at `lg` and both take width: the sidebar rail goes from `hidden` to an in-flow column at `w-[240px]` (#4053; before that, a `fixed` drawer going `lg:static`) — border-box, so its 1px `border-r` is *inside* the 240 (`main` measures 784px at a 1024px viewport) — and the authenticated layout's `main` steps `p-6` to `lg:p-8`, 16px more across the pair. **240 + 16 = 256px** handed back in a single breakpoint, so the content available to a table is a **sawtooth** in viewport width, not a ramp. Attributing it to the sidebar alone is wrong and invites a reader who checks `Sidebar.tsx`, finds 240px, and discards the whole claim. Measured in real Chromium on the authenticated shell — the same numbers on every route, because they share it:
 
 | viewport | 390 | 767 | 768 | 900 | 1023 | 1024 | 1279 | 1280 |
 |---|---|---|---|---|---|---|---|---|
@@ -2586,43 +2539,13 @@ So `Table.HeaderCell` / `Table.SortableHeaderCell` take **`revealAt="md" | "xl"`
 - **Header and body must be converted together, always.** The `<th>` takes `revealAt`; the matching `<td>` takes `tableColumnClass(stage)` from the same module, and relocated content (a movement line under a narrow title, a date under the Amount) takes `tableHideFromClass(stage)`. A `<th>` on a container stage over `<td>`s on a `md:` variant is #1774 one layer down — width declarations on a `display: none` cell take no part in column sizing, and the result measures byte-identical to a fix.
 - **Every table gets the container; there is no opt-out, and that is deliberate.** A dense table that scrolls (`Table.Head collapseWhenNarrow={false}` plus an `overflow-x-auto` wrapper) keeps it too. The containment does **not** defeat the scroll — measured on the z-index table at 390px, which is `min-w-[560px]` inside its wrapper: with the container in place the table still lays out at 560px and the wrapper still reports `scrollWidth` 560 / `clientWidth` 340 with `scrollLeft` reaching 220, identical to the reading without it. An opt-out would be worse than useless: a caller pairing it with `revealAt` emits a `@container v2table` condition with no container-named ancestor, and per spec such a query never matches — so the base `hidden` wins **permanently, at every viewport, in every browser**. Silent and total, and strictly worse than the unsupporting-browser case the `@supports` fallback exists for.
 
-- **Container-keying makes DOM mount order a layout input**, which viewport-keying never did. `Sidebar` is `dynamic(ssr:false)`, so for the frames before its chunk mounts the shell hands the table ~256px it is about to take back. Measured two ways. Deterministically (stage with the sidebar in layout vs `display: none`, fixed viewport): `/transactions` is same-stage at 768/1024/1100/1279/1280, so no mount transition can change its column set. By timing, at low load: the `/design-system` showcase paints **seven** columns at a 1034px container and collapses to **five** at 794px roughly **106ms** later at a 1100px viewport (98ms at 1279px); 1024px is same-stage. Accepted on an internal showcase route where the whole page shifts 240px in the same window — but check it before keying a **new** surface on the container.
+- **Container-keying makes DOM mount order a layout input**, which viewport-keying never did. `Sidebar` is `dynamic(ssr:false)`, so for the frames before its chunk mounts the shell hands a container-keyed table ~256px it is about to take back; a table can paint one column stage and collapse to the next a moment later. Check it before keying a **new** surface on the container.
 
-Pinning the `md`+ columns instead of staging them is the tempting alternative and it is wrong: it was measured during #1774 and grew desktop rows 85px → 133px. Prefer moving low-priority content rather than dropping it — this table moves the date under the Amount for the `md`→`xl` band. Note the limit of that example, since it was written before #2792: below `md` the Amount column collapses too and the date goes with it, so the narrow layout drops the date rather than relocating it. Moving beats dropping where there is somewhere to move to.
+Pinning the `md`+ columns instead of staging them is the tempting alternative and it is wrong: it was measured during #1774 and grew desktop rows 85px → 133px. Prefer moving low-priority content rather than dropping it — a date can ride under the Amount for a band before it goes. Moving beats dropping where there is somewhere to move to.
 
-**`TransactionsTable.tsx` still reveals everything at the single `md` stage, and must not be restructured to match the showcase's two.** It is also a seven-column table and it escapes measure starvation a different way, by **truncating its title to one line instead of wrapping it**. Re-measured under the container keying: one line at every width, 89.6px at 768px *and* at 1024px (ellipsised, with the full string on the `title` attribute), 225.1px at 1280px — so the defect above simply does not arise there. The staging rule is about tables whose flexible cell *wraps*. Restructuring `TransactionsTable` for consistency with a showcase would be a change against a defect measurement says is absent, which is the trap § *Local hint marker* already warns about. What #1999 did change there is only the *key*: the same columns collapse at the same widths, from the container instead of the viewport.
+A new container-keyed table takes `tableColumnClass` / `tableHideFromClass`, never a `md:` width: a viewport-keyed width on a container-keyed collapse is harmless only while this shell makes the two coincide (container ≥ 718px ⟺ viewport ≥ 768px), and splits under any container resize that does not track the viewport.
 
-**Where the two DO now agree: the amount column collapses below `md` in both**
-([#2734](https://github.com/d-hinders/Haven-AI/issues/2734) for the component,
-[#2792](https://github.com/d-hinders/Haven-AI/issues/2792) for the showcase),
-with the amount riding under the title and the date going with it. The showcase
-carried the old column for one merge and
-`e2e/table-container-collapse.spec.ts` measured the gap — 3 surviving body cells
-at a 717px container on `/transactions`, still 4 here.
-
-**Scope that assertion honestly: it counts surviving CELLS.** It is the check
-that the two tables collapse the same number of columns, and nothing more. It
-cannot see the amount stacked in the wrong place, an alignment divergence, or
-the title-wrap inversion #2792 found and fixed — the showcase ellipsised below
-`md` while the component wrapped, at the same 248px cell, so both tables passed
-this spec while rendering different rows. A green tick here is not a statement
-that the two render alike.
-
-Two axes still diverge **on purpose**, and neither is drift: the showcase stages
-in two steps (`md` + `xl`) where the component reveals at one, per the paragraph
-above; and the component carries its narrow widths unconditionally into desktop
-while the showcase hands them back with `md:w-auto`, because the showcase sizes
-its columns from content and the component does not.
-
-Do not read that `md:w-auto` as a pattern to copy. It is a **viewport**-keyed
-width on a table whose collapse is **container**-keyed, and it is harmless only
-because this shell makes the two coincide (container ≥ 718px ⟺ viewport ≥ 768px).
-Under a container resize that does not track the viewport they split — the exact
-trap the paragraphs above spend three passes warning about. A new
-container-keyed table takes `tableColumnClass` / `tableHideFromClass`, never a
-`md:` width.
-
-Note what can and cannot see this class of defect. The visual-regression gate compares every committed baseline — `/design-system` is one route among several since [#2318](https://github.com/d-hinders/Haven-AI/issues/2318), and `scripts/ci/visual-baseline-inventory.mjs` (printed into the job's own summary) is the authority for which captures those are, not this sentence — but every one of those captures is rendered at a width read from `scripts/evidence-viewports.mjs`, which holds exactly two: 1280 and 390 (pinned by [`packages/frontend/src/__tests__/capture-viewports.test.ts`](../../packages/frontend/src/__tests__/capture-viewports.test.ts), #2680). So **every width in the table above other than its two endpoints is invisible to the gate**, whichever route is captured, before and after. Geometry assertions are the guard — see `e2e/transaction-title-measure.spec.ts`, which asserts the measure floor and the row-height ceiling *together*, because either alone is satisfiable by a change that destroys the other. And note what a viewport-driven test *cannot* prove here: because container width is a function of viewport width on this shell, every viewport-driven assertion passes identically against the old viewport-keyed implementation. `e2e/table-container-collapse.spec.ts` therefore holds the viewport fixed and resizes the query container itself, in both halves (header labels and body cells) at once.
+Note what can and cannot see this class of defect. The visual-regression gate compares every committed baseline — `/design-system` is one route among several since [#2318](https://github.com/d-hinders/Haven-AI/issues/2318), and `scripts/ci/visual-baseline-inventory.mjs` (printed into the job's own summary) is the authority for which captures those are, not this sentence — but every one of those captures is rendered at a width read from `scripts/evidence-viewports.mjs`, which holds exactly two: 1280 and 390 (pinned by [`packages/frontend/src/__tests__/capture-viewports.test.ts`](../../packages/frontend/src/__tests__/capture-viewports.test.ts), #2680). So **every width in the table above other than its two endpoints is invisible to the gate**, whichever route is captured, before and after. Geometry assertions are the guard, and they should assert the measure floor and the row-height ceiling *together*, because either alone is satisfiable by a change that destroys the other. And note what a viewport-driven test *cannot* prove here: because container width is a function of viewport width on this shell, every viewport-driven assertion passes identically against the old viewport-keyed implementation, so a test of the collapse holds the viewport fixed and resizes the query container itself, reading header labels and body cells together.
 
 ### Sections (`Section`)
 
@@ -2999,7 +2922,7 @@ element-scoped capture clips the very thing it photographs (#1873).
 | App modals | `packages/frontend/src/components/ui/Modal.tsx` plus Send, Receive, Add funds, and agent modals in `packages/frontend/src/components` |
 | Agent & transaction activity rows | `packages/frontend/src/components/haven/TransactionActivityRow.tsx` |
 | Transaction previews | `packages/frontend/src/components/haven/TransactionActivityRow.tsx`, `packages/frontend/src/components/haven/TransactionMovement.tsx` |
-| Full transaction history | `packages/frontend/src/components/transactions/TransactionsTable.tsx` |
+| Full transaction history | `packages/frontend/src/app/(authenticated)/transactions/TransactionsClient.tsx`, `packages/frontend/src/components/haven/TransactionActivityRow.tsx` |
 
 The handoff plan in `docs/archive/redesign-handoff.md` is now project history.
 

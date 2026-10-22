@@ -12,7 +12,7 @@ import {
   transactionTitle,
 } from '../transaction-presentation'
 import { truncate } from '@/lib/format'
-import TransactionsTable from '@/components/transactions/TransactionsTable'
+import TransactionsLedgerRow from '@/components/transactions/TransactionsLedgerRow'
 import TransactionDetailPanel from '@/components/transactions/TransactionDetailPanel'
 import type { AggregatedTransaction } from '@/types/transactions'
 
@@ -342,9 +342,10 @@ describe('counterpartyLabel no-address mode (#3810)', () => {
 
 /**
  * #3811 — the shared list screens ADOPT the no-address rules. The
- * transactions table (and, through `activityCounterparty`, the agent detail
- * Activity table) never render a truncated address in a row; the detail
- * panel is where the address lives, in full, with a copy button.
+ * `/transactions` ledger rows (#4266; the transactions table before them)
+ * and, through `activityCounterparty`, the agent detail Activity rows never
+ * render a truncated address in a row; the detail panel is where the address
+ * lives, in full, with a copy button.
  */
 describe('shared screens adopt the no-address rules (#3811)', () => {
   const UNKNOWN = '0x9999999999999999999999999999999999999999'
@@ -354,22 +355,26 @@ describe('shared screens adopt the no-address rules (#3811)', () => {
 
   function renderTable() {
     return render(
-      <TransactionsTable
-        transactions={[row]}
-        loading={false}
-        error={null}
-        onRefresh={() => {}}
-        hasActiveFilters={false}
-      />,
+      <div>
+        {[row].map((r, i) => (
+          <TransactionsLedgerRow
+            key={i}
+            tx={r}
+            resolveAddress={() => null}
+            accountNamesByAddress={new Map()}
+            showAccount={false}
+            onOpen={() => {}}
+            insetDivider={false}
+          />
+        ))}
+      </div>,
     )
   }
 
-  it('TransactionsTable renders the calm counterparty — never a truncated address', () => {
+  it('the /transactions ledger row renders the calm counterparty — never a truncated address', () => {
     renderTable()
 
-    // The counterparty falls back to calm copy in BOTH the desktop and the
-    // stacked mobile layout of the same table.
-    expect(screen.getAllByText('New recipient').length).toBeGreaterThan(0)
+    expect(screen.getByText('New recipient')).toBeInTheDocument()
     expect(screen.queryByText(TRUNCATED)).not.toBeInTheDocument()
   })
 
@@ -427,16 +432,22 @@ describe('shared screens adopt the no-address rules (#3811)', () => {
  * table feeds the SAME path through `activityToTransaction` (covered in
  * AgentDetailClient.test.tsx).
  */
-describe('the transactions table renders the user currency (#3811)', () => {
+describe('the /transactions ledger rows render the user currency (#3811, #4266)', () => {
   function renderTable(rows: AggregatedTransaction[]) {
     return render(
-      <TransactionsTable
-        transactions={rows}
-        loading={false}
-        error={null}
-        onRefresh={() => {}}
-        hasActiveFilters={false}
-      />,
+      <div>
+        {rows.map((r, i) => (
+          <TransactionsLedgerRow
+            key={i}
+            tx={r}
+            resolveAddress={() => null}
+            accountNamesByAddress={new Map()}
+            showAccount={false}
+            onOpen={() => {}}
+            insetDivider={false}
+          />
+        ))}
+      </div>,
     )
   }
 
@@ -444,9 +455,10 @@ describe('the transactions table renders the user currency (#3811)', () => {
   // with NO `≈` mark. The mark — a span plus a breakable space in front of
   // an otherwise-NBSP figure — was the only break opportunity a list amount
   // had, so every approx-valued row wrapped onto two lines. Both inverted
-  // tests below assert BOTH renderings (the `md`+ column and the narrow
-  // block under the title) show the converted figure, sign stripped and
-  // NBSP-normalised, and that no `≈` survives anywhere in the table.
+  // tests below assert the row's one rendering shows the converted figure,
+  // sign stripped and NBSP-normalised, and that no `≈` survives anywhere in
+  // the row. (The table rendered the amount twice — an `md`+ column and a
+  // block under the title; the ledger row has one amount, #4266.)
   it('renders the converted figure without "≈" on a sweep row priced serve-time (no book-time fiat)', () => {
     renderTable([
       tx({
@@ -457,17 +469,16 @@ describe('the transactions table renders the user currency (#3811)', () => {
       }),
     ])
     expect(screen.queryByText('≈')).not.toBeInTheDocument()
-    // Exactly two matches — the row renders the amount twice (the `md`+
-    // column and the narrow block under the title). The matcher anchors on
-    // `<Amount>`'s own span (`v2-tabular`): a function matcher sees every
-    // ancestor's full textContent, so the cell wrappers would otherwise
-    // double the count.
+    // Exactly one match — the ledger row renders the amount once. The
+    // matcher anchors on `<Amount>`'s own span (`v2-tabular`): a function
+    // matcher sees every ancestor's full textContent, so the wrappers would
+    // otherwise inflate the count.
     expect(
       screen.getAllByText((_, element) =>
         element?.classList.contains('v2-tabular') === true &&
         (element?.textContent ?? '').replace(/\u00a0/g, ' ').replace(/^[-+]/, '') === '10,50 kr',
       ).length,
-    ).toBe(2)
+    ).toBe(1)
   })
 
   it('renders the converted figure without "≈" on a direct row with no book-time fiat', () => {
@@ -480,7 +491,7 @@ describe('the transactions table renders the user currency (#3811)', () => {
         element?.classList.contains('v2-tabular') === true &&
         (element?.textContent ?? '').replace(/\u00a0/g, ' ').replace(/^[-+]/, '') === '10,50 kr',
       ).length,
-    ).toBe(2)
+    ).toBe(1)
   })
 
   // #3950 guard: the mark moved OFF the list rows and nowhere else. The

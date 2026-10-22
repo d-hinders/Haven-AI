@@ -99,4 +99,18 @@ describe('useUnfilteredTransactionTotal', () => {
     // "3 of 40" on a 40-row ledger.
     expect(mockGet).toHaveBeenCalledWith('/transactions?offset=0&limit=1&accountId=safe-1')
   })
+
+  it('asks for the own-transfer fold when the page does, so both numbers count a move once (#4266)', async () => {
+    mockGet.mockResolvedValue({ total: 7 })
+    const { result } = renderHook(() =>
+      useUnfilteredTransactionTotal({
+        filtered: true,
+        feedTotal: 3,
+        feedLoading: false,
+        foldOwnTransfers: true,
+      }),
+    )
+    await waitFor(() => expect(result.current).toBe(7))
+    expect(mockGet).toHaveBeenCalledWith('/transactions?offset=0&limit=1&foldOwnTransfers=1')
+  })
 })

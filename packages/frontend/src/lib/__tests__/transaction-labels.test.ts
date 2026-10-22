@@ -7,7 +7,7 @@ import {
 
 /**
  * #2357 — `paymentSourceTitle` is the PRIMARY title of a transaction row on
- * `DashboardClient.tsx`, `TransactionsTable.tsx`, `TransactionDetailPanel.tsx`
+ * `DashboardClient.tsx`, `TransactionsClient.tsx`, `TransactionDetailPanel.tsx`
  * and `AgentDetailClient.tsx`. Two defects shipped in it: the word "demo" in a
  * real payment's title, and a bare protocol identifier leading the row people
  * scan.

@@ -1,17 +1,20 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext'
+import { usePreferences } from '@/hooks/usePreferences'
 import { useContacts } from '@/hooks/useContacts'
 import { agentStatusPresentation } from '@/lib/payment-status'
+import { useActivityMoneyTotals } from '@/hooks/useActivityMoneyTotals'
 import { useTransactionFilters } from '@/hooks/useTransactionFilters'
-import { browserTimeZone, useTransactionsFeed } from '@/hooks/useTransactionsFeed'
-import { useUnfilteredTransactionTotal } from '@/hooks/useUnfilteredTransactionTotal'
 import {
-  buildTransactionScopeSubtitle,
-  buildTransactionSummary,
-} from '@/lib/transaction-scope'
+  browserTimeZone,
+  transactionFilterParams,
+  useTransactionsFeed,
+} from '@/hooks/useTransactionsFeed'
+import { useUnfilteredTransactionTotal } from '@/hooks/useUnfilteredTransactionTotal'
+import { buildTransactionScopeSubtitle } from '@/lib/transaction-scope'
 import {
   transactionChainName,
   transactionChainLabel,
@@ -21,10 +24,22 @@ import type {
   AggregatedTransaction,
   TransactionFilterState,
 } from '@/types/transactions'
-import { buildCsvFilename, downloadCsv } from '@/lib/transaction-csv'
-import { api, ApiRequestError } from '@/lib/api'
-import TransactionsTable from '@/components/transactions/TransactionsTable'
+import {
+  buildCsvFilename,
+  downloadCsv,
+  exportFailureNotice,
+  hasCsvRecords,
+  type ExportNotice,
+} from '@/lib/transaction-csv'
+import { UNPRICED_TOTALS_NOTE } from '@/lib/money-flow-tally'
+import { api } from '@/lib/api'
+import { Amount, type AmountCurrency } from '@/components/haven/Amount'
+import {
+  TransactionActivityDayHeader,
+  transactionDayGroups,
+} from '@/components/haven'
 import TransactionDetailPanel from '@/components/transactions/TransactionDetailPanel'
+import TransactionsLedgerRow from '@/components/transactions/TransactionsLedgerRow'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { EmptyState } from '@/components/ui/EmptyState'
@@ -39,69 +54,6 @@ import {
   type ListUrlSchema,
 } from '@/components/ui/list-url-codec'
 import { useListUrlState } from '@/components/ui/useListUrlState'
-
-/**
- * What the export tells the user when it does not hand back a file.
- *
- * Two tones, because two different things happen: `error` is a refusal, and
- * `info` is the export succeeding over an empty result set — which is not a
- * failure and must not be painted as one.
- *
- * The headline/detail split mirrors the partial-failure banner already on
- * this screen: a short first line, the specifics beneath.
- */
-interface ExportNotice {
-  tone: 'error' | 'info'
-  headline: string
-  detail?: string
-}
-
-/**
- * What to show the user when an export fails.
- *
- * The refusal that matters is the row cap: the backend's `details` carries the
- * count, the limit and the way out ("narrow the filters"), and `message` is
- * only the three-word summary — so `details` is read where the route sends
- * one, via the `body` escape hatch `ApiRequestError` exists for. Every other
- * status gets a written sentence rather than a passthrough: the remaining
- * refusals on this route are validation strings for query parameters the UI
- * builds itself, and a 500 would otherwise surface Fastify's
- * "Internal Server Error" as product copy.
- */
-function exportFailureNotice(err: unknown): ExportNotice {
-  if (err instanceof ApiRequestError) {
-    const details = (err.body as { details?: unknown } | undefined)?.details
-    if (err.status === 413 && typeof details === 'string' && details.length > 0) {
-      return { tone: 'error', headline: err.message, detail: details }
-    }
-  }
-  return {
-    tone: 'error',
-    headline: 'The export could not be generated.',
-    detail: 'Try again in a moment.',
-  }
-}
-
-/**
- * Does this CSV body carry any record, or only the header?
- *
- * The export applies the same filters the list applies — server-side, since
- * #4095 — so the file and the table agree by construction; what this still
- * catches is the empty result set, which is read back off the body and
- * reported rather than silently handed to the user as a header-only file.
- *
- * This reads the body because it has to: the route sends the count in
- * `X-Export-Row-Count`, but the backend's CORS registration sets no
- * `exposedHeaders`, so no browser client can read it. The test below is exact
- * rather than heuristic — the backend's `toCsv` joins lines with CRLF and
- * writes no trailing terminator (pinned by `domain/__tests__/csv.test.ts`:
- * `toCsv(columns, [])` is the bare header), so a record-free body contains no
- * CRLF and any record guarantees one. A CRLF inside a quoted field cannot
- * cause a false positive, since such a field only exists inside a record.
- */
-function hasCsvRecords(csv: string): boolean {
-  return csv.replace(/^\uFEFF/, '').includes('\r\n')
-}
 
 const transactionNoun: ListNoun = { one: 'transaction', other: 'transactions' }
 
@@ -129,9 +81,11 @@ const transactionsUrlSchema: ListUrlSchema = {
 }
 
 /**
- * The toolbar's state as the filters the feed and the export send. A
- * network that is not a positive integer is dropped here, as the URL
- * reader before #4111 dropped it.
+ * The toolbar's state as the filters the feed, its totals and the export
+ * send. A network that is not a positive integer is dropped here, as the URL
+ * reader before #4111 dropped it. `foldOwnTransfers` is this page's own
+ * projection (#4266): a move between the user's accounts is one row, and the
+ * shared serializer carries it onto every request.
  */
 function listStateToFilters(state: ListState): TransactionFilterState {
   const first = (id: string): string | undefined => state.facets[id]?.[0]
@@ -149,38 +103,29 @@ function listStateToFilters(state: ListState): TransactionFilterState {
     period: period.preset,
     from: period.from && period.to ? period.from : undefined,
     to: period.from && period.to ? period.to : undefined,
+    foldOwnTransfers: true,
   }
 }
 
 /**
- * The export request's query: the API's own parameter names, which are NOT
- * the page URL's (#4111). The URL writes search as `q`; the backend reads
- * `search`, and this builder is the one place that says so, so renaming a
- * URL key can never drop a filter from the file. The list request has its
- * twin in `useTransactionsFeed`'s `toQueryString`.
+ * One figure on the summary line — the account Activity tab's anatomy
+ * (#4098): the short visible label ("In") so the line fits a phone beside
+ * the count, and the full name ("Money in") for screen readers.
  */
-function filtersToApiParams(filters: TransactionFilterState): URLSearchParams {
-  const params = new URLSearchParams()
-  if (filters.accountId) params.set('accountId', filters.accountId)
-  if (filters.agentId) params.set('agentId', filters.agentId)
-  if (filters.tokenKey) params.set('tokenKey', filters.tokenKey)
-  if (filters.direction) params.set('direction', filters.direction)
-  if (filters.chainId !== undefined) params.set('chainId', String(filters.chainId))
-  const search = filters.search?.trim()
-  if (search) params.set('search', search)
-  if (filters.period) {
-    params.set('period', filters.period)
-  } else if (filters.from && filters.to) {
-    params.set('from', filters.from)
-    params.set('to', filters.to)
-  }
-  return params
+function TotalFigure({ short, name, children }: { short: string; name: string; children: ReactNode }) {
+  return (
+    <span data-testid="transactions-total">
+      <span aria-hidden="true">{short}</span>
+      <span className="sr-only">{name}</span> {children}
+    </span>
+  )
 }
 
 export default function TransactionsClient() {
   const searchParams = useSearchParams()
   const { user } = useAuth()
   const { resolveAddress } = useContacts()
+  const { currency } = usePreferences()
   const [selectedTx, setSelectedTx] = useState<AggregatedTransaction | null>(null)
   const [exporting, setExporting] = useState(false)
   const [exportNotice, setExportNotice] = useState<ExportNotice | null>(null)
@@ -225,6 +170,12 @@ export default function TransactionsClient() {
     loadMore,
     refresh,
   } = useTransactionsFeed(filters, TRANSACTIONS_PAGE_SIZE)
+  // In and Out over the whole filtered set (#4266), from the same
+  // server-filtered, folded feed the list pages through — so a move between
+  // the user's accounts counts as neither, and the figures follow every
+  // toolbar dimension the count does.
+  const displayCurrency: AmountCurrency = currency
+  const moneyTotals = useActivityMoneyTotals(filters, displayCurrency)
 
   const userAccounts = user?.accounts ?? []
   const hasAccounts = userAccounts.length > 0
@@ -239,6 +190,7 @@ export default function TransactionsClient() {
     filtered: hasActiveFilters,
     feedTotal: total,
     feedLoading: loadingInitial,
+    foldOwnTransfers: true,
   })
 
   // Every network by default; the Network facet narrows to one (#620). There
@@ -339,11 +291,6 @@ export default function TransactionsClient() {
     [filters, accountNamesById, agentNamesById, tokenSymbolsByKey, truncated],
   )
 
-  // Cheap summary stats — count by direction over the filtered rows the
-  // server returned. See `buildTransactionSummary` for the mutually-exclusive
-  // bucket rule.
-  const summary = useMemo(() => buildTransactionSummary(transactions), [transactions])
-  const showSummary = hasActiveFilters && transactions.length > 0
   const handleListChange = (next: ListState) => {
     setListState(next)
     // Both notices name the filters as the thing to change; leaving one up
@@ -363,11 +310,12 @@ export default function TransactionsClient() {
   // The backend generates the file (#2871): it sees the whole filtered result
   // set, where the browser only ever had the pages it had loaded. Every
   // filter the toolbar applies goes on the query, in the API's parameter
-  // names (`filtersToApiParams`, separate from the URL codec since #4111),
+  // names (`transactionFilterParams`, the list request's own serializer,
+  // separate from the URL codec since #4111 — the fold rides it too, #4266),
   // plus the `tz` the server cuts a custom range's calendar days in — so the
   // file and the on-screen rows agree.
   const handleExportCsv = async () => {
-    const params = filtersToApiParams(filters)
+    const params = transactionFilterParams(filters)
     if (filters.from && filters.to) params.set('tz', browserTimeZone())
 
     setExporting(true)
@@ -440,6 +388,9 @@ export default function TransactionsClient() {
         ? null
         : { shown: total, total: unfilteredTotal }
   const showNoMatch = hasActiveFilters && !loadingInitial && !error && transactions.length === 0
+  const showTotals = !loadingInitial && !moneyTotals.loading && !moneyTotals.error && total > 0
+  // With one account, naming it on every row would repeat the page (#4266).
+  const showAccountOnRows = userAccounts.length > 1
 
   return (
     <div className="max-w-6xl">
@@ -488,30 +439,27 @@ export default function TransactionsClient() {
         period={{ allowCustom: true }}
         searchDescription="by name, agent or address"
         count={count}
-        summary={showSummary ? (
-          // A Direction filter already fixes one half, so only the other
-          // is shown — never "0 received" under Direction: Outgoing.
-          <span data-testid="transactions-totals" className="inline-flex flex-wrap items-baseline gap-x-1.5">
+        summary={showTotals ? (
+          // In and Out over the filtered set (#4266), the account Activity
+          // tab's line. Hidden while loading and after a failed read — no
+          // figure is better than a wrong one. A Direction filter already
+          // fixes one half, so only the other is shown — never "In 0" under
+          // Direction: Outgoing.
+          <span data-testid="transactions-totals">
             {[
               filters.direction !== 'out' ? (
-                <span key="received">
-                  <span className="v2-tabular font-medium text-[var(--v2-success)]">{summary.received}</span> received
-                </span>
+                <TotalFigure key="in" short="In" name="Money in">
+                  <Amount amount={moneyTotals.moneyIn} currency={displayCurrency} approx={moneyTotals.approxIn} />
+                </TotalFigure>
               ) : null,
               filters.direction !== 'in' ? (
-                <span key="sent">
-                  <span className="v2-tabular font-medium text-[var(--v2-debit)]">{summary.sent}</span> sent
-                </span>
-              ) : null,
-              summary.failed > 0 ? (
-                <span key="failed">
-                  <span className="v2-tabular font-medium text-[var(--v2-danger)]">{summary.failed}</span> failed
-                </span>
+                <TotalFigure key="out" short="Out" name="Money out">
+                  <Amount amount={moneyTotals.moneyOut} currency={displayCurrency} approx={moneyTotals.approxOut} />
+                </TotalFigure>
               ) : null,
             ]
               .filter((part) => part !== null)
-              .flatMap((part, i) => (i === 0 ? [part] : [<span key={`sep-${i}`} aria-hidden="true">·</span>, part]))}
-            {hasMore ? <span className="text-[var(--v2-ink-3)]">(loaded results)</span> : null}
+              .flatMap((part, i) => (i === 0 ? [part] : [' · ', part]))}
           </span>
         ) : undefined}
         searchEpoch={searchEpoch}
@@ -539,10 +487,15 @@ export default function TransactionsClient() {
         be" is true in every state at no cost. It corrects the SCREEN; the
         downloaded CSV carries no such note, which is recorded on the PR.
       */}
+      {/* #4165: rows the totals could not value are said in words, never
+          folded into a "≈" — the mark means converted, nothing else. */}
+      {showTotals && moneyTotals.unpriced ? (
+        <p className="mt-1 px-0.5 text-xs text-[var(--v2-ink-3)]">{UNPRICED_TOTALS_NOTE}</p>
+      ) : null}
       {!loadingInitial && truncated && (
         <p className="mt-1 px-0.5 text-xs text-[var(--v2-ink-3)]">
-          Counts and exports cover the transactions loaded here, which may
-          not be your full history.
+          Counts, totals and exports cover the transactions loaded here, which
+          may not be your full history.
         </p>
       )}
 
@@ -563,19 +516,74 @@ export default function TransactionsClient() {
           <ListNoMatch noun={transactionNoun} onClear={handleClearFilters} />
         </div>
       ) : (
-        <Card hover={false} className="mt-3">
-          <TransactionsTable
-            transactions={transactions}
-            loading={loadingInitial}
-            error={error}
-            onRefresh={() => void refresh()}
-            resolveAddress={resolveAddress}
-            accountNamesByAddress={accountNamesByAddress}
-            hasActiveFilters={hasActiveFilters}
-            onClearFilters={handleClearFilters}
-            variant="page"
-            onSelect={setSelectedTx}
-          />
+        <Card hover={false} className="mt-3 overflow-hidden">
+          {loadingInitial ? (
+            <div className="divide-y divide-[var(--v2-border)]" role="status" aria-busy="true" aria-label="Loading transactions">
+              {[0, 1, 2].map((item) => (
+                <div key={item} className="flex items-center gap-3 px-5 py-3.5">
+                  <div className="h-9 w-9 rounded-[10px] bg-[var(--v2-surface-2)] animate-pulse" />
+                  <div className="min-w-0 flex-1">
+                    <div className="h-3.5 w-40 rounded bg-[var(--v2-surface-2)] animate-pulse" />
+                    <div className="mt-1.5 h-2.5 w-48 rounded bg-[var(--v2-surface-2)] animate-pulse" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : error ? (
+            <div className="p-6">
+              <EmptyState
+                title="Transactions could not load"
+                body={error}
+                className="py-8"
+                action={
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      void refresh()
+                      void moneyTotals.refresh()
+                    }}
+                  >
+                    Try again
+                  </Button>
+                }
+              />
+            </div>
+          ) : transactions.length === 0 ? (
+            <div className="p-6">
+              {/* A filter that matches nothing is the no-match state above
+                  and never reaches here. */}
+              <EmptyState
+                title="No activity yet"
+                body="Payments and account funding activity will appear here."
+                className="py-8"
+                action={
+                  <Button href="/dashboard" variant="ghost" size="sm">
+                    Open dashboard
+                  </Button>
+                }
+              />
+            </div>
+          ) : (
+            <div className="divide-y divide-[var(--v2-border)] v2-animate-fade-in" data-testid="transactions-ledger">
+              {transactionDayGroups(transactions, (tx) => new Date(tx.timestamp * 1000).toISOString()).map((day) => (
+                <div key={day.dayKey}>
+                  <TransactionActivityDayHeader label={day.label} />
+                  {day.items.map((tx, index) => (
+                    <TransactionsLedgerRow
+                      key={`${tx.accountId}:${tx.hash}:${tx.type}:${index}`}
+                      tx={tx}
+                      resolveAddress={resolveAddress}
+                      accountNamesByAddress={accountNamesByAddress}
+                      showAccount={showAccountOnRows}
+                      onOpen={() => setSelectedTx(tx)}
+                      insetDivider={index > 0}
+                    />
+                  ))}
+                </div>
+              ))}
+            </div>
+          )}
         </Card>
       )}
 

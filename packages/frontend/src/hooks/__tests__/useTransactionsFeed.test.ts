@@ -9,7 +9,7 @@ vi.mock('@/lib/api', () => ({
   },
 }))
 
-import { useTransactionsFeed } from '@/hooks/useTransactionsFeed'
+import { transactionFeedQuery, transactionFilterParams, useTransactionsFeed } from '@/hooks/useTransactionsFeed'
 import type { AggregatedTransaction, TransactionsFeedResponse } from '@/types/transactions'
 
 function tx(hash: string, accountId: string): AggregatedTransaction {
@@ -216,5 +216,17 @@ describe('useTransactionsFeed visible-only polling (#2732)', () => {
       await manual
     })
     expect(mockApiGet).toHaveBeenCalledTimes(3)
+  })
+})
+
+describe('the own-transfer fold on the request (#4266)', () => {
+  it('serializes foldOwnTransfers as the exact value the backend opts in on', () => {
+    expect(transactionFilterParams({ foldOwnTransfers: true }).get('foldOwnTransfers')).toBe('1')
+    expect(transactionFeedQuery({ foldOwnTransfers: true }, 0, 25)).toContain('foldOwnTransfers=1')
+  })
+
+  it('sends nothing when the caller does not ask — the per-account ledger', () => {
+    expect(transactionFilterParams({ accountId: 'safe-1' }).has('foldOwnTransfers')).toBe(false)
+    expect(transactionFeedQuery({ accountId: 'safe-1' }, 0, 25)).not.toContain('foldOwnTransfers')
   })
 })

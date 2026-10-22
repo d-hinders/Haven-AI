@@ -134,6 +134,36 @@ describe('useActivityMoneyTotals (#4098)', () => {
     expect(result.current.moneyOut).toBe(3)
   })
 
+  it('excludes a folded move between the user\'s own accounts — neither in nor out (#4266)', async () => {
+    mockApiGet.mockResolvedValue(
+      page([
+        tx({
+          direction: 'out',
+          convertedAmount: '50.00',
+          ownTransfer: { toAccountId: 'safe-2', toAccountName: 'Reserve', toAccountAddress: '0x' + 'dd'.repeat(20) },
+        }),
+        tx({ direction: 'out', convertedAmount: '3.00' }),
+        tx({ direction: 'in', convertedAmount: '2.00' }),
+      ]),
+    )
+    const { result } = renderHook(() =>
+      useActivityMoneyTotals({ ...FILTERS, foldOwnTransfers: true }, 'USD'),
+    )
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.moneyOut).toBe(3)
+    expect(result.current.moneyIn).toBe(2)
+    expect(result.current.unpriced).toBe(false)
+    // The walk asks for the same folded set the /transactions list shows.
+    expect(mockApiGet).toHaveBeenCalledWith(expect.stringContaining('foldOwnTransfers=1'))
+  })
+
+  it('does not ask for the fold unless the caller does — the account tab keeps both legs', async () => {
+    mockApiGet.mockResolvedValue(page([]))
+    const { result } = renderHook(() => useActivityMoneyTotals(FILTERS, 'USD'))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    for (const [url] of mockApiGet.mock.calls) expect(String(url)).not.toContain('foldOwnTransfers')
+  })
+
   it('a serve-time USDC row in USD carries no ≈ — USDC is dollars (#4165)', async () => {
     mockApiGet.mockResolvedValue(
       page([

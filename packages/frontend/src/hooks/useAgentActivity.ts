@@ -13,7 +13,7 @@ import type { PaymentStatus } from '@/lib/payment-status'
 type ActivityStatus = PaymentStatus
 
 /**
- * Payment rows — money-movement events that fit the transactions table.
+ * Payment rows — money-movement events that fit the transactions ledger.
  *
  * #2120: `type` was `'payment' | 'approval'`. Since #2055 the activity routes
  * build their list from `payment_intents` + MCP tool invocations only; the
@@ -80,7 +80,7 @@ export interface PaymentActivityItem {
 /**
  * MCP tool invocation rows — audit-log entries produced by the
  * `X-Haven-MCP-Tool` header on the backend. Surfaced separately from the
- * transactions table because most of them never move money (status reads,
+ * transactions ledger because most of them never move money (status reads,
  * quote inspections). See backend migration 015_agent_tool_invocations.
  */
 export interface McpToolCallActivityItem {

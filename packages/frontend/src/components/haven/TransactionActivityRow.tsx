@@ -22,6 +22,7 @@ export function TransactionActivityRow({
   failed = false,
   status,
   statusTone = 'neutral',
+  extraBadges,
   timestamp,
   direction = 'neutral',
   details = [],
@@ -48,7 +49,7 @@ export function TransactionActivityRow({
    * `approxAmount`), so the amount renders through <Amount>'s currency mode —
    * an em dash for an unknown valuation, and `approx` as the caller's
    * `shouldMarkApprox` answer for a row, which is never a mark (#4165). Omitted for
-   * token-denominated rows (the transactions table) — the default keeps every
+   * token-denominated rows (rows that show the token amount) — the default keeps every
    * existing caller byte-identical.
    */
   fiat?: { amount: number | null; currency: AmountCurrency; approx?: boolean }
@@ -56,12 +57,18 @@ export function TransactionActivityRow({
   failed?: boolean
   status?: string
   statusTone?: StatusTone
+  /**
+   * Badges after the status badge, on the same wrapping title line (#4266):
+   * the `/transactions` ledger's per-payment `AccountingBadge`, which links
+   * to `/accounting` and stops its own click from opening the row.
+   */
+  extraBadges?: ReactNode
   timestamp?: string
   direction?: TransactionActivityDirection
   details?: TransactionActivityDetail[]
   action?: ReactNode
   /**
-   * `comfortable` (default) is for the dedicated transactions screen.
+   * `comfortable` (default) is the roomier row; the transactions ledger uses `compact`.
    * `compact` is the dashboard preview, tightened so the agents and
    * transactions columns sit on the same rhythm. Compact also hides the
    * description line on the desktop layout.
@@ -139,6 +146,10 @@ export function TransactionActivityRow({
         'aria-haspopup': 'dialog' as const,
         onClick: () => onOpen(),
         onKeyDown: (event: React.KeyboardEvent) => {
+          // Only the row's own key presses (#4266): Enter on a link inside it
+          // (an accounting badge, an explorer anchor) follows that link and
+          // must not also open the panel.
+          if (event.target !== event.currentTarget) return
           if (event.key === 'Enter' || event.key === ' ') {
             event.preventDefault()
             onOpen()
@@ -173,6 +184,7 @@ export function TransactionActivityRow({
               <span className="text-xs font-medium text-[var(--v2-ink-3)]">{countLabel}</span>
             ) : null}
             {status ? <StatusBadge tone={statusTone}>{status}</StatusBadge> : null}
+            {extraBadges}
           </div>
           {description ? (
             // Compact density tightens the title→description gap to match Row's mt-0.5.

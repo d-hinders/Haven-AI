@@ -28,10 +28,32 @@ import type { ReactNode } from 'react'
 export function TransactionMovement({
   from,
   to,
+  bare = false,
 }: {
   from: ReactNode
   to: ReactNode
+  /**
+   * Drop the visible "From"/"To" words (#4266): a ledger subline reads
+   * "My account → Reserve" after the actor, where the words would repeat
+   * what the arrow says. The arrow then carries the direction for screen
+   * readers too, as an sr-only "to"; the wrap binding is unchanged.
+   */
+  bare?: boolean
 }) {
+  if (bare) {
+    return (
+      <span className="inline-flex flex-wrap items-center gap-x-1.5 gap-y-1">
+        <span className="flex min-w-0 items-end gap-x-1.5">
+          <span className="min-w-0">{from}</span>
+          <span aria-hidden="true" className="shrink-0">
+            →
+          </span>
+          <span className="sr-only">to</span>
+        </span>
+        <span className="min-w-0">{to}</span>
+      </span>
+    )
+  }
   return (
     <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
       {/* `items-end`, not `items-center`: when the container is too narrow to

@@ -15,10 +15,9 @@ import {
   settlementSchemeLabel,
   transactionFiat,
   transactionInitiator,
-  transactionStatus,
+  transactionRowBadge,
   transactionTitle,
 } from '@/lib/transaction-presentation'
-import { machinePaymentLifecyclePresentation } from '@/lib/machine-payment-lifecycle'
 import type { AggregatedTransaction } from '@/types/transactions'
 
 interface Props {
@@ -149,11 +148,9 @@ export default function TransactionDetailPanel({
   if (!tx) return null
 
   const kind = rowType(tx)
-  const status =
-    transactionStatus(tx) ??
-    machinePaymentLifecyclePresentation(tx) ??
-    tx.statusBadge ??
-    (tx.isError ? { label: 'Failed', tone: 'danger' as const } : { label: 'Executed', tone: 'success' as const })
+  // The rows' one precedence (`transactionRowBadge`, #4266); the panel
+  // alone names a plain settled payment "Executed".
+  const status = transactionRowBadge(tx) ?? { label: 'Executed', tone: 'success' as const }
 
   const addr = (address: string) => (
     <AddressValue

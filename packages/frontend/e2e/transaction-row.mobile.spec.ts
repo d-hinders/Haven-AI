@@ -47,9 +47,8 @@ const WIDTHS = [320, 390, 393] as const
 
 /**
  * The floor the Activity cell must clear at 390px. Chosen from measurement,
- * not from taste: after the fix it measures 106px on `/transactions` and 106px
- * on the `/design-system` showcase, and before it, the showcase's cell was
- * **13px** — a 250px title ellipsised to nothing. 64px sits well clear of the
+ * not from taste: after the fix it measures 106px on `/transactions`, and before it,
+ * the (since retired, #4266) design-system showcase's cell was **13px** — a 250px title ellipsised to nothing. 64px sits well clear of the
  * real value and well above the defect, so ordinary text-metric drift cannot
  * move it while a re-collapse cannot hide under it.
  */
@@ -133,10 +132,9 @@ async function activityCellWidths(page: import('@playwright/test').Page): Promis
   )
 }
 
-for (const route of ['/transactions', '/design-system'] as const) {
+for (const route of ['/transactions'] as const) {
   test(`${route}: the movement arrow never sits alone on its own line`, async ({ page }) => {
-    // `/design-system` is a very long page and both routes re-layout on every
-    // width in the sweep; the default 60s is comfortable on CI and marginal on
+    // The route re-lays out on every width in the sweep; the default 60s is comfortable on CI and marginal on
     // a loaded dev machine.
     test.slow()
     const errors = collectBrowserErrors(page)
@@ -240,8 +238,7 @@ for (const route of ['/transactions', '/design-system'] as const) {
 // detail no longer renders `TransactionsTable` at all (its Activity tab is
 // `TransactionActivityRow` ledger rows), so there is no agent route left to
 // add here. Recorded as an unasserted screen rather than covered by an
-// assertion that cannot run; the `/design-system` legs above exercise the
-// component in a second context.
+// assertion that cannot run.
 for (const route of ['/transactions'] as const) {
 test(`${route}: the amount rides under the title below md, and the title stops wrapping to three lines (#2734)`, async ({
   page,

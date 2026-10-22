@@ -198,12 +198,11 @@ Before shipping a UI change, compare it against an existing v2 screen with the s
 
 ### Tables And Activity
 
-- Full `/transactions` history uses the semantic full-page `TransactionsTable`.
-- Sortable headers need `aria-sort` and clear labels.
-- Amount sorting must use raw numeric values, not formatted strings.
-- Account and agent detail pages may use the card/compact `TransactionsTable`
-  variants for scoped, sortable histories.
-- Short non-sortable previews such as Dashboard use `TransactionActivityRow`.
+- Every transaction list uses `TransactionActivityRow`: compact previews such
+  as Dashboard, and in ledger mode under day bands the full `/transactions`
+  history and the account and agent Activity tabs (per #4266).
+- Where a generic `Table` has sortable headers, they need `aria-sort` and clear
+  labels, and amount sorting must use raw numeric values, not formatted strings.
 - Mobile table views should collapse secondary metadata while preserving the
   direction, activity/movement, amount, and external detail link. Date may move
   to a detail surface.

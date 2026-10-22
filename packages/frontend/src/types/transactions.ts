@@ -34,7 +34,7 @@ export type Transaction = ApiSchema<'TransactionBase'> & {
 
 /**
  * Aggregated-feed item plus the frontend-only presentation overrides used by
- * `TransactionsTable` when rendering non-transaction activity through the
+ * the activity ledger when rendering non-transaction activity through the
  * same primitive. Wire fields come from the generated `Transaction` schema.
  */
 export interface AggregatedTransaction extends ApiSchema<'Transaction'> {
@@ -54,7 +54,7 @@ export interface AggregatedTransaction extends ApiSchema<'Transaction'> {
    * Optional status pill rendered inline beside the activity title. When set
    * it takes precedence over the default `isError` → "Failed" badge. Used by
    * callers that render non-transaction activity (e.g. agent approval items)
-   * through `TransactionsTable` so the table stays a single primitive.
+   * through the activity ledger so it stays a single primitive.
    */
   statusBadge?: { label: string; tone: StatusTone }
   /**
@@ -118,6 +118,15 @@ export interface TransactionFilterState {
   from?: string
   /** Custom-range end, `YYYY-MM-DD` — inclusive of its whole zone day. */
   to?: string
+  /**
+   * Opt in to the all-accounts feed's own-transfer fold (#4265): a move
+   * between two of the user's accounts comes back as ONE row carrying
+   * `ownTransfer`. Set only by `/transactions` (#4266) — the per-account
+   * ledger keeps both legs, each its own account's in or out — and
+   * serialized by `transactionFilterParams`, so the list, its In/Out totals
+   * and the CSV export all request the same folded set.
+   */
+  foldOwnTransfers?: boolean
 }
 
 export type TransactionFilterOptionsResponse = ApiSchema<'TransactionFilterOptionsResponse'>

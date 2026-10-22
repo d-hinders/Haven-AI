@@ -10,8 +10,8 @@ type Density = 'comfortable' | 'compact' | 'figure' | 'inline'
  * the markup so a colour change (e.g. the sky-blue debit colour for
  * outgoing transactions) lands everywhere at once.
  *
- * - `comfortable` (default): 36px mark, 16px icon — used inside the
- *   dedicated `/transactions` table.
+ * - `comfortable` (default): 36px mark, 16px icon — the roomier
+ *   row; the transaction ledger (`/transactions`, Activity tabs) uses `compact`.
  * - `compact`: 32px mark, 14px icon — matches the dashboard's <Row>
  *   primitive so transaction rows sit on the same rhythm as agent rows.
  * - `figure`: 24px mark, 14px icon — sits beside a 20px secondary figure

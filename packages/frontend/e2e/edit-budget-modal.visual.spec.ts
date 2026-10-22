@@ -71,6 +71,15 @@ async function openEditBudgetModal(page: Page) {
   await page.getByRole('menuitem', { name: 'Edit budget' }).click()
   const dialog = page.getByRole('dialog', { name: 'Edit budget' })
   await expect(dialog).toHaveCount(1)
+  // Park the pointer ON the primary button. The blessed baseline was
+  // captured through the old flow — clicking the card's Edit button — and
+  // the pointer that click left behind came to rest over the modal's
+  // primary button, baking its :hover fill (--v2-brand-strong at the
+  // disabled opacity) into the capture. The ⋯-menu path opens the dialog
+  // without that pointer overlap, so the hover must be re-applied
+  // deliberately: moving the pointer off the dialog renders the resting
+  // --v2-brand fill (#958FEF) and moves the baseline (#8E87DF expected).
+  await dialog.getByRole('button', { name: 'Review changes' }).hover()
   return dialog
 }
 

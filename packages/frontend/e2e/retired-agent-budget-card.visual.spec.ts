@@ -99,6 +99,13 @@ test.describe('retired agent budget card visual regression (#3549)', () => {
       await expect(card.getByRole('menuitem', { name: 'Stop budget…' })).toHaveCount(0)
       await expect(card.getByRole('button', { name: 'Issue sub-budget' })).toHaveCount(0)
       await expect(card.getByLabel('Budget amount')).toHaveCount(0)
+      // The kebab click above leaves the pointer resting on the trigger —
+      // its hover fill (--v2-surface-hover, a uniform 44x44 block, not a
+      // focus ring) is not in the blessed pixels — and the Escape leaves it
+      // focused. Park the pointer and drop focus before the capture (after
+      // the closed-menu assertions, which read the real post-Escape DOM).
+      await page.mouse.move(0, 0)
+      await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
 
       await page.evaluate(() => document.fonts.ready)
       await expect(card).toHaveScreenshot(`agents-retired-budget-card-${state.name}-mobile.png`, {

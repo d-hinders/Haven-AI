@@ -1537,9 +1537,11 @@ describe('DelegationBudgetCard hero states (#4226)', () => {
       period_end: '2026-09-02T02:00:00Z',
     })
 
-  const spendWindow = (usd: number, payments: number) => ({
+  // #4274: gross and net take SEPARATE values — the old helper built both
+  // from one `usd`, which is why the hero's gross read passed every test.
+  const spendWindow = (usd: number, payments: number, netUsd: number = usd) => ({
     gross: { usd, eur: usd, sek: usd * 10 },
-    net: { usd, eur: usd, sek: usd * 10 },
+    net: { usd: netUsd, eur: netUsd, sek: netUsd * 10 },
     approx: false,
     payments,
     refusals: { budget: 0, scope: 0, failed: 0, haven: 0 },
@@ -1547,7 +1549,8 @@ describe('DelegationBudgetCard hero states (#4226)', () => {
 
   const stats: DashboardAgentStats = {
     d7: spendWindow(1, 1),
-    d30: spendWindow(12.5, 7),
+    // Gross and net differ, so the Spent figure's read is observable.
+    d30: spendWindow(12.5, 7, 8.25),
     lastPaymentAt: '2026-08-30T10:00:00Z',
     lastCounterparty: {
       source: 'x402',
@@ -1642,15 +1645,58 @@ describe('DelegationBudgetCard hero states (#4226)', () => {
     expect([...grid.classList]).toEqual(expect.arrayContaining(['grid', 'grid-cols-3']))
     expect(grid.querySelectorAll(':scope > div')).toHaveLength(3)
     // Spent is Amount size="md": text-xl on the Amount span itself (#4259).
-    const spent = within(figure('Spent')).getByText(/12\.50/)
+    // #4274: the figure is d30's NET — 8.25, never the 12.50 gross the hero
+    // used to read and the dashboard does not show.
+    const spent = within(figure('Spent')).getByText(/8\.25/)
     expect([...spent.classList]).toContain('text-xl')
     expect([...spent.classList]).not.toContain('text-sm')
+    expect(within(figure('Spent')).queryByText(/12\.50/)).toBeNull()
     expect(figure('Payments').textContent).toBe('7')
     expect([...figure('Payments').classList]).toContain('text-xl')
     expect(figure('Last paid').textContent).toBe(timeAgo('2026-08-30T10:00:00Z'))
     expect([...figure('Last paid').classList]).toContain('text-xl')
     // The 30px headline the column used to carry is gone; the balance is the headline.
     expect(grid.closest('section')?.querySelector('.text-3xl')).toBeNull()
+  })
+
+  it('an unpriced bucket with net 0 renders no Spent amount — the dashboard headline rule (#4274)', () => {
+    mockGet.mockReturnValue([heroBudget()])
+    render(
+      <DelegationBudgetCard
+        {...PROPS}
+        stats={{
+          ...stats,
+          d30: { ...spendWindow(0, 0), payments: 3, unpricedByCurrency: { usd: true, eur: true, sek: true } },
+        }}
+      />,
+    )
+    // Unknown, not zero: `Amount amount={null}` renders the em dash, the same
+    // read the dashboard headline makes (MoneyPanel.tsx). The account-level
+    // unpriced NOTE stays off the hero — the dashboard's per-agent rows carry
+    // none either.
+    expect(figure('Spent').textContent).toBe('—')
+    expect(figure('Payments').textContent).toBe('3')
+  })
+
+  it('a partly unpriced bucket with net > 0 still renders the figure (#4274)', () => {
+    mockGet.mockReturnValue([heroBudget()])
+    render(
+      <DelegationBudgetCard
+        {...PROPS}
+        stats={{
+          ...stats,
+          d30: { ...spendWindow(12.5, 7, 8.25), unpricedByCurrency: { usd: false, eur: true, sek: true } },
+        }}
+      />,
+    )
+    expect(within(figure('Spent')).getByText(/8\.25/)).toBeTruthy()
+  })
+
+  it('net 0 with payments in the window (everything swept) reads 0 — the true net, no special case (#4274)', () => {
+    mockGet.mockReturnValue([heroBudget()])
+    render(<DelegationBudgetCard {...PROPS} stats={{ ...stats, d30: spendWindow(12.5, 7, 0) }} />)
+    expect(within(figure('Spent')).getByText(/0\.00/)).toBeTruthy()
+    expect(figure('Payments').textContent).toBe('7')
   })
 
   it('the merchant sits on its own line below the figures, with no divider (#4260)', () => {

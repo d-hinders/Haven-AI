@@ -231,7 +231,7 @@ describe('AgentPassportCard (#1072)', () => {
   })
 
   // ── Row layout (#3697) ──────────────────────────────────────────────────
-  // The passport is a ROW in the "Identity and settings" card, not a
+  // The passport is a ROW in the agent page's Settings tab, not a
   // standalone Card — every state renders inside one padded row block
   // (`data-testid="agent-passport-row"`), with no card chrome of its own.
 

@@ -711,8 +711,8 @@ rule). `?grant=` keeps working alongside `?tab=`. Sections, in order:
    attention), **Token** and **Period** — all server-filtered on the kinded
    read (#4229, plus its `token` parameter). The summary line reads "Out"
    with the server's total (a count, never a money sum the read does not
-   serve), `ListShowMore` sits below the card, and a row opens
-   `TransactionDetailPanel`. Under the list: "See in Transactions"
+   serve), `ListShowMore` sits below the card, and a row opens the shared
+   transaction detail panel. Under the list: "See in Transactions"
    (`/transactions?agentId={id}`). Empty states: "No payments yet" — and for
    an agent still in setup, "Once you set a budget, every payment this agent
    makes shows here." When recoverable-funds payments exist, the Activity tab
@@ -751,7 +751,7 @@ Structure:
 2. `TransactionActivityRow` ledger rows, merchant-first, under
    `TransactionActivityDayHeader` day bands (#4225). No "by <agent>" title and
    no "From … →" movement line: the page fixes the agent and the wallet, so
-   neither repeats on a row. A row opens `TransactionDetailPanel`.
+   neither repeats on a row. A row opens the shared transaction detail panel.
 3. The summary line ("Out" and the server's total) and `ListShowMore` below
    the card; "See in Transactions" under the list.
 4. Empty state with the next useful action ("No payments yet"; for an agent

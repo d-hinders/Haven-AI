@@ -401,9 +401,28 @@ haven_pay_x402_quote → haven_sign
 > policy (https-only public hosts, no IP literals or internal names, ≤3
 > re-checked GET redirects, while-reading byte caps, per-use budgets —
 > [docs/security/hosted-egress.md](../security/hosted-egress.md)). The local
-> MCP and SDK embedders are unchanged: without `merchantEgress` the client
-> behaves exactly as before, including `http` to loopback and reserved
-> `.test`/`.localhost`/`.invalid`/`.example` fixtures. Accepted residual on
+> MCP and SDK embedders have no URL policy: without `merchantEgress` the
+> client still reaches `http` to loopback and reserved
+> `.test`/`.localhost`/`.invalid`/`.example` fixtures, with no caps or per-use
+> budgets. Both sides share one header rule (#4244, #4257): a hop to another
+> origin carries only an allow-list of headers. Under the hosted policy only
+> GET redirects are followed at all, so any non-GET 3xx, a 303 answering a
+> paid POST included, is refused with `redirect_on_non_get`. Without a policy
+> the Fetch spec's rewrite applies:
+>
+> - A 301 or 302 rewrites a POST to a body-less GET.
+> - A 303 rewrites every method except GET and HEAD.
+> - Every other case keeps both the method and the body: a non-POST method
+>   (a PUT, say) answered with a 301 or 302, and any request answered with a
+>   307 or 308.
+> - A paid GET, or a paid request rewritten to GET, that crosses origin is
+>   followed with the payment headers stripped and no body.
+> - A redirect that would re-send a paid body to another origin is refused:
+>   a 307/308, or a 301/302 on a non-POST method.
+>
+> On the local side a redirect refused during paid
+> delivery is recorded and reported as funded and undelivered, with
+> `haven_get_payment_status` as the next tool. Accepted residual on
 > the hosted side: a public name whose DNS answer points at private space is
 > not blocked (that is the resolution-time work parked in #3742–#3744).
 

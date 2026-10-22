@@ -17,6 +17,8 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ### Changed
 
+- **A paid x402 call whose merchant redirects the paid request to another origin now reports the funded, undelivered state (#4257).** The embedded SDK no longer re-sends a paid request to a different origin. When it refuses to, `haven_pay_x402` and the other local paid tools answer `MERCHANT_EGRESS_REFUSED` with the `paymentId`, `status: merchant_unresponsive_after_funding`, `next_tool: haven_get_payment_status` and `next_arguments: { payment_id }`, and the message says not to pay again. EIP-3009 is `phase: funded_but_unsettled` and `next_action: sweep_stranded_funds` (verify-then-sweep). erc7710 is `phase: not_delivered` and `next_action: check_status_later`. This is the local twin of the hosted #1300 treatment. It ships only with an `@haven_ai/mcp` release (this package pins `@haven_ai/sdk` exactly).
+
 - **Local paid x402 tools can take up to ~7 s longer when Haven answers the
   merchant's settlement report `retryable` (#4215).** The embedded SDK now
   retries the local EIP-3009 settlement-evidence report on the bounded

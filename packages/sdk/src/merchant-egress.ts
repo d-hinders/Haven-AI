@@ -16,9 +16,14 @@ import { HavenError } from './types.js'
  *    it is a string check. A public host name whose DNS ANSWER points at
  *    private space is NOT blocked here — that needs the resolution-time
  *    checks parked in #3742–#3744 (owner-accepted residual, 2026-10-07).
- *  - Without `merchantEgress`, NOTHING in the SDK changes: no `redirect:
- *    'manual'`, no body capping, no extra refusals. SDK, local-MCP and
- *    embedder callers keep today's behaviour byte for byte.
+ *  - Without `merchantEgress` there is no URL check, no body capping and no
+ *    per-use budget. Redirects are still followed by the transport (#4257),
+ *    under the platform's rules (20 hops, the Fetch spec's method/body
+ *    rewrite), plus the one rule both paths share: a hop to another origin
+ *    carries only the cross-origin header allow-list. A paid request (the
+ *    delivery, or a body with an x402 payment in `_meta`) is never re-sent
+ *    to another origin by a redirect that keeps the body (307/308, or 301/302
+ *    on a method other than POST); any other request follows as before.
  *  - The policy is network policy, not spend control. It never gates a
  *    payment's authority — the on-chain allowance stays the real control
  *    (CASP: off-chain policy is never the spend control).
@@ -74,6 +79,13 @@ export type MerchantEgressRefusalReason =
   | 'redirect_missing_location'
   | 'redirect_invalid_location'
   | 'redirect_budget_exceeded'
+  /**
+   * #4257: a redirect that keeps the body (307/308, or 301/302 on a method
+   * other than POST) would re-send it to another origin. Under a
+   * policy (GET only) this is unreachable; without one it fires for a paid
+   * delivery, or a body carrying an x402 payment in `_meta`.
+   */
+  | 'redirect_cross_origin_body'
 
 export const MERCHANT_EGRESS_REFUSED_CODE = 'MERCHANT_EGRESS_REFUSED'
 
@@ -89,18 +101,42 @@ export class MerchantEgressRefusedError extends HavenError {
   readonly url: string
   readonly refusal: MerchantEgressRefusalReason
   readonly beforeRequest: boolean
+  /** #4257: the redirect status that was not followed, when a redirect was refused. */
+  readonly redirectStatus?: number
+  /**
+   * #4257: set only when `url` IS the redirect target (a cross-origin body
+   * re-send, a spent hop budget, a hop `assertUrl` refused). A refusal that
+   * stopped at the answering URL itself (a non-GET redirect, a missing or
+   * unresolvable Location) leaves it unset, and `url` is that answering URL.
+   */
+  readonly redirectTarget?: string
+  /**
+   * #4257: set when the refusal interrupted a PAID delivery and the local
+   * completion has re-thrown it with the payment it belongs to — the funded,
+   * undelivered state, never "nothing happened".
+   */
+  readonly settlementScheme?: 'eip3009' | 'erc7710'
 
   constructor(
     message: string,
     url: string,
     refusal: MerchantEgressRefusalReason,
     beforeRequest: boolean,
+    extra: {
+      redirectStatus?: number
+      redirectTarget?: string
+      paymentId?: string
+      settlementScheme?: 'eip3009' | 'erc7710'
+    } = {},
   ) {
-    super(message, MERCHANT_EGRESS_REFUSED_CODE, 400)
+    super(message, MERCHANT_EGRESS_REFUSED_CODE, 400, extra.paymentId)
     this.name = 'MerchantEgressRefusedError'
     this.url = url
     this.refusal = refusal
     this.beforeRequest = beforeRequest
+    this.redirectStatus = extra.redirectStatus
+    this.redirectTarget = extra.redirectTarget
+    this.settlementScheme = extra.settlementScheme
   }
 }
 

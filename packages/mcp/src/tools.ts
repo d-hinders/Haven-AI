@@ -16,6 +16,7 @@ import {
   HavenError,
   HavenPaymentStateError,
   HavenSigningError,
+  MerchantEgressRefusedError,
   catalogFundingLegExpected,
   composeDescription,
   discoverMerchantMcpUrl,
@@ -1453,6 +1454,30 @@ function normalizeError(err: unknown): ToolFailure {
       success: false,
       code: err.code,
       message: err.message,
+    }
+  }
+
+  // #4257: a refused redirect that interrupted a PAID delivery (the local
+  // twin of the hosted #1300 treatment in mcp-server's paid-mcp-completion).
+  // The payment reached the merchant and nothing came back, so this is the
+  // funded, undelivered state: status read first, never a re-pay, never a
+  // blind sweep. erc7710 has no funding leg and nothing to sweep.
+  if (err instanceof MerchantEgressRefusedError && !err.beforeRequest && err.paymentId) {
+    const noFundingLeg = err.settlementScheme === 'erc7710'
+    const nextAction = noFundingLeg ? AgentPaymentNextAction.CheckStatusLater : AgentPaymentNextAction.SweepStrandedFunds
+    return {
+      success: false,
+      code: err.code,
+      message: err.message,
+      statusCode: err.statusCode,
+      paymentId: err.paymentId,
+      status: 'merchant_unresponsive_after_funding',
+      phase: noFundingLeg ? 'not_delivered' : 'funded_but_unsettled',
+      nextAction,
+      next_action: nextAction,
+      next_tool: 'haven_get_payment_status',
+      next_arguments: { payment_id: err.paymentId },
+      suggested_tool: 'haven_get_payment_status',
     }
   }
 

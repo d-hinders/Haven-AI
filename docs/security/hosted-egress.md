@@ -63,6 +63,53 @@ hosted client's own outbound rule.
   (15 s, 256 KiB while reading), and a STRICTER redirect rule —
   `redirect: 'error'`, so no hop is followed at all.
 
+## Without a policy (#4257)
+
+The SDK default, the local MCP, connect and every embedder that sets no
+`merchantEgress` get no URL check, no byte cap and no per-use budget. The
+transport still follows redirects itself, so both paths share the
+cross-origin rule:
+
+- A hop to another origin (scheme, host or port, compared hop to hop) carries
+  only `accept`, `accept-language`, `user-agent` and `x402-wallet`, exactly as
+  in rule 4. An API key, a cookie or an x402 payment header supplied for one
+  merchant never reaches the origin it redirects to, and an `https` → `http`
+  hop is a different origin.
+- A redirect that would re-send a request body to another origin (a 307/308,
+  or a 301/302 on a method other than POST) is refused
+  mid-flight (`redirect_cross_origin_body`) only when the request carries a
+  payment: the paid delivery (`deliverPayment`), or a body with an x402
+  payment in `_meta["x402/payment"]`. That body can be a string, a
+  `Uint8Array`/`ArrayBuffer` decoded as UTF-8 JSON, or a JSON-RPC batch with
+  any element carrying it. A body that cannot be read that way (a stream,
+  form data, bytes that are not UTF-8 JSON) is not treated as paid. Every
+  other request (MCP `initialize`,
+  quote probes, a plain `fetch` POST) follows that redirect with its body, as
+  the platform did, with the headers reduced.
+- Everything else is the platform's behaviour, kept as it was: up to 20 hops
+  (`NO_POLICY_MAX_REDIRECTS`); the Fetch spec's rewrite, in which a 301 or 302
+  rewrites only a POST to a body-less GET and a 303 rewrites every method
+  except GET and HEAD; a 3xx without `Location` returned as the answer; a
+  non-HTTP(S) `Location` failing with a `TypeError`; and a caller's
+  `redirect: 'manual'` or `'error'` passed straight to the platform.
+
+A refusal on the paid delivery is the funded, undelivered state on this path
+too (see Refusals). `MerchantCompletion.retryRequest` records it as
+`merchant_retry_rejected_after_payment`. Without a policy the only refusal
+that can reach it is `redirect_cross_origin_body`. Every other refusal below
+fires only when an embedder sets `merchantEgress` on the local completion.
+The event's `retry_status` is the redirect status and `retry_body` is `null`.
+Its `details` carry `refusal` and one more key:
+- `redirect_location`, the redirect target, when the refusal names one:
+  `redirect_cross_origin_body`, and with a policy `redirect_budget_exceeded`
+  or a hop that `assertUrl` refused;
+- `refused_url`, the URL that answered with the redirect, otherwise (all
+  with a policy): `redirect_on_non_get`, `redirect_missing_location` or
+  `redirect_invalid_location`.
+It then re-throws the refusal with the `payment_id`, and the local MCP
+answers with `haven_get_payment_status` as the
+next tool and "do not pay again".
+
 ## Refusals
 
 - A refusal **before anything was sent** raises `MerchantEgressRefusedError`

@@ -1,6 +1,6 @@
 'use client'
 
-import { ArrowDown, ArrowUp, Bot, Check, Circle, CirclePause, CreditCard, EllipsisVertical, Info, OctagonAlert, Sparkles, TriangleAlert, X } from 'lucide-react'
+import { ArrowDown, ArrowLeftRight, ArrowUp, Bot, Check, ChevronDown, Circle, CirclePause, CreditCard, EllipsisVertical, Info, OctagonAlert, Sparkles, TriangleAlert, X } from 'lucide-react'
 import { MobileTabBar } from '@/components/sidebar/MobileTabBar'
 import { baseNavItems } from '@/components/sidebar/Sidebar'
 import { Icon } from '@/components/ui/Icon'
@@ -2434,8 +2434,8 @@ export default function DesignSystemPage() {
       </Section>
 
       <Section
-        title="Direction marks (in / out / pending)"
-        description="One shared `<DirectionMark>` for every transaction row in the app. Incoming uses success green, outgoing uses debit sky, pending uses neutral grey. Density `compact` (32px) for dashboard rows, `comfortable` (36px, default) for the dedicated transactions table, `inline` (18px mark, 11px icon) beside a figure in dense content — the account summary card's Last 30 days row (#4197)."
+        title="Direction marks (in / out / pending / move)"
+        description="One shared `<DirectionMark>` for every transaction row in the app. Incoming uses success green, outgoing uses debit sky, pending uses neutral grey, and a move between your own accounts uses the two-way arrow on the same neutral grey ground (#4264) — neither income nor spend, so like pending it passes no sign to `Amount`. Density `compact` (32px) for dashboard rows, `comfortable` (36px, default) for the dedicated transactions table, `inline` (18px mark, 11px icon) beside a figure in dense content — the account summary card's Last 30 days row (#4197)."
       >
         <Card hover={false} className="p-5">
           <div className="flex flex-wrap items-center gap-5">
@@ -2451,6 +2451,10 @@ export default function DesignSystemPage() {
               <DirectionMark direction="neutral" />
               <p className="text-xs text-[var(--v2-ink-3)]">pending · comfortable</p>
             </div>
+            <div className="flex flex-col items-center gap-1">
+              <DirectionMark direction="move" />
+              <p className="text-xs text-[var(--v2-ink-3)]">move · comfortable</p>
+            </div>
             <div className="ml-4 flex flex-col items-center gap-1">
               <DirectionMark direction="in" density="compact" />
               <p className="text-xs text-[var(--v2-ink-3)]">in · compact</p>
@@ -2458,6 +2462,10 @@ export default function DesignSystemPage() {
             <div className="flex flex-col items-center gap-1">
               <DirectionMark direction="out" density="compact" />
               <p className="text-xs text-[var(--v2-ink-3)]">out · compact</p>
+            </div>
+            <div className="flex flex-col items-center gap-1">
+              <DirectionMark direction="move" density="compact" />
+              <p className="text-xs text-[var(--v2-ink-3)]">move · compact</p>
             </div>
             <div className="ml-4 flex flex-col items-center gap-1">
               <DirectionMark direction="in" density="inline" />
@@ -2467,12 +2475,76 @@ export default function DesignSystemPage() {
               <DirectionMark direction="out" density="inline" />
               <p className="text-xs text-[var(--v2-ink-3)]">out · inline</p>
             </div>
+            <div className="flex flex-col items-center gap-1">
+              <DirectionMark direction="move" density="inline" />
+              <p className="text-xs text-[var(--v2-ink-3)]">move · inline</p>
+            </div>
           </div>
           <p className="mt-4 text-xs leading-relaxed text-[var(--v2-ink-3)]">
             Don&apos;t reinline this markup. If you need a new direction state, add it to{' '}
             <code className="rounded bg-[var(--v2-surface)] px-1">DirectionMark</code> and document it here.
           </p>
         </Card>
+      </Section>
+
+      <Section
+        title="Technical details disclosure"
+        description="A markup pattern, not a component (#4264): a native <details>/<summary>, closed by default, for the technical disclosure surfaces (§ Vocabulary, voice, accessibility). The summary is a full-width row — label leading, a lucide ChevronDown trailing, rotating 180° on open via group-open:rotate-180, the same group-open rotation rule as § Arrows — and the default marker is suppressed. The content uses the panel's own detail rows (ink-3 dt label, ink-2 dd value), so the opened block reads as part of the panel. The hand-rolled <details> uses that predate the pattern (ErrorBoundary, SignersSection, OffersTable, connect-agent/*, the signers card's text-only Show address toggle) are not migrated; a new technical disclosure is written this way. Specimen content — the module address, the relayer hash, the token standard — is exactly the vocabulary this pattern exists to keep behind a deliberate fold."
+      >
+        <div className="grid gap-5 lg:grid-cols-2">
+          <Card hover={false} className="p-5">
+            <p className="mb-3 text-xs text-[var(--v2-ink-3)]">Closed by default</p>
+            <details className="group">
+              <summary className="flex w-full cursor-pointer select-none list-none items-center justify-between rounded text-sm text-[var(--v2-ink)] [&::-webkit-details-marker]:hidden">
+                Technical details
+                <Icon
+                  icon={ChevronDown}
+                  className="h-4 w-4 flex-shrink-0 text-[var(--v2-ink-3)] transition-transform group-open:rotate-180"
+                />
+              </summary>
+              <dl className="mt-3 space-y-1.5 border-t border-[var(--v2-border)] pt-3 text-xs">
+                <div className="flex items-center gap-2">
+                  <dt className="flex-shrink-0 text-[var(--v2-ink-3)]">Module:</dt>
+                  <dd className="min-w-0 truncate font-mono text-[var(--v2-ink-2)]">0x3fab…8c21</dd>
+                </div>
+                <div className="flex items-center gap-2">
+                  <dt className="flex-shrink-0 text-[var(--v2-ink-3)]">Token standard:</dt>
+                  <dd className="min-w-0 text-[var(--v2-ink-2)]">ERC-3009</dd>
+                </div>
+              </dl>
+            </details>
+          </Card>
+          <Card hover={false} className="p-5">
+            <p className="mb-3 text-xs text-[var(--v2-ink-3)]">Open (the `open` attribute, for the specimen only)</p>
+            {/*
+              `inert` + `aria-hidden`: this specimen is held open by a literal
+              `open` attribute, so the #2002 permanently-open rule applies — the
+              wrapper is what keeps the static illustration out of the
+              accessibility tree and the tab order.
+            */}
+            <div inert aria-hidden="true">
+              <details className="group" open>
+                <summary className="flex w-full cursor-pointer select-none list-none items-center justify-between rounded text-sm text-[var(--v2-ink)] [&::-webkit-details-marker]:hidden">
+                  Technical details
+                  <Icon
+                    icon={ChevronDown}
+                    className="h-4 w-4 flex-shrink-0 text-[var(--v2-ink-3)] transition-transform group-open:rotate-180"
+                  />
+                </summary>
+                <dl className="mt-3 space-y-1.5 border-t border-[var(--v2-border)] pt-3 text-xs">
+                  <div className="flex items-center gap-2">
+                    <dt className="flex-shrink-0 text-[var(--v2-ink-3)]">Module:</dt>
+                    <dd className="min-w-0 truncate font-mono text-[var(--v2-ink-2)]">0x3fab…8c21</dd>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <dt className="flex-shrink-0 text-[var(--v2-ink-3)]">Token standard:</dt>
+                    <dd className="min-w-0 text-[var(--v2-ink-2)]">ERC-3009</dd>
+                  </div>
+                </dl>
+              </details>
+            </div>
+          </Card>
+        </div>
       </Section>
 
       <Section
@@ -3689,7 +3761,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="Amount: currency mode"
-        description="The other half of the Amount contract (#3805): for a figure that is already a fiat valuation server-side, pass the unsigned magnitude (amount) and the currency it is in — never a symbol string, never a conversion done here. It formats through formatFiatDisplay — formatFiat's output, plus <$0.01 for a non-zero figure under a cent (zero stays $0.00, #3897) — the one formatter, so a SEK figure reads the same on every screen; the sign comes only from direction, and a negative magnitude can never double-sign it. ≈ marks a figure converted at today's rate where the conversion changes the number, and it goes before the sign; the caller decides it with the one rule, shouldMarkApprox (@haven_ai/core, #4165) — never on a list row, never on a booked figure, never for USDC shown in USD, otherwise on totals and the detail panel. Unknown — null, or a non-finite value — renders an em dash in secondary ink, never 0,00 kr: an unknown valuation is not a zero. A currency figure is a valuation of a token amount, not a fiat balance Haven holds."
+        description="The other half of the Amount contract (#3805): for a figure that is already a fiat valuation server-side, pass the unsigned magnitude (amount) and the currency it is in — never a symbol string, never a conversion done here. It formats through formatFiatDisplay — formatFiat's output, plus exactly 4 decimals for a non-zero figure under a cent, and <$0.0001 when even 4 decimals would still show 0.0000 (zero stays $0.00; owner decision 2026-10-22, superseding #3897's <$0.01) — the one formatter, so a SEK figure reads the same on every screen; the sign comes only from direction, and a negative magnitude can never double-sign it. ≈ marks a figure converted at today's rate where the conversion changes the number, and it goes before the sign; the caller decides it with the one rule, shouldMarkApprox (@haven_ai/core, #4165) — never on a list row, never on a booked figure, never for USDC shown in USD, otherwise on totals and the detail panel. Unknown — null, or a non-finite value — renders an em dash in secondary ink, never 0,00 kr: an unknown valuation is not a zero. A currency figure is a valuation of a token amount, not a fiat balance Haven holds."
       >
         {/* The testid rides a plain wrapper: `Card` forwards no extra props,
             and the visual spec clips this sample by it. */}
@@ -3702,6 +3774,8 @@ export default function DesignSystemPage() {
               <p><Amount amount={9.09} currency="SEK" direction="out" approx /> <span className="text-xs text-[var(--v2-ink-3)]">— approx: a SEK total converted at today&apos;s rate, ≈ before the sign (never on a row, never USDC in USD)</span></p>
               <p><Amount amount={null} currency="SEK" direction="out" /> <span className="text-xs text-[var(--v2-ink-3)]">— unknown renders an em dash, never 0,00 kr</span></p>
               <p><Amount amount={0} currency="SEK" /> <span className="text-xs text-[var(--v2-ink-3)]">— zero is a real valuation and renders as one</span></p>
+              <p><Amount amount={0.0049} currency="USD" direction="out" /> <span className="text-xs text-[var(--v2-ink-3)]">— under a cent: exactly 4 decimals in the currency&apos;s own format (2026-10-22, superseding #3897&apos;s &lt;$0.01)</span></p>
+              <p><Amount amount={0.00003} currency="SEK" /> <span className="text-xs text-[var(--v2-ink-3)]">— under 0.00005: &quot;&lt;&quot; against the smallest figure the format can show</span></p>
             </div>
           </Card>
         </div>

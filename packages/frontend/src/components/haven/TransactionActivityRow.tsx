@@ -6,7 +6,7 @@ import { ExternalLink } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 
 type StatusTone = 'success' | 'warning' | 'danger' | 'neutral' | 'brand'
-export type TransactionActivityDirection = 'in' | 'out' | 'neutral'
+export type TransactionActivityDirection = 'in' | 'out' | 'neutral' | 'move'
 type Density = 'comfortable' | 'compact'
 
 export interface TransactionActivityDetail {
@@ -199,14 +199,14 @@ export function TransactionActivityRow({
                 amount={fiat.amount}
                 currency={fiat.currency}
                 approx={fiat.approx}
-                direction={direction === 'neutral' ? undefined : direction}
+                direction={direction === 'neutral' || direction === 'move' ? undefined : direction}
                 failed={failed}
               />
             ) : (
               <Amount
                 value={value}
                 symbol={asset}
-                direction={direction === 'neutral' ? undefined : direction}
+                direction={direction === 'neutral' || direction === 'move' ? undefined : direction}
                 failed={failed}
               />
             )}

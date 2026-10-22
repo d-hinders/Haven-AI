@@ -1,11 +1,11 @@
-import { ArrowDown, ArrowUp, Clock } from 'lucide-react'
+import { ArrowDown, ArrowLeftRight, ArrowUp, Clock } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import type { TransactionActivityDirection } from './TransactionActivityRow'
 
 type Density = 'comfortable' | 'compact' | 'inline'
 
 /**
- * Single source of truth for the in/out/pending direction icon used in
+ * Single source of truth for the in/out/pending/move direction icon used in
  * transaction rows. Previously each table inlined its own copy; this lifts
  * the markup so a colour change (e.g. the sky-blue debit colour for
  * outgoing transactions) lands everywhere at once.
@@ -18,6 +18,11 @@ type Density = 'comfortable' | 'compact' | 'inline'
  *   dense content (the account summary card's Last 30 days row, #4197).
  *   Still `aria-hidden`: the name is the caller's sr-only text, and any
  *   tooltip lives on the mark through `ui/Tooltip`.
+ *
+ * `move` (#4264): a two-way lucide `ArrowLeftRight` on the neutral grey
+ * ground — a transfer between your own accounts is neither income nor
+ * spend. `neutral` (the pending clock) is unchanged. Like `neutral`, a
+ * `move` row passes no sign to `Amount`.
  */
 export function DirectionMark({
   direction,
@@ -31,6 +36,8 @@ export function DirectionMark({
       ? 'border-success/20 bg-[var(--v2-success-soft)] text-[var(--v2-success)]'
       : direction === 'out'
         ? 'border-debit/20 bg-[var(--v2-debit-soft)] text-[var(--v2-debit)]'
+        // `move` shares the pending clock's neutral ground: a transfer between
+        // your own accounts is neither income nor spend (#4264).
         : 'border-[var(--v2-border)] bg-[var(--v2-surface-2)] text-[var(--v2-ink-3)]'
 
   // The radius scales with the mark (10px reads as a squircle at 32-36px but
@@ -50,7 +57,15 @@ export function DirectionMark({
       className={`flex flex-shrink-0 items-center justify-center border ${sizeClass} ${classes}`}
     >
       <Icon
-        icon={direction === 'in' ? ArrowDown : direction === 'out' ? ArrowUp : Clock}
+        icon={
+          direction === 'in'
+            ? ArrowDown
+            : direction === 'out'
+              ? ArrowUp
+              : direction === 'move'
+                ? ArrowLeftRight
+                : Clock
+        }
         className={iconSizeClass}
       />
     </span>

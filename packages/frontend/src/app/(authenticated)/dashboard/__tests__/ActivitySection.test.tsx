@@ -69,9 +69,9 @@ describe('ActivitySection badges only when something is off (#3897)', () => {
     expect(screen.getByText('Failed')).toBeInTheDocument()
   })
 
-  it('a sub-cent amount reads "-<…", never "0,00"', () => {
+  it('a sub-cent amount reads 4 decimals, never "0,00"', () => {
     renderSection({ activity: [group({ approxAmount: '0.0040' })] })
-    expect(screen.getByText(/-<0,01/)).toBeInTheDocument()
+    expect(screen.getByText(/-0,0040/)).toBeInTheDocument()
   })
 })
 

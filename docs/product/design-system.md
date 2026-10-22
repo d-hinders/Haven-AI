@@ -835,10 +835,14 @@ the component), and optionally `approx`. It formats through
 `Intl.NumberFormat` — so `9,09 kr`, `$0.96` and `0,88 €` are byte-for-byte
 the formatter's output, NBSPs included.
 
-**Under a cent (#3897, owner decision 2026-10-12):** a non-zero figure with
-`|value| < 0.005`, which would round to `0.00`, renders `<$0.01` (`<0,01 kr`,
-`<0,01 €`); the sign still comes from the caller (`-<$0.01` in activity,
-`≈<0,01 kr of 10,00 kr` in a SEK budget caption). Zero stays `$0.00`. The rule lives
+**Under a cent (owner decision 2026-10-22, superseding #3897's "<$0.01"):** a
+non-zero figure with `|value| < 0.005` (`isSubCent`) renders with EXACTLY 4
+decimals in the currency's own format — `$0.0010`, `$0.0049`, `0,0010 kr`,
+`0,0010 €` — and one that would still show `0.0000` (`|value| < 0.00005`)
+renders `<$0.0001` (`<0,0001 kr`, `<0,0001 €`). The sign still comes from the
+caller (`-$0.0040` in activity, `≈0,0040 kr of 10,00 kr` in a SEK budget
+caption). Zero stays `$0.00`; everything from `0.005` up rounds at 2 decimals
+as before. The rule lives
 in `formatFiatDisplay`, not `formatFiat`, which also drives the balance
 count-up, the "since yesterday" line and /accounts and keeps plain rounding.
 `Amount`'s currency mode, the budget caption's fiat mode and the dashboard
@@ -1657,7 +1661,7 @@ into one "×N" row; a full ledger needs one row per transaction, and gets it:
 
 ### Direction marks — `DirectionMark` ([#4197](https://github.com/d-hinders/Haven-AI/issues/4197))
 
-One shared `<DirectionMark>` for every in/out/pending direction in the app: incoming uses
+One shared `<DirectionMark>` for every in/out/pending/move direction in the app: incoming uses
 success green, outgoing uses debit sky, pending uses neutral grey. Three densities:
 
 - `comfortable` (default): 36px mark, 16px icon — the dedicated `/transactions` table.
@@ -1672,6 +1676,35 @@ hears "Money in ≈ $19.99" when the mark applies. A tooltip belongs on the mark
 `ui/Tooltip` — never around the figure: `Amount` already draws the "≈" with its own
 `title`, and two tooltips would stack. Don't hand-draw the icon or inline a copy of the
 markup; pick a density, and add a new direction state to the component itself.
+
+`move` (#4264, owner decision 2026-10-22, mockup version 2): a two-way lucide
+`ArrowLeftRight` on the same neutral grey ground as pending — a transfer between your
+own accounts is neither income nor spend. A `move` row passes no sign to `Amount`,
+exactly like pending.
+
+### Technical details disclosure (#4264)
+
+Technical terms are allowed on technical disclosure surfaces (§ Vocabulary, voice,
+accessibility), and a **"Technical details" disclosure is a markup pattern, not a
+component** — a native `<details>`/`<summary>`, closed by default:
+
+- `<details className="group">` — the `group` class is what lets the chevron key off
+  the open state;
+- `<summary>` is a full-width row: `flex cursor-pointer select-none list-none
+  items-center justify-between [&::-webkit-details-marker]:hidden`, with the label
+  ("Technical details") leading and the marker trailing. The label carries the
+  affordance — never a bare "Show"/"Hide" toggle whose state is only implied;
+- the marker is a lucide `ChevronDown` with `transition-transform
+  group-open:rotate-180` — the same group-open rotation rule as § Arrows. Never a raw
+  glyph, and never no marker at all;
+- the content uses the panel's detail rows — the label/value `dl` rows the rest of the
+  panel already renders (`dt` ink-3 label, `dd` ink-2 value), so the opened block reads
+  as part of the panel, not a bolted-on sub-card.
+
+The hand-rolled `<details>` uses that predate the pattern (`ErrorBoundary`,
+`settings/SignersSection.tsx`, `marketplace/OffersTable.tsx`, `connect-agent/*`, and
+the account signers card's text-only "Show address" toggle, which has no marker and
+does not match) are NOT migrated here. A new technical disclosure is written this way.
 
 ### Cards (`Card`)
 

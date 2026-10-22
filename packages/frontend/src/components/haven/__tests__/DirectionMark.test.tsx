@@ -14,6 +14,7 @@ describe('DirectionMark', () => {
     ['in', 'lucide-arrow-down', 'text-[var(--v2-success)]'],
     ['out', 'lucide-arrow-up', 'text-[var(--v2-debit)]'],
     ['neutral', 'lucide-clock', 'text-[var(--v2-ink-3)]'],
+    ['move', 'lucide-arrow-left-right', 'text-[var(--v2-ink-3)]'],
   ] as const)('%s renders its lucide glyph in the direction colour', (direction, glyph, colour) => {
     const { container } = render(<DirectionMark direction={direction} />)
     const mark = container.firstElementChild
@@ -44,5 +45,37 @@ describe('DirectionMark', () => {
     const { container } = render(<DirectionMark direction="in" density="inline" />)
     expect(container.firstElementChild).toHaveClass('h-[18px] w-[18px]', 'rounded-[6px]')
     expect(container.querySelector('svg')).toHaveClass('h-[11px] w-[11px]')
+  })
+
+  // #4264: a move between your own accounts gets the two-way arrow on the
+  // NEUTRAL ground — pending's clock keeps neutral for itself. A test per
+  // density, since the size classes are per-density lookups.
+  it('move (comfortable): lucide ArrowLeftRight on the neutral ground', () => {
+    const { container } = render(<DirectionMark direction="move" />)
+    expect(container.firstElementChild).toHaveClass('h-9 w-9')
+    expect(container.firstElementChild).toHaveClass('border-[var(--v2-border)]')
+    expect(container.firstElementChild).toHaveClass('bg-[var(--v2-surface-2)]')
+    expect(container.querySelector('svg.lucide-arrow-left-right')).not.toBeNull()
+    expect(container.querySelector('svg.lucide-clock')).toBeNull()
+  })
+
+  it('move (compact): lucide ArrowLeftRight on the neutral ground', () => {
+    const { container } = render(<DirectionMark direction="move" density="compact" />)
+    expect(container.firstElementChild).toHaveClass('h-8 w-8')
+    expect(container.firstElementChild).toHaveClass('bg-[var(--v2-surface-2)]')
+    expect(container.querySelector('svg.lucide-arrow-left-right')).toHaveClass('h-3.5 w-3.5')
+  })
+
+  it('move (inline): lucide ArrowLeftRight on the neutral ground', () => {
+    const { container } = render(<DirectionMark direction="move" density="inline" />)
+    expect(container.firstElementChild).toHaveClass('h-[18px] w-[18px]')
+    expect(container.firstElementChild).toHaveClass('bg-[var(--v2-surface-2)]')
+    expect(container.querySelector('svg.lucide-arrow-left-right')).toHaveClass('h-[11px] w-[11px]')
+  })
+
+  it('neutral is unchanged: still the pending clock, never the two-way arrow', () => {
+    const { container } = render(<DirectionMark direction="neutral" />)
+    expect(container.querySelector('svg.lucide-clock')).not.toBeNull()
+    expect(container.querySelector('svg.lucide-arrow-left-right')).toBeNull()
   })
 })

@@ -566,6 +566,25 @@ async function waitFor(pred, what, ms = 120000) {
 const MUTATE = ['mutate', '--issue', '1']
 const releaseFile = (repo) => path.join(repo.dir, 'release')
 const release = (repo) => writeFileSync(releaseFile(repo), 'go\n')
+/**
+ * Has this pid exited? A killed process reparented to PID 1 stays a zombie until
+ * PID 1 reaps it — lazily on some hosts (1–2 s in the Claude Code container,
+ * #4297) — and `kill(pid, 0)` succeeds on a zombie. So state `Z` counts as gone;
+ * where /proc is absent (macOS, launchd reaps) ESRCH alone decides.
+ */
+function pidExited(pid) {
+  try {
+    process.kill(pid, 0)
+  } catch (e) {
+    if (e.code === 'ESRCH') return true
+    throw e
+  }
+  try {
+    return readFileSync(`/proc/${pid}/stat`, 'utf8').replace(/^.*\) /s, '').startsWith('Z')
+  } catch {
+    return false
+  }
+}
 /** Stop an orphaned process group; it may already be gone (ESRCH), which is fine. */
 function stopGroup(pg) {
   try {
@@ -950,12 +969,24 @@ describe('signals and recover', { concurrency: 4 }, () => {
     await waitFor(() => existsSync(pids) && readFileSync(pids, 'utf8').split('\n').filter(Boolean).length >= 2, 'the mutant build')
     const mutantBuild = Number(readFileSync(pids, 'utf8').split('\n').filter(Boolean)[1])
     const t0 = Date.now()
+    // Pins pidExited's polarity: the blocked build is alive here, whatever its reaping.
+    assert.equal(pidExited(mutantBuild), false, 'the blocked mutant build is alive before the signal')
     p.child.kill('SIGINT')
     const r = await p.done
+    // Before the release: a build that survived the signal is still blocked
+    // here, so it never exits; after it, a survivor would finish by itself.
+    // The short poll is for hosts with no /proc, where only the reap says gone (#4297).
+    const exited = await waitFor(() => pidExited(mutantBuild), 'the mutant build to exit', 5000).then(
+      () => true,
+      (e) => {
+        if (/^timed out/.test(e.message)) return false
+        throw e
+      },
+    )
     release(repo)
     assert.equal(r.code, 130, r.out)
     assert.ok(Date.now() - t0 < 120000, `took ${Date.now() - t0} ms: the blocked build was not stopped`)
-    assert.throws(() => process.kill(mutantBuild, 0), /ESRCH/, 'the mutant build process is gone')
+    assert.ok(exited, 'the mutant build process is gone')
     assert.equal(readFileSync(path.join(repo.wt, 'packages/a/dist/index.mjs'), 'utf8'), A_SRC)
     assert.ok(!existsSync(repo.journal))
   })

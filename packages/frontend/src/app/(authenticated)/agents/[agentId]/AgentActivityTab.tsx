@@ -113,21 +113,20 @@ function activityUrlSchema(): ListUrlSchema {
 /**
  * The Token facet's honest options (#4249): only tokens an agent payment can
  * be in. `payment_intents.token_address` is NOT NULL — budgets are metered
- * per ERC-20 — so a native option could never match a row, and the
- * registry's native entries (`address: null`) used to map to `''`, which the
- * reader drops, so "Token: ETH" fetched EVERY payment (#4246 review B2). When
- * the page knows the agent's chain, other chains' tokens go too: none of the
- * agent's payments can be in them.
+ * per ERC-20 — and the route takes a contract address, so an option without
+ * one can never match a row. The registry's native entries are exactly those
+ * (`address: null`); they used to map to `''`, which the reader drops, so
+ * "Token: ETH" fetched EVERY payment (#4246 review B2). When the page knows
+ * the agent's chain, other chains' tokens go too: none of the agent's
+ * payments can be in them.
  */
 export function agentPaymentTokenOptions(
   tokens: readonly TransactionFilterTokenOption[],
   chainId: number | undefined,
-): TransactionFilterTokenOption[] {
+): Array<TransactionFilterTokenOption & { address: string }> {
   return tokens.filter(
-    (token) =>
-      !token.isNative &&
-      Boolean(token.address) &&
-      (chainId === undefined || token.chainId === chainId),
+    (token): token is TransactionFilterTokenOption & { address: string } =>
+      Boolean(token.address) && (chainId === undefined || token.chainId === chainId),
   )
 }
 
@@ -290,7 +289,7 @@ export default function AgentActivityTab({
   const [listState, setListState] = useListUrlState(urlSchema, { filtering: 'server' })
 
   const tokenAddressByKey = useMemo(
-    () => new Map(tokens.map((token) => [token.key, token.address as string])),
+    () => new Map(tokens.map((token) => [token.key, token.address])),
     [tokens],
   )
   const { filters, tokenPending } = useMemo(

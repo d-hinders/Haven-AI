@@ -2152,7 +2152,7 @@ describe('AgentDetailClient tabs and the Activity tab (#4226)', () => {
       render(<AgentDetailClient agentId="agent-1" />)
       // The row itself carries the badge — never the settled intent's "Sent".
       const panel = screen.getByTestId('agent-activity-section')
-      expect(within(panel).getByText('Needs attention')).toBeInTheDocument()
+      expect(within(panel).queryAllByText('Needs attention')).toHaveLength(1)
       expect(within(panel).queryByText('Sent')).toBeNull()
     })
   })

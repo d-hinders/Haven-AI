@@ -244,14 +244,15 @@ export function normalizeNodeEvents(records, exitCode, timedOut = false) {
  * `Error: expect(element).toHaveClass(...)`, a `getBy*` as
  * `TestingLibraryElementError`, and a `findBy*` / `waitFor` timeout as a plain
  * `Error:` carrying the query library's own message — "Unable to find an
- * element …", "Unable to find role=…", "Unable to find a label with the text
+ * element …", "Unable to find role=…" (or, for a `getByRole` after an `await`
+ * inside an async `waitFor` callback, "Unable to find an accessible element …"), "Unable to find a label with the text
  * of: …", "Found multiple elements …", "Found a label with the text of: …".
  * Only those recorded stems, each anchored at the start: a code throw that
  * merely mentions one later in its message stays an error, and so does an
  * unrecorded query shape (fail closed).
  */
 export const VITEST_ASSERTION_SHAPE =
-  /^(?:AssertionError\b|TestingLibraryElementError\b|Error: expect\(|Error: Unable to find (?:an element |role=|a label with the text of: )|Error: Found (?:multiple elements |a label with the text of: ))/
+  /^(?:AssertionError\b|TestingLibraryElementError\b|Error: expect\(|Error: Unable to find (?:an element |an accessible element |role=|a label with the text of: )|Error: Found (?:multiple elements |a label with the text of: ))/
 
 /** `vitest run --reporter=json` output → normalized result. Pure. */
 export function normalizeVitestJson(json, exitCode, timedOut = false) {

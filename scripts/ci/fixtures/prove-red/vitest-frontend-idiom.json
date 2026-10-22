@@ -1,5 +1,5 @@
 {
-  "numTotalTests": 17,
+  "numTotalTests": 19,
   "success": false,
   "testResults": [
     {
@@ -110,11 +110,33 @@
           "ancestorTitles": [
             "frontend idiom"
           ],
+          "title": "async waitFor getByRole after an await",
+          "fullName": "frontend idiom async waitFor getByRole after an await",
+          "status": "failed",
+          "failureMessages": [
+            "Error: Unable to find an accessible element with the role \"alert\"\n\nThere are no accessible roles. But there might be some inaccessible roles. If you wish to access them, then set the `hidden` option to `true`. Learn more about this here: https://testing-library.com/docs/dom-testing-library/api-queries#byrole\n\nIgnored nodes: comments, script, style\n\u001b[36m<div\u001b[39m\n  \u001b[33mrole\u001b[39m=\u001b[32m\"dialog\"\u001b[39m\n\u001b[36m>\u001b[39m\n  \u001b[36m<span>\u001b[39m\n    \u001b[0mx\u001b[0m\n  \u001b[36m</span>\u001b[39m\n\u001b[36m</div>\u001b[39m\n    at waitForWrapper (<fixture>/repo/node_modules/@testing-library/dom/dist/wait-for.js:163:27)\n    at <fixture>/vt/probe.test.jsx:42:11\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)\n    at runTest (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)\n    at runSuite (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runSuite (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)"
+          ]
+        },
+        {
+          "ancestorTitles": [
+            "frontend idiom"
+          ],
           "title": "plain Error",
           "fullName": "frontend idiom plain Error",
           "status": "failed",
           "failureMessages": [
-            "Error: boom\n    at <fixture>/vt/probe.test.jsx:40:35\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)\n    at runTest (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)\n    at runSuite (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runSuite (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runFiles (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1787:3)"
+            "Error: boom\n    at <fixture>/vt/probe.test.jsx:44:35\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)\n    at runTest (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)\n    at runSuite (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runSuite (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runFiles (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1787:3)"
+          ]
+        },
+        {
+          "ancestorTitles": [
+            "frontend idiom"
+          ],
+          "title": "code throw starting Found",
+          "fullName": "frontend idiom code throw starting Found",
+          "status": "failed",
+          "failureMessages": [
+            "Error: Found no config for haven.json\n    at <fixture>/vt/probe.test.jsx:45:49\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)\n    at runTest (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)\n    at runSuite (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runSuite (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runFiles (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1787:3)"
           ]
         },
         {
@@ -125,7 +147,7 @@
           "fullName": "frontend idiom Error mentioning expect( later",
           "status": "failed",
           "failureMessages": [
-            "Error: setup failed before expect(x) ran\n    at <fixture>/vt/probe.test.jsx:41:54\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)\n    at runTest (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)\n    at runSuite (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runSuite (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runFiles (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1787:3)"
+            "Error: setup failed before expect(x) ran\n    at <fixture>/vt/probe.test.jsx:46:54\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)\n    at runTest (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)\n    at runSuite (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runSuite (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runFiles (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1787:3)"
           ]
         },
         {
@@ -136,7 +158,7 @@
           "fullName": "frontend idiom code throw wrapping an assertion stem",
           "status": "failed",
           "failureMessages": [
-            "Error: cleanup failed: Error: expect(el).toHaveClass(a)\n    at <fixture>/vt/probe.test.jsx:42:61\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)\n    at runTest (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)\n    at runSuite (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runSuite (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runFiles (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1787:3)"
+            "Error: cleanup failed: Error: expect(el).toHaveClass(a)\n    at <fixture>/vt/probe.test.jsx:47:61\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)\n    at runTest (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)\n    at runSuite (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runSuite (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runFiles (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1787:3)"
           ]
         },
         {
@@ -147,7 +169,7 @@
           "fullName": "frontend idiom code throw wrapping a TestingLibraryElementError",
           "status": "failed",
           "failureMessages": [
-            "Error: cleanup failed: TestingLibraryElementError: Unable to find\n    at <fixture>/vt/probe.test.jsx:43:72\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)\n    at runTest (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)\n    at runSuite (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runSuite (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runFiles (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1787:3)"
+            "Error: cleanup failed: TestingLibraryElementError: Unable to find\n    at <fixture>/vt/probe.test.jsx:48:72\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)\n    at runTest (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)\n    at runSuite (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runSuite (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runFiles (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1787:3)"
           ]
         },
         {
@@ -158,7 +180,7 @@
           "fullName": "frontend idiom code throw starting Unable to find",
           "status": "failed",
           "failureMessages": [
-            "Error: Unable to find config file haven.json\n    at <fixture>/vt/probe.test.jsx:44:58\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)\n    at runTest (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)\n    at runSuite (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runSuite (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runFiles (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1787:3)"
+            "Error: Unable to find config file haven.json\n    at <fixture>/vt/probe.test.jsx:49:58\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)\n    at runTest (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)\n    at runSuite (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runSuite (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runFiles (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1787:3)"
           ]
         },
         {
@@ -169,7 +191,7 @@
           "fullName": "frontend idiom code throw about a labelled widget",
           "status": "failed",
           "failureMessages": [
-            "Error: Unable to find a labelled widget in config\n    at <fixture>/vt/probe.test.jsx:45:58\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)\n    at runTest (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)\n    at runSuite (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runSuite (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runFiles (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1787:3)"
+            "Error: Unable to find a labelled widget in config\n    at <fixture>/vt/probe.test.jsx:50:58\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)\n    at runTest (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)\n    at runSuite (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runSuite (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runFiles (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1787:3)"
           ]
         },
         {
@@ -180,7 +202,7 @@
           "fullName": "frontend idiom code throw starting expectation",
           "status": "failed",
           "failureMessages": [
-            "Error: expectation of a fixture failed\n    at <fixture>/vt/probe.test.jsx:46:55\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)\n    at runTest (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)\n    at runSuite (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runSuite (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runFiles (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1787:3)"
+            "Error: expectation of a fixture failed\n    at <fixture>/vt/probe.test.jsx:51:55\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)\n    at runTest (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)\n    at runSuite (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runSuite (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runFiles (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1787:3)"
           ]
         },
         {
@@ -191,7 +213,7 @@
           "fullName": "frontend idiom TypeError",
           "status": "failed",
           "failureMessages": [
-            "TypeError: Cannot read properties of undefined (reading 'y')\n    at <fixture>/vt/probe.test.jsx:47:57\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)\n    at runTest (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)\n    at runSuite (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runSuite (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runFiles (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1787:3)"
+            "TypeError: Cannot read properties of undefined (reading 'y')\n    at <fixture>/vt/probe.test.jsx:52:57\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)\n    at runTest (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)\n    at runSuite (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runSuite (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runFiles (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1787:3)"
           ]
         }
       ]

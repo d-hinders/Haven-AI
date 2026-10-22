@@ -272,7 +272,7 @@ describe('McpMerchantTransport under a policy — redirect hops and caller heade
     })
   })
 
-  it('a different port or scheme is a different origin', async () => {
+  it('a different port is a different origin', async () => {
     const fetchSpy = recordingFetch((url) =>
       url === 'https://a.dev/start'
         ? new Response(null, { status: 302, headers: { location: 'https://a.dev:8443/next' } })

@@ -2372,7 +2372,9 @@ probe (`verified_payable === true`); `verified=operator` still filters on
 provenance alone. Since #4245 `source` has a third value, `bazaar`, for rows
 the x402 Bazaar discovery cron wrote (only when a deployment enables
 discovery): seller-chosen name and description, no operator review, no
-ownership proof. Before #4245 those rows were labelled `operator`. The value
+ownership proof. Before #4245 those rows were labelled `operator`. Since the #4245 follow-up, the `haven_discover_tools` and
+`haven_quote_catalog_purchase` descriptions no longer call the catalog "curated". That is a
+description-only change: no tool name, schema or argument moved, so there is no skew. The value
 is additive, and there is no skew: every published SDK's `verified=operator`
 already keeps `source === 'operator'` only, so it excludes `bazaar` rows on
 both surfaces. The result is still read-only discovery

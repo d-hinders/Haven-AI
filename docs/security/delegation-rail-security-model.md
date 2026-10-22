@@ -529,6 +529,12 @@ caveat, so the authority is still the signed caveat stack and nothing else.
 > `merchant-catalog.ts`/`merchants.ts` coverage it names; the rest of the
 > document was not re-read for it.
 
+> **Re-verified #4245 follow-up (2026-10-22):** the follow-up only rewords the
+> `getCatalogEntry` doc comment in `sdk/src/client.ts` and two tool descriptions
+> ("curated" dropped). No code path, budget pin, caveat or authority changed.
+> Scope of this re-read: that comment and the `client.ts` coverage named above;
+> nothing else in this document was re-read for it.
+
 > **Re-verified #4245 (2026-10-22):** #4245 adds `merchant_catalog.source`
 > (`'operator'` | `'bazaar'`, migration 117) and widens the `CatalogRow` type
 > in `merchant-catalog.ts`; in `sdk/src/client.ts` only a doc comment on

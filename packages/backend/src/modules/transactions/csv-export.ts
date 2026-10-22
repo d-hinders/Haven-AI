@@ -74,6 +74,19 @@ export const TRANSACTION_CSV_COLUMNS = [
 
 export type TransactionCsvColumn = (typeof TRANSACTION_CSV_COLUMNS)[number]
 
+/**
+ * Opt-in extension used only by `foldOwnTransfers=1` exports (#4265).
+ * Keeping the default column constant untouched is what makes an export
+ * without the flag byte-identical to the pre-fold contract.
+ */
+export const FOLDED_TRANSACTION_CSV_COLUMNS = [
+  ...TRANSACTION_CSV_COLUMNS,
+  'to_account_name',
+] as const
+
+export type FoldedTransactionCsvColumn =
+  (typeof FOLDED_TRANSACTION_CSV_COLUMNS)[number]
+
 export interface TransactionCsvLookups {
   /**
    * Human-readable counterparty name — address book first, then the user's
@@ -94,6 +107,7 @@ export interface TransactionCsvLookups {
 }
 
 function rowType(tx: EnrichedTransaction): string {
+  if (tx.ownTransfer) return 'own_transfer'
   if (tx.activityType === 'delegate_sweep') return 'allowance funding'
   if (tx.source === 'x402') return 'x402'
   if (tx.source === 'mpp_demo') return 'mpp'
@@ -115,9 +129,10 @@ function counterparty(tx: EnrichedTransaction): string {
 export function transactionCsvRow(
   tx: EnrichedTransaction,
   lookups: TransactionCsvLookups,
-): Record<TransactionCsvColumn, string> {
+  includeOwnTransferColumn = false,
+): Record<TransactionCsvColumn, string> & Partial<Record<'to_account_name', string>> {
   const cp = counterparty(tx)
-  return {
+  const row: Record<TransactionCsvColumn, string> & Partial<Record<'to_account_name', string>> = {
     settled_at: new Date(tx.timestamp * 1000).toISOString(),
     type: rowType(tx),
     status: rowStatus(tx),
@@ -151,6 +166,10 @@ export function transactionCsvRow(
     // and never a placeholder promising a later record.
     settlement_tx_hash: tx.settlementTxHash ?? '',
   }
+  if (includeOwnTransferColumn) {
+    row.to_account_name = tx.ownTransfer?.toAccountName ?? ''
+  }
+  return row
 }
 
 /**
@@ -182,10 +201,14 @@ export function csvInitiator(tx: EnrichedTransaction): string {
 export function transactionsToCsv(
   transactions: EnrichedTransaction[],
   lookups: TransactionCsvLookups,
+  includeOwnTransferColumn = false,
 ): string {
+  const columns = includeOwnTransferColumn
+    ? FOLDED_TRANSACTION_CSV_COLUMNS
+    : TRANSACTION_CSV_COLUMNS
   return toCsv(
-    TRANSACTION_CSV_COLUMNS,
-    transactions.map((tx) => transactionCsvRow(tx, lookups)),
+    columns,
+    transactions.map((tx) => transactionCsvRow(tx, lookups, includeOwnTransferColumn)),
   )
 }
 

@@ -83,6 +83,16 @@ covers:
 last-verified: "2026-10-22"
 ---
 
+> **Re-verified unchanged (#4265, 2026-10-22, transaction-feed client
+> compatibility):** the covered transaction routes accept the optional
+> `foldOwnTransfers` query parameter only on the aggregate JSON and CSV reads.
+> The CSV projection appends `to_account_name` only for that opt-in request;
+> its default column set is untouched. The covered published CLI sends no flag
+> and keeps its existing local CSV behavior.
+> No MCP tool, argument, input schema, signing input, expected-context version,
+> consent hash, runtime channel or release step moves. Scope: the transaction
+> feed/export compatibility claims only; `last-verified` is not re-stamped.
+
 > **Re-verified unchanged (#4271, 2026-10-22, a new self-test step in
 > `ci_config_checks`).** The only covered file this diff touches is
 > `.github/workflows/ci.yml`: one step ADDED after the design-lint self-test

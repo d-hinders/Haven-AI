@@ -20,7 +20,11 @@ import {
 import { findCurrencyPreference } from '../../infra/repositories/users.js'
 import { fetchAccountTransactions } from './aggregate.js'
 import { toCanonicalAddress } from './normalize.js'
-import { compareEnrichedTransactions, enrichedTransactionIdentityKey } from './ordering.js'
+import {
+  compareEnrichedTransactions,
+  enrichedTransactionIdentityKey,
+  transactionDedupKey,
+} from './ordering.js'
 import { enrichTransactionsWithAgents } from './enrichment.js'
 import { enrichTransactionsWithAccounting } from './accounting.js'
 import { fetchConfirmedX402Transactions, mergeX402Transactions } from './x402.js'
@@ -128,6 +132,88 @@ export async function mergeSortDedupeAndEnrich(
   return enrichTransactionsWithAgents(userId, deduped, currency)
 }
 
+function accountLocationKey(address: string, chainId: number): string {
+  return `${address.toLowerCase()}:${chainId}`
+}
+
+function accountDisplayName(account: SmartAccountRow): string {
+  return account.name?.trim() || 'Unnamed account'
+}
+
+/**
+ * Fold the two explorer legs of a transfer between this user's own accounts
+ * into the outbound leg (#4265).
+ *
+ * Pairing is by chain plus the provider-independent transaction key and by
+ * the account each leg belongs to. Candidate discovery is separate from
+ * projection, so whether the inbound or outbound leg appears first has no
+ * bearing on which rows pair. A failed agent-enrichment pass is deliberately
+ * fail-closed: its outbound row has no `initiatedBy` classification and is
+ * left untouched rather than risking hiding an agent payment.
+ */
+export function foldOwnAccountTransfers(
+  transactions: EnrichedTransaction[],
+  accounts: SmartAccountRow[],
+): EnrichedTransaction[] {
+  const accountsByLocation = new Map(
+    accounts.map((account) => [
+      accountLocationKey(account.account_address, account.chain_id),
+      account,
+    ]),
+  )
+  const groups = new Map<
+    string,
+    { outbound: number[]; inbound: number[]; destination: SmartAccountRow }
+  >()
+
+  for (const [index, tx] of transactions.entries()) {
+    const source = accountsByLocation.get(accountLocationKey(tx.from, tx.chainId))
+    const destination = accountsByLocation.get(accountLocationKey(tx.to, tx.chainId))
+    if (!source || !destination || source.id === destination.id) continue
+
+    const groupKey = `${tx.chainId}:${transactionDedupKey(tx)}`
+    const group = groups.get(groupKey) ?? { outbound: [], inbound: [], destination }
+
+    if (
+      tx.direction === 'out' &&
+      tx.accountId === source.id &&
+      tx.agentId === undefined &&
+      tx.initiatedBy !== undefined
+    ) {
+      group.outbound.push(index)
+    } else if (tx.direction === 'in' && tx.accountId === destination.id) {
+      group.inbound.push(index)
+    }
+
+    groups.set(groupKey, group)
+  }
+
+  const foldedByIndex = new Map<number, EnrichedTransaction>()
+  const removed = new Set<number>()
+  for (const group of groups.values()) {
+    const pairCount = Math.min(group.outbound.length, group.inbound.length)
+    for (let pair = 0; pair < pairCount; pair += 1) {
+      const outboundIndex = group.outbound[pair]
+      const inboundIndex = group.inbound[pair]
+      const outbound = transactions[outboundIndex]
+      foldedByIndex.set(outboundIndex, {
+        ...outbound,
+        ownTransfer: {
+          toAccountId: group.destination.id,
+          toAccountName: accountDisplayName(group.destination),
+          toAccountAddress: toCanonicalAddress(group.destination.account_address),
+        },
+      })
+      removed.add(inboundIndex)
+    }
+  }
+
+  return transactions.flatMap((tx, index) => {
+    if (removed.has(index)) return []
+    return [foldedByIndex.get(index) ?? tx]
+  })
+}
+
 /**
  * The currency this user's converted amounts are struck in (#3127): their
  * stored `currency_preference`, or SEK when none is set — the documented
@@ -179,6 +265,8 @@ export function filterEnrichedTransactions(
   const foldedSearch = options.search !== undefined ? foldForSearch(options.search.trim()) : ''
   const searchIndex = options.searchIndex ?? EMPTY_SEARCH_INDEX
   return transactions.filter((tx) => {
+    // A move is neither money in nor money out of the user's wallet set.
+    if (options.direction && tx.ownTransfer) return false
     if (options.direction && tx.direction !== options.direction) return false
     if (options.chainId !== undefined && tx.chainId !== options.chainId) return false
 
@@ -192,7 +280,12 @@ export function filterEnrichedTransactions(
     }
 
     if (foldedSearch !== '' && !transactionMatchesSearch(tx, searchIndex, foldedSearch)) {
-      return false
+      const ownAccountNameMatches = tx.ownTransfer
+        ? [tx.accountName, tx.ownTransfer.toAccountName]
+            .map(foldForSearch)
+            .some((name) => name.includes(foldedSearch))
+        : false
+      if (!ownAccountNameMatches) return false
     }
 
     if (options.agentId === 'user') {

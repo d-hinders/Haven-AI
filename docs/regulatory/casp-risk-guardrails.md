@@ -92,6 +92,14 @@ satisfied-by:
 last-verified: "2026-10-05"
 ---
 
+> **Re-verified unchanged (#4265, 2026-10-22, published CLI boundary):** the
+> covered CLI commands and regression fixture send no own-transfer-folding flag
+> and keep both transaction legs plus the existing local CSV behavior. No
+> covered payment, signing, key, custody, advice, settlement or
+> merchant-acquiring surface changes. Scope: §7's factual-history preference
+> and the non-custody boundary for the published CLI only;
+> the document-wide `last-verified` date is not re-stamped.
+
 # Haven CASP / MiCA Risk Minimisation Guardrails
 
 ## Purpose

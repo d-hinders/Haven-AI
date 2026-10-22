@@ -81,6 +81,15 @@ covers:
 last-verified: "2026-10-22"
 ---
 
+> **Re-verified unchanged (#4265, 2026-10-22, read-only transaction
+> route):** the covered transaction route adds an opt-in projection to its
+> aggregate JSON and CSV reads. The route still authenticates the owner and
+> reads the same owned-account set; this diff adds no signing step, write, key,
+> budget decision, authorization branch or authority surface, so the
+> delegation-rail invariants are unchanged. Scope: the transaction-history
+> ownership and authority claims only; `last-verified` already carries today's
+> date and is unchanged.
+
 # Delegation rail — security model & exit story (epic #821, gate G4)
 
 Design doc for issue #824. The delegation stack (Hybrid DeleGator accounts +

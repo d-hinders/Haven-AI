@@ -10,9 +10,21 @@
  * instead of advertising stale offers.
  *
  * The probe is read-only — it never pays, signs, or follows the challenge.
+ *
+ * ## Every probe goes through the SSRF guard (#4281)
+ *
+ * A row's URL is not always one an operator chose. Since #4245, where
+ * `CATALOG_DISCOVERY_ENABLED=true` the discovery cron inserts seller-listed
+ * x402 Bazaar URLs (`source = 'bazaar'`), and the refresh re-probes every
+ * non-delisted row. So the default transport here is `guardedCatalogFetch`:
+ * the shared SSRF guard (`infra/http/ssrf-guard.ts`, #1712) classifies the
+ * resolved address, pins the socket to it, and bounds the deadline, byte
+ * count and redirects. One rule for every row: no branch on `source` to keep
+ * correct. A refusal is a failed probe, never a crash.
  */
 // dep-lint-exempt: pool appears only as the default of the injectable QueryableLike executor (index.ts and tests inject their own); the probe-driven refresh/ingest updates it feeds await a catalog repository (beyond #999's ~100-line budget)
 import pool from '../../db.js'
+import { safeRequest, type SafeFetchOptions } from '../../infra/http/ssrf-guard.js'
 
 export interface CatalogRow {
   id: string
@@ -211,6 +223,47 @@ function assetSymbol(asset: string | undefined): string {
   return known[asset.toLowerCase()] ?? 'USDC'
 }
 
+/** Total budget for one catalog probe, redirects included (the ingestion probe's leg budget). */
+export const CATALOG_PROBE_TIMEOUT_MS = 5_000
+/** Response cap for one catalog probe; a 402 challenge is a few KiB at most. */
+export const CATALOG_PROBE_MAX_BYTES = 256 * 1024
+
+/** Statuses a `Response` must be constructed without a body. */
+const NULL_BODY_STATUSES = new Set([101, 103, 204, 205, 304])
+
+/**
+ * A `fetch`-shaped transport that sends every request through the SSRF guard
+ * (#4281). Shaped like `fetch` so `probeCatalogEntry` reads one kind of
+ * response whichever transport a caller injects. A guard refusal rejects, and
+ * `probeCatalogEntry` turns the rejection into `{ ok: false }`.
+ *
+ * `options` is the guard's test seam (resolver, transport, budgets). In
+ * production the defaults apply: system DNS and the pinned `node:https`
+ * transport.
+ */
+export function createGuardedCatalogFetch(options: SafeFetchOptions = {}): typeof fetch {
+  return (async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
+    const headers = new Headers(init?.headers)
+    if (init?.body != null && typeof init.body !== 'string') {
+      throw new Error('guarded catalog probe sends only a string body')
+    }
+    const result = await safeRequest(
+      url,
+      { method: init?.method ?? 'GET', body: init?.body ?? null, accept: headers.get('accept') ?? undefined },
+      { timeoutMs: CATALOG_PROBE_TIMEOUT_MS, maxBytes: CATALOG_PROBE_MAX_BYTES, ...options },
+    )
+    if (!result.ok) throw new Error(`catalog probe refused: ${result.reason}`)
+    return new Response(NULL_BODY_STATUSES.has(result.status) ? null : result.body, {
+      status: result.status,
+      headers: result.headers,
+    })
+  }) as typeof fetch
+}
+
+/** The production catalog-probe transport: every request through the SSRF guard. */
+export const guardedCatalogFetch: typeof fetch = createGuardedCatalogFetch()
+
 /**
  * Probe one catalog entry. MCP merchants are probed with a JSON-RPC
  * tools/call POST (x402-gated MCP servers reply 402 to unpaid calls); plain
@@ -222,7 +275,7 @@ export async function probeCatalogEntry(
     CatalogRow,
     'resource_url' | 'protocol' | 'tool_name' | 'tool_arguments' | 'rail' | 'http_method' | 'body_type' | 'body_example'
   >,
-  fetchImpl: typeof fetch = fetch,
+  fetchImpl: typeof fetch = guardedCatalogFetch,
 ): Promise<ProbeResult> {
   let response: Response
   try {
@@ -324,7 +377,7 @@ export interface QueryableLike {
  */
 export async function refreshCatalog(
   db: QueryableLike = pool as unknown as QueryableLike,
-  fetchImpl: typeof fetch = fetch,
+  fetchImpl: typeof fetch = guardedCatalogFetch,
 ): Promise<{ verified: number; degraded: number }> {
   const { rows } = await db.query(
     `SELECT * FROM merchant_catalog WHERE status != 'delisted'`,

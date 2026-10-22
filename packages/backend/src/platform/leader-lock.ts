@@ -64,8 +64,8 @@ export const LEADER_LOCK_KEYS = {
   /**
    * Catalogue ingestion probe — verification of self-submitted merchant
    * endpoints (#1713, epic #1717). Deliberately its OWN key rather than
-   * sharing `catalogRefresh`: refresh re-prices an operator-curated catalogue
-   * on a fast cadence, ingest probes attacker-supplied URLs on a slow one, and
+   * sharing `catalogRefresh`: refresh re-prices the listed catalogue on a fast
+   * cadence, ingest probes attacker-supplied URLs on a slow one, and
    * a shared key would let either starve the other's tick for reasons that
    * have nothing to do with the other's work.
    *

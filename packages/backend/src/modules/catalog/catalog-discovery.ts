@@ -17,6 +17,7 @@ import type { Executor } from '../../infra/transaction.js'
 import { findOrCreateMerchantByHost, merchantHostOf } from '../../infra/repositories/merchants.js'
 import { SUPPORTED_CHAIN_IDS } from '../../domain/chains.js'
 import {
+  guardedCatalogFetch,
   probeCatalogEntry,
   type CatalogRow,
   type QueryableLike,
@@ -162,6 +163,10 @@ export async function ingestDiscoveredCatalog(
   fetchImpl: typeof fetch = fetch,
   maxItems = DEFAULT_MAX_ITEMS,
   merchants: DiscoveryMerchantWriter = defaultMerchantWriter,
+  // #4281: candidates are seller-listed URLs, so they are probed through the
+  // SSRF guard, never through `fetchImpl`. That one reads only the Bazaar
+  // index, whose URL is operator-configured (`CATALOG_DISCOVERY_URL`).
+  probeFetch: typeof fetch = guardedCatalogFetch,
 ): Promise<DiscoveryResult> {
   const result: DiscoveryResult = {
     scanned: 0,
@@ -202,7 +207,7 @@ export async function ingestDiscoveredCatalog(
     // plain-HTTP x402 resources today, so probe as an x402 http merchant.
     const probe = await probeCatalogEntry(
       { resource_url: resourceUrl, protocol: 'http', tool_name: null, tool_arguments: null, rail: 'x402' },
-      fetchImpl,
+      probeFetch,
     )
     if (!probe.ok) {
       result.failedProbe += 1

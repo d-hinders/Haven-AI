@@ -646,9 +646,13 @@ test.describe('bottom tab bar (#2731)', () => {
     // top and bottom always, left on the first cell. The More cell never
     // shows an indicator, so the right outer edge is read only through
     // symmetry with the left. The active label must also sit inside the
-    // capsule's STRAIGHT section: not extending into the 26px end radii at
-    // the label's own vertical position — the criterion #4058's
-    // `rounded-2xl` was a workaround for, now checked per tab.
+    // capsule's STRAIGHT section: its rendered GLYPHS must not extend into
+    // the 26px end radii — the criterion #4058's `rounded-2xl` was a
+    // workaround for, now checked per tab. The vertical position of the ink
+    // is the fit criterion (owner decision 2026-10-22: measure the glyph ink
+    // bounds, not the line box — the line box's corners overshoot the ink by
+    // the half-leading and the cap-to-ascent gap, which read "Accounts" as
+    // failing when its ink fits).
     for (const width of [375, 390]) {
       await page.setViewportSize({ width, height: 844 })
       for (const route of ['/dashboard', '/agents', '/transactions', '/accounts']) {
@@ -676,12 +680,34 @@ test.describe('bottom tab bar (#2731)', () => {
           const label = active.querySelector<HTMLElement>('span:last-of-type')!
           const li = indicator.getBoundingClientRect()
           const lb = label.getBoundingClientRect()
+          // The ink criterion (owner decision 2026-10-22): dy is measured to
+          // the rendered GLYPH ink, not the line box. The ink's vertical
+          // extent around the baseline comes from canvas TextMetrics —
+          // actualBoundingBox* is the ink, fontBoundingBox* places the
+          // baseline in the line box (Chromium has both). For "Accounts" at
+          // 375px this is the difference between the line box's dy of 19
+          // (8.25px required — the whole 38px stack, an overshoot) and the
+          // ink's dy of ~16 (~5.5px required vs 6.09px actual: fits).
+          const labelCs = getComputedStyle(label)
+          const ink = (() => {
+            const ctx = document.createElement('canvas').getContext('2d')!
+            ctx.font = `${labelCs.fontWeight} ${labelCs.fontSize} ${labelCs.fontFamily}`
+            const m = ctx.measureText((label.textContent ?? '').trim())
+            const fontAscent = m.fontBoundingBoxAscent ?? parseFloat(labelCs.fontSize)
+            const fontDescent = m.fontBoundingBoxDescent ?? 0
+            const halfLeading = (parseFloat(labelCs.lineHeight) - (fontAscent + fontDescent)) / 2
+            const baseline = lb.top + halfLeading + fontAscent
+            return {
+              top: baseline - m.actualBoundingBoxAscent,
+              bottom: baseline + m.actualBoundingBoxDescent,
+            }
+          })()
           // Straight section of a capsule of radius r: the end radius eats
           // `r - sqrt(r^2 - dy^2)` of the width at height-offset dy from the
-          // capsule's centre; the label's worst dy is its farthest corner.
+          // capsule's centre; the ink's worst dy is its farthest edge.
           const r = li.height / 2
           const cy = li.top + li.height / 2
-          const dy = Math.max(Math.abs(lb.top - cy), Math.abs(lb.bottom - cy))
+          const dy = Math.max(Math.abs(ink.top - cy), Math.abs(ink.bottom - cy))
           const curveInset = r - Math.sqrt(Math.max(r * r - dy * dy, 0))
           return {
             pillPadding: [cs.paddingTop, cs.paddingRight, cs.paddingBottom, cs.paddingLeft],
@@ -694,6 +720,7 @@ test.describe('bottom tab bar (#2731)', () => {
             },
             labelFit: {
               label: label.textContent,
+              inkDy: dy,
               insetLeft: lb.left - li.left,
               insetRight: li.right - lb.right,
               requiredInset: curveInset,

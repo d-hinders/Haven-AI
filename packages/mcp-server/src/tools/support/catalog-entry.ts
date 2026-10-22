@@ -32,7 +32,7 @@ export async function getUsableCatalogMcpEntry(
         code: 'CATALOG_ENTRY_NOT_FOUND',
         message:
           `No catalog entry "${catalogId}" is visible to this agent. It may not exist, ` +
-          'be delisted, or be curated for a different chain than this agent\'s. Call ' +
+          'be delisted, or be listed for a different chain than this agent\'s. Call ' +
           'haven_discover_tools to see entries available on this chain.',
         statusCode: 404,
         nextStep: refusalNextStep({ nextAction: AgentPaymentNextAction.StopAndTellUser, nextTool: null, nextToolOmittedReason: 'the user has to decide before anything is called again; suggested_tool names the tool for after that' }),

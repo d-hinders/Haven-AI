@@ -2372,12 +2372,12 @@ probe (`verified_payable === true`); `verified=operator` still filters on
 provenance alone. Since #4245 `source` has a third value, `bazaar`, for rows
 the x402 Bazaar discovery cron wrote (only when a deployment enables
 discovery): seller-chosen name and description, no operator review, no
-ownership proof. Before #4245 those rows were labelled `operator`. Since the #4245 follow-up, the `haven_discover_tools` and
-`haven_quote_catalog_purchase` descriptions no longer call the catalog "curated". That is a
-description-only change: no tool name, schema or argument moved, so there is no skew. The value
+ownership proof. Before #4245 those rows were labelled `operator`. The value
 is additive, and there is no skew: every published SDK's `verified=operator`
 already keeps `source === 'operator'` only, so it excludes `bazaar` rows on
-both surfaces. The result is still read-only discovery
+both surfaces. Since the #4245 follow-up, no catalog tool description calls
+the catalog or its entries "curated"; that is description text only (no tool
+name, schema or argument moved). The result is still read-only discovery
 metadata: catalog prices are indicative hints, never payment authority.
 `verified_payable` means the endpoint answered a live probe; `domain_verified`
 is the separate, stronger claim that ownership of the domain was proven —
@@ -2390,7 +2390,7 @@ skew-flat, the meaning of `verified=verified` is not, for that window.
 
 The default hosted MCP + local signer topology additionally exposes
 `haven_quote_mcp_tool` and `haven_quote_catalog_purchase` (#1397). They are
-read-only live-price probes for an arbitrary MCP merchant or a curated catalog
+read-only live-price probes for an arbitrary MCP merchant or a catalog
 entry: no payment intent, approval, signing context, allowance check, funding,
 or paid retry is created. Their response is informational only; a later hosted
 `haven_pay_mcp_tool` or `haven_prepare_catalog_purchase` always obtains a fresh

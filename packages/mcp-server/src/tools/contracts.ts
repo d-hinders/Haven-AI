@@ -368,7 +368,7 @@ export const toolSchemas = {
     arguments: z.record(z.string(), z.unknown()).optional(),
   },
   haven_prepare_catalog_purchase: {
-    // #1306: the guided path — starts from a curated catalog row instead of a
+    // #1306: the guided path — starts from a catalog row instead of a
     // hand-copied merchant_url/tool_name. Chain-scoped to this agent for free
     // by the backend's /catalog/:id SQL (#1299).
     catalog_id: z.string().min(1),
@@ -1253,7 +1253,7 @@ const PREPARE_CATALOG_PURCHASE_DESCRIPTION = composeDescription({
   behavior:
     'Exactly ONE cap is REQUIRED — max_amount_human (whole tokens, preferred) or max_amount (atomic); both or neither refuses before any network call, and with no user-stated cap, quote first (haven_quote_catalog_purchase) and cap at the quoted amount. The cap is enforced against the LIVE quote before any funding intent exists. ' +
     'Returns the same compact quote shape as haven_pay_mcp_tool plus catalog fields and an allowance block { rail, sufficient, remainingAtomic (deprecated alias remaining_atomic — the name haven_get_agent reports; the snake_case key is kept for a deprecation window), source }: an over-budget quote REFUSES here, before any payment exists and with no approval queue to fall back on. sufficient can be null with a warning when the read itself failed — the on-chain policy remains the real gate. ' +
-    'The response guidance says which settlement shape you are on (erc7710 direct settlement has no funding leg and no payment_header). Catalog prices are indicative; the live quote in this response is authoritative (CATALOG_PRICE_DIFFERS warns on mismatch). An unknown catalog_id, or one curated for a different chain, refuses with 404.',
+    'The response guidance says which settlement shape you are on (erc7710 direct settlement has no funding leg and no payment_header). Catalog prices are indicative; the live quote in this response is authoritative (CATALOG_PRICE_DIFFERS warns on mismatch). An unknown catalog_id, or one listed for a different chain, refuses with 404.',
   nextActionGuidance:
     'Next: the signer tool named by the response guidance, then haven_settle_mcp_tool. On a refusal, tell the user the budget was exceeded and ask them to raise it in Haven — never re-quote, re-pay, or poll: nothing is queued.',
 })

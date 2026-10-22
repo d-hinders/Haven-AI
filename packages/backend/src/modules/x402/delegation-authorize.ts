@@ -179,7 +179,7 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
   // merchantPayTo = the merchant, while erc7710 callers send the merchant
   // as payTo. An explicit settlementScheme, when present, must agree.
   const fundingShape = deriveFundingShape(payTo, agent.delegate_address)
-  const shapeError = validateDelegationSchemeShape(fundingShape, settlementScheme, facilitatorAddresses)
+  const shapeError = validateDelegationSchemeShape(fundingShape, settlementScheme, facilitatorAddresses, { payTo, merchantPayTo })
   if (shapeError) return shapeError
 
   // ── #961 hardening: cap, one-shot, replay — BEFORE any sponsored prepare ──
@@ -951,7 +951,9 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
     signHash: built.childHash,
     resourceUrl: url,
     category: category ?? null,
-    merchantAddress: (merchantPayTo ?? payTo).toLowerCase(),
+    // #4243: the merchant is the address the child pays. The shape check
+    // above already refuses a differing merchantPayTo on this branch.
+    merchantAddress: payTo.toLowerCase(),
     challengeId: null,
     idempotencyKey: idempotencyKey ?? null,
     // #1053 review, finding 5 (the quick half): record the scheme like the

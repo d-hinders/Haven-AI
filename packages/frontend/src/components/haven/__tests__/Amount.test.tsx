@@ -7,10 +7,15 @@ function renderAmount(props: Parameters<typeof Amount>[0]) {
   return container.querySelector('span')!
 }
 
-describe('Amount currency mode under a cent (#3897)', () => {
-  it('an outgoing sub-cent figure reads "-<$0.01", never "-$0.00"', () => {
+describe('Amount currency mode under a cent (2026-10-22, superseding #3897)', () => {
+  it('an outgoing sub-cent figure reads exactly 4 decimals, never "-$0.00"', () => {
     const el = renderAmount({ amount: 0.004, currency: 'USD', direction: 'out' })
-    expect(el.textContent).toBe('-<$0.01')
+    expect(el.textContent).toBe('-$0.0040')
+  })
+
+  it('a figure below 0.00005 reads "<" against the smallest showable figure', () => {
+    const el = renderAmount({ amount: 0.00003, currency: 'USD', direction: 'out' })
+    expect(el.textContent).toBe('-<$0.0001')
   })
 
   it('zero stays "$0.00"', () => {

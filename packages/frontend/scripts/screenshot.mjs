@@ -6749,7 +6749,7 @@ export const SCENARIOS = {
   },
   'dashboard-sub-cent': {
     description:
-      '#3897: a week of sub-cent agent payments — the count-form summary and "<$0.01" in the spending half and the activity row, never "$0.00" (the agent caption\'s sub-cent form is unit-tested, not shown here: the shared budget read is not sub-cent)',
+      '#4264: a week of sub-cent agent payments — the count-form summary and the 4-decimal sub-cent figures in the spending half and the activity row, "<0,0001 kr" only below 0.00005 (owner decision 2026-10-22, superseding #3897\'s "<$0.01"; the agent caption\'s sub-cent form is unit-tested, not shown here: the shared budget read is not sub-cent)',
     api(apiPath) {
       if (apiPath === '/dashboard/overview') {
         // Under a cent in EVERY display currency (the fixture user's default is SEK).

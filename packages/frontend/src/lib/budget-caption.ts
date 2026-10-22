@@ -146,12 +146,12 @@ function tokenAmount(atomic: string, symbol: string, chainId: number | null | un
   })
 }
 
-/** Bare fiat — "$1.25", or "<$0.01" under a cent (#3897). An unparseable amount falls back to token mode. */
+/** Bare fiat — "$1.25", or 4 decimals under a cent ("<0,0001 kr" below 0.00005; 2026-10-22, superseding #3897). An unparseable amount falls back to token mode. */
 function fiatValue(atomic: string, symbol: string, rate: BudgetRate, chainId: number | null | undefined): string {
   const decimals = chainId != null ? getTokenDecimals(chainId, symbol) : undefined
   // Every token decimal, not the 4-digit display default (#3897): truncating
   // first turned a sub-cent amount into "0" before it was converted, so the
-  // caption printed "≈$0.00" where "≈<$0.01" is the true figure.
+  // caption printed "≈$0.00" where "≈0,0001 kr" is the true figure.
   const decimal = formatAllowanceAmount(atomic, decimals ?? 18, { maximumFractionDigits: decimals ?? 18 })
   const human = Number.parseFloat(decimal)
   if (!Number.isFinite(human)) return tokenAmount(atomic, symbol, chainId)

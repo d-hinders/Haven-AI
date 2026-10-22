@@ -153,7 +153,7 @@ describeDb('migration 117: merchant_catalog.source (#4245)', () => {
       })
     }) as typeof fetch
 
-    const result = await ingestDiscoveredCatalog(db, fetchStub, 100)
+    const result = await ingestDiscoveredCatalog(db, fetchStub, 100, undefined, fetchStub)
     expect(result.ingested).toBe(1)
 
     const { rows } = await db.query<CatalogRow & CatalogRowWithMerchant>(

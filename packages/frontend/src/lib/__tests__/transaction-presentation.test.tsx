@@ -7,6 +7,7 @@ import {
   transactionFiat,
   transactionInitiator,
   transactionMovement,
+  transactionRowBadge,
   transactionStatus,
   transactionTitle,
 } from '../transaction-presentation'
@@ -570,6 +571,53 @@ describe('transactionFiat (#3811, #4165)', () => {
       amount: null,
       currency: 'SEK',
       approx: false,
+    })
+  })
+
+  // #4288 — the ONE row-badge precedence. The account Activity tab now
+  // renders the same badges `/transactions` does for the same rows; each
+  // rule below is the order the helper fixes.
+  describe('transactionRowBadge', () => {
+    it('falls back to "Failed" for an errored row with no other badge', () => {
+      // The production shape the account page showed unlabelled: an errored
+      // on-chain payment with no lifecycle and no wire badge.
+      expect(
+        transactionRowBadge(
+          tx({ isError: true, direction: 'out', paymentFlowStatus: null, statusBadge: undefined }),
+        ),
+      ).toEqual({ label: 'Failed', tone: 'danger' })
+    })
+
+    it('labels a clean row nothing', () => {
+      expect(transactionRowBadge(tx({}))).toBeNull()
+    })
+
+    it('puts the sweep status first — a sweep reads "Recovered"', () => {
+      const sweep = tx({ activityType: 'delegate_sweep', isError: true })
+      expect(transactionRowBadge(sweep)).toEqual({ label: 'Recovered', tone: 'success' })
+    })
+
+    it('puts the machine-payment lifecycle over the wire badge', () => {
+      expect(
+        transactionRowBadge(
+          tx({
+            direction: 'out',
+            paymentFlowStatus: 'needs_attention',
+            statusBadge: { label: 'Sent', tone: 'success' },
+          }),
+        ),
+      ).toEqual({ label: 'Needs attention', tone: 'warning' })
+      expect(
+        transactionRowBadge(tx({ direction: 'out', paymentFlowStatus: 'confirming_merchant' })),
+      ).toEqual({ label: 'Confirming', tone: 'warning' })
+    })
+
+    it('uses the wire badge when no lifecycle applies', () => {
+      expect(
+        transactionRowBadge(
+          tx({ direction: 'out', statusBadge: { label: 'Sent', tone: 'success' } }),
+        ),
+      ).toEqual({ label: 'Sent', tone: 'success' })
     })
   })
 })

@@ -124,10 +124,48 @@ describe('agentSpendSummaryLine (#4097)', () => {
       }),
     ]
     // 5 USDC at 9.5 kr + 0.01 ETH at 18 000 kr = 47.50 + 180 = 227.50 kr.
+    // #4288: a mixed-token line always includes a floating token, and this
+    // is a converted total — the line carries the "≈" mark.
     const line = agentSpendSummaryLine(agents, 'SEK', { USDC: 9.5, ETH: 18_000 })
     expect(line).toBe(
-      `2 agents can spend up to ${formatFiat(227.5, 'SEK')} per day from this account.`,
+      `2 agents can spend up to ≈${formatFiat(227.5, 'SEK')} per day from this account.`,
     )
+  })
+
+  it('mixed tokens in USD mark ≈ and price the pegged token at exactly 1.0 — no spot rate needed (#4288)', () => {
+    const agents = [
+      budgetAgent({}), // 5 USDC/day
+      budgetAgent({
+        id: 'agent-2',
+        budgets: [
+          {
+            id: 'budget-2',
+            delegationHash: '0xdef',
+            chainId: 8453,
+            tokenAddress: '0x' + 'bb'.repeat(20),
+            tokenSymbol: 'ETH',
+            decimals: 18,
+            budgetAtomic: '10000000000000000', // 0.01 ETH per day
+            periodSeconds: 86_400,
+            startDate: '2026-10-01T00:00:00Z',
+            expiresAt: '2026-11-01T00:00:00Z',
+            periodEnd: '2026-10-20T00:00:00Z',
+          },
+        ],
+      }),
+    ]
+    // USDC in USD is dollars (the peg is a registry fact) — priced at 1.0
+    // with NO USDC rate in the map, not at the ≈0.9998 market rate and not
+    // a fallback. 0.01 ETH at $3 000 = 30. The ETH budget is the float, so
+    // the line carries the mark.
+    const line = agentSpendSummaryLine(agents, 'USD', { ETH: 3_000 })
+    expect(line).toBe('2 agents can spend up to ≈$35.00 per day from this account.')
+  })
+
+  it('the same-token line stays unmarked and in token units (#4288 regression guard)', () => {
+    const agents = [budgetAgent({}), budgetAgent({ id: 'agent-2', budgets: undefined })]
+    const line = agentSpendSummaryLine(agents, 'USD', { USDC: 0.9998 })
+    expect(line).toBe('2 agents can spend up to 5.00 USDC per day from this account.')
   })
 
   it('a missing spot rate never produces a guessed figure', () => {

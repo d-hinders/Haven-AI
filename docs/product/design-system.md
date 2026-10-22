@@ -887,7 +887,10 @@ rate AND the conversion changed the number:
   (`CoreTokenConfig.pegged`), never a guess from the symbol.
 - Otherwise — a re-priced figure in another display currency (kr, €), or a
   token that floats — **totals and the detail panel** carry it: the account
-  summary card, the Activity tab's totals on its list summary line, the dashboard's 30-day spend
+  summary card, the Activity tab's totals on its list summary line, the Agents
+  tab's mixed-token budget summary line (the one converted figure on that tab
+  — a same-token line reads in token units and never carries it), the
+  dashboard's 30-day spend
   (the server applies the rule per currency, `approxByCurrency`), budget
   captions in fiat, and `TransactionDetailPanel`.
 
@@ -1067,7 +1070,11 @@ the one "≈" rule, so a total re-priced at today's rate carries the `≈` only
 where the conversion changes the number (never USDC in USD), and a booked
 total never does. A bucket with rows the server could not price
 (`unpricedByCurrency`) also carries the unpriced line — never a "≈" for
-it — and reads `—` when its priced net is zero. The four KPI tiles and
+it — and reads `—` when its priced GROSS is zero. Gross, not net (#4288):
+gross is the booked or re-priced fiat before the #3755 sweep netting, so
+gross > 0 means something was priced — priced rows that genuinely net to 0
+show "$0.00" plus the unpriced note, and only a bucket with nothing priced
+at all collapses to `—`. The four KPI tiles and
 their `metrics.*` wire fields are gone with this panel: agent counts live
 in the agents section (#3809), the spend total is the analytics page's own
 #3803 net figure, and "Successful transactions" counted receives, so it

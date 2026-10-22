@@ -67,8 +67,16 @@ describeDb('migration 117: merchant_catalog.source (#4245)', () => {
   // the next file on this worker inherit an off-head schema.
   afterAll(assertWorkerSchemaAtHead)
 
+  // Every test reads the column as THIS file's up() builds it, not as the
+  // harness built the worker schema at init: an assertion about the
+  // migration's DDL against an older build of it certifies nothing. A mutation
+  // that widened the CHECK survived until this rebuild existed, and the
+  // down/up test below then left the widened CHECK in the worker schema for
+  // the next run. Rebuilding here also heals that.
   beforeEach(async () => {
     await resetDb()
+    await down(db as never)
+    await up(db as never)
   })
 
   it('names itself', () => {

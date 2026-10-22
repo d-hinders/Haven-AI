@@ -154,8 +154,10 @@ describe('TransactionsLedgerRow — a move between your accounts', () => {
   it('one row: the move title, You · Main → Reserve, and an unsigned amount', () => {
     const row = renderRow(ownTransfer, { showAccount: true })
     expect(within(row).getByText('Moved between your accounts')).toBeInTheDocument()
-    expect(within(row).getByText('You')).toBeInTheDocument()
-    expect(within(row).getByText('Main')).toBeInTheDocument()
+    const subline = within(row).getByText('Main').closest('div')
+    // The subline reads "You · Main → Reserve" (the arrow is aria-hidden,
+    // an sr-only "to" stands in for it).
+    expect(subline?.textContent).toBe('You · Main→toReserve')
     expect(within(row).getByText('Reserve')).toBeInTheDocument()
     const amount = row.querySelector('.v2-tabular')
     expect(amount?.textContent).not.toMatch(/^[-+−]/)
@@ -164,8 +166,8 @@ describe('TransactionsLedgerRow — a move between your accounts', () => {
 
   it('says "Your accounts", never "You", when no owner send was recorded (#2097)', () => {
     const row = renderRow(tx({ ...ownTransfer, initiatedBy: 'unknown' }))
-    expect(within(row).getByText('Your accounts')).toBeInTheDocument()
-    expect(within(row).queryByText('You')).toBeNull()
+    const subline = within(row).getByText('Main').closest('div')
+    expect(subline?.textContent).toMatch(/^Your accounts · /)
     expect(row.textContent).not.toContain('Unknown')
   })
 })

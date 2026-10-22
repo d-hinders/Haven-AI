@@ -73,15 +73,16 @@ export default function TransactionsLedgerRow({
         title="Moved between your accounts"
         direction="move"
         description={
-          <span className="inline-flex max-w-full flex-wrap items-center gap-x-1.5">
-            <span>{tx.initiatedBy === 'human' ? 'You' : 'Your accounts'}</span>
-            <span aria-hidden="true">·</span>
+          // The separator is text, as on every other subline (" · "), so
+          // the two kinds of row set the dot at the same spacing.
+          <>
+            {tx.initiatedBy === 'human' ? 'You' : 'Your accounts'} ·{' '}
             <TransactionMovement
               bare
               from={accountLabel(tx.accountName)}
               to={accountLabel(tx.ownTransfer.toAccountName)}
             />
-          </span>
+          </>
         }
       />
     )

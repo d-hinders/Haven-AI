@@ -45,6 +45,7 @@ import { AttentionList } from '@/components/haven/AttentionList'
 import { NoticeRow } from '@/components/haven/NoticeRow'
 import type { AttentionListItem } from '@/components/haven/AttentionList'
 import { CodeBlock } from '@/components/ui/CodeBlock'
+import { AccountingBadge } from '@/components/accounting/AccountingBadge'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import QRCode from 'qrcode'
 import ComingSoonModal from '@/components/ComingSoonModal'
@@ -616,11 +617,43 @@ const DS_CARD_NOOP_ASYNC = async () => {}
 // account page's ledger will. Same agent, same merchant, same day: the
 // dashboard's preview MERGES these into one "×2" row; the ledger keeps one
 // row per transaction.
-const DS_LEDGER_ROWS = [
-  { id: 'l1', at: new Date(Date.now() - 5 * 60_000).toISOString(), title: 'api.vendor.com', description: 'Research assistant', value: '12.00' },
+//
+// #4266 adds the two `/transactions` shapes: a payment carrying the
+// accounting feed's badge as a plain pill (`extraBadges`, `interactive=
+// {false}` — the row is the button), and one folded move between the user's
+// own accounts (`direction="move"`, the bare `TransactionMovement`, no sign).
+const DS_LEDGER_ROWS: Array<{
+  id: string
+  at: string
+  title: string
+  description: ReactNode
+  value: string
+  direction?: 'out' | 'move'
+  accounting?: boolean
+}> = [
+  { id: 'l1', at: new Date(Date.now() - 5 * 60_000).toISOString(), title: 'api.vendor.com', description: 'Research assistant', value: '12.00', accounting: true },
+  {
+    id: 'l4',
+    at: new Date(Date.now() - 2 * 3_600_000).toISOString(),
+    title: 'Moved between your accounts',
+    description: (
+      <>
+        You · <TransactionMovement bare from="Operations" to="Reserve" />
+      </>
+    ),
+    value: '200.00',
+    direction: 'move',
+  },
   { id: 'l2', at: new Date(Date.now() - 3 * 3_600_000).toISOString(), title: 'storage.provider.io', description: 'Data agent', value: '4.50' },
   { id: 'l3', at: new Date(Date.now() - 26 * 3_600_000).toISOString(), title: 'api.vendor.com', description: 'Research assistant', value: '36.00' },
 ]
+
+const DS_LEDGER_ACCOUNTING = {
+  provider: 'fortnox',
+  status: 'pushed' as const,
+  externalRef: 'fortnox:supplierinvoice:11',
+  error: null,
+}
 
 // ── List controls (#4110, epic #4108) ─────────────────────────────────────
 // Sample data for the ListToolbar showcase. Rows are filtered in memory, so
@@ -3073,7 +3106,7 @@ export default function DesignSystemPage() {
           into a "×N" row. */}
       <Section
         title="Activity ledger (day-grouped)"
-        description="TransactionActivityRow's ledger mode (#4096, epic #4093): one row per transaction, grouped under the tinted TransactionActivityDayHeader day bands (“Today”, “Yesterday”, then short dates) — the second sanctioned band after Card.Header, on the table-header tokens with a full-width --v2-border hairline below (#4225). Rows within one day are separated by an inset --v2-border-subtle hairline that starts at the text column (insetDivider on every row after a day's first, #4165) — the un-merged counterpart of the dashboard's merged preview, which folds same agent / same merchant / same day into one ×N row. A ledger row with onOpen becomes a button: click or Enter/Space opens the shared TransactionDetailPanel, exactly as the account page's Activity tab will."
+        description="TransactionActivityRow's ledger mode (#4096, epic #4093): one row per transaction, grouped under the tinted TransactionActivityDayHeader day bands (“Today”, “Yesterday”, then short dates) — the second sanctioned band after Card.Header, on the table-header tokens with a full-width --v2-border hairline below (#4225). Rows within one day are separated by an inset --v2-border-subtle hairline that starts at the text column (insetDivider on every row after a day's first, #4165) — the un-merged counterpart of the dashboard's merged preview, which folds same agent / same merchant / same day into one ×N row. A ledger row with onOpen becomes a button: click or Enter/Space opens the shared TransactionDetailPanel, exactly as the account page's Activity tab will. Nothing inside a ledger row may be a control, so the accounting feed's badge rides extraBadges as a plain pill (#4266). A move between the user's own accounts is one row (the /transactions fold, #4265): the neutral two-way mark, an unsigned amount, and the bare TransactionMovement — the actor, then “Operations → Reserve” without From/To words."
       >
         <div className="max-w-xl">
           {/* #4288: the testid anchors the ledger clip — the day-grouped
@@ -3090,10 +3123,15 @@ export default function DesignSystemPage() {
                       <TransactionActivityRow
                         key={row.id}
                         insetDivider={index > 0}
-                        direction="out"
+                        direction={row.direction ?? 'out'}
                         title={row.title}
                         description={row.description}
                         value={row.value}
+                        extraBadges={
+                          row.accounting ? (
+                            <AccountingBadge accounting={DS_LEDGER_ACCOUNTING} interactive={false} />
+                          ) : undefined
+                        }
                         asset="USDC"
                         timestamp={timeAgo(row.at)}
                         onOpen={() => setDsLedgerOpened(row.title)}

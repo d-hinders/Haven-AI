@@ -141,3 +141,55 @@ describe('no-policy transport — redirect characterization (#4257)', () => {
     await expect(transport().fetch(`${A}/h0`)).rejects.toThrow()
   })
 })
+
+describe('no-policy transport — a cross-origin hop keeps credentials at their origin (#4257)', () => {
+  it('a cross-origin GET hop carries only the allow-listed headers', async () => {
+    routes.set('a /start', redirect(302, `${B}/next`))
+    const response = await transport().fetch(`${A}/start`, { headers: CALLER_HEADERS })
+    expect(await response.text()).toBe('b-final')
+    expect(at('a')[0].headers['x-api-key']).toBe('merchant-a-key')
+    const sent = at('b')[0].headers
+    expect(sent['x-api-key']).toBeUndefined()
+    expect(sent.authorization).toBeUndefined()
+    expect(sent.cookie).toBeUndefined()
+    expect(sent).toMatchObject({
+      accept: 'application/json',
+      'user-agent': 'haven-test',
+      'x402-wallet': '0x0000000000000000000000000000000000000001',
+    })
+  })
+
+  it('a paid GET never delivers its payment headers to a cross-origin redirect target', async () => {
+    routes.set('a /paid', redirect(302, `${B}/elsewhere`))
+    await transport().deliverPayment(`${A}/paid`, { headers: { 'X-Api-Key': 'merchant-a-key' } }, 'signed-for-a')
+    const sent = at('b')[0].headers
+    expect(sent['payment-signature']).toBeUndefined()
+    expect(sent['x-payment']).toBeUndefined()
+    expect(sent['x-api-key']).toBeUndefined()
+  })
+
+  it('a 303 that crosses origin follows as a GET with the headers reduced', async () => {
+    routes.set('a /start', redirect(303, `${B}/next`))
+    await transport().fetch(`${A}/start`, { method: 'POST', headers: CALLER_HEADERS, body: '{"x":1}' })
+    expect(at('b')[0]).toMatchObject({ method: 'GET', body: '' })
+    expect(at('b')[0].headers['x-api-key']).toBeUndefined()
+  })
+
+  it('a 307 that would re-send the body to another origin is refused before connecting there', async () => {
+    routes.set('a /start', redirect(307, `${B}/next`))
+    await expect(
+      transport().fetch(`${A}/start`, { method: 'POST', headers: CALLER_HEADERS, body: '{"payment":"signed-for-a"}' }),
+    ).rejects.toMatchObject({ refusal: 'redirect_cross_origin_body', beforeRequest: false })
+    expect(at('a')).toHaveLength(1)
+    expect(at('b')).toHaveLength(0)
+  })
+
+  it('once stripped, a later hop back to the first origin does not regain them', async () => {
+    routes.set('a /start', redirect(302, `${B}/x`))
+    routes.set('b /x', redirect(302, `${A}/back`))
+    await transport().fetch(`${A}/start`, { headers: CALLER_HEADERS })
+    const back = at('a').find((s) => s.path === '/back')
+    expect(back?.headers['x-api-key']).toBeUndefined()
+    expect(back?.headers.authorization).toBeUndefined()
+  })
+})

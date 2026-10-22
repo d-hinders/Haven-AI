@@ -74,6 +74,11 @@ export type MerchantEgressRefusalReason =
   | 'redirect_missing_location'
   | 'redirect_invalid_location'
   | 'redirect_budget_exceeded'
+  /**
+   * #4257: a 307/308 would re-send the request body to another origin. Only
+   * reachable without a policy, which follows GET redirects alone.
+   */
+  | 'redirect_cross_origin_body'
 
 export const MERCHANT_EGRESS_REFUSED_CODE = 'MERCHANT_EGRESS_REFUSED'
 

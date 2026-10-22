@@ -420,15 +420,15 @@ describe('discoverMerchantMcpUrl under a policy', () => {
 })
 
 describe('characterization — WITHOUT a policy the transport is unchanged', () => {
-  it('passes the caller init through untouched (no redirect: manual) and returns redirects as-is', async () => {
+  it("passes a caller's redirect: 'manual' straight to the platform and returns the 3xx as-is", async () => {
     const fetchSpy = recordingFetch(() =>
       new Response(null, { status: 302, headers: { location: 'https://b.dev/x' } }),
     )
     const transport = transportWith(undefined, fetchSpy)
-    const response = await transport.fetch('https://a.dev/start', { method: 'POST' })
+    const response = await transport.fetch('https://a.dev/start', { method: 'POST', redirect: 'manual' })
     expect(response.status).toBe(302)
     expect(fetchSpy.calls).toHaveLength(1)
-    expect(fetchSpy.calls[0].init?.redirect).toBeUndefined()
+    expect(fetchSpy.calls[0].init?.redirect).toBe('manual')
   })
 
   it('budgetFor falls back to merchantTimeout for every use', () => {
@@ -444,5 +444,88 @@ describe('characterization — WITHOUT a policy the transport is unchanged', () 
     const transport = transportWith(undefined, fetchSpy)
     const response = await transport.fetch('https://a.dev/big')
     await expect(response.text()).resolves.toHaveLength(3 * 4096)
+  })
+})
+
+describe('McpMerchantTransport WITHOUT a policy — the transport follows redirects itself (#4257)', () => {
+  const sentHeaders = (init?: RequestInit): Record<string, string> =>
+    Object.fromEntries(new Headers(init?.headers))
+
+  const CALLER_HEADERS = {
+    Authorization: 'Bearer merchant-a-token',
+    Cookie: 'session=a',
+    'X-Api-Key': 'merchant-a-key',
+    'PAYMENT-SIGNATURE': 'signed-for-a',
+    Accept: 'application/json',
+  }
+
+  it('follows with redirect: manual so no hop is left to the platform', async () => {
+    const fetchSpy = recordingFetch((url) =>
+      url === 'https://a.dev/start'
+        ? new Response(null, { status: 302, headers: { location: '/next' } })
+        : okText('arrived'),
+    )
+    await transportWith(undefined, fetchSpy).fetch('https://a.dev/start', { headers: CALLER_HEADERS })
+    expect(fetchSpy.calls.map((c) => c.init?.redirect)).toEqual(['manual', 'manual'])
+    expect(sentHeaders(fetchSpy.calls[1].init)).toEqual(sentHeaders({ headers: CALLER_HEADERS }))
+  })
+
+  it('an https → http hop is a different origin: no credential or payment header travels in clear', async () => {
+    const fetchSpy = recordingFetch((url) =>
+      url === 'https://a.dev/paid'
+        ? new Response(null, { status: 302, headers: { location: 'http://a.dev/paid' } })
+        : okText('arrived'),
+    )
+    await transportWith(undefined, fetchSpy).fetch('https://a.dev/paid', { headers: CALLER_HEADERS })
+    expect(sentHeaders(fetchSpy.calls[1].init)).toEqual({ accept: 'application/json' })
+  })
+
+  it('a 308 to another origin with a body is refused mid-flight and never reaches the target', async () => {
+    const fetchSpy = recordingFetch((url) =>
+      url === 'https://a.dev/mcp'
+        ? new Response(null, { status: 308, headers: { location: 'https://b.dev/mcp' } })
+        : okText('arrived'),
+    )
+    await expect(
+      transportWith(undefined, fetchSpy).fetch('https://a.dev/mcp', {
+        method: 'POST',
+        headers: CALLER_HEADERS,
+        body: '{"params":{"_meta":{"x402/payment":"signed-for-a"}}}',
+      }),
+    ).rejects.toMatchObject({ refusal: 'redirect_cross_origin_body', beforeRequest: false })
+    expect(fetchSpy.calls.map((c) => c.url)).toEqual(['https://a.dev/mcp'])
+  })
+
+  it('a 302 POST becomes a body-less GET, and the body headers go with the body', async () => {
+    const fetchSpy = recordingFetch((url) =>
+      url === 'https://a.dev/start'
+        ? new Response(null, { status: 302, headers: { location: '/next' } })
+        : okText('arrived'),
+    )
+    await transportWith(undefined, fetchSpy).fetch('https://a.dev/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Api-Key': 'k' },
+      body: '{}',
+    })
+    expect(fetchSpy.calls[1].init).toMatchObject({ method: 'GET', body: null })
+    expect(sentHeaders(fetchSpy.calls[1].init)).toEqual({ 'x-api-key': 'k' })
+  })
+
+  it('a 307 PUT keeps its method and body on a same-origin hop', async () => {
+    const fetchSpy = recordingFetch((url) =>
+      url === 'https://a.dev/start'
+        ? new Response(null, { status: 307, headers: { location: '/next' } })
+        : okText('arrived'),
+    )
+    await transportWith(undefined, fetchSpy).fetch('https://a.dev/start', { method: 'PUT', body: 'payload' })
+    expect(fetchSpy.calls[1].init).toMatchObject({ method: 'PUT', body: 'payload' })
+  })
+
+  it('an unresolvable Location fails like the platform, without a second request', async () => {
+    const fetchSpy = recordingFetch(() =>
+      new Response(null, { status: 302, headers: { location: 'http://[bad' } }),
+    )
+    await expect(transportWith(undefined, fetchSpy).fetch('https://a.dev/start')).rejects.toBeInstanceOf(TypeError)
+    expect(fetchSpy.calls).toHaveLength(1)
   })
 })

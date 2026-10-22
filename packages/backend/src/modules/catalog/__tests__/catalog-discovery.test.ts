@@ -31,6 +31,7 @@ function paid402(): Response {
 /** A fake db that records inserts and returns the given existing resource URLs. */
 function fakeDb(existing: string[] = []) {
   const inserts: unknown[][] = []
+  const insertSql: string[] = []
   const db = {
     query: async (sql: string, values?: unknown[]) => {
       if (sql.includes('SELECT resource_url')) {
@@ -38,11 +39,12 @@ function fakeDb(existing: string[] = []) {
       }
       if (sql.startsWith('INSERT')) {
         inserts.push(values ?? [])
+        insertSql.push(sql)
       }
       return { rows: [] as CatalogRow[] }
     },
   }
-  return { db, inserts }
+  return { db, inserts, insertSql }
 }
 
 
@@ -101,6 +103,27 @@ describe('ingestDiscoveredCatalog', () => {
       'merchant-1',
       '0x' + '11'.repeat(20),
     ])
+  })
+
+  it('writes source bazaar on every row it inserts, never the operator default (#4245)', async () => {
+    // Mutation: drop `source` from the INSERT and the row takes the column's
+    // 'operator' default — the listing would present a seller's own words as
+    // operator-curated. The real-DB proof is in the migration 117 suite.
+    const { db, insertSql } = fakeDb()
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input)
+      if (url.includes('/discovery/resources')) {
+        return bazaarPage([{ resource: 'https://api.weather.example/paid', type: 'http', accepts: X402_BODY.accepts }])
+      }
+      return paid402()
+    })
+
+    const result = await ingestDiscoveredCatalog(db, fetchMock as unknown as typeof fetch, 100, stubMerchants().merchants)
+
+    expect(result.ingested).toBe(1)
+    expect(insertSql).toHaveLength(1)
+    expect(insertSql[0]).toMatch(/\bsource\)/)
+    expect(insertSql[0]).toMatch(/'bazaar'\)\s*ON CONFLICT/)
   })
 
   it('keys the merchant by the host a client would fetch, so a crafted Bazaar URL cannot join a curated merchant (#3078 reviews)', async () => {

@@ -758,6 +758,15 @@ Isolation rules that are non-negotiable for a payments product:
  > this bullet's catalog-verification paragraphs; nothing else in the
  > document was re-read for it, and `last-verified` is bumped to 2026-10-08
  > for exactly this coverage.
+ > **Re-verified #4245 (2026-10-22):** #4245 adds `merchant_catalog.source`
+ > (migration 117) and the `CatalogRow.source` field in
+ > `modules/catalog/merchant-catalog.ts`. The refresh probe, what it records
+ > (`pay_to`, `asset_transfer_methods`, `http_method`) and the marketplace
+ > chain scoping above are unchanged; only the discovery cron's INSERT writes
+ > the new column. `CATALOG_DISCOVERY_ENABLED` stays false in
+ > `.env.dev.example`. Scope of this re-read: this bullet's catalog
+ > paragraphs; nothing else in the document was re-read for it, and
+ > `last-verified` is not bumped.
  - **Owner company details (#3332)** — `HAVEN_OWNER_COMPANY_DETAILS` (strict
   boolean) gates `/user/company-details*`, the additive `parties.buyer`
   field on payment evidence/receipts, and the Settings → Company details

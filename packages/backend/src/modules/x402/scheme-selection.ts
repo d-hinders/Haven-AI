@@ -49,6 +49,7 @@ export function validateDelegationSchemeShape(
   fundingShape: boolean,
   settlementScheme: string | undefined,
   facilitatorAddresses: string[] | undefined,
+  payee: { payTo: string; merchantPayTo: string | undefined },
 ): X402HandlerResult | null {
   if (settlementScheme === 'eip3009' && !fundingShape) {
     return {
@@ -62,6 +63,24 @@ export function validateDelegationSchemeShape(
     return {
       code: 400,
       body: { error: 'erc7710 settlement requires payTo = the merchant, not the agent delegate EOA' },
+    }
+  }
+  // #4243: on erc7710 the settlement child pays `payTo`, and `payTo` is the
+  // merchant. A `merchantPayTo` that names anyone else would be recorded as
+  // the payment's merchant (evidence, receipts, the accounting counterparty)
+  // while the funds go to `payTo`. Equal in any case, or absent, is fine.
+  if (
+    !fundingShape &&
+    payee.merchantPayTo !== undefined &&
+    payee.merchantPayTo.toLowerCase() !== payee.payTo.toLowerCase()
+  ) {
+    return {
+      code: 400,
+      body: {
+        error:
+          'erc7710 settlement pays payTo, so payTo is the merchant: merchantPayTo, when sent, must equal payTo. ' +
+          'merchantPayTo belongs to the EIP-3009 funding leg, where payTo is the agent delegate EOA.',
+      },
     }
   }
   if (facilitatorAddresses !== undefined && fundingShape) {

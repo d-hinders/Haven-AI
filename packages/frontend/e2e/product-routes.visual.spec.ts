@@ -569,7 +569,8 @@ async function expectNoSkeletons(region: Locator, label: string) {
  * reserves a bottom band for the bar (`AuthenticatedShell`'s
  * `max-lg:pb-[calc(1.5rem+var(--v2-tab-bar-h)+var(--v2-tab-bar-bottom))]`),
  * so the bar is moved into that band at the document's end: still
- * photographed, covering nothing. `position: absolute; bottom: …` would NOT
+ * photographed, covering nothing — and only when it covers something, so a
+ * page that already ends above it keeps its fixed bar byte-for-byte. `position: absolute; bottom: …` would NOT
  * do it — it resolves against the viewport-sized initial containing block and
  * lands back at the first viewport's bottom — so the bar gets a pixel `top`,
  * corrected once against where it actually painted.
@@ -585,25 +586,40 @@ async function parkTabBarAtPageEnd(page: Page, label: string): Promise<void> {
       const cs = getComputedStyle(el)
       return cs.position === 'fixed' && cs.display !== 'none' && !el.closest('[inert]')
     })
-    if (live.length !== 1) return { live: live.length, barTop: 0, contentBottom: 0 }
-    const bar = live[0]
-    const rect = bar.getBoundingClientRect()
-    const bottomGap = window.innerHeight - rect.bottom
-    const target = document.documentElement.scrollHeight - rect.height - bottomGap
-    bar.style.setProperty('position', 'absolute', 'important')
-    bar.style.setProperty('bottom', 'auto', 'important')
-    bar.style.setProperty('top', `${target}px`, 'important')
-    // A positioned ancestor offsets `top`; measure where it painted and correct once.
-    const painted = bar.getBoundingClientRect().top + window.scrollY
-    bar.style.setProperty('top', `${target + (target - painted)}px`, 'important')
-
     const main = document.getElementById('main-content')
     let contentBottom = 0
     for (const child of Array.from(main?.children ?? [])) {
       const r = child.getBoundingClientRect()
       if (r.height > 0) contentBottom = Math.max(contentBottom, r.bottom + window.scrollY)
     }
-    return { live: 1, barTop: bar.getBoundingClientRect().top + window.scrollY, contentBottom }
+    if (live.length !== 1) return { live: live.length, parked: false, barTop: 0, barBottom: 0, docHeight: 0, visibility: '', contentBottom }
+    const bar = live[0]
+    const rect = bar.getBoundingClientRect()
+    // Park only when the bar actually sits over content: a page that ends
+    // above it (every one-viewport capture) keeps the fixed bar untouched, so
+    // its baseline does not move on a compositing difference (fixed vs
+    // absolute rasterises the bar's shadow differently).
+    const parked = rect.top + window.scrollY < contentBottom
+    if (parked) {
+      const bottomGap = window.innerHeight - rect.bottom
+      const target = document.documentElement.scrollHeight - rect.height - bottomGap
+      bar.style.setProperty('position', 'absolute', 'important')
+      bar.style.setProperty('bottom', 'auto', 'important')
+      bar.style.setProperty('top', `${target}px`, 'important')
+      // A positioned ancestor offsets `top`; measure where it painted and correct once.
+      const painted = bar.getBoundingClientRect().top + window.scrollY
+      bar.style.setProperty('top', `${target + (target - painted)}px`, 'important')
+    }
+    const after = bar.getBoundingClientRect()
+    return {
+      live: 1,
+      parked,
+      barTop: after.top + window.scrollY,
+      barBottom: after.bottom + window.scrollY,
+      docHeight: document.documentElement.scrollHeight,
+      visibility: getComputedStyle(bar).visibility,
+      contentBottom,
+    }
   })
   expect(result.live, `${label}: exactly one live (fixed) phone tab bar renders below lg`).toBe(1)
   expect(
@@ -611,6 +627,12 @@ async function parkTabBarAtPageEnd(page: Page, label: string): Promise<void> {
     `${label}: the tab bar's top (${result.barTop}px) sits above the end of the page content ` +
       `(${result.contentBottom}px) — the full-page capture would paint the bar over content (#4283)`,
   ).toBeGreaterThanOrEqual(result.contentBottom - 0.5)
+  // Still photographed: visible, and inside the captured document.
+  expect(result.visibility, `${label}: the tab bar is hidden`).toBe('visible')
+  expect(
+    result.barBottom,
+    `${label}: the tab bar ends at ${result.barBottom}px, outside the ${result.docHeight}px document`,
+  ).toBeLessThanOrEqual(result.docHeight + 0.5)
 }
 
 test.describe('product-route visual regression', () => {

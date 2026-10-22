@@ -1725,7 +1725,7 @@ export async function serveOwnerOnlyHybridSigners(page: Page, ownerAddress: stri
  *  - the dashboard-overview stats the Spending hero's Last 30 days reads
  *    (#4260), told as ONE story with those rows (#4283): the payment is the
  *    hero's last payment (same merchant host, same time, an amount inside the
- *    30-day total), and the agent carries an MCP last-seen an hour before
+ *    30-day total), and the agent carries an MCP last-seen 80 minutes before
  *    the harness clock, so the header reads "Last activity 1h ago".
  *  - the company-details read the #3426 toggle fires at mount, so the census
  *    above is not re-failed by it (see the handler below).
@@ -1776,7 +1776,7 @@ export async function serveAgentDetailResponses(
             created_at: '2026-05-02T10:00:00.000Z',
             // #4283: the header's "Last activity" reads MCP last-seen; a
             // server name with it keeps the Settings tab's Connection row
-            // coherent (AgentSettingsTab). An hour before the harness clock.
+            // coherent (AgentSettingsTab). 80 minutes before the harness clock (renders "1h ago").
             mcp_server_name: 'haven-research',
             mcp_last_seen_at: '2026-09-01T10:40:00.000Z',
             ...options.agentOverrides,
@@ -2010,7 +2010,7 @@ export async function serveAgentDetailResponses(
 
     if (path === `/agent-activity/${agentId}/stats`) {
       await fulfillJson(route, {
-        all_time: [{ token: 'USDC', total_spent: '25.00', tx_count: 1 }],
+        all_time: [{ token: 'USDC', total_spent: '0.05', tx_count: 1 }],
         today: [{ token: 'USDC', total_spent: '0.00', tx_count: 0 }],
         pending_approvals: 0,
       })

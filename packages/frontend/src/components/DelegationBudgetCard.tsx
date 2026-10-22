@@ -11,7 +11,7 @@
  * budget is "a budget that refills itself".
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type Ref } from 'react'
 import { EllipsisVertical } from 'lucide-react'
 import { Icon } from './ui/Icon'
 import { isAddress, parseUnits, formatUnits } from 'viem'
@@ -41,6 +41,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from './ui/DropdownMenu'
 import { useToast } from './ui/Toast'
@@ -243,10 +244,17 @@ export default function DelegationBudgetCard({
   // this flag is not consulted. A `?grant=` prefill opens it (#2539): the
   // human must see the build they are about to sign.
   const [formOpen, setFormOpen] = useState(false)
+  // #4261: the form's opener is a row's ⋯ menu item, so the collapse has to
+  // know WHICH trigger to hand focus back to. The menu item records its row's
+  // delegation hash here; a `?grant=` prefill (no menu) leaves it null.
+  const formOriginRef = useRef<string | null>(null)
+  const budgetCardRef = useRef<HTMLElement | null>(null)
+  const headingRef = useRef<HTMLHeadingElement | null>(null)
   // Opening and collapsing swap the pressed control for another, so focus
   // would fall to <body> (#3695 review). An owner-initiated toggle says where
-  // focus goes next — the amount field on open, Add budget on collapse; the
-  // `?grant=` prefill opens without one, so a page load never steals focus.
+  // focus goes next — the amount field on open, the originating ⋯ trigger on
+  // collapse; the `?grant=` prefill opens without one, so a page load never
+  // steals focus.
   const addBudgetRef = useRef<HTMLButtonElement>(null)
   const amountRef = useRef<HTMLInputElement>(null)
   const pendingFocus = useRef<'amount' | 'add' | null>(null)
@@ -254,9 +262,42 @@ export default function DelegationBudgetCard({
     pendingFocus.current = 'amount'
     setFormOpen(true)
   }, [])
+  // #4261: the row menu's Add budget item — remembers which row opened the
+  // form so the collapse can return to that row's trigger.
+  const openFormFromRow = useCallback(
+    (hash: string) => {
+      formOriginRef.current = hash
+      openForm()
+    },
+    [openForm],
+  )
   const collapseForm = useCallback(() => {
     pendingFocus.current = 'add'
     setFormOpen(false)
+  }, [])
+  // Where collapse focus lands (#4261): the ⋯ trigger that opened the form —
+  // resolved fresh, the list may have reloaded while it was up — else the
+  // first row's trigger, else Set budget, else the section heading. A trigger
+  // that is disabled (`busy`) cannot take focus, so the heading takes it
+  // instead. It never lands on <body>.
+  const focusAfterCollapse = useCallback(() => {
+    const root = budgetCardRef.current
+    const origin = formOriginRef.current
+    const trigger =
+      (origin
+        ? root?.querySelector<HTMLButtonElement>(`[data-budget-trigger="${CSS.escape(origin)}"]`)
+        : null) ??
+      root?.querySelector<HTMLButtonElement>('[data-budget-trigger]') ??
+      null
+    if (trigger && !trigger.disabled) {
+      trigger.focus()
+      return
+    }
+    if (trigger && trigger.disabled) {
+      headingRef.current?.focus()
+      return
+    }
+    ;(addBudgetRef.current ?? headingRef.current)?.focus()
   }, [])
   // #3716: the sub-budget entry lives in the Add budget panel, below the
   // grant form. Clicking it collapses the form and opens the modal. It
@@ -273,23 +314,30 @@ export default function DelegationBudgetCard({
     const target = pendingFocus.current
     if (!target) return
     pendingFocus.current = null
-    ;(target === 'amount' ? amountRef.current : addBudgetRef.current)?.focus()
-  }, [formOpen])
+    if (target === 'amount') {
+      amountRef.current?.focus()
+      return
+    }
+    // #4261: collapse (Cancel or save) returns focus to the ⋯ trigger that
+    // opened the form, via the chain in `focusAfterCollapse`.
+    focusAfterCollapse()
+  }, [formOpen, focusAfterCollapse])
 
   // #3716: when the modal closes, `formOpen` does not change, so the effect
   // above does not run — and `Modal` restores focus to the clicked entry
-  // (ui/Modal.tsx), which the collapsed form has unmounted. Focus Add budget
-  // explicitly, once per open→close cycle; the guard keeps the initial
-  // render (and a close without a modal) from stealing focus.
+  // (ui/Modal.tsx), which the collapsed form has unmounted. Focus the form's
+  // origin trigger explicitly, once per open→close cycle, through the same
+  // chain a Cancel uses (#4261); the guard keeps the initial render (and a
+  // close without a modal) from stealing focus.
   const wasIssuingSubBudget = useRef(false)
   useEffect(() => {
     if (issuingSubBudget) {
       wasIssuingSubBudget.current = true
     } else if (wasIssuingSubBudget.current) {
       wasIssuingSubBudget.current = false
-      addBudgetRef.current?.focus()
+      focusAfterCollapse()
     }
-  }, [issuingSubBudget])
+  }, [issuingSubBudget, focusAfterCollapse])
 
   useEffect(() => {
     // #3549: a retired agent's card has no grant form to fill — leave the
@@ -308,6 +356,9 @@ export default function DelegationBudgetCard({
     setPeriod(row.period_seconds)
     setRecipient(row.recipient_address ?? '')
     setPrefill({ hash: grantHash, periodSeconds: row.period_seconds })
+    // #4261: a prefill opens with no menu origin — the collapse falls back to
+    // the first row's trigger (or Set budget) instead of a stale one.
+    formOriginRef.current = null
     setFormOpen(true)
     try {
       window.history.replaceState(null, '', `/agents/${agentId}`)
@@ -519,8 +570,8 @@ export default function DelegationBudgetCard({
   const showForm = formOpen || Boolean(budgetsError)
 
   return (
-    <section className="mt-6">
-      <SpendingHeading retired={retired} />
+    <section ref={budgetCardRef} className="mt-6">
+      <SpendingHeading retired={retired} headingRef={headingRef} />
       {/* #4226: the dashboard money-card pattern (design-system.md, #3897) —
           budgets on the left, Last 30 days on the right as a divided section,
           stacked below `lg`. The card itself carries no padding: the halves
@@ -620,6 +671,7 @@ export default function DelegationBudgetCard({
               paused={isPaused}
               onRevoke={handleRevoke}
               onEdit={retired ? undefined : setEditing}
+              onAdd={!retired && hasActive && tokens.length > 0 && !showForm ? openFormFromRow : undefined}
               busy={busy}
               ready={ready}
             />
@@ -639,24 +691,28 @@ export default function DelegationBudgetCard({
           </p>
         ) : null
       ) : tokens.length > 0 && !showForm ? (
-        <div className="mt-3">
-          {hasActive ? (
-            <Button ref={addBudgetRef} size="sm" variant="ghost" onClick={openForm}>
-              Add budget
+        !hasActive ? (
+          // #4226: needs setup — "No budget yet." with Set budget (mockup
+          // v2). The form opens on the button, or expanded straight away on
+          // a `?grant=` prefill; the received-grants nuance lives on the
+          // form's own line when it opens. #4261: with an active budget
+          // there is NO control here — Add budget is the rows' ⋯ menu item.
+          <div className="mt-3">
+            <p className="text-sm text-[var(--v2-ink-muted)]">No budget yet.</p>
+            <Button
+              ref={addBudgetRef}
+              size="sm"
+              variant="ghost"
+              className="mt-2"
+              onClick={() => {
+                formOriginRef.current = null
+                openForm()
+              }}
+            >
+              Set budget
             </Button>
-          ) : (
-            // #4226: needs setup — "No budget yet" with Set budget (mockup
-            // v2). The form opens on the button, or expanded straight away on
-            // a `?grant=` prefill; the received-grants nuance lives on the
-            // form's own line when it opens.
-            <div>
-              <p className="text-sm text-[var(--v2-ink-muted)]">No budget yet.</p>
-              <Button ref={addBudgetRef} size="sm" variant="ghost" className="mt-2" onClick={openForm}>
-                Set budget
-              </Button>
-            </div>
-          )}
-        </div>
+          </div>
+        ) : null
       ) : tokens.length > 0 ? (
         <div className={hasActive ? 'mt-4 space-y-2' : 'space-y-2'}>
           {hasActive ? (
@@ -904,10 +960,19 @@ export default function DelegationBudgetCard({
  * The section's heading and one-line description, ABOVE its card — the
  * detail-page section rule (design-system.md, #3692).
  */
-function SpendingHeading({ retired }: { retired?: 'revoked' | 'archived' }) {
+function SpendingHeading({
+  retired,
+  headingRef,
+}: {
+  retired?: 'revoked' | 'archived'
+  /** #4261: the collapse-focus chain's last resort when every trigger is gone. */
+  headingRef?: React.Ref<HTMLHeadingElement>
+}) {
   return (
     <div className="mb-3">
-      <h2 className="v2-text-h3 text-[var(--v2-ink)]">Spending</h2>
+      <h2 ref={headingRef} tabIndex={-1} className="v2-text-h3 text-[var(--v2-ink)] outline-none">
+        Spending
+      </h2>
       <p className="mt-0.5 text-sm text-[var(--v2-ink-muted)]">
         {retired
           ? 'What this agent can still spend each period.'
@@ -1031,6 +1096,7 @@ function BudgetRow({
   paused,
   onRevoke,
   onEdit,
+  onAdd,
   busy,
   ready,
 }: {
@@ -1047,6 +1113,13 @@ function BudgetRow({
   onRevoke: (hash: string) => void | Promise<void>
   /** Opens the edit-in-place flow (#3166) for THIS row; absent on a retired agent (#3549). */
   onEdit?: (budget: DelegationBudget) => void
+  /**
+   * #4261: opens the collapsed grant form, remembering this row as the form's
+   * origin (its trigger takes the collapse focus). Present only when the old
+   * Add budget button showed: an active budget, tokens on this network, the
+   * form not already open, and not retired.
+   */
+  onAdd?: (hash: string) => void
   busy: boolean
   ready: boolean
 }) {
@@ -1119,35 +1192,34 @@ function BudgetRow({
             is unchanged. The line names the state the greyed meter implies. */}
         {paused ? <p className="mt-1 text-xs text-[var(--v2-ink-3)]">{AGENT_PAUSED_SHORT}</p> : null}
       </div>
-      {/* #3166: Edit changes this budget's limits in place — same slot, same
-          agent key, new owner-signed delegation. It is hidden while a
-          lifecycle action is busy, exactly like Stop, and requires a
-          reachable signer like every affordance that asks for one.
-          #4226: Stop moves into the per-budget ⋯ menu beside Edit — one
-          irreversible action per menu, and its confirm still stands between
-          the click and the signature. */}
+      {/* #4261: everything a row can do lives in its ⋯ menu — Edit budget,
+          Add budget, then the irreversible Stop budget… behind its confirm.
+          #3166: Edit changes this budget's limits in place — same slot, same
+          agent key, new owner-signed delegation. The trigger is disabled only
+          while a lifecycle action is busy; with no reachable signer the menu
+          still opens — Stop is a disabled item there (it needs the signer),
+          while Edit and Add open controls that explain how to connect. The
+          data attribute is how the card finds a row's trigger for focus
+          without a second ref on the React-19 trigger. */}
       <div className="flex shrink-0 items-center gap-1">
-        {onEdit ? (
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => onEdit(budget)}
-            disabled={busy || !ready}
-            aria-label={`Edit budget ${amount} ${t?.symbol ?? ''} ${periodLabel}`.replace(/\s+/g, ' ')}
-          >
-            Edit
-          </Button>
-        ) : null}
         <DropdownMenu>
           <DropdownMenuTrigger
             aria-label={`Budget options ${amount} ${t?.symbol ?? ''} ${periodLabel}`.replace(/\s+/g, ' ')}
-            disabled={busy || !ready}
+            data-budget-trigger={budget.delegation_hash}
+            disabled={busy}
             className={MENU_TRIGGER_CLASS}
           >
             <Icon icon={EllipsisVertical} className="h-4 w-4" />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="right">
-            <DropdownMenuItem tone="danger" onSelect={() => setConfirmOpen(true)}>
+            {onEdit ? (
+              <DropdownMenuItem onSelect={() => onEdit(budget)}>Edit budget</DropdownMenuItem>
+            ) : null}
+            {onAdd ? (
+              <DropdownMenuItem onSelect={() => onAdd(budget.delegation_hash)}>Add budget</DropdownMenuItem>
+            ) : null}
+            {onEdit || onAdd ? <DropdownMenuSeparator /> : null}
+            <DropdownMenuItem tone="danger" disabled={!ready} onSelect={() => setConfirmOpen(true)}>
               Stop budget…
             </DropdownMenuItem>
           </DropdownMenuContent>

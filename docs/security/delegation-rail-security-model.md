@@ -542,6 +542,14 @@ caveat, so the authority is still the signed caveat stack and nothing else.
 > `merchant-catalog.ts`/`client.ts` coverage it names; the rest of the
 > document was not re-read for it, and `last-verified` is not bumped.
 
+> **Re-verified #4245 follow-up (2026-10-22):** the follow-up only rewords text
+> ("curated" dropped): three catalog tool descriptions, the
+> `CATALOG_ENTRY_NOT_FOUND` refusal message, the OpenAPI `GET /catalog`
+> summary and description, code comments (including the `getCatalogEntry`
+> doc comment in `sdk/src/client.ts`) and four docs. No code path, budget pin, caveat or authority changed.
+> Scope of this re-read: the text named above and the `client.ts` coverage;
+> nothing else in this document was re-read for it.
+
 Two limits are deliberate:
 - **Slot sharing.** A merchant-locked budget and a plain budget pinned to the
   same address share one `(agent, token, recipient)` slot. Activating either

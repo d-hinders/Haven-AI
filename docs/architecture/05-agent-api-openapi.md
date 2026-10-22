@@ -214,7 +214,7 @@ includes three read-only query parameters: `category`, `search`, and `rail`.
 whitespace, accepts at most eight words, and requires every word to match the
 product `name`, `description`, or `category`; merchant name is deliberately
 excluded because it belongs to the separate merchant table. `rail` keeps its
-existing filter. This surface only returns curated metadata and may yield zero
+existing filter. This surface only returns catalog metadata and may yield zero
 or multiple entries. It never quotes, signs, or authorizes a payment, and
 catalog prices remain indicative rather than authoritative.
 

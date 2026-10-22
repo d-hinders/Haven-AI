@@ -73,11 +73,12 @@ export default function TransactionsLedgerRow({
         title="Moved between your accounts"
         direction="move"
         description={
-          // A wrapping flex line, so the movement can wrap and its names
-          // shrink inside the compact one-line subline instead of being
-          // clipped (#4266 design review). The 4px gap sets the dot as the
-          // text " · " sets it on every other subline.
-          <span className="inline-flex max-w-full flex-wrap items-center gap-x-1">
+          // One line, like every compact subline: the actor stays whole
+          // and the bare movement's names shrink to an ellipsis, so the
+          // destination is never clipped mid-word and the line never wraps
+          // past the 72px row (#4266 reviews). The 4px gap sets the dot as
+          // the text " · " sets it on every other subline.
+          <span className="flex min-w-0 max-w-full items-center gap-x-1">
             <span className="shrink-0">{tx.initiatedBy === 'human' ? 'You' : 'Your accounts'} ·{' '}</span>
             <TransactionMovement
               bare

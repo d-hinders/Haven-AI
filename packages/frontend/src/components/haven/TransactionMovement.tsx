@@ -36,24 +36,25 @@ export function TransactionMovement({
    * Drop the visible "From"/"To" words (#4266): a ledger subline reads
    * "My account → Reserve" after the actor, where the words would repeat
    * what the arrow says. The arrow then carries the direction for screen
-   * readers too, as an sr-only "to"; the wrap binding is unchanged.
+   * readers too, as an sr-only "to". Bare is ONE line that never wraps:
+   * each name shrinks to an ellipsis instead, because its host — the
+   * compact ledger subline — is a one-line box in a 72px row from `sm` up,
+   * where a wrapped line overflows the row (#1833).
    */
   bare?: boolean
 }) {
   if (bare) {
     return (
-      // Each name may shrink to an ellipsis (#4266 design review): the
-      // ledger's compact subline is a one-line `truncate` box, and an
-      // inline box that cannot shrink is hard-clipped there, mid-word.
-      <span className="inline-flex min-w-0 max-w-full flex-wrap items-center gap-x-1.5 gap-y-1">
-        <span className="flex min-w-0 max-w-full items-end gap-x-1.5">
-          <span className="min-w-0 truncate">{from}</span>
-          <span aria-hidden="true" className="shrink-0">
-            →
-          </span>
-          <span className="sr-only">to</span>
+      // One line, each name shrinking to an ellipsis (#4266 reviews): an
+      // unshrinkable box is hard-clipped mid-word in the one-line subline,
+      // and a wrapping one overflows the fixed-height row at `sm`.
+      <span className="inline-flex min-w-0 max-w-full items-center gap-x-1.5">
+        <span className="min-w-0 truncate">{from}</span>
+        <span aria-hidden="true" className="shrink-0">
+          →
         </span>
-        <span className="min-w-0 max-w-full truncate">{to}</span>
+        <span className="sr-only">to</span>
+        <span className="min-w-0 truncate">{to}</span>
       </span>
     )
   }

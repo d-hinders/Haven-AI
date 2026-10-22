@@ -36,10 +36,12 @@ import {
  * Widths swept inside the mobile project. A GEOMETRY sweep (rectangles, not
  * pixels), so resizing away from Pixel 5's 393 costs nothing. 320 is the
  * narrowest phone still in the support matrix and where every number is worst.
- * 768 is the tablet width where long account names still overran the subline
- * (#4266 design review: 39px clipped at 768).
+ * 640 and 700 sit in the band where the row is pinned to 72px (`sm:`) yet
+ * narrow — a subline that wraps there overflows the row (#1833, #4266 code
+ * review: three lines at 640/700). 768 is where long account names still
+ * overran the subline (#4266 design review: 39px clipped).
  */
-const WIDTHS = [320, 390, 393, 768] as const
+const WIDTHS = [320, 390, 393, 640, 700, 768] as const
 
 const ROW = '[data-testid="transactions-ledger"] [role="button"][aria-haspopup="dialog"]'
 
@@ -100,14 +102,20 @@ type Movement = {
   sublineOverflow: number
   /** How far the "to" half's box runs past the subline box's right edge. */
   toOverrun: number
+  /** The row's own vertical overflow — the #1833 overlap at the 72px `sm` pin. */
+  rowVerticalOverflow: number
+  /** The actor ("You ·") shares a line with the names; never alone. */
+  actorWithNames: boolean
+  /** The subline box's height: one `text-xs` line is 16px. */
+  sublineHeight: number
 }
 
 async function readMovements(page: Page): Promise<Movement[]> {
   return page.evaluate((rowSelector) => {
     const visible = (el: Element) => el.getClientRects().length > 0
-    // Anchor on the glyph inside a ledger row, then read its two halves: the
-    // "from" label shares the arrow's flex row; the "to" label is the
-    // arrow-row's next sibling (TransactionMovement `bare`).
+    // Anchor on the glyph inside a ledger row, then read the bare movement
+    // around it: `from` is the movement's first child, `to` its last, and
+    // the actor ("You ·") the movement's previous sibling.
     const arrows = Array.from(document.querySelectorAll(`${rowSelector} [aria-hidden="true"]`))
       .filter((el) => (el.textContent ?? '').trim() === '→')
       .filter(visible)
@@ -115,7 +123,8 @@ async function readMovements(page: Page): Promise<Movement[]> {
     return arrows.map((arrow) => {
       const arrowRow = arrow.parentElement as HTMLElement
       const from = arrowRow.firstElementChild
-      const to = arrowRow.nextElementSibling
+      const to = arrowRow.lastElementChild
+      const actor = arrowRow.previousElementSibling
       const parts = [from, to].filter((el): el is Element => el != null && visible(el))
       const arrowRect = arrow.getBoundingClientRect()
       // "Alone on its line" is a vertical-band question: orphaned exactly
@@ -131,6 +140,8 @@ async function readMovements(page: Page): Promise<Movement[]> {
       const subline = arrowRow.closest('div') as HTMLElement
       const sublineRect = subline.getBoundingClientRect()
       const toRect = to ? to.getBoundingClientRect() : sublineRect
+      const actorRect = actor ? actor.getBoundingClientRect() : null
+      const fromRect = from ? from.getBoundingClientRect() : null
       return {
         arrowWidth: +arrowRect.width.toFixed(1),
         arrowAlone,
@@ -138,6 +149,13 @@ async function readMovements(page: Page): Promise<Movement[]> {
         rowOverflow: row.scrollWidth - row.clientWidth,
         sublineOverflow: subline.scrollWidth - subline.clientWidth,
         toOverrun: +(toRect.right - sublineRect.right).toFixed(1),
+        rowVerticalOverflow: row.scrollHeight - row.clientHeight,
+        actorWithNames:
+          actorRect !== null &&
+          fromRect !== null &&
+          actorRect.top < fromRect.bottom &&
+          fromRect.top < actorRect.bottom,
+        sublineHeight: +sublineRect.height.toFixed(1),
       }
     })
   }, ROW)
@@ -171,6 +189,10 @@ test('/transactions: an own-transfer ledger row keeps its movement arrow beside 
       expect(movement.rowOverflow, `@${width}px: row scrolls horizontally`).toBeLessThanOrEqual(0)
       expect(movement.sublineOverflow, `@${width}px: the subline clips its content`).toBeLessThanOrEqual(0)
       expect(movement.toOverrun, `@${width}px: the destination runs past the subline`).toBeLessThanOrEqual(1)
+      expect(movement.rowVerticalOverflow, `@${width}px: the row overflows its height`).toBeLessThanOrEqual(0)
+      expect(movement.actorWithNames, `@${width}px: the actor sits alone on its line`).toBe(true)
+      // One 16px line of `text-xs`; a second line would be 32px.
+      expect(movement.sublineHeight, `@${width}px: the subline wraps`).toBeLessThanOrEqual(20)
     }
   }
 

@@ -636,10 +636,12 @@ const DS_LEDGER_ROWS: Array<{
     id: 'l4',
     at: new Date(Date.now() - 2 * 3_600_000).toISOString(),
     title: 'Moved between your accounts',
+    // The `/transactions` row's own subline markup (TransactionsLedgerRow).
     description: (
-      <>
-        You · <TransactionMovement bare from="Operations" to="Reserve" />
-      </>
+      <span className="flex min-w-0 max-w-full items-center gap-x-1">
+        <span className="shrink-0">You ·{' '}</span>
+        <TransactionMovement bare from="Operations" to="Reserve" />
+      </span>
     ),
     value: '200.00',
     direction: 'move',

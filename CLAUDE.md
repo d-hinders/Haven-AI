@@ -327,8 +327,9 @@ Build product UI from the documented [`/design-system` Patterns](docs/product/de
 No nested filled cards. To group content inside a `Card`, use `Card.Section` or
 `Card.Section divided`; list items use `Row`. Tinted surfaces
 (`--v2-surface`, `--v2-surface-2`) are reserved for callouts, table headers
-(`--v2-table-header-bg`), the `anchor` Card elevation, chips, code blocks and
-overlays. A grey inner wrapper "grouping" siblings creates a phantom surface
+(`--v2-table-header-bg`), day bands on day-grouped lists (the same
+`--v2-table-header-bg` tokens — `TransactionActivityDayHeader`, #4225), the
+`anchor` Card elevation, chips, code blocks and overlays. A grey inner wrapper "grouping" siblings creates a phantom surface
 tier and fights the parent Card's lift. See `/design-system` → "Surface
 hierarchy".
 

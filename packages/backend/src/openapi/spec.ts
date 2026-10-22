@@ -8691,6 +8691,7 @@ export const openapiSpec = {
           { name: 'from', in: 'query', schema: { type: 'string', pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' }, description: '#4095: custom-range start calendar date `YYYY-MM-DD`, inclusive of the whole day in `tz`. Sent together with `to`; mutually exclusive with `period`.' },
           { name: 'to', in: 'query', schema: { type: 'string', pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' }, description: '#4095: custom-range end calendar date `YYYY-MM-DD`, inclusive of the whole day in `tz`. A `from` after `to` is a structured 400.' },
           { name: 'tz', in: 'query', schema: { type: 'string' }, description: '#4095: IANA zone the custom `from`/`to` days are cut in, validated as `GET /dashboard/overview` validates its `tz` (invalid → 400). Defaults to UTC.' },
+          { name: 'foldOwnTransfers', in: 'query', schema: { type: 'string' }, description: '#4265: the exact value `1` opts in to folding paired transfers between two of the signed-in user’s accounts into one outbound-compatible row with `ownTransfer`. Other values preserve the legacy response. Folding is also disabled when `accountId` narrows the request to one account.' },
           { name: 'offset', in: 'query', schema: { type: 'integer', minimum: 0, maximum: 9007199254740991, default: 0 }, description: 'Bounded to a safe integer (#3030: the handler used to cap it; ajv reads `1e400` as an integer).' },
           { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 25 } },
           { name: 'fresh', in: 'query', schema: { type: 'string', enum: ['1', 'true'] } },
@@ -8734,6 +8735,7 @@ export const openapiSpec = {
           { name: 'from', in: 'query', schema: { type: 'string', pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' }, description: '#4095: custom-range start calendar date `YYYY-MM-DD`, inclusive of the whole day in `tz`.' },
           { name: 'to', in: 'query', schema: { type: 'string', pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' }, description: '#4095: custom-range end calendar date `YYYY-MM-DD`, inclusive of the whole day in `tz`.' },
           { name: 'tz', in: 'query', schema: { type: 'string' }, description: '#4095: IANA zone the custom `from`/`to` days are cut in. Defaults to UTC.' },
+          { name: 'foldOwnTransfers', in: 'query', schema: { type: 'string' }, description: '#4265: the exact value `1` opts in to the same own-account transfer fold as `GET /transactions`; other values preserve the legacy response. The opt-in CSV appends `to_account_name`, writes `own_transfer` in the type cell, and keeps the JSON row\'s `out` direction. Folding is disabled with `accountId`.' },
           { name: 'fresh', in: 'query', schema: { type: 'string', enum: ['1', 'true'] } },
         ],
         responses: {
@@ -13280,6 +13282,17 @@ export const openapiSpec = {
           accountId: uuid,
           accountAddress: address,
           accountName: { type: 'string' },
+          ownTransfer: {
+            type: 'object',
+            description: '#4265: present only when an opt-in aggregated feed folds the paired outbound and inbound legs of a move between two accounts owned by this user. The row retains the outbound account fields and direction for compatibility; these fields name the destination.',
+            required: ['toAccountId', 'toAccountName', 'toAccountAddress'],
+            properties: {
+              toAccountId: uuid,
+              toAccountName: { type: 'string' },
+              toAccountAddress: address,
+            },
+            additionalProperties: false,
+          },
           agentId: uuid,
           scope: { $ref: '#/components/schemas/ListScope' },
         },

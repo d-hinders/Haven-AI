@@ -81,6 +81,19 @@ covers:
 last-verified: "2026-10-22"
 ---
 
+> **Re-verified unchanged (#4265, 2026-10-22, read-only transaction
+> projection):** the all-accounts transaction feed and CSV export can opt in
+> with the exact query value `foldOwnTransfers=1` to pair the two explorer rows
+> for a move between the signed-in user's own accounts. Ownership is matched by
+> address plus chain against that user's account set; agent-attributed rows,
+> failed attribution, self-sends and incomplete pairs remain separate. Folding
+> runs after attribution and before filters/paging, preserves the outbound row,
+> and adds destination metadata only. It adds no signing step, write, key,
+> budget decision, authorization branch or authority surface, so the
+> delegation-rail invariants are unchanged. Scope: the transaction-history
+> ownership and authority claims only; `last-verified` already carries today's
+> date and is unchanged.
+
 # Delegation rail — security model & exit story (epic #821, gate G4)
 
 Design doc for issue #824. The delegation stack (Hybrid DeleGator accounts +

@@ -191,6 +191,17 @@ export interface EnrichedTransaction extends Transaction {
   agentId?: string
   agentName?: string
   /**
+   * Opt-in projection for a transfer between two accounts owned by this
+   * user (#4265). The row keeps the sender leg's fields and direction so
+   * older readers can still render it as an outbound transfer; aware readers
+   * use this destination to render one account-to-account move.
+   */
+  ownTransfer?: {
+    toAccountId: string
+    toAccountName: string
+    toAccountAddress: string
+  }
+  /**
    * Which settlement branch moved the money — `'eip3009' | 'erc7710'` — read
    * from the intent's `machine_metadata` JSONB (#1705, epic #1704).
    *

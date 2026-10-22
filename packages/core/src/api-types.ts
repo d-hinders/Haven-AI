@@ -6115,6 +6115,14 @@ export type components = {
             /** @example 0x1111111111111111111111111111111111111111 */
             accountAddress: string;
             accountName: string;
+            /** @description #4265: present only when an opt-in aggregated feed folds the paired outbound and inbound legs of a move between two accounts owned by this user. The row retains the outbound account fields and direction for compatibility; these fields name the destination. */
+            ownTransfer?: {
+                /** Format: uuid */
+                toAccountId: string;
+                toAccountName: string;
+                /** @example 0x1111111111111111111111111111111111111111 */
+                toAccountAddress: string;
+            };
             /** Format: uuid */
             agentId?: string;
             scope?: components["schemas"]["ListScope"];
@@ -22117,6 +22125,8 @@ export interface operations {
                 to?: string;
                 /** @description #4095: IANA zone the custom `from`/`to` days are cut in, validated as `GET /dashboard/overview` validates its `tz` (invalid → 400). Defaults to UTC. */
                 tz?: string;
+                /** @description #4265: the exact value `1` opts in to folding paired transfers between two of the signed-in user’s accounts into one outbound-compatible row with `ownTransfer`. Other values preserve the legacy response. Folding is also disabled when `accountId` narrows the request to one account. */
+                foldOwnTransfers?: string;
                 /** @description Bounded to a safe integer (#3030: the handler used to cap it; ajv reads `1e400` as an integer). */
                 offset?: number;
                 limit?: number;
@@ -22190,6 +22200,8 @@ export interface operations {
                 to?: string;
                 /** @description #4095: IANA zone the custom `from`/`to` days are cut in. Defaults to UTC. */
                 tz?: string;
+                /** @description #4265: the exact value `1` opts in to the same own-account transfer fold as `GET /transactions`; other values preserve the legacy response. The opt-in CSV appends `to_account_name`, writes `own_transfer` in the type cell, and keeps the JSON row's `out` direction. Folding is disabled with `accountId`. */
+                foldOwnTransfers?: string;
                 fresh?: "1" | "true";
             };
             header?: never;

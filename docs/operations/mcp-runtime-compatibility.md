@@ -83,6 +83,20 @@ covers:
 last-verified: "2026-10-21"
 ---
 
+> **Re-verified unchanged (#4265, 2026-10-22, opt-in own-account transfer
+> folding):** `GET /transactions` and `GET /transactions/export.csv` gain the
+> optional `foldOwnTransfers` query parameter. Only the exact value `1`, on an
+> all-accounts request, folds the paired outbound and inbound explorer rows for
+> a move between two accounts owned by the signed-in user. The JSON row keeps
+> the outbound fields and adds optional `ownTransfer` destination metadata; the
+> opt-in server CSV appends `to_account_name` last, writes `own_transfer` in the
+> type cell, and keeps direction `out`. Requests without the flag, with another value, or narrowed by
+> `accountId` are byte-identical to the existing feed/export contract. The
+> published CLI sends no flag and keeps both legs and its existing local CSV.
+> No MCP tool, argument, input schema, signing input, expected-context version,
+> consent hash, runtime channel or release step moves. Scope: the transaction
+> feed/export compatibility claims only; `last-verified` is not re-stamped.
+
 > **Re-verified unchanged (#4244, 2026-10-22, merchant-transport only).**
 > `packages/sdk/src/mcp-merchant-transport.ts` and `merchant-egress.ts` are on
 > this contract's cover list. Under a merchant-egress policy, a GET redirect

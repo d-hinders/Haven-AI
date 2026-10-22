@@ -92,6 +92,16 @@ satisfied-by:
 last-verified: "2026-10-05"
 ---
 
+> **Re-verified unchanged (#4265, 2026-10-22, factual transaction history):**
+> an exact, optional `foldOwnTransfers=1` projection turns the paired explorer
+> rows for a move between two accounts owned by the signed-in user into one
+> history row. It is read-only presentation over existing transaction data:
+> no funds move, no payment intent changes, no signing or key surface changes,
+> and no advice, custody, settlement or merchant-acquiring role is added. The
+> default JSON feed, published CLI and default server CSV stay unchanged.
+> Scope: §7's factual-balance/history preference and the non-custody boundary;
+> the document-wide `last-verified` date is not re-stamped.
+
 # Haven CASP / MiCA Risk Minimisation Guardrails
 
 ## Purpose

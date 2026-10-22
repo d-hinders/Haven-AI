@@ -9,6 +9,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   EXPORT_ROW_CAP,
+  FOLDED_TRANSACTION_CSV_COLUMNS,
   TRANSACTION_CSV_COLUMNS,
   buildTransactionCsvFilename,
   exceedsExportRowCap,
@@ -177,6 +178,29 @@ describe('transactionsToCsv', () => {
     const csv = transactionsToCsv([tx(), tx({ hash: '0xdef' })], NEVER_NAMED)
 
     expect(csv.split('\r\n')).toHaveLength(3)
+  })
+
+  it('keeps the default export byte-identical and appends the destination name only when opted in', () => {
+    const move = tx({
+      ownTransfer: {
+        toAccountId: 'account-2',
+        toAccountName: 'Savings',
+        toAccountAddress: '0xrecipient',
+      },
+    })
+    const defaultCsv = transactionsToCsv([move], NEVER_NAMED)
+    expect(defaultCsv.split('\r\n')[0]).toBe(TRANSACTION_CSV_COLUMNS.join(','))
+    expect(defaultCsv.split('\r\n')[1].split(',')).toHaveLength(
+      TRANSACTION_CSV_COLUMNS.length,
+    )
+
+    const foldedCsv = transactionsToCsv([move], NEVER_NAMED, true)
+    const [header, record] = foldedCsv.split('\r\n')
+    expect(header).toBe(FOLDED_TRANSACTION_CSV_COLUMNS.join(','))
+    expect(header.endsWith(',to_account_name')).toBe(true)
+    expect(record).toContain('"own_transfer"')
+    expect(record).toContain('"out"')
+    expect(record.endsWith('"Savings"')).toBe(true)
   })
 })
 

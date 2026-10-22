@@ -1722,8 +1722,11 @@ export async function serveOwnerOnlyHybridSigners(page: Page, ownerAddress: stri
  *  - an anchored passport (#1072), the richer of the two passport states;
  *  - one confirmed x402 payment and one read-only MCP tool call, so the
  *    activity table and the audit-trail panel both render content;
- *  - stats matching those rows, so the two StatBlocks do not read 0 beside a
- *    non-empty activity table.
+ *  - the dashboard-overview stats the Spending hero's Last 30 days reads
+ *    (#4260), told as ONE story with those rows (#4283): the payment is the
+ *    hero's last payment (same merchant host, same time, an amount inside the
+ *    30-day total), and the agent carries an MCP last-seen 80 minutes before
+ *    the harness clock, so the header reads "Last activity 1h ago".
  *  - the company-details read the #3426 toggle fires at mount, so the census
  *    above is not re-failed by it (see the handler below).
  *
@@ -1771,6 +1774,11 @@ export async function serveAgentDetailResponses(
             ...testAgent,
             id: agentId,
             created_at: '2026-05-02T10:00:00.000Z',
+            // #4283: the header's "Last activity" reads MCP last-seen; a
+            // server name with it keeps the Settings tab's Connection row
+            // coherent (AgentSettingsTab). 80 minutes before the harness clock (renders "1h ago").
+            mcp_server_name: 'haven-research',
+            mcp_last_seen_at: '2026-09-01T10:40:00.000Z',
             ...options.agentOverrides,
             // #3988: a spec can research a grant HOLDER — no own budget, an
             // open received grant (default: the ordinary budgeted agent).
@@ -1882,29 +1890,30 @@ export async function serveAgentDetailResponses(
           agent_name: testAgent.name,
           token: 'USDC',
           token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
-          amount_raw: '25000000',
-          amount: '25.00',
+          amount_raw: '50000',
+          amount: '0.05',
           // #3824: the serve-time amount at the served user's rate in their
-          // preference (#4166) — 25 USDC ≈ 269.00 SEK at the fixture's
-          // ~10.76 SEK/USD story; the USD session prices it at par.
-          ...serveTimeApproxSnake(25),
+          // preference (#4166) — the USD session prices it at par. #4283: the
+          // hero's last payment (research.example, 2026-08-31T09:40Z), small
+          // enough to sit inside its 30-day total.
+          ...serveTimeApproxSnake(0.05),
           to: testRecipientAddress,
           reason: null,
           status: 'confirmed',
           tx_hash: `0x${'a1'.repeat(32)}`,
           source: 'x402',
-          x402_resource_url: 'https://api.example.dev/reports',
+          x402_resource_url: 'https://research.example/report',
           x402_merchant_address: testRecipientAddress,
           chain_id: testSafe.chain_id,
           account_id: testSafe.id,
           account_address: testSafeAddress,
           account_name: testSafe.name,
           explorer_url: `https://sepolia.basescan.org/tx/0x${'a1'.repeat(32)}`,
-          confirmed_at: '2026-07-10T08:20:00.000Z',
+          confirmed_at: '2026-08-31T09:40:00.000Z',
           payment_proof_status: 'payment_confirmed',
           payment_flow_status: 'confirming_merchant',
           payment_attention_reason: null,
-          created_at: '2026-07-10T08:18:00.000Z',
+          created_at: '2026-08-31T09:38:00.000Z',
         }
         const toolCallRow = {
           type: 'mcp_tool_call',
@@ -1917,7 +1926,7 @@ export async function serveAgentDetailResponses(
           next_action: 'settle',
           error_code: null,
           status_code: 200,
-          created_at: '2026-07-10T08:17:00.000Z',
+          created_at: '2026-08-31T09:37:00.000Z',
         }
         const paymentStatuses = new Set(['sent', 'pending', 'failed', 'needs_attention'])
         const rows: Array<Record<string, any>> =
@@ -1956,29 +1965,30 @@ export async function serveAgentDetailResponses(
             agent_name: testAgent.name,
             token: 'USDC',
             token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
-            amount_raw: '25000000',
-            amount: '25.00',
+            amount_raw: '50000',
+            amount: '0.05',
             // #3824: the serve-time amount at the served user's rate in their
-            // preference (#4166) — 25 USDC ≈ 269.00 SEK at the fixture's
-            // ~10.76 SEK/USD story; the USD session prices it at par.
-            ...serveTimeApproxSnake(25),
+            // preference (#4166) — the USD session prices it at par. #4283: the
+            // hero's last payment (research.example, 2026-08-31T09:40Z), small
+            // enough to sit inside its 30-day total.
+            ...serveTimeApproxSnake(0.05),
             to: testRecipientAddress,
             reason: null,
             status: 'confirmed',
             tx_hash: `0x${'a1'.repeat(32)}`,
             source: 'x402',
-            x402_resource_url: 'https://api.example.dev/reports',
+            x402_resource_url: 'https://research.example/report',
             x402_merchant_address: testRecipientAddress,
             chain_id: testSafe.chain_id,
             account_id: testSafe.id,
             account_address: testSafeAddress,
             account_name: testSafe.name,
             explorer_url: `https://sepolia.basescan.org/tx/0x${'a1'.repeat(32)}`,
-            confirmed_at: '2026-07-10T08:20:00.000Z',
+            confirmed_at: '2026-08-31T09:40:00.000Z',
             payment_proof_status: 'payment_confirmed',
             payment_flow_status: 'confirming_merchant',
             payment_attention_reason: null,
-            created_at: '2026-07-10T08:18:00.000Z',
+            created_at: '2026-08-31T09:38:00.000Z',
           },
           {
             type: 'mcp_tool_call',
@@ -1991,7 +2001,7 @@ export async function serveAgentDetailResponses(
             next_action: 'settle',
             error_code: null,
             status_code: 200,
-            created_at: '2026-07-10T08:17:00.000Z',
+            created_at: '2026-08-31T09:37:00.000Z',
           },
         ],
       })
@@ -2000,7 +2010,7 @@ export async function serveAgentDetailResponses(
 
     if (path === `/agent-activity/${agentId}/stats`) {
       await fulfillJson(route, {
-        all_time: [{ token: 'USDC', total_spent: '25.00', tx_count: 1 }],
+        all_time: [{ token: 'USDC', total_spent: '0.05', tx_count: 1 }],
         today: [{ token: 'USDC', total_spent: '0.00', tx_count: 0 }],
         pending_approvals: 0,
       })
@@ -2051,8 +2061,11 @@ export async function serveAgentDetailResponses(
               ...dashboardOverview.agents[0].stats,
               d30: {
                 ...dashboardOverview.agents[0].stats.d30,
+                // #4274: gross and net differ, so the refreshed
+                // agent-detail-research-* baseline proves the hero reads the
+                // net window (1.05), not the gross one (1.42) it used to.
                 gross: { usd: 1.42, eur: 1.29, sek: 15.28 },
-                net: { usd: 1.42, eur: 1.29, sek: 15.28 },
+                net: { usd: 1.05, eur: 0.95, sek: 11.3 },
                 payments: 48,
               },
               lastPaymentAt: '2026-08-31T09:40:00.000Z',

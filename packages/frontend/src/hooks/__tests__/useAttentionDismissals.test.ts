@@ -63,6 +63,22 @@ describe('useAttentionDismissals (#3813)', () => {
     expect(result.current.dismissedIds.size).toBe(0)
   })
 
+  it('a malformed body hides nothing and does not throw — the read resolves to a body without dismissals (#4288)', async () => {
+    // `SCREENSHOT_FIXTURE=empty` serves `FIXTURE_EMPTY_FALLBACK`, which has
+    // no `dismissals` key. The old read iterated it inside a
+    // `setDismissedIds` updater; React re-runs updaters while rendering, so
+    // the `response.dismissals is not iterable` TypeError crashed the page
+    // instead of reaching the `.catch` below.
+    mockApiGet.mockResolvedValueOnce({})
+
+    const { result } = renderHook(() => useAttentionDismissals())
+
+    await waitFor(() => expect(mockApiGet).toHaveBeenCalledOnce())
+    // The hook RENDERS — the crash used to take the whole page down — and
+    // hides nothing: a body the hook cannot read dismisses nothing.
+    expect(result.current.dismissedIds.size).toBe(0)
+  })
+
   it('dismiss writes through for the backup item and hides it optimistically', async () => {
     const { result } = renderHook(() => useAttentionDismissals())
 

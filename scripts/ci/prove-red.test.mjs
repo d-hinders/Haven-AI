@@ -203,6 +203,43 @@ describe('classifier over recorded runner output', () => {
     )
     assert.equal(classify({ baseline: greenOf(r), mutant: r, expectRed: ['suite one > fails expect'] }).class, 'caught')
   })
+  test('vitest (#4284): the frontend idiom — jest-dom, getBy*, findBy* — is assertion; a code throw is not', () => {
+    // Recorded verbatim from vitest 3.2.4 + jsdom (ANSI kept): the jest-dom
+    // message has colour codes between `Error: ` and `expect(`, so this case
+    // also proves the vitest path strips ANSI before classifying.
+    const r = normalizeVitestJson(readJson('vitest-frontend-idiom.json'), 1)
+    assert.deepEqual(
+      r.tests.map((x) => [x.name, x.kind]),
+      [
+        ['frontend idiom > jest-dom matcher fails', 'assertion'],
+        ['frontend idiom > getBy finds nothing', 'assertion'],
+        ['frontend idiom > findBy times out', 'assertion'],
+        ['frontend idiom > findByRole times out', 'assertion'],
+        ['frontend idiom > findByRole with a name times out', 'assertion'],
+        ['frontend idiom > findByLabelText times out', 'assertion'],
+        ['frontend idiom > findBy finds several', 'assertion'],
+        ['frontend idiom > waitFor getBy finds several', 'assertion'],
+        ['frontend idiom > findByLabelText label without control', 'assertion'],
+        ['frontend idiom > async waitFor getByRole after an await', 'assertion'],
+        // Code throws: each mentions a stem somewhere but not at the start,
+        // or is close to one without being it — pins the anchor, the
+        // grouping and each stem's exact text.
+        ['frontend idiom > plain Error', 'error'],
+        ['frontend idiom > code throw starting Found', 'error'],
+        ['frontend idiom > Error mentioning expect( later', 'error'],
+        ['frontend idiom > code throw wrapping an assertion stem', 'error'],
+        ['frontend idiom > code throw wrapping a TestingLibraryElementError', 'error'],
+        ['frontend idiom > code throw starting Unable to find', 'error'],
+        ['frontend idiom > code throw about a labelled widget', 'error'],
+        ['frontend idiom > code throw starting expectation', 'error'],
+        ['frontend idiom > TypeError', 'error'],
+      ],
+    )
+    assert.equal(
+      classify({ baseline: greenOf(r), mutant: r, expectRed: ['frontend idiom > jest-dom matcher fails'] }).class,
+      'caught',
+    )
+  })
   test('incident 5: the SQL-error shape in vitest is mutation-red', () => {
     const mutant = normalizeVitestJson(readJson('vitest-sql-error.json'), 1)
     assert.deepEqual(mutant.tests.map((x) => [x.name, x.kind]), [['owner join holds', 'error'], ['other', null]])
@@ -229,6 +266,37 @@ describe('classifier over recorded runner output', () => {
     assert.equal(classify({ baseline: greenOf(r), mutant: r, expectRed: ['suite one > throws'] }).class, 'mutation-red')
     const load = normalizePlaywrightJson(readJson('playwright-load-failure.json'), 1)
     assert.match(load.loadErrors[0], /Cannot find module/)
+  })
+  test('playwright (#4294): a custom-message expect is assertion; a thrown error or a test timeout is not', () => {
+    // Recorded from Playwright 1.60.0 (page.setContent), message text verbatim
+    // with ANSI. Classification reads results.at(-1).error only: the test
+    // timeout case also carries the pending expect in errors[], and must
+    // still read as an error.
+    const r = normalizePlaywrightJson(readJson('playwright-custom-messages.json'), 1)
+    const cm = 'custom messages > '
+    assert.deepEqual(
+      r.tests.map((x) => [x.name.replace(cm, ''), x.kind]),
+      [
+        ['value with message', 'assertion'],
+        ['multi-line message', 'assertion'],
+        ['locator timeout with message', 'assertion'],
+        ['screenshot with message', 'assertion'],
+        ['soft with message', 'assertion'],
+        ['poll with message', 'assertion'],
+        ['no message', 'assertion'],
+        ['plain Error', 'error'],
+        ['thrown error mentioning expect later', 'error'],
+        ['TypeError', 'error'],
+        ['click timeout', 'error'],
+        ['test timeout during messaged expect', 'error'],
+      ],
+    )
+    // The reported message is now the custom message, the reader's sentence.
+    assert.equal(r.tests[0].message, 'Error: the count is wrong')
+    assert.equal(
+      classify({ baseline: greenOf(r), mutant: r, expectRed: [`${cm}value with message`] }).class,
+      'caught',
+    )
   })
   test('caught needs the baseline test count; shadowed is an assertion red outside expect_red', () => {
     const baseline = res([t('a'), t('b'), t('c')])

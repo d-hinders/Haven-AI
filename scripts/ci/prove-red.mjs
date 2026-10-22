@@ -237,6 +237,23 @@ export function normalizeNodeEvents(records, exitCode, timedOut = false) {
   return { exitCode, timedOut, tests, loadErrors }
 }
 
+/**
+ * A vitest failure message (ANSI stripped) that is an assertion failing, not
+ * code throwing. Vitest's own `expect` and `node:assert` throw `AssertionError`;
+ * the frontend's idiom does not (#4284): a jest-dom matcher fails as
+ * `Error: expect(element).toHaveClass(...)`, a `getBy*` as
+ * `TestingLibraryElementError`, and a `findBy*` / `waitFor` timeout as a plain
+ * `Error:` carrying the query library's own message — "Unable to find an
+ * element …", "Unable to find role=…" (or, for a `getByRole` after an `await`
+ * inside an async `waitFor` callback, "Unable to find an accessible element …"), "Unable to find a label with the text
+ * of: …", "Found multiple elements …", "Found a label with the text of: …".
+ * Only those recorded stems, each anchored at the start: a code throw that
+ * merely mentions one later in its message stays an error, and so does an
+ * unrecorded query shape (fail closed).
+ */
+export const VITEST_ASSERTION_SHAPE =
+  /^(?:AssertionError\b|TestingLibraryElementError\b|Error: expect\(|Error: Unable to find (?:an element |an accessible element |role=|a label with the text of: )|Error: Found (?:multiple elements |a label with the text of: ))/
+
 /** `vitest run --reporter=json` output → normalized result. Pure. */
 export function normalizeVitestJson(json, exitCode, timedOut = false) {
   const tests = []
@@ -250,12 +267,28 @@ export function normalizeVitestJson(json, exitCode, timedOut = false) {
       if (a.status === 'passed') tests.push({ name, status: 'passed', kind: null, message: null })
       else if (a.status === 'failed') {
         const m = stripAnsi(a.failureMessages?.[0] ?? '')
-        tests.push({ name, status: 'failed', kind: /^AssertionError\b/.test(m) ? 'assertion' : 'error', message: firstLine(m) })
+        tests.push({ name, status: 'failed', kind: VITEST_ASSERTION_SHAPE.test(m) ? 'assertion' : 'error', message: firstLine(m) })
       } else tests.push({ name, status: 'skipped', kind: null, message: null })
     }
   }
   return { exitCode, timedOut, tests, loadErrors }
 }
+
+/**
+ * A Playwright failure message (ANSI stripped) that is an assertion failing.
+ * Without a message: `Error: expect(…` (the `Timed out <n>ms waiting for
+ * expect(` form is kept as untested compatibility — no 1.60 runtime code emits
+ * it). With `expect(value, 'msg')` — the repo's style — Playwright prepends the
+ * message (`customMessage + "\n\n" + message`, #4294): `Error: <msg>\n\n
+ * expect(received|locator|page)…`, and `expect.poll(…, { message })` writes it
+ * twice: `Error: <msg>\n\n<msg>\n\nexpect(…`. The message is one or more
+ * non-blank lines; a message that itself holds a blank line cannot be told
+ * from a thrown error and reads as an error. The matcher subjects are the
+ * recorded ones, so a thrown error whose later text says `expect(foo)` stays
+ * an error.
+ */
+export const PLAYWRIGHT_ASSERTION_SHAPE =
+  /^Error: (?:(?:Timed out \d+ms waiting for )?expect\(|((?:[^\n]+\n)*?[^\n]+)\n\n(?:\1\n\n)?expect\((?:received|locator|page)\))/
 
 /** `playwright test --reporter=json` output → normalized result. Pure. */
 export function normalizePlaywrightJson(json, exitCode, timedOut = false) {
@@ -272,7 +305,7 @@ export function normalizePlaywrightJson(json, exitCode, timedOut = false) {
         else {
           const last = (t.results ?? []).at(-1)
           const m = stripAnsi(last?.error?.message ?? '')
-          tests.push({ name, status: 'failed', kind: /^Error: (Timed out \d+ms waiting for )?expect\(/.test(m) ? 'assertion' : 'error', message: firstLine(m) })
+          tests.push({ name, status: 'failed', kind: PLAYWRIGHT_ASSERTION_SHAPE.test(m) ? 'assertion' : 'error', message: firstLine(m) })
         }
       }
     }

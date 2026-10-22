@@ -97,6 +97,7 @@ export {
   aggregateAccountTransactions,
   buildAccountTransactionsPage,
   filterEnrichedTransactions,
+  foldOwnAccountTransfers,
   mergeSortDedupeAndEnrich,
   paginateByOffset,
   resolveTransactionCurrency,

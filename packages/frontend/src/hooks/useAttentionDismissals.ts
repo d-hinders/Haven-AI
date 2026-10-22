@@ -77,6 +77,13 @@ export function useAttentionDismissals({ accounts }: UseAttentionDismissalsOptio
       .get<AttentionDismissalsResponse>('/user/attention-dismissals')
       .then((response) => {
         if (cancelled) return
+        // #4288: a malformed body hides nothing — same as a failed read.
+        // The read ran inside a `setDismissedIds` updater once, and React
+        // re-runs updaters while rendering, so a throw there never reached
+        // the `.catch` below: it took the whole page down (the empty
+        // account capture crashed on `FIXTURE_EMPTY_FALLBACK`, which has
+        // no `dismissals` key). Guard the ITERATION, not the fixture.
+        if (!Array.isArray(response?.dismissals)) return
         // MERGE, never replace: the legacy-key migration may have optimistically
         // added ids this session before the read landed; replacing the set
         // would un-hide them.

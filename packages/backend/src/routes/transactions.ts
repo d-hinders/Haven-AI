@@ -18,6 +18,7 @@ import {
   enrichTransactionsWithAccounting,
   exceedsExportRowCap,
   filterEnrichedTransactions,
+  foldOwnAccountTransfers,
   mergeSortDedupeAndEnrich,
   paginateByOffset,
   parseTransactionWindow,
@@ -134,6 +135,7 @@ export default async function transactionRoutes(
       offset?: string
       limit?: string
       fresh?: string
+      foldOwnTransfers?: string
       direction?: TransferDirection
       chainId?: string
       search?: string
@@ -232,11 +234,15 @@ export default async function transactionRoutes(
       aggregateAccountTransactions(accounts, request.log, fresh),
     ])
     const enriched = await mergeSortDedupeAndEnrich(sub, accounts, aggregate.merged, currency)
+    const folded =
+      request.query.foldOwnTransfers === '1' && !accountFilterId
+        ? foldOwnAccountTransfers(enriched, allAccounts)
+        : enriched
     // #4095: names resolve BEFORE filtering, server-side — search matches
     // what the row shows, and the row's names live here now.
     const searchTerm = request.query.search?.trim() ?? ''
-    const searchIndex = searchTerm ? await buildSearchIndex(sub, allAccounts, enriched) : undefined
-    const filtered = filterEnrichedTransactions(enriched, {
+    const searchIndex = searchTerm ? await buildSearchIndex(sub, allAccounts, folded) : undefined
+    const filtered = filterEnrichedTransactions(folded, {
       agentId: request.query.agentId,
       tokenFilter,
       direction: request.query.direction,
@@ -350,6 +356,7 @@ export default async function transactionRoutes(
       to?: string
       tz?: string
       fresh?: string
+      foldOwnTransfers?: string
     }
   }>('/export.csv', async (request, reply) => {
     const { sub } = request.user as { sub: string }
@@ -432,6 +439,10 @@ export default async function transactionRoutes(
         aggregateAccountTransactions(accounts, request.log, fresh),
       ])
       const enriched = await mergeSortDedupeAndEnrich(sub, accounts, aggregateResult.merged, currency)
+      const folded =
+        request.query.foldOwnTransfers === '1' && !accountFilterId
+          ? foldOwnAccountTransfers(enriched, allAccounts)
+          : enriched
 
       // #4095: receipt merchant names resolve BEFORE the filter, so a search
       // for a merchant's name finds its rows. Caught, not bare — an outage
@@ -441,7 +452,7 @@ export default async function transactionRoutes(
       if (searchTerm) {
         const receiptNames = await listReceiptMerchantNamesForUser(
           sub,
-          counterpartyAddressesOf(enriched),
+          counterpartyAddressesOf(folded),
         ).catch(() => new Map<string, string>())
         searchIndex = {
           contactNames,
@@ -450,7 +461,7 @@ export default async function transactionRoutes(
         }
       }
 
-      filtered = filterEnrichedTransactions(enriched, {
+      filtered = filterEnrichedTransactions(folded, {
         agentId: request.query.agentId,
         tokenFilter,
         direction,
@@ -480,22 +491,26 @@ export default async function transactionRoutes(
     // order, as the dashboard table. (#4095: read above the filter now; the
     // CSV projection below is unchanged.)
 
-    const csv = transactionsToCsv(filtered, {
-      resolveName: (address, addressChainId) => {
-        const contactName = contactNames.get(address.toLowerCase())
-        if (contactName) return contactName
-        return accountNames.get(accountNameKey(address, addressChainId)) ?? null
+    const csv = transactionsToCsv(
+      filtered,
+      {
+        resolveName: (address, addressChainId) => {
+          const contactName = contactNames.get(address.toLowerCase())
+          if (contactName) return contactName
+          return accountNames.get(accountNameKey(address, addressChainId)) ?? null
+        },
+        // #3127: the accounting export stays a FIXED-currency file. Deliberate,
+        // not the default everywhere: the feed was built (epic 026, #2871)
+        // around one reporting currency, the accountants' importers are keyed
+        // on it, and `amount_sek` is the stored book-time column — a
+        // preference-driven amount would re-express a filed figure instead of
+        // reporting one. The user's currency_preference (read above) names the
+        // column so the reader still sees how the file relates to what the
+        // dashboard serves them; the AMOUNT does not follow it.
+        reportingCurrency: 'SEK',
       },
-      // #3127: the accounting export stays a FIXED-currency file. Deliberate,
-      // not the default everywhere: the feed was built (epic 026, #2871)
-      // around one reporting currency, the accountants' importers are keyed
-      // on it, and `amount_sek` is the stored book-time column — a
-      // preference-driven amount would re-express a filed figure instead of
-      // reporting one. The user's currency_preference (read above) names the
-      // column so the reader still sees how the file relates to what the
-      // dashboard serves them; the AMOUNT does not follow it.
-      reportingCurrency: 'SEK',
-    })
+      request.query.foldOwnTransfers === '1' && !accountFilterId,
+    )
 
     return reply
       .header('Content-Type', 'text/csv; charset=utf-8')

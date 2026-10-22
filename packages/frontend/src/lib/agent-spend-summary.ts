@@ -21,6 +21,7 @@ import { hasPositiveCap } from '@/lib/dashboard-attention'
 import { budgetPeriodLabel } from '@/lib/budget-period'
 import { formatFiat } from '@/lib/format'
 import type { DisplayCurrency } from '@/lib/account-holdings'
+import { shouldMarkApprox, tokenPeg } from '@haven_ai/core'
 
 /** `27.01` — a token-unit figure, up to two fraction digits, no separators. */
 function formatTokenUnits(value: number): string {
@@ -75,14 +76,34 @@ export function agentSpendSummaryLine(
 
   // Mixed tokens: sum in the display currency through the #3803 spot rates.
   // Any missing or unusable rate keeps the figure unclaimed — a total built
-  // on a guessed price is worse than no total.
+  // on a guessed price is worse than no total. A pegged token prices at 1.0
+  // in its peg currency (#4288): USDC in USD is dollars, per the one rule —
+  // the ≈0.9998 market rate the wire carries would understate it.
   let fiatTotal = 0
   for (const budget of budgets) {
+    if (tokenPeg(budget.chainId, budget.tokenSymbol) === currency) {
+      fiatTotal += (Number(budget.budgetAtomic) / 10 ** budget.decimals) * 1.0
+      continue
+    }
     const rate = spotRates?.[budget.tokenSymbol]
     if (typeof rate !== 'number' || !Number.isFinite(rate) || rate <= 0) {
       return `${base} with budgets.`
     }
     fiatTotal += (Number(budget.budgetAtomic) / 10 ** budget.decimals) * rate
   }
-  return `${base} can spend up to ${formatFiat(fiatTotal, currency)} ${periodWord} from this account.`
+  // The one "≈" rule (#4165), per budget: a mixed-token line always carries
+  // a floating token (each Haven chain has exactly one USD-pegged token in
+  // the registry, so the other budget is the float), and this is a converted
+  // TOTAL — so the line carries the mark wherever the conversion changes the
+  // number. `shouldMarkApprox` decides, never a hand-rolled rule here.
+  const approx = budgets.some((budget) =>
+    shouldMarkApprox({
+      repriced: true,
+      chainId: budget.chainId,
+      tokenSymbol: budget.tokenSymbol,
+      displayCurrency: currency,
+      kind: 'total',
+    }),
+  )
+  return `${base} can spend up to ${approx ? '≈' : ''}${formatFiat(fiatTotal, currency)} ${periodWord} from this account.`
 }

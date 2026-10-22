@@ -662,10 +662,12 @@ rule). `?grant=` keeps working alongside `?tab=`. Sections, in order:
    the detail-page section rule in design-system.md). The hero is the
    dashboard money-card pattern (#4226): a `Card` with `Card.Section divided` —
    budgets on the left, **Last 30 days** on the right, stacked below `lg`.
-   Each budget is one row — amount, period, recipient or merchant, Edit and a
-   per-budget ⋯ menu whose one item is **Stop budget** (the irreversible
-   action gets the menu; its confirm still stands between the click and the
-   signature) — each measured by a meter that spans its column and captioned
+   Each budget is one row — amount, period, recipient or merchant and a
+   per-budget ⋯ menu whose items are **Edit budget**, **Add budget** and
+   **Stop budget** (the first two open their controls; the irreversible action
+   sits last, behind a separator, and its confirm still stands between the
+   click and the signature) — each measured by a meter that spans its column
+   and captioned
    by the shared budget-caption helper in the dashboard ROW style (#3806):
    "0.40 of 3.00 USDC · per day · refills in 24h" at two decimals, then the
    earlier of the refill and the expiry ("refills in 45m" / "refills Thu
@@ -682,7 +684,12 @@ rule). `?grant=` keeps working alongside `?tab=`. Sections, in order:
    caption itself is unchanged. A budget at or past 90% used renders the
    warning meter. **Last 30 days** comes from the dashboard overview's
    per-agent stats as three labelled figures across the column (#4260):
-   **Spent** in the display currency, **Payments** and **Last paid** {age},
+   **Spent** — #3803's NET figure in the display currency, the same
+   booked-or-repriced, sweep-netted number the dashboard's money card and
+   agents section read, so the two surfaces cannot disagree (#4274; an
+   unpriced bucket with net 0 renders "—" like the dashboard headline, with
+   no unpriced note — that note is account-level) — **Payments** and
+   **Last paid** {age},
    each a small label over a 20px value (`Amount size="md"` for Spent), then
    "Last paid to {merchant}" on its own line below, with no divider — the
    merchant label is #4209's helper (name → x402 host → nothing, never an
@@ -694,8 +701,11 @@ rule). `?grant=` keeps working alongside `?tab=`. Sections, in order:
    Last 30 days column; its history is under Activity.
    **Add budget is collapsed once a budget exists**: with no budget the
    section reads "No budget yet." with a "Set budget" control that opens the
-   grant form; once one exists, adding another is an "Add budget" control
-   that opens the form in place (Cancel collapses it), never a permanent
+   grant form; once one exists, adding another is the rows' ⋯ menu "Add
+   budget" item (#4261 — no button under the list), which opens the form in
+   place (Cancel collapses it and returns focus to the row's trigger; after a
+   `?grant=` prefill, which has no origin, focus goes to the first row's
+   trigger, or to Set budget when there are no rows), never a permanent
    second form — unless `?grant=` asks for the form, in which case it opens
    expanded. Sharing part of an existing budget with another agent lives
    INSIDE the Add budget panel — a quiet line and an "Issue sub-budget"
@@ -723,9 +733,12 @@ rule). `?grant=` keeps working alongside `?tab=`. Sections, in order:
    wallet, so neither repeats on a row. The standard toolbar rides on the
    card: search, a **Status** facet (All, Sent, Pending, Failed, Needs
    attention), **Token** and **Period** — all server-filtered on the kinded
-   read (#4229, plus its `token` parameter). The summary line reads "Out"
-   with the server's total (a count, never a money sum the read does not
-   serve), `ListShowMore` sits below the card, and a row opens the shared
+   read (#4229, plus its `token` parameter). The toolbar's count stands alone
+   on the summary line — no figure beside it (#4274, owner decision (a): the
+   former "Out" + server total repeated the count and, beside the account
+   tab's money In/Out, read as an amount; the count alone is the List
+   controls default for a page with no totals, #4196),
+   `ListShowMore` sits below the card, and a row opens the shared
    transaction detail panel. Under the list: "See in Transactions"
    (`/transactions?agentId={id}`). Empty states: "No payments yet" — and for
    an agent still in setup, "Once you set a budget, every payment this agent
@@ -859,7 +872,8 @@ Structure:
    `TransactionActivityDayHeader` day bands (#4225). No "by <agent>" title and
    no "From … →" movement line: the page fixes the agent and the wallet, so
    neither repeats on a row. A row opens the shared transaction detail panel.
-3. The summary line ("Out" and the server's total) and `ListShowMore` below
+3. The toolbar's count alone on the summary line (#4274, owner decision
+   (a)) and `ListShowMore` below
    the card; "See in Transactions" under the list.
 4. Empty state with the next useful action ("No payments yet"; for an agent
    still in setup, the budget pointer).

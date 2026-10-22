@@ -87,12 +87,25 @@ test.describe('retired agent budget card visual regression (#3549)', () => {
       // Nothing that grants authority.
       await expect(card.getByText(state.reason)).toBeVisible()
       await expect(card.getByRole('button', { name: 'Set budget' })).toHaveCount(0)
-      // #3695: a live agent with a budget shows "Add budget", not "Set budget",
-      // so "Set budget" absent alone no longer proves the retired gate.
-      await expect(card.getByRole('button', { name: 'Add budget' })).toHaveCount(0)
-      await expect(card.getByRole('button', { name: /^Edit budget / })).toHaveCount(0)
+      // #4261: the menu holds ONLY Stop budget… — opened, so Edit/Add absence
+      // is measured against the real menu rather than a vacuous closed one.
+      await card.getByRole('button', { name: /^Budget options/ }).click()
+      await expect(card.getByRole('menuitem', { name: 'Add budget' })).toHaveCount(0)
+      await expect(card.getByRole('menuitem', { name: 'Edit budget' })).toHaveCount(0)
+      await expect(card.getByRole('menuitem', { name: 'Stop budget…' })).toBeVisible()
+      // Close the menu again — the baseline below must not move (a retired
+      // card's menu is closed in its blessed pixels).
+      await page.keyboard.press('Escape')
+      await expect(card.getByRole('menuitem', { name: 'Stop budget…' })).toHaveCount(0)
       await expect(card.getByRole('button', { name: 'Issue sub-budget' })).toHaveCount(0)
       await expect(card.getByLabel('Budget amount')).toHaveCount(0)
+      // The kebab click above leaves the pointer resting on the trigger —
+      // its hover fill (--v2-surface-hover, a uniform 44x44 block, not a
+      // focus ring) is not in the blessed pixels — and the Escape leaves it
+      // focused. Park the pointer and drop focus before the capture (after
+      // the closed-menu assertions, which read the real post-Escape DOM).
+      await page.mouse.move(0, 0)
+      await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
 
       await page.evaluate(() => document.fonts.ready)
       await expect(card).toHaveScreenshot(`agents-retired-budget-card-${state.name}-mobile.png`, {

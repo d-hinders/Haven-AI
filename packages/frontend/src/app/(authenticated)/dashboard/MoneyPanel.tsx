@@ -351,9 +351,13 @@ export default function MoneyPanel({
                 (`approxByCurrency`, so USDC in USD never marks), and a
                 bucket it could not price says so in words. With every
                 re-priced row unpriced and nothing booked, the total is
-                unknown — "—", never "$0.00". */}
+                unknown — "—", never "$0.00". The "—" test reads the GROSS
+                figure (#4288): gross is the booked or re-priced fiat before
+                the #3755 sweep netting, so gross > 0 means something was
+                priced — priced rows that genuinely net to 0 render
+                "$0.00" plus the note, not an em dash. */}
             <Amount
-              amount={spendUnpriced && d30.net[bucket] === 0 ? null : d30.net[bucket]}
+              amount={spendUnpriced && d30.gross[bucket] === 0 ? null : d30.net[bucket]}
               currency={currency}
               approx={spendApprox}
               size="lg"

@@ -667,6 +667,34 @@ describe('read commands', () => {
     expect(parsed[0].hash).toBe('0xa')
   })
 
+  it('keeps both own-account transfer legs and never opts the published CLI into folding (#4265)', async () => {
+    const transactions = [
+      {
+        hash: '0xmove', direction: 'out', valueFormatted: '1', asset: 'USDC',
+        tokenSymbol: 'USDC', timestamp: 1_700_000_000, from: '0xmain', to: '0xsavings',
+        chainId: 8453, accountAddress: '0xmain', accountName: 'Main',
+      },
+      {
+        hash: '0xmove', direction: 'in', valueFormatted: '1', asset: 'USDC',
+        tokenSymbol: 'USDC', timestamp: 1_700_000_000, from: '0xmain', to: '0xsavings',
+        chainId: 8453, accountAddress: '0xsavings', accountName: 'Savings',
+      },
+    ]
+    const api = fakeApi({ 'GET /transactions': { transactions } })
+    const { deps, out } = harness({ makeApi: () => api })
+
+    expect(await run(['activity', 'list', '--json'], deps)).toBe(0)
+    expect(JSON.parse(out.join('\n'))).toHaveLength(2)
+
+    out.length = 0
+    expect(await run(['activity', 'export'], deps)).toBe(0)
+    expect(out.join('\n').trim().split('\n')).toHaveLength(3)
+
+    const transactionCalls = api.calls.filter((call) => call.startsWith('GET /transactions?'))
+    expect(transactionCalls).toHaveLength(2)
+    expect(transactionCalls.every((call) => !call.includes('foldOwnTransfers'))).toBe(true)
+  })
+
   it('renders the ACCOUNT column from accountName — the server stopped sending safeName (#2914 follow-up)', async () => {
     // The table's ACCOUNT column read `safeName` while the feed emitted it.
     // #2914 renamed that field to `accountName`, and a stale read here fails

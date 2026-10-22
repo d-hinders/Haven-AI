@@ -3077,28 +3077,34 @@ export default function DesignSystemPage() {
         description="TransactionActivityRow's ledger mode (#4096, epic #4093): one row per transaction, grouped under the tinted TransactionActivityDayHeader day bands (“Today”, “Yesterday”, then short dates) — the second sanctioned band after Card.Header, on the table-header tokens with a full-width --v2-border hairline below (#4225). Rows within one day are separated by an inset --v2-border-subtle hairline that starts at the text column (insetDivider on every row after a day's first, #4165) — the un-merged counterpart of the dashboard's merged preview, which folds same agent / same merchant / same day into one ×N row. A ledger row with onOpen becomes a button: click or Enter/Space opens the shared TransactionDetailPanel, exactly as the account page's Activity tab will."
       >
         <div className="max-w-xl">
-          <Card hover={false} className="overflow-hidden">
-            <div className="divide-y divide-[var(--v2-border)]">
-              {transactionDayGroups(DS_LEDGER_ROWS, (row) => row.at).map((group) => (
-                <div key={group.dayKey}>
-                  <TransactionActivityDayHeader label={group.label} />
-                  {group.items.map((row, index) => (
-                    <TransactionActivityRow
-                      key={row.id}
-                      insetDivider={index > 0}
-                      direction="out"
-                      title={row.title}
-                      description={row.description}
-                      value={row.value}
-                      asset="USDC"
-                      timestamp={timeAgo(row.at)}
-                      onOpen={() => setDsLedgerOpened(row.title)}
-                    />
-                  ))}
-                </div>
-              ))}
-            </div>
-          </Card>
+          {/* #4288: the testid anchors the ledger clip — the day-grouped
+              card with its same-day inset divider, which no other baseline
+              pins. `Card` does not spread extra props, so the div carries it
+              (the ds-activity-row pattern). */}
+          <div data-testid="ds-activity-ledger">
+            <Card hover={false} className="overflow-hidden">
+              <div className="divide-y divide-[var(--v2-border)]">
+                {transactionDayGroups(DS_LEDGER_ROWS, (row) => row.at).map((group) => (
+                  <div key={group.dayKey}>
+                    <TransactionActivityDayHeader label={group.label} />
+                    {group.items.map((row, index) => (
+                      <TransactionActivityRow
+                        key={row.id}
+                        insetDivider={index > 0}
+                        direction="out"
+                        title={row.title}
+                        description={row.description}
+                        value={row.value}
+                        asset="USDC"
+                        timestamp={timeAgo(row.at)}
+                        onOpen={() => setDsLedgerOpened(row.title)}
+                      />
+                    ))}
+                  </div>
+                ))}
+              </div>
+            </Card>
+          </div>
           <p className="mt-3 text-xs text-[var(--v2-ink-3)]">
             {dsLedgerOpened
               ? `Opened "${dsLedgerOpened}" — the account page opens the shared TransactionDetailPanel from this row.`

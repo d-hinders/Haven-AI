@@ -213,11 +213,13 @@ test.describe('agent detail at 390px (#2733)', () => {
     )
 
     // ── 2. "Set budget" is one line in its pill ────────────────────────────
-    // #3695: with an active budget the grant form waits behind "Add budget",
-    // so it is opened first — and asserted ABSENT before that, which is the
-    // collapsed-form claim measured in a real browser.
+    // #3695: with an active budget the grant form waits behind the row's ⋯
+    // menu (#4261), so it is opened first — and the form is asserted ABSENT
+    // before that, which is the collapsed-form claim measured in a real
+    // browser.
     await expect(page.getByLabel('Recipient')).toHaveCount(0)
-    await page.getByRole('button', { name: 'Add budget', exact: true }).click()
+    await page.getByRole('button', { name: /^Budget options/ }).click()
+    await page.getByRole('menuitem', { name: 'Add budget' }).click()
     await expect(page.getByRole('button', { name: 'Set budget', exact: true })).toBeVisible()
     // The `sm` Button's height is the fixed `h-9` regardless of line count,
     // so the PILL height cannot detect wrapping. The label's rendered line

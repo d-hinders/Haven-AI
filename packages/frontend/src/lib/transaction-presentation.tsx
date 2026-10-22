@@ -2,6 +2,7 @@ import { TransactionMovement } from '@/components/haven'
 import type { AmountCurrency } from '@/components/haven/Amount'
 import { shouldMarkApprox, type ApproxMarkKind } from '@haven_ai/core'
 import type { StatusTone } from '@/components/ui/StatusBadge'
+import { machinePaymentLifecyclePresentation } from '@/lib/machine-payment-lifecycle'
 import { isMachinePaymentSource, parseX402Hostname, paymentSourceTitle } from '@/lib/transaction-labels'
 import { truncate } from '@/lib/format'
 import type { AggregatedTransaction } from '@/types/transactions'
@@ -59,6 +60,26 @@ export function transactionStatus(
 ): { label: string; tone: StatusTone } | null {
   if (!isDelegateSweep(tx)) return null
   return { label: 'Recovered', tone: 'success' }
+}
+
+/**
+ * The ONE row-badge precedence, shared by every ledger surface (#4288):
+ * a delegate sweep's "Recovered", then the machine-payment lifecycle
+ * ("Confirming", "Needs attention"), then the wire's `statusBadge`, and
+ * finally a failed on-chain payment as "Failed" — the same fallback
+ * `/transactions` renders, so an `isError` row never shows an unlabelled
+ * red amount. One precedence everywhere: a screen that builds its own chain
+ * drifts from this the moment a rule changes.
+ */
+export function transactionRowBadge(
+  tx: AggregatedTransaction,
+): { label: string; tone: StatusTone } | null {
+  return (
+    transactionStatus(tx) ??
+    machinePaymentLifecyclePresentation(tx) ??
+    tx.statusBadge ??
+    (tx.isError ? { label: 'Failed', tone: 'danger' } : null)
+  )
 }
 
 export function transactionMovement(

@@ -10,6 +10,7 @@ import { accumulateGroup, emptySpendWindow, type GroupPricing } from '../dashboa
  */
 
 const BASE_USDC = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
+const ETH_KEY = '0x' + 'cc'.repeat(20)
 
 function group(overrides: Partial<DashboardSpendGroupRow>): DashboardSpendGroupRow {
   const zero = '0'
@@ -27,8 +28,12 @@ function group(overrides: Partial<DashboardSpendGroupRow>): DashboardSpendGroupR
   }
 }
 
-function pricingFor(symbol: string | null, rates: GroupPricing['rates']): Map<string, GroupPricing> {
-  return new Map([[`8453:${BASE_USDC}`, { symbol, rates }]])
+function pricingFor(
+  symbol: string | null,
+  rates: GroupPricing['rates'],
+  tokenKey = BASE_USDC,
+): Map<string, GroupPricing> {
+  return new Map([[`8453:${tokenKey}`, { symbol, rates }]])
 }
 
 const RATES = { usd: 1, eur: 0.9, sek: 10.76 }
@@ -50,17 +55,58 @@ describe('dashboard spend window — the "≈" rule per currency (#4165)', () =>
     expect(window.approxByCurrency.usd).toBe(true)
   })
 
-  it('a bucket with no rate is unpriced — left out of the sum, never marked ≈', () => {
+  it('a bucket with no rate is unpriced for a FLOAT — left out of the sum, never marked ≈', () => {
+    // ETH floats: with no sek quote the SEK bucket is unpriced. (#4288)
     const window = emptySpendWindow()
     accumulateGroup(
       window,
-      group({ net_usd_30: '2', gross_usd_30: '2', fb_usd_30: '5', fb_sek_30: '5' }),
+      group({ token_key: ETH_KEY, net_usd_30: '2', gross_usd_30: '2', fb_sek_30: '5' }),
       '30',
-      pricingFor('USDC', { usd: null, eur: 0.9, sek: null }),
+      pricingFor('ETH', { usd: 3_000, eur: 0.9, sek: null }, ETH_KEY),
     )
+    // The booked USD rows stand; the SEK fallback row is left out and the
+    // bucket says so.
     expect(window.netUsd).toBe(2)
-    expect(window.unpricedByCurrency).toEqual({ usd: true, eur: false, sek: true })
+    expect(window.netSek).toBe(0)
+    expect(window.unpricedByCurrency).toEqual({ usd: false, eur: false, sek: true })
     expect(window.approxByCurrency).toEqual({ usd: false, eur: false, sek: false })
+  })
+
+  it('prices a NULL-booked USDC row at exactly 1.0 in the USD bucket — the peg, not the market rate (#4288)', () => {
+    // CoinGecko's `usd` for USDC is ≈ 0.9998 and #4165 renders those
+    // dollars plain: USDC in the USD bucket is dollars, so the re-price is
+    // the peg (1.0), and the bucket is NOT marked — and NOT unpriced even
+    // with the USD quote missing.
+    const window = emptySpendWindow()
+    accumulateGroup(
+      window,
+      group({ fb_usd_30: '5', fb_eur_30: '5' }),
+      '30',
+      pricingFor('USDC', { usd: null, eur: 0.9, sek: 10.76 }),
+    )
+    expect(window.netUsd).toBe(5)
+    expect(window.grossUsd).toBe(5)
+    expect(window.unpricedByCurrency.usd).toBe(false)
+    expect(window.approxByCurrency.usd).toBe(false)
+    // The non-peg currencies still take the market rate.
+    expect(window.netEur).toBeCloseTo(4.5)
+  })
+
+  it('a pegged token still uses the market rate in every other currency (#4288)', () => {
+    const window = emptySpendWindow()
+    accumulateGroup(window, group({ fb_sek_30: '5', fb_usd_30: '5' }), '30', pricingFor('USDC', RATES))
+    expect(window.netSek).toBeCloseTo(53.8)
+    expect(window.approxByCurrency.sek).toBe(true)
+    // USD: 5 × 1.0 (the peg), never the ≈0.9998 `usd` quote the map carries.
+    expect(window.netUsd).toBe(5)
+    expect(window.approxByCurrency.usd).toBe(false)
+  })
+
+  it('a group the pricing map misses entirely keeps the old behaviour — no peg, no rate, unpriced (#4288)', () => {
+    const window = emptySpendWindow()
+    accumulateGroup(window, group({ fb_usd_30: '5' }), '30', new Map())
+    expect(window.netUsd).toBe(0)
+    expect(window.unpricedByCurrency.usd).toBe(true)
   })
 
   it('a fully booked group sets nothing', () => {

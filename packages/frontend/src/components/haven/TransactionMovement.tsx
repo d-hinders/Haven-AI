@@ -45,16 +45,21 @@ export function TransactionMovement({
 }) {
   if (bare) {
     return (
-      // One line, each name shrinking to an ellipsis (#4266 reviews): an
+      // One line, each name shrinking to an ellipsis (#4266 reviews) and
+      // carrying its full text as a `title` for when it is cut: an
       // unshrinkable box is hard-clipped mid-word in the one-line subline,
       // and a wrapping one overflows the fixed-height row at `sm`.
       <span className="inline-flex min-w-0 max-w-full items-center gap-x-1.5">
-        <span className="min-w-0 truncate">{from}</span>
+        <span className="min-w-0 truncate" title={typeof from === 'string' ? from : undefined}>
+          {from}
+        </span>
         <span aria-hidden="true" className="shrink-0">
           →
         </span>
         <span className="sr-only">to</span>
-        <span className="min-w-0 truncate">{to}</span>
+        <span className="min-w-0 truncate" title={typeof to === 'string' ? to : undefined}>
+          {to}
+        </span>
       </span>
     )
   }

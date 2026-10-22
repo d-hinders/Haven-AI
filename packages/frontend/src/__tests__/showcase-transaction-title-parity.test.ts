@@ -114,11 +114,11 @@ describe('/design-system machine-payment sample titles (#2448)', () => {
     expect(source).toContain(`title="${shipped}"`)
   })
 
-  it('shows the agent-attributed title the product ships', () => {
-    const shipped = transactionTitle(showcaseX402Row({ agentName: SHOWCASE_AGENT }))
-    expect(shipped).toContain(SHOWCASE_AGENT)
-    expect(source).toContain(`title: '${shipped}'`)
-  })
+  // The agent-attributed row title ("Agent payment by <agent>") was pinned
+  // here against the "Transaction history" table showcase. #4266 retired that
+  // showcase with `TransactionsTable`: list rows lead with the counterparty
+  // now, and `transactionTitle` heads only the detail drawer — so the page no
+  // longer carries a sample of it to keep honest.
 
   it('no longer carries the pre-#2357 wording anywhere in the file', () => {
     expect(source).not.toContain('x402 payment')

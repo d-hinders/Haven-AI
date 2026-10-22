@@ -94,7 +94,7 @@ test('/transactions: row titles truncate to one line and stay inside the row acr
           hasMore: false,
           partialFailure: false,
           failedAccountIds: [],
-          spills: false,
+          truncated: false,
         }),
       })
       return

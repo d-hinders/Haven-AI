@@ -2376,7 +2376,7 @@ ownership proof. Before #4245 those rows were labelled `operator`. The value
 is additive, and there is no skew: every published SDK's `verified=operator`
 already keeps `source === 'operator'` only, so it excludes `bazaar` rows on
 both surfaces. Since the #4245 follow-up, no catalog tool description calls
-the catalog or its entries "curated"; that is description text only (no tool
+the catalog or its entries "curated"; that is description and refusal-message text only (no tool
 name, schema or argument moved). The result is still read-only discovery
 metadata: catalog prices are indicative hints, never payment authority.
 `verified_payable` means the endpoint answered a live probe; `domain_verified`

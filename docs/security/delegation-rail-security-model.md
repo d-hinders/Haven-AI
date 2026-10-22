@@ -546,7 +546,7 @@ caveat, so the authority is still the signed caveat stack and nothing else.
 > three catalog tool descriptions, the `CATALOG_ENTRY_NOT_FOUND` refusal message,
 > a `contracts.ts` comment and the `getCatalogEntry` doc comment in
 > `sdk/src/client.ts` ("curated" dropped). No code path, budget pin, caveat or authority changed.
-> Scope of this re-read: that comment and the `client.ts` coverage named above;
+> Scope of this re-read: the text named above and the `client.ts` coverage;
 > nothing else in this document was re-read for it.
 
 Two limits are deliberate:

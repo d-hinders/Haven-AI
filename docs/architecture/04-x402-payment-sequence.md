@@ -836,7 +836,7 @@ the user. Guidance only: the cap stays required and its enforcement is
 unchanged.
 
 `haven_prepare_catalog_purchase({ catalog_id, max_amount_human | max_amount, arguments?, idempotency_key? })`
-starts a paid-MCP-tool purchase from a curated `merchant_catalog` row instead
+starts a paid-MCP-tool purchase from a `merchant_catalog` row instead
 of a hand-copied `merchant_url` / `tool_name` / `tool_arguments`. A row that
 DECLARES an argument schema (`tool_arguments_schema`, #3769) accepts caller
 `arguments` for its per-call tool — merged over the row's pinned ones and

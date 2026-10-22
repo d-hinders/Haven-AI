@@ -1638,16 +1638,17 @@ describe('DelegationBudgetCard hero states (#4226)', () => {
     render(<DelegationBudgetCard {...PROPS} stats={stats} />)
     expect(screen.getByText('Last 30 days')).toBeTruthy()
     const grid = screen.getByText('Spent', { selector: 'dt' }).closest('dl')!
-    expect(grid).toHaveClass('grid', 'grid-cols-3')
+    // Plain matchers over the class list, so a miss is an AssertionError.
+    expect([...grid.classList]).toEqual(expect.arrayContaining(['grid', 'grid-cols-3']))
     expect(grid.querySelectorAll(':scope > div')).toHaveLength(3)
     // Spent is Amount size="md": text-xl on the Amount span itself (#4259).
     const spent = within(figure('Spent')).getByText(/12\.50/)
-    expect(spent).toHaveClass('text-xl')
-    expect(spent).not.toHaveClass('text-sm')
+    expect([...spent.classList]).toContain('text-xl')
+    expect([...spent.classList]).not.toContain('text-sm')
     expect(figure('Payments').textContent).toBe('7')
-    expect(figure('Payments')).toHaveClass('text-xl')
+    expect([...figure('Payments').classList]).toContain('text-xl')
     expect(figure('Last paid').textContent).toBe(timeAgo('2026-08-30T10:00:00Z'))
-    expect(figure('Last paid')).toHaveClass('text-xl')
+    expect([...figure('Last paid').classList]).toContain('text-xl')
     // The 30px headline the column used to carry is gone; the balance is the headline.
     expect(grid.closest('section')?.querySelector('.text-3xl')).toBeNull()
   })
@@ -1682,8 +1683,8 @@ describe('DelegationBudgetCard hero states (#4226)', () => {
   it('no payments in 30 days but an older one: the empty line, then when and to whom (#4260)', () => {
     mockGet.mockReturnValue([heroBudget()])
     render(<DelegationBudgetCard {...PROPS} stats={{ ...stats, d30: spendWindow(0, 0) }} />)
-    expect(screen.getByText('No payments in the last 30 days.')).toBeTruthy()
-    expect(screen.getByText(`Last paid ${timeAgo('2026-08-30T10:00:00Z')} to api.bitrefill.com`)).toBeTruthy()
+    expect(screen.queryByText('No payments in the last 30 days.')).not.toBeNull()
+    expect(screen.queryByText(`Last paid ${timeAgo('2026-08-30T10:00:00Z')} to api.bitrefill.com`)).not.toBeNull()
     expect(screen.queryByText('Spent', { selector: 'dt' })).toBeNull()
   })
 
@@ -1695,7 +1696,7 @@ describe('DelegationBudgetCard hero states (#4226)', () => {
         stats={{ ...stats, d30: spendWindow(0, 0), lastPaymentAt: null, lastCounterparty: null }}
       />,
     )
-    expect(screen.getByText('No payments in the last 30 days.')).toBeTruthy()
+    expect(screen.queryByText('No payments in the last 30 days.')).not.toBeNull()
     expect(screen.queryByText(/Last paid/)).toBeNull()
     expect(screen.queryByText('Spent', { selector: 'dt' })).toBeNull()
   })

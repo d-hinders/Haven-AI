@@ -805,15 +805,16 @@ describe('AccountDetailClient', () => {
       // resizes the figure (#4259).
       const moneyIn = within(section).getByText('$120.00')
       const moneyOut = within(section).getByText('$45.00')
+      // Plain matchers over the class list, so a miss is an AssertionError.
       for (const figure of [moneyIn, moneyOut]) {
-        expect(figure).toHaveClass('text-xl')
-        expect(figure).not.toHaveClass('text-sm')
+        expect([...figure.classList]).toContain('text-xl')
+        expect([...figure.classList]).not.toContain('text-sm')
       }
       // The mark is the 24px figure box, on the rendered mark span.
       for (const icon of ['svg.lucide-arrow-down', 'svg.lucide-arrow-up']) {
-        const mark = section.querySelector(icon)!.closest('span[aria-hidden="true"]')
-        expect(mark).toHaveClass('h-6', 'w-6', 'rounded-[7px]')
-        expect(mark).not.toHaveClass('h-[18px]')
+        const mark = section.querySelector(icon)!.closest('span[aria-hidden="true"]')!
+        expect([...mark.classList]).toEqual(expect.arrayContaining(['h-6', 'w-6', 'rounded-[7px]']))
+        expect([...mark.classList]).not.toContain('h-[18px]')
       }
       // The sr-only names still sit before each figure, in its pair.
       expect(within(section).getByText('Money in').parentElement).toContainElement(moneyIn)
@@ -827,8 +828,8 @@ describe('AccountDetailClient', () => {
       })
       render(<AccountDetailClient />)
       const skeleton = screen.getByRole('status', { name: 'Loading the last 30 days' })
-      expect(skeleton).toHaveClass('flex', 'h-7')
-      expect(skeleton).not.toHaveClass('space-y-2')
+      expect([...skeleton.classList]).toEqual(expect.arrayContaining(['flex', 'h-7']))
+      expect([...skeleton.classList]).not.toContain('space-y-2')
       expect(skeleton.children).toHaveLength(2)
     })
 

@@ -127,8 +127,10 @@ export interface McpMerchantTransportOptions {
   merchantTimeout?: number
   fetch?: MerchantFetch
   /**
-   * #3747: optional merchant-egress policy. Absent — the SDK default — the
-   * transport behaves exactly as before. Present, every request and every
+   * #3747: optional merchant-egress policy. Absent — the SDK default — there
+   * is no URL check, cap or per-use budget, and redirects follow the
+   * platform's rules except that a hop to another origin keeps credentials
+   * and payment headers at the origin they were sent to (#4257). Present, every request and every
    * GET-redirect hop is `assertUrl`-checked before it connects, redirects go
    * `manual` with re-checked GET follows, response bodies are capped WHILE
    * being read, and `budgetFor` resolves per-use timeouts.

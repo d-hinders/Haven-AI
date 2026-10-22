@@ -401,9 +401,12 @@ haven_pay_x402_quote → haven_sign
 > policy (https-only public hosts, no IP literals or internal names, ≤3
 > re-checked GET redirects, while-reading byte caps, per-use budgets —
 > [docs/security/hosted-egress.md](../security/hosted-egress.md)). The local
-> MCP and SDK embedders are unchanged: without `merchantEgress` the client
-> behaves exactly as before, including `http` to loopback and reserved
-> `.test`/`.localhost`/`.invalid`/`.example` fixtures. Accepted residual on
+> MCP and SDK embedders have no URL policy: without `merchantEgress` the
+> client still reaches `http` to loopback and reserved
+> `.test`/`.localhost`/`.invalid`/`.example` fixtures, with no caps or per-use
+> budgets. Both sides share one redirect rule (#4244, #4257): a hop to another
+> origin carries only an allow-list of headers, and a hop that would re-send a
+> request body to another origin is refused. Accepted residual on
 > the hosted side: a public name whose DNS answer points at private space is
 > not blocked (that is the resolution-time work parked in #3742–#3744).
 

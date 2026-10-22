@@ -58,6 +58,27 @@ hosted client's own outbound rule.
   time, so re-asserting is a no-op there.
 - Discovery (`discoverMerchantMcpUrl`) asserts the input origin before it
   fetches and reads its 64 KB document with the cap enforced while reading.
+
+## Without a policy (#4257)
+
+The SDK default, the local MCP, connect and every embedder that sets no
+`merchantEgress` get no URL check, no byte cap and no per-use budget. They do
+share the redirect rule, because the transport follows redirects itself on
+both paths:
+
+- A hop to another origin (scheme, host or port, compared hop to hop) carries
+  only `accept`, `accept-language`, `user-agent` and `x402-wallet`, exactly as
+  in rule 4. An API key, a cookie or an x402 payment header supplied for one
+  merchant never reaches the origin it redirects to, and an `https` → `http`
+  hop is a different origin.
+- A hop that would re-send a request body to another origin (a 307/308 on a
+  POST) is refused mid-flight (`redirect_cross_origin_body`). A request body
+  can carry the payment itself: an MCP `tools/call` puts it in
+  `_meta["x402/payment"]`.
+- Everything else is the platform's behaviour, kept as it was: up to 20 hops
+  (`NO_POLICY_MAX_REDIRECTS`), the Fetch spec's 301/302/303 rewrite to a
+  body-less GET, a 3xx without `Location` returned as the answer, and a
+  caller's `redirect: 'manual'` or `'error'` passed straight to the platform.
 - `haven_pay_x402_quote`'s request mode (#3739) makes its own unpaid probe
   under the same policy: `assertUrl` before the fetch, the quote budgets
   (15 s, 256 KiB while reading), and a STRICTER redirect rule —

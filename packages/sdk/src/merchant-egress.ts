@@ -16,9 +16,12 @@ import { HavenError } from './types.js'
  *    it is a string check. A public host name whose DNS ANSWER points at
  *    private space is NOT blocked here — that needs the resolution-time
  *    checks parked in #3742–#3744 (owner-accepted residual, 2026-10-07).
- *  - Without `merchantEgress`, NOTHING in the SDK changes: no `redirect:
- *    'manual'`, no body capping, no extra refusals. SDK, local-MCP and
- *    embedder callers keep today's behaviour byte for byte.
+ *  - Without `merchantEgress` there is no URL check, no body capping and no
+ *    per-use budget. Redirects are still followed by the transport (#4257),
+ *    under the platform's rules (20 hops, the Fetch spec's method/body
+ *    rewrite), plus the one rule both paths share: a hop to another origin
+ *    carries only the cross-origin header allow-list, and a hop that would
+ *    re-send a request body to another origin is refused.
  *  - The policy is network policy, not spend control. It never gates a
  *    payment's authority — the on-chain allowance stays the real control
  *    (CASP: off-chain policy is never the spend control).

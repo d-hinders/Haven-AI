@@ -140,7 +140,9 @@ inverts an edit.
 | **mutation-red** | red for the mutation's own reason — compile, import or SQL error, a non-assertion throw in a named test, a timeout, or a different test count | no — fix the mutation and re-run |
 
 Assertion-type is `ERR_ASSERTION` for `node --test`, an `expect(` failure for
-Playwright, and for vitest (`VITEST_ASSERTION_SHAPE`, #4284) an `AssertionError`
+Playwright — with or without a custom message (`expect(v, 'msg')`, `expect.poll(…,
+{ message })`; `PLAYWRIGHT_ASSERTION_SHAPE`, #4294; a message that itself holds a
+blank line reads as an error) — and for vitest (`VITEST_ASSERTION_SHAPE`, #4284) an `AssertionError`
 or the frontend's idiom: a jest-dom matcher (`Error: expect(element)…`), a
 `getBy*` (`TestingLibraryElementError`), or a `findBy*` / `waitFor` timeout
 (a plain `Error:` with the query library's "Unable to find …" or "Found …"

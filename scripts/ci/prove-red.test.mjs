@@ -267,6 +267,37 @@ describe('classifier over recorded runner output', () => {
     const load = normalizePlaywrightJson(readJson('playwright-load-failure.json'), 1)
     assert.match(load.loadErrors[0], /Cannot find module/)
   })
+  test('playwright (#4294): a custom-message expect is assertion; a thrown error or a test timeout is not', () => {
+    // Recorded from Playwright 1.60.0 (page.setContent), message text verbatim
+    // with ANSI. Classification reads results.at(-1).error only: the test
+    // timeout case also carries the pending expect in errors[], and must
+    // still read as an error.
+    const r = normalizePlaywrightJson(readJson('playwright-custom-messages.json'), 1)
+    const cm = 'custom messages > '
+    assert.deepEqual(
+      r.tests.map((x) => [x.name.replace(cm, ''), x.kind]),
+      [
+        ['value with message', 'assertion'],
+        ['multi-line message', 'assertion'],
+        ['locator timeout with message', 'assertion'],
+        ['screenshot with message', 'assertion'],
+        ['soft with message', 'assertion'],
+        ['poll with message', 'assertion'],
+        ['no message', 'assertion'],
+        ['plain Error', 'error'],
+        ['thrown error mentioning expect later', 'error'],
+        ['TypeError', 'error'],
+        ['click timeout', 'error'],
+        ['test timeout during messaged expect', 'error'],
+      ],
+    )
+    // The reported message is now the custom message, the reader's sentence.
+    assert.equal(r.tests[0].message, 'Error: the count is wrong')
+    assert.equal(
+      classify({ baseline: greenOf(r), mutant: r, expectRed: [`${cm}value with message`] }).class,
+      'caught',
+    )
+  })
   test('caught needs the baseline test count; shadowed is an assertion red outside expect_red', () => {
     const baseline = res([t('a'), t('b'), t('c')])
     const fewer = res([t('a', 'failed', 'assertion'), t('b')])

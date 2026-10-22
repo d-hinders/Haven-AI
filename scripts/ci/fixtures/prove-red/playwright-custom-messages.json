@@ -1,0 +1,223 @@
+{
+  "suites": [
+    {
+      "title": "shapes.spec.mjs",
+      "specs": [],
+      "suites": [
+        {
+          "title": "custom messages",
+          "specs": [
+            {
+              "title": "value with message",
+              "tests": [
+                {
+                  "status": "unexpected",
+                  "results": [
+                    {
+                      "status": "failed",
+                      "error": {
+                        "message": "Error: the count is wrong\n\n\u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32m2\u001b[39m\nReceived: \u001b[31m1\u001b[39m"
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "title": "multi-line message",
+              "tests": [
+                {
+                  "status": "unexpected",
+                  "results": [
+                    {
+                      "status": "failed",
+                      "error": {
+                        "message": "Error: first line\nsecond line\n\n\u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32m2\u001b[39m\nReceived: \u001b[31m1\u001b[39m"
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "title": "locator timeout with message",
+              "tests": [
+                {
+                  "status": "unexpected",
+                  "results": [
+                    {
+                      "status": "failed",
+                      "error": {
+                        "message": "Error: the banner never rendered\n\n\u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoBeVisible\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('#nope')\nExpected: visible\nTimeout: 300ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - the banner never rendered with timeout 300ms\u001b[22m\n\u001b[2m  - waiting for locator('#nope')\u001b[22m\n"
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "title": "screenshot with message",
+              "tests": [
+                {
+                  "status": "unexpected",
+                  "results": [
+                    {
+                      "status": "failed",
+                      "error": {
+                        "message": "Error: the page drifted\n\n\u001b[2mexpect(\u001b[22m\u001b[31mpage\u001b[39m\u001b[2m).\u001b[22mtoHaveScreenshot\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m)\u001b[22m failed\n\n  11 pixels (ratio 0.01 of all image pixels) are different.\n\n  Snapshot: shot.png\n\nCall log:\n\u001b[2m  - the page drifted with timeout 5000ms\u001b[22m\n\u001b[2m    - verifying given screenshot expectation\u001b[22m\n\u001b[2m  - taking page screenshot\u001b[22m\n\u001b[2m    - disabled all CSS animations\u001b[22m\n\u001b[2m  - waiting for fonts to load...\u001b[22m\n\u001b[2m  - fonts loaded\u001b[22m\n\u001b[2m  - 11 pixels (ratio 0.01 of all image pixels) are different.\u001b[22m\n\u001b[2m  - waiting 100ms before taking screenshot\u001b[22m\n\u001b[2m  - taking page screenshot\u001b[22m\n\u001b[2m    - disabled all CSS animations\u001b[22m\n\u001b[2m  - waiting for fonts to load...\u001b[22m\n\u001b[2m  - fonts loaded\u001b[22m\n\u001b[2m  - captured a stable screenshot\u001b[22m\n\u001b[2m  - 11 pixels (ratio 0.01 of all image pixels) are different.\u001b[22m\n"
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "title": "soft with message",
+              "tests": [
+                {
+                  "status": "unexpected",
+                  "results": [
+                    {
+                      "status": "failed",
+                      "error": {
+                        "message": "Error: soft check\n\n\u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32m2\u001b[39m\nReceived: \u001b[31m1\u001b[39m"
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "title": "poll with message",
+              "tests": [
+                {
+                  "status": "unexpected",
+                  "results": [
+                    {
+                      "status": "failed",
+                      "error": {
+                        "message": "Error: the poll never settled\n\nthe poll never settled\n\n\u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32m2\u001b[39m\nReceived: \u001b[31m1\u001b[39m\n\nCall Log:\n- Timeout 300ms exceeded while waiting on the predicate"
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "title": "no message",
+              "tests": [
+                {
+                  "status": "unexpected",
+                  "results": [
+                    {
+                      "status": "failed",
+                      "error": {
+                        "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32m2\u001b[39m\nReceived: \u001b[31m1\u001b[39m"
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "title": "plain Error",
+              "tests": [
+                {
+                  "status": "unexpected",
+                  "results": [
+                    {
+                      "status": "failed",
+                      "error": {
+                        "message": "Error: boom"
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "title": "thrown error mentioning expect later",
+              "tests": [
+                {
+                  "status": "unexpected",
+                  "results": [
+                    {
+                      "status": "failed",
+                      "error": {
+                        "message": "Error: setup failed\n\nexpect(foo) was never reached"
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "title": "TypeError",
+              "tests": [
+                {
+                  "status": "unexpected",
+                  "results": [
+                    {
+                      "status": "failed",
+                      "error": {
+                        "message": "TypeError: Cannot read properties of undefined (reading 'y')"
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "title": "click timeout",
+              "tests": [
+                {
+                  "status": "unexpected",
+                  "results": [
+                    {
+                      "status": "failed",
+                      "error": {
+                        "message": "TimeoutError: locator.click: Timeout 300ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('#nope')\u001b[22m\n"
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "title": "test timeout during messaged expect",
+              "tests": [
+                {
+                  "status": "unexpected",
+                  "results": [
+                    {
+                      "status": "timedOut",
+                      "error": {
+                        "message": "\u001b[31mTest timeout of 1500ms exceeded.\u001b[39m"
+                      },
+                      "errors": [
+                        {
+                          "message": "\u001b[31mTest timeout of 1500ms exceeded.\u001b[39m"
+                        },
+                        {
+                          "message": "Error: never shows\n\n\u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoBeVisible\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('#nope')\nExpected: visible\nError: element(s) not found\n\nCall log:\n\u001b[2m  - never shows with timeout 10000ms\u001b[22m\n\u001b[2m  - waiting for locator('#nope')\u001b[22m\n\n\n  21 |     test.setTimeout(1500)\n  22 |     await page.setContent('<p>x</p>')\n> 23 |     await expect(page.locator('#nope'), 'never shows').toBeVisible({ timeout: 10000 })\n     |                                                        ^\n  24 |   })\n  25 | })\n  26 |\n    at <fixture>/pw/shapes.spec.mjs:23:56"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "suites": []
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "expected": 0,
+    "unexpected": 12,
+    "skipped": 0,
+    "flaky": 0
+  }
+}

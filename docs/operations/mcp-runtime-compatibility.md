@@ -83,6 +83,17 @@ covers:
 last-verified: "2026-10-21"
 ---
 
+> **Re-verified unchanged (#4257, 2026-10-22, merchant-transport only).**
+> `packages/sdk/src/mcp-merchant-transport.ts` and `merchant-egress.ts` are on
+> this contract's cover list. Without a merchant-egress policy the transport
+> now follows redirects itself: a hop to another origin carries only the
+> #4244 header allow-list, and a hop that would re-send a request body to
+> another origin is refused with `MerchantEgressRefusedError`
+> (`redirect_cross_origin_body`, a new refusal reason). Everything else keeps
+> the platform's redirect behaviour. No tool is added, renamed or re-shaped;
+> no strict schema, consent hash, version-skew rule or signing input moves.
+> `last-verified` is not re-stamped: this block is the scope.
+
 > **Re-verified unchanged (#4244, 2026-10-22, merchant-transport only).**
 > `packages/sdk/src/mcp-merchant-transport.ts` and `merchant-egress.ts` are on
 > this contract's cover list. Under a merchant-egress policy, a GET redirect

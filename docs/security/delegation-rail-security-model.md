@@ -529,6 +529,27 @@ caveat, so the authority is still the signed caveat stack and nothing else.
 > `merchant-catalog.ts`/`merchants.ts` coverage it names; the rest of the
 > document was not re-read for it.
 
+> **Re-verified #4245 (2026-10-22):** #4245 adds `merchant_catalog.source`
+> (`'operator'` | `'bazaar'`, migration 117) and widens the `CatalogRow` type
+> in `merchant-catalog.ts`; in `sdk/src/client.ts` only a doc comment on
+> `discoverTools` changed. The payTo contract above is unchanged: the
+> merchant-locked budget's pin is still read from `pay_to` across the
+> merchant's active, verified offers, and `source` feeds no budget pin, no
+> caveat, and no authority path — it is a provenance label on the catalog
+> read. A Bazaar row's `pay_to` takes part in its merchant's funding target
+> exactly as before #4245 (a disagreeing offer still refuses the budget).
+> Scope of this re-read: the Merchant-locked budgets section and the
+> `merchant-catalog.ts`/`client.ts` coverage it names; the rest of the
+> document was not re-read for it, and `last-verified` is not bumped.
+
+> **Re-verified #4245 follow-up (2026-10-22):** the follow-up only rewords text
+> ("curated" dropped): three catalog tool descriptions, the
+> `CATALOG_ENTRY_NOT_FOUND` refusal message, the OpenAPI `GET /catalog`
+> summary and description, code comments (including the `getCatalogEntry`
+> doc comment in `sdk/src/client.ts`) and four docs. No code path, budget pin, caveat or authority changed.
+> Scope of this re-read: the text named above and the `client.ts` coverage;
+> nothing else in this document was re-read for it.
+
 Two limits are deliberate:
 - **Slot sharing.** A merchant-locked budget and a plain budget pinned to the
   same address share one `(agent, token, recipient)` slot. Activating either
@@ -2336,7 +2357,8 @@ signer imports:
   of the two x402 shapes above was signed; a settlement-child binding is
   refused, because no funding leg put that amount in the delegate EOA the
   header spends from. `haven_sign_x402` refuses a settlement child before
-  signing it. And **the sweep home**, against Haven's recovery binding (see
+  signing it. Since #4248 a settlement-child binding is retired at mint and
+  never held, so the signer keeps no payment context for it. And **the sweep home**, against Haven's recovery binding (see
   residual 2).
 - **A task-budget child `Delegation` (#3329)** — a self-delegation: delegator
   AND delegate are this key's own delegate account, authority is the agent's
@@ -3578,8 +3600,10 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > `scripts/record-kit-analytics-connections.mjs` net over the backend suite.
 
 > **Re-verified unchanged (#4226, 2026-10-22, agent detail tabs and the
-> Spending hero):** this diff touches one covered file, display-layer:
-> `components/DelegationBudgetCard.tsx`. The card is rebuilt on the
+> Spending hero):** this diff touches two covered files, display-layer:
+> `components/DelegationBudgetCard.tsx` and `components/haven/BudgetMeter.tsx`
+> (the latter brought under this document by the same change; corrected by
+> #4249). The card is rebuilt on the
 > dashboard's money-card pattern (budgets left, Last 30 days right, one
 > `Card.Section divided`, stacked below `lg`); each budget's caption moves to
 > the shared `budgetCaptionFor` `row` style — the same text the dashboard row
@@ -3601,3 +3625,18 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > caption and liveness notes, this run of card notes); nothing else in this
 > document was re-read for it, and `last-verified` is bumped to 2026-10-22
 > for exactly this coverage.
+
+> **Re-verified unchanged (#4260, 2026-10-22, Last 30 days at the
+> secondary-figure size):** this diff touches one covered file,
+> display-layer: `components/DelegationBudgetCard.tsx`. Only the hero's
+> right half (`LastThirtyDays`) and its loading skeleton change: the spent
+> figure, payment count and last-paid age render as three labelled figures
+> at 20px, and the merchant label moves to its own "Last paid to …" line.
+> The figures read the same overview stats as before, through the same
+> #4209 merchant helper (never an address). No budget row, caption, meter,
+> menu, confirm, signing, edit or revoke path moves; no fetch or write is
+> added or removed. No new spender, no new authority grant, no custody
+> change (Red Line #4: the chain remains the only spend authority). Scope
+> of this re-read: the card diff above and the previous note's card
+> display claims; nothing else in this document was re-read for it, and
+> `last-verified` stays 2026-10-22.

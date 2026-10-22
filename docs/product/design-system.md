@@ -109,6 +109,11 @@ last-verified: 2026-10-21
 
 # Haven Design System
 
+> Re-verified 2026-10-22 for #4237: the navigation bullets (floating tab bar —
+> the concentric-capsule indicator, the pill's `p-1` inset, the bar-only
+> "Home" label and the relaxed one-active-idiom rule for the bar). This note
+> covers those passages only.
+
 > Re-verified 2026-10-19 for #4063: the navigation bullets (floating tab bar —
 > the dark pill's own token pair and the re-measured ratios — and active
 > idiom). This note covers those passages only.
@@ -601,6 +606,7 @@ Authenticated app pages use compact product typography utilities from `@haven_ai
 | `.v2-text-display` | 40 / 48px | 600 | -0.02em | Rare app hero display, not ordinary dashboards |
 | `.v2-text-h1` | 28 / 34px | 600 | -0.015em | PageHeader title |
 | `.v2-text-h2` | 20 / 28px | 600 | -0.01em | Major section titles |
+| `Amount size="md"` (`text-xl`) | 20 / 28px | 600 | 0 | Secondary figure, 20px — a figure beside a headline: the Last 30 days figures on the account summary card and the agent Spending hero (#4260); pair it with `DirectionMark density="figure"` (#4259). Set on `Amount`'s own span: a wrapper's `text-*` never resizes the figure |
 | `.v2-text-h3` | 16 / 24px | 600 | 0 | Card and panel titles |
 | `.v2-text-body` | 14 / 22px | 400 | 0 | Main app body copy |
 | `.v2-text-meta` | 12 / 18px | 400 | 0 | Labels, captions, metadata |
@@ -642,10 +648,10 @@ in the same PR (Pattern Absorption, #901).
 The authenticated app uses one stable product shell:
 
 - Sidebar: 240px desktop rail at `lg` and above, white surface, subtle active tint, and a 2px brand accent bar on the active route. Below `lg` the rail is `hidden` (still in the DOM — the visual specs wait on its `User menu` kebab as a "shell has mounted" signal).
-- **Below `lg`, navigation is the floating tab bar plus the More sheet** ([#2731](https://github.com/d-hinders/Haven-AI/issues/2731), [#4053](https://github.com/d-hinders/Haven-AI/issues/4053), [#4058](https://github.com/d-hinders/Haven-AI/issues/4058)). Primary is a five-cell pill — Dashboard, Agents, Activity (the bar's label for `/transactions`; the rail and the page keep "Transactions"), Accounts, and More, which opens a floating card holding everything else. Properties worth knowing before touching it:
-  - **A floating pill** (#4058, dark lift #4063): `rounded-full`, a 1px token edge and `shadow-popover`, inset `max(12px, inset)` from the sides, `--v2-tab-bar-bottom` (`max(12px, inset)`) above the bottom edge, capped at `max-w-md` and centred. The pill paints from its own token pair, `--v2-tab-bar-bg` / `--v2-tab-bar-border` — **solid** and opaque, with no `backdrop-filter`: the owner chose near-solid over glass, and at 95% opacity page text ghosted through behind the labels. In light mode the pair aliases `--v2-bg` / `--v2-border` exactly and the popover shadow lifts the pill. In dark mode both blocks redeclare it — fill `--v2-surface-2` (`#20252f`) and edge `--v2-border-strong` (`#3a4152`) — because the dark shadow is black on near-black: against `--v2-bg` the dark edge measures **1.79:1** (up from `--v2-border`'s 1.41:1) and the fill 1.19:1, so the pill reads as a distinct surface. `--v2-tab-bar-h` is its outer height (62px). It stays the `fixed` `<nav data-mobile-tab-bar>` itself — specs select it that way. Each cell is a full rectangle for hit-testing (Chromium hit-tests `border-radius`, so a rounded cell has dead corners); the active shape is painted by an inner `[data-tab-indicator]` span — `rounded-2xl`, not a full capsule, because a capsule crossed the letters of "Dashboard" at 390px.
+- **Below `lg`, navigation is the floating tab bar plus the More sheet** ([#2731](https://github.com/d-hinders/Haven-AI/issues/2731), [#4053](https://github.com/d-hinders/Haven-AI/issues/4053), [#4058](https://github.com/d-hinders/Haven-AI/issues/4058), [#4237](https://github.com/d-hinders/Haven-AI/issues/4237)). Primary is a five-cell pill — Home (the bar's label for `/dashboard`; the rail, the page `h1` and the route keep "Dashboard"), Agents, Activity (the bar's label for `/transactions`; the rail and the page keep "Transactions"), Accounts, and More, which opens a floating card holding everything else. Properties worth knowing before touching it:
+  - **A floating pill** (#4058, dark lift #4063, concentric capsule #4237): `rounded-full`, a 1px token edge and `shadow-popover`, inset `max(12px, inset)` from the sides, `--v2-tab-bar-bottom` (`max(12px, inset)`) above the bottom edge, capped at `max-w-md` and centred. The pill paints from its own token pair, `--v2-tab-bar-bg` / `--v2-tab-bar-border` — **solid** and opaque, with no `backdrop-filter`: the owner chose near-solid over glass, and at 95% opacity page text ghosted through behind the labels. In light mode the pair aliases `--v2-bg` / `--v2-border` exactly and the popover shadow lifts the pill. In dark mode both blocks redeclare it — fill `--v2-surface-2` (`#20252f`) and edge `--v2-border-strong` (`#3a4152`) — because the dark shadow is black on near-black: against `--v2-bg` the dark edge measures **1.79:1** (up from `--v2-border`'s 1.41:1) and the fill 1.19:1, so the pill reads as a distinct surface. `--v2-tab-bar-h` is its outer height (62px): 52px cells, `p-1` (4px) on every side and the 1px border. It stays the `fixed` `<nav data-mobile-tab-bar>` itself — specs select it that way. Each cell is a full rectangle for hit-testing (Chromium hit-tests `border-radius`, so a rounded cell has dead corners); the active shape is painted by an inner `[data-tab-indicator]` span — a full capsule, concentric with the pill: it is set in by the same 5px on every side (the `p-1` padding plus the border), so its 26px radius follows the pill's 31px curve. #4058 had it `rounded-2xl` because a capsule crossed the letters of "Dashboard"; #4237 pairs the capsule with the bar-only "Home" label (`TAB_LABELS`), which keeps the curved ends off the landing tab's label instead.
   - **Tabs are selected from `baseNavItems` by ROUTE, never by index.** The bar's order differs from the rail's, so a positional read reorders the bar the next time an entry is inserted.
-  - **One active idiom** ([#2818](https://github.com/d-hinders/Haven-AI/issues/2818), [#4058](https://github.com/d-hinders/Haven-AI/issues/4058)): the active cell is brand ink on a rounded `--v2-brand-soft` indicator bounded by a 1px inset brand **outline** — `SegmentedControl`'s selected option ([#4056](https://github.com/d-hinders/Haven-AI/issues/4056)) — replacing the 2px top rail a floating pill has nowhere to hang; rail and sheet rows keep their brand tint. The outline carries the accessibility weight rather than decorating: measured against `--v2-bg`, `--v2-brand` is 6.29:1 (light) / 8.65:1 (dark) — and 7.27:1 against the dark pill's lifted fill (`--v2-surface-2`, #4063) — while the indicator fill alone is 1.12:1 (light on `--v2-bg`) / 1.10:1 (dark on the pill fill), and `--v2-brand` against `--v2-ink-3` only **1.18:1** (light) / 1.32 (dark) — hue with no luminance, so brand ink *alone* would fail WCAG 1.4.1 in greyscale and for a colour-blind user. The outline — a non-colour cue — is what carries the selection on the lifted pill. An outline, not `ring-inset`, so every cell's focus ring stays the outset `ring-2`. `aria-current="page"` remains the programmatic cue.
+  - **The bar's active idiom is its own: a neutral concentric capsule** ([#4237](https://github.com/d-hinders/Haven-AI/issues/4237), owner decision 2026-10-21, Revolut-style). The active cell is `--v2-ink` + semibold on a `rounded-full` `--v2-tab-bar-indicator` fill with NO outline; inactive cells and More stay `--v2-ink-3` + medium. This deliberately relaxes the **one active idiom** rule ([#2818](https://github.com/d-hinders/Haven-AI/issues/2818)) for the bar: the More sheet's rows keep their `--v2-brand-soft` + brand ink, and `SegmentedControl`'s selected option is untouched. The two idioms are never on screen together — the sheet covers the bar while open (`design-system.md` § *More sheet*) — and co-visibility was #2818's failure case. The fill is a SUPPLEMENTARY cue, recorded here with its measured ratios: it reads 1.12:1 on the light pill (`#eef2f7` on `#ffffff`) and 1.18:1 on the dark pill (`#2b3140` on `#20252f`) — a subtle neutral fill cannot reach WCAG 1.4.11's 3:1 without becoming the heavy block the owner declined (and dark `--v2-surface-2` equals the pill fill outright, 1.00:1). Selection is carried by three cues on the cell: `--v2-ink` vs `--v2-ink-3` (3.05:1 light, 2.50:1 dark — in dark mode the 600-vs-500 weight is load-bearing), the weight step, and `aria-current="page"`. Both text states clear 4.5:1 on their grounds (`CONTRAST_PAIRS`: ink on `tab-bar-indicator` 14.44 light / 11.68 dark; ink-3 on `tab-bar-bg` 5.32 light / 5.52 dark). The focus ring stays the outset `ring-2 ring-brand/80` on the indicator.
   - **More is a cell of the bar, and only opens** (#4053, #4058). Until #4053 it was a sibling painted over the bar on `--v2-z-nav-toggle`, because #2820's full-screen drawer covered the bar. Since #4058 its name is the constant *Open sidebar* (with `aria-expanded`) and its label always "More": the sheet covers the cell, and *Close sidebar* belongs to the sheet's ✕ alone — two buttons with that name would break the harness under Playwright's strict mode.
 - **The More sheet** (#4053, `components/sidebar/MoreSheet.tsx`) replaced #2820's full-screen drawer — the desktop rail stretched to the screen. Since #4058 it is a floating card over the floating bar.
   - **Geometry:** a card `max(8px, inset)` in from the sides and the bottom, `rounded-3xl`, capped at `max-w-lg` and centred; it covers the tab bar. Sized to its content up to a max height, scrolling inside beyond that. Its scrim dims everything from below the status-bar band (§ *Safe areas*) to the viewport **bottom**, edge to edge — no scrim edge across the pill, no undimmed strip.
@@ -753,6 +759,17 @@ which this rule does not touch).
 - The `PageHeader`'s own `meta` line (above) carries the entity's quiet
   identity row — account, network, created, last activity — so the section
   headings below stay about their sections.
+- **Manage pattern: row actions in ⋯** (#3695; rewritten by #4259 under the
+  [owner decisions of 2026-10-22 on #4258](https://github.com/d-hinders/Haven-AI/issues/4258)).
+  A section that manages a list — the agent page's Spending section, to be
+  adopted there by #4261 — puts each
+  row's actions AND the section's add in that row's ⋯ `DropdownMenu`: Edit
+  budget, Add budget, a separator, then Stop budget… in the danger tone. No
+  visible Edit, Stop or Add button competes with the rows; the row's identity
+  rides on the trigger's `aria-label` ("Budget options 250 USDC per week").
+  Choosing Add opens the form in place. A section with **no rows** has no menu
+  to carry the add, so it keeps a visible add (Set budget, a ghost button). The
+  `/design-system` specimen shows both states.
 
 ### BudgetMeter (#3692)
 
@@ -835,10 +852,14 @@ the component), and optionally `approx`. It formats through
 `Intl.NumberFormat` — so `9,09 kr`, `$0.96` and `0,88 €` are byte-for-byte
 the formatter's output, NBSPs included.
 
-**Under a cent (#3897, owner decision 2026-10-12):** a non-zero figure with
-`|value| < 0.005`, which would round to `0.00`, renders `<$0.01` (`<0,01 kr`,
-`<0,01 €`); the sign still comes from the caller (`-<$0.01` in activity,
-`≈<0,01 kr of 10,00 kr` in a SEK budget caption). Zero stays `$0.00`. The rule lives
+**Under a cent (owner decision 2026-10-22, superseding #3897's "<$0.01"):** a
+non-zero figure with `|value| < 0.005` (`isSubCent`) renders with EXACTLY 4
+decimals in the currency's own format — `$0.0010`, `$0.0049`, `0,0010 kr`,
+`0,0010 €` — and one that would still show `0.0000` (`|value| < 0.00005`)
+renders `<$0.0001` (`<0,0001 kr`, `<0,0001 €`). The sign still comes from the
+caller (`-$0.0040` in activity, `≈0,0040 kr of 10,00 kr` in a SEK budget
+caption). Zero stays `$0.00`; everything from `0.005` up rounds at 2 decimals
+as before. The rule lives
 in `formatFiatDisplay`, not `formatFiat`, which also drives the balance
 count-up, the "since yesterday" line and /accounts and keeps plain rounding.
 `Amount`'s currency mode, the budget caption's fiat mode and the dashboard
@@ -993,6 +1014,15 @@ truncation, and the tiles stack. Tiles carrying only short counts — the
 dashboard money card's payments / merchants / stopped by budget (#3897) —
 stay three across at every width. The figure still carries no colour in any state — the card
 tile's contract, at a smaller scale.
+
+**Hand-built where a figure is money (#4260).** The agent Spending hero's Last
+30 days (`DelegationBudgetCard.tsx`, `LastThirtyDays`) is this three-across
+composition — Spent, Payments and Last paid, a small label above each — built
+by hand rather than from `StatTile`, deliberately: `StatTile.value` is a
+`string` and cannot carry an `Amount` (its "≈" and currency mode), and
+`StatTile` lives in `packages/ui`, shared with ops. Its values sit at the
+secondary-figure size (20px, `Amount size="md"`), not the inline tile's
+`text-base`; a long value wraps inside its cell, never truncates.
 
 ### Money panel (#3807)
 
@@ -1657,14 +1687,16 @@ into one "×N" row; a full ledger needs one row per transaction, and gets it:
 
 ### Direction marks — `DirectionMark` ([#4197](https://github.com/d-hinders/Haven-AI/issues/4197))
 
-One shared `<DirectionMark>` for every in/out/pending direction in the app: incoming uses
-success green, outgoing uses debit sky, pending uses neutral grey. Three densities:
+One shared `<DirectionMark>` for every in/out/pending/move direction in the app: incoming uses
+success green, outgoing uses debit sky, pending uses neutral grey. Four densities:
 
 - `comfortable` (default): 36px mark, 16px icon — the dedicated `/transactions` table.
 - `compact`: 32px mark, 14px icon — dashboard rows, on the same rhythm as agent rows.
-- `inline`: 18px mark, 11px icon — small enough to sit BESIDE a figure in dense
-  content; the account summary card's Last 30 days row (an in-arrow and the Money-in
-  figure, then an out-arrow and the Money-out figure) is the first use.
+- `figure`: 24px mark, 14px icon, 7px radius — beside a 20px secondary figure
+  (`Amount size="md"`), such as the account summary card's Last 30 days In/Out
+  pair (#4260). Added by #4259.
+- `inline`: 18px mark, 11px icon — the size for a mark in dense inline text, where a
+  line of body copy sets the height.
 
 The mark is always `aria-hidden`. The accessible name is the CALLER's job: sr-only text
 before the figure ("Money in" / "Money out" on the account page), so a screen reader
@@ -1672,6 +1704,35 @@ hears "Money in ≈ $19.99" when the mark applies. A tooltip belongs on the mark
 `ui/Tooltip` — never around the figure: `Amount` already draws the "≈" with its own
 `title`, and two tooltips would stack. Don't hand-draw the icon or inline a copy of the
 markup; pick a density, and add a new direction state to the component itself.
+
+`move` (#4264, owner decision 2026-10-22, mockup version 2): a two-way lucide
+`ArrowLeftRight` on the same neutral grey ground as pending — a transfer between your
+own accounts is neither income nor spend. A `move` row passes no sign to `Amount`,
+exactly like pending.
+
+### Technical details disclosure (#4264)
+
+Technical terms are allowed on technical disclosure surfaces (§ Vocabulary, voice,
+accessibility), and a **"Technical details" disclosure is a markup pattern, not a
+component** — a native `<details>`/`<summary>`, closed by default:
+
+- `<details className="group">` — the `group` class is what lets the chevron key off
+  the open state;
+- `<summary>` is a full-width row: `flex cursor-pointer select-none list-none
+  items-center justify-between [&::-webkit-details-marker]:hidden`, with the label
+  ("Technical details") leading and the marker trailing. The label carries the
+  affordance — never a bare "Show"/"Hide" toggle whose state is only implied;
+- the marker is a lucide `ChevronDown` with `transition-transform
+  group-open:rotate-180` — the same group-open rotation rule as § Arrows. Never a raw
+  glyph, and never no marker at all;
+- the content uses the panel's detail rows — the label/value `dl` rows the rest of the
+  panel already renders (`dt` ink-3 label, `dd` ink-2 value), so the opened block reads
+  as part of the panel, not a bolted-on sub-card.
+
+The hand-rolled `<details>` uses that predate the pattern (`ErrorBoundary`,
+`settings/SignersSection.tsx`, `marketplace/OffersTable.tsx`, `connect-agent/*`, and
+the account signers card's text-only "Show address" toggle, which has no marker and
+does not match) are NOT migrated here. A new technical disclosure is written this way.
 
 ### Cards (`Card`)
 

@@ -190,15 +190,15 @@ export const toolDescriptions = {
   },
   discoverTools: {
     summary:
-      'Step 1 of a purchase: discover payable services from Haven\'s curated merchant catalog — names, prices, the next call.',
+      'Step 1 of a purchase: discover payable services from Haven\'s merchant catalog — names, prices, the next call.',
     selectionGuidance:
       'Use this when the user asks what the agent can buy, pay for, or which paid services exist — or when you need a resource URL for a service the user described. ' +
-      'Use verified=verified for entries Haven watched pass a live quote probe (operator-curated or self-submitted) — domain_verified is the only ownership claim; never treat these badges as proof of merchant honesty, quality, or reliability. ' +
+      'Use verified=verified for entries Haven watched pass a live quote probe (any source; bazaar seller-asserted) — domain_verified is the only ownership claim; never treat these badges as proof of merchant honesty, quality, or reliability. ' +
       'Do NOT use for balance, budget, or spend-limit questions — use haven_get_allowances. ' +
       'Do NOT use to pay — each returned entry names the next tool to call.',
     behavior:
       'Use each entry\'s suggested_tool + suggested_arguments first; an entry without them says why. ' +
-      'Read-only lookup against Haven\'s curated catalog; entries are periodically re-verified against the live merchant and degraded entries are flagged. ' +
+      'Read-only lookup against Haven\'s catalog; entries are periodically re-verified against the live merchant and degraded entries are flagged. ' +
       'Use category for a case-insensitive category filter (for example, VPN or vpn), or search for a product name, category, or description term. ' +
       'Returns name, description, price, rail, resource URL, tool_name, tool_arguments, the hint, and the provenance badges source/domain_verified/verified_payable. ' +
       FUNDING_LEG_DISCOVERY_GUIDANCE +

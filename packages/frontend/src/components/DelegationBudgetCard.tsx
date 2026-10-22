@@ -846,9 +846,14 @@ export default function DelegationBudgetCard({
             ) : (
               <div role="status" aria-busy="true" aria-label="Loading the last 30 days">
                 <Skeleton className="h-4 w-24" />
-                <div className="mt-3 space-y-2">
-                  <Skeleton className="h-9 w-36" />
-                  <Skeleton className="h-4 w-28" />
+                {/* #4260: three label-and-value pairs, the shape of the figures. */}
+                <div className="mt-2.5 grid grid-cols-3 gap-3">
+                  {[0, 1, 2].map((i) => (
+                    <div key={i} className="space-y-1.5">
+                      <Skeleton className="h-3 w-12" />
+                      <Skeleton className="h-6 w-16" />
+                    </div>
+                  ))}
                 </div>
               </div>
             )}
@@ -1178,6 +1183,13 @@ function BudgetRow({
  * line with #4209's merchant label (name → x402 host → nothing, never an
  * address). All-time latest payment: `lastPaymentAt` is not windowed on the
  * wire, matching the card footer's read.
+ *
+ * #4260: three labelled figures across the column at the secondary-figure
+ * size (20px, `Amount size="md"`), the dashboard money card's three-figure
+ * row built by hand — `StatTile.value` is a `string` and cannot carry an
+ * `Amount` (its "≈" and currency mode), and `StatTile` lives in
+ * `packages/ui`, shared with ops. The merchant sits on its own line below,
+ * with no divider. A long figure wraps inside its cell; nothing truncates.
  */
 function LastThirtyDays({
   stats,
@@ -1196,23 +1208,43 @@ function LastThirtyDays({
     <div>
       <p className="text-sm font-medium text-[var(--v2-ink-2)]">Last 30 days</p>
       {d30.payments === 0 ? (
-        <p className="mt-2 text-sm text-[var(--v2-ink-3)]">No payments in the last 30 days.</p>
+        <>
+          <p className="mt-2 text-sm text-[var(--v2-ink-3)]">No payments in the last 30 days.</p>
+          {/* An older payment still says when, and to whom. */}
+          {stats.lastPaymentAt ? (
+            <p className="mt-1 text-sm text-[var(--v2-ink-3)]">
+              Last paid {timeAgo(stats.lastPaymentAt)}
+              {merchant ? ` to ${merchant}` : ''}
+            </p>
+          ) : null}
+        </>
       ) : (
         <>
-          <p className="mt-2 text-3xl font-semibold tracking-tight text-[var(--v2-ink)] v2-tabular">
-            <Amount amount={gross} currency={currency} approx={approx} />
-          </p>
-          <p className="mt-1 text-sm text-[var(--v2-ink-3)] v2-tabular">
-            {d30.payments} {d30.payments === 1 ? 'payment' : 'payments'}
-          </p>
+          <dl className="mt-2.5 grid grid-cols-3 gap-3">
+            <div className="min-w-0">
+              <dt className="text-xs text-[var(--v2-ink-3)]">Spent</dt>
+              <dd className="mt-0.5 break-words text-[var(--v2-ink)]">
+                <Amount amount={gross} currency={currency} approx={approx} size="md" />
+              </dd>
+            </div>
+            <div className="min-w-0">
+              <dt className="text-xs text-[var(--v2-ink-3)]">Payments</dt>
+              <dd className="mt-0.5 break-words text-xl font-semibold text-[var(--v2-ink)] v2-tabular">
+                {d30.payments}
+              </dd>
+            </div>
+            <div className="min-w-0">
+              <dt className="text-xs text-[var(--v2-ink-3)]">Last paid</dt>
+              <dd className="mt-0.5 break-words text-xl font-semibold text-[var(--v2-ink)]">
+                {stats.lastPaymentAt ? timeAgo(stats.lastPaymentAt) : '—'}
+              </dd>
+            </div>
+          </dl>
+          {merchant ? (
+            <p className="mt-2.5 break-words text-xs text-[var(--v2-ink-3)]">Last paid to {merchant}</p>
+          ) : null}
         </>
       )}
-      {stats.lastPaymentAt ? (
-        <p className="mt-1 text-sm text-[var(--v2-ink-3)]">
-          Last paid {timeAgo(stats.lastPaymentAt)}
-          {merchant ? ` · ${merchant}` : ''}
-        </p>
-      ) : null}
     </div>
   )
 }

@@ -70,9 +70,10 @@ country when known, and two flags that decide how it is shown:
   to be catalog-reachable, only callable on the merchant directly. Its
   Base-mainnet sibling settles normally and stays listed.
 
-An **offer** is a catalog row. Every operator row has a `merchant_id` (NOT
-NULL after 088) and every self-submitted row gets one the moment it is
-verified payable (`docs/operations/catalog-ingestion.md`, *The merchant
+An **offer** is a catalog row. Every `merchant_catalog` row — operator-curated
+or, where discovery is enabled, Bazaar-discovered (`source: 'bazaar'`, #4245)
+— has a `merchant_id` (NOT NULL after 088) and every self-submitted row gets
+one the moment it is verified payable (`docs/operations/catalog-ingestion.md`, *The merchant
 step*). The **hostname is the find key** for every writer: the seeded map in
 088 names the hosts the curated merchants own (Anchor's two paths share one
 merchant; the demo store and Ampersend each span a dev and a prod host), the
@@ -134,8 +135,10 @@ for the modal's own shape.
   offer's recorded network names the same well-formed address; options on
   other networks do not count. A merchant's **verified payTo** on a chain is
   derived, never stored: it is the one address all its active, verified x402
-  operator offers on that network agree on. Self-submitted offers do not
-  count, because they carry no network.
+  `merchant_catalog` offers on that network agree on — operator-curated or
+  Bazaar-discovered alike (`source` is a label and does not filter here,
+  #4245). Self-submitted directory offers do not count, because they carry no
+  network.
 - **`GET /merchants/{slug}`** carries `funding`, one entry per listed chain
   with such an offer:
   `{ network, chain_id, pay_to, pay_to_status, erc7710 }`. The chain scope is
@@ -144,10 +147,11 @@ for the modal's own shape.
   - `pay_to_status` is `verified` (`pay_to` set), `conflicting` (two offers
     name different addresses), `unstated` (some offer names none, including
     every offer before its first probe after the migration) or `shared`
-    (another merchant's offer on that network names the same address, so a
-    pin would pay that merchant too; a degraded or not-yet-verified offer
-    counts, since it can recover without anyone re-issuing the budget, and
-    only a delisted one does not).
+    (another merchant's non-delisted `merchant_catalog` offer on that
+    network, operator or Bazaar, names the same address, so a pin would pay
+    that merchant too; a degraded or not-yet-verified offer counts, since it
+    can recover without anyone re-issuing the budget, and only a delisted one
+    does not).
   - `erc7710` is true only when **every** such offer on that recorded network
     advertises the ERC-7710 transfer method. A pinned budget cannot fund an
     EIP-3009 payment, because that leg pays the agent's own wallet first, so

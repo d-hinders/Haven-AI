@@ -17,9 +17,11 @@
  * ALREADY a fiat valuation server-side (book-time `convertedAmount`, or
  * #3824's `approxAmount`), the caller passes the unsigned magnitude and the
  * currency it is denominated in, and the component formats through
- * `formatFiatDisplay` (`lib/format.ts`: `formatFiat`, plus "<$0.01" for a
- * non-zero figure under a cent, #3897) — the one formatter, so a SEK figure on one
- * screen cannot disagree with the same figure on the next. It never converts
+ * `formatFiatDisplay` (`lib/format.ts`: `formatFiat`, plus exactly 4 decimals
+ * for a non-zero figure under a cent — "<$0.0001" when even that would show
+ * 0.0000; owner decision 2026-10-22, superseding #3897's "<$0.01") — the one
+ * formatter, so a SEK figure on one screen cannot disagree with the same
+ * figure on the next. It never converts
  * and never fetches a rate: the sign comes only from `direction` (a negative
  * input magnitude cannot double-sign it), `symbol` is not allowed, and the
  * per-currency locale is the same `currencyLocale` rule everywhere.
@@ -43,6 +45,7 @@ import type { ReactNode } from 'react'
 
 const SIZE_CLASS = {
   sm: 'text-sm',
+  md: 'text-xl',
   lg: 'text-2xl',
 } as const
 
@@ -63,7 +66,12 @@ interface TokenAmountProps {
   direction?: AmountDirection
   /** Failed transactions render danger — the only red money ever gets. */
   failed?: boolean
-  /** `sm` for rows and tables (default); `lg` for detail-panel headlines. */
+  /**
+   * `sm` for rows and tables (default); `md` (20px) for a secondary figure
+   * beside a headline, such as Last 30 days (#4259); `lg` for detail-panel
+   * headlines. The size is on this span, so a wrapper's `text-*` never
+   * resizes the figure — pick it here, not with `className`.
+   */
   size?: keyof typeof SIZE_CLASS
   className?: string
 }
@@ -108,7 +116,8 @@ export function Amount(props: AmountProps) {
     } else {
       // The sign comes only from `direction`, so a negative magnitude is
       // formatted through its absolute value: no double sign. A non-zero
-      // figure under a cent reads "<$0.01", never "$0.00" (#3897).
+      // figure under a cent reads 4 decimals, "<$0.0001" below 0.00005 —
+      // never "$0.00" (owner decision 2026-10-22, superseding #3897).
       body = formatFiatDisplay(Math.abs(props.amount), props.currency)
       if (props.approx) {
         approxMark = (

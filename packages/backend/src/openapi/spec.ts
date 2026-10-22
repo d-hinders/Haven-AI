@@ -9224,10 +9224,10 @@ export const openapiSpec = {
       get: {
         tags: ['Catalog'],
         operationId: 'listCatalog',
-        summary: 'List curated payable services agents can discover and pay.',
+        summary: 'List payable services agents can discover and pay.',
         description:
           'Read-only discovery surface. One source of truth consumed by both the dashboard catalog page and the haven_discover_tools MCP tool. ' +
-          'Entries are operator-curated and periodically re-verified against the live merchant 402 challenge; category matching is case-insensitive and every whitespace-separated search word must match the product name, description, or category. Blank search is rejected after trimming, non-empty search is capped at 120 characters, and searches with more than 8 words return 400; nothing here creates payments or signatures. **What `active` means, exactly (#1669):** verification exercises the 402 CHALLENGE only, so `active` says the merchant answers — it cannot say the merchant settles. One deliberate consequence is in the catalog on purpose: entries with `category: \'test-fixture\'` simulate failure modes (today, a stranded-funds simulator whose funding leg succeeds but which never settles); their name and description say so plainly. Since #3078 every entry carries its `merchant`, and `merchant.is_test_merchant` is the structural signal a pre-filtering client should use (the Haven demo store and the stranded-funds fixture both carry it); the `test-fixture` category remains as data but is no longer the documented signal.',
+          'Each entry names its provenance in `source` (operator-curated `operator`, self-submitted `ingestion`, or seller-asserted `bazaar`) and is periodically re-verified against the live merchant 402 challenge; category matching is case-insensitive and every whitespace-separated search word must match the product name, description, or category. Blank search is rejected after trimming, non-empty search is capped at 120 characters, and searches with more than 8 words return 400; nothing here creates payments or signatures. **What `active` means, exactly (#1669):** verification exercises the 402 CHALLENGE only, so `active` says the merchant answers — it cannot say the merchant settles. One deliberate consequence is in the catalog on purpose: entries with `category: \'test-fixture\'` simulate failure modes (today, a stranded-funds simulator whose funding leg succeeds but which never settles); their name and description say so plainly. Since #3078 every entry carries its `merchant`, and `merchant.is_test_merchant` is the structural signal a pre-filtering client should use (the Haven demo store and the stranded-funds fixture both carry it); the `test-fixture` category remains as data but is no longer the documented signal.',
         security: [{ AgentApiKey: [] }, { DashboardJwt: [] }],
         parameters: [
           { name: 'category', in: 'query', schema: { type: 'string' } },
@@ -10021,9 +10021,9 @@ export const openapiSpec = {
           verified_at: { anyOf: [{ type: 'string' }, { type: 'null' }] },
           source: {
             type: 'string',
-            enum: ['operator', 'ingestion'],
+            enum: ['operator', 'ingestion', 'bazaar'],
             description:
-              'Where the entry came from. `operator` = curated in migrations/scripts (the operator vouches for the listing; no domain-ownership proof runs). `ingestion` = self-submitted through the Verified Payable Directory (epic #1717) and passed domain-ownership proof plus the read-only quote probe.',
+              'Where the entry came from. `operator` = curated in migrations/scripts (the operator vouches for the listing; no domain-ownership proof runs). `ingestion` = self-submitted through the Verified Payable Directory (epic #1717) and passed domain-ownership proof plus the read-only quote probe. `bazaar` = written by the x402 Bazaar discovery cron (#4245, only when the deployment enables discovery): the seller chose the name and description and no operator reviewed them; no domain-ownership proof runs.',
           },
           domain_verified: {
             type: 'boolean',
@@ -12328,7 +12328,11 @@ export const openapiSpec = {
         properties: {
           url: { type: 'string', format: 'uri' },
           payTo: address,
-          merchantPayTo: address,
+          merchantPayTo: {
+            ...address,
+            description:
+              'EIP-3009 funding leg only: the real merchant, when payTo is the agent delegate EOA (the funding target). On erc7710 direct settlement payTo IS the merchant; omit merchantPayTo, or send it equal to payTo. A different value is refused with 400 (#4243), since the settlement child pays payTo and the recorded merchant must be the address that is paid.',
+          },
           amount: {
             type: 'string',
             pattern: '^[0-9]+$',

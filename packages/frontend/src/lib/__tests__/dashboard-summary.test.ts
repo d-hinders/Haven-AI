@@ -287,7 +287,7 @@ describe('buildDashboardSummary (#3897) — a week under a cent reads as a count
 
   it('the dominant split prints figures only when the agent\'s share is at or above the threshold too', () => {
     // Total 0.007 is above the threshold, Atlas's 0.004 is not: no "spent
-    // <$0.01 of $0.01" — the spread-out count form takes over.
+    // $0.0040 of $0.0070" — the spread-out count form takes over.
     expect(
       buildDashboardSummary(
         input({

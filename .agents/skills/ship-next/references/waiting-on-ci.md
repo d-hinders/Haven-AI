@@ -5,6 +5,19 @@ checks or its auto-merge.
 
 Do not burn fixed-timeout `sleep` loops against `gh pr checks`.
 
+- **Never end a turn waiting on a single background job without first checking
+  that it is still producing output (#4271).** This is the wait discipline for
+  LOCAL jobs, not just PR checks: while shipping #4259 (PR #4270, 2026-10-22) a
+  whole-suite `vitest run` stopped writing output one minute in and the session
+  waited ~75 minutes before anyone noticed — nobody had checked that the job
+  was still alive. For frontend vitest, run it through
+  `npm run test:local -w packages/frontend -- <paths…>` instead: the wrapper
+  turns a silent hang into a non-zero exit (86 after `TEST_LOCAL_SILENCE_MS`,
+  default 5 min; 87 at the `TEST_LOCAL_CAP_MS` wall, default 30 min), names the
+  silent duration, and reaps the whole process group, so no worker is left
+  holding ~330 MB. For any other background job, check output progress before
+  ending the turn — a job that has stopped writing output is a hang, not a
+  wait.
 - **Auto-merged PRs:** `--auto` ([*Merge Gate*](../SKILL.md#merge-gate)) means GitHub merges when green — but **no
   GitHub event re-invokes a local session**, so "armed" is not "watched". When the
   next step depends on the merge (releasing claims, ticking the epic, taking the

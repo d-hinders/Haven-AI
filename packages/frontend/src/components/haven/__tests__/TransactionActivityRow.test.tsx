@@ -172,3 +172,22 @@ describe('TransactionActivityDayHeader', () => {
     expect(band.className).toContain('text-[var(--v2-ink-3)]')
   })
 })
+
+describe('TransactionActivityRow move direction (#4264)', () => {
+  it('renders the two-way mark and an UNSIGNED amount, like neutral', () => {
+    const { container } = renderRow({
+      direction: 'move',
+      fiat: { amount: 12, currency: 'SEK' },
+    })
+    expect(container.querySelector('svg.lucide-arrow-left-right')).not.toBeNull()
+    expect(container.querySelector('span.v2-tabular')!.textContent).not.toMatch(/^[-+\u2212]/)
+  })
+
+  it('out still signs the amount — the unsigned path is move/neutral only', () => {
+    const { container } = renderRow({
+      direction: 'out',
+      fiat: { amount: 12, currency: 'SEK' },
+    })
+    expect(container.querySelector('span.v2-tabular')!.textContent).toMatch(/^[-+\u2212]/)
+  })
+})

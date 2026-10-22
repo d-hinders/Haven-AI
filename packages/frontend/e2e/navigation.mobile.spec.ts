@@ -548,7 +548,7 @@ test.describe('bottom tab bar (#2731)', () => {
       await bar.getByRole('link').evaluateAll((els) => els.map((e) => e.getAttribute('href'))),
       'the bar reads baseNavItems by route, not by position',
     ).toEqual(['/dashboard', '/agents', '/transactions', '/accounts'])
-    await expect(bar.getByRole('link', { name: 'Dashboard' })).toHaveAttribute(
+    await expect(bar.getByRole('link', { name: 'Home' })).toHaveAttribute(
       'aria-current',
       'page',
     )
@@ -639,36 +639,149 @@ test.describe('bottom tab bar (#2731)', () => {
     await expect(page.getByRole('button', { name: 'Open sidebar' })).toBeFocused()
   })
 
-  test('every bar label renders whole from 375px, and the focused active tab gets an OUTSET ring (#4058)', async ({ page }) => {
+  test('the concentric capsule fits every tab from 375px, and the focused active tab gets an OUTSET ring (#4237)', async ({ page }) => {
+    // #4237's geometry, measured with each of the four tab routes active in
+    // turn: the indicator is a full capsule set in from the pill's border-box
+    // edge by 5px (the 1px border + `p-1`'s 4px) on every side it can touch —
+    // top and bottom always, left on the first cell. The More cell never
+    // shows an indicator, so the right outer edge is read only through
+    // symmetry with the left. The active label must also sit inside the
+    // capsule's STRAIGHT section: its rendered GLYPHS must not extend into
+    // the 26px end radii — the criterion #4058's `rounded-2xl` was a
+    // workaround for, now checked per tab. The vertical position of the ink
+    // is the fit criterion (owner decision 2026-10-22: measure the glyph ink
+    // bounds, not the line box — the line box's corners overshoot the ink by
+    // the half-leading and the cap-to-ascent gap, which read "Accounts" as
+    // failing when its ink fits).
     for (const width of [375, 390]) {
       await page.setViewportSize({ width, height: 844 })
-      await page.goto('/dashboard')
-      const bar = page.locator('nav[data-mobile-tab-bar]')
-      await bar.waitFor()
-      const clipped = await bar.evaluate((nav) =>
-        Array.from(nav.querySelectorAll<HTMLElement>('a > span:last-child, button > span:last-child'))
-          .filter((el) => el.scrollWidth > el.clientWidth)
-          .map((el) => el.textContent),
-      )
-      expect(clipped, `labels clipped at ${width}px`).toEqual([])
+      for (const route of ['/dashboard', '/agents', '/transactions', '/accounts']) {
+        await page.goto(route)
+        const bar = page.locator('nav[data-mobile-tab-bar]')
+        await bar.waitFor()
+        const clipped = await bar.evaluate((nav) =>
+          Array.from(nav.querySelectorAll<HTMLElement>('a > span:last-child, button > span:last-child'))
+            .filter((el) => el.scrollWidth > el.clientWidth)
+            .map((el) => el.textContent),
+        )
+        expect(clipped, `labels clipped at ${width}px on ${route}`).toEqual([])
+
+        const geo = await bar.evaluate((nav) => {
+          const pill = nav.getBoundingClientRect()
+          const cs = getComputedStyle(nav)
+          // The first grid cell — its indicator touches the pill's left
+          // padding edge, so it is the cell that measures the OUTER gap.
+          const first = nav.querySelector<HTMLElement>('a, button')!
+          const firstIndicator = first.querySelector('[data-tab-indicator]')!
+          const fi = firstIndicator.getBoundingClientRect()
+          // The ACTIVE tab's indicator and label: the label-fit criterion.
+          const active = nav.querySelector<HTMLElement>('a[aria-current="page"]')!
+          const indicator = active.querySelector<HTMLElement>('[data-tab-indicator]')!
+          const label = active.querySelector<HTMLElement>('span:last-of-type')!
+          const li = indicator.getBoundingClientRect()
+          const lb = label.getBoundingClientRect()
+          // The ink criterion (owner decision 2026-10-22): dy is measured to
+          // the rendered GLYPH ink, not the line box. The ink's vertical
+          // extent around the baseline comes from canvas TextMetrics —
+          // actualBoundingBox* is the ink, fontBoundingBox* places the
+          // baseline in the line box (Chromium has both). For "Accounts" at
+          // 375px this is the difference between the line box's dy of 19
+          // (8.25px required — the whole 38px stack, an overshoot) and the
+          // ink's dy of ~16 (~5.5px required vs 6.09px actual: fits).
+          const labelCs = getComputedStyle(label)
+          const ink = (() => {
+            const ctx = document.createElement('canvas').getContext('2d')!
+            ctx.font = `${labelCs.fontWeight} ${labelCs.fontSize} ${labelCs.fontFamily}`
+            const m = ctx.measureText((label.textContent ?? '').trim())
+            const fontAscent = m.fontBoundingBoxAscent ?? parseFloat(labelCs.fontSize)
+            const fontDescent = m.fontBoundingBoxDescent ?? 0
+            const halfLeading = (parseFloat(labelCs.lineHeight) - (fontAscent + fontDescent)) / 2
+            const baseline = lb.top + halfLeading + fontAscent
+            return {
+              top: baseline - m.actualBoundingBoxAscent,
+              bottom: baseline + m.actualBoundingBoxDescent,
+            }
+          })()
+          // Straight section of a capsule of radius r: the end radius eats
+          // `r - sqrt(r^2 - dy^2)` of the width at height-offset dy from the
+          // capsule's centre; the ink's worst dy is its farthest edge.
+          const r = li.height / 2
+          const cy = li.top + li.height / 2
+          const dy = Math.max(Math.abs(ink.top - cy), Math.abs(ink.bottom - cy))
+          const curveInset = r - Math.sqrt(Math.max(r * r - dy * dy, 0))
+          return {
+            pillPadding: [cs.paddingTop, cs.paddingRight, cs.paddingBottom, cs.paddingLeft],
+            firstIndicatorRadius: getComputedStyle(firstIndicator).borderRadius,
+            activeIndicatorRadius: getComputedStyle(indicator).borderRadius,
+            gaps: {
+              top: fi.top - pill.top,
+              bottom: pill.bottom - fi.bottom,
+              left: fi.left - pill.left,
+            },
+            labelFit: {
+              label: label.textContent,
+              inkDy: dy,
+              insetLeft: lb.left - li.left,
+              insetRight: li.right - lb.right,
+              requiredInset: curveInset,
+            },
+          }
+        })
+        expect(geo.pillPadding, `pill padding at ${width}px on ${route}`).toEqual([
+          '4px',
+          '4px',
+          '4px',
+          '4px',
+        ])
+        // `rounded-full` is `border-radius: 9999px`; the renderer clamps it
+        // to the capsule's true 26px. The computed VALUE is the class's
+        // fingerprint — 26px would also pass a `rounded-[26px]` regression.
+        expect(geo.firstIndicatorRadius).toBe('9999px')
+        expect(geo.activeIndicatorRadius).toBe('9999px')
+        for (const [side, gap] of Object.entries(geo.gaps)) {
+          expect(
+            gap,
+            `${side} gap at ${width}px on ${route}`,
+          ).toBeGreaterThanOrEqual(4.5)
+          expect(
+            gap,
+            `${side} gap at ${width}px on ${route}`,
+          ).toBeLessThanOrEqual(5.5)
+        }
+        expect(
+          geo.labelFit.insetLeft,
+          `active label "${geo.labelFit.label}" crosses the capsule's left curve at ${width}px on ${route}`,
+        ).toBeGreaterThanOrEqual(geo.labelFit.requiredInset)
+        expect(
+          geo.labelFit.insetRight,
+          `active label "${geo.labelFit.label}" crosses the capsule's right curve at ${width}px on ${route}`,
+        ).toBeGreaterThanOrEqual(geo.labelFit.requiredInset)
+      }
     }
 
     // Keyboard focus on the ACTIVE tab: the ring is the outset system ring —
-    // computed box-shadow without `inset` — and the selection outline is
-    // cleared under it. jsdom cannot compute this; the unit test pins classes.
+    // computed box-shadow without `inset` — and the indicator has NO outline
+    // at all, focused or not (#4237): the #4058 outlineColor assertion would
+    // otherwise read `currentcolor` against the removed outline. jsdom cannot
+    // compute this; the unit test pins classes.
     const active = page.locator('nav[data-mobile-tab-bar] a[aria-current="page"]')
+    const unfocused = await active.evaluate((a) => {
+      const pill = a.querySelector('[data-tab-indicator]')!
+      return getComputedStyle(pill).outlineStyle
+    })
+    expect(unfocused).toBe('none')
     await active.focus()
     await page.keyboard.press('Shift+Tab')
     await page.keyboard.press('Tab')
     const ring = await active.evaluate((a) => {
       const pill = a.querySelector('[data-tab-indicator]')!
       const cs = getComputedStyle(pill)
-      return { focusVisible: a.matches(':focus-visible'), shadow: cs.boxShadow, outlineColor: cs.outlineColor }
+      return { focusVisible: a.matches(':focus-visible'), shadow: cs.boxShadow, outlineStyle: cs.outlineStyle }
     })
     expect(ring.focusVisible).toBe(true)
     expect(ring.shadow).not.toBe('none')
     expect(ring.shadow).not.toContain('inset')
-    expect(ring.outlineColor).toBe('rgba(0, 0, 0, 0)')
+    expect(ring.outlineStyle).toBe('none')
   })
 
   test('the sheet dismisses on a scrim tap and on Escape, handing focus back to More (#4053)', async ({ page }) => {

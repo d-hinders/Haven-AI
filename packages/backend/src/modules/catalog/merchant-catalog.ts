@@ -60,9 +60,18 @@ export interface CatalogRow {
   body_type?: string | null
   /** #3769: an example body the row's probe and discovery hint carry. */
   body_example?: Record<string, unknown> | null
+  /**
+   * #4245: who wrote the row — `'operator'` (migrations, scripts; the
+   * column default) or `'bazaar'` (the discovery cron). Migration 117.
+   * Optional because a test fixture may predate it.
+   */
+  source?: CatalogRowSource
   created_at: string
   updated_at: string
 }
+
+/** The closed vocabulary of `merchant_catalog.source` (migration 117's CHECK). */
+export type CatalogRowSource = 'operator' | 'bazaar'
 
 /**
  * Consecutive failed probes before an entry is shown as degraded. A single

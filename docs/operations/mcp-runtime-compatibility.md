@@ -80,7 +80,7 @@ covers:
   - scripts/ci/check-stale-client-compat.mjs
   - packages/mcp-server/src/next-arguments-corpus.json
   - packages/mcp-server/src/tool-contract-snapshot.test.ts
-last-verified: "2026-10-21"
+last-verified: "2026-10-22"
 ---
 
 > **Contract change, additive (#4257, 2026-10-22): the local MCP's paid-call failure envelope.**
@@ -102,12 +102,28 @@ last-verified: "2026-10-21"
 >
 > On the transport, a hop to another origin now carries only the #4244 header
 > allow-list, and redirects are followed by the SDK with `redirect: 'manual'`.
-> `MerchantEgressRefusedError` gains `redirect_cross_origin_body` and three
-> optional fields (`redirectStatus`, `paymentId`, `settlementScheme`).
+> `MerchantEgressRefusedError` gains `redirect_cross_origin_body` and four
+> optional fields (`redirectStatus`, `redirectTarget`, `paymentId`,
+> `settlementScheme`).
 >
 > No tool is added, renamed or re-shaped. No strict schema, consent hash,
 > version-skew rule or signing input moves. `last-verified` is not
 > re-stamped: this block is the scope.
+
+> **Re-verified unchanged (#4271, 2026-10-22, a new self-test step in
+> `ci_config_checks`).** The only covered file this diff touches is
+> `.github/workflows/ci.yml`: one step ADDED after the design-lint self-test
+> in `ci_config_checks` — a `node --test` run of the dependency-free
+> self-test of the `test:local` watchdog wrapper (#4271; a new file under
+> `packages/frontend/scripts/`, driven by a stub child, never vitest, and
+> importing no package in this repo). No job, env value, literal, condition
+> or existing step moves, and no covered tool, schema,
+> `tools-list.snapshot.json` entry, description budget, channel, dist-tag,
+> release step or consent surface is touched by it. The wrapper itself is
+> frontend-local (same new `packages/frontend/scripts/` directory) and on no
+> cover list, as is its package.json script. `last-verified` is re-stamped
+> to 2026-10-22 for this note; this block is the scope. Nothing else in
+> this document was re-verified.
 
 > **Re-verified unchanged (#4244, 2026-10-22, merchant-transport only).**
 > `packages/sdk/src/mcp-merchant-transport.ts` and `merchant-egress.ts` are on
@@ -1459,6 +1475,19 @@ last-verified: "2026-10-21"
 > signers keep the old x402 arm until upgraded. Nothing else in this document
 > was re-verified in this pass.
 >
+> **Recent re-verification (#4248):** the #4242 refusal is now the
+> structured `NO_FUNDING_LEG` (it was `SIGNING_ERROR`), with
+> `next_action: sign_and_submit_payment` and a `next_tool_omitted_reason`,
+> on both `haven_x402_sign_header` and `haven_sign_x402`. `haven_sign_x402`
+> now checks the expected-context version before the settlement-child
+> refusal, so an out-of-date signer gets `UNSUPPORTED_EXPECTED_CONTEXT_VERSION`
+> (#1143 ordering) whatever the typed data is. A settlement-child binding is
+> retired at mint and no longer held in memory. No tool, argument,
+> description or version set changes, so the handshake and consent hash do
+> not move. Skew: no released signer emitted the #4242 `SIGNING_ERROR`, and
+> hosted code branches on neither code. Nothing else in this document was
+> re-verified in this pass.
+>
 > **Recent re-verification (#4242):** the signer's x402 binding now records
 > which shape was signed, and `haven_x402_sign_header` builds an EIP-3009
 > header only from a funding-leg binding; a settlement-child binding is
@@ -2380,10 +2409,19 @@ Since #1716 both surfaces also accept the same optional
 `domain_verified` / `verified_payable` badge fields on each entry — added to
 BOTH surfaces together, so the skew-flat claim holds unchanged. Since #2978,
 `verified` is not a pure provenance filter: `verified=verified` returns any
-entry, operator-curated or self-submitted, whose endpoint Haven watched
-answer a live quote probe (`verified_payable === true`); `verified=operator`
-still filters on provenance alone. The result is still read-only discovery
-metadata: catalog prices are indicative hints, never payment authority.
+entry, whatever its source, whose endpoint Haven watched answer a live quote
+probe (`verified_payable === true`); `verified=operator` still filters on
+provenance alone. Since #4245 `source` has a third value, `bazaar`, for rows
+the x402 Bazaar discovery cron wrote (only when a deployment enables
+discovery): seller-chosen name and description, no operator review, no
+ownership proof. Before #4245 those rows were labelled `operator`. The value
+is additive, and there is no skew: every published SDK's `verified=operator`
+already keeps `source === 'operator'` only, so it excludes `bazaar` rows on
+both surfaces. Since the #4245 follow-up, no catalog tool description calls
+the catalog or its entries "curated"; that is description and
+refusal-message text only (no tool name, schema or argument moved). The
+result is still read-only discovery metadata: catalog prices are indicative
+hints, never payment authority.
 `verified_payable` means the endpoint answered a live probe; `domain_verified`
 is the separate, stronger claim that ownership of the domain was proven —
 operator rows can carry the former without the latter. Version skew, stated:
@@ -2395,7 +2433,7 @@ skew-flat, the meaning of `verified=verified` is not, for that window.
 
 The default hosted MCP + local signer topology additionally exposes
 `haven_quote_mcp_tool` and `haven_quote_catalog_purchase` (#1397). They are
-read-only live-price probes for an arbitrary MCP merchant or a curated catalog
+read-only live-price probes for an arbitrary MCP merchant or a catalog
 entry: no payment intent, approval, signing context, allowance check, funding,
 or paid retry is created. Their response is informational only; a later hosted
 `haven_pay_mcp_tool` or `haven_prepare_catalog_purchase` always obtains a fresh
@@ -4416,6 +4454,10 @@ Message text and one next-step reason only. When a merchant refuses with `reason
 - Haven's wording is keyed on `reason_code`; it does not read the merchant's `recovery` field.
 
 No tool, schema, refusal code or consent-hash change. A local client on an older `@haven_ai/mcp` keeps the old "retry after" text until it updates.
+
+### erc7710 authorize refuses a `merchantPayTo` that differs from `payTo` (#4243)
+
+Backend only. On the erc7710 shape (`payTo` = the merchant) `POST /x402/authorize` now answers 400 when the body carries a `merchantPayTo` that differs from `payTo`, and the intent records `payTo` as the merchant. No current client is affected: `@haven_ai/sdk`'s erc7710 path, the hosted MCP tools and the local runtime send the merchant as `payTo` and no `merchantPayTo`, and the EIP-3009 funding leg (`payTo` = the delegate EOA, `merchantPayTo` = the merchant) is unchanged. The one skewed caller it reaches is a pre-#1360 SDK that sends a stale delegate address as `payTo` with `merchantPayTo` and no `settlementScheme`: it used to fall through to the erc7710 selector and now gets the 400 before anything is built. No tool, schema shape, refusal code or consent-hash change.
 
 ### Detecting skew before a payment (#1155)
 

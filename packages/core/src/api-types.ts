@@ -3625,8 +3625,8 @@ export type paths = {
             cookie?: never;
         };
         /**
-         * List curated payable services agents can discover and pay.
-         * @description Read-only discovery surface. One source of truth consumed by both the dashboard catalog page and the haven_discover_tools MCP tool. Entries are operator-curated and periodically re-verified against the live merchant 402 challenge; category matching is case-insensitive and every whitespace-separated search word must match the product name, description, or category. Blank search is rejected after trimming, non-empty search is capped at 120 characters, and searches with more than 8 words return 400; nothing here creates payments or signatures. **What `active` means, exactly (#1669):** verification exercises the 402 CHALLENGE only, so `active` says the merchant answers — it cannot say the merchant settles. One deliberate consequence is in the catalog on purpose: entries with `category: 'test-fixture'` simulate failure modes (today, a stranded-funds simulator whose funding leg succeeds but which never settles); their name and description say so plainly. Since #3078 every entry carries its `merchant`, and `merchant.is_test_merchant` is the structural signal a pre-filtering client should use (the Haven demo store and the stranded-funds fixture both carry it); the `test-fixture` category remains as data but is no longer the documented signal.
+         * List payable services agents can discover and pay.
+         * @description Read-only discovery surface. One source of truth consumed by both the dashboard catalog page and the haven_discover_tools MCP tool. Each entry names its provenance in `source` (operator-curated `operator`, self-submitted `ingestion`, or seller-asserted `bazaar`) and is periodically re-verified against the live merchant 402 challenge; category matching is case-insensitive and every whitespace-separated search word must match the product name, description, or category. Blank search is rejected after trimming, non-empty search is capped at 120 characters, and searches with more than 8 words return 400; nothing here creates payments or signatures. **What `active` means, exactly (#1669):** verification exercises the 402 CHALLENGE only, so `active` says the merchant answers — it cannot say the merchant settles. One deliberate consequence is in the catalog on purpose: entries with `category: 'test-fixture'` simulate failure modes (today, a stranded-funds simulator whose funding leg succeeds but which never settles); their name and description say so plainly. Since #3078 every entry carries its `merchant`, and `merchant.is_test_merchant` is the structural signal a pre-filtering client should use (the Haven demo store and the stranded-funds fixture both carry it); the `test-fixture` category remains as data but is no longer the documented signal.
          */
         get: operations["listCatalog"];
         put?: never;
@@ -4058,10 +4058,10 @@ export type components = {
             status: "active" | "degraded" | "delisted";
             verified_at: string | null;
             /**
-             * @description Where the entry came from. `operator` = curated in migrations/scripts (the operator vouches for the listing; no domain-ownership proof runs). `ingestion` = self-submitted through the Verified Payable Directory (epic #1717) and passed domain-ownership proof plus the read-only quote probe.
+             * @description Where the entry came from. `operator` = curated in migrations/scripts (the operator vouches for the listing; no domain-ownership proof runs). `ingestion` = self-submitted through the Verified Payable Directory (epic #1717) and passed domain-ownership proof plus the read-only quote probe. `bazaar` = written by the x402 Bazaar discovery cron (#4245, only when the deployment enables discovery): the seller chose the name and description and no operator reviewed them; no domain-ownership proof runs.
              * @enum {string}
              */
-            source: "operator" | "ingestion";
+            source: "operator" | "ingestion" | "bazaar";
             /** @description True only for `ingestion` entries whose seller proved control of the endpoint domain. Always false for operator-curated rows: no ownership proof ever runs for them, and this field must not claim one. */
             domain_verified: boolean;
             /** @description True when Haven watched this endpoint answer a real x402 (or MPP) quote in its periodic probe: for `ingestion` rows that is the SSRF-hardened directory probe; for `operator` rows it is the catalog refresh probe (`status === active && verified_at` set) — same observation, no domain-ownership claim attached. False for a degraded row, or an operator row with no `verified_at` (migration 058 seeds its demo rows with one, so on a fresh database those carry the badge before the first refresh tick). Never treat this badge as proof of merchant honesty, quality, or settlement reliability. */
@@ -5395,7 +5395,10 @@ export type components = {
             url: string;
             /** @example 0x1111111111111111111111111111111111111111 */
             payTo: string;
-            /** @example 0x1111111111111111111111111111111111111111 */
+            /**
+             * @description EIP-3009 funding leg only: the real merchant, when payTo is the agent delegate EOA (the funding target). On erc7710 direct settlement payTo IS the merchant; omit merchantPayTo, or send it equal to payTo. A different value is refused with 400 (#4243), since the settlement child pays payTo and the recorded merchant must be the address that is paid.
+             * @example 0x1111111111111111111111111111111111111111
+             */
             merchantPayTo?: string;
             /** @description Atomic token amount from the x402 challenge. Digits only; the route additionally refuses zero (`isPositiveDecimalAtomicAmount`), which JSON Schema does not express. */
             amount: string;

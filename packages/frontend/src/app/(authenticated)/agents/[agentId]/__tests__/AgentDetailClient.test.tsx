@@ -32,8 +32,10 @@ const { mockRouterPush, mockRouterReplace } = vi.hoisted(() => ({
   mockRouterReplace: vi.fn(),
 }))
 
-const { mockUseCompanyDetails, mockRegistryTokens } = vi.hoisted(() => ({
+const { mockUseCompanyDetails, mockRegistryTokens, mockRegistryState } = vi.hoisted(() => ({
   mockUseCompanyDetails: vi.fn(),
+  // #4249 (review M1): whether the token registry is still loading.
+  mockRegistryState: { loading: false },
   // #4226: the token registry the Token facet reads. Default: one token —
   // facets with a single option render nothing (ListToolbar's rule), so a
   // test that wants the Token trigger seeds a second entry and restores.
@@ -49,7 +51,7 @@ const { mockUseCompanyDetails, mockRegistryTokens } = vi.hoisted(() => ({
 }))
 
 vi.mock('@/hooks/useTransactionFilters', () => ({
-  useTransactionFilters: () => ({ tokens: mockRegistryTokens }),
+  useTransactionFilters: () => ({ tokens: mockRegistryTokens, loading: mockRegistryState.loading }),
 }))
 
 vi.mock('@/hooks/useCompanyDetails', () => ({
@@ -106,7 +108,7 @@ vi.mock('@/hooks/useAgentActivity', async () => {
     useAgentActivity: () => mockUseAgentActivity(),
     // #4226: the Activity tab's paged reader — the page tests assert on the
     // rendered rows, so the reader is the mock surface, not `api`.
-    useAgentPaymentLedger: () => mockUseAgentPaymentLedger(),
+    useAgentPaymentLedger: (...args: unknown[]) => mockUseAgentPaymentLedger(...args),
     // #4227: the Tool calls tab's paged reader — same mock surface.
     useAgentToolCallLog: () => mockUseAgentToolCallLog(),
   }
@@ -212,6 +214,7 @@ import { AGENT_PAUSED_BODY, AGENT_PAUSED_TITLE } from '@/lib/agent-pause-copy'
 import { HALF_REVOKED_TITLE } from '@/lib/half-revoked'
 import { AgentRow, type DashboardAgent } from '@/components/haven/AgentRow'
 import AgentDetailClient from '../AgentDetailClient'
+import { DEFAULT_CHAIN_ID } from '@/lib/chains'
 import { MCP_NOT_RECORDED_NOTE } from '@/components/agent-panel/McpServerName'
 
 const VIES_VALID_ROW = {
@@ -2136,12 +2139,13 @@ describe('AgentDetailClient tabs and the Activity tab (#4226)', () => {
 
   it('the toolbar offers the Status facet with Needs attention, plus Token and Period', () => {
     // A single-option facet renders nothing (ListToolbar's rule), so the
-    // Token trigger needs a second registry entry.
+    // Token trigger needs a second registry entry — on the agent's own chain
+    // (#4249: other chains' tokens are not offered).
     mockRegistryTokens.push({
-      key: '8453:0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
-      symbol: 'USDC',
-      address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
-      chainId: 8453,
+      key: '100:0x0000000000000000000000000000000000000eur',
+      symbol: 'EURC',
+      address: '0x0000000000000000000000000000000000000eur',
+      chainId: 100,
       isNative: false,
     })
     try {
@@ -2157,6 +2161,103 @@ describe('AgentDetailClient tabs and the Activity tab (#4226)', () => {
     } finally {
       mockRegistryTokens.splice(1)
     }
+  })
+
+  describe('the Token facet is honest (#4249, #4246 review B2)', () => {
+    const NATIVE = { key: '100:native', symbol: 'xDAI', address: undefined, chainId: 100, isNative: true }
+    const EURC = {
+      key: '100:0x0000000000000000000000000000000000000eur',
+      symbol: 'EURC',
+      address: '0x0000000000000000000000000000000000000eur',
+      chainId: 100,
+      isNative: false,
+    }
+    const OTHER_CHAIN = {
+      key: '8453:0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+      symbol: 'USDC',
+      address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+      chainId: 8453,
+      isNative: false,
+    }
+    /** The filters of the reader's LAST call, and the agent id it read for. */
+    function lastLedgerCall(): { agentId: unknown; filters: Record<string, unknown> } {
+      const call = mockUseAgentPaymentLedger.mock.calls.at(-1) ?? []
+      return { agentId: call[0], filters: (call[1] ?? {}) as Record<string, unknown> }
+    }
+
+    afterEach(() => {
+      mockRegistryTokens.splice(1)
+      mockRegistryState.loading = false
+    })
+
+    it('a selected token the loading registry has not resolved holds the read (#4249 review M1)', () => {
+      mockRegistryState.loading = true
+      window.history.replaceState(null, '', `/agents/agent-1?tokenKey=${encodeURIComponent(EURC.key)}`)
+      render(<AgentDetailClient agentId="agent-1" />)
+      expect(lastLedgerCall().agentId).toBeNull()
+    })
+
+    it('a loading registry holds nothing when no token is selected (#4249 review M1)', () => {
+      mockRegistryState.loading = true
+      render(<AgentDetailClient agentId="agent-1" />)
+      expect(lastLedgerCall().agentId).toBe('agent-1')
+    })
+
+    it('an agent whose chain is unknown is offered every chain — no default chain is guessed (#4249 review N1)', () => {
+      mockUseAuth.mockReturnValue({ user: { accounts: [] } })
+      const agents = mockUseAgents()
+      mockUseAgents.mockReturnValue({
+        ...agents,
+        agents: agents.agents.map((a: Record<string, unknown>) => ({ ...a, account_chain_id: null })),
+      })
+      const ON_DEFAULT = {
+        key: `${DEFAULT_CHAIN_ID}:0x0000000000000000000000000000000000000def`,
+        symbol: 'DEF',
+        address: '0x0000000000000000000000000000000000000def',
+        chainId: DEFAULT_CHAIN_ID,
+        isNative: false,
+      }
+      const original = mockRegistryTokens.slice()
+      mockRegistryTokens.splice(0, mockRegistryTokens.length, ON_DEFAULT, EURC)
+      try {
+        render(<AgentDetailClient agentId="agent-1" />)
+        const trigger = screen.queryByText('Token:')
+        expect(trigger).not.toBeNull()
+        fireEvent.click(trigger!)
+        const options = screen.getAllByRole('menuitemradio').map((el) => el.textContent ?? '')
+        expect(options.some((label) => label.includes('EURC'))).toBe(true)
+        expect(options.some((label) => label.includes('DEF'))).toBe(true)
+      } finally {
+        mockRegistryTokens.splice(0, mockRegistryTokens.length, ...original)
+      }
+    })
+
+    it('offers only ERC-20s on the agent chain — never a native token, never another chain', () => {
+      mockRegistryTokens.push(NATIVE, EURC, OTHER_CHAIN)
+      render(<AgentDetailClient agentId="agent-1" />)
+      fireEvent.click(screen.getByText('Token:'))
+      const options = screen.getAllByRole('menuitemradio').map((el) => el.textContent ?? '')
+      expect(options.some((label) => label.includes('EURC'))).toBe(true)
+      expect(options.some((label) => /Native/.test(label))).toBe(false)
+      expect(options.some((label) => label.includes('Base'))).toBe(false)
+    })
+
+    it('a selected token reaches the reader as its contract address', () => {
+      mockRegistryTokens.push(EURC)
+      window.history.replaceState(null, '', `/agents/agent-1?tokenKey=${encodeURIComponent(EURC.key)}`)
+      render(<AgentDetailClient agentId="agent-1" />)
+      const { agentId, filters } = lastLedgerCall()
+      expect(agentId).toBe('agent-1')
+      expect(filters.token).toBe(EURC.address)
+    })
+
+    it('a key that does not resolve is sent verbatim — an honest empty result, never an unfiltered read', () => {
+      window.history.replaceState(null, '', `/agents/agent-1?tokenKey=${encodeURIComponent('100:native')}`)
+      render(<AgentDetailClient agentId="agent-1" />)
+      const { agentId, filters } = lastLedgerCall()
+      expect(agentId).toBe('agent-1')
+      expect(filters.token).toBe('100:native')
+    })
   })
 
   it('the needs-setup empty state points at the budget', () => {
@@ -2265,11 +2366,14 @@ describe('AgentDetailClient tabs and the Activity tab (#4226)', () => {
     })
 
     it('the affected rows carry the Needs attention badge in the Activity tab', () => {
-      // A payment INTENT whose status is needs_attention presents as the
-      // badge (the status map has no such key, so the label is the
-      // humanised status — the same read the wallet feed's rows get).
+      // #4249: the PRODUCTION shape. A stranded payment's intent is
+      // `confirmed` — the funding leg settled — and only the machine-payment
+      // lifecycle says it needs attention. `payment_intents.status` never
+      // holds `needs_attention`, so a fixture that put it there proved the
+      // humanised status, not the lifecycle badge the row must read (#4246
+      // review B1).
       mockUseAgentPaymentLedger.mockReturnValue({
-        payments: [ledgerRow({ id: 'pn', status: 'needs_attention', payment_attention_reason: 'merchant_retry_rejected_after_payment', payment_flow_status: 'needs_attention' })],
+        payments: [ledgerRow({ id: 'pn', status: 'confirmed', payment_attention_reason: 'merchant_retry_rejected_after_payment', payment_flow_status: 'needs_attention' })],
         total: 1,
         hasMore: false,
         loading: false,
@@ -2279,13 +2383,15 @@ describe('AgentDetailClient tabs and the Activity tab (#4226)', () => {
         refresh: vi.fn(),
       })
       mockUseAgentActivity.mockReturnValue({
-        activity: [ledgerRow({ id: 'pn', status: 'needs_attention', payment_attention_reason: 'merchant_retry_rejected_after_payment', payment_flow_status: 'needs_attention' })],
+        activity: [ledgerRow({ id: 'pn', status: 'confirmed', payment_attention_reason: 'merchant_retry_rejected_after_payment', payment_flow_status: 'needs_attention' })],
         stats: null,
         loading: false,
       })
       render(<AgentDetailClient agentId="agent-1" />)
-      // One on the tab's warning dot, one on the affected row.
-      expect(screen.getAllByText('Needs attention').length).toBeGreaterThanOrEqual(2)
+      // The row itself carries the badge — never the settled intent's "Sent".
+      const panel = screen.getByTestId('agent-activity-section')
+      expect(within(panel).queryAllByText('Needs attention')).toHaveLength(1)
+      expect(within(panel).queryByText('Sent')).toBeNull()
     })
   })
 })

@@ -356,17 +356,22 @@ describeDb('GET /agent-activity/:id/activity — the kinded read (#4229, real DB
     // Rows leave canonicalized (checksummed) — compare case-insensitively.
     expect(usdc.json().activity.every((row: { token_address: string }) => row.token_address.toLowerCase() === '0x036cbd53842c5426634e7929541ec2318f3dcf7e')).toBe(true)
 
-    // Case-insensitive: the CHECKSUMMED form matches the lowercase row.
+    // Case-insensitive on BOTH queries (#4249): the CHECKSUMMED form — a real
+    // mixed-case one; `0x1111…` checksums to itself and proved nothing —
+    // matches the lowercase rows. `total` comes from the count query, so the
+    // LIST query is pinned by the rows it returns.
     const checksummed = await get(
       seed.userId,
-      `/agent-activity/${seed.agentId}/activity?kind=payments&token=0x1111111111111111111111111111111111111111`,
+      `/agent-activity/${seed.agentId}/activity?kind=payments&token=0x036CbD53842c5426634e7929541eC2318f3dCF7e`,
     )
-    expect(checksummed.json().total).toBe(1)
+    expect(checksummed.json().total).toBe(3)
+    expect(checksummed.json().activity).toHaveLength(3)
     const upper = await get(
       seed.userId,
       `/agent-activity/${seed.agentId}/activity?kind=payments&token=0X1111111111111111111111111111111111111111`,
     )
     expect(upper.json().total).toBe(1)
+    expect(upper.json().activity).toHaveLength(1)
 
     // A token nobody paid in: an honest empty page, not an error.
     const none = await get(

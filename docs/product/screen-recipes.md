@@ -681,9 +681,15 @@ rule). `?grant=` keeps working alongside `?tab=`. Sections, in order:
    ("Payments paused in Haven — its budget is still live on-chain."); the
    caption itself is unchanged. A budget at or past 90% used renders the
    warning meter. **Last 30 days** comes from the dashboard overview's
-   per-agent stats — the spent figure in the display currency, the payment
-   count, and "Last paid {age} · {merchant}" where the merchant label is
-   #4209's helper (name → x402 host → nothing, never an address). A revoked
+   per-agent stats as three labelled figures across the column (#4260):
+   **Spent** in the display currency, **Payments** and **Last paid** {age},
+   each a small label over a 20px value (`Amount size="md"` for Spent), then
+   "Last paid to {merchant}" on its own line below, with no divider — the
+   merchant label is #4209's helper (name → x402 host → nothing, never an
+   address), and with no label the line is omitted. With no payments in the
+   window it reads "No payments in the last 30 days.", followed by "Last paid
+   {age}" (plus "to {merchant}" when there is a label) when an older payment
+   exists. With payments but no recorded time, Last paid reads "—". A revoked
    or otherwise uncovered agent is not in the overview, so it renders no
    Last 30 days column; its history is under Activity.
    **Add budget is collapsed once a budget exists**: with no budget the
@@ -727,6 +733,10 @@ rule). `?grant=` keeps working alongside `?tab=`. Sections, in order:
    carries a warning dot, "Review the payment(s)" selects the tab and scrolls
    to it (never one payment's panel — #2196's rule), and the affected rows
    carry the Needs attention badge while the Status facet can narrow to them.
+   The row badge reads the machine-payment lifecycle before the intent's own
+   status, the same precedence as the wallet feed's rows: a stranded
+   payment's intent is `confirmed` (its funding settled), so the status alone
+   would say Sent (#4249).
    **Tool calls** is the agent's MCP audit log (see **Agent Tool Calls**
    below).
 6. Settings (#4228): the tab is two sections, mirroring the account page's
@@ -839,6 +849,12 @@ refused before they reached the chain.
 Structure:
 1. The standard toolbar on the card: search, a Status facet (All, Sent,
    Pending, Failed, Needs attention), Token and Period — server-filtered.
+   Token offers only ERC-20s on the agent's chain (when the page knows it):
+   an agent payment is never in a native token. A selected token that does
+   not resolve is sent as-is and matches nothing — never dropped into an
+   unfiltered read under a "Token: …" chip (#4249). With fewer than two
+   contract tokens to offer, the Token facet hides (a single option is no
+   choice — the toolbar's rule).
 2. `TransactionActivityRow` ledger rows, merchant-first, under
    `TransactionActivityDayHeader` day bands (#4225). No "by <agent>" title and
    no "From … →" movement line: the page fixes the agent and the wallet, so
@@ -1138,11 +1154,14 @@ it):
      shows the rate instead ("1 USDC = 9,50 kr"); two or more tokens each
      show their value. The header row is the summary card's own anatomy — it
      is not a shared pattern.
-   - **Last 30 days** — ONE row under the title (#4197): an inline in-arrow
-     and the Money-in figure, then an out-arrow and the Money-out figure
-     (replacing #4166's label row, so the column is no taller than Balance
-     and Holdings — the acceptance bar stands: at 1280 px the three columns'
-     content blocks differ by at most 24 px). Each figure carries sr-only
+   - **Last 30 days** — ONE row under the title (#4197): an in-arrow and the
+     Money-in figure, then an out-arrow and the Money-out figure (replacing
+     #4166's label row). Both figures sit at the secondary-figure size
+     (20px, `Amount size="md"`) beside the 24px `DirectionMark
+     density="figure"` (#4260); Balance stays the larger headline. The
+     acceptance bar stands: at 1280 px the three columns' content blocks
+     differ by at most 24 px. While loading, the skeleton is one row of the
+     figures' height, so the card does not jump. Each figure carries sr-only
      text ("Money in" / "Money out") before the amount — a screen reader
      hears "Money in ≈ $19.99" — and the arrow's icon carries the tooltip
      with the same words. At 375px the pairs fit on one line or wrap

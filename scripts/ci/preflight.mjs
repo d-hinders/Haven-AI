@@ -578,7 +578,11 @@ export const DB_SKIP_MARKER = /real-DB suites SKIPPED/i
  * `changedSurfaces` already use — is far above any real suite's chatter but
  * still bounded, so a runaway gate cannot balloon memory without limit. Async
  * `spawn` has no `maxBuffer`; the byte counter in `runGate` enforces this cap
- * now (#4276).
+ * now (#4276) — on BOTH streams (`spawnSync`'s `maxBuffer` capped stdout and
+ * stderr independently, so a stderr-heavy gate is just as bound) and against
+ * the RETAINED output too: once the counter fires, later chunks are dropped
+ * rather than kept, so the cap also bounds the memory the harness holds while
+ * the kill settles (#4276).
  */
 export const GATE_OUTPUT_MAX_BUFFER = 64 * 1024 * 1024
 
@@ -874,9 +878,14 @@ export const SIGNAL_EXIT_CODES = Object.freeze({ SIGINT: 130, SIGTERM: 143 })
  *   reads as a timeout shape — so `isTimeoutShaped` tests `stalled` first.
  *
  * - **The byte counter.** Async `spawn` has no `maxBuffer`; the counter below
- *   emulates it. Output past GATE_OUTPUT_MAX_BUFFER ends the gate with
- *   SIGTERM, exactly as `spawnSync` did, reported as `error: 'ENOBUFS'` —
- *   still a distinct, non-timeout outcome (#3954).
+ *   emulates it, on both streams — stdout and stderr share the budget, since
+ *   `spawnSync`'s `maxBuffer` capped each independently and a stderr-heavy
+ *   gate is exactly the case test runners produce (#4276). Output past
+ *   GATE_OUTPUT_MAX_BUFFER ends the gate with SIGTERM, exactly as
+ *   `spawnSync` did, reported as `error: 'ENOBUFS'` — still a distinct,
+ *   non-timeout outcome (#3954). Chunks arriving after the counter fires are
+ *   dropped, not retained: the cap bounds the memory the harness holds, and
+ *   the ENOBUFS tail shows the captured prefix like `spawnSync`'s truncation.
  *
  * The gate is spawned `detached` — its own process-group leader, pgid == pid —
  * so the watchdog's kill (and a SIGINT/SIGTERM to preflight itself, see
@@ -947,28 +956,33 @@ export async function runGate(gate, { maxBuffer = GATE_OUTPUT_MAX_BUFFER, silenc
       silenceMs: silence,
     })
 
-    child.stdout.on('data', (chunk) => {
+    // ONE handler per pipe, ONE shared byte counter: `spawnSync`'s `maxBuffer`
+    // capped stdout AND stderr independently, so a stderr-heavy gate (test
+    // runners write much of their output to stderr) must be just as bound
+    // (#4276) — the counter runs on both streams, first past the cap wins.
+    const onOutput = (chunk) => {
       lastOutputAt = Date.now()
-      chunks.push(chunk)
+      // The push sits BEHIND the latch: once the cap is hit, retained output
+      // stops growing too — the cap bounds the memory the harness holds, not
+      // only when the kill fires; the ENOBUFS tail then shows the captured
+      // prefix, matching `spawnSync`'s truncation (#4276).
       if (killPending || overBuffer) return
-      bytes += chunk.length
-      if (bytes > maxBuffer) {
-        // Async `spawn` has no `maxBuffer`; the counter emulates it. spawnSync
-        // ended an over-buffer gate with SIGTERM itself (#3954's shape) — so
-        // does this, then reports the same distinct `error: 'ENOBUFS'`.
-        overBuffer = true
-        killPending = true
-        killGroup('SIGTERM')
-        killTimer = setTimeout(() => {
-          killGroup('SIGKILL')
-          settle({ ...result(), ok: false, status: null, signal: 'SIGTERM', error: 'ENOBUFS' })
-        }, grace)
-      }
-    })
-    child.stderr.on('data', (chunk) => {
-      lastOutputAt = Date.now()
       chunks.push(chunk)
-    })
+      bytes += chunk.length
+      if (bytes <= maxBuffer) return
+      // Async `spawn` has no `maxBuffer`; the counter emulates it. spawnSync
+      // ended an over-buffer gate with SIGTERM itself (#3954's shape) — so
+      // does this, then reports the same distinct `error: 'ENOBUFS'`.
+      overBuffer = true
+      killPending = true
+      killGroup('SIGTERM')
+      killTimer = setTimeout(() => {
+        killGroup('SIGKILL')
+        settle({ ...result(), ok: false, status: null, signal: 'SIGTERM', error: 'ENOBUFS' })
+      }, grace)
+    }
+    child.stdout.on('data', onOutput)
+    child.stderr.on('data', onOutput)
 
     // The watchdog. POLLED, not a single timer: every chunk resets
     // `lastOutputAt`, so a gate that writes at least once per threshold is

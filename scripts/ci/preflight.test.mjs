@@ -1491,6 +1491,38 @@ describe('timeout shapes (#4175)', () => {
     assert.equal(isTimeoutShaped(live), false)
   })
 
+  test('preflight ending a stderr-heavy gate past maxBuffer, produced live, is not timeout-shaped', async () => {
+    // The counter runs on BOTH streams: `spawnSync`'s `maxBuffer` capped
+    // stdout and stderr independently, so a gate whose overflow arrives on
+    // stderr — test runners write much of their output there — is killed and
+    // reported `ENOBUFS` exactly like the stdout case above (#4276).
+    const live = await runGate(
+      { command: `node -e "process.stderr.write('x'.repeat(4096))"`, jobs: ['fixture'] },
+      { maxBuffer: 1024 },
+    )
+    assert.equal(live.error, 'ENOBUFS')
+    assert.equal(live.signal, 'SIGTERM', "preflight's byte counter ends the gate with SIGTERM, as spawnSync did")
+    assert.equal(live.stalled, false)
+    assert.equal(live.ok, false)
+    assert.equal(isTimeoutShaped(live), false)
+  })
+
+  test('a stderr-heavy gate past maxBuffer is killed, and its retained output is bounded', { timeout: 15_000 }, async () => {
+    // Writes 1 MiB to stderr in a loop, far past a 1024-byte cap: the kill
+    // must fire from stderr alone, and once it has, LATER chunks must be
+    // dropped rather than retained — the cap bounds the memory the harness
+    // holds, and the ENOBUFS tail shows the captured prefix (#4276).
+    const live = await runGate(
+      { command: `node -e "let i=0; const t=setInterval(() => { process.stderr.write('x'.repeat(65536)); if (++i === 64) { clearInterval(t); setTimeout(() => {}, 10_000) } }, 10)"`, jobs: ['fixture'] },
+      { maxBuffer: 1024, silenceMs: 5000, graceMs: 300 },
+    )
+    assert.equal(live.error, 'ENOBUFS')
+    assert.equal(live.signal, 'SIGTERM')
+    assert.equal(live.stalled, false)
+    assert.ok(live.output.length <= 65_536, `retained output is bounded (got ${live.output.length} bytes, not just the captured prefix)`)
+    assert.equal(isTimeoutShaped(live), false)
+  })
+
   test('timeoutEvidence keeps the naming line and the timeout line, bounded', async () => {
     const live = await liveNodeTest("test('slow', { timeout: 20 }, () => new Promise((r) => setTimeout(r, 300)))")
     const ev = timeoutEvidence(live.output)
@@ -1665,8 +1697,19 @@ describe('the silence watchdog (#4276)', () => {
       // event loop with an open handle, the way a test awaiting an RPC that
       // never answers does; a bare never-resolving promise does NOT hang the
       // runner (node drains and reports "event loop has already resolved").
+      // The fixture carries a self-cap, like hangFixture's: if the watchdog
+      // is removed, the gate exits 9 after 5s and the suite fails RED —
+      // never hangs the runner (#4276).
       const file = path.join(dir, 'hang.test.mjs')
-      writeFileSync(file, `import { test } from 'node:test'\ntest('hangs', () => new Promise(() => { setInterval(() => {}, 1e6) }))\n`)
+      writeFileSync(
+        file,
+        [
+          `import { test } from 'node:test'`,
+          `setTimeout(() => process.exit(9), 5000) // self-cap: fails red, never hangs`,
+          `test('hangs', () => new Promise(() => { setInterval(() => {}, 1e6) }))`,
+          ``,
+        ].join('\n'),
+      )
       const phases = []
       const calls = []
       const outcome = await runBattery([{ command: `env -u NODE_TEST_CONTEXT node --test "${file}"`, jobs: ['fixture'] }], {

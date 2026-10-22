@@ -12,6 +12,7 @@ const {
   mockUseAgents,
   mockUseAgentActivity,
   mockUseAgentPaymentLedger,
+  mockUseAgentToolCallLog,
   mockUseDelegateBalance,
   mockUseAgentPassport,
   mockUseDashboardOverview,
@@ -20,6 +21,7 @@ const {
   mockUseAgents: vi.fn(),
   mockUseAgentActivity: vi.fn(),
   mockUseAgentPaymentLedger: vi.fn(),
+  mockUseAgentToolCallLog: vi.fn(),
   mockUseDelegateBalance: vi.fn(),
   mockUseAgentPassport: vi.fn(),
   mockUseDashboardOverview: vi.fn(),
@@ -105,6 +107,8 @@ vi.mock('@/hooks/useAgentActivity', async () => {
     // #4226: the Activity tab's paged reader — the page tests assert on the
     // rendered rows, so the reader is the mock surface, not `api`.
     useAgentPaymentLedger: () => mockUseAgentPaymentLedger(),
+    // #4227: the Tool calls tab's paged reader — same mock surface.
+    useAgentToolCallLog: () => mockUseAgentToolCallLog(),
   }
 })
 
@@ -313,6 +317,18 @@ describe('AgentDetailClient last-activity metadata', () => {
       loadMore: vi.fn(),
       refresh: vi.fn(),
     })
+    // #4227: the Tool calls tab's reader — empty and idle unless seeded.
+    mockUseAgentToolCallLog.mockReturnValue({
+      items: [],
+      total: 0,
+      hasMore: false,
+      errorCount: 0,
+      loading: false,
+      loadingMore: false,
+      error: null,
+      loadMore: vi.fn(),
+      refresh: vi.fn(),
+    })
     // Default: the overview answers nothing — the hero renders no Last 30
     // days column. Hero-column tests override this.
     mockUseDashboardOverview.mockReturnValue({
@@ -410,41 +426,91 @@ describe('AgentDetailClient last-activity metadata', () => {
   })
 
   /**
-   * #3696 put the MCP panel directly under the table in the one Activity
-   * section; #4226 moves it to its own Tool calls TAB, out of Activity —
-   * nothing renders in the tab it does not belong to. Placement contract
-   * asserted structurally: the panel lives in the tool-calls panel and the
+   * #4226 put the MCP panel in its own Tool calls TAB; #4227 rebuilds it —
+   * plain-language labels over #4229's kinded read. Placement contract
+   * asserted structurally: the tab lives in the tool-calls section and the
    * Activity section (the #2196 scroll target) does not exist on this tab.
    */
-  it('renders the MCP tool calls panel in the Tool calls tab, out of Activity (#4226)', () => {
-    mockUseAgentActivity.mockReturnValue({
-      activity: [
+  it('renders the rebuilt Tool calls tab in its tab, out of Activity (#4227)', () => {
+    mockUseAgentToolCallLog.mockReturnValue({
+      items: [
         {
           type: 'mcp_tool_call',
           id: 'mcp-1',
           agent_id: 'agent-1',
-          tool_name: 'get_payment_status',
+          tool_name: 'haven_get_payment_status',
           payment_id: null,
           result_status: 'ok',
           next_action: null,
           error_code: null,
           status_code: 200,
-          created_at: '2026-06-01T10:00:00Z',
+          created_at: '2026-05-30T10:00:00Z',
         },
       ],
-      stats: null,
+      total: 1,
+      hasMore: false,
+      errorCount: 0,
       loading: false,
+      loadingMore: false,
+      error: null,
+      loadMore: vi.fn(),
+      refresh: vi.fn(),
     })
     window.history.replaceState(null, '', '/agents/agent-1?tab=tool-calls')
 
     render(<AgentDetailClient agentId="agent-1" />)
 
-    const panel = screen.getByTestId('agent-tool-calls-section')
-    const panelHeading = screen.getByText('MCP tool calls')
-    expect(panel.contains(panelHeading)).toBe(true)
+    const section = screen.getByTestId('agent-tool-calls-section')
+    // The row leads with the plain-language label; the raw name is second.
+    expect(within(section).getByText('Checked a payment')).toBeInTheDocument()
+    expect(within(section).getByText('haven_get_payment_status').tagName).toBe('CODE')
+    // The old panel is gone: no "MCP tool calls" heading, no --v2-divider.
+    expect(within(section).queryByText('MCP tool calls')).toBeNull()
+    expect(document.body.innerHTML).not.toContain('v2-divider')
     // Out of the Activity tab: its section (and the #2196 anchor with it)
     // does not exist while Tool calls is showing.
     expect(document.getElementById('agent-activity')).toBeNull()
+  })
+
+  /**
+   * #4227: a call that touched a payment links to it — the link selects the
+   * Activity tab and carries the payment id, which the Activity tab reads
+   * (#4229's `paymentId`) to open that payment's detail panel.
+   */
+  it('a tool call with a payment links to the Activity tab with the payment id (#4227)', () => {
+    mockUseAgentToolCallLog.mockReturnValue({
+      items: [
+        {
+          type: 'mcp_tool_call',
+          id: 'mcp-2',
+          agent_id: 'agent-1',
+          tool_name: 'haven_pay_x402_quote',
+          payment_id: 'pay-77',
+          result_status: 'ok',
+          next_action: null,
+          error_code: null,
+          status_code: 200,
+          created_at: '2026-05-30T10:00:00Z',
+        },
+      ],
+      total: 1,
+      hasMore: false,
+      errorCount: 0,
+      loading: false,
+      loadingMore: false,
+      error: null,
+      loadMore: vi.fn(),
+      refresh: vi.fn(),
+    })
+    window.history.replaceState(null, '', '/agents/agent-1?tab=tool-calls')
+
+    render(<AgentDetailClient agentId="agent-1" />)
+
+    fireEvent.click(screen.getByTestId('tool-call-payment-link'))
+    expect(mockRouterReplace).toHaveBeenCalledWith(
+      '/agents/agent-1?tab=activity&paymentId=pay-77',
+      { scroll: false },
+    )
   })
 
   it('renders last activity in the header meta without a default connected badge', () => {
@@ -1951,6 +2017,18 @@ describe('AgentDetailClient tabs and the Activity tab (#4226)', () => {
       payments: [],
       total: 0,
       hasMore: false,
+      loading: false,
+      loadingMore: false,
+      error: null,
+      loadMore: vi.fn(),
+      refresh: vi.fn(),
+    })
+    // #4227: the Tool calls tab's reader — empty and idle unless seeded.
+    mockUseAgentToolCallLog.mockReturnValue({
+      items: [],
+      total: 0,
+      hasMore: false,
+      errorCount: 0,
       loading: false,
       loadingMore: false,
       error: null,

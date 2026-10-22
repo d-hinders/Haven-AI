@@ -1,0 +1,90 @@
+{
+  "numTotalTests": 7,
+  "success": false,
+  "testResults": [
+    {
+      "name": "<fixture>/vt/probe.test.jsx",
+      "status": "failed",
+      "message": "",
+      "assertionResults": [
+        {
+          "ancestorTitles": [
+            "frontend idiom"
+          ],
+          "title": "jest-dom matcher fails",
+          "fullName": "frontend idiom jest-dom matcher fails",
+          "status": "failed",
+          "failureMessages": [
+            "Error: \u001b[2mexpect(\u001b[22m\u001b[31melement\u001b[39m\u001b[2m).toHaveClass(\u001b[22m\u001b[32m\u001b[32m\"text-xl\"\u001b[32m\u001b[39m\u001b[2m)\u001b[22m\n\nExpected the element to have class:\n\u001b[32m  text-xl\u001b[39m\nReceived:\n\u001b[31m  text-sm\u001b[39m\n    at Proxy.expectWrapper (file:///home/user/Haven-AI/node_modules/@vitest/expect/dist/index.js:1745:12)\n    at Proxy.<anonymous> (file:///home/user/Haven-AI/node_modules/@vitest/expect/dist/index.js:1029:14)\n    at Proxy.methodWrapper (file:///home/user/Haven-AI/node_modules/chai/index.js:1686:25)\n    at <fixture>/vt/probe.test.jsx:6:35\n    at file:///home/user/Haven-AI/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11\n    at file:///home/user/Haven-AI/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26\n    at file:///home/user/Haven-AI/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file:///home/user/Haven-AI/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)\n    at runTest (file:///home/user/Haven-AI/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)"
+          ]
+        },
+        {
+          "ancestorTitles": [
+            "frontend idiom"
+          ],
+          "title": "getBy finds nothing",
+          "fullName": "frontend idiom getBy finds nothing",
+          "status": "failed",
+          "failureMessages": [
+            "TestingLibraryElementError: Unable to find an element with the text: nope. This could be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher more flexible.\n\nIgnored nodes: comments, script, style\n\u001b[36m<body>\u001b[39m\n  \u001b[36m<div>\u001b[39m\n    \u001b[36m<span\u001b[39m\n      \u001b[33mclass\u001b[39m=\u001b[32m\"text-sm\"\u001b[39m\n    \u001b[36m>\u001b[39m\n      \u001b[0mx\u001b[0m\n    \u001b[36m</span>\u001b[39m\n  \u001b[36m</div>\u001b[39m\n  \u001b[36m<div>\u001b[39m\n    \u001b[36m<span>\u001b[39m\n      \u001b[0mx\u001b[0m\n    \u001b[36m</span>\u001b[39m\n  \u001b[36m</div>\u001b[39m\n\u001b[36m</body>\u001b[39m\n    at Object.getElementError (/home/user/Haven-AI/node_modules/@testing-library/dom/dist/config.js:37:19)\n    at /home/user/Haven-AI/node_modules/@testing-library/dom/dist/query-helpers.js:76:38\n    at /home/user/Haven-AI/node_modules/@testing-library/dom/dist/query-helpers.js:52:17\n    at /home/user/Haven-AI/node_modules/@testing-library/dom/dist/query-helpers.js:95:19\n    at <fixture>/vt/probe.test.jsx:10:12\n    at file:///home/user/Haven-AI/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11\n    at file:///home/user/Haven-AI/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26\n    at file:///home/user/Haven-AI/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file:///home/user/Haven-AI/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)"
+          ]
+        },
+        {
+          "ancestorTitles": [
+            "frontend idiom"
+          ],
+          "title": "findBy times out",
+          "fullName": "frontend idiom findBy times out",
+          "status": "failed",
+          "failureMessages": [
+            "Error: Unable to find an element with the text: nope. This could be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher more flexible.\n\nIgnored nodes: comments, script, style\n\u001b[36m<body>\u001b[39m\n  \u001b[36m<div>\u001b[39m\n    \u001b[36m<span\u001b[39m\n      \u001b[33mclass\u001b[39m=\u001b[32m\"text-sm\"\u001b[39m\n    \u001b[36m>\u001b[39m\n      \u001b[0mx\u001b[0m\n    \u001b[36m</span>\u001b[39m\n  \u001b[36m</div>\u001b[39m\n  \u001b[36m<div>\u001b[39m\n    \u001b[36m<span>\u001b[39m\n      \u001b[0mx\u001b[0m\n    \u001b[36m</span>\u001b[39m\n  \u001b[36m</div>\u001b[39m\n  \u001b[36m<div>\u001b[39m\n    \u001b[36m<span>\u001b[39m\n      \u001b[0mx\u001b[0m\n    \u001b[36m</span>\u001b[39m\n  \u001b[36m</div>\u001b[39m\n\u001b[36m</body>\u001b[39m\n    at waitForWrapper (/home/user/Haven-AI/node_modules/@testing-library/dom/dist/wait-for.js:163:27)\n    at /home/user/Haven-AI/node_modules/@testing-library/dom/dist/query-helpers.js:86:33\n    at <fixture>/vt/probe.test.jsx:14:18\n    at file:///home/user/Haven-AI/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11\n    at file:///home/user/Haven-AI/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26\n    at file:///home/user/Haven-AI/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file:///home/user/Haven-AI/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)\n    at runTest (file:///home/user/Haven-AI/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)\n    at processTicksAndRejections (node:internal/process/task_queues:104:5)"
+          ]
+        },
+        {
+          "ancestorTitles": [
+            "frontend idiom"
+          ],
+          "title": "findByRole times out",
+          "fullName": "frontend idiom findByRole times out",
+          "status": "failed",
+          "failureMessages": [
+            "Error: Unable to find role=\"button\"\n\nIgnored nodes: comments, script, style\n\u001b[36m<body>\u001b[39m\n  \u001b[36m<div>\u001b[39m\n    \u001b[36m<span\u001b[39m\n      \u001b[33mclass\u001b[39m=\u001b[32m\"text-sm\"\u001b[39m\n    \u001b[36m>\u001b[39m\n      \u001b[0mx\u001b[0m\n    \u001b[36m</span>\u001b[39m\n  \u001b[36m</div>\u001b[39m\n  \u001b[36m<div>\u001b[39m\n    \u001b[36m<span>\u001b[39m\n      \u001b[0mx\u001b[0m\n    \u001b[36m</span>\u001b[39m\n  \u001b[36m</div>\u001b[39m\n  \u001b[36m<div>\u001b[39m\n    \u001b[36m<span>\u001b[39m\n      \u001b[0mx\u001b[0m\n    \u001b[36m</span>\u001b[39m\n  \u001b[36m</div>\u001b[39m\n  \u001b[36m<div>\u001b[39m\n    \u001b[36m<span>\u001b[39m\n      \u001b[0mx\u001b[0m\n    \u001b[36m</span>\u001b[39m\n  \u001b[36m</div>\u001b[39m\n\u001b[36m</body>\u001b[39m\n    at waitForWrapper (/home/user/Haven-AI/node_modules/@testing-library/dom/dist/wait-for.js:163:27)\n    at /home/user/Haven-AI/node_modules/@testing-library/dom/dist/query-helpers.js:86:33\n    at <fixture>/vt/probe.test.jsx:18:18\n    at file:///home/user/Haven-AI/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11\n    at file:///home/user/Haven-AI/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26\n    at file:///home/user/Haven-AI/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file:///home/user/Haven-AI/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)\n    at runTest (file:///home/user/Haven-AI/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)\n    at runSuite (file:///home/user/Haven-AI/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)"
+          ]
+        },
+        {
+          "ancestorTitles": [
+            "frontend idiom"
+          ],
+          "title": "plain Error",
+          "fullName": "frontend idiom plain Error",
+          "status": "failed",
+          "failureMessages": [
+            "Error: boom\n    at <fixture>/vt/probe.test.jsx:20:35\n    at file:///home/user/Haven-AI/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11\n    at file:///home/user/Haven-AI/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26\n    at file:///home/user/Haven-AI/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file:///home/user/Haven-AI/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)\n    at runTest (file:///home/user/Haven-AI/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)\n    at runSuite (file:///home/user/Haven-AI/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runSuite (file:///home/user/Haven-AI/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runFiles (file:///home/user/Haven-AI/node_modules/@vitest/runner/dist/chunk-hooks.js:1787:3)"
+          ]
+        },
+        {
+          "ancestorTitles": [
+            "frontend idiom"
+          ],
+          "title": "Error mentioning expect( later",
+          "fullName": "frontend idiom Error mentioning expect( later",
+          "status": "failed",
+          "failureMessages": [
+            "Error: setup failed before expect(x) ran\n    at <fixture>/vt/probe.test.jsx:21:54\n    at file:///home/user/Haven-AI/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11\n    at file:///home/user/Haven-AI/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26\n    at file:///home/user/Haven-AI/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file:///home/user/Haven-AI/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)\n    at runTest (file:///home/user/Haven-AI/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)\n    at runSuite (file:///home/user/Haven-AI/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runSuite (file:///home/user/Haven-AI/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runFiles (file:///home/user/Haven-AI/node_modules/@vitest/runner/dist/chunk-hooks.js:1787:3)"
+          ]
+        },
+        {
+          "ancestorTitles": [
+            "frontend idiom"
+          ],
+          "title": "TypeError",
+          "fullName": "frontend idiom TypeError",
+          "status": "failed",
+          "failureMessages": [
+            "TypeError: Cannot read properties of undefined (reading 'y')\n    at <fixture>/vt/probe.test.jsx:22:57\n    at file:///home/user/Haven-AI/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11\n    at file:///home/user/Haven-AI/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26\n    at file:///home/user/Haven-AI/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file:///home/user/Haven-AI/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)\n    at runTest (file:///home/user/Haven-AI/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)\n    at runSuite (file:///home/user/Haven-AI/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runSuite (file:///home/user/Haven-AI/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runFiles (file:///home/user/Haven-AI/node_modules/@vitest/runner/dist/chunk-hooks.js:1787:3)"
+          ]
+        }
+      ]
+    }
+  ]
+}

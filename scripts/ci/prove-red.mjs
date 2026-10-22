@@ -237,6 +237,18 @@ export function normalizeNodeEvents(records, exitCode, timedOut = false) {
   return { exitCode, timedOut, tests, loadErrors }
 }
 
+/**
+ * A vitest failure message (ANSI stripped) that is an assertion failing, not
+ * code throwing. Vitest's own `expect` and `node:assert` throw `AssertionError`;
+ * the frontend's idiom does not (#4284): a jest-dom matcher fails as
+ * `Error: expect(element).toHaveClass(...)`, a `getBy*` as
+ * `TestingLibraryElementError`, and a `findBy*` / `waitFor` timeout as a plain
+ * `Error: Unable to find …` carrying a query-library message. Anchored on those
+ * exact stems: a bare `Error:` (a throw in the code under test) stays an error.
+ */
+export const VITEST_ASSERTION_SHAPE =
+  /^(AssertionError\b|TestingLibraryElementError\b|Error: expect\(|Error: Unable to find (an element|an accessible element|a label|role=))/
+
 /** `vitest run --reporter=json` output → normalized result. Pure. */
 export function normalizeVitestJson(json, exitCode, timedOut = false) {
   const tests = []
@@ -250,7 +262,7 @@ export function normalizeVitestJson(json, exitCode, timedOut = false) {
       if (a.status === 'passed') tests.push({ name, status: 'passed', kind: null, message: null })
       else if (a.status === 'failed') {
         const m = stripAnsi(a.failureMessages?.[0] ?? '')
-        tests.push({ name, status: 'failed', kind: /^AssertionError\b/.test(m) ? 'assertion' : 'error', message: firstLine(m) })
+        tests.push({ name, status: 'failed', kind: VITEST_ASSERTION_SHAPE.test(m) ? 'assertion' : 'error', message: firstLine(m) })
       } else tests.push({ name, status: 'skipped', kind: null, message: null })
     }
   }

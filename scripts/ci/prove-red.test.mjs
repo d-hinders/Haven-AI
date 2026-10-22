@@ -203,6 +203,28 @@ describe('classifier over recorded runner output', () => {
     )
     assert.equal(classify({ baseline: greenOf(r), mutant: r, expectRed: ['suite one > fails expect'] }).class, 'caught')
   })
+  test('vitest (#4284): the frontend idiom — jest-dom, getBy*, findBy* — is assertion; a code throw is not', () => {
+    // Recorded verbatim from vitest 3.2.4 + jsdom (ANSI kept): the jest-dom
+    // message has colour codes between `Error: ` and `expect(`, so this case
+    // also proves the vitest path strips ANSI before classifying.
+    const r = normalizeVitestJson(readJson('vitest-frontend-idiom.json'), 1)
+    assert.deepEqual(
+      r.tests.map((x) => [x.name, x.kind]),
+      [
+        ['frontend idiom > jest-dom matcher fails', 'assertion'],
+        ['frontend idiom > getBy finds nothing', 'assertion'],
+        ['frontend idiom > findBy times out', 'assertion'],
+        ['frontend idiom > findByRole times out', 'assertion'],
+        ['frontend idiom > plain Error', 'error'],
+        ['frontend idiom > Error mentioning expect( later', 'error'],
+        ['frontend idiom > TypeError', 'error'],
+      ],
+    )
+    assert.equal(
+      classify({ baseline: greenOf(r), mutant: r, expectRed: ['frontend idiom > jest-dom matcher fails'] }).class,
+      'caught',
+    )
+  })
   test('incident 5: the SQL-error shape in vitest is mutation-red', () => {
     const mutant = normalizeVitestJson(readJson('vitest-sql-error.json'), 1)
     assert.deepEqual(mutant.tests.map((x) => [x.name, x.kind]), [['owner join holds', 'error'], ['other', null]])

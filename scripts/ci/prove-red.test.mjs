@@ -457,6 +457,12 @@ function makeRepo(extraFiles = {}, { worktree = true, modes = {}, symlinks = {} 
   if (worktree) {
     wt = path.join(dir, 'wt')
     g(main, 'worktree', 'add', '-q', wt, '-b', 'wt')
+    // `git worktree add` honours the caller's umask when it checks the files
+    // out: under umask 0002 a 100755 blob lands as 0775 (#4272). Re-apply the
+    // requested modes in the worktree so a fixture's mode is exactly what the
+    // test asked for, whatever the shell's umask. Git tracks only the execute
+    // bit, which this does not change, so the tree stays clean.
+    for (const [f, m] of Object.entries(modes)) chmodSync(path.join(wt, f), m)
   }
   const scratch = path.join(dir, 'scratch')
   mkdirSync(scratch)

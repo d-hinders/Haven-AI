@@ -48,6 +48,8 @@ import { useAuth } from '@/context/AuthContext'
 import { useContacts } from '@/hooks/useContacts'
 import { useTransactionFilters } from '@/hooks/useTransactionFilters'
 import {
+  isPaymentActivityItem,
+  type ActivityItem,
   useAgentPaymentLedger,
   AGENT_PAYMENT_LEDGER_PAGE_SIZE,
   type AgentPaymentLedgerFilters,
@@ -90,6 +92,20 @@ interface AgentActivityTabProps {
    * offers every chain's ERC-20s rather than guessing a chain.
    */
   chainId?: number
+  /**
+   * #4227: a payment the Tool calls tab asked to open. The tab links to
+   * `?tab=activity&paymentId=…`; the page reads the parameter and hands it
+   * here. The tab fetches that ONE payment through #4229's `paymentId`
+   * filter, adapts it with `activityToTransaction` and opens the shared
+   * detail panel — the list does not need to contain it.
+   */
+  openPaymentId?: string | null
+  /**
+   * #4227: called once the payment panel is open (or the read failed) so the
+   * page can strip `paymentId` from the URL — consumed, not re-opened on the
+   * next mount or filter write.
+   */
+  onPaymentOpened?: () => void
 }
 
 const paymentNoun: ListNoun = { one: 'payment', other: 'payments' }
@@ -169,8 +185,12 @@ export function listStateToFilters(
  * The bounds are cut in the browser's zone: a date-time without an offset
  * parses as local time, and `toISOString()` re-expresses the same instants in
  * UTC for the wire.
+ *
+ * Exported (#4227): the Tool calls tab sends the SAME bounds for the SAME
+ * period — one rule, both tabs, or the two tabs' "Last 7 days" would silently
+ * cover different windows.
  */
-function periodToBounds(period: PeriodValue | undefined): { from?: string; to?: string } {
+export function periodToBounds(period: PeriodValue | undefined): { from?: string; to?: string } {
   if (!period) return {}
   if (period.preset) {
     const { from, to } = rollingWindow(period.preset)
@@ -189,12 +209,16 @@ function periodToBounds(period: PeriodValue | undefined): { from?: string; to?: 
 }
 
 /**
- * The adapter from a kinded-read payment row to the shape the shared ledger
+ * The adapter from a kinded-read activity row to the shape the shared ledger
  * and detail panel read. Carried over from the page's `TransactionsTable`
  * days (#2120, #3824, #3129 intact) — only the overrides are gone, with the
  * "by <agent>" title and the movement line they carried (#4226).
+ *
+ * Exported (#4227): the Tool calls tab's payment link lands here and the
+ * fetched payment row goes through this same adapter into the detail panel,
+ * so a payment renders identically from both tabs.
  */
-function paymentToTransaction(
+export function activityToTransaction(
   item: PaymentActivityItem,
   agentName: string,
   walletName: string,
@@ -272,6 +296,8 @@ export default function AgentActivityTab({
   walletName,
   needsSetup,
   chainId,
+  openPaymentId,
+  onPaymentOpened,
 }: AgentActivityTabProps) {
   const { user } = useAuth()
   const { resolveAddress } = useContacts()
@@ -333,9 +359,38 @@ export default function AgentActivityTab({
   }, [hasActiveFilters, agentId])
 
   const rows = useMemo(
-    () => payments.map((item) => paymentToTransaction(item, agentName, walletName)),
+    () => payments.map((item) => activityToTransaction(item, agentName, walletName)),
     [payments, agentName, walletName],
   )
+
+  // #4227: a Tool-calls payment link landed on this tab. Fetch the ONE
+  // payment through #4229's `paymentId` filter (the read exists for exactly
+  // this), adapt it with the shared adapter and open the same detail panel a
+  // ledger row opens — then report it consumed so the page strips the
+  // parameter. A failed read still consumes: a link that retries a fetch
+  // forever is worse than one that quietly doesn't open.
+  useEffect(() => {
+    if (!openPaymentId || !agentId) return
+    let cancelled = false
+    api
+      .get<{ activity: ActivityItem[] }>(
+        `/agent-activity/${agentId}/activity?kind=payments&paymentId=${encodeURIComponent(openPaymentId)}&limit=1`,
+      )
+      .then((res) => {
+        if (cancelled) return
+        const row = (res?.activity ?? []).filter(isPaymentActivityItem)[0]
+        if (row) {
+          setSelectedTx(activityToTransaction(row, agentName, walletName))
+        }
+        onPaymentOpened?.()
+      })
+      .catch(() => {
+        if (!cancelled) onPaymentOpened?.()
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [openPaymentId, agentId, agentName, walletName, onPaymentOpened])
 
   const facets: ListFacet[] = [
     {

@@ -13,9 +13,17 @@ covers:
   - packages/frontend/src/components/connect-agent/ConnectAgentFlow.tsx
   - packages/frontend/src/components/connect-agent/InlineAgentSetup.tsx
   - packages/frontend/src/components/EditAgentModal.tsx
+  - packages/frontend/src/components/PaymentCredentialsModal.tsx
+  - packages/frontend/src/components/AgentPassportCard.tsx
+  - packages/frontend/src/components/LabelsManagerModal.tsx
+  - packages/frontend/src/components/agent-panel/ReplaceSigningKeyModal.tsx
+  - packages/frontend/src/components/agent-panel/TaxDeclarationToggle.tsx
+  - packages/frontend/src/components/agent-panel/McpServerName.tsx
+  - packages/frontend/src/app/(authenticated)/agents/[agentId]/AgentSettingsTab.tsx
   - packages/frontend/src/components/DashboardOnboardingGuide.tsx
   - packages/frontend/src/components/haven/**
   - packages/frontend/src/app/(authenticated)/agents/[agentId]/AgentDetailClient.tsx
+  - packages/frontend/src/components/transactions/TransactionDetailPanel.tsx
   - packages/frontend/src/components/transactions/TransactionsTable.tsx
   - packages/frontend/src/components/ui/Input.tsx
   - packages/ui/**
@@ -723,15 +731,43 @@ rule). `?grant=` keeps working alongside `?tab=`. Sections, in order:
    status, the same precedence as the wallet feed's rows: a stranded
    payment's intent is `confirmed` (its funding settled), so the status alone
    would say Sent (#4249).
-   **Tool calls** and **Settings** hold today's content unchanged (the MCP
-   tool calls panel; the Identity and settings card) until #4227 and #4228.
-6. Identity and settings — the Settings tab's content (#4226): one quiet card
-   of rows: the Agent Passport, the
-   **MCP server name** (#4209, moved here from the `/agents` card): the
-   hosted+signer pair the agent is wired as, with a copy button and a tooltip
-   naming both servers, or the bare `not recorded` label with its explanation
-   as visible text beside it, never a tooltip (#2043); then the tax declaration row (when shown)
-   and the Backup & recovery pointer.
+   **Tool calls** is the agent's MCP audit log (see **Agent Tool Calls**
+   below).
+6. Settings (#4228): the tab is two sections, mirroring the account page's
+   Security & details tab. Under a small **This agent** label, ONE `Card` of
+   `Card.Section divided` rows —
+   1. **Connection**: the **MCP server name** (#4209, moved here from the
+      `/agents` card) with its copy button and a tooltip naming the
+      hosted+signer pair, plus **Last active** (`mcp_last_seen_at`). The
+      `not recorded` label keeps #2043's rule: its explanation is visible
+      text beside it, never a tooltip. An agent with no name AND no
+      `mcp_last_seen_at` reads "**No MCP connection recorded**" — and does
+      NOT say "API key": a null name alone also means an MCP agent connected
+      before names were recorded. An agent with an API-key prefix gets an
+      **API key** line (the visible prefix half of the credential; the full
+      key is shown once at creation and in the credentials modal), in every
+      connection state.
+   2. **Payment credentials**: **View** (opens `PaymentCredentialsModal`) and
+      **Replace signing key** (`ReplaceSigningKeyModal`) — hidden for
+      revoked and archived agents, matching the header ⋮ menu's
+      `canManageCredentials`. The header ⋮ menu keeps every action (Edit
+      agent, Manage labels, Payment credentials, Replace signing key, Remove
+      agent), so each stays reachable both ways.
+   3. **Labels**: the chips plus **Edit**, which opens `EditAgentModal`
+      (where the agent's labels are set, #3167). `LabelsManagerModal`
+      manages the vocabulary itself and stays in the ⋮ menu. Readable in
+      every state; Edit follows the editor's own gate (not mounted when
+      revoked).
+   4. **Tax declaration**: `TaxDeclarationToggle`, rendered only when the
+      company details are VIES-valid (the toggle owns its row and divider;
+      the row is absent otherwise).
+   5. **Agent Passport**: `AgentPassportCard`'s content as a row. Its own
+      revoked-only gate stands — archived agents are not newly gated.
+
+   Under **On {account name}**, a linked row to the account's **Backup &
+   recovery** — the account's Security & details tab (`?tab=security`). A
+   pointer, not a second copy (#1089). The old standalone "Identity and
+   settings" section is gone; its tests moved with the rows.
 
 Money and risk clarity:
 - The budget section leads: it is the reason to open an agent at all. The
@@ -740,6 +776,61 @@ Money and risk clarity:
   moves), never just a state name.
 - Remove copy states the on-chain fact: revoking takes effect whether or not
   Haven is reachable, and finish mode ends any remaining budget.
+
+## Agent Tool Calls
+
+Use for the agent page's Tool calls tab (#4227): the
+`agent_tool_invocations` audit log the backend writes when an MCP server tags
+Haven API calls with `X-Haven-MCP-Tool`. Read-only — an audit trail, not a
+spending control, and the tab's one-line intro says exactly that: "Calls from
+this agent's MCP runtime: an audit trail, not a spending control."
+
+Structure:
+1. The standard toolbar on the card: search (by tool), a **Result** facet
+   (All, OK, Error, Denied) and **Period** — all server-filtered on the
+   kinded read (#4229, `kind=tool_calls`). The summary line reads "N errors"
+   from #4229's `counts.error` (counted WITHOUT the status filter, so it
+   holds while the facet flips) beside the call count; when a filter is
+   applied the count compares the filtered population against the agent's
+   unfiltered one (#4196's rule).
+2. Generic `Row` list items under `TransactionActivityDayHeader` day bands —
+   NOT `TransactionActivityRow`, which needs an amount and a direction mark
+   an audit row does not have (a no-amount variant would be a design-system
+   extension). Each row leads with a plain-language label — one per name in
+   the closed allowlist `MCP_TOOL_NAMES` (`lib/tool-call-labels.ts`, kept in
+   sync with the backend): `haven_get_agent` → "Checked identity and
+   budget", `haven_quote_x402` → "Quoted a paid API", `haven_pay_x402_quote`
+   → "Paid a quote", `haven_get_allowances` → "Read budgets". The raw tool
+   name sits second, as `code`. A retired name in an old row falls back to
+   its raw name — the raw name is the one fact the log is certain of.
+3. Repeats fold: consecutive calls with the same tool, the same result and
+   the same day are one row with "×N". The fold is client-side over the
+   LOADED list, so loading more re-folds everything on screen and a run is
+   never split at a page boundary; the dashboard's server fold is a
+   different population and is not reused.
+4. Error and Denied rows carry a `StatusBadge` (`result_status` is
+   `ok | error | denied`) and the `error_code` in words
+   (`errorCodeLabel`'s map of Haven's own refusal codes; unknown codes
+   render as-is — the backend's `error` values are already sentences). OK
+   rows render no badge, so the failures are the things that read.
+5. A call with a `payment_id` links to that payment: the link selects the
+   Activity tab (`?tab=activity&paymentId=…`) and opens that payment's
+   shared `TransactionDetailPanel`, read by #4229's `paymentId` filter and
+   adapted by `activityToTransaction`. The parameter is consumed — stripped
+   once the panel is open — so a re-render or filter write cannot re-open
+   it.
+6. `ListShowMore` sits below the card, paging with #4229's `hasMore` and
+   `total`.
+
+Empty state: an agent with no tool calls gets "No tool calls" and a one-line
+reason ("When this agent's MCP runtime calls Haven, each call shows here.")
+— and the tab stays. A filtered read with no matches gets the standard
+no-match state with the toolbar still up.
+
+Row hairlines are the shared ones: the same-day inset (`--v2-border-subtle`,
+#4165's rule) inside a day band and `--v2-border` between bands — never the
+deleted `--v2-divider`, whose undefined token painted dividers bright in
+dark mode.
 
 ## Agent Activity
 

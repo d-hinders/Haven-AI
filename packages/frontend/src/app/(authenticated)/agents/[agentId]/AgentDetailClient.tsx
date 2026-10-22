@@ -1,16 +1,14 @@
 'use client'
 
-import { ArrowRight, EllipsisVertical } from 'lucide-react'
+import { EllipsisVertical } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext'
 import { useAgents } from '@/hooks/useAgents'
 import {
   useAgentActivity,
   isPaymentActivityItem,
-  isMcpToolCallActivityItem,
-  type McpToolCallActivityItem,
 } from '@/hooks/useAgentActivity'
 import { useDashboardOverview } from '@/hooks/useDashboardOverview'
 import { useDelegateBalance } from '@/hooks/useDelegateBalance'
@@ -38,16 +36,9 @@ import EditAgentModal from '@/components/EditAgentModal'
 import LabelsManagerModal from '@/components/LabelsManagerModal'
 import { LabelChipRow } from '@/components/haven/LabelChip'
 import DelegationBudgetCard, { DELEGATION_BUDGET_CARD_ID } from '@/components/DelegationBudgetCard'
-import AgentPassportCard from '@/components/AgentPassportCard'
-import {
-  MCP_NOT_RECORDED_NOTE,
-  McpServerName,
-  hasUnrecordedMcpServerName,
-} from '@/components/agent-panel/McpServerName'
 import PaymentCredentialsModal from '@/components/PaymentCredentialsModal'
 import { RemoveAgentDialog } from '@/components/agent-panel/RemoveAgentDialog'
 import { ReplaceSigningKeyModal } from '@/components/agent-panel/ReplaceSigningKeyModal'
-import { TaxDeclarationToggle } from '@/components/agent-panel/TaxDeclarationToggle'
 import { useAgentPassport } from '@/hooks/useAgentPassport'
 import {
   DropdownMenu,
@@ -62,10 +53,11 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { Tabs } from '@/components/ui/Tabs'
 import { Monogram } from '@/components/ui/Monogram'
 import { BackLink } from '@haven_ai/ui/BackLink'
-import { Row } from '@/components/ui/Row'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Skeleton } from '@/components/ui/Skeleton'
 import AgentActivityTab from './AgentActivityTab'
+import AgentSettingsTab from './AgentSettingsTab'
+import AgentToolCallsTab from './AgentToolCallsTab'
 import {
   ApprovalRequiredBanner,
 } from '@/components/haven'
@@ -75,72 +67,6 @@ type AgentTab = 'activity' | 'tool-calls' | 'settings'
 
 function agentTabFromUrl(raw: string | null): AgentTab {
   return raw === 'tool-calls' || raw === 'settings' ? raw : 'activity'
-}
-
-function mcpToolCallTone(resultStatus: string): 'success' | 'warning' | 'danger' | 'neutral' {
-  switch (resultStatus) {
-    case 'ok':
-      return 'success'
-    case 'denied':
-      return 'danger'
-    case 'error':
-      return 'warning'
-    default:
-      return 'neutral'
-  }
-}
-
-/**
- * Surfaces the agent_tool_invocations audit log produced when an MCP server
- * tags Haven API calls with X-Haven-MCP-Tool. Money-moving calls are still
- * shown in the transactions table above; this panel exists so read-only
- * tool calls (status checks, allowance reads) are also visible — that's
- * the user-facing piece of the issue #163 audit-log requirement.
- */
-function McpToolCallsPanel({
-  items,
-  loading,
-}: {
-  items: McpToolCallActivityItem[]
-  loading: boolean
-}) {
-  if (loading && items.length === 0) return null
-  if (!loading && items.length === 0) return null
-
-  return (
-    <div>
-      <div className="mb-4">
-        <h2 className="text-base font-semibold text-[var(--v2-ink)]">MCP tool calls</h2>
-        <p className="mt-1 text-sm text-[var(--v2-ink-3)]">
-          Tool invocations from an MCP-connected agent runtime. This list is an
-          audit trail, not a spending control.
-        </p>
-      </div>
-      <Card hover={false}>
-        <ul className="divide-y divide-[var(--v2-divider)]">
-          {items.map((item) => (
-            <li key={item.id} className="flex items-center justify-between gap-3 px-4 py-3">
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <code className="truncate text-sm font-medium text-[var(--v2-ink)]">{item.tool_name}</code>
-                  <StatusBadge tone={mcpToolCallTone(item.result_status)}>{item.result_status}</StatusBadge>
-                </div>
-                <p className="mt-1 text-xs text-[var(--v2-ink-3)]">
-                  {item.next_action ? `next: ${item.next_action}` : ''}
-                  {item.next_action && item.error_code ? ' · ' : ''}
-                  {item.error_code ? `error: ${item.error_code}` : ''}
-                  {!item.next_action && !item.error_code && item.payment_id
-                    ? `payment ${item.payment_id.slice(0, 8)}…`
-                    : ''}
-                </p>
-              </div>
-              <span className="shrink-0 text-xs text-[var(--v2-ink-3)]">{timeAgo(item.created_at)}</span>
-            </li>
-          ))}
-        </ul>
-      </Card>
-    </div>
-  )
 }
 
 interface Props {
@@ -185,6 +111,10 @@ export default function AgentDetailClient({ agentId }: Props) {
   const router = useRouter()
   const searchParams = useSearchParams()
   const activeTab = agentTabFromUrl(searchParams.get('tab'))
+  // #4227: a Tool-calls payment link lands here — `?tab=activity&paymentId=…`.
+  // Read once and handed to the Activity tab, which opens the payment's
+  // detail panel and then consumes it (clearPaymentLink).
+  const openPaymentId = searchParams.get('paymentId')
   const {
     agents,
     loading,
@@ -210,7 +140,10 @@ export default function AgentDetailClient({ agentId }: Props) {
       return null
     }
   }, [chainId])
-  const { activity, loading: activityLoading } = useAgentActivity(agent?.id ?? null)
+  // The merged read stays for the page's own consumers — the banners'
+  // attention filter and ReplaceSigningKeyModal's recent payments. The Tool
+  // calls tab (#4227) reads #4229's kinded population instead.
+  const { activity } = useAgentActivity(agent?.id ?? null)
   // #4226: the hero's Last 30 days reads the dashboard overview — the same
   // source #4209's card footer uses, the way the account page reads it. A
   // revoked (or otherwise uncovered) agent is not in the response; the hero
@@ -289,6 +222,29 @@ export default function AgentDetailClient({ agentId }: Props) {
       { scroll: false },
     )
   }
+  // #4227: the Tool calls tab's payment link — selects the Activity tab and
+  // carries the payment's id. Only the tab and the id are written; the
+  // Activity tab's own filters are the Activity tab's state and a tab switch
+  // clears them anyway (the rule above).
+  const openPayment = useCallback(
+    (paymentId: string) => {
+      router.replace(
+        `/agents/${encodeURIComponent(agentId)}?tab=activity&paymentId=${encodeURIComponent(paymentId)}`,
+        { scroll: false },
+      )
+    },
+    [agentId, router],
+  )
+  // #4227: the Activity tab consumed (or failed to open) the linked payment —
+  // strip ONLY the parameter, preserving the tab and the Activity tab's filter
+  // state, so a re-render or filter write cannot re-open the panel.
+  const clearPaymentLink = useCallback(() => {
+    if (typeof window === 'undefined') return
+    const url = new URL(window.location.href)
+    if (!url.searchParams.has('paymentId')) return
+    url.searchParams.delete('paymentId')
+    router.replace(`${url.pathname}${url.search}`, { scroll: false })
+  }, [router])
   const [pendingAction, setPendingAction] = useState<PendingAction>(null)
   const [removeOpen, setRemoveOpen] = useState(false)
   // #3542: the Remove dialog in finish mode — ends the remaining budget of a
@@ -758,13 +714,13 @@ export default function AgentDetailClient({ agentId }: Props) {
         />
       </div>
 
-      {/* #3426: the per-agent x402 tax declaration opt-in moved into the
-          "Identity and settings" card below (#3697) — the toggle owns its own
-          row and divider there. The opt-in is settings, not authority: it
-          changes no budget, no rule, and no key. */}
+      {/* #3426: the per-agent x402 tax declaration opt-in lives on the
+          Settings tab (#4228) — the toggle owns its own row and divider
+          there. The opt-in is settings, not authority: it changes no budget,
+          no rule, and no key. */}
 
-      {/* #3697: the old standalone Backup & recovery card moved into the
-          "Identity and settings" card below — same link, new wording. */}
+      {/* #1089: the Backup & recovery pointer lives on the Settings tab
+          (#4228) — an account capability, pointed at, not copied. */}
 
       {/* #3696: the two stat cards ("All-time transactions" / "Today") are
           gone for good — #3696 moved their figures into the Activity header's
@@ -797,7 +753,9 @@ export default function AgentDetailClient({ agentId }: Props) {
           included, drawn with the shared ledger pieces over #4229's kinded
           read. NOT the wallet-scoped transactions feed — that is a different
           population and would drop payments refused before they reached the
-          chain (routes/transactions.ts). */}
+          chain (routes/transactions.ts). openPaymentId/#4227: a Tool-calls
+          payment link landed here; the tab opens the shared detail panel for
+          it and clears the parameter. */}
       {activeTab === 'activity' ? (
         <div id={AGENT_ACTIVITY_SECTION_ID} className="mt-6 scroll-mt-24" data-testid="agent-activity-section">
           <AgentActivityTab
@@ -808,89 +766,39 @@ export default function AgentDetailClient({ agentId }: Props) {
             // The KNOWN chain only — never `chainId`'s DEFAULT_CHAIN_ID
             // fallback, which would hide the real chain's tokens (#4249).
             chainId={account?.chain_id ?? currentAgent.account_chain_id ?? undefined}
+            openPaymentId={activeTab === 'activity' ? openPaymentId : null}
+            onPaymentOpened={clearPaymentLink}
           />
         </div>
       ) : null}
 
-      {/* ── Tool calls tab (#4226): today's MCP tool-call audit panel,
-          unchanged — #4227 rebuilds it. */}
+      {/* ── Tool calls tab (#4227): the MCP audit log rebuilt — plain-language
+          labels with the raw tool name as code, day bands, ×N repeat folding
+          over the loaded list, server-filtered Result/Period/search on
+          #4229's kinded read, and a payment link per money-touching call. */}
       {activeTab === 'tool-calls' ? (
         <div className="mt-6" data-testid="agent-tool-calls-section">
-          <McpToolCallsPanel
-            items={activity.filter(isMcpToolCallActivityItem)}
-            loading={activityLoading}
-          />
+          <AgentToolCallsTab agentId={agentId} onOpenPayment={openPayment} />
         </div>
       ) : null}
 
-      {/* ── Settings tab (#4226): today's Identity and settings card,
-          unchanged — #4228 rebuilds it. */}
+      {/* ── Settings tab (#4228): one Card of divided rows — connection,
+          credentials, labels, tax, passport — plus the account-level
+          Backup & recovery pointer. The modals stay page-owned so the ⋮
+          menu opens the same flows. */}
       {activeTab === 'settings' ? (
         <div className="mt-6" data-testid="agent-settings-section">
-      {/* #3697: the page's optional and account-level items — the Agent
-          Passport row, the MCP server name row (#4209), the tax declaration row (rendered only when company
-          details are VIES-valid; the toggle owns its own row and divider) and
-          the Backup & recovery pointer — as ONE quiet card at the bottom. The
-          detail-page section rule (#3692): the heading sits above the card;
-          the card holds the rows. Each row renders its own `Card.Section`
-          divided wrapper so a hidden row leaves no orphan divider. */}
-      <section className="mt-6" data-testid="identity-settings-section">
-        <div className="mb-4">
-          <h2 className="text-base font-semibold text-[var(--v2-ink)]">Identity and settings</h2>
-          <p className="mt-1 text-sm text-[var(--v2-ink-3)]">
-            Optional records and account-level settings for this agent.
-          </p>
-        </div>
-        <Card hover={false}>
-          <AgentPassportCard
-            agentId={agentId}
-            agentRevoked={isRevoked}
-          />
-
-          {/* #4209: the MCP server name moved here from the `/agents` card
-              (#1878) — which hosted+signer pair this agent is wired as, with
-              its copy button and tooltip. The `not recorded` note (#2043)
-              moved with it: visible text beside the bare label, never a
-              tooltip, and only when this agent has no recorded name. */}
-          <Card.Section divided>
-            <div className="px-4 py-4 md:px-6 md:py-5" data-testid="mcp-server-name-row">
-              <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-1">
-                <h3 className="text-base font-semibold text-[var(--v2-ink)]">MCP server name</h3>
-                <McpServerName value={currentAgent.mcp_server_name} />
-              </div>
-              {hasUnrecordedMcpServerName([currentAgent]) ? (
-                <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-3)]">
-                  {MCP_NOT_RECORDED_NOTE}
-                </p>
-              ) : (
-                <p className="mt-1 text-xs text-[var(--v2-ink-3)]">
-                  The name of this agent&apos;s Haven servers in its MCP config.
-                </p>
-              )}
-            </div>
-          </Card.Section>
-
-          <TaxDeclarationToggle
-            agentId={agentId}
-            taxDeclarationEnabled={currentAgent.tax_declaration_enabled}
+          <AgentSettingsTab
+            agent={currentAgent}
+            account={account ? { id: account.id, name: account.name } : null}
+            isRevoked={isRevoked}
+            canManageCredentials={canManageCredentials}
+            canEditDetails={canEditDetails}
+            onOpenCredentials={() => setCredentialsOpen(true)}
+            onOpenReplaceKey={() => setReplaceKeyOpen(true)}
+            onOpenEditAgent={openEditAgent}
             onAgentsChanged={() => void refetch()}
           />
-
-          {/* #1089: backup & recovery moved to the account page — it's an
-              account capability, not an agent one. This is a pointer, not a
-              second copy of the controls. */}
-          {account ? (
-            <Card.Section divided>
-              <Row
-                href={`/accounts/${account.id}`}
-                title="Backup & recovery"
-                subtitle={`Managed on ${account.name}: it covers every agent on it`}
-                trailing={<Icon icon={ArrowRight} className="h-4 w-4 text-[var(--v2-ink-3)]" />}
-              />
-            </Card.Section>
-          ) : null}
-        </Card>
-      </section>
         </div>
       ) : null}
 

@@ -8,7 +8,7 @@ import { Icon } from '@/components/ui/Icon'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { EmptyState } from '@/components/ui/EmptyState'
-import { TransactionActivityRow } from '@/components/haven'
+import { TransactionActivityDayHeader, TransactionActivityRow, transactionDayKey, transactionDayLabel } from '@/components/haven'
 import type { StatusTone } from '@/components/ui/StatusBadge'
 import { timeAgo } from '@/lib/format'
 import { counterpartyLabel, type CounterpartyFields } from '@/lib/transaction-presentation'
@@ -180,13 +180,20 @@ export function ActivitySection({
 /**
  * Day buckets + rows. The server grouped by the USER's local day already
  * (#3824) — the client only derives each heading from the group's
- * `latestAt`, so the buckets cannot disagree with the grouping.
+ * `latestAt`, so the buckets cannot disagree with the grouping. Bucketing
+ * and labelling use the ledger's shared `transactionDayKey` /
+ * `transactionDayLabel` (#4225): the same helpers the account page's ledger
+ * uses, so the two surfaces cannot drift.
  *
  * The oldest heading can cover part of a day (#3975): when
  * `activityWindowStart` is present and cuts its own local day (the
  * analytics rule — a boundary that is not local midnight), the bucket whose
  * key is that day reads "(partial)". The bucket keys and the partial check
  * use the same runtime zone, so they cannot disagree.
+ *
+ * The card's own tinted `Card.Header` sits directly above the first day, so
+ * the first heading renders unbanded (`band={false}` — the owner decision
+ * on #4225) and every later day gets the tinted band.
  */
 function ActivityRows({
   activity,
@@ -199,20 +206,20 @@ function ActivityRows({
 }) {
   const partialDayKey = useMemo(() => {
     if (activityWindowStart == null || !cutsItsDay(activityWindowStart)) return null
-    return localDayKey(activityWindowStart)
+    return transactionDayKey(activityWindowStart)
   }, [activityWindowStart])
 
   const days = useMemo(() => {
     const buckets = new Map<string, ActivityGroup[]>()
     for (const group of activity) {
-      const key = localDayKey(group.latestAt)
+      const key = transactionDayKey(group.latestAt)
       const bucket = buckets.get(key)
       if (bucket) bucket.push(group)
       else buckets.set(key, [group])
     }
     return Array.from(buckets.entries(), ([key, groups]) => ({
       key,
-      label: activityDayLabel(key),
+      label: transactionDayLabel(key),
       partial: key === partialDayKey,
       groups,
     }))
@@ -220,11 +227,13 @@ function ActivityRows({
 
   return (
     <div className="divide-y divide-[var(--v2-border)] v2-animate-fade-in">
-      {days.map((day) => (
+      {days.map((day, dayIndex) => (
         <div key={day.key}>
-          <p className="px-4 pt-3 pb-1 text-xs font-medium text-[var(--v2-ink-3)] sm:px-5">
-            {day.partial ? `${day.label} (partial)` : day.label}
-          </p>
+          <TransactionActivityDayHeader
+            label={day.label}
+            partial={day.partial}
+            band={dayIndex > 0}
+          />
           {day.groups.map((group, index) => {
             const groupKey = `${group.latestAt}-${group.to}-${group.tokenSymbol}-${index}`
             return (
@@ -351,15 +360,6 @@ function EmptyActivityIcon() {
   return <Icon icon={ArrowLeftRight} className="w-full h-full" />
 }
 
-/** Local calendar day of an ISO instant, `YYYY-MM-DD` (en-CA's ISO format). */
-function localDayKey(iso: string): string {
-  return new Intl.DateTimeFormat('en-CA', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(new Date(iso))
-}
-
 /**
  * True when the instant is not local midnight in the runtime zone — a
  * boundary that cuts its day. The analytics page applies the same rule to
@@ -375,27 +375,4 @@ function cutsItsDay(iso: string): boolean {
   }).formatToParts(new Date(iso))
   const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '00'
   return !(get('hour') === '00' && get('minute') === '00' && get('second') === '00')
-}
-
-/**
- * Heading for a day bucket: "Today", "Yesterday", else the short date
- * ("17 May"). Derived from the group's own local day key, so a group rendered
- * under "Today" IS from today — the label and the bucket cannot drift apart
- * the way a label recomputed from the raw instant could across midnight.
- */
-export function activityDayLabel(dayKey: string): string {
-  const today = new Date()
-  const localDay = (date: Date) =>
-    new Intl.DateTimeFormat('en-CA', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-    }).format(date)
-  if (dayKey === localDay(today)) return 'Today'
-  const yesterday = new Date(today)
-  yesterday.setDate(today.getDate() - 1)
-  if (dayKey === localDay(yesterday)) return 'Yesterday'
-  const [year, month, day] = dayKey.split('-').map(Number)
-  const date = new Date(year, month - 1, day)
-  return new Intl.DateTimeFormat('en-GB', { month: 'short', day: 'numeric' }).format(date)
 }

@@ -294,13 +294,13 @@ describe('x402 binding rail (#4242)', () => {
       const viaHeader = (await handlers.haven_x402_sign_header({
         payment_required: paymentRequiredFor(CHILD_QUOTE),
         x402_binding: signed.data?.x402_binding,
-      } as never)) as Record<string, unknown>
+      } as never)) as unknown as Record<string, unknown>
       const viaOneShot = (await handlers.haven_sign_x402({
         payload_hash: expected.payloadHash,
         typed_data: td,
         x402_expected: wire(expected),
         payment_required: paymentRequiredFor(CHILD_QUOTE),
-      } as never)) as Record<string, unknown>
+      } as never)) as unknown as Record<string, unknown>
       for (const refusal of [viaHeader, viaOneShot]) {
         expect(refusal.code).toBe('NO_FUNDING_LEG')
         expect(refusal.next_action).toBe('sign_and_submit_payment')

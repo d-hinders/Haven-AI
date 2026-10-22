@@ -57,49 +57,51 @@ describe('MobileTabBar — the presentational copy is inert (#2819)', () => {
 })
 
 /**
- * The one active idiom, asserted on the RENDERED markup (#2818, #4058).
+ * The bar's own active idiom, asserted on the RENDERED markup (#2818, #4058,
+ * #4237).
  *
  * Before #2818 the bar's active state had no unit coverage at all — the only
  * automated evidence was the visual baselines, which is evidence a reviewer
- * reads rather than evidence a gate reports. Since #4058 the idiom is the
- * app's selection idiom (#4056's `SegmentedControl`): a rounded brand-soft
- * indicator bounded by a 1px inset brand OUTLINE, which replaced the 2px top rail a
- * floating pill has nowhere to hang. These cases go red if the outline is
- * dropped, applied to every cell, or drawn as an inset ring (which leaks into
- * the focus ring).
+ * reads rather than evidence a gate reports. #4058 gave the bar the app's
+ * selection idiom (#4056's `SegmentedControl`); #4237 (owner decision:
+ * Revolut's tab bar) replaced it with a NEUTRAL CONCENTRIC CAPSULE — a full
+ * `rounded-full` indicator filled with `--v2-tab-bar-indicator`, no outline —
+ * and moved the active cell to `--v2-ink` + semibold. The one-active-idiom
+ * rule is deliberately relaxed for the bar (the More sheet keeps its brand
+ * tint, and the sheet covers the bar while open). These cases go red if the
+ * capsule reverts to a different radius, a brand tint or an outline, or if
+ * the active cell loses its ink/weight step.
  *
  * Asserted on the element, not on a class string in the source: the defect
  * class here is "the active cell renders like the inactive one", and a source
- * grep for `--v2-brand` finds the token in a comment just as happily. jsdom
- * computes no `box-shadow`, so the outset focus ring is pinned here by class
- * and in `navigation.mobile.spec.ts` by computed style.
+ * grep for `--v2-tab-bar-indicator` finds the token in a comment just as
+ * happily. jsdom computes no `box-shadow`, so the outset focus ring is pinned
+ * here by class and in `navigation.mobile.spec.ts` by computed style.
  */
-describe('MobileTabBar — active cell carries the selection idiom (#2818, #4058)', () => {
+describe('MobileTabBar — active cell carries the selection idiom (#2818, #4058, #4237)', () => {
   const renderBar = () =>
     render(<MobileTabBar items={baseNavItems} presentational activeHref="/agents" />)
   const classes = (el: Element) => el.className.split(/\s+/)
   /** The active shape is painted by an indicator span; the cell stays a rectangle for hit-testing. */
   const indicatorOf = (cell: HTMLElement) => cell.querySelector('[data-tab-indicator]')!
 
-  it('gives the active cell brand ink on a rounded brand-soft indicator with a 1px inset brand outline', () => {
+  it('gives the active cell ink + semibold on a rounded-full neutral capsule, with no outline', () => {
     renderBar()
 
     const active = screen.getByRole('link', { name: 'Agents' })
-    expect(classes(active)).toContain('text-[var(--v2-brand)]')
-    const pill = indicatorOf(active)
-    expect(pill.getAttribute('aria-hidden')).toBe('true')
-    expect(classes(pill)).toEqual(
-      expect.arrayContaining([
-        'absolute',
-        'inset-0',
-        'rounded-2xl',
-        'bg-[var(--v2-brand-soft)]',
-        'outline',
-        'outline-1',
-        '-outline-offset-1',
-        'outline-brand',
-      ]),
+    expect(classes(active)).toContain('text-[var(--v2-ink)]')
+    expect(classes(active)).toContain('font-semibold')
+    const capsule = indicatorOf(active)
+    expect(capsule.getAttribute('aria-hidden')).toBe('true')
+    expect(classes(capsule)).toEqual(
+      expect.arrayContaining(['absolute', 'inset-0', 'rounded-full', 'bg-[var(--v2-tab-bar-indicator)]']),
     )
+    // No outline anywhere on the indicator — the #4058 brand outline is gone,
+    // and with it the `-outline-offset-1` bookkeeping that cleared it under
+    // focus. The focus RING (outset, on this same span) is the next test.
+    expect(classes(capsule)).not.toContain('outline')
+    expect(classes(capsule)).not.toContain('outline-1')
+    expect(classes(capsule)).not.toContain('outline-brand')
     // The cell itself is NOT rounded: Chromium hit-tests border-radius, and a
     // rounded cell has dead corners. `relative` scopes the indicator to it.
     expect(classes(active)).not.toContain('rounded-full')
@@ -108,23 +110,26 @@ describe('MobileTabBar — active cell carries the selection idiom (#2818, #4058
     expect(active.querySelector('.top-0')).toBeNull()
   })
 
-  it('leaves every inactive cell in ink-3, with no fill and no outline', () => {
-    // The control. Without it, an outline rendered unconditionally would
+  it('leaves every inactive cell in ink-3 at font-medium, with no capsule fill and no semibold', () => {
+    // The control. Without it, a fill rendered unconditionally would
     // satisfy the case above while erasing the distinction it exists to draw.
     renderBar()
 
-    for (const name of ['Dashboard', 'Activity', 'Accounts']) {
+    for (const name of ['Home', 'Activity', 'Accounts']) {
       const inactive = screen.getByRole('link', { name })
       expect(classes(inactive)).toContain('text-[var(--v2-ink-3)]')
-      expect(classes(inactive)).not.toContain('text-[var(--v2-brand)]')
-      expect(classes(indicatorOf(inactive))).not.toContain('outline-brand')
-      expect(classes(indicatorOf(inactive))).not.toContain('bg-[var(--v2-brand-soft)]')
+      expect(classes(inactive)).toContain('font-medium')
+      expect(classes(inactive)).not.toContain('text-[var(--v2-ink)]')
+      expect(classes(inactive)).not.toContain('font-semibold')
+      const pill = indicatorOf(inactive)
+      expect(classes(pill)).not.toContain('bg-[var(--v2-tab-bar-indicator)]')
+      expect(classes(pill)).not.toContain('bg-[var(--v2-brand-soft)]')
     }
   })
 
   it('gives every cell an OUTSET focus ring — no ring-inset anywhere in the bar', () => {
     renderBar()
-    for (const name of ['Dashboard', 'Agents', 'Activity', 'Accounts']) {
+    for (const name of ['Home', 'Agents', 'Activity', 'Accounts']) {
       const cell = screen.getByRole('link', { name })
       expect(classes(cell)).toEqual(expect.arrayContaining(['group', 'focus-visible:outline-none']))
       const pill = indicatorOf(cell)
@@ -137,8 +142,8 @@ describe('MobileTabBar — active cell carries the selection idiom (#2818, #4058
   })
 
   it('keeps aria-current on exactly one tab — the visual cue did not replace it', () => {
-    // The outline is a second, VISUAL cue. It must not have become the only
-    // one: `aria-current` is what a screen reader has.
+    // The capsule fill is a second, SUPPLEMENTARY cue. It must not have
+    // become the only one: `aria-current` is what a screen reader has.
     const { container } = renderBar()
 
     const current = container.querySelectorAll('a[aria-current="page"]')
@@ -153,6 +158,18 @@ describe('MobileTabBar — active cell carries the selection idiom (#2818, #4058
     expect(screen.queryByRole('link', { name: 'Transactions' })).toBeNull()
     // The rail's own item list is untouched: the override is the bar's.
     expect(baseNavItems.find((i) => i.href === '/transactions')?.label).toBe('Transactions')
+  })
+
+  it('labels /dashboard "Home" in the bar only (#4237)', () => {
+    // The twin of the Activity override above: the capsule's curved ends must
+    // stay off the landing tab's label, so the bar shortens it to "Home"
+    // while the rail, the page `h1` and the route keep "Dashboard".
+    renderBar()
+    const home = screen.getByRole('link', { name: 'Home' })
+    expect(home).toHaveAttribute('href', '/dashboard')
+    expect(screen.queryByRole('link', { name: 'Dashboard' })).toBeNull()
+    // The rail's own item list is untouched: the override is the bar's.
+    expect(baseNavItems.find((i) => i.href === '/dashboard')?.label).toBe('Dashboard')
   })
 })
 

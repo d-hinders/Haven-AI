@@ -2073,7 +2073,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="Bottom tab bar — primary navigation below lg"
-        description="Below `lg` the primary navigation: a floating pill of four tabs (Dashboard, Agents, Activity — the bar's label for /transactions — and Accounts) plus More, which opens a floating card with everything the tabs do not carry. The active tab is brand ink on a rounded brand-soft indicator with a 1px inset brand outline, the same idiom as a selected SegmentedControl option. Tabs are selected from the sidebar's own list BY ROUTE, never by index — the bar's order differs from the rail's, so a positional read would reorder it the next time an entry is inserted. Active state follows the route including detail pages, so /agents/agent-research lights Agents."
+        description="Below `lg` the primary navigation: a floating pill of four tabs (Home — the bar's label for /dashboard — Agents, Activity — the bar's label for /transactions — and Accounts) plus More, which opens a floating card with everything the tabs do not carry. The active tab is ink + semibold on a neutral CONCENTRIC CAPSULE: a rounded-full indicator set in from the pill by the same 5px on every side, no outline — the bar's own idiom (#4237, Revolut-style), deliberately not SegmentedControl's. Tabs are selected from the sidebar's own list BY ROUTE, never by index — the bar's order differs from the rail's, so a positional read would reorder it the next time an entry is inserted. Active state follows the route including detail pages, so /agents/agent-research lights Agents."
       >
         <Card hover={false} className="max-w-sm p-4">
           {/*

@@ -45,8 +45,9 @@ import type { NavItem } from './Sidebar'
  *
  * `baseNavItems` is ordered for the rail (Dashboard, Analytics, Accounts,
  * Transactions, Accounting, Agents, Marketplace, Contacts — regrouped by #3024,
- * Analytics from #2947; Marketplace renamed from Catalog by #3079); the bar's order
- * is the issue's (Dashboard, Agents, Transactions — labelled Activity since
+ * Analytics from #2947; Marketplace renamed from Catalog by #3079); the bar's
+ * order is the issue's (Dashboard — labelled "Home" in the bar since #4237 —
+ * Agents, Transactions — labelled Activity since
  * #4058 — Accounts), unchanged by that
  * regroup. Reading it by position would silently reorder the bar the next
  * time someone inserts a rail entry, so the tabs are picked by `href` and the
@@ -56,12 +57,16 @@ import type { NavItem } from './Sidebar'
 export const TAB_ROUTES = ['/dashboard', '/agents', '/transactions', '/accounts'] as const
 
 /**
- * Bar-only labels (#4058, owner decision). "Transactions" truncated in the
- * pill at 390px and already did at 375px (bug report 2026-10-14, N2); the bar
- * says "Activity" while the rail, the page title and the route stay
- * "Transactions".
+ * Bar-only labels (#4058, #4237 — owner decisions). "Transactions" truncated
+ * in the pill at 390px and already did at 375px (bug report 2026-10-14, N2);
+ * the bar says "Activity" while the rail, the page title and the route stay
+ * "Transactions". "Dashboard" is shortened to "Home" so the concentric
+ * capsule's curved ends (#4237) stay off the landing tab's label — the same
+ * trade #4058 made with `rounded-2xl`, which the capsule replaces. The rail,
+ * the page `h1` and the route keep "Dashboard".
  */
 export const TAB_LABELS: Partial<Record<(typeof TAB_ROUTES)[number], string>> = {
+  '/dashboard': 'Home',
   '/transactions': 'Activity',
 }
 
@@ -80,23 +85,46 @@ export function isActiveRoute(pathname: string, href: string): boolean {
  * `rounded-full` cell left its four corners dead — taps there fell through to
  * the bar — and the e2e corner probes caught it. The cells abut (no gap), so
  * there is no dead strip between them either.
+ *
+ * The FONT WEIGHT is deliberately not here: an inactive and an active cell
+ * share this string, and `font-medium` and `font-semibold` on one element
+ * resolve by CSS order, not by specificity (#4237). Weight is applied per
+ * cell below — inactive and More are `font-medium` (500), the active tab
+ * `font-semibold` (600).
  */
 const CELL =
-  'group relative flex h-[3.25rem] min-w-0 flex-col items-center justify-center gap-0.5 text-xs font-medium transition-colors focus-visible:outline-none'
+  'group relative flex h-[3.25rem] min-w-0 flex-col items-center justify-center gap-0.5 text-xs transition-colors focus-visible:outline-none'
 
 /**
- * The indicator carries the selection AND the focus ring. Active: brand-soft
- * fill bounded by a 1px inset brand outline (the `SegmentedControl` idiom).
- * Focused: the system's outset `ring-2 ring-brand/80`, with the outline
- * cleared so the ring reads as one edge. `rounded-2xl`, not `rounded-full`:
- * a full capsule curves in at the label's baseline, and at 390px it crossed
- * the first and last letters of "Dashboard" — the landing tab, so the active
- * state users see most (#4058 design review). Icon and label are `relative`, so
- * they paint above this absolutely placed span.
+ * The indicator carries the selection AND the focus ring (#4237, owner
+ * decision: Revolut's tab bar). Active: a full `rounded-full` CAPSULE filled
+ * with the neutral `--v2-tab-bar-indicator` — no outline. Set in from the
+ * pill by the same 5px on every side (`p-1` padding + the 1px border), so
+ * its 26px radius is concentric with the pill's 31px and its curve follows
+ * the pill's. Focused: the system's outset `ring-2 ring-brand/80`.
+ *
+ * The FILL is a supplementary cue, never the carrier of the selection. A
+ * subtle neutral fill cannot reach WCAG 1.4.11's 3:1 non-text contrast
+ * against the pill without becoming a heavy block — the owner declined the
+ * brand tint that reached for that. Selection is carried by three cues on
+ * the cell itself:
+ *
+ *   | Cue          | Active              | Inactive    |
+ *   |--------------|---------------------|-------------|
+ *   | Luminance    | `--v2-ink`          | `--v2-ink-3` |
+ *   | Weight       | 600                 | 500         |
+ *   | Programmatic | `aria-current="page"` | none      |
+ *
+ * `--v2-ink` vs `--v2-ink-3` measures 3.05:1 in light and 2.50:1 in dark, so
+ * in dark mode the weight is load-bearing. The fill itself measures 1.12:1
+ * (light) / 1.18:1 (dark) against `--v2-tab-bar-bg`; the text states both
+ * clear 4.5:1 on their grounds (pinned in `CONTRAST_PAIRS`: ink on
+ * `tab-bar-indicator`, ink-3 on `tab-bar-bg`). Icon and label are `relative`,
+ * so they paint above this absolutely placed span.
  */
 function indicatorClass(active: boolean): string {
-  return `absolute inset-0 rounded-2xl group-focus-visible:ring-2 group-focus-visible:ring-brand/80 ${
-    active ? 'bg-[var(--v2-brand-soft)] outline outline-1 -outline-offset-1 outline-brand group-focus-visible:outline-none' : ''
+  return `absolute inset-0 rounded-full group-focus-visible:ring-2 group-focus-visible:ring-brand/80 ${
+    active ? 'bg-[var(--v2-tab-bar-indicator)]' : ''
   }`
 }
 
@@ -151,7 +179,7 @@ export function MobileTabBar({
       // #2819's capture surfaced the warning.
       {...(presentational ? { inert: true } : {})}
       data-mobile-tab-bar=""
-      className={`grid max-w-md grid-cols-5 rounded-full border border-[var(--v2-tab-bar-border)] bg-[var(--v2-tab-bar-bg)] px-0.5 py-1 shadow-popover ${
+      className={`grid max-w-md grid-cols-5 rounded-full border border-[var(--v2-tab-bar-border)] bg-[var(--v2-tab-bar-bg)] p-1 shadow-popover ${
         presentational
           ? 'relative mx-auto w-full'
           : 'lg:hidden fixed left-[max(0.75rem,var(--v2-safe-left))] right-[max(0.75rem,var(--v2-safe-right))] bottom-[var(--v2-tab-bar-bottom)] mx-auto z-[var(--v2-z-tab-bar)]'
@@ -164,31 +192,30 @@ export function MobileTabBar({
             key={item.href}
             href={item.href}
             aria-current={active ? 'page' : undefined}
-            className={`${CELL} ${active ? 'text-[var(--v2-brand)]' : 'text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)]'}`}
+            className={`${CELL} ${active ? 'text-[var(--v2-ink)] font-semibold' : 'text-[var(--v2-ink-3)] font-medium hover:text-[var(--v2-ink)]'}`}
           >
-            {/* One "you are here" idiom across the navigation (#2818),
-                and since #4058 the SAME one the app's other selections use:
-                brand ink on a rounded `--v2-brand-soft` indicator bounded by a 1px inset
-                brand OUTLINE — `SegmentedControl`'s selected option (#4056).
-                It replaced a 2px rail across the cell's top edge, which an
-                edge-less floating pill has nowhere to hang.
+            {/* The bar's selection idiom is its own (#4237, owner decision —
+                Revolut's tab bar): a neutral concentric CAPSULE
+                (`--v2-tab-bar-indicator`), not the brand-soft + outline idiom
+                the rest of the app's selections use. The "one active idiom"
+                rule (#2818) is deliberately relaxed for the bar: the More
+                sheet's rows keep their brand tint (`MoreSheet`), and since the
+                sheet covers the bar while open the two idioms are never on
+                screen together — co-visibility was #2818's failure case.
+                `SegmentedControl` itself is untouched. It replaced a 2px rail
+                across the cell's top edge, which an edge-less floating pill
+                has nowhere to hang (and then the #4058 brand-soft+outline
+                indicator).
 
-                The outline is NOT decoration. Brand ink alone would be a WCAG
-                1.4.1 regression: `--v2-brand` against `--v2-ink-3` is 1.18:1,
-                a hue difference with no luminance difference, and the fill
-                alone is 1.12:1 (light) / 1.10:1 (dark) against the pill's own
-                surface (#4063 — the dark pill is `--v2-surface-2`). The
-                outline is the non-colour cue — 6.29:1 (light) / 8.65:1 (dark)
-                against `--v2-bg`, and 7.27:1 (dark) against the lifted pill
-                fill — exactly as the rail was. Both text states still clear
-                AA at 12px on their own (light: active 5.62 on the brand-soft
-                fill, inactive 5.32 on `--v2-bg`; dark: active 6.63 on the
-                brand-soft fill, inactive 5.52 on the pill fill).
-
-                An outline and not `ring-inset`: an inset ring leaks
-                `--tw-ring-inset` into the focus ring (#4056's review), and
-                every cell's focus ring is OUTSET. Both are painted on the
-                INDICATOR, not the cell — see `indicatorClass`. */}
+                The fill is NOT the carrier of the selection — see the
+                accessibility position on `indicatorClass`: a subtle neutral
+                fill cannot reach WCAG 1.4.11's 3:1 without becoming a heavy
+                block, which is the owner's call against brand tint.
+                Selection rides on the cell's ink (`--v2-ink` vs `--v2-ink-3`,
+                3.05:1 light / 2.50:1 dark — in dark mode the weight is
+                load-bearing), the 600/500 weight step, and
+                `aria-current="page"`. Every cell's focus ring is OUTSET and
+                painted on the INDICATOR — see `indicatorClass`. */}
             <span aria-hidden="true" data-tab-indicator="" className={indicatorClass(active)} />
             <span className="relative h-5 w-5" aria-hidden="true">
               {item.icon}
@@ -209,10 +236,12 @@ export function MobileTabBar({
                 text and cannot tell a class from a comment about one.)
 
                 So the label and the padding give, not the font: the bar says
-                "Activity" (`TAB_LABELS`, #4058), the label span carries no
-                side padding, and the pill pads only 2px sideways — which is
-                what keeps "Dashboard" whole at 375px on CI's font
-                rasteriser, where it measured a few pixels wider than locally.
+                "Activity" and "Home" (`TAB_LABELS`, #4058/#4237), the label
+                span carries no side padding, and the pill pads 4px on every
+                side. #4237 widened the side padding from 2px to 4px to make
+                the capsule concentric, narrowing each cell by about 1.6px —
+                the per-tab fit check in `navigation.mobile.spec.ts` is what
+                catches any label that cost.
                 Every label renders whole from 375px up. 320px, the narrowest phone in the support matrix, is
                 reported in the PR rather than promised here. */}
             <span className="relative min-w-0 max-w-full truncate">
@@ -238,7 +267,7 @@ export function MobileTabBar({
           aria-expanded={more.open}
           aria-controls={more.open ? 'more-sheet' : undefined}
           data-more-toggle=""
-          className={`${CELL} text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)]`}
+          className={`${CELL} font-medium text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)]`}
         >
           <span aria-hidden="true" data-tab-indicator="" className={indicatorClass(false)} />
           <span className="relative h-5 w-5" aria-hidden="true">
@@ -249,7 +278,7 @@ export function MobileTabBar({
           </span>
         </button>
       ) : presentational ? (
-        <span className={`${CELL} text-[var(--v2-ink-3)]`}>
+        <span className={`${CELL} font-medium text-[var(--v2-ink-3)]`}>
           <span className="h-5 w-5" aria-hidden="true">
             <Icon icon={Menu} className="w-full h-full" />
           </span>

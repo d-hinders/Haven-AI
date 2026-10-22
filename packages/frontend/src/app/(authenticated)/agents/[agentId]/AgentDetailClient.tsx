@@ -805,6 +805,9 @@ export default function AgentDetailClient({ agentId }: Props) {
             agentName={currentAgent.name}
             walletName={walletName}
             needsSetup={currentAgent.status === 'pending_approval'}
+            // The KNOWN chain only — never `chainId`'s DEFAULT_CHAIN_ID
+            // fallback, which would hide the real chain's tokens (#4249).
+            chainId={account?.chain_id ?? currentAgent.account_chain_id ?? undefined}
           />
         </div>
       ) : null}

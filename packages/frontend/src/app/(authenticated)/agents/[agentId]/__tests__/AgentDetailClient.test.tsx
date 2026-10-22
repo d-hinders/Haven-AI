@@ -104,7 +104,7 @@ vi.mock('@/hooks/useAgentActivity', async () => {
     useAgentActivity: () => mockUseAgentActivity(),
     // #4226: the Activity tab's paged reader — the page tests assert on the
     // rendered rows, so the reader is the mock surface, not `api`.
-    useAgentPaymentLedger: () => mockUseAgentPaymentLedger(),
+    useAgentPaymentLedger: (...args: unknown[]) => mockUseAgentPaymentLedger(...args),
   }
 })
 
@@ -1944,12 +1944,13 @@ describe('AgentDetailClient tabs and the Activity tab (#4226)', () => {
 
   it('the toolbar offers the Status facet with Needs attention, plus Token and Period', () => {
     // A single-option facet renders nothing (ListToolbar's rule), so the
-    // Token trigger needs a second registry entry.
+    // Token trigger needs a second registry entry — on the agent's own chain
+    // (#4249: other chains' tokens are not offered).
     mockRegistryTokens.push({
-      key: '8453:0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
-      symbol: 'USDC',
-      address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
-      chainId: 8453,
+      key: '100:0x0000000000000000000000000000000000000eur',
+      symbol: 'EURC',
+      address: '0x0000000000000000000000000000000000000eur',
+      chainId: 100,
       isNative: false,
     })
     try {
@@ -1965,6 +1966,60 @@ describe('AgentDetailClient tabs and the Activity tab (#4226)', () => {
     } finally {
       mockRegistryTokens.splice(1)
     }
+  })
+
+  describe('the Token facet is honest (#4249, #4246 review B2)', () => {
+    const NATIVE = { key: '100:native', symbol: 'xDAI', address: undefined, chainId: 100, isNative: true }
+    const EURC = {
+      key: '100:0x0000000000000000000000000000000000000eur',
+      symbol: 'EURC',
+      address: '0x0000000000000000000000000000000000000eur',
+      chainId: 100,
+      isNative: false,
+    }
+    const OTHER_CHAIN = {
+      key: '8453:0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+      symbol: 'USDC',
+      address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+      chainId: 8453,
+      isNative: false,
+    }
+    /** The filters of the reader's LAST call, and the agent id it read for. */
+    function lastLedgerCall(): { agentId: unknown; filters: Record<string, unknown> } {
+      const call = mockUseAgentPaymentLedger.mock.calls.at(-1) ?? []
+      return { agentId: call[0], filters: (call[1] ?? {}) as Record<string, unknown> }
+    }
+
+    afterEach(() => {
+      mockRegistryTokens.splice(1)
+    })
+
+    it('offers only ERC-20s on the agent chain — never a native token, never another chain', () => {
+      mockRegistryTokens.push(NATIVE, EURC, OTHER_CHAIN)
+      render(<AgentDetailClient agentId="agent-1" />)
+      fireEvent.click(screen.getByText('Token:'))
+      const options = screen.getAllByRole('menuitemradio').map((el) => el.textContent ?? '')
+      expect(options.some((label) => label.includes('EURC'))).toBe(true)
+      expect(options.some((label) => /Native/.test(label))).toBe(false)
+      expect(options.some((label) => label.includes('Base'))).toBe(false)
+    })
+
+    it('a selected token reaches the reader as its contract address', () => {
+      mockRegistryTokens.push(EURC)
+      window.history.replaceState(null, '', `/agents/agent-1?tokenKey=${encodeURIComponent(EURC.key)}`)
+      render(<AgentDetailClient agentId="agent-1" />)
+      const { agentId, filters } = lastLedgerCall()
+      expect(agentId).toBe('agent-1')
+      expect(filters.token).toBe(EURC.address)
+    })
+
+    it('a key that does not resolve is sent verbatim — an honest empty result, never an unfiltered read', () => {
+      window.history.replaceState(null, '', `/agents/agent-1?tokenKey=${encodeURIComponent('100:native')}`)
+      render(<AgentDetailClient agentId="agent-1" />)
+      const { agentId, filters } = lastLedgerCall()
+      expect(agentId).toBe('agent-1')
+      expect(filters.token).toBe('100:native')
+    })
   })
 
   it('the needs-setup empty state points at the budget', () => {
@@ -2073,11 +2128,14 @@ describe('AgentDetailClient tabs and the Activity tab (#4226)', () => {
     })
 
     it('the affected rows carry the Needs attention badge in the Activity tab', () => {
-      // A payment INTENT whose status is needs_attention presents as the
-      // badge (the status map has no such key, so the label is the
-      // humanised status — the same read the wallet feed's rows get).
+      // #4249: the PRODUCTION shape. A stranded payment's intent is
+      // `confirmed` — the funding leg settled — and only the machine-payment
+      // lifecycle says it needs attention. `payment_intents.status` never
+      // holds `needs_attention`, so a fixture that put it there proved the
+      // humanised status, not the lifecycle badge the row must read (#4246
+      // review B1).
       mockUseAgentPaymentLedger.mockReturnValue({
-        payments: [ledgerRow({ id: 'pn', status: 'needs_attention', payment_attention_reason: 'merchant_retry_rejected_after_payment', payment_flow_status: 'needs_attention' })],
+        payments: [ledgerRow({ id: 'pn', status: 'confirmed', payment_attention_reason: 'merchant_retry_rejected_after_payment', payment_flow_status: 'needs_attention' })],
         total: 1,
         hasMore: false,
         loading: false,
@@ -2087,13 +2145,15 @@ describe('AgentDetailClient tabs and the Activity tab (#4226)', () => {
         refresh: vi.fn(),
       })
       mockUseAgentActivity.mockReturnValue({
-        activity: [ledgerRow({ id: 'pn', status: 'needs_attention', payment_attention_reason: 'merchant_retry_rejected_after_payment', payment_flow_status: 'needs_attention' })],
+        activity: [ledgerRow({ id: 'pn', status: 'confirmed', payment_attention_reason: 'merchant_retry_rejected_after_payment', payment_flow_status: 'needs_attention' })],
         stats: null,
         loading: false,
       })
       render(<AgentDetailClient agentId="agent-1" />)
-      // One on the tab's warning dot, one on the affected row.
-      expect(screen.getAllByText('Needs attention').length).toBeGreaterThanOrEqual(2)
+      // The row itself carries the badge — never the settled intent's "Sent".
+      const panel = screen.getByTestId('agent-activity-section')
+      expect(within(panel).getByText('Needs attention')).toBeInTheDocument()
+      expect(within(panel).queryByText('Sent')).toBeNull()
     })
   })
 })

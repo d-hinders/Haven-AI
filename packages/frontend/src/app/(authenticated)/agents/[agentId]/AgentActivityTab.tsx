@@ -50,9 +50,11 @@ import { useTransactionFilters } from '@/hooks/useTransactionFilters'
 import {
   useAgentPaymentLedger,
   AGENT_PAYMENT_LEDGER_PAGE_SIZE,
+  type AgentPaymentLedgerFilters,
   type PaymentActivityItem,
 } from '@/hooks/useAgentActivity'
 import { api } from '@/lib/api'
+import { machinePaymentLifecyclePresentation } from '@/lib/machine-payment-lifecycle'
 import {
   failedOrRejectedStatus,
   paymentStatusPresentation,
@@ -64,7 +66,7 @@ import {
 } from '@/lib/transaction-presentation'
 import { transactionTokenLabel } from '@/lib/transaction-filters'
 import { timeAgo } from '@/lib/format'
-import type { AggregatedTransaction } from '@/types/transactions'
+import type { AggregatedTransaction, TransactionFilterTokenOption } from '@/types/transactions'
 
 interface AgentActivityTabProps {
   /** The agent whose payments this is — fixed by the page, never a filter. */
@@ -81,6 +83,13 @@ interface AgentActivityTabProps {
    * the budget instead of just reporting an empty list.
    */
   needsSetup: boolean
+  /**
+   * The chain the agent's account lives on, when the page KNOWS it (#4249) —
+   * every one of the agent's payments is on that chain, so the Token facet
+   * offers only that chain's tokens. Undefined when unknown: the facet then
+   * offers every chain's ERC-20s rather than guessing a chain.
+   */
+  chainId?: number
 }
 
 const paymentNoun: ListNoun = { one: 'payment', other: 'payments' }
@@ -102,22 +111,55 @@ function activityUrlSchema(): ListUrlSchema {
 }
 
 /**
+ * The Token facet's honest options (#4249): only tokens an agent payment can
+ * be in. `payment_intents.token_address` is NOT NULL — budgets are metered
+ * per ERC-20 — so a native option could never match a row, and the
+ * registry's native entries (`address: null`) used to map to `''`, which the
+ * reader drops, so "Token: ETH" fetched EVERY payment (#4246 review B2). When
+ * the page knows the agent's chain, other chains' tokens go too: none of the
+ * agent's payments can be in them.
+ */
+export function agentPaymentTokenOptions(
+  tokens: readonly TransactionFilterTokenOption[],
+  chainId: number | undefined,
+): TransactionFilterTokenOption[] {
+  return tokens.filter(
+    (token) =>
+      !token.isNative &&
+      Boolean(token.address) &&
+      (chainId === undefined || token.chainId === chainId),
+  )
+}
+
+/**
  * The toolbar's state as the filters the kinded read sends. `tokenKey` is the
  * shared registry's `<chainId>:<address>` key — the address half is what the
  * route takes.
+ *
+ * A selected key that does not resolve to an address is NEVER dropped (#4249):
+ * dropping it sent an unfiltered request under a "Token: …" chip. While the
+ * registry is still loading the read waits (`tokenPending`); once it has
+ * loaded, the key goes out verbatim, which the route documents as matching
+ * nothing — an honest empty result for a link to a token the agent cannot
+ * have paid in.
  */
-function listStateToFilters(
+export function listStateToFilters(
   state: ListState,
-  tokenAddressByKey: Map<string, string>,
-): { status?: string; token?: string; q?: string; from?: string; to?: string } {
+  tokenAddressByKey: ReadonlyMap<string, string>,
+  tokensLoading: boolean,
+): { filters: AgentPaymentLedgerFilters; tokenPending: boolean } {
   const first = (id: string): string | undefined => state.facets[id]?.[0]
   const search = state.q.trim()
   const tokenKey = first('tokenKey')
+  const resolved = tokenKey ? tokenAddressByKey.get(tokenKey) : undefined
   return {
-    status: first('status'),
-    token: tokenKey ? tokenAddressByKey.get(tokenKey) : undefined,
-    q: search || undefined,
-    ...periodToBounds(state.period),
+    filters: {
+      status: first('status'),
+      token: tokenKey ? (resolved ?? tokenKey) : undefined,
+      q: search || undefined,
+      ...periodToBounds(state.period),
+    },
+    tokenPending: Boolean(tokenKey) && resolved === undefined && tokensLoading,
   }
 }
 
@@ -230,10 +272,15 @@ export default function AgentActivityTab({
   agentName,
   walletName,
   needsSetup,
+  chainId,
 }: AgentActivityTabProps) {
   const { user } = useAuth()
   const { resolveAddress } = useContacts()
-  const { tokens } = useTransactionFilters()
+  const { tokens: registryTokens, loading: tokensLoading } = useTransactionFilters()
+  const tokens = useMemo(
+    () => agentPaymentTokenOptions(registryTokens, chainId),
+    [registryTokens, chainId],
+  )
   const [selectedTx, setSelectedTx] = useState<AggregatedTransaction | null>(null)
   const accountNamesByAddress = useMemo(() => accountNamesByAddressOf(user), [user])
 
@@ -243,12 +290,12 @@ export default function AgentActivityTab({
   const [listState, setListState] = useListUrlState(urlSchema, { filtering: 'server' })
 
   const tokenAddressByKey = useMemo(
-    () => new Map(tokens.map((token) => [token.key, token.address ?? ''])),
+    () => new Map(tokens.map((token) => [token.key, token.address as string])),
     [tokens],
   )
-  const filters = useMemo(
-    () => listStateToFilters(listState, tokenAddressByKey),
-    [listState, tokenAddressByKey],
+  const { filters, tokenPending } = useMemo(
+    () => listStateToFilters(listState, tokenAddressByKey, Boolean(tokensLoading)),
+    [listState, tokenAddressByKey, tokensLoading],
   )
 
   const {
@@ -260,7 +307,7 @@ export default function AgentActivityTab({
     error,
     loadMore,
     refresh,
-  } = useAgentPaymentLedger(agentId, filters)
+  } = useAgentPaymentLedger(tokenPending ? null : agentId, filters)
 
   // Active means "differs from the tab default" (#4110): no search, every
   // facet All, All time — the same rule the toolbar applies to its chips.
@@ -472,7 +519,11 @@ function AgentLedgerRow({
   /** #4165: the same-day inset hairline, on every row after a day's first. */
   insetDivider: boolean
 }) {
-  const badge = transactionStatus(tx) ?? tx.statusBadge
+  // The same precedence the wallet feed's rows read (`TransactionsTable`):
+  // the machine-payment lifecycle outranks the intent's own status, because a
+  // stranded payment's intent is `confirmed` — its funding settled — and
+  // only the lifecycle says it needs attention (#2196, #4249).
+  const badge = transactionStatus(tx) ?? machinePaymentLifecyclePresentation(tx) ?? tx.statusBadge
   const fiat = transactionFiat(tx, 'row')
   return (
     <TransactionActivityRow

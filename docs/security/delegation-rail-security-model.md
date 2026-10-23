@@ -1283,6 +1283,21 @@ resolved differently) but has no remaining frontend caller.
 > the card. The rest of this document was not re-read for it;
 > `last-verified` already reads 2026-10-20 and is left as is — this note is
 > the scope.
+
+> **Re-verified unchanged (#4307, 2026-10-23 — card order only):** this diff
+> is presentation chrome only in `components/AccountSignersCard.tsx`. The
+> #3825 Settings link no longer leads the card: it moves below the signers
+> and their actions onto its own `Card.Section` — same href
+> (`/settings#signers`), same wording, the #3825 object note kept as a
+> comment — the one-signer warning now LEADS the card (same div, its `mt-4`
+> offset dropped), and the passkey helper text's offset goes `mt-1.5` to
+> `mt-2`. No signing step, signer-set gate, `pickSigningPath` branch, route
+> or `wayCount < 2` last-way gate is touched; the card remains the ONLY
+> surface that can change signers or run recovery, and nothing about who
+> signs, what may be spent, or when revocation bites changed. Scope of this
+> re-read: this paragraph and the card; `last-verified` already reads
+> 2026-10-23 and is left as is.
+
 The two surfaces differ only in how the account is resolved: agent lookup
 versus an owner-scoped `(address, chain)` lookup on `smart_accounts`. Authority
 rules, the last-signer refusal (§7), the calldata encoding and the signed-op

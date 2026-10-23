@@ -17,17 +17,22 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
  * (push before/without a claim, ignoring `claim.owned`, never recording the
  * push) and argument-order drift between the real functions.
  *
- * What it does NOT guard: the oracle models the *intended* dedup key
- * (provider, payment_id, user_id), so a SQL-text-only change to the ON CONFLICT
+ * What it does NOT guard: the oracle models the dedup key as
+ * (provider, payment_id, user_id) — the real key since migration 113 is
+ * (provider, payment_id, user_id, document_kind), but every generic statement
+ * the oracle interprets is scoped to `document_kind = 'underlag'`, so the two
+ * agree on the rows these statements touch. A SQL-text-only change to the ON CONFLICT
  * columns or the unique index would not be caught here — that is the unit test's
  * job (`feed-sync.test.ts` asserts the claim SQL) and ultimately the migration's.
  */
 
 // ── Oracle: in-memory model of the accounting_feed_syncs table ────────────────
-// Enforces uniqueness on (provider, payment_id, user_id) — the same key as the
-// migration and the ON CONFLICT target — by interpreting the exact SQL that
-// feed-sync.ts issues. Reads the real query shapes; it is not a generic SQL
-// engine, so an unrecognised statement fails loudly rather than silently.
+// Enforces uniqueness on (provider, payment_id, user_id). The migration-113
+// key and the ON CONFLICT target add document_kind; the oracle stays
+// equivalent because the statements it models are scoped to 'underlag'. It
+// works by interpreting the exact SQL that feed-sync.ts issues. Reads the
+// real query shapes; it is not a generic SQL engine, so an unrecognised
+// statement fails loudly rather than silently.
 const { ledger } = vi.hoisted(() => {
   interface Row {
     id: string

@@ -37,6 +37,7 @@
 import { DEFAULT_CHAIN_ID } from '@haven_ai/core'
 import pool from '../../db.js'
 import type { Executor } from '../transaction.js'
+import { escapeLikeContains } from '../sql-like.js'
 
 export type { Executor }
 
@@ -214,13 +215,13 @@ export const LIST_AGENT_PAYMENTS_FILTERED_SQL = `SELECT pi.id,
                   AND pi.status IN ('confirmed', 'executed')))
          AND ($4::text IS NULL OR pi.created_at >= $4::timestamptz)
          AND ($5::text IS NULL OR pi.created_at < $5::timestamptz)
-         AND ($6::text IS NULL OR pi.x402_resource_url ILIKE '%' || $6 || '%'
-              OR pi.merchant_address ILIKE '%' || $6 || '%'
-              OR pi.to_address ILIKE '%' || $6 || '%'
+         AND ($6::text IS NULL OR pi.x402_resource_url ILIKE '%' || $6 || '%' ESCAPE '\\'
+              OR pi.merchant_address ILIKE '%' || $6 || '%' ESCAPE '\\'
+              OR pi.to_address ILIKE '%' || $6 || '%' ESCAPE '\\'
               OR EXISTS (SELECT 1 FROM contacts c
                          WHERE c.user_id = pi.user_id
                            AND LOWER(c.address) = LOWER(pi.to_address)
-                           AND c.name ILIKE '%' || $6 || '%'))
+                           AND c.name ILIKE '%' || $6 || '%' ESCAPE '\\'))
          AND ($7::uuid IS NULL OR pi.id = $7::uuid)
          AND ($8::text IS NULL OR LOWER(pi.token_address) = LOWER($8::text))
        ORDER BY pi.created_at DESC
@@ -249,13 +250,13 @@ export const COUNT_AGENT_PAYMENTS_FILTERED_SQL = `SELECT COUNT(*)
                   AND pi.status IN ('confirmed', 'executed')))
          AND ($4::text IS NULL OR pi.created_at >= $4::timestamptz)
          AND ($5::text IS NULL OR pi.created_at < $5::timestamptz)
-         AND ($6::text IS NULL OR pi.x402_resource_url ILIKE '%' || $6 || '%'
-              OR pi.merchant_address ILIKE '%' || $6 || '%'
-              OR pi.to_address ILIKE '%' || $6 || '%'
+         AND ($6::text IS NULL OR pi.x402_resource_url ILIKE '%' || $6 || '%' ESCAPE '\\'
+              OR pi.merchant_address ILIKE '%' || $6 || '%' ESCAPE '\\'
+              OR pi.to_address ILIKE '%' || $6 || '%' ESCAPE '\\'
               OR EXISTS (SELECT 1 FROM contacts c
                          WHERE c.user_id = pi.user_id
                            AND LOWER(c.address) = LOWER(pi.to_address)
-                           AND c.name ILIKE '%' || $6 || '%'))
+                           AND c.name ILIKE '%' || $6 || '%' ESCAPE '\\'))
          AND ($7::uuid IS NULL OR pi.id = $7::uuid)
          AND ($8::text IS NULL OR LOWER(pi.token_address) = LOWER($8::text))`
 
@@ -288,7 +289,7 @@ function filteredPaymentArgs(agentId: string, filter: AgentPaymentActivityFilter
     filter.rails,
     filter.from,
     filter.to,
-    filter.q,
+    escapeLikeContains(filter.q),
     filter.paymentId,
     filter.token,
   ]

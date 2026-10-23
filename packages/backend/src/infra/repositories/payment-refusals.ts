@@ -25,6 +25,7 @@
 
 import pool from '../../db.js'
 import type { Executor } from '../transaction.js'
+import { escapeLikeContains } from '../sql-like.js'
 
 /** The closed `reason` set — mirrors migration 086's CHECK exactly. */
 export type PaymentRefusalReason =
@@ -278,8 +279,8 @@ export const LIST_AGENT_REFUSALS_FILTERED_SQL = `SELECT id, agent_id, chain_id, 
        WHERE agent_id = $1
          AND ($2::text IS NULL OR created_at >= $2::timestamptz)
          AND ($3::text IS NULL OR created_at < $3::timestamptz)
-         AND ($4::text IS NULL OR resource_url ILIKE '%' || $4 || '%'
-              OR merchant_to ILIKE '%' || $4 || '%')
+         AND ($4::text IS NULL OR resource_url ILIKE '%' || $4 || '%' ESCAPE '\\'
+              OR merchant_to ILIKE '%' || $4 || '%' ESCAPE '\\')
        ORDER BY created_at DESC
        LIMIT $5 OFFSET $6`
 
@@ -294,8 +295,8 @@ export const COUNT_AGENT_REFUSALS_FILTERED_SQL = `SELECT COUNT(*)
        WHERE agent_id = $1
          AND ($2::text IS NULL OR created_at >= $2::timestamptz)
          AND ($3::text IS NULL OR created_at < $3::timestamptz)
-         AND ($4::text IS NULL OR resource_url ILIKE '%' || $4 || '%'
-              OR merchant_to ILIKE '%' || $4 || '%')`
+         AND ($4::text IS NULL OR resource_url ILIKE '%' || $4 || '%' ESCAPE '\\'
+              OR merchant_to ILIKE '%' || $4 || '%' ESCAPE '\\')`
 
 /**
  * NOT tenant-scoped — the caller must have confirmed the agent belongs to the
@@ -313,7 +314,7 @@ export async function listAgentRefusalsFiltered(
     agentId,
     filter.from,
     filter.to,
-    filter.q,
+    escapeLikeContains(filter.q),
     limit,
     offset,
   ])
@@ -330,7 +331,7 @@ export async function countAgentRefusalsFiltered(
     agentId,
     filter.from,
     filter.to,
-    filter.q,
+    escapeLikeContains(filter.q),
   ])
   return Number(result.rows[0]?.count ?? 0)
 }

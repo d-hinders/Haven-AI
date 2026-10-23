@@ -56,7 +56,7 @@ Start with an existing [`/design-system` Pattern](docs/product/design-system.md#
 
 ## UI Implementation Rules
 
-- Inspect existing primitives in `packages/frontend/src/components/ui` and Haven-domain components in `packages/frontend/src/components/haven` before creating new UI. The shared primitives and shims of `@haven_ai/ui` live at `packages/ui` (moved since #3508).
+- Inspect existing primitives in `packages/frontend/src/components/ui` and Haven-domain components in `packages/frontend/src/components/haven` before creating new UI. The primitives shared with the ops console live in `@haven_ai/ui` (`packages/ui/src`, moved since #3508); their old `components/ui` paths are re-export shims, and the rest of `components/ui` is the frontend's own.
 - Prefer composition over new visual patterns. Do not invent new card styles, spacing systems, shadows, radius, or typography unless the existing system cannot express the need.
 - Use the v2 tokens from `packages/ui/src/tokens.css` (imported by the app layout before `globals.css`) and the shared Tailwind preset `packages/ui/tailwind.preset.js` consumed by the frontend config.
 - Do not install or introduce a second UI framework for ordinary product work.
@@ -80,7 +80,7 @@ Every screen that moves money or changes agent authority must make these clear:
 
 Before changing payment execution, agent authority, account or signer setup, relaying, SDK payment APIs, x402/MPP flows, merchant-facing demos, fiat/card surfaces, swaps, yield, or treasury features, read `docs/regulatory/casp-risk-guardrails.md`.
 
-Hard product and architecture rule: Haven is non-custodial smart account software. Haven must not hold user or agent private keys, make API credentials sufficient to spend, rely on off-chain policy as the real spend control, alter signed payment intent, operate swaps/ramps/fiat/card/merchant settlement/yield/advice flows without review, or prevent users from enumerating and revoking their delegations, or managing their account's signers, outside Haven.
+Hard product and architecture rule: Haven is non-custodial smart account software. Haven must not hold user or agent private keys, make API credentials sufficient to spend, rely on off-chain policy as the real spend control, alter signed payment intent, operate swaps/ramps/fiat/card/merchant settlement/yield/advice flows without review, or prevent users from accessing their account, enumerating and revoking their delegations, or managing its signers outside Haven.
 
 Apply these guardrails to generated artifacts too: SDK examples, credential files, agent handoff docs, demo scripts, and skill bundles must not imply Haven holds funds, controls keys, transfers money on the user's behalf, or makes API credentials sufficient to spend.
 
@@ -239,7 +239,7 @@ Gravity files the captain should usually own — this list is canonical and
 
 ## Cross-session agent coordination
 
-More than one agent session works this repo (different users, different machines). GitHub is the only channel every session reads — coordinate THROUGH the repo, never assume you are alone. The standing async channel is the pinned issue [#3193](https://github.com/d-hinders/Haven-AI/issues/3193) (vol. 2, from 2026-09-20; its predecessor [#1289](https://github.com/d-hinders/Haven-AI/issues/1289) is kept open as read-only history — nothing reads it for live state, nothing writes to it). **This section is the only canonical protocol text**: `ship-next`, the channel body and the workflow headers point here instead of restating it, and the channel's number lives in one script constant (`scripts/ci/coordination-channel.mjs`) that every coordination workflow imports (#3182).
+More than one agent session works this repo (different users, different machines). GitHub is the only channel every session reads — coordinate THROUGH the repo, never assume you are alone. The standing async channel is the pinned issue [#3193](https://github.com/d-hinders/Haven-AI/issues/3193) (vol. 2, from 2026-09-20; its predecessor [#1289](https://github.com/d-hinders/Haven-AI/issues/1289), closed 2026-09-26, is read-only history — nothing reads it for live state, nothing writes to it; `RETIRED_CHANNEL_ISSUES` in `scripts/ci/coordination-channel.mjs` lists it). **This section is the only canonical protocol text**: `ship-next`, the channel body and the workflow headers point here instead of restating it, and the channel's number lives in one script constant (`scripts/ci/coordination-channel.mjs`) that every coordination workflow imports (#3182).
 
 **Before building an issue** (any session, any agent):
 

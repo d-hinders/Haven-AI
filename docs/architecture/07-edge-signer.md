@@ -639,12 +639,14 @@ account is permanently out of scope.
   can complete, and nothing here is a path that still exists server-side.
   Delegation-rail payments (#829/#830) sign the account's EIP-712 typed data
   verbatim via the SDK — `HavenClient` dispatches on
-  `sign_data.signature_scheme` (`eip712_userop` for payments,
-  `eip712_delegation` for x402 settlement) to
-  `signUserOpTypedDataForDelegation` — and in the hosted topology the same
-  `eip712_userop` typed data is signed by this signer's `haven_sign` (by
+  `sign_data.signature_scheme`: `eip712_userop` (payments) to
+  `signUserOpTypedDataForDelegation`, `eip712_delegation` (x402 settlement)
+  to `signSettlementDelegationTypedData` after `assertOwnSettlementChild`
+  (`packages/sdk/src/client.ts:668-697`). In the hosted topology this
+  signer's `haven_sign` signs both: the `eip712_userop` typed data (by
   `payment_id` since #3271, under the #3272 allowlist; see Regular payment
-  above). The retired session rail's `eip191_userop` scheme is refused (#834).
+  above) and the erc7710 settlement child, after `verifySettlementChild`
+  (#3281). The retired session rail's `eip191_userop` scheme is refused (#834).
 - Regular payment signing is chain-neutral; the backend-provided payload and
   on-chain wallet rules define the transfer (AllowanceModule-hash signing:
   removed, #3169).

@@ -434,10 +434,17 @@ in local mode the SDK makes the merchant retry itself and writes the evidence
 or reconciliation row from what it observed, while here the AGENT makes that
 retry and Haven never sends the merchant the paid request (it sends only unpaid
 probes: `haven_quote_x402`'s, and since #3739 request mode's) — so the outcome has to come back
-through a tool or it does not come back at all. erc7710 needs no equivalent:
-there is no funding leg, `confirmed` IS merchant settlement, and the
-funded-but-undelivered state the report resolves is scoped to
-`settlement_scheme: 'eip3009'`.
+through a tool or it does not come back at all. erc7710 needs a different
+step, not none: there is no funding leg, so the funded-but-undelivered state
+the outcome report resolves is scoped to `settlement_scheme: 'eip3009'` (and
+`haven_report_x402_outcome` refuses an unconfirmed erc7710 payment and names
+the evidence tool, `mcp-server/src/tools/plain-http-x402.ts:139-175`), but the
+payment stays
+`submitted` until its settlement is recorded — by
+`haven_report_settlement_evidence`, the next tool after the erc7710
+`haven_submit` (#3774, `mcp-server/src/tools/state-direct-recovery.ts:985-992`),
+or by the backend's passive settlement sweeper finding the redemption on chain
+(#2117). `confirmed` IS merchant settlement.
 
 In both cases, Haven's backend constructs and records the payment intent.
 Hosted MCP never signs; it relays already signed, context-bound payloads.

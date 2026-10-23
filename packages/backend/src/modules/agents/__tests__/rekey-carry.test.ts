@@ -186,6 +186,32 @@ describe('planCarry — the repeated-re-key bypass', () => {
   })
 })
 
+describe('planCarry — the build-route 365-day expiry cap does NOT apply here (#4351)', () => {
+  it('carries a legacy row whose expires_at is PAST the cap — rotation must stay possible', () => {
+    // #4351: POST /delegations/build refuses an expiry more than 365 days
+    // out. The re-key path never builds through that route — it carries the
+    // OLD row's terms — so a row past the cap must still rotate (rotation is
+    // the response to a suspected key exposure). This pins the cap out of
+    // the shared policy builder against a later "centralise the validation"
+    // refactor: putting the bound HERE would strand past-cap rows.
+    const pastCap = T0 + 400 * DAY
+    const plan = planCarry({
+      old: oldTerms({ expiresAt: pastCap }),
+      meter: fromChain(400_000n),
+      meteredAtSec: T0 + 3600,
+      nowSec: T0 + 3600,
+    })
+    assertCarryKind(plan)
+
+    // The carry still dies at the old boundary, and the steady piece still
+    // resumes at it with the OLD expiry — past the cap, unchanged.
+    expect(plan.boundary).toBe(T0 + DAY)
+    expect(plan.carry?.expiresAt).toBe(T0 + DAY)
+    expect(plan.steady?.expiresAt).toBe(pastCap)
+    expect(plan.steady?.expiresAt).toBeGreaterThan(T0 + 365 * DAY)
+  })
+})
+
 describe('planCarry — refusals', () => {
   it('REFUSES a meter reading that did not come from the chain', () => {
     // readRemainingBudget falls back to the FULL budget on a failed read.

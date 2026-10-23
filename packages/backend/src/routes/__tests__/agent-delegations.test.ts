@@ -669,6 +669,58 @@ describe('delegation lifecycle API (#828)', () => {
       })
     })
 
+    // #4351: the expiry's upper bound. JSON Schema cannot state a
+    // clock-relative maximum, so the cap lives in the build route — the first
+    // test below is its mutation target: drop the route's
+    // `expiry > nowSec + 365 * 86_400` check and it goes red.
+    describe('expires_at cap (#4351)', () => {
+      const DAY = 86_400
+      const nowSec = () => Math.floor(Date.now() / 1000)
+
+      it('refuses an expiry just past the 365-day cap with the error envelope', async () => {
+        mockDb({})
+        const res = await app.inject({
+          method: 'POST', url: `/agents/${AGENT_ID}/delegations/build`,
+          payload: { token_address: USDC, budget_atomic: '5000000', period_seconds: 86400, expires_at: nowSec() + 365 * DAY + 60 },
+        })
+        expect(res.statusCode).toBe(400)
+        expect(res.json()).toEqual({ error: 'expires_at must be at most 365 days in the future' })
+        // Nothing was stored — the refusal happens before the slot lock.
+        expect(mockQuery.mock.calls.some((c) => /INSERT INTO agent_delegations/.test(String(c[0])))).toBe(false)
+      })
+
+      it('accepts an expiry exactly AT the cap', async () => {
+        mockDb({})
+        const res = await app.inject({
+          method: 'POST', url: `/agents/${AGENT_ID}/delegations/build`,
+          payload: { token_address: USDC, budget_atomic: '5000000', period_seconds: 86400, expires_at: nowSec() + 365 * DAY },
+        })
+        expect(res.statusCode).toBe(201)
+        const insert = mockQuery.mock.calls.find((c) => /INSERT INTO agent_delegations/.test(String(c[0])))
+        expect(insert).toBeTruthy()
+      })
+
+      it('caps the EDIT path too: a build with `replaces` cannot set an end date past the cap', async () => {
+        mockDb({})
+        const res = await app.inject({
+          method: 'POST', url: `/agents/${AGENT_ID}/delegations/build`,
+          payload: {
+            token_address: USDC,
+            budget_atomic: '5000000',
+            period_seconds: 86400,
+            expires_at: nowSec() + 365 * DAY + 60,
+            // The edit flow's declaration: one hash naming the live budget
+            // being replaced. The cap check runs BEFORE the slot lock, so a
+            // past-cap edit is refused even though the slot handling never
+            // runs.
+            replaces: [`0x${'ab'.repeat(32)}`],
+          },
+        })
+        expect(res.statusCode).toBe(400)
+        expect(res.json()).toEqual({ error: 'expires_at must be at most 365 days in the future' })
+      })
+    })
+
     it.each([
       ['bad token', { token_address: 'x', budget_atomic: '1', period_seconds: 86400 }],
       ['zero budget', { token_address: USDC, budget_atomic: '0', period_seconds: 86400 }],

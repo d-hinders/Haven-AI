@@ -8,9 +8,18 @@ import {
 import { machinePaymentLifecycle } from '../domain/machine-payment-lifecycle.js'
 import { deriveSettlementTracking } from '../domain/settlement-tracking.js'
 import { agentExistsForUser, listAgentNamesForUser } from '../infra/repositories/agents.js'
+import { listContactsForUser } from '../infra/repositories/contacts.js'
+import { listBasicAccountsForUser } from '../infra/repositories/transaction-history.js'
+import {
+  EXPORT_ROW_CAP,
+  refuseCsvExportOverCap,
+  sendCsvExport,
+  toCsv,
+} from '../domain/csv.js'
 import {
   listAgentPayments,
   listAgentPaymentsFiltered,
+  listAgentPaymentsForExport,
   countAgentPaymentsFiltered,
   listFeedPayments,
   sumAgentSpendAllTime,
@@ -270,6 +279,170 @@ function toolCallFilter(query: Record<string, string>): AgentToolInvocationFilte
   }
 }
 
+// ── The agent ledger export (#4327) ──────────────────────────────────────────
+//
+// `GET /agent-activity/:id/activity/export.csv` writes the Activity tab's
+// ledger AS SHOWN (owner decision, option (a)): the agent's own
+// `payment_intents` — failed and pending included — under the tab's own
+// filters, or, with `status=refused`, its refused attempts. The wallet-scoped
+// `/transactions/export.csv` serves a different population (the fixed-SEK
+// accounting book) and has no payment-status filter, so it cannot be this
+// file. The response plumbing — cap, 413, headers, BOM, filename — is the
+// shared `domain/csv.ts` helper; only the projection below is this export's.
+
+/**
+ * The file's columns, one contract for both populations. `status` is the
+ * tab's own vocabulary (its Status facet's words); `reason` is the machine
+ * code behind a refusal or a needs-attention payment, empty otherwise.
+ * `approx_value` is SERVE-TIME — re-priced at today's rate in
+ * `approx_currency` (the user's display currency), empty when the token has
+ * no usable quote, never 0. `tx_hash` is the merchant settlement when one is
+ * recorded, else the funding leg — the transaction the tab's detail panel
+ * headlines.
+ */
+type AgentLedgerCsvColumn =
+  | 'date'
+  | 'status'
+  | 'reason'
+  | 'counterparty_name'
+  | 'counterparty_address'
+  | 'amount'
+  | 'token'
+  | 'approx_value'
+  | 'approx_currency'
+  | 'tx_hash'
+  | 'payment_id'
+
+export const AGENT_LEDGER_CSV_COLUMNS: readonly AgentLedgerCsvColumn[] = [
+  'date',
+  'status',
+  'reason',
+  'counterparty_name',
+  'counterparty_address',
+  'amount',
+  'token',
+  'approx_value',
+  'approx_currency',
+  'tx_hash',
+  'payment_id',
+]
+
+type AgentLedgerCsvRow = Partial<Record<AgentLedgerCsvColumn, string>>
+
+/** The tab's Status facet, plus `refused` — the population switch (#4323). */
+const EXPORT_STATUS_FILTERS = new Set([...PAYMENT_STATUS_FILTERS, 'refused'])
+
+/** The 413's way out: the Activity tab's own filters, in its words. */
+const AGENT_LEDGER_NARROW_BY = 'status, token, search or period'
+
+/** The Status facet's word for a payment row; an unknown status echoes its own word. */
+function paymentStatusWord(status: string, needsAttention: boolean): string {
+  if (needsAttention) return 'Needs attention'
+  switch (status) {
+    case 'confirmed':
+    case 'executed':
+      return 'Sent'
+    case 'pending_signature':
+    case 'submitted':
+      return 'Pending'
+    case 'failed':
+      return 'Failed'
+    case 'expired':
+      return 'Expired'
+    default:
+      return status
+  }
+}
+
+function resourceHost(url: string | null | undefined): string | null {
+  if (!url) return null
+  try {
+    return new URL(url).hostname
+  } catch {
+    return null
+  }
+}
+
+/**
+ * The tab's merchant-first naming without its "no address" fallbacks: a
+ * machine payment's resource host, else the user's own account (chain-keyed
+ * first), else the contact name, else empty — the address has its own column.
+ */
+interface LedgerNames {
+  contacts: Map<string, string>
+  accounts: Map<string, string>
+}
+
+function counterpartyName(
+  names: LedgerNames,
+  address: string | null,
+  chainId: number,
+  host: string | null,
+): string {
+  if (host) return host
+  if (!address) return ''
+  const key = address.toLowerCase()
+  const chainKey = [key, chainId].join(':')
+  return names.accounts.get(chainKey) ?? names.accounts.get(key) ?? names.contacts.get(key) ?? ''
+}
+
+function isoDate(value: string | Date): string {
+  return new Date(value).toISOString()
+}
+
+async function paymentCsvRow(
+  p: ActivityPaymentRow,
+  names: LedgerNames,
+  currency: TransactionCurrency,
+): Promise<AgentLedgerCsvRow> {
+  const lifecycle = machinePaymentLifecycle({
+    rail: p.source,
+    paymentStatus: p.status,
+    paymentProofStatus: p.payment_proof_status,
+    reconciliationEventType: p.payment_reconciliation_event_type,
+  })
+  const address = toCanonicalAddress(p.x402_merchant_address ?? p.to_address)
+  const host = p.source && MACHINE_PAYMENT_RAILS.has(p.source) ? resourceHost(p.x402_resource_url) : null
+  const approx = await serveTimeAmount(p.token_symbol, p.amount_human, currency)
+  return {
+    date: isoDate(p.created_at),
+    status: paymentStatusWord(p.status, lifecycle.paymentFlowStatus === 'needs_attention'),
+    reason: lifecycle.paymentAttentionReason ?? '',
+    counterparty_name: counterpartyName(names, address, p.chain_id, host),
+    counterparty_address: address ?? '',
+    amount: p.amount_human,
+    token: p.token_symbol,
+    approx_value: approx ?? '',
+    approx_currency: currency,
+    tx_hash: p.settlement_tx_hash ?? p.tx_hash ?? '',
+    payment_id: p.id,
+  }
+}
+
+async function refusalCsvRow(
+  r: AgentRefusalRow,
+  names: LedgerNames,
+  currency: TransactionCurrency,
+): Promise<AgentLedgerCsvRow> {
+  const amount = humanTokenAmount(r.chain_id, r.token_symbol, r.amount_atomic)
+  const approx = await serveTimeAmountTriple(r.token_symbol, amount)
+  const address = r.merchant_to ? toCanonicalAddress(r.merchant_to) : null
+  return {
+    date: isoDate(r.created_at),
+    status: 'Refused',
+    reason: r.reason,
+    counterparty_name: counterpartyName(names, address, r.chain_id, resourceHost(r.resource_url)),
+    counterparty_address: address ?? '',
+    amount,
+    token: r.token_symbol,
+    approx_value: approx[currency.toLowerCase() as 'usd' | 'eur' | 'sek'] ?? '',
+    approx_currency: currency,
+    // No money moved and no payment exists: both stay empty.
+    tx_hash: '',
+    payment_id: '',
+  }
+}
+
 export default async function agentActivityRoutes(
   app: FastifyInstance,
   options: AgentActivityRouteOptions = {},
@@ -420,6 +593,84 @@ export default async function agentActivityRoutes(
     ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
 
     return { activity }
+  })
+
+  // GET /agent-activity/:id/activity/export.csv — the Activity tab's ledger
+  // as a file (#4327). Same filters as the tab's read (`status`, `token`,
+  // `from`/`to`, `q`), the same population, unpaged and capped: the read takes
+  // `EXPORT_ROW_CAP + 1` rows, and the extra row means the file would be over
+  // the cap — a refusal, never a truncated file. `status=refused` switches
+  // the population to the refused attempts, as the tab's facet does.
+  app.get<{
+    Params: { id: string }
+    Querystring: {
+      status?: string
+      from?: string
+      to?: string
+      q?: string
+      token?: string
+    }
+  }>('/:id/activity/export.csv', async (request, reply) => {
+    const { sub } = request.user as { sub: string }
+    const { id } = request.params
+    const query = request.query as Record<string, string>
+
+    if (!(await agentExistsForUser(id, sub))) {
+      return reply.code(404).send({ error: 'Agent not found' })
+    }
+
+    const status = query.status ?? null
+    if (status && !EXPORT_STATUS_FILTERS.has(status)) {
+      return reply.code(400).send({ error: `status ${status} does not apply to the agent ledger` })
+    }
+    if (parseIsoBound(query.from) === 'invalid' || parseIsoBound(query.to) === 'invalid') {
+      return reply.code(400).send({ error: 'invalid period bound' })
+    }
+
+    const [currency, contacts, accounts] = await Promise.all([
+      approxCurrencyFor(sub),
+      listContactsForUser(sub),
+      listBasicAccountsForUser(sub),
+    ])
+    const names: LedgerNames = {
+      contacts: new Map(contacts.map((c) => [c.address.toLowerCase(), c.name])),
+      accounts: new Map(
+        accounts.flatMap((a) => [
+          [[a.account_address.toLowerCase(), a.chain_id].join(':'), a.name],
+          [a.account_address.toLowerCase(), a.name],
+        ]),
+      ),
+    }
+
+    let rows: AgentLedgerCsvRow[]
+    if (status === 'refused') {
+      const filter: AgentRefusalActivityFilter = {
+        from: query.from ?? null,
+        to: query.to ?? null,
+        q: query.q?.trim() ? query.q.trim() : null,
+      }
+      const refusals = await listAgentRefusalsFiltered(id, filter, EXPORT_ROW_CAP + 1, 0)
+      const overCap = refuseCsvExportOverCap(reply, refusals.length, {
+        narrowBy: AGENT_LEDGER_NARROW_BY,
+        lowerBound: true,
+      })
+      if (overCap) return overCap
+      rows = await Promise.all(refusals.map((r) => refusalCsvRow(r, names, currency)))
+    } else {
+      const payments = await listAgentPaymentsForExport(id, paymentFilter(query), EXPORT_ROW_CAP)
+      const overCap = refuseCsvExportOverCap(reply, payments.length, {
+        narrowBy: AGENT_LEDGER_NARROW_BY,
+        lowerBound: true,
+      })
+      if (overCap) return overCap
+      rows = await Promise.all(payments.map((p) => paymentCsvRow(p, names, currency)))
+    }
+
+    return sendCsvExport(reply, {
+      csv: toCsv(AGENT_LEDGER_CSV_COLUMNS, rows),
+      rowCount: rows.length,
+      filenamePrefix: 'haven-agent-payments',
+    })
   })
 
   // GET /agents/:id/stats — spending stats for an agent

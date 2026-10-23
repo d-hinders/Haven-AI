@@ -326,6 +326,27 @@ export async function countAgentPaymentsFiltered(
   return Number(result.rows[0]?.count ?? 0)
 }
 
+/**
+ * The agent ledger export's read (#4327): the SAME filtered population and
+ * order as `listAgentPaymentsFiltered` — the file is the rows the tab shows —
+ * unpaged, and capped. It reads `cap + 1` rows from the top, so a caller
+ * holding more than `cap` rows knows the export is over the cap without a
+ * second, unbounded count: the extra row is the signal, never a row of the
+ * file. The filtered list read caps `limit` at 100 at the route, so the export
+ * cannot page through it.
+ *
+ * Same gating contract as `listAgentPaymentsFiltered`: NOT tenant-scoped; the
+ * caller confirms the agent belongs to the requesting user first.
+ */
+export async function listAgentPaymentsForExport(
+  agentId: string,
+  filter: AgentPaymentActivityFilter,
+  cap: number,
+  db: Executor = pool,
+): Promise<ActivityPaymentRow[]> {
+  return listAgentPaymentsFiltered(agentId, filter, cap + 1, 0, db)
+}
+
 // #2055: `LIST_AGENT_APPROVALS_SQL` / `listAgentApprovals` are gone with
 // `approval_requests` — the activity feed is payments + tool invocations.
 

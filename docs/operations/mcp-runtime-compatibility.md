@@ -52,6 +52,7 @@ covers:
   - packages/cli/src/commands.ts
   - packages/cli/src/commands.test.ts
   - packages/frontend/src/components/connect-agent/setup-copy.ts
+  - packages/frontend/src/components/connect-agent/WaitingForConnector.tsx
   - packages/frontend/src/components/connect-agent/__tests__/runtime-status-copy.test.ts
   - packages/frontend/src/hooks/useAgentConnectionSetupStatus.ts
   - packages/connect/src/installed-clients.test.ts
@@ -3164,15 +3165,19 @@ signer from the same `payment_id`. This preflight does not replace merchant or
 facilitator verification.
 
 The default Connect topology writes a keyless hosted Haven MCP entry plus a
-separate local `haven-signer` stdio entry; it is distinct from the local-stdio
+separate local signer stdio entry. Since #3737 that is a named pair by default
+(`haven-<slug>` / `haven-signer-<slug>`), and the bare `haven` / `haven-signer`
+pair only when `--bare` or `--replace` is given without `--name`. It is distinct from the local-stdio
 runtime described above. Hermes Agent is a supported hosted-runtime profile:
 Connect writes `$HERMES_HOME/config.yaml` and its matching owner-only `.env`
 when `HERMES_HOME` is set, otherwise `~/.hermes/config.yaml` and `.env`. The
-hosted API key stays in `.env`; config uses the `Bearer ${MCP_HAVEN_API_KEY}`
-template. Connect preserves source text outside `mcp_servers` and replaces only
-this agent's own two `mcp_servers` entries: `haven` and `haven-signer`, or
-`haven-<slug>` and `haven-signer-<slug>` for a named pair, whose API key goes
-in `.env` as `MCP_HAVEN_<SLUG>_API_KEY`.
+hosted API key stays in `.env`; config uses the `Bearer ${<the pair's env key>}`
+template, where the key is `MCP_HAVEN_<SLUG>_API_KEY` for a named pair (the
+default; the slug upper-cased, hyphens as underscores) and `MCP_HAVEN_API_KEY`
+for the bare pair. Connect preserves source text outside `mcp_servers` and
+replaces only this agent's own two `mcp_servers` entries: `haven-<slug>` and
+`haven-signer-<slug>` for a named pair, or `haven` and `haven-signer` for the
+bare pair.
 Hermes discovers MCP servers at process startup, so start a new session (or run
 `/restart` for a gateway). Hermes also needs its Python MCP SDK installed (`pip
 install mcp`) to load MCP tools.
@@ -3415,9 +3420,12 @@ refusal). Installed CLIs are unaffected: 404 and 409 map to the same exit
 class. Nothing the connector sends or does changes.
 
 `runtime_config_unreadable` is the exception, and the only one of the eight that
-reaches the dashboard (`runtimeStatusHelper`; the routing is pinned by
-[`packages/frontend/src/components/connect-agent/__tests__/runtime-status-copy.test.ts`](../../packages/frontend/src/components/connect-agent/__tests__/runtime-status-copy.test.ts),
-#2680): it happens after credentials
+reaches the dashboard (`runtimeStatusHelper`). The routing of the six
+`runtime_*` codes is pinned by
+[`packages/frontend/src/components/connect-agent/__tests__/runtime-status-copy.test.ts`](../../packages/frontend/src/components/connect-agent/__tests__/runtime-status-copy.test.ts)
+(#2680); the two `wiring_collision` codes precede `/register` and never reach
+the dashboard (`setup-copy.ts`, where the dashboard routes connector error
+codes, names neither). It happens after credentials
 exist, during the config write. It is deliberately distinct from its
 retryable sibling `runtime_config_write_failed` — an unparseable config fails
 identically on every re-run until the file itself is fixed. Parsing happens
@@ -3878,8 +3886,8 @@ additions are backward compatible in the only direction that can actually occur
 — a **v1** (legacy-rail) context is byte-identical to what shipped before, so an
 older signer keeps verifying it — but the delegation rail needs both halves
 current, and the failure mode differs by which half is stale. (That v1 path has
-since been retired: the backend now emits only v2 or v3 —
-`version: context.payerDelegate ? 3 : 2` in
+since been retired: the backend now emits only v2, or v3 where
+`X402_EMIT_PAYER_CONTEXT` is on — `version: context.payerDelegate ? 3 : 2` in
 `packages/backend/src/infra/chain/x402-binding-signer.ts` — and the current
 signer accepts `[2, 3]`; see the v1-retirement note above.)
 
@@ -3887,7 +3895,7 @@ signer accepts `[2, 3]`; see the v1-retirement note above.)
 |---|---|
 | Signer older than the backend, **`@haven_ai/signer` ≥ the #1143 release** | `This signer is out of date: it supports x402 expected context versions up to <N>, and Haven sent version <M>. Update @haven_ai/signer …` |
 | Signer older than the backend, **signer predating #1138** | `MCP error -32602: Input validation error: Invalid arguments for tool haven_sign_x402: Invalid literal value, expected 1 at x402_expected.auth.version` |
-| Signer with #1138 but predating #1143 (forward-looking — see below) | `… Invalid input at x402_expected.auth.version` — Zod says nothing at all about a failing literal *union* |
+| Signer with #1138 but predating #1143 (fires once the deployment emits v3 — see below) | `… Invalid input at x402_expected.auth.version` — Zod says nothing at all about a failing literal *union* |
 | Backend older than the signer | `Refusing to sign typed data under an expected context that does not commit to it` |
 | Hosted tool list (client loaded `tools/list` before a hosted deploy) | A result's `contract_fingerprint` differs from the one in the server instructions the client loaded at `initialize`; or a `next_arguments` doesn't fit the schema the client loaded for the **hosted** tool it names (a misfit on a signer tool is signer skew — the rows above). The server cannot push `notifications/tools/list_changed` (stateless transport, `sessionIdGenerator: undefined`), so the SDK's `-32602` / unknown-tool refusals arrive before any Haven handler and now carry the fingerprint plus a reconnect hint. |
 
@@ -4107,11 +4115,11 @@ rather than inferred — note that a failing literal *union* degrades to a bare
 `Invalid input`, so the pre-#1143 signer that knows v2 is even less diagnosable
 than the older one that reported `expected 1`.
 
-Row three was written for the next context bump, and that bump has shipped: the
-backend emits a v3 context whenever it binds the quote to the paying delegate
-(#1690, `x402-binding-signer.ts`). A signer carrying #1138 but predating #1143
-accepts v1 and v2 only, so against a current backend it can now produce row
-three. Row two is the one seen in the field on 2026-08-06.
+Row three was written for the next context bump, and that bump has shipped as an
+operator switch: the backend emits v3 where `X402_EMIT_PAYER_CONTEXT` is on
+(#1690, `x402-binding-signer.ts`; a per-environment operator flip). On such a
+deployment a signer carrying #1138 but predating #1143, which accepts v1 and v2
+only, produces row three. Row two is the one seen in the field on 2026-08-06.
 
 If you see either Zod row, **do not** "fix" it by editing `auth.version` to a
 supported value. The version is inside the Haven-signed binding message, so
@@ -4606,8 +4614,8 @@ at the time, production ran the signer at `@haven_ai/connect@alpha`'s exact pin
 (`0.4.0-alpha.0`) — which is why the recovery route, not an update prompt, is
 the compatibility story. Merging to `dev` waited for the promotion carrying
 #3271 to publish a connect/signer pair that includes the direct sign-context;
-that has shipped, and connect now pins `@haven_ai/signer` `0.10.0-alpha.0`
-(`packages/connect/src/runtime-manifest.ts`).
+that has shipped, and connect now pins the signer version shown in the
+*Supported Runtime Manifest* table above (`packages/connect/src/runtime-manifest.ts`).
 
 > **Superseded by #3495 (2026-09-30), see the section immediately below.**
 > The paragraph above ("the relay fields stay on every delegation-rail result

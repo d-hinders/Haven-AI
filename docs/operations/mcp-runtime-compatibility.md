@@ -87,13 +87,12 @@ last-verified: "2026-10-23"
 ---
 
 > **Re-verified #4352 (2026-10-23, the additive `budget_ended_at` /
-> `budgetEndedAt` read):** two covered surfaces change.
-> `packages/backend/src/modules/mpp/allowances.ts` adds ONE top-level
-> response field on the delegation-rail allowances read (the latest ended
-> budget's expiry, null unless an expired row exists — the same narrow
-> query the refusal answers use), and `packages/sdk/src/account-reads.ts`
-> maps it and derives `budgetEndedAt` on `getAgentSummary()` for an agent
-> whose only budgets have ended. Additive both ways: an older backend's
+> `budgetEndedAt` read):** two covered surfaces change. The backend
+> machine-payments allowances read adds ONE top-level response field (the
+> latest ended budget's expiry, null unless an expired row exists — the
+> same narrow query the refusal answers use), and
+> `packages/sdk/src/account-reads.ts` maps it and derives `budgetEndedAt`
+> on `getAgentSummary()` for an agent whose only budgets have ended. Additive both ways: an older backend's
 > rows omit the key and map to `null`; the readiness values, the
 > tools/list shape (one description sentence) and every other response
 > field are unchanged, so local and hosted surfaces stay in lockstep — the

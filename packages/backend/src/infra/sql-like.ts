@@ -3,9 +3,10 @@
  *
  * A search term bound into `col ILIKE '%' || $n || '%'` is parameterised (no
  * injection), but LIKE still reads `%` and `_` in it as wildcards and `\` as
- * its escape character. So a term of `_` matched every row, and `a\b` matched
- * `ab` but not a literal `a\b`. The specs promise a case-insensitive substring
- * search, so the term must match literally.
+ * its escape character. So a term of `_` matched any non-empty value, and
+ * `a\b` matched `ab` but not a literal `a\b`. The agent-activity `q` spec
+ * promises a case-insensitive substring search, so the term must match
+ * literally.
  *
  * The contract between this helper and the SQL:
  * - the helper escapes `\`, `%` and `_` with a backslash;

@@ -79,7 +79,8 @@ public unicast, pins the socket to the address it checked, and caps the
 response at 256 KiB. The total deadline is 15 s for a refresh probe, enough
 for a sleeping merchant's cold start, and 5 s for a discovery candidate, the
 ingestion probe's budget. It follows at most 3 redirects on a GET or HEAD, and
-refuses any redirect on a method that carries a body. A refusal counts as a failed probe: discovery skips the
+refuses any redirect on a method that carries a body. A refusal counts as a
+failed probe: discovery skips the
 candidate, and the refresh adds one to the row's failure streak.
 
 ## Cadences and thresholds (module constants)

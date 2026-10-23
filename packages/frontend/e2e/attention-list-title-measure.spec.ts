@@ -115,7 +115,7 @@ test.describe('AttentionList text overflow (#3861, #3876)', () => {
  *
  * The reference is the Row root (`li > div`), never the `li`: in the
  * full-bleed sample the `li` carries the `divide-y` top border. Two rows are
- * measured — a badge-and-dismiss row and the "Add funds" action row (a 36px-tall
+ * measured — a badge-and-dismiss row and the "Review" action row (a 36px-tall
  * control, not the 32px dismiss) — each as rendered and with a body made two
  * lines taller than the icon, where centring on the row and centring on the
  * first line give different answers.
@@ -124,7 +124,7 @@ const CENTRE_TOLERANCE_PX = 1
 
 const CENTRED_ROWS = [
   { name: 'a badge-and-dismiss row', id: 'budget-reached', hasAction: false },
-  { name: 'the action row', id: 'low-balance', hasAction: true },
+  { name: 'the action row', id: 'payment-failed', hasAction: true },
 ] as const
 
 test.describe('AttentionList centred in the row (#4019)', () => {

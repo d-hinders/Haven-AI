@@ -65,6 +65,12 @@ export interface ActivityPaymentRow {
   settlement_tx_hash: string | null
   /** #3763: `machine_metadata.settlement_scheme` (#1705) — no scheme selected before this read. */
   settlement_scheme: string | null
+  /** #4319: the stored proof state the `settlement_tracking`/`settlement_proof` wire fields derive from. */
+  settlement_proof_label: string | null
+  settlement_nonce_bound: boolean | null
+  settlement_nonce_derived: boolean | null
+  receipt_verdict: string | null
+  has_stored_header: boolean | null
   source: string | null
   x402_resource_url: string | null
   x402_merchant_address: string | null
@@ -106,6 +112,11 @@ export const LIST_AGENT_PAYMENTS_SQL = `SELECT pi.id,
               pi.tx_hash,
               pi.machine_metadata->>'merchant_settlement_tx_hash' AS settlement_tx_hash,
               pi.machine_metadata->>'settlement_scheme' AS settlement_scheme,
+              pi.machine_metadata->>'merchant_settlement_proof' AS settlement_proof_label,
+              (pi.machine_metadata->>'merchant_settlement_nonce_bound')::boolean AS settlement_nonce_bound,
+              (pi.machine_metadata->>'merchant_settlement_nonce_derived')::boolean AS settlement_nonce_derived,
+              pi.machine_metadata->>'merchant_settlement_receipt_verdict' AS receipt_verdict,
+              (mpe.payment_proof_header IS NOT NULL) AS has_stored_header,
               COALESCE(pi.payment_rail, pi.source, 'direct') AS source,
               COALESCE(pi.payment_resource_url, pi.x402_resource_url) AS x402_resource_url,
               COALESCE(pi.merchant_address, pi.x402_merchant_address) AS x402_merchant_address,
@@ -165,6 +176,11 @@ export const LIST_AGENT_PAYMENTS_FILTERED_SQL = `SELECT pi.id,
               pi.tx_hash,
               pi.machine_metadata->>'merchant_settlement_tx_hash' AS settlement_tx_hash,
               pi.machine_metadata->>'settlement_scheme' AS settlement_scheme,
+              pi.machine_metadata->>'merchant_settlement_proof' AS settlement_proof_label,
+              (pi.machine_metadata->>'merchant_settlement_nonce_bound')::boolean AS settlement_nonce_bound,
+              (pi.machine_metadata->>'merchant_settlement_nonce_derived')::boolean AS settlement_nonce_derived,
+              pi.machine_metadata->>'merchant_settlement_receipt_verdict' AS receipt_verdict,
+              (mpe.payment_proof_header IS NOT NULL) AS has_stored_header,
               COALESCE(pi.payment_rail, pi.source, 'direct') AS source,
               COALESCE(pi.payment_resource_url, pi.x402_resource_url) AS x402_resource_url,
               COALESCE(pi.merchant_address, pi.x402_merchant_address) AS x402_merchant_address,
@@ -348,6 +364,11 @@ export const LIST_FEED_PAYMENTS_SQL = `SELECT pi.id,
               pi.tx_hash,
               pi.machine_metadata->>'merchant_settlement_tx_hash' AS settlement_tx_hash,
               pi.machine_metadata->>'settlement_scheme' AS settlement_scheme,
+              pi.machine_metadata->>'merchant_settlement_proof' AS settlement_proof_label,
+              (pi.machine_metadata->>'merchant_settlement_nonce_bound')::boolean AS settlement_nonce_bound,
+              (pi.machine_metadata->>'merchant_settlement_nonce_derived')::boolean AS settlement_nonce_derived,
+              pi.machine_metadata->>'merchant_settlement_receipt_verdict' AS receipt_verdict,
+              (mpe.payment_proof_header IS NOT NULL) AS has_stored_header,
               COALESCE(pi.payment_rail, pi.source, 'direct') AS source,
               COALESCE(pi.payment_resource_url, pi.x402_resource_url) AS x402_resource_url,
               COALESCE(pi.merchant_address, pi.x402_merchant_address) AS x402_merchant_address,

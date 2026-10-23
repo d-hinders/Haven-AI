@@ -547,6 +547,17 @@ export const config = {
   dbPoolMax: Number(process.env.DB_POOL_MAX) || 20,
   dbPoolIdleTimeout: Number(process.env.DB_POOL_IDLE_TIMEOUT) || 30000,
   dbPoolConnectionTimeout: Number(process.env.DB_POOL_CONNECTION_TIMEOUT) || 5000,
+
+  // #4319 Tier 2: receipt-hash attribution for the EIP-3009 merchant
+  // settlement (the `observeEip3009ReceiptSettlement` path — evidence
+  // arrival and the backfill; NEVER the sweep tick). Off by default: the
+  // operator turns it on per the issue's rollout order (merge → dev dry run
+  // → dev write → dev flag → prod). Tier 1 (the stored signed header) is
+  // today's #3925 standard and is not gated.
+  eip3009ReceiptAttribution: parseBooleanFlag(
+    'HAVEN_EIP3009_RECEIPT_ATTRIBUTION',
+    process.env.HAVEN_EIP3009_RECEIPT_ATTRIBUTION,
+  ),
 } as const
 
 /**

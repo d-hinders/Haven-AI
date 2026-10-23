@@ -6,6 +6,7 @@ import {
   type TransactionCurrency,
 } from '../domain/transaction-currency.js'
 import { machinePaymentLifecycle } from '../domain/machine-payment-lifecycle.js'
+import { deriveSettlementTracking } from '../domain/settlement-tracking.js'
 import { agentExistsForUser, listAgentNamesForUser } from '../infra/repositories/agents.js'
 import {
   listAgentPayments,
@@ -141,6 +142,21 @@ function toPaymentEntry(
     funding_tx_hash: p.tx_hash,
     settlement_tx_hash: p.settlement_tx_hash,
     settlement_scheme: p.settlement_scheme,
+    // #4319: what Haven knows about the merchant settlement, snake_case on
+    // this hand-mapped read (the transactions feed carries the camelCase
+    // twins through ApiSchema<'Transaction'>).
+    ...(() => {
+      const t = deriveSettlementTracking({
+        settlementTxHash: p.settlement_tx_hash,
+        settlementProofLabel: p.settlement_proof_label,
+        nonceBound: p.settlement_nonce_bound,
+        nonceDerived: p.settlement_nonce_derived,
+        receiptVerdict: p.receipt_verdict,
+        hasStoredHeader: p.has_stored_header ?? false,
+        confirmedAt: p.confirmed_at ?? null,
+      })
+      return { settlement_tracking: t.settlementTracking, settlement_proof: t.settlementProof }
+    })(),
     payment_id: p.id,
     payment_proof_status: p.payment_proof_status,
     payment_flow_status: lifecycle.paymentFlowStatus,
@@ -538,6 +554,22 @@ export default async function agentActivityRoutes(
           funding_tx_hash: p.tx_hash,
           settlement_tx_hash: p.settlement_tx_hash,
           settlement_scheme: p.settlement_scheme,
+          // #4319: what Haven knows about the merchant settlement, snake_case
+          // on this hand-mapped read (the transactions feed carries the
+          // camelCase twins through ApiSchema<'Transaction'>) — the same
+          // derivation the per-agent handler above serves.
+          ...(() => {
+            const t = deriveSettlementTracking({
+              settlementTxHash: p.settlement_tx_hash,
+              settlementProofLabel: p.settlement_proof_label,
+              nonceBound: p.settlement_nonce_bound,
+              nonceDerived: p.settlement_nonce_derived,
+              receiptVerdict: p.receipt_verdict,
+              hasStoredHeader: p.has_stored_header ?? false,
+              confirmedAt: p.confirmed_at ?? null,
+            })
+            return { settlement_tracking: t.settlementTracking, settlement_proof: t.settlementProof }
+          })(),
           payment_id: p.id,
           payment_proof_status: p.payment_proof_status,
           payment_flow_status: lifecycle.paymentFlowStatus,

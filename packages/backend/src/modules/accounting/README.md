@@ -198,8 +198,10 @@ The routes (`routes/accounting-connections.ts`) and the feed (`feed-orchestrator
 same transaction ID the Haven UI (#3763) and the block explorer show. On an
 EIP-3009 bridge payment that is the verified merchant settlement leg
 (`machine_metadata.merchant_settlement_tx_hash`, written only after on-chain
-verification — reported by the agent (#3475) or detected from the chain by
-the #3888 settlement sweep); the funding leg rides along as `fundingTxHash`
+verification — reported by the agent (#3475), detected from the chain by
+the #3888 settlement sweep, or recorded by the #4319 proof ladder (Tier 1
+signed header; Tier 2 receipt hash under the flag and its seven limits));
+the funding leg rides along as `fundingTxHash`
 for the receipt PDF. When no verified settlement was recorded inside the
 merchant-report grace window (15 minutes, `domain/merchant-report-grace.ts` —
 the same clock the payment status uses; the #3888 sweep scans from the

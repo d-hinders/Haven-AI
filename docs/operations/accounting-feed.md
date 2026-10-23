@@ -159,7 +159,12 @@ that code is:
 [`04-x402-payment-sequence.md`](../architecture/04-x402-payment-sequence.md)
 § *Completing an erc7710 settlement* and § *Completing a settlement nobody
 reported*. If `/accounting` has **no row** for a payment the user can see on
-Transactions, start there; if it has a row, stay here.
+Transactions, start there; if it has a row, stay here. For eip3009 rows the
+sweep missed, the #4319 backfill is the remaining door:
+`npm run x402:eip3009-backfill -w @haven/backend` — `--dry-run` first (the
+default; per-tier and per-verdict counts, nothing written), then `--write`
+(idempotent, fires `feedSettledPaymentBestEffort` after each record, Tier 2
+honouring `HAVEN_EIP3009_RECEIPT_ATTRIBUTION`).
 
 **Settlement-side reasons and fixes** (`settlement-sweeper.ts`, verified at
 this head). Three `warn` lines can name such a payment; only the first carries

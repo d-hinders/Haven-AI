@@ -6506,3 +6506,15 @@ to call next in structured fields, and those fields are typed end to end
 > `haven_*` tool, input schema, strict-input list, `next_tool` value,
 > expected-context version, signer contract or publish step changes. Scope of
 > this note: those lines. Nothing else in this document was re-verified.
+
+> **Re-verified unchanged (#4379, 2026-10-23 — import paths only).** The diff
+> touches covered files only in their import lines:
+> `modules/x402/sign-context.ts`, `modules/x402/delegation-authorize.ts` and
+> `modules/mpp/budget-precheck.ts` now import from `../payments/index.js`
+> instead of private payments files, and `modules/payments/agent-payment-status.ts`
+> reads `MAX_SETTLEMENT_WINDOW_SECONDS` and `CLOCK_SKEW_SECONDS` from the new
+> zero-import `domain/x402-settlement-timing.ts` (same values, 600 and 120)
+> instead of `modules/x402/`. No `haven_*` tool, input schema, refusal,
+> `next_tool` value, status projection or expected-context version changes.
+> Scope of this note: those import lines. Nothing else in this document was
+> re-verified.

@@ -64,7 +64,7 @@ function gitOnlyPath(root) {
   const git = (process.env.PATH ?? '')
     .split(path.delimiter)
     .filter(Boolean)
-    .map((dir) => path.join(dir, 'git'))
+    .map((dir) => path.resolve(dir, 'git'))
     .find((candidate) => {
       try {
         fs.accessSync(candidate, fs.constants.X_OK)

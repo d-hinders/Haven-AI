@@ -112,7 +112,7 @@ required") is refused — reword to "no update needed", or quote it in a code sp
   and, for price only, the local `haven_quote_x402`. `AgentPaymentWarningCode`
   gains `QUOTE_EXCEEDS_REMAINING_BUDGET` (the quoted amount does not fit the
   agent's remaining budget) and `MERCHANT_REPORTED_DENIAL` (the merchant
-  reported a denial on one of its payment options; informational). 
+  reported a denial on one of its payment options; informational).
   `precheckBudget()` takes an optional `recordRefusal` (default `true`; quote
   surfaces pass `false`, so a quote writes no refusal row). The
   haven-pay skill tells agents to pass `expected_amount` when the price is

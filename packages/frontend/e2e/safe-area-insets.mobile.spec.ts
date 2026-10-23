@@ -478,8 +478,13 @@ test.describe('safe-area insets — nothing under the notch or the home indicato
    * passes no footer. So the clearance was dead code at the one call site that
    * exists, and the panel's scroll body met the home indicator with 20px of its
    * own padding. Nothing here covered it, which is why it took a review.
+   *
+   * #4267 gave the panel its first footer — "View on explorer" for a record
+   * with a real transaction hash — so the pin that no footer exists became a
+   * pin that the footer clears the home indicator: the inset stays on the
+   * panel, and the footer row is the last thing above it.
    */
-  test('the transaction detail panel clears both bands, with no footer to pad', async ({
+  test('the transaction detail panel clears both bands, footer included', async ({
     page,
   }) => {
     await page.goto('/transactions')
@@ -498,6 +503,10 @@ test.describe('safe-area insets — nothing under the notch or the home indicato
       if (body) body.scrollTop = body.scrollHeight
       const controls = Array.from(el.querySelectorAll<HTMLElement>('a[href], button')).filter(
         (c) => {
+          // `checkVisibility()`: the closed Technical details (#4267) keeps
+          // its copy buttons and explorer links in the DOM, unrendered —
+          // `getBoundingClientRect` still lays them out, below the footer.
+          if (!c.checkVisibility()) return false
           const r = c.getBoundingClientRect()
           return r.width > 1 && r.height > 1 && r.bottom > 0 && r.top < window.innerHeight
         },
@@ -506,6 +515,9 @@ test.describe('safe-area insets — nothing under the notch or the home indicato
         paddingTop: style.paddingTop,
         paddingBottom: style.paddingBottom,
         hasFooter: !!el.querySelector('[data-side-panel-footer]'),
+        footerBottom: Math.round(
+          el.querySelector('[data-side-panel-footer]')?.getBoundingClientRect().bottom ?? -1,
+        ),
         lowestControlBottom: Math.round(
           Math.max(...controls.map((c) => c.getBoundingClientRect().bottom)),
         ),
@@ -517,10 +529,10 @@ test.describe('safe-area insets — nothing under the notch or the home indicato
     // inset whether or not a footer exists.
     expect(panel.paddingTop).toBe(`${INSET_TOP}px`)
     expect(panel.paddingBottom).toBe(`${INSET_BOTTOM}px`)
-    // Pins the shape the defect depended on: this caller renders no footer, so
-    // a footer-row inset would be unreachable here. If a footer ever arrives,
-    // this line fails and whoever adds it re-reads the reasoning above.
-    expect(panel.hasFooter, 'TransactionDetailPanel renders no footer row').toBe(false)
+    // The fixture's first row carries a real hash, so the footer renders
+    // (#4267) — and it ends above the home indicator, as does every control.
+    expect(panel.hasFooter, 'TransactionDetailPanel renders its explorer footer').toBe(true)
+    expect(panel.footerBottom).toBeLessThanOrEqual(panel.viewportHeight - INSET_BOTTOM)
     expect(panel.lowestControlBottom).toBeLessThanOrEqual(panel.viewportHeight - INSET_BOTTOM)
   })
 

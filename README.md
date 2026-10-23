@@ -533,7 +533,7 @@ Test the full flow locally, then push and open the PR. Once merged, watch the Ra
 Collaborators have **Viewer** access to the Railway project — you can see services, deploy logs, and runtime logs, but not change env vars. If a deploy fails or behaves unexpectedly:
 
 - **Railway → backend service → Deployments** — build logs and runtime logs
-- **Railway → Postgres → Data** — inspect tables (read-only with Viewer role)
+- **Railway → Postgres → Database** — inspect tables
 - **Vercel deployments** — production and the `dev` host deploy on every push that changes the frontend; a PR gets a preview only from a `preview/*` branch
 
 If you need an env var changed in Railway or a secret rotated, ping the project owner.

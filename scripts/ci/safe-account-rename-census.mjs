@@ -165,7 +165,7 @@ const ALLOWED = [
 // Every added hit was read before the number moved; that is the bar for
 // raising one of these, and the guard caught the increase rather than being
 // told about it.
-const ALLOWED_CEILING = new Map([
+export const ALLOWED_CEILING = new Map([
   ['packages/backend/src/infra/repositories/smart-accounts.ts', 1],
   ['packages/backend/src/infra/repositories/transaction-history.ts', 3],
   // 5 -> 10 (#2914 review, B1), then 10 -> 6 (#2914 follow-up): the headroom
@@ -267,6 +267,22 @@ function grepHitsWithExclusions(ref) {
 }
 
 /**
+ * The over-ceiling comparison the CLI (and now the test suite, #4315) enforces:
+ * an allow-listed file whose hit count grew past the number its reason was
+ * written for. Pure and exported so the test can prove the comparison itself
+ * — lowering a ceiling below the current count must turn it red — rather than
+ * asserting on a second copy of the logic.
+ */
+export function filesOverCeiling(perFile, ceilings = ALLOWED_CEILING) {
+  const over = []
+  for (const [file, ceiling] of ceilings) {
+    const actual = perFile.get(file) ?? 0
+    if (actual > ceiling) over.push([file, actual, ceiling])
+  }
+  return over.sort()
+}
+
+/**
  * Run the census against `ref` (empty string = working tree) and return the
  * total plus the per-token breakdown. Exported so
  * `safe-account-rename-census.test.mjs` can assert on it directly rather than
@@ -294,11 +310,7 @@ export function runCensus(ref) {
   }
   // A named file that GREW past the count its reason was written for: the
   // reason still matches the path, so `unallowed` cannot see it.
-  const overCeiling = []
-  for (const [file, ceiling] of ALLOWED_CEILING) {
-    const actual = perFile.get(file) ?? 0
-    if (actual > ceiling) overCeiling.push([file, actual, ceiling])
-  }
+  const overCeiling = filesOverCeiling(perFile)
   return {
     ref,
     total: files.length,

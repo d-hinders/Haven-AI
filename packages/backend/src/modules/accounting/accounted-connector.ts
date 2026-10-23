@@ -18,6 +18,7 @@ import {
 } from './accounted-client.js'
 import type { AccountingConnector, ProviderSecrets, PushResult, VerifyOutcome } from './connector.js'
 import type { FeedTransaction } from './feed-transaction.js'
+import type { SafeFetchOptions } from '../../infra/http/ssrf-guard.js'
 import { loadReceiptUnderlag, merchantReceiptDocument } from './receipt-underlag.js'
 import { ProviderError, type ProviderCompanyInfo } from './provider.js'
 import { readApiKeyConnection } from './api-key-flow.js'
@@ -61,7 +62,16 @@ import { markPushed } from './feed-sync.js'
 export class AccountedConnector implements AccountingConnector {
   provider = 'accounted'
 
-  constructor(private readonly fetchImpl: typeof fetch = fetch) {}
+  constructor(
+    private readonly fetchImpl: typeof fetch = fetch,
+    /**
+     * #4309: the merchant-receipt URL fetch no longer rides `fetchImpl` (a
+     * URL an agent or merchant chose must never share the connector's
+     * provider transport) — it goes through the SSRF guard. This is the
+     * guard's test seam (resolver/transport/budgets); production defaults.
+     */
+    private readonly receiptFetchOptions: SafeFetchOptions = {},
+  ) {}
 
   async isConnected(userId: string): Promise<boolean> {
     // The generic connection row is the source of truth for api_key
@@ -260,7 +270,7 @@ export class AccountedConnector implements AccountingConnector {
     const notes: string[] = []
     if (tx.merchantReceipt) {
       try {
-        const doc = await merchantReceiptDocument(tx.paymentId, tx.merchantReceipt, this.fetchImpl)
+        const doc = await merchantReceiptDocument(tx.paymentId, tx.merchantReceipt, this.receiptFetchOptions)
         if (!doc) {
           notes.push("the merchant's own receipt names neither a document nor a url")
         } else if (doc.bytes.byteLength > ACCOUNTED_DOCUMENTS_MAX_BYTES) {
@@ -451,6 +461,7 @@ export async function lateAttachAccountedMerchantReceipt(
   paymentId: string,
   receipt: { url: string | null; inlineJson: unknown | null },
   fetchImpl: typeof fetch = fetch,
+  receiptFetchOptions: SafeFetchOptions = {},
 ): Promise<void> {
   const sync = await getSyncState(userId, 'accounted', paymentId)
   if (!sync || sync.status !== 'pushed') return // not pushed — the in-order push attaches at push time
@@ -459,7 +470,7 @@ export async function lateAttachAccountedMerchantReceipt(
   const companyId = connection?.row.external_company_id
   if (!connection || !companyId) return
   try {
-    const doc = await merchantReceiptDocument(paymentId, receipt, fetchImpl)
+    const doc = await merchantReceiptDocument(paymentId, receipt, receiptFetchOptions)
     if (!doc) return
     if (doc.bytes.byteLength > ACCOUNTED_DOCUMENTS_MAX_BYTES) return // the provider would refuse it; say nothing on a silent best-effort path
     const { document } = await accountedUploadDocument({

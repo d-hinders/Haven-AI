@@ -28,6 +28,11 @@ covers:
   - packages/sdk/src/delegate-sweep.ts
   - packages/signer/src/tools.ts
   - packages/signer/src/core.ts
+  - packages/signer/src/no-funding-leg.ts
+  - packages/sdk/src/x402.ts
+  - packages/backend/src/modules/x402/x402-delegation.ts
+  - packages/backend/src/modules/x402/delegation-authorize.ts
+  - packages/backend/src/rails/delegation-policy.ts
   - packages/backend/src/infra/chain/settlement-transfer-verifier.ts
   - packages/backend/src/middleware/auth.ts
   - packages/backend/src/routes/auth.ts
@@ -78,7 +83,7 @@ covers:
   - packages/backend/src/middleware/ops-auth.ts
   - packages/ops/**
   - packages/frontend/scripts/check-kit-analytics-define.mjs
-last-verified: "2026-10-22"
+last-verified: "2026-10-23"
 ---
 
 > **Re-verified unchanged (#4265, 2026-10-22, read-only transaction
@@ -106,7 +111,7 @@ can spend, and its execution machinery is deleted; the closure sequence is in
 the [decision log](../archive/decision-log.md#2026-08-14--retire-the-safe-rail-entirely-1440). Existing
 Safe rows are untouched and still readable to a direct database query, though
 no account, agent or dashboard surface displays them (the transactions
-surface is not among the filtered queries: `LIST_BASIC_SAFES_FOR_USER_SQL` and
+surface is not among the filtered queries: `LIST_BASIC_ACCOUNTS_FOR_USER_SQL` and
 `LIST_AGENTS_FOR_TRANSACTION_FILTERS_SQL` have no rail predicate, so it still spans
 every account and agent row);
 since #2847 the relayed owner-signed execution route is deleted with the last
@@ -372,12 +377,15 @@ surfaces.
 |---|---|---|
 | Delegation object alone | Nothing — redemption requires the delegate key's signature | — |
 | Delegate key alone | Nothing beyond existing agent-credential risk — no delegation, no authority | — |
-| Both (agent fully compromised) | Spend **within the caveat stack**: ≤ period budget per period, only to pinned recipients, until expiry or revocation | `MultiTokenPeriodEnforcer` + `allowedCalldata` + `Timestamp`; owner kill-switch `disableDelegation` |
+| Both (agent fully compromised) | Spend **within the caveat stack**: ≤ each budget's period amount per period, only to pinned recipients (any recipient for an open budget, which the EIP-3009 bridge requires), until expiry or revocation | `ERC20PeriodTransferEnforcer` + `allowedCalldata` when pinned + `Timestamp`; owner kill-switch `disableDelegation` |
 | Haven fully compromised | Constructs malicious payloads but **cannot sign** grants, redemptions, or upgrades (invariants 3/5/7/11/12); worst case = denial of service | The perimeter this doc exists to prove |
 
-Blast radius on full agent compromise is therefore **identical in kind** to
-the retired session rail's (one period's budget per recipient) — with
-revocation one `disableDelegation` away.
+Blast radius on full agent compromise is therefore bounded by the sum of every
+enabled budget delegation's period amount per period: each slot's live grant (a
+re-keyed agent's carry/steady pair sits in one slot) and every `replaced` row
+until its Stop lands (see the #3933 bullet below). Each spends only to its
+pinned recipient, or to any recipient for an open budget, and revocation is one
+`disableDelegation` away.
 
 **Batch revocation (#1400):** `POST /agents/:id/delegations/revoke-all`
 prepares ONE UserOp batching a `disableDelegation` call per still-enabled
@@ -616,9 +624,11 @@ unlink path above is reached only for a live delegation account. The legacy
 rows are untouched and still readable to a direct query; what changed is that
 no account, agent or dashboard surface displays them, and no on-chain Safe permission is affected
 either way. Conversely,
-the unlink route refuses with `409` while a delegation agent has a pending or
-active delegation, or while a recovery sweep is prepared/submitting, so an
-in-flight live operation cannot lose its Safe binding. The guard only ever
+the account unlink route (`DELETE /user/accounts/:accountId`) refuses with
+`409` while any of the account's agents has a live delegation — `pending`,
+`active` or `replaced`, the same `stillEnabledDelegationSql` predicate — or a
+recovery sweep that is `prepared` or `submitting`, so an in-flight live
+operation cannot lose its account binding. The guard only ever
 REFUSES or files a record — it grants nothing, signs nothing, and touches no
 chain.
 
@@ -1030,8 +1040,8 @@ chain.
 > of this note: those reads and that close path; nothing else in this
 > document was re-verified, and `last-verified` is not bumped.
 
-The unlink guard also refuses while an agent re-key is in flight, so the Safe
-binding cannot disappear between re-key stages. This is a database
+The unlink guard also refuses while an agent re-key is in flight, so the
+account binding cannot disappear between re-key stages. This is a database
 serialization guard only: it grants nothing, signs nothing, and touches no
 chain.
 
@@ -1722,7 +1732,7 @@ making it unrecoverable.
   the agent has since rotated away from — but placed the address derivation it
   needs (`computeHybridAccountAddress`, one RPC) *between* `BEGIN` and `COMMIT`,
   so a slow or hanging RPC held the agent row lock and a pooled connection while
-  every other writer that lock serializes (Safe unlink, re-key open, re-key
+  every other writer that lock serializes (account unlink, re-key open, re-key
   completion, sibling activations) waited behind it. The derivation now runs
   **before** `BEGIN`, on the delegate key from the pre-lock read, and the lock's
   job is to assert the locked row still carries that exact key — which is what
@@ -1965,11 +1975,17 @@ Two properties of the erc7710 settlement leg, corrected in #1061:
   identifies the agent, the recovered delegate signature is what authorises.
   Unlike `payments.ts`, the child's typed data is fully known server-side, so
   the check is possible here.
-- **The child is a bearer instrument, and the doc says so.** It is issued to
-  `ANY_BENEFICIARY`; the redeemer *caveat* is the constraint that would narrow
-  it, and no live path populates it yet (`requirements.extra` is not parsed —
-  [#1058](https://github.com/d-hinders/Haven-AI/issues/1058)). The real
-  guarantee is therefore the caveat stack, not the recipient: exact amount,
+- **The child can be a bearer instrument, and the doc says so.** It is issued
+  to `ANY_BENEFICIARY`; the redeemer *caveat* is the constraint that narrows
+  it. Since [#1058](https://github.com/d-hinders/Haven-AI/issues/1058) the SDK
+  forwards the address-shaped entries of a 402's `extra.facilitatorAddresses`
+  into authorize, and the child is then redeemable only by those addresses.
+  The child is unpinned, and so a bearer instrument, whenever authorize
+  receives no `facilitatorAddresses`: the merchant advertised none; every
+  advertised entry was malformed and the SDK dropped it
+  (`x402FacilitatorAddresses`); or a direct API caller omitted them, which
+  the backend allows (`pinsAdvertised` accepts an empty pin set). Either way
+  the real guarantee is the caveat stack, not the recipient: exact amount,
   payee-pinned, ≤600 s expiry. Worst case on a leaked child is "the merchant is
   paid without delivering" for that one quoted amount — the leak-analysis table
   in §3 is unchanged, since redeeming still cannot exceed those bounds.
@@ -2490,12 +2506,18 @@ signer imports:
   structurally header-free.
 
 The signer's x402 arm (#3281) signs only the first two shapes, however validly
-Haven's binding key declared anything else. Every refusal on the shape checks,
-the settlement child's (malformed children included), is
+Haven's binding key declared anything else. On `haven_sign`, every refusal on
+the shape checks, the settlement child's (malformed children included), is
 `TYPED_DATA_NOT_ALLOWED`, or `USEROP_BINDING_MISMATCH` for a funding leg whose
-hash does not match. A settlement network the signer cannot map keeps its own
-`SIGNING_ERROR`, which asks for a signer update. In every
-case nothing is signed, audited or submitted.
+hash does not match, and a settlement network the signer cannot map keeps its
+own `SIGNING_ERROR`, which asks for a signer update. `haven_sign_x402`
+refuses any settlement-child-shaped payload (`isSettlementChildTypedData`),
+malformed or not, with `NO_FUNDING_LEG` before any shape check (after the
+expected-context version check). `haven_x402_sign_header` answers a
+settlement-child binding with `NO_FUNDING_LEG` while that id is among the
+last 64 the process retired (`RETIRED_BINDING_MEMORY`); after eviction or a
+restart it gets the unknown-binding refusal. Either way nothing is built
+(#4242, #4248). In every case nothing is signed, audited or submitted.
 In the SDK, a funding-leg refusal (#3375) throws `HavenTypedDataRefusedError`
 before the funding leg is signed or posted to `/sign`. The EIP-3009 merchant
 header, minted in-process just before (#1521), is discarded and never returned;

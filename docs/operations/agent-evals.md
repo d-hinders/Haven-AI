@@ -87,6 +87,17 @@ WITHIN tiers only (deterministic per seed, recorded in the report);
 same canonical set — tier order and any `--shuffle` are preserved (#4218,
 see Other flags).
 
+**Two lessons from 2026-10-23 (run 39914610364).** A wait that times out
+makes ONE trial red: later trials do not wait on the same expectation again,
+and the skip is recorded in the report (`guardEvents`); that run lost four
+whole tasks to one unmet wait repeated thirteen times. The unmet wait itself
+came from an **idempotent replay**: trials 2 and 1 of the bridge task bought
+the same item inside Haven's 5-minute idempotency bucket, so trial 2's pay
+call returned trial 1's payment (`idempotent_replay: true`) and spent
+nothing, yet graded green with trial 1's spend. The graders now reject a
+trial whose only payment is a replay, and purchasing tasks give each trial
+its own key with the `{purchase_key}` placeholder.
+
 **Consistency guard:** before resolving each trial, the resolver waits
 (bounded, 120s default) until the backend budget read reflects the previous
 trial's settled spend — `/allowances` can lag the observer node. When the

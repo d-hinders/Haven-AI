@@ -4191,15 +4191,25 @@ export default function DesignSystemPage() {
         onClose={() => setComingSoonOpen(false)}
       />
 
+      {/* `leading` and `footer` are the two optional slots
+          `TransactionDetailPanel` fills (#4267): the counterparty's mark
+          before the title, and the explorer link. */}
       <SidePanel
         open={panelOpen}
         onClose={() => setPanelOpen(false)}
-        title="Agent payment"
-        subtitle="Operating wallet · just now"
+        leading={<Monogram name="api.vendor.com" decorative />}
+        title="api.vendor.com"
+        subtitle="Paid request"
+        footer={
+          <Button variant="tertiary" size="sm" onClick={() => setPanelOpen(false)}>
+            View on explorer
+          </Button>
+        }
       >
         <p className="text-sm text-[var(--v2-ink-2)]">
           Detail content goes here — the transactions route uses this panel for per-transaction
-          breakdowns (amount, movement, initiator, receipts).
+          breakdowns: a header summary, plain-word details and a closed Technical details
+          disclosure.
         </p>
       </SidePanel>
 

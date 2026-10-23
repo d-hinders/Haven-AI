@@ -158,10 +158,12 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
 import { VISUAL_SKIP_REASON, VISUAL_SPECS_ENABLED } from './support/visual-mode'
 import {
+  dashboardTransaction,
   mockHavenApi,
   seedAuthenticatedSession,
   serveAgentDetailResponses,
   serveTwoAccounts,
+  x402UnrecordedSettlementTransaction,
 } from './fixtures/haven-api'
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — plain .mjs; the SINGLE source of evidence viewports, shared with
@@ -736,5 +738,112 @@ test.describe('product-route visual regression', () => {
         })
       })
     }
+  }
+})
+
+/**
+ * #4267: the transaction detail panel, open — the first committed baselines
+ * of the drawer. One desktop capture of the x402 panel (the fixture's first
+ * row: eip3009 with a recorded settlement) and one mobile capture of the
+ * needs-attention panel (the second row, overlaid into that state below).
+ *
+ * The panel's "when" line is `toLocaleString()`, and `playwright.config.ts`
+ * pins neither a timezone nor a locale, so both are pinned here and the
+ * literal the frozen clock must produce is asserted by name — a drift
+ * fails on the string, not as an unattributable pixel diff (epic #4263, S6).
+ */
+test.describe('transaction detail panel visual regression (#4267)', () => {
+  test.skip(!VISUAL_SPECS_ENABLED, VISUAL_SKIP_REASON)
+  test.use({ timezoneId: 'UTC', locale: 'en-US' })
+
+  const PANELS = [
+    {
+      slug: 'transaction-panel-x402',
+      axis: 'desktop' as const,
+      row: 'research.example',
+      // `dashboardTransaction.timestamp` 1779000000 = 2026-05-17T06:40:00Z.
+      when: /^Paid by Research agent from Operations · May 17, 2026, 6:40\sAM$/,
+      needsAttention: false,
+    },
+    {
+      slug: 'transaction-panel-needs-attention',
+      axis: 'mobile' as const,
+      row: 'api.example.dev',
+      // `x402UnrecordedSettlementTransaction.timestamp` 1778900000 = 2026-05-16T02:53:20Z.
+      when: /^Paid by Research agent from Operations · May 16, 2026, 2:53\sAM$/,
+      needsAttention: true,
+    },
+  ]
+
+  for (const panel of PANELS) {
+    test(`${panel.slug} renders pixel-stable (${panel.axis})`, async ({ page }) => {
+      const vp = panel.axis === 'mobile' ? MOBILE : DESKTOP
+      if (!vp) throw new Error(`visual gate: no "${panel.axis}" viewport in evidence-viewports.mjs`)
+
+      await page.clock.setFixedTime(FROZEN_NOW)
+      await mockHavenApi(page)
+      if (panel.needsAttention) {
+        // Overlay (later routes win): the second row needs attention — the
+        // merchant rejected the retry after the funding leg settled.
+        await page.route('**/api/**', async (route) => {
+          const request = route.request()
+          const path = new URL(request.url()).pathname.replace(/^\/api/, '')
+          if (request.method() !== 'GET' || path !== '/transactions') return route.fallback()
+          // The shared feed's two rows (their consts carry the USD strike
+          // this session serves), the second in the needs-attention state.
+          await route.fulfill({
+            json: {
+              transactions: [
+                dashboardTransaction,
+                {
+                  ...x402UnrecordedSettlementTransaction,
+                  paymentFlowStatus: 'needs_attention',
+                  paymentAttentionReason: 'merchant_retry_rejected_after_payment',
+                },
+              ],
+              total: 2,
+              offset: 0,
+              limit: 25,
+              hasMore: false,
+              partialFailure: false,
+              failedAccountIds: [],
+              truncated: false,
+            },
+          })
+        })
+      }
+      await seedAuthenticatedSession(page)
+      await page.setViewportSize({ width: vp.width, height: vp.height })
+      await page.goto('/transactions')
+
+      const ledger = page.getByTestId('transactions-ledger')
+      await expect(ledger).toBeVisible({ timeout: ANCHOR_TIMEOUT_MS })
+      await ledger
+        .locator('[role="button"][aria-haspopup="dialog"]')
+        .filter({ hasText: panel.row })
+        .first()
+        .click()
+      const dialog = page.getByRole('dialog')
+      await expect(dialog).toBeVisible()
+      await expect(
+        dialog.getByText(panel.when),
+        `the frozen clock, timezone or locale is not in effect — expected "${panel.when}" at ` +
+          `${FROZEN_NOW.toISOString()} (UTC, en-US)`,
+      ).toBeVisible()
+      if (panel.needsAttention) {
+        await expect(dialog.getByText('Needs attention', { exact: true })).toBeVisible()
+        await expect(dialog.getByRole('link', { name: 'Open agent' })).toBeVisible()
+      }
+      await expect(dialog.getByTestId('transaction-technical-details')).not.toHaveAttribute('open')
+
+      await page.evaluate(() => document.fonts.ready)
+      await page.waitForLoadState('networkidle')
+      await expect(dialog).toHaveScreenshot(`${panel.slug}-${panel.axis}.png`, {
+        animations: 'disabled',
+        caret: 'hide',
+        maxDiffPixels: FULL_PAGE_MAX_DIFF_PIXELS,
+        threshold: PIXEL_THRESHOLD,
+      })
+    })
   }
 })

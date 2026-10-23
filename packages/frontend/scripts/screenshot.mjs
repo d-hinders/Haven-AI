@@ -820,11 +820,11 @@ const tx = (i, over = {}) => {
 // fourth state the capture has to show: an unfed row renders no badge.
 const accounting = (status, extra = {}) => ({ provider: 'fortnox', status, externalRef: null, error: null, ...extra })
 export const FIXTURE_TXS = [
-  // #3763: eip3009 WITH a recorded settlement — the drawer headlines it
-  // ("Merchant settlement (reported by the agent or detected on-chain,
-  // verified)") and names the funding leg ("Funding from your account"). The
-  // `transactions-detail-network` capture photographs THIS row's drawer, so
-  // the regenerated evidence carries the recorded state's visible text.
+  // #3763: eip3009 WITH a recorded settlement — the drawer reads
+  // "Settlement: Recorded (verified)" and, under Technical details, names
+  // both legs ("Transaction" for the funding leg, "Settlement transaction",
+  // #4267). The `transactions-detail-network` capture photographs THIS row's
+  // drawer, so the regenerated evidence carries the recorded state's text.
   tx(1, {
     agentName: 'Research agent', source: 'x402', x402ResourceUrl: 'https://api.example.dev/reports',
     settlementScheme: 'eip3009',
@@ -4598,30 +4598,34 @@ export const SCENARIOS = {
   },
   'transactions-detail-network': {
     description:
-      'The /transactions detail drawer for the first fixture row — its Network row now renders the NetworkPill (#3670)',
+      'The /transactions detail drawer for the first fixture row, Technical details opened — its Network row renders the NetworkPill (#3670, #4267)',
     api() {
       return undefined
     },
     async run({ page, vp, shoot }) {
       await page.goto(`${BASE_URL}/transactions`, { waitUntil: 'domcontentloaded', timeout: 60_000 })
       await dismissMobileSidebar(page, vp)
-      const select = page.locator('button[data-row-select]').first()
+      // #4266: a ledger row is the control.
+      const select = page.locator('[data-testid="transactions-ledger"] [role="button"][aria-haspopup="dialog"]').first()
       await select.waitFor({ timeout: 30_000 })
       await select.click()
       const drawer = page.getByRole('dialog').first()
       await drawer.waitFor({ timeout: 20_000 })
-      await drawer.getByText('Network', { exact: true }).waitFor({ timeout: 20_000 })
       await shoot(drawer, 'drawer')
+      // #4267: the Network row sits under Technical details, closed by default.
+      await drawer.locator('[data-testid="transaction-technical-details"] summary').click()
+      await drawer.getByText('Network', { exact: true }).waitFor({ timeout: 20_000 })
+      await shoot(drawer, 'drawer-technical')
     },
   },
   // #3763: the second eip3009 state — the LAST fixture row carries NO
-  // recorded settlement, so its drawer reads "Merchant settlement / Not
-  // recorded" and names the funding leg. Photographed beside
+  // recorded settlement, so its drawer reads "Settlement: Not recorded yet"
+  // with what the record proves (#4267). Photographed beside
   // `transactions-detail-network` (the recorded state's drawer, same
   // mechanism) so the reviewer evidence carries visible text for both.
   'transactions-detail-settlement-unrecorded': {
     description:
-      'The /transactions detail drawer for the unrecorded-settlement fixture row — "Merchant settlement / Not recorded" plus the funding leg, labelled (#3763)',
+      'The /transactions detail drawer for the unrecorded-settlement fixture row — "Settlement: Not recorded yet" and what the record proves (#3763, #4267)',
     api() {
       return undefined
     },
@@ -4629,12 +4633,12 @@ export const SCENARIOS = {
       await page.goto(`${BASE_URL}/transactions`, { waitUntil: 'domcontentloaded', timeout: 60_000 })
       await dismissMobileSidebar(page, vp)
       // Rows render sorted date-descending; the tx(7) row is the oldest.
-      const select = page.locator('button[data-row-select]').last()
+      const select = page.locator('[data-testid="transactions-ledger"] [role="button"][aria-haspopup="dialog"]').last()
       await select.waitFor({ timeout: 30_000 })
       await select.click()
       const drawer = page.getByRole('dialog').first()
       await drawer.waitFor({ timeout: 20_000 })
-      await drawer.getByText('Not recorded', { exact: true }).waitFor({ timeout: 20_000 })
+      await drawer.getByText('Not recorded yet', { exact: true }).waitFor({ timeout: 20_000 })
       await shoot(drawer, 'drawer')
     },
   },

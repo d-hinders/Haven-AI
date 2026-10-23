@@ -573,15 +573,19 @@ describe('safeFetch deadline and address fallback (#4300)', () => {
     expect(calls[1]!.timeoutMs).toBeLessThanOrEqual(1_000 - 140)
   })
 
-  it('counts name resolution against the deadline and never sends when it runs out', async () => {
+  it('counts name resolution against the deadline: refuses at the deadline, not when the resolver finally answers', async () => {
     const transport = vi.fn(transportReturning(ok402))
     const slowResolver = async (): Promise<ResolvedAddress[]> => {
-      await delay(300)
+      await delay(800)
       return [{ address: '93.184.216.34', family: 4 }]
     }
+    const started = Date.now()
     const result = await safeGetText('https://slow-dns.example/', { timeoutMs: 100, resolver: slowResolver, transport })
+    const elapsed = Date.now() - started
     expect(result).toMatchObject({ ok: false, reason: 'timeout' })
     expect(transport).not.toHaveBeenCalled()
+    // Without the bound the call would last as long as the resolver (800 ms).
+    expect(elapsed).toBeLessThan(500)
   })
 
   it('takes the time spent resolving out of the request budget', async () => {

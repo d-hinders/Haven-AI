@@ -39,6 +39,8 @@ covers:
   - packages/sdk/src/types.ts
   - packages/signer/src/core.ts
   - packages/signer/src/tools.ts
+  - packages/signer/src/no-funding-leg.ts
+  - packages/sdk/src/merchant-egress.ts
   - packages/signer/src/sign-context.ts
   - packages/signer/src/next-step.ts
   - packages/signer/src/bare-hash.ts
@@ -552,10 +554,13 @@ second entry point.
 The edge signer holds that line on its own side too (#4242, #4248). A
 signature over a settlement child records no live `x402_binding`: the signer
 retires the binding id as `no_funding_leg` the moment it is minted
-(`packages/signer/src/core.ts`). So `haven_x402_sign_header` refuses that id
-with `NO_FUNDING_LEG` instead of building an EIP-3009 header from the delegate
-EOA, and `haven_sign_x402` refuses a settlement child before signing anything.
-Only a funding-leg binding can build a header.
+(`packages/signer/src/core.ts`). So `haven_x402_sign_header` never builds an
+EIP-3009 header from the delegate EOA for that id. While the id is among the
+last 64 this process retired (`RETIRED_BINDING_MEMORY`), the refusal is the
+structured `NO_FUNDING_LEG`. After that, or after a signer restart, the id gets
+the unknown-binding refusal, which also builds nothing. `haven_sign_x402`
+refuses a settlement child before signing anything. The invariant that always
+holds is the shorter one: only a funding-leg binding can build a header.
 
 Before signing the funding payload, the edge signer checks the typed-data
 digest against Haven's committed `typedDataHash`, reconstructs the canonical payment/resource/merchant/amount/asset/network/expiry
@@ -788,11 +793,13 @@ delivery seam — `MerchantCompletion.retryRequest` for the local paid retry and
 resends the SAME header on the new session on exactly that shape; a bare
 `-32001` or any other 404 is still a `MERCHANT_REJECTED_AFTER_FUNDING`.
 Since #4257 that seam also governs redirects on the paid retry. A hop to
-another origin carries only the #4244 header allow-list. A redirect that would
-re-send the paid body to another origin is refused mid-flight
-(`redirect_cross_origin_body`). On the local path,
-`MerchantCompletion.retryRequest` records any refusal raised after the paid
-request was sent as `merchant_retry_rejected_after_payment`, and re-throws it
+another origin carries only the #4244 header allow-list. Without a
+merchant-egress policy, a redirect that would re-send the paid body to another
+origin is refused mid-flight (`redirect_cross_origin_body`); under a policy, a
+paid POST answered with a redirect is refused as `redirect_on_non_get`. On the
+local path, `MerchantCompletion.retryRequest` records any merchant-egress
+refusal (`MerchantEgressRefusedError` with `beforeRequest: false`) as
+`merchant_retry_rejected_after_payment`, and re-throws it
 with the `paymentId`. The local MCP answers it as funded and undelivered, with
 `haven_get_payment_status` next and an instruction not to pay again. The
 policy path's own refusals (for example `redirect_on_non_get`) reach that

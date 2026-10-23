@@ -103,11 +103,14 @@ The edge signer ships as **`@haven_ai/signer`** in two layers:
      for an erc7710 settlement child is refused, because that payment has no
      funding leg to back a delegate-EOA transfer. Since #4248 such a binding is
      retired the moment it is minted and never held, so no payment context
-     outlives the call that signed the child; the refusal is the structured
-     `NO_FUNDING_LEG` (`next_action: sign_and_submit_payment`, no tool, a
+     outlives the call that signed the child. While its id is among the last
+     64 this process retired (`RETIRED_BINDING_MEMORY`), the refusal is the
+     structured `NO_FUNDING_LEG`; after that, or after a signer restart, the id
+     gets the unknown-binding refusal, which also builds nothing.
+     `NO_FUNDING_LEG` carries `next_action: sign_and_submit_payment`, no tool, and a
      `next_tool_omitted_reason` per site: here, submit the child signature the
      agent already holds to `haven_submit` with `settlement_scheme: 'erc7710'`;
-     on `haven_sign_x402`, sign the child with `haven_sign` first). No tool is
+     on `haven_sign_x402`, sign the child with `haven_sign` first. No tool is
      named because the signer's own next-step targets declare only `haven_get_payment_status`, and the refusal does not hold the signature argument a `haven_submit` step would need. Reuses the SDK's `selectStandardPaymentOption` +
      `toStandardPaymentRequirements` + the `x402` library. Since #3888 the
      authorization's nonce is not the library's random draw: the signer
@@ -483,8 +486,10 @@ signature funds the delegate EOA, here it IS the settlement child. There is no
 funding transaction and therefore no `haven_x402_sign_header` step — see the
 custody note below on who assembles the header on this scheme. Since #4242 the
 signer enforces this rather than leaving it to guidance: `haven_x402_sign_header`
-refuses a settlement-child binding, and `haven_sign_x402` refuses a settlement
-child before signing it.
+never builds a header from a settlement-child binding (it answers
+`NO_FUNDING_LEG` while the retired id is still remembered, the unknown-binding
+refusal after that), and `haven_sign_x402` refuses a settlement child before
+signing it. Only a funding-leg binding builds a header.
 
 `haven_sign_x402` creates the short-lived merchant authorization before funding
 confirms, so call `haven_settle_mcp_tool` promptly. If the payment window

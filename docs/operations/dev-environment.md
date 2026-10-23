@@ -31,6 +31,11 @@ covers:
   - packages/frontend/vercel.json
   - packages/frontend/src/lib/__tests__/vercel-ignore-build.test.ts
   - scripts/vercel/**
+  - packages/backend/src/infra/chain/x402-binding-signer.ts
+  - packages/backend/src/config/boolean-flag.ts
+  - packages/frontend/package.json
+  - .github/workflows/ci.yml
+  - .github/workflows/update-visual-baselines.yml
 last-verified: "2026-10-23"
 ---
 
@@ -609,7 +614,7 @@ recorded on PR #3022. It covered the flags that existed then;
 `HAVEN_MARKETPLACE_PROSPECTS` (#3078, 2026-09-17) and
 `HAVEN_OWNER_COMPANY_DETAILS` (#3332) came later, and `X402_EMIT_PAYER_CONTEXT`
 was not in that table either. `X402_EMIT_PAYER_CONTEXT` (#3021), read through
-`parseBooleanFlag` in `infra/chain/x402-binding-signer.ts`, is the one exception to the
+`parseBooleanFlag` in `packages/backend/src/infra/chain/x402-binding-signer.ts`, is the one exception to the
 "only `true`/`false`" rule: it also accepts `1` (on) — the spelling every
 #1690 document and template names — trimmed, with a one-line boot warning
 that `true` is the preferred form. Anything else refuses the boot too. It is
@@ -1315,10 +1320,10 @@ uploaded artifact the design_visual job downloads),
 the webServer boots that standalone build; the non-CI branch runs `next dev`,
 which inlines the constant from `playwright.config.ts`'s `webServer.env`). All
 of them set the same fixed synthetic literal, `e2e-onramp-app-id-placeholder`.
-The frontend workspace's local equivalents of those gates set it too: its
-`test:visual:structure` and `test:e2e:gate:built` npm scripts (#3487) build
-with the same literal.
-**It is test-only by construction: nothing else in the repo sets it** —
+The frontend workspace's local equivalents of those gates set it too: the
+`test:visual:structure` and `test:e2e:gate:built` scripts in
+`packages/frontend/package.json` (#3487) build with the same literal.
+**It is test-only by construction: nothing else in the repo sets the literal** —
 no `.env*` file, no other workflow, no Docker or hosting config (the literal is
 grep-unique, so the leak check is mechanical), and it is not a secret: the id
 is never rendered, only its PRESENCE gates the card, so a fixed value keeps
@@ -1337,7 +1342,7 @@ unaffected; deleting it from a project's settings is tidying, not a fix.
 ## Inspecting the dev environment
 
 - **Railway → dev backend service → Deployments** — build and runtime logs.
-- **Railway → dev Postgres → Database** — inspect tables (read-only with Viewer role). The **Console** tab opens a shell on the service, where `psql` connects as the database owner: run read-only queries only.
+- **Railway → dev Postgres → Database** — inspect tables. The service's tabs are Deployments, Database, Backups, Variables, Metrics, Console and Settings (owner screenshots of the dev and production projects, 2026-10-23). **Console** opens a shell on the service, where `psql` connects with an owner prompt (`railway=#`): run read-only queries only.
 - **Vercel → dev project** — frontend build logs, the branch-tracking `dev`
   preview (the canonical dev URL above) and the opt-in `preview/*` deployments
   (open one only to test that branch's build — remember each is a

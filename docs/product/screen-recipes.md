@@ -1078,9 +1078,17 @@ Money and risk clarity:
   the account funds the agent's delegate key first, then the delegate pays
   the merchant from the agent's signed authorization. The row still
   represents the agent payment. The detail drawer's Settlement row says what
-  the record proves — "Recorded (verified)", or "Not recorded yet" with one
+  the record proves, from `settlementTracking` (#4320) — "Settled (verified)",
+  "Checking" ("Haven is looking for the merchant's settlement on-chain. This
+  usually takes a minute.") or "Not tracked" ("This payment left your account.
+  Haven has no record of the merchant's settlement for it.") — never a word
+  that implies a paid payment failed, and never "confirmed by the merchant";
+  while an older backend sends no `settlementTracking`, the two original
+  states stand ("Recorded (verified)", or "Not recorded yet" with one
   line saying the payment left the account and no settlement has been
-  recorded, never "confirmed by the merchant" (#3763, #4267) — and both legs
+  recorded, #3763). Under Technical details a settled row adds "Matched by" —
+  how the recorded settlement was attributed: "Payment nonce", "Signed
+  payment header" or "Merchant receipt"; nothing for a `legacy` record. Both legs
   sit under Technical details: "Transaction" (the funding leg, also the
   footer's "View on explorer") and "Settlement transaction". Scheme-less and
   erc7710 rows are one transaction. Neither the row nor the drawer names the

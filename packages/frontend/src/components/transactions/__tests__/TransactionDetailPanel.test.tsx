@@ -66,7 +66,31 @@ const x402Base = {
 } satisfies Partial<AggregatedTransaction>
 
 const KINDS = {
-  x402Recorded: tx({ ...x402Base, settlementTxHash: SETTLEMENT, paymentProofStatus: 'protocol_receipt_attached' }),
+  // #4320: the settled row carries its proof — the sweep standard's derived
+  // nonce — so "Matched by" rides beside the settlement hash.
+  x402Recorded: tx({
+    ...x402Base,
+    settlementTxHash: SETTLEMENT,
+    settlementTracking: 'verified',
+    settlementProof: 'nonce',
+    paymentProofStatus: 'protocol_receipt_attached',
+  }),
+  x402Checking: tx({ ...x402Base, settlementTxHash: null, settlementTracking: 'checking' }),
+  x402Untracked: tx({ ...x402Base, settlementTxHash: null, settlementTracking: 'untracked' }),
+  x402ReceiptProof: tx({
+    ...x402Base,
+    settlementTxHash: SETTLEMENT,
+    settlementTracking: 'verified',
+    settlementProof: 'receipt',
+  }),
+  // Pre-#4319 records carry no proof label: the hash is there, "Matched by" is not.
+  x402LegacyProof: tx({
+    ...x402Base,
+    settlementTxHash: SETTLEMENT,
+    settlementTracking: 'verified',
+    settlementProof: 'legacy',
+  }),
+  // No `settlementTracking` on the wire (an older backend) — the fallback.
   x402Unrecorded: tx({ ...x402Base, settlementTxHash: null, paymentProofStatus: 'payment_confirmed' }),
   needsAttention: tx({
     ...x402Base,
@@ -130,6 +154,24 @@ function rows(container: HTMLElement): Record<string, string> {
   return out
 }
 
+/**
+ * One Details row's value and note SEPARATELY, so each state's wording is
+ * asserted as a full string (#4133) — the `rows()` concatenation above would
+ * let a note leak into a value assertion and vice versa.
+ */
+function detailRow(label: string): { value: string; note: string } {
+  const row = Array.from(details().querySelectorAll(':scope > div')).find(
+    (r) => r.querySelector('dt')?.textContent === label,
+  )
+  if (!row) throw new Error(`no Details row "${label}"`)
+  const dd = row.querySelector('dd')
+  if (!dd) throw new Error(`no dd in "${label}"`)
+  return {
+    value: dd.querySelector(':scope > div')?.textContent ?? '',
+    note: dd.querySelector(':scope > p')?.textContent ?? '',
+  }
+}
+
 describe('TransactionDetailPanel — structure per kind', () => {
   it('renders nothing when no transaction is selected', () => {
     const { container } = render(<TransactionDetailPanel transaction={null} open={false} onClose={vi.fn()} />)
@@ -144,28 +186,76 @@ describe('TransactionDetailPanel — structure per kind', () => {
     expect(technical()).not.toHaveAttribute('open')
   })
 
-  it('x402 with a recorded settlement: the host, the receipt in words, "Recorded (verified)"', () => {
+  it('x402 settled (verified): the host, the receipt in words, "Settled (verified)", no note (#4320)', () => {
     renderPanel(KINDS.x402Recorded)
     expect(screen.getByRole('dialog', { name: 'api.vendor.com' })).toBeInTheDocument()
     expect(within(header()).getByText('Paid by Atlas from Main', { exact: false })).toBeInTheDocument()
     expect(rows(details())).toEqual({
       For: 'api.vendor.com',
       Receipt: 'Attached',
-      Settlement: 'Recorded (verified)',
+      Settlement: 'Settled (verified)',
     })
+    expect(detailRow('Settlement')).toEqual({ value: 'Settled (verified)', note: '' })
     expect(screen.getByText('Paid request')).toBeInTheDocument()
   })
 
-  it('x402 without a recorded settlement: "Not recorded yet" and what the record proves', () => {
-    renderPanel(KINDS.x402Unrecorded)
-    expect(rows(details())).toEqual({
-      For: 'api.vendor.com',
-      Receipt: 'Not attached',
-      Settlement:
-        'Not recorded yetThe payment left your account; no settlement from the merchant has been recorded.',
+  it('x402 checking: "Checking" and the on-chain look-up line, full strings (#4320)', () => {
+    renderPanel(KINDS.x402Checking)
+    expect(detailRow('Settlement')).toEqual({
+      value: 'Checking',
+      note: 'Haven is looking for the merchant’s settlement on-chain. This usually takes a minute.',
     })
-    // Never a promise the merchant confirmed it.
-    expect(screen.getByRole('dialog').textContent).not.toMatch(/confirmed by the merchant/i)
+  })
+
+  it('x402 not tracked: "Not tracked" and only what the record proves (#4320)', () => {
+    renderPanel(KINDS.x402Untracked)
+    expect(detailRow('Settlement')).toEqual({
+      value: 'Not tracked',
+      note: 'This payment left your account. Haven has no record of the merchant’s settlement for it.',
+    })
+    // No cause Haven does not know (S5): the row never explains WHY.
+    expect(detailRow('Settlement').note).not.toMatch(/because|refused|expired/i)
+  })
+
+  it('fallback — no settlementTracking field (an older backend): today\'s two states (#4320)', () => {
+    const { unmount } = renderPanel(KINDS.x402Unrecorded)
+    expect(detailRow('Settlement')).toEqual({
+      value: 'Not recorded yet',
+      note: 'The payment left your account; no settlement from the merchant has been recorded.',
+    })
+    unmount()
+    // The verified fallback keeps its wording too.
+    renderPanel(tx({ ...x402Base, settlementTxHash: SETTLEMENT }))
+    expect(detailRow('Settlement')).toEqual({ value: 'Recorded (verified)', note: '' })
+  })
+
+  it('"Matched by" names the proof beside the settlement hash (#4320)', () => {
+    renderPanel(KINDS.x402Recorded)
+    expect(within(technical()).getByText('Matched by')).toBeInTheDocument()
+    expect(within(technical()).getByText('Payment nonce')).toBeInTheDocument()
+  })
+
+  it('"Matched by" reads the Tier 2 receipt as "Merchant receipt"', () => {
+    renderPanel(KINDS.x402ReceiptProof)
+    expect(within(technical()).getByText('Matched by')).toBeInTheDocument()
+    expect(within(technical()).getByText('Merchant receipt')).toBeInTheDocument()
+  })
+
+  it('a legacy proof names nothing: no "Matched by" row', () => {
+    renderPanel(KINDS.x402LegacyProof)
+    expect(within(technical()).getByText('Settlement transaction')).toBeInTheDocument()
+    expect(within(technical()).queryByText('Matched by')).not.toBeInTheDocument()
+  })
+
+  it('no settlement state says failed, missing or error (#3763 guard, #4320)', () => {
+    for (const kind of ['x402Recorded', 'x402Checking', 'x402Untracked', 'x402ReceiptProof', 'x402LegacyProof', 'x402Unrecorded'] as const) {
+      const { unmount } = renderPanel(KINDS[kind])
+      const settlement = detailRow('Settlement')
+      expect(`${settlement.value} ${settlement.note}`.toLowerCase()).not.toMatch(/failed|missing|error/)
+      const matched = within(technical()).queryByText('Matched by')
+      if (matched) expect(matched.textContent?.toLowerCase()).not.toMatch(/failed|missing|error/)
+      unmount()
+    }
   })
 
   it('erc7710 is one transaction: no Settlement row', () => {
@@ -323,7 +413,11 @@ describe('TransactionDetailPanel — once, in the header', () => {
 describe('TransactionDetailPanel — every field is still reachable', () => {
   /** Technical details' labels per kind: the raw fields the old panel showed. */
   const TECHNICAL: Record<keyof typeof KINDS, string[]> = {
-    x402Recorded: ['Network', 'Payment ID', 'Settlement method', 'Delivered', 'Merchant address', 'Your account', 'Token contract', 'Transaction', 'Settlement transaction'],
+    x402Recorded: ['Network', 'Payment ID', 'Settlement method', 'Delivered', 'Merchant address', 'Your account', 'Token contract', 'Transaction', 'Settlement transaction', 'Matched by'],
+    x402Checking: ['Network', 'Payment ID', 'Settlement method', 'Delivered', 'Merchant address', 'Your account', 'Token contract', 'Transaction'],
+    x402Untracked: ['Network', 'Payment ID', 'Settlement method', 'Delivered', 'Merchant address', 'Your account', 'Token contract', 'Transaction'],
+    x402ReceiptProof: ['Network', 'Payment ID', 'Settlement method', 'Delivered', 'Merchant address', 'Your account', 'Token contract', 'Transaction', 'Settlement transaction', 'Matched by'],
+    x402LegacyProof: ['Network', 'Payment ID', 'Settlement method', 'Delivered', 'Merchant address', 'Your account', 'Token contract', 'Transaction', 'Settlement transaction'],
     x402Unrecorded: ['Network', 'Payment ID', 'Settlement method', 'Delivered', 'Merchant address', 'Your account', 'Token contract', 'Transaction'],
     needsAttention: ['Network', 'Payment ID', 'Settlement method', 'Delivered', 'Merchant address', 'Your account', 'Token contract', 'Transaction'],
     onChainFailed: ['Network', 'To address', 'Your account', 'Token contract', 'Transaction'],

@@ -51,7 +51,7 @@ test.describe('transaction history — x402 display + detail panel', () => {
     await expect(panel.getByRole('heading', { name: 'research.example' })).toBeVisible()
     await expect(panel.getByText('Paid request', { exact: true })).toBeVisible()
     await expect(panel.getByText('For', { exact: true })).toBeVisible()
-    await expect(panel.getByText('Recorded (verified)', { exact: true })).toBeVisible()
+    await expect(panel.getByText('Settled (verified)', { exact: true })).toBeVisible()
     await expect(panel).not.toContainText(/x402 payment/i)
     await expect(panel).not.toContainText('protocol_receipt_attached')
 

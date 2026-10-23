@@ -54,6 +54,15 @@ export interface PaymentActivityItem {
   settlement_tx_hash?: string | null
   /** #3763: which settlement branch moved the money (`eip3009` | `erc7710`); null when none was recorded. */
   settlement_scheme?: string | null
+  /**
+   * #4319: what Haven knows about the merchant settlement — `verified`,
+   * `checking`, `untracked` (the transactions feed's camelCase
+   * `settlementTracking`, hand-mapped snake_case here). Computed from stored
+   * state only; null on non-x402 rows.
+   */
+  settlement_tracking?: 'verified' | 'checking' | 'untracked' | null
+  /** #4319: which proof the recorded settlement carries — same derivation as the feed's `settlementProof`. */
+  settlement_proof?: 'nonce' | 'signed_header' | 'receipt' | 'legacy' | null
   source?: string
   x402_resource_url?: string | null
   x402_merchant_address?: string | null

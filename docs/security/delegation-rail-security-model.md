@@ -3548,13 +3548,13 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > coverage: `routes/user.ts` (the POST now dispatches per kind and refuses a
 > kind it does not know) and `infra/repositories/dashboard.ts` (the overview's
 > 7-day refusal buckets also return each bucket's latest `created_at`, and the
-> failed-intent read returns its newest row's latest recorded step). The
-> properties the #3813 note relies on still hold: an acknowledgement hides a
-> dashboard row and nothing else, no payment-path code reads the table, the
-> per-agent writes select through an ownership `EXISTS` against `agents`, the
-> user-level rows carry no foreign id, and every row is scoped to the JWT
-> subject. No new spender, no authority grant, no custody change. Scope of
-> this re-read: the `routes/user.ts` endpoints and the two
+> failed-intent read returns the latest recorded step of any failed intent in
+> the window). The properties the #3813 note relies on still hold: an
+> acknowledgement hides a dashboard row and nothing else, no payment-path code
+> reads the table, the per-agent writes select through an ownership `EXISTS`
+> against `agents`, the user-level rows carry no foreign id, and every row is
+> scoped to the JWT subject. No new spender, no authority grant, no custody
+> change. Scope of this re-read: the `routes/user.ts` endpoints and the two
 > `infra/repositories/dashboard.ts` statements above; nothing else in this
 > document was re-read for it, and `last-verified` is not bumped.
 

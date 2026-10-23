@@ -212,6 +212,23 @@ describeDb('attention-dismissals repository (#3813)', () => {
     expect(await listAttentionDismissals(userB)).toEqual([])
   })
 
+  for (const kind of ['haven-paused', 'payments-failed'] as const) {
+    it(`#4324: re-acknowledging the user-level ${kind} item moves acknowledged_at forward`, async () => {
+      const userId = await insertTestUser()
+      const first = await acknowledgeUserItem(userId, kind)
+      // Age the stored acknowledgement so the second write is measurably later.
+      await db.query(`UPDATE attention_dismissals SET acknowledged_at = acknowledged_at - INTERVAL '1 hour' WHERE id = $1`, [first.id])
+
+      const second = await acknowledgeUserItem(userId, kind)
+      expect(second.id).toBe(first.id)
+      // The aged hour is gone: the second acknowledgement stamped now.
+      expect(Date.now() - new Date(second.acknowledged_at).getTime()).toBeLessThan(60_000)
+      const listed = await listAttentionDismissals(userId)
+      expect(listed).toHaveLength(1)
+      expect(Date.now() - new Date(listed[0].acknowledged_at).getTime()).toBeLessThan(60_000)
+    })
+  }
+
   it('#4324: an acknowledgement for a foreign or unknown agent writes nothing and answers null', async () => {
     const owner = await insertTestUser()
     const outsider = await insertTestUser()

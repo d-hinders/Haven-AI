@@ -532,7 +532,17 @@ describe('computeAttentionItems — payments failed (rule 4)', () => {
       tone: 'neutral',
       subtitle: 'A payment was refused by the network. No money moved.',
     })
-    expect(failedItem(3)).toMatchObject({ tone: 'danger', subtitle: 'Payments keep failing — check the agent.' })
+    expect(failedItem(3)).toEqual({
+      id: 'payments-failed:a1',
+      kind: 'payments-failed',
+      tone: 'danger',
+      badge: 'Failed',
+      title: 'Scout had 3 failed payments',
+      subtitle: 'Payments keep failing — check the agent.',
+      actionLabel: 'Review',
+      href: '/agents/a1?tab=activity&status=refused',
+      agentId: 'a1',
+    })
   })
 
   it('#4324: the unattributed item is neutral below 3 failed intents and danger at 3, never claiming no money moved', () => {
@@ -555,7 +565,16 @@ describe('computeAttentionItems — payments failed (rule 4)', () => {
       actionLabel: 'View transactions',
       href: '/transactions',
     })
-    expect(unattributed(3)).toMatchObject({ tone: 'danger', subtitle: 'Payments keep failing — check your agents.' })
+    expect(unattributed(3)).toEqual({
+      id: 'payments-failed:unattributed',
+      kind: 'payments-failed',
+      tone: 'danger',
+      badge: 'Failed',
+      title: '3 payments failed',
+      subtitle: 'Payments keep failing — check your agents.',
+      actionLabel: 'View transactions',
+      href: '/transactions',
+    })
   })
 
   it('surfaces the user-level failed-intent count when no agent is named', () => {

@@ -781,8 +781,8 @@ export async function listRefusalBucketsByAgent(
 
 /**
  * Failed payment intents in the 7-day window — a COUNT, not a fiat sum — and
- * (#4324) the latest such intent's time, which the unattributed "Payments
- * failed" acknowledgement re-arms on.
+ * (#4324) the latest recorded step of any failed intent in the window, which
+ * the unattributed "Payments failed" acknowledgement re-arms on.
  *
  * `payment_intents` has no column that records WHEN a row became `failed`
  * (no `updated_at`; the failure writers set `status` and `error_message`

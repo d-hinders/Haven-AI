@@ -405,7 +405,7 @@ describeDb('#3803 overview statements', () => {
     expect(row.last_haven_7).toBeNull()
   })
 
-  it('#4324: the failed-intent read returns the latest recorded step of the newest failed intent', async () => {
+  it('#4324: the failed-intent read returns the latest recorded step of any failed intent in the window', async () => {
     const userId = await seedUser()
     const { from7, to } = window()
     const seed = await seedAccountAndAgent(userId)

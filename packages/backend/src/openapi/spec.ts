@@ -14075,7 +14075,7 @@ export const openapiSpec = {
                 additionalProperties: false,
               },
               failedIntents7d: { type: 'integer', description: 'Payment intents with status failed in the 7-day window.' },
-              lastFailedIntentAt: { type: 'string', format: 'date-time', description: '#4324 — the newest failed intent\u2019s latest recorded step (`created_at`, `signed_at` or `submitted_at`; no column records the failure itself). Absent when the window has none. The unattributed "Payments failed" acknowledgement re-arms when this is after it.' },
+              lastFailedIntentAt: { type: 'string', format: 'date-time', description: '#4324 — the latest recorded step of any failed intent in the window (`created_at`, `signed_at` or `submitted_at`; no column records the failure itself). Absent when the window has none. The unattributed "Payments failed" acknowledgement re-arms when this is after it.' },
               balance_by_day: {
                 type: 'array',
                 description: '30 days of portfolio totals, shared with analytics\u2019 BALANCE_BY_DAY_SQL. Days with no snapshot are ABSENT, not zero; totalSek is null on pre-migration-090 days.',

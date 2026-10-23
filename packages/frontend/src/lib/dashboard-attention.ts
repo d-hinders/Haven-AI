@@ -614,7 +614,8 @@ export function computeAttentionItems(input: DashboardAttentionInput): Attention
         kind: 'payments-failed',
         tone: repeated ? 'danger' : 'neutral',
         badge: 'Failed',
-        title: `${agent.name} had a failed payment`,
+        // The title counts when they repeat, so it agrees with the subtitle.
+        title: repeated ? `${agent.name} had ${failed} failed payments` : `${agent.name} had a failed payment`,
         subtitle: repeated
           ? 'Payments keep failing — check the agent.'
           : 'A payment was refused by the network. No money moved.',
@@ -634,7 +635,7 @@ export function computeAttentionItems(input: DashboardAttentionInput): Attention
       kind: 'payments-failed',
       tone: repeated ? 'danger' : 'neutral',
       badge: 'Failed',
-      title: 'A payment failed',
+      title: repeated ? `${failedIntents7d} payments failed` : 'A payment failed',
       subtitle: repeated
         ? 'Payments keep failing — check your agents.'
         : 'A payment did not go through in the last 7 days.',

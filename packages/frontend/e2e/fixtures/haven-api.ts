@@ -670,6 +670,8 @@ export const dashboardOverview = {
       merchantName: null,
     },
     failedIntents7d: 1,
+    // #4324: the latest recorded step of any failed intent in the window (sent when there is one).
+    lastFailedIntentAt: '2026-10-08T14:20:00.000Z',
     // 30 days, most recent last — days WITHOUT a snapshot are ABSENT from the
     // real wire; the harness generates a dense series so a gap never renders.
     balance_by_day: Array.from({ length: 30 }, (_, i) => {
@@ -729,7 +731,8 @@ export const dashboardOverview = {
           net: { usd: 7.5, eur: 6.83, sek: 80.7 },
           approx: false,
           payments: 4,
-          refusals: { budget: 1, scope: 0, failed: 0, haven: 0 },
+          // #4324: d7 carries the latest refusal time of each non-empty bucket.
+          refusals: { budget: 1, scope: 0, failed: 0, haven: 0, lastBudgetAt: '2026-10-08T11:05:00.000Z' },
         },
         d30: {
           gross: { usd: 50.0, eur: 45.5, sek: 538.0 },
@@ -783,7 +786,14 @@ export const dashboardOverview = {
           net: { usd: 3.6, eur: 3.28, sek: 38.76 },
           approx: false,
           payments: 2,
-          refusals: { budget: 0, scope: 0, failed: 1, haven: 1 },
+          refusals: {
+            budget: 0,
+            scope: 0,
+            failed: 1,
+            haven: 1,
+            lastFailedAt: '2026-10-07T16:40:00.000Z',
+            lastHavenAt: '2026-10-07T17:15:00.000Z',
+          },
         },
         d30: {
           gross: { usd: 24.0, eur: 21.84, sek: 258.4 },

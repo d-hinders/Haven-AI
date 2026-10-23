@@ -156,7 +156,8 @@ Needs attention items after setup (#4324, owner decisions 2026-10-23):
   opens the refused attempts of the agent with the latest one, and shows no
   action when that is unknown.
 - A failed payment is calm (neutral) until an agent has 3 in 7 days, then it
-  reads "Payments keep failing — check the agent" in danger. A refusal-based
+  reads "<agent> had N failed payments" over "Payments keep failing — check
+  the agent" in danger. A refusal-based
   failure says no money moved; the unattributed one does not claim that.
 - Zero USDC reads "No USDC", not "Low balance".
 - "You're all caught up" can show once every budget and scope stop has been

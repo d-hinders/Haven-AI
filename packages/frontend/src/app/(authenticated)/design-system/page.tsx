@@ -1,6 +1,6 @@
 'use client'
 
-import { ArrowDown, ArrowLeftRight, ArrowUp, Bot, Check, ChevronDown, Circle, CirclePause, CreditCard, EllipsisVertical, Info, OctagonAlert, Sparkles, TriangleAlert, X } from 'lucide-react'
+import { ArrowDown, ArrowLeftRight, ArrowUp, Bot, Check, ChevronDown, Circle, CreditCard, EllipsisVertical, Info, OctagonAlert, Sparkles, TriangleAlert, X } from 'lucide-react'
 import { MobileTabBar } from '@/components/sidebar/MobileTabBar'
 import { baseNavItems } from '@/components/sidebar/Sidebar'
 import { Icon } from '@/components/ui/Icon'
@@ -436,8 +436,8 @@ const DS_ATTENTION_ITEMS: AttentionListItem[] = [
   },
   {
     id: 'payment-failed',
-    title: 'Payments keep failing',
-    subtitle: 'Travel planner had 3 payments refused by the network this week. Check the agent.',
+    title: 'Travel planner had 3 failed payments',
+    subtitle: 'Payments keep failing — check the agent.',
     tone: 'danger',
     badge: 'Failed',
     icon: OctagonAlert,
@@ -455,7 +455,7 @@ const DS_ATTENTION_ITEMS: AttentionListItem[] = [
     title: 'No summary this week',
     subtitle: 'There were no payments in the week ending Sunday, so there is nothing to summarise.',
     tone: 'neutral',
-    icon: CirclePause,
+    icon: Info,
     dismissible: false,
   },
 ]

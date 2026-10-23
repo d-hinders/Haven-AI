@@ -82,8 +82,23 @@ covers:
   - scripts/ci/check-stale-client-compat.mjs
   - packages/mcp-server/src/next-arguments-corpus.json
   - packages/mcp-server/src/tool-contract-snapshot.test.ts
-last-verified: "2026-10-22"
+last-verified: "2026-10-23"
 ---
+
+> **Re-verified unchanged (#4315, 2026-10-23, a comment-only doc comment in
+> `packages/signer/src/audit.ts`).** The only covered file this PR touches is
+> `packages/signer/src/audit.ts`: the #3728 doc comment above the
+> `domain`/`nonce` fields is reworded to no longer name the retired
+> `safe_address` token (it now refers to the persisted serialized key declared
+> above instead); the serialized key itself, the `SigningAuditEntry`
+> interface and every behavior are unchanged. The rest of the PR is CI-only
+> census plumbing under `scripts/ci/` (the `ALLOWED_CEILING` comparison is
+> exported and asserted in `safe-account-rename-census.test.mjs`), none of it
+> on this contract's cover list. No MCP tool, argument, input schema, signing
+> input, expected-context version, consent hash, runtime channel or release
+> step moves. Scope: the comment-only `audit.ts` edit only;
+> `last-verified` is re-stamped to 2026-10-23 for this note. Nothing else in
+> this document was re-verified.
 
 > **Contract change, additive (#4257, 2026-10-22): the local MCP's paid-call failure envelope.**
 > `packages/mcp/**` is on this contract's cover list.

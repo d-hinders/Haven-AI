@@ -1305,15 +1305,15 @@ matters more than the verdict, because the stated reason would justify covering
 dependencies** — no `viem`, no `ethers`, no crypto, no signing path, no key
 material of any kind. Every agent-lifecycle command ends in one call to a backend
 route that enforces its own checks: `cmdAgentRotateKey` is `api.post('/agents/:id/rotate-key')`,
-and `cmdAgentRevoke` ends in `api.post('/agents/:id/revoke')`. The budget
-commands sign nothing either. Besides reads of the agent, its balances and its
-delegations, `budget grant` and `budget revoke` only ask the backend to build a
-delegation or prepare a revoke for the owner to sign in the dashboard, and with
-`--wait` they poll `GET /agents/:id/delegations` until the owner has signed. Before that call
-`cmdAgentRevoke` reads the agent's live budgets and refuses to revoke while one
-is still redeemable unless `--keep-budget` is passed. That is a client-side
-guard that can only stop a revoke, stated in the code as not an authority
-control. The rotated API key
+and `cmdAgentRevoke` ends in `api.post('/agents/:id/revoke')`. Before its revoke
+call, `cmdAgentRevoke` reads the agent's live budgets and refuses to revoke while
+one is still redeemable unless `--keep-budget` is passed. That is a client-side
+guard that can only stop a revoke, stated in the code as not an authority control.
+The budget commands sign nothing either. Besides reads of the agent, its balances
+and its delegations, `budget grant` and `budget revoke` only ask the backend to
+build a delegation or prepare a revoke for the owner to sign in the dashboard, and
+with `--wait` they poll `GET /agents/:id/delegations` until the owner has signed
+or the wait times out. The rotated API key
 is generated **server-side** in the route, and every route re-derives ownership
 from the JWT's `sub` rather than trusting anything the client sends. A CLI edit
 cannot grant authority the backend does not already grant. That is a materially

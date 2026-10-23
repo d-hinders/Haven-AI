@@ -195,6 +195,28 @@ describe('TransactionDetailPanel — structure per kind', () => {
     expect(within(header()).getByText('Attempted by you from Main', { exact: false })).toBeInTheDocument()
   })
 
+  it('a failed agent-tab intent with no transaction never claims an on-chain failure', () => {
+    renderPanel(tx({ ...x402Base, hash: 'activity-payment-1', fundingTxHash: null, settlementScheme: null, isError: true }))
+    expect(screen.getByText('Payment attempt')).toBeInTheDocument()
+    expect(screen.getByRole('dialog').textContent).not.toContain('failed on-chain')
+  })
+
+  it('a failed x402 payment is a "Payment attempt", not a "Paid request"', () => {
+    renderPanel(tx({ ...KINDS.x402Recorded, isError: true }))
+    expect(screen.getByText('Payment attempt')).toBeInTheDocument()
+    expect(screen.queryByText('Paid request')).toBeNull()
+  })
+
+  it('an observed merchant response is not an attached receipt', () => {
+    renderPanel(tx({ ...KINDS.x402Recorded, paymentProofStatus: 'merchant_response_observed' }))
+    expect(rows(details()).Receipt).toBe('Not attached (the merchant responded)')
+  })
+
+  it('an x402 row with no recorded scheme shows no Settlement row', () => {
+    renderPanel(tx({ ...x402Base, settlementScheme: null, fundingTxHash: null, hash: HASH }))
+    expect(rows(details())).not.toHaveProperty('Settlement')
+  })
+
   it('a contact send: the contact, by you', () => {
     renderPanel(KINDS.contactSend)
     expect(screen.getByRole('dialog', { name: 'Alice' })).toBeInTheDocument()
@@ -372,12 +394,27 @@ describe('TransactionDetailPanel — the footer', () => {
     expect(within(technical()).queryByText('Transaction')).toBeNull()
   })
 
-  it('honours explorerUrl: null hides it, a value is used as given', () => {
+  it('honours explorerUrl: null hides it; a value stands in only where the chain has no explorer', () => {
     const { unmount } = renderPanel(tx({ explorerUrl: null }))
     expect(footerLink()).toBeNull()
     unmount()
-    renderPanel(tx({ explorerUrl: 'https://explorer.example/tx/abc' }))
+    renderPanel(tx({ chainId: 999999, explorerUrl: 'https://explorer.example/tx/abc' }))
     expect(footerLink()).toHaveAttribute('href', 'https://explorer.example/tx/abc')
+  })
+
+  it('an agent-tab row: the settlement-first explorerUrl never wins over the funding leg (#3763 superseded)', () => {
+    renderPanel(
+      tx({
+        ...KINDS.x402Recorded,
+        explorerUrl: `https://basescan.org/tx/${SETTLEMENT}`,
+      }),
+    )
+    expect(footerLink()).toHaveAttribute('href', `https://basescan.org/tx/${FUNDING}`)
+  })
+
+  it('a synthetic hash is never paired with a footer, whatever explorerUrl says', () => {
+    renderPanel(tx({ hash: 'activity-payment-7', explorerUrl: 'https://basescan.org/tx/0xabc' }))
+    expect(footerLink()).toBeNull()
   })
 })
 

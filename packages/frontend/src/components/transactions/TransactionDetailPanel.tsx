@@ -156,17 +156,18 @@ function accountTxHash(tx: AggregatedTransaction): string | null {
 }
 
 /**
- * The footer's explorer URL. It honours `explorerUrl` as the row link always
- * did: `null` → no footer, a value → that value, otherwise the chain's
- * explorer for the account's transaction — none for a synthetic hash or a
- * chain the registry does not know.
+ * The footer's explorer URL: the account's transaction on the chain's
+ * explorer. `explorerUrl` is honoured as the row link always honoured it —
+ * `null` → no footer — but a supplied value is only the fallback for a chain
+ * the registry cannot build a link on: the agent feed's `explorer_url` is
+ * settlement-first (#3763), which this panel supersedes (#4267). None for a
+ * synthetic hash.
  */
 function footerExplorerUrl(tx: AggregatedTransaction): string | null {
   if (tx.explorerUrl === null) return null
   const hash = accountTxHash(tx)
   if (!hash) return null
-  if (tx.explorerUrl) return tx.explorerUrl
-  return getExplorerUrlOrNull(tx.chainId, 'tx', hash)
+  return getExplorerUrlOrNull(tx.chainId, 'tx', hash) ?? tx.explorerUrl ?? null
 }
 
 /**

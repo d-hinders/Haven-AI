@@ -255,6 +255,14 @@ export function activityToTransaction(
     x402ResourceUrl: item.x402_resource_url ?? null,
     x402MerchantAddress: item.x402_merchant_address ?? null,
     deliveryReference: item.delivery_reference ?? null,
+    // The eip3009 legs, named (#3763), so the detail panel can link the
+    // funding leg and list the settlement beside it (#4267).
+    settlementScheme:
+      item.settlement_scheme === 'eip3009' || item.settlement_scheme === 'erc7710'
+        ? item.settlement_scheme
+        : null,
+    settlementTxHash: item.settlement_tx_hash ?? null,
+    fundingTxHash: item.funding_tx_hash ?? null,
     chainId: item.chain_id ?? 0,
     accountId: item.account_id ?? '',
     accountAddress: item.account_address ?? '',

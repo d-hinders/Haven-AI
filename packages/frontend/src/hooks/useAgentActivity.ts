@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { api } from '@/lib/api'
 import { useVisiblePolling } from '@/hooks/useVisiblePolling'
 import { browserTimeZone } from '@/lib/analytics-range'
+import { isRefusalActivityItem, type RefusalActivityItem } from '@/lib/refusal-reasons'
 import type { PaymentStatus } from '@/lib/payment-status'
 
 /**
@@ -289,6 +290,110 @@ export function useAgentPaymentLedger(
 
   return {
     payments,
+    total,
+    hasMore,
+    loading,
+    loadingMore,
+    error,
+    loadMore,
+    refresh: () => fetchPage(0, false),
+  }
+}
+
+// ── The Activity tab's paged, filtered refusals reader (#4323) ───────────────
+//
+// The third population of #4229's kinded read: the agent's refused payment
+// attempts (`payment_refusals`), served by `kind=refusals` with its OWN item
+// schema — not the payment/tool-call union. The Status facet's Refused value
+// switches the tab to this reader; the deep link
+// `/agents/:id?tab=activity&status=refused` lands here through it.
+
+/** The refusals reader's toolbar state as its server filters. */
+export interface AgentRefusalLedgerFilters {
+  /** Inclusive ISO lower bound (the Period facet). */
+  from?: string
+  /** Exclusive ISO upper bound (the Period facet). */
+  to?: string
+  /** The search term — the route matches it against resource_url and merchant_to. */
+  q?: string
+}
+
+/** The page size the refusal ledger pages by — the payment ledger's own. */
+export const AGENT_REFUSAL_LEDGER_PAGE_SIZE = 25
+
+export function useAgentRefusalLedger(
+  agentId: string | null,
+  filters: AgentRefusalLedgerFilters,
+  pageSize: number = AGENT_REFUSAL_LEDGER_PAGE_SIZE,
+) {
+  const [refusals, setRefusals] = useState<RefusalActivityItem[]>([])
+  const [total, setTotal] = useState(0)
+  const [hasMore, setHasMore] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const requestIdRef = useRef(0)
+
+  // Same rule as the payment ledger: the refetch key is the serialized filter
+  // SET, so an equal rebuild must not restart the list, a change must.
+  const filterKey = JSON.stringify(filters)
+
+  const fetchPage = useCallback(
+    async (offset: number, append: boolean) => {
+      if (!agentId) return
+      const requestId = ++requestIdRef.current
+      if (append) setLoadingMore(true)
+      try {
+        const params = new URLSearchParams({ kind: 'refusals', limit: String(pageSize), offset: String(offset) })
+        const parsed: AgentRefusalLedgerFilters = JSON.parse(filterKey)
+        if (parsed.q) params.set('q', parsed.q)
+        if (parsed.from) params.set('from', parsed.from)
+        if (parsed.to) params.set('to', parsed.to)
+        const res = await api.get<{ activity: RefusalActivityItem[]; total?: number; hasMore?: boolean }>(
+          `/agent-activity/${agentId}/activity?${params.toString()}`,
+        )
+        if (requestIdRef.current !== requestId) return
+        // #4229's own rule, kept: filter by `type` defensively until both
+        // sides of the kinded read are deployed — an old backend answers the
+        // merged window (or 400s) and a fixture may answer loosely.
+        const rows = (res?.activity ?? []).filter(isRefusalActivityItem)
+        setRefusals((current) => (append ? [...current, ...rows] : rows))
+        setTotal(res?.total ?? rows.length)
+        setHasMore(Boolean(res?.hasMore))
+        setError(null)
+      } catch (err) {
+        if (requestIdRef.current !== requestId) return
+        // A failed page keeps the rows already on screen (an append failing
+        // must not blank the list the user is reading) and says so.
+        if (!append) setRefusals([])
+        setHasMore(false)
+        setError(err instanceof Error ? err.message : 'Refused attempts could not load')
+      } finally {
+        if (requestIdRef.current === requestId) {
+          setLoading(false)
+          setLoadingMore(false)
+        }
+      }
+    },
+    [agentId, filterKey, pageSize],
+  )
+
+  // A filter or agent change restarts the list; `loadMore` appends.
+  useEffect(() => {
+    // Same hold as the payment ledger (#4249 N2): a null agent retires
+    // whatever is in flight.
+    if (!agentId) requestIdRef.current += 1
+    setLoading(true)
+    void fetchPage(0, false)
+  }, [agentId, fetchPage])
+
+  const loadMore = useCallback(() => {
+    if (loadingMore) return
+    void fetchPage(refusals.length, true)
+  }, [fetchPage, loadingMore, refusals.length])
+
+  return {
+    refusals,
     total,
     hasMore,
     loading,

@@ -18,6 +18,13 @@ import {
   type AgentPaymentActivityFilter,
 } from '../infra/repositories/agent-activity.js'
 import {
+  countAgentRefusalsFiltered,
+  listAgentRefusalsFiltered,
+  type AgentRefusalActivityFilter,
+  type AgentRefusalRow,
+} from '../infra/repositories/payment-refusals.js'
+import { humanTokenAmount } from '../domain/tokens.js'
+import {
   listToolInvocationsForAgent,
   listToolInvocationsForAgentFiltered,
   countToolInvocationsForAgentFiltered,
@@ -31,6 +38,7 @@ import {
   toCanonicalAddress,
   resolveTransactionCurrency,
   serveTimeAmount,
+  serveTimeAmountTriple,
 } from '../modules/transactions/index.js'
 import { MACHINE_PAYMENT_RAILS } from '@haven_ai/core'
 
@@ -73,6 +81,10 @@ async function approxCurrencyFor(userId: string): Promise<TransactionCurrency> {
 /** The `status` vocabularies per `kind`; a value from the other kind is a 400. */
 const PAYMENT_STATUS_FILTERS = new Set(['sent', 'pending', 'failed', 'needs_attention'])
 const TOOL_CALL_STATUS_FILTERS = new Set(['ok', 'error', 'denied'])
+// #4323: the refusal population IS the refused population — `refused` is the
+// facet's one value (the deep link's `status=refused`), and there is nothing
+// else to narrow to. Any other value is a client bug, same as above.
+const REFUSAL_STATUS_FILTERS = new Set(['refused'])
 
 /**
  * ISO bounds: a date (`2026-07-10`) or a full date-time with zone/offset.
@@ -183,6 +195,45 @@ function toToolCallEntry(inv: AgentToolInvocationRow) {
  * `sent` is `payment_intents`' `confirmed`, whitespace around `q` is not
  * part of the search term, and an empty string filters nothing.
  */
+
+/**
+ * The one refusal-entry builder for the kinded read (#4323).
+ *
+ * `amount` is ATOMIC on the wire — the reviewer's contract — and the renderer
+ * derives the human amount from the shared registry's decimals
+ * (`core/chains`, the same source `humanAmount` reads). The serve-time fiat
+ * triple, by contrast, is struck HERE from the human amount, so both views of
+ * one refusal come from one conversion, never two.
+ */
+function toRefusalEntry(r: AgentRefusalRow): Promise<Record<string, unknown>> {
+  return serveTimeAmountTriple(r.token_symbol, humanTokenAmount(r.chain_id, r.token_symbol, r.amount_atomic)).then(
+    (approx) => ({
+      type: 'refusal' as const,
+      id: r.id,
+      created_at: r.created_at,
+      // Atomic, deliberately unscaled here: `formatTokenValue` on the client
+      // (via the registry) is the one humanizer, as for the budget surfaces.
+      amount: r.amount_atomic,
+      token_symbol: r.token_symbol,
+      chain_id: r.chain_id,
+      merchant_to: r.merchant_to,
+      resource_url: r.resource_url,
+      reason: r.reason,
+      attempts: r.attempts,
+      // Serve-time fiat in all three currencies (#4323); `sek_value` is not
+      // stored, so SEK is serve-time only — null, never 0, on a price outage.
+      approx_amount_usd: approx.usd,
+      approx_amount_eur: approx.eur,
+      approx_amount_sek: approx.sek,
+    }),
+  )
+}
+
+/**
+ * Normalizes the query's optional filters into the repository shape: the UI's
+ * `sent` is `payment_intents`' `confirmed`, whitespace around `q` is not
+ * part of the search term, and an empty string filters nothing.
+ */
 function paymentFilter(query: Record<string, string>): AgentPaymentActivityFilter {
   const rawStatus = query.status ?? null
   return {
@@ -253,13 +304,24 @@ export default async function agentActivityRoutes(
     }
 
     const kind =
-      query.kind === 'payments' ? 'payments' : query.kind === 'tool_calls' ? 'tool_calls' : undefined
+      query.kind === 'payments'
+        ? 'payments'
+        : query.kind === 'tool_calls'
+          ? 'tool_calls'
+          : query.kind === 'refusals'
+            ? 'refusals'
+            : undefined
 
     if (kind) {
       // A `status` value from the OTHER kind's vocabulary is a client bug —
       // answer 400 rather than silently serving an unfiltered population.
       const status = query.status ?? null
-      const allowedStatuses = kind === 'payments' ? PAYMENT_STATUS_FILTERS : TOOL_CALL_STATUS_FILTERS
+      const allowedStatuses =
+        kind === 'payments'
+          ? PAYMENT_STATUS_FILTERS
+          : kind === 'refusals'
+            ? REFUSAL_STATUS_FILTERS
+            : TOOL_CALL_STATUS_FILTERS
       if (status && !allowedStatuses.has(status)) {
         return reply.code(400).send({ error: `status ${status} does not apply to kind ${kind}` })
       }
@@ -272,6 +334,25 @@ export default async function agentActivityRoutes(
       // #3824: the approx amounts are struck in the user's preferred currency —
       // one read per request, same as the legacy read.
       const currency = await approxCurrencyFor(sub)
+
+      if (kind === 'refusals') {
+        // #4323: the refusal population. `refused` is the only status value it
+        // takes (checked above); the filters are the shared ISO bounds and the
+        // `q` search over the refusal's two merchant-naming columns. The fiat
+        // is serve-time (all three currencies), so the preference read above
+        // is not consumed here — it stays for the payments arm.
+        const filter: AgentRefusalActivityFilter = {
+          from: query.from ?? null,
+          to: query.to ?? null,
+          q: query.q?.trim() ? query.q.trim() : null,
+        }
+        const [rows, total] = await Promise.all([
+          listAgentRefusalsFiltered(id, filter, limit, offset),
+          countAgentRefusalsFiltered(id, filter),
+        ])
+        const activity = await Promise.all(rows.map(toRefusalEntry))
+        return { activity, total, hasMore: offset + activity.length < total }
+      }
 
       if (kind === 'payments') {
         const filter = paymentFilter(query)

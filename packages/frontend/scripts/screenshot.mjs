@@ -2098,9 +2098,30 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
     const status = query.get('status')
     const offset = Number(query.get('offset')) || 0
     const paymentStatuses = new Set(['sent', 'pending', 'failed', 'needs_attention'])
-    const rows = FIXTURE_AGENT_ACTIVITY.filter((row) => (kind === 'payments' ? row.type === 'payment' : row.type === 'mcp_tool_call'))
+    // #4323: the refusal population — one refused attempt so the Refused
+    // facet's capture has a row to show. Atomic on the wire; the serve-time
+    // triple is the fixture's priced view.
+    const refusalRow = {
+      type: 'refusal',
+      id: 'refusal-fixture-1',
+      created_at: '2026-08-31T09:36:00.000Z',
+      amount: '25000',
+      token_symbol: 'USDC',
+      chain_id: 84532,
+      merchant_to: '0x0000000000000000000000000000000000000009',
+      resource_url: 'https://research.example/report',
+      reason: 'delegation_budget_exceeded',
+      attempts: 2,
+      approx_amount_usd: '0.0250',
+      approx_amount_eur: null,
+      approx_amount_sek: null,
+    }
+    const rows = FIXTURE_AGENT_ACTIVITY.filter((row) =>
+      kind === 'payments' ? row.type === 'payment' : kind === 'refusals' ? row.type === 'refusal' : row.type === 'mcp_tool_call',
+    )
     const filtered = rows.filter((row) => {
       if (!status) return true
+      if (kind === 'refusals') return status === 'refused'
       if (kind === 'tool_calls') return row.result_status === status
       if (!paymentStatuses.has(status)) return true
       if (status === 'sent') return row.status === 'confirmed'

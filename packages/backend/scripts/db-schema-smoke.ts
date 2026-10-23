@@ -347,6 +347,10 @@ import {
   SUM_AGENT_SPEND_TODAY_SQL,
 } from '../src/infra/repositories/agent-activity.js'
 import {
+  LIST_AGENT_REFUSALS_FILTERED_SQL,
+  COUNT_AGENT_REFUSALS_FILTERED_SQL,
+} from '../src/infra/repositories/payment-refusals.js'
+import {
   LIST_TOOL_INVOCATIONS_FOR_AGENT_SQL,
   LIST_TOOL_INVOCATIONS_FOR_AGENTS_SQL,
   LIST_TOOL_INVOCATIONS_FOR_AGENT_FILTERED_SQL,
@@ -545,6 +549,11 @@ const QUERIES: SmokeQuery[] = [
   // checked surface — PREPARE type-checks every `$n::t IS NULL OR …` arm.
   { name: 'agent-activity: filtered single-agent payments (page)', sql: LIST_AGENT_PAYMENTS_FILTERED_SQL },
   { name: 'agent-activity: filtered single-agent payments (count)', sql: COUNT_AGENT_PAYMENTS_FILTERED_SQL },
+  // #4323: the kind=refusals read — page + total over the (agent_id,
+  // created_at)-indexed refusal ledger. The nullable-parameter predicates and
+  // the two-column ILIKE are the checked surface.
+  { name: 'agent-activity: filtered refusals for agent (page)', sql: LIST_AGENT_REFUSALS_FILTERED_SQL },
+  { name: 'agent-activity: filtered refusals for agent (count)', sql: COUNT_AGENT_REFUSALS_FILTERED_SQL },
   // One statement, two surfaces (#1179) — the dashboard and the activity feed.
   { name: 'agent-tool-invocations: read for agent', sql: LIST_TOOL_INVOCATIONS_FOR_AGENT_SQL },
   { name: 'agent-tool-invocations: read for agent set', sql: LIST_TOOL_INVOCATIONS_FOR_AGENTS_SQL },

@@ -8,11 +8,21 @@
  * Token, Period) and `ListShowMore`.
  *
  * The population is deliberately NOT the wallet-scoped transactions feed:
- * `routes/transactions.ts` serves a different set and would drop payments
- * refused before they reached the chain. The rows come from #4229's kinded
- * read (`useAgentPaymentLedger`), server-filtered — the Token facet rides the
+ * `routes/transactions.ts` serves a different set, and would drop both the
+ * attempts that never became payments and the failed/pending states this tab
+ * exists to show. The rows come from #4229's kinded read
+ * (`useAgentPaymentLedger`), server-filtered — the Token facet rides the
  * `token` parameter #4226 added to that read, because the agent's payments
  * are invisible to the transactions feed's `tokenKey` machinery.
+ *
+ * Refused attempts (#4323) are the tab's third population: the Status
+ * facet's **Refused** value switches the read to `kind=refusals` — the
+ * agent's `payment_refusals` rows, rendered with the same ledger row, a
+ * neutral "Refused" badge, the reason in words and an UNSIGNED amount (no
+ * money moved). The Token facet hides while Refused is selected: a refusal
+ * carries no token address to facet on. Refusal rows are not interactive —
+ * ledger rows hold no controls, and there is no refused shape in the detail
+ * panel; everything a refusal says is in the row.
  *
  * Row anatomy (#4226): the merchant is the title — `counterpartyLabel`'s
  * no-address mode, the same helper the account tab reads — and the "by
@@ -51,10 +61,14 @@ import {
   isPaymentActivityItem,
   type ActivityItem,
   useAgentPaymentLedger,
+  useAgentRefusalLedger,
   AGENT_PAYMENT_LEDGER_PAGE_SIZE,
   type AgentPaymentLedgerFilters,
+  type AgentRefusalLedgerFilters,
   type PaymentActivityItem,
 } from '@/hooks/useAgentActivity'
+import { refusalRowSubline, type RefusalActivityItem } from '@/lib/refusal-reasons'
+import { formatAllowanceForToken } from '@/lib/allowance-format'
 import { api } from '@/lib/api'
 import {
   failedOrRejectedStatus,
@@ -66,6 +80,7 @@ import {
   transactionRowBadge,
 } from '@/lib/transaction-presentation'
 import { transactionTokenLabel } from '@/lib/transaction-filters'
+import { parseX402Hostname } from '@/lib/transaction-labels'
 import { timeAgo } from '@/lib/format'
 import type { AggregatedTransaction, TransactionFilterTokenOption } from '@/types/transactions'
 
@@ -108,17 +123,20 @@ interface AgentActivityTabProps {
 }
 
 const paymentNoun: ListNoun = { one: 'payment', other: 'payments' }
+const refusalNoun: ListNoun = { one: 'refused attempt', other: 'refused attempts' }
 
 /**
  * The tab's URL keys, alongside the page's own `?tab=` — the codec never
  * touches keys it does not own, so a filtered link is
  * `/agents/<id>?status=failed` and reproduces the view on any machine.
+ * `refused` (#4323) is the deep link's value: `/agents/<id>?tab=activity&
+ * status=refused` opens the tab on the refusal population.
  */
 function activityUrlSchema(): ListUrlSchema {
   return {
     search: { aliases: ['search'] },
     facets: [
-      { id: 'status', values: ['sent', 'pending', 'failed', 'needs_attention'] },
+      { id: 'status', values: ['sent', 'pending', 'failed', 'needs_attention', 'refused'] },
       { id: 'tokenKey' },
     ],
     period: { allowCustom: true },
@@ -286,15 +304,72 @@ function accountNamesByAddressOf(user: ReturnType<typeof useAuth>['user']): Map<
   return map
 }
 
-/** One capped read of the agent's UNFILTERED payment count (#4196's rule). */
-async function fetchUnfilteredTotal(agentId: string): Promise<number | null> {
+/** One capped read of the agent's UNFILTERED count (#4196's rule), per population. */
+async function fetchUnfilteredTotal(
+  agentId: string,
+  kind: 'payments' | 'refusals',
+): Promise<number | null> {
   try {
     const res = await api.get<{ total?: number }>(
-      `/agent-activity/${agentId}/activity?kind=payments&limit=1`,
+      `/agent-activity/${agentId}/activity?kind=${kind}&limit=1`,
     )
     return typeof res?.total === 'number' ? res.total : null
   } catch {
     return null
+  }
+}
+
+/**
+ * What one refusal row renders. The ledger row primitive stays shared — a
+ * refused attempt is an existing row with a status badge and no signed
+ * amount (#4323) — so the adapter keeps the row's five inputs together:
+ * the merchant-first title (through `counterpartyLabel`, the payments' own
+ * helper), the reason subline (the one map), the unsigned human amount
+ * (registry decimals, the refusal's only humanizer), the day-group instant
+ * and the item itself.
+ */
+export interface RefusalRowView {
+  item: RefusalActivityItem
+  title: string
+  subline: string
+  value: string
+  /** Seconds — `transactionDayGroups`' instant. */
+  timestamp: number
+}
+
+export function refusalRowView(
+  item: RefusalActivityItem,
+  resolveAddress: (address: string) => string | null,
+  accountNamesByAddress: Map<string, string>,
+): RefusalRowView {
+  const createdMs = new Date(item.created_at).getTime()
+  return {
+    item,
+    // Merchant-first, same helper the payment rows read: a resource-scoped
+    // attempt titles its merchant host, an addressed one its resolved name.
+    title: counterpartyLabel(
+      {
+        activityType: undefined,
+        agentName: undefined,
+        // Route through the machine-payment branch ONLY when a hostname
+        // parses out — otherwise the title would fall to "Agent payment"
+        // instead of the merchant address.
+        source: parseX402Hostname(item.resource_url) ? 'x402' : undefined,
+        x402ResourceUrl: item.resource_url ?? null,
+        direction: 'out',
+        to: item.merchant_to ?? '',
+        from: '',
+        chainId: item.chain_id ?? 0,
+      },
+      resolveAddress,
+      accountNamesByAddress,
+      { noAddress: true },
+    ),
+    subline: refusalRowSubline(item.reason),
+    // Unsigned by construction: `formatAllowanceForToken` has no sign, and
+    // the row's direction stays neutral — no money moved.
+    value: formatAllowanceForToken(item.amount, item.chain_id, item.token_symbol),
+    timestamp: Number.isFinite(createdMs) ? Math.floor(createdMs / 1000) : 0,
   }
 }
 
@@ -331,6 +406,15 @@ export default function AgentActivityTab({
     [listState, tokenAddressByKey, tokensLoading],
   )
 
+  // #4323: the Status facet's Refused value switches the POPULATION — the
+  // refusal reader takes over and the payment reader is held (a null agent
+  // retires its in-flight requests, #4249's rule).
+  const refusedSelected = (listState.facets.status ?? []).includes('refused')
+  const refusalFilters: AgentRefusalLedgerFilters = useMemo(
+    () => ({ q: filters.q, from: filters.from, to: filters.to }),
+    [filters],
+  )
+
   const {
     payments,
     total,
@@ -340,7 +424,27 @@ export default function AgentActivityTab({
     error,
     loadMore,
     refresh,
-  } = useAgentPaymentLedger(tokenPending ? null : agentId, filters)
+  } = useAgentPaymentLedger(!refusedSelected && !tokenPending ? agentId : null, filters)
+
+  const {
+    refusals,
+    total: refusalTotal,
+    hasMore: refusalHasMore,
+    loading: refusalLoading,
+    loadingMore: refusalLoadingMore,
+    error: refusalError,
+    loadMore: refusalLoadMore,
+    refresh: refusalRefresh,
+  } = useAgentRefusalLedger(refusedSelected ? agentId : null, refusalFilters)
+
+  const activeTotal = refusedSelected ? refusalTotal : total
+  const activeHasMore = refusedSelected ? refusalHasMore : hasMore
+  const activeLoading = refusedSelected ? refusalLoading : loading
+  const activeLoadingMore = refusedSelected ? refusalLoadingMore : loadingMore
+  const activeError = refusedSelected ? refusalError : error
+  const activeLoadMore = refusedSelected ? refusalLoadMore : loadMore
+  const activeRefresh = refusedSelected ? refusalRefresh : refresh
+  const activeNoun = refusedSelected ? refusalNoun : paymentNoun
 
   // Active means "differs from the tab default" (#4110): no search, every
   // facet All, All time — the same rule the toolbar applies to its chips.
@@ -353,22 +457,29 @@ export default function AgentActivityTab({
   // applied, "{shown} of {total}" compares the FILTERED population against
   // the agent's UNFILTERED one — never the filtered total against itself,
   // which would claim every payment matches. Unknown renders no figure
-  // rather than a wrong one.
+  // rather than a wrong one. Per population (#4323): on Refused the
+  // denominator is the agent's UNFILTERED REFUSAL total — reusing the
+  // payments count here would claim every refusal matched.
   const [unfilteredTotal, setUnfilteredTotal] = useState<number | null>(null)
   useEffect(() => {
     if (!hasActiveFilters) return
     let cancelled = false
-    void fetchUnfilteredTotal(agentId).then((count) => {
+    void fetchUnfilteredTotal(agentId, refusedSelected ? 'refusals' : 'payments').then((count) => {
       if (!cancelled) setUnfilteredTotal(count)
     })
     return () => {
       cancelled = true
     }
-  }, [hasActiveFilters, agentId])
+  }, [hasActiveFilters, agentId, refusedSelected])
 
   const rows = useMemo(
     () => payments.map((item) => activityToTransaction(item, agentName, walletName)),
     [payments, agentName, walletName],
+  )
+
+  const refusalRows = useMemo(
+    () => refusals.map((item) => refusalRowView(item, resolveAddress, accountNamesByAddress)),
+    [refusals, resolveAddress, accountNamesByAddress],
   )
 
   // #4227: a Tool-calls payment link landed on this tab. Fetch the ONE
@@ -409,34 +520,55 @@ export default function AgentActivityTab({
         { value: 'pending', label: 'Pending' },
         { value: 'failed', label: 'Failed' },
         { value: 'needs_attention', label: 'Needs attention' },
+        { value: 'refused', label: 'Refused' },
       ],
     },
-    {
-      id: 'tokenKey',
-      label: 'Token',
-      options: tokens.map((token) => ({ value: token.key, label: transactionTokenLabel(token) })),
-    },
+    // #4323: hidden while Refused is selected — a refusal carries no token
+    // address to facet on (the wire has `token_symbol` only), so offering
+    // the facet would promise a filter that can never match.
+    ...(refusedSelected
+      ? []
+      : [
+          {
+            id: 'tokenKey',
+            label: 'Token',
+            options: tokens.map((token) => ({ value: token.key, label: transactionTokenLabel(token) })),
+          },
+        ]),
   ]
 
-  const count: ListCount | null = loading
+  const count: ListCount | null = activeLoading
     ? null
     : !hasActiveFilters
-      ? { shown: total, total }
-      : unfilteredTotal === null || unfilteredTotal < total
+      ? { shown: activeTotal, total: activeTotal }
+      : unfilteredTotal === null || unfilteredTotal < activeTotal
         ? null
-        : { shown: total, total: unfilteredTotal }
-  const showNoMatch = hasActiveFilters && !loading && !error && rows.length === 0
+        : { shown: activeTotal, total: unfilteredTotal }
+  // #4323: on Refused, an empty population reads "No refused attempts" —
+  // but only when Refused is the ONLY selection. Any other active filter
+  // (search, another facet, a period) keeps the standard no-match state, so
+  // the cause stays editable there.
+  const refusedOtherFiltersActive =
+    listState.q.trim() !== '' ||
+    Object.entries(listState.facets).some(([id, values]) => id !== 'status' && values.length > 0) ||
+    !isAllTime(listState.period)
+  const refusedEmptyState = refusedSelected && refusalRows.length === 0 && !refusedOtherFiltersActive
+  const showNoMatch =
+    hasActiveFilters &&
+    !activeLoading &&
+    !activeError &&
+    (refusedSelected ? refusalRows.length === 0 && !refusedEmptyState : rows.length === 0)
 
   return (
     <div>
       <ListToolbar
-        noun={paymentNoun}
+        noun={activeNoun}
         state={listState}
         onChange={setListState}
         filtering="server"
         facets={facets}
         period={{ allowCustom: true }}
-        searchDescription="by merchant, recipient or contact"
+        searchDescription={refusedSelected ? 'by merchant or resource' : 'by merchant, recipient or contact'}
         count={count}
         // #4274 (owner decision, option (a)): no summary figure. "Out 4"
         // beside the count read as an amount (the account tab's In/Out are
@@ -451,13 +583,13 @@ export default function AgentActivityTab({
         // toolbar still up, so the cause stays editable.
         <div className="mt-3" data-testid="activity-no-match">
           <ListNoMatch
-            noun={paymentNoun}
+            noun={activeNoun}
             onClear={() => setListState(clearedListState(listState, urlSchema))}
           />
         </div>
       ) : (
         <Card hover={false} className="mt-3">
-          {loading ? (
+          {activeLoading ? (
             <div
               className="divide-y divide-[var(--v2-border)]"
               role="status"
@@ -474,19 +606,46 @@ export default function AgentActivityTab({
                 </div>
               ))}
             </div>
-          ) : error ? (
+          ) : activeError ? (
             <div className="p-6">
               <EmptyState
                 title="Activity could not load"
-                body={error}
+                body={activeError}
                 className="py-8"
                 action={
-                  <Button variant="ghost" size="sm" onClick={() => void refresh()}>
+                  <Button variant="ghost" size="sm" onClick={() => void activeRefresh()}>
                     Try again
                   </Button>
                 }
               />
             </div>
+          ) : refusedSelected ? (
+            refusalRows.length === 0 ? (
+              <div className="p-6">
+                <EmptyState
+                  title="No refused attempts"
+                  body="When a guardrail or budget stops one of this agent's payments, the attempt shows here."
+                  className="py-8"
+                />
+              </div>
+            ) : (
+              <div className="divide-y divide-[var(--v2-border)] v2-animate-fade-in">
+                {transactionDayGroups(refusalRows, (row) =>
+                  new Date(row.timestamp * 1000).toISOString(),
+                ).map((day) => (
+                  <div key={day.dayKey}>
+                    <TransactionActivityDayHeader label={day.label} />
+                    {day.items.map((row, index) => (
+                      <AgentRefusalRow
+                        key={`${row.item.id}:${index}`}
+                        view={row}
+                        insetDivider={index > 0}
+                      />
+                    ))}
+                  </div>
+                ))}
+              </div>
+            )
           ) : rows.length === 0 ? (
             <div className="p-6">
               <EmptyState
@@ -523,14 +682,14 @@ export default function AgentActivityTab({
         </Card>
       )}
 
-      {!showNoMatch && !loading && !error && (
+      {!showNoMatch && !activeLoading && !activeError && (
         <ListShowMore
-          loaded={rows.length}
-          total={total}
+          loaded={refusedSelected ? refusalRows.length : rows.length}
+          total={activeTotal}
           pageSize={AGENT_PAYMENT_LEDGER_PAGE_SIZE}
-          hasMore={hasMore}
-          loading={loadingMore}
-          onShowMore={() => void loadMore()}
+          hasMore={activeHasMore}
+          loading={activeLoadingMore}
+          onShowMore={() => void activeLoadMore()}
         />
       )}
 
@@ -555,6 +714,30 @@ export default function AgentActivityTab({
         accountNamesByAddress={accountNamesByAddress}
       />
     </div>
+  )
+}
+
+/**
+ * One refusal row (#4323) — the shared ledger row, non-interactive: ledger
+ * rows hold no controls, and there is no refused shape in the detail panel,
+ * so everything the refusal says lives in the row. The badge is a NEUTRAL
+ * "Refused" and the direction is neutral, so `Amount` neither signs nor
+ * danger-tints the amount — no money moved.
+ */
+function AgentRefusalRow({ view, insetDivider }: { view: RefusalRowView; insetDivider: boolean }) {
+  return (
+    <TransactionActivityRow
+      title={view.title}
+      description={view.subline}
+      value={view.value}
+      asset={view.item.token_symbol}
+      status="Refused"
+      statusTone="neutral"
+      timestamp={timeAgo(view.timestamp * 1000)}
+      direction="neutral"
+      density="compact"
+      insetDivider={insetDivider}
+    />
   )
 }
 

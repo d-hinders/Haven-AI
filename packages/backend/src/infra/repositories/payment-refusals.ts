@@ -24,6 +24,7 @@
  */
 
 import pool from '../../db.js'
+import type { Executor } from '../transaction.js'
 
 /** The closed `reason` set — mirrors migration 086's CHECK exactly. */
 export type PaymentRefusalReason =
@@ -234,6 +235,104 @@ export async function aggregateRefusalsForUserByAgent(
     attempts: Number(row.attempts),
     by_reason: (row.by_reason ?? {}) as Partial<Record<PaymentRefusalReason, number>>,
   }))
+}
+
+// ── The agent Activity tab's paged refusal read (#4323) ─────────────────────
+//
+// The per-agent, per-page list behind `GET /agent-activity/:id/activity?kind=
+// refusals`. Distinct from `listRefusalsForUser` above — that one is
+// user-scoped, unpaged and range-shaped for the analytics slice; this one is
+// AGENT-scoped and paged, served only after the route has established that
+// the agent belongs to the caller (the same gating contract as
+// `agent-activity.ts`'s statements, which this file now shares).
+//
+// The `(agent_id, created_at)` index (migration 086) serves the ORDER BY +
+// window directly, so no migration is needed. The fiat columns are NOT read:
+// the refusal wire serves SERVE-TIME fiat (all three currencies, struck at
+// request time by the route), never the book-time booking values — consistent
+// with this file's write-only `sek_value` posture above.
+
+/** The refusal columns the agent-activity read serves — no book-time fiat. */
+export type AgentRefusalRow = Pick<
+  PaymentRefusalRow,
+  'id' | 'agent_id' | 'chain_id' | 'token_symbol' | 'amount_atomic' | 'merchant_to' | 'resource_url' | 'reason' | 'attempts' | 'created_at'
+>
+
+/**
+ * The optional filter set behind `kind=refusals`. `from`/`to` are ISO bounds —
+ * inclusive `from`, exclusive `to` (the same tiling contract as the payments
+ * read). `q` is the trimmed search term: a substring match over
+ * `resource_url` AND `merchant_to` — the two merchant-naming columns a
+ * refusal carries (the payments read's contact-name arm has no analogue:
+ * a refusal is not yet a payment with a `to_address`).
+ */
+export interface AgentRefusalActivityFilter {
+  from: string | null
+  to: string | null
+  q: string | null
+}
+
+export const LIST_AGENT_REFUSALS_FILTERED_SQL = `SELECT id, agent_id, chain_id, token_symbol,
+              amount_atomic, merchant_to, resource_url, reason, attempts, created_at
+       FROM payment_refusals
+       WHERE agent_id = $1
+         AND ($2::text IS NULL OR created_at >= $2::timestamptz)
+         AND ($3::text IS NULL OR created_at < $3::timestamptz)
+         AND ($4::text IS NULL OR resource_url ILIKE '%' || $4 || '%'
+              OR merchant_to ILIKE '%' || $4 || '%')
+       ORDER BY created_at DESC
+       LIMIT $5 OFFSET $6`
+
+/**
+ * The filtered population's total — the COUNT twin of
+ * `LIST_AGENT_REFUSALS_FILTERED_SQL` with the same predicates minus the page
+ * (same reason as `COUNT_AGENT_PAYMENTS_FILTERED_SQL`: an offset past the end
+ * returns zero rows, and `hasMore` is computed from the total, not the page).
+ */
+export const COUNT_AGENT_REFUSALS_FILTERED_SQL = `SELECT COUNT(*)
+       FROM payment_refusals
+       WHERE agent_id = $1
+         AND ($2::text IS NULL OR created_at >= $2::timestamptz)
+         AND ($3::text IS NULL OR created_at < $3::timestamptz)
+         AND ($4::text IS NULL OR resource_url ILIKE '%' || $4 || '%'
+              OR merchant_to ILIKE '%' || $4 || '%')`
+
+/**
+ * NOT tenant-scoped — the caller must have confirmed the agent belongs to the
+ * requesting user before calling this (same contract as
+ * `listAgentPaymentsFiltered`).
+ */
+export async function listAgentRefusalsFiltered(
+  agentId: string,
+  filter: AgentRefusalActivityFilter,
+  limit: number,
+  offset: number,
+  db: Executor = pool,
+): Promise<AgentRefusalRow[]> {
+  const result = await db.query<AgentRefusalRow>(LIST_AGENT_REFUSALS_FILTERED_SQL, [
+    agentId,
+    filter.from,
+    filter.to,
+    filter.q,
+    limit,
+    offset,
+  ])
+  return result.rows
+}
+
+/** Same gating contract as `listAgentRefusalsFiltered`. Returns the filtered population's total. */
+export async function countAgentRefusalsFiltered(
+  agentId: string,
+  filter: AgentRefusalActivityFilter,
+  db: Executor = pool,
+): Promise<number> {
+  const result = await db.query<{ count: string }>(COUNT_AGENT_REFUSALS_FILTERED_SQL, [
+    agentId,
+    filter.from,
+    filter.to,
+    filter.q,
+  ])
+  return Number(result.rows[0]?.count ?? 0)
 }
 
 /**

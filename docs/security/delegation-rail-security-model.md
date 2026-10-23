@@ -2852,7 +2852,7 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > covered-file edit is the `SIGNER_VERSION` literal in `packages/signer/src/tools.ts`
 > (`0.11.0-alpha.0`). No signing check, refusal or allowlist moves in that edit.
 > Three commits in the range change signer source (`git log origin/main..origin/dev
-> -- packages/signer/src` at `05c8066b`), each recorded above where it merged and
+> -- packages/signer/src` at `c966ff81`), each recorded above where it merged and
 > read again for this release:
 > - #4242 (#4247): the binding records the shape it was minted for, and
 >   `haven_x402_sign_header` builds an EIP-3009 header only from a funding-leg

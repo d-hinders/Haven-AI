@@ -6437,3 +6437,14 @@ to call next in structured fields, and those fields are typed end to end
 > `lint:runbook-parity` (11 of 11 at `10762fb`); `/for-agents.md` was edited
 > to match. Scope of this note: those two sentences. Nothing else in this
 > document was re-verified.
+
+> **Re-verified unchanged (#4345, 2026-10-23 — the skill says which quote
+> checks the budget).** The diff touches the haven-pay skill text that connect
+> installs (`HAVEN_SKILL_MD`, `packages/sdk/src/skill-content.ts`, with its
+> byte-identical frontend copy): two sentences now say the hosted quote checks
+> the remaining budget, and the local `@haven_ai/mcp` `haven_quote_x402` checks
+> only a stated `expected_amount`, the budget being checked at pay time. Wording
+> only: no `haven_*` tool, schema, strict-input list, `next_tool` value,
+> expected-context version or signer contract changes; an installed `SKILL.md`
+> stays stale until reinstalled. Scope of this note: those two sentences. Nothing
+> else in this document was re-verified.

@@ -387,8 +387,10 @@ for example, an invoice carrying an \`x402_payment_url\` to POST with its
   report it, the merchant's settlement evidence. (A deposit transfer is bound
   to its payee and amount on-chain too; the difference is the record, not
   the binding.)
-- **If the quote says stop, stop.** The quote checks the agent's remaining
-  budget at quote time, and it can check a price you state (\`expected_amount\`).
+- **If the quote says stop, stop.** The hosted quote checks the agent's
+  remaining budget at quote time, and it can check a price you state
+  (\`expected_amount\`). On the local runtime (\`@haven_ai/mcp\`) the quote
+  checks only a price you state; the budget is checked when you pay.
   When it returns \`safe_to_continue: false\` — the amount exceeds the budget, or
   the price does not match what you expected — it prefills no cap and names no
   next tool: stop and tell the user. If the x402 challenge itself is wrong (a

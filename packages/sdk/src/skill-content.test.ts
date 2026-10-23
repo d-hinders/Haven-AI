@@ -131,6 +131,15 @@ describe('generic skill content', () => {
     expect(HAVEN_SKILL_MD).toContain('safe_to_continue')
   })
 
+  it('says only the hosted quote checks the remaining budget; the local quote checks only a stated price (#4345)', () => {
+    expect(HAVEN_SKILL_MD).toContain(
+      "- **If the quote says stop, stop.** The hosted quote checks the agent's\n" +
+        '  remaining budget at quote time, and it can check a price you state\n' +
+        '  (`expected_amount`). On the local runtime (`@haven_ai/mcp`) the quote\n' +
+        '  checks only a price you state; the budget is checked when you pay.\n',
+    )
+  })
+
   it('signs and settles by payment_id only, never a bare merchant_url/tool_name pass', () => {
     // Signing: payment_id + payment_required only; typed_data is never relayed
     // by the agent on the preferred path.

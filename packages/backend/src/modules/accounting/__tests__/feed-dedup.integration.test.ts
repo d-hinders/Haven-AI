@@ -30,8 +30,9 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 // Enforces uniqueness on (provider, payment_id, user_id). The migration-113
 // key and the ON CONFLICT target add document_kind; the oracle stays
 // equivalent because the statements it models are scoped to 'underlag'. It
-// works by interpreting the exact SQL that feed-sync.ts issues. Reads the real query shapes; it is not a generic SQL
-// engine, so an unrecognised statement fails loudly rather than silently.
+// works by interpreting the exact SQL that feed-sync.ts issues. Reads the
+// real query shapes; it is not a generic SQL engine, so an unrecognised
+// statement fails loudly rather than silently.
 const { ledger } = vi.hoisted(() => {
   interface Row {
     id: string

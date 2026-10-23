@@ -435,10 +435,16 @@ describeDb('search terms match literally — % _ and \\ are not wildcards (#4346
       createdAt: '2026-07-10T08:00:00Z',
       x402ResourceUrl: 'https://shop.example/a\\b',
     })
+    // Two `ab` rows: a raw `a\\b` term matches both, so the count tells raw from escaped.
     await seedIntent(seed, {
       status: 'confirmed',
       createdAt: '2026-07-10T07:00:00Z',
       x402ResourceUrl: 'https://shop.example/ab',
+    })
+    await seedIntent(seed, {
+      status: 'confirmed',
+      createdAt: '2026-07-10T06:00:00Z',
+      x402ResourceUrl: 'https://shop.example/ab-2',
     })
 
     const rows = await listAgentPaymentsFiltered(seed.agentId, filterWith({ q: 'a\\b' }), 30, 0, db)

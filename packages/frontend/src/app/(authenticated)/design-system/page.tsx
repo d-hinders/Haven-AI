@@ -306,10 +306,11 @@ const DS_CHART_DAYS: StackedBarDay[] = [
   {
     label: 'Thu 4',
     refusals: 2,
-    series: [
-      { id: 'research', name: 'Research agent', amount: 180, color: DS_RESEARCH_COLOR },
-      { id: 'ops', name: 'Ops agent', amount: 70, color: DS_OPS_COLOR },
-    ],
+    // The continuous axis (#4334), shown not described: a day with NO spend
+    // is an empty slot — no segments at all — and its refusals still draw,
+    // as the grey dash under the slot that a cap-on-the-bar could never
+    // have shown on a barless day.
+    series: [],
   },
   {
     label: 'Fri 5',
@@ -3731,7 +3732,7 @@ export default function DesignSystemPage() {
       <Section
         title="StackedBarChart"
         testId="ds-stacked-bar-chart"
-        description="Daily bars stacked by agent for a spend range, refusals as a marker cap above the bar (a refusal count has no money scale, so never a second axis). Since #4331 an agent's fill is its own avatar tint (seriesColorForAgent, hashed from the name): the chart, the legend, the tooltip and the agent's monogram all wear one colour, in every period and on every page, no matter how its spend ranks. Two agents can hash to the same tint — six tints, unbounded agents — and the legend and tooltip tell them apart by name. A partial day — the window's cut first or last day — is striped with the series fill at full strength (not faded: an opacity blend would read lighter on the light ground and darker on the dark one, and drop under 3:1). Below three days it renders nothing; the page shows tiles instead (#2948). Focus the figure and use the arrow keys for a day's detail: a two-line callout (day, refusal count and total, then the agents as wrapping swatch·name·amount chips, capped at 24rem so a token breakdown wraps inside its chip instead of stretching the callout — #3067, so it fits above or below almost any bar) anchored over the day, clamped inside the plot by its own measured width, and dropped below the described bar's top when the bar or its cap would otherwise hide under it — bottom just above the axis when the bar can hold it, else just above the legend over the date labels beneath it — whichever of the two hides the fewest neighbouring tops (#3076) — and not at all for a bar the drop would swallow (#3063 — the bar's top and its refusal cap stay visible; on this sample the days whose bars reach under the resting callout drop, the rest keep it). The callout takes no pointer: hover the next bar through it and the detail moves on; a tap pins a day, a second tap or Escape releases it (#3066). On a narrow screen the tooltip becomes a panel pinned below the plot."
+        description="Daily bars stacked by agent for a spend range. Since #4334 the axis is CONTINUOUS — the caller hands it every calendar day in the window, and a day with no spend is an empty slot (Thu 4 below), not a skipped column; refusals are the marker series, a small grey dash UNDER the day's slot (never a second axis, never a cap on the bar — a barless day's refusals would be undrawable as a cap), named 'Refused' in the legend. A tick label's fraction digits come from the tick STEP (#4334): whole steps print none, a sub-cent step prints 4, so '$0.0010 … $0.0040' reads instead of '$0, $0'. Since #4331 an agent's fill is its own avatar tint (seriesColorForAgent, hashed from the name): the chart, the legend, the tooltip and the agent's monogram all wear one colour, in every period and on every page, no matter how its spend ranks. Two agents can hash to the same tint — six tints, unbounded agents — and the legend and tooltip tell them apart by name. A partial day — the window's cut first or last day — is striped with the series fill at full strength (not faded: an opacity blend would read lighter on the light ground and darker on the dark one, and drop under 3:1). Below three days it renders nothing; the page shows tiles instead (#2948). Focus the figure and use the arrow keys for a day's detail: a two-line callout (day, refusal count and total, then the agents as wrapping swatch·name·amount chips, capped at 24rem so a token breakdown wraps inside its chip instead of stretching the callout — #3067, so it fits above or below almost any bar) anchored over the day, clamped inside the plot by its own measured width, and dropped below the described bar's top when the bar would otherwise hide under it — bottom just above the axis when the bar can hold it, else just above the legend over the date labels beneath it — whichever of the two hides the fewest neighbouring tops or refusal marks (#3076) — and not at all for a bar the drop would swallow (#3063 — the bar's top stays visible; on this sample the days whose bars reach under the resting callout drop, the rest keep it). The callout takes no pointer: hover the next bar through it and the detail moves on; a tap pins a day, a second tap or Escape releases it (#3066). On a narrow screen the tooltip becomes a panel pinned below the plot."
       >
         <Card hover={false} className="p-5">
           <StackedBarChart
@@ -3739,7 +3740,7 @@ export default function DesignSystemPage() {
             currency="USD"
             ariaLabel={DS_CHART_SUMMARY}
             formatValue={dsMoney}
-            formatTick={(n) => formatAnalyticsTick(n, 'USD')}
+            formatTick={(n, step) => formatAnalyticsTick(n, step, 'USD')}
           />
           {/* The narrow treatment, as the page mounts it below `lg`: wider
               tick gutter, dot legend, tap-to-pin panel. */}
@@ -3749,7 +3750,7 @@ export default function DesignSystemPage() {
               currency="USD"
               ariaLabel={DS_CHART_SUMMARY}
               formatValue={dsMoney}
-              formatTick={(n) => formatAnalyticsTick(n, 'USD')}
+              formatTick={(n, step) => formatAnalyticsTick(n, step, 'USD')}
               narrow
             />
           </div>

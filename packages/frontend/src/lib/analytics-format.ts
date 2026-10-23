@@ -243,15 +243,20 @@ export function formatAnalyticsValue(value: number, currency: AnalyticsCurrency)
 
 /**
  * The y-axis tick: the same currency voice as `formatAnalyticsValue`, with
- * NO fraction digits — an axis needs no more precision than its grid, and a
- * `$100.00` tick overran the 390 gutter and sat on the first bar (#3051
- * design review). Values are the scale's own round ticks, never a figure.
+ * the fraction digits the TICK STEP chooses (#4334) — 0 for a whole-unit
+ * step, 2 otherwise, and 4 when the step is under a cent, so a sub-cent
+ * scale's ticks stay distinct instead of printing "$0, $0". The decimals
+ * come from the STEP and not from each value (S5 on #4334): per-value
+ * formatting would print "$0.0020, $0.0040, $0.01, $0.01" up one axis —
+ * the two coarse ticks rounding away the very distinction the fine ones
+ * carry. Values are the scale's own round ticks, never a figure.
  */
-export function formatAnalyticsTick(value: number, currency: AnalyticsCurrency): string {
+export function formatAnalyticsTick(value: number, step: number, currency: AnalyticsCurrency): string {
+  const decimals = step >= 1 ? 0 : step > 0 && step < 0.01 ? 4 : 2
   return new Intl.NumberFormat(analyticsCurrencyLocale(currency), {
     style: 'currency',
     currency,
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
   }).format(value)
 }

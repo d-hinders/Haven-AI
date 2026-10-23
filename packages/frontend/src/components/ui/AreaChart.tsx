@@ -174,8 +174,10 @@ export interface FullChartProps {
   ariaLabel: string
   /** The caller formats every money figure — one voice across the page. */
   formatValue: (amount: number) => string
-  /** Tick labels; callers keep it compact (no cents) so the gutter fits. Defaults to `formatValue`. */
-  formatTick?: (amount: number) => string
+  /** Tick labels; receives the scale's tick step (#4334) so the caller can
+   *  pick the label's fraction digits from it. Callers keep it compact so
+   *  the gutter fits. Defaults to `formatValue`. */
+  formatTick?: (amount: number, step: number) => string
   /** Fewer ticks and the pinned panel: the 390px treatment, owned by the
    *  caller's breakpoint. */
   narrow?: boolean
@@ -630,7 +632,7 @@ function AreaChartFull({
               transform: 'translateY(-50%)',
             }}
           >
-            {formatTick(tick)}
+            {formatTick(tick, plot.scale.step)}
           </span>
         ))}
         {plot.labelIdx.map((i) => (

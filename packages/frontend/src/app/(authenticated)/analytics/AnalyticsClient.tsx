@@ -429,10 +429,11 @@ export default function AnalyticsClient() {
             table is the page's primary reading surface and stays on the
             first screen; the chart is the same figures over time. Each
             section keeps its own guard (#4333 removed the page-level sparse
-            band that hid all of them together), so a one-day window still
-            shows the figures and the table — a total over one day is still
-            the total over that day — and only the charts decline to draw
-            through fewer than MIN_CHARTABLE_DAYS points. */}
+            band that hid all of them together): the balance chart declines
+            to draw through fewer than MIN_CHARTABLE_DAYS points, and the
+            spend chart draws every calendar day of the window (#4334) — its
+            own floor is a period with no activity at all, which renders the
+            section's empty state. */}
         <div className="mt-4">
           <SpendSection
             byDay={data.by_day}

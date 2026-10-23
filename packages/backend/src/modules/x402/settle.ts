@@ -21,7 +21,7 @@ import { storedPaymentRequiredFromMetadata } from './sign-context.js'
 import { passportReferenceFor } from '../passport/index.js'
 import { markIntentSubmittedForSettlement } from '../../infra/repositories/x402-authorizations.js'
 import type { X402HandlerResult } from './types.js'
-import { boundedErrorDetails } from '../payments/prepare-failure.js'
+import { boundedErrorDetails } from '../payments/index.js'
 
 /** The row's recorded settlement scheme (`machine_metadata.settlement_scheme`), or null. */
 function settlementScheme(intent: { machine_metadata: Record<string, unknown> | string | null }): string | null {

@@ -5,6 +5,7 @@ contract: true
 covers:
   - packages/backend/src/middleware/owner-cli.ts
   - packages/backend/src/domain/user-signers.ts
+  - packages/backend/src/domain/x402-settlement-timing.ts
   - packages/backend/src/routes/user.ts
   - packages/frontend/src/components/PasskeyElsewhereHint.tsx
   - packages/backend/src/infra/repositories/merchants.ts
@@ -3906,3 +3907,15 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > calls `POST /machine-payments/budget-precheck`. JSDoc only: no signing,
 > settlement, budget read or authority path changes. Scope of this note: that
 > comment. Nothing else in this document was re-read for it.
+
+> **Re-verified unchanged (#4379, 2026-10-23 — import paths and one constant's
+> home).** `modules/x402/delegation-authorize.ts` and
+> `modules/mpp/budget-precheck.ts` now import `refuse`, the refusal-ledger
+> classifiers and the prepare-failure helpers through `../payments/index.js`
+> rather than private payments files. `MAX_SETTLEMENT_WINDOW_SECONDS` (600) is
+> now defined in `domain/x402-settlement-timing.ts` and re-exported unchanged
+> by `modules/x402/x402-delegation.ts`, which still clamps the settlement
+> child's window with it; the new file joins the paths this document's front
+> matter covers, and the money-path globs. No delegation, caveat, enforcer term, settlement
+> window, budget pre-check or refusal changes. Scope of this note: those lines.
+> Nothing else in this document was re-verified.

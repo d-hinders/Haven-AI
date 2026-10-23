@@ -1,12 +1,14 @@
 /**
- * Visual regression for Settings → Company details (#3332): the owner
- * company-details + VIES section, behind `HAVEN_OWNER_COMPANY_DETAILS`.
+ * Visual regression for Settings → Company details (#3332, reshaped #4359):
+ * the owner company-details + VIES section, behind
+ * `HAVEN_OWNER_COMPANY_DETAILS`.
  *
  * Two states, light + dark (desktop only — no mobile dark baseline exists
  * for this spec, same convention `marketplace.visual.spec.ts` follows):
- * empty (nothing saved yet — the purpose text and blank fields) and filled
- * with a VIES-`valid` VAT number (the "checked against VIES on <date>" line,
- * never "verified").
+ * empty (nothing saved yet — #4359's "No company details" state, with the
+ * blank form revealed via **Add company details**) and filled with a
+ * VIES-`valid` VAT number (the "Checked against VIES" badge + date, never
+ * "verified").
  */
 import { expect, test, type Locator, type Page } from '@playwright/test'
 import { VISUAL_SKIP_REASON, VISUAL_SPECS_ENABLED } from './support/visual-mode'
@@ -85,7 +87,7 @@ async function serveCompanyDetails(page: Page, body: unknown, status = 200) {
   })
 }
 
-async function openSettings(page: Page) {
+async function openSettings(page: Page, opts: { reveal?: boolean } = {}) {
   // #4358: company details live on the Business tab.
   await page.goto('/settings?tab=business')
   await page.evaluate(() => document.fonts.ready)
@@ -94,7 +96,15 @@ async function openSettings(page: Page) {
   const heading = page.getByRole('heading', { name: 'Company details', exact: true })
   const card = page.locator('section', { has: heading })
   await expect(card).toHaveCount(1)
-  await expect(card.getByTestId('company-details-form')).toHaveCount(1)
+  // #4359: with nothing saved the form sits behind **Add company details** —
+  // the empty-state capture keeps the one-line state, the blank-form capture
+  // clicks through first.
+  if (opts.reveal) {
+    await card.getByRole('button', { name: 'Add company details' }).click()
+    await expect(card.getByTestId('company-details-form')).toHaveCount(1)
+  } else {
+    await expect(card.getByTestId('company-details-form')).toHaveCount(1)
+  }
   return card
 }
 
@@ -115,12 +125,14 @@ test.describe('settings company details', () => {
   })
 
   for (const vp of VIEWPORTS) {
-    test(`empty — purpose text, blank fields (${vp.name})`, async ({ page }, testInfo) => {
+    test(`empty — purpose text, blank fields behind Add company details (${vp.name})`, async ({ page }, testInfo) => {
       const scheme = schemeOf(testInfo)
       test.skip(scheme === 'dark' && vp.name !== 'desktop', 'no mobile dark baseline for this spec')
       await page.setViewportSize({ width: vp.width, height: vp.name === 'mobile' ? MOBILE_CAPTURE_HEIGHT : vp.height })
       await serveCompanyDetails(page, EMPTY_DETAILS, 200)
-      const card = await openSettings(page)
+      // #4359: the blank form is behind **Add company details** — click
+      // through, then capture the form as before.
+      const card = await openSettings(page, { reveal: true })
       await expect(card.getByLabel('Legal name')).toHaveValue('')
       await expect(card.getByTestId('company-details-purpose')).toContainText('personal identity number')
       await scrollCardToTop(card)
@@ -130,14 +142,16 @@ test.describe('settings company details', () => {
       )
     })
 
-    test(`filled — VIES checked against VIES, never "verified" (${vp.name})`, async ({ page }, testInfo) => {
+    test(`filled — the VIES badge says "Checked against VIES", never "verified" (${vp.name})`, async ({ page }, testInfo) => {
       const scheme = schemeOf(testInfo)
       test.skip(scheme === 'dark' && vp.name !== 'desktop', 'no mobile dark baseline for this spec')
       await page.setViewportSize({ width: vp.width, height: vp.name === 'mobile' ? MOBILE_CAPTURE_HEIGHT : vp.height })
       await serveCompanyDetails(page, FILLED_DETAILS)
       const card = await openSettings(page)
       await expect(card.getByLabel('Legal name')).toHaveValue('Ada Lovelace AB')
-      await expect(card.getByText('VAT number checked against VIES on 20 September 2026')).toHaveCount(1)
+      // #4359: the state is a badge + the date beside it.
+      await expect(card.getByTestId('vies-status-line')).toContainText('Checked against VIES')
+      await expect(card.getByTestId('vies-status-line')).toContainText('20 September 2026')
       await expect(card.getByText(/verified/i)).toHaveCount(0)
       await expect(card.getByRole('button', { name: 'Remove company details' })).toHaveCount(1)
       await scrollCardToTop(card)

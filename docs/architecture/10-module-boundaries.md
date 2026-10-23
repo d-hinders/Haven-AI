@@ -122,10 +122,10 @@ severity and unconditional** (#999). Enforcement status:
 |---|---|---|
 | 1. `domain/` is pure | ✅ `core-stays-pure` covers the shared kernel (#983); `domain-stays-pure` covers the backend's own `domain/` (#998), zero violations on both | landed |
 | 2. `modules/` may not import `http/` | ✗ | the `http/` directory (routes/ → http/ is not part of #998's scope — a separate future rename) |
-| 3. Only `infra/` touches the DB | ✅ `pg-only-in-infra`, absolute | #985 / #988 / #995 extracted the money path; #999 drove the residue to zero, #1167 retired three more waivers and #1180 the signup/login one — deliberate exceptions carry inline `dep-lint-exempt` waivers with their reasons (8 at `2d0713dad`, of the 11 waived edges the lint prints; live count printed by every lint run) |
+| 3. Only `infra/` touches the DB | ✅ `pg-only-in-infra`, absolute | #985 / #988 / #995 extracted the money path; #999 drove the residue to zero, #1167 retired three more waivers and #1180 the signup/login one — deliberate exceptions carry inline `dep-lint-exempt` waivers with their reasons (8 at #4379, of the 15 waived edges the lint prints; live count printed by every lint run) |
 | 4. Only `rails/` + `infra/` touch a chain SDK | ✅ `chain-sdk-not-in-routes`, zeroed for `routes/**` (#994) | `rails/` itself landed with #998; the rule's positive form (asserting infra/rails ARE the only importers, everywhere) is still follow-up work |
 | 5. `http/` imports module entry points only | ✗ | the `http/` directory (see rule 2 — not part of #998) |
-| 6. Cross-module imports go through `index.ts` | ◐ `no-deep-cross-module-import`, absolute — but only for importers **outside** `modules/`: its `from` excludes every `modules/<name>/` file (`.dependency-cruiser.cjs`), so code anywhere in `packages/backend/src` outside `modules/` (`routes/`, `rails/`, `infra/`, `platform/`, `middleware/`, `index.ts`, …) must import a module through its `index.ts`, while one module reaching into another's private file is not checked. 14 static module-to-module deep imports exist at `2d0713dad` (e.g. `modules/x402/delegation-authorize.ts` → `modules/payments/refuse.js`), and the lint passes. It covers every `modules/**` directory (accounts, accounting, agents, budget-scope, catalog, dashboard, fee, feedback, mpp, ops, owner-profile, passport, payments, sub-budgets, task-budgets, transactions, x402), with 3 inline waivers (`index.ts`, `routes/accounting.ts`, `routes/dashboard-budget-remaining.ts`) | landed (#998 widened from the five `lib/{reporting,fee}` + `modules/{transactions,x402,mpp}` directories to all of `modules/**`; the 2026-09-11 #2881 rename dissolved `modules/reporting/` into `modules/accounting/` and split its asserting code out; `modules/task-budgets/` joined with #3329; `modules/owner-profile/` joined with #3332; `modules/sub-budgets/` joined with #3444; `modules/ops/` joined with #3509; `modules/feedback/` joined with #3597 — `domain-stays-pure` forbids its `viem/accounts` import inside `domain/`, and it lives here carrying no waiver today; `modules/budget-scope/` joined with #3616 and `modules/dashboard/` with #3847). Widening the `from` side to module-to-module imports is not done: it would first need the 14 deep imports routed through their modules' `index.ts` |
+| 6. Cross-module imports go through `index.ts` | ✅ two arms, absolute: `no-deep-cross-module-import` (an import into `modules/<name>/` from outside `modules/`) and `no-deep-module-to-module-import` (one module importing another module's private file, #4379 — before it, the first arm's `from` excluded every `modules/` file, so 14 such imports were unchecked). Every `modules/**` directory — zero violations, 3 + 4 inline waivers (see below). `modules/dashboard/` (#3847) is the one directory without an `index.ts`, deliberately: #3804's owner decision makes `routes/dashboard-budget-remaining.ts` the only importer of its display-only budget-remaining cache, through one of the 3 `no-deep-cross-module-import` waivers, and `modules/dashboard/__tests__/budget-remaining-import-guard.test.ts` pins that no other file imports it | landed (#998 widened from the five `lib/{reporting,fee}` + `modules/{transactions,x402,mpp}` directories to all of `modules/**`; the 2026-09-11 #2881 rename dissolved `modules/reporting/` into `modules/accounting/` and split its asserting code out; `modules/task-budgets/` joined with #3329; `modules/owner-profile/` joined with #3332; `modules/sub-budgets/` joined with #3444; `modules/ops/` joined with #3509; `modules/feedback/` joined with #3597 — `domain-stays-pure` forbids its `viem/accounts` import inside `domain/`, and it lives here carrying no waiver today; `modules/budget-scope/` joined with #3616 and `modules/dashboard/` with #3847) |
 | 7. The graph is acyclic | ✅ `no-circular` | at zero — held absolutely, and the one rule an inline waiver can never silence |
 
 `@haven_ai/core` also carries the GENERATED API wire types (#984):
@@ -142,11 +142,14 @@ inherited debt), and `domain-stays-pure` (#998 — every file placed in the
 backend's own `domain/` was verified pure before landing there; one candidate,
 `execution-rail.ts`, was kept OUT of `domain/` specifically because it reached
 the database directly, and lives in `rails/` instead — its query itself moved
-behind `infra/repositories/` in #999). `no-deep-cross-module-import` is not one
-of them: #998 emptied it, but it carries 3 inline waivers at `2d0713dad`
-(`index.ts` injecting the ops chain readers, #3513; `routes/accounting.ts`'s
-legacy entry, #2881; `routes/dashboard-budget-remaining.ts`'s display cache,
-#3804). Unlike `no-circular` it is not mechanically unwaivable.
+behind `infra/repositories/` in #999). Rule 6's two rules are not among them:
+at #4379 `no-deep-cross-module-import` carries 3 inline waivers (`index.ts`,
+`routes/accounting.ts`, `routes/dashboard-budget-remaining.ts`) and
+`no-deep-module-to-module-import` carries 4 (`modules/accounting/entry.ts` →
+`transactions/normalize.ts`, and three `modules/mpp/evidence.ts` → `x402/`
+leaves), each naming the cycle an `index.ts` import would close — `no-circular`
+is the one rule no waiver can silence, so a deep import into a zero-cycle leaf
+is the reviewed alternative. Unlike `no-circular`, both are waivable.
 
 1. **`domain/` is pure.** It may not import `fastify`, `pg`, `ethers`, `viem`,
    `permissionless`, `@metamask/smart-accounts-kit`, or any path under
@@ -161,8 +164,10 @@ legacy entry, #2881; `routes/dashboard-budget-remaining.ts`'s display cache,
 5. **`http/` may import module public entry points only.** A route may not
    reach past `modules/<name>/index.ts`.
 6. **Cross-module imports resolve to `modules/<name>/index.ts`.** Never a deep
-   path into another module's private files. (Enforced today only for importers
-   outside `modules/`; see the table above.)
+   path into another module's private files — from outside `modules/`
+   (`no-deep-cross-module-import`) or from another module
+   (`no-deep-module-to-module-import`, #4379). A module's own files import
+   each other freely.
 7. **The graph is acyclic.** No cycles between modules, ever. Cycles are what
    make a codebase impossible to test in isolation, split, or delete from.
 
@@ -271,7 +276,7 @@ Achieved state as of 2026-08-07 (#999, the epic's closing issue):
 | Inline SQL call sites | 35 `.query(` call sites across 9 production files outside `db/`, `db.ts` and `infra/repositories/` — gauged on every lint run (`npm run lint:deps`, re-measured 2026-10-23 at `2d0713dad`) and capped by the shrink-only ceiling, now also 35 (#1166; `packages/backend/dep-lint-callsite-ceiling.json`, 9 per-file entries). Was 108 across 18 files; #1167 emptied `routes/user.ts`, `routes/dashboard.ts` and `routes/agent-activity.ts`, #1180 `routes/auth.ts`; the epic-#1440 deletions (incl. #2055 removing `routes/approvals.ts`) and later moves account for the rest; the ceiling was locked down from 58 to 35 by #4044 |
 | Chain SDK imported in `routes/` | **0** (#994 — `ChainClient` port + `@haven_ai/core` amount helpers) |
 | Rail branching outside the seam | The retirement gate is decided ONCE, in `rails/execution-rail.ts` (#993); outside migrations, no non-test file but the seam itself mentions `session_key` as a live value — the remaining mentions are the passport rail-domain enum and its OpenAPI mirror, which list `session_key` only as a retired member (#2110) |
-| Boundary enforcement | `npm run lint:deps`, blocking, **0 baseline entries — the baseline file and its ratchet machinery are deleted**; 11 deliberate exceptions carry inline `dep-lint-exempt` waivers, each printed with its reason — 8 `pg-only-in-infra` and 3 `no-deep-cross-module-import` (`index.ts`, `routes/accounting.ts`, `routes/dashboard-budget-remaining.ts`); the lint reports 0 violations across 500 source files (re-measured 2026-10-23 at `2d0713dad`) |
+| Boundary enforcement | `npm run lint:deps`, blocking, **0 baseline entries — the baseline file and its ratchet machinery are deleted**; 15 deliberate exceptions carry inline `dep-lint-exempt` waivers, each printed with its reason — 8 `pg-only-in-infra`, 3 `no-deep-cross-module-import` and 4 `no-deep-module-to-module-import` (re-measured at #4379: "No dependency-boundary violations across 501 source files (15 import edge(s) waived)") |
 | Dependency cycles | **0** — `no-circular` is absolute and unwaivable |
 
 The gauge exists because the retired baseline was a file-edge count, and that
@@ -335,7 +340,10 @@ gauge is 35 across 9 files under a ceiling of 35 (locked down by #4044);
 the largest route is `routes/payments.ts` (1561 lines); the passport alias
 check is case-insensitive; the `lib/` row names `modules/dashboard/`'s missing
 `index.ts` (review round 1 of #4377); the package-split sentence no longer implies
-seven packages. Re-checked without change: the six enabled rules and their
+seven packages. (Merged with #4379 on 2026-10-24: the rule-6 row, the waiver paragraph
+and the boundary-enforcement row now carry #4379's text — a module-to-module
+arm and 15 waivers — so this note's rule-6 and waiver-census items describe
+the doc at `2d0713dad`.) Re-checked without change: the six enabled rules and their
 error severity (`.dependency-cruiser.cjs`), `UNWAIVABLE_RULES` and the
 20-character reason floor (`scripts/dep-lint.mjs`), the nine
 `rails/delegation-*` / `rails/hybrid-*` files, the `session_key` seam (only

@@ -118,7 +118,7 @@ import {
   recordMachinePaymentEvidenceBase,
   type MachinePaymentEvidenceSource,
   type EvidenceRecordOutcome,
-} from '../mpp/evidence.js'
+} from '../mpp/index.js'
 import { feedSettledPaymentBestEffort } from '../accounting/index.js'
 import { SWEEP_RECOVERY_HORIZON_SECONDS } from '../../domain/x402-sweep-window.js'
 

@@ -82,7 +82,7 @@ describe('/accounting after the connection moved to Settings (#2868)', () => {
   it('offers no Connect / Disconnect and points at Settings instead', () => {
     renderPage()
     expect(screen.queryByRole('button', { name: /^(Dis)?connect$/ })).toBeNull()
-    expect(screen.getByRole('link', { name: 'Open Settings' })).toHaveAttribute('href', '/settings')
+    expect(screen.getByRole('link', { name: 'Open Settings' })).toHaveAttribute('href', '/settings?tab=business')
     expect(screen.getByText('Manage your accounting connection in Settings.')).toBeInTheDocument()
     // Positive control: the feed itself is still here.
     expect(screen.getByRole('button', { name: 'Sync now' })).toBeInTheDocument()
@@ -240,7 +240,7 @@ describe('/accounting with the feed on (#2869)', () => {
     })
     renderPage()
     expect(screen.getByTestId('feed-summary')).toHaveAttribute('data-status', 'needs_reauthorisation')
-    expect(screen.getByRole('link', { name: en.accountingPage.summary.fixInSettings })).toHaveAttribute('href', '/settings')
+    expect(screen.getByRole('link', { name: en.accountingPage.summary.fixInSettings })).toHaveAttribute('href', '/settings?tab=business')
   })
 
   it('renders the retry counts from the status (#2866), with the exhausted explanation INLINE', () => {

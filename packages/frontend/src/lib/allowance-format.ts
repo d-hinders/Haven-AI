@@ -21,7 +21,7 @@ function defaultFractionDigits(symbol: string | null | undefined): number | unde
   return undefined
 }
 
-function defaultTokenUnitDecimals(symbol: string | null | undefined): number | undefined {
+export function defaultTokenUnitDecimals(symbol: string | null | undefined): number | undefined {
   const normalized = normalizeTokenSymbol(symbol)
   if (normalized === 'USDC' || normalized === 'USDCE') return 6
   if (normalized === 'ETH' || normalized === 'EURE' || normalized === 'XDAI') return 18

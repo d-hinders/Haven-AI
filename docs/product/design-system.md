@@ -232,6 +232,8 @@ Same rule as v1: **never repurpose a semantic color**.
 
 The ordered set the chart primitives (`ui/StackedBarChart`, `ui/AreaChart`) paint their **non-agent** series from. Colour identifies the SERIES, never the meaning of a value — a refusal is not red and an incoming payment is not green here; those semantics stay with the ink scale and the semantic tokens above. **Order is the contract: assign series by index, never by hash or by name.** Since [#4331](https://github.com/d-hinders/Haven-AI/issues/4331), an **agent-keyed series does not come from this palette at all**: it is filled with the agent's own avatar tint (`seriesColorForAgent(name)`, beside `avatarTint`), so one agent wears one colour on every chart, in every period and on every page, matching its monogram — and the colour survives a re-rank. Two agents can hash to the same tint (six tints, unbounded agents); charts tell same-tint agents apart by name — the legend and the tooltip both print the name beside the swatch. Renaming an agent changes its colour, as it changes its monogram; that is intended. The avatar inks carry their own measured chart-fill guarantee below. Within THIS palette, index assignment stands, and Series 1 deliberately opens on `--v2-brand`. Never reuse a series colour outside a chart.
 
+**The axis is continuous, and the refusal mark lives under the slot ([#4334](https://github.com/d-hinders/Haven-AI/issues/4334)).** `StackedBarChart` draws one slot per day the CALLER hands it; the spend section hands it every local calendar date the window touches, so a day with no spend is an EMPTY slot — the axis reads as time, not as the days that happened to carry a figure — and on 90 days the bars are thin, which is accepted rather than scrolled away. Refusals are the marker series: a small neutral-ink dash UNDER the day's slot (3 viewBox units, below the axis baseline), never a cap on the bar — a barless day's refusals would be undrawable as a cap — and the legend names it "Refused". A tick label's fraction digits come from the tick STEP the scale reports (`chartScale(...).step`, passed to the caller's `formatTick(value, step)`): 4 decimals when the step is under a cent (a sub-cent peak reads "$0.0010 … $0.0040", never "$0, $0"), none for whole-unit steps, 2 between — and the narrow treatment's tick gutter is sized so a 4-decimal SEK tick ("0,0040 kr") fits at 390.
+
 ### Avatar tints ([#4066](https://github.com/d-hinders/Haven-AI/issues/4066))
 
 | Token | Light ink | Light ground | Dark ink | Dark ground |
@@ -870,6 +872,15 @@ The card variant is the bordered tile the analytics page mounts (§ Cards
 chrome: `rounded-[10px]`, border, `--v2-bg` ground, `shadow-card`). The
 inline variant (#3805) is below.
 
+**The `hint` prop (#4333).** An optional ReactNode rendered beside the label,
+sized to the label's line. The caller composes it — usually a `Tooltip` on an
+ⓘ `Info` mark, as the Analytics page's Refused tile does with its two
+recording caveats (the ledger's floor date, the unrecorded price-cap class).
+It is for ELABORATION on something already visible (the count behind the
+hint), never essential copy: § Tooltips' rules bind the call site. Ops tiles
+pass nothing and are unchanged; the hint carries no colour of its own, so a
+tile with a hint still renders its figure in ink in every state.
+
 ### Amount: currency mode (#3805)
 
 `Amount` has two modes. The token mode is the original contract: a
@@ -1003,6 +1014,12 @@ things that need your eye, while a `NoticeRow` is a single line that stays
 until its cause is gone.
 
 ### AreaChart sparkline (#3805)
+
+The full chart's endpoint delta reads "**Net change**" with a SIGNED amount —
+"Net change -120.00" — not "gained"/"spent" (#4333): a fall in the balance is
+not a spend and a rise is not a gain, the balance being per-user and moving
+for reasons the spend chart does not draw. Zero is still "unchanged",
+unsigned.
 
 `variant="sparkline"` inside `ui/AreaChart.tsx` (no new file, so the chart
 home's design-lint `raw-svg` exemption already covers it): the balance line
@@ -2434,6 +2451,14 @@ where the lists get the same key from `useListUrlState`.
 choices (theme, appearance) and is **not used for list or period filtering**
 — the one period control is `PeriodPicker`, the one filter controls are the
 facets (#4116).
+
+**FacetMenu beside PeriodPicker in a PageHeader (#4333).** The Analytics
+header is the documented list-controls PLACEMENT outside a `ListToolbar`: a
+`PageHeader`'s actions row carries the Agent `FacetMenu` before the
+`PeriodPicker`, exactly as a toolbar would — single-select, "All agents"
+first, the trigger tinting while a filter is set. A page that has no list
+summary line may mount the two chips directly; the toolbar is for pages that
+have one.
 
 #### Behaviour
 

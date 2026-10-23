@@ -2,10 +2,7 @@
 import pool from '../../db.js'
 import { isSupportedLedgerCurrency, type LedgerCurrency } from '../../domain/ledger-currency.js'
 import { vatTreatmentForCountry } from '../../domain/vat.js'
-// Imported from the leaf, not `../transactions/index.js`: the module index
-// pulls a cycle back into accounting, and `no-circular` can never be waived.
-// Module-to-module deep imports are outside `no-deep-cross-module-import`,
-// whose `from` excludes files that are themselves inside a module.
+// dep-lint-exempt: the transactions barrel re-exports transactions/accounting.ts, which imports the accounting barrel, so importing toCanonicalAddress through it closes an accounting ↔ transactions cycle; normalize.ts is a zero-import leaf (#4379)
 import { toCanonicalAddress } from '../transactions/normalize.js'
 
 /**

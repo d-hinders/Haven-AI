@@ -1321,8 +1321,9 @@ resolved differently) but has no remaining frontend caller.
 > **Re-verified unchanged (#4307, 2026-10-23 — card order only):** this diff
 > is presentation chrome only in `components/AccountSignersCard.tsx`. The
 > #3825 Settings link no longer leads the card: it moves below the signers
-> and their actions onto its own `Card.Section` — same href
-> (`/settings#signers`), same wording, the #3825 object note kept as a
+> and their actions onto its own `Card.Section` — same target (now
+> `/settings?tab=security#signers` since #4358 moved the signers onto
+> Settings' Security tab), same wording, the #3825 object note kept as a
 > comment — the one-signer warning now LEADS the card (same div, its `mt-4`
 > offset dropped), and the passkey helper text's offset goes `mt-1.5` to
 > `mt-2`. No signing step, signer-set gate, `pickSigningPath` branch, route

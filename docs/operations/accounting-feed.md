@@ -208,8 +208,9 @@ a `remedy` field, the other two carry a `reason`. A fourth, chain-level line
   `GET /accounting/feed/status` has answered (no flash of an entry that a
   self-hosted answer then removes); a failed status read renders the plain
   entry with no marker.
-- **Where the user manages it (#2868, PR #2903)** — the *Accounting*
-  card on `/settings` (`SettingsClient.tsx` →
+- **Where the user manages it (#2868, PR #2903; Business tab since #4358)** —
+  the *Accounting*
+  card on `/settings?tab=business` (`SettingsClient.tsx` →
   `components/accounting/ConnectionsCard.tsx`, with `ConnectionRow`,
   `ConnectionSettings` and `BackfillDialog`): one row per provider with
   Connect / Reconnect / Disconnect, the per-connection settings and the

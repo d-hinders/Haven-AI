@@ -3901,10 +3901,13 @@ export const SCENARIOS = {
       }
       const openStage = async (stage, query = '') => {
         setSettingsAccountingStage(stage)
-        await settle(() => page.goto(`${BASE_URL}/settings${query}`, { waitUntil: 'domcontentloaded', timeout: 30_000 }))
+        // #4358: the accounting card lives on the Business tab — join
+        // `tab=business` with any forwarded outcome query, never append to
+        // a constant already holding `?tab=…`.
+        await settle(() => page.goto(`${BASE_URL}/settings?tab=business${query ? `&${query.replace(/^\?/, '')}` : ''}`, { waitUntil: 'domcontentloaded', timeout: 30_000 }))
       }
 
-      await settle(() => page.goto(`${BASE_URL}/settings`, { waitUntil: 'networkidle', timeout: 30_000 }))
+      await settle(() => page.goto(`${BASE_URL}/settings?tab=business`, { waitUntil: 'networkidle', timeout: 30_000 }))
 
       // Each stage waits on its own distinguishing copy AND its action, and
       // refuses the neighbouring states' actions — a stage that quietly
@@ -3993,7 +3996,7 @@ export const SCENARIOS = {
       // action renders — so these settle on the state's own test id.
       const settleOff = async (stage, testId) => {
         setSettingsAccountingStage(stage)
-        await page.goto(`${BASE_URL}/settings`, { waitUntil: 'domcontentloaded', timeout: 30_000 })
+        await page.goto(`${BASE_URL}/settings?tab=business`, { waitUntil: 'domcontentloaded', timeout: 30_000 })
         await page.evaluate(() => document.fonts.ready)
         await page.locator('button[aria-label="User menu"]').waitFor({ state: 'attached', timeout: 15_000 })
         await dismissMobileSidebar(page, vp)
@@ -6059,10 +6062,10 @@ export const SCENARIOS = {
       return undefined
     },
     async run({ page, vp, shoot }) {
-      await page.goto(`${BASE_URL}/settings#signers`, { waitUntil: 'networkidle', timeout: 30_000 })
+      await page.goto(`${BASE_URL}/settings?tab=security#signers`, { waitUntil: 'networkidle', timeout: 30_000 })
       await page.evaluate(() => document.fonts.ready)
       await dismissMobileSidebar(page, vp)
-      const heading = page.getByRole('heading', { name: 'Signers' })
+      const heading = page.getByRole('heading', { name: 'Passkeys and wallets' })
       await heading.waitFor({ timeout: 15_000 })
       const section = page.locator('#signers')
       await section.getByText('Passkey 2').waitFor({ timeout: 15_000 })

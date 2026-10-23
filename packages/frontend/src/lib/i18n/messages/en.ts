@@ -161,12 +161,45 @@ export const en = {
   },
   settings: {
     title: 'Settings',
-    subtitle: 'Manage preferences, account access, notifications, and data controls.',
-    viewProfile: 'View profile',
+    // Does not promise business details: the Business tab's visibility rule
+    // is #4359's, and until that lands the tab simply always shows.
+    subtitle: 'Your profile, preferences and security.',
+
+    /** The `?tab=` values and their labels (General is the default). */
+    tab: {
+      general: 'General',
+      security: 'Security',
+      business: 'Business',
+      ariaLabel: 'Settings sections',
+    },
+
+    /**
+     * General → Profile (#4358): the name editor, the read-only email and
+     * Member since — the rows `/profile` carried, moved into Settings.
+     */
+    profile: {
+      title: 'Profile',
+      description: 'The personal details shown on your Haven account.',
+      nameLabel: 'Name',
+      edit: 'Edit',
+      cancel: 'Cancel',
+      save: 'Save',
+      saving: 'Saving...',
+      saved: 'Name updated.',
+      helperText: 'Use the name you want shown in Haven.',
+      errorEmpty: 'Enter a name for your Haven account.',
+      errorControlChar: 'Remove unsupported characters before saving.',
+      errorTooLong: 'Use 80 characters or fewer.',
+      errorGeneric: 'We could not save your name. Please try again.',
+      email: 'Email',
+      emailDetail: 'Used to sign in and for account recovery support',
+      memberSince: 'Member since',
+      notAvailable: 'Not available',
+    },
 
     preferences: {
       title: 'Preferences',
-      description: 'Choose how Haven displays values and future alerts.',
+      description: 'Choose how Haven displays values.',
     },
     currency: {
       label: 'Preferred currency',
@@ -174,7 +207,7 @@ export const en = {
     },
     theme: {
       label: 'Theme',
-      detail: 'System follows your device',
+      detail: 'System follows your device. The toggle in the sidebar changes the same setting.',
       light: 'Light',
       dark: 'Dark',
       system: 'System',
@@ -193,23 +226,15 @@ export const en = {
       label: 'Theme',
       ariaLabel: (current: string, next: string) => `Theme: ${current}. Switch to ${next}`,
     },
-    agentSpendAlerts: {
-      label: 'Agent spend alerts',
-      detail: 'Receive updates when agents use their budget.',
-    },
-
-    access: {
-      title: 'Access',
-      description: 'How you sign in to Haven.',
-    },
     /**
-     * Settings → Signers (#3825). A signer is its own object, not part of an
+     * Settings → Security → "Passkeys and wallets" (#4358, renamed from
+     * plain "Signers"). A signer is its own object, not part of an
      * account (owner decision 2026-10-09): one passkey can approve accounts
      * on several networks. No address by default; "passkey", never a
      * platform brand (#1679).
      */
     signers: {
-      title: 'Signers',
+      title: 'Passkeys and wallets',
       description:
         'The passkeys and wallets that can approve actions on your accounts. One passkey or wallet can approve several accounts.',
       walletLabel: 'Browser wallet',
@@ -227,19 +252,18 @@ export const en = {
       connect: 'Connect wallet',
       disconnect: 'Disconnect',
     },
-    password: {
-      label: 'Password',
-      detail: 'Password changes are not available yet.',
-    },
-
+    /**
+     * Security → "If something goes wrong" (#4358): the exit path and what
+     * Haven cannot recover. The backup line is part of the recovery note —
+     * the one place outside the "Passkeys and wallets" section name where
+     * "signer" would otherwise be tempting (`copy-guidelines.md`).
+     */
     recovery: {
-      title: 'Recovery and safety',
+      title: 'If something goes wrong',
       description: 'Know what Haven can and cannot recover.',
-      limitationsLabel: 'Recovery limitations',
+      limitationsLabel: "What Haven can't recover",
       limitationsDetail:
-        'Haven can help you find account details, but it cannot bypass your wallets or passkeys or recover funds sent on the wrong network.',
-      sessionsLabel: 'Active sessions',
-      sessionsDetail: 'Review signed-in devices and revoke sessions.',
+        'Haven can help you find account details, but it cannot bypass your wallets or passkeys or recover funds sent on the wrong network. Keep a backup passkey or wallet on each funded account.',
       exitPathLabel: 'Your exit path',
       exitPathDetail: 'Inspect and revoke your agent budgets directly on-chain — without Haven. Opens the independent exit page.',
     },
@@ -438,13 +462,16 @@ export const en = {
       },
     },
 
+    /**
+     * General → "Your data" (#4358): one row. The CSV itself lives on
+     * `/transactions` (its Export CSV) — this row only links there.
+     */
     data: {
-      title: 'Data and privacy',
-      description: 'Controls for activity history and product preferences.',
+      title: 'Your data',
+      description: 'Where your records live and how to take them with you.',
       exportLabel: 'Export transactions',
-      exportDetail: 'Download a CSV of account and agent activity.',
-      privacyLabel: 'Privacy controls',
-      privacyDetail: 'Manage analytics and product improvement preferences.',
+      exportDetail: 'Download a CSV of account and agent activity from the transactions page.',
+      openTransactions: 'Open Transactions',
     },
 
     /**

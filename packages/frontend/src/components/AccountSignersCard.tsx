@@ -196,7 +196,7 @@ export default function AccountSignersCard({ accountAddress, chainId, userEmail 
               on the same Card.Section rhythm as "Lost a device?" below. */}
           <Card.Section className="mt-4">
             <Link
-              href="/settings#signers"
+              href="/settings?tab=security#signers"
               className="inline-flex items-center gap-1 text-sm font-medium text-[var(--v2-brand)] hover:underline"
             >
               All your passkeys and wallets in Settings

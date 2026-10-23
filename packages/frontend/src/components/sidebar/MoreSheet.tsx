@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type RefObject } from 'react'
 import Link from 'next/link'
-import { ChevronRight, LogOut, X } from 'lucide-react'
+import { LogOut, X } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { SegmentedControl } from '@haven_ai/ui/SegmentedControl'
 import { useTheme, type ThemePreference } from '@/context/ThemeContext'
@@ -80,7 +80,7 @@ export function MoreSheet({
   /** Destinations the tab bar does NOT carry, in rail order, Settings last. */
   items: NavItem[]
   isActive: (href: string) => boolean
-  account: { name: string; email: string | null; initial: string; active: boolean }
+  account: { name: string; email: string | null; initial: string }
   onLogout: () => void
   /** The logo band (wordmark + environment badge), shared with the rail. */
   header: React.ReactNode
@@ -260,17 +260,14 @@ export function MoreSheet({
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
-          {/* Account first: who you are, then where you can go. The whole
-              row is the profile link — one target, the name it was always
-              announced by (`Open profile for …`). */}
-          <Link
-            href="/profile"
-            onClick={onClose}
-            aria-label={`Open profile for ${account.name}`}
-            aria-current={account.active ? 'page' : undefined}
-            className={`flex items-center gap-3 rounded-md px-3 py-2.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 ${
-              account.active ? 'bg-[var(--v2-brand-soft)]' : 'hover:bg-[var(--v2-surface-2)]'
-            }`}
+          {/* Account first: who you are, then where you can go. NOT a link
+              (#4358): /profile is gone, Settings is already in the sheet's
+              list once (Sidebar.test.tsx #4053 pins that), and a second
+              route to it here would break the "one Settings entry" rule.
+              The row keeps the identity the sheet always announced. */}
+          <div
+            data-account-row=""
+            className="flex items-center gap-3 rounded-md px-3 py-2.5"
           >
             <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--v2-brand)] text-xs font-bold text-[var(--v2-ink-on-brand)]">
               {account.initial}
@@ -281,13 +278,7 @@ export function MoreSheet({
                 <span className="mt-0.5 block truncate text-xs leading-tight text-[var(--v2-ink-3)]">{account.email}</span>
               )}
             </span>
-            {/* The row's tappable cue (#4056): on a phone this is the only
-                route to Profile, and a bare name read as a label. Decorative —
-                the link's name stays `Open profile for …`. */}
-            <span aria-hidden="true" data-account-chevron="" className="inline-flex h-4 w-4 flex-shrink-0 text-[var(--v2-ink-3)]">
-              <Icon icon={ChevronRight} className="h-full w-full" />
-            </span>
-          </Link>
+          </div>
 
           <nav aria-label="All sections" className="mt-2 border-t border-[var(--v2-border)] pt-2">
             <ul className="space-y-0.5">

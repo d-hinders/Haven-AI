@@ -60,8 +60,10 @@ describe('SignersSection (#3825)', () => {
     expect(passkeys).toHaveLength(2)
     expect(screen.getAllByTestId('signer-row-wallet')).toHaveLength(1)
     expect(mockGet).toHaveBeenCalledWith('/user/signers')
-    // One passkey approving the account on two networks reads as ONE row.
-    expect(within(passkeys[0]).getByText('Approves Main (Base), Main (Base Sepolia)')).toBeInTheDocument()
+    // One passkey approving the account on two networks reads as ONE row —
+    // each account now a link to its ?tab=security (#4358).
+    expect(within(passkeys[0]).getByRole('link', { name: 'Main (Base)' })).toBeInTheDocument()
+    expect(within(passkeys[0]).getByRole('link', { name: 'Main (Base Sepolia)' })).toBeInTheDocument()
   })
 
   it('names passkeys by enrollment date, numbering the fallback across the list, never a platform brand', async () => {
@@ -138,7 +140,9 @@ describe('SignersSection (#3825)', () => {
     const { container } = renderSection()
     await screen.findAllByTestId('signer-row-passkey')
     const heading = screen.getByRole('heading', { level: 2 })
-    expect(heading.textContent).toBe('Signers')
+    // #4358: the section is titled "Passkeys and wallets" — the one place
+    // the word "signer" is allowed at all (copy-guidelines.md).
+    expect(heading.textContent).toBe('Passkeys and wallets')
     const rest = (container.textContent ?? '').replace(heading.textContent ?? '', '')
     expect(rest).not.toMatch(/signer/i)
   })
@@ -148,6 +152,9 @@ describe('SignersSection (#3825)', () => {
       signers: [{ kind: 'passkey', key_id: '0x01', created_at: null, accounts: [{ ...BASE_MAIN, account_name: null }] }],
     })
     renderSection()
-    expect(await screen.findByText('Approves Account (Base)')).toBeInTheDocument()
+    // #4358: the account is a link to its security tab now, so the name
+    // renders inside the link.
+    const link = await screen.findByRole('link', { name: 'Account (Base)' })
+    expect(link).toHaveAttribute('href', `/accounts/${BASE_MAIN.account_id}?tab=security`)
   })
 })

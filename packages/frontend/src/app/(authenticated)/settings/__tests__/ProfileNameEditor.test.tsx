@@ -1,6 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { LocaleProvider } from '@/context/LocaleContext'
 
 const mockUseAuth = vi.fn()
 const mockApiPut = vi.hoisted(() => vi.fn())
@@ -27,9 +28,16 @@ vi.mock('@/lib/api', () => {
 })
 
 import { ApiRequestError } from '@/lib/api'
-import ProfileClient from '@/app/(authenticated)/profile/ProfileClient'
+import { ProfileNameEditor } from '@/components/settings/ProfileNameEditor'
 
-describe('ProfileClient', () => {
+/**
+ * The name editor's behaviour tests, moved from the deleted `/profile`
+ * page's suite (#4358) — the editor itself moved to
+ * `components/settings/ProfileNameEditor.tsx` and renders inside
+ * Settings → General → Profile; the page-level test lives in
+ * `SettingsClient.test.tsx`.
+ */
+describe('ProfileNameEditor', () => {
   beforeEach(() => {
     mockUseAuth.mockReset()
     mockApiPut.mockReset()
@@ -48,14 +56,18 @@ describe('ProfileClient', () => {
     })
   })
 
-  it('renders the current profile details', () => {
-    render(<ProfileClient />)
+  function renderEditor() {
+    return render(
+      <LocaleProvider>
+        <ProfileNameEditor />
+      </LocaleProvider>,
+    )
+  }
 
-    expect(screen.getByRole('heading', { name: 'Profile' })).toBeInTheDocument()
+  it('renders the current name', () => {
+    renderEditor()
+
     expect(screen.getByText('Ada Lovelace')).toBeInTheDocument()
-    expect(screen.getByText('ada@example.com')).toBeInTheDocument()
-    expect(screen.getByText('January 15, 2025')).toBeInTheDocument()
-    expect(screen.getByText('Haven account')).toBeInTheDocument()
   })
 
   it('updates the user name', async () => {
@@ -75,7 +87,7 @@ describe('ProfileClient', () => {
       updateUser,
     })
 
-    render(<ProfileClient />)
+    renderEditor()
 
     await user.click(screen.getByRole('button', { name: 'Edit' }))
     await user.clear(screen.getByLabelText('Name'))
@@ -92,7 +104,7 @@ describe('ProfileClient', () => {
   it('shows a validation error before saving an empty name', async () => {
     const user = userEvent.setup()
 
-    render(<ProfileClient />)
+    renderEditor()
 
     await user.click(screen.getByRole('button', { name: 'Edit' }))
     await user.clear(screen.getByLabelText('Name'))
@@ -106,7 +118,7 @@ describe('ProfileClient', () => {
     const user = userEvent.setup()
     mockApiPut.mockRejectedValue(new ApiRequestError('We could not save your name right now.', 500))
 
-    render(<ProfileClient />)
+    renderEditor()
 
     await user.click(screen.getByRole('button', { name: 'Edit' }))
     await user.clear(screen.getByLabelText('Name'))

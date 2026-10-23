@@ -102,6 +102,15 @@ const nextConfig: NextConfig = {
         destination: '/accounts',
         permanent: true,
       },
+      // #4358: the profile page is deleted, not kept on disk as a redirect
+      // page — same shape as `/custody` above. Everything it carried (name
+      // editing, email, member since) renders in Settings → General now, so
+      // a bookmark 308s there (query string preserved by default).
+      {
+        source: '/profile',
+        destination: '/settings',
+        permanent: true,
+      },
       // #3079: the catalog page is renamed Marketplace, so `/catalog` (and any
       // deep link under it, e.g. `/catalog?category=x`) 308s to `/marketplace`.
       // Next preserves the query string on a redirect by default — nothing to

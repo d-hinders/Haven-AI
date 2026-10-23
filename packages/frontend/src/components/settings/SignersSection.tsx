@@ -18,6 +18,8 @@
  * the ordinal fallback numbers across the deduplicated list.
  */
 
+import { Fragment, type ReactNode } from 'react'
+import Link from 'next/link'
 import { useConnectModal } from '@rainbow-me/rainbowkit'
 import { useAccount, useDisconnect } from 'wagmi'
 import { useT } from '@/context/LocaleContext'
@@ -27,10 +29,24 @@ import { chainName } from '@/lib/marketplace'
 import { Button } from '@/components/ui/Button'
 import { SettingsSection, SettingsRow } from '@/components/ui/SettingsSection'
 
-function accountsLine(accounts: UserSignerAccount[], fallbackName: string): string {
-  return accounts
-    .map((a) => `${a.account_name?.trim() || fallbackName} (${chainName(a.chain_id)})`)
-    .join(', ')
+/**
+ * The accounts a signer approves, each as a link to its Security & details
+ * tab (`/accounts/<id>?tab=security`, as `AgentSettingsTab` links them) —
+ * the account page is the only place that can add or remove a signer, so
+ * the settings list points there (#4358).
+ */
+function accountsLine(accounts: UserSignerAccount[], fallbackName: string): ReactNode {
+  return accounts.map((a, index) => (
+    <Fragment key={`${a.account_id}-${a.chain_id}`}>
+      {index > 0 ? ', ' : null}
+      <Link
+        href={`/accounts/${a.account_id}?tab=security`}
+        className="text-[var(--v2-brand)] hover:underline"
+      >
+        {a.account_name?.trim() || fallbackName} ({chainName(a.chain_id)})
+      </Link>
+    </Fragment>
+  ))
 }
 
 function SignerRow({
@@ -45,9 +61,13 @@ function SignerRow({
 }) {
   const t = useT().settings.signers
   const approves =
-    signer.accounts.length > 0
-      ? `${t.approves} ${accountsLine(signer.accounts, t.accountFallbackName)}`
-      : t.noAccounts
+    signer.accounts.length > 0 ? (
+      <>
+        {t.approves} {accountsLine(signer.accounts, t.accountFallbackName)}
+      </>
+    ) : (
+      t.noAccounts
+    )
   return (
     <SettingsRow
       data-testid={`signer-row-${signer.kind}`}

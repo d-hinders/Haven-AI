@@ -69,7 +69,10 @@ export const DISCOVERY_INDEX_MAX_PAGES = 5
  * #4300: wall-clock budget for probing one run's candidates. With the 5 s
  * candidate probe budget that is at least 24 probes a run. A candidate the run
  * does not reach is not in the catalog yet, so the next run considers it
- * again; nothing is lost.
+ * again. Failed candidates are not remembered and the index is read in the
+ * same order each run, so if the candidates ahead of it keep using their full
+ * probe budget, a late candidate can be deferred run after run. Discovery is
+ * opt-in and off by default.
  */
 export const DISCOVERY_RUN_BUDGET_MS = 2 * 60_000
 

@@ -412,7 +412,8 @@ const HAVEN_USER_AGENT = 'Haven-CatalogVerification/1.0 (+https://haven.xyz)'
 
 /**
  * Settle `work` within `budgetMs`, or refuse with `timeout` (#4300). The work
- * itself is not cancelled; its late result is ignored.
+ * itself is not cancelled; its late result is ignored. A timed-out
+ * `dns.lookup` keeps its libuv threadpool slot until getaddrinfo returns.
  */
 async function withinBudget<T>(work: Promise<T>, budgetMs: number, totalMs: number): Promise<T | SsrfRefusal> {
   let timer: ReturnType<typeof setTimeout> | undefined

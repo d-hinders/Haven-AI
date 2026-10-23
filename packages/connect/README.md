@@ -503,7 +503,9 @@ need its full public identifier can inspect the owner-only, non-secret
 `identity.json` or `signer.json` for diagnostics because they contain secrets.
 
 For Hermes, Connect stores the hosted-MCP API key in the matching owner-only
-`.env` file and keeps only `Bearer ${MCP_HAVEN_API_KEY}` in `config.yaml`.
+`.env` file and keeps only `Bearer ${<the pair's env key>}` in `config.yaml`:
+`MCP_HAVEN_<SLUG>_API_KEY` for a named pair (the default since #3737), or
+`MCP_HAVEN_API_KEY` for the bare pair (`--bare` or `--replace` without `--name`).
 Hermes requires its Python MCP SDK support to be installed. If Haven tools do
 not appear after restart, run `pip install mcp` in the Hermes environment, then
 restart Hermes and check `hermes mcp list`.

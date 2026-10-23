@@ -32,7 +32,7 @@ test.describe('transactions row — activation (#3554, #4266)', () => {
   }) => {
     // A role="button" row must not contain interactive descendants
     // (nested-interactive ARIA): the accounting badge on a row is a plain
-    // pill, and the /accounting link lives in the detail panel's Feed row.
+    // pill, and the /accounting link lives in the detail panel's Accounting row.
     const row = page.locator(ROW).first()
     await expect(row.locator('a, button')).toHaveCount(0)
     await row.getByTestId('accounting-badge').click()

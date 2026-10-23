@@ -338,8 +338,10 @@ any secret is stored — 409 `UNSUPPORTED_BASE_CURRENCY`, or the OAuth callback'
 `reason=unsupported_currency`. A provider that cannot say (`base_currency` null)
 passes and books in SEK, the default.
 
-> **No production connection is non-SEK today.** Fortnox is the only `live`
-> provider and its `getCompanyInfo` reports `SEK` by construction. The machinery
+> **No production connection is non-SEK today.** Two providers are `live`:
+> Fortnox, whose `getCompanyInfo` reports `SEK` by construction, and Accounted,
+> whose company read exposes no currency (`base_currency` null), so it books in
+> SEK by the default above. The machinery
 > below ships ahead of its first user — the `coming_soon` providers.
 
 **What is pushed, and when the rate was taken.** The record carries the amount in

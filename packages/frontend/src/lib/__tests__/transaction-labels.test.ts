@@ -59,9 +59,9 @@ describe('paymentSourceTitle (#2357)', () => {
     // The identifiers that reach this function as `source` values. A title
     // containing one is the row saying "x402" / "mpp" to a user, which
     // `copy-guidelines.md` § Core principle rules out for a primary surface.
-    // Technical vocabulary stays legal on the detail drawer — that is where
-    // `TransactionDetailPanel`'s "x402 payment" heading and `settlementScheme`
-    // label live, and neither goes through this function.
+    // Technical vocabulary stays legal under the detail panel's Technical
+    // details — that is where its "Settlement method" row lives, and it does
+    // not go through this function.
     for (const source of MACHINE_PAYMENT_SOURCES) {
       const title = paymentSourceTitle(source) ?? ''
       expect(title).not.toMatch(/x402/i)

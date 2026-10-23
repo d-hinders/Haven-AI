@@ -23,21 +23,6 @@ export type CounterpartyFields = Pick<
   'activityType' | 'agentName' | 'source' | 'x402ResourceUrl' | 'direction' | 'to' | 'from' | 'chainId'
 >
 
-export function transactionTitle(tx: AggregatedTransaction): string {
-  if (isDelegateSweep(tx)) return 'Agent funds swept back'
-  if (tx.direction === 'in') return 'Received payment'
-
-  const sourceTitle = paymentSourceTitle(tx.source)
-  if (sourceTitle && tx.agentName) return `${sourceTitle} by ${tx.agentName}`
-  if (sourceTitle) return sourceTitle
-  if (tx.agentName) return `Agent payment by ${tx.agentName}`
-  // "Payment sent by you" is reserved for human-initiated payments; a row
-  // with no human marker renders neutral copy — the Initiator field carries
-  // the attribution state (#2097).
-  if (tx.initiatedBy === 'human') return 'Payment sent by you'
-  return 'Payment sent'
-}
-
 /**
  * Who initiated the row (#2097). "You" is reserved for human-initiated
  * payments (`initiatedBy === 'human'`, an owner send recorded at submit,
@@ -147,9 +132,10 @@ function ownAccountSenderName(
  * #3824) — the groups expose no chain-scoped address map, so the client
  * cannot re-run the `accountNamesByAddress` lookup itself.
  *
- * The default mode is byte-identical to the pre-#3810 behaviour: the list
- * rows pass `{ noAddress: true }` (#3811); `TransactionDetailPanel` keeps the
- * default, where the full address is the point.
+ * The default mode is byte-identical to the pre-#3810 behaviour. The list
+ * rows pass `{ noAddress: true }` (#3811), and so does
+ * `TransactionDetailPanel` since #4267: its title matches the row, and every
+ * address sits shortened under its Technical details.
  */
 export function counterpartyLabel(
   tx: CounterpartyFields,

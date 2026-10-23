@@ -3882,7 +3882,8 @@ export const SCENARIOS = {
 
       const heading = page.getByRole('heading', { name: 'Accounting', exact: true })
       // The section root that owns the heading (`SettingsSection` renders
-      // `<section>`; the heading is its `Card.Header` h2). Rows are
+      // `<section>`; the heading is its `v2-text-h3` h2, ABOVE the card).
+      // Rows are
       // `SettingsRow`s, which stack their actions under the text below `sm`
       // — the mobile capture shows that stacking, not a mobile layout.
       const card = page.locator('section', { has: heading })

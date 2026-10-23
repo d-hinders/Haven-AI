@@ -33,9 +33,10 @@
  * re-open the dialog after "Feed from now" the moment Settings was saved.
  * `askedRef` remembers which outcome the dialog was opened for.
  *
- * Surface hierarchy: the card is a `SettingsSection` (white, grey header
- * band) whose body is a hairline-divided row list; the inline settings are
- * a padded block under their row, never a nested filled card.
+ * Surface hierarchy: the card is a `SettingsSection` (heading above the
+ * card, per the detail-page section rule) whose body is a hairline-divided
+ * row list; the inline settings are a padded block under their row, never a
+ * nested filled card.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
@@ -45,7 +46,7 @@ import { Card } from '@/components/ui/Card'
 import { InlineAlert } from '@/components/ui/InlineAlert'
 import { Modal } from '@/components/ui/Modal'
 import { Skeleton } from '@/components/ui/Skeleton'
-import { SettingsSection } from '@/app/(authenticated)/settings/SettingsSection'
+import { SettingsSection } from '@/components/ui/SettingsSection'
 import {
   accountingRefusal,
   useAccountingConnections,
@@ -55,7 +56,7 @@ import {
 } from '@/hooks/useAccounting'
 import { accountingFeedOffState, useAccountingFeed } from '@/hooks/useAccountingFeed'
 import { StatusBadge } from '@/components/ui/StatusBadge'
-import { SettingsRow } from '@/app/(authenticated)/settings/SettingsSection'
+import { SettingsRow } from '@/components/ui/SettingsSection'
 import { BackfillDialog } from './BackfillDialog'
 import { ConnectionRow } from './ConnectionRow'
 import { ConnectionSettings } from './ConnectionSettings'

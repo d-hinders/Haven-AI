@@ -2,13 +2,21 @@ import type { ReactNode } from 'react'
 import { Card } from '@/components/ui/Card'
 
 /**
- * One titled section on the Settings page — the white card with the grey
- * `Card.Header` band and a hairline-divided row list under it.
+ * One titled section on the Settings page — a `v2-text-h3` heading and its
+ * description sit ABOVE the card, and the card holds the hairline-divided
+ * row list (settings pages follow the detail-page section rule, owner
+ * decision 2026-10-23 on #4357). The card can load, swap or be replaced
+ * without moving its heading, and a skimming reader gets every section name
+ * from the heading scan alone.
  *
- * Extracted from `SettingsClient` on its second consumer (#2868): the
- * Accounting connections card lives in `components/accounting/` and has to
- * sit in the same vertical list as Preferences and Access without re-writing
- * the shell. Screen recipe: `docs/product/screen-recipes.md` § Settings.
+ * Moved here from `app/(authenticated)/settings/SettingsSection.tsx` (#4357)
+ * so the design-system coupling gate watches it; screen recipe:
+ * `docs/product/screen-recipes.md` § Settings.
+ *
+ * Note: unlike the Manage pattern on detail pages (#3695), settings rows keep
+ * their visible actions — a settings section is not required to move row
+ * actions into a ⋯ menu (`ConnectionRow`'s Connect / Reconnect / Disconnect /
+ * Settings buttons stay compliant).
  */
 export function SettingsSection({
   title,
@@ -25,15 +33,15 @@ export function SettingsSection({
   className?: string
 }) {
   return (
-    <section className={`rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] shadow-card ${className}`}>
-      <Card.Header padding="spacious" className="rounded-t-[10px]">
-        <h2 className="text-[13px] font-semibold uppercase tracking-widest text-[var(--v2-ink)]">{title}</h2>
-        {description ? (
-          <p className="mt-1 text-sm text-[var(--v2-ink-3)]">{description}</p>
-        ) : null}
-        {note ? <p className="mt-2 text-xs text-[var(--v2-ink-3)]">{note}</p> : null}
-      </Card.Header>
-      <div className="divide-y divide-[var(--v2-border)]">{children}</div>
+    <section className={className}>
+      <h2 className="v2-text-h3 text-[var(--v2-ink)]">{title}</h2>
+      {description ? (
+        <p className="mt-0.5 mb-3 text-sm text-[var(--v2-ink-muted)]">{description}</p>
+      ) : null}
+      {note ? <p className="mt-0.5 mb-3 text-xs text-[var(--v2-ink-3)]">{note}</p> : null}
+      <Card hover={false}>
+        <div className="divide-y divide-[var(--v2-border)]">{children}</div>
+      </Card>
     </section>
   )
 }

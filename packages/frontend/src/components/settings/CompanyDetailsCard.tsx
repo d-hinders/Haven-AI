@@ -44,7 +44,7 @@ import { Button } from '@/components/ui/Button'
 import { InlineAlert } from '@/components/ui/InlineAlert'
 import { Input } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
-import { SettingsSection } from '@/app/(authenticated)/settings/SettingsSection'
+import { SettingsSection } from '@/components/ui/SettingsSection'
 import { useCompanyDetails, type CompanyDetailsRow, type ViesStatus } from '@/hooks/useCompanyDetails'
 
 const COUNTRY_RE = /^[A-Za-z]{2}$/

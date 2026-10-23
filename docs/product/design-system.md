@@ -32,6 +32,7 @@ covers:
   - packages/frontend/src/components/marketing/**
   - packages/frontend/src/components/sidebar/**
   - packages/frontend/src/components/haven/TransactionActivityRow.tsx
+  - packages/frontend/src/components/accounting/ConnectionRow.tsx
   - packages/frontend/src/components/haven/AgentRow.tsx
   - packages/frontend/src/app/(authenticated)/agents/[agentId]/AgentDetailClient.tsx
   - packages/frontend/src/app/(authenticated)/dashboard/AgentsSection.tsx
@@ -754,17 +755,25 @@ a letter ([owner decision on #4210](https://github.com/d-hinders/Haven-AI/issues
 
 On an **entity detail page** — an agent or an account — the page is a stack of
 labelled sections, and every section is assembled the same way. The rule is
-scoped to entity detail pages: not list pages, not settings, not modals (a
-modal keeps its own callout vocabulary — see #3690's in-modal neutral callout,
-which this rule does not touch).
+scoped to entity detail pages and **settings pages** (owner decision
+2026-10-23, on #4357): not list pages, not modals (a modal keeps its own
+callout vocabulary — see #3690's in-modal neutral callout, which this rule
+does not touch). The Settings page assembles its sections with the shared
+`components/ui/SettingsSection.tsx`, which renders this shape so every caller
+follows without edits.
 
 - Each section's heading (`v2-text-h3`) and its one-line description sit
-  **above** its `Card`, not inside it. The card holds the content — rows,
-  `Card.Section` groups and their dividers — so the card can load, swap or be
-  replaced without moving its heading, and a skimming reader gets every section
-  name from the heading scan alone. (This retires the mix the agent page had:
-  "Agent budgets" was headed from inside its card while "Recent activity" was
-  headed from above — epic #3691's later slices apply the rule there.)
+  **above** its `Card`, not inside it — on detail pages **and on settings
+  pages**. On settings the shared `SettingsSection` enforces the shape: the
+  heading is sentence case `v2-text-h3` (never the old uppercase band), the
+  description is `mt-0.5 mb-3 text-sm text-[var(--v2-ink-muted)]` and any
+  note rides under it in `text-xs text-[var(--v2-ink-3)]`, all above the
+  card; the card holds only the hairline-divided rows. The card can load,
+  swap or be replaced without moving its heading, and a skimming reader gets
+  every section name from the heading scan alone. (This retires the mix the
+  agent page had: "Agent budgets" was headed from inside its card while
+  "Recent activity" was headed from above — epic #3691's later slices apply
+  the rule there.)
 - State banners (`ApprovalRequiredBanner`) do not scatter through the page.
   They stack in ONE slot directly under the `PageHeader`, ordered by severity:
   `danger` first (the next action cannot be undone), then `warning` (something
@@ -787,7 +796,10 @@ which this rule does not touch).
   rides on the trigger's `aria-label` ("Budget options 250 USDC per week").
   Choosing Add opens the form in place. A section with **no rows** has no menu
   to carry the add, so it keeps a visible add (Set budget, a ghost button). The
-  `/design-system` specimen shows both states.
+  `/design-system` specimen shows both states. This bullet is **detail-page
+  only**: settings sections are exempt — a `SettingsRow` keeps its visible
+  actions (`ConnectionRow`'s Connect / Reconnect / Disconnect and Settings
+  buttons stay compliant; owner decision 2026-10-23, #4357).
 
 ### BudgetMeter (#3692)
 

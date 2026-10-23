@@ -3875,7 +3875,7 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > rather than private payments files. `MAX_SETTLEMENT_WINDOW_SECONDS` (600) is
 > now defined in `domain/x402-settlement-timing.ts` and re-exported unchanged
 > by `modules/x402/x402-delegation.ts`, which still clamps the settlement
-> child's window with it; the new file joins this document's `covers:` and
-> the money-path globs. No delegation, caveat, enforcer term, settlement
+> child's window with it; the new file joins the paths this document's front
+> matter covers, and the money-path globs. No delegation, caveat, enforcer term, settlement
 > window, budget pre-check or refusal changes. Scope of this note: those lines.
 > Nothing else in this document was re-verified.

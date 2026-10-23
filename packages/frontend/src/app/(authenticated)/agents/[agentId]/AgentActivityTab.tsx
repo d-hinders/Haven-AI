@@ -281,6 +281,10 @@ export function activityToTransaction(
         : null,
     settlementTxHash: item.settlement_tx_hash ?? null,
     fundingTxHash: item.funding_tx_hash ?? null,
+    // #4320: the settlement state rides to the panel under its camelCase
+    // wire names — the activity read is snake_case, mapped here.
+    settlementTracking: item.settlement_tracking ?? null,
+    settlementProof: item.settlement_proof ?? null,
     chainId: item.chain_id ?? 0,
     accountId: item.account_id ?? '',
     accountAddress: item.account_address ?? '',

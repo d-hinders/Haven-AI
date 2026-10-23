@@ -36,6 +36,8 @@ import { ThemeToggle } from '@/components/ui/ThemeToggle'
 import { Textarea } from '@/components/ui/Textarea'
 import { Table } from '@/components/ui/Table'
 import { SidePanel } from '@/components/ui/SidePanel'
+import TransactionDetailPanel from '@/components/transactions/TransactionDetailPanel'
+import type { AggregatedTransaction } from '@/types/transactions'
 import { StepProgress } from '@/components/ui/StepProgress'
 import { DialogActions } from '@/components/ui/DialogActions'
 import { SeriesSwatch, StackedBarChart } from '@/components/ui/StackedBarChart'
@@ -658,6 +660,70 @@ const DS_LEDGER_ACCOUNTING = {
   error: null,
 }
 
+// ── The transaction detail panel's settlement states (#4320) ───────────────
+// The REAL shared panel (the SidePanel section above shows the primitive's
+// slots with specimen content; this shows the product's own drawer) mounted
+// over three production-shaped eip3009 settlement rows, one per
+// `settlementTracking` state — settled (verified), checking and not tracked.
+// The wording lives in `TransactionDetailPanel.tsx`; nothing here re-states it.
+const DS_SETTLEMENT_HASH = `0x${'ef'.repeat(32)}`
+const DS_SETTLEMENT_BASE = {
+  hash: `0x${'ab'.repeat(32)}`,
+  type: 'erc20',
+  from: '0x4444444444444444444444444444444444444444',
+  to: '0x5555555555555555555555555555555555555555',
+  value: '12500000',
+  valueFormatted: '12.50',
+  asset: 'USDC',
+  decimals: 6,
+  direction: 'out',
+  timestamp: 1_779_000_000,
+  blockNumber: null,
+  isError: false,
+  chainId: 8453,
+  accountId: 'acc-operations',
+  accountAddress: '0x4444444444444444444444444444444444444444',
+  accountName: 'Operations',
+  agentName: 'Research agent',
+  initiatedBy: 'agent',
+  source: 'x402',
+  x402ResourceUrl: 'https://api.vendor.com/search?q=1',
+  x402MerchantAddress: '0x5555555555555555555555555555555555555555',
+  paymentId: 'pay_ds_settlement',
+  settlementScheme: 'eip3009',
+  fundingTxHash: `0x${'ab'.repeat(32)}`,
+  deliveryReference: null,
+} satisfies Partial<AggregatedTransaction>
+
+const DS_SETTLEMENT_ROWS: Record<'verified' | 'checking' | 'untracked', AggregatedTransaction> = {
+  verified: {
+    ...DS_SETTLEMENT_BASE,
+    settlementTxHash: DS_SETTLEMENT_HASH,
+    settlementTracking: 'verified',
+    settlementProof: 'nonce',
+  },
+  // Still looking: inside the 24-hour sweep window with a derivable nonce.
+  checking: {
+    ...DS_SETTLEMENT_BASE,
+    hash: `0x${'cd'.repeat(32)}`,
+    fundingTxHash: `0x${'cd'.repeat(32)}`,
+    settlementTxHash: null,
+    settlementTracking: 'checking',
+    settlementProof: null,
+  },
+  // No hash and no source can produce one — outside the window.
+  untracked: {
+    ...DS_SETTLEMENT_BASE,
+    hash: `0x${'cd'.repeat(32)}`,
+    fundingTxHash: `0x${'cd'.repeat(32)}`,
+    settlementTxHash: null,
+    settlementTracking: 'untracked',
+    settlementProof: null,
+  },
+}
+
+type DsSettlementState = keyof typeof DS_SETTLEMENT_ROWS
+
 // ── List controls (#4110, epic #4108) ─────────────────────────────────────
 // Sample data for the ListToolbar showcase. Rows are filtered in memory, so
 // the count is the applied result exactly as a browser-filtered page wires it.
@@ -1152,6 +1218,9 @@ export default function DesignSystemPage() {
     }
   }, [])
   const [panelOpen, setPanelOpen] = useState(false)
+  // #4320: which settlement state the REAL detail panel (below the primitive's
+  // slot demo) is mounted over — null while closed.
+  const [dsSettlement, setDsSettlement] = useState<DsSettlementState | null>(null)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [topModalOpen, setTopModalOpen] = useState(false)
   const [topModalTall, setTopModalTall] = useState(false)
@@ -2437,10 +2506,23 @@ export default function DesignSystemPage() {
 
       <Section
         title="SidePanel"
-        description="Right-hand detail drawer — used for transaction details. Title + optional subtitle header, Escape/backdrop dismiss, focus trapped while open. Reach for it when a Row click needs more detail than a modal question."
+        description="Right-hand detail drawer — used for transaction details. Title + optional subtitle header, Escape/backdrop dismiss, focus trapped while open. Reach for it when a Row click needs more detail than a modal question. The specimen below is the primitive with its two optional slots filled; the REAL shared drawer — the transaction routes' own TransactionDetailPanel — is mounted under it, one button per settlementTracking state of an eip3009 settlement row (#4320)."
       >
         <Card hover={false} className="p-5">
           <Button variant="ghost" onClick={() => setPanelOpen(true)}>Open side panel</Button>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            {/* Each opens the shared `TransactionDetailPanel` over a
+                production-shaped row in that `settlementTracking` state. */}
+            <Button variant="ghost" size="sm" onClick={() => setDsSettlement('verified')}>
+              Detail panel — Settled (verified)
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setDsSettlement('checking')}>
+              Detail panel — Checking
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setDsSettlement('untracked')}>
+              Detail panel — Not tracked
+            </Button>
+          </div>
         </Card>
       </Section>
 
@@ -4253,6 +4335,16 @@ export default function DesignSystemPage() {
           disclosure.
         </p>
       </SidePanel>
+
+      {/* #4320: the REAL shared drawer, one mount per open — the transaction
+          routes mount exactly this component; the three buttons above feed it
+          a production-shaped row per `settlementTracking` state. Closed
+          renders null, so nothing here enters the resting page. */}
+      <TransactionDetailPanel
+        transaction={dsSettlement ? DS_SETTLEMENT_ROWS[dsSettlement] : null}
+        open={dsSettlement !== null}
+        onClose={() => setDsSettlement(null)}
+      />
 
       {confirmOpen ? (
         <ConfirmDialog

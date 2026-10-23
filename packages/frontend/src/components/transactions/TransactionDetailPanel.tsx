@@ -191,6 +191,51 @@ function receiptLabel(status: string | null | undefined): string {
 }
 
 /**
+ * The Settlement row's words, from #4319's `settlementTracking` (#4320). The
+ * three states say only what the record proves — settled (a hash is recorded
+ * and verified on-chain), checking (Haven is still looking) and not tracked
+ * (no record of the merchant's settlement) — never that a paid payment
+ * failed. While an older backend sends no `settlementTracking`, the panel's
+ * two original states stand (#3763): a recorded hash reads "Recorded
+ * (verified)", its absence "Not recorded yet". Null tracks undefined: an
+ * absent field is an older backend, not a state of its own.
+ */
+function settlementDetail(tx: AggregatedTransaction): { value: string; note?: string } {
+  if (tx.settlementTracking === 'verified') return { value: 'Settled (verified)' }
+  if (tx.settlementTracking === 'checking') {
+    return {
+      value: 'Checking',
+      note: 'Haven is looking for the merchant’s settlement on-chain. This usually takes a minute.',
+    }
+  }
+  if (tx.settlementTracking === 'untracked') {
+    return {
+      value: 'Not tracked',
+      note: 'This payment left your account. Haven has no record of the merchant’s settlement for it.',
+    }
+  }
+  return tx.settlementTxHash
+    ? { value: 'Recorded (verified)' }
+    : {
+        value: 'Not recorded yet',
+        note: 'The payment left your account; no settlement from the merchant has been recorded.',
+      }
+}
+
+/**
+ * The "Matched by" row's words, from `settlementProof` (#4320) — how the
+ * recorded settlement was attributed. `legacy` records (before the proof
+ * flags) and a null proof name nothing: the row only speaks when the record
+ * says how the settlement was matched.
+ */
+function settlementProofLabel(proof: AggregatedTransaction['settlementProof']): string | null {
+  if (proof === 'nonce') return 'Payment nonce'
+  if (proof === 'signed_header') return 'Signed payment header'
+  if (proof === 'receipt') return 'Merchant receipt'
+  return null
+}
+
+/**
  * The header's one line: who, where and when. Owner attribution follows
  * #2097 — "you" only for a recorded owner send.
  */
@@ -271,26 +316,16 @@ export default function TransactionDetailPanel({
     const host = parseX402Hostname(tx.x402ResourceUrl) ?? tx.x402ResourceUrl
     if (host) details.push(<DetailRow key="for" label="For" value={host} />)
     details.push(<DetailRow key="receipt" label="Receipt" value={receiptLabel(tx.paymentProofStatus)} />)
-    // #3763: on the eip3009 bridge the merchant settles in a SECOND
-    // transaction. The words state only what the record proves — the
-    // settlement hash was reported by the agent or detected by Haven's
-    // settlement sweep (#3888) and verified on-chain (#3475) — never that the
-    // merchant confirmed anything, and a missing record is "not recorded",
-    // never "failed": the SDK's default evidence post reports the funding
-    // hash (refused by the writer), so many eip3009 rows never get one.
-    // erc7710 is one transaction: the merchant's redemption IS the payment.
+    // On the eip3009 bridge the merchant settles in a SECOND transaction, so
+    // the row tracks what Haven knows about it (#4320): settled (verified),
+    // checking, or not tracked — the words claim only what the record proves,
+    // never that the merchant confirmed anything and never that a paid
+    // payment failed. erc7710 is one transaction: the merchant's redemption
+    // IS the payment, so it has no settlement row.
     if (tx.settlementScheme === 'eip3009') {
+      const settlement = settlementDetail(tx)
       details.push(
-        tx.settlementTxHash ? (
-          <DetailRow key="settlement" label="Settlement" value="Recorded (verified)" />
-        ) : (
-          <DetailRow
-            key="settlement"
-            label="Settlement"
-            value="Not recorded yet"
-            note="The payment left your account; no settlement from the merchant has been recorded."
-          />
-        ),
+        <DetailRow key="settlement" label="Settlement" value={settlement.value} note={settlement.note} />,
       )
     }
   } else if (kind === 'mpp' || kind === 'send') {
@@ -391,6 +426,10 @@ export default function TransactionDetailPanel({
     technical.push(
       <DetailRow key="settlement-tx" label="Settlement transaction" value={onChain('tx', tx.settlementTxHash)} />,
     )
+    // #4320: how the recorded settlement was attributed — beside the hash it
+    // names. Nothing for `legacy` records or an absent proof.
+    const matchedBy = settlementProofLabel(tx.settlementProof)
+    if (matchedBy) technical.push(<DetailRow key="matched-by" label="Matched by" value={matchedBy} />)
   }
 
   // ── The callout, when the record needs one ──

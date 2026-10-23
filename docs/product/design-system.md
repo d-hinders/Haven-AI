@@ -2597,14 +2597,25 @@ pattern, and it leads with the answer:
    amount, date, agent and account appear once, in the header. An x402
    payment shows For, Receipt ("Attached" / "Not attached", never the raw
    proof status) and, on the eip3009 bridge, Settlement worded to what the
-   record proves ("Recorded (verified)", or "Not recorded yet" with one line —
-   never "confirmed by the merchant"). A send shows To, a deposit From, a move
+   record proves from `settlementTracking` (#4320): **Settled (verified)** (a
+   hash is recorded and verified on-chain), **Checking** with one line — "Haven
+   is looking for the merchant's settlement on-chain. This usually takes a
+   minute." — or **Not tracked** with "This payment left your account. Haven
+   has no record of the merchant's settlement for it." Never "confirmed by
+   the merchant", and never a word that implies a paid payment failed. While
+   an older backend sends no `settlementTracking`, the panel's two original
+   states stand: "Recorded (verified)" with a hash, "Not recorded yet" with
+   its line. A send shows To, a deposit From, a move
    By, a sweep what happened; the Accounting row carries the accounting
    badge, linked to `/accounting`, and a failure reason in words.
 3. **Technical details** — § Technical details disclosure, closed by
    default: Network (`NetworkPill`), Payment ID, Settlement method, the
    delivered reference, every address and both hashes (the account's
-   transaction and the merchant's settlement transaction). Each address and
+   transaction and the merchant's settlement transaction), and — beside the
+   settlement hash, when the record says how it was attributed (#4320) —
+   "Matched by": "Payment nonce" (`nonce`), "Signed payment header"
+   (`signed_header`) or "Merchant receipt" (`receipt`); `legacy` records and
+   an absent proof name nothing. Each address and
    hash is shortened (`0x0415…b195`), on one line, with `CopyButton` and an
    explorer link — superseding #3811's "in full" rule. **Trailing slot
    (#4312):** every copy-bearing row reserves a fixed 44px slot after the
@@ -2612,7 +2623,8 @@ pattern, and it leads with the answer:
    empty slot stands in when it does not (the Payment ID row, or an address
    on a chain the registry does not know) — so the copy glyphs share one
    column centre and the explorer glyphs another, whether or not a link is
-   present. Text-only rows (Network, Settlement method, Delivered) do not
+   present. Text-only rows (Network, Settlement method, Delivered, Matched
+   by) do not
    reserve it.
 4. **Footer** — `SidePanel`'s `footer` slot: "View on explorer" for the
    transaction that left or entered the account (the funding leg on eip3009).

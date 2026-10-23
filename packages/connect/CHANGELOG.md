@@ -15,6 +15,8 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+## 0.11.0-alpha.0 — 2026-10-23
+
 ### Changed
 
 - **The installed skill passes the payment header with the settlement report

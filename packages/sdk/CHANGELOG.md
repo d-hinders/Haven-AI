@@ -15,6 +15,8 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+## 0.11.0-alpha.0 — 2026-10-23
+
 ### Changed
 
 - **Without `merchantEgress`, the transport follows redirects itself, and a hop to another origin keeps credentials and payment headers at the origin they were sent to (#4257).** The default path (the SDK, the local MCP, connect and embedders) left redirects to the platform, which on a cross-origin hop drops `Authorization`, `Proxy-Authorization` and `Cookie` (and, on a hop it rewrites to GET, the body headers) but forwards other caller headers. An `X-Api-Key`, a `PAYMENT-SIGNATURE` / `X-PAYMENT` header and other caller headers reached the new origin, and an `https` → `http` hop sent them in clear. A 307/308 also re-sent a POST body there, and an MCP `tools/call` body carries the payment in `_meta["x402/payment"]`. Now:
@@ -85,6 +87,37 @@ required") is refused — reword to "no update needed", or quote it in a code sp
   pass `payment_header`. No update needed to keep paying. Until you update,
   your settlement reports are refused, so receipts show only the funding
   transaction.
+
+- **`MerchantEgressRefusalReason` gains `'redirect_cross_origin_body'` (#4257).
+  BREAKING only for TypeScript code with an exhaustive `switch` over it.** It is
+  the refusal value the #4257 entry above describes; add the case. No update
+  needed to keep paying.
+
+- **A plain tool error after funding is a rejection, never a settlement
+  (#4062).** When a merchant answers the paid retry with `isError: true` and
+  carries neither a payment challenge nor a settlement transaction (no
+  `PAYMENT-RESPONSE` hash, no `_meta` settlement transaction), both paid-retry
+  paths (`completeX402MerchantCall` and `MerchantCompletion.retryRequest`) now
+  treat it as the merchant rejecting after funding:
+  `MERCHANT_REJECTED_AFTER_FUNDING`, never `settled: true`. The
+  rejection-after-funding message now adds that the merchant may still settle
+  late, so check the payment status before sweeping the delegate. A tool error
+  beside a settlement transaction is still delivered as evidence (#4120,
+  above). No update needed.
+
+- **Quote-time budget and price stops (#3967).** `AgentPaymentWarningCode`
+  gains `QUOTE_EXCEEDS_REMAINING_BUDGET` (the quoted amount does not fit the
+  agent's remaining budget) and `MERCHANT_REPORTED_DENIAL` (the merchant
+  reported a denial on one of its payment options; informational). 
+  `precheckBudget()` takes an optional `recordRefusal` (default `true`; quote
+  surfaces pass `false`, so a quote writes no refusal row). The
+  haven-pay skill tells agents to pass `expected_amount` when the price is
+  stated up front and to stop when a quote returns `safe_to_continue: false`.
+  Additive; the on-chain policy stays the gate. No update needed.
+
+- The `checkFunds` / `haven_check_funds` description says a `false` result means the
+  account holds less than the checked amount ("short"), not that it is empty
+  (#4079). Text only; no update needed.
 
 - Doc-only (#4023): `delegate-account.ts`'s salt comment now states precisely
   what the package derives — DELEGATE accounts, always at the literal zero

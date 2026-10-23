@@ -2693,6 +2693,50 @@ and `@haven_ai/connect` its own `CONNECTOR_VERSION`).
 > **Re-read, not rubber-stamped:** the Node floor and the Codex and Claude Code
 > rows are unchanged. `last-verified` is not bumped.
 
+> **Re-verification (0.11.0-alpha.0 release, 2026-10-23):** the manifest table
+> above is re-pinned by the bump to `0.11.0-alpha.0` for `connect`, `mcp`, `sdk`
+> and `signer`, with `SDK_VERSION` rewritten beside it. The step from
+> `0.10.0-alpha.0` is **MINOR**: the range adds surfaces and removes none, and
+> no CHANGELOG entry is marked **Update required**.
+>
+> Two type-level changes for SDK consumers: `HavenCatalogEntry.source` gains
+> `'bazaar'` (#4245) and `MerchantEgressRefusalReason` gains
+> `'redirect_cross_origin_body'` (#4257). Only an exhaustive `switch` over
+> either needs the new case. The `.d.ts` comparison against the published
+> `0.10.0-alpha.0` (`sdk`, `signer`, `mcp`) removes and adds no declaration
+> name; the other changes are optional fields and parameters.
+>
+> **Surfaces this release moves:**
+> - **SDK.** Redirects no longer carry caller credentials or payment headers to
+>   another origin, with or without `merchantEgress`, and a paid request is
+>   never re-sent cross-origin (#4244, #4257). Settlement reports carry the
+>   payment header (#4061) and the local report is retried while Haven answers
+>   `retryable` (#4215). One merchant-answer decision for both paid paths
+>   (#4120), and a plain tool error after funding is a rejection (#4062).
+>   Quote-time budget and price warnings (#3967), `is_live` (#3922, #3923),
+>   catalog `source: 'bazaar'` (#4245), and runbook and description wording
+>   (#4079, #4168).
+> - **Signer.** Only a funding-leg binding builds an EIP-3009 header; a
+>   settlement-child binding is refused with `NO_FUNDING_LEG` and retired at
+>   mint (#4242, #4248). Description text names the settlement report (#4061).
+>   Narrower, not wider: no new signing path.
+> - **Local MCP.** `haven_quote_x402` takes `expected_amount` (#3967),
+>   `HAVEN_RPC_URL_<chainId>` wires per-chain RPC reads (#3996), a cross-origin
+>   paid redirect reports the funded, undelivered state (#4257), the #4215
+>   retry, and `isLive` on task budgets (#3922).
+> - **Connect.** The installed skill passes `payment_header` with the
+>   settlement report (#4061). Existing installs keep their `SKILL.md` until
+>   reinstalled.
+> - **CLI.** `budget grant` refuses an occupied slot (#3933), approve wording
+>   (#4067), `is_live` on grant wait (#3922), passkey wording (#4168).
+> - **Not moved.** `CLIENT_COMPAT` is unchanged (`git diff origin/main
+>   origin/dev -- packages/core/src/client-compat.ts` is empty), so no installed
+>   client is forced to update.
+>
+> **Re-read, not rubber-stamped:** the Node floor and the Codex and Claude Code
+> rows are unchanged. `last-verified` already reads 2026-10-22 from an earlier
+> change and is not bumped.
+
 > **Re-verification (0.10.0-alpha.0 release, 2026-10-14):** the manifest table
 > above is re-pinned by the bump to `0.10.0-alpha.0` for `connect`, `mcp`, `sdk`
 > and `signer`, with `SDK_VERSION` rewritten beside it. The step from
@@ -3029,10 +3073,10 @@ doc that carries an argument rather than a number.
 | Component | Supported version |
 | --- | --- |
 | Node.js | >= 22.0.0 (`engines` floor; repo development and CI pin LTS 24 via `.nvmrc`) |
-| `@haven_ai/connect` | `0.10.0-alpha.0` |
-| `@haven_ai/mcp` | `0.10.0-alpha.0` |
-| `@haven_ai/sdk` | `0.10.0-alpha.0` |
-| `@haven_ai/signer` | `0.10.0-alpha.0` |
+| `@haven_ai/connect` | `0.11.0-alpha.0` |
+| `@haven_ai/mcp` | `0.11.0-alpha.0` |
+| `@haven_ai/sdk` | `0.11.0-alpha.0` |
+| `@haven_ai/signer` | `0.11.0-alpha.0` |
 | Codex Desktop / Codex CLI | local stdio MCP via `~/.codex/config.toml` |
 | Claude Code | local stdio MCP via `claude mcp add-json --scope user` |
 

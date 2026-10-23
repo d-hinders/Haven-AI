@@ -124,7 +124,12 @@ The edge signer ships as **`@haven_ai/signer`** in two layers:
      Signers older than #3888 still send a random nonce. Why this is safe is in
      the [delegation-rail security model](../security/delegation-rail-security-model.md)
      ("Since #3888 the 3009 header's nonce is derived, not random"); the
-     payment sequence is in [04](04-x402-payment-sequence.md).
+     payment sequence is in [04](04-x402-payment-sequence.md). Since #4319 a
+     settlement can also be recorded from a STORED header (Tier 1, the same
+     nonce-bound standard, on the generic attach path and in the sweep tick)
+     or — flag-gated, under seven fail-closed limits — from the merchant
+     receipt's transaction hash (Tier 2, labelled `receipt`, never
+     nonce-bound); the ladder and its limits are documented in [04](04-x402-payment-sequence.md).
    - `signSweepAuthorization(authorization, expectedAuth)` → verifies Haven's
      authenticated recovery context, confirms the delegate and — when the
      local credential carries the agent's account (Haven wallet) address —

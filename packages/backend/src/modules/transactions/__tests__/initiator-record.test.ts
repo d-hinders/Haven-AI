@@ -63,6 +63,12 @@ const X402_ROW: X402PaymentIntentRow = {
   id: 'pi-1',
   tx_hash: '0xabc',
   delivery_reference: null,
+  // #4319: the stored settlement proof state — defaults read as "nothing stored".
+  settlement_proof_label: null,
+  settlement_nonce_bound: null,
+  settlement_nonce_derived: null,
+  receipt_verdict: null,
+  has_stored_header: false,
   agent_id: 'agent-1',
   agent_name: 'Alice',
   account_id: 'safe-1',

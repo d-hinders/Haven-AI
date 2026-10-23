@@ -120,12 +120,13 @@ export interface AgentPaymentStatus {
    * #3475 follow-up: `true` only when an eip3009 payment's merchant
    * settlement transaction is already recorded and on-chain-verified
    * (`machine_metadata.merchant_settlement_tx_hash`, written by
-   * `haven_report_settlement_evidence`'s eip3009 branch or by the #3888
+   * `haven_report_settlement_evidence`'s eip3009 branch, by the #3888
    * settlement sweep when the chain names the settlement and the agent never
-   * reported it). Always absent on erc7710 — its one settlement transaction
-   * IS the confirmed intent, not a separately recorded hash, so this flag is
-   * not the right signal there. Absent — never `false` — when unknown,
-   * matching `delivered`'s own honesty rule.
+   * reported it, or — since #4319 — by the proof ladder's Tier 1/Tier 2 on
+   * the generic attach path and the backfill). Always absent on erc7710 —
+   * its one settlement transaction IS the confirmed intent, not a separately
+   * recorded hash, so this flag is not the right signal there. Absent —
+   * never `false` — when unknown, matching `delivered`'s own honesty rule.
    */
   merchant_settlement_recorded?: boolean
   /**

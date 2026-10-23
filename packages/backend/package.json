@@ -20,6 +20,7 @@
     "ops:check-delegation": "tsx scripts/check-delegation-contracts.ts",
     "ops:check-delegate-balances": "tsx scripts/check-delegate-balances.ts",
     "db:schema-smoke": "tsx scripts/db-schema-smoke.ts",
+    "x402:eip3009-backfill": "tsx scripts/eip3009-settlement-backfill.ts",
     "pilot:fortnox": "tsx scripts/fortnox-sandbox-validation.ts",
     "ops:register-passport-schema": "tsx scripts/register-passport-schema.ts",
     "ops:check-mainnet-reconciliation": "tsx scripts/check-mainnet-reconciliation.ts",

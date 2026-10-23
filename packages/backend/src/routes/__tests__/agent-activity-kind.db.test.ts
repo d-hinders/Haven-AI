@@ -52,6 +52,9 @@ const LEGACY_PAYMENT_KEYS = [
   'funding_tx_hash',
   'settlement_tx_hash',
   'settlement_scheme',
+  // #4319: what Haven knows about the merchant settlement, snake_case here.
+  'settlement_tracking',
+  'settlement_proof',
   'payment_id',
   'payment_proof_status',
   'payment_flow_status',

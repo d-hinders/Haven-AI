@@ -242,10 +242,14 @@ export interface ExpectedSettlementTransfer {
    * with the delegate that burned it. When present, check 9 requires the
    * receipt to carry the token's own `AuthorizationUsed(authorizer, nonce)`
    * log — the sweep's attribution proof (#3888), now required of every
-   * merchant-settlement record. Mirrors `delegationHash` above: conditional,
-   * so callers that cannot name a nonce (none today — the agent path derives
-   * it from the posted X-PAYMENT header, the sweep from the payment id) leave
-   * the verdict at the earlier checks.
+   * nonce-proven merchant-settlement record. Mirrors `delegationHash` above:
+   * conditional, so callers that cannot name a nonce (none today — the agent
+   * path derives it from the posted X-PAYMENT header, the sweep from the
+   * payment id) leave the verdict at the earlier checks. #4319: the
+   * receipt-hash path (Tier 2) names a nonce too — the single
+   * `AuthorizationUsed` burn its candidate's receipt carries — so check 9
+   * applies there as well; the record it writes is labelled `receipt`, never
+   * nonce-bound, and lands only under the flag and the issue's limits.
    */
   expectedAuthorizationUsed?: { authorizer: string; nonce: string }
 }

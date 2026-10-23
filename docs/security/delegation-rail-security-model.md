@@ -2887,9 +2887,9 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > **Re-verified (0.11.0-alpha.0 release, 2026-10-23):** the release bump's only
 > covered-file edit is the `SIGNER_VERSION` literal in `packages/signer/src/tools.ts`
 > (`0.11.0-alpha.0`). No signing check, refusal or allowlist moves in that edit.
-> Three commits in the range change signer source (`git log origin/main..origin/dev
-> -- packages/signer/src` at `c966ff81`), each recorded where it merged (#4242 and #4248
-> above, #4061 below) and read again for this release:
+> Four commits in the range change signer source (`git log origin/main..origin/dev
+> -- packages/signer/src` at `7b2cca38`). Three are recorded where they merged (#4242
+> and #4248 above, #4061 below); all four were read again for this release:
 > - #4242 (#4247): the binding records the shape it was minted for, and
 >   `haven_x402_sign_header` builds an EIP-3009 header only from a funding-leg
 >   binding. `haven_sign_x402` refuses a settlement child before signing.
@@ -2897,8 +2897,9 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 >   and its refusal is the structured `NO_FUNDING_LEG`, checked after the
 >   expected-context version.
 > - #4061 (#4075): tool description text only, naming the settlement report.
+> - #4325: a reworded doc comment in `audit.ts`; no code changes.
 >
-> All three add refusals or text; none adds a signing path or widens a check.
+> All four add refusals or text; none adds a signing path or widens a check.
 > Nothing else in this document was re-verified.
 
 > **Re-verified (0.10.0-alpha.0 release, 2026-10-14):** the release bump's only

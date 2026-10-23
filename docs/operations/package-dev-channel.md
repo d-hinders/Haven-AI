@@ -351,7 +351,7 @@ and the `release` skill.
 > bump rewrites `CONNECTOR_VERSION` (`packages/connect/src/runtime.ts`), now
 > `0.10.0-alpha.0` → `0.11.0-alpha.0`, a MINOR step. `HAVEN_CONNECTOR_CHANNEL`
 > stays `alpha`.
-> - **Publish path.** Re-measured at `origin/dev` `c966ff81`: `git log
+> - **Publish path.** Re-measured at `origin/dev` `7b2cca38`: `git log
 >   origin/main..origin/dev` over `publish.yml`, `release-channel.mjs`,
 >   `release-snapshot-version.mjs` and `release-version-order.mjs` returns **0**
 >   commits. The bump's own diff touches none of these files.

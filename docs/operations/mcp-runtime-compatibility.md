@@ -2759,7 +2759,7 @@ and `@haven_ai/connect` its own `CONNECTOR_VERSION`).
 >   client is forced to update.
 >
 > **Re-read, not rubber-stamped:** the Node floor and the Codex and Claude Code
-> rows are unchanged. `last-verified` already reads 2026-10-22 from an earlier
+> rows are unchanged. `last-verified` already reads 2026-10-23 from an earlier
 > change and is not bumped.
 
 > **Re-verification (0.10.0-alpha.0 release, 2026-10-14):** the manifest table

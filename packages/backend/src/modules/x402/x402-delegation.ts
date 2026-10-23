@@ -30,11 +30,13 @@ import { createDelegation, type Delegation } from '@metamask/smart-accounts-kit'
 import { encodeDelegations, hashDelegation } from '@metamask/smart-accounts-kit/utils'
 import { getDelegationContracts } from '../../rails/delegation-contracts.js'
 import { getDelegationEnvironment, delegationSigningPayload } from '../../rails/delegation-policy.js'
+import { MAX_SETTLEMENT_WINDOW_SECONDS } from '../../domain/x402-settlement-timing.js'
 
 const ERC20_IFACE = new Interface(['function transfer(address to, uint256 amount) returns (bool)'])
 
-/** Cap on how long a settlement grant may live, whatever the merchant asks. */
-export const MAX_SETTLEMENT_WINDOW_SECONDS = 600 // the #715 discipline carries over
+// The cap on how long a settlement grant may live is defined in
+// `domain/x402-settlement-timing.ts` (#4379) and re-exported here unchanged.
+export { MAX_SETTLEMENT_WINDOW_SECONDS }
 
 /**
  * Domain-separated salt that makes a settlement child INTENT-UNIQUE (#2094).

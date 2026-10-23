@@ -17,8 +17,7 @@ import {
 import { type AgentContext } from '../../middleware/agentAuth.js'
 import { quoteFee } from '../fee/index.js'
 import { toCanonicalAddress } from '../transactions/index.js'
-import { MAX_SETTLEMENT_WINDOW_SECONDS } from '../x402/x402-delegation.js'
-import { CLOCK_SKEW_SECONDS } from '../x402/settlement-observed.js'
+import { MAX_SETTLEMENT_WINDOW_SECONDS, CLOCK_SKEW_SECONDS } from '../../domain/x402-settlement-timing.js'
 
 /**
  * #2085: narrowed — this module constructs `'payment_intent'` and nothing

@@ -358,6 +358,22 @@ export async function probeCatalogEntry(
     return { ok: false }
   }
 
+  // #4300: the 402 is merchant-controlled, and the parsing below assumes its
+  // field types (a numeric `amount`, a null `accepts[0]`, a non-string `asset`
+  // all throw). A throw must read as a miss like any other unusable answer:
+  // escaping here would abort the refresh run, leave this row unwritten and
+  // so oldest, and stop every later run at the same row.
+  try {
+    return await readProbeChallenge(entry, response)
+  } catch {
+    return { ok: false }
+  }
+}
+
+async function readProbeChallenge(
+  entry: Pick<CatalogRow, 'rail'>,
+  response: Response,
+): Promise<ProbeResult> {
   if (response.status !== 402) return { ok: false }
 
   if (entry.rail === 'mpp') {
@@ -422,7 +438,9 @@ export interface QueryableLike {
 /**
  * Probe non-delisted entries and persist each outcome, within a run budget.
  * Returns counts for observability. Failures on individual entries never
- * abort the run.
+ * abort the run: the probe answers every failure as a miss, and a row whose
+ * write fails is logged and skipped (it keeps its old `updated_at`, so it
+ * comes first again next run) without being counted.
  *
  * #4300: rows are taken least recently updated first, and a probe is started
  * only while its whole budget still fits in the run's. Rows the run does not
@@ -453,54 +471,69 @@ export async function refreshCatalog(
       break
     }
     const result = await probeCatalogEntry(entry, fetchImpl)
-    if (result.ok) {
-      verified++
-      // Success always recovers the entry and clears the failure streak.
-      await db.query(
-        `UPDATE merchant_catalog
-         SET price_atomic = $2, price_display = $3, asset = $4,
-             network = COALESCE($5, network),
-             asset_transfer_methods = COALESCE($6, asset_transfer_methods),
-             pay_to = $7,
-             http_method = COALESCE($8, http_method),
-             status = 'active', verified_at = now(),
-             consecutive_failures = 0, updated_at = now()
-         WHERE id = $1`,
-        [
-          entry.id,
-          result.priceAtomic,
-          result.priceDisplay,
-          result.asset,
-          result.network ?? null,
-          result.assetTransferMethods?.join(',') ?? null,
-          // #3331: written as seen, NOT COALESCEd like the fields above — a
-          // merchant that stops naming one payTo must lose its verified one
-          // (the merchant-locked-budget action then disappears) rather than
-          // keep pinning budgets to an address its own challenge no longer
-          // names. A rotation lands here as a different value, which is what
-          // flags the budgets pinned to the old one as stale.
-          result.payTo ?? null,
-          // #3769: a 402 that advertises its own method corrects the row —
-          // the live challenge is authoritative for how it is called (the
-          // same doctrine the price fields above follow). HTTP rows only: an
-          // MCP row's challenge never advertises one, and a stray value must
-          // not leak onto a row whose probe is a tools/call.
-          entry.protocol === 'http' ? (result.advertisedMethod ?? null) : null,
-        ],
-      )
-    } else {
-      // Hysteresis: count the miss, but only degrade after a sustained streak
-      // so one flaky probe doesn't light up the whole catalog.
-      const failures = (entry.consecutive_failures ?? 0) + 1
-      const nextStatus = failures >= DEGRADE_AFTER_FAILURES ? 'degraded' : entry.status
-      if (nextStatus === 'degraded') degraded++
-      await db.query(
-        `UPDATE merchant_catalog
-         SET consecutive_failures = $2, status = $3, updated_at = now()
-         WHERE id = $1`,
-        [entry.id, failures, nextStatus],
+    try {
+      if (result.ok) {
+        await persistVerified(db, entry, result)
+        verified++
+      } else if (await persistMiss(db, entry)) {
+        degraded++
+      }
+    } catch (err) {
+      console.warn(
+        `[catalog] refresh could not record the probe of ${entry.resource_url}; the row keeps its old updated_at: ${err instanceof Error ? err.message : String(err)}`,
       )
     }
   }
   return { verified, degraded, deferred }
+}
+
+async function persistVerified(db: QueryableLike, entry: CatalogRow, result: ProbeResult): Promise<void> {
+  // Success always recovers the entry and clears the failure streak.
+  await db.query(
+    `UPDATE merchant_catalog
+     SET price_atomic = $2, price_display = $3, asset = $4,
+         network = COALESCE($5, network),
+         asset_transfer_methods = COALESCE($6, asset_transfer_methods),
+         pay_to = $7,
+         http_method = COALESCE($8, http_method),
+         status = 'active', verified_at = now(),
+         consecutive_failures = 0, updated_at = now()
+     WHERE id = $1`,
+    [
+      entry.id,
+      result.priceAtomic,
+      result.priceDisplay,
+      result.asset,
+      result.network ?? null,
+      result.assetTransferMethods?.join(',') ?? null,
+      // #3331: written as seen, NOT COALESCEd like the fields above — a
+      // merchant that stops naming one payTo must lose its verified one
+      // (the merchant-locked-budget action then disappears) rather than
+      // keep pinning budgets to an address its own challenge no longer
+      // names. A rotation lands here as a different value, which is what
+      // flags the budgets pinned to the old one as stale.
+      result.payTo ?? null,
+      // #3769: a 402 that advertises its own method corrects the row —
+      // the live challenge is authoritative for how it is called (the
+      // same doctrine the price fields above follow). HTTP rows only: an
+      // MCP row's challenge never advertises one, and a stray value must
+      // not leak onto a row whose probe is a tools/call.
+      entry.protocol === 'http' ? (result.advertisedMethod ?? null) : null,
+    ],
+  )
+}
+
+/** Record one miss; true when it moved the row to `degraded`. */
+async function persistMiss(db: QueryableLike, entry: CatalogRow): Promise<boolean> {
+  // Hysteresis: count the miss, but only degrade after a sustained streak
+  // so one flaky probe doesn't light up the whole catalog.
+  const failures = (entry.consecutive_failures ?? 0) + 1
+  const nextStatus = failures >= DEGRADE_AFTER_FAILURES ? 'degraded' : entry.status
+  await db.query(
+    `UPDATE merchant_catalog
+     SET consecutive_failures = $2, status = $3, updated_at = now()
+     WHERE id = $1`,
+    [entry.id, failures, nextStatus],
+  )
+  return nextStatus === 'degraded'
 }

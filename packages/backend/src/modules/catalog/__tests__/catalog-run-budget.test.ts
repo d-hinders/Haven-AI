@@ -14,7 +14,7 @@ import {
   fetchBazaarResources,
   ingestDiscoveredCatalog,
 } from '../catalog-discovery.js'
-import type { CatalogRow } from '../merchant-catalog.js'
+import { refreshCatalog, type CatalogRow } from '../merchant-catalog.js'
 
 const ACCEPTS = [{ scheme: 'exact', network: 'eip155:8453', asset: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', amount: '20000', payTo: '0x' + '11'.repeat(20) }]
 
@@ -114,5 +114,53 @@ describe('Bazaar index read bounds (#4300)', () => {
     const out = await fetchBazaarResources(indexFetch as unknown as typeof fetch, 1_000)
     expect(indexFetch).toHaveBeenCalledTimes(DISCOVERY_INDEX_MAX_PAGES)
     expect(out).toHaveLength(DISCOVERY_INDEX_MAX_PAGES)
+  })
+})
+
+describe('one bad entry does not abort a run (#4300)', () => {
+  it('discovery counts a candidate whose 402 cannot be parsed as a failed probe and goes on', async () => {
+    const items = Array.from({ length: 3 }, (_, i) => ({ resource: `https://seller${i}.example/paid`, type: 'http', accepts: ACCEPTS }))
+    const { db, inserted } = fakeDb()
+    const probeFetch = (async (input: string | URL | Request) =>
+      String(input) === items[0]!.resource
+        ? new Response(JSON.stringify({ accepts: [null] }), { status: 402 })
+        : paid402()) as unknown as typeof fetch
+
+    const result = await ingestDiscoveredCatalog(db, (async () => indexPage(items)) as unknown as typeof fetch, 50, merchants, probeFetch)
+
+    expect(inserted).toEqual(items.slice(1).map((i) => i.resource))
+    expect(result).toMatchObject({ candidates: 3, ingested: 2, failedProbe: 1 })
+  })
+
+  it('the refresh logs a row whose write fails, does not count it, and probes the rows after it', async () => {
+    const rows = ['a', 'b', 'c'].map(
+      (id) => ({ id, resource_url: `https://${id}.example/paid`, protocol: 'http', rail: 'x402', status: 'active', consecutive_failures: 0 }) as unknown as CatalogRow,
+    )
+    const written: string[] = []
+    const db = {
+      query: async (sql: string, values?: unknown[]) => {
+        if (sql.trimStart().startsWith('SELECT')) return { rows }
+        const id = String((values ?? [])[0])
+        if (id === 'a') throw new Error('write failed')
+        written.push(id)
+        return { rows: [] as CatalogRow[] }
+      },
+    }
+    const probed: string[] = []
+    const fetchImpl = (async (input: string | URL | Request) => {
+      probed.push(String(input))
+      return paid402()
+    }) as unknown as typeof fetch
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const result = await refreshCatalog(db, fetchImpl)
+      expect(result).toEqual({ verified: 2, degraded: 0, deferred: 0 })
+      expect(probed).toEqual(rows.map((r) => r.resource_url))
+      expect(written).toEqual(['b', 'c'])
+      expect(warn).toHaveBeenCalledTimes(1)
+      expect(String(warn.mock.calls[0]![0])).toContain('https://a.example/paid')
+    } finally {
+      warn.mockRestore()
+    }
   })
 })

@@ -77,4 +77,31 @@ describeDb('refresh run budget rotation (#4300)', () => {
     const afterSecond = await failuresByUrl()
     for (const url of urls) expect(afterSecond[url], url).toBe(1)
   })
+
+  it('keeps rotating past a row whose 402 the probe cannot parse, and records that row as a miss', async () => {
+    const urls = await seedRows()
+    const probed: string[] = []
+    // The oldest row answers a 402 whose `amount` is a number, not a string:
+    // parsing it throws. Every other row answers a well-formed challenge.
+    const fetchImpl = (async (input: string | URL | Request) => {
+      const url = String(input)
+      probed.push(url)
+      const body = url === urls[0]
+        ? { accepts: [{ amount: 1000 }] }
+        : { accepts: [{ amount: '20000', asset: 'USDC', network: 'eip155:8453', payTo: '0x00000000000000000000000000000000000000aa' }] }
+      return new Response(JSON.stringify(body), { status: 402, headers: { 'Content-Type': 'application/json' } })
+    }) as unknown as typeof fetch
+
+    for (let run = 0; run < 2; run += 1) {
+      const result = await refreshCatalog(db as unknown as QueryableLike, fetchImpl)
+      expect(result, `run ${run}`).toEqual({ verified: ROWS - 1, degraded: 0, deferred: 0 })
+    }
+    // Both runs reached every row, the unparsable one included. The second
+    // run's order depends on write timestamps, so only its set is pinned.
+    expect(probed.slice(0, ROWS)).toEqual(urls)
+    expect([...probed.slice(ROWS)].sort()).toEqual([...urls].sort())
+    const failures = await failuresByUrl()
+    expect(failures[urls[0]!]).toBe(2)
+    for (const url of urls.slice(1)) expect(failures[url], url).toBe(0)
+  })
 })

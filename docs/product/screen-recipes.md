@@ -1038,7 +1038,7 @@ Money and risk clarity:
   other surface fed by the same hook — the account detail page's transaction
   count included. Hedge the wording ("may not be your full history"); the
   detection is not exact on every provider, and the reason lives in the code.
-- The ROW leads with the counterparty (above), never "Agent payment by …" (#4266), and so does the detail drawer's title (#4267). "You" is reserved for human-initiated payments only (#2097): a transaction with no attribution never says "you" — the drawer's header line reads "Sent from" or "Paid from" <account>, naming no actor.
+- The ROW leads with the counterparty (above), never "Agent payment by …" (#4266), and so does the detail drawer's title (#4267). "You" is reserved for human-initiated payments only (#2097): a transaction with no attribution never says "you" — the drawer's header line reads "Sent", "Paid" or "Attempted from <account>", naming no actor.
 - For x402 payments, collapse the historical Safe-to-agent funding step into
   one merchant-facing row titled with the merchant's hostname. On the
   eip3009 bridge the funding leg is REAL and present on every payment (#946):

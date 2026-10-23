@@ -2567,7 +2567,8 @@ pattern, and it leads with the answer:
    explorer link — superseding #3811's "in full" rule.
 4. **Footer** — `SidePanel`'s `footer` slot: "View on explorer" for the
    transaction that left or entered the account (the funding leg on eip3009).
-   It honours `explorerUrl` (`null` hides it) and is absent for a record with
+   `explorerUrl: null` hides it; any other value is used only where the chain
+   registry builds no link. It is absent for a record with
    no real hash, such as the agent tab's synthetic `activity-…` rows.
 
 ### Table column collapse

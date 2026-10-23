@@ -1708,7 +1708,7 @@ verified on-chain by Haven — cite it as such. `tx_hash` /
 `txHash` are unchanged and kept for wire compatibility, marked deprecated in
 their OpenAPI/SDK description only. The dashboard's Settlement row and
 both legs are described in `docs/product/design-system.md` § Transaction
-detail panel (#3763, #4267). `hash`/`tx_hash` on those views keep their
+detail panel (#3763, #4267). `hash`/`tx_hash` on the dashboard's transaction views keep their
 funding meaning — the legs travel as named fields, so the row cannot split
 in two.
 

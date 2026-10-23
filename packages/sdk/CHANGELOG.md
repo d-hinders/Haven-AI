@@ -15,6 +15,14 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+### Changed
+
+- **The skill text says which quote checks the budget (#4345).** It used to
+  tell every agent that the quote checks its remaining budget; only the hosted
+  `haven_quote_x402` does. The local `@haven_ai/mcp` quote checks only a price
+  the agent states (`expected_amount`), and the budget is checked when the
+  agent pays. Wording only; no API change. No update needed.
+
 ## 0.11.0-alpha.0 — 2026-10-23
 
 ### Changed

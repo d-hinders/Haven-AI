@@ -15,6 +15,14 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+### Changed
+
+- **The installed skill says which quote checks the budget (#4345).** Only
+  the hosted quote checks the agent's remaining budget; on the local runtime
+  (`@haven_ai/mcp`) the quote checks only a stated price, and the budget is
+  checked at pay time. An already installed `SKILL.md` stays stale until
+  reinstalled. No update needed.
+
 ## 0.11.0-alpha.0 — 2026-10-23
 
 ### Changed

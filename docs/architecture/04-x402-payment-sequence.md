@@ -238,11 +238,13 @@ on-chain transaction. Every quote is informational rather than a price
 reservation or payment authority.
 
 Since #3967 every quote ALSO carries what Haven can already know about the
-price before any payment exists: a quote-time budget pre-check against the
-agent's remaining delegation budget (asked about the option pay will actually
-select, with `record_refusal: false` so a quote writes no refusal row), an
-optional agent-stated `expected_amount`, and the merchant's own denial hints
-from `accepts[].extra`. An over-budget or mismatched quote stops the agent —
+price before any payment exists: an optional agent-stated `expected_amount`,
+the merchant's own denial hints from `accepts[].extra`, and, on the **hosted**
+quote only, a quote-time budget pre-check against the agent's remaining
+delegation budget (asked about the option pay will actually select, with
+`record_refusal: false` so a quote writes no refusal row). The SDK's
+`quoteX402()` and the local `@haven_ai/mcp` `haven_quote_x402` run no budget
+pre-check (#4345); there the budget is checked when the agent pays. An over-budget or mismatched quote stops the agent —
 `safe_to_continue: false`, no prefilled cap, no next tool — but the quote data
 itself is still returned, an unavailable pre-check fails OPEN with a warning
 (the on-chain policy remains the actual gate), and nothing about the payment

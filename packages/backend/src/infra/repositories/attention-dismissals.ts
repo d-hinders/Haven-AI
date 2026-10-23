@@ -21,8 +21,10 @@ export type { Executor }
  *   the newest acknowledgement is the one that counts. Per-agent kinds and
  *   user-level kinds have one write each, each targeting its own 118 index.
  *
- * Every write selects through an ownership EXISTS (a row for an account or
- * agent the caller does not own is never written — the route answers 404).
+ * Every write that names an account or agent selects through an ownership
+ * EXISTS (a row for an account or agent the caller does not own is never
+ * written — the route answers 404). The user-level acknowledgement names
+ * neither: its row belongs to the JWT subject by construction.
  * Reads are whole-list per user; the dashboard maps rows to rule-item ids
  * client-side (`useAttentionDismissals.ts`). There is no undismiss.
  */

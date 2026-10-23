@@ -543,6 +543,8 @@ describe('computeAttentionItems — payments failed (rule 4)', () => {
       href: '/agents/a1?tab=activity&status=refused',
       agentId: 'a1',
     })
+    // Above the threshold the title carries the real count, not the threshold.
+    expect(failedItem(5)).toMatchObject({ tone: 'danger', title: 'Scout had 5 failed payments' })
   })
 
   it('#4324: the unattributed item is neutral below 3 failed intents and danger at 3, never claiming no money moved', () => {
@@ -575,6 +577,7 @@ describe('computeAttentionItems — payments failed (rule 4)', () => {
       actionLabel: 'View transactions',
       href: '/transactions',
     })
+    expect(unattributed(5)).toMatchObject({ tone: 'danger', title: '5 payments failed' })
   })
 
   it('surfaces the user-level failed-intent count when no agent is named', () => {

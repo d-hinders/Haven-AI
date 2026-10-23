@@ -365,14 +365,17 @@ each writes the step after its own confirm wins, through
 `recordFirstPaymentSettled` (`infra/repositories/onboarding-funnel.ts`):
 
 - `POST /payments/:id/sign`, which serves the direct rail and the x402
-  EIP-3009 funding leg;
+  EIP-3009 funding leg. For EIP-3009, "settled" is this funding leg's
+  confirm, not the merchant's settlement, so a purchase the merchant refuses
+  after funding still counts. That was already the behaviour before #4354;
 - the erc7710 settlement seam (`modules/x402/settlement-observed.ts`), where
   the merchant redeems and Haven submits nothing;
 - the outcome reconciler (`modules/payments/submission-reconciler.ts`), for a
   submit whose receipt the sign route never saw.
 
-The metadata is `payment_id`, `rail` (the payment's own rail, `manual` for the
-direct rail) and `settlement_scheme` when the payment has one. Before #4354
+The metadata is `payment_id`, `rail` and `settlement_scheme` when the payment
+has one. `rail` is the payment's `payment_rail`, which every machine payment
+sets (`x402`), or `manual` for the direct rail, where it is NULL. Before #4354
 only the sign route wrote the step, with `rail: 'manual'` on every row,
 including x402 funding legs. A user whose first settled payments were erc7710
 or reconciled has no row from that period, because nothing backfills it.

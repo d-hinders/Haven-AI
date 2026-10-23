@@ -5,7 +5,7 @@ vi.mock('../../../db.js', () => ({
   default: { query: (...args: unknown[]) => mockQuery(...args) },
 }))
 
-import { emitFunnelEvent, queryFunnel } from '../onboarding-funnel.js'
+import { emitFirstPaymentSettled, emitFunnelEvent, queryFunnel } from '../onboarding-funnel.js'
 
 describe('emitFunnelEvent', () => {
   beforeEach(() => mockQuery.mockReset())
@@ -39,6 +39,28 @@ describe('emitFunnelEvent', () => {
     await drainMicrotasks()
     const [sql] = mockQuery.mock.calls[0]
     expect(String(sql)).toContain('ON CONFLICT DO NOTHING')
+  })
+})
+
+describe('emitFirstPaymentSettled (#4354)', () => {
+  beforeEach(() => mockQuery.mockReset())
+
+  it('a failed insert neither throws to the caller nor escapes as an unhandled rejection', async () => {
+    const unhandled: unknown[] = []
+    const onUnhandled = (reason: unknown) => unhandled.push(reason)
+    process.on('unhandledRejection', onUnhandled)
+    try {
+      mockQuery.mockRejectedValueOnce(new Error('db unavailable'))
+      expect(() => emitFirstPaymentSettled('pay-1')).not.toThrow()
+      // Two turns: one for the rejected insert, one for Node to report an
+      // unhandled rejection if the body let it escape.
+      await new Promise((r) => setTimeout(r, 0))
+      await new Promise((r) => setTimeout(r, 0))
+      expect(mockQuery).toHaveBeenCalledTimes(1)
+      expect(unhandled).toEqual([])
+    } finally {
+      process.off('unhandledRejection', onUnhandled)
+    }
   })
 })
 

@@ -58,16 +58,19 @@ export function emitFunnelEvent(
  * - only a `confirmed` row writes, so a caller that runs it on the wrong
  *   branch still books nothing;
  * - the user is the agent's owner, as the sign route always wrote;
- * - `rail` is the row's own rail, with `manual` kept for the direct rail's
- *   NULL so existing rows and new ones read the same; `settlement_scheme`
- *   rides along when the row has one.
+ * - `rail` is the row's `payment_rail`, which every machine insert sets
+ *   (`insertMachineIntent`; migration 012 backfilled older x402 rows), with
+ *   `manual` for the direct rail's NULL so existing rows and new ones read
+ *   the same. Not `source`: it defaults to 'direct' (migration 000) and the
+ *   direct inserts never set it, so it would relabel every direct payment;
+ *   `settlement_scheme` rides along when the row has one.
  * The partial unique index on (user_id, event) keeps the first one only.
  */
 export const RECORD_FIRST_PAYMENT_SETTLED_SQL = `INSERT INTO onboarding_events (user_id, event, metadata)
      SELECT a.user_id, 'first_payment_settled',
             jsonb_strip_nulls(jsonb_build_object(
               'payment_id', pi.id,
-              'rail', COALESCE(pi.payment_rail, pi.source, 'manual'),
+              'rail', COALESCE(pi.payment_rail, 'manual'),
               'settlement_scheme', pi.machine_metadata->>'settlement_scheme'))
        FROM payment_intents pi
        JOIN agents a ON a.id = pi.agent_id

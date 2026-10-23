@@ -35,18 +35,26 @@ interface IntentOptions {
   settlementScheme?: 'erc7710' | 'eip3009'
 }
 
+/**
+ * A machine row carries `source` and `payment_rail` as `insertMachineIntent`
+ * writes them (both the rail). A direct row leaves BOTH unset, as the direct
+ * inserts do, so `source` takes the column default ('direct', migration 000)
+ * exactly as it does in production.
+ */
 async function seedIntent(owner: { userId: string; agentId: string }, opts: IntentOptions): Promise<string> {
   const n = ++seq
+  const railColumns = opts.rail === null ? '' : ', source, payment_rail'
+  const railValues = opts.rail === null ? '' : ', $7, $7'
   const result = await db.query<{ id: string }>(
     `INSERT INTO payment_intents
        (agent_id, user_id, account_address, token_symbol, token_address, to_address,
         amount_raw, amount_human, delegate_address, allowance_nonce, sign_hash,
-        status, tx_hash, expires_at, source, payment_rail, machine_metadata)
+        status, tx_hash, expires_at, machine_metadata${railColumns})
      VALUES ($1, $2, '0x00000000000000000000000000000000000000f1', 'USDC',
              '0x036cbd53842c5426634e7929541ec2318f3dcf7e',
              '0x00000000000000000000000000000000000000c1',
              '100000', '0.10', '0x00000000000000000000000000000000000000d1',
-             0, $3, $4, $5, NOW() + interval '1 hour', $6, $6, $7::jsonb)
+             0, $3, $4, $5, NOW() + interval '1 hour', $6::jsonb${railValues})
      RETURNING id`,
     [
       owner.agentId,
@@ -54,8 +62,8 @@ async function seedIntent(owner: { userId: string; agentId: string }, opts: Inte
       `0xsign${n}`,
       opts.status,
       opts.status === 'confirmed' ? `0x${n.toString(16).padStart(64, '0')}` : null,
-      opts.rail,
       opts.settlementScheme ? JSON.stringify({ settlement_scheme: opts.settlementScheme }) : null,
+      ...(opts.rail === null ? [] : [opts.rail]),
     ],
   )
   return result.rows[0].id
@@ -80,12 +88,16 @@ describeDb('recordFirstPaymentSettled — real Postgres (#4354)', () => {
   it('an erc7710 settlement writes one row, for the agent\'s owner, labelled with its rail and scheme', async () => {
     const owner = await seedOwner()
     const paymentId = await seedIntent(owner, { status: 'confirmed', rail: 'x402', settlementScheme: 'erc7710' })
+    // A second user created AFTER the owner, so a writer that picked the
+    // wrong user (the newest, say) would put the row on them instead.
+    const bystander = await seedOwner()
 
     expect(await recordFirstPaymentSettled(paymentId)).toBe(true)
 
     expect(await funnelRows(owner.userId)).toEqual([
       { payment_id: paymentId, rail: 'x402', settlement_scheme: 'erc7710' },
     ])
+    expect(await funnelRows(bystander.userId)).toEqual([])
   })
 
   it('an EIP-3009 funding leg is labelled x402 / eip3009, not manual', async () => {
@@ -102,6 +114,13 @@ describeDb('recordFirstPaymentSettled — real Postgres (#4354)', () => {
   it('a direct payment keeps the manual label the sign route always wrote, with no scheme key', async () => {
     const owner = await seedOwner()
     const paymentId = await seedIntent(owner, { status: 'confirmed', rail: null })
+    // The seed matches production: no rail, and `source` at its column
+    // default. A label read from `source` would say 'direct' here.
+    const row = await db.query<{ source: string | null; payment_rail: string | null }>(
+      'SELECT source, payment_rail FROM payment_intents WHERE id = $1',
+      [paymentId],
+    )
+    expect(row.rows[0]).toEqual({ source: 'direct', payment_rail: null })
 
     await recordFirstPaymentSettled(paymentId)
 

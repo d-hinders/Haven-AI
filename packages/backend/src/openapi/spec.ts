@@ -13941,7 +13941,7 @@ export const openapiSpec = {
               toAccountName: { type: 'string', description: 'The own Haven name of the account the money reached; "Unnamed account" when it has none, never an address.' },
             },
             additionalProperties: false,
-            description: '#4268: present only on a move between two of the user\'s own accounts, its two explorer legs folded into one group (#4265\'s fold, the same one `GET /transactions?foldOwnTransfers=1` applies). Same-day moves between the same two accounts form one group. The group keeps `direction: out`, `merchantName` and `fromAccountName` as an unfolded send would. Not set for an agent-initiated transfer, a self-send, an outbound row whose initiator could not be classified, or a leg whose partner leg was not read; each of those stays the row it was before.',
+            description: '#4268: present only on a move between two of the user\'s own accounts, its two explorer legs folded into one group (#4265\'s fold, the same one `GET /transactions?foldOwnTransfers=1` applies). Same-day moves between the same two accounts form one group. The group keeps `direction: out`, `merchantName` and `fromAccountName` as an unfolded send would. Not set for an agent-initiated transfer, a self-send, an outbound row whose agent enrichment failed, or a leg whose partner leg was not read; each of those stays the row it was before.',
           },
           activityType: { type: ['string', 'null'], description: "The activity class, e.g. `delegate_sweep`; null for plain transfers and x402 payments." },
           direction: { type: 'string', enum: ['in', 'out'] },

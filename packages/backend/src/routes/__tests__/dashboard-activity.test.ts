@@ -661,7 +661,12 @@ describeDb('#4268 — an own-account move is one Activity group', () => {
     expect(activity[0]).toMatchObject({ ownTransfer: { toAccountName: 'Savings' }, countIsFloor: true, approxAmount: '10.7600', approxCurrency: 'SEK' })
   })
 
-  it('MoneyPanel figures are the same whether or not the move folds', async () => {
+  it('MoneyPanel figures (spend, totals, change) are equal for a folded and an unfolded move (non-regression)', async () => {
+    // A non-regression check, not proof about the fold: no MoneyPanel figure
+    // reads the Activity feed today (spend is SQL over payment_intents and
+    // delegate_sweeps; totals and change come from the portfolio read), so no
+    // mutation of the fold can turn this red. It pins that the two reads
+    // agree, the #4268 acceptance criterion.
     // Two users with the same transfer, on distinct addresses (the explorer
     // cache is keyed by address): for the second, the receiving account's
     // read fails, so its move cannot fold.
@@ -703,6 +708,30 @@ describeDb('#4268 — an own-account move is one Activity group', () => {
     const body = await getOverviewBody()
     expect(body.activity).toHaveLength(0)
     expect(body.hasOlderActivity).toBe(true)
+  })
+
+  it('same-day moves between three own accounts are one group per (from, to) pair', async () => {
+    const main = await seedAccount(userId, { name: 'Main' })
+    const savings = await seedAccount(userId, { name: 'Savings' })
+    const reserve = await seedAccount(userId, { name: 'Reserve' })
+    const ts = tsInLocalDay(TZ, 0)
+    // Main→Savings and Main→Reserve share a sender; Main→Savings and
+    // Reserve→Savings share a receiver. The move key carries both ends, so
+    // neither pair merges.
+    transfers.push({ hash: hash(1), from: main.address, to: savings.address, value: '1000000', ts })
+    transfers.push({ hash: hash(2), from: main.address, to: reserve.address, value: '2000000', ts: ts - 60 })
+    transfers.push({ hash: hash(3), from: reserve.address, to: savings.address, value: '4000000', ts: ts - 120 })
+
+    const activity = await getActivity()
+    expect(activity).toHaveLength(3)
+    const pairs = activity.map((g) => ({ ...(g.ownTransfer as object), count: g.count, sumAtomic: g.sumAtomic }))
+    expect(pairs).toEqual(
+      expect.arrayContaining([
+        { fromAccountName: 'Main', toAccountName: 'Savings', count: 1, sumAtomic: '1000000' },
+        { fromAccountName: 'Main', toAccountName: 'Reserve', count: 1, sumAtomic: '2000000' },
+        { fromAccountName: 'Reserve', toAccountName: 'Savings', count: 1, sumAtomic: '4000000' },
+      ]),
+    )
   })
 
   it('a folded move does not merge with an unpaired send to the same account on the same day', async () => {

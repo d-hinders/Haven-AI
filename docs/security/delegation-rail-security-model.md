@@ -586,12 +586,32 @@ caveat, so the authority is still the signed caveat stack and nothing else.
 > streak until a later run reaches it, which takes the least recently
 > updated rows first. A merchant's verified payTo can therefore stay
 > deferred until the rotation reaches it when a run hits its budget; with
-> the seeded rows a run finishes well inside it. A row whose write fails
+> the seeded rows a run finishes well inside it. ~~A row whose write fails
 > (for example a 402 the database cannot store) is logged and not counted,
-> so it too keeps its current `pay_to`, status and failure streak. The
+> so it too keeps its current `pay_to`, status and failure streak.~~ The
 > payTo contract above is unchanged. Scope of this re-read: the
 > Merchant-locked budgets section and the `merchant-catalog.ts` coverage
 > it names; the rest of the document was not re-read for it.
+>
+> **Re-verified #4341 (2026-10-23):** #4341 closes the write-failure hole
+> the #4300 note above described. A row whose VERIFIED write fails (the
+> reviewer's repro: a well-formed 402 whose string field carries a NUL
+> byte, which Postgres rejects with `invalid byte sequence for encoding
+> "UTF8": 0x00`) is no longer left unchanged forever — it is recorded as a
+> MISS, so the failure streak moves and the row degrades after the usual
+> three, per the #3331 doctrine that an unverifiable merchant degrades.
+> The row keeps its stored `pay_to` through those misses (a miss never
+> writes `pay_to`), but the degraded row stops being advertised and a
+> verified run — the challenge the database CAN store — still rewrites
+> `pay_to` as seen. A row whose MISS write itself fails is logged, not
+> counted, and keeps its current streak; that is unchanged. A probe whose
+> challenge does not parse is now logged with the row's `resource_url` and
+> the error message (nothing from the merchant payload) instead of
+> silently reading as a miss. In discovery, a candidate whose write fails
+> (e.g. an index entry whose name carries a NUL byte) is counted and
+> skipped, and the run reaches later candidates. Scope of this re-read:
+> the Merchant-locked budgets section and the `merchant-catalog.ts`
+> coverage it names; the rest of the document was not re-read for it.
 
 Two limits are deliberate:
 - **Slot sharing.** A merchant-locked budget and a plain budget pinned to the

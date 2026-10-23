@@ -160,8 +160,12 @@ describe('one bad entry does not abort a run (#4300)', () => {
       expect(result).toEqual({ verified: 2, degraded: 0, deferred: 0 })
       expect(probed).toEqual(rows.map((r) => r.resource_url))
       expect(written).toEqual(['b', 'c'])
-      expect(warn).toHaveBeenCalledTimes(1)
+      // #4341: the failing verified write is logged, then the fallback miss
+      // write is attempted; when that one fails too it is logged again and
+      // the row is not counted. Two warnings, both naming the row.
+      expect(warn).toHaveBeenCalledTimes(2)
       expect(String(warn.mock.calls[0]![0])).toContain('https://a.example/paid')
+      expect(String(warn.mock.calls[1]![0])).toContain('https://a.example/paid')
     } finally {
       warn.mockRestore()
     }

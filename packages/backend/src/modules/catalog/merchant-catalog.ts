@@ -365,7 +365,15 @@ export async function probeCatalogEntry(
   // so oldest, and stop every later run at the same row.
   try {
     return await readProbeChallenge(entry, response)
-  } catch {
+  } catch (err) {
+    // #4341: a throw here is a bug in our parsing or a challenge shape the
+    // parsers did not anticipate, not a quiet miss — after three silent
+    // hourly runs it would degrade the whole catalog with logs showing only
+    // counts. Log it the way the write path logs: the row's URL and the
+    // error message, and nothing from the merchant payload.
+    console.warn(
+      `[catalog] probe could not parse the challenge of ${entry.resource_url}: ${err instanceof Error ? err.message : String(err)}`,
+    )
     return { ok: false }
   }
 }
@@ -438,9 +446,12 @@ export interface QueryableLike {
 /**
  * Probe non-delisted entries and persist each outcome, within a run budget.
  * Returns counts for observability. Failures on individual entries never
- * abort the run: the probe answers every failure as a miss, and a row whose
- * write fails is logged and skipped (it keeps its old `updated_at`, so it
- * comes first again next run) without being counted.
+ * abort the run: the probe answers every failure as a miss, a row whose
+ * VERIFIED write fails is recorded as a miss too (#4341 — a probe result the
+ * database cannot store, e.g. a challenge carrying a NUL byte, would
+ * otherwise leave the row unchanged forever), and only a row whose miss
+ * write itself fails is logged and skipped (it keeps its old `updated_at`,
+ * so it comes first again next run) without being counted.
  *
  * #4300: rows are taken least recently updated first, and a probe is started
  * only while its whole budget still fits in the run's. Rows the run does not
@@ -473,8 +484,24 @@ export async function refreshCatalog(
     const result = await probeCatalogEntry(entry, fetchImpl)
     try {
       if (result.ok) {
-        await persistVerified(db, entry, result)
-        verified++
+        try {
+          await persistVerified(db, entry, result)
+          verified++
+        } catch (verifiedErr) {
+          // #4341: a probe result the database cannot store (the reviewer's
+          // repro: a well-formed 402 whose string field carries a NUL byte —
+          // Postgres rejects 0x00 in text) must not leave the row unchanged
+          // forever. Unwritten, `consecutive_failures` never moves and the
+          // status stays `active`, so the row is advertised forever and
+          // budgets pinned to its old `pay_to` are never flagged stale —
+          // against the #3331 doctrine that an unverifiable merchant
+          // degrades. Record a miss instead, so the row degrades after the
+          // usual streak.
+          console.warn(
+            `[catalog] refresh could not store the verified probe of ${entry.resource_url}; recording a miss instead: ${verifiedErr instanceof Error ? verifiedErr.message : String(verifiedErr)}`,
+          )
+          if (await persistMiss(db, entry)) degraded++
+        }
       } else if (await persistMiss(db, entry)) {
         degraded++
       }

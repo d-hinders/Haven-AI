@@ -340,9 +340,10 @@ gauge is 35 across 9 files under a ceiling of 35 (locked down by #4044);
 the largest route is `routes/payments.ts` (1561 lines); the passport alias
 check is case-insensitive; the `lib/` row names `modules/dashboard/`'s missing
 `index.ts` (review round 1 of #4377); the package-split sentence no longer implies
-seven packages. (Merged with #4379 on 2026-10-24: the rule-6 row, the waiver paragraph
-and the boundary-enforcement row now carry #4379's text — a module-to-module
-arm and 15 waivers — so this note's rule-6 and waiver-census items describe
+seven packages. (Merged with #4379 on 2026-10-24: the rule-3 row's census, the rule-6 row
+and numbered rule 6, the waiver paragraph and the boundary-enforcement row
+now carry #4379's text — a seventh rule, the module-to-module arm, and 15
+waivers — so this note's rule-6, rule-count and waiver-census items describe
 the doc at `2d0713dad`.) Re-checked without change: the six enabled rules and their
 error severity (`.dependency-cruiser.cjs`), `UNWAIVABLE_RULES` and the
 20-character reason floor (`scripts/dep-lint.mjs`), the nine

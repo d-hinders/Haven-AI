@@ -362,15 +362,19 @@ Haven backend
 > public payment metadata the merchant already quoted: no new data class, no
 > authority change.)
 
-> **Current state (2026-07-18, #956):** agents may report the MERCHANT's own
-> receipt after a settled payment (`POST /machine-payments/:id/merchant-receipt`,
+> **Current state (2026-07-18, #956; URL fetch moved behind the shared SSRF
+> guard 2026-10-23, #4309):** agents may report the MERCHANT's own receipt
+> after a settled payment (`POST /machine-payments/:id/merchant-receipt`,
 > agent-scoped, size-capped). The reporting feed attaches it verbatim next to
 > the Haven-generated payment evidence, under a provenance banner stating
 > Haven asserts nothing about its contents — data tooling, not accounting
-> judgment. URL-referenced receipts are fetched server-side at feed time under
-> strict guards (https-only, private/internal hosts refused, content-type
-> whitelist, 5MB cap); string-level host blocking does not defeat DNS
-> rebinding — revisit before production rollout.
+> judgment. URL-referenced receipts are fetched server-side at feed time
+> through the shared SSRF guard (`infra/http/ssrf-guard.ts`, via
+> `safeGetBinary`): https-only, default-port-only, the hostname resolved and
+> every returned address classified before any packet is sent, the socket
+> PINNED to a validated address (DNS rebinding cannot split the check from
+> the connect), redirects refused, pdf/png/jpeg content-type whitelist, 5 MB
+> cap, bounded deadline.
 
 ## Hard Architecture Invariants
 

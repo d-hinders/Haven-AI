@@ -54,17 +54,15 @@ conditional-heavy common handler.
 Delegate balance was coverage for an approval request, not permission to bypass
 the configured allowance.
 
-Both strategies apply to the legacy AllowanceModule rail only — and since
-#1986 that rail fails closed, so `decideCoverage`'s legacy branch is
-**unreachable in production traffic**: every route that used to reach it now
-answers HTTP 410 first. The description above is kept because the code is
-**deleted by #1987** — `domain/payment-coverage.ts` and `decideCoverage`
-are gone, along with every caller; it documents what the consolidation did, not
-a path live traffic takes. Delegation-rail
-requests (#830) branch before coverage: they reuse `insertMachineIntent` (with
-`execution_rail='delegation'` and a prepared settlement delegation) but skip
-`decideCoverage` entirely — budget, recipient, and expiry are enforced on-chain
-by the caveat enforcers, with no approval queue. Retired session-rail intents
+Both strategies applied to the legacy AllowanceModule rail only. #1986 made
+that rail fail closed, so every route that reached `decideCoverage` answered
+HTTP 410 first, and #1987 then deleted `domain/payment-coverage.ts`,
+`decideCoverage` and every caller. The description above records what the
+consolidation did, not a path live traffic takes. Delegation-rail requests
+(#830) never had a coverage step: they reuse `insertMachineIntent` (with
+`execution_rail='delegation'` and a prepared settlement delegation), and
+budget, recipient and expiry are enforced on-chain by the caveat enforcers,
+with no approval queue. Retired session-rail intents
 get HTTP 410 before any coverage decision (#834).
 
 ## Deliberate boundaries
@@ -105,8 +103,10 @@ payment/receipt/evidence/status rows stay readable through the generic
 Re-verified 2026-10-24 (#4372 part D, at dev `f590d946c`). Changed: the
 intro and *Coverage strategies* now speak of `decideCoverage` in the past
 tense (deleted by #1987, with its two strategies), the #1328 section no longer
-calls the "Allowance-only" strategy live, and a "below" that pointed at the
-paragraph above now says "above". Re-checked without change:
+calls the "Allowance-only" strategy live, a "below" that pointed at the
+paragraph above now says "above", and (review round 1) the paragraph after
+*Coverage strategies* states the legacy branch and the delegation rail's lack
+of a coverage step in the past tense. Re-checked without change:
 `insertMachineIntent` in `infra/repositories/payment-intents.ts`, called with
 `executionRail: 'delegation'` from `modules/x402/delegation-authorize.ts`;
 `resolvePaymentToken` in `domain/payment-token.ts`; the deleted files

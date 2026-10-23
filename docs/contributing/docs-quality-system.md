@@ -144,7 +144,7 @@ backend vitest job, so a PR touching no backend surface never runs it.
 | Archive integrity | `retire-verified-chains.mjs verify()`, driven by the docs unit tests | **Blocking** (a hash mismatch fails the required job) |
 | Doc/config drift | `packages/backend/src/openapi/spec.test.ts`, `packages/backend/src/docs-drift/*.test.ts`, which pins `.env.example` in **both** directions — every variable the backend reads is listed, every listed key is read somewhere; the values and comments beside a key are prose the test does not check | **Blocking** (vitest) |
 | Queue-framing census ([#2107](https://github.com/d-hinders/Haven-AI/issues/2107)) | `scripts/ci/queue-framing-census.test.mjs`, in `ci_config_checks` | **Blocking** (zero-tolerance: a guarded file either has no hit or cannot join the list) |
-| Operator-verify close-keyword guard ([#2276](https://github.com/d-hinders/Haven-AI/issues/2276)) | `scripts/ci/operator-verify-close-guard.mjs`, a step of `docs.yml`'s required job; it reads the PR body, title and commit messages, and re-runs on `edited` ([#2839](https://github.com/d-hinders/Haven-AI/issues/2839)) | **Blocking** when a closing keyword names an `operator-verify` issue |
+| Operator-verify close-keyword guard ([#2276](https://github.com/d-hinders/Haven-AI/issues/2276)) | `scripts/ci/operator-verify-close-guard.mjs`, a step of `docs.yml`'s required job; it reads the PR body, title and commit messages, and re-runs on `edited` ([#2839](https://github.com/d-hinders/Haven-AI/issues/2839)) | **Blocking** when a closing keyword names an issue labelled `operator-verify`, or one the pull request itself says stays open |
 | Coupling gate — contract docs ([#644](https://github.com/d-hinders/Haven-AI/issues/644)) | `scripts/docs/coupling-gate.mjs --strict`, `.github/workflows/docs-coupling.yml` | **Blocking** for `contract: true` docs |
 | Coupling gate — advisory comment | `scripts/docs/coupling-gate.mjs` | Advisory (always exits 0) |
 | Link health | lychee (`.lychee.toml`) | Advisory (`continue-on-error`) |
@@ -232,9 +232,9 @@ origin it is reading:
   `packages/frontend/scripts/serve-docs.mjs` regenerates the served files,
   `packages/frontend/public/docs/` is gitignored, and the invariant is pinned by
   [`served-docs.test.ts`](../../packages/frontend/src/lib/__tests__/served-docs.test.ts)
-  (#2680). That test also asserts a served copy contains no `covers:` once its
-  front matter is stripped, so a source's body must not write that key
-  literally — a re-verification note that did turned *Frontend checks* red on
+  (#2680). That test also asserts a served copy contains neither `last-verified:` nor
+  `covers:` once its front matter is stripped, so a source's body must not
+  write either key literally — a re-verification note that did turned *Frontend checks* red on
   PR #4381 while every docs gate stayed green.
 - **The generator is invoked from `next.config.ts`**, not an npm `prebuild`
   hook, and is phase-gated to build and dev — a server does not generate.
@@ -284,7 +284,8 @@ gates table gains the operator-verify close-keyword guard (a step of the
 required *Docs front-matter & agent skills* job since #2276, on `edited` since
 #2839); *Docs served to agents* says four docs (three product docs and the
 security model) rather than four product docs, and records that
-`served-docs.test.ts` forbids a literal `covers:` in a served body; `covers:`
+`served-docs.test.ts` forbids a literal `last-verified:` or `covers:` in a served
+body; `covers:`
 gains `scripts/ci/operator-verify-close-guard.mjs` for the new row. Re-checked
 without change: every script the table names (`chain-integrity.mjs` absent, as
 "Retired" says), the `docs:*` scripts, `docs.yml`'s unfiltered `pull_request`

@@ -56,5 +56,5 @@ nothing changed. Checked: `scripts/README.md` and `scripts/release-bump.mjs`;
 internal versions and the private consumers (backend, frontend, ops, qa-agent,
 mcp-server) pin `"*"`; `release-bump` and `publish.yml` are on the
 money-path globs; `.github/CODEOWNERS` gates only
-`packages/backend/src/db/migrations/*.ts`, and both rulesets require code-owner
-review.
+`packages/backend/src/db/migrations/*.ts`, and *Haven automerge rules* (on `dev`
+and `main`) and *Dev gate* (on `main`) both require code-owner review.

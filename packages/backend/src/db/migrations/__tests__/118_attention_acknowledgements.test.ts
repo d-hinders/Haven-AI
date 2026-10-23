@@ -83,9 +83,15 @@ describeDb('migration 118 — attention acknowledgements (#4324)', () => {
     await initDbHarness()
     // Re-apply THIS source over the worker schema, so every case below tests
     // the migration as written now — not a schema an earlier run (or a
-    // mutation run) left behind.
-    await run(down)
-    await run(up)
+    // mutation run) left behind. Emptied first, so down() has no rows to
+    // trip on; up() runs even when down() throws, so a broken down() cannot
+    // leave the worker schema off head for the files after this one.
+    await resetDb()
+    try {
+      await run(down)
+    } finally {
+      await run(up)
+    }
   })
 
   beforeEach(async () => {
@@ -203,8 +209,13 @@ describeDb('migration 118 — attention acknowledgements (#4324)', () => {
     await insert(userId, 'budget-reached', { agentId })
     await insert(userId, 'haven-paused')
 
+    // up() is the restore whatever happens, including a down() that throws
+    // halfway: the worker schema must be back at head for later files.
     await withMigrationReverted(
-      () => run(down),
+      () => run(down).catch(async (error) => {
+        await run(up)
+        throw error
+      }),
       async () => {
         const rows = await db.query<{ item_kind: string }>(
           `SELECT item_kind FROM attention_dismissals WHERE user_id = $1`,
@@ -232,6 +243,10 @@ describeDb('migration 118 — attention acknowledgements (#4324)', () => {
       [userId],
     )
     expect(rows[0].acknowledged_at.toISOString()).toBe('2026-10-10T12:00:00.000Z')
+    // Restored by up(): a second backup dismissal of the same user (another
+    // account, again no agent) still coexists with the first — the user-level
+    // index's predicate keeps account rows out of its scope.
+    await insert(userId, 'no-backup', { accountId: await insertTestAccount(userId) })
     await run(up) // idempotent
     await assertWorkerSchemaAtHead()
   })

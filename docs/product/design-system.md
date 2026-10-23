@@ -230,7 +230,7 @@ Same rule as v1: **never repurpose a semantic color**.
 | `--v2-series-5` | `#8a1290` | `#c28fff` |
 | `--v2-series-6` | `#a01a63` | `#e878b5` |
 
-The ordered set the chart primitives (`ui/StackedBarChart`, `ui/AreaChart`) paint their series from. Colour identifies the SERIES, never the meaning of a value — a refusal is not red and an incoming payment is not green here; those semantics stay with the ink scale and the semantic tokens above. **Order is the contract: assign series by index, never by hash or by name**, so an agent that keeps the first slot keeps the same colour across the chart, the legend, and the agents table's share column. Series 1 deliberately opens on `--v2-brand`. Never reuse a series colour outside a chart.
+The ordered set the chart primitives (`ui/StackedBarChart`, `ui/AreaChart`) paint their **non-agent** series from. Colour identifies the SERIES, never the meaning of a value — a refusal is not red and an incoming payment is not green here; those semantics stay with the ink scale and the semantic tokens above. **Order is the contract: assign series by index, never by hash or by name.** Since [#4331](https://github.com/d-hinders/Haven-AI/issues/4331), an **agent-keyed series does not come from this palette at all**: it is filled with the agent's own avatar tint (`seriesColorForAgent(name)`, beside `avatarTint`), so one agent wears one colour on every chart, in every period and on every page, matching its monogram — and the colour survives a re-rank. Two agents can hash to the same tint (six tints, unbounded agents); charts tell same-tint agents apart by name — the legend and the tooltip both print the name beside the swatch. Renaming an agent changes its colour, as it changes its monogram; that is intended. The avatar inks carry their own measured chart-fill guarantee below. Within THIS palette, index assignment stands, and Series 1 deliberately opens on `--v2-brand`. Never reuse a series colour outside a chart.
 
 ### Avatar tints ([#4066](https://github.com/d-hinders/Haven-AI/issues/4066))
 
@@ -243,9 +243,26 @@ The ordered set the chart primitives (`ui/StackedBarChart`, `ui/AreaChart`) pain
 | `--v2-avatar-5` (rose) | `#9c2759` | `#fbe2ec` | `#f193bd` | `#381b2b` |
 | `--v2-avatar-6` (steel) | `#2e5d8f` | `#d5e3f1` | `#93c1ea` | `#152639` |
 
-Six muted tints for the `Monogram` initials avatar (the `-soft` ground carries the initials, the ink is the initials colour). Assigned **by hashing the entity's name** (`lib/avatar-tint.ts` — djb2 mod 6 over the trimmed name, a pure function, so the same merchant or contact (and agent, from #4208) keeps the same tint everywhere, in light and dark, and SSR hydration agrees). Unlike the series palette there is deliberately **no order contract** — assignment is by name, never by index — which is exactly why the family is separate from `--v2-series-*`: the series contract forbids hashing, the charts own those hexes, and an avatar must not collide with a chart colour on the same screen. The avatar hexes are also disjoint from every status and brand hex (asserted in `theme-tokens.test.ts`), so a tint never reads as success, warning, danger or debit.
+Six muted tints for the `Monogram` initials avatar (the `-soft` ground carries the initials, the ink is the initials colour). Assigned **by hashing the entity's name** (`lib/avatar-tint.ts` — djb2 mod 6 over the trimmed name, a pure function, so the same merchant or contact (and agent, from #4208) keeps the same tint everywhere, in light and dark, and SSR hydration agrees). Assignment is by name, never by index — an agent's colour must not move because its spend rank did — which is exactly why there is deliberately **no order contract** here.
 
-Each ink clears 4.5:1 on its own ground in both themes (in `CONTRAST_PAIRS`, unlike the series stops' 3:1 non-text bar — initials are text), and the six grounds and six inks stay pairwise separable (a minimum CIE76 ΔE is pinned in the same test). Do not reach for a `-soft` semantic tint, `brand-soft` or a series stop for an avatar — `Monogram` owns this family.
+**One colour per agent ([#4331](https://github.com/d-hinders/Haven-AI/issues/4331)).** The ink does double duty: `seriesColorForAgent(name)` (same file as `avatarTint`) is the fill every **agent-keyed** chart uses, so an agent's chart swatch matches its monogram everywhere. The two families stay separate hex sets — an avatar ink is never equal to a `--v2-series-*` stop or a status/brand hex (asserted in `theme-tokens.test.ts`) — but the avatar family is no longer chart-exclusive: `--v2-series-*` remains for series that are **not** an agent.
+
+**Measured as a chart fill.** Every ink was checked against both card grounds it can be painted on, in both themes, at the 3:1 non-text bar charts are held to (WCAG relative luminance):
+
+| Ink | Light ink | on `--v2-bg` | on `--v2-surface` | Dark ink | on `--v2-bg` | on `--v2-surface` | Hue (light/dark) |
+|---|---|---|---|---|---|---|---|
+| avatar-1 (terracotta) | `#8a3a1a` | 7.78:1 | 7.36:1 | `#f2a884` | 9.31:1 | 8.60:1 | 17° / 20° |
+| avatar-2 (teal) | `#0c6b5a` | 6.43:1 | 6.08:1 | `#74d6c2` | 10.56:1 | 9.75:1 | 169° / 168° |
+| avatar-3 (violet) | `#6b2fa8` | 8.09:1 | 7.65:1 | `#c6a8f2` | 8.94:1 | 8.26:1 | 270° / 264° |
+| avatar-4 (moss) | `#4f661a` | 6.47:1 | 6.12:1 | `#b8cd82` | 10.52:1 | 9.71:1 | 78° / 77° |
+| avatar-5 (rose) | `#9c2759` | 7.37:1 | 6.98:1 | `#f193bd` | 8.39:1 | 7.75:1 | 334° / 333° |
+| avatar-6 (steel) | `#2e5d8f` | 6.82:1 | 6.46:1 | `#93c1ea` | 9.62:1 | 8.88:1 | 211° / 208° |
+
+Worst cell 6.08:1 — twice the 3:1 bar — and the hues stay at least ~41° apart within each theme. `CONTRAST_PAIRS` (`src/lib/theme-tokens.ts`) holds one `avatar-N` vs `bg` and one vs `surface` entry per ink, so the numbers above are a test, not a memory.
+
+**Collisions.** Six tints, unbounded agents: two agents can hash to the same tint and appear in the same chart. No workaround is attempted in the colour — the legend row and the tooltip chip both print the agent NAME beside the swatch, which is what tells same-tint agents apart. Renaming an agent changes its tint (as it changes its monogram); intended.
+
+Each ink clears 4.5:1 on its own ground in both themes (in `CONTRAST_PAIRS`, unlike the series stops' 3:1 non-text bar — initials are text) and, since #4331, 3:1 on both card grounds as a chart fill; the six grounds and six inks stay pairwise separable (a minimum CIE76 ΔE is pinned in the same test). Do not reach for a `-soft` semantic tint, `brand-soft` or a series stop for an avatar — `Monogram` and `seriesColorForAgent` own this family.
 
 ### Opacity on a token colour ([#1708](https://github.com/d-hinders/Haven-AI/issues/1708))
 

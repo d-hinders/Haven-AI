@@ -28,7 +28,7 @@ import { StatTile } from '@/components/ui/StatTile'
 import { AgentsTable } from '@/components/analytics/AgentsTable'
 import { BalanceSection } from '@/components/analytics/BalanceSection'
 import { SpendSection } from '@/components/analytics/SpendSection'
-import { orderAgentsForDisplay, seriesIndexByAgent } from '@/lib/analytics-series'
+import { orderAgentsForDisplay, seriesColorByAgent } from '@/lib/analytics-series'
 import { MerchantsTable } from '@/components/analytics/MerchantsTable'
 // The floor slice D fixed for "too little data to chart" — ONE home: the
 // page's sparse rule and every section's own guard read this constant, so
@@ -324,11 +324,12 @@ export default function AnalyticsClient() {
     // still render — a total over one day is still the total over that day —
     // and `SparseDataLine` says out what the reader is not being shown.
     const sparse = analyticsDaysWithData(data) < MIN_CHARTABLE_DAYS
-    // One order and one colour map for every section that names an agent:
-    // the wire's `agents[]` is unordered (no ORDER BY in the repository), and
-    // a colour keyed on wire position would move between two requests.
+    // One order for every section that names an agent: the wire's `agents[]`
+    // is unordered (no ORDER BY in the repository), so the page sorts once.
+    // One colour map too (#4331): each agent's fill is its own avatar tint,
+    // hashed from its name, so it holds across requests, ranges and ranks.
     const agents = orderAgentsForDisplay(data.agents)
-    const seriesIndexById = seriesIndexByAgent(agents, data.by_day)
+    const agentColors = seriesColorByAgent(agents, data.by_day)
     const rangeDays = days === 7 || days === 90 ? days : 30
     body = (
       <>
@@ -341,7 +342,7 @@ export default function AnalyticsClient() {
           <>
             {agents.length > 0 && (
               <div className="mt-4" data-testid="analytics-agents-section">
-                <AgentsTable agents={agents} currency={currency} seriesIndexById={seriesIndexById} />
+                <AgentsTable agents={agents} currency={currency} />
               </div>
             )}
             {/* Below the table, per screen-recipes.md § Analytics item 5
@@ -356,7 +357,7 @@ export default function AnalyticsClient() {
               <SpendSection
                 byDay={data.by_day}
                 agents={agents}
-                seriesIndexById={seriesIndexById}
+                agentColors={agentColors}
                 range={data.range}
                 tz={data.basis.tz}
                 currency={currency}

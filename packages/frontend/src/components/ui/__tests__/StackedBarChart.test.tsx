@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -189,6 +189,37 @@ describe('StackedBarChart — the drawing says what the data says', () => {
       'var(--v2-series-2)',
       'var(--v2-series-1)',
     ])
+  })
+
+  it('paints an agent-keyed series from its own color (#4331), and the legend and tooltip agree', () => {
+    // One colour per agent: the series carries `color` — its avatar tint,
+    // `seriesColorForAgent(name)` — and every reader of the segment (bar,
+    // legend dot, tooltip swatch) uses it, never a rank index.
+    renderChart({}, [
+      {
+        label: 'Mon 8',
+        series: [
+          { id: 'a', name: 'A', amount: 10, color: 'var(--v2-avatar-3)' },
+          { id: 'b', name: 'B', amount: 10, color: 'var(--v2-avatar-5)' },
+        ],
+      },
+      { label: 'Tue 9', series: [{ id: 'a', name: 'A', amount: 10, color: 'var(--v2-avatar-3)' }] },
+      { label: 'Wed 10', series: [{ id: 'a', name: 'A', amount: 10, color: 'var(--v2-avatar-3)' }] },
+    ])
+    expect(segmentsOf(dayGroups()[0]).map((s) => s.fill)).toEqual([
+      'var(--v2-avatar-3)',
+      'var(--v2-avatar-5)',
+    ])
+    // The legend rows read the same fill as the bar they name.
+    const legend = within(document.querySelector('[data-testid="chart-legend"]') as HTMLElement).getAllByTestId(
+      'chart-legend-item',
+    )
+    expect(
+      (legend[0]!.querySelector('span') as HTMLElement).style.backgroundColor,
+    ).toBe('var(--v2-avatar-3)')
+    expect(
+      (legend[1]!.querySelector('span') as HTMLElement).style.backgroundColor,
+    ).toBe('var(--v2-avatar-5)')
   })
 
   it('leaves the picture to the figure and the words to the reader', () => {

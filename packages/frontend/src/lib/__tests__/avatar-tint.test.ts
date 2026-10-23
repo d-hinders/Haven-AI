@@ -6,7 +6,7 @@ import {
   bergetAi,
   havenDemoStore,
 } from '../../../e2e/fixtures/marketplace'
-import { avatarTint } from '../avatar-tint'
+import { avatarTint, seriesColorForAgent } from '../avatar-tint'
 
 /**
  * The showcase names, read out of the page's source rather than imported:
@@ -69,5 +69,40 @@ describe('avatarTint', () => {
   it('the /design-system showcase names cover all six tints', () => {
     expect(SHOWCASE_NAMES).toHaveLength(6)
     expect(new Set(SHOWCASE_NAMES.map(avatarTint)).size).toBe(6)
+  })
+})
+
+/**
+ * One colour per agent (#4331): the tint the `Monogram` wears is the SAME
+ * token the agent's chart series is filled with, via `seriesColorForAgent`.
+ */
+describe('seriesColorForAgent', () => {
+  it('gives a name the var() of the very tint its monogram wears', () => {
+    for (const name of [
+      'Research agent',
+      'Ops agent',
+      'Ampersend Demo API',
+      'Haven Demo Store',
+      'Berget AI',
+      'Zoé Lambert',
+    ]) {
+      expect(seriesColorForAgent(name)).toBe(`var(--v2-avatar-${avatarTint(name)})`)
+    }
+  })
+
+  it('is rank-independent — a pure function of the name, unmoved by any other agent', () => {
+    // The colour does not consult an ordering: the same call, with or without
+    // a second agent "queued" ahead of it, reads the same token.
+    expect(seriesColorForAgent('Research agent')).toBe(seriesColorForAgent('Research agent'))
+    expect(seriesColorForAgent('Research agent')).toBe('var(--v2-avatar-6)')
+    expect(seriesColorForAgent('Ops agent')).toBe('var(--v2-avatar-5)')
+  })
+
+  it('lands the /design-system showcase pair on two different tints, so the monogram-beside-swatch row reads', () => {
+    expect(avatarTint('Research agent')).not.toBe(avatarTint('Ops agent'))
+  })
+
+  it('normalises like avatarTint — trim and collapsed whitespace', () => {
+    expect(seriesColorForAgent('  Research \t agent ')).toBe(seriesColorForAgent('Research agent'))
   })
 })

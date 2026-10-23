@@ -41,6 +41,7 @@ import type { AggregatedTransaction } from '@/types/transactions'
 import { StepProgress } from '@/components/ui/StepProgress'
 import { DialogActions } from '@/components/ui/DialogActions'
 import { SeriesSwatch, StackedBarChart } from '@/components/ui/StackedBarChart'
+import { seriesColorForAgent } from '@/lib/avatar-tint'
 import type { StackedBarDay } from '@/components/ui/StackedBarChart'
 import { AreaChart } from '@/components/ui/AreaChart'
 import type { AreaPoint, SparklinePoint } from '@/components/ui/AreaChart'
@@ -255,13 +256,24 @@ const NOOP = () => {}
 const dsMoney = (n: number) =>
   n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
+/**
+ * The two showcase agents' fills (#4331): their own avatar tints, read
+ * through the same `seriesColorForAgent` the charts use — so the swatch list
+ * under the chart and the `Monogram` section show the SAME colour for the
+ * SAME name, by construction. ('Research agent' hashes to tint 6, 'Ops
+ * agent' to tint 5 — two different tints, checked in
+ * `avatar-tint.test.ts`.)
+ */
+const DS_RESEARCH_COLOR = seriesColorForAgent('Research agent')
+const DS_OPS_COLOR = seriesColorForAgent('Ops agent')
+
 const DS_CHART_DAYS: StackedBarDay[] = [
   {
     label: 'Mon 1',
     refusals: 0,
     series: [
-      { id: 'research', name: 'Research agent', amount: 140, seriesIndex: 0, tokens: [['USDC', 140]] },
-      { id: 'ops', name: 'Ops agent', amount: 60, seriesIndex: 1 },
+      { id: 'research', name: 'Research agent', amount: 140, color: DS_RESEARCH_COLOR, tokens: [['USDC', 140]] },
+      { id: 'ops', name: 'Ops agent', amount: 60, color: DS_OPS_COLOR },
     ],
   },
   {
@@ -272,53 +284,53 @@ const DS_CHART_DAYS: StackedBarDay[] = [
         id: 'research',
         name: 'Research agent',
         amount: 220,
-        seriesIndex: 0,
+        color: DS_RESEARCH_COLOR,
         tokens: [
           ['USDC', 160.4],
           ['PYUSD', 59.6],
         ],
       },
-      { id: 'ops', name: 'Ops agent', amount: 45, seriesIndex: 1 },
+      { id: 'ops', name: 'Ops agent', amount: 45, color: DS_OPS_COLOR },
     ],
   },
   {
     label: 'Wed 3',
     refusals: 0,
     series: [
-      { id: 'research', name: 'Research agent', amount: 95, seriesIndex: 0 },
-      { id: 'ops', name: 'Ops agent', amount: 310, seriesIndex: 1 },
+      { id: 'research', name: 'Research agent', amount: 95, color: DS_RESEARCH_COLOR },
+      { id: 'ops', name: 'Ops agent', amount: 310, color: DS_OPS_COLOR },
     ],
   },
   {
     label: 'Thu 4',
     refusals: 2,
     series: [
-      { id: 'research', name: 'Research agent', amount: 180, seriesIndex: 0 },
-      { id: 'ops', name: 'Ops agent', amount: 70, seriesIndex: 1 },
+      { id: 'research', name: 'Research agent', amount: 180, color: DS_RESEARCH_COLOR },
+      { id: 'ops', name: 'Ops agent', amount: 70, color: DS_OPS_COLOR },
     ],
   },
   {
     label: 'Fri 5',
     refusals: 0,
     series: [
-      { id: 'research', name: 'Research agent', amount: 260, seriesIndex: 0 },
-      { id: 'ops', name: 'Ops agent', amount: 55, seriesIndex: 1 },
+      { id: 'research', name: 'Research agent', amount: 260, color: DS_RESEARCH_COLOR },
+      { id: 'ops', name: 'Ops agent', amount: 55, color: DS_OPS_COLOR },
     ],
   },
   {
     label: 'Sat 6',
     refusals: 0,
     series: [
-      { id: 'research', name: 'Research agent', amount: 60, seriesIndex: 0 },
-      { id: 'ops', name: 'Ops agent', amount: 40, seriesIndex: 1 },
+      { id: 'research', name: 'Research agent', amount: 60, color: DS_RESEARCH_COLOR },
+      { id: 'ops', name: 'Ops agent', amount: 40, color: DS_OPS_COLOR },
     ],
   },
   {
     label: 'Sun 7',
     refusals: 0,
     series: [
-      { id: 'research', name: 'Research agent', amount: 150, seriesIndex: 0 },
-      { id: 'ops', name: 'Ops agent', amount: 90, seriesIndex: 1 },
+      { id: 'research', name: 'Research agent', amount: 150, color: DS_RESEARCH_COLOR },
+      { id: 'ops', name: 'Ops agent', amount: 90, color: DS_OPS_COLOR },
     ],
   },
 ]
@@ -3642,7 +3654,7 @@ export default function DesignSystemPage() {
       <Section
         title="StackedBarChart"
         testId="ds-stacked-bar-chart"
-        description="Daily bars stacked by agent for a spend range, refusals as a marker cap above the bar (a refusal count has no money scale, so never a second axis). Colour reads the ordered --v2-series-* tokens by index, so an agent keeps one colour across the chart, the legend, and the swatch beside its spend figure in the agents table (SeriesSwatch, exported from this file — the table reads the same index the chart paints with; never beside a name, where a dot reads as a status light). A partial day — the window's cut first or last day — is striped with the series token at full strength (not faded: an opacity blend would read lighter on the light ground and darker on the dark one, and drop under 3:1). Below three days it renders nothing; the page shows tiles instead (#2948). Focus the figure and use the arrow keys for a day's detail: a two-line callout (day, refusal count and total, then the agents as wrapping swatch·name·amount chips, capped at 24rem so a token breakdown wraps inside its chip instead of stretching the callout — #3067, so it fits above or below almost any bar) anchored over the day, clamped inside the plot by its own measured width, and dropped below the described bar's top when the bar or its cap would otherwise hide under it — bottom just above the axis when the bar can hold it, else just above the legend over the date labels beneath it — whichever of the two hides the fewest neighbouring tops (#3076) — and not at all for a bar the drop would swallow (#3063 — the bar's top and its refusal cap stay visible; on this sample the days whose bars reach under the resting callout drop, the rest keep it). The callout takes no pointer: hover the next bar through it and the detail moves on; a tap pins a day, a second tap or Escape releases it (#3066). On a narrow screen the tooltip becomes a panel pinned below the plot."
+        description="Daily bars stacked by agent for a spend range, refusals as a marker cap above the bar (a refusal count has no money scale, so never a second axis). Since #4331 an agent's fill is its own avatar tint (seriesColorForAgent, hashed from the name): the chart, the legend, the tooltip and the agent's monogram all wear one colour, in every period and on every page, no matter how its spend ranks. Two agents can hash to the same tint — six tints, unbounded agents — and the legend and tooltip tell them apart by name. A partial day — the window's cut first or last day — is striped with the series fill at full strength (not faded: an opacity blend would read lighter on the light ground and darker on the dark one, and drop under 3:1). Below three days it renders nothing; the page shows tiles instead (#2948). Focus the figure and use the arrow keys for a day's detail: a two-line callout (day, refusal count and total, then the agents as wrapping swatch·name·amount chips, capped at 24rem so a token breakdown wraps inside its chip instead of stretching the callout — #3067, so it fits above or below almost any bar) anchored over the day, clamped inside the plot by its own measured width, and dropped below the described bar's top when the bar or its cap would otherwise hide under it — bottom just above the axis when the bar can hold it, else just above the legend over the date labels beneath it — whichever of the two hides the fewest neighbouring tops (#3076) — and not at all for a bar the drop would swallow (#3063 — the bar's top and its refusal cap stay visible; on this sample the days whose bars reach under the resting callout drop, the rest keep it). The callout takes no pointer: hover the next bar through it and the detail moves on; a tap pins a day, a second tap or Escape releases it (#3066). On a narrow screen the tooltip becomes a panel pinned below the plot."
       >
         <Card hover={false} className="p-5">
           <StackedBarChart
@@ -3664,16 +3676,20 @@ export default function DesignSystemPage() {
               narrow
             />
           </div>
-          {/* The swatch a table row carries to key itself to the chart above —
-              the same `seriesColor(index)` the segments and the legend read. */}
+          {/* One colour per agent (#4331): the monogram and the chart swatch
+              read the same avatar tint for the same name — `seriesColorForAgent`
+              — so this list is the pairing the rule promises, not a mock-up.
+              (The agents table no longer carries a swatch; the monogram in
+              its row IS the colour key.) */}
           <ul
             data-testid="ds-stacked-bar-swatch-list"
             className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-[var(--v2-ink-2)]"
           >
             {DS_CHART_DAYS[0]?.series.map((s) => (
               <li key={s.id} className="inline-flex items-center gap-1.5">
-                <SeriesSwatch seriesIndex={s.seriesIndex} />
-                <span>{s.name} — table row swatch</span>
+                <Monogram name={s.name} size="xs" decorative />
+                <SeriesSwatch color={s.color} />
+                <span>{s.name} — one colour: monogram and chart fill</span>
               </li>
             ))}
           </ul>
@@ -3929,7 +3945,7 @@ export default function DesignSystemPage() {
       <Section
         title="Monogram"
         testId="ds-monogram"
-        description="Initials-in-a-circle avatar, or the entity's logo when it has one. Promoted to components/ui on its third copy (#3079): the /contacts Initials avatar, the marketplace card and the merchant header all drew the same circle. xs (32px) for the agent row's 2rem mark track (#4208), sm (36px) for lists and cards, md (48px) for a page header. `decorative` sets aria-hidden for a caller that prints the name beside the mark; without it the initials stay readable. Initials are taken by visible character, so a flag or a joined emoji never renders half of one; a name that starts with an emoji shows that emoji alone. Since #4066 the initials variant is tinted from the entity's NAME — one of six muted avatar tints picked by a pure hash of the trimmed name, so the same entity keeps the same colour everywhere and neighbouring rows are told apart at a glance. Assigned by name, never by index, and never from a status or --v2-series-* chart colour (the hexes are disjoint from both)."
+        description="Initials-in-a-circle avatar, or the entity's logo when it has one. Promoted to components/ui on its third copy (#3079). xs (32px) for the agent row's 2rem mark track (#4208), sm (36px) for lists and cards, md (48px) for a page header. `decorative` sets aria-hidden for a caller that prints the name beside the mark; a name that starts with an emoji shows that emoji alone. Since #4066 the initials are tinted from the entity's NAME — one of six muted avatar tints, a pure hash of the trimmed name (assigned by name, never by index, and never a status or semantic colour). Since #4331 the tint is also the agent's chart fill (seriesColorForAgent) — one colour per agent: the chart swatch beside the monogram above matches it, and renaming an agent changes its colour, as it changes its monogram."
       >
         <div className="flex flex-wrap items-center gap-4">
           {MONOGRAM_TINT_EXAMPLES.map((name) => (

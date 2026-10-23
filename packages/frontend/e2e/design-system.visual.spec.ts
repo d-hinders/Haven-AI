@@ -450,7 +450,8 @@ test.describe('design-system visual regression', () => {
    *   - the NARROW sample → `...-stacked-bar-chart-narrow-<vp>[-dark].png`,
    *     the `PAD_NARROW` gutter treatment whose tick voice #3057 changed;
    *   - the SWATCH LIST   → `...-stacked-bar-swatch-list-<vp>[-dark].png`,
-   *     one `series-swatch` per series in order.
+   *     one `series-swatch` per agent in order, each wearing the agent's own
+   *     avatar tint with its Monogram beside it (#4331).
    *
    * ── The assertions are the named causes for any pixel diff ──────────────────
    *
@@ -460,8 +461,9 @@ test.describe('design-system visual regression', () => {
    * step to 200, and `formatAnalyticsTick` renders integers); exactly one day
    * carries `data-partial`, it is the LAST day, and the chart defines a hatch
    * pattern per series for it; the swatch list holds one `series-swatch` per
-   * series, IN ORDER (`data-series-index` 0 then 1, the same indexes the bars
-   * paint with). A diff with none of these having moved is a paint/token
+   * agent, IN ORDER, each wearing the agent's OWN avatar tint
+   * (`seriesColorForAgent`) with its Monogram beside it (#4331). A diff with
+   * none of these having moved is a paint/token
    * drift; a diff WITH one of them moved names its own cause.
    *
    * The budget is the same 100-px absolute slack every clip in this file
@@ -540,14 +542,34 @@ test.describe('design-system visual regression', () => {
       await page.evaluate(() => document.fonts.ready)
       await page.waitForLoadState('networkidle')
 
-      // Named cause 3 — the swatches: one per series, in order, the same
-      // `seriesColor(index)` the bars paint with.
+      // Named cause 3 — the swatches: one per agent, in order, each wearing
+      // the agent's OWN avatar tint (`seriesColorForAgent`, #4331 —
+      // 'Research agent' hashes to --v2-avatar-6, 'Ops agent' to
+      // --v2-avatar-5, pinned in `src/lib/__tests__/avatar-tint.test.ts`),
+      // with the agent's Monogram beside it — the pairing the list exists to
+      // show, not a rank-assigned series index the bars paint with.
       const swatchList = page.getByTestId('ds-stacked-bar-swatch-list')
       await expect(swatchList).toHaveCount(1)
-      const swatches = swatchList.getByTestId('series-swatch')
-      await expect(swatches).toHaveCount(2)
-      await expect(swatches.nth(0)).toHaveAttribute('data-series-index', '0')
-      await expect(swatches.nth(1)).toHaveAttribute('data-series-index', '1')
+      const rows = swatchList.locator('li')
+      await expect(rows).toHaveCount(2)
+      await expect(swatchList.getByTestId('series-swatch')).toHaveCount(2)
+      const researchRow = rows.filter({ hasText: 'Research agent' })
+      const opsRow = rows.filter({ hasText: 'Ops agent' })
+      await expect(researchRow).toHaveCount(1)
+      await expect(opsRow).toHaveCount(1)
+      await expect(researchRow.getByTestId('series-swatch')).toHaveAttribute(
+        'style',
+        /var\(--v2-avatar-6\)/,
+      )
+      await expect(opsRow.getByTestId('series-swatch')).toHaveAttribute(
+        'style',
+        /var\(--v2-avatar-5\)/,
+      )
+      // The agent's own Monogram sits beside its swatch: the same aria-hidden
+      // 32px mark the Monogram agent-row sample below asserts on — the #4331
+      // pairing, one colour per agent.
+      await expect(researchRow.locator('[aria-hidden="true"].h-8.w-8')).toHaveCount(1)
+      await expect(opsRow.locator('[aria-hidden="true"].h-8.w-8')).toHaveCount(1)
 
       await expectShowcaseClip(swatchList, vp.height, 'the swatch list', `design-system-stacked-bar-swatch-list-${vp.name}${schemeSuffix}.png`, STACKED_BAR_MAX_DIFF_PIXELS)
     })

@@ -1,8 +1,8 @@
 import { render, screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { SpendSection, partialEdgeDates, partialEdges, partialNote, spendSummary, toStackedBarDays } from '../SpendSection'
-import { orderAgentsForDisplay, seriesIndexByAgent } from '@/lib/analytics-series'
-import { seriesColor } from '@/components/ui/StackedBarChart'
+import { orderAgentsForDisplay, seriesColorByAgent } from '@/lib/analytics-series'
+import { seriesColorForAgent } from '@/lib/avatar-tint'
 import { formatAnalyticsValue } from '@/lib/analytics-format'
 import { FIXTURE_ANALYTICS_OVERVIEW } from '../../../../scripts/screenshot.mjs'
 import type { AnalyticsAgentRow, AnalyticsDayBucket, AnalyticsOverviewResponse } from '@/types/analytics'
@@ -17,10 +17,10 @@ import type { AnalyticsAgentRow, AnalyticsDayBucket, AnalyticsOverviewResponse }
 const POPULATED = FIXTURE_ANALYTICS_OVERVIEW as AnalyticsOverviewResponse
 const AGENTS = orderAgentsForDisplay(POPULATED.agents as AnalyticsAgentRow[])
 const BY_DAY = POPULATED.by_day as AnalyticsDayBucket[]
-const SERIES = seriesIndexByAgent(AGENTS, BY_DAY)
+const SERIES = seriesColorByAgent(AGENTS, BY_DAY)
 const render6 = (byDay: AnalyticsDayBucket[], range: { from: string; to: string }, tz: string) =>
   render(
-    <SpendSection byDay={byDay} agents={AGENTS} seriesIndexById={seriesIndexByAgent(AGENTS, byDay)} range={range} tz={tz} currency="USD" rangeDays={30} />,
+    <SpendSection byDay={byDay} agents={AGENTS} agentColors={seriesColorByAgent(AGENTS, byDay)} range={range} tz={tz} currency="USD" rangeDays={30} />,
   )
 
 /** A window whose edges are NOT midnight in Stockholm: 07 Jul 09:30 → 10 Jul 09:30 UTC. */
@@ -29,12 +29,18 @@ const CUT_RANGE = { from: '2026-07-07T09:30:00.000Z', to: '2026-07-10T09:30:00.0
 const ALIGNED_RANGE = { from: '2026-07-06T22:00:00.000Z', to: '2026-07-10T22:00:00.000Z' }
 
 describe('toStackedBarDays — the wire becomes the primitive input', () => {
-  it('keys every segment to the agent name and its index in agents[], the order the endpoint sent', () => {
+  it('keys every segment to the agent name and its own avatar tint, the colour its monogram wears', () => {
     const days = toStackedBarDays(BY_DAY, AGENTS, SERIES, ALIGNED_RANGE, 'Europe/Stockholm')
     expect(days).toHaveLength(BY_DAY.length)
     const first = days[0]!
     expect(first.series.map((s) => s.name)).toEqual(['Research agent', 'Data-feed agent'])
-    expect(first.series.map((s) => s.seriesIndex)).toEqual([0, 1])
+    // One colour per agent (#4331): the fill is the agent's avatar tint,
+    // hashed from the NAME — not a rank index — so it is stable across
+    // periods, pages and re-rankings.
+    expect(first.series.map((s) => s.color)).toEqual([
+      seriesColorForAgent('Research agent'),
+      seriesColorForAgent('Data-feed agent'),
+    ])
     // The one string→number parse, at the row: "85.75" → 85.75, not a
     // re-typed wire.
     expect(first.series[0]!.amount).toBe(85.75)
@@ -53,25 +59,31 @@ describe('toStackedBarDays — the wire becomes the primitive input', () => {
     const reversed: AnalyticsDayBucket[] = [
       { date: '2026-07-07', spent_by_agent: { 'agent-retired': '12.50', 'agent-research': '85.75' }, refusals: 0 },
     ]
-    const [day] = toStackedBarDays(reversed, AGENTS, seriesIndexByAgent(AGENTS, reversed), ALIGNED_RANGE, 'UTC')
-    expect(day!.series.map((s) => [s.id, s.seriesIndex])).toEqual([
-      ['agent-research', 0],
-      ['agent-retired', 1],
+    const [day] = toStackedBarDays(reversed, AGENTS, seriesColorByAgent(AGENTS, reversed), ALIGNED_RANGE, 'UTC')
+    expect(day!.series.map((s) => s.id)).toEqual(['agent-research', 'agent-retired'])
+    // Rank-independence (#4331): the reverse-order wire changes the STACK
+    // order to the display order but not either agent's colour.
+    expect(day!.series.map((s) => s.color)).toEqual([
+      seriesColorForAgent('Research agent'),
+      seriesColorForAgent('Data-feed agent'),
     ])
   })
 
-  it('gives two stray ids two different colours', () => {
+  it('gives ids the roster does not carry the neutral ink, named rather than dropped', () => {
     const stray: AnalyticsDayBucket[] = [{ date: '2026-07-07', spent_by_agent: { x: '1', y: '2' }, refusals: 0 }]
-    const [day] = toStackedBarDays(stray, AGENTS, new Map([['c', 0]]), ALIGNED_RANGE, 'UTC')
-    expect(day!.series.map((s) => s.seriesIndex)).toEqual([1, 2])
+    const [day] = toStackedBarDays(stray, AGENTS, new Map(), ALIGNED_RANGE, 'UTC')
+    // No name to hash → no invented hue; the neutral ink MoneyPanel gives
+    // unattributed money (#3897). The legend and tooltip still NAME them.
+    expect(day!.series.map((s) => s.color)).toEqual(['var(--v2-ink-3)', 'var(--v2-ink-3)'])
+    expect(day!.series.map((s) => s.name)).toEqual(['x', 'y'])
   })
 
-  it('names an agent id the roster does not carry rather than dropping its money, on a colour past the roster', () => {
+  it('names an agent id the roster does not carry rather than dropping its money, on the neutral ink', () => {
     const stray: AnalyticsDayBucket[] = [
       { date: '2026-07-07', spent_by_agent: { 'agent-ghost': '3.00' }, refusals: 0 },
     ]
-    const [day] = toStackedBarDays(stray, AGENTS, seriesIndexByAgent(AGENTS, stray), ALIGNED_RANGE, 'UTC')
-    expect(day!.series[0]).toMatchObject({ name: 'agent-ghost', seriesIndex: 0, amount: 3 })
+    const [day] = toStackedBarDays(stray, AGENTS, seriesColorByAgent(AGENTS, stray), ALIGNED_RANGE, 'UTC')
+    expect(day!.series[0]).toMatchObject({ name: 'agent-ghost', color: 'var(--v2-ink-3)', amount: 3 })
   })
 })
 
@@ -118,7 +130,7 @@ describe('spendSummary — the accessible sentence in the primitive shape', () =
 
   it('singularises', () => {
     const oneDay = [{ date: '2026-07-07', spent_by_agent: { 'agent-research': '10.00' }, refusals: 1 }]
-    const one = toStackedBarDays(oneDay, AGENTS, seriesIndexByAgent(AGENTS, oneDay), ALIGNED_RANGE, 'UTC')
+    const one = toStackedBarDays(oneDay, AGENTS, seriesColorByAgent(AGENTS, oneDay), ALIGNED_RANGE, 'UTC')
     // `formatAnalyticsValue` owns the de-DE spacing (a non-breaking space before €); the sentence around it is what this pins.
     expect(spendSummary(one, 'EUR', 7)).toBe(`Spend over 7 days: ${formatAnalyticsValue(10, 'EUR')} across 1 agent, 1 refusal.`)
   })
@@ -132,13 +144,19 @@ describe('SpendSection — on the page', () => {
     expect(screen.getAllByRole('img', { name: /Spend over 30 days: \$324\.75 across 2 agents, 2 refusals\./ })).toHaveLength(2)
   })
 
-  it('paints agent i in the same series token the agents table swatch reads for row i', () => {
+  it('paints each agent in its own avatar tint — the same fill its monogram wears (#4331)', () => {
     const { container } = render6(BY_DAY, ALIGNED_RANGE, 'UTC')
     const chart = container.querySelector('[data-testid="stacked-bar-chart"]')!
     const firstDay = within(chart as HTMLElement).getAllByTestId('chart-day')[0]!
     const segments = firstDay.querySelectorAll('[data-testid="chart-segment"]')
-    expect(segments[0]!.getAttribute('fill')).toBe(seriesColor(0))
-    expect(segments[1]!.getAttribute('fill')).toBe(seriesColor(1))
+    expect(segments[0]!.getAttribute('fill')).toBe(seriesColorForAgent('Research agent'))
+    expect(segments[1]!.getAttribute('fill')).toBe(seriesColorForAgent('Data-feed agent'))
+    // Both fixture agents hash to tint 6 — the documented collision, live in
+    // the capture fixture: two agents, one chart, one tint, told apart by
+    // NAME in the legend and tooltip. The pin is deliberate: rank-based
+    // assignment would have silently "fixed" this by re-painting an agent.
+    expect(segments[0]!.getAttribute('fill')).toBe('var(--v2-avatar-6)')
+    expect(segments[1]!.getAttribute('fill')).toBe('var(--v2-avatar-6)')
   })
 
   it('says on the face of the card when the edge bars are partial, and stays quiet when they are not', () => {

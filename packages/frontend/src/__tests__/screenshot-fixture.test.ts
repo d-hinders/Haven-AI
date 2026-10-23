@@ -1143,15 +1143,22 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
         expect(refusalSum).toBe(overview.totals.refused_count)
       })
 
-      it('merchant rows demonstrate all three label resolutions the API defines (#2949)', () => {
-        // contact name → receipt name → address, in that order (issue #2946);
-        // one capture must show every label source the product can produce.
-        const overview = fx('/analytics/overview') as { merchants: { label: string; address: string; spent: string }[] }
+      it('merchant rows demonstrate every label resolution the API defines (#2949, #4332)', () => {
+        // The five-step naming order (#4332): x402 resource host → own
+        // account → contact → receipt → null. One capture must show the
+        // named sources AND the null terminal state (the client renders
+        // "Unknown recipient" there; until #4333 the shim shows the address).
+        const overview = fx('/analytics/overview') as { merchants: { label: string | null; kind: string; address: string; spent: string }[] }
         const labels = overview.merchants.map((m) => m.label)
-        expect(labels).toContain('Klara Data AB') // contact name
-        expect(labels).toContain('NordShield VPN') // receipt merchant name
-        const addressOnly = overview.merchants.find((m) => m.label === m.address)
-        expect(addressOnly).toBeDefined()
+        expect(labels).toContain('Klara Data AB') // receipt merchant name
+        expect(labels).toContain('NordShield VPN') // contact name
+        const unresolved = overview.merchants.find((m) => m.label === null)
+        expect(unresolved).toBeDefined()
+        expect(unresolved?.kind).toBe('unknown')
+        // Every named row carries the kind that produced its label.
+        for (const m of overview.merchants) {
+          if (m.label !== null) expect(m.kind).not.toBe('unknown')
+        }
         // Top of the table is by spent, descending. `spent` is a numeric
         // string on the wire (B #2946), so the fold goes through Number().
         const spent = overview.merchants.map((m) => Number(m.spent))

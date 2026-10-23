@@ -6471,6 +6471,13 @@ export const openapiSpec = {
             schema: { type: 'string', default: 'UTC' },
             description: 'IANA time zone used to bucket `by_day`. Defaults to UTC; an unrecognized zone is a 400.',
           },
+          {
+            name: 'agentId',
+            in: 'query',
+            schema: { type: 'string', format: 'uuid' },
+            description:
+              'Scope every agent-dimensioned section (totals, previous-window totals, by-day buckets, agents, merchants, refusal counts, near-budget count, fees) to ONE agent of the user. A well-formed uuid that is not the user\'s is a 404 — the whole page is about that agent, so unlike a list filter there is no meaningful empty answer (`/transactions` answers a foreign filter id 400 instead). A revoked agent keeps its history. `balance_by_day` and `gas_sponsored_ops` are NOT scoped: history is stored per user (`user_daily_portfolio_snapshots`) and gas is genuinely mixed — the response carries `balance_scope: "all_accounts"` so the client can say so. A MALFORMED id is the standard 400 envelope, before the handler.',
+          },
         ],
         responses: {
           '200': {
@@ -6479,7 +6486,7 @@ export const openapiSpec = {
               'application/json': {
                 schema: {
                   type: 'object',
-                  required: ['range', 'currency', 'basis', 'totals', 'by_day', 'agents', 'merchants', 'balance_by_day'],
+                  required: ['range', 'currency', 'basis', 'totals', 'by_day', 'agents', 'merchants', 'balance_scope', 'balance_by_day'],
                   properties: {
                     range: {
                       type: 'object',
@@ -6593,6 +6600,7 @@ export const openapiSpec = {
                                 remaining_from_chain: { type: 'boolean', description: 'False when the on-chain read fell back to the configured budget.' },
                                 period_start: { type: 'string', format: 'date-time' },
                                 period_end: { type: 'string', format: 'date-time' },
+                                chain_id: { type: 'integer', description: 'The delegation\'s chain. Optional on the wire (#4332) — hardening for #4333\'s budget caption fix.' },
                               },
                             },
                           },
@@ -6600,7 +6608,7 @@ export const openapiSpec = {
                             type: ['object', 'null'],
                             required: ['label', 'address'],
                             properties: {
-                              label: { type: 'string' },
+                              label: { type: ['string', 'null'], description: 'The five-step naming order (x402 resource host → own account → contact → receipt → none, #4332); null when nothing resolved — the client renders "Unknown recipient".' },
                               address: address,
                             },
                           },
@@ -6613,9 +6621,23 @@ export const openapiSpec = {
                       description: 'Top 10 by spend.',
                       items: {
                         type: 'object',
-                        required: ['label', 'address', 'spent', 'payments', 'agent_ids', 'first_seen', 'last_seen'],
+                        required: ['label', 'kind', 'filter_address', 'address', 'spent', 'payments', 'agent_ids', 'first_seen', 'last_seen'],
                         properties: {
-                          label: { type: 'string', description: 'The user’s contact name where the address matches, else the receipt’s merchant name, else the address.' },
+                          label: {
+                            type: ['string', 'null'],
+                            description:
+                              'The five-step naming order (#4332, the /transactions order plus one analytics-only step): the x402 resource host of the merchant\'s most recent payment IN THE WINDOW → one of the user\'s own accounts (address-only across chains; the oldest account wins a shared address) → the contact name → the receipt\'s merchant_name (the analytics-only extension) → null. Null means the client renders "Unknown recipient".',
+                          },
+                          kind: {
+                            type: 'string',
+                            enum: ['x402', 'own_account', 'contact', 'receipt', 'unknown'],
+                            description: 'Which naming step produced `label`.',
+                          },
+                          filter_address: {
+                            type: 'string',
+                            description:
+                              'The address /transactions\' search matches (`x402MerchantAddress ?? to`) — the "View in Transactions" link target. One merchant group (keyed on `COALESCE(merchant_address, x402_merchant_address, to_address)`) can hold DIFFERENT filter addresses; this is the most FREQUENT one in the group, ties to the most recent payment.',
+                          },
                           address: address,
                           spent: { type: 'string' },
                           payments: { type: 'integer' },
@@ -6624,6 +6646,12 @@ export const openapiSpec = {
                           last_seen: { type: 'string', format: 'date-time' },
                         },
                       },
+                    },
+                    balance_scope: {
+                      type: 'string',
+                      enum: ['all_accounts'],
+                      description:
+                        'What `balance_by_day` covers. Always `all_accounts` (#4332): history is stored per USER (`user_daily_portfolio_snapshots`), so the balance series is deliberately NOT scoped by `agentId` even when the rest of the response is.',
                     },
                     balance_by_day: {
                       type: 'array',
@@ -6641,8 +6669,9 @@ export const openapiSpec = {
               },
             },
           },
-          '400': { ...errorResponse, description: 'range/currency outside the enum, or tz is not a recognized IANA zone.' },
+          '400': { ...errorResponse, description: 'range/currency outside the enum, or tz is not a recognized IANA zone. A malformed `agentId` (not a uuid) is this envelope too, answered before the handler.' },
           '401': errorResponse,
+          '404': { ...errorResponse, description: 'A well-formed `agentId` that is not an agent of the authenticated user — never another user\'s data.' },
         },
       },
     },

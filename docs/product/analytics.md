@@ -139,9 +139,15 @@ Below three days of data the chart is not drawn (see the sparse rule below)
 — a line through one point agrees with every trend.
 
 **Top merchants.** The recipients your agents paid most, ranked by spent.
-A merchant's label is resolved by the API in a fixed order: your contact's
-name for that address, else the name on the payment's receipt, else the
-address itself. Each row also shows payments, paying agents (up to three,
+A merchant's label is resolved by the API in a fixed order: the host of the
+x402 resource its most recent payment in the range called, else the name of
+one of your own accounts at that address (address-only, across chains; the
+oldest account wins a shared address), else your contact's name for that
+address, else the name on the payment's receipt, else nothing — the row
+shows "Unknown recipient" where the transaction history says "New
+recipient". Each row also carries `filter_address`, the address the
+transaction history's search matches, which the "View in Transactions" link
+targets. Each row also shows payments, paying agents (up to three,
 then "and N more"), and first and last seen in the range. A row links into
 the transaction history for that merchant; until the merchant filter exists
 there, it links to the transaction history unfiltered — the row never links

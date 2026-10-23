@@ -270,16 +270,23 @@ bounded funding leg:
 
 ```
 hosted:  haven_pay_x402_quote     -> { payment_id, payload_hash, x402.expected }
-local:   haven_sign + expected    -> funding signature + x402_binding
+local:   haven_sign               -> funding signature + x402_binding; pass { payment_id }
+                                    (preferred), or payload_hash + x402_expected together with
+                                    typed_data_b64 from a re-run quote with
+                                    include_signing_payload=true
 hosted:  haven_submit             -> funds account -> delegate EOA
 local:   haven_x402_sign_header   -> payment header only if binding matches
 agent:   retry merchant, setting BOTH PAYMENT-SIGNATURE + X-PAYMENT
          (both names are correct HERE — the bridged header is small)
 ```
 
-On the bridge, pass `x402.expected` from the hosted quote unchanged into the
-local `haven_sign` call, or just pass `{ payment_id }` and let the signer fetch
-it. The signer records that context and returns a process-local `x402_binding`;
+On the bridge, pass `{ payment_id }` to the local `haven_sign` call and let the
+signer fetch the exact signing bytes and the expected context (preferred). The
+decomposed form is `payload_hash` plus `x402_expected` together with
+`typed_data_b64` from the quote re-run with `include_signing_payload=true`; a
+`payload_hash` with `x402_expected` and no typed data is refused, because the
+signer re-derives the funding payload's EIP-712 digest before signing. The
+signer records that context and returns a process-local `x402_binding`;
 pass that binding into `haven_x402_sign_header` after `haven_submit` confirms.
 The signer refuses to authorize the merchant header when the fresh merchant
 challenge has a different amount, merchant recipient, resource URL, token asset

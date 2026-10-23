@@ -1154,9 +1154,9 @@ describe('haven_prepare_catalog_purchase', () => {
 
     expect(payload.success).toBe(false)
     // No funding intent — the agent lookup is a hard stop before the intent
-    // is ever created. (#1348 changed one incidental detail: the allowance
-    // READ now starts in parallel with the merchant probe, so it may have
-    // fired — a harmless read. The load-bearing invariant is intent-creation,
+    // is ever created. (#1348 moved the agent read to overlap the merchant
+    // probe; since #3054 the budget pre-check runs after the agent read, so
+    // it cannot fire here. The load-bearing invariant is intent-creation,
     // asserted here, plus the refusal itself.)
     expect(recordedCalls().find((c) => c.url.endsWith('/x402'))).toBeUndefined()
   })
@@ -1165,9 +1165,10 @@ describe('haven_prepare_catalog_purchase', () => {
   // These counts ARE the regression gate: wall-clock is machine-dependent, but
   // the number of sequential Haven round trips is deterministic. Before #1348
   // a successful preflight made FIVE Haven recordedCalls() (catalog, agent, allowances,
-  // agent AGAIN inside createX402Intent, POST /x402); now it makes four, and
-  // the agent/allowance reads overlap the merchant probe instead of following
-  // it.
+  // agent AGAIN inside createX402Intent, POST /x402); now it makes four:
+  // catalog, agent, one budget read and POST /x402. Since #3054 the budget
+  // read is POST /machine-payments/budget-precheck, issued after the quote;
+  // the agent read still overlaps the merchant probe instead of following it.
   it('ROUND-TRIP BUDGET: a successful preflight makes exactly one call per Haven surface — no duplicate agent fetch (#1348)', async () => {
     stubFetch({
       ...baseRoutes,

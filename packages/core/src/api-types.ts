@@ -17226,6 +17226,8 @@ export interface operations {
                 currency?: "usd" | "eur" | "sek";
                 /** @description IANA time zone used to bucket `by_day`. Defaults to UTC; an unrecognized zone is a 400. */
                 tz?: string;
+                /** @description Scope every agent-dimensioned section (totals, previous-window totals, by-day buckets, agents, merchants, refusal counts, near-budget count, fees) to ONE agent of the user. A well-formed uuid that is not the user's is a 404 — the whole page is about that agent, so unlike a list filter there is no meaningful empty answer (`/transactions` answers a foreign filter id 400 instead). A revoked agent keeps its history. `balance_by_day` and `gas_sponsored_ops` are NOT scoped: history is stored per user (`user_daily_portfolio_snapshots`) and gas is genuinely mixed — the response carries `balance_scope: "all_accounts"` so the client can say so. A MALFORMED id is the standard 400 envelope, before the handler. */
+                agentId?: string;
             };
             header?: never;
             path?: never;
@@ -17327,9 +17329,12 @@ export interface operations {
                                 period_start: string;
                                 /** Format: date-time */
                                 period_end: string;
+                                /** @description The delegation's chain. Optional on the wire (#4332) — hardening for #4333's budget caption fix. */
+                                chain_id?: number;
                             }[];
                             top_merchant: {
-                                label: string;
+                                /** @description The five-step naming order (x402 resource host → own account → contact → receipt → none, #4332); null when nothing resolved — the client renders "Unknown recipient". */
+                                label: string | null;
                                 /** @example 0x1111111111111111111111111111111111111111 */
                                 address: string;
                             } | null;
@@ -17338,8 +17343,15 @@ export interface operations {
                         }[];
                         /** @description Top 10 by spend. */
                         merchants: {
-                            /** @description The user’s contact name where the address matches, else the receipt’s merchant name, else the address. */
-                            label: string;
+                            /** @description The five-step naming order (#4332, the /transactions order plus one analytics-only step): the x402 resource host of the merchant's most recent payment IN THE WINDOW → one of the user's own accounts (address-only across chains; the oldest account wins a shared address) → the contact name → the receipt's merchant_name (the analytics-only extension) → null. Null means the client renders "Unknown recipient". */
+                            label: string | null;
+                            /**
+                             * @description Which naming step produced `label`.
+                             * @enum {string}
+                             */
+                            kind: "x402" | "own_account" | "contact" | "receipt" | "unknown";
+                            /** @description The address /transactions' search matches (`x402MerchantAddress ?? to`) — the "View in Transactions" link target. One merchant group (keyed on `COALESCE(merchant_address, x402_merchant_address, to_address)`) can hold DIFFERENT filter addresses; this is the most FREQUENT one in the group, ties to the most recent payment. */
+                            filter_address: string;
                             /** @example 0x1111111111111111111111111111111111111111 */
                             address: string;
                             spent: string;
@@ -17350,6 +17362,11 @@ export interface operations {
                             /** Format: date-time */
                             last_seen: string;
                         }[];
+                        /**
+                         * @description What `balance_by_day` covers. Always `all_accounts` (#4332): history is stored per USER (`user_daily_portfolio_snapshots`), so the balance series is deliberately NOT scoped by `agentId` even when the rest of the response is.
+                         * @enum {string}
+                         */
+                        balance_scope: "all_accounts";
                         balance_by_day: {
                             date: string;
                             value: string;
@@ -17357,7 +17374,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description range/currency outside the enum, or tz is not a recognized IANA zone. */
+            /** @description range/currency outside the enum, or tz is not a recognized IANA zone. A malformed `agentId` (not a uuid) is this envelope too, answered before the handler. */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -17374,6 +17391,21 @@ export interface operations {
             };
             /** @description Error response */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description A well-formed `agentId` that is not an agent of the authenticated user — never another user's data. */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

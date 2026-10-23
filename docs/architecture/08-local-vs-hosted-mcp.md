@@ -24,7 +24,7 @@ covers:
   - packages/backend/src/routes/transactions.ts
   - packages/backend/src/routes/machine-payments.ts
   - packages/backend/src/modules/transactions/x402.ts
-last-verified: "2026-09-30"
+last-verified: "2026-10-23"
 ---
 
 # Haven — Local MCP vs Hosted MCP + Edge Signer
@@ -115,12 +115,12 @@ says which list it serves:
   prod agree. It is computed once at import
   (`packages/mcp-server/src/contract-fingerprint.ts:101-127`).
 - **Where it appears.** The hosted instructions state the fingerprint and the
-  reconnect rule (`packages/mcp-server/src/server.ts:156-170`), and every
+  reconnect rule (`packages/mcp-server/src/server.ts:169-183`), and every
   hosted handler result carries `contract_fingerprint` and `server_version` at
-  the top level of its JSON (`toMcpResult`, `server.ts:374-392`). An
+  the top level of its JSON (`toMcpResult`, `server.ts:387-405`). An
   SDK-generated refusal that is not already a hosted payload (an unknown tool,
   a strict-input refusal) gets the same fingerprint and the stale-list hint
-  appended to its text (`annotateStaleToolList`, `server.ts:349-372`).
+  appended to its text (`annotateStaleToolList`, `server.ts:373-385`).
 - **The rule.** A result whose fingerprint differs from the one in the
   instructions means the agent's list is stale: reconnect or restart before
   continuing. During a rolling deploy it may alternate once. A payment already
@@ -196,8 +196,9 @@ rather than from arguments (`haven_report_x402_outcome`, `haven_submit`,
 `haven_send`, `haven_pay_mcp_tool`, `haven_quote_x402`,
 `haven_pay_x402_quote` — each with a refusal that NAMES the local spelling, so
 a caller holding `idempotencyKey` is told what to send instead. #2349 closed
-the list: **the split now stands at 26 strict of the 28 hosted tools, with the
+the list: **the split now stands at 27 strict of the 29 hosted tools, with the
 two permissive tools on a second, equally explicit list** (re-measured
+2026-10-23: #3788 added `haven_report_delivery_quality` strict; re-measured
 2026-10-07: #3723 added `haven_get_receipt` strict; re-measured
 2026-10-05: #3557 added `haven_get_task_budget` strict; re-measured
 2026-09-30: #3354 added `haven_open_task_budget`, `haven_close_task_budget`
@@ -661,3 +662,13 @@ none of it moved the local/hosted split this document is about.
 > "hosted only" claim. Scope of this note: that paragraph and the related-docs
 > link. The rest of this document was not re-read for it, and `last-verified`
 > is not bumped.
+
+Re-verified 2026-10-23 (#4372 part A, at dev `1579908a4`). Changed: the
+strict/permissive census is 27 strict of 29 hosted tools (#3788 added
+`haven_report_delivery_quality`; `PERMISSIVE_INPUT_TOOLS` still exactly
+`haven_get_agent` + `haven_get_allowances`), and the fingerprint paragraph's
+`server.ts` line anchors moved (instructions `:169-183`, `annotateStaleToolList`
+`:373-385`, `toMcpResult` `:387-405`). Re-checked without change: the five
+signer tools, the report-settlement-evidence arguments, the hosted egress
+deadlines and the DNS residual (`sdk/src/merchant-egress.ts:16-18`), the qa-dev
+env pins, and the #1986 410 (`modules/x402/authorize.ts:106`).

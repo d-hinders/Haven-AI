@@ -69,7 +69,7 @@ covers:
   - docs/architecture/08-local-vs-hosted-mcp.md
   - docs/architecture/11-agent-passport-schema.md
   - docs/regulatory/casp-risk-guardrails.md
-last-verified: "2026-10-05"
+last-verified: "2026-10-23"
 ---
 
 # Haven — Architecture Overview
@@ -99,7 +99,9 @@ marked `execution_rail='session_key'` get HTTP 410 from the payment paths).
 `execution_rail='delegation'`), where the same identity/authority split holds but
 enforcement is a signed MetaMask delegation with audited caveat enforcers (period
 budget with native refill, optional recipient pin, expiry) redeemed via the
-DelegationManager as a sponsored UserOp. Direct payments and erc7710 x402
+DelegationManager. Haven submits that redemption as a sponsored UserOp for
+direct payments and for the EIP-3009 funding leg; on erc7710 x402 settlement the
+merchant or its facilitator submits it. Direct payments and erc7710 x402
 settlement move funds account→recipient directly, with no funding leg; the
 EIP-3009 x402 fallback (below) instead redeems the same delegation to fund the
 agent's delegate first. There is no approval queue. Deep dive:
@@ -146,8 +148,10 @@ prompt locally → connector generates both credentials locally, registers proof
 and public metadata, stores credentials, and configures the runtime → user
 approves the budget-delegation signature in the Haven modal, which also
 activates the agent (#1069/#1076) → the runtime activates its new MCP entry → the agent makes the
-read-only `haven_get_agent` and `haven_get_allowances` checks before any
-payment. Current contracts:
+read-only `haven_get_agent` call before any payment: identity, spend-authority
+readiness and the live remaining budget in one call, as the hosted server's
+instructions say (`haven_get_allowances` gives the per-token breakdown when
+needed). Current contracts:
 [hosted MCP connect](06-hosted-mcp-connect-flow.md) and
 [edge signer](07-edge-signer.md).
 
@@ -156,7 +160,8 @@ payment. Current contracts:
 - **Hybrid DeleGator (epic #821)** — the account type for every new account
   (`account_type='delegator_hybrid'`): MetaMask's audited smart account with
   policy as delegations + caveat enforcers. Payments redeem an owner-signed
-  budget delegation via sponsored UserOps (#829) — the paying agent's own,
+  budget delegation — through Haven's sponsored UserOps (#829), or through the
+  merchant or facilitator on erc7710 x402 settlement — the paying agent's own,
   directly or through the task-budget child it signs (#3329), or, for a
   sub-budget, the delegating agent's, reached through that agent's signed
   children (#3330); period budgets refill natively on-chain. See `docs/security/delegation-rail-security-model.md`.
@@ -174,7 +179,7 @@ payment. Current contracts:
   rail cannot transact, so there is no spending for a contract to govern. Haven's verifier is authoritative for live standing; the
   on-chain anchor is eventually consistent. See
   [agent passport schema](11-agent-passport-schema.md).
-- **PostgreSQL** — users, wallets, agents, allowances, payments,
+- **PostgreSQL** — users, wallets, agents, budget delegations, payments,
   receipts, catalog and accounting state, and audit records.
 - **Base** (8453) is the primary production network; **Base Sepolia** (84532)
   is the dev/QA testnet. Gnosis Chain (100) is not a Haven network.
@@ -247,3 +252,21 @@ rails' 410s, the dropped approval queue, the caveat triple, the frontend
 purity rule and `"*"` pins, the nine runtime profiles and Hermes paths, the
 connect-flow tool names, the budget-approval activation, and the passport
 chain.
+
+Re-verified 2026-10-23 (#4372 part A, at dev `1579908a4`). Changed: the
+delegation-rail line and the Hybrid DeleGator line no longer say every
+redemption is a sponsored UserOp — Haven submits it for direct payments and the
+EIP-3009 funding leg, the merchant or its facilitator on erc7710 settlement
+(`04-x402-payment-sequence.md`, "the settling party needs native gas"); the
+connect flow's pre-payment read is `haven_get_agent`, as the hosted
+instructions say (`mcp-server/src/server.ts:35-36`), with `haven_get_allowances`
+for the breakdown; and PostgreSQL holds budget delegations, not allowances
+(`agent_allowances` retired, `infra/repositories/agents.ts:378`). Re-checked
+without change: the 13-package table and each package's `private` flag, the
+`core-stays-pure` rule and `"*"` pins, the accounting connectors (`fortnox`,
+`accounted` live; `light`, `igdrasil` coming soon), `/ops` answering 404 until
+configured, the retired rails' 410s (`isRetiredRailIntent`), the
+`delegator_hybrid` list filters, the nine runtime profiles and Hermes paths,
+the named-pair default (`connect/src/server-names.ts`), first-grant activation
+(`routes/agent-delegations.ts:988-996`), the passport chain (84532 only), and
+Gnosis as history-only.

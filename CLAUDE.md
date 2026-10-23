@@ -25,7 +25,7 @@ covers:
   - .claude/agents/**
   - .claude/commands/**
   - packages/core/src/client-releases.data.ts
-last-verified: "2026-09-30"
+last-verified: "2026-10-23"
 ---
 
 # Haven — CLAUDE.md
@@ -93,7 +93,8 @@ create-additional request (#4023) copies it server-side and derives the new
 account at its own per-account deploy salt. The new account's only signer is
 that passkey; it is never the default and starts with no agents or budgets.
 Signer sets are **per account** — a backup on one account protects no other.
-The **signer set** is user-managed (`/agents/:id/account-signers/*`): every change
+The **signer set** is user-managed (`/accounts/hybrid/:address/signers/*`, or the
+agent-scoped `/agents/:id/account-signers/*`): every change
 is signed by an existing signer, never by Haven; recovery is a backup signer
 replacing a lost one.
 **Single-signer accounts are permitted and have no recovery** — recommended
@@ -154,7 +155,7 @@ HTTP 410 fail-closed, nothing written, distinct in the body returned.
    (over-budget when the pre-check failed open) reverts here
 4. The agent signs the account's exact EIP-712 typed data VERBATIM (never a bare
    hash); Haven submits the sponsored UserOp, funds move account→recipient
-5. Response → { status: "executed", tx }
+5. Response (`POST /payments/:id/sign`) → { payment_id, status: "confirmed", tx_hash, … }
 ```
 
 ### x402
@@ -162,7 +163,8 @@ HTTP 410 fail-closed, nothing written, distinct in the body returned.
 Settlement runs on the delegation rail only; the scheme is chosen per payment.
 
 **ERC-7710 (preferred).** `POST /x402/authorize` builds a settlement **child**
-delegation — exact amount, payee pin, short expiry, facilitator pin — under the
+delegation — exact amount, payee pin, short expiry, and a facilitator pin when
+the merchant advertises facilitator addresses — under the
 agent's budget delegation; the merchant redeems the [child, budget] chain and
 settles account→merchant. No funding leg, no hot balance, no sweep.
 
@@ -215,8 +217,10 @@ All of these must fail for funds to be at risk.
   Base Sepolia (84532) is dev/QA; Gnosis Chain (chain ID 100) is not a Haven
   network. Chain and token FACTS live in
   `packages/core/src/chains.ts`, with backend env wiring and frontend viem
-  construction pinned to it. `DEFAULT_CHAIN_ID` is the single home for the
-  default; a guard test flags new bare numeric fallbacks.
+  construction pinned to it. `DEFAULT_CHAIN_ID` there is the backend's single
+  home for the default (the dashboard's own `DEFAULT_CHAIN_ID` is the build-time
+  pre-selection from `NEXT_PUBLIC_HAVEN_CHAIN_ID`, Base when unset); a guard
+  test flags new bare numeric fallbacks in the backend and core.
 - **Smart accounts:** MetaMask Hybrid DeleGator via
   `@metamask/smart-accounts-kit` + `permissionless`/`viem`;
   `@safe-global/protocol-kit` was never adopted.

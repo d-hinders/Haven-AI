@@ -45,7 +45,7 @@ covers:
   - packages/mcp-server/src/tools/plain-http-x402.ts
   - packages/mcp-server/src/tools/contracts.ts
   - packages/backend/src/modules/mpp/sweep.ts
-last-verified: "2026-10-19"
+last-verified: "2026-10-23"
 ---
 
 # Haven — Edge Signer
@@ -116,11 +116,11 @@ The edge signer ships as **`@haven_ai/signer`** in two layers:
      authorization's nonce is not the library's random draw: the signer
      overwrites it with `deriveX402PaymentNonce(expected.paymentId)` on the
      unsigned payload `preparePaymentHeader` built, then lets the library's
-     `signPaymentHeader` sign it (`packages/signer/src/core.ts:448-454`). That
+     `signPaymentHeader` sign it (`packages/signer/src/core.ts:495-501`). That
      ties the merchant's on-chain `AuthorizationUsed(delegate, nonce)` to the
      Haven payment, so the backend's settlement sweeper can attribute a
      settlement the agent never reported
-     (`packages/backend/src/modules/x402/eip3009-settlement-sweeper.ts:464`, the nonce the scan looks up).
+     (`packages/backend/src/modules/x402/eip3009-settlement-sweeper.ts:472`, the nonce the scan looks up).
      Signers older than #3888 still send a random nonce. Why this is safe is in
      the [delegation-rail security model](../security/delegation-rail-security-model.md)
      ("Since #3888 the 3009 header's nonce is derived, not random"); the
@@ -641,9 +641,10 @@ account is permanently out of scope.
   verbatim via the SDK — `HavenClient` dispatches on
   `sign_data.signature_scheme` (`eip712_userop` for payments,
   `eip712_delegation` for x402 settlement) to
-  `signUserOpTypedDataForDelegation` — and are not exposed as edge-signer or
-  hosted-MCP tools today. The retired session rail's `eip191_userop` scheme is
-  refused (#834).
+  `signUserOpTypedDataForDelegation` — and in the hosted topology the same
+  `eip712_userop` typed data is signed by this signer's `haven_sign` (by
+  `payment_id` since #3271, under the #3272 allowlist; see Regular payment
+  above). The retired session rail's `eip191_userop` scheme is refused (#834).
 - Regular payment signing is chain-neutral; the backend-provided payload and
   on-chain wallet rules define the transfer (AllowanceModule-hash signing:
   removed, #3169).
@@ -685,3 +686,13 @@ account is permanently out of scope.
 > the `core.ts:448-454` and sweeper `:464` line anchors, the tool set and
 > `--help` / unknown-option exit 2 (run), the consent and ack paths, the audit
 > rotation constants, the SIWX grammar limits, and the 300 s delivery default.
+
+> **Re-verified 2026-10-23 (#4372 part A, at dev `1579908a4`):** the whole
+> document was re-read. Changed: the nonce line anchors (`core.ts:495-501`,
+> sweeper `:472`), and the scope note no longer says delegation-rail payments
+> are not exposed as signer tools — `haven_sign` signs their `eip712_userop`
+> typed data (#3271/#3272). Re-checked without change: `RETIRED_BINDING_MEMORY`
+> (64), the handshake version fields, the egress deadlines (5 s discovery, 15 s
+> quote and session, 300 s delivery, ≤3 GET redirects), the sweep chains
+> (`isSweepableChain`: Base, Base Sepolia), `X402_BINDING_PRIVATE_KEY` with no
+> fallback, `HAVEN_SIGNER_ACK` and the ack sidecar, and the 8 MiB audit rotation.

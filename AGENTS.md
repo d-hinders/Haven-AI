@@ -29,14 +29,14 @@ covers:
   - .agents/skills/**
   - .claude/agents/**
   - .claude/commands/**
-last-verified: "2026-09-20"
+last-verified: "2026-10-23"
 ---
 
 # Haven Codex Instructions
 
 ## Product Context
 
-Haven is an agentic stablecoin payment wallet. Users create or link a Haven account, add funds, and give AI agents constrained spending ability through agent rules and budgets. Product UX must feel like modern fintech: calm, clear, and honest about spending control.
+Haven is an agentic stablecoin payment wallet. Users create a Haven account, add funds, and give AI agents constrained spending ability through agent rules and budgets. Product UX must feel like modern fintech: calm, clear, and honest about spending control.
 
 ## Required Reading For UI Work
 
@@ -56,7 +56,7 @@ Start with an existing [`/design-system` Pattern](docs/product/design-system.md#
 
 ## UI Implementation Rules
 
-- Inspect existing primitives in `packages/frontend/src/components/ui` and Haven-domain components in `packages/frontend/src/components/haven` before creating new UI. The shared primitives and shims of `@haven_ai/ui` live at `packages/ui` (moved since #3508).
+- Inspect existing primitives in `packages/frontend/src/components/ui` and Haven-domain components in `packages/frontend/src/components/haven` before creating new UI. The primitives shared with the ops console live in `@haven_ai/ui` (`packages/ui/src`, moved since #3508); their old `components/ui` paths are re-export shims, and the rest of `components/ui` is the frontend's own.
 - Prefer composition over new visual patterns. Do not invent new card styles, spacing systems, shadows, radius, or typography unless the existing system cannot express the need.
 - Use the v2 tokens from `packages/ui/src/tokens.css` (imported by the app layout before `globals.css`) and the shared Tailwind preset `packages/ui/tailwind.preset.js` consumed by the frontend config.
 - Do not install or introduce a second UI framework for ordinary product work.
@@ -78,9 +78,9 @@ Every screen that moves money or changes agent authority must make these clear:
 
 ## CASP / MiCA Guardrails
 
-Before changing payment execution, agent authority, Safe setup, relaying, SDK payment APIs, x402/MPP flows, merchant-facing demos, fiat/card surfaces, swaps, yield, or treasury features, read `docs/regulatory/casp-risk-guardrails.md`.
+Before changing payment execution, agent authority, account or signer setup, relaying, SDK payment APIs, x402/MPP flows, merchant-facing demos, fiat/card surfaces, swaps, yield, or treasury features, read `docs/regulatory/casp-risk-guardrails.md`.
 
-Hard product and architecture rule: Haven is non-custodial smart account software. Haven must not hold user or agent private keys, make API credentials sufficient to spend, rely on off-chain policy as the real spend control, alter signed payment intent, operate swaps/ramps/fiat/card/merchant settlement/yield/advice flows without review, or prevent users from accessing and revoking Safe permissions outside Haven.
+Hard product and architecture rule: Haven is non-custodial smart account software. Haven must not hold user or agent private keys, make API credentials sufficient to spend, rely on off-chain policy as the real spend control, alter signed payment intent, operate swaps/ramps/fiat/card/merchant settlement/yield/advice flows without review, or prevent users from accessing their account, enumerating and revoking their delegations, or managing its signers outside Haven.
 
 Apply these guardrails to generated artifacts too: SDK examples, credential files, agent handoff docs, demo scripts, and skill bundles must not imply Haven holds funds, controls keys, transfers money on the user's behalf, or makes API credentials sufficient to spend.
 
@@ -126,14 +126,15 @@ defects of this shape). If it is not plainly load, file an issue and link it nex
 the list you quote in the PR body. An unknown flag exits 2; pass flags after `--`.
 
 **`npm run quality` is not this.** It chains `typecheck && test:unit && build`.
-That covers most of the 32 per-package gates the battery knows (every
-`typecheck -w` and `test -w`, via `--workspaces`) — but **none of the 21
+That covers most of the 37 per-package gates the battery knows (every
+`typecheck -w` and `test -w`, via `--workspaces`) — but **none of the 23
 ratchets**, which is what these incidents reddened on. The counts are
 `npm run (typecheck|test|build) -w packages/*` and `npm run (lint|check|docs):*`
-respectively, out of 70; the rest are the per-workflow one-offs.
+respectively, out of 78 (`npm run preflight -- --list --all` at `1579908a4`);
+the rest are the per-workflow one-offs.
 
 Even the covered part is not total: root `build` is **not** `--workspaces`, it is
-a hand-written nine-package chain. Eleven packages have a build script and it
+a hand-written ten-package chain. Twelve packages have a build script and it
 omits two — `demo-merchant-mcp`, which IS a CI gate, and `qa-agent`, which is
 not. A hand-maintained second copy of the workspace list, drifted, which is the
 same failure this battery exists to stop, one level down.
@@ -238,7 +239,7 @@ Gravity files the captain should usually own — this list is canonical and
 
 ## Cross-session agent coordination
 
-More than one agent session works this repo (different users, different machines). GitHub is the only channel every session reads — coordinate THROUGH the repo, never assume you are alone. The standing async channel is the pinned issue [#3193](https://github.com/d-hinders/Haven-AI/issues/3193) (vol. 2, from 2026-09-20; its predecessor [#1289](https://github.com/d-hinders/Haven-AI/issues/1289) is kept open as read-only history — nothing reads it for live state, nothing writes to it). **This section is the only canonical protocol text**: `ship-next`, the channel body and the workflow headers point here instead of restating it, and the channel's number lives in one script constant (`scripts/ci/coordination-channel.mjs`) that every coordination workflow imports (#3182).
+More than one agent session works this repo (different users, different machines). GitHub is the only channel every session reads — coordinate THROUGH the repo, never assume you are alone. The standing async channel is the pinned issue [#3193](https://github.com/d-hinders/Haven-AI/issues/3193) (vol. 2, from 2026-09-20; its predecessor [#1289](https://github.com/d-hinders/Haven-AI/issues/1289), closed 2026-09-26, is read-only history — nothing reads it for live state, nothing writes to it; `RETIRED_CHANNEL_ISSUES` in `scripts/ci/coordination-channel.mjs` lists it). **This section is the only canonical protocol text**: `ship-next`, the channel body and the workflow headers point here instead of restating it, and the channel's number lives in one script constant (`scripts/ci/coordination-channel.mjs`) that every coordination workflow imports (#3182).
 
 **Before building an issue** (any session, any agent):
 

@@ -139,7 +139,7 @@ export type paths = {
         put?: never;
         /**
          * Poll for the session token once a human has approved.
-         * @description Unauthenticated by design: the device code IS the credential. Answers `authorization_pending` until approved, then the session token exactly once — redemption is a single-use claim, so a poll loop that fires twice mints one session, not two. The token carries `purpose: owner_cli`, which every authenticated route refuses unless it is on the owner-CLI allow-list (`middleware/owner-cli.ts`): agents, connect setups and read-only account context — never signer changes, re-keying, credentials, provisioning, transfers, or delegation build/activate/revoke. The human keeps every signature.
+         * @description Unauthenticated by design: the device code IS the credential. Answers `authorization_pending` until approved, then the session token exactly once — redemption is a single-use claim, so a poll loop that fires twice mints one session, not two. The token carries `purpose: owner_cli`, which every authenticated route refuses unless it is on the owner-CLI allow-list (`middleware/owner-cli.ts`): agents (including building an unsigned budget delegation and preparing a revoke, both signed by the owner), connect setups, contacts, feedback and read-only account context — never signer changes, re-keying, the user's own credentials, provisioning, transfers, or delegation activation/submit. The human keeps every signature.
          */
         post: operations["redeemDeviceAuthorization"];
         delete?: never;

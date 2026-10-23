@@ -726,7 +726,7 @@ Implementation rule:
 
 > Haven must not silently create or expand an agent's authority.
 
-**The dashboard's signing surfaces are rail-honest (#1079).** The signer layer types the two authorities apart: a Safe transaction can only be signed by a `SafeCapableSigner` (EOA or Safe passkey), never by a Hybrid account's passkey — the compiler enforces the exclusion at every remaining Safe-shaped call site, and Safe-only controls are hidden on delegation accounts rather than dead-ending at a signer they cannot use. #1989 has since deleted most legacy Safe surfaces outright, #2847 deleted the relayed `/safe/exec` route they existed for with the last live Safe-rail behaviour, and #2848 then deleted `SafeCapableSigner` itself with its last importers, so no Safe-shaped signing call site remains in the signer layer. This is a UI/type-layer hardening only; the on-chain authority model above is unchanged.
+**The dashboard's signing surfaces are rail-honest (#1079).** The signer layer typed the two authorities apart: a Safe transaction could only be signed by a `SafeCapableSigner` (EOA or Safe passkey), never by a Hybrid account's passkey — the compiler enforced the exclusion at every Safe-shaped call site, and Safe-only controls were hidden on delegation accounts rather than dead-ending at a signer they could not use. #1989 has since deleted most legacy Safe surfaces outright, #2847 deleted the relayed `/safe/exec` route they existed for with the last live Safe-rail behaviour, and #2848 then deleted `SafeCapableSigner` itself with its last importers, so no Safe-shaped signing call site remains in the signer layer. This is a UI/type-layer hardening only; the on-chain authority model above is unchanged.
 
 **Where a setup flow marks an agent approved, Haven verifies the authority rather than accepting the client's word for it.** **Since #2259 there is ONE such route** (`routes/agent-connection-setups.ts`): the delegation rail's `budget-approval`, which reads the agent's own active, owner-signed delegations. The legacy `wallet-approval` route — which read live AllowanceModule state on-chain — is **deleted**, together with `validateWalletApprovalBody`, `tryVerifySetupAuthority` and the last two AllowanceModule contract readers. No amount, recipient, or hash a caller supplies can influence the surviving route's outcome, and it refuses when the signed budget's amount or period differs from the one the user reviewed. Be exact about the mechanism, because the shape of the deleted route is now
 only history: `WalletApprovalBody` carried `chain_id`, `safe_address`,
@@ -851,7 +851,7 @@ Add comments, docs, tests, and PR notes around these points when touching paymen
 
 **The refusal record (`payment_refusals`, #2945) is the audit trail of this section, and it is a record, not a control.** When a fail-fast pre-check or an on-chain caveat enforcer refuses a payment, `modules/payments/refusal-ledger.ts` writes one row (reason, source, amounts, the fiat values booked through the same price path a settled payment uses, and a JSONB `detail` restricted to a named allowlist) so the user can see what their guardrails caught even though nothing moved. The posture is deliberately fire-and-forget: the write happens after the refusal is decided, its own failure is logged and swallowed, and characterization tests pin every refusal response byte-identical with the ledger succeeding and failing. That ordering is the regulatory point: a telemetry table must never be able to alter, delay, or soften a refusal the on-chain guardrails already made, because the enforcement is the enforcer's and the ledger only testifies to it. Two boundaries belong in the record and are stated rather than assumed: the hosted MCP's `PRICE_EXCEEDS_MAX` cap refusal happens in the agent's own runtime before any backend call and is the user's own instruction, so it is not in this table (a machine-side report of it is a possible follow-up, not filed); and there is no retention policy, because these rows are small and they are precisely the evidence trail this section asks the codebase to maintain.
 
-**The user-facing half of this was `/custody` (#2106), and the distinction it drew is the settled one.** The page separated what the chain enforces from what Haven merely asserts, and marked each claim accordingly rather than collapsing them into one reassurance: budget, period, expiry and any pinned recipient badged on-chain enforced — "a payment outside them reverts on-chain instead of waiting for anyone's approval" — while a recipient that is only advisory on a given account was badged as such. #3024 deleted the page (its two facts, the account's signer set and each agent's delegation terms, already render on `/accounts/:id` and `/agents/:id`, and the agent detail page's Spending section says *Budgets are enforced on-chain: a payment over budget is declined before any money moves* (`DelegationBudgetCard.tsx`) — no rendered surface carries the sentence below any more), but its framing is still the reference wording to match when a new surface has to make this distinction: *"Proof that you — not Haven — control your funds. Your agents' limits are enforced on-chain by your account, not by Haven's database."* Before #2106 that page told delegation-rail users their agent had no on-chain limits, which was the invariant above stated backwards on the one screen built to demonstrate it. Reach for this phrasing rather than inventing another.
+**The user-facing half of this was `/custody` (#2106), and the distinction it drew is the settled one.** The page separated what the chain enforces from what Haven merely asserts, and marked each claim accordingly rather than collapsing them into one reassurance: budget, period, expiry and any pinned recipient badged on-chain enforced — "a payment outside them reverts on-chain instead of waiting for anyone's approval" — while a recipient that is only advisory on a given account was badged as such. #3024 deleted the page (its two facts, the account's signer set and each agent's delegation terms, already render on `/accounts/:id` and `/agents/:id`, and the agent detail page's Spending section states that budgets are enforced on-chain, while a retired agent's card says what it can still spend — no rendered surface carries the sentence below any more), but its framing is still the reference wording to match when a new surface has to make this distinction: *"Proof that you — not Haven — control your funds. Your agents' limits are enforced on-chain by your account, not by Haven's database."* Before #2106 that page told delegation-rail users their agent had no on-chain limits, which was the invariant above stated backwards on the one screen built to demonstrate it. Reach for this phrasing rather than inventing another.
 
 ## Feature Review Triggers
 
@@ -1303,9 +1303,13 @@ matters more than the verdict, because the stated reason would justify covering
 
 **The CLI grants no authority.** It is a thin HTTP client with **zero runtime
 dependencies** — no `viem`, no `ethers`, no crypto, no signing path, no key
-material of any kind. Every authority command ends in one call to a backend
+material of any kind. Every agent-lifecycle command ends in one call to a backend
 route that enforces its own checks: `cmdAgentRotateKey` is `api.post('/agents/:id/rotate-key')`,
-and `cmdAgentRevoke` ends in `api.post('/agents/:id/revoke')`. Before that call
+and `cmdAgentRevoke` ends in `api.post('/agents/:id/revoke')`. The budget
+commands sign nothing either. Besides reads of the agent, its balances and its
+delegations, `budget grant` and `budget revoke` only ask the backend to build a
+delegation or prepare a revoke for the owner to sign in the dashboard, and with
+`--wait` they poll `GET /agents/:id/delegations` until the owner has signed. Before that call
 `cmdAgentRevoke` reads the agent's live budgets and refuses to revoke while one
 is still redeemable unless `--keep-budget` is passed. That is a client-side
 guard that can only stop a revoke, stated in the code as not an authority
@@ -1335,7 +1339,7 @@ discipline — name the event coverage gates — the gated event is an *edit to 
 CLI's command surface*, never a user running `haven agents revoke`. Two things
 about that edit are perimeter-relevant even for a thin client. It holds a **user
 JWT**, owner-only at 0600, and sends it as a Bearer token to whatever `baseUrlFor` resolves —
-which reads a user-supplied `--api` flag first (then the saved session's base URL, then `HAVEN_API_URL`). An edit that logged the
+which reads a user-supplied `--api` flag first (then the saved session's base URL, then `HAVEN_API_URL`, then the built-in default). An edit that logged the
 token, loosened those perms, or widened where it is sent is a credential change,
 and Red Line 3 treats a credential as a payment instrument. And it prints a
 freshly rotated agent API key to stdout. That is a real, bounded surface, and it
@@ -1349,7 +1353,7 @@ carries `purpose: owner_cli` and reaches only the routes on the allow-list in
 `packages/backend/src/middleware/owner-cli.ts` — agents (including building an
 unsigned budget delegation and preparing a revoke, both handed to the owner to
 sign), connect setups, contacts, feedback and read-only account context, never
-signer changes, re-keying, credentials, provisioning, transfers, or delegation
+signer changes, re-keying, the user's own credentials, provisioning, transfers, or delegation
 activation. Both are Bearer tokens sent
 to whatever `baseUrlFor` resolves, so the credential-change reasoning above
 applies unchanged to both; what the narrower one bounds is the blast radius if

@@ -7,12 +7,12 @@ covers:
   - .github/workflows/ci.yml
   - docs/contributing/autonomous-pr-loop.md
   - .agents/skills/quality-scan/references/discovery-method.md
-last-verified: "2026-09-11"
+last-verified: "2026-10-24"
 ---
 
 # Loop Engineering (oracle-grounded automated loops)
 
-Last updated: 2026-07-18
+Last updated: 2026-10-24
 
 > **Disambiguation.** Haven uses “loop” in three ways:
 > [the quality-scan discovery method](../../.agents/skills/quality-scan/references/discovery-method.md) is a human-curated discovery
@@ -211,3 +211,12 @@ behavior (reward-hacking) rather than independent truth.
 
 - [`loop-harness-index.md`](./loop-harness-index.md) — the loop portfolio (none live today).
 - [`ai-agent-workflow.md`](./ai-agent-workflow.md) — the broader agentic delivery workflow.
+
+Re-verified 2026-10-24 (#4372 part D, at dev `f590d946c`). Changed: the
+body's "Last updated" date, which predated the withdrawal edits below it.
+Re-checked without change: no `loop-harness/` directory is tracked (`git
+ls-files | grep loop-harness/` is empty), no package defines `test:loop`,
+`loop-harness-index.md` says none is live (LP-2 withdrawn, #2848), #2020 and
+#2848 are closed, #1024 removed the money-path merge pause, and the linked
+`autonomous-pr-loop.md`, `ai-agent-workflow.md` and the quality-scan
+`discovery-method.md` exist.

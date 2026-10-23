@@ -7,7 +7,7 @@ covers:
   - packages/mcp/**
   - packages/connect/**
   - packages/cli/**
-last-verified: "2026-10-07"
+last-verified: "2026-10-24"
 ---
 
 # SDK / API / credentials playbook
@@ -49,3 +49,12 @@ Re-verified 2026-10-07 (weekly docs audit #3645, at dev `009bd611`): §§1–5
 re-read. The private-consumer list in § Versioning gains `ops` (#3570), which
 `npm run lint:workspace-pins` already enforces by its `private: true` field.
 Everything else above is unchanged at this head.
+
+Re-verified 2026-10-24 (#4372 part D, at dev `f590d946c`): §§1–5 re-read,
+nothing changed. Checked: `scripts/README.md` and `scripts/release-bump.mjs`;
+`smoke:pack` in `packages/connect`; `lint:workspace-pins`; the five published packages pin exact
+internal versions and the private consumers (backend, frontend, ops, qa-agent,
+mcp-server) pin `"*"`; `release-bump` and `publish.yml` are on the
+money-path globs; `.github/CODEOWNERS` gates only
+`packages/backend/src/db/migrations/*.ts`, and both rulesets require code-owner
+review.

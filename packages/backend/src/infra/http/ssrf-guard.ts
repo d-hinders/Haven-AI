@@ -283,6 +283,12 @@ export const httpsTransport: PinnedTransport = async (req) =>
       req.url,
       {
         method: req.method,
+        // #4300: never a pooled socket. `https.globalAgent` keeps connections
+        // alive and keys its pool by host and port, not by the address the
+        // `lookup` hook pins, so a second attempt pinned to another address
+        // could ride the first attempt's socket. With no agent every attempt
+        // opens its own connection to its own address.
+        agent: false,
         // Pin the connection to the address we validated.
         lookup: (_hostname, options, callback) => {
           if ((options as { all?: boolean }).all === true) {
@@ -344,10 +350,9 @@ export const httpsTransport: PinnedTransport = async (req) =>
         connected = true
         if (connectTimer !== undefined) clearTimeout(connectTimer)
       }
-      // A socket handed back by the agent's pool is already connected and
-      // never emits `secureConnect` again.
-      if (!(socket as { connecting?: boolean }).connecting && !(socket as { pending?: boolean }).pending) markConnected()
-      else socket.once('secureConnect', markConnected)
+      // `agent: false` above: the socket is always new, so the handshake is
+      // still ahead of it and `secureConnect` is what marks it done.
+      socket.once('secureConnect', markConnected)
     })
     if (req.connectTimeoutMs !== undefined) {
       connectTimer = setTimeout(() => {

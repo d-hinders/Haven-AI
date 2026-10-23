@@ -217,6 +217,25 @@ describe('httpsTransport against a real local server (#3741)', () => {
 })
 
 describe('httpsTransport connect phase (#4300)', () => {
+  it('opens a new connection for every attempt — no pooled socket carries one attempt onto another', async () => {
+    // The server keeps connections alive, so a pooling agent would serve the
+    // second request on the first one's socket: same client port twice.
+    const clientPorts: number[] = []
+    const server = await listenTls((req, res) => {
+      clientPorts.push(req.socket.remotePort ?? -1)
+      res.writeHead(200, { 'content-type': 'text/plain' })
+      res.end('ok')
+    })
+    const url = new URL(`https://real-transport.test:${server.port}/x`)
+    const first = await httpsTransport(pinnedRequest({ url }))
+    const second = await httpsTransport(pinnedRequest({ url }))
+    await server.close()
+    expect(first).toMatchObject({ status: 200 })
+    expect(second).toMatchObject({ status: 200 })
+    expect(clientPorts).toHaveLength(2)
+    expect(clientPorts[0]).not.toBe(clientPorts[1])
+  })
+
   it('answers connect_error when nothing listens, so the caller may try another address', async () => {
     // Bind a port, then close it: the connect is refused before any byte of
     // the request leaves.

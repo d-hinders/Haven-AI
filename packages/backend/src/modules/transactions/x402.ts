@@ -5,6 +5,7 @@
  */
 import { getChain } from '../../domain/chains.js'
 import { machinePaymentLifecycle } from '../../domain/machine-payment-lifecycle.js'
+import { deriveSettlementTracking } from '../../domain/settlement-tracking.js'
 import {
   findConfirmedX402PaymentIntents,
 } from '../../infra/repositories/transaction-history.js'
@@ -57,6 +58,17 @@ export async function fetchConfirmedX402Transactions(
       hash: row.tx_hash,
       fundingTxHash: row.tx_hash,
       settlementTxHash: row.settlement_tx_hash,
+      // #4319: what Haven knows about the merchant settlement, computed from
+      // stored state only (domain/settlement-tracking.ts).
+      ...deriveSettlementTracking({
+        settlementTxHash: row.settlement_tx_hash,
+        settlementProofLabel: row.settlement_proof_label,
+        nonceBound: row.settlement_nonce_bound,
+        nonceDerived: row.settlement_nonce_derived,
+        receiptVerdict: row.receipt_verdict,
+        hasStoredHeader: row.has_stored_header ?? false,
+        confirmedAt: row.confirmed_at ?? null,
+      }),
       type: 'erc20',
       from: toCanonicalAddress(row.account_address),
       to: toCanonicalAddress(merchantAddress),

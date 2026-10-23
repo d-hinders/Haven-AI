@@ -1938,6 +1938,27 @@ are. A fixed nonce also closes the #3475 re-pay hazard for new signers: a
 resumed payment re-signs the same nonce, so a settled payment is refused as
 already used instead of paying twice.
 
+**2026-10-23 (#4319): the settlement record's proof strength is a ladder, and
+its weakest rung is still fail-closed.** The receipt-hash attribution (Tier
+2) records a settlement WITHOUT a nonce proof — the merchant receipt's
+`transaction` — under `HAVEN_EIP3009_RECEIPT_ATTRIBUTION` (default off) and
+seven limits, every one refusing closed: fallback-only behind the existing
+compare-and-set; exactly one `AuthorizationUsed(delegate, *)` burn in the
+candidate's receipt, fed to the same verifier (check 9 included); a burned
+nonce that is any sibling's derived nonce refused; a symmetric by-block
+ambiguity guard over same-shape siblings funded at or before the candidate
+(they must be provably settled before this payment's funding); the candidate
+must burn before the delegate's next funding; the refusal stands while this
+payment's derived nonce is burned elsewhere (the sweep's stronger proof
+outranks the weaker one); and the verdict is persisted
+(`merchant_settlement_receipt_verdict`), refused verdicts final. The record
+is labelled `merchant_settlement_proof: 'receipt'` and never stamps
+`merchant_settlement_nonce_bound`. Nothing here adds authority: the path
+reads the chain, verifies a pull, and writes metadata — it moves no money and
+cannot re-sign anything (the re-sign gate keys on a recorded hash, which a
+refused attribution never writes). Tier 1 (a stored signed header) is the
+#3925 standard, ungated.
+
 Hardening shipped with #961: the per-agent hourly x402 cap now guards the
 delegation branch too (every authorize costs a sponsored bundler estimation,
 so the cap is sponsorship-cost protection on the #717 surface — placed after

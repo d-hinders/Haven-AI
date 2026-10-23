@@ -44,11 +44,16 @@
  * payment whose merchant leg never completed can be re-signed long after its
  * signing deadline (the #2290 funded-merchant-retry path), and its genuine
  * settlement must still be recordable. And since #3925 the window is no
- * longer the only thing separating two same-shaped payments: every recorded
- * settlement is also bound to an `AuthorizationUsed` nonce provably this
- * payment's — derived from its id (the sweep), or signed by its delegate in
- * the X-PAYMENT header the report posts (the agent path, via
- * {@link eip3009SettlementProofFromHeader}). See `recordEip3009MerchantSettlement`.
+ * longer the only thing separating two same-shaped payments: a settlement is
+ * recorded only against a proof, in tiers (#4319). Tier 1 — the standard —
+ * binds the record to an `AuthorizationUsed` nonce provably this payment's:
+ * derived from its id (the sweep), or signed by its delegate in the X-PAYMENT
+ * header the report posts (the agent path, via
+ * {@link eip3009SettlementProofFromHeader}). Tier 2 (#4319, owner-approved,
+ * flag-gated) records the merchant receipt's transaction hash under seven
+ * fail-closed limits — see {@link observeEip3009ReceiptSettlement} — labelled
+ * `merchant_settlement_proof: 'receipt'`, never nonce-bound. See
+ * `recordEip3009MerchantSettlement`.
  */
 import { ethers } from 'ethers'
 import { verifySettlementTransferTx } from '../../infra/chain/settlement-transfer-verifier.js'
@@ -293,6 +298,44 @@ export function eip3009SettlementProofFromHeader(
   }
 }
 
+/**
+ * The chain-side half of `observeEip3009MerchantSettlement`, extracted so the
+ * #4319 backfill's dry run can evaluate the SAME verification without going
+ * near the record write: exact amount and token, delegate → merchant, the
+ * funding window (`confirmed_at − 120 s`), and — check 9 (#3925) — the
+ * `AuthorizationUsed` nonce the proof names.
+ */
+export async function verifyEip3009SettlementTransfer(
+  intent: Eip3009SettlementIntent,
+  txHash: string,
+  nonceProof: Eip3009SettlementNonceProof,
+  nowMs: number,
+): Promise<Awaited<ReturnType<typeof verifySettlementTransferTx>>> {
+  const merchant = intent.x402_merchant_address ?? intent.merchant_address ?? null
+  const confirmedSec = Math.floor(new Date(intent.confirmed_at ?? '').getTime() / 1000)
+  if (!merchant || !Number.isFinite(confirmedSec)) {
+    // Same refusal shape the observe path answers for a missing anchor; the
+    // outcome vocabulary of the verifier is what the callers branch on.
+    return {
+      outcome: 'mismatch',
+      reason: 'The payment has no merchant or no funding time, so its settlement cannot be verified',
+    }
+  }
+  return verifySettlementTransferTx(txHash, {
+    chainId: intent.chain_id,
+    tokenAddress: intent.token_address,
+    fromAddress: intent.to_address,
+    toAddress: merchant,
+    amountRaw: intent.amount_raw,
+    // The merchant can only pull what this payment's funding put on the delegate.
+    notBeforeSec: confirmedSec - CLOCK_SKEW_SECONDS,
+    notAfterSec: Math.floor(nowMs / 1000) + CLOCK_SKEW_SECONDS,
+    // Check 9 (#3925): the transaction must have burned the nonce this
+    // payment's proof names — the sweep's own attribution standard.
+    expectedAuthorizationUsed: { authorizer: intent.to_address, nonce: nonceProof.nonce },
+  })
+}
+
 export async function observeEip3009MerchantSettlement(
   intent: Eip3009SettlementIntent,
   txHash: string,
@@ -349,19 +392,7 @@ export async function observeEip3009MerchantSettlement(
     }
   }
 
-  const verification = await verifySettlementTransferTx(txHash, {
-    chainId: intent.chain_id,
-    tokenAddress: intent.token_address,
-    fromAddress: intent.to_address,
-    toAddress: merchant,
-    amountRaw: intent.amount_raw,
-    // The merchant can only pull what this payment's funding put on the delegate.
-    notBeforeSec: confirmedSec - CLOCK_SKEW_SECONDS,
-    notAfterSec: Math.floor(nowMs / 1000) + CLOCK_SKEW_SECONDS,
-    // Check 9 (#3925): the transaction must have burned the nonce this
-    // payment's proof names — the sweep's own attribution standard.
-    expectedAuthorizationUsed: { authorizer: intent.to_address, nonce: nonceProof.nonce },
-  })
+  const verification = await verifyEip3009SettlementTransfer(intent, txHash, nonceProof, nowMs)
   if (verification.outcome !== 'verified') {
     // A burned-but-different nonce that IS another payment's derived nonce
     // names the theft: the report's hash settles a sibling payment.

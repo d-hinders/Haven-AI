@@ -129,6 +129,18 @@ const transactionBaseProperties = {
     type: ['string', 'null'],
     description: '#3763: the merchant settlement transaction when one is recorded (#3475); null otherwise — "not recorded", never "failed". Null on non-x402 rows.',
   },
+  settlementTracking: {
+    type: ['string', 'null'],
+    enum: ['verified', 'checking', 'untracked', null],
+    description:
+      '#4319: what Haven knows about the merchant settlement — `verified` (a hash is recorded), `checking` (a source can still produce one: the payment is inside the 24-hour sweep window with a derivable nonce or a stored header, or a receipt verdict is retryable), `untracked` (a refused verdict, outside the window, or nothing else possible). Computed from stored state only; null on non-x402 rows.',
+  },
+  settlementProof: {
+    type: ['string', 'null'],
+    enum: ['nonce', 'signed_header', 'receipt', 'legacy', null],
+    description:
+      '#4319: which proof the recorded settlement carries — `nonce` (derived from the payment id, the sweep standard), `signed_header` (the delegate-signed X-PAYMENT header, #3925), `receipt` (the owner-approved Tier 2 receipt-hash attribution, #4319), `legacy` (records from 2026-09-29 to 10-14, before the flags). Null when nothing is recorded.',
+  },
   // #3778: the NON-SECRET delivery pointer an agent reported with an accepted
   // x402 outcome ("Bik Bok 5 SEK, order 6ac7…") — the owner's proof that a
   // deliverable EXISTS and where to recover it. Never the deliverable itself:
@@ -922,11 +934,22 @@ const activityPayment = {
     funding_tx_hash: { type: ['string', 'null'], description: '#3763: the EIP-3009 funding leg, named — same value as `tx_hash`.' },
     settlement_tx_hash: {
       type: ['string', 'null'],
-      description: '#3763: the merchant’s settlement transaction (delegate → merchant) when an agent reported one or the backend’s settlement sweep detected it on-chain (#3888), and it verified on-chain (#3475, `machine_metadata.merchant_settlement_tx_hash`). Null is "not recorded", never "failed" — the SDK’s default evidence post reports the funding hash, which the writer refuses, so many eip3009 payments legitimately never get one.',
+      description: '#3763: the merchant’s settlement transaction (delegate → merchant) when an agent reported one, the backend’s settlement sweep detected it on-chain (#3888), or the #4319 proof ladder recorded it (Tier 1 signed header; Tier 2 receipt hash under the flag and its limits), and it verified on-chain (#3475, `machine_metadata.merchant_settlement_tx_hash`). Null is "not recorded", never "failed" — the SDK’s default evidence post reports the funding hash, which the writer refuses, so many eip3009 payments legitimately never get one. See `settlement_tracking` / `settlement_proof` for what Haven knows about it.',
     },
     settlement_scheme: {
       type: ['string', 'null'],
       description: '#3763: which settlement branch moved the money — `eip3009` or `erc7710` — read from the intent’s `machine_metadata`; null when none was recorded.',
+    },
+    settlement_tracking: {
+      type: ['string', 'null'],
+      enum: ['verified', 'checking', 'untracked', null],
+      description:
+        '#4319: what Haven knows about the merchant settlement — `verified`, `checking`, `untracked` (same derivation as the transactions feed\'s camelCase `settlementTracking`, hand-mapped snake_case here). Computed from stored state only.',
+    },
+    settlement_proof: {
+      type: ['string', 'null'],
+      enum: ['nonce', 'signed_header', 'receipt', 'legacy', null],
+      description: '#4319: which proof the recorded settlement carries — same derivation as the feed\'s `settlementProof`.',
     },
     payment_id: { type: 'string' },
     payment_proof_status: { type: ['string', 'null'] },

@@ -2068,7 +2068,22 @@ refused by name ("settles another payment"). A nonce-proven attribution that
 collides with an earlier agent-reported hash on a same-shaped sibling payment
 is LOGGED and recorded
 nowhere (the owner question is open; the conservative answer is the
-implemented one). Two side effects worth naming: a resumed or
+implemented one). **Since #4319 a settlement can also be recorded without a
+nonce proof, in tiers.** Tier 1 — the #3925 standard, ungated — runs wherever
+a stored X-PAYMENT header exists: on the generic evidence-attach path (the
+funding-hash report clients like Lovable Dev's produce) and in the sweep
+tick, the header's delegate-signed nonce is scanned for exactly like the
+derived one and recorded nonce-bound through the same seam. Tier 2 — the
+owner-approved relaxation, behind `HAVEN_EIP3009_RECEIPT_ATTRIBUTION`
+(default off) — records the merchant receipt's transaction hash under seven
+fail-closed limits (single-burn receipt, sibling-nonce refusal, symmetric
+by-block ambiguity guard, before-the-next-funding, derived-nonce-not-burned,
+persisted verdict), labelled `merchant_settlement_proof: 'receipt'` and
+NEVER nonce-bound; it runs on the attach path and in an idempotent backfill
+script (`npm run x402:eip3009-backfill`), never in the tick. A refused or
+mismatched sibling cannot unlock a re-sign: nothing is written, so
+`isFundedX402AwaitingMerchantLeg` keeps gating on an actually-recorded hash.
+Two side effects worth naming: a resumed or
 `retry_original_x402_request` re-sign of a settled payment carries the SAME
 derived nonce, so the merchant refuses it as already used — that closes the
 #3475 re-pay hazard for new signers — and the refusal cannot strand the

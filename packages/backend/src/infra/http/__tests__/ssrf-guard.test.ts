@@ -15,6 +15,7 @@ import {
   assertSafeUrl,
   ipLiteralRange,
   resolvePublicAddresses,
+  safeGetBinary,
   safeGetText,
   safePostJson,
   safeRequest,
@@ -341,6 +342,58 @@ describe('safeGetText', () => {
       maxBytes: 1024,
     })
     expect(transport.mock.calls[0]![0]!.maxBytes).toBe(1024)
+  })
+})
+
+/**
+ * `safeGetBinary` (#4309): the merchant-receipt path needs the RAW bytes of a
+ * PDF/PNG/JPEG — the utf8 decode `safeGetText` applies is lossless for text
+ * and corruption for anything else. Same loop, same controls, different
+ * encoding only.
+ */
+describe('safeGetBinary (#4309)', () => {
+  it('returns the body as raw bytes on a clean 200', async () => {
+    const bytes = Buffer.from([0x25, 0x50, 0x44, 0x46, 0xff, 0xfe, 0x00, 0x01]) // not valid utf8
+    const result = await safeGetBinary('https://receipts.example.com/invoice.pdf', {
+      resolver: publicResolver,
+      transport: transportReturning({ status: 200, location: null, body: '', bodyBytes: bytes }),
+    })
+    expect(result).toMatchObject({ ok: true })
+    expect((result as { body: Buffer }).body.equals(bytes)).toBe(true)
+  })
+
+  it('does not change the text path: safeGetText still decodes utf8, byte-identical headers flow either way', async () => {
+    const transport = vi.fn<PinnedTransport>()
+    transport.mockImplementationOnce(async () => ({ status: 200, location: null, body: 'héllo', headers: { 'content-type': 'text/plain' } }))
+    transport.mockImplementationOnce(async () => ({
+      status: 200,
+      location: null,
+      body: '',
+      bodyBytes: Buffer.from('héllo'),
+      headers: { 'content-type': 'text/plain' },
+    }))
+    const opts = { resolver: publicResolver, transport }
+    const text = await safeGetText('https://shop.example.com/x', opts)
+    const binary = await safeGetBinary('https://shop.example.com/x', opts)
+    expect(text).toMatchObject({ ok: true, body: 'héllo' })
+    expect(binary).toMatchObject({ ok: true, status: 200 })
+    expect((binary as { body: Buffer }).body.equals(Buffer.from('héllo'))).toBe(true)
+    // Both reads went through the same pinned transport with the same controls.
+    expect(transport).toHaveBeenCalledTimes(2)
+    expect(transport.mock.calls[0]![0]).toMatchObject({ address: '93.184.216.34' })
+    expect(transport.mock.calls[1]![0]).toMatchObject({ address: '93.184.216.34' })
+  })
+
+  it('applies every control the text path has: scheme, resolution, pinning, budgets', async () => {
+    const transport = vi.fn<PinnedTransport>(async () => ({ status: 200, location: null, body: '' }))
+    const refused = await safeGetBinary('https://shop.example.com:8443/x', { resolver: publicResolver, transport })
+    expect(refused).toMatchObject({ ok: false, reason: 'non_default_port' })
+    const privateSpace = await safeGetBinary('https://shop.example.com/x', {
+      resolver: async () => [{ address: '10.0.0.9', family: 4 }],
+      transport,
+    })
+    expect(privateSpace).toMatchObject({ ok: false, reason: 'address_not_public' })
+    expect(transport).not.toHaveBeenCalled()
   })
 })
 

@@ -465,10 +465,16 @@ describe('merchant receipt dual-attach (#956)', () => {
 
   it('a failed merchant-receipt URL fetch degrades to a note; evidence attach + push survive', async () => {
     mockLoadUnderlag.mockResolvedValue(UNDERLAG)
-    // The receipt URL host resolves through the SAME injected fetchImpl —
-    // return 404 for it.
-    const { impl, calls } = stubs({ 'merchant.example/receipt.pdf': () => ({ status: 404, body: {} }) })
-    const res = await new FortnoxConnector(impl).pushTransaction('u1', {
+    // #4309: the receipt URL fetch no longer rides the connector's fetchImpl —
+    // a URL an agent or merchant chose goes through the SSRF guard, injected
+    // here via its seams: the host resolves public, the pinned transport
+    // answers 404.
+    const { impl, calls } = stubs()
+    const receiptFetchOptions = {
+      resolver: async () => [{ address: '93.184.216.34', family: 4 }],
+      transport: async () => ({ status: 404, location: null, body: '', headers: {} }),
+    }
+    const res = await new FortnoxConnector(impl, receiptFetchOptions).pushTransaction('u1', {
       ...TX,
       merchantReceipt: { url: 'https://merchant.example/receipt.pdf', inlineJson: null },
     })
@@ -481,6 +487,8 @@ describe('merchant receipt dual-attach (#956)', () => {
 
   it('a private-host receipt URL is refused by the SSRF guard — note, never fetched blind', async () => {
     mockLoadUnderlag.mockResolvedValue(UNDERLAG)
+    // No receipt seam at all: an IP literal is refused at the guard's URL
+    // policy, before resolution — the refusal needs no network.
     const { impl, calls } = stubs()
     const res = await new FortnoxConnector(impl).pushTransaction('u1', {
       ...TX,

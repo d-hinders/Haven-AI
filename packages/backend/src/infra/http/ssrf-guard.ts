@@ -18,8 +18,9 @@
  *   2. **Resolution-time address validation.** The hostname is resolved and
  *      EVERY returned address is classified (`ip-classification.ts`); a
  *      hostname whose A record is `169.254.169.254` is refused here, where a
- *      hostname regex would wave it through. This is the DNS-rebinding gap
- *      that `modules/accounting/receipt-underlag.ts` documents as a residual.
+ *      hostname regex would wave it through. This was the DNS-rebinding gap
+ *      the receipt fetch ran with until #4309 moved
+ *      `modules/accounting/receipt-underlag.ts` behind this guard.
  *   3. **Connection pinning.** The socket connects to the address we just
  *      validated, because resolution happens INSIDE the connection through
  *      the `lookup` hook. A resolver that answers "public" to our check and
@@ -69,6 +70,11 @@ export interface SafeResponse {
    * may arrive in `payment-required` rather than the body.
    */
   headers: Record<string, string>
+  /**
+   * Raw body bytes, present ONLY when the read was requested binary
+   * (`safeGetBinary`) — `body` is empty then, the bytes ARE the body.
+   */
+  bodyBytes?: Buffer
   /** The URL actually read, after any re-validated redirects. */
   finalUrl: string
 }
@@ -223,12 +229,23 @@ export interface PinnedRequest {
   /** Request body; never contains a secret — see `safePostJson` / `safeRequest`. */
   body: string | null
   headers: Record<string, string>
+  /**
+   * #4309: when true the body is collected as RAW BYTES and returned in
+   * `bodyBytes` (`body` is then empty) — a PDF receipt utf8-decoded would be
+   * corrupt bytes on the accountant's desk. Text reads are unchanged.
+   */
+  binary?: boolean
 }
 
 export interface PinnedResponse {
   status: number
   location: string | null
   body: string
+  /**
+   * Raw body bytes, present ONLY when the request set `binary` (#4309).
+   * `body` is empty in that mode — the bytes ARE the body.
+   */
+  bodyBytes?: Buffer
   /** Lowercased response headers. Absent from a fake transport means none. */
   headers?: Record<string, string>
 }
@@ -293,10 +310,12 @@ export const httpsTransport: PinnedTransport = async (req) =>
             if (typeof value === 'string') headers[name.toLowerCase()] = value
             else if (Array.isArray(value)) headers[name.toLowerCase()] = value.join(', ')
           }
+          const bodyBytes = Buffer.concat(chunks)
           done({
             status: res.statusCode ?? 0,
             location: typeof location === 'string' ? location : null,
-            body: Buffer.concat(chunks).toString('utf8'),
+            body: req.binary === true ? '' : bodyBytes.toString('utf8'),
+            ...(req.binary === true ? { bodyBytes } : {}),
             headers,
           })
         })
@@ -360,6 +379,8 @@ interface RequestShape {
    * throw away the only response that matters.
    */
   acceptAnyStatus: boolean
+  /** #4309: collect the body as raw bytes (see `PinnedRequest.binary`). */
+  binary?: boolean
 }
 
 const HAVEN_USER_AGENT = 'Haven-CatalogVerification/1.0 (+https://haven.xyz)'
@@ -409,6 +430,7 @@ async function safeFetch(
       method: shape.method,
       body: shape.body,
       headers: shape.headers,
+      ...(shape.binary === true ? { binary: true } : {}),
     })
     if ('ok' in response && response.ok === false) return response
 
@@ -445,6 +467,7 @@ async function safeFetch(
       ok: true,
       status: res.status,
       body: res.body,
+      ...(res.bodyBytes !== undefined ? { bodyBytes: res.bodyBytes } : {}),
       headers: res.headers ?? {},
       finalUrl: checked.url.toString(),
     }
@@ -473,6 +496,56 @@ export async function safeGetText(raw: string, options: SafeFetchOptions = {}): 
     },
     options,
   )
+}
+
+/** A successful guarded read whose body is raw bytes (`safeGetBinary`, #4309). */
+export interface SafeBinaryResponse {
+  ok: true
+  status: number
+  body: Buffer
+  headers: Record<string, string>
+  finalUrl: string
+}
+
+export type SafeBinaryFetchResult = SafeBinaryResponse | SsrfRefusal
+
+/**
+ * Read a merchant-controlled URL under the full guard and return the RAW
+ * BYTES (#4309): the merchant-receipt path attaches a PDF/PNG/JPEG document,
+ * and a utf8 decode of those bytes is corruption on the accountant's desk.
+ * The same single loop as `safeGetText` — same resolver, same socket pinning,
+ * same per-hop re-validation, same deadlines — with only the body encoding
+ * different. Callers still own their content-type allow-list and size cap on
+ * top; this does not weaken anything, it only stops the lossy decode.
+ */
+export async function safeGetBinary(raw: string, options: SafeFetchOptions = {}): Promise<SafeBinaryFetchResult> {
+  const result = await safeFetch(
+    raw,
+    {
+      method: 'GET',
+      body: null,
+      binary: true,
+      headers: {
+        // Same courtesy as `safeGetText`: a merchant reading their access log
+        // can see who asked and why.
+        'user-agent': 'Haven-ReceiptFetch/1.0 (+https://haven.xyz)',
+        accept: 'application/pdf, image/png, image/jpeg, */*;q=0.1',
+      },
+      acceptAnyStatus: false,
+    },
+    options,
+  )
+  if (!result.ok) return result
+  if (result.bodyBytes === undefined) {
+    return refuse('transport_error', 'binary read returned no body bytes')
+  }
+  return {
+    ok: true,
+    status: result.status,
+    body: result.bodyBytes,
+    headers: result.headers,
+    finalUrl: result.finalUrl,
+  }
 }
 
 /**

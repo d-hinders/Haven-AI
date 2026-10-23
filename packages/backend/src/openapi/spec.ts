@@ -6225,6 +6225,68 @@ export const openapiSpec = {
         },
       },
     },
+    '/agent-activity/{id}/activity/export.csv': {
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'exportAgentActivityCsv',
+        summary: "One agent's Activity ledger as a CSV file (#4327).",
+        description:
+          "The agent page's Activity tab AS SHOWN, as a file: the agent's own `payment_intents` — failed and pending included — under the tab's filters (`status`, `token`, `from`/`to`, `q`, with the same meaning as on `GET /agent-activity/{id}/activity?kind=payments`), or, with `status=refused`, the agent's refused attempts (the `kind=refusals` population; `token` is ignored there). Newest first, unpaged. This is NOT the wallet-scoped `/transactions/export.csv`, which writes the fixed-SEK accounting book and has no payment-status filter.\n\nColumns: `date` (ISO), `status` (the tab's words: Sent, Pending, Failed, Expired, Needs attention, Refused), `reason` (the refusal reason or the needs-attention reason code; empty otherwise), `counterparty_name` (a machine payment's resource host, else the user's own account or contact name; empty when none resolves), `counterparty_address`, `amount` (human units), `token`, `approx_value` and `approx_currency` (SERVE-TIME: re-priced at today's rate in the user's display currency; empty, never 0, when the token has no usable quote), `tx_hash` (the merchant settlement when recorded, else the funding leg; empty for a refusal or an unsent payment) and `payment_id` (empty for a refusal).\n\nCapped at 10,000 rows. The read takes one row more than the cap, so an export over it is refused with a 413 that says 'more than 10,000 rows' and names the tab's filters — a refusal, never a truncated file.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Agent id.' },
+          {
+            name: 'status',
+            in: 'query',
+            schema: { type: 'string', enum: ['sent', 'pending', 'failed', 'needs_attention', 'refused'] },
+            description: "The tab's Status facet. sent (confirmed), pending (awaiting signature or submitted), failed, needs_attention (a machine-rail payment with an open merchant-retry-rejected reconciliation event), or refused — which exports the refused attempts instead of the payments.",
+          },
+          {
+            name: 'from',
+            in: 'query',
+            schema: { type: 'string' },
+            description: 'Inclusive ISO lower bound on created_at — a date or a full date-time. A non-ISO value is a 400.',
+          },
+          {
+            name: 'to',
+            in: 'query',
+            schema: { type: 'string' },
+            description: 'EXCLUSIVE ISO upper bound on created_at — a date or a full date-time. A non-ISO value is a 400.',
+          },
+          {
+            name: 'q',
+            in: 'query',
+            schema: { type: 'string' },
+            description: "Case-insensitive substring search, as on the tab's read: for payments the merchant resource URL, the merchant/recipient address and the owner's contact name for the recipient; for refusals the resource URL and the merchant/recipient value.",
+          },
+          {
+            name: 'token',
+            in: 'query',
+            schema: { type: 'string' },
+            description: "The ERC-20 token contract address, matched case-insensitively (the tab's Token facet). Ignored with status=refused. Any other value matches nothing.",
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'The CSV file.',
+            headers: {
+              'Content-Disposition': {
+                schema: { type: 'string' },
+                description: 'attachment; filename="haven-agent-payments-YYYYMMDD.csv"',
+              },
+              'X-Export-Row-Count': {
+                schema: { type: 'string' },
+                description: 'Rows written, excluding the header.',
+              },
+            },
+            content: { 'text/csv': { schema: { type: 'string' } } },
+          },
+          '400': { ...errorResponse, description: 'A query parameter is off-spec (the status enum), or `from`/`to` is not ISO.' },
+          '401': errorResponse,
+          '404': { ...errorResponse, description: 'No such agent for this caller.' },
+          '413': { ...errorResponse, description: 'More than 10,000 rows match. The body names the filters to narrow by.' },
+        },
+      },
+    },
     '/agent-activity/{id}/stats': {
       get: {
         tags: ['Dashboard'],

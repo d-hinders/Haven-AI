@@ -86,6 +86,20 @@ covers:
 last-verified: "2026-10-23"
 ---
 
+> **Re-verified #4327 (2026-10-23, the CSV export's response plumbing
+> moves into `domain/csv.ts`):** this diff touches one file in this
+> document's coverage list, `routes/transactions.ts`, and adds no signing
+> step, no gate, no write and no authority surface. The export's row cap,
+> 413 body, headers, BOM and filename move into a shared helper; the route's
+> reads, its ownership checks (`accountId` against the caller's accounts,
+> `agentId` through `agentExistsForUser`) and its filters are untouched, and
+> its 413 body and success headers are pinned byte-for-byte by a test
+> written before the move. The new agent ledger export
+> (`GET /agent-activity/{id}/activity/export.csv`, `routes/agent-activity.ts`,
+> not on this list) answers 404 unless `agentExistsForUser` confirms the
+> agent is the caller's, exactly as the list read beside it does. Nothing
+> else in this document was re-verified, and `last-verified` is not bumped.
+
 > **Re-verified unchanged (#4265, 2026-10-22, read-only transaction
 > route):** the covered transaction route adds an opt-in projection to its
 > aggregate JSON and CSV reads. The route still authenticates the owner and

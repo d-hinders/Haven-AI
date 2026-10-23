@@ -2202,6 +2202,30 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/agent-activity/{id}/activity/export.csv": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One agent's Activity ledger as a CSV file (#4327).
+         * @description The agent page's Activity tab AS SHOWN, as a file: the agent's own `payment_intents` — failed and pending included — under the tab's filters (`status`, `token`, `from`/`to`, `q`, with the same meaning as on `GET /agent-activity/{id}/activity?kind=payments`), or, with `status=refused`, the agent's refused attempts (the `kind=refusals` population; `token` is ignored there). Newest first, unpaged. This is NOT the wallet-scoped `/transactions/export.csv`, which writes the fixed-SEK accounting book and has no payment-status filter.
+         *
+         *     Columns: `date` (ISO), `status` (the tab's words: Sent, Pending, Failed, Expired, Needs attention, Refused), `reason` (the refusal reason or the needs-attention reason code; empty otherwise), `counterparty_name` (a machine payment's resource host, else the user's own account or contact name; empty when none resolves), `counterparty_address`, `amount` (human units), `token`, `approx_value` and `approx_currency` (SERVE-TIME: re-priced at today's rate in the user's display currency; empty, never 0, when the token has no usable quote), `tx_hash` (the merchant settlement when recorded, else the funding leg; empty for a refusal or an unsent payment) and `payment_id` (empty for a refusal).
+         *
+         *     Capped at 10,000 rows. The read takes one row more than the cap, so an export over it is refused with a 413 that says 'more than 10,000 rows' and names the tab's filters — a refusal, never a truncated file.
+         */
+        get: operations["exportAgentActivityCsv"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/agent-activity/{id}/stats": {
         parameters: {
             query?: never;
@@ -16724,6 +16748,104 @@ export interface operations {
             };
             /** @description No such agent for this caller. */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    exportAgentActivityCsv: {
+        parameters: {
+            query?: {
+                /** @description The tab's Status facet. sent (confirmed), pending (awaiting signature or submitted), failed, needs_attention (a machine-rail payment with an open merchant-retry-rejected reconciliation event), or refused — which exports the refused attempts instead of the payments. */
+                status?: "sent" | "pending" | "failed" | "needs_attention" | "refused";
+                /** @description Inclusive ISO lower bound on created_at — a date or a full date-time. A non-ISO value is a 400. */
+                from?: string;
+                /** @description EXCLUSIVE ISO upper bound on created_at — a date or a full date-time. A non-ISO value is a 400. */
+                to?: string;
+                /** @description Case-insensitive substring search, as on the tab's read: for payments the merchant resource URL, the merchant/recipient address and the owner's contact name for the recipient; for refusals the resource URL and the merchant/recipient value. */
+                q?: string;
+                /** @description The ERC-20 token contract address, matched case-insensitively (the tab's Token facet). Ignored with status=refused. Any other value matches nothing. */
+                token?: string;
+            };
+            header?: never;
+            path: {
+                /** @description Agent id. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The CSV file. */
+            200: {
+                headers: {
+                    /** @description attachment; filename="haven-agent-payments-YYYYMMDD.csv" */
+                    "Content-Disposition"?: string;
+                    /** @description Rows written, excluding the header. */
+                    "X-Export-Row-Count"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            /** @description A query parameter is off-spec (the status enum), or `from`/`to` is not ISO. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description No such agent for this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description More than 10,000 rows match. The body names the filters to narrow by. */
+            413: {
                 headers: {
                     [name: string]: unknown;
                 };

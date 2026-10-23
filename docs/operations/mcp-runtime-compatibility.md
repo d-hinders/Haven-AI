@@ -64,6 +64,7 @@ covers:
   - packages/backend/src/domain/agent-payment-taxonomy.ts
   - packages/backend/src/modules/payments/agent-payment-status.ts
   - packages/backend/src/modules/transactions/csv-export.ts
+  - packages/backend/src/domain/csv.ts
   - packages/sdk/src/types.ts
   - packages/sdk/src/payment-mappers.ts
   - packages/sdk/src/x402.ts
@@ -84,6 +85,23 @@ covers:
   - packages/mcp-server/src/tool-contract-snapshot.test.ts
 last-verified: "2026-10-23"
 ---
+
+> **Re-verified unchanged (#4327, 2026-10-23, the CSV export's response
+> plumbing moves into `packages/backend/src/domain/csv.ts`).** Two covered
+> files change: `packages/backend/src/routes/transactions.ts` and
+> `packages/backend/src/modules/transactions/csv-export.ts`. The export row
+> cap, the 413 body, the CSV headers, the BOM and the dated filename leave
+> them for one shared helper, which a second export (the agent Activity
+> ledger, `GET /agent-activity/{id}/activity/export.csv`) also uses.
+> `GET /transactions/export.csv` answers the same bytes: a characterization
+> test written before the move pins its exact 413 body and its exact success
+> headers, and the route's existing tests pass unchanged; the column set and
+> quoting are untouched. No runtime package (`packages/cli`, `packages/mcp`,
+> `packages/mcp-server`, `packages/sdk`, `packages/signer`,
+> `packages/connect`) calls either export. No tool, argument, input schema,
+> expected-context version, consent surface or runtime channel moves.
+> `last-verified` is not re-stamped: this block is the scope. Nothing else in
+> this document was re-verified.
 
 > **Re-verified unchanged (#4328, 2026-10-23, a comment-only path reference in
 > `packages/backend/src/modules/transactions/csv-export.ts`).** The only

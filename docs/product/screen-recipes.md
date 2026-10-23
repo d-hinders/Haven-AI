@@ -750,7 +750,11 @@ rule). `?grant=` keeps working alongside `?tab=`. Sections, in order:
    and the wallet, so neither repeats on a row. The standard toolbar rides on
    the card: search, a **Status** facet (All, Sent, Pending, Failed, Needs
    attention, Refused), **Token** and **Period** — all server-filtered on the
-   kinded read (#4229, plus its `token` parameter). **Refused** (#4323)
+   kinded read (#4229, plus its `token` parameter) — and **Export CSV** in the
+   actions slot (#4327): the shared list export action writing the ledger as
+   shown through `GET /agent-activity/{id}/activity/export.csv`, under the
+   tab's filters, saved as `haven-agent-payments-YYYYMMDD.csv`; on Refused it
+   writes the refused attempts. **Refused** (#4323)
    switches the population: the tab then shows the agent's refused payment
    attempts (`payment_refusals`) — what the agent tried to pay, how much, and
    why a guardrail stopped it — through the same ledger row: the merchant
@@ -769,8 +773,9 @@ rule). `?grant=` keeps working alongside `?tab=`. Sections, in order:
    tab's money In/Out, read as an amount; the count alone is the List
    controls default for a page with no totals, #4196),
    `ListShowMore` sits below the card, and a row opens the shared
-   transaction detail panel. Under the list: "See in Transactions"
-   (`/transactions?agentId={id}`). Empty states: "No payments yet" — and for
+   transaction detail panel. No link to `/transactions` under the list
+   (#4327): the tab is a full ledger, like the account Activity tab. Empty
+   states: "No payments yet" — and for
    an agent still in setup, "Once you set a budget, every payment this agent
    makes shows here." When recoverable-funds payments exist, the Activity tab
    carries a warning dot, "Review the payment(s)" selects the tab and scrolls
@@ -894,7 +899,11 @@ shows.
 Structure:
 1. The standard toolbar on the card: search, a Status facet (All, Sent,
    Pending, Failed, Needs attention, Refused), Token and Period —
-   server-filtered. Token offers only ERC-20s on the agent's chain (when the
+   server-filtered — and Export CSV in the actions slot (#4327): the ledger
+   as shown, through the agent's own export route and the shared list export
+   action. An empty file reads "Nothing to export." (the ledger is plain
+   Postgres, so there is no explorer-outage arm), and a 413 names this tab's
+   filters. Token offers only ERC-20s on the agent's chain (when the
    page knows it): an agent payment is never in a native token. A selected
    token that does not resolve is sent as-is and matches nothing — never
    dropped into an unfiltered read under a "Token: …" chip (#4249). With
@@ -916,7 +925,7 @@ Structure:
    `/agents/{id}?tab=activity&status=refused` reproduces the view.
 4. The toolbar's count alone on the summary line (#4274, owner decision
    (a)) and `ListShowMore` below
-   the card; "See in Transactions" under the list.
+   the card; no link to `/transactions` under it (#4327).
 5. Empty state with the next useful action ("No payments yet"; for an agent
    still in setup, the budget pointer).
 

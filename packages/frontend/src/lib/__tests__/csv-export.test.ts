@@ -25,7 +25,7 @@ describe('buildCsvFilename', () => {
 
   it('names the same export alike from either side of midnight UTC', () => {
     // Was the local date before #2871; UTC now, matching the backend's
-    // `buildTransactionCsvFilename` so the two never disagree.
+    // `buildCsvExportFilename` (`domain/csv.ts`) so the two never disagree.
     expect(buildCsvFilename(new Date('2026-01-05T23:30:00.000Z'), 'haven-transactions')).toBe(
       'haven-transactions-20260105.csv',
     )

@@ -211,32 +211,3 @@ export function transactionsToCsv(
     transactions.map((tx) => transactionCsvRow(tx, lookups, includeOwnTransferColumn)),
   )
 }
-
-/**
- * Row ceiling for one CSV export (#2871). The export runs the whole
- * aggregate-and-enrich pipeline in memory rather than streaming from the
- * database — there is no database to stream from, the feed is aggregated from
- * block explorers — so it is bounded here instead.
- *
- * It IS reachable. The explorer legs are bounded (one `EXPLORER_PAGE_SIZE`
- * window per source per account — `infra/explorer-api.ts` owns the number,
- * and #2884 paginates past it), but the x402 leg is not: `FIND_CONFIRMED_X402_PAYMENT_INTENTS_SQL` carries no
- * `LIMIT` and `mergeX402Transactions` appends every row it returns, so a user
- * with more than `EXPORT_ROW_CAP` confirmed x402 payment intents crosses this
- * on an unfiltered export. That is the case the route's 413 answers, and the
- * route test seeds it.
- */
-export const EXPORT_ROW_CAP = 10_000
-
-export function exceedsExportRowCap(rowCount: number): boolean {
-  return rowCount > EXPORT_ROW_CAP
-}
-
-function pad(n: number): string {
-  return String(n).padStart(2, '0')
-}
-
-export function buildTransactionCsvFilename(now: Date): string {
-  const stamp = `${now.getUTCFullYear()}${pad(now.getUTCMonth() + 1)}${pad(now.getUTCDate())}`
-  return `haven-transactions-${stamp}.csv`
-}

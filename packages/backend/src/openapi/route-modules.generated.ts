@@ -37,6 +37,7 @@ export const ROUTE_MODULE_BY_OPERATION: Readonly<Record<string, string>> = Objec
   "GET /accounts/hybrid/{address}/signers": "routes/hybrid-accounts.ts",
   "GET /agent-activity/feed": "routes/agent-activity.ts",
   "GET /agent-activity/{id}/activity": "routes/agent-activity.ts",
+  "GET /agent-activity/{id}/activity/export.csv": "routes/agent-activity.ts",
   "GET /agent-activity/{id}/stats": "routes/agent-activity.ts",
   "GET /agent-connection-setups/{setupId}": "routes/agent-connection-setups.ts",
   "GET /agent-connection-setups/{setupId}/connector-status": "routes/agent-connection-setups.ts",

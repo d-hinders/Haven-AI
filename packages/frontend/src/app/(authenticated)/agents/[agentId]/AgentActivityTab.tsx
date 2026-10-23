@@ -29,10 +29,14 @@
  * <agent>" title and the "From … →" movement line are GONE: the page fixes
  * the agent and the wallet, so both repeated the page on every row. What the
  * movement line used to say is carried by the row itself and the page.
+ *
+ * The tab is a full ledger, so it carries no "see elsewhere" link (#4327):
+ * like the account Activity tab and `/transactions`, it offers Export CSV in
+ * the toolbar's actions slot — the agent ledger as shown, through the agent's
+ * own export route and the shared list export action.
  */
 
 import { useEffect, useMemo, useState } from 'react'
-import Link from 'next/link'
 import {
   TransactionActivityDayHeader,
   TransactionActivityRow,
@@ -42,6 +46,7 @@ import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { ListNoMatch, ListShowMore, ListToolbar } from '@/components/ui/ListToolbar'
+import { ListExportAction, ListExportNotice, useListExport, type ListExportRequest } from '@/components/ui/ListExportAction'
 import type { ListFacet } from '@/components/ui/FacetMenu'
 import type { ListCount, ListNoun } from '@/components/ui/list-controls-copy'
 import {
@@ -515,6 +520,42 @@ export default function AgentActivityTab({
     }
   }, [openPaymentId, agentId, agentName, walletName, onPaymentOpened])
 
+  // #4327: Export CSV writes the ledger AS SHOWN (owner decision, option
+  // (a)) — the agent's own export route, with the tab's own filters, so the
+  // file and the on-screen rows agree. On Refused the population switches to
+  // the refused attempts, exactly as the list does, and the Token facet (hidden
+  // there) is not sent. The shared action (#4328) owns the busy state, the
+  // fetch, the empty check, the download and the failure notice — including
+  // the server's 413 sentence, which names this tab's filters.
+  const exportRequest = useMemo<ListExportRequest>(() => {
+    const params = new URLSearchParams()
+    if (refusedSelected) {
+      params.set('status', 'refused')
+    } else {
+      if (filters.status) params.set('status', filters.status)
+      if (filters.token) params.set('token', filters.token)
+    }
+    if (filters.q) params.set('q', filters.q)
+    if (filters.from) params.set('from', filters.from)
+    if (filters.to) params.set('to', filters.to)
+    return { path: `/agent-activity/${agentId}/activity/export.csv`, params }
+  }, [agentId, filters, refusedSelected])
+
+  // The agent ledger is plain Postgres — there is no explorer outage behind an
+  // empty file, so one "Nothing to export." and no outage arm.
+  const listExport = useListExport({
+    request: exportRequest,
+    exportable: !activeLoading && !tokenPending && activeTotal > 0,
+    filenamePrefix: 'haven-agent-payments',
+    emptyNotice: {
+      tone: 'info',
+      headline: 'Nothing to export.',
+      detail: refusedSelected
+        ? 'No refused attempts match these filters. Widen them and try again.'
+        : 'No payments match these filters. Widen them and try again.',
+    },
+  })
+
   const facets: ListFacet[] = [
     {
       id: 'status',
@@ -580,7 +621,10 @@ export default function AgentActivityTab({
         // shows. The count alone is the List controls default for a page
         // with no totals (#4196); there is no money total and no backend
         // change — #4229's count read is unchanged.
+        actions={<ListExportAction state={listExport} />}
       />
+
+      <ListExportNotice notice={listExport.notice} className="mt-3" />
 
       {showNoMatch ? (
         // The standard no-match state (#4110): in place of the list card,
@@ -696,19 +740,6 @@ export default function AgentActivityTab({
           onShowMore={() => void activeLoadMore()}
         />
       )}
-
-      {/* #4226: "See in Transactions" replaces the header's "View in
-          Transactions" — under the list now, and without the `--v2-divider`
-          underline (the variable is undefined, so it always painted
-          currentColor; the plain underline is the same pixels). */}
-      <div className="mt-3">
-        <Link
-          href={`/transactions?agentId=${agentId}`}
-          className="text-sm font-medium text-[var(--v2-ink)] underline underline-offset-4 hover:text-[var(--v2-ink-strong)]"
-        >
-          See in Transactions
-        </Link>
-      </div>
 
       <TransactionDetailPanel
         transaction={selectedTx}

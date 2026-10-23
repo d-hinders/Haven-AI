@@ -97,7 +97,12 @@ describe('Bazaar index read bounds (#4300)', () => {
   it('refuses a page larger than the byte cap', async () => {
     const huge = 'x'.repeat(DISCOVERY_INDEX_PAGE_MAX_BYTES + 1)
     const indexFetch = vi.fn(async () => new Response(JSON.stringify({ items: [{ resource: huge }] }), { status: 200 }))
-    await expect(fetchBazaarResources(indexFetch as unknown as typeof fetch)).rejects.toThrow(/exceeded/)
+    // Settled by hand, so a page that is read anyway fails the assertion below.
+    const outcome = await fetchBazaarResources(indexFetch as unknown as typeof fetch).then(
+      () => 'read',
+      (err: Error) => err.message,
+    )
+    expect(outcome).toMatch(/exceeded/)
   })
 
   it('reads at most the page cap, even when every page claims there is more', async () => {

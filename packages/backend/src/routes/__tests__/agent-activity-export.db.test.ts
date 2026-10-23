@@ -11,9 +11,14 @@
  * test dials CoinGecko (#4217); the file's fiat columns are asserted as the
  * outage answer (empty, never 0).
  */
+// A `vi.fn` so the 413 tests can assert the price read never ran: the cap is
+// checked on the row count BEFORE the projection (which prices every row).
+const fiat = vi.hoisted(() => ({
+  getServeTimeFiatValues: vi.fn(async () => ({ usd: null, eur: null, sek: null })),
+}))
 vi.mock('../../infra/fiat-values.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../infra/fiat-values.js')>()),
-  getServeTimeFiatValues: async () => ({ usd: null, eur: null, sek: null }),
+  getServeTimeFiatValues: fiat.getServeTimeFiatValues,
 }))
 import { afterAll, beforeAll, beforeEach, expect, it, vi } from 'vitest'
 import { randomUUID } from 'node:crypto'
@@ -50,6 +55,7 @@ async function seedIntent(
     toAddress?: string
     resourceUrl?: string | null
     txHash?: string | null
+    tokenAddress?: string
   },
 ): Promise<string> {
   const n = ++seq
@@ -61,7 +67,7 @@ async function seedIntent(
        chain_id, source, payment_rail, execution_rail, x402_resource_url, tx_hash
      ) VALUES (
        $1, $2, $3, 'USDC',
-       '0x036cbd53842c5426634e7929541ec2318f3dcf7e',
+       $12,
        $4, '1500000', '1.5',
        '0x00000000000000000000000000000000000000d1', 1, $5,
        $6, $7::timestamptz, $8::timestamptz, NOW() + INTERVAL '10 minutes', 84532,
@@ -79,6 +85,7 @@ async function seedIntent(
       opts.paymentRail ?? null,
       opts.resourceUrl ?? null,
       opts.txHash ?? null,
+      opts.tokenAddress ?? '0x036cbd53842c5426634e7929541ec2318f3dcf7e',
     ],
   )
   return result.rows[0].id
@@ -110,15 +117,22 @@ async function seedAttention(seed: { userId: string; agentId: string }, paymentI
 
 async function seedRefusal(
   seed: { userId: string; agentId: string },
-  opts: { createdAt: string; reason: string },
+  opts: { createdAt: string; reason: string; resourceUrl?: string },
 ): Promise<void> {
   await db.query(
     `INSERT INTO payment_refusals (
        user_id, agent_id, chain_id, token_symbol, amount_atomic,
        merchant_to, resource_url, reason, source, created_at
-     ) VALUES ($1, $2, 84532, 'USDC', '25000', $3, 'https://research.example/report', $4,
+     ) VALUES ($1, $2, 84532, 'USDC', '25000', $3, $6, $4,
        'x402_authorize', $5::timestamptz)`,
-    [seed.userId, seed.agentId, MERCHANT, opts.reason, opts.createdAt],
+    [
+      seed.userId,
+      seed.agentId,
+      MERCHANT,
+      opts.reason,
+      opts.createdAt,
+      opts.resourceUrl ?? 'https://research.example/report',
+    ],
   )
 }
 
@@ -175,6 +189,7 @@ describeDb('GET /agent-activity/:id/activity/export.csv (#4327, real DB)', () =>
   beforeEach(async () => {
     await resetDb()
     seq = 0
+    fiat.getServeTimeFiatValues.mockClear()
   })
 
   async function get(userId: string, url: string) {
@@ -334,5 +349,112 @@ describeDb('GET /agent-activity/:id/activity/export.csv (#4327, real DB)', () =>
         'This export would contain more than 10,000 rows; the limit is 10,000. ' +
         'Narrow the filters — by status, token, search or period — and export again.',
     })
+    // The cap is checked on the row count before the projection prices any row.
+    expect(fiat.getServeTimeFiatValues).not.toHaveBeenCalled()
   }, 60_000)
+
+  it('refuses an over-cap REFUSED export the same way — "more than", before any row is priced', async () => {
+    const seed = await seedUserWithAgent()
+    await db.query(
+      `INSERT INTO payment_refusals (
+         user_id, agent_id, chain_id, token_symbol, amount_atomic,
+         merchant_to, resource_url, reason, source, created_at
+       )
+       SELECT $1, $2, 84532, 'USDC', '25000', NULL, 'https://bulk.example/' || g,
+              'delegation_budget_exceeded', 'x402_authorize', NOW() - make_interval(secs => g)
+       FROM generate_series(1, 10001) AS g`,
+      [seed.userId, seed.agentId],
+    )
+
+    const res = await get(seed.userId, `/agent-activity/${seed.agentId}/activity/export.csv?status=refused`)
+
+    expect(res.statusCode).toBe(413)
+    expect(res.json().details).toBe(
+      'This export would contain more than 10,000 rows; the limit is 10,000. ' +
+        'Narrow the filters — by status, token, search or period — and export again.',
+    )
+    expect(fiat.getServeTimeFiatValues).not.toHaveBeenCalled()
+  }, 60_000)
+
+  // ── File = tab parity: every filter the tab sends narrows the file ────────
+
+  it('applies the token facet: only payments in that ERC-20', async () => {
+    const seed = await seedUserWithAgent()
+    const usdc = await seedIntent(seed, { status: 'confirmed', createdAt: '2026-10-02T10:00:00Z' })
+    await seedIntent(seed, {
+      status: 'confirmed',
+      createdAt: '2026-10-03T10:00:00Z',
+      tokenAddress: '0x1111111111111111111111111111111111111111',
+    })
+
+    const res = await get(
+      seed.userId,
+      `/agent-activity/${seed.agentId}/activity/export.csv?token=0x036CBD53842c5426634e7929541eC2318f3dCF7e`,
+    )
+
+    const { records } = parseCsv(res.body.slice(1))
+    expect(records.map((r) => r.payment_id)).toEqual([usdc])
+  })
+
+  it('applies q to the payments: the merchant resource URL', async () => {
+    const seed = await seedUserWithAgent()
+    const hit = await seedIntent(seed, {
+      status: 'confirmed',
+      createdAt: '2026-10-02T10:00:00Z',
+      paymentRail: 'x402',
+      resourceUrl: 'https://reports.example/weekly',
+    })
+    await seedIntent(seed, {
+      status: 'confirmed',
+      createdAt: '2026-10-03T10:00:00Z',
+      paymentRail: 'x402',
+      resourceUrl: 'https://other.example/data',
+    })
+
+    const res = await get(seed.userId, `/agent-activity/${seed.agentId}/activity/export.csv?q=reports`)
+
+    const { records } = parseCsv(res.body.slice(1))
+    expect(records.map((r) => r.payment_id)).toEqual([hit])
+  })
+
+  it('applies q and the period bounds to the refused attempts', async () => {
+    const seed = await seedUserWithAgent()
+    await seedRefusal(seed, {
+      createdAt: '2026-10-05T10:00:00Z',
+      reason: 'onchain_revert',
+      resourceUrl: 'https://reports.example/weekly',
+    })
+    // Same search hit, outside the window.
+    await seedRefusal(seed, {
+      createdAt: '2026-09-01T10:00:00Z',
+      reason: 'delegation_expired',
+      resourceUrl: 'https://reports.example/old',
+    })
+    // Inside the window, no search hit.
+    await seedRefusal(seed, {
+      createdAt: '2026-10-06T10:00:00Z',
+      reason: 'delegation_budget_exceeded',
+      resourceUrl: 'https://other.example/data',
+    })
+
+    const res = await get(
+      seed.userId,
+      `/agent-activity/${seed.agentId}/activity/export.csv?status=refused&q=reports&from=2026-10-01&to=2026-10-10`,
+    )
+
+    const { records } = parseCsv(res.body.slice(1))
+    expect(records.map((r) => r.reason)).toEqual(['onchain_revert'])
+  })
+
+  it('ignores paymentId — not an export parameter: neither narrows the file nor 500s on a bad value', async () => {
+    const { seed, sent } = await seedLedger()
+
+    const narrowed = await get(seed.userId, `/agent-activity/${seed.agentId}/activity/export.csv?paymentId=${sent}`)
+    expect(narrowed.statusCode).toBe(200)
+    expect(narrowed.headers['x-export-row-count']).toBe('4')
+
+    const malformed = await get(seed.userId, `/agent-activity/${seed.agentId}/activity/export.csv?paymentId=not-a-uuid`)
+    expect(malformed.statusCode).toBe(200)
+    expect(malformed.headers['x-export-row-count']).toBe('4')
+  })
 })

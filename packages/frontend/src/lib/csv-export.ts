@@ -33,7 +33,7 @@ export function downloadCsv(csv: string, filename: string): void {
  * the download is driven by the anchor's `download` attribute — so the name
  * is decided client-side: `{prefix}-YYYYMMDD.csv`. The prefix comes from the
  * page (`haven-transactions`, `haven-agent-payments`, …). UTC, matching
- * `buildTransactionCsvFilename` on the backend.
+ * `buildCsvExportFilename` in the backend's `domain/csv.ts`.
  */
 export function buildCsvFilename(now: Date, prefix: string): string {
   const pad = (n: number) => String(n).padStart(2, '0')

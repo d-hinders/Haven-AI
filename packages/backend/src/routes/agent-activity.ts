@@ -657,7 +657,12 @@ export default async function agentActivityRoutes(
       if (overCap) return overCap
       rows = await Promise.all(refusals.map((r) => refusalCsvRow(r, names, currency)))
     } else {
-      const payments = await listAgentPaymentsForExport(id, paymentFilter(query), EXPORT_ROW_CAP)
+      // `paymentId` is the list read's deep-link narrowing, not an export
+      // parameter: it is not in this route's schema, so it is dropped here —
+      // otherwise an undeclared value would narrow the file silently, or a
+      // malformed one reach Postgres's uuid cast as a 500.
+      const filter = { ...paymentFilter(query), paymentId: null }
+      const payments = await listAgentPaymentsForExport(id, filter, EXPORT_ROW_CAP)
       const overCap = refuseCsvExportOverCap(reply, payments.length, {
         narrowBy: AGENT_LEDGER_NARROW_BY,
         lowerBound: true,

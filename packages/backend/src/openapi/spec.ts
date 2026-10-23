@@ -2995,7 +2995,7 @@ export const openapiSpec = {
                     description: 'Positive atomic token amount; must fit uint96 (the enforcer word size).',
                   },
                   period_seconds: { type: 'integer', minimum: 60, description: 'Native refill period; ≥ 60.' },
-                  expires_at: { type: 'integer', description: 'Unix seconds, must be in the future. Default: now + 90 days.' },
+                  expires_at: { type: 'integer', description: 'Unix seconds, must be in the future and no more than 365 days from now (#4351). Default: now + 90 days.' },
                   merchant_slug: {
                     // `['string', 'null']`, not a bare `string` (#3331 merge):
                     // the handler treats an explicit null as absent (a plain

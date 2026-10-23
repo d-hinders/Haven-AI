@@ -41,6 +41,7 @@ import {
 } from '../../infra/repositories/x402-authorizations.js'
 import { verifySettlementTransferTx } from '../../infra/chain/settlement-transfer-verifier.js'
 import { getFiatValuesForTokenAmount } from '../../infra/fiat-values.js'
+import { emitFirstPaymentSettled } from '../../infra/repositories/onboarding-funnel.js'
 import { MAX_SETTLEMENT_WINDOW_SECONDS } from './x402-delegation.js'
 
 /**
@@ -305,6 +306,13 @@ export async function observeErc7710Settlement(
         'means this settlement cannot be attributed unambiguously',
     }
   }
+
+  // #4354: the funnel's last step. Haven submits nothing on erc7710, so this
+  // confirm is the only place the payment settles; the sign route's emission
+  // never runs for it. Fire-and-forget on the pool, after the CAS won. Both
+  // callers (the evidence seam and the sweeper) pass no transaction, so the
+  // read inside the helper sees the committed `confirmed` row.
+  emitFirstPaymentSettled(intent.id)
 
   return { outcome: 'confirmed', delegationBound: verification.delegationBound }
 }

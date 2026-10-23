@@ -72,7 +72,7 @@ import { getAgentPaymentResumeState } from '../modules/payments/index.js'
 import { getPaymentReceipt, verifyPaymentReceipt } from '../modules/payments/index.js'
 import { quoteFee } from '../modules/fee/index.js'
 import { toCanonicalAddress } from '../modules/transactions/index.js'
-import { emitFunnelEvent } from '../infra/repositories/onboarding-funnel.js'
+import { emitFirstPaymentSettled } from '../infra/repositories/onboarding-funnel.js'
 // #3618: these two stay as DIRECT imports — the revert classification below
 // (the sign route's catch) re-reads live state itself and deliberately does
 // NOT read the #3616 resolver: the task-budget revert confirms against
@@ -1087,7 +1087,7 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
         }
 
         await tryRecordMachinePaymentEvidenceBaseById(id, agent.id, request.log)
-        emitFunnelEvent(agent.user_id, 'first_payment_settled', { payment_id: id, rail: 'manual' })
+        emitFirstPaymentSettled(id)
 
         return reply.send({
           payment_id: id,

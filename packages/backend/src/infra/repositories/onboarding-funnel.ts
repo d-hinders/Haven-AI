@@ -48,6 +48,53 @@ export function emitFunnelEvent(
   })()
 }
 
+/**
+ * The funnel's last step, written from the payment row itself (#4354).
+ *
+ * Three transitions settle an agent's payment, and each calls this after its
+ * own confirm wins: the sign route (direct rail and the x402 EIP-3009 funding
+ * leg), the erc7710 settlement seam, and the outcome reconciler. Reading the
+ * row instead of trusting the caller keeps the three identical:
+ * - only a `confirmed` row writes, so a caller that runs it on the wrong
+ *   branch still books nothing;
+ * - the user is the agent's owner, as the sign route always wrote;
+ * - `rail` is the row's own rail, with `manual` kept for the direct rail's
+ *   NULL so existing rows and new ones read the same; `settlement_scheme`
+ *   rides along when the row has one.
+ * The partial unique index on (user_id, event) keeps the first one only.
+ */
+export const RECORD_FIRST_PAYMENT_SETTLED_SQL = `INSERT INTO onboarding_events (user_id, event, metadata)
+     SELECT a.user_id, 'first_payment_settled',
+            jsonb_strip_nulls(jsonb_build_object(
+              'payment_id', pi.id,
+              'rail', COALESCE(pi.payment_rail, pi.source, 'manual'),
+              'settlement_scheme', pi.machine_metadata->>'settlement_scheme'))
+       FROM payment_intents pi
+       JOIN agents a ON a.id = pi.agent_id
+      WHERE pi.id = $1
+        AND pi.status = 'confirmed'
+     ON CONFLICT DO NOTHING`
+
+/** Awaitable form, for tests and callers that want the outcome. True when a row was written. */
+export async function recordFirstPaymentSettled(paymentId: string): Promise<boolean> {
+  const result = await db.query(RECORD_FIRST_PAYMENT_SETTLED_SQL, [paymentId])
+  return (result.rowCount ?? 0) > 0
+}
+
+/**
+ * Fire-and-forget form for the payment paths, with the same contract as
+ * {@link emitFunnelEvent}: never throws, never blocks the caller.
+ */
+export function emitFirstPaymentSettled(paymentId: string): void {
+  void (async () => {
+    try {
+      await recordFirstPaymentSettled(paymentId)
+    } catch {
+      // Swallow — funnel telemetry must never break product flows
+    }
+  })()
+}
+
 const FUNNEL_ORDER: FunnelEvent[] = [
   'signed_up',
   'safe_deployed',

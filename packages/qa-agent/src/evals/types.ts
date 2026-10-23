@@ -33,6 +33,12 @@ export interface RecordedToolResult {
    * exactly the one `payment_status_settled` needs to probe.
    */
   paymentId?: string
+  /**
+   * True when the tool answered with `idempotent_replay: true`: it returned
+   * an EARLIER payment for the same idempotency key and created nothing new
+   * (2026-10-23: bridge trial 2 replayed trial 1's payment and graded green).
+   */
+  idempotentReplay?: boolean
 }
 
 /**

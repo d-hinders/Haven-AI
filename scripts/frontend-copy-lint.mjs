@@ -142,8 +142,8 @@ export const SCAN_FILES = [
   // credentials 'passkey'" (#1679) specifies this string by name (#2333).
   'packages/frontend/src/lib/passkeyLabels.ts',
   // Transaction-row copy — titles, initiator, status and the settlement-scheme
-  // label ("Payment sent by you", "Agent funds swept back", "Recovered",
-  // "x402 payment"). Extracted out of the row components so the table, the
+  // label ("Agent payment", "Returned from <agent>",
+  // "Recovered", "EIP-3009"). Extracted out of the row components so the table, the
   // detail drawer and the CSV agree (#2333). `transaction-presentation.tsx`
   // renders JSX: it is a file the DIRECTORY scan would already have caught had
   // it lived one level up in `components/`.

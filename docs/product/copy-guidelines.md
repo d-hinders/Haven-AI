@@ -535,7 +535,7 @@ Use this mapping when replacing technical language with product-facing language.
 | Transaction hash in advanced or transaction detail | Transaction ID / explorer link |
 | Safe address in primary account UI | Account address / Haven wallet address |
 | Agent delegate address | Agent wallet address (advanced and recovery copy) |
-| `x402` / `mpp_demo` as a transaction ROW TITLE | Agent payment / Machine payment — the protocol name belongs on the detail drawer, not the row people scan (#2357) |
+| `x402` / `mpp_demo` as a transaction ROW TITLE | Agent payment / Machine payment — never the protocol name on the row people scan (#2357); the detail drawer says "Paid request" and keeps the settlement method under Technical details (#4267) |
 | Connected or recipient wallet address | Wallet address when the control or destination distinction matters |
 
 ### Agent-facing vocabulary — one term each ([#2533](https://github.com/d-hinders/Haven-AI/issues/2533))

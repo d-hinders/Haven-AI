@@ -191,7 +191,7 @@ function unwrapErrorShell(parsed: unknown): unknown {
  * refusal and is never promoted. The `{"error": "<json>"}` shell an MCP
  * client wraps around a failed result is unwrapped first.
  */
-export function resultFieldsFromText(text: string): { errorCode?: string; nextTool?: string; nextToolServerRole?: ServerRole; ok?: boolean; paymentId?: string } {
+export function resultFieldsFromText(text: string): { errorCode?: string; nextTool?: string; nextToolServerRole?: ServerRole; ok?: boolean; paymentId?: string; idempotentReplay?: boolean } {
   const parsed = parseMaybeJson(text)
   if (parsed !== undefined) {
     const envelope = unwrapErrorShell(parsed)
@@ -204,7 +204,9 @@ export function resultFieldsFromText(text: string): { errorCode?: string; nextTo
       const nextTool = deepFind(envelope, 'next_tool_name')
       const role = deepFind(envelope, 'next_tool_server_role')
       const paymentId = deepFind(envelope, 'payment_id')
+      const replay = deepFind(envelope, 'idempotent_replay')
       return {
+        ...(replay === true ? { idempotentReplay: true } : {}),
         ...(typeof errorCode === 'string' ? { errorCode } : {}),
         ...(typeof nextTool === 'string' ? { nextTool: bareToolName(nextTool) } : {}),
         ...(role === 'hosted' || role === 'signer' ? { nextToolServerRole: role } : {}),
@@ -224,7 +226,9 @@ export function resultFieldsFromText(text: string): { errorCode?: string; nextTo
     (/"success"\s*:\s*false/.test(text) ? /"code"\s*:\s*"([A-Za-z0-9_]+)"/.exec(text)?.[1] : undefined)
   const nextTool = /"next_tool_name"\s*:\s*"([A-Za-z0-9_]+)"/.exec(text)?.[1]
   const paymentId = /"payment_id"\s*:\s*"([^"]+)"/.exec(text)?.[1]
+  const replay = /"idempotent_replay"\s*:\s*true/.test(text)
   return {
+    ...(replay ? { idempotentReplay: true } : {}),
     ...(errorCode !== undefined ? { errorCode: canonicalErrorCode(errorCode) } : {}),
     ...(nextTool !== undefined ? { nextTool: bareToolName(nextTool) } : {}),
     ...(paymentId !== undefined ? { paymentId } : {}),

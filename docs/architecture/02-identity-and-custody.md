@@ -229,9 +229,11 @@ radius shifts in a few ways worth mapping explicitly:
   `api_key_hash`-class data: encrypted at rest, never logged.
 - **The delegate key alone still cannot spend**, and the delegation alone still
   cannot spend. Full agent compromise (both) is bounded by the caveat stack:
-  ≤ one period's budget, only to pinned recipients, until expiry or the owner's
-  `disableDelegation` kill-switch. Blast radius is therefore **identical in kind**
-  to the retired session rail's per-period allowance.
+  the sum of every enabled budget delegation's period amount per period (each
+  slot's live grant and every `replaced` row until its Stop lands), each to its
+  pinned recipient or to any recipient for an open budget, until expiry or the
+  owner's `disableDelegation` kill-switch. See
+  [`delegation-rail-security-model.md`](../security/delegation-rail-security-model.md) §3.
 - **No funding leg on the primary paths, so no standing delegate balance.**
   Direct payments and erc7710 x402 settle account→recipient/merchant directly.
   The **EIP-3009 x402 fallback (#946) is the deliberate exception**: the budget

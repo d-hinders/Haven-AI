@@ -46,8 +46,9 @@ export interface PaymentActivityItem {
   /**
    * #3763: the merchant's settlement transaction (delegate → merchant) when
    * an agent reported one and it verified on-chain (#3475). Null is "not
-   * recorded", never "failed" — `explorer_url` already headlines the
-   * settlement for the same reason the drawer does.
+   * recorded", never "failed". `explorer_url` headlines the settlement on
+   * the wire (#3763); the detail panel links the funding leg and lists the
+   * settlement under Technical details (#4267).
    */
   settlement_tx_hash?: string | null
   /** #3763: which settlement branch moved the money (`eip3009` | `erc7710`); null when none was recorded. */

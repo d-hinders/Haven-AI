@@ -47,10 +47,12 @@ covers:
   - packages/mcp-server/src/log.ts
   - packages/backend/src/modules/x402/delegation-authorize.ts
   - packages/backend/src/modules/x402/replay.ts
+  - packages/backend/src/infra/chain/x402-binding-signer.ts
   - packages/backend/src/modules/mpp/budget-precheck.ts
   - packages/cli/src/commands.ts
   - packages/cli/src/commands.test.ts
   - packages/frontend/src/components/connect-agent/setup-copy.ts
+  - packages/frontend/src/components/connect-agent/WaitingForConnector.tsx
   - packages/frontend/src/components/connect-agent/__tests__/runtime-status-copy.test.ts
   - packages/frontend/src/hooks/useAgentConnectionSetupStatus.ts
   - packages/connect/src/installed-clients.test.ts
@@ -2402,9 +2404,11 @@ last-verified: "2026-10-22"
 > and the version-skew and consent-hash contracts do not move. Nothing else in
 > this document was re-verified in this pass.
 
-Haven Connect Agent 2 installs a local stdio MCP runtime for Codex Desktop,
-Codex CLI, and Claude Code. The connector must not rely on `npx` at agent
-startup; setup preinstalls a tested runtime and writes a stable wrapper:
+With `--local`, Haven Connect installs a local stdio MCP runtime for Codex
+Desktop, Codex CLI, and Claude Code; the default topology is the hosted MCP plus
+a local signer (see *Hosted-runtime connector profiles*). The connector must not
+rely on `npx` at agent startup; a `--local` setup preinstalls a tested runtime
+and writes a stable wrapper:
 
 `haven_discover_tools` remains skew-flat across the local and hosted MCP
 topologies: since #1350 it accepts the same optional `search` argument on both
@@ -2439,7 +2443,9 @@ the filter runs in `@haven_ai/sdk`, so the hosted server (deployed from
 `dev`) applies the badge semantics as soon as #2978 lands, while a published
 local runtime keeps the older provenance semantics (`source === 'ingestion'`)
 until the next release bump republishes the sdk pin — the surface is
-skew-flat, the meaning of `verified=verified` is not, for that window.
+skew-flat, the meaning of `verified=verified` is not, for that window. That
+window has closed: #2978 landed on 2026-09-14, and every release since
+(through `0.10.0-alpha.0`) bundles the badge semantics.
 
 The default hosted MCP + local signer topology additionally exposes
 `haven_quote_mcp_tool` and `haven_quote_catalog_purchase` (#1397). They are
@@ -2473,9 +2479,10 @@ goes to `POST /x402/:id/settle` and the response carries the Haven-assembled
 `payment_header` with `tx_hash` / `funding_tx_hash` null — there is no
 Haven-submitted transaction on that scheme. Omitting the field, or sending
 `eip3009`, relays the funding signature exactly as before, so **every existing
-caller is unchanged and there is nothing to upgrade**. `haven_submit` is a
-hosted-only tool — the local stdio MCP does not expose it — so nothing here is
-skew.
+caller is unchanged and there is nothing to upgrade**. The local stdio MCP's
+`haven_submit` (added by #3329) relays task-budget and sub-budget signatures
+(`task_budget_id` / `sub_budget_id`) and refuses a `payment_id`, so it takes no
+`settlement_scheme` and nothing here is skew.
 
 An **erc7710-ONLY merchant** — no untagged `accepts[]` entry — is reachable
 through `haven_pay_mcp_tool` and `haven_prepare_catalog_purchase` since #2054:
@@ -3158,13 +3165,19 @@ signer from the same `payment_id`. This preflight does not replace merchant or
 facilitator verification.
 
 The default Connect topology writes a keyless hosted Haven MCP entry plus a
-separate local `haven-signer` stdio entry; it is distinct from the local-stdio
+separate local signer stdio entry. Since #3737 that is a named pair by default
+(`haven-<slug>` / `haven-signer-<slug>`), and the bare `haven` / `haven-signer`
+pair only when `--bare` or `--replace` is given without `--name`. It is distinct from the local-stdio
 runtime described above. Hermes Agent is a supported hosted-runtime profile:
 Connect writes `$HERMES_HOME/config.yaml` and its matching owner-only `.env`
 when `HERMES_HOME` is set, otherwise `~/.hermes/config.yaml` and `.env`. The
-hosted API key stays in `.env`; config uses the `Bearer ${MCP_HAVEN_API_KEY}`
-template. Connect preserves source text outside `mcp_servers` and replaces only
-the `mcp_servers.haven` and `mcp_servers.haven-signer` entries.
+hosted API key stays in `.env`; config uses the `Bearer ${<the pair's env key>}`
+template, where the key is `MCP_HAVEN_<SLUG>_API_KEY` for a named pair (the
+default; the slug upper-cased, hyphens as underscores) and `MCP_HAVEN_API_KEY`
+for the bare pair. Connect preserves source text outside `mcp_servers` and
+replaces only this agent's own two `mcp_servers` entries: `haven-<slug>` and
+`haven-signer-<slug>` for a named pair, or `haven` and `haven-signer` for the
+bare pair.
 Hermes discovers MCP servers at process startup, so start a new session (or run
 `/restart` for a gateway). Hermes also needs its Python MCP SDK installed (`pip
 install mcp`) to load MCP tools.
@@ -3177,9 +3190,10 @@ precedence order:
 
 1. `--runtime-force <name>` always wins (an unknown name refuses, listing the
    valid values).
-2. Environment detection (`CLAUDECODE`/`CLAUDE_CODE` → claude-code,
-   `CODEX_SANDBOX`/`CODEX_HOME` → codex-cli, `VSCODE_*` → vscode,
-   `HERMES_*` → hermes) **beats a contradicting `--runtime` hint**, with a
+2. Environment detection (`CLAUDECODE`/`CLAUDE_CODE`/`CLAUDECODE_CWD` →
+   claude-code, `CODEX_SANDBOX`/`CODEX_HOME`/`CODEX_CWD` → codex-cli,
+   `VSCODE_CWD`/`VSCODE_IPC_HOOK_CLI` or `TERM_PROGRAM=vscode` → vscode,
+   `HERMES_HOME`/`HERMES_AGENT` → hermes) **beats a contradicting `--runtime` hint**, with a
    printed one-line notice. Detection only fires inside a real agent shell,
    where writing a different client's config is almost surely wrong — the
    failure this closed was a `--runtime claude-desktop` hint pasted into
@@ -3405,10 +3419,13 @@ revoked agent; the approval answers the route's typed refusal instead (404, or
 refusal). Installed CLIs are unaffected: 404 and 409 map to the same exit
 class. Nothing the connector sends or does changes.
 
-`runtime_config_unreadable` is the exception, and the only one of the six that
-reaches the dashboard (`runtimeStatusHelper`; the routing is pinned by
-[`packages/frontend/src/components/connect-agent/__tests__/runtime-status-copy.test.ts`](../../packages/frontend/src/components/connect-agent/__tests__/runtime-status-copy.test.ts),
-#2680): it happens after credentials
+`runtime_config_unreadable` is the exception, and the only one of the eight that
+reaches the dashboard (`runtimeStatusHelper`). The routing of the six
+`runtime_*` codes is pinned by
+[`packages/frontend/src/components/connect-agent/__tests__/runtime-status-copy.test.ts`](../../packages/frontend/src/components/connect-agent/__tests__/runtime-status-copy.test.ts)
+(#2680); the two `wiring_collision` codes precede `/register` and never reach
+the dashboard (`setup-copy.ts`, where the dashboard routes connector error
+codes, names neither). It happens after credentials
 exist, during the config write. It is deliberately distinct from its
 retryable sibling `runtime_config_write_failed` — an unparseable config fails
 identically on every re-run until the file itself is fixed. Parsing happens
@@ -3635,7 +3652,7 @@ that a first run downloads the connector before it can register — an
 observation, not a warning: it offers no recovery actions and does not suggest
 anything is wrong. After **three minutes** of confirmed `awaiting_connection`
 it says Haven has not received a connection yet — whether or not the prompt
-was copied — asks the user not to approve agent rules, offers the same local command for copying, and lets them cancel
+was copied — asks the user not to approve the budget yet, offers the same local command for copying, and lets them cancel
 the one-time setup before creating a fresh prompt. A status-read error resets
 the clock rather than advancing it: it remains an error state, not evidence
 that the connector succeeded or failed.
@@ -3868,13 +3885,17 @@ x402 expected context has a second version that carries `typedDataHash`. Both
 additions are backward compatible in the only direction that can actually occur
 — a **v1** (legacy-rail) context is byte-identical to what shipped before, so an
 older signer keeps verifying it — but the delegation rail needs both halves
-current, and the failure mode differs by which half is stale:
+current, and the failure mode differs by which half is stale. (That v1 path has
+since been retired: the backend now emits only v2, or v3 where
+`X402_EMIT_PAYER_CONTEXT` is on — `version: context.payerDelegate ? 3 : 2` in
+`packages/backend/src/infra/chain/x402-binding-signer.ts` — and the current
+signer accepts `[2, 3]`; see the v1-retirement note above.)
 
 | Stale half | Symptom |
 |---|---|
 | Signer older than the backend, **`@haven_ai/signer` ≥ the #1143 release** | `This signer is out of date: it supports x402 expected context versions up to <N>, and Haven sent version <M>. Update @haven_ai/signer …` |
 | Signer older than the backend, **signer predating #1138** | `MCP error -32602: Input validation error: Invalid arguments for tool haven_sign_x402: Invalid literal value, expected 1 at x402_expected.auth.version` |
-| Signer with #1138 but predating #1143 (forward-looking — see below) | `… Invalid input at x402_expected.auth.version` — Zod says nothing at all about a failing literal *union* |
+| Signer with #1138 but predating #1143 (fires once the deployment emits v3 — see below) | `… Invalid input at x402_expected.auth.version` — Zod says nothing at all about a failing literal *union* |
 | Backend older than the signer | `Refusing to sign typed data under an expected context that does not commit to it` |
 | Hosted tool list (client loaded `tools/list` before a hosted deploy) | A result's `contract_fingerprint` differs from the one in the server instructions the client loaded at `initialize`; or a `next_arguments` doesn't fit the schema the client loaded for the **hosted** tool it names (a misfit on a signer tool is signer skew — the rows above). The server cannot push `notifications/tools/list_changed` (stateless transport, `sessionIdGenerator: undefined`), so the SDK's `-32602` / unknown-tool refusals arrive before any Haven handler and now carry the fingerprint plus a reconnect hint. |
 
@@ -3988,7 +4009,7 @@ Read it as an argument-name mismatch, not an out-of-date package. Two things
 worth knowing before you reach for an upgrade:
 
 - **The affected tools are a declared list — and since #2353's switch that
-  list is every hosted tool except the two `{}`-schema reads (`haven_get_agent`, `haven_get_allowances`); it read "21 of the 23" until #3645 re-measured 25 of 27.** It is `STRICT_INPUT_TOOLS`, which since #2807 lives
+  list is every hosted tool except the two `{}`-schema reads (`haven_get_agent`, `haven_get_allowances`); it read "21 of the 23" until #3645 re-measured 25 of 27, and at `ffca80f36` it is 27 of 29.** It is `STRICT_INPUT_TOOLS`, which since #2807 lives
   in the hosted server's contracts module (`src/tools/contracts.ts`, behind
   the `tools.ts` facade). It began (#2312) with the money-path
   tools that read from the payment record rather than from arguments, #2348
@@ -4094,10 +4115,11 @@ rather than inferred — note that a failing literal *union* degrades to a bare
 `Invalid input`, so the pre-#1143 signer that knows v2 is even less diagnosable
 than the older one that reported `expected 1`.
 
-Row three cannot fire on today's traffic and is listed for the next context bump:
-a signer carrying #1138 accepts both v1 and v2, so it only breaks once a v3
-context ships while that signer is still installed. Row two is the one seen in
-the field on 2026-08-06.
+Row three was written for the next context bump, and that bump has shipped as an
+operator switch: the backend emits v3 where `X402_EMIT_PAYER_CONTEXT` is on
+(#1690, `x402-binding-signer.ts`; a per-environment operator flip). On such a
+deployment a signer carrying #1138 but predating #1143, which accepts v1 and v2
+only, produces row three. Row two is the one seen in the field on 2026-08-06.
 
 If you see either Zod row, **do not** "fix" it by editing `auth.version` to a
 supported value. The version is inside the Haven-signed binding message, so
@@ -4588,10 +4610,12 @@ code, expected-context version or signing wire format changes. The
 named in the notice are pinned to what `@haven_ai/signer` emits
 (`sign-context.ts`) by a cross-package test
 (`hosted-signer-integration.test.ts`). No gate upgrades existing installs —
-production runs the signer at `@haven_ai/connect@alpha`'s exact pin
+at the time, production ran the signer at `@haven_ai/connect@alpha`'s exact pin
 (`0.4.0-alpha.0`) — which is why the recovery route, not an update prompt, is
-the compatibility story. Merging to `dev` waits for the promotion carrying
-#3271 to publish a connect/signer pair that includes the direct sign-context.
+the compatibility story. Merging to `dev` waited for the promotion carrying
+#3271 to publish a connect/signer pair that includes the direct sign-context;
+that has shipped, and connect now pins the signer version shown in the
+*Supported Runtime Manifest* table above (`packages/connect/src/runtime-manifest.ts`).
 
 > **Superseded by #3495 (2026-09-30), see the section immediately below.**
 > The paragraph above ("the relay fields stay on every delegation-rail result
@@ -4906,8 +4930,11 @@ to call next in structured fields, and those fields are typed end to end
   wrong key, a missing required key, an unregistered tool or an omitted
   `nextTool` is a compile error at the site. Cross-surface handoffs are pinned
   both ways in `packages/mcp-server/src/next-step-signer-parity.test.ts`:
-  every hosted emission fixture (19 fixtures for the 17 success sites, 28 for
-  the refusal steps) is built for real and its `next_arguments` parsed with the named tool's strict schema
+  every hosted emission fixture is built for real (the census constants in
+  `test-support/next-step-fixtures.ts`: at `ffca80f36`, `EMISSION_FIXTURE_COUNT`
+  43 fixtures for `EMISSION_SITE_COUNT` 33 success sites, plus
+  `REFUSAL_SITE_COUNT` 63 refusal sites; the doc's earlier figures, 19 for 17
+  and 28, predate later sites) and its `next_arguments` parsed with the named tool's strict schema
   on the surface its role names (hosted → hosted, hosted → signer from the
   signer's built package); the signer's declared hosted shapes parse under the
   hosted schemas; the local runtime's discovery hints parse under its own
@@ -5171,7 +5198,8 @@ to call next in structured fields, and those fields are typed end to end
   reads two fields (`id`, `delegate_address`) from `GET
   /machine-payments/agent` — whose response carries `id`, `name`, `status`,
   `account_address`, `delegate_address`, `delegate_account_address`,
-  `chain_id` and `execution_rail` since #2914, **none of them a re-key
+  `chain_id` and `execution_rail` since #2914, plus `superseded_by` (#3772)
+  and `parent_sub_budgets` (#3330) since, **none of them a re-key
   stage**. Widening the probe
   would not help, because the field does not exist on that endpoint to read.
   So "never started on the agent page" and "started, revoked,

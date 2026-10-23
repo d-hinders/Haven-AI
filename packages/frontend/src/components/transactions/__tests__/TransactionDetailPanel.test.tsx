@@ -1,18 +1,38 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+/**
+ * The transaction detail panel (#4267, epic #4263): a header summary (the
+ * counterparty, the kind in words, the amount, the status, one who/where/when
+ * line and a callout when needed), a few plain-word Details rows per kind,
+ * and every raw value behind a Technical details disclosure, closed by
+ * default — shortened, with copy and an explorer link. The footer links the
+ * account's transaction, only for a real hash.
+ */
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
-import TransactionDetailPanel from '@/components/transactions/TransactionDetailPanel'
+import { LocaleProvider } from '@/context/LocaleContext'
+import TransactionDetailPanel, { formatWhen } from '@/components/transactions/TransactionDetailPanel'
 import { truncate } from '@/lib/format'
 import type { AggregatedTransaction } from '@/types/transactions'
 
 vi.mock('@/hooks/useEscapeToClose', () => ({ useEscapeToClose: vi.fn() }))
 vi.mock('@/hooks/useFocusTrap', () => ({ useFocusTrap: vi.fn() }))
 
+const ACCOUNT = '0x4444444444444444444444444444444444444444'
+const RESERVE = '0x6666666666666666666666666666666666666666'
+const RECIPIENT = '0x2222222222222222222222222222222222222222'
+const SENDER = '0x1111111111111111111111111111111111111111'
+const TOKEN = '0x3333333333333333333333333333333333333333'
+const MERCHANT = '0x5555555555555555555555555555555555555555'
+const HASH = `0x${'ab'.repeat(32)}`
+const FUNDING = `0x${'cd'.repeat(32)}`
+const SETTLEMENT = `0x${'ef'.repeat(32)}`
+const PAYMENT_ID = 'pay_abcdef1234567890'
+
 function tx(overrides: Partial<AggregatedTransaction> = {}): AggregatedTransaction {
   return {
-    hash: '0xhash',
+    hash: HASH,
     type: 'erc20',
-    from: '0x1111111111111111111111111111111111111111',
-    to: '0x2222222222222222222222222222222222222222',
+    from: ACCOUNT,
+    to: RECIPIENT,
     value: '1000000',
     valueFormatted: '1.00',
     asset: 'USDC',
@@ -21,203 +41,406 @@ function tx(overrides: Partial<AggregatedTransaction> = {}): AggregatedTransacti
     timestamp: 1_700_000_000,
     blockNumber: 1,
     isError: false,
-    tokenAddress: '0x3333333333333333333333333333333333333333',
+    tokenAddress: TOKEN,
     tokenSymbol: 'USDC',
     chainId: 8453,
-    accountId: 'safe-1',
-    accountAddress: '0x4444444444444444444444444444444444444444',
+    accountId: 'acc-main',
+    accountAddress: ACCOUNT,
     accountName: 'Main',
     ...overrides,
   }
 }
 
-function renderPanel(t: AggregatedTransaction, resolveAddress?: (a: string) => string | null) {
+const x402Base = {
+  source: 'x402',
+  agentId: 'agent-1',
+  agentName: 'Atlas',
+  initiatedBy: 'agent',
+  x402ResourceUrl: 'https://api.vendor.com/search?q=1',
+  x402MerchantAddress: MERCHANT,
+  paymentId: PAYMENT_ID,
+  settlementScheme: 'eip3009',
+  fundingTxHash: FUNDING,
+  hash: FUNDING,
+  deliveryReference: 'delivery-ref-7',
+} satisfies Partial<AggregatedTransaction>
+
+const KINDS = {
+  x402Recorded: tx({ ...x402Base, settlementTxHash: SETTLEMENT, paymentProofStatus: 'protocol_receipt_attached' }),
+  x402Unrecorded: tx({ ...x402Base, settlementTxHash: null, paymentProofStatus: 'payment_confirmed' }),
+  needsAttention: tx({
+    ...x402Base,
+    settlementTxHash: null,
+    paymentFlowStatus: 'needs_attention',
+    paymentAttentionReason: 'merchant_retry_rejected_after_payment',
+  }),
+  onChainFailed: tx({ initiatedBy: 'human', isError: true }),
+  contactSend: tx({ initiatedBy: 'human' }),
+  deposit: tx({ direction: 'in', from: SENDER, to: ACCOUNT }),
+  ownTransfer: tx({
+    to: RESERVE,
+    initiatedBy: 'human',
+    // A valuation, so the headline is a figure that COULD carry a sign.
+    convertedAmount: '1.00',
+    convertedCurrency: 'USD',
+    ownTransfer: { toAccountId: 'acc-reserve', toAccountName: 'Reserve', toAccountAddress: RESERVE },
+  }),
+  sweep: tx({ direction: 'in', activityType: 'delegate_sweep', agentName: 'Atlas', from: SENDER, to: ACCOUNT }),
+  accounting: tx({
+    ...x402Base,
+    settlementTxHash: SETTLEMENT,
+    accounting: { status: 'failed', provider: 'fortnox', externalRef: null, error: 'Supplier missing' },
+  }),
+} satisfies Record<string, AggregatedTransaction>
+
+function renderPanel(t: AggregatedTransaction) {
   return render(
-    <TransactionDetailPanel
-      transaction={t}
-      open
-      onClose={vi.fn()}
-      resolveAddress={resolveAddress}
-    />,
+    <LocaleProvider>
+      <TransactionDetailPanel
+        transaction={t}
+        open
+        onClose={vi.fn()}
+        resolveAddress={(a) => (a.toLowerCase() === RECIPIENT ? 'Alice' : null)}
+        accountNamesByAddress={new Map([
+          [`${ACCOUNT}:8453`, 'Main'],
+          [`${RESERVE}:8453`, 'Reserve'],
+        ])}
+      />
+    </LocaleProvider>,
   )
 }
 
-describe('TransactionDetailPanel', () => {
+const header = () => screen.getByTestId('transaction-detail-header')
+const details = () => screen.getByTestId('transaction-detail-details')
+const technical = () => screen.getByTestId('transaction-technical-details')
+/** Everything but the Technical details disclosure. */
+function outsideTechnical(): string {
+  const dialog = screen.getByRole('dialog')
+  const clone = dialog.cloneNode(true) as HTMLElement
+  clone.querySelector('[data-testid="transaction-technical-details"]')?.remove()
+  return clone.textContent ?? ''
+}
+/** The Details rows as label → value text. */
+function rows(container: HTMLElement): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const row of Array.from(container.querySelectorAll(':scope > div, :scope > dl > div'))) {
+    const label = row.querySelector('dt')?.textContent ?? ''
+    out[label] = row.querySelector('dd')?.textContent ?? ''
+  }
+  return out
+}
+
+describe('TransactionDetailPanel — structure per kind', () => {
   it('renders nothing when no transaction is selected', () => {
-    const { container } = render(
-      <TransactionDetailPanel transaction={null} open={false} onClose={vi.fn()} />,
-    )
+    const { container } = render(<TransactionDetailPanel transaction={null} open={false} onClose={vi.fn()} />)
     expect(container).toBeEmptyDOMElement()
   })
 
-  it('shows the x402 body with resource, merchant, and payment id', () => {
-    renderPanel(
-      tx({
-        source: 'x402',
-        agentName: 'Research agent',
-        x402ResourceUrl: 'https://api.example.com/data?q=1',
-        x402MerchantAddress: '0x5555555555555555555555555555555555555555',
-        paymentId: 'pay_abcdef123456',
-      }),
-    )
-    // #2357: the section heading names the protocol, because the drawer is the
-    // advanced surface — the primary row title no longer does.
-    expect(screen.getByText('x402 payment')).toBeInTheDocument()
-    expect(screen.getByText('Resource')).toBeInTheDocument()
-    expect(screen.getByText('api.example.com')).toBeInTheDocument() // hostname, not full URL
-    expect(screen.getByText('Merchant')).toBeInTheDocument()
-    expect(screen.getByText('Research agent')).toBeInTheDocument()
-    expect(screen.getByText('Payment ID')).toBeInTheDocument()
+  it.each(Object.entries(KINDS))('%s: header, Details and a closed Technical details', (_, t) => {
+    renderPanel(t)
+    expect(header()).toBeInTheDocument()
+    expect(details().children.length).toBeGreaterThan(0)
+    expect(technical().tagName).toBe('DETAILS')
+    expect(technical()).not.toHaveAttribute('open')
   })
 
-  it('shows the settlement scheme for an eip3009 x402 payment', () => {
-    renderPanel(
-      tx({
-        source: 'x402',
-        settlementScheme: 'eip3009',
-      }),
-    )
-    expect(screen.getByText('Settlement')).toBeInTheDocument()
-    expect(screen.getByText('EIP-3009')).toBeInTheDocument()
+  it('x402 with a recorded settlement: the host, the receipt in words, "Recorded (verified)"', () => {
+    renderPanel(KINDS.x402Recorded)
+    expect(screen.getByRole('dialog', { name: 'api.vendor.com' })).toBeInTheDocument()
+    expect(within(header()).getByText('Paid by Atlas from Main', { exact: false })).toBeInTheDocument()
+    expect(rows(details())).toEqual({
+      For: 'api.vendor.com',
+      Receipt: 'Attached',
+      Settlement: 'Recorded (verified)',
+    })
+    expect(screen.getByText('Paid request')).toBeInTheDocument()
   })
 
-  it('shows the settlement scheme for an erc7710 x402 payment', () => {
-    renderPanel(
-      tx({
-        source: 'x402',
-        settlementScheme: 'erc7710',
-      }),
-    )
-    expect(screen.getByText('Settlement')).toBeInTheDocument()
-    expect(screen.getByText('ERC-7710')).toBeInTheDocument()
+  it('x402 without a recorded settlement: "Not recorded yet" and what the record proves', () => {
+    renderPanel(KINDS.x402Unrecorded)
+    expect(rows(details())).toEqual({
+      For: 'api.vendor.com',
+      Receipt: 'Not attached',
+      Settlement:
+        'Not recorded yetThe payment left your account; no settlement from the merchant has been recorded.',
+    })
+    // Never a promise the merchant confirmed it.
+    expect(screen.getByRole('dialog').textContent).not.toMatch(/confirmed by the merchant/i)
   })
 
-  it('renders no settlement row for x402 rows without a recorded scheme', () => {
-    renderPanel(tx({ source: 'x402' }))
-    expect(screen.queryByText('Settlement')).not.toBeInTheDocument()
+  it('erc7710 is one transaction: no Settlement row', () => {
+    renderPanel(tx({ ...x402Base, settlementScheme: 'erc7710', fundingTxHash: null, hash: HASH }))
+    expect(rows(details())).not.toHaveProperty('Settlement')
+    expect(within(technical()).getByText('ERC-7710')).toBeInTheDocument()
   })
 
-  it('renders no settlement row for non-x402 kinds even when a scheme is present', () => {
-    renderPanel(
-      tx({
-        direction: 'out',
-        source: 'direct',
-        settlementScheme: 'eip3009',
-      }),
-    )
-    expect(screen.queryByText('Settlement')).not.toBeInTheDocument()
+  it('needs attention: the stranded-funds sentence and a link to the agent page', () => {
+    renderPanel(KINDS.needsAttention)
+    expect(within(header()).getByText('Needs attention')).toBeInTheDocument()
+    expect(
+      within(header()).getByText(
+        'A payment was funded on-chain but didn’t reach the merchant, leaving money in your agent’s wallet.',
+      ),
+    ).toBeInTheDocument()
+    expect(within(header()).getByRole('link', { name: 'Open agent' })).toHaveAttribute('href', '/agents/agent-1')
   })
 
-  it('shows the send body with recipient and initiator', () => {
-    renderPanel(
-      tx({ direction: 'out', source: 'direct', agentName: undefined, initiatedBy: 'human' }),
-    )
-    expect(screen.getByText('Transfer')).toBeInTheDocument()
-    expect(screen.getByText('To')).toBeInTheDocument()
-    expect(screen.getByText('Initiator')).toBeInTheDocument()
-    expect(screen.getByText('You')).toBeInTheDocument() // "You" only for human-initiated (#2097)
+  it('an on-chain failure: Failed, "Payment attempt", and nothing left the account', () => {
+    renderPanel(KINDS.onChainFailed)
+    expect(within(header()).getByText('Failed')).toBeInTheDocument()
+    expect(screen.getByText('Payment attempt')).toBeInTheDocument()
+    expect(
+      within(header()).getByText('The transaction failed on-chain. Nothing left your account.'),
+    ).toBeInTheDocument()
+    expect(within(header()).getByText('Attempted by you from Main', { exact: false })).toBeInTheDocument()
   })
 
-  it('renders explicit "Unknown" — never "You" — when an outbound row has missing attribution', () => {
-    renderPanel(tx({ direction: 'out', source: 'direct', agentName: undefined }))
-    expect(screen.getByText('Transfer')).toBeInTheDocument()
-    expect(screen.getByText('Initiator')).toBeInTheDocument()
-    expect(screen.getByText('Unknown')).toBeInTheDocument()
-    expect(screen.queryByText('You')).not.toBeInTheDocument()
+  it('a failed agent-tab intent with no transaction never claims an on-chain failure', () => {
+    renderPanel(tx({ ...x402Base, hash: 'activity-payment-1', fundingTxHash: null, settlementScheme: null, isError: true }))
+    expect(screen.getByText('Payment attempt')).toBeInTheDocument()
+    expect(screen.getByRole('dialog').textContent).not.toContain('failed on-chain')
   })
 
-  it('attributes the initiator to the agent when present', () => {
-    renderPanel(
-      tx({ direction: 'out', source: 'direct', agentName: 'Ops agent', initiatedBy: 'agent' }),
-    )
-    expect(screen.getByText('Ops agent')).toBeInTheDocument()
-    expect(screen.queryByText('You')).not.toBeInTheDocument()
+  it('a failed x402 payment is a "Payment attempt", not a "Paid request"', () => {
+    renderPanel(tx({ ...KINDS.x402Recorded, isError: true }))
+    expect(screen.getByText('Payment attempt')).toBeInTheDocument()
+    expect(screen.queryByText('Paid request')).toBeNull()
   })
 
-  it('shows the receive body with sender', () => {
-    renderPanel(tx({ direction: 'in', source: 'direct' }))
-    expect(screen.getByText('Transfer')).toBeInTheDocument()
-    expect(screen.getByText('From')).toBeInTheDocument()
+  it('an observed merchant response is not an attached receipt', () => {
+    renderPanel(tx({ ...KINDS.x402Recorded, paymentProofStatus: 'merchant_response_observed' }))
+    expect(rows(details()).Receipt).toBe('Not attached (the merchant responded)')
   })
 
-  it('shows the allowance-funding body for delegate sweeps', () => {
-    renderPanel(tx({ activityType: 'delegate_sweep' }))
-    expect(screen.getByText('Allowance funding')).toBeInTheDocument()
+  it('an x402 row with no recorded scheme shows no Settlement row', () => {
+    renderPanel(tx({ ...x402Base, settlementScheme: null, fundingTxHash: null, hash: HASH }))
+    expect(rows(details())).not.toHaveProperty('Settlement')
   })
 
-  it('resolves a counterparty name from the address book', () => {
-    renderPanel(
-      tx({ direction: 'in', source: 'direct' }),
-      (a) => (a === '0x1111111111111111111111111111111111111111' ? 'Alice' : null),
-    )
-    expect(screen.getByText('Alice')).toBeInTheDocument()
+  it('a contact send: the contact, by you', () => {
+    renderPanel(KINDS.contactSend)
+    expect(screen.getByRole('dialog', { name: 'Alice' })).toBeInTheDocument()
+    expect(screen.getByText('Payment')).toBeInTheDocument()
+    expect(within(header()).getByText('Sent by you from Main', { exact: false })).toBeInTheDocument()
+    expect(rows(details())).toEqual({ To: 'Alice' })
   })
 
-  it('always renders the on-chain section with a tx explorer link', () => {
+  it('the mark: a named counterparty gets its monogram, an unnamed one the direction mark', () => {
+    const { unmount } = renderPanel(KINDS.contactSend)
+    expect(screen.getByRole('dialog').textContent).toContain('AL')
+    unmount()
+    renderPanel(tx({ to: SENDER, initiatedBy: 'human' }))
+    expect(screen.getByRole('dialog', { name: 'New recipient' })).toBeInTheDocument()
+    expect(screen.getByRole('dialog').textContent).not.toContain('NR')
+  })
+
+  it('a send with no owner record never says "you" (#2097)', () => {
     renderPanel(tx())
-    expect(screen.getByText('On-chain')).toBeInTheDocument()
-    const txLink = screen.getByRole('link', { name: /0xhash/i })
-    expect(txLink).toHaveAttribute('href', expect.stringContaining('/tx/0xhash'))
+    expect(within(header()).getByText('Sent from Main', { exact: false })).toBeInTheDocument()
+    expect(header().textContent).not.toMatch(/\byou\b/i)
   })
 
-  // #3811: the drawer is where users go to verify — the address renders in
-  // FULL with the working copy affordance, and the transaction hash renders
-  // in full too (never ellipsised behind a link).
-  it('shows the full recipient address with a working copy button', async () => {
+  it('a deposit: "Deposit", into the account, from an outside wallet', () => {
+    renderPanel(KINDS.deposit)
+    expect(screen.getByRole('dialog', { name: 'Deposit' })).toBeInTheDocument()
+    // The kind would only repeat the title: it is dropped, not shown twice.
+    expect(screen.getAllByText('Deposit')).toHaveLength(1)
+    expect(within(header()).getByText('Into Main', { exact: false })).toBeInTheDocument()
+    expect(rows(details())).toEqual({ From: 'An outside wallet' })
+  })
+
+  it('an own transfer: the row title, From → To in the header, and an unsigned amount', () => {
+    renderPanel(KINDS.ownTransfer)
+    expect(screen.getByRole('dialog', { name: 'Moved between your accounts' })).toBeInTheDocument()
+    expect(screen.getByText('Transfer')).toBeInTheDocument()
+    expect(within(header()).getByText('From Main to Reserve', { exact: false })).toBeInTheDocument()
+    expect(rows(details())).toEqual({ By: 'You' })
+    const headline = header().querySelector('.v2-tabular')
+    expect(headline?.textContent).toMatch(/1\.00/)
+    expect(headline?.textContent).not.toMatch(/^[-+−]/)
+    expect(header().textContent).not.toContain('Payment sent by you')
+  })
+
+  it('an own transfer with no owner record is by "Your accounts"', () => {
+    renderPanel(tx({ ...KINDS.ownTransfer, initiatedBy: 'unknown' }))
+    expect(rows(details())).toEqual({ By: 'Your accounts' })
+  })
+
+  it('a sweep (the agent allowance funding, returned): Recovered, from the agent into the account', () => {
+    renderPanel(KINDS.sweep)
+    expect(within(header()).getByText('Recovered')).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: 'Returned from Atlas' })).toBeInTheDocument()
+    expect(within(header()).getByText('Into Main', { exact: false })).toBeInTheDocument()
+    expect(rows(details())).toEqual({ 'What happened': "Unspent funds returned from the agent's wallet" })
+  })
+
+  it('accounting present: the badge, linked to /accounting, and the failure reason in words', () => {
+    renderPanel(KINDS.accounting)
+    const accountingRow = rows(details())
+    expect(accountingRow.Accounting).toBe('Not fed')
+    expect(accountingRow.Reason).toBe('Supplier missing')
+    expect(within(details()).getByRole('link', { name: /Not fed/ })).toHaveAttribute(
+      'href',
+      expect.stringContaining('/accounting'),
+    )
+  })
+})
+
+describe('TransactionDetailPanel — the words that are gone', () => {
+  it.each(Object.entries(KINDS))('%s: no raw or retired label', (_, t) => {
+    renderPanel(t)
+    const all = screen.getByRole('dialog').textContent ?? ''
+    expect(outsideTechnical()).not.toMatch(/x402 payment/i)
+    expect(all).not.toContain('Merchant settlement')
+    expect(all).not.toContain('protocol_receipt_attached')
+    expect(all).not.toContain('Funding from your account')
+    for (const element of Array.from(screen.getByRole('dialog').querySelectorAll('dd, div, p, span'))) {
+      if (element.closest('[data-testid="transaction-technical-details"]')) continue
+      expect(element.textContent).not.toBe('Not recorded')
+    }
+  })
+})
+
+describe('TransactionDetailPanel — once, in the header', () => {
+  it.each(Object.entries(KINDS))('%s: amount, date, agent and account appear once', (_, t) => {
+    renderPanel(t)
+    const text = screen.getByRole('dialog').textContent ?? ''
+    const count = (needle: string) => text.split(needle).length - 1
+    // The header is the panel's title row plus the summary block; neither
+    // Details nor Technical details repeats what it says.
+    const below = `${details().textContent}${technical().textContent}`
+    const date = formatWhen(t.timestamp)
+    for (const needle of [date, `${t.valueFormatted} ${t.asset}`, 'Main', ...(t.agentName ? [t.agentName] : [])]) {
+      expect(count(needle), needle).toBe(1)
+      expect(below, needle).not.toContain(needle)
+    }
+    expect(header().textContent).toContain(date)
+  })
+})
+
+describe('TransactionDetailPanel — every field is still reachable', () => {
+  /** Technical details' labels per kind: the raw fields the old panel showed. */
+  const TECHNICAL: Record<keyof typeof KINDS, string[]> = {
+    x402Recorded: ['Network', 'Payment ID', 'Settlement method', 'Delivered', 'Merchant address', 'Your account', 'Token contract', 'Transaction', 'Settlement transaction'],
+    x402Unrecorded: ['Network', 'Payment ID', 'Settlement method', 'Delivered', 'Merchant address', 'Your account', 'Token contract', 'Transaction'],
+    needsAttention: ['Network', 'Payment ID', 'Settlement method', 'Delivered', 'Merchant address', 'Your account', 'Token contract', 'Transaction'],
+    onChainFailed: ['Network', 'To address', 'Your account', 'Token contract', 'Transaction'],
+    contactSend: ['Network', 'To address', 'Your account', 'Token contract', 'Transaction'],
+    deposit: ['Network', 'From address', 'Your account', 'Token contract', 'Transaction'],
+    ownTransfer: ['Network', 'From address', 'To address', 'Token contract', 'Transaction'],
+    sweep: ['Network', 'From address', 'Your account', 'Token contract', 'Transaction'],
+    accounting: ['Network', 'Payment ID', 'Settlement method', 'Delivered', 'Merchant address', 'Your account', 'Token contract', 'Transaction', 'Settlement transaction'],
+  }
+
+  it.each(Object.entries(KINDS))('%s: the Technical details inventory', (name, t) => {
+    renderPanel(t)
+    const labels = Array.from(technical().querySelectorAll('dt')).map((dt) => dt.textContent)
+    expect(labels).toEqual(TECHNICAL[name as keyof typeof KINDS])
+  })
+
+  it('both eip3009 hashes: the funding leg as "Transaction", the merchant settlement beside it', () => {
+    renderPanel(KINDS.x402Recorded)
+    const hrefs = within(technical()).getAllByRole('link').map((a) => a.getAttribute('href'))
+    expect(hrefs).toContain(`https://basescan.org/tx/${FUNDING}`)
+    expect(hrefs).toContain(`https://basescan.org/tx/${SETTLEMENT}`)
+    expect(within(technical()).getByText('EIP-3009')).toBeInTheDocument()
+    expect(within(technical()).getByText('delivery-ref-7')).toBeInTheDocument()
+  })
+
+  it('shortens every address and hash, with copy and an explorer link — never in full', async () => {
     const writeText = vi.fn<(text: string) => Promise<void>>().mockResolvedValue(undefined)
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
-    const address = '0x2222222222222222222222222222222222222222'
-    renderPanel(tx({ direction: 'out', source: 'direct' }))
-
-    expect(screen.getAllByText(address).length).toBeGreaterThan(0)
-    expect(screen.queryByText(truncate(address))).not.toBeInTheDocument()
-
-    const copyButton = screen.getAllByRole('button', { name: 'Copy address' })[0]
-    fireEvent.click(copyButton)
-    await waitFor(() => expect(writeText).toHaveBeenCalledWith(address))
+    renderPanel(KINDS.x402Recorded)
+    const dialog = screen.getByRole('dialog')
+    for (const full of [MERCHANT, ACCOUNT, TOKEN, FUNDING, SETTLEMENT]) {
+      expect(dialog.textContent).not.toContain(full)
+      expect(within(technical()).getByText(truncate(full))).toHaveAttribute('title', full)
+    }
+    expect(within(technical()).getAllByRole('link', { name: 'Open address in explorer' })).toHaveLength(3)
+    expect(within(technical()).getAllByRole('link', { name: 'Open transaction in explorer' })).toHaveLength(2)
+    fireEvent.click(within(technical()).getAllByRole('button', { name: 'Copy address' })[0])
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(MERCHANT))
+    fireEvent.click(within(technical()).getByRole('button', { name: 'Copy payment ID' }))
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(PAYMENT_ID))
   })
 
-  it('shows the transaction hash in full', () => {
-    const hash = '0x' + 'ab'.repeat(32)
-    renderPanel(tx({ hash }))
+  // The keyboard itself is the browser's: a native <summary> is focusable and
+  // toggles on Enter/Space, which jsdom does not implement — the Playwright
+  // spec (`transactions-detail.spec.ts`) presses it. Here: the native shape.
+  it('is a native disclosure: the summary is the details element\'s first child', () => {
+    renderPanel(KINDS.x402Recorded)
+    const summary = technical().firstElementChild
+    expect(summary?.tagName).toBe('SUMMARY')
+    expect(summary).toHaveTextContent('Technical details')
+  })
+})
 
-    expect(screen.getAllByText(hash).length).toBeGreaterThan(0)
-    const txLink = screen.getByRole('link', { name: new RegExp(hash.slice(0, 10)) })
-    expect(txLink).toHaveAttribute('href', expect.stringContaining(`/tx/${hash}`))
+describe('TransactionDetailPanel — the footer', () => {
+  const footerLink = () => screen.queryByRole('link', { name: 'View on explorer' })
+
+  it('links the transaction that left the account — the funding leg on eip3009', () => {
+    renderPanel(KINDS.x402Recorded)
+    expect(footerLink()).toHaveAttribute('href', `https://basescan.org/tx/${FUNDING}`)
+    expect(footerLink()?.closest('[data-side-panel-footer]')).not.toBeNull()
   })
 
-  it('signs the headline currency figure by direction and keeps the token amount beside it', () => {
-    const { rerender } = renderPanel(
-      tx({ direction: 'out', source: 'direct', convertedAmount: '134.50', convertedCurrency: 'SEK' }),
+  it('links a plain transfer by its hash', () => {
+    renderPanel(KINDS.contactSend)
+    expect(footerLink()).toHaveAttribute('href', `https://basescan.org/tx/${HASH}`)
+  })
+
+  it('is absent for a synthetic activity- hash', () => {
+    renderPanel(tx({ hash: 'activity-payment-42', explorerUrl: undefined }))
+    expect(footerLink()).toBeNull()
+    expect(document.querySelector('[data-side-panel-footer]')).toBeNull()
+    expect(within(technical()).queryByText('Transaction')).toBeNull()
+  })
+
+  it('honours explorerUrl: null hides it; a value stands in only where the chain has no explorer', () => {
+    const { unmount } = renderPanel(tx({ explorerUrl: null }))
+    expect(footerLink()).toBeNull()
+    unmount()
+    renderPanel(tx({ chainId: 999999, explorerUrl: 'https://explorer.example/tx/abc' }))
+    expect(footerLink()).toHaveAttribute('href', 'https://explorer.example/tx/abc')
+  })
+
+  it('an agent-tab row: the settlement-first explorerUrl never wins over the funding leg (#3763 superseded)', () => {
+    renderPanel(
+      tx({
+        ...KINDS.x402Recorded,
+        explorerUrl: `https://basescan.org/tx/${SETTLEMENT}`,
+      }),
     )
-    expect(
-      screen.getAllByText((_, element) =>
-        (element?.textContent ?? '').replace(/\u00a0/g, ' ') === '-134,50 kr',
-      ).length,
-    ).toBeGreaterThan(0)
-    // The token amount rides beside the currency figure, signless — the
-    // currency figure carries the sign (owner decision, #3811). (The section
-    // rows repeat it; both count.)
-    expect(screen.getAllByText('1.00 USDC').length).toBeGreaterThan(0)
+    expect(footerLink()).toHaveAttribute('href', `https://basescan.org/tx/${FUNDING}`)
+  })
 
+  it('a synthetic hash is never paired with a footer, whatever explorerUrl says', () => {
+    renderPanel(tx({ hash: 'activity-payment-7', explorerUrl: 'https://basescan.org/tx/0xabc' }))
+    expect(footerLink()).toBeNull()
+  })
+})
+
+describe('TransactionDetailPanel — the headline amount', () => {
+  it('signs the currency figure by direction and keeps the token amount beside it', () => {
+    const { rerender } = renderPanel(tx({ convertedAmount: '134.50', convertedCurrency: 'SEK' }))
+    const text = () => (header().textContent ?? '').replace(/ /g, ' ')
+    expect(text()).toContain('-134,50 kr')
+    expect(text()).toContain('1.00 USDC')
     rerender(
-      <TransactionDetailPanel
-        transaction={tx({ direction: 'in', source: 'direct', convertedAmount: '134.50', convertedCurrency: 'SEK' })}
-        open
-        onClose={vi.fn()}
-      />,
+      <LocaleProvider>
+        <TransactionDetailPanel
+          transaction={tx({ direction: 'in', from: SENDER, convertedAmount: '134.50', convertedCurrency: 'SEK' })}
+          open
+          onClose={vi.fn()}
+        />
+      </LocaleProvider>,
     )
-    expect(
-      screen.getAllByText((_, element) =>
-        (element?.textContent ?? '').replace(/\u00a0/g, ' ') === '+134,50 kr',
-      ).length,
-    ).toBeGreaterThan(0)
+    expect(text()).toContain('+134,50 kr')
   })
 
   it('renders an unknown valuation as an em dash — the token amount still shows', () => {
-    renderPanel(tx({ direction: 'out', source: 'direct' }))
-
-    expect(screen.getByText('—')).toBeInTheDocument()
-    expect(screen.getAllByText('1.00 USDC').length).toBeGreaterThan(0)
+    renderPanel(tx())
+    expect(within(header()).getByText('—')).toBeInTheDocument()
+    expect(header().textContent).toContain('1.00 USDC')
   })
 })

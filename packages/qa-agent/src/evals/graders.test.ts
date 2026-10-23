@@ -711,3 +711,67 @@ describe('nothing_stranded_on_delegate — no funding left on the delegate EOA, 
     expect(noSnapshot.detail).toContain('resolve-time')
   })
 })
+
+// 2026-10-23, run 39914610364: bridge trial 2 replayed trial 1's payment
+// (idempotent_replay inside Haven's 5-minute bucket) and graded green.
+describe('a trial whose only payment is an idempotent replay bought nothing', () => {
+  const statusProbe = async () => ({ ok: true as const, status: 'settled', amountAtomic: '1000' })
+
+  it('payment_status_settled fails a replay-only trial and reports no spend', async () => {
+    const r = await paymentStatusSettled(
+      log([
+        call(`${DEV_PREFIX}haven_pay_mcp_tool`, { result: { ok: true, paymentId: 'pay_1', idempotentReplay: true } }),
+        call(`${DEV_PREFIX}haven_get_payment_status`, { args: { payment_id: 'pay_1' } }),
+      ]),
+      { probePaymentStatus: statusProbe },
+    )
+    expect(r.pass).toBe(false)
+    expect(r.detail).toContain('idempotent replay')
+    expect(r.settledSpendAtomic).toBeUndefined()
+  })
+
+  it('a replay of a payment the SAME trial created is still that trial\'s purchase', async () => {
+    const r = await paymentStatusSettled(
+      log([
+        call(`${DEV_PREFIX}haven_pay_mcp_tool`, { result: { ok: true, paymentId: 'pay_1' } }),
+        call(`${DEV_PREFIX}haven_pay_mcp_tool`, { result: { ok: true, paymentId: 'pay_1', idempotentReplay: true } }),
+      ]),
+      { probePaymentStatus: statusProbe },
+    )
+    expect(r.pass).toBe(true)
+  })
+
+  it('the result parser reads idempotent_replay', async () => {
+    const { resultFieldsFromText } = await import('./hermes.js')
+    expect(resultFieldsFromText(JSON.stringify({ success: true, payment_id: 'p', idempotent_replay: true })).idempotentReplay).toBe(true)
+    expect(resultFieldsFromText('prose {"payment_id":"p","idempotent_replay": true}').idempotentReplay).toBe(true)
+    expect(resultFieldsFromText(JSON.stringify({ success: true, payment_id: 'p' })).idempotentReplay).toBeUndefined()
+  })
+})
+
+describe('replay detection is not fooled by an unflagged echo, and covers the bridge graders', () => {
+  const replayThenEcho = log([
+    call(`${DEV_PREFIX}haven_pay_mcp_tool`, { result: { ok: true, paymentId: 'pay_1', idempotentReplay: true } }),
+    call(`${DEV_PREFIX}haven_settle_mcp_tool`, { result: { ok: true, paymentId: 'pay_1' } }),
+  ])
+
+  it('a replay followed by a tool that merely echoes the id is still replay-only', async () => {
+    const { replayOnlyPaymentIds } = await import('./graders.js')
+    expect([...replayOnlyPaymentIds(replayThenEcho)]).toEqual(['pay_1'])
+    const r = await paymentStatusSettled(replayThenEcho, { probePaymentStatus: async () => ({ ok: true as const, status: 'settled', amountAtomic: '1000' }) })
+    expect(r.pass).toBe(false)
+  })
+
+  it.each(['merchant_settlement_recorded', 'eip3009_settlement_shape', 'nothing_stranded_on_delegate'])('%s fails a replay-only trial', async (name) => {
+    // Every probe present and permissive, so only the replay rule can fail it.
+    const ctx = {
+      probeMerchantSettlement: async () => ({ ok: true, recorded: true }),
+      probeReceipt: async () => ({ ok: true, scheme: 'eip3009' }),
+      probeDelegateBalance: async () => ({ ok: true, balanceAtomic: '0' }),
+      resolved: { delegateEoa: '0x' + '33'.repeat(20), delegateEoaBalanceBeforeAtomic: 0n },
+    } as never
+    const results = await applyGraders(replayThenEcho, [{ name }], ctx)
+    expect(results[0]!.pass).toBe(false)
+    expect(results[0]!.detail).toContain('idempotent replay')
+  })
+})

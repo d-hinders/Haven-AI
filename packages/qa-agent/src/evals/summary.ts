@@ -66,6 +66,12 @@ export function renderMarkdownSummary(report: EvalReport): string {
       )
     }
   }
+  if (report.guardEvents && report.guardEvents.length > 0) {
+    lines.push('')
+    for (const e of report.guardEvents) {
+      lines.push(`> Budget wait skipped before ${e.beforeTask} trial ${e.beforeTrial}: ${e.reason}.`)
+    }
+  }
   if (report.totalCostUsd !== undefined) {
     lines.push('')
     lines.push(`**Total cost the run reported:** ${usd(report.totalCostUsd)}`)

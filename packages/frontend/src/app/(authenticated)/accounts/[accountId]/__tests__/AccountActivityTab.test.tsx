@@ -642,8 +642,7 @@ describe('AccountActivityTab — the facet set (#4130)', () => {
     }))
     renderTab()
     const row = ledgerRows()[0]
-    // Merchant first, as on the dashboard — the shared `transactionTitle`
-    // ("Agent payment by …") is untouched, this row just doesn't use it.
+    // Merchant first, as on the dashboard — never "Agent payment by …".
     expect(row).toHaveTextContent('research.example')
     expect(row).not.toHaveTextContent('Agent payment by')
     // The agent is the subtitle; the movement line is gone — the page fixes

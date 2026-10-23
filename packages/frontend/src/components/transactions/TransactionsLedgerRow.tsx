@@ -57,7 +57,7 @@ export default function TransactionsLedgerRow({
     status: badge?.label,
     statusTone: badge?.tone,
     // The pill alone (#4266): the row is a whole-row button, and a link
-    // inside it is invalid ARIA; the panel's Feed row links to /accounting.
+    // inside it is invalid ARIA; the panel's Accounting row links to /accounting.
     extraBadges: <AccountingBadge accounting={tx.accounting} interactive={false} />,
     timestamp: timeAgo(tx.timestamp * 1000),
     fiat,

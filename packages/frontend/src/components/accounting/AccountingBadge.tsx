@@ -88,7 +88,7 @@ export interface AccountingBadgeProps {
    * tooltip — for a host that is itself the control: the `/transactions`
    * ledger row is a whole-row `role="button"`, and a link nested inside it
    * is invalid ARIA (#4266). The row opens `TransactionDetailPanel`, whose
-   * Feed row carries the linked badge and the reason.
+   * Accounting row carries the linked badge, and its Reason row the reason.
    */
   interactive?: boolean
 }

@@ -1037,29 +1037,37 @@ Money and risk clarity:
   other surface fed by the same hook — the account detail page's transaction
   count included. Hedge the wording ("may not be your full history"); the
   detection is not exact on every provider, and the reason lives in the code.
-- The ROW leads with the counterparty (above), never "Agent payment by …" (#4266). The detail drawer's title (`transactionTitle`) uses `Payment sent` (neutral), `Received payment`, and `Agent payment by [agent name]` before technical transaction language. `Payment sent by you` is reserved for human-initiated payments only (#2097); a transaction with no attribution renders as `Payment sent` with an explicit unknown initiator — never `You`.
+- The ROW leads with the counterparty (above), never "Agent payment by …" (#4266), and so does the detail drawer's title (#4267). "You" is reserved for human-initiated payments only (#2097): a transaction with no attribution never says "you" — the drawer's header line reads "Sent from <account>", naming no actor.
 - For x402 payments, collapse the historical Safe-to-agent funding step into
   one merchant-facing row titled with the merchant's hostname. On the
   eip3009 bridge the funding leg is REAL and present on every payment (#946):
   the account funds the agent's delegate key first, then the delegate pays
   the merchant from the agent's signed authorization. The row still
-  represents the agent payment — but the detail drawer names the funding leg
-  ("Funding from your account") and headlines the merchant settlement when
-  one is recorded, saying "Merchant settlement · Not recorded" when it is
-  not (#3763). Scheme-less/legacy rows keep the single-transaction read. The
-  row title deliberately does NOT name the protocol (#2357): `x402` rides on
-  the detail drawer's section heading, and the row title is the resource
-  hostname.
+  represents the agent payment. The detail drawer's Settlement row says what
+  the record proves — "Recorded (verified)", or "Not recorded yet" with one
+  line saying the payment left the account and no settlement has been
+  recorded, never "confirmed by the merchant" (#3763, #4267) — and both legs
+  sit under Technical details: "Transaction" (the funding leg, also the
+  footer's "View on explorer") and "Settlement transaction". Scheme-less and
+  erc7710 rows are one transaction. Neither the row nor the drawer names the
+  protocol (#2357, #4267): the row title is the resource hostname and the
+  drawer calls it a "Paid request".
 - The row's subline names who acted and, with two or more accounts, the
   account — never a `From … -> To …` line (#4266). Only a move between the
   user's own accounts draws an arrow: "You · <from> → <to>", or "Your
   accounts · <from> → <to>" when no owner send was recorded (#2097).
-- **The detail drawer is where users verify (#3811).** Addresses and hashes
-  render IN FULL there — never ellipsised — and every address carries the
-  one copy affordance (`CopyButton`, "Copy address"); the explorer link
-  stays beside it. The headline is the user's currency figure with the
-  token amount beside it, signless (owner decision 2026-10-09, #3811): the
-  currency figure carries the sign.
+- **The detail drawer leads with the answer (#4267, epic #4263).** Its
+  anatomy is documented once, in `design-system.md` § Transaction detail
+  panel: a header summary (the counterparty, the kind in words, the amount,
+  the status, one who/where/when line and a callout when one is needed), a
+  few plain-word Details rows, and every raw value under a Technical details
+  disclosure, closed by default. Addresses and hashes are shortened there,
+  each with copy and an explorer link — this supersedes #3811's "in full"
+  rule, whose two-line wraps the shortened form stops; the full value is one
+  copy or one click away. The headline is still the user's currency figure
+  with the token amount beside it, signless (owner decision 2026-10-09,
+  #3811): the currency figure carries the sign, and a move between your own
+  accounts carries none.
 - The amount sits on the right at `sm` and up and rides under the title
   below `sm`; the time sits under the amount at every width; the explorer link lives in `TransactionDetailPanel`, not on the row.
   There are no columns to collapse and no sorting (#4266 — date order only).

@@ -177,9 +177,8 @@ function TotalFigure({ short, name, children }: { short: string; name: string; c
  * One feed row in the ledger — #4096's ledger mode, the account page's own
  * copy (#4166): the title is WHO WAS PAID — `counterpartyLabel` in the
  * dashboard's no-address mode, the merchant or counterparty first — with the
- * agent as the subtitle, exactly the dashboard row's anatomy. The shared
- * `transactionTitle` ("Agent payment by …") stays untouched for
- * `/transactions`, the agent page and the detail panel.
+ * agent as the subtitle, exactly the dashboard row's anatomy — the same
+ * title `/transactions` and the detail panel use (#4266, #4267).
  *
  * The movement line is gone with it: the page fixes the account, so its
  * "From <this account> →" half repeated the page on every row (#4166 — done

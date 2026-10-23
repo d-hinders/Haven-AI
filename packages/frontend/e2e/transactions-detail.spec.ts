@@ -45,17 +45,31 @@ test.describe('transaction history — x402 display + detail panel', () => {
 
     const panel = page.getByRole('dialog')
     await expect(panel).toBeVisible()
-    // x402-specific body: resource hostname (not the full URL) + merchant.
-    // The section heading carries the protocol name since #2357; the panel's
-    // own title is `transactionTitle`'s "Agent payment by …" (the row's title is the
-    // resource host since #4266).
-    await expect(panel.getByText('x402 payment', { exact: true })).toBeVisible()
-    await expect(panel.getByText('Resource', { exact: true })).toBeVisible()
-    await expect(panel.getByText('research.example')).toBeVisible()
-    await expect(panel.getByText('Merchant', { exact: true })).toBeVisible()
-    // The always-present on-chain section with an explorer link for the tx hash.
-    await expect(panel.getByText('On-chain', { exact: true })).toBeVisible()
-    await expect(panel.getByRole('link', { name: /0xabab/i })).toBeVisible()
+    // #4267: the panel leads with the answer. Its title is the row's — the
+    // resource host — and the kind reads in words ("Paid request"), never the
+    // protocol name ("x402 payment") or a raw proof value.
+    await expect(panel.getByRole('heading', { name: 'research.example' })).toBeVisible()
+    await expect(panel.getByText('Paid request', { exact: true })).toBeVisible()
+    await expect(panel.getByText('For', { exact: true })).toBeVisible()
+    await expect(panel.getByText('Recorded (verified)', { exact: true })).toBeVisible()
+    await expect(panel).not.toContainText(/x402 payment/i)
+    await expect(panel).not.toContainText('protocol_receipt_attached')
+
+    // Technical details: closed by default, opened from the keyboard (a
+    // native <summary> — jsdom cannot press it, so this is the proof).
+    const technical = panel.getByTestId('transaction-technical-details')
+    await expect(technical).not.toHaveAttribute('open')
+    const summary = technical.locator('summary')
+    await summary.focus()
+    await page.keyboard.press('Enter')
+    await expect(technical).toHaveAttribute('open', '')
+    await expect(technical.getByText('Merchant address', { exact: true })).toBeVisible()
+    await expect(technical.getByText('Settlement transaction', { exact: true })).toBeVisible()
+    // The footer links the account's transaction — the eip3009 FUNDING leg.
+    await expect(panel.getByRole('link', { name: 'View on explorer' })).toHaveAttribute(
+      'href',
+      /\/tx\/0x(ab){32}$/,
+    )
 
     // No secrets ever surface in the UI.
     await expect(panel).not.toContainText(/delegate_key|private_key|privateKey/)
@@ -90,6 +104,17 @@ test.describe('transaction history — x402 display + detail panel', () => {
       dialogCount: 1,
       overlayOverflows: false,
     })
+    // #4267: every address and hash is shortened and stays on one line at
+    // 420px, the width the issue's acceptance names (the panel fills the
+    // viewport there). Measured last: the checks above are at desktop width.
+    await page.setViewportSize({ width: 420, height: 900 })
+    const wrapped = await technical.locator('dd .font-mono').evaluateAll((values) =>
+      values
+        .filter((el) => el.getClientRects().length > 1 || el.getBoundingClientRect().height > 20)
+        .map((el) => el.textContent),
+    )
+    expect(await technical.locator('dd .font-mono').count()).toBeGreaterThan(4)
+    expect(wrapped).toEqual([])
     expect(unexpectedBrowserErrors(browserErrors)).toEqual([])
   })
 })

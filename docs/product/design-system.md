@@ -533,7 +533,8 @@ clamp it an over-tall panel overflows both ends with no scroll path.
 design, so a gutter on its wrapper would un-flush it at every width. Its insets
 go on the panel, where `box-sizing: border-box` takes them out of the scroll
 body between the header and footer rows — not on the rows themselves, because
-`footer` is optional and the only shipped caller passes none.
+`footer` is optional: `TransactionDetailPanel` passes one only for a record with
+a real transaction hash (#4267), so the inset has to hold with and without it.
 
 **Keep `backdrop-filter` off anything that spans a safe-area band** (#2819). The
 top bar originally grew the blurred `<header>` itself by `--v2-safe-top`, putting
@@ -2500,7 +2501,7 @@ sorting; filters and search live in `ListToolbar`, and the order is date only,
 with no Sort. A ledger row is a whole-row `role="button"`, so nothing inside it
 may be a control — an interactive element nested in a button is invalid ARIA.
 The accounting badge renders as a plain pill there (`interactive={false}`); its
-`/accounting` link and reason live in the detail panel's Feed row.
+`/accounting` link and reason live in the detail panel's Accounting row.
 
 **Merchant-first titles (#3810).** The dashboard's activity list reads
 `counterpartyLabel` in `lib/transaction-presentation.tsx` with the opt-in
@@ -2513,8 +2514,9 @@ subtitle is the agent's name; on a send it adds "From <account>", the account
 the money left (#4117), only when the user has more than one account and a
 name came back. A confirmed row carries no status badge — its
 direction is already the amount's sign and tone; only "Pending" and "Failed"
-name a state (#3897). `/transactions` reads the same mode (per #4266); `TransactionDetailPanel`
-passes no mode and renders the full address, where users verify (#3811) — the two supports on the same helper must not drift apart silently,
+name a state (#3897). `/transactions` reads the same mode (per #4266), and so does
+`TransactionDetailPanel`'s title (#4267); the default mode stays for the
+movement line — the supports on the same helper must not drift apart silently,
 which is what the characterization tests in
 `lib/__tests__/transaction-presentation.test.tsx` pin. Two row props exist for
 the grouped dashboard shape: `countLabel` renders the muted ×N beside the
@@ -2524,6 +2526,45 @@ never presented as exact when it is not), and `fiat` switches the amount to
 unknown valuation an em dash). Rows group under user-local day headings ("Today" /
 "Yesterday" / a short date); the server buckets the groups per day (#3824),
 the client only names the bucket.
+
+### Transaction detail panel
+
+`TransactionDetailPanel` (#4267, epic #4263) is the one detail drawer for a
+transaction — `/transactions` and the account and agent Activity tabs all open
+it. It is a local composition of documented pieces on `ui/SidePanel`, not a new
+pattern, and it leads with the answer:
+
+1. **Header.** `SidePanel`'s `leading` slot carries the mark — a decorative
+   `Monogram` of the counterparty, or `DirectionMark` for a deposit, a sweep
+   and a move between your own accounts, which name no counterparty. The title
+   is the ledger row's title (`counterpartyLabel` no-address mode, or "Moved
+   between your accounts"), the subtitle the kind in words ("Paid request",
+   "Payment", "Deposit", "Transfer", "Payment attempt"). Below it: `Amount
+   size="lg"` with the token amount beside it (a move passes no sign), the
+   `StatusBadge` from `transactionRowBadge(tx)` with "Executed" as the panel's
+   own fallback, one line saying who, where and when ("Paid by Atlas from Main
+   · <date>"), and, when the record needs one, a `NoticeRow` callout: needs
+   attention (the shared stranded-funds sentence and an "Open agent" link) or
+   an on-chain failure ("The transaction failed on-chain. Nothing left your
+   account.").
+2. **Details** — a few plain-word rows per kind, never repeating the header:
+   amount, date, agent and account appear once, in the header. An x402
+   payment shows For, Receipt ("Attached" / "Not attached", never the raw
+   proof status) and, on the eip3009 bridge, Settlement worded to what the
+   record proves ("Recorded (verified)", or "Not recorded yet" with one line —
+   never "confirmed by the merchant"). A send shows To, a deposit From, a move
+   By, a sweep what happened; the Accounting row carries the accounting
+   badge, linked to `/accounting`, and a failure reason in words.
+3. **Technical details** — § Technical details disclosure, closed by
+   default: Network (`NetworkPill`), Payment ID, Settlement method, the
+   delivered reference, every address and both hashes (the account's
+   transaction and the merchant's settlement transaction). Each address and
+   hash is shortened (`0x0415…b195`), on one line, with `CopyButton` and an
+   explorer link — superseding #3811's "in full" rule.
+4. **Footer** — `SidePanel`'s `footer` slot: "View on explorer" for the
+   transaction that left or entered the account (the funding leg on eip3009).
+   It honours `explorerUrl` (`null` hides it) and is absent for a record with
+   no real hash, such as the agent tab's synthetic `activity-…` rows.
 
 ### Table column collapse
 

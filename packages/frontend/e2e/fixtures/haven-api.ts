@@ -300,11 +300,11 @@ export const receivedGrantsFixture = [
 
 export const dashboardTransaction = {
   hash: `0x${'ab'.repeat(32)}`,
-  // #3763: the two EIP-3009 legs, named. `hash` stays the FUNDING hash; the
-  // recorded settlement — the transaction the MERCHANT names — headlines the
-  // drawer's On-chain section and the table link. Visible text: the drawer
-  // renders "Merchant settlement (reported by the agent or detected
-  // on-chain, verified)" + "Funding from your account" on this row.
+  // #3763: the two EIP-3009 legs, named. `hash` stays the FUNDING hash — the
+  // transaction that left the account, which the drawer's footer links
+  // (#4267); the recorded settlement — the transaction the MERCHANT names —
+  // has its own "Settlement transaction" row under Technical details, and the
+  // drawer's Details read "Settlement: Recorded (verified)".
   fundingTxHash: `0x${'ab'.repeat(32)}`,
   settlementTxHash: `0x${'22'.repeat(32)}`,
   settlementScheme: 'eip3009' as const,
@@ -341,7 +341,7 @@ export const dashboardTransaction = {
   // #2870: the payment-intent id the accounting badge is keyed on, and the
   // badge's own object. Carried on the row itself so the fixture-shape parity
   // test (`fixture-shape-parity.test.ts`) sees the same keys the screenshot
-  // dataset has. Rendered only by `/transactions` (table + drawer); the
+  // dataset has. Rendered only by `/transactions` (ledger row + drawer); the
   // dashboard's recent-transactions preview reads neither key, so its
   // baseline is unchanged.
   paymentId: 'pay-research-1',
@@ -355,9 +355,9 @@ export const dashboardTransaction = {
 
 /**
  * #3763: the OTHER eip3009 state — a synthesized x402 payment with NO
- * recorded settlement. The drawer reads "Merchant settlement / Not recorded"
- * (never a promise of a later record) and links the funding leg labelled as
- * the funding leg. Served as the SECOND `/transactions` row so the
+ * recorded settlement. The drawer reads "Settlement: Not recorded yet" with
+ * what the record proves (never a promise the merchant confirmed it), and
+ * links the funding leg as the account's transaction (#4267). Served as the SECOND `/transactions` row so the
  * regenerated baselines photograph both states' rows; every other route that
  * serves `dashboardTransaction` alone is unchanged.
  */

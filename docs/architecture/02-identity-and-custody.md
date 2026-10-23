@@ -229,8 +229,8 @@ radius shifts in a few ways worth mapping explicitly:
   `api_key_hash`-class data: encrypted at rest, never logged.
 - **The delegate key alone still cannot spend**, and the delegation alone still
   cannot spend. Full agent compromise (both) is bounded by the caveat stack:
-  each live budget delegation's period amount per period (one per
-  `(token, recipient)` slot, plus a `replaced` row until its Stop lands), to its
+  the sum of every enabled budget delegation's period amount per period (each
+  slot's live grant and every `replaced` row until its Stop lands), each to its
   pinned recipient or to any recipient for an open budget, until expiry or the
   owner's `disableDelegation` kill-switch. See
   [`delegation-rail-security-model.md`](../security/delegation-rail-security-model.md) §3.

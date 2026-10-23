@@ -380,10 +380,12 @@ surfaces.
 | Both (agent fully compromised) | Spend **within the caveat stack**: ≤ each budget's period amount per period, only to pinned recipients (any recipient for an open budget, which the EIP-3009 bridge requires), until expiry or revocation | `ERC20PeriodTransferEnforcer` + `allowedCalldata` when pinned + `Timestamp`; owner kill-switch `disableDelegation` |
 | Haven fully compromised | Constructs malicious payloads but **cannot sign** grants, redemptions, or upgrades (invariants 3/5/7/11/12); worst case = denial of service | The perimeter this doc exists to prove |
 
-Blast radius on full agent compromise is therefore bounded by each live budget
-delegation's period amount per period (one per `(token, recipient)` slot, plus a
-`replaced` row until its Stop lands), to its pinned recipient or to any
-recipient for an open budget, with revocation one `disableDelegation` away.
+Blast radius on full agent compromise is therefore bounded by the sum of every
+enabled budget delegation's period amount per period: each slot's live grant (a
+re-keyed agent's carry/steady pair sits in one slot) and every `replaced` row
+until its Stop lands (see the #3933 bullet below). Each spends only to its
+pinned recipient, or to any recipient for an open budget, and revocation is one
+`disableDelegation` away.
 
 **Batch revocation (#1400):** `POST /agents/:id/delegations/revoke-all`
 prepares ONE UserOp batching a `disableDelegation` call per still-enabled

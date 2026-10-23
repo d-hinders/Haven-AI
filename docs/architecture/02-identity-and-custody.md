@@ -26,6 +26,7 @@ covers:
   - packages/frontend/src/context/AuthContext.tsx
   - packages/frontend/src/lib/api.ts
   - packages/frontend/src/lib/passkey*.ts
+  - packages/frontend/src/hooks/useAgentConnectionSetup.ts
   - packages/connect/src/runtime.ts
   - packages/connect/src/key.ts
   - packages/connect/src/storage.ts
@@ -151,10 +152,12 @@ flowchart TB
 
 - **Default Connect Agent flow:** the connector generates both the API key and
   delegate key locally. Of credential material it sends Haven only the API-key
-  hash/prefix, the public delegate address and the challenge proof; the rest
-  of the registration is non-secret setup metadata (the runtime, connector
-  version and run mode, and the MCP server name it wired the agent as, #1878 —
-  a display label, never authority). It then writes separate owner-only
+  hash/prefix, the public delegate address and the challenge proof, alongside
+  the one-time setup token (a 30-minute bearer secret) and the challenge id
+  that authenticate the call; the rest of the registration is non-secret setup
+  metadata (the runtime, connector version and run mode, `connector_context`
+  labels, `install_capabilities`, and the MCP server name it wired the agent
+  as, #1878 — a display label, never authority). It then writes separate owner-only
   `identity.json` and `signer.json` files. Of the API key itself,
   registration sends only the hash/prefix; later API calls present the plaintext
   API key as a bearer
@@ -166,6 +169,16 @@ flowchart TB
   once, and stores only its SHA-256 hash and prefix. The caller supplies the
   public delegate address; the delegate private key remains outside Haven
   ([agent routes](../../packages/backend/src/routes/agents.ts)).
+- **Dashboard manual credential (#2482):** for a server or hosted backend that
+  cannot run the connector, the dashboard generates the delegate key and the
+  API key in the user's browser, registers the setup through the same
+  register route with only the public address, proof and API-key hash/prefix
+  as credential material (plus the setup token and challenge id), and shows
+  the plaintext pair in the page for the user to copy into the backend's own
+  secrets. The pair lives only in the page's memory: it is never sent to
+  Haven or stored by the dashboard
+  ([`hooks/useAgentConnectionSetup.ts`](../../packages/frontend/src/hooks/useAgentConnectionSetup.ts)).
+  The owner still signs the budget delegation before the agent can spend.
 - **Re-key flow (#1700):** an agent's delegate key is REPLACED rather than
   provisioned, and the split is asymmetric in a way the other paths are not.
   The connector generates the new delegate key locally and sends Haven only the
@@ -186,8 +199,9 @@ flowchart TB
   attestation, which the enrolment route stored without verifying. That route
   (`POST /passkeys`, the Safe WebAuthn signer enrolment) was deleted with #2847;
   `GET /passkeys` still lists the existing rows. On the delegation rail a
-  passkey is one of the account's own signers, and Haven stores only its public
-  key material (see the signer-set bullet below)
+  passkey is one of the account's own signers, and Haven stores only public
+  metadata about it — its key id, public P-256 coordinates and label
+  (`hybrid_account_passkeys`, migration 044; see the signer-set bullet below)
   ([passkey routes](../../packages/backend/src/routes/passkeys.ts),
   [browser passkey helper](../../packages/frontend/src/lib/passkey.ts)).
 
@@ -232,13 +246,17 @@ radius shifts in a few ways worth mapping explicitly:
   delegation (period budget with native refill + optional recipient pin +
   expiry) to the agent's delegate account. Haven stores it
   (`agent_delegations.delegation_json`) for reconstruction, revocation
-  targeting and observability, and embeds it in each redemption UserOp it
-  prepares; the agent sees it only inside the typed data it signs, and none
-  of the connector's credential files holds it (`packages/connect/src/storage.ts`).
-  It is **not key
-  material**, but it is spend-enabling *in combination with* the delegate key,
-  so it is handled like `api_key_hash`-class data: platform-level encryption at
-  rest, never logged (migration `042_agent_delegations.ts`).
+  targeting and observability, and embeds it in every redemption it prepares:
+  inside the UserOp the agent signs for a direct payment, and, on erc7710,
+  inside the `payment_header` Haven returns for the agent to forward to the
+  merchant (the encoded `[settlement child, …, budget]` chain,
+  `modules/x402/x402-delegation.ts` `assembleSettlementPayload`). So the agent,
+  and every erc7710 merchant it pays, does see the signed budget delegation.
+  No connector credential file stores it (`packages/connect/src/storage.ts`).
+  It is **not key material**, but it is spend-enabling *in combination with*
+  the delegate key, so migration `042_agent_delegations.ts` specifies it be
+  handled like `api_key_hash`-class data: platform-level encryption at rest,
+  never logged.
 - **The delegate key alone still cannot spend**, and the delegation alone still
   cannot spend. Full agent compromise (both) is bounded by the caveat stack:
   the sum of every enabled budget delegation's period amount per period (each
@@ -314,11 +332,15 @@ delegate address, proof) from the non-secret setup metadata the
 registration also sends (`connect/src/runtime.ts`); the passkey bullet says
 the enrolment route (`POST /passkeys`) was deleted with #2847 and only the
 read remains (`routes/passkeys.ts`); the delegation-rail section no longer
-says the agent receives or holds the signed delegation — the owner signs it
-to the agent's delegate account, Haven stores it and embeds it in the
-redemption UserOp it prepares (`rails/delegation-rail.ts`
-`buildRedemptionCall`), and no connector credential file holds it
-(`connect/src/storage.ts`). Re-checked without change: `identity.json` /
+says the agent receives the signed delegation through the credential
+channel — the owner signs it to the agent's delegate account, Haven stores it
+and embeds it in every redemption it prepares (the direct-payment UserOp,
+`rails/delegation-rail.ts` `buildRedemptionCall`; on erc7710 the
+`payment_header` the agent forwards, `modules/x402/x402-delegation.ts`
+`assembleSettlementPayload`), and no connector credential file stores it
+(`connect/src/storage.ts`). Review round 1 (#4377) added the setup token and
+challenge id to the registration's list, the dashboard manual-credential
+path, and the exact `hybrid_account_passkeys` columns. Re-checked without change: `identity.json` /
 `signer.json`, the manual `/agents` key (`routes/agents.ts`), the re-key
 split and `refuseAgentCaller` (`connect/src/rekey.ts`,
 `routes/agent-rekey.ts`), relayer deployment (`rails/hybrid-provisioning.ts`),

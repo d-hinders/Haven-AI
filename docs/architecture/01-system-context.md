@@ -270,8 +270,8 @@ flowchart LR
 - Re-verified 2026-10-23 (#4372 part B, at dev `2d0713dad`), a full re-read.
   Changed: the delegation-rail bullet no longer says the agent "holds" the
   signed budget delegation. The owner signs it to the agent's delegate
-  account and Haven stores it (`agent_delegations.delegation_json`, read
-  only server-side); the build route caps a new expiry at 365 days (#4351,
+  account and Haven stores it (`agent_delegations.delegation_json`) and
+  embeds it in the redemptions it prepares; the build route caps a new expiry at 365 days (#4351,
   `routes/agent-delegations.ts`). The chains bullet no longer lists Safe
   contracts in the core registry (they left with #2849,
   `packages/core/src/chains.ts`). The ops bullet no longer says "2FA

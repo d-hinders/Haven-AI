@@ -150,7 +150,8 @@ key. The manual credential may display a one-time delegate private key only
 after the user generates it; it is not part of routine connection snippets.
 The key pair and API key are generated in the browser
 (`hooks/useAgentConnectionSetup.ts`). Of credential material, its registration
-sends only the public address, proof and API-key hash/prefix; the rest is
+sends only the public address, proof and API-key hash/prefix, alongside the
+setup token and challenge id that authenticate the call; the rest is
 non-secret setup metadata: the manual-fallback marker (`connector_version:
 'browser-manual-fallback'`), connector context labels and install
 capabilities. That marker does not create authority or activate the agent: the user still makes the same owner-signed budget
@@ -466,7 +467,9 @@ the signer section names all five tools — `haven_sign_siwx` (#3728) was
 missing from the table and from the never-reaches-the-network list
 (`SignerToolName`, `packages/signer/src/tools.ts`); the manual-credential
 paragraph says the key pair is generated in the browser and separates its
-credential material from the setup metadata it also sends
+credential material (and the setup token and challenge id that authenticate
+the call, added in review round 1 of #4377) from the setup metadata it also
+sends
 (`hooks/useAgentConnectionSetup.ts`). Re-checked without change: the hosted
 egress limits (`HOSTED_MAX_GET_REDIRECTS = 3`, non-GET redirects refused,
 the DNS residual, all in the SDK's merchant egress policy), the boot-time key

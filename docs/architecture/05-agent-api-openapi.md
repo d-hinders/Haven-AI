@@ -527,7 +527,8 @@ The contract exposes four authentication schemes:
   emit, not an idealization (e.g. `from`/`to` can be the empty string;
   `amountSek` is present on enriched rows). The agent-activity reads
   (`/agent-activity/{id}/activity`, `/agent-activity/{id}/stats`,
-  `/agent-activity/feed`) are `Dashboard`-tagged too: the per-agent activity
+  `/agent-activity/feed`, and since #4366 the Activity tab's CSV,
+  `/agent-activity/{id}/activity/export.csv`) are `Dashboard`-tagged too: the per-agent activity
   read serves ONE population per `kind` (#4229) — `payments`, `tool_calls`,
   and since #4323 `refusals`, the agent's `payment_refusals` rows under their
   own `RefusalActivityEntry` item schema (atomic `amount`, the closed
@@ -701,7 +702,8 @@ not a second copy.
 
 Re-verified 2026-10-23 (#4372 part B, at dev `2d0713dad`), a full re-read. Changed:
 the `/agents` facet sentence names the account (#3719) and organization
-facets beside the built-in status and budget ones (`AgentPanel.tsx`); the
+facets beside the built-in status and budget ones (`AgentPanel.tsx`); the agent-activity reads gain #4366's export
+(review round 1 of #4377); the
 spend-authority read names #4355's `next_refill_at` (spec entry beside each
 row's `onchain` block); the `AgentApiKey` operation count is 46 (five also
 accept `DashboardJwt` or `SetupToken`); the route total is 211 across 49

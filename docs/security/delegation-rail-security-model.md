@@ -377,10 +377,29 @@ and a recording failure is swallowed: metrics can never gate a payment. See
 > caption stand. `last-verified` is not re-stamped: this note is the scope,
 > and nothing else in this document was re-verified.
 
-**Where the signed delegation lives:** the agent receives it through the
-existing credential channel (same trust envelope as the agent API key).
-Haven stores a copy server-side for reconstruction, revocation targeting and
-observability. It is **not** key material — but it is spend-enabling in
+> **Re-verified #4377 (2026-10-23, #4372 part B — this passage only).** The
+> paragraph below said the agent "receives it through the existing credential
+> channel". No credential channel carries it: the connector's credential files
+> hold no delegation (see `docs/architecture/02-identity-and-custody.md`). Haven stores it
+> (`agent_delegations.delegation_json`) and embeds it in the redemptions it
+> prepares — the direct-payment UserOp the agent signs
+> (`rails/delegation-rail.ts` `buildRedemptionCall`) and, on erc7710, the
+> `payment_header` Haven returns for the agent to forward to the merchant,
+> which carries the encoded `[settlement child, …, budget]` chain
+> (`modules/x402/x402-delegation.ts` `assembleSettlementPayload`, called from
+> `modules/x402/settle.ts`). The delegation is therefore not secret from the
+> agent or from any erc7710 merchant it pays, and the leak table's "delegate
+> key alone" row reaches the "both" row's bound once a budget delegation has
+> appeared in such a header — its delegate is the agent's delegate account
+> (`rails/delegation-policy.ts`), which the key controls. The caveat-stack
+> bound itself is unchanged. `last-verified` is not re-stamped: this note is
+> the scope, and nothing else in this document was re-verified for it.
+
+**Where the signed delegation lives:** Haven stores it server-side for
+reconstruction, revocation targeting and observability, and embeds it in
+every redemption it prepares — inside the UserOp the agent signs for a direct
+payment, and, on erc7710, inside the `payment_header` the agent forwards to
+the merchant. No connector credential file stores it. It is **not** key material — but it is spend-enabling in
 combination with the delegate key, so it is stored with the same care as
 `api_key_hash`-class data: encrypted at rest, never logged, never in error
 surfaces.
@@ -390,7 +409,7 @@ surfaces.
 | Compromised | Attacker gets | Bounded by |
 |---|---|---|
 | Delegation object alone | Nothing — redemption requires the delegate key's signature | — |
-| Delegate key alone | Nothing beyond existing agent-credential risk — no delegation, no authority | — |
+| Delegate key alone | Nothing beyond existing agent-credential risk while the attacker has no delegation — but the delegation is not secret on erc7710 (it rides the `payment_header`; see the #4377 note above), so this reaches the next row's bound | As the next row |
 | Both (agent fully compromised) | Spend **within the caveat stack**: ≤ each budget's period amount per period, only to pinned recipients (any recipient for an open budget, which the EIP-3009 bridge requires), until expiry or revocation | `ERC20PeriodTransferEnforcer` + `allowedCalldata` when pinned + `Timestamp`; owner kill-switch `disableDelegation` |
 | Haven fully compromised | Constructs malicious payloads but **cannot sign** grants, redemptions, or upgrades (invariants 3/5/7/11/12); worst case = denial of service | The perimeter this doc exists to prove |
 

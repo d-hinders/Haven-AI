@@ -58,6 +58,12 @@ export async function findExpiredBudgetForToken(
   if (!row) return null
   const sec = Number(row.expires_at)
   if (!Number.isFinite(sec) || sec <= 0 || sec * 1000 > MAX_MS) return null
+  // Defense in depth (#3919 posture): the narrow query filters
+  // `expires_at <= NOW()` in SQL, but this answer must never call a LIVE row
+  // ended — re-check the window against the reader's own clock before
+  // answering, so a source that ignores the WHERE cannot report a live budget
+  // as over.
+  if (sec * 1000 > Date.now()) return null
   const date = new Date(sec * 1000)
   return {
     endedAtSec: row.expires_at,

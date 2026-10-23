@@ -480,9 +480,8 @@ const PRE_TRIM_BASELINE_BYTES = 30_609
  * (#4062): 31,674 UTF-8 bytes (+324); the mean pin: 31,674 / 29 =
  * 1092.2068…, pinned at the two-decimal ceiling (1092.21). Shrink-only from
  * here.
- */
-/*
- * Round 29 (#4355): `haven_get_agent`'s description gives `needs_approval`
+ *
+ * **Re-derived — round 29, #4355 (2026-10-23).** `haven_get_agent`'s description gives `needs_approval`
  * its two causes — no allowances[] rows (nothing approved yet) vs rows spent
  * for the period, refilling at the new `budgetRefillsAt` — and lists the
  * rows' new `nextRefillAt`. Without it an agent with a spent budget is told

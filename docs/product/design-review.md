@@ -48,7 +48,7 @@ Use this checklist before finishing any Haven UI task. It is written for AI impl
   user-held or agent-held key signs, distinguishes API identity from payment
   authority, and never implies an API key or Haven backend can spend.
 - There is no retired-rail notice to review. #2413 deleted `RetiredRailNotice`
-  and the six list queries filter to `account_type = 'delegator_hybrid'`, so no
+  and the list queries filter to `account_type = 'delegator_hybrid'`, so no
   legacy account reaches a screen; this criterion is retained only so a reviewer
   who meets such a notice in a diff knows it should not be there.
 - Payment execution, agent authority, credentials, Safe setup, relaying, SDK

@@ -1166,20 +1166,25 @@ describe('x402 delegation-rail settlement (#830)', () => {
     })
   }
 
-  it('#4352 characterization: an expired-only budget answers the erc7710 no-active-budget 403 (pre-#4352 wording, nothing created)', async () => {
+  it('#4352: an expired-only budget answers the erc7710 authorize with delegation_expired and the end date — decision unchanged, nothing created', async () => {
     mockSelect.mockResolvedValue(null)
     routeExpiredRowQuery()
     const res = await app.inject({
       method: 'POST', url: '/x402/authorize',
-      headers: { authorization: 'Bearer ' + ['sk', 'agent', 'test', 'key', '0001'].join('_') },
+      headers: { authorization: 'Bearer sk_agent_test' },
       payload: authorizeBody(),
     })
     expect(res.statusCode).toBe(403)
-    expect(res.json().error).toMatch(/no active budget delegation/) // pre-#4352 words
+    expect(res.json().error).toContain('this budget ended on 20') // #4352 words
+    expect(res.json().error).toContain('ask the owner to set a new one')
+    expect(mockRecordRefusal).toHaveBeenCalledTimes(1)
+    const ask = mockRecordRefusal.mock.calls[0][0] as Record<string, unknown>
+    expect(ask).toMatchObject({ reason: 'delegation_expired', source: 'x402_authorize' })
+    expect((ask.detail as Record<string, unknown>).budget_ended_at).toMatch(/^\d{4}-\d{2}-\d{2}T/)
     expect(mockCreateIntent).not.toHaveBeenCalled()
   })
 
-  it('#4352 characterization: an expired-only budget 403s the 3009 leg with the no-delegation reason (pre-#4352), one ledger row, nothing created', async () => {
+  it('#4352: an expired-only budget 403s the 3009 leg with delegation_expired and the end date — one ledger row, nothing created', async () => {
     mockSelect.mockResolvedValue(null)
     routeExpiredRowQuery()
     mockPrepareFunding.mockResolvedValue(null)
@@ -1189,11 +1194,12 @@ describe('x402 delegation-rail settlement (#830)', () => {
       payload: authorizeBody({ payTo: DELEGATE_SIGNER.address, merchantPayTo: MERCHANT }),
     })
     expect(res.statusCode).toBe(403)
-    expect(res.json().error).toMatch(/no delegation able to fund EIP-3009 settlement/) // pre-#4352 words
+    expect(res.json().error).toContain('this budget ended on 20') // #4352 words
+    expect(res.json().error).toContain('ask the owner to set a new one')
     expect(mockRecordRefusal).toHaveBeenCalledTimes(1)
     const ask = mockRecordRefusal.mock.calls[0][0] as Record<string, unknown>
-    expect(ask).toMatchObject({ reason: 'no_delegation_for_target', source: 'x402_authorize' }) // pre-#4352 reason
-    expect(ask.detail).toEqual({ error_code: 'no_delegation_for_target' })
+    expect(ask).toMatchObject({ reason: 'delegation_expired', source: 'x402_authorize' })
+    expect((ask.detail as Record<string, unknown>).budget_ended_at).toMatch(/^\d{4}-\d{2}-\d{2}T/)
     expect(mockCreateIntent).not.toHaveBeenCalled()
   })
 

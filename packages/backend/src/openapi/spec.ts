@@ -8264,10 +8264,13 @@ export const openapiSpec = {
           '403': {
             ...errorResponse,
             description:
-              'The amount exceeds the agent\'s remaining delegation budget — decided here and ' +
-              'recorded in the payment_refusals ledger (source "hosted_prepare"). Carries ' +
-              'error_code "delegation_budget_exceeded", phase "insufficient_funds", next_action ' +
-              '"fund_account_or_raise_allowance", plus remaining/remaining_atomic, ' +
+              'The agent has no spend authority that can pay this. Since #4352 there are two shapes: ' +
+              'the amount exceeds a LIVE budget\u2019s remaining period figure — error_code ' +
+              '"delegation_budget_exceeded", recorded in the payment_refusals ledger (source ' +
+              '"hosted_prepare") — or the only budget row for the token has ENDED — error_code ' +
+              '"delegation_expired", with budget_ended_at and the end-date prose ("this budget ended ' +
+              'on <date>; ask the owner to set a new one"). Both carry phase "insufficient_funds", ' +
+              'next_action "fund_account_or_raise_allowance", plus remaining/remaining_atomic, ' +
               'amount/amount_atomic and shortfall/shortfall_atomic, and resource_url / ' +
               'merchant_address when the request carried them.',
           },
@@ -12921,6 +12924,16 @@ export const openapiSpec = {
           delegate_address: address,
           chain_id: { type: 'integer' },
           superseded_by: { $ref: '#/components/schemas/AgentSupersession' },
+          budget_ended_at: {
+            type: ['string', 'null'],
+            format: 'date-time',
+            description:
+              '#4352 (decision 5, additive): when the agent\u2019s only budgets for this chain have ENDED, ' +
+              'the latest ended budget\u2019s expiry (ISO 8601) — read by the same narrow expired-row query ' +
+              'the refusal answers use. `null` when no expired row exists; the field NEVER reports a ' +
+              'live budget. Lets an agent whose `allowances[]` is empty tell \u201cnobody approved yet\u201d from ' +
+              '\u201cthe budget ended on this date\u201d. Optional on the schema so an older backend that omits it stays valid.',
+          },
           allowances: {
             type: 'array',
             items: {

@@ -21,6 +21,7 @@ import { sumOpenReservedForBudgetDelegation } from '../../infra/repositories/sub
 import { readRemainingBudget } from '../../infra/chain/delegation-budget-reader.js'
 import { getChainClient } from '../../infra/chain/index.js'
 import { currentPeriodBounds } from '@haven_ai/core'
+import { findExpiredBudgetForToken } from '../budget-scope/expired-budget.js'
 import { toCanonicalAddress } from '../transactions/index.js'
 import type { AgentContext } from '../../middleware/agentAuth.js'
 import type { MppHandlerResult } from './types.js'
@@ -135,6 +136,18 @@ export async function handleGetAllowances(agent: AgentContext): Promise<MppHandl
         account_address: toCanonicalAddress(agent.account_address),
         delegate_address: toCanonicalAddress(agent.delegate_address),
         chain_id: agent.chain_id,
+        // #4352 (decision 5, additive): when the agent's only budgets for
+        // this chain have ENDED, the live `allowances[]` above is empty and
+        // `needs_approval` used to read "nobody approved yet". The latest
+        // ended budget's expiry rides here — the same narrow expired-row
+        // query the refusal answers use — so the SDK's `budgetEndedAt` (and
+        // every copy of the `needs_approval` guidance) can say "your budget
+        // ended on <date>; ask the owner to set a new one". null when no
+        // expired row exists: the field NEVER reports a live budget, and a
+        // live row for any token keeps this null (the readiness above is
+        // 'ready' then anyway). Optional on the schema so an older backend
+        // that omits it stays valid.
+        budget_ended_at: (await findExpiredBudgetForToken(agent.id, agent.chain_id, null))?.endedAtIso ?? null,
         allowances: await Promise.all(budgets.map(async (b) => {
           const { remainingAtomic, fromChain } = remainingById.get(b.id) ?? {
             remainingAtomic: b.budget_atomic,

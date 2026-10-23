@@ -17,6 +17,17 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ### Added
 
+- **`getAgentSummary()` names the ENDED budget, not just the spent one (#4352).**
+  The allowances read gains `budget_ended_at` (the latest ended budget's
+  expiry, ISO 8601; `null` when no budget has ended or on an older backend)
+  and the summary gains `budgetEndedAt`: set only when readiness is
+  `needs_approval` because the agent's only budget(s) have ENDED — waiting
+  will not help, the guidance says to ask the owner to set a new one. The
+  readiness values are unchanged (`ready` / `needs_approval` / `revoked`), so
+  nothing that switches over them breaks. The runbook, skill text and
+  `haven_get_agent` description now give `needs_approval` its three causes.
+  No update needed.
+
 - **`getAgentSummary()` tells a spent budget from no budget (#4355).** Each
   allowance row gains `nextRefillAt` (ISO time of the next period refill;
   `null` when the budget ends before it would refill, or on an older backend),

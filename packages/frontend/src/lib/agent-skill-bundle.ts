@@ -174,7 +174,9 @@ spending:
   still try the payment; \`null\` means the coverage read failed or the remaining
   figure was not read live; the key is absent when the remaining is 0. Rows for
   one token are compared alone. \`needs_approval\` with no \`allowances[]\`
-  rows means nobody approved a budget yet; with rows (all at remaining 0) the
+  rows and \`budgetEndedAt\` set means the budget ENDED on that date — waiting
+  will not help, ask the owner to set a new one; with no rows and no
+  \`budgetEndedAt\`, nobody approved a budget yet; with rows (all at remaining 0) the
   budget is spent for this period, and \`budgetRefillsAt\` says when it refills
   (\`null\`: it ends before it refills) — tell the user, then wait or ask them
   to raise it.

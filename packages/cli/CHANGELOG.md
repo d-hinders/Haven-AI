@@ -17,6 +17,12 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ### Changed
 
+- **`haven guide`'s runbook gives `needs_approval` its three causes (#4352).**
+  No `allowances[]` rows with `budgetEndedAt` set: the budget ENDED on that
+  date — waiting will not help, ask the owner to set a new one. No rows
+  without it: nobody approved a budget yet. Rows, all spent: the budget
+  refills at `budgetRefillsAt`. Wording only. No update needed.
+
 - **`haven guide`'s runbook gives `needs_approval` its two causes (#4355).**
   No `allowances[]` rows: nobody approved a budget yet. Rows, all spent: the
   budget refills at `budgetRefillsAt`. Wording only. No update needed.

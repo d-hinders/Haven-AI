@@ -419,14 +419,18 @@ describeDb('POST /machine-payments/budget-precheck (#3054)', () => {
   // touches any view, and stay green after (the first commits on today's
   // code; the spec's "characterization first").
 
-  it('#3802 characterization: an EXPIRED-ONLY budget is refused 403 delegation_budget_exceeded with remaining_atomic "0"', async () => {
+  it('#3802/#4352: an EXPIRED-ONLY budget is refused 403 with remaining_atomic "0" — since #4352 as delegation_expired with the end date', async () => {
     const { agentId } = await seedDelegationAgent()
     // 5.00 USDC remaining on the LEDGER — but the grant expired a minute ago.
     await seedActiveDelegation(agentId, '5000000', { expiresAt: Math.floor(Date.now() / 1000) - 60 })
 
     const res = await app.inject({ method: 'POST', url: '/machine-payments/budget-precheck', headers, payload: precheckBody() })
     expect(res.statusCode).toBe(403)
-    expect(res.json().error_code).toBe('delegation_budget_exceeded')
+    // #3802 pinned delegation_budget_exceeded here (the only refusal the
+    // compare could name); #4352 answers delegation_expired with the end
+    // date instead — the decision (403, remaining 0, one row) is unchanged.
+    expect(res.json().error_code).toBe('delegation_expired')
+    expect(res.json().error).toContain('this budget ended on 20')
     expect(res.json().remaining_atomic).toBe('0')
 
     await vi.waitFor(async () => {
@@ -434,12 +438,13 @@ describeDb('POST /machine-payments/budget-precheck (#3054)', () => {
     })
   })
 
-  it('#3802 characterization: an expired PINNED budget with no merchantTo answers 403, not 409 — an expired pin is not a live pin', async () => {
+  it('#3802/#4352: an expired PINNED budget with no merchantTo answers 403, not 409 — an expired pin is not a live pin', async () => {
     const { agentId } = await seedDelegationAgent()
     // A merchant-locked budget that EXPIRED: naming no payee must NOT read as
     // "the agent holds a funded pin" (the 409 retry_with_explicit_context
-    // answer) — the pin is dead, so the honest answer is the exhausted-budget
-    // 403, exactly as the live-pin gate (`liveRecipientPins`) decides.
+    // answer) — the pin is dead, so the honest answer is a 403, exactly as
+    // the live-pin gate (`liveRecipientPins`) decides. Since #4352 the 403
+    // names the expiry, not a period budget.
     await seedActiveDelegation(agentId, '5000000', {
       expiresAt: Math.floor(Date.now() / 1000) - 60,
       recipientAddress: '0x' + '5a'.repeat(20),
@@ -452,7 +457,8 @@ describeDb('POST /machine-payments/budget-precheck (#3054)', () => {
       payload: precheckBody({ merchantTo: undefined }),
     })
     expect(res.statusCode).toBe(403)
-    expect(res.json().error_code).toBe('delegation_budget_exceeded')
+    expect(res.json().error_code).toBe('delegation_expired')
+    expect(res.json().error).toContain('this budget ended on 20')
     expect(res.json().remaining_atomic).toBe('0')
   })
 
@@ -1242,7 +1248,7 @@ describeDb('POST /machine-payments/budget-precheck (#3054)', () => {
   // the words may differ; every assertion below that is not about the reason
   // or the prose must keep passing verbatim.
 
-  it('an expired-only budget refuses 403 with remaining 0 — the same OUTCOME as the over-budget refusal (pre-#4352: also the same reason and words)', async () => {
+  it('an expired-only budget refuses 403 with remaining 0 — the same OUTCOME as the over-budget refusal, now as delegation_expired (#4352)', async () => {
     const { agentId } = await seedDelegationAgent()
     await seedActiveDelegation(agentId, '500000', {
       expiresAt: Math.floor(Date.now() / 1000) - 3600, // ended an hour ago
@@ -1251,10 +1257,13 @@ describeDb('POST /machine-payments/budget-precheck (#3054)', () => {
     const res = await app.inject({ method: 'POST', url: '/machine-payments/budget-precheck', headers, payload: precheckBody() })
     expect(res.statusCode).toBe(403)
     const body = res.json()
-    // Pre-#4352 the expired-only case rides the generic refusal whole.
-    expect(body.error_code).toBe('delegation_budget_exceeded')
-    expect(body.error).toContain('exceeds the agent\'s remaining budget for this period')
-    // The OUTCOME fields — these survive #4352 verbatim:
+    // #4352: the expired-only case names the reason and the end date...
+    expect(body.error_code).toBe('delegation_expired')
+    expect(body.error).toContain('this budget ended on 20')
+    expect(body.error).toContain('ask the owner to set a new one')
+    expect(body.budget_ended_at).toMatch(/^\d{4}-\d{2}-\d{2}T/)
+    // ...and NOTHING else about the refusal moved (the outcome pins above the
+    // reason are verbatim from the base-SHA characterization):
     expect(body.phase).toBe('insufficient_funds')
     expect(body.next_action).toBe('fund_account_or_raise_allowance')
     expect(body.remaining_atomic).toBe('0')
@@ -1265,8 +1274,9 @@ describeDb('POST /machine-payments/budget-precheck (#3054)', () => {
     const rows = await refusalRows(agentId)
     expect(rows).toHaveLength(1)
     expect(rows[0].source).toBe('hosted_prepare')
-    expect(rows[0].reason).toBe('delegation_budget_exceeded') // pre-#4352
+    expect(rows[0].reason).toBe('delegation_expired')
     expect(rows[0].detail?.remaining_atomic).toBe('0')
+    expect(rows[0].detail?.budget_ended_at).toMatch(/^\d{4}-\d{2}-\d{2}T/)
   })
 
   it('an expired row beside a LIVE budget for the token is never treated as live — the compare answers from the live row', async () => {

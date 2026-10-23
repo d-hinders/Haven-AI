@@ -432,7 +432,7 @@ test.describe('safe-area insets — nothing under the notch or the home indicato
       const el = document.querySelector('[data-more-sheet]') as HTMLElement
       const scrim = document.querySelector('[data-more-sheet-scrim]') as HTMLElement
       const bar = document.querySelector('nav[data-mobile-tab-bar]') as HTMLElement
-      const profile = el.querySelector('a[href="/profile"]') as HTMLElement
+      const profile = el.querySelector('[data-account-row]') as HTMLElement
       const logOut = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Log out')!
       const r = el.getBoundingClientRect()
       const b = bar.getBoundingClientRect()

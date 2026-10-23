@@ -92,7 +92,6 @@ covers:
   - packages/frontend/src/lib/__tests__/installed-app.test.ts
   - scripts/ci/visual-baseline-inventory.mjs
   - scripts/lib/lint-escapes.mjs
-  - packages/frontend/src/app/(authenticated)/profile/ProfileClient.tsx
   - packages/frontend/src/components/ComingSoonModal.tsx
   - packages/frontend/src/components/DashboardOnboardingGuide.tsx
   - packages/frontend/src/components/ErrorBoundary.tsx
@@ -674,7 +673,7 @@ The authenticated app uses one stable product shell:
   - **More is a cell of the bar, and only opens** (#4053, #4058). Until #4053 it was a sibling painted over the bar on `--v2-z-nav-toggle`, because #2820's full-screen drawer covered the bar. Since #4058 its name is the constant *Open sidebar* (with `aria-expanded`) and its label always "More": the sheet covers the cell, and *Close sidebar* belongs to the sheet's ✕ alone — two buttons with that name would break the harness under Playwright's strict mode.
 - **The More sheet** (#4053, `components/sidebar/MoreSheet.tsx`) replaced #2820's full-screen drawer — the desktop rail stretched to the screen. Since #4058 it is a floating card over the floating bar.
   - **Geometry:** a card `max(8px, inset)` in from the sides and the bottom, `rounded-3xl`, capped at `max-w-lg` and centred; it covers the tab bar. Sized to its content up to a max height, scrolling inside beyond that. Its scrim dims everything from below the status-bar band (§ *Safe areas*) to the viewport **bottom**, edge to edge — no scrim edge across the pill, no undimmed strip.
-  - **Content:** a drag handle; the logo band (wordmark — not a link here — and the environment badge) beside the sheet's ✕ (44px, *Close sidebar*); the account row (name, email, links to `/profile`); one compact list of only the destinations the tab bar lacks, derived from `TAB_ROUTES` (Analytics, Accounting when shown, Marketplace, Contacts, Settings); the theme control as a three-way `SegmentedControl`; and a visible **Log out** row — no kebab.
+  - **Content:** a drag handle; the logo band (wordmark — not a link here — and the environment badge) beside the sheet's ✕ (44px, *Close sidebar*); the account row (name and email, #4358 — no longer a link, `/profile` is gone); one compact list of only the destinations the tab bar lacks, derived from `TAB_ROUTES` (Analytics, Accounting when shown, Marketplace, Contacts, Settings); the theme control as a three-way `SegmentedControl`; and a visible **Log out** row — no kebab.
   - **Behaviour:** a modal `role="dialog"` (`aria-modal`, #4058): while it is open the tab bar and `<main>` are `inert` and Tab cycles inside the card. Closes on the ✕, scrim tap, Escape, a downward swipe on the handle (`SWIPE_DISMISS_PX`), a destination tap and any route change; focus moves in on open and back to More on a dismissal — not on a destination tap or route change, which is why `useFocusTrap` (restore on every close) is not reused. It exists in the DOM only while open, and `data-state="open"` marks the end of its enter animation (`.v2-sheet-enter`, motion-gated) — the e2e helpers key on both.
 - Sidebar nav: 36px row height, 16px icon box, 13px medium label. (The Approvals item and its live actionable-count badge were the nav's only dynamic entry; both are deleted with the Safe rail, [#1989](https://github.com/d-hinders/Haven-AI/issues/1989) — every nav item is static now.)
 - Brand: the wordmark may use `.v2-brand-gradient-text`; do not repeat the gradient elsewhere in nav.
@@ -871,6 +870,15 @@ The card variant is the bordered tile the analytics page mounts (§ Cards
 chrome: `rounded-[10px]`, border, `--v2-bg` ground, `shadow-card`). The
 inline variant (#3805) is below.
 
+**The `hint` prop (#4333).** An optional ReactNode rendered beside the label,
+sized to the label's line. The caller composes it — usually a `Tooltip` on an
+ⓘ `Info` mark, as the Analytics page's Refused tile does with its two
+recording caveats (the ledger's floor date, the unrecorded price-cap class).
+It is for ELABORATION on something already visible (the count behind the
+hint), never essential copy: § Tooltips' rules bind the call site. Ops tiles
+pass nothing and are unchanged; the hint carries no colour of its own, so a
+tile with a hint still renders its figure in ink in every state.
+
 ### Amount: currency mode (#3805)
 
 `Amount` has two modes. The token mode is the original contract: a
@@ -1004,6 +1012,12 @@ things that need your eye, while a `NoticeRow` is a single line that stays
 until its cause is gone.
 
 ### AreaChart sparkline (#3805)
+
+The full chart's endpoint delta reads "**Net change**" with a SIGNED amount —
+"Net change -120.00" — not "gained"/"spent" (#4333): a fall in the balance is
+not a spend and a rise is not a gain, the balance being per-user and moving
+for reasons the spend chart does not draw. Zero is still "unchanged",
+unsigned.
 
 `variant="sparkline"` inside `ui/AreaChart.tsx` (no new file, so the chart
 home's design-lint `raw-svg` exemption already covers it): the balance line
@@ -1505,7 +1519,8 @@ only if they are the same shape.
 **Since [#3825](https://github.com/d-hinders/Haven-AI/issues/3825) no global chrome
 carries a wallet pill** — and the top bar that used to host it is gone entirely
 (#4029). Most users sign with a passkey, and a signer with a raw address on every
-screen is the wrong level of detail; signers have their own home in Settings → Signers,
+screen is the wrong level of detail; signers have their own home in Settings →
+Passkeys and wallets (the Security tab, #4358),
 and every signing flow offers its own in-flow connect (#3812). `WalletButton` still
 renders in the connect flow's approval step, so the collapse rules above still describe
 it; the over-subscribed-bar argument is history.
@@ -2434,6 +2449,14 @@ where the lists get the same key from `useListUrlState`.
 choices (theme, appearance) and is **not used for list or period filtering**
 — the one period control is `PeriodPicker`, the one filter controls are the
 facets (#4116).
+
+**FacetMenu beside PeriodPicker in a PageHeader (#4333).** The Analytics
+header is the documented list-controls PLACEMENT outside a `ListToolbar`: a
+`PageHeader`'s actions row carries the Agent `FacetMenu` before the
+`PeriodPicker`, exactly as a toolbar would — single-select, "All agents"
+first, the trigger tinting while a filter is set. A page that has no list
+summary line may mount the two chips directly; the toolbar is for pages that
+have one.
 
 #### Behaviour
 

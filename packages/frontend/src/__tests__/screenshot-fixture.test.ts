@@ -852,7 +852,7 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
       const rowOf = () =>
         (settings.api('/accounting/connections', 'GET') as { connections: Record<string, unknown>[] }).connections[0]
 
-      it('serves every one of the five connection states, each under its own stage, plus the first-connect return, the #3017 paste-modal stage, and the two OFF states', () => {
+      it('serves every one of the five connection states, each under its own stage, plus the first-connect return, the #3017 paste-modal stage, and the self-hosted OFF state', () => {
         const seen: Record<string, unknown> = {}
         for (const stage of Object.keys(settings.stages)) {
           settings.stage(stage)
@@ -867,16 +867,15 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
           'first-connect': 'connected',
           // #3017: the Accounted row waits for a pasted key — no connection row.
           'api-key-modal': null,
-          // #2869: no row at all — the feed-status answer makes these states.
-          'coming-soon': null,
+          // #2869 → #4359: no row at all — the feed-status answer makes the
+          // state. The hosted flag-off "coming-soon" stage is RETIRED: the
+          // card renders nothing there, so there is nothing to photograph.
           'self-hosted': null,
         })
       })
 
-      it('the two OFF stages switch the FEED STATUS answer, and only they do (#2869)', () => {
+      it('the self-hosted OFF stage switches the FEED STATUS answer, and only it does (#2869)', () => {
         const statusOf = () => settings.api('/accounting/feed/status', 'GET') as { hosted: boolean; enabled: boolean } | undefined
-        settings.stage('coming-soon')
-        expect(statusOf()).toMatchObject({ hosted: true, enabled: false, available: false })
         settings.stage('self-hosted')
         expect(statusOf()).toMatchObject({ hosted: false, enabled: false, available: false })
         for (const stage of ['connected', 'needs-reauthorisation', 'scope-missing', 'revoked', 'disconnected', 'first-connect']) {
@@ -907,11 +906,15 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
         expect((rowOf() as { settings: unknown }).settings).toEqual({ suggestedAccount: '6540', autoFeed: true })
       })
 
-      it('answers only the connections route (and, in the OFF stages, the feed status) in every stage', () => {
+      it('answers only the connections route (plus the feed status in the OFF stage and the company-details null #4359 needs) in every stage', () => {
         for (const stage of Object.keys(settings.stages)) {
           settings.stage(stage)
           expect(settings.api('/accounting/providers', 'GET'), stage).toBeUndefined()
           expect(settings.api('/auth/me', 'GET'), stage).toBeUndefined()
+          // #4359: 200 `null` in every stage — the flag-on "nothing saved"
+          // answer that keeps the Business tab visible while the accounting
+          // card owns the pixels.
+          expect(settings.api('/user/company-details', 'GET'), stage).toBeNull()
         }
       })
 
@@ -1143,15 +1146,22 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
         expect(refusalSum).toBe(overview.totals.refused_count)
       })
 
-      it('merchant rows demonstrate all three label resolutions the API defines (#2949)', () => {
-        // contact name → receipt name → address, in that order (issue #2946);
-        // one capture must show every label source the product can produce.
-        const overview = fx('/analytics/overview') as { merchants: { label: string; address: string; spent: string }[] }
+      it('merchant rows demonstrate every label resolution the API defines (#2949, #4332)', () => {
+        // The five-step naming order (#4332): x402 resource host → own
+        // account → contact → receipt → null. One capture must show the
+        // named sources AND the null terminal state (the client renders
+        // "Unknown recipient" there; until #4333 the shim shows the address).
+        const overview = fx('/analytics/overview') as { merchants: { label: string | null; kind: string; address: string; spent: string }[] }
         const labels = overview.merchants.map((m) => m.label)
-        expect(labels).toContain('Klara Data AB') // contact name
-        expect(labels).toContain('NordShield VPN') // receipt merchant name
-        const addressOnly = overview.merchants.find((m) => m.label === m.address)
-        expect(addressOnly).toBeDefined()
+        expect(labels).toContain('Klara Data AB') // receipt merchant name
+        expect(labels).toContain('NordShield VPN') // contact name
+        const unresolved = overview.merchants.find((m) => m.label === null)
+        expect(unresolved).toBeDefined()
+        expect(unresolved?.kind).toBe('unknown')
+        // Every named row carries the kind that produced its label.
+        for (const m of overview.merchants) {
+          if (m.label !== null) expect(m.kind).not.toBe('unknown')
+        }
         // Top of the table is by spent, descending. `spent` is a numeric
         // string on the wire (B #2946), so the fold goes through Number().
         const spent = overview.merchants.map((m) => Number(m.spent))

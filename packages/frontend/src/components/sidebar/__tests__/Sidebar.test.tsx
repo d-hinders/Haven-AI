@@ -134,18 +134,20 @@ describe('Sidebar', () => {
   })
 
   /**
-   * The rail's bottom section (#3024): Settings and the profile link come after
-   * the labeled `<nav>`, in that order. The phone sheet's contents are pinned
-   * in the `More sheet` block below, against the sheet itself.
+   * The rail's bottom section (#3024, retargeted #4358): the Settings NavLink
+   * and the identity card come after the labeled `<nav>` — the card now
+   * links to /settings too (with "Open settings for <name>"), in that
+   * order. The phone sheet's contents are pinned in the `More sheet` block
+   * below, against the sheet itself.
    */
-  it('the rail keeps Settings and Profile after the labeled sections', () => {
+  it('the rail keeps Settings and the identity card after the labeled sections', () => {
     render(<LocaleProvider><ThemeProvider><Sidebar /></ThemeProvider></LocaleProvider>)
     const rail = document.querySelector('aside')!
     const settingsLink = rail.querySelector('a[href="/settings"]')!
-    const profileLink = rail.querySelector('a[aria-label^="Open profile for"]')!
+    const identityLink = rail.querySelector('a[aria-label^="Open settings for"]')!
     const lastRemaining = rail.querySelector('nav[aria-label="All sections"] a[href="/contacts"]')!
     expect(lastRemaining.compareDocumentPosition(settingsLink) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(settingsLink.compareDocumentPosition(profileLink) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(settingsLink.compareDocumentPosition(identityLink) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
   // #1989 (epic #1440): the Approvals entry and its live badge are DELETED, for
@@ -383,14 +385,14 @@ describe('Sidebar', () => {
     }
   })
 
-  it('opens profile from the bottom-left identity area', () => {
+  it('opens settings from the bottom-left identity area', () => {
     render(<LocaleProvider><ThemeProvider><Sidebar /></ThemeProvider></LocaleProvider>)
 
-    const profileLink = screen.getByRole('link', { name: 'Open profile for Ada Lovelace' })
-    expect(profileLink).toHaveAttribute('href', '/profile')
+    const settingsLink = screen.getByRole('link', { name: 'Open settings for Ada Lovelace' })
+    expect(settingsLink).toHaveAttribute('href', '/settings')
   })
 
-  it('shows Profile, Settings, and sign out in the account menu', async () => {
+  it('shows Settings and sign out in the account menu — no Profile item', async () => {
     const user = userEvent.setup()
     const logout = vi.fn()
     mockUseAuth.mockReturnValue({
@@ -405,7 +407,7 @@ describe('Sidebar', () => {
 
     await user.click(screen.getByRole('button', { name: 'User menu' }))
 
-    expect(screen.getByRole('menuitem', { name: 'Profile' })).toHaveAttribute('href', '/profile')
+    expect(screen.queryByRole('menuitem', { name: 'Profile' })).toBeNull()
     expect(screen.getByRole('menuitem', { name: 'Settings' })).toHaveAttribute('href', '/settings')
     await user.click(screen.getByRole('menuitem', { name: 'Log out' }))
 
@@ -656,19 +658,23 @@ describe('More sheet across the desktop breakpoint (#2586, #4053)', () => {
     mountAt(390)
     openSheet()
     const s = sheet()!
-    const profile = s.querySelector('a[aria-label="Open profile for Ada Lovelace"]')!
-    expect(profile.getAttribute('href')).toBe('/profile')
-    expect(profile.textContent).toContain('ada@example.com')
-    // #4056: a decorative trailing chevron marks the row as tappable.
-    const chevron = profile.querySelector('[data-account-chevron]')!
-    expect(chevron.getAttribute('aria-hidden')).toBe('true')
+    // #4358: the account row is no longer a link — /profile is gone and
+    // Settings is already in the sheet's list once (the assertion above).
+    // The identity the row announces stays: name + email, before the nav.
+    expect(s.querySelector('a[aria-label="Open profile for Ada Lovelace"]')).toBeNull()
+    const accountRow = Array.from(s.querySelectorAll('div')).find(
+      (d) => d.textContent?.includes('Ada Lovelace') && d.textContent?.includes('ada@example.com'),
+    )!
+    expect(accountRow.textContent).toContain('ada@example.com')
+    // No tappable cue: the row is not a link any more.
+    expect(s.querySelector('[data-account-chevron]')).toBeNull()
     // #4056: the sheet's wordmark sits on the rows' left edge (px-6), the
     // rail keeps its own px-5.
     expect(s.querySelector('[data-logo-band]')!.className.split(/\s+/)).toContain('px-6')
     expect(document.querySelector('aside [data-logo-band]')!.className.split(/\s+/)).toContain('px-5')
     // Account comes before the destinations.
     const firstDestination = s.querySelector('nav a')!
-    expect(profile.compareDocumentPosition(firstDestination) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(accountRow.compareDocumentPosition(firstDestination) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(s.querySelector('button[aria-label="User menu"]')).toBeNull()
     const logOut = Array.from(s.querySelectorAll('button')).find((b) => b.textContent === 'Log out')!
     expect(logOut).toBeTruthy()

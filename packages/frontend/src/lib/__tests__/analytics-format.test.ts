@@ -9,8 +9,9 @@ import {
   formatBudgetTokenValue,
   formatSharePercent,
   lastPaymentCaption,
-  percentChange,
-  rangeCaption,
+  paymentsAgentsCaption,
+  spentComparisonCaption,
+  unknownRecipientShortAddress,
   refusalsCaption,
   formatAnalyticsTick,
   formatAnalyticsValue,
@@ -189,11 +190,35 @@ describe('budgetBandsCaption', () => {
   })
 })
 
-describe('rangeCaption', () => {
-  it('names the window the figures cover, for every option the control offers', () => {
-    expect(rangeCaption(7)).toBe('Last 7 days')
-    expect(rangeCaption(30)).toBe('Last 30 days')
-    expect(rangeCaption(90)).toBe('Last 90 days')
+describe('spentComparisonCaption — the absolute comparison (#4333)', () => {
+  it('puts the previous window beside this one as an amount, never a ratio', () => {
+    // The harness pair the old delta pill used to ratio: 324.75 now on
+    // 280.10 then. The comparison is the AMOUNT ("vs $280.10 the 30 days
+    // before"), because a percentage is a derivation the endpoint did not
+    // make — the response reports both windows and the tile puts them side
+    // by side.
+    expect(spentComparisonCaption('280.10', 30, 'USD')).toBe('vs $280.10 the 30 days before')
+  })
+
+  it('names the window from the response, and the currency from the preference', () => {
+    expect(spentComparisonCaption('87.25', 7, 'USD')).toBe('vs $87.25 the 7 days before')
+    expect(spentComparisonCaption('87.25', 90, 'EUR')).toMatch(/^vs .*87,25.* the 90 days before$/)
+  })
+})
+
+describe('paymentsAgentsCaption — the Payments tile (#4333)', () => {
+  it('counts the agents the window came from, out of the agents listed', () => {
+    expect(paymentsAgentsCaption(2, 3)).toBe('by 2 of 3 agents')
+    expect(paymentsAgentsCaption(1, 1)).toBe('by 1 of 1 agents')
+    expect(paymentsAgentsCaption(0, 2)).toBe('by 0 of 2 agents')
+  })
+})
+
+describe('unknownRecipientShortAddress — the kind line, never a label (#4333)', () => {
+  it('truncates through the one app rule (#853)', () => {
+    expect(unknownRecipientShortAddress('0x71C2E8a4D5f6093b1a7C8e2F4B6D0A9C3E5F7128')).toBe(
+      '0x71C2…7128',
+    )
   })
 })
 
@@ -220,38 +245,6 @@ describe('lastPaymentCaption', () => {
     // rot as "now" moves, and a rotting pin that fails in a month is worse
     // than no pin. The absolute instant rides on the element's title instead.
     expect(lastPaymentCaption('2020-01-01T00:00:00.000Z')).toMatch(/^[0-9]+(m|h|d|mo|y) ago$/)
-  })
-})
-
-describe('percentChange', () => {
-  it('expresses the change against the previous window as a percentage of it', () => {
-    // The harness pair behind the Spent tile's chip: 324.75 on 280.10.
-    expect(percentChange('324.75', '280.10')).toBeCloseTo(15.94, 2)
-    expect(percentChange(2, 1)).toBe(100)
-    expect(percentChange(1, 2)).toBe(-50)
-    expect(percentChange(2, 2)).toBe(0)
-  })
-
-  it('accepts both wire types, numeric strings for money and numbers for counts', () => {
-    // The two fields the page calls it with are `totals.spent` (a string) and
-    // `totals.refused_count` (a number). A helper that refused the string would
-    // push a Number() coercion into the render, which the rule at the top of
-    // the file forbids.
-    expect(percentChange('10.00', '20.00')).toBe(-50)
-    expect(percentChange(3, '2')).toBe(50)
-  })
-
-  it('reports no change figure at all when there is nothing to compare against', () => {
-    // The states the tile must NOT render a chip for. "Up from zero" is not a
-    // percentage of zero, and the first window an account has data in has no
-    // previous window; a made-up 0% would be a figure the endpoint never
-    // reported, and a reader cannot tell it from a real "flat".
-    expect(percentChange('324.75', '0')).toBeNull()
-    expect(percentChange('324.75', '0.00')).toBeNull()
-    expect(percentChange(2, 0)).toBeNull()
-    expect(percentChange(2, -1)).toBeNull()
-    expect(percentChange('324.75', 'not-a-number')).toBeNull()
-    expect(percentChange('not-a-number', '280.10')).toBeNull()
   })
 })
 

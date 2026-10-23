@@ -161,12 +161,45 @@ export const en = {
   },
   settings: {
     title: 'Settings',
-    subtitle: 'Manage preferences, account access, notifications, and data controls.',
-    viewProfile: 'View profile',
+    // Does not promise business details: the Business tab's visibility rule
+    // is #4359's, and until that lands the tab simply always shows.
+    subtitle: 'Your profile, preferences and security.',
+
+    /** The `?tab=` values and their labels (General is the default). */
+    tab: {
+      general: 'General',
+      security: 'Security',
+      business: 'Business',
+      ariaLabel: 'Settings sections',
+    },
+
+    /**
+     * General → Profile (#4358): the name editor, the read-only email and
+     * Member since — the rows `/profile` carried, moved into Settings.
+     */
+    profile: {
+      title: 'Profile',
+      description: 'The personal details shown on your Haven account.',
+      nameLabel: 'Name',
+      edit: 'Edit',
+      cancel: 'Cancel',
+      save: 'Save',
+      saving: 'Saving...',
+      saved: 'Name updated.',
+      helperText: 'Use the name you want shown in Haven.',
+      errorEmpty: 'Enter a name for your Haven account.',
+      errorControlChar: 'Remove unsupported characters before saving.',
+      errorTooLong: 'Use 80 characters or fewer.',
+      errorGeneric: 'We could not save your name. Please try again.',
+      email: 'Email',
+      emailDetail: 'Used to sign in and for account recovery support',
+      memberSince: 'Member since',
+      notAvailable: 'Not available',
+    },
 
     preferences: {
       title: 'Preferences',
-      description: 'Choose how Haven displays values and future alerts.',
+      description: 'Choose how Haven displays values.',
     },
     currency: {
       label: 'Preferred currency',
@@ -174,7 +207,7 @@ export const en = {
     },
     theme: {
       label: 'Theme',
-      detail: 'System follows your device',
+      detail: 'System follows your device. The toggle in the sidebar changes the same setting.',
       light: 'Light',
       dark: 'Dark',
       system: 'System',
@@ -193,23 +226,15 @@ export const en = {
       label: 'Theme',
       ariaLabel: (current: string, next: string) => `Theme: ${current}. Switch to ${next}`,
     },
-    agentSpendAlerts: {
-      label: 'Agent spend alerts',
-      detail: 'Receive updates when agents use their budget.',
-    },
-
-    access: {
-      title: 'Access',
-      description: 'How you sign in to Haven.',
-    },
     /**
-     * Settings → Signers (#3825). A signer is its own object, not part of an
+     * Settings → Security → "Passkeys and wallets" (#4358, renamed from
+     * plain "Signers"). A signer is its own object, not part of an
      * account (owner decision 2026-10-09): one passkey can approve accounts
      * on several networks. No address by default; "passkey", never a
      * platform brand (#1679).
      */
     signers: {
-      title: 'Signers',
+      title: 'Passkeys and wallets',
       description:
         'The passkeys and wallets that can approve actions on your accounts. One passkey or wallet can approve several accounts.',
       walletLabel: 'Browser wallet',
@@ -227,19 +252,18 @@ export const en = {
       connect: 'Connect wallet',
       disconnect: 'Disconnect',
     },
-    password: {
-      label: 'Password',
-      detail: 'Password changes are not available yet.',
-    },
-
+    /**
+     * Security → "If something goes wrong" (#4358): the exit path and what
+     * Haven cannot recover. The backup line is part of the recovery note —
+     * the one place outside the "Passkeys and wallets" section name where
+     * "signer" would otherwise be tempting (`copy-guidelines.md`).
+     */
     recovery: {
-      title: 'Recovery and safety',
+      title: 'If something goes wrong',
       description: 'Know what Haven can and cannot recover.',
-      limitationsLabel: 'Recovery limitations',
+      limitationsLabel: "What Haven can't recover",
       limitationsDetail:
-        'Haven can help you find account details, but it cannot bypass your wallets or passkeys or recover funds sent on the wrong network.',
-      sessionsLabel: 'Active sessions',
-      sessionsDetail: 'Review signed-in devices and revoke sessions.',
+        'Haven can help you find account details, but it cannot bypass your wallets or passkeys or recover funds sent on the wrong network. Keep a backup passkey or wallet on each funded account.',
       exitPathLabel: 'Your exit path',
       exitPathDetail: 'Inspect and revoke your agent budgets directly on-chain — without Haven. Opens the independent exit page.',
     },
@@ -263,6 +287,9 @@ export const en = {
       disclaimer:
         'Haven provides data tooling, not accounting or tax advice. Payments are fed as drafts — you and your accountant remain responsible for coding, correctness, and filing.',
       loadError: 'We could not load accounting connections. Try again in a moment.',
+      // #4359: the card's footer link — the feed page keeps the sync rows;
+      // the link is only rendered when at least one connector shows.
+      seeSyncedPayments: 'See synced payments on Accounting',
       /**
        * One line per coming-soon provider — listed, never endorsed. The chip
        * and the disabled action already say it is not connectable, so the
@@ -438,13 +465,16 @@ export const en = {
       },
     },
 
+    /**
+     * General → "Your data" (#4358): one row. The CSV itself lives on
+     * `/transactions` (its Export CSV) — this row only links there.
+     */
     data: {
-      title: 'Data and privacy',
-      description: 'Controls for activity history and product preferences.',
+      title: 'Your data',
+      description: 'Where your records live and how to take them with you.',
       exportLabel: 'Export transactions',
-      exportDetail: 'Download a CSV of account and agent activity.',
-      privacyLabel: 'Privacy controls',
-      privacyDetail: 'Manage analytics and product improvement preferences.',
+      exportDetail: 'Download a CSV of account and agent activity from the transactions page.',
+      openTransactions: 'Open Transactions',
     },
 
     /**
@@ -478,12 +508,18 @@ export const en = {
       loadError: 'We could not load your company details. Try again in a moment.',
       retry: 'Try again',
 
+      // #4359: the "Not added yet" state — one line, then the reveal.
+      empty: {
+        line: 'No company details',
+        add: 'Add company details',
+      },
+
       fields: {
         legalName: 'Legal name',
         legalNamePlaceholder: 'e.g. Ada Lovelace AB',
         country: 'Country',
-        countryPlaceholder: 'e.g. SE',
-        countryHelp: 'Two-letter country code (ISO 3166-1), e.g. "SE" for Sweden.',
+        // #4359: the picker starts on a placeholder, not an example.
+        countryPlaceholder: 'Choose a country',
         orgNumber: 'Organisation number',
         orgNumberPlaceholder: 'e.g. 556677-8899',
         orgNumberHelp: 'For a sole trader, this is your personal identity number.',
@@ -538,34 +574,30 @@ export const en = {
 
       /**
        * VIES states (product doc § "The VIES states, and why an outage is
-       * never invalid"). `not_verifiable` covers every failure to check —
-       * including a VAT prefix that is not a VIES member country — never
-       * read as "the number is wrong". The wire `CompanyDetails` shape
-       * carries no machine-readable reason for `not_verifiable` (the
-       * backend's `reason` is log-only, see `modules/owner-profile/service.ts`),
-       * so this stays one neutral line rather than a reason this screen
-       * cannot actually tell apart.
+       * never invalid"), rendered as a StatusBadge per state with the tone
+       * table from #4359's spec review: valid = success, invalid =
+       * warning, everything else neutral. `not_verifiable` covers every
+       * failure to check — including a VAT prefix that is not a VIES
+       * member country — and is NEUTRAL, never danger or warning: "VIES
+       * couldn't check this" must never read as "the number is wrong".
+       * The wire `CompanyDetails` shape carries no machine-readable reason
+       * for `not_verifiable` (the backend's `reason` is log-only, see
+       * `modules/owner-profile/service.ts`), so this stays one neutral
+       * badge rather than a reason this screen cannot actually tell
+       * apart. Only `valid` says "Checked against VIES" — never
+       * "verified", that word is reserved for a passport tier that does
+       * not exist yet (`docs/product/agent-passport.md:71`).
        */
       vies: {
-        pending: 'Checking the VAT number with VIES…',
+        pending: 'Checking with VIES…',
         // #3332 review round 2, design 4: once the poll's bound has elapsed,
         // "Checking…" next to a "Check again" button read as still in
-        // progress — this names the actual state (VIES has not answered in
-        // the time this screen waits) instead.
-        pendingTimedOut: 'VIES has not answered yet.',
-        valid: (date: string) => `VAT number checked against VIES on ${date}`,
-        // #3332 review round 2, n1: the backend always writes a `checked_at`
-        // timestamp alongside any result (`setViesResult` in
-        // `infra/repositories/owner-company-details.ts` is always called with
-        // `new Date().toISOString()`), so a `valid` row with no
-        // `vies_checked_at` should not occur in practice. This stays only as
-        // a defensive fallback for a row shape this screen cannot otherwise
-        // rule out, and never claims a specific date it does not have.
-        validNoDate: 'VAT number checked against VIES.',
-        // Design review 8: names the next step rather than leaving the owner
-        // to guess one.
-        invalid: 'VIES says this VAT number is not valid. Check the number and save it again.',
-        notVerifiable: 'VIES could not check this number right now.',
+        // progress — this names the actual state (the check is still
+        // pending) instead.
+        pendingTimedOut: 'VIES check pending',
+        valid: 'Checked against VIES',
+        invalid: 'Not found in VIES',
+        notVerifiable: "VIES couldn't check this",
         checkAgain: 'Check again',
         checking: 'Checking…',
         checkError: 'We could not check the VAT number with VIES. Try again in a moment.',

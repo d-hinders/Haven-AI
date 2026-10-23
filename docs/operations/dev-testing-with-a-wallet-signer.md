@@ -42,8 +42,9 @@ which is production.)
 
 1. **Sign in** with email + password — same account, same data, every preview
    points at the same dev backend.
-2. **Connect your wallet before anything else:** Settings → Signers → Connect
-   wallet (the top bar has no wallet button since #3825), or the in-flow
+2. **Connect your wallet before anything else:** Settings → Security →
+   Passkeys and wallets → Connect wallet (#4358; the top bar has no wallet
+   button since #3825), or the in-flow
    Connect wallet a signing screen offers.
 3. Set budgets, revoke, manage signers, run agents. Each action pops a MetaMask
    signature instead of a passkey prompt.
@@ -67,7 +68,8 @@ on the passkey path). Connect the enrolled wallet and retry.
 
 ## Testing passkeys on a preview
 
-You don't need a new account. Sign in, connect your wallet (Settings → Signers),
+You don't need a new account. Sign in, connect your wallet (Settings → Security
+→ Passkeys and wallets),
 then **Backup &
 recovery → add a backup passkey** — the wallet signs the change and the new
 passkey is created on that domain. Only onboarding itself still needs a

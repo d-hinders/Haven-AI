@@ -69,7 +69,7 @@
  * removed Details from the footer and added the link-focused card capture, so
  * the total remains nine.
  *
- *   Sidebar kebab popover   Profile · Settings · Log out          3/3  captured
+ *   Sidebar kebab popover   Settings · Log out                     2/2  captured
  *   AgentCard action row    Edit · Pause · Revoke                 3/8  captured  (as #1863 measured it)
  *
  * `AgentCard` NEVER renders all six card controls at once — `isOperational`,
@@ -577,9 +577,9 @@ async function openUserMenuByKeyboard(page: Page) {
   await expect(popover).toHaveCount(1)
   await expect(popover).toBeVisible()
 
-  const profile = popover.getByRole('menuitem', { name: 'Profile' })
+  const firstItem = popover.getByRole('menuitem', { name: 'Settings' })
   await expect(
-    profile,
+    firstItem,
     'Sidebar auto-focuses its first menu item on open (#1831) — that stopped being true',
   ).toBeFocused()
   return popover
@@ -833,14 +833,15 @@ test.describe('driven focus-state visual regression', () => {
     await seedAuthenticatedSession(page)
   })
 
-  // ── Sidebar kebab user menu — three current indicators ────────────────────
+  // ── Sidebar kebab user menu — two current indicators ──────────────────────
   //
   // Captured on `/design-system` rather than on `/agents`, so the sidebar's
   // pixel evidence stays on one route — the same route #1820's resting-state
   // sidebar capture uses. The popover contains no nav item, so the route's
   // active-nav highlight cannot leak into these baselines either way.
+  // #4358: the Profile item is gone with /profile — Settings and Log out
+  // remain, and the popover's baselines move with the shorter menu.
   const menuItems = [
-    { slug: 'profile', name: 'Profile', tone: 'brand' },
     { slug: 'settings', name: 'Settings', tone: 'brand' },
     { slug: 'logout', name: 'Log out', tone: 'danger' },
   ] as const
@@ -852,9 +853,10 @@ test.describe('driven focus-state visual regression', () => {
 
       const target = popover.getByRole('menuitem', { name: item.name })
       await expect(target).toHaveCount(1)
-      // Profile already holds focus from the open; the other two are tabbed to
-      // from wherever the previous step left off, which is the real traversal.
-      if (item.slug !== 'profile') {
+      // Settings already holds focus from the open (it is the popover's
+      // first — now only non-danger — item); Log out is tabbed to from
+      // wherever the previous step left off, which is the real traversal.
+      if (item.slug !== 'settings') {
         await tabToTarget(page, target, `Sidebar user menu · ${item.name}`)
       }
       await expectFocusedAndIndicated(page, target, `Sidebar user menu · ${item.name}`)

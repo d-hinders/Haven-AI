@@ -1162,3 +1162,11 @@ compatibility contract — the manifest table, version skew, `--doctor`'s checks
 > field this document names; nothing about channel selection, dist-tag
 > resolution, the snapshot path or publish behaviour moves. Scope of this
 > note: confirming that. Nothing else in this document was re-verified.
+
+> **Re-verified unchanged (#4371, 2026-10-23 — `publish.yml`'s invariant
+> comment).** The comment over the dev-tag invariant in
+> `.github/workflows/publish.yml` now says five enforcement places, matching the
+> five it lists and the "**Five** independent guards" this document already
+> states. Comment only: no step, guard, channel resolution or dist-tag behaviour
+> changes. Scope of this note: that comment. Nothing else in this document was
+> re-verified.

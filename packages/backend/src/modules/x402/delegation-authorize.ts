@@ -29,9 +29,13 @@ import { x402Description } from '../../domain/x402-description.js'
 import { formatTokenValue } from '../../domain/tokens.js'
 import { type ResolvePaymentTokenResult } from '../../domain/payment-token.js'
 import { agentHourlyX402CapExceeded, normaliseAddress, ZERO_ADDRESS } from './helpers.js'
-import { classifyRevertForLedger, isTransferCapRevert } from '../payments/refusal-ledger.js'
-import { refuse } from '../payments/refuse.js'
-import { boundedErrorDetails, prepareFailureBody } from '../payments/prepare-failure.js'
+import {
+  boundedErrorDetails,
+  classifyRevertForLedger,
+  isTransferCapRevert,
+  prepareFailureBody,
+  refuse,
+} from '../payments/index.js'
 import { redactVendorSecrets } from '../../domain/redact-vendor-secrets.js'
 import { deriveFundingShape, validateDelegationSchemeShape } from './scheme-selection.js'
 import { delegationReplay } from './replay.js'

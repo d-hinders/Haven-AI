@@ -13,6 +13,8 @@ covers:
   - packages/sdk/src/payment-mappers.ts
   - packages/frontend/src/hooks/useCompanyDetails.ts
   - packages/frontend/src/components/settings/CompanyDetailsCard.tsx
+  - packages/frontend/src/lib/countries.ts
+  - packages/frontend/src/components/ui/Select.tsx
 last-verified: "2026-09-28"
 ---
 
@@ -89,11 +91,11 @@ concurrent `GET`s never both start a check for the same row.
 
 **Naming discipline:** wherever this reaches a person — the API's own
 responses, and the Settings → Company details screen
-(`CompanyDetailsCard`) — the copy must say "VAT number checked against VIES
-on `<date>`", never "verified". `docs/product/agent-passport.md` reserves
-that word for a passport tier that does not exist yet, and the reasoning is
-identical here: `vies_status: valid` is a checked fact, not an identity
-claim.
+(`CompanyDetailsCard`) — the copy must say "checked against VIES" (the
+valid badge; with the date beside it), never "verified".
+`docs/product/agent-passport.md` reserves that word for a passport tier
+that does not exist yet, and the reasoning is identical here:
+`vies_status: valid` is a checked fact, not an identity claim.
 
 ## The API
 
@@ -186,28 +188,49 @@ same reason.
 ## The settings screen
 
 Settings → Company details (`CompanyDetailsCard`, `useCompanyDetails`) is the
-#3332 frontend slice on top of the API above. Two things worth naming about
-how it is built:
+#3332 frontend slice on top of the API above. Things worth naming about how
+it is built:
 
 - **Gating without a second flag.** The screen has no frontend-side feature
   flag of its own; it reads the STATUS of `GET /user/company-details`, never
   its body. `404` means only one thing — the feature is off
   (`requireFeatureEnabled` in `routes/owner-company-details.ts`) — and the
   screen renders nothing. `200` with a `null` body means the flag is on and
-  the owner has never saved a row, and the screen renders an empty form ready
-  to fill in. `200` with a row renders the filled form. A first-time owner on
-  a flagged-on deployment therefore always sees an empty form, never nothing.
+  the owner has never saved a row: the screen shows **"No company details"**
+  with **Add company details**, which reveals the blank form (#4359).
+  `200` with a row renders the filled form. The purpose and retention text
+  is visible in every state — see the next bullet.
 - **The purpose and retention text is shown above the form, always** — not
   behind a tooltip or a second screen — because *Purpose, retention and GDPR
-  basis* below is what the owner is agreeing to by filling it in.
+  basis* below is what the owner is agreeing to by filling it in. It sits
+  above the Add button in the empty state too (#4359).
+- **Country is a picker, not a text field (#4359).** A native `Select` of the
+  officially ASSIGNED ISO 3166-1 alpha-2 codes, labelled in the user's
+  locale (`lib/countries.ts`), starting on "Choose a country". It saves the
+  same wire value — the alpha-2 code — so nothing on the API changes. A row
+  saved with a code OUTSIDE the assigned list ("UK", "EL", "XI", "XK": the
+  backend's `^[A-Z]{2}$` accepts any well-formed pair) still displays: the
+  picker appends it as its own option labelled with the code, and saving
+  without touching Country round-trips it exactly as stored — the buyer
+  country on receipts never changes silently.
+- **The VIES status renders as a badge** (`StatusBadge`), one per state with
+  the tones from #4359: `valid` → "Checked against VIES" (success, beside
+  the checked date), `invalid` → "Not found in VIES" (warning), `pending` →
+  "Checking with VIES…" (neutral), a timed-out `pending` → "VIES check
+  pending" (neutral, with Check again), `not_verifiable` → "VIES couldn't
+  check this" (NEUTRAL — never danger, never warning; see *The VIES
+  states*). No VAT number or an edited-away one: no badge at all.
+- **"Remove company details" lives in the footer row** — a `ghost` button to
+  the LEFT of Save (#4359); a past design review rejected `tertiary` here
+  because it reads as a secondary call to action.
 
-The VIES status line polls `GET /user/company-details` every few seconds
+The VIES status polls `GET /user/company-details` every few seconds
 while `vies_status` is `pending`, bounded (a check that never resolves stops
 being polled rather than polling forever) and stopped on navigating away;
 "Check again" calls `POST /user/company-details/vies-check` on demand and
 surfaces its `429` in plain words. "Remove company details" asks for
-confirmation before calling `DELETE /user/company-details`, then resets the
-form to empty.
+confirmation before calling `DELETE /user/company-details`; the card then
+falls back to the "No company details" state (#4359).
 
 ## Purpose, retention and GDPR basis
 

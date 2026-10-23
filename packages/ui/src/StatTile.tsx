@@ -87,6 +87,16 @@ interface StatTileProps {
   deltaLocale?: string
   /** What the figure was computed over — the basis line ("based on 4 payments"). */
   footnote?: ReactNode
+  /**
+   * An info affordance beside the LABEL (#4333): the caller's ReactNode, which
+   * composes its own `Tooltip` — the primitive renders it verbatim after the
+   * label, sized to the label's line, and knows nothing of its content. It is
+   * for ELABORATION on something already visible (the recording caveats
+   * behind a count), never for essential copy: the tooltip rules in
+   * design-system.md § Tooltips bind the caller. Ops tiles pass nothing and
+   * are unchanged.
+   */
+  hint?: ReactNode
   /** `card` (default) is the bordered tile; `inline` is the borderless variant. */
   variant?: StatTileVariant
   className?: string
@@ -107,6 +117,7 @@ export function StatTile({
   deltaLocale = 'en-US',
   deltaCaption,
   footnote,
+  hint,
   variant = 'card',
   className = '',
 }: StatTileProps) {
@@ -147,7 +158,17 @@ export function StatTile({
       }
       data-testid={`stat-tile-${label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}
     >
-      <p className="text-sm font-medium text-[var(--v2-ink-2)]">{label}</p>
+      <p className="text-sm font-medium text-[var(--v2-ink-2)]">
+        {label}
+        {hint && (
+          // Inline-flex on the label's own line so the mark rides the text
+          // baseline without stretching the tile; the caller owns the trigger
+          // (and its Tooltip), the primitive only places it.
+          <span className="ml-1.5 inline-flex translate-y-px align-baseline text-[var(--v2-ink-3)]">
+            {hint}
+          </span>
+        )}
+      </p>
       <p
         className={
           isInline

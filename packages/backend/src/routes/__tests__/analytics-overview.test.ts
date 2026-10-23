@@ -81,6 +81,21 @@ vi.mock('../../infra/repositories/payment-refusals.js', () => ({
   firstRefusalDayForUser: mockFirstRefusalDayForUser,
 }))
 
+const { mockAgentExistsForUser, mockListAccountsForUser } = vi.hoisted(() => ({
+  mockAgentExistsForUser: vi.fn(),
+  mockListAccountsForUser: vi.fn(),
+}))
+
+vi.mock('../../infra/repositories/agents.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  agentExistsForUser: mockAgentExistsForUser,
+}))
+
+vi.mock('../../infra/repositories/smart-accounts.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  listAccountsForUser: mockListAccountsForUser,
+}))
+
 import analyticsOverviewRoutes, { ANALYTICS_OVERVIEW_ENUMS } from '../analytics-overview.js'
 import { openapiSpec } from '../../openapi/spec.js'
 import { installRequestValidation } from '../../openapi/request-validation.js'
@@ -153,11 +168,13 @@ const MERCHANT_ADDRESS = `0x${'7'.padStart(40, '0')}`
 function fullFixtures(userId: string) {
   emptyFixtures(userId)
   mockListPerAgentTopMerchantForUser.mockResolvedValue([
-    { agent_id: AGENT_UUID, merchant_key: MERCHANT_ADDRESS },
+    { agent_id: AGENT_UUID, merchant_key: MERCHANT_ADDRESS, resource_url: 'https://agent-top.example/v1' },
   ])
   mockListTopMerchantsForUser.mockResolvedValue([
     {
       merchant_key: MERCHANT_ADDRESS,
+      filter_address: MERCHANT_ADDRESS,
+      resource_url: 'https://merchant.example/v1',
       spent_usd: '10.00',
       spent_eur: '9.00',
       spent_sek: '95.00',
@@ -216,6 +233,8 @@ describe('GET /analytics/overview', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     emptyFixtures(USER)
+    mockAgentExistsForUser.mockResolvedValue(true)
+    mockListAccountsForUser.mockResolvedValue([])
   })
 
   function call(url: string, bearer?: string) {
@@ -358,13 +377,14 @@ describe('GET /analytics/overview', () => {
 
   it('passes the caller\'s own sub to every repository call, never another user\'s (does NOT prove row-level tenant isolation — that is the repository suite\'s job)', async () => {
     await call('/analytics/overview?range=30d', token)
-    expect(mockSumTotalsSpendForUser).toHaveBeenCalledWith(USER, expect.anything(), expect.anything())
+    // #4332: every agent-dimensioned read now carries the (null) agentId too.
+    expect(mockSumTotalsSpendForUser).toHaveBeenCalledWith(USER, expect.anything(), expect.anything(), null)
 
     vi.clearAllMocks()
     emptyFixtures(OTHER_USER)
     await call('/analytics/overview?range=30d', otherToken)
-    expect(mockSumTotalsSpendForUser).toHaveBeenCalledWith(OTHER_USER, expect.anything(), expect.anything())
-    expect(mockSumTotalsSpendForUser).not.toHaveBeenCalledWith(USER, expect.anything(), expect.anything())
+    expect(mockSumTotalsSpendForUser).toHaveBeenCalledWith(OTHER_USER, expect.anything(), expect.anything(), null)
+    expect(mockSumTotalsSpendForUser).not.toHaveBeenCalledWith(USER, expect.anything(), expect.anything(), null)
   })
 
   it('accepts an owner-CLI token (the allow-list entry)', async () => {
@@ -405,6 +425,7 @@ describe('GET /analytics/overview', () => {
     expect(mockAggregateRefusalAmountForUser).toHaveBeenCalledWith(
       USER,
       expect.objectContaining({ from: expect.any(String), to: expect.any(String) }),
+      null,
     )
   })
 
@@ -524,5 +545,123 @@ describe('GET /analytics/overview', () => {
         expect(await listedIds()).toEqual([ROW_UUID])
       },
     )
+  })
+
+  // ── #4332 — the agentId filter and the counterparty-naming module. ────────
+
+  describe('#4332 — agentId scoping and naming', () => {
+    const AGENT_A = 'a1a1a1a1-1111-4111-8111-111111111111'
+    const AGENT_B = 'b2b2b2b2-2222-4222-8222-222222222222'
+
+    function twoAgentFixtures() {
+      emptyFixtures(USER)
+      mockListPerAgentSpendForUser.mockResolvedValue([
+        { agent_id: AGENT_A, name: 'a', status: 'active', spent_usd: '10.00', spent_eur: '9.00', spent_sek: '95.00', payments: '2', last_payment_at: '2030-06-01T12:00:00.000Z' },
+        { agent_id: AGENT_B, name: 'b', status: 'active', spent_usd: '5.00', spent_eur: '4.50', spent_sek: '47.50', payments: '1', last_payment_at: '2030-06-02T12:00:00.000Z' },
+      ])
+      mockAggregateRefusalsForUserByAgent.mockResolvedValue([
+        { agent_id: AGENT_A, refusals: 2, attempts: 3 },
+        { agent_id: AGENT_B, refusals: 1, attempts: 1 },
+      ])
+      mockListActiveDelegationsForUser.mockResolvedValue([
+        { id: 'd-a', agent_id: AGENT_A, chain_id: 84532, token_address: `0x${'a'.repeat(40)}`, recipient_address: null, delegation_json: '{}', budget_atomic: '1000000', period_seconds: 86400, start_date: String(Math.floor(Date.now() / 1000) - 3600) },
+        { id: 'd-b', agent_id: AGENT_B, chain_id: 84532, token_address: `0x${'b'.repeat(40)}`, recipient_address: null, delegation_json: '{}', budget_atomic: '2000000', period_seconds: 86400, start_date: String(Math.floor(Date.now() / 1000) - 3600) },
+      ])
+    }
+
+    it('scopes the SQL reads to the requested agent: every agent-dimensioned read receives it', async () => {
+      await call(`/analytics/overview?range=30d&agentId=${AGENT_A}`, token)
+      expect(mockSumTotalsSpendForUser).toHaveBeenCalledWith(USER, expect.anything(), expect.anything(), AGENT_A)
+      expect(mockCountUnsettledSubmittedForUser).toHaveBeenCalledWith(USER, expect.anything(), AGENT_A)
+      expect(mockListByDaySpendForUser).toHaveBeenCalledWith(USER, 'UTC', expect.anything(), AGENT_A)
+      expect(mockListTopMerchantsForUser).toHaveBeenCalledWith(USER, expect.anything(), AGENT_A)
+      expect(mockSumFeesTotalsForUser).toHaveBeenCalledWith(USER, expect.anything(), expect.anything(), AGENT_A)
+      expect(mockAggregateRefusalAmountForUser).toHaveBeenCalledWith(USER, expect.anything(), AGENT_A)
+      expect(mockListRefusalsByDayForUser).toHaveBeenCalledWith(USER, 'UTC', expect.anything(), AGENT_A)
+    })
+
+    it('unfiltered requests keep the whole-tenant reads (agentId null), exactly the golden-pinned path', async () => {
+      await call('/analytics/overview?range=30d', token)
+      expect(mockSumTotalsSpendForUser).toHaveBeenCalledWith(USER, expect.anything(), expect.anything(), null)
+      expect(mockListTopMerchantsForUser).toHaveBeenCalledWith(USER, expect.anything(), null)
+    })
+
+    it('agents[], their budgets and the refusal folds carry ONLY the requested agent', async () => {
+      twoAgentFixtures()
+      const res = await call(`/analytics/overview?range=30d&agentId=${AGENT_A}`, token)
+      expect(res.statusCode).toBe(200)
+      const body = res.json()
+      expect(body.agents.map((a: { id: string }) => a.id)).toEqual([AGENT_A])
+      expect(body.agents[0].refusals).toBe(2)
+      expect(body.totals.refused_count).toBe(2)
+      expect(body.totals.refused_attempts).toBe(3)
+      expect(body.agents[0].budgets).toHaveLength(1)
+      // budgets[].chain_id — the #4333 hardening the partner review asked for.
+      expect(body.agents[0].budgets[0].chain_id).toBe(84532)
+    })
+
+    it('answers 404 for a well-formed agentId that is not the user\'s, before ANY read', async () => {
+      mockAgentExistsForUser.mockResolvedValue(false)
+      const res = await call(`/analytics/overview?range=30d&agentId=${AGENT_B}`, token)
+      expect(res.statusCode).toBe(404)
+      expect(res.json()).toMatchObject({ error: 'Agent not found' })
+      expect(mockSumTotalsSpendForUser).not.toHaveBeenCalled()
+      expect(mockListAccountsForUser).not.toHaveBeenCalled()
+    })
+
+    it('answers the enforced 400 envelope for a MALFORMED agentId, before the handler', async () => {
+      const res = await call('/analytics/overview?range=30d&agentId=not-a-uuid', token)
+      expect(res.statusCode).toBe(400)
+      expect(res.json()).toMatchObject({ error: 'Request does not match the API spec', error_code: 'invalid_request' })
+      expect(mockAgentExistsForUser).not.toHaveBeenCalled()
+      expect(mockSumTotalsSpendForUser).not.toHaveBeenCalled()
+    })
+
+    it('the response carries balance_scope "all_accounts" — balance is never agent-scoped', async () => {
+      const res = await call('/analytics/overview?range=30d', token)
+      expect(res.statusCode).toBe(200)
+      expect(res.json().balance_scope).toBe('all_accounts')
+    })
+
+    it('naming order step 1: the x402 resource host of the most recent payment wins, with kind x402', async () => {
+      fullFixtures(USER)
+      const res = await call('/analytics/overview?range=7d', token)
+      const body = res.json()
+      expect(body.merchants[0].label).toBe('merchant.example')
+      expect(body.merchants[0].kind).toBe('x402')
+      expect(body.merchants[0].filter_address).toBe(MERCHANT_ADDRESS)
+      // top_merchant runs the SAME module.
+      expect(body.agents[0].top_merchant.label).toBe('agent-top.example')
+    })
+
+    it('naming steps 2-4: own account (address-only, oldest wins) → contact → receipt, and null when nothing resolves', async () => {
+      const OWN = `0x${'3'.repeat(40)}`
+      mockListAccountsForUser.mockResolvedValue([
+        { id: 'acc-old', account_address: OWN, chain_id: 1, name: 'Old Vault', is_default: false, created_at: new Date() },
+        { id: 'acc-new', account_address: OWN, chain_id: 84532, name: 'New Vault', is_default: false, created_at: new Date() },
+      ])
+      mockListTopMerchantsForUser.mockResolvedValue([
+        { merchant_key: OWN, filter_address: OWN, resource_url: null, spent_usd: '7.00', spent_eur: '6.00', spent_sek: '66.00', payments: '1', agent_ids: [AGENT_A], first_seen: '2030-06-01T12:00:00.000Z', last_seen: '2030-06-01T12:00:00.000Z' },
+        { merchant_key: `0x${'4'.repeat(40)}`, filter_address: `0x${'4'.repeat(40)}`, resource_url: null, spent_usd: '3.00', spent_eur: '3.00', spent_sek: '33.00', payments: '1', agent_ids: [AGENT_A], first_seen: '2030-06-01T12:00:00.000Z', last_seen: '2030-06-01T12:00:00.000Z' },
+        { merchant_key: `0x${'5'.repeat(40)}`, filter_address: `0x${'5'.repeat(40)}`, resource_url: null, spent_usd: '2.00', spent_eur: '2.00', spent_sek: '22.00', payments: '1', agent_ids: [AGENT_A], first_seen: '2030-06-01T12:00:00.000Z', last_seen: '2030-06-01T12:00:00.000Z' },
+        { merchant_key: `0x${'6'.repeat(40)}`, filter_address: `0x${'6'.repeat(40)}`, resource_url: null, spent_usd: '1.00', spent_eur: '1.00', spent_sek: '11.00', payments: '1', agent_ids: [AGENT_A], first_seen: '2030-06-01T12:00:00.000Z', last_seen: '2030-06-01T12:00:00.000Z' },
+      ])
+      mockListReceiptMerchantNamesForUser.mockResolvedValue(new Map([[`0x${'6'.repeat(40)}`.toLowerCase(), 'Klara Data AB']]))
+      // Step 3 — a contact names before the receipt.
+      mockListContactsForUser.mockResolvedValue([{ id: 'c1', name: 'Acme AB', address: `0x${'4'.repeat(40)}` }])
+
+      const res = await call('/analytics/overview?range=30d', token)
+      expect(res.statusCode).toBe(200)
+      const merchants = res.json().merchants
+      // Step 2 — the OLDEST account at the shared address, chain-insensitive.
+      expect(merchants[0]).toMatchObject({ label: 'Old Vault', kind: 'own_account' })
+      // Step 3 — the contact.
+      expect(merchants[1]).toMatchObject({ label: 'Acme AB', kind: 'contact' })
+      // Step 5 — nothing resolves: label null, kind unknown (the wire change).
+      expect(merchants[2].label).toBeNull()
+      expect(merchants[2].kind).toBe('unknown')
+      // Step 4 — the receipt name is the LAST resolvable step.
+      expect(merchants[3]).toMatchObject({ label: 'Klara Data AB', kind: 'receipt' })
+    })
   })
 })

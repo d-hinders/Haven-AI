@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo } from 'react'
-import { AreaChart, deltaLabel } from '@/components/ui/AreaChart'
+import { AreaChart, deltaLabel, signedDelta } from '@/components/ui/AreaChart'
 import type { AreaPoint } from '@/components/ui/AreaChart'
 import { formatAnalyticsDay, formatAnalyticsTick, formatAnalyticsValue } from '@/lib/analytics-format'
 import type { AnalyticsCurrency } from '@/lib/analytics-format'
@@ -82,21 +82,31 @@ function balanceSummary(points: AreaPoint[], currency: AnalyticsCurrency, days: 
   const opening = `Balance over ${days} days: started at ${formatAnalyticsValue(first, currency)}`
   const ending = ` and ended at ${formatAnalyticsValue(last, currency)}`
   if (delta === 0) return `${opening}${ending}, unchanged across the range.`
-  // The verb is the primitive's own: the sentence and the annotation printed
-  // on the plot can then never call the same movement two different things.
-  return `${opening}${ending}, ${formatAnalyticsValue(Math.abs(delta), currency)} ${deltaLabel(delta)} across the range.`
+  // The word is the primitive's own and the SIGN rides the amount
+  // (`signedDelta`, #4333): the sentence and the annotation printed on the
+  // plot can then never call the same movement two different things.
+  return `${opening}${ending}, ${deltaLabel(delta)} ${signedDelta(delta, (v) => formatAnalyticsValue(v, currency))} across the range.`
 }
 
 export function BalanceSection({
   balanceByDay,
   currency,
   rangeDays,
+  agentFiltered = false,
 }: {
   /** `overview.balance_by_day`, uncoerced: each `value` is a numeric string. */
   balanceByDay: AnalyticsBalanceDay[]
   currency: AnalyticsCurrency
   /** The window the figures cover, from the response's own `range.days`. */
   rangeDays: 7 | 30 | 90
+  /**
+   * Whether the page's Agent facet is set (#4333). The balance series is
+   * per-USER (the endpoint keeps it unscoped; `balance_scope:
+   * 'all_accounts'`), so an agent-filtered page must say the chart is not
+   * narrowed — a reader who assumes the filter reached it would read the
+   * OTHER agents' movements as this agent's.
+   */
+  agentFiltered?: boolean
 }) {
   const points = useMemo(() => balancePoints(balanceByDay), [balanceByDay])
 
@@ -116,7 +126,11 @@ export function BalanceSection({
         <Card.Header
           as="h2"
           title="Balance over time"
-          description="What your Haven account held, as Haven’s daily snapshots recorded it at each day’s end. This is a record of what was held, not a live valuation."
+          description={
+            agentFiltered
+              ? 'What all your accounts held, as Haven’s daily snapshots recorded it at each day’s end — a record of what was held, not a live valuation. Balance isn’t filtered by agent.'
+              : 'What all your accounts held, as Haven’s daily snapshots recorded it at each day’s end. This is a record of what was held, not a live valuation.'
+          }
         />
         <div className="px-5 pb-5 pt-2">
           <div className="hidden lg:block">

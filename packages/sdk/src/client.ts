@@ -892,12 +892,13 @@ export class HavenClient {
   /**
    * Post-purchase allowance/budget summary for a settled payment (#1310).
    *
-   * Reuses the EXACT rail-aware read path {@link getAllowances} / #1306's
-   * catalog-purchase preflight `allowance` block use — `GET
-   * /machine-payments/allowances`, with delegation-rail values coming from
-   * the #1090 `deriveDelegationBudgets`-backed enforcer read, never
+   * Reuses the EXACT rail-aware read path {@link getAllowances} uses —
+   * `GET /machine-payments/allowances`, with delegation-rail values coming
+   * from the #1090 `deriveDelegationBudgets`-backed enforcer read, never
    * `agent_allowances` — so this can never disagree with
-   * {@link getAllowances} for the same fixture. The settled token is
+   * {@link getAllowances} for the same fixture. (#1306's catalog-purchase
+   * preflight read the same path until #3054; it now calls
+   * `POST /machine-payments/budget-precheck` instead.) The settled token is
    * resolved from {@link getPaymentStatus} so callers pass only
    * `paymentId`, never a second haven_get_agent-style round trip.
    *

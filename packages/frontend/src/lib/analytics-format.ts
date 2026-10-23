@@ -1,4 +1,4 @@
-import { timeAgo, truncate, isValidAddress, currencyLocale } from '@/lib/format'
+import { timeAgo, truncate, currencyLocale } from '@/lib/format'
 import { formatAllowanceForToken } from '@/lib/allowance-format'
 // #3844: the instant voice is the budget caption helper's (#3806) — the same
 // three-distance phrasing a budget meter's "refills …" line uses, so a period
@@ -142,17 +142,35 @@ export function budgetBandsCaption(above75: number, agentsWithBudget: number): s
 }
 
 /**
- * A one- or two-word label for the window the figures cover. A caption that
- * restates the endpoint's own numbers ("30 days of data, 12 payments") adds a
- * second place for a count to be wrong, so the range stays a shape word and
- * the counts stay in their tiles.
+ * "by 2 of 3 agents" — the Payments tile's caption (#4333): the agents the
+ * window's payments came from, out of the agents the table lists. Both counts
+ * are read off the response's own `agents[]` rows (each carries its
+ * `payments`), so the caption counts what the endpoint reported and invents
+ * nothing; when the page is filtered to one agent the caller renders that
+ * agent's name instead and this caption is not used.
  */
-export function rangeCaption(rangeDays: 7 | 30 | 90): string {
-  return `Last ${rangeDays} days`
+export function paymentsAgentsCaption(agentsWithPayments: number, agentsListed: number): string {
+  return `by ${agentsWithPayments} of ${agentsListed} agents`
 }
 
 /**
- * The "last payment" cell, built from the one piece the response offers:
+ * The Spent tile's comparison (#4333): the previous window's spent, as an
+ * AMOUNT rather than a percentage — "$280.10 the 30 days before". A ratio of
+ * two booked totals is a derivation the response did not make (`percentChange`
+ * is gone with the delta pills); the endpoint reports both windows' figures
+ * and the tile puts them side by side, which is the one comparison it can
+ * make without inventing a number.
+ */
+export function spentComparisonCaption(
+  previousSpent: string,
+  days: number,
+  currency: AnalyticsCurrency,
+): string {
+  return `vs ${formatAnalyticsAmount(previousSpent, currency)} the ${days} days before`
+}
+
+/**
+ * The "last payment" cell, from the one piece the response offers:
  * `last_payment_at` (null → never). Relative form keeps the column comparable
  * across rows at a glance — "2h ago" answers the question the column is for,
  * how recently has this agent spent — and reuses the app's own `timeAgo` so
@@ -162,31 +180,6 @@ export function rangeCaption(rangeDays: 7 | 30 | 90): string {
  */
 export function lastPaymentCaption(iso: string | null): string {
   return iso === null ? 'No payments in this range' : timeAgo(iso)
-}
-
-/**
- * The change of a figure against the same figure in the previous window, as
- * a percentage of the previous window (2.4 = +2.4%), or `null` when there is
- * no previous figure to compare against.
- *
- * It takes a STRING as well as a number because the two fields it is called
- * with on the overview response (`spent`/`spent_previous`) are numeric
- * strings — B books fiat via `::text` and the route passes them through — and
- * a helper that refused them would push every caller into coercing at the
- * render boundary, the one thing the note above this file forbids. The parse
- * happens here, at the edge, exactly where the formatters parse.
- *
- * `null` rather than `Infinity`/`NaN` for a zero or absent previous figure is
- * deliberate: "up from zero" is not a percentage of zero, and the first window
- * an account has data has no previous window at all. A tile given a `null`
- * delta renders no chip; a tile given a made-up one would be a figure the
- * endpoint never reported.
- */
-export function percentChange(current: string | number, previous: string | number): number | null {
-  const now = typeof current === 'number' ? current : Number.parseFloat(current)
-  const before = typeof previous === 'number' ? previous : Number.parseFloat(previous)
-  if (!Number.isFinite(now) || !Number.isFinite(before) || before <= 0) return null
-  return ((now - before) / before) * 100
 }
 
 /**
@@ -202,33 +195,14 @@ export function refusalsCaption(refusedCount: number, refusedAttempts: number): 
 }
 
 /**
- * How a merchant label that is still an address is DISPLAYED (#2949).
- *
- * This decides nobody's identity — the label is the API's (contact, else
- * receipt name, else address), and neither of the two tables that use it
- * re-resolves, because a second resolution is a second place the same merchant
- * can be named two ways. What it does is the display half only: such a label
- * goes through `lib/format.truncate`, the one truncation rule in the app
- * (#853), because an un-truncated `0x…` at table width clips mid-glyph with no
- * ellipsis and no way to read the whole thing. The full string rides in the
- * returned `title` so the reader can still get it; contacts and receipt names
- * are not addresses, keep their own characters, and get no title.
- *
- * `isValidAddress` is `@haven_ai/core`'s (re-exported through `lib/format`),
- * deliberately not viem's, which validates the EIP-55 checksum and so would
- * reject a lowercase address into the non-address branch.
- *
- * It lives here rather than beside either table because BOTH tables use it —
- * the agents table's top-merchant cell and slice E's merchants table render
- * the same field — and a truncation that exists on one side and not the other
- * is a disagreement between them, exactly the class this module exists to
- * prevent.
+ * The short address an UNKNOWN recipient shows under its "Unknown recipient"
+ * label (#4333): the one truncation rule in the app (#853) — "0x71C2…7128".
+ * Since #4332 the overview's `label` is either a resolved NAME or null — it
+ * is never an address — so the address appears only where the issue puts it:
+ * the kind line and the tooltip of an unknown recipient, never AS the label.
  */
-export function merchantLabel(label: string): { value: string; title?: string } {
-  if (isValidAddress(label)) {
-    return { value: truncate(label), title: label }
-  }
-  return { value: label }
+export function unknownRecipientShortAddress(address: string): string {
+  return truncate(address)
 }
 
 /**

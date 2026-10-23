@@ -209,8 +209,9 @@ a `remedy` field, the other two carry a `reason`. A fourth, chain-level line
   `GET /accounting/feed/status` has answered (no flash of an entry that a
   self-hosted answer then removes); a failed status read renders the plain
   entry with no marker.
-- **Where the user manages it (#2868, PR #2903)** — the *Accounting*
-  card on `/settings` (`SettingsClient.tsx` →
+- **Where the user manages it (#2868, PR #2903; Business tab since #4358)** —
+  the *Accounting*
+  card on `/settings?tab=business` (`SettingsClient.tsx` →
   `components/accounting/ConnectionsCard.tsx`, with `ConnectionRow`,
   `ConnectionSettings` and `BackfillDialog`): one row per provider with
   Connect / Reconnect / Disconnect, the per-connection settings and the
@@ -235,13 +236,15 @@ off**, and the two off states read differently — exposure (flipping
 
 | `hosted` | `enabled` | `/accounting` | sidebar entry | Settings → Accounting card |
 |---|---|---|---|---|
-| true | true | the summary line + the feed (or the add-on card when `entitled` is false) | rendered; attention dot per the rule above | the five connection states (#2868) |
-| true | **false** | **Coming soon**: what the feed will do, the platforms being lined up, and "Nothing can be connected yet." No connect or sync control is reachable | rendered, with a muted **Soon** pill (accessible name and, below `lg`, visible text: *Coming soon*) | every provider listed as *Coming soon* with **no action at all** — not even a disabled Connect. The controls are absent by design, not just disabled: the backend 404s the connection routes too (#2918), so a request the UI never offers would refuse anyway |
-| **false** | either | **"Not available on self-hosted"** — the feed is part of the hosted service; this copy must never read as coming soon | **hidden** (the page still renders the copy by URL) | the same not-available sentence, and **no providers listed** — same backend 404 underneath (#2918) |
+| true | true | the summary line + the feed (or the add-on card when `entitled` is false) | rendered; attention dot per the rule above | the five connection states (#2868); a footer link, *See synced payments on Accounting* (#4359) |
+| true | **false** | **Coming soon**: what the feed will do, the platforms being lined up, and "Nothing can be connected yet." No connect or sync control is reachable | rendered, with a muted **Soon** pill (accessible name and, below `lg`, visible text: *Coming soon*) | **renders nothing at all (#4359, 2026-10-23 — superseding the 2026-09-11 decision to list every provider as *Coming soon* with no action)**: coming-soon providers are hidden, so there is no row and no card; the deep link `?tab=business` falls back to the General body with the URL untouched |
+| **false** | either | **"Not available on self-hosted"** — the feed is part of the hosted service; this copy must never read as coming soon | **hidden** (the page still renders the copy by URL) | the same not-available sentence, and **no providers listed** — same backend 404 underneath (#2918). The explanation is information: it renders whenever the Business tab is visible (e.g. because company details render), but on its own it does not make the tab appear (#4359) |
 
-In both off states the page header and the Settings card carry a neutral
-one-liner ("Accounting tool connections for agent spend." / "Your company's
-accounting tool.") — the product subtitle ("…your accountant codes and
+In both off states the `/accounting` page header carries the neutral
+one-liner ("Accounting tool connections for agent spend."). The Settings
+card's neutral description ("Your company's accounting tool.") applies to
+the self-hosted state; in the flag-off state the card renders nothing at
+all (#4359). The product subtitle ("…your accountant codes and
 confirms them") and the card's product description are shown only when the
 feed is on, so nothing above "Nothing can be connected yet." asserts that
 something happens.

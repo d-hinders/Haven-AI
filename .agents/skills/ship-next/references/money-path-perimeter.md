@@ -61,11 +61,19 @@ was `rails/allowance-module.ts` until #2850 renamed it to `infra/chain/relayer-r
 the AllowanceModule filename was the last false claim the retired rail left behind.
 The `domain/machine-payment-lifecycle.ts` entry guards the backend re-export shim;
 the code itself lives in `packages/core` (see below, #1905).
+The two `domain/x402-*` entries hold the settlement path's window constants:
+`x402-settlement-timing.ts` (the 600 s settlement-child expiry clamp and the 120 s
+clock skew, moved out of `modules/x402/` by #4379 so a payments file could read
+them without a cycle) and `x402-sweep-window.ts` (the sweeper's window, #3514).
+The glob follows moved code in the same PR; the sweep-window file was off the
+list before #4379.
 
 - `packages/backend/src/modules/x402/**`
 - `packages/backend/src/modules/mpp/**`
 - `packages/backend/src/domain/payment-token.ts`
 - `packages/backend/src/domain/machine-payment-lifecycle.ts`
+- `packages/backend/src/domain/x402-settlement-timing.ts`
+- `packages/backend/src/domain/x402-sweep-window.ts`
 - `packages/backend/src/infra/chain/relayer-reads.ts`
 
 ### Budget scope

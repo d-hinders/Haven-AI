@@ -30,7 +30,7 @@ covers:
   - packages/frontend/src/components/DashboardOnboardingGuide.tsx
   - packages/frontend/src/components/AuthenticatedShell.tsx
   - packages/frontend/src/components/sidebar/Sidebar.tsx
-last-verified: "2026-10-16"
+last-verified: "2026-10-24"
 ---
 
 # Haven Product & UX Guide
@@ -57,7 +57,8 @@ The old dark app system is retired. Dark mode since #2927 is a different thing:
 the sanctioned v2 token set now carries a dark palette (re-declared in the two
 mechanically-enforced blocks in `packages/ui/src/tokens.css`, where the palette
 moved from `globals.css` in #3508), `ThemeProvider` and
-`ThemeToggle` exist, and users choose light, dark, or system in Settings → Theme. Do
+`ThemeToggle` exist, and users choose light, dark, or system in Settings →
+General → Preferences (#4358). Do
 not extend old dark token patterns, gradient buttons, glow shadows, or hard
 dark-modal surfaces — dark styling comes from the v2 tokens flipping under the
 active theme, not from one-off dark classes.
@@ -99,8 +100,9 @@ active step carries a primary button; connecting an agent early is offered at
 secondary weight. While the steps show and the USDC step is not done, the card
 holds back its low-balance and zero-USDC items. When every account is also
 known to hold no USDC, the page is a focused view: the money card and this card
-only, with Agents and Activity hidden, and the money card's Add funds steps
-down beside Deposit address so step 1's is the one primary Add funds.
+only, with Agents and Activity hidden, and the money card's Receive steps down
+to ghost (Send is disabled while the balance is known empty, #4167) so step
+1's Add funds is the one primary funding action.
 
 On `/agents`, a user with no agents gets the connect flow itself, inline, in
 place of an empty state (#4065): the card "Connect your first agent" with the
@@ -121,7 +123,9 @@ High-level voice rules:
 - Plain, direct, quiet.
 - No exclamation marks or emoji in product UI.
 - No disabled control should look enabled.
-- "Coming soon" is acceptable when a feature is intentionally not live.
+- "Coming soon" is acceptable when a feature is intentionally not live —
+  except on Settings, which shows no placeholder rows or coming-soon
+  connectors at all (#4356, owner decision 3).
 - Error copy should explain the next useful action, not expose raw system detail.
 
 ---
@@ -255,7 +259,7 @@ answers:
 Rules:
 
 - Never imply Haven has custody.
-- Distinguish Safe funding constrained by on-chain agent rules from funds already
+- Distinguish account funds constrained by on-chain agent rules from funds already
   controlled by an agent-held signing key.
 - Always show network context in signing and transaction review surfaces.
 - Results for on-chain actions include an externally verifiable link.
@@ -332,3 +336,16 @@ pick. See [design-system.md](./design-system.md) § Buttons → Tap targets for 
 mechanism and its one constraint (keep stacked controls ~8px apart, or two
 targets fight over the same pixels). Controls that are **not** a `Button` inherit
 nothing from this — verify their mobile placement and spacing explicitly.
+
+Re-verified 2026-10-24 (#4372 part C, at dev `795c50fc7`), end to end. Changed:
+the focused first-run view's money card steps its Receive down to ghost with
+Send disabled (#4105 replaced Add funds and Deposit address with Receive,
+#4167); "Coming soon" is no longer acceptable on Settings (#4356 owner decision
+3, #4358/#4359); the money-movement rule says account funds, not Safe funding.
+Re-checked without change: the theme control under Settings → General →
+Preferences; "Get started", "N of 3 done", "Hide for now" and "You're set up";
+the low-balance and zero-USDC hold-back; the inline "Connect your first agent"
+on `/agents`; Analytics second in the Overview group; the raised money panel
+with the 30-day spending; `design-system.md` § Cards; `.v2-modal-backdrop` with
+no blur; `MaxButton`/`PasteButton`; the `#main-content` skip link; `Button`
+`sm` 36px and `md` 40px with a 44px hit area (#1726).

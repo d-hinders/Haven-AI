@@ -103,7 +103,11 @@ export const AUTH_MARKED_PREFIXES = [
   // entry: this list is pinned bidirectionally to the directory listing
   // (see the guard test), and an entry with no backing directory fails it.
   '/marketplace',
-  '/profile',
+  // #4358: /profile is DELETED — `next.config.ts` 308s it to `/settings`
+  // before any route in this group ever runs — so it is removed here rather
+  // than kept alongside: this list is pinned bidirectionally to the
+  // directory listing (see the guard test), and an entry with no backing
+  // directory fails it.
   // #2859 renamed the feed page's route. `/reporting` remains on disk as a
   // redirect to `/accounting`, so the filesystem-pinned list carries both.
   '/reporting',

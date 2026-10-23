@@ -1835,18 +1835,25 @@ export const ANALYTICS_RANGE = {
 }
 export const FIXTURE_ANALYTICS_MERCHANTS = [
   {
-    label: 'NordShield VPN', address: ADDR.merchant,
+    // #4332: `kind` names the naming step that produced `label`; the address-only
+    // third row's label is NULL now (the client renders "Unknown recipient" in
+    // #4333 — until then the shim renders the address, pixel-neutral).
+    label: 'NordShield VPN', kind: 'contact',
+    filter_address: ADDR.merchant, address: ADDR.merchant,
     spent: '225.00', payments: 3, agent_ids: ['agent-research'],
     first_seen: '2026-07-08T09:15:00.000Z', last_seen: '2026-07-10T08:12:00.000Z',
   },
   {
-    label: 'Klara Data AB', address: '0xC0dA5fA2b7E1d3418c6b9A0fD2e3B4C5D6E7F809',
+    label: 'Klara Data AB', kind: 'receipt',
+    filter_address: '0xC0dA5fA2b7E1d3418c6b9A0fD2e3B4C5D6E7F809',
+    address: '0xC0dA5fA2b7E1d3418c6b9A0fD2e3B4C5D6E7F809',
     spent: '87.25', payments: 1, agent_ids: ['agent-research'],
     first_seen: '2026-07-09T10:00:00.000Z', last_seen: '2026-07-09T10:00:00.000Z',
   },
   {
-    // Address-only: no contact, no receipt name — the label IS the address.
-    label: '0x71C2E8a4D5f6093b1a7C8e2F4B6D0A9C3E5F7128',
+    // Nothing resolves: label null, kind unknown.
+    label: null, kind: 'unknown',
+    filter_address: '0x71C2E8a4D5f6093b1a7C8e2F4B6D0A9C3E5F7128',
     address: '0x71C2E8a4D5f6093b1a7C8e2F4B6D0A9C3E5F7128',
     spent: '12.50', payments: 1, agent_ids: ['agent-retired'],
     first_seen: '2026-07-10T12:30:00.000Z', last_seen: '2026-07-10T12:30:00.000Z',
@@ -1905,6 +1912,8 @@ export const FIXTURE_ANALYTICS_OVERVIEW = {
     gas_sponsored_ops: 7,
   },
   by_day: FIXTURE_ANALYTICS_BY_DAY,
+  // #4332: balance is stored per USER and is deliberately NOT agent-scoped.
+  balance_scope: 'all_accounts',
   // Wire shape (B #2946): `spent` numeric strings; `share` is B's one
   // number-typed money-adjacent field, DERIVED here (not hand-typed) so the
   // ratios cannot drift from the sums they are shares of.
@@ -1934,7 +1943,7 @@ export const FIXTURE_ANALYTICS_OVERVIEW = {
           remaining_from_chain: false,
           period_start: '2026-07-10T00:00:00.000Z', period_end: '2026-07-11T00:00:00.000Z',
         }],
-        top_merchant: { label: '0x71C2E8a4D5f6093b1a7C8e2F4B6D0A9C3E5F7128', address: '0x71C2E8a4D5f6093b1a7C8e2F4B6D0A9C3E5F7128' },
+        top_merchant: { label: null, address: '0x71C2E8a4D5f6093b1a7C8e2F4B6D0A9C3E5F7128' },
         last_payment_at: '2026-07-10T12:30:00.000Z',
       },
     ]
@@ -1971,6 +1980,7 @@ export const FIXTURE_ANALYTICS_OVERVIEW_EMPTY = {
   by_day: [],
   agents: [],
   merchants: [],
+  balance_scope: 'all_accounts',
   balance_by_day: [],
 }
 
@@ -3491,15 +3501,14 @@ const SETTINGS_ACCOUNTING_STAGES = {
   // #3017: the Accounted row — not connected, waiting for a pasted key. The
   // paste modal opens from THIS row's Connect.
   'api-key-modal': null,
-  // The card's two OFF states (#2869): no connection row at all, and the
-  // FEED STATUS answer is what makes the state — `hosted && !enabled` lists
-  // every provider as Coming soon with no action; `!hosted` lists none.
-  'coming-soon': null,
+  // The card's OFF state (#2869 → #4359): no connection row at all, and the
+  // FEED STATUS answer is what makes the state — `!hosted` lists none. The
+  // hosted flag-off "coming-soon" stage is GONE with #4359: the card renders
+  // nothing there, so there is nothing left to photograph.
   'self-hosted': null,
 }
 /** The feed-status answer per OFF stage; every other stage falls through to the ON fixture. */
 const SETTINGS_ACCOUNTING_FEED_STAGES = {
-  'coming-soon': FIXTURE_ACCOUNTING_FEED_COMING_SOON,
   'self-hosted': FIXTURE_ACCOUNTING_FEED_SELF_HOSTED,
 }
 let settingsAccountingStage = 'connected'
@@ -3864,7 +3873,7 @@ export const SCENARIOS = {
 
   'settings-accounting': {
     description:
-      'Settings → Accounting card in each of the five connection states, plus the inline feed settings and the backfill choice on a first connect (#2868), the Accounted paste modal (#3017), and the two feed OFF states — Coming soon and self-hosted (#2869)',
+      'Settings → Accounting card in each of the five connection states, plus the inline feed settings and the backfill choice on a first connect (#2868), the Accounted paste modal (#3017), and the self-hosted OFF state (#2869) — the hosted flag-off capture is retired with #4359, where the card renders nothing',
     stages: SETTINGS_ACCOUNTING_STAGES,
     /** Exposed so the fixture-contract test can pin each stage. */
     stage: setSettingsAccountingStage,
@@ -3874,6 +3883,12 @@ export const SCENARIOS = {
         return { connections: row ? [row] : [] }
       }
       if (apiPath === '/accounting/feed/status') return SETTINGS_ACCOUNTING_FEED_STAGES[settingsAccountingStage]
+      // #4359: the Business tab is visible only when a card has content — in
+      // every stage here the ACCOUNTING card is the content, but the
+      // company-details read must still settle: 200 `null` (flag on, nothing
+      // saved) keeps the tab visible without adding a second card's pixels
+      // (the sections clip independently).
+      if (apiPath === '/user/company-details') return null
       return undefined
     },
     async run({ page, vp, shoot }) {
@@ -3901,10 +3916,13 @@ export const SCENARIOS = {
       }
       const openStage = async (stage, query = '') => {
         setSettingsAccountingStage(stage)
-        await settle(() => page.goto(`${BASE_URL}/settings${query}`, { waitUntil: 'domcontentloaded', timeout: 30_000 }))
+        // #4358: the accounting card lives on the Business tab — join
+        // `tab=business` with any forwarded outcome query, never append to
+        // a constant already holding `?tab=…`.
+        await settle(() => page.goto(`${BASE_URL}/settings?tab=business${query ? `&${query.replace(/^\?/, '')}` : ''}`, { waitUntil: 'domcontentloaded', timeout: 30_000 }))
       }
 
-      await settle(() => page.goto(`${BASE_URL}/settings`, { waitUntil: 'networkidle', timeout: 30_000 }))
+      await settle(() => page.goto(`${BASE_URL}/settings?tab=business`, { waitUntil: 'networkidle', timeout: 30_000 }))
 
       // Each stage waits on its own distinguishing copy AND its action, and
       // refuses the neighbouring states' actions — a stage that quietly
@@ -3918,8 +3936,8 @@ export const SCENARIOS = {
         for (const name of refused) {
           await refuseIfPresent(fortnoxActions.getByRole('button', { name, exact: true }), `settings-accounting · ${stage} · ${name}`)
         }
-        // The coming-soon rows are part of every state.
-        await card.getByTestId('connection-row-igdrasil').getByText('Coming soon').waitFor({ timeout: 15_000 })
+        // The coming-soon rows are HIDDEN (#4359) — the igdrasil wait that
+        // used to pin them here is gone with them.
         await card.scrollIntoViewIfNeeded()
         await shoot(card, stage)
       }
@@ -3988,12 +4006,14 @@ export const SCENARIOS = {
       await dialog.getByRole('button', { name: 'Not now', exact: true }).waitFor({ timeout: 15_000 })
       await shoot(dialog, 'backfill-dialog')
 
-      // ── the two OFF states (#2869) ────────────────────────────────────────
+      // ── the self-hosted OFF state (#2869 → #4359) ─────────────────────────
       // No `fortnoxActions` to wait on here — the whole point is that no
-      // action renders — so these settle on the state's own test id.
+      // action renders — so this settles on the state's own test id. (The
+      // hosted flag-off "coming-soon" capture is retired with #4359: the card
+      // renders nothing there.)
       const settleOff = async (stage, testId) => {
         setSettingsAccountingStage(stage)
-        await page.goto(`${BASE_URL}/settings`, { waitUntil: 'domcontentloaded', timeout: 30_000 })
+        await page.goto(`${BASE_URL}/settings?tab=business`, { waitUntil: 'domcontentloaded', timeout: 30_000 })
         await page.evaluate(() => document.fonts.ready)
         await page.locator('button[aria-label="User menu"]').waitFor({ state: 'attached', timeout: 15_000 })
         await dismissMobileSidebar(page, vp)
@@ -4002,15 +4022,9 @@ export const SCENARIOS = {
         for (const name of ['Connect', 'Reconnect', 'Disconnect', 'Settings']) {
           await refuseIfPresent(card.getByRole('button', { name, exact: true }), `settings-accounting · ${stage} · ${name}`)
         }
-        // The neutral description, never the product sentence above "Nothing can be connected yet."
-        await card.getByText("Your company's accounting tool.", { exact: true }).waitFor({ timeout: 15_000 })
-        await refuseIfPresent(card.getByText(/Connect the accounting tool your company uses/), `settings-accounting · ${stage} · product description`)
         await card.scrollIntoViewIfNeeded()
         await shoot(card, stage)
       }
-      await settleOff('coming-soon', 'accounting-coming-soon')
-      await card.getByText('Nothing can be connected yet.', { exact: true }).waitFor({ timeout: 15_000 })
-      await card.getByTestId('connection-row-fortnox').getByText('Coming soon').waitFor({ timeout: 15_000 })
       await settleOff('self-hosted', 'accounting-self-hosted')
       await card.getByText('Not available on self-hosted', { exact: true }).waitFor({ timeout: 15_000 })
       await refuseIfPresent(card.getByTestId('connection-row-fortnox'), 'settings-accounting · self-hosted · provider row')
@@ -6059,10 +6073,10 @@ export const SCENARIOS = {
       return undefined
     },
     async run({ page, vp, shoot }) {
-      await page.goto(`${BASE_URL}/settings#signers`, { waitUntil: 'networkidle', timeout: 30_000 })
+      await page.goto(`${BASE_URL}/settings?tab=security#signers`, { waitUntil: 'networkidle', timeout: 30_000 })
       await page.evaluate(() => document.fonts.ready)
       await dismissMobileSidebar(page, vp)
-      const heading = page.getByRole('heading', { name: 'Signers' })
+      const heading = page.getByRole('heading', { name: 'Passkeys and wallets' })
       await heading.waitFor({ timeout: 15_000 })
       const section = page.locator('#signers')
       await section.getByText('Passkey 2').waitFor({ timeout: 15_000 })

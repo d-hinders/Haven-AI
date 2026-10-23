@@ -59,9 +59,10 @@ test.describe('More sheet visual regression (#4053)', () => {
     await page.mouse.move(4, 4)
 
     const sheet = page.locator('[data-more-sheet]')
-    // State anchors before the shot: the account row has loaded, and the
-    // destinations are the four the tab bar lacks plus Settings.
-    await expect(sheet.getByRole('link', { name: /^Open profile for / })).toBeVisible()
+    // State anchors before the shot: the identity row has rendered (no
+    // longer a link — #4358), and the destinations are the four the tab bar
+    // lacks plus Settings.
+    await expect(sheet.getByText('Ada Lovelace')).toBeVisible()
     await expect(sheet.getByRole('navigation', { name: 'All sections' }).getByRole('link')).toHaveCount(5)
     await expect(sheet.getByRole('radiogroup', { name: 'Theme' })).toBeVisible()
 

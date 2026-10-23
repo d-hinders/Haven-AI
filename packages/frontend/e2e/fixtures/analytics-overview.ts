@@ -176,7 +176,7 @@ export const analyticsOverview =
           }
         ],
         "top_merchant": {
-          "label": "0x71C2E8a4D5f6093b1a7C8e2F4B6D0A9C3E5F7128",
+          "label": null,
           "address": "0x71C2E8a4D5f6093b1a7C8e2F4B6D0A9C3E5F7128"
         },
         "last_payment_at": "2026-07-10T12:30:00.000Z",
@@ -186,6 +186,8 @@ export const analyticsOverview =
     "merchants": [
       {
         "label": "NordShield VPN",
+        "kind": "contact",
+        "filter_address": "0x6B175474E89094C44Da98b954EedeAC495271d0F",
         "address": "0x6B175474E89094C44Da98b954EedeAC495271d0F",
         "spent": "225.00",
         "payments": 3,
@@ -197,6 +199,8 @@ export const analyticsOverview =
       },
       {
         "label": "Klara Data AB",
+        "kind": "receipt",
+        "filter_address": "0xC0dA5fA2b7E1d3418c6b9A0fD2e3B4C5D6E7F809",
         "address": "0xC0dA5fA2b7E1d3418c6b9A0fD2e3B4C5D6E7F809",
         "spent": "87.25",
         "payments": 1,
@@ -207,7 +211,9 @@ export const analyticsOverview =
         "last_seen": "2026-07-09T10:00:00.000Z"
       },
       {
-        "label": "0x71C2E8a4D5f6093b1a7C8e2F4B6D0A9C3E5F7128",
+        "label": null,
+        "kind": "unknown",
+        "filter_address": "0x71C2E8a4D5f6093b1a7C8e2F4B6D0A9C3E5F7128",
         "address": "0x71C2E8a4D5f6093b1a7C8e2F4B6D0A9C3E5F7128",
         "spent": "12.50",
         "payments": 1,
@@ -218,6 +224,7 @@ export const analyticsOverview =
         "last_seen": "2026-07-10T12:30:00.000Z"
       }
     ],
+    "balance_scope": "all_accounts",
     "balance_by_day": [
       {
         "date": "2026-06-11",
@@ -390,6 +397,7 @@ export const analyticsOverviewEmpty =
     "by_day": [],
     "agents": [],
     "merchants": [],
+    "balance_scope": "all_accounts",
     "balance_by_day": []
   } satisfies AnalyticsOverviewResponse
 

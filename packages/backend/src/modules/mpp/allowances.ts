@@ -21,7 +21,7 @@ import { sumOpenReservedForBudgetDelegation } from '../../infra/repositories/sub
 import { readRemainingBudget } from '../../infra/chain/delegation-budget-reader.js'
 import { getChainClient } from '../../infra/chain/index.js'
 import { currentPeriodBounds } from '@haven_ai/core'
-import { findExpiredBudgetForToken } from '../budget-scope/expired-budget.js'
+import { findExpiredBudgetForToken } from '../budget-scope/index.js'
 import { toCanonicalAddress } from '../transactions/index.js'
 import type { AgentContext } from '../../middleware/agentAuth.js'
 import type { MppHandlerResult } from './types.js'

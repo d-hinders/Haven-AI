@@ -2,7 +2,8 @@
  * `/accounting` after #2868: the feed page keeps the sync rows and points at
  * Settings for the connection; the OAuth callback still lands here
  * (`routes/accounting-connections.ts` redirects to `/accounting?…`), so the
- * outcome query is forwarded to `/settings` verbatim — including
+ * outcome query is forwarded to the Business tab of Settings —
+ * `/settings?tab=business&…` (#4358) — including
  * `reason=unsupported_currency`, which Settings turns into a sentence naming
  * the supported ledger currencies (#2877).
  */
@@ -81,18 +82,18 @@ describe('/accounting after the connection moved to Settings (#2868)', () => {
   it('offers no Connect / Disconnect and points at Settings instead', () => {
     renderPage()
     expect(screen.queryByRole('button', { name: /^(Dis)?connect$/ })).toBeNull()
-    expect(screen.getByRole('link', { name: 'Open Settings' })).toHaveAttribute('href', '/settings')
+    expect(screen.getByRole('link', { name: 'Open Settings' })).toHaveAttribute('href', '/settings?tab=business')
     expect(screen.getByText('Manage your accounting connection in Settings.')).toBeInTheDocument()
     // Positive control: the feed itself is still here.
     expect(screen.getByRole('button', { name: 'Sync now' })).toBeInTheDocument()
   })
 
   it.each([
-    ['provider=fortnox&connect=connected', '/settings?provider=fortnox&connect=connected'],
-    ['provider=fortnox&connect=denied', '/settings?provider=fortnox&connect=denied'],
+    ['provider=fortnox&connect=connected', '/settings?provider=fortnox&connect=connected&tab=business'],
+    ['provider=fortnox&connect=denied', '/settings?provider=fortnox&connect=denied&tab=business'],
     [
       'provider=fortnox&connect=error&reason=unsupported_currency',
-      '/settings?provider=fortnox&connect=error&reason=unsupported_currency',
+      '/settings?provider=fortnox&connect=error&reason=unsupported_currency&tab=business',
     ],
   ])('forwards the callback query %s to Settings', async (query, target) => {
     searchParamsRef.current = new URLSearchParams(query)
@@ -104,12 +105,16 @@ describe('/accounting after the connection moved to Settings (#2868)', () => {
     searchParamsRef.current = new URLSearchParams('provider=fortnox&connect=connected')
     mockFeed.mockReturnValue(feed({ status: null, loading: true }))
     const { unmount } = renderPage()
-    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith('/settings?provider=fortnox&connect=connected'))
+    await waitFor(() =>
+      expect(mockReplace).toHaveBeenCalledWith('/settings?provider=fortnox&connect=connected&tab=business'),
+    )
     unmount()
     mockReplace.mockReset()
     withStatus(OFF_SELF_HOSTED)
     renderPage()
-    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith('/settings?provider=fortnox&connect=connected'))
+    await waitFor(() =>
+      expect(mockReplace).toHaveBeenCalledWith('/settings?provider=fortnox&connect=connected&tab=business'),
+    )
   })
 
   it('does not touch the URL without an outcome', () => {
@@ -235,7 +240,7 @@ describe('/accounting with the feed on (#2869)', () => {
     })
     renderPage()
     expect(screen.getByTestId('feed-summary')).toHaveAttribute('data-status', 'needs_reauthorisation')
-    expect(screen.getByRole('link', { name: en.accountingPage.summary.fixInSettings })).toHaveAttribute('href', '/settings')
+    expect(screen.getByRole('link', { name: en.accountingPage.summary.fixInSettings })).toHaveAttribute('href', '/settings?tab=business')
   })
 
   it('renders the retry counts from the status (#2866), with the exhausted explanation INLINE', () => {

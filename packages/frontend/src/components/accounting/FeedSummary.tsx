@@ -38,6 +38,15 @@ import { ACCOUNTED_SCOPE_WEBHOOKS_MANAGE } from './accounted-copy'
 /** Where the connection is managed (#2868): Settings owns Connect / Reconnect / Disconnect. */
 export const ACCOUNTING_SETTINGS_HREF = '/settings'
 
+/**
+ * The Settings links on this page land on the Business tab (#4359) — built
+ * with `URLSearchParams` beside the plain constant above, never appended to
+ * it (the OAuth forwarder composes its own query from
+ * `ACCOUNTING_SETTINGS_HREF`, and a constant that grows a `?tab=` would
+ * double it).
+ */
+const ACCOUNTING_SETTINGS_TAB_HREF = `/settings?${new URLSearchParams({ tab: 'business' })}`
+
 const TONE: Record<NonNullable<AccountingFeedStatus['destination']>['status'], StatusTone> = {
   connected: 'success',
   needs_reauthorisation: 'warning',
@@ -140,7 +149,7 @@ export function FeedSummary({ status }: { status: AccountingFeedStatus }) {
           {detail ? <p className="text-xs text-[var(--v2-ink-3)]">{detail}</p> : null}
         </div>
         <div className="shrink-0">
-          <Button variant={attention ? 'primary' : 'ghost'} href={ACCOUNTING_SETTINGS_HREF}>
+          <Button variant={attention ? 'primary' : 'ghost'} href={ACCOUNTING_SETTINGS_TAB_HREF}>
             {action}
           </Button>
         </div>

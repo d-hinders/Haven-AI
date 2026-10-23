@@ -5,6 +5,7 @@ contract: true
 covers:
   - packages/backend/src/middleware/owner-cli.ts
   - packages/backend/src/domain/user-signers.ts
+  - packages/backend/src/domain/x402-settlement-timing.ts
   - packages/backend/src/routes/user.ts
   - packages/frontend/src/components/PasskeyElsewhereHint.tsx
   - packages/backend/src/infra/repositories/merchants.ts
@@ -1382,8 +1383,9 @@ resolved differently) but has no remaining frontend caller.
 > **Re-verified unchanged (#4307, 2026-10-23 — card order only):** this diff
 > is presentation chrome only in `components/AccountSignersCard.tsx`. The
 > #3825 Settings link no longer leads the card: it moves below the signers
-> and their actions onto its own `Card.Section` — same href
-> (`/settings#signers`), same wording, the #3825 object note kept as a
+> and their actions onto its own `Card.Section` — same target (now
+> `/settings?tab=security#signers` since #4358 moved the signers onto
+> Settings' Security tab), same wording, the #3825 object note kept as a
 > comment — the one-signer warning now LEADS the card (same div, its `mt-4`
 > offset dropped), and the passkey helper text's offset goes `mt-1.5` to
 > `mt-2`. No signing step, signer-set gate, `pickSigningPath` branch, route
@@ -3873,3 +3875,23 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > on the card's affordances (this run of card notes, the #3812 owner-wallet
 > notice); nothing else in this document was re-read for it, and
 > `last-verified` stays 2026-10-22.
+
+> **Re-verified unchanged (#4371, 2026-10-23 — a JSDoc in the SDK client).**
+> The `getPostPurchaseAllowanceSummary` JSDoc in `packages/sdk/src/client.ts`
+> keeps that it reuses the read path `getAllowances` uses, and drops the claim that
+> #1306's catalog-purchase preflight reads it too: since #3054 that preflight
+> calls `POST /machine-payments/budget-precheck`. JSDoc only: no signing,
+> settlement, budget read or authority path changes. Scope of this note: that
+> comment. Nothing else in this document was re-read for it.
+
+> **Re-verified unchanged (#4379, 2026-10-23 — import paths and one constant's
+> home).** `modules/x402/delegation-authorize.ts` and
+> `modules/mpp/budget-precheck.ts` now import `refuse`, the refusal-ledger
+> classifiers and the prepare-failure helpers through `../payments/index.js`
+> rather than private payments files. `MAX_SETTLEMENT_WINDOW_SECONDS` (600) is
+> now defined in `domain/x402-settlement-timing.ts` and re-exported unchanged
+> by `modules/x402/x402-delegation.ts`, which still clamps the settlement
+> child's window with it; the new file joins the paths this document's front
+> matter covers, and the money-path globs. No delegation, caveat, enforcer term, settlement
+> window, budget pre-check or refusal changes. Scope of this note: those lines.
+> Nothing else in this document was re-verified.

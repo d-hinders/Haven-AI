@@ -315,6 +315,11 @@ export function createPerTrialResolver(deps: PerTrialResolverDeps): PerTrialReso
   const pollMs = deps.consistencyPollMs ?? 2_000
   const sleep = deps.sleep ?? defaultSleep
   const budgetEvents: BudgetIncreaseEvent[] = []
+  // The prior trial whose consistency wait already timed out. A timeout makes
+  // ONE trial red; every later trial must not wait on the same expectation
+  // again — on 2026-10-23 one unmet wait turned into a two-minute timeout on
+  // all 13 remaining trials, and four tasks never ran at all.
+  let timedOutPriorKey: string | undefined
   let lastRemaining: bigint | undefined
 
   const readRemaining = async (use: BudgetUse): Promise<bigint> => {
@@ -355,8 +360,17 @@ export function createPerTrialResolver(deps: PerTrialResolverDeps): PerTrialReso
         if (known) derivedSpend = total
       }
     }
-    const spend = derivedSpend ?? 0n
-    const priorSpendSizeUnknown = prior?.settled === true && derivedSpend === undefined
+    // EIP-3009 bridge (#4205): the budget is debited by the FUNDING leg, a
+    // Haven-submitted UserOp that confirms before the agent signs the header,
+    // so by the time the trial ends the budget read already reflects it. And
+    // when the delegate EOA still held USDC, the merchant is paid without any
+    // new funding leg, so the budget never moves at all (2026-10-23, run
+    // 39914610364). Either way there is nothing to wait for.
+    const priorWasBridge = prior?.record.graders.some((g) => g.name === 'eip3009_settlement_shape' && g.pass) ?? false
+    const priorKey = prior ? `${prior.taskId}#${prior.trial}` : undefined
+    const skipWait = priorWasBridge || (priorKey !== undefined && priorKey === timedOutPriorKey)
+    const spend = skipWait ? 0n : (derivedSpend ?? 0n)
+    const priorSpendSizeUnknown = !skipWait && prior?.settled === true && derivedSpend === undefined
     if ((spend > 0n || priorSpendSizeUnknown) && lastRemaining !== undefined) {
       const deadline = Date.now() + timeoutMs
       for (;;) {
@@ -384,6 +398,7 @@ export function createPerTrialResolver(deps: PerTrialResolverDeps): PerTrialReso
           break
         }
         if (Date.now() > deadline) {
+          timedOutPriorKey = priorKey
           throw new Error(
             spend > 0n
               ? `budget consistency timeout: the backend still reports ${remaining} after the previous ` +

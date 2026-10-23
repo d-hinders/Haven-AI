@@ -87,6 +87,15 @@ WITHIN tiers only (deterministic per seed, recorded in the report);
 same canonical set — tier order and any `--shuffle` are preserved (#4218,
 see Other flags).
 
+**Consistency guard, two limits (2026-10-23, run 39914610364):** after a
+passing EIP-3009 bridge trial (`eip3009_settlement_shape` passed) the guard
+does not wait: the funding leg confirms before the agent signs the header,
+so the budget read already reflects it, and when the delegate EOA still held
+USDC no funding leg runs and the budget never moves. And a wait that times
+out makes ONE trial red: later trials do not wait on the same expectation
+again (that run lost four whole tasks to one unmet wait repeated thirteen
+times).
+
 **Consistency guard:** before resolving each trial, the resolver waits
 (bounded, 120s default) until the backend budget read reflects the previous
 trial's settled spend — `/allowances` can lag the observer node. When the

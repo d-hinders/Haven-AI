@@ -27,7 +27,7 @@ import {
 import {
   ownAccountNameForAddress,
   resolveCounterpartyName,
-} from '../modules/transactions/counterparty-name.js'
+} from '../modules/transactions/index.js'
 
 /**
  * `GET /analytics/overview` (#2946, slice B of epic #2944).

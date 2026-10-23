@@ -46,18 +46,11 @@ import { MAX_SETTLEMENT_WINDOW_SECONDS } from './x402-delegation.js'
 
 /**
  * Clock-skew allowance between Postgres' `created_at` and the chain's block
- * timestamps. Generous on purpose: this bound exists to EXCLUDE settlements
- * from unrelated windows, so widening it costs a little precision, while
- * narrowing it could reject a genuine payment — which on this path means
- * silently dropping it out of the user's bookkeeping.
- *
- * #3420: exported — the agent-facing status projection
- * (`agent-payment-status.ts`) derives its terminal cutover from THIS constant
- * rather than restating 120: the instant past which no verification is
- * possible is the verifier's own `notAfterSec`, and a second copy of the
- * number would let the two disagree silently.
+ * timestamps — defined in `domain/x402-settlement-timing.ts` (#4379), where
+ * `agent-payment-status.ts` reads it too.
  */
-export const CLOCK_SKEW_SECONDS = 120
+import { CLOCK_SKEW_SECONDS } from '../../domain/x402-settlement-timing.js'
+export { CLOCK_SKEW_SECONDS }
 
 /**
  * How far apart two intents' `created_at` values can be and still have

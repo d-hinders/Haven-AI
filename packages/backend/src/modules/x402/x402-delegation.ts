@@ -33,8 +33,9 @@ import { getDelegationEnvironment, delegationSigningPayload } from '../../rails/
 
 const ERC20_IFACE = new Interface(['function transfer(address to, uint256 amount) returns (bool)'])
 
-/** Cap on how long a settlement grant may live, whatever the merchant asks. */
-export const MAX_SETTLEMENT_WINDOW_SECONDS = 600 // the #715 discipline carries over
+/** Cap on how long a settlement grant may live — defined in `domain/x402-settlement-timing.ts` (#4379). */
+import { MAX_SETTLEMENT_WINDOW_SECONDS } from '../../domain/x402-settlement-timing.js'
+export { MAX_SETTLEMENT_WINDOW_SECONDS }
 
 /**
  * Domain-separated salt that makes a settlement child INTENT-UNIQUE (#2094).

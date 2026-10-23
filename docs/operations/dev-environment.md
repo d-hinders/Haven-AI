@@ -837,6 +837,19 @@ Isolation rules that are non-negotiable for a payments product:
  > budget, so local behaviour is unchanged. Scope of this re-read: this
  > bullet's catalog paragraphs; nothing else in the document was re-read for
  > it, and `last-verified` is not bumped.
+ > **Re-verified #4341 (2026-10-23):** #4341 changes what happens when a
+ > probe's outcome cannot be STORED, in `modules/catalog/merchant-catalog.ts`
+ > and `modules/catalog/catalog-discovery.ts`. A row whose verified write
+ > fails (e.g. a challenge string carrying a NUL byte, which Postgres
+ > rejects) is now recorded as a miss and degrades after the usual three;
+ > `probeCatalogEntry` logs a thrown parse error with the row's URL and the
+ > message; and a discovery candidate whose write fails is skipped and
+ > counted (`failedWrite`) while the run reaches later candidates. No env
+ > scalar, workflow, dev service, port or seeded row in this document
+ > changes, and local dev behaviour with the migration-seeded rows is
+ > unchanged (their challenges are storable). Scope of this re-read: this
+ > bullet's catalog paragraphs; nothing else in the document was re-read for
+ > it, and `last-verified` is not bumped.
  - **Owner company details (#3332)** — `HAVEN_OWNER_COMPANY_DETAILS` (strict
   boolean) gates `/user/company-details*`, the additive `parties.buyer`
   field on payment evidence/receipts, and the Settings → Company details

@@ -163,7 +163,7 @@ vi.mock('@/components/ui/Toast', async () => {
 })
 
 import DashboardClient from '../DashboardClient'
-import type { DashboardAgentPreview } from '@/types/dashboard'
+import type { DashboardAgentPreview, DashboardOverviewResponse } from '@/types/dashboard'
 
 const SAFE = {
   id: 'safe-1',
@@ -366,12 +366,41 @@ describe('DashboardClient', () => {
     const actions = within(balance)
       .getAllByRole('button')
       .map((button) => button.textContent)
-    expect(actions).toEqual(['Receive', 'Send'])
+    // #4307 owner decision (a): Send, then Receive, everywhere — the order
+    // the account header already had.
+    expect(actions).toEqual(['Send', 'Receive'])
     // Primary is the brand fill; the secondary is the ghost outline.
     expect(within(balance).getByRole('button', { name: 'Send' }).className).toContain('bg-[var(--v2-brand)]')
     expect(within(balance).getByRole('button', { name: 'Receive' }).className).not.toContain(
       'bg-[var(--v2-brand)]',
     )
+  })
+
+  it('renders with a partial overview that has neither totals nor change (#4307)', () => {
+    // The screenshot harness's empty fixture answers /dashboard/overview
+    // with FIXTURE_EMPTY_FALLBACK — no `totals`, no `change`. The client
+    // must default every nested read instead of crashing on `.sek`.
+    mockBaseState([], { onboardingProgress: { hasFirstAgentPayment: true } })
+    mockUseDashboardOverview.mockReturnValue({
+      data: {
+        actionableApprovals: 0,
+        pendingApprovals: 0,
+        onboardingProgress: { hasFirstAgentPayment: true },
+        agents: [],
+        transactions: [],
+      } as unknown as DashboardOverviewResponse,
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    })
+    render(<DashboardClient />)
+
+    // The page is up — no error boundary — and the money card renders its
+    // defaults: zero total, no change line.
+    const balance = screen.getByRole('region', { name: 'Balance' })
+    expect(balance).toBeInTheDocument()
+    expect(within(balance).getByRole('button', { name: 'Send' })).toBeInTheDocument()
+    expect(within(balance).getByText('$0.00')).toBeInTheDocument()
   })
 
   it('keeps "Send" primary and enabled while the balance is loading or failed to read (#4167)', () => {

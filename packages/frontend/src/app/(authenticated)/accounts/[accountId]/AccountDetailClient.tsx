@@ -525,7 +525,11 @@ export default function AccountDetailClient() {
                             {row.symbol}
                           </span>
                         </span>
-                        <span className="font-mono text-sm text-[var(--v2-ink)] v2-tabular">
+                        {/* #4307: tabular sans, NOT `font-mono` — the amount sits
+                            beside proportional fiat, and the freshness marker
+                            inherited the mono. Grouping stays with the wire
+                            (`formatTokenValue` serves an ungrouped string). */}
+                        <span className="text-sm text-[var(--v2-ink)] v2-tabular">
                           {/* #4197: at most 4 decimals, rounded down by
                               string truncation; the title carries the
                               amount AS SERVED (up to 6 decimals). The title

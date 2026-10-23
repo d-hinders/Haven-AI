@@ -307,24 +307,30 @@ export default function DashboardClient() {
   // STALE set of totals still diffs normally. `change.balancesFreshness`
   // also tells the hero to render its subtle stale indicator beside the
   // headline figure.
+  // #4307: every nested read is guarded, not just `overview` — a PARTIAL
+  // overview body (the screenshot harness's empty fixture answers
+  // `/dashboard/overview` with `FIXTURE_EMPTY_FALLBACK`, which carries
+  // neither `totals` nor `change`) crashed the client on `.sek`. The child
+  // helpers (`dashboard-attention.ts`, `AgentsSection`, `MoneyPanel`) were
+  // already defaulting with `??`.
   const totalFiat = currency === 'EUR'
-    ? (overview?.totals.eur ?? 0)
+    ? (overview?.totals?.eur ?? 0)
     : currency === 'SEK'
-      ? (overview?.totals.sek ?? 0)
-      : (overview?.totals.usd ?? 0)
-  const sekChangeUnavailable = currency === 'SEK' && overview?.change.sekAmount == null
-  const balancesFreshness = overview?.change.balancesFreshness
+      ? (overview?.totals?.sek ?? 0)
+      : (overview?.totals?.usd ?? 0)
+  const sekChangeUnavailable = currency === 'SEK' && overview?.change?.sekAmount == null
+  const balancesFreshness = overview?.change?.balancesFreshness
   const changeUnavailable = balancesFreshness?.status === 'unavailable'
   const changeAmount = currency === 'EUR'
-    ? (overview?.change.eurAmount ?? 0)
+    ? (overview?.change?.eurAmount ?? 0)
     : currency === 'SEK'
-      ? (overview?.change.sekAmount ?? 0)
-      : (overview?.change.usdAmount ?? 0)
+      ? (overview?.change?.sekAmount ?? 0)
+      : (overview?.change?.usdAmount ?? 0)
   const changePercent = currency === 'EUR'
-    ? (overview?.change.eurPercent ?? 0)
+    ? (overview?.change?.eurPercent ?? 0)
     : currency === 'SEK'
-      ? (overview?.change.sekPercent ?? 0)
-      : (overview?.change.usdPercent ?? 0)
+      ? (overview?.change?.sekPercent ?? 0)
+      : (overview?.change?.usdPercent ?? 0)
   const overviewUnavailable = Boolean(overviewError && !overview)
   // Render the guide whenever the user has at least one account and either:
   // (a) the first agent payment hasn't happened and the steps aren't hidden
@@ -507,7 +513,8 @@ export default function DashboardClient() {
       unavailable={overviewUnavailable}
       currency={currency}
       totalFiat={totalFiat}
-      changeAvailable={Boolean(overview?.change.available)}
+      // #4307: guarded — a partial overview has no `change` at all.
+      changeAvailable={Boolean(overview?.change?.available)}
       sekChangeUnavailable={sekChangeUnavailable}
       balancesFreshness={balancesFreshness}
       changeUnavailable={changeUnavailable}

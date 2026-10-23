@@ -355,13 +355,26 @@ describe('AccountDetailClient', () => {
       // The token amount is its own right-aligned cell in a justified row —
       // not inline text after the symbol ("USDC 8.225255", the old shape).
       // #4197: it renders at most 4 decimals (string truncation) and carries
-      // the served amount in its title; the mono cell is the outer span.
+      // the served amount in its title. #4307: the cell is tabular SANS —
+      // `font-mono` is gone (it set the freshness marker too, beside
+      // proportional fiat).
       const amount = within(section).getByText('42.00')
       expect(amount).toHaveAttribute('title', '42.00')
-      expect(amount.parentElement).toHaveClass('font-mono')
+      expect(amount.parentElement).not.toHaveClass('font-mono')
+      expect(amount.parentElement).toHaveClass('v2-tabular')
       const row = amount.closest('div')
       expect(row).toHaveClass('justify-between')
       expect(within(row as HTMLElement).getByText('USDC')).toBeInTheDocument()
+    })
+
+    it('the header lists Send, then Receive (#4307 owner decision a)', () => {
+      render(<AccountDetailClient />)
+      // DOM order, not styling: Send precedes Receive everywhere.
+      const send = screen.getByRole('button', { name: 'Send' })
+      const receive = screen.getByRole('button', { name: 'Receive' })
+      expect(
+        send.compareDocumentPosition(receive) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy()
     })
 
     it('Money in and Money out sit on ONE row beside their direction icons (#4197)', () => {

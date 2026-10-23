@@ -804,3 +804,67 @@ describe('AccountActivityTab — the row badge (#4288)', () => {
     expect(screen.getByText('Recovered')).toBeInTheDocument()
   })
 })
+
+describe('AccountActivityTab — the shared ledger row\u2019s initiator (#4307)', () => {
+  function renderWithRow(overrides: Partial<AggregatedTransaction>) {
+    feedMock.mockImplementation(() => ({
+      ...DEFAULT_FEED,
+      transactions: [tx(overrides)],
+      total: 1,
+      loadMore: vi.fn(),
+      refresh: vi.fn(),
+    }))
+    renderTab()
+    return ledgerRows()[0]
+  }
+
+  it('an outgoing owner send shows "You" — the row the account page used to leave unnamed', () => {
+    // The production shape #4099's acceptance names: the backend stamps
+    // `initiatedBy: 'human'` for a matched owner send, and the account tab
+    // now renders `transactionInitiator` through the shared row, so the
+    // subline says "You" exactly as /transactions does.
+    const row = renderWithRow({ direction: 'out', initiatedBy: 'human' })
+
+    expect(row).toHaveTextContent('You')
+    expect(row).not.toHaveTextContent('Unknown')
+  })
+
+  it('an unattributed outgoing row shows "Unknown"', () => {
+    const row = renderWithRow({ direction: 'out' })
+
+    expect(row).toHaveTextContent('Unknown')
+    expect(row).not.toHaveTextContent('You')
+  })
+
+  it('an inbound row carries no initiator', () => {
+    const row = renderWithRow({ direction: 'in' })
+
+    expect(row).not.toHaveTextContent('You')
+    expect(row).not.toHaveTextContent('Unknown')
+  })
+
+  it('an own transfer folds as on /transactions', () => {
+    // The fold is the shared row's (`tx.ownTransfer`): one row, the neutral
+    // two-way mark, and the actor "You" for an owner-recorded move.
+    const row = renderWithRow({
+      direction: 'out',
+      initiatedBy: 'human',
+      ownTransfer: {
+        toAccountId: 'safe-2',
+        toAccountName: 'Reserve',
+        toAccountAddress: '0x' + 'dd'.repeat(20),
+      },
+    })
+
+    expect(row).toHaveTextContent('Moved between your accounts')
+    expect(row).toHaveTextContent('You')
+    expect(row).toHaveTextContent('Reserve')
+  })
+
+  it('an agent-initiated send names the agent, as on /transactions', () => {
+    const row = renderWithRow({ direction: 'out', agentName: 'Research agent' })
+
+    expect(row).toHaveTextContent('Research agent')
+    expect(row).not.toHaveTextContent('Unknown')
+  })
+})

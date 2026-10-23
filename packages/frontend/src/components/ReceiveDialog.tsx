@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from 'react'
 import QRCode from 'qrcode'
 import { Check, Clipboard, CreditCard, Droplet, X } from 'lucide-react'
 import { resolveChainOrNull } from '@/lib/chains'
-import { truncate } from '@/lib/format'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import type { SmartAccount } from '@/context/AuthContext'
 import { getFaucetUrl } from '@haven_ai/core'
@@ -289,14 +288,14 @@ export default function ReceiveDialog({ open, account, accounts, onClose }: Rece
                     <img
                       src={qrDataUrl}
                       alt={`QR code for ${selectedAccount.name} on ${chainConfig.name}`}
-                      className="h-[220px] w-[220px] rounded-lg border border-[var(--v2-border)]"
+                      className="h-[220px] w-[220px] rounded-lg"
                     />
                   ) : (
                     <Skeleton className="h-[220px] w-[220px] rounded-lg" />
                   )}
-                  <p className="mt-3 text-center text-xs text-[var(--v2-ink-3)]">
-                    QR code for {truncate(accountAddress)}
-                  </p>
+                  {/* #4307: one frame (this box) and no visible caption — the
+                      alt text names the code for screen readers, and the
+                      address and Copy button below say what it holds. */}
                 </div>
               </div>
 

@@ -85,6 +85,18 @@ covers:
 last-verified: "2026-10-23"
 ---
 
+> **Re-verified unchanged (#4319, 2026-10-23, a comment-only doc comment in
+> `packages/backend/src/modules/payments/agent-payment-status.ts`).** The only
+> covered file this PR touches is `agent-payment-status.ts`: the #3475 doc
+> comment above `merchant_settlement_recorded` gains one clause naming the
+> #4319 proof ladder (Tier 1/Tier 2 on the generic attach path and the
+> backfill) among the writers of the recorded hash. Wording only: no
+> interface field, type, route, status predicate, `haven_*` tool schema,
+> strict-input list, `next_tool` value or expected-context version moves, and
+> the signer contract is untouched. Scope of this note: that one comment.
+> Nothing else in this document was re-verified, and `last-verified` already
+> reads 2026-10-23 and is left as is.
+
 > **Re-verified unchanged (#4315, 2026-10-23, a comment-only doc comment in
 > `packages/signer/src/audit.ts`).** The only covered file this PR touches is
 > `packages/signer/src/audit.ts`: the #3728 doc comment above the

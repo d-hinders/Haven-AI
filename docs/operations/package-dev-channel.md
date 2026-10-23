@@ -31,6 +31,19 @@ covers:
 last-verified: "2026-10-23"
 ---
 
+> **Re-verified unchanged (#4319, 2026-10-23, one added backend feature flag
+> in `packages/backend/src/config.ts`).** The only covered file this PR
+> touches is `config.ts`: it adds `eip3009ReceiptAttribution`, a
+> `parseBooleanFlag` entry for the new `HAVEN_EIP3009_RECEIPT_ATTRIBUTION`
+> env scalar (default off, unrecognised values refuse the boot — #3015's
+> fail-closed family). It does not touch `HAVEN_CONNECTOR_CHANNEL`, the
+> credential-file shape, the consent inputs, `chainRpcsFromEnv`, any version
+> constant, or any field this document names; nothing about channel
+> selection, dist-tag resolution, the snapshot path or publish behaviour
+> moves. Scope of this note: confirming that. Nothing else in this document
+> was re-verified, and `last-verified` already reads 2026-10-23 and is left
+> as is.
+
 > **Re-verification (#3819, 2026-10-09):** coupled through
 > `.github/workflows/publish.yml`: the dependency-presence gate's ledger
 > (`dep_state`) is now a space-delimited `pkg=state` string with an

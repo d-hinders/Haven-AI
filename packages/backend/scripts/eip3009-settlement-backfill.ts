@@ -13,7 +13,11 @@
  * receipt attribution (`observeEip3009ReceiptSettlement`), labelled
  * `receipt`. GATED by `HAVEN_EIP3009_RECEIPT_ATTRIBUTION` (default off);
  * with the flag off the run counts `disabled` and writes nothing for those
- * rows. `protocol_receipt_header`-only rows are counted, never decoded —
+ * rows. Runs ONLY for rows with no stored X-PAYMENT header (Tier 1 is
+ * preferred wherever one exists — a weaker receipt record would pin the one
+ * hash the CAS writer allows), and rows with a final refused verdict
+ * (`refused_ambiguous` / `refused_mismatch`) are never re-checked (limit 7).
+ * `protocol_receipt_header`-only rows are counted, never decoded —
  * the issue defers that fallback to a later slice.
  *
  * Run `--dry-run` FIRST (the default): per tier and verdict counts, nothing
@@ -101,6 +105,23 @@ async function main(): Promise<void> {
   const tier1: Record<string, number> = {}
   const tier2: Record<string, number> = {}
   let receiptHeaderOnly = 0
+  let refusedFinal = 0
+
+  /** #4319 limit 7: the payment's persisted receipt-attribution verdict, when one is stored. */
+  const storedVerdict = (metadata: BackfillRow['machine_metadata']): string | null => {
+    let parsed: Record<string, unknown> = {}
+    if (metadata && typeof metadata === 'string') {
+      try {
+        parsed = JSON.parse(metadata) as Record<string, unknown>
+      } catch {
+        parsed = {}
+      }
+    } else if (metadata && typeof metadata === 'object') {
+      parsed = metadata
+    }
+    const verdict = parsed.merchant_settlement_receipt_verdict
+    return typeof verdict === 'string' ? verdict : null
+  }
 
   for (const row of rows) {
     const intent = toIntent(row)
@@ -117,6 +138,20 @@ async function main(): Promise<void> {
     }
 
     if (recorded) continue
+    // Owner decision: Tier 1 is preferred wherever a signed header exists —
+    // the receipt hash runs ONLY for rows with NO stored header. A weaker
+    // receipt record on a header-holding row would pin the one hash the CAS
+    // writer allows and permanently pre-empt a later Tier 1 (`hash_taken`).
+    if (row.payment_proof_header) continue
+    // Limit 7: a final refused receipt verdict is never re-checked — every
+    // `--write` run would otherwise re-verify `refused_ambiguous` /
+    // `refused_mismatch` rows against the chain. (Tier 1 above still runs:
+    // the refusal is the receipt path's, not Tier 1's.)
+    const verdict = storedVerdict(row.machine_metadata)
+    if (verdict === 'refused_ambiguous' || verdict === 'refused_mismatch') {
+      refusedFinal += 1
+      continue
+    }
     const candidate = receiptPayloadTransaction(row.protocol_receipt_payload)
     if (!candidate) continue
     const t2 = await observeEip3009ReceiptSettlement(intent, candidate, { dryRun: !WRITE })
@@ -134,6 +169,7 @@ async function main(): Promise<void> {
   console.log(`tier 1 (stored header) outcomes: ${JSON.stringify(tier1)}`)
   console.log(`tier 2 (receipt hash) outcomes: ${JSON.stringify(tier2)}`)
   console.log(`rows carrying only protocol_receipt_header (not decoded in this slice): ${receiptHeaderOnly}`)
+  console.log(`rows with a final refused receipt verdict (never re-checked): ${refusedFinal}`)
   await getPool().end()
   // eslint-disable-next-line n/no-process-exit
   process.exit(0)

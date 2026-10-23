@@ -204,6 +204,45 @@ async function receiptVerdict(id: string): Promise<string | null> {
 const reportFunding = (agentId: string, paymentId: string, funding: string, extra: Record<string, unknown> = {}) =>
   attachMachinePaymentEvidence({ agentId, paymentId, rail: 'x402', txHash: funding, resourceUrl: RESOURCE, ...extra })
 
+/** The intent literal the direct Tier 2 observe calls take. */
+const tier2Intent = (id: string, agentId: string, funding: string) => ({
+  id,
+  agent_id: agentId,
+  chain_id: 84532,
+  token_address: TOKEN,
+  to_address: DELEGATE,
+  amount_raw: AMOUNT_RAW,
+  status: 'confirmed',
+  tx_hash: funding,
+  source: 'x402',
+  payment_rail: 'x402',
+  execution_rail: 'delegation',
+  x402_merchant_address: MERCHANT,
+  machine_metadata: { settlement_scheme: 'eip3009' },
+  confirmed_at: new Date().toISOString(),
+})
+
+/** A delegate-SIGNED X-PAYMENT header naming `nonce` (the #3925 proof shape). */
+async function signedHeaderFor(nonce: string): Promise<string> {
+  const wallet = DELEGATE_WALLET
+  const authorization = { from: wallet.address, to: MERCHANT, value: AMOUNT_RAW, validAfter: '0', validBefore: '9999999999', nonce }
+  const signature = await wallet.signTypedData(
+    { name: 'USDC', version: '2', chainId: 84532, verifyingContract: TOKEN },
+    {
+      TransferWithAuthorization: [
+        { name: 'from', type: 'address' },
+        { name: 'to', type: 'address' },
+        { name: 'value', type: 'uint256' },
+        { name: 'validAfter', type: 'uint256' },
+        { name: 'validBefore', type: 'uint256' },
+        { name: 'nonce', type: 'bytes32' },
+      ],
+    },
+    { ...authorization, value: BigInt(AMOUNT_RAW), validAfter: 0n, validBefore: 9999999999n },
+  )
+  return Buffer.from(JSON.stringify({ payload: { signature, authorization } }), 'utf8').toString('base64')
+}
+
 describeDb('eip3009 proof ladder (#4319)', () => {
   beforeAll(async () => {
     await initDbHarness()
@@ -512,5 +551,127 @@ describeDb('eip3009 proof ladder (#4319)', () => {
     )
     expect(outcome.outcome).toBe('disabled')
     expect(await recordedHash(id)).toBeNull()
+  })
+
+  it('a re-attach with no input header runs Tier 1 from the STORED header — the row holds the strongest proof', async () => {
+    const { agentId, userId } = await seedAgent()
+    const { id, funding } = await seedFunded({ agentId, userId })
+    const headerNonce = `0x${'9'.repeat(64)}`
+    const settle = `0x${'7'.repeat(64)}`
+    mockChain(
+      {
+        [funding.toLowerCase()]: { funding: FUNDING_BLOCK },
+        [settle.toLowerCase()]: settleReceipt(settle, { burns: [headerNonce] }),
+      },
+      [authorizationUsedLog(DELEGATE, headerNonce, settle)],
+    )
+    // The header is ALREADY on the evidence row (an earlier attach); this
+    // report carries none — the ladder must still find and use it. Before
+    // the fix the injection dropped it (`inputHeader ?? null`), answered
+    // `no_header`, and handed the row to Tier 2.
+    await seedEvidenceBase(id, agentId, { header: await signedHeaderFor(headerNonce) })
+
+    await reportFunding(agentId, id, funding)
+
+    expect(await recordedHash(id)).toBe(settle)
+    const metadata = (await readIntent(id)).machine_metadata
+    expect(metadata.merchant_settlement_nonce_bound).toBe(true)
+    expect(feedSettledPaymentBestEffort).toHaveBeenCalledTimes(1)
+  })
+
+  it('a header-holding payment never falls through to Tier 2, even when Tier 1 does not record', async () => {
+    const { agentId, userId } = await seedAgent()
+    const { id, funding } = await seedFunded({ agentId, userId })
+    const settle = `0x${'8'.repeat(64)}`
+    // The header is signed and stored, but the scan finds NO burn of its
+    // nonce — Tier 1 answers `not_found` and records nothing. A valid
+    // receipt is ALSO reported: the owner's gate must keep Tier 2 off
+    // anyway — a weaker receipt record would pin the one hash the CAS
+    // writer allows and pre-empt a later Tier 1 (`hash_taken`).
+    mockChain({
+      [funding.toLowerCase()]: { funding: FUNDING_BLOCK },
+      [settle.toLowerCase()]: settleReceipt(settle, { burns: [`0x${'5'.repeat(64)}`] }),
+    })
+
+    await reportFunding(agentId, id, funding, {
+      paymentProofHeader: await signedHeaderFor(`0x${'9'.repeat(64)}`),
+      protocolReceiptPayload: JSON.stringify({ transaction: settle }),
+    })
+
+    expect(await recordedHash(id)).toBeNull()
+    // No receipt-attribution verdict either — Tier 2 never ran (under the
+    // old fall-through it would have recorded the settlement, labelled
+    // `receipt`).
+    expect(await receiptVerdict(id)).toBeNull()
+    const receiptsRead = getTransactionReceipt.mock.calls.map((c) => String(c[0]).toLowerCase())
+    expect(receiptsRead).not.toContain(settle)
+    // The evidence report itself still stands and the feed still fires once.
+    expect(feedSettledPaymentBestEffort).toHaveBeenCalledTimes(1)
+  })
+
+  it('the wrong merchant refuses through the Tier 2 ladder (the verifier names the payee)', async () => {
+    const { agentId, userId } = await seedAgent()
+    const { id, funding } = await seedFunded({ agentId, userId })
+    const settle = `0x${'3'.repeat(64)}`
+    const wrongMerchant = '0x00000000000000000000000000000000000000bb'
+    mockChain({
+      [funding.toLowerCase()]: { funding: FUNDING_BLOCK },
+      [settle.toLowerCase()]: settleReceipt(settle, { burns: [`0x${'7'.repeat(64)}`], to: wrongMerchant }),
+    })
+    const outcome = await observeEip3009ReceiptSettlement(tier2Intent(id, agentId, funding), settle, {
+      flagEnabled: true,
+    })
+    expect(outcome.outcome).toBe('refused_mismatch')
+    expect(await recordedHash(id)).toBeNull()
+    expect(await receiptVerdict(id)).toBe('refused_mismatch')
+  })
+
+  it('a receipt that burns no nonce for this payment’s delegate refuses (the wrong-delegate shape)', async () => {
+    const { agentId, userId } = await seedAgent()
+    const { id, funding } = await seedFunded({ agentId, userId })
+    const settle = `0x${'4'.repeat(64)}`
+    // The transfer is otherwise perfect — right token, right merchant, right
+    // amount — but the transaction carries NO AuthorizationUsed burn for the
+    // delegate: the receipt names a pull by someone else's authorization.
+    mockChain({
+      [funding.toLowerCase()]: { funding: FUNDING_BLOCK },
+      [settle.toLowerCase()]: settleReceipt(settle, { burns: [] }),
+    })
+    const outcome = await observeEip3009ReceiptSettlement(tier2Intent(id, agentId, funding), settle, {
+      flagEnabled: true,
+    })
+    expect(outcome.outcome).toBe('refused_mismatch')
+    expect(String((outcome as { reason: string }).reason)).toContain('burned no AuthorizationUsed nonce')
+    expect(await recordedHash(id)).toBeNull()
+    expect(await receiptVerdict(id)).toBe('refused_mismatch')
+  })
+
+  it('a settlement hash another payment already holds is refused (hash_taken), not stolen', async () => {
+    const { agentId, userId } = await seedAgent()
+    const { id: aId, funding: aFunding } = await seedFunded({ agentId, userId })
+    const { id: bId, funding: bFunding } = await seedFunded({ agentId, userId })
+    const settle = `0x${'6'.repeat(64)}`
+    // Block geometry that passes limits 4–5: A funded at 100, the candidate
+    // burned at 105, and the sibling funded LATER (110) — so no same-shape
+    // sibling makes the pull ambiguous and the writer itself is reached.
+    mockChain({
+      [aFunding.toLowerCase()]: { funding: 100 },
+      [bFunding.toLowerCase()]: { funding: 110 },
+      [settle.toLowerCase()]: settleReceipt(settle, { burns: [`0x${'5'.repeat(64)}`], blockNumber: 105 }),
+    })
+    // The sibling ALREADY holds this exact hash (its own earlier record):
+    // the CAS writer answers `hash_taken` for A — A writes nothing and
+    // persists the refusal, B's record is untouched.
+    await recordEip3009MerchantSettlement({ txHash: settle, intentId: bId, agentId, proof: { nonceBound: true, nonceDerived: true } })
+
+    const outcome = await observeEip3009ReceiptSettlement(tier2Intent(aId, agentId, aFunding), settle, {
+      flagEnabled: true,
+    })
+    expect(outcome.outcome).toBe('refused_mismatch')
+    expect(String((outcome as { reason: string }).reason)).toContain('already recorded for another payment')
+    expect(await recordedHash(aId)).toBeNull()
+    expect(await recordedHash(bId)).toBe(settle)
+    expect(await receiptVerdict(aId)).toBe('refused_mismatch')
+    expect(await receiptVerdict(bId)).toBeNull()
   })
 })

@@ -712,28 +712,43 @@ export async function attachMachinePaymentEvidence(
   //   Tier 1 — the X-PAYMENT header (input, or the row just attached):
   //   delegate-signed nonce, recorded nonce-bound through the standard seam.
   //   Tier 2 — the stored receipt's transaction hash, under the flag and the
-  //   seven limits, labelled `receipt`. A final refused verdict is never
+  //   seven limits, labelled `receipt` — and ONLY when no header is stored:
+  //   a header-holding payment gets Tier 1 or nothing, never a weaker
+  //   receipt record that would pin the one hash the CAS writer allows and
+  //   pre-empt a later Tier 1. A final refused verdict is never
   //   re-checked. Both best-effort around the attach: a ladder refusal does
   //   NOT fail the evidence post — the report itself is valid — but the feed
   //   still fires exactly once, AFTER whatever the ladder wrote.
   if (isEip3009BridgePayment(payment)) {
     try {
       const inputHeader = cleanHeaderValue(input.paymentProofHeader)
+      // One proofs read serves both tiers: the STORED header must reach
+      // Tier 1 even on a re-attach that carries no input header (the row
+      // holds the strongest proof), and Tier 2 reads the receipt payload
+      // from the same row.
+      const storedProofs = inputHeader ? null : await findEvidenceProofsForIntent(payment.id, input.agentId)
+      const headerForLadder = inputHeader ?? storedProofs?.payment_proof_header ?? null
       let tier1Recorded = false
-      if (inputHeader || (await findEvidenceProofsForIntent(payment.id, input.agentId))?.payment_proof_header) {
+      if (headerForLadder) {
         const tier1 = await recordTier1SettlementFromStoredHeader(payment, {
           findProofs: async () => ({
-            payment_proof_header: inputHeader ?? null,
+            payment_proof_header: headerForLadder,
           }),
         })
         tier1Recorded = tier1.outcome === 'recorded'
       }
       if (
         !tier1Recorded &&
+        // Owner decision: Tier 1 is preferred wherever a signed header
+        // exists — Tier 2 (the receipt hash) runs ONLY when no header is
+        // stored. The CAS writer allows ONE hash per payment, so a weaker
+        // receipt record would pin the settlement hash and permanently
+        // pre-empt a later Tier 1 sweep/backfill (`hash_taken`) — the same
+        // hazard limit 6 exists to prevent.
+        !headerForLadder &&
         storedReceiptVerdict(payment) !== 'refused_ambiguous' &&
         storedReceiptVerdict(payment) !== 'refused_mismatch'
       ) {
-        const storedProofs = inputHeader ? null : await findEvidenceProofsForIntent(payment.id, input.agentId)
         const receiptPayload = input.protocolReceiptPayload
           ? normalizeJson(input.protocolReceiptPayload)
           : storedProofs?.protocol_receipt_payload

@@ -557,7 +557,7 @@ describeDb('#4268 — an own-account move is one Activity group', () => {
   })
 
   /** Every transfer the explorer knows; each account's read returns the rows touching it. */
-  let transfers: Array<{ hash: string; from: string; to: string; value: string; ts: number; chainId?: number }>
+  let transfers: Array<{ hash: string; from: string; to: string; value: string; ts: number; chainId?: number; hiddenFrom?: string }>
   /** Account addresses whose explorer read fails (a missing partner leg). */
   let failingReads: Set<string>
   /** When true every read reports more rows upstream (a truncated window). */
@@ -580,6 +580,7 @@ describeDb('#4268 — an own-account move is one Activity group', () => {
         rows: transfers
           .filter((t) => (t.chainId ?? CHAIN) === chainId)
           .filter((t) => t.from.toLowerCase() === self || t.to.toLowerCase() === self)
+          .filter((t) => t.hiddenFrom?.toLowerCase() !== self)
           .map((t, i) => ({
             blockNumber: String(46_000_000 + i),
             timeStamp: String(t.ts),
@@ -702,6 +703,21 @@ describeDb('#4268 — an own-account move is one Activity group', () => {
     const body = await getOverviewBody()
     expect(body.activity).toHaveLength(0)
     expect(body.hasOlderActivity).toBe(true)
+  })
+
+  it('a folded move does not merge with an unpaired send to the same account on the same day', async () => {
+    const main = await seedAccount(userId, { name: 'Main' })
+    const savings = await seedAccount(userId, { name: 'Savings' })
+    const ts = tsInLocalDay(TZ, 0)
+    transfers.push({ hash: hash(1), from: main.address, to: savings.address, value: '1000000', ts })
+    // The receiving account's read does not return this one: its partner leg is missing.
+    transfers.push({ hash: hash(2), from: main.address, to: savings.address, value: '2000000', ts: ts - 60, hiddenFrom: savings.address })
+
+    const activity = await getActivity()
+    const sends = activity.filter((g) => g.direction === 'out')
+    expect(sends).toHaveLength(2)
+    expect(sends.find((g) => g.ownTransfer !== undefined)).toMatchObject({ count: 1, sumAtomic: '1000000' })
+    expect(sends.find((g) => g.ownTransfer === undefined)).toMatchObject({ count: 1, sumAtomic: '2000000', merchantName: 'Savings' })
   })
 
   it('names an unnamed account "Unnamed account", never an address', async () => {

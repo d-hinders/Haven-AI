@@ -24,9 +24,14 @@
  * `--v2-series-*` (#2948) is an ordered categorical set: colour identifies
  * the SERIES, never the meaning of a value. A refusal is therefore a neutral
  * ink cap and not a red one — red is `--v2-danger`'s job when a row states a
- * failure, and this is a count of events. Callers assign a series index per
- * agent and hold it stable so the bar, the legend, and the agents table's
- * share column all read one colour per agent.
+ * failure, and this is a count of events. An AGENT-keyed series does not
+ * read this palette at all (#4331): it carries `color` — the agent's avatar
+ * tint from `seriesColorForAgent`, name-hashed, so one agent wears one
+ * colour on every chart, in every period, matching its monogram. Two agents
+ * can share a tint (six tints, unbounded agents); the legend and tooltip
+ * tell them apart by name. Callers assign `seriesIndex` only for series that
+ * are not an agent, and hold it stable so the bar, the legend, and any
+ * companion table read one colour per series.
  *
  * ## Why the labels are HTML over the drawing rather than SVG <text>
  *
@@ -155,10 +160,16 @@ export interface StackedBarSeries {
   /** The display-currency amount this agent spent that day — the stack's
    *  height contributor. */
   amount: number
-  /** Index into the six `--v2-series-*` tokens; wraps past six. Assign per
-   *  agent and HOLD IT STABLE across renders, or an agent silently changes
-   *  colour between the chart and the table beside it. */
-  seriesIndex: number
+  /** Index into the six `--v2-series-*` tokens; wraps past six. For series
+   *  that are NOT an agent. Assign per series and HOLD IT STABLE across
+   *  renders, or a series silently changes colour between the chart and the
+   *  table beside it. An AGENT-keyed series carries `color` instead
+   *  (#4331) — its avatar tint — and omits this. */
+  seriesIndex?: number
+  /** Explicit fill for an agent-keyed series (#4331): `seriesColorForAgent(name)`
+   *  — the agent's avatar tint, the same token its `Monogram` wears, stable
+   *  under re-ranking. Wins over `seriesIndex` when both are set. */
+  color?: string
   /** Stable key; the tooltip's per-row identity and the React key. */
   id: string
   /** Per-denomination breakdown, e.g. `[['USDC', 900.4], ['PYUSD', 340]]`.
@@ -193,10 +204,21 @@ export interface StackedBarChartProps {
 interface StackedBarSegment {
   seriesId: string
   name: string
-  seriesIndex: number
+  seriesIndex?: number
+  color?: string
   /** The amount this segment represents, in the display currency. */
   amount: number
   tokens?: Array<[symbol: string, amount: number]>
+}
+
+/**
+ * The fill for one segment (#4331): an agent-keyed series paints its own
+ * avatar tint; every other series paints the ordered `--v2-series-*` token
+ * its `seriesIndex` names. One home so the bar, the legend dot, the tooltip
+ * swatch and the exported `SeriesSwatch` cannot disagree.
+ */
+function seriesFill(s: Pick<StackedBarSegment, 'color' | 'seriesIndex'>): string {
+  return s.color ?? seriesColor(s.seriesIndex ?? 0)
 }
 
 /** The whole of one day, as the plot and the tooltip read it. */
@@ -234,19 +256,29 @@ function legendRows(entries: StackedBarEntry[]): StackedBarSegment[] {
 }
 
 /**
- * The legend dot as a component, exported so a table beside the chart can
- * key a row to the same series token (#3051: the agents table's name cell).
- * One home for "what colour is agent i": the chart's segments, its legend,
- * its tooltip and the table all read `seriesColor(seriesIndex)`.
+ * The legend dot as a component, exported so a showcase beside the chart can
+ * key a row to the same fill the chart paints (#3051; #4331 added `color` for
+ * agent-keyed series — an agent's monogram beside its chart swatch). One home
+ * for "what colour is this series": the chart's segments, its legend and its
+ * tooltip all read `seriesFill`; a caller passes the same `color` the series
+ * carries (or the same `seriesIndex` for a non-agent series).
  */
-export function SeriesSwatch({ seriesIndex, className = '' }: { seriesIndex: number; className?: string }) {
+export function SeriesSwatch({
+  seriesIndex,
+  color,
+  className = '',
+}: {
+  seriesIndex?: number
+  color?: string
+  className?: string
+}) {
   return (
     <span
       aria-hidden="true"
       data-testid="series-swatch"
       data-series-index={seriesIndex}
       className={`inline-block h-2.5 w-2.5 flex-shrink-0 rounded-full ${className}`.trim()}
-      style={{ backgroundColor: seriesColor(seriesIndex) }}
+      style={{ backgroundColor: color ?? seriesColor(seriesIndex ?? 0) }}
     />
   )
 }
@@ -307,6 +339,7 @@ export function StackedBarChart({
           seriesId: s.id,
           name: s.name,
           seriesIndex: s.seriesIndex,
+          color: s.color,
           amount: s.amount,
           tokens: s.tokens,
         }))
@@ -341,12 +374,16 @@ export function StackedBarChart({
 
   const yOf = (value: number) => baseY - (scale.max === 0 ? 0 : value / scale.max) * plotH
   const xOf = (index: number) => pad.left + band * index + (band - barW) / 2
-  // The series indexes that need a hatch pattern: only partial days use one.
+  // The fills that need a hatch pattern: only partial days use one. Keyed by
+  // the fill itself (an avatar tint can be shared by two agents — one
+  // pattern per colour is then exactly right), so the id has to be derived
+  // from position in the de-duped list.
   const hatched = useMemo(() => {
-    const set = new Set<number>()
-    for (const e of entries) if (e.partial) for (const s of e.segments) set.add(s.seriesIndex)
+    const set = new Set<string>()
+    for (const e of entries) if (e.partial) for (const s of e.segments) set.add(seriesFill(s))
     return [...set]
   }, [entries])
+  const hatchId = useMemo(() => new Map(hatched.map((fill, i) => [fill, `${patternId}-hatch-${i}`])), [hatched, patternId])
 
   // A pin or caret outlives the data it pointed at otherwise: a shorter
   // range would leave `active` on an index with no entry — no callout, and
@@ -521,12 +558,12 @@ export function StackedBarChart({
               strokeWidth={1}
             />
           ))}
-          {/* Hatch patterns for partial days: the series token at full
+          {/* Hatch patterns for partial days: the series fill at full
               strength with diagonal ground-coloured stripes, so the mark is
-              the same on both themes and the token's contrast survives. */}
+              the same on both themes and the fill's contrast survives. */}
           {hatched.length > 0 && (
             <defs>
-              {hatched.map((i) => (
+              {hatched.map((fill, i) => (
                 <pattern
                   key={`hatch-${i}`}
                   id={`${patternId}-hatch-${i}`}
@@ -536,7 +573,7 @@ export function StackedBarChart({
                   height="6"
                   patternTransform="rotate(45)"
                 >
-                  <rect width="6" height="6" fill={seriesColor(i)} />
+                  <rect width="6" height="6" fill={fill} />
                   <line x1="0" y1="0" x2="0" y2="6" stroke="var(--v2-bg)" strokeWidth="2" />
                 </pattern>
               ))}
@@ -595,7 +632,7 @@ export function StackedBarChart({
                       height={Math.max(0, height)}
                       // A partial day is hatched so a cut day does not read
                       // as a quiet one (see `StackedBarDay.partial`).
-                      fill={e.partial ? `url(#${patternId}-hatch-${s.seriesIndex})` : seriesColor(s.seriesIndex)}
+                      fill={e.partial ? `url(#${hatchId.get(seriesFill(s))})` : seriesFill(s)}
                       data-hatched={e.partial ? 'true' : undefined}
                       fillOpacity={isHl ? 1 : 0.88}
                     />
@@ -673,7 +710,7 @@ export function StackedBarChart({
             <span
               aria-hidden="true"
               className="inline-block h-2.5 w-2.5 flex-shrink-0 rounded-full"
-              style={{ backgroundColor: seriesColor(row.seriesIndex) }}
+              style={{ backgroundColor: seriesFill(row) }}
             />
             <span className="truncate">{row.name}</span>
           </li>
@@ -797,7 +834,7 @@ export function StackedBarChart({
                     <span
                       aria-hidden="true"
                       className="inline-block h-2 w-2 flex-shrink-0 self-center rounded-full"
-                      style={{ backgroundColor: seriesColor(s.seriesIndex) }}
+                      style={{ backgroundColor: seriesFill(s) }}
                     />
                     <span data-testid="chart-tooltip-name" className="min-w-0 truncate text-[var(--v2-ink-2)]">{s.name}</span>
                     <span data-testid="chart-tooltip-amount" className="v2-tabular flex-shrink-0 whitespace-nowrap text-[var(--v2-ink)]">

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { orderAgentsForDisplay, seriesIndexByAgent } from '../analytics-series'
+import { orderAgentsForDisplay, seriesColorByAgent } from '../analytics-series'
+import { avatarTint, seriesColorForAgent } from '../avatar-tint'
 import type { AnalyticsAgentRow, AnalyticsDayBucket } from '@/types/analytics'
 
 /**
@@ -37,33 +38,44 @@ describe('orderAgentsForDisplay', () => {
   })
 })
 
-describe('seriesIndexByAgent', () => {
+describe('seriesColorByAgent', () => {
   const days: AnalyticsDayBucket[] = [
     { date: '2026-07-07', spent_by_agent: { c: '10.00', a: '5.00' }, refusals: 0 },
     { date: '2026-07-08', spent_by_agent: { a: '1.00' }, refusals: 0 },
   ]
 
-  it('numbers only the agents that appear on the chart, in display order', () => {
+  it('maps every rostered agent to its own avatar tint — the colour its monogram wears', () => {
     const ordered = orderAgentsForDisplay([agent('b', '5.00'), agent('c', '10.00'), agent('a', '5.00'), agent('z', '0')])
-    const map = seriesIndexByAgent(ordered, days)
-    expect([...map.entries()]).toEqual([
-      ['c', 0],
-      ['a', 1],
-    ])
-    expect(map.has('b')).toBe(false)
-    expect(map.has('z')).toBe(false)
+    const map = seriesColorByAgent(ordered, days)
+    expect(map.get('c')).toBe(seriesColorForAgent('c'))
+    expect(map.get('a')).toBe(seriesColorForAgent('a'))
+    // Whether an agent appears in `by_day` no longer decides its colour
+    // (#4331): the tints hash-wrap instead of running out, so b and z carry
+    // theirs too (they plot on other pages and periods).
+    expect(map.get('b')).toBe(seriesColorForAgent('b'))
+    expect(map.get('z')).toBe(seriesColorForAgent('z'))
   })
 
-  it('does not spend a colour on a rostered agent with no bar, so seven agents with two spenders use two tokens', () => {
-    const roster = orderAgentsForDisplay(['p', 'q', 'r', 's', 't', 'u', 'v'].map((id) => agent(id, '0')).concat([agent('a', '5.00'), agent('c', '10.00')]))
-    const map = seriesIndexByAgent(roster, days)
-    expect(map.size).toBe(2)
-    expect(Math.max(...map.values())).toBe(1)
+  it('is rank-independent: the same agent keeps its colour under any display order', () => {
+    const rows = [agent('b', '5.00'), agent('c', '10.00'), agent('a', '5.00')]
+    const forward = seriesColorByAgent(orderAgentsForDisplay(rows), days)
+    const reversed = seriesColorByAgent([...orderAgentsForDisplay(rows)].reverse(), days)
+    expect(forward.get('a')).toBe(reversed.get('a'))
+    expect(forward.get('a')).toBe(seriesColorForAgent('a'))
   })
 
-  it('names a by_day id the roster does not carry, after the rostered ones', () => {
-    const map = seriesIndexByAgent([agent('c', '10.00')], [{ date: '2026-07-07', spent_by_agent: { c: '1', ghost: '2' }, refusals: 0 }])
-    expect(map.get('c')).toBe(0)
-    expect(map.get('ghost')).toBe(1)
+  it('gives an id the roster does not carry the neutral ink, named rather than dropped', () => {
+    const map = seriesColorByAgent([agent('c', '10.00')], [{ date: '2026-07-07', spent_by_agent: { c: '1', ghost: '2' }, refusals: 0 }])
+    expect(map.get('c')).toBe(seriesColorForAgent('c'))
+    // No name to hash → no invented hue: the neutral ink MoneyPanel gives
+    // unattributed money (#3897).
+    expect(map.get('ghost')).toBe('var(--v2-ink-3)')
+  })
+
+  it('wraps at six tints: two names always share one — the documented collision', () => {
+    // Pigeonhole with seven names; charts tell same-tint agents apart by
+    // name (legend, tooltip), never by colour.
+    const names = Array.from({ length: 7 }, (_, i) => `agent-${i}`)
+    expect(new Set(names.map((n) => avatarTint(n))).size).toBeLessThan(names.length)
   })
 })

@@ -12,8 +12,11 @@ import { avatarTint } from '@/lib/avatar-tint'
  * muted `--v2-avatar-*` tints picked by `avatarTint` (a pure hash of the
  * trimmed name — djb2 mod 6), so the same entity keeps the same colour
  * everywhere and neighbouring rows are told apart at a glance. Assignment is
- * by name, never by index, and never from a status or `--v2-series-*` chart
- * colour. Logos are untinted.
+ * by name, never by index, and never from a status colour — the ink hexes
+ * are disjoint from every status/semantic hex and from the `--v2-series-*`
+ * stops themselves (`theme-tokens.test.ts`). Since #4331 the SAME tint fills
+ * the agent's chart series (`seriesColorForAgent`): one colour per agent,
+ * chart fill matching monogram. Logos are untinted.
  *
  * `alt=""` on the logo: the name is always printed beside the avatar, so the
  * image is decorative to a screen reader. The initials variant stays readable

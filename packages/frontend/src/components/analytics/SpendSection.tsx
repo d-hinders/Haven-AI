@@ -21,13 +21,11 @@ import type { AnalyticsAgentRow, AnalyticsDayBucket, AnalyticsRange } from '@/ty
  *   happens here, at the row that becomes a segment — the same edge parse
  *   `BalanceSection` performs for its points.
  * - Agent NAMES come from `agents[]`; the series colour comes from the ONE
- *   map the page builds in `lib/analytics-series.ts` (`seriesIndexByAgent`
- *   over the display order) and hands to this section and to `AgentsTable`
- *   alike — the endpoint's `agents[]` is unordered on the wire, so a colour
- *   keyed on wire position would move between requests. An agent id in
- *   `by_day` that is not in `agents[]` cannot happen on this response (both
- *   statements share the tenant + rail scope) but is named rather than
- *   dropped.
+ *   map the page builds in `lib/analytics-series.ts`
+ *   (`seriesColorByAgent` — the agent's own avatar tint, #4331) and hands
+ *   to this section. The fill is keyed on the agent's NAME, so it holds
+ *   across periods and rank moves; two agents that hash to the same tint
+ *   are told apart by name in the legend and tooltip.
  * - **Partial edge buckets.** `range.from`/`to` are UTC instants; `by_day` is
  *   bucketed in `basis.tz`. So a bucket on the window's first or last local
  *   day covers less than a day (the OpenAPI description says so and says the
@@ -95,38 +93,32 @@ export function partialEdgeDates(range: Pick<AnalyticsRange, 'from' | 'to'>, tz:
 export function toStackedBarDays(
   byDay: AnalyticsDayBucket[],
   agents: AnalyticsAgentRow[],
-  seriesIndexById: Map<string, number>,
+  agentColors: Map<string, string>,
   range: Pick<AnalyticsRange, 'from' | 'to'>,
   tz: string,
 ): StackedBarDay[] {
   const nameById = new Map(agents.map((a) => [a.id, a.name]))
   const partial = partialEdgeDates(range, tz)
-  // An id the map does not carry (not producible by this endpoint) takes the
-  // next free slot, each its own, so two strays never share a colour.
-  const fallback = new Map<string, number>()
-  const indexOf = (agentId: string): number => {
-    const known = seriesIndexById.get(agentId)
-    if (known !== undefined) return known
-    let slot = fallback.get(agentId)
-    if (slot === undefined) {
-      slot = seriesIndexById.size + fallback.size
-      fallback.set(agentId, slot)
-    }
-    return slot
-  }
   // Segments in display order — the wire's `spent_by_agent` key order is the
   // SQL's row order, not the page's — so every bar stacks the agents the same
-  // way the table lists them.
+  // way the table lists them. An id the roster does not carry stacks last,
+  // in the order it was met (the sort is stable).
+  const position = new Map(agents.map((agent, index) => [agent.id, index]))
+  const orderOf = (agentId: string): number => position.get(agentId) ?? agents.length
+  // The fill is the agent's avatar tint (`seriesColorByAgent`, #4331) —
+  // name-hashed, so it survives re-ranking. An id the map does not carry
+  // (not producible by this endpoint) gets the neutral ink rather than a
+  // silent fall-through to the first series token.
   return byDay.map((day) => ({
     label: formatAnalyticsDay(day.date),
     series: Object.entries(day.spent_by_agent)
       .map(([agentId, amount]) => ({
         id: agentId,
         name: nameById.get(agentId) ?? agentId,
-        seriesIndex: indexOf(agentId),
+        color: agentColors.get(agentId) ?? 'var(--v2-ink-3)',
         amount: Number(amount),
       }))
-      .sort((a, b) => a.seriesIndex - b.seriesIndex),
+      .sort((a, b) => orderOf(a.id) - orderOf(b.id)),
     refusals: day.refusals,
     partial: partial.has(day.date),
   }))
@@ -164,7 +156,7 @@ export function spendSummary(days: StackedBarDay[], currency: AnalyticsCurrency,
 export function SpendSection({
   byDay,
   agents,
-  seriesIndexById,
+  agentColors,
   range,
   tz,
   currency,
@@ -173,16 +165,16 @@ export function SpendSection({
   byDay: AnalyticsDayBucket[]
   /** In display order — the page sorts once (`orderAgentsForDisplay`). */
   agents: AnalyticsAgentRow[]
-  /** `seriesIndexByAgent(agents, byDay)` — the same map `AgentsTable` reads. */
-  seriesIndexById: Map<string, number>
+  /** `seriesColorByAgent(agents, byDay)` — the agent → avatar-tint map (#4331). */
+  agentColors: Map<string, string>
   range: Pick<AnalyticsRange, 'from' | 'to'>
   tz: string
   currency: AnalyticsCurrency
   rangeDays: 7 | 30 | 90
 }) {
   const days = useMemo(
-    () => toStackedBarDays(byDay, agents, seriesIndexById, range, tz),
-    [byDay, agents, seriesIndexById, range, tz],
+    () => toStackedBarDays(byDay, agents, agentColors, range, tz),
+    [byDay, agents, agentColors, range, tz],
   )
 
   if (days.length < MIN_CHARTABLE_DAYS) return null

@@ -35,6 +35,7 @@ import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { StatTile } from '@/components/ui/StatTile'
 import { AreaChart, type SparklinePoint } from '@/components/ui/AreaChart'
+import { seriesColorForAgent } from '@/lib/avatar-tint'
 import { Amount } from '@/components/haven'
 import { BalanceFreshnessIndicator } from '@/components/haven'
 import PasskeyOtherDeviceNotice from '@/components/PasskeyOtherDeviceNotice'
@@ -126,10 +127,8 @@ function balanceSparkPoints(
   return measured.length >= 3 ? dense : measured
 }
 
-/** The `--v2-series-*` colour for a ranked agent — the analytics palette's order. */
-function seriesColor(index: number): string {
-  return `var(--v2-series-${(index % 6) + 1})`
-}
+// The agent's chart colour (#4331) is `seriesColorForAgent` (lib/avatar-tint.ts)
+// — the agent's own avatar tint, name-hashed — used at both call sites below.
 
 function sparklineAriaLabel(points: SparklinePoint[], currency: 'USD' | 'EUR' | 'SEK'): string {
   // #3977: the series is UTC-dated — the aria-label names what it measures
@@ -303,18 +302,20 @@ export default function MoneyPanel({
     d30 && perAgentSpend.length > 0 ? d30.net[bucket] - attributedValue : 0
   const showUnattributed = d30 !== null && unattributedValue >= SUB_CENT_THRESHOLD
 
-  // The split bar's segments (#3897): the named agents in series colours,
-  // then everything else (other agents, agents since removed) in one
-  // neutral segment, as shares of what the list itself adds up to.
+  // The split bar's segments (#3897): the named agents in their own avatar
+  // tints (#4331 — the same colour their monogram wears, stable across
+  // periods and rank moves), then everything else (other agents, agents
+  // since removed) in one neutral segment, as shares of what the list
+  // itself adds up to.
   const restValue = otherAgentValue + (showUnattributed ? unattributedValue : 0)
   const splitTotal = topAgents.reduce((sum, row) => sum + row.value, 0) + restValue
   const splitSegments =
     splitTotal > 0
       ? [
-          ...topAgents.map((row, index) => ({
+          ...topAgents.map((row) => ({
             key: row.id,
             share: (row.value / splitTotal) * 100,
-            color: seriesColor(index),
+            color: seriesColorForAgent(row.name),
           })),
           ...(restValue > 0
             ? [{ key: 'rest', share: (restValue / splitTotal) * 100, color: 'var(--v2-ink-3)' }]
@@ -385,13 +386,13 @@ export default function MoneyPanel({
           ))}
         </div>
         <dl className="mt-3 space-y-1.5">
-          {topAgents.map((row, index) => (
+          {topAgents.map((row) => (
             <div key={row.id} className="flex items-baseline justify-between gap-4">
               <dt className="flex min-w-0 items-center gap-2 text-sm text-[var(--v2-ink-2)]">
                 <span
                   aria-hidden="true"
                   className="h-2 w-2 flex-shrink-0 rounded-sm"
-                  style={{ background: seriesColor(index) }}
+                  style={{ background: seriesColorForAgent(row.name) }}
                 />
                 <span className="min-w-0 truncate">{row.name}</span>
               </dt>

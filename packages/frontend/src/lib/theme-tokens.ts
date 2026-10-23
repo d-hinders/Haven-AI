@@ -74,9 +74,13 @@ export const THEME_TOKENS: TokenSpec[] = [
   { name: 'danger', light: '#b42318', dark: '#f87171' },
   { name: 'danger-soft', light: '#fef2f2', dark: '#3a1512' },
   { name: 'modal-backdrop', light: 'rgba(26, 31, 54, 0.66)', dark: 'rgba(0, 0, 0, 0.6)' },
-  // Avatar tints (#4066) — the Monogram initials family, assigned by hashing
-  // the entity's NAME (lib/avatar-tint.ts), never by index and never from the
-  // series/status palettes (disjointness asserted in theme-tokens.test.ts).
+  // Avatar tints (#4066) — the Monogram initials family, and since #4331 the
+  // AGENT chart fills: assigned by hashing the entity's NAME
+  // (lib/avatar-tint.ts), never by index (an agent's colour must not move
+  // because its spend rank did) and never from a status colour. The ink hexes
+  // stay disjoint from every status/semantic hex and from the --v2-series-*
+  // stops themselves (theme-tokens.test.ts); as chart fills they clear 3:1 on
+  // both card grounds in both themes (CONTRAST_PAIRS).
   // Each ink clears 4.5:1 on its own -soft ground in both themes; see
   // CONTRAST_PAIRS.
   { name: 'avatar-1', light: '#8a3a1a', dark: '#f2a884' },
@@ -154,10 +158,19 @@ export const CONTRAST_PAIRS: ContrastPair[] = [
   { fg: 'debit', bg: 'debit-soft', min: 3 },
   { fg: 'warning', bg: 'warning-soft', min: 3 },
   { fg: 'danger', bg: 'danger-soft', min: 3 },
-  // The avatar tints (#4066): initials ink on its own tint must read as text
-  // in both themes, so the pair bar is the full 4.5:1 — not the 3:1 the other
-  // -soft pairs get.
+  // The avatar tints (#4066) — since #4331 also the AGENT chart fills (one
+  // colour per agent: the tint the Monogram wears is the fill its series
+  // gets). So the ink is checked twice more: against both card grounds it
+  // can be painted on as a chart fill, at the 3:1 non-text bar charts are
+  // held to (measured 6.08:1–10.56:1 across all twelve cells; the two
+  // acceptance pairs below make that a test, not a memory). The inks stay
+  // pairwise separable and disjoint from the series/status hexes
+  // (theme-tokens.test.ts).
   ...[1, 2, 3, 4, 5, 6].map((n) => ({ fg: `avatar-${n}`, bg: `avatar-${n}-soft`, min: 4.5 as const })),
+  ...[1, 2, 3, 4, 5, 6].flatMap((n) => [
+    { fg: `avatar-${n}`, bg: 'bg', min: 3 as const },
+    { fg: `avatar-${n}`, bg: 'surface', min: 3 as const },
+  ]),
   // The categorical series (#2948): each stop on the two grounds a chart paints
   // on — the page background and the card surface — in BOTH themes. The dataviz
   // non-text bar is 3:1, and the pair is fg-vs-ground rather than fg-vs-own-tint

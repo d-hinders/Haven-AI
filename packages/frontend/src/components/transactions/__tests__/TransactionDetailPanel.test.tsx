@@ -80,6 +80,9 @@ const KINDS = {
   ownTransfer: tx({
     to: RESERVE,
     initiatedBy: 'human',
+    // A valuation, so the headline is a figure that COULD carry a sign.
+    convertedAmount: '1.00',
+    convertedCurrency: 'USD',
     ownTransfer: { toAccountId: 'acc-reserve', toAccountName: 'Reserve', toAccountAddress: RESERVE },
   }),
   sweep: tx({ direction: 'in', activityType: 'delegate_sweep', agentName: 'Atlas', from: SENDER, to: ACCOUNT }),
@@ -229,6 +232,7 @@ describe('TransactionDetailPanel — structure per kind', () => {
     expect(within(header()).getByText('From Main to Reserve', { exact: false })).toBeInTheDocument()
     expect(rows(details())).toEqual({ By: 'You' })
     const headline = header().querySelector('.v2-tabular')
+    expect(headline?.textContent).toMatch(/1\.00/)
     expect(headline?.textContent).not.toMatch(/^[-+−]/)
     expect(header().textContent).not.toContain('Payment sent by you')
   })
@@ -266,7 +270,7 @@ describe('TransactionDetailPanel — the words that are gone', () => {
     expect(all).not.toContain('Merchant settlement')
     expect(all).not.toContain('protocol_receipt_attached')
     expect(all).not.toContain('Funding from your account')
-    for (const element of Array.from(screen.getByRole('dialog').querySelectorAll('dd, p, span'))) {
+    for (const element of Array.from(screen.getByRole('dialog').querySelectorAll('dd, div, p, span'))) {
       if (element.closest('[data-testid="transaction-technical-details"]')) continue
       expect(element.textContent).not.toBe('Not recorded')
     }

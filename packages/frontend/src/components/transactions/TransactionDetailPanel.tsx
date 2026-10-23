@@ -46,7 +46,7 @@ function DetailRow({ label, value, note }: { label: string; value: ReactNode; no
     <div className="grid grid-cols-[minmax(0,7.5rem)_minmax(0,1fr)] items-baseline gap-3 border-b border-[var(--v2-table-row-border)] py-2.5 last:border-b-0">
       <dt className="text-xs text-[var(--v2-ink-3)]">{label}</dt>
       <dd className="min-w-0 text-right text-sm text-[var(--v2-ink-2)]">
-        {value}
+        <div>{value}</div>
         {note ? <p className="mt-0.5 text-xs text-[var(--v2-ink-3)]">{note}</p> : null}
       </dd>
     </div>

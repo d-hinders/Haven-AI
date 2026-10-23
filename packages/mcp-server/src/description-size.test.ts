@@ -499,6 +499,15 @@ const PRE_TRIM_BASELINE_BYTES = 30_609
  * sentence compressed to its three-cause form, the signer/over-budget
  * sentences tightened, redundant taskBudgets prose dropped), landing back on
  * EXACTLY 31,812 UTF-8 bytes — the cap does not move and 29 tools hold.
+ *
+ * **Re-derived — round 31, #4352 (2026-10-23).** The round-30 three-cause
+ * `needs_approval` sentence had drifted from the pinned copy in
+ * `packages/sdk/src/tool-descriptions.test.ts` (same meaning, compressed
+ * prose). Restored to the pinned sentence verbatim (+36 bytes on the catalog)
+ * and re-trimmed the same description by 40 (the "closed and expired omitted"
+ * parenthetical dropped — "only live rows are listed" already says it — the
+ * full-cap aside shortened, "next step" tightened): 31,808 UTF-8 bytes, back
+ * under the cap. No tool was added — 29 holds. Shrink-only from here.
  */
 const MAX_TOTAL_BYTES = 31_812
 // Mean pin: round 29 (#4355 block above): 31,812 / 29 = 1096.9655…, pinned

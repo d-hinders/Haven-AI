@@ -41,12 +41,12 @@ export interface SigningAuditEntry {
   safe_address?: string
   chain_id?: number
   /**
-   * #3728, additive like `safe_address`/`chain_id`: present on SIWX entries
-   * only — the challenge domain and nonce the composed message committed to.
-   * The `payload_hash` already pins the exact composed message (its sha256,
-   * pre-signature), so an entry is replayable without these; they make a
-   * sign-in row scannable without re-deriving the message. No existing key
-   * renamed (#2914).
+   * #3728, additive like `chain_id` and the persisted serialized key declared
+   * above: present on SIWX entries only — the challenge domain and nonce the
+   * composed message committed to. The `payload_hash` already pins the exact
+   * composed message (its sha256, pre-signature), so an entry is replayable
+   * without these; they make a sign-in row scannable without re-deriving the
+   * message. No existing key renamed (#2914).
    */
   domain?: string
   nonce?: string

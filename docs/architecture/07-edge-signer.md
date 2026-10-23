@@ -448,7 +448,10 @@ hosted:  haven_settle_mcp_tool  -> relay funding, confirm, call merchant tool
 ```
 hosted:  haven_quote_x402         -> price + next_arguments { url, method, headers, body, max_amount_human }
 hosted:  haven_pay_x402_quote     -> { payment_id, payload_hash, x402.expected }
-local:   haven_sign + expected    -> funding signature + x402_binding
+local:   haven_sign               -> funding signature + x402_binding; pass { payment_id }
+                                    (preferred), or payload_hash + x402_expected together with
+                                    typed_data_b64 from a re-run quote with
+                                    include_signing_payload=true
 hosted:  haven_submit             -> fund delegated agent EOA from the account budget
 local:   haven_x402_sign_header   -> EIP-3009 payment header if binding matches
 agent:   retry merchant, setting BOTH PAYMENT-SIGNATURE + X-PAYMENT

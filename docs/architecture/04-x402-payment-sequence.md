@@ -57,6 +57,7 @@ covers:
   - packages/backend/src/__tests__/erc7710-confirm-seam-census-pin.test.ts
   - packages/backend/src/__tests__/resume-gate-call-census-pin.test.ts
   - packages/backend/src/__tests__/settlement-verifier-roster-pin.test.ts
+  - packages/backend/src/modules/payments/__tests__/x402-funded-unsettled-status.test.ts
   - packages/backend/src/infra/chain/delegation-budget-reader.ts
   - packages/demo-merchant-mcp/src/invoice.ts
   - packages/backend/src/openapi/request-validation.ts
@@ -504,7 +505,8 @@ and after `haven_submit` the agent passes that binding to
 `haven_x402_sign_header` for the header. A `payload_hash` with
 `x402_expected` and no typed data is refused: the delegation-rail funding
 payload is EIP-712 typed data, and the signer re-derives its digest before
-signing (`packages/signer/src/core.ts`). A `payload_hash` with neither is
+signing (`packages/signer/src/core.ts`). That form needs `typed_data_b64`
+from the quote re-run with `include_signing_payload=true`. A `payload_hash` with neither is
 refused as `BARE_HASH_REFUSED` (`packages/signer/src/bare-hash.ts`).
 
 > **What this branch used to say, and why it changed** (#2121). It read `else
@@ -676,10 +678,11 @@ The recommended three-call fast path for an x402-protected MCP tool is:
    returns `agent_summary.purchase_summary` as the default report; raw `result`
    remains optional merchant evidence.
 
-The steps above are the EIP-3009 shape. When the shared scheme selector picks
-erc7710 (#1456), step 1 returns a settlement child (`settlement_scheme:
-'erc7710'`, `settlement.funding_leg: false`) instead of a funding payload, and
-step 2 is `haven_sign { payment_id }`: the signer fetches the child itself
+The steps above are the EIP-3009 shape. When the shared #1453 selector picks
+erc7710 (#1456 wired it into this tool), step 1 returns `payment_id` plus the
+`settlement` block (`settlement_scheme: 'erc7710'`, `settlement.funding_leg:
+false`) instead of a funding payload, and step 2 is
+`haven_sign { payment_id }`: the signer fetches the settlement child itself
 (`packages/mcp-server/src/tools/catalog-purchase.ts`, the `haven_pay_mcp_tool`
 erc7710 branch). Step 3 then carries the signature and no `payment_header`.
 Haven assembles the header at settle, and there is no funding transaction to
@@ -856,8 +859,11 @@ tool would refuse — no `tool_name` on either surface, degraded on the hosted
 one — gets `suggested_tool_omitted_reason` instead of a hint. A hosted strict
 refusal names the declared keys and the declared alias of a rejected key
 (`resource_url` → `url`, `id` → `catalog_id`; epic #3105, decision 5). The
-quote tool the hosted hint names carries no structured next step of its own
-yet — its description leads to prepare; slice #3102 closes that hop.
+quote tool the hosted hint names carries no structured next step of its own:
+its description leads to prepare, and the MCP quote tools add no next-step
+block, by design (`tools/support/quote-response.ts`, `buildMcpToolQuoteResponse`).
+This used to say slice #3102 would close that hop. #3102 shipped the
+next-step contract on hosted refusals and left the quote tools informational.
 
 Since [#2530](https://github.com/d-hinders/Haven-AI/issues/2530) `GET /catalog`
 also answers WITHOUT a credential, in a reduced public shape: name,
@@ -1115,11 +1121,13 @@ report budget to the user without a separate `haven_get_agent` /
 `haven_get_allowances` round trip. No new backend endpoint here either — the
 SDK's `HavenClient.getPostPurchaseAllowanceSummary(paymentId)` resolves the
 settled token from `getPaymentStatus`, then reads through the EXACT same path
-as `getAllowances()` / #1306's preflight `allowance` block (`GET
-/machine-payments/agent` + `GET /machine-payments/allowances`; delegation-rail
-values are the #1090 `deriveDelegationBudgets`-backed enforcer read, never
-`agent_allowances`) — so it can never disagree with `haven_get_allowances` for
-the same fixture. Shape:
+as `getAllowances()` (`GET /machine-payments/agent` + `GET
+/machine-payments/allowances`; delegation-rail values are the #1090
+`deriveDelegationBudgets`-backed enforcer read, never `agent_allowances`) —
+so it can never disagree with
+`haven_get_allowances` for the same fixture. #1306's preflight `allowance`
+block read that same path until #3054; it now reads `POST
+/machine-payments/budget-precheck` instead (step 5 above). Shape:
 
 ```text
 { rail: 'delegation', remaining_atomic: string, remainingAtomic?: string,
@@ -1401,9 +1409,11 @@ and called by both `intentStateFor` and `getX402SignContext`
 so a published remedy and the permission to act on it cannot drift apart. That
 two-site roster is pinned by
 [`packages/backend/src/__tests__/resume-gate-call-census-pin.test.ts`](../../packages/backend/src/__tests__/resume-gate-call-census-pin.test.ts)
-(#2680). A real-Postgres test (the suite "#2290 — the resume predicate
-agrees with the status remedy") asserts that biconditional over every case
-in its table. Everything else still refuses: erc7710, a reported
+(#2680). A real-Postgres test asserts that biconditional over every case in
+its table
+([`modules/payments/__tests__/x402-funded-unsettled-status.test.ts`](../../packages/backend/src/modules/payments/__tests__/x402-funded-unsettled-status.test.ts),
+the "#2290 — the resume predicate agrees with the status remedy" suite).
+Everything else still refuses: erc7710, a reported
 merchant leg, a client-reported rejection (whose remedy stays
 `sweep_stranded_funds`), a verified merchant settlement already recorded
 (#3475), an intent inside the grace window, absent scheme metadata, and a
@@ -2100,11 +2110,12 @@ holds it can redeem it. That happens in three cases:
 - every advertised entry was malformed: `x402FacilitatorAddresses`
   (`packages/sdk/src/x402.ts`) drops each entry that is not an address and
   forwards nothing when none is left;
-- a direct API caller omitted the field. The authorize-time match against the
-  stored challenge (`selectStoredAccepted`, called from
-  `modules/x402/delegation-authorize.ts`) treats an empty pin list as
-  advertised (`pinsAdvertised`), so it does not refuse the omission even when
-  the merchant did advertise facilitators.
+- a direct API caller omitted the field. Authorize matches the request
+  against the challenge sent in the same request, before that challenge is
+  stored (`selectStoredAccepted`, called from
+  `modules/x402/delegation-authorize.ts`). The match treats an empty pin list
+  as advertised (`pinsAdvertised`), so it does not refuse the omission even
+  when the merchant did advertise facilitators.
 
 In every case the child stays within hard bounds that are the actual
 guarantee:
@@ -2964,5 +2975,8 @@ which the characterization tests enforce.
 > reference, refusal summary and round-trip budget match the code after
 > #3054; the unpinned settlement child lists all three ways authorize
 > receives no `facilitatorAddresses`; and several counts were replaced with
-> pointers to the instruments that hold them. `last-verified` is bumped for
-> this re-read.
+> pointers to the instruments that hold them. A review round then found the
+> post-purchase summary still describing the #1306 preflight's pre-#3054
+> read, and a forward reference to #3102 that the shipped slice did not
+> fulfil; both are corrected, and the #3054 fact family was swept with the
+> wrapped lines joined. `last-verified` is bumped for this re-read.

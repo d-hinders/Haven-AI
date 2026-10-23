@@ -577,6 +577,10 @@ describe('machine payment routes', () => {
           // the same fallback path #1145 takes on an RPC failure), so the
           // coverage answer is null, never fabricated from the fallback.
           funds_cover_remaining: null,
+          // #4355: start_date 0 + a daily period → the next UTC midnight
+          // (expires_at is far beyond it). Derived here rather than frozen,
+          // since the route reads the real clock.
+          next_refill_at: new Date((Math.floor(Date.now() / 86_400_000) + 1) * 86_400_000).toISOString(),
           onchain: {
             amount: '10000000',
             spent: '0',

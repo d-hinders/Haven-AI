@@ -39,6 +39,17 @@ covers:
 last-verified: "2026-10-23"
 ---
 
+> **Re-verified #4327 (2026-10-23, the agent Activity ledger export):** this
+> diff touched one file in this document's coverage list,
+> `packages/backend/src/openapi/route-modules.generated.ts`, and none of this
+> document's mode/rollback/env semantics. The map gains exactly one
+> operation — `GET /agent-activity/{id}/activity/export.csv` →
+> `routes/agent-activity.ts`, which is already an enforced module
+> (`index.ts`'s `enforcedModules`). No route file is added or moved,
+> `enforcedModules` is untouched, and `.env.dev.example` gains no variable.
+> Nothing else in this document was re-verified, and `last-verified` is not
+> bumped.
+
 > **Re-verified #4319 (2026-10-23, the EIP-3009 receipt-attribution flag):**
 > this diff touched one file in this document's coverage list,
 > `packages/backend/src/config.ts`. The change adds one entry to the `config`

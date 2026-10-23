@@ -388,11 +388,14 @@ describe('AgentDetailClient last-activity metadata', () => {
     expect(screen.queryByText('Out')).not.toBeInTheDocument()
   })
 
-  it('links under the list to the agent-filtered transactions view (#4226)', () => {
+  it('carries no "see elsewhere" link to /transactions — the tab is a full ledger (#4327)', () => {
     render(<AgentDetailClient agentId="agent-1" />)
 
-    const link = screen.getByRole('link', { name: 'See in Transactions' })
-    expect(link).toHaveAttribute('href', '/transactions?agentId=agent-1')
+    // #4226 put a transactions link under the list; #4327 removes it, as
+    // the account tab and /transactions have none. Export CSV is the tab's
+    // own action instead.
+    expect(screen.queryByRole('link', { name: /in Transactions/ })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Export CSV' })).toBeInTheDocument()
   })
 
   /**

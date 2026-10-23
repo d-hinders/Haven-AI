@@ -247,7 +247,8 @@ radius shifts in a few ways worth mapping explicitly:
   expiry) to the agent's delegate account. Haven stores it
   (`agent_delegations.delegation_json`) for reconstruction, revocation
   targeting and observability, and embeds it in every redemption it prepares:
-  inside the UserOp the agent signs for a direct payment, and, on erc7710,
+  inside the UserOp the agent signs for a direct payment or the EIP-3009
+  funding leg, and, on erc7710,
   inside the `payment_header` Haven returns for the agent to forward to the
   merchant (the encoded `[settlement child, …, budget]` chain,
   `modules/x402/x402-delegation.ts` `assembleSettlementPayload`). On erc7710 a
@@ -349,8 +350,8 @@ and embeds it in every redemption it prepares (the direct-payment UserOp,
 (`connect/src/storage.ts`). Review round 1 (#4377) added the setup token and
 challenge id to the registration's list, the dashboard manual-credential
 path, and the exact `hybrid_account_passkeys` columns. Review round 2 made
-the delegation-exposure bullets say the delegation is public after first use
-on every rail (calldata, the erc7710 header, the evidence copy) and that the
+the delegation-exposure bullets say the delegation is not secret after first use
+on every rail (public calldata; the erc7710 header; Haven's evidence copy) and that the
 delegate key alone can spend within the caveat stack once it is. Re-checked without change: `identity.json` /
 `signer.json`, the manual `/agents` key (`routes/agents.ts`), the re-key
 split and `refuseAgentCaller` (`connect/src/rekey.ts`,

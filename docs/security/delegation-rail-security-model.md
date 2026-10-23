@@ -384,7 +384,7 @@ and a recording failure is swallowed: metrics can never gate a payment. See
 > "Delegate key alone" row, and §1 item 2. They said the agent "receives it
 > through the existing credential channel", that a delegate key alone gets
 > "no delegation", and that a delegation is "a signed message the agent
-> holds" whose exfiltration (plus the key) is needed to spend. None holds.
+> holds" whose exfiltration is "sufficient to spend" with the key. None holds.
 > The connector's credential files hold no delegation (see
 > `docs/architecture/02-identity-and-custody.md`); Haven stores it
 > (`agent_delegations.delegation_json`) and every redemption carries the
@@ -403,8 +403,10 @@ and a recording failure is swallowed: metrics can never gate a payment. See
 > policy.delegateAccountAddress`), which the delegate key controls, so once
 > the agent has paid under a budget the key alone reaches the "Both" row's
 > bound. That bound — the caveat stack — is unchanged. This matches the
-> 2026-10-07 owner decision behind the dashboard's pause copy (#3717: a
-> raw-key holder "can still redeem within the budget OUTSIDE Haven"). `last-verified` is not
+> 2026-10-07 owner decision behind the dashboard's pause copy (#3717;
+> `agent-pause-copy.ts`: a raw-key holder "can still redeem within the budget
+> OUTSIDE Haven"), which assumed the key holder has the delegation; this
+> note adds that the delegation is obtainable. `last-verified` is not
 > re-stamped: nothing else in this document was re-verified for this note.
 
 **Where the signed delegation lives:** Haven stores it server-side for
@@ -428,7 +430,7 @@ the delegate key is what must be protected.
 | Compromised | Attacker gets | Bounded by |
 |---|---|---|
 | Delegation object alone | Nothing — redemption requires the delegate key's signature | — |
-| Delegate key alone | The same as the next row once the agent has paid under a budget, on any rail: every redemption carries the owner-signed chain in its `redeemDelegations` calldata (public once mined, and seen before that by the bundler, by the merchant and facilitator on erc7710, and by the agent's signer), so treat the delegation as public. Before the first redemption: nothing beyond existing agent-credential risk (the sign-context read needs the API key), plus any delegate-EOA balance left by the EIP-3009 bridge (invariant 5) | As the next row |
+| Delegate key alone | The same as the next row once the agent has paid under a budget, on any rail: every redemption carries the owner-signed chain in its `redeemDelegations` calldata (public once mined, and seen before that by the bundler, by the merchant and facilitator on erc7710, and by the agent's signer), so treat the delegation as public. Before the first redemption: nothing beyond existing agent-credential risk (the sign-context read needs the API key). In either phase, plus any delegate-EOA residue the EIP-3009 bridge left (§8, compensating control 1), which the budget already metered at the funding hop | As the next row |
 | Both (agent fully compromised) | Spend **within the caveat stack**: ≤ each budget's period amount per period, only to pinned recipients (any recipient for an open budget, which the EIP-3009 bridge requires), until expiry or revocation | `ERC20PeriodTransferEnforcer` + `allowedCalldata` when pinned + `Timestamp`; owner kill-switch `disableDelegation` |
 | Haven fully compromised | Constructs malicious payloads but **cannot sign** grants, redemptions, or upgrades (invariants 3/5/7/11/12); worst case = denial of service | The perimeter this doc exists to prove |
 

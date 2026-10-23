@@ -2,11 +2,11 @@
  * The x402 settlement grant's TIMING constants, lifted into their own
  * zero-import module (#4379) so `modules/payments/agent-payment-status.ts`
  * reads the SAME numbers the x402 verifier uses WITHOUT importing
- * `modules/x402/*`: payments' status projection and x402's sign-context
- * already depend on each other's barrels, so a payments → x402 import was a
- * cycle. `x402-delegation.ts` and `settlement-observed.ts` re-export these
+ * `modules/x402/*`: x402's sign-context imports the payments barrel, so a
+ * payments → x402 import would close a cycle. `x402-delegation.ts` and `settlement-observed.ts` re-export these
  * unchanged, and their behaviour is untouched — the same move
- * `x402-sweep-window.ts` made for the sweeper's window.
+ * `x402-sweep-window.ts` made for the sweeper's window. Both files are on the
+ * money-path list (`.github/money-path-globs.json`).
  */
 
 /** Cap on how long a settlement grant may live, whatever the merchant asks. */

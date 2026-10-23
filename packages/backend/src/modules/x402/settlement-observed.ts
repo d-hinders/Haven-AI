@@ -43,13 +43,11 @@ import { verifySettlementTransferTx } from '../../infra/chain/settlement-transfe
 import { getFiatValuesForTokenAmount } from '../../infra/fiat-values.js'
 import { emitFirstPaymentSettled } from '../../infra/repositories/onboarding-funnel.js'
 import { MAX_SETTLEMENT_WINDOW_SECONDS } from './x402-delegation.js'
-
-/**
- * Clock-skew allowance between Postgres' `created_at` and the chain's block
- * timestamps — defined in `domain/x402-settlement-timing.ts` (#4379), where
- * `agent-payment-status.ts` reads it too.
- */
 import { CLOCK_SKEW_SECONDS } from '../../domain/x402-settlement-timing.js'
+
+// The clock-skew allowance between Postgres' `created_at` and the chain's
+// block timestamps is defined in `domain/x402-settlement-timing.ts` (#4379),
+// where `agent-payment-status.ts` reads it too, and re-exported here unchanged.
 export { CLOCK_SKEW_SECONDS }
 
 /**

@@ -121,9 +121,10 @@ module.exports = {
       // remaining modules/** directory one too (accounts/, agents/, payments/,
       // catalog/, accounting/, reporting/, fee/, passport/) and fixed every
       // external call site to import through it. This arm polices every
-      // import INTO modules/** from outside it — zero violations, and it must
-      // never gain a waiver for any of them; the module-to-module arm below
-      // (#4379) polices imports between modules. `platform/`,
+      // import INTO modules/** from outside it — zero violations, with a few
+      // reviewed inline waivers (`npm run lint:deps` prints each with its
+      // reason); the module-to-module arm below (#4379) polices imports
+      // between modules. `platform/`,
       // `domain/`, `infra/` and `rails/` are LAYERS, not domain-capability
       // modules (see the architecture doc's "what belongs where" table), and
       // deliberately do not get barrels — they hold multiple files each with

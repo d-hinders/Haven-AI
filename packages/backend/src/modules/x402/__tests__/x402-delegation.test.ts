@@ -90,6 +90,10 @@ describe('buildSettlementDelegation (#830)', () => {
   it('clamps the settlement window to the 600s ceiling (the #715 discipline)', () => {
     const built = buildSettlementDelegation(req({ maxTimeoutSeconds: 99999 }))
     expect(built.expiresAt - NOW).toBeLessThanOrEqual(MAX_SETTLEMENT_WINDOW_SECONDS + 2)
+    // The ceiling itself, as a literal (#4379): comparing against the constant
+    // alone could not catch a change to the constant's value.
+    expect(MAX_SETTLEMENT_WINDOW_SECONDS).toBe(600)
+    expect(built.expiresAt - NOW).toBeLessThanOrEqual(600 + 2)
   })
 
   it('adds a REDEEMER caveat pinned to our enforcer, terms naming the facilitator (#1058)', () => {

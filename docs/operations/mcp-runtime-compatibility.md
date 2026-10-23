@@ -62,6 +62,7 @@ covers:
   - packages/backend/src/routes/agents.ts
   - packages/backend/src/routes/agent-connection-setups.ts
   - packages/backend/src/domain/agent-payment-taxonomy.ts
+  - packages/backend/src/domain/x402-settlement-timing.ts
   - packages/backend/src/modules/payments/agent-payment-status.ts
   - packages/backend/src/modules/transactions/csv-export.ts
   - packages/backend/src/domain/csv.ts
@@ -6514,7 +6515,8 @@ to call next in structured fields, and those fields are typed end to end
 > instead of private payments files, and `modules/payments/agent-payment-status.ts`
 > reads `MAX_SETTLEMENT_WINDOW_SECONDS` and `CLOCK_SKEW_SECONDS` from the new
 > zero-import `domain/x402-settlement-timing.ts` (same values, 600 and 120)
-> instead of `modules/x402/`. No `haven_*` tool, input schema, refusal,
+> instead of `modules/x402/`; that file joins this document's `covers:`. No
+> `haven_*` tool, input schema, refusal,
 > `next_tool` value, status projection or expected-context version changes.
 > Scope of this note: those import lines. Nothing else in this document was
 > re-verified.

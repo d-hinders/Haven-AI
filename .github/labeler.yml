@@ -55,6 +55,8 @@
           - "packages/backend/src/db/migrations/**"
           - "packages/backend/src/domain/machine-payment-lifecycle.ts"
           - "packages/backend/src/domain/payment-token.ts"
+          - "packages/backend/src/domain/x402-settlement-timing.ts"
+          - "packages/backend/src/domain/x402-sweep-window.ts"
           - "packages/backend/src/infra/chain/**"
           - "packages/backend/src/infra/delegate-*.ts"
           - "packages/backend/src/infra/outbound-*.ts"

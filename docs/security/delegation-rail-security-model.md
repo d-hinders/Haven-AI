@@ -575,9 +575,10 @@ caveat, so the authority is still the signed caveat stack and nothing else.
 > 10 min and takes rows least recently updated first. What a probed row
 > writes is unchanged, `pay_to` included. A row the run does not reach is
 > not written at all: it keeps its current `pay_to`, status and failure
-> streak until the next run, which takes it first. A merchant's verified
-> payTo can therefore be one run older than before, but only when a run
-> hits its budget; with the seeded rows a run finishes well inside it. The
+> streak until a later run reaches it, which takes the least recently
+> updated rows first. A merchant's verified payTo can therefore stay
+> deferred until the rotation reaches it, but only when a run hits its
+> budget; with the seeded rows a run finishes well inside it. The
 > payTo contract above is unchanged. Scope of this re-read: the
 > Merchant-locked budgets section and the `merchant-catalog.ts` coverage
 > it names; the rest of the document was not re-read for it.

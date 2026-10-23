@@ -693,7 +693,8 @@ account is permanently out of scope.
 > document was re-read. Changed: the nonce line anchors (`core.ts:495-501`,
 > sweeper `:472`), and the scope note no longer says delegation-rail payments
 > are not exposed as signer tools — `haven_sign` signs their `eip712_userop`
-> typed data (#3271/#3272). Re-checked without change: `RETIRED_BINDING_MEMORY`
+> typed data (#3271/#3272) and the erc7710 settlement child — and names the
+> SDK's `eip712_delegation` target, `signSettlementDelegationTypedData`. Re-checked without change: `RETIRED_BINDING_MEMORY`
 > (64), the handshake version fields, the egress deadlines (5 s discovery, 15 s
 > quote and session, 300 s delivery, ≤3 GET redirects), the sweep chains
 > (`isSweepableChain`: Base, Base Sepolia), `X402_BINDING_PRIVATE_KEY` with no

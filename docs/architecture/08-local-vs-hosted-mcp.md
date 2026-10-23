@@ -675,7 +675,9 @@ strict/permissive census is 27 strict of 29 hosted tools (#3788 added
 `haven_report_delivery_quality`; `PERMISSIVE_INPUT_TOOLS` still exactly
 `haven_get_agent` + `haven_get_allowances`), and the fingerprint paragraph's
 `server.ts` line anchors moved (instructions `:169-183`, `annotateStaleToolList`
-`:373-385`, `toMcpResult` `:387-405`). Re-checked without change: the five
+`:373-385`, `toMcpResult` `:387-405`); and the report paragraph no longer
+says erc7710 needs no report step (#3774, review round 1). Re-checked without
+change: the five
 signer tools, the report-settlement-evidence arguments, the hosted egress
 deadlines and the DNS residual (`sdk/src/merchant-egress.ts:16-18`), the qa-dev
 env pins, and the #1986 410 (`modules/x402/authorize.ts:106`).

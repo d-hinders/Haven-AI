@@ -8,7 +8,9 @@ import type { AgentConnectionSetupStatusResponse } from '@/hooks/useAgentConnect
 import { useDelegationBudget, type GrantInput } from '@/hooks/useDelegationBudget'
 import { formatAllowanceForToken } from '@/lib/allowance-format'
 import { budgetPeriodLabel } from '@/lib/budget-period'
+import { BUDGET_END_DEFAULT_DAYS, budgetEndsAt } from '@/lib/budget-end'
 import BudgetGrantAction from '../BudgetGrantAction'
+import BudgetEndDateSelect from '../haven/BudgetEndDateSelect'
 import PasskeyElsewhereHint from '../PasskeyElsewhereHint'
 import WalletButton from '../WalletButton'
 import { Button } from '../ui/Button'
@@ -66,6 +68,12 @@ export function DelegationApprovalStep({
   // nothing left for "Cancel" to undo, and offering it would promise a
   // reversal Haven cannot perform (#1073 review). The backend refuses it too.
   const [granted, setGranted] = useState(false)
+  // #4350: the end date is a CHOICE on this step — 30/90/180/365 days, 90 the
+  // default (owner decision 1 on #4349). Until this slice the connect approval
+  // showed no end date at all; the owner now picks one and reads its date
+  // before the signature. Renewal later is the edit flow's new end date.
+  const [endDays, setEndDays] = useState(BUDGET_END_DEFAULT_DAYS)
+  const nowSec = Math.floor(Date.now() / 1000)
 
   const budget = status.agent_budget[0] ?? null
   const displayAmount = budget
@@ -74,6 +82,7 @@ export function DelegationApprovalStep({
 
   // The policy step's single budget, in the shape the grant takes. Minutes on
   // the setup record, seconds on a delegation.
+  const endsAt = budget ? budgetEndsAt(endDays, nowSec) : null
   const grantInput: GrantInput | null = budget
     ? {
         tokenAddress: budget.token_address as Address,
@@ -83,6 +92,10 @@ export function DelegationApprovalStep({
         recipientAddress: null,
         budgetAtomic: budget.allowance_amount,
         periodSeconds: budget.reset_period_min * 60,
+        // #4350: the chosen end date rides the build — a surface that shows
+        // one must never drop the field (the server default would silently
+        // replace it).
+        ...(endsAt !== null ? { expiresAt: endsAt } : {}),
       }
     : null
 
@@ -140,6 +153,24 @@ export function DelegationApprovalStep({
           />
         }
       />
+
+      {budget ? (
+        // #4350: the end-date choice, with its resulting day — the same
+        // control the agent page's grant form and the edit modal use. The
+        // summary above restates the policy; this chooses the budget's term.
+        <div className="mt-4">
+          <BudgetEndDateSelect
+            id="approval-budget-end"
+            days={endDays}
+            onDaysChange={(d) => setEndDays(d ?? BUDGET_END_DEFAULT_DAYS)}
+            nowSec={nowSec}
+          />
+          <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-3)]">
+            When it ends, {status.agent.name ?? 'the agent'} can no longer spend. Renewing it is a new approval on the
+            agent&apos;s page.
+          </p>
+        </div>
+      ) : null}
 
       {confirmFailed && (
         <WarningCallout

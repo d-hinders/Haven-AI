@@ -891,23 +891,24 @@ describe('DelegationBudgetCard Spending section (#3695)', () => {
     render(<DelegationBudgetCard {...PROPS} />)
     const meter = screen.getByRole('progressbar', { name: 'USDC budget used' })
     expect(meter.getAttribute('aria-valuenow')).toBe('25')
-    // #3806: amounts are always two decimals.
-    expect(screen.getByText('1.25 of 5.00 USDC · per day · refills in 14h')).toBeTruthy()
+    // #3806: amounts are always two decimals. #4350: the end date is always named.
+    expect(screen.getByText('1.25 of 5.00 USDC · per day · refills in 14h · ends 20 Nov 2286')).toBeTruthy()
   })
 
-  it('says "expires" when the budget ends before its period does', () => {
+  it('names the end date when the budget ends before its period does (#4350)', () => {
     mockGet.mockReturnValue([
       budget({
         remaining_atomic: '5000000',
         remaining_from_chain: true,
         period_end: '2026-09-08T12:00:00Z',
         // Ends 2h after the frozen clock — before the 02:00Z boundary would
-        // refill it, so "expires" is the next event.
+        // refill it, so the expiry is the next event, phrased as the absolute
+        // "ends <date>" (#4350; was the relative "expires in 2h").
         expires_at: Math.floor(Date.parse('2026-09-01T14:00:00Z') / 1000),
       }),
     ])
     render(<DelegationBudgetCard {...PROPS} />)
-    expect(screen.getByText('0.00 of 5.00 USDC · per day · expires in 2h')).toBeTruthy()
+    expect(screen.getByText('0.00 of 5.00 USDC · per day · ends 1 Sept 2026')).toBeTruthy()
   })
 
   it('a read whose period has already ended shows unknown — the old amount is never paired with the next refill', () => {
@@ -1287,7 +1288,8 @@ describe('DelegationBudgetCard — occupied slot and replaced-but-enabled budget
     mockGrant.mockResolvedValue({ ok: true })
     render(<DelegationBudgetCard {...PROPS} />)
     await openFormAndType('10', OTHER)
-    expect(screen.getByText('One approval. Refills every period automatically.')).toBeTruthy()
+    // #4350: the pre-sign helper names the chosen end date (90-day default).
+    expect(screen.getByText(/One approval\. Refills every period automatically until \d{1,2} \w{3} \d{4}\./)).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Set budget' }))
     await waitFor(() => expect(mockGrant).toHaveBeenCalled())
     expect(screen.queryByRole('dialog', { name: 'Edit budget' })).toBeNull()
@@ -1784,7 +1786,7 @@ describe('DelegationBudgetCard hero states (#4226)', () => {
     const fill = screen.getByRole('progressbar', { name: 'USDC budget used' }).querySelector('div')
     expect(fill?.className).toContain('bg-[var(--v2-ink-3)]')
     expect(screen.getByText(AGENT_PAUSED_SHORT)).toBeTruthy()
-    expect(screen.getByText('1.25 of 5.00 USDC · per day · refills in 14h')).toBeTruthy()
+    expect(screen.getByText('1.25 of 5.00 USDC · per day · refills in 14h · ends 20 Nov 2286')).toBeTruthy()
   })
 
   it("an active agent's hero caption is the dashboard row's caption, verbatim", () => {

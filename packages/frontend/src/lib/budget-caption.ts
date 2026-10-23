@@ -1,6 +1,7 @@
 import { currentPeriodBounds, shouldMarkApprox } from '@haven_ai/core'
 import { formatAllowanceAmount, getTokenDecimals } from './allowance-format'
 import { formatFiatDisplay } from './format'
+import { formatSubBudgetDate } from './sub-budget'
 
 /**
  * The ONE budget caption (#3806, epic #3801) — every budget meter in the app
@@ -276,13 +277,21 @@ function meterCaption(row: BudgetCaptionRow, options: BudgetCaptionOptions): str
     style === 'row' ? `${figures} · ${budgetPeriodWords(row.periodSeconds)}` : `${figures} used this period`
   const refillMs = nextRefillAt(row.startSec, row.periodSeconds, nowMs)
   const expiresMs = row.expiresSec != null ? row.expiresSec * 1000 : null
-  // The earlier of the two wins; "expires" is the phrase at a tie — a re-key
-  // carry row's expiry sits AT its period boundary, so it correctly reads as
-  // an expiry, never as a refill that will not happen.
+  // #4350: the end date is ALWAYS named, as an absolute "ends <date>"
+  // segment (the sub-budget formatter, so no surface drifts). When the
+  // expiry is the next event it IS the phrase — an absolute date still reads
+  // as an expiry at the re-key tie; when a refill comes first, the end date
+  // rides after the refill wording, so a daily budget 89 days out reads
+  // "refills in 5h · ends 21 Jan 2027" and never a bare "refills" that
+  // hides the end. Rows without an expiry (the analytics read) name nothing.
+  const endsAt = expiresMs != null ? `ends ${formatSubBudgetDate(row.expiresSec!)}` : null
+  // The earlier of the two wins; a tie is the expiry — a re-key carry row's
+  // expiry sits AT its period boundary, so it correctly reads as an expiry,
+  // never as a refill that will not happen.
   const when =
     expiresMs != null && expiresMs <= refillMs
-      ? `expires ${formatNextEvent(expiresMs, nowMs, timeZone)}`
-      : `refills ${formatNextEvent(refillMs, nowMs, timeZone)}`
+      ? endsAt!
+      : `refills ${formatNextEvent(refillMs, nowMs, timeZone)}${endsAt ? ` · ${endsAt}` : ''}`
   return `${usedLine} · ${when}`
 }
 

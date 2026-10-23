@@ -6,6 +6,7 @@ export {
   default as BudgetAmountRow,
   type BudgetAmountTokenOption,
 } from './BudgetAmountRow'
+export { default as BudgetEndDateSelect } from './BudgetEndDateSelect'
 export { Address, truncateAddress } from './Address'
 export {
   ExternalDetailsLink,

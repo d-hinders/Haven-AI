@@ -137,7 +137,10 @@ function MerchantCell({ agent }: { agent: AnalyticsAgentRow }) {
   if (agent.top_merchant === null) {
     return <span className="text-sm text-[var(--v2-ink-3)]">None in this range</span>
   }
-  const { value, title } = merchantLabel(agent.top_merchant.label)
+  // #4332: `top_merchant.label` is nullable now (null = nothing resolved).
+  // Pixel-neutral shim — an unresolved label renders the address exactly as
+  // the pre-#4332 wire did; #4333 replaces this with "Unknown recipient".
+  const { value, title } = merchantLabel(agent.top_merchant.label ?? agent.top_merchant.address)
   return (
     <span
       // Tabular numerals only on the address branch: a hexadecimal string is a
@@ -310,7 +313,7 @@ function MobileAgentRow({
           <DisclosureLine term="Spend" value={formatAnalyticsAmount(agent.spent, currency)} />
           <DisclosureLine
             term="Top merchant"
-            {...merchantLabel(agent.top_merchant?.label ?? 'None in this range')}
+            {...merchantLabel(agent.top_merchant?.label ?? agent.top_merchant?.address ?? 'None in this range')}
           />
           <DisclosureLine
             term="Last payment"

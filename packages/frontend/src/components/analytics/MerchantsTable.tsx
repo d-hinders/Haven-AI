@@ -125,7 +125,10 @@ function SeenCell({ iso }: { iso: string }) {
  *  the title. A resolved name keeps its own characters and spacing, and gets
  *  no title. */
 function LabelCell({ merchant }: { merchant: AnalyticsMerchantRow }) {
-  const { value, title } = merchantLabel(merchant.label)
+  // #4332: `label` is nullable now (null = nothing resolved). Pixel-neutral
+  // shim — an unresolved label renders the address exactly as the pre-#4332
+  // wire did; #4333 replaces this with "Unknown recipient".
+  const { value, title } = merchantLabel(merchant.label ?? merchant.address)
   return (
     <span
       className={`text-sm font-medium text-[var(--v2-ink)]${title ? ' v2-tabular' : ''}`}
@@ -248,7 +251,8 @@ function MobileMerchantRow({
 }) {
   const [open, setOpen] = useState(false)
   const { names, total } = agentNamesFor(merchant.agent_ids, roster)
-  const label = merchantLabel(merchant.label)
+  // #4332 pixel-neutral shim: a null label renders the address as before.
+  const label = merchantLabel(merchant.label ?? merchant.address)
 
   return (
     <div className="px-4 py-3">

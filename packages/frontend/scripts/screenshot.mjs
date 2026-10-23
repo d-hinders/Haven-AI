@@ -1835,18 +1835,25 @@ export const ANALYTICS_RANGE = {
 }
 export const FIXTURE_ANALYTICS_MERCHANTS = [
   {
-    label: 'NordShield VPN', address: ADDR.merchant,
+    // #4332: `kind` names the naming step that produced `label`; the address-only
+    // third row's label is NULL now (the client renders "Unknown recipient" in
+    // #4333 — until then the shim renders the address, pixel-neutral).
+    label: 'NordShield VPN', kind: 'contact',
+    filter_address: ADDR.merchant, address: ADDR.merchant,
     spent: '225.00', payments: 3, agent_ids: ['agent-research'],
     first_seen: '2026-07-08T09:15:00.000Z', last_seen: '2026-07-10T08:12:00.000Z',
   },
   {
-    label: 'Klara Data AB', address: '0xC0dA5fA2b7E1d3418c6b9A0fD2e3B4C5D6E7F809',
+    label: 'Klara Data AB', kind: 'receipt',
+    filter_address: '0xC0dA5fA2b7E1d3418c6b9A0fD2e3B4C5D6E7F809',
+    address: '0xC0dA5fA2b7E1d3418c6b9A0fD2e3B4C5D6E7F809',
     spent: '87.25', payments: 1, agent_ids: ['agent-research'],
     first_seen: '2026-07-09T10:00:00.000Z', last_seen: '2026-07-09T10:00:00.000Z',
   },
   {
-    // Address-only: no contact, no receipt name — the label IS the address.
-    label: '0x71C2E8a4D5f6093b1a7C8e2F4B6D0A9C3E5F7128',
+    // Nothing resolves: label null, kind unknown.
+    label: null, kind: 'unknown',
+    filter_address: '0x71C2E8a4D5f6093b1a7C8e2F4B6D0A9C3E5F7128',
     address: '0x71C2E8a4D5f6093b1a7C8e2F4B6D0A9C3E5F7128',
     spent: '12.50', payments: 1, agent_ids: ['agent-retired'],
     first_seen: '2026-07-10T12:30:00.000Z', last_seen: '2026-07-10T12:30:00.000Z',
@@ -1905,6 +1912,8 @@ export const FIXTURE_ANALYTICS_OVERVIEW = {
     gas_sponsored_ops: 7,
   },
   by_day: FIXTURE_ANALYTICS_BY_DAY,
+  // #4332: balance is stored per USER and is deliberately NOT agent-scoped.
+  balance_scope: 'all_accounts',
   // Wire shape (B #2946): `spent` numeric strings; `share` is B's one
   // number-typed money-adjacent field, DERIVED here (not hand-typed) so the
   // ratios cannot drift from the sums they are shares of.
@@ -1934,7 +1943,7 @@ export const FIXTURE_ANALYTICS_OVERVIEW = {
           remaining_from_chain: false,
           period_start: '2026-07-10T00:00:00.000Z', period_end: '2026-07-11T00:00:00.000Z',
         }],
-        top_merchant: { label: '0x71C2E8a4D5f6093b1a7C8e2F4B6D0A9C3E5F7128', address: '0x71C2E8a4D5f6093b1a7C8e2F4B6D0A9C3E5F7128' },
+        top_merchant: { label: null, address: '0x71C2E8a4D5f6093b1a7C8e2F4B6D0A9C3E5F7128' },
         last_payment_at: '2026-07-10T12:30:00.000Z',
       },
     ]
@@ -1971,6 +1980,7 @@ export const FIXTURE_ANALYTICS_OVERVIEW_EMPTY = {
   by_day: [],
   agents: [],
   merchants: [],
+  balance_scope: 'all_accounts',
   balance_by_day: [],
 }
 

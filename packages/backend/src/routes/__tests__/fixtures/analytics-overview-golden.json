@@ -88,21 +88,6 @@
   ],
   "agents": [
     {
-      "id": "Ops",
-      "name": "Ops",
-      "status": "active",
-      "spent": "12.000000000000000000000000000000",
-      "share": 0.3870967741935484,
-      "payments": 3,
-      "refusals": 0,
-      "refusal_attempts": 0,
-      "budgets": [],
-      "top_merchant": {
-        "address": "0x3333333333333333333333333333333333333333"
-      },
-      "last_payment_at": "2030-06-05T10:00:00.000Z"
-    },
-    {
       "id": "Idle",
       "name": "Idle",
       "status": "active",
@@ -116,19 +101,19 @@
       "last_payment_at": null
     },
     {
-      "id": "Revoked",
-      "name": "Revoked",
-      "status": "revoked",
-      "spent": "4.000000000000000000000000000000",
-      "share": 0.12903225806451613,
-      "payments": 1,
-      "refusals": 1,
-      "refusal_attempts": 1,
+      "id": "Ops",
+      "name": "Ops",
+      "status": "active",
+      "spent": "12.000000000000000000000000000000",
+      "share": 0.3870967741935484,
+      "payments": 3,
+      "refusals": 0,
+      "refusal_attempts": 0,
       "budgets": [],
       "top_merchant": {
-        "address": "0x2222222222222222222222222222222222222222"
+        "address": "0x3333333333333333333333333333333333333333"
       },
-      "last_payment_at": "2030-06-06T10:00:00.000Z"
+      "last_payment_at": "2030-06-05T10:00:00.000Z"
     },
     {
       "id": "Research",
@@ -154,6 +139,21 @@
         "address": "0x1111111111111111111111111111111111111111"
       },
       "last_payment_at": "2030-06-02T10:00:00.000Z"
+    },
+    {
+      "id": "Revoked",
+      "name": "Revoked",
+      "status": "revoked",
+      "spent": "4.000000000000000000000000000000",
+      "share": 0.12903225806451613,
+      "payments": 1,
+      "refusals": 1,
+      "refusal_attempts": 1,
+      "budgets": [],
+      "top_merchant": {
+        "address": "0x2222222222222222222222222222222222222222"
+      },
+      "last_payment_at": "2030-06-06T10:00:00.000Z"
     }
   ],
   "merchants": [

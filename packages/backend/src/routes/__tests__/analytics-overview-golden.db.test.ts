@@ -35,6 +35,7 @@ import fastifyJwt from '@fastify/jwt'
 import db from '../../db.js'
 import { describeDb, initDbHarness, resetDb } from '../../infra/__tests__/helpers/db-harness.js'
 import analyticsOverviewRoutes from '../analytics-overview.js'
+import { installRequestValidation } from '../../openapi/request-validation.js'
 import { readRemainingBudget } from '../../infra/chain/delegation-budget-reader.js'
 import { config } from '../../config.js'
 
@@ -201,7 +202,12 @@ async function seedDelegation(agentId: string): Promise<void> {
  * a receipt, the user's own account on TWO chains, a fee, a submitted
  * (unsettled) intent, and balance snapshots.
  */
-async function seedFixture(): Promise<string> {
+async function seedFixture(): Promise<{
+  userId: string
+  a1: string
+  a2: string
+  a3: string
+}> {
   const userId = await seedUser()
 
   const mainAccount = await seedAccount(userId, `0x${'aa'.repeat(20)}`, { name: 'Main' })
@@ -267,7 +273,7 @@ async function seedFixture(): Promise<string> {
     )
   }
 
-  return userId
+  return { userId, a1, a2, a3 }
 }
 
 /**
@@ -280,7 +286,7 @@ function stableGolden(body: Record<string, unknown>): unknown {
   const clone = structuredClone(body) as {
     balance_scope?: unknown
     merchants: Array<Record<string, unknown>>
-    agents: Array<{ id: string; top_merchant: { label?: unknown } | null }>
+    agents: Array<{ id: string; top_merchant: { label?: unknown } | null; budgets: Array<Record<string, unknown>> }>
     by_day: Array<{ spent_by_agent: Record<string, string> }>
   }
   delete clone.balance_scope
@@ -291,7 +297,16 @@ function stableGolden(body: Record<string, unknown>): unknown {
   }
   for (const a of clone.agents ?? []) {
     if (a.top_merchant) delete a.top_merchant.label
+    // budgets[].chain_id is the OPTIONAL #4333 hardening — present after the
+    // change, absent on the base SHA; not a figure the golden pins.
+    for (const b of a.budgets ?? []) delete b.chain_id
   }
+  // `agents[]` is unordered by the spec ("The tenant's delegation-rail agents,
+  // unordered") — the read has no ORDER BY, so plan order is not a figure the
+  // golden pins. Sort on the (never-aliased) name before comparing.
+  clone.agents = [...clone.agents].sort((a, b) =>
+    String((a as { name?: string }).name ?? '').localeCompare(String((b as { name?: string }).name ?? '')),
+  )
   return aliasSeededUuids(clone)
 }
 
@@ -324,6 +339,9 @@ describeDb('GET /analytics/overview — the golden (real DB, faked clock, #4332)
     await initDbHarness()
     vi.useFakeTimers({ toFake: ['Date'], now: FIXED_NOW })
     app = Fastify({ logger: false })
+    // The production wiring: the module is enforced, so a malformed agentId
+    // is the spec's 400 envelope before the handler ever runs.
+    installRequestValidation(app, { mode: 'enforce', enforcedModules: ['routes/analytics-overview.ts'] })
     await app.register(fastifyJwt, { secret: 'test-secret' })
     await app.register(analyticsOverviewRoutes, { prefix: '/analytics' })
   })
@@ -341,19 +359,20 @@ describeDb('GET /analytics/overview — the golden (real DB, faked clock, #4332)
   async function getOverview(
     userId: string,
     query = 'range=30d&currency=usd&tz=UTC',
-  ): Promise<Record<string, unknown>> {
+  ): Promise<{ status: number; body: Record<string, unknown> }> {
     const res = await app.inject({
       method: 'GET',
       url: `/analytics/overview?${query}`,
       headers: { authorization: `Bearer ${app.jwt.sign({ sub: userId, email: 'user@example.com' })}` },
     })
-    expect(res.statusCode).toBe(200)
-    return res.json()
+    return { status: res.statusCode, body: res.json() as Record<string, unknown> }
   }
 
   it('the unfiltered response is identical to the base-SHA golden (by-design fields stripped)', async () => {
-    const userId = await seedFixture()
-    const golden = stableGolden(await getOverview(userId))
+    const { userId } = await seedFixture()
+    const { status, body } = await getOverview(userId)
+    expect(status).toBe(200)
+    const golden = stableGolden(body)
 
     if (process.env.UPDATE_ANALYTICS_GOLDEN) {
       mkdirSync(dirname(GOLDEN_PATH), { recursive: true })
@@ -365,5 +384,125 @@ describeDb('GET /analytics/overview — the golden (real DB, faked clock, #4332)
     expect(existsSync(GOLDEN_PATH)).toBe(true)
     const committed = JSON.parse(readFileSync(GOLDEN_PATH, 'utf8'))
     expect(golden).toEqual(committed)
+  })
+
+  // ── agentId scoping (#4332) — the five required real-Postgres cases. ──────
+
+  it('scopes to ONE agent of several: totals, buckets, agents, merchants, refusals, fees — but not balance', async () => {
+    const { userId, a1 } = await seedFixture()
+    const { status, body } = await getOverview(userId, `range=30d&currency=usd&tz=UTC&agentId=${a1}`)
+    expect(status).toBe(200)
+    // a1 booked 5.00 + 10.00 and its fee rides p1.
+    expect(body.totals).toMatchObject({ spent: '15.000000000000000000000000000000', refused_count: 1 })
+    expect(body.basis).toMatchObject({ payments_counted: 2, fee_rows: 1, unsettled_submitted: 0 })
+    expect((body.agents as Array<{ id: string }>).map((a) => a.id)).toEqual([a1])
+    expect((body.merchants as Array<{ address: string }>).map((m) => m.address)).toEqual([MERCHANT_X402])
+    // Every by_day SPEND key is the scoped agent — refusal-only days carry an
+    // empty map by design.
+    let sawSpendDay = false
+    for (const day of body.by_day as Array<{ spent_by_agent: Record<string, string> }>) {
+      for (const key of Object.keys(day.spent_by_agent)) {
+        expect(key).toBe(a1)
+        sawSpendDay = true
+      }
+    }
+    expect(sawSpendDay).toBe(true)
+    // Balance is NEVER scoped — and the response says so.
+    expect((body.balance_by_day as unknown[]).length).toBe(3)
+    expect(body.balance_scope).toBe('all_accounts')
+    // The naming ran for the scoped agent only: the x402 host of p1.
+    expect((body.merchants as Array<{ label: string | null }>)[0].label).toBe('api.nordshield.example')
+  })
+
+  it('an agent with no activity answers a zeroed page that still lists the agent', async () => {
+    const { userId } = await seedFixture()
+    // A fourth agent with none of the activity the fixture seeds. It must sit
+    // on the delegation rail — the agents read joins on it.
+    const railAccount = await seedAccount(userId, `0x${'bb'.repeat(20)}`)
+    const { rows } = await db.query<{ id: string }>(
+      `INSERT INTO agents (user_id, name, status, account_id) VALUES ($1, 'Idle', 'active', $2) RETURNING id`,
+      [userId, railAccount],
+    )
+    const { status, body } = await getOverview(userId, `range=30d&agentId=${rows[0].id}`)
+    expect(status).toBe(200)
+    expect(body.totals).toMatchObject({ spent: '0', refused_count: 0 })
+    expect(body.basis).toMatchObject({ payments_counted: 0, fee_rows: 0 })
+    const agents = body.agents as Array<{ id: string }>
+    expect(agents).toHaveLength(1)
+    expect(agents[0].id).toBe(rows[0].id)
+    expect(body.merchants).toEqual([])
+    // Balance still arrives, unscoped.
+    expect((body.balance_by_day as unknown[]).length).toBe(3)
+  })
+
+  it('a revoked agent keeps its history — no 404, its payments and refusals render', async () => {
+    const { userId, a3 } = await seedFixture()
+    const { status, body } = await getOverview(userId, `range=30d&agentId=${a3}`)
+    expect(status).toBe(200)
+    expect(body.totals).toMatchObject({ spent: '4.000000000000000000000000000000', refused_count: 1 })
+    expect((body.agents as Array<{ id: string }>).map((a) => a.id)).toEqual([a3])
+    // The receipt step named a3's merchant (analytics-only extension).
+    expect((body.merchants as Array<{ label: string | null }>)[0].label).toBe('Klara Data AB')
+  })
+
+  it('a well-formed agentId that belongs to ANOTHER user is a 404, before any read', async () => {
+    const { userId } = await seedFixture()
+    // A foreign user's agent — asked for under the MAIN user's credentials.
+    const foreignUser = await seedUser()
+    const foreignAgent = await db.query<{ id: string }>(
+      `INSERT INTO agents (user_id, name) VALUES ($1, 'foreign') RETURNING id`,
+      [foreignUser],
+    )
+    const { status, body } = await getOverview(userId, `range=30d&agentId=${foreignAgent.rows[0].id}`)
+    expect(status).toBe(404)
+    expect(body).toMatchObject({ error: 'Agent not found' })
+  })
+
+  it('a MALFORMED agentId is the enforced 400 envelope, before the handler', async () => {
+    const { userId } = await seedFixture()
+    const { status, body } = await getOverview(userId, 'range=30d&agentId=not-a-uuid')
+    expect(status).toBe(400)
+    expect(body).toMatchObject({ error: 'Request does not match the API spec', error_code: 'invalid_request' })
+  })
+
+  it('filter_address is the most FREQUENT x402MerchantAddress ?? to in the group (ties to the most recent), which can differ from the group key', async () => {
+    const userId = await seedUser()
+    const account = await seedAccount(userId, `0x${'aa'.repeat(20)}`)
+    const agentId = await seedAgent(userId, account)
+    // Group key COALESCEs merchant_address first — one group; the FILTER
+    // address (x402 ?? to) differs: two payments name FILTER_A, one names
+    // FILTER_B. FILTER_A wins on frequency; if it tied, the more recent
+    // payment would.
+    const FILTER_A = `0x${'b1'.repeat(20)}`
+    const FILTER_B = `0x${'b2'.repeat(20)}`
+    await seedPayment({ agentId, userId, toAddress: FILTER_A, merchantAddress: `0x${'c1'.repeat(20)}`, x402MerchantAddress: FILTER_A, confirmedAt: '2030-06-01T10:00:00.000Z' })
+    await seedPayment({ agentId, userId, toAddress: FILTER_A, merchantAddress: `0x${'c1'.repeat(20)}`, x402MerchantAddress: FILTER_A, confirmedAt: '2030-06-02T10:00:00.000Z' })
+    await seedPayment({ agentId, userId, toAddress: FILTER_B, merchantAddress: `0x${'c1'.repeat(20)}`, x402MerchantAddress: FILTER_B, confirmedAt: '2030-06-03T10:00:00.000Z' })
+
+    const { status, body } = await getOverview(userId)
+    expect(status).toBe(200)
+    const merchants = body.merchants as Array<{ address: string; filter_address: string; resource_url?: unknown }>
+    expect(merchants).toHaveLength(1)
+    expect(merchants[0].address).toBe(`0x${'c1'.repeat(20)}`)
+    expect(merchants[0].filter_address).toBe(FILTER_A)
+  })
+
+  it('the x402 resource URL is the MOST RECENT payment in the window, even when an older payment carried one', async () => {
+    const userId = await seedUser()
+    const account = await seedAccount(userId, `0x${'aa'.repeat(20)}`)
+    const agentId = await seedAgent(userId, account)
+    const merchant = `0x${'c2'.repeat(20)}`
+    // Older payment HAS a resource URL; the most recent does NOT — the
+    // naming step 1 input must be the most recent payment's URL (null here),
+    // so the merchant falls through the naming order rather than using a
+    // stale host.
+    await seedPayment({ agentId, userId, toAddress: merchant, merchantAddress: merchant, resourceUrl: 'https://old.example/x', confirmedAt: '2030-06-01T10:00:00.000Z' })
+    await seedPayment({ agentId, userId, toAddress: merchant, merchantAddress: merchant, resourceUrl: null, confirmedAt: '2030-06-02T10:00:00.000Z' })
+
+    const { status, body } = await getOverview(userId)
+    expect(status).toBe(200)
+    const merchants = body.merchants as Array<{ label: string | null; kind: string }>
+    expect(merchants[0].kind).toBe('unknown')
+    expect(merchants[0].label).toBeNull()
   })
 })

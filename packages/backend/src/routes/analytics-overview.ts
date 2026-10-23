@@ -2,6 +2,8 @@ import { FastifyInstance } from 'fastify'
 import { authMiddleware } from '../middleware/auth.js'
 import { config } from '../config.js'
 import { listContactsForUser } from '../infra/repositories/contacts.js'
+import { agentExistsForUser } from '../infra/repositories/agents.js'
+import { listAccountsForUser } from '../infra/repositories/smart-accounts.js'
 import { aggregateRefusalsForUserByAgent, firstRefusalDayForUser } from '../infra/repositories/payment-refusals.js'
 import {
   aggregateRefusalAmountForUser,
@@ -22,6 +24,10 @@ import {
   countUnsettledSubmittedForUser,
   type DateRange,
 } from '../infra/repositories/analytics.js'
+import {
+  ownAccountNameForAddress,
+  resolveCounterpartyName,
+} from '../modules/transactions/counterparty-name.js'
 
 /**
  * `GET /analytics/overview` (#2946, slice B of epic #2944).
@@ -41,8 +47,10 @@ type AnalyticsRange = keyof typeof RANGE_DAYS
 export const ANALYTICS_OVERVIEW_ENUMS = { range: Object.keys(RANGE_DAYS), currency: ['usd', 'eur', 'sek'] } as const
 /** The spec's query, as the enforced module hands it over (#3030). Kept as
  *  an alias: a quoted union inside the route generic hides the path literal
- *  from `generate-route-modules`, which scans for it. */
-type OverviewQuery = { range: AnalyticsRange; currency?: 'usd' | 'eur' | 'sek'; tz?: string }
+ *  from `generate-route-modules`, which scans for it. `agentId` is the spec's
+ *  uuid (#4332) — a malformed id is the enforced 400 envelope, so the handler
+ *  sees only well-formed uuids. */
+type OverviewQuery = { range: AnalyticsRange; currency?: 'usd' | 'eur' | 'sek'; tz?: string; agentId?: string }
 
 /**
  * `Intl.DateTimeFormat`'s own constructor accepts far more than IANA zone
@@ -59,29 +67,22 @@ function isValidTimeZone(tz: string): boolean {
   return tz === 'UTC' || Intl.supportedValuesOf('timeZone').includes(tz)
 }
 
-interface MerchantLabelSources {
-  contactsByAddress: Map<string, string>
-  receiptByAddress: Map<string, string>
-}
-
-function resolveMerchantLabel(address: string, sources: MerchantLabelSources): string {
-  const key = address.toLowerCase()
-  return sources.contactsByAddress.get(key) ?? sources.receiptByAddress.get(key) ?? address
-}
-
 export default async function analyticsOverviewRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('onRequest', authMiddleware)
 
-  // GET /analytics/overview?range=7d|30d|90d&currency=usd|eur|sek&tz=<IANA>
+  // GET /analytics/overview?range=7d|30d|90d&currency=usd|eur|sek&tz=<IANA>&agentId=<uuid>
   // `range` (required) and `currency` are the spec's enums, enforced before
   // the handler since #3030 — the module is in `enforcedModules`, so the
   // types below are the enums and the defaults are injected. `tz` stays a
   // handler decision: "a zone Intl knows" is not a shape the spec can state.
+  // `agentId` (#4332) is the spec's uuid — a malformed id never reaches this
+  // handler (the enforced 400 envelope answers it), and a WELL-FORMED id
+  // that is not the user's is a 404 below, never another user's data.
   app.get<{ Querystring: OverviewQuery }>(
     '/overview',
     async (request, reply) => {
       const { sub } = request.user as { sub: string }
-      const { range: rangeParam, currency: currencyParam, tz: tzParam } = request.query
+      const { range: rangeParam, currency: currencyParam, tz: tzParam, agentId: agentIdParam } = request.query
 
       const days = RANGE_DAYS[rangeParam]
       const currency = currencyParam ?? 'usd'
@@ -94,6 +95,18 @@ export default async function analyticsOverviewRoutes(app: FastifyInstance): Pro
       }
       const cur = currency
 
+      // ── Ownership (#4332). A revoked agent KEEPS its history: the check is
+      // existence for this user, not status (`agentExistsForUser` selects by
+      // id + user only), so a revoked agent's filtered page still renders.
+      let agentId: string | null = null
+      if (agentIdParam !== undefined) {
+        if (!(await agentExistsForUser(agentIdParam, sub))) {
+          // The same "not found or not yours" contract the other agent
+          // routes answer with — no existence oracle, no cross-tenant probe.
+          return reply.code(404).send({ error: 'Agent not found' })
+        }
+        agentId = agentIdParam
+      }
       const now = new Date()
       const to = now
       const from = new Date(to.getTime() - days * 24 * 60 * 60 * 1000)
@@ -121,14 +134,14 @@ export default async function analyticsOverviewRoutes(app: FastifyInstance): Pro
         refusalLedgerFloor,
         contacts,
       ] = await Promise.all([
-        sumTotalsSpendForUser(sub, current, previous),
-        countUnsettledSubmittedForUser(sub, current),
-        listByDaySpendForUser(sub, tz, current),
+        sumTotalsSpendForUser(sub, current, previous, agentId),
+        countUnsettledSubmittedForUser(sub, current, agentId),
+        listByDaySpendForUser(sub, tz, current, agentId),
         listPerAgentSpendForUser(sub, current),
         listPerAgentTopMerchantForUser(sub, current),
-        listTopMerchantsForUser(sub, current),
+        listTopMerchantsForUser(sub, current, agentId),
         listBalanceByDayForUser(sub, current),
-        sumFeesTotalsForUser(sub, current, previous),
+        sumFeesTotalsForUser(sub, current, previous, agentId),
         listGasEventsByChainForUser(sub, current),
         listActiveDelegationsForUser(sub),
         aggregateRefusalsForUserByAgent(sub, { fromExclusive: current.from, toInclusive: current.to }),
@@ -136,38 +149,72 @@ export default async function analyticsOverviewRoutes(app: FastifyInstance): Pro
         // Amount and by-day are ONE aggregate scan each (analytics.ts,
         // review of #2946) — never a client-side fold over a fetched row
         // list, and both use the same `[from, to)` boundary as spend.
-        aggregateRefusalAmountForUser(sub, current),
-        listRefusalsByDayForUser(sub, tz, current),
+        aggregateRefusalAmountForUser(sub, current, agentId),
+        listRefusalsByDayForUser(sub, tz, current, agentId),
         // The ledger floor (#3013) — read inside NO window bound: it is a
         // property of the ledger, not of the requested range.
         firstRefusalDayForUser(sub),
         listContactsForUser(sub),
       ])
 
+      // ── agentId scoping (#4332) — the JS half. The per-agent reads and the
+      // per-agent refusal aggregate return EVERY agent's rows keyed by
+      // `agent_id`, so the filter is an exact projection, not a re-query:
+      // `payment-refusals.ts` is CASP-covered (no parameter added there) and
+      // the delegations are filtered BEFORE `shapeBudgets`, so no other
+      // agent's chain reads run. Balance and gas are intentionally unscoped.
+      const scopedPerAgentSpend = agentId
+        ? perAgentSpend.filter((a) => a.agent_id === agentId)
+        : perAgentSpend
+      const scopedPerAgentTopMerchant = agentId
+        ? perAgentTopMerchant.filter((m) => m.agent_id === agentId)
+        : perAgentTopMerchant
+      const scopedRefusalsCurrent = agentId
+        ? refusalsCurrentByAgent.filter((r) => r.agent_id === agentId)
+        : refusalsCurrentByAgent
+      const scopedRefusalsPrevious = agentId
+        ? refusalsPreviousByAgent.filter((r) => r.agent_id === agentId)
+        : refusalsPreviousByAgent
+      const scopedDelegations = agentId
+        ? activeDelegations.filter((d) => d.agent_id === agentId)
+        : activeDelegations
+
       // Budget reads are RPC calls, not SQL — sequential per delegation,
       // documented in infra/repositories/analytics.ts.
-      const budgetsByAgent = await shapeBudgets(activeDelegations)
+      const budgetsByAgent = await shapeBudgets(scopedDelegations)
       const budgetBands = computeBudgetBands(budgetsByAgent)
 
       const contactsByAddress = new Map(contacts.map((c) => [c.address.toLowerCase(), c.name]))
+      // Address-only own-account names (#4332): `LIST_ACCOUNTS_FOR_USER_SQL`
+      // orders `created_at ASC`, so `ownAccountNameForAddress`'s first match
+      // is the OLDEST account when several share an address, on any chain.
+      const ownAccounts = await listAccountsForUser(sub)
       const merchantAddresses = Array.from(
         new Set([
           ...topMerchants.map((m) => m.merchant_key),
-          ...perAgentTopMerchant.map((m) => m.merchant_key),
+          ...scopedPerAgentTopMerchant.map((m) => m.merchant_key),
         ]),
       )
       const receiptByAddress = await listReceiptMerchantNamesForUser(sub, merchantAddresses)
-      const labelSources: MerchantLabelSources = { contactsByAddress, receiptByAddress }
+
+      /** The five-step naming order (Scope §2), from the candidates this route fetched. */
+      const nameMerchant = (merchantKey: string, x402ResourceUrl: string | null) =>
+        resolveCounterpartyName({
+          x402ResourceUrl,
+          ownAccountName: ownAccountNameForAddress(ownAccounts, merchantKey),
+          contactName: contactsByAddress.get(merchantKey.toLowerCase()) ?? null,
+          receiptName: receiptByAddress.get(merchantKey.toLowerCase()) ?? null,
+        })
 
       // ── Refusal totals, folded from the per-agent aggregate (no re-query). ──
       let refusedCount = 0
       let refusedAttempts = 0
-      for (const a of refusalsCurrentByAgent) {
+      for (const a of scopedRefusalsCurrent) {
         refusedCount += a.refusals
         refusedAttempts += a.attempts
       }
       let refusedPreviousCount = 0
-      for (const a of refusalsPreviousByAgent) refusedPreviousCount += a.refusals
+      for (const a of scopedRefusalsPrevious) refusedPreviousCount += a.refusals
       const refusedAmount =
         cur === 'usd'
           ? refusalAmount.refused_amount_usd
@@ -193,8 +240,10 @@ export default async function analyticsOverviewRoutes(app: FastifyInstance): Pro
         .map(([date, v]) => ({ date, spent_by_agent: v.spent_by_agent, refusals: v.refusals }))
 
       // ── agents[] ──────────────────────────────────────────────────────────
-      const topMerchantByAgent = new Map(perAgentTopMerchant.map((m) => [m.agent_id, m.merchant_key]))
-      const totalSpentAcrossAgents = perAgentSpend.reduce(
+      const topMerchantByAgent = new Map(
+        scopedPerAgentTopMerchant.map((m) => [m.agent_id, m] as const),
+      )
+      const totalSpentAcrossAgents = scopedPerAgentSpend.reduce(
         (sum, a) =>
           sum + Number(cur === 'usd' ? a.spent_usd : cur === 'eur' ? a.spent_eur : a.spent_sek),
         0,
@@ -206,10 +255,10 @@ export default async function analyticsOverviewRoutes(app: FastifyInstance): Pro
       // it is revoked yet still holds an active delegation — revoking flips
       // only `agents.status`, so that agent can still spend, and
       // `totals.budget_bands` already counts it.
-      const agents = perAgentSpend.map((a) => {
-        const refusalAgg = refusalsCurrentByAgent.find((r) => r.agent_id === a.agent_id)
+      const agents = scopedPerAgentSpend.map((a) => {
+        const refusalAgg = scopedRefusalsCurrent.find((r) => r.agent_id === a.agent_id)
         const spent = Number(cur === 'usd' ? a.spent_usd : cur === 'eur' ? a.spent_eur : a.spent_sek)
-        const merchantKey = topMerchantByAgent.get(a.agent_id) ?? null
+        const topMerchant = topMerchantByAgent.get(a.agent_id) ?? null
         const budgets = (budgetsByAgent.get(a.agent_id) ?? []).map((b) => ({
           token: b.token,
           recipient: b.recipient,
@@ -218,6 +267,7 @@ export default async function analyticsOverviewRoutes(app: FastifyInstance): Pro
           remaining_from_chain: b.remaining_from_chain,
           period_start: b.period_start,
           period_end: b.period_end,
+          chain_id: b.chain_id,
         }))
         return {
           id: a.agent_id,
@@ -229,8 +279,11 @@ export default async function analyticsOverviewRoutes(app: FastifyInstance): Pro
           refusals: refusalAgg?.refusals ?? 0,
           refusal_attempts: refusalAgg?.attempts ?? 0,
           budgets,
-          top_merchant: merchantKey
-            ? { label: resolveMerchantLabel(merchantKey, labelSources), address: merchantKey }
+          top_merchant: topMerchant
+            ? {
+                label: nameMerchant(topMerchant.merchant_key, topMerchant.resource_url).label,
+                address: topMerchant.merchant_key,
+              }
             : null,
           last_payment_at: a.last_payment_at,
         }
@@ -239,15 +292,25 @@ export default async function analyticsOverviewRoutes(app: FastifyInstance): Pro
       )
 
       // ── merchants[] (top 10) ─────────────────────────────────────────────
-      const merchants = topMerchants.map((m) => ({
-        label: resolveMerchantLabel(m.merchant_key, labelSources),
-        address: m.merchant_key,
-        spent: cur === 'usd' ? m.spent_usd : cur === 'eur' ? m.spent_eur : m.spent_sek,
-        payments: Number(m.payments),
-        agent_ids: m.agent_ids,
-        first_seen: m.first_seen,
-        last_seen: m.last_seen,
-      }))
+      // `label` is NULLABLE now (#4332): `unknown` means the client renders
+      // "Unknown recipient" (#4333), where /transactions says "New
+      // recipient". `filter_address` is the address /transactions' search
+      // matches — the "View in Transactions" link's target, NOT the group
+      // key (the two COALESCEs can disagree; see TOP_MERCHANTS_SQL).
+      const merchants = topMerchants.map((m) => {
+        const name = nameMerchant(m.merchant_key, m.resource_url)
+        return {
+          label: name.label,
+          kind: name.kind,
+          filter_address: m.filter_address,
+          address: m.merchant_key,
+          spent: cur === 'usd' ? m.spent_usd : cur === 'eur' ? m.spent_eur : m.spent_sek,
+          payments: Number(m.payments),
+          agent_ids: m.agent_ids,
+          first_seen: m.first_seen,
+          last_seen: m.last_seen,
+        }
+      })
 
       // ── balance_by_day[] ─────────────────────────────────────────────────
       // The SEK column is nullable (migration 090 backfills only days with
@@ -312,6 +375,9 @@ export default async function analyticsOverviewRoutes(app: FastifyInstance): Pro
         by_day: byDay,
         agents,
         merchants,
+        // Balance is stored per USER only (`user_daily_portfolio_snapshots`);
+        // it is deliberately NOT scoped by agentId, and the response says so.
+        balance_scope: 'all_accounts',
         balance_by_day: balanceSeries,
       }
     },

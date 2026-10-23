@@ -168,6 +168,7 @@ export const TOTALS_SPEND_SQL = `WITH legs AS (
       AND pi.status = 'confirmed'
       AND pi.confirmed_at >= $4
       AND pi.confirmed_at < $3
+      AND ($5::uuid IS NULL OR pi.agent_id = $5::uuid)
   ), swept AS (
     SELECT ds.agent_id,
            LOWER(ds.token_address) AS token_key,
@@ -182,6 +183,7 @@ export const TOTALS_SPEND_SQL = `WITH legs AS (
     WHERE ds.user_id = $1
       AND ds.status = 'submitted'
       AND ds.tx_hash IS NOT NULL
+      AND ($5::uuid IS NULL OR ds.agent_id = $5::uuid)
       AND ((COALESCE(ds.submitted_at, ds.created_at) >= $2
         AND COALESCE(ds.submitted_at, ds.created_at) < $3)
     OR (COALESCE(ds.submitted_at, ds.created_at) >= $4
@@ -215,11 +217,18 @@ export const TOTALS_SPEND_SQL = `WITH legs AS (
    AND s.token_key = g.token_key
    AND s.chain_key = g.chain_key`
 
-/** `userId` is REQUIRED. `current`/`previous` are equal-length, adjacent windows. */
+/**
+ * `userId` is REQUIRED. `current`/`previous` are equal-length, adjacent windows.
+ * `agentId` (optional, #4332) scopes the aggregate to ONE agent of the user —
+ * `null`/omitted keeps the whole-tenant figure. The predicate rides the same
+ * statement (`$5::uuid IS NULL OR …`), so the unfiltered path is the SAME
+ * prepared query the golden pins, not a second spelling.
+ */
 export async function sumTotalsSpendForUser(
   userId: string,
   current: DateRange,
   previous: DateRange,
+  agentId?: string | null,
   db: Executor = pool,
 ): Promise<TotalsSpendRow> {
   const result = await db.query<TotalsSpendRow>(TOTALS_SPEND_SQL, [
@@ -227,6 +236,7 @@ export async function sumTotalsSpendForUser(
     current.from,
     current.to,
     previous.from,
+    agentId ?? null,
   ])
   return (
     result.rows[0] ?? {
@@ -250,23 +260,27 @@ export const COUNT_UNSETTLED_SUBMITTED_SQL = `SELECT COUNT(*)::text AS count
   WHERE pi.user_id = $1
     AND pi.status = 'submitted'
     AND pi.created_at >= $2
-    AND pi.created_at < $3`
+    AND pi.created_at < $3
+    AND ($4::uuid IS NULL OR pi.agent_id = $4::uuid)`
 
 /**
  * `submitted` rows never carry a booked fiat value and are never counted as
  * spend — this is the count the page uses to say "N payments awaiting
  * settlement evidence are not counted" (an erc7710 payment whose hash was
  * never reported stays `submitted`; `settlement-observed.ts` is fail-closed).
+ * `agentId` (optional, #4332) scopes the count to one agent of the user.
  */
 export async function countUnsettledSubmittedForUser(
   userId: string,
   range: DateRange,
+  agentId?: string | null,
   db: Executor = pool,
 ): Promise<number> {
   const result = await db.query<{ count: string }>(COUNT_UNSETTLED_SUBMITTED_SQL, [
     userId,
     range.from,
     range.to,
+    agentId ?? null,
   ])
   return Number(result.rows[0]?.count ?? '0')
 }
@@ -319,6 +333,7 @@ export const BY_DAY_SPEND_SQL = `WITH legs AS (
       AND pi.status = 'confirmed'
       AND pi.confirmed_at >= $3
       AND pi.confirmed_at < $4
+      AND ($5::uuid IS NULL OR pi.agent_id = $5::uuid)
   ), swept AS (
     SELECT ds.agent_id,
            LOWER(ds.token_address) AS token_key,
@@ -328,6 +343,7 @@ export const BY_DAY_SPEND_SQL = `WITH legs AS (
     WHERE ds.user_id = $1
       AND ds.status = 'submitted'
       AND ds.tx_hash IS NOT NULL
+      AND ($5::uuid IS NULL OR ds.agent_id = $5::uuid)
       AND COALESCE(ds.submitted_at, ds.created_at) >= $3
       AND COALESCE(ds.submitted_at, ds.created_at) < $4
     GROUP BY ds.agent_id, LOWER(ds.token_address), ds.chain_id
@@ -359,14 +375,21 @@ export const BY_DAY_SPEND_SQL = `WITH legs AS (
    AND s.chain_key = dg.chain_key
   GROUP BY dg.day, dg.agent_id`
 
-/** `userId` is REQUIRED. One statement regardless of agent count. */
+/** `userId` is REQUIRED. One statement regardless of agent count. `agentId` optional (#4332). */
 export async function listByDaySpendForUser(
   userId: string,
   tz: string,
   range: DateRange,
+  agentId?: string | null,
   db: Executor = pool,
 ): Promise<ByDaySpendRow[]> {
-  const result = await db.query<ByDaySpendRow>(BY_DAY_SPEND_SQL, [userId, tz, range.from, range.to])
+  const result = await db.query<ByDaySpendRow>(BY_DAY_SPEND_SQL, [
+    userId,
+    tz,
+    range.from,
+    range.to,
+    agentId ?? null,
+  ])
   return result.rows
 }
 
@@ -492,6 +515,11 @@ export async function listPerAgentSpendForUser(
 export interface PerAgentTopMerchantRow {
   agent_id: string
   merchant_key: string
+  /**
+   * The x402 resource URL of that agent's most recent payment to this
+   * merchant in the window (#4332) — the naming module's step 1 input.
+   */
+  resource_url: string | null
 }
 
 /**
@@ -506,7 +534,8 @@ export const PER_AGENT_TOP_MERCHANT_SQL = `WITH per_agent_merchant AS (
     SELECT
       pi.agent_id,
       LOWER(COALESCE(pi.merchant_address, pi.x402_merchant_address, pi.to_address)) AS merchant_key,
-      SUM(pi.usd_value) AS usd_spent
+      SUM(pi.usd_value) AS usd_spent,
+      (ARRAY_AGG(COALESCE(pi.payment_resource_url, pi.x402_resource_url) ORDER BY pi.confirmed_at DESC))[1] AS resource_url
     FROM payment_intents pi
     JOIN agents a ON a.id = pi.agent_id
     ${DELEGATION_RAIL_JOIN}
@@ -516,11 +545,11 @@ export const PER_AGENT_TOP_MERCHANT_SQL = `WITH per_agent_merchant AS (
       AND pi.confirmed_at < $3
     GROUP BY pi.agent_id, merchant_key
   ), ranked AS (
-    SELECT agent_id, merchant_key,
+    SELECT agent_id, merchant_key, resource_url,
            ROW_NUMBER() OVER (PARTITION BY agent_id ORDER BY usd_spent DESC) AS rn
     FROM per_agent_merchant
   )
-  SELECT agent_id, merchant_key FROM ranked WHERE rn = 1`
+  SELECT agent_id, merchant_key, resource_url FROM ranked WHERE rn = 1`
 
 export async function listPerAgentTopMerchantForUser(
   userId: string,
@@ -539,6 +568,22 @@ export async function listPerAgentTopMerchantForUser(
 
 export interface MerchantAggregateRow {
   merchant_key: string
+  /**
+   * The address `/transactions` search matches (`x402MerchantAddress ?? to`,
+   * `modules/transactions/search.ts`) — the "View in Transactions" link's
+   * target (#4332). One `merchant_key` group can hold DIFFERENT
+   * filter addresses (the group key COALESCEs merchant_address first, the
+   * filter COALESCEs x402 first), so the group carries the most FREQUENT
+   * value; ties go to the most recent payment.
+   */
+  filter_address: string
+  /**
+   * The x402 resource URL of the merchant's most recent payment in the
+   * window — step 1 of the naming order. `null` when that payment carries
+   * none (the naming module then falls through to own account / contact /
+   * receipt / none).
+   */
+  resource_url: string | null
   spent_usd: string
   spent_eur: string
   spent_sek: string
@@ -549,28 +594,54 @@ export interface MerchantAggregateRow {
   last_seen: string
 }
 
-export const TOP_MERCHANTS_SQL = `SELECT
-    LOWER(COALESCE(pi.merchant_address, pi.x402_merchant_address, pi.to_address)) AS merchant_key,
-    COALESCE(SUM(pi.usd_value), 0)::text AS spent_usd,
-    COALESCE(SUM(pi.eur_value), 0)::text AS spent_eur,
-    COALESCE(SUM(pi.sek_value), 0)::text AS spent_sek,
+export const TOP_MERCHANTS_SQL = `WITH legs AS (
+    SELECT
+      LOWER(COALESCE(pi.merchant_address, pi.x402_merchant_address, pi.to_address)) AS merchant_key,
+      COALESCE(pi.x402_merchant_address, pi.to_address) AS filter_address,
+      COALESCE(pi.payment_resource_url, pi.x402_resource_url) AS resource_url,
+      pi.agent_id,
+      pi.usd_value,
+      pi.eur_value,
+      pi.sek_value,
+      pi.confirmed_at
+    FROM payment_intents pi
+    JOIN agents a ON a.id = pi.agent_id
+    ${DELEGATION_RAIL_JOIN}
+    WHERE pi.user_id = $1
+      AND pi.status = 'confirmed'
+      AND pi.confirmed_at >= $2
+      AND pi.confirmed_at < $3
+      AND ($4::uuid IS NULL OR pi.agent_id = $4::uuid)
+  ), filter_pick AS (
+    SELECT DISTINCT ON (merchant_key) merchant_key, filter_address
+    FROM (
+      SELECT merchant_key, filter_address, COUNT(*) AS n, MAX(confirmed_at) AS latest
+      FROM legs
+      GROUP BY merchant_key, filter_address
+    ) counts
+    ORDER BY merchant_key, n DESC, latest DESC
+  )
+  SELECT
+    l.merchant_key,
+    COALESCE(SUM(l.usd_value), 0)::text AS spent_usd,
+    COALESCE(SUM(l.eur_value), 0)::text AS spent_eur,
+    COALESCE(SUM(l.sek_value), 0)::text AS spent_sek,
     COUNT(*)::text AS payments,
-    ARRAY_AGG(DISTINCT pi.agent_id)::text[] AS agent_ids,
-    MIN(pi.confirmed_at) AS first_seen,
-    MAX(pi.confirmed_at) AS last_seen
-  FROM payment_intents pi
-  JOIN agents a ON a.id = pi.agent_id
-  ${DELEGATION_RAIL_JOIN}
-  WHERE pi.user_id = $1
-    AND pi.status = 'confirmed'
-    AND pi.confirmed_at >= $2
-    AND pi.confirmed_at < $3
-  GROUP BY merchant_key
-  ORDER BY SUM(pi.usd_value) DESC
+    ARRAY_AGG(DISTINCT l.agent_id)::text[] AS agent_ids,
+    MIN(l.confirmed_at) AS first_seen,
+    MAX(l.confirmed_at) AS last_seen,
+    (ARRAY_AGG(l.resource_url ORDER BY l.confirmed_at DESC))[1] AS resource_url,
+    fp.filter_address
+  FROM legs l
+  JOIN filter_pick fp ON fp.merchant_key = l.merchant_key
+  GROUP BY l.merchant_key, fp.filter_address
+  ORDER BY SUM(l.usd_value) DESC
   LIMIT 10`
 
 interface MerchantAggregateRawRow {
   merchant_key: string
+  filter_address: string
+  resource_url: string | null
   spent_usd: string
   spent_eur: string
   spent_sek: string
@@ -583,9 +654,15 @@ interface MerchantAggregateRawRow {
 export async function listTopMerchantsForUser(
   userId: string,
   range: DateRange,
+  agentId?: string | null,
   db: Executor = pool,
 ): Promise<MerchantAggregateRow[]> {
-  const result = await db.query<MerchantAggregateRawRow>(TOP_MERCHANTS_SQL, [userId, range.from, range.to])
+  const result = await db.query<MerchantAggregateRawRow>(TOP_MERCHANTS_SQL, [
+    userId,
+    range.from,
+    range.to,
+    agentId ?? null,
+  ])
   return result.rows.map((r) => ({
     ...r,
     first_seen: r.first_seen.toISOString(),
@@ -712,12 +789,18 @@ export const FEES_TOTALS_SQL = `SELECT
   WHERE pi.user_id = $1
     AND pi.status = 'confirmed'
     AND pi.confirmed_at >= $4
-    AND pi.confirmed_at < $3`
+    AND pi.confirmed_at < $3
+    AND ($5::uuid IS NULL OR pi.agent_id = $5::uuid)`
 
+/**
+ * `agentId` (optional, #4332) scopes the fees to one agent of the user —
+ * fees ARE agent-scoped (each fee row's payment joins its agent).
+ */
 export async function sumFeesTotalsForUser(
   userId: string,
   current: DateRange,
   previous: DateRange,
+  agentId?: string | null,
   db: Executor = pool,
 ): Promise<FeesTotalsRow> {
   const result = await db.query<FeesTotalsRow>(FEES_TOTALS_SQL, [
@@ -725,6 +808,7 @@ export async function sumFeesTotalsForUser(
     current.from,
     current.to,
     previous.from,
+    agentId ?? null,
   ])
   return (
     result.rows[0] ?? {
@@ -823,6 +907,8 @@ export async function listActiveDelegationsForUser(
 
 export interface DelegationBudgetView {
   agent_id: string
+  /** The delegation's chain — surfaced as `budgets[].chain_id` (#4332, hardening for #4333's caption fix). */
+  chain_id: number
   token: string
   recipient: string | null
   used_atomic: string
@@ -872,6 +958,7 @@ export async function shapeBudgets(
     const ratio = budgetAtomic > 0n ? Number(used) / Number(budgetAtomic) : 0
     const view: DelegationBudgetView = {
       agent_id: d.agent_id,
+      chain_id: d.chain_id,
       token: tokenSymbolFor(d.chain_id, d.token_address),
       recipient: d.recipient_address,
       used_atomic: used.toString(),
@@ -916,17 +1003,24 @@ export const AGGREGATE_REFUSALS_FOR_USER_SQL = `SELECT
   FROM payment_refusals pr
   WHERE pr.user_id = $1
     AND pr.created_at >= $2
-    AND pr.created_at < $3`
+    AND pr.created_at < $3
+    AND ($4::uuid IS NULL OR pr.agent_id = $4::uuid)`
 
+/**
+ * `agentId` (optional, #4332) scopes the refused amount to one agent of the
+ * user — `payment_refusals.agent_id` is NOT NULL, so the predicate is exact.
+ */
 export async function aggregateRefusalAmountForUser(
   userId: string,
   range: DateRange,
+  agentId?: string | null,
   db: Executor = pool,
 ): Promise<RefusalAmountRow> {
   const result = await db.query<RefusalAmountRow>(AGGREGATE_REFUSALS_FOR_USER_SQL, [
     userId,
     range.from,
     range.to,
+    agentId ?? null,
   ])
   return (
     result.rows[0] ?? {
@@ -951,6 +1045,7 @@ export const REFUSALS_BY_DAY_SQL = `SELECT
   WHERE pr.user_id = $1
     AND pr.created_at >= $3
     AND pr.created_at < $4
+    AND ($5::uuid IS NULL OR pr.agent_id = $5::uuid)
   GROUP BY day`
 
 /**
@@ -973,6 +1068,7 @@ export async function listRefusalsByDayForUser(
   userId: string,
   tz: string,
   range: DateRange,
+  agentId?: string | null,
   db: Executor = pool,
 ): Promise<RefusalsByDayRow[]> {
   const result = await db.query<RefusalsByDayRow>(REFUSALS_BY_DAY_SQL, [
@@ -980,6 +1076,7 @@ export async function listRefusalsByDayForUser(
     tz,
     range.from,
     range.to,
+    agentId ?? null,
   ])
   return result.rows
 }

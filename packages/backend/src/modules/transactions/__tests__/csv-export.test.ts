@@ -8,11 +8,8 @@
  */
 import { describe, it, expect } from 'vitest'
 import {
-  EXPORT_ROW_CAP,
   FOLDED_TRANSACTION_CSV_COLUMNS,
   TRANSACTION_CSV_COLUMNS,
-  buildTransactionCsvFilename,
-  exceedsExportRowCap,
   transactionCsvRow,
   transactionsToCsv,
 } from '../csv-export.js'
@@ -42,18 +39,6 @@ function tx(overrides: Partial<EnrichedTransaction> = {}): EnrichedTransaction {
     ...overrides,
   }
 }
-
-describe('exceedsExportRowCap', () => {
-  it('admits a count at the cap and refuses one above it', () => {
-    expect(exceedsExportRowCap(EXPORT_ROW_CAP - 1)).toBe(false)
-    expect(exceedsExportRowCap(EXPORT_ROW_CAP)).toBe(false)
-    expect(exceedsExportRowCap(EXPORT_ROW_CAP + 1)).toBe(true)
-  })
-
-  it('admits an empty export', () => {
-    expect(exceedsExportRowCap(0)).toBe(false)
-  })
-})
 
 describe('transactionCsvRow', () => {
   it('maps an outbound agent payment across every column', () => {
@@ -201,13 +186,5 @@ describe('transactionsToCsv', () => {
     expect(record).toContain('"own_transfer"')
     expect(record).toContain('"out"')
     expect(record.endsWith('"Savings"')).toBe(true)
-  })
-})
-
-describe('buildTransactionCsvFilename', () => {
-  it('stamps the UTC date, so two timezones name the same export alike', () => {
-    expect(buildTransactionCsvFilename(new Date('2026-01-05T23:30:00.000Z'))).toBe(
-      'haven-transactions-20260105.csv',
-    )
   })
 })

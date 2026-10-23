@@ -870,6 +870,15 @@ The card variant is the bordered tile the analytics page mounts (§ Cards
 chrome: `rounded-[10px]`, border, `--v2-bg` ground, `shadow-card`). The
 inline variant (#3805) is below.
 
+**The `hint` prop (#4333).** An optional ReactNode rendered beside the label,
+sized to the label's line. The caller composes it — usually a `Tooltip` on an
+ⓘ `Info` mark, as the Analytics page's Refused tile does with its two
+recording caveats (the ledger's floor date, the unrecorded price-cap class).
+It is for ELABORATION on something already visible (the count behind the
+hint), never essential copy: § Tooltips' rules bind the call site. Ops tiles
+pass nothing and are unchanged; the hint carries no colour of its own, so a
+tile with a hint still renders its figure in ink in every state.
+
 ### Amount: currency mode (#3805)
 
 `Amount` has two modes. The token mode is the original contract: a
@@ -1003,6 +1012,12 @@ things that need your eye, while a `NoticeRow` is a single line that stays
 until its cause is gone.
 
 ### AreaChart sparkline (#3805)
+
+The full chart's endpoint delta reads "**Net change**" with a SIGNED amount —
+"Net change -120.00" — not "gained"/"spent" (#4333): a fall in the balance is
+not a spend and a rise is not a gain, the balance being per-user and moving
+for reasons the spend chart does not draw. Zero is still "unchanged",
+unsigned.
 
 `variant="sparkline"` inside `ui/AreaChart.tsx` (no new file, so the chart
 home's design-lint `raw-svg` exemption already covers it): the balance line
@@ -2434,6 +2449,14 @@ where the lists get the same key from `useListUrlState`.
 choices (theme, appearance) and is **not used for list or period filtering**
 — the one period control is `PeriodPicker`, the one filter controls are the
 facets (#4116).
+
+**FacetMenu beside PeriodPicker in a PageHeader (#4333).** The Analytics
+header is the documented list-controls PLACEMENT outside a `ListToolbar`: a
+`PageHeader`'s actions row carries the Agent `FacetMenu` before the
+`PeriodPicker`, exactly as a toolbar would — single-select, "All agents"
+first, the trigger tinting while a filter is set. A page that has no list
+summary line may mount the two chips directly; the toolbar is for pages that
+have one.
 
 #### Behaviour
 

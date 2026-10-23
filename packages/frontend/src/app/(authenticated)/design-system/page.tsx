@@ -1910,6 +1910,13 @@ export default function DesignSystemPage() {
                 delta={100}
                 deltaCaption="vs previous 30 days"
                 footnote="2 refused payments · across 3 attempts · $3.00 attempted"
+                hint={
+                  <Tooltip label="Price-cap refusals in your agent's runtime are not recorded." side="bottom">
+                    <span tabIndex={0} role="button" aria-label="What the refused count records">
+                      <Icon icon={Info} className="h-3.5 w-3.5" />
+                    </span>
+                  </Tooltip>
+                }
               />
               <StatTile
                 label="Budget used"
@@ -3768,7 +3775,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="AreaChart"
-        description="Balance over time (#2948): one line on the first series token with a faint area beneath it, and the range's spend annotated as the endpoint delta. The y-scale runs from the data with headroom rather than from zero, so a quiet range still reads as a range. The point dots are HTML spans positioned like the labels — a `<circle>` in the stretched svg would render as an oval wherever the box's aspect differs from the viewBox's (#3903). Below three points it renders nothing. Same keyboard treatment and narrow-screen panel as StackedBarChart, and the same pointer treatment too: the callout takes no pointer, a tap pins a day, and a second tap on the pinned day or Escape releases it (#3070)."
+        description="Balance over time (#2948): one line on the first series token with a faint area beneath it, and the range's net change annotated as the signed endpoint delta — 'Net change +$X' (#4333): a fall is not a spend and a rise is not a gain. The y-scale runs from the data with headroom rather than from zero, so a quiet range still reads as a range. The point dots are HTML spans positioned like the labels — a `<circle>` in the stretched svg would render as an oval wherever the box's aspect differs from the viewBox's (#3903). Below three points it renders nothing. Same keyboard treatment and narrow-screen panel as StackedBarChart, and the same pointer treatment too: the callout takes no pointer, a tap pins a day, and a second tap on the pinned day or Escape releases it (#3070)."
       >
         <Card hover={false} className="p-5">
           <AreaChart

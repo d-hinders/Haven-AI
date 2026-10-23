@@ -123,7 +123,7 @@ async function readAgentsTable(page: Page) {
   return page.evaluate(() => {
     const visible = (el: Element) => el.getClientRects().length > 0
     const table = Array.from(document.querySelectorAll('table')).find(
-      (t) => visible(t) && (t.querySelector('thead')?.textContent ?? '').includes('Budget used'),
+      (t) => visible(t) && Array.from(t.querySelectorAll('thead th')).some((th) => (th.textContent ?? '').trim() === 'Budget'),
     )
     if (!table) return { columns: ['NO TABLE'], bodyCells: -1, containerWidth: -1 }
     const headRow = table.querySelector('thead tr')
@@ -144,7 +144,9 @@ async function readAgentsTable(page: Page) {
 async function setAgentsTableContainerWidth(page: Page, px: number) {
   await page.evaluate((width) => {
     const table = Array.from(document.querySelectorAll('table')).find(
-      (t) => t.getClientRects().length > 0 && (t.querySelector('thead')?.textContent ?? '').includes('Budget used'),
+      (t) =>
+        t.getClientRects().length > 0 &&
+        Array.from(t.querySelectorAll('thead th')).some((th) => (th.textContent ?? '').trim() === 'Budget'),
     )
     const container = table?.parentElement
     if (!container || !container.className.includes('container-type')) {
@@ -176,23 +178,24 @@ test('Table primitive: the xl collapse follows the CONTAINER while the viewport 
   await seedAuthenticatedSession(page)
   await page.setViewportSize({ width: 1600, height: 900 })
   await page.goto('/analytics')
-  await expect(page.getByRole('columnheader', { name: 'Budget used' })).toBeVisible({ timeout: 60_000 })
+  await expect(page.getByRole('columnheader', { name: 'Budget', exact: true })).toBeVisible({ timeout: 60_000 })
 
   // 974px: exactly the `xl` stage — every column, header and body together.
   await setAgentsTableContainerWidth(page, 974)
   const atStage = await readAgentsTable(page)
   expect(atStage.containerWidth, 'the container really is 974px wide').toBe(974)
-  expect(atStage.columns).toContain('Share')
+  // #4333: the Share column merged into Spent, so the surviving
+  // `revealAt="xl"` column is Top merchant — the one this test anchors on.
   expect(atStage.columns).toContain('Top merchant')
+  expect(atStage.columns).not.toContain('Share')
   expect(atStage.bodyCells, 'the body row carries every column the header shows').toBe(atStage.columns.length)
 
-  // 973px: one pixel under — Share and Top merchant drop from header AND body,
-  // though the 1600px viewport is far past `xl`.
+  // 973px: one pixel under — Top merchant drops from header AND body, though
+  // the 1600px viewport is far past `xl`.
   await setAgentsTableContainerWidth(page, 973)
   const under = await readAgentsTable(page)
   expect(under.containerWidth).toBe(973)
-  expect(under.columns).not.toContain('Share')
   expect(under.columns).not.toContain('Top merchant')
-  expect(under.columns.length).toBe(atStage.columns.length - 2)
-  expect(under.bodyCells, 'the body drops the same two cells').toBe(atStage.bodyCells - 2)
+  expect(under.columns.length).toBe(atStage.columns.length - 1)
+  expect(under.bodyCells, 'the body drops the same cell').toBe(atStage.bodyCells - 1)
 })

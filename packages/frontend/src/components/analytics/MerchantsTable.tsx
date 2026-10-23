@@ -6,17 +6,19 @@ import {
   formatAnalyticsAmount,
   formatAnalyticsAmountCompact,
   formatAnalyticsDay,
-  merchantLabel,
+  lastPaymentCaption,
+  unknownRecipientShortAddress,
 } from '@/lib/analytics-format'
 import type { AnalyticsCurrency } from '@/lib/analytics-format'
-import { Address } from '@/components/haven/Address'
 import { Card } from '@/components/ui/Card'
 import { Row } from '@/components/ui/Row'
+import { Tooltip } from '@/components/ui/Tooltip'
+import { Address } from '@/components/haven/Address'
 import { Table, tableColumnClass } from '@/components/ui/Table'
-import type { AnalyticsAgentRow, AnalyticsMerchantRow } from '@/types/analytics'
+import type { AnalyticsAgentRow, AnalyticsMerchantRow, AnalyticsRangeValue } from '@/types/analytics'
 
 /**
- * The top merchants table (#2949, epic #2944 slice E).
+ * The top merchants table (#2949, epic #2944 slice E; the #4333 rebuild).
  *
  * One row per merchant the account's agents paid most in the range, in the
  * order the endpoint already sent them: `GET /analytics/overview` returns
@@ -24,13 +26,19 @@ import type { AnalyticsAgentRow, AnalyticsMerchantRow } from '@/types/analytics'
  * rather than choosing its own — two orders would be two answers to "who got
  * the most". Every column is one field on one merchant row; the table
  * computes nothing about the money, and it never re-resolves a label.
- * `merchants[].label` is already the API's own resolution (contact name, else
- * the receipt's merchant name, else the address), and a second resolution
- * here would be a second place the same merchant can be named two different
- * ways. What the table does with a label that is still an address is display
- * only, through the one `lib/analytics-format.merchantLabel` rule the agents
- * table shares — the two tables cannot disagree about how an unresolved
- * address reads, because neither owns a private version of it.
+ *
+ * ── The columns (#4333) ─────────────────────────────────────────────────────
+ *
+ * "Paid to" shows the NAME — the API's own resolution (`merchants[].label`,
+ * nullable since #4332) — with a KIND line under it: "Your account"
+ * (`own_account`), "Paid API" (`x402`), or the short address for an unknown
+ * recipient (`kind: 'unknown'`, label null). A contact or receipt name needs
+ * no kind line: the name already says what resolved it. The Address COLUMN is
+ * gone — an address is metadata, shown in the mobile disclosure and the
+ * unknown recipient's tooltip, never as a label. Spent, Payments, "Paid by"
+ * as TEXT (the roster line, not a monogram stack — no new pattern), Last
+ * paid, and "View in Transactions" linking to the history pre-filtered to
+ * that recipient.
  *
  * The money fields arrive as numeric STRINGS (`spent`, and every other fiat
  * field on this response, #2946). They are handed to the shared formatters
@@ -41,41 +49,51 @@ import type { AnalyticsAgentRow, AnalyticsMerchantRow } from '@/types/analytics'
  * ── Why there are two renderings ────────────────────────────────────────────
  *
  * The split `AgentsTable` documents and ships: below `lg` there is no width
- * for seven columns, and the collapse primitive inside `Table` would keep two
+ * for the columns, and the collapse primitive inside `Table` would keep two
  * or three of them and drop the rest — silently deleting the figures the row
  * exists to show. So below `lg` the table leaves the layout entirely and the
  * same rows render through the `Row` list, which keeps WHO, SPEND and
  * PAYMENTS on the face of every row and carries what the table would have
- * hidden — address, paying agents, first and last seen — in a disclosure
- * that opens. The pair is complements by construction: one container carries
+ * hidden — the kind line, paying agents, last paid — in a disclosure that
+ * opens. The pair is complements by construction: one container carries
  * `hidden lg:block`, the other `lg:hidden`, the same `lg:` prefix once with
  * `hidden` and once without, so exactly one is displayed at any width
  * (#2928's rule; the test pins both halves).
  *
  * ── The link target, stated once because the test states it too ───────────
  *
- * The issue's rule is `/transactions?merchant=<address>` when that filter
- * exists there, else `/transactions`. The filter does not exist:
- * `TransactionsClient` seeds its filters from the `accountId`, `agentId`,
- * `tokenKey` and `direction` search parameters alone, and no `merchant`
- * parameter is read anywhere on that page. So the target is the plain
- * `/transactions`. A URL carrying a parameter the page ignores would look
- * filtered while showing everything, which is the one thing the issue
- * forbids ("the row never links somewhere that shows something else"). When
- * the filter lands, `MERCHANT_FILTER_BASE` is the single line that changes,
- * and `MERCHANTS_LINK_TARGET` carries the rule the test reads.
+ * `View in Transactions` goes to `/transactions` pre-filtered to the
+ * recipient (#4333): `search=<filter_address>` — `search` is the key
+ * `parseTransactionFilters` reads (`lib/transaction-filters.ts`), and
+ * `filter_address` is the address that page's search matches (the wire's
+ * field for exactly this, NOT the group key) — plus `direction=out` and the
+ * page's current `period`, and `agentId` when the Agent facet is set. A
+ * filtered-looking link that showed everything would be the one thing the
+ * issue forbids, so the query is built from the page's own state and the
+ * test reads it through `merchantsLinkTarget`.
  */
 
 const COLUMN_PAD = 'px-4 py-3'
-
-/** See the header: the plain history route is the target until the merchant
- *  filter exists on `/transactions`. */
-const MERCHANT_FILTER_BASE = '/transactions'
 
 /** The roster cap the desktop column and the mobile disclosure both honour:
  *  three paying agents named, the rest counted ("and N more"). Three is the
  *  issue's number, not this component's opinion of it. */
 const MAX_AGENT_NAMES = 3
+
+/**
+ * The `View in Transactions` target for one merchant row (#4333). Exported
+ * for the tests the same way `MERCHANTS_LINK_TARGET` was: the rule lives
+ * here, the assertions follow it.
+ */
+export function merchantsLinkTarget(
+  filterAddress: string,
+  period: AnalyticsRangeValue,
+  agentId: string | null,
+): string {
+  const params = new URLSearchParams({ search: filterAddress, direction: 'out', period })
+  if (agentId !== null) params.set('agentId', agentId)
+  return `/transactions?${params.toString()}`
+}
 
 /** The roster the `agent_ids` of a merchant row are looked up in: the SAME
  *  response's `agents` array, keyed by id. An id the roster does not name
@@ -103,38 +121,44 @@ function PayingAgentsCell({ names, total }: { names: string[]; total: number }) 
 }
 
 /**
- * The "first/last seen" cell. Day granularity is the right unit here: first
- * and last seen answer when this relationship began and ended, which is a
- * question about days, and — unlike the relative "3d ago" of the agents
- * table's last-payment cell — an absolute day label reads identically on the
- * day the capture is taken, which is why the fixture's dates are absolute.
- * The full timestamp rides in the title for whoever needs the instant.
+ * The kind line under "Paid to" (#4333): the naming step that produced the
+ * label, in words. `own_account` and `x402` name the KIND of counterparty; an
+ * unknown recipient shows the short address there (the address is already
+ * metadata the reader can reach in the tooltip — the KIND line is where the
+ * issue puts its visible short form). A contact or receipt name needs no
+ * line: the name is the whole answer.
  */
-function SeenCell({ iso }: { iso: string }) {
+function kindLine(merchant: AnalyticsMerchantRow): string | null {
+  if (merchant.kind === 'own_account') return 'Your account'
+  if (merchant.kind === 'x402') return 'Paid API'
+  if (merchant.kind === 'unknown') return unknownRecipientShortAddress(merchant.address)
+  return null
+}
+
+/** The label half of the row: the name, the kind line under it, and — for an
+ *  unknown recipient — the full address in the tooltip. A name is rendered
+ *  as-is with no tooltip; there is nothing to elaborate. */
+function LabelCell({ merchant }: { merchant: AnalyticsMerchantRow }) {
+  const known = merchant.label !== null
+  const name = merchant.label ?? 'Unknown recipient'
+  const kind = kindLine(merchant)
   return (
-    <span className="v2-tabular text-sm text-[var(--v2-ink-2)]" title={new Date(iso).toLocaleString()}>
-      {formatAnalyticsDay(iso.slice(0, 10))}
-    </span>
+    <Tooltip label={known ? name : merchant.address} mono={!known}>
+      <span className="inline-flex flex-col">
+        <span className={`text-sm font-medium text-[var(--v2-ink)]${known ? '' : ' v2-tabular'}`}>{name}</span>
+        {kind && <span className="v2-tabular text-xs text-[var(--v2-ink-3)]">{kind}</span>}
+      </span>
+    </Tooltip>
   )
 }
 
-/** The label half of the row. An address-valued label is the API saying it
- *  found no contact and no receipt name behind the address; it goes through
- *  the shared truncation rule, reads in tabular figures so two rows'
- *  addresses do not jitter against each other, and keeps the whole string in
- *  the title. A resolved name keeps its own characters and spacing, and gets
- *  no title. */
-function LabelCell({ merchant }: { merchant: AnalyticsMerchantRow }) {
-  // #4332: `label` is nullable now (null = nothing resolved). Pixel-neutral
-  // shim — an unresolved label renders the address exactly as the pre-#4332
-  // wire did; #4333 replaces this with "Unknown recipient".
-  const { value, title } = merchantLabel(merchant.label ?? merchant.address)
+/** The "last paid" cell — the same relative voice the agents table uses
+ *  (`lastPaymentCaption`), so the two tables answer "how recently" in one
+ *  dialect; the full instant rides the title. */
+function LastPaidCell({ iso }: { iso: string }) {
   return (
-    <span
-      className={`text-sm font-medium text-[var(--v2-ink)]${title ? ' v2-tabular' : ''}`}
-      title={title}
-    >
-      {value}
+    <span className="v2-tabular text-sm text-[var(--v2-ink-2)]" title={new Date(iso).toLocaleString()}>
+      {lastPaymentCaption(iso)}
     </span>
   )
 }
@@ -143,6 +167,8 @@ export function MerchantsTable({
   merchants,
   agents,
   currency,
+  period,
+  agentId = null,
 }: {
   merchants: AnalyticsMerchantRow[]
   /** The response's own `agents` array, read only to turn the ids in
@@ -150,6 +176,10 @@ export function MerchantsTable({
    *  It is not re-sorted, re-filtered, or used to derive a figure. */
   agents: AnalyticsAgentRow[]
   currency: AnalyticsCurrency
+  /** The page's current window, carried onto the link's `period` key. */
+  period: AnalyticsRangeValue
+  /** The Agent facet's selection, carried onto the link when set. */
+  agentId?: string | null
 }) {
   const roster = new Map(agents.map((agent) => [agent.id, agent.name] as const))
 
@@ -165,15 +195,16 @@ export function MerchantsTable({
         <Table>
           <Table.Head collapseWhenNarrow={false}>
             <tr>
-              <Table.HeaderCell align="left">Merchant</Table.HeaderCell>
-              <Table.HeaderCell align="left">Address</Table.HeaderCell>
+              <Table.HeaderCell align="left">Paid to</Table.HeaderCell>
               <Table.HeaderCell align="right">Spent</Table.HeaderCell>
               <Table.HeaderCell align="right">Payments</Table.HeaderCell>
               <Table.HeaderCell align="left" revealAt="xl">
-                Paying agents
+                Paid by
               </Table.HeaderCell>
-              <Table.HeaderCell align="left">First seen</Table.HeaderCell>
-              <Table.HeaderCell align="left">Last seen</Table.HeaderCell>
+              <Table.HeaderCell align="left">Last paid</Table.HeaderCell>
+              <Table.HeaderCell align="left" revealAt="xl">
+                View in Transactions
+              </Table.HeaderCell>
             </tr>
           </Table.Head>
           <Table.Body>
@@ -186,14 +217,11 @@ export function MerchantsTable({
                 >
                   <td className={COLUMN_PAD}>
                     <Link
-                      href={MERCHANT_FILTER_BASE}
+                      href={merchantsLinkTarget(merchant.filter_address, period, agentId)}
                       className="inline-flex min-w-0 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
                     >
                       <LabelCell merchant={merchant} />
                     </Link>
-                  </td>
-                  <td className={COLUMN_PAD}>
-                    <Address value={merchant.address} className="text-xs text-[var(--v2-ink-2)]" />
                   </td>
                   <td className={`${COLUMN_PAD} text-right`}>
                     <span className="v2-tabular text-sm font-medium text-[var(--v2-ink)]">
@@ -207,10 +235,15 @@ export function MerchantsTable({
                     <PayingAgentsCell names={names} total={total} />
                   </td>
                   <td className={COLUMN_PAD}>
-                    <SeenCell iso={merchant.first_seen} />
+                    <LastPaidCell iso={merchant.last_seen} />
                   </td>
-                  <td className={COLUMN_PAD}>
-                    <SeenCell iso={merchant.last_seen} />
+                  <td className={`${COLUMN_PAD} ${tableColumnClass('xl')}`}>
+                    <Link
+                      href={merchantsLinkTarget(merchant.filter_address, period, agentId)}
+                      className="inline-block text-xs font-medium text-[var(--v2-brand)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 rounded"
+                    >
+                      View in Transactions
+                    </Link>
                   </td>
                 </tr>
               )
@@ -226,6 +259,8 @@ export function MerchantsTable({
             merchant={merchant}
             roster={roster}
             currency={currency}
+            period={period}
+            agentId={agentId}
           />
         ))}
       </div>
@@ -244,26 +279,28 @@ function MobileMerchantRow({
   merchant,
   roster,
   currency,
+  period,
+  agentId,
 }: {
   merchant: AnalyticsMerchantRow
   roster: Map<string, string>
   currency: AnalyticsCurrency
+  period: AnalyticsRangeValue
+  agentId: string | null
 }) {
   const [open, setOpen] = useState(false)
   const { names, total } = agentNamesFor(merchant.agent_ids, roster)
-  // #4332 pixel-neutral shim: a null label renders the address as before.
-  const label = merchantLabel(merchant.label ?? merchant.address)
+  const known = merchant.label !== null
+  const name = merchant.label ?? 'Unknown recipient'
+  const kind = kindLine(merchant)
 
   return (
     <div className="px-4 py-3">
       <Row
         title={
-          <span
-            className={`truncate ${label.title ? 'v2-tabular' : ''}`}
-            title={label.title}
-          >
-            {label.value}
-          </span>
+          <Tooltip label={known ? name : merchant.address} mono={!known}>
+            <span className={`truncate ${known ? '' : 'v2-tabular'}`}>{name}</span>
+          </Tooltip>
         }
         subtitle={
           <span className="v2-tabular">
@@ -283,6 +320,7 @@ function MobileMerchantRow({
         }
         density="flush"
       />
+      {kind && <p className="v2-tabular mt-0.5 text-xs text-[var(--v2-ink-3)]">{kind}</p>}
       {open && (
         <dl className="mt-2 space-y-1.5 rounded-md bg-[var(--v2-surface)] p-3 text-xs">
           <div className="flex items-baseline justify-between gap-3">
@@ -298,17 +336,17 @@ function MobileMerchantRow({
             title={new Date(merchant.first_seen).toLocaleString()}
           />
           <DisclosureLine
-            term="Last seen"
-            value={formatAnalyticsDay(merchant.last_seen.slice(0, 10))}
+            term="Last paid"
+            value={lastPaymentCaption(merchant.last_seen)}
             title={new Date(merchant.last_seen).toLocaleString()}
           />
         </dl>
       )}
       <Link
-        href={MERCHANT_FILTER_BASE}
+        href={merchantsLinkTarget(merchant.filter_address, period, agentId)}
         className="mt-2 inline-block rounded text-xs font-medium text-[var(--v2-brand)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
       >
-        View in transactions
+        View in Transactions
       </Link>
     </div>
   )
@@ -329,10 +367,5 @@ function DisclosureLine({ term, value, title }: { term: string; value: string; t
     </div>
   )
 }
-
-/** The link-target rule the test reads instead of re-stating the constant:
- *  when `/transactions` gains a `merchant` filter, this becomes a function of
- *  the address and the test follows it. */
-export const MERCHANTS_LINK_TARGET = MERCHANT_FILTER_BASE
 
 export default MerchantsTable

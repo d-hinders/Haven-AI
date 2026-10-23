@@ -33,6 +33,7 @@ covers:
   - packages/frontend/src/components/ui/Skeleton.tsx
   - packages/ui/src/StatTile.tsx
   - packages/frontend/src/components/analytics/AgentsTable.tsx
+  - packages/frontend/src/components/ui/FacetMenu.tsx
   - packages/frontend/src/components/ui/PeriodPicker.tsx
   - packages/frontend/src/components/analytics/EmptyStates.tsx
   - packages/frontend/src/hooks/useAccountingFeed.ts
@@ -1155,10 +1156,13 @@ the other secondary routes.
 
 Structure:
 1. PageHeader with title *Analytics* and the subtitle "What your agents did
-   with your money.", plus the window caption beside the period picker. The
-   caption comes from the response's own resolved window, not from the control,
-   so a request answered for a different window than the one asked for is what
-   the reader is told.
+   with your money.", carrying exactly two controls (#4333): the **Agent
+   facet** (a list-controls `FacetMenu`, single-select, "All agents" first,
+   options named from the agents list) writing `?agentId=` — the key
+   `/transactions` reads — and the period picker. There is no bare window
+   caption beside the picker: the trigger's own value span names the window.
+   A stale or foreign `?agentId=` clears with a one-line notice ("That agent
+   isn't available"), never the page error.
 2. One `PeriodPicker` — the list-controls period control (#4110) — for the
    window (7d / 30d / 90d, default 30d), presets only: Last 7 / 30 / 90 days,
    no All time and no custom range, because the endpoint takes a rolling
@@ -1168,53 +1172,83 @@ Structure:
    `haven.analytics.range` — the same device-local rule the theme key follows —
    and a value the endpoint would answer 400 to falls back to the default on
    either surface. Picking writes the stored key and mirrors `?period=` with a
-   `replaceState`, no history entry per change (#4116). The display currency
-   is read from the Settings currency preference, the one owner of that value;
-   the page never re-asks it.
-3. Four `StatTile` figures, one request behind all four: *Spent* with its
-   basis ("based on N payments", plus how many submissions awaiting their
-   settlement evidence are not counted), *Refused* with the attempts behind
-   the count and the attempted amount, *Budget used* as a count of agents
-   above 75% of their period budget, and *Fees paid to Haven*, which while
-   Haven charges no fees says "No fees yet — Haven is not charging fees" in
-   words rather than rendering `$0.00`, because "nothing charged in this
-   window" is a different fact from "the product is not charging fees".
-   (`StatTile` lives in `packages/ui/src/StatTile.tsx`; these are the card
-   variant. The redesigned dashboard's hero figures use the `inline` variant
-   — no card chrome, `text-base` value, no delta chip — #3805.)
-4. The agents table: spend, share, payments, refusals, budget used, top
-   merchant, last payment, each row a link into the agent. Budget figures ride
-   in the delegation's own token units, captioned by the shared budget-caption
-   helper (#3806) — the period length derived from the response's own bounds,
-   and the next refill as its next event ("refills Thu 14:02"). There is no
-   `expires_at` on this endpoint, so no "expires" branch.
+   `replaceState`, no history entry per change (#4116). The Agent facet is
+   NOT persisted: it is linkable state, mirrored onto `?agentId=` the same
+   way. The display currency is read from the Settings currency preference,
+   the one owner of that value; the page never re-asks it.
+3. Four `StatTile` figures (five while fees exist), one request behind all:
+   *Spent* with the previous window's spent under it as an AMOUNT ("vs
+   $280.10 the 30 days before" — `totals.spent_previous`; no delta pills, so
+   `percentChange` is gone), *Payments* with "by N of M agents" (or the
+   agent's name when filtered), *Refused* with the attempts behind the count
+   and — when filtered to one agent — a **Review** link to that agent's
+   refused attempts (`/agents/<id>?tab=activity&status=refused`, #4323;
+   hidden with all agents, where no page-level refused list exists), and
+   *Agents near their budget* as "N of M" over the agents with budgets,
+   captioned "above 75% of a period budget". The two refusal recording
+   caveats (the ledger's floor date, the unrecorded price-cap class) ride an
+   ⓘ `Tooltip` hint on the Refused label — `StatTile`'s optional `hint`
+   (#4333), an elaboration on the count, not essential copy. *Fees paid to
+   Haven* renders ONLY while `fees.flag_on` is true (fourth or fifth tile);
+   while Haven charges nothing the tile is absent — a $0.00 would report
+   "nothing charged this period", which is not the same fact — and the
+   gas-sponsored count rides the tile when it exists. (`StatTile` lives in
+   `packages/ui/src/StatTile.tsx`; these are the card variant. The redesigned
+   dashboard's hero figures use the `inline` variant — no card chrome,
+   `text-base` value, no delta chip — #3805.)
+4. The agents table: the agent's `Monogram` and name (revoked agents get the
+   shared `StatusBadge` "Revoked", not a truncated row), Spent with "N% of
+   spend" under it (the Share column merged in), Payments, Refused as a link
+   to that agent's refused attempts, Budget captioned by the shared
+   budget-caption helper (#3806 — whose symbol-decimals fallback, #4333,
+   makes a 1.00 USDC budget read "0.00 of 1.00 USDC · used this period ·
+   refills …", never "0.00 of 0.00"), Top merchant by name with a merchant
+   monogram (an unresolved one reads "Unknown recipient", the full address in
+   the tooltip — no cell renders a `0x…` address AS a label), and Last paid.
+   The whole row links to the agent. There is no `expires_at` on this
+   endpoint, so no "expires" branch.
 5. Below the table: the spend-over-time chart (one bar per day with activity,
    stacked by agent, refusal caps, partial edge days striped; #3051), then the
    top-merchants table, then the balance-over-time chart (#2949). The table
-   stays on the first screen; the charts are the same figures over time.
+   stays on the first screen; the charts are the same figures over time. The
+   former page-level sparse band is GONE (#4333): sections render whenever
+   the window has any activity, each keeping its own guard — the charts
+   decline to draw below `MIN_CHARTABLE_DAYS` points, the tiles and tables
+   stay. The merchants table's "Paid to" carries the kind line ("Your
+   account", "Paid API", or the short address for an unknown recipient), the
+   Address column is gone, and "View in Transactions" links to
+   `/transactions?search=<filter_address>&direction=out&period=<current>`
+   (plus `&agentId=` when filtered). Balance reads "Net change" with a signed
+   amount, says "all your accounts", and adds "Balance isn't filtered by
+   agent" when the facet is set (#4333).
+
+A user with NO agents at all (revoked included) gets one empty state instead
+of the zero tiles and empty sections: "No agent activity yet", a line on what
+the page will show, and **Connect agent** opening the existing connect flow on
+`/agents` (#4333). An agent-owning user with a quiet window keeps the
+whole-window empty state; a sparse window keeps the tiles and the table.
 
 Money and risk clarity:
-- A value is a reading, never a judgement: the figure is ink in every state,
-  and only the delta chip carries tone, derived from what a *rising* value of
-  that figure means (`StatTile`'s polarity prop owns the rule). More refusals
-  is worse; more spend is neither.
+- A value is a reading, never a judgement: the figure is ink in every state.
+  The tile's delta chips are gone (#4333) — the Spent comparison is absolute,
+  so there is no percentage to colour; the only colour the Refused tile
+  carries is the ⓘ hint's, and it carries no judgement either.
 - The refused figure is the *attempted* amount. Never "saved": a refused
   payment is money that was not spent, not money that was kept. The count's
-  limit is said out — price-cap refusals in the agent's runtime are not
-  recorded.
+  limit is said in the ⓘ hint — price-cap refusals in the agent's runtime are
+  not recorded — together with the ledger floor the response reports.
 - A budget reading that cannot be made is not a measurement: a failed chain
   read, or a read whose period has already ended, renders "Usage this period
   couldn't be read" instead of a bar — never a 0 % bar and never a "read from
   Haven's last snapshot" claim (#3806).
 - The states are mutually exclusive, because what they report about the
   request is: empty says the endpoint answered and the window holds nothing;
-  error says it did not answer. A page of confident zeros is what an outage
-  is mistaken for, so the empty state replaces the tiles rather than filling
-  them, and the error state says the money has not stopped — the agents keep
-  spending under the rules the user set — with the one remedy the page has
-  evidence for, a retry.
-- Fewer than three days carrying data is a reading too short for a trend: the
-  tiles stay, and one line says what the charts need before they render.
+  new-user says there is no agent the page could ever report on; error says
+  it did not answer. A page of confident zeros is what an outage is mistaken
+  for, so the empty state replaces the tiles rather than filling them, and
+  the error state says the money has not stopped — the agents keep spending
+  under the rules the user set — with the one remedy the page has evidence
+  for, a retry.
 - The table's two layouts are the same data: below `lg` the row list carries
   spend, refusals and budget on the face of the row and the rest in a
   disclosure. The collapse is a layout decision, not a second source — no

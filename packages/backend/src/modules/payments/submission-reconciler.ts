@@ -63,6 +63,7 @@ import {
   reconcileOutcomeConfirmed,
   reconcileOutcomeFailed,
 } from '../../infra/repositories/payment-intents.js'
+import { emitFirstPaymentSettled } from '../../infra/repositories/onboarding-funnel.js'
 import { readUserOperationReceipt } from '../../rails/delegation-rail.js'
 
 /** Structural logger — Fastify's and vitest's loggers both satisfy it. */
@@ -122,12 +123,14 @@ export async function runSubmissionReconcileTick(
     readReceipt?: typeof readUserOperationReceipt
     confirmOutcome?: typeof reconcileOutcomeConfirmed
     failOutcome?: typeof reconcileOutcomeFailed
+    emitFirstPayment?: typeof emitFirstPaymentSettled
   } = {},
 ): Promise<SubmissionReconcileTickResult> {
   const findCandidates = deps.findCandidates ?? findOutcomePendingIntents
   const readReceipt = deps.readReceipt ?? readUserOperationReceipt
   const confirmOutcome = deps.confirmOutcome ?? reconcileOutcomeConfirmed
   const failOutcome = deps.failOutcome ?? reconcileOutcomeFailed
+  const emitFirstPayment = deps.emitFirstPayment ?? emitFirstPaymentSettled
 
   const rows = await findCandidates(RECONCILE_MIN_AGE_SECONDS, RECONCILE_MAX_CANDIDATES_PER_TICK)
   const result: SubmissionReconcileTickResult = {
@@ -154,6 +157,9 @@ export async function runSubmissionReconcileTick(
           if (await confirmOutcome(row.id, receipt.txHash)) {
             log.info({ payment_id: row.id, user_op_hash: row.user_op_hash, tx_hash: receipt.txHash }, 'Submission reconciled: receipt confirmed')
             outcome = 'confirmed'
+            // #4354: a submit whose receipt the sign route never saw settles
+            // HERE, so the funnel's last step is written here too.
+            emitFirstPayment(row.id)
           }
         } else {
           if (await failOutcome(row.id, ' was included but reverted')) {

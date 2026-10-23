@@ -45,8 +45,43 @@ function tickDeps(rows: unknown[], readReceipt: (chainId: number, hash: string) 
     // submission-outcome-reconciliation.test.ts.
     confirmOutcome: vi.fn(async () => true) as unknown as typeof import('../../../infra/repositories/payment-intents.js').reconcileOutcomeConfirmed,
     failOutcome: vi.fn(async () => true) as unknown as typeof import('../../../infra/repositories/payment-intents.js').reconcileOutcomeFailed,
+    // #4354: the funnel write is injected too, so no test here reaches db.js.
+    emitFirstPayment: vi.fn(),
   }
 }
+
+describe('#4354 — a reconciled confirm writes the funnel\'s last step', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('a landed-and-succeeded receipt emits first_payment_settled for that payment, once', async () => {
+    const deps = tickDeps([row()], async () => ({ state: 'included', success: true, txHash: `0x${'ef'.repeat(32)}` }))
+    await runSubmissionReconcileTick(log, deps)
+    expect(deps.emitFirstPayment).toHaveBeenCalledTimes(1)
+    expect(deps.emitFirstPayment).toHaveBeenCalledWith(row().id)
+  })
+
+  it('a confirm that lost its CAS emits nothing — the other writer owns the row', async () => {
+    const deps = tickDeps([row()], async () => ({ state: 'included', success: true, txHash: `0x${'ef'.repeat(32)}` }))
+    deps.confirmOutcome = vi.fn(async () => false) as unknown as typeof deps.confirmOutcome
+    await runSubmissionReconcileTick(log, deps)
+    expect(deps.emitFirstPayment).not.toHaveBeenCalled()
+  })
+
+  it('a reverted receipt and an elapsed window emit nothing', async () => {
+    const reverted = tickDeps([row()], async () => ({ state: 'included', success: false, txHash: `0x${'ef'.repeat(32)}` }))
+    await runSubmissionReconcileTick(log, reverted)
+    expect(reverted.emitFirstPayment).not.toHaveBeenCalled()
+
+    const elapsed = tickDeps(
+      [row({ signed_at: new Date(Date.now() - (RECONCILE_MAX_AGE_SECONDS + 600) * 1000).toISOString() })],
+      async () => ({ state: 'not_found_yet' }),
+    )
+    await runSubmissionReconcileTick(log, elapsed)
+    expect(elapsed.emitFirstPayment).not.toHaveBeenCalled()
+  })
+})
 
 describe('#3564 — the submission reconciler tick', () => {
   beforeEach(() => {

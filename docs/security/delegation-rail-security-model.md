@@ -1076,6 +1076,22 @@ chain.
 > Scope of this note: that forward only; nothing else in this document was
 > re-read for it, and `last-verified` is not bumped (it already reads
 > 2026-10-23).
+>
+> **Re-verified #4351 (2026-10-23: the expiry gains its ceiling).** The diff
+> touches a covered path: `routes/agent-delegations.ts` — the build route now
+> refuses an `expires_at` more than 365 days out (400, same `{ error }`
+> envelope as the future check), exactly as this document's #4350 note
+> anticipated. Nothing this document claims about the caveat itself moves:
+> the end date is still the signed `beforeThreshold` caveat enforced by the
+> `Timestamp` enforcer, and the cap is a route-level admission check that
+> only ever REFUSES a build — it adds no authority and touches no selector,
+> signer set or custody path. The re-key path is deliberately untouched
+> (`agent-rekey.ts` carries the old row's `expires_at` via the meter
+> snapshot and `planCarry`, without the build route), so a legacy row past
+> the cap stays rotatable; a real-Postgres pin (`agent-rekey-issue-past-cap.test.ts`)
+> and a `planCarry` unit pin hold that open. Scope of this re-read: the
+> expiry-validation claims above; nothing else in this document was re-read
+> for it, and `last-verified` is not bumped (it already reads 2026-10-23).
 
 The unlink guard also refuses while an agent re-key is in flight, so the
 account binding cannot disappear between re-key stages. This is a database

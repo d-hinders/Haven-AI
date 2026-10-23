@@ -987,6 +987,64 @@ const activityToolCall = {
 // `ApiSchema<>` imports.
 const activityEntry = { oneOf: [activityPayment, activityToolCall] } as const
 
+/**
+ * One refused payment attempt (#4323) — the agent Activity tab's third
+ * population, served ONLY under `kind=refusals`. Deliberately NOT a member of
+ * `activityEntry` above: that union is shared with `/agent-activity/feed`,
+ * which serves no refusals, and a `oneOf` member is a promise to a code
+ * generator. The refusal read documents its own item schema — the route's
+ * 200 response is an `anyOf` of the payment/tool-call shape and this one.
+ */
+const refusalActivityEntry = {
+  type: 'object',
+  required: [
+    'type',
+    'id',
+    'created_at',
+    'amount',
+    'token_symbol',
+    'chain_id',
+    'merchant_to',
+    'resource_url',
+    'reason',
+    'attempts',
+    'approx_amount_usd',
+    'approx_amount_eur',
+    'approx_amount_sek',
+  ],
+  properties: {
+    type: { type: 'string', enum: ['refusal'] },
+    id: { type: 'string', format: 'uuid' },
+    created_at: { type: 'string' },
+    amount: {
+      type: 'string',
+      description:
+        'ATOMIC token amount — never pre-scaled here. The renderer derives the human amount from the shared registry decimals (core/chains), the same source the refusal ledger books through; the fiat triple below is struck server-side from that same human conversion.',
+    },
+    token_symbol: { type: 'string' },
+    chain_id: { type: 'integer' },
+    merchant_to: { type: ['string', 'null'], description: 'The merchant/recipient the attempt named, when one was recorded.' },
+    resource_url: { type: ['string', 'null'], description: 'The x402 resource the agent tried to pay, when the attempt was resource-scoped.' },
+    reason: {
+      type: 'string',
+      enum: ['delegation_budget_exceeded', 'delegation_expired', 'no_delegation_for_target', 'relayer_budget', 'onchain_revert'],
+      description: 'The closed refusal vocabulary — mirrors the payment_refusals CHECK exactly. The plain words are the frontend\'s one reason-word map, not a wire field.',
+    },
+    attempts: {
+      type: 'integer',
+      description:
+        'Folded attempts on this row: the 60-second (agent, reason, resource) dedupe increments `attempts` instead of inserting, so one row can stand for several tries. `delegation_budget_exceeded` also covers task-budget and sub-budget caps (the enforcer error codes share the classification).',
+    },
+    approx_amount_usd: { type: ['string', 'null'], description: 'Serve-time USD at request time; null when the token has no usable quote — never 0.' },
+    approx_amount_eur: { type: ['string', 'null'], description: 'Serve-time EUR; same null-for-unknown rule.' },
+    approx_amount_sek: {
+      type: ['string', 'null'],
+      description: 'Serve-time SEK. SEK is serve-time ONLY — `sek_value` is not stored on a refusal (the read shape keeps the write-only posture).',
+    },
+  },
+  additionalProperties: false,
+} as const
+
 /** Per-token spend totals, as the stats route shapes them. */
 const spendTotals = {
   type: 'array',
@@ -6027,7 +6085,7 @@ export const openapiSpec = {
         operationId: 'getAgentActivity',
         summary: "One agent's payments and tool calls, newest first.",
         description:
-          "A heterogeneous list discriminated by `type`: payment or mcp_tool_call. (#2262: the third branch, `approval`, is gone — #2055 dropped `approval_requests` and this handler merges `payment_intents` and the MCP tool-call audit log, with no third source.) **Read the pagination carefully — it is approximate by construction.** `limit` is applied to EACH of the two sources separately and the results are then merged and sorted, so this route can return up to twice `limit` entries, and `offset` walks each source independently rather than the merged sequence. (The combined feed below merges the same way but then truncates to `limit`, so the two routes do NOT paginate identically.) Treat the list as a recent-activity window, not as a stable paged sequence.\n\n**One population at a time (#4229).** When `kind` is given the route serves exactly that population — `payments` or `tool_calls` — filtered by `status`, `from`/`to`, `q` and `paymentId`, paged by `limit`/`offset` over the FILTERED sequence, and measured: the response adds `total` (the filtered population's size, ignoring `limit`/`offset`) and `hasMore` (`offset` + returned < `total`). `kind=tool_calls` also adds `counts.error` — the population's error count WITHOUT the `status` filter applied, so the summary line stays stable while the status selection flips. `from` is inclusive and `to` exclusive; `q` is a substring match — for payments over the merchant resource URL, the merchant/recipient address and the owner's contact name for the recipient, for tool calls over the tool name and error code; `paymentId` narrows to that one payment (a tool call links to its payment). `status` has one vocabulary per kind — `sent | pending | failed | needs_attention` for payments (`needs_attention` is the derived state: a machine-rail payment with an open merchant-retry-rejected reconciliation event) and `ok | error | denied` for tool calls; a value from the other kind's vocabulary is a 400. Omitting `kind` serves the legacy merged window described above and IGNORES every filter, so a legacy caller's response is unchanged and a new caller against an old backend (which does not reject unknown query parameters) simply gets the unfiltered merged shape.",
+          "A heterogeneous list discriminated by `type`: payment or mcp_tool_call. (#2262: the third branch, `approval`, is gone — #2055 dropped `approval_requests` and this handler merges `payment_intents` and the MCP tool-call audit log, with no third source.) **Read the pagination carefully — it is approximate by construction.** `limit` is applied to EACH of the two sources separately and the results are then merged and sorted, so this route can return up to twice `limit` entries, and `offset` walks each source independently rather than the merged sequence. (The combined feed below merges the same way but then truncates to `limit`, so the two routes do NOT paginate identically.) Treat the list as a recent-activity window, not as a stable paged sequence.\n\n**One population at a time (#4229).** When `kind` is given the route serves exactly that population — `payments` or `tool_calls` — filtered by `status`, `from`/`to`, `q` and `paymentId`, paged by `limit`/`offset` over the FILTERED sequence, and measured: the response adds `total` (the filtered population's size, ignoring `limit`/`offset`) and `hasMore` (`offset` + returned < `total`). `kind=tool_calls` also adds `counts.error` — the population's error count WITHOUT the `status` filter applied, so the summary line stays stable while the status selection flips. `from` is inclusive and `to` exclusive; `q` is a substring match — for payments over the merchant resource URL, the merchant/recipient address and the owner's contact name for the recipient, for tool calls over the tool name and error code; `paymentId` narrows to that one payment (a tool call links to its payment). `status` has one vocabulary per kind — `sent | pending | failed | needs_attention` for payments (`needs_attention` is the derived state: a machine-rail payment with an open merchant-retry-rejected reconciliation event) and `ok | error | denied` for tool calls; a value from the other kind's vocabulary is a 400. Omitting `kind` serves the legacy merged window described above and IGNORES every filter, so a legacy caller's response is unchanged and a new caller against an old backend (which does not reject unknown query parameters) simply gets the unfiltered merged shape.\n\n**Refused attempts (kind=refusals, #4323).** A THIRD population: the agent's rows in `payment_refusals` — what the agent tried to pay, for how much, and why Haven or its budget stopped it, including attempts that never became a payment. The response's `activity` items are `RefusalActivityEntry` (not the payment/tool-call union above): `amount` is ATOMIC (the renderer scales it through the shared registry's decimals), `reason` is the closed five-value refusal vocabulary, and `attempts` folds the 60-second (agent, reason, resource) dedupe — one row, not two, per window. There is no `reason_label` on the wire: the plain words are the frontend's single reason-word map. The fiat is SERVE-TIME, all three currencies at once (`approx_amount_usd`/`_eur`/`_sek`; `sek_value` is not stored, so SEK exists only at request time) — null, never 0, on a price outage. `q` searches the resource URL and the merchant/recipient value; `from`/`to` bound `created_at`; `status` takes only `refused`. Two honest overlaps: a `relayer_budget` refusal is written at redeem AFTER the intent exists and the claim is released to `pending_signature`, so the same attempt can show as a pending payment AND a refusal (they cannot be linked — the refusal carries no payment id); and one attempt can book two refusal rows (pre-check plus prepare-catch) — both show, and each is true. An old backend answers `kind=refusals` with a 400 under enforced validation; a caller should show its error state rather than mix populations.",
         security: [{ DashboardJwt: [] }],
         parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Agent id.' },
           { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 30 }, description: 'Capped at 100.' },
@@ -6035,14 +6093,14 @@ export const openapiSpec = {
           {
             name: 'kind',
             in: 'query',
-            schema: { type: 'string', enum: ['payments', 'tool_calls'] },
-            description: 'Serve ONE population instead of the merged window. Adds total/hasMore to the response (plus counts.error for tool_calls). Omitted: the legacy merged read, filters ignored.',
+            schema: { type: 'string', enum: ['payments', 'tool_calls', 'refusals'] },
+            description: "Serve ONE population instead of the merged window. Adds total/hasMore to the response (plus counts.error for tool_calls). kind=refusals serves the agent's refused payment attempts — the payment_refusals ledger (#4323) — with its own item schema and no counts. Omitted: the legacy merged read, filters ignored.",
           },
           {
             name: 'status',
             in: 'query',
-            schema: { type: 'string', enum: ['sent', 'pending', 'failed', 'needs_attention', 'ok', 'error', 'denied'] },
-            description: 'Requires kind. Payments: sent (confirmed), pending (awaiting signature or submitted), failed, needs_attention (a machine-rail payment with an open merchant-retry-rejected reconciliation event). Tool calls: ok, error, denied. A value from the other kind is a 400.',
+            schema: { type: 'string', enum: ['sent', 'pending', 'failed', 'needs_attention', 'ok', 'error', 'denied', 'refused'] },
+            description: "Requires kind. Payments: sent (confirmed), pending (awaiting signature or submitted), failed, needs_attention (a machine-rail payment with an open merchant-retry-rejected reconciliation event). Tool calls: ok, error, denied. Refusals: refused — the only value, the population IS the refused attempts (#4323). A value from the other kind is a 400.",
           },
           {
             name: 'from',
@@ -6060,7 +6118,7 @@ export const openapiSpec = {
             name: 'q',
             in: 'query',
             schema: { type: 'string' },
-            description: 'Requires kind. Case-insensitive substring search. Payments: the merchant resource URL, the merchant/recipient address, and the owner\'s contact name for the recipient. Tool calls: the tool name and the error code.',
+            description: "Requires kind. Case-insensitive substring search. Payments: the merchant resource URL, the merchant/recipient address, and the owner's contact name for the recipient. Tool calls: the tool name and the error code. Refusals: the resource URL and the merchant/recipient value (#4323 — a refusal is not yet a payment, so it has no contact-name arm).",
           },
           {
             name: 'paymentId',
@@ -6077,34 +6135,63 @@ export const openapiSpec = {
         ],
         responses: {
           '200': {
-            description: 'Merged activity, newest first — or, with `kind`, one filtered population with its total and hasMore.',
+            description: 'Merged activity, newest first — or, with `kind`, one filtered population with its total and hasMore. With kind=refusals the items are RefusalActivityEntry (#4323); every other population serves the payment/tool-call union.',
             content: {
               'application/json': {
                 schema: {
-                  type: 'object',
-                  required: ['activity'],
-                  properties: {
-                    activity: { type: 'array', items: activityEntry },
-                    total: {
-                      type: 'integer',
-                      description: 'Present when `kind` is given: the filtered population\'s size, ignoring limit/offset.',
-                    },
-                    hasMore: {
-                      type: 'boolean',
-                      description: 'Present when `kind` is given: offset + returned rows < total.',
-                    },
-                    counts: {
+                  // `anyOf`, not `oneOf`, deliberately: an EMPTY page
+                  // (`activity: []`, total 0) validates against BOTH shapes —
+                  // the arrays' item schemas are disjoint, but an empty array
+                  // satisfies either — and a `oneOf` would reject exactly the
+                  // empty result the pager must serve. The shapes stay
+                  // disjoint for every non-empty body.
+                  anyOf: [
+                    {
                       type: 'object',
-                      required: ['error'],
+                      required: ['activity'],
                       properties: {
-                        error: {
+                        activity: { type: 'array', items: activityEntry },
+                        total: {
                           type: 'integer',
-                          description: 'The population\'s tool calls with result_status error, counted WITHOUT the status filter — the summary line stays stable while the status selection flips.',
+                          description: 'Present when `kind` is given: the filtered population\'s size, ignoring limit/offset.',
+                        },
+                        hasMore: {
+                          type: 'boolean',
+                          description: 'Present when `kind` is given: offset + returned rows < total.',
+                        },
+                        counts: {
+                          type: 'object',
+                          required: ['error'],
+                          properties: {
+                            error: {
+                              type: 'integer',
+                              description: 'The population\'s tool calls with result_status error, counted WITHOUT the status filter — the summary line stays stable while the status selection flips.',
+                            },
+                          },
+                          description: 'Present when kind=tool_calls.',
                         },
                       },
-                      description: 'Present when kind=tool_calls.',
                     },
-                  },
+                    {
+                      // The refusal population's own response shape (#4323) —
+                      // NOT the shared `activityEntry` union, which
+                      // `/agent-activity/feed` also documents and which serves
+                      // no refusals.
+                      type: 'object',
+                      required: ['activity'],
+                      properties: {
+                        activity: { type: 'array', items: { $ref: '#/components/schemas/RefusalActivityEntry' } },
+                        total: {
+                          type: 'integer',
+                          description: 'The filtered refusal population\'s size, ignoring limit/offset.',
+                        },
+                        hasMore: {
+                          type: 'boolean',
+                          description: 'offset + returned rows < total.',
+                        },
+                      },
+                    },
+                  ],
                 },
               },
             },
@@ -9557,6 +9644,7 @@ export const openapiSpec = {
       },
     },
     schemas: {
+      RefusalActivityEntry: refusalActivityEntry,
       ClientUpdate: {
         type: 'object',
         description:

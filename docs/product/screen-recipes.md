@@ -724,15 +724,28 @@ rule). `?grant=` keeps working alongside `?tab=`. Sections, in order:
 5. Tabs and Activity (#4226): below the hero, the tab row (no counts), then
    the tab's panel. **Activity** — the agent's OWN payments (`payment_intents`,
    failed and pending included — deliberately NOT the wallet-scoped
-   transactions feed, a different population that would drop payments refused
-   before they reached the chain) drawn with the shared ledger pieces:
-   `TransactionActivityRow` in ledger mode, merchant-first, under
-   `TransactionActivityDayHeader` day bands; the row's "by <agent>" title and
-   "From … →" movement line are GONE — the page fixes the agent and the
-   wallet, so neither repeats on a row. The standard toolbar rides on the
-   card: search, a **Status** facet (All, Sent, Pending, Failed, Needs
-   attention), **Token** and **Period** — all server-filtered on the kinded
-   read (#4229, plus its `token` parameter). The toolbar's count stands alone
+   transactions feed, a different population that would drop both those
+   states and the refused attempts this tab shows) drawn with the shared
+   ledger pieces: `TransactionActivityRow` in ledger mode, merchant-first,
+   under `TransactionActivityDayHeader` day bands; the row's "by <agent>"
+   title and the "From … →" movement line are GONE — the page fixes the agent
+   and the wallet, so neither repeats on a row. The standard toolbar rides on
+   the card: search, a **Status** facet (All, Sent, Pending, Failed, Needs
+   attention, Refused), **Token** and **Period** — all server-filtered on the
+   kinded read (#4229, plus its `token` parameter). **Refused** (#4323)
+   switches the population: the tab then shows the agent's refused payment
+   attempts (`payment_refusals`) — what the agent tried to pay, how much, and
+   why a guardrail stopped it — through the same ledger row: the merchant
+   title, a neutral **Refused** badge, the reason in words (the one
+   reason-word map in `lib/refusal-reasons.ts`) and an UNSIGNED amount,
+   because no money moved; rows are not interactive (there is no refused
+   detail view — everything a refusal says is in the row), the Token facet
+   hides (a refusal has no token address), the toolbar's noun reads "refused
+   attempt", the empty state is "No refused attempts", and a `relayer_budget`
+   row's subline says the payment stayed pending and can be retried (the same
+   attempt also shows as a pending payment — the two cannot be linked). The
+   deep link `/agents/{id}?tab=activity&status=refused` opens the tab on that
+   population (#4324's "Review" lands there). The toolbar's count stands alone
    on the summary line — no figure beside it (#4274, owner decision (a): the
    former "Out" + server total repeated the count and, beside the account
    tab's money In/Out, read as an amount; the count alone is the List
@@ -853,28 +866,40 @@ dark mode.
 ## Agent Activity
 
 Use for the agent page's Activity tab (#4226): the agent's own payments —
-confirmed, pending and failed alike — in one ledger. The population is the
-agent's `payment_intents` (the kinded read, #4229), NOT the wallet-scoped
-transactions feed: that feed serves a different set and would drop payments
-refused before they reached the chain.
+confirmed, pending and failed alike — in one ledger, and (#4323) the agent's
+refused payment attempts. The population is the agent's `payment_intents`
+(the kinded read, #4229) and the `payment_refusals` ledger, NOT the
+wallet-scoped transactions feed: that feed serves a different set and would
+drop both the failed and pending states and the refused attempts this tab
+shows.
 
 Structure:
 1. The standard toolbar on the card: search, a Status facet (All, Sent,
-   Pending, Failed, Needs attention), Token and Period — server-filtered.
-   Token offers only ERC-20s on the agent's chain (when the page knows it):
-   an agent payment is never in a native token. A selected token that does
-   not resolve is sent as-is and matches nothing — never dropped into an
-   unfiltered read under a "Token: …" chip (#4249). With fewer than two
-   contract tokens to offer, the Token facet hides (a single option is no
-   choice — the toolbar's rule).
+   Pending, Failed, Needs attention, Refused), Token and Period —
+   server-filtered. Token offers only ERC-20s on the agent's chain (when the
+   page knows it): an agent payment is never in a native token. A selected
+   token that does not resolve is sent as-is and matches nothing — never
+   dropped into an unfiltered read under a "Token: …" chip (#4249). With
+   fewer than two contract tokens to offer, the Token facet hides (a single
+   option is no choice — the toolbar's rule).
 2. `TransactionActivityRow` ledger rows, merchant-first, under
    `TransactionActivityDayHeader` day bands (#4225). No "by <agent>" title and
    no "From … →" movement line: the page fixes the agent and the wallet, so
    neither repeats on a row. A row opens the shared transaction detail panel.
-3. The toolbar's count alone on the summary line (#4274, owner decision
+3. Refused attempts (#4323): the Status facet's **Refused** value switches
+   the population to the refusal ledger, served by the same kinded read
+   (`kind=refusals`). A refusal row is the existing ledger row — merchant
+   title, a neutral **Refused** badge, the reason in words, the UNSIGNED
+   amount — and nothing else: no detail view, no row expansion, no controls.
+   The subline reads "<reason words> · No money moved" (`relayer_budget`:
+   "… The payment stayed pending and can be retried"). The Token facet hides
+   while Refused is selected, the toolbar's noun is "refused attempt", and
+   the empty state is "No refused attempts". The deep link
+   `/agents/{id}?tab=activity&status=refused` reproduces the view.
+4. The toolbar's count alone on the summary line (#4274, owner decision
    (a)) and `ListShowMore` below
    the card; "See in Transactions" under the list.
-4. Empty state with the next useful action ("No payments yet"; for an agent
+5. Empty state with the next useful action ("No payments yet"; for an agent
    still in setup, the budget pointer).
 
 Money and risk clarity:

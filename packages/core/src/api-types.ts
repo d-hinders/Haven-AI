@@ -2190,6 +2190,8 @@ export type paths = {
          * @description A heterogeneous list discriminated by `type`: payment or mcp_tool_call. (#2262: the third branch, `approval`, is gone — #2055 dropped `approval_requests` and this handler merges `payment_intents` and the MCP tool-call audit log, with no third source.) **Read the pagination carefully — it is approximate by construction.** `limit` is applied to EACH of the two sources separately and the results are then merged and sorted, so this route can return up to twice `limit` entries, and `offset` walks each source independently rather than the merged sequence. (The combined feed below merges the same way but then truncates to `limit`, so the two routes do NOT paginate identically.) Treat the list as a recent-activity window, not as a stable paged sequence.
          *
          *     **One population at a time (#4229).** When `kind` is given the route serves exactly that population — `payments` or `tool_calls` — filtered by `status`, `from`/`to`, `q` and `paymentId`, paged by `limit`/`offset` over the FILTERED sequence, and measured: the response adds `total` (the filtered population's size, ignoring `limit`/`offset`) and `hasMore` (`offset` + returned < `total`). `kind=tool_calls` also adds `counts.error` — the population's error count WITHOUT the `status` filter applied, so the summary line stays stable while the status selection flips. `from` is inclusive and `to` exclusive; `q` is a substring match — for payments over the merchant resource URL, the merchant/recipient address and the owner's contact name for the recipient, for tool calls over the tool name and error code; `paymentId` narrows to that one payment (a tool call links to its payment). `status` has one vocabulary per kind — `sent | pending | failed | needs_attention` for payments (`needs_attention` is the derived state: a machine-rail payment with an open merchant-retry-rejected reconciliation event) and `ok | error | denied` for tool calls; a value from the other kind's vocabulary is a 400. Omitting `kind` serves the legacy merged window described above and IGNORES every filter, so a legacy caller's response is unchanged and a new caller against an old backend (which does not reject unknown query parameters) simply gets the unfiltered merged shape.
+         *
+         *     **Refused attempts (kind=refusals, #4323).** A THIRD population: the agent's rows in `payment_refusals` — what the agent tried to pay, for how much, and why Haven or its budget stopped it, including attempts that never became a payment. The response's `activity` items are `RefusalActivityEntry` (not the payment/tool-call union above): `amount` is ATOMIC (the renderer scales it through the shared registry's decimals), `reason` is the closed five-value refusal vocabulary, and `attempts` folds the 60-second (agent, reason, resource) dedupe — one row, not two, per window. There is no `reason_label` on the wire: the plain words are the frontend's single reason-word map. The fiat is SERVE-TIME, all three currencies at once (`approx_amount_usd`/`_eur`/`_sek`; `sek_value` is not stored, so SEK exists only at request time) — null, never 0, on a price outage. `q` searches the resource URL and the merchant/recipient value; `from`/`to` bound `created_at`; `status` takes only `refused`. Two honest overlaps: a `relayer_budget` refusal is written at redeem AFTER the intent exists and the claim is released to `pending_signature`, so the same attempt can show as a pending payment AND a refusal (they cannot be linked — the refusal carries no payment id); and one attempt can book two refusal rows (pre-check plus prepare-catch) — both show, and each is true. An old backend answers `kind=refusals` with a 400 under enforced validation; a caller should show its error state rather than mix populations.
          */
         get: operations["getAgentActivity"];
         put?: never;
@@ -3758,6 +3760,34 @@ export type paths = {
 export type webhooks = Record<string, never>;
 export type components = {
     schemas: {
+        RefusalActivityEntry: {
+            /** @enum {string} */
+            type: "refusal";
+            /** Format: uuid */
+            id: string;
+            created_at: string;
+            /** @description ATOMIC token amount — never pre-scaled here. The renderer derives the human amount from the shared registry decimals (core/chains), the same source the refusal ledger books through; the fiat triple below is struck server-side from that same human conversion. */
+            amount: string;
+            token_symbol: string;
+            chain_id: number;
+            /** @description The merchant/recipient the attempt named, when one was recorded. */
+            merchant_to: string | null;
+            /** @description The x402 resource the agent tried to pay, when the attempt was resource-scoped. */
+            resource_url: string | null;
+            /**
+             * @description The closed refusal vocabulary — mirrors the payment_refusals CHECK exactly. The plain words are the frontend's one reason-word map, not a wire field.
+             * @enum {string}
+             */
+            reason: "delegation_budget_exceeded" | "delegation_expired" | "no_delegation_for_target" | "relayer_budget" | "onchain_revert";
+            /** @description Folded attempts on this row: the 60-second (agent, reason, resource) dedupe increments `attempts` instead of inserting, so one row can stand for several tries. `delegation_budget_exceeded` also covers task-budget and sub-budget caps (the enforcer error codes share the classification). */
+            attempts: number;
+            /** @description Serve-time USD at request time; null when the token has no usable quote — never 0. */
+            approx_amount_usd: string | null;
+            /** @description Serve-time EUR; same null-for-unknown rule. */
+            approx_amount_eur: string | null;
+            /** @description Serve-time SEK. SEK is serve-time ONLY — `sek_value` is not stored on a refusal (the read shape keeps the write-only posture). */
+            approx_amount_sek: string | null;
+        };
         /** @description #3303: the backend's update hint for an outdated published client. `required: true` means the client is below a minimum this deployment set and will be refused at its refusal points; `upgrade_command` is the command that starts the update, on this deployment's channel. For the connector-installed packages (signer, mcp, connect) it is the connector doctor (#3412): it works as pasted on an existing install and prints the exact `--doctor --repair` line to run next — a bare connector re-run is a setup command that stops at "Missing --setup" on an already set-up machine. #3799: on those packages the backend may append ` --name <slug>` (normalised from the calling agent's recorded MCP pair — a display aid, never identity), so an agent on a multi-agent machine can run one command. `/discovery`, `/.well-known/haven.json` and `/releases` keep the bare form. */
         ClientUpdate: {
             /** @example @haven_ai/mcp */
@@ -16508,15 +16538,15 @@ export interface operations {
                 /** @description Capped at 100. */
                 limit?: number;
                 offset?: number;
-                /** @description Serve ONE population instead of the merged window. Adds total/hasMore to the response (plus counts.error for tool_calls). Omitted: the legacy merged read, filters ignored. */
-                kind?: "payments" | "tool_calls";
-                /** @description Requires kind. Payments: sent (confirmed), pending (awaiting signature or submitted), failed, needs_attention (a machine-rail payment with an open merchant-retry-rejected reconciliation event). Tool calls: ok, error, denied. A value from the other kind is a 400. */
-                status?: "sent" | "pending" | "failed" | "needs_attention" | "ok" | "error" | "denied";
+                /** @description Serve ONE population instead of the merged window. Adds total/hasMore to the response (plus counts.error for tool_calls). kind=refusals serves the agent's refused payment attempts — the payment_refusals ledger (#4323) — with its own item schema and no counts. Omitted: the legacy merged read, filters ignored. */
+                kind?: "payments" | "tool_calls" | "refusals";
+                /** @description Requires kind. Payments: sent (confirmed), pending (awaiting signature or submitted), failed, needs_attention (a machine-rail payment with an open merchant-retry-rejected reconciliation event). Tool calls: ok, error, denied. Refusals: refused — the only value, the population IS the refused attempts (#4323). A value from the other kind is a 400. */
+                status?: "sent" | "pending" | "failed" | "needs_attention" | "ok" | "error" | "denied" | "refused";
                 /** @description Requires kind. Inclusive ISO lower bound on created_at — a date or a full date-time. A non-ISO value is a 400. */
                 from?: string;
                 /** @description Requires kind. EXCLUSIVE ISO upper bound on created_at — a date or a full date-time; pass the next period's start so adjacent windows tile. A non-ISO value is a 400. */
                 to?: string;
-                /** @description Requires kind. Case-insensitive substring search. Payments: the merchant resource URL, the merchant/recipient address, and the owner's contact name for the recipient. Tool calls: the tool name and the error code. */
+                /** @description Requires kind. Case-insensitive substring search. Payments: the merchant resource URL, the merchant/recipient address, and the owner's contact name for the recipient. Tool calls: the tool name and the error code. Refusals: the resource URL and the merchant/recipient value (#4323 — a refusal is not yet a payment, so it has no contact-name arm). */
                 q?: string;
                 /** @description Requires kind. Narrows to that one payment (kind=payments) or to the calls recorded against it (kind=tool_calls). */
                 paymentId?: string;
@@ -16532,7 +16562,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Merged activity, newest first — or, with `kind`, one filtered population with its total and hasMore. */
+            /** @description Merged activity, newest first — or, with `kind`, one filtered population with its total and hasMore. With kind=refusals the items are RefusalActivityEntry (#4323); every other population serves the payment/tool-call union. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -16618,6 +16648,12 @@ export interface operations {
                             /** @description The population's tool calls with result_status error, counted WITHOUT the status filter — the summary line stays stable while the status selection flips. */
                             error: number;
                         };
+                    } | {
+                        activity: components["schemas"]["RefusalActivityEntry"][];
+                        /** @description The filtered refusal population's size, ignoring limit/offset. */
+                        total?: number;
+                        /** @description offset + returned rows < total. */
+                        hasMore?: boolean;
                     };
                 };
             };

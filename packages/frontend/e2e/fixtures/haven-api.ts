@@ -1928,13 +1928,34 @@ export async function serveAgentDetailResponses(
           status_code: 200,
           created_at: '2026-08-31T09:37:00.000Z',
         }
+        const refusalRow = {
+          // #4323: the refusal population — the fixture serves one refused
+          // attempt so the Refused facet's capture has a row to show. Atomic
+          // on the wire; the serve-time triple is the fixture's priced view.
+          type: 'refusal',
+          id: 'refusal-e2e-1',
+          created_at: '2026-08-31T09:36:00.000Z',
+          amount: '25000',
+          token_symbol: 'USDC',
+          chain_id: testSafe.chain_id,
+          merchant_to: testRecipientAddress,
+          resource_url: 'https://research.example/report',
+          reason: 'delegation_budget_exceeded',
+          attempts: 2,
+          approx_amount_usd: '0.0250',
+          approx_amount_eur: null,
+          approx_amount_sek: null,
+        }
         const paymentStatuses = new Set(['sent', 'pending', 'failed', 'needs_attention'])
         const rows: Array<Record<string, any>> =
           activityKind === 'payments'
             ? [paymentRow]
-            : [toolCallRow]
+            : activityKind === 'refusals'
+              ? [refusalRow]
+              : [toolCallRow]
         const filtered = rows.filter((row) => {
           if (!activityStatus) return true
+          if (activityKind === 'refusals') return activityStatus === 'refused'
           if (activityKind === 'tool_calls') return row.result_status === activityStatus
           if (!paymentStatuses.has(activityStatus)) return true
           if (activityStatus === 'sent') return row.status === 'confirmed'

@@ -44,7 +44,7 @@ export { fetchAccountTransactions } from './aggregate.js'
 export { fetchLastOutgoingAt } from './last-outgoing.js'
 export { enrichTransactionsWithAgents } from './enrichment.js'
 export { enrichTransactionsWithAccounting } from './accounting.js'
-export { serveTimeAmount } from './serve-time.js'
+export { serveTimeAmount, serveTimeAmountTriple } from './serve-time.js'
 export {
   ACTIVITY_GROUP_LIMIT,
   ACTIVITY_WINDOW_DAYS,

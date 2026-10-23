@@ -28,7 +28,7 @@ covers:
   - packages/mcp/src/server.ts
   - packages/backend/src/middleware/retired-safe-names.ts
   - packages/core/src/client-compat.ts
-last-verified: "2026-10-15"
+last-verified: "2026-10-23"
 ---
 
 > **Re-verification (#3819, 2026-10-09):** coupled through

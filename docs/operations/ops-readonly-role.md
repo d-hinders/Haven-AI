@@ -38,7 +38,7 @@ no fallback to the main login.
 ## Set it up (once per environment)
 
 Run every SQL step as the database owner, for example the Railway `postgres`
-user in Railway → Postgres → Query.
+user in Railway → Postgres → Console (`psql`, connects as the owner).
 
 1. **Print the role script.** Run it with `-s`, otherwise npm's `> …` banner
    lands in the output and the output is no longer pure SQL:

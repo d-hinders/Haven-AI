@@ -52,11 +52,13 @@ export type AttentionDismissalsResponse = ApiSchema<'AttentionDismissalsResponse
 /** The RecoveryNudge browser-storage key this hook migrates once (#3813). */
 export const LEGACY_DISMISS_KEY = 'haven.recovery-nudge.dismissed'
 
-type DismissalRow = {
-  item_kind: string
-  account_id: string | null
-  agent_id: string | null
-}
+/**
+ * A dismissal row as this build reads it: the spec's row, with `item_kind`
+ * widened to a string so a kind a NEWER backend writes is representable —
+ * and then ignored (S1) instead of being mistyped as a known one.
+ */
+type DismissalRow = Pick<AttentionDismissalsResponse['dismissals'][number], 'account_id' | 'agent_id'> &
+  Record<'item_kind', string>
 
 /**
  * The rule-item id a dismissal row hides (`lib/dashboard-attention.ts` ids),

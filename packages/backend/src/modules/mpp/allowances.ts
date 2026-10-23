@@ -220,7 +220,9 @@ export async function handleGetAllowances(agent: AgentContext): Promise<MppHandl
                 ? currentPeriodBounds(startSec, b.period_seconds, nowSecForRefill).end
                 : null
           const nextRefillAt =
-            refillSec !== null && refillSec < expiresSec ? new Date(refillSec * 1000).toISOString() : null
+            refillSec !== null && Number.isFinite(refillSec) && refillSec < expiresSec && refillSec * 1000 <= 8.64e15
+              ? new Date(refillSec * 1000).toISOString()
+              : null
           return {
             id: b.id,
             // #3319: checksummed at the response boundary like the

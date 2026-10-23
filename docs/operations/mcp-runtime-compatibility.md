@@ -6461,6 +6461,9 @@ to call next in structured fields, and those fields are typed end to end
 > runbook (`haven guide`, the agent-skills step file, `/for-agents.md`), the
 > skill text and the `haven_get_agent` description now give `needs_approval`
 > its two causes. No `haven_*` tool name, input schema, strict-input list,
-> `next_tool` value, expected-context version or signer contract changes.
-> Scope of this note: those fields and that wording. Nothing else in this
+> `next_tool` value, expected-context version or signer contract changes —
+> but the `haven_get_agent` DESCRIPTION does, so `tools-list.snapshot.json`
+> and the hosted contract fingerprint move: an already-connected hosted
+> client gets the stale-list reconnect hint after deploy, as for any
+> description change. Scope of this note: those fields and that wording. Nothing else in this
 > document was re-verified.

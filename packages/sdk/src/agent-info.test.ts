@@ -522,6 +522,11 @@ describe('agent info helpers', () => {
       const older = await new HavenClient({ apiKey: 'sk_agent_test', baseUrl }).getAgentSummary()
       expect(older.allowances[0].nextRefillAt).toBeNull()
       expect(older.budgetRefillsAt).toBeNull()
+      // An unparseable time is passed through on the row but never chosen.
+      vi.restoreAllMocks()
+      stub(() => allowancesResponse({ remaining: '0', nextRefillAt: 'not-a-date' }))
+      const garbled = await new HavenClient({ apiKey: 'sk_agent_test', baseUrl }).getAgentSummary()
+      expect(garbled.budgetRefillsAt).toBeNull()
     })
   })
 

@@ -123,7 +123,9 @@ describeDb('recordFirstPaymentSettled — real Postgres (#4354)', () => {
     const second = await seedIntent(owner, { status: 'confirmed', rail: 'x402', settlementScheme: 'erc7710' })
 
     expect(await recordFirstPaymentSettled(first)).toBe(true)
-    expect(await recordFirstPaymentSettled(second)).toBe(false)
+    // `resolves`, so a unique-violation throw is an assertion failure here,
+    // not an error that ends the test before it asserts anything.
+    await expect(recordFirstPaymentSettled(second)).resolves.toBe(false)
 
     expect(await funnelRows(owner.userId)).toEqual([{ payment_id: first, rail: 'manual' }])
   })

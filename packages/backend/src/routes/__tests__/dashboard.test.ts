@@ -36,6 +36,10 @@ const { mockQuery, portfolioMocks, transactionMocks } = vi.hoisted(() => ({
     // #4099: the route hands the feed an own-account name lookup built from
     // its account list.
     ownAccountNameResolver: vi.fn((_accounts: unknown[]) => (_address: string, _chainId: number): string | null => null),
+    // #4268: the route folds own-account moves before grouping. This suite
+    // feeds the feed builder directly, so the fold passes rows through; the
+    // fold itself is pinned against the real route in dashboard-activity.test.ts.
+    foldOwnAccountTransfers: vi.fn((rows: unknown[]) => rows),
     // #3944: the route reads the feed BUILDER — rows plus the two
     // empty-state facts — not the bare group list any more.
     buildActivityFeed: vi.fn(async () => ({

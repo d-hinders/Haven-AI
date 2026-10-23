@@ -8,18 +8,37 @@
  * `'off'` AND `'loading'` render nothing at all (design review 7 — no
  * title/skeleton flash while the first read is in flight, so a flag-off
  * deployment never shows a title for a section that does not exist);
- * `'error'` a retry state (never a blank crash); `'empty'`/`'ready'` the
- * form, pre-filled from `details` when it is `'ready'`.
+ * `'error'` a retry state (never a blank crash). `'ready'` the form,
+ * pre-filled from `details`. `'empty'` (#4359) the empty state — "No
+ * company details", the purpose line and **Add company details**, which
+ * reveals the form — because a first-time owner no longer meets a wall of
+ * empty inputs; the purpose line stays above it either way
+ * (`owner-company-details.md`: the purpose and retention text is shown
+ * above the form, always).
+ *
+ * The reads come from `BusinessDataProvider` (#4359): the card, the
+ * Connections card and the Business tab's visibility rule share ONE
+ * `useCompanyDetails` — its VIES polling must never run twice.
+ *
+ * ── Country (#4359) ──────────────────────────────────────────────────────
+ * A native `Select` of the assigned ISO 3166-1 alpha-2 codes, labelled in
+ * the user's locale (`lib/countries.ts`) — browser typeahead, no search
+ * (a searchable combobox would be a new pattern). It saves the same
+ * alpha-2 code the text input did, so the wire is unchanged. A saved code
+ * outside the list ("UK", "EL", "XI", "XK") renders as its own option
+ * labelled with the code and round-trips unchanged — the backend accepts
+ * any `^[A-Z]{2}$`, and the buyer country on receipts must never change
+ * silently.
  *
  * ── VIES ─────────────────────────────────────────────────────────────────
- * The status line under the VAT field follows the product doc's naming
- * discipline: "checked against VIES", never "verified" — see
- * `docs/product/owner-company-details.md` § The VIES states. The hook polls
- * while `pending`, bounded; once the bound elapses "Check again" replaces
- * the frozen "Checking…" line (#3332 review M1) rather than leaving the
- * owner with no action. The line — and "Check again" — are about the SAVED
- * VAT number, so both hide while the VAT field has been edited to something
- * else (design review 11/12).
+ * The status renders as a `StatusBadge` plus the checked date and "Check
+ * again" (#4359). The badge follows the product doc's naming discipline:
+ * "checked against VIES", never "verified" — see
+ * `docs/product/owner-company-details.md` § The VIES states. The badge —
+ * and "Check again" — are about the SAVED VAT number, so both hide while
+ * the VAT field has been edited to something else (design review 11/12).
+ * The hook polls while `pending`, bounded; once the bound elapses "Check
+ * again" replaces the frozen "Checking…" badge (#3332 review M1).
  *
  * ── Validation ───────────────────────────────────────────────────────────
  * Client-side checks mirror the backend's own allowed-character rules
@@ -35,8 +54,11 @@
  * danger-button shape `ConnectionsCard`'s Disconnect dialog uses) before
  * calling `DELETE /user/company-details`. A failed delete shows its error
  * INSIDE the dialog (design review 5) and blocks Escape/backdrop-close while
- * the request is in flight; success closes the dialog, resets the form to
- * empty and announces "Company details removed." (design review 6).
+ * the request is in flight; success closes the dialog and announces
+ * "Company details removed." (design review 6) — the card then falls back to
+ * the empty state. The trigger is a `ghost` button in the card's footer row,
+ * left of Save (#4359): not `tertiary`, which a past design review rejected
+ * here because it reads as a secondary call to action.
  */
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { useT } from '@/context/LocaleContext'
@@ -44,8 +66,12 @@ import { Button } from '@/components/ui/Button'
 import { InlineAlert } from '@/components/ui/InlineAlert'
 import { Input } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
+import { Select } from '@/components/ui/Select'
 import { SettingsSection } from '@/components/ui/SettingsSection'
-import { useCompanyDetails, type CompanyDetailsRow, type ViesStatus } from '@/hooks/useCompanyDetails'
+import { StatusBadge, type StatusTone } from '@/components/ui/StatusBadge'
+import { useBusinessData } from '@/components/settings/BusinessDataContext'
+import { countryOptions } from '@/lib/countries'
+import type { CompanyDetailsRow, ViesStatus } from '@/hooks/useCompanyDetails'
 
 const COUNTRY_RE = /^[A-Za-z]{2}$/
 // Mirrors `ORG_NUMBER_RE` in `packages/backend/src/modules/owner-profile/service.ts`.
@@ -90,30 +116,31 @@ function formatCheckedDate(iso: string): string {
 }
 
 /** Exported for the copy-lint "never verified" mutation test to import directly. */
-export function viesStatusLine(
+export interface ViesBadge {
+  label: string
+  tone: StatusTone
+}
+
+export function viesBadge(
   copy: {
     pending: string
     pendingTimedOut: string
-    valid: (date: string) => string
-    validNoDate: string
+    valid: string
     invalid: string
     notVerifiable: string
   },
   status: ViesStatus | null,
-  checkedAt: string | null,
-  // #3332 review round 2, design 4: once the poll's bound elapses, "Checking…"
-  // next to a "Check again" button reads as still in progress — this swaps
-  // in the actual state.
+  // `checkedAt` is rendered beside the badge, not inside it, so it is not
+  // part of this table's answer.
   pollTimedOut = false,
-): string | null {
-  if (status === 'pending') return pollTimedOut ? copy.pendingTimedOut : copy.pending
-  // A `valid` row with no `checkedAt` never renders a dangling "on" with
-  // nothing after it. The backend always writes `checked_at` alongside any
-  // VIES result, so this branch is a defensive fallback, not a path this
-  // screen expects to hit (#3332 review round 2, n1).
-  if (status === 'valid') return checkedAt ? copy.valid(formatCheckedDate(checkedAt)) : copy.validNoDate
-  if (status === 'invalid') return copy.invalid
-  if (status === 'not_verifiable') return copy.notVerifiable
+): ViesBadge | null {
+  if (status === 'pending') return { label: pollTimedOut ? copy.pendingTimedOut : copy.pending, tone: 'neutral' }
+  // `not_verifiable` is NEUTRAL — never `danger`, never `warning`: "VIES
+  // could not check" must not read as "the number is wrong"
+  // (`owner-company-details.md` § The VIES states, the one load-bearing rule).
+  if (status === 'valid') return { label: copy.valid, tone: 'success' }
+  if (status === 'invalid') return { label: copy.invalid, tone: 'warning' }
+  if (status === 'not_verifiable') return { label: copy.notVerifiable, tone: 'neutral' }
   return null
 }
 
@@ -167,6 +194,7 @@ const BACKEND_VALIDATION_FIELD: Record<string, FieldKey> = {
 export function CompanyDetailsCard() {
   const t = useT()
   const copy = t.settings.companyDetails
+  const { company } = useBusinessData()
   const {
     status,
     details,
@@ -181,9 +209,10 @@ export function CompanyDetailsCard() {
     checkingVies,
     viesCheckError,
     pollTimedOut,
-  } = useCompanyDetails()
+  } = company
 
   const [draft, setDraft] = useState<Draft>(() => draftFrom(details))
+  const [adding, setAdding] = useState(false)
   const [touched, setTouched] = useState(false)
   const [saved, setSaved] = useState(false)
   const [justRemoved, setJustRemoved] = useState(false)
@@ -299,20 +328,30 @@ export function CompanyDetailsCard() {
     setFormError(copy.saveError)
   }
 
-  // Design review 11/12: the VIES line (and "Check again") describe the
-  // SAVED VAT number — while the field has been edited away from it, hide
-  // both rather than let the status read as being about the box on screen.
+  // Design review 11/12: the badge (and "Check again") describe the SAVED
+  // VAT number — while the field has been edited away from it, hide both
+  // rather than let the status read as being about the box on screen.
   const savedVatNumber = details?.vat_number ?? ''
   const vatEdited = draft.vatNumber.trim().toUpperCase() !== savedVatNumber
-  const viesLine = vatEdited
+  const vies = vatEdited
     ? null
-    : viesStatusLine(copy.vies, details?.vies_status ?? null, details?.vies_checked_at ?? null, pollTimedOut)
+    : viesBadge(copy.vies, details?.vies_status ?? null, pollTimedOut)
+  // Only `valid` carries the date, and only when there is one to show —
+  // the date sits BESIDE the badge (#4359's spec table).
+  const viesCheckedDate =
+    details?.vies_status === 'valid' && !vatEdited && details?.vies_checked_at
+      ? formatCheckedDate(details.vies_checked_at)
+      : null
   const hasVatNumber = Boolean(details?.vat_number)
   const viesPending = details?.vies_status === 'pending' && !vatEdited
   // #3332 review M1: once the poll's 60s bound elapses a still-pending check
   // gets an action instead of a frozen "Checking…" forever; hidden only
   // while a poll tick is actually in flight.
   const showCheckAgain = !vatEdited && hasVatNumber && (!viesPending || pollTimedOut)
+
+  // 'empty' shows the "No company details" state until Add company details
+  // reveals the form (#4359); 'ready' shows the filled form directly.
+  const showForm = status === 'ready' || (status === 'empty' && adding)
 
   return (
     <SettingsSection title={copy.title} description={copy.description}>
@@ -332,142 +371,172 @@ export function CompanyDetailsCard() {
           </p>
         ) : null}
 
-        <form onSubmit={(event) => void submit(event)} className="space-y-4" data-testid="company-details-form">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div>
-              <label htmlFor={FIELD_ID.legalName} className="block text-sm font-medium text-[var(--v2-ink)]">
-                {copy.fields.legalName}
-              </label>
-              <Input
-                id={FIELD_ID.legalName}
-                value={draft.legalName}
-                onChange={(event) => onFieldChange((d) => ({ ...d, legalName: event.target.value }))}
-                placeholder={copy.fields.legalNamePlaceholder}
-                invalid={Boolean(fieldError('legalName'))}
-                maxLength={200}
-                className="mt-1"
-                aria-describedby={fieldError('legalName') ? `${FIELD_ID.legalName}-error` : undefined}
-              />
-              {fieldError('legalName') ? (
-                <InlineAlert id={`${FIELD_ID.legalName}-error`}>{fieldError('legalName')}</InlineAlert>
-              ) : null}
+        {showForm ? (
+          <form onSubmit={(event) => void submit(event)} className="space-y-4" data-testid="company-details-form">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <label htmlFor={FIELD_ID.legalName} className="block text-sm font-medium text-[var(--v2-ink)]">
+                  {copy.fields.legalName}
+                </label>
+                <Input
+                  id={FIELD_ID.legalName}
+                  value={draft.legalName}
+                  onChange={(event) => onFieldChange((d) => ({ ...d, legalName: event.target.value }))}
+                  placeholder={copy.fields.legalNamePlaceholder}
+                  invalid={Boolean(fieldError('legalName'))}
+                  maxLength={200}
+                  className="mt-1"
+                  aria-describedby={fieldError('legalName') ? `${FIELD_ID.legalName}-error` : undefined}
+                />
+                {fieldError('legalName') ? (
+                  <InlineAlert id={`${FIELD_ID.legalName}-error`}>{fieldError('legalName')}</InlineAlert>
+                ) : null}
+              </div>
+
+              <div>
+                <label htmlFor={FIELD_ID.country} className="block text-sm font-medium text-[var(--v2-ink)]">
+                  {copy.fields.country}
+                </label>
+                {/* Native `<select>` — browser typeahead does the finding; no
+                    search UI (#4359: a combobox would be a new pattern). The
+                    saved value is always among the options, including one
+                    appended for a code outside the assigned list. */}
+                <Select
+                  id={FIELD_ID.country}
+                  value={draft.country}
+                  onChange={(event) => onFieldChange((d) => ({ ...d, country: event.target.value.toUpperCase() }))}
+                  className="mt-1"
+                  aria-invalid={Boolean(fieldError('country')) || undefined}
+                  aria-describedby={fieldError('country') ? `${FIELD_ID.country}-error` : undefined}
+                >
+                  <option value="">{copy.fields.countryPlaceholder}</option>
+                  {countryOptions(draft.country).map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </Select>
+                {fieldError('country') ? (
+                  <InlineAlert id={`${FIELD_ID.country}-error`}>{fieldError('country')}</InlineAlert>
+                ) : null}
+              </div>
+
+              <div>
+                <label htmlFor={FIELD_ID.orgNumber} className="block text-sm font-medium text-[var(--v2-ink)]">
+                  {copy.fields.orgNumber}
+                </label>
+                <Input
+                  id={FIELD_ID.orgNumber}
+                  value={draft.orgNumber}
+                  onChange={(event) => onFieldChange((d) => ({ ...d, orgNumber: event.target.value }))}
+                  placeholder={copy.fields.orgNumberPlaceholder}
+                  invalid={Boolean(fieldError('orgNumber'))}
+                  maxLength={32}
+                  helperText={fieldError('orgNumber') ?? copy.fields.orgNumberHelp}
+                  helperTextId={`${FIELD_ID.orgNumber}-help`}
+                  className="mt-1"
+                  autoComplete="off"
+                  aria-describedby={`${FIELD_ID.orgNumber}-help`}
+                />
+              </div>
+
+              <div>
+                <label htmlFor={FIELD_ID.vatNumber} className="block text-sm font-medium text-[var(--v2-ink)]">
+                  {copy.fields.vatNumber}
+                </label>
+                <Input
+                  id={FIELD_ID.vatNumber}
+                  value={draft.vatNumber}
+                  onChange={(event) => onFieldChange((d) => ({ ...d, vatNumber: event.target.value }))}
+                  placeholder={copy.fields.vatNumberPlaceholder}
+                  invalid={Boolean(fieldError('vatNumber'))}
+                  maxLength={32}
+                  helperText={fieldError('vatNumber') ?? copy.fields.vatNumberHelp}
+                  helperTextId={`${FIELD_ID.vatNumber}-help`}
+                  className="mt-1"
+                  autoComplete="off"
+                  aria-describedby={`${FIELD_ID.vatNumber}-help`}
+                />
+              </div>
             </div>
 
-            <div>
-              <label htmlFor={FIELD_ID.country} className="block text-sm font-medium text-[var(--v2-ink)]">
-                {copy.fields.country}
-              </label>
-              <Input
-                id={FIELD_ID.country}
-                value={draft.country}
-                onChange={(event) => onFieldChange((d) => ({ ...d, country: event.target.value.toUpperCase() }))}
-                placeholder={copy.fields.countryPlaceholder}
-                invalid={Boolean(fieldError('country'))}
-                maxLength={2}
-                helperText={fieldError('country') ?? copy.fields.countryHelp}
-                helperTextId={`${FIELD_ID.country}-help`}
-                className="mt-1"
-                aria-describedby={`${FIELD_ID.country}-help`}
-              />
-            </div>
+            {vies ? (
+              <div className="flex flex-wrap items-center gap-3" data-testid="vies-status-line">
+                <StatusBadge tone={vies.tone}>{vies.label}</StatusBadge>
+                {viesCheckedDate ? <span className="text-sm text-[var(--v2-ink-2)]">{viesCheckedDate}</span> : null}
+                {showCheckAgain ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    disabled={checkingVies}
+                    aria-busy={checkingVies}
+                    onClick={() => void recheckVies()}
+                  >
+                    {checkingVies ? copy.vies.checking : copy.vies.checkAgain}
+                  </Button>
+                ) : null}
+              </div>
+            ) : null}
+            {viesCheckError ? (
+              <InlineAlert>
+                {viesCheckError.code === 'rate_limited'
+                  ? copy.vies.rateLimited
+                  : viesCheckError.code === 'feature_off'
+                    ? copy.vies.featureOff
+                    : viesCheckError.code === 'no_vat_number'
+                      ? copy.vies.noVatNumber
+                      : copy.vies.checkError}
+              </InlineAlert>
+            ) : null}
 
-            <div>
-              <label htmlFor={FIELD_ID.orgNumber} className="block text-sm font-medium text-[var(--v2-ink)]">
-                {copy.fields.orgNumber}
-              </label>
-              <Input
-                id={FIELD_ID.orgNumber}
-                value={draft.orgNumber}
-                onChange={(event) => onFieldChange((d) => ({ ...d, orgNumber: event.target.value }))}
-                placeholder={copy.fields.orgNumberPlaceholder}
-                invalid={Boolean(fieldError('orgNumber'))}
-                maxLength={32}
-                helperText={fieldError('orgNumber') ?? copy.fields.orgNumberHelp}
-                helperTextId={`${FIELD_ID.orgNumber}-help`}
-                className="mt-1"
-                autoComplete="off"
-                aria-describedby={`${FIELD_ID.orgNumber}-help`}
-              />
-            </div>
-
-            <div>
-              <label htmlFor={FIELD_ID.vatNumber} className="block text-sm font-medium text-[var(--v2-ink)]">
-                {copy.fields.vatNumber}
-              </label>
-              <Input
-                id={FIELD_ID.vatNumber}
-                value={draft.vatNumber}
-                onChange={(event) => onFieldChange((d) => ({ ...d, vatNumber: event.target.value }))}
-                placeholder={copy.fields.vatNumberPlaceholder}
-                invalid={Boolean(fieldError('vatNumber'))}
-                maxLength={32}
-                helperText={fieldError('vatNumber') ?? copy.fields.vatNumberHelp}
-                helperTextId={`${FIELD_ID.vatNumber}-help`}
-                className="mt-1"
-                autoComplete="off"
-                aria-describedby={`${FIELD_ID.vatNumber}-help`}
-              />
-            </div>
-          </div>
-
-          {viesLine ? (
-            <div className="flex flex-wrap items-center gap-3" data-testid="vies-status-line">
-              <p role="status" className="text-sm text-[var(--v2-ink-2)]">
-                {viesLine}
-              </p>
-              {showCheckAgain ? (
+            {/* The footer row: the destructive trigger on the LEFT, Save on
+                the RIGHT (#4359). The trigger keeps its name — "Remove
+                company details", no ellipsis — so tests and muscle memory
+                keep selecting on it, and stays `ghost`: `tertiary` reads as
+                a secondary CTA (past design review on #3332). The confirm
+                modal below is unchanged. */}
+            <div className="flex flex-wrap items-center justify-between gap-3" data-testid="company-details-footer">
+              {status === 'ready' ? (
                 <Button
                   type="button"
                   variant="ghost"
                   size="sm"
-                  disabled={checkingVies}
-                  aria-busy={checkingVies}
-                  onClick={() => void recheckVies()}
+                  data-testid="company-details-remove"
+                  onClick={() => {
+                    resetDeleteError()
+                    setConfirmingDelete(true)
+                  }}
                 >
-                  {checkingVies ? copy.vies.checking : copy.vies.checkAgain}
+                  {copy.remove.action}
                 </Button>
-              ) : null}
+              ) : (
+                <span />
+              )}
+              <div className="flex flex-wrap items-center gap-3">
+                {formError ? <InlineAlert>{formError}</InlineAlert> : null}
+                {saved && !formError ? (
+                  <p role="status" className="text-xs text-[var(--v2-success)]">
+                    {copy.saved}
+                  </p>
+                ) : null}
+                <Button type="submit" size="sm" disabled={saving} aria-busy={saving}>
+                  {saving ? copy.saving : copy.save}
+                </Button>
+              </div>
             </div>
-          ) : null}
-          {viesCheckError ? (
-            <InlineAlert>
-              {viesCheckError.code === 'rate_limited'
-                ? copy.vies.rateLimited
-                : viesCheckError.code === 'feature_off'
-                  ? copy.vies.featureOff
-                  : viesCheckError.code === 'no_vat_number'
-                    ? copy.vies.noVatNumber
-                    : copy.vies.checkError}
-            </InlineAlert>
-          ) : null}
-
-          <div className="flex items-center gap-3">
-            <Button type="submit" size="sm" disabled={saving} aria-busy={saving}>
-              {saving ? copy.saving : copy.save}
-            </Button>
-            {formError ? <InlineAlert>{formError}</InlineAlert> : null}
-            {saved && !formError ? (
-              <p role="status" className="text-xs text-[var(--v2-success)]">
-                {copy.saved}
-              </p>
-            ) : null}
-          </div>
-        </form>
-
-        {status === 'ready' ? (
-          <div className="border-t border-[var(--v2-border)] pt-4">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                resetDeleteError()
-                setConfirmingDelete(true)
-              }}
-            >
-              {copy.remove.action}
+          </form>
+        ) : (
+          // 'empty' and not yet adding: one line plus the reveal (#4359).
+          // The purpose line above is always visible — it is what the owner
+          // is agreeing to by filling the form in (owner-company-details.md).
+          <div className="space-y-3" data-testid="company-details-empty">
+            <p className="text-sm text-[var(--v2-ink-2)]">{copy.empty.line}</p>
+            <Button variant="ghost" size="sm" onClick={() => setAdding(true)}>
+              {copy.empty.add}
             </Button>
           </div>
-        ) : null}
+        )}
       </div>
 
       {confirmingDelete ? (
@@ -501,6 +570,7 @@ export function CompanyDetailsCard() {
                     if (result.ok) {
                       setConfirmingDelete(false)
                       setSaved(false)
+                      setAdding(false)
                       setJustRemoved(true)
                     }
                   })

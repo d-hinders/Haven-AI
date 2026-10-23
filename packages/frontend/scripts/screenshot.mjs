@@ -3501,15 +3501,14 @@ const SETTINGS_ACCOUNTING_STAGES = {
   // #3017: the Accounted row — not connected, waiting for a pasted key. The
   // paste modal opens from THIS row's Connect.
   'api-key-modal': null,
-  // The card's two OFF states (#2869): no connection row at all, and the
-  // FEED STATUS answer is what makes the state — `hosted && !enabled` lists
-  // every provider as Coming soon with no action; `!hosted` lists none.
-  'coming-soon': null,
+  // The card's OFF state (#2869 → #4359): no connection row at all, and the
+  // FEED STATUS answer is what makes the state — `!hosted` lists none. The
+  // hosted flag-off "coming-soon" stage is GONE with #4359: the card renders
+  // nothing there, so there is nothing left to photograph.
   'self-hosted': null,
 }
 /** The feed-status answer per OFF stage; every other stage falls through to the ON fixture. */
 const SETTINGS_ACCOUNTING_FEED_STAGES = {
-  'coming-soon': FIXTURE_ACCOUNTING_FEED_COMING_SOON,
   'self-hosted': FIXTURE_ACCOUNTING_FEED_SELF_HOSTED,
 }
 let settingsAccountingStage = 'connected'
@@ -3874,7 +3873,7 @@ export const SCENARIOS = {
 
   'settings-accounting': {
     description:
-      'Settings → Accounting card in each of the five connection states, plus the inline feed settings and the backfill choice on a first connect (#2868), the Accounted paste modal (#3017), and the two feed OFF states — Coming soon and self-hosted (#2869)',
+      'Settings → Accounting card in each of the five connection states, plus the inline feed settings and the backfill choice on a first connect (#2868), the Accounted paste modal (#3017), and the self-hosted OFF state (#2869) — the hosted flag-off capture is retired with #4359, where the card renders nothing',
     stages: SETTINGS_ACCOUNTING_STAGES,
     /** Exposed so the fixture-contract test can pin each stage. */
     stage: setSettingsAccountingStage,
@@ -3884,6 +3883,12 @@ export const SCENARIOS = {
         return { connections: row ? [row] : [] }
       }
       if (apiPath === '/accounting/feed/status') return SETTINGS_ACCOUNTING_FEED_STAGES[settingsAccountingStage]
+      // #4359: the Business tab is visible only when a card has content — in
+      // every stage here the ACCOUNTING card is the content, but the
+      // company-details read must still settle: 200 `null` (flag on, nothing
+      // saved) keeps the tab visible without adding a second card's pixels
+      // (the sections clip independently).
+      if (apiPath === '/user/company-details') return null
       return undefined
     },
     async run({ page, vp, shoot }) {
@@ -3931,8 +3936,8 @@ export const SCENARIOS = {
         for (const name of refused) {
           await refuseIfPresent(fortnoxActions.getByRole('button', { name, exact: true }), `settings-accounting · ${stage} · ${name}`)
         }
-        // The coming-soon rows are part of every state.
-        await card.getByTestId('connection-row-igdrasil').getByText('Coming soon').waitFor({ timeout: 15_000 })
+        // The coming-soon rows are HIDDEN (#4359) — the igdrasil wait that
+        // used to pin them here is gone with them.
         await card.scrollIntoViewIfNeeded()
         await shoot(card, stage)
       }
@@ -4001,9 +4006,11 @@ export const SCENARIOS = {
       await dialog.getByRole('button', { name: 'Not now', exact: true }).waitFor({ timeout: 15_000 })
       await shoot(dialog, 'backfill-dialog')
 
-      // ── the two OFF states (#2869) ────────────────────────────────────────
+      // ── the self-hosted OFF state (#2869 → #4359) ─────────────────────────
       // No `fortnoxActions` to wait on here — the whole point is that no
-      // action renders — so these settle on the state's own test id.
+      // action renders — so this settles on the state's own test id. (The
+      // hosted flag-off "coming-soon" capture is retired with #4359: the card
+      // renders nothing there.)
       const settleOff = async (stage, testId) => {
         setSettingsAccountingStage(stage)
         await page.goto(`${BASE_URL}/settings?tab=business`, { waitUntil: 'domcontentloaded', timeout: 30_000 })
@@ -4015,15 +4022,9 @@ export const SCENARIOS = {
         for (const name of ['Connect', 'Reconnect', 'Disconnect', 'Settings']) {
           await refuseIfPresent(card.getByRole('button', { name, exact: true }), `settings-accounting · ${stage} · ${name}`)
         }
-        // The neutral description, never the product sentence above "Nothing can be connected yet."
-        await card.getByText("Your company's accounting tool.", { exact: true }).waitFor({ timeout: 15_000 })
-        await refuseIfPresent(card.getByText(/Connect the accounting tool your company uses/), `settings-accounting · ${stage} · product description`)
         await card.scrollIntoViewIfNeeded()
         await shoot(card, stage)
       }
-      await settleOff('coming-soon', 'accounting-coming-soon')
-      await card.getByText('Nothing can be connected yet.', { exact: true }).waitFor({ timeout: 15_000 })
-      await card.getByTestId('connection-row-fortnox').getByText('Coming soon').waitFor({ timeout: 15_000 })
       await settleOff('self-hosted', 'accounting-self-hosted')
       await card.getByText('Not available on self-hosted', { exact: true }).waitFor({ timeout: 15_000 })
       await refuseIfPresent(card.getByTestId('connection-row-fortnox'), 'settings-accounting · self-hosted · provider row')

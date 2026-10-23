@@ -22,9 +22,9 @@
  *   approved account links to its `/accounts/<id>?tab=security` — plus
  *   "If something goes wrong": the exit path and what Haven cannot
  *   recover.
- * - **Business.** Company details and the accounting connections, moved
- *   here unchanged; #4359 reshapes them. Its visibility rule is #4359's;
- *   until that lands the tab always shows.
+ * - **Business.** Company details and the accounting connections
+ *   (#4359), visible only when at least one of them has something to
+ *   show — see "The Business tab's visibility" below.
  *
  * The placeholder rows the old single-page layout carried (agent spend
  * alerts, password, active sessions, privacy controls) are removed with
@@ -34,6 +34,29 @@
  *
  * The `#signers` anchor (`AccountSignersCard` links here with
  * `?tab=security#signers`) scrolls once the Security tab has mounted.
+ *
+ * ## The Business tab's visibility (#4359)
+ *
+ * Company details and the accounting connections both load asynchronously,
+ * so whether the Business tab belongs on the page is a TRI-STATE:
+ *
+ * - **Unknown** (either read still pending): the tab is absent — it must
+ *   never flash in and then out. But an explicit `?tab=business` (or an
+ *   OAuth return) is honoured through the pending phase: the Business
+ *   body renders its skeleton, so the "Open Settings" link from the
+ *   feed page and the OAuth callback NEVER land on General.
+ * - **Shown**: company details renders something (`empty`/`ready`/`error` —
+ *   an error is something to show), or the accounting card does (a live,
+ *   configured connector; a failed listing; an OAuth outcome). The
+ *   self-hosted explanation is information, NOT content — on its own it
+ *   does not make the tab visible.
+ * - **Hidden** (both reads settled with nothing to show): the tab is
+ *   absent. A deep link `?tab=business` falls back to the General BODY but
+ *   the URL is never rewritten — `tab=business` stays, so the same link
+ *   works once the data arrives.
+ *
+ * The three reads themselves are called ONCE, in `BusinessDataProvider`
+ * (see it for why), and shared with both cards through context.
  */
 
 import { ArrowRight } from 'lucide-react'
@@ -47,10 +70,13 @@ import { useAuth } from '@/context/AuthContext'
 import { formatLongDate } from '@/lib/format'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
+import { Skeleton } from '@/components/ui/Skeleton'
 import { Tabs } from '@/components/ui/Tabs'
 import { SettingsSection as Section, SettingsRow as SettingRow } from '@/components/ui/SettingsSection'
+import { accountingFeedOffState } from '@/hooks/useAccountingFeed'
 import { ConnectionsCard, CONNECT_OUTCOME_PARAMS } from '@/components/accounting/ConnectionsCard'
 import { CompanyDetailsCard } from '@/components/settings/CompanyDetailsCard'
+import { BusinessDataProvider, useBusinessData } from '@/components/settings/BusinessDataContext'
 import { SignersSection } from '@/components/settings/SignersSection'
 import { ProfileNameEditor } from '@/components/settings/ProfileNameEditor'
 
@@ -65,23 +91,68 @@ function settingsTabFromUrl(raw: string | null): SettingsTab | null {
 /**
  * True when the URL carries an OAuth outcome the Business tab's card has
  * not consumed yet — an old bookmarked `/settings?provider=…&connect=…`
- * callback selects Business even without an explicit `tab`.
+ * callback selects Business even without an explicit `tab`. The outcome
+ * sentence is content too (#4359), so it also counts toward the tab's
+ * visibility.
  */
 function hasConnectOutcome(searchParams: URLSearchParams): boolean {
   return CONNECT_OUTCOME_PARAMS.some((key) => searchParams.get(key) !== null)
 }
 
 export default function SettingsClient() {
+  // The three Business reads are called here — the ONE place — and shared
+  // with both cards (#4359). The wrapper is the provider so the reads run
+  // regardless of which tab is active: the visibility RULE needs them even
+  // while General or Security is showing.
+  return (
+    <BusinessDataProvider>
+      <SettingsTabs />
+    </BusinessDataProvider>
+  )
+}
+
+function SettingsTabs() {
   const { currency, setCurrency, saving } = usePreferences()
   const { preference, setPreference } = useTheme()
   const { user } = useAuth()
   const t = useT()
   const router = useRouter()
   const searchParams = useSearchParams()
+  const { company, providers, feed } = useBusinessData()
+
+  // ── The tri-state ──────────────────────────────────────────────────────
+  const companyPending = company.status === 'loading'
+  const companyHasContent = company.status === 'empty' || company.status === 'ready' || company.status === 'error'
+  const feedOff = accountingFeedOffState(feed.status) // null = the flag is on
+  // Fail closed (the card's own convention): a failed feed-status read
+  // renders the card's load error — which is content.
+  const feedUnknown = !feed.loading && !feed.status
+  const providersFailed = !providers.loading && providers.error != null
+  const accountingHasContent =
+    // A live, configured connector is a row; the flag-off and self-hosted
+    // states and a not-configured provider contribute nothing (#4359).
+    (feedOff == null && providers.providers.some((p) => p.availability === 'live' && p.configured)) ||
+    providersFailed ||
+    feedUnknown ||
+    hasConnectOutcome(searchParams)
+  const businessKnown = !companyPending && !providers.loading && !feed.loading
+  const businessVisible = companyHasContent || accountingHasContent
 
   // The URL owns the tab; an unknown value falls back to General.
   const urlTab = settingsTabFromUrl(searchParams.get('tab'))
-  const activeTab: SettingsTab = urlTab ?? (hasConnectOutcome(searchParams) ? 'business' : 'general')
+  const outcomeSelected = !urlTab && hasConnectOutcome(searchParams)
+  const requestedTab: SettingsTab = urlTab ?? (outcomeSelected ? 'business' : 'general')
+  // While the reads are pending, an explicitly requested Business tab
+  // KEEPS the selection (skeleton, never General); once known-empty it
+  // falls back — but the URL is never rewritten, so the deep link still
+  // works when the data arrives later.
+  const fallbackToGeneral = requestedTab === 'business' && businessKnown && !businessVisible
+  const activeTab: SettingsTab = fallbackToGeneral ? 'general' : requestedTab
+  // The tab itself is listed while unknown only when something selected it
+  // explicitly (so `?tab=business` has a selected tab to point at); once
+  // settled it follows the verdict.
+  const showBusinessTab =
+    requestedTab === 'business' ? !businessKnown || businessVisible : businessKnown && businessVisible
 
   // `general` is the default and carries no parameter (the canonical
   // address); every other tab is written alongside — never replacing — the
@@ -111,7 +182,7 @@ export default function SettingsClient() {
   const tabItems = [
     { value: 'general' as const, label: t.settings.tab.general },
     { value: 'security' as const, label: t.settings.tab.security },
-    { value: 'business' as const, label: t.settings.tab.business },
+    ...(showBusinessTab ? [{ value: 'business' as const, label: t.settings.tab.business }] : []),
   ]
 
   return (
@@ -128,6 +199,17 @@ export default function SettingsClient() {
       />
 
       <div className="space-y-6 pt-6">
+        {activeTab === 'business' && !businessKnown ? (
+          // An explicit `?tab=business` (or OAuth return) during the pending
+          // phase: a skeleton, NOT General — the "Open Settings" link and the
+          // callback must never land on the wrong tab (#4359).
+          <div className="space-y-4 px-6 py-4" role="status" aria-busy="true" aria-label={t.settings.tab.business}>
+            <Skeleton variant="text" className="h-5 w-48" />
+            <Skeleton variant="text" className="h-4 w-full max-w-md" />
+            <Skeleton variant="text" className="h-4 w-full max-w-sm" />
+          </div>
+        ) : null}
+
         {activeTab === 'general' && (
           <>
             <Section title={t.settings.profile.title} description={t.settings.profile.description}>
@@ -250,24 +332,23 @@ export default function SettingsClient() {
           </>
         )}
 
-        {activeTab === 'business' && (
+        {activeTab === 'business' && businessKnown && (
           <>
+            {/*
+              Owner company details + VIES (#3332, reshaped by #4359): the
+              country picker, the VIES badge, remove-via-confirm in the
+              footer row, and the "No company details" empty state.
+            */}
+            <CompanyDetailsCard />
+
             {/*
               Accounting connections live HERE (owner decision 2026-09-11,
               #2868): the feed page keeps the sync rows, Settings owns
               Connect / Reconnect / Disconnect, the feed settings and the
-              backfill choice. Moved onto the Business tab unchanged
-              (#4358); #4359 reshapes it.
+              backfill choice. #4359 hides coming-soon providers and
+              renders nothing when no connector qualifies.
             */}
             <ConnectionsCard />
-
-            {/*
-              Owner company details + VIES (#3332): renders only when
-              `GET /user/company-details` does not answer the feature-off 404 —
-              `CompanyDetailsCard` itself returns null in that case, so there is
-              no flag to check here.
-            */}
-            <CompanyDetailsCard />
           </>
         )}
       </div>

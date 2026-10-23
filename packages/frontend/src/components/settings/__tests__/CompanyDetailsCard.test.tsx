@@ -23,6 +23,7 @@ vi.mock('@/lib/api', async () => {
 
 import { ApiRequestError } from '@/lib/api'
 import { CompanyDetailsCard } from '@/components/settings/CompanyDetailsCard'
+import { BusinessDataProvider } from '@/components/settings/BusinessDataContext'
 import { VIES_POLL_INTERVAL_MS, VIES_POLL_MAX_MS } from '@/hooks/useCompanyDetails'
 
 type CompanyDetails = NonNullable<ApiOperations['getCompanyDetails']['responses']['200']['content']['application/json']>
@@ -58,9 +59,25 @@ function details(overrides: Partial<CompanyDetails> = {}): CompanyDetails {
 function renderCard() {
   return render(
     <LocaleProvider>
-      <CompanyDetailsCard />
+      {/* #4359: the cards read their shared data through the provider — the
+          ONE `useCompanyDetails` (with its VIES polling) that Settings
+          mounts. The card renders standalone under it, exactly as it sits
+          inside `SettingsClient`. */}
+      <BusinessDataProvider>
+        <CompanyDetailsCard />
+      </BusinessDataProvider>
     </LocaleProvider>,
   )
+}
+
+/**
+ * #4359: with nothing saved the card shows the "No company details" state;
+ * the form sits behind **Add company details**. Every test that works on
+ * the empty form reveals it first.
+ */
+async function revealEmptyForm() {
+  fireEvent.click(await screen.findByRole('button', { name: 'Add company details' }))
+  await screen.findByTestId('company-details-form')
 }
 
 function featureOff404() {
@@ -90,13 +107,27 @@ describe('CompanyDetailsCard — gating', () => {
     expect(container).toBeEmptyDOMElement()
   })
 
-  it('renders an empty form when the flag is on but nothing is saved (200 null)', async () => {
+  it('shows the "No company details" state when the flag is on but nothing is saved (200 null)', async () => {
     mockApi.get.mockImplementation(() => noRow())
     renderCard()
+    // #4359: one line + the reveal — the purpose line stays ABOVE the Add
+    // button (owner-company-details.md: shown above the form, always).
+    expect(await screen.findByText('No company details')).toBeInTheDocument()
+    expect(screen.getByTestId('company-details-purpose')).toHaveTextContent(/personal identity number/)
+    expect(screen.getByRole('button', { name: 'Add company details' })).toBeInTheDocument()
+    // The form is NOT rendered until it is asked for.
+    expect(screen.queryByTestId('company-details-form')).not.toBeInTheDocument()
+  })
+
+  it('Add company details reveals the form, blank (#4359)', async () => {
+    mockApi.get.mockImplementation(() => noRow())
+    renderCard()
+    fireEvent.click(await screen.findByRole('button', { name: 'Add company details' }))
     await waitFor(() => expect(screen.getByTestId('company-details-form')).toBeInTheDocument())
     expect(screen.getByLabelText('Legal name')).toHaveValue('')
-    // The purpose text is shown before any submission (acceptance point 2).
-    expect(screen.getByTestId('company-details-purpose')).toHaveTextContent(/personal identity number/)
+    // The picker starts on its placeholder.
+    expect(screen.getByLabelText('Country')).toHaveValue('')
+    expect(screen.getByRole('option', { name: 'Choose a country', selected: true })).toBeInTheDocument()
   })
 
   it('renders the saved details when present', async () => {
@@ -120,7 +151,7 @@ describe('CompanyDetailsCard — validation and save', () => {
   it('blocks submit on an empty legal name, without calling PUT', async () => {
     mockApi.get.mockImplementation(() => noRow())
     renderCard()
-    await waitFor(() => screen.getByTestId('company-details-form'))
+    await revealEmptyForm()
     fireEvent.change(screen.getByLabelText('Country'), { target: { value: 'SE' } })
     fireEvent.change(screen.getByLabelText('Organisation number'), { target: { value: '556677-8899' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
@@ -128,16 +159,58 @@ describe('CompanyDetailsCard — validation and save', () => {
     expect(mockApi.put).not.toHaveBeenCalled()
   })
 
-  it('rejects a malformed country before the request leaves the browser', async () => {
+  it('saves a code OUTSIDE the assigned list exactly as stored, and displays it as its own option (#4359)', async () => {
+    // "UK" is exceptionally reserved, not officially assigned — the backend
+    // accepts any `^[A-Z]{2}$`, and the buyer country on receipts must never
+    // change silently. Saving WITHOUT touching Country round-trips it.
+    mockApi.get.mockImplementation(() => Promise.resolve(details({ country: 'UK' })))
+    mockApi.put.mockImplementation((_path: string, body: unknown) => Promise.resolve({ ...details(), ...(body as PutBody) }))
+    renderCard()
+    await waitFor(() => expect(screen.getByLabelText('Legal name')).toHaveValue('Ada Lovelace AB'))
+    // Displayed: an option labelled with the raw code, and it is the selected one.
+    const picker = screen.getByLabelText('Country') as HTMLSelectElement
+    expect(picker).toHaveValue('UK')
+    expect(screen.getByRole('option', { name: 'UK', selected: true })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(mockApi.put).toHaveBeenCalledTimes(1))
+    const [, body] = mockApi.put.mock.calls[0] as [string, PutBody]
+    expect(body.country).toBe('UK')
+  })
+
+  it('labels the picker options with country names and saves the alpha-2 code (#4359)', async () => {
+    mockApi.get.mockImplementation(() => noRow())
+    mockApi.put.mockImplementation((_path: string, body: unknown) =>
+      Promise.resolve(details({ ...(body as PutBody), vies_status: 'pending', vies_checked_at: null })),
+    )
+    renderCard()
+    await revealEmptyForm()
+    // Country NAMES, not codes — via `Intl.DisplayNames` in the user's locale.
+    expect(screen.getByRole('option', { name: 'Sweden' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'Germany' })).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Legal name'), { target: { value: 'Ada Lovelace AB' } })
+    fireEvent.change(screen.getByLabelText('Country'), { target: { value: 'SE' } })
+    fireEvent.change(screen.getByLabelText('Organisation number'), { target: { value: '556677-8899' } })
+    expect(screen.getByLabelText('Country')).toHaveValue('SE')
+    // The wire is unchanged: the same ISO 3166-1 alpha-2 code the text input saved.
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(mockApi.put).toHaveBeenCalledTimes(1))
+    const [, body] = mockApi.put.mock.calls[0] as [string, PutBody]
+    expect(body.country).toBe('SE')
+  })
+
+  it('blocks submit while no country is chosen, with one description under the picker (#4359)', async () => {
     mockApi.get.mockImplementation(() => noRow())
     renderCard()
-    await waitFor(() => screen.getByTestId('company-details-form'))
+    await revealEmptyForm()
     fireEvent.change(screen.getByLabelText('Legal name'), { target: { value: 'Ada Lovelace AB' } })
-    fireEvent.change(screen.getByLabelText('Country'), { target: { value: 'SWE' } })
     fireEvent.change(screen.getByLabelText('Organisation number'), { target: { value: '556677-8899' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     expect(await screen.findByText('Country must be a two-letter code, e.g. "SE".')).toBeInTheDocument()
     expect(mockApi.put).not.toHaveBeenCalled()
+    // Exactly ONE description under the select — the error paragraph, no
+    // helper text (the picker carries none anymore).
+    const describedBy = screen.getByLabelText('Country').getAttribute('aria-describedby')
+    expect(describedBy?.trim().split(/\s+/)).toHaveLength(1)
   })
 
   it('PUTs the full-replacement body, normalised, on a valid submit', async () => {
@@ -146,9 +219,9 @@ describe('CompanyDetailsCard — validation and save', () => {
       Promise.resolve(details({ ...(body as PutBody), vies_status: 'pending', vies_checked_at: null })),
     )
     renderCard()
-    await waitFor(() => screen.getByTestId('company-details-form'))
+    await revealEmptyForm()
     fireEvent.change(screen.getByLabelText('Legal name'), { target: { value: '  Ada Lovelace AB  ' } })
-    fireEvent.change(screen.getByLabelText('Country'), { target: { value: 'se' } })
+    fireEvent.change(screen.getByLabelText('Country'), { target: { value: 'SE' } })
     fireEvent.change(screen.getByLabelText('Organisation number'), { target: { value: '556677-8899' } })
     fireEvent.change(screen.getByLabelText('VAT number (optional)'), { target: { value: 'se556677889901' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
@@ -183,7 +256,7 @@ describe('CompanyDetailsCard — validation and save', () => {
       })),
     )
     renderCard()
-    await waitFor(() => screen.getByTestId('company-details-form'))
+    await revealEmptyForm()
     fireEvent.change(screen.getByLabelText('Legal name'), { target: { value: 'Ada Lovelace AB' } })
     fireEvent.change(screen.getByLabelText('Country'), { target: { value: 'SE' } })
     fireEvent.change(screen.getByLabelText('Organisation number'), { target: { value: '1'.repeat(32) } })
@@ -195,7 +268,7 @@ describe('CompanyDetailsCard — validation and save', () => {
     mockApi.get.mockImplementation(() => noRow())
     mockApi.put.mockImplementation(() => Promise.reject(new ApiRequestError('Too many requests', 429, { error: 'Too many requests' })))
     renderCard()
-    await waitFor(() => screen.getByTestId('company-details-form'))
+    await revealEmptyForm()
     fireEvent.change(screen.getByLabelText('Legal name'), { target: { value: 'Ada Lovelace AB' } })
     fireEvent.change(screen.getByLabelText('Country'), { target: { value: 'SE' } })
     fireEvent.change(screen.getByLabelText('Organisation number'), { target: { value: '556677-8899' } })
@@ -211,7 +284,7 @@ describe('CompanyDetailsCard — validation and save', () => {
     mockApi.get.mockImplementation(() => noRow())
     mockApi.put.mockImplementation(() => Promise.reject(new ApiRequestError('Not found', 404, { error: 'Not found' })))
     renderCard()
-    await waitFor(() => screen.getByTestId('company-details-form'))
+    await revealEmptyForm()
     fireEvent.change(screen.getByLabelText('Legal name'), { target: { value: 'Ada Lovelace AB' } })
     fireEvent.change(screen.getByLabelText('Country'), { target: { value: 'SE' } })
     fireEvent.change(screen.getByLabelText('Organisation number'), { target: { value: '556677-8899' } })
@@ -224,7 +297,7 @@ describe('CompanyDetailsCard — validation and save', () => {
     mockApi.get.mockImplementation(() => noRow())
     mockApi.put.mockImplementation(() => Promise.reject(new ApiRequestError('boom', 500)))
     renderCard()
-    await waitFor(() => screen.getByTestId('company-details-form'))
+    await revealEmptyForm()
     fireEvent.change(screen.getByLabelText('Legal name'), { target: { value: 'Ada Lovelace AB' } })
     fireEvent.change(screen.getByLabelText('Country'), { target: { value: 'SE' } })
     fireEvent.change(screen.getByLabelText('Organisation number'), { target: { value: '556677-8899' } })
@@ -235,7 +308,7 @@ describe('CompanyDetailsCard — validation and save', () => {
   it('rejects an organisation number with a disallowed character, matching the backend shape, without calling PUT (m2)', async () => {
     mockApi.get.mockImplementation(() => noRow())
     renderCard()
-    await waitFor(() => screen.getByTestId('company-details-form'))
+    await revealEmptyForm()
     fireEvent.change(screen.getByLabelText('Legal name'), { target: { value: 'Ada Lovelace AB' } })
     fireEvent.change(screen.getByLabelText('Country'), { target: { value: 'SE' } })
     fireEvent.change(screen.getByLabelText('Organisation number'), { target: { value: '556677_8899' } })
@@ -249,7 +322,7 @@ describe('CompanyDetailsCard — validation and save', () => {
   it('rejects a legal name with a control character, without calling PUT (m2)', async () => {
     mockApi.get.mockImplementation(() => noRow())
     renderCard()
-    await waitFor(() => screen.getByTestId('company-details-form'))
+    await revealEmptyForm()
     fireEvent.change(screen.getByLabelText('Legal name'), { target: { value: 'Ada\u0000 Lovelace AB' } })
     fireEvent.change(screen.getByLabelText('Country'), { target: { value: 'SE' } })
     fireEvent.change(screen.getByLabelText('Organisation number'), { target: { value: '556677-8899' } })
@@ -268,7 +341,7 @@ describe('CompanyDetailsCard — validation and save', () => {
       ),
     )
     renderCard()
-    await waitFor(() => screen.getByTestId('company-details-form'))
+    await revealEmptyForm()
     fireEvent.change(screen.getByLabelText('Legal name'), { target: { value: 'Ada Lovelace AB' } })
     fireEvent.change(screen.getByLabelText('Country'), { target: { value: 'SE' } })
     fireEvent.change(screen.getByLabelText('Organisation number'), { target: { value: '556677-8899' } })
@@ -294,7 +367,7 @@ describe('CompanyDetailsCard — validation and save', () => {
   it('focuses the first invalid field on a client-validation failure (design review 3)', async () => {
     mockApi.get.mockImplementation(() => noRow())
     renderCard()
-    await waitFor(() => screen.getByTestId('company-details-form'))
+    await revealEmptyForm()
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     expect(await screen.findByText('Enter a legal name.')).toBeInTheDocument()
     await waitFor(() => expect(screen.getByLabelText('Legal name')).toHaveFocus())
@@ -303,44 +376,71 @@ describe('CompanyDetailsCard — validation and save', () => {
   it('has autoComplete off on the organisation and VAT number fields (nit)', async () => {
     mockApi.get.mockImplementation(() => noRow())
     renderCard()
-    await waitFor(() => screen.getByTestId('company-details-form'))
+    await revealEmptyForm()
     expect(screen.getByLabelText('Organisation number')).toHaveAttribute('autoComplete', 'off')
     expect(screen.getByLabelText('VAT number (optional)')).toHaveAttribute('autoComplete', 'off')
   })
 
-  it('an invalid country shows the error in place of the helper text, not both (design review 2)', async () => {
-    mockApi.get.mockImplementation(() => noRow())
+  it('the country error replaces — never joins — any other description under the picker (#4359)', async () => {
+    // The picker carries NO helper text (the old "Two-letter country code…"
+    // line is gone with the text input): the error paragraph is the only
+    // thing that can sit under it.
+    mockApi.get.mockImplementation(() => Promise.resolve(details({ country: 'SE' })))
     renderCard()
-    await waitFor(() => screen.getByTestId('company-details-form'))
-    expect(screen.getByText('Two-letter country code (ISO 3166-1), e.g. "SE" for Sweden.')).toBeInTheDocument()
-    fireEvent.change(screen.getByLabelText('Legal name'), { target: { value: 'Ada Lovelace AB' } })
-    fireEvent.change(screen.getByLabelText('Country'), { target: { value: 'SWE' } })
-    fireEvent.change(screen.getByLabelText('Organisation number'), { target: { value: '556677-8899' } })
+    await waitFor(() => expect(screen.getByLabelText('Legal name')).toHaveValue('Ada Lovelace AB'))
+    expect(screen.getByLabelText('Country', { selector: 'select' })).not.toHaveAttribute('aria-describedby')
+    fireEvent.change(screen.getByLabelText('Country'), { target: { value: '' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     expect(await screen.findByText('Country must be a two-letter code, e.g. "SE".')).toBeInTheDocument()
-    // The neutral helper text is GONE, not shown alongside the error.
-    expect(screen.queryByText('Two-letter country code (ISO 3166-1), e.g. "SE" for Sweden.')).not.toBeInTheDocument()
-    // And there is only ONE description under the field, not two.
     const describedBy = screen.getByLabelText('Country').getAttribute('aria-describedby')
     expect(describedBy?.trim().split(/\s+/)).toHaveLength(1)
   })
 })
 
 describe('CompanyDetailsCard — VIES status copy', () => {
-  const ALL_RENDERED_TEXT_CASES: Array<[CompanyDetails['vies_status'], string, string | null]> = [
-    ['pending', 'Checking the VAT number with VIES…', null],
-    ['valid', 'VAT number checked against VIES on 20 September 2026', '2026-09-20T10:00:00.000Z'],
-    ['invalid', 'VIES says this VAT number is not valid. Check the number and save it again.', null],
-    ['not_verifiable', 'VIES could not check this number right now.', null],
+  // #4359: the sentence is now a StatusBadge per state, beside the date and
+  // Check again. The tone table is the spec's: valid = success, invalid =
+  // warning, everything else neutral — `not_verifiable` is NEVER danger or
+  // warning (owner-company-details.md's one load-bearing rule).
+  const TONE_CLASS: Record<string, string> = {
+    success: 'bg-[var(--v2-success-soft)]',
+    warning: 'bg-[var(--v2-warning-soft)]',
+    neutral: 'bg-[var(--v2-surface-2)]',
+  }
+
+  const ALL_RENDERED_TEXT_CASES: Array<[CompanyDetails['vies_status'], string, keyof typeof TONE_CLASS, string | null]> = [
+    ['pending', 'Checking with VIES…', 'neutral', null],
+    ['valid', 'Checked against VIES', 'success', '2026-09-20T10:00:00.000Z'],
+    ['invalid', 'Not found in VIES', 'warning', null],
+    ['not_verifiable', "VIES couldn't check this", 'neutral', null],
   ]
 
-  for (const [status, expected, checkedAt] of ALL_RENDERED_TEXT_CASES) {
-    it(`renders the ${status} line exactly`, async () => {
+  for (const [status, expected, tone, checkedAt] of ALL_RENDERED_TEXT_CASES) {
+    it(`renders the ${status} state as a badge with the ${tone} tone`, async () => {
       mockApi.get.mockImplementation(() => Promise.resolve(details({ vies_status: status, vies_checked_at: checkedAt })))
       renderCard()
-      expect(await screen.findByText(expected)).toBeInTheDocument()
+      const line = await screen.findByTestId('vies-status-line')
+      expect(line).toHaveTextContent(expected)
+      // The tone: the badge's fill carries the tone variable.
+      expect(line.querySelector('span')).toHaveClass(TONE_CLASS[tone])
     })
   }
+
+  it('shows the checked date BESIDE the valid badge, and none when there is no date', async () => {
+    mockApi.get.mockImplementation(() => Promise.resolve(details({ vies_status: 'valid', vies_checked_at: '2026-09-20T10:00:00.000Z' })))
+    renderCard()
+    const line = await screen.findByTestId('vies-status-line')
+    expect(line).toHaveTextContent('Checked against VIES')
+    expect(line).toHaveTextContent('20 September 2026')
+
+    mockApi.get.mockImplementation(() => Promise.resolve(details({ vies_status: 'valid', vies_checked_at: null })))
+    const { unmount } = renderCard()
+    const second = await screen.findByTestId('vies-status-line')
+    expect(second).toHaveTextContent('Checked against VIES')
+    // The repo's en-GB long date — the date text is the only thing beside the badge.
+    expect(second.textContent).not.toMatch(/on\s*$/)
+    unmount()
+  })
 
   it('never renders the word "verified" anywhere, in any VIES state', async () => {
     for (const status of ['pending', 'valid', 'invalid', 'not_verifiable'] as const) {
@@ -349,7 +449,10 @@ describe('CompanyDetailsCard — VIES status copy', () => {
         Promise.resolve(details({ vies_status: status, vies_checked_at: status === 'valid' ? '2026-09-20T10:00:00.000Z' : null })),
       )
       const { unmount, container } = renderCard()
-      await waitFor(() => expect(mockApi.get).toHaveBeenCalled())
+      // A POSITIVE anchor first (#4359 spec review): the old version could
+      // pass on an empty, still-loading card. The badge must be on screen
+      // before the absence is asserted.
+      await screen.findByTestId('vies-status-line')
       expect(container.textContent ?? '').not.toMatch(/verified/i)
       unmount()
     }
@@ -366,17 +469,17 @@ describe('CompanyDetailsCard — VIES status copy', () => {
     mockApi.get.mockImplementation(() => Promise.resolve(details({ vies_status: 'invalid' })))
     mockApi.post.mockImplementation(() => Promise.resolve(details({ vies_status: 'pending', vies_checked_at: null })))
     renderCard()
-    await waitFor(() => screen.getByText('VIES says this VAT number is not valid. Check the number and save it again.'))
+    await waitFor(() => screen.getByText('Not found in VIES'))
     fireEvent.click(screen.getByRole('button', { name: 'Check again' }))
     await waitFor(() => expect(mockApi.post).toHaveBeenCalledWith('/user/company-details/vies-check'))
-    expect(await screen.findByText('Checking the VAT number with VIES…')).toBeInTheDocument()
+    expect(await screen.findByText('Checking with VIES…')).toBeInTheDocument()
   })
 
   it('shows a plain message on a 429 from vies-check', async () => {
     mockApi.get.mockImplementation(() => Promise.resolve(details({ vies_status: 'invalid' })))
     mockApi.post.mockImplementation(() => Promise.reject(new ApiRequestError('Too many requests', 429, { error: 'Too many requests' })))
     renderCard()
-    await waitFor(() => screen.getByText('VIES says this VAT number is not valid. Check the number and save it again.'))
+    await waitFor(() => screen.getByText('Not found in VIES'))
     fireEvent.click(screen.getByRole('button', { name: 'Check again' }))
     expect(await screen.findByText(/too many times just now/)).toBeInTheDocument()
   })
@@ -385,7 +488,7 @@ describe('CompanyDetailsCard — VIES status copy', () => {
     mockApi.get.mockImplementation(() => Promise.resolve(details({ vies_status: 'invalid' })))
     mockApi.post.mockImplementation(() => Promise.reject(new ApiRequestError('Not found', 404, { error: 'Not found' })))
     renderCard()
-    await waitFor(() => screen.getByText('VIES says this VAT number is not valid. Check the number and save it again.'))
+    await waitFor(() => screen.getByText('Not found in VIES'))
     fireEvent.click(screen.getByRole('button', { name: 'Check again' }))
     expect(await screen.findByText('This setting is no longer available.')).toBeInTheDocument()
   })
@@ -396,49 +499,61 @@ describe('CompanyDetailsCard — VIES status copy', () => {
       Promise.reject(new ApiRequestError('No VAT number saved to check', 404, { error: 'No VAT number saved to check' })),
     )
     renderCard()
-    await waitFor(() => screen.getByText('VIES says this VAT number is not valid. Check the number and save it again.'))
+    await waitFor(() => screen.getByText('Not found in VIES'))
     fireEvent.click(screen.getByRole('button', { name: 'Check again' }))
     expect(await screen.findByText('This VAT number is no longer saved. Reload to see the current details.')).toBeInTheDocument()
     expect(screen.queryByText('This setting is no longer available.')).not.toBeInTheDocument()
   })
 
-  it('renders "valid" with no dangling "on" when vies_checked_at is null (nit)', async () => {
-    mockApi.get.mockImplementation(() => Promise.resolve(details({ vies_status: 'valid', vies_checked_at: null })))
-    renderCard()
-    expect(await screen.findByText('VAT number checked against VIES.')).toBeInTheDocument()
-    expect(screen.queryByText(/checked against VIES on\s*$/)).not.toBeInTheDocument()
-  })
-
   it('hides the VIES line while the VAT field has been edited away from the saved number (design review 11/12)', async () => {
     mockApi.get.mockImplementation(() => Promise.resolve(details({ vies_status: 'valid' })))
     renderCard()
-    await waitFor(() => screen.getByText('VAT number checked against VIES on 20 September 2026'))
+    await waitFor(() => screen.getByText('Checked against VIES'))
     fireEvent.change(screen.getByLabelText('VAT number (optional)'), { target: { value: 'SE999999999901' } })
     expect(screen.queryByTestId('vies-status-line')).not.toBeInTheDocument()
   })
 })
 
 describe('CompanyDetailsCard — VIES polling', () => {
+  // #4359: the hook now lives in the shared provider, which mounts the
+  // accounting reads too — the counter must count ONLY the company-details
+  // GETs, or the two other reads' first calls would pollute it.
+  function serveCompanyDetailsCounting(calls: () => void, responses: Array<CompanyDetails>): () => void {
+    let n = 0
+    mockApi.get.mockImplementation((url: string) => {
+      if (url !== '/user/company-details') return Promise.reject(new Error(`unexpected GET ${url}`))
+      calls()
+      const row = responses[Math.min(n, responses.length - 1)]
+      n += 1
+      return Promise.resolve(row)
+    })
+    return () => n
+  }
+
   it('polls while pending and stops once the status resolves', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
     let call = 0
-    mockApi.get.mockImplementation(() => {
-      call += 1
-      if (call === 1) return Promise.resolve(details({ vies_status: 'pending', vies_checked_at: null }))
-      return Promise.resolve(details({ vies_status: 'valid', vies_checked_at: '2026-09-20T10:00:00.000Z' }))
-    })
+    serveCompanyDetailsCounting(
+      () => {
+        call += 1
+      },
+      [
+        details({ vies_status: 'pending', vies_checked_at: null }),
+        details({ vies_status: 'valid', vies_checked_at: '2026-09-20T10:00:00.000Z' }),
+      ],
+    )
     renderCard()
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0)
     })
-    expect(await screen.findByText('Checking the VAT number with VIES…')).toBeInTheDocument()
+    expect(await screen.findByText('Checking with VIES…')).toBeInTheDocument()
     expect(call).toBe(1)
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(4000)
     })
     expect(call).toBe(2)
-    expect(await screen.findByText('VAT number checked against VIES on 20 September 2026')).toBeInTheDocument()
+    expect(await screen.findByText('Checked against VIES')).toBeInTheDocument()
 
     // No further poll ticks once the status left `pending`.
     await act(async () => {
@@ -450,10 +565,9 @@ describe('CompanyDetailsCard — VIES polling', () => {
   it('stops polling on unmount', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
     let call = 0
-    mockApi.get.mockImplementation(() => {
+    serveCompanyDetailsCounting(() => {
       call += 1
-      return Promise.resolve(details({ vies_status: 'pending', vies_checked_at: null }))
-    })
+    }, [details({ vies_status: 'pending', vies_checked_at: null })])
     const { unmount } = renderCard()
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0)
@@ -473,7 +587,7 @@ describe('CompanyDetailsCard — VIES polling', () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0)
     })
-    expect(await screen.findByText('Checking the VAT number with VIES…')).toBeInTheDocument()
+    expect(await screen.findByText('Checking with VIES…')).toBeInTheDocument()
     // Still well inside the bound — no action shown while a poll tick is live.
     expect(screen.queryByRole('button', { name: 'Check again' })).not.toBeInTheDocument()
 
@@ -483,14 +597,46 @@ describe('CompanyDetailsCard — VIES polling', () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(VIES_POLL_MAX_MS + VIES_POLL_INTERVAL_MS)
     })
-    expect(screen.getByText('VIES has not answered yet.')).toBeInTheDocument()
-    expect(screen.queryByText('Checking the VAT number with VIES…')).not.toBeInTheDocument()
+    expect(screen.getByText('VIES check pending')).toBeInTheDocument()
+    expect(screen.queryByText('Checking with VIES…')).not.toBeInTheDocument()
     expect(await screen.findByRole('button', { name: 'Check again' })).toBeInTheDocument()
   })
 })
 
+describe('CompanyDetailsCard — the remove trigger (#4359)', () => {
+  it('sits in the footer row, LEFT of Save, with its name unchanged', async () => {
+    mockApi.get.mockImplementation(() => Promise.resolve(details()))
+    renderCard()
+    const footer = await screen.findByTestId('company-details-footer')
+    const trigger = within(footer).getByRole('button', { name: 'Remove company details' })
+    const save = within(footer).getByRole('button', { name: 'Save' })
+    // Left of Save in document order.
+    expect(trigger.compareDocumentPosition(save) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('is a GHOST button — never tertiary, never a filled CTA', async () => {
+    mockApi.get.mockImplementation(() => Promise.resolve(details()))
+    renderCard()
+    const footer = await screen.findByTestId('company-details-footer')
+    // `Button` does not forward `data-testid`, so this selects by role —
+    // `ghost`'s own markers (`Button`'s VARIANT_CLASS): a visible outline on
+    // the card background, no shadow.
+    const trigger = within(footer).getByRole('button', { name: 'Remove company details' })
+    expect(trigger).toHaveClass('bg-[var(--v2-bg)]')
+    expect(trigger).toHaveClass('border-[var(--v2-border-strong)]')
+    expect(trigger).not.toHaveClass('shadow-button')
+  })
+
+  it('renders no trigger while the details have not been saved (#4359)', async () => {
+    mockApi.get.mockImplementation(() => noRow())
+    renderCard()
+    await screen.findByText('No company details')
+    expect(screen.queryByRole('button', { name: 'Remove company details' })).not.toBeInTheDocument()
+  })
+})
+
 describe('CompanyDetailsCard — delete', () => {
-  it('asks for confirmation before DELETE, and resets to empty on success', async () => {
+  it('asks for confirmation before DELETE, and falls back to the empty state on success (#4359)', async () => {
     mockApi.get.mockImplementation(() => Promise.resolve(details()))
     mockApi.delete.mockImplementation(() => Promise.resolve({ ok: true }))
     renderCard()
@@ -503,7 +649,9 @@ describe('CompanyDetailsCard — delete', () => {
     mockApi.get.mockImplementation(() => noRow())
     fireEvent.click(within(dialog).getByRole('button', { name: 'Remove' }))
     await waitFor(() => expect(mockApi.delete).toHaveBeenCalledWith('/user/company-details'))
-    await waitFor(() => expect(screen.getByLabelText('Legal name')).toHaveValue(''))
+    // The form is gone and the empty state is what remains (#4359).
+    await waitFor(() => expect(screen.queryByTestId('company-details-form')).not.toBeInTheDocument())
+    expect(screen.getByTestId('company-details-empty')).toHaveTextContent('No company details')
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 
@@ -598,15 +746,19 @@ describe('CompanyDetailsCard — load error (m1/design review 4)', () => {
 
   it('renders nothing while the first read is in flight — no title, no skeleton (design review 7)', async () => {
     let resolveGet!: (value: unknown) => void
-    mockApi.get.mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          resolveGet = resolve
-        }),
-    )
+    // Only the company-details read hangs; the provider's two accounting
+    // reads answer at once (their result is irrelevant to this card).
+    mockApi.get.mockImplementation((url: string) => {
+      if (url !== '/user/company-details') return Promise.resolve(null)
+      return new Promise((resolve) => {
+        resolveGet = resolve
+      })
+    })
     const { container } = renderCard()
     expect(container).toBeEmptyDOMElement()
     resolveGet(null)
-    await waitFor(() => expect(screen.getByTestId('company-details-form')).toBeInTheDocument())
+    // #4359: 200 null now lands on the "No company details" state, not a
+    // bare form.
+    await waitFor(() => expect(screen.getByTestId('company-details-empty')).toBeInTheDocument())
   })
 })

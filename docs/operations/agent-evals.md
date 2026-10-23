@@ -87,14 +87,16 @@ WITHIN tiers only (deterministic per seed, recorded in the report);
 same canonical set — tier order and any `--shuffle` are preserved (#4218,
 see Other flags).
 
-**Consistency guard, two limits (2026-10-23, run 39914610364):** after a
-passing EIP-3009 bridge trial (`eip3009_settlement_shape` passed) the guard
-does not wait: the funding leg confirms before the agent signs the header,
-so the budget read already reflects it, and when the delegate EOA still held
-USDC no funding leg runs and the budget never moves. And a wait that times
-out makes ONE trial red: later trials do not wait on the same expectation
-again (that run lost four whole tasks to one unmet wait repeated thirteen
-times).
+**Two lessons from 2026-10-23 (run 39914610364).** A wait that times out
+makes ONE trial red: later trials do not wait on the same expectation again,
+and the skip is recorded in the report (`guardEvents`); that run lost four
+whole tasks to one unmet wait repeated thirteen times. The unmet wait itself
+came from an **idempotent replay**: trials 2 and 1 of the bridge task bought
+the same item inside Haven's 5-minute idempotency bucket, so trial 2's pay
+call returned trial 1's payment (`idempotent_replay: true`) and spent
+nothing, yet graded green with trial 1's spend. The graders now reject a
+trial whose only payment is a replay, and purchasing tasks give each trial
+its own key with the `{purchase_key}` placeholder.
 
 **Consistency guard:** before resolving each trial, the resolver waits
 (bounded, 120s default) until the backend budget read reflects the previous

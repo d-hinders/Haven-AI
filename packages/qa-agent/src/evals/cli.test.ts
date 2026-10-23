@@ -856,7 +856,7 @@ describe('budgetPreflightMessage — with the real budget reader', () => {
 // 2026-10-23, run 39914610364: one unmet consistency wait after the bridge
 // task cascaded into a two-minute timeout on every later trial — four tasks
 // never ran. A timeout stays ONE red trial; and a bridge trial needs no wait.
-describe('consistency guard: no cascade, no wait after a bridge trial', () => {
+describe('consistency guard: a timeout fails one trial, not the rest', () => {
   const settledPrior = (taskId: string, graders: Array<{ name: string; pass: boolean; settledSpendAtomic?: string }>) => ({
     taskId,
     trial: 1,
@@ -883,20 +883,27 @@ describe('consistency guard: no cascade, no wait after a bridge trial', () => {
     await resolver.resolve(t, 1) // establishes the baseline read
     const prior = settledPrior('x402-catalog-guided-purchase', [{ name: 'payment_status_settled', pass: true, settledSpendAtomic: '1000' }])
     await expect(resolver.resolve(t, 2, prior as never)).rejects.toThrow(/budget consistency timeout/)
-    const started = Date.now()
     await expect(resolver.resolve(t, 3, prior as never)).resolves.toBeDefined()
-    expect(Date.now() - started).toBeLessThan(5)
   })
 
-  it('does not wait after a passing EIP-3009 bridge trial (its budget effect has already landed, or never happens)', async () => {
+  it('after a timeout, a DIFFERENT settled prior still gets its wait (no sticky "never wait again")', async () => {
     const resolver = makeResolver()
     const t = await task('direct-send-partial-budget')
     await resolver.resolve(t, 1)
-    const prior = settledPrior('x402-eip3009-bridge-vpn-legacy', [
-      { name: 'payment_status_settled', pass: true, settledSpendAtomic: '1000' },
-      { name: 'eip3009_settlement_shape', pass: true },
-    ])
-    await expect(resolver.resolve(t, 2, prior as never)).resolves.toBeDefined()
+    const first = settledPrior('x402-catalog-guided-purchase', [{ name: 'payment_status_settled', pass: true, settledSpendAtomic: '1000' }])
+    await expect(resolver.resolve(t, 2, first as never)).rejects.toThrow(/budget consistency timeout/)
+    const second = { ...settledPrior('x402-catalog-guided-purchase', [{ name: 'payment_status_settled', pass: true, settledSpendAtomic: '1000' }]), trial: 2 }
+    await expect(resolver.resolve(t, 3, second as never)).rejects.toThrow(/budget consistency timeout/)
+  })
+
+  it('records the skipped wait as a guard event', async () => {
+    const resolver = makeResolver()
+    const t = await task('direct-send-partial-budget')
+    await resolver.resolve(t, 1)
+    const prior = settledPrior('x402-catalog-guided-purchase', [{ name: 'payment_status_settled', pass: true, settledSpendAtomic: '1000' }])
+    await expect(resolver.resolve(t, 2, prior as never)).rejects.toThrow()
+    await resolver.resolve(t, 3, prior as never)
+    expect(resolver.guardEvents).toEqual([expect.objectContaining({ kind: 'consistency_wait_skipped', beforeTrial: 3, priorKey: 'x402-catalog-guided-purchase#1' })])
   })
 
   it('still waits (and can time out) after an erc7710 settlement, where the merchant redeems later', async () => {

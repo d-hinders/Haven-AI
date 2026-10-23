@@ -282,9 +282,9 @@ async function paymentStatusIn(
   // Ids come from call arguments AND from tool RESULTS (#3992 A1): the
   // adapters keep `payment_id` out of result envelopes as a field, so the
   // result-borne id arrives through `result.paymentId`.
-  const ids = log.calls
-    .map((call) => call.result?.paymentId ?? paymentIdFrom(call))
-    .filter((id): id is string => Boolean(id))
+  const replayFailure = replayOnlyFailure(log)
+  if (replayFailure) return replayFailure
+  const ids = paymentIdsIn(log)
   if (ids.length === 0) {
     return fail('no payment_id anywhere in the log — the run cannot be tied to a backend payment object')
   }
@@ -395,7 +395,43 @@ export function toolCalled(log: AgentRunLog, options: ToolCalledOptions): Grader
  * RESULTS (#3992 A1) via `paymentIdFrom`.
  */
 function paymentIdsIn(log: AgentRunLog): string[] {
-  return [...new Set(log.calls.map((call) => call.result?.paymentId ?? paymentIdFrom(call)).filter((id): id is string => Boolean(id)))]
+  const replayed = replayOnlyPaymentIds(log)
+  return [...new Set(log.calls.map((call) => call.result?.paymentId ?? paymentIdFrom(call)).filter((id): id is string => Boolean(id)))].filter(
+    (id) => !replayed.has(id),
+  )
+}
+
+/**
+ * Payment ids this trial only ever saw as an IDEMPOTENT REPLAY: a tool
+ * returned the id with `idempotent_replay: true` and no tool ever returned it
+ * as newly created. Such a payment belongs to an earlier trial — nothing was
+ * bought in this one — so it is not this trial's evidence (2026-10-23, run
+ * 39914610364: two trials of the same purchase inside Haven's 5-minute
+ * idempotency bucket graded green on ONE payment). A replay of a payment the
+ * same trial created (the agent repeating its own call) is still fresh.
+ */
+export function replayOnlyPaymentIds(log: AgentRunLog): Set<string> {
+  const replayed = new Set<string>()
+  const created = new Set<string>()
+  for (const call of log.calls) {
+    const id = call.result?.paymentId
+    if (!id) continue
+    if (call.result?.idempotentReplay === true) replayed.add(id)
+    else created.add(id)
+  }
+  return new Set([...replayed].filter((id) => !created.has(id)))
+}
+
+/** The failure for a trial whose only payment evidence is a replay of an earlier trial's payment. */
+function replayOnlyFailure(log: AgentRunLog): GraderResult | undefined {
+  const replayed = replayOnlyPaymentIds(log)
+  if (replayed.size > 0 && paymentIdsIn(log).length === 0) {
+    return fail(
+      `the only payment in this trial was an idempotent replay of an earlier one (${[...replayed].join(', ')}) — nothing new was bought; ` +
+        'give each purchase its own idempotency key',
+    )
+  }
+  return undefined
 }
 
 /** Case-insensitive address comparison (checksummed vs lowercase wire forms). */
@@ -416,6 +452,8 @@ function eqAddr(a: string | null | undefined, b: string | null | undefined): boo
 export async function merchantSettlementRecorded(log: AgentRunLog, ctx: GraderContext): Promise<GraderResult> {
   const probe = ctx.probeMerchantSettlement
   if (!probe) return fail('no machine-payment status probe injected — a merchant-settlement grader without a backend proves nothing')
+  const replayFailure = replayOnlyFailure(log)
+  if (replayFailure) return replayFailure
   const ids = paymentIdsIn(log)
   if (ids.length === 0) {
     return fail('no payment_id anywhere in the log — the merchant settlement cannot be tied to a backend payment object')
@@ -451,6 +489,8 @@ export async function eip3009SettlementShape(log: AgentRunLog, ctx: GraderContex
   if (!delegate) {
     return fail('no resolve-time delegate EOA on the resolved task — the runner must snapshot GET /machine-payments/agent before the trial')
   }
+  const replayFailure = replayOnlyFailure(log)
+  if (replayFailure) return replayFailure
   const ids = paymentIdsIn(log)
   if (ids.length === 0) {
     return fail('no payment_id anywhere in the log — no receipt row can be matched to this trial')
@@ -507,6 +547,8 @@ export async function nothingStrandedOnDelegate(log: AgentRunLog, ctx: GraderCon
   if (!delegate || before === undefined) {
     return fail('no resolve-time delegate EOA balance snapshot — the runner must read the EOA USDC balance immediately before the trial')
   }
+  const replayFailure = replayOnlyFailure(log)
+  if (replayFailure) return replayFailure
   const ids = paymentIdsIn(log)
   if (ids.length === 0) {
     return fail('no payment_id anywhere in the log — the stranded-balance read cannot be tied to this trial')

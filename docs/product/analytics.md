@@ -17,6 +17,7 @@ covers:
   - packages/frontend/src/lib/analytics-format.ts
   - packages/frontend/src/lib/analytics-series.ts
   - packages/frontend/src/lib/analytics-range.ts
+  - packages/frontend/src/components/ui/FacetMenu.tsx
   - packages/frontend/src/components/ui/PeriodPicker.tsx
   - packages/frontend/src/components/analytics/BalanceSection.tsx
   - packages/backend/src/routes/analytics-overview.ts

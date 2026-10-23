@@ -32,6 +32,7 @@ covers:
   - packages/frontend/src/components/ui/Skeleton.tsx
   - packages/ui/src/StatTile.tsx
   - packages/frontend/src/components/analytics/AgentsTable.tsx
+  - packages/frontend/src/components/ui/FacetMenu.tsx
   - packages/frontend/src/components/ui/PeriodPicker.tsx
   - packages/frontend/src/components/analytics/EmptyStates.tsx
   - packages/frontend/src/hooks/useAccountingFeed.ts

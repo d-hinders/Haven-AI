@@ -2511,7 +2511,10 @@ own accounts (#4099) — "New recipient" when nothing resolves, "Agent payment" 
 row carries no resource URL, and "Returned from <agent>" for sweeps. The
 subtitle is the agent's name; on a send it adds "From <account>", the account
 the money left (#4117), only when the user has more than one account and a
-name came back. A confirmed row carries no status badge — its
+name came back. A move between two of the user's own accounts (`ownTransfer`,
+#4268) titles "Moved between your accounts" with the `move` mark, draws
+"<from> → <to>" through `TransactionMovement` in place of the subtitle, and
+shows an unsigned amount. A confirmed row carries no status badge — its
 direction is already the amount's sign and tone; only "Pending" and "Failed"
 name a state (#3897). `/transactions` reads the same mode (per #4266); `TransactionDetailPanel`
 passes no mode and renders the full address, where users verify (#3811) — the two supports on the same helper must not drift apart silently,

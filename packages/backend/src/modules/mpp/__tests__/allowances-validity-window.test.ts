@@ -137,4 +137,24 @@ describeDb('#3802 — allowances read vs the validity window (characterization)'
     // '1000000' atomic / 6 decimals — the human shape `deriveDelegationBudgets` emits.
     expect(body.allowances[0].configured_amount).toBe('1.00')
   })
+
+  it('#4355: each row carries next_refill_at — the end of its current period, or null when the budget ends first', async () => {
+    const nowSec = Math.floor(Date.now() / 1000)
+    // A daily budget that started 1 h ago refills 23 h from now.
+    const started = nowSec - 3_600
+    const live = await seedAgentWithDelegation({ startDate: started })
+    const liveBody = (await handleGetAllowances(live)).body as { allowances: { next_refill_at: string | null }[] }
+    expect(liveBody.allowances[0].next_refill_at).toBe(new Date((started + 86_400) * 1000).toISOString())
+
+    // The same budget ending before that boundary never refills again.
+    const ending = await seedAgentWithDelegation({ startDate: started, expiresAt: started + 86_400 })
+    const endingBody = (await handleGetAllowances(ending)).body as { allowances: { next_refill_at: string | null }[] }
+    expect(endingBody.allowances[0].next_refill_at).toBeNull()
+
+    // A not-yet-started row reports when its authority first arms: its start.
+    const start = nowSec + 3_600
+    const dormant = await seedAgentWithDelegation({ startDate: start })
+    const dormantBody = (await handleGetAllowances(dormant)).body as { allowances: { next_refill_at: string | null }[] }
+    expect(dormantBody.allowances[0].next_refill_at).toBe(new Date(start * 1000).toISOString())
+  })
 })

@@ -12914,6 +12914,15 @@ export const openapiSpec = {
                     '`null` means unverifiable: the chain read failed, or `onchain.remaining` was not read live (`remaining_is_from_chain` false — the fallback figure cannot answer a holdings question). ' +
                     'Absent when `onchain.remaining` is 0 (the compare would be vacuously true). Only the boolean rides the wire; the balance itself never does.',
                 },
+                next_refill_at: {
+                  type: ['string', 'null'],
+                  format: 'date-time',
+                  description:
+                    '#4355: when THIS budget next refills — the end of its current period, from its own start date and period (ISO 8601). ' +
+                    '`null` when it never refills again: the period boundary falls at or after the budget\'s end date, so it ends first. ' +
+                    'With `onchain.remaining` 0 it tells an agent its budget is spent for this period and when it refills, as opposed to never approved. ' +
+                    'Optional on the schema so an older backend that omits it stays valid.',
+                },
                 onchain: {
                   type: 'object',
                   required: ['amount', 'spent', 'remaining', 'effective_spent', 'reset_time_min', 'last_reset_min', 'nonce', 'is_reset_pending'],

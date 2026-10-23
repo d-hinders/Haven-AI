@@ -116,8 +116,12 @@ describe('haven guide text (#2525)', () => {
     // #4168: -42 bytes / -42 units — the account step and the signup hand-off
     // script say "a passkey", dropping " (Face ID / Touch ID)" (21 ASCII
     // characters) from each. Lands at 11661/11566.
-    expect(Buffer.byteLength(HAVEN_AGENT_RUNBOOK_MD, 'utf8')).toBe(11661)
-    expect(HAVEN_AGENT_RUNBOOK_MD.length).toBe(11566)
+    // #4355: +160 bytes / +158 units — the § How to verify `needs_approval`
+    // bullet names its two causes (no allowances[] rows vs rows spent for the
+    // period) and `budgetRefillsAt`, instead of "nobody approved yet" for
+    // both. Lands at 11821/11724.
+    expect(Buffer.byteLength(HAVEN_AGENT_RUNBOOK_MD, 'utf8')).toBe(11821)
+    expect(HAVEN_AGENT_RUNBOOK_MD.length).toBe(11724)
   })
 
   it('names the command that actually prints the revoke hash (#3892)', () => {

@@ -217,6 +217,8 @@ describe('agent info helpers', () => {
       // #1590: same value under the honest name; `readiness` is the
       // deprecated alias and stays byte-identical.
       spend_authority_readiness: 'ready',
+      // #4355: set only when needs_approval comes from spent rows.
+      budgetRefillsAt: null,
       allowances: [{
         // #3128: the HavenAllowance's own id and token address ride along.
         id: 'allowance-1',
@@ -230,6 +232,8 @@ describe('agent info helpers', () => {
         // #3731: the stub body carries no coverage field — mapped to null,
         // never undefined.
         fundsCoverRemaining: null,
+        // #4355: the stub carries no next_refill_at (an older backend) — null.
+        nextRefillAt: null,
       }],
       taskBudgets: [],
       pendingSubBudgetSignatures: [], // #3506
@@ -267,7 +271,7 @@ describe('agent info helpers', () => {
     expect(compact.resetPeriodMin).toBe(full.resetPeriodMin)
     expect(compact.isResetPending).toBe(full.onchain.isResetPending)
     // A client that wants the id AND a display amount can use either read alone.
-    expect(Object.keys(compact).sort()).toEqual(['configuredAmount', 'fundsCoverRemaining', 'id', 'isResetPending', 'remainingAtomic', 'remainingDisplay', 'resetPeriodMin', 'tokenAddress', 'tokenSymbol'])
+    expect(Object.keys(compact).sort()).toEqual(['configuredAmount', 'fundsCoverRemaining', 'id', 'isResetPending', 'nextRefillAt', 'remainingAtomic', 'remainingDisplay', 'resetPeriodMin', 'tokenAddress', 'tokenSymbol'])
     // #3731: the new key's provenance — the SAME projection rule as the eight
     // original keys, asserted separately per the #3128 invariant's amendment:
     // the compact row is a projection of the detailed read, never a second
@@ -451,6 +455,56 @@ describe('agent info helpers', () => {
     expect(summary.readiness).toBe('needs_approval')
     expect(summary.spend_authority_readiness).toBe(summary.readiness)
     expect(summary.allowances[0]).toMatchObject({ remainingAtomic: '0', remainingDisplay: '0.0 USDC' })
+  })
+
+  describe('#4355: needs_approval says WHICH case — spent for the period vs never approved', () => {
+    const REFILL = '2026-10-24T09:00:00.000Z'
+    function stub(allowances: () => Response) {
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+        const u = String(url)
+        if (u.endsWith('/machine-payments/agent')) return agentResponse('active')
+        if (u.endsWith('/machine-payments/allowances')) return allowances()
+        if (u.includes('/task-budgets')) return new Response(JSON.stringify({ task_budgets: [] }), { status: 200, headers: { 'content-type': 'application/json' } })
+        throw new Error(`unexpected fetch: ${u}`)
+      })
+    }
+
+    it('exhausted mid-period: needs_approval, with budgetRefillsAt = the spent row\'s next refill', async () => {
+      stub(() => allowancesResponse({ remaining: '0', nextRefillAt: REFILL }))
+      const summary = await new HavenClient({ apiKey: 'sk_agent_test', baseUrl }).getAgentSummary()
+      expect(summary.spend_authority_readiness).toBe('needs_approval')
+      expect(summary.budgetRefillsAt).toBe(REFILL)
+      expect(summary.allowances[0]).toMatchObject({ remainingAtomic: '0', nextRefillAt: REFILL })
+    })
+
+    it('never approved: needs_approval with NO rows, and budgetRefillsAt null', async () => {
+      stub(() => delegationAllowancesResponse([]))
+      const summary = await new HavenClient({ apiKey: 'sk_agent_test', baseUrl }).getAgentSummary()
+      expect(summary.spend_authority_readiness).toBe('needs_approval')
+      expect(summary.allowances).toEqual([])
+      expect(summary.budgetRefillsAt).toBeNull()
+    })
+
+    it('ready: budgetRefillsAt null even though the live row has a next refill', async () => {
+      stub(() => allowancesResponse({ remaining: '7500', nextRefillAt: REFILL }))
+      const summary = await new HavenClient({ apiKey: 'sk_agent_test', baseUrl }).getAgentSummary()
+      expect(summary.spend_authority_readiness).toBe('ready')
+      expect(summary.allowances[0].nextRefillAt).toBe(REFILL)
+      expect(summary.budgetRefillsAt).toBeNull()
+    })
+
+    it('spent and ending before it would refill (next_refill_at null), or an older backend: budgetRefillsAt null', async () => {
+      stub(() => allowancesResponse({ remaining: '0', nextRefillAt: null }))
+      const ending = await new HavenClient({ apiKey: 'sk_agent_test', baseUrl }).getAgentSummary()
+      expect(ending.spend_authority_readiness).toBe('needs_approval')
+      expect(ending.allowances[0].nextRefillAt).toBeNull()
+      expect(ending.budgetRefillsAt).toBeNull()
+      vi.restoreAllMocks()
+      stub(() => allowancesResponse({ remaining: '0' }))
+      const older = await new HavenClient({ apiKey: 'sk_agent_test', baseUrl }).getAgentSummary()
+      expect(older.allowances[0].nextRefillAt).toBeNull()
+      expect(older.budgetRefillsAt).toBeNull()
+    })
   })
 
   it('getAgentSummary derives ready from a delegation-rail derived budget (#1135)', async () => {
@@ -803,6 +857,8 @@ const mappedAllowances = {
     // #3731: the stub body carries no coverage field — mapped to null, never
     // undefined.
     fundsCoverRemaining: null,
+    // #4355: no next_refill_at on the stub (an older backend) — null.
+    nextRefillAt: null,
     remainingDisplay: '0.0075 USDC', // #3128 — derived by the same function as the bootstrap summary
     onchain: {
       amount: '10000',
@@ -867,7 +923,7 @@ function delegationAllowancesResponse(
 }
 
 function allowancesResponse(
-  overrides: { remaining?: string; tokenAddress?: string; tokenSymbol?: string } = {},
+  overrides: { remaining?: string; tokenAddress?: string; tokenSymbol?: string; nextRefillAt?: string | null } = {},
 ): Response {
   return new Response(JSON.stringify({
     agent_id: 'agent-1',
@@ -880,6 +936,7 @@ function allowancesResponse(
       token_symbol: overrides.tokenSymbol ?? 'USDC',
       configured_amount: '10000',
       reset_period_min: 60,
+      ...(overrides.nextRefillAt !== undefined ? { next_refill_at: overrides.nextRefillAt } : {}),
       onchain: {
         amount: '10000',
         spent: '2500',

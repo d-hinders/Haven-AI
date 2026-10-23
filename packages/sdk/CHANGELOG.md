@@ -15,6 +15,18 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+### Added
+
+- **`getAgentSummary()` tells a spent budget from no budget (#4355).** Each
+  allowance row gains `nextRefillAt` (ISO time of the next period refill;
+  `null` when the budget ends before it would refill, or on an older backend),
+  and the summary gains `budgetRefillsAt`: set only when readiness is
+  `needs_approval` because every live budget is spent for its period. The
+  readiness values are unchanged (`ready` / `needs_approval` / `revoked`), so
+  nothing that switches over them breaks. The runbook, skill text and
+  `haven_get_agent` description now give `needs_approval` its two causes
+  instead of "nobody approved yet" for both. No update needed.
+
 ### Changed
 
 - **The skill text says which quote checks the budget (#4345).** It used to

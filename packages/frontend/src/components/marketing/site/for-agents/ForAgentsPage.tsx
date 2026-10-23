@@ -51,7 +51,7 @@ const SEQUENCE: ReadonlyArray<{ who: 'human' | 'you'; lead: string; body: string
 /** The readiness values (runbook § How to verify), each verbatim. */
 const READINESS = [
   ['ready', 'a budget is live: you have the authority to pay. It does not say the account holds funds — the allowances[] rows carry funds_cover_remaining, and false there is a heads-up to mention to your user, not a refusal.'],
-  ['needs_approval', 'nobody approved yet. Ask your user again; there is no queue.'],
+  ['needs_approval', 'no budget can pay right now. With no allowances[] rows, nobody approved one yet: ask your user again; there is no queue. With rows, it is spent for this period: budgetRefillsAt says when it refills.'],
   ['revoked', 'the credential is not active; ask your user to create a new agent.'],
 ] as const
 

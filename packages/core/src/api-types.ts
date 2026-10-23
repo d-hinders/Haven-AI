@@ -5715,6 +5715,11 @@ export type components = {
                 reserved_haven_atomic?: string;
                 /** @description #3731: whether the account's balance can back THIS row's whole remaining period budget. One `balanceOf` read per distinct token; each row is compared ALONE (several rows for one token do not add up, so two `true` rows do not mean both are backed at once). `false` means the account cannot back the whole remaining budget — a heads-up to mention to the user, NOT a refusal and NOT proof the next payment fails: a budget larger than the balance is a normal setup (an owner may top up weekly). `null` means unverifiable: the chain read failed, or `onchain.remaining` was not read live (`remaining_is_from_chain` false — the fallback figure cannot answer a holdings question). Absent when `onchain.remaining` is 0 (the compare would be vacuously true). Only the boolean rides the wire; the balance itself never does. */
                 funds_cover_remaining?: boolean | null;
+                /**
+                 * Format: date-time
+                 * @description #4355: when THIS budget next refills — the end of its current period, from its own start date and period (ISO 8601). `null` when it never refills again: the period boundary falls at or after the budget's end date, so it ends first. With `onchain.remaining` 0 it tells an agent its budget is spent for this period and when it refills, as opposed to never approved. Optional on the schema so an older backend that omits it stays valid.
+                 */
+                next_refill_at?: string | null;
                 onchain: {
                     /** @description The configured period budget in ATOMIC units — the same budget as the sibling `configured_amount`, which states it in whole token units. `spent`, `remaining` and `effective_spent` are atomic too (#2295). */
                     amount: string;

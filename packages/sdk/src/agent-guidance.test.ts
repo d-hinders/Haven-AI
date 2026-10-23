@@ -15,7 +15,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { AGENT_README_SECTION_MD } from './agent-guidance.js'
+import { AGENT_README_SECTION_MD, HAVEN_AGENT_RUNBOOK_MD } from './agent-guidance.js'
 
 const REPO_ROOT = join(import.meta.dirname, '..', '..', '..')
 
@@ -128,5 +128,16 @@ describe('the settled agent vocabulary across the artifacts (#2533)', () => {
       read(rel).includes('sk_live_'),
     )
     expect(offenders).toEqual([])
+  })
+})
+
+describe('§ How to verify: needs_approval names its two causes (#4355)', () => {
+  it('tells "no rows: nobody approved" apart from "rows spent: refills at budgetRefillsAt"', () => {
+    expect(HAVEN_AGENT_RUNBOOK_MD).toContain(
+      '- `needs_approval` — no budget can pay. `allowances[]` empty: nobody approved one yet; ' +
+        'ask your user again, in their Haven tab — there is no queue. Rows, all spent: it refills at ' +
+        '`budgetRefillsAt`; tell your user, then wait or ask them to raise it',
+    )
+    expect(HAVEN_AGENT_RUNBOOK_MD).not.toContain('the connector finished, nobody approved yet')
   })
 })

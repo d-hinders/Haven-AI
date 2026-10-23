@@ -614,3 +614,16 @@ describe('tier-3 EXHAUSTED label must parse', () => {
     expect(validateTask(base, 'x.json')).toMatch(/must read EXHAUSTED-period-budget-below-<X>-USDC/)
   })
 })
+
+describe('{purchase_key} renders a fresh key per trial', () => {
+  it('two renders of the bridge task carry different idempotency keys', async () => {
+    const { loadTasks, renderInstruction } = await import('./tasks.js')
+    const task = (await loadTasks()).tasks.find((t) => t.id === 'x402-eip3009-bridge-vpn-legacy')!
+    const a = renderInstruction(task, 1n, undefined, 'https://m.example/mcp')
+    const b = renderInstruction(task, 1n, undefined, 'https://m.example/mcp')
+    const key = (s: string) => /idempotency_key "([^"]+)"/.exec(s)?.[1]
+    expect(key(a)).toMatch(/^eval-x402-eip3009-bridge-vpn-legacy-/)
+    expect(key(a)).not.toBe(key(b))
+    expect(a).not.toContain('{purchase_key}')
+  })
+})

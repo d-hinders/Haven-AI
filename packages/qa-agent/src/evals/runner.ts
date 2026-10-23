@@ -164,6 +164,8 @@ export interface EvalReport {
   harnessVersion?: string
   /** Budget INCREASES the resolver detected between trials (a refill boundary, #3992 E). */
   budgetEvents?: BudgetIncreaseEvent[]
+  /** Consistency-guard decisions the report must show (e.g. a wait skipped after a timeout). */
+  guardEvents?: Array<{ kind: string; beforeTask: string; beforeTrial: number; priorKey: string; reason: string }>
   hostedMcp?: HostedMcpInfo
 }
 
@@ -374,6 +376,12 @@ export function renderSummary(report: EvalReport): string {
       lines.push(
         `Budget increase detected before ${e.detectedBeforeTask} trial ${e.detectedBeforeTrial}: ${e.previousRemainingAtomic} → ${e.observedRemainingAtomic} (a refill boundary was crossed mid-run).`,
       )
+    }
+    lines.push('')
+  }
+  if (report.guardEvents && report.guardEvents.length > 0) {
+    for (const e of report.guardEvents) {
+      lines.push(`Budget wait skipped before ${e.beforeTask} trial ${e.beforeTrial}: ${e.reason} (${e.priorKey}).`)
     }
     lines.push('')
   }

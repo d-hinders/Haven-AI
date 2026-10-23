@@ -1574,14 +1574,14 @@ export type paths = {
             cookie?: never;
         };
         /**
-         * The caller’s saved "Needs you" dismissals.
-         * @description Server-saved dismissals for the recurring "Needs you" items (#3813), stored per account (backup) and per agent (needs setup) — permanent, and visible from every device of the same user. Presentation-only: nothing here is on the payment path, and there is no undismiss — the backup recommendation stays visible on the account page and a budget-less agent on the agent page.
+         * The caller’s saved "Needs attention" dismissals and acknowledgements.
+         * @description Server-saved dismissals for the recurring "Needs attention" items (#3813), stored per account (backup) and per agent (needs setup) — permanent, and visible from every device of the same user — plus #4324’s acknowledgements of the event-driven items, which return when something newer happens. Presentation-only: nothing here is on the payment path, and there is no undismiss — the backup recommendation stays visible on the account page and a budget-less agent on the agent page.
          */
         get: operations["listAttentionDismissals"];
         put?: never;
         /**
-         * Dismiss one recurring "Needs you" item.
-         * @description Idempotent: re-dismissing answers the same 201 as the first write. `item_kind` decides which id the body must carry — `no-backup` requires `account_id` (the backup item is per account), `needs-setup` requires `agent_id` (per agent within its account). A foreign or unknown id is a 404, never a 403 — the route does not confirm that an id exists.
+         * Dismiss or acknowledge one "Needs attention" item.
+         * @description Idempotent for the permanent kinds: re-dismissing answers the same 201 as the first write. An acknowledgement (#4324) moves `acknowledged_at` to now. `item_kind` decides which ids the body must carry — `no-backup` requires `account_id` (the backup item is per account); `needs-setup`, `budget-reached`, `budget-scope` and an attributed `payments-failed` require `agent_id`; `budget-usage` requires `agent_id` and the firing budget’s `period_end`; `haven-paused` and the unattributed `payments-failed` carry no id. A foreign or unknown id is a 404, never a 403 — the route does not confirm that an id exists.
          */
         post: operations["createAttentionDismissal"];
         delete?: never;
@@ -3997,12 +3997,12 @@ export type components = {
              */
             expires_at: string;
         };
-        /** @description One server-saved "Needs you" dismissal (#3813). `no-backup` rows carry `account_id` (the backup item is per account); `needs-setup` rows carry `agent_id` (per agent within its account). Permanent — there is no undismiss. */
+        /** @description One server-saved "Needs attention" dismissal or acknowledgement. Permanent dismissals (#3813): `no-backup` rows carry `account_id` (per account), `needs-setup` rows carry `agent_id` (per agent within its account). Acknowledgements (#4324): `budget-reached`, `budget-usage`, `budget-scope` and `payments-failed` carry `agent_id`; `haven-paused` and the unattributed `payments-failed` carry neither id. An acknowledged item comes back when an event of its kind is newer than `acknowledged_at` (`budget-usage`: when the budget’s period has moved past `acknowledged_period_end`). There is no undismiss. */
         AttentionDismissal: {
             /** Format: uuid */
             id: string;
             /** @enum {string} */
-            item_kind: "no-backup" | "needs-setup";
+            item_kind: "no-backup" | "needs-setup" | "budget-reached" | "budget-usage" | "budget-scope" | "haven-paused" | "payments-failed";
             /**
              * Format: uuid
              * @description Set on `no-backup` rows; null otherwise.
@@ -4010,16 +4010,26 @@ export type components = {
             account_id: string | null;
             /**
              * Format: uuid
-             * @description Set on `needs-setup` rows; null otherwise.
+             * @description Set on per-agent rows (`needs-setup`, `budget-reached`, `budget-usage`, `budget-scope`, an attributed `payments-failed`); null otherwise.
              */
             agent_id: string | null;
             /** Format: date-time */
             created_at: string;
+            /**
+             * Format: date-time
+             * @description #4324 — when the user last dismissed or acknowledged the item. Re-acknowledging moves it forward; for the permanent kinds it is the first dismissal’s time.
+             */
+            acknowledged_at: string;
+            /**
+             * Format: date-time
+             * @description #4324 — `budget-usage` only: the firing budget’s `period_end` when it was acknowledged. Null on every other kind.
+             */
+            acknowledged_period_end: string | null;
         };
         AttentionDismissalsResponse: {
             dismissals: components["schemas"]["AttentionDismissal"][];
         };
-        /** @description The kind decides which id the body carries; any other pairing is refused before the handler. */
+        /** @description The kind decides which ids the body carries; any other pairing is refused before the handler. */
         AttentionDismissalInput: {
             /** @enum {string} */
             item_kind: "no-backup";
@@ -4027,9 +4037,25 @@ export type components = {
             account_id: string;
         } | {
             /** @enum {string} */
-            item_kind: "needs-setup";
+            item_kind: "needs-setup" | "budget-reached" | "budget-scope" | "payments-failed";
             /** Format: uuid */
             agent_id: string;
+        } | {
+            /** @enum {string} */
+            item_kind: "budget-usage";
+            /** Format: uuid */
+            agent_id: string;
+            /**
+             * Format: date-time
+             * @description The firing budget’s `period_end` (from `/dashboard/budget-remaining`); the item re-arms once that budget’s period has moved past it.
+             */
+            period_end: string;
+        } | {
+            /**
+             * @description User-level: `haven-paused`, or the unattributed `payments-failed` item.
+             * @enum {string}
+             */
+            item_kind: "haven-paused" | "payments-failed";
         };
         CatalogEntryMerchant: {
             /** Format: uuid */
@@ -6487,6 +6513,26 @@ export type components = {
             failed: number;
             /** @description relayer_budget. */
             haven: number;
+            /**
+             * Format: date-time
+             * @description #4324 — the latest `budget` refusal in the window. Sent on `d7` only, and only when the bucket has a row: the "Needs attention" items fire on the 7-day counts and re-arm an acknowledgement when this is after it. Absent never hides an item.
+             */
+            lastBudgetAt?: string;
+            /**
+             * Format: date-time
+             * @description #4324 — the latest `scope` refusal in the window. `d7` only; absent when the bucket is empty.
+             */
+            lastScopeAt?: string;
+            /**
+             * Format: date-time
+             * @description #4324 — the latest `failed` (onchain_revert) refusal in the window. `d7` only; absent when the bucket is empty.
+             */
+            lastFailedAt?: string;
+            /**
+             * Format: date-time
+             * @description #4324 — the latest `haven` (relayer_budget) refusal in the window. `d7` only; absent when the bucket is empty.
+             */
+            lastHavenAt?: string;
         };
         /** @description #3803 — per-agent 7/30-day figures. The spend windows carry the same definition as the user-level block; refusals are row counts per bucket over the same window. */
         DashboardAgentStats: {
@@ -6601,6 +6647,11 @@ export type components = {
                 } | null;
                 /** @description Payment intents with status failed in the 7-day window. */
                 failedIntents7d: number;
+                /**
+                 * Format: date-time
+                 * @description #4324 — the newest failed intent’s latest recorded step (`created_at`, `signed_at` or `submitted_at`; no column records the failure itself). Absent when the window has none. The unattributed "Payments failed" acknowledgement re-arms when this is after it.
+                 */
+                lastFailedIntentAt?: string;
                 /** @description 30 days of portfolio totals, shared with analytics’ BALANCE_BY_DAY_SQL. Days with no snapshot are ABSENT, not zero; totalSek is null on pre-migration-090 days. */
                 balance_by_day: {
                     /** @description YYYY-MM-DD (UTC). */

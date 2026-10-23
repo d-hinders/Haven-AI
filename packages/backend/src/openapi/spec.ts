@@ -4749,9 +4749,9 @@ export const openapiSpec = {
       get: {
         tags: ['Dashboard'],
         operationId: 'listAttentionDismissals',
-        summary: 'The caller\u2019s saved "Needs you" dismissals.',
+        summary: 'The caller\u2019s saved "Needs attention" dismissals and acknowledgements.',
         description:
-          'Server-saved dismissals for the recurring "Needs you" items (#3813), stored per account (backup) and per agent (needs setup) — permanent, and visible from every device of the same user. Presentation-only: nothing here is on the payment path, and there is no undismiss — the backup recommendation stays visible on the account page and a budget-less agent on the agent page.',
+          'Server-saved dismissals for the recurring "Needs attention" items (#3813), stored per account (backup) and per agent (needs setup) — permanent, and visible from every device of the same user — plus #4324\u2019s acknowledgements of the event-driven items, which return when something newer happens. Presentation-only: nothing here is on the payment path, and there is no undismiss — the backup recommendation stays visible on the account page and a budget-less agent on the agent page.',
         security: [{ DashboardJwt: [] }],
         responses: {
           '200': {
@@ -4766,9 +4766,9 @@ export const openapiSpec = {
       post: {
         tags: ['Dashboard'],
         operationId: 'createAttentionDismissal',
-        summary: 'Dismiss one recurring "Needs you" item.',
+        summary: 'Dismiss or acknowledge one "Needs attention" item.',
         description:
-          'Idempotent: re-dismissing answers the same 201 as the first write. `item_kind` decides which id the body must carry — `no-backup` requires `account_id` (the backup item is per account), `needs-setup` requires `agent_id` (per agent within its account). A foreign or unknown id is a 404, never a 403 — the route does not confirm that an id exists.',
+          'Idempotent for the permanent kinds: re-dismissing answers the same 201 as the first write. An acknowledgement (#4324) moves `acknowledged_at` to now. `item_kind` decides which ids the body must carry — `no-backup` requires `account_id` (the backup item is per account); `needs-setup`, `budget-reached`, `budget-scope` and an attributed `payments-failed` require `agent_id`; `budget-usage` requires `agent_id` and the firing budget\u2019s `period_end`; `haven-paused` and the unattributed `payments-failed` carry no id. A foreign or unknown id is a 404, never a 403 — the route does not confirm that an id exists.',
         security: [{ DashboardJwt: [] }],
         requestBody: {
           required: true,
@@ -10016,14 +10016,19 @@ export const openapiSpec = {
       AttentionDismissal: {
         type: 'object',
         description:
-          'One server-saved "Needs you" dismissal (#3813). `no-backup` rows carry `account_id` (the backup item is per account); `needs-setup` rows carry `agent_id` (per agent within its account). Permanent — there is no undismiss.',
-        required: ['id', 'item_kind', 'account_id', 'agent_id', 'created_at'],
+          'One server-saved "Needs attention" dismissal or acknowledgement. Permanent dismissals (#3813): `no-backup` rows carry `account_id` (per account), `needs-setup` rows carry `agent_id` (per agent within its account). Acknowledgements (#4324): `budget-reached`, `budget-usage`, `budget-scope` and `payments-failed` carry `agent_id`; `haven-paused` and the unattributed `payments-failed` carry neither id. An acknowledged item comes back when an event of its kind is newer than `acknowledged_at` (`budget-usage`: when the budget\u2019s period has moved past `acknowledged_period_end`). There is no undismiss.',
+        required: ['id', 'item_kind', 'account_id', 'agent_id', 'created_at', 'acknowledged_at', 'acknowledged_period_end'],
         properties: {
           id: uuid,
-          item_kind: { type: 'string', enum: ['no-backup', 'needs-setup'] },
+          item_kind: {
+            type: 'string',
+            enum: ['no-backup', 'needs-setup', 'budget-reached', 'budget-usage', 'budget-scope', 'haven-paused', 'payments-failed'],
+          },
           account_id: { ...uuid, nullable: true, description: 'Set on `no-backup` rows; null otherwise.' },
-          agent_id: { ...uuid, nullable: true, description: 'Set on `needs-setup` rows; null otherwise.' },
+          agent_id: { ...uuid, nullable: true, description: 'Set on per-agent rows (`needs-setup`, `budget-reached`, `budget-usage`, `budget-scope`, an attributed `payments-failed`); null otherwise.' },
           created_at: isoDateTime,
+          acknowledged_at: { ...isoDateTime, description: '#4324 — when the user last dismissed or acknowledged the item. Re-acknowledging moves it forward; for the permanent kinds it is the first dismissal\u2019s time.' },
+          acknowledged_period_end: { ...isoDateTime, nullable: true, description: '#4324 — `budget-usage` only: the firing budget\u2019s `period_end` when it was acknowledged. Null on every other kind.' },
         },
         additionalProperties: false,
       },
@@ -10037,7 +10042,7 @@ export const openapiSpec = {
       },
       AttentionDismissalInput: {
         description:
-          'The kind decides which id the body carries; any other pairing is refused before the handler.',
+          'The kind decides which ids the body carries; any other pairing is refused before the handler.',
         oneOf: [
           {
             type: 'object',
@@ -10052,8 +10057,26 @@ export const openapiSpec = {
             type: 'object',
             required: ['item_kind', 'agent_id'],
             properties: {
-              item_kind: { type: 'string', enum: ['needs-setup'] },
+              item_kind: { type: 'string', enum: ['needs-setup', 'budget-reached', 'budget-scope', 'payments-failed'] },
               agent_id: uuid,
+            },
+            additionalProperties: false,
+          },
+          {
+            type: 'object',
+            required: ['item_kind', 'agent_id', 'period_end'],
+            properties: {
+              item_kind: { type: 'string', enum: ['budget-usage'] },
+              agent_id: uuid,
+              period_end: { ...isoDateTime, description: 'The firing budget\u2019s `period_end` (from `/dashboard/budget-remaining`); the item re-arms once that budget\u2019s period has moved past it.' },
+            },
+            additionalProperties: false,
+          },
+          {
+            type: 'object',
+            required: ['item_kind'],
+            properties: {
+              item_kind: { type: 'string', enum: ['haven-paused', 'payments-failed'], description: 'User-level: `haven-paused`, or the unattributed `payments-failed` item.' },
             },
             additionalProperties: false,
           },
@@ -13876,6 +13899,10 @@ export const openapiSpec = {
           scope: { type: 'integer', description: 'no_delegation_for_target.' },
           failed: { type: 'integer', description: 'onchain_revert.' },
           haven: { type: 'integer', description: 'relayer_budget.' },
+          lastBudgetAt: { type: 'string', format: 'date-time', description: '#4324 — the latest `budget` refusal in the window. Sent on `d7` only, and only when the bucket has a row: the "Needs attention" items fire on the 7-day counts and re-arm an acknowledgement when this is after it. Absent never hides an item.' },
+          lastScopeAt: { type: 'string', format: 'date-time', description: '#4324 — the latest `scope` refusal in the window. `d7` only; absent when the bucket is empty.' },
+          lastFailedAt: { type: 'string', format: 'date-time', description: '#4324 — the latest `failed` (onchain_revert) refusal in the window. `d7` only; absent when the bucket is empty.' },
+          lastHavenAt: { type: 'string', format: 'date-time', description: '#4324 — the latest `haven` (relayer_budget) refusal in the window. `d7` only; absent when the bucket is empty.' },
         },
         additionalProperties: false,
       },
@@ -14048,6 +14075,7 @@ export const openapiSpec = {
                 additionalProperties: false,
               },
               failedIntents7d: { type: 'integer', description: 'Payment intents with status failed in the 7-day window.' },
+              lastFailedIntentAt: { type: 'string', format: 'date-time', description: '#4324 — the newest failed intent\u2019s latest recorded step (`created_at`, `signed_at` or `submitted_at`; no column records the failure itself). Absent when the window has none. The unattributed "Payments failed" acknowledgement re-arms when this is after it.' },
               balance_by_day: {
                 type: 'array',
                 description: '30 days of portfolio totals, shared with analytics\u2019 BALANCE_BY_DAY_SQL. Days with no snapshot are ABSENT, not zero; totalSek is null on pre-migration-090 days.',

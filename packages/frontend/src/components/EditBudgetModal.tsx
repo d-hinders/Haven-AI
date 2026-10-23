@@ -40,8 +40,9 @@ import {
   classifyMerchantBudgetRefusal,
   isPermanentMerchantBudgetRefusal,
 } from '@/lib/merchantBudgetRefusal'
-import { truncateAddress, BudgetAmountRow, NoticeRow } from './haven'
+import { truncateAddress, BudgetAmountRow, BudgetEndDateSelect, NoticeRow } from './haven'
 import { budgetPeriodWords } from '@/lib/budget-caption'
+import { budgetEndsAt, formatBudgetEndDate } from '@/lib/budget-end'
 import { countWord, findOccupyingBudget, sameSlot } from '@/lib/budget-slot'
 import { Icon } from './ui/Icon'
 import { Button } from './ui/Button'
@@ -194,6 +195,12 @@ export default function EditBudgetModal({
     open ? (prefill?.periodSeconds ?? budget.period_seconds) : budget.period_seconds,
   )
   const [recipient, setRecipient] = useState(budget.recipient_address ?? '')
+  // #4350: the end date is an editable term. `null` is "keep the current
+  // end" — the DEFAULT, so an owner who edits only the amount does not
+  // silently restart the server's 90-day default (the issue's problem
+  // statement). A preset sends its day as `opts.expiresAt`; "keep current"
+  // sends the budget's own `expires_at`, so the edit always carries one.
+  const [endDays, setEndDays] = useState<number | null>(null)
   const [outcome, setOutcome] = useState<EditBudgetResult | null>(null)
   // #3933: the finish action on the `revoke_unfinished` screen — the Stop of
   // the previous budget, through the same per-hash revoke the card's Stop uses.
@@ -212,6 +219,7 @@ export default function EditBudgetModal({
     setStep('form')
     setOutcome(null)
     setFinishState('idle')
+    setEndDays(null)
     // #3933: a routed grant opens with the limits the owner typed.
     setPeriod(prefill?.periodSeconds ?? budget.period_seconds)
     setRecipient(budget.recipient_address ?? '')
@@ -284,6 +292,10 @@ export default function EditBudgetModal({
     // #3933: the Fund flow can move a budget to another merchant sharing the
     // same payment address — a change even when the limits are equal.
     const merchantChanged = (input.merchantSlug ?? null) !== (budget.merchant_slug ?? null)
+    // #4350: an end-date change is a change ON ITS OWN — the renewal case is
+    // exactly this: same terms, new end date. `endDays === null` means the
+    // owner kept the current end.
+    const endDateChanged = endDays !== null
     return {
       raised,
       lowered,
@@ -296,9 +308,10 @@ export default function EditBudgetModal({
       recipientChanged,
       oldRecipient: budget.recipient_address,
       newRecipient: input.recipientAddress ?? null,
-      changed: raised || lowered || periodChanged || recipientChanged || merchantChanged,
+      endDateChanged,
+      changed: raised || lowered || periodChanged || recipientChanged || merchantChanged || endDateChanged,
     }
-  }, [budget, input, token])
+  }, [budget, endDays, input, token])
 
   // #3933 review findings 1 and 2: the slot facts the owner must see before
   // signing. `oldBudgetHashes` is every live row of the edited budget's slot
@@ -321,6 +334,9 @@ export default function EditBudgetModal({
           nowSec,
         )
       : null
+  // #4350: the end dates the review states — the budget's current one, and
+  // the one the approval will set ("keep current" = the same day).
+  const newEndsAt = endDays === null ? budget.expires_at : (budgetEndsAt(endDays, nowSec) ?? budget.expires_at)
 
   const handleClose = useCallback(() => {
     if (busy) return
@@ -334,6 +350,14 @@ export default function EditBudgetModal({
     setStep('working')
     const result = await editBudget(budget.delegation_hash, input, {
       oldSlot: { tokenAddress: budget.token_address, recipientAddress: budget.recipient_address },
+      // #4350: the edit ALWAYS carries an end date. "Keep current" sends the
+      // budget's own `expires_at` — without it the build route would restart
+      // its 90-day default and an amount-only edit would silently move the
+      // end. A chosen preset sends its day.
+      expiresAt:
+        endDays === null
+          ? budget.expires_at
+          : (budgetEndsAt(endDays, Math.floor(Date.now() / 1000)) ?? budget.expires_at),
     })
     setOutcome(result)
     if (result.ok) {
@@ -358,7 +382,7 @@ export default function EditBudgetModal({
         onBudgetChange?.()
       }
     }
-  }, [budget.delegation_hash, budget.recipient_address, budget.token_address, changes, editBudget, input, onBudgetChange, onFinished])
+  }, [budget.delegation_hash, budget.expires_at, budget.recipient_address, budget.token_address, changes, editBudget, endDays, input, onBudgetChange, onFinished])
 
   // #3933: finish a replace whose Stop did not land — the same per-hash revoke
   // the card's Stop uses, once per row still enabled (a re-key pair is two),
@@ -555,6 +579,16 @@ export default function EditBudgetModal({
                   Enter an amount above zero to continue.
                 </p>
               ) : null}
+              {/* #4350: the end date is an editable term — "keep current" by
+                  default (an untouched select never moves the end), a preset
+                  for the renewal. Same control as the grant form. */}
+              <BudgetEndDateSelect
+                id="edit-budget-end"
+                days={endDays}
+                onDaysChange={setEndDays}
+                nowSec={nowSec}
+                keepUntilSec={budget.expires_at}
+              />
               <div className="flex gap-3">
                 <Button variant="ghost" onClick={handleClose} className="flex-1" disabled={busy}>
                   Cancel
@@ -598,6 +632,8 @@ export default function EditBudgetModal({
                       : changes.oldRecipient
                         ? ' · one recipient'
                         : ' · any recipient'}
+                    {/* #4350: the current end date is part of the review. */}
+                    {` · ends ${formatBudgetEndDate(budget.expires_at)}`}
                   </p>
                 </div>
                 <div>
@@ -609,6 +645,10 @@ export default function EditBudgetModal({
                       : changes.newRecipient
                         ? ' · one recipient'
                         : ' · any recipient'}
+                    {/* #4350: and the end the approval sets — an end-date-only
+                        edit (the renewal) shows the old and the new side by
+                        side, and a date change is a change on its own. */}
+                    {` · ends ${formatBudgetEndDate(newEndsAt)}`}
                   </p>
                 </div>
                 {changes.raised ? (

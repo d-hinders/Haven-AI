@@ -99,6 +99,7 @@ import {
   BalanceFreshnessIndicator,
   WhenBalanceDegraded,
   BudgetAmountRow,
+  BudgetEndDateSelect,
   BudgetMeter,
 } from '@/components/haven'
 
@@ -1240,6 +1241,7 @@ export default function DesignSystemPage() {
   const [checkboxOn, setCheckboxOn] = useState(true)
   const [sampleAmount, setSampleAmount] = useState('')
   const [dsBudgetAmount, setDsBudgetAmount] = useState('')
+  const [dsBudgetEndDays, setDsBudgetEndDays] = useState<number | null>(90)
   const [segmented, setSegmented] = useState<'light' | 'dark' | 'system'>('system')
   // #4096: the Tabs showcase is a controlled primitive (the caller owns the
   // value), and a ledger row's click stands in for the account page opening
@@ -2944,6 +2946,50 @@ export default function DesignSystemPage() {
             <p className="text-xs text-[var(--v2-ink-3)]">
               The labelled variant (FundMerchantModal&apos;s form) with the invalid state shown —
               the error paragraph itself belongs to the caller, announced via role=&quot;alert&quot;.
+            </p>
+          </div>
+        </div>
+        {/* #4350: the budget end-date choice, absorbed here on its second
+            use (grant form, connect approval step, EditBudgetModal). The
+            presets are the owner decision on #4349; the day under the select
+            is the chosen term, computed through the sub-budget conversion. */}
+        <div className="mt-5 grid gap-5 lg:grid-cols-[1fr_1fr]">
+          <div className="space-y-2">
+            <p className="text-xs font-medium uppercase tracking-wide text-[var(--v2-ink-3)]">
+              BudgetEndDateSelect
+            </p>
+            <div className="rounded-[10px] border border-[var(--v2-border)] p-4">
+              {/* The frozen DS clock (#3806): a capture must always render the
+                  same day, never the machine's today. */}
+              <BudgetEndDateSelect
+                id="ds-budget-end"
+                days={dsBudgetEndDays}
+                onDaysChange={setDsBudgetEndDays}
+                nowSec={Math.floor(DS_BUDGET_NOW / 1000)}
+              />
+            </div>
+            <p className="text-xs text-[var(--v2-ink-3)]">
+              The grant form, the connect approval step and EditBudgetModal share this control. A
+              null day (the edit&apos;s &quot;Keep current end&quot;) is offered by the caller via
+              keepUntilSec.
+            </p>
+          </div>
+          <div className="space-y-2">
+            <p className="text-xs font-medium uppercase tracking-wide text-[var(--v2-ink-3)]">
+              BudgetEndDateSelect — edit variant
+            </p>
+            <div className="rounded-[10px] border border-[var(--v2-border)] p-4">
+              <BudgetEndDateSelect
+                id="ds-budget-end-edit"
+                days={null}
+                onDaysChange={() => undefined}
+                nowSec={Math.floor(DS_BUDGET_NOW / 1000)}
+                keepUntilSec={Math.floor(DS_BUDGET_NOW / 1000) + 90 * 86_400}
+              />
+            </div>
+            <p className="text-xs text-[var(--v2-ink-3)]">
+              The edit modal&apos;s default: keep the budget&apos;s current end — an untouched select
+              never moves the date an approval would set.
             </p>
           </div>
         </div>

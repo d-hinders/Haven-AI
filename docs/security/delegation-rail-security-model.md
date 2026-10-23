@@ -1061,6 +1061,21 @@ chain.
 > No payment selector, enforcer, refusal or signer-set decision moves. Scope
 > of this note: those reads and that close path; nothing else in this
 > document was re-verified, and `last-verified` is not bumped.
+>
+> **Re-verified #4350 (2026-10-23: the end date becomes an owner choice).**
+> The diff touches a covered path: `hooks/useDelegationBudget.ts` — `grant`
+> now forwards the owner's chosen end date as the existing `expires_at` on
+> `POST /delegations/build`, and the edit flow always supplies one (the
+> row's own when kept). Nothing about the caveat itself moves: the end date
+> was already a signed `beforeThreshold` caveat enforced by the
+> `Timestamp` enforcer; the owner only now SEES and CHOOSES it before
+> signing (30/90/180/365 presets, 90 the default — owner decision 1 on
+> #4349). Haven signs nothing and the server still validates the expiry;
+> the 365-day ceiling is #4351's build-route cap and is not enforced here.
+> No payment selector, enforcer, refusal or signer-set decision moves.
+> Scope of this note: that forward only; nothing else in this document was
+> re-read for it, and `last-verified` is not bumped (it already reads
+> 2026-10-23).
 
 The unlink guard also refuses while an agent re-key is in flight, so the
 account binding cannot disappear between re-key stages. This is a database

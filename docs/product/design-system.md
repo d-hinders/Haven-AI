@@ -818,7 +818,12 @@ rate, with at most ONE leading "≈", and only where the one rule
 number: USDC shown in USD carries none — followed by the earlier of the refill and the
 expiry, phrased under 24 h relative ("refills in 45m"), under 7 days as
 weekday and 24-hour time ("refills Thu 14:02"), otherwise day and month
-("refills 14 Nov"). The states that replace the bar: a failed or stale read
+("refills 14 Nov"), AND the budget's end date ALWAYS stated as an absolute
+day after it — "refills in 5h · ends 21 Jan 2027" (#4350; the sub-budget
+formatter, so no surface drifts). When the budget ends before its period
+does, "ends 1 Sept 2026" IS the next event — an absolute day still reads as
+an expiry at the re-key tie, never as a refill that will not happen. A row
+without an expiry (the analytics read) names none. The states that replace the bar: a failed or stale read
 shows "Usage this period couldn't be read" (never a 0 % bar, never a
 "snapshot" claim), an expired budget its own line, and a future `start_date`
 shows when the budget starts. The shared agent row (`AgentRow` — the dashboard's

@@ -29,13 +29,15 @@ unclear; this page is the order, not the reasoning.
    hard-gated path). Request it when opening, not when it blocks.
 5. **When migrations are in range — prod DB snapshot, recommended, not a
    gate.** Take one before the migrations run on deploy when the plan allows
-   it. The current Railway plan cannot create backups, so skipping it is
-   allowed (owner decision, 2026-10-23). Say on the promotion PR which you
-   did. Without a snapshot, the mitigation is the migrations themselves:
-   each runs in its own transaction, so a failure rolls back. Run any
-   data precondition a migration states (for example a duplicate check
-   before a new unique index) against prod before merging. See
-   `promoting-dev-to-main.md` § *Migrations*.
+   it. The current Railway plan shows a Backups tab but cannot create new
+   backups, so skipping it is allowed (owner decision, 2026-10-23). Say on
+   the promotion PR which you did. Without a snapshot nothing undoes a
+   migration that applies and writes wrong data, and a `transactional =
+   false` migration (see the `migrate.ts` header) does not roll back even
+   when it fails. So the forward-only / safe-on-existing-rows review carries
+   that risk. Run any data precondition a migration states (for example a
+   duplicate check before a new unique index) against prod before merging.
+   See `promoting-dev-to-main.md` § *Migrations*.
 6. **Click Merge.** Any of the three maintainers: the ordinary **Merge pull
    request** button, **merge commit** form, in the web UI (`gh pr merge
    --merge` from a terminal works too). The PR showing as BEHIND `main` is

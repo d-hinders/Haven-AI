@@ -134,9 +134,11 @@ so this is a rule to point at rather than a question to ask the release runner.
       Confirm each is **forward-only / safe on existing rows**. A **prod DB
       snapshot** before they run on deploy is **recommended, not required**
       (owner decision, 2026-10-23: the current Railway plan cannot create
-      backups). Record on the PR whether one was taken. When none is, run
-      each migration's data precondition against prod before merging, for
-      example a duplicate check before a new unique index.
+      backups). Record on the PR whether one was taken. When none is, the
+      review above carries the risk of a migration that applies and writes
+      wrong data, and you run any data precondition a migration states
+      against prod before merging, for example a duplicate check before a new
+      unique index.
 - [ ] **Migration availability:** does any migration build an index, rewrite a
       table, or otherwise hold a lock on a hot table? If so, record the expected
       lock duration and mitigation. Since #2150 the first choice is in the repo,

@@ -59,12 +59,14 @@ import {
 } from '../rails/delegation-rail.js'
 import {
   activatePendingDelegationInSlot,
+  findOccupyingDelegationsInSlot,
   findReusablePendingDelegation,
   withDelegationBuildSlotLock,
   listNonRevokedDelegationsForAgent,
   revokeDelegationsByHashes,
   selectDelegationRowForAgentByHash,
   listDelegationJsonByIds,
+  spendableDelegationSql,
 } from '../infra/repositories/delegation-budgets.js'
 import {
   readRemainingBudget,
@@ -115,6 +117,8 @@ interface AgentDelegationListRow {
   merchant_id: string | null
   merchant_slug: string | null
   merchant_name: string | null
+  /** #3922: `spendableDelegationSql(…, { requireStarted: false })`, selected from SQL. */
+  is_live: boolean
 }
 
 // Serialize a prepared UserOperation to wire JSON: bigint → "123n" string,
@@ -160,6 +164,76 @@ export const UNAVAILABLE_AGENT_REFUSAL =
   'Agent cannot receive a budget while its account or re-key is unavailable'
 /** #2331's rotated-delegate-key refusal; #2415 kept the wording byte-identical. */
 export const ROTATED_DELEGATE_KEY_REFUSAL = 'Delegation was built for a previous delegate key'
+/**
+ * #3933: a plain grant into a (token, recipient) slot that already holds a
+ * live budget. Activation would mark the old grant `replaced` in the database
+ * only — it stays enabled on-chain until the owner's Stop lands, and only the
+ * edit flow (grant + Stop) submits that. So a plain grant is refused and the
+ * owner is sent to edit; the edit flow names the budget it `replaces`.
+ */
+export const BUDGET_SLOT_OCCUPIED_REFUSAL =
+  'This agent already has a live budget for this token and recipient. Edit that budget instead: editing replaces it and stops the old one on-chain, so two budgets are never left spendable side by side.'
+export const BUDGET_SLOT_OCCUPIED_ERROR_CODE = 'BUDGET_SLOT_OCCUPIED'
+
+/**
+ * #3933: the per-hash revoke's already-done answer — the row is revoked, or
+ * the chain shows it disabled and the route healed the record. Named so a
+ * client finishing a Stop can treat it as met without reading the sentence.
+ */
+export const DELEGATION_ALREADY_REVOKED_ERROR_CODE = 'DELEGATION_ALREADY_REVOKED'
+
+/**
+ * The edit flow's `replaces` on the wire: one hash (the original shape, which
+ * the qa-agent seed and lifecycle scenario still send) or a list of hashes
+ * (#3933 review finding 1: a re-key's carry and steady rows share one slot,
+ * so replacing that slot replaces both). Lower-cased, de-duplicated.
+ */
+function namedReplaces(replaces: string | string[] | null | undefined): string[] {
+  // The request schema (enforced on this module) guarantees the shape.
+  const list = Array.isArray(replaces) ? replaces : replaces ? [replaces] : []
+  return [...new Set(list.map((hash) => hash.toLowerCase()))]
+}
+
+/**
+ * The slot rule (#3933), one definition for build and activate. Allowed into
+ * an empty slot; into an occupied slot only as an edit whose `replaces` names
+ * EXACTLY the slot's occupying grants — every one of them, and nothing else.
+ *
+ * - Every one (review finding 1): activate's sweep marks EVERY active row in
+ *   the slot `replaced`, and the edit flow stops what it named. A re-key's
+ *   carry/steady pair is two occupying rows; naming one would sweep both and
+ *   stop one, leaving the other enabled on-chain behind a `replaced` label.
+ * - Nothing else: a named hash that does not occupy this slot (already
+ *   replaced, another slot, another agent, invented) is a stale or wrong
+ *   declaration — the client's picture of the slot is not the server's.
+ *
+ * An empty slot ignores `replaces`: nothing is swept, so nothing can be
+ * replaced silently, and the edit flow's Stop of a hash that was already
+ * revoked answers "Already revoked" (its #3166 success race).
+ */
+function slotOccupiedRefusal(
+  occupying: string[],
+  replaces: string | string[] | null | undefined,
+): {
+  error: string
+  error_code: string
+  existing_delegation_hash: string
+  occupying_delegation_hashes: string[]
+} | null {
+  if (occupying.length === 0) return null
+  const named = new Set(namedReplaces(replaces))
+  const occupied = new Set(occupying.map((hash) => hash.toLowerCase()))
+  const namesEveryOccupant = [...occupied].every((hash) => named.has(hash))
+  const namesOnlyOccupants = [...named].every((hash) => occupied.has(hash))
+  if (namesEveryOccupant && namesOnlyOccupants) return null
+  return {
+    error: BUDGET_SLOT_OCCUPIED_REFUSAL,
+    error_code: BUDGET_SLOT_OCCUPIED_ERROR_CODE,
+    // Back-compat: the newest occupying grant, the budget to edit.
+    existing_delegation_hash: occupying[0],
+    occupying_delegation_hashes: occupying,
+  }
+}
 // #3439: a re-key's own replacement row is activated only by that re-key's
 // own completion (`ACTIVATE_REKEY_DELEGATION_SQL` inside `completeRekey`) —
 // never by the ordinary owner-signature activate route, however the row got
@@ -226,9 +300,9 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
   // SELECT produced, byte-identical to the pre-#3693 shape: no enrichment
   // keys (not even the three nulls on non-active rows), the server-side
   // delegation_json fetch does NOT run, and the chain reader is never called.
-  // With `?include=remaining`, each ACTIVE row additionally carries
-  // remaining_atomic / remaining_from_chain / period_end (non-active rows
-  // carry the three as null), following the GET /merchants/:slug/budgets
+  // With `?include=remaining`, each LIVE row additionally carries
+  // remaining_atomic / remaining_from_chain / period_end (every non-live
+  // row, an expired active one included, carries the three as null), following the GET /merchants/:slug/budgets
   // precedent. Unknown `include` values are refused by the enforced request
   // schema — this module is in `enforcedModules` — before the handler runs.
   //
@@ -256,7 +330,8 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
       `SELECT d.id, d.chain_id, d.token_address, d.recipient_address, d.delegation_hash,
               d.version, d.status, d.budget_atomic, d.period_seconds, d.start_date,
               d.expires_at, d.created_at,
-              d.merchant_id, m.slug AS merchant_slug, m.name AS merchant_name
+              d.merchant_id, m.slug AS merchant_slug, m.name AS merchant_name,
+              (${spendableDelegationSql('d', { requireStarted: false })}) AS is_live
        FROM agent_delegations d
        LEFT JOIN merchants m ON m.id = d.merchant_id
        WHERE d.agent_id = $1
@@ -265,7 +340,11 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
     )
 
     // #3693 (corrected body): the plain pollers' default. The rows go back
-    // exactly as the SELECT produced them — the enrichment keys are absent
+    // exactly as the SELECT produced them — the one derived field is #3922's
+    // `is_live`, selected as the budget-VIEW predicate itself
+    // (`spendableDelegationSql`, `requireStarted: false`, so a dormant
+    // future-start re-key row is live as the budget views show it) so the
+    // wire flag cannot drift from the SQL; the enrichment keys are absent
     // (not null), the delegation_json fetch below never runs, and the chain
     // reader is never called.
     if (request.query.include !== 'remaining') {
@@ -274,16 +353,20 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
 
     // delegation_json intentionally NOT in the list — fetch is explicit (#3693:
     // the remaining-this-period read needs it, so it is read SERVER-SIDE only,
-    // for the ACTIVE rows, and never reaches the response).
-    const activeIds = result.rows.filter((r) => r.status === 'active').map((r) => r.id)
-    const jsonById = await listDelegationJsonByIds(activeIds)
+    // for the LIVE rows, and never reaches the response).
+    // #3923 P1: only a SPENDABLE row (`is_live`, the budget-view predicate) is
+    // read. An expired `active` row stays in the list as history but costs no
+    // chain read and reports null remaining, like a non-active row.
+    const isReadable = (r: AgentDelegationListRow): boolean => r.status === 'active' && r.is_live
+    const liveIds = result.rows.filter(isReadable).map((r) => r.id)
+    const jsonById = await listDelegationJsonByIds(liveIds)
     const nowSec = Math.floor(Date.now() / 1000)
-    // #3693: each ACTIVE row reports what the chain will still allow this
+    // #3693: each LIVE row reports what the chain will still allow this
     // period. Reads share analytics' worker pool (`BUDGET_READ_CONCURRENCY` in
     // flight) and the reader's own per-read timeouts, so a slow RPC can slow
     // the page by at most one read — never hang it, never fire N RPCs at once.
     const delegations = await mapWithConcurrency(result.rows, BUDGET_READ_CONCURRENCY, async (row) => {
-      if (row.status !== 'active') {
+      if (!isReadable(row)) {
         return { ...row, remaining_atomic: null, remaining_from_chain: null, period_end: null }
       }
       // `readRemainingBudget` already degrades to the full budget on failure;
@@ -318,7 +401,11 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
   // ── GET /:id/account-signers — the treasury's signer set (#887) ───────────
   // The dashboard builds the account's WebAuthn signer from this (kit
   // deployParams must match EXACTLY what provisioning derived the address
-  // from). Owner-scoped; public-key material only — nothing secret.
+  // from — including the account's per-account deploy salt, #4023, which
+  // stays server-side on the smart_accounts row and is NOT part of this
+  // response: the client signs with the signers it is handed; it never
+  // re-derives the address). Owner-scoped; public-key material only —
+  // nothing secret.
   app.get<{ Params: { id: string } }>('/:id/account-signers', async (request, reply) => {
     const { sub } = request.user as { sub: string }
     const agent = await loadOwnedDelegationAgent(request.params.id, sub)
@@ -429,6 +516,8 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
       period_seconds: number
       expires_at?: number
       merchant_slug?: string
+      /** #3933: the edit flow names the live budget(s) this grant replaces. */
+      replaces?: string | string[] | null
     }
   }>('/:id/delegations/build', async (request, reply) => {
     const { sub } = request.user as { sub: string }
@@ -537,6 +626,20 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
     // is `nowSec - 60` and a pair straddling a second boundary hashes
     // differently — so the unique index never collided and one slot ended up
     // with two pending version-1 rows.
+    // #3933: refuse a plain grant into an occupied slot here, before the owner
+    // is asked to sign something activate would refuse. Activate checks again
+    // under the agent lock — the slot can change between the two calls.
+    const buildSlotRefusal = slotOccupiedRefusal(
+      await findOccupyingDelegationsInSlot(
+        request.params.id,
+        token_address,
+        recipient_address ? recipient_address.toLowerCase() : null,
+        null,
+      ),
+      request.body?.replaces,
+    )
+    if (buildSlotRefusal) return reply.code(409).send(buildSlotRefusal)
+
     const outcome = await withDelegationBuildSlotLock(
       request.params.id,
       token_address,
@@ -660,7 +763,7 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
   })
 
   // ── POST /:id/delegations/:hash/activate — grant step 2 ───────────────────
-  app.post<{ Params: { id: string; hash: string }; Body: { signature?: string } }>(
+  app.post<{ Params: { id: string; hash: string }; Body: { signature?: string; replaces?: string | string[] | null } }>(
     '/:id/delegations/:hash/activate',
     async (request, reply) => {
       const { sub } = request.user as { sub: string }
@@ -825,12 +928,31 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
         // alone. Kept as one `if` so the transaction gains no second
         // ROLLBACK call site (`lint:deps` counts inline SQL per file,
         // shrink-only).
-        if (
+        const rotated =
           lockedAgent.delegate_address.toLowerCase() !== preLockDelegateKey.toLowerCase() ||
           signed.delegate.toLowerCase() !== expectedDelegateAccountAddress.toLowerCase()
-        ) {
+        // #3933: under the agent lock (activations for one agent serialize),
+        // so the slot read is authoritative: a plain grant into a slot that
+        // holds a live grant is refused, and only an edit naming EVERY live
+        // grant there as `replaces` goes on to the sweep below — the sweep
+        // retires all of them, so the edit must stop all of them. Folded into
+        // the rotated-key refusal's one `if` — same transaction, still one
+        // ROLLBACK site.
+        const slotRefusal = rotated
+          ? null
+          : slotOccupiedRefusal(
+              await findOccupyingDelegationsInSlot(
+                request.params.id,
+                pending.token_address,
+                pending.recipient_address,
+                request.params.hash,
+                client,
+              ),
+              request.body?.replaces,
+            )
+        if (rotated || slotRefusal) {
           await client.query('ROLLBACK')
-          return reply.code(409).send({ error: ROTATED_DELEGATE_KEY_REFUSAL })
+          return reply.code(409).send(rotated ? { error: ROTATED_DELEGATE_KEY_REFUSAL } : slotRefusal)
         }
         // Sweep the slot's OTHER active grants, then flip the pending row —
         // one repository call that owns the order and excludes the new row by
@@ -957,6 +1079,7 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
       const treasury = await createTreasuryOps({
         ownerAddress: owner.config.ownerAddress,
         passkeys: owner.config.passkeys,
+        deploySalt: owner.config.deploySalt,
         accountAddress: agent.treasury_address as Address,
         chainId: agent.chain_id,
         bundlerUrl: delegationRailBundlerUrl(agent.chain_id),
@@ -1049,6 +1172,7 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
       const treasury = await createTreasuryOps({
         ownerAddress: owner.config.ownerAddress,
         passkeys: owner.config.passkeys,
+        deploySalt: owner.config.deploySalt,
         accountAddress: agent.treasury_address as Address,
         chainId: agent.chain_id,
         bundlerUrl: delegationRailBundlerUrl(agent.chain_id),
@@ -1089,7 +1213,7 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
       const target = row.rows[0]
       if (!target) return reply.code(404).send({ error: 'Delegation not found' })
       if (target.status === 'revoked') {
-        return reply.code(409).send({ error: 'Already revoked' })
+        return reply.code(409).send({ error: 'Already revoked', error_code: DELEGATION_ALREADY_REVOKED_ERROR_CODE })
       }
 
       // #1423: same crash-window hardening as revoke-all — disableDelegation
@@ -1107,7 +1231,10 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
             { agentId: request.params.id, healed },
             'per-hash revoke reconciled an on-chain-disabled delegation to revoked (no signature — chain state was already disabled)',
           )
-          return reply.code(409).send({ error: 'Already revoked — the delegation was disabled on-chain and the record has been reconciled.' })
+          return reply.code(409).send({
+            error: 'Already revoked — the delegation was disabled on-chain and the record has been reconciled.',
+            error_code: DELEGATION_ALREADY_REVOKED_ERROR_CODE,
+          })
         }
       } catch (err) {
         request.log.warn({ err }, 'disabled-delegation read failed; proceeding with the normal prepare')
@@ -1133,6 +1260,7 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
         const treasury = await createTreasuryOps({
           ownerAddress: owner.config.ownerAddress,
           passkeys: owner.config.passkeys,
+          deploySalt: owner.config.deploySalt,
           accountAddress: agent.treasury_address as Address,
           chainId: agent.chain_id,
           bundlerUrl: delegationRailBundlerUrl(agent.chain_id),
@@ -1224,6 +1352,7 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
       const treasury = await createTreasuryOps({
         ownerAddress: owner.config.ownerAddress,
         passkeys: owner.config.passkeys,
+        deploySalt: owner.config.deploySalt,
         accountAddress: agent.treasury_address as Address,
         chainId: agent.chain_id,
         bundlerUrl: delegationRailBundlerUrl(agent.chain_id),

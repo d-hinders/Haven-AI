@@ -69,12 +69,68 @@ export interface CapturedMerchantResponse {
 
 type MerchantFetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>
 
+/**
+ * #4244: the caller headers a redirect hop may carry to a DIFFERENT origin.
+ * The platform `fetch` drops `Authorization` on a cross-origin redirect; the
+ * manual follower in `fetchUnderPolicy` replaced it and has to do the same
+ * itself. It goes further than the Fetch spec: a caller's header was supplied
+ * for the origin it addressed (a merchant API key, a cookie, a payment
+ * header), so everything not on this list is dropped. What stays describes
+ * the request, not its credentials: content negotiation, the client name, and
+ * `x402-wallet` (a public address the SDK itself adds).
+ */
+const CROSS_ORIGIN_REDIRECT_HEADERS: ReadonlySet<string> = new Set([
+  'accept',
+  'accept-language',
+  'user-agent',
+  'x402-wallet',
+])
+
+/** #4244: `headers` reduced to `CROSS_ORIGIN_REDIRECT_HEADERS`; accepts every `HeadersInit` shape. */
+function crossOriginRedirectHeaders(headers: HeadersInit | undefined): Headers {
+  const kept = new Headers()
+  // `Headers` iteration yields lower-cased names whatever shape came in.
+  for (const [name, value] of new Headers(headers)) {
+    if (CROSS_ORIGIN_REDIRECT_HEADERS.has(name)) kept.set(name, value)
+  }
+  return kept
+}
+
+/**
+ * #4257: the redirect limit the Fetch spec gives the platform follower. The
+ * no-policy path follows redirects itself now, and keeps this limit so it
+ * follows exactly as many hops as `fetch` did before.
+ */
+export const NO_POLICY_MAX_REDIRECTS = 20
+
+/** Fetch spec: the request-body header names dropped when a redirect turns the request into a GET. */
+const REQUEST_BODY_HEADERS = ['content-encoding', 'content-language', 'content-location', 'content-type', 'content-length']
+
+/**
+ * #4257: the method and body a redirect hop is sent with, per the Fetch
+ * spec's HTTP-redirect fetch: a 301/302 POST and a 303 of anything but
+ * GET/HEAD become a GET with no body and no body headers; every other hop
+ * (307/308 included) keeps method and body.
+ */
+function redirectedInit(init: RequestInit, status: number): RequestInit {
+  const method = (init.method ?? 'GET').toUpperCase()
+  const toGet =
+    ((status === 301 || status === 302) && method === 'POST') ||
+    (status === 303 && method !== 'GET' && method !== 'HEAD')
+  if (!toGet) return init
+  const headers = new Headers(init.headers)
+  for (const name of REQUEST_BODY_HEADERS) headers.delete(name)
+  return { ...init, method: 'GET', body: null, headers }
+}
+
 export interface McpMerchantTransportOptions {
   merchantTimeout?: number
   fetch?: MerchantFetch
   /**
-   * #3747: optional merchant-egress policy. Absent — the SDK default — the
-   * transport behaves exactly as before. Present, every request and every
+   * #3747: optional merchant-egress policy. Absent — the SDK default — there
+   * is no URL check, cap or per-use budget, and redirects follow the
+   * platform's rules except that a hop to another origin keeps credentials
+   * and payment headers at the origin they were sent to (#4257). Present, every request and every
    * GET-redirect hop is `assertUrl`-checked before it connects, redirects go
    * `manual` with re-checked GET follows, response bodies are capped WHILE
    * being read, and `budgetFor` resolves per-use timeouts.
@@ -125,11 +181,29 @@ export class McpMerchantTransport {
 
   /** Fetch a merchant with a settlement-sized timeout and caller cancellation. */
   async fetch(url: string, init: RequestInit = {}, timeoutMs = this.merchantTimeout, maxBytes?: number): Promise<Response> {
+    return this.send(url, init, timeoutMs, maxBytes, false)
+  }
+
+  /**
+   * `fetch`, plus whether this request is the paid delivery (#4257). A paid
+   * delivery, or any body carrying an x402 payment in `_meta`, is never
+   * re-sent to another origin by a redirect that keeps the body; without a policy every other
+   * request follows that redirect as the platform would, headers reduced.
+   */
+  private async send(url: string, init: RequestInit, timeoutMs: number, maxBytes: number | undefined, paidDelivery: boolean): Promise<Response> {
+    const carriesPayment = paidDelivery || bodyCarriesX402Payment(init.body)
     if (!this.egress) {
       const timeoutSignal = AbortSignal.timeout(timeoutMs)
       const signal = init.signal ? AbortSignal.any([init.signal, timeoutSignal]) : timeoutSignal
       try {
-        return await this.fetchImpl(url, { ...init, signal })
+        // #4257: a caller that chose 'manual' or 'error' gets exactly that
+        // from the platform, as before. Following is done here instead of by
+        // the platform so a hop to another origin cannot carry this origin's
+        // credentials or payment headers (the #4244 rule, both paths).
+        if (init.redirect === 'manual' || init.redirect === 'error') {
+          return await this.fetchImpl(url, { ...init, signal })
+        }
+        return await this.followRedirects(url, init, signal, undefined, carriesPayment)
       } catch (err) {
         if (timeoutSignal.aborted) {
           throw new MerchantTimeoutError(`Merchant request timed out after ${timeoutMs}ms: ${url}`)
@@ -137,19 +211,20 @@ export class McpMerchantTransport {
         throw err
       }
     }
-    return this.fetchUnderPolicy(url, init, timeoutMs, maxBytes)
+    return this.fetchUnderPolicy(url, init, timeoutMs, maxBytes, carriesPayment)
   }
 
   /**
    * #3747: the policy path. Every URL — the initial request and each redirect
    * hop — is `assertUrl`-checked BEFORE it connects; redirects run `manual`
    * so nothing is ever followed un-checked; GET redirects are followed up to
-   * `maxGetRedirects` (a redirect on any other method is refused); response
-   * bodies are capped WHILE being read, not after buffering. The timeout
+   * `maxGetRedirects` (a redirect on any other method is refused); a hop to
+   * another origin carries only `CROSS_ORIGIN_REDIRECT_HEADERS` (#4244);
+   * response bodies are capped WHILE being read, not after buffering. The timeout
    * signal spans the WHOLE redirect chain, and `MerchantTimeoutError`
    * classification is preserved.
    */
-  private async fetchUnderPolicy(url: string, init: RequestInit, timeoutMs: number, maxBytes?: number): Promise<Response> {
+  private async fetchUnderPolicy(url: string, init: RequestInit, timeoutMs: number, maxBytes: number | undefined, carriesPayment: boolean): Promise<Response> {
     const egress = this.egress as MerchantEgressPolicy
     // Before anything is sent: a refusal here means no request of this use
     // ever left.
@@ -158,77 +233,156 @@ export class McpMerchantTransport {
     } catch (err) {
       throw asRefusal(err, url, true)
     }
-    const method = (init.method ?? 'GET').toUpperCase()
     const timeoutSignal = AbortSignal.timeout(timeoutMs)
     const signal = init.signal ? AbortSignal.any([init.signal, timeoutSignal]) : timeoutSignal
-    const maxRedirects = egress.maxGetRedirects ?? 0
-    let currentUrl = url
-    let hops = 0
+    let finalUrl = url
     try {
-      while (true) {
-        // (Spec review 2026-10-07): 'manual' is set AFTER spreading init so a
-        // caller-supplied `redirect: 'follow'` cannot win; the ONE override
-        // allowed is the stricter 'error' (discovery, the #3739 probe).
-        const response = await this.fetchImpl(currentUrl, {
-          ...init,
-          redirect: init.redirect === 'error' ? 'error' : 'manual',
-          signal,
-        })
-        if (!isRedirectStatus(response.status)) return this.capResponse(response, currentUrl, maxBytes)
-        // The 3xx came back from a request that WAS sent: everything from
-        // here on is mid-flight.
-        if (method !== 'GET') {
-          throw new MerchantEgressRefusedError(
-            `Hosted egress policy refuses the ${response.status} redirect from ${currentUrl}: ` +
-              `redirects are followed for GET requests only, and this was a ${method}. ` +
-              'The request itself was already sent to the checked URL; nothing was sent to the redirect target.',
-            currentUrl,
-            'redirect_on_non_get',
-            false,
-          )
-        }
-        const location = response.headers.get('location')
-        if (!location) {
-          throw new MerchantEgressRefusedError(
-            `Hosted egress policy refuses the ${response.status} redirect from ${currentUrl}: it carries no Location header, so there is no checked target to follow.`,
-            currentUrl,
-            'redirect_missing_location',
-            false,
-          )
-        }
-        let next: string
-        try {
-          next = new URL(location, currentUrl).toString()
-        } catch {
-          throw new MerchantEgressRefusedError(
-            `Hosted egress policy refuses the redirect from ${currentUrl}: its Location header is not a resolvable URL.`,
-            currentUrl,
-            'redirect_invalid_location',
-            false,
-          )
-        }
-        if (hops >= maxRedirects) {
-          throw new MerchantEgressRefusedError(
-            `Hosted egress policy refuses the redirect from ${currentUrl} to ${next}: the ${maxRedirects}-redirect budget for this request is spent.`,
-            next,
-            'redirect_budget_exceeded',
-            false,
-          )
-        }
-        try {
-          egress.assertUrl(next)
-        } catch (err) {
-          // Mid-flight: the chain's earlier requests were already sent.
-          throw asRefusal(err, next, false)
-        }
-        hops++
-        currentUrl = next
-      }
+      const response = await this.followRedirects(url, init, signal, egress, carriesPayment, (hopUrl) => {
+        finalUrl = hopUrl
+      })
+      return this.capResponse(response, finalUrl, maxBytes)
     } catch (err) {
       if (timeoutSignal.aborted) {
-        throw new MerchantTimeoutError(`Merchant request timed out after ${timeoutMs}ms: ${currentUrl}`)
+        throw new MerchantTimeoutError(`Merchant request timed out after ${timeoutMs}ms: ${finalUrl}`)
       }
       throw err
+    }
+  }
+
+  /**
+   * The redirect follower both paths share (#3747, #4244, #4257). Redirects
+   * run `manual` and every hop is decided here:
+   *
+   * - Under a `policy`, every hop is `assertUrl`-checked before it connects,
+   *   only GET redirects are followed (any other method is refused), up to
+   *   `maxGetRedirects`; a missing or unresolvable Location is refused.
+   * - Without one, the platform's rules are kept: up to
+   *   `NO_POLICY_MAX_REDIRECTS` hops, the Fetch spec's method/body rewrite,
+   *   and a 3xx with no Location returned as the answer.
+   * - On both, a hop to another origin carries only
+   *   `CROSS_ORIGIN_REDIRECT_HEADERS`, never restored on a later hop.
+   * - A hop that would re-send a request body to another origin is refused
+   *   under a policy (which follows GET alone, so this is unreachable there),
+   *   and without one only when `carriesPayment`: the paid delivery, or a body
+   *   carrying an x402 payment in `_meta` (#4257). Any other body-keeping redirect is
+   *   followed with its body, as the platform did, headers reduced.
+   *
+   * `onHop` sees every URL a request goes to, so the caller can name the hop
+   * it was on when the chain stops.
+   */
+  private async followRedirects(
+    url: string,
+    init: RequestInit,
+    signal: AbortSignal,
+    policy: MerchantEgressPolicy | undefined,
+    carriesPayment: boolean,
+    onHop?: (hopUrl: string) => void,
+  ): Promise<Response> {
+    const maxRedirects = policy ? (policy.maxGetRedirects ?? 0) : NO_POLICY_MAX_REDIRECTS
+    let currentUrl = url
+    // #4244: the init the NEXT request goes out with — `init` until a hop
+    // rewrites the method or crosses origin; reduced headers are never restored.
+    let hopInit = init
+    let hops = 0
+    while (true) {
+      onHop?.(currentUrl)
+      // (Spec review 2026-10-07): 'manual' is set AFTER spreading init so a
+      // caller-supplied `redirect: 'follow'` cannot win; the ONE override
+      // allowed is the stricter 'error' (discovery, the #3739 probe).
+      const response = await this.fetchImpl(currentUrl, {
+        ...hopInit,
+        redirect: init.redirect === 'error' ? 'error' : 'manual',
+        signal,
+      })
+      if (!isRedirectStatus(response.status)) return response
+      // The 3xx came back from a request that WAS sent: everything from
+      // here on is mid-flight.
+      const method = (hopInit.method ?? 'GET').toUpperCase()
+      if (policy && method !== 'GET') {
+        throw new MerchantEgressRefusedError(
+          `Hosted egress policy refuses the ${response.status} redirect from ${currentUrl}: ` +
+            `redirects are followed for GET requests only, and this was a ${method}. ` +
+            'The request itself was already sent to the checked URL; nothing was sent to the redirect target.',
+          currentUrl,
+          'redirect_on_non_get',
+          false,
+          { redirectStatus: response.status },
+        )
+      }
+      const location = response.headers.get('location')
+      if (!location) {
+        // Fetch spec: a redirect status with no Location is the response.
+        if (!policy) return response
+        throw new MerchantEgressRefusedError(
+          `Hosted egress policy refuses the ${response.status} redirect from ${currentUrl}: it carries no Location header, so there is no checked target to follow.`,
+          currentUrl,
+          'redirect_missing_location',
+          false,
+          { redirectStatus: response.status },
+        )
+      }
+      let next: string
+      try {
+        next = new URL(location, currentUrl).toString()
+      } catch {
+        if (!policy) throw new TypeError(`fetch failed: the redirect from ${currentUrl} has an unresolvable Location header`)
+        throw new MerchantEgressRefusedError(
+          `Hosted egress policy refuses the redirect from ${currentUrl}: its Location header is not a resolvable URL.`,
+          currentUrl,
+          'redirect_invalid_location',
+          false,
+          { redirectStatus: response.status },
+        )
+      }
+      // Fetch spec (and undici): a redirect to a non-HTTP(S) URL is a network error.
+      if (!policy && !/^https?:$/.test(new URL(next).protocol)) {
+        throw new TypeError(`fetch failed: the redirect from ${currentUrl} names a non-HTTP(S) URL`)
+      }
+      if (hops >= maxRedirects) {
+        if (!policy) throw new TypeError(`fetch failed: redirect count exceeded (${maxRedirects}) at ${currentUrl}`)
+        throw new MerchantEgressRefusedError(
+          `Hosted egress policy refuses the redirect from ${currentUrl} to ${next}: the ${maxRedirects}-redirect budget for this request is spent.`,
+          next,
+          'redirect_budget_exceeded',
+          false,
+          { redirectStatus: response.status, redirectTarget: next },
+        )
+      }
+      if (policy) {
+        try {
+          policy.assertUrl(next)
+        } catch (err) {
+          // Mid-flight: the chain's earlier requests were already sent.
+          throw asRefusal(err, next, false, { redirectStatus: response.status, redirectTarget: next })
+        }
+      }
+      hopInit = redirectedInit(hopInit, response.status)
+      // #4244: headers addressed to one origin never follow a redirect to
+      // another. Compared hop to hop, as the Fetch spec does.
+      if (new URL(next).origin !== new URL(currentUrl).origin) {
+        // #4257: a body survives only a 307/308, or a 301/302 on a method
+        // other than POST, and only off-policy (the policy follows GET alone). A paid request re-sent elsewhere would hand the
+        // payment, or the paid call, to an origin it was not made for.
+        if (hopInit.body != null && (policy || carriesPayment)) {
+          throw new MerchantEgressRefusedError(
+            carriesPayment
+              ? `The ${response.status} redirect of a paid request from ${currentUrl} to ${next} was not followed: ` +
+                  'following it would re-send the paid request to a different origin. The paid request, payment ' +
+                  `header and body included, was already delivered to ${currentUrl}; nothing was sent to ${next}.`
+              : `Refusing the ${response.status} redirect from ${currentUrl} to ${next}: it would re-send the request body ` +
+                  'to a different origin. The request was already sent to the first URL; nothing was sent to the redirect target.',
+            next,
+            'redirect_cross_origin_body',
+            false,
+            { redirectStatus: response.status, redirectTarget: next },
+          )
+        }
+        hopInit = { ...hopInit, headers: crossOriginRedirectHeaders(hopInit.headers) }
+      }
+      // The 3xx body is never read; release it before the next hop.
+      await response.body?.cancel().catch(() => undefined)
+      hops++
+      currentUrl = next
     }
   }
 
@@ -451,7 +605,7 @@ export class McpMerchantTransport {
     // #3118: a `tools/call` body additionally carries the payment in
     // `params._meta["x402/payment"]` (the official MCP profile). Any other
     // body is sent byte-for-byte as the caller gave it.
-    return this.fetch(url, withMcpPaymentMeta({ ...init, headers }, paymentHeader), this.budgetFor('delivery'), this.capFor('delivery'))
+    return this.send(url, withMcpPaymentMeta({ ...init, headers }, paymentHeader), this.budgetFor('delivery'), this.capFor('delivery'), true)
   }
 
   /**
@@ -655,6 +809,38 @@ export function encodeMcpSettlementReceipt(settlement: McpX402SettlementMeta): s
   return encodeBase64Json(settlement)
 }
 
+/**
+ * #4257: whether a request body carries an x402 payment in `params._meta`,
+ * on any JSON-RPC method. Reads a string body, a `Uint8Array`/`ArrayBuffer`
+ * body decoded as UTF-8, and a batch array (paid when any element is). Fail
+ * safe in the old direction: a body it cannot read (a stream, form data,
+ * bytes that are not UTF-8 JSON) is not treated as paid, so it follows as
+ * the platform did.
+ */
+function bodyCarriesX402Payment(body: unknown): boolean {
+  let text: string
+  if (typeof body === 'string') text = body
+  else if (body instanceof Uint8Array || body instanceof ArrayBuffer) {
+    try {
+      text = new TextDecoder('utf-8', { fatal: true }).decode(body)
+    } catch {
+      return false
+    }
+  } else return false
+  let request: unknown
+  try {
+    request = JSON.parse(text)
+  } catch {
+    return false
+  }
+  return Array.isArray(request) ? request.some(messageCarriesX402Payment) : messageCarriesX402Payment(request)
+}
+
+function messageCarriesX402Payment(message: unknown): boolean {
+  return isRecord(message) && isRecord(message.params) && isRecord(message.params._meta) &&
+    message.params._meta[MCP_X402_PAYMENT_META_KEY] !== undefined
+}
+
 /** #3155: the request body parsed as a JSON-RPC `tools/call` with an object `params`, else undefined. */
 function parseJsonRpcToolsCall(body: unknown): (Record<string, unknown> & { params: Record<string, unknown> }) | undefined {
   if (typeof body !== 'string') return undefined
@@ -720,10 +906,15 @@ function isRedirectStatus(status: number): boolean {
  * `beforeRequest: true` (its contract is "nothing sent yet"), but a HOP check
  * runs after earlier requests of the same use were already sent.
  */
-function asRefusal(err: unknown, url: string, beforeRequest: boolean): unknown {
+function asRefusal(
+  err: unknown,
+  url: string,
+  beforeRequest: boolean,
+  redirect?: { redirectStatus: number; redirectTarget: string },
+): unknown {
   if (!(err instanceof MerchantEgressRefusedError)) return err
-  if (err.beforeRequest === beforeRequest) return err
-  return new MerchantEgressRefusedError(err.message, url, err.refusal, beforeRequest)
+  if (err.beforeRequest === beforeRequest && !redirect) return err
+  return new MerchantEgressRefusedError(err.message, url, err.refusal, beforeRequest, redirect)
 }
 
 /** Consume and preserve every diagnostic field of a failed merchant response. */

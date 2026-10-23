@@ -1,4 +1,8 @@
+// Third-party analytics off for the whole suite (#4216): the kit latches at
+// its first tracked call, so the opt-out must precede any test importing it.
+import './src/telemetry/kit-analytics-off.js'
 import { applyTestEnvDefaults } from './src/infra/__tests__/helpers/test-env.js'
+import { installTestNetworkNet, registerNetHooks } from './src/infra/__tests__/helpers/test-network-net.js'
 import { workerSchemaName } from './src/infra/__tests__/helpers/worker-schema.js'
 
 // Default matches `docker compose up -d postgres` AND the ci.yml service
@@ -16,6 +20,20 @@ import { workerSchemaName } from './src/infra/__tests__/helpers/worker-schema.js
 // `vitest.global-setup.ts` needs the same ones (#2622) and a second copy of
 // them is the divergence this file's own comment above warns about.
 applyTestEnvDefaults()
+
+// The network net (#4217): a backend test must not dial the real network.
+// Every connection whose RESOLVED address is not loopback is refused and
+// recorded, and the hooks turn each record into a red — in `afterEach` for
+// the test that dialed, in this file's `afterAll` for a dial that landed after
+// its test ended — so code that swallows the connection error cannot hide it.
+// Installed after the env defaults because it admits `DATABASE_URL`'s host.
+// The rule, the exemption list and how to add to it:
+// docs/contributing/testing-strategy.md § "No real network (#4217)".
+// The kit's analytics host is never exempt: the first import above
+// (#4216's `kit-analytics-off`) keeps the kit silent, and if anything turned it
+// back on, the net would refuse its posts and fail the file.
+installTestNetworkNet()
+registerNetHooks()
 
 // Explorer history routing is env-driven: with ALCHEMY_HISTORY_API_KEY set
 // (a production value copied into a local `.env`), every Base history read

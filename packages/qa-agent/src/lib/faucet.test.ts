@@ -13,6 +13,7 @@ const API_KEY_SECRET = 'test-secret-that-must-never-escape'
 const baseOptions = () => ({
   address: ADDRESS,
   chainId: 84532,
+  token: 'eth' as const,
   apiKeyId: API_KEY_ID,
   apiKeySecret: API_KEY_SECRET,
 })
@@ -65,6 +66,20 @@ describe('requestCdpEvmFaucet', () => {
         signal: expect.any(AbortSignal),
       }),
     )
+  })
+
+  it('requests USDC when token: "usdc" is passed (#3997)', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ transactionHash: '0xdef456' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    await expect(
+      requestCdpEvmFaucet({ ...baseOptions(), token: 'usdc', fetchImpl }),
+    ).resolves.toEqual({ transactionHash: '0xdef456' })
+    const init = fetchImpl.mock.calls[0]?.[1] as RequestInit
+    expect(JSON.parse(String(init.body))).toEqual({ address: ADDRESS, network: 'base-sepolia', token: 'usdc' })
   })
 
   it.each([8453, 100])('refuses chain %s before authentication or network access', async (chainId) => {

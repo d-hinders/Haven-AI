@@ -68,6 +68,7 @@ import {
   resolveTokenFromAddress,
   resolveX402RetryTarget,
   strictMerchantEgressPolicy,
+  x402AuthorizationAmount,
   type MerchantEgressPolicy,
   isSecureX402RetryTarget,
   isZeroSettlementTxHash,
@@ -90,7 +91,14 @@ import {
   quoteWarnings,
   readMaxAmountCap,
 } from './support/cap-price.js'
-import { HostedToolError, egressRefusalBeforeIntent, normalizeError, runTool } from './support/errors.js'
+import {
+  HostedToolError,
+  SETTLEMENT_PROOF_HEADER_MISSING_CODE,
+  egressRefusalBeforeIntent,
+  isMissingProofHeaderRefusal,
+  normalizeError,
+  runTool,
+} from './support/errors.js'
 import {
   buildAgentGuidance,
   catchSettledReplay,
@@ -102,7 +110,11 @@ import {
 import { buildX402SigningContext, coerceJsonField } from './support/mcp-context.js'
 import {
   isPendingApproval,
+  merchantDenialWarnings,
+  quoteBudgetCheckFields,
   resolveResumeState,
+  runQuoteBudgetPrecheck,
+  selectedSettlement,
   settlementPredictionFields,
   wrongTool,
 } from './support/quote-response.js'
@@ -203,6 +215,8 @@ function reportOutcomeHandoff(
   }
   if (settlementEvidence) return evidenceHandoff(settlementEvidence, paymentId)
   if (offerSettlementEvidence) {
+    // #4061: payment_header is the agent's own value — Haven never saw it —
+    // so it cannot be prefilled; the reason names it.
     return { nextTool: 'haven_report_settlement_evidence', nextArguments: { payment_id: paymentId } }
   }
   return { nextTool: null, nextToolOmittedReason: 'the merchant accepted the paid retry; the purchase is complete and no Haven tool follows' }
@@ -348,6 +362,14 @@ type ReportedSettlementEvidence = {
   readonly outcome: EvidenceReportOutcome['outcome'] | 'not_attempted'
   readonly status_code?: number
   readonly refusal_reason?: string
+  /**
+   * #4061: the typed refusal, when the backend gave one a remedy —
+   * `SETTLEMENT_PROOF_HEADER_MISSING` (backend `error_code`
+   * `settlement_proof_header_missing`): the report carried no payment
+   * header, so the hash was never judged. The handoff and reason branch on
+   * THIS, never on `refusal_reason`'s sentence.
+   */
+  readonly code?: typeof SETTLEMENT_PROOF_HEADER_MISSING_CODE
   readonly note?: string
 }
 
@@ -367,6 +389,15 @@ function evidenceHandoff(
       nextArguments: { payment_id: paymentId, settlement_tx_hash: reported.settlement_tx_hash },
     }
   }
+  // #4061: refused for want of the proof header — the hash was never judged,
+  // so the evidence tool follows, the hash prefilled; the agent adds the
+  // payment_header it holds (Haven never saw it, so it cannot be prefilled).
+  if (reported.code === SETTLEMENT_PROOF_HEADER_MISSING_CODE) {
+    return {
+      nextTool: 'haven_report_settlement_evidence',
+      nextArguments: { payment_id: paymentId, settlement_tx_hash: reported.settlement_tx_hash },
+    }
+  }
   if (reported.outcome === 'refused') {
     return {
       nextTool: null,
@@ -379,6 +410,16 @@ function evidenceHandoff(
   return { nextTool: 'haven_get_payment_status', nextArguments: { payment_id: paymentId } }
 }
 
+// #4123: the retryable arm names payment_header (an EIP-3009 settlement
+// report is refused without it before its hash is judged), unconditionally.
+// A PENDING erc7710 report never gets here (`erc7710OutcomeRefusal`); a
+// CONFIRMED one does reach `reportSettlementEvidence`, but cannot come back
+// retryable: the backend answers 503 only for `settlement_unobservable`,
+// raised by the pending-erc7710 seam or the eip3009 branch, while the
+// confirmed-erc7710 attach path answers 202/409. Even a stray 503 leaves
+// the text harmless: the named report tool drops the header on any
+// non-eip3009 payment (`settlementProofHeaderFor`). next_arguments stay
+// unchanged.
 function evidenceReason(reported: ReportedSettlementEvidence): string {
   if (reported.recorded) {
     return (
@@ -389,14 +430,29 @@ function evidenceReason(reported: ReportedSettlementEvidence): string {
   if (reported.outcome === 'retryable') {
     return (
       'Recorded. The settlement hash could not be verified yet (the chain read failed, or the ' +
-      'transaction is not mined); retry haven_report_settlement_evidence with the same hash.'
+      'transaction is not mined). Call next_tool (haven_report_settlement_evidence) shortly ' +
+      'with next_arguments, adding payment_header: the exact payment_header you sent the merchant.'
     )
+  }
+  if (reported.code === SETTLEMENT_PROOF_HEADER_MISSING_CODE) {
+    return MISSING_PROOF_HEADER_REPORT_REASON
   }
   return (
     'Recorded, but the settlement evidence was refused: the hash does not match this payment ' +
     'on-chain. Do not re-report the same hash — check the PAYMENT-RESPONSE you relayed.'
   )
 }
+
+/**
+ * #4061: the reason when the folded evidence was refused for want of the
+ * proof header. Says what is true — the outcome IS recorded, the hash was not
+ * judged — and names the one fix. Never "the hash does not match".
+ */
+const MISSING_PROOF_HEADER_REPORT_REASON =
+  'Recorded. The merchant\'s answer is recorded, but its settlement is not yet: the report carried ' +
+  'no payment_header, and Haven records a reported EIP-3009 merchant settlement only with the payment header ' +
+  'you retried the merchant with. The hash was not judged. Call next_tool with next_arguments, adding ' +
+  'payment_header: the exact payment_header you sent the merchant.'
 
 function differsFromRequest(target: X402RetryTarget): { resource_url_differs_from_request?: boolean } {
   return target.resourceUrlDiffersFromRequest === undefined
@@ -713,7 +769,8 @@ async function requestModeReplay(
           'This idempotency_key already has a payment awaiting signature, so nothing was probed or ' +
           'created. Sign locally: call next_tool with next_arguments EXACTLY as given — the signer ' +
           'fetches the stored payment challenge itself. It returns BOTH signature and payment_header. ' +
-          'Relay signature via haven_submit, then retry retry_url yourself with payment_header.',
+          'Relay signature via haven_submit, then retry retry_url yourself with payment_header, and ' +
+          'report the answer with haven_report_x402_outcome, passing that same payment_header.',
         summary,
       }),
     }
@@ -854,6 +911,59 @@ export function createPlainHttpX402Handlers(
           agent,
           'haven_pay_x402_quote',
         )
+        // #3967: the option pay will ACTUALLY authorize for this account —
+        // the budget pre-check and the `expected_amount` comparison ask about
+        // IT (its amount, its payTo), never about `quote.accepted`, which
+        // describes the merchant's preferred entry (#2051).
+        const selected = selectedSettlement(quote.paymentRequired.accepts, agent)
+        // #3967: the agent's stated expectation about the price. A mismatch
+        // STOPS the agent — the plain-HTTP analogue of the MCP quote tools'
+        // `catalog_price_differs`. Compared against the SELECTED option's
+        // atomic amount through the quote's own decimals; when the quote's
+        // asset is not a token Haven recognises (`decimals: null`) the
+        // comparison is not made rather than guessed at a scale, and when the
+        // stated price is finer than the token's own scale can express it
+        // cannot equal any option amount, so the mismatch is decided.
+        // `undefined` = no comparison was made (no field is emitted).
+        let priceDiffers: boolean | undefined
+        if (args.expected_amount !== undefined && selected && quote.decimals !== null) {
+          const expectedAtomic = humanToAtomic(args.expected_amount as string, quote.decimals)
+          if (expectedAtomic === null) {
+            priceDiffers = true
+          } else {
+            let optionAmount: bigint | null = null
+            try {
+              // The AUTHORIZATION amount — maxAmountRequired when named —
+              // exactly what the pay path would authorize.
+              optionAmount = BigInt(x402AuthorizationAmount(selected.option))
+            } catch {
+              optionAmount = null
+            }
+            if (optionAmount !== null) priceDiffers = optionAmount !== expectedAtomic
+          }
+        }
+        // #3967: the quote-time budget pre-check, on the option pay selects.
+        // SKIPPED entirely when the stated expectation already mismatches —
+        // the agent stops on the price, and a budget answer about a wrong
+        // amount is moot (and the extra Haven call is saved). Never widens
+        // authority: its only STOP outcome is a refusal that the later
+        // on-chain evaluatePeriodPrecheck would reach anyway; any failure
+        // degrades with a warning, never a refusal.
+        const budgetOutcome = priceDiffers
+          ? null
+          : await runQuoteBudgetPrecheck(haven, quote, agent)
+        const budget = budgetOutcome ? quoteBudgetCheckFields(budgetOutcome) : null
+        const overBudget = budget?.budget_check.sufficient === false
+        // #3967: the merchant's own denial hints, merged with the prediction's
+        // warnings and the budget warning — never a second `warnings` key
+        // overwriting `X402_SCHEME_UNKNOWN`.
+        const denialWarnings = merchantDenialWarnings(quote.paymentRequired.accepts)
+        const mergedWarnings = [
+          ...(prediction.warnings ?? []),
+          ...(budget?.warnings ?? []),
+          ...denialWarnings,
+        ]
+        const stop = overBudget || priceDiffers === true
         // #3739: the result names its next tool for the first time — the pay
         // tool in REQUEST MODE, with the request exactly as the caller sent
         // it (url, method, headers, body), so the agent never copies the
@@ -902,15 +1012,57 @@ export function createPlainHttpX402Handlers(
             merchant_address: quote.merchantAddress,
             max_timeout_seconds: quote.maxTimeoutSeconds,
             ...prediction,
-            ...taskBudgetNextStep({
-              nextAction: AgentPaymentNextAction.SignAndSubmitPayment,
-              nextTool: 'haven_pay_x402_quote',
-              nextArguments: payNextArguments,
-              reason:
-                'Pay with next_tool and next_arguments: Haven fetches the payment challenge itself ' +
-                'from this same request, so do not copy payment_required. The cap is prefilled ' +
-                'with the quoted amount; lower it to any cap the user stated.',
-            }),
+            // #3967: merged, never overwritten — see mergedWarnings above.
+            ...(mergedWarnings.length > 0 ? { warnings: mergedWarnings } : {}),
+            // #3967: the budget figures ride in a block, not on the warning
+            // (`AgentPaymentWarning` is { code, message }). Present whenever
+            // the check was asked (any outcome) — absent when skipped for an
+            // already-decided price mismatch.
+            ...(budget ? { budget_check: budget.budget_check } : {}),
+            ...(priceDiffers !== undefined ? { price_differs_from_expected: priceDiffers } : {}),
+            // #3967: a stop (over budget, or the price differs from the
+            // stated expectation) names NO tool and pre-fills NO cap —
+            // `fund_account_or_raise_allowance` would invite raising the
+            // budget to cover what may be a wrong price. The quote data
+            // itself is still returned. Both stop paths are
+            // `stop_and_tell_user`, and both reason texts name the
+            // deposit-address fallback's ONE condition: the user's explicit
+            // go-ahead (owner decision, #3967) — never automatic, and never
+            // once anything has been paid via x402 on the invoice.
+            ...(stop
+              ? taskBudgetNextStep({
+                  nextAction: AgentPaymentNextAction.StopAndTellUser,
+                  nextTool: null,
+                  nextToolOmittedReason:
+                    'no Haven tool follows: the quoted price does not fit the agent\'s budget ' +
+                    'or the stated expectation — the user decides before any payment',
+                  safeToContinue: false,
+                  reason:
+                    (priceDiffers
+                      ? `The merchant's quoted price (${quote.amount} ${quote.asset}) does not match ` +
+                        `the expected price (${args.expected_amount as string}) stated with this quote. `
+                      : '') +
+                    (overBudget && budget
+                      ? `The quoted amount (${budget.budget_check.requested_atomic} atomic) exceeds ` +
+                        `the agent's remaining budget (${budget.budget_check.remaining_atomic} atomic), ` +
+                        'decided by Haven\'s server-side budget pre-check — the same compare the ' +
+                        'payment path runs before funding. '
+                      : '') +
+                    'Stop and tell the user before any payment; do not re-quote, re-pay, or poll. ' +
+                    'If the x402 challenge itself is wrong and nothing has been paid via x402 on ' +
+                    'this invoice, the invoice\'s own deposit address MAY be an alternative — but ' +
+                    'only with the user\'s explicit go-ahead, never automatically, and never once ' +
+                    'anything has been paid via x402.',
+                })
+              : taskBudgetNextStep({
+                  nextAction: AgentPaymentNextAction.SignAndSubmitPayment,
+                  nextTool: 'haven_pay_x402_quote',
+                  nextArguments: payNextArguments,
+                  reason:
+                    'Pay with next_tool and next_arguments: Haven fetches the payment challenge itself ' +
+                    'from this same request, so do not copy payment_required. The cap is prefilled ' +
+                    'with the quoted amount; lower it to any cap the user stated.',
+                })),
           },
         }
       } catch (err) {
@@ -1274,7 +1426,8 @@ export function createPlainHttpX402Handlers(
                   : 'signer fetches payment_required itself; only if it reports the context carried ' +
                     'none, re-call with the payment_required you passed to this tool added VERBATIM. ') +
                 'It returns BOTH signature and payment_header. Relay signature via haven_submit, ' +
-                'then retry retry_url yourself with payment_header. Do NOT call ' +
+                'then retry retry_url yourself with payment_header, and report the answer with ' +
+                'haven_report_x402_outcome, passing that same payment_header. Do NOT call ' +
                 'haven_x402_sign_header: haven_sign_x402 already spent its binding building that ' +
                 'header, so that call can only refuse. The header is signed before funding ' +
                 'confirms, so retry promptly.',
@@ -1482,9 +1635,25 @@ export function createPlainHttpX402Handlers(
         // on-chain mismatch it always did.
         let settlementEvidence: ReportedSettlementEvidence | null = null
         if (evidence && report.outcome === 'accepted') {
+          // #4061: forwarded with the payment header the agent retried
+          // with — the #3925 nonce proof — exactly as the SDK forwards its
+          // own (`paymentProofHeader` + the names derived from it).
+          // #4061 review: ONLY where it is that proof — a hash other than the
+          // payment's own funding anchor (`report.txHash`). A report of the
+          // anchor itself (an erc7710 settlement once confirmed) goes through
+          // the evidence attach path, which would store the agent's header
+          // over the recorded one; a different hash on any non-eip3009
+          // payment is refused before attach, so it cannot store it either.
+          const proofHeader =
+            args.payment_header &&
+            report.txHash &&
+            report.txHash.toLowerCase() !== evidence.settlementTxHash.toLowerCase()
+              ? args.payment_header
+              : undefined
           const evidenceOutcome = await haven.reportSettlementEvidence(
             report.paymentId,
             evidence.settlementTxHash,
+            proofHeader ? { paymentHeader: proofHeader } : {},
           )
           settlementEvidence = {
             settlement_tx_hash: evidence.settlementTxHash,
@@ -1496,6 +1665,9 @@ export function createPlainHttpX402Handlers(
               : {}),
             ...(evidenceOutcome.outcome === 'refused' && evidenceOutcome.reason
               ? { refusal_reason: evidenceOutcome.reason }
+              : {}),
+            ...(isMissingProofHeaderRefusal(evidenceOutcome)
+              ? { code: SETTLEMENT_PROOF_HEADER_MISSING_CODE }
               : {}),
           }
         } else if (evidence) {
@@ -1587,7 +1759,8 @@ export function createPlainHttpX402Handlers(
                   : offerSettlementEvidence
                     ? "Recorded. If the merchant's response carried a settlement transaction " +
                       '(PAYMENT-RESPONSE.transaction), pass it as settlement_tx_hash to ' +
-                      'haven_report_settlement_evidence so Haven can verify and record it. If it did ' +
+                      'haven_report_settlement_evidence, with payment_header set to the exact header ' +
+                      'you retried the merchant with, so Haven can verify and record it. If it did ' +
                       'not, the purchase is already complete and no further Haven tool is needed.'
                     : 'Recorded. The purchase is complete and no longer reads as undelivered; no further ' +
                       'Haven tool is needed.',

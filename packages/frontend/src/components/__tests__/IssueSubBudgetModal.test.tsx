@@ -59,6 +59,16 @@ describe('IssueSubBudgetModal (#3506)', () => {
     expect(options).toEqual(['Choose an agent', 'Scout', 'Resting'])
   })
 
+  it('says the sharing agent signs, so the owner gets no passkey prompt', () => {
+    // The sharing agent's key signs the sub-delegation; the owner neither signs
+    // nor approves here (copy-guidelines.md, "The owner approves; only an
+    // agent's key signs"). "No approval needed" would misdescribe a modal
+    // whose whole point is the owner deciding to issue it.
+    renderModal()
+    expect(screen.getByText(/Atlas signs it with its own key — no passkey prompt for you\./)).toBeTruthy()
+    expect(screen.queryByText(/No approval needed/)).toBeNull()
+  })
+
   it('validates before calling the API', async () => {
     renderModal()
     fireEvent.click(screen.getByText('Issue sub-budget', { selector: 'button' }))
@@ -145,16 +155,17 @@ describe('IssueSubBudgetModal (#3506)', () => {
 })
 
 describe('eligibleSubBudgetParents (#3506 S4)', () => {
-  const now = 1_000
-  const b = (o: Record<string, unknown>) => ({ status: 'active', expires_at: 2_000, merchant_slug: null, ...o })
-  it('excludes expired, merchant-locked and non-active budgets', () => {
+  // #3922: liveness is the server's `is_live` (active and unexpired), never
+  // recomputed from status/expires_at here.
+  const b = (o: Record<string, unknown>) => ({ is_live: true, status: 'active', expires_at: 9_999_999_999, merchant_slug: null, ...o })
+  it('keeps only live, non-merchant-locked budgets', () => {
     const rows = [
       b({ id: 'ok' }),
-      b({ id: 'expired', expires_at: 999 }),
+      b({ id: 'expired', is_live: false }),
       b({ id: 'merchant', merchant_slug: 'acme' }),
-      b({ id: 'pending', status: 'pending' }),
+      b({ id: 'pending', is_live: false }),
     ]
-    expect(eligibleSubBudgetParents(rows, now).map((r) => (r as { id?: string }).id)).toEqual(['ok'])
-    expect(eligibleSubBudgetParents(null, now)).toEqual([])
+    expect(eligibleSubBudgetParents(rows).map((r) => (r as { id?: string }).id)).toEqual(['ok'])
+    expect(eligibleSubBudgetParents(null)).toEqual([])
   })
 })

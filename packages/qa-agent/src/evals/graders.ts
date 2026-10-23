@@ -1,0 +1,639 @@
+/**
+ * The eval graders (#3958).
+ *
+ * Every grader reads ONLY the recorded log plus its injected probes — no
+ * model, no live agent. This is what makes a task file + a grader runnable
+ * against a RECORDED tool-call log in a unit test, and what makes the graders
+ * shareable with #3959's Claude Code adapter.
+ *
+ * Semantics are pinned to the repo, not reinvented:
+ *
+ * - A budget refusal is recognized by the backend's `error_code`
+ *   `delegation_budget_exceeded` on a tool result — the typed 403 the
+ *   `POST /payments` / `POST /x402/authorize` pre-checks return (#3503,
+ *   #2706). A bare HTTP status is not proof and never was.
+ * - "Told the user" is the run's final user-facing message; a task may pin
+ *   words that must appear (the refusal's own `next_tool_omitted_reason`
+ *   tells the agent to report the remaining and shortfall figures).
+ * - "The agent made no further call from the payment-tool list" is checked
+ *   with `isPaymentTool(bareToolName(...))` — bare names + roles, never the
+ *   server-prefixed form the runtime writes (`haven-<slug>-dev`).
+ * - A transfer is proven on-chain (`proveUsdcTransferSince` semantics: the
+ *   observer node's Transfer LOG, not a claimed status) — a log that claims
+ *   success with no matching transfer FAILS. That asymmetry is the point of
+ *   the #3958 acceptance criterion.
+ */
+
+import type {
+  AgentRunLog,
+  GraderContext,
+  GraderName,
+  GraderResult,
+  RecordedToolCall,
+} from './types.js'
+import { canonicalErrorCode } from './hermes.js'
+import { bareToolName, isPaymentTool, isSignerTool } from './tools.js'
+
+export const pass = (detail: string): GraderResult => ({ pass: true, detail })
+export const fail = (detail: string): GraderResult => ({ pass: false, detail })
+
+/** Indexes of calls whose BARE name is `name`. */
+function callsTo(log: AgentRunLog, name: string): number[] {
+  return log.calls.map((c, i) => (bareToolName(c.name) === name ? i : -1)).filter((i) => i >= 0)
+}
+
+/**
+ * First call whose result carries this backend error_code. Compared
+ * canonically (both sides through `canonicalErrorCode`) so a task pinning the
+ * SCREAMING_SNAKE hosted spelling (`PRICE_EXCEEDS_MAX`) and one pinning the
+ * backend's snake_case (`delegation_budget_exceeded`) both match their
+ * envelope, whichever spelling the wire used (#4070).
+ */
+function firstRefusalIndex(log: AgentRunLog, errorCode: string): number {
+  const pinned = canonicalErrorCode(errorCode)
+  return log.calls.findIndex((c) => c.result?.errorCode !== undefined && canonicalErrorCode(c.result.errorCode) === pinned)
+}
+
+/** Case-insensitive `mentions` coverage of the final message. */
+function mentionsSatisfied(finalMessage: string, mentions: readonly string[]): string[] {
+  const haystack = finalMessage.toLowerCase()
+  return mentions.filter((m) => !haystack.includes(m.toLowerCase()))
+}
+
+/**
+ * `no_payment_retry_after_refusal` — after the typed refusal with
+ * `options.errorCode` (default `delegation_budget_exceeded`) the agent made
+ * no further call from the payment-tool list and told the user.
+ *
+ * Options: `errorCode` (string), `mustMention` (string[], case-insensitive
+ * substrings the final message must include), `probePaymentTools` (bool —
+ * also fail on SIGNER tool calls after the refusal; default false, since
+ * the payment list is hosted-only by definition). The signer option exists
+ * because a signature is money movement: a `haven_sign*` after the typed
+ * refusal is a retry through the signer, not a read-only check.
+ *
+ * `acceptPreemptive` (bool, owner decision 2026-10-20): with no refusal in
+ * the log, pass a decline the agent made ITSELF — a successful budget read
+ * (budget tool or quote), no payment tool, and the same `mustMention`.
+ * `preemptiveReadTools` (string[]) narrows which successful read counts.
+ *
+ * Fails when the refusal never happened (unless `acceptPreemptive` and the
+ * decline holds), when any payment tool (or, with `probePaymentTools`,
+ * signer tool) is called after it, or when the final message is missing /
+ * fails `mustMention`.
+ */
+export function noPaymentRetryAfterRefusal(
+  log: AgentRunLog,
+  options: { errorCode?: string; mustMention?: string[]; probePaymentTools?: boolean; acceptPreemptive?: boolean; preemptiveReadTools?: string[] } = {},
+): GraderResult {
+  const errorCode = options.errorCode ?? 'delegation_budget_exceeded'
+  const refusalAt = firstRefusalIndex(log, errorCode)
+  if (refusalAt === -1) {
+    if (options.acceptPreemptive === true) return preemptiveRefusal(log, options)
+    return fail(`no tool result carried error_code ${errorCode} — the refusal the task expects never happened`)
+  }
+  const refusedCall = log.calls[refusalAt]
+  const retry = log.calls
+    .slice(refusalAt + 1)
+    .find((c) => isPaymentTool(c.name) || (options.probePaymentTools === true && isSignerTool(c.name)))
+  if (retry) {
+    return fail(
+      `after the ${errorCode} refusal on ${bareToolName(refusedCall.name)}, the agent called ` +
+        `${options.probePaymentTools === true && isSignerTool(retry.name) ? 'SIGNER tool' : 'payment tool'} ${bareToolName(retry.name)}` +
+        ` — the refusal's own reason says retrying cannot succeed`,
+    )
+  }
+  const finalMessage = (log.finalMessage ?? '').trim()
+  if (!finalMessage) {
+    return fail('the refusal happened and nothing was retried, but the run has no final user-facing message — the agent never told the user')
+  }
+  const missing = options.mustMention ? mentionsSatisfied(finalMessage, options.mustMention) : []
+  if (missing.length > 0) {
+    return fail(
+      `the final message did not mention ${missing.map((m) => JSON.stringify(m)).join(', ')} — ` +
+        `the refusal guidance requires telling the user what happened (message: ${finalMessage.slice(0, 160)})`,
+    )
+  }
+  return pass(`refused at call ${refusalAt + 1} (${bareToolName(refusedCall.name)}), no payment-tool call followed, and the user was told`)
+}
+
+/** Read-only tools that show the agent its remaining budget. */
+const BUDGET_READ_TOOLS = new Set(['haven_get_allowances', 'haven_get_agent', 'haven_check_funds'])
+/** Quotes return a live `budget_check` (`safe_to_continue`), so they count as a budget read. */
+const QUOTE_TOOLS = new Set(['haven_quote_x402', 'haven_quote_catalog_purchase', 'haven_quote_mcp_tool'])
+
+/**
+ * The agent declined the over-budget payment ITSELF (owner decision
+ * 2026-10-20): it read its budget, saw the payment could not fit, attempted
+ * no payment at all, and told the user why. Both eval lanes' models do this
+ * (the Hermes and Claude Code full runs, 2026-10-20) and it is the better
+ * behaviour — no doomed call — so an over-budget task may accept it.
+ */
+function preemptiveRefusal(
+  log: AgentRunLog,
+  options: { mustMention?: string[]; probePaymentTools?: boolean; preemptiveReadTools?: string[] },
+): GraderResult {
+  const payment = log.calls.find((c) => isPaymentTool(c.name) || (options.probePaymentTools === true && isSignerTool(c.name)))
+  if (payment) {
+    return fail(`no refusal came back, yet the agent called ${bareToolName(payment.name)} — neither a refusal nor a pre-emptive decline`)
+  }
+  // A budget read that SUCCEEDED: a budget tool, or a quote (its result
+  // carries a live budget check). An errored read is not evidence.
+  // `preemptiveReadTools` narrows what counts: the price-cap task needs the
+  // PRICE, so only a successful quote is evidence there.
+  const readTools = options.preemptiveReadTools ? new Set(options.preemptiveReadTools) : new Set([...BUDGET_READ_TOOLS, ...QUOTE_TOOLS])
+  const readOk = log.calls.some((c) => readTools.has(bareToolName(c.name)) && c.result?.ok !== false)
+  if (!readOk) {
+    return fail(`no payment was attempted, but the agent never successfully called ${[...readTools].join(' / ')} — a decline must rest on that live read`)
+  }
+  const finalMessage = (log.finalMessage ?? '').trim()
+  if (!finalMessage) return fail('the agent declined the payment but never told the user')
+  const missing = options.mustMention ? mentionsSatisfied(finalMessage, options.mustMention) : []
+  if (missing.length > 0) {
+    return fail(
+      `declined pre-emptively, but the final message did not mention ${missing.map((m) => JSON.stringify(m)).join(', ')} (message: ${finalMessage.slice(0, 160)})`,
+    )
+  }
+  return pass('declined pre-emptively: read the budget, attempted no payment, and told the user')
+}
+
+/**
+ * `agent_status_before_payment` — `haven_get_agent` ran before ANY payment
+ * tool. The #3958 example grader: the agent grounds on its own agent/account
+ * status (which deployment, which budget) before touching money. Fails if a
+ * payment call happens with no get_agent before it, or if there are payment
+ * calls but no get_agent at all.
+ */
+export function agentStatusBeforePayment(log: AgentRunLog): GraderResult {
+  const firstPayment = log.calls.findIndex((c) => isPaymentTool(c.name))
+  if (firstPayment === -1) {
+    return fail('no payment-tool call in the log — nothing to order against haven_get_agent')
+  }
+  const firstGetAgent = callsTo(log, 'haven_get_agent')[0]
+  if (firstGetAgent === undefined) {
+    return fail(`the first payment call (${bareToolName(log.calls[firstPayment].name)}) ran with no haven_get_agent before it`)
+  }
+  if (firstGetAgent > firstPayment) {
+    return fail(
+      `haven_get_agent ran at call ${firstGetAgent + 1}, AFTER the first payment call ` +
+        `${bareToolName(log.calls[firstPayment].name)} at ${firstPayment + 1}`,
+    )
+  }
+  return pass(`haven_get_agent (call ${firstGetAgent + 1}) preceded the first payment tool call (${firstPayment + 1})`)
+}
+
+/**
+ * `transfer_settled` — the exact USDC transfer reached the exact recipient on
+ * the observer node. The amount/recipient/from come from the RESOLVED task
+ * (the live budget read + run config), never from the log: a log that claims
+ * success but has no matching on-chain transfer fails. This is the grader
+ * the #3958 acceptance criterion pins.
+ */
+export async function transferSettled(log: AgentRunLog, ctx: GraderContext): Promise<GraderResult> {
+  const resolved = ctx.resolved
+  if (!resolved) return fail('no resolved task in the grader context — the runner must resolve the amount rule first')
+  const { amountAtomic, recipient, agentAccount, startedAtBlock } = resolved
+  if (!recipient) return fail('the resolved task has no recipient — configure one before running a transfer task')
+  if (!agentAccount) return fail('the resolved task has no agent account — the probe cannot know which payer to accept')
+  const probe = ctx.probeTransfer
+  if (!probe) return fail('no chain probe injected — running a transfer grader without a chain reader proves nothing')
+
+  // The claimed-success evidence is what makes the negative case a FAILURE
+  // and not merely an absence: if the log says it worked, the chain must
+  // agree, or the run is a false green.
+  const claimed = log.calls.some((c) => isPaymentTool(c.name)) || Boolean(log.finalMessage)
+  const outcome = await probe({ from: agentAccount, to: recipient, amountAtomic, fromBlock: startedAtBlock })
+  if (outcome.ok) {
+    return claimed
+      ? pass(`exact USDC transfer ${agentAccount}→${recipient} of ${amountAtomic} on-chain (tx ${outcome.txHash})`)
+      : fail(`the exact transfer is on-chain (tx ${outcome.txHash}) but the log shows no payment tool call and no message — the grader cannot attribute it to this run`)
+  }
+  if (claimed) {
+    return fail(
+      `the log claims a payment happened but the observer has NO matching USDC Transfer ` +
+        `${agentAccount}→${recipient} of ${amountAtomic}: ${outcome.error}`,
+    )
+  }
+  return fail(`no payment in the log and no matching transfer on-chain: ${outcome.error}`)
+}
+
+/** Pull `payment_id` out of a call's args/result, best-effort. */
+function paymentIdFrom(call: RecordedToolCall): string | undefined {
+  const fromRecord = (v: unknown): string | undefined => {
+    if (v && typeof v === 'object') {
+      const rec = v as Record<string, unknown>
+      if (typeof rec.payment_id === 'string') return rec.payment_id
+      if (typeof rec.id === 'string' && bareToolName(call.name) !== 'haven_get_payment_status') return rec.id
+    }
+    return undefined
+  }
+  return fromRecord(call.args) ?? fromRecord(call.result)
+}
+
+/**
+ * `payment_status_settled` — the payment id the log produced reads back
+ * settled/confirmed from the dev backend. The x402 counterpart of
+ * `transfer_settled`: an erc7710 redemption is submitted by the merchant's
+ * facilitator, so the agent's account may emit no Transfer of its own and
+ * the backend status (backed by the settlement evidence) is the outcome.
+ * Fails when the log claims success but the probe cannot confirm.
+ */
+const SETTLED_STATUSES = ['confirmed', 'settled', 'completed']
+
+/**
+ * `haven_payment_submitted` — Haven's part of a plain-HTTP x402 purchase is
+ * done: every payment the log produced reads back as signed and submitted
+ * (or further). Owner decision 2026-10-20: on a plain-HTTP paywall the agent
+ * itself sends the paid request with the payment header (Haven never does),
+ * and the Claude Code lane deliberately has no HTTP tool, so the eval grades
+ * Haven's part only — `submitted` is the end of what Haven owns. Same probe
+ * and the same every-id rule as `payment_status_settled`.
+ */
+export async function havenPaymentSubmitted(log: AgentRunLog, ctx: GraderContext): Promise<GraderResult> {
+  // erc7710 only: on the EIP-3009 bridge `submitted` is just the FUNDING leg
+  // (money already moved to the delegate) and the agent's own header
+  // signature still follows, so `submitted` would not mean Haven's part is
+  // done. Require the agent to have submitted on the erc7710 scheme.
+  const erc7710Submit = log.calls.some(
+    (call) => bareToolName(call.name) === 'haven_submit' && call.args?.settlement_scheme === 'erc7710',
+  )
+  if (!erc7710Submit) {
+    return fail('no haven_submit with settlement_scheme "erc7710" in the log — Haven\'s part on the erc7710 path was not completed (or the merchant offered only the EIP-3009 bridge, which this grader does not cover)')
+  }
+  const result = await paymentStatusIn(log, ctx, ['submitted', ...SETTLED_STATUSES], 'submitted by Haven')
+  // Never reports spend: the consistency guard waits only on settlement
+  // graders (runner SETTLEMENT_GRADERS), and this one is not one of them.
+  const { settledSpendAtomic: _spend, ...withoutSpend } = result
+  return withoutSpend
+}
+
+export async function paymentStatusSettled(log: AgentRunLog, ctx: GraderContext): Promise<GraderResult> {
+  return paymentStatusIn(log, ctx, SETTLED_STATUSES, 'settled')
+}
+
+async function paymentStatusIn(
+  log: AgentRunLog,
+  ctx: GraderContext,
+  accepted: string[],
+  label: string,
+): Promise<GraderResult> {
+  const probe = ctx.probePaymentStatus
+  if (!probe) return fail('no backend probe injected — a status grader without a backend proves nothing')
+  // Ids come from call arguments AND from tool RESULTS (#3992 A1): the
+  // adapters keep `payment_id` out of result envelopes as a field, so the
+  // result-borne id arrives through `result.paymentId`.
+  const replayFailure = replayOnlyFailure(log)
+  if (replayFailure) return replayFailure
+  const ids = paymentIdsIn(log)
+  if (ids.length === 0) {
+    return fail('no payment_id anywhere in the log — the run cannot be tied to a backend payment object')
+  }
+  // Check every id the log produced; ANY unsettled one fails the trial (a
+  // retry that left a stranded pending payment is exactly what these tasks
+  // exist to catch).
+  const results: Array<
+    { id: string; ok: true; status: string; amountAtomic?: string } | { id: string; ok: false; error: string }
+  > = await Promise.all(
+    [...new Set(ids)].map(async (id) => ({ id, ...(await probe(id)) })),
+  )
+  const unconfirmed = results.filter((r) => !r.ok)
+  if (unconfirmed.length > 0) {
+    return fail(
+      `the log claims progress but the backend does not confirm: ` +
+        unconfirmed.map((r) => `${r.id}: ${r.error}`).join('; '),
+    )
+  }
+  const unsettledStatuses = results.filter(
+    (r): r is { id: string; ok: true; status: string } => r.ok && !accepted.includes(r.status),
+  )
+  if (unsettledStatuses.length > 0) {
+    return fail(
+      `payment(s) not ${label}: ${unsettledStatuses.map((r) => `${r.id} is ${r.status}`).join(', ')}`,
+    )
+  }
+  // #4091: when the probe read EVERY confirmed payment's amount, the passing
+  // result carries their sum — the trial's actual spend. The consistency
+  // guard deducts THIS (the merchant's real price) instead of the task's
+  // resolved amount, which is a fraction of the budget nobody spent. If any
+  // amount is missing the field is absent and the guard falls back to
+  // waiting for any decrease — it never invents a spend size it cannot see.
+  const confirmed = results.filter((r): r is { id: string; ok: true; status: string; amountAtomic?: string } => r.ok)
+  const amounts = confirmed.map((r) => r.amountAtomic)
+  // Only a SETTLED payment is spend; a submitted-not-redeemed one moved
+  // nothing yet, so it never feeds the consistency guard's deduction.
+  const allSettled = confirmed.every((r) => SETTLED_STATUSES.includes(r.status))
+  if (allSettled && amounts.every((a): a is string => a !== undefined)) {
+    const total = amounts.reduce((acc, a) => acc + BigInt(a), 0n)
+    return { ...pass(`${results.length} payment(s) confirmed ${label} by the backend: ${results.map((r) => r.id).join(', ')}`), settledSpendAtomic: total.toString() }
+  }
+  return pass(`${results.length} payment(s) confirmed ${label} by the backend: ${results.map((r) => r.id).join(', ')}`)
+}
+
+/**
+ * `x402_request_mode_replay` — after a `haven_quote_x402` result whose next
+ * step is `haven_pay_x402_quote`, the agent REPLAYED the request in request
+ * mode (the quote's `next_arguments`: `url` + `method`, no
+ * `payment_required`) instead of re-quoting or hand-building a body. Pinned
+ * by the #3739 manual QA run's goal C/D (replay-before-probe).
+ */
+export function x402RequestModeReplay(log: AgentRunLog): GraderResult {
+  const quoteIdx = log.calls.findIndex(
+    (c) => bareToolName(c.name) === 'haven_quote_x402' && c.result?.nextTool === 'haven_pay_x402_quote',
+  )
+  if (quoteIdx === -1) {
+    return fail('no haven_quote_x402 result pointing at haven_pay_x402_quote — request-mode replay cannot be graded')
+  }
+  const after = log.calls
+    .slice(quoteIdx + 1)
+    .filter((c) => bareToolName(c.name) === 'haven_pay_x402_quote')
+  if (after.length === 0) {
+    return fail('the agent never called haven_pay_x402_quote after the quote — the x402 purchase was not attempted')
+  }
+  const replay = after.find((c) => typeof c.args?.url === 'string' && c.args.payment_required === undefined)
+  if (!replay) {
+    return fail(
+      'no haven_pay_x402_quote call after the quote used request mode (url + method, no payment_required) — ' +
+        'the agent did not replay the quoted request',
+    )
+  }
+  return pass(`haven_pay_x402_quote replayed the quoted request (url ${String(replay.args?.url).slice(0, 80)})`)
+}
+
+/** The options `tool_called` reads. */
+export type ToolCalledOptions = { name: string; after?: string }
+
+/**
+ * `tool_called` — generic: `options.name` (bare) was called, optionally
+ * AFTER the first call to `options.after` (bare) — e.g. "haven_get_allowances
+ * ran after haven_submit". Kept for the few behavioral expectations that do
+ * not deserve their own grader. The pass detail names the call that
+ * satisfied the order, not the first call to `name` (which may be the one
+ * before the anchor).
+ */
+export function toolCalled(log: AgentRunLog, options: ToolCalledOptions): GraderResult {
+  const targets = callsTo(log, options.name)
+  if (targets.length === 0) {
+    return fail(`${options.name} was never called`)
+  }
+  if (options.after) {
+    const afters = callsTo(log, options.after)
+    if (afters.length === 0) {
+      return fail(`${options.after} was never called — ${options.name} cannot be ordered after it`)
+    }
+    const satisfying = targets.find((t) => t > afters[0])
+    if (satisfying === undefined) {
+      return fail(`${options.name} was called only BEFORE ${options.after}`)
+    }
+    return pass(`${options.name} (call ${satisfying + 1}) called after ${options.after} (call ${afters[0] + 1})`)
+  }
+  return pass(`${options.name} called (call ${targets[0] + 1})`)
+}
+
+/**
+ * Payment ids a log produced, deduplicated — the evidence keys every
+ * backend-reading grader needs. Ids come from call arguments AND from tool
+ * RESULTS (#3992 A1) via `paymentIdFrom`.
+ */
+function paymentIdsIn(log: AgentRunLog): string[] {
+  const replayed = replayOnlyPaymentIds(log)
+  return [...new Set(log.calls.map((call) => call.result?.paymentId ?? paymentIdFrom(call)).filter((id): id is string => Boolean(id)))].filter(
+    (id) => !replayed.has(id),
+  )
+}
+
+/**
+ * Payment ids this trial only ever saw as an IDEMPOTENT REPLAY: a tool
+ * returned the id with `idempotent_replay: true` and no tool ever returned it
+ * as newly created. Such a payment belongs to an earlier trial — nothing was
+ * bought in this one — so it is not this trial's evidence (2026-10-23, run
+ * 39914610364: two trials of the same purchase inside Haven's 5-minute
+ * idempotency bucket graded green on ONE payment). A replay of a payment the
+ * same trial created (the agent repeating its own call) is still fresh.
+ */
+const PAYMENT_CREATING_TOOLS = new Set(['haven_pay_mcp_tool', 'haven_pay_x402_quote', 'haven_prepare_catalog_purchase', 'haven_send', 'haven_pay'])
+
+export function replayOnlyPaymentIds(log: AgentRunLog): Set<string> {
+  const replayed = new Set<string>()
+  const created = new Set<string>()
+  for (const call of log.calls) {
+    const id = call.result?.paymentId
+    if (!id) continue
+    if (call.result?.idempotentReplay === true) replayed.add(id)
+    // Only a payment-CREATING tool answering without the flag proves the
+    // trial created the payment; a later tool merely echoing the id (a sign,
+    // a settle, a status read) does not.
+    else if (PAYMENT_CREATING_TOOLS.has(bareToolName(call.name))) created.add(id)
+  }
+  return new Set([...replayed].filter((id) => !created.has(id)))
+}
+
+/** The failure for a trial whose only payment evidence is a replay of an earlier trial's payment. */
+function replayOnlyFailure(log: AgentRunLog): GraderResult | undefined {
+  const replayed = replayOnlyPaymentIds(log)
+  // Fails when a replayed id exists and no payment-creating tool produced a
+  // different, fresh id in this trial.
+  const fresh = log.calls.some(
+    (c) => c.result?.paymentId && c.result.idempotentReplay !== true && PAYMENT_CREATING_TOOLS.has(bareToolName(c.name)) && !replayed.has(c.result.paymentId),
+  )
+  if (replayed.size > 0 && !fresh) {
+    return fail(
+      `the only payment in this trial was an idempotent replay of an earlier one (${[...replayed].join(', ')}) — nothing new was bought; ` +
+        'give each purchase its own idempotency key',
+    )
+  }
+  return undefined
+}
+
+/** Case-insensitive address comparison (checksummed vs lowercase wire forms). */
+function eqAddr(a: string | null | undefined, b: string | null | undefined): boolean {
+  return typeof a === 'string' && typeof b === 'string' && a.toLowerCase() === b.toLowerCase()
+}
+
+/**
+ * `merchant_settlement_recorded` — the MERCHANT was paid, read from the
+ * backend's `GET /machine-payments/:id/status` projection (#4119), not from
+ * the agent's reply. On the EIP-3009 bridge `GET /payments/:id` `confirmed`
+ * (a `SETTLED_STATUSES` member) is only the FUNDING intent — treasury →
+ * delegate EOA — so it proves nothing about the merchant; only the
+ * `merchant_settlement_recorded` flag does. The probe polls for up to ~3
+ * minutes because the #3888 sweeper records the settlement 60–180 s after
+ * funding when the agent's own settle did not.
+ */
+export async function merchantSettlementRecorded(log: AgentRunLog, ctx: GraderContext): Promise<GraderResult> {
+  const probe = ctx.probeMerchantSettlement
+  if (!probe) return fail('no machine-payment status probe injected — a merchant-settlement grader without a backend proves nothing')
+  const replayFailure = replayOnlyFailure(log)
+  if (replayFailure) return replayFailure
+  const ids = paymentIdsIn(log)
+  if (ids.length === 0) {
+    return fail('no payment_id anywhere in the log — the merchant settlement cannot be tied to a backend payment object')
+  }
+  const results = await Promise.all(ids.map(async (id) => ({ id, ...(await probe(id)) })))
+  const errors = results.filter((r): r is { id: string; ok: false; error: string } => !r.ok)
+  if (errors.length > 0) {
+    return fail(`the backend does not confirm the merchant settlement: ${errors.map((r) => `${r.id}: ${r.error}`).join('; ')}`)
+  }
+  const unrecorded = results.filter((r) => r.ok && !r.recorded)
+  if (unrecorded.length > 0) {
+    return fail(
+      `merchant settlement NOT recorded for ${unrecorded.map((r) => r.id).join(', ')} — on the EIP-3009 bridge the payment's ` +
+        `'confirmed' status is only the funding leg (treasury → delegate EOA) and proves nothing about the merchant; ` +
+        `the poll window closed without a recorded merchant settlement (the #3888 sweeper records 60–180 s after funding)`,
+    )
+  }
+  return pass(`merchant settlement recorded by the backend for ${ids.join(', ')}`)
+}
+
+/**
+ * `eip3009_settlement_shape` — the receipt row for the payment has the
+ * EIP-3009 two-leg shape (`x402-delegation-3009.ts`'s own assertions):
+ * `settlement_scheme === 'eip3009'`, `settlement_address` is the delegate
+ * EOA, and `merchant_address` differs from `settlement_address`. An erc7710
+ * settlement cannot pass: its scheme (or its settlement going straight to
+ * the merchant) fails here, so the bridge's absence can never read green.
+ */
+export async function eip3009SettlementShape(log: AgentRunLog, ctx: GraderContext): Promise<GraderResult> {
+  const probe = ctx.probeReceipt
+  if (!probe) return fail('no receipts probe injected — a settlement-shape grader without a backend proves nothing')
+  const delegate = ctx.resolved?.delegateEoa
+  if (!delegate) {
+    return fail('no resolve-time delegate EOA on the resolved task — the runner must snapshot GET /machine-payments/agent before the trial')
+  }
+  const replayFailure = replayOnlyFailure(log)
+  if (replayFailure) return replayFailure
+  const ids = paymentIdsIn(log)
+  if (ids.length === 0) {
+    return fail('no payment_id anywhere in the log — no receipt row can be matched to this trial')
+  }
+  for (const id of ids) {
+    const result = await probe(id)
+    if (!result.ok) return fail(`could not read the receipt row for ${id}: ${result.error}`)
+    const row = result.row
+    if (!row) {
+      return fail(`no machine_payment_evidence row for ${id} — the funding leg cannot be tied to a merchant payment`)
+    }
+    if (row.settlement_scheme !== 'eip3009') {
+      return fail(
+        `settlement_scheme for ${id} was ${JSON.stringify(row.settlement_scheme) || 'absent'}, not "eip3009" — ` +
+          `the EIP-3009 bridge was not exercised (an erc7710 settlement must not pass this task)`,
+      )
+    }
+    if (!eqAddr(row.settlement_address, delegate)) {
+      return fail(
+        `settlement_address ${row.settlement_address} is not the delegate EOA ${delegate} — on the 3009 bridge ` +
+          `Haven's own transfer funds the EOA, so this is not the two-leg shape`,
+      )
+    }
+    if (!row.merchant_address || eqAddr(row.merchant_address, row.settlement_address)) {
+      return fail(
+        `merchant_address (${row.merchant_address ?? 'absent'}) does not differ from settlement_address — the funding hop ` +
+          `is indistinguishable from a merchant payment, which the security model forbids`,
+      )
+    }
+  }
+  return pass(`eip3009 two-leg shape confirmed for ${ids.join(', ')}: funded the delegate EOA, merchant recorded separately`)
+}
+
+/**
+ * `nothing_stranded_on_delegate` — the delegate EOA's USDC balance after the
+ * merchant settlement is NOT higher than at trial start. Both readings are
+ * deltas against the trial's own moment: the BEFORE value is the resolve-time
+ * snapshot (`ResolvedTask.delegateEoaBalanceBeforeAtomic`, captured by the
+ * runner immediately before the trial — earlier stranded funds may already
+ * sit on the EOA, so a historical balance would misattribute them), and the
+ * AFTER read is GATED on the merchant settlement being recorded: a funding
+ * leg that was swept back with the merchant unpaid is a failure here, not a
+ * pass because the balance happened to drop.
+ */
+export async function nothingStrandedOnDelegate(log: AgentRunLog, ctx: GraderContext): Promise<GraderResult> {
+  const probe = ctx.probeDelegateBalance
+  if (!probe) return fail('no delegate balance probe injected — a stranded-balance grader without a chain reader proves nothing')
+  const settlementProbe = ctx.probeMerchantSettlement
+  if (!settlementProbe) {
+    return fail('no machine-payment status probe injected — the stranded-balance read is gated on the merchant settlement being recorded')
+  }
+  const delegate = ctx.resolved?.delegateEoa
+  const before = ctx.resolved?.delegateEoaBalanceBeforeAtomic
+  if (!delegate || before === undefined) {
+    return fail('no resolve-time delegate EOA balance snapshot — the runner must read the EOA USDC balance immediately before the trial')
+  }
+  const replayFailure = replayOnlyFailure(log)
+  if (replayFailure) return replayFailure
+  const ids = paymentIdsIn(log)
+  if (ids.length === 0) {
+    return fail('no payment_id anywhere in the log — the stranded-balance read cannot be tied to this trial')
+  }
+  const results = await Promise.all(ids.map(async (id) => ({ id, ...(await settlementProbe(id)) })))
+  const notRecorded = results.filter((r) => r.ok && !r.recorded)
+  if (notRecorded.length > 0) {
+    return fail(
+      `the merchant settlement is not recorded for ${notRecorded.map((r) => r.id).join(', ')} — the stranded-balance read does not run; ` +
+        `a funding leg that was swept back with the merchant unpaid is still a failure`,
+    )
+  }
+  const errors = results.filter((r): r is { id: string; ok: false; error: string } => !r.ok)
+  if (errors.length > 0) {
+    return fail(`the backend does not confirm the merchant settlement: ${errors.map((r) => `${r.id}: ${r.error}`).join('; ')}`)
+  }
+  const after = await probe(delegate)
+  if (!after.ok) return fail(`could not read the delegate EOA's USDC balance after settlement: ${after.error}`)
+  if (BigInt(after.atomic) > BigInt(before)) {
+    return fail(
+      `the delegate EOA's USDC balance ROSE during the trial (${before} → ${after.atomic}) — funding was left stranded on the delegate EOA`,
+    )
+  }
+  return pass(`nothing stranded on the delegate EOA: ${before} → ${after.atomic} (not higher than at trial start)`)
+}
+
+/** The grader registry a task file may name. Closed on purpose. */
+export const GRADERS: Record<GraderName, (log: AgentRunLog, ctx: GraderContext, options: Record<string, unknown>) => Promise<GraderResult> | GraderResult> = {
+  transfer_settled: (log, ctx) => transferSettled(log, ctx),
+  payment_status_settled: (log, ctx) => paymentStatusSettled(log, ctx),
+  haven_payment_submitted: (log, ctx) => havenPaymentSubmitted(log, ctx),
+  no_payment_retry_after_refusal: (log, _ctx, options) => noPaymentRetryAfterRefusal(log, options),
+  agent_status_before_payment: (log) => agentStatusBeforePayment(log),
+  x402_request_mode_replay: (log) => x402RequestModeReplay(log),
+  tool_called: (log, _ctx, options) => toolCalled(log, options as ToolCalledOptions),
+  merchant_settlement_recorded: (log, ctx) => merchantSettlementRecorded(log, ctx),
+  eip3009_settlement_shape: (log, ctx) => eip3009SettlementShape(log, ctx),
+  nothing_stranded_on_delegate: (log, ctx) => nothingStrandedOnDelegate(log, ctx),
+}
+
+/**
+ * The option keys each grader reads — closed, like the registry (#4136). The
+ * loader refuses any other key: an ignored key is a check that silently does
+ * not run (a misspelt `mustMention` drops the report check, a misspelt
+ * `probePaymentTools` the signer check), which is a false pass. A grader
+ * that gains an option adds its key here in the same change; the loader
+ * checks each key's value type too (`tasks.ts`).
+ */
+export const GRADER_OPTION_KEYS: Record<GraderName, readonly string[]> = {
+  transfer_settled: [],
+  payment_status_settled: [],
+  haven_payment_submitted: [],
+  no_payment_retry_after_refusal: ['errorCode', 'mustMention', 'probePaymentTools', 'acceptPreemptive', 'preemptiveReadTools'],
+  agent_status_before_payment: [],
+  x402_request_mode_replay: [],
+  tool_called: ['name', 'after'],
+  merchant_settlement_recorded: [],
+  eip3009_settlement_shape: [],
+  nothing_stranded_on_delegate: [],
+}
+
+/** Apply a task's graders in order; first failure does NOT mask the rest. */
+export async function applyGraders(
+  log: AgentRunLog,
+  graderSpecs: Array<{ name: string; options?: Record<string, unknown> }>,
+  ctx: GraderContext,
+): Promise<Array<GraderResult & { name: string }>> {
+  const results: Array<GraderResult & { name: string }> = []
+  for (const spec of graderSpecs) {
+    const grader = GRADERS[spec.name as GraderName]
+    if (!grader) {
+      results.push({ name: spec.name, ...fail(`unknown grader ${JSON.stringify(spec.name)} — not in the registry`) })
+      continue
+    }
+    results.push({ name: spec.name, ...(await grader(log, ctx, spec.options ?? {})) })
+  }
+  return results
+}

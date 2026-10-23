@@ -67,7 +67,7 @@ describe('SignersSection (#3825)', () => {
   it('names passkeys by enrollment date, numbering the fallback across the list, never a platform brand', async () => {
     renderSection()
     const [first, second] = await screen.findAllByTestId('signer-row-passkey')
-    expect(within(first).getByText('Passkey · added October 9, 2026')).toBeInTheDocument()
+    expect(within(first).getByText('Passkey · added 9 October 2026')).toBeInTheDocument()
     // The second passkey in the deduplicated list, with no stored date.
     expect(within(second).getByText('Passkey 2')).toBeInTheDocument()
     expect(screen.queryByText(/Face ID|Touch ID|Windows Hello/)).toBeNull()

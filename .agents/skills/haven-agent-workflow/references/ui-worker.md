@@ -7,6 +7,11 @@ Before editing UI, read:
 4. `docs/product/screen-recipes.md`
 5. `docs/product/design-review.md`
 
+Inspect the [`/design-system` Patterns](../../../../docs/product/design-system.md#patterns)
+before implementing. Use an existing Pattern when one fits; if none does,
+stop and report the need for a separately approved **new pattern** slice rather
+than establishing it inside the consuming page.
+
 Then inspect existing primitives before creating anything new:
 - `packages/frontend/src/components/ui`
 - `packages/frontend/src/components/haven`

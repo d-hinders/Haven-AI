@@ -151,7 +151,7 @@ function routeQueries(plan: QueryPlan) {
 
 function mockRails(result: Awaited<ReturnType<typeof prepareTransfer>>) {
   vi.mocked(loadHybridOwnerConfig).mockResolvedValue({
-    config: { ownerAddress: ACCOUNT_ADDRESS as `0x${string}` },
+    config: { ownerAddress: ACCOUNT_ADDRESS as `0x${string}`, deploySalt: '0x' },
     accountId: ACCOUNT_ID,
     singleSignerWaiverAt: null,
   })

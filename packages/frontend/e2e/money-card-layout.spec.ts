@@ -3,13 +3,13 @@
  *
  * At `lg` the balance half and the spending half share one grid row, so they
  * are the same height, and the spending half is the taller one. Before #3908
- * the balance half ended in an empty band under "Add funds" / "Deposit
- * address". The sparkline now grows into that height, so the actions sit
+ * the balance half ended in an empty band under the money card's actions.
+ * The sparkline now grows into that height, so the actions sit
  * level with the spending half's bottom row. Measured in rendered CSS px —
  * the visual gate is advisory on `dev`, so a baseline alone would not hold it.
  */
 import { expect, test } from '@playwright/test'
-import { dashboardOverview, dismissMobileSidebar, mockHavenApi, seedAuthenticatedSession } from './fixtures/haven-api'
+import { dashboardOverview, dismissMobileSidebar, mockHavenApi, seedAuthenticatedSession, serveSekUser } from './fixtures/haven-api'
 
 test.beforeEach(async ({ page }) => {
   await mockHavenApi(page)
@@ -20,7 +20,7 @@ test('the balance half has no empty band under its actions at 1280', async ({ pa
   await page.setViewportSize({ width: 1280, height: 900 })
   await page.goto('/dashboard')
   const balance = page.getByRole('region', { name: 'Balance' })
-  await expect(balance.getByRole('button', { name: 'Add funds' })).toBeVisible()
+  await expect(balance.getByRole('button', { name: 'Receive' })).toBeVisible()
   await expect(page.getByRole('region', { name: 'Spending' }).getByText('Stopped by budget')).toBeVisible()
   const bottoms = await page.evaluate(() => {
     const balanceEl = document.querySelector('section[aria-label="Balance"]')
@@ -56,7 +56,7 @@ test('the balance half has no empty band under its actions at 1280', async ({ pa
 test('below lg the stacked card keeps the sparkline at its fixed 40px (900)', async ({ page }) => {
   await page.setViewportSize({ width: 900, height: 900 })
   await page.goto('/dashboard')
-  await expect(page.getByRole('region', { name: 'Balance' }).getByRole('button', { name: 'Add funds' })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Balance' }).getByRole('button', { name: 'Receive' })).toBeVisible()
   const height = await page.evaluate(
     () => document.querySelector('[data-testid="money-card-sparkline"] svg')?.getBoundingClientRect().height ?? null,
   )
@@ -64,15 +64,15 @@ test('below lg the stacked card keeps the sparkline at its fixed 40px (900)', as
   expect(Math.abs(height! - 40), `sparkline drawing is ${height}px tall at 900`).toBeLessThanOrEqual(0.5)
 })
 
-test('at 390 every agent row keeps its name whole beside the last-payment column', async ({ page }) => {
+test('at 390 every agent row keeps its name whole beside its badge (#3989)', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 900 })
   await page.goto('/dashboard')
   await dismissMobileSidebar(page)
   await expect(page.getByTestId('agent-row-last-payment').first()).toBeVisible()
-  // #3908 design review: a 40% right column left "Research agent" as "R…".
-  // The name span truncates by design when it truly cannot fit; since #3910
-  // the time sits on the name line below `sm` (no merchant), so the fixture's
-  // names fit whole.
+  // #3989: the last-payment time no longer sits on the name line at any
+  // width — it lives on the caption line under the bar. The name line carries
+  // only the name and its badge, so nothing wraps under the name at 390 and
+  // the fixture's names fit whole.
   const names = await page.evaluate(() =>
     Array.from(document.querySelectorAll<HTMLElement>('a[href^="/agents/"] p span.truncate')).map((el) => ({
       text: el.textContent,
@@ -84,15 +84,15 @@ test('at 390 every agent row keeps its name whole beside the last-payment column
 })
 
 /**
- * #3912: every agent row's budget bar is the same length. Each row is its
- * own grid, and from `sm` the last-payment column was content-sized
- * (`fit-content(40%)`, #3910), so a long merchant host shortened that row's
- * bar. The column is now a fixed 10rem in every row; the merchant truncates
- * with a tooltip.
+ * #3989: the fixture keeps a long x402 host and a resolved merchant on the
+ * wire (the fields are required), but the row renders NEITHER — the merchant
+ * is gone from the dashboard agent row. The watcher never paid, so its time
+ * reads "No payments yet".
  *
  * The clock is frozen at the fixture's day: its budget reads end on 09-02 /
  * 09-03, and on the real clock they read as "refilled, updating", which
- * renders no bar at all — an "every bar equal" loop would pass on nothing.
+ * renders no bar at all — a layout loop over the caption line would pass on
+ * nothing.
  */
 const FROZEN_NOW = new Date('2026-09-01T12:00:00.000Z')
 
@@ -118,24 +118,31 @@ async function serveOverview(page: import('@playwright/test').Page, body: unknow
   )
 }
 
-test('from sm every agent row\'s budget bar has the same length and right edge (1280)', async ({ page }) => {
+test('at every width each agent row\'s bar ends at the row\'s content edge (1280)', async ({ page }) => {
   await page.clock.setFixedTime(FROZEN_NOW)
   const { body } = overviewWithLongHostAndNoPayment()
   await serveOverview(page, body)
   await page.setViewportSize({ width: 1280, height: 900 })
   await page.goto('/dashboard')
   await expect(page.locator('a[href^="/agents/"] [role="progressbar"]').nth(1)).toBeVisible()
-  const bars = await page.evaluate(() =>
-    Array.from(document.querySelectorAll('a[href^="/agents/"] [role="progressbar"]')).map((el) => {
-      const r = el.getBoundingClientRect()
-      return { width: r.width, right: r.right }
-    }),
+  // #3989: no 10rem time column any more — the body (bar, caption line) spans
+  // the row between the icon and the chevron at EVERY width. The bar's right
+  // edge sits exactly one 12px grid gap short of the chevron's left edge.
+  // Measured on the row that USED to carry the long host, whose bar used to
+  // stop ~10rem short.
+  const gaps = await page.evaluate(() =>
+    Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href^="/agents/"]'))
+      .filter((a) => a.querySelector('[role="progressbar"]'))
+      .map((a) => {
+        const bar = (a.querySelector('[role="progressbar"]') as HTMLElement).getBoundingClientRect()
+        const chev = (a.lastElementChild as Element).getBoundingClientRect()
+        return { gap: chev.left - bar.right }
+      }),
   )
-  // Guard first: at least two bars, or "all equal" proves nothing.
-  expect(bars.length, 'fewer than two budget bars rendered').toBeGreaterThanOrEqual(2)
-  for (const bar of bars) {
-    expect(Math.abs(bar.width - bars[0].width), `bar widths ${bars.map((b) => b.width).join(', ')}`).toBeLessThanOrEqual(1)
-    expect(Math.abs(bar.right - bars[0].right), `bar right edges ${bars.map((b) => b.right).join(', ')}`).toBeLessThanOrEqual(1)
+  expect(gaps.length, 'fewer than two budget bars rendered').toBeGreaterThanOrEqual(2)
+  for (const { gap } of gaps) {
+    expect(gap, `bar right edge sits ${gap}px from the chevron (want 12px grid gap)`).toBeGreaterThanOrEqual(11)
+    expect(gap, `bar right edge sits ${gap}px from the chevron (want 12px grid gap)`).toBeLessThanOrEqual(13)
   }
 })
 
@@ -161,20 +168,30 @@ test('from sm a setup row\'s body ends where the other rows\' bodies end (1280)'
   expect(Math.abs(setup.right - other.right), `setup body ends at ${setup.right}, others at ${other.right}`).toBeLessThanOrEqual(1)
 })
 
-test('from sm a long host truncates with its full name as a tooltip, and "No payments yet" fits (1280)', async ({ page }) => {
+test('no merchant or counterparty renders in any agent row; the time stays labelled (1280)', async ({ page }) => {
   await page.clock.setFixedTime(FROZEN_NOW)
   const { body, researchId } = overviewWithLongHostAndNoPayment()
   await serveOverview(page, body)
   await page.setViewportSize({ width: 1280, height: 900 })
   await page.goto('/dashboard')
-  const research = page.locator(`a[href="/agents/${researchId}"]`).filter({ has: page.getByTestId('agent-row-last-payment') })
-  const merchant = research.getByTestId('agent-row-last-payment').locator('p').nth(1)
-  await expect(merchant).toBeVisible()
-  await expect(merchant).toHaveAttribute('title', 'demo-merchant-dev-84e4.up.railway.app')
-  expect(await merchant.evaluate((el) => el.scrollWidth > el.clientWidth + 1), 'the long host is not truncated').toBe(true)
-  const none = page.locator('a[href="/agents/agent-e2e-watcher"]').filter({ has: page.getByTestId('agent-row-last-payment') }).getByText('No payments yet')
-  await expect(none).toBeVisible()
-  expect(await none.evaluate((el) => el.scrollWidth <= el.clientWidth + 1), '"No payments yet" is clipped').toBe(true)
+  // #3989: the research row's counterparty is the long x402 host, the
+  // watcher's is 'Example Shop AB' over a 0x… address — the wire carries
+  // both, the row renders neither.
+  const research = page
+    .locator(`a[href="/agents/${researchId}"]`)
+    .filter({ has: page.getByTestId('agent-row-last-payment') })
+  await expect(research.getByTestId('agent-row-last-payment')).toBeVisible()
+  await expect(research).not.toContainText('demo-merchant-dev-84e4.up.railway.app')
+  await expect(research).not.toContainText(/0x[0-9a-f]{8}/i)
+  const watcher = page
+    .locator('a[href="/agents/agent-e2e-watcher"]')
+    .filter({ has: page.getByTestId('agent-row-last-payment') })
+  await expect(watcher).not.toContainText('Example Shop AB')
+  await expect(watcher).not.toContainText(/0x[0-9a-f]{8}/i)
+  // What the row DOES show: the labelled time, under the bar. The watcher
+  // never paid.
+  await expect(research.getByTestId('agent-row-last-payment')).toHaveText(/^Last paid /)
+  await expect(watcher.getByTestId('agent-row-last-payment')).toHaveText('No payments yet')
 })
 
 test('at 390 a budget bar still spans the row (frozen clock)', async ({ page }) => {
@@ -184,54 +201,100 @@ test('at 390 a budget bar still spans the row (frozen clock)', async ({ page }) 
   await dismissMobileSidebar(page)
   const row = page.locator('a[href^="/agents/"]').filter({ has: page.getByRole('progressbar') }).first()
   await expect(row).toBeVisible()
+  // #3989: the bar spans the row at every width — no time column to stop
+  // short of. Measured as the gap: exactly the 12px grid gap short of the
+  // chevron (a ratio to the icon-chevron span can never reach 1 — the span
+  // includes the gap itself).
   const ratio = await row.evaluate((rowEl) => {
-    const icon = rowEl.firstElementChild as HTMLElement
     const chev = rowEl.lastElementChild as Element
     const bar = rowEl.querySelector('[role="progressbar"]') as HTMLElement
-    return bar.getBoundingClientRect().width / (chev.getBoundingClientRect().left - icon.getBoundingClientRect().right)
+    // Expressed as the GAP, not a ratio: the bar's right edge sits exactly one
+    // 12px grid gap short of the chevron (a ratio can never reach 1 — the
+    // span includes the gap).
+    return chev.getBoundingClientRect().left - bar.getBoundingClientRect().right
   })
-  expect(ratio, 'the bar does not span the row at 390').toBeGreaterThanOrEqual(0.85)
+  expect(ratio, `the bar does not span the row at 390 (gap ${ratio}px, want 12)`).toBeGreaterThanOrEqual(11)
+  expect(ratio, `the bar does not span the row at 390 (gap ${ratio}px, want 12)`).toBeLessThanOrEqual(13)
 })
 
 /**
- * #3910: below `sm` the time sits on the name line and the body (bar,
- * caption, paused line) spans the row; the merchant is hidden. Structural,
- * so it holds on any fixture: the paused Watcher row's paused line spans the
- * space between the icon and the chevron, and the time is level with the name.
+ * #3989: at 390 the last-payment time sits on the caption line UNDER the bar,
+ * right-aligned to the content edge, and the name line is free of it — so the
+ * row's badge ("Paused" here) stays beside the name instead of wrapping.
  */
-test('at 390 the paused row body spans the row and the time sits on the name line', async ({ page }) => {
+test('at 390 the time sits under the bar, right-aligned, and the name line stays free of it', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 900 })
   await page.goto('/dashboard')
   await dismissMobileSidebar(page)
   // The agents-section row, not a "Needs attention" action linking to the same page.
   const row = page.locator('a[href="/agents/agent-e2e-watcher"]').filter({ has: page.getByTestId('agent-row-last-payment') })
-  await expect(row.getByText(/Payments paused in Haven/)).toBeVisible()
+  await expect(row.getByTestId('agent-row-last-payment')).toBeVisible()
   const m = await row.evaluate((rowEl) => {
-    // The row's first child is the robot mark, its last the chevron.
     const icon = rowEl.firstElementChild as HTMLElement
     const chev = rowEl.lastElementChild as Element
-    const paused = Array.from(rowEl.querySelectorAll('p')).find((p) => p.textContent?.startsWith('Payments paused')) as HTMLElement
+    const nameLine = rowEl.querySelector('p') as HTMLElement
     const name = rowEl.querySelector('p span.truncate') as HTMLElement
-    const time = rowEl.querySelector('[data-testid="agent-row-last-payment"] p') as HTMLElement
-    const merchant = rowEl.querySelector('[data-testid="agent-row-last-payment"] p:nth-child(2)') as HTMLElement | null
-    const span = chev.getBoundingClientRect().left - icon.getBoundingClientRect().right
+    const badge = nameLine.querySelector('span:not(.truncate)') as HTMLElement | null
+    const time = rowEl.querySelector('[data-testid="agent-row-last-payment"]') as HTMLElement
+    const bar = rowEl.querySelector('[role="progressbar"]') as HTMLElement | null
     return {
-      ratio: paused.getBoundingClientRect().width / span,
-      topDelta: Math.abs(time.getBoundingClientRect().top - name.getBoundingClientRect().top),
-      merchantShown: merchant ? merchant.getBoundingClientRect().width > 0 : false,
+      nameHasTime: nameLine.contains(time),
+      timeTop: time.getBoundingClientRect().top,
+      nameBottom: nameLine.getBoundingClientRect().bottom,
+      barBottom: bar ? bar.getBoundingClientRect().bottom : null,
+      badgeTop: badge ? badge.getBoundingClientRect().top : null,
+      nameTop: name.getBoundingClientRect().top,
+      rightEdge: chev.getBoundingClientRect().left - 12 - time.getBoundingClientRect().right,
     }
   })
-  expect(m.ratio, 'the paused line does not span the row').toBeGreaterThanOrEqual(0.85)
-  expect(m.topDelta, 'the time is not on the name line').toBeLessThanOrEqual(2)
-  expect(m.merchantShown, 'the merchant is visible at 390').toBe(false)
+  expect(m.nameHasTime, 'the time renders inside the name line').toBe(false)
+  expect(m.timeTop, 'the time is not below the name line').toBeGreaterThanOrEqual(m.nameBottom - 2)
+  if (m.barBottom !== null) {
+    expect(m.timeTop, 'the time is not below the bar').toBeGreaterThanOrEqual(m.barBottom - 2)
+  }
+  expect(m.badgeTop, 'no badge beside the name').not.toBeNull()
+  expect(
+    Math.abs(m.badgeTop! - m.nameTop),
+    'the badge does not sit beside the name',
+  ).toBeLessThanOrEqual(2)
+  expect(Math.abs(m.rightEdge), `time right edge ${m.rightEdge}px off the content edge`).toBeLessThanOrEqual(1)
 })
 
 /**
- * #3910 design review: a setup row has no time cell. Its name now spans the
- * empty column and that column's gap, so at 390 "Needs setup" stays on the
- * name's line instead of wrapping under it (~20px taller row).
+ * #3989, the long-caption case: at 390 with the SEK fixture the caption and
+ * the time do not fit on one line, so the time wraps to its OWN right-aligned
+ * line and the caption is not narrowed to make room.
  */
-test('at 390 a setup row\'s name line spans the empty time column', async ({ page }) => {
+test('at 390 a long SEK caption wraps the time to its own right-aligned line', async ({ page }) => {
+  await page.clock.setFixedTime(FROZEN_NOW)
+  await serveSekUser(page)
+  await page.setViewportSize({ width: 390, height: 900 })
+  await page.goto('/dashboard')
+  await dismissMobileSidebar(page)
+  const row = page.locator('a[href^="/agents/"]').filter({ has: page.getByRole('progressbar') }).first()
+  await expect(row.getByTestId('agent-row-last-payment')).toBeVisible()
+  const m = await row.evaluate((rowEl) => {
+    const caption = (rowEl.querySelector('[role="progressbar"]') as HTMLElement).parentElement!.querySelector('p') as HTMLElement
+    const time = rowEl.querySelector('[data-testid="agent-row-last-payment"]') as HTMLElement
+    const line = time.parentElement as HTMLElement
+    return {
+      wrapped: time.getBoundingClientRect().top >= caption.getBoundingClientRect().bottom - 1,
+      captionNotNarrowed:
+        Math.abs(caption.getBoundingClientRect().width - line.getBoundingClientRect().width) <= 1,
+      rightEdge: line.getBoundingClientRect().right - time.getBoundingClientRect().right,
+    }
+  })
+  expect(m.wrapped, 'the time did not wrap below the caption').toBe(true)
+  expect(m.captionNotNarrowed, 'the caption was narrowed').toBe(true)
+  expect(Math.abs(m.rightEdge), `time right edge ${m.rightEdge}px off the content edge`).toBeLessThanOrEqual(1)
+})
+
+/**
+ * #3989: with no time column in the grid at all, a setup row's name line
+ * spans the row exactly like every other row's — the badge ("Needs setup")
+ * never wraps under the name, at any width.
+ */
+test('at 390 a setup row\'s name line spans the row', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 900 })
   await page.goto('/dashboard')
   await dismissMobileSidebar(page)
@@ -240,10 +303,8 @@ test('at 390 a setup row\'s name line spans the empty time column', async ({ pag
     .filter({ hasNot: page.getByTestId('agent-row-last-payment') })
     .filter({ hasText: 'Connecting agent' })
   await expect(row.getByText('Needs setup')).toBeVisible()
-  // Structural, so it holds whatever the font metrics: with no time cell the
-  // name line spans everything between the icon and the chevron except their
-  // two 12px gaps. On the old template the empty column kept a third gap,
-  // which on CI's Linux fonts wrapped "Needs setup" under the name.
+  // Structural, so it holds whatever the font metrics: the name line spans
+  // everything between the icon and the chevron except the two 12px gaps.
   const m = await row.evaluate((rowEl) => {
     const icon = rowEl.firstElementChild as HTMLElement
     const chev = rowEl.lastElementChild as Element
@@ -255,11 +316,12 @@ test('at 390 a setup row\'s name line spans the empty time column', async ({ pag
 })
 
 /**
- * #3912: from `sm` the name line spans the row (the time column sits beside
- * the body only), so a badge such as "92% used" stays on the name's line
- * instead of wrapping under a name squeezed into the 1fr track.
+ * #3989: the grid has no time column, so the name line spans the row at every
+ * width — a badge such as "92% used" stays on the name's line instead of
+ * wrapping under a squeezed name. (Under #3912 this needed the fixed 10rem
+ * column and two grid flows; #3989 removed the column entirely.)
  */
-test('from sm every agent row\'s name line spans the row (1280)', async ({ page }) => {
+test('at every width each agent row\'s name line spans the row (1280)', async ({ page }) => {
   await page.clock.setFixedTime(FROZEN_NOW)
   await page.setViewportSize({ width: 1280, height: 900 })
   await page.goto('/dashboard')

@@ -42,6 +42,7 @@ What to look for — the things that only show up **rendered**, not in a class-n
 - **Touch targets & mobile.** Interactive targets are comfortably tappable at 390px; nothing critical is pushed below an unnecessary scroll; the mobile layout holds, it isn't just the desktop layout squeezed.
 - **Focus-visible & affordance.** Focus rings are present and legible; disabled vs. enabled is distinguishable; a control looks like what it does.
 - **Design-system adherence in the render.** Type sizes sit on the ramp; colours read as tokens (no off-system tints); a primitive is used where one exists rather than a look-alike hand-roll (the design-lint structural rules catch some bypass at the class level — you catch the ones that render subtly wrong).
+- **Pattern adherence.** Compare every rendered screen with the documented [`/design-system` Patterns](../../../../docs/product/design-system.md#patterns). Rebuilding a documented Pattern instead of using it is a `should-fix`; an unfamiliar composition must be labeled **new pattern** and arrive through an owner-approved design-system slice before the consuming page.
 - **Money & authority clarity (Haven-specific).** Rendered on the screen: who can spend, from which Haven wallet, how much and which asset, when approval is required, what already happened, and how to pause/revoke. Unnecessary wallet internals (Safe, module, relayer, signer, raw hash) should not surface in primary UX.
 
 Return:

@@ -17,11 +17,13 @@ covers:
   - packages/frontend/src/app/(authenticated)/marketplace/page.tsx
   - packages/frontend/src/app/(authenticated)/marketplace/[slug]/page.tsx
   - packages/frontend/src/components/marketplace/MerchantGrid.tsx
+  - packages/frontend/src/components/ui/FacetMenu.tsx
   - packages/frontend/src/components/marketplace/MerchantCard.tsx
+  - packages/frontend/src/components/marketplace/ComingSoonMerchants.tsx
   - packages/frontend/src/components/marketplace/MerchantHeader.tsx
   - packages/frontend/src/components/marketplace/OffersTable.tsx
   - packages/frontend/src/components/marketplace/OfferRow.tsx
-  - packages/frontend/src/components/marketplace/PayWithHavenBlock.tsx
+  - packages/frontend/src/components/marketplace/HowToBuyPanel.tsx
   - packages/frontend/src/components/marketplace/FundMerchantModal.tsx
   - packages/frontend/src/components/marketplace/MerchantBudgetsList.tsx
   - packages/frontend/src/components/DelegationBudgetCard.tsx
@@ -32,7 +34,7 @@ covers:
   - packages/frontend/src/lib/merchantBudgetRefusal.ts
   - packages/frontend/src/hooks/useCatalog.ts
   - packages/frontend/src/components/CatalogSubmitModal.tsx
-last-verified: "2026-09-27"
+last-verified: "2026-10-17"
 ---
 
 # Marketplace
@@ -68,9 +70,10 @@ country when known, and two flags that decide how it is shown:
   to be catalog-reachable, only callable on the merchant directly. Its
   Base-mainnet sibling settles normally and stays listed.
 
-An **offer** is a catalog row. Every operator row has a `merchant_id` (NOT
-NULL after 088) and every self-submitted row gets one the moment it is
-verified payable (`docs/operations/catalog-ingestion.md`, *The merchant
+An **offer** is a catalog row. Every `merchant_catalog` row — operator-curated
+or, where discovery is enabled, Bazaar-discovered (`source: 'bazaar'`, #4245)
+— has a `merchant_id` (NOT NULL after 088) and every self-submitted row gets
+one the moment it is verified payable (`docs/operations/catalog-ingestion.md`, *The merchant
 step*). The **hostname is the find key** for every writer: the seeded map in
 088 names the hosts the curated merchants own (Anchor's two paths share one
 merchant; the demo store and Ampersend each span a dev and a prod host), the
@@ -122,7 +125,7 @@ caller, including `haven_discover_tools`.
 An owner can give an agent a budget that pays **one merchant only**. It is an
 ordinary recipient-pinned budget delegation, and its pin is the merchant's
 verified payTo on the agent's chain. This section covers the backend slice
-and the "Fund this merchant" modal, the frontend slice — see *Screens* below
+and the "Set a budget for this merchant" modal, the frontend slice — see *Screens* below
 for the modal's own shape.
 
 - **Where a merchant is paid.** The catalog refresh probe (at backend boot,
@@ -132,8 +135,10 @@ for the modal's own shape.
   offer's recorded network names the same well-formed address; options on
   other networks do not count. A merchant's **verified payTo** on a chain is
   derived, never stored: it is the one address all its active, verified x402
-  operator offers on that network agree on. Self-submitted offers do not
-  count, because they carry no network.
+  `merchant_catalog` offers on that network agree on — operator-curated or
+  Bazaar-discovered alike (`source` is a label and does not filter here,
+  #4245). Self-submitted directory offers do not count, because they carry no
+  network.
 - **`GET /merchants/{slug}`** carries `funding`, one entry per listed chain
   with such an offer:
   `{ network, chain_id, pay_to, pay_to_status, erc7710 }`. The chain scope is
@@ -142,10 +147,11 @@ for the modal's own shape.
   - `pay_to_status` is `verified` (`pay_to` set), `conflicting` (two offers
     name different addresses), `unstated` (some offer names none, including
     every offer before its first probe after the migration) or `shared`
-    (another merchant's offer on that network names the same address, so a
-    pin would pay that merchant too; a degraded or not-yet-verified offer
-    counts, since it can recover without anyone re-issuing the budget, and
-    only a delisted one does not).
+    (another merchant's non-delisted `merchant_catalog` offer on that
+    network, operator or Bazaar, names the same address, so a pin would pay
+    that merchant too; a degraded or not-yet-verified offer counts, since it
+    can recover without anyone re-issuing the budget, and only a delisted one
+    does not).
   - `erc7710` is true only when **every** such offer on that recorded network
     advertises the ERC-7710 transfer method. A pinned budget cannot fund an
     EIP-3009 payment, because that leg pays the agent's own wallet first, so
@@ -192,15 +198,25 @@ for the modal's own shape.
   pinned to the same address share one `(agent, token, recipient)` slot —
   and so does a merchant-locked budget pinned to a DIFFERENT merchant's payTo
   that happens to land in the same slot (a shared address, or an address a
-  merchant later stops using and another later takes up). Activating any
-  grant in that slot replaces whichever ACTIVE row is already there: they
-  carry the same on-chain authority, and two live grants in one slot would
-  make selection ambiguous. Activating a plain pinned budget to a merchant's
-  payTo therefore replaces that merchant's budget, and drops its merchant
-  label. The fund-merchant modal's review step warns about this before the
-  owner signs — a warning fires whichever kind of active row already occupies
-  the slot (plain, locked to this merchant, or locked to another merchant),
-  naming whichever one it is. A budget for THIS merchant in a *different*
+  merchant later stops using and another later takes up). A slot holds ONE
+  live budget (active and unexpired — the wire's `is_live`, #3922): they
+  carry the same on-chain authority, and two live grants
+  in one slot would make selection ambiguous. Since #3933 a new budget
+  cannot be *granted* into a slot that already holds a live one — build and
+  activate refuse it (409 `BUDGET_SLOT_OCCUPIED`), because the activation's
+  database sweep alone would leave the old delegation enabled on-chain. The
+  only way to replace it is the edit flow, which grants the new budget
+  naming every live row of the old one as `replaces` (a re-keyed agent's
+  budget is two rows) and then stops each on-chain (open task and
+  sub-budgets carved from it end with it). So funding a merchant
+  whose payTo already holds a live budget — plain, locked to this merchant,
+  or locked to another merchant — opens that budget's edit instead of a new
+  grant, and the review step names which kind of budget it is and that the
+  old one is stopped — with how many Stop signatures that takes (one per
+  row the edit replaces: two for a re-keyed budget, #3971). The edit opened from Fund labels the new budget for
+  THIS merchant; the agent page's Edit keeps the row's own label. Only a
+  direct API caller can still replace a merchant's budget with a plain
+  pinned one, which drops its merchant label. A budget for THIS merchant in a *different*
   token, or one still pinned to a payTo the merchant has since rotated away
   from (`stale`, below), is a *different* slot and survives with no warning.
 - **Editing one in place (#3166's REPLACE composition) — only a `current`
@@ -251,6 +267,143 @@ for the modal's own shape.
   `merchant_id`, `merchant_slug` and `merchant_name`, so a budget card can
   name its merchant. A deleted merchant leaves the budget pinned and drops
   only the label.
+
+## The per-offer budget answer (#4004)
+
+The merchant page's offers table answers, per offer, **which of the owner's
+agents can pay it** — a named, truthful answer (`agentsThatCanPay` in
+`packages/frontend/src/lib/marketplace.ts`), not the old cap-only
+`withinBudget` check, which compared the price against the CAP of any agent's
+allowance and could say yes when no agent could actually pay (it ignored what
+is left, which agent, recipient pins and networks).
+
+The answer mirrors how a payment picks its budget
+(`SELECT_DELEGATION_FOR_PAYMENT_SQL`) — it is a display mirror, not a second
+authority:
+
+1. The agent is active and its account chain is the offer's chain; otherwise
+   the agent **cannot** pay (or is unknown, when the chain itself is unknown).
+2. For an ERC-7710 offer, the selected budget is the one locked to the
+   merchant's verified pay-to **if one exists**, else the open budget; a
+   bridge-only offer selects only the open budget. A budget locked to the
+   offer's payee always wins over the open one, whatever is left on it.
+3. The selected budget must be live, in the offer's token, and its
+   **remaining** amount must cover the price. The cap (`allowance_amount`)
+   is read only for the period word, never for the comparison.
+
+**Unknown is silent, never "can't pay"** (the #2295 misleading-direction
+rule): a `remaining_atomic` of null, a from-chain flag of false on either
+budget wire, missing decimals, and an agent that pays from a received
+sub-budget (`receivedSubBudgets[].open`, #3988 — a power the helper does not
+model) all answer **unknown**, and unknown renders as NO line at all — the
+absence is the honest state, not a warning.
+
+The row then says one of:
+
+- "`Atlas` can pay this", or "`Atlas` and 2 other agents can pay this";
+- "More than `Atlas` has left this week" — the period word ("today", "this
+  week") comes from the selected budget's period. Only a no that is ABOUT the
+  offer's token is named this way: "insufficient" (the selected budget's
+  remaining is below the price) or "no budget in the token";
+- "No agent can pay this yet" — when every agent's answer is a known no,
+  whatever the reasons. A wrong-chain or paused agent is never named as
+  "more than … has left": its balance was never measured, and the sentence
+  would state a fact nobody has;
+- nothing, when the remaining answers cannot honestly fill either form —
+  a wrong-chain or paused agent beside an unknown one, or all unknown.
+
+**Data.** The helper reads two wires already on the page or the dashboard —
+`GET /dashboard/budget-remaining` (per budget: `remaining_atomic`, cached up
+to 60 s) and `GET /merchants/{slug}/budgets` (the merchant-locked budgets)
+— plus `GET /agents` for the agent's name, status, account chain and the
+period word. #4004 added two additive, nullable fields to
+`DashboardBudgetRemainingEntry` — `recipient_address` (the pin; null = open)
+and `start_date` — so the locked-vs-open and live-vs-dormant distinctions can
+be made client-side without widening the byte-frozen `GET /agents`
+projection. The future-dated re-key row is still returned by the route (#3802
+owner decision stands); the HELPER is what skips a row whose `start_date` is
+in the future — the dormant half of a re-key is not spendable.
+
+## The "How to buy" panel (#4005)
+
+Between the header and the offers, a live merchant with at least one offer
+renders a one-Card panel (`components/marketplace/HowToBuyPanel.tsx`) —
+its title in the house `Card.Header` band, one hairline above step 1
+(#4015) — with three steps, each claimed from data the page already loads — `useAgents`,
+the two budget wires (#4004) and the funding targets — never asserted.
+Coming-soon and no-offer merchants show no panel.
+
+1. **Connect an agent.** Done when the user has at least one ACTIVE agent —
+   "Atlas is connected on Base Sepolia"; with several, the count names one.
+   Open when there are none: "Connect an agent to buy from <merchant>" with
+   a link to `/agents`. A FAILED agents read says "Haven couldn't load your
+   agents" and never "Connect an agent" (the same distinction the page's
+   funding slot draws). While agents load, the step is a skeleton.
+2. **Give it a budget it can spend here.** The merchant-level reduction of
+   #4004's per-offer verdicts (`howToBuy` in `lib/marketplace.ts`), so the
+   panel and the offers answer from one set of computations:
+   - **Done** when an active agent can pay at least one offer — the line
+     names the agent and the SELECTED budget's remaining and cap ("Atlas has
+     $0.65 left of $1.00 today, and can pay anyone — so it can pay
+     <merchant>"), or "can pay only <merchant>" when the paying budget is
+     merchant-locked. The step reads the offers on the named agent's own
+     chain — the offers table's split (#4015): when the agent cannot pay
+     every offer THERE, the line says "for some offers"; offers on another
+     network have their own disclosure line and never make it partial. When
+     the agent's chain is not the default account's chain, the line names
+     the network ("…so it can pay <merchant> on Base"); when agents on
+     several chains can pay, one on the default chain is named first. The any-recipient
+     requirement (the old offer-level note, moved here in #4005) reads the
+     same per-chain set through one predicate (`anyRecipientRule`): in the
+     done line it renders only when that set is mixed ("The offers marked
+     'any-recipient budget' need a budget that can pay anyone") — an open
+     budget's "can pay anyone" already says the rest.
+   - **A budget fix** when no agent can pay and a budget-shaped no exists:
+     the panel names the first agent with one (one on the default
+     account's chain first, as in the done line) and offers "Set a budget for
+     this merchant" (the same modal as the header action) ONLY when the
+     action is available AND an eligible agent is ACTIVE —
+     `eligibleFundingAgents` admits paused and pending agents, the panel
+     does not point a paused agent at an action. A merchant-locked budget
+     wins over the open one for this payee, so the action is never offered
+     while an open budget already covers the offers (that state is "done"
+     instead) — and since #4015 the header action follows the same rule
+     (see *"Set a budget for this merchant"* below). Otherwise the fix links
+     to the agent's page. The fix line keeps the any-recipient sentence in
+     both forms, mixed or not. A depleted
+     budget names what is left ("not enough for any offer here"); a budget
+     locked to another recipient is simply "no budget that can pay
+     <merchant>" — true either way.
+   - **Wrong network** when every known no is a chain no: the step names the
+     agent's chain and the offers' chains and says plainly that Haven can't
+     add a second account from here — no fix button. **The sentence stays
+     after #4024** (decision recorded 2026-10-16), even though the Accounts
+     screen now has a **New account** action. It is still literally true of
+     this panel, and New account would not fix the step: an agent spends only
+     from the one account it is linked to (`agents.account_id`), so a new
+     account on the offers' chain leaves *this* agent exactly where it was —
+     it would need its own agent connection and budget there. Linking the
+     action here would offer a step that cannot make the named agent able to
+     buy. Revisit if agents can move between accounts.
+   - **No claim** when the answers are unknown (remaining unreadable, a
+     received sub-budget in play) — "couldn't confirm what your agent can
+     spend here just now". A failed budget read (either wire) is a
+     retryable "Haven couldn't check budgets — try again".
+3. **Ask your agent to buy.** "Copy an offer's prompt below and paste it
+   into <agent>'s chat. It pays from its budget and brings back the result.
+   The payment shows up in Transactions", linked to `/transactions`. The
+   named target is the agent step 2 claimed can pay, else the only active
+   agent, else the generic "your agent's" — never a name the data does not
+   single out.
+
+The panel is one unpadded `Card` whose three steps sit in one
+`Card.Section divided`, each row owning its padding — the shared row-list
+pattern, so the dividers meet the card's edges (#4014) — with no nested
+filled cards (CLAUDE.md § UI Surface Hierarchy). The copy confirmation on an
+offer's "Copy prompt" button becomes "Copied — paste it to <agent>" when
+exactly one agent can pay that offer (`CopyButton`'s optional `copiedText`,
+shown on `/design-system`), and the longer label wraps rather than widening
+the row.
 
 ## Prospects
 
@@ -308,7 +461,7 @@ Dev's standing env is `HAVEN_MARKETPLACE_PROSPECTS=true` **and**
 `HAVEN_MARKETPLACE_CHAIN_IDS=84532,8453` (the list is restored to that value
 as the operator step after PR #3202 lands; for the 2026-09-20 demo it was
 narrowed to `84532`), so a logged-in dev user sees the mainnet merchants, the
-Ampersend sandbox and the "Coming soon" prospects on one grid, all the time;
+Ampersend sandbox and the "Coming soon" prospects on one page, all the time;
 nothing is flipped before or after a meeting. Two things still hold: agents and
 credential-less readers never see a prospect (measured 2026-09-20 on dev at
 `84532`, before this rule change — the property, not the count, is what the
@@ -367,7 +520,7 @@ URL). They are used only if no merchant owns the host when the submission is
 verified; on a curated merchant's host they are ignored. The `website` field
 of that request is the bot honeypot and is unrelated. The submit modal exposes
 both as optional inputs (`components/CatalogSubmitModal.tsx`), reachable from
-the marketplace grid and from a merchant page.
+the marketplace grid — a merchant page carries no seller entry point (#3981).
 
 ## Screens (#3079)
 
@@ -376,41 +529,126 @@ string, `next.config.ts`); the sidebar label is "Marketplace", same index in
 `baseNavItems`, same More-sheet position.
 
 - **Grid** (`components/marketplace/MerchantGrid.tsx`,
-  `MerchantCard.tsx`) — one card per merchant on the shared entity-card
+  `MerchantCard.tsx`, `ComingSoonMerchants.tsx`) — one card per payable merchant on the shared entity-card
   idiom (`entityCardClassName`: hover lift, product focus ring): a monogram
   (`components/ui/Monogram.tsx`, promoted on its third copy — `/contacts`,
   the card, the merchant header) or a logo when `logo_url` is set, name,
-  category chip (acronyms kept: API, AI), description clamped to two lines,
-  network chips, and a bottom-pinned footer with the offer count or "Coming
-  soon", plus the Haven test-merchant label on a test merchant. Filters:
-  category pills (`components/ui/FilterPill.tsx`, moved out of
-  `CatalogPanel.tsx`), a network dropdown shown only when the listed chains
-  are more than one, search over name and description, "Verified only", and
-  "Show test merchants" — defaulted **on** when any of the merchants' listed
+  the category as plain `ink-3` text (acronyms kept: API, AI — deliberately
+  not a chip, so it stops dressing up like the network chips beside it),
+  description clamped to two lines, network chips, and a bottom-pinned footer
+  that answers "can I pay this, and what does it cost?" (#3980): live
+  merchants show "From <price> USDC" — the lowest USDC price over the counted
+  offers, served as the nullable `lowest_price_atomic` on `GET /merchants`
+  (atomic units; the card formats it with the backend's two-decimal rule —
+  trailing zeros trimmed to at least two decimals, "0.10" and "1.00" but
+  "0.001" stays — the ONE price format on the frontend, matching the offer
+  row's `price_display`; #4008), with the offer count after it
+  when there is more than one offer, and the offer count alone when no
+  counted offer prices in USDC. The price leads in ink and semibold, the
+  count stays ink-3 (#4052). Only payable merchants get a card (#4052):
+  coming-soon merchants list below the grid in `ComingSoonMerchants`, one
+  Card titled "Coming soon" with a divided list of linked rows (monogram,
+  name, one-line description, an ink-3 chevron) and nothing comparable — no price, no
+  count; its header says "Not payable through Haven yet.". The section renders only when it has rows, and "No merchants match
+  this filter" shows only when both the grid and the section are empty. The
+  split (#3980 sorted, #4052 partitions) is CLIENT-side in `MerchantGrid` —
+  the endpoint's own order (test merchants last, then by name) is preserved
+  within each group and must not change for its other clients. Verified is a
+  quiet check after the name (`title` = the meaning, sr-only "Verified" so
+  the card link's accessible name stays the merchant's) — the merchant page
+  still spells the meaning out in visible text. A test merchant carries a
+  neutral "Test" badge in the card's badge slot; the full test-merchant note
+  ("payments are real … demo content") is the merchant page's (#4052).
+  Filters are the list-controls toolbar (#4114, epic #4108 — the pattern's
+  own anatomy: search, facets, chips, count): the browser-filtered mode —
+  the merchant list is small, unpaged and has no export, so rows re-render
+  per keystroke and only the URL write waits for a pause. The facets:
+  **Category** is the pill facet (a `FacetMenu` pills row — `FilterPill`
+  renders only inside `FacetMenu` now); **Network**, **Verified**
+  ("Any" / "Verified only") and **Test merchants** ("Shown" / "Hidden") are
+  single-select menus. Every control writes the URL through the codec
+  (`useListUrlState`), so a shared link, a refresh and Back all land on the
+  same grid; `category` keeps the key the old deep links used, so a
+  `/catalog?category=ai` redirect keeps working. The defaults survive the
+  move: with no `chainId` key the network facet opens on the chain of the
+  user's default account (`resolveDefaultAccount`) when the listed merchants
+  serve it AND there is more than one listed chain, else All networks — the
+  default is the codec's `defaultValue`, derived from data that arrives after
+  mount, never captured; an explicit `chainId=all` means All networks. With
+  no `test` key, test merchants show when any of the merchants' listed
   networks is a testnet (core's faucet field, `isTestnetChain`, not a
   hard-coded id), read off the served data rather than
-  `NEXT_PUBLIC_HAVEN_ENV` (epic decision 10). A `/catalog?category=…` deep
-  link keeps its category. A failed load offers "Try again"; a filter that
-  hides everything offers "Clear filters"; an empty marketplace shows no
-  filter row, only the submit entry point.
+  `NEXT_PUBLIC_HAVEN_ENV` (epic decision 10). A merchant that lists no
+  network — coming soon, or every offer self-submitted — stays visible under
+  any network filter. Test content has one control: the `test-fixture`
+  category gets no pill, and a `?category=test-fixture` deep link opens as
+  "All". The pills are built from the merchants that pass the NETWORK facet
+  and the Test merchants facet — not the category or search filters (#4008)
+  — so pills never vanish while you use them; a category whose pill the
+  network facet currently hides is not an active filter — a deep link such
+  as `?category=media` under the Base Sepolia default opens as "All" with no
+  chip over it (#4008), the same no-filter-without-a-pill rule. The count is
+  the standard one (rendered merchants at the defaults; "n of all listed"
+  once a chip is up), the no-match copy is `ListNoMatch`'s ("No merchants
+  match these filters" — plural, per the pattern), and a filter that hides
+  everything offers "Clear filters", which returns the whole list to the
+  page defaults (the user's own network, not All). A failed load offers
+  "Try again"; an empty marketplace shows no toolbar, only the submit entry
+  point. Below a populated grid, a note for
+  sellers ("Sell an API or MCP tool?") opens the submit modal — listing a
+  service is not a toolbar action.
 - **Merchant page** (`app/(authenticated)/marketplace/[slug]/page.tsx`,
-  `MerchantHeader.tsx`, `PayWithHavenBlock.tsx`, `OffersTable.tsx`) — header
-  (monogram/logo, name, category, website link, networks, Verified with its
-  meaning as VISIBLE text under the description — never only a tooltip — and
-  the Haven test-merchant note as a wrapping line on a test merchant, where a
-  payment is one paste away), a "Pay this with Haven"
-  block with one paste-into-agent instruction per offer, each labelled with
-  the offer's name and price and printed in full (`agentInstruction()`, moved
-  to `lib/marketplace.ts`) with a copy button, the line "This merchant
-  settles by EIP-3009 — the paying agent needs an unpinned budget" **once**
-  when any offer's `asset_transfer_methods` lacks `erc7710` (the offers that
-  need it are tagged when the merchant is mixed), and the offers: a table from
-  `md` up (Offer · Method · Description · Price · Network · Freshness — the
-  network cell names the chain) and one stacked card per offer below `md`,
-  both reusing `withinBudget()` for the per-agent budget hint so the warning
-  is never behind a horizontal scroll on a phone. A `coming_soon` merchant renders its description, website and
-  "Coming soon — not payable yet" — no instruction block, no offers table, no
-  price. Loading, empty, error (with "Try again") and unknown-slug (404 via
+  `MerchantHeader.tsx`, `OffersTable.tsx`) — header (monogram/logo, name,
+  category, website link, networks, the Verified marker as the quiet check
+  plus the word "Verified" in sentence case — the ONE treatment, shared with
+  the grid card (#4008) — with its meaning as VISIBLE text
+  under the description — never only a tooltip — the Haven test-merchant note
+  as a wrapping line on a test merchant, where a payment is one paste away,
+  and "Set a budget for this merchant" in the header's actions slot when the
+  action shows — its helper capped at `16rem`; below the text until `xl`
+  (1280px), beside it from there, so the merchant's own text keeps the
+  width (#4015, `merchant-page-fit-measure.spec.ts`)), and ONE offers section (#3981): each offer is a single row —
+  a table from `md` up, one stacked card below — carrying name, description,
+  price with the `withinBudget()` per-agent hint (so the warning is never
+  behind a horizontal scroll on a phone), the network's chain name and a
+  labelled **Copy prompt** button (#3998, #4003 wording) that copies the full
+  paste-into-agent instruction (`agentInstruction()`, byte-stable in
+  `lib/marketplace.ts`). The instruction is not printed under every offer:
+  the row carries a quiet line under the description — the resource URL
+  without its scheme, truncated with the full URL as its title, then the
+  freshness — and prints the instruction (monospace, wrapping, never
+  truncated) only where the user must see it: when it carries a placeholder
+  to replace (`instructionNeedsEdit`: an MCP offer with a tool, "… for
+  <what you want>", with a "Replace <what you want> before sending" hint),
+  or after the clipboard refused a copy, when it is revealed in place. The
+  button's accessible name keeps its visible words ("Copy prompt for
+  <offer>"). There is no Method column (the MCP tool name survives inside the
+  printed instruction) and no per-row Verified badge — the trust claim lives
+  once, in the header. Offers on the
+  user's own network (the chain of the default account,
+  `resolveDefaultAccount`) come first; offers on other networks sit behind an
+  "n more on <chain names>" disclosure (#4003 — with "— none of your agents
+  can pay on that network" when no active agent's account chain is among the
+  hidden chains). The nested table inside the disclosure shares the outer
+  table's fixed column layout — one `table-layout: fixed` and one `colgroup`
+  for both, and no extra horizontal padding on the disclosure's cell — so
+  their columns line up to the pixel (#4008); the rows stay in the DOM while
+  the disclosure is collapsed, and the phone `OfferCard` disclosure is
+  unchanged. Every offer renders flat when the
+  user's default network serves none of the merchant's offers. (#4005: the
+  offer-level any-recipient NOTE is gone from the table — the "How to buy"
+  panel's step 2 states that requirement in plain words, next to the state
+  that makes it matter; the per-offer TAG stays in a mixed merchant. The copy
+  confirmation names the ONE agent that can pay — "Copied — paste it to
+  <agent>" via `CopyButton`'s `copiedText` — and stays "Copied" when the
+  answer is none, unknown or more than one.) No "EIP-3009" and no
+  "unpinned" reaches the page, and where one network's offers are mixed
+  the offers there that need it carry an "any-recipient budget" tag —
+  decided per chain through the panel's own `anyRecipientRule` (#4015), so
+  step 2 never points at a tag on another network.
+  A `coming_soon` merchant renders its description, website and
+  "Coming soon — not payable yet" — no offers section, no price. Loading,
+  empty, error (with "Try again") and unknown-slug (404 via
   `next/navigation`'s `notFound()`, landing on the segment's own
   `not-found.tsx` with "Back to Marketplace") states are covered by unit
   tests, not baselines — except the unknown slug, whose `notFound()` →
@@ -422,16 +660,23 @@ string, `next.config.ts`); the sidebar label is "Marketplace", same index in
   `CatalogCard` is now `components/marketplace/OfferRow.tsx`;
   `hooks/useCatalog.ts` gains `useMerchants()` / `useMerchant(slug)`, and
   `useMerchant`'s response now also carries `funding` (#3331).
-- **"Fund this merchant"** (`components/marketplace/FundMerchantModal.tsx`,
+- **"Set a budget for this merchant"** (`components/marketplace/FundMerchantModal.tsx`,
   #3331) — the action shows on the merchant page ONLY when ALL of these hold:
   the merchant is live, AT LEAST ONE listed chain's `funding` entry is
   `verified` and `erc7710`, AND the owner has at least one ELIGIBLE agent for
   one of those chains (`eligibleFundingAgents`) — a qualifying chain with no
   eligible agent hides the action too, rather than opening a modal that can
-  only ever say "no eligible agent". The open-budget note shows instead ONLY
-  when no chain qualifies (no verified+`erc7710` funding entry) but at least
-  one chain has a verified payTo that is not `erc7710`; neither the action nor
-  the note shows when no chain has a verified payTo at all. The modal: pick
+  only ever say "no eligible agent". In the header it is also withheld when
+  an active agent's OPEN budget already pays every offer on the user's
+  network (`openBudgetCoversOffers` over `offersOnUserNetwork`, the same
+  per-offer verdicts step 2 reads; only once both budget wires answered) —
+  owner decision (a), 2026-10-16, #4015: "No need to push for merchant
+  specific budgets here." A merchant-locked budget does not count, so the
+  action stays beside one; it may reappear as the open budget drains. The
+  modal is unchanged. The action's old funding-level
+  "open-budget note" is gone since #3981: the offers section's own
+  plain-language payment note (above) is offer-level and covers it — when no
+  offer is `erc7710` the note shows and the action is withheld. The modal: pick
   one of the eligible agents, an amount in whichever token the merchant
   actually sells in on that chain (`merchantTokenOptions`, restricted to its
   ERC-7710 offers) and a period, a review step naming the agent, the budget
@@ -443,7 +688,7 @@ string, `next.config.ts`); the sidebar label is "Marketplace", same index in
   — the same build → sign → activate composition the agent page's budget form
   uses, extended with `merchant_slug` rather than forked. The review step
   states which payments this budget pays and which still use the open budget
-  (see "Which budget pays" above) and, if an ACTIVE row already occupies the same
+  (see "Which budget pays" above) and, if a LIVE (active and unexpired, #3922) row already occupies the same
   `(agent, token, recipient)` slot — plain, locked to this merchant, or locked
   to a DIFFERENT merchant — warns that signing replaces it, naming whichever
   one it is; a budget for this merchant in another token, or one pinned to a

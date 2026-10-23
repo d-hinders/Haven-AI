@@ -70,8 +70,10 @@ worktrees whose directory is gone, and these all had live ones.
 **Two cases where the root STAYS even though it is clean**, because someone is
 about to stand in it:
 
-- a **blocked** verdict, or a guard refusal — the captain is going to re-make or
-  inspect the tree, and deleting it turns a blocked pass into a lost one;
+- a **blocked** verdict, a guard refusal, or a `prove-red verify` exit 3 — the
+  captain is going to re-make, inspect or `recover` the tree (that journal lives
+  in the root's git dir, so removing the root removes it), and deleting it turns
+  a blocked pass into a lost one;
 - any finding you could not fully verify and flagged as such, if you named the
   root as where the evidence sits.
 
@@ -79,7 +81,10 @@ Say which you did. "Root removed" and "root kept, blocked on X" are both
 verdict-carrying facts; silence is the thing that leaves them behind.
 
 Default posture:
-- Read only unless the captain explicitly asks for a patch.
+- Read only unless the captain explicitly asks for a patch. One carve-out:
+  `prove-red verify` ([prove-red](../../prove-red/SKILL.md) § *verify*) mutates
+  and restores files in your own review root, and only there; it needs a cells
+  file you wrote, and refuses to run without one.
 - Prioritize bugs, security risks, behavioral regressions, unclear money movement, confusing agent authority, and missing tests.
 - Findings come first, ordered by severity, with file and line references.
 - If there are no serious findings, say that clearly and mention residual risk or test gaps.
@@ -139,6 +144,7 @@ These mirror the preflight items in `docs/contributing/ai-agent-workflow.md` and
 - **Identifier Entropy.** Displayed key prefixes, setup-token prefixes, invoice numbers, nonces, or visual identifiers have enough entropy for their population and duplicate handling where needed.
 - **Credential Setup Copy.** Setup copy is consistent across UI, generated credential files, hosted-connect prompts, runtime snippets, SDK examples, and docs. It does not imply API credentials or Haven backend custody can spend.
 - **Browser Or Headless Verification.** Skipped browser verification is named and paired with a headless equivalent that covers the skipped animation, layout, routing, loading, or interaction risk.
+- **Assertions A Wrong Edit Still Satisfies.** Every new assertion was mutated by the nearest wrong edit that keeps what it matches, not by deleting the guarded code. Four families: **polarity** (a substring check passes the rewrite that inverts the instruction — pin generated text whole with `toBe`, PR #4133), **wildcard token** (a token such as `src/**` or `**/` names a whole set, so the test cannot fail, PR #4131), **any error code** (no test goes red when the anchor accepts any code, PR #4145), and **unentered branch** (an arm no test drives, PR #4144).
 - **Instrument Self-Reference And Staleness.** A claim made from a measurement states what the instrument actually looked at. Reject a count taken over a multi-column listing without filtering to the column (`git worktree list | grep -c review` counts branch names), an absence claim made over an unfetched tree, and a "the value appears in the output" conclusion drawn from a probe that was passed the value. A correction is a new claim: the replacement sentence is verified against its instrument, never against the sentence it replaces.
 
 Return:

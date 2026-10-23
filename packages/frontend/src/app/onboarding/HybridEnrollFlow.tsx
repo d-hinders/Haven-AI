@@ -7,7 +7,7 @@
  * P256 coordinates (POST /accounts/hybrid, #885 persists the signer set), and
  * land on the dashboard. The account is COUNTERFACTUAL — no deployment
  * transaction here; the first budget grant relayer-deploys it (#860). That is
- * the whole flow: one Face ID prompt, zero transactions, zero gas.
+ * the whole flow: one passkey prompt, zero transactions, zero gas.
  *
  * The user never sees an address ceremony, a wallet, or a seed phrase — the
  * copy stays in outcome language (copy-guidelines).

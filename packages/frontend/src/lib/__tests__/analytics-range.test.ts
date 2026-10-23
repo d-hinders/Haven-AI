@@ -1,11 +1,14 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
+  ANALYTICS_PERIOD_URL_PARAM,
   ANALYTICS_RANGE_STORAGE_KEY,
   DEFAULT_ANALYTICS_RANGE,
   browserTimeZone,
   isAnalyticsRangeValue,
   readStoredAnalyticsRange,
+  readUrlAnalyticsRange,
   writeStoredAnalyticsRange,
+  writeUrlAnalyticsRange,
 } from '../analytics-range'
 
 /**
@@ -118,6 +121,77 @@ describe('writeStoredAnalyticsRange', () => {
     } finally {
       window.localStorage.setItem = original
     }
+  })
+})
+
+/**
+ * The URL half (#4116). `?period=` is the sharable half of the choice: it is
+ * read before storage in the client's initialiser, through the same
+ * `isAnalyticsRangeValue` gate, and mirrored back on every pick with a
+ * `replaceState` write — no history entry per change, the posture
+ * `useListUrlState` set (#4110).
+ */
+describe('readUrlAnalyticsRange', () => {
+  function seedUrl(search: string) {
+    window.history.replaceState(null, '', `/${search}`)
+  }
+
+  it('reads the period the URL asks for', () => {
+    for (const value of ['7d', '30d', '90d']) {
+      seedUrl(`?period=${value}`)
+      expect(readUrlAnalyticsRange()).toBe(value)
+    }
+  })
+
+  it('returns null when the URL carries no period', () => {
+    seedUrl('')
+    expect(readUrlAnalyticsRange()).toBeNull()
+  })
+
+  it('returns null rather than a value the endpoint would answer 400 to', () => {
+    // The same reject list the storage gate holds: a stale or hand-edited
+    // parameter must fall back to the device's choice, never reach the wire.
+    for (const value of ['7', '7D', '180d', 'all', '']) {
+      seedUrl(`?period=${value}`)
+      expect(readUrlAnalyticsRange()).toBeNull()
+    }
+  })
+
+  it('ignores other params and keeps the first period if two arrive', () => {
+    seedUrl('?foo=1&period=7d&range=90d')
+    expect(readUrlAnalyticsRange()).toBe('7d')
+  })
+})
+
+describe('writeUrlAnalyticsRange', () => {
+  it('mirrors the choice onto the address bar', () => {
+    window.history.replaceState(null, '', '/analytics')
+    writeUrlAnalyticsRange('7d')
+    expect(new URLSearchParams(window.location.search).get(ANALYTICS_PERIOD_URL_PARAM)).toBe('7d')
+    // And the read half round-trips it, which is what makes a reload or a
+    // shared link reopen the window the reader is looking at.
+    expect(readUrlAnalyticsRange()).toBe('7d')
+  })
+
+  it('leaves params the page does not own untouched', () => {
+    window.history.replaceState(null, '', '/analytics?foo=1')
+    writeUrlAnalyticsRange('90d')
+    const params = new URLSearchParams(window.location.search)
+    expect(params.get('foo')).toBe('1')
+    expect(params.get(ANALYTICS_PERIOD_URL_PARAM)).toBe('90d')
+  })
+
+  it('replaces rather than pushes, so the back button still leaves the page', () => {
+    window.history.replaceState(null, '', '/analytics')
+    const before = window.history.length
+    writeUrlAnalyticsRange('30d')
+    expect(window.history.length).toBe(before)
+  })
+
+  it('refuses to write a value the endpoint would answer 400 to', () => {
+    window.history.replaceState(null, '', '/analytics?period=7d')
+    writeUrlAnalyticsRange('180d' as never)
+    expect(new URLSearchParams(window.location.search).get(ANALYTICS_PERIOD_URL_PARAM)).toBe('7d')
   })
 })
 

@@ -70,6 +70,8 @@ async function serveIssueResponse(page: Page, outcome: Outcome) {
       id,
       agent_id: agentId,
       status: 'pending',
+      // #3922: a pending slice is not live until it opens.
+      is_live: false,
       period_amount_atomic: '25000000',
       // 2027-01-15 end of day, UTC — what the form asked for.
       expires_at: 1800057599,
@@ -97,8 +99,10 @@ async function openModal(page: Page) {
   })
   await dismissMobileSidebar(page)
   // #3716: the entry moved into the Add budget panel, below the grant form —
-  // the panel must open before the entry exists to click.
-  await page.getByRole('button', { name: 'Add budget', exact: true }).click()
+  // the panel must open before the entry exists to click. #4261: the panel
+  // opens from the active row's ⋯ menu now.
+  await page.getByRole('button', { name: /^Budget options/ }).click()
+  await page.getByRole('menuitem', { name: 'Add budget' }).click()
   const entry = page.getByRole('button', { name: 'Issue sub-budget', exact: true })
   await expect(entry).toBeVisible()
   await entry.click()

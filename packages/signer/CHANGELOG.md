@@ -15,6 +15,33 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+## 0.11.0-alpha.0 — 2026-10-23
+
+### Fixed
+
+- An x402 binding now records which shape the signer verified when minting it,
+  and `haven_x402_sign_header` builds an EIP-3009 merchant header only from a
+  funding-leg binding (#4242). A binding minted for an erc7710 settlement child
+  is refused and retired: that payment has no funding leg, and its merchant
+  header comes from `haven_submit` with `settlement_scheme: 'erc7710'`.
+  `haven_sign_x402` refuses a settlement child before signing anything.
+  Funding-leg payments are unchanged; no update needed.
+
+### Changed
+
+- The #4242 settlement-child refusal is now structured: code `NO_FUNDING_LEG`
+  (it was a plain `SIGNING_ERROR`), `next_action: sign_and_submit_payment`, and
+  a `next_tool_omitted_reason` naming the erc7710 remedy (#4248).
+  `haven_sign_x402` checks the expected-context version first, so a skewed
+  context gets `UNSUPPORTED_EXPECTED_CONTEXT_VERSION` rather than the
+  settlement-child refusal. A settlement-child binding is retired when it is
+  minted and is no longer held in memory. No update needed.
+
+- `haven_sign_x402`'s description now ends the plain-HTTP flow with the report:
+  after retrying the merchant, call `haven_report_x402_outcome` with the same
+  `payment_header` (#4061). Haven records the merchant settlement only with
+  that header. Text only. No update needed.
+
 ## 0.10.0-alpha.0 — 2026-10-14
 
 ### Changed

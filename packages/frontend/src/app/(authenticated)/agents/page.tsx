@@ -1,14 +1,10 @@
 import AgentPanel from '@/components/AgentPanel'
-import { PageHeader } from '@/components/ui/PageHeader'
 
+// #4209: the page header (title, Connect agent and the ⋯ menu) renders inside
+// `AgentPanel`, beside the state it reads.
 export default function AgentsPage() {
   return (
     <div className="max-w-5xl">
-      <PageHeader
-        title="Agents"
-        subtitle="Delegation agents use on-chain rules; historical agent records remain readable."
-      />
-
       <AgentPanel />
     </div>
   )

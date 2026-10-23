@@ -9,6 +9,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   EXPORT_ROW_CAP,
+  FOLDED_TRANSACTION_CSV_COLUMNS,
   TRANSACTION_CSV_COLUMNS,
   buildTransactionCsvFilename,
   exceedsExportRowCap,
@@ -89,7 +90,8 @@ describe('transactionCsvRow', () => {
       tx_hash: '0xabc',
       payment_id: 'pi-1',
       agent_name: 'Buyer',
-      initiator: 'agent',
+      // #4099: the app's words, not the raw enum.
+      initiator: 'Buyer',
       account_address: '0xsafe',
       // #3127: the fixed-reporting-currency statement and the row's own
       // converted currency, appended at the end of the contract.
@@ -116,6 +118,20 @@ describe('transactionCsvRow', () => {
 
     expect(row.tx_hash).toBe('0xabc')
     expect(row.settlement_tx_hash).toBe(`0x${'22'.repeat(32)}`)
+  })
+
+  it("#4099: the initiator column uses the app's words — You, the agent's name, Unknown", () => {
+    expect(transactionCsvRow(tx({ initiatedBy: 'human' }), NEVER_NAMED).initiator).toBe('You')
+    expect(transactionCsvRow(tx({ initiatedBy: 'agent', agentName: 'Buyer' }), NEVER_NAMED).initiator).toBe('Buyer')
+    expect(transactionCsvRow(tx({ initiatedBy: 'unknown' }), NEVER_NAMED).initiator).toBe('Unknown')
+    // No record at all (the enrichment step failed and returned rows
+    // unclassified): outbound is still "Unknown", inbound stays empty.
+    expect(transactionCsvRow(tx({ initiatedBy: undefined }), NEVER_NAMED).initiator).toBe('Unknown')
+    expect(transactionCsvRow(tx({ initiatedBy: undefined, direction: 'in' }), NEVER_NAMED).initiator).toBe('')
+    // No raw enum value ever reaches the file.
+    for (const initiatedBy of ['human', 'agent', 'unknown'] as const) {
+      expect(transactionCsvRow(tx({ initiatedBy, agentName: 'Buyer' }), NEVER_NAMED).initiator).not.toBe(initiatedBy)
+    }
   })
 
   it('takes the counterparty from the sender on an inbound row', () => {
@@ -162,6 +178,29 @@ describe('transactionsToCsv', () => {
     const csv = transactionsToCsv([tx(), tx({ hash: '0xdef' })], NEVER_NAMED)
 
     expect(csv.split('\r\n')).toHaveLength(3)
+  })
+
+  it('keeps the default export byte-identical and appends the destination name only when opted in', () => {
+    const move = tx({
+      ownTransfer: {
+        toAccountId: 'account-2',
+        toAccountName: 'Savings',
+        toAccountAddress: '0xrecipient',
+      },
+    })
+    const defaultCsv = transactionsToCsv([move], NEVER_NAMED)
+    expect(defaultCsv.split('\r\n')[0]).toBe(TRANSACTION_CSV_COLUMNS.join(','))
+    expect(defaultCsv.split('\r\n')[1].split(',')).toHaveLength(
+      TRANSACTION_CSV_COLUMNS.length,
+    )
+
+    const foldedCsv = transactionsToCsv([move], NEVER_NAMED, true)
+    const [header, record] = foldedCsv.split('\r\n')
+    expect(header).toBe(FOLDED_TRANSACTION_CSV_COLUMNS.join(','))
+    expect(header.endsWith(',to_account_name')).toBe(true)
+    expect(record).toContain('"own_transfer"')
+    expect(record).toContain('"out"')
+    expect(record.endsWith('"Savings"')).toBe(true)
   })
 })
 

@@ -147,6 +147,15 @@ describe('states', () => {
     expect(caption).toEqual({ kind: 'expired', caption: 'This budget has expired and can no longer be spent.' })
   })
 
+  // #3922: the server's `is_live: false` is honoured even where this render's
+  // clock says the row has not expired; `true`/absent defer to the clock.
+  it('is_live false reads expired even before expires_at; is_live true still flips on the clock (#3922)', () => {
+    const future = Math.floor(ANCHOR_NOW / 1000) + 86_400 * 30
+    expect(budgetCaption(row({ expiresSec: future, isLive: false }), { nowMs: ANCHOR_NOW }).kind).toBe('expired')
+    expect(budgetCaption(row({ expiresSec: future, isLive: true }), { nowMs: ANCHOR_NOW }).kind).toBe('meter')
+    expect(budgetCaption(row({ expiresSec: Math.floor(ANCHOR_NOW / 1000) - 60, isLive: true }), { nowMs: ANCHOR_NOW }).kind).toBe('expired')
+  })
+
   it('not-started: a future start_date — the dormant half of a re-key', () => {
     const caption = budgetCaption(row({ startSec: Math.floor(ANCHOR_NOW / 1000) + 3 * 86_400 }), {
       nowMs: ANCHOR_NOW,
@@ -194,38 +203,61 @@ describe('states', () => {
     })
   })
 
-  it('currency mode: one leading ≈, the caller’s rate; an unknown rate falls back to token mode', () => {
+  it('currency mode: USDC in USD is dollars — no ≈ (#4165)', () => {
     const caption = budgetCaption(row(), { nowMs: ANCHOR_NOW, timeZone: 'UTC', rate: { currency: 'USD', perToken: 1 } })
     expect(caption.kind).toBe('meter')
     if (caption.kind !== 'meter') return
-    expect(caption.caption).toBe('≈$1.25 of $5.00 used this period · refills in 3h')
+    expect(caption.caption).toBe('$1.25 of $5.00 used this period · refills in 3h')
+  })
+
+  it('currency mode in another currency: one leading ≈, the caller’s rate', () => {
+    const caption = budgetCaption(row(), { nowMs: ANCHOR_NOW, timeZone: 'UTC', rate: { currency: 'SEK', perToken: 10 } })
+    expect(caption.kind).toBe('meter')
+    if (caption.kind !== 'meter') return
+    expect(caption.caption).toBe('≈12,50\u00A0kr of 50,00\u00A0kr used this period · refills in 3h')
     expect(caption.caption.match(/≈/g)).toHaveLength(1)
   })
 
-  it('a used amount under a cent reads "≈<$0.01", never "≈$0.00" (#3897)', () => {
+  it('a used amount under a cent reads 4 decimals, "<$0.0001" below 0.00005, never "$0.00" (2026-10-22, superseding #3897)', () => {
     // 3 atomic units of USDC (0.000003) at $1 — the "≈$0.00 of $0.00" class
-    // reported on dev, which the display helper now renders honestly.
-    const caption = budgetCaption(row({ usedAtomic: '3', budgetAtomic: '4000' }), {
+    // reported on dev, which the display helper now renders honestly. USDC in
+    // USD carries no ≈ since #4165. 0.000003 is below the 0.00005 floor, so
+    // the figure is "<$0.0001" (was "<$0.01" under #3897); the budget itself
+    // (30 atomic = 0.00003) stays under the floor too, so both figures are "<".
+    const caption = budgetCaption(row({ usedAtomic: '3', budgetAtomic: '30' }), {
       nowMs: ANCHOR_NOW,
       timeZone: 'UTC',
       rate: { currency: 'USD', perToken: 1 },
     })
     expect(caption.kind).toBe('meter')
     if (caption.kind !== 'meter') return
-    expect(caption.caption).toBe('≈<$0.01 of <$0.01 used this period · refills in 3h')
+    expect(caption.caption).toBe('<$0.0001 of <$0.0001 used this period · refills in 3h')
+  })
+
+  it('a used amount at or above 0.00005 reads exactly 4 decimals in the caption', () => {
+    // 4900 atomic units of USDC (0.0049) at $1: 4 decimals, the currency's own format.
+    const caption = budgetCaption(row({ usedAtomic: '4900', budgetAtomic: '4000000' }), {
+      nowMs: ANCHOR_NOW,
+      timeZone: 'UTC',
+      rate: { currency: 'USD', perToken: 1 },
+    })
+    expect(caption.kind).toBe('meter')
+    if (caption.kind !== 'meter') return
+    expect(caption.caption).toBe('$0.0049 of $4.00 used this period · refills in 3h')
   })
 })
 
 describe("the dashboard row's compact wording (#3908)", () => {
   it('is opt-in: the same row reads in full by default and compact only with style "row"', () => {
-    const opts = { nowMs: ANCHOR_NOW, timeZone: 'UTC', rate: { currency: 'USD' as const, perToken: 1 } }
+    // Token mode, as the shared agent row renders it since #4165 (no rate).
+    const opts = { nowMs: ANCHOR_NOW, timeZone: 'UTC' }
     const full = budgetCaption(row(), opts)
     const compact = budgetCaption(row(), { ...opts, style: 'row' })
     if (full.kind !== 'meter' || compact.kind !== 'meter') throw new Error('expected meters')
-    // Every surface but the dashboard row keeps the full wording.
-    expect(full.caption).toBe('≈$1.25 of $5.00 used this period · refills in 3h')
-    // One leading ≈ still covers the line: the cap is a spot-rate estimate too.
-    expect(compact.caption).toBe('≈$1.25 of $5.00 · per day · refills in 3h')
+    // Every surface but the agent row keeps the full wording.
+    expect(full.caption).toBe('1.25 of 5.00 USDC used this period · refills in 3h')
+    // The row joins the cap and its symbol with a no-break space (#3910).
+    expect(compact.caption).toBe('1.25 of 5.00\u00a0USDC · per day · refills in 3h')
   })
 
   it('names an odd period in token mode', () => {
@@ -276,6 +308,14 @@ describe('several budgets (the dashboard row)', () => {
   it('expired rows are excluded from the count (#3802)', () => {
     const live = row({})
     const dead = row({ token: 'USDC', recipient: null, expiresSec: nowSec - 60 })
+    const selected = selectPrimaryBudgets([live, dead], now)
+    expect(selected!.extraCount).toBe(0)
+    expect(selected!.primary).toBe(live)
+  })
+
+  it('a row the server says is not live is excluded from the count (#3922)', () => {
+    const live = row({ isLive: true })
+    const dead = row({ isLive: false })
     const selected = selectPrimaryBudgets([live, dead], now)
     expect(selected!.extraCount).toBe(0)
     expect(selected!.primary).toBe(live)

@@ -31,6 +31,19 @@ function zeroPrice(): TokenPrice {
 const priceCache = createCache<PriceMap>(60_000)
 const CACHE_KEY = 'all'
 
+// #3963: the fetch is BOUNDED. The book-time capture documents that "a pricing
+// outage yields null — it must not block settlement", but before this deadline
+// only a fast failure degraded: a HUNG upstream (blackholed DNS, stalled TLS,
+// a rate-limiting CDN that accepts the SYN and never answers) blocked every
+// caller — including the evidence attach, whose contract is best-effort
+// capture — for the OS's full connect timeout. An abort rejects like any other
+// failure: `getOrFetch` skips the cache on a throw, so the next caller retries
+// and the documented null/backfillable degradation applies. 2s because a price
+// quote slower than that is worthless at capture time, and because real-DB
+// tests that reach this path (the #2292 sibling) run under vitest's 5000 ms
+// `testTimeout` — the deadline keeps the worst case well inside it.
+const PRICE_FETCH_DEADLINE_MS = 2_000
+
 /** Build a map of symbol → price in every quoted currency, for all tokens across all chains */
 export async function fetchTokenPrices(): Promise<PriceMap> {
   return priceCache.getOrFetch(CACHE_KEY, async () => {
@@ -57,7 +70,10 @@ export async function fetchTokenPrices(): Promise<PriceMap> {
       headers['x-cg-demo-api-key'] = apiKey
     }
 
-    const res = await fetch(url, { headers })
+    const res = await fetch(url, {
+      headers,
+      signal: AbortSignal.timeout(PRICE_FETCH_DEADLINE_MS),
+    })
 
     if (!res.ok) {
       throw new Error(`CoinGecko API error: ${res.status}`)

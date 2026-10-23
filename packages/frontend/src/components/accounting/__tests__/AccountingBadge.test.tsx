@@ -13,7 +13,7 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { LocaleProvider } from '@/context/LocaleContext'
 import { AccountingBadge, providerDisplayName } from '@/components/accounting/AccountingBadge'
-import TransactionsTable from '@/components/transactions/TransactionsTable'
+import TransactionsLedgerRow from '@/components/transactions/TransactionsLedgerRow'
 import TransactionDetailPanel from '@/components/transactions/TransactionDetailPanel'
 import type { AggregatedTransaction } from '@/types/transactions'
 
@@ -149,17 +149,22 @@ describe('AccountingBadge', () => {
   })
 })
 
-describe('AccountingBadge in the Transactions table', () => {
+describe('AccountingBadge on the Transactions ledger rows', () => {
   function renderTable(rows: AggregatedTransaction[]) {
     return renderWithLocale(
-      <TransactionsTable
-        transactions={rows}
-        loading={false}
-        error={null}
-        onRefresh={vi.fn()}
-        hasActiveFilters={false}
-        onSelect={vi.fn()}
-      />,
+      <div>
+        {rows.map((row) => (
+          <TransactionsLedgerRow
+            key={row.hash}
+            tx={row}
+            resolveAddress={() => null}
+            accountNamesByAddress={new Map()}
+            showAccount={false}
+            onOpen={vi.fn()}
+            insetDivider={false}
+          />
+        ))}
+      </div>,
     )
   }
 

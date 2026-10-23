@@ -25,10 +25,24 @@ covers:
   - packages/signer/src/credentials.ts
   - packages/signer/src/file-mode.ts
   - packages/mcp/src/credentials.ts
+  - packages/mcp/src/server.ts
   - packages/backend/src/middleware/retired-safe-names.ts
   - packages/core/src/client-compat.ts
-last-verified: "2026-10-09"
+last-verified: "2026-10-23"
 ---
+
+> **Re-verified unchanged (#4319, 2026-10-23, one added backend feature flag
+> in `packages/backend/src/config.ts`).** The only covered file this PR
+> touches is `config.ts`: it adds `eip3009ReceiptAttribution`, a
+> `parseBooleanFlag` entry for the new `HAVEN_EIP3009_RECEIPT_ATTRIBUTION`
+> env scalar (default off, unrecognised values refuse the boot — #3015's
+> fail-closed family). It does not touch `HAVEN_CONNECTOR_CHANNEL`, the
+> credential-file shape, the consent inputs, `chainRpcsFromEnv`, any version
+> constant, or any field this document names; nothing about channel
+> selection, dist-tag resolution, the snapshot path or publish behaviour
+> moves. Scope of this note: confirming that. Nothing else in this document
+> was re-verified, and `last-verified` already reads 2026-10-23 and is left
+> as is.
 
 > **Re-verification (#3819, 2026-10-09):** coupled through
 > `.github/workflows/publish.yml`: the dependency-presence gate's ledger
@@ -99,6 +113,12 @@ backend's connector handout), [#2423](https://github.com/d-hinders/Haven-AI/issu
 unchanged and is not described here — see
 [`../contributing/branch-and-release-flow.md`](../contributing/branch-and-release-flow.md)
 and the `release` skill.
+
+> **Re-verified unchanged (#4012, 2026-10-16, `ETH_GETLOGS_MAX_BLOCK_RANGE` added):**
+> - **What changed.** `config.ts` gains `getLogsMaxBlockRange`, read only by the x402 settlement sweepers' `eth_getLogs` span (`infra/chain/log-range-limit.ts`). No connector, dist-tag or channel variable is touched.
+> - **What did not.** No dist-tag, channel or `HAVEN_CONNECTOR_CHANNEL` behaviour moves.
+>
+> The rest of this document was not re-read for it, and `last-verified` is not bumped.
 
 > **Re-verified unchanged (#3732, 2026-10-07, the runtime picker's no-default rule):**
 > - **What changed.** `connect/src/runtime.ts`: the default prompt rung now passes the hint scan's `env` to the installed-client prompt (new `promptRuntimeByInstalledClient` dep), and the prompt itself never pre-selects — an empty answer re-asks and aborts with `runtime_prompt_aborted` after three attempts, writing nothing. `connect/src/installed-clients.ts` (not covered here) gains a `~/.claude.json`-`mcpServers` evidence path and the "(suggested)" marker, which changes which candidate the picker SUGGESTS, not any connector command the route builds.
@@ -337,6 +357,20 @@ and the `release` skill.
 >   commits. The bump's own diff touches none of them.
 > - **Live dist-tags read during this release.** `dev` =
 >   `0.0.0-dev.202610051128.d0e0c97`, below `alpha`/`latest` = `0.7.0-alpha.0`.
+>
+> `last-verified` is not bumped.
+
+> **Re-verification (0.11.0-alpha.0 release, 2026-10-23):** coupled because the
+> bump rewrites `CONNECTOR_VERSION` (`packages/connect/src/runtime.ts`), now
+> `0.10.0-alpha.0` → `0.11.0-alpha.0`, a MINOR step. `HAVEN_CONNECTOR_CHANNEL`
+> stays `alpha`.
+> - **Publish path.** Re-measured at `origin/dev` `7b2cca38`: `git log
+>   origin/main..origin/dev` over `publish.yml`, `release-channel.mjs`,
+>   `release-snapshot-version.mjs` and `release-version-order.mjs` returns **0**
+>   commits. The bump's own diff touches none of these files.
+> - **Live dist-tags read during this release** (registry over HTTP). `dev` =
+>   `0.0.0-dev.202610222020.b071b39`, below `alpha`/`latest` = `0.10.0-alpha.0`
+>   for all five packages.
 >
 > `last-verified` is not bumped.
 
@@ -1116,3 +1150,15 @@ compatibility contract — the manifest table, version skew, `--doctor`'s checks
 > the signer's `tools.ts` since #3454. The snapshot version format, the
 > guards, `HAVEN_CONNECTOR_CHANNEL` and the `dev` dist-tag publish did not
 > move.
+
+> **Re-verified #3996 (2026-10-15 — an additive env reader in
+> `packages/mcp/src/credentials.ts`).** The diff touches two covered paths:
+> `packages/mcp/src/credentials.ts`, which gains the exported
+> `chainRpcsFromEnv(env)` helper, and `packages/mcp/src/server.ts`, newly
+> declared in `covers:` so this doc is implicated the next time that file
+> changes. The helper scans for `HAVEN_RPC_URL_<chainId>` scalars, consumed by
+> `resolveHavenClient`. It does not touch `HAVEN_CONNECTOR_CHANNEL`, the
+> credential-file shape, the consent inputs, any version constant, or any
+> field this document names; nothing about channel selection, dist-tag
+> resolution, the snapshot path or publish behaviour moves. Scope of this
+> note: confirming that. Nothing else in this document was re-verified.

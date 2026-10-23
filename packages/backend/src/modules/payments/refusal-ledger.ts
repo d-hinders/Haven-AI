@@ -61,7 +61,7 @@ import {
   type PaymentRefusalSource,
 } from '../../infra/repositories/payment-refusals.js'
 import { getChain } from '../../domain/chains.js'
-import { formatTokenValue } from '../../domain/tokens.js'
+import { formatTokenValue, humanTokenAmount } from '../../domain/tokens.js'
 import { EstimateGasExecutionError } from 'viem'
 
 export type { PaymentRefusalDetail, PaymentRefusalReason, PaymentRefusalSource }
@@ -330,16 +330,19 @@ export function classifyRevertForLedger(
   return isEstimationRevert ? 'onchain_revert' : null
 }
 
-function humanAmount(chainId: number, tokenSymbol: string, amountAtomic: string): string {
-  try {
-    const chain = getChain(chainId)
-    const token = Object.values(chain.tokens).find((t) => t.symbol === tokenSymbol)
-    if (token) return formatTokenValue(amountAtomic, token.decimals)
-  } catch {
-    // Unknown chain or token — the atomic string is the honest fallback and
-    // the fiat lookup below keys on the symbol either way.
-  }
-  return amountAtomic
+/**
+ * Atomic → human token amount through the shared registry's decimals — the
+ * ONE domain conversion (`humanTokenAmount`); kept here as the booking-path
+ * name so the ledger's callers don't change. #4323's route uses the same
+ * function for the wire's serve-time fiat, so the atomic amount and its fiat
+ * triple are struck from one source, never two.
+ */
+export function humanAmount(
+  chainId: number,
+  tokenSymbol: string,
+  amountAtomic: string,
+): string {
+  return humanTokenAmount(chainId, tokenSymbol, amountAtomic)
 }
 
 async function resolveAccountId(userId: string, accountAddress: string | null | undefined, chainId: number): Promise<string | null> {

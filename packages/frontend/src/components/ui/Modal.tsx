@@ -36,6 +36,26 @@ const maxHeightClasses = {
 
 type ModalMaxHeight = keyof typeof maxHeightClasses
 
+// `placement="top"`: the panel hangs from a fixed line instead of centring, so
+// a dialog whose content height changes between screens (the Connect agent
+// flow: name → budget → prompt → approval → done) keeps its header at one y
+// and grows DOWNWARD only. Centred, every height change moved the title — up
+// to 164px between two steps of one flow at 1280×900.
+//
+// The offset is added from `sm` up only. Below it the wrapper's own padding —
+// `max(gutter, safe-top)` — is already the top line, so the panel sits just
+// under the notch on a phone. The ceiling subtracts the offset, for the same
+// reason the base ceiling subtracts the padding (#2730): the footer is what
+// overflows otherwise.
+const TOP_OFFSET_CLASS = 'sm:mt-16'
+const topMaxHeightClasses: Record<ModalMaxHeight, string> = {
+  default:
+    'sm:max-h-[calc(100vh-max(1rem,var(--v2-safe-top))-max(1rem,var(--v2-safe-bottom))-4rem)]',
+  tight: 'sm:max-h-[calc(100vh-max(12px,var(--v2-safe-top))-max(12px,var(--v2-safe-bottom))-4rem)]',
+}
+
+type ModalPlacement = 'center' | 'top'
+
 export function Modal({
   open,
   onClose,
@@ -51,6 +71,7 @@ export function Modal({
   closeButtonDisabled = false,
   width = 'md',
   maxHeight = 'default',
+  placement = 'center',
   bodyClassName = '',
   panelTestId,
 }: {
@@ -69,6 +90,12 @@ export function Modal({
   closeButtonDisabled?: boolean
   width?: ModalWidth
   maxHeight?: ModalMaxHeight
+  /**
+   * `center` (default) centres the panel vertically. `top` anchors it to a
+   * fixed line below the top safe area, so the header holds still while the
+   * body changes height — for a multi-screen flow in one dialog.
+   */
+  placement?: ModalPlacement
   bodyClassName?: string
   /**
    * `data-testid` for the PANEL — the bordered box — not the `role="dialog"`
@@ -178,7 +205,10 @@ export function Modal({
       role="dialog"
       aria-modal="true"
       aria-labelledby={titleId}
-      className="fixed inset-0 z-[var(--v2-z-modal)] flex items-center justify-center v2-safe-overlay [--v2-safe-gutter:1rem]"
+      data-modal-placement={placement}
+      className={`fixed inset-0 z-[var(--v2-z-modal)] flex justify-center v2-safe-overlay [--v2-safe-gutter:1rem] ${
+        placement === 'top' ? 'items-start' : 'items-center'
+      }`}
     >
       <div
         className="absolute inset-0 v2-modal-backdrop"
@@ -188,7 +218,9 @@ export function Modal({
       <div
         ref={panelRef}
         data-testid={panelTestId}
-        className={`relative flex w-full flex-col overflow-hidden rounded-[14px] border border-[var(--v2-border)] bg-[var(--v2-bg)] shadow-modal ${maxHeightClasses[maxHeight]} ${widthClasses[width]}`}
+        className={`relative flex w-full flex-col overflow-hidden rounded-[14px] border border-[var(--v2-border)] bg-[var(--v2-bg)] shadow-modal ${maxHeightClasses[maxHeight]} ${
+          placement === 'top' ? `${TOP_OFFSET_CLASS} ${topMaxHeightClasses[maxHeight]}` : ''
+        } ${widthClasses[width]}`}
       >
         <div className="flex shrink-0 items-start justify-between gap-4 border-b border-[var(--v2-border)] px-5 py-4">
           <div className="min-w-0">

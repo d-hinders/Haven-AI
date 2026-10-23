@@ -33,6 +33,30 @@
 
   --v2-border: #e6ebf1;
   --v2-border-strong: #d6dbe3;
+  /* The lighter hairline between rows of ONE day in a ledger (#4165, owner
+     decision 2026-10-20 on #4093): inset to the text column, quieter than
+     the full-width `--v2-border` that still separates day groups. */
+  --v2-border-subtle: #edf0f4;
+
+  /* The floating tab-bar pill (#4063). Light keeps the page ground and the
+     plain border — there the popover shadow lifts the pill, so the values
+     alias `--v2-bg` / `--v2-border` exactly. Both dark blocks below redeclare
+     the pair: a distinct OPAQUE surface (`--v2-surface-2`) and the strong
+     border, because the dark popover shadow is black on near-black and
+     `--v2-border` measures only 1.41:1 against `--v2-bg` there (the edge
+     becomes 1.79:1, the fill 1.19:1). Still hex so `THEME_TOKENS` and
+     `scripts/contrast-check.mjs` can measure it. */
+  --v2-tab-bar-bg: #ffffff;
+  --v2-tab-bar-border: #e6ebf1;
+
+  /* The active tab's concentric capsule (#4237): the indicator span is set
+     inside the pill by the same 5px on every side (`p-1` padding + the 1px
+     border), so its 26px radius is concentric with the pill's 31px. Light
+     aliases `--v2-surface-2` — 1.12:1 on the white pill, deliberately a
+     SUPPLEMENTARY cue: selection is carried by ink, weight and
+     `aria-current` (see MobileTabBar). Hex so `THEME_TOKENS` and
+     `scripts/contrast-check.mjs` can measure it. */
+  --v2-tab-bar-indicator: #eef2f7;
 
   --v2-brand: #4f46e5;
   --v2-brand-strong: #4338ca;
@@ -49,6 +73,33 @@
   --v2-warning-soft: #fef3c7;
   --v2-danger: #b42318;
   --v2-danger-soft: #fef2f2;
+
+  /* ── Avatar tints (#4066) ──────────────────────────────────────────────
+     Six muted tints for the `Monogram` initials avatar, assigned by hashing
+     the entity's NAME (`lib/avatar-tint.ts` on the frontend) — the same
+     entity keeps the same tint everywhere, light and dark. Unlike the series
+     palette above there is deliberately NO order contract: assignment is by
+     name, never by index, and the family is separate from `--v2-series-*`
+     (charts own those) and from every status colour — the hexes are disjoint
+     from all of them in each theme, asserted in `theme-tokens.test.ts`.
+
+     Each tint is a `-soft` ground with a darker ink, following the
+     `brand-soft` precedent; the pair clears 4.5:1 in its own theme and the
+     six stay pairwise separable (a minimum ΔE is pinned in the same test —
+     unlike the series comment above, only claim what a test holds). */
+  --v2-avatar-1: #8a3a1a;
+  --v2-avatar-1-soft: #f8e6d8;
+  --v2-avatar-2: #0c6b5a;
+  --v2-avatar-2-soft: #dcf1eb;
+  --v2-avatar-3: #6b2fa8;
+  --v2-avatar-3-soft: #e9dbf8;
+  --v2-avatar-4: #4f661a;
+  --v2-avatar-4-soft: #e9efd6;
+  --v2-avatar-5: #9c2759;
+  --v2-avatar-5-soft: #fbe2ec;
+  --v2-avatar-6: #2e5d8f;
+  --v2-avatar-6-soft: #d5e3f1;
+
   --v2-modal-backdrop: rgba(26, 31, 54, 0.66);
 
   /* ── Channel form of the palette above (#1708) ──────────────────────────
@@ -242,40 +293,65 @@
      authenticated route.
 
      The rule the numbers encode, in one sentence: the mobile navigation
-     overlay outranks the app chrome it slides over. That direction is not
-     arbitrary. The drawer is `inset-y-0`, so its own logo band occupies the
-     same 56px as TopBar; its scrim exists to dim everything behind it, and
-     "everything" includes the bar. Let the bar win and the drawer is
-     decapitated, the scrim dims all but the top strip, and the toggle — which
-     is positioned INSIDE that strip by design, in the gap TopBar reserves for
-     it — is unreachable. Modals and toasts in turn outrank the navigation,
-     because a dialog opened from a nav link must cover the drawer.
+     overlay outranks the app chrome it opens over. That direction is not
+     arbitrary: let the chrome win and the navigation is covered and its
+     control cannot be tapped (#1749). The phone overlay is the More sheet
+     (#4053), which since #4058 floats OVER the tab bar with a full-height
+     scrim: the bar is covered by rank while the sheet is open, and the sheet
+     carries its own close control. Modals and toasts in turn
+     outrank the navigation, because a dialog opened from a nav link must
+     cover the sheet.
 
      Tiers are spaced by 10 so a genuinely new layer has room to land between
      two without renumbering the scale. */
   --v2-z-content: 10; /* in-flow overlaps: badges, gradient washes */
   --v2-z-sticky: 20; /* sticky table headers */
-  --v2-z-chrome: 100; /* TopBar — the app shell's own bar */
-  /* The bottom tab bar (#2730, used by #2731) — the shell's OTHER bar, and the
+  /* The app chrome tier. It has no consumer: the top bar that owned it was
+     deleted (#4029, epic #4027), and the non-production warning line that
+     briefly inherited it was removed the day after. The tier stays as the
+     anchor the nav, tab-bar and popover tiers are ordered against — the same
+     reason `--v2-z-nav-scrim` survives without a consumer. */
+  --v2-z-chrome: 100;
+  /* The bottom tab bar (#2730, used by #2731) — the shell's only bar, and the
      one tier the scale's spacing-by-10 was left room for. Between chrome and
-     chrome-popover deliberately: a popover anchored in the top bar can extend
-     down over the bar's band on a phone and must not be clipped by it, while
-     the drawer and its scrim (130/140) have to cover the bar so "More" is not
-     painted over by the navigation it opened. */
+     chrome-popover deliberately: a popover can extend down over the bar's
+     band on a phone and must not be clipped by it. Its fifth cell is More
+     (#4053), which opens a sheet that, since #4058, floats over the bar: the
+     scrim (130) and the sheet (140) out-rank it on purpose, and the sheet's
+     own ✕ closes it. */
   --v2-z-tab-bar: 105;
 
-  /* The bottom tab bar's height (#2731), as a token because three places need
-     the same number and two of them are not the bar: `<main>`'s scroll region
-     reserves it so the last row does not sit under the bar, and the toast
-     container lifts by it so the payoff notification is not hidden behind the
-     thing everyone is looking at. The safe-area inset is NOT folded in here —
-     it is added at each site, because the bar pads itself with it while the
-     others clear the bar and the inset together. */
-  --v2-tab-bar-h: 3.5rem;
-  --v2-z-chrome-popover: 110; /* popovers anchored in the chrome (notifications, wallet) */
-  --v2-z-nav-scrim: 130; /* mobile drawer scrim — dims the chrome, hence > chrome */
-  --v2-z-nav-drawer: 140; /* mobile drawer itself */
-  --v2-z-nav-toggle: 150; /* the Open/Close toggle — above its own drawer, so one control does both */
+  /* The floating tab bar's geometry (#2731, floating since #4058), as tokens
+     because the places that need the numbers are mostly not the bar:
+     `<main>`'s scroll region reserves `h + bottom` so the last row clears the
+     pill, and the toast container lifts by the same sum so the payoff
+     notification is not hidden behind the thing everyone is looking at.
+
+     `--v2-tab-bar-h` is the pill's OUTER height: 52px cells, `p-1` (4px) on
+     every side and the 1px border — 62px. The side padding is also the
+     capsule indicator's inset (#4237): 4px padding + 1px border = 5px on
+     every side, concentric with the pill. `--v2-tab-bar-bottom` is the gap
+     between the pill and the viewport bottom: 12px in a browser tab, and the
+     home-indicator inset itself on a notched phone, where adding a gap ON TOP
+     of the inset would float the pill visibly high. */
+  --v2-tab-bar-h: 3.875rem;
+  --v2-tab-bar-bottom: max(0.75rem, var(--v2-safe-bottom));
+
+  /* The sticky table-header compensation (#4029): `Table`'s `STICKY_HEAD` /
+     `STICKY_CELL` pin with `top-[var(--v2-sticky-head)]`, the NEGATIVE of the
+     scroll container's top padding (the value is stored negative), so a pinned
+     header sits flush against the top of the scrollport. The default is
+     -1.5rem — the 24px `py-6` the ops shell uses. The authenticated app's
+     shell overrides it on its frame
+     (`max-lg:[--v2-sticky-head:-1rem] lg:[--v2-sticky-head:-2rem]`) to track
+     its own `<main>` padding, 16px below `lg` and 32px at and above. A shell
+     with a different top padding overrides the variable rather than the
+     primitive gaining a responsive class. */
+  --v2-sticky-head: -1.5rem;
+  --v2-z-chrome-popover: 110; /* popovers anchored in the chrome (notifications, wallet, user menu) */
+  --v2-z-nav-scrim: 130; /* the phone More sheet's scrim (#4053) — dims the page above the tab bar */
+  --v2-z-nav-drawer: 140; /* the phone More sheet itself (#4053) */
+  --v2-z-nav-toggle: 150; /* no consumer since #4053 moved More into the tab bar; kept as an ordering anchor */
   --v2-z-modal: 200; /* Modal, SidePanel */
   --v2-z-tooltip: 210;
   --v2-z-panel: 250; /* AgentPanel */
@@ -372,6 +448,21 @@
     --v2-border-rgb: 43 49 64;
     --v2-border-strong: #3a4152;
     --v2-border-strong-rgb: 58 65 82;
+    --v2-border-subtle: #232834;
+
+    /* The floating tab-bar pill (#4063): an opaque surface distinct from the
+       page ground and a strong edge, because the dark popover shadow is black
+       on near-black and `--v2-border` is only 1.41:1 here. Edge 1.79:1 and
+       fill 1.19:1 against `--v2-bg`. Byte-identical with the explicit-dark
+       block — the theme-tokens unit test holds the two sets equal. */
+    --v2-tab-bar-bg: #20252f;
+    --v2-tab-bar-border: #3a4152;
+
+    /* The active tab's concentric capsule (#4237): a step LIGHTER than
+       `--v2-surface-2`, which is identical to the pill fill here (1.00:1) —
+       this measures 1.18:1 on the pill, still a supplementary cue. Selection
+       is carried by ink, weight and `aria-current` (see MobileTabBar). */
+    --v2-tab-bar-indicator: #2b3140;
 
     --v2-brand: #a5acff;
     --v2-brand-rgb: 165 172 255;
@@ -396,6 +487,25 @@
     --v2-danger-rgb: 248 113 113;
     --v2-danger-soft: #3a1512;
     --v2-danger-soft-rgb: 58 21 18;
+
+    /* Avatar tints (#4066) — the dark stops of the family documented in
+       `:root` above: deep-wash grounds with lightened inks, each pair
+       clearing 4.5:1. Assigned by NAME, never by index. Byte-identical in
+       both dark blocks, and disjoint from every series and status hex
+       (asserted in `theme-tokens.test.ts`). */
+    --v2-avatar-1: #f2a884;
+    --v2-avatar-1-soft: #39211a;
+    --v2-avatar-2: #74d6c2;
+    --v2-avatar-2-soft: #0f2f2a;
+    --v2-avatar-3: #c6a8f2;
+    --v2-avatar-3-soft: #2a2044;
+    --v2-avatar-4: #b8cd82;
+    --v2-avatar-4-soft: #242d15;
+    --v2-avatar-5: #f193bd;
+    --v2-avatar-5-soft: #381b2b;
+    --v2-avatar-6: #93c1ea;
+    --v2-avatar-6-soft: #152639;
+
     --v2-modal-backdrop: rgba(0, 0, 0, 0.6);
 
     /*
@@ -492,6 +602,21 @@
   --v2-border-rgb: 43 49 64;
   --v2-border-strong: #3a4152;
   --v2-border-strong-rgb: 58 65 82;
+  --v2-border-subtle: #232834;
+
+  /* The floating tab-bar pill (#4063): an opaque surface distinct from the
+     page ground and a strong edge, because the dark popover shadow is black
+     on near-black and `--v2-border` is only 1.41:1 here. Edge 1.79:1 and
+     fill 1.19:1 against `--v2-bg`. Byte-identical with the media-gated dark
+     block — the theme-tokens unit test holds the two sets equal. */
+  --v2-tab-bar-bg: #20252f;
+  --v2-tab-bar-border: #3a4152;
+
+  /* The active tab's concentric capsule (#4237): a step LIGHTER than
+     `--v2-surface-2`, which is identical to the pill fill here (1.00:1) —
+     this measures 1.18:1 on the pill, still a supplementary cue. Selection
+     is carried by ink, weight and `aria-current` (see MobileTabBar). */
+  --v2-tab-bar-indicator: #2b3140;
 
   --v2-brand: #a5acff;
   --v2-brand-rgb: 165 172 255;
@@ -516,6 +641,25 @@
   --v2-danger-rgb: 248 113 113;
   --v2-danger-soft: #3a1512;
   --v2-danger-soft-rgb: 58 21 18;
+
+  /* Avatar tints (#4066) — the dark stops of the family documented in
+     `:root` above: deep-wash grounds with lightened inks, each pair
+     clearing 4.5:1. Assigned by NAME, never by index. Byte-identical in
+     both dark blocks, and disjoint from every series and status hex
+     (asserted in `theme-tokens.test.ts`). */
+  --v2-avatar-1: #f2a884;
+  --v2-avatar-1-soft: #39211a;
+  --v2-avatar-2: #74d6c2;
+  --v2-avatar-2-soft: #0f2f2a;
+  --v2-avatar-3: #c6a8f2;
+  --v2-avatar-3-soft: #2a2044;
+  --v2-avatar-4: #b8cd82;
+  --v2-avatar-4-soft: #242d15;
+  --v2-avatar-5: #f193bd;
+  --v2-avatar-5-soft: #381b2b;
+  --v2-avatar-6: #93c1ea;
+  --v2-avatar-6-soft: #152639;
+
   --v2-modal-backdrop: rgba(0, 0, 0, 0.6);
 
   /*

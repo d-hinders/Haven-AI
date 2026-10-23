@@ -225,6 +225,13 @@ export default defineConfig({
   ],
   use: {
     baseURL,
+    // #4293: every capture and e2e run renders local times in UTC, whatever
+    // the host's zone — CI is UTC, a laptop is not, and a baseline
+    // regenerated off-CI otherwise bakes in a different wall clock (the
+    // dashboard-mobile "refills Thu 12:00" vs desktop "10:00", #4289). The
+    // server half is pinned in webServer.env below. The one spec-level
+    // override is the #4288 ledger capture (design-system.visual.spec.ts).
+    timezoneId: 'UTC',
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
@@ -244,6 +251,8 @@ export default defineConfig({
     reuseExistingServer: REUSE_EXISTING_SERVER,
     timeout: 120_000,
     env: {
+      // #4293: the server renders in the same zone as the browser (use.timezoneId).
+      TZ: 'UTC',
       NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: 'playwright-placeholder',
       NEXT_TELEMETRY_DISABLED: '1',
       HOSTNAME: '127.0.0.1',
@@ -341,9 +350,10 @@ export default defineConfig({
       // releases (#3573 — the public pages' redesigned header and footer
       // follow the visitor's theme), how-it-works (#3576 — How it works and
       // its protocols sub-page), home (#3574 — the redesigned home page),
-      // dev-agent-pages (#3577 — For developers and For agents).
+      // dev-agent-pages (#3577 — For developers and For agents), more-sheet
+      // (#4053 — the phone More sheet, light and dark).
       // Baseline counts are not restated here;
-      // `git ls-files` the `__screenshots__` tree for them. add-funds-modal
+      // `git ls-files` the `__screenshots__` tree for them. receive-dialog
       // seeds `haven.theme='dark'` itself and skips its mobile shots under
       // this project (no mobile dark baseline), so only its desktop clips
       // compare here.
@@ -352,12 +362,13 @@ export default defineConfig({
         '**/analytics.visual.spec.ts',
         '**/marketplace.visual.spec.ts',
         '**/settings-company-details.visual.spec.ts',
-        '**/add-funds-modal.visual.spec.ts',
+        '**/receive-dialog.visual.spec.ts',
         '**/demo.visual.spec.ts',
         '**/releases.visual.spec.ts',
         '**/how-it-works.visual.spec.ts',
         '**/home.visual.spec.ts',
         '**/dev-agent-pages.visual.spec.ts',
+        '**/more-sheet.visual.spec.ts',
       ],
       testIgnore: SUITE_IGNORE,
     },

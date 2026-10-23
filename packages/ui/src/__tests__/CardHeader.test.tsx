@@ -11,6 +11,17 @@ describe('Card.Header', () => {
     expect(screen.getByRole('heading', { level: 2, name: 'Connected agents' })).toBeInTheDocument()
   })
 
+  it('puts titleId on the heading, so a landmark can name itself by it', () => {
+    render(
+      <section aria-labelledby="card-title">
+        <Card.Header as="h2" titleId="card-title" title="Connect your first agent" />
+      </section>,
+    )
+    const heading = screen.getByRole('heading', { level: 2, name: 'Connect your first agent' })
+    expect(heading).toHaveAttribute('id', 'card-title')
+    expect(screen.getByRole('region', { name: 'Connect your first agent' })).toBeInTheDocument()
+  })
+
   it('renders description and actions alongside the title', () => {
     render(
       <Card.Header

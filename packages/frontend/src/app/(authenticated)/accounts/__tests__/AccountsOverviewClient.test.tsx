@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const {
@@ -17,6 +17,11 @@ vi.mock('@/context/AuthContext', () => ({ useAuth: () => mockUseAuth() }))
 vi.mock('@/hooks/useAccounts', () => ({ useAccounts: () => mockUseAccounts() }))
 vi.mock('@/hooks/useAgents', () => ({ useAgents: () => mockUseAgents() }))
 vi.mock('@/hooks/usePreferences', () => ({ usePreferences: () => mockUsePreferences() }))
+// The New account dialog's own signer read (#4024) — only reached once the
+// dialog is open; its behaviour is NewAccountDialog.test.tsx's.
+vi.mock('@/hooks/useUserSigners', () => ({
+  useUserSigners: () => ({ signers: [], loadError: false, reload: vi.fn() }),
+}))
 const { mockUsePortfolio } = vi.hoisted(() => ({ mockUsePortfolio: vi.fn() }))
 vi.mock('@/hooks/usePortfolio', () => ({
   usePortfolio: (...args: unknown[]) => mockUsePortfolio(...args),
@@ -62,7 +67,7 @@ describe('AccountsOverviewClient — no global active account (#3719)', () => {
     vi.clearAllMocks()
     mockUseAgents.mockReturnValue({ agents: [] })
     mockUsePreferences.mockReturnValue({ currency: 'USD' })
-    mockUsePortfolio.mockReturnValue({ totalUsd: 0, totalEur: 0, totalSek: 0, breakdown: [], loading: false })
+    mockUsePortfolio.mockReturnValue({ totalUsd: 0, totalEur: 0, totalSek: 0, breakdown: [], lastOutgoingAt: null, loading: false })
     mockUseAccounts.mockReturnValue({
       accounts: [BASE, SEPOLIA],
       loading: false,
@@ -106,6 +111,10 @@ describe('AccountsOverviewClient — no global active account (#3719)', () => {
    * so this card renders the same sv-SE suffix voice as `/dashboard` and
    * `/accounts/[id]` — `13 000,50 kr`, NBSP included — and this test pins
    * that unified output instead.
+   *
+   * #4021: moved to a TWO-token fixture. A single non-zero token now renders
+   * NO rows (it would just repeat the headline), so per-row SEK formatting
+   * needs a second holding to stay covered.
    */
   it('renders SEK figures from the portfolio hook when the preference is SEK', () => {
     mockUsePreferences.mockReturnValue({ currency: 'SEK' })
@@ -115,7 +124,9 @@ describe('AccountsOverviewClient — no global active account (#3719)', () => {
       totalSek: 13000.5,
       breakdown: [
         { symbol: 'USDC', balance: '1000000', formatted: '1.00', usdValue: 1, eurValue: 0.92, sekValue: 9.4 },
+        { symbol: 'ETH', balance: '10000000000000000', formatted: '0.01', usdValue: 33, eurValue: 30, sekValue: 316 },
       ],
+      lastOutgoingAt: null,
       loading: false,
     })
     render(<AccountsOverviewClient />)
@@ -126,11 +137,13 @@ describe('AccountsOverviewClient — no global active account (#3719)', () => {
     // bytes are pinned separately below via textContent.
     expect(within(activeCard).getByText('13 000,50 kr')).toBeInTheDocument()
     expect(within(activeCard).getByText('9,40 kr')).toBeInTheDocument()
+    expect(within(activeCard).getByText('316,00 kr')).toBeInTheDocument()
     // Byte-exact pin: the unified formatter's output is NBSP-separated
     // (`13\u00a0000,50\u00a0kr`), not a plain-space lookalike.
     const totals = within(activeCard).getAllByText(/kr$/).map((el) => el.textContent)
     expect(totals).toContain('13\u00a0000,50\u00a0kr')
     expect(totals).toContain('9,40\u00a0kr')
+    expect(totals).toContain('316,00\u00a0kr')
     // The USD/EUR figures stay off the card.
     expect(within(activeCard).queryByText('$1,234.56')).toBeNull()
     expect(within(activeCard).queryByText('1.100,00 €')).toBeNull()
@@ -144,11 +157,34 @@ describe('AccountsOverviewClient — no global active account (#3719)', () => {
  * attach a Safe: a three-mode modal (choose / deploy / import) reached from
  * an "Add account" button in the page header and from the empty state's
  * "Add your first account". Both routes it called now answer 410, so the
- * trigger is gone with the modal. Asserting the ABSENCE of an affordance is
- * weak by nature, so this asserts it in both states the page can be in and
- * on both the accessible name and the modal's own headings — the specific
- * strings a reintroduction would have to render.
+ * trigger is gone with the modal.
+ *
+ * #4024 re-scoped these from "no account entry point" to "no SAFE entry
+ * point". The Accounts screen now has a create action — "New account", which
+ * provisions a passkey-owned delegation-rail account — so a test that asked
+ * whether any add/create control exists would be asserting something false,
+ * and one that only queried `/add account/i` would pass vacuously next to it.
+ * What #1984 closed is the Safe deploy/import flow, so the absences below are
+ * that flow's own strings: its trigger labels and its modal's headings and
+ * actions, the specific text a reintroduction would have to render.
  */
+const SAFE_INFLOW_STRINGS = [
+  'Add your first account',
+  'Import existing account',
+  'Import account',
+  'Create Haven account',
+  'Connect a wallet to deploy',
+  'Create a new Haven account or import one you already use.',
+]
+
+function expectNoSafeInflow() {
+  expect(screen.queryByRole('button', { name: /^add account$/i })).toBeNull()
+  for (const text of SAFE_INFLOW_STRINGS) {
+    expect(screen.queryByText(text), `the retired Safe flow rendered "${text}"`).toBeNull()
+    expect(screen.queryByRole('button', { name: text })).toBeNull()
+  }
+}
+
 describe('AccountsOverviewClient — the Safe inflow is closed (#1984)', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -157,7 +193,7 @@ describe('AccountsOverviewClient — the Safe inflow is closed (#1984)', () => {
     mockUseAuth.mockReturnValue({ user: { accounts: [BASE, SEPOLIA] } })
   })
 
-  it('offers no Add-account entry point when accounts exist', () => {
+  it('offers no Safe deploy or import entry point when accounts exist', () => {
     mockUseAccounts.mockReturnValue({
       accounts: [BASE, SEPOLIA],
       loading: false,
@@ -168,23 +204,67 @@ describe('AccountsOverviewClient — the Safe inflow is closed (#1984)', () => {
     // The cards still render — this is a read/manage surface, not a deletion.
     expect(screen.getByRole('link', { name: 'Base account' })).toBeInTheDocument()
 
-    expect(screen.queryByRole('button', { name: /add account/i })).toBeNull()
-    expect(screen.queryByRole('button', { name: /add your first account/i })).toBeNull()
-    expect(screen.queryByText('Import existing account')).toBeNull()
-    expect(screen.queryByText('Create Haven account')).toBeNull()
+    // Non-vacuity (#4024): the page DOES offer a create action now, and the
+    // scan below would see it — it is the delegation-rail New account, not
+    // the Safe flow.
+    expect(screen.getByRole('button', { name: 'New account' })).toBeInTheDocument()
+
+    expectNoSafeInflow()
   })
 
-  it('offers no Add-account entry point from the empty state either', () => {
+  it('offers no Safe deploy or import entry point from the empty state either', () => {
     mockUseAccounts.mockReturnValue({ accounts: [], loading: false })
 
     render(<AccountsOverviewClient />)
 
     expect(screen.getByText('No Haven accounts yet')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /add/i })).toBeNull()
-    expect(screen.queryByText('Import existing account')).toBeNull()
+    expectNoSafeInflow()
   })
 })
 
+/**
+ * #4024: the "New account" header action. It sits in `PageHeader`'s actions
+ * slot (owner decision 2026-10-16, label verbatim) and opens the create
+ * dialog; the dialog's flow is NewAccountDialog.test.tsx's.
+ */
+describe('AccountsOverviewClient — the New account action (#4024)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockUseAgents.mockReturnValue({ agents: [] })
+    mockUsePreferences.mockReturnValue({ currency: 'USD' })
+    mockUsePortfolio.mockReturnValue({ totalUsd: 0, totalEur: 0, totalSek: 0, breakdown: [], loading: false })
+    mockUseAuth.mockReturnValue({ user: { accounts: [BASE, SEPOLIA] } })
+  })
+
+  it('sits in the page header and opens the New account dialog', () => {
+    mockUseAccounts.mockReturnValue({ accounts: [BASE, SEPOLIA], loading: false })
+    render(<AccountsOverviewClient />)
+
+    const header = screen.getByRole('heading', { name: 'Accounts', level: 1 }).closest('header')
+    expect(header).not.toBeNull()
+    const action = within(header as HTMLElement).getByRole('button', { name: 'New account' })
+    expect(screen.queryByRole('dialog')).toBeNull()
+
+    fireEvent.click(action)
+
+    expect(screen.getByRole('dialog', { name: 'New account' })).toBeInTheDocument()
+  })
+
+  it('is offered with a single account too', () => {
+    mockUseAccounts.mockReturnValue({ accounts: [BASE], loading: false })
+    render(<AccountsOverviewClient />)
+    expect(screen.getByRole('button', { name: 'New account' })).toBeInTheDocument()
+  })
+
+  it('is hidden with no accounts: there is no passkey to create from', () => {
+    mockUseAccounts.mockReturnValue({ accounts: [], loading: false })
+    render(<AccountsOverviewClient />)
+
+    // Non-vacuity: the page rendered its empty state.
+    expect(screen.getByText('No Haven accounts yet')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'New account' })).toBeNull()
+  })
+})
 
 /**
  * #2374 — the card's "set as default" star is gone, by owner decision.
@@ -283,5 +363,211 @@ describe('AccountsOverviewClient — the card has no set-default control (#2374)
     // detail page hides the same action here, and the star rendered anyway.
     expect(screen.queryByText('default')).toBeNull()
     expect(controlsMentioning(/default/i)).toEqual([])
+  })
+})
+
+/**
+ * #4021 — the card cleanup and the multi-account layout.
+ *
+ * Part A slims the card to name, balance and one line about agents: the raw
+ * `balance` rules what renders (a zero-raw token never does, even with a
+ * non-zero fiat value — an unpriced holding has fiat 0), rows exist only to
+ * BREAK DOWN a total, the "Added {timeAgo}" caption and the faint "Open →"
+ * affordance are gone, the agent icon is the sidebar's `Bot`, the footer
+ * carries the account's most recent outgoing transfer, and the network
+ * marker is a "Test network" chip on testnets only (driven by the SAME
+ * `isTestnetChain` predicate the Receive dialog uses — no second predicate).
+ *
+ * Part B: with one account the card renders wide beside a dashed "Create
+ * another account" tile that opens the SAME dialog as the header action;
+ * with two or more the tile is gone.
+ */
+describe('AccountsOverviewClient — the card cleanup and layout (#4021)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockUseAgents.mockReturnValue({ agents: [] })
+    mockUsePreferences.mockReturnValue({ currency: 'USD' })
+    mockUsePortfolio.mockReturnValue({ totalUsd: 0, totalEur: 0, totalSek: 0, breakdown: [], lastOutgoingAt: null, loading: false })
+    mockUseAccounts.mockReturnValue({ accounts: [BASE, SEPOLIA], loading: false })
+    mockUseAuth.mockReturnValue({ user: { accounts: [BASE, SEPOLIA] } })
+  })
+
+  const usdcHolding = { symbol: 'USDC', balance: '400000000', formatted: '400.00', usdValue: 400, eurValue: 368, sekValue: 4160 }
+
+  it('never renders a token row whose RAW balance is zero, even when priced', () => {
+    mockUsePortfolio.mockReturnValue({
+      totalUsd: 433,
+      totalEur: 398,
+      totalSek: 4476,
+      breakdown: [
+        usdcHolding,
+        { symbol: 'ETH', balance: '10000000000000000', formatted: '0.01', usdValue: 33, eurValue: 30, sekValue: 316 },
+        // The filler shape the backend sends: raw balance zero, yet a
+        // non-zero fiat value attached. Hidden — the fiat figure must never
+        // resurrect a row the raw balance killed.
+        { symbol: 'DAI', balance: '0', formatted: '0.00', usdValue: 50, eurValue: 46, sekValue: 520 },
+      ],
+      lastOutgoingAt: null,
+      loading: false,
+    })
+    render(<AccountsOverviewClient />)
+
+    const baseCard = getAccountCard('Base account')
+    expect(within(baseCard).getByText('USDC')).toBeInTheDocument()
+    expect(within(baseCard).getByText('ETH')).toBeInTheDocument()
+    expect(within(baseCard).queryByText('DAI')).toBeNull()
+  })
+
+  it('renders an unpriced holding — fiat 0, raw balance non-zero', () => {
+    mockUsePortfolio.mockReturnValue({
+      totalUsd: 0,
+      totalEur: 0,
+      totalSek: 0,
+      breakdown: [
+        { symbol: 'USDC', balance: '400000000', formatted: '400.00', usdValue: 0, eurValue: 0, sekValue: 0 },
+        { symbol: 'ETH', balance: '10000000000000000', formatted: '0.01', usdValue: 0, eurValue: 0, sekValue: 0 },
+      ],
+      lastOutgoingAt: null,
+      loading: false,
+    })
+    render(<AccountsOverviewClient />)
+
+    const baseCard = getAccountCard('Base account')
+    // Both rows render: the raw balance rules, not the fiat value.
+    expect(within(baseCard).getByText('USDC')).toBeInTheDocument()
+    expect(within(baseCard).getByText('ETH')).toBeInTheDocument()
+    expect(within(baseCard).getAllByText('$0.00').length).toBeGreaterThan(0)
+  })
+
+  it('a single non-zero token renders no rows; two render one each', () => {
+    mockUsePortfolio.mockReturnValue({
+      totalUsd: 400,
+      totalEur: 368,
+      totalSek: 4160,
+      breakdown: [usdcHolding],
+      lastOutgoingAt: null,
+      loading: false,
+    })
+    const { unmount } = render(<AccountsOverviewClient />)
+
+    const baseCard = getAccountCard('Base account')
+    // One holding IS the headline — a row would repeat it.
+    expect(within(baseCard).queryByText('USDC')).toBeNull()
+    expect(within(baseCard).queryByText('No funds yet.')).toBeNull()
+    unmount()
+
+    mockUsePortfolio.mockReturnValue({
+      totalUsd: 433,
+      totalEur: 398,
+      totalSek: 4476,
+      breakdown: [
+        usdcHolding,
+        { symbol: 'ETH', balance: '10000000000000000', formatted: '0.01', usdValue: 33, eurValue: 30, sekValue: 316 },
+      ],
+      lastOutgoingAt: null,
+      loading: false,
+    })
+    render(<AccountsOverviewClient />)
+
+    const bothCard = getAccountCard('Base account')
+    expect(within(bothCard).getByText('USDC')).toBeInTheDocument()
+    expect(within(bothCard).getByText('ETH')).toBeInTheDocument()
+  })
+
+  it('the card has no "Added" caption and no "Open" affordance, and its agent icon is Bot', () => {
+    mockUsePortfolio.mockReturnValue({
+      totalUsd: 400,
+      totalEur: 368,
+      totalSek: 4160,
+      breakdown: [usdcHolding],
+      lastOutgoingAt: '2026-10-01T12:00:00.000Z',
+      loading: false,
+    })
+    render(<AccountsOverviewClient />)
+
+    const baseCard = getAccountCard('Base account')
+    expect(within(baseCard).queryByText(/Added /)).toBeNull()
+    expect(within(baseCard).queryByText(/^Open$/)).toBeNull()
+    // lucide's Icon renders the svg with the icon name in its class list.
+    expect(baseCard.querySelector('svg.lucide-flask-conical')).toBeNull()
+    expect(baseCard.querySelector('svg.lucide-bot')).not.toBeNull()
+    // The footer reads the account's most recent outgoing transfer.
+    expect(within(baseCard).getByText(/Last payment /)).toBeInTheDocument()
+  })
+
+  it('the footer says "No payments yet" while the account has sent nothing', () => {
+    render(<AccountsOverviewClient />)
+
+    const baseCard = getAccountCard('Base account')
+    expect(within(baseCard).getByText('No payments yet')).toBeInTheDocument()
+  })
+
+  it('mainnet cards carry no network marker; testnet cards read "Test network"', () => {
+    render(<AccountsOverviewClient />)
+
+    const baseCard = getAccountCard('Base account')
+    const sepoliaCard = getAccountCard('Sepolia account')
+    expect(within(baseCard).queryByText('Test network')).toBeNull()
+    expect(within(baseCard).queryByText('Base')).toBeNull()
+    expect(within(sepoliaCard).getByText('Test network')).toBeInTheDocument()
+    expect(within(sepoliaCard).queryByText('Base Sepolia')).toBeNull()
+  })
+
+  it('an empty-balance card shows "No funds yet." with an Add funds link that opens the Receive dialog', () => {
+    render(<AccountsOverviewClient />)
+
+    const baseCard = getAccountCard('Base account')
+    expect(within(baseCard).getByText('No funds yet.')).toBeInTheDocument()
+    // A link, not a button — the card keeps holding no buttons (#3719). The
+    // LINK keeps its task wording (owner decision on #4094); the dialog it
+    // opens is the one merged Receive dialog.
+    const addFunds = within(baseCard).getByRole('link', { name: 'Add funds' })
+    expect(screen.queryByRole('dialog', { name: 'Receive' })).toBeNull()
+    fireEvent.click(addFunds)
+    expect(screen.getByRole('dialog', { name: 'Receive' })).toBeInTheDocument()
+  })
+
+  it('one account renders wide beside the create tile; two or more render no tile', () => {
+    mockUseAccounts.mockReturnValue({ accounts: [BASE], loading: false })
+    mockUseAuth.mockReturnValue({ user: { accounts: [BASE] } })
+    const { unmount } = render(<AccountsOverviewClient />)
+
+    expect(screen.getByRole('button', { name: /Create another account/ })).toBeInTheDocument()
+    unmount()
+
+    mockUseAccounts.mockReturnValue({ accounts: [BASE, SEPOLIA], loading: false })
+    render(<AccountsOverviewClient />)
+
+    expect(screen.queryByRole('button', { name: /Create another account/ })).toBeNull()
+    // Both cards still render in the grid.
+    expect(screen.getByRole('link', { name: 'Base account' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Sepolia account' })).toBeInTheDocument()
+  })
+
+  it('the tile opens the same dialog as the header action', () => {
+    mockUseAccounts.mockReturnValue({ accounts: [BASE], loading: false })
+    mockUseAuth.mockReturnValue({ user: { accounts: [BASE] } })
+    render(<AccountsOverviewClient />)
+
+    fireEvent.click(screen.getByRole('button', { name: /Create another account/ }))
+    expect(screen.getByRole('dialog', { name: 'New account' })).toBeInTheDocument()
+  })
+
+  it('the subtitle counts accounts from two, and never says "linked"', () => {
+    const { unmount } = render(<AccountsOverviewClient />)
+
+    const header = screen.getByRole('heading', { name: 'Accounts', level: 1 }).closest('header')
+    expect(within(header as HTMLElement).getByText('accounts')).toBeInTheDocument()
+    expect(within(header as HTMLElement).queryByText(/linked/)).toBeNull()
+    unmount()
+
+    mockUseAccounts.mockReturnValue({ accounts: [BASE], loading: false })
+    render(<AccountsOverviewClient />)
+    const loneHeader = screen.getByRole('heading', { name: 'Accounts', level: 1 }).closest('header')
+    // Exact strings: /account/ would match the header's own "New account"
+    // action. One account renders no subtitle at all.
+    expect(within(loneHeader as HTMLElement).queryByText('accounts')).toBeNull()
+    expect(within(loneHeader as HTMLElement).queryByText('account')).toBeNull()
+    expect(within(loneHeader as HTMLElement).queryByText(/linked/)).toBeNull()
   })
 })

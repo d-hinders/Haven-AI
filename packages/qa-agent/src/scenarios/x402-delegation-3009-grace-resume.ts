@@ -44,20 +44,47 @@
  * exists for is closed at its source by #2444's other half. Anyone adding a
  * THIRD scenario to this shared delegate identity should re-read this bound
  * before assuming it still holds.
+ *
+ * ## Haven must record the resumed settlement (#4119)
+ *
+ * The balances prove money moved; they do not prove Haven RECORDED the
+ * merchant settlement, which the receipts headline and the accounting feed
+ * book under — for five days every SDK settlement report was refused (#4061)
+ * while this leg printed PASS. So the resumed response's merchant transaction
+ * (`PAYMENT-RESPONSE`, falling back to the tool result's `_meta`) is proved
+ * on-chain, and the status must carry `merchant_settlement_recorded` with the
+ * receipt's hash equal to it (`lib/settlement-record.ts`).
+ *
+ * The anchor differs from `x402-delegation-3009`'s, deliberately. There the
+ * call that funds is the call that settles, so a timestamp before it precedes
+ * the funding confirm. Here the funding confirms BEFORE the resume, by design,
+ * so a timestamp before `resumeX402Payment` does not guarantee a bound on the
+ * #3888 sweep's 60 s floor. The anchor is therefore taken immediately before
+ * the funding submit (`signPayment`), the latest instant the confirm cannot
+ * precede. The whole leg runs in about 7–12 s on dev (eight qa-dev runs,
+ * 2026-10-15 to 10-20), well inside the 45 s window.
  */
 
 import { HavenClient, buildSweepTypedData, signUserOpTypedDataForDelegation } from '@haven_ai/sdk'
 import { ethers } from 'ethers'
 import { HavenApi } from '../lib/haven-api.js'
-import { BASE_SEPOLIA_RPC, SEPOLIA_USDC } from '../lib/chain.js'
+import { BASE_SEPOLIA_RPC, SEPOLIA_USDC, waitForReceipt } from '../lib/chain.js'
 import { decodeChallenge, MCP_HEADERS, mcpBody, readMcpOutcome } from '../lib/merchant-mcp.js'
 import { freshPurchaseIdempotencyKey } from '../lib/run-idempotency.js'
+import { assertSdkSettlementRecorded, merchantSettlementHashFrom } from '../lib/settlement-record.js'
 import { type Scenario, type ScenarioContext, fail, pass, skip } from './types.js'
 
 const USDC_ABI = ['function balanceOf(address) view returns (uint256)'] as const
 const STATUS_WAIT_MS = 45_000
 const MONEY_WAIT_MS = 30_000
 const POLL_MS = 1_000
+
+/**
+ * #4119: how long the resumed merchant settlement's receipt may take to reach
+ * the observer node — the same 60 s the sibling legs allow. Mutable purely as
+ * a TEST SEAM.
+ */
+export const TIMING = { receiptWaitMs: 60_000, receiptPollMs: 3_000 }
 
 /**
  * How much pre-existing delegate drain this proof will absorb, in units of this
@@ -176,7 +203,7 @@ async function sweepAfterFailure(
 export const x402Delegation3009GraceResume: Scenario = {
   name: 'x402-delegation-3009-grace-resume',
   invariant:
-    'A confirmed EIP-3009 funding leg with no merchant retry becomes retryable after the dev-only grace, then resumes the original x402 request without leaving delegate funds stranded.',
+    'A confirmed EIP-3009 funding leg with no merchant retry becomes retryable after the dev-only grace, then resumes the original x402 request, Haven records the merchant settlement it verified on-chain, and no delegate funds are left stranded.',
   async run(ctx: ScenarioContext) {
     if (!ctx.cfg.demoMerchantUrl) {
       return skip('QA_DEMO_MERCHANT_URL not set — the crash/resume leg needs the dev demo-merchant')
@@ -246,6 +273,9 @@ export const x402Delegation3009GraceResume: Scenario = {
       return fail(`authorize did not return a delegation-rail funding payload (HTTP ${authorized.status}): ${JSON.stringify(authorized.data).slice(0, 180)}`)
     }
     const signature = await signUserOpTypedDataForDelegation(ctx.cfg.delegationDelegateKey, typedData as never)
+    // #4119 anchor: immediately before the funding submit — the latest instant
+    // the funding confirm cannot precede (see the module comment).
+    const fundingAnchor = Date.now()
     const funded = await api.signPayment(paymentId, signature)
     if (!funded.ok) return fail(`funding leg failed (HTTP ${funded.status}): ${(funded.data.details ?? funded.data.error ?? '').slice(0, 180)}`)
 
@@ -292,6 +322,36 @@ export const x402Delegation3009GraceResume: Scenario = {
         )
       }
 
+      // ── #4119: Haven recorded the resumed merchant settlement ────────────
+      const merchantSettlement = merchantSettlementHashFrom(resumed.headers, resumedText)
+      if (!merchantSettlement) {
+        return failAfterFunding(
+          `resumed merchant request for payment ${paymentId} named no settlement transaction (no PAYMENT-RESPONSE ` +
+            'transaction, no _meta["x402/payment-response"].transaction) — the merchant leg cannot be proved on-chain',
+        )
+      }
+      const record = await assertSdkSettlementRecorded(api, {
+        paymentId,
+        merchantHash: merchantSettlement.hash,
+        anchorMs: fundingAnchor,
+      })
+      if (!record.ok) return failAfterFunding(record.detail)
+      const merchantReceipt = await waitForReceipt(provider, merchantSettlement.hash, {
+        timeoutMs: TIMING.receiptWaitMs,
+        intervalMs: TIMING.receiptPollMs,
+      })
+      if (!merchantReceipt) {
+        return failAfterFunding(
+          `merchant settlement tx ${merchantSettlement.hash} (from ${merchantSettlement.source}) has no receipt ` +
+            `within ${TIMING.receiptWaitMs / 1000}s — the merchant reported a hash that did not land`,
+        )
+      }
+      if (merchantReceipt.status !== 1) {
+        return failAfterFunding(
+          `merchant settlement tx ${merchantSettlement.hash} (from ${merchantSettlement.source}) REVERTED on-chain`,
+        )
+      }
+
       let [treasuryAfter, merchantAfter, delegateAfter] = (await Promise.all([
         usdc.balanceOf(treasury), usdc.balanceOf(option.payTo), usdc.balanceOf(delegate.address),
       ])) as [bigint, bigint, bigint]
@@ -330,7 +390,8 @@ export const x402Delegation3009GraceResume: Scenario = {
       return pass(
         `confirmed funding without a merchant retry became retryable, then resume paid ${fmt(amount)} USDC ` +
           `treasury→merchant with the delegate holding no unsettled funding of its own ` +
-          `(${fmt(delegateBefore)} → ${fmt(delegateAfter)} USDC)${attribution} (payment ${paymentId})`,
+          `(${fmt(delegateBefore)} → ${fmt(delegateAfter)} USDC)${attribution}; merchant settlement recorded: ` +
+          `${record.hash} (block ${merchantReceipt.blockNumber}, from ${merchantSettlement.source}) (payment ${paymentId})`,
       )
     } catch (error) {
       return failAfterFunding(

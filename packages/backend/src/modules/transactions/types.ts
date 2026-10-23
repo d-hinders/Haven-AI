@@ -86,6 +86,21 @@ export interface Transaction {
    */
   settlementTxHash?: string | null
   /**
+   * #4319: what Haven knows about the merchant settlement — `verified` (a
+   * hash is recorded), `checking` (a source can still produce one inside the
+   * 24-hour window, or a receipt verdict is retryable), `untracked`
+   * (everything else). Computed from stored state only.
+   */
+  settlementTracking?: 'verified' | 'checking' | 'untracked'
+  /**
+   * #4319: WHICH proof the recorded settlement carries — `nonce` (derived
+   * from the payment id, the sweep's standard), `signed_header` (the
+   * delegate-signed X-PAYMENT header, #3925), `receipt` (the owner-approved
+   * Tier 2 relaxation, #4319), `legacy` (records from 2026-09-29 to 10-14,
+   * before the flags). Null when nothing is recorded.
+   */
+  settlementProof?: 'nonce' | 'signed_header' | 'receipt' | 'legacy' | null
+  /**
    * The book-time FX rate `amountSek` was struck at, and where it came from —
    * `machine_payment_evidence.fx_rate_sek` / `.fx_source` (#463, migration
    * 026), surfaced for the CSV export (#2871). Null wherever `amountSek` is:
@@ -134,14 +149,15 @@ export interface Transaction {
    *   intents, delegate sweeps, and raw explorer / Safe-service transfers
    *   matched to a confirmed intent or sweep during enrichment
    *   (`enrichTransactionsWithAgents`).
-   * - `'human'`: reserved. Nothing populates it today — no
-   *   dashboard-initiated send path exists (the mpp demo and `/send` were
-   *   retired), so no row can currently claim a human initiator.
+   * - `'human'`: an OUTBOUND row matched to an owner send recorded at
+   *   submit (`owner_transfers`, #4099) — the account owner sent it from the
+   *   dashboard (`POST /accounts/hybrid/:address/transfers/submit`).
    * - `'unknown'`: an OUTBOUND raw transfer that stayed unattributed — no
-   *   matched intent or sweep.
+   *   matched intent, sweep or owner-send record. Owner sends made before
+   *   #4099 have no record and stay here; nothing infers them.
    *
-   * Absent (undefined) for inbound (`direction: 'in'`) rows, which have no
-   * initiator record at all.
+   * Absent (undefined) for inbound (`direction: 'in'`) rows, except an
+   * agent's delegate sweep (`'agent'`).
    */
   initiatedBy?: 'agent' | 'human' | 'unknown'
   /**
@@ -189,6 +205,17 @@ export interface EnrichedTransaction extends Transaction {
   accountName: string
   agentId?: string
   agentName?: string
+  /**
+   * Opt-in projection for a transfer between two accounts owned by this
+   * user (#4265). The row keeps the sender leg's fields and direction so
+   * older readers can still render it as an outbound transfer; aware readers
+   * use this destination to render one account-to-account move.
+   */
+  ownTransfer?: {
+    toAccountId: string
+    toAccountName: string
+    toAccountAddress: string
+  }
   /**
    * Which settlement branch moved the money — `'eip3009' | 'erc7710'` — read
    * from the intent's `machine_metadata` JSONB (#1705, epic #1704).

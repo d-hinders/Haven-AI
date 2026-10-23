@@ -137,6 +137,7 @@ Edit `.env` and fill in the required values:
 | `DATABASE_URL` | Yes | PostgreSQL connection string (default works with Docker) |
 | `JWT_SECRET` | Yes | Secret for dashboard auth tokens; use a long random string in production |
 | `RPC_URL_BASE` | No | Base RPC (default: `https://mainnet.base.org`) |
+| `ETH_GETLOGS_MAX_BLOCK_RANGE` | No | Widest `eth_getLogs` block range the RPC provider serves (Alchemy free plan: `10`). The x402 settlement sweepers never ask for more; unset, they learn the limit from the provider's refusal |
 | `RELAYER_PRIVATE_KEY` | Yes for on-chain execution | EOA private key that pays gas for relayed transactions; it cannot access user funds |
 | `GNOSISSCAN_API_KEY` | No | History only (decision (c), #3635): the chain-100 explorer history read; nothing runs on Gnosis |
 | `BASESCAN_API_KEY` | No | Base explorer API key when using an Etherscan-style Base source; Base currently defaults to Blockscout for transactions |
@@ -183,7 +184,7 @@ npm run dev
 
 1. Go to [http://localhost:3000](http://localhost:3000)
 2. Click **Get Early Access** → create an account
-3. Pick your network, then **create the account with a passkey** — one Face ID / Touch ID prompt
+3. Pick your network, then **create the account with a passkey** — one passkey prompt
 4. You'll land on the dashboard with your Haven wallet address
 
 > **One onboarding path, no transaction.** Signup provisions a counterfactual passkey-owned
@@ -532,7 +533,7 @@ Test the full flow locally, then push and open the PR. Once merged, watch the Ra
 Collaborators have **Viewer** access to the Railway project — you can see services, deploy logs, and runtime logs, but not change env vars. If a deploy fails or behaves unexpectedly:
 
 - **Railway → backend service → Deployments** — build logs and runtime logs
-- **Railway → Postgres → Data** — inspect tables (read-only with Viewer role)
+- **Railway → Postgres → Database** — inspect tables
 - **Vercel deployments** — production and the `dev` host deploy on every push that changes the frontend; a PR gets a preview only from a `preview/*` branch
 
 If you need an env var changed in Railway or a secret rotated, ping the project owner.

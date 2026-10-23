@@ -4,6 +4,22 @@
  */
 
 /**
+ * "17 May 2026" — the ONE long-date rule (en-GB, day month year, #4166).
+ * The app's dates were rendered in two voices — `passkeyLabels` said
+ * "October 16, 2026" (en-US) while the account page said "16 October 2026"
+ * (en-GB) for the same instant. en-GB is the app's dominant voice
+ * (`CompanyDetailsCard`, sub-budget, analytics), so it is the rule here, and
+ * both surfaces read it.
+ */
+export function formatLongDate(date: string | Date): string {
+  return new Intl.DateTimeFormat('en-GB', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  }).format(typeof date === 'string' ? new Date(date) : date)
+}
+
+/**
  * `0x1234…abcd` — the ONE address truncation rule (6 + ellipsis + 4).
  * Render addresses through `<Address>` (components/haven) where possible;
  * this is the underlying rule for plain-string contexts (#853).
@@ -64,16 +80,19 @@ export function isSubCent(value: number): boolean {
 }
 
 /**
- * `formatFiat` for DISPLAY (#3897, owner decision 2026-10-12): a non-zero
- * figure under a cent renders "<$0.01" ("<0,01 kr", "<0,01 €") instead of a
- * `0.00` that states nothing was spent. Zero stays `$0.00`; everything else
- * is `formatFiat`'s output unchanged. A negative sub-cent figure keeps its
- * sign in the locale's minus glyph ("-<$0.01", "\u2212<0,01 kr"); callers
- * that sign by direction (`Amount`) pass the magnitude.
+ * `formatFiat` for DISPLAY (owner decision 2026-10-22 on the transactions
+ * epic, superseding #3897's "<$0.01"): a non-zero figure under a cent
+ * (`isSubCent`) renders with EXACTLY 4 decimals in the currency's own format
+ * ("$0.0010", "0,0049 kr", "0,0010 €"), and one that would still show
+ * `0.0000` (`|value| < 0.00005`) renders "<$0.0001" ("<0,0001 kr",
+ * "<0,0001 €"). Zero stays `$0.00`; everything else is `formatFiat`'s output
+ * unchanged. A negative sub-cent figure keeps its sign in the locale's minus
+ * glyph ("-$0.0010", "\u2212<0,0001 kr"); callers that sign by direction
+ * (`Amount`) pass the magnitude.
  *
  * Deliberately NOT folded into `formatFiat`: that one also drives the
- * balance count-up (which would flash "<$0.01" while counting from 0), the
- * "since yesterday" line and /accounts, which keep plain rounding.
+ * balance count-up, the "since yesterday" line and /accounts, which keep
+ * plain 2-decimal rounding.
  */
 export function formatFiatDisplay(value: number, currency: 'USD' | 'EUR' | 'SEK'): string {
   if (!isSubCent(value)) return formatFiat(value, currency)
@@ -83,7 +102,25 @@ export function formatFiatDisplay(value: number, currency: 'USD' | 'EUR' | 'SEK'
     new Intl.NumberFormat(currencyLocale(currency))
       .formatToParts(-1)
       .find((part) => part.type === 'minusSign')?.value ?? '-'
-  return `${value < 0 ? minus : ''}<${formatFiat(0.01, currency)}`
+  const sign = value < 0 ? minus : ''
+  const abs = Math.abs(value)
+  // Still rounds to 0.0000 at 4 decimals: say "<" instead, against the
+  // smallest figure the format can show. The sign still comes from the input.
+  if (abs < SUB_CENT_DISPLAY_FLOOR) return `${sign}<${fiatOf(0.0001, currency, 4)}`
+  return `${sign}${fiatOf(abs, currency, 4)}`
+}
+
+/** Below this magnitude a sub-cent figure would still show 0.0000 at 4 decimals. */
+const SUB_CENT_DISPLAY_FLOOR = 0.00005
+
+/** `formatFiat`'s Intl setup at an explicit fraction-digit count. */
+function fiatOf(value: number, currency: 'USD' | 'EUR' | 'SEK', fractionDigits: number): string {
+  return new Intl.NumberFormat(currencyLocale(currency), {
+    style: 'currency',
+    currency,
+    minimumFractionDigits: fractionDigits,
+    maximumFractionDigits: fractionDigits,
+  }).format(value)
 }
 
 /**

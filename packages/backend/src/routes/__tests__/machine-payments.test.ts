@@ -45,6 +45,9 @@ const { mockQuery, fiatMocks, reportingMocks } = vi.hoisted(() => ({
     // modules/accounting/ barrel post-#998, so it needs a mock here too (an
     // unmocked call threw and 500'd the settle/evidence routes).
     feedSettledPaymentBestEffort: vi.fn(),
+    // #3918: the Accounted late-attach, fired fire-and-forget next to the
+    // Fortnox one by the same capture route — same barrel, same 500-if-unmocked.
+    lateAttachAccountedMerchantReceipt: vi.fn().mockResolvedValue(undefined),
   },
 }))
 
@@ -305,6 +308,7 @@ describe('machine payment routes', () => {
     // `.catch()` in the fire-and-forget call site — it must keep resolving
     // to a promise across tests, just with a clean call history.
     reportingMocks.lateAttachMerchantReceipt.mockClear()
+    reportingMocks.lateAttachAccountedMerchantReceipt.mockClear()
   })
 
   function pendingIntent(overrides: Record<string, unknown> = {}) {
@@ -566,6 +570,8 @@ describe('machine payment routes', () => {
           delegation_hash: `0x${'dd'.repeat(32)}`,
           recipient_address: null,
           merchant_id: null,
+          // #3922: shape parity — true by construction on this read.
+          is_live: true,
           reserved_haven_atomic: '0',
           // #3731: the remaining was NOT read live (no delegation_json row —
           // the same fallback path #1145 takes on an RPC failure), so the

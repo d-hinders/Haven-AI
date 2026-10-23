@@ -14,6 +14,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   BUILD,
+  GIT,
   SKIP,
   globToRegExp,
   hermeticEnv,
@@ -21,10 +22,15 @@ import {
   parseIgnoreCommand,
   readIgnoreCommand,
   rmSync,
+  yieldToEventLoop,
 } from '../../../../scripts/vercel/ignore-build-harness.mjs'
 
 const PACKAGE_ROOT = join(__dirname, '..', '..')
 const ignoreCommand: string = readIgnoreCommand(PACKAGE_ROOT)
+
+// Every case below spawns git synchronously; without a turn of the event loop
+// between them the file outlasts vitest's 60 s RPC timer (#4192).
+afterEach(yieldToEventLoop)
 
 let r: ReturnType<typeof makeRepo>
 
@@ -201,7 +207,7 @@ describe('ops Vercel ignore step (#3591, #3594)', () => {
       r.git('checkout', '-q', '-b', 'feature')
       r.commit('docs/guide.md')
       withClone({ withOrigin: true, depth: 3 }, (dir) => {
-        execFileSync('git', ['remote', 'set-url', 'origin', `file://${dir}-gone`], { cwd: dir, env: hermeticEnv() })
+        execFileSync(GIT, ['remote', 'set-url', 'origin', `file://${dir}-gone`], { cwd: dir, env: hermeticEnv() })
         expect(r.run({ ...preview(), IGNORE_BUILD_DEV_URL: `file://${r.repo}` }, dir)).toBe(SKIP)
       })
     })

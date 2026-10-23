@@ -29,7 +29,7 @@
 
 import { getChainData } from '@haven_ai/core'
 import pool from '../../db.js'
-import { delegationLiveWindowSql } from './delegation-budgets.js'
+import { spendableDelegationSql } from './delegation-budgets.js'
 import type { Executor } from '../transaction.js'
 
 export type { Executor }
@@ -44,6 +44,8 @@ export interface DashboardBudgetRow {
   token_symbol: string
   token_decimals: number
   delegation_hash: string
+  /** #4004: the delegation's recipient pin (null = open budget). */
+  recipient_address: string | null
   budget_atomic: string
   period_seconds: number
   /** Unix-second BIGINTs (node-postgres decodes them as strings). */
@@ -59,14 +61,14 @@ export interface DashboardBudgetRow {
  */
 
 export const LIST_DASHBOARD_BUDGET_DELEGATIONS_SQL = `SELECT ad.id, ad.agent_id, ad.chain_id,
-         ad.token_address, ad.delegation_hash, ad.budget_atomic, ad.period_seconds,
+         ad.token_address, ad.delegation_hash, ad.recipient_address, ad.budget_atomic,
+         ad.period_seconds,
          ad.start_date::text AS start_date, ad.expires_at::text AS expires_at
        FROM agent_delegations ad
        JOIN agents a ON a.id = ad.agent_id
        JOIN smart_accounts sa ON sa.id = a.account_id AND sa.account_type = 'delegator_hybrid'
        WHERE a.user_id = $1
-         AND ad.status = 'active'
-         AND (${delegationLiveWindowSql('ad')})
+         AND (${spendableDelegationSql('ad', { requireStarted: false })})
        ORDER BY ad.created_at ASC`
 
 /**

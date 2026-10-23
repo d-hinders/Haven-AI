@@ -281,7 +281,7 @@ describe('RemoveAgentDialog', () => {
     mockBudgetState.budgets = [{ id: 'd-1', status: 'active' }]
     renderDialog(agentFixture({ status: 'revoked' }))
     expect(document.body.textContent).not.toMatch(/already ended/i)
-    expect(document.body.textContent).toMatch(/you sign once/i)
+    expect(document.body.textContent).toMatch(/you approve once/i)
   })
 
   it('while the list loads, a signature is still required (Remove waits for a signer)', () => {
@@ -411,7 +411,7 @@ describe('RemoveAgentDialog', () => {
       expect(screen.getByRole('button', { name: 'Finish revoking' })).toBeTruthy()
       const text = document.body.textContent ?? ''
       expect(text).toMatch(/remaining budget ends/i)
-      expect(text).not.toMatch(/moves to Removed/i)
+      expect(text).not.toMatch(/is archived: hidden from the list/i)
       expect(text).not.toMatch(/credential stops working/i)
     })
 
@@ -615,7 +615,7 @@ describe('RemoveAgentDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Remove agent' }))
     await waitFor(() => expect(onArchive).toHaveBeenCalled())
     expect(onClose).toHaveBeenCalled()
-    expect(screen.queryByText(/could not be moved to Removed/i)).toBeNull()
+    expect(screen.queryByText(/could not be archived/i)).toBeNull()
   })
 
   it('a 409 already_revoked refusal is step-already-done: archive still runs and the dialog closes', async () => {
@@ -666,7 +666,7 @@ describe('RemoveAgentDialog', () => {
   it('a pending_approval agent is removed end to end: no live budget, both filing steps run, dialog closes', async () => {
     // #3544: the issue's repro — a connect-modal agent still awaiting its
     // first budget. No delegation exists, so revoke-all is never asked for;
-    // the widened revoke 200s; archive files it under Removed.
+    // the widened revoke 200s; archive hides it from the list (#4113).
     mockBudgetState.budgets = []
     const order: string[] = []
     const { onClose } = renderDialog(agentFixture({ status: 'pending_approval' }), {
@@ -708,5 +708,9 @@ describe('RemoveAgentDialog', () => {
     expect(text).toMatch(/credential stops working/i)
     expect(text).toMatch(/history stays/i)
     expect(text).toMatch(/restoring never brings back its ability to spend/i)
+    // #4113: the Removed group is gone; the copy names where the agent goes.
+    expect(text).toMatch(/is archived: hidden from the list/i)
+    expect(text).toMatch(/Archived: Shown/)
+    expect(text).not.toMatch(/Removed/)
   })
 })

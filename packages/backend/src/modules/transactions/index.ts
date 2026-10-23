@@ -41,21 +41,45 @@ export {
 export { toCanonicalAddress } from './normalize.js'
 export { compareTransactions, enrichedTransactionIdentityKey } from './ordering.js'
 export { fetchAccountTransactions } from './aggregate.js'
+export { fetchLastOutgoingAt } from './last-outgoing.js'
 export { enrichTransactionsWithAgents } from './enrichment.js'
 export { enrichTransactionsWithAccounting } from './accounting.js'
-export { serveTimeAmount } from './serve-time.js'
+export { serveTimeAmount, serveTimeAmountTriple } from './serve-time.js'
 export {
   ACTIVITY_GROUP_LIMIT,
   ACTIVITY_WINDOW_DAYS,
+  ACTIVITY_WINDOW_MS,
+  activityWindowStartIso,
+  buildActivityFeed,
   buildActivityGroups,
   isValidActivityTimeZone,
+  localDayBounds,
   localDayKey,
   activityOutcome,
+  ownAccountNameResolver,
+  type ActivityFeed,
   type ActivityOutcome,
   type BuildActivityGroupsParams,
   type DashboardActivityGroup,
+  type LocalDayBounds,
 } from './activity.js'
 export { fetchConfirmedX402Transactions, mergeX402Transactions } from './x402.js'
+export {
+  counterpartyAddressOf,
+  counterpartyAddressesOf,
+  EMPTY_SEARCH_INDEX,
+  foldForSearch,
+  resolvedCounterpartyNames,
+  transactionMatchesSearch,
+  type TransactionSearchIndex,
+} from './search.js'
+export {
+  parseTransactionWindow,
+  type ParsedTransactionWindow,
+  type TransactionPeriodPreset,
+  type TransactionWindow,
+  type TransactionWindowParams,
+} from './period.js'
 export {
   ingestInboundTransfers,
   matchInboundTransferForAccount,
@@ -73,6 +97,7 @@ export {
   aggregateAccountTransactions,
   buildAccountTransactionsPage,
   filterEnrichedTransactions,
+  foldOwnAccountTransfers,
   mergeSortDedupeAndEnrich,
   paginateByOffset,
   resolveTransactionCurrency,

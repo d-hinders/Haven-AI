@@ -163,6 +163,8 @@ describe('haven_pay_x402_quote', () => {
     expect(result.data.reason).toContain('Do NOT call')
     expect(result.data.reason).toContain('haven_x402_sign_header')
     expect(result.data.reason).toContain('payment_header')
+    // #4061: the report after the retry carries the same header.
+    expect(result.data.reason).toContain('haven_report_x402_outcome, passing that same payment_header')
     expect(result.data.payload_hash).toBe('0xfunding')
     expect(result.data.x402.funding_to).toBe('0xDelegate')
     expect(result.data.x402.merchant_to).toBe('0xMerchant')
@@ -383,6 +385,18 @@ describe('haven_quote_x402', () => {
         responseHeaders: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(paymentRequired)) },
       },
       ...(agent ? { 'GET /machine-payments/agent': { status: 200, body: agent } } : {}),
+      // #3967: the quote now also runs the quote-time budget pre-check on the
+      // option pay will select. Explicit SUFFICIENT stub (never a blanket
+      // always-sufficient mock — the refusal and degrade branches have their
+      // own tests below); over-budget tests stub their own decided 403.
+      ...(agent
+        ? {
+            'POST /machine-payments/budget-precheck': {
+              status: 200,
+              body: { sufficient: true, remaining_atomic: '5000000' },
+            },
+          }
+        : {}),
     })
     return handlers().haven_quote_x402({ url: 'http://merchant.test/paid' })
   }
@@ -395,6 +409,12 @@ describe('haven_quote_x402', () => {
     expect(result.data.expected_funding_leg).toBe(false)
     expect(result.data.expected_settleable).toBe(true)
     expect(result.data.warnings).toBeUndefined()
+    // #3967: the budget pre-check ran and answered — the block reports it.
+    expect(result.data.budget_check).toEqual({
+      sufficient: true,
+      remaining_atomic: '5000000',
+      requested_atomic: SCHEME_ERC7710_ATOMIC,
+    })
   })
 
   it('the same both-entries merchant + a LEGACY-rail agent: predicts eip3009, funding leg, NOT settleable', async () => {
@@ -404,7 +424,17 @@ describe('haven_quote_x402', () => {
     expect(result.data.expected_settlement_scheme).toBe('eip3009')
     expect(result.data.expected_funding_leg).toBe(true)
     expect(result.data.expected_settleable).toBe(false)
-    expect(result.data.warnings).toBeUndefined()
+    // #3967: a retired rail cannot run the pre-check (the route 410s it), so
+    // the check degrades — sufficient null, an unavailable warning, and the
+    // quote otherwise behaves exactly as before (the cap is still prefilled).
+    expect(result.data.warnings).toEqual([
+      expect.objectContaining({ code: 'ALLOWANCE_CHECK_UNAVAILABLE' }),
+    ])
+    expect(result.data.budget_check).toEqual({
+      sufficient: null,
+      requested_atomic: '1500000',
+    })
+    expect(result.data.next_arguments?.max_amount_human).toBeDefined()
   })
 
   it('a failed agent read predicts nothing and carries the X402_SCHEME_UNKNOWN warning', async () => {
@@ -426,8 +456,11 @@ describe('haven_quote_x402', () => {
     expect(result.data.expected_settlement_scheme).toBeNull()
     expect(result.data.expected_funding_leg).toBeNull()
     expect(result.data.expected_settleable).toBeUndefined()
+    // #3967: without an agent the budget pre-check cannot run either — its
+    // own degradation warning MERGES with the scheme one, never overwrites it.
     expect(result.data.warnings).toEqual([
       expect.objectContaining({ code: 'X402_SCHEME_UNKNOWN' }),
+      expect.objectContaining({ code: 'ALLOWANCE_CHECK_UNAVAILABLE' }),
     ])
     // #3007 review: the warning names THIS surface's pay sibling, not the MCP ones.
     expect(result.data.warnings?.[0]?.message).toContain('haven_pay_x402_quote')
@@ -1393,5 +1426,234 @@ describe('next-step fields (#2550)', () => {
     // for the signer among ITS OWN configured servers rather than trusting a
     // name minted by a server that cannot see its config.
     expect(result.data.next_tool_server_role).toBe('signer')
+  })
+})
+
+// ── #3967: quote-time budget gate, expected_amount, merchant denial hints ─────
+
+describe('haven_quote_x402 #3967 — over-budget / expected_amount / denial stops', () => {
+  // The incident the issue files: a 0.10 USDC invoice answering a 402 for
+  // 1000 USDC whose Lightning entry carried extra.issuanceDenied. The fixture
+  // keeps the shape: an amount far above a plausible budget, plus a denial
+  // key on the entry itself.
+  const BITREFILL_SHAPED_ACCEPTS = [
+    {
+      ...PAYMENT_REQUIRED.accepts[0],
+      amount: '1000000000',
+      maxAmountRequired: '1000000000',
+      extra: {
+        ...PAYMENT_REQUIRED.accepts[0].extra,
+        issuanceDenied: 'invoice_not_found',
+      },
+    },
+  ]
+  const OVERBUDGET_PAYMENT_REQUIRED = {
+    ...PAYMENT_REQUIRED,
+    accepts: BITREFILL_SHAPED_ACCEPTS,
+  }
+  const DELEGATION_AGENT = { ...AGENT_RESPONSE, execution_rail: 'delegation' }
+  const SUFFICIENT_PRECHECK = {
+    'POST /machine-payments/budget-precheck': {
+      status: 200,
+      body: { sufficient: true, remaining_atomic: '5000000' },
+    },
+  }
+
+  function stubQuote(paymentRequired: unknown, agent: Record<string, unknown>, extra: Record<string, unknown> = {}) {
+    stubFetch({
+      'GET /paid': {
+        status: 402,
+        responseHeaders: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(paymentRequired)) },
+      },
+      'GET /machine-payments/agent': { status: 200, body: agent },
+      ...extra,
+    })
+  }
+
+  it('COMBINED — 1000 USDC 402 far above budget + an issuanceDenied entry: stop, no cap, BOTH warnings', async () => {
+    stubQuote(
+      OVERBUDGET_PAYMENT_REQUIRED,
+      DELEGATION_AGENT,
+      {
+        // The decided refusal the backend answers for an over-budget compare.
+        'POST /machine-payments/budget-precheck': {
+          status: 403,
+          body: {
+            error: 'delegation_budget_exceeded',
+            error_code: 'delegation_budget_exceeded',
+            remaining_atomic: '5000000',
+          },
+        },
+      },
+    )
+    const result = ok<Record<string, any>>(
+      await handlers().haven_quote_x402({ url: 'http://merchant.test/paid' }),
+    )
+    // The quote data itself is still returned…
+    expect(result.data.payment_required).toBeDefined()
+    expect(result.data.amount).toBe('1000')
+    // …but the agent is STOPPED: no pay next step, no prefilled cap.
+    expect(result.data.safe_to_continue).toBe(false)
+    expect(result.data.next_action).toBe(AgentPaymentNextAction.StopAndTellUser)
+    expect(result.data.next_tool).toBeUndefined()
+    expect(result.data.next_arguments).toBeUndefined()
+    expect(result.data.next_tool_omitted_reason).toBeDefined()
+    // Both figures ride in the block, not on the warning.
+    expect(result.data.budget_check).toEqual({
+      sufficient: false,
+      remaining_atomic: '5000000',
+      requested_atomic: '1000000000',
+    })
+    // BOTH warnings, merged — the budget one and the merchant's own denial.
+    expect(result.data.warnings).toEqual([
+      expect.objectContaining({ code: 'QUOTE_EXCEEDS_REMAINING_BUDGET' }),
+      expect.objectContaining({ code: 'MERCHANT_REPORTED_DENIAL' }),
+    ])
+    expect(result.data.warnings?.[1]?.message).toContain('issuanceDenied: invoice_not_found')
+    // Owner decision: the stop reason names the deposit-address fallback's ONE
+    // condition — the user's explicit go-ahead.
+    expect(result.data.reason).toContain('explicit go-ahead')
+    // A quote never writes to the refusals ledger…
+    const precheckCall = recordedCalls().find((c) => c.url.includes('/machine-payments/budget-precheck'))
+    expect(precheckCall).toBeDefined()
+    expect((precheckCall?.body as Record<string, unknown>).recordRefusal).toBe(false)
+    // …and never passes an idempotency key (a stale replay must not answer
+    // `replay: true` for a repeat purchase).
+    expect((precheckCall?.body as Record<string, unknown>).idempotencyKey).toBeUndefined()
+  })
+
+  it('expected_amount mismatch ALONE stops the agent with no cap and no pre-check call', async () => {
+    stubQuote(
+      PAYMENT_REQUIRED, // 1 USDC on the wire
+      DELEGATION_AGENT,
+      SUFFICIENT_PRECHECK,
+    )
+    const result = ok<Record<string, any>>(
+      await handlers().haven_quote_x402({
+        url: 'http://merchant.test/paid',
+        expected_amount: '0.10', // the invoice price — 100000 atomic, not 1000000
+      }),
+    )
+    expect(result.data.price_differs_from_expected).toBe(true)
+    expect(result.data.safe_to_continue).toBe(false)
+    expect(result.data.next_action).toBe(AgentPaymentNextAction.StopAndTellUser)
+    expect(result.data.next_tool).toBeUndefined()
+    expect(result.data.next_arguments).toBeUndefined()
+    expect(result.data.next_tool_omitted_reason).toBeDefined()
+    expect(result.data.reason).toContain('explicit go-ahead')
+    // The expectation already decided the stop — the budget call is not spent.
+    expect(recordedCalls().find((c) => c.url.includes('/machine-payments/budget-precheck'))).toBeUndefined()
+  })
+
+  it('expected_amount that MATCHES changes nothing but the explicit false', async () => {
+    stubQuote(PAYMENT_REQUIRED, DELEGATION_AGENT, SUFFICIENT_PRECHECK)
+    const result = ok<Record<string, any>>(
+      await handlers().haven_quote_x402({
+        url: 'http://merchant.test/paid',
+        expected_amount: '1.5', // the fixture's authorization amount (maxAmountRequired)
+      }),
+    )
+    expect(result.data.price_differs_from_expected).toBe(false)
+    expect(result.data.safe_to_continue).toBe(true)
+    expect(result.data.next_tool).toBe('mcp__haven__haven_pay_x402_quote')
+    expect(result.data.next_arguments?.max_amount_human).toBeDefined()
+  })
+
+  it('an UNAVAILABLE pre-check fails open: cap still prefilled, sufficient null, a warning', async () => {
+    stubQuote(PAYMENT_REQUIRED, DELEGATION_AGENT, {
+      'POST /machine-payments/budget-precheck': { status: 500, body: { error: 'down' } },
+    })
+    const result = ok<Record<string, any>>(
+      await handlers().haven_quote_x402({ url: 'http://merchant.test/paid' }),
+    )
+    expect(result.data.safe_to_continue).toBe(true)
+    expect(result.data.budget_check).toEqual({
+      sufficient: null,
+      requested_atomic: '1500000',
+    })
+    expect(result.data.warnings).toEqual([
+      expect.objectContaining({ code: 'ALLOWANCE_CHECK_UNAVAILABLE' }),
+    ])
+    expect(result.data.next_action).toBe(AgentPaymentNextAction.SignAndSubmitPayment)
+    expect(result.data.next_arguments?.max_amount_human).toBe('1.5')
+  })
+
+  it('a CHAIN mismatch skips the check: no pre-check call, sufficient null, NO warning', async () => {
+    stubQuote(PAYMENT_REQUIRED, { ...DELEGATION_AGENT, chain_id: 999999 }, SUFFICIENT_PRECHECK)
+    const result = ok<Record<string, any>>(
+      await handlers().haven_quote_x402({ url: 'http://merchant.test/paid' }),
+    )
+    expect(recordedCalls().find((c) => c.url.includes('/machine-payments/budget-precheck'))).toBeUndefined()
+    expect(result.data.budget_check).toEqual({
+      sufficient: null,
+      requested_atomic: '1500000',
+    })
+    expect(result.data.warnings).toBeUndefined()
+    expect(result.data.next_arguments?.max_amount_human).toBe('1.5')
+  })
+
+  it('an amount EXACTLY equal to remaining is not refused — the backend refuses only on <', async () => {
+    stubQuote(PAYMENT_REQUIRED, DELEGATION_AGENT, {
+      'POST /machine-payments/budget-precheck': {
+        status: 200,
+        body: { sufficient: true, remaining_atomic: '1500000' },
+      },
+    })
+    const result = ok<Record<string, any>>(
+      await handlers().haven_quote_x402({ url: 'http://merchant.test/paid' }),
+    )
+    expect(result.data.safe_to_continue).toBe(true)
+    expect(result.data.budget_check).toEqual({
+      sufficient: true,
+      remaining_atomic: '1500000',
+      requested_atomic: '1500000',
+    })
+    expect(result.data.next_arguments?.max_amount_human).toBe('1.5')
+  })
+
+  it('warnings MERGE: X402_SCHEME_UNKNOWN survives beside the denial hint', async () => {
+    // Agent read fails (scheme unknown) while the merchant denies issuance —
+    // both are facts about the quote and neither may overwrite the other.
+    stubFetch({
+      'GET /paid': {
+        status: 402,
+        responseHeaders: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(OVERBUDGET_PAYMENT_REQUIRED)) },
+      },
+      'GET /machine-payments/agent': { status: 500, body: {} },
+    })
+    const result = ok<Record<string, any>>(
+      await handlers().haven_quote_x402({ url: 'http://merchant.test/paid' }),
+    )
+    expect(result.data.warnings).toEqual([
+      expect.objectContaining({ code: 'X402_SCHEME_UNKNOWN' }),
+      expect.objectContaining({ code: 'ALLOWANCE_CHECK_UNAVAILABLE' }),
+      expect.objectContaining({ code: 'MERCHANT_REPORTED_DENIAL' }),
+    ])
+    // The denial hint flips nothing: no budget answer was possible, so the
+    // quote proceeds exactly as a scheme-unknown quote always has.
+    expect(result.data.next_action).toBe(AgentPaymentNextAction.SignAndSubmitPayment)
+    expect(result.data.next_arguments?.max_amount_human).toBe('1000')
+  })
+
+  it('a denial hint ALONE is informational: safe_to_continue stays true and no cap changes', async () => {
+    const denialOnly = {
+      ...PAYMENT_REQUIRED,
+      accepts: [
+        {
+          ...PAYMENT_REQUIRED.accepts[0],
+          extra: { ...PAYMENT_REQUIRED.accepts[0].extra, issuanceDenied: 'invoice_not_found' },
+        },
+      ],
+    }
+    stubQuote(denialOnly, DELEGATION_AGENT, SUFFICIENT_PRECHECK)
+    const result = ok<Record<string, any>>(
+      await handlers().haven_quote_x402({ url: 'http://merchant.test/paid' }),
+    )
+    expect(result.data.warnings).toEqual([
+      expect.objectContaining({ code: 'MERCHANT_REPORTED_DENIAL' }),
+    ])
+    expect(result.data.safe_to_continue).toBe(true)
+    expect(result.data.expected_settleable).toBe(true)
+    expect(result.data.next_arguments?.max_amount_human).toBe('1.5')
   })
 })

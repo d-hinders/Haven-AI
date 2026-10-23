@@ -8,6 +8,7 @@ import {
   listBasicAccountsForUser,
 } from '../infra/repositories/transaction-history.js'
 import { listContactsForUser } from '../infra/repositories/contacts.js'
+import { listReceiptMerchantNamesForUser } from '../infra/repositories/analytics.js'
 import { getChain, isKnownChain } from '../domain/chains.js'
 import {
   aggregateAccountTransactions,
@@ -17,13 +18,18 @@ import {
   enrichTransactionsWithAccounting,
   exceedsExportRowCap,
   filterEnrichedTransactions,
+  foldOwnAccountTransfers,
   mergeSortDedupeAndEnrich,
   paginateByOffset,
+  parseTransactionWindow,
   resolveTransactionCurrency,
   resolveTransactionFilters,
   serveTimeAmount,
   transactionsToCsv,
+  counterpartyAddressesOf,
   type ParsedTokenFilter,
+  type SmartAccountRow,
+  type TransactionSearchIndex,
 } from '../modules/transactions/index.js'
 import type { ListScope } from '../modules/transactions/index.js'
 import { CSV_BOM } from '../domain/csv.js'
@@ -57,6 +63,36 @@ function parseChainId(value: unknown): number | null {
 
 function parseFreshFlag(value: string | undefined): boolean {
   return value === '1' || value === 'true'
+}
+
+/**
+ * #4095: the name sources search matches against, resolved BEFORE filtering
+ * — the whole point of the parameter. Contacts win, then receipt merchant
+ * names (the dashboard's label order); the user's OWN account names ride the
+ * FULL account list, not the filtered scope, so a search for another of the
+ * user's accounts finds the internal transfer even when the feed is scoped
+ * to one account. The receipt read is caught, not awaited bare: an outage
+ * there must not 500 the feed — an unnamed merchant just stops matching by
+ * receipt name (the dashboard's posture, verbatim).
+ */
+async function buildSearchIndex(
+  sub: string,
+  allAccounts: SmartAccountRow[],
+  enriched: Awaited<ReturnType<typeof mergeSortDedupeAndEnrich>>,
+): Promise<TransactionSearchIndex> {
+  const [contacts, receiptNames] = await Promise.all([
+    listContactsForUser(sub),
+    listReceiptMerchantNamesForUser(sub, counterpartyAddressesOf(enriched)).catch(
+      () => new Map<string, string>(),
+    ),
+  ])
+  return {
+    contactNames: new Map(contacts.map((c) => [c.address.toLowerCase(), c.name])),
+    receiptNames,
+    accountNames: new Map(
+      allAccounts.map((account) => [accountNameKey(account.account_address, account.chain_id), account.name]),
+    ),
+  }
 }
 
 function parseTokenKey(tokenKey: string | undefined): ParsedTokenFilter | null {
@@ -99,6 +135,14 @@ export default async function transactionRoutes(
       offset?: string
       limit?: string
       fresh?: string
+      foldOwnTransfers?: string
+      direction?: TransferDirection
+      chainId?: string
+      search?: string
+      period?: string
+      from?: string
+      to?: string
+      tz?: string
     }
   }>('/', async (request, reply) => {
     const { sub } = request.user as { sub: string }
@@ -128,7 +172,32 @@ export default async function transactionRoutes(
       return reply.code(400).send({ error: 'Invalid tokenKey' })
     }
 
+    // #4095: the network dimension moves server-side (it was filtered in the
+    // browser over the loaded page only), and the Period window is parsed
+    // before ANY read so an invalid range answers cheaply.
+    const chainId = parseChainId(request.query.chainId)
+    if (chainId !== null && !isKnownChain(chainId)) {
+      return reply.code(400).send({ error: `Unsupported chain: ${chainId}` })
+    }
+
+    const windowParsed = parseTransactionWindow(
+      {
+        period: request.query.period,
+        from: request.query.from,
+        to: request.query.to,
+        tz: request.query.tz,
+      },
+      Date.now(),
+    )
+    if (!windowParsed.ok) {
+      return reply.code(400).send({ error: windowParsed.error })
+    }
+
     let accounts = await listBasicAccountsForUser(sub)
+    // Search names ride the FULL account list — an internal transfer must be
+    // findable by the far account's name even when the feed is scoped to one
+    // account (see `buildSearchIndex`).
+    const allAccounts = accounts
 
     if (accountFilterId) {
       accounts = accounts.filter((account) => account.id === accountFilterId)
@@ -165,9 +234,22 @@ export default async function transactionRoutes(
       aggregateAccountTransactions(accounts, request.log, fresh),
     ])
     const enriched = await mergeSortDedupeAndEnrich(sub, accounts, aggregate.merged, currency)
-    const filtered = filterEnrichedTransactions(enriched, {
+    const folded =
+      request.query.foldOwnTransfers === '1' && !accountFilterId
+        ? foldOwnAccountTransfers(enriched, allAccounts)
+        : enriched
+    // #4095: names resolve BEFORE filtering, server-side — search matches
+    // what the row shows, and the row's names live here now.
+    const searchTerm = request.query.search?.trim() ?? ''
+    const searchIndex = searchTerm ? await buildSearchIndex(sub, allAccounts, folded) : undefined
+    const filtered = filterEnrichedTransactions(folded, {
       agentId: request.query.agentId,
       tokenFilter,
+      direction: request.query.direction,
+      chainId: chainId ?? undefined,
+      search: searchTerm || undefined,
+      searchIndex,
+      window: windowParsed.window,
     })
     const { page: paginated, hasMore } = paginateByOffset(filtered, offset, limit)
     // #2870: the accounting badge rides the PAGE, not the whole feed — one
@@ -249,7 +331,9 @@ export default async function transactionRoutes(
    * Filter-faithful over the whole set the aggregation returned, not the page
    * the dashboard has loaded: it accepts the same `accountId` / `agentId` /
    * `tokenKey` filters as `GET /`, plus the `direction` and `chainId` the
-   * dashboard used to apply in the browser.
+   * dashboard used to apply in the browser — and since #4095 the same
+   * `search` and Period window too, resolved against the SAME name index the
+   * list searches, so the file and the on-screen rows cannot disagree.
    *
    * Two bounds, not one. `EXPORT_ROW_CAP` refuses above a ceiling, so one
    * request can never stream an unbounded result set. Underneath it the feed
@@ -266,7 +350,13 @@ export default async function transactionRoutes(
       tokenKey?: string
       direction?: TransferDirection
       chainId?: string
+      search?: string
+      period?: string
+      from?: string
+      to?: string
+      tz?: string
       fresh?: string
+      foldOwnTransfers?: string
     }
   }>('/export.csv', async (request, reply) => {
     const { sub } = request.user as { sub: string }
@@ -295,9 +385,26 @@ export default async function transactionRoutes(
       return reply.code(400).send({ error: `Unsupported chain: ${chainId}` })
     }
 
+    // #4095: the Period window parses before ANY read — an invalid range is a
+    // cheap structured 400, identical to the list endpoint's.
+    const windowParsed = parseTransactionWindow(
+      {
+        period: request.query.period,
+        from: request.query.from,
+        to: request.query.to,
+        tz: request.query.tz,
+      },
+      Date.now(),
+    )
+    if (!windowParsed.ok) {
+      return reply.code(400).send({ error: windowParsed.error })
+    }
+
     // Kept unfiltered for name resolution below: a transfer between two of
     // the user's own accounts must still name the far side when the export is
-    // scoped to one of them, exactly as the dashboard table does.
+    // scoped to one of them, exactly as the dashboard table does. #4095: the
+    // SAME maps now feed the search index as well — read once, before the
+    // filter, because search matches on the resolved names.
     const allAccounts = await listBasicAccountsForUser(sub)
     let accounts = allAccounts
 
@@ -315,6 +422,12 @@ export default async function transactionRoutes(
       }
     }
 
+    const contacts = await listContactsForUser(sub)
+    const contactNames = new Map(contacts.map((c) => [c.address.toLowerCase(), c.name]))
+    const accountNames = new Map(
+      allAccounts.map((account) => [accountNameKey(account.account_address, account.chain_id), account.name]),
+    )
+
     let filtered: Awaited<ReturnType<typeof mergeSortDedupeAndEnrich>> = []
     if (accounts.length > 0) {
       // #3127: the export reads the preference too — the file's
@@ -326,11 +439,36 @@ export default async function transactionRoutes(
         aggregateAccountTransactions(accounts, request.log, fresh),
       ])
       const enriched = await mergeSortDedupeAndEnrich(sub, accounts, aggregateResult.merged, currency)
-      filtered = filterEnrichedTransactions(enriched, {
+      const folded =
+        request.query.foldOwnTransfers === '1' && !accountFilterId
+          ? foldOwnAccountTransfers(enriched, allAccounts)
+          : enriched
+
+      // #4095: receipt merchant names resolve BEFORE the filter, so a search
+      // for a merchant's name finds its rows. Caught, not bare — an outage
+      // degrades to "no receipt names" instead of 500-ing the export.
+      const searchTerm = request.query.search?.trim() ?? ''
+      let searchIndex: TransactionSearchIndex | undefined
+      if (searchTerm) {
+        const receiptNames = await listReceiptMerchantNamesForUser(
+          sub,
+          counterpartyAddressesOf(folded),
+        ).catch(() => new Map<string, string>())
+        searchIndex = {
+          contactNames,
+          receiptNames,
+          accountNames,
+        }
+      }
+
+      filtered = filterEnrichedTransactions(folded, {
         agentId: request.query.agentId,
         tokenFilter,
         direction,
         chainId: chainId ?? undefined,
+        search: searchTerm || undefined,
+        searchIndex,
+        window: windowParsed.window,
       })
     }
 
@@ -344,35 +482,35 @@ export default async function transactionRoutes(
         details:
           `This export would contain ${filtered.length.toLocaleString('en-US')} rows; ` +
           `the limit is ${EXPORT_ROW_CAP.toLocaleString('en-US')}. Narrow the filters — ` +
-          'by account, agent, token, network or direction — and export again.',
+          'by account, agent, token, network, direction, search or period — and export again.',
       })
     }
 
     // The address book is chain-agnostic (`contacts` has no chain_id), the
     // user's own accounts are not — the same two-step resolution, in the same
-    // order, as the dashboard table.
-    const contacts = await listContactsForUser(sub)
-    const contactNames = new Map(contacts.map((c) => [c.address.toLowerCase(), c.name]))
-    const accountNames = new Map(
-      allAccounts.map((account) => [accountNameKey(account.account_address, account.chain_id), account.name]),
-    )
+    // order, as the dashboard table. (#4095: read above the filter now; the
+    // CSV projection below is unchanged.)
 
-    const csv = transactionsToCsv(filtered, {
-      resolveName: (address, addressChainId) => {
-        const contactName = contactNames.get(address.toLowerCase())
-        if (contactName) return contactName
-        return accountNames.get(accountNameKey(address, addressChainId)) ?? null
+    const csv = transactionsToCsv(
+      filtered,
+      {
+        resolveName: (address, addressChainId) => {
+          const contactName = contactNames.get(address.toLowerCase())
+          if (contactName) return contactName
+          return accountNames.get(accountNameKey(address, addressChainId)) ?? null
+        },
+        // #3127: the accounting export stays a FIXED-currency file. Deliberate,
+        // not the default everywhere: the feed was built (epic 026, #2871)
+        // around one reporting currency, the accountants' importers are keyed
+        // on it, and `amount_sek` is the stored book-time column — a
+        // preference-driven amount would re-express a filed figure instead of
+        // reporting one. The user's currency_preference (read above) names the
+        // column so the reader still sees how the file relates to what the
+        // dashboard serves them; the AMOUNT does not follow it.
+        reportingCurrency: 'SEK',
       },
-      // #3127: the accounting export stays a FIXED-currency file. Deliberate,
-      // not the default everywhere: the feed was built (epic 026, #2871)
-      // around one reporting currency, the accountants' importers are keyed
-      // on it, and `amount_sek` is the stored book-time column — a
-      // preference-driven amount would re-express a filed figure instead of
-      // reporting one. The user's currency_preference (read above) names the
-      // column so the reader still sees how the file relates to what the
-      // dashboard serves them; the AMOUNT does not follow it.
-      reportingCurrency: 'SEK',
-    })
+      request.query.foldOwnTransfers === '1' && !accountFilterId,
+    )
 
     return reply
       .header('Content-Type', 'text/csv; charset=utf-8')

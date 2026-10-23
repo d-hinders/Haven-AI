@@ -95,7 +95,19 @@
  * Every RPC failure returns "not known yet" and the tick does nothing for that
  * chain. Nothing is written, nothing is marked failed, and there is no retry
  * inside the tick — the next scheduled tick is the retry, which is what keeps a
- * dead RPC from becoming a hot loop.
+ * dead RPC from becoming a hot loop. A failed LOG SCAN also backs off every
+ * candidate it left unjudged, on a growing schedule capped at an hour (#4012),
+ * so a provider that refuses the request is not asked the same thing every two
+ * minutes for a day. An unreadable clock is chain-wide and costs one read, so
+ * it is not backed off.
+ *
+ * The batch span is the provider's, not a constant: `effectiveLogBatchBlocks`
+ * narrows the 500-block default to what the provider serves (#4012). A window
+ * that cannot fit the per-chain call budget at that span is NOT walked. Its
+ * candidates back off and a warn names the cause. On Alchemy's free plan
+ * (10 blocks) no window fits 20 calls, so this sweep scans nothing there. That
+ * is an accepted loss of passive recovery on that plan, not of the payment:
+ * the agent-reported path ({@link UNRESOLVED_REMEDY}) is unaffected.
  *
  * Each candidate is scanned over ITS OWN settlement window, which is where its
  * transaction provably is, so no candidate's coverage depends on any other's —
@@ -179,6 +191,10 @@ import {
   type ScanRange,
 } from '../../infra/chain/redeemed-delegation-scanner.js'
 import { getProvider } from '../../infra/chain/relayer-reads.js'
+import {
+  effectiveLogBatchBlocks,
+  LOG_RANGE_LIMIT_REASON,
+} from '../../infra/chain/log-range-limit.js'
 import { observeErc7710Settlement } from './settlement-observed.js'
 import { tryRecordMachinePaymentEvidenceBaseById } from '../mpp/index.js'
 import { MAX_SETTLEMENT_WINDOW_SECONDS } from './x402-delegation.js'
@@ -211,10 +227,13 @@ export const SWEEP_RECOVERY_HORIZON_SECONDS = SWEEP_WINDOW_HORIZON
 /** Candidates considered per tick, across all chains. */
 export const SWEEP_MAX_CANDIDATES_PER_TICK = 200
 
-/** Blocks per `eth_getLogs` call — under every provider's served span. */
+/**
+ * Default blocks per `eth_getLogs` call. A ceiling, not a promise: the span
+ * requested is `effectiveLogBatchBlocks(chainId, this)` (#4012).
+ */
 export const SWEEP_LOG_BATCH_BLOCKS = 500
 
-/** Hard cap on `eth_getLogs` calls per chain per tick: ≤ 10 000 blocks. */
+/** Hard cap on `eth_getLogs` calls per chain per tick: ≤ 10 000 blocks at the default span. */
 export const SWEEP_MAX_BATCHES_PER_CHAIN = 20
 
 /**
@@ -252,7 +271,17 @@ const FALLBACK_SECONDS_PER_BLOCK = 2
 const SCAN_BACKOFF_BASE_MS = SETTLEMENT_SWEEP_INTERVAL_MS
 const SCAN_BACKOFF_MAX_MS = 60 * 60 * 1000
 
-const scanBackoff = new Map<string, { attempts: number; nextAttemptAtMs: number }>()
+type Backoff = Map<string, { attempts: number; nextAttemptAtMs: number }>
+const scanBackoff: Backoff = new Map()
+
+/**
+ * The backoff for a candidate whose scan could not run (#4012): the log scan
+ * failed, or its window does not fit the call budget at the provider's span.
+ * The same schedule as the fruitless backoff, in its own map, because "could
+ * not ask" is not "found nothing" and must not compound it. A judged
+ * candidate (its window scanned) clears it.
+ */
+const unavailableBackoff: Backoff = new Map()
 
 /**
  * What an operator can actually DO about an unattributable settled payment
@@ -270,17 +299,29 @@ export const UNRESOLVED_REMEDY =
 /** Test seam: the backoff is process-lifetime state, so a suite must reset it. */
 export function resetSettlementSweepBackoff(): void {
   scanBackoff.clear()
+  unavailableBackoff.clear()
 }
 
 function isSuppressed(paymentId: string, nowMs: number): boolean {
-  const entry = scanBackoff.get(paymentId)
-  return entry !== undefined && entry.nextAttemptAtMs > nowMs
+  for (const map of [scanBackoff, unavailableBackoff]) {
+    const entry = map.get(paymentId)
+    if (entry !== undefined && entry.nextAttemptAtMs > nowMs) return true
+  }
+  return false
+}
+
+function backOff(map: Backoff, paymentId: string, nowMs: number): void {
+  const attempts = (map.get(paymentId)?.attempts ?? 0) + 1
+  const delay = Math.min(SCAN_BACKOFF_MAX_MS, SCAN_BACKOFF_BASE_MS * 2 ** (attempts - 1))
+  map.set(paymentId, { attempts, nextAttemptAtMs: nowMs + delay })
 }
 
 function recordFruitlessScan(paymentId: string, nowMs: number): void {
-  const attempts = (scanBackoff.get(paymentId)?.attempts ?? 0) + 1
-  const delay = Math.min(SCAN_BACKOFF_MAX_MS, SCAN_BACKOFF_BASE_MS * 2 ** (attempts - 1))
-  scanBackoff.set(paymentId, { attempts, nextAttemptAtMs: nowMs + delay })
+  backOff(scanBackoff, paymentId, nowMs)
+}
+
+function recordUnavailableScan(paymentId: string, nowMs: number): void {
+  backOff(unavailableBackoff, paymentId, nowMs)
 }
 
 /**
@@ -325,11 +366,17 @@ export interface SweepTickResult {
   evidenceOrphaned: number
   /** Candidates whose hash was found but which the seam or the guards refused. */
   refused: number
-  /** Chains skipped because the RPC could not be read. Never a verdict. */
+  /**
+   * Chains skipped because the RPC could not be read. Never a verdict. A failed
+   * log scan backs off the chain's unjudged candidates (#4012).
+   */
   chainsUnavailable: number
   /** Candidates past their settlement window that remain unattributable. */
   unresolved: number
-  /** Candidates skipped this tick by the fruitless-scan backoff. */
+  /**
+   * Candidates skipped this tick: held by either backoff, past the call
+   * budget, or in a window too wide for the provider's span (#4012).
+   */
   suppressed: number
 }
 
@@ -482,6 +529,7 @@ export async function runSettlementSweepTick(
   // sets rather than by process uptime.
   const liveIds = new Set([...candidates, ...orphans].map((r) => r.id))
   for (const id of scanBackoff.keys()) if (!liveIds.has(id)) scanBackoff.delete(id)
+  for (const id of unavailableBackoff.keys()) if (!liveIds.has(id)) unavailableBackoff.delete(id)
 
   for (const row of orphans) {
     if (isSuppressed(row.id, nowMs)) {
@@ -517,9 +565,10 @@ export async function runSettlementSweepTick(
     const clock = await readClock(chainId)
     if (!clock) {
       // "Could not ask" — never a verdict. Nothing is written, nothing is
-      // marked failed, and the next tick is the retry. Deliberately NOT counted
-      // as a fruitless scan: backing a candidate off for an outage that had
-      // nothing to do with it would delay the recovery this exists for.
+      // marked failed, and the next tick is the retry. Deliberately NOT backed
+      // off: the clock read is chain-wide and is the whole cost, and backing a
+      // candidate off for an outage that had nothing to do with it would delay
+      // the recovery this exists for.
       result.chainsUnavailable += 1
       log.warn({ chainId, candidates: rows.length }, 'Settlement sweep could not read the chain — nothing confirmed')
       continue
@@ -534,19 +583,31 @@ export async function runSettlementSweepTick(
     }))
     const merged = coalesceRanges(withRanges.map((c) => c.range))
 
+    // The provider's span, read once per chain per tick so the budget check
+    // and the scan agree on it (#4012).
+    const batchBlocks = effectiveLogBatchBlocks(chainId, SWEEP_LOG_BATCH_BLOCKS, nowMs)
     const index: RedemptionIndex = new Map()
     let batchesSpent = 0
     let scanFailed = false
     const covered: ScanRange[] = []
+    const tooWide: ScanRange[] = []
     for (const range of merged) {
       const span = range.toBlock - range.fromBlock + 1
-      const batches = Math.ceil(span / SWEEP_LOG_BATCH_BLOCKS)
+      const batches = Math.ceil(span / batchBlocks)
+      if (batches > SWEEP_MAX_BATCHES_PER_CHAIN) {
+        // This window cannot be scanned within the budget at this provider's
+        // span, on any tick. Walking it would be the 1,000-call tick #4012
+        // forbids, so it is skipped and its candidates back off below. Later
+        // windows may still fit, so this is `continue`, not `break`.
+        tooWide.push(range)
+        continue
+      }
       if (batchesSpent + batches > SWEEP_MAX_BATCHES_PER_CHAIN) break
       let part: RedemptionIndex | null
       try {
         part = await scan(chainId, range, {
-          batchBlocks: SWEEP_LOG_BATCH_BLOCKS,
-          maxBatches: SWEEP_MAX_BATCHES_PER_CHAIN,
+          batchBlocks,
+          maxBatches: batches,
         })
       } catch {
         part = null
@@ -579,11 +640,43 @@ export async function runSettlementSweepTick(
 
     if (scanFailed) {
       result.chainsUnavailable += 1
-      log.warn({ chainId, candidates: rows.length }, 'Settlement sweep log scan failed — nothing confirmed')
+      const narrowed = effectiveLogBatchBlocks(chainId, SWEEP_LOG_BATCH_BLOCKS, nowMs)
+      if (narrowed < batchBlocks) {
+        // The provider refused the span and named a narrower one: the next
+        // tick asks a different, fitting question, so nothing is backed off.
+        log.warn(
+          { chainId, candidates: rows.length, reason: LOG_RANGE_LIMIT_REASON, requestedBlocks: batchBlocks, limitBlocks: narrowed },
+          'Settlement sweep: the RPC provider refused the eth_getLogs block range — narrowing the span to the limit it named (set ETH_GETLOGS_MAX_BLOCK_RANGE to skip the refused call)',
+        )
+        continue
+      }
+      // Every candidate on the chain is unjudged, because the whole index is
+      // abandoned. Back each one off: never a verdict, never fruitless.
+      for (const { row } of withRanges) recordUnavailableScan(row.id, nowMs)
+      log.warn({ chainId, candidates: rows.length }, 'Settlement sweep log scan failed — nothing confirmed, candidates backed off')
       continue
     }
 
+    if (tooWide.length > 0) {
+      log.warn(
+        {
+          chainId,
+          reason: LOG_RANGE_LIMIT_REASON,
+          batchBlocks,
+          maxBatches: SWEEP_MAX_BATCHES_PER_CHAIN,
+          windows: tooWide.length,
+          remedy: UNRESOLVED_REMEDY,
+        },
+        'Settlement sweep: settlement windows exceed the eth_getLogs call budget at this provider\'s block-range limit — not scanned, candidates backed off',
+      )
+    }
+
     for (const { row, range } of withRanges) {
+      if (tooWide.some((w) => w.fromBlock <= range.fromBlock && w.toBlock >= range.toBlock)) {
+        recordUnavailableScan(row.id, nowMs)
+        result.suppressed += 1
+        continue
+      }
       // Only judge a candidate whose whole window was actually scanned. A
       // candidate the budget did not reach is untouched — not "not found" —
       // because those are the same observation and only one of them is true.
@@ -592,6 +685,7 @@ export async function runSettlementSweepTick(
         result.suppressed += 1
         continue
       }
+      unavailableBackoff.delete(row.id)
       try {
         await sweepOne(row, index, { observe, recordEvidence }, log, result, nowMs)
       } catch (err) {

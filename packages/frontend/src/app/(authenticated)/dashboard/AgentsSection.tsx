@@ -13,8 +13,8 @@
  *
  * Each row's meter is `BudgetMeter` captioned through `lib/budget-caption.ts`
  * (#3806): the primary of the agent's budgets — the one closest to running
- * out, per `selectPrimaryBudgets` — in the user's currency via #3803's
- * `spotRates`, plus a "+N budgets" count OUTSIDE the meter's ARIA name. A
+ * out, per `selectPrimaryBudgets` — in the budget's own token ("1.20 of 3.00
+ * USDC", #4165), plus a "+N budgets" count OUTSIDE the meter's ARIA name. A
  * budget with no known read renders an em dash, never a 0% bar; an agent
  * whose only authority is an open received sub-budget reads "Spends from
  * <parent>'s budget", never "No budget" (#3803). A paused agent keeps its
@@ -33,39 +33,20 @@
  * depend on query timing. At most six rows render, then a
  * "View all N agents" link (N from #3803's `agentCount`). Zero agents keeps
  * the old empty state with "Connect agent".
+ *
+ * #4096: `AgentRow` / `AgentBudget` / `agentBadge` live in
+ * `components/haven/AgentRow.tsx` now — the account page's Agents tab draws
+ * the same rows from the same overview, and a private copy here would drift
+ * from it. This section keeps the grouping and ordering logic.
  */
 
 import Link from 'next/link'
-import { Fragment, useMemo, useRef } from 'react'
-import { Bot, ChevronRight } from 'lucide-react'
-import { Icon } from '@/components/ui/Icon'
+import { useMemo, useRef } from 'react'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { EmptyState } from '@/components/ui/EmptyState'
-import { StatusBadge, type StatusTone } from '@/components/ui/StatusBadge'
-import { BudgetMeter } from '@/components/haven'
+import { AgentRow, agentBadge, CURRENCY_KEY, type DashboardAgent, type DashboardCurrency } from '@/components/haven'
 import type { AttentionRuleItem, DashboardBudgetRemaining, DashboardOverview } from '@/lib/dashboard-attention'
-import { agentUsedPercent, hasPositiveCap } from '@/lib/dashboard-attention'
-import {
-  budgetCaption,
-  selectPrimaryBudgets,
-  type BudgetCaptionRow,
-  type BudgetRate,
-} from '@/lib/budget-caption'
-import { counterpartyLabel, type CounterpartyFields } from '@/lib/transaction-presentation'
-import { timeAgo } from '@/lib/format'
-import { AGENT_PAUSED_SHORT } from '@/lib/agent-pause-copy'
-
-type DashboardAgent = DashboardOverview['agents'][number]
-
-/** The user's display currency, as the #3803 spend keys are spelled. */
-export type DashboardCurrency = 'USD' | 'EUR' | 'SEK'
-
-const CURRENCY_KEY: Record<DashboardCurrency, 'usd' | 'eur' | 'sek'> = {
-  USD: 'usd',
-  EUR: 'eur',
-  SEK: 'sek',
-}
 
 /** At most six rows, then the "View all N agents" link (owner-approved cap). */
 const MAX_ROWS = 6
@@ -120,160 +101,6 @@ export function applyStableGroupOrder(
       rest: anchor.filter((id) => !isAttentionById(id)),
     },
   }
-}
-
-// ── The badge ───────────────────────────────────────────────────────────────
-
-/**
- * The row's badge — only when something is off, and the same three states the
- * section docblock names. The ≥90% badge reads the shared `agentUsedPercent`,
- * the exact function rule 3's arm fires on, so this badge and the "Needs attention"
- * item cannot disagree.
- */
-export function agentBadge(
-  agent: DashboardAgent,
-  attentionItems: AttentionRuleItem[],
-  budgetRemaining: DashboardBudgetRemaining | null,
-): { label: string; tone: StatusTone } | null {
-  if (attentionItems.some((item) => item.kind === 'needs-setup' && item.agentId === agent.id)) {
-    return { label: 'Needs setup', tone: 'brand' }
-  }
-  if (agent.status === 'paused') {
-    return { label: 'Paused', tone: 'warning' }
-  }
-  const pct = agentUsedPercent(agent.id, budgetRemaining)
-  if (pct !== null && pct >= 90) {
-    const rounded = Math.round(Math.min(100, Math.max(0, pct)))
-    return { label: `${rounded}% used`, tone: 'neutral' }
-  }
-  return null
-}
-
-// ── The budget meter ────────────────────────────────────────────────────────
-
-function budgetRemainingEntry(
-  agentId: string,
-  budget: DashboardAgent['budgets'][number],
-  budgetRemaining: DashboardBudgetRemaining | null,
-) {
-  return budgetRemaining?.budgets.find(
-    (entry) =>
-      entry.agent_id === agentId &&
-      entry.chain_id === budget.chainId &&
-      entry.delegation_hash === budget.delegationHash &&
-      entry.token_address.toLowerCase() === budget.tokenAddress.toLowerCase(),
-  )
-}
-
-function toCaptionRow(
-  agentId: string,
-  budget: DashboardAgent['budgets'][number],
-  budgetRemaining: DashboardBudgetRemaining | null,
-): BudgetCaptionRow {
-  const entry = budgetRemainingEntry(agentId, budget, budgetRemaining)
-  return {
-    token: budget.tokenAddress,
-    recipient: null,
-    startSec: Math.floor(new Date(budget.startDate).getTime() / 1000),
-    periodSeconds: budget.periodSeconds,
-    expiresSec: Math.floor(new Date(budget.expiresAt).getTime() / 1000),
-    budgetAtomic: budget.budgetAtomic,
-    // No matching read = no figure exists (never 0); `remaining_from_chain`
-    // false = a failed read. Both render as unknown — see `budgetCaption`.
-    usedAtomic: entry?.used_atomic ?? null,
-    readFromChain: entry?.remaining_from_chain ?? false,
-    periodEndMs: entry ? new Date(entry.period_end).getTime() : new Date(budget.periodEnd).getTime(),
-    createdMs: null,
-    symbol: budget.tokenSymbol,
-    chainId: budget.chainId,
-  }
-}
-
-function receivedSubBudgetLine(agent: DashboardAgent): string | null {
-  const open = (agent.receivedSubBudgets ?? []).filter((sub) => sub.open)
-  if (open.length === 0) return null
-  // Distinct parents; one reads "<parent>'s budget", several "<a> and <b>'s
-  // budgets". The parent's own name carries the possessive's voice.
-  const parents = [...new Set(open.map((sub) => sub.parentAgentName))]
-  const subject = parents.join(' and ')
-  return `Spends from ${subject}${parents.length > 1 ? "'s budgets" : "'s budget"}`
-}
-
-/**
- * The row's budget block: the meter captioned through #3806, or the em dash
- * when no read is known, or the received-sub-budget / no-budget line.
- */
-function AgentBudget({
-  agent,
-  budgetRemaining,
-  spotRates,
-  currency,
-  nowMs,
-}: {
-  agent: DashboardAgent
-  budgetRemaining: DashboardBudgetRemaining | null
-  spotRates: DashboardOverview['spotRates'] | undefined
-  currency: DashboardCurrency
-  nowMs: number
-}) {
-  // A zero cap is no authority (#3802's rule): it reads "No budget", never a
-  // meter captioned "≈$0.00 of $0.00 used" (#3897 item 8 — the exact string
-  // reported on dev, and what a zero-cap row renders through the caption).
-  const rows = agent.budgets
-    .filter((budget) => hasPositiveCap(budget.budgetAtomic))
-    .map((budget) => toCaptionRow(agent.id, budget, budgetRemaining))
-  const selected = selectPrimaryBudgets(rows, nowMs)
-
-  if (!selected) {
-    // The overview's budgets array carries only live budgets (#3802/#3803), so
-    // this is the no-authority state — except that an open RECEIVED
-    // sub-budget is real authority and must never read "No budget" (#3803).
-    const subBudgetLine = receivedSubBudgetLine(agent)
-    return <p className="mt-1 text-xs text-[var(--v2-ink-3)]">{subBudgetLine ?? 'No budget'}</p>
-  }
-
-  const perToken = spotRates?.[selected.primary.symbol]
-  const rate: BudgetRate | null =
-    typeof perToken === 'number' && perToken > 0 ? { currency, perToken } : null
-  // #3908: the compact row wording, as the mockup draws it — the period word
-  // in place of "used this period"; every other surface keeps the full one.
-  const caption = budgetCaption(selected.primary, { nowMs, rate, style: 'row' })
-
-  if (caption.kind !== 'meter') {
-    // Unknown remaining, a failed read, a read past its period — an em dash,
-    // never a 0% bar and never the full budget stated as fact.
-    return <p className="mt-1 text-sm text-[var(--v2-ink-3)]">—</p>
-  }
-
-  // The extra-budget count rides in the caption line (#3908, the mockup's
-  // place for it) — a sibling of the bar, never inside its ARIA name.
-  const extra =
-    selected.extraCount > 0
-      ? ` · +${selected.extraCount} ${selected.extraCount === 1 ? 'budget' : 'budgets'}`
-      : ''
-  // Each "·" segment after the amounts stays whole (#3908 design review): a
-  // narrow row may wrap the caption, but only at a separator — never between
-  // "refills in" and "22h", which would strand a time apart from its verb.
-  // The amounts segment may wrap at its own spaces ("… of …"): it is the
-  // widest, and a large SEK budget kept whole would overflow a 390px row.
-  // Each figure is still unbroken — the currency formats separate digits
-  // and symbol with no-break spaces, and token mode joins the cap and its
-  // symbol with one too (#3910).
-  const segments = `${caption.caption}${extra}`.split(' · ')
-  return (
-    <div className="mt-1.5">
-      <BudgetMeter
-        usedPercent={caption.usedPercent}
-        label={caption.label}
-        caption={segments.map((segment, index) => (
-          <Fragment key={index}>
-            {index > 0 ? ' · ' : null}
-            <span className={index === 0 ? undefined : 'whitespace-nowrap'}>{segment}</span>
-          </Fragment>
-        ))}
-      />
-    </div>
-  )
 }
 
 // ── The section ─────────────────────────────────────────────────────────────
@@ -432,8 +259,6 @@ export function AgentsSection({
               agent={agent}
               budgetRemaining={budgetRemaining}
               attentionItems={attentionItems}
-              spotRates={overview?.spotRates}
-              currency={currency}
               accountNames={accountNames}
               accountCount={totalAccounts(overview)}
               nowMs={effectiveNowMs}
@@ -456,143 +281,6 @@ export function AgentsSection({
 /** #3803: the account name shows only when the user has more than one account. */
 function totalAccounts(overview: DashboardOverview | null): number {
   return overview?.accounts?.length ?? 0
-}
-
-function AgentRow({
-  agent,
-  budgetRemaining,
-  attentionItems,
-  spotRates,
-  currency,
-  accountNames,
-  accountCount,
-  nowMs,
-}: {
-  agent: DashboardAgent
-  budgetRemaining: DashboardBudgetRemaining | null
-  attentionItems: AttentionRuleItem[]
-  spotRates: DashboardOverview['spotRates'] | undefined
-  currency: DashboardCurrency
-  accountNames: Record<string, string>
-  accountCount: number
-  nowMs: number
-}) {
-  const badge = agentBadge(agent, attentionItems, budgetRemaining)
-  const accountName =
-    (agent.accountId ? accountNames[agent.accountId] : undefined) ?? agent.accountName
-
-  // #3810's naming: the counterparty through `counterpartyLabel`'s no-address
-  // mode — a raw address can never surface. The backend resolved the name
-  // (`merchantName`); there is no chain-scoped map client-side, so it rides
-  // in as `resolvedName`, the same shim the activity rows use.
-  const lastCounterparty = agent.stats?.lastCounterparty
-  // `lastCounterparty` carries no activityType/agentName (it is a payment's
-  // counterparty, not a row) — the fields the label can read are mapped, the
-  // rest undefined, so the shim stays honest (same as the activity rows).
-  const counterparty: CounterpartyFields | null = lastCounterparty
-    ? {
-        activityType: undefined,
-        agentName: undefined,
-        source: lastCounterparty.source ?? undefined,
-        x402ResourceUrl: lastCounterparty.x402ResourceUrl ?? undefined,
-        direction: 'out',
-        to: lastCounterparty.to ?? '',
-        from: lastCounterparty.to ?? '',
-        chainId: agent.accountChainId ?? 0,
-      }
-    : null
-  const counterpartyLabelValue = counterparty
-    ? counterpartyLabel(counterparty, undefined, undefined, {
-        noAddress: true,
-        resolvedName: lastCounterparty?.merchantName,
-      })
-    : null
-
-  const hasLastPaymentColumn = agent.status !== 'pending_approval' && Boolean(agent.stats)
-
-  return (
-    // #3910: one grid, two flows. Below `sm` the last-payment time sits on the
-    // name line and the body (bar, caption, paused line) spans the row's full
-    // width — a 390px paused row ran ~9 lines squeezed beside the column.
-    // From `sm` the column sits beside the body (the name line spans the row)
-    // at ONE fixed width, 10rem, in every row (#3912): each row is its own
-    // grid, so a content-sized column (`fit-content(40%)`, #3910) gave every
-    // bar a different length depending on its merchant. The merchant truncates
-    // and carries its full name as a tooltip. Below `sm` the time-only column
-    // stays content-sized. The column renders once.
-    <Link
-      href={`/agents/${agent.id}`}
-      className={`grid grid-cols-[2rem_minmax(0,1fr)_fit-content(40%)_1rem] items-center sm:grid-cols-[2rem_minmax(0,1fr)_10rem_1rem] gap-x-3 px-5 py-3.5 transition-colors hover:bg-[var(--v2-surface-hover)] ${
-        hasLastPaymentColumn
-          ? // From `sm` the name line spans the row and the time column sits
-            // beside the body only: with a fixed 10rem column, a name sharing
-            // the 1fr track pushed a "92% used" badge under the name (#3912).
-            "[grid-template-areas:'icon_name_time_chev'_'icon_body_body_chev'] sm:[grid-template-areas:'icon_name_name_chev'_'icon_body_time_chev']"
-          : // No time cell (a setup row, or no stats): below `sm` the name and
-            // body span the empty column and its gap, or the badge wraps at 390
-            // (#3910 review). From `sm` the column is a fixed 10rem, so the
-            // body stays out of it — or this row's bar would run 172px longer
-            // than everyone else's (#3912). The name may still span it.
-            "[grid-template-areas:'icon_name_name_chev'_'icon_body_body_chev'] sm:[grid-template-areas:'icon_name_name_chev'_'icon_body_._chev']"
-      }`}
-    >
-      {/* Robot mark matches the sidebar's "agents" icon so the dashboard and
-          nav read as the same system (carried from the old section). */}
-      <span aria-hidden="true" className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-[var(--v2-brand-soft)] text-[var(--v2-brand)] [grid-area:icon]">
-        <Icon icon={Bot} className="h-4 w-4" />
-      </span>
-      {/* flex-wrap (#3908): on a narrow row the badge drops under the name
-          rather than squeezing the name to a few letters. */}
-      <p className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-sm font-medium text-[var(--v2-ink)] [grid-area:name]">
-        <span className="max-w-full truncate">{agent.name}</span>
-        {badge && <StatusBadge tone={badge.tone}>{badge.label}</StatusBadge>}
-      </p>
-      <div className="min-w-0 [grid-area:body]">
-        {accountCount > 1 && accountName && (
-          <p className="mt-0.5 truncate text-xs text-[var(--v2-ink-3)]">{`From ${accountName}`}</p>
-        )}
-        <AgentBudget
-          agent={agent}
-          budgetRemaining={budgetRemaining}
-          spotRates={spotRates}
-          currency={currency}
-          nowMs={nowMs}
-        />
-        {agent.status === 'paused' && (
-          // The owner-approved pause wording, short form — the same module the
-          // agent page's banner reads, so the two cannot drift.
-          <p className="mt-1 text-xs text-[var(--v2-ink-3)]">{AGENT_PAUSED_SHORT}</p>
-        )}
-      </div>
-      {/* #3908: the last payment in a right-hand column, as the mockup draws
-          it — the time on top, the merchant (never a raw address) under it.
-          The merchant shows from `sm` only (#3910): at 390 it truncated to a
-          few characters, and it stays on the agent page. A setup row has
-          nothing to say here yet. */}
-      {hasLastPaymentColumn && agent.stats ? (
-        <div data-testid="agent-row-last-payment" className="min-w-0 self-start text-right [grid-area:time] sm:self-center">
-          {agent.stats.lastPaymentAt ? (
-            <>
-              <p className="text-sm font-medium text-[var(--v2-ink)] whitespace-nowrap">
-                {/* The column drops the visible "Last payment" words; a screen
-                    reader still hears what the time is. */}
-                <span className="sr-only">Last payment </span>
-                {timeAgo(agent.stats.lastPaymentAt)}
-              </p>
-              {counterpartyLabelValue ? (
-                <p className="mt-0.5 hidden truncate text-xs text-[var(--v2-ink-3)] sm:block" title={counterpartyLabelValue}>
-                  {counterpartyLabelValue}
-                </p>
-              ) : null}
-            </>
-          ) : (
-            <p className="text-sm font-medium text-[var(--v2-ink)] whitespace-nowrap">No payments yet</p>
-          )}
-        </div>
-      ) : null}
-      <Icon icon={ChevronRight} className="h-4 w-4 flex-shrink-0 text-[var(--v2-ink-3)] [grid-area:chev]" />
-    </Link>
-  )
 }
 
 export default AgentsSection

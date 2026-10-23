@@ -37,6 +37,13 @@ export async function signTyped(
   return wallet.signTypedData(td.domain as never, types as never, td.message as never)
 }
 
+/** A grant the backend refused, with what it answered (#3933). */
+export interface GrantRefusal {
+  error: string
+  status?: number
+  errorCode?: string
+}
+
 export interface ThrowawayIdentity {
   owner: ethers.HDNodeWallet
   delegate: ethers.HDNodeWallet
@@ -60,8 +67,13 @@ export interface ThrowawayIdentity {
    * cannot leak it (#3505/#3459).
    */
   createAdditionalAgent(label: string): Promise<ThrowawayAdditionalAgent | { error: string }>
-  /** Build + owner-sign + activate a replacement grant in the same slot. */
-  grantAndActivate(): Promise<{ hash: string } | { error: string }>
+  /**
+   * Build + owner-sign + activate a grant in the same slot. Since #3933 a
+   * grant into a slot that holds a live budget must name it as `replaces`
+   * (the edit flow) or both build and activate refuse it; a refusal carries
+   * the HTTP status and the backend's `error_code`.
+   */
+  grantAndActivate(opts?: { replaces?: string }): Promise<{ hash: string } | GrantRefusal>
   /**
    * `POST /agents/:id/revoke` as the throwaway user (#3459). Never throws;
    * resolves to a warning naming the agent id when the revoke did not land.
@@ -220,28 +232,40 @@ export async function provisionThrowawayIdentity(
     }
   }
 
-  async function grantAndActivate(): Promise<{ hash: string } | { error: string }> {
+  async function grantAndActivate(opts: { replaces?: string } = {}): Promise<{ hash: string } | GrantRefusal> {
+    const replaces = opts.replaces ? { replaces: opts.replaces } : {}
     const built = await userCall<{
       delegation_hash?: string
       signing_payload?: TypedData
       delegate_account_address?: string
       error?: string
+      error_code?: string
     }>(
       'POST', `/agents/${agentId}/delegations/build`, token!,
-      { token_address: SEPOLIA_USDC, budget_atomic: options.budgetAtomic, period_seconds: 86_400 },
+      { token_address: SEPOLIA_USDC, budget_atomic: options.budgetAtomic, period_seconds: 86_400, ...replaces },
     )
     if (!built.json.delegation_hash || !built.json.signing_payload) {
-      return { error: `grant build failed (${built.status}): ${built.json.error ?? ''}` }
+      return {
+        error: `grant build failed (${built.status}): ${built.json.error ?? ''}`,
+        status: built.status,
+        ...(built.json.error_code ? { errorCode: built.json.error_code } : {}),
+      }
     }
     grantDelegation = built.json.signing_payload.message
     if (built.json.delegate_account_address) {
       delegateAccountAddress = built.json.delegate_account_address
     }
     const signature = await signTyped(owner, built.json.signing_payload)
-    const act = await userCall<{ error?: string }>(
-      'POST', `/agents/${agentId}/delegations/${built.json.delegation_hash}/activate`, token!, { signature },
+    const act = await userCall<{ error?: string; error_code?: string }>(
+      'POST', `/agents/${agentId}/delegations/${built.json.delegation_hash}/activate`, token!, { signature, ...replaces },
     )
-    if (act.status !== 200) return { error: `activate failed (${act.status}): ${act.json.error ?? ''}` }
+    if (act.status !== 200) {
+      return {
+        error: `activate failed (${act.status}): ${act.json.error ?? ''}`,
+        status: act.status,
+        ...(act.json.error_code ? { errorCode: act.json.error_code } : {}),
+      }
+    }
     return { hash: built.json.delegation_hash }
   }
 

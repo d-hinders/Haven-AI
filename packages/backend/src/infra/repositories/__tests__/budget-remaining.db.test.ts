@@ -65,14 +65,15 @@ async function seedBudgetDelegation(seed: {
   periodSeconds?: number
   startDate?: number
   expiresAt?: number
+  recipientAddress?: string
 }): Promise<{ id: string; delegation_hash: string }> {
   const delegationHash =
     seed.delegationHash ?? `0x${randomUUID().replaceAll('-', '')}${randomUUID().replaceAll('-', '').slice(0, 2)}`
   const result = await db.query<{ id: string; delegation_hash: string }>(
     `INSERT INTO agent_delegations
        (agent_id, chain_id, token_address, delegation_hash, delegation_json, version,
-        status, budget_atomic, period_seconds, start_date, expires_at)
-     VALUES ($1, 84532, $2, $3, $4, 1, $5, $6, $7, $8, $9)
+        status, budget_atomic, period_seconds, start_date, expires_at, recipient_address)
+     VALUES ($1, 84532, $2, $3, $4, 1, $5, $6, $7, $8, $9, $10)
      RETURNING id, delegation_hash`,
     [
       seed.agentId,
@@ -84,6 +85,7 @@ async function seedBudgetDelegation(seed: {
       seed.periodSeconds ?? 86400,
       seed.startDate ?? Math.floor(Date.now() / 1000) - 60,
       seed.expiresAt ?? Math.floor(Date.now() / 1000) + 30 * 86400,
+      seed.recipientAddress ?? null,
     ],
   )
   return result.rows[0]
@@ -195,6 +197,23 @@ describeDb('budget-remaining repository (#3804)', () => {
     })
     const rows = await listDashboardBudgetDelegations(a.userId)
     expect(rows).toHaveLength(1)
+  })
+
+  // #4004: the display helper tells a locked budget from the open one off the
+  // wire, so the pin and the window-open instant must ride the row.
+  it('carries the recipient pin and the start_date the helper needs (#4004)', async () => {
+    const a = await seedAgent('a')
+    const pinned = `0x${'ab'.repeat(20)}`
+    const open = await seedBudgetDelegation({ agentId: a.agentId })
+    const locked = await seedBudgetDelegation({ agentId: a.agentId, recipientAddress: pinned })
+
+    const rows = await listDashboardBudgetDelegations(a.userId)
+    expect(rows).toHaveLength(2)
+    const byHash = new Map(rows.map((r) => [r.delegation_hash, r]))
+    expect(byHash.get(open.delegation_hash)!.recipient_address).toBeNull()
+    expect(byHash.get(locked.delegation_hash)!.recipient_address).toBe(pinned)
+    // start_date arrives as a unix-second string the route ISO's.
+    expect(Number(byHash.get(locked.delegation_hash)!.start_date)).toBeGreaterThan(0)
   })
 
   // ── Sub-budget attribution ─────────────────────────────────────────────────

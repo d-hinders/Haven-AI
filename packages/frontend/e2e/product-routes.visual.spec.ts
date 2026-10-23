@@ -31,12 +31,12 @@
  *   /agents           549  1 (chain RPC)   none            rejected
  *   /transactions     320  0               "3mo ago"       ADDED, clock frozen
  *   /contacts         179  0               none            deferred
- *   /accounts         104  0               "Added 4mo ago" rejected
+ *   /accounts         104  0               "Last payment 4mo ago"  ADDED, clock frozen
  *
  * `/dashboard` is the post-login landing screen and the densest composition of
  * shared primitives in the product; `/transactions` is the money-history screen
- * and the `Table` primitive's only product consumer at scale. Neither had a
- * pixel of coverage.
+ * and was then the `Table` primitive's only product consumer at scale (it
+ * renders the shared ledger since #4266). Neither had a pixel of coverage.
  *
  * **`/agents` and `/agents/agent-research` are covered from #2733**, plus the
  * URL-seeded filtered list `agents-list-filtered` (#3165); all three ship
@@ -59,7 +59,10 @@
  * nothing else measured, desktop adds a second re-bless tax on the repo's
  * hottest screen without a defect pointing at it, and the overflow class a
  * desktop baseline would catch is guarded by boolean measurement in
- * `agent-detail.mobile.spec.ts` (#1858's standing argument).
+ * `agent-detail.mobile.spec.ts` (#1858's standing argument). #4260 adds the
+ * desktop axis for `agent-detail-research` only: the Spending hero's two
+ * halves sit side by side only at `lg`, a composition the mobile stack never
+ * shows. `agents-list` and `agents-list-filtered` stay mobile-only.
  *
  * **`/accounts` was rejected on fixture fidelity (#2225) — superseded 2026-09-10
  * by #2817, which adds this route MOBILE-only.** The rejection was written
@@ -73,17 +76,27 @@
  * and the warning STANDS for any harness serving more than one account; it is
  * unobservable in THIS gate because `mockHavenApi` seeds exactly ONE Safe
  * (`testSafe`), so no two accounts here can render identical-looking balances.
- * Re-derive this paragraph before a second fixture account is seeded or an
- * address-keyed fixture fix lands in either file. #2817's capture also keeps
+ * RE-DERIVED under #4021: the `accounts-multi` capture seeds a second fixture
+ * account through `serveTwoAccounts`, which answers `/portfolio/` for THAT
+ * account's ADDRESS with its own envelope — distinct balances, row count and
+ * last-payment footer — so the two cards cannot photograph alike, which is
+ * the re-derivation this paragraph asked for. The prefix-keyed handlers on
+ * `dev` are unchanged; the overlay is scoped to the one address it owns.
+ * #2817's capture also keeps
  * clear of the `/agents` flake class: `/accounts` makes no on-chain call —
  * its portfolio and balances come from the shared fixture.
  *
  * `/settings` and `/contacts` are deferred rather than rejected — nothing is
  * wrong with them, they are simply lower-traffic, and every added baseline is
- * re-blessed forever. `/settings` is the cheapest next candidate: it measured
- * as the most render-complete and most deterministic authenticated route in the
- * repo (1,407 chars at the time of that measurement — see the note in the
- * table — zero console errors, no chain call, no wall-clock text).
+ * re-blessed forever. `/contacts` leaves the deferred list with #4115 (list
+ * controls 6/7): the page's controls changed what the screen shows, which is
+ * exactly the trigger a baseline exists for, and it measured deterministically
+ * in this harness (no chain call, no wall-clock text). It ships MOBILE-only
+ * for the same reasons as `/agents` and `/accounts` below. `/settings` is the
+ * cheapest next candidate: it measured as the most render-complete and most
+ * deterministic authenticated route in the repo (1,407 chars at the time of
+ * that measurement — see the note in the table — zero console errors, no
+ * chain call, no wall-clock text).
  *
  * ── Everything NOT listed above still has NO baseline ────────────────────────
  *
@@ -145,9 +158,12 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
 import { VISUAL_SKIP_REASON, VISUAL_SPECS_ENABLED } from './support/visual-mode'
 import {
+  dashboardTransaction,
   mockHavenApi,
   seedAuthenticatedSession,
   serveAgentDetailResponses,
+  serveTwoAccounts,
+  x402UnrecordedSettlementTransaction,
 } from './fixtures/haven-api'
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — plain .mjs; the SINGLE source of evidence viewports, shared with
@@ -179,7 +195,8 @@ const VIEWPORTS = SHARED_VIEWPORTS as ReadonlyArray<{
  *
  * #2733 inverts that choice for the two routes it adds: the mobile
  * composition is the thing that issue tunes and the thing nothing else
- * measured, so those two ship MOBILE-only (see the header note above).
+ * measured, so those two ship MOBILE-only (see the header note above;
+ * #4260 later added desktop for the detail route).
  *
  * #2817 (2026-09-10) extends it once more: `/dashboard`, `/transactions` and
  * `/accounts` also carry MOBILE now — the bottom tab bar (#2805) makes the
@@ -286,17 +303,18 @@ const ANCHOR_TIMEOUT_MS = 60_000
  * as a render/compile problem before suspecting the fixture.
  *
  * Per route rather than one global floor, because the floor has to sit under
- * the route's real content and `/transactions` legitimately renders 320
- * characters while `/settings` renders an order of magnitude more (1,407 when
+ * the route's real content and `/transactions` rendered 320 characters on the
+ * retired table (338 on the ledger, #4266) while `/settings` renders an order of magnitude more (1,407 when
  * measured; see the table note).
  *
  * Per AXIS as well, not just per route (#2817): a responsive layout carries
- * less text at 390 than at 1280 — `/transactions` measures 246 characters at
- * the mobile width against 320 at desktop, on this harness — so a floor set
+ * less text at 390 than at 1280 — `/transactions` measured 246 characters on the retired table at
+ * the mobile width against 320 at desktop (the ledger: 299 against 338,
+ * #4266), on this harness — so a floor set
  * from the desktop measurement fails every mobile run of the same route.
  * `minCharsMobile` overrides `minChars` on the mobile axis only, and is set
- * FROM MEASUREMENT like the desktop numbers: `/transactions` mobile gets 200
- * (measured 246), `/accounts` mobile gets 100 (measured 104 — matching the
+ * FROM MEASUREMENT like the desktop numbers: `/transactions` mobile gets 240
+ * (measured 299 on the ledger; 246 on the retired table), `/accounts` mobile gets 100 (measured 104 — matching the
  * header's historic 104-character measurement of this route). A floor above
  * the measured content is not strictness; it is a permanent red.
  */
@@ -317,8 +335,9 @@ type ProductRoute = {
    * mobile baseline to a route that already ships desktop — flipping it would
    * silently DROP the desktop PNG. The loop below emits one test per listed
    * axis and the snapshot stays `${slug}-${axis}.png`, so no existing PNG
-   * moves. `/dashboard` and `/transactions` carry both axes; `/accounts`
-   * ships mobile-only (see the header for both decisions).
+   * moves. `/dashboard`, `/transactions` and `/agents/agent-research`
+   * (#4260) carry both axes; `/accounts` ships mobile-only (see the header
+   * for these decisions).
    */
   viewports?: ReadonlyArray<'desktop' | 'mobile'>
   /** The route's own H1 — present only once the client component has data. */
@@ -330,19 +349,19 @@ type ProductRoute = {
    */
   frozenRelativeTime?: string
   /**
-   * Set when the mobile layout hides every element that renders the fixture's
-   * relative timestamp (#2817, measured): the pin is then asserted on the
-   * desktop axis only. `page.clock.setFixedTime` stays global either way — a
-   * hidden timestamp cannot drift a pixel, and a freeze failure would have
-   * nothing visible to fail on at that width.
-   */
-  frozenRelativeTimeHiddenOnMobile?: boolean
-  /**
    * Register `serveAgentDetailResponses` for this route — the detail-page
    * reads (`passport`, `delegate-balance`, per-agent activity/stats) that the
    * shared fixture falls through on. The agent id is `agent-research`.
    */
   serveDetailResponses?: boolean
+  /**
+   * Route-specific fixture overlay, run after `mockHavenApi` (later-registered
+   * routes win) and before `seedAuthenticatedSession` — for a capture whose
+   * served state differs from the shared fixture's (#4021: the
+   * two-or-more-account grid, priced distinctly per #2225). Keep overlays
+   * scoped to their own reads; everything else must fall through.
+   */
+  serve?: (page: Page) => Promise<void>
 }
 
 const ROUTES: ProductRoute[] = [
@@ -379,24 +398,25 @@ const ROUTES: ProductRoute[] = [
     path: '/transactions',
     slug: 'transactions',
     viewports: ['desktop', 'mobile'],
-    minChars: 250,
-    /** Measured at 390: the responsive layout renders 246 characters. */
-    minCharsMobile: 200,
+    minChars: 260,
+    /**
+     * Measured at 390 on the ledger (#4266): 299 characters (338 at 1280),
+     * `innerText` of `#main-content` on the structure-only harness. Floors
+     * sit below the measurement, as before the table was retired (250/200
+     * against 320/246).
+     */
+    minCharsMobile: 240,
     anchor: (page: Page) => page.getByRole('heading', { name: 'Transaction history' }),
     /**
      * `dashboardTransaction.timestamp` is 1779000000 (2026-05-17T06:40Z), which
      * is 3 months and change before `FROZEN_NOW` — `timeAgo`'s `${months}mo ago`
      * bucket. Pinned as a literal so a clock that stops being frozen fails HERE,
      * by name, rather than as a pixel diff on a date nobody can attribute.
+     * Asserted on BOTH axes since #4266: the ledger row prints the time under
+     * the amount at every width, where the table's mobile layout hid its date
+     * column (the old `frozenRelativeTimeHiddenOnMobile` exemption, #2817).
      */
     frozenRelativeTime: '3mo ago',
-    /**
-     * #2817, measured: below the table's 718px container stage the date
-     * column is collapsed and NO riding element carries the timestamp (the
-     * mobile page renders no `ago` string at all — read off this spec's own
-     * failure snapshot), so the pin is asserted on the desktop axis only.
-     */
-    frozenRelativeTimeHiddenOnMobile: true,
   },
 
   /**
@@ -404,17 +424,19 @@ const ROUTES: ProductRoute[] = [
    * detail page — the screen the demo lingers on and the composition this
    * issue tunes. See the header for why these two ship mobile-only.
    *
-   * `/agents` needs no `frozenRelativeTime` by measurement: the e2e fixture
-   * agent carries no `mcp_last_seen_at`, so `formatAgentLastActivity` renders
-   * the STATIC string "No activity yet" — there is no relative timestamp to
-   * pin, and the freeze stays on as cheap insurance for anything else on the
-   * shell that might read the clock.
+   * `/agents` reads the clock since #4209: the card's footer is "Last paid
+   * <time ago>" off the dashboard overview's `stats.lastPaymentAt`, and its
+   * budget caption says when the period refills. Both render against the
+   * frozen clock here, which is what makes the baseline stable; the fixture's
+   * payment sits AFTER `FROZEN_NOW`, so `timeAgo` reads its "just now" floor
+   * rather than a value that ages.
    *
    * `/agents/agent-research` renders its pins inside the fixture-seeded
    * content: `Created` is `timeAgo` off the agent's fixed `created_at`
-   * (4mo at `FROZEN_NOW`, from the 2026-05-02 fixture timestamp) and
-   * `Last activity` is the passport/activity rows' own static content —
-   * `4mo ago` is the frozen-clock literal this route's determinism hangs on.
+   * (4mo at `FROZEN_NOW`, from the 2026-05-02 fixture timestamp) — `4mo ago`
+   * is the frozen-clock literal this route's determinism hangs on. The header's
+   * `Last activity` reads the agent's `mcp_last_seen_at` (1h at `FROZEN_NOW`,
+   * #4283), and the hero's Last paid and the Activity row both read 1d.
    */
   {
     path: '/agents',
@@ -425,18 +447,22 @@ const ROUTES: ProductRoute[] = [
   },
   {
     // #3165: the list toolbar with a search term and a status facet applied,
-    // read from the URL — the shareable-view contract in one frame.
+    // read from the URL — the shareable-view contract in one frame. On
+    // ListToolbar since #4113: its count is the pattern's, on the list
+    // summary line since #4196.
     path: '/agents?q=research&status=active',
     slug: 'agents-list-filtered',
     minChars: 200,
     viewports: ['mobile'],
-    anchor: (page: Page) => page.getByTestId('agent-list-count'),
+    anchor: (page: Page) => page.getByTestId('list-summary').getByTestId('list-toolbar-count'),
   },
   {
     path: '/agents/agent-research',
     slug: 'agent-detail-research',
     minChars: 700,
-    viewports: ['mobile'],
+    // #4260: desktop too — the Spending hero's two halves sit side by side
+    // only at `lg`, the composition the mobile stack never shows.
+    viewports: ['mobile', 'desktop'],
     anchor: (page: Page) => page.getByRole('heading', { name: 'Research agent', exact: true }),
     frozenRelativeTime: '4mo ago',
     /** Serves the four detail-page reads the shared fixture falls through on. */
@@ -453,19 +479,65 @@ const ROUTES: ProductRoute[] = [
    * header paragraph this row superseded.
    *
    * `frozenRelativeTime` is pinned for the same reason as `/transactions`:
-   * the card caption renders `Added {timeAgo(safe.created_at)}` off the
-   * fixture's fixed `2026-05-01` timestamp, which buckets to `4mo ago` at
-   * `FROZEN_NOW` — assert the literal the frozen clock must produce, not a
-   * pixel that drifts on a calendar boundary.
+   * the card footer renders `Last payment {timeAgo(...)}` off the fixture's
+   * `lastOutgoingAt` (#4021, pinned to `testSafe.created_at`), which buckets
+   * to `4mo ago` at `FROZEN_NOW` — assert the literal the frozen clock must
+   * produce, not a pixel that drifts on a calendar boundary. (#4021 replaced
+   * the old `Added 4mo ago` caption pin; the "Added" line itself is gone.)
    */
   {
     path: '/accounts',
     slug: 'accounts',
     viewports: ['mobile'],
-    /** Measured at 390 on this harness: 104 characters. */
+    /** Measured at 390 on this harness: 104 characters; re-measured under the #4021 card. */
     minChars: 100,
     anchor: (page: Page) => page.getByRole('heading', { name: 'Accounts', exact: true }),
-    frozenRelativeTime: 'Added 4mo ago',
+    frozenRelativeTime: 'Last payment 4mo ago',
+  },
+
+  /**
+   * #4021: the TWO-OR-MORE-ACCOUNT grid — the layout that exists once
+   * multi-account creation has landed, the one the old three-column grid
+   * never showed with more than one card in it. Served by `serveTwoAccounts`,
+   * which prices the two accounts DIFFERENTLY (#2225): distinct balances, row
+   * counts and last-payment footers, so the baseline cannot pass with one
+   * card painted twice. The header action and the grid render from the same
+   * fixture as production; no chain call is made. Desktop-only: the mobile
+   * composition is the one-account `accounts-mobile` capture's sibling, and
+   * every extra axis here is a re-bless tax without a defect pointing at it.
+   */
+  {
+    path: '/accounts',
+    slug: 'accounts-multi',
+    viewports: ['desktop'],
+    minChars: 120,
+    anchor: (page: Page) => page.getByRole('heading', { name: 'Accounts', exact: true }),
+    frozenRelativeTime: 'Last payment 17d ago',
+    serve: serveTwoAccounts,
+  },
+
+  /**
+   * #4115: the contacts list moved onto `ListToolbar` — the route the #2318
+   * audit deferred ("179 chars, 0 console errors, none" in the table above)
+   * gets its first whole-screen baseline on the change that altered what the
+   * screen shows. The shared fixture serves one contact ("Research vendor",
+   * `testRecipientAddress`), whose only activity is on 8453, so the Network
+   * facet has one option and photographs hidden — the toolbar with search and
+   * the count is what the baseline pins. MOBILE-only by decision, per the
+   * #2733/#2817 reasoning above.
+   *
+   * No `frozenRelativeTime` by measurement: a contact row renders its name,
+   * its address and the "Used on" badges — no relative timestamp anywhere,
+   * so there is no literal to pin. The freeze stays on as cheap insurance,
+   * as on `/agents`.
+   */
+  {
+    path: '/contacts',
+    slug: 'contacts',
+    viewports: ['mobile'],
+    /** Measured at 390 on this harness: 192 characters. */
+    minChars: 150,
+    anchor: (page: Page) => page.getByRole('heading', { name: 'Contacts', exact: true }),
   },
 ]
 
@@ -480,6 +552,83 @@ async function expectNoSkeletons(region: Locator, label: string) {
     `${label}: still rendering skeleton placeholders — the capture would bake in ` +
       `a mid-load frame and then match it forever`,
   ).toHaveCount(0)
+}
+
+/**
+ * #4283: park the phone tab bar at the END of the page for a mobile full-page
+ * capture, and prove it covers no content.
+ *
+ * The bar is `position: fixed`, and `unclipScrollShell` only un-clips
+ * `#main-content` and its ancestors, so in a `fullPage` PNG the bar paints at
+ * the FIRST viewport's bottom edge — over whatever content sits there (the
+ * agent hero's figures, a dashboard "Needs attention" row). `<main>` already
+ * reserves a bottom band for the bar (`AuthenticatedShell`'s
+ * `max-lg:pb-[calc(1.5rem+var(--v2-tab-bar-h)+var(--v2-tab-bar-bottom))]`),
+ * so the bar is moved into that band at the document's end: still
+ * photographed, covering nothing — and only when it covers something, so a
+ * page that already ends above it keeps its fixed bar byte-for-byte. `position: absolute; bottom: …` would NOT
+ * do it — it resolves against the viewport-sized initial containing block and
+ * lands back at the first viewport's bottom — so the bar gets a pixel `top`,
+ * corrected once against where it actually painted.
+ *
+ * The live bar is found by its computed `position: fixed`, which excludes the
+ * presentational copy `/design-system` renders with the same attribute. Unlike
+ * `assertClearOfTabBar` (design-system.visual.spec.ts) there is no "no bar →
+ * pass" fallback: below `lg` exactly one live bar must exist.
+ */
+async function parkTabBarAtPageEnd(page: Page, label: string): Promise<void> {
+  const result = await page.evaluate(() => {
+    const live = Array.from(document.querySelectorAll<HTMLElement>('[data-mobile-tab-bar]')).filter((el) => {
+      const cs = getComputedStyle(el)
+      return cs.position === 'fixed' && cs.display !== 'none' && !el.closest('[inert]')
+    })
+    const main = document.getElementById('main-content')
+    let contentBottom = 0
+    for (const child of Array.from(main?.children ?? [])) {
+      const r = child.getBoundingClientRect()
+      if (r.height > 0) contentBottom = Math.max(contentBottom, r.bottom + window.scrollY)
+    }
+    if (live.length !== 1) return { live: live.length, parked: false, barTop: 0, barBottom: 0, docHeight: 0, visibility: '', contentBottom }
+    const bar = live[0]
+    const rect = bar.getBoundingClientRect()
+    // Park only when the bar actually sits over content: a page that ends
+    // above it (every one-viewport capture) keeps the fixed bar untouched, so
+    // its baseline does not move on a compositing difference (fixed vs
+    // absolute rasterises the bar's shadow differently).
+    const parked = rect.top + window.scrollY < contentBottom
+    if (parked) {
+      const bottomGap = window.innerHeight - rect.bottom
+      const target = document.documentElement.scrollHeight - rect.height - bottomGap
+      bar.style.setProperty('position', 'absolute', 'important')
+      bar.style.setProperty('bottom', 'auto', 'important')
+      bar.style.setProperty('top', `${target}px`, 'important')
+      // A positioned ancestor offsets `top`; measure where it painted and correct once.
+      const painted = bar.getBoundingClientRect().top + window.scrollY
+      bar.style.setProperty('top', `${target + (target - painted)}px`, 'important')
+    }
+    const after = bar.getBoundingClientRect()
+    return {
+      live: 1,
+      parked,
+      barTop: after.top + window.scrollY,
+      barBottom: after.bottom + window.scrollY,
+      docHeight: document.documentElement.scrollHeight,
+      visibility: getComputedStyle(bar).visibility,
+      contentBottom,
+    }
+  })
+  expect(result.live, `${label}: exactly one live (fixed) phone tab bar renders below lg`).toBe(1)
+  expect(
+    result.barTop,
+    `${label}: the tab bar's top (${result.barTop}px) sits above the end of the page content ` +
+      `(${result.contentBottom}px) — the full-page capture would paint the bar over content (#4283)`,
+  ).toBeGreaterThanOrEqual(result.contentBottom - 0.5)
+  // Still photographed: visible, and inside the captured document.
+  expect(result.visibility, `${label}: the tab bar is hidden`).toBe('visible')
+  expect(
+    result.barBottom,
+    `${label}: the tab bar ends at ${result.barBottom}px, outside the ${result.docHeight}px document`,
+  ).toBeLessThanOrEqual(result.docHeight + 0.5)
 }
 
 test.describe('product-route visual regression', () => {
@@ -504,6 +653,9 @@ test.describe('product-route visual regression', () => {
         await mockHavenApi(page)
         if (route.serveDetailResponses) {
           await serveAgentDetailResponses(page, 'agent-research')
+        }
+        if (route.serve) {
+          await route.serve(page)
         }
         await seedAuthenticatedSession(page)
 
@@ -538,10 +690,7 @@ test.describe('product-route visual regression', () => {
           )
         await expectNoSkeletons(main, route.path)
 
-        if (
-          route.frozenRelativeTime &&
-          !(axis === 'mobile' && route.frozenRelativeTimeHiddenOnMobile)
-        ) {
+        if (route.frozenRelativeTime) {
           await expect(
             main.getByText(route.frozenRelativeTime, { exact: true }).first(),
             `${route.path}: the frozen clock is not in effect — expected the ` +
@@ -573,6 +722,7 @@ test.describe('product-route visual regression', () => {
         // letting it stand as a baseline — a pixel gate whose baseline is empty
         // compares white to white forever.
         await unclipScrollShell(page)
+        if (axis === 'mobile') await parkTabBarAtPageEnd(page, `${route.path} · ${axis}`)
         const devicePixelRatio = await page.evaluate(() => window.devicePixelRatio)
         await assertCaptureNotBlank(await page.screenshot({ fullPage: true }), {
           label: `${route.path} · ${axis}`,
@@ -588,5 +738,112 @@ test.describe('product-route visual regression', () => {
         })
       })
     }
+  }
+})
+
+/**
+ * #4267: the transaction detail panel, open — the first committed baselines
+ * of the drawer. One desktop capture of the x402 panel (the fixture's first
+ * row: eip3009 with a recorded settlement) and one mobile capture of the
+ * needs-attention panel (the second row, overlaid into that state below).
+ *
+ * The panel's "when" line is `toLocaleString()`, and `playwright.config.ts`
+ * pins neither a timezone nor a locale, so both are pinned here and the
+ * literal the frozen clock must produce is asserted by name — a drift
+ * fails on the string, not as an unattributable pixel diff (epic #4263, S6).
+ */
+test.describe('transaction detail panel visual regression (#4267)', () => {
+  test.skip(!VISUAL_SPECS_ENABLED, VISUAL_SKIP_REASON)
+  test.use({ timezoneId: 'UTC', locale: 'en-US' })
+
+  const PANELS = [
+    {
+      slug: 'transaction-panel-x402',
+      axis: 'desktop' as const,
+      row: 'research.example',
+      // `dashboardTransaction.timestamp` 1779000000 = 2026-05-17T06:40:00Z.
+      when: /^Paid by Research agent from Operations · May 17, 2026, 6:40\sAM$/,
+      needsAttention: false,
+    },
+    {
+      slug: 'transaction-panel-needs-attention',
+      axis: 'mobile' as const,
+      row: 'api.example.dev',
+      // `x402UnrecordedSettlementTransaction.timestamp` 1778900000 = 2026-05-16T02:53:20Z.
+      when: /^Paid by Research agent from Operations · May 16, 2026, 2:53\sAM$/,
+      needsAttention: true,
+    },
+  ]
+
+  for (const panel of PANELS) {
+    test(`${panel.slug} renders pixel-stable (${panel.axis})`, async ({ page }) => {
+      const vp = panel.axis === 'mobile' ? MOBILE : DESKTOP
+      if (!vp) throw new Error(`visual gate: no "${panel.axis}" viewport in evidence-viewports.mjs`)
+
+      await page.clock.setFixedTime(FROZEN_NOW)
+      await mockHavenApi(page)
+      if (panel.needsAttention) {
+        // Overlay (later routes win): the second row needs attention — the
+        // merchant rejected the retry after the funding leg settled.
+        await page.route('**/api/**', async (route) => {
+          const request = route.request()
+          const path = new URL(request.url()).pathname.replace(/^\/api/, '')
+          if (request.method() !== 'GET' || path !== '/transactions') return route.fallback()
+          // The shared feed's two rows (their consts carry the USD strike
+          // this session serves), the second in the needs-attention state.
+          await route.fulfill({
+            json: {
+              transactions: [
+                dashboardTransaction,
+                {
+                  ...x402UnrecordedSettlementTransaction,
+                  paymentFlowStatus: 'needs_attention',
+                  paymentAttentionReason: 'merchant_retry_rejected_after_payment',
+                },
+              ],
+              total: 2,
+              offset: 0,
+              limit: 25,
+              hasMore: false,
+              partialFailure: false,
+              failedAccountIds: [],
+              truncated: false,
+            },
+          })
+        })
+      }
+      await seedAuthenticatedSession(page)
+      await page.setViewportSize({ width: vp.width, height: vp.height })
+      await page.goto('/transactions')
+
+      const ledger = page.getByTestId('transactions-ledger')
+      await expect(ledger).toBeVisible({ timeout: ANCHOR_TIMEOUT_MS })
+      await ledger
+        .locator('[role="button"][aria-haspopup="dialog"]')
+        .filter({ hasText: panel.row })
+        .first()
+        .click()
+      const dialog = page.getByRole('dialog')
+      await expect(dialog).toBeVisible()
+      await expect(
+        dialog.getByText(panel.when),
+        `the frozen clock, timezone or locale is not in effect — expected "${panel.when}" at ` +
+          `${FROZEN_NOW.toISOString()} (UTC, en-US)`,
+      ).toBeVisible()
+      if (panel.needsAttention) {
+        await expect(dialog.getByText('Needs attention', { exact: true })).toBeVisible()
+        await expect(dialog.getByRole('link', { name: 'Open agent' })).toBeVisible()
+      }
+      await expect(dialog.getByTestId('transaction-technical-details')).not.toHaveAttribute('open')
+
+      await page.evaluate(() => document.fonts.ready)
+      await page.waitForLoadState('networkidle')
+      await expect(dialog).toHaveScreenshot(`${panel.slug}-${panel.axis}.png`, {
+        animations: 'disabled',
+        caret: 'hide',
+        maxDiffPixels: FULL_PAGE_MAX_DIFF_PIXELS,
+        threshold: PIXEL_THRESHOLD,
+      })
+    })
   }
 })

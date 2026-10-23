@@ -1,10 +1,12 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 
-const { mockUseMerchant, mockUseAgents, mockUseMerchantBudgets, mockNotFound } = vi.hoisted(() => ({
+const { mockUseMerchant, mockUseAgents, mockUseMerchantBudgets, mockUseBudgetRemaining, mockUseAuth, mockNotFound } = vi.hoisted(() => ({
   mockUseMerchant: vi.fn(),
   mockUseAgents: vi.fn(),
   mockUseMerchantBudgets: vi.fn(),
+  mockUseBudgetRemaining: vi.fn(),
+  mockUseAuth: vi.fn(),
   mockNotFound: vi.fn(),
 }))
 
@@ -21,6 +23,14 @@ vi.mock('@/hooks/useMerchantBudgets', () => ({
   useMerchantBudgets: () => mockUseMerchantBudgets(),
 }))
 
+vi.mock('@/hooks/useBudgetRemaining', () => ({
+  useBudgetRemaining: () => mockUseBudgetRemaining(),
+}))
+
+vi.mock('@/context/AuthContext', () => ({
+  useAuth: () => mockUseAuth(),
+}))
+
 vi.mock('next/navigation', () => ({
   useParams: () => ({ slug: 'ampersend-demo-api' }),
   notFound: () => mockNotFound(),
@@ -29,6 +39,12 @@ vi.mock('next/navigation', () => ({
 import MerchantPage from '../page'
 import type { CatalogEntry, Merchant, MerchantFundingTarget } from '@/hooks/useCatalog'
 import type { Agent } from '@/hooks/useAgents'
+import type { DashboardBudgetRemainingEntry } from '@/hooks/useBudgetRemaining'
+// #4005: the fixtures below are built from apiMock()'s typed route table
+// (frontend playbook §4) — a spread of the e2e fixture's own wire-shaped
+// defaults, so a dropped required field is a tsc error, not a screen
+// rendering undefined.
+import { API_MOCK_DEFAULTS } from '../../../../../../e2e/fixtures/api-mock'
 
 // #3331 review finding F6: the action needs at least one ELIGIBLE agent, not
 // just a qualifying chain — this fixture is the one Agent shape that
@@ -69,6 +85,7 @@ const merchant: Merchant = {
   offer_count: 1,
   networks: ['eip155:84532'],
   verified_payable: true,
+  lowest_price_atomic: '1000',
 }
 
 function offer(overrides: Partial<CatalogEntry> = {}): CatalogEntry {
@@ -93,7 +110,7 @@ function offer(overrides: Partial<CatalogEntry> = {}): CatalogEntry {
     http_method: null,
     body_type: null,
     body_example: null,
-    price_display: '$0.001 USDC',
+    price_display: '0.001 USDC',
     price_atomic: '1000',
     asset: 'USDC',
     network: 'eip155:84532',
@@ -112,6 +129,12 @@ describe('MerchantPage', () => {
     vi.clearAllMocks()
     mockUseAgents.mockReturnValue({ agents: [] })
     mockUseMerchantBudgets.mockReturnValue({ budgets: [], loading: false, error: null, forbidden: false, refetch: vi.fn() })
+    // #4005: the panel reads the cached budget-remaining wire — idle by
+    // default, so the tests that need amounts seed it explicitly below.
+    mockUseBudgetRemaining.mockReturnValue({ data: null, loading: false, error: null, refetch: vi.fn() })
+    // #3981: the offers on the user's own network come first — the default
+    // account here is on Base Sepolia.
+    mockUseAuth.mockReturnValue({ user: { accounts: [{ id: 'acc-1', chain_id: 84532, is_default: true }] } })
   })
 
   it('renders a loading state', () => {
@@ -163,11 +186,15 @@ describe('MerchantPage', () => {
     for (const state of states) {
       mockUseMerchant.mockReturnValue(state)
       const { unmount } = render(<MerchantPage />)
-      const link = screen.getByRole('link', { name: 'Back to Marketplace' })
+      const link = screen.getByRole('link', { name: 'Marketplace' })
       expect(link.getAttribute('href')).toBe('/marketplace')
-      // The Button primitive, not a hand-rolled 16 px link: it carries the
-      // 44 px hit area and the focus ring on a phone.
+      // The shared BackLink (#4028), not a hand-rolled 16 px link: it carries
+      // the 44 px hit area and the focus ring on a phone.
       expect(link.className).toContain('focus-visible:')
+      expect(link.className).toContain('after:h-11')
+      // Never inside a loading live region (#4028): it is navigation, not status.
+      const status = screen.queryByRole('status')
+      if (status) expect(status.contains(link)).toBe(false)
       unmount()
     }
   })
@@ -185,7 +212,7 @@ describe('MerchantPage', () => {
     expect(mockNotFound).toHaveBeenCalled()
   })
 
-  it('renders the pay-with-Haven block and offers table for a live merchant with offers', () => {
+  it('renders ONE offers section for a live merchant with offers — no "Pay this with Haven", no "List your payable service"', () => {
     mockUseMerchant.mockReturnValue({
       merchant,
       offers: [offer()],
@@ -195,12 +222,27 @@ describe('MerchantPage', () => {
       refetch: vi.fn(),
     })
     render(<MerchantPage />)
-    expect(screen.getByText('Pay this with Haven')).toBeDefined()
-    expect(screen.getByText('Offers')).toBeDefined()
-    expect(screen.getByLabelText(/Copy agent instruction/)).toBeDefined()
+    // #3981: the pay block folded into the offers section — one heading, not two.
+    expect(screen.getByRole('heading', { name: 'Offers' })).toBeDefined()
+    expect(screen.queryByText('Pay this with Haven')).toBeNull()
+    // One copy button per shape: the desktop row and the phone card.
+    expect(screen.getAllByRole('button', { name: 'Copy prompt for Joke' })).toHaveLength(2)
+    expect(screen.queryByText('List your payable service')).toBeNull()
+    // The header is still the page's only h1.
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1)
   })
 
-  it('shows the unpinned-budget line only when erc7710 is absent from asset_transfer_methods', () => {
+  it('#4005: the offer-level note is gone — the panel carries the requirement, the rows keep only the tag', () => {
+    mockUseAgents.mockReturnValue({ agents: [eligibleAgent] })
+    // Built from apiMock()'s /dashboard/budget-remaining default: the fixture
+    // row is testAgent's on Base; re-keyed here to the page's agent and chain.
+    const budgetRow = {
+      ...API_MOCK_DEFAULTS['/dashboard/budget-remaining'].budgets[0]!,
+      agent_id: 'agent-1',
+      chain_id: 84532,
+      remaining_atomic: '20000000',
+    } satisfies DashboardBudgetRemainingEntry
+    mockUseBudgetRemaining.mockReturnValue({ data: { budgets: [budgetRow] }, loading: false, error: null, refetch: vi.fn() })
     mockUseMerchant.mockReturnValue({
       merchant,
       offers: [offer({ asset_transfer_methods: null }), offer({ id: 'offer-2', asset_transfer_methods: 'eip3009,erc7710' })],
@@ -210,15 +252,41 @@ describe('MerchantPage', () => {
       refetch: vi.fn(),
     })
     render(<MerchantPage />)
-    // The merchant-level note renders ONCE (not per offer), and in the mixed
-    // case the offers that need the unpinned budget are the tagged ones.
-    expect(screen.getAllByText(/This merchant settles by EIP-3009 — the paying agent needs an unpinned budget\./)).toHaveLength(1)
-    expect(screen.getAllByText('unpinned budget')).toHaveLength(1)
-    expect(screen.getByTestId('pay-block-offer-1').textContent).toContain('unpinned budget')
-    expect(screen.getByTestId('pay-block-offer-2').textContent).not.toContain('unpinned budget')
+    // The separate paragraph above the table is gone.
+    expect(screen.queryByTestId('any-recipient-budget-note')).toBeNull()
+    // In the mixed case only the offers that need an any-recipient budget are tagged.
+    expect(screen.getByTestId('offer-row-offer-1').textContent).toContain('any-recipient budget')
+    expect(screen.getByTestId('offer-row-offer-2').textContent).not.toContain('any-recipient budget')
+    // The requirement lives in the panel's step 2, in plain words.
+    expect(screen.getByTestId('how-to-buy-step-2').textContent).toContain(
+      'The offers marked "any-recipient budget" need a budget that can pay anyone.',
+    )
+    // No protocol jargon reaches the page.
+    expect(document.body.textContent).not.toContain('EIP-3009')
+    expect(document.body.textContent).not.toContain('unpinned')
   })
 
-  it('renders the coming-soon branch with no instruction block and no offers table', () => {
+  it('groups a merchant\'s offers by the user\'s default network, others behind a disclosure; flat when the default network serves none', () => {
+    mockUseMerchant.mockReturnValue({
+      merchant,
+      offers: [offer({ id: 'sepolia' }), offer({ id: 'base', network: 'eip155:8453' })],
+      loading: false,
+      error: null,
+      notFound: false,
+      refetch: vi.fn(),
+    })
+    const { unmount } = render(<MerchantPage />)
+    expect(screen.getAllByText('1 more on Base — none of your agents can pay on that network')).toHaveLength(2)
+    expect(screen.getAllByTestId('offer-row-sepolia')).toHaveLength(1)
+    expect(screen.getAllByTestId('offer-row-base')).toHaveLength(1)
+    unmount()
+    // No default account on any network the offers use → all flat.
+    mockUseAuth.mockReturnValue({ user: null })
+    render(<MerchantPage />)
+    expect(screen.queryByText(/more on/)).toBeNull()
+  })
+
+  it('renders the coming-soon branch with no offers section and no copy buttons', () => {
     mockUseMerchant.mockReturnValue({
       merchant: { ...merchant, listing_status: 'coming_soon', offer_count: 0 },
       offers: [],
@@ -230,11 +298,12 @@ describe('MerchantPage', () => {
     render(<MerchantPage />)
     expect(screen.getByText('Coming soon — not payable yet')).toBeDefined()
     expect(screen.queryByText('Pay this with Haven')).toBeNull()
-    expect(screen.queryByText('Offers')).toBeNull()
-    expect(screen.queryByLabelText(/Copy agent instruction/)).toBeNull()
+    expect(screen.queryByRole('heading', { name: 'Offers' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Copy prompt/ })).toBeNull()
+    expect(screen.queryByText('List your payable service')).toBeNull()
   })
 
-  it('renders an empty-offers state for a live merchant with none', () => {
+  it('renders an empty-offers state for a live merchant with none, and no "List your payable service" either', () => {
     mockUseMerchant.mockReturnValue({
       merchant,
       offers: [],
@@ -245,9 +314,10 @@ describe('MerchantPage', () => {
     })
     render(<MerchantPage />)
     expect(screen.getByText('No offers listed yet')).toBeDefined()
+    expect(screen.queryByText('List your payable service')).toBeNull()
   })
 
-  // ── "Fund this merchant" (#3331) ──────────────────────────────────────────
+  // ── The "How to buy" panel (#4005) ─────────────────────────────────────────
   const verifiedErc7710Funding: MerchantFundingTarget[] = [
     { network: 'eip155:84532', chain_id: 84532, pay_to: '0x' + 'f0'.repeat(20), pay_to_status: 'verified', erc7710: true },
   ]
@@ -257,6 +327,22 @@ describe('MerchantPage', () => {
   const unstatedFunding: MerchantFundingTarget[] = [
     { network: 'eip155:84532', chain_id: 84532, pay_to: null, pay_to_status: 'unstated', erc7710: false },
   ]
+
+  // Built from apiMock()'s /dashboard/budget-remaining default: the fixture
+  // row is testAgent's on Base; re-keyed to the page's agent, chain and a
+  // remaining that covers the 0.001 USDC offer.
+  const sepoliaBudgetRow = {
+    ...API_MOCK_DEFAULTS['/dashboard/budget-remaining'].budgets[0]!,
+    agent_id: 'agent-1',
+    chain_id: 84532,
+    remaining_atomic: '20000000',
+  } satisfies DashboardBudgetRemainingEntry
+
+  function seedPayingState(funding: MerchantFundingTarget[] = verifiedErc7710Funding, offers: CatalogEntry[] = [offer()]) {
+    mockUseAgents.mockReturnValue({ agents: [eligibleAgent] })
+    mockUseBudgetRemaining.mockReturnValue({ data: { budgets: [sepoliaBudgetRow] }, loading: false, error: null, refetch: vi.fn() })
+    mockUseMerchant.mockReturnValue({ merchant, offers, funding, loading: false, error: null, notFound: false, refetch: vi.fn() })
+  }
 
   it('renders the action when a listed chain has a verified, ERC-7710 payTo AND the owner has an eligible agent', () => {
     mockUseAgents.mockReturnValue({ agents: [eligibleAgent] })
@@ -270,18 +356,24 @@ describe('MerchantPage', () => {
       refetch: vi.fn(),
     })
     render(<MerchantPage />)
-    expect(screen.getByRole('button', { name: 'Fund this merchant' })).toBeDefined()
+    // TWO controls carry the action now — the header slot and the panel's
+    // step-2 fix — both open the same modal.
+    expect(screen.getAllByRole('button', { name: 'Set a budget for this merchant' })).toHaveLength(2)
   })
 
-  // #3331 review finding F6: the chain qualifies but NONE of the owner's own
-  // agents do — the action must not show a Review that can only ever land on
-  // "no eligible agent", and the open-budget note (a DIFFERENT case: a
-  // verified payTo that is not ERC-7710) must not show here either.
-  //
-  // Round 2 review finding R2-5 (design 3): this used to leave the whole slot
-  // BLANK — now it says why, and how to fix it, with a link to /agents.
-  it('shows a plain "connect an agent" line (not the open-budget note) when a chain qualifies but the owner has no eligible agent', () => {
-    mockUseAgents.mockReturnValue({ agents: [], loading: false })
+  it('renders the panel between the header and the offers for a live merchant with offers', () => {
+    seedPayingState()
+    render(<MerchantPage />)
+    const panel = screen.getByTestId('how-to-buy-panel')
+    const offersHeading = screen.getByRole('heading', { name: 'Offers' })
+    // The panel precedes the offers section in the DOM.
+    expect(Boolean(panel.compareDocumentPosition(offersHeading) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
+  })
+
+  // The old connect-agent note's case, in the panel's terms: no agent to
+  // point at, so step 1 is open with the /agents link and steps 2–3 claim
+  // nothing about budgets the user does not have yet.
+  it('no active agents: step 1 is open with a link to /agents; steps 2 and 3 claim nothing', () => {
     mockUseMerchant.mockReturnValue({
       merchant,
       offers: [offer()],
@@ -292,20 +384,17 @@ describe('MerchantPage', () => {
       refetch: vi.fn(),
     })
     render(<MerchantPage />)
-    expect(screen.queryByRole('button', { name: 'Fund this merchant' })).toBeNull()
-    expect(screen.queryByText(/use an agent's open budget/)).toBeNull()
-    expect(
-      screen.getByText(/Connect an agent on Base Sepolia to give it a budget for Ampersend Demo API\./),
-    ).toBeDefined()
-    // Design review round 3, finding C: the link text must not repeat
-    // "Connect an agent" — the sentence right before it already says that.
+    expect(screen.getByTestId('how-to-buy-step-1').textContent).toContain('Connect an agent to buy from Ampersend Demo API.')
     expect(screen.getByRole('link', { name: 'Go to Agents' }).getAttribute('href')).toBe('/agents')
+    expect(screen.getByTestId('how-to-buy-step-2').textContent).toContain('Once an agent is connected')
+    expect(screen.getByTestId('how-to-buy-step-3').textContent).toContain("paste it into your agent's chat")
+    expect(screen.queryByRole('button', { name: 'Set a budget for this merchant' })).toBeNull()
   })
 
-  // Design review round 3, finding C (code F5): a failed agents read reads
-  // `agents: []` from `useAgents`, identical to "no eligible agent" — the
-  // page must not claim "Connect an agent" over a read that simply failed.
-  it('shows a neutral line, not "Connect an agent", when useAgents itself errored', () => {
+  // Design review round 3, finding C (code F5), rewritten for #4005: a failed
+  // agents read reads `agents: []`, identical to "no eligible agent" — the
+  // panel must not claim "Connect an agent" over a read that simply failed.
+  it('a failed agents read never renders "Connect an agent" — the panel says the load failed', () => {
     mockUseAgents.mockReturnValue({ agents: [], loading: false, error: 'boom' })
     mockUseMerchant.mockReturnValue({
       merchant,
@@ -317,15 +406,16 @@ describe('MerchantPage', () => {
       refetch: vi.fn(),
     })
     render(<MerchantPage />)
-    expect(screen.queryByRole('button', { name: 'Fund this merchant' })).toBeNull()
-    expect(screen.queryByText(/Connect an agent/)).toBeNull()
-    expect(screen.getByText(/Haven could not load your agents just now, so funding is unavailable\. Reload the page to try again\./)).toBeDefined()
+    expect(screen.getByTestId('how-to-buy-step-1').textContent).toContain("Haven couldn't load your agents.")
+    expect(screen.queryByText(/Connect an agent to buy from/)).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Set a budget for this merchant' })).toBeNull()
   })
 
-  // Design review round 3, finding C: several pinnable chains must each be
-  // named — the sentence used to always read the first chain only.
-  it('names every pinnable chain when the merchant qualifies on more than one', () => {
-    mockUseAgents.mockReturnValue({ agents: [], loading: false })
+  // Design review round 3, finding C (every chain named), rewritten: with an
+  // agent on the wrong chain, step 2 names the agent's chain AND every chain
+  // the offers are on — the sentence that used to name the pinnable chains.
+  it('wrong network: step 2 names the agent chain and every offer chain, with no fix button', () => {
+    mockUseAgents.mockReturnValue({ agents: [{ ...eligibleAgent, account_chain_id: 8453 }] })
     mockUseMerchant.mockReturnValue({
       merchant,
       offers: [offer()],
@@ -339,10 +429,13 @@ describe('MerchantPage', () => {
       refetch: vi.fn(),
     })
     render(<MerchantPage />)
-    expect(screen.getByText(/Connect an agent on Base Sepolia or Gnosis Chain to give it a budget/)).toBeDefined()
+    expect(screen.getByTestId('how-to-buy-step-2').textContent).toContain(
+      "Research Agent's Haven wallet is on Base — this merchant's offers are on Base Sepolia. Haven can't add a second account from here.",
+    )
+    expect(screen.getByTestId('how-to-buy-step-2').textContent).not.toContain('Set a budget')
   })
 
-  it('shows neither the action nor the connect-agent note while agents are still loading — no flash (R2-5)', () => {
+  it('while agents load the panel shows skeletons and claims nothing — no flash (R2-5)', () => {
     mockUseAgents.mockReturnValue({ agents: [], loading: true })
     mockUseMerchant.mockReturnValue({
       merchant,
@@ -354,38 +447,126 @@ describe('MerchantPage', () => {
       refetch: vi.fn(),
     })
     render(<MerchantPage />)
-    expect(screen.queryByRole('button', { name: 'Fund this merchant' })).toBeNull()
-    expect(screen.queryByText(/Connect an agent on/)).toBeNull()
+    expect(document.querySelectorAll('.animate-pulse').length).toBeGreaterThan(0)
+    expect(screen.queryByText(/Connect an agent to buy from/)).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Set a budget for this merchant' })).toBeNull()
   })
 
-  it('withholds the action, with open-budget copy, when the only verified payTo is not ERC-7710', () => {
+  // An agent that can pay: all three steps read done or ready, and step 2
+  // names the agent and its REMAINING amount — the #4004 figures, not a cap.
+  it('an agent that can pay: step 1 done, step 2 names the agent and its remaining amount, step 3 names the paste target', () => {
+    seedPayingState()
+    render(<MerchantPage />)
+    expect(screen.getByTestId('how-to-buy-step-1').textContent).toContain('Research Agent is connected on Base Sepolia.')
+    expect(screen.getByTestId('how-to-buy-step-2').textContent).toContain(
+      'Research Agent has 20 USDC left of 250 USDC, and can pay anyone — so it can pay Ampersend Demo API.',
+    )
+    expect(screen.getByTestId('how-to-buy-step-3').textContent).toContain("paste it into Research Agent's chat")
+    expect(screen.getByRole('link', { name: 'Transactions' }).getAttribute('href')).toBe('/transactions')
+  })
+
+  it('a failed budget read: step 2 says it could not check budgets, with a retry', () => {
+    mockUseAgents.mockReturnValue({ agents: [eligibleAgent] })
+    mockUseBudgetRemaining.mockReturnValue({ data: null, loading: false, error: 'boom', refetch: vi.fn() })
     mockUseMerchant.mockReturnValue({
       merchant,
       offers: [offer()],
-      funding: verifiedNotErc7710Funding,
+      funding: verifiedErc7710Funding,
       loading: false,
       error: null,
       notFound: false,
       refetch: vi.fn(),
     })
     render(<MerchantPage />)
-    expect(screen.queryByRole('button', { name: 'Fund this merchant' })).toBeNull()
-    expect(screen.getByText(/use an agent's open budget/)).toBeDefined()
+    expect(screen.getByTestId('how-to-buy-step-2').textContent).toContain("Haven couldn't check budgets — try again.")
   })
 
-  it('renders neither the action nor the open-budget copy with no verified payTo at all', () => {
-    mockUseMerchant.mockReturnValue({
-      merchant,
-      offers: [offer()],
-      funding: unstatedFunding,
+  // The old open-budget note's case: offers lack erc7710, so the requirement
+  // shows in the panel's step 2 — even when no budget can be PINNED here.
+  it('withholds the fund action when the only verified payTo is not ERC-7710, and step 2 says "can pay anyone" once (#4015)', () => {
+    seedPayingState(verifiedNotErc7710Funding)
+    render(<MerchantPage />)
+    const step2 = screen.getByTestId('how-to-buy-step-2')
+    expect(step2.textContent).toContain('and can pay anyone — so it can pay Ampersend Demo API.')
+    // #4015: the open budget's own sentence carries the rule; the line that
+    // repeated it stays only for the budget-fix and mixed cases.
+    expect(step2.textContent).not.toContain("A budget limited to one recipient can't pay")
+    expect(screen.queryByRole('button', { name: 'Set a budget for this merchant' })).toBeNull()
+  })
+
+  // #4015 owner decision (a), 2026-10-16 — "No need to push for merchant
+  // specific budgets here."
+  it('hides the header action and its helper when an active agent\'s open budget already covers the offers here', () => {
+    seedPayingState()
+    render(<MerchantPage />)
+    expect(screen.queryByRole('button', { name: 'Set a budget for this merchant' })).toBeNull()
+    expect(screen.queryByText(/Give one of your agents a budget that pays only/)).toBeNull()
+  })
+
+  it('keeps the header action when no open budget covers the offers here — none, or not enough left', () => {
+    // No budget at all: the header action and the panel's step-2 fix.
+    mockUseAgents.mockReturnValue({ agents: [eligibleAgent] })
+    mockUseMerchant.mockReturnValue({ merchant, offers: [offer()], funding: verifiedErc7710Funding, loading: false, error: null, notFound: false, refetch: vi.fn() })
+    const { unmount } = render(<MerchantPage />)
+    expect(screen.getAllByRole('button', { name: 'Set a budget for this merchant' })).toHaveLength(2)
+    expect(screen.getByText('Give one of your agents a budget that pays only Ampersend Demo API.')).toBeDefined()
+    unmount()
+
+    // An open budget with less left than the offer costs: still not covered.
+    mockUseBudgetRemaining.mockReturnValue({
+      data: { budgets: [{ ...sepoliaBudgetRow, remaining_atomic: '500' }] },
       loading: false,
       error: null,
-      notFound: false,
       refetch: vi.fn(),
     })
     render(<MerchantPage />)
-    expect(screen.queryByRole('button', { name: 'Fund this merchant' })).toBeNull()
-    expect(screen.queryByText(/use an agent's open budget/)).toBeNull()
+    expect(screen.getByText('Give one of your agents a budget that pays only Ampersend Demo API.')).toBeDefined()
+    expect(screen.getAllByRole('button', { name: 'Set a budget for this merchant' }).length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('keeps the header action while the merchant-budgets wire is loading or failed, even with a covering open budget — no hiding on a guess', () => {
+    for (const state of [
+      { budgets: undefined, loading: true, error: null },
+      { budgets: undefined, loading: false, error: 'boom' },
+    ]) {
+      seedPayingState()
+      mockUseMerchantBudgets.mockReturnValue({ ...state, forbidden: false, refetch: vi.fn() })
+      const { unmount } = render(<MerchantPage />)
+      expect(screen.getByText('Give one of your agents a budget that pays only Ampersend Demo API.')).toBeDefined()
+      unmount()
+    }
+  })
+
+  it('counts only the offers on the user\'s network: an open budget there covers them even with an unpayable offer on another network', () => {
+    seedPayingState(verifiedErc7710Funding, [offer(), offer({ id: 'offer-2', network: 'eip155:8453' })])
+    render(<MerchantPage />)
+    expect(screen.queryByRole('button', { name: 'Set a budget for this merchant' })).toBeNull()
+    // Step 2 follows the same split: not "for some offers".
+    expect(screen.getByTestId('how-to-buy-step-2').textContent).toContain('so it can pay Ampersend Demo API.')
+    expect(screen.getByTestId('how-to-buy-step-2').textContent).not.toContain('for some offers')
+  })
+
+  it('renders no any-recipient requirement anywhere when the offers advertise erc7710, even with no verified payTo at all', () => {
+    seedPayingState(unstatedFunding, [offer({ asset_transfer_methods: 'eip3009,erc7710' })])
+    render(<MerchantPage />)
+    expect(screen.getByTestId('how-to-buy-step-2').textContent).toContain('and can pay anyone')
+    expect(document.body.textContent).not.toContain('any-recipient budget')
+  })
+
+  // #4005: after a copy, the confirmation names the ONE agent that can pay.
+  it("the copy confirmation reads 'Copied — paste it to <agent>' when exactly one agent can pay", async () => {
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: vi.fn().mockResolvedValue(undefined) },
+      configurable: true,
+    })
+    seedPayingState()
+    render(<MerchantPage />)
+    fireEvent.click(screen.getAllByRole('button', { name: 'Copy prompt for Joke' })[0]!)
+    await vi.waitFor(() => {
+      expect(screen.getAllByRole('button', { name: /Prompt for Joke copied/ })[0]!.textContent).toBe(
+        'Copied — paste it to Research Agent',
+      )
+    })
   })
 
   it('never renders the action for a coming_soon merchant, even with funding data', () => {
@@ -399,7 +580,7 @@ describe('MerchantPage', () => {
       refetch: vi.fn(),
     })
     render(<MerchantPage />)
-    expect(screen.queryByRole('button', { name: 'Fund this merchant' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Set a budget for this merchant' })).toBeNull()
   })
 
   it('renders merchant-locked budgets, with pin_status and #1319 provenance, when GET /merchants/:slug/budgets returns rows', () => {

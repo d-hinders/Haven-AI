@@ -454,11 +454,37 @@ const PRE_TRIM_BASELINE_BYTES = 30_609
  * before this re-derivation. No tool was added — 29 holds. Measured: 31,214
  * UTF-8 bytes (+267); the mean pin: 31,214 / 29 = 1076.3448…, pinned at the
  * two-decimal ceiling (1076.35). Shrink-only from here.
+ *
+ * **Re-derived — round 27, #4062 (2026-10-19).** The EIP-3009 exceptional
+ * states on `haven_complete_mcp_tool` and `haven_settle_mcp_tool` now say to
+ * VERIFY before sweeping (`haven_get_payment_status` before
+ * `haven_sweep_delegate`, the merchant may still settle late) — the same
+ * verify-then-sweep rule #3102 put in the refusal steps, which the flat
+ * "recover with haven_sweep_delegate" wording contradicted. Both descriptions
+ * grew; nothing else was touched and no tool was added — 29 holds. Measured:
+ * 31,350 UTF-8 bytes (+136); the mean pin: 31,350 / 29 = 1081.0345…, pinned
+ * at the two-decimal ceiling (1081.04). Shrink-only from here.
+ *
+ * **Re-derived — round 28, #4061 (2026-10-19).** Since #3925 an EIP-3009
+ * merchant settlement is recorded only with the payment header the agent
+ * retried the merchant with, and the hosted report tools gained
+ * `payment_header` to carry it. The descriptions that tell the agent to
+ * report must now say to pass it, or every plain-HTTP settlement report is
+ * refused: `haven_report_x402_outcome` (the folded-evidence sentence),
+ * `haven_report_settlement_evidence` (the EIP-3009 clause and the new
+ * `SETTLEMENT_PROOF_HEADER_MISSING` code), and the "report with
+ * haven_report_x402_outcome" handoff in `haven_pay_x402_quote` and
+ * `haven_resume_x402_payment`. Trimmed once (+453 → +327 bytes) before this
+ * re-derivation; what remains is the parameter, the reason it is required,
+ * and the code. No tool was added — 29 holds. Measured on top of round 27
+ * (#4062): 31,674 UTF-8 bytes (+324); the mean pin: 31,674 / 29 =
+ * 1092.2068…, pinned at the two-decimal ceiling (1092.21). Shrink-only from
+ * here.
  */
-const MAX_TOTAL_BYTES = 31_214
-// Mean pin: round 26 (#3839 block above): 31,214 / 29 = 1076.3448…, pinned
-// at the two-decimal ceiling (1076.35). Shrink-only from here.
-const MAX_MEAN_BYTES = 1076.35
+const MAX_TOTAL_BYTES = 31_674
+// Mean pin: round 28 (#4061 block above): 31,674 / 29 = 1092.2068…, pinned
+// at the two-decimal ceiling (1092.21). Shrink-only from here.
+const MAX_MEAN_BYTES = 1092.21
 
 describe('tool description payload (#1591)', () => {
   it(`served descriptions average ≤${MAX_MEAN_BYTES} UTF-8 bytes (pre-trim total was ${PRE_TRIM_BASELINE_BYTES})`, () => {

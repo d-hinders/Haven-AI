@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { STILL_ENABLED_DELEGATION_STATUSES } from '@haven_ai/core'
 import type { Agent } from '@/hooks/useAgents'
 import { useDelegationBudget } from '@/hooks/useDelegationBudget'
 import { useDelegateBalance } from '@/hooks/useDelegateBalance'
@@ -16,8 +17,12 @@ import PasskeyElsewhereHint from '../PasskeyElsewhereHint'
 import { ApprovalRequiredBanner } from '../haven/ApprovalRequiredBanner'
 import { InlineAlert } from '../ui/InlineAlert'
 
-/** Delegation rows `revoke-all` targets — the same set the backend counts as live. */
-const LIVE_DELEGATION_STATUSES: ReadonlySet<string> = new Set(['pending', 'active', 'replaced'])
+/**
+ * Delegation rows `revoke-all` targets — the same set the backend counts as
+ * live (#3922: ONE constant in `@haven_ai/core`, pinned to the SQL by a backend
+ * test). Status, not the wire `is_live`: this guards on-chain authority.
+ */
+const LIVE_DELEGATION_STATUSES: ReadonlySet<string> = new Set(STILL_ENABLED_DELEGATION_STATUSES)
 
 /**
  * #1402: "Remove agent" — ONE action with three effects, in an order that is
@@ -28,7 +33,8 @@ const LIVE_DELEGATION_STATUSES: ReadonlySet<string> = new Set(['pending', 'activ
  *      error says the agent was NOT removed. (A dead credential next to a
  *      live on-chain budget is the state nobody should be able to create.)
  *   2. Revoke the agent — the credential stops working immediately.
- *   3. Archive (#1401) — the agent moves to Removed; history stays readable.
+ *   3. Archive (#1401) — the agent is archived (hidden from the list until
+ *      Archived: Shown, #4113); history stays readable.
  *
  * Retry-safety: a remove that failed at step 2/3 leaves the agent revoked
  * (and visibly un-archived in the primary list). Re-running skips what is
@@ -66,7 +72,7 @@ export function RemoveAgentDialog({
   onBudgetEnded?: () => void
   /** POST /agents/:id/revoke via the caller's state (kills the API key). */
   onRevokeCredential: () => Promise<void>
-  /** POST /agents/:id/archive via the caller's state (files under Removed). */
+  /** POST /agents/:id/archive via the caller's state (archives it). */
   onArchive: () => Promise<void>
   onClose: () => void
 }) {
@@ -119,8 +125,8 @@ export function RemoveAgentDialog({
         setError(
           result.reason === 'cancelled'
             ? finish
-              ? 'The signature was cancelled — this agent’s budget is still active.'
-              : 'The signature was cancelled — the agent was not removed and can still spend within its budget.'
+              ? 'The approval was cancelled — this agent’s budget is still active.'
+              : 'The approval was cancelled — the agent was not removed and can still spend within its budget.'
             : result.reason === 'too_many'
               ? null // the state line below carries the actionable version
               : finish
@@ -193,7 +199,7 @@ export function RemoveAgentDialog({
                     ? 'Checking which budgets it still holds…'
                     : budgetAlreadyEnded
                       ? 'No budget is left to end.'
-                      : 'You sign once and every budget it still holds ends — no matter how many.'}
+                      : 'You approve once and every budget it still holds ends — no matter how many.'}
                 </li>
                 <li>
                   <span className="font-medium text-[var(--v2-ink)]">Its history stays.</span> Nothing
@@ -210,7 +216,7 @@ export function RemoveAgentDialog({
                   {budgetsLoading
                     ? 'Checking which budgets it still holds…'
                     : needsSignature
-                      ? 'You sign once and every budget it holds ends — no matter how many.'
+                      ? 'You approve once and every budget it holds ends — no matter how many.'
                       : cannotEndBudgetHere && isHalfRevoked(agent)
                         ? 'Haven cannot end its budget from here — it may still be active on the account it was removed from.'
                         : 'Its spending authority is already ended.'}
@@ -221,8 +227,9 @@ export function RemoveAgentDialog({
                 </li>
                 <li>
                   <span className="font-medium text-[var(--v2-ink)]">Its history stays.</span> The agent
-                  moves to Removed, where every payment and record remains readable. You can restore it
-                  to the list later, but restoring never brings back its ability to spend.
+                  is archived: hidden from the list, where every payment and record remains readable
+                  (choose Archived: Shown to see it). You can restore it to the list later, but
+                  restoring never brings back its ability to spend.
                 </li>
               </ul>
           </>
@@ -270,8 +277,8 @@ export function RemoveAgentDialog({
               {finish
                 ? 'The budget has ended, but the credential could not be stopped. Choose Finish revoking to retry.'
                 : cannotEndBudgetHere
-                  ? 'The agent could not be moved to Removed, and its budget may still be active on the account it was removed from.'
-                  : 'The agent can no longer spend, but it could not be moved to Removed. Choose Finish removal to retry.'}
+                  ? 'The agent could not be archived, and its budget may still be active on the account it was removed from.'
+                  : 'The agent can no longer spend, but it could not be archived. Choose Finish removal to retry.'}
             </InlineAlert>
           )}
           {/* #1437: the backend refuses an oversized batch by naming the
@@ -279,7 +286,7 @@ export function RemoveAgentDialog({
               the user pressing the same button forever. */}
           {phase === 'too_many' && (
             <InlineAlert>
-              This agent holds too many budgets to stop in one signature. Stop them individually
+              This agent holds too many budgets to stop in one approval. Stop them individually
               on the{' '}
               <Link
                 href={`/agents/${agent.id}`}

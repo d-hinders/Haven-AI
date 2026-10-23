@@ -9,9 +9,10 @@ export type { Executor }
  * channel.
  *
  * Retention is 7 days (owner decision, 2026-10-02): `expires_at` defaults at
- * insert time (migration 106), every read here filters `expires_at > NOW()`
- * so the 7 days hold even if the purge lags, and `deleteExpiredFeedback`
- * mirrors `deleteExpiredRateLimits`
+ * insert time (migration 106; an elapsed 168 hours since 115, so the window
+ * does not depend on the session `TimeZone` — #4084), every read here filters
+ * `expires_at > NOW()` so the 7 days hold even if the purge lags, and
+ * `deleteExpiredFeedback` mirrors `deleteExpiredRateLimits`
  * (`infra/repositories/rate-limit-counters.ts`) — wired in `index.ts` through
  * `runIfLeader` under its own `LEADER_LOCK_KEYS` entry, never on an interval
  * of its own.

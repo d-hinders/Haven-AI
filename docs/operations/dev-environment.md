@@ -10,7 +10,7 @@ covers:
   - .github/workflows/qa-dev.yml
   - scripts/ci/qa-freshness.mjs
   - .env.dev.example
-  - packages/frontend/src/components/AddFundsModal.tsx
+  - packages/frontend/src/components/ReceiveDialog.tsx
   - packages/frontend/src/components/EnvBadge.tsx
   - packages/frontend/src/lib/env.ts
   - packages/backend/src/config.ts
@@ -31,8 +31,90 @@ covers:
   - packages/frontend/vercel.json
   - packages/frontend/src/lib/__tests__/vercel-ignore-build.test.ts
   - scripts/vercel/**
-last-verified: "2026-10-10"
+  - packages/backend/src/infra/chain/x402-binding-signer.ts
+  - packages/backend/src/config/boolean-flag.ts
+  - packages/frontend/package.json
+  - .github/workflows/ci.yml
+  - .github/workflows/update-visual-baselines.yml
+last-verified: "2026-10-23"
 ---
+
+> **Re-verified #4319 (2026-10-23, the EIP-3009 receipt-attribution flag):**
+> this diff touched one file in this document's coverage list,
+> `packages/backend/src/config.ts`. The change adds one entry to the `config`
+> object — `eip3009ReceiptAttribution`, read through `parseBooleanFlag` from a
+> NEW env scalar, `HAVEN_EIP3009_RECEIPT_ATTRIBUTION`. It follows the family's
+> standing rules this document already describes: unset/empty reads `false`
+> (the flag ships off, per the issue's rollout order — merge → dev dry run →
+> dev write → dev flag → prod), an unrecognised value refuses the boot
+> (#3015), and the flag is documented in `.env.example` beside its siblings.
+> No env variable this document names is renamed, re-read, or re-typed; no
+> dev-environment surface (ports, services, workflow env plumbing) moves.
+> Scope of this note: the one new flag and its env scalar. Nothing else in
+> this document was re-verified, and `last-verified` already reads 2026-10-23
+> and is left as is.
+
+> **Re-verified #4307 (2026-10-23, Receive dialog QR chrome):** this diff
+> touched one file in this document's coverage list,
+> `packages/frontend/src/components/ReceiveDialog.tsx`. The change is
+> presentational: the visible "QR code for 0x…" caption under the QR image is
+> removed — the `<img>` alt text is unchanged and still names the code for
+> screen readers, and the address and the Copy button below still say what it
+> holds — and the QR image loses its inner `border` (the rounded frame box
+> that wraps it remains); the now-unused `truncate` import goes with the
+> caption. The claim § `NEXT_PUBLIC_COINBASE_ONRAMP_APP_ID` in the Playwright
+> builds makes about this file is unchanged: the id is still read at module
+> scope (`const ONRAMP_APP_ID = process.env.NEXT_PUBLIC_COINBASE_ONRAMP_APP_ID`),
+> so the build-time gate and every CI surface that sets the literal behave
+> exactly as written. Nothing else in this document was re-verified, and
+> `last-verified` already reads 2026-10-23 and is left as is.
+
+> **Re-verified #4192 (2026-10-21, ignore-step tests: event-loop yield and
+> real git):** this diff touched two files in this document's coverage list,
+> `scripts/vercel/ignore-build-harness.mjs` and
+> `packages/frontend/src/lib/__tests__/vercel-ignore-build.test.ts`. The
+> harness gains `yieldToEventLoop`, which both ignore-step test files register
+> as an `afterEach`. The harness spawns git synchronously, so without it a file
+> that runs longer than 60 s blocks the vitest worker's event loop past the
+> 60 s timer of its `onTaskUpdate` RPC. vitest then reports an unhandled error
+> and exits 1 although every test passed. On macOS the harness also resolves
+> the real git once (`xcrun -f git`) and puts its directory first on PATH,
+> skipping the slow `/usr/bin/git` shim; elsewhere it spawns plain `git` as
+> before. No assertion, watched path or script behaviour changed, and the
+> claims this document makes about the step and its test stand as written.
+> Nothing else in this document was re-verified, and `last-verified` is not
+> bumped.
+
+> **Re-verified #4167 (2026-10-20, Receive dialog clean-up):** this diff
+> touched one file in this document's coverage list,
+> `packages/frontend/src/components/ReceiveDialog.tsx`. The change is present-
+> tational — the #4094 dialog loses its old Deposit-address chrome (the
+> "On-chain receive" chip, the "Show QR code" toggle in favour of an inline
+> QR, the "View on explorer" button, the "Before you send" box), gains an
+> account picker when the caller offers several accounts, and the dashboard
+> money card follows #4167's one primary-button rule. The claim §
+> `NEXT_PUBLIC_COINBASE_ONRAMP_APP_ID` in the Playwright builds makes about
+> this file is unchanged: the id is still read at module scope
+> (`process.env.NEXT_PUBLIC_COINBASE_ONRAMP_APP_ID`), so the build-time gate
+> and every CI surface that sets the literal behave exactly as written.
+> #1844/#3478 gating is untouched. Nothing else in this document was
+> re-verified, and `last-verified` is not bumped.
+
+> **Re-verified #4118 (2026-10-20, `eth_getLogs` probe line):** this diff
+> touched one file in this document's coverage list,
+> `scripts/ci/rpc-conformance.mjs`, which gains a sixth check (`eth_getLogs`
+> over the last 500 blocks) and the `--logs-range` flag. The edits are the
+> probe step in § *Two Base Sepolia RPCs* (the new line, why 500, the QA
+> observer's `--logs-range 10`) and the provider table's new `--logs-range`
+> column. Nothing else in this document was re-verified, and `last-verified`
+> is not bumped.
+
+> **Re-verified #3913 (2026-10-19, after the toggle):** only the sentence in
+> § *PR previews are opt-in* about the haven-ops skip setting changed. It now
+> says the setting was seen **Enabled** on haven-ops in the dashboard and
+> turned off on 2026-10-15, and that the records stopped (measured on #3913).
+> The frontend's value is still inferred from its records. Nothing else
+> in this document was re-verified, and `last-verified` is not bumped.
 
 > **Re-verified #3913 (2026-10-13, Vercel skip-setting doc corrections):** the
 > edits are the "Skipped - Not affected" sentences in *Which pushes rebuild the
@@ -40,7 +122,7 @@ last-verified: "2026-10-10"
 > such a deployment, the records belong to haven-ops, and they came from the
 > per-project Vercel setting named in the diff with required value **off**
 > (per #3913's GitHub deployment-records census; inferred, dashboard
-> unchecked). Nothing else in this document was re-verified, and
+> unchecked; superseded for haven-ops by the 2026-10-19 note above). Nothing else in this document was re-verified, and
 > `last-verified` is not bumped.
 
 > **Re-verified #3825 (2026-10-09, `GET /user/signers`):** this diff touched
@@ -131,6 +213,19 @@ last-verified: "2026-10-10"
 >
 > Nothing else in this document was re-verified, and `last-verified` is not bumped.
 
+> **Re-verified (#4012, 2026-10-16, `ETH_GETLOGS_MAX_BLOCK_RANGE` added):** a
+> new optional backend variable: the widest `eth_getLogs` block range the RPC
+> provider serves. The x402 settlement sweepers never ask for more. Dev's RPC
+> is the Alchemy dev app on the free plan, which serves **10**. Unset, the
+> sweepers learn that limit from the provider's refusal, which costs one
+> refused call per chain per hour and a `provider_log_range_limit` warn in the
+> backend logs. Set `ETH_GETLOGS_MAX_BLOCK_RANGE=10` on dev while it stays on
+> the free plan, and unset it (or raise it) after a PAYG upgrade. On a
+> 10-block cap the erc7710 sweep scans nothing (its settlement windows do not
+> fit the call budget). The eip3009 sweep still works, 200 blocks per attempt.
+> No other variable, value or deploy step changes. Nothing else in this
+> document was re-verified, and `last-verified` is not bumped.
+
 > **Re-verified (2026-10-09, `ALCHEMY_HISTORY_API_KEY` added):** a new
 > optional backend variable. When set, Base and Base Sepolia transaction
 > history is read through Alchemy's transfers API (`alchemy_getAssetTransfers`,
@@ -156,6 +251,28 @@ last-verified: "2026-10-10"
 > serves the chain-100 explorer history read. The "Testnet RPCs by default"
 > bullet drops its Chiado line. Nothing else in this document was re-verified,
 > and `last-verified` is not bumped.
+
+> **Re-verified #4053 (2026-10-17):** `playwright.config.ts`'s dark-project
+> `testMatch` gains `more-sheet.visual.spec.ts` — the phone More sheet joins
+> the pixel gate in light and dark with the same seed-before-navigation dark
+> convention the other specs use (its spec reads `testInfo.project.name`;
+> unlike most specs it does keep a MOBILE dark baseline, because the sheet only
+> exists below `lg`). `webServer.env` and every other project are untouched,
+> so the Playwright build surfaces this document describes are unchanged; the
+> `DEV` badge section above still holds (the badge now sits off the wordmark
+> with a gap, in the rail and in the sheet). No environment variable changes
+> name, meaning, surface, or where it is set. Nothing else in this file's
+> coverage was touched; this note is the only edit.
+
+> **Re-verified #4293 (2026-10-22):** `playwright.config.ts` gains
+> `use.timezoneId: 'UTC'` and `TZ: 'UTC'` in `webServer.env`, so every e2e and
+> visual run renders local times in UTC whatever the host's zone (the same pin
+> goes into `scripts/screenshot.mjs`'s browser context and dev-server spawn).
+> `TZ` here is a process setting for the test server only: no app environment
+> variable is added, renamed or moved, nothing reads it by name, and no build
+> surface this document describes changes. The other `webServer.env` entries
+> and the projects are untouched. Nothing else in this file's coverage was
+> re-verified; `last-verified` is not bumped.
 
 > **Re-verified #3577 (2026-10-02):** `playwright.config.ts`'s dark-project
 > `testMatch` gains `dev-agent-pages.visual.spec.ts` — For developers and For
@@ -396,9 +513,11 @@ recorded one. Those records belong to haven-ops, and they came from the
 per-project Vercel setting **"Skip deployments when there are no changes to
 the root directory or its dependencies"** — a dashboard setting under
 Settings → Build and Deployment (Root Directory section) that `vercel.json`
-cannot carry — which is on for haven-ops and off for the frontend (inferred
-from GitHub's records; nobody has checked the dashboard yet). Its required
-value on haven-ops is **off** (owner decision 2026-10-13, #3913); see
+cannot carry. The setting is believed off for the frontend, which has never
+recorded a skipped deployment; nobody has checked its dashboard. On haven-ops the owner
+found it **Enabled** and turned it off on 2026-10-15; its required value
+there is **off**. Since then haven-ops has recorded no feature-branch
+deployments (#3913's measurement); see
 [`ops-console.md` § 1](ops-console.md#1-the-vercel-project).
 #3821's Method counted 22–38
 haven-ops deployments a day before #3681 took effect and 3 on 2026-10-08. No
@@ -429,7 +548,7 @@ persisted for weeks**, each invisible to every gate in the repo (#1131):
   relayed call failed upstream;
 - its Railway **Source** was connected to the **`main`** branch, not `dev`. So a service
   in the dev environment was serving *production* code — and because `main` had not
-  moved since 2026-06-26 (317 commits behind `dev`; see the pending-promotion issue),
+  moved since 2026-06-26 (317 commits behind `dev` at the time),
   auto-deploy had nothing to fire on and the build silently aged. Its commit predated
   SDK Base-Sepolia x402 support (`6d4d647`, 2026-06-28), so x402 payments failed with
   `No compatible payment option found in x402 requirements` — an error that reads like
@@ -508,20 +627,24 @@ mirrors `.env.example` with dev-isolated values. Set these in the **dev Railway
 project** (backend / mcp-server) and the **dev Vercel project** (frontend) —
 never in code. **Every secret MUST differ from production.**
 
-**Boolean flags accept only lowercase `true` / `false` (#3015).** Every
-boolean flag the backend reads at boot — `CATALOG_DISCOVERY_ENABLED`,
+**Boolean flags accept only lowercase `true` / `false` (#3015).** The
+boolean flags `config.ts` reads at boot — `CATALOG_DISCOVERY_ENABLED`,
 `HAVEN_FEE_ENABLED`, `HAVEN_LEGACY_BOOKKEEPING_ENABLED`, `HAVEN_HOSTED`,
-`HAVEN_ACCOUNTING_ENABLED`, `HAVEN_OWNER_COMPANY_DETAILS` and the deprecated
+`HAVEN_ACCOUNTING_ENABLED`, `HAVEN_OWNER_COMPANY_DETAILS`,
+`HAVEN_MARKETPLACE_PROSPECTS` and the deprecated
 `HAVEN_REPORTING_FEED_ENABLED` —
-goes through `parseBooleanFlag`: unset or blank means false; any other value
+go through `parseBooleanFlag`: unset or blank means false; any other value
 (`TRUE`, `1`, `yes`, `on`, a trailing space) **refuses the boot**, naming the
 variable and the offending bytes. `HAVEN_HOSTED=TRUE` once reached production
 and silently read as off. Precision: the deprecated alias is parsed only when
 `HAVEN_ACCOUNTING_ENABLED` is unset (the new name shadows it), so a boot that
-succeeds proves the five active flags clean, not the alias. The Railway
-audit of all six (both projects, exact bytes) was completed 2026-09-15 and is
-recorded on PR #3022; `X402_EMIT_PAYER_CONTEXT` was not in that table and
-needs its own reading before #3021 deploys. The seventh, `X402_EMIT_PAYER_CONTEXT` (#3021), is the one exception to the
+succeeds proves the seven active flags clean, not the alias. The Railway
+audit (both projects, exact bytes) was completed 2026-09-15 and is
+recorded on PR #3022. It covered the flags that existed then;
+`HAVEN_MARKETPLACE_PROSPECTS` (#3078, 2026-09-17) and
+`HAVEN_OWNER_COMPANY_DETAILS` (#3332) came later, and `X402_EMIT_PAYER_CONTEXT`
+was not in that table either. `X402_EMIT_PAYER_CONTEXT` (#3021), read through
+`parseBooleanFlag` in `packages/backend/src/infra/chain/x402-binding-signer.ts`, is the one exception to the
 "only `true`/`false`" rule: it also accepts `1` (on) — the spelling every
 #1690 document and template names — trimmed, with a one-line boot warning
 that `true` is the preferred form. Anything else refuses the boot too. It is
@@ -569,20 +692,42 @@ Isolation rules that are non-negotiable for a payments product:
   `node scripts/ci/rpc-conformance.mjs --url "$CANDIDATE_URL" --chain 84532`
   (#3336) — a required step.** Every line must be ✓: the chain id, a JSON-RPC batch of 10 (the harness's
   ethers providers batch up to 100 calls per ~10 ms), the `pending` block tag,
-  `eth_sendRawTransaction` accepted as a method (a zero-balance throwaway key,
-  refused for funds, never mined) and a burst of 20 without a 429. dRPC's free
+  `eth_getLogs` over the last 500 blocks (#4118), `eth_sendRawTransaction`
+  accepted as a method (a zero-balance throwaway key, refused for funds, never
+  mined) and a burst of 20 without a 429. dRPC's free
   plan (the dev primary 2026-09-24 → 2026-09-28) failed the batch and the
   `pending` tag; the shared public node can fail the burst — it is what a
   dedicated endpoint replaces. The probe measures per-second behaviour, never
-  monthly quota: a 5/5 endpoint can still run out of compute units mid-month.
+  monthly quota: an endpoint that passes every line can still run out of
+  compute units mid-month.
+
+  The `eth_getLogs` line asks for 500 blocks because that is the widest batch
+  the backend's settlement sweepers ask for (`EIP3009_LOG_BATCH_BLOCKS`,
+  `SWEEP_LOG_BATCH_BLOCKS`; the probe's self-test pins it to them). Alchemy's
+  free tier serves 10 blocks per call: the probe passed it 5/5 before this
+  line existed, and then both sweepers were refused on every tick (#4012) and
+  the QA observer graded real payments as missing (PR #4086). At 10 blocks the
+  settlement sweep scans nothing on that chain
+  ([accounting-feed.md](./accounting-feed.md)), so this line fails dev's
+  primary while it stays on that plan — the step working, not a probe bug.
+  The query is address-filtered and its result empty, so it measures the
+  range cap only, not a result-count cap. A narrower `--logs-range` is for a
+  variable whose reader asks for less, and it is justified in that variable's
+  row of the table below. **The QA observer `QA_RPC_URL_BASE_SEPOLIA` is
+  probed with `--logs-range 10`**: since PR #4086 the harness reads 10-block
+  windows (`GET_LOGS_MAX_RANGE`), so 500 would measure nothing the observer does.
+
+  ```sh
+  node scripts/ci/rpc-conformance.mjs --url "$CANDIDATE_URL" --chain 84532 --logs-range 10   # QA_RPC_URL_BASE_SEPOLIA only
+  ```
 
   **The dev arrangement since 2026-10-01 (#3489, #3456):**
 
-  | Variable | Where | Provider | Burst of 20 |
-  |---|---|---|---|
-  | `RPC_URL_BASE_SEPOLIA` (primary) | `@haven/backend` / dev | Alchemy, the dev app | 20/20 answered, all 5 checks pass (2026-10-01, after the swap; probed before that day's key rotation, same app) |
-  | `RPC_URL_BASE_SEPOLIA_FALLBACK` | `@haven/backend` / dev | Infura, free Core plan | **fails**: 20/20 then 14/20 rate-limited (2026-09-29), 20/20 (2026-09-30) |
-  | `QA_RPC_URL_BASE_SEPOLIA` (the QA observer) | GitHub Actions secret | Alchemy, a separate QA-observer app | not probed |
+  | Variable | Where | Provider | Burst of 20 | `--logs-range` |
+  |---|---|---|---|---|
+  | `RPC_URL_BASE_SEPOLIA` (primary) | `@haven/backend` / dev | Alchemy, the dev app | 20/20 answered, all 5 checks pass (2026-10-01, after the swap; probed before that day's key rotation, same app) | 500, the default (the sweepers' batch). Not yet probed with the `eth_getLogs` line; expected ✗ on the free tier's 10-block cap (#4118) |
+  | `RPC_URL_BASE_SEPOLIA_FALLBACK` | `@haven/backend` / dev | Infura, free Core plan | **fails**: 20/20 then 14/20 rate-limited (2026-09-29), 20/20 (2026-09-30) | Informational, not a gate: no `eth_getLogs` reader uses the fallback (it carries the viem failover reads and the relayer's raw-send rebroadcast; the log scanners stay on the primary, see *RPC failover* below), so its logs line is covered by the fallback exception below. Re-probe at the default 500 only if it is ever promoted to primary |
+  | `QA_RPC_URL_BASE_SEPOLIA` (the QA observer) | GitHub Actions secret | Alchemy, a separate QA-observer app | not probed | **10**: the harness reads 10-block windows (`GET_LOGS_MAX_RANGE`, PR #4086) and never asks for more |
 
   **Two owner-accepted exceptions to the probe rule above** (2026-10-01):
   - **The fallback fails the burst.** Infura's free plan is kept as a
@@ -636,6 +781,18 @@ Isolation rules that are non-negotiable for a payments product:
  101 deploys (see `docs/product/marketplace.md`); until then every offer
  reads `unstated`.
 
+ > **Re-verified #3980 (2026-10-15):** #3980 touches
+ > `infra/repositories/merchants.ts` (a USDC lowest-price aggregate beside the
+ > offer count) and `routes/merchants.ts` (the field on the wire, plus a
+ > renumbered bind placeholder), without moving the scoping this bullet
+ > describes: `$1` is still the network list, `coming_soon` rows are still
+ > listed only through the same `includeProspects` gate, and the SQL's
+ > `ORDER BY` is deliberately unchanged — #3980 re-sorts client-side in the
+ > grid's `visible` memo, so the endpoint's order for its other clients stays
+ > put.
+ > Scope of this re-read: this bullet's marketplace paragraphs and the
+ > merchants repo/route coverage it names; the rest of the document was not
+ > re-read for it.
  > **Re-verified #3769 (2026-10-08):** the catalog verifier
  > (`modules/catalog/merchant-catalog.ts`) now probes a plain-HTTP row with
  > the row's DECLARED method and body example (`http_method`/`body_type`/
@@ -650,6 +807,36 @@ Isolation rules that are non-negotiable for a payments product:
  > this bullet's catalog-verification paragraphs; nothing else in the
  > document was re-read for it, and `last-verified` is bumped to 2026-10-08
  > for exactly this coverage.
+ > **Re-verified #4245 (2026-10-22):** #4245 adds `merchant_catalog.source`
+ > (migration 117) and the `CatalogRow.source` field in
+ > `modules/catalog/merchant-catalog.ts`. The refresh probe, what it records
+ > (`pay_to`, `asset_transfer_methods`, `http_method`) and the marketplace
+ > chain scoping above are unchanged; only the discovery cron's INSERT writes
+ > the new column. `CATALOG_DISCOVERY_ENABLED` stays false in
+ > `.env.dev.example`. Scope of this re-read: this bullet's catalog
+ > paragraphs; nothing else in the document was re-read for it, and
+ > `last-verified` is not bumped.
+ > **Re-verified #4281 (2026-10-22):** the refresh probe in
+ > `modules/catalog/merchant-catalog.ts` now sends every request through the
+ > SSRF guard (`infra/http/ssrf-guard.ts`). That means https on the default
+ > port only, a public resolved address only, a 15 s total deadline and a
+ > 256 KiB cap, and no redirect on a method that carries a body. It still probes
+ > with the row's declared method and
+ > body example, and what a success records (`pay_to`,
+ > `asset_transfer_methods`, `http_method`) is unchanged. Every catalog row
+ > seeded by migrations is an https URL on a public host, so a local dev
+ > refresh probes them as before. A row pointed at a local or http merchant
+ > now fails its probe. Scope of this re-read: this bullet's catalog
+ > paragraphs; nothing else in the document was re-read for it, and
+ > `last-verified` is not bumped.
+ > **Re-verified #4300 (2026-10-23):** a refresh run is now bounded to
+ > 10 min, and a row it does not reach waits for the next run without being
+ > counted as a miss. The guard's deadline now covers name resolution, and it
+ > tries the next checked address when a connection fails before TLS. With
+ > the migration-seeded rows, a local dev refresh finishes well inside the run
+ > budget, so local behaviour is unchanged. Scope of this re-read: this
+ > bullet's catalog paragraphs; nothing else in the document was re-read for
+ > it, and `last-verified` is not bumped.
  - **Owner company details (#3332)** — `HAVEN_OWNER_COMPANY_DETAILS` (strict
   boolean) gates `/user/company-details*`, the additive `parties.buyer`
   field on payment evidence/receipts, and the Settings → Company details
@@ -951,7 +1138,7 @@ credentials. The feed was live-proven against dev on 2026-07-16.
   > provider's ~87 h retry budget) and adds no variable. The
   > request-validation claims hold unchanged: the webhook module is NOT in
   > `enforcedModules` (public route, spec-documented, carries no session
-  > surface to shadow), and `route-modules.generated.ts` was regenerated in
+  > surface to shadow; since #3030 it is listed, see the enumeration above), and `route-modules.generated.ts` was regenerated in
   > the same commit (`npm run check:route-modules` green), including the
   > trailing-slash twin's spec entry so the provider never meets Fastify's
   > redirect. `HAVEN_SECRETS_KEY` now also protects the three webhook
@@ -1125,11 +1312,14 @@ Payments*.
 
 ### The `DEV` badge
 
-`NEXT_PUBLIC_HAVEN_ENV=dev` makes the frontend render a `DEV` chip in the app
-`TopBar` (`components/EnvBadge.tsx`), in the warning tone, so a dev deploy is
-never mistaken for production. `NEXT_PUBLIC_*` is build-time inlined, so the dev
-Vercel deploy bakes the value in; **production leaves the var unset**, which
-renders nothing.
+`NEXT_PUBLIC_HAVEN_ENV=dev` makes the frontend render a `DEV` chip beside the
+"Haven" wordmark in the sidebar's logo band (`components/EnvBadge.tsx`), in the
+warning tone, so a dev deploy is never mistaken for production. (It lived in
+the app `TopBar` until #4029 removed the bar. The 2px warning line #4029 added
+along the top of the app was removed the next day: on a phone it read as a
+rendering bug.) `NEXT_PUBLIC_*` is
+build-time inlined, so the dev Vercel deploy bakes the value in; **production
+leaves the var unset**, which renders nothing.
 
 "Unset means production" is read in ONE place, `packages/frontend/src/lib/env.ts`
 (#2709): the chip, the `?apiBaseUrl` override gate and the capability manifest's
@@ -1158,8 +1348,8 @@ counts as production: to see `/demo` locally, start the server with
 
 ### `NEXT_PUBLIC_COINBASE_ONRAMP_APP_ID` in the Playwright builds (#3483)
 
-The Add funds modal reads `NEXT_PUBLIC_COINBASE_ONRAMP_APP_ID` at build time
-(`packages/frontend/src/components/AddFundsModal.tsx`), so the app a visual
+The Receive dialog reads `NEXT_PUBLIC_COINBASE_ONRAMP_APP_ID` at build time
+(`packages/frontend/src/components/ReceiveDialog.tsx`), so the app a visual
 spec's server serves shows the "Buy with card" onramp card only when the BUILD
 that produced it carried the id. Every CI surface that builds or serves the app
 for Playwright therefore sets it: `ci.yml`'s frontend_checks build (whose
@@ -1168,7 +1358,10 @@ uploaded artifact the design_visual job downloads),
 the webServer boots that standalone build; the non-CI branch runs `next dev`,
 which inlines the constant from `playwright.config.ts`'s `webServer.env`). All
 of them set the same fixed synthetic literal, `e2e-onramp-app-id-placeholder`.
-**It is CI-only by construction: nothing in the repo sets it anywhere else** —
+The frontend workspace's local equivalents of those gates set it too: the
+`test:visual:structure` and `test:e2e:gate:built` scripts in
+`packages/frontend/package.json` (#3487) build with the same literal.
+**It is test-only by construction: nothing else in the repo sets the literal** —
 no `.env*` file, no other workflow, no Docker or hosting config (the literal is
 grep-unique, so the leak check is mechanical), and it is not a secret: the id
 is never rendered, only its PRESENCE gates the card, so a fixed value keeps
@@ -1187,7 +1380,7 @@ unaffected; deleting it from a project's settings is tidying, not a fix.
 ## Inspecting the dev environment
 
 - **Railway → dev backend service → Deployments** — build and runtime logs.
-- **Railway → dev Postgres → Data** — inspect tables (read-only with Viewer role).
+- **Railway → dev Postgres → Database** — inspect tables. The service's tabs are Deployments, Database, Backups, Variables, Metrics, Console and Settings (owner screenshots of the dev and production projects, 2026-10-23). **Console** opens a shell on the service, where `psql` connects with an owner prompt (`railway=#`): run read-only queries only.
 - **Vercel → dev project** — frontend build logs, the branch-tracking `dev`
   preview (the canonical dev URL above) and the opt-in `preview/*` deployments
   (open one only to test that branch's build — remember each is a
@@ -1375,4 +1568,53 @@ project owner — collaborators have Viewer access, not env-var write access.
 > module is already in `index.ts`'s `enforcedModules`). No request-validation
 > mode, enforced-module list, environment variable or dev setup step this
 > document describes moved. The rest of this document was not re-read for it,
+> and `last-verified` is not bumped.
+
+> **Re-verified #3988 (2026-10-15 — a generated table, regenerated).**
+> `packages/backend/src/openapi/route-modules.generated.ts` is the one
+> covered file in this diff: it is REGENERATED (`npm run
+> generate:route-modules`) for the new `GET /agents/{id}/sub-budgets/received`
+> operation, exactly as the file's own header instructs — one mapped row, no
+> mode, enforced-module list, environment variable or dev setup step this
+> document describes moved. The rest of this document was not re-read for
+> it; `last-verified` already reads 2026-10-15.
+
+> **Re-verified #4069 (2026-10-19):** `qa-dev.yml`'s money-flow job gains a
+> *Close the standing qa-failure issue on green* step after Coverage
+> completeness — a failed close only warns, so the job conclusion is
+> unaffected — which only closes the standing
+> `qa-failure` issue; the failure step's trigger line moved into the issue
+> script (agent-qa.md § *Automated failure reporting*). The gate job, the Coverage completeness step, the #1047
+> override validation and the `money-flow` job's conclusion are unchanged, so
+> the freshness-gate statements above still hold. The rest of this document was
+> not re-read for it, and `last-verified` is not bumped.
+
+> **Re-verified #4216 (2026-10-21 — kit analytics off at boot):**
+> `packages/backend/src/index.ts` is the covered file in this diff, and the
+> change is its import ORDER: `src/telemetry/kit-analytics-off.ts` is now the
+> first import, setting `process.env.DO_NOT_TRACK = '1'` before anything in
+> the process can load `@metamask/smart-accounts-kit` (whose analytics post
+> from the first tracked call and latch once). No route, module list,
+> enforced-module entry, start command, health probe or required environment
+> variable this document describes moved — `PORT`, `DATABASE_URL`, the ops
+> surface and the boot checks are untouched; the only behavioral delta is the
+> absence of an outbound telemetry post. The same module is imported by
+> `vitest.setup.ts` and the kit-reaching `scripts/*.ts`, and the deployed
+> process takes this path (Railway starts `node packages/backend/dist/index.js`).
+> Scope of this note: the one new first import; `last-verified` is bumped to
+> 2026-10-21 for exactly this coverage.
+
+> **Re-verified #4236 (2026-10-21 — the qa-failure window):** `qa-dev.yml`'s
+> `money-flow` job gains a job-level `permissions:` block. It restates the
+> top-level `contents: read`, `issues: write` and `deployments: read` and
+> adds `actions: read`, which the failure step uses to list qa-dev's own runs
+> and read their jobs. With that, the standing `qa-failure` issue names the
+> last-green → first-red window and its PRs (agent-qa.md § *Automated failure
+> reporting*). The failure step also passes the dispatch's `haven_api_url`
+> input through env, so a run against another backend reads "window: not a
+> dev run". The `gate` job, its top-level grants, the triggers, the #1047
+> override validation, Coverage completeness, the green step and the
+> `money-flow` job's conclusion are unchanged, so the freshness-gate
+> statements above still hold. `qa-freshness.mjs` is imported by the
+> reporter, not edited. The rest of this document was not re-read for it,
 > and `last-verified` is not bumped.

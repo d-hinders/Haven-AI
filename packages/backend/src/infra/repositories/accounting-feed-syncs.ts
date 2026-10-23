@@ -16,6 +16,11 @@
  * - `markPushed` never flips a pushed row back to retryable: a retry after a
  *   successful push would double-post the invoice. The `note` (#498) carries
  *   a non-fatal degradation into the `error` column WITHOUT changing status.
+ * - Every generic statement is scoped to `document_kind = 'underlag'`
+ *   (#3918): a `merchant_invoice` row is written once — only after a proven
+ *   upload — by `recordMerchantInvoiceSync`, and no claim/mark/sweep/backfill
+ *   statement may claim, rewrite or count it. A new ledger statement that
+ *   could reach a merchant-invoice row must name its kind explicitly.
  */
 
 import pool from '../../db.js'
@@ -36,11 +41,26 @@ export interface FeedSyncRow {
   attempts: number
   created_at: string
   updated_at: string
+  /**
+   * #3918: which document of a payment this row records — `'underlag'` (the
+   * verifiable receipt; every pre-#3918 row, and the only kind the generic
+   * ledger machinery claims, marks and reads) or `'merchant_invoice'` (the
+   * merchant's own invoice, written only after a proven second upload).
+   */
+  document_kind: string
   /** When the provider's webhook confirmed the pushed document (#3019);
    *  null until then, and on every non-Accounted row. Its own column so
    *  `error` stays the failure vocabulary (PR #3196 S2). */
   delivery_confirmed_at: string | null
 }
+
+/**
+ * #3918: the two document kinds a sync row can record. One constant here (not
+ * inline literals in the SQL) so the statement guards and the writer cannot
+ * drift apart; the migration carries the same default.
+ */
+export const UNDERLAG_SYNC_KIND = 'underlag'
+export const MERCHANT_INVOICE_SYNC_KIND = 'merchant_invoice'
 
 export interface ClaimResult {
   /** True when this caller now owns the push (fresh claim or retry of a failed row). */
@@ -55,23 +75,26 @@ export interface ClaimResult {
   fresh: boolean
 }
 
-export const CLAIM_SYNC_INSERT_SQL = `INSERT INTO accounting_feed_syncs (user_id, provider, payment_id, status, attempts)
-     VALUES ($1, $2, $3, 'pending', 1)
-     ON CONFLICT (provider, payment_id, user_id) DO NOTHING
+export const CLAIM_SYNC_INSERT_SQL = `INSERT INTO accounting_feed_syncs (user_id, provider, payment_id, document_kind, status, attempts)
+     VALUES ($1, $2, $3, '${UNDERLAG_SYNC_KIND}', 'pending', 1)
+     ON CONFLICT (provider, payment_id, user_id, document_kind) DO NOTHING
      RETURNING id`
 
 export const CLAIM_SYNC_RECLAIM_FAILED_SQL = `UPDATE accounting_feed_syncs
      SET status = 'pending', attempts = attempts + 1, error = NULL, updated_at = NOW()
      WHERE provider = $2 AND payment_id = $3 AND user_id = $1 AND status IN ('failed', 'skipped')
+       AND document_kind = '${UNDERLAG_SYNC_KIND}'
      RETURNING id`
 
 export const MARK_SYNC_PUSHED_SQL = `UPDATE accounting_feed_syncs
      SET status = 'pushed', external_ref = $4, error = $5, updated_at = NOW()
-     WHERE provider = $2 AND payment_id = $3 AND user_id = $1`
+     WHERE provider = $2 AND payment_id = $3 AND user_id = $1
+       AND document_kind = '${UNDERLAG_SYNC_KIND}'`
 
 export const MARK_SYNC_FAILED_SQL = `UPDATE accounting_feed_syncs
      SET status = 'failed', error = $4, updated_at = NOW()
-     WHERE provider = $2 AND payment_id = $3 AND user_id = $1`
+     WHERE provider = $2 AND payment_id = $3 AND user_id = $1
+       AND document_kind = '${UNDERLAG_SYNC_KIND}'`
 
 // #1365: a connector-level skip is a real ledger state now — previously it was
 // recorded via markPushed (status 'pushed', NULL external_ref, reason
@@ -80,7 +103,8 @@ export const MARK_SYNC_FAILED_SQL = `UPDATE accounting_feed_syncs
 // contract already uses for non-fatal detail).
 export const MARK_SYNC_SKIPPED_SQL = `UPDATE accounting_feed_syncs
      SET status = 'skipped', error = $4, updated_at = NOW()
-     WHERE provider = $2 AND payment_id = $3 AND user_id = $1`
+     WHERE provider = $2 AND payment_id = $3 AND user_id = $1
+       AND document_kind = '${UNDERLAG_SYNC_KIND}'`
 
 // #1365: verification-gated reopen for a deleted-in-Fortnox invoice. The
 // status predicate keeps the double-post guard intact: only a `pushed` row
@@ -90,21 +114,25 @@ export const MARK_SYNC_SKIPPED_SQL = `UPDATE accounting_feed_syncs
 export const REOPEN_PUSHED_SQL = `UPDATE accounting_feed_syncs
      SET status = 'failed', error = $4, updated_at = NOW()
      WHERE provider = $2 AND payment_id = $3 AND user_id = $1 AND status = 'pushed'
+       AND document_kind = '${UNDERLAG_SYNC_KIND}'
      RETURNING id`
 
 export const GET_SYNC_STATE_SQL = `SELECT * FROM accounting_feed_syncs
-     WHERE provider = $2 AND payment_id = $3 AND user_id = $1`
+     WHERE provider = $2 AND payment_id = $3 AND user_id = $1
+       AND document_kind = '${UNDERLAG_SYNC_KIND}'`
 
 export const LIST_SYNCS_FOR_USER_SQL = `SELECT * FROM accounting_feed_syncs
-     WHERE user_id = $1 ORDER BY updated_at DESC LIMIT $2`
+     WHERE user_id = $1 AND document_kind = '${UNDERLAG_SYNC_KIND}' ORDER BY updated_at DESC LIMIT $2`
 
 // #2870: the per-page join the Transactions badge reads. ONE query for the
 // whole page (`= ANY($2)` over the page's payment ids), tenant-scoped by
 // `user_id` — the sync ledger is keyed per user, so a payment id that
 // collides across tenants must never surface another user's row.
+// `document_kind = 'underlag'` (#3918): the badge is one row per payment —
+// the merchant-invoice delivery record is not a second badge.
 export const LIST_SYNCS_FOR_PAYMENT_IDS_SQL = `SELECT provider, payment_id, status, external_ref, error
      FROM accounting_feed_syncs
-     WHERE user_id = $1 AND payment_id = ANY($2)`
+     WHERE user_id = $1 AND payment_id = ANY($2) AND document_kind = '${UNDERLAG_SYNC_KIND}'`
 
 /**
  * Atomically claim a payment for pushing. The concurrency guard is the unique
@@ -249,6 +277,7 @@ export const LIST_UNPUSHED_PAYMENT_IDS_SQL = `SELECT COALESCE(mpe.payment_intent
        ON s.user_id = mpe.user_id AND s.provider = $2
       AND s.payment_id = COALESCE(mpe.payment_intent_id::TEXT, mpe.approval_request_id::TEXT)
       AND s.status = 'pushed'
+      AND s.document_kind = 'underlag'
      WHERE mpe.user_id = $1 AND (mpe.amount_sek IS NOT NULL OR mpe.fx_rates IS NOT NULL) AND s.id IS NULL
        AND ($4::timestamptz IS NULL OR COALESCE(mpe.confirmed_at, mpe.created_at) >= $4::timestamptz)
      ORDER BY COALESCE(mpe.confirmed_at, mpe.created_at) DESC
@@ -380,6 +409,7 @@ export const LIST_DUE_RETRY_SYNCS_SQL = `SELECT * FROM (
      JOIN accounting_connections c ON c.user_id = s.user_id AND c.provider = s.provider
      WHERE c.status = 'connected' AND c.is_active_destination
        AND (c.settings -> 'auto_feed') IS DISTINCT FROM 'false'::jsonb
+       AND s.document_kind = 'underlag'
        AND s.attempts < $2::int
        AND (
          (s.status IN ('failed', 'skipped')
@@ -406,6 +436,7 @@ export const LIST_DUE_RETRY_SYNCS_SQL = `SELECT * FROM (
          SELECT 1 FROM accounting_feed_syncs s2
          WHERE s2.user_id = mpe.user_id AND s2.provider = c.provider
            AND s2.payment_id = COALESCE(mpe.payment_intent_id::TEXT, mpe.approval_request_id::TEXT)
+           AND s2.document_kind = 'underlag'
        )
      ) due
      ORDER BY due.user_id, due.provider, due.updated_at ASC, due.id ASC
@@ -447,7 +478,7 @@ export const COUNT_SYNCS_FOR_USER_SQL = `SELECT
        COUNT(*) FILTER (WHERE status = 'failed' AND attempts < $2::int)::int AS failed,
        COUNT(*) FILTER (WHERE status = 'failed' AND attempts >= $2::int)::int AS exhausted
      FROM accounting_feed_syncs
-     WHERE user_id = $1`
+     WHERE user_id = $1 AND document_kind = 'underlag'`
 
 export interface FeedSyncCounts {
   pending: number
@@ -464,7 +495,7 @@ export interface FeedSyncCounts {
  */
 export const COUNT_EXHAUSTED_SYNCS_SQL = `SELECT COUNT(*)::int AS n
      FROM accounting_feed_syncs
-     WHERE status = 'failed' AND attempts >= $1::int`
+     WHERE status = 'failed' AND attempts >= $1::int AND document_kind = 'underlag'`
 
 export async function listDueRetrySyncs(
   now: Date,
@@ -560,4 +591,53 @@ export async function confirmAccountedDocumentDelivery(
     userId,
   ])
   return (result.rowCount ?? 0) > 0
+}
+
+// ── The merchant's own invoice as a second sync row (#3918) ──────────────────
+//
+// #3016 pinned "one upload is one file, one ref per sync row"; #3918 revisits
+// the row, not the upload: the merchant's own invoice is its own WORM
+// document with its own provider id, recorded as a SECOND row for the same
+// payment under `document_kind = 'merchant_invoice'` (migration 113). The row
+// is written ONLY after the upload's sha256 proof — a merchant-invoice ref is
+// exactly as vouched-for as an underlag ref — and it is never claimed,
+// re-marked or swept: it is delivery bookkeeping, not retry state. A failed
+// upload leaves no row and surfaces as a note on the pushed underlag row.
+
+export const RECORD_MERCHANT_INVOICE_SYNC_SQL = `INSERT INTO accounting_feed_syncs
+       (user_id, provider, payment_id, document_kind, status, attempts, external_ref)
+     VALUES ($1, $2, $3, '${MERCHANT_INVOICE_SYNC_KIND}', 'pushed', 1, $4)
+     ON CONFLICT (provider, payment_id, user_id, document_kind) DO NOTHING
+     RETURNING id`
+
+export const GET_MERCHANT_INVOICE_SYNC_SQL = `SELECT external_ref FROM accounting_feed_syncs
+     WHERE provider = $2 AND payment_id = $3 AND user_id = $1
+       AND document_kind = '${MERCHANT_INVOICE_SYNC_KIND}'`
+
+/**
+ * Record a proven merchant-invoice delivery for `paymentId`. Idempotent by
+ * the ledger's own unique key — the push path and the late-attach path race
+ * on it, and the loser's insert is a no-op rather than a second row.
+ * Returns false when a row already existed.
+ */
+export async function recordMerchantInvoiceSync(
+  userId: string,
+  provider: string,
+  paymentId: string,
+  externalRef: string,
+  db: Executor = pool,
+): Promise<boolean> {
+  const result = await db.query(RECORD_MERCHANT_INVOICE_SYNC_SQL, [userId, provider, paymentId, externalRef])
+  return result.rows.length > 0
+}
+
+/** The recorded merchant-invoice ref for a payment, or null when none exists. */
+export async function getMerchantInvoiceSyncRef(
+  userId: string,
+  provider: string,
+  paymentId: string,
+  db: Executor = pool,
+): Promise<string | null> {
+  const result = await db.query<{ external_ref: string }>(GET_MERCHANT_INVOICE_SYNC_SQL, [userId, provider, paymentId])
+  return result.rows[0]?.external_ref ?? null
 }

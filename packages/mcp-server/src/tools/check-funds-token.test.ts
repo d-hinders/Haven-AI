@@ -126,3 +126,37 @@ describe('haven_check_funds: the token argument (#3213)', () => {
     expect(recordedCalls()).toEqual([])
   })
 })
+
+describe('haven_check_funds: covered false is a SHORT account, not an empty one (#4079)', () => {
+  function shortRoutes() {
+    stubFetch({
+      'GET /machine-payments/allowances': { status: 200, body: AGENT_ALLOWANCES_RESPONSE },
+      'GET /machine-payments/balance-coverage': { status: 200, body: { ...COVERAGE, covered: false } },
+    })
+  }
+
+  it('next_step says the account holds less than the checked amount and to stop — never "empty"', async () => {
+    shortRoutes()
+    const result = ok<{ covered: boolean; next_step: string }>(
+      await handlers().haven_check_funds({ token: 'USDC', max_amount_human: '0.001' }),
+    )
+    expect(result.data.covered).toBe(false)
+    expect(result.data.next_step).toContain('holds less than the checked amount')
+    expect(result.data.next_step).toMatch(/stop and tell the user/)
+    expect(result.data.next_step).not.toMatch(/empty/i)
+  })
+
+  it('the hosted description words covered false as a short account — never empty or missing', async () => {
+    const { toolDescriptions } = await import('../tools.js')
+    const description = toolDescriptions.haven_check_funds
+    expect(description).toContain('tell the user the account is short')
+    expect(description).not.toMatch(/empty account|funds are missing/i)
+  })
+
+  it('the SDK description says the same', async () => {
+    const { toolDescriptions } = await import('@haven_ai/sdk')
+    const behavior = toolDescriptions.checkFunds.behavior
+    expect(behavior).toContain('holds less than the checked amount')
+    expect(behavior).not.toMatch(/empty account|funds are missing/i)
+  })
+})

@@ -183,7 +183,14 @@ const POPULATED_MIN_TEXT_CHARS = 60
 const COPY = {
   heading: 'Analytics',
   rangeCaption: 'Last 30 days',
-  rangeControl: 'Analytics date range',
+  /**
+   * #4116 retarget: the SegmentedControl wrapper is gone; the header carries
+   * the list-controls Period trigger — a resting menu button whose accessible
+   * name is "{label}: {value}" (`listTriggerClasses`), presets only. The
+   * "Analytics date range" radiogroup it replaced asserts ABSENT below.
+   */
+  periodTrigger: 'Period: Last 30 days',
+  rangeControlLegacyName: 'Analytics date range',
   spentBasis: 'based on 5 payments',
   unsettled: '1 awaiting settlement evidence is not counted',
   refusedCount: '2 refused payments',
@@ -374,21 +381,28 @@ const SCENARIOS: Scenario[] = [
       await expect(spend.locator('[data-testid="chart-day"][data-partial="true"]')).toHaveCount(2)
       await expect(spend.getByText(COPY.spendPartialNote, { exact: false })).toHaveCount(1)
 
-      // ── The range control, in its resting state ───────────────────────────
-      // The default window is 30d (`DEFAULT_ANALYTICS_RANGE`) and the fixture's
-      // range is a 30-day window, so the control and the caption agree without
-      // any interaction — and neither is clicked here, because a click would
-      // leave the page mid-request and the capture would be of a transition.
-      const control = page.getByRole('radiogroup', { name: COPY.rangeControl })
-      await expect(control).toHaveCount(1)
-      await expect(control.getByRole('radio', { name: '30 days' })).toBeChecked()
+      // ── The period control, in its resting state ─────────────────────────
+      // #4116: the header's control is the list-controls Period trigger — a
+      // CLOSED menu button named "Period: Last 30 days"; the default window is
+      // 30d (`DEFAULT_ANALYTICS_RANGE`) and the fixture's range is a 30-day
+      // window, so the trigger and the caption agree without any interaction.
+      // It is deliberately NOT opened here: an open panel is a mid-interaction
+      // frame, and a click would leave the capture of a transition. The
+      // SegmentedControl wrapper's radiogroup is asserted gone by name.
+      const trigger = page.getByRole('button', { name: COPY.periodTrigger })
+      await expect(trigger).toHaveCount(1)
+      await expect(trigger).toHaveAttribute('aria-haspopup', 'menu')
+      await expect(trigger).toHaveAttribute('aria-expanded', 'false')
+      await expect(page.getByRole('radiogroup', { name: COPY.rangeControlLegacyName })).toHaveCount(0)
       // The window label the header carries (`rangeCaption(days)` in the
-      // PageHeader's actions, beside the control it names). Page-level because
-      // that is where it renders — the tiles carry the COMPARISON caption
-      // instead, asserted above.
+      // PageHeader's actions, beside the trigger): exactly TWO elements carry
+      // the exact words now — the response-owned caption and the trigger's
+      // value span inside the button. Page-level because that is where both
+      // render — the tiles carry the COMPARISON caption instead, asserted
+      // above (#3038 structure run: scoping it to the tiles grid resolves 0).
       await expect(
         page.getByTestId('analytics-page').getByText(COPY.rangeCaption, { exact: true }),
-      ).toHaveCount(1)
+      ).toHaveCount(2)
 
       // ── The agents table ───────────────────────────────────────────────────
       const agents = section(page, 'analytics-agents-section')
@@ -512,9 +526,12 @@ const SCENARIOS: Scenario[] = [
 
       // The header is rendered from the response the page did get, so the
       // window the report covers is still named, and the control is still on
-      // the page to change it: an empty report is not an unavailable one.
-      await expect(page.getByText(COPY.rangeCaption)).toHaveCount(1)
-      await expect(page.getByRole('radiogroup', { name: COPY.rangeControl })).toHaveCount(1)
+      // the page to change it: an empty report is not an unavailable one. Two
+      // exact-text elements carry the words — the caption and the trigger's
+      // value span (#4116).
+      await expect(page.getByText(COPY.rangeCaption)).toHaveCount(2)
+      await expect(page.getByRole('button', { name: COPY.periodTrigger })).toHaveCount(1)
+      await expect(page.getByRole('radiogroup', { name: COPY.rangeControlLegacyName })).toHaveCount(0)
     },
   },
   {
@@ -553,9 +570,11 @@ const SCENARIOS: Scenario[] = [
 
       // The header survives its endpoint: the page still says which window it
       // tried to read and still offers the control, because what failed was the
-      // reading, not the page.
-      await expect(page.getByText(COPY.rangeCaption)).toHaveCount(1)
-      await expect(page.getByRole('radiogroup', { name: COPY.rangeControl })).toHaveCount(1)
+      // reading, not the page. Two exact-text elements carry the words — the
+      // caption and the trigger's value span (#4116).
+      await expect(page.getByText(COPY.rangeCaption)).toHaveCount(2)
+      await expect(page.getByRole('button', { name: COPY.periodTrigger })).toHaveCount(1)
+      await expect(page.getByRole('radiogroup', { name: COPY.rangeControlLegacyName })).toHaveCount(0)
     },
   },
 ]
@@ -566,7 +585,7 @@ const SCENARIOS: Scenario[] = [
  * request defers to the shared fixture with `route.fallback()`, the same
  * idiom `settings-accounting.visual.spec.ts` and `focus-visible.visual.spec.ts`
  * use. The shared fixture's own `/agents` and `/auth/*` handlers stay in
- * force, which is what keeps the shell (TopBar, sidebar, user menu) rendering
+ * force, which is what keeps the shell (sidebar, user card) rendering
  * its committed content instead of erroring into a half-painted capture.
  *
  * The route glob is the fixture's api-prefix pattern (`**` + the api path +

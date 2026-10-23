@@ -1,0 +1,222 @@
+{
+  "numTotalTests": 19,
+  "success": false,
+  "testResults": [
+    {
+      "name": "<fixture>/vt/probe.test.jsx",
+      "status": "failed",
+      "message": "",
+      "assertionResults": [
+        {
+          "ancestorTitles": [
+            "frontend idiom"
+          ],
+          "title": "jest-dom matcher fails",
+          "fullName": "frontend idiom jest-dom matcher fails",
+          "status": "failed",
+          "failureMessages": [
+            "Error: \u001b[2mexpect(\u001b[22m\u001b[31melement\u001b[39m\u001b[2m).toHaveClass(\u001b[22m\u001b[32m\u001b[32m\"text-xl\"\u001b[32m\u001b[39m\u001b[2m)\u001b[22m\n\nExpected the element to have class:\n\u001b[32m  text-xl\u001b[39m\nReceived:\n\u001b[31m  text-sm\u001b[39m\n    at Proxy.expectWrapper (<fixture>/repo/node_modules/@vitest/expect/dist/index.js:1745:12)\n    at Proxy.<anonymous> (<fixture>/repo/node_modules/@vitest/expect/dist/index.js:1029:14)\n    at Proxy.methodWrapper (<fixture>/repo/node_modules/chai/index.js:1686:25)\n    at <fixture>/vt/probe.test.jsx:6:35\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)\n    at runTest (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)"
+          ]
+        },
+        {
+          "ancestorTitles": [
+            "frontend idiom"
+          ],
+          "title": "getBy finds nothing",
+          "fullName": "frontend idiom getBy finds nothing",
+          "status": "failed",
+          "failureMessages": [
+            "TestingLibraryElementError: Unable to find an element with the text: nope. This could be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher more flexible.\n\nIgnored nodes: comments, script, style\n\u001b[36m<body>\u001b[39m\n  \u001b[36m<div>\u001b[39m\n    \u001b[36m<span\u001b[39m\n      \u001b[33mclass\u001b[39m=\u001b[32m\"text-sm\"\u001b[39m\n    \u001b[36m>\u001b[39m\n      \u001b[0mx\u001b[0m\n    \u001b[36m</span>\u001b[39m\n  \u001b[36m</div>\u001b[39m\n  \u001b[36m<div>\u001b[39m\n    \u001b[36m<span>\u001b[39m\n      \u001b[0mx\u001b[0m\n    \u001b[36m</span>\u001b[39m\n  \u001b[36m</div>\u001b[39m\n\u001b[36m</body>\u001b[39m\n    at Object.getElementError (<fixture>/repo/node_modules/@testing-library/dom/dist/config.js:37:19)\n    at <fixture>/repo/node_modules/@testing-library/dom/dist/query-helpers.js:76:38\n    at <fixture>/repo/node_modules/@testing-library/dom/dist/query-helpers.js:52:17\n    at <fixture>/repo/node_modules/@testing-library/dom/dist/query-helpers.js:95:19\n    at <fixture>/vt/probe.test.jsx:10:12\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)"
+          ]
+        },
+        {
+          "ancestorTitles": [
+            "frontend idiom"
+          ],
+          "title": "findBy times out",
+          "fullName": "frontend idiom findBy times out",
+          "status": "failed",
+          "failureMessages": [
+            "Error: Unable to find an element with the text: nope. This could be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher more flexible.\n\nIgnored nodes: comments, script, style\n\u001b[36m<body>\u001b[39m\n  \u001b[36m<div>\u001b[39m\n    \u001b[36m<span\u001b[39m\n      \u001b[33mclass\u001b[39m=\u001b[32m\"text-sm\"\u001b[39m\n    \u001b[36m>\u001b[39m\n      \u001b[0mx\u001b[0m\n    \u001b[36m</span>\u001b[39m\n  \u001b[36m</div>\u001b[39m\n  \u001b[36m<div>\u001b[39m\n    \u001b[36m<span>\u001b[39m\n      \u001b[0mx\u001b[0m\n    \u001b[36m</span>\u001b[39m\n  \u001b[36m</div>\u001b[39m\n  \u001b[36m<div>\u001b[39m\n    \u001b[36m<span>\u001b[39m\n      \u001b[0mx\u001b[0m\n    \u001b[36m</span>\u001b[39m\n  \u001b[36m</div>\u001b[39m\n\u001b[36m</body>\u001b[39m\n    at waitForWrapper (<fixture>/repo/node_modules/@testing-library/dom/dist/wait-for.js:163:27)\n    at <fixture>/repo/node_modules/@testing-library/dom/dist/query-helpers.js:86:33\n    at <fixture>/vt/probe.test.jsx:14:18\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)\n    at runTest (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)\n    at processTicksAndRejections (node:internal/process/task_queues:104:5)"
+          ]
+        },
+        {
+          "ancestorTitles": [
+            "frontend idiom"
+          ],
+          "title": "findByRole times out",
+          "fullName": "frontend idiom findByRole times out",
+          "status": "failed",
+          "failureMessages": [
+            "Error: Unable to find role=\"button\"\n\nIgnored nodes: comments, script, style\n\u001b[36m<body>\u001b[39m\n  \u001b[36m<div>\u001b[39m\n    \u001b[36m<span\u001b[39m\n      \u001b[33mclass\u001b[39m=\u001b[32m\"text-sm\"\u001b[39m\n    \u001b[36m>\u001b[39m\n      \u001b[0mx\u001b[0m\n    \u001b[36m</span>\u001b[39m\n  \u001b[36m</div>\u001b[39m\n  \u001b[36m<div>\u001b[39m\n    \u001b[36m<span>\u001b[39m\n      \u001b[0mx\u001b[0m\n    \u001b[36m</span>\u001b[39m\n  \u001b[36m</div>\u001b[39m\n  \u001b[36m<div>\u001b[39m\n    \u001b[36m<span>\u001b[39m\n      \u001b[0mx\u001b[0m\n    \u001b[36m</span>\u001b[39m\n  \u001b[36m</div>\u001b[39m\n  \u001b[36m<div>\u001b[39m\n    \u001b[36m<span>\u001b[39m\n      \u001b[0mx\u001b[0m\n    \u001b[36m</span>\u001b[39m\n  \u001b[36m</div>\u001b[39m\n\u001b[36m</body>\u001b[39m\n    at waitForWrapper (<fixture>/repo/node_modules/@testing-library/dom/dist/wait-for.js:163:27)\n    at <fixture>/repo/node_modules/@testing-library/dom/dist/query-helpers.js:86:33\n    at <fixture>/vt/probe.test.jsx:18:18\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)\n    at runTest (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)\n    at runSuite (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)"
+          ]
+        },
+        {
+          "ancestorTitles": [
+            "frontend idiom"
+          ],
+          "title": "findByRole with a name times out",
+          "fullName": "frontend idiom findByRole with a name times out",
+          "status": "failed",
+          "failureMessages": [
+            "Error: Unable to find role=\"button\" and name \"Stop\"\n\nIgnored nodes: comments, script, style\n\u001b[36m<body>\u001b[39m\n  \u001b[36m<div>\u001b[39m\n    \u001b[36m<span\u001b[39m\n      \u001b[33mclass\u001b[39m=\u001b[32m\"text-sm\"\u001b[39m\n    \u001b[36m>\u001b[39m\n      \u001b[0mx\u001b[0m\n    \u001b[36m</span>\u001b[39m\n  \u001b[36m</div>\u001b[39m\n  \u001b[36m<div>\u001b[39m\n    \u001b[36m<span>\u001b[39m\n      \u001b[0mx\u001b[0m\n    \u001b[36m</span>\u001b[39m\n  \u001b[36m</div>\u001b[39m\n  \u001b[36m<div>\u001b[39m\n    \u001b[36m<span>\u001b[39m\n      \u001b[0mx\u001b[0m\n    \u001b[36m</span>\u001b[39m\n  \u001b[36m</div>\u001b[39m\n  \u001b[36m<div>\u001b[39m\n    \u001b[36m<span>\u001b[39m\n      \u001b[0mx\u001b[0m\n    \u001b[36m</span>\u001b[39m\n  \u001b[36m</div>\u001b[39m\n  \u001b[36m<div>\u001b[39m\n    \u001b[36m<button>\u001b[39m\n      \u001b[0mGo\u001b[0m\n    \u001b[36m</button>\u001b[39m\n  \u001b[36m</div>\u001b[39m\n\u001b[36m</body>\u001b[39m\n    at waitForWrapper (<fixture>/repo/node_modules/@testing-library/dom/dist/wait-for.js:163:27)\n    at <fixture>/repo/node_modules/@testing-library/dom/dist/query-helpers.js:86:33\n    at <fixture>/vt/probe.test.jsx:22:18\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)\n    at runTest (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)\n    at runSuite (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)"
+          ]
+        },
+        {
+          "ancestorTitles": [
+            "frontend idiom"
+          ],
+          "title": "findByLabelText times out",
+          "fullName": "frontend idiom findByLabelText times out",
+          "status": "failed",
+          "failureMessages": [
+            "Error: Unable to find a label with the text of: Amount\n\nIgnored nodes: comments, script, style\n\u001b[36m<body>\u001b[39m\n  \u001b[36m<div>\u001b[39m\n    \u001b[36m<span\u001b[39m\n      \u001b[33mclass\u001b[39m=\u001b[32m\"text-sm\"\u001b[39m\n    \u001b[36m>\u001b[39m\n      \u001b[0mx\u001b[0m\n    \u001b[36m</span>\u001b[39m\n  \u001b[36m</div>\u001b[39m\n  \u001b[36m<div>\u001b[39m\n    \u001b[36m<span>\u001b[39m\n      \u001b[0mx\u001b[0m\n    \u001b[36m</span>\u001b[39m\n  \u001b[36m</div>\u001b[39m\n  \u001b[36m<div>\u001b[39m\n    \u001b[36m<span>\u001b[39m\n      \u001b[0mx\u001b[0m\n    \u001b[36m</span>\u001b[39m\n  \u001b[36m</div>\u001b[39m\n  \u001b[36m<div>\u001b[39m\n    \u001b[36m<span>\u001b[39m\n      \u001b[0mx\u001b[0m\n    \u001b[36m</span>\u001b[39m\n  \u001b[36m</div>\u001b[39m\n  \u001b[36m<div>\u001b[39m\n    \u001b[36m<button>\u001b[39m\n      \u001b[0mGo\u001b[0m\n    \u001b[36m</button>\u001b[39m\n  \u001b[36m</div>\u001b[39m\n  \u001b[36m<div>\u001b[39m\n    \u001b[36m<span>\u001b[39m\n      \u001b[0mx\u001b[0m\n    \u001b[36m</span>\u001b[39m\n  \u001b[36m</div>\u001b[39m\n\u001b[36m</body>\u001b[39m\n    at waitForWrapper (<fixture>/repo/node_modules/@testing-library/dom/dist/wait-for.js:163:27)\n    at <fixture>/repo/node_modules/@testing-library/dom/dist/query-helpers.js:86:33\n    at <fixture>/vt/probe.test.jsx:26:18\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)\n    at runTest (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)\n    at runSuite (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)"
+          ]
+        },
+        {
+          "ancestorTitles": [
+            "frontend idiom"
+          ],
+          "title": "findBy finds several",
+          "fullName": "frontend idiom findBy finds several",
+          "status": "failed",
+          "failureMessages": [
+            "Error: Found multiple elements with the text: x\n\nHere are the matching elements:\n\nIgnored nodes: comments, script, style\n\u001b[36m<span\u001b[39m\n  \u001b[33mclass\u001b[39m=\u001b[32m\"text-sm\"\u001b[39m\n\u001b[36m>\u001b[39m\n  \u001b[0mx\u001b[0m\n\u001b[36m</span>\u001b[39m\n\nIgnored nodes: comments, script, style\n\u001b[36m<span>\u001b[39m\n  \u001b[0mx\u001b[0m\n\u001b[36m</span>\u001b[39m\n\nIgnored nodes: comments, script, style\n\u001b[36m<span>\u001b[39m\n  \u001b[0mx\u001b[0m\n\u001b[36m</span>\u001b[39m\n\nIgnored nodes: comments, script, style\n\u001b[36m<span>\u001b[39m\n  \u001b[0mx\u001b[0m\n\u001b[36m</span>\u001b[39m\n\nIgnored nodes: comments, script, style\n\u001b[36m<span>\u001b[39m\n  \u001b[0mx\u001b[0m\n\u001b[36m</span>\u001b[39m\n\nIgnored nodes: comments, script, style\n\u001b[36m<span>\u001b[39m\n  \u001b[0mx\u001b[0m\n\u001b[36m</span>\u001b[39m\n\nIgnored nodes: comments, script, style\n\u001b[36m<span>\u001b[39m\n  \u001b[0mx\u001b[0m\n\u001b[36m</span>\u001b[39m\n\n(If this is intentional, then use the `*AllBy*` variant of the query (like `queryAllByText`, `getAllByText`, or `findAllByText`)).\n\nIgnored nodes: comments, script, style\n\u001b[36m<body>\u001b[39m\n  \u001b[36m<div>\u001b[39m\n    \u001b[36m<span\u001b[39m\n      \u001b[33mclass\u001b[39m=\u001b[32m\"text-sm\"\u001b[39m\n    \u001b[36m>\u001b[39m\n      \u001b[0mx\u001b[0m\n    \u001b[36m</span>\u001b[39m\n  \u001b[36m</div>\u001b[39m\n  \u001b[36m<div>\u001b[39m\n    \u001b[36m<span>\u001b[39m\n      \u001b[0mx\u001b[0m\n    \u001b[36m</span>\u001b[39m\n  \u001b[36m</div>\u001b[39m\n  \u001b[36m<div>\u001b[39m\n    \u001b[36m<span>\u001b[39m\n      \u001b[0mx\u001b[0m\n    \u001b[36m</span>\u001b[39m\n  \u001b[36m</div>\u001b[39m\n  \u001b[36m<div>\u001b[39m\n    \u001b[36m<span>\u001b[39m\n      \u001b[0mx\u001b[0m\n    \u001b[36m</span>\u001b[39m\n  \u001b[36m</div>\u001b[39m\n  \u001b[36m<div>\u001b[39m\n    \u001b[36m<button>\u001b[39m\n      \u001b[0mGo\u001b[0m\n    \u001b[36m</button>\u001b[39m\n  \u001b[36m</div>\u001b[39m\n  \u001b[36m<div>\u001b[39m\n    \u001b[36m<span>\u001b[39m\n      \u001b[0mx\u001b[0m\n    \u001b[36m</span>\u001b[39m\n  \u001b[36m</div>\u001b[39m\n  \u001b[36m<div>\u001b[39m\n    \u001b[36m<div>\u001b[39m\n      \u001b[36m<span>\u001b[39m\n        \u001b[0mx\u001b[0m\n      \u001b[36m</span>\u001b[39m\n      \u001b[36m<span>\u001b[39m\n        \u001b[0mx\u001b[0m\n      \u001b[36m</span>\u001b[39m\n    \u001b[36m</div>\u001b[39m\n  \u001b[36m</div>\u001b[39m\n\u001b[36m</body>\u001b[39m\n    at waitForWrapper (<fixture>/repo/node_modules/@testing-library/dom/dist/wait-for.js:163:27)\n    at <fixture>/repo/node_modules/@testing-library/dom/dist/query-helpers.js:86:33\n    at <fixture>/vt/probe.test.jsx:30:18\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)\n    at runTest (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)\n    at runSuite (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)"
+          ]
+        },
+        {
+          "ancestorTitles": [
+            "frontend idiom"
+          ],
+          "title": "waitFor getBy finds several",
+          "fullName": "frontend idiom waitFor getBy finds several",
+          "status": "failed",
+          "failureMessages": [
+            "Error: Found multiple elements with the text: x\n\nHere are the matching elements:\n\nIgnored nodes: comments, script, style\n\u001b[36m<span\u001b[39m\n  \u001b[33mclass\u001b[39m=\u001b[32m\"text-sm\"\u001b[39m\n\u001b[36m>\u001b[39m\n  \u001b[0mx\u001b[0m\n\u001b[36m</span>\u001b[39m\n\nIgnored nodes: comments, script, style\n\u001b[36m<span>\u001b[39m\n  \u001b[0mx\u001b[0m\n\u001b[36m</span>\u001b[39m\n\nIgnored nodes: comments, script, style\n\u001b[36m<span>\u001b[39m\n  \u001b[0mx\u001b[0m\n\u001b[36m</span>\u001b[39m\n\nIgnored nodes: comments, script, style\n\u001b[36m<span>\u001b[39m\n  \u001b[0mx\u001b[0m\n\u001b[36m</span>\u001b[39m\n\nIgnored nodes: comments, script, style\n\u001b[36m<span>\u001b[39m\n  \u001b[0mx\u001b[0m\n\u001b[36m</span>\u001b[39m\n\nIgnored nodes: comments, script, style\n\u001b[36m<span>\u001b[39m\n  \u001b[0mx\u001b[0m\n\u001b[36m</span>\u001b[39m\n\nIgnored nodes: comments, script, style\n\u001b[36m<span>\u001b[39m\n  \u001b[0mx\u001b[0m\n\u001b[36m</span>\u001b[39m\n\nIgnored nodes: comments, script, style\n\u001b[36m<span>\u001b[39m\n  \u001b[0mx\u001b[0m\n\u001b[36m</span>\u001b[39m\n\nIgnored nodes: comments, script, style\n\u001b[36m<span>\u001b[39m\n  \u001b[0mx\u001b[0m\n\u001b[36m</span>\u001b[39m\n\n(If this is intentional, then use the `*AllBy*` variant of the query (like `queryAllByText`, `getAllByText`, or `findAllByText`)).\n\nIgnored nodes: comments, script, style\n\u001b[36m<body>\u001b[39m\n  \u001b[36m<div>\u001b[39m\n    \u001b[36m<span\u001b[39m\n      \u001b[33mclass\u001b[39m=\u001b[32m\"text-sm\"\u001b[39m\n    \u001b[36m>\u001b[39m\n      \u001b[0mx\u001b[0m\n    \u001b[36m</span>\u001b[39m\n  \u001b[36m</div>\u001b[39m\n  \u001b[36m<div>\u001b[39m\n    \u001b[36m<span>\u001b[39m\n      \u001b[0mx\u001b[0m\n    \u001b[36m</span>\u001b[39m\n  \u001b[36m</div>\u001b[39m\n  \u001b[36m<div>\u001b[39m\n    \u001b[36m<span>\u001b[39m\n      \u001b[0mx\u001b[0m\n    \u001b[36m</span>\u001b[39m\n  \u001b[36m</div>\u001b[39m\n  \u001b[36m<div>\u001b[39m\n    \u001b[36m<span>\u001b[39m\n      \u001b[0mx\u001b[0m\n    \u001b[36m</span>\u001b[39m\n  \u001b[36m</div>\u001b[39m\n  \u001b[36m<div>\u001b[39m\n    \u001b[36m<button>\u001b[39m\n      \u001b[0mGo\u001b[0m\n    \u001b[36m</button>\u001b[39m\n  \u001b[36m</div>\u001b[39m\n  \u001b[36m<div>\u001b[39m\n    \u001b[36m<span>\u001b[39m\n      \u001b[0mx\u001b[0m\n    \u001b[36m</span>\u001b[39m\n  \u001b[36m</div>\u001b[39m\n  \u001b[36m<div>\u001b[39m\n    \u001b[36m<div>\u001b[39m\n      \u001b[36m<span>\u001b[39m\n        \u001b[0mx\u001b[0m\n      \u001b[36m</span>\u001b[39m\n      \u001b[36m<span>\u001b[39m\n        \u001b[0mx\u001b[0m\n      \u001b[36m</span>\u001b[39m\n    \u001b[36m</div>\u001b[39m\n  \u001b[36m</div>\u001b[39m\n  \u001b[36m<div>\u001b[39m\n    \u001b[36m<div>\u001b[39m\n      \u001b[36m<span>\u001b[39m\n        \u001b[0mx\u001b[0m\n      \u001b[36m</span>\u001b[39m\n      \u001b[36m<span>\u001b[39m\n        \u001b[0mx\u001b[0m\n      \u001b[36m</span>\u001b[39m\n    \u001b[36m</div>\u001b[39m\n  \u001b[36m</div>\u001b[39m\n\u001b[36m</body>\u001b[39m\n    at waitForWrapper (<fixture>/repo/node_modules/@testing-library/dom/dist/wait-for.js:163:27)\n    at <fixture>/vt/probe.test.jsx:34:11\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)\n    at runTest (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)\n    at runSuite (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runSuite (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)"
+          ]
+        },
+        {
+          "ancestorTitles": [
+            "frontend idiom"
+          ],
+          "title": "findByLabelText label without control",
+          "fullName": "frontend idiom findByLabelText label without control",
+          "status": "failed",
+          "failureMessages": [
+            "Error: Found a label with the text of: Name, however no form control was found associated to that label. Make sure you're using the \"for\" attribute or \"aria-labelledby\" attribute correctly.\n\nIgnored nodes: comments, script, style\n\u001b[36m<body>\u001b[39m\n  \u001b[36m<div>\u001b[39m\n    \u001b[36m<span\u001b[39m\n      \u001b[33mclass\u001b[39m=\u001b[32m\"text-sm\"\u001b[39m\n    \u001b[36m>\u001b[39m\n      \u001b[0mx\u001b[0m\n    \u001b[36m</span>\u001b[39m\n  \u001b[36m</div>\u001b[39m\n  \u001b[36m<div>\u001b[39m\n    \u001b[36m<span>\u001b[39m\n      \u001b[0mx\u001b[0m\n    \u001b[36m</span>\u001b[39m\n  \u001b[36m</div>\u001b[39m\n  \u001b[36m<div>\u001b[39m\n    \u001b[36m<span>\u001b[39m\n      \u001b[0mx\u001b[0m\n    \u001b[36m</span>\u001b[39m\n  \u001b[36m</div>\u001b[39m\n  \u001b[36m<div>\u001b[39m\n    \u001b[36m<span>\u001b[39m\n      \u001b[0mx\u001b[0m\n    \u001b[36m</span>\u001b[39m\n  \u001b[36m</div>\u001b[39m\n  \u001b[36m<div>\u001b[39m\n    \u001b[36m<button>\u001b[39m\n      \u001b[0mGo\u001b[0m\n    \u001b[36m</button>\u001b[39m\n  \u001b[36m</div>\u001b[39m\n  \u001b[36m<div>\u001b[39m\n    \u001b[36m<span>\u001b[39m\n      \u001b[0mx\u001b[0m\n    \u001b[36m</span>\u001b[39m\n  \u001b[36m</div>\u001b[39m\n  \u001b[36m<div>\u001b[39m\n    \u001b[36m<div>\u001b[39m\n      \u001b[36m<span>\u001b[39m\n        \u001b[0mx\u001b[0m\n      \u001b[36m</span>\u001b[39m\n      \u001b[36m<span>\u001b[39m\n        \u001b[0mx\u001b[0m\n      \u001b[36m</span>\u001b[39m\n    \u001b[36m</div>\u001b[39m\n  \u001b[36m</div>\u001b[39m\n  \u001b[36m<div>\u001b[39m\n    \u001b[36m<div>\u001b[39m\n      \u001b[36m<span>\u001b[39m\n        \u001b[0mx\u001b[0m\n      \u001b[36m</span>\u001b[39m\n      \u001b[36m<span>\u001b[39m\n        \u001b[0mx\u001b[0m\n      \u001b[36m</span>\u001b[39m\n    \u001b[36m</div>\u001b[39m\n  \u001b[36m</div>\u001b[39m\n  \u001b[36m<div>\u001b[39m\n    \u001b[36m<label>\u001b[39m\n      \u001b[0mName\u001b[0m\n    \u001b[36m</label>\u001b[39m\n  \u001b[36m</div>\u001b[39m\n\u001b[36m</body>\u001b[39m\n    at waitForWrapper (<fixture>/repo/node_modules/@testing-library/dom/dist/wait-for.js:163:27)\n    at <fixture>/repo/node_modules/@testing-library/dom/dist/query-helpers.js:86:33\n    at <fixture>/vt/probe.test.jsx:38:18\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)\n    at runTest (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)\n    at runSuite (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)"
+          ]
+        },
+        {
+          "ancestorTitles": [
+            "frontend idiom"
+          ],
+          "title": "async waitFor getByRole after an await",
+          "fullName": "frontend idiom async waitFor getByRole after an await",
+          "status": "failed",
+          "failureMessages": [
+            "Error: Unable to find an accessible element with the role \"alert\"\n\nThere are no accessible roles. But there might be some inaccessible roles. If you wish to access them, then set the `hidden` option to `true`. Learn more about this here: https://testing-library.com/docs/dom-testing-library/api-queries#byrole\n\nIgnored nodes: comments, script, style\n\u001b[36m<div\u001b[39m\n  \u001b[33mrole\u001b[39m=\u001b[32m\"dialog\"\u001b[39m\n\u001b[36m>\u001b[39m\n  \u001b[36m<span>\u001b[39m\n    \u001b[0mx\u001b[0m\n  \u001b[36m</span>\u001b[39m\n\u001b[36m</div>\u001b[39m\n    at waitForWrapper (<fixture>/repo/node_modules/@testing-library/dom/dist/wait-for.js:163:27)\n    at <fixture>/vt/probe.test.jsx:42:11\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)\n    at runTest (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)\n    at runSuite (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runSuite (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)"
+          ]
+        },
+        {
+          "ancestorTitles": [
+            "frontend idiom"
+          ],
+          "title": "plain Error",
+          "fullName": "frontend idiom plain Error",
+          "status": "failed",
+          "failureMessages": [
+            "Error: boom\n    at <fixture>/vt/probe.test.jsx:44:35\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)\n    at runTest (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)\n    at runSuite (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runSuite (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runFiles (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1787:3)"
+          ]
+        },
+        {
+          "ancestorTitles": [
+            "frontend idiom"
+          ],
+          "title": "code throw starting Found",
+          "fullName": "frontend idiom code throw starting Found",
+          "status": "failed",
+          "failureMessages": [
+            "Error: Found no config for haven.json\n    at <fixture>/vt/probe.test.jsx:45:49\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)\n    at runTest (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)\n    at runSuite (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runSuite (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runFiles (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1787:3)"
+          ]
+        },
+        {
+          "ancestorTitles": [
+            "frontend idiom"
+          ],
+          "title": "Error mentioning expect( later",
+          "fullName": "frontend idiom Error mentioning expect( later",
+          "status": "failed",
+          "failureMessages": [
+            "Error: setup failed before expect(x) ran\n    at <fixture>/vt/probe.test.jsx:46:54\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)\n    at runTest (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)\n    at runSuite (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runSuite (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runFiles (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1787:3)"
+          ]
+        },
+        {
+          "ancestorTitles": [
+            "frontend idiom"
+          ],
+          "title": "code throw wrapping an assertion stem",
+          "fullName": "frontend idiom code throw wrapping an assertion stem",
+          "status": "failed",
+          "failureMessages": [
+            "Error: cleanup failed: Error: expect(el).toHaveClass(a)\n    at <fixture>/vt/probe.test.jsx:47:61\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)\n    at runTest (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)\n    at runSuite (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runSuite (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runFiles (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1787:3)"
+          ]
+        },
+        {
+          "ancestorTitles": [
+            "frontend idiom"
+          ],
+          "title": "code throw wrapping a TestingLibraryElementError",
+          "fullName": "frontend idiom code throw wrapping a TestingLibraryElementError",
+          "status": "failed",
+          "failureMessages": [
+            "Error: cleanup failed: TestingLibraryElementError: Unable to find\n    at <fixture>/vt/probe.test.jsx:48:72\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)\n    at runTest (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)\n    at runSuite (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runSuite (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runFiles (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1787:3)"
+          ]
+        },
+        {
+          "ancestorTitles": [
+            "frontend idiom"
+          ],
+          "title": "code throw starting Unable to find",
+          "fullName": "frontend idiom code throw starting Unable to find",
+          "status": "failed",
+          "failureMessages": [
+            "Error: Unable to find config file haven.json\n    at <fixture>/vt/probe.test.jsx:49:58\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)\n    at runTest (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)\n    at runSuite (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runSuite (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runFiles (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1787:3)"
+          ]
+        },
+        {
+          "ancestorTitles": [
+            "frontend idiom"
+          ],
+          "title": "code throw about a labelled widget",
+          "fullName": "frontend idiom code throw about a labelled widget",
+          "status": "failed",
+          "failureMessages": [
+            "Error: Unable to find a labelled widget in config\n    at <fixture>/vt/probe.test.jsx:50:58\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)\n    at runTest (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)\n    at runSuite (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runSuite (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runFiles (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1787:3)"
+          ]
+        },
+        {
+          "ancestorTitles": [
+            "frontend idiom"
+          ],
+          "title": "code throw starting expectation",
+          "fullName": "frontend idiom code throw starting expectation",
+          "status": "failed",
+          "failureMessages": [
+            "Error: expectation of a fixture failed\n    at <fixture>/vt/probe.test.jsx:51:55\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)\n    at runTest (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)\n    at runSuite (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runSuite (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runFiles (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1787:3)"
+          ]
+        },
+        {
+          "ancestorTitles": [
+            "frontend idiom"
+          ],
+          "title": "TypeError",
+          "fullName": "frontend idiom TypeError",
+          "status": "failed",
+          "failureMessages": [
+            "TypeError: Cannot read properties of undefined (reading 'y')\n    at <fixture>/vt/probe.test.jsx:52:57\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26\n    at <fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)\n    at runTest (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)\n    at runSuite (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runSuite (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runFiles (<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1787:3)"
+          ]
+        }
+      ]
+    }
+  ]
+}

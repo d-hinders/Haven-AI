@@ -1,5 +1,9 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest'
+import { budgetCaption } from '@/lib/budget-caption'
+import { AGENT_PAUSED_SHORT } from '@/lib/agent-pause-copy'
+import { timeAgo } from '@/lib/format'
+import type { DashboardAgentStats } from '@/types/dashboard'
 
 // #3812: the in-flow connect/switch control reads wagmi and RainbowKit, which
 // these tests do not provide. Stub it so the test can assert WHEN a flow
@@ -8,30 +12,52 @@ vi.mock('@/components/WalletConnectAction', () => ({
   default: () => <button type="button">Connect wallet</button>,
 }))
 
-const { mockGet, mockGrant, mockRevoke, mockReload, mockBudgetsError, mockTaskBudgets, mockHookArgs, mockToast, mockSigner } =
+const { mockGet, mockGrant, mockEdit, mockRevoke, mockReload, mockBudgetsError, mockTaskBudgets, mockTrees, mockReceivedGrants, mockHookArgs, mockToast, mockSigner } =
   vi.hoisted(() => ({
   // #3812: whether this device can sign, and whether the signer set is known.
-  mockSigner: { ready: true, signersLoading: false, signersError: null as string | null, passkeyElsewhere: false },
+  // #4261: `busy` — a lifecycle action in flight — is parametrizable too, so
+  // the disabled-trigger focus rule is reachable from a test.
+  mockSigner: { ready: true, signersLoading: false, signersError: null as string | null, passkeyElsewhere: false, busy: false },
   mockHookArgs: vi.fn(),
   mockGet: vi.fn(),
   mockGrant: vi.fn(),
+  // #4154: the edit flow's activate-then-Stop, one call as in the hook.
+  mockEdit: vi.fn(),
   mockRevoke: vi.fn(),
   mockReload: vi.fn(),
   mockBudgetsError: vi.fn(() => false),
   mockTaskBudgets: vi.fn(() => [] as unknown[]),
+  // #3922: the sub-budget trees the card renders; null = nothing read (default).
+  mockTrees: vi.fn(() => null as unknown[] | null),
+  // #3988: the grants the agent RECEIVES; null = nothing read (default).
+  mockReceivedGrants: vi.fn(() => null as unknown[] | null),
   // Shared so the revoke-toast tests can assert on it; the component only
   // ever calls the namespaced methods (success/info/error).
   mockToast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn(), info: vi.fn() }),
 }))
 
+// #4226: the hero's Last 30 days column formats through the user's display
+// currency. Pinned so the rendered figure is deterministic; the column tests
+// override it through a dedicated helper if a currency case ever needs one.
+vi.mock('@/hooks/usePreferences', () => ({
+  usePreferences: () => ({ currency: 'USD' }),
+}))
+
+// The modal's Stop-set read (#3933), over the mocked list: the real helper
+// with no remembered attempt (the hook's own tests cover that case).
+const budgetSlot = await vi.importActual<typeof import('@/lib/budget-slot')>('@/lib/budget-slot')
 vi.mock('@/hooks/useDelegationBudget', () => ({
   useDelegationBudget: (...args: unknown[]) => {
     mockHookArgs(...args)
     return {
     budgets: mockGet(),
     grant: mockGrant,
+    editBudget: mockEdit,
+    editStopSet: (hash: string, slot: { tokenAddress: string; recipientAddress?: string | null }, nowSec: number) =>
+      budgetSlot.slotOccupantHashesForEdit(mockGet() as never, hash, slot, nowSec),
+    isOwnAttemptedGrant: () => false,
     revoke: mockRevoke,
-    busy: false,
+    busy: mockSigner.busy,
     ready: mockSigner.ready,
     signersLoading: mockSigner.signersLoading,
     signersError: mockSigner.signersError,
@@ -46,11 +72,17 @@ vi.mock('@/hooks/useDelegationBudget', () => ({
 vi.mock('@/hooks/useTaskBudgets', () => ({
   useTaskBudgets: () => ({ taskBudgets: mockTaskBudgets(), error: false, reload: vi.fn() }),
 }))
+vi.mock('@/hooks/useSubBudgets', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/hooks/useSubBudgets')>()),
+  useSubBudgetTrees: () => ({ trees: mockTrees(), error: false, reload: vi.fn() }),
+  useReceivedSubBudgets: () => ({ grants: mockReceivedGrants(), error: false, reload: vi.fn() }),
+}))
 vi.mock('@/components/ui/Toast', () => ({
   useToast: () => ({ toast: mockToast }),
 }))
 
 const DelegationBudgetCard = (await import('../DelegationBudgetCard')).default
+const DELEGATION_BUDGET_CARD_ID = (await import('../DelegationBudgetCard')).DELEGATION_BUDGET_CARD_ID
 
 const USDC = '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
 const PROPS = {
@@ -64,7 +96,7 @@ const PROPS = {
 function budget(overrides: Record<string, unknown> = {}) {
   return {
     id: 'b1', token_address: USDC, recipient_address: '0x' + 'cc'.repeat(20),
-    delegation_hash: '0x' + 'ab'.repeat(32), version: 1, status: 'active',
+    delegation_hash: '0x' + 'ab'.repeat(32), version: 1, status: 'active', is_live: true,
     budget_atomic: '5000000', period_seconds: 86_400, expires_at: 9_999_999_999,
     // #3806: the anchor — 2026-09-01T02:00:00Z, so the daily boundary after the
     // frozen clock (2026-09-01T12:00Z) is 2026-09-02T02:00Z, 14h out.
@@ -78,11 +110,61 @@ function taskBudget(overrides: Record<string, unknown> = {}) {
     id: 't1', agent_id: 'agent-1', chain_id: 84532, token_address: USDC,
     recipient_address: null, parent_delegation_hash: '0x' + 'ab'.repeat(32),
     delegation_hash: '0x' + 'dd'.repeat(32), label: null, max_atomic: '1000000',
-    status: 'open', expires_at: Math.floor(Date.now() / 1000) + 3600, is_expired: false,
+    status: 'open', expires_at: Math.floor(Date.now() / 1000) + 3600, is_expired: false, is_live: true,
     created_at: '2026-01-01T00:00:00Z', opened_at: '2026-01-01T00:00:00Z',
     closed_at: null, close_tx_hash: null,
     ...overrides,
   }
+}
+
+/**
+ * #4261: every row action lives in the per-budget ⋯ menu — Edit budget,
+ * Add budget, then Stop budget… behind its confirm. Opens the row's menu;
+ * the item-specific helpers below click the item inside it.
+ */
+async function openRowMenu(label: string) {
+  fireEvent.click(
+    await waitFor(() => screen.getByRole('button', { name: new RegExp(`^Budget options ${label}$`) })),
+  )
+}
+
+async function clickMenuItem(name: string) {
+  fireEvent.click(await waitFor(() => screen.getByRole('menuitem', { name })))
+}
+
+/**
+ * #4226: Stop lives in the budget's per-budget ⋯ menu — the irreversible
+ * action gets a menu of its own and its confirm still stands between the
+ * click and the signature.
+ */
+async function openStopViaMenu(label: string) {
+  await openRowMenu(label)
+  await clickMenuItem('Stop budget…')
+}
+
+/**
+ * #4261: Add budget opens the collapsed grant form from a row's ⋯ menu
+ * (default label — the fixture's single 5 USDC/day budget).
+ */
+async function openAddViaMenu(label = '5 USDC per day') {
+  await openRowMenu(label)
+  await clickMenuItem('Add budget')
+}
+
+/** #4261: Edit budget opens the edit-in-place modal from a row's ⋯ menu. */
+async function openEditViaMenu(label: string) {
+  await openRowMenu(label)
+  await clickMenuItem('Edit budget')
+}
+
+/**
+ * #4226: the needs-setup state collapses the grant form behind "Set budget"
+ * (mockup v2). Tests that interact with the form click it open first; with
+ * budgets listed the opener is the rows' ⋯ menu "Add budget" item (#4261)
+ * and the form is untouched.
+ */
+async function openGrantForm() {
+  fireEvent.click(await waitFor(() => screen.getByRole('button', { name: 'Set budget' })))
 }
 
 beforeEach(() => {
@@ -90,8 +172,14 @@ beforeEach(() => {
   mockSigner.passkeyElsewhere = false
   mockSigner.signersLoading = false
   mockSigner.signersError = null
+  mockSigner.busy = false
   mockGet.mockReset()
+  mockTrees.mockReset()
+  mockTrees.mockReturnValue(null)
+  mockReceivedGrants.mockReset()
+  mockReceivedGrants.mockReturnValue(null)
   mockGrant.mockReset()
+  mockEdit.mockReset()
   mockRevoke.mockReset()
   mockReload.mockReset()
   mockBudgetsError.mockReturnValue(false)
@@ -176,7 +264,7 @@ describe('DelegationBudgetCard (#833)', () => {
     unmount()
 
     // A pending (not yet active) budget is not something to slice either.
-    mockGet.mockReturnValue([budget({ status: 'pending' })])
+    mockGet.mockReturnValue([budget({ status: 'pending', is_live: false })])
     const second = render(<DelegationBudgetCard {...PROPS} />)
     await waitFor(() => expect(screen.getByText('Set budget')).toBeTruthy())
     expect(screen.queryByText('Issue sub-budget')).toBeNull()
@@ -189,7 +277,7 @@ describe('DelegationBudgetCard (#833)', () => {
     await waitFor(() => expect(screen.getByText(/5 USDC per day/)).toBeTruthy())
     expect(screen.queryByText('Issue sub-budget')).toBeNull()
     expect(screen.queryByText('Or share part of an existing budget with another agent')).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: 'Add budget' }))
+    await openAddViaMenu()
     expect(screen.getByText('Issue sub-budget')).toBeTruthy()
     third.unmount()
   })
@@ -198,7 +286,7 @@ describe('DelegationBudgetCard (#833)', () => {
     mockGet.mockReturnValue([])
     mockGrant.mockResolvedValue({ ok: true })
     render(<DelegationBudgetCard {...PROPS} />)
-    await waitFor(() => expect(screen.getByText('Set budget')).toBeTruthy())
+    await openGrantForm()
     fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '2.5' } })
     fireEvent.click(screen.getByText('Set budget'))
     await waitFor(() => expect(mockGrant).toHaveBeenCalled())
@@ -215,7 +303,7 @@ describe('DelegationBudgetCard (#833)', () => {
     mockGrant.mockResolvedValue({ ok: true })
     const R = '0x' + 'ee'.repeat(20)
     render(<DelegationBudgetCard {...PROPS} />)
-    await waitFor(() => expect(screen.getByText('Set budget')).toBeTruthy())
+    await openGrantForm()
     fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '1' } })
     fireEvent.change(screen.getByLabelText('Recipient'), { target: { value: R } })
     fireEvent.click(screen.getByText('Set budget'))
@@ -229,7 +317,7 @@ describe('DelegationBudgetCard (#833)', () => {
     mockGet.mockReturnValue([])
     mockGrant.mockResolvedValue({ ok: false, reason: 'failed' })
     render(<DelegationBudgetCard {...PROPS} />)
-    await waitFor(() => expect(screen.getByText('Set budget')).toBeTruthy())
+    await openGrantForm()
     fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '1' } })
     fireEvent.click(screen.getByText('Set budget'))
 
@@ -242,8 +330,10 @@ describe('DelegationBudgetCard (#833)', () => {
   it('Set budget stays disabled without a valid amount', async () => {
     mockGet.mockReturnValue([])
     render(<DelegationBudgetCard {...PROPS} />)
-    await waitFor(() => expect(screen.getByText('Set budget')).toBeTruthy())
-    expect((screen.getByText('Set budget') as HTMLButtonElement).disabled).toBe(true)
+    // #4226: the opener opens the form; the submit inside it stays disabled
+    // until the amount parses.
+    await openGrantForm()
+    expect((screen.getByRole('button', { name: 'Set budget' }) as HTMLButtonElement).disabled).toBe(true)
   })
 
   // ── #3812: the owner wallet's way in, on the card itself ──
@@ -254,8 +344,10 @@ describe('DelegationBudgetCard (#833)', () => {
     mockSigner.ready = false
     mockGet.mockReturnValue([budget()])
     render(<DelegationBudgetCard {...PROPS} />)
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Stop budget 5 USDC per day' })).toBeTruthy())
-    expect((screen.getByRole('button', { name: 'Stop budget 5 USDC per day' }) as HTMLButtonElement).disabled).toBe(true)
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Budget options 5 USDC per day' })).toBeTruthy())
+    // #4261: the trigger itself stays enabled — the menu opens, and it is the
+    // signature-asking Stop item that is disabled in there.
+    expect((screen.getByRole('button', { name: 'Budget options 5 USDC per day' }) as HTMLButtonElement).disabled).toBe(false)
     expect(screen.getByText(/Connect your account owner wallet to change or stop a budget/)).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Connect wallet' })).toBeTruthy()
   })
@@ -264,7 +356,7 @@ describe('DelegationBudgetCard (#833)', () => {
     mockSigner.ready = false
     mockGet.mockReturnValue([])
     render(<DelegationBudgetCard {...PROPS} />)
-    await waitFor(() => expect(screen.getByText('Set budget')).toBeTruthy())
+    await openGrantForm()
     expect(screen.getByText(/Connect your account owner wallet to set a budget/)).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Connect wallet' })).toBeTruthy()
   })
@@ -274,7 +366,7 @@ describe('DelegationBudgetCard (#833)', () => {
     mockSigner.signersLoading = true
     mockGet.mockReturnValue([budget()])
     const { unmount } = render(<DelegationBudgetCard {...PROPS} />)
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Stop budget 5 USDC per day' })).toBeTruthy())
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Budget options 5 USDC per day' })).toBeTruthy())
     expect(screen.queryByRole('button', { name: 'Connect wallet' })).toBeNull()
     unmount()
     mockSigner.signersLoading = false
@@ -287,7 +379,7 @@ describe('DelegationBudgetCard (#833)', () => {
   it('a ready (passkey) owner is offered no wallet connect', async () => {
     mockGet.mockReturnValue([budget()])
     render(<DelegationBudgetCard {...PROPS} />)
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Stop budget 5 USDC per day' })).toBeTruthy())
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Budget options 5 USDC per day' })).toBeTruthy())
     expect(screen.queryByRole('button', { name: 'Connect wallet' })).toBeNull()
   })
 
@@ -300,8 +392,9 @@ describe('DelegationBudgetCard (#833)', () => {
     mockGet.mockReturnValue([budget()])
     mockRevoke.mockResolvedValue({ ok: true })
     render(<DelegationBudgetCard {...PROPS} />)
-    const stop = await waitFor(() => screen.getByRole('button', { name: 'Stop budget 5 USDC per day' }))
-    fireEvent.click(stop)
+    // #4226: the menu item opens the confirm directly; the copy below is the
+    // dialog's, and nothing is signed until its own confirm is clicked.
+    await openStopViaMenu('5 USDC per day')
     // The owner copy, rendered for the row: agent name, 5 USDC, period noun.
     expect(screen.getByRole('heading', { name: 'Stop this budget?' })).toBeTruthy()
     expect(
@@ -317,7 +410,7 @@ describe('DelegationBudgetCard (#833)', () => {
   it('Cancel closes the Stop confirm with nothing called', async () => {
     mockGet.mockReturnValue([budget()])
     render(<DelegationBudgetCard {...PROPS} />)
-    fireEvent.click(await waitFor(() => screen.getByRole('button', { name: 'Stop budget 5 USDC per day' })))
+    await openStopViaMenu('5 USDC per day')
     expect(screen.getByRole('heading', { name: 'Stop this budget?' })).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
     expect(screen.queryByRole('heading', { name: 'Stop this budget?' })).toBeNull()
@@ -329,14 +422,14 @@ describe('DelegationBudgetCard (#833)', () => {
     // largest-dividing-unit rule ("every 90 seconds"), not a raw "90s".
     mockGet.mockReturnValue([budget({ period_seconds: 90 })])
     render(<DelegationBudgetCard {...PROPS} />)
-    fireEvent.click(await waitFor(() => screen.getByRole('button', { name: 'Stop budget 5 USDC every 90 seconds' })))
+    await openStopViaMenu('5 USDC every 90 seconds')
     expect(screen.getByText(/from this 5 USDC every 90 seconds budget\./)).toBeTruthy()
 
     mockGet.mockReturnValue([budget({ budget_atomic: '5' })])
     const { unmount } = render(<DelegationBudgetCard {...PROPS} tokens={[]} />)
     // An unknown token has no decimals, so the row shows the raw atomic
     // amount — its own fallback, without the slash form.
-    fireEvent.click(await waitFor(() => screen.getByRole('button', { name: 'Stop budget 5 per day' })))
+    await openStopViaMenu('5 per day')
     expect(screen.getByText(/from this 5 per day budget\./)).toBeTruthy()
     unmount()
   })
@@ -345,19 +438,19 @@ describe('DelegationBudgetCard (#833)', () => {
     mockGet.mockReturnValue([budget()])
     mockRevoke.mockResolvedValue({ ok: true })
     render(<DelegationBudgetCard {...PROPS} />)
-    fireEvent.click(await waitFor(() => screen.getByRole('button', { name: 'Stop budget 5 USDC per day' })))
+    await openStopViaMenu('5 USDC per day')
     fireEvent.click(screen.getByRole('button', { name: 'Stop budget' }))
     await waitFor(() => expect(mockToast.success).toHaveBeenCalledWith('Budget stopped.'))
     await waitFor(() => expect(screen.queryByRole('heading', { name: 'Stop this budget?' })).toBeNull())
   })
 
-  it('a cancelled signature toasts "Signature was cancelled." and closes the confirm', async () => {
+  it('a cancelled signature toasts "Approval was cancelled." and closes the confirm', async () => {
     mockGet.mockReturnValue([budget()])
     mockRevoke.mockResolvedValue({ ok: false, reason: 'cancelled' })
     render(<DelegationBudgetCard {...PROPS} />)
-    fireEvent.click(await waitFor(() => screen.getByRole('button', { name: 'Stop budget 5 USDC per day' })))
+    await openStopViaMenu('5 USDC per day')
     fireEvent.click(screen.getByRole('button', { name: 'Stop budget' }))
-    await waitFor(() => expect(mockToast.info).toHaveBeenCalledWith('Signature was cancelled.'))
+    await waitFor(() => expect(mockToast.info).toHaveBeenCalledWith('Approval was cancelled.'))
     await waitFor(() => expect(screen.queryByRole('heading', { name: 'Stop this budget?' })).toBeNull())
     expect(mockToast.success).not.toHaveBeenCalled()
   })
@@ -366,7 +459,7 @@ describe('DelegationBudgetCard (#833)', () => {
     mockGet.mockReturnValue([budget()])
     mockRevoke.mockResolvedValue({ ok: false, reason: 'failed' })
     render(<DelegationBudgetCard {...PROPS} />)
-    fireEvent.click(await waitFor(() => screen.getByRole('button', { name: 'Stop budget 5 USDC per day' })))
+    await openStopViaMenu('5 USDC per day')
     fireEvent.click(screen.getByRole('button', { name: 'Stop budget' }))
     await waitFor(() => expect(mockToast.error).toHaveBeenCalledWith('Could not stop the budget. Try again.'))
     await waitFor(() => expect(screen.queryByRole('heading', { name: 'Stop this budget?' })).toBeNull())
@@ -377,7 +470,7 @@ describe('DelegationBudgetCard (#833)', () => {
     mockRevoke.mockResolvedValue({ ok: true })
     const onBudgetChange = vi.fn()
     render(<DelegationBudgetCard {...PROPS} onBudgetChange={onBudgetChange} />)
-    fireEvent.click(await waitFor(() => screen.getByRole('button', { name: 'Stop budget 5 USDC per day' })))
+    await openStopViaMenu('5 USDC per day')
     fireEvent.click(screen.getByRole('button', { name: 'Stop budget' }))
     await waitFor(() => expect(onBudgetChange).toHaveBeenCalled())
   })
@@ -387,7 +480,7 @@ describe('DelegationBudgetCard (#833)', () => {
     mockRevoke.mockResolvedValue({ ok: false, reason: 'failed' })
     const onBudgetChange = vi.fn()
     render(<DelegationBudgetCard {...PROPS} onBudgetChange={onBudgetChange} />)
-    fireEvent.click(await waitFor(() => screen.getByRole('button', { name: 'Stop budget 5 USDC per day' })))
+    await openStopViaMenu('5 USDC per day')
     fireEvent.click(screen.getByRole('button', { name: 'Stop budget' }))
     await waitFor(() => expect(mockRevoke).toHaveBeenCalled())
     expect(onBudgetChange).not.toHaveBeenCalled()
@@ -442,6 +535,7 @@ describe('DelegationBudgetCard (#833)', () => {
           id: 'b2',
           delegation_hash: '0x' + 'cd'.repeat(32),
           status: 'pending',
+          is_live: false,
           recipient_address: null,
           budget_atomic: '7000000',
         }),
@@ -449,10 +543,39 @@ describe('DelegationBudgetCard (#833)', () => {
       render(<DelegationBudgetCard {...PROPS} />)
       await waitFor(() => expect((screen.getByLabelText('Budget amount') as HTMLInputElement).value).toBe('7'))
       expect(screen.getByText('Set budget')).toBeTruthy()
-      expect(screen.queryByRole('button', { name: 'Add budget' })).toBeNull()
+      // #4261: the form is open, so the row's ⋯ menu offers no Add budget —
+      // asserted inside the OPEN menu, not against a vacuous closed one.
+      await openRowMenu('5 USDC per day')
+      expect(screen.queryByRole('menuitem', { name: 'Add budget' })).toBeNull()
+      expect(screen.getByRole('menuitem', { name: 'Edit budget' })).toBeTruthy()
       // #3716: the prefill opens the panel, so the entry shows there too.
       expect(screen.getByText('Issue sub-budget')).toBeTruthy()
       expect(screen.getByText('Or share part of an existing budget with another agent')).toBeTruthy()
+    } finally {
+      restore()
+    }
+  })
+
+  // #4261: a prefill opens with no menu origin, so the collapse lands on the
+  // first row's trigger — measured, not assumed on <body>.
+  it('?grant= Cancel (no origin) returns focus to the first row trigger, never <body> (#4261)', async () => {
+    const restore = withSearch(`?grant=${'0x' + 'cd'.repeat(32)}`)
+    try {
+      mockGet.mockReturnValue([
+        budget(),
+        budget({
+          id: 'b2',
+          delegation_hash: '0x' + 'cd'.repeat(32),
+          status: 'pending',
+          is_live: false,
+          recipient_address: null,
+          budget_atomic: '7000000',
+        }),
+      ])
+      render(<DelegationBudgetCard {...PROPS} />)
+      await waitFor(() => expect((screen.getByLabelText('Budget amount') as HTMLInputElement).value).toBe('7'))
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+      expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Budget options 5 USDC per day' }))
     } finally {
       restore()
     }
@@ -501,7 +624,9 @@ describe('DelegationBudgetCard (#833)', () => {
     try {
       mockGet.mockReturnValue([])
       render(<DelegationBudgetCard {...PROPS} />)
-      await waitFor(() => expect(screen.getByText('Set budget')).toBeTruthy())
+      // #4226: the collapsed needs-setup state — open the form to see that
+      // the unknown hash left it blank.
+      await openGrantForm()
       expect((screen.getByLabelText('Budget amount') as HTMLInputElement).value).toBe('')
     } finally {
       restore()
@@ -537,9 +662,10 @@ describe('DelegationBudgetCard load failure (#2473)', () => {
     expect(screen.queryByText(/No budget yet/i)).toBeNull()
   })
 
-  // Money-path review (#2473): a grant REPLACES the active budget in the same
-  // (token, recipient) slot, silently. The rows above the form are what let an
-  // owner see that coming — with the list unknown they cannot, so the action
+  // Money-path review (#2473): a submit into a (token, recipient) slot that
+  // already holds a budget must be edited, not granted (#3933 — the backend
+  // refuses a plain grant there). The rows above the form are what the
+  // card's slot check reads — with the list unknown it cannot, so the action
   // is gated on reloading rather than on the owner reading a warning.
   it('refuses to grant while the current budgets are unknown', async () => {
     mockGet.mockReturnValue(null)
@@ -610,6 +736,7 @@ describe('DelegationBudgetCard task budgets (#3329)', () => {
       taskBudget({
         parent_delegation_hash: '0x' + 'ab'.repeat(32),
         is_expired: true,
+        is_live: false,
         expires_at: Math.floor(Date.now() / 1000) - 3600,
       }),
     ])
@@ -641,12 +768,14 @@ describe('DelegationBudgetCard on a retired agent (#3549)', () => {
     mockGet.mockReturnValue([budget()])
     const live = render(<DelegationBudgetCard {...PROPS} />)
     await waitFor(() => expect(screen.getByText(/5 USDC per day/)).toBeTruthy())
-    // #3695: with an active budget the grant form waits behind "Add budget",
-    // so "Set budget" is not on screen until it is opened — asserting "Add
-    // budget" is what keeps the retired half below from passing vacuously.
-    expect(screen.getByRole('button', { name: 'Add budget' })).toBeTruthy()
-    expect(screen.getByText('Edit')).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: 'Add budget' }))
+    // #4261: with an active budget the grant form waits behind the row's ⋯
+    // menu — asserting the OPEN menu's items is what keeps the retired half
+    // below from passing vacuously.
+    await openRowMenu('5 USDC per day')
+    expect(screen.getByRole('menuitem', { name: 'Edit budget' })).toBeTruthy()
+    expect(screen.getByRole('menuitem', { name: 'Add budget' })).toBeTruthy()
+    expect(screen.getByRole('menuitem', { name: 'Stop budget…' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Add budget' }))
     expect(screen.getByText('Set budget')).toBeTruthy()
     expect(screen.getByLabelText('Period')).toBeTruthy()
     // #3716: the live half's sub-budget assertion moved here — the entry only
@@ -659,13 +788,16 @@ describe('DelegationBudgetCard on a retired agent (#3549)', () => {
     expect(screen.getByText(reason)).toBeTruthy()
     // The whole grant form is gone, not just its button.
     expect(screen.queryByText('Set budget')).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Add budget' })).toBeNull()
     expect(screen.queryByLabelText('Budget amount')).toBeNull()
     expect(screen.queryByLabelText('Period')).toBeNull()
     expect(screen.queryByLabelText('Recipient')).toBeNull()
-    expect(screen.queryByText('Edit')).toBeNull()
     expect(screen.queryByText('Issue sub-budget')).toBeNull()
-    expect(screen.getByRole('button', { name: 'Stop budget 5 USDC per day' })).toBeTruthy()
+    // #4261: a retired agent's menu holds ONLY Stop budget… — asserted inside
+    // the open menu, so Edit/Add absence is measured, not assumed.
+    await openRowMenu('5 USDC per day')
+    expect(screen.queryByRole('menuitem', { name: 'Edit budget' })).toBeNull()
+    expect(screen.queryByRole('menuitem', { name: 'Add budget' })).toBeNull()
+    expect(screen.getByRole('menuitem', { name: 'Stop budget…' })).toBeTruthy()
     expect(document.body.textContent).not.toMatch(/delegation|caveat|redemption|userop|permission/i)
   })
 
@@ -673,10 +805,11 @@ describe('DelegationBudgetCard on a retired agent (#3549)', () => {
     mockGet.mockReturnValue([budget()])
     mockRevoke.mockResolvedValue({ ok: true })
     render(<DelegationBudgetCard {...PROPS} retired={retired} />)
-    const stop = await waitFor(() => screen.getByRole('button', { name: 'Stop budget 5 USDC per day' }))
+    // #4226: retired keeps the per-budget menu; the item is available.
+    await openStopViaMenu('5 USDC per day')
+    const stop = screen.getByRole('button', { name: 'Stop budget' })
     expect((stop as HTMLButtonElement).disabled).toBe(false)
     fireEvent.click(stop)
-    fireEvent.click(screen.getByRole('button', { name: 'Stop budget' }))
     await waitFor(() => expect(mockRevoke).toHaveBeenCalledWith('0x' + 'ab'.repeat(32)))
   })
 
@@ -694,7 +827,8 @@ describe('DelegationBudgetCard on a retired agent (#3549)', () => {
     await waitFor(() => expect(screen.getByText('No active budget.')).toBeTruthy())
     expect(document.body.textContent).not.toMatch(/set one below|Set how much|can only be stopped|first budget/)
     expect(screen.queryByText('Set budget')).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Add budget' })).toBeNull()
+    // No rows, so there is no ⋯ menu either — Add budget cannot exist.
+    expect(screen.queryByRole('button', { name: /^Budget options/ })).toBeNull()
   })
 
   // #3716: the sub-budget entry lives inside the Add budget panel, which a
@@ -707,7 +841,9 @@ describe('DelegationBudgetCard on a retired agent (#3549)', () => {
       mockGet.mockReturnValue([budget()])
       render(<DelegationBudgetCard {...PROPS} retired={retired} />)
       await waitFor(() => expect(screen.getByText(/5 USDC per day/)).toBeTruthy())
-      expect(screen.queryByRole('button', { name: 'Add budget' })).toBeNull()
+      await openRowMenu('5 USDC per day')
+      expect(screen.queryByRole('menuitem', { name: 'Add budget' })).toBeNull()
+      expect(screen.queryByRole('menuitem', { name: 'Edit budget' })).toBeNull()
       expect(screen.queryByText('Issue sub-budget')).toBeNull()
       expect(screen.queryByText('Or share part of an existing budget with another agent')).toBeNull()
       expect(screen.queryByRole('dialog')).toBeNull()
@@ -756,7 +892,7 @@ describe('DelegationBudgetCard Spending section (#3695)', () => {
     const meter = screen.getByRole('progressbar', { name: 'USDC budget used' })
     expect(meter.getAttribute('aria-valuenow')).toBe('25')
     // #3806: amounts are always two decimals.
-    expect(screen.getByText('1.25 of 5.00 USDC used this period · refills in 14h')).toBeTruthy()
+    expect(screen.getByText('1.25 of 5.00 USDC · per day · refills in 14h')).toBeTruthy()
   })
 
   it('says "expires" when the budget ends before its period does', () => {
@@ -771,7 +907,7 @@ describe('DelegationBudgetCard Spending section (#3695)', () => {
       }),
     ])
     render(<DelegationBudgetCard {...PROPS} />)
-    expect(screen.getByText('0.00 of 5.00 USDC used this period · expires in 2h')).toBeTruthy()
+    expect(screen.getByText('0.00 of 5.00 USDC · per day · expires in 2h')).toBeTruthy()
   })
 
   it('a read whose period has already ended shows unknown — the old amount is never paired with the next refill', () => {
@@ -808,27 +944,34 @@ describe('DelegationBudgetCard Spending section (#3695)', () => {
     expect(screen.queryByText(/used this period|couldn.t be read/)).toBeNull()
   })
 
-  it('with an active budget the grant form is not mounted until Add budget; Cancel collapses it', () => {
+  it("with an active budget the grant form is not mounted until the ⋯ menu's Add budget; Cancel collapses it", async () => {
     mockGet.mockReturnValue([budget()])
     render(<DelegationBudgetCard {...PROPS} />)
     expect(screen.queryByLabelText('Budget amount')).toBeNull()
     expect(screen.queryByText('Set budget')).toBeNull()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Add budget' }))
+    await openAddViaMenu()
     expect(screen.getByLabelText('Budget amount')).toBeTruthy()
     expect(screen.getByText('Set budget')).toBeTruthy()
 
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
     expect(screen.queryByLabelText('Budget amount')).toBeNull()
-    expect(screen.getByRole('button', { name: 'Add budget' })).toBeTruthy()
+    // #4261: the collapse hands focus back to the opening ⋯ trigger.
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Budget options 5 USDC per day' }))
   })
 
-  it('with no active budget the form is open, headed "Set its first budget"', () => {
+  it('with no active budget the collapsed state reads "No budget yet." and Set budget opens the form (#4226)', () => {
     mockGet.mockReturnValue([])
     render(<DelegationBudgetCard {...PROPS} />)
+    // Collapsed by default — the mockup's needs-setup state — with the
+    // opener; the form's heading appears once it is opened.
+    expect(screen.getByText('No budget yet.')).toBeTruthy()
+    expect(screen.queryByText('Set its first budget')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Set budget' }))
     expect(screen.getByText('Set its first budget')).toBeTruthy()
     expect(screen.getByLabelText('Budget amount')).toBeTruthy()
-    expect(screen.queryByRole('button', { name: 'Add budget' })).toBeNull()
+    // No rows, so no ⋯ menu offers Add budget (#4261).
+    expect(screen.queryByRole('button', { name: /^Budget options/ })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull()
   })
 
@@ -840,6 +983,7 @@ describe('DelegationBudgetCard Spending section (#3695)', () => {
         remaining_atomic: '4000000',
         remaining_from_chain: true,
         period_end: '2026-09-01T10:00:00Z',
+        is_live: false,
         expires_at: Math.floor(Date.parse('2026-08-31T00:00:00Z') / 1000),
       }),
     ])
@@ -853,35 +997,46 @@ describe('DelegationBudgetCard Spending section (#3695)', () => {
   // hasActive — the grant form shows for an agent whose only budget expired,
   // exactly as for one that was never granted (#3695's gate on the row's
   // bookkeeping `active` status alone is not the owner predicate).
-  it('an expired-ONLY row keeps its expired line AND shows the grant form (it does not count toward hasActive)', () => {
+  it('an expired-ONLY row keeps its expired line AND shows the grant form (it does not count toward hasActive)', async () => {
     mockGet.mockReturnValue([
       budget({
         remaining_atomic: '4000000',
         remaining_from_chain: true,
+        is_live: false,
         expires_at: Math.floor(Date.now() / 1000) - 3600,
       }),
     ])
     render(<DelegationBudgetCard {...PROPS} />)
     expect(screen.getByText('This budget has expired and can no longer be spent.')).toBeTruthy()
+    // #4226: the expired-only row does not count toward hasActive, so the
+    // collapsed state is the needs-setup one; opening it shows the grant form.
+    fireEvent.click(screen.getByRole('button', { name: 'Set budget' }))
     expect(screen.getByText('Set its first budget')).toBeTruthy()
-    expect(screen.queryByRole('button', { name: 'Add budget' })).toBeNull()
+    // #4261: an expired-only agent's row menu offers NO Add budget — the
+    // visible Set budget is the way in — while Edit and Stop remain.
+    await openRowMenu('5 USDC per day')
+    expect(screen.queryByRole('menuitem', { name: 'Add budget' })).toBeNull()
+    expect(screen.getByRole('menuitem', { name: 'Edit budget' })).toBeTruthy()
+    expect(screen.getByRole('menuitem', { name: 'Stop budget…' })).toBeTruthy()
   })
 
   // #3695 review S2: opening and collapsing swap the pressed control for
   // another, so focus is placed deliberately instead of falling to <body>.
-  it('Add budget moves focus to the amount field; Cancel returns it to Add budget', () => {
+  // #4261: the opener is now the row's ⋯ menu, so the collapse returns to the
+  // trigger that opened the form.
+  it('Add budget moves focus to the amount field; Cancel returns it to the opening trigger', async () => {
     mockGet.mockReturnValue([budget()])
     render(<DelegationBudgetCard {...PROPS} />)
-    fireEvent.click(screen.getByRole('button', { name: 'Add budget' }))
+    await openAddViaMenu()
     expect(document.activeElement).toBe(screen.getByLabelText('Budget amount'))
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
-    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Add budget' }))
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Budget options 5 USDC per day' }))
   })
 
-  it('Cancel sits in the submit row beside Set budget', () => {
+  it('Cancel sits in the submit row beside Set budget', async () => {
     mockGet.mockReturnValue([budget()])
     render(<DelegationBudgetCard {...PROPS} />)
-    fireEvent.click(screen.getByRole('button', { name: 'Add budget' }))
+    await openAddViaMenu()
     const cancel = screen.getByRole('button', { name: 'Cancel' })
     const setBudget = screen.getByRole('button', { name: 'Set budget' })
     expect(cancel.parentElement).toBe(setBudget.parentElement)
@@ -898,23 +1053,135 @@ describe('DelegationBudgetCard Spending section (#3695)', () => {
     mockGet.mockReturnValue([budget()])
     mockGrant.mockResolvedValue({ ok: true })
     render(<DelegationBudgetCard {...PROPS} />)
-    fireEvent.click(screen.getByRole('button', { name: 'Add budget' }))
+    await openAddViaMenu()
     fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '3' } })
     fireEvent.click(screen.getByText('Set budget'))
     await waitFor(() => expect(mockGrant).toHaveBeenCalled())
     await waitFor(() => expect(screen.queryByLabelText('Budget amount')).toBeNull())
-    // ...and focus lands on Add budget, not <body> (#3695 review S2).
-    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Add budget' }))
+    // ...and focus lands on the ⋯ trigger that opened the form, not <body>
+    // (#3695 review S2, #4261).
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Budget options 5 USDC per day' }))
+  })
+})
+
+// #4261: Edit budget, Add budget and Stop budget… live in each budget's ⋯
+// menu (mockup v6); the per-item rules and the focus chain are pinned here.
+describe('DelegationBudgetCard budget ⋯ menus (#4261)', () => {
+  it("an active row's ⋯ menu lists Edit budget, Add budget, a separator, then Stop budget… — and no stray buttons", async () => {
+    mockGet.mockReturnValue([budget()])
+    render(<DelegationBudgetCard {...PROPS} />)
+    await openRowMenu('5 USDC per day')
+    const menu = screen.getByRole('menu')
+    const roles = Array.from(menu.children).map((el) => (el as HTMLElement).getAttribute('role'))
+    expect(roles).toEqual(['menuitem', 'menuitem', 'separator', 'menuitem'])
+    const labels = Array.from(menu.querySelectorAll('[role="menuitem"]')).map((el) => el.textContent)
+    expect(labels).toEqual(['Edit budget', 'Add budget', 'Stop budget…'])
+    // The visible Edit button and the list's Add budget button are gone.
+    expect(screen.queryByRole('button', { name: 'Add budget' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /^Edit budget/ })).toBeNull()
+  })
+
+  it('Add budget from a row menu opens the collapsed form; Stop budget… still goes through its confirm', async () => {
+    mockGet.mockReturnValue([budget()])
+    render(<DelegationBudgetCard {...PROPS} />)
+    await openAddViaMenu()
+    expect(screen.getByLabelText('Budget amount')).toBeTruthy()
+  })
+
+  it('Edit budget from a row menu opens the edit modal, with focus inside it (#4259)', async () => {
+    mockGet.mockReturnValue([budget()])
+    render(<DelegationBudgetCard {...PROPS} />)
+    await openEditViaMenu('5 USDC per day')
+    const dialog = await screen.findByRole('dialog', { name: 'Edit budget' })
+    // useFocusTrap moves focus on a rAF, so wait rather than assert cold.
+    await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true))
+  })
+
+  it('closing the edit modal returns focus to the row ⋯ trigger, never <body> (#4261)', async () => {
+    mockGet.mockReturnValue([budget()])
+    render(<DelegationBudgetCard {...PROPS} />)
+    await openEditViaMenu('5 USDC per day')
+    const dialog = await screen.findByRole('dialog', { name: 'Edit budget' })
+    await act(async () => {
+      const closes = within(dialog).getAllByRole('button', { name: 'Close' })
+      fireEvent.click(closes[0])
+    })
+    expect(screen.queryByRole('dialog', { name: 'Edit budget' })).toBeNull()
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Budget options 5 USDC per day' }))
+  })
+
+  it('an open grant form hides Add budget in every row menu (#4261)', async () => {
+    mockGet.mockReturnValue([
+      budget(),
+      budget({ id: 'b2', delegation_hash: '0x' + 'ee'.repeat(32), budget_atomic: '10000000' }),
+    ])
+    render(<DelegationBudgetCard {...PROPS} />)
+    await openAddViaMenu('5 USDC per day')
+    // The form is open; the OTHER row's menu offers no Add budget either.
+    await openRowMenu('10 USDC per day')
+    expect(screen.queryByRole('menuitem', { name: 'Add budget' })).toBeNull()
+    expect(screen.getByRole('menuitem', { name: 'Edit budget' })).toBeTruthy()
+  })
+
+  it('a network with no grantable tokens offers Edit and Stop but no Add (#4261)', async () => {
+    mockGet.mockReturnValue([budget()])
+    render(<DelegationBudgetCard {...PROPS} tokens={[]} />)
+    // Token lookup failed, so the amount falls back to the raw atomic string.
+    await openRowMenu('5000000 per day')
+    expect(screen.queryByRole('menuitem', { name: 'Add budget' })).toBeNull()
+    expect(screen.getByRole('menuitem', { name: 'Edit budget' })).toBeTruthy()
+    expect(screen.getByRole('menuitem', { name: 'Stop budget…' })).toBeTruthy()
+  })
+
+  it('with no reachable signer the trigger stays enabled, Stop is a disabled item, and Add opens the connect (#4261)', async () => {
+    mockSigner.ready = false
+    mockGet.mockReturnValue([budget()])
+    render(<DelegationBudgetCard {...PROPS} />)
+    const trigger = await screen.findByRole('button', { name: 'Budget options 5 USDC per day' })
+    expect((trigger as HTMLButtonElement).disabled).toBe(false)
+    fireEvent.click(trigger)
+    expect((screen.getByRole('menuitem', { name: 'Stop budget…' }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole('menuitem', { name: 'Add budget' }) as HTMLButtonElement).disabled).toBe(false)
+    expect((screen.getByRole('menuitem', { name: 'Edit budget' }) as HTMLButtonElement).disabled).toBe(false)
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Add budget' }))
+    expect(screen.getByText(/Connect your account owner wallet to set a budget/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Connect wallet' })).toBeTruthy()
+  })
+
+  it('Edit with no reachable signer opens the modal, whose review step carries the connect hint (#4261)', async () => {
+    mockSigner.ready = false
+    mockGet.mockReturnValue([budget()])
+    render(<DelegationBudgetCard {...PROPS} />)
+    await openEditViaMenu('5 USDC per day')
+    const dialog = await screen.findByRole('dialog', { name: 'Edit budget' })
+    fireEvent.change(within(dialog).getByLabelText('Budget amount'), { target: { value: '10' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Review changes' }))
+    expect(await within(dialog).findByText(/Connect your account owner wallet to approve the new budget/)).toBeTruthy()
+    expect(within(dialog).getByRole('button', { name: 'Connect wallet' })).toBeTruthy()
+  })
+
+  it('a collapse while the trigger is disabled (busy) sends focus to the section heading, never <body> (#4261)', async () => {
+    mockGet.mockReturnValue([budget()])
+    const view = render(<DelegationBudgetCard {...PROPS} />)
+    await openAddViaMenu()
+    // A lifecycle action starts while the form is up — the trigger disables.
+    mockSigner.busy = true
+    view.rerender(<DelegationBudgetCard {...PROPS} />)
+    expect(
+      (screen.getByRole('button', { name: 'Budget options 5 USDC per day' }) as HTMLButtonElement).disabled,
+    ).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Spending' }))
   })
 })
 
 // #3716: the sub-budget entry moved from a permanent card row into the Add
 // budget panel — below the grant form, visible only while the panel is open.
 describe('DelegationBudgetCard sub-budget entry in the Add budget panel (#3716)', () => {
-  it('sits below Set budget / Cancel in DOM order once the panel is open', () => {
+  it('sits below Set budget / Cancel in DOM order once the panel is open', async () => {
     mockGet.mockReturnValue([budget()])
     render(<DelegationBudgetCard {...PROPS} />)
-    fireEvent.click(screen.getByRole('button', { name: 'Add budget' }))
+    await openAddViaMenu()
     const link = screen.getByRole('button', { name: 'Issue sub-budget' })
     const setBudget = screen.getByRole('button', { name: 'Set budget' })
     const cancel = screen.getByRole('button', { name: 'Cancel' })
@@ -923,17 +1190,17 @@ describe('DelegationBudgetCard sub-budget entry in the Add budget panel (#3716)'
     expect(cancel.compareDocumentPosition(link) & FOLLOWING).toBeTruthy()
   })
 
-  it('is absent with the panel open when the only active budget is merchant-pinned', () => {
+  it('is absent with the panel open when the only active budget is merchant-pinned', async () => {
     mockGet.mockReturnValue([budget({ merchant_id: 'm-1', merchant_slug: 'ampersend-demo-api', merchant_name: 'Ampersend Demo API' })])
     render(<DelegationBudgetCard {...PROPS} />)
-    fireEvent.click(screen.getByRole('button', { name: 'Add budget' }))
+    await openAddViaMenu()
     expect(screen.getByRole('button', { name: 'Set budget' })).toBeTruthy()
     expect(screen.queryByText('Issue sub-budget')).toBeNull()
     expect(screen.queryByText('Or share part of an existing budget with another agent')).toBeNull()
   })
 
   it('is absent when the form shows by default over a pending-only budget', () => {
-    mockGet.mockReturnValue([budget({ status: 'pending' })])
+    mockGet.mockReturnValue([budget({ status: 'pending', is_live: false })])
     render(<DelegationBudgetCard {...PROPS} />)
     expect(screen.getByText('Set budget')).toBeTruthy()
     expect(screen.queryByText('Issue sub-budget')).toBeNull()
@@ -947,16 +1214,17 @@ describe('DelegationBudgetCard sub-budget entry in the Add budget panel (#3716)'
     mockGet.mockReturnValue([budget()])
     mockBudgetsError.mockReturnValue(true)
     render(<DelegationBudgetCard {...PROPS} />)
-    fireEvent.click(screen.getByRole('button', { name: 'Add budget' }))
+    // #4226: a failed read keeps the form open (#2473's contract) — there is
+    // no Add budget button to click, the panel is simply up.
     expect(screen.getByRole('button', { name: 'Set budget' })).toBeTruthy()
     expect(screen.queryByText('Issue sub-budget')).toBeNull()
     expect(screen.queryByText('Or share part of an existing budget with another agent')).toBeNull()
   })
 
-  it('clicking the entry collapses the form, opens the modal inside focus, and returns focus to Add budget on close', async () => {
+  it('clicking the entry collapses the form, opens the modal inside focus, and returns focus to the opening trigger on close', async () => {
     mockGet.mockReturnValue([budget()])
     render(<DelegationBudgetCard {...PROPS} />)
-    fireEvent.click(screen.getByRole('button', { name: 'Add budget' }))
+    await openAddViaMenu()
     fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '2' } })
     // act-wrapped: the modal's open/close state lands in effects (its own
     // child effect and the card's focus-restore) that outlive the event.
@@ -974,6 +1242,751 @@ describe('DelegationBudgetCard sub-budget entry in the Add budget panel (#3716)'
       fireEvent.click(screen.getByRole('button', { name: 'Close' }))
     })
     expect(screen.queryByRole('dialog')).toBeNull()
-    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Add budget' }))
+    // #4261: the same target as a form collapse — the ⋯ trigger that opened
+    // the form (its entry lives in the open panel).
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Budget options 5 USDC per day' }))
+  })
+})
+
+/**
+ * #3933: a plain grant into an occupied (token, recipient) slot left the old
+ * budget enabled on-chain. The card now routes such a submit to the edit flow
+ * (client-side check first, the server's 409 as the fallback), and flags any
+ * old budget a past replace left `replaced` but unexpired, with a Stop.
+ */
+describe('DelegationBudgetCard — occupied slot and replaced-but-enabled budgets (#3933)', () => {
+  const PINNED = '0x' + 'cc'.repeat(20)
+  const OTHER = '0x' + 'dd'.repeat(20)
+  const OLD_HASH = '0x' + '01'.repeat(32)
+
+  async function openFormAndType(amount: string, recipient: string) {
+    await openAddViaMenu()
+    fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: amount } })
+    fireEvent.change(screen.getByLabelText('Recipient'), { target: { value: recipient } })
+  }
+
+  it('a submit matching a live budget opens the edit flow with the typed limits — no plain grant is signed', async () => {
+    mockGet.mockReturnValue([budget({ recipient_address: PINNED })])
+    render(<DelegationBudgetCard {...PROPS} />)
+    await openFormAndType('10', PINNED)
+    // The hint says what happens on-chain before anything is signed.
+    expect(screen.getByText(/so you edit it: you approve the new budget, then approve once more to stop the old one\. The review step shows how many approvals that takes\./)).toBeTruthy()
+    expect(screen.getByText(/Stopping it ends any open task budget or sub-budget taken from it/)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Edit existing budget' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Edit budget' })
+    expect(mockGrant).not.toHaveBeenCalled()
+    // The edit opened on THIS budget, with what the owner typed.
+    expect((within(dialog).getByLabelText('Budget amount') as HTMLInputElement).value).toBe('10')
+    expect(within(dialog).getByText(/already has a budget for this token and recipient/)).toBeTruthy()
+    // Never the generic failure.
+    expect(screen.queryByText(/Haven could not set the budget/)).toBeNull()
+  })
+
+  it('a submit into an EMPTY slot (another recipient) still grants as before', async () => {
+    mockGet.mockReturnValue([budget({ recipient_address: PINNED })])
+    mockGrant.mockResolvedValue({ ok: true })
+    render(<DelegationBudgetCard {...PROPS} />)
+    await openFormAndType('10', OTHER)
+    expect(screen.getByText('One approval. Refills every period automatically.')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Set budget' }))
+    await waitFor(() => expect(mockGrant).toHaveBeenCalled())
+    expect(screen.queryByRole('dialog', { name: 'Edit budget' })).toBeNull()
+  })
+
+  it('an EXPIRED budget in the slot does not occupy it — the submit grants', async () => {
+    mockGet.mockReturnValue([budget({ recipient_address: PINNED, expires_at: 1, is_live: false })])
+    mockGrant.mockResolvedValue({ ok: true })
+    render(<DelegationBudgetCard {...PROPS} />)
+    // An expired-only agent's collapsed needs-setup state opens to the form (#3802, #4226).
+    await openGrantForm()
+    fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '10' } })
+    fireEvent.change(screen.getByLabelText('Recipient'), { target: { value: PINNED } })
+    fireEvent.click(screen.getByRole('button', { name: 'Set budget' }))
+    await waitFor(() => expect(mockGrant).toHaveBeenCalled())
+  })
+
+  it("server fallback: the client check missed (stale list), the 409's hash picks the budget once the list has it", async () => {
+    const EXISTING = '0x' + 'e1'.repeat(32)
+    // The list the card rendered with does not show the occupying budget.
+    mockGet.mockReturnValue([budget({ recipient_address: PINNED })])
+    mockGrant.mockImplementation(async () => {
+      // The hook refreshed the list before answering.
+      mockGet.mockReturnValue([
+        budget({ recipient_address: PINNED }),
+        budget({ recipient_address: OTHER, delegation_hash: EXISTING, budget_atomic: '7000000' }),
+      ])
+      return { ok: false, reason: 'slot_occupied', existingDelegationHash: EXISTING }
+    })
+    render(<DelegationBudgetCard {...PROPS} />)
+    await openFormAndType('10', OTHER)
+    fireEvent.click(screen.getByRole('button', { name: 'Set budget' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Edit budget' })
+    // The budget the server named: 7 USDC, not the other row's 5.
+    expect(within(dialog).getByText(/Editing the 7 USDC per day budget/)).toBeTruthy()
+    expect(screen.queryByText(/Haven could not set the budget/)).toBeNull()
+  })
+
+  it('server fallback with the list not caught up: a named notice and a reload — never the generic failure', async () => {
+    mockGet.mockReturnValue([budget({ recipient_address: PINNED })])
+    mockGrant.mockResolvedValue({ ok: false, reason: 'slot_occupied', existingDelegationHash: '0x' + 'e1'.repeat(32) })
+    render(<DelegationBudgetCard {...PROPS} />)
+    await openFormAndType('10', OTHER)
+    fireEvent.click(screen.getByRole('button', { name: 'Set budget' }))
+    await waitFor(() => expect(screen.getByText(/already has a live budget for this token and recipient\. Nothing was approved/)).toBeTruthy())
+    expect(screen.queryByText(/Haven could not set the budget/)).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Reload budgets' }))
+    expect(mockReload).toHaveBeenCalled()
+  })
+
+  it('flags a replaced-but-unexpired budget with what it can still do, and Stops it through the per-hash revoke', async () => {
+    mockGet.mockReturnValue([
+      budget(),
+      budget({ status: 'replaced', is_live: false, delegation_hash: OLD_HASH, budget_atomic: '3000000' }),
+    ])
+    mockRevoke.mockResolvedValue({ ok: true })
+    render(<DelegationBudgetCard {...PROPS} />)
+    expect(await screen.findByText('An old budget has not been stopped')).toBeTruthy()
+    expect(screen.getByText(/The 3 USDC per day budget to 0xcccc…cccc was replaced, but it can still be spent outside Haven until it is stopped/)).toBeTruthy()
+    expect(screen.getByText(/Stopping it also ends any open task budget or sub-budget taken from it/)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Stop old budget 3 USDC per day' }))
+    await waitFor(() => expect(mockRevoke).toHaveBeenCalledWith(OLD_HASH))
+    await waitFor(() => expect(mockToast.success).toHaveBeenCalledWith('Old budget stopped.'))
+  })
+
+  it('"Already revoked" on the finish action is finished, not an error', async () => {
+    mockGet.mockReturnValue([budget(), budget({ status: 'replaced', is_live: false, delegation_hash: OLD_HASH })])
+    mockRevoke.mockResolvedValue({ ok: true, alreadyStopped: true })
+    render(<DelegationBudgetCard {...PROPS} />)
+    fireEvent.click(await screen.findByRole('button', { name: /Stop old budget/ }))
+    await waitFor(() => expect(mockToast.success).toHaveBeenCalledWith('That old budget was already stopped.'))
+    expect(mockToast.error).not.toHaveBeenCalled()
+  })
+
+  it('a failed finish action says so', async () => {
+    mockGet.mockReturnValue([budget(), budget({ status: 'replaced', is_live: false, delegation_hash: OLD_HASH })])
+    mockRevoke.mockResolvedValue({ ok: false, reason: 'failed' })
+    render(<DelegationBudgetCard {...PROPS} />)
+    fireEvent.click(await screen.findByRole('button', { name: /Stop old budget/ }))
+    await waitFor(() => expect(mockToast.error).toHaveBeenCalledWith('Could not stop the old budget. Try again.'))
+  })
+
+  it.each([
+    ['an expired replaced row', { status: 'replaced', expires_at: 1, is_live: false }],
+    ['a revoked row', { status: 'revoked', is_live: false }],
+    ['a pending row', { status: 'pending', is_live: false }],
+  ])('no flag for %s', async (_label, overrides) => {
+    mockGet.mockReturnValue([budget(), budget({ delegation_hash: OLD_HASH, ...overrides })])
+    render(<DelegationBudgetCard {...PROPS} />)
+    await screen.findByText('Spending')
+    expect(screen.queryByText('An old budget has not been stopped')).toBeNull()
+  })
+
+  it('a retired agent shows no flag — its Finish revoking (revoke-all) already covers replaced rows', async () => {
+    mockGet.mockReturnValue([budget(), budget({ status: 'replaced', is_live: false, delegation_hash: OLD_HASH })])
+    render(<DelegationBudgetCard {...PROPS} retired="revoked" />)
+    await screen.findByText('Spending')
+    expect(screen.queryByText('An old budget has not been stopped')).toBeNull()
+  })
+})
+
+// #3922: "ends" is only for a row the server calls live (or a still-pending
+// unexpired slice). A closed row with a FUTURE expiry reads "closed" (#3923:
+// status wins over expiry), not a countdown as if it were running.
+describe('DelegationBudgetCard sub-budget "ends" follows is_live (#3922)', () => {
+  const future = Math.floor(Date.now() / 1000) + 7 * 86_400
+  const sub = (overrides: Record<string, unknown>) => ({
+    id: 's1', agent_id: 'agent-2', parent_agent_id: 'agent-1', parent_sub_budget_id: null, chain_id: 84532,
+    token_address: USDC, recipient_address: null, parent_delegation_hash: '0x' + 'ab'.repeat(32),
+    delegation_hash: '0x' + 'ee'.repeat(32), label: 'Scraper slice', period_amount_atomic: '2000000',
+    status: 'open', expires_at: future, is_expired: false, is_live: true,
+    created_at: '2026-01-01T00:00:00Z', opened_at: '2026-01-01T00:00:00Z', closed_at: null, close_tx_hash: null,
+    ...overrides,
+  })
+  const tree = (grant: Record<string, unknown>) => [{
+    parent_child_sub_budget: sub({ id: 'p1', label: 'Parent narrowing' }),
+    grants: [grant],
+  }]
+
+  it('a live grant reads "ends …"', () => {
+    mockGet.mockReturnValue([budget()])
+    mockTrees.mockReturnValue(tree(sub({})))
+    render(<DelegationBudgetCard {...PROPS} />)
+    expect(document.body.textContent).toMatch(/up to 2 USDC · ends /)
+  })
+
+  it('a closed grant with a future expiry reads "closed", never "ends" or "ended"', () => {
+    mockGet.mockReturnValue([budget()])
+    mockTrees.mockReturnValue(tree(sub({ status: 'closed', is_live: false })))
+    render(<DelegationBudgetCard {...PROPS} />)
+    expect(document.body.textContent).toMatch(/up to 2 USDC · closed/)
+    expect(document.body.textContent).not.toMatch(/up to 2 USDC · ends/)
+  })
+
+  it('a closed parent narrowing row reads "closed" too; an expired non-closed grant keeps "ended"', () => {
+    mockGet.mockReturnValue([budget()])
+    mockTrees.mockReturnValue([{
+      parent_child_sub_budget: sub({ id: 'p1', label: 'Parent narrowing', status: 'closed', is_live: false, period_amount_atomic: '5000000' }),
+      grants: [sub({ status: 'open', is_live: false, is_expired: true, expires_at: Math.floor(Date.now() / 1000) - 60 })],
+    }])
+    render(<DelegationBudgetCard {...PROPS} />)
+    expect(document.body.textContent).toMatch(/5 USDC · closed/)
+    expect(document.body.textContent).toMatch(/up to 2 USDC · ended/)
+  })
+
+  it('a pending, unexpired grant still shows when it ends, beside "waiting for the sharing agent to sign it"', () => {
+    mockGet.mockReturnValue([budget()])
+    mockTrees.mockReturnValue(tree(sub({ status: 'pending', is_live: false })))
+    render(<DelegationBudgetCard {...PROPS} />)
+    expect(document.body.textContent).toMatch(/up to 2 USDC · ends .*waiting for the sharing agent to sign it/)
+  })
+})
+
+// #3988: the holder's side — the read-only "Received budgets" block and an
+// empty state that never implies a grant holder cannot pay.
+describe('DelegationBudgetCard received budgets (#3988)', () => {
+  const receivedGrant = {
+    id: 'g1',
+    agent_id: 'agent-1',
+    parent_agent_id: 'p1',
+    parent_agent_name: 'Agent naming',
+    parent_sub_budget_id: 'pc1',
+    chain_id: 84532,
+    token_address: USDC,
+    recipient_address: null,
+    parent_delegation_hash: '0x' + 'ab'.repeat(32),
+    delegation_hash: '0x' + 'ef'.repeat(32),
+    label: null,
+    period_amount_atomic: '25000000',
+    status: 'open',
+    expires_at: 9_999_999_999,
+    is_expired: false,
+    is_live: true,
+    created_at: '2026-09-01T00:00:00Z',
+    opened_at: '2026-09-01T00:00:00Z',
+    closed_at: null,
+    close_tx_hash: null,
+  }
+
+  it('lists each received grant with the parent agent, amount per period and its end', () => {
+    mockReceivedGrants.mockReturnValue([receivedGrant])
+    render(<DelegationBudgetCard {...PROPS} />)
+    expect(screen.getByText('Received budgets')).toBeTruthy()
+    expect(screen.getByText('From Agent naming')).toBeTruthy()
+    const row = screen.getByText('From Agent naming').closest('div')?.parentElement ?? null
+    expect(row?.textContent).toContain('25 USDC')
+    expect(row?.textContent).toMatch(/ends /)
+  })
+
+  it('words a pending grant as not-yet-signed, not as live authority', () => {
+    mockReceivedGrants.mockReturnValue([{ ...receivedGrant, status: 'pending', is_live: false }])
+    render(<DelegationBudgetCard {...PROPS} />)
+    expect(screen.getByText('From Agent naming')).toBeTruthy()
+    expect(screen.getByText(/waiting for the sharing agent to sign it/)).toBeTruthy()
+  })
+
+  it('renders nothing when the agent has received nothing (never an empty section)', () => {
+    mockReceivedGrants.mockReturnValue([])
+    render(<DelegationBudgetCard {...PROPS} />)
+    expect(screen.queryByText('Received budgets')).toBeNull()
+  })
+
+  it('the no-own-budget empty state does not imply a grant holder cannot pay', () => {
+    mockReceivedGrants.mockReturnValue([receivedGrant])
+    render(<DelegationBudgetCard {...PROPS} />)
+    // #4226: the received-budget nuance lives on the form's own line — open it.
+    fireEvent.click(screen.getByRole('button', { name: 'Set budget' }))
+    expect(screen.getByText('Set its first budget')).toBeTruthy()
+    expect(screen.getByText(/spends through the received budgets below/)).toBeTruthy()
+    expect(document.body.textContent).not.toContain('The agent can start paying within it.')
+  })
+
+  it('keeps the original empty-state line when nothing has been received', () => {
+    mockReceivedGrants.mockReturnValue([])
+    render(<DelegationBudgetCard {...PROPS} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Set budget' }))
+    expect(screen.getByText('The agent can start paying within it.')).toBeTruthy()
+  })
+})
+
+/**
+ * #4154: between the edit's two approvals the old row reads `replaced`, and
+ * the card's background poll showed "An old budget has not been stopped"
+ * behind the still-open modal. The notice now stands down for the slot the
+ * edit flow owns, and only while it owns it — any close that leaves the old
+ * budget enabled shows it at once.
+ */
+describe('DelegationBudgetCard — no replaced-budget flash during an edit (#4154)', () => {
+  const OLD_HASH = '0x' + 'ab'.repeat(32)
+  const NEW_HASH = '0x' + 'be'.repeat(32)
+  const OTHER = '0x' + 'dd'.repeat(20)
+  const NOTICE = 'An old budget has not been stopped'
+
+  function deferred<T>() {
+    let resolve!: (v: T) => void
+    const promise = new Promise<T>((r) => {
+      resolve = r
+    })
+    return { promise, resolve }
+  }
+
+  /** The old row `replaced`, the new one live — what a poll sees after approval 1. */
+  const afterActivate = (extra: Record<string, unknown>[] = []) => [
+    budget({ delegation_hash: NEW_HASH, budget_atomic: '10000000' }),
+    budget({ delegation_hash: OLD_HASH, status: 'replaced', is_live: false }),
+    ...extra.map((o) => budget(o)),
+  ]
+
+  /** Opens the edit on the live budget and signs approval 1; the edit resolves when the test says. */
+  async function startEdit() {
+    const edit = deferred<unknown>()
+    mockEdit.mockReturnValue(edit.promise)
+    mockGet.mockReturnValue([budget({ delegation_hash: OLD_HASH })])
+    const view = render(<DelegationBudgetCard {...PROPS} />)
+    await openEditViaMenu('5 USDC per day')
+    const dialog = await screen.findByRole('dialog', { name: 'Edit budget' })
+    fireEvent.change(within(dialog).getByLabelText('Budget amount'), { target: { value: '10' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Review changes' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Approve new budget' }))
+    await waitFor(() => expect(mockEdit).toHaveBeenCalled())
+    return { view, edit, dialog }
+  }
+
+  it('the old row reading `replaced` mid-edit shows no notice behind the open modal', async () => {
+    const { view, edit } = await startEdit()
+    // The background poll lands between the two approvals.
+    mockGet.mockReturnValue(afterActivate())
+    view.rerender(<DelegationBudgetCard {...PROPS} />)
+    expect(screen.getByRole('dialog', { name: 'Edit budget' })).toBeTruthy()
+    expect(screen.queryByText(NOTICE)).toBeNull()
+    await act(async () => edit.resolve({ ok: true, newDelegationHash: NEW_HASH, oldDelegationRevoked: true }))
+  })
+
+  it('a replaced row in ANOTHER slot keeps its notice while the modal is open', async () => {
+    const { view, edit } = await startEdit()
+    mockGet.mockReturnValue(
+      afterActivate([{ delegation_hash: '0x' + '07'.repeat(32), recipient_address: OTHER, status: 'replaced', is_live: false, budget_atomic: '3000000' }]),
+    )
+    view.rerender(<DelegationBudgetCard {...PROPS} />)
+    expect(screen.getAllByText(NOTICE)).toHaveLength(1)
+    expect(screen.getByText(/The 3 USDC per day budget to 0xdddd…dddd was replaced/)).toBeTruthy()
+    await act(async () => edit.resolve({ ok: true, newDelegationHash: NEW_HASH, oldDelegationRevoked: true }))
+  })
+
+  it('a leftover `replaced` row in the SAME slot that this edit does not Stop keeps its notice while the modal is open', async () => {
+    // An earlier abandoned edit left A `replaced` in B's slot. Editing B
+    // Stops only B (the Stop set is the slot's LIVE rows), so A's warning is
+    // genuine the whole time.
+    const LEFTOVER = '0x' + '0a'.repeat(32)
+    const edit = deferred<unknown>()
+    mockEdit.mockReturnValue(edit.promise)
+    mockGet.mockReturnValue([
+      budget({ delegation_hash: OLD_HASH }),
+      budget({ delegation_hash: LEFTOVER, status: 'replaced', is_live: false, budget_atomic: '3000000' }),
+    ])
+    const view = render(<DelegationBudgetCard {...PROPS} />)
+    expect(await screen.findByText(NOTICE)).toBeTruthy()
+    await openEditViaMenu('5 USDC per day')
+    const dialog = await screen.findByRole('dialog', { name: 'Edit budget' })
+    // Already on the form step, before any approval.
+    expect(screen.getAllByText(NOTICE)).toHaveLength(1)
+    fireEvent.change(within(dialog).getByLabelText('Budget amount'), { target: { value: '10' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Review changes' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Approve new budget' }))
+    await waitFor(() => expect(mockEdit).toHaveBeenCalled())
+    mockGet.mockReturnValue(afterActivate([{ delegation_hash: LEFTOVER, status: 'replaced', is_live: false, budget_atomic: '3000000' }]))
+    view.rerender(<DelegationBudgetCard {...PROPS} />)
+    // B's own `replaced` row is hidden; A's stays.
+    expect(screen.getAllByText(NOTICE)).toHaveLength(1)
+    expect(screen.getByText(/The 3 USDC per day budget to 0xcccc…cccc was replaced/)).toBeTruthy()
+    await act(async () => edit.resolve({ ok: true, newDelegationHash: NEW_HASH, oldDelegationRevoked: true }))
+  })
+
+  it('closing with the Stop not done shows the notice at once — no reload needed', async () => {
+    const { view, edit } = await startEdit()
+    mockGet.mockReturnValue(afterActivate())
+    view.rerender(<DelegationBudgetCard {...PROPS} />)
+    await act(async () =>
+      edit.resolve({ ok: false, reason: 'revoke_unfinished', newDelegationHash: NEW_HASH, unstoppedDelegationHashes: [OLD_HASH], moved: false }),
+    )
+    // The modal's own step-2 screen says it first…
+    const dialog = await screen.findByRole('dialog', { name: 'Edit budget' })
+    expect(within(dialog).getByText('New budget is live — one step left')).toBeTruthy()
+    expect(screen.queryByText(NOTICE)).toBeNull()
+    // …and the card says it the moment the modal is gone.
+    // The footer Close (the header has its own ✕, also named Close).
+    const closes = within(dialog).getAllByRole('button', { name: 'Close' })
+    fireEvent.click(closes[closes.length - 1])
+    expect(screen.queryByRole('dialog', { name: 'Edit budget' })).toBeNull()
+    expect(screen.getByText(NOTICE)).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Stop old budget 5 USDC per day' })).toBeTruthy()
+  })
+
+  it('a finished edit shows no notice while the reload after close settles, nor after it reads the row revoked', async () => {
+    const { view, edit } = await startEdit()
+    mockGet.mockReturnValue(afterActivate())
+    view.rerender(<DelegationBudgetCard {...PROPS} />)
+    await act(async () => edit.resolve({ ok: true, newDelegationHash: NEW_HASH, oldDelegationRevoked: true }))
+    const dialog = await screen.findByRole('dialog', { name: 'Edit budget' })
+    await within(dialog).findByText('Budget updated')
+    const reloadAfterClose = deferred<void>()
+    mockReload.mockReset()
+    mockReload.mockReturnValue(reloadAfterClose.promise)
+    // The list the card holds still predates the Stop.
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Done' }))
+    expect(mockReload).toHaveBeenCalled()
+    expect(screen.queryByText(NOTICE)).toBeNull()
+    mockGet.mockReturnValue([
+      budget({ delegation_hash: NEW_HASH, budget_atomic: '10000000' }),
+      budget({ delegation_hash: OLD_HASH, status: 'revoked', is_live: false }),
+    ])
+    await act(async () => reloadAfterClose.resolve())
+    view.rerender(<DelegationBudgetCard {...PROPS} />)
+    expect(screen.queryByText(NOTICE)).toBeNull()
+  })
+
+  it("a step-2 Stop finished from the modal's own screen counts as finished too", async () => {
+    const { view, edit } = await startEdit()
+    mockGet.mockReturnValue(afterActivate())
+    view.rerender(<DelegationBudgetCard {...PROPS} />)
+    await act(async () =>
+      edit.resolve({ ok: false, reason: 'revoke_unfinished', newDelegationHash: NEW_HASH, unstoppedDelegationHashes: [OLD_HASH], moved: false }),
+    )
+    const dialog = await screen.findByRole('dialog', { name: 'Edit budget' })
+    mockRevoke.mockResolvedValue({ ok: true })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Stop old budget' }))
+    await within(dialog).findByText('Budget updated')
+    expect(mockRevoke).toHaveBeenCalledWith(OLD_HASH)
+    const reloadAfterClose = deferred<void>()
+    mockReload.mockReset()
+    mockReload.mockReturnValue(reloadAfterClose.promise)
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Done' }))
+    expect(mockReload).toHaveBeenCalled()
+    expect(screen.queryByText(NOTICE)).toBeNull()
+    await act(async () => reloadAfterClose.resolve())
+  })
+
+  it('reopening Edit before the reload after a finished edit settles does not bring the flash back', async () => {
+    const { view, edit } = await startEdit()
+    mockGet.mockReturnValue(afterActivate())
+    view.rerender(<DelegationBudgetCard {...PROPS} />)
+    await act(async () => edit.resolve({ ok: true, newDelegationHash: NEW_HASH, oldDelegationRevoked: true }))
+    const dialog = await screen.findByRole('dialog', { name: 'Edit budget' })
+    await within(dialog).findByText('Budget updated')
+    const reloadAfterClose = deferred<void>()
+    mockReload.mockReset()
+    mockReload.mockReturnValue(reloadAfterClose.promise)
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Done' }))
+    // Straight back into Edit on the NEW budget, the stale list still in hand.
+    await openEditViaMenu('10 USDC per day')
+    await screen.findByRole('dialog', { name: 'Edit budget' })
+    expect(screen.queryByText(NOTICE)).toBeNull()
+    await act(async () => reloadAfterClose.resolve())
+  })
+
+  it('a finished edit whose reload still reads the row `replaced` shows the notice — the server has the last word', async () => {
+    const { view, edit } = await startEdit()
+    mockGet.mockReturnValue(afterActivate())
+    view.rerender(<DelegationBudgetCard {...PROPS} />)
+    await act(async () => edit.resolve({ ok: true, newDelegationHash: NEW_HASH, oldDelegationRevoked: true }))
+    const dialog = await screen.findByRole('dialog', { name: 'Edit budget' })
+    await within(dialog).findByText('Budget updated')
+    mockReload.mockReset()
+    mockReload.mockResolvedValue(undefined)
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Done' }))
+    expect(await screen.findByText(NOTICE)).toBeTruthy()
+  })
+})
+
+describe('DelegationBudgetCard hero states (#4226)', () => {
+  const NOW = Date.parse('2026-09-01T12:00:00Z')
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(NOW)
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  const withSearch = (search: string) => {
+    const original = window.location
+    // @ts-expect-error — jsdom permits the delete/delete-then-assign dance.
+    delete window.location
+    // @ts-expect-error — see above.
+    window.location = new URL(`https://app.haven.test/agents/agent-1${search}`) as unknown as Location
+    return () => {
+      // @ts-expect-error — see above.
+      window.location = original
+    }
+  }
+
+  // A live row with a chain read: 5 USDC/day, 1.25 used this period.
+  const heroBudget = () =>
+    budget({
+      remaining_atomic: '3750000',
+      remaining_from_chain: true,
+      period_end: '2026-09-02T02:00:00Z',
+    })
+
+  // #4274: gross and net take SEPARATE values — the old helper built both
+  // from one `usd`, which is why the hero's gross read passed every test.
+  const spendWindow = (usd: number, payments: number, netUsd: number = usd) => ({
+    gross: { usd, eur: usd, sek: usd * 10 },
+    net: { usd: netUsd, eur: netUsd, sek: netUsd * 10 },
+    approx: false,
+    payments,
+    refusals: { budget: 0, scope: 0, failed: 0, haven: 0 },
+  })
+
+  const stats: DashboardAgentStats = {
+    d7: spendWindow(1, 1),
+    // Gross and net differ, so the Spent figure's read is observable.
+    d30: spendWindow(12.5, 7, 8.25),
+    lastPaymentAt: '2026-08-30T10:00:00Z',
+    lastCounterparty: {
+      source: 'x402',
+      x402ResourceUrl: 'https://api.bitrefill.com/buy',
+      to: '0x' + 'ab'.repeat(20),
+      merchantName: null,
+    },
+  }
+
+  it('several budgets render a row each, with a meter and a menu per budget', () => {
+    mockGet.mockReturnValue([
+      heroBudget(),
+      budget({
+        id: 'b2',
+        delegation_hash: '0x' + 'ee'.repeat(32),
+        budget_atomic: '10000000',
+        remaining_atomic: '8000000',
+        remaining_from_chain: true,
+        period_end: '2026-09-02T02:00:00Z',
+      }),
+    ])
+    render(<DelegationBudgetCard {...PROPS} />)
+    expect(screen.getAllByRole('progressbar', { name: 'USDC budget used' })).toHaveLength(2)
+    expect(screen.getAllByRole('button', { name: /^Budget options / })).toHaveLength(2)
+  })
+
+  it('a budget at or past 90% used renders the warning meter', () => {
+    mockGet.mockReturnValue([
+      budget({ remaining_atomic: '400000', remaining_from_chain: true, period_end: '2026-09-02T02:00:00Z' }),
+    ])
+    render(<DelegationBudgetCard {...PROPS} />)
+    const meter = screen.getByRole('progressbar', { name: 'USDC budget used' })
+    expect(meter.getAttribute('aria-valuenow')).toBe('92')
+    const fill = meter.querySelector('div')
+    expect(fill?.className).toContain('bg-warning')
+  })
+
+  it('a paused agent greys the meter and adds the shared pause line; the caption itself is unchanged', () => {
+    mockGet.mockReturnValue([heroBudget()])
+    render(<DelegationBudgetCard {...PROPS} agentStatus="paused" />)
+    const fill = screen.getByRole('progressbar', { name: 'USDC budget used' }).querySelector('div')
+    expect(fill?.className).toContain('bg-[var(--v2-ink-3)]')
+    expect(screen.getByText(AGENT_PAUSED_SHORT)).toBeTruthy()
+    expect(screen.getByText('1.25 of 5.00 USDC · per day · refills in 14h')).toBeTruthy()
+  })
+
+  it("an active agent's hero caption is the dashboard row's caption, verbatim", () => {
+    mockGet.mockReturnValue([heroBudget()])
+    render(<DelegationBudgetCard {...PROPS} />)
+    // AgentRow renders `budgetCaption(row, { nowMs, style: 'row' })` for the
+    // dashboard row. Building the same caption the hero's mapping feeds and
+    // asserting the hero renders exactly that string pins the parity the
+    // issue demands: one helper, one style, no drift between the surfaces.
+    const caption = budgetCaption(
+      {
+        token: USDC,
+        recipient: '0x' + 'cc'.repeat(20),
+        startSec: Number('1788228000'),
+        periodSeconds: 86_400,
+        expiresSec: 9_999_999_999,
+        isLive: true,
+        budgetAtomic: '5000000',
+        usedAtomic: '1250000',
+        readFromChain: true,
+        periodEndMs: Date.parse('2026-09-02T02:00:00Z'),
+        createdMs: Date.parse('2026-09-01T00:00:00Z'),
+        symbol: 'USDC',
+        chainId: 84532,
+      },
+      { nowMs: NOW, style: 'row' },
+    )
+    expect(caption.kind).toBe('meter')
+    // The rendered caption IS the helper's row-style output — compared raw
+    // (the formatter puts an nbsp between the number and the symbol, which
+    // getByText's normalizer does not preserve on the matcher side).
+    const meter = screen.getByRole('progressbar', { name: 'USDC budget used' })
+    expect(meter.parentElement?.textContent).toBe((caption as { caption: string }).caption)
+  })
+
+  // #4260: the figure cell is the <dd> under the named <dt>.
+  const figure = (label: string) => {
+    const term = screen.getByText(label, { selector: 'dt' })
+    return term.nextElementSibling as HTMLElement
+  }
+
+  it('the Last 30 days column shows Spent, Payments and Last paid as three labelled figures (#4260)', () => {
+    mockGet.mockReturnValue([heroBudget()])
+    render(<DelegationBudgetCard {...PROPS} stats={stats} />)
+    expect(screen.getByText('Last 30 days')).toBeTruthy()
+    const grid = screen.getByText('Spent', { selector: 'dt' }).closest('dl')!
+    // Plain matchers over the class list, so a miss is an AssertionError.
+    expect([...grid.classList]).toEqual(expect.arrayContaining(['grid', 'grid-cols-3']))
+    expect(grid.querySelectorAll(':scope > div')).toHaveLength(3)
+    // Spent is Amount size="md": text-xl on the Amount span itself (#4259).
+    // #4274: the figure is d30's NET — 8.25, never the 12.50 gross the hero
+    // used to read and the dashboard does not show.
+    const spent = within(figure('Spent')).getByText(/8\.25/)
+    expect([...spent.classList]).toContain('text-xl')
+    expect([...spent.classList]).not.toContain('text-sm')
+    expect(within(figure('Spent')).queryByText(/12\.50/)).toBeNull()
+    expect(figure('Payments').textContent).toBe('7')
+    expect([...figure('Payments').classList]).toContain('text-xl')
+    expect(figure('Last paid').textContent).toBe(timeAgo('2026-08-30T10:00:00Z'))
+    expect([...figure('Last paid').classList]).toContain('text-xl')
+    // The 30px headline the column used to carry is gone; the balance is the headline.
+    expect(grid.closest('section')?.querySelector('.text-3xl')).toBeNull()
+  })
+
+  it('an unpriced bucket with net 0 renders no Spent amount — the dashboard headline rule (#4274)', () => {
+    mockGet.mockReturnValue([heroBudget()])
+    render(
+      <DelegationBudgetCard
+        {...PROPS}
+        stats={{
+          ...stats,
+          d30: { ...spendWindow(0, 0), payments: 3, unpricedByCurrency: { usd: true, eur: true, sek: true } },
+        }}
+      />,
+    )
+    // Unknown, not zero: `Amount amount={null}` renders the em dash, the same
+    // read the dashboard headline makes (MoneyPanel.tsx). The account-level
+    // unpriced NOTE stays off the hero — the dashboard's per-agent rows carry
+    // none either.
+    expect(figure('Spent').textContent).toBe('—')
+    expect(figure('Payments').textContent).toBe('3')
+  })
+
+  it('a partly unpriced bucket with net > 0 still renders the figure (#4274)', () => {
+    mockGet.mockReturnValue([heroBudget()])
+    render(
+      <DelegationBudgetCard
+        {...PROPS}
+        stats={{
+          ...stats,
+          d30: { ...spendWindow(12.5, 7, 8.25), unpricedByCurrency: { usd: false, eur: true, sek: true } },
+        }}
+      />,
+    )
+    expect(within(figure('Spent')).getByText(/8\.25/)).toBeTruthy()
+  })
+
+  it('net 0 with payments in the window (everything swept) reads 0 — the true net, no special case (#4274)', () => {
+    mockGet.mockReturnValue([heroBudget()])
+    render(<DelegationBudgetCard {...PROPS} stats={{ ...stats, d30: spendWindow(12.5, 7, 0) }} />)
+    expect(within(figure('Spent')).getByText(/0\.00/)).toBeTruthy()
+    expect(figure('Payments').textContent).toBe('7')
+  })
+
+  it('the merchant sits on its own line below the figures, with no divider (#4260)', () => {
+    mockGet.mockReturnValue([heroBudget()])
+    render(<DelegationBudgetCard {...PROPS} stats={stats} />)
+    // #4209's helper: the merchant NAME, else the x402 host — never the
+    // recipient address the counterparty also carries.
+    const line = screen.getByText('Last paid to api.bitrefill.com')
+    expect(line.tagName).toBe('P')
+    expect(line.className).not.toMatch(/\bborder/)
+    expect(line.closest('dl')).toBeNull()
+    expect(document.body.textContent).not.toContain('0x' + 'ab'.repeat(20))
+  })
+
+  it('with no merchant label the merchant line is omitted (#4260)', () => {
+    mockGet.mockReturnValue([heroBudget()])
+    render(
+      <DelegationBudgetCard
+        {...PROPS}
+        stats={{
+          ...stats,
+          lastCounterparty: { source: 'direct', x402ResourceUrl: null, to: '0x' + 'ab'.repeat(20), merchantName: null },
+        }}
+      />,
+    )
+    expect(figure('Last paid').textContent).toBe(timeAgo('2026-08-30T10:00:00Z'))
+    expect(screen.queryByText(/Last paid to/)).toBeNull()
+  })
+
+  it('payments in the window but no last-payment time: Last paid reads a dash, never a fabricated age (#4260)', () => {
+    mockGet.mockReturnValue([heroBudget()])
+    render(<DelegationBudgetCard {...PROPS} stats={{ ...stats, lastPaymentAt: null }} />)
+    expect(figure('Last paid').textContent).toBe('—')
+    expect(figure('Payments').textContent).toBe('7')
+  })
+
+  it('no payments in 30 days but an older one: the empty line, then when and to whom (#4260)', () => {
+    mockGet.mockReturnValue([heroBudget()])
+    render(<DelegationBudgetCard {...PROPS} stats={{ ...stats, d30: spendWindow(0, 0) }} />)
+    expect(screen.queryByText('No payments in the last 30 days.')).not.toBeNull()
+    expect(screen.queryByText(`Last paid ${timeAgo('2026-08-30T10:00:00Z')} to api.bitrefill.com`)).not.toBeNull()
+    expect(screen.queryByText('Spent', { selector: 'dt' })).toBeNull()
+  })
+
+  it('no payments in 30 days and never paid: the empty line alone (#4260)', () => {
+    mockGet.mockReturnValue([heroBudget()])
+    render(
+      <DelegationBudgetCard
+        {...PROPS}
+        stats={{ ...stats, d30: spendWindow(0, 0), lastPaymentAt: null, lastCounterparty: null }}
+      />,
+    )
+    expect(screen.queryByText('No payments in the last 30 days.')).not.toBeNull()
+    expect(screen.queryByText(/Last paid/)).toBeNull()
+    expect(screen.queryByText('Spent', { selector: 'dt' })).toBeNull()
+  })
+
+  it('while the overview read is in flight the column reserves its shape with a skeleton', () => {
+    mockGet.mockReturnValue([heroBudget()])
+    render(<DelegationBudgetCard {...PROPS} statsLoading />)
+    const skeleton = screen.getByLabelText('Loading the last 30 days')
+    // #4260: three label-and-value bar pairs, the shape of the figures.
+    expect(skeleton.querySelector('.grid-cols-3')?.children).toHaveLength(3)
+  })
+
+  it('a retired agent renders no Last 30 days column, even when handed stats', () => {
+    mockGet.mockReturnValue([heroBudget()])
+    render(<DelegationBudgetCard {...PROPS} retired="revoked" stats={stats} />)
+    expect(screen.queryByText('Last 30 days')).toBeNull()
+  })
+
+  it('anchors #delegation-budget-card so page affordances can scroll to it', () => {
+    mockGet.mockReturnValue([heroBudget()])
+    render(<DelegationBudgetCard {...PROPS} />)
+    // The id is the PAGE's wrapper (AgentDetailClient), asserted there; the
+    // card's contract here is the export itself.
+    expect(DELEGATION_BUDGET_CARD_ID).toBe('delegation-budget-card')
+  })
+
+  it('?grant= opens the budget expanded alongside the page tab parameter', async () => {
+    // Both parameters ride one URL: the card reads ?grant= from the window
+    // itself, so a hand-off link that lands with a tab keeps working.
+    const restore = withSearch(`?grant=${'0x' + 'cd'.repeat(32)}&tab=activity`)
+    try {
+      mockGet.mockReturnValue([
+        heroBudget(),
+        budget({
+          id: 'b2',
+          delegation_hash: '0x' + 'cd'.repeat(32),
+          status: 'pending',
+          is_live: false,
+          recipient_address: null,
+          budget_atomic: '7000000',
+        }),
+      ])
+      render(<DelegationBudgetCard {...PROPS} />)
+      await waitFor(() => expect((screen.getByLabelText('Budget amount') as HTMLInputElement).value).toBe('7'))
+      expect(screen.getByText('Set budget')).toBeTruthy()
+    } finally {
+      restore()
+    }
   })
 })

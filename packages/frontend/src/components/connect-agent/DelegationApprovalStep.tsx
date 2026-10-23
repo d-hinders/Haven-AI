@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { useState } from 'react'
 import { type Address } from 'viem'
 import { api } from '@/lib/api'
@@ -13,6 +14,7 @@ import WalletButton from '../WalletButton'
 import { Button } from '../ui/Button'
 import { AgentRulesSummary } from '../haven'
 import { ConnectionVerificationFooter } from './ConnectionVerificationFooter'
+import { ROW_FOOTER_OUTDENT_CLASS } from './ConnectSteps'
 import { WarningCallout } from './SetupNotices'
 
 /**
@@ -105,14 +107,14 @@ export function DelegationApprovalStep({
       <AgentRulesSummary
         // #1684: no card heading — the modal subtitle already reads "Approve
         // the agent budget" above this card, and since #3832 the step-list
-        // row around it says "Review and sign". One sentence, once.
+        // row around it says "Review and approve". One sentence, once.
         title={null}
         // #1684: one line, not three sentences. What the table below cannot
         // say is kept: the refill, and the guarantee that nothing executes
         // outside this budget — the only statement of it anywhere in the
         // flow, on the screen that grants spend authority. The per-period
         // amount is dropped because the Budget row already carries it.
-        description={`You sign once to give ${status.agent.name ?? 'this agent'} a budget that refills every period — nothing executes outside it.`}
+        description={`You approve once to give ${status.agent.name ?? 'this agent'} a budget that refills every period — nothing executes outside it.`}
         density="compact"
         items={[
           {
@@ -158,7 +160,7 @@ export function DelegationApprovalStep({
       )}
 
       {confirmFailed ? (
-        <div className="flex gap-3">
+        <div className={`flex gap-3 ${ROW_FOOTER_OUTDENT_CLASS}`}>
           {/* The budget is signed and the agent is live. Closing is all that
               is left — to stop it, the user uses Stop budget or Remove
               agent… on its own page. Offering a cancel here would promise a reversal
@@ -174,14 +176,31 @@ export function DelegationApprovalStep({
           ready={ready}
           input={grantInput}
           label="Approve budget"
-          busyLabel={confirming ? 'Finishing…' : 'Waiting for signature…'}
+          busyLabel={confirming ? 'Finishing…' : 'Waiting for your approval…'}
           // #3895: this screen approves; the agent page sets. Each caller
           // supplies the failure sentence its own button's verb carries.
-          // The owner approves by signing, so the sentence never makes
+          // The owner approves, so the sentence never makes
           // Haven the approver (copy-guidelines.md, attribution).
           failureMessage="The budget was not approved. Nothing changed — try again."
+          // #3933: on a resume or a retry the agent may already hold a live
+          // budget for this token, and the backend refuses a second one. Not
+          // a failure, and not retryable: the control disables itself and
+          // this sends the owner to the agent page, where the budget is edited.
+          slotOccupiedNotice={
+            <>
+              {status.agent.name ?? 'This agent'} already has a live budget for{' '}
+              {budget?.token_symbol ?? 'this token'}. To change it, edit that budget on{' '}
+              <Link href={`/agents/${encodeURIComponent(agentId)}`} className="font-medium text-[var(--v2-brand)] hover:underline">
+                the agent&rsquo;s page
+              </Link>
+              .
+            </>
+          }
           // Same footer shape as the legacy step: equal-width ghost-then-
           // primary, with the money-authority action carrying the weight.
+          // Outdented to the dialog body's edges (the flow's one footer rule)
+          // rather than sitting in the checklist's text column.
+          actionsClassName={ROW_FOOTER_OUTDENT_CLASS}
           leadingAction={
             granted ? (
               <Button variant="ghost" onClick={onClose} disabled={confirming} className="flex-1">

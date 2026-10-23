@@ -104,6 +104,34 @@ semantics match. They are not byte-for-byte identical:
 - Hosted MCP provides gasless sweep orchestration; the signer supplies
   `haven_sign_sweep_delegate`.
 
+**A hosted tool list carries a contract fingerprint; a local one does not
+(#3816).** The hosted server's tool list changes on every deploy, while an
+agent keeps the list it loaded when its session started, so the hosted server
+says which list it serves:
+
+- **What is hashed.** For each hosted tool, sorted by name: its name,
+  description and converted input schema, serialised as sorted-key JSON,
+  sha256, first 16 hex characters. The instructions are excluded, so dev and
+  prod agree. It is computed once at import
+  (`packages/mcp-server/src/contract-fingerprint.ts:101-127`).
+- **Where it appears.** The hosted instructions state the fingerprint and the
+  reconnect rule (`packages/mcp-server/src/server.ts:156-170`), and every
+  hosted handler result carries `contract_fingerprint` and `server_version` at
+  the top level of its JSON (`toMcpResult`, `server.ts:374-392`). An
+  SDK-generated refusal that is not already a hosted payload (an unknown tool,
+  a strict-input refusal) gets the same fingerprint and the stale-list hint
+  appended to its text (`annotateStaleToolList`, `server.ts:349-372`).
+- **The rule.** A result whose fingerprint differs from the one in the
+  instructions means the agent's list is stale: reconnect or restart before
+  continuing. During a rolling deploy it may alternate once. A payment already
+  prepared or funded keeps its `payment_id` and resumes after reconnecting; it
+  is never paid again.
+- **Hosted only.** The local stdio server and the signer carry neither field;
+  their tool list changes only on reinstall.
+
+The full contract and the skew table live in
+[`mcp-runtime-compatibility.md` § Hosted tool lists](../operations/mcp-runtime-compatibility.md#hosted-tool-lists--the-contract-fingerprint-and-the-reconnect-rule-3816).
+
 **A receipt read is not a transaction-history read, and since #3132 every row
 says which it is.** `haven_list_receipts` (both runtimes, via the SDK's
 `listReceiptsPage`) returns this agent's evidence rows only — agent-scoped by
@@ -349,10 +377,12 @@ The decomposed generic hosted flow remains, in two shapes since
 EIP-3009 bridge
 haven_pay_x402_quote → haven_sign → haven_submit
   → haven_x402_sign_header → merchant retry
-  → haven_report_x402_outcome
+  → haven_report_x402_outcome          (#4061: with the payment_header you retried with
+                                         whenever it carries settlement evidence)
   → haven_report_settlement_evidence   (#3475 follow-up: only on an accepted outcome
                                          with no settlement recorded yet, and only if the
-                                         merchant returned PAYMENT-RESPONSE.transaction)
+                                         merchant returned PAYMENT-RESPONSE.transaction;
+                                         #4061: pass the same payment_header)
 
 erc7710 direct settlement
 haven_pay_x402_quote → haven_sign
@@ -371,9 +401,28 @@ haven_pay_x402_quote → haven_sign
 > policy (https-only public hosts, no IP literals or internal names, ≤3
 > re-checked GET redirects, while-reading byte caps, per-use budgets —
 > [docs/security/hosted-egress.md](../security/hosted-egress.md)). The local
-> MCP and SDK embedders are unchanged: without `merchantEgress` the client
-> behaves exactly as before, including `http` to loopback and reserved
-> `.test`/`.localhost`/`.invalid`/`.example` fixtures. Accepted residual on
+> MCP and SDK embedders have no URL policy: without `merchantEgress` the
+> client still reaches `http` to loopback and reserved
+> `.test`/`.localhost`/`.invalid`/`.example` fixtures, with no caps or per-use
+> budgets. Both sides share one header rule (#4244, #4257): a hop to another
+> origin carries only an allow-list of headers. Under the hosted policy only
+> GET redirects are followed at all, so any non-GET 3xx, a 303 answering a
+> paid POST included, is refused with `redirect_on_non_get`. Without a policy
+> the Fetch spec's rewrite applies:
+>
+> - A 301 or 302 rewrites a POST to a body-less GET.
+> - A 303 rewrites every method except GET and HEAD.
+> - Every other case keeps both the method and the body: a non-POST method
+>   (a PUT, say) answered with a 301 or 302, and any request answered with a
+>   307 or 308.
+> - A paid GET, or a paid request rewritten to GET, that crosses origin is
+>   followed with the payment headers stripped and no body.
+> - A redirect that would re-send a paid body to another origin is refused:
+>   a 307/308, or a 301/302 on a non-POST method.
+>
+> On the local side a redirect refused during paid
+> delivery is recorded and reported as funded and undelivered, with
+> `haven_get_payment_status` as the next tool. Accepted residual on
 > the hosted side: a public name whose DNS answer points at private space is
 > not blocked (that is the resolution-time work parked in #3742–#3744).
 
@@ -447,6 +496,7 @@ since #1984 — are unaffected, hosted and local alike.
 
 - [Hosted connect flow](06-hosted-mcp-connect-flow.md)
 - [Edge signer](07-edge-signer.md)
+- [MCP runtime compatibility](../operations/mcp-runtime-compatibility.md) — the contract fingerprint and reconnect rule (#3816)
 - [Hosted merchant egress](../security/hosted-egress.md) (#3747)
 - [CASP / MiCA guardrails](../regulatory/casp-risk-guardrails.md)
 
@@ -602,3 +652,12 @@ The week's tool-surface drift (#3423 slices, #3444, #3465 catalog handoff,
 #3467 compact receipts, #3476 allowance block, #3485 allowance spelling)
 extended schemas and refusal text inside the documented decision structure;
 none of it moved the local/hosted split this document is about.
+
+> **Re-verification (#3935, the hosted contract fingerprint, 2026-10-14):** the
+> fingerprint paragraph under "Tool model" was added against `origin/dev`
+> `686ac03c` (`packages/mcp-server/src/{server,contract-fingerprint}.ts`); a
+> grep over `packages/mcp/src` and `packages/signer/src` for
+> `contract_fingerprint` / `server_version` returns nothing, which is the
+> "hosted only" claim. Scope of this note: that paragraph and the related-docs
+> link. The rest of this document was not re-read for it, and `last-verified`
+> is not bumped.

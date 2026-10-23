@@ -1,46 +1,67 @@
 import { expect, test } from '@playwright/test'
 import { dismissMobileSidebar, mockHavenApi, seedAuthenticatedSession } from './fixtures/haven-api'
 
-// #3554: the Transactions row is a native row whose click is a mouse
-// convenience; the title button is the accessible path, and the accounting
-// badge and the explorer link are its SIBLINGS. This drives a real pointer
-// at each of the three targets and asserts that only the row/title opens the
-// drawer — the badge and the explorer link keep their own behaviour.
-test.describe('transactions row — pointer activation (#3554)', () => {
+// #3554, retargeted to the ledger rows in #4266: a ledger row is itself the
+// control (`role="button"`, `aria-haspopup="dialog"`, tabindex 0) — click,
+// Enter or Space opens the drawer — and the accounting badge inside it is a
+// plain pill (no nested interactive control). This drives a real pointer and the keyboard at
+// each target and asserts that only the row opens the drawer.
+//
+// The "explorer link opens a popup and does not open the drawer" leg is
+// deleted, not retargeted: rows carry no explorer link any more (the detail
+// panel has it), so there is no sibling control left to protect.
+test.describe('transactions row — activation (#3554, #4266)', () => {
+  const ROW = '[data-testid="transactions-ledger"] [role="button"][aria-haspopup="dialog"]'
+
   test.beforeEach(async ({ page }) => {
     await mockHavenApi(page)
     await seedAuthenticatedSession(page)
     await page.goto('/transactions')
     await dismissMobileSidebar(page)
-    await expect(page.getByRole('table').getByText('Agent payment').first()).toBeVisible()
+    await expect(page.locator(ROW).first()).toBeVisible()
   })
 
   test('clicking the blank area of a row opens the drawer', async ({ page }) => {
-    // The direction cell holds no control and is laid out at every width.
-    await page.locator('tbody tr').first().locator('td').first().click()
+    // The row's own padding, away from the title text and any badge.
+    await page.locator(ROW).first().click({ position: { x: 4, y: 4 } })
     await expect(page.getByRole('dialog')).toBeVisible()
   })
 
-  test('clicking the accounting badge navigates and does not open the drawer', async ({ page }) => {
-    await page.locator('tbody tr').first().getByTestId('accounting-badge').click()
-    await page.waitForURL('**/accounting**')
-    await expect(page.getByRole('dialog')).toHaveCount(0)
+  test('the row holds no nested link or button; clicking its accounting badge opens the drawer', async ({
+    page,
+  }) => {
+    // A role="button" row must not contain interactive descendants
+    // (nested-interactive ARIA): the accounting badge on a row is a plain
+    // pill, and the /accounting link lives in the detail panel's Accounting row.
+    const row = page.locator(ROW).first()
+    await expect(row.locator('a, button')).toHaveCount(0)
+    await row.getByTestId('accounting-badge').click()
+    const dialog = page.getByRole('dialog')
+    await expect(dialog).toBeVisible()
+    await expect(page).toHaveURL(/\/transactions/)
+
+    const feed = dialog.getByTestId('accounting-badge')
+    await expect(feed).toBeVisible()
+    await expect(feed).toHaveAttribute('href', /\/accounting/)
   })
 
-  test('clicking the explorer link opens a popup and does not open the drawer', async ({
+  test('Enter on a focused row opens the drawer; Escape closes it and focus returns to the row', async ({
     page,
-    context,
   }) => {
-    const link = page.locator('tbody tr').first().getByRole('link', { name: 'Open externally' })
-    const href = await link.getAttribute('href')
-    expect(href).toBeTruthy()
-    // Never load the real explorer.
-    await context.route(`${new URL(href as string).origin}/**`, (route) =>
-      route.fulfill({ status: 200, contentType: 'text/html', body: '<html></html>' }),
-    )
-    const [popup] = await Promise.all([page.waitForEvent('popup'), link.click()])
-    expect(popup.url()).toBe(href)
-    await popup.close()
+    const row = page.locator(ROW).first()
+    await row.focus()
+    await expect(row).toBeFocused()
+    await page.keyboard.press('Enter')
+    await expect(page.getByRole('dialog')).toBeVisible()
+    await page.keyboard.press('Escape')
     await expect(page.getByRole('dialog')).toHaveCount(0)
+    await expect(row).toBeFocused()
+  })
+
+  test('Space on a focused row opens the drawer', async ({ page }) => {
+    const row = page.locator(ROW).first()
+    await row.focus()
+    await page.keyboard.press('Space')
+    await expect(page.getByRole('dialog')).toBeVisible()
   })
 })

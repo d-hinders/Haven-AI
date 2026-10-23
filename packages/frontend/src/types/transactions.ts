@@ -1,4 +1,3 @@
-import type { ReactNode } from 'react'
 import type { ApiSchema } from '@haven_ai/core'
 import type { StatusTone } from '@/components/ui/StatusBadge'
 
@@ -6,23 +5,26 @@ import type { StatusTone } from '@/components/ui/StatusBadge'
  * Wire shapes come from `@haven_ai/core`'s generated API types (#984) — the
  * OpenAPI spec is the single source; nothing here restates a response field.
  * This module keeps the frontend's established names as aliases, plus the
- * frontend-ONLY derived types (presentation overrides, client-side filter
+ * frontend-ONLY derived types (presentation state, client-side filter
  * state) that extend the wire shapes rather than replacing them.
  */
 
 /**
  * Who initiated a transaction (#2097). `'agent'` = agent-initiated (always
- * carries `agentName` too); `'human'` = user/dashboard-initiated (reserved —
- * nothing sets it today); `'unknown'` = outbound raw transfer with no agent
- * attribution. Direction `'in'` rows carry no `initiatedBy`.
+ * carries `agentName` too); `'human'` = an owner send from the dashboard,
+ * recorded at submit (#4099; earlier owner sends stay `'unknown'`);
+ * `'unknown'` = outbound raw transfer with no agent attribution or owner
+ * record. Direction `'in'` rows carry no `initiatedBy`, bar an agent's
+ * delegate sweep (`'agent'`).
  *
  * Declared here as a frontend-only extension because the OpenAPI field lands
  * in the same PR (#2097): the generated wire type in `@haven_ai/core`
  * (`packages/core/src/api-types.ts`, regenerated from the backend spec via
  * `npm run generate:api-types`) gains the same optional field. This keeps the
  * UI compiling before that regeneration lands, and stays consistent after it.
- * Rendering contract: "You" / "Payment sent by you" is RESERVED for `'human'`;
- * a missing value renders as explicit "Unknown" — never "You".
+ * Rendering contract: "You" is RESERVED for `'human'`; a missing value
+ * never renders as "You" (the ledger subline says "Unknown", the detail
+ * panel's header line names no actor, #4267).
  */
 type TransactionInitiator = 'agent' | 'human' | 'unknown'
 
@@ -33,17 +35,19 @@ export type Transaction = ApiSchema<'TransactionBase'> & {
 
 /**
  * Aggregated-feed item plus the frontend-only presentation overrides used by
- * `TransactionsTable` when rendering non-transaction activity through the
+ * the activity ledger when rendering non-transaction activity through the
  * same primitive. Wire fields come from the generated `Transaction` schema.
  */
 export interface AggregatedTransaction extends ApiSchema<'Transaction'> {
   /**
    * Who initiated the payment (#2097). `'agent'` → agent-initiated (always
-   * accompanied by `agentName`); `'human'` → user/dashboard-initiated
-   * (reserved — nothing sets it today); `'unknown'` → outbound raw transfer
-   * with no agent attribution. Direction `'in'` rows carry no `initiatedBy`.
-   * Rendering contract: "You" / "Payment sent by you" is RESERVED for
-   * `'human'`; a missing value renders as explicit "Unknown" — never "You".
+   * accompanied by `agentName`); `'human'` → an owner send from the
+   * dashboard, recorded at submit (#4099); `'unknown'` → outbound raw
+   * transfer with no agent attribution or owner record. Direction `'in'`
+   * rows carry no `initiatedBy`, bar an agent's delegate sweep.
+   * Rendering contract: "You" is RESERVED for `'human'`; a missing value
+   * never renders as "You" (the ledger subline says "Unknown", the detail
+   * panel's header line names no actor, #4267).
    * Frontend-only extension of the wire schema (see `Transaction`) — the
    * backend spec adds the field in the same PR (#2097).
    */
@@ -52,21 +56,9 @@ export interface AggregatedTransaction extends ApiSchema<'Transaction'> {
    * Optional status pill rendered inline beside the activity title. When set
    * it takes precedence over the default `isError` → "Failed" badge. Used by
    * callers that render non-transaction activity (e.g. agent approval items)
-   * through `TransactionsTable` so the table stays a single primitive.
+   * through the activity ledger so it stays a single primitive.
    */
   statusBadge?: { label: string; tone: StatusTone }
-  /**
-   * Optional title override. When provided, replaces the rule-based title
-   * the table would otherwise compute from direction / source / agentName.
-   */
-  titleOverride?: string
-  /**
-   * Optional from → to override for the From/To cell. When provided,
-   * replaces the address-resolution path. Use sparingly — only when the
-   * caller already has richer context than the table can resolve (e.g.
-   * x402 hostname + tooltip).
-   */
-  movementOverride?: ReactNode
   /**
    * Optional override for the external-link cell. `null` hides the link
    * entirely (e.g. approval items without a tx hash). Undefined falls back
@@ -82,16 +74,61 @@ export type TransactionsFeedResponse = Omit<ApiSchema<'TransactionsResponse'>, '
   transactions: AggregatedTransaction[]
 }
 
-/** Client-side only — not a wire shape. */
+/**
+ * The Period presets the Transactions filters offer (#4095). Server-side rolling
+ * windows `[now − N×24h, now)` — the owner rule from epic #3801 (rolling
+ * days, no calendar month). `'7d'`/`'30d'`/`'90d'` mirror the API's
+ * `period` enum; "All time" is the ABSENT parameter, not a fourth value.
+ */
+export type TransactionPeriodPreset = '7d' | '30d' | '90d'
+
+/**
+ * Client-side only — not a wire shape. Every dimension here rides the
+ * `GET /transactions` request since #4095, so the loaded rows, the count,
+ * the totals and the CSV export are the same set by construction.
+ */
 export interface TransactionFilterState {
   accountId?: string
   agentId?: string
   tokenKey?: string
   /**
-   * Direction filter — incoming or outgoing only. Applied client-side over
-   * the fetched transactions; the API doesn't yet support this dimension.
+   * Direction filter — incoming or outgoing only. Server-side since #4095:
+   * the browser filtered the loaded page in memory, which could disagree
+   * with the export over the whole result set.
    */
   direction?: 'in' | 'out'
+  /**
+   * Network filter — one chain id, or every chain (absent). Server-side
+   * since #4095 (`chainId` on the list request), same motivation as
+   * `direction`.
+   */
+  chainId?: number
+  /**
+   * Free-text search over what a row shows — the counterparty's resolved
+   * name (contact, receipt merchant, or another of the user's own
+   * accounts), the agent name, and the counterparty address. Resolved and
+   * matched on the SERVER (#4095); the browser never had the whole result
+   * set, so it could never search it honestly.
+   */
+  search?: string
+  /** Rolling Period preset; exclusive with a custom `from`/`to` range. */
+  period?: TransactionPeriodPreset
+  /**
+   * Custom-range start, `YYYY-MM-DD`, inclusive of the whole calendar day
+   * in the user's zone. Sent together with `to`; exclusive with `period`.
+   */
+  from?: string
+  /** Custom-range end, `YYYY-MM-DD` — inclusive of its whole zone day. */
+  to?: string
+  /**
+   * Opt in to the all-accounts feed's own-transfer fold (#4265): a move
+   * between two of the user's accounts comes back as ONE row carrying
+   * `ownTransfer`. Set only by `/transactions` (#4266) — the per-account
+   * ledger keeps both legs, each its own account's in or out — and
+   * serialized by `transactionFilterParams`, so the list, its In/Out totals
+   * and the CSV export all request the same folded set.
+   */
+  foldOwnTransfers?: boolean
 }
 
 export type TransactionFilterOptionsResponse = ApiSchema<'TransactionFilterOptionsResponse'>
@@ -115,13 +152,11 @@ export type BalanceItem = ApiSchema<'BalanceItem'> & { chainId?: number }
 
 export type BalancesResponse = ApiSchema<'BalancesResponse'>
 
-/** The receive ledger row (`GET /receive/{accountAddress}`, #3333). */
-export type ReceiveLedgerTransfer = ApiSchema<'ReceiveLedgerTransfer'>
-
-export type ReceiveLedgerResponse = ApiSchema<'ReceiveLedgerResponse'>
-
-export type OffRampDestination = ApiSchema<'OffRampDestination'>
-
-export type OffRampPrepareResponse = ApiSchema<'OffRampPrepareResponse'>
+// #4097: the receive-ledger and off-ramp wire aliases are removed here —
+// #3333's off-ramp panel and its ledger hook were their last frontend user.
+// The backend routes stay (#3333); the generated
+// `ApiSchema<'…'>` source of truth in @haven_ai/core is unchanged, so a
+// future cash-out surface re-declares an alias rather than a hand-written
+// shape (the wire-type ratchet's rule, #1447).
 export type PortfolioBreakdown = ApiSchema<'PortfolioBreakdown'>
 export type PortfolioResponse = ApiSchema<'PortfolioResponse'>

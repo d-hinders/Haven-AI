@@ -94,8 +94,10 @@ Run only the items that match the changed surface. Skip the rest.
 - **Credential Setup Copy.** If the diff changes setup copy, credential handoffs, signing-key guidance, or done-step instructions: confirm the copy is consistent across surfaces, leads with the user-facing safety property, and does not imply API credentials or Haven backend custody can spend.
 - **Browser Or Headless Verification.** If browser verification is skipped for UI or routing changes: name the reason and add a headless equivalent that covers the skipped risk.
 - **Green-Gate Evidence.** If you are about to record a gate as passing in the PR body: confirm the run actually saw the candidate diff. A check that reports on a file list can report success on an *empty* one, which reads identically to a clean pass — `node scripts/docs/coupling-gate.mjs` did exactly this when run before the commit, and "no covered docs implicated" went into #1076's Local Checks as evidence while a contract doc sat untouched. Run the strict, CI-equivalent form (`npm run docs:coupling`), and treat a gate that names zero inputs as unrun rather than green.
+- **Assertions A Wrong Edit Still Satisfies.** If the diff adds an assertion: make the nearest wrong edit that keeps what it matches and confirm it goes red — invert the instruction but keep the phrase (polarity; pin generated text whole with `toBe`), widen a token to a wildcard that names a whole set (wildcard token), return a different error code and confirm a test goes red (any error code), and drive every new arm (unentered branch). PRs #4133, #4131, #4145 and #4144 each needed a review round to find one.
 - **Instrument Self-Reference And Staleness.** If a PR-body claim rests on a measurement: confirm the instrument looked at the column, the tree and the process you mean. Filter a multi-column listing to the column before counting it (`git worktree list | grep -c review` counts branch names too, and its value is machine-local), `git fetch` before any "the code is not there", and never conclude a value appears in output you passed that value to. Correcting a false claim is itself a measurement — verify the replacement against its instrument, not against the sentence it replaces (see [`session-retrospective-2026-09-06.md`](session-retrospective-2026-09-06.md)).
 - **Pattern Absorption.** If the diff writes a markup shape a **second** time — the same header band, badge, row, empty-state, inline `<svg>`, or address-truncation you (or an existing file) already wrote — or re-creates something a `ui/`/`haven/` primitive already covers: extract it into a `ui/`/`haven/` primitive **and** add a `/design-system` entry, in this same PR. The trigger is the 2nd occurrence, not the 12th — this is what would have prevented every debt cluster #859 had to clean retroactively. The new primitive trips the design-system coupling gate (#898) by design, which is how the "add a DS entry" half is machine-checked. If extraction is genuinely premature (the two uses will diverge), say so explicitly rather than silently duplicating.
+  Before absorption is even needed, inspect the documented [`/design-system` Patterns](../product/design-system.md#patterns): use one that fits, or create a separate, owner-approved design-system slice before a consuming page introduces a **new pattern**. The line between the two rules: extracting a shape the product already ships, on the diff that writes its second copy, is absorption and stays in this PR; a composition with no shipped instance and no `/design-system` entry is a new pattern and comes first, in its own slice.
 
 Run the matching items before invoking `haven-reviewer` so the reviewer finds fewer issues. If the reviewer surfaces a new trap family, add it to `docs/contributing/ai-review-patterns.md`, this preflight, and the reviewer agent's recurring-traps list together — the three should stay in sync.
 
@@ -275,7 +277,7 @@ Use the haven-reviewer agent to review the current diff for Haven product, UX, s
 
 ### `haven-doc-reviewer`
 
-Use after implementation, on every diff. The coupling gate flags the docs whose `covers:` front-matter maps to the changed code, and those are the floor of what the pass reviews, not the scope — it derives that from the diff's claims (#2499). It reports specific stale, missing, or broken doc claims so the captain can update them before merge. The agent's findings are read-only suggestions, but **running it and acting on its findings (the `covers:`-mapped ones are the floor, not the scope — #2499) is a hard definition-of-done step in the loop, not optional** — the captain must update the implicated docs (or genuinely re-verify and bump `last-verified`) in the same PR before opening it. Advisory here means the **docs↔code** coupling comment does not by itself block auto-merge (contract docs excepted), not that the step can be skipped. The *design-system* coupling gate is a different check and does block — see [`autonomous-pr-loop.md`](autonomous-pr-loop.md).
+Use after implementation, on every diff. The coupling gate flags the docs whose `covers:` front-matter maps to the changed code, and those are the floor of what the pass reviews, not the scope — it derives that from the diff's claims (#2499). It reports specific stale, missing, or broken doc claims so the captain can update them before merge. The agent's findings are read-only suggestions, but **running it and acting on its findings (the `covers:`-mapped ones are the floor, not the scope — #2499) is a hard definition-of-done step in the loop, not optional** — the captain must update the implicated docs (or genuinely re-verify and bump `last-verified`) in the same PR before opening it. Advisory here means the **docs↔code** coupling comment does not by itself block auto-merge (contract docs excepted), not that the step can be skipped. A wrong claim (now-wrong, or newly written by the diff) about custody, signing, spend authority or money movement is **blocking** in any doc, whether or not it is `contract: true` (#4174). The *design-system* coupling gate is a different check and does block — see [`autonomous-pr-loop.md`](autonomous-pr-loop.md).
 
 Example:
 
@@ -382,7 +384,7 @@ Measured in one working session: **477 entries**, containing `Sidebar.bak`, `Sid
 
 | purpose | write | not |
 |---|---|---|
-| mutation backup | `Sidebar.tsx.1766.bak` | `Sidebar.bak` |
+| mutation backup (`<file>.<issue>.<role>.<cell>.bak`, written by [prove-red](../../.agents/skills/prove-red/SKILL.md)) | `Sidebar.tsx.1766.author.M1.bak` | `Sidebar.bak` |
 | PR body | `pr-1766.md` | `pr.md` |
 | captured output | `1766-typecheck.txt` | `out.txt` |
 
@@ -437,7 +439,7 @@ Gravity files the captain should usually own:
 
 For UI work, enforce the Haven UI instructions from AGENTS.md:
 - read the required UX and design docs
-- inspect `/design-system` if it exists
+- inspect `/design-system` if it exists, and build from its documented [Patterns](../product/design-system.md#patterns); a **new pattern** lands in its own earlier design-system slice first
 - reuse existing primitives and Haven-domain components
 - do not invent new card styles, spacing systems, shadows, radius, or typography unless necessary
 - include empty, loading, error, and success states when applicable

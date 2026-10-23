@@ -128,7 +128,7 @@ const { REBROADCAST_SAFE_SUBMITTERS, STALE_BROADCAST_SECONDS } = await import(
 const { ensureHybridDeployed, HYBRID_DEPLOY_CONFIRM_TIMEOUT_MS, HybridDeployUnconfirmedError } =
   await import('../hybrid-provisioning.js')
 
-const OWNER = { ownerAddress: ('0x' + 'aa'.repeat(20)) as `0x${string}` }
+const OWNER = { ownerAddress: ('0x' + 'aa'.repeat(20)) as `0x${string}`, deploySalt: '0x' as const }
 
 // Warm the deploy path's LAZY imports (`relayer-spend-guard`, `relayer`,
 // `outbound-queue` are imported inside the function) on real timers. Module

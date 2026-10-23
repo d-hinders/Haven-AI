@@ -139,7 +139,7 @@ export type paths = {
         put?: never;
         /**
          * Poll for the session token once a human has approved.
-         * @description Unauthenticated by design: the device code IS the credential. Answers `authorization_pending` until approved, then the session token exactly once — redemption is a single-use claim, so a poll loop that fires twice mints one session, not two. The token carries `purpose: owner_cli`, which every authenticated route refuses unless it is on the owner-CLI allow-list (`middleware/owner-cli.ts`): agents, connect setups and read-only account context — never signer changes, re-keying, credentials, provisioning, transfers, or delegation build/activate/revoke. The human keeps every signature.
+         * @description Unauthenticated by design: the device code IS the credential. Answers `authorization_pending` until approved, then the session token exactly once — redemption is a single-use claim, so a poll loop that fires twice mints one session, not two. The token carries `purpose: owner_cli`, which every authenticated route refuses unless it is on the owner-CLI allow-list (`middleware/owner-cli.ts`): agents (including building an unsigned budget delegation and preparing a revoke, both signed by the owner), connect setups, contacts, feedback and read-only account context — never signer changes, re-keying, the user's own credentials, provisioning, transfers, or delegation activation/submit. The human keeps every signature.
          */
         post: operations["redeemDeviceAuthorization"];
         delete?: never;
@@ -722,7 +722,7 @@ export type paths = {
         };
         /**
          * List an agent's budget delegations with lifecycle status.
-         * @description Every grant the agent has, newest first, including pending (built but not owner-signed), replaced and revoked rows — the dashboard renders exactly what is and isn't live (#802). Without the include parameter the response is the plain lifecycle list, byte-identical to the pre-#3693 shape. With include=remaining, ACTIVE rows additionally carry the on-chain remaining-this-period figure: remaining_atomic, remaining_from_chain and period_end (#3693); non-active rows carry null for all three. The route is polled every 10 s, so the chain reads behind those fields run only when asked for. The signed delegation object itself is deliberately NOT in the list: it is api_key_hash-class data returned only by the explicit flows that need it.
+         * @description Every grant the agent has, newest first, including pending (built but not owner-signed), replaced and revoked rows — the dashboard renders exactly what is and isn't live (#802). Without the include parameter the response is the plain lifecycle list, byte-identical to the pre-#3693 shape. With include=remaining, LIVE rows (`is_live`: active and unexpired, #3923) additionally carry the on-chain remaining-this-period figure: remaining_atomic, remaining_from_chain and period_end (#3693); every other row (an expired active one included) carries null for all three. The route is polled every 10 s, so the chain reads behind those fields run only when asked for. The signed delegation object itself is deliberately NOT in the list: it is api_key_hash-class data returned only by the explicit flows that need it.
          */
         get: operations["listAgentDelegations"];
         put?: never;
@@ -764,7 +764,7 @@ export type paths = {
         put?: never;
         /**
          * Grant step 2: attach the owner signature and make the budget live.
-         * @description Stores the owner's signature on the pending delegation and flips it active, marking any previously active grant in the same (token, recipient) slot replaced — atomically, so the slot never ends up with zero live grants mid-replacement. Deploys the counterfactual delegator account via the relayer first when needed (#860; permissionless factory call, no owner signature). Activating an agent's FIRST budget also activates a pending_approval agent — on this rail the grant signature IS the approval (#1069). Signature validation is a shape check only (65-byte ECDSA or longer WebAuthn assertion); the real validator is EIP-1271 at redemption.
+         * @description Stores the owner's signature on the pending delegation and flips it active, marking any previously active grant in the same (token, recipient) slot replaced — atomically, so the slot never ends up with zero live grants mid-replacement. Since #3933 that replacement is only for the edit flow: if the slot holds live (active, unexpired) budgets, the request must name every one of them as `replaces`, and no other hash, or it is refused with 409 BUDGET_SLOT_OCCUPIED — the database sweep alone would leave the old delegation enabled on-chain, and the edit flow is what stops it. Deploys the counterfactual delegator account via the relayer first when needed (#860; permissionless factory call, no owner signature). Activating an agent's FIRST budget also activates a pending_approval agent — on this rail the grant signature IS the approval (#1069). Signature validation is a shape check only (65-byte ECDSA or longer WebAuthn assertion); the real validator is EIP-1271 at redemption.
          */
         post: operations["activateAgentDelegation"];
         delete?: never;
@@ -877,6 +877,26 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/agents/{id}/sub-budgets/received": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The sub-budget grants this agent RECEIVES and has not closed.
+         * @description #3988 — the holder's side of the sub-budget table: every non-closed grant the agent holds, with the parent agent's name, for the read-only Received budgets block on the holder's own page. Read-only by design — closing a grant stays the delegator's action (DELETE /agents/{id}/sub-budgets/{sub}). Whether a grant can actually pay is the server's chain verdict on the Agent payload (`receivedSubBudgets[].open`), not this list.
+         */
+        get: operations["listReceivedAgentSubBudgets"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/agents/{id}/sub-budgets/{sub}/sign": {
         parameters: {
             query?: never;
@@ -909,7 +929,7 @@ export type paths = {
         post?: never;
         /**
          * Revoke one sub-budget row (the parent-child, or a single grant).
-         * @description Authority-reducing only (#3329-2's rule): the delegating agent's own delegate account prepares disableDelegation of THIS row's child. Revoking a PARENT-CHILD row strands every grant under it (their chain's middle link dies — revoking A's budget delegation closes this row too, which is what makes B's child unredeemable); revoking a GRANT row ends B's slice and leaves A intact. status=pending or expired: closes immediately, nothing signed. status=open and live: returns the prepared close operation for the agent to sign (then relay via the agent close endpoint).
+         * @description Authority-reducing only (#3329-2's rule): the delegating agent's own delegate account prepares disableDelegation of THIS row's child. Revoking a PARENT-CHILD row strands every grant under it (their chain's middle link dies — revoking A's budget delegation closes this row too, which is what makes B's child unredeemable); revoking a GRANT row ends B's slice and leaves A intact. status=pending, or status=open past its expiry: closes immediately, nothing signed. status=closing: an EXPIRED closing row whose delegating agent is revoked or archived closes immediately, nothing signed, no chain read (owner decision, #3923: nobody is left to sign and the child can no longer spend); otherwise first checks the chain — a child already disabled answers status='closed'. status=open and live, or any other status=closing row (#3923): returns the prepared close operation for the agent to sign (then relay via the agent close endpoint).
          */
         delete: operations["revokeAgentSubBudget"];
         options?: never;
@@ -1969,7 +1989,7 @@ export type paths = {
         put?: never;
         /**
          * Provision a counterfactual Hybrid DeleGator account.
-         * @description Computes the deterministic account address for an owner configuration (an EOA, P256 passkeys, or both) and records the row. **No transaction happens here** — the address is derived, not deployed, and `deployed: false` says so; the first sponsored operation (the budget grant) deploys the code. Refusals guard the derivation's own traps: the zero address is rejected because it derives the SAME account as the pure-passkey configuration while counting as a second signer, and duplicate passkey key_ids are rejected because they collapse to one on-chain key. A single-signer account is permitted (#1153) — the backup recommendation reaches the user after funding instead of walling the first minute.
+         * @description Computes the deterministic account address for an owner configuration and records the row. **No transaction happens here** — the address is derived, not deployed, and `deployed: false` says so; the first sponsored operation (the budget grant) deploys the code. Two request shapes share this route: the historical SIGNUP (owner_address and/or passkeys from the client) and the #4023 CREATE-ADDITIONAL (source_account_id + key_id), which copies the named passkey's coordinates SERVER-SIDE from the source account's stored signer set — the new account's owner is that passkey alone and it never becomes the default. Each account is derived at its own per-account deploy salt (#4023), so one passkey can own several accounts on one chain; the salt is a monotonic per-(user, signer) counter that is never reused, and a user can hold any derived address only once per chain (UNIQUE(user_id, chain_id, LOWER(account_address))). Refusals guard the derivation's own traps: the zero address is rejected because it derives the SAME account as the pure-passkey configuration while counting as a second signer, and duplicate passkey key_ids are rejected because they collapse to one on-chain key. A single-signer account is permitted (#1153) — the backup recommendation reaches the user after funding instead of walling the first minute.
          */
         post: operations["createHybridAccount"];
         delete?: never;
@@ -2168,6 +2188,10 @@ export type paths = {
         /**
          * One agent's payments and tool calls, newest first.
          * @description A heterogeneous list discriminated by `type`: payment or mcp_tool_call. (#2262: the third branch, `approval`, is gone — #2055 dropped `approval_requests` and this handler merges `payment_intents` and the MCP tool-call audit log, with no third source.) **Read the pagination carefully — it is approximate by construction.** `limit` is applied to EACH of the two sources separately and the results are then merged and sorted, so this route can return up to twice `limit` entries, and `offset` walks each source independently rather than the merged sequence. (The combined feed below merges the same way but then truncates to `limit`, so the two routes do NOT paginate identically.) Treat the list as a recent-activity window, not as a stable paged sequence.
+         *
+         *     **One population at a time (#4229).** When `kind` is given the route serves exactly that population — `payments` or `tool_calls` — filtered by `status`, `from`/`to`, `q` and `paymentId`, paged by `limit`/`offset` over the FILTERED sequence, and measured: the response adds `total` (the filtered population's size, ignoring `limit`/`offset`) and `hasMore` (`offset` + returned < `total`). `kind=tool_calls` also adds `counts.error` — the population's error count WITHOUT the `status` filter applied, so the summary line stays stable while the status selection flips. `from` is inclusive and `to` exclusive; `q` is a substring match — for payments over the merchant resource URL, the merchant/recipient address and the owner's contact name for the recipient, for tool calls over the tool name and error code; `paymentId` narrows to that one payment (a tool call links to its payment). `status` has one vocabulary per kind — `sent | pending | failed | needs_attention` for payments (`needs_attention` is the derived state: a machine-rail payment with an open merchant-retry-rejected reconciliation event) and `ok | error | denied` for tool calls; a value from the other kind's vocabulary is a 400. Omitting `kind` serves the legacy merged window described above and IGNORES every filter, so a legacy caller's response is unchanged and a new caller against an old backend (which does not reject unknown query parameters) simply gets the unfiltered merged shape.
+         *
+         *     **Refused attempts (kind=refusals, #4323).** A THIRD population: the agent's rows in `payment_refusals` — what the agent tried to pay, for how much, and why Haven or its budget stopped it, including attempts that never became a payment. The response's `activity` items are `RefusalActivityEntry` (not the payment/tool-call union above): `amount` is ATOMIC (the renderer scales it through the shared registry's decimals), `reason` is the closed five-value refusal vocabulary, and `attempts` folds the 60-second (agent, reason, resource) dedupe — one row, not two, per window. There is no `reason_label` on the wire: the plain words are the frontend's single reason-word map. The fiat is SERVE-TIME, all three currencies at once (`approx_amount_usd`/`_eur`/`_sek`; `sek_value` is not stored, so SEK exists only at request time) — null, never 0, on a price outage. `q` searches the resource URL and the merchant/recipient value; `from`/`to` bound `created_at`; `status` takes only `refused`. Two honest overlaps: a `relayer_budget` refusal is written at redeem AFTER the intent exists and the claim is released to `pending_signature`, so the same attempt can show as a pending payment AND a refusal (they cannot be linked — the refusal carries no payment id); and one attempt can book two refusal rows (pre-check plus prepare-catch) — both show, and each is true. An old backend answers `kind=refusals` with a 400 under enforced validation; a caller should show its error state rather than mix populations.
          */
         get: operations["getAgentActivity"];
         put?: never;
@@ -2187,7 +2211,7 @@ export type paths = {
         };
         /**
          * One agent's spend totals per token, plus its pending-approval count.
-         * @description Totals count CONFIRMED spend only, so an in-flight payment does not inflate them. Each window (all time, today, this week) is a separate per-token list rather than one list with three numbers, because a token can appear in one window and not another.
+         * @description Totals count CONFIRMED spend only, so an in-flight payment does not inflate them. Each window (all time, today) is a separate per-token list rather than one list with both numbers, because a token can appear in one window and not another. "Today" is the CALLER's local day: the `tz` query parameter names the IANA zone the day is cut in, and the window counts on `confirmed_at` — a payment created before local midnight and confirmed after belongs to the day it was confirmed in (#3977).
          */
         get: operations["getAgentStats"];
         put?: never;
@@ -2601,7 +2625,7 @@ export type paths = {
         };
         /**
          * List task budgets for the authenticated agent.
-         * @description Default status=open: OPEN and not expired. status=live (#3518): every row the agent can still act on — closing rows always, pending and open rows while not expired; closed and expired rows are omitted, so the read (and its per-row chain reads) is bounded by live work rather than history. status=all: every row regardless of status or expiry. #3501: open rows carry spent_atomic and remaining_atomic, read live from the enforcer's spentMap for the child's delegation hash (the same authority the chain applies at redemption), so the agent can tell BEFORE paying whether its next payment will be refused. A failed on-chain read reports spent/remaining as null with remaining_is_from_chain: false — never the full cap as remaining.
+         * @description Default status=open: OPEN and not expired. status=live (#3518): every row the agent can still act on — pending, open and closing rows while not expired (#3773); closed and expired rows are omitted, so the read (and its per-row chain reads) is bounded by live work rather than history. status=all: every row regardless of status or expiry. #3501: open rows carry spent_atomic and remaining_atomic, read live from the enforcer's spentMap for the child's delegation hash (the same authority the chain applies at redemption), so the agent can tell BEFORE paying whether its next payment will be refused. A failed on-chain read reports spent/remaining as null with remaining_is_from_chain: false — never the full cap as remaining.
          */
         get: operations["listTaskBudgets"];
         put?: never;
@@ -2783,8 +2807,8 @@ export type paths = {
         get?: never;
         put?: never;
         /**
-         * Close a sub-budget row — trivially if never signed or already expired, otherwise prepares the revocation.
-         * @description DELEGATOR-scoped (the delegating agent closes either row of its tree). status=pending, or status=open/closing past its expiry: closes immediately, nothing signed, nothing on-chain (200, status='closed'). status=open and live: prepares disableDelegation(child) from the delegating agent's own delegate account and returns sign_data to sign, then submit via POST /sub-budgets/{id}/submit. status=closing: first checks the chain; if the child is already disabled, answers 200 status='closed'; otherwise re-prepares a fresh close operation (idempotent in EFFECT, never in bytes). Closing the parent-child row strands every grant under it; closing a grant row leaves the delegating agent intact. status=closed: 409.
+         * Close a sub-budget row — trivially if never signed or open and already expired, otherwise prepares the revocation.
+         * @description DELEGATOR-scoped (the delegating agent closes either row of its tree). status=pending, or status=open past its expiry: closes immediately, nothing signed, nothing on-chain (200, status='closed'). status=open and live: prepares disableDelegation(child) from the delegating agent's own delegate account and returns sign_data to sign, then submit via POST /sub-budgets/{id}/submit. status=closing (expired or not — its disable signature is still owed, #3923): first checks the chain; if the child is already disabled, answers 200 status='closed'; otherwise re-prepares a fresh close operation (idempotent in EFFECT, never in bytes). Closing the parent-child row strands every grant under it; closing a grant row leaves the delegating agent intact. status=closed: 409.
          */
         post: operations["closeSubBudget"];
         delete?: never;
@@ -3179,7 +3203,7 @@ export type paths = {
         put?: never;
         /**
          * Attach merchant proof evidence for a settled machine payment.
-         * @description Records proof-loop evidence for a settled x402 or MPP payment owned by the authenticated agent. This does not authorize or execute payment. On most schemes the payment is already confirmed and this only attaches merchant/protocol evidence. On erc7710 direct settlement the merchant redeems the delegation chain and Haven submits nothing, so this call is also what COMPLETES the payment: it verifies the reported txHash on-chain against the intent (token, payer, merchant, exact amount, and the settlement window) and confirms the intent before recording evidence. On eip3009, a funded payment reported with a txHash other than its own funding transaction is the merchant's settlement: it is verified on-chain as a delegate → merchant transfer of the exact amount, mined after funding confirmed, and recorded on the payment (receipts then show it as settlement_tx_hash); the funding hash and the proof status do not change. It fails closed — 409 when the transaction does not settle this payment, cannot be attributed to it unambiguously, or is already recorded (on eip3009 the body carries a reason), 503 when the chain could not be read or the transaction is not mined yet; neither confirms or records anything.
+         * @description Records proof-loop evidence for a settled x402 or MPP payment owned by the authenticated agent. This does not authorize or execute payment. On most schemes the payment is already confirmed and this only attaches merchant/protocol evidence. On erc7710 direct settlement the merchant redeems the delegation chain and Haven submits nothing, so this call is also what COMPLETES the payment: it verifies the reported txHash on-chain against the intent (token, payer, merchant, exact amount, and the settlement window) and confirms the intent before recording evidence. On eip3009, a funded payment reported with a txHash other than its own funding transaction is the merchant's settlement: it is verified on-chain as a delegate → merchant transfer of the exact amount, mined after funding confirmed, and recorded on the payment (receipts then show it as settlement_tx_hash); the funding hash and the proof status do not change. That eip3009 settlement report must carry paymentProofHeader, the payment header sent to the merchant (#3925): its signed authorization proves the nonce the settlement burned is this payment's. A report without it is refused 409 with error_code "settlement_proof_header_missing" (#4061), the one refusal that a report repeated with the header can clear. It fails closed — 409 when the transaction does not settle this payment, cannot be attributed to it unambiguously, or is already recorded (on eip3009 the body carries a reason), 503 when the chain could not be read or the transaction is not mined yet; neither confirms or records anything.
          */
         post: operations["attachMachinePaymentEvidence"];
         delete?: never;
@@ -3314,7 +3338,7 @@ export type paths = {
         };
         /**
          * Download the filtered transaction list as a CSV file.
-         * @description Applies the same filters as `GET /transactions` over the whole result set rather than one page, and adds `direction` and `chainId`. UTF-8 with a byte-order mark and RFC 4180 quoting. Bounded at 10 000 rows; above that the request is refused with 413 rather than truncated.
+         * @description Applies the same filters as `GET /transactions` over the whole result set rather than one page, and adds `direction` and `chainId` — and, since #4095, the same `search` term and Period window, so the file and the on-screen list cannot disagree. UTF-8 with a byte-order mark and RFC 4180 quoting. Bounded at 10 000 rows; above that the request is refused with 413 rather than truncated.
          */
         get: operations["exportTransactionsCsv"];
         put?: never;
@@ -3603,8 +3627,8 @@ export type paths = {
             cookie?: never;
         };
         /**
-         * List curated payable services agents can discover and pay.
-         * @description Read-only discovery surface. One source of truth consumed by both the dashboard catalog page and the haven_discover_tools MCP tool. Entries are operator-curated and periodically re-verified against the live merchant 402 challenge; category matching is case-insensitive and every whitespace-separated search word must match the product name, description, or category. Blank search is rejected after trimming, non-empty search is capped at 120 characters, and searches with more than 8 words return 400; nothing here creates payments or signatures. **What `active` means, exactly (#1669):** verification exercises the 402 CHALLENGE only, so `active` says the merchant answers — it cannot say the merchant settles. One deliberate consequence is in the catalog on purpose: entries with `category: 'test-fixture'` simulate failure modes (today, a stranded-funds simulator whose funding leg succeeds but which never settles); their name and description say so plainly. Since #3078 every entry carries its `merchant`, and `merchant.is_test_merchant` is the structural signal a pre-filtering client should use (the Haven demo store and the stranded-funds fixture both carry it); the `test-fixture` category remains as data but is no longer the documented signal.
+         * List payable services agents can discover and pay.
+         * @description Read-only discovery surface. One source of truth consumed by both the dashboard catalog page and the haven_discover_tools MCP tool. Each entry names its provenance in `source` (operator-curated `operator`, self-submitted `ingestion`, or seller-asserted `bazaar`) and is periodically re-verified against the live merchant 402 challenge; category matching is case-insensitive and every whitespace-separated search word must match the product name, description, or category. Blank search is rejected after trimming, non-empty search is capped at 120 characters, and searches with more than 8 words return 400; nothing here creates payments or signatures. **What `active` means, exactly (#1669):** verification exercises the 402 CHALLENGE only, so `active` says the merchant answers — it cannot say the merchant settles. One deliberate consequence is in the catalog on purpose: entries with `category: 'test-fixture'` simulate failure modes (today, a stranded-funds simulator whose funding leg succeeds but which never settles); their name and description say so plainly. Since #3078 every entry carries its `merchant`, and `merchant.is_test_merchant` is the structural signal a pre-filtering client should use (the Haven demo store and the stranded-funds fixture both carry it); the `test-fixture` category remains as data but is no longer the documented signal.
          */
         get: operations["listCatalog"];
         put?: never;
@@ -3736,6 +3760,34 @@ export type paths = {
 export type webhooks = Record<string, never>;
 export type components = {
     schemas: {
+        RefusalActivityEntry: {
+            /** @enum {string} */
+            type: "refusal";
+            /** Format: uuid */
+            id: string;
+            created_at: string;
+            /** @description ATOMIC token amount — never pre-scaled here. The renderer derives the human amount from the shared registry decimals (core/chains), the same source the refusal ledger books through; the fiat triple below is struck server-side from that same human conversion. */
+            amount: string;
+            token_symbol: string;
+            chain_id: number;
+            /** @description The merchant/recipient the attempt named, when one was recorded. */
+            merchant_to: string | null;
+            /** @description The x402 resource the agent tried to pay, when the attempt was resource-scoped. */
+            resource_url: string | null;
+            /**
+             * @description The closed refusal vocabulary — mirrors the payment_refusals CHECK exactly. The plain words are the frontend's one reason-word map, not a wire field.
+             * @enum {string}
+             */
+            reason: "delegation_budget_exceeded" | "delegation_expired" | "no_delegation_for_target" | "relayer_budget" | "onchain_revert";
+            /** @description Folded attempts on this row: the 60-second (agent, reason, resource) dedupe increments `attempts` instead of inserting, so one row can stand for several tries. `delegation_budget_exceeded` also covers task-budget and sub-budget caps (the enforcer error codes share the classification). */
+            attempts: number;
+            /** @description Serve-time USD at request time; null when the token has no usable quote — never 0. */
+            approx_amount_usd: string | null;
+            /** @description Serve-time EUR; same null-for-unknown rule. */
+            approx_amount_eur: string | null;
+            /** @description Serve-time SEK. SEK is serve-time ONLY — `sek_value` is not stored on a refusal (the read shape keeps the write-only posture). */
+            approx_amount_sek: string | null;
+        };
         /** @description #3303: the backend's update hint for an outdated published client. `required: true` means the client is below a minimum this deployment set and will be refused at its refusal points; `upgrade_command` is the command that starts the update, on this deployment's channel. For the connector-installed packages (signer, mcp, connect) it is the connector doctor (#3412): it works as pasted on an existing install and prints the exact `--doctor --repair` line to run next — a bare connector re-run is a setup command that stops at "Missing --setup" on an already set-up machine. #3799: on those packages the backend may append ` --name <slug>` (normalised from the calling agent's recorded MCP pair — a display aid, never identity), so an agent on a multi-agent machine can run one command. `/discovery`, `/.well-known/haven.json` and `/releases` keep the bare form. */
         ClientUpdate: {
             /** @example @haven_ai/mcp */
@@ -3794,11 +3846,13 @@ export type components = {
             merchant_slug: string | null;
             /** @description That merchant’s display name, or null. */
             merchant_name: string | null;
-            /** @description Atomic units the on-chain caveat enforcer will still allow this period, read for ACTIVE rows — present ONLY on GET /agents/{id}/delegations?include=remaining (#3693); the key is absent entirely without the parameter. When remaining_from_chain is false the read failed and this is the full budget. null for non-active rows when included. */
+            /** @description Derived server-side (#3922) from the budget-VIEW predicate: status active and expires_at in the future (the start date is NOT consulted, so a dormant future-start re-key row is live, as the budget views show it). pending, replaced and revoked rows are false. */
+            is_live: boolean;
+            /** @description Atomic units the on-chain caveat enforcer will still allow this period, read for LIVE rows (`is_live`, #3923) — present ONLY on GET /agents/{id}/delegations?include=remaining (#3693); the key is absent entirely without the parameter. When remaining_from_chain is false the read failed and this is the full budget. null for non-live rows (an expired active one included) when included. */
             remaining_atomic?: string | null;
-            /** @description Present ONLY on GET /agents/{id}/delegations?include=remaining (#3693); the key is absent entirely without the parameter. False means the on-chain read failed and remaining_atomic is the budget, exactly as readRemainingBudget reports it. null for non-active rows when included. */
+            /** @description Present ONLY on GET /agents/{id}/delegations?include=remaining (#3693); the key is absent entirely without the parameter. False means the on-chain read failed and remaining_atomic is the budget, exactly as readRemainingBudget reports it. null for non-live rows (an expired active one included) when included. */
             remaining_from_chain?: boolean | null;
-            /** @description Present ONLY on GET /agents/{id}/delegations?include=remaining (#3693); the key is absent entirely without the parameter. When the current period refills (ISO 8601), computed the same way as the analytics budget views. Still the PERIOD boundary when the delegation expires earlier — the row expires_at then shows the earlier expiry. null for non-active rows when included. */
+            /** @description Present ONLY on GET /agents/{id}/delegations?include=remaining (#3693); the key is absent entirely without the parameter. When the current period refills (ISO 8601), computed the same way as the analytics budget views. Still the PERIOD boundary when the delegation expires earlier — the row expires_at then shows the earlier expiry. null for non-live rows (an expired active one included) when included. */
             period_end?: string | null;
         };
         MerchantFundingTarget: {
@@ -3847,6 +3901,8 @@ export type components = {
             expires_at: number;
             /** @description Derived: expires_at <= now. */
             is_expired: boolean;
+            /** @description Derived server-side (#3922): the row passes the live filter — status pending/open/closing and not expired, exactly the rows `?status=live` returns. Clients read this instead of recomputing from status and expires_at. */
+            is_live: boolean;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
@@ -3880,6 +3936,8 @@ export type components = {
             expires_at: number;
             /** @description Derived: expires_at <= now. */
             is_expired: boolean;
+            /** @description Derived server-side (#3922): the row is an OPEN sub-budget inside its spend window (status open and not expired). A pending, closing, closed or expired row is false. */
+            is_live: boolean;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
@@ -3987,6 +4045,8 @@ export type components = {
             networks: string[];
             /** @description Any offer verified payable — the same observation `CatalogEntry.verified_payable` records, at merchant level. */
             verified_payable: boolean;
+            /** @description The lowest price among the merchant's counted offers, in USDC atomic units (6 decimals), null when no counted offer prices in USDC. Counted offers are the same set `offer_count` aggregates (non-delisted, on the listed chains); an offer counts when its `price_atomic` is a digit string and its `asset` is USDC — the symbol or Circle's canonical contract address (the seed data carries both). A client renders "From <price> USDC" (price scaled by 10^-6) with the offer count after it when there is more than one. */
+            lowest_price_atomic: string | null;
         };
         CatalogEntry: {
             /** Format: uuid */
@@ -4028,10 +4088,10 @@ export type components = {
             status: "active" | "degraded" | "delisted";
             verified_at: string | null;
             /**
-             * @description Where the entry came from. `operator` = curated in migrations/scripts (the operator vouches for the listing; no domain-ownership proof runs). `ingestion` = self-submitted through the Verified Payable Directory (epic #1717) and passed domain-ownership proof plus the read-only quote probe.
+             * @description Where the entry came from. `operator` = curated in migrations/scripts (the operator vouches for the listing; no domain-ownership proof runs). `ingestion` = self-submitted through the Verified Payable Directory (epic #1717) and passed domain-ownership proof plus the read-only quote probe. `bazaar` = written by the x402 Bazaar discovery cron (#4245, only when the deployment enables discovery): the seller chose the name and description and no operator reviewed them; no domain-ownership proof runs.
              * @enum {string}
              */
-            source: "operator" | "ingestion";
+            source: "operator" | "ingestion" | "bazaar";
             /** @description True only for `ingestion` entries whose seller proved control of the endpoint domain. Always false for operator-curated rows: no ownership proof ever runs for them, and this field must not claim one. */
             domain_verified: boolean;
             /** @description True when Haven watched this endpoint answer a real x402 (or MPP) quote in its periodic probe: for `ingestion` rows that is the SSRF-hardened directory probe; for `operator` rows it is the catalog refresh probe (`status === active && verified_at` set) — same observation, no domain-ownership claim attached. False for a degraded row, or an operator row with no `verified_at` (migration 058 seeds its demo rows with one, so on a fresh database those carry the badge before the first refresh tick). Never treat this badge as proof of merchant honesty, quality, or settlement reliability. */
@@ -5043,6 +5103,7 @@ export type components = {
             created_at: string;
             archived_at?: string | null;
             allowances: components["schemas"]["AgentAllowance"][];
+            receivedSubBudgets?: components["schemas"]["AgentReceivedSubBudget"][];
             labels: components["schemas"]["Label"][];
             organization_id: string | null;
             tax_declaration_enabled: boolean;
@@ -5364,7 +5425,10 @@ export type components = {
             url: string;
             /** @example 0x1111111111111111111111111111111111111111 */
             payTo: string;
-            /** @example 0x1111111111111111111111111111111111111111 */
+            /**
+             * @description EIP-3009 funding leg only: the real merchant, when payTo is the agent delegate EOA (the funding target). On erc7710 direct settlement payTo IS the merchant; omit merchantPayTo, or send it equal to payTo. A different value is refused with 400 (#4243), since the settlement child pays payTo and the recorded merchant must be the address that is paid.
+             * @example 0x1111111111111111111111111111111111111111
+             */
             merchantPayTo?: string;
             /** @description Atomic token amount from the x402 challenge. Digits only; the route additionally refuses zero (`isPositiveDecimalAtomicAmount`), which JSON Schema does not express. */
             amount: string;
@@ -5614,6 +5678,8 @@ export type components = {
                 /** @enum {string} */
                 status: "open" | "closing";
                 is_expired: boolean;
+                /** @description Derived server-side (#3922): an OPEN grant inside its spend window. A `closing` grant (listed while its disable op may be owed) is false. */
+                is_live: boolean;
             }[];
         };
         AllowanceSummary: {
@@ -5643,6 +5709,8 @@ export type components = {
                  * @description #3518: the merchant this budget was issued for (#3331), null for every other budget. Never set without a recipient pin.
                  */
                 merchant_id?: string | null;
+                /** @description #3922: shape parity with the other budget wires — always true here (this read lists only active, unexpired budgets). Optional on the schema so an older backend that omits it stays valid. */
+                is_live?: boolean;
                 /** @description #3518: Haven-side reservation — the sum of this budget's OPEN, unexpired task- and sub-budget children's caps (`agent_task_budgets` + `agent_sub_budgets`, joined by delegation_hash), in ATOMIC units. Reported BESIDE `onchain.remaining` and never folded into it: the on-chain figure stays authoritative, a reservation releases on close/expire without any chain event, and "0" covers both no-reservation and a failed read (the sum is best-effort). */
                 reserved_haven_atomic?: string;
                 /** @description #3731: whether the account's balance can back THIS row's whole remaining period budget. One `balanceOf` read per distinct token; each row is compared ALONE (several rows for one token do not add up, so two `true` rows do not mean both are backed at once). `false` means the account cannot back the whole remaining budget — a heads-up to mention to the user, NOT a refusal and NOT proof the next payment fails: a budget larger than the balance is a normal setup (an owner may top up weekly). `null` means unverifiable: the chain read failed, or `onchain.remaining` was not read live (`remaining_is_from_chain` false — the fallback figure cannot answer a holdings question). Absent when `onchain.remaining` is 0 (the compare would be vacuously true). Only the boolean rides the wire; the balance itself never does. */
@@ -5679,6 +5747,8 @@ export type components = {
             resourceUrl?: string;
             /** @description #3492/#3527: the x402 idempotency key of the quote this pre-check describes. When it resolves to an already-SETTLED erc7710 OR eip3009 payment matching this same quote (confirmed, a tx_hash, settlement_scheme erc7710 or eip3009, and the SAME token/amountAtomic/merchantTo/resourceUrl this request names — both of the latter two are REQUIRED for a replay match, no task- or sub-budget pin), the pre-check answers sufficient — with `replay: true` — WITHOUT comparing against the now-lower remaining budget and WITHOUT recording a payment_refusals row: the money already moved (on eip3009, its funding leg did — the same fact the x402 replay guard already treats as replayable for every scheme), so re-refusing it as over-budget would be a false ledger row. Any other shape (no row, a pending child, a key collision on a different quote, or a task/sub-budget-scoped row) leaves today's compare unchanged. Omitted: unchanged behavior. */
             idempotencyKey?: string;
+            /** @description #3967: false answers the same decided 403 WITHOUT writing a payment_refusals row. The quote surfaces ask with this — a quote is not a payment attempt, and a later prepare records its own refusal if the agent goes ahead. Default true (omitted = record): every existing caller is unchanged. */
+            recordRefusal?: boolean;
         };
         /** @description The sufficient branch of the server-side budget pre-check (#3054). The insufficient answer is not this schema — it is the 403 delegation_budget_exceeded refusal, which also lands a payment_refusals row with source "hosted_prepare". */
         BudgetPrecheckResponse: {
@@ -5939,10 +6009,20 @@ export type components = {
             fundingTxHash?: string | null;
             /** @description #3763: the merchant settlement transaction when one is recorded (#3475); null otherwise — "not recorded", never "failed". Null on non-x402 rows. */
             settlementTxHash?: string | null;
+            /**
+             * @description #4319: what Haven knows about the merchant settlement — `verified` (a hash is recorded), `checking` (a source can still produce one: the payment is inside the 24-hour sweep window with a derivable nonce or a stored header, or a receipt verdict is retryable), `untracked` (a refused verdict, outside the window, or nothing else possible). Computed from stored state only; null on non-x402 rows.
+             * @enum {string|null}
+             */
+            settlementTracking?: "verified" | "checking" | "untracked" | null;
+            /**
+             * @description #4319: which proof the recorded settlement carries — `nonce` (derived from the payment id, the sweep standard), `signed_header` (the delegate-signed X-PAYMENT header, #3925), `receipt` (the owner-approved Tier 2 receipt-hash attribution, #4319), `legacy` (records from 2026-09-29 to 10-14, before the flags). Null when nothing is recorded.
+             * @enum {string|null}
+             */
+            settlementProof?: "nonce" | "signed_header" | "receipt" | "legacy" | null;
             /** @description #3778: the non-secret delivery pointer reported with an accepted x402 outcome (merchant, product, value, order id); null when none was reported. Never a redemption code or other credential — those are refused at write. */
             deliveryReference?: string | null;
             /**
-             * @description Who initiated the transaction, recorded by the backend. `agent`: agent-attributed rows (confirmed x402 intents, delegate sweeps, raw transfers matched to a confirmed intent). `human`: reserved — nothing populates it today. `unknown`: outbound raw transfer with no matched intent. Absent for inbound (`direction: in`) rows.
+             * @description Who initiated the transaction, recorded by the backend. `agent`: agent-attributed rows (confirmed x402 intents, delegate sweeps, raw transfers matched to a confirmed intent). `human`: an outbound transfer the account owner sent from the dashboard, recorded when it was submitted (#4099). `unknown`: outbound raw transfer with no matched intent or owner-send record — including owner sends made before that record existed. Absent for inbound (`direction: in`) rows, except an agent's delegate sweep, which is `agent`.
              * @enum {string}
              */
             initiatedBy?: "agent" | "human" | "unknown";
@@ -6038,10 +6118,20 @@ export type components = {
             fundingTxHash?: string | null;
             /** @description #3763: the merchant settlement transaction when one is recorded (#3475); null otherwise — "not recorded", never "failed". Null on non-x402 rows. */
             settlementTxHash?: string | null;
+            /**
+             * @description #4319: what Haven knows about the merchant settlement — `verified` (a hash is recorded), `checking` (a source can still produce one: the payment is inside the 24-hour sweep window with a derivable nonce or a stored header, or a receipt verdict is retryable), `untracked` (a refused verdict, outside the window, or nothing else possible). Computed from stored state only; null on non-x402 rows.
+             * @enum {string|null}
+             */
+            settlementTracking?: "verified" | "checking" | "untracked" | null;
+            /**
+             * @description #4319: which proof the recorded settlement carries — `nonce` (derived from the payment id, the sweep standard), `signed_header` (the delegate-signed X-PAYMENT header, #3925), `receipt` (the owner-approved Tier 2 receipt-hash attribution, #4319), `legacy` (records from 2026-09-29 to 10-14, before the flags). Null when nothing is recorded.
+             * @enum {string|null}
+             */
+            settlementProof?: "nonce" | "signed_header" | "receipt" | "legacy" | null;
             /** @description #3778: the non-secret delivery pointer reported with an accepted x402 outcome (merchant, product, value, order id); null when none was reported. Never a redemption code or other credential — those are refused at write. */
             deliveryReference?: string | null;
             /**
-             * @description Who initiated the transaction, recorded by the backend. `agent`: agent-attributed rows (confirmed x402 intents, delegate sweeps, raw transfers matched to a confirmed intent). `human`: reserved — nothing populates it today. `unknown`: outbound raw transfer with no matched intent. Absent for inbound (`direction: in`) rows.
+             * @description Who initiated the transaction, recorded by the backend. `agent`: agent-attributed rows (confirmed x402 intents, delegate sweeps, raw transfers matched to a confirmed intent). `human`: an outbound transfer the account owner sent from the dashboard, recorded when it was submitted (#4099). `unknown`: outbound raw transfer with no matched intent or owner-send record — including owner sends made before that record existed. Absent for inbound (`direction: in`) rows, except an agent's delegate sweep, which is `agent`.
              * @enum {string}
              */
             initiatedBy?: "agent" | "human" | "unknown";
@@ -6078,6 +6168,14 @@ export type components = {
             /** @example 0x1111111111111111111111111111111111111111 */
             accountAddress: string;
             accountName: string;
+            /** @description #4265: present only when an opt-in aggregated feed folds the paired outbound and inbound legs of a move between two accounts owned by this user. The row retains the outbound account fields and direction for compatibility; these fields name the destination. */
+            ownTransfer?: {
+                /** Format: uuid */
+                toAccountId: string;
+                toAccountName: string;
+                /** @example 0x1111111111111111111111111111111111111111 */
+                toAccountAddress: string;
+            };
             /** Format: uuid */
             agentId?: string;
             scope?: components["schemas"]["ListScope"];
@@ -6183,6 +6281,11 @@ export type components = {
             totalEur: number;
             totalSek?: number;
             breakdown: components["schemas"]["PortfolioBreakdown"][];
+            /**
+             * Format: date-time
+             * @description #4021 — the account's most recent OUTGOING transfer of any kind (agent payment or owner send; incoming transfers excluded), as the account card's "Last payment {relative}" footer reads it. Null when the account has never sent anything (or the probe could not see one — a failed chain read is not cached and is not reported as "no payments"). Absent from the dashboard aggregate, which prices balances only.
+             */
+            lastOutgoingAt?: string | null;
         };
         TransactionFilterOptionsResponse: {
             accounts: {
@@ -6263,12 +6366,23 @@ export type components = {
              */
             periodEnd: string;
         };
+        /** @description #3988 — a sub-budget grant the agent received from a parent agent, with the server-side qualifying-chain verdict. `open` follows the payment path: a grant whose chain the payment path would refuse (stopped parent budget, closed or expired parent-child row, expired grant, or the delegator's own self row) is `open: false`, so no surface presents it as spendable. */
+        AgentReceivedSubBudget: {
+            /** Format: uuid */
+            parent_agent_id: string;
+            parent_agent_name: string;
+            open: boolean;
+        };
+        /** @description #3988 — one row of GET /agents/{id}/sub-budgets/received: the same wire shape as SubBudget (is_live is the server’s liveness answer) plus the parent agent’s display name. Deliberately WIDER than the chain verdict: a pending or closing grant is listed (the owner can still act on it) but only the Agent payload’s `receivedSubBudgets[].open` says whether it can pay. */
+        ReceivedSubBudgetGrant: components["schemas"]["SubBudget"] & {
+            parent_agent_name: string;
+        };
         /** @description #3803 — a sub-budget grant the agent received from a parent agent. */
         DashboardReceivedSubBudget: {
             /** Format: uuid */
             parentAgentId: string;
             parentAgentName: string;
-            /** @description true iff the grant's stored status is 'open'. */
+            /** @description #3988: true iff the WHOLE redemption chain is live by Haven's rows — the grant is open and unexpired, hangs from an open, unexpired parent-child row, and that row was carved from the parent agent's currently spendable budget delegation (the payment path would accept the chain). Not the grant's stored status alone, and never true for a self row. */
             open: boolean;
         };
         /** @description #3803 — one window of the 7/30-day block. gross is the booked (or re-priced) fiat; net is gross with the #3755 delegate_sweeps ratio netting applied. Both are USD/EUR/SEK triples. */
@@ -6283,8 +6397,20 @@ export type components = {
                 eur: number;
                 sek: number;
             };
-            /** @description Owner decision 1: true when any row's booked fiat was NULL and was priced at today's rate — the client marks the figure ≈ so a re-priced total is never shown as booked. */
+            /** @description Owner decision 1: true when any row's booked fiat was NULL and was priced (or needed pricing) at today's rate. Provenance only since #4165 — the display mark is `approxByCurrency`. */
             approx: boolean;
+            /** @description #4165 — the "≈" DECISION per display currency, from the one rule (`shouldMarkApprox` in @haven_ai/core): true when a row was priced at today’s rate AND the conversion changes the number in that currency. USDC re-priced into USD is dollars and never sets `usd`. The client marks the figure in its display currency from this, not from `approx`. Always sent since #4165; optional so a client reading an older backend falls back to `approx`. */
+            approxByCurrency?: {
+                usd: boolean;
+                eur: boolean;
+                sek: boolean;
+            };
+            /** @description #4165 — true when a row needed today’s rate in that currency and none was available, so it is NOT in the gross/net figure. The client says so in words rather than with a "≈". */
+            unpricedByCurrency?: {
+                usd: boolean;
+                eur: boolean;
+                sek: boolean;
+            };
             /** @description Confirmed payment rows in the window — activity, never netted. */
             payments: number;
             /** @description DISTINCT merchants over the window — merchant = the x402 resource host, else the recipient address. A user-level figure, never a sum of per-agent counts. */
@@ -6306,6 +6432,18 @@ export type components = {
             };
             /** @description Owner decision 1: true when any row's booked fiat was NULL and was priced at today's rate. */
             approx: boolean;
+            /** @description #4165 — the "≈" DECISION per display currency, from the one rule (`shouldMarkApprox` in @haven_ai/core): true when a row was priced at today’s rate AND the conversion changes the number in that currency. USDC re-priced into USD is dollars and never sets `usd`. The client marks the figure in its display currency from this, not from `approx`. Always sent since #4165; optional so a client reading an older backend falls back to `approx`. */
+            approxByCurrency?: {
+                usd: boolean;
+                eur: boolean;
+                sek: boolean;
+            };
+            /** @description #4165 — true when a row needed today’s rate in that currency and none was available, so it is NOT in the gross/net figure. The client says so in words rather than with a "≈". */
+            unpricedByCurrency?: {
+                usd: boolean;
+                eur: boolean;
+                sek: boolean;
+            };
             /** @description Confirmed payment rows in the window — activity, never netted. */
             payments: number;
             refusals: components["schemas"]["DashboardRefusalBuckets"];
@@ -6391,6 +6529,15 @@ export type components = {
             agents: components["schemas"]["DashboardAgentPreview"][];
             /** @description Grouped activity rows, newest first. Every count is a FLOOR (`countIsFloor`) when the explorer window was truncated. */
             activity?: components["schemas"]["DashboardActivityGroup"][];
+            /** @description True when the merged transaction feed carries any transaction outside the rolling `activityWindowDays` window — activity exists, just not in it. False (not absent) when an account read failed, the same degradation as the rows. */
+            hasOlderActivity?: boolean;
+            /** @description The ROLLING window, in days — `[now − N×24h, now)`, the backend’s `ACTIVITY_WINDOW_DAYS` (#3975: the same definition as `spend.d7`), carried on the wire so the client names the window without hard-coding it. */
+            activityWindowDays?: number;
+            /**
+             * Format: date-time
+             * @description The rolling window’s start instant, `now − 7×24h` — the same boundary the `spend.d7` SQL applies (#3975), so the header’s "last 7 days" and the Activity card are one window. The client marks the oldest Activity day heading partial when this instant cuts its own local day.
+             */
+            activityWindowStart?: string;
             /** @description #3803 — the overview’s agents[] by status, so tiles do not derive counts from a client-side slice. */
             agentCount: {
                 active: number;
@@ -6459,10 +6606,19 @@ export type components = {
             source: string | null;
             /** @description The newest member’s x402 resource URL, when it is an x402 payment. */
             x402ResourceUrl: string | null;
-            /** @description The newest member’s raw `to` field — the merchant address on outbound payments, the account’s own address on deposits. */
+            /** @description The newest member’s raw `to` field — the merchant address on outbound payments, the account’s own address on deposits, and the receiving own account’s address on a folded move (`ownTransfer`, #4268). */
             to: string;
-            /** @description Contact or receipt-merchant name resolved for the counterparty, when one exists; null otherwise (always null on deposits). */
+            /** @description Contact or receipt-merchant name resolved for the counterparty, else the name of the user's own account on the other side of a transfer between two of their accounts (#4099); null otherwise. On a deposit it is set only for a transfer from another of the user's own accounts, and that deposit is its own group. A folded move (`ownTransfer`, #4268) keeps the value an unfolded send would carry, so a client that predates `ownTransfer` still renders a readable out row. */
             merchantName: string | null;
+            /** @description Outbound groups only (#4117): the label of the user's own account the money left — a contact name saved for it first, else the account's own name. Every member of the group left that one account. Absent on deposits and when no name resolves. */
+            fromAccountName?: string;
+            /** @description #4268: present only on a move between two of the user's own accounts, its two explorer legs folded into one group (#4265's fold, the same one `GET /transactions?foldOwnTransfers=1` applies). Same-day moves between the same two accounts form one group. The group keeps `direction: out`, `merchantName` and `fromAccountName` as an unfolded send would. Not set for an agent-initiated transfer, a self-send, an outbound row whose agent enrichment failed, or a leg whose partner leg was not read; each of those stays the row it was before. */
+            ownTransfer?: {
+                /** @description The own Haven name of the account the money left; "Unnamed account" when it has none, never an address. */
+                fromAccountName: string;
+                /** @description The own Haven name of the account the money reached; "Unnamed account" when it has none, never an address. */
+                toAccountName: string;
+            };
             /** @description The activity class, e.g. `delegate_sweep`; null for plain transfers and x402 payments. */
             activityType: string | null;
             /** @enum {string} */
@@ -6508,6 +6664,13 @@ export type components = {
             remaining_from_chain: boolean;
             /** @description Null when the read is unknown. */
             used_atomic: string | null;
+            /** @description #4004 — the delegation’s recipient pin; null = open budget. The display helper reads it to tell a budget locked to a merchant’s verified pay-to from the open one, the same distinction the payment’s own selection makes. */
+            recipient_address?: string | null;
+            /**
+             * Format: date-time
+             * @description #4004 — the instant the budget’s window opens. The future-dated re-key row is still returned beside its live carry row (#3802 owner decision stands); the display helper is what skips a row whose start_date is in the future.
+             */
+            start_date?: string | null;
             sub_budget_spend: {
                 /** Format: uuid */
                 agent_id: string;
@@ -9517,7 +9680,7 @@ export interface operations {
     listAgentDelegations: {
         parameters: {
             query?: {
-                /** @description Opt-in enrichment. remaining: each ACTIVE delegation carries the on-chain remaining-this-period fields (remaining_atomic, remaining_from_chain, period_end); non-active rows carry them as null. Anything outside the enum is refused with the 400 envelope before the handler runs. */
+                /** @description Opt-in enrichment. remaining: each LIVE delegation (`is_live`: active and unexpired, #3923) carries the on-chain remaining-this-period fields (remaining_atomic, remaining_from_chain, period_end); every other row — an expired active one included — carries them as null and costs no chain read. Anything outside the enum is refused with the 400 envelope before the handler runs. */
                 include?: "remaining";
             };
             header?: never;
@@ -9613,6 +9776,8 @@ export interface operations {
                     expires_at?: number;
                     /** @description A merchant-locked budget (#3331): the server pins the recipient to this live merchant's verified payTo on the agent's chain and records the merchant on the row. recipient_address may be omitted; when sent it must equal that payTo (409 otherwise). 404 for an unknown or non-live merchant; 409 when the merchant has no verified payTo there, not every offer there advertises ERC-7710, or the payTo is one of this agent's own addresses (delegate key, delegate account or treasury). */
                     merchant_slug?: string | null;
+                    /** @description #3933: the edit flow's declaration — one delegation hash, or a list of them. When the (token, recipient) slot already holds live budgets (active, unexpired; a re-key's dormant steady row counts), the build is allowed only when this names EXACTLY those budgets: every one of them, and no other hash. A build without it, naming only some of them (a re-key's carry and steady rows are two), or naming a hash that is not one of them, is refused with 409 BUDGET_SLOT_OCCUPIED, since activating it would leave an old delegation enabled on-chain. Ignored for an empty slot. The edit flow names the budgets it replaces here and in activate, then stops each one. */
+                    replaces?: string | string[] | null;
                 };
             };
         };
@@ -9691,7 +9856,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Revoked agents cannot receive a new budget delegation; other delegation-account conflicts also return 409, as do the merchant-locked refusals (#3331: no verified payTo, not ERC-7710, the payTo is one of the agent’s own addresses, recipient_address differs from the current payTo). */
+            /** @description Revoked agents cannot receive a new budget delegation; other delegation-account conflicts also return 409, as do the merchant-locked refusals (#3331: no verified payTo, not ERC-7710, the payTo is one of the agent’s own addresses, recipient_address differs from the current payTo), and a plain grant into an occupied slot (#3933: error_code BUDGET_SLOT_OCCUPIED, with existing_delegation_hash — the newest live budget there, the one to edit — and occupying_delegation_hashes, every live budget in the slot, which an edit’s `replaces` must name). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -9738,6 +9903,8 @@ export interface operations {
             content: {
                 "application/json": {
                     signature: string;
+                    /** @description #3933: the live budgets this grant replaces (the edit flow) — one delegation hash, or a list of them. Checked under the agent lock against the slot's live (active, unexpired) budgets: allowed into an occupied slot only when this names exactly those budgets, every one and no other hash, since the activation marks every active budget in the slot replaced and the edit flow stops what it named. Ignored for an empty slot. */
+                    replaces?: string | string[] | null;
                 };
             };
         };
@@ -9800,7 +9967,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Revoked agents cannot activate a new budget delegation; non-pending delegation and account conflicts also return 409. A row belonging to a re-key (`rekey_id` set) is refused with `error_code: "REKEY_DELEGATION_NOT_ACTIVATABLE"` — it is activated only by that re-key's own completion (#3439). */
+            /** @description Revoked agents cannot activate a new budget delegation; non-pending delegation and account conflicts also return 409. A row belonging to a re-key (`rekey_id` set) is refused with `error_code: "REKEY_DELEGATION_NOT_ACTIVATABLE"` — it is activated only by that re-key's own completion (#3439). A plain grant into a (token, recipient) slot that holds a live budget is refused with `error_code: "BUDGET_SLOT_OCCUPIED"`, `existing_delegation_hash` (the newest live budget there) and `occupying_delegation_hashes` (every live budget there) unless `replaces` names exactly those budgets (#3933); nothing is written. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -9965,7 +10132,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Error response */
+            /** @description Already revoked — the row is revoked, or it was disabled on-chain and the record has been healed to revoked. Both carry `error_code: "DELEGATION_ALREADY_REVOKED"` (#3933), so a client finishing a Stop can treat the goal as met. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -10385,6 +10552,62 @@ export interface operations {
                             grants: components["schemas"]["SubBudget"][];
                         }[];
                         unattached: components["schemas"]["SubBudget"][];
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    listReceivedAgentSubBudgets: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["AgentId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The received grants, newest first. Closed grants are never listed. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        agent_id: string;
+                        received: components["schemas"]["ReceivedSubBudgetGrant"][];
                     };
                 };
             };
@@ -15218,15 +15441,16 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    /** @description Defaults to Base Sepolia while delegation onboarding is dark-launched. */
+                    /** @description The chain the account is created on. REQUIRED for a create-additional request (no fallback); defaults to Base Sepolia for a signup request while delegation onboarding is dark-launched. */
                     chain_id?: number;
                     /** @description Display label; defaults to 'My account'. */
                     name?: string;
                     /**
-                     * @description EOA owner. Must not be the zero address.
+                     * @description EOA owner. Must not be the zero address. Signup shape only.
                      * @example 0x1111111111111111111111111111111111111111
                      */
                     owner_address?: string;
+                    /** @description Signup shape only. */
                     passkeys?: {
                         key_id: string;
                         /** @description P256 public-key x coordinate. */
@@ -15234,6 +15458,15 @@ export interface operations {
                         /** @description P256 public-key y coordinate. */
                         y: string;
                     }[];
+                    /**
+                     * Format: uuid
+                     * @description #4023 create-additional: an account the caller owns whose stored signer set the new owner passkey is copied FROM. Required together with key_id; owner_address/passkeys must be omitted.
+                     */
+                    source_account_id?: string;
+                    /** @description #4023 create-additional: the WebAuthn credential the user authenticated the dialog with. Must be a passkey on the source account; the new account derives from it alone (no backups, no EOA). */
+                    key_id?: string;
+                    /** @description #4023: retried-create dedup (the send_idempotency_key pattern). A retried create returns the FIRST account it created instead of minting a second — checked first, before the source, key and cap checks (#4024), and answered with the stored account's chain_id. A key reused with a different chain_id or key_id is refused with 409 IDEMPOTENCY_KEY_REUSED. */
+                    idempotency_key?: string;
                     /** @description Accepted and recorded as history, but REQUIRED FOR NOTHING (#1153) — sending it changes no outcome and omitting it changes no outcome. Kept on the request shape so existing clients keep working. */
                     single_signer_waiver?: {
                         acknowledged?: boolean;
@@ -15242,7 +15475,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Account row recorded. Counterfactual — nothing was deployed. */
+            /** @description Account row recorded. Counterfactual — nothing was deployed. Also answers an idempotent retry (the first account) and the winner of a concurrent create at the same derived address. */
             201: {
                 headers: {
                     [name: string]: unknown;
@@ -15266,7 +15499,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Bad owner configuration, or a chain the delegation rail does not serve. */
+            /** @description Bad owner configuration, a chain the delegation rail does not serve, or a mixed/ambiguous request shape. */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -15296,8 +15529,38 @@ export interface operations {
                     };
                 };
             };
-            /** @description This account is already registered for the caller. */
+            /** @description Create-additional: the named source_account_id is not an account the caller owns. error_code SOURCE_ACCOUNT_NOT_FOUND (#4024). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description This account is already registered for the caller. Also (#4024) a create-additional idempotency_key that already belongs to an account with a different chain_id or key_id: error_code IDEMPOTENCY_KEY_REUSED, with the existing account id. */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Create-additional (#4024 codes): the source account has no passkey to copy (error_code SOURCE_HAS_NO_PASSKEY); the key_id is not one of its passkeys (KEY_NOT_ON_SOURCE); or the per-user per-chain soft cap is reached (ACCOUNT_CAP_REACHED, with `cap` — 10 — and the request `chain_id`). An idempotent replay is answered BEFORE any of these checks, so a retried create whose first attempt succeeded gets that account (201), never one of these refusals. */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -16295,6 +16558,20 @@ export interface operations {
                 /** @description Capped at 100. */
                 limit?: number;
                 offset?: number;
+                /** @description Serve ONE population instead of the merged window. Adds total/hasMore to the response (plus counts.error for tool_calls). kind=refusals serves the agent's refused payment attempts — the payment_refusals ledger (#4323) — with its own item schema and no counts. Omitted: the legacy merged read, filters ignored. */
+                kind?: "payments" | "tool_calls" | "refusals";
+                /** @description Requires kind. Payments: sent (confirmed), pending (awaiting signature or submitted), failed, needs_attention (a machine-rail payment with an open merchant-retry-rejected reconciliation event). Tool calls: ok, error, denied. Refusals: refused — the only value, the population IS the refused attempts (#4323). A value from the other kind is a 400. */
+                status?: "sent" | "pending" | "failed" | "needs_attention" | "ok" | "error" | "denied" | "refused";
+                /** @description Requires kind. Inclusive ISO lower bound on created_at — a date or a full date-time. A non-ISO value is a 400. */
+                from?: string;
+                /** @description Requires kind. EXCLUSIVE ISO upper bound on created_at — a date or a full date-time; pass the next period's start so adjacent windows tile. A non-ISO value is a 400. */
+                to?: string;
+                /** @description Requires kind. Case-insensitive substring search. Payments: the merchant resource URL, the merchant/recipient address, and the owner's contact name for the recipient. Tool calls: the tool name and the error code. Refusals: the resource URL and the merchant/recipient value (#4323 — a refusal is not yet a payment, so it has no contact-name arm). */
+                q?: string;
+                /** @description Requires kind. Narrows to that one payment (kind=payments) or to the calls recorded against it (kind=tool_calls). */
+                paymentId?: string;
+                /** @description Requires kind=payments. The ERC-20 token contract address, matched case-insensitively against payment_intents.token_address (#4226 — the agent Activity tab's Token facet; the population is the agent's own payments, which the wallet-scoped transactions feed does not serve). Any other value matches nothing. */
+                token?: string;
             };
             header?: never;
             path: {
@@ -16305,7 +16582,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Merged activity, newest first. */
+            /** @description Merged activity, newest first — or, with `kind`, one filtered population with its total and hasMore. With kind=refusals the items are RefusalActivityEntry (#4323); every other population serves the payment/tool-call union. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -16332,10 +16609,20 @@ export interface operations {
                             tx_hash?: string | null;
                             /** @description #3763: the EIP-3009 funding leg, named — same value as `tx_hash`. */
                             funding_tx_hash?: string | null;
-                            /** @description #3763: the merchant’s settlement transaction (delegate → merchant) when an agent reported one or the backend’s settlement sweep detected it on-chain (#3888), and it verified on-chain (#3475, `machine_metadata.merchant_settlement_tx_hash`). Null is "not recorded", never "failed" — the SDK’s default evidence post reports the funding hash, which the writer refuses, so many eip3009 payments legitimately never get one. */
+                            /** @description #3763: the merchant’s settlement transaction (delegate → merchant) when an agent reported one, the backend’s settlement sweep detected it on-chain (#3888), or the #4319 proof ladder recorded it (Tier 1 signed header; Tier 2 receipt hash under the flag and its limits), and it verified on-chain (#3475, `machine_metadata.merchant_settlement_tx_hash`). Null is "not recorded", never "failed" — the SDK’s default evidence post reports the funding hash, which the writer refuses, so many eip3009 payments legitimately never get one. See `settlement_tracking` / `settlement_proof` for what Haven knows about it. */
                             settlement_tx_hash?: string | null;
                             /** @description #3763: which settlement branch moved the money — `eip3009` or `erc7710` — read from the intent’s `machine_metadata`; null when none was recorded. */
                             settlement_scheme?: string | null;
+                            /**
+                             * @description #4319: what Haven knows about the merchant settlement — `verified`, `checking`, `untracked` (same derivation as the transactions feed's camelCase `settlementTracking`, hand-mapped snake_case here). Computed from stored state only.
+                             * @enum {string|null}
+                             */
+                            settlement_tracking?: "verified" | "checking" | "untracked" | null;
+                            /**
+                             * @description #4319: which proof the recorded settlement carries — same derivation as the feed's `settlementProof`.
+                             * @enum {string|null}
+                             */
+                            settlement_proof?: "nonce" | "signed_header" | "receipt" | "legacy" | null;
                             payment_id?: string;
                             payment_proof_status?: string | null;
                             /** @description Derived from the payment lifecycle. */
@@ -16382,6 +16669,36 @@ export interface operations {
                             /** @description Feed only. */
                             agent_name?: string;
                         })[];
+                        /** @description Present when `kind` is given: the filtered population's size, ignoring limit/offset. */
+                        total?: number;
+                        /** @description Present when `kind` is given: offset + returned rows < total. */
+                        hasMore?: boolean;
+                        /** @description Present when kind=tool_calls. */
+                        counts?: {
+                            /** @description The population's tool calls with result_status error, counted WITHOUT the status filter — the summary line stays stable while the status selection flips. */
+                            error: number;
+                        };
+                    } | {
+                        activity: components["schemas"]["RefusalActivityEntry"][];
+                        /** @description The filtered refusal population's size, ignoring limit/offset. */
+                        total?: number;
+                        /** @description offset + returned rows < total. */
+                        hasMore?: boolean;
+                    };
+                };
+            };
+            /** @description A query parameter is off-spec (kind/status enum, limit/offset bounds), or `status` belongs to the other kind, or `from`/`to` is not ISO. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
                     };
                 };
             };
@@ -16419,7 +16736,10 @@ export interface operations {
     };
     getAgentStats: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description IANA time-zone name (e.g. `Europe/Stockholm`) the "today" window cuts the caller's local day by. Defaults to UTC; an invalid zone is refused with 400. */
+                tz?: string;
+            };
             header?: never;
             path: {
                 /** @description Agent id. */
@@ -16446,13 +16766,23 @@ export interface operations {
                             total_spent: string | null;
                             tx_count: number;
                         }[];
-                        this_week: {
-                            token: string | null;
-                            total_spent: string | null;
-                            tx_count: number;
-                        }[];
                         /** @description Always 0 since #2055 — the approval queue died with the Safe rail; kept for wire compatibility. */
                         pending_approvals: number;
+                    };
+                };
+            };
+            /** @description Invalid `tz` — not an IANA zone name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
                     };
                 };
             };
@@ -16528,10 +16858,20 @@ export interface operations {
                             tx_hash?: string | null;
                             /** @description #3763: the EIP-3009 funding leg, named — same value as `tx_hash`. */
                             funding_tx_hash?: string | null;
-                            /** @description #3763: the merchant’s settlement transaction (delegate → merchant) when an agent reported one or the backend’s settlement sweep detected it on-chain (#3888), and it verified on-chain (#3475, `machine_metadata.merchant_settlement_tx_hash`). Null is "not recorded", never "failed" — the SDK’s default evidence post reports the funding hash, which the writer refuses, so many eip3009 payments legitimately never get one. */
+                            /** @description #3763: the merchant’s settlement transaction (delegate → merchant) when an agent reported one, the backend’s settlement sweep detected it on-chain (#3888), or the #4319 proof ladder recorded it (Tier 1 signed header; Tier 2 receipt hash under the flag and its limits), and it verified on-chain (#3475, `machine_metadata.merchant_settlement_tx_hash`). Null is "not recorded", never "failed" — the SDK’s default evidence post reports the funding hash, which the writer refuses, so many eip3009 payments legitimately never get one. See `settlement_tracking` / `settlement_proof` for what Haven knows about it. */
                             settlement_tx_hash?: string | null;
                             /** @description #3763: which settlement branch moved the money — `eip3009` or `erc7710` — read from the intent’s `machine_metadata`; null when none was recorded. */
                             settlement_scheme?: string | null;
+                            /**
+                             * @description #4319: what Haven knows about the merchant settlement — `verified`, `checking`, `untracked` (same derivation as the transactions feed's camelCase `settlementTracking`, hand-mapped snake_case here). Computed from stored state only.
+                             * @enum {string|null}
+                             */
+                            settlement_tracking?: "verified" | "checking" | "untracked" | null;
+                            /**
+                             * @description #4319: which proof the recorded settlement carries — same derivation as the feed's `settlementProof`.
+                             * @enum {string|null}
+                             */
+                            settlement_proof?: "nonce" | "signed_header" | "receipt" | "legacy" | null;
                             payment_id?: string;
                             payment_proof_status?: string | null;
                             /** @description Derived from the payment lifecycle. */
@@ -21857,6 +22197,22 @@ export interface operations {
                 agentId?: string;
                 /** @description `<chainId>:<token address>`, or `<chainId>:native`. Whether Haven serves that chain is checked by the handler. */
                 tokenKey?: string;
+                /** @description #4095: filter by transfer direction server-side (was a browser-side filter over the loaded page only). */
+                direction?: "in" | "out";
+                /** @description #4095: filter to one supported network server-side. Whether Haven serves the chain is checked by the handler. */
+                chainId?: number;
+                /** @description #4095: free text matched case- and accent-insensitively against what a row shows — the counterparty's resolved name (contact, receipt merchant, or another of the user's accounts), the agent name, and the counterparty address (partial match). */
+                search?: string;
+                /** @description #4095: a rolling window `[now − N×24h, now)` (owner rule, epic #3801: rolling days, no calendar month). Mutually exclusive with `from`/`to`. */
+                period?: "7d" | "30d" | "90d";
+                /** @description #4095: custom-range start calendar date `YYYY-MM-DD`, inclusive of the whole day in `tz`. Sent together with `to`; mutually exclusive with `period`. */
+                from?: string;
+                /** @description #4095: custom-range end calendar date `YYYY-MM-DD`, inclusive of the whole day in `tz`. A `from` after `to` is a structured 400. */
+                to?: string;
+                /** @description #4095: IANA zone the custom `from`/`to` days are cut in, validated as `GET /dashboard/overview` validates its `tz` (invalid → 400). Defaults to UTC. */
+                tz?: string;
+                /** @description #4265: the exact value `1` opts in to folding paired transfers between two of the signed-in user’s accounts into one outbound-compatible row with `ownTransfer`. Other values preserve the legacy response. Folding is also disabled when `accountId` narrows the request to one account. */
+                foldOwnTransfers?: string;
                 /** @description Bounded to a safe integer (#3030: the handler used to cap it; ajv reads `1e400` as an integer). */
                 offset?: number;
                 limit?: number;
@@ -21920,6 +22276,18 @@ export interface operations {
                 tokenKey?: string;
                 direction?: "in" | "out";
                 chainId?: number;
+                /** @description #4095: the same search term `GET /transactions` applies, matched against the resolved counterparty names. */
+                search?: string;
+                /** @description #4095: the same rolling window `GET /transactions` applies. Mutually exclusive with `from`/`to`. */
+                period?: "7d" | "30d" | "90d";
+                /** @description #4095: custom-range start calendar date `YYYY-MM-DD`, inclusive of the whole day in `tz`. */
+                from?: string;
+                /** @description #4095: custom-range end calendar date `YYYY-MM-DD`, inclusive of the whole day in `tz`. */
+                to?: string;
+                /** @description #4095: IANA zone the custom `from`/`to` days are cut in. Defaults to UTC. */
+                tz?: string;
+                /** @description #4265: the exact value `1` opts in to the same own-account transfer fold as `GET /transactions`; other values preserve the legacy response. The opt-in CSV appends `to_account_name`, writes `own_transfer` in the type cell, and keeps the JSON row's `out` direction. Folding is disabled with `accountId`. */
+                foldOwnTransfers?: string;
                 fresh?: "1" | "true";
             };
             header?: never;

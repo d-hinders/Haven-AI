@@ -44,7 +44,9 @@ import {
 import {
   findForDelegatingAgent,
   insertPendingSubBudget,
+  isOpenSubBudget,
   listForOwner,
+  listReceivedGrantsForOwner,
   listTreeForOwner,
   markClosed,
   markClosing,
@@ -103,6 +105,7 @@ function toWire(row: SubBudgetRow, nowSec: number) {
     status: row.status,
     expires_at: Number(row.expires_at),
     is_expired: Number(row.expires_at) <= nowSec,
+    is_live: isOpenSubBudget(row, nowSec),
     created_at: row.created_at,
     opened_at: row.opened_at,
     closed_at: row.closed_at,
@@ -417,6 +420,26 @@ export default async function agentSubBudgetsOwnerRoutes(app: FastifyInstance): 
     })
   })
 
+  // ── GET /agents/:id/sub-budgets/received — the grants this agent RECEIVES ─
+  // The holder's side of the table (#3988): every non-closed grant the agent
+  // holds, with the parent agent's name joined, for the read-only "Received
+  // budgets" block on the holder's own page. `listTreeForOwner` answers the
+  // DELEGATING side; this is the mirror — a holder with no budget of its own
+  // must not read as if it cannot pay. Read-only: closing a grant stays the
+  // delegator's action (DELETE /agents/:issuer/sub-budgets/:sub above), and
+  // this endpoint offers no mutation.
+  app.get<{ Params: { id: string } }>('/:id/sub-budgets/received', async (request, reply) => {
+    const { sub } = request.user as { sub: string }
+    const agent = await loadOwnedDelegationAgent(request.params.id, sub)
+    if (!agent) return reply.code(404).send({ error: 'Agent not found' })
+    const rows = await listReceivedGrantsForOwner(request.params.id, sub)
+    const nowSec = Math.floor(Date.now() / 1000)
+    return reply.send({
+      agent_id: agent.agent_id,
+      received: rows.map((r) => ({ ...toWire(r, nowSec), parent_agent_name: r.parent_agent_name })),
+    })
+  })
+
   // ── DELETE /agents/:id/sub-budgets/:sub — owner revoke ───────────────────
   app.delete<{ Params: { id: string; sub: string } }>('/:id/sub-budgets/:sub', async (request, reply) => {
     const { sub } = request.user as { sub: string }
@@ -432,9 +455,28 @@ export default async function agentSubBudgetsOwnerRoutes(app: FastifyInstance): 
     // delegate account prepares disableDelegation of THIS row's child. For
     // a parent-child row this is the revoke that strands B's grants; for a
     // grant row it ends B's slice and leaves A intact.
-    const { prepareSubBudgetClose, serializeClosePreparedUserOp } = await import('../modules/sub-budgets/index.js')
+    const { prepareSubBudgetClose, serializeClosePreparedUserOp, isSubBudgetChildDisabledOnChain } =
+      await import('../modules/sub-budgets/index.js')
     const nowSec = Math.floor(Date.now() / 1000)
     try {
+      if (row.status === 'closing') {
+        // #3923 (owner decision 2026-10-14): the delegating agent is retired
+        // (revoked/archived), so nobody will sign the stored disable op, and
+        // the child is already past its expiry — close in Haven, no signature.
+        // Checked before the probe: it needs no chain read, so an RPC failure
+        // cannot 502 it.
+        if (isRetired(agent) && Number(row.expires_at) <= nowSec) {
+          const closed = await markClosed(row.id, agent.agent_id, null)
+          if (closed) return reply.send({ sub_budget: toWire(closed, nowSec), status: 'closed' })
+        }
+        // #3329 N2(b) / #3923: a PRIOR submit on this 'closing' row may have
+        // landed without confirmation — probe before re-preparing, or
+        // AlreadyDisabled 502s forever (same probe as POST /sub-budgets/:id/close).
+        if (await isSubBudgetChildDisabledOnChain(agent.chain_id, row.delegation_hash as `0x${string}`)) {
+          const closed = await markClosed(row.id, agent.agent_id, null)
+          if (closed) return reply.send({ sub_budget: toWire(closed, nowSec), status: 'closed' })
+        }
+      }
       const outcome = await prepareSubBudgetClose(
         { chain_id: agent.chain_id, delegate_address: agent.delegate_address },
         row,

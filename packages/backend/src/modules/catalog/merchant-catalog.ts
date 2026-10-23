@@ -10,9 +10,23 @@
  * instead of advertising stale offers.
  *
  * The probe is read-only — it never pays, signs, or follows the challenge.
+ *
+ * ## Every probe goes through the SSRF guard (#4281)
+ *
+ * A row's URL is not always one an operator chose. Since #4245, where
+ * `CATALOG_DISCOVERY_ENABLED=true` the discovery cron inserts seller-listed
+ * x402 Bazaar URLs (`source = 'bazaar'`), and the refresh re-probes every
+ * non-delisted row. So the default transport here is `guardedCatalogFetch`:
+ * the shared SSRF guard (`infra/http/ssrf-guard.ts`, #1712) classifies the
+ * resolved address, pins the socket to it, and bounds the deadline, byte
+ * count and redirects. The refresh gets a 15 s deadline, enough for a
+ * sleeping merchant's cold start; a discovery candidate gets the ingestion
+ * probe's 5 s. One rule for every row: no branch on `source` to keep
+ * correct. A refusal is a failed probe, never a crash.
  */
 // dep-lint-exempt: pool appears only as the default of the injectable QueryableLike executor (index.ts and tests inject their own); the probe-driven refresh/ingest updates it feeds await a catalog repository (beyond #999's ~100-line budget)
 import pool from '../../db.js'
+import { safeRequest, type SafeFetchOptions } from '../../infra/http/ssrf-guard.js'
 
 export interface CatalogRow {
   id: string
@@ -60,9 +74,18 @@ export interface CatalogRow {
   body_type?: string | null
   /** #3769: an example body the row's probe and discovery hint carry. */
   body_example?: Record<string, unknown> | null
+  /**
+   * #4245: who wrote the row — `'operator'` (migrations, scripts; the
+   * column default) or `'bazaar'` (the discovery cron). Migration 117.
+   * Optional because a test fixture may predate it.
+   */
+  source?: CatalogRowSource
   created_at: string
   updated_at: string
 }
+
+/** The closed vocabulary of `merchant_catalog.source` (migration 117's CHECK). */
+export type CatalogRowSource = 'operator' | 'bazaar'
 
 /**
  * Consecutive failed probes before an entry is shown as degraded. A single
@@ -203,6 +226,93 @@ function assetSymbol(asset: string | undefined): string {
 }
 
 /**
+ * Total budget for one REFRESH probe, redirects included. The refresh
+ * re-probes listed merchants hourly, and a sleeping one (Railway serverless,
+ * e.g. the dev Demo-merchant) cold-starts on that probe: measured 3.8–5.0 s on
+ * 2026-10-22. The budget sits well above that, but stays bounded.
+ */
+export const CATALOG_REFRESH_PROBE_TIMEOUT_MS = 15_000
+/**
+ * Total budget for one DISCOVERY probe of a Bazaar candidate. Kept at the
+ * ingestion probe's leg budget (`probe.ts`, #1713): a candidate is an unknown,
+ * seller-listed URL, the same kind of target that budget was set for.
+ */
+export const CATALOG_DISCOVERY_PROBE_TIMEOUT_MS = 5_000
+/** Response cap for one catalog probe; a 402 challenge is a few KiB at most. */
+export const CATALOG_PROBE_MAX_BYTES = 256 * 1024
+/**
+ * #4300: wall-clock budget for one whole refresh run. The refresh runs hourly
+ * under a leader lock (`platform/leader-lock.ts`) that has no TTL, so an
+ * unbounded run would hold it, and delay the next run, for as long as its
+ * slowest rows take. 10 min leaves the hourly tick most of its hour, and fits
+ * the 26 seeded rows even if every one of them used its full 15 s probe budget
+ * (6.5 min). A probe is started only when its whole budget still fits, so a
+ * run ends within this figure.
+ */
+export const CATALOG_REFRESH_RUN_BUDGET_MS = 10 * 60_000
+
+export interface RefreshOptions {
+  /** Wall-clock budget for the run. Defaults to `CATALOG_REFRESH_RUN_BUDGET_MS`. */
+  runBudgetMs?: number
+  /** The longest one probe can take. Defaults to `CATALOG_REFRESH_PROBE_TIMEOUT_MS`. */
+  probeBudgetMs?: number
+  /** Clock seam for tests. */
+  now?: () => number
+}
+
+/**
+ * Statuses a `Response` must be constructed without a body. The pinned
+ * transport never returns a 1xx (Node handles informational responses before
+ * the final one), so only these can arrive.
+ */
+const NULL_BODY_STATUSES = new Set([204, 205, 304])
+
+/**
+ * A `fetch`-shaped transport that sends every request through the SSRF guard
+ * (#4281). Shaped like `fetch` so `probeCatalogEntry` reads one kind of
+ * response whichever transport a caller injects. A guard refusal rejects, and
+ * `probeCatalogEntry` turns the rejection into `{ ok: false }`.
+ *
+ * `options` is the guard's test seam (resolver, transport, budgets). In
+ * production the defaults apply: system DNS and the pinned `node:https`
+ * transport.
+ */
+export function createGuardedCatalogFetch(options: SafeFetchOptions = {}): typeof fetch {
+  return (async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+    // A `Request` carries its own method, headers and body; reading only its
+    // URL would silently send something else. The probe never passes one.
+    if (typeof input !== 'string' && !(input instanceof URL)) {
+      throw new Error('guarded catalog probe takes a URL, not a Request')
+    }
+    const url = input.toString()
+    const headers = new Headers(init?.headers)
+    if (init?.body != null && typeof init.body !== 'string') {
+      throw new Error('guarded catalog probe sends only a string body')
+    }
+    const result = await safeRequest(
+      url,
+      { method: init?.method ?? 'GET', body: init?.body ?? null, accept: headers.get('accept') ?? undefined },
+      { timeoutMs: CATALOG_REFRESH_PROBE_TIMEOUT_MS, maxBytes: CATALOG_PROBE_MAX_BYTES, ...options },
+    )
+    if (!result.ok) throw new Error(`catalog probe refused: ${result.reason}`)
+    return new Response(NULL_BODY_STATUSES.has(result.status) ? null : result.body, {
+      status: result.status,
+      headers: result.headers,
+    })
+  }) as typeof fetch
+}
+
+/** The production refresh transport: every request through the SSRF guard, refresh budget. */
+export const guardedCatalogFetch: typeof fetch = createGuardedCatalogFetch({
+  timeoutMs: CATALOG_REFRESH_PROBE_TIMEOUT_MS,
+})
+
+/** The production discovery-probe transport: the SSRF guard, ingestion budget. */
+export const guardedDiscoveryProbeFetch: typeof fetch = createGuardedCatalogFetch({
+  timeoutMs: CATALOG_DISCOVERY_PROBE_TIMEOUT_MS,
+})
+
+/**
  * Probe one catalog entry. MCP merchants are probed with a JSON-RPC
  * tools/call POST (x402-gated MCP servers reply 402 to unpaid calls); plain
  * HTTP merchants with a GET. A challenge parsable from the PAYMENT-REQUIRED
@@ -213,7 +323,7 @@ export async function probeCatalogEntry(
     CatalogRow,
     'resource_url' | 'protocol' | 'tool_name' | 'tool_arguments' | 'rail' | 'http_method' | 'body_type' | 'body_example'
   >,
-  fetchImpl: typeof fetch = fetch,
+  fetchImpl: typeof fetch = guardedCatalogFetch,
 ): Promise<ProbeResult> {
   let response: Response
   try {
@@ -248,6 +358,22 @@ export async function probeCatalogEntry(
     return { ok: false }
   }
 
+  // #4300: the 402 is merchant-controlled, and the parsing below assumes its
+  // field types (a numeric `amount`, a null `accepts[0]`, a non-string `asset`
+  // all throw). A throw must read as a miss like any other unusable answer:
+  // escaping here would abort the refresh run, leave this row unwritten and
+  // so oldest, and stop every later run at the same row.
+  try {
+    return await readProbeChallenge(entry, response)
+  } catch {
+    return { ok: false }
+  }
+}
+
+async function readProbeChallenge(
+  entry: Pick<CatalogRow, 'rail'>,
+  response: Response,
+): Promise<ProbeResult> {
   if (response.status !== 402) return { ok: false }
 
   if (entry.rail === 'mpp') {
@@ -310,69 +436,104 @@ export interface QueryableLike {
 }
 
 /**
- * Probe every non-delisted entry and persist the outcome. Returns counts for
- * observability. Failures on individual entries never abort the run.
+ * Probe non-delisted entries and persist each outcome, within a run budget.
+ * Returns counts for observability. Failures on individual entries never
+ * abort the run: the probe answers every failure as a miss, and a row whose
+ * write fails is logged and skipped (it keeps its old `updated_at`, so it
+ * comes first again next run) without being counted.
+ *
+ * #4300: rows are taken least recently updated first, and a probe is started
+ * only while its whole budget still fits in the run's. Rows the run does not
+ * reach are left untouched, so they are neither counted as misses nor moved
+ * toward `degraded`, and they come first next run. That rotation rests on
+ * `updated_at`: both outcome writes below set it, and nothing else writes it
+ * outside migrations.
  */
 export async function refreshCatalog(
   db: QueryableLike = pool as unknown as QueryableLike,
-  fetchImpl: typeof fetch = fetch,
-): Promise<{ verified: number; degraded: number }> {
+  fetchImpl: typeof fetch = guardedCatalogFetch,
+  options: RefreshOptions = {},
+): Promise<{ verified: number; degraded: number; deferred: number }> {
+  const runBudgetMs = options.runBudgetMs ?? CATALOG_REFRESH_RUN_BUDGET_MS
+  const probeBudgetMs = options.probeBudgetMs ?? CATALOG_REFRESH_PROBE_TIMEOUT_MS
+  const now = options.now ?? Date.now
+  const started = now()
   const { rows } = await db.query(
-    `SELECT * FROM merchant_catalog WHERE status != 'delisted'`,
+    `SELECT * FROM merchant_catalog WHERE status != 'delisted' ORDER BY updated_at ASC, id ASC`,
   )
 
   let verified = 0
   let degraded = 0
-  for (const entry of rows) {
+  let deferred = 0
+  for (const [index, entry] of rows.entries()) {
+    if (now() - started + probeBudgetMs > runBudgetMs) {
+      deferred = rows.length - index
+      break
+    }
     const result = await probeCatalogEntry(entry, fetchImpl)
-    if (result.ok) {
-      verified++
-      // Success always recovers the entry and clears the failure streak.
-      await db.query(
-        `UPDATE merchant_catalog
-         SET price_atomic = $2, price_display = $3, asset = $4,
-             network = COALESCE($5, network),
-             asset_transfer_methods = COALESCE($6, asset_transfer_methods),
-             pay_to = $7,
-             http_method = COALESCE($8, http_method),
-             status = 'active', verified_at = now(),
-             consecutive_failures = 0, updated_at = now()
-         WHERE id = $1`,
-        [
-          entry.id,
-          result.priceAtomic,
-          result.priceDisplay,
-          result.asset,
-          result.network ?? null,
-          result.assetTransferMethods?.join(',') ?? null,
-          // #3331: written as seen, NOT COALESCEd like the fields above — a
-          // merchant that stops naming one payTo must lose its verified one
-          // (the merchant-locked-budget action then disappears) rather than
-          // keep pinning budgets to an address its own challenge no longer
-          // names. A rotation lands here as a different value, which is what
-          // flags the budgets pinned to the old one as stale.
-          result.payTo ?? null,
-          // #3769: a 402 that advertises its own method corrects the row —
-          // the live challenge is authoritative for how it is called (the
-          // same doctrine the price fields above follow). HTTP rows only: an
-          // MCP row's challenge never advertises one, and a stray value must
-          // not leak onto a row whose probe is a tools/call.
-          entry.protocol === 'http' ? (result.advertisedMethod ?? null) : null,
-        ],
-      )
-    } else {
-      // Hysteresis: count the miss, but only degrade after a sustained streak
-      // so one flaky probe doesn't light up the whole catalog.
-      const failures = (entry.consecutive_failures ?? 0) + 1
-      const nextStatus = failures >= DEGRADE_AFTER_FAILURES ? 'degraded' : entry.status
-      if (nextStatus === 'degraded') degraded++
-      await db.query(
-        `UPDATE merchant_catalog
-         SET consecutive_failures = $2, status = $3, updated_at = now()
-         WHERE id = $1`,
-        [entry.id, failures, nextStatus],
+    try {
+      if (result.ok) {
+        await persistVerified(db, entry, result)
+        verified++
+      } else if (await persistMiss(db, entry)) {
+        degraded++
+      }
+    } catch (err) {
+      console.warn(
+        `[catalog] refresh could not record the probe of ${entry.resource_url}; the row keeps its old updated_at: ${err instanceof Error ? err.message : String(err)}`,
       )
     }
   }
-  return { verified, degraded }
+  return { verified, degraded, deferred }
+}
+
+async function persistVerified(db: QueryableLike, entry: CatalogRow, result: ProbeResult): Promise<void> {
+  // Success always recovers the entry and clears the failure streak.
+  await db.query(
+    `UPDATE merchant_catalog
+     SET price_atomic = $2, price_display = $3, asset = $4,
+         network = COALESCE($5, network),
+         asset_transfer_methods = COALESCE($6, asset_transfer_methods),
+         pay_to = $7,
+         http_method = COALESCE($8, http_method),
+         status = 'active', verified_at = now(),
+         consecutive_failures = 0, updated_at = now()
+     WHERE id = $1`,
+    [
+      entry.id,
+      result.priceAtomic,
+      result.priceDisplay,
+      result.asset,
+      result.network ?? null,
+      result.assetTransferMethods?.join(',') ?? null,
+      // #3331: written as seen, NOT COALESCEd like the fields above — a
+      // merchant that stops naming one payTo must lose its verified one
+      // (the merchant-locked-budget action then disappears) rather than
+      // keep pinning budgets to an address its own challenge no longer
+      // names. A rotation lands here as a different value, which is what
+      // flags the budgets pinned to the old one as stale.
+      result.payTo ?? null,
+      // #3769: a 402 that advertises its own method corrects the row —
+      // the live challenge is authoritative for how it is called (the
+      // same doctrine the price fields above follow). HTTP rows only: an
+      // MCP row's challenge never advertises one, and a stray value must
+      // not leak onto a row whose probe is a tools/call.
+      entry.protocol === 'http' ? (result.advertisedMethod ?? null) : null,
+    ],
+  )
+}
+
+/** Record one miss; true when it moved the row to `degraded`. */
+async function persistMiss(db: QueryableLike, entry: CatalogRow): Promise<boolean> {
+  // Hysteresis: count the miss, but only degrade after a sustained streak
+  // so one flaky probe doesn't light up the whole catalog.
+  const failures = (entry.consecutive_failures ?? 0) + 1
+  const nextStatus = failures >= DEGRADE_AFTER_FAILURES ? 'degraded' : entry.status
+  await db.query(
+    `UPDATE merchant_catalog
+     SET consecutive_failures = $2, status = $3, updated_at = now()
+     WHERE id = $1`,
+    [entry.id, failures, nextStatus],
+  )
+  return nextStatus === 'degraded'
 }

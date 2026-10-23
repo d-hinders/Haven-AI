@@ -20,9 +20,12 @@ import {
   findX402IntentByIdempotencyKey,
   getX402HourlyUsage,
   markIntentSubmittedForSettlement,
+  RECORD_EIP3009_MERCHANT_SETTLEMENT_SQL,
+  recordEip3009MerchantSettlement,
   recordX402Signature,
 } from '../x402-authorizations.js'
 import { expirePendingIntent } from '../payment-intents.js'
+import type { Executor } from '../../transaction.js'
 
 let seq = 0
 
@@ -385,5 +388,153 @@ describeDb('x402-authorizations repository (#1222)', () => {
     // makes the X-PAYMENT header single-emission.
     await markIntentSubmittedForSettlement('0xreplay-sig', id, agentId)
     expect((await readIntent(id)).signature).toBe('0xchild-sig')
+  })
+})
+
+// ── #3927: two DIFFERENT verified settlement hashes for one eip3009 payment ──
+//
+// The writer serializes per HASH; two different hashes take different hash
+// locks. Before #3927 only the UPDATE's `merchant_settlement_tx_hash IS NULL`
+// clause stopped the second hash from overwriting the first (READ COMMITTED
+// re-evaluates the blocked UPDATE's WHERE after the winner commits), and the
+// loser answered `not_eligible`. The widened writer also locks the INTENT, so
+// the loser's pre-read sees the winner's hash and answers `conflict`.
+describeDb('eip3009 merchant-settlement writer: one hash per payment (#3927)', () => {
+  const HASH_A = `0x${'a1'.repeat(32)}`
+  const HASH_B = `0x${'b2'.repeat(32)}`
+
+  beforeAll(async () => {
+    await initDbHarness()
+  })
+
+  beforeEach(async () => {
+    await resetDb()
+  })
+
+  /** A funded (confirmed) eip3009 delegation-rail x402 intent — the writer's eligible shape. */
+  async function seedFundedEip3009(): Promise<{ id: string; agentId: string }> {
+    const { agentId, userId } = await seedAgent()
+    const id = await seedIntent({
+      agentId,
+      userId,
+      status: 'confirmed',
+      txHash: `0x${'f0'.repeat(32)}`,
+      executionRail: 'delegation',
+    })
+    await db.query(
+      `UPDATE payment_intents SET machine_metadata = '{"settlement_scheme":"eip3009"}'::jsonb WHERE id = $1`,
+      [id],
+    )
+    return { id, agentId }
+  }
+
+  async function recordedHash(id: string): Promise<string | null> {
+    const r = await db.query<{ h: string | null }>(
+      `SELECT machine_metadata->>'merchant_settlement_tx_hash' AS h FROM payment_intents WHERE id = $1`,
+      [id],
+    )
+    return r.rows[0]?.h ?? null
+  }
+
+  /**
+   * Resolves once every pid is waiting on a heavyweight lock (row or
+   * advisory). The deadline sits under vitest's 5 s test timeout, so a pid
+   * that never blocks fails with this message, not an anonymous timeout.
+   */
+  async function waitUntilBlocked(pids: number[]): Promise<void> {
+    const deadline = Date.now() + 4_000
+    for (;;) {
+      const r = await db.query<{ n: string }>(
+        `SELECT COUNT(*)::text AS n FROM pg_stat_activity WHERE pid = ANY($1::int[]) AND wait_event_type = 'Lock'`,
+        [pids],
+      )
+      if (Number(r.rows[0].n) === pids.length) return
+      if (Date.now() > deadline) throw new Error(`pids ${pids.join(',')} never blocked`)
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    }
+  }
+
+  async function pidOf(client: { query: typeof db.query }): Promise<number> {
+    const r = await client.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')
+    return r.rows[0].pid
+  }
+
+  type Checkout = Awaited<ReturnType<typeof db.connect>>
+
+  /**
+   * Hand a client back clean even when the test failed mid-transaction: an
+   * open transaction would keep its row or advisory lock and poison the
+   * next test's `resetDb` (or the next checkout of the same client).
+   */
+  async function releaseClean(client: Checkout): Promise<void> {
+    try {
+      await client.query('ROLLBACK')
+      client.release()
+    } catch {
+      client.release(true)
+    }
+  }
+
+  it('the compare-and-set alone stops a second hash: the blocked UPDATE writes 0 rows (direct SQL)', async () => {
+    // The mutation proof: with the `IS NULL` clause turned into `AND TRUE`,
+    // B's re-evaluated UPDATE overwrites A's hash and this goes red.
+    const { id, agentId } = await seedFundedEip3009()
+    const a = await db.connect()
+    const b = await db.connect()
+    try {
+      await a.query('BEGIN')
+      const first = await a.query(RECORD_EIP3009_MERCHANT_SETTLEMENT_SQL, [HASH_A, id, agentId, null])
+      expect(first.rows).toHaveLength(1)
+
+      await b.query('BEGIN')
+      const pidB = await pidOf(b)
+      const second = b.query(RECORD_EIP3009_MERCHANT_SETTLEMENT_SQL, [HASH_B, id, agentId, null])
+      await waitUntilBlocked([pidB])
+      await a.query('COMMIT')
+
+      expect((await second).rows).toHaveLength(0)
+      await b.query('COMMIT')
+      expect(await recordedHash(id)).toBe(HASH_A)
+    } finally {
+      await releaseClean(a)
+      await releaseClean(b)
+    }
+  })
+
+  it('two concurrent writers with different hashes: exactly one recorded, the loser answers conflict', async () => {
+    const { id, agentId } = await seedFundedEip3009()
+    // C holds the payment row so both writers reach their UPDATE (or, once the
+    // intent is locked, the second writer reaches that lock) before either
+    // can finish — the interleaving is forced, not left to timing.
+    const c = await db.connect()
+    const wa = await db.connect()
+    const wb = await db.connect()
+    // An executor whose transaction runs on a known backend. Passing the
+    // client itself would make `withTransaction` skip BEGIN (a checked-out
+    // client is treated as an outer transaction), and the xact locks would
+    // then release per statement; through `connect()` it opens and releases
+    // the transaction on this client.
+    const on = (client: Checkout): Executor => ({ query: client.query.bind(client), connect: async () => client }) as unknown as Executor
+    try {
+      const [pidA, pidB] = [await pidOf(wa), await pidOf(wb)]
+      await c.query('BEGIN')
+      await c.query('SELECT id FROM payment_intents WHERE id = $1 FOR UPDATE', [id])
+
+      const writers = Promise.allSettled([
+        recordEip3009MerchantSettlement({ txHash: HASH_A, intentId: id, agentId }, on(wa)),
+        recordEip3009MerchantSettlement({ txHash: HASH_B, intentId: id, agentId }, on(wb)),
+      ])
+      await waitUntilBlocked([pidA, pidB])
+      await c.query('COMMIT')
+
+      const outcomes = (await writers).map((r) => (r.status === 'fulfilled' ? r.value : `rejected: ${String(r.reason)}`))
+      expect([...outcomes].sort()).toEqual(['conflict', 'recorded'])
+      const winner = outcomes[0] === 'recorded' ? HASH_A : HASH_B
+      expect(await recordedHash(id)).toBe(winner)
+    } finally {
+      // On a failure before the writers settle, ending C's transaction lets
+      // them finish (and release their clients through `withTransaction`).
+      await releaseClean(c)
+    }
   })
 })

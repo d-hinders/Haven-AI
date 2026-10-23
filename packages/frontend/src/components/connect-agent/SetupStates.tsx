@@ -4,6 +4,7 @@ import type { ReactNode } from 'react'
 import { useState } from 'react'
 import { Check, Download } from 'lucide-react'
 import { Button } from '../ui/Button'
+import { DialogActions } from '../ui/DialogActions'
 import { Icon } from '../ui/Icon'
 import { StatusBadge, type StatusTone } from '../ui/StatusBadge'
 import { describeBudgetGrant } from '@/lib/budget-period'
@@ -36,23 +37,28 @@ export function TerminalSetupState({
   // font-semibold): the modal has exactly one title, the Modal primitive's
   // own `text-sm font-semibold` (ui/Modal.tsx) — every heading inside the
   // connect flow plays a SECTION role, never a competing modal-title role.
+  //
+  // The badge stands alone, centred — the same as SetupStatusState. It used to
+  // sit inside a 40px tinted disc that its own label ("Cancelled") overflowed
+  // on both sides: a pill already is the status mark, so the disc only added
+  // a second surface that could not hold it.
   return (
     <>
-      <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-[var(--v2-surface-2)]">
+      <div className="flex justify-center">
         <StatusBadge tone={tone}>{badgeLabel}</StatusBadge>
       </div>
       <div className="text-center">
         <h3 className="text-sm font-semibold text-[var(--v2-ink)]">{title}</h3>
         <p className="mx-auto mt-1 max-w-sm text-xs leading-relaxed text-[var(--v2-ink-2)]">{body}</p>
       </div>
-      <div className="flex gap-3">
+      <DialogActions>
         <Button variant="ghost" onClick={onSecondary} className="flex-1">
           {secondaryLabel}
         </Button>
         <Button onClick={onPrimary} className="flex-1">
           {primaryLabel}
         </Button>
-      </div>
+      </DialogActions>
     </>
   )
 }
@@ -209,12 +215,12 @@ export function SetupDoneState({
                   rendered as stray bold text in the middle of a checklist
                   rather than a control. A border is what makes it read as
                   something you can press. Secondary weight is still correct —
-                  "Done" below is the primary action. */}
+                  "Done" below is the primary action. The flow's standard
+                  40px, not a 44px one-off; Button's own hit area keeps the
+                  44px tap target. */}
               <span className="mt-2 block">
                 <Button
                   variant="ghost"
-                  size="sm"
-                  className="min-h-11"
                   onClick={handleDownloadSkill}
                   disabled={downloading}
                 >

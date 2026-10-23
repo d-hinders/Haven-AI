@@ -353,6 +353,42 @@ export interface HostedSettleMcpToolResult {
     tokenAddress?: string
   } | null
   warnings?: Array<{ code: string; message: string }>
+  /**
+   * #1308 / #3764 next-step contract. On the eip3009 settled arm it carries
+   * the settlement-evidence report's outcome (#4119 reads it): no tool when
+   * the report was recorded or nothing was posted, or when the hash was
+   * refused (told apart by `next_tool_omitted_reason`); the report tool when
+   * the answer was retryable or the proof header was missing.
+   */
+  next_action?: string
+  next_tool?: string | null
+  next_tool_name?: string | null
+  next_tool_server_role?: string
+  next_arguments?: Record<string, unknown>
+  next_tool_omitted_reason?: string
+  reason?: string
+}
+
+/**
+ * `haven_report_settlement_evidence`'s result (#2972), as far as #4119
+ * needs it. `settled: true` is the recorded answer; `retryable: true` with
+ * `code: SETTLEMENT_PENDING` is worth reporting again; every other shape
+ * (`DELIVERED_UNSETTLED`, `SETTLEMENT_NOT_RECORDED`,
+ * `SETTLEMENT_PROOF_HEADER_MISSING`, or the no-hash `recorded: false` no-op)
+ * recorded nothing.
+ */
+export interface HostedReportSettlementEvidenceResult {
+  payment_id?: string
+  settled?: boolean
+  recorded?: boolean
+  code?: string
+  retryable?: boolean
+  refusal_reason?: string
+  settlement_tx_hash?: string | null
+  next_tool_name?: string | null
+  next_arguments?: Record<string, unknown>
+  next_tool_omitted_reason?: string
+  reason?: string
 }
 
 /** The rail-aware allowance/budget block `haven_prepare_catalog_purchase` reports (#1306). */

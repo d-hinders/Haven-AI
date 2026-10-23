@@ -1,31 +1,59 @@
 'use client'
 
-import { StatusBadge } from '@/components/ui/StatusBadge'
+import { useState } from 'react'
 import { Table } from '@/components/ui/Table'
-import { chainName, freshness, networkToChainId, VERIFIED_MEANING, withinBudget } from '@/lib/marketplace'
+import {
+  ANY_RECIPIENT_BUDGET_TAG,
+  agentsThatCanPay,
+  anyRecipientRule,
+  budgetAnswerLine,
+  chainName,
+  needsUnpinnedBudget,
+  networkToChainId,
+  offersOnChain,
+  offersOnUserNetwork,
+  type BudgetAgent,
+} from '@/lib/marketplace'
+import { OfferCopyButton, OfferInstructionText, OfferMeta } from './OfferInstruction'
 import { OfferRow } from './OfferRow'
-import type { CatalogEntry } from '@/hooks/useCatalog'
+import type { CatalogEntry, MerchantFundingTarget } from '@/hooks/useCatalog'
+import type { DashboardBudgetRemainingEntry } from '@/hooks/useBudgetRemaining'
+import type { MerchantBudget } from '@/hooks/useMerchantBudgets'
 
-type Agents = Array<{ status: string; allowances: Array<{ token_symbol: string; allowance_amount: string }> }>
+/** One row's budget answer: the line and its tone, or null when nothing is known. */
+export type OfferBudgetHint = { text: string; tone: 'can' | 'cannot' } | null
 
-function BudgetHint({ budget }: { budget: boolean | null }) {
-  if (budget === null) return null
+function BudgetHint({ budget }: { budget: OfferBudgetHint }) {
+  if (!budget) return null
   return (
-    <p className={`mt-0.5 text-xs font-medium ${budget ? 'text-[var(--v2-success)]' : 'text-[var(--v2-warning)]'}`}>
-      {budget ? 'Within your agent budget' : 'Above every agent budget — a payment would be declined'}
+    <p className={`mt-0.5 text-xs font-medium ${budget.tone === 'can' ? 'text-[var(--v2-success)]' : 'text-[var(--v2-warning)]'}`}>
+      {budget.text}
     </p>
   )
 }
 
 /**
  * One offer as a stacked card — the phone-width shape of the table row
- * below (same cells, same copy, same budget hint), so the warning that
- * prevents a declined payment is never behind a horizontal scroll.
+ * below (same cells, same copy, same budget hint, same labelled copy button
+ * and the same rule for when the instruction is printed, #3998), so the
+ * warning that prevents a declined payment is never behind a horizontal
+ * scroll.
  */
-function OfferCard({ entry, budget }: { entry: CatalogEntry; budget: boolean | null }) {
+function OfferCard({
+  entry,
+  budget,
+  tagged,
+  copiedText,
+}: {
+  entry: CatalogEntry
+  budget: OfferBudgetHint
+  tagged: boolean
+  /** Set when exactly one agent can pay this offer — the confirmation names it (#4005). */
+  copiedText?: string | null
+}) {
   const degraded = entry.status === 'degraded'
-  const method = entry.protocol === 'mcp' ? entry.tool_name : entry.rail
   const chainId = networkToChainId(entry.network)
+  const [revealed, setRevealed] = useState(false)
   return (
     <li
       data-testid={`offer-card-${entry.id}`}
@@ -38,15 +66,14 @@ function OfferCard({ entry, budget }: { entry: CatalogEntry; budget: boolean | n
             Limited availability
           </span>
         )}
-        {entry.verified_payable && (
-          <span title={VERIFIED_MEANING}>
-            <StatusBadge tone="success" className="uppercase tracking-wide">
-              Verified
-            </StatusBadge>
+        {tagged && (
+          <span className="rounded-full bg-[var(--v2-warning-soft)] px-2 py-0.5 text-xs font-medium text-[var(--v2-warning)]">
+            {ANY_RECIPIENT_BUDGET_TAG}
           </span>
         )}
       </div>
       <p className="mt-1 text-xs text-[var(--v2-ink-3)]">{entry.description}</p>
+      <OfferMeta entry={entry} />
       {degraded && (
         <p className="mt-1 text-xs text-[var(--v2-ink-3)]">
           Recently unreachable on our checks — a payment may need a retry until it recovers.
@@ -58,52 +85,229 @@ function OfferCard({ entry, budget }: { entry: CatalogEntry; budget: boolean | n
           {entry.price_display ?? 'Price on request'}
           <BudgetHint budget={budget} />
         </dd>
-        <dt className="text-[var(--v2-ink-3)]">Method</dt>
-        <dd className="text-[var(--v2-ink-2)]">{method}</dd>
         <dt className="text-[var(--v2-ink-3)]">Network</dt>
         <dd className="text-[var(--v2-ink-2)]">{chainId === undefined ? '—' : chainName(chainId)}</dd>
-        <dt className="text-[var(--v2-ink-3)]">Freshness</dt>
-        <dd className="text-[var(--v2-ink-3)]">{freshness(entry.verified_at)}</dd>
       </dl>
-      <p className="mt-1 break-all text-xs text-[var(--v2-ink-3)]">{entry.resource_url}</p>
+      <OfferInstructionText entry={entry} revealed={revealed} />
+      <OfferCopyButton entry={entry} copiedText={copiedText} onCopyFailed={() => setRevealed(true)} className="mt-3 w-full" />
     </li>
   )
 }
 
 /**
- * The merchant page's offers (#3079, epic #3077). From `md` up: the dense,
- * non-collapsing table. Below `md`: one stacked card per offer — a 720px
- * table behind `overflow-x-auto` at 390 showed one column, a header cut
- * mid-word and no scroll affordance, and hid the budget warning off-screen.
- * Both render the same offers and the same `withinBudget` answer.
+ * #4008: ONE shared column layout for the merchant page's desktop offers
+ * table and the nested "Other networks" table inside its disclosure.
+ *
+ * The disclosure renders a second `Table` inside a `colSpan={4}` cell, and
+ * on dev its columns sized on their own — auto layout over different
+ * content — so the nested cells' left edges sat up to 16px off the outer
+ * table's (measured at 1280: 273/744/889/1022 vs 289/737/898/982). Both
+ * tables therefore carry `table-fixed` and THIS `colgroup`, so their columns
+ * are decided by the same declaration rather than by their own rows. Merging
+ * the rows into one table is not an option: `<details>` cannot wrap `<tr>`s,
+ * and the #3998 structural test asserts the nested table. The proportions
+ * started from the auto layout the outer table had on dev
+ * (≈48.75/15/13.75/22.5); #4015 moved width from Offer to Price, because at
+ * 1280 a 15% Price cell left ≈115px for text and a one-agent budget answer
+ * ("Delegate can pay this") wrapped under the price
+ * (`merchant-page-fit-measure.spec.ts` measures it on one line;
+ * `offers-table-alignment-measure.spec.ts` keeps the two tables aligned).
  */
-export function OffersTable({ offers, agents }: { offers: CatalogEntry[]; agents: Agents }) {
+const OFFER_COLUMN_LAYOUT = (
+  <colgroup>
+    <col className="w-[42%]" />
+    <col className="w-[22%]" />
+    <col className="w-[13.75%]" />
+    <col className="w-[22.25%]" />
+  </colgroup>
+)
+
+/**
+ * The merchant page's ONE offers section (#3981, epic #3077): each offer is a
+ * single row — a `Table` from `md` up, the stacked card below — carrying its
+ * price, network and a labelled "Copy prompt" button (#3998, #4003 wording).
+ * The
+ * instruction itself is printed only where the user must see it: an offer
+ * whose instruction has a placeholder to replace, or after a refused copy
+ * (`OfferInstruction.tsx`).
+ *
+ * The offers on the user's own network (the chain of
+ * `resolveDefaultAccount(user.accounts)`, passed as `defaultChainId`) come
+ * first; offers on other networks sit behind an "n more on <chain names>"
+ * disclosure in BOTH shapes. When the user's default network serves none of
+ * the merchant's offers, everything renders flat.
+ */
+export function OffersTable({
+  offers,
+  agents,
+  budgets = [],
+  merchantBudgets = [],
+  funding = [],
+  defaultChainId = null,
+}: {
+  offers: CatalogEntry[]
+  /** The spec-derived agent shape `agentsThatCanPay` reads (#4004). */
+  agents: BudgetAgent[]
+  /** `GET /dashboard/budget-remaining` rows — what is LEFT, per agent and budget. */
+  budgets?: DashboardBudgetRemainingEntry[]
+  /** `GET /merchants/{slug}/budgets` rows — the merchant-locked budgets. */
+  merchantBudgets?: MerchantBudget[]
+  /** The merchant's funding targets — the verified pay-to a locked budget pins. */
+  funding?: MerchantFundingTarget[]
+  defaultChainId?: number | null
+}) {
+  if (offers.length === 0) return null
+
+  // One answer per offer, shared by the table row and the phone card — the
+  // two shapes must never disagree about who can pay (#4004). The same
+  // answers drive the #4005 copy confirmation: when exactly one agent can
+  // pay an offer, its button names that agent once copied.
+  const answersFor = (offer: CatalogEntry) =>
+    agentsThatCanPay({ offer, agents, budgets, merchantBudgets, funding })
+  const perOffer = new Map(offers.map((offer) => [offer.id, answersFor(offer)]))
+  const hintFor = (offer: CatalogEntry): OfferBudgetHint => {
+    const answers = perOffer.get(offer.id)!
+    const text = budgetAnswerLine(answers)
+    if (!text) return null
+    return { text, tone: answers.some((a) => a.answer === 'can') ? 'can' : 'cannot' }
+  }
+  const copiedTextFor = (offer: CatalogEntry): string | null => {
+    const cans = perOffer.get(offer.id)!.filter((a) => a.answer === 'can')
+    return cans.length === 1 ? `Copied — paste it to ${cans[0]!.agentName}` : null
+  }
+
+  const chainIdOf = (offer: CatalogEntry) => networkToChainId(offer.network)
+  // #4015: the split is `offersOnUserNetwork` — the same set the header's
+  // coverage check reads.
+  const visible = offersOnUserNetwork(offers, defaultChainId)
+  const others = visible.length < offers.length ? offers.filter((o) => chainIdOf(o) !== defaultChainId) : []
+
+  // #4003's one predicate: the disclosure names the hidden chains, and adds
+  // "— none of your agents can pay on that network" ONLY when no active
+  // agent's account chain is among them. The SPLIT above is by the default
+  // account, but an agent can sit on any account — a user with a second
+  // account may still have an agent that can pay on a hidden network, and
+  // then the warning must not fire.
+  const hiddenChainIds = Array.from(
+    new Set(others.map((o) => chainIdOf(o)).filter((id): id is number => id !== undefined)),
+  )
+  const agentChainIds = new Set(
+    agents.filter((a) => a.status === 'active' && a.account_chain_id !== null).map((a) => a.account_chain_id),
+  )
+  const noAgentCanPayHidden = !hiddenChainIds.some((id) => agentChainIds.has(id))
+  const disclosure =
+    `${others.length} more on ${hiddenChainIds.map(chainName).join(', ')}` +
+    (noAgentCanPayHidden ? ' — none of your agents can pay on that network' : '')
+
+  // #4015: "mixed" is decided per chain, through the panel's own
+  // `anyRecipientRule` — so a tag the panel's step 2 points at always sits
+  // among the offers on the named agent's chain.
+  const tagged = (offer: CatalogEntry) => {
+    const chainId = chainIdOf(offer)
+    return (
+      chainId !== undefined &&
+      needsUnpinnedBudget(offer.asset_transfer_methods) &&
+      anyRecipientRule(offersOnChain(offers, chainId)).mixed
+    )
+  }
+  // #4005: the any-recipient NOTE is no longer a paragraph above the table —
+  // the "How to buy" panel's step 2 carries it in plain words, next to the
+  // state that makes it matter. The per-offer TAG stays on the rows that
+  // need it in a mixed merchant.
+
   return (
-    <>
+    <div className="space-y-3">
       <ul className="space-y-2 md:hidden" data-testid="offers-list">
-        {offers.map((offer) => (
-          <OfferCard key={offer.id} entry={offer} budget={withinBudget(offer, agents)} />
+        {visible.map((offer) => (
+          <OfferCard
+            key={offer.id}
+            entry={offer}
+            budget={hintFor(offer)}
+            tagged={tagged(offer)}
+            copiedText={copiedTextFor(offer)}
+          />
         ))}
+        {others.length > 0 && (
+          <li>
+            <details data-testid="other-networks" className="rounded-lg border border-[var(--v2-border)] p-3">
+              <summary className="cursor-pointer text-sm font-medium text-[var(--v2-ink)]">
+                {disclosure}
+              </summary>
+              <ul className="mt-2 space-y-2">
+                {others.map((offer) => (
+                  <OfferCard
+                    key={offer.id}
+                    entry={offer}
+                    budget={hintFor(offer)}
+                    tagged={tagged(offer)}
+                    copiedText={copiedTextFor(offer)}
+                  />
+                ))}
+              </ul>
+            </details>
+          </li>
+        )}
       </ul>
+
       <div className="hidden overflow-x-auto rounded-xl border border-[var(--v2-border)] md:block" data-testid="offers-table">
-        <Table className="min-w-[720px]">
+        <Table className="min-w-[560px] table-fixed">
+          {OFFER_COLUMN_LAYOUT}
           <Table.Head collapseWhenNarrow={false}>
             <tr>
               <Table.HeaderCell align="left">Offer</Table.HeaderCell>
-              <Table.HeaderCell align="left">Method</Table.HeaderCell>
-              <Table.HeaderCell align="left">Description</Table.HeaderCell>
               <Table.HeaderCell align="left">Price</Table.HeaderCell>
               <Table.HeaderCell align="left">Network</Table.HeaderCell>
-              <Table.HeaderCell align="left">Freshness</Table.HeaderCell>
+              <Table.HeaderCell align="left">
+                <span className="sr-only">Copy prompt</span>
+              </Table.HeaderCell>
             </tr>
           </Table.Head>
           <Table.Body>
-            {offers.map((offer) => (
-              <OfferRow key={offer.id} entry={offer} budget={withinBudget(offer, agents)} />
+            {visible.map((offer) => (
+              <OfferRow
+                key={offer.id}
+                entry={offer}
+                budget={hintFor(offer)}
+                tagged={tagged(offer)}
+                copiedText={copiedTextFor(offer)}
+              />
             ))}
+            {others.length > 0 && (
+              <tr>
+                <td colSpan={4} className="py-3">
+                  {/* #4008: no horizontal padding here — the nested table
+                      spans the row's full width, so its `table-fixed` +
+                      shared `colgroup` lines its columns up with the outer
+                      table's (the Offer cells' own `px-4` insets match).
+                      With `px-4` the nested table was offset by the cell's
+                      own gutter AND sized on its own content. */}
+                  <details data-testid="other-networks" className="text-sm">
+                    <summary className="cursor-pointer font-medium text-[var(--v2-ink)]">
+                      {disclosure}
+                    </summary>
+                    <div className="mt-2">
+                      <Table className="table-fixed">
+                        {OFFER_COLUMN_LAYOUT}
+                        <Table.Body>
+                          {others.map((offer) => (
+                            <OfferRow
+                              key={offer.id}
+                              entry={offer}
+                              budget={hintFor(offer)}
+                              tagged={tagged(offer)}
+                              copiedText={copiedTextFor(offer)}
+                            />
+                          ))}
+                        </Table.Body>
+                      </Table>
+                    </div>
+                  </details>
+                </td>
+              </tr>
+            )}
           </Table.Body>
         </Table>
       </div>
-    </>
+    </div>
   )
 }

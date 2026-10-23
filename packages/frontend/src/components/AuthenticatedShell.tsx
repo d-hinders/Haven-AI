@@ -3,7 +3,7 @@
 import dynamic from 'next/dynamic'
 import ProtectedRoute from '@/components/ProtectedRoute'
 import ErrorBoundary from '@/components/ErrorBoundary'
-import TopBar from '@/components/TopBar'
+import { SafeAreaBand } from '@/components/ui/SafeAreaBand'
 import { ToastProvider, Toaster } from '@/components/ui/Toast'
 
 const Sidebar = dynamic(() => import('@/components/sidebar/Sidebar'), {
@@ -57,14 +57,38 @@ export default function AuthenticatedShell({
             `<main>` below deliberately does NOT get it: `overscroll-behavior`
             there would take momentum scrolling with it, which is the one thing
             a phone must keep.
+
+            `--v2-sticky-head`: `packages/ui`'s `Table` pins its `<thead>` with
+            `-top-[var(--v2-sticky-head)]`, compensating for the scroll
+            container's top padding. The token defaults to -1.5rem — the `py-6`
+            the ops shell uses, unchanged — and the authenticated app overrides
+            it here to match its own padding: 16px below `lg`, 32px at and
+            above. One variable, both shells, no responsive class inside the
+            shared primitive.
           */}
           <div
             data-app-frame=""
-            className="flex h-screen overscroll-none bg-[var(--v2-bg)] text-[var(--v2-ink)] overflow-hidden"
+            className="flex h-screen overscroll-none bg-[var(--v2-bg)] text-[var(--v2-ink)] overflow-hidden max-lg:[--v2-sticky-head:-1rem] lg:[--v2-sticky-head:-2rem]"
           >
             <Sidebar />
             <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-              <TopBar />
+              {/*
+                The status-bar band, now rendered by the shell itself (#4029).
+                `SafeAreaBand` was the top bar's first child while the bar
+                existed; with the bar gone the band is the only chrome left
+                above the scroll region, so the shell owns it directly — same
+                element, same opaque `bg-bg` fill, same contract as the
+                component's docstring (never inside a `backdrop-filter` layer).
+                The fill is the channel alias `bg-bg`, never the opacity-modified
+                arbitrary var (`bg-[var(--v2-bg)]/85`) — the dead shape #1818
+                compiled to nothing.
+
+                No non-production line under it: #4029 added a 2px warning strip
+                here and the owner removed it the next day — on a phone it read
+                as a rendering bug, with no label in view to explain it. The
+                environment badge beside the sidebar wordmark is the only marker.
+              */}
+              <SafeAreaBand />
               {/*
                   The scroll region's own insets (#2730), below `lg` only. The
                   bottom one is the load-bearing one: this box runs to the
@@ -77,7 +101,10 @@ export default function AuthenticatedShell({
                   layout, so without this the last row sits under the BAR
                   instead of under the home indicator. Three terms, three
                   different owners — content padding, chrome height, device
-                  inset — which is why they add rather than `max`. `calc` on the bottom because the 24px of `p-6` is
+                  inset — which is why they add rather than `max`. Since
+                  #4058 the bar floats, and its distance from the bottom
+                  (`--v2-tab-bar-bottom`, which already takes the inset into
+                  account) replaces the bare inset term. `calc` on the bottom because the 24px of `p-6` is
                   padding the CONTENT wants and the inset is clearance the
                   device demands, so they add; `max` on the sides because there
                   both are the same gutter measured two ways and the larger
@@ -86,7 +113,7 @@ export default function AuthenticatedShell({
               <main
                 id="main-content"
                 tabIndex={-1}
-                className="flex-1 bg-[var(--v2-bg)] p-6 lg:p-8 max-lg:pb-[calc(1.5rem+var(--v2-tab-bar-h)+var(--v2-safe-bottom))] max-lg:pl-[max(1.5rem,var(--v2-safe-left))] max-lg:pr-[max(1.5rem,var(--v2-safe-right))] overflow-y-auto focus:outline-none"
+                className="flex-1 bg-[var(--v2-bg)] p-6 pt-4 lg:p-8 max-lg:pb-[calc(1.5rem+var(--v2-tab-bar-h)+var(--v2-tab-bar-bottom))] max-lg:pl-[max(1.5rem,var(--v2-safe-left))] max-lg:pr-[max(1.5rem,var(--v2-safe-right))] overflow-y-auto focus:outline-none"
               >
                 <ErrorBoundary>{children}</ErrorBoundary>
               </main>

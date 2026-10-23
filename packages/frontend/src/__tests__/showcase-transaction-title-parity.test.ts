@@ -6,7 +6,8 @@
  *
  * #2357 changed `paymentSourceTitle` so `source: 'x402'` renders "Agent payment"
  * instead of "x402 payment", and moved the protocol name to
- * `TransactionDetailPanel`'s section heading. `/design-system` hardcodes row
+ * `TransactionDetailPanel`'s section heading (retired by #4267: the panel says
+ * "Paid request" now). `/design-system` hardcodes row
  * titles as illustrative sample data, so its four copies of the old wording went
  * stale and NOTHING went red — the showcase is the page contributors read to
  * learn the house patterns, and it spent that window teaching retired copy.
@@ -27,7 +28,7 @@
  * ## What is asserted, and why in this shape
  *
  * The expected strings are COMPUTED from the shipping functions —
- * `paymentSourceTitle` and `transactionTitle` — never restated as literals. That
+ * `paymentSourceTitle` — never restated as literals. That
  * is the point: a fourth copy of the copy would go stale exactly the way the
  * showcase did. `ship-next` § Rework caps rule 1 is the governing rule (guard the
  * code that GENERATES the text; never write an assertion that has to interpret a
@@ -42,12 +43,9 @@
  *   green. The `not.toContain` below closes that hole for the ONE literal #2448
  *   removed, and for no other.
  * - The `not.toContain` is scoped to this single file on the basis that the file
- *   has no legitimate use of "x402 payment" today. It is NOT a repo-wide ban:
- *   `TransactionDetailPanel.tsx:168` renders that exact heading and is right to,
- *   because the detail drawer is the advanced surface the copy guidelines allow
- *   technical vocabulary on. If someone later showcases that heading on
- *   `/design-system`, this assertion is the thing that must be deleted with a
- *   reason — which is the intended cost, not a defect.
+ *   has no legitimate use of "x402 payment" today. It is NOT a repo-wide ban;
+ *   the detail panel's own absence pin (`TransactionDetailPanel.test.tsx`,
+ *   #4267) covers that surface.
  * - It reads SOURCE TEXT, not the DOM. It cannot tell a rendered title from one
  *   inside a JSX comment or behind a closed overlay, and it says nothing about
  *   layout, which is the pixel gate's job.
@@ -58,55 +56,18 @@ import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { paymentSourceTitle } from '@/lib/transaction-labels'
-import { transactionTitle } from '@/lib/transaction-presentation'
-import type { AggregatedTransaction } from '@/types/transactions'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const SHOWCASE = path.resolve(HERE, '..', 'app/(authenticated)/design-system/page.tsx')
-
-/** The agent the showcase's machine-payment sample rows are attributed to. */
-const SHOWCASE_AGENT = 'Research assistant'
-
-/**
- * The showcase's own x402 sample row, as an `AggregatedTransaction`. Only the
- * fields `transactionTitle` reads matter; the rest satisfy the wire type.
- */
-function showcaseX402Row(
-  overrides: Partial<AggregatedTransaction> = {},
-): AggregatedTransaction {
-  return {
-    hash: '0x' + '12'.repeat(32),
-    type: 'erc20',
-    from: '0xA87300000000000000000000000000000000DD35',
-    to: '0x135a9215604711AC70d970e12Caa812c53537EF4',
-    value: '12000000',
-    valueFormatted: '12.00',
-    asset: 'USDC',
-    decimals: 6,
-    direction: 'out',
-    timestamp: 1779436199,
-    blockNumber: 45725826,
-    isError: false,
-    tokenAddress: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
-    tokenSymbol: 'USDC',
-    chainId: 8453,
-    accountId: 'safe-id',
-    accountAddress: '0x135a9215604711AC70d970e12Caa812c53537EF4',
-    accountName: 'Main Haven wallet',
-    source: 'x402',
-    ...overrides,
-  }
-}
 
 describe('/design-system machine-payment sample titles (#2448)', () => {
   const source = readFileSync(SHOWCASE, 'utf8')
 
   // POSITIVE CONTROL. Without it, both assertions below are satisfiable by
-  // making the functions return empty strings — `''` is contained in every
+  // making the function return an empty string — `''` is contained in every
   // file, and `not.toContain('')` would then be the only thing failing.
-  it('the shipping functions still produce non-empty machine-payment titles', () => {
+  it('the shipping function still produces a non-empty machine-payment title', () => {
     expect(paymentSourceTitle('x402')).toBeTruthy()
-    expect(transactionTitle(showcaseX402Row({ agentName: SHOWCASE_AGENT }))).toBeTruthy()
   })
 
   it('shows the bare source title the product ships', () => {
@@ -114,11 +75,10 @@ describe('/design-system machine-payment sample titles (#2448)', () => {
     expect(source).toContain(`title="${shipped}"`)
   })
 
-  it('shows the agent-attributed title the product ships', () => {
-    const shipped = transactionTitle(showcaseX402Row({ agentName: SHOWCASE_AGENT }))
-    expect(shipped).toContain(SHOWCASE_AGENT)
-    expect(source).toContain(`title: '${shipped}'`)
-  })
+  // The agent-attributed row title ("Agent payment by <agent>") was pinned
+  // here against the "Transaction history" table showcase. #4266 retired that
+  // showcase with `TransactionsTable`, and #4267 retired `transactionTitle`
+  // itself: the list rows and the detail panel lead with the counterparty.
 
   it('no longer carries the pre-#2357 wording anywhere in the file', () => {
     expect(source).not.toContain('x402 payment')

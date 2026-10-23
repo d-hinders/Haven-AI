@@ -16,16 +16,15 @@ import {
 } from './mcp-merchant-transport.js'
 import type { CapturedMerchantResponse } from './mcp-merchant-transport.js'
 import {
-  MCP_X402_PAYMENT_RESPONSE_META_KEY,
   X402_RETRY_REJECTED_STATUS,
-  encodeMcpSettlementReceipt,
-  extractMcpPaymentRequired,
   mcpSettlementFromToolResult,
 } from './mcp-merchant-transport.js'
 import { x402PaymentHeaderNamesSent, x402PaymentHeaderNamesFor } from './x402.js'
+import { decidePostFundingMerchantAnswer } from './merchant-answer.js'
 import { buildExplorerUrl, x402PayerAddress } from './x402-protocol.js'
 import { paymentStateStatusCode } from './payment-state.js'
 import { decodeBase64Json } from './base64.js'
+import { MerchantEgressRefusedError } from './merchant-egress.js'
 import { X_TAX_DECLARATION_HEADER, withTaxDeclarationHeader, type TaxDeclarationHeaderResolver } from './client-tax-declaration.js'
 
 /**
@@ -210,12 +209,24 @@ export class MerchantCompletion {
     // between the challenge and this retry) and it SAYS nothing was settled,
     // re-initialize and resend the same header once instead of reporting a
     // 404 as a rejection after funding.
-    const retryResponse = await this.merchantTransport.deliverPaymentRecoveringSession(
-      url,
-      retryInit,
-      receipt.paymentHeader,
-      () => this.merchantTransport.initialize(url, initialInit),
-    )
+    let retryResponse: Response
+    try {
+      retryResponse = await this.merchantTransport.deliverPaymentRecoveringSession(
+        url,
+        retryInit,
+        receipt.paymentHeader,
+        () => this.merchantTransport.initialize(url, initialInit),
+      )
+    } catch (err) {
+      // #4257: a redirect refused AFTER the paid request was sent. The payment
+      // reached the merchant at `url` and nothing came back: the funded,
+      // undelivered state (#1300), recorded and re-thrown with the payment it
+      // belongs to so the caller can never read it as "nothing happened".
+      if (err instanceof MerchantEgressRefusedError && !err.beforeRequest) {
+        throw await this.paidDeliveryInterrupted(err, url, receipt, receipt.paymentHeader, retryInit?.body != null)
+      }
+      throw err
+    }
 
     // #3118: a profile merchant refuses under HTTP 200 with an `isError: true`
     // payment-required tool result or a `_meta["x402/payment-response"]` of
@@ -227,11 +238,22 @@ export class MerchantCompletion {
     // the funding leg moved money, and a merchant that mixes dialects (HTTP-402
     // challenge, profile-style refusal on the paid answer) must still be seen.
     // The content-type gate inside readToolResult keeps binary/streaming paid
-    // resources unbuffered.
+    // resources unbuffered — that gate stays HERE, per caller (#4120 D2).
     const toolResult = retryResponse.ok ? await this.merchantTransport.readToolResult(retryResponse) : undefined
-    const inBandChallenge = toolResult ? extractMcpPaymentRequired(toolResult) : undefined
     const metaSettlement = toolResult ? mcpSettlementFromToolResult(toolResult) : undefined
-    const inBandRejection = inBandChallenge !== undefined || metaSettlement?.success === false
+    const headerReceipt = retryResponse.headers.get('PAYMENT-RESPONSE')
+    // #4120: the verdict, the settlement hash and the protocol receipt are the
+    // ONE shared post-funding merchant-answer decision (`merchant-answer.ts`)
+    // — the local hash rule (header transaction, falling back to the `_meta`
+    // settlement's) is the rule both paths now use, per owner decision 1.
+    const answer = decidePostFundingMerchantAnswer({
+      toolResult,
+      httpOk: retryResponse.ok,
+      paymentResponseHeader: headerReceipt ?? undefined,
+      metaSettlement,
+    })
+    const reportedSettlementTxHash = answer.settlementTxHash
+    const inBandRejection = answer.inBandRejection
     if (!retryResponse.ok || inBandRejection) {
       const merchant = await captureMerchantResponse(retryResponse)
       await this.recordRetryRejected({
@@ -247,7 +269,10 @@ export class MerchantCompletion {
       })
 
       throw new HavenApiError(
-        'x402 retry failed after Haven funded the delegate wallet; reconciliation may be required.',
+        'x402 retry failed after Haven funded the delegate wallet; reconciliation may be required. ' +
+          // #4062: an answering merchant may still redeem its authorization
+          // after refusing — verify-then-sweep, never a blind sweep.
+          'The merchant may still settle late: check the payment status before sweeping the delegate.',
         inBandRejection ? X402_RETRY_REJECTED_STATUS : merchant.merchant_status,
         {
           marker: 'x402_retry_rejected_after_funding',
@@ -261,16 +286,16 @@ export class MerchantCompletion {
       )
     }
 
-    // #3155 review S1: the `_meta` settlement is the receipt when there is no
-    // header, re-encoded so the one existing decoder reads both forms.
-    const headerReceipt = retryResponse.headers.get('PAYMENT-RESPONSE')
-    const protocolReceiptHeader = headerReceipt ?? (metaSettlement ? encodeMcpSettlementReceipt(metaSettlement) : undefined)
-    const protocolReceiptHeaderName = headerReceipt
-      ? 'PAYMENT-RESPONSE'
-      : metaSettlement
-        ? `_meta.${MCP_X402_PAYMENT_RESPONSE_META_KEY}`
-        : undefined
-    const merchantSettlement = parseMerchantSettlement(protocolReceiptHeader ?? null)
+    // The receipt the shared decision derived: the PAYMENT-RESPONSE header as
+    // sent, or the `_meta` settlement re-encoded so the one existing decoder
+    // reads both forms. Read before the rejection gate above (#4062) — reused
+    // here, never re-read.
+    const { protocolReceiptHeader, protocolReceiptHeaderName } = answer
+    // The same settlement the gate saw: the header's parse, falling back to
+    // the _meta transaction when the header carried none.
+    const merchantSettlement = {
+      settlementTxHash: reportedSettlementTxHash ?? null,
+    }
     if (receipt.merchant && merchantSettlement.settlementTxHash) {
       receipt.merchant.settlementTxHash = merchantSettlement.settlementTxHash
       // #3638: an unknown chain has no explorer link — keep `null`, never `''`.
@@ -295,15 +320,23 @@ export class MerchantCompletion {
     // #3764: the funding report above anchors Haven's row on the FUNDING tx.
     // The merchant's OWN settlement transaction — parsed just above into the
     // local receipt — is a SECOND report through the same evidence endpoint,
-    // exactly one attempt (D2), so the backend's #3475 branch can verify the
-    // delegate → merchant transfer and record it beside the funding hash.
-    // Gated like the hosted path: well-formed, non-zero, and DIFFERENT from
-    // the funding hash in any letter case (the backend compares
-    // case-insensitively — a checksummed copy of the funding hash is not a
-    // settlement). The outcome is swallowed by design (D1), exactly like the
-    // funding outcome on this path (#1620): the local receipt already shows
-    // the settlement (above), and nothing here may change the
-    // caller-visible result of a completed purchase.
+    // so the backend's #3475 branch can verify the delegate → merchant
+    // transfer and record it beside the funding hash. Gated like the hosted
+    // path: well-formed, non-zero, and DIFFERENT from the funding hash in any
+    // letter case (the backend compares case-insensitively — a checksummed
+    // copy of the funding hash is not a settlement). The outcome is swallowed
+    // by design (D1), exactly like the funding outcome on this path (#1620):
+    // the local receipt already shows the settlement (above), and nothing
+    // here may change the caller-visible result of a completed purchase.
+    // #4215: unlike the hosted path (D2, one attempt), the LOCAL report is
+    // retried while Haven answers `retryable` (503) — the qa-dev EIP-3009
+    // legs showed the backend's node sees the merchant tx only seconds after
+    // the funding confirm, and a swallowed one-shot 503 red the legs. The
+    // reuse goes through `reportEvidence`, so the bounded
+    // `EVIDENCE_RETRY_DELAYS_MS` schedule applies: four attempts over ~7 s,
+    // well inside the legs' 45 s window. Any refusal — a 409, a proof-header
+    // refusal, a validation error, a transport failure with no status — ends
+    // the loop, exactly as everywhere else this endpoint is called.
     const settlementCandidate = merchantSettlement.settlementTxHash
     if (
       settlementCandidate &&
@@ -311,7 +344,21 @@ export class MerchantCompletion {
       !isZeroSettlementTxHash(settlementCandidate) &&
       settlementCandidate.toLowerCase() !== receipt.txHash.toLowerCase()
     ) {
-      await this.reportSettlementEvidenceOnce(receipt.paymentId, settlementCandidate)
+      // #4061: WITH the header this retry sent — since #3925 it is the
+      // nonce proof the backend records the settlement against, and a
+      // settlement report without it is refused.
+      // #4215: through `reportEvidence`, whose loop re-attempts while the
+      // backend answers `retryable` (503) under the bounded
+      // `EVIDENCE_RETRY_DELAYS_MS` schedule. The gate above already excluded
+      // the zero marker, so — unlike the public `reportSettlementEvidence` —
+      // this reuse adds NO throw path out of a completed purchase; every
+      // failure answers an outcome that is swallowed (D1).
+      await this.reportEvidence({
+        paymentId: receipt.paymentId,
+        rail: 'x402',
+        txHash: settlementCandidate,
+        ...settlementProofFields(receipt.paymentHeader),
+      })
     }
 
     await this.reportMerchantReceipt(receipt.paymentId, retryResponse)
@@ -474,6 +521,66 @@ export class MerchantCompletion {
   // and MACHINE-PAYMENT-CHALLENGE was never produced by any other Haven
   // surface. Use the x402 flow (authorizeX402 / fetch / quoteX402 / payX402Quote)
   // for agent-to-merchant payments.
+
+  /**
+   * #4257: record a paid delivery that a refused redirect interrupted, and
+   * return the refusal re-thrown with its payment and an accurate account:
+   * the payment header (and the body, when there is one) reached `url`, the
+   * merchant answered with a redirect Haven did not follow, and the merchant
+   * may still settle. The record is the same
+   * `merchant_retry_rejected_after_payment` event a non-2xx answer writes: its
+   * `retry_status` is the redirect status, `retry_body` is null, and `details`
+   * carry `refusal` plus `redirect_location` when the refusal names a redirect
+   * target, or `refused_url` (the URL that answered) otherwise. The payment
+   * reads as funded and undelivered.
+   */
+  private async paidDeliveryInterrupted(
+    err: MerchantEgressRefusedError,
+    url: string,
+    receipt: X402Receipt,
+    paymentHeader: string,
+    hasBody: boolean,
+  ): Promise<MerchantEgressRefusedError> {
+    const scheme = x402PaymentHeaderNamesFor(paymentHeader).length > 1 ? 'eip3009' : 'erc7710'
+    const status = err.redirectStatus ?? 0
+    await this.recordRetryRejected({
+      rail: 'x402',
+      paymentId: receipt.paymentId,
+      txHash: receipt.txHash,
+      resourceUrl: receipt.resourceUrl,
+      merchant: {
+        merchant_status: status,
+        merchant_status_text: 'redirect not followed',
+        merchant_headers: {},
+        merchant_body: '',
+      },
+      details: {
+        merchant_to: receipt.merchantTo,
+        delegate_to: receipt.to,
+        refusal: err.refusal,
+        // The refusal's url is the redirect target only when it carries one;
+        // otherwise it is the URL that answered (a non-GET redirect, a missing
+        // or unresolvable Location), recorded under a neutral key.
+        ...(err.redirectTarget ? { redirect_location: err.redirectTarget } : { refused_url: err.url }),
+      },
+    })
+    const what =
+      `The paid request was delivered to ${url}, ${hasBody ? 'payment header and body' : 'payment header'} included, ` +
+      `and the merchant answered ${status ? `HTTP ${status} ` : ''}with a redirect${unfollowedRedirect(err)} Do not pay again: `
+    const next =
+      scheme === 'erc7710'
+        ? 'erc7710 has no funding leg, so there is no delegate balance to strand or sweep. The merchant may still ' +
+          'redeem the settlement authorization within its window: check haven_get_payment_status after that window ' +
+          'and re-quote only if it shows no settlement.'
+        : 'the funding leg is confirmed on-chain and the merchant may still settle late. Check haven_get_payment_status ' +
+          'before anything else, and sweep the delegate only if no settlement appears.'
+    return new MerchantEgressRefusedError(what + next, err.url, err.refusal, false, {
+      redirectStatus: err.redirectStatus,
+      redirectTarget: err.redirectTarget,
+      paymentId: receipt.paymentId,
+      settlementScheme: scheme,
+    })
+  }
 
   async recordRetryRejected(input: {
     rail: string
@@ -702,10 +809,11 @@ export class MerchantCompletion {
   }
 
   /**
-   * ONE evidence attempt — the body of `reportEvidence`'s loop above, and the
-   * whole of the #3764 settlement report below. A 503 answers `retryable`
-   * immediately; the caller decides whether to sleep and re-attempt
-   * (`reportEvidence`) or hand the outcome to its consumer (#3764 D2).
+   * ONE evidence attempt — the body of `reportEvidence`'s loop above. A 503
+   * answers `retryable` immediately; the caller decides whether to sleep and
+   * re-attempt (`reportEvidence`, and — #4215 — the local settlement report
+   * in `retryRequest`) or hand the outcome to its consumer (#3764 D2, the
+   * hosted settlement report).
    */
   private async postEvidenceOnce(body: Record<string, unknown>): Promise<EvidenceReportOutcome> {
     try {
@@ -724,10 +832,14 @@ export class MerchantCompletion {
         // leg is already confirmed — so it is carried verbatim, and left
         // absent (not empty) when the body has none.
         const reason = refusalReasonFromBody(err)
+        // #4061: the refusal's machine code, when the backend sent one
+        // (`settlement_proof_header_missing`). Absent, not empty, otherwise.
+        const errorCode = refusalErrorCodeFromBody(err)
         return {
           outcome: 'refused',
           statusCode: statusCode ?? 0,
           ...(reason ? { reason } : {}),
+          ...(errorCode ? { errorCode } : {}),
         }
       }
       return { outcome: 'retryable', statusCode }
@@ -765,10 +877,20 @@ export class MerchantCompletion {
    * gate uses, so a caller cannot "fix" a missing hash by reporting the demo
    * merchant's own marker and getting a different verdict than the settle
    * path already gave it.
+   *
+   * #4061: `options.paymentHeader` is the payment header the caller sent to
+   * the merchant on its paid retry. On eip3009 it is REQUIRED for the record
+   * (#3925): its signed authorization proves the nonce the settlement burned
+   * is this payment's, and a report without it is refused with
+   * `errorCode: 'settlement_proof_header_missing'`. It is forwarded exactly
+   * as the funding report forwards it (`paymentProofHeader` plus the names
+   * `x402PaymentHeaderNamesSent` derives from the same payload). erc7710
+   * needs none — Haven assembled that header itself.
    */
   async reportSettlementEvidence(
     paymentId: string,
     settlementTxHash: string,
+    options: { paymentHeader?: string } = {},
   ): Promise<EvidenceReportOutcome> {
     if (isZeroSettlementTxHash(settlementTxHash)) {
       throw new HavenZeroSettlementHashError(paymentId)
@@ -777,32 +899,58 @@ export class MerchantCompletion {
       paymentId,
       rail: 'x402',
       txHash: settlementTxHash,
+      ...settlementProofFields(options.paymentHeader),
     })
   }
 
   /**
    * #3764: report the merchant's OWN EIP-3009 settlement transaction right
-   * after a completed purchase — the second leg of a payment that already has
-   * a funding-evidence row. Same endpoint and payload shape as
+   * after a completed hosted purchase — the second leg of a payment that
+   * already has a funding-evidence row. Same endpoint and payload shape as
    * `reportSettlementEvidence` above, but with #3764's D2 budget: exactly ONE
    * attempt, no `EVIDENCE_RETRY_DELAYS_MS` backoff. The resource is already
    * paid for and delivered, so a retryable answer must not stretch the
    * completed purchase — the HOSTED tools hand the outcome to the agent
-   * (`settlementEvidenceOutcome` → `haven_report_settlement_evidence`), and
-   * the local caller swallows it by design (D1). Callers validate the hash
-   * before this call (well-formed, non-zero, different from the funding hash
+   * (`settlementEvidenceOutcome` → `haven_report_settlement_evidence`). Since
+   * #4215 this ONE-attempt form serves the HOSTED path only
+   * (`completeX402MerchantCall`); the local `retryRequest` posts the same
+   * report through `reportEvidence`, whose bounded loop re-attempts while
+   * Haven answers `retryable`. Callers validate the hash before this call
+   * (well-formed, non-zero, different from the funding hash
    * case-insensitively), so there is no client-side refusal here — the
    * backend verifies on-chain and is the only judge.
+   *
+   * #4061: `paymentHeader` is the header the paid retry sent — the #3925
+   * nonce proof, forwarded as `reportSettlementEvidence` forwards it. Both
+   * callers hold it; without it the backend refuses the record.
    */
   async reportSettlementEvidenceOnce(
     paymentId: string,
     settlementTxHash: string,
+    paymentHeader?: string,
   ): Promise<EvidenceReportOutcome> {
     return this.postEvidenceOnce({
       paymentId,
       rail: 'x402',
       txHash: settlementTxHash,
+      ...settlementProofFields(paymentHeader),
     })
+  }
+}
+
+/**
+ * #4061: the proof-header fields of a settlement report — the SAME pair the
+ * funding report posts (`paymentProofHeader`, and `paymentProofHeaderName`
+ * from `x402PaymentHeaderNamesSent`, the rule the request itself used), or
+ * nothing when the caller holds no header. A blank header is no header.
+ */
+function settlementProofFields(
+  paymentHeader: string | undefined,
+): { paymentProofHeader?: string; paymentProofHeaderName?: string } {
+  if (!paymentHeader || !paymentHeader.trim()) return {}
+  return {
+    paymentProofHeaderName: x402PaymentHeaderNamesSent(paymentHeader),
+    paymentProofHeader: paymentHeader,
   }
 }
 
@@ -832,7 +980,13 @@ export class MerchantCompletion {
 export type EvidenceReportOutcome =
   | { outcome: 'confirmed' }
   | { outcome: 'retryable'; statusCode: number | undefined }
-  | { outcome: 'refused'; statusCode: number; reason?: string }
+  /**
+   * #4061: `errorCode` is the backend body's `error_code`, present only when
+   * it sent one — today only `settlement_proof_header_missing`, the eip3009
+   * refusal of a settlement report that carried no payment header. Branch on
+   * it, never on `reason`.
+   */
+  | { outcome: 'refused'; statusCode: number; reason?: string; errorCode?: string }
 
 /**
  * #3529: read the evidence-report refusal reason the backend relayed
@@ -849,6 +1003,15 @@ function refusalReasonFromBody(err: unknown): string | undefined {
   if (body === null || typeof body !== 'object' || Array.isArray(body)) return undefined
   const reason = (body as Record<string, unknown>).reason
   return typeof reason === 'string' && reason.length > 0 ? reason : undefined
+}
+
+/** #4061: the evidence refusal's `error_code`, read the way `refusalReasonFromBody` reads `reason`. */
+function refusalErrorCodeFromBody(err: unknown): string | undefined {
+  if (!(err instanceof HavenApiError)) return undefined
+  const body: unknown = err.body
+  if (body === null || typeof body !== 'object' || Array.isArray(body)) return undefined
+  const code = (body as Record<string, unknown>).error_code
+  return typeof code === 'string' && code.length > 0 ? code : undefined
 }
 
 /**
@@ -901,5 +1064,26 @@ export function parseProtocolReceiptHeader(value: string): Record<string, unknow
     } catch {
       return undefined
     }
+  }
+}
+
+/** #4257: why a paid request's redirect was not followed, worded per refusal (completes "…with a redirect"). */
+function unfollowedRedirect(err: MerchantEgressRefusedError): string {
+  const target = err.redirectTarget ?? err.url
+  switch (err.refusal) {
+    case 'redirect_cross_origin_body':
+      return ` to a different origin (${target}). Haven did not follow it, so the payment was not re-sent there.`
+    case 'redirect_on_non_get':
+      return '. Under the egress policy only GET redirects are followed, so Haven did not follow it and nothing was sent to the redirect target.'
+    case 'redirect_missing_location':
+      return ' that named no target (no Location header). Haven did not follow it.'
+    case 'redirect_invalid_location':
+      return ' whose Location header is not a resolvable URL. Haven did not follow it.'
+    case 'redirect_budget_exceeded':
+      return ` past the redirect budget. The chain stopped before ${target}, and nothing was sent there.`
+    case 'url_not_allowed':
+      return ` to a URL the egress policy does not allow (${target}). Haven did not follow it, so nothing was sent there.`
+    default:
+      return '. Haven did not follow it.'
   }
 }

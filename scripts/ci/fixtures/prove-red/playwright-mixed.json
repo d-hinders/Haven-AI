@@ -1,0 +1,68 @@
+{
+  "suites": [
+    {
+      "title": "a.spec.mjs",
+      "specs": [],
+      "suites": [
+        {
+          "title": "suite one",
+          "specs": [
+            {
+              "title": "passes",
+              "tests": [
+                {
+                  "status": "expected",
+                  "results": [
+                    {
+                      "status": "passed"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "title": "fails expect",
+              "tests": [
+                {
+                  "status": "unexpected",
+                  "results": [
+                    {
+                      "status": "failed",
+                      "error": {
+                        "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m"
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "title": "throws",
+              "tests": [
+                {
+                  "status": "unexpected",
+                  "results": [
+                    {
+                      "status": "failed",
+                      "error": {
+                        "message": "TypeError: boom"
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "suites": []
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "expected": 1,
+    "unexpected": 2,
+    "skipped": 0,
+    "flaky": 0
+  }
+}

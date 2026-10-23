@@ -108,7 +108,7 @@ checks either way. What you take on is the judgement layer no check performs:
    unreviewed fixes is not a reviewed PR. For area:frontend, a rendered pass
    too. Nothing in CI does this, and nothing will tell you it was skipped.
 
-2. DOC-REVIEWER — run: node scripts/docs/coupling-gate.mjs
+2. DOC-REVIEWER — run: node scripts/docs/coupling-gate.mjs --strict --changed=<files> --out=/dev/null
    Run it after implementation. Docs whose `covers:` front-matter maps to the
    changed code are the FLOOR of what it reviews, not the scope (#2499): the
    pass derives scope from the claims in the diff and sweeps files that no

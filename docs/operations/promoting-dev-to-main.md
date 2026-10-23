@@ -10,7 +10,7 @@ covers:
   - docs/operations/dev-environment.md
   - packages/backend/src/index.ts
   - scripts/release-scope.mjs
-last-verified: "2026-09-25"
+last-verified: "2026-10-19"
 ---
 
 # Promoting `dev → main` (production release)
@@ -160,7 +160,15 @@ so this is a rule to point at rather than a question to ask the release runner.
       merge — confirm the version and the intended dist-tag (`alpha` vs `latest`),
       then read the run's **per-package summary table**: a package can fail while
       the others publish (#1159), so green-except-one is a real outcome, not a
-      binary.
+      binary. Since [#3797](https://github.com/d-hinders/Haven-AI/issues/3797) a
+      package whose internal dependency neither published in the same run nor
+      was already on npm is held back, its row reading **FAILED** — not
+      published: dependency … did not publish in this run, rather than going out
+      against a version npm does not have. A package whose internal pin has
+      drifted from the workspace version is held back the same way (published
+      packages pin internal dependencies exactly, `lint:workspace-pins`).
+      Re-running the failed job skips the versions already on npm and publishes
+      the held-back rest.
       Since [#2421](https://github.com/d-hinders/Haven-AI/issues/2421) the same
       workflow also publishes `0.0.0-dev.*` snapshots under a separate `dev`
       dist-tag on pushes to `dev`. That is a different channel and changes
@@ -176,8 +184,9 @@ so this is a rule to point at rather than a question to ask the release runner.
       these at 90 days); the fix is to renew it and re-run that job, never to
       cut another version.
 - [ ] **The prod bar is green.** A promotion PR must satisfy **19** required
-      contexts: the 15 that every PR into `dev` also meets, plus four required on
-      `main` only —
+      contexts: the 15 that every PR into `dev` also meets (a `dev`-only
+      context such as **External intake gate**, #4200, required on `dev`
+      only, is not among them), plus four required on `main` only —
       - `gate` — refuses anything but `dev` / `hotfix/*`;
       - `qa-freshness` — refuses without a green money-flow run covering the
         promoted money-path code (the item above);
@@ -199,7 +208,7 @@ so this is a rule to point at rather than a question to ask the release runner.
       The per-branch inventory and the `gh api` command that produced it are in
       [`../contributing/autonomous-pr-loop.md`](../contributing/autonomous-pr-loop.md#one-time-github-setup-required)
       step 3.
-- [ ] **Sweep the docs staleness audit** ([#2645](https://github.com/d-hinders/Haven-AI/issues/2645), "Docs staleness audit (weekly)" — one standing issue that `docs-audit.yml` rewrites every Monday). Open it and give every `current`-status doc it ranks one of three dispositions: **fix** it in a follow-up, **file** it, or **accept** it with a reason recorded in this promotion PR. Contract docs cannot reach here — the coupling gate blocks them on the PR that made them stale — so what this sweeps is the *non-contract* drift that is allowed to accumulate on `dev` between promotions, which is exactly the class no per-PR gate is watching. `archived` and `research` docs are not ranked and need no disposition (#2638). An empty or unchanged report is a valid outcome; say so rather than leaving the item silently unticked.
+- [ ] **Sweep the docs staleness audit** (the open "Docs staleness audit (weekly)" issue, [#3645](https://github.com/d-hinders/Haven-AI/issues/3645) at this writing — `docs-audit.yml` rewrites the open one every Monday, and opens a new one when the last was closed). Open it and give every `current`-status doc it ranks one of three dispositions: **fix** it in a follow-up, **file** it, or **accept** it with a reason recorded in this promotion PR. Contract docs cannot reach here — the coupling gate blocks them on the PR that made them stale — so what this sweeps is the *non-contract* drift that is allowed to accumulate on `dev` between promotions, which is exactly the class no per-PR gate is watching. `archived` and `research` docs are not ranked and need no disposition (#2638). An empty or unchanged report is a valid outcome; say so rather than leaving the item silently unticked.
 - [ ] **The request-validation rollout's named residue (`#3223`, epic #3028) is expected here.** `POST /machine-payments/reconciliation-events` is intentionally NOT enforced — the shadow reading did not cover it and CANNOT have: the route is only posted on a genuine merchant rejection after a confirmed payment, and driving it synthetically would write a false record into a payment's ledger (owner decision 2026-09-24 on epic #3028). Do not read its `NOT PROVEN` row in a shadow table, or its entry in `lint-request-schemas-baseline.json` (`routes/machine-payments-reconciliation-events.ts`), as unfinished slice work; it is the standing residue until a real rejection — or a QA scenario that produces one — gives the reading traffic to prove it, at which point its file joins `enforcedModules` and its handler rungs delete like every other flip.
 - [ ] A code-owner approval, from an owner other than the PR author, is present
       if the batch touches an owned path — today only migration files:
@@ -274,10 +283,28 @@ so this is a rule to point at rather than a question to ask the release runner.
       ```
 
       Every line must be ✓: the chain id, a JSON-RPC batch of 10, the `pending`
-      block tag, `eth_sendRawTransaction` accepted as a method, and a burst of 20
-      without a 429. At the defaults it makes 32 read calls (1 + a batch of 10 +
-      1 + a burst of 20) plus one transaction signed by a fresh zero-balance key,
-      which the node refuses for funds and can never mine. The burst deliberately
+      block tag, `eth_getLogs` over the last 500 blocks (#4118),
+      `eth_sendRawTransaction` accepted as a method, and a burst of 20 without a
+      429. At the defaults it makes 34 read calls (1 + a batch of 10 + 1 + 2 for
+      the `eth_getLogs` line, its own head and the query, + a burst of 20) plus
+      one transaction signed by a fresh zero-balance key, which the node refuses
+      for funds and can never mine. The 500 is the widest batch the backend's
+      settlement sweepers ask for, pinned to their constants by the probe's
+      self-test; a narrower `--logs-range` is justified only in that variable's
+      row of the provider table in
+      [dev-environment.md](./dev-environment.md) → *Two Base Sepolia RPCs*.
+      Alchemy's free tier serves 10 blocks per call, which broke both sweepers
+      (#4012). Prod's primary is an app on the same Alchemy account; whether it
+      carries the same cap has not been measured, so this line may fail
+      there until the plan serves 500 blocks or the owner records an accepted
+      exception in the
+      [owner-accepted exceptions to the probe rule](./dev-environment.md#configuration)
+      (dev-environment.md → *Two Base Sepolia RPCs*). On a `*_FALLBACK`
+      variable the logs line is informational, not a gate: no `eth_getLogs`
+      reader uses the fallback (the viem failover reads and the relayer's
+      raw-send rebroadcast do; the log scanners stay on `RPC_URL_BASE*`), so it
+      is covered by the fallback exception above. Re-probe a fallback at the
+      default 500 only if it is ever promoted to primary. The burst deliberately
       spends up to 20 requests of the key's per-second budget: against a key the
       live mainnet relayer already uses, run it off-peak or with a smaller
       `--burst`. A failing line means the endpoint cannot carry Haven's traffic —
@@ -295,12 +322,12 @@ so this is a rule to point at rather than a question to ask the release runner.
       the response to one misbehaving module, per epic decision 6 — while
       `HAVEN_REQUEST_VALIDATION=off` / `shadow` are the GLOBAL switches (a
       listed module does not escape them; a mode change is a restart). The
-      shadow reading did not prove three machine-payment routes
-      (`GET /payments`, `GET /payments/{id}/receipt`,
-      `POST /machine-payments/reconciliation-events`); they are enforced on
-      test evidence per the #3223 owner decision, and a real
-      reconciliation-event refusal in prod is a client to fix, not the gate to
-      loosen.
+      shadow reading could not prove three routes no client calls
+      (`GET /payments`, `GET /payments/{id}/receipt` and the retired
+      `POST /machine-payments/authorize`); they are enforced on test evidence
+      per the #3223 owner decision. `POST /machine-payments/reconciliation-events`
+      is not among them: it stays in shadow, the named residue in the item
+      above (its own route file, deliberately absent from `enforcedModules`).
 
 - [ ] **Prod smoke:** load the prod app (no `DEV` badge), check login + balances,
       and run one small real payment / x402 happy path as a canary.
@@ -345,6 +372,20 @@ deployment holding a confusing name.
   taking the branch alias — and so is the fix. Smoke prod on
   `haven-ai-frontend.vercel.app` regardless.
 
-Separately: `main` has not moved since **2026-06-26**, so production is a long
-way behind `dev`. That is a promotion backlog, not a deploy bug — the pipeline
-below is wired correctly and will deploy whatever you merge.
+Separately: when this section was written (2026-08-06), `main` had not moved
+since **2026-06-26**. That was a promotion backlog, not a deploy bug, and
+promotions have run since: the latest at this doc's last verification is
+#3934, merged to `main` on 2026-10-14.
+
+> **Re-verified 2026-10-19 (weekly docs audit #3645, at dev `cf88627c`):**
+> the whole checklist was re-read. Changed: the npm item names the #3797
+> hold-back; the request-validation item names the right three routes enforced
+> on test evidence (#3223) and keeps reconciliation-events in shadow; the docs
+> audit item points at the open standing issue rather than the closed #2645;
+> and the closing note no longer says `main` has not moved since June.
+> Checked and accurate: the 19 required contexts (15 + 4, read from the live
+> rulesets), `dismiss_stale_reviews_on_push` and the strict up-to-date rule on
+> `main`, the one CODEOWNERS rule, `release:scope`'s exit codes 2 and 1, the
+> RPC probe's defaults (batch 10, burst 20, cap 50), the public RPC defaults,
+> `SWEEP_MIN_USDC`'s `0.01` default, and the `enforce` default. Not checkable
+> from the repo: the npm token's expiry date.

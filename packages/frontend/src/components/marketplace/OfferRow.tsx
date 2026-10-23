@@ -1,75 +1,85 @@
-import { StatusBadge } from '@/components/ui/StatusBadge'
-import { chainName, freshness, networkToChainId, VERIFIED_MEANING } from '@/lib/marketplace'
+'use client'
+
+import { useState } from 'react'
+import { ANY_RECIPIENT_BUDGET_TAG, chainName, networkToChainId } from '@/lib/marketplace'
+import { OfferCopyButton, OfferInstructionText, OfferMeta } from './OfferInstruction'
+import type { OfferBudgetHint } from './OffersTable'
 import type { CatalogEntry } from '@/hooks/useCatalog'
 
 /**
- * One offer's row content in the merchant page's offers table (#3079, epic
- * #3077). Renamed from `CatalogCard` (`CatalogPanel.tsx`, deleted by this
- * issue) — that component rendered a whole card per entry; this renders the
- * per-offer cells a `<tr>` in `OffersTable.tsx` wraps, since an offer's
- * identity is now the merchant page, not a card of its own.
+ * One offer's row in the merchant page's single offers list (#3981, epic
+ * #3978): no Method column and no per-row Verified marker (the merchant-level
+ * check-plus-word in `MerchantHeader` is the trust claim, #4008). Since #3998
+ * it is ONE table row: the instruction is no longer printed as a second row —
+ * the labelled "Copy prompt" button copies it byte-for-byte, and the Offer
+ * cell prints it only when the user must edit it or the clipboard refused it
+ * (`OfferInstructionText`).
  */
 export function OfferRow({
   entry,
   budget,
+  tagged,
+  copiedText,
 }: {
   entry: CatalogEntry
-  budget: boolean | null
+  /** The shared per-offer budget answer (`OffersTable`'s hint map, #4004). */
+  budget: OfferBudgetHint
+  tagged: boolean
+  /** Set when exactly one agent can pay this offer — the confirmation names it (#4005). */
+  copiedText?: string | null
 }) {
   const degraded = entry.status === 'degraded'
-  const method = entry.protocol === 'mcp' ? entry.tool_name : entry.rail
-  // The resource URL for every protocol: an MCP offer's tool name is already
-  // the Method cell, so repeating it here printed one string under two headers.
-  const path = entry.resource_url
   const chainId = networkToChainId(entry.network)
+  const [revealed, setRevealed] = useState(false)
 
   return (
-    <tr data-testid={`offer-row-${entry.id}`}>
-      <td className="px-4 py-3 align-top">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-medium text-[var(--v2-ink)]">{entry.name}</span>
+      <tr data-testid={`offer-row-${entry.id}`}>
+        <td className="px-4 py-3 align-top">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-medium text-[var(--v2-ink)]">{entry.name}</span>
+            {degraded ? (
+              <span className="rounded-full bg-[var(--v2-warning-soft)] px-2 py-0.5 text-xs font-medium text-[var(--v2-warning)]">
+                Limited availability
+              </span>
+            ) : null}
+            {tagged ? (
+              <span className="rounded-full bg-[var(--v2-warning-soft)] px-2 py-0.5 text-xs font-medium text-[var(--v2-warning)]">
+                {ANY_RECIPIENT_BUDGET_TAG}
+              </span>
+            ) : null}
+          </div>
+          <p className="mt-0.5 text-xs text-[var(--v2-ink-3)]">{entry.description}</p>
+          <OfferMeta entry={entry} />
+          <OfferInstructionText entry={entry} revealed={revealed} />
           {degraded ? (
-            <span className="rounded-full bg-[var(--v2-warning-soft)] px-2 py-0.5 text-xs font-medium text-[var(--v2-warning)]">
-              Limited availability
-            </span>
+            <p className="mt-1 text-xs text-[var(--v2-ink-3)]">
+              Recently unreachable on our checks — a payment may need a retry until it recovers.
+            </p>
           ) : null}
-          {entry.verified_payable && (
-            // Beside the offer, as on the phone card — the trust claim is not
-            // a recency fact, so it does not live under Freshness.
-            <span title={VERIFIED_MEANING}>
-              <StatusBadge tone="success" className="uppercase tracking-wide">
-                Verified
-              </StatusBadge>
-            </span>
+        </td>
+        <td className="px-4 py-3 align-top">
+          <span className="v2-tabular text-sm font-semibold text-[var(--v2-ink)]">
+            {entry.price_display ?? 'Price on request'}
+          </span>
+          {budget !== null && (
+            <p
+              className={`mt-0.5 text-xs font-medium ${
+                budget.tone === 'can' ? 'text-[var(--v2-success)]' : 'text-[var(--v2-warning)]'
+              }`}
+            >
+              {budget.text}
+            </p>
           )}
-        </div>
-        <p className="mt-0.5 max-w-xs truncate text-xs text-[var(--v2-ink-3)]">{path}</p>
-        {degraded ? (
-          <p className="mt-1 text-xs text-[var(--v2-ink-3)]">
-            Recently unreachable on our checks — a payment may need a retry until it recovers.
-          </p>
-        ) : null}
-      </td>
-      <td className="px-4 py-3 align-top text-xs text-[var(--v2-ink-2)]">{method}</td>
-      <td className="px-4 py-3 align-top text-xs text-[var(--v2-ink-3)]">{entry.description}</td>
-      <td className="v2-tabular px-4 py-3 align-top text-sm font-semibold text-[var(--v2-ink)]">
-        {entry.price_display ?? 'Price on request'}
-        {budget !== null && (
-          <p
-            className={`mt-0.5 text-xs font-medium ${
-              budget ? 'text-[var(--v2-success)]' : 'text-[var(--v2-warning)]'
-            }`}
-          >
-            {budget
-              ? 'Within your agent budget'
-              : 'Above every agent budget — a payment would be declined'}
-          </p>
-        )}
-      </td>
-      <td className="px-4 py-3 align-top text-xs text-[var(--v2-ink-2)]">{chainId === undefined ? '—' : chainName(chainId)}</td>
-      <td className="px-4 py-3 align-top text-xs text-[var(--v2-ink-3)]">
-        {freshness(entry.verified_at)}
-      </td>
-    </tr>
+        </td>
+        <td className="whitespace-nowrap px-4 py-3 align-top text-xs text-[var(--v2-ink-2)]">
+          {chainId === undefined ? '—' : chainName(chainId)}
+        </td>
+        <td className="px-4 py-3 text-right align-top">
+          {/* No `whitespace-nowrap` here: the resting label is short, and the
+              #4005 confirmation ("Copied — paste it to <agent>") is longer —
+              it must wrap cleanly in the cell rather than widen the row. */}
+          <OfferCopyButton entry={entry} copiedText={copiedText} onCopyFailed={() => setRevealed(true)} />
+        </td>
+      </tr>
   )
 }

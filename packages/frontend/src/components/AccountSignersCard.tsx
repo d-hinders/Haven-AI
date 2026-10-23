@@ -74,7 +74,7 @@ export default function AccountSignersCard({ accountAddress, chainId, userEmail 
       const r = await result
       if (r.ok) toast.success(okMsg)
       // #1085: neutral, not error — the user changed their mind.
-    else if (r.reason === 'cancelled') toast.info('Signature was cancelled.')
+    else if (r.reason === 'cancelled') toast.info('Approval was cancelled.')
       else if (r.reason === 'blocked') toast.error(r.message ?? 'That change is not allowed.')
       else toast.error('Something went wrong. Try again.')
     },
@@ -86,24 +86,15 @@ export default function AccountSignersCard({ accountAddress, chainId, userEmail 
   const onlyOneWay = wayCount < 2
 
   return (
-    <Card hover={false} className="mt-6 p-5 md:p-6">
-      <div>
-        <h2 className="text-base font-semibold text-[var(--v2-ink)]">Backup &amp; recovery</h2>
-        <p className="mt-0.5 text-sm text-[var(--v2-ink-muted)]">
-          These are the ways this account can be approved. Keep at least two, so a lost device never
-          means a lost account.
-        </p>
-        {/* #3825: a signer is its own object; the full list — every passkey and
-            wallet, with all the accounts each approves — lives in Settings. */}
-        <Link
-          href="/settings#signers"
-          className="mt-1 inline-flex items-center gap-1 text-sm font-medium text-[var(--v2-brand)] hover:underline"
-        >
-          All your passkeys and wallets in Settings
-          <Icon icon={ArrowRight} className="h-3.5 w-3.5" />
-        </Link>
-      </div>
-
+    // #4166: the section's ONE heading and intro ("Who can approve" and the
+    // keep-at-least-two sentence) live on the page above this card — the card
+    // used to repeat both under a second "Backup & recovery" heading. Every
+    // flow the card owns is unchanged; only the duplicated chrome is gone.
+    // #4307: the card reads warning first (the one thing that asks for
+    // action), then the signers and their actions, then the Settings link —
+    // which no longer leads the card — and the helper text no longer sits
+    // tight under the buttons.
+    <Card hover={false} className="p-5 md:p-6">
       {loadError ? (
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-danger/20 bg-[var(--v2-danger-soft)] px-4 py-3">
           <p className="text-sm text-[var(--v2-danger)]">
@@ -115,8 +106,11 @@ export default function AccountSignersCard({ accountAddress, chainId, userEmail 
         </div>
       ) : signers ? (
         <>
+          {/* #4307: the one-signer warning LEADS the card — it is the one
+              thing here that asks for action, and it no longer sits under
+              the Settings link. */}
           {onlyOneWay ? (
-            <div className="mt-4 rounded-lg border border-warning/25 bg-[var(--v2-warning-soft)] px-4 py-3 text-sm text-[var(--v2-ink)]">
+            <div className="rounded-lg border border-warning/25 bg-[var(--v2-warning-soft)] px-4 py-3 text-sm text-[var(--v2-ink)]">
               This account has only one way to approve. Add a backup now — without it, losing this device
               means losing the account.
             </div>
@@ -192,10 +186,23 @@ export default function AccountSignersCard({ accountAddress, chainId, userEmail 
                 </Button>
               ) : null}
             </div>
-            <p className="mt-1.5 text-xs text-[var(--v2-ink-muted)]">
-              Approve with Face ID, Touch ID, Windows Hello, or your device PIN.
+            <p className="mt-2 text-xs text-[var(--v2-ink-muted)]">
+              Approve with your passkey (usually your device&rsquo;s screen lock).
             </p>
           </div>
+
+          {/* #4307: the Settings link follows the signers and their actions —
+              #3825's object note stands, it just no longer leads the card —
+              on the same Card.Section rhythm as "Lost a device?" below. */}
+          <Card.Section className="mt-4">
+            <Link
+              href="/settings#signers"
+              className="inline-flex items-center gap-1 text-sm font-medium text-[var(--v2-brand)] hover:underline"
+            >
+              All your passkeys and wallets in Settings
+              <Icon icon={ArrowRight} className="h-3.5 w-3.5" />
+            </Link>
+          </Card.Section>
 
           {showWallet && !signers.owner_address ? (
             <div className="mt-3 flex flex-col gap-2 sm:flex-row">

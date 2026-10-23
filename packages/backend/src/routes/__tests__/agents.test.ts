@@ -224,6 +224,13 @@ describe('agent routes', () => {
           }],
         }
       }
+      if (/FROM agent_sub_budgets/.test(s)) {
+        // #3988: the received-grant ride-along — empty here; the pin is the
+        // derived allowances, and the read must not inherit the delegation
+        // row the agent_delegations branch serves (the received SQL names
+        // agent_delegations inside its EXISTS).
+        return { rows: [] }
+      }
       if (/FROM agent_delegations/.test(s)) {
         return {
           rows: [{

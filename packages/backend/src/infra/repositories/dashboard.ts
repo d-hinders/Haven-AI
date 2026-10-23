@@ -33,6 +33,7 @@
 import pool from '../../db.js'
 import type { Executor } from '../transaction.js'
 import { DELEGATION_RAIL_JOIN, spendNetFactorSql } from './analytics.js'
+import { listReceivedGrantsForAgents, type ReceivedGrantRow } from './sub-budgets.js'
 
 export type { Executor }
 
@@ -354,40 +355,22 @@ export async function listPendingAgentSetupStatuses(
 /**
  * Sub-budget grants an agent RECEIVED — `{ parentAgentId, parentAgentName,
  * open }` per row (#3803), so an agent whose only authority is a received
- * sub-budget does not read "No budget". `open` is the stored `status =
- * 'open'`; `pending`/`closing`/`closed` grant rows report `open = false`
- * rather than being dropped, because a pending grant is still authority the
- * owner can act on.
+ * sub-budget does not read "No budget". #3988 moved the read itself to
+ * {@link listReceivedGrantsForAgents} (`infra/repositories/sub-budgets.ts`)
+ * so `/agents`, the account detail page and this overview share ONE
+ * qualifying-chain read: `open` is now the FULL payment-path chain verdict
+ * (real grant, open + unexpired, live parent-child row it hangs from, carved
+ * from the parent's SPENDABLE budget delegation) — not the grant row's
+ * status alone, and never a self row. This wrapper keeps the #3803 name the
+ * dashboard route already imports.
  */
-export const RECEIVED_SUB_BUDGETS_FOR_AGENTS_SQL = `SELECT asb.agent_id,
-         asb.parent_agent_id,
-         pa.name AS parent_agent_name,
-         (asb.status = 'open') AS open
-  FROM agent_sub_budgets asb
-  JOIN agents pa ON pa.id = asb.parent_agent_id
-  JOIN agents a ON a.id = asb.agent_id
-  WHERE a.user_id = $1
-    AND asb.agent_id = ANY($2)`
-
-export interface ReceivedSubBudgetRow {
-  agent_id: string
-  parent_agent_id: string
-  parent_agent_name: string
-  open: boolean
-}
-
-/** `userId` is REQUIRED; `agentIds` must have been read under the same tenant. */
 export async function listReceivedSubBudgetsForAgents(
   userId: string,
   agentIds: string[],
+  nowSec: number = Math.floor(Date.now() / 1000),
   db: Executor = pool,
-): Promise<ReceivedSubBudgetRow[]> {
-  if (agentIds.length === 0) return []
-  const result = await db.query<ReceivedSubBudgetRow>(
-    RECEIVED_SUB_BUDGETS_FOR_AGENTS_SQL,
-    [userId, agentIds],
-  )
-  return result.rows
+): Promise<ReceivedGrantRow[]> {
+  return listReceivedGrantsForAgents(userId, agentIds, nowSec, db)
 }
 
 /**
@@ -674,6 +657,41 @@ export async function listAgentLastPayments(
     ...r,
     confirmed_at: r.confirmed_at ? new Date(r.confirmed_at) : r.confirmed_at,
   }))
+}
+
+/**
+ * The newest CONFIRMED payment intent booked against ONE account (#4021).
+ *
+ * This is deliberately NOT a twin of `AGENT_LAST_PAYMENT_SQL` promoted to
+ * account scope and used alone: agent intents are only HALF of what the
+ * account card's "Last payment" counts — the owner ruling is any outgoing
+ * transfer, INCLUDING owner sends, which never touch `payment_intents` (they
+ * are broadcast straight from the owner's signer; no backend row records
+ * them). The chain-history probe in `modules/transactions/last-outgoing.ts`
+ * covers owner sends and on-chain legs; THIS read is the belt-and-braces leg
+ * for a confirmed intent whose transfer never surfaced in the explorer rows
+ * (the x402-synthesized row case). `last-outgoing.ts` takes the MAX of both.
+ *
+ * `agents.account_id` is a plain column, not an FK (migration 084) — the JOIN
+ * is still tenant-safe: the caller passes the account id from an ownership
+ * check that already ran under the caller's user.
+ */
+export const LAST_OUTGOING_INTENT_SQL = `SELECT MAX(pi.confirmed_at) AS last_outgoing_at
+  FROM payment_intents pi
+  JOIN agents a ON a.id = pi.agent_id
+  WHERE a.account_id = $1
+    AND pi.status = 'confirmed'`
+
+/** `accountId` is REQUIRED — scope it from the caller's ownership check, never from the wire. */
+export async function findLastOutgoingIntentAt(
+  accountId: string,
+  db: Executor = pool,
+): Promise<Date | null> {
+  const result = await db.query<{ last_outgoing_at: Date | null }>(LAST_OUTGOING_INTENT_SQL, [
+    accountId,
+  ])
+  const raw = result.rows[0]?.last_outgoing_at
+  return raw ? new Date(raw) : null
 }
 
 /**

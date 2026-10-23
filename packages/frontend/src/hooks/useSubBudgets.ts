@@ -68,3 +68,44 @@ export function useSubBudgetTrees(agentId: string) {
 
   return { trees, error, reload }
 }
+
+/** One grant the agent RECEIVES (#3988): `components.schemas.ReceivedSubBudgetGrant` in `openapi/spec.ts` — a SubBudget plus the parent agent's name. */
+export type ReceivedSubBudgetGrant = ApiSchema<'ReceivedSubBudgetGrant'>
+
+/**
+ * The holder's side of the sub-budget table (#3988): every non-closed grant
+ * the agent RECEIVES (`GET /agents/:id/sub-budgets/received`), for the
+ * read-only "Received budgets" block on the agent page's Spending card. Read
+ * the same defensive way as the trees above — `grants` stays `null`
+ * (nothing rendered) on failure, so a failed fetch never takes the budgets
+ * list down with it — and with the same one-in-flight-request guard (#2732).
+ */
+export function useReceivedSubBudgets(agentId: string) {
+  const [grants, setGrants] = useState<ReceivedSubBudgetGrant[] | null>(null)
+  const [error, setError] = useState(false)
+  const requestIdRef = useRef(0)
+
+  const reload = useCallback(async () => {
+    const requestId = ++requestIdRef.current
+    try {
+      const res = await api.get<{ agent_id: string; received: ReceivedSubBudgetGrant[] }>(
+        `/agents/${agentId}/sub-budgets/received`,
+      )
+      if (requestIdRef.current !== requestId) return
+      // `?? []` — an absent key must degrade, not crash the route (#3093).
+      setGrants(res.received ?? [])
+      setError(false)
+    } catch {
+      if (requestIdRef.current !== requestId) return
+      setError(true)
+    }
+  }, [agentId])
+
+  useEffect(() => {
+    setGrants(null)
+    setError(false)
+    void reload()
+  }, [agentId, reload])
+
+  return { grants, error, reload }
+}

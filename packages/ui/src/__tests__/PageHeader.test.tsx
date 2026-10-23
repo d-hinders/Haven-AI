@@ -35,3 +35,68 @@ describe('PageHeader meta slot (#3692)', () => {
     expect(container.textContent).toContain('Just a subtitle.')
   })
 })
+
+describe('PageHeader back link (#4028)', () => {
+  it('renders the back link ABOVE the title row, not inside the title column', () => {
+    const { container, getByRole } = render(
+      <PageHeader
+        title="Research agent"
+        back={{ href: '/agents', label: 'Agents' }}
+        actions={<button type="button">Pause payments</button>}
+      />,
+    )
+    const link = getByRole('link', { name: 'Agents' })
+    expect(link.getAttribute('href')).toBe('/agents')
+    const header = container.querySelector('header')!
+    const h1 = container.querySelector('h1')!
+    // the link is a direct child of the header, and precedes the title
+    expect(link.parentElement).toBe(header)
+    expect(link.compareDocumentPosition(h1)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+    // the title column does not contain the link, so actions stay centred on the title
+    expect(h1.parentElement!.contains(link)).toBe(false)
+  })
+
+  it('renders the same markup as before when no back is passed — existing callers are unchanged', () => {
+    const { container } = render(
+      <PageHeader title="Agents" actions={<button type="button">New</button>} />,
+    )
+    const header = container.querySelector('header')!
+    expect(container.querySelectorAll('a').length).toBe(0)
+    // the header is still itself the flex row
+    expect(header.className).toBe(
+      'mb-6 flex gap-4 sm:flex-row sm:items-center sm:justify-between flex-col',
+    )
+    expect(header.firstElementChild!.querySelector('h1')).not.toBeNull()
+  })
+})
+
+describe('PageHeader leading slot (#4210)', () => {
+  it('renders leading BEFORE the title, on the title line', () => {
+    const { container, getByTestId } = render(
+      <PageHeader
+        title="Research agent"
+        eyebrow="Agent"
+        subtitle="Connected through the Haven credential."
+        leading={<span data-testid="mark" />}
+      />,
+    )
+    const mark = getByTestId('mark')
+    const h1 = container.querySelector('h1')!
+    expect(mark.compareDocumentPosition(h1)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+    // the mark and the title share one centred row — the eyebrow and subtitle are outside it
+    const line = h1.parentElement!
+    expect(line.contains(mark)).toBe(true)
+    expect(line.className.split(' ')).toEqual(expect.arrayContaining(['flex', 'items-center']))
+    expect(line.textContent).toBe('Research agent')
+  })
+
+  it('renders the same markup as before when no leading is passed — existing callers are unchanged', () => {
+    const { container } = render(
+      <PageHeader title="Agents" subtitle="All agents." actions={<button type="button">New</button>} />,
+    )
+    // pinned whole from origin/dev @ e44a7a79a, before the slot existed
+    expect(container.innerHTML).toBe(
+      '<header class="mb-6 flex gap-4 sm:flex-row sm:items-center sm:justify-between flex-col"><div class="min-w-0"><h1 class="v2-text-h1 text-[var(--v2-ink)]">Agents</h1><p class="mt-2 v2-text-body text-[var(--v2-ink-2)] max-w-2xl">All agents.</p></div><div class="flex flex-wrap items-center gap-2 flex-shrink-0"><button type="button">New</button></div></header>',
+    )
+  })
+})

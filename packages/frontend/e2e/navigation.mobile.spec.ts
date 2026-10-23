@@ -5,7 +5,8 @@
  * project comment in `playwright.config.ts`. This file exists because until
  * #1768 no mobile viewport gated a pull request at all: `chromium-mobile` was
  * configured but only a manual `workflow_dispatch` ever ran it, so #1749 (the
- * "Open sidebar" toggle hit-tested under `TopBar` and unopenable below `lg` on
+ * "Open sidebar" toggle hit-tested under the then-56px top bar and unopenable
+ * below `lg` on
  * every authenticated route) could ship without a single check going red.
  *
  * WHAT BELONGS HERE: behaviour that is only wrong at a small width or under a
@@ -29,6 +30,7 @@ import {
   mockHavenApi,
   seedAuthenticatedSession,
   unexpectedBrowserErrors,
+  waitForDrawerOpen,
 } from './fixtures/haven-api'
 
 // Authenticated routes a user reaches from primary navigation. Each is checked
@@ -212,8 +214,8 @@ test.describe('mobile viewport', () => {
       // this assertion is the useless one: `contentRight === viewportWidth`
       // holds under the mutation (393 either way) and catches nothing on its
       // own. `contentLeft === 0` is what goes red. Both are asserted because
-      // together they say the real invariant — below `lg` the drawer is
-      // `fixed`, so it consumes no layout and the content region owns the FULL
+      // together they say the real invariant — below `lg` the rail is
+      // `hidden` (#4053), so it consumes no layout and the content region owns the FULL
       // width of the screen — which also catches a gutter opening on the right.
       expect(
         { left: overflow.contentLeft, right: overflow.contentRight },
@@ -427,13 +429,86 @@ test.describe('mobile viewport', () => {
   //
   // Worth recording how it got there. While building this file the hit-test was
   // written here and it FAILED against `dev`: `elementFromPoint` at the toggle's
-  // centre returned `TopBar`'s `z-[100]` header, over the toggle's `z-[60]` —
+  // centre returned the top bar's `z-[100]` header, over the toggle's `z-[60]` —
   // #1749, live, found by this gate on its first run. #1769 then merged the fix
   // and its own layering spec, which had used `test.use({ viewport })` inside
   // `chromium-desktop` precisely BECAUSE `chromium-mobile` never gated a PR.
   // That constraint is what #1768 removed, so the spec moved into this project
   // and the hit-test came with it, under a real touch pointer rather than a
   // mouse in a narrow window.
+})
+
+/**
+ * One theme control per screen (#4029, #4053).
+ *
+ * A RENDERED-visibility count, not a unit pin: the failure that could regress
+ * it is a second control mounting somewhere a unit test on `Sidebar` cannot
+ * see. Since #4053 the two sides of `lg` carry different controls on purpose —
+ * the rail's two-state flip (`Theme: <current>. Switch to <next>`) at and
+ * above it, the More sheet's three-way radiogroup (`Theme`) below it, owner
+ * decision 2026-10-17 — so the count spans both shapes and asks for exactly
+ * ONE visible where the user can reach it: the rail at 1280, the open sheet at
+ * 390. Visible = has client rects; the hidden rail (`display: none` below
+ * `lg`) has none.
+ */
+test.describe('one theme control per screen (#4029, #4053)', () => {
+  test.beforeEach(async ({ page }) => {
+    await mockHavenApi(page)
+    await seedAuthenticatedSession(page)
+  })
+
+  const countThemeControls = (page: import('@playwright/test').Page) =>
+    page.evaluate(() => {
+      const controls = [
+        ...Array.from(document.querySelectorAll<HTMLElement>('button[aria-label^="Theme: "]')),
+        ...Array.from(document.querySelectorAll<HTMLElement>('[role="radiogroup"][aria-label="Theme"]')),
+      ]
+      return controls.filter((el) => el.getClientRects().length > 0).length
+    })
+
+  test('exactly one visible theme control at 1280px: the rail flip', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 844 })
+    await page.goto('/dashboard')
+    // The sidebar is `dynamic(..., { ssr: false })` (#2521): wait for it, or a
+    // count of 0 would be read before it mounts.
+    await page.locator('button[aria-label^="Theme: "]').first().waitFor()
+    expect(await countThemeControls(page)).toBe(1)
+    await expect(page.locator('[role="radiogroup"][aria-label="Theme"]')).toHaveCount(0)
+  })
+
+  test('exactly one visible theme control at 390px: the sheet radiogroup', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.goto('/dashboard')
+    await page.getByRole('button', { name: 'Open sidebar' }).click()
+    await waitForDrawerOpen(page)
+    await page.locator('[role="radiogroup"][aria-label="Theme"]').waitFor()
+    expect(await countThemeControls(page)).toBe(1)
+  })
+
+  test('a theme option takes a tap in its 44px hit area, outside the painted 32px (#4056)', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.goto('/dashboard')
+    await page.getByRole('button', { name: 'Open sidebar' }).click()
+    await waitForDrawerOpen(page)
+    const light = page.locator('[role="radiogroup"][aria-label="Theme"] [role="radio"]', { hasText: 'Light' })
+    const box = (await light.boundingBox())!
+    // The painted option is ~32px: tap 4px ABOVE its top edge — inside the
+    // 6px overhang of the 44px target, outside every painted pixel.
+    expect(box.height).toBeLessThan(40)
+    const hit = await page.evaluate(
+      ([x, y]) => document.elementFromPoint(x, y)?.closest('[role="radio"]')?.textContent ?? null,
+      [box.x + box.width / 2, box.y - 4] as const,
+    )
+    expect(hit, 'the tap 4px above the painted option still reaches it').toBe('Light')
+    // And the bottom edge, at the full 6px overhang (1px past the track).
+    const below = await page.evaluate(
+      ([x, y]) => document.elementFromPoint(x, y)?.closest('[role="radio"]')?.textContent ?? null,
+      [box.x + box.width / 2, box.y + box.height + 5.5] as const,
+    )
+    expect(below, 'the tap 5.5px below the painted option still reaches it').toBe('Light')
+    await page.mouse.click(box.x + box.width / 2, box.y - 4)
+    await expect(light).toHaveAttribute('aria-checked', 'true')
+  })
 })
 
 /**
@@ -457,28 +532,32 @@ test.describe('bottom tab bar (#2731)', () => {
     const bar = page.locator('[data-mobile-tab-bar]')
     await bar.waitFor()
 
-    // The bar renders four tabs; More is a sibling, by stacking-context
-    // necessity (see `MobileTabBar`). Asserted so a fifth link appearing in
-    // here — the obvious "just add More to the grid" edit — is caught.
+    // The bar renders four tab LINKS and one More BUTTON (#4053 — More is a
+    // cell of the bar, not a sibling painted over it). Asserted so a fifth
+    // link — a destination promoted to a tab without updating `TAB_ROUTES`
+    // and the sheet — is caught.
     await expect(bar.getByRole('link')).toHaveCount(4)
+    await expect(bar.getByRole('button', { name: 'Open sidebar' })).toHaveCount(1)
     // ORDER, not just membership. "Selected by route, never by index" is the
     // headline claim in the component, the doc and the showcase caption, and
     // nothing tested it: replacing the route lookup with `items.slice(0, 4)`
     // left every one of these tests green, because the SET of four routes is
     // the same either way and only the order differs. The bar's order is not
-    // the drawer's, which is the whole reason the claim exists.
+    // the rail's, which is the whole reason the claim exists.
     expect(
       await bar.getByRole('link').evaluateAll((els) => els.map((e) => e.getAttribute('href'))),
       'the bar reads baseNavItems by route, not by position',
     ).toEqual(['/dashboard', '/agents', '/transactions', '/accounts'])
-    await expect(bar.getByRole('link', { name: 'Dashboard' })).toHaveAttribute(
+    await expect(bar.getByRole('link', { name: 'Home' })).toHaveAttribute(
       'aria-current',
       'page',
     )
 
-    await bar.getByRole('link', { name: 'Transactions' }).click()
+    // The bar labels /transactions "Activity" (#4058, owner decision); the
+    // route and the page keep "Transactions".
+    await bar.getByRole('link', { name: 'Activity' }).click()
     await page.waitForURL('**/transactions')
-    await expect(bar.getByRole('link', { name: 'Transactions' })).toHaveAttribute(
+    await expect(bar.getByRole('link', { name: 'Activity' })).toHaveAttribute(
       'aria-current',
       'page',
     )
@@ -495,19 +574,243 @@ test.describe('bottom tab bar (#2731)', () => {
     await expect(bar.locator('a[aria-current="page"]')).toHaveCount(1)
   })
 
-  test('More opens the drawer, and keeps the name the harness waits on', async ({ page }) => {
+  test('More opens the sheet, and keeps the name the harness waits on', async ({ page }) => {
     await page.goto('/dashboard')
     // `Open sidebar` is not decoration: `dismissMobileSidebar` in
-    // `scripts/screenshot.mjs` waits on this exact name from 25 call sites,
-    // and `e2e/fixtures/haven-api.ts` has a twin. #2731 moved the control and
-    // deliberately did not rename it.
-    const more = page.getByRole('button', { name: 'Open sidebar' })
-    await more.click()
+    // `scripts/screenshot.mjs` and its twin in `e2e/fixtures/haven-api.ts`
+    // click `Close sidebar`, and every mobile capture reaches the page through
+    // them. #2731 and #4053 both moved the control and deliberately did not
+    // rename it.
+    await page.getByRole('button', { name: 'Open sidebar' }).click()
+    await waitForDrawerOpen(page)
+    const sheet = page.locator('[data-more-sheet]')
     await expect(
-      page.getByRole('navigation', { name: 'All sections' }).getByRole('link', { name: 'Marketplace' }),
+      sheet.getByRole('navigation', { name: 'All sections' }).getByRole('link', { name: 'Marketplace' }),
     ).toBeVisible()
+    // Only the destinations the bar lacks (#4053): no tab route in the sheet.
+    for (const route of ['/dashboard', '/agents', '/transactions', '/accounts']) {
+      await expect(sheet.locator(`a[href="${route}"]`), `sheet repeats ${route}`).toHaveCount(0)
+    }
     await page.getByRole('button', { name: 'Close sidebar' }).click()
+    await expect(sheet).toHaveCount(0)
     await expect(page.getByRole('button', { name: 'Open sidebar' })).toBeVisible()
+  })
+
+  test('the open sheet covers the bar and makes it inert; Tab stays in the sheet; its ✕ closes it (#4058)', async ({ page }) => {
+    // Inverted from #4053's "the bar stays live under the sheet": since #4058
+    // the sheet floats OVER the floating bar, so the bar is covered by the
+    // scrim/sheet and `inert`, and the sheet carries its own way out.
+    await page.goto('/dashboard')
+    await page.getByRole('button', { name: 'Open sidebar' }).click()
+    await waitForDrawerOpen(page)
+
+    const bar = page.locator('nav[data-mobile-tab-bar]')
+    const sheet = page.locator('[data-more-sheet]')
+    await expect(sheet).toHaveAttribute('aria-modal', 'true')
+    await expect(bar).toHaveAttribute('inert', '')
+    await expect(page.locator('#main-content')).toHaveAttribute('inert', '')
+
+    // The Agents tab's centre is covered — by the sheet or its scrim, not the bar.
+    const box = (await bar.getByRole('link', { name: 'Agents', includeHidden: true }).boundingBox())!
+    const coveredBy = await page.evaluate(
+      ([x, y]) => {
+        const el = document.elementFromPoint(x, y)
+        if (el?.closest('[data-mobile-tab-bar]')) return 'BAR'
+        if (el?.closest('[data-more-sheet]')) return 'sheet'
+        if (el?.closest('[data-more-sheet-scrim]')) return 'scrim'
+        return el?.tagName.toLowerCase() ?? 'nothing'
+      },
+      [box.x + box.width / 2, box.y + box.height / 2] as const,
+    )
+    expect(['sheet', 'scrim'], 'the Agents tab is covered while the sheet is open').toContain(coveredBy)
+
+    // Tab cycles inside the card: from the last stop, Tab lands back on the
+    // first (the ✕), never on the inert page behind.
+    const close = page.getByRole('button', { name: 'Close sidebar' })
+    await expect(close).toBeFocused()
+    await sheet.getByRole('button', { name: 'Log out' }).focus()
+    await page.keyboard.press('Tab')
+    await expect(close).toBeFocused()
+
+    await close.click()
+    await expect(sheet).toHaveCount(0)
+    await expect(bar).not.toHaveAttribute('inert', '')
+    await expect(page.locator('#main-content')).not.toHaveAttribute('inert', '')
+    await expect(page.getByRole('button', { name: 'Open sidebar' })).toBeFocused()
+  })
+
+  test('the concentric capsule fits every tab from 375px, and the focused active tab gets an OUTSET ring (#4237)', async ({ page }) => {
+    // #4237's geometry, measured with each of the four tab routes active in
+    // turn: the indicator is a full capsule set in from the pill's border-box
+    // edge by 5px (the 1px border + `p-1`'s 4px) on every side it can touch —
+    // top and bottom always, left on the first cell. The More cell never
+    // shows an indicator, so the right outer edge is read only through
+    // symmetry with the left. The active label must also sit inside the
+    // capsule's STRAIGHT section: its rendered GLYPHS must not extend into
+    // the 26px end radii — the criterion #4058's `rounded-2xl` was a
+    // workaround for, now checked per tab. The vertical position of the ink
+    // is the fit criterion (owner decision 2026-10-22: measure the glyph ink
+    // bounds, not the line box — the line box's corners overshoot the ink by
+    // the half-leading and the cap-to-ascent gap, which read "Accounts" as
+    // failing when its ink fits).
+    for (const width of [375, 390]) {
+      await page.setViewportSize({ width, height: 844 })
+      for (const route of ['/dashboard', '/agents', '/transactions', '/accounts']) {
+        await page.goto(route)
+        const bar = page.locator('nav[data-mobile-tab-bar]')
+        await bar.waitFor()
+        const clipped = await bar.evaluate((nav) =>
+          Array.from(nav.querySelectorAll<HTMLElement>('a > span:last-child, button > span:last-child'))
+            .filter((el) => el.scrollWidth > el.clientWidth)
+            .map((el) => el.textContent),
+        )
+        expect(clipped, `labels clipped at ${width}px on ${route}`).toEqual([])
+
+        const geo = await bar.evaluate((nav) => {
+          const pill = nav.getBoundingClientRect()
+          const cs = getComputedStyle(nav)
+          // The first grid cell — its indicator touches the pill's left
+          // padding edge, so it is the cell that measures the OUTER gap.
+          const first = nav.querySelector<HTMLElement>('a, button')!
+          const firstIndicator = first.querySelector('[data-tab-indicator]')!
+          const fi = firstIndicator.getBoundingClientRect()
+          // The ACTIVE tab's indicator and label: the label-fit criterion.
+          const active = nav.querySelector<HTMLElement>('a[aria-current="page"]')!
+          const indicator = active.querySelector<HTMLElement>('[data-tab-indicator]')!
+          const label = active.querySelector<HTMLElement>('span:last-of-type')!
+          const li = indicator.getBoundingClientRect()
+          const lb = label.getBoundingClientRect()
+          // The ink criterion (owner decision 2026-10-22): dy is measured to
+          // the rendered GLYPH ink, not the line box. The ink's vertical
+          // extent around the baseline comes from canvas TextMetrics —
+          // actualBoundingBox* is the ink, fontBoundingBox* places the
+          // baseline in the line box (Chromium has both). For "Accounts" at
+          // 375px this is the difference between the line box's dy of 19
+          // (8.25px required — the whole 38px stack, an overshoot) and the
+          // ink's dy of ~16 (~5.5px required vs 6.09px actual: fits).
+          const labelCs = getComputedStyle(label)
+          const ink = (() => {
+            const ctx = document.createElement('canvas').getContext('2d')!
+            ctx.font = `${labelCs.fontWeight} ${labelCs.fontSize} ${labelCs.fontFamily}`
+            const m = ctx.measureText((label.textContent ?? '').trim())
+            const fontAscent = m.fontBoundingBoxAscent ?? parseFloat(labelCs.fontSize)
+            const fontDescent = m.fontBoundingBoxDescent ?? 0
+            const halfLeading = (parseFloat(labelCs.lineHeight) - (fontAscent + fontDescent)) / 2
+            const baseline = lb.top + halfLeading + fontAscent
+            return {
+              top: baseline - m.actualBoundingBoxAscent,
+              bottom: baseline + m.actualBoundingBoxDescent,
+            }
+          })()
+          // Straight section of a capsule of radius r: the end radius eats
+          // `r - sqrt(r^2 - dy^2)` of the width at height-offset dy from the
+          // capsule's centre; the ink's worst dy is its farthest edge.
+          const r = li.height / 2
+          const cy = li.top + li.height / 2
+          const dy = Math.max(Math.abs(ink.top - cy), Math.abs(ink.bottom - cy))
+          const curveInset = r - Math.sqrt(Math.max(r * r - dy * dy, 0))
+          return {
+            pillPadding: [cs.paddingTop, cs.paddingRight, cs.paddingBottom, cs.paddingLeft],
+            firstIndicatorRadius: getComputedStyle(firstIndicator).borderRadius,
+            activeIndicatorRadius: getComputedStyle(indicator).borderRadius,
+            gaps: {
+              top: fi.top - pill.top,
+              bottom: pill.bottom - fi.bottom,
+              left: fi.left - pill.left,
+            },
+            labelFit: {
+              label: label.textContent,
+              inkDy: dy,
+              insetLeft: lb.left - li.left,
+              insetRight: li.right - lb.right,
+              requiredInset: curveInset,
+            },
+          }
+        })
+        expect(geo.pillPadding, `pill padding at ${width}px on ${route}`).toEqual([
+          '4px',
+          '4px',
+          '4px',
+          '4px',
+        ])
+        // `rounded-full` is `border-radius: 9999px`; the renderer clamps it
+        // to the capsule's true 26px. The computed VALUE is the class's
+        // fingerprint — 26px would also pass a `rounded-[26px]` regression.
+        expect(geo.firstIndicatorRadius).toBe('9999px')
+        expect(geo.activeIndicatorRadius).toBe('9999px')
+        for (const [side, gap] of Object.entries(geo.gaps)) {
+          expect(
+            gap,
+            `${side} gap at ${width}px on ${route}`,
+          ).toBeGreaterThanOrEqual(4.5)
+          expect(
+            gap,
+            `${side} gap at ${width}px on ${route}`,
+          ).toBeLessThanOrEqual(5.5)
+        }
+        expect(
+          geo.labelFit.insetLeft,
+          `active label "${geo.labelFit.label}" crosses the capsule's left curve at ${width}px on ${route}`,
+        ).toBeGreaterThanOrEqual(geo.labelFit.requiredInset)
+        expect(
+          geo.labelFit.insetRight,
+          `active label "${geo.labelFit.label}" crosses the capsule's right curve at ${width}px on ${route}`,
+        ).toBeGreaterThanOrEqual(geo.labelFit.requiredInset)
+      }
+    }
+
+    // Keyboard focus on the ACTIVE tab: the ring is the outset system ring —
+    // computed box-shadow without `inset` — and the indicator has NO outline
+    // at all, focused or not (#4237): the #4058 outlineColor assertion would
+    // otherwise read `currentcolor` against the removed outline. jsdom cannot
+    // compute this; the unit test pins classes.
+    const active = page.locator('nav[data-mobile-tab-bar] a[aria-current="page"]')
+    const unfocused = await active.evaluate((a) => {
+      const pill = a.querySelector('[data-tab-indicator]')!
+      return getComputedStyle(pill).outlineStyle
+    })
+    expect(unfocused).toBe('none')
+    await active.focus()
+    await page.keyboard.press('Shift+Tab')
+    await page.keyboard.press('Tab')
+    const ring = await active.evaluate((a) => {
+      const pill = a.querySelector('[data-tab-indicator]')!
+      const cs = getComputedStyle(pill)
+      return { focusVisible: a.matches(':focus-visible'), shadow: cs.boxShadow, outlineStyle: cs.outlineStyle }
+    })
+    expect(ring.focusVisible).toBe(true)
+    expect(ring.shadow).not.toBe('none')
+    expect(ring.shadow).not.toContain('inset')
+    expect(ring.outlineStyle).toBe('none')
+  })
+
+  test('the sheet dismisses on a scrim tap and on Escape, handing focus back to More (#4053)', async ({ page }) => {
+    await page.goto('/dashboard')
+    await page.getByRole('button', { name: 'Open sidebar' }).click()
+    await waitForDrawerOpen(page)
+    // The scrim's visible strip is above the sheet: tap near the top.
+    await page.locator('[data-more-sheet-scrim]').click({ position: { x: 20, y: 60 } })
+    await expect(page.locator('[data-more-sheet]')).toHaveCount(0)
+
+    await page.getByRole('button', { name: 'Open sidebar' }).click()
+    await waitForDrawerOpen(page)
+    await page.keyboard.press('Escape')
+    await expect(page.locator('[data-more-sheet]')).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Open sidebar' })).toBeFocused()
+  })
+
+  test('a downward swipe on the handle dismisses the sheet (#4053)', async ({ page }) => {
+    await page.goto('/dashboard')
+    await page.getByRole('button', { name: 'Open sidebar' }).click()
+    await waitForDrawerOpen(page)
+    const handle = page.locator('[data-more-sheet-handle]')
+    const box = (await handle.boundingBox())!
+    const x = box.x + box.width / 2
+    const y = box.y + box.height / 2
+    await handle.dispatchEvent('pointerdown', { clientX: x, clientY: y, pointerId: 1, isPrimary: true })
+    await handle.dispatchEvent('pointermove', { clientX: x, clientY: y + 120, pointerId: 1, isPrimary: true })
+    await handle.dispatchEvent('pointerup', { clientX: x, clientY: y + 120, pointerId: 1, isPrimary: true })
+    await expect(page.locator('[data-more-sheet]')).toHaveCount(0)
   })
 
   // Both bands, because the offset is carried by THREE variants and only one

@@ -11,12 +11,18 @@ import { useFocusTrap } from '@/hooks/useFocusTrap'
  * tall, scannable column rather than a centered dialog — e.g. the per-type
  * transaction detail view. Backdrop click and Escape close it; focus is
  * trapped while open.
+ *
+ * `leading` (#4267) is an optional mark before the title — the transaction
+ * panel's `Monogram` or `DirectionMark`. It sits outside the `<h2>`, so a
+ * block-level mark never lands inside the heading, and it is the caller's
+ * job to keep it decorative (the title already names the subject).
  */
 export function SidePanel({
   open,
   onClose,
   title,
   subtitle,
+  leading,
   children,
   footer,
 }: {
@@ -24,6 +30,7 @@ export function SidePanel({
   onClose: () => void
   title: ReactNode
   subtitle?: ReactNode
+  leading?: ReactNode
   children: ReactNode
   footer?: ReactNode
 }) {
@@ -53,15 +60,22 @@ export function SidePanel({
           landscape notch on the right, which is the side it is anchored to.
 
           On the panel rather than on the header and footer rows, which is where
-          the first version put them, because `footer` is OPTIONAL and the only
-          shipped caller — `TransactionDetailPanel` — passes none. A footer-row
-          inset is dead code at every real call site, and `/transactions` is one
-          of the routes the acceptance criteria name; the scroll body's own
-          `py-5` was what actually met the home indicator. Found by review, and
-          now covered by `safe-area-insets.mobile.spec.ts`.
+          the first version put them, because `footer` is OPTIONAL: when this
+          was written the only shipped caller — `TransactionDetailPanel` —
+          passed none, and the scroll body's own `py-5` was what actually met
+          the home indicator. Since #4267 that caller passes a footer for a
+          record with a real on-chain transaction and none otherwise, so the inset
+          has to hold both ways — which is why it stays on the panel.
+          `safe-area-insets.mobile.spec.ts` covers the footer case.
         */}
         <div className="flex items-start justify-between gap-3 border-b border-[var(--v2-border)] px-5 py-4">
-          <div className="min-w-0">
+          {leading ? <div className="shrink-0">{leading}</div> : null}
+          {/* #4312 A: the title block centres itself on the mark when it is
+              the row's only content (a deposit drops its subtitle): the row
+              stays `items-start`, so the close button keeps its top edge in
+              the two-line case — `items-center` on the ROW would move it
+              ~7px, which both committed baselines pin. */}
+          <div className={subtitle ? 'min-w-0 flex-1' : 'min-w-0 flex-1 self-center'}>
             <h2 className="text-sm font-semibold text-[var(--v2-ink)]">{title}</h2>
             {subtitle ? (
               <p className="mt-0.5 text-xs text-[var(--v2-ink-3)]">{subtitle}</p>

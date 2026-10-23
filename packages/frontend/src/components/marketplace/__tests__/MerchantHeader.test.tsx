@@ -1,6 +1,7 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
-import { MerchantHeader } from '../MerchantHeader'
+import { MerchantHeader, TEST_MERCHANT_NOTE } from '../MerchantHeader'
+import { verifiedMeaning } from '@/lib/marketplace'
 import type { Merchant } from '@/hooks/useCatalog'
 
 function merchant(overrides: Partial<Merchant> = {}): Merchant {
@@ -18,6 +19,7 @@ function merchant(overrides: Partial<Merchant> = {}): Merchant {
     offer_count: 3,
     networks: ['eip155:8453', 'eip155:84532'],
     verified_payable: true,
+    lowest_price_atomic: '1000',
     ...overrides,
   }
 }
@@ -39,23 +41,38 @@ describe('MerchantHeader', () => {
     // A wrapping paragraph, not a one-line badge (a badge clipped it at 390).
     const note = screen.getByTestId('test-merchant-note')
     expect(note.tagName).toBe('P')
-    expect(note.textContent).toBe('Haven test merchant — real payments, demo goods')
+    expect(note.textContent).toBe(TEST_MERCHANT_NOTE)
     unmount()
     render(<MerchantHeader merchant={merchant()} />)
     expect(screen.queryByText(/Haven test merchant/)).toBeNull()
   })
 
-  it('shows the Verified badge with the honest claim only when verified payable', () => {
+  it('renders the actions slot on the header\'s right-hand side, and nothing extra when absent', () => {
+    const { unmount } = render(<MerchantHeader merchant={merchant()} actions={<button type="button">Set a budget for this merchant</button>} />)
+    expect(screen.getByRole('button', { name: 'Set a budget for this merchant' })).toBeDefined()
+    unmount()
+    render(<MerchantHeader merchant={merchant()} />)
+    expect(screen.queryByRole('button', { name: 'Set a budget for this merchant' })).toBeNull()
+  })
+
+  it('#4008: the Verified treatment is the quiet check plus the word, sentence case — asserted by element and class, not text alone', () => {
     const { unmount } = render(<MerchantHeader merchant={merchant()} />)
-    expect(screen.getByText('Verified')).toBeDefined()
+    // The marker: a check icon plus the word, on ONE element carrying the
+    // meaning as its title. CSS `uppercase` leaves the text node unchanged,
+    // so `getByText('Verified')` alone cannot prove the treatment — the
+    // class list (no `uppercase`) and the sentence-case node are asserted.
+    const marker = screen.getByTestId('verified-marker')
+    expect(marker.querySelector('svg')).not.toBeNull()
+    expect(marker.className).not.toContain('uppercase')
+    expect(within(marker).getByText('Verified').textContent).toBe('Verified')
+    expect(within(marker).queryByText('VERIFIED')).toBeNull()
     // The meaning is VISIBLE text on the page (a tooltip is not a home for
-    // essential copy), reachable without hover, focus or tap.
-    expect(screen.getByTestId('verified-meaning').textContent).toContain(
-      'not a claim about quality or settlement',
-    )
+    // essential copy), reachable without hover, focus or tap — and it names
+    // the merchant (#4003).
+    expect(screen.getByTestId('verified-meaning').textContent).toBe(verifiedMeaning('Ampersend Demo API'))
     unmount()
     render(<MerchantHeader merchant={merchant({ verified_payable: false })} />)
-    expect(screen.queryByText('Verified')).toBeNull()
+    expect(screen.queryByTestId('verified-marker')).toBeNull()
     expect(screen.queryByTestId('verified-meaning')).toBeNull()
   })
 

@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "npm --prefix ../core run build && next build",
+    "build": "npm --prefix ../core run build && next build && node scripts/check-kit-analytics-define.mjs",
     "typecheck": "npm --prefix ../core run build && tsc --noEmit",
     "start": "next start",
     "lint": "next lint",
@@ -14,6 +14,7 @@
     "design:coupling:strict": "node scripts/design-system-coupling.mjs --strict --out=/dev/null",
     "screenshot": "node scripts/screenshot.mjs",
     "test": "npm --prefix ../core run build && vitest run",
+    "test:local": "node scripts/test-local.mjs",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "test:visual": "VISUAL_REGRESSION=1 playwright test .visual.spec.ts --project=chromium-desktop",

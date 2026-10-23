@@ -148,7 +148,7 @@ export function HowItWorksPage() {
           <SiteSplit>
             <SiteCopy eyebrow="1 · Your account" title="An account only you control." titleId="how-account">
               <SiteLede>
-                One Face ID prompt creates a Haven account you own outright. No seed phrase, no credit card. Add USDC
+                One passkey prompt creates a Haven account you own outright. No seed phrase, no credit card. Add USDC
                 when your agents need it, and a backup passkey when you like.
               </SiteLede>
             </SiteCopy>
@@ -198,7 +198,7 @@ export function HowItWorksPage() {
                 titleId="how-budgets"
               >
                 <SiteLede>
-                  An amount and a period per agent, optionally pinned to one recipient. You sign it once, it refills
+                  An amount and a period per agent, optionally pinned to one recipient. You approve it once, it refills
                   itself, and you can stop it at any time.
                 </SiteLede>
               </SiteCopy>

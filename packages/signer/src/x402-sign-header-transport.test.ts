@@ -68,8 +68,11 @@ async function expectedX402() {
   return { ...context, auth: { version: 2 as const, message, signature: await account.signMessage({ message }), signer: account.address } }
 }
 
+// #4248: an assertion, not a thrown Error — a refusal must fail these tests as
+// an assertion so a mutation runner counts it as caught (prove-red reads a bare
+// throw as "mutation-red": the test went red for an unknown reason).
 function ok(payload: { success: boolean; data?: unknown; message?: string }): { success: true; data: unknown } {
-  if (!payload.success) throw new Error(`expected success, got failure: ${payload.message}`)
+  expect(payload.success, `expected success, got failure: ${payload.message}`).toBe(true)
   return payload as { success: true; data: unknown }
 }
 

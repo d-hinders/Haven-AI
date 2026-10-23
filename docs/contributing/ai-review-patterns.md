@@ -67,7 +67,7 @@ The patterns below are also the items checked by the **Captain Self-Check Prefli
 ## Shared UI And Cross-Surface Consistency
 
 - If the same movement, transaction row, status badge, contact row, or money summary appears in multiple places, prefer one shared component or utility.
-- **Pattern absorption (2nd occurrence, not the 12th).** When a diff writes the same markup shape a *second* time — a header band, badge, row, empty-state, inline `<svg>`, address slice — or re-creates something a `ui/`/`haven/` primitive already covers, extract it into a primitive and add a `/design-system` entry in that same PR. Catching the second occurrence is what prevents the debt clusters #859 cleaned retroactively; the new primitive trips the design-system coupling gate (#898) by design. Flag a diff that duplicates a shape instead of absorbing it — unless the author states the two uses will genuinely diverge.
+- **Pattern absorption (2nd occurrence, not the 12th).** When a diff writes the same markup shape a *second* time — a header band, badge, row, empty-state, inline `<svg>`, address slice — or re-creates something a `ui/`/`haven/` primitive already covers, extract it into a primitive and add a `/design-system` entry in that same PR. Catching the second occurrence is what prevents the debt clusters #859 cleaned retroactively; the new primitive trips the design-system coupling gate (#898) by design. Flag a diff that duplicates a shape instead of absorbing it — unless the author states the two uses will genuinely diverge. Absorption is not a **new pattern**: a composition with no shipped instance and no [`/design-system`](../product/design-system.md#patterns) entry needs its own earlier, owner-approved design-system slice (#4109), so flag a page that introduces one inline.
 - **A bare `var()` inside a Tailwind arbitrary value compiles to the wrong thing, silently.** Tailwind cannot infer what a variable holds, so `shadow-[var(--v2-shadow-card)]` takes the *colour* branch and emits `--tw-shadow: var(--tw-shadow-colored)` against a variable nothing sets — computed `box-shadow: none`. The same shape drops an opacity modifier it cannot re-compose (`ring-[var(--v2-brand)]/30`, `ring-current/30`). **Three instances, all found by looking at rendered output rather than at source:** #1708 (68 focus rings falling back to preflight blue), #1818 (the generalisation — the defect is the OUTPUT, not the arbitrary-value *shape*, so `currentColor` and an off-scale numeric modifier fail identically), #1945 (four elevation tokens, 67 call sites, every Card/Modal panel/popover flat). Flag the spelling on sight, and note what makes this class expensive: **it lints clean and reads correctly.** `design:lint` exists to catch a *bypassed* token, and here the token is referenced exactly as convention says. The fix in all three cases is to promote the token into `tailwind.config.js`'s theme and use the named utility (`ring-brand/80`, `shadow-card`), and the guard is a compiled-CSS test with a positive control — never a regex over class strings, which #1818 measured as too narrow the first time.
 - Keep dashboard, account detail, agent detail, transaction history, live delegation actions, and design-system examples aligned after changing shared presentation. Treat approval-queue examples as historical unless they are explicitly marked retired.
 - If a temporary frontend shim or preview backfill is added, label it clearly and avoid letting it redefine backend-owned totals or durable semantics.
@@ -201,6 +201,26 @@ The patterns below are also the items checked by the **Captain Self-Check Prefli
 - A gate that reports on a file list can report success on an **empty** list, and that reads identically to a clean pass. Before recording a check as green in the PR body, confirm the run actually saw the candidate diff.
 - Flag a PR whose Local Checks quote a gate's success message when the gate's default range could not have included the change — a committed-only range run before the commit, a `paths`-filtered job on a non-matching PR, a check run in the wrong worktree.
 - Run the **CI-equivalent** form, not the convenient one. `node scripts/docs/coupling-gate.mjs` is advisory and always exits 0; `npm run docs:coupling` is what CI runs. A local invocation that cannot fail is not evidence that CI will pass (#1076 → #1077).
+
+## Assertions A Wrong Edit Still Satisfies
+
+A deletion of the guarded code is the mutation every assertion catches. The one
+that counts is the **nearest wrong edit that keeps what the assertion matches**
+(ship-next *Implement* step 5). Four PRs merged on 2026-10-20 only after a review
+round found it:
+
+- **Polarity.** A substring assertion passes a rewrite that forbids what the text
+  told the agent to do, because the phrase survives. Pin generated agent-facing
+  text whole with `toBe` (PR #4133, `2580546a`).
+- **Wildcard token.** A matcher that lets `src/**`, `sdk/src/*` or `**/` name
+  whole sets of globs cannot fail for any file in them (PR #4131, `a06bb2be`,
+  `3e3b8608`).
+- **Any error code.** No test went red when the refusal anchor accepted any
+  code (PR #4145, `59f3967f`; the arm was later dropped). Add the negative case:
+  a retryable follow-up whose code is not `SETTLEMENT_PENDING` fails
+  (`36beba4a`, `x402-hosted-mcp-signer.test.ts`).
+- **Unentered branch.** A new arm no test drives is green by absence (PR #4144,
+  `36beba4a`, the hosted no-tool attribution window).
 
 ## Instrument Self-Reference And Staleness
 

@@ -15,6 +15,22 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+## 0.11.0-alpha.0 — 2026-10-23
+
+### Changed
+
+- **The installed skill passes the payment header with the settlement report
+  (#4061).** On the EIP-3009 plain-HTTP path, the skill now tells the agent to
+  pass `payment_header` (the exact header it retried the merchant with) on
+  `haven_report_x402_outcome` and on `haven_report_settlement_evidence`. Haven
+  records the merchant's settlement only with that header. An already
+  installed `SKILL.md` stays stale until reinstalled. No update needed.
+
+- **The installed skill names the quote's stop signals (#3967).** It tells the
+  agent to pass `expected_amount` when the price is stated up front, and to
+  stop and tell the user when a quote returns `safe_to_continue: false`.
+  Same reinstall note as above. No update needed.
+
 ## 0.10.0-alpha.0 — 2026-10-14
 
 ### Added

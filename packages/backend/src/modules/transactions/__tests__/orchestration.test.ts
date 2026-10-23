@@ -1,6 +1,19 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { filterEnrichedTransactions, paginateByOffset } from '../orchestration.js'
-import type { EnrichedTransaction } from '../types.js'
+import {
+  filterEnrichedTransactions,
+  foldOwnAccountTransfers,
+  paginateByOffset,
+} from '../orchestration.js'
+import type { EnrichedTransaction, SmartAccountRow } from '../types.js'
+
+const ACCOUNT_A = '0x1111111111111111111111111111111111111111'
+const ACCOUNT_B = '0x2222222222222222222222222222222222222222'
+const FOREIGN = '0x3333333333333333333333333333333333333333'
+
+const ownAccounts: SmartAccountRow[] = [
+  { id: 'account-a', account_address: ACCOUNT_A, chain_id: 8453, name: 'Main account' },
+  { id: 'account-b', account_address: ACCOUNT_B, chain_id: 8453, name: 'Savings' },
+]
 
 function enriched(overrides: Partial<EnrichedTransaction> = {}): EnrichedTransaction {
   return {
@@ -24,6 +37,133 @@ function enriched(overrides: Partial<EnrichedTransaction> = {}): EnrichedTransac
     ...overrides,
   }
 }
+
+function ownTransferLegs(
+  overrides: Partial<EnrichedTransaction> = {},
+): [EnrichedTransaction, EnrichedTransaction] {
+  const shared = {
+    hash: '0xown',
+    from: ACCOUNT_A,
+    to: ACCOUNT_B,
+    value: '500',
+    valueFormatted: '0.5',
+    chainId: 8453,
+    initiatedBy: 'human' as const,
+    ...overrides,
+  }
+  return [
+    enriched({
+      ...shared,
+      direction: 'out',
+      accountId: 'account-a',
+      accountAddress: ACCOUNT_A,
+      accountName: 'Main account',
+    }),
+    enriched({
+      ...shared,
+      direction: 'in',
+      accountId: 'account-b',
+      accountAddress: ACCOUNT_B,
+      accountName: 'Savings',
+      initiatedBy: undefined,
+    }),
+  ]
+}
+
+describe('foldOwnAccountTransfers (module internals, no HTTP)', () => {
+  it('pairs the two legs independent of input order and keeps the outbound fields', () => {
+    const [outbound, inbound] = ownTransferLegs({
+      paymentId: 'payment-1',
+      convertedAmount: '5.25',
+      accounting: { provider: 'fortnox', status: 'pushed', externalRef: 'ref', error: null },
+    })
+
+    for (const rows of [[outbound, inbound], [inbound, outbound]]) {
+      const result = foldOwnAccountTransfers(rows, ownAccounts)
+      expect(result).toHaveLength(1)
+      expect(result[0]).toMatchObject({
+        accountId: 'account-a',
+        direction: 'out',
+        initiatedBy: 'human',
+        paymentId: 'payment-1',
+        convertedAmount: '5.25',
+        accounting: { provider: 'fortnox', status: 'pushed' },
+        ownTransfer: {
+          toAccountId: 'account-b',
+          toAccountName: 'Savings',
+          toAccountAddress: ACCOUNT_B,
+        },
+      })
+    }
+  })
+
+  it('pairs a multiset one-for-one without consuming an unrelated transfer', () => {
+    const [outOne, inOne] = ownTransferLegs({ hash: '0xone', value: '1' })
+    const [outTwo, inTwo] = ownTransferLegs({ hash: '0xtwo', value: '2' })
+    const unrelated = enriched({ hash: '0xforeign', from: ACCOUNT_A, to: FOREIGN })
+
+    const result = foldOwnAccountTransfers(
+      [inTwo, unrelated, outOne, inOne, outTwo],
+      ownAccounts,
+    )
+    expect(result).toHaveLength(3)
+    expect(result.filter((row) => row.ownTransfer)).toHaveLength(2)
+    expect(result).toContain(unrelated)
+  })
+
+  it.each([
+    ['agent-initiated', { agentId: 'agent-1', initiatedBy: 'agent' as const }, ownAccounts],
+    ['failed enrichment', { initiatedBy: undefined }, ownAccounts],
+    ['foreign destination', { to: FOREIGN }, ownAccounts],
+    [
+      'destination owned by another user',
+      {},
+      [ownAccounts[0]],
+    ],
+    [
+      'same address on another chain',
+      {},
+      [ownAccounts[0], { ...ownAccounts[1], chain_id: 100 }],
+    ],
+  ])('does not fold %s', (_label, overrides, accounts) => {
+    const legs = ownTransferLegs(overrides as Partial<EnrichedTransaction>)
+    expect(foldOwnAccountTransfers(legs, accounts as SmartAccountRow[])).toEqual(legs)
+  })
+
+  it('does not fold a self-send or a missing leg', () => {
+    const self = ownTransferLegs({ from: ACCOUNT_A, to: ACCOUNT_A }).map((leg) => ({
+      ...leg,
+      accountId: 'account-a',
+      accountAddress: ACCOUNT_A,
+      accountName: 'Main account',
+    }))
+    expect(foldOwnAccountTransfers(self, ownAccounts)).toEqual(self)
+
+    const [outbound] = ownTransferLegs()
+    expect(foldOwnAccountTransfers([outbound], ownAccounts)).toEqual([outbound])
+  })
+
+  it('uses the unnamed-account fallback for an empty destination name', () => {
+    const result = foldOwnAccountTransfers(ownTransferLegs(), [
+      ownAccounts[0],
+      { ...ownAccounts[1], name: '' },
+    ])
+    expect(result[0].ownTransfer?.toAccountName).toBe('Unnamed account')
+  })
+
+  it('folds before paging, so adjacent pages neither repeat nor skip the move', () => {
+    const [outbound, inbound] = ownTransferLegs()
+    const before = enriched({ hash: '0xbefore' })
+    const after = enriched({ hash: '0xafter' })
+    const folded = foldOwnAccountTransfers([before, outbound, inbound, after], ownAccounts)
+
+    expect(paginateByOffset(folded, 0, 2).page).toEqual([
+      before,
+      expect.objectContaining({ ownTransfer: expect.any(Object) }),
+    ])
+    expect(paginateByOffset(folded, 2, 2).page).toEqual([after])
+  })
+})
 
 describe('filterEnrichedTransactions (module internals, no HTTP)', () => {
   it('agentId=user selects unattributed OUTBOUND transactions only', () => {
@@ -76,6 +216,24 @@ describe('filterEnrichedTransactions (module internals, no HTTP)', () => {
     const a = enriched({ hash: '0x1' })
     const b = enriched({ hash: '0x2' })
     expect(filterEnrichedTransactions([a, b], {})).toEqual([a, b])
+  })
+
+  it('treats a folded move as neither inbound nor outbound, but includes it for agentId=user', () => {
+    const [outbound, inbound] = ownTransferLegs()
+    const [move] = foldOwnAccountTransfers([outbound, inbound], ownAccounts)
+
+    expect(filterEnrichedTransactions([move], { direction: 'in' })).toEqual([])
+    expect(filterEnrichedTransactions([move], { direction: 'out' })).toEqual([])
+    expect(filterEnrichedTransactions([move], { agentId: 'user' })).toEqual([move])
+  })
+
+  it('searches both account names on a folded move', () => {
+    const [outbound, inbound] = ownTransferLegs()
+    const [move] = foldOwnAccountTransfers([outbound, inbound], ownAccounts)
+
+    expect(filterEnrichedTransactions([move], { search: 'main account' })).toEqual([move])
+    expect(filterEnrichedTransactions([move], { search: 'savings' })).toEqual([move])
+    expect(filterEnrichedTransactions([move], { search: 'merchant' })).toEqual([])
   })
 })
 

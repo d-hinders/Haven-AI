@@ -21,19 +21,19 @@
  * - `/design-system` renders `Address` and `WalletIdentityBlock` triggers as
  *   bare text in ordinary containers — standalone, so a tap must open them.
  *   These are the triggers that were mouse-only before this change.
- * - `/agents` renders `McpServerName` inside `AgentCard`, alongside the
- *   actual agent-name link. The recorded server name is now a standalone
- *   elaboration trigger, so its tap should open the tooltip without affecting
- *   card navigation.
+ * - `/agents/<id>` renders `McpServerName` on the agent detail page's MCP
+ *   server name row (#4209 moved it there from the `/agents` card). The
+ *   recorded server name is a standalone elaboration trigger, so a tap must
+ *   open its tooltip.
  *
- * ## The card trigger changed in #2043 and #3550
+ * ## The trigger changed in #2043, #3550 and #4209
  *
  * It used to be the `not recorded` label and its 169-character explanation.
  * **That tooltip is gone**: the copy was essential rather than elaboration —
  * it explains an absence, and its whole job is to stop a user concluding the
  * agent is broken — so a trigger this primitive can never make reachable was
- * the wrong home for it. It is visible text above the agent list now (#2043,
- * following #2017), and the card shows the bare label.
+ * the wrong home for it. It became visible text (#2043, following #2017) —
+ * above the agent list until #4209, beside the label on the detail page now.
  *
  * The RECORDED name's `MCP servers: … and …` tooltip remains because it
  * elaborates a value already on screen next to a sibling `CopyButton`. #3550
@@ -55,7 +55,7 @@ const SAMPLE_ADDRESS = '0x8f4F0f6d712C5c5C9Bb02F4a5B5c0D7F462A6f4C'
 const SAMPLE_TRUNCATED = '0x8f4F…6f4C'
 
 /**
- * The live agent-card MCP label, from `McpServerName`'s RECORDED branch —
+ * The agent page's MCP label, from `McpServerName`'s RECORDED branch —
  * `testAgent` carries no `mcp_server_name`, so the name is served by the
  * per-test route override below and the label is built with the component's
  * own pair rule rather than pasted.
@@ -93,7 +93,8 @@ test.describe('Tooltip on touch (#2038)', () => {
   })
 
   test('a tap on the recorded server name opens its tooltip', async ({ page }) => {
-    // Registered after `mockHavenApi`, so this handler wins for `/agents`.
+    // Registered after `mockHavenApi`, so this handler wins for `/agents` —
+    // the LIST read the detail page resolves its agent from.
     await page.route('**/api/agents', async (route) => {
       await route.fulfill({
         status: 200,
@@ -104,10 +105,14 @@ test.describe('Tooltip on touch (#2038)', () => {
       })
     })
 
-    await page.goto('/agents')
+    // #4226 moved the Identity-and-settings card behind the Settings tab, so
+    // the row only exists in the DOM there — the tab is part of the contract.
+    await page.goto(`/agents/${testAgent.id}?tab=settings`)
     await dismissMobileSidebar(page)
 
-    const trigger = page.getByText(CARD_SERVER_NAME).first()
+    const row = page.getByTestId('mcp-server-name-row')
+    await expect(row).toHaveCount(1)
+    const trigger = row.getByText(CARD_SERVER_NAME)
     await expect(trigger).toBeVisible()
 
     // The standalone wrapper's tab stop is the reachability contract, not a

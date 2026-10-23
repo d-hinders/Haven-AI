@@ -5,7 +5,7 @@ import {
   expectNoHorizontalOverflow,
   measureDialogOverflow,
   mockHavenApi,
-  openReceiveFundsModal,
+  openReceiveDialog,
   seedAuthenticatedSession,
   testSafeAddress,
   unexpectedBrowserErrors,
@@ -24,11 +24,16 @@ test.describe('dashboard browser UX', () => {
     // screen is not viewport-dependent, so a second copy would only let the
     // two drift. The MEASUREMENT below stays written out here; see the
     // helper's JSDoc for why that split is deliberate.
-    const modal = await openReceiveFundsModal(page)
+    const modal = await openReceiveDialog(page)
     await expect(modal).toBeVisible()
-    await expect(modal.getByText('Operations')).toBeVisible()
-    await expect(modal.getByText('Base', { exact: true })).toBeVisible()
+    // #4167: one account, so the dialog renders NO account card — the
+    // account and network context come from the inline QR's alt text and the
+    // one network rule, not from a card restating them.
     await expect(modal.getByText(testSafeAddress)).toBeVisible()
+    await expect(modal.getByAltText('QR code for Operations on Base')).toBeVisible()
+    await expect(
+      modal.getByText('Send USDC on Base only. It arrives in about a minute and shows in Activity.'),
+    ).toBeVisible()
     // Measures the dashboard BEHIND the modal, not the modal. A fixed-position
     // overlay contributes to neither scroll box — see the blind spot noted on
     // `expectNoHorizontalOverflow` (#1771), measured rather than assumed.

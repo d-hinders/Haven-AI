@@ -76,6 +76,64 @@ export const testUserSek = {
   currency_preference: 'SEK',
 } as const
 
+/**
+ * The currency preference of the user this page's fixture session is serving
+ * (#4166). The backend strikes serve-time amounts (`approxAmount`) in the
+ * user's `currency_preference`, but the fixture pinned `approxCurrency:
+ * 'SEK'` onto rows served to the `currency_preference: 'USD'` session — so
+ * every USD page photographed rows in kr (the
+ * `balance-freshness-account-detail-desktop.png` defect). The auth handlers
+ * set this from the user they answer (`mockHavenApi` → `testUser`, the SEK
+ * overlay → `testUserSek`), and the row builders below strike at serve time.
+ * Set at fixture-registration time, which is per-page: Playwright workers run
+ * tests sequentially, so the value never races.
+ */
+let servedCurrencyPreference: 'USD' | 'EUR' | 'SEK' = 'USD'
+
+/**
+ * The fixture's rate story (#3824): 1 USDC ≈ $1 (the USD peg — `totals.usd`
+ * prices USDC at par), ≈ €0.92, ≈ 10.76 kr (the same story `totals.sek`
+ * tells). Serve-time amounts are struck from the token amount with the
+ * served user's rate.
+ */
+const FIXTURE_USDC_RATES: Record<'USD' | 'EUR' | 'SEK', number> = {
+  USD: 1,
+  EUR: 0.92,
+  SEK: 10.76,
+}
+
+/**
+ * A fixture row's serve-time fields (#3824), struck in the SERVED user's
+ * currency (#4166) — the backend's documented behaviour the fixture used to
+ * contradict. `usdcBase` is the token amount the row's story prices.
+ */
+function serveTimeApprox(usdcBase: number): {
+  approxAmount: string
+  approxCurrency: 'USD' | 'EUR' | 'SEK'
+} {
+  return {
+    approxAmount: (usdcBase * FIXTURE_USDC_RATES[servedCurrencyPreference]).toFixed(4),
+    approxCurrency: servedCurrencyPreference,
+  }
+}
+
+/** `serveTimeApprox` for the agent-activity wire's snake_case row (#4166). */
+function serveTimeApproxSnake(usdcBase: number): {
+  approx_amount: string
+  approx_currency: 'USD' | 'EUR' | 'SEK'
+} {
+  const strike = serveTimeApprox(usdcBase)
+  return { approx_amount: strike.approxAmount, approx_currency: strike.approxCurrency }
+}
+
+/** Re-strike a camelCase row's serve-time fields in the served currency. */
+function withServedApprox<T extends object>(
+  row: T,
+  usdcBase: number,
+): T & { approxAmount: string; approxCurrency: 'USD' | 'EUR' | 'SEK' } {
+  return { ...row, ...serveTimeApprox(usdcBase) }
+}
+
 export const testAgent = {
   id: 'agent-e2e',
   name: 'Research agent',
@@ -125,15 +183,128 @@ export const testAgent = {
       reset_period_min: 43_200,
     },
   ],
+  // #3988: the received-grant data rides on every Agent read now. The
+  // Research agent holds an open grant from the Watcher agent (the same
+  // direction the dashboard fixture states), but its OWN budget is positive,
+  // so the card still renders its allowance rows — the received line only
+  // takes over for a holder with no (or zero-capped) own budgets.
+  receivedSubBudgets: [
+    { parent_agent_id: 'agent-e2e-watcher', parent_agent_name: 'Watcher agent', open: true },
+  ],
 }
+
+/**
+ * #3988: a grant HOLDER — no budget of its own, an open received sub-budget
+ * from the Research agent. The state the /agents card used to read "No
+ * budget" for. Specs opt in by seeding it (`seedAgents`) or routing its id;
+ * the shared `GET /agents` answer keeps returning only `testAgent`, so the
+ * resting agent-panel captures stay untouched.
+ */
+export const grantHolderAgent = {
+  ...testAgent,
+  id: 'agent-e2e-grantholder',
+  name: 'Grant holder agent',
+  description: 'Spends through a budget another agent granted it.',
+  allowances: [],
+  receivedSubBudgets: [
+    { parent_agent_id: testAgent.id, parent_agent_name: testAgent.name, open: true },
+  ],
+}
+
+/**
+ * #3988: the tree the fixture DELEGATOR issues to the grant holder — the
+ * issuer-side "Sub-agent budgets" section of the same card, so both sides of
+ * the table photograph. Returned ONLY for `subBudgetTreeAgent.id`; every
+ * other agent keeps the empty `trees: []` the card renders nothing for.
+ */
+export const subBudgetTreeAgent = {
+  ...testAgent,
+  id: 'agent-e2e-delegator',
+  name: 'Delegating agent',
+}
+
+export const subBudgetTreeFixture = [
+  {
+    parent_child_sub_budget: {
+      id: 'tree-e2e-parent-child',
+      agent_id: subBudgetTreeAgent.id,
+      parent_agent_id: subBudgetTreeAgent.id,
+      parent_sub_budget_id: null,
+      chain_id: 84532,
+      token_address: '0xddafbb505ad214d7b80b1f830fccc89b60fb7a83',
+      recipient_address: null,
+      parent_delegation_hash: `0x${'4d'.repeat(32)}`,
+      delegation_hash: `0x${'51'.repeat(32)}`,
+      label: null,
+      period_amount_atomic: '100000000',
+      status: 'open',
+      expires_at: Math.floor(Date.UTC(2027, 4, 2) / 1000),
+      is_expired: false,
+      is_live: true,
+      created_at: '2026-09-01T10:00:00.000Z',
+      opened_at: '2026-09-01T10:00:00.000Z',
+      closed_at: null,
+      close_tx_hash: null,
+    },
+    grants: [
+      {
+        id: 'tree-e2e-grant',
+        agent_id: grantHolderAgent.id,
+        parent_agent_id: subBudgetTreeAgent.id,
+        parent_sub_budget_id: 'tree-e2e-parent-child',
+        chain_id: 84532,
+        token_address: '0xddafbb505ad214d7b80b1f830fccc89b60fb7a83',
+        recipient_address: null,
+        parent_delegation_hash: `0x${'51'.repeat(32)}`,
+        delegation_hash: `0x${'52'.repeat(32)}`,
+        label: null,
+        period_amount_atomic: '25000000',
+        status: 'open',
+        expires_at: Math.floor(Date.UTC(2027, 4, 2) / 1000),
+        is_expired: false,
+        is_live: true,
+        created_at: '2026-09-01T10:00:00.000Z',
+        opened_at: '2026-09-01T10:00:00.000Z',
+        closed_at: null,
+        close_tx_hash: null,
+      },
+    ],
+  },
+]
+
+/** #3988: the grants the fixture grant holder RECEIVES (`parent_agent_name` joined). */
+export const receivedGrantsFixture = [
+  {
+    id: 'received-e2e-grant',
+    agent_id: grantHolderAgent.id,
+    parent_agent_id: testAgent.id,
+    parent_agent_name: testAgent.name,
+    parent_sub_budget_id: 'tree-e2e-parent-child',
+    chain_id: 84532,
+    token_address: '0xddafbb505ad214d7b80b1f830fccc89b60fb7a83',
+    recipient_address: null,
+    parent_delegation_hash: `0x${'51'.repeat(32)}`,
+    delegation_hash: `0x${'53'.repeat(32)}`,
+    label: null,
+    period_amount_atomic: '25000000',
+    status: 'open',
+    expires_at: Math.floor(Date.UTC(2027, 4, 2) / 1000),
+    is_expired: false,
+    is_live: true,
+    created_at: '2026-09-01T10:00:00.000Z',
+    opened_at: '2026-09-01T10:00:00.000Z',
+    closed_at: null,
+    close_tx_hash: null,
+  },
+]
 
 export const dashboardTransaction = {
   hash: `0x${'ab'.repeat(32)}`,
-  // #3763: the two EIP-3009 legs, named. `hash` stays the FUNDING hash; the
-  // recorded settlement — the transaction the MERCHANT names — headlines the
-  // drawer's On-chain section and the table link. Visible text: the drawer
-  // renders "Merchant settlement (reported by the agent or detected
-  // on-chain, verified)" + "Funding from your account" on this row.
+  // #3763: the two EIP-3009 legs, named. `hash` stays the FUNDING hash — the
+  // transaction that left the account, which the drawer's footer links
+  // (#4267); the recorded settlement — the transaction the MERCHANT names —
+  // has its own "Settlement transaction" row under Technical details, and the
+  // drawer's Details read "Settlement: Recorded (verified)".
   fundingTxHash: `0x${'ab'.repeat(32)}`,
   settlementTxHash: `0x${'22'.repeat(32)}`,
   settlementScheme: 'eip3009' as const,
@@ -142,12 +313,14 @@ export const dashboardTransaction = {
   to: testRecipientAddress,
   value: '12500000',
   valueFormatted: '12.50',
-  // #3824: the serve-time amount for a row without book-time fiat — today's
-  // rate (~10.76 SEK/USD, the same story `totals.sek` tells) in the served
-  // default currency. `convertedAmount` stays absent on this row: the two
-  // provenances never ride together.
-  approxAmount: '134.5000',
-  approxCurrency: 'SEK' as const,
+  // #3824: the serve-time amount for a row without book-time fiat — struck
+  // in the SERVED user's currency (#4166): the USD session this fixture
+  // serves by default prices 12.50 USDC at par, the SEK overlay at the
+  // fixture's ~10.76 kr/USD story (the same story `totals.sek` tells).
+  // `convertedAmount` stays absent on this row: the two provenances never
+  // ride together. The `/transactions` handler re-strikes per served user.
+  approxAmount: '12.5000',
+  approxCurrency: 'USD' as const,
   asset: 'USDC',
   decimals: 6,
   direction: 'out' as const,
@@ -168,7 +341,7 @@ export const dashboardTransaction = {
   // #2870: the payment-intent id the accounting badge is keyed on, and the
   // badge's own object. Carried on the row itself so the fixture-shape parity
   // test (`fixture-shape-parity.test.ts`) sees the same keys the screenshot
-  // dataset has. Rendered only by `/transactions` (table + drawer); the
+  // dataset has. Rendered only by `/transactions` (ledger row + drawer); the
   // dashboard's recent-transactions preview reads neither key, so its
   // baseline is unchanged.
   paymentId: 'pay-research-1',
@@ -182,9 +355,9 @@ export const dashboardTransaction = {
 
 /**
  * #3763: the OTHER eip3009 state — a synthesized x402 payment with NO
- * recorded settlement. The drawer reads "Merchant settlement / Not recorded"
- * (never a promise of a later record) and links the funding leg labelled as
- * the funding leg. Served as the SECOND `/transactions` row so the
+ * recorded settlement. The drawer reads "Settlement: Not recorded yet" with
+ * what the record proves (never a promise the merchant confirmed it), and
+ * links the funding leg as the account's transaction (#4267). Served as the SECOND `/transactions` row so the
  * regenerated baselines photograph both states' rows; every other route that
  * serves `dashboardTransaction` alone is unchanged.
  */
@@ -198,9 +371,10 @@ export const x402UnrecordedSettlementTransaction = {
   to: testRecipientAddress,
   value: '1000000',
   valueFormatted: '1.00',
-  // #3824: serve-time amount, same rule and rate story as `dashboardTransaction`.
-  approxAmount: '10.7600',
-  approxCurrency: 'SEK' as const,
+  // #3824: serve-time amount, same rule and rate story as `dashboardTransaction`
+  // — struck per served user (#4166); the const carries the USD strike.
+  approxAmount: '1.0000',
+  approxCurrency: 'USD' as const,
   asset: 'USDC',
   decimals: 6,
   direction: 'out' as const,
@@ -226,6 +400,149 @@ export const x402UnrecordedSettlementTransaction = {
   paymentFlowStatus: 'confirming_merchant',
   paymentAttentionReason: null,
   initiatedBy: 'agent' as const,
+}
+
+/**
+ * #4312: the states the shared feed never serves — a deposit, a delegate
+ * sweep, a failed payment and a row on a chain the registry does not know —
+ * plus the overlay that serves them. The detail-panel polish spec
+ * (transactions-detail-polish.spec.ts) measures geometry A–E on panels the
+ * default fixture cannot open; the overlay registers AFTER `mockHavenApi`
+ * (later routes win) and replaces ONLY `GET /transactions`.
+ */
+export const depositTransaction = {
+  hash: `0x${'bd'.repeat(32)}`,
+  type: 'erc20' as const,
+  // An unnamed outside sender: the one-line header case (kindLabel === title,
+  // "Deposit"), which is what criterion A measures.
+  from: '0x7777777777777777777777777777777777777777',
+  to: testSafeAddress,
+  value: '5000000',
+  valueFormatted: '5.00',
+  // Serve-time strike in the served session's currency (the #3824/#4166
+  // convention); these rows are only served to the default USD session.
+  approxAmount: '5.0000',
+  approxCurrency: 'USD' as const,
+  asset: 'USDC',
+  decimals: 6,
+  direction: 'in' as const,
+  timestamp: 1_778_800_000,
+  blockNumber: 42,
+  isError: false,
+  tokenAddress: '0xddafbb505ad214d7b80b1f830fccc89b60fb7a83',
+  tokenSymbol: 'USDC',
+  chainId: 8453,
+  accountId: testSafe.id,
+  accountAddress: testSafeAddress,
+  accountName: testSafe.name,
+}
+
+export const sweepTransaction = {
+  hash: `0x${'71'.repeat(32)}`,
+  type: 'erc20' as const,
+  // The delegate's wallet is the source of a returned allowance.
+  from: '0x3333333333333333333333333333333333333333',
+  to: testSafeAddress,
+  value: '2000000',
+  valueFormatted: '2.00',
+  approxAmount: '2.0000',
+  approxCurrency: 'USD' as const,
+  asset: 'USDC',
+  decimals: 6,
+  direction: 'in' as const,
+  activityType: 'delegate_sweep' as const,
+  agentName: 'Atlas',
+  timestamp: 1_778_700_000,
+  blockNumber: 41,
+  isError: false,
+  tokenAddress: '0xddafbb505ad214d7b80b1f830fccc89b60fb7a83',
+  tokenSymbol: 'USDC',
+  chainId: 8453,
+  accountId: testSafe.id,
+  accountAddress: testSafeAddress,
+  accountName: testSafe.name,
+}
+
+export const failedTransaction = {
+  hash: `0x${'f0'.repeat(32)}`,
+  type: 'erc20' as const,
+  from: testSafeAddress,
+  to: '0x8888888888888888888888888888888888888888',
+  value: '500000',
+  valueFormatted: '0.50',
+  approxAmount: '0.5000',
+  approxCurrency: 'USD' as const,
+  asset: 'USDC',
+  decimals: 6,
+  direction: 'out' as const,
+  // A recorded owner attempt that failed on-chain: the headline keeps its
+  // sign ("-$0.50", #4312 F) in the danger tone, beside the Failed badge and
+  // the on-chain callout.
+  initiatedBy: 'human' as const,
+  isError: true,
+  timestamp: 1_778_600_000,
+  blockNumber: 40,
+  tokenAddress: '0xddafbb505ad214d7b80b1f830fccc89b60fb7a83',
+  tokenSymbol: 'USDC',
+  chainId: 8453,
+  accountId: testSafe.id,
+  accountAddress: testSafeAddress,
+  accountName: testSafe.name,
+}
+
+export const unknownChainTransaction = {
+  hash: `0x${'97'.repeat(32)}`,
+  type: 'erc20' as const,
+  from: testSafeAddress,
+  to: '0x8888888888888888888888888888888888888888',
+  value: '2500000',
+  valueFormatted: '2.50',
+  approxAmount: '2.5000',
+  approxCurrency: 'USD' as const,
+  asset: 'USDC',
+  decimals: 6,
+  direction: 'out' as const,
+  isError: false,
+  timestamp: 1_778_500_000,
+  blockNumber: 39,
+  // 999999 is in no registry: every Technical details row keeps its copy
+  // button and drops its explorer link (criterion D's unknown-chain panel).
+  chainId: 999_999,
+  accountId: testSafe.id,
+  accountAddress: testSafeAddress,
+  accountName: testSafe.name,
+  paymentId: 'pay-unknown-chain-1',
+  // A supplied value is only the fallback where the chain has no explorer;
+  // null hides the footer outright for this panel.
+  explorerUrl: null,
+}
+
+/**
+ * Overlay `GET /transactions` with a bespoke row list (#4312). Register AFTER
+ * `mockHavenApi` (later routes win); every other read falls through to the
+ * shared fixture untouched.
+ */
+export async function serveTransactions(page: Page, transactions: unknown[]) {
+  await page.route('**/api/**', async (route) => {
+    const request = route.request()
+    const path = new URL(request.url()).pathname.replace(/^\/api/, '')
+    if (request.method() === 'GET' && path === '/transactions') {
+      await route.fulfill({
+        json: {
+          transactions,
+          total: transactions.length,
+          offset: 0,
+          limit: 25,
+          hasMore: false,
+          partialFailure: false,
+          failedAccountIds: [],
+          truncated: false,
+        },
+      })
+      return
+    }
+    await route.fallback()
+  })
 }
 
 const balances = [
@@ -332,6 +649,10 @@ export const dashboardOverview = {
       gross: { usd: 74.0, eur: 67.34, sek: 796.4 },
       net: { usd: 48.1, eur: 43.77, sek: 517.66 },
       approx: true,
+      // #4165: what the server now sends for re-priced USDC — dollars in USD
+      // (no ≈), converted in EUR and SEK.
+      approxByCurrency: { usd: false, eur: true, sek: true },
+      unpricedByCurrency: { usd: false, eur: false, sek: false },
       payments: 21,
       distinctMerchants: 5,
       budgetStops: 3,
@@ -408,6 +729,8 @@ export const dashboardOverview = {
           gross: { usd: 50.0, eur: 45.5, sek: 538.0 },
           net: { usd: 32.5, eur: 29.58, sek: 349.7 },
           approx: true,
+          approxByCurrency: { usd: false, eur: true, sek: true },
+          unpricedByCurrency: { usd: false, eur: false, sek: false },
           payments: 14,
           refusals: { budget: 2, scope: 1, failed: 1, haven: 0 },
         },
@@ -529,10 +852,20 @@ export const dashboardOverview = {
       activityType: null,
       direction: 'out' as const,
       status: 'confirmed' as const,
-      approxAmount: '134.5000',
-      approxCurrency: 'SEK' as const,
+      // #3824: the serve-time strike, per served user (#4166) — the handler
+      // re-strikes; the const carries the USD session's figures.
+      approxAmount: '12.5000',
+      approxCurrency: 'USD' as const,
     },
   ],
+  // #3944: the two empty-state facts. The fixture renders activity rows, so
+  // `hasOlderActivity` is false; `activityWindowDays` mirrors the backend's
+  // ACTIVITY_WINDOW_DAYS. `activityWindowStart` (#3975) is the rolling
+  // window's start instant — 7×24h before the row's timestamp, so the rows
+  // sit inside it and no heading reads partial.
+  hasOlderActivity: false,
+  activityWindowDays: 7,
+  activityWindowStart: new Date((1_779_000_000 - 7 * 86_400) * 1000).toISOString(),
 }
 
 /**
@@ -801,16 +1134,19 @@ export async function mockHavenApi(page: Page) {
     const method = request.method()
 
     if (method === 'POST' && path === '/auth/login') {
+      servedCurrencyPreference = testUser.currency_preference as 'USD' | 'EUR' | 'SEK'
       await fulfillJson(route, { token: 'e2e-token', user: testUser })
       return
     }
 
     if (method === 'POST' && path === '/auth/signup') {
+      servedCurrencyPreference = testUser.currency_preference as 'USD' | 'EUR' | 'SEK'
       await fulfillJson(route, { token: 'e2e-token', user: testUser })
       return
     }
 
     if (method === 'GET' && path === '/auth/me') {
+      servedCurrencyPreference = testUser.currency_preference as 'USD' | 'EUR' | 'SEK'
       await fulfillJson(route, testUser)
       return
     }
@@ -821,7 +1157,12 @@ export async function mockHavenApi(page: Page) {
     }
 
     if (method === 'GET' && path === '/dashboard/overview') {
-      await fulfillJson(route, dashboardOverview)
+      await fulfillJson(route, {
+        ...dashboardOverview,
+        // #4166: the grouped-activity rows' serve-time strike follows the
+        // served user's currency, like every other approx-valued row.
+        activity: dashboardOverview.activity.map((group) => withServedApprox(group, 12.5)),
+      })
       return
     }
 
@@ -1029,6 +1370,11 @@ export async function mockHavenApi(page: Page) {
             sekValue: 13450,
           },
         ],
+        // #4021: the card footer's "Last payment {relative}". Pinned to
+        // `testSafe.created_at` so the frozen clock produces the same
+        // "4mo ago" the old caption did — a capture must not drift on a
+        // calendar boundary.
+        lastOutgoingAt: '2026-05-01T10:00:00.000Z',
       })
       return
     }
@@ -1061,7 +1407,11 @@ export async function mockHavenApi(page: Page) {
     // visible changes for both.
     if (method === 'GET' && path === '/transactions') {
       await fulfillJson(route, {
-        transactions: [dashboardTransaction, x402UnrecordedSettlementTransaction],
+        // #4166: the serve-time strike follows the served user's currency.
+        transactions: [
+          withServedApprox(dashboardTransaction, 12.5),
+          withServedApprox(x402UnrecordedSettlementTransaction, 1),
+        ],
         total: 2,
         offset: 0,
         limit: 25,
@@ -1077,7 +1427,8 @@ export async function mockHavenApi(page: Page) {
 
     if (method === 'GET' && path.startsWith('/transactions/')) {
       await fulfillJson(route, {
-        transactions: [dashboardTransaction],
+        // #4166: the serve-time strike follows the served user's currency.
+        transactions: [withServedApprox(dashboardTransaction, 12.5)],
         total: 1,
         page: 1,
         limit: 10,
@@ -1104,14 +1455,26 @@ export async function mockHavenApi(page: Page) {
       await fulfillJson(route, { task_budgets: [] })
       return
     }
-    // #3330: the budget card also reads the sub-budget trees the agent ISSUES
-    // (`useSubBudgetTrees`). No fixture agent has issued one, so every agent
-    // gets the empty list the API returns in that state (`useSubBudgetTrees`
-    // tolerates the absent `unattached` key) — the card renders unchanged, and
-    // the read is no longer an "Unmocked API route" that
-    // `unexpectedBrowserErrors` fails the mobile agent-detail spec on.
+    // #3330/#3988: the budget card reads the sub-budget trees the agent ISSUES
+    // (`useSubBudgetTrees`) AND the grants the agent RECEIVES
+    // (`useReceivedSubBudgets`). The DELEGATING fixture agent gets its real
+    // tree so the issuer side of the card photographs; the grant holder gets
+    // its received list; every other agent gets the empty answers the card
+    // renders nothing for — the reads are no longer an "Unmocked API route"
+    // that `unexpectedBrowserErrors` fails the mobile agent-detail spec on.
     if (method === 'GET' && path.startsWith('/agents/') && path.endsWith('/sub-budgets/tree')) {
-      await fulfillJson(route, { trees: [] })
+      const issuerId = path.split('/')[2]
+      await fulfillJson(route, {
+        trees: issuerId === subBudgetTreeAgent.id ? subBudgetTreeFixture : [],
+      })
+      return
+    }
+    if (method === 'GET' && path.startsWith('/agents/') && path.endsWith('/sub-budgets/received')) {
+      const holderId = path.split('/')[2]
+      await fulfillJson(route, {
+        agent_id: holderId,
+        received: holderId === grantHolderAgent.id ? receivedGrantsFixture : [],
+      })
       return
     }
     if (method === 'GET' && path.startsWith('/agents/') && path.endsWith('/delegations')) {
@@ -1130,6 +1493,8 @@ export async function mockHavenApi(page: Page) {
               delegation_hash: `0x${'4d'.repeat(32)}`,
               version: 1,
               status: 'active',
+              // #3922: the server's budget-view liveness (active, unexpired).
+              is_live: true,
               budget_atomic: '250000000',
               period_seconds: 43_200 * 60,
               // #3806: the wire carries `start_date` as a Unix-seconds digit
@@ -1295,10 +1660,14 @@ export async function mockHavenApi(page: Page) {
  * Everything else falls through to the shared fixture untouched.
  */
 export async function serveSekUser(page: Page) {
+  // #4166: the SEK session's rows are struck in SEK — the served user's
+  // preference, per the auth answer below.
+  servedCurrencyPreference = testUserSek.currency_preference
   await page.route('**/api/**', async (route) => {
     const request = route.request()
     const path = new URL(request.url()).pathname.replace(/^\/api/, '')
     if (request.method() === 'GET' && path === '/auth/me') {
+      servedCurrencyPreference = testUserSek.currency_preference
       await fulfillJson(route, testUserSek)
       return
     }
@@ -1307,11 +1676,12 @@ export async function serveSekUser(page: Page) {
 }
 
 /**
- * Overlay `/auth/me` (and only it) with the Add-funds account (#3483).
+ * Overlay `/auth/me` (and only it) with the re-chained account (#3483, #4094).
  *
- * The Add funds modal's layout is a function of the SELECTED ACCOUNT's chain
- * (`AddFundsModal.tsx` #3478: faucet on a testnet account, onramp on a
- * mainnet one), but the shared `testSafe` is pinned to 8453 for every other
+ * The Receive dialog's layout is a function of the SELECTED ACCOUNT's chain
+ * (`ReceiveDialog.tsx`, the #3478 gate carried over: faucet on a testnet
+ * account, onramp on a mainnet one), but the shared `testSafe` is pinned to
+ * 8453 for every other
  * spec and baseline — so a spec that needs a different chain overlays
  * `/auth/me` with a one-field-splice of it rather than mutating the shared
  * object. The dashboard reads only `/auth/me` for the account list
@@ -1332,6 +1702,66 @@ export async function serveAddFundsAccount(page: Page, chainId?: number) {
     const path = new URL(request.url()).pathname.replace(/^\/api/, '')
     if (request.method() === 'GET' && path === '/auth/me') {
       await fulfillJson(route, { ...testUser, accounts: [account] })
+      return
+    }
+    await route.fallback()
+  })
+}
+
+/**
+ * Overlay `/auth/me` with TWO accounts and price them DIFFERENTLY (#4021) —
+ * the two-or-more-account grid baseline, and the #2225 rule that every
+ * account row carries distinct data so a baseline cannot pass with the same
+ * card painted twice. The second account derives from `testSafe` (one-field
+ * splices, never a mutation of the shared object), its address is its own,
+ * and `/portfolio/` for THAT address answers its own envelope; every other
+ * read falls through to the shared fixture. Register AFTER `mockHavenApi`
+ * (later routes win).
+ */
+export async function serveTwoAccounts(page: Page) {
+  const second = {
+    ...testSafe,
+    id: 'safe-second',
+    account_address: '0x4444444444444444444444444444444444444444',
+    name: 'Imported Safe',
+    is_default: false,
+    created_at: '2026-04-20T10:00:00.000Z',
+  }
+  const secondAddress = second.account_address.toLowerCase()
+  await page.route('**/api/**', async (route) => {
+    const request = route.request()
+    const path = new URL(request.url()).pathname.replace(/^\/api/, '')
+    if (request.method() === 'GET' && path === '/auth/me') {
+      await fulfillJson(route, { ...testUser, accounts: [testSafe, second] })
+      return
+    }
+    if (request.method() === 'GET' && path.toLowerCase() === `/portfolio/${secondAddress}`) {
+      await fulfillJson(route, {
+        totalUsd: 480,
+        totalEur: 438,
+        totalSek: 5165,
+        breakdown: [
+          {
+            symbol: 'USDC',
+            balance: '300000000',
+            formatted: '300.00',
+            usdValue: 300,
+            eurValue: 274,
+            sekValue: 3230,
+          },
+          {
+            symbol: 'ETH',
+            balance: '60000000000000000',
+            formatted: '0.06',
+            usdValue: 180,
+            eurValue: 164,
+            sekValue: 1935,
+          },
+        ],
+        // Distinct from the first account's: the grid baseline must show two
+        // different footers, not one card twice.
+        lastOutgoingAt: '2026-08-15T10:00:00.000Z',
+      })
       return
     }
     await route.fallback()
@@ -1435,8 +1865,11 @@ export async function serveOwnerOnlyHybridSigners(page: Page, ownerAddress: stri
  *  - an anchored passport (#1072), the richer of the two passport states;
  *  - one confirmed x402 payment and one read-only MCP tool call, so the
  *    activity table and the audit-trail panel both render content;
- *  - stats matching those rows, so the two StatBlocks do not read 0 beside a
- *    non-empty activity table.
+ *  - the dashboard-overview stats the Spending hero's Last 30 days reads
+ *    (#4260), told as ONE story with those rows (#4283): the payment is the
+ *    hero's last payment (same merchant host, same time, an amount inside the
+ *    30-day total), and the agent carries an MCP last-seen 80 minutes before
+ *    the harness clock, so the header reads "Last activity 1h ago".
  *  - the company-details read the #3426 toggle fires at mount, so the census
  *    above is not re-failed by it (see the handler below).
  *
@@ -1456,11 +1889,18 @@ export async function serveAgentDetailResponses(
     // a credential is revoked before its budget (`POST /revoke` flips status
     // only). No archived override: archiving needs no live budget.
     agentOverrides?: { status?: 'revoked' }
+    // #3988: pass an array to research a grant HOLDER — the agent's own
+    // allowances empty out and its received grants ride on the list read
+    // (the shared sub-budgets/received handler answers the detail fetch).
+    receivedSubBudgets?: Array<{ parent_agent_id: string; parent_agent_name: string; open: boolean }>
   } = {},
 ) {
   await page.route('**/api/**', async (route) => {
     const request = route.request()
     const path = new URL(request.url()).pathname.replace(/^\/api/, '')
+    // #4229: the kinded activity read is filterable — the fixture needs the
+    // query string, not just the path.
+    const activityQuery = new URL(request.url()).searchParams
     if (request.method() !== 'GET') return route.fallback()
 
     if (path === '/agents') {
@@ -1477,17 +1917,31 @@ export async function serveAgentDetailResponses(
             ...testAgent,
             id: agentId,
             created_at: '2026-05-02T10:00:00.000Z',
+            // #4283: the header's "Last activity" reads MCP last-seen; a
+            // server name with it keeps the Settings tab's Connection row
+            // coherent (AgentSettingsTab). 80 minutes before the harness clock (renders "1h ago").
+            mcp_server_name: 'haven-research',
+            mcp_last_seen_at: '2026-09-01T10:40:00.000Z',
             ...options.agentOverrides,
+            // #3988: a spec can research a grant HOLDER — no own budget, an
+            // open received grant (default: the ordinary budgeted agent).
+            // The spread keeps the literal under the `allowances: [` key the
+            // fixture-shape-parity test classifies it by.
             allowances: [
-              {
-                id: 'dlg-e2e-1',
-                agent_id: agentId,
-                token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
-                token_symbol: 'USDC',
-                allowance_amount: '250.000000',
-                reset_period_min: 10_080,
-              },
+              ...(options.receivedSubBudgets !== undefined
+                ? []
+                : [
+                    {
+                      id: 'dlg-e2e-1',
+                      agent_id: agentId,
+                      token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+                      token_symbol: 'USDC',
+                      allowance_amount: '250.000000',
+                      reset_period_min: 10_080,
+                    },
+                  ]),
             ],
+            receivedSubBudgets: options.receivedSubBudgets ?? [],
           },
         ],
       })
@@ -1549,6 +2003,7 @@ export async function serveAgentDetailResponses(
             delegation_hash: `0x${'4d'.repeat(32)}`,
             version: 1,
             status: 'active',
+            is_live: true,
             budget_atomic: '250000000',
             period_seconds: 604_800,
             // #3806: Unix-seconds digit string on the wire, never ISO.
@@ -1562,6 +2017,109 @@ export async function serveAgentDetailResponses(
     }
 
     if (path === `/agent-activity/${agentId}/activity`) {
+      // #4229: the kinded read is pageable and filterable, so the fixture
+      // honours kind, status and offset — a filtered capture never bakes in
+      // mixed or unfiltered rows. Omitting kind serves the legacy merged
+      // list, unchanged. (from/to/q/paymentId are not fixture inputs; the
+      // capture suite never passes them.)
+      const activityKind = activityQuery.get('kind')
+      if (activityKind) {
+        const activityStatus = activityQuery.get('status')
+        const activityOffset = Number(activityQuery.get('offset')) || 0
+        const paymentRow = {
+          type: 'payment',
+          id: 'pay-e2e-1',
+          agent_id: agentId,
+          agent_name: testAgent.name,
+          token: 'USDC',
+          token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+          amount_raw: '50000',
+          amount: '0.05',
+          // #3824: the serve-time amount at the served user's rate in their
+          // preference (#4166) — the USD session prices it at par. #4283: the
+          // hero's last payment (research.example, 2026-08-31T09:40Z), small
+          // enough to sit inside its 30-day total.
+          ...serveTimeApproxSnake(0.05),
+          to: testRecipientAddress,
+          reason: null,
+          status: 'confirmed',
+          tx_hash: `0x${'a1'.repeat(32)}`,
+          source: 'x402',
+          x402_resource_url: 'https://research.example/report',
+          x402_merchant_address: testRecipientAddress,
+          chain_id: testSafe.chain_id,
+          account_id: testSafe.id,
+          account_address: testSafeAddress,
+          account_name: testSafe.name,
+          explorer_url: `https://sepolia.basescan.org/tx/0x${'a1'.repeat(32)}`,
+          confirmed_at: '2026-08-31T09:40:00.000Z',
+          payment_proof_status: 'payment_confirmed',
+          payment_flow_status: 'confirming_merchant',
+          payment_attention_reason: null,
+          created_at: '2026-08-31T09:38:00.000Z',
+        }
+        const toolCallRow = {
+          type: 'mcp_tool_call',
+          id: 'call-e2e-1',
+          agent_id: agentId,
+          agent_name: testAgent.name,
+          tool_name: 'haven_pay_x402_quote',
+          payment_id: 'pay-e2e-1',
+          result_status: 'ok',
+          next_action: 'settle',
+          error_code: null,
+          status_code: 200,
+          created_at: '2026-08-31T09:37:00.000Z',
+        }
+        const refusalRow = {
+          // #4323: the refusal population — the fixture serves one refused
+          // attempt so the Refused facet's capture has a row to show. Atomic
+          // on the wire; the serve-time triple is the fixture's priced view.
+          type: 'refusal',
+          id: 'refusal-e2e-1',
+          created_at: '2026-08-31T09:36:00.000Z',
+          amount: '25000',
+          token_symbol: 'USDC',
+          chain_id: testSafe.chain_id,
+          merchant_to: testRecipientAddress,
+          resource_url: 'https://research.example/report',
+          reason: 'delegation_budget_exceeded',
+          attempts: 2,
+          approx_amount_usd: '0.0250',
+          approx_amount_eur: null,
+          approx_amount_sek: null,
+        }
+        const paymentStatuses = new Set(['sent', 'pending', 'failed', 'needs_attention'])
+        const rows: Array<Record<string, any>> =
+          activityKind === 'payments'
+            ? [paymentRow]
+            : activityKind === 'refusals'
+              ? [refusalRow]
+              : [toolCallRow]
+        const filtered = rows.filter((row) => {
+          if (!activityStatus) return true
+          if (activityKind === 'refusals') return activityStatus === 'refused'
+          if (activityKind === 'tool_calls') return row.result_status === activityStatus
+          if (!paymentStatuses.has(activityStatus)) return true
+          if (activityStatus === 'sent') return row.status === 'confirmed'
+          if (activityStatus === 'pending') return row.status === 'pending_signature' || row.status === 'submitted'
+          if (activityStatus === 'failed') return row.status === 'failed'
+          return row.payment_attention_reason != null
+        })
+        const page = filtered.slice(activityOffset)
+        const body: Record<string, unknown> = {
+          activity: page,
+          total: filtered.length,
+          hasMore: activityOffset + page.length < filtered.length,
+        }
+        // The summary-line count ignores the status filter (same contract as
+        // the route), so it is stable while the status selection flips.
+        if (activityKind === 'tool_calls') {
+          body.counts = { error: rows.filter((row) => row.result_status === 'error').length }
+        }
+        await fulfillJson(route, body)
+        return
+      }
       await fulfillJson(route, {
         activity: [
           {
@@ -1571,30 +2129,30 @@ export async function serveAgentDetailResponses(
             agent_name: testAgent.name,
             token: 'USDC',
             token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
-            amount_raw: '25000000',
-            amount: '25.00',
-            // #3824: the serve-time amount at today's rate in the user's
-            // preference — 25 USDC ≈ 269.00 SEK at the fixture's ~10.76
-            // SEK/USD story.
-            approx_amount: '269.0000',
-            approx_currency: 'SEK',
+            amount_raw: '50000',
+            amount: '0.05',
+            // #3824: the serve-time amount at the served user's rate in their
+            // preference (#4166) — the USD session prices it at par. #4283: the
+            // hero's last payment (research.example, 2026-08-31T09:40Z), small
+            // enough to sit inside its 30-day total.
+            ...serveTimeApproxSnake(0.05),
             to: testRecipientAddress,
             reason: null,
             status: 'confirmed',
             tx_hash: `0x${'a1'.repeat(32)}`,
             source: 'x402',
-            x402_resource_url: 'https://api.example.dev/reports',
+            x402_resource_url: 'https://research.example/report',
             x402_merchant_address: testRecipientAddress,
             chain_id: testSafe.chain_id,
             account_id: testSafe.id,
             account_address: testSafeAddress,
             account_name: testSafe.name,
             explorer_url: `https://sepolia.basescan.org/tx/0x${'a1'.repeat(32)}`,
-            confirmed_at: '2026-07-10T08:20:00.000Z',
+            confirmed_at: '2026-08-31T09:40:00.000Z',
             payment_proof_status: 'payment_confirmed',
             payment_flow_status: 'confirming_merchant',
             payment_attention_reason: null,
-            created_at: '2026-07-10T08:18:00.000Z',
+            created_at: '2026-08-31T09:38:00.000Z',
           },
           {
             type: 'mcp_tool_call',
@@ -1607,7 +2165,7 @@ export async function serveAgentDetailResponses(
             next_action: 'settle',
             error_code: null,
             status_code: 200,
-            created_at: '2026-07-10T08:17:00.000Z',
+            created_at: '2026-08-31T09:37:00.000Z',
           },
         ],
       })
@@ -1616,9 +2174,8 @@ export async function serveAgentDetailResponses(
 
     if (path === `/agent-activity/${agentId}/stats`) {
       await fulfillJson(route, {
-        all_time: [{ token: 'USDC', total_spent: '25.00', tx_count: 1 }],
+        all_time: [{ token: 'USDC', total_spent: '0.05', tx_count: 1 }],
         today: [{ token: 'USDC', total_spent: '0.00', tx_count: 0 }],
-        this_week: [{ token: 'USDC', total_spent: '25.00', tx_count: 1 }],
         pending_approvals: 0,
       })
       return
@@ -1644,6 +2201,42 @@ export async function serveAgentDetailResponses(
     // forms and the shared fixture's 404 hides the card — keeps its state.
     if (path === '/user/company-details') {
       await fulfillJson(route, null)
+      return
+    }
+
+    // #4260: the agent Spending hero's right half (Last 30 days) renders
+    // only from the overview's per-agent stats, and the shared overview
+    // lists no researched agent — so no capture showed it. Served HERE and
+    // not in the shared `dashboardOverview`, whose agents list every
+    // dashboard baseline photographs. Ages are pinned against the visual
+    // harness's frozen clock (2026-09-01T12:00Z): "1d ago".
+    if (path === '/dashboard/overview') {
+      await fulfillJson(route, {
+        ...dashboardOverview,
+        activity: dashboardOverview.activity.map((group) => withServedApprox(group, 12.5)),
+        // A spec that researches a shared-overview agent (`agent-e2e`) keeps
+        // one row per id: the researched agent replaces, never duplicates.
+        agents: [
+          ...dashboardOverview.agents.filter((agent) => agent.id !== agentId),
+          {
+            ...dashboardOverview.agents[0],
+            id: agentId,
+            stats: {
+              ...dashboardOverview.agents[0].stats,
+              d30: {
+                ...dashboardOverview.agents[0].stats.d30,
+                // #4274: gross and net differ, so the refreshed
+                // agent-detail-research-* baseline proves the hero reads the
+                // net window (1.05), not the gross one (1.42) it used to.
+                gross: { usd: 1.42, eur: 1.29, sek: 15.28 },
+                net: { usd: 1.05, eur: 0.95, sek: 11.3 },
+                payments: 48,
+              },
+              lastPaymentAt: '2026-08-31T09:40:00.000Z',
+            },
+          },
+        ],
+      })
       return
     }
 
@@ -1709,72 +2302,27 @@ export async function dismissMobileSidebar(page: Page) {
   if (!viewport || viewport.width >= 1024) return
 
   /**
-   * #2902: decide from GEOMETRY, not from the toggle's accessible name.
+   * #4053: the phone More menu is a bottom sheet that exists in the DOM only
+   * while it is open (`[data-more-sheet]`), and it opens only on a tap — every
+   * mount starts closed, and widening past `lg` closes it. So "is it open" is
+   * a presence check with nothing to settle: no geometry, no animation, no
+   * viewport-derived label to race (the #2902 failure mode of the drawer
+   * this replaced, whose open/closed state was a function of the viewport).
    *
-   * The helper used to ask `getByRole('button', { name: 'Close sidebar' })
-   * .isVisible()` and click only on true. That probe waits for nothing —
-   * `isVisible()` returns immediately (its `timeout` option is ignored,
-   * per Playwright's own types) — so it is a single instantaneous read of a
-   * label that is a FUNCTION OF THE VIEWPORT: Sidebar's `matchMedia` sync
-   * effect (Sidebar.tsx) sets `collapsed` on mount and on every breakpoint
-   * crossing, and the name derives from it (`Open sidebar` when collapsed,
-   * `Close sidebar` when not). Resize 1280 -> 390 mid-test — the shape
-   * `agent-card-name-measure` is built on — and the name flips a tick after
-   * the resize lands. Under CI load the probe could read the pre-commit DOM
-   * (`Close sidebar` still present, drawer already sliding closed), return
-   * true, and then `click()` re-resolved the role+name locator against a tree
-   * that would never contain that name again: a locator matching NOTHING polls
-   * until the TEST timeout kills it. `test.slow()` triples that spec's 60 s,
-   * so one lost race was 180 s per attempt on #2900/#2889 — attempt AND retry,
-   * because once the name is gone the failure is deterministic.
-   *
-   * The drawer's position IS the state, and it is the same fact
-   * `waitForDrawerOpen` (above) already trusts for the OPEN direction:
-   * `getBoundingClientRect()` reports the border box AFTER transforms, so
-   * open-below-`lg` reads `left === 0` (`translate-x-0`) and closed reads
-   * `left === -width` (`-translate-x-full`). The off-canvas drawer is
-   * `position: fixed`, so the box reads without reflowing anything.
+   * Closed: nothing to dismiss — and nothing is clicked, so a closed sheet
+   * can never be toggled OPEN by this helper.
    */
-  const drawer = page.locator('aside').first()
-  const drawerLeft = async (): Promise<number | null> => {
-    const box = await drawer.boundingBox()
-    return box && box.width > 0 ? Math.round(box.x) : null
-  }
+  const sheet = page.locator('[data-more-sheet]')
+  if ((await sheet.count()) === 0) return
 
-  // Settle before deciding: the drawer animates on `transition-transform
-  // duration-200` (and the resize also triggers Sidebar's matchMedia sync),
-  // so a single read can land mid-motion. Two consecutive equal reads ~300 ms
-  // apart mean the position has stopped changing; bounded at 10 s.
-  let left = await drawerLeft()
-  let stableFor = 0
-  const deadline = Date.now() + 10_000
-  while (stableFor < 300 && Date.now() < deadline) {
-    await page.waitForTimeout(150)
-    const next = await drawerLeft()
-    if (next === left) stableFor += 150
-    else stableFor = 0
-    left = next
-  }
-
-  // Settled closed (or no drawer box at all): nothing to dismiss. This also
-  // kills the old shape's second latent race — a stale probe reading
-  // `Close sidebar` off a closed drawer would have CLICKED THE DRAWER OPEN
-  // and then hung on the `Open sidebar` wait below.
-  if (left === null || left !== 0) return
-
-  // Settled OPEN: dismiss it. The plain click is kept deliberately — no
-  // `{ force: true }` (#1749). It used to be required, and that was the
-  // undiagnosed symptom: `force` skips the actionability check, and the check
-  // this helper was failing is the hit-test — TopBar's `z-[100]` covered the
-  // toggle's `z-[60]`, so the real user gesture was impossible on every
-  // authenticated route below `lg`. Keeping the plain click makes this helper
-  // the regression canary: if the layering breaks again, mobile e2e tests
-  // fail here with "intercepts pointer events" instead of quietly forcing
-  // their way through. Bounded at 10 s rather than the test timeout (#2902):
-  // a genuine failure reports in seconds, not minutes.
-  const closeButton = page.getByRole('button', { name: 'Close sidebar' })
-  await closeButton.click({ timeout: 10_000 })
-  await page.getByRole('button', { name: 'Open sidebar' }).waitFor({ state: 'visible', timeout: 10_000 })
+  // Open: dismiss it with the real control — since #4058 the sheet's own ✕,
+  // which carries `Close sidebar` (the sheet covers the bar, and the More
+  // cell is only ever `Open sidebar`). A plain click — no `{ force: true }`
+  // (#1749) — keeps this helper a regression canary for the sheet's way out
+  // being covered: mobile e2e fails here with "intercepts pointer events".
+  // Bounded at 10 s.
+  await page.getByRole('button', { name: 'Close sidebar' }).click({ timeout: 10_000 })
+  await sheet.waitFor({ state: 'detached', timeout: 10_000 })
 }
 
 /**
@@ -1796,56 +2344,33 @@ export async function dismissMobileSidebar(page: Page) {
  * viewports without a branch.
  */
 /**
- * Waits for the mobile drawer to finish sliding OPEN.
+ * Waits for the phone More sheet (#4053) to finish opening.
  *
- * The name says `Open` because that is the only thing it waits for: the
- * predicate is the open position, so calling it after a dismiss would hang for
- * the full timeout rather than confirming the drawer left.
+ * The sheet slides up on a 200ms enter animation, and a moving element is
+ * "visible" to Playwright from its first frame, so geometry read on
+ * visibility lands on a part-way sheet. The sheet says when it has arrived:
+ * `data-state="open"` is set on its own `animationend` (or on the next frame
+ * under reduced motion, with a timeout backstop), and `opening` before that.
  *
- * A visible control is not this signal. `<aside>` animates on
- * `transition-transform duration-200`, and a transforming element still has a
- * non-empty box, so Playwright calls it visible from the first frame. Geometry
- * read on that signal lands on a part-way drawer. Two specs found this
- * independently — #1749's false layering failure "hit three of four widths on
- * this spec's first run", and a #2819 mutation that should have moved the
- * drawer over a sample point measured its right edge at 178px on a 390px
- * viewport instead.
- *
- * `getBoundingClientRect()` reports the border box AFTER transforms, so
- * `left` interpolates from `-width` to 0 rather than jumping — which is why
- * `left === 0` is the arrival, and why a frame-to-frame stability check is the
- * wrong shape: its first poll can land before the transition starts, when the
- * closed position is trivially stable.
- *
- * At or above `lg` the drawer is `lg:static` at the shell's left edge, so this
- * resolves on the first poll whatever the drawer is doing. Below `lg` is where
- * it means something.
+ * The name says `Open` because that is all it waits for — call it after a tap
+ * on More, never to confirm a dismissal.
  */
 export async function waitForDrawerOpen(page: Page) {
-  await page.waitForFunction(
-    () => {
-      const aside = document.querySelector('aside')
-      if (!aside) return false
-      const rect = aside.getBoundingClientRect()
-      return Math.round(rect.left) === 0 && rect.width > 0
-    },
-    undefined,
-    { timeout: 10_000 },
-  )
+  await page.locator('[data-more-sheet][data-state="open"]').waitFor({ state: 'visible', timeout: 10_000 })
 }
 
-export async function openReceiveFundsModal(page: Page) {
+export async function openReceiveDialog(page: Page) {
   await page.goto('/dashboard')
   await dismissMobileSidebar(page)
-  // #3807: the hero CTA reads "Deposit address" everywhere (funded and
-  // unfunded alike), as do the onboarding checklist and the account-detail
-  // button. Pin to the first exact match in DOM order.
+  // #4094: the money card's actions are "Receive" (primary) and "Send"; both
+  // funding verbs — the old "Add funds" and "Deposit address" — merged into
+  // the one Receive dialog. Pin to the first exact match in DOM order.
   await page
-    .getByRole('button', { name: /^Deposit address$/ })
+    .getByRole('button', { name: /^Receive$/ })
     .first()
     .click()
 
-  const modal = page.getByRole('dialog', { name: 'Deposit address' })
+  const modal = page.getByRole('dialog', { name: 'Receive' })
   await modal.waitFor({ state: 'visible' })
   return modal
 }
@@ -1949,9 +2474,9 @@ export async function openReceiveFundsModal(page: Page) {
  *
  * These three are deliberately NOT asserted here, and that is the design rather
  * than an omission. This helper has three classes of caller with three
- * different CORRECT answers: below `lg` the drawer is `fixed`, so `<main>`
- * spans the full viewport (`0 → innerWidth`); on desktop the drawer is
- * `lg:static` and legitimately occupies the first 240px, so `contentLeft` is
+ * different CORRECT answers: below `lg` the rail is hidden (#4053), so
+ * `<main>` spans the full viewport (`0 → innerWidth`); on desktop the rail is
+ * an in-flow column and legitimately occupies the first 240px, so `contentLeft` is
  * 240; and `/login` is outside the shell entirely and has no content region at
  * all. A single anchor baked in here would have to be loose enough to hold for
  * all three, which is another way of saying it would hold for the defect too.

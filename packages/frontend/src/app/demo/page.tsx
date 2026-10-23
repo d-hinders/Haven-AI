@@ -118,7 +118,7 @@ export default function DemoPage() {
               <Card className="p-4" hover={false}>
                 <p className="text-xs font-medium uppercase tracking-wide text-[var(--v2-ink-3)]">Before you start</p>
                 <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-[var(--v2-ink-2)]">
-                  <li>A passkey-capable device (Face ID, Touch ID, Windows Hello, or a device PIN).</li>
+                  <li>A device that can create a passkey (one with a screen lock).</li>
                   <li>One AI agent, such as Claude Code, Codex, or Hermes.</li>
                   <li>About 10 minutes.</li>
                 </ul>
@@ -146,9 +146,9 @@ export default function DemoPage() {
                 whyItMatters="This test USDC comes from Circle straight to your account — Haven isn't part of that transfer and never holds it."
               >
                 <p>
-                  From your dashboard, choose <strong>Add funds</strong>. Copy the{' '}
-                  <strong>Account address (Base Sepolia)</strong> shown there, then use the{' '}
-                  <strong>Get test funds</strong> card below it — &ldquo;Get free Base Sepolia USDC from Circle's
+                  From your dashboard, choose <strong>Receive</strong>. Copy the{' '}
+                  <strong>Haven wallet address</strong> shown there, then use the{' '}
+                  <strong>Get test USDC</strong> card — &ldquo;Get free Base Sepolia USDC from Circle's
                   faucet&rdquo; — and click <strong>Open Circle's faucet</strong>. Pick USDC and Base Sepolia there,
                   then paste in the address you copied.
                 </p>
@@ -181,7 +181,7 @@ export default function DemoPage() {
               <StepCard
                 number={4}
                 title="Approve its budget with your passkey"
-                whyItMatters="This signature — not a Haven approval — is what gives the agent any spending authority at all."
+                whyItMatters="Your approval — not Haven’s — is what gives the agent any spending authority at all."
               >
                 <p>
                   Approve it with your passkey. Nothing can be spent until you do. Leave the budget as set —
@@ -200,7 +200,7 @@ export default function DemoPage() {
               <StepCard
                 number={6}
                 title="Buy a joke"
-                whyItMatters="Proves your agent can pay 0.001 USDC with no Haven approval step, inside the budget you signed."
+                whyItMatters="Proves your agent can pay 0.001 USDC with no Haven approval step, inside the budget you approved."
                 accent
               >
                 <p>
@@ -238,7 +238,7 @@ export default function DemoPage() {
               <Card elevation="anchor" className="p-6" hover={false}>
                 <h3 className="text-[17px] font-semibold text-[var(--v2-ink)]">What you just saw</h3>
                 <p className="mt-2 text-sm leading-relaxed text-[var(--v2-ink-2)]">
-                  Your agent paid for something small, from a budget you signed and it could not exceed, and Haven
+                  Your agent paid for something small, from a budget you approved and it could not exceed, and Haven
                   refused a payment over that budget before it could move any money — enforced on-chain, agent-native
                   from the first step.
                 </p>

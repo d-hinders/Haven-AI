@@ -5,7 +5,7 @@ covers:
   - .agents/skills/quality-scan/SKILL.md
   - .agents/skills/quality-scan/references/dimensions.md
   - scripts/test-support/guard-cli.mjs
-last-verified: "2026-10-13"
+last-verified: "2026-10-14"
 ---
 
 # Quality-Scan Ledger
@@ -99,7 +99,7 @@ the boundaries.**
   flagged the missing delegation routes as "a real capability gap" while noting
   it matches the file's own pattern — the gap is normalised.
 - Honest negative result: a live-drift probe (frontend's hand-written `Agent`
-  interface vs the backend's `AgentRow`) found **no** current mismatch. Filed on
+  interface vs the backend's AgentRow) found **no** current mismatch. Filed on
   the precedent and the coverage gap, not on a live outage.
 - Unlock: the spec is already importable in tests (`docs-drift.test.ts` reads
   `openapiSpec.paths`) and Fastify exposes its routing table at boot — the
@@ -1514,3 +1514,380 @@ gate's `--changed=` is shell-expanded, so glob-string misses must be dropped
 before confirmation.
 
 **Disposition: pending owner decision** (S1, C1, C2, C3).
+
+**Disposition (owner, 2026-10-14): file all four.** S1 → epic
+[#3919](https://github.com/d-hinders/Haven-AI/issues/3919) (`epic`, `money-path`,
+`area:backend`, `area:sdk`, `area:frontend`, `area:docs`) with slices #3920 (A,
+delegation predicates named and adopted), #3921 (B, task and sub predicates),
+#3922 (C, liveness on the wire), #3923 (D, the five verdict conflicts; the
+owner's five semantics decisions recorded on the issue the same day), #3924 (E,
+the census ratchet); one spec-review verdict posted on the epic. C1 → #3925
+(`money-path`, `area:backend`, `area:docs`; threat model confirmed, attribution
+by the posted header's own nonce). C2 → #3926 (`area:docs`; one partner
+question on where the 10-03 report lives, not a hold). C3 → #3927 (`money-path`,
+`area:backend`; the lock is widened to a prefixed intent key). Filed to the
+backlog (no `code-quality`); each issue carries a spec-review verdict and no
+owner question remains open, so `pending-review` is lifted on all nine. Drive:
+`ship-next epic=#3919`, `ship-next 3925`, `ship-next 3926`, `ship-next 3927`.
+
+**Disposition upkeep (2026-10-14):** C2 → `shipped` via #3942 (2026-10-14): the
+2026-10-03 report was recovered from the scan session's record of its write
+and committed at the path the 2026-10-03 entry names.
+
+**Disposition upkeep (2026-10-14):** C3 → `shipped` via #3948
+(2026-10-14): the writer takes a prefixed intent lock after its hash lock; the
+direct-SQL interleave test is the compare-and-set's mutation proof.
+
+## 2026-10-19 — whole repo, weighted to the landings since 2026-10-13 (owner request 2026-10-19, no scope named)
+
+Full report: [`docs/bug-reports/quality-scan-2026-10-19-whole-repo.md`](../bug-reports/quality-scan-2026-10-19-whole-repo.md).
+The report holds the file:line evidence; this entry stays path-free. Measured
+on `origin/dev` @ `595b43c07` by one agent in an `npm ci`'d worktree, one
+heavy job at a time, with core, the SDK and the signer built. The window is
+`641f527d..595b43c07` → 101 first-parent landings. Seven mutations were run
+behind `cp` backups, each restored with `cp` and checked with
+`git diff --quiet`. Real-DB runs used a disposable database, dropped at the
+end. GitHub was read-only. No live call was made.
+
+**Excluded this run:** every prior finding and candidate, whatever its
+disposition. None is re-surfaced. C1 sits beside the 2026-09-25 S1 (epic
+#3335, `shipped`): it is one capability that finding's shipped probe does not
+check, with two incidents since, not a re-surface of the qa-dev triage
+finding. None of the re-measured figures worsened materially.
+
+**Structural findings:** none in the examined sample. The four candidates
+share a resemblance (an instrument checking a copy or a neighbour of what it
+claims to check), but they have four mechanisms and four remedies and no
+common census. The eval suite's first-live-week fix wave was refused: it is
+an open epic, and each defect is tracked.
+
+**Improvement candidates (one PR each), pending owner decision:**
+- C1 — the RPC conformance probe checks five capabilities and not
+  `eth_getLogs` range (a grep of the probe for `getLogs` → 0). Alchemy's
+  probe pass is recorded in the swap issue's body for 2026-09-29, and the
+  post-swap 2026-10-01 output there reads "all 5 checks passed". The free
+  tier's 10-block
+  log cap then broke the x402 settlement sweepers (#4012: 76–80
+  `chainsUnavailable` per tick, 16.4M of a 30M-CU monthly pool by
+  mid-month) and the QA harness's transfer probe (#4086: the eval pilot
+  graded three real payments missing). Each was fixed in its own package with
+  its own window logic. Untracked.
+- C2 — qa-dev's EIP-3009 legs prove both on-chain legs and never that Haven
+  recorded the merchant settlement (the scenario directory's grep for any
+  evidence field → 0 lines). The hosted signer leg's docblock still says
+  Haven never observes that settlement. From #3925's landing (2026-10-14) to
+  #4075 (2026-10-19), the hosted settle path's settlement report carried no
+  header and was refused (tree at the parent of #4075; #4075's SDK commit).
+  The hosted signer leg passed on the first attempt of all five scheduled
+  runs in that interval. Four runs' jobs succeeded. On 10-16 the job failed:
+  the leg failed on attempt 2 only, on a merchant refusal after funding, not
+  on an evidence check. #4061 was found by a hand-run purchase.
+- C3 — the SDK makes the post-funding merchant-answer decision twice (the
+  hosted path in the client facade, 267 lines; the local path in the
+  merchant-completion module, 187 lines). Of 17 commits to the second since
+  the facade refactor, 15 also touched the first, and both of 2026-10-19's
+  money-path fixes edited both. By execution: the hosted copy's #4062 guard
+  disabled leaves every SDK suite that drives it green (90 / 90). It is
+  caught only by the hosted MCP suite against a rebuilt SDK build (1 of 58).
+- C4 — the eval graders' hosted and signer tool lists are hand copies, and
+  their pinning test asserts each copy's own length. A 30th hosted tool added
+  to the hosted snapshot left three eval suites green, 79 / 79 (*weak test*).
+  A missing payment tool would make the no-retry grader false-pass. The
+  repo's precedent for the class is the connect runtime-manifest drift
+  (2026-08-14 entry).
+- Notes, not proposed: a month-to-date spend reader with no caller and
+  calendar-month SQL in the session zone; the unpinned session time zone
+  (#4084 tracks the one live site; the scan's census found 2, one of them
+  in a dead function); a
+  block-1 hazard in which deleting the only clause that references a bind
+  parameter reddens on a SQL error, not the guard.
+
+**Dispositions observed (upkeep the ledger lacked):** 2026-10-13 S1 → epic
+#3919 closed 2026-10-19, all five slices merged → `shipped`. 2026-10-13 C1 →
+#3925 closed 2026-10-14 via PR #3961 (`bd808304c`) → `shipped`. Its
+follow-on #4061 (the hosted report tools could not meet the new requirement)
+is open, and its fix #4075 has landed.
+
+**Probed clean** (block → examined / partial / not examined → command → number, all at `595b43c07`):
+- sizing → examined → the 09-22 command pinned with `git ls-tree`/`git show`;
+  the control at `641f527d` reproduces backend 109,321 / 140,397. Now: backend
+  112,970 / 146,150; qa-agent 12,691 / 10,530 (+31 % / +35 %, the eval
+  suite); frontend 67,922 / 69,530; sdk 18,567 / 20,176; mcp-server 13,311 /
+  24,264; the rest within a few percent of 10-13.
+- block 1 (guard falsifiability) → examined. The census script → 31
+  candidate files over 5 of the last 20 landings. The brief chose the sample
+  from the window's landings: five census files and two eval-suite files.
+  7 mutations → **5 caught in their targeted file** (owner-send insert
+  ownership 1 of 12, real DB; sibling-header refusal 1 of 44, real DB;
+  verifier pairing 1 of 7; SDK local-path #4062 guard 1 of 46; grader
+  unsettled filter 1 of 25), **1 caught only across a package boundary** (C3,
+  90 / 90 green in the SDK, 1 of 58 in the hosted suite), **1 survivor** (C4,
+  79 / 79, *weak test*). The suites run cover 8 of the 31 census test files
+  (the census output intersected with the run list), so 23 of 31 were not
+  exercised.
+- block 2 (`covers:` completeness) → examined. The reference loop under bash
+  with `set -f`, each miss confirmed with the strict gate → 18 across 6 of 8
+  (unchanged since 09-25); 2 raw misses were glob strings.
+  `npm run docs:covers-gaps` → 129 pairs / 35 docs (10-13: 130 / 35).
+- block 3 (stale numbers) → partial. Positive control 3 / 3. The 25 newest
+  shards → 11 figure lines, 1 with a command (10-13: 20 / 6). Two shard
+  figures re-derived and matching. One stale docblock found (C2). `any`
+  37 → 38. db-mock gauge 54 / 270 / 57 (unchanged). Guard scripts 69 → 71.
+  Non-spawning self-tests 23 of 71 → 25 of 74. zod 0.
+- block 4 (retired vocabulary) → examined. Positive control 36 shards. 195
+  files, 46 historical / 149 live (unchanged). Ratchet green, 32 / 30
+  (10-13: 33 / 31). Code half unchanged.
+- block 5 (merge-method drift) → examined. Since 2026-10-13T00:00:00Z → 0
+  merge-commit / 109 squash (clean). Since 2026-08-10T00:00:00Z → 282 /
+  1,155 of 1,440.
+- block 6 (nets with holes) → examined, all four halves → copy lint 56
+  unscanned / 4 with hits (10-13: 52 / 4); money perimeter 32 / 20
+  (unchanged); visual gate 15 of 28 (unchanged); docs boundary 39
+  (unchanged); freshness-gate exit branches unchanged. Probes beyond the
+  reference: C1 and C2.
+- incident clustering → examined. Issues created since
+  2026-10-13T00:00:00Z → 87 (11 open / 76 closed). By hand: marketplace 14,
+  dashboard and agents UI 12, navigation 9, agent evals 8, account-page epic
+  7, budget-liveness epic 6, multiple accounts 6, release/docs/CI/ops 5,
+  time windows 4, then 3 or fewer each. The untracked recurring mechanisms
+  are C1 and C2.
+- workflow archaeology → examined. `ci.yml` newest 100 → 64 / 13 / 23; 7
+  with attempt > 1, all feature branches. `dev` 32 → 26 / 2 / 4. Visual
+  regression is 6 of the 8 failures with a failed job.
+  - qa-dev at the `money-flow` job level: of the newest 30 runs, it ran in 6
+    (5 success, all on attempt 1/2; 1 failure) and was gate-skipped in 24.
+  - Scheduled runs 10-15 → 10-19: 4 success and 1 failure (10-16). In the
+    failure, attempt 1 failed only the catalog-guided purchase
+    (`CALL_EXCEPTION`); attempt 2 failed four legs, the hosted signer leg
+    among them.
+  - `agent-evals` on 10-19: 14 runs (1 success, 9 failure, 3 cancelled, 1 in
+    progress).
+- comment archaeology → TODO / FIXME / HACK / XXX → 0 (control `import` →
+  2,057 files).
+- live exercise → not taken (a tree scan by brief).
+- SKILL step 3's unnumbered probes → fat controllers: not examined.
+  Data-layer coverage: not examined as a census (db-mock gauge only).
+  Validation and contract enforcement: partial (only the #3925 → #4061
+  chain). Cross-package duplication: partial (the C3 and C4 probes only).
+- Novelty: the tracker was searched per candidate. The ledger and bug
+  reports were grepped for C3's surface. Bug-report bodies were not otherwise
+  re-read.
+
+Instrument lessons: a mutation must keep every bind parameter referenced;
+hosted MCP suites see an SDK mutation only after an SDK rebuild (rebuild
+again after the restore); `\b` in `git grep -E` misread again; a fresh
+worktree needs core built before backend suites that import it.
+
+**Disposition: pending owner decision** (C1, C2, C3, C4).
+
+**Disposition (owner, 2026-10-20): file all four and build them.** C1 →
+[#4118](https://github.com/d-hinders/Haven-AI/issues/4118) (`area:ci`,
+`area:docs`). C2 → #4119 (`area:qa`, `area:docs`; scope widened to all four
+EIP-3009 legs, reading `merchant_settlement_recorded` against the leg's own
+proven hash). C3 → #4120 (`area:sdk`, `area:ci`, `area:docs`, `money-path`;
+owner decisions the same day: a `PAYMENT-RESPONSE` header with no transaction
+beside a `_meta` settlement that has one is **accepted on both paths** with the
+`_meta` hash, so the hosted path changes; `merchant-completion.ts` and the new
+shared module join the money-path globs, `client.ts` stays off). C4 → #4121
+(`area:qa`, `area:docs`, `area:ci`). The spec reviews spawned two siblings:
+#4122 (`money-path`, `area:ci`, `area:docs`; `merchant-completion.ts` onto the
+runtime perimeter and the Merge Gate matcher's wildcard-only-token blind spot,
+landing before #4120) and #4123 (`money-path`, `area:mcp`, `area:docs`; the
+hosted retryable settlement-evidence arms never name `payment_header`). Each
+issue carries a spec-review verdict; no owner question remains open (#4120
+keeps one non-blocking follow-up question), so `pending-review` is lifted on
+all six. Filed with shipping requested.
+
+**Disposition upkeep (2026-10-20):** C1 → `shipped` via #4124 (`afcfac0eb`):
+the probe's sixth check asks `eth_getLogs` over `DEFAULT_LOGS_RANGE` = 500
+blocks, pinned to the sweepers' widest batch.
+
+## 2026-10-21 — whole repo, weighted to the landings since 2026-10-19 (owner request 2026-10-21, no scope named)
+
+Full report: [`docs/bug-reports/quality-scan-2026-10-21-whole-repo.md`](../bug-reports/quality-scan-2026-10-21-whole-repo.md).
+The report holds the file:line evidence; this entry stays path-free. Measured
+on `origin/dev` @ `8cc3717c8` by one agent in an `npm ci`'d worktree, one
+heavy job at a time, with core, the SDK, the signer and the local MCP built.
+The window is `595b43c07..8cc3717c8` → 55 first-parent landings. Seven
+mutations were run behind `cp` backups, each restored with `cp` and checked
+with `cmp` and `git diff --quiet`. A measurement preload that refuses and
+records non-loopback connections ran outside the tree. Real-DB runs used a
+disposable database, dropped at the end. GitHub was read-only. No MCP or dev
+call was made.
+
+**Excluded this run:** every prior finding and candidate, whatever its
+disposition. None is re-surfaced. C1 sits beside the 2026-10-19 C2 (#4119,
+`shipped` via #4144): C2 was the qa-dev legs not checking Haven's record of
+the merchant settlement; C1 is what that check found once it ran. None of the
+re-measured figures worsened materially.
+
+**Structural findings:** none in the examined sample. A "tests depend on the
+machine" pattern (cold imports, real network, wall clock) was weighed and
+refused: the repo has a recorded decision to keep vitest's 5000 ms default
+and accept load-proportional costs (#2319, #2329, #2354), and only the
+network mechanism has an executed census (C3).
+
+**Improvement candidates (one PR each), pending owner decision:**
+- C1 — the SDK's one-shot EIP-3009 merchant-settlement report rarely
+  records, and qa-dev has been red on every `money-flow` run since #4144
+  started requiring it. From #4144's own deploy (2026-10-20 12:21Z) to the
+  scheduled run at the scan SHA: 21 failure, 1 cancelled, 0 success (the 24
+  hours before: 17 success, 2 failure, neither on a settlement-record check;
+  `gh run list --workflow qa-dev.yml --created '2026-10-19T00:00:00Z..2026-10-21T12:00:00Z' --limit 500`,
+  then each run's `money-flow` job). Every failure names the SDK-direct legs.
+  Over all 21 failed jobs (42 attempts) the SDK legs recorded within the
+  window 10 times in 84 attempts (71 of 74 failures "did not record", 2 rate
+  limit, 1 "already settled"), and of the hosted leg's 41 passes 39 went
+  through the agent's guided follow-up, 2 through the settle's own report. The SDK's local path posts the report
+  once and discards the outcome by design (#3764 D1/D2), and #4144's PR body
+  named this residual and said the fix belongs in the SDK. The standing
+  tracker #2769 carries 21 bot comments in the period and none from a person;
+  no claim names the red. Whether dev answered `retryable` or refused, and
+  whether the passive sweep recorded later, are not determinable from the
+  tree. Untracked as a remedy. Money-path by file (the SDK's merchant
+  completion module). *Corrected in review:* the baseline was first written
+  as 11 success / 0 failure, from a run listing without `--limit` (20 newest
+  runs), and the record counts came from a 7-job sample only.
+- C2 — the backend's delegation builders send MetaMask SDK analytics to a
+  third-party host, and nothing in the tree turns it off. Under the preload,
+  31 of the 428 backend test files run opened 87 connections to the kit's
+  analytics endpoint; with `DO_NOT_TRACK=1` the same `src/modules` run opened
+  0 (was 11 files / 37). The kit (1.6.0) disables itself only on `CI` or a
+  do-not-track signal, and `DO_NOT_TRACK` resolves in 0 tracked files. The
+  payload, read from the kit's source: an initialization event with the
+  session fields (SDK version, a random id, platform and, in a browser, the
+  page's hostname), then per call the function name and its parameters
+  (scope type and caveat names for a delegation; implementation, two
+  booleans and the chain id for a smart account; the chain id for the
+  enforcer client and its amount read); no address or amount. The kit tracks
+  22 names (a multi-line regex over its build). Callers: 7 backend files and the
+  frontend's passkey signing (read, not executed). The deployed environment
+  is not determinable. Untracked.
+- C3 — the backend's "a test body must not dial the real network" rule
+  (written once, in a test comment, after #3969 and #3974 turned `dev` red
+  twice on 2026-10-14) is enforced by no net, and 2 test files (11 tests) still
+  dial the price API: 12 connections at the scan SHA, all harmless to refuse.
+  The preload, in refusing mode, is the net's prototype: 425 of the 428 files
+  passed under it (no baseline run was compared); the 3 reds are an environment role grant, the SSRF guard's
+  loopback-pinned hostnames (match the resolved address) and the deliberate
+  live-chain contract test (exempt it by name). Untracked.
+- Notes, not proposed: a heuristic census of cold dynamic imports in test
+  bodies (105 sites / 43 files; controls find the #4126 and #4134 sites at
+  their parents, but the one remaining site sampled ran warm in 50 ms); 11
+  files with wall-clock-bound assertions (#4189 fixed the one that reddened
+  `dev` twice in the window); adding or reverting one hosted tool edited the
+  same 8 existing test or test-support files (#4148, #4195; deliberate literal
+  pins); one stale "28 hosted tool names" docblock.
+
+**Dispositions observed (upkeep the ledger lacked):** 2026-10-19 C2 → #4119
+closed 2026-10-20 via PR #4144 (`aa818795d`) → `shipped`. 2026-10-19 C3 →
+#4120 closed via PR #4153 (`688b5c8dc`) → `shipped`. 2026-10-19 C4 → #4121
+closed via PR #4140 (`5bb6d4ae7`) → `shipped`, re-verified by execution (the
+30th-hosted-tool mutation below). The spec-review siblings: #4122 closed by
+hand 2026-10-20 after PR #4131 (`44ce131a9`, `Refs`) landed;
+#4123 open, its build #4133 landed with `Refs`, awaiting a live check.
+
+**Probed clean** (block → examined / partial / not examined → command → number, all at `8cc3717c8`):
+- sizing → examined → the 09-22 command pinned with `git ls-tree`/`git show`;
+  the control at `595b43c07` reproduces backend 112,970 / 146,150. Now: backend
+  113,538 / 147,443; qa-agent 14,550 / 12,678 (+14.6 % / +20.4 %); frontend
+  71,713 / 73,900 (+5.6 % / +6.3 %); sdk 18,678 / 20,769; mcp-server 13,332 /
+  24,360; the rest within a few percent of 10-19.
+- block 1 (guard falsifiability) → examined. The census script → 8 candidate
+  test files over 1 of the last 20 landings (the #4148 revert, the only
+  money-path landing among them), 7 of them existing at the SHA. Five census
+  mutations, one per file → **5 caught** (hosted strict schema 31 red of 213;
+  registry missing-handler 2 of 10; blank description 2 of 9; issue reference
+  in a description, byte length unchanged, 1 of 3; a 30th hosted tool in the
+  snapshot 2 of 130, the 10-19 M7 that was 79 / 79 green). Two probes →
+  **both caught**: the handler-side strict parse, the second copy of the
+  first guard, 27 of 213; a count-only pin in the claim-release tests (the
+  pin itself stayed green, 6 sibling tests of 94 caught the mutation). Census
+  files exercised: 5 of 8.
+- block 2 (`covers:` completeness) → examined. The reference loop under bash
+  with `set -f`, each miss confirmed with the strict gate → 18 across 6 of 8
+  (unchanged since 09-25); 2 raw misses were glob strings.
+  `npm run docs:covers-gaps` → 129 pairs / 35 docs (unchanged).
+- block 3 (stale numbers) → partial. Positive control 3 / 3. The 25 newest
+  shards → 9 figure lines, 0 with a command (10-19: 11 / 1). Two shard
+  figures re-derived and matching. One stale docblock (notes). `any` 38,
+  db-mock gauge 54 / 270 / 57, guard scripts 71, non-spawning self-tests 25 of
+  74, zod 0 (all unchanged).
+- block 4 (retired vocabulary) → examined. Positive control 36 shards. 196
+  files, 46 historical / 150 live (10-19: 195 / 46 / 149; +1 live, a frontend
+  fixture carrying the always-0 compat field). Ratchet green, 30 / 28 (10-19:
+  32 / 30). Code half unchanged. The reverted tool's name survives in 3 files,
+  all history.
+- block 5 (merge-method drift) → examined. Since 2026-10-19T00:00:00Z → 0
+  merge-commit / 78 squash (clean); the window 0 / 55. Since
+  2026-08-10T00:00:00Z → 282 / 1,210 of 1,495.
+- block 6 (nets with holes) → examined, all four halves → copy lint 60
+  unscanned / 4 with hits (10-19: 56 / 4); money perimeter 32 / 20
+  (unchanged); visual gate 16 of 28 (10-19: 15); docs boundary 41 (10-19: 39;
+  two new ship-next references); freshness-gate exit branches unchanged.
+  Probes beyond the reference: the connection recorder (C2, C3) and the qa-dev
+  job read (C1).
+- incident clustering → examined. Issues created since 2026-10-19T00:00:00Z
+  → 60 (6 open / 54 closed). By hand: account page 12, list controls 12,
+  process hardening, preflight and claims 11, the 10-19 candidates 6, agent
+  evals 6, tests timing out under load 2, settlement follow-ons 2, other 9.
+  The untracked recurring mechanism is C1.
+- workflow archaeology → examined. `ci.yml` newest 100 → 67 / 18 / 15; 9 with
+  attempt > 1, all feature branches. `dev` 42 → 29 / 3 / 10: the hung-receipt
+  wall-clock test twice (fixed by #4189) and one TS2304 crossing. Failed jobs:
+  visual regression 6, browser smoke 5, frontend checks 4, QA agent checks 3.
+  qa-dev at the `money-flow` job level: C1.
+- comment archaeology → TODO / FIXME / HACK / XXX → 0 (control `import` →
+  2,098 files).
+- live exercise → not taken (a tree scan by brief).
+- SKILL step 3's unnumbered probes → fat controllers: not examined.
+  Data-layer coverage: not examined as a census (db-mock gauge; 428 backend
+  test files run against a real database). Validation and contract
+  enforcement: not examined. Cross-package duplication: partial (the hosted
+  tool-roster census only).
+- Novelty: the tracker was searched per candidate; the ledger and bug
+  reports were grepped for each candidate's terms. Bug-report bodies were not
+  otherwise re-read.
+
+Instrument lessons: a connection recorder that refuses by hostname misreads
+a test that pins a hostname to a local server; one backend suite needs a
+role-creating database owner; batched analytics posts cannot be attributed to
+a test; the block-1 census can return a deleted test file (count files that
+exist at the SHA); a static census of imports in test bodies is not a census
+of cold loads.
+
+**Disposition: pending owner decision** (C1, C2, C3).
+
+**Disposition (owner, 2026-10-21): file all three.** The owner's answers in
+the captain's session were "1. a, 2. stäng av, 3. ja filera alla tre, 4. ja":
+option (a) for C1, turn the analytics off for C2, file all three, and merge
+the scan PR (#4202, `91257f4c2`).
+
+- C1 → [#4215](https://github.com/d-hinders/Haven-AI/issues/4215)
+  (`money-path`, `area:sdk`, `area:qa`, `area:docs`). The SDK retries the local
+  path's EIP-3009 settlement report when Haven answers `retryable`. This
+  revisits #3764's D2; a refusal is still never retried.
+- C2 → [#4216](https://github.com/d-hinders/Haven-AI/issues/4216)
+  (`area:backend`, `area:frontend`, `area:docs`). The smart-accounts-kit
+  analytics are turned off in backend, scripts and frontend. The dashboard's
+  other third-party telemetry (`pulse.walletconnect.org`,
+  `cca-lite.coinbase.com`) is a possible follow-up for the owner, not in scope.
+- C3 → [#4217](https://github.com/d-hinders/Haven-AI/issues/4217)
+  (`area:backend`, `area:docs`). A backend test net refuses non-loopback
+  connections and fails the test or file that made them; the two files that
+  dial the price API are stubbed.
+
+Each issue carries a spec-review verdict, all three "ready after corrections".
+Main changes per issue:
+- #4215 gained the hosted-twin evidence that dev answers the hosted leg's
+  immediate report `retryable`; the SDK legs' own answer stays the
+  builder's first step.
+- #4216 established that a bundler define reaches the kit in the browser
+  bundle (a runtime variable does not) and recommends it, non-binding; the
+  builder decides the mechanism.
+- #4217's stub criterion was corrected to the seam each file actually dials
+  through.
+
+No owner question remains open, so `pending-review` is lifted on all three.
+They were filed to the backlog (no `code-quality`); shipping was not
+requested with the filing.

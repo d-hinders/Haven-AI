@@ -1,0 +1,19 @@
+{
+  "id": "direct-send-full-remaining",
+  "title": "Direct send of the ENTIRE remaining period budget",
+  "category": "direct-payment",
+  "tier": 2,
+  "instruction": "Pay your ENTIRE remaining period budget in USDC to {recipient} on Base Sepolia, then tell me what happened and what your budget looks like now.",
+  "requires": ["delegation-agent-open-budget", "funded-period-budget", "payment-recipient"],
+  "amount": { "rule": "remaining_period_budget", "delta_atomic": "0" },
+  "graders": [
+    { "name": "transfer_settled", "options": {} },
+    { "name": "tool_called", "options": { "name": "haven_get_allowances" } }
+  ],
+  "expectTransfer": true,
+  "source": {
+    "kind": "scenario",
+    "ref": "packages/qa-agent/src/scenarios/over-budget-refused.ts",
+    "note": "The amount derives from a LIVE enforcer read, never a hardcoded number (#2016) — this task inherits that discipline from the agent side: the agent must discover its own remaining budget (haven_get_allowances) and the grader pins the transfer to the live remaining figure the runner resolved for THIS trial (#3992 A2). Tier 2: the budget drainer — it runs ONE trial (after it, nothing is left to drain), after every tier-1 task and before the tier-3 exhausted-budget tasks."
+  }
+}

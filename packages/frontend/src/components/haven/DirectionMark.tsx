@@ -1,19 +1,31 @@
-import { ArrowDown, ArrowUp, Clock } from 'lucide-react'
+import { ArrowDown, ArrowLeftRight, ArrowUp, Clock } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import type { TransactionActivityDirection } from './TransactionActivityRow'
 
-type Density = 'comfortable' | 'compact'
+type Density = 'comfortable' | 'compact' | 'figure' | 'inline'
 
 /**
- * Single source of truth for the in/out/pending direction icon used in
+ * Single source of truth for the in/out/pending/move direction icon used in
  * transaction rows. Previously each table inlined its own copy; this lifts
  * the markup so a colour change (e.g. the sky-blue debit colour for
  * outgoing transactions) lands everywhere at once.
  *
- * - `comfortable` (default): 36px mark, 16px icon — used inside the
- *   dedicated `/transactions` table.
+ * - `comfortable` (default): 36px mark, 16px icon — the roomier
+ *   row; the transaction ledger (`/transactions`, Activity tabs) uses `compact`.
  * - `compact`: 32px mark, 14px icon — matches the dashboard's <Row>
  *   primitive so transaction rows sit on the same rhythm as agent rows.
+ * - `figure`: 24px mark, 14px icon — sits beside a 20px secondary figure
+ *   (`Amount size="md"`), such as a Last 30 days In/Out pair (#4259).
+ * - `inline`: 18px mark, 11px icon — the size for a mark in dense inline
+ *   text, where a line of body copy sets the height.
+ *
+ * `move` (#4264): a two-way lucide `ArrowLeftRight` on the neutral grey
+ * ground — a transfer between your own accounts is neither income nor
+ * spend. `neutral` (the pending clock) is unchanged. Like `neutral`, a
+ * `move` row passes no sign to `Amount`.
+ *
+ * Every density is `aria-hidden`: the name is the caller's sr-only text, and
+ * any tooltip lives on the mark through `ui/Tooltip`.
  */
 export function DirectionMark({
   direction,
@@ -27,18 +39,42 @@ export function DirectionMark({
       ? 'border-success/20 bg-[var(--v2-success-soft)] text-[var(--v2-success)]'
       : direction === 'out'
         ? 'border-debit/20 bg-[var(--v2-debit-soft)] text-[var(--v2-debit)]'
+        // `move` shares the pending clock's neutral ground: a transfer between
+        // your own accounts is neither income nor spend (#4264).
         : 'border-[var(--v2-border)] bg-[var(--v2-surface-2)] text-[var(--v2-ink-3)]'
 
-  const sizeClass = density === 'compact' ? 'h-8 w-8' : 'h-9 w-9'
-  const iconSizeClass = density === 'compact' ? 'h-3.5 w-3.5' : 'h-4 w-4'
+  // The radius scales with the mark (10px reads as a squircle at 32-36px but
+  // near-circles an 18px mark), so it lives with the size, not in the base.
+  const sizeClass =
+    density === 'compact'
+      ? 'h-8 w-8 rounded-[10px]'
+      : density === 'figure'
+        ? 'h-6 w-6 rounded-[7px]'
+        : density === 'inline'
+          ? 'h-[18px] w-[18px] rounded-[6px]'
+          : 'h-9 w-9 rounded-[10px]'
+  const iconSizeClass =
+    density === 'compact' || density === 'figure'
+      ? 'h-3.5 w-3.5'
+      : density === 'inline'
+        ? 'h-[11px] w-[11px]'
+        : 'h-4 w-4'
 
   return (
     <span
       aria-hidden="true"
-      className={`flex flex-shrink-0 items-center justify-center rounded-[10px] border ${sizeClass} ${classes}`}
+      className={`flex flex-shrink-0 items-center justify-center border ${sizeClass} ${classes}`}
     >
       <Icon
-        icon={direction === 'in' ? ArrowDown : direction === 'out' ? ArrowUp : Clock}
+        icon={
+          direction === 'in'
+            ? ArrowDown
+            : direction === 'out'
+              ? ArrowUp
+              : direction === 'move'
+                ? ArrowLeftRight
+                : Clock
+        }
         className={iconSizeClass}
       />
     </span>

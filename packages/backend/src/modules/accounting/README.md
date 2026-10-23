@@ -59,6 +59,15 @@ The routes (`routes/accounting-connections.ts`) and the feed (`feed-orchestrator
      `connectionStatus: 'scope_missing'` on the result — the orchestrator
      flips the connection's status so the dashboard asks for a re-consent, and
      the sync row stays `pushed` (never re-pushable).
+   - **A second document (#3918)** — when the provider's model carries the
+     merchant's own invoice as its own object (Accounted's WORM documents do),
+     upload it in the same `pushTransaction` with a payment-derived but
+     DISTINCT idempotency key (Accounted: `paymentId:merchant-invoice`) and
+     return its ref as `merchantInvoiceRef`; the orchestrator records it as a
+     second ledger row (`document_kind = 'merchant_invoice'`) that no claim,
+     mark or sweep statement ever touches. The second upload is best-effort:
+     a failure is a note on the pushed row, never a failed push (re-pushing
+     to reach the second document would re-file the first).
    - **pre-push vs post-push scope refusal (#2865).** If the CREATE call
      itself (or anything before it) is refused for scope — nothing exists at
      the provider — return `status: 'skipped'` with the reason and
@@ -189,8 +198,10 @@ The routes (`routes/accounting-connections.ts`) and the feed (`feed-orchestrator
 same transaction ID the Haven UI (#3763) and the block explorer show. On an
 EIP-3009 bridge payment that is the verified merchant settlement leg
 (`machine_metadata.merchant_settlement_tx_hash`, written only after on-chain
-verification — reported by the agent (#3475) or detected from the chain by
-the #3888 settlement sweep); the funding leg rides along as `fundingTxHash`
+verification — reported by the agent (#3475), detected from the chain by
+the #3888 settlement sweep, or recorded by the #4319 proof ladder (Tier 1
+signed header; Tier 2 receipt hash under the flag and its seven limits));
+the funding leg rides along as `fundingTxHash`
 for the receipt PDF. When no verified settlement was recorded inside the
 merchant-report grace window (15 minutes, `domain/merchant-report-grace.ts` —
 the same clock the payment status uses; the #3888 sweep scans from the

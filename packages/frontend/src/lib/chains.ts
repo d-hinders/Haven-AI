@@ -151,8 +151,9 @@ export function getChainConfig(chainId: number): FrontendChainConfig {
  * (a chain the API serves before the frontend registry catches up). Callers that
  * test only `chainId != null` cover one and crash on the other.
  *
- * Introduced local to `AddFundsModal` by #1844; lifted here by #1852 when
- * `ReceiveFundsModal` needed the same answer. Lifting the WRAPPER is not the
+ * Introduced local to the funding modal by #1844; lifted here by #1852 when
+ * the receive side needed the same answer (both old funding dialogs, and
+ * their merged successor `ReceiveDialog.tsx` since #4094). Lifting the WRAPPER is not the
  * decision that was rejected in #1844 — that was making `getChainConfig` itself
  * total, which would silently change those ~20 call sites. This adds a second,
  * explicitly-opted-into function and leaves the throwing contract untouched.
@@ -196,10 +197,9 @@ export function getTokensForChain(chainId: number): Record<string, FrontendToken
  * Moved here from `lib/safe-tx.ts` (#2848, epic #1440): it was that file's
  * one shared export, a generic per-chain token list with nothing Safe about
  * it, and the rest of the file was retired Safe signing plumbing deleted
- * with the rail. Consumers: `DelegationSendModal`, `useAgentConnectionSetup`,
- * and `agent-panel/agent-display` — the chain-aware `tokenSymbol`/
- * `tokenDecimals` display helpers read it directly, and `tokenDecimals` is the
- * address-scan fallback behind `formatConfiguredAllowance`'s decimals.
+ * with the rail. Consumers: `DelegationSendModal`, `useAgentConnectionSetup`
+ * and `lib/marketplace` (`agent-panel/agent-display`'s token helpers went
+ * with the card's configured-allowance row, #4209).
  */
 export function getChainTokens(chainId: number): Record<string, { address: Address | null; decimals: number }> {
   const tokens = getChainConfig(chainId).tokens

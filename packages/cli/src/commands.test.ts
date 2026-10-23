@@ -235,6 +235,36 @@ describe('budget grant/revoke (#2539)', () => {
     expect(api.calls).toEqual([])
   })
 
+  // #3933: a live budget already holds the slot. The build is refused with a
+  // code; the CLI says to edit that budget and carries the code in --json.
+  it('an occupied slot is refused with the edit-it hint, exit 4, and the code in --json', async () => {
+    const OLD = '0x' + 'cd'.repeat(32)
+    const inner = grantApi()
+    const api = {
+      ...inner,
+      post: async <T,>(path: string) => {
+        if (path === '/agents/a1/delegations/build') {
+          throw new CliApiError(
+            'This agent already has a live budget for this token and recipient. Edit that budget instead.',
+            409,
+            { error: 'This agent already has a live budget for this token and recipient. Edit that budget instead.', error_code: 'BUDGET_SLOT_OCCUPIED', existing_delegation_hash: OLD },
+          )
+        }
+        return inner.post<T>(path)
+      },
+    } as unknown as CliApi
+    const human = harness({ makeApi: () => api })
+    const code = await run(['budget', 'grant', 'a1', '--amount', '25', '--token', 'USDC', '--period', '1440'], human.deps)
+    expect(code).toBe(4)
+    expect(human.err.join('\n')).toMatch(/Edit that budget on the agent's page/)
+    expect(human.err.join('\n')).toMatch(/stops the old one on-chain/)
+
+    const json = harness({ makeApi: () => api })
+    await run(['budget', 'grant', 'a1', '--amount', '25', '--token', 'USDC', '--period', '1440', '--json'], json.deps)
+    const out = JSON.parse([...json.out, ...json.err].find((l) => l.trim().startsWith('{')) ?? '{}')
+    expect(out.error).toMatchObject({ error_code: 'BUDGET_SLOT_OCCUPIED', existing_delegation_hash: OLD })
+  })
+
   it('does not advertise a one-time period for a budget grant', async () => {
     const { deps, err } = harness({ makeApi: () => grantApi() })
     await run(['budget', 'grant', 'a1', '--amount', '25', '--token', 'USDC'], deps)
@@ -253,7 +283,11 @@ describe('budget grant/revoke (#2539)', () => {
       'POST /agents/a1/delegations/build',
     ])
     expect(out.join('\n')).toContain('https://app.haven.test/agents/a1?grant=')
-    expect(out.join('\n')).toContain('sign')
+    // Owner copy rule (copy-guidelines.md): the human approves; nothing in
+    // this block says "sign".
+    const text = out.join('\n')
+    expect(text).toContain('Open this link and approve')
+    expect(text).not.toMatch(/\bsign/i)
   })
 
   it('grant --json returns the reconciled build object with the signing link', async () => {
@@ -299,6 +333,37 @@ describe('budget grant/revoke (#2539)', () => {
     expect(JSON.parse(out[out.length - 1]).status).toBe('active')
   })
 
+  // #3922: the wait gate reads the backend's `is_live` when it is sent — an
+  // `active` row that is not live (expired) keeps the wait going — and falls
+  // back to `status === active` for an older backend that omits the field
+  // (the test above is exactly that case).
+  it('grant --wait honours is_live: an active-but-not-live row keeps waiting until is_live is true (#3922)', async () => {
+    const inner = waitApi({
+      [`GET /agents/a1`]: AGENT,
+      'GET /balances/0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?chain_id=84532': {
+        balances: [{ symbol: 'USDC', address: '0x' + '03'.repeat(20), decimals: 6 }],
+      },
+      'POST /agents/a1/delegations/build': { ...BUILT },
+    }, 'active')
+    const rows = [
+      { delegation_hash: HASH, version: 1, status: 'active', is_live: false },
+      { delegation_hash: HASH, version: 1, status: 'active', is_live: true },
+    ]
+    let polls = 0
+    const api = {
+      ...inner,
+      get: async <T,>(path: string) =>
+        path === '/agents/a1/delegations'
+          ? ({ delegations: [rows[Math.min(polls++, rows.length - 1)]] } as T)
+          : inner.get<T>(path),
+    }
+    const { deps, out } = harness({ makeApi: () => api, sleep: async () => {} })
+    const code = await run(['budget', 'grant', 'a1', '--amount', '25', '--token', 'USDC', '--period', '1440', '--wait', '--json'], deps)
+    expect(code).toBe(0)
+    expect(polls).toBe(2)
+    expect(JSON.parse(out[out.length - 1]).status).toBe('active')
+  })
+
   it('grant refuses an agent that is not on the delegation rail', async () => {
     const api = grantApi({ account_type: 'legacy_safe' })
     const { deps, err } = harness({ makeApi: () => api })
@@ -321,6 +386,22 @@ describe('budget grant/revoke (#2539)', () => {
     const parsed = JSON.parse(out.join('\n'))
     expect(parsed.status).toBe('pending_revoke')
     expect(parsed.revocation_url).toContain('agents/a1')
+  })
+
+  it('revoke text output says approve, never sign (copy-guidelines.md)', async () => {
+    const api = fakeApi({
+      'GET /agents/a1/delegations': { delegations: [{ delegation_hash: HASH, version: 1, status: 'active' }] },
+      [`POST /agents/a1/delegations/${HASH}/revoke`]: {
+        signature_scheme: 'eip712_userop',
+        revocation_url: 'https://app.haven.test/agents/a1?grant=' + HASH,
+      },
+    })
+    const { deps, out } = harness({ makeApi: () => api })
+    expect(await run(['budget', 'revoke', 'a1', HASH], deps)).toBe(0)
+    const text = out.join('\n')
+    expect(text).toContain('one approval, sponsored (no gas)')
+    expect(text).toContain('Open this link and approve to stop this budget:')
+    expect(text).not.toMatch(/\bsign/i)
   })
 
   it('revoke refuses an already-revoked hash without calling the route', async () => {
@@ -586,6 +667,34 @@ describe('read commands', () => {
     expect(parsed[0].hash).toBe('0xa')
   })
 
+  it('keeps both own-account transfer legs and never opts the published CLI into folding (#4265)', async () => {
+    const transactions = [
+      {
+        hash: '0xmove', direction: 'out', valueFormatted: '1', asset: 'USDC',
+        tokenSymbol: 'USDC', timestamp: 1_700_000_000, from: '0xmain', to: '0xsavings',
+        chainId: 8453, accountAddress: '0xmain', accountName: 'Main',
+      },
+      {
+        hash: '0xmove', direction: 'in', valueFormatted: '1', asset: 'USDC',
+        tokenSymbol: 'USDC', timestamp: 1_700_000_000, from: '0xmain', to: '0xsavings',
+        chainId: 8453, accountAddress: '0xsavings', accountName: 'Savings',
+      },
+    ]
+    const api = fakeApi({ 'GET /transactions': { transactions } })
+    const { deps, out } = harness({ makeApi: () => api })
+
+    expect(await run(['activity', 'list', '--json'], deps)).toBe(0)
+    expect(JSON.parse(out.join('\n'))).toHaveLength(2)
+
+    out.length = 0
+    expect(await run(['activity', 'export'], deps)).toBe(0)
+    expect(out.join('\n').trim().split('\n')).toHaveLength(3)
+
+    const transactionCalls = api.calls.filter((call) => call.startsWith('GET /transactions?'))
+    expect(transactionCalls).toHaveLength(2)
+    expect(transactionCalls.every((call) => !call.includes('foldOwnTransfers'))).toBe(true)
+  })
+
   it('renders the ACCOUNT column from accountName — the server stopped sending safeName (#2914 follow-up)', async () => {
     // The table's ACCOUNT column read `safeName` while the feed emitted it.
     // #2914 renamed that field to `accountName`, and a stale read here fails
@@ -754,6 +863,41 @@ describe('management commands (backend-only)', () => {
     expect(text).not.toContain('ef'.repeat(32))
     // The one-signature route is named.
     expect(text).toContain('Remove agent')
+  })
+
+  // #3922: the revoke gate reads the still-enabled STATUS set, never `is_live`
+  // — it must refuse against an older backend (no `is_live` on any row) and
+  // even when a new backend says `is_live: false` for an enabled-on-chain row
+  // (a `replaced` row is not budget-live but is still redeemable on-chain).
+  it.each([
+    ['rows lacking is_live (older backend)', undefined],
+    ['an enabled row flagged is_live:false', false],
+  ])('the revoke gate still refuses on %s (#3922)', async (_label, isLive) => {
+    const LIVE1 = '0x' + 'ab'.repeat(32)
+    const api = fakeApi({
+      'GET /agents/a1': { id: 'a1', name: 'Scout', status: 'active', live_delegation_count: 1 },
+      'GET /agents/a1/delegations': {
+        delegations: [{ delegation_hash: LIVE1, version: 1, status: 'replaced', ...(isLive === undefined ? {} : { is_live: isLive }) }],
+      },
+      'POST /agents/a1/revoke': {},
+    })
+    const { deps } = harness({ makeApi: () => api })
+    expect(await run(['agents', 'revoke', 'a1', '--yes'], deps)).toBe(4)
+    expect(api.calls).not.toContain('POST /agents/a1/revoke')
+  })
+
+  // #3922: the CLI's one copy of the still-enabled set cannot import the
+  // private core package; this pins it to core's exported constant.
+  it('the CLI still-enabled status set equals core STILL_ENABLED_DELEGATION_STATUSES (#3922)', async () => {
+    // Read as text: a cross-package import would escape this package's rootDir.
+    const coreSrc = readFileSync(new URL('../../core/src/delegation-statuses.ts', import.meta.url), 'utf8')
+    const coreList = /STILL_ENABLED_DELEGATION_STATUSES = \[([^\]]*)\]/.exec(coreSrc)?.[1] ?? ''
+    const coreSet = [...coreList.matchAll(/'([a-z]+)'/g)].map((m) => m[1]).sort()
+    expect(coreSet.length).toBeGreaterThan(0)
+    const src = readFileSync(new URL('./commands.ts', import.meta.url), 'utf8')
+    const block = /const STILL_ENABLED_STATUSES[\s\S]*?\]\)/.exec(src)?.[0] ?? ''
+    const cliSet = [...block.matchAll(/'([a-z]+)'/g)].map((m) => m[1]).sort()
+    expect(cliSet).toEqual(coreSet)
   })
 
   it('the live-budget refusal under --json carries error.live_delegations (#3729)', async () => {

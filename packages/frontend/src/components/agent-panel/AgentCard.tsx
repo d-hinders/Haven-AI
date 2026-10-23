@@ -1,13 +1,36 @@
 'use client'
 
-import { McpServerName } from './McpServerName'
-import { ApprovalRequiredBanner } from '@/components/haven/ApprovalRequiredBanner'
-import { LabelChipRow } from '@/components/haven/LabelChip'
+import { EllipsisVertical } from 'lucide-react'
 import { useState } from 'react'
 import Link from 'next/link'
+import { ApprovalRequiredBanner } from '@/components/haven/ApprovalRequiredBanner'
+import { AgentBudget, agentBadge, type DashboardAgent } from '@/components/haven/AgentRow'
+import { LabelChipRow } from '@/components/haven/LabelChip'
+import { Button } from '@/components/ui/Button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/DropdownMenu'
+import { Icon } from '@/components/ui/Icon'
+import { Monogram } from '@/components/ui/Monogram'
+import { Skeleton } from '@/components/ui/Skeleton'
+import { StatusBadge, type StatusTone } from '@/components/ui/StatusBadge'
+import { DELEGATION_BUDGET_CARD_ID } from '@/components/DelegationBudgetCard'
 import { type Agent } from '@/hooks/useAgents'
+import type { AgentBusyAction } from '@/hooks/useAgentPanelState'
 import type { Organization } from '@/hooks/useOrganizations'
-import { DEFAULT_CHAIN_ID, resolveChainOrNull } from '@/lib/chains'
+import { AGENT_PAUSED_BODY, AGENT_PAUSED_TITLE } from '@/lib/agent-pause-copy'
+import { agentMerchantLabel } from '@/lib/agent-merchant-label'
+import { DEFAULT_CHAIN_ID } from '@/lib/chains'
+import {
+  hasUsableBudget,
+  type AttentionRuleItem,
+  type DashboardBudgetRemaining,
+} from '@/lib/dashboard-attention'
+import { timeAgo } from '@/lib/format'
 import {
   FINISH_REVOKING_LABEL,
   HALF_REVOKED_BODY,
@@ -16,29 +39,101 @@ import {
   canFinishRevoking,
   isHalfRevoked,
 } from '@/lib/half-revoked'
-import { formatAgentLastActivity, formatAgentLastActivityTitle } from '@/lib/agent-last-seen'
-import { AGENT_PAUSED_BODY, AGENT_PAUSED_TITLE } from '@/lib/agent-pause-copy'
+import { agentStatusPresentation } from '@/lib/payment-status'
 import { STRANDED_FUNDS_TITLE, strandedFundsCause } from '@/lib/stranded-funds-copy'
 import MoveAgentModal from '../MoveAgentModal'
 import { RemoveAgentDialog } from './RemoveAgentDialog'
 import { entityCardClassName } from '../ui/entityCardStyles'
-import { ConfiguredAllowanceRow } from './ConfiguredAllowanceRow'
-import { BotIcon } from './agent-display'
-import type { AgentBusyAction } from '@/hooks/useAgentPanelState'
 
-const ACTION_BUTTON_CLASS =
-  'inline-flex min-h-11 min-w-11 items-center justify-center rounded-md px-1 text-xs text-[var(--v2-brand)] transition-colors hover:text-[var(--v2-brand-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--v2-bg)] disabled:opacity-50'
-const DANGER_ACTION_BUTTON_CLASS =
-  'inline-flex min-h-11 min-w-11 items-center justify-center rounded-md px-1 text-xs text-[var(--v2-ink-3)] transition-colors hover:text-[var(--v2-danger)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/80 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--v2-bg)] disabled:opacity-50'
 /**
- * The `|` between the operational card's actions. Hidden below `lg`, where the
- * row wraps and a separator could only land at a line's start or end (#3222
- * re-review S9); visible from `lg` up, where the row never wraps.
+ * What the card reads from the dashboard's two reads (#4209). `GET /agents`
+ * carries no used or remaining figures, so the panel joins
+ * `useDashboardOverview` + `useBudgetRemaining` by agent id — the way
+ * `AccountDetailClient` does — and hands each card its slice.
  */
-const SEPARATOR_CLASS = 'hidden text-[var(--v2-border-strong)] lg:inline'
+export interface AgentCardDashboard {
+  /**
+   * False while the overview's first read, or the budget reads it captions
+   * with, are still in flight. The card shows a skeleton then — never "No
+   * budget" for an agent whose budget simply has not loaded yet.
+   */
+  ready: boolean
+  /**
+   * This agent's overview entry. `null` once ready means the overview has no
+   * entry for it: revoked agents are not in it (`dashboard.ts` selects active,
+   * paused and pending_approval), and a failed overview read has none.
+   */
+  agent: DashboardAgent | null
+  budgetRemaining: DashboardBudgetRemaining | null
+  attentionItems: AttentionRuleItem[]
+  nowMs: number
+}
+
+/**
+ * The card's one badge, only when the agent needs attention. The dashboard's
+ * `agentBadge` decides it for every agent it covers, so the dashboard row and
+ * this card badge one agent the same way; the two arms it does not cover —
+ * Archived (`archived_at`) and Revoked (the shared status words) — come first.
+ */
+export function agentCardBadge(
+  agent: Pick<Agent, 'status' | 'archived_at'>,
+  dashboard: AgentCardDashboard,
+): { label: string; tone: StatusTone } | null {
+  if (agent.archived_at) return { label: 'Archived', tone: 'neutral' }
+  if (agent.status === 'revoked') return agentStatusPresentation('revoked')
+  if (!dashboard.ready || !dashboard.agent) return null
+  // The LIST's status, not the overview's: Pause and Resume update the list
+  // at once while the overview refreshes on its own 10 s poll, and the badge
+  // must agree with the paused banner and the menu beside it.
+  return agentBadge(
+    { ...dashboard.agent, status: agent.status as DashboardAgent['status'] },
+    dashboard.attentionItems,
+    dashboard.budgetRemaining,
+  )
+}
+
+/**
+ * The footer's one line. "Last paid 20h ago · api.bitrefill.com" when the
+ * agent has paid (the merchant label never prints an address); "Connected
+ * 2h ago" when it never paid but has connected ("Last seen" for an agent the
+ * overview does not cover); "No payments yet", the dashboard's words,
+ * otherwise. Null when there is nothing true to say: an
+ * agent the overview does not cover (revoked) has unknown payments, so it
+ * never reads "No payments yet".
+ */
+export function agentCardFooter(
+  agent: Pick<Agent, 'mcp_last_seen_at'>,
+  dashboard: AgentCardDashboard,
+): string | null {
+  const stats = dashboard.agent?.stats ?? null
+  if (stats?.lastPaymentAt) {
+    const merchant = agentMerchantLabel(stats.lastCounterparty)
+    const paid = `Last paid ${timeAgo(stats.lastPaymentAt)}`
+    return merchant ? `${paid} · ${merchant}` : paid
+  }
+  if (agent.mcp_last_seen_at) {
+    // Outside the overview (a revoked agent) payments are unknown and the
+    // credential can no longer connect, so "Connected" would read as live.
+    const seen = timeAgo(agent.mcp_last_seen_at)
+    return dashboard.agent ? `Connected ${seen}` : `Last seen ${seen}`
+  }
+  return dashboard.agent ? 'No payments yet' : null
+}
+
+const MENU_TRIGGER_CLASS =
+  'inline-flex min-h-11 min-w-11 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-hover)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 disabled:cursor-not-allowed disabled:opacity-50'
+
+const BUSY_LABEL: Record<NonNullable<AgentBusyAction>, string> = {
+  pause: 'Pausing…',
+  resume: 'Resuming…',
+  archive: 'Removing…',
+  restore: 'Restoring…',
+}
 
 export function AgentCard({
   agent,
+  dashboard,
+  showAccountName = false,
   onPause,
   onResume,
   onRevokeCredential,
@@ -51,6 +146,9 @@ export function AgentCard({
   organizations = [],
 }: {
   agent: Agent
+  dashboard: AgentCardDashboard
+  /** #3719: the account name prints only when the user has two or more. */
+  showAccountName?: boolean
   onPause: (agent: Agent) => void
   onResume: (agent: Agent) => void
   /** RemoveAgentDialog step 2: plain POST /agents/:id/revoke, throws on failure. */
@@ -70,19 +168,17 @@ export function AgentCard({
   /** #3164: the user's organization tree, for the card's Move picker. */
   organizations?: Organization[]
 }) {
-  // #3717: pause is one click everywhere. It is a reversible, Haven-side
-  // block — not an on-chain end — so it no longer asks for a confirmation;
-  // the honest account of what it did is the paused banner (AGENT_PAUSED_BODY).
+  // #3717: pause is one click everywhere, so it is a plain menu item — no
+  // confirmation; the paused banner says what it did.
   const [removeModalOpen, setRemoveModalOpen] = useState(false)
   // #3542: the same dialog in its finish mode — ends the remaining budget of an
   // agent that is already revoked or archived, and moves nothing.
   const [finishModalOpen, setFinishModalOpen] = useState(false)
-  // #3164: mounted only while open (the per-agent modal, same pattern as
-  // RemoveAgentDialog below).
   const [moveModalOpen, setMoveModalOpen] = useState(false)
 
   const isActive = agent.status === 'active'
   const isPaused = agent.status === 'paused'
+  const isPending = agent.status === 'pending_approval'
   const isRevoked = agent.status === 'revoked'
   const isArchived = Boolean(agent.archived_at)
   const isOperational = !isRevoked && !isArchived
@@ -90,490 +186,238 @@ export function AgentCard({
   const halfRevoked = isHalfRevoked(agent)
   const canFinish = canFinishRevoking(agent)
 
-  const hasConfiguredAllowances = agent.allowances.length > 0
+  const badge = agentCardBadge(agent, dashboard)
+  const footer = agentCardFooter(agent, dashboard)
+  const budgetHref = `/agents/${agent.id}#${DELEGATION_BUDGET_CARD_ID}`
+  const needsBudget =
+    isActive && dashboard.ready && dashboard.agent !== null && !hasUsableBudget(dashboard.agent)
+
+  // ONE call to action, the step this agent needs next (#4209). Finishing a
+  // revocation ends live spend authority, so it outranks everything; stranded
+  // funds come next because they are the owner's money sitting outside the
+  // account. Everything else lives in the ⋯ menu.
+  const cta = canFinish ? (
+    <Button
+      size="sm"
+      onClick={() => setFinishModalOpen(true)}
+      disabled={isBusy}
+      aria-label={`${FINISH_REVOKING_LABEL} ${agent.name}`}
+    >
+      {FINISH_REVOKING_LABEL}
+    </Button>
+  ) : agent.has_stranded_funds ? (
+    // The list knows only THAT funds are stranded (`has_stranded_funds` is
+    // an EXISTS), not how many payments, so the count-aware "Review the N
+    // payments" label (`reviewStrandedPaymentsLabel`) cannot be honest here.
+    // The card uses the agent page's own action — label AND destination, the
+    // recovery flow — so one name never leads to two places.
+    <Button size="sm" href={`/agents/${agent.id}/sweep`}>
+      Recover funds
+    </Button>
+  ) : isPending ? (
+    <Button size="sm" href={budgetHref}>
+      Finish setup
+    </Button>
+  ) : needsBudget ? (
+    <Button size="sm" href={budgetHref}>
+      Set budget
+    </Button>
+  ) : null
+
+  const menuItems: Array<{ key: string; label: string; onSelect: () => void; danger?: boolean } | 'separator'> = []
+  if (isOperational) {
+    if (isActive) menuItems.push({ key: 'pause', label: 'Pause payments', onSelect: () => onPause(agent) })
+    if (isPaused) menuItems.push({ key: 'resume', label: 'Resume payments', onSelect: () => onResume(agent) })
+    // #3222: Move only when there is somewhere to move to.
+    if (organizations.length > 0) {
+      menuItems.push({ key: 'move', label: 'Move to organization', onSelect: () => setMoveModalOpen(true) })
+    }
+    if (menuItems.length > 0) menuItems.push('separator')
+    // #1402: Remove stops the live delegation and archives the credential.
+    menuItems.push({ key: 'remove', label: 'Remove', onSelect: () => setRemoveModalOpen(true), danger: true })
+  } else if (isArchived) {
+    menuItems.push({ key: 'restore', label: 'Restore to list', onSelect: () => onRestore(agent) })
+  } else {
+    menuItems.push({ key: 'remove', label: 'Remove from list', onSelect: () => setRemoveModalOpen(true) })
+  }
 
   return (
     <>
     <div
       data-testid="agent-card"
-      className={`${entityCardClassName({ muted: isRevoked, linked: true })} min-w-0`}
+      // #4209: a column, so the footer can sit on `mt-auto` and line up across
+      // a grid row (the panel's grid stretches cards to the tallest). An open
+      // ⋯ menu lifts its card above the next one, which the panel would
+      // otherwise paint over it.
+      // Revoked and archived cards fade — they are inert — except a
+      // half-revoked one: its budget is still live, and its Finish revoking
+      // CTA must not read as disabled.
+      className={`${entityCardClassName({ muted: (isRevoked || isArchived) && !halfRevoked, linked: true })} flex min-w-0 flex-col has-[[aria-expanded=true]]:z-[var(--v2-z-content)]`}
     >
-      {/* Header */}
-      {/* #2325: `flex-wrap` here, plus the stamp's `basis-full sm:basis-auto`
-          below, is the information-priority decision for a narrow card. Below
-          `sm` the "Last activity" stamp drops to its own line under the
-          name/account/MCP block, so the block gets the row's full width and the
-          MCP chip inside it is distinguishable at 390. At `sm` and up the stamp
-          is `basis-auto` and stays on the line, so the tablet/desktop layout is
-          unchanged. `flex-wrap` alone does nothing (the block's flex-basis is
-          0%, so it never pushes the stamp to a second line); the `basis-full`
-          is what forces the wrap. Proven by rendered geometry in
-          `e2e/agent-card-mcp-chip-measure.spec.ts`. */}
-      <div className="flex flex-wrap items-start gap-3 mb-4">
-          <div
-            className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${
-              isActive
-                ? 'bg-[var(--v2-brand-soft)] text-[var(--v2-brand)]'
-                : isPaused
-                  ? 'bg-[var(--v2-warning-soft)] text-[var(--v2-warning)]'
-                  : 'bg-[var(--v2-surface-2)] text-[var(--v2-ink-3)]'
-            }`}
-          >
-            <BotIcon size={16} />
+      <div className="flex items-start gap-3">
+        <Monogram name={agent.name} size="sm" decorative />
+        <div className="min-w-0 flex-1">
+          {/* #2237: the title row wraps, so a long name never pays for the
+              badge — the badge drops under it instead. */}
+          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
+            <h3 className="min-w-0 max-w-full truncate text-sm font-semibold text-[var(--v2-ink)]">
+              <Link
+                href={`/agents/${agent.id}`}
+                className="block min-w-0 truncate rounded-sm after:absolute after:inset-0 after:content-[''] focus-visible:outline-none"
+              >
+                {agent.name}
+              </Link>
+            </h3>
+            {badge ? (
+              <span data-testid="agent-status-chip" className="inline-flex">
+                <StatusBadge tone={badge.tone}>{badge.label}</StatusBadge>
+              </span>
+            ) : null}
           </div>
-          <div className="min-w-0 flex-1">
-            {/* #2237: the title row WRAPS, so the name stops paying for the
-                status pill. Same idiom as `components/haven/
-                TransactionActivityRow.tsx` (#1833), `WalletIdentityBlock.tsx`
-                and, since #2223, the `/accounts` card — `flex flex-wrap
-                items-center gap-2` around a `min-w-0 truncate` name.
-
-                This is a REAL defect here, not only an inconsistency, and it
-                was measured before it was fixed. At 1280 this row's content is
-                259px and the `paused` pill is 54.5px + an 8px gap. Without
-                `flex-wrap` the pill is the row's incompressible item, so the
-                name is capped at 196.7px whatever it says — "Nightly data-feed
-                reconciliation agent" measures 256.2px, FITS the row, and was
-                still rendered ellipsised at 75.9% of it. Every name past
-                196.5px truncated 62.5px earlier than the card required.
-
-                WHAT WRAPPING COSTS, stated rather than buried. When the pill
-                does move down, the title row grows one line: 20px -> 48px, and
-                the card 332px -> 360px. That cost is confined to the card that
-                wraps, because `AgentPanel`'s grid is `items-start` — unlike
-                `/accounts`, whose `align-items: stretch` propagated #2223's
-                wrap to the whole grid row as 28px of dead whitespace. Nothing
-                else on this row can pay: at most ONE pill renders (`!isActive`),
-                so there is no badge pair to orphan (#2235) and no hover-action
-                reservation to derive (#2236) — both of #2240's fixes are
-                inapplicable here, which is why this stayed a separate issue.
-
-                `min-w-0` on the `h3` is redundant given `truncate`
-                (`overflow: hidden` already resolves `min-width: auto` to 0, and
-                removing it alone leaves the geometry suite green — mutated and
-                measured). It is written anyway because all three sibling
-                surfaces write it, and an idiom that is only sometimes complete
-                is the thing this issue is about. */}
-            <div className="flex flex-wrap items-center gap-2">
-              <h3 className="min-w-0 truncate text-sm font-semibold text-[var(--v2-ink)]">
-                <Link
-                  href={`/agents/${agent.id}`}
-                  className="block min-w-0 truncate rounded-sm after:absolute after:inset-0 after:content-[''] focus-visible:outline-none"
-                >
-                  {agent.name}
-                </Link>
-              </h3>
-              {!isActive ? (
-                <span
-                  className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${
-                    isPaused
-                      ? 'bg-[var(--v2-warning-soft)] text-[var(--v2-warning)]'
-                      : agent.status === 'revoked'
-                        ? 'bg-[var(--v2-danger-soft)] text-[var(--v2-danger)]'
-                        : 'bg-[var(--v2-surface-2)] text-[var(--v2-ink-3)]'
-                  }`}
-                >
-                  {agent.status}
-                </span>
-              ) : null}
+          {showAccountName && agent.account_name ? (
+            <p className="mt-0.5 truncate text-xs text-[var(--v2-ink-3)]">{agent.account_name}</p>
+          ) : null}
+          {/* #3167: up to three labels, then "+N". Rendered only when labels
+              exist (#3197), so an unlabelled card gains no gap. */}
+          {agent.labels.length > 0 && (
+            <div data-testid="agent-card-labels" className="relative z-[var(--v2-z-content)] mt-1.5">
+              <LabelChipRow labels={agent.labels} />
             </div>
-            {/* #3719: the list spans every account, so the row names its own —
-                with the chain as the secondary half, the same shape the
-                account filter's options use. */}
-            {agent.account_name && (
-              <p className="text-xs text-[var(--v2-ink-2)] mt-0.5">
-                <span className="text-[var(--v2-ink-3)]">Account:</span> {agent.account_name}
-                {agent.account_chain_id != null && resolveChainOrNull(agent.account_chain_id) && (
-                  <span className="text-[var(--v2-ink-3)]">
-                    {' · '}
-                    {resolveChainOrNull(agent.account_chain_id)?.name}
-                  </span>
-                )}
-              </p>
-            )}
-            {/*
-              #1878: which MCP pair this agent is wired as. Below the display
-              name rather than beside it, and monospace rather than prose —
-              #1694's decision is "editable display name, immutable wiring
-              slug", so the two must not read as the same kind of thing.
-            */}
-            <div className="relative z-[var(--v2-z-content)] mt-0.5 flex min-w-0 items-center gap-1 text-xs">
-              <span className="text-[var(--v2-ink-3)]">MCP:</span>
-              <McpServerName value={agent.mcp_server_name} />
-            </div>
-            {agent.description && (
-              <p className="text-xs text-[var(--v2-ink-3)] mt-0.5">
-                {agent.description}
-              </p>
-            )}
-            {/*
-              #3167: the labels this agent carries — max three visible, then a
-              "+N" counter (`LabelChipRow`). Under the identity block, beside
-              nothing: a label is categorisation, not status, so it must not
-              read as the header's warning/danger pill. The wrapper is
-              rendered only when labels exist (#3197): `LabelChipRow` returns
-              null for an empty list, but this div's `mt-1.5` would still
-              render and every unlabelled card gained a ~6px gap under the
-              description. Same guard as the detail page's label row
-              (`AgentDetailClient`). Edit via the card's Edit modal; the full
-              set is visible there and in the label manager.
-            */}
-            {agent.labels.length > 0 && (
-              <div className="relative z-[var(--v2-z-content)] mt-1.5">
-                <LabelChipRow labels={agent.labels} />
-              </div>
-            )}
-          </div>
-          <p
-            /* #2325: the information-priority half of the narrow-card fix.
-               `basis-full` makes this stamp a full-width flex item, so on the
-               now-wrapping header row it is forced onto its own line below the
-               name/account/MCP block at every width below `sm`. `sm:basis-auto`
-               restores the on-the-line layout at `sm` and up, where the card is
-               wide enough that the stamp and the block share the row.
-
-               WHY `sm` AND NOT A NARROWER BREAKPOINT. Below `sm` the wrap is
-               unconditional, so between ~466 and 639 a card with a SHORT slug
-               takes a line it did not strictly need. That band is measured,
-               not overlooked, and 640 is where it should stay: on the
-               unwrapped layout a 34-character slug (natural 258px) is still
-               cut to 148.5px at 500 and 208.5px at 560, and only renders whole
-               from 639 up. Moving the breakpoint down to spare the short slug
-               its extra line would hand that band back to the #2325 defect for
-               exactly the names hardest to tell apart. One line of whitespace
-               for a legible identifier is the same trade as the wrap itself.
-               Pinned by the 500px arm in the spec below.
-
-               ALIGNMENT ON THE WRAPPED LINE. `text-left sm:text-right`: on
-               its own line the stamp is LEFT-aligned, flowing directly under
-               the description in normal reading order, and it goes back to
-               right-aligned at `sm` where it shares the row. The rendered
-               review pass raised this: right-flush, the stamp was the one
-               right-jutting line under an otherwise left-aligned stack, so the
-               eye crossed the whole card for a fragment of secondary text —
-               more visual pull than the element this change deliberately
-               demotes should carry. Left-aligned it reads as a continuation of
-               the block instead of a flagged line.
-
-               `ml-auto` and `shrink-0` stay. On the wrapped line `ml-auto` is
-               a no-op (the block above is `flex-1` and fills the line) and it
-               still does the right-alignment work at `sm` and up; `shrink-0`
-               keeps the "Last activity 1mo ago" text from wrapping. The
-               `title` tooltip and the text are untouched — only the line it
-               sits on, and its alignment on that line, change. */
-            className="relative z-[var(--v2-z-content)] ml-auto shrink-0 basis-full pt-0.5 text-left text-xs text-[var(--v2-ink-3)] sm:basis-auto sm:text-right"
-            title={formatAgentLastActivityTitle(agent.mcp_last_seen_at)}
-          >
-            {formatAgentLastActivity(agent.mcp_last_seen_at)}
-          </p>
+          )}
+        </div>
+        {/* A sibling control raised above the stretched name link
+            (`design-system.md` § Cards), so it opens the menu, not the page. */}
+        <div className="relative z-[var(--v2-z-content)] -mr-2 -mt-2 flex items-center gap-1">
+          <span role="status" className="sr-only">
+            {busyAction ? BUSY_LABEL[busyAction] : ''}
+          </span>
+          {busyAction ? (
+            <span aria-hidden="true" className="text-xs text-[var(--v2-ink-3)]">
+              {BUSY_LABEL[busyAction]}
+            </span>
+          ) : null}
+          <DropdownMenu>
+            {/* Never disabled: an item chosen from the keyboard hands focus
+                back to this trigger, and a disabled one would drop it to
+                the body. While an action runs, the ITEMS are disabled. */}
+            <DropdownMenuTrigger
+              aria-label={`Actions for ${agent.name}`}
+              className={MENU_TRIGGER_CLASS}
+            >
+              <Icon icon={EllipsisVertical} className="h-4 w-4" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent>
+              {menuItems.map((item, index) =>
+                item === 'separator' ? (
+                  <DropdownMenuSeparator key={`separator-${index}`} />
+                ) : (
+                  <DropdownMenuItem
+                    key={item.key}
+                    onSelect={item.onSelect}
+                    disabled={isBusy}
+                    tone={item.danger ? 'danger' : 'default'}
+                  >
+                    {item.label}
+                  </DropdownMenuItem>
+                ),
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
       </div>
 
-      {/* ── Both notices go through `ApprovalRequiredBanner` (#2216) ───────────
-          These were two hand-rolled copies of the primitive's shape, a few
-          lines apart in this file, painting TITLE AND BODY in
-          `--v2-warning` while the primitive reserves the tint for the icon
-          badge and keeps prose in `--v2-ink` / `--v2-ink-2`. Same words as the
-          agent-detail banners one click away, two colour voices.
+      <div className="mt-3 space-y-3">
+        {isOperational ? (
+          !dashboard.ready ? (
+            <div data-testid="agent-card-budget-loading" aria-hidden="true" className="space-y-2 pt-1">
+              <Skeleton className="h-1.5 w-full rounded-full" />
+              <Skeleton variant="text" className="h-2.5 w-40" />
+            </div>
+          ) : dashboard.agent ? (
+            // The dashboard row's own budget block (#4096): the same meter and
+            // caption, "+N budgets", the received-sub-budget line and "No
+            // budget" — nothing re-composed here.
+            <div data-testid="agent-card-budget">
+              <AgentBudget
+                agent={dashboard.agent}
+                budgetRemaining={dashboard.budgetRemaining}
+                nowMs={dashboard.nowMs}
+              />
+            </div>
+          ) : (
+            // The overview failed or has no entry: usage is unknown — an em
+            // dash, never a meter and never "No budget" (#1846).
+            <p data-testid="agent-card-budget" className="text-xs text-[var(--v2-ink-3)]">—</p>
+          )
+        ) : null}
 
-          Restyling the two to imitate the primitive was rejected: it leaves
-          three implementations of one visual idea, which is how these diverged
-          in the first place, and the pattern-absorption preflight (#901) says
-          extract on the SECOND occurrence — this file was already at two, and
-          the primitive existed. Adopting it inherits the ink rule, the icon
-          badge, the tone ladder and the 10px frame instead of re-typing any of
-          them.
-
-          `--v2-warning` is scoped to "402 Payment Required, pending review"
-          and to environment identity — the DEV chip and the dev install's
-          icon badge (`docs/product/design-system.md` § 1, restated in § Local
-          hint marker, widened by #2729) — neither of which is a paused agent,
-          which is a reason the tint belongs on a severity MARKER and not on a
-          paragraph.
-
-          The tones are the ones `AgentDetailClient` already passes for the
-          same two facts (`:666`, `:674`) — `neutral` for paused, `warning` for
-          stranded. Paused is neither 402/pending-review nor environment
-          identity, and the card has not lost
-          its amber: the header's status pill and the bot tile both still paint
-          it. Choosing anything else here would leave one fact rendered two
-          ways on two screens the card's own link navigates between, which is
-          exactly the #2195 defect this is the styling half of. */}
-      {/* #2230 (the BODY half #2216 deferred): title and body come from
-          `lib/agent-pause-copy.ts`, shared with the detail page's banner one
-          click away. The card once said "Existing network permissions stay
-          in place" where the detail page said "Existing wallet rules" — the
-          detail page's wording was TAKEN rather than a third one written.
-          #3717 replaced that shared body with the 2026-10-07 owner sentence,
-          which says what a pause does NOT block and how to end what it
-          leaves standing (see the module header). */}
-      {isPaused && (
-        <div className="mb-3">
+        {/* #2230 / #3717: the paused copy is the detail page's banner, shared. */}
+        {isPaused && (
           <ApprovalRequiredBanner title={AGENT_PAUSED_TITLE} tone="neutral" density="compact">
             {AGENT_PAUSED_BODY}
           </ApprovalRequiredBanner>
-        </div>
-      )}
+        )}
 
-      {agent.has_stranded_funds && (
-        <div className="mb-3">
+        {agent.has_stranded_funds && (
           <ApprovalRequiredBanner title={STRANDED_FUNDS_TITLE} tone="warning" density="compact">
-            {/* #2195: title and cause clause are the SHARED ones — this card and
-                the agent-detail banner are one click apart and used to name the
-                same reconciliation event two different ways. The count is `null`
-                because `has_stranded_funds` is a SQL `EXISTS`, so this surface
-                knows the state exists and cannot know how many events or how
-                much money; the detail banner holds the list and the balance, and
-                says so. That is the difference in detail level, made deliberate.
-
-                `strandedFundsCause`, not the `WithLocation` variant the detail
-                banner uses: the shared title already says "in agent wallet" and
-                the link below says "these funds", so repeating the location
-                here bought nothing and cost a fourth wrapped line at 390px
-                (`haven-design-reviewer` on this change, measured off the 390
-                capture — it also corrected my desktop-only "2 to 3 lines"
-                reading; the real growth at 390 was 3 to 4). */}
-            <span>{strandedFundsCause(null)} Open the agent to recover these funds.</span>
+            {/* #2195: the shared title and cause clause. The count is `null`:
+                `has_stranded_funds` is an EXISTS, so the card knows the state
+                and not its size; the agent page holds the list. The way there
+                is the card's Recover funds CTA, so the body does not repeat it. */}
+            <span>{strandedFundsCause(null)}</span>
           </ApprovalRequiredBanner>
-        </div>
-      )}
+        )}
 
-      {/* #3542: revoked or removed, yet a budget delegation is still redeemable
-          on-chain. `status` alone says the opposite ("revoked"), so this is the
-          one place the card tells the truth about it. The action lives in the
-          row below, next to Remove / Restore. */}
-      {halfRevoked && (
-        <div className="mb-3" data-testid="half-revoked-marker">
-          <ApprovalRequiredBanner title={HALF_REVOKED_TITLE} tone="warning" density="compact">
-            {canFinish ? HALF_REVOKED_BODY : HALF_REVOKED_UNLINKED_BODY}
-          </ApprovalRequiredBanner>
-        </div>
-      )}
-
-      {isOperational && (
-        <div className="mb-3">
-          <div className="space-y-2">
-            <p className="text-xs font-medium text-[var(--v2-ink-3)]">Agent budget</p>
-
-            {hasConfiguredAllowances ? (
-              agent.allowances.map((allowance) => (
-                <ConfiguredAllowanceRow
-                  key={allowance.id}
-                  allowance={allowance}
-                  chainId={chainId}
-                />
-              ))
-            ) : (
-              <p className="text-xs text-[var(--v2-ink-3)]">No budget</p>
-            )}
+        {/* #3542: revoked or removed, yet a budget is still redeemable
+            on-chain — the one place the card says so. */}
+        {halfRevoked && (
+          <div data-testid="half-revoked-marker">
+            <ApprovalRequiredBanner title={HALF_REVOKED_TITLE} tone="warning" density="compact">
+              {canFinish ? HALF_REVOKED_BODY : HALF_REVOKED_UNLINKED_BODY}
+            </ApprovalRequiredBanner>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Actions */}
-      {/* #1909: `pb-1` is load-bearing, not spacing taste. These controls carry
-          `ring-2` with NO offset, so ~2px of every focus ring falls outside the
-          control's own box. The clearance the operational branches appeared to
-          have was an ACCIDENT of the `|` separators below: they carry no
-          `text-xs`, so they inherit 16px/24px and become the tallest flex item,
-          and `items-center` then centres the 16px controls inside that 24px band
-          — 4px above and below, for free. The archived branch renders no
-          separator, so its tallest item IS the 16px control and the row's box
-          ended exactly at the control's box: ring flush against the boundary,
-          zero clearance, identically on macOS and Linux (measured 29px vs the
-          siblings' 37px). Stating the padding makes the clearance a property of
-          the row rather than of which children happen to render. 4px is the
-          sibling clearance exactly — 2px of ring, 2px clear.
+        {/* Revoked and archived cards draw no meter — the overview does not
+            cover revoked agents, and #1846 forbids a meter when usage is not
+            known — so they say why instead. */}
+        {isRevoked && !isArchived && !halfRevoked ? (
+          <p className="text-xs text-[var(--v2-ink-3)]">Network access already revoked</p>
+        ) : null}
+        {isArchived ? (
+          <p className="text-xs text-[var(--v2-ink-3)]">
+            {halfRevoked
+              ? 'Restoring to the list does not end its budget'
+              : 'History stays readable; restoring never re-enables spending'}
+          </p>
+        ) : null}
 
-          The result is deliberately asymmetric and that is fine: the branches
-          with separators now get ~8px (4 accidental + 4 stated) and the
-          archived branch gets 4. Both contain the ring with room to spare, and
-          the alternative — a `pb` conditional on which branch rendered — would
-          encode the accident instead of retiring it. Giving the separators
-          `text-xs` would equalise the band at 16px and make all five branches
-          4px, but it also resizes a visible glyph, so it is a design change
-          rather than this fix. */}
+        {cta ? (
+          <div data-testid="agent-card-cta" className="relative z-[var(--v2-z-content)] flex">
+            {cta}
+          </div>
+        ) : null}
+      </div>
+
+      {/* #4209 (owner decision 2026-10-21, reversing #2237's `items-start`):
+          the footer is pinned with `mt-auto`, so in a row stretched to its
+          tallest card every footer sits on the same line, as on `/accounts`.
+          #2237 had kept cards at their own height so one wrapping title did
+          not pad its neighbour; a footer that lines up across the row is now
+          the rule, and the spare space sits above the divider. */}
       <div
-        data-testid="agent-card-actions"
-        className={`relative z-[var(--v2-z-content)] flex flex-wrap ${isArchived && halfRevoked ? '' : 'lg:flex-nowrap'} items-center ${isOperational ? 'gap-x-4 gap-y-2 lg:gap-2' : 'gap-2'} pt-3 pb-1 border-t border-[var(--v2-border)]`}
+        data-testid="agent-card-footer"
+        className="mt-auto pt-4"
       >
-        {/* #3222 re-review S9: below `lg` the row wraps, and a `|` could only
-            ever land at a line's start or end — round 3 moved it from one to
-            the other. The operational separators are hidden below `lg`
-            (SEPARATOR_CLASS) and `gap-x-4` spaces the actions instead — on the
-            operational row only, so the revoked and archived rows keep `gap-2`; from
-            `lg` up the row is nowrap with `gap-2` and the separators, so the
-            desktop render is unchanged. */}
-        {/* #3164 review: `flex-wrap` — the row holds four `min-w-11` text
-            actions plus separators, and below `lg` a card is the full grid
-            column (one column at 390, `minmax(0,1fr)` track at 768). At the
-            narrowest supported width (320) the operational row's actions
-            (~270px natural) exceed the card's content box (~288px), so the
-            row MUST be allowed to wrap between controls; `gap-2` is the
-            wrapped lines' row-gap too. The Mobile-shell gate asserts the
-            ARCHIVED row's own 390px no-overflow budget
-            (`focus-visible.visual.spec.ts`), and the /agents card row was
-            measured fitting 393 with ~50px to spare — this wrap is the
-            320-hardening, not a fix for a 393 overflow. `lg:flex-nowrap`
-            keeps every desktop render byte-identical: the desktop captures
-            in this file (438px rows with 9px of slack on the widest branch)
-            were taken with the row on one line, and font-metric drift is the
-            one thing a baseline cannot absorb. */}
-        {isOperational && (
-          <>
-            {/* #3164: file the agent under an organization. Placement only —
-                the modal's note says so, and nothing here touches authority. */}
-            {/* Round-3 review (S9): each `|` travels WITH the button it
-                introduces — on a wrapped line below `lg` the row used to
-                strand a pipe at the previous line's end (a dangling `|`
-                followed by a lone "Remove"). At `lg`+ the row is nowrap and
-                renders byte-identically to the committed close-up baselines. */}
-            {/* #3222 re-review: Move only when there is somewhere to move
-                to — with no organizations the picker offered only "Top level",
-                a dead end that also made the mobile row wrap. */}
-            {organizations.length > 0 && (
-              <span className="flex items-center gap-2">
-                <button
-                  onClick={() => setMoveModalOpen(true)}
-                  disabled={isBusy}
-                  aria-label={`Move ${agent.name} to an organization`}
-                  className={ACTION_BUTTON_CLASS}
-                >
-                  Move
-                </button>
-              </span>
-            )}
-            <span className="flex items-center gap-2">
-              {isActive ? (
-                <button
-                  onClick={() => onPause(agent)}
-                  disabled={isBusy}
-                  aria-label={`Pause ${agent.name}`}
-                  className={ACTION_BUTTON_CLASS}
-                >
-                  {busyAction === 'pause' ? 'Pausing…' : 'Pause payments'}
-                </button>
-              ) : (
-                <button
-                  onClick={() => onResume(agent)}
-                  disabled={isBusy}
-                  aria-label={`Resume ${agent.name}`}
-                  className={ACTION_BUTTON_CLASS}
-                >
-                  {busyAction === 'resume' ? 'Resuming...' : 'Resume from pause'}
-                </button>
-              )}
-            </span>
-            {/* #1402: Remove stops the live delegation and archives its
-                credential. #2413 dropped the legacy "Unlink" variant with the
-                records it named. */}
-            <span className="flex items-center gap-2">
-              <span className={SEPARATOR_CLASS}>|</span>
-              <button
-                onClick={() => setRemoveModalOpen(true)}
-                disabled={isBusy}
-                aria-label={`Remove ${agent.name}`}
-                className={DANGER_ACTION_BUTTON_CLASS}
-              >
-                Remove
-              </button>
-            </span>
-          </>
-        )}
-        {isRevoked && !isArchived && (
-          <>
-            {halfRevoked ? (
-              canFinish && (
-                <>
-                  <button
-                    onClick={() => setFinishModalOpen(true)}
-                    disabled={isBusy}
-                    aria-label={`${FINISH_REVOKING_LABEL} ${agent.name}`}
-                    className={`${ACTION_BUTTON_CLASS} whitespace-nowrap`}
-                  >
-                    {FINISH_REVOKING_LABEL}
-                  </button>
-                  <span className="text-[var(--v2-border-strong)]">|</span>
-                </>
-              )
-            ) : (
-              <>
-                <span className="text-xs text-[var(--v2-ink-3)]">
-                  Network access already revoked
-                </span>
-                <span className="text-[var(--v2-border-strong)]">|</span>
-              </>
-            )}
-            <button
-              onClick={() => setRemoveModalOpen(true)}
-              disabled={isBusy}
-              aria-label={`Remove ${agent.name}`}
-              className={DANGER_ACTION_BUTTON_CLASS}
-            >
-              {busyAction === 'archive' ? 'Removing...' : 'Remove'}
-            </button>
-          </>
-        )}
-        {isArchived && (
-          <>
-            {/* #1909: `whitespace-nowrap` on the action label, with the sentence
-                beside it left free to wrap. Under CI's (Linux) font metrics
-                `Restore to list` broke across two lines at DESKTOP width — the
-                committed baseline was 438x45 where macOS rendered 438x29 — so
-                this is a real wrap, not a rendering-judge quirk.
-
-                The 390px budget says this costs nothing. Row content width
-                there is 300px (342px card less `p-5` and borders), gap 8px, so
-                the two children share 292px. Unwrapped the label is 77px and
-                the sentence is 340px — the sentence CANNOT fit on one line at
-                this width whatever the label does, and its `min-content` is
-                53px. Pinning the label therefore leaves 300 - 77 - 8 - 53 =
-                162px of slack before the row could overflow, and the measured
-                overflow at 390px is 0. A two-word action label is an atomic
-                phrase; the explanatory sentence is the thing that should reflow.
-
-                That budget is ASSERTED rather than merely recorded here — see
-                "the archived branch does not overflow at 390px" in
-                `e2e/focus-visible.visual.spec.ts`, which checks both the
-                overflow and the single line at exactly this width. Arithmetic
-                in a comment is run by nobody.
-
-                Rejected: shortening to `Restore` (43px unwrapped) — a shorter
-                label is still a wrappable one, so it buys probability where the
-                whole lesson of this defect is that macOS metrics mispredicted
-                Linux by 16px, and it drops the object from a control whose
-                destination is the point (`aria-label` says "to the list").
-                Rejected: widening the container — it is the agents grid column,
-                so every card on the page moves to fix one label. */}
-            {/* #3542: the action that ends the live budget comes first. */}
-            {canFinish && (
-              <button
-                onClick={() => setFinishModalOpen(true)}
-                disabled={isBusy}
-                aria-label={`${FINISH_REVOKING_LABEL} ${agent.name}`}
-                className={`${ACTION_BUTTON_CLASS} whitespace-nowrap`}
-              >
-                {FINISH_REVOKING_LABEL}
-              </button>
-            )}
-            <button
-              onClick={() => onRestore(agent)}
-              disabled={isBusy}
-              aria-label={`Restore ${agent.name} to the list`}
-              className={`${ACTION_BUTTON_CLASS} whitespace-nowrap`}
-            >
-              {busyAction === 'restore' ? 'Restoring...' : 'Restore to list'}
-            </button>
-            {/* Half-revoked: the helper takes its own full-width line under the
-                buttons rather than wrapping beside them. */}
-            <span
-              className={`text-xs text-[var(--v2-ink-3)] ${halfRevoked ? 'basis-full' : 'ml-auto'}`}
-            >
-              {halfRevoked
-                ? 'Restoring to the list does not end its budget'
-                : 'History stays readable; restoring never re-enables spending'}
-            </span>
-          </>
-        )}
+        {/* One 16px line in every state — loading, empty and filled — so a
+            footer with nothing true to say still lines up with its row. */}
+        <div className="flex h-4 items-center border-t border-[var(--v2-border)] pt-3 text-xs leading-4 text-[var(--v2-ink-3)] box-content">
+          {!dashboard.ready ? (
+            <Skeleton variant="text" className="h-2.5 w-32" />
+          ) : footer ? (
+            <p className="min-w-0 truncate v2-tabular">{footer}</p>
+          ) : null}
+        </div>
       </div>
     </div>
 
@@ -602,8 +446,7 @@ export function AgentCard({
       />
     )}
 
-    {/* #3164: the org picker for THIS agent, mounted only while open. The
-        vocabulary comes from the panel (one fetch serves every card). */}
+    {/* #3164: the org picker for THIS agent, mounted only while open. */}
     {moveModalOpen && (
       <MoveAgentModal
         open={moveModalOpen}

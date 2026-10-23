@@ -1,4 +1,4 @@
-import { currentPeriodBounds } from '@haven_ai/core'
+import { currentPeriodBounds, shouldMarkApprox } from '@haven_ai/core'
 import { formatAllowanceAmount, getTokenDecimals } from './allowance-format'
 import { formatFiatDisplay } from './format'
 
@@ -122,8 +122,9 @@ export function nextRefillAt(startSec: number, periodSeconds: number, nowMs: num
 // Token mode is the budget card's voice: the delegation's own units, always
 // two decimals ("1.25 of 5.00 USDC"). Currency mode is everywhere else: a
 // rate supplied by the caller converts the token amounts to the display
-// currency, and the caption carries ONE leading "≈" because a spot rate is an
-// estimate. An unknown rate falls back to token mode.
+// currency, and the caption carries at most ONE leading "≈" — only where the
+// one rule (`shouldMarkApprox`, #4165) says the conversion changes the number,
+// so USDC in USD carries none. An unknown rate falls back to token mode.
 
 export type BudgetRate = { currency: 'USD' | 'EUR' | 'SEK'; /** Fiat per one token unit. */ perToken: number }
 
@@ -145,25 +146,34 @@ function tokenAmount(atomic: string, symbol: string, chainId: number | null | un
   })
 }
 
-/** Bare fiat — "$1.25", or "<$0.01" under a cent (#3897). An unparseable amount falls back to token mode. */
+/** Bare fiat — "$1.25", or 4 decimals under a cent ("<0,0001 kr" below 0.00005; 2026-10-22, superseding #3897). An unparseable amount falls back to token mode. */
 function fiatValue(atomic: string, symbol: string, rate: BudgetRate, chainId: number | null | undefined): string {
   const decimals = chainId != null ? getTokenDecimals(chainId, symbol) : undefined
   // Every token decimal, not the 4-digit display default (#3897): truncating
   // first turned a sub-cent amount into "0" before it was converted, so the
-  // caption printed "≈$0.00" where "≈<$0.01" is the true figure.
+  // caption printed "≈$0.00" where "≈0,0001 kr" is the true figure.
   const decimal = formatAllowanceAmount(atomic, decimals ?? 18, { maximumFractionDigits: decimals ?? 18 })
   const human = Number.parseFloat(decimal)
   if (!Number.isFinite(human)) return tokenAmount(atomic, symbol, chainId)
   return formatFiatDisplay(human * rate.perToken, rate.currency)
 }
 
+/** "≈" when the one rule says the conversion changes the number (#4165), else nothing. */
+function approxPrefix(symbol: string, chainId: number | null | undefined, rate: BudgetRate): string {
+  return shouldMarkApprox({ repriced: true, chainId, tokenSymbol: symbol, displayCurrency: rate.currency, kind: 'total' })
+    ? '≈'
+    : ''
+}
+
 /**
- * One budget amount in the mode `options` selects: token units, or "≈" fiat —
- * the "≈" marks the estimate a spot rate always is.
+ * One budget amount in the mode `options` selects: token units, or fiat —
+ * marked "≈" where the conversion changes the number.
  */
 export function budgetAmount(atomic: string, symbol: string, options: BudgetAmountOptions = {}): string {
   const { chainId = null, rate } = options
-  return rate ? `≈${fiatValue(atomic, symbol, rate, chainId)}` : `${tokenAmount(atomic, symbol, chainId)} ${symbol}`.trim()
+  return rate
+    ? `${approxPrefix(symbol, chainId, rate)}${fiatValue(atomic, symbol, rate, chainId)}`
+    : `${tokenAmount(atomic, symbol, chainId)} ${symbol}`.trim()
 }
 
 // ── The caption ─────────────────────────────────────────────────────────────
@@ -183,6 +193,15 @@ export interface BudgetCaptionRow {
   periodSeconds: number
   /** Unix seconds; null when the row carries no expiry (the analytics read). */
   expiresSec: number | null
+  /**
+   * #3922: the server's liveness for the row (`is_live`). `false` means the
+   * backend no longer counts it as a live budget — for an active row, past its
+   * expiry — and it reads as expired even if this render's clock disagrees.
+   * Undefined (analytics, allowance rows) defers to `expiresSec` alone. It is
+   * a fetch-time snapshot, so the clock comparison stays: a page left open
+   * past `expiresSec` still flips to expired.
+   */
+  isLive?: boolean | null
   budgetAtomic: string
   /** The used amount when a read exists, else null — "no figure" ≠ "failed". */
   usedAtomic: string | null
@@ -203,8 +222,8 @@ export interface BudgetCaptionOptions {
   /** Currency mode; absent or unresolvable → token mode. */
   rate?: BudgetRate | null
   /**
-   * #3908: `'row'` is the dashboard agent row's compact meter caption, as the
-   * mockup draws it — "≈$0.40 of $1.00 · per day · refills in 5h". The bar
+   * #3908: `'row'` is the shared agent row's compact meter caption — "1.20
+   * of 3.00 USDC · per day · refills in 5h" (token mode since #4165). The bar
    * already shows usage, so "used this period" gives way to the period word.
    * Default `'full'` keeps every other surface's wording.
    */
@@ -245,9 +264,10 @@ function usedPercentOf(usedAtomic: string, budgetAtomic: string): number | null 
 function meterCaption(row: BudgetCaptionRow, options: BudgetCaptionOptions): string {
   const { nowMs, timeZone, rate, style = 'full' } = options
   const figures = rate
-    ? // Currency mode: ONE leading "≈" for the caption — a spot rate is an
-      // estimate, and the estimate covers the line, not each figure.
-      `≈${fiatValue(row.usedAtomic ?? '0', row.symbol, rate, row.chainId)} of ${fiatValue(row.budgetAtomic, row.symbol, rate, row.chainId)}`
+    ? // Currency mode: at most ONE leading "≈" for the caption — the estimate
+      // covers the line, not each figure — and only where the one rule says
+      // the conversion changes the number (#4165): USDC in USD carries none.
+      `${approxPrefix(row.symbol, row.chainId, rate)}${fiatValue(row.usedAtomic ?? '0', row.symbol, rate, row.chainId)} of ${fiatValue(row.budgetAtomic, row.symbol, rate, row.chainId)}`
     : // The dashboard row (#3910) joins the cap and its symbol with a no-break
       // space: its amounts segment may wrap at its own spaces, and "3.00" /
       // "USDC" must not land on separate lines. Other surfaces keep a plain one.
@@ -266,6 +286,10 @@ function meterCaption(row: BudgetCaptionRow, options: BudgetCaptionOptions): str
   return `${usedLine} · ${when}`
 }
 
+function rowIsExpired(row: BudgetCaptionRow, nowMs: number): boolean {
+  return row.isLive === false || (row.expiresSec != null && row.expiresSec * 1000 <= nowMs)
+}
+
 /**
  * The caption for one budget row (#3806). Every budget meter in the app — the
  * agent detail card, the edit modals, the analytics table, the dashboard row
@@ -275,7 +299,7 @@ export function budgetCaption(row: BudgetCaptionRow, options: BudgetCaptionOptio
   const { nowMs } = options
   // An `active` row can outlive its `expires_at` — nothing flips the status.
   // Such a budget can no longer spend: no meter, no countdown.
-  if (row.expiresSec != null && row.expiresSec * 1000 <= nowMs) return { kind: 'expired', caption: EXPIRED_CAPTION }
+  if (rowIsExpired(row, nowMs)) return { kind: 'expired', caption: EXPIRED_CAPTION }
   // The dormant half of a re-key: the steady grant has not begun.
   if (row.startSec * 1000 > nowMs) {
     return { kind: 'not-started', caption: `Starts ${formatNextEvent(row.startSec * 1000, nowMs, options.timeZone)}` }
@@ -349,7 +373,7 @@ export function selectPrimaryBudgets(rows: BudgetCaptionRow[], nowMs: number): S
   const nowSec = Math.floor(nowMs / 1000)
   const live = rows.filter(
     (r) =>
-      !(r.expiresSec != null && r.expiresSec <= nowSec) && // expired (#3802)
+      !rowIsExpired(r, nowMs) && // expired (#3802; the server's `is_live` too, #3922)
       r.startSec <= nowSec, // future start — the dormant half of a re-key
   )
   if (live.length === 0) return null

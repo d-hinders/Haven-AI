@@ -1,0 +1,123 @@
+name: Release the claim on close
+
+# Posts the `🔓 RELEASE` the claim protocol asks for (AGENTS.md § Cross-session
+# agent coordination) when an issue is closed with no merge behind the close —
+# the close `claim-release-on-merge.yml` never sees (#4176, Path B). Measured on
+# 2026-10-20: eight stale claims were backfilled by hand on #3193, every one on
+# an issue a person closed between 12 minutes and nine days after its `Refs`-only
+# PR merged. Decision logic, fetch and every write live in
+# `scripts/ci/release-on-merge.mjs` (`--close-event`), under `node --test`.
+#
+# ## What one close posts
+#
+# For every collaborator (OWNER / MEMBER / COLLABORATOR, never a bot) who holds
+# an unreleased claim of the issue — a `🔒 CLAIM` on the issue or on the channel,
+# with no `🔓 RELEASE` or `↩️ WITHDRAWN` of theirs since — ONE comment on the
+# issue naming them all:
+#
+#   🔓 RELEASE #N — claims of `a`, `b` — the issue was closed by `closer` with no
+#   merge behind the close, so no claim on it is live — posted automatically on a
+#   hand close (#4176).
+#
+# the same line on the channel for the claimants whose claim is there, and an
+# unassign of everyone still assigned (no claim on a CLOSED issue is live — the
+# merge path's rule). With no unreleased claim it posts nothing and leaves the
+# assignees as they are: every unassign is explained by a release line beside
+# it, and an assignee nobody claimed is a person's tracking decision. A re-run
+# posts nothing on a thread that already carries the line.
+#
+# ## It defers to the merge path
+#
+# A merge that closes an issue fires the merge workflow's pull-request `closed`
+# event AND `issues: closed` within seconds, and neither run would see the
+# other's line in time. So this job mirrors the merge path's exact rule and
+# skips an issue whose closer — read from the issue timeline's closed event,
+# never by re-reading a PR — is a pull request merged into the default branch
+# with `closed_at` within five minutes after its `merged_at`. When the closing
+# keyword sat in the title or a commit, GitHub records the squash COMMIT as the
+# closer (11 of the last 100 closed issues at #4176's review, e.g. #2314 →
+# #2268 via `7f7102ff`); its associated pull requests are read and the same
+# rule applies. A commit closer with NO merged associated pull request fails
+# closed (the association may lag the merge by the second this run reads it;
+# a real direct push to dev needs a ruleset bypass): nothing is released. Every
+# other close is this job's: by hand, or by a merge outside the window. If the closed
+# event cannot be read, or its time is more than 10 s from the issue's
+# `closed_at` (so it is not provably THIS close), nothing is released.
+#
+# The reads are staged so a close that cannot release costs little: the
+# payload gate (bot close, non-collaborator author's own close) reads nothing;
+# the deferral reads only the timeline (one GraphQL call); only a close that
+# may release reads both threads' comments (~16 REST pages with the channel).
+#
+# Past the merge path's `closingIssuesReferences(first:50)` cap: an issue linked
+# only from a PR body beyond the fiftieth reference is closed by GitHub, not
+# released by the merge path, and deferred here as merge-closed — released by
+# neither. Stated, not guarded.
+#
+# ## Who can trigger a release
+#
+# Only a person's close: a bot or App close is skipped from the payload alone.
+# A close by the issue's own author counts only when the author is a
+# collaborator (`author_association`); anyone else needed triage access to close
+# it at all. Closes made with `GITHUB_TOKEN` never fire `issues: closed`
+# (GitHub's non-recursion rule), so the bot self-closes in
+# `scripts/ci/qa-failure-issue.mjs`, `scripts/ci/qa-balance-issue.mjs`,
+# `scripts/ci/dev-push-health.mjs` and `scripts/ci/guard-freshness.mjs` release
+# nothing.
+#
+# A mass hand-close fans out one run per issue, and each run reads the whole
+# channel (~14 REST pages at ~1,400 comments): the REST rate limit bounds how
+# many fit in an hour. Runs for the same issue queue rather than overlap.
+#
+# ## Trust boundary
+#
+# `issues` events run the default branch's copy of this file and of the
+# script. The checkout names the default branch explicitly — the merge
+# workflow's checkout ref (the pull request's base branch) is empty on an
+# `issues` event and must not be copied here. The event is read from the file
+# GitHub provides (it carries the issue body, which is public text); comment
+# bodies go to `gh` on stdin, never argv. The token can comment and unassign;
+# it reads the closer pull request as the public data it is (this repository is
+# public). It never closes, reopens or labels anything, and never fails the
+# build: a failed read or a refused write is logged, exit 0.
+#
+# First proof: the first live run is linked on #4176
+# (`gh run list --workflow claim-release-on-close.yml --event issues`).
+
+on:
+  issues:
+    types: [closed]
+
+permissions:
+  issues: write # comment + unassign
+
+concurrency:
+  group: claim-release-on-close-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Post the release for a close no merge caused
+    if: github.repository == 'd-hinders/Haven-AI'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The default branch, named explicitly. Not the merge workflow's
+          # pull-request base ref, which does not exist on this event.
+          ref: ${{ github.event.repository.default_branch }}
+          # The job only reads its own script; the token never needs to
+          # outlive the checkout.
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+
+      - name: Decide and apply
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        # The event payload is read from the file GitHub provides, never
+        # interpolated. A failed read is logged and the step exits 0.
+        run: node scripts/ci/release-on-merge.mjs --close-event "$GITHUB_EVENT_PATH" --apply

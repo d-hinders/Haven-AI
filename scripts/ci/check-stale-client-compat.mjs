@@ -39,6 +39,18 @@ import { fileURLToPath } from 'node:url'
 const SNAPSHOT_REL = 'packages/mcp-server/src/tools-list.snapshot.json'
 const CORPUS_REL = 'packages/mcp-server/src/next-arguments-corpus.json'
 
+/**
+ * How-to-reconnect sentence printed in the job summary whenever the check
+ * has reconnect-required findings (#3940). A hosted tool-contract change
+ * needs a session restart, NOT a reset: the hosted transport is stateless
+ * and a restart rewrites no local files, so a reconnect keeps credentials,
+ * agent id and budget, and a prepared or funded payment keeps its
+ * payment_id and resumes. A relative link does not resolve in a job
+ * summary, hence the absolute GitHub URL.
+ */
+export const RECONNECT_HOWTO =
+  "Connected agents holding the last deploy's schema must reconnect or restart the session after this deploys — a reconnect keeps credentials, agent id and budget, and a prepared or funded payment keeps its payment_id and resumes (how-to: [the contract fingerprint and the reconnect rule](https://github.com/d-hinders/Haven-AI/blob/dev/docs/operations/mcp-runtime-compatibility.md#hosted-tool-lists--the-contract-fingerprint-and-the-reconnect-rule-3816))."
+
 /** Resolve a repo-relative path against this script's location (scripts/ci/). */
 function repoRoot(rel) {
   return join(dirname(fileURLToPath(import.meta.url)), '..', '..', rel)
@@ -192,7 +204,7 @@ function main() {
     console.log('**No reconnect-required changes detected.** Description-only and additive-optional changes are silent by design.')
     return
   }
-  console.log(`**Reconnect required — ${reports.length} finding(s).** Connected agents holding the last deploy's schema must reconnect after this deploys (how-to: the \`haven-reset\` skill):`)
+  console.log(`**Reconnect required — ${reports.length} finding(s).** ${RECONNECT_HOWTO}:`)
   console.log('')
   for (const report of reports) console.log(`- ${report}`)
 }

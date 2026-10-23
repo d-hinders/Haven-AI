@@ -1,6 +1,9 @@
 import type { Agent } from '@/hooks/useAgents'
 import type { SmartAccount } from '@/context/AuthContext'
 import { accountWithChainLabel } from '@/lib/account-label'
+import { hasConfiguredAllowances, receivedBudgetLine } from '@/lib/agent-budget'
+import type { ListFacet } from '@/components/ui/FacetMenu'
+import { sameValues, type ListState, type ListUrlSchema } from '@/components/ui/list-url-codec'
 
 /**
  * Search, facets and sort for the `/agents` list (#3165).
@@ -11,13 +14,21 @@ import { accountWithChainLabel } from '@/lib/account-label'
  * the toolbar. The built-in facets are the two the row already carries at
  * this head: status and budget state.
  *
- * Budget state is derived from `allowances` alone, which is all `GET /agents`
- * returns. "Exhausted", "near limit" and "pending signature" (the issue names
- * them) need a per-agent remaining figure or a setup state the row does not
- * carry, so they are NOT offered as options: a facet that silently matched
- * nothing would read as "no agent is near its limit", which is the false
- * zero this codebase keeps meeting. They arrive with a server field; see the
- * PR body for the note the issue asks for.
+ * Budget state (#3988) comes from the shared `lib/agent-budget.ts` helper —
+ * the agent's own `allowances` (zero-capped = none) PLUS its
+ * `receivedSubBudgets` (the server's qualifying-chain verdict). "Exhausted",
+ * "near limit" and "pending signature" (the issue names them) need a
+ * per-agent remaining figure or a setup state the row does not carry, so
+ * they are NOT offered as options: a facet that silently matched nothing
+ * would read as "no agent is near its limit", which is the false zero this
+ * codebase keeps meeting. They arrive with a server field; see the PR body
+ * for the note the issue asks for.
+ *
+ * The #3988 builder decision for a grant holder: its OWN facet value
+ * `received` ("Received budget") — `recurring`/`one_time` describe the
+ * agent's own cap, which a holder may not have, and the row carries no
+ * grant amount to classify it by. The existing `none` value keeps its name,
+ * so saved `?budget=none` links still parse.
  */
 
 export type AgentFacetMatch = 'any' | 'all'
@@ -41,6 +52,15 @@ export interface AgentFacet<TAgent = Agent> {
   match: AgentFacetMatch
   /** Does this agent satisfy ONE selected value? */
   predicate: (agent: TAgent, value: string) => boolean
+  /**
+   * How `ListToolbar` offers it (#4113). Omitted: `multi` — every facet the
+   * list shipped with under #3165 is multi-select.
+   */
+  selection?: 'single' | 'multi'
+  /** The value when the URL says nothing. Omitted: `[]`, every agent. */
+  defaultValue?: readonly string[]
+  /** The pattern's `allLabel`: `null` for a facet with no "All" row. */
+  allLabel?: string | null
 }
 
 export type AgentSortKey = 'name' | 'seen' | 'created' | 'budget'
@@ -77,13 +97,23 @@ export const STATUS_FACET: AgentFacet = {
   predicate: (agent, value) => agent.status === value,
 }
 
-export type BudgetState = 'recurring' | 'one_time' | 'none'
+export type BudgetState = 'recurring' | 'one_time' | 'received' | 'none'
 
-/** What the row can say about its budget from `allowances` alone. */
-export function budgetStateOf(agent: Pick<Agent, 'allowances'>): BudgetState {
-  const allowances = agent.allowances ?? []
-  if (allowances.length === 0) return 'none'
-  return allowances.some((a) => Number(a.reset_period_min) > 0) ? 'recurring' : 'one_time'
+/**
+ * What the row can say about its budget (#3988): the agent's own allowance
+ * caps through the shared helper's zero-cap rule, then the server's
+ * qualifying-chain verdict on its received grants. A grant holder is never
+ * classified `'none'` — "No budget" was the bug this file fed.
+ */
+export function budgetStateOf(
+  agent: Pick<Agent, 'allowances' | 'receivedSubBudgets'>,
+): BudgetState {
+  if (hasConfiguredAllowances(agent)) {
+    return (agent.allowances ?? []).some((a) => Number(a.reset_period_min) > 0)
+      ? 'recurring'
+      : 'one_time'
+  }
+  return receivedBudgetLine(agent.receivedSubBudgets) !== null ? 'received' : 'none'
 }
 
 export const BUDGET_FACET: AgentFacet = {
@@ -93,12 +123,40 @@ export const BUDGET_FACET: AgentFacet = {
   options: [
     { value: 'recurring', label: 'Recurring budget' },
     { value: 'one_time', label: 'One-time budget' },
+    { value: 'received', label: 'Received budget' },
     { value: 'none', label: 'No budget' },
   ],
   predicate: (agent, value) => budgetStateOf(agent) === value,
 }
 
 export const BUILT_IN_FACETS: AgentFacet[] = [STATUS_FACET, BUDGET_FACET]
+
+/**
+ * Archived (#4113, owner decision 2026-10-20): archived agents —
+ * `archived_at` set, #1402's "Removed" — are hidden by default and shown on
+ * request, in the toolbar instead of a disclosure below the list. A separate
+ * axis from Status: a revoked agent that is NOT archived is listed under
+ * Hidden and matched by "Status: Revoked"; an archived one needs "Shown".
+ * Single-select with no "All" row, because "Shown" already means all.
+ */
+export const ARCHIVED_FACET: AgentFacet = {
+  id: 'archived',
+  label: 'Archived',
+  match: 'any',
+  selection: 'single',
+  defaultValue: ['hidden'],
+  allLabel: null,
+  options: [
+    { value: 'hidden', label: 'Hidden' },
+    { value: 'shown', label: 'Shown' },
+  ],
+  predicate: (agent, value) => value === 'shown' || !agent.archived_at,
+}
+
+/** True when the archived facet hides archived agents, its default. */
+export function archivedHidden(state: Pick<AgentListFilterState, 'facets'>): boolean {
+  return (state.facets[ARCHIVED_FACET.id] ?? ARCHIVED_FACET.defaultValue ?? []).includes('hidden')
+}
 
 /**
  * Account facet (#3719). The list shows every agent on every account — there
@@ -139,6 +197,10 @@ function time(value: string | null | undefined): number {
  * tokens are not comparable in fiat here (the row carries no price), so the
  * sort is by the largest number the user typed — good enough to bring the
  * big budgets to the top, and honest about being unit-blind.
+ *
+ * #3988: a received-grant holder ranks by `hasBudgetTieBreak` in the sort
+ * below, not here — the row carries no grant amount, so its number stays 0
+ * rather than an invented positive.
  */
 export function largestAllowance(agent: Pick<Agent, 'allowances'>): number {
   return (agent.allowances ?? []).reduce((max, a) => {
@@ -154,7 +216,15 @@ export function compareAgents(sort: AgentSortKey): (a: Agent, b: Agent) => numbe
     case 'created':
       return (a, b) => time(b.created_at) - time(a.created_at) || a.name.localeCompare(b.name)
     case 'budget':
-      return (a, b) => largestAllowance(b) - largestAllowance(a) || a.name.localeCompare(b.name)
+      // #3988: equal amounts fall to the shared helper's "has a budget"
+      // answer — a received-grant holder (whose amount the row does not
+      // carry) ranks above a zero-capped or budgetless agent instead of
+      // tying at 0.
+      return (a, b) =>
+        largestAllowance(b) - largestAllowance(a) ||
+        Number(hasConfiguredAllowances(b) || receivedBudgetLine(b.receivedSubBudgets) !== null) -
+          Number(hasConfiguredAllowances(a) || receivedBudgetLine(a.receivedSubBudgets) !== null) ||
+        a.name.localeCompare(b.name)
     case 'name':
     default:
       return (a, b) => a.name.localeCompare(b.name)
@@ -162,6 +232,11 @@ export function compareAgents(sort: AgentSortKey): (a: Agent, b: Agent) => numbe
 }
 
 // ── Apply ──────────────────────────────────────────────────────────────────
+
+/** A facet's selection; a facet the state does not name is at its default. */
+function selectionOf(facet: AgentFacet, state: AgentListFilterState): string[] {
+  return state.facets[facet.id] ?? [...(facet.defaultValue ?? [])]
+}
 
 export function facetMatches(facet: AgentFacet, agent: Agent, selected: string[]): boolean {
   if (selected.length === 0) return true
@@ -178,7 +253,7 @@ export function applyAgentListFilters(
   const out = agents.filter(
     (agent) =>
       matchesSearch(agent, state.q) &&
-      facets.every((facet) => facetMatches(facet, agent, state.facets[facet.id] ?? [])),
+      facets.every((facet) => facetMatches(facet, agent, selectionOf(facet, state))),
   )
   return out.sort(compareAgents(state.sort))
 }
@@ -200,7 +275,7 @@ export function facetCounts(
     const base = agents.filter(
       (agent) =>
         matchesSearch(agent, state.q) &&
-        others.every((f) => facetMatches(f, agent, state.facets[f.id] ?? [])),
+        others.every((f) => facetMatches(f, agent, selectionOf(f, state))),
     )
     counts[facet.id] = {}
     for (const option of facet.options) {
@@ -210,51 +285,80 @@ export function facetCounts(
   return counts
 }
 
-export function isFilterActive(state: AgentListFilterState): boolean {
-  return state.q.trim() !== '' || Object.values(state.facets).some((v) => v.length > 0)
+/** Search or any facet away from its default. Sort is a view choice, never a filter. */
+export function isFilterActive(state: AgentListFilterState, facets: AgentFacet[]): boolean {
+  return (
+    state.q.trim() !== '' ||
+    facets.some((facet) => !sameValues(selectionOf(facet, state), facet.defaultValue ?? []))
+  )
 }
 
-// ── URL codec ──────────────────────────────────────────────────────────────
+// ── The list-controls pattern (#4113) ──────────────────────────────────────
 
 const RESERVED = new Set(['q', 'sort'])
 
 /**
- * `?q=research&status=active,paused&budget=none&sort=seen`. Unknown facet
- * keys and unknown option values are dropped on read, so a stale link never
- * silently filters on a facet that no longer exists. Other query parameters
- * on the page (`setup`, #352/#2522) are left alone by `writeFilterState`.
+ * The facet ids the Agents URL always knows, whether or not their facet is
+ * registered yet. Account and Organization register only once their options
+ * load, so a shared `?organization=<id>` link must parse before that.
  */
-export function readFilterState(search: URLSearchParams, facets: AgentFacet[]): AgentListFilterState {
-  const q = search.get('q') ?? ''
-  const sortRaw = search.get('sort')
-  const sort = SORT_OPTIONS.some((o) => o.value === sortRaw) ? (sortRaw as AgentSortKey) : DEFAULT_SORT
-  const out: Record<string, string[]> = {}
-  for (const facet of facets) {
-    if (RESERVED.has(facet.id)) continue
-    const raw = search.get(facet.id)
-    if (!raw) continue
-    const allowed = new Set(facet.options.map((o) => o.value))
-    const values = raw.split(',').filter((v) => allowed.has(v))
-    if (values.length > 0) out[facet.id] = values
+export const AGENT_LIST_FACET_IDS = ['status', 'budget', 'account', 'organization', 'archived'] as const
+
+/**
+ * The `/agents` URL through the list-controls codec (`list-url-codec.ts`).
+ * The keys #3165 shipped keep their names and formats — `q`, `sort`, one
+ * key per facet id, multi-values comma-joined — and keys the codec does not
+ * own (`setup`, #352/#2522) are left alone. A facet with fixed options lists
+ * its `values`, so a stale link drops what no longer exists; one whose
+ * options load late (Account, Organization, a registered extension) does not.
+ * A facet id may not shadow `q` or `sort`.
+ */
+export function agentListUrlSchema(facets: readonly AgentFacet[]): ListUrlSchema {
+  const byId = new Map(facets.map((facet) => [facet.id, facet]))
+  const fixed = new Map<string, AgentFacet>([
+    [STATUS_FACET.id, STATUS_FACET],
+    [BUDGET_FACET.id, BUDGET_FACET],
+    [ARCHIVED_FACET.id, ARCHIVED_FACET],
+  ])
+  const ids = [...new Set<string>([...AGENT_LIST_FACET_IDS, ...byId.keys()])].filter((id) => !RESERVED.has(id))
+  return {
+    facets: ids.map((id) => {
+      const facet = fixed.get(id) ?? byId.get(id)
+      return {
+        id,
+        selection: facet?.selection ?? 'multi',
+        defaultValue: facet?.defaultValue,
+        allLabel: facet?.allLabel,
+        values: fixed.has(id) ? facet?.options.map((o) => o.value) : undefined,
+      }
+    }),
+    sort: { values: SORT_OPTIONS.map((o) => o.value), defaultValue: DEFAULT_SORT },
   }
-  return { q, facets: out, sort }
 }
 
-export function writeFilterState(
-  search: URLSearchParams,
-  state: AgentListFilterState,
-  facets: AgentFacet[],
-): URLSearchParams {
-  const next = new URLSearchParams(search)
-  if (state.q.trim()) next.set('q', state.q.trim())
-  else next.delete('q')
-  if (state.sort !== DEFAULT_SORT) next.set('sort', state.sort)
-  else next.delete('sort')
-  for (const facet of facets) {
-    if (RESERVED.has(facet.id)) continue
-    const values = state.facets[facet.id] ?? []
-    if (values.length > 0) next.set(facet.id, values.join(','))
-    else next.delete(facet.id)
+/** The codec's state as the filter functions above read it. */
+export function toAgentFilterState(state: ListState): AgentListFilterState {
+  const sort = SORT_OPTIONS.some((o) => o.value === state.sort) ? (state.sort as AgentSortKey) : DEFAULT_SORT
+  return { q: state.q, facets: state.facets, sort }
+}
+
+/**
+ * A registered facet as `ListToolbar` draws it. Multi-select rows carry the
+ * faceted counts; a single-select facet's rows do not (the pattern draws
+ * counts on multi-select rows only).
+ */
+export function toListFacet(facet: AgentFacet, counts: Record<string, number> | undefined): ListFacet {
+  const selection = facet.selection ?? 'multi'
+  return {
+    id: facet.id,
+    label: facet.label,
+    selection,
+    defaultValue: facet.defaultValue,
+    allLabel: facet.allLabel,
+    options: facet.options.map((option) => ({
+      value: option.value,
+      label: option.label,
+      count: selection === 'multi' ? counts?.[option.value] ?? 0 : undefined,
+    })),
   }
-  return next
 }

@@ -1,47 +1,49 @@
 import { expect, test, type Page } from '@playwright/test'
-import { mockHavenApi, seedAuthenticatedSession, waitForDrawerOpen } from './fixtures/haven-api'
+import {
+  mockHavenApi,
+  seedAuthenticatedSession,
+  serveAgentDetailResponses,
+  waitForDrawerOpen,
+} from './fixtures/haven-api'
 
 /**
  * Mobile navigation toggle — tap target (#1766).
  *
- * The `Open sidebar` toggle paints a 32x32 box, 12px under the 44px comfort
- * target `docs/product/design-system.md` § Buttons documents (#1726). It is a
- * hand-rolled `<button>`, not the `Button` primitive, so it inherited none of
- * that primitive's invisible hit-area extension. #1749 had just made this
- * control REACHABLE for the first time below `lg` — it hit-tested under
- * `TopBar` for the whole life of the shell — so the undersized target went from
- * moot to load-bearing on the entry point to primary navigation.
+ * The `Open sidebar` control is the tab bar's fifth slot ("More", #2731): a
+ * hand-rolled `<button>` painted `w-1/5` by the tab bar's height, whose
+ * geometry is asserted by `measureTabBar` below. Its tap-target history is
+ * what this file exists to keep honest about:
  *
- * Measured on `/dashboard` under Pixel 5 emulation, before the fix:
+ *   - As a 32x32 icon (the original #1766 subject) it sat 12px under the 44px
+ *     comfort target `docs/product/design-system.md` § Buttons documents
+ *     (#1726) — it was not the `Button` primitive, so it inherited none of
+ *     that primitive's invisible hit-area extension, and #1749 had just made
+ *     it REACHABLE for the first time (it had hit-tested under the top bar
+ *     for the shell's whole life), so the undersized target went from moot to
+ *     load-bearing on the entry point to primary navigation. The fix was the
+ *     transparent `::after` overlay: 44x44 hit, 32x32 painted.
+ *   - #1767 then moved the painted box to `top-3`, centred in the then-56px
+ *     bar (y 12-44, centre 28), with the x held at `left-4` on measured
+ *     grounds.
+ *   - #2730 expressed both offsets with the safe-area tokens
+ *     (`top-[calc(0.75rem+var(--v2-safe-top))]`,
+ *     `left-[max(1rem,var(--v2-safe-left))]`) — identical numbers wherever
+ *     the insets are 0, and the centring survived a real notch because the
+ *     bar grew by the same inset.
+ *   - #2731 moved the control into the tab bar's fifth slot, where the
+ *     painted cell IS the 44px+ target and the overlay retired (#3825's bar
+ *     was emptied in the same move; the bar itself is gone since #4029).
  *
- *   painted box                        32 x 32   (x 16-48, y 16-48)
- *   MEASURED hit rectangle             32 x 32   (x 16-47, y 16-47)
- *   corners of the intended 44px area  all four land on <header>, not the toggle
- *
- * ...and after it:
- *
- *   painted box                        32 x 32   (unchanged — that is the point)
- *   MEASURED hit rectangle             44 x 44   (x 10-54, y 10-54)
- *   corners of the intended 44px area  all four reach the toggle
- *
- * #1767 then moved the painted box UP to `top-3` (y 12-44, centred in the 56px
- * bar), so the hit rectangle is y 6-50. The x is unchanged at `left-4`, on
- * purpose — see the alignment block below.
- *
- * #2730 rewrote both as `top-[calc(0.75rem+var(--v2-safe-top))]` and
- * `left-[max(1rem,var(--v2-safe-left))]`; both resolve to the same 12px and
- * 16px wherever the safe-area insets are 0, which is every viewport this spec
- * runs at, so every number above still verifies. The centring also survives a
- * non-zero top inset on a real phone, because `TopBar` grows by that same
- * inset: the bar's content band becomes inset..inset+56 and the toggle's centre
- * inset+28.
+ * The walk below does not care which era it is measuring: it reads the LIVE
+ * geometry of `button[aria-label="Open sidebar"]` wherever the control
+ * currently lives.
  *
  * Pixel conventions, because the two readings differ by one and both appear
  * below: a 44px-wide box spanning x 10-54 has its LAST HITTING PIXEL at x=53.
  * `hit.right` in the measurement is that last hitting pixel (53); "right edge
  * x=54" in the clearance reasoning is the box edge. Same rectangle.
  *
- * ── Why every number above is MEASURED and not read off a class string ───────
+ * ── Why every number below is MEASURED and not read off a class string ───────
  * The obvious cheap test — assert the className contains `after:h-11 after:w-11`
  * — cannot fail for the reason that matters. A pseudo-element overlay is a
  * plausible-looking CSS trick with several silent no-op failure modes: a
@@ -56,143 +58,97 @@ import { mockHavenApi, seedAuthenticatedSession, waitForDrawerOpen } from './fix
  * that returns the BORDER box and would report 32x32 even with a working 44px
  * overlay. It is walked outward from the centre one pixel at a time, asking
  * `elementFromPoint` at each step, so it is the rectangle a finger sees.
- *
- * ── Both halves of the invariant ────────────────────────────────────────────
- * The target reaching 44px is only half the promise; the other half is that
- * NOTHING MOVED. A test that only checks the hit area passes just as happily if
- * someone "fixes" this by growing the visible box to `w-11 h-11`, which is the
- * remedy #1726 explicitly rejected (it would crowd `NetworkSwitcher` in this
- * 56px bar and churn the `/design-system` baselines). So the painted box is
- * pinned at 32x32 in the same assertion pass.
  */
 
 /**
- * Alignment — the toggle and the slot `TopBar` reserves for it (#1767).
+ * Alignment history — what #1767 measured and why the geometry is what it is.
+ * Recorded here because the decisions were measured, not argued, and a future
+ * move of the control should inherit the numbers rather than repeat the
+ * debate:
  *
- * `TopBar` carries `<div className="w-8 shrink-0 lg:hidden" />` and a comment
- * saying it reserves the room for this toggle. Two separate things were wrong
- * with that claim, and the issue only named the first:
+ *   - `top-4 left-4` (x 16-48, y 16-48) sat 4px low in the 56px bar; `top-3`
+ *     centred it (y 12-44, centre 28).
+ *   - The issue also asked for `left-6`, making the box concentric with the
+ *     `w-8` spacer the bar reserved. That half was measured and NOT taken:
+ *     `left-6` moves the 44px target's right edge from x=54 to x=62, which
+ *     (a) cuts clearance to `NetworkSwitcher` (x=68) from 14px to 6px, under
+ *     the 8px § Buttons asks for between adjacent targets, and (b) reaches
+ *     PAST x=56 — the centre of the open drawer's Haven logo link — so the
+ *     last test in this file goes red. A spacer's job is to keep the bar's
+ *     content clear of a floating control, not to be concentric with it.
+ *   - **The slot was not there at all on a phone.** `w-8` with the default
+ *     `flex-shrink: 1` is a suggestion, and the bar's row was
+ *     over-subscribed below about 700px: the spacer collapsed to width 0 and
+ *     every reserved pixel went to `NetworkSwitcher`. Measured on
+ *     `/dashboard` before the fix:
  *
- *   1. The toggle was `top-4 left-4` — x 16-48, y 16-48 — 4px low in a 56px
- *      bar. Now `top-3`: y 12-44, centre 28, exactly the band's centre.
+ *       width   slot        toggle box   NetworkSwitcher box   clearance
+ *       320     24-24  (0)  16-48        36-212.88             -17px  OVERLAP
+ *       390     24-24  (0)  16-48        36-212.88             -17px  OVERLAP
+ *       393     24-24  (0)  16-48        36-212.88             -17px  OVERLAP
+ *       768     24-56  (32) 16-48        68-244.88             +15px
+ *       1023    24-56  (32) 16-48        68-244.88             +15px
  *
- *      The issue also asked for `left-6`, making the box concentric with the
- *      slot at x 24-56. That half was measured and NOT taken, and the numbers
- *      are here so the decision can be argued with rather than repeated:
- *      `left-6` moves the 44px target's right edge from x=54 to x=62, which
- *      (a) cuts clearance to `NetworkSwitcher` (x=68) from 14px to 6px, under
- *      the 8px § Buttons asks for between adjacent targets, and (b) reaches
- *      PAST x=56 — the centre of the open drawer's Haven logo link — so the
- *      last test in this file goes red. Measured, both. A spacer's job is to
- *      keep the bar's content clear of a floating control, not to be
- *      concentric with it, and at `left-4` it clears it by 14px at every
- *      width. That is what (2) makes true.
+ *     The bar reserved the room at the widths where nothing needed reserving
+ *     and gave it away at every width a phone actually has. The painted 32px
+ *     toggle sat ON TOP of the chip's leading 12px, and #1766's invisible 44px
+ *     target took 18 more: `NetworkSwitcher`'s own hit rectangle started at
+ *     x=54 instead of its border-box x=36.
  *
- *   2. **The slot was not there at all on a phone.** `w-8` with the default
- *      `flex-shrink: 1` is a suggestion, and this row is over-subscribed below
- *      about 700px: the spacer was the only compressible item in the left
- *      region, so it collapsed to width 0 and every reserved pixel went to
- *      `NetworkSwitcher`. Measured on `/dashboard` before the fix:
+ * Why the suite of the time did not catch the collapse, which is the part
+ * worth carrying forward: `neighbour` was found with
+ * `if (b.left <= box.right) continue` — "the nearest control to the toggle's
+ * RIGHT". A control the toggle is sitting on top of has `b.left` inside the
+ * toggle, so the filter skipped it and happily measured the next control
+ * along (the notification bell, 160px away — the bell has since been deleted
+ * by #1989; this records what was measured at the time). The one assertion
+ * written to catch a swallowed neighbour could not see a neighbour that had
+ * already been swallowed. That is the lesson that made the tab-bar era's
+ * assertions structural (the seam between adjacent cells is an EQUALITY, not
+ * a floor).
  *
- *        width   slot        toggle box   NetworkSwitcher box   clearance
- *        320     24-24  (0)  16-48        36-212.88             -17px  OVERLAP
- *        390     24-24  (0)  16-48        36-212.88             -17px  OVERLAP
- *        393     24-24  (0)  16-48        36-212.88             -17px  OVERLAP
- *        768     24-56  (32) 16-48        68-244.88             +15px
- *        1023    24-56  (32) 16-48        68-244.88             +15px
- *
- *      The bar reserved the room at the widths where nothing needed reserving
- *      and gave it away at every width a phone actually has. The painted 32px
- *      toggle sat ON TOP of the chip's leading 12px, and #1766's invisible 44px
- *      target took 18 more: `NetworkSwitcher`'s own hit rectangle started at
- *      x=54 instead of its border-box x=36.
- *
- * Why the suite above did not catch (2), which is the part worth carrying
- * forward: `neighbour` was found with `if (b.left <= box.right) continue` —
- * "the nearest control to the toggle's RIGHT". A control the toggle is sitting
- * on top of has `b.left` inside the toggle, so the filter skipped it and
- * happily measured the next control along (the notification bell, 160px away —
- * the bell has since been deleted by #1989; this records what was measured at
- * the time).
- * The one assertion written to catch a swallowed neighbour could not see a
- * neighbour that had already been swallowed. It now takes the LEFTMOST control
- * in the band, overlapping or not, and compares hit rectangle against hit
- * rectangle rather than against a border box.
- *
- * `320` and `1023` alone could not have caught it either, even with the right
- * filter, because at both of those the OLD failure and the OLD pass looked the
- * same shape. 390 is added deliberately: it is the width `evidence-viewports`
- * renders the mobile baseline at, and the width a Pixel/iPhone actually has.
+ * `320` and `1023` alone could not have caught the collapse either, even with
+ * the right filter, because at both of those the OLD failure and the OLD pass
+ * looked the same shape. 390 is included deliberately: it is the width
+ * `evidence-viewports` renders the mobile baseline at, and the width a
+ * Pixel/iPhone actually has.
  */
 
-// The toggle is `lg:hidden`. Three widths: the narrowest phone we support, the
-// width the visual baseline and the design evidence render at, and the last
-// pixel below the `lg` breakpoint where a regression would most plausibly
+// The toggle is `lg:hidden`. Four widths: the narrowest phone we support, the
+// width the visual baseline and the design evidence render at, a tablet (768,
+// the first of these widths where #4058's `max-w-md` cap and centring apply —
+// the cap bites above 472px, 448 plus two 12px insets), and the last pixel
+// below the `lg` breakpoint where a regression would most plausibly
 // reappear. (`mobile-nav-layering.mobile.spec.ts` already proves the toggle
 // vanishes AT 1024px.)
-const WIDTHS = [320, 390, 1023]
+const WIDTHS = [320, 390, 768, 1023]
 
-const PAINTED_PX = 32
 const COMFORTABLE_TAP_TARGET_PX = 44
-/** `w-8` — what `TopBar`'s spacer must actually measure, not merely declare. */
-const RESERVED_SLOT_PX = 32
-/** `h-14` — the bar the toggle has to be centred in. The spacer cannot say: it
- *  is an empty box in an `items-center` row, so its own height is 0. */
-const HEADER_BAND_PX = 56
 /**
- * The floor for dead space between the toggle's invisible target (right box
- * edge x=54) and the nearest control's (`NetworkSwitcher`, x=68): 14px, and now
- * 14px at EVERY width rather than 14px on a tablet and MINUS 17px on a phone.
- *
- * Asserted as a floor rather than left as a comment because the two ways to
- * close it are both one-word edits someone will plausibly make: moving the
- * toggle right (#1767 proposed `left-6`, which lands at 6px — under the 8px
- * § Buttons asks for between adjacent targets) or letting the slot shrink
- * again. It has been both.
+ * The page back link's measured hit HEIGHT (#4028). It moved out of the
+ * (since deleted, #4029) top bar into the page, drawn at text height (about
+ * 20px) with a transparent `::after` extending its target to 44px, Button's
+ * mechanism (#1726). So this is the comfort target itself, measured the way a
+ * finger meets it, not the "not collapsed" floor the bar's 13px text link
+ * used to get. Width is not extended (the label already makes it wide), so
+ * width gets the old floor.
  */
-const MIN_NEIGHBOUR_CLEARANCE_PX = 14
-/**
- * The floor for the gap between two controls INSIDE the bar. 8px is the number
- * § Buttons names for adjacent targets, and the row's own rhythm is `gap-3`
- * (12px), so this is deliberately the weaker of the two — it is here to catch
- * "they touch", not to police the layout's spacing choices.
- */
-const MIN_CONTROL_GAP_PX = 8
-/**
- * The least a bar control's measured hit rectangle may be on either axis. The
- * back link is a 13px text row, not a 44px target, so this is deliberately a
- * "not collapsed / not covered" floor and not the comfort target.
- */
-const BACK_LINK_MIN_HIT_PX = 12
+const BACK_LINK_MIN_HIT_PX = COMFORTABLE_TAP_TARGET_PX
+const BACK_LINK_MIN_HIT_W_PX = 12
 
 type Measurement = {
   painted: { w: number; h: number }
   hit: { left: number; right: number; top: number; bottom: number; w: number; h: number }
   corners: Record<string, string>
   /**
-   * The LEFTMOST interactive control in the toggle's band inside the top bar —
-   * overlapping the toggle or not. `left`/`right` are its border box; `hitLeft`
-   * is its own measured hit rectangle, which is the edge that matters: a
-   * neighbour whose taps the toggle's overlay is stealing reports a `hitLeft`
-   * well right of its `left`, and nothing else in this suite would say so.
+   * Where the app frame starts. The toggle is `fixed`, so it consumes NO
+   * layout — the frame it floats over begins at the viewport edge. See the
+   * assertion. (This was the top bar's `<header>` left edge until #4029
+   * deleted the bar; a bare `querySelector('header')` now finds
+   * `PageHeader`'s in-page header, so the anchor moved to the frame.)
    */
-  neighbour: { label: string; left: number; right: number; hitLeft: number } | null
-  /**
-   * Where the top bar starts. The toggle is `fixed`, so it consumes NO layout —
-   * the bar it floats over begins at the viewport edge. See the assertion.
-   */
-  headerLeft: number
-  /** Smallest gap between two consecutive controls inside the bar, in px. */
-  smallestBarGap: number | null
-  /** How many controls sit in the bar's band — what `smallestBarGap` is over. */
-  barControlCount: number
-  /** Account chips in the header — 0 since #3719 removed the global account picker. */
-  accountChipCount: number
-  /** The `w-8 shrink-0 lg:hidden` spacer: the room `TopBar` claims to reserve. */
-  slot: { left: number; right: number; width: number; centreX: number } | null
-  /** The bar itself. Height, because the spacer's own height is 0. */
-  band: { height: number; centreY: number }
-  /** Centre of the PAINTED box — what has to line up with the slot and band. */
+  frameLeft: number
+  /** Centre of the PAINTED box — what has to line up with the tab bar slot. */
   centre: { x: number; y: number }
 }
 
@@ -264,133 +220,20 @@ async function measureToggle(page: Page): Promise<Measurement> {
         bottomRight: describe(cx + half - 1, cy + half - 1),
       }
 
-      // The LEFTMOST interactive control in the toggle's vertical band. The
-      // invisible target must not reach it: an overlay that swallows a
-      // neighbour's taps trades one mis-tap for another, and it is invisible by
-      // construction, so nothing but a measurement would notice.
-      //
-      // Deliberately NOT filtered to "controls starting right of the toggle"
-      // (#1767). That filter reads as a harmless optimisation and is the exact
-      // blind spot: a control the toggle is already sitting on top of starts
-      // INSIDE the toggle, so it was skipped, and the next control along —
-      // 160px away and in no danger from anything — was measured in its place.
-      // The failure this assertion exists for made itself invisible to it.
-      const header = document.querySelector('header')!
-      let nEl: HTMLElement | null = null
-      let nBox: DOMRect | null = null
-      for (const el of Array.from(
-        header.querySelectorAll<HTMLElement>('button, a[href], [role="button"]'),
-      )) {
-        const b = el.getBoundingClientRect()
-        if (b.width === 0 || b.height === 0) continue
-        if (b.bottom < box.top || b.top > box.bottom) continue
-        if (!nBox || b.left < nBox.left) {
-          nEl = el
-          nBox = b
-        }
-      }
-      const neighbour =
-        nEl && nBox
-          ? {
-              label: (nEl.getAttribute('aria-label') || nEl.textContent || nEl.tagName)
-                .trim()
-                .slice(0, 40),
-              left: Math.round(nBox.left),
-              right: Math.round(nBox.right),
-              // Its OWN hit rectangle's left edge, walked the same way. Equal to
-              // `left` when nothing is stealing from it; well right of `left`
-              // when the toggle's overlay is.
-              hitLeft:
-                Math.round(nBox.left + nBox.width / 2) -
-                walkFrom(
-                  nEl,
-                  Math.round(nBox.left + nBox.width / 2),
-                  Math.round(nBox.top + nBox.height / 2),
-                  -1,
-                  0,
-                  Math.ceil(nBox.width / 2) + 8,
-                ),
-            }
-          : null
-
-      // Every control in the bar, left to right, and the worst overlap between
-      // two consecutive ones. Reclaiming the toggle's 32px has to come out of
-      // something in an over-subscribed row: if the widest item cannot
-      // truncate, it does not shrink — it OVERFLOWS its parent and paints over
-      // whatever sits one control further along, which is a different defect of
-      // the same shape. (That neighbour was the notification bell when this was
-      // written; #1989 deleted it. The geometry argument is unchanged — the
-      // sweep reads the real bar, not a named control.)
-      // Reported as the smallest GAP rather than the worst overlap: "they do
-      // not overlap" was satisfied at 390px by two controls touching at exactly
-      // 210.61 — a coincidence of the current account name, one line away from
-      // this suite rejecting a 6px gap elsewhere as too tight (#1767, raised in
-      // design review). A floor is a decision; zero-by-luck is not.
-      // Starts at Infinity so `Math.min` works, but an EMPTY set must report
-      // null rather than Infinity — `expect(...).not.toBeNull()` passed on a
-      // set of zero controls otherwise, which is the guard's own comment
-      // describing something it did not do (#2731 review).
-      let smallestBarGap = Number.POSITIVE_INFINITY
-      const inBar = Array.from(
-        header.querySelectorAll<HTMLElement>('button, a[href], [role="button"]'),
-      )
-        .map((el) => el.getBoundingClientRect())
-        // Keyed on the HEADER's own band, not on the toggle's box (#2731).
-        // The toggle used to sit inside this row, so its box was a fair proxy
-        // for "vertically in the bar"; it is now at the bottom of the screen,
-        // and the old filter would have selected NOTHING and reported
-        // `smallestBarGap: null` — an assertion measuring an empty set while
-        // looking green.
-        .filter((b) => {
-          const band = header.getBoundingClientRect()
-          return b.width > 0 && b.height > 0 && b.bottom >= band.top && b.top <= band.bottom
-        })
-        .sort((a, b) => a.left - b.left)
-      for (let i = 1; i < inBar.length; i += 1) {
-        smallestBarGap = Math.min(smallestBarGap, inBar[i].left - inBar[i - 1].right)
-      }
-
-      // The room TopBar claims to reserve. `w-8` is a DECLARATION; this is the
-      // measurement, and below ~700px they used to disagree completely.
-      //
-      // Found STRUCTURALLY — the first childless `lg:hidden` box in the bar —
-      // not by `div.w-8`. Selecting it by the width class makes the width
-      // assertion below unfalsifiable in the one direction that matters: edit
-      // `w-8` to anything else and the element simply stops being found, so the
-      // failure says "missing" instead of "36px", and a genuine change to the
-      // reserved width reads as a broken test rather than a broken promise.
-      // (Verified: the mutation that widened the slot reported `null` under the
-      // class selector and reports the number under this one.)
-      const slotEl =
-        Array.from(header.querySelectorAll<HTMLElement>('div[class*="lg:hidden"]')).find(
-          (el) => el.children.length === 0 && el.textContent === '',
-        ) ?? null
-      const slotBox = slotEl?.getBoundingClientRect()
-      const headerBox = header.getBoundingClientRect()
+      // The VIEWPORT-ABSOLUTE anchor. The toggle is `fixed` and consumes NO
+      // layout, so the frame it floats over must begin at the viewport edge —
+      // the same absolute anchor #1767 pinned on the top bar's `<header>`,
+      // moved to `[data-app-frame]` when the bar was deleted (#4029). A bare
+      // `querySelector('header')` would now find `PageHeader`'s in-page
+      // header, which is exactly the silent re-point this suite refuses.
+      const frame = document.querySelector('[data-app-frame]')!
+      const frameBox = frame.getBoundingClientRect()
 
       return {
         painted: { w: Math.round(box.width), h: Math.round(box.height) },
         hit: { left: cx - l, right: cx + r, top: cy - u, bottom: cy + d, w: l + r + 1, h: u + d + 1 },
         corners,
-        neighbour,
-        headerLeft: Math.round(headerBox.left),
-        barControlCount: inBar.length,
-        smallestBarGap: inBar.length >= 2 && Number.isFinite(smallestBarGap)
-          ? Math.round(smallestBarGap * 100) / 100
-          : null,
-        accountChipCount: header.querySelectorAll('button[aria-label^="Active account"]').length,
-        slot: slotBox
-          ? {
-              left: Math.round(slotBox.left),
-              right: Math.round(slotBox.right),
-              width: Math.round(slotBox.width),
-              centreX: Math.round(slotBox.left + slotBox.width / 2),
-            }
-          : null,
-        band: {
-          height: Math.round(headerBox.height),
-          centreY: Math.round(headerBox.top + headerBox.height / 2),
-        },
+        frameLeft: Math.round(frameBox.left),
         centre: { x: Math.round(box.left + box.width / 2), y: Math.round(box.top + box.height / 2) },
       }
     },
@@ -399,27 +242,15 @@ async function measureToggle(page: Page): Promise<Measurement> {
 }
 
 /**
- * What the top bar's band holds, read from the live DOM (#3825).
- *
- * Found by the `[data-app-bar]` contract and the header's own scope, never by
- * the pill's label: the point is that NOTHING interactive lives in the right
- * cluster any more, and an assertion that located the pill by name could not
- * notice a different control arriving in its place. `controls` are the visible
- * links/buttons in the band left to right, each with a hit rectangle walked
- * with `elementFromPoint` (a finger's view, not a border box).
+ * The page's back link (#4028), measured the way the deleted `measureBar`
+ * measured a bar control: a hit rectangle walked with `elementFromPoint` out
+ * from its centre, so a transparent `::after` target counts and a covered
+ * pixel does not.
  */
-async function measureBar(page: Page) {
-  return page.evaluate(() => {
-    const header = document.querySelector('header[data-app-chrome]')!
-    const bar = header.querySelector<HTMLElement>('[data-app-bar]')!
-    const selector = 'button, a[href], [role="button"], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-    const visible = (el: HTMLElement) => {
-      const b = el.getBoundingClientRect()
-      return b.width > 0 && b.height > 0 && getComputedStyle(el).visibility !== 'hidden'
-    }
-    const nameOf = (el: HTMLElement) =>
-      (el.getAttribute('aria-label') || el.textContent || el.tagName).trim().slice(0, 40)
-    const walk = (el: HTMLElement, ox: number, oy: number, dx: number, dy: number, cap: number) => {
+async function measurePageBackLink(page: Page, href: string) {
+  return page.evaluate((target) => {
+    const el = document.querySelector<HTMLElement>(`#main-content a[href="${target}"]`)!
+    const walk = (ox: number, oy: number, dx: number, dy: number, cap: number) => {
       let n = 0
       while (n < cap) {
         const x = ox + dx * (n + 1)
@@ -431,41 +262,26 @@ async function measureBar(page: Page) {
       }
       return n
     }
-    const all = Array.from(header.querySelectorAll<HTMLElement>(selector)).filter(visible)
-    const controls = all
-      .map((el) => {
-        const b = el.getBoundingClientRect()
-        const cx = Math.round(b.left + b.width / 2)
-        const cy = Math.round(b.top + b.height / 2)
-        const top = document.elementFromPoint(cx, cy)
-        const cap = Math.ceil(Math.max(b.width, b.height) / 2) + 12
-        return {
-          label: nameOf(el),
-          left: Math.round(b.left),
-          right: Math.round(b.right),
-          reachableAtCentre: !!top && (top === el || el.contains(top)),
-          hit: {
-            w: walk(el, cx, cy, -1, 0, cap) + walk(el, cx, cy, 1, 0, cap) + 1,
-            h: walk(el, cx, cy, 0, -1, cap) + walk(el, cx, cy, 0, 1, cap) + 1,
-          },
-        }
-      })
-      .sort((a, b) => a.left - b.left)
-    // The right cluster is the bar's LAST direct child region (`ml-auto`).
-    const cluster = bar.lastElementChild as HTMLElement | null
-    const rightClusterControls = cluster
-      ? Array.from(cluster.querySelectorAll<HTMLElement>(selector)).filter(visible).map(nameOf)
-      : ['(no right cluster)']
-    // Every wallet-state name the retired pill could announce as, anywhere in
-    // the chrome band.
-    const WALLET_NAMES = /^(connect wallet|wrong wallet|wrong network|passkey|0x[0-9a-f]{4}…[0-9a-f]{4})$/i
+    const b = el.getBoundingClientRect()
+    const cx = Math.round(b.left + b.width / 2)
+    const cy = Math.round(b.top + b.height / 2)
+    const top = document.elementFromPoint(cx, cy)
+    const cap = 40
+    const h1 = document.querySelector<HTMLElement>('#main-content h1')
     return {
-      controls,
-      rightClusterControls,
-      chromeControlNames: all.map(nameOf).filter((n) => WALLET_NAMES.test(n)),
-      scrollOverflowPx: Math.round(bar.scrollWidth - bar.clientWidth),
+      label: (el.textContent || '').trim(),
+      left: Math.round(b.left),
+      right: Math.round(b.right),
+      bottom: Math.round(b.bottom),
+      titleTop: h1 ? Math.round(h1.getBoundingClientRect().top) : Number.POSITIVE_INFINITY,
+      painted: { w: Math.round(b.width), h: Math.round(b.height) },
+      reachableAtCentre: !!top && (top === el || el.contains(top)),
+      hit: {
+        w: walk(cx, cy, -1, 0, cap) + walk(cx, cy, 1, 0, cap) + 1,
+        h: walk(cx, cy, 0, -1, cap) + walk(cx, cy, 0, 1, cap) + 1,
+      },
     }
-  })
+  }, href)
 }
 
 /**
@@ -517,10 +333,11 @@ async function measureTabBar(page: import('@playwright/test').Page) {
         bottomLeft: at(moreBox.left + 1, moreBox.bottom - 1),
         bottomRight: at(moreBox.right - 1, moreBox.bottom - 1),
       },
-      // Flush to the bottom of the viewport, and spanning it.
+      // Floating since #4058: the gaps to the viewport's bottom and sides.
       barBottomGap: Math.round(window.innerHeight - barBox.bottom),
-      barSpansViewport:
-        Math.round(barBox.left) === 0 && Math.round(barBox.right) === Math.round(window.innerWidth),
+      barLeftGap: Math.round(barBox.left),
+      barRightGap: Math.round(window.innerWidth - barBox.right),
+      barWidth: Math.round(barBox.width),
       // What `<main>` reserves for it. The bar is `fixed` and consumes no
       // layout, so this padding is the only thing keeping the last row out
       // from under it.
@@ -548,12 +365,12 @@ test.describe('mobile navigation toggle tap target (#1766)', () => {
 
         const m = await measureToggle(page)
 
-        // #2731 moved this control out of the top bar and into the bottom tab
-        // bar's fifth slot. Assertions 1-7 below are the SAME seven questions
-        // translated to that geometry, not a smaller set: a hit area, its
-        // corners, its painted size, its neighbour, the absolute anchor, the
-        // reservation that keeps content clear of it, and its placement in its
-        // own band.
+        // #2731 moved this control out of the (now deleted) top bar and into
+        // the bottom tab bar's fifth slot. Assertions 1-8 below are the SAME
+        // questions translated to that geometry, not a smaller set: a hit
+        // area, its corners, its painted size, its neighbour, the absolute
+        // anchor, the reservation that keeps content clear of it, its
+        // placement in its own band, and what landmark the chrome exposes.
         const t = (await measureTabBar(page))!
         expect(t, 'the tab bar did not render').not.toBeNull()
 
@@ -579,103 +396,102 @@ test.describe('mobile navigation toggle tap target (#1766)', () => {
         // 3. The painted box IS the target now, and that is the change. The
         //    old assertion pinned 32px painted so a "fix" could not simply
         //    grow the visible control; here growing it is the design, so what
-        //    replaces that guard is exactness: More is one fifth of the bar,
-        //    the same height as the tabs beside it. A control that drifted to
-        //    a different width would look like a design decision and be a
-        //    misalignment.
-        expect(t.slots[4].w).toBe(Math.round(width / 5))
-        expect(t.slots[4].h).toBe(t.slots[0].h)
+        //    replaces that guard is exactness: More is one fifth of the bar's
+        //    content box, the same size as the tabs beside it. Since #4058
+        //    the bar floats, so the fifth is of the pill (its 2px side
+        //    padding and 1px border each side excluded), not of the viewport.
+        for (const slot of t.slots) {
+          expect(Math.abs(slot.w - t.slots[4].w)).toBeLessThanOrEqual(1)
+          expect(slot.h).toBe(t.slots[4].h)
+        }
+        expect(Math.abs(t.slots[4].w - (t.barWidth - 6) / 5)).toBeLessThanOrEqual(1)
 
         // 4. It did not eat its neighbour, and did not leave a dead strip
         //    either. The old neighbour was `NetworkSwitcher` 14px away in the
         //    header row; the new one is the last tab, and tabs ABUT by design,
         //    so the floor becomes an equality. A negative seam is an overlap
-        //    (a thumb on Accounts opens the drawer); a positive one is a gap
+        //    (a thumb on Accounts opens the sheet); a positive one is a gap
         //    that swallows taps.
         expect(t.seam).toBe(0)
 
         // 5. Nothing consumes layout. UNCHANGED from the original, and it is
         //    the assertion that earned its place: swapping `fixed` for
         //    `relative` on the old toggle passed every other check while
-        //    shifting the whole shell 32px. Two fixed elements depend on it
-        //    now, so it guards more than it did.
-        expect(m.headerLeft).toBe(0)
+        //    shifting the whole shell 32px. The frame is the viewport-absolute
+        //    anchor since the top bar — the element the old assertion measured
+        //    — was deleted (#4029).
+        expect(m.frameLeft).toBe(0)
 
-        // 6. `<main>` reserves the bar's height. This replaces the 32px
-        //    TopBar slot, and it is the same KIND of assertion: a reservation
+        // 6. `<main>` reserves the bar's height. This replaced the 32px top
+        //    bar slot, and it is the same KIND of assertion: a reservation
         //    that a naive edit drops, whose absence is invisible until the
         //    last row of a long page sits under the chrome. The bar is
         //    `fixed`, so nothing else keeps content clear of it.
-        expect(t.mainPaddingBottom).toBeGreaterThanOrEqual(t.barHeight)
+        expect(t.mainPaddingBottom).toBeGreaterThanOrEqual(t.barHeight + t.barBottomGap)
 
-        // 7. Flush to the bottom, spanning the width. The old control was
-        //    centred in the header band; this one owns its own band, and the
-        //    failure it replaces is the same shape — a control placed against
-        //    the wrong box. A bar floating a few pixels off the bottom leaves
-        //    a strip of page showing under it that scrolls, which reads as a
-        //    rendering bug rather than a design.
-        expect(t.barBottomGap).toBe(0)
-        expect(t.barSpansViewport).toBe(true)
+        // 7. Floating, and placed against the right box (#4058, replacing
+        //    #2731's flush, edge-to-edge assertion). The pill sits 12px above
+        //    the viewport bottom (`--v2-tab-bar-bottom` with no inset here —
+        //    the inset case is safe-area-insets.mobile.spec.ts), at least
+        //    12px in from each side, centred, and no wider than `max-w-md`
+        //    (448px), so a tablet does not get 200px cells. The failure
+        //    shape is the old one — a control placed against the wrong box.
+        expect(t.barBottomGap).toBe(12)
+        expect(t.barLeftGap).toBeGreaterThanOrEqual(12)
+        expect(t.barRightGap).toBeGreaterThanOrEqual(12)
+        expect(Math.abs(t.barLeftGap - t.barRightGap)).toBeLessThanOrEqual(1)
+        expect(t.barWidth).toBeLessThanOrEqual(448)
 
-        // 8. The top bar's band paints NO control on the dashboard (#3825).
-        //    The wallet pill was the only interactive item the phone bar held
-        //    here (`EnvBadge` is a span, the theme toggle is `hidden` below
-        //    `lg`), so removing it leaves an EMPTY band. That is asserted as a
-        //    count rather than assumed: `barControlCount` is the same scan the
-        //    gap floor used to run over, now required to find nothing, so a
-        //    control re-added to the bar (the pill, or any other) fails here
-        //    with the number instead of silently re-crowding a 320px row.
-        //    The right cluster is checked on its own as well, because "the bar
-        //    has no controls" would still pass if a control had merely moved
-        //    to the left region.
-        const bar = await measureBar(page)
-        expect(m.barControlCount).toBe(0)
-        expect(m.smallestBarGap).toBeNull()
-        expect(bar.rightClusterControls).toEqual([])
-        //    ...and no wallet-state control by NAME anywhere in the chrome
-        //    band, so a pill that rendered outside the two regions fails too.
-        expect(bar.chromeControlNames).toEqual([])
-
-        // 9. The account chip is GONE (#3719 removed the global active
-        //    account and its picker); a reintroduced one would reopen every
-        //    width question the bar used to have (#1767, #1803).
-        expect(m.accountChipCount).toBe(0)
+        // 8. NO banner landmark (#4029). The top bar was the app's only
+        //    `<header>` outside the page; with it deleted the shell renders
+        //    no banner at all. `ui/PageHeader` still renders a `<header>` —
+        //    inside `<main>`, so it is NOT a banner landmark (a header is a
+        //    banner only when it is not nested inside a sectioning root) —
+        //    and the assertion must be structural (`getByRole('banner')`),
+        //    not attribute-shaped, because a bare
+        //    `querySelector('header')` silently re-points at PageHeader's
+        //    header the moment the bar is gone. Count 0 on a real engine is
+        //    the proof that no chrome header came back.
+        expect(await page.getByRole('banner').count()).toBe(0)
       })
 
-      test('on a detail route the bar keeps exactly its back link, which is reachable and clear of the edges (#3825)', async ({
+      test('on a detail route the back link is in the page, and keeps a 44px target (#4028)', async ({
         page,
       }) => {
-        // The one control the phone bar still holds. This is the "remaining
-        // items keep their tap target and do not overlap" half of the pill's
-        // removal: with the right cluster empty the back link is alone in the
-        // band, so a regression that re-crowds it shows as a second control
-        // (count) or as an overlap (gap floor), at the widths where the old
-        // row ran out of room.
+        // #3825 left the back link as the one control in the phone bar; #4028
+        // moved it into the page, above the title. #4029 deleted the bar that
+        // used to hold it, so the link the user reaches is the page's —
+        // measured with the same finger's-view walk as the toggle.
+        // The shared fixture seeds `agent-e2e` only; the detail page resolves
+        // its agent from the list read, so `/agents/agent-research` needs the
+        // same overlay every other agent-detail spec uses. (Its absence was
+        // the pre-existing "Frontend browser smoke" red on #4037's merge
+        // commit — the h1 here was the not-found card's, and the assertions
+        // below measured a page that was never the one under test.)
+        await serveAgentDetailResponses(page, 'agent-research')
         await page.goto('/agents/agent-research')
-        await page.locator('header[data-app-chrome] a[href="/agents"]').waitFor()
+        // Wait for the agent's OWN title: the loading branch renders the
+        // same BackLink with no h1, and the not-found card has a BackLink
+        // above a different h1, so either would measure the wrong thing.
+        await expect(page.locator('#main-content h1')).toHaveText('Research agent', { timeout: 60_000 })
 
-        const bar = await measureBar(page)
+        // No banner landmark here either — the bar's absence is a property of
+        // the shell, not of one route (see assertion 8 above).
+        expect(await page.getByRole('banner').count()).toBe(0)
 
-        // Exactly the back link: one control, labelled, in the LEFT region.
-        expect(bar.controls.map((c) => c.label)).toEqual(['Agents'])
-        expect(bar.rightClusterControls).toEqual([])
-        expect(bar.chromeControlNames).toEqual([])
-
-        const back = bar.controls[0]
-        // It is the thing a finger reaches at its own centre: nothing in the
-        // chrome (and no stale overlay) has taken its taps.
+        const back = await measurePageBackLink(page, '/agents')
+        expect(back.label).toBe('Agents')
+        // It is the thing a finger reaches at its own centre.
         expect(back.reachableAtCentre).toBe(true)
-        // Measured hit rectangle, the same walk the toggle's uses. The link is
-        // a 13px text row, so this records the real number instead of a
-        // comfort target it never had; the floor is "not collapsed".
+        // The extended target, measured: 44px tall although it paints ~20px.
         expect(back.hit.h).toBeGreaterThanOrEqual(BACK_LINK_MIN_HIT_PX)
-        expect(back.hit.w).toBeGreaterThanOrEqual(BACK_LINK_MIN_HIT_PX)
-        // On the left, inside the viewport, and nowhere near the right edge
-        // the pill used to occupy.
+        expect(back.painted.h).toBeLessThan(BACK_LINK_MIN_HIT_PX)
+        expect(back.hit.w).toBeGreaterThanOrEqual(BACK_LINK_MIN_HIT_W_PX)
+        // Above the page title, inside the viewport, on the left.
         expect(back.left).toBeGreaterThanOrEqual(0)
         expect(back.right).toBeLessThanOrEqual(width / 2)
-        // Nothing overflowed the bar sideways.
-        expect(bar.scrollOverflowPx).toBeLessThanOrEqual(0)
+        expect(Number.isFinite(back.titleTop)).toBe(true)
+        expect(back.bottom).toBeLessThanOrEqual(back.titleTop)
       })
     })
   }
@@ -683,10 +499,10 @@ test.describe('mobile navigation toggle tap target (#1766)', () => {
   test.describe('at the project viewport', () => {
     // #1749 made this control reachable at all. An overlay is exactly the kind
     // of change that can re-break it — a stray `relative` would un-fix the
-    // button and drop it back under `TopBar` — so the reachability half is
+    // button (the #1749 defect class) — so the reachability half is
     // re-asserted here with a NON-forced click, which runs Playwright's own
     // hit-test before it fires.
-    test('the enlarged target still opens the drawer, and its edge is live', async ({ page }) => {
+    test('the More cell opens the sheet, and its edge is live', async ({ page }) => {
       await page.goto('/dashboard')
       const open = page.getByRole('button', { name: 'Open sidebar' })
       await open.waitFor()
@@ -697,57 +513,62 @@ test.describe('mobile navigation toggle tap target (#1766)', () => {
       // #1766 was an invisible 44px overlay around a 32px control. There is no
       // overlay now: the painted cell IS the target. The analogous pixel-level
       // fact is the seam — one pixel the wrong side of it navigates to
-      // /accounts instead of opening the drawer, and a thumb does not know
+      // /accounts instead of opening the sheet, and a thumb does not know
       // which side it landed on.
       const box = (await open.boundingBox())!
       await page.mouse.click(box.x + 1, box.y + box.height / 2)
 
-      const nav = page.getByRole('navigation', { name: 'All sections' })
-      await expect(nav.getByRole('link', { name: 'Dashboard' })).toBeVisible()
+      const nav = page.locator('[data-more-sheet]').getByRole('navigation', { name: 'All sections' })
+      await expect(nav.getByRole('link', { name: 'Marketplace' })).toBeVisible()
 
-      // ...and the ordinary centre click still closes it.
+      // ...and the sheet's own ✕ closes it (#4058: the cell is covered).
       await page.getByRole('button', { name: 'Close sidebar' }).click()
+      await expect(page.locator('[data-more-sheet]')).toHaveCount(0)
       await expect(page.getByRole('button', { name: 'Open sidebar' })).toBeVisible()
     })
 
-    // The OPEN-drawer state, which the closed-state measurements above cannot
-    // see. The toggle outranks the drawer (`--v2-z-nav-toggle` 150 vs
-    // `--v2-z-nav-drawer` 140) so that one control both opens and closes it —
-    // which means the invisible target now also floats over the drawer's own
-    // 56px logo band, 6px per edge further than it did before.
-    //
-    // Raised by review rather than predicted, and worth an assertion rather
-    // than a judgement: the 6px looks obviously harmless, but "obviously
-    // harmless" is precisely the reasoning that shipped a control nobody could
-    // tap (#1749). What must stay true is not "no overlap" — the 32px box
-    // already overlapped the logo's leading edge before this PR — but that the
-    // Haven logo link is still reachable at its own centre.
-    test('the enlarged target does not swallow the open drawer\'s logo link', async ({ page }) => {
+    // The OPEN state, which the closed-state measurements above cannot see.
+    // Re-aimed by #4053, and inverted by #4058: the sheet now floats OVER the
+    // bar, so the claim is that its top row (the account) and its ✕ are each
+    // reachable at their own centre, and that the More cell is NOT — it is
+    // covered by the sheet or its scrim, never the topmost thing in its slot.
+    test('with the sheet open, its account row and ✕ are reachable, and the More cell is covered', async ({ page }) => {
       await page.goto('/dashboard')
       await page.getByRole('button', { name: 'Open sidebar' }).click()
 
-      // Wait for the 200ms slide to FINISH. Hit-testing a transforming element
-      // lands on a part-way drawer and reports a defect that does not exist —
-      // the false failure that hit three of four widths on #1749's first run.
+      // Wait for the slide-up to FINISH: hit-testing a moving element lands
+      // on a part-way sheet and reports a defect that does not exist.
       await waitForDrawerOpen(page)
 
       const reach = await page.evaluate(() => {
-        const aside = document.querySelector('aside')!
-        const logo = aside.querySelector<HTMLElement>('a[href="/dashboard"]')!
-        const b = logo.getBoundingClientRect()
-        const top = document.elementFromPoint(
-          Math.round(b.left + b.width / 2),
-          Math.round(b.top + b.height / 2),
-        )
+        const probe = (el: Element) => {
+          const b = el.getBoundingClientRect()
+          const top = document.elementFromPoint(Math.round(b.left + b.width / 2), Math.round(b.top + b.height / 2))
+          return {
+            ok: !!top && (top === el || el.contains(top)),
+            takenBy: top
+              ? `${top.tagName.toLowerCase()}.${String(top.className).trim().split(/\s+/).slice(0, 2).join('.')}`
+              : 'nothing',
+          }
+        }
+        const account = document.querySelector('[data-more-sheet] a[href="/profile"]')!
+        const close = document.querySelector('[data-more-sheet-close]')!
+        const more = document.querySelector('[data-more-toggle]')!
+        const mb = more.getBoundingClientRect()
+        const atMore = document.elementFromPoint(Math.round(mb.left + mb.width / 2), Math.round(mb.top + mb.height / 2))
         return {
-          logoReachableAtItsCentre: !!top && (top === logo || logo.contains(top)),
-          // Named, so a red run says WHAT took the tap instead of just `false`.
-          takenBy: top
-            ? `${top.tagName.toLowerCase()}.${String(top.className).trim().split(/\s+/).slice(0, 2).join('.')}`
-            : 'nothing',
+          account: probe(account),
+          close: probe(close),
+          moreCoveredBy: atMore?.closest('[data-more-sheet]')
+            ? 'sheet'
+            : atMore?.closest('[data-more-sheet-scrim]')
+              ? 'scrim'
+              : (atMore?.tagName.toLowerCase() ?? 'nothing'),
         }
       })
-      expect(reach).toMatchObject({ logoReachableAtItsCentre: true })
+      expect(reach.account, `account row taken by ${reach.account.takenBy}`).toMatchObject({ ok: true })
+      expect(reach.close, `✕ taken by ${reach.close.takenBy}`).toMatchObject({ ok: true })
+      expect(['sheet', 'scrim']).toContain(reach.moreCoveredBy)
     })
   })
 })

@@ -7,7 +7,7 @@ import type { CatalogEntry, Merchant } from '../../src/hooks/useCatalog'
  *   - `ampersendDemoApi`  — live, real third-party content, Sepolia + Base,
  *     three offers, none advertising `erc7710` (the unpinned-budget line).
  *   - `havenDemoStore`    — live, `is_test_merchant`, the "Haven test
- *     merchant" footer/label.
+ *     merchant" badge on the grid card (#4052), the full note on its page.
  *   - `bergetAi`          — `coming_soon`, no offers, the merchant-page
  *     "Coming soon — not payable yet" branch. (The real seed is #3080's; this
  *     fixture only exercises the `listing_status` branch this issue builds.)
@@ -26,6 +26,7 @@ export const ampersendDemoApi: Merchant = {
   offer_count: 3,
   networks: ['eip155:84532', 'eip155:8453'],
   verified_payable: true,
+  lowest_price_atomic: '1000',
 }
 
 export const ampersendOffers: CatalogEntry[] = [
@@ -50,7 +51,7 @@ export const ampersendOffers: CatalogEntry[] = [
     http_method: null,
     body_type: null,
     body_example: null,
-    price_display: '$0.001 USDC',
+    price_display: '0.001 USDC',
     price_atomic: '1000',
     asset: 'USDC',
     network: 'eip155:84532',
@@ -82,7 +83,7 @@ export const ampersendOffers: CatalogEntry[] = [
     http_method: null,
     body_type: null,
     body_example: null,
-    price_display: '$0.001 USDC',
+    price_display: '0.001 USDC',
     price_atomic: '1000',
     asset: 'USDC',
     network: 'eip155:84532',
@@ -114,7 +115,7 @@ export const ampersendOffers: CatalogEntry[] = [
     http_method: null,
     body_type: null,
     body_example: null,
-    price_display: '$0.001 USDC',
+    price_display: '0.001 USDC',
     price_atomic: '1000',
     asset: 'USDC',
     network: 'eip155:8453',
@@ -141,6 +142,7 @@ export const havenDemoStore: Merchant = {
   offer_count: 1,
   networks: ['eip155:84532'],
   verified_payable: true,
+  lowest_price_atomic: '50000',
 }
 
 export const havenDemoStoreOffers: CatalogEntry[] = [
@@ -165,7 +167,7 @@ export const havenDemoStoreOffers: CatalogEntry[] = [
     http_method: null,
     body_type: null,
     body_example: null,
-    price_display: '$0.05 USDC',
+    price_display: '0.05 USDC',
     price_atomic: '50000',
     asset: 'USDC',
     network: 'eip155:84532',
@@ -192,6 +194,7 @@ export const bergetAi: Merchant = {
   offer_count: 0,
   networks: [],
   verified_payable: false,
+  lowest_price_atomic: null,
 }
 
 export const marketplaceMerchants: Merchant[] = [ampersendDemoApi, havenDemoStore, bergetAi]

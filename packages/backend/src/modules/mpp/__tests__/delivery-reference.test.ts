@@ -14,11 +14,28 @@
  * The seed is the same confirmed-eip3009 shape the #2292 sibling file uses;
  * nothing here disturbs its pins.
  */
-import { beforeAll, beforeEach, expect, it } from 'vitest'
+import { beforeAll, beforeEach, expect, it, vi } from 'vitest'
 import db from '../../../db.js'
 import { describeDb, initDbHarness, resetDb } from '../../../infra/__tests__/helpers/db-harness.js'
 import { attachEvidenceHandler, listReceipts } from '../evidence.js'
 import type { AgentContext } from '../../../middleware/agentAuth.js'
+
+// #3963 (round 2): the evidence write captures book-time FX through
+// `getBookTimeCapture`, which fetches CoinGecko over the LIVE network with no
+// deadline. Three of this file's six tests reach that path (the refusal cases
+// throw pre-write); on the shared CI runner the FIRST fetch — DNS + TCP + TLS
+// setup to api.coingecko.com — once took past 5s, burning straight through
+// vitest's 5000 ms `testTimeout` on the first test while the later ones rode
+// the reused connection and passed (run 38638461903). Same class as round 1
+// (#3969): a test body must not dial the real network. `null` is the module's
+// own pricing-outage answer (the capture is backfillable) and this file
+// asserts nothing about FX, so the stub is semantics-preserving and the test
+// makes no outbound calls. `prices.ts` bounds its own fetch as well — this
+// stub is what keeps THIS file deterministic regardless of egress.
+vi.mock('../../../infra/fiat-values.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../infra/fiat-values.js')>()),
+  getBookTimeCapture: async () => null,
+}))
 
 let seq = 0
 

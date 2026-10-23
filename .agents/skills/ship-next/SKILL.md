@@ -25,6 +25,38 @@ Accept one source:
 - it carries `pending-review`: its spec review or an owner decision is outstanding
   ([new-task](../new-task/SKILL.md) § *Hold until ready*). This holds for a
   specified issue too — report what it is waiting for instead of building it.
+- it is **external and not accepted** (#4200): its author is neither a maintainer
+  nor a Bot, and no maintainer has removed its `external` label. Decide from the
+  author and the events, never from the label alone — the definitions and the
+  commands are in AGENTS.md § *Cross-session agent coordination*, rule 0b. This
+  holds for the queue, for an `epic=` sub-issue and for a specified issue alike,
+  whoever asked: print exactly
+  `` Not building #<n>: external author <login>, not accepted by a maintainer (a maintainer accepts it by removing the `external` label). ``
+  and skip it — in the queue and `epic=` modes take the next candidate; for a
+  specified issue, stop and report. The same holds for the issue a PR you
+  would finish closes.
+  Never clear this blocker yourself: removing `external` is a human
+  maintainer's decision, and an agent never adds, removes or edits that label
+  or the `[external] ` prefix, whoever asks.
+- it carries **`landed-partial`** (#4235): part or all has landed — read the
+  merged PR before building. `release-on-merge.mjs` adds it on a `Refs`-only
+  merge, so the issue is open by design and a merged PR, not an open one, holds
+  the work. In the queue and `epic=` modes, skip it and take the next
+  candidate. For a specified issue, read that PR's body and the issue's latest
+  comments, then take exactly one of three branches:
+  - what is left is an operator step, or nothing: stop and report what landed
+    and what is outstanding (*Closeout*, operator-verify mode);
+  - the merged PR names code scope of the issue it did not build: build only
+    that remainder, and say in your PR body which merged PR landed the rest;
+  - the merged PR only **cites** the issue and none of its scope landed (`Refs`
+    is also used as a citation — #4235's spec review found PR #4006's
+    `Refs #4005 (panel), #4004 (budget answer), epic #3077.`): build the issue
+    normally, and say so in your PR body.
+
+  In the third branch the label is a false positive. Any session that has read
+  the merged PR and found none of the issue's scope landed may remove
+  `landed-partial`, with a one-line comment on the issue naming the PR and
+  saying why. Nothing else reads the label, so removing it changes no check.
 
 If every remaining candidate is blocked, stop and report the dependency chain instead
 of forcing the lowest number.
@@ -49,7 +81,14 @@ Before selecting new work, find any open pull request linked to the issue. Searc
 for the issue number rather than the keyword (`gh pr list --search "<issue>"`): an
 operator-verify pull request deliberately carries **no** closing keyword (step 7 of
 *Commit And Pull Request*), so a `Closes #<issue>` lookup alone reports "no in-flight
-work" on exactly the pull requests whose issue is still open by design.
+work" on exactly the pull requests whose issue is still open by design. Run it a
+second time for merged ones (`gh pr list --state merged --search "<issue>"`):
+`gh pr list` lists open pull requests only by default, and `--state all` would add
+closed-unmerged ones. A merged PR that `Refs` the issue means part or all of it has
+landed — read that PR and the issue's `landed-partial` label before building. A
+search hit is a prompt to open the PR and read how it references the issue (`Refs`
+or a plain mention), not proof: the search is fuzzy, where the bot's `Refs` parse
+(`parseRefsRefs`) is precise (#4235).
 
 - If it is waiting on CI or has a fixable failure, finish that pull request.
 - If it is waiting on a user decision, migration review, or UX decision, stop and report the blocker.
@@ -76,7 +115,11 @@ for overlap:
   branch activity) whose name references this issue or surface — the main
   pushed-branch check, since sessions no longer link branches (#3425);
 - the candidate issue's assignee and latest comments;
-- `gh pr list --search "<issue-number>"`;
+- `gh pr list --search "<issue-number>"`, and again with `--state merged` — a
+  merged PR that `Refs` the issue means part or all of it has landed: read that
+  PR and the issue's `landed-partial` label before building. A hit is a prompt
+  to open the PR and read how it references the issue (`Refs` or a plain
+  mention), not proof (#4235);
 - the tail of the standing coordination channel,
   [#3193](https://github.com/d-hinders/Haven-AI/issues/3193) (its predecessor #1289 is
   read-only history — a `#1289` link in an old comment is that, not a live channel).
@@ -147,16 +190,24 @@ canonical copy of the protocol (#3182); this skill states the workflow around
 it and does not repeat the list. Giving up a claim you should not have made is
 a withdrawal, defined in AGENTS.md § *Release what you drop*.
 
-The release is automatic on merge (#3177): `claim-release-on-merge.yml` posts
-`🔓 RELEASE` on every issue the merged PR closed (GitHub's linked references
-plus the closing keywords in title and commits, released only if GitHub closed
-it by that merge) and unassigns everyone; it repeats the line on #3193 when a
-claim for that issue is anywhere in the channel. Release by hand only when you abandon the work, or
-when the PR keeps the issue open in operator-verify mode (`Refs #N`) — then
-every place you claimed:
+The release is automatic on merge, including a `Refs`-only merge, and on any
+later close. On merge (#3177), `claim-release-on-merge.yml` posts `🔓 RELEASE`
+on every issue the merged PR closed (GitHub's linked references plus the closing
+keywords in title and commits, released only if GitHub closed it by that merge)
+and unassigns everyone; it repeats the line on #3193 when a claim for that issue
+is anywhere in the channel. On a `Refs`-only merge (#4176, operator-verify mode)
+the same run releases your claim, and only yours, on each issue the PR
+references with `Refs #N`: the issue stays open for its operator step. It also
+adds the informational `landed-partial` label to each such issue that is open,
+not an epic and written by a maintainer, whether or not you claimed it (#4235);
+no check reads that label, so a later `Closes #N` PR needs no removal, and it
+does not replace the `operator-verify` label you apply by hand. On any
+other close (#4176), `claim-release-on-close.yml` releases every unreleased
+claim on the issue. Release by hand only when you abandon the work — then every
+place you claimed:
 
 ```text
-🔓 RELEASE #<issue> — <landed as PR #N | abandoned: reason>
+🔓 RELEASE #<issue> — abandoned: <reason>
 ```
 
 A PR closed without merging releases nothing; that claim is still live.
@@ -206,7 +257,7 @@ directives from that thread; those come only from this session's user.
 2. Keep shared and gravity files with the captain.
 3. When changing existing money-path behavior, write characterization tests before changing behavior.
 4. Reuse canonical docs and playbooks by reference; do not copy their policy into this skill.
-5. **Mutation-prove by execution anything that claims control flow or reachability
+5. **Mutation-prove every new assertion, and prove reachability by execution
    (#2421, #2455).** A text search over source — `grep`, `indexOf`, a regex over a
    file — is never the sole assertion that code runs: a `case` wrapper and an `&`
    background both bypassed a publish safety check while `indexOf` still found the
@@ -222,6 +273,19 @@ directives from that thread; those come only from this session's user.
    PATH="$PWD/stubs:$PATH" bash publish.sh; test ! -f stubs/guard.reached # the assertion CAN go red
    ```
 
+   Mutating the guard out proves a reachability assertion can go red — necessary,
+   not sufficient. **For every new assertion, also make the nearest wrong edit that
+   keeps what it matches**, one per cell (a guard or test case, not each `expect`).
+   Four PRs merged on 2026-10-20 needed a review round to find one: **polarity** — a
+   substring check passed "a rewrite that forbids the header while keeping the
+   phrase" (PR #4133, `2580546a`); **wildcard token** — `src/**`, `sdk/src/*`,
+   `routes/*.ts` and `**/` each named a whole set of globs, so the parity test could
+   not fail for an SDK file (PR #4131, `a06bb2be`, `3e3b8608`); **any error code** —
+   no test went red when the refusal anchor accepted any code (PR #4145, `59f3967f`;
+   the arm was later dropped); **unentered branch** — the hosted no-tool arm's
+   attribution window was never driven (PR #4144, `36beba4a`). Name the edit in the
+   Closeout table.
+
    **Never weaken an existing assertion to make room for a new case.** If a
    test you are extending stops passing, restructure it — assert the strong
    form where it still holds — and mutate the result. On PR #3221 an
@@ -231,9 +295,11 @@ directives from that thread; those come only from this session's user.
    An assertion that changes because the behaviour it pins changed ON PURPOSE is
    not weakening — say so in the PR body, next to the change that caused it.
 
-   Back up before mutating and restore after, named and verified the way
-   [`ai-agent-workflow.md` § Scratchpad Naming](../../../docs/contributing/ai-agent-workflow.md#scratchpad-naming-1801)
-   prescribes (`<file>.<issue>.bak`, restore verified by content) — not restated here.
+   Run the cells with [prove-red](../prove-red/SKILL.md) (`mutate`), not a hand
+   rig: it backs up, applies each edit exactly once, rebuilds across a package
+   boundary, classifies the red, restores by verified `cp` and prints the
+   Closeout table below — none of that is restated here. Name every `all: true`
+   cell in the PR body.
 6. **Removal ships with a claim sweep (#1440, #2242).** A change that deletes or
    retires anything — a rail, a flag, a route, a term — lists the retired vocabulary
    in the PR body and sweeps `docs/**`, `packages/**/*.md`, code comments,
@@ -262,11 +328,19 @@ directives from that thread; those come only from this session's user.
    36 of the 600 issues classified in
    [the 2026-09 retrospective](../../../docs/contributing/issue-retrospective-2026-09.md)
    carry *still* in their title, each an edge found by hand after the fact.
-8. **No operator state in prose (#2422).** Nothing in code, comments or docs states
-   that an environment *has* a variable set or *hands out* a tag. Operator steps are
-   an unticked checklist in the PR body, in this order: mechanism merged → observed
-   (run log, `npm view`) → flag flipped. Sweep code comments as well as docs — the
-   last survivor on #2422 was a comment.
+8. **No operator state or unsourced authority in prose (#2422).** Nothing in code,
+   comments or docs states that an environment *has* a variable set or *hands out* a
+   tag. Operator steps are an unticked checklist in the PR body, in this order:
+   mechanism merged → observed (run log, `npm view`) → flag flipped. Sweep code
+   comments as well as docs — the last survivor on #2422 was a comment. Authority
+   is sourced the same way: "owner decision", "decided" or "the owner chose" stands
+   only next to a link to the owner's own words; otherwise write "per #N's spec
+   review" or "captain decision on #N". PR #4144 wrote "Owner decision on #4119"
+   (`598c3ee6`) and "Decided on #4119" (`fbd62969`) for a spec-review correction,
+   fixed in `36beba4a`. The rule covers the `+` lines a PR adds, not a back-fill:
+   the 565 existing lines, this file's included, stay as written (`git grep -i -E
+   'owner decision|owner decided|decided by the owner' 777b71137 -- ':!docs/archive/**'
+   ':!docs/regulatory/casp-changelog/**' ':!docs/bug-reports/**' ':!docs/quality/**' | wc -l`).
 
 ## Acceptance Gate
 
@@ -279,6 +353,15 @@ gate only CI ran. The enumeration below is a second copy, which is why it is
 kept short and why the battery, not this list, is the answer to "did I run
 everything".
 
+**Static ratchets run first, before any suite** — PR #4155 found a retired-rail hit
+in a test title (`3fa96047`) only at the end of a full run. Run them alone with
+`npm run preflight -- --static` (#4175); the battery also orders them first.
+Preflight exit 3 (timed out, green alone) is neither green nor a reason to
+re-run until green: investigate as the printed note says, and quote the list.
+A STALL — a gate silent past `PREFLIGHT_SILENCE_MS`, killed with its process
+group — is exit 1 red and never re-run alone: a gate that hung once hangs
+again (#4276).
+
 Then run what the battery cannot: a live database (`docker compose up -d
 postgres`, or the backend suite skips its real-DB files), browser verification
 for UI changes, and anything the issue names specifically.
@@ -286,9 +369,15 @@ for UI changes, and anything the issue names specifically.
 Run checks proportionate to every changed surface:
 
 - package tests and type checks for package changes;
-- `npm run preflight` for cross-package behavior, or `npm run quality` when you
-  only need typecheck/test/build;
+- `npm run preflight` for cross-package behavior;
 - browser verification or the required headless equivalent for UI changes.
+
+**Locally, the frontend vitest suite runs through `test:local`, scoped to the directories the diff touches (#4271).** `npm run test:local -w packages/frontend -- <paths…>` — package-relative paths, single worker (`--maxWorkers=1`), verbose reporter, core built first — wraps the run in a silence watchdog (default 5 min) and a wall-clock cap (default 30 min) that kill the whole process group on a hang, so a silent stall becomes a red exit naming the silent duration instead of a ~75-minute wait (the #4259 case, PR #4270: a whole-suite run stopped writing output one minute in, and killing it left a ~330 MB worker). The full frontend suite — what preflight's frontend gate runs — is left to CI: the builder deselects that gate locally and says so in the PR. A whole-suite run is CI's job, not `test:local`'s; the wrapper refuses without paths unless `--all` is passed. The order stays as it is: preflight first, review before the PR (owner decision 2026-10-22). Two rules ride along:
+
+- **Reviewers are dispatched while the scoped local run is going**, rather than after it.
+- **Reviewers do not run frontend vitest at the same time as the builder's run**, except through `test:local`. Competing jsdom workers are what turns tests red — the measured mechanism in the frontend playbook §4 (`:415`, #2319).
+
+And the wait rule itself, for every job: **never end a turn waiting on a single background job without first checking that it is still producing output.** It is stated once in [*waiting-on-ci*](references/waiting-on-ci.md), the home of the wait discipline — `test:local` is the vitest-shaped instance of it.
 
 Run the **repository's own required checks** locally before pushing, for fast feedback:
 
@@ -299,11 +388,12 @@ Run the **repository's own required checks** locally before pushing, for fast fe
 - **The `node --test` suites are the part a vitest sweep never touches, which is
   why the battery above comes first.** Several read source by content —
   `scripts/lint-request-schemas.test.mjs` pins the real `enforcedModules` list,
-  `scripts/ci/money-path.test.mjs` requires every path in this skill's Merge Gate
-  to be on the perimeter — and PR #3221 went red on each in turn (runs
-  `35743765136` at `162f916a`, `35748951778` at `9bd70181`) after a local sweep
-  that ran vitest and a hand-picked lint list. `node scripts/ci/preflight.mjs
-  --list` selects `npm run lint:request-schemas:test` at the first commit and
+  `scripts/ci/money-path.test.mjs` holds this skill's
+  `references/money-path-perimeter.md` equal to the perimeter — and PR #3221
+  went red on each in turn (runs `35743765136` at `162f916a`, `35748951778` at
+  `9bd70181`) after a local sweep that ran vitest and a hand-picked lint list.
+  `node scripts/ci/preflight.mjs --list` selects
+  `npm run lint:request-schemas:test` at the first commit and
   `node --test scripts/ci/*.test.mjs` at the second: the battery would have
   caught both. Two traps when running any of them by hand: without `npm ci`
   six cases fail for missing packages (`dependency-cruiser`, `tsx`), which is the
@@ -437,9 +527,10 @@ do not restate them here.
    new issue's prose does not bind anything: the selector's BLOCKED check reads
    outbound references from the candidate it is about to ship, so an inbound "close
    this before #N" is invisible and #N ships anyway.
-5. Run `npm run docs:coupling`. Two kinds of finding, and they are not the same obligation:
+5. Run `npm run docs:coupling`. The findings are not the same obligation:
    - **⚠️ contract doc → blocking.** The strict gate exits 1 and so will CI. Resolve it in *this* pull request: update the stale claims, or genuinely re-verify the doc and bump `last-verified`. Never push with this red.
-   - **A parent doc cleared by a shard → advisory, and it is the one to read first (#2323).** The gate's own section is *"Parent docs cleared by a shard — body not re-read"*. The coupling requirement is genuinely satisfied and nothing blocks; what the shard does not do is prove anybody opened the parent, because the author of the change writes the shard. Re-read the named sections against the matched files. Leaving the parent untouched and saying so in the PR is a legitimate outcome — a rubber-stamped `last-verified` is worse than a stale one. Before #2323 the parent was not merely un-blocked here, it was **absent from the comment**, which is how #2274 (PR #2322) shipped a false CASP sentence past a green tick.
+   - **⚠️ custody claim → blocking, in any doc, including a shard-cleared parent.** A wrong claim (now-wrong, or newly written by the diff) about custody, signing, spend authority or money movement is **blocking** in any doc, whether or not it is `contract: true` (#4174). The doc-reviewer role labels it `blocking`; resolve it in *this* pull request.
+   - **A parent doc cleared by a shard → advisory, and it is the one to read first (#2323).** The gate's own section is *"Parent docs cleared by a shard — body not re-read"*. The coupling requirement is genuinely satisfied and the gate does not block; what the shard does not do is prove anybody opened the parent, because the author of the change writes the shard. Re-read the named sections against the matched files. Leaving the parent untouched and saying so in the PR is a legitimate outcome — a rubber-stamped `last-verified` is worse than a stale one. Before #2323 the parent was not merely un-blocked here, it was **absent from the comment**, which is how #2274 (PR #2322) shipped a false CASP sentence past a green tick.
    - **Everything else → advisory.** Run the doc-reviewer role over the implicated docs; this is a **hard definition-of-done step**, not optional. Update what the diff actually made stale. Bump `last-verified` only on a doc you really re-read — a rubber-stamped date is worse than a stale one, because the weekly staleness audit ranks on it, so leaving a doc untouched and saying why is a legitimate outcome.
 
    **Update `last-verified` only after a genuine re-read.** It is a date, not
@@ -474,7 +565,8 @@ real blind spot (`design:lint` green being uninformative for a `src/lib` diff).
    rule is never a licence to drop cheap literal guards, which were the *good*
    outcome on #2131 (sound on the first attempt, while four successive
    prose-interpreting guards each failed against realistic edits in the file's
-   own house style).
+   own house style). A generated string is pinned whole with `toBe`, never by a
+   phrase it contains: the phrase survives the rewrite that inverts it (PR #4133).
 2. **One stopping rule for the fix→review loop, with four triggers.** Decide which
    branch a round is on before writing the next fix:
    - **Fix-traceable (#2131):** the round's findings are all traceable to your own
@@ -738,151 +830,17 @@ label **or** the diff touches a file on the perimeter.
 **The perimeter's single source of truth is
 [`.github/money-path-globs.json`](../../../.github/money-path-globs.json)** (#1030) —
 the same file that drives the `money-path` labeler and the `qa-freshness` promotion
-gate. The annotated list below exists for the *why* behind each group, and
-`scripts/ci/money-path.test.mjs` now pins it to that JSON **in both directions**: a
-path here that the JSON lacks fails CI, and a path in the JSON that is missing here
-fails CI too. Read the JSON when you need the authoritative answer; read this when
-you need the reasoning. Never edit one without the other — CI will not let you.
-
-- `routes/payments.ts`, `routes/x402.ts`, and
-  `routes/machine-payments.ts` — all three are live route files. (#996/#997 moved
-  their *logic* into the modules below and left thin validation/auth shells, which
-  this line described for a year as the files having "dissolved". They had not;
-  both are registered in `index.ts` today. A parenthetical that reads as an
-  exclusion is worse than an omission, because nobody re-checks it — #1892.);
-- `modules/x402/`, `modules/mpp/`, `domain/payment-token.ts`,
-  `domain/machine-payment-lifecycle.ts`, or
-  `infra/chain/relayer-reads.ts` (#1987 deleted the off-chain coverage-arithmetic
-  module and the allowance-nonce coordinator with the AllowanceModule rail, so
-  both are gone from this list — a glob naming a file that no longer exists
-  guards nothing, and the "no phantom globs" assertion in
-  `scripts/ci/money-path.test.mjs` fails CI on it. The reads-only survivor
-  STAYS on this list: it was rails/allowance-module.ts until #2850 renamed
-  that file to `infra/chain/relayer-reads.ts` — the AllowanceModule filename
-  was the last false claim the retired rail left behind);
-- `modules/budget-scope/` (#3649 — the #2099 fail-open period pre-check, the
-  task cap and the typed refusal. The pre-check lived inline in
-  `modules/x402/delegation-authorize.ts` until #3616 created this module and
-  #3617 deleted the inline copy; both x402 authorize legs and POST /payments
-  now decide through it. The move took the decision off the perimeter —
-  #1892's accident of location again: where the comparison lives is not what
-  makes it a spend decision);
-- `modules/task-budgets/`, `modules/sub-budgets/`, `routes/task-budgets.ts`,
-  `routes/sub-budgets.ts` and `routes/agent-sub-budgets.ts` (#3661 — they build
-  the task child and the sub-budget children, including the A→B grant that
-  hands spend authority to another agent, and run the pre-sign cap and
-  narrowing refusals; `agent-sub-budgets.ts` is where the owner issues a
-  sub-budget, the `agent-connection-setups.ts` reason. Not
-  `agent-task-budgets.ts`: GET only);
-- `modules/payments/direct-sign-context.ts` (the bytes the local signer signs
-  for a direct payment, #3271), `modules/payments/submission-reconciler.ts`
-  (the terminal state of a submitted payment whose UserOp may have landed,
-  #3564) and `modules/payments/agent-payment-status.ts` (its
-  `isFundedX402AwaitingMerchantLeg` decides whether x402 sign-context re-signs
-  a confirmed payment — a wrong clause can pay a merchant twice) — file-level
-  on purpose: the rest of that module is the refusal record, receipts and
-  prepare-failure reporting, pinned as off-list in
-  `scripts/ci/money-path.test.mjs` (#3661);
-- `rails/execution-rail.ts` (the rail seam);
-- `rails/delegation-*.ts`, `rails/hybrid-provisioning.ts`,
-  `rails/hybrid-account-config.ts`, `rails/hybrid-signer-actions.ts`,
-  `rails/hybrid-transfers.ts`, `routes/agent-delegations.ts`,
-  `routes/agent-connection-setups.ts`, or
-  `routes/agent-rekey.ts` and `modules/agents/rekey-*.ts`
-  (the delegation rail — including re-key, which revokes and re-issues an agent's
-  on-chain spend authority. It was missing here, in the JSON and in the labeler
-  from #1698 until #1892, while `infra/repositories/` already covered its storage
-  layer: a PR touching the re-key repository was labelled and one touching only the
-  route was not, so the list read as though it knew about re-key. `routes/agent-connection-setups.ts`
-  is the third member of that family, added by #2264 on the identical rationale:
-  its budget-approval route verifies the signed delegation against the setup and
-  flips setup and agent to `active`, so it is where an owner's approval becomes an
-  agent's on-chain spend authority — and since #1984 made connect the only
-  onboarding path, the retirement moved that job INTO this list's blind spot);
-- `rails/sweep.ts`, `infra/relayer*.ts`, `infra/delegate-*.ts`, `infra/outbound-*.ts`,
-  `infra/chain/`, `infra/repositories/`, or `modules/accounts/mainnet-gate.ts` (funds
-  recovery, gas payment, the durable outbound-tx queue and its bump worker, the relayer
-  spend guard/monitor, the delegate exposure monitor, the contract-call and persistence
-  layers, and the mainnet authority floor — the relayer/mainnet trio added by #1045
-  after review found them missing while they literally move or gate money; the outbound
-  globs added after epic #1554 shipped files that broadcast and replace real
-  transactions without appearing here; `infra/delegate-*.ts` added by #1892's own
-  review, which found the delegate balance monitor unlisted while its equally
-  read-only sibling `infra/relayer-balance-monitor.ts` was matched by prefix accident —
-  the two even share an alert channel);
-- `packages/backend/src/openapi/request-validation.ts` (#3029, epic #3028 — the
-  request-validation plugin. Runtime, not control: it sits IN FRONT OF every
-  payment route, so a green money-flow QA run exercises it on every leg from
-  the day it lands. It refuses on the modules the backend's own
-  `enforcedModules` install option names and shadow-logs everywhere else —
-  read that list in the source, never a count here; it is a shape VALIDATOR —
-  it reads the request against the spec, refuses or logs, and never
-  authorizes or constructs spend intent. It does REWRITE values where the
-  spec declares a type and ajv coerces: #3082 found a shadow-mode body
-  reaching handlers with `null` turned into `''`, which refused every open
-  budget. Shadow bodies are restored since then and the divergence is
-  counted; querystring/params coercion, and enforce-mode bodies, still
-  rewrite by design);
-- `routes/hybrid-accounts.ts` (user-signed execution and account provisioning;
-  the approval queue's route file was deleted with its table by #2055, so its
-  glob left the perimeter rather than being repointed — the code is dead, not
-  moved; the owner-signed relayed execution route left the same way in #2847,
-  deleted with the last of the Safe rail's live behaviour);
-- `packages/sdk/src/signer.ts` and `packages/signer/` (signing schemes are spend
-  authority — the SDK entry point was listed; the edge-signer package that
-  actually holds the delegate key material was on no list at all, and is the
-  stronger case of the two — #1896);
-- `packages/sdk/src/delegate-account.ts`, `direct-payment-guard.ts`,
-  `redemption-guard.ts`, `settlement-child.ts` and `userop-binding.ts` (the
-  delegate key's signing-surface guard, moved out of `packages/signer/` into the
-  SDK by #3283, and the #3271 binding check both packages import — their
-  location is not what makes them spend authority); `task-budget-guards.ts` and
-  `sub-budget-guards.ts` join them on the same rule (#3661 — the signer's own
-  checks on task and sub-budget children before it signs; both arrived after
-  #3283);
-- `packages/core/src/machine-payment-lifecycle.ts` (the machine-payment domain
-  actually lives here since #987 — the `domain/machine-payment-lifecycle.ts` line
-  above guards the backend re-export shim, not the code — #1905);
-- `middleware/agentAuth.ts`;
-- `packages/mcp-server/src/**` (the hosted MCP tool surface — #2300. `tools.ts`
-  decides *whether* a funding userop is relayed and *in what order*, and four
-  money defects lived in it with no money-path label by the file half: #2282's
-  funding-before-merchant-context relay, #2312's silently stripped `tx_hash`,
-  #2348's stripped `idempotencyKey` that made a retry a second spend, and
-  #2051's merchant-steerable cap bypass. Runtime `globs`, not control: the
-  hosted MCP deploys from `dev` and the money-flow harness drives it through
-  `QA_HOSTED_MCP_URL`, so a green run really does cover it — the argument the
-  frontend decision surfaces could not make. Scoped to `src/**` on a measured
-  3-of-113-commits delta for the package's README/Dockerfile/config files —
-  the command and window are in the JSON note);
-- `packages/demo-merchant-mcp/src/**` (the demo merchant's settlement surface —
-  #3098. `x402.ts` verifies the buyer's authorization and submits it on-chain,
-  and the prod instance runs on Base mainnet; the CASP guardrails doc had
-  covered the package since #650 while the classifier never had, and two
-  settlement-semantics changes shipped through that gap — #2969/PR #2977
-  unlabelled, #2979/PR #2982 labelled only because it also touched
-  `mcp-server/src/**`. Runtime `globs`, not control: it deploys from `dev` on
-  Railway and the money-flow harness pays it through `QA_DEMO_MERCHANT_URL`.
-  Scoped to `src/**` like the hosted MCP entry);
-- `db/migrations/`;
-- the safeguard's own control surface — `scripts/release-bump.mjs`,
-  `scripts/release-version-order.mjs` (the forward-only version rule #2580 lifted
-  out of it — a rule that decides which version may reach npm belongs on the same
-  footing as the script that applies it),
-  `scripts/ci/qa-freshness.mjs`, `scripts/ci/money-path.test.mjs`,
-  `scripts/ci/money-path-restatement-scan.mjs`, `.github/CODEOWNERS`,
-  `.github/money-path-globs.json`, `.github/workflows/publish.yml`,
-  `.github/workflows/dev-gate.yml`, `.github/workflows/qa-dev.yml`,
-  `packages/frontend/src/lib/signer.ts`, `packages/frontend/src/hooks/useAgentRekey.ts`,
-  `scripts/docs/coupling-gate.mjs`, `scripts/docs/validate-frontmatter.mjs` and
-  `.github/workflows/docs-coupling.yml`. These are
-  `controlGlobs` in the JSON: labelled money-path so a PR weakening the gate gets
-  this playbook and a human, but excluded from the freshness re-run, because
-  re-running the money-flow harness proves nothing about a CI config change —
-  and the two frontend paths are the same call: the harness exercises the
-  deployed backend, not the client, so a QA re-run would prove nothing about a
-  change to which signer signs a spend-authority action, but a human should read
-  it — #1903.
+gate. The *why* behind each group lives in
+[`references/money-path-perimeter.md`](references/money-path-perimeter.md), one
+path per line, and `scripts/ci/money-path.test.mjs` holds that file **equal** to the
+JSON: its runtime section to `globs`, its control section to `controlGlobs`, in both
+directions (#4177). Read the JSON when you need the authoritative answer; read the
+reference when you need the reasoning. Never edit one without the other — CI will
+not let you. This section does not restate the list, and since #4177 this file is
+not one of the list's known homes (`KNOWN_COPIES` in
+`scripts/ci/money-path-restatement-scan.mjs`): a full copy pasted back here lifts
+the prose ceiling past a planted copy, and the #1904 test in `money-path.test.mjs`
+goes red. A partial copy does not, which is that test's finding.
 
 The label matters because money-sensitive changes do not always touch listed files
 (a new signing scheme, a new rail); the file list matters because a diff can be
@@ -976,7 +934,10 @@ Route the merge:
   disputed** rather than fixed, or there is no re-review at all.
 - **Everything else, money-path included:** after local gates pass and independent
   review has no blocking or should-fix findings, enable squash auto-merge right after
-  opening and **read the method back** — the arming line alone is not the evidence:
+  opening and **read the method back** — the arming line alone is not the evidence,
+  and `dev` refuses any method but squash, so an auto-merge reading `MERGE` is refused
+  or never fires. On `MERGE` (or `REBASE`): `gh pr merge <pr> --disable-auto`, re-arm
+  with `--squash`, and read it back again; `SQUASH` or empty proceeds:
 
   ```bash
   gh pr merge <pr> --auto --squash --delete-branch
@@ -991,37 +952,9 @@ rule and the pointer to its already-squashed recovery (#1173) live in
 [`branch-and-release-flow.md`](../../../docs/contributing/branch-and-release-flow.md)).
 Do not let the promotion rule leak backwards into feature PRs.
 
-**The squash rule is checked, not remembered (#2165) — a stopgap until the
-repository setting changes.** Before any merge-related action on a feature PR, and
-again before reporting it armed, run
-
-```bash
-gh pr view <pr> --json autoMergeRequest --jq .autoMergeRequest.mergeMethod
-```
-
-`SQUASH` or empty proceeds; **`MERGE` (or `REBASE`) refuses** — `gh pr merge <pr>
---disable-auto`, re-arm with `--squash`, run the command again. A report that says
-"armed" without that output has not checked. The checkable basis is four named
-landings — #2428, #2460, #2493 and #2438 — every one of which reached `dev` as a
-two-parent merge commit (`git rev-list --parents -n1 <merge-sha>` prints three hashes
-for each). Three of them (#2428, #2460, #2493) carry a comment saying "disarmed
-auto-merge" and landed wrong anyway: a disarm not followed by a squash re-arm and a
-read-back changes nothing. Those four carry the rule. If you census the history as well,
-**pin the instant** — a bare `--since=<date>` is a git approxidate resolved against
-the wall clock *now*, so the same SHA counts differently every hour of the evening
-(this rule's own draft read 258 and then 256 for one SHA in one session; PR #2506's
-body records the same defect independently: "a bare `--since=2026-08-10` is a git
-approxidate that takes the *current time of day*"):
-
-```bash
-git log <sha> --first-parent --since=2026-08-10T00:00:00Z --oneline | grep -c '^[0-9a-f]* Merge pull request'
-git log <sha> --first-parent --since=2026-08-10T00:00:00Z --oneline | grep -cE '\(#[0-9]+\)$'
-```
-
-At `ff052462`, pinned: 275 merge-commit landings, 346 squash, 624 first-parent, stable
-across re-runs. Run `git rev-parse --is-shallow-repository` first as well — a shallow
-clone *can* truncate the window silently, even though it was not the cause here
-(#2500 review rounds 2–3).
+The squash rule is enforced, not remembered (#2632, owner step O1): ruleset 22449193 (*Dev merge*) allows
+only squash on `dev` — see the ruleset inventory in
+[`autonomous-pr-loop.md`](../../../docs/contributing/autonomous-pr-loop.md#one-time-github-setup-required) step 3.
 
 **Check `mergeStateStatus` before arming auto-merge.** On `DIRTY`, merge `dev` in and
 resolve first — arming auto-merge on a conflicted PR does nothing, silently. The
@@ -1063,96 +996,9 @@ A PR's head SHA is not stable between opening and merging. Routes move it, and *
 
 > **Worked example — PR #2114, 2026-08-27.** Head at open `bcc23cb5`; an unrelated PR merged to `dev`; the branch was updated to `af36577f`, whose CI run cancelled the old one. The PR merged on `af36577f`'s green checks. `check-runs` on the captured `bcc23cb5`: **1 failure + 5 cancelled**. On the re-read `af36577f`: **23/23 success**. Here the stale read produced a false RED — five minutes of investigation. Reverse which run went red and the identical mechanism produces a false GREEN, silently.
 
-### Waiting on CI — mechanics
-
-Do not burn fixed-timeout `sleep` loops against `gh pr checks`.
-
-- **Auto-merged PRs:** `--auto` (above) means GitHub merges when green — but **no
-  GitHub event re-invokes a local session**, so "armed" is not "watched". When the
-  next step depends on the merge (releasing claims, ticking the epic, taking the
-  next queue item), arm a Monitor or a background watch and act on its result;
-  otherwise check the PR's state at the next natural opportunity instead of
-  assuming it landed. Two silent-stall states to know: `DIRTY` after arming means
-  no checks run and no merge ever comes (read `mergeStateStatus`, don't wait), and
-  a required check failing means auto-merge simply never fires.
-- **Editing the pull-request body re-runs the checks that read it** —
-  *Docs front-matter & agent skills* (a required context on `dev`, so it blocks
-  the merge while it runs) and *PR ownership gate* (not required on `dev` yet,
-  per the ruleset inventory in `autonomous-pr-loop.md`). A merge attempted right
-  after the last body edit — filling the verdict lines, say — is refused until
-  the re-run finishes. Fill the body before the final CI wait, or wait the
-  re-run out. On PR #3221 the body was edited at 16:47:31Z and the re-runs ran
-  16:47:34–55Z before the merge at 16:48:13Z; on PR #3224, 18:50:35Z,
-  18:50:38–57Z, 18:51:21Z.
-- **Known infra flakes:** a required check failing with a known infrastructure
-  signature gets **one rerun before any diagnosis** (`gh run rerun <id> --failed`).
-  The signature list lives in
-  [`autonomous-pr-loop.md`](../../../docs/contributing/autonomous-pr-loop.md) §
-  *Known CI flake signatures* — check the failing job's log against it first; a
-  second failure after the rerun is a real failure.
-- **When a wait is genuinely needed** (holding a UI PR on a review finding, or
-  confirming a specific run), poll the condition below, or arm a Monitor on it if the
-  client supports one. Not `gh pr checks <pr> --watch --fail-fast`: it resolves on
-  the checks that *exist*, so it returns before the ones that have not been created
-  yet, which is the same hole as an empty rollup.
-- **A wait loop's terminal condition is the ruleset's named list, not a count, and
-  cannot be satisfied by an empty rollup.** Before the first run is created,
-  `statusCheckRollup` is empty, and an empty list satisfies both "nothing in
-  progress" and "nothing failed". A count is the wrong floor too: on PR #2503, 6 of
-  the required contexts concluded `SUCCESS` and 9 `SKIPPED` (surface-gated behind *Detect changed
-  surfaces*), so a predicate that accepts only `SUCCESS` never reaches the full set. The
-  expected set is the ruleset's, read live and documented in
-  [`autonomous-pr-loop.md` § One-time GitHub setup](../../../docs/contributing/autonomous-pr-loop.md#one-time-github-setup-required)
-  step 3 (a context listed there but absent from the rule is a pending operator
-  step, #2321):
-
-  **Read `$REQ` from the PR's OWN base branch**, which is what `BASE` below is for.
-  Hardcoding `dev` on a promotion PR silently drops the four contexts required on
-  `main` alone (`gate`, `qa-freshness`, Design visual regression, Frontend browser
-  smoke), so the loop reports green on a set it never checked:
-
-  ```bash
-  BASE=$(gh pr view <pr> --json baseRefName -q .baseRefName)
-  REQ=$(gh api repos/<o>/<r>/rules/branches/"$BASE" --jq '[.[]|select(.type=="required_status_checks")|.parameters.required_status_checks[].context]')
-  gh pr view <pr> --json mergeStateStatus,statusCheckRollup | jq --argjson req "$REQ" '
-    (.statusCheckRollup | map({name: (.name // .context), c: ((.conclusion // .state // "PENDING") | ascii_upcase)})) as $r
-    | { state: .mergeStateStatus,
-        missing: [ $req[] | select(. as $n | $r | map(.name) | index($n) | not) ],
-        failed:  [ $r[] | select(.name as $n | $req | index($n)) | select(.c | IN("FAILURE","ERROR","CANCELLED","TIMED_OUT")) | .name ],
-        pending: [ $r[] | select(.name as $n | $req | index($n)) | select(.c | IN("SUCCESS","SKIPPED","NEUTRAL","FAILURE","ERROR","CANCELLED","TIMED_OUT") | not) | .name ],
-        nonrequired_failed: [ $r[] | select(.name as $n | $req | index($n) | not) | select(.c | IN("FAILURE","ERROR")) | .name ] }'
-  ```
-
-  The loop ends **only** on one of three outcomes, tested in this order: **red** —
-  `failed` non-empty (a **required** context with a failing conclusion; `CANCELLED`
-  means read `gh run list --commit <sha>` for the superseding run before believing
-  it); **green** — `missing`, `failed` and `pending` all empty **and**
-  `state ∈ {CLEAN, UNSTABLE}`, plus `BEHIND` on a PR **based on `dev`** —
-  `UNSTABLE` *is* green here: every required context
-  is satisfied and something non-required failed (#2503 merged clean with `Vercel`
-  = `FAILURE`; name `nonrequired_failed` in the report, never stop on it); or
-  **stuck** — the three lists empty and `state ∈ {BLOCKED, DIRTY}`, plus `BEHIND`
-  on a PR **based on `main`**, which is a review requirement, a conflict or a
-  stale promotion head, not CI: stop waiting and act on the state (`DIRTY`
-  guidance is above). `BEHIND` is the one state whose verdict depends on the base
-  branch, because only `main` still requires an up-to-date head (#2632). Anything else — a non-empty
-  `missing` or `pending`, an empty rollup, `state: UNKNOWN` (GitHub has not computed
-  mergeability for that head yet; measured to persist across re-reads on a freshly
-  pushed PR) — keeps waiting under a wall-clock ceiling you state, and a loop that
-  outlives the ceiling reports that, not green. The rollup mixes `CheckRun`
-  (`status`/`conclusion`/`name`) and `StatusContext` (`state`/`context`) shapes, which
-  is why every field above is read with a fallback.
-- **BEHIND does NOT self-resolve under `--auto` in this repo** — observed twice
-  before #2632, when the armed PR sat BEHIND indefinitely until a manual
-  `gh pr update-branch <pr>`. On `dev` that no longer matters: with the up-to-date
-  rule off, an armed PR in `BEHIND` merges on its own checks and needs nothing from
-  you. A **promotion PR into `main`** is still strict, and you cannot update it:
-  its head is `dev`, which refuses direct pushes. It merges behind, with no
-  sync-back (owner decision, 2026-09-26) — since 2026-10-09 **any of the three
-  maintainers** does that merge, from the ordinary **Merge pull request**
-  (merge commit) button in the web UI; BEHIND is expected on it, not a defect
-  to clear ([`branch-and-release-flow.md`](../../../docs/contributing/branch-and-release-flow.md)
-  § *Promotion to production*) — say so, never run `gh pr update-branch` on it.
+**Waiting on CI** — the wait-loop predicate, body-edit re-runs, infra-flake reruns and
+the `BEHIND` promotion rule live in [`references/waiting-on-ci.md`](references/waiting-on-ci.md):
+read it before any wait, or before acting on an armed PR's merge; never `sleep`-loop on `gh pr checks`.
 
 ## Closeout
 
@@ -1167,12 +1013,14 @@ Three drafts of one PR body said twelve, fourteen and sixteen for the same mutat
 set, and the final table says four of fourteen reproduced (#2423, commit `12ea16c1`) —
 different denominators, different definitions of *reproduced*, and until the table
 existed nothing either could be checked against.
-The closeout (and the PR body it summarises) carries one row per cell:
+The closeout (and the PR body it summarises) carries one row per cell, and the
+adversarial-edit column names the wrong edit (*Implement* step 5), not "removed the guard":
 
-| # | Cell (guard + mutation) | Author result @ sha | Reproduced by (pass @ sha) | Status |
-|---|---|---|---|---|
-| 1 | `verify-connect-bundle` — stale `dist` → exit 0 | red → green @ `2097f9e0` | `haven-reviewer` @ `2097f9e0` | reproduced |
-| 2 | dev-snapshot rebuild at `0.0.0-dev.*` — four `@alpha` assertions go red | 2/4/1/1 @ `12ea16c1` | — | **author-only** |
+| # | Guard | Adversarial edit | Author result @ sha | Reproduced by (pass @ sha) | Status |
+|---|---|---|---|---|---|
+| 1 | `verify-connect-bundle` | stale `dist` | exit 0; red → green @ `2097f9e0` | `haven-reviewer` @ `2097f9e0` | reproduced |
+| 2 | dev-snapshot rebuild | rebuild at `0.0.0-dev.*` | four `@alpha` assertions go red: 2/4/1/1 @ `12ea16c1` | — | **author-only** |
+| 3 | retryable-reason test (polarity, PR #4133) | reason rewritten to forbid the header, phrase kept | red, per `2580546a`'s message | — | **author-only** |
 
 The table is the source; any total in the prose is derived from it and says so.
 
@@ -1245,4 +1093,9 @@ operator can run (funded testnet keys, vendor dashboards, live end-to-end runs):
    "code merged".
 4. When the operator confirms (or pastes the output), verify it matches the expected
    evidence, tick the checklist, remove the `operator-verify` label, and close with
-   the evidence links.
+   the evidence links. To find landed issues still waiting for that evidence,
+   `gh issue list --label landed-partial --state open` lists the open issues the
+   merge-time workflow labelled (#4235; the label can stay on at close). Not every
+   one waits on an operator step, and the list misses epics, non-maintainer or
+   bot-authored issues, bot-authored PRs, the second and later numbers of a
+   list-form `Refs #a, #b`, and merges before #4235.

@@ -1,0 +1,25 @@
+{
+  "packages/backend/src/infra/repositories/agent-rekeys.ts": {
+    "sql-status-literal": 1
+  },
+  "packages/backend/src/infra/repositories/delegation-budgets.ts": {
+    "sql-status-literal": 1,
+    "sql-time-now": 1,
+    "ts-payment-window": 4
+  },
+  "packages/backend/src/infra/repositories/sub-budgets.ts": {
+    "sql-status-literal": 1
+  },
+  "packages/cli/src/commands.ts": {
+    "ts-status-liveness": 2
+  },
+  "packages/frontend/src/components/DelegationBudgetCard.tsx": {
+    "ts-status-liveness": 5
+  },
+  "packages/frontend/src/hooks/useDelegationBudget.ts": {
+    "ts-status-liveness": 2
+  },
+  "packages/sdk/src/account-reads.ts": {
+    "ts-status-liveness": 1
+  }
+}

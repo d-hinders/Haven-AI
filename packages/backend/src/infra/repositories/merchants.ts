@@ -17,8 +17,29 @@
 import pool from '../../db.js'
 import type { Executor } from '../transaction.js'
 import { HOST_OF_URL_SQL, hostOfUrl } from '../../db/url-host.js'
+import { CHAIN_REGISTRY } from '@haven_ai/core'
 
 export type MerchantListingStatus = 'live' | 'coming_soon'
+
+/**
+ * Every wire form "USDC" takes in `merchant_catalog.asset` (#3980): most rows
+ * carry the symbol, the Ampersend seeds carry Circle's canonical contract
+ * address (`088_merchants.ts`). Derived from core's chain registry — the same
+ * addresses the wallet pays with — so a chain added there is matched here
+ * without a second hand-maintained list. Compared lowercased on both sides:
+ * asset strings come from merchant operators, not from this codebase.
+ */
+export const USDC_ASSET_IDENTIFIERS: readonly string[] = (() => {
+  const ids = new Set<string>(['usdc'])
+  for (const chain of Object.values(CHAIN_REGISTRY)) {
+    for (const token of chain.tokens) {
+      if (token.symbol.toUpperCase() === 'USDC' && token.address) {
+        ids.add(token.address.toLowerCase())
+      }
+    }
+  }
+  return [...ids]
+})()
 
 /**
  * The merchant columns every catalog read joins onto a `merchant_catalog`
@@ -95,6 +116,11 @@ export interface MerchantListingRow extends MerchantRow {
   networks: string[]
   /** Any offer verified payable (operator: active + verified_at; ingestion: always). */
   verified_payable: boolean
+  /**
+   * The lowest USDC price among those offers in atomic units (#3980), or null
+   * when none of them names one — the marketplace card's "From <price> USDC".
+   */
+  lowest_price_atomic: string | null
 }
 
 /**
@@ -138,14 +164,29 @@ const MERCHANT_COLUMNS = `
 /**
  * Offer aggregates per merchant: operator rows on the listed chains that are
  * not delisted, plus verified_payable submissions (any chain). `$1` is the
- * network list or NULL for "every chain".
+ * network list or NULL for "every chain"; `$2` is the set of `asset` values
+ * that count as USDC (`USDC_ASSET_IDENTIFIERS`) — the data carries the symbol
+ * on most rows and Circle's contract address on the Ampersend seeds, so the
+ * lowest price matches both. The lowest price is read over the SAME rows the
+ * count is: every non-delisted offer (a degraded offer is still listed),
+ * whose `price_atomic` is a plain digit string (the value is the merchant's
+ * own advertisement — a malformed one is excluded, not cast, the same
+ * defensiveness `withinBudget` applies client-side) and whose asset is USDC.
+ * The original text wins through `array_agg ... ORDER BY numeric` — no
+ * reformatting round-trip, and a lexicographic MIN over text would answer
+ * "1000" over "900".
  */
 const OFFER_AGGREGATES_SQL = `
   WITH operator AS (
     SELECT merchant_id,
            count(*)::int AS n,
            array_remove(array_agg(DISTINCT network), NULL) AS networks,
-           bool_or(status = 'active' AND verified_at IS NOT NULL) AS any_verified
+           bool_or(status = 'active' AND verified_at IS NOT NULL) AS any_verified,
+           (array_agg(price_atomic ORDER BY price_atomic::numeric ASC) FILTER (
+              WHERE price_atomic IS NOT NULL
+                AND price_atomic ~ '^[0-9]+$'
+                AND lower(COALESCE(asset, '')) = ANY($2::text[])
+           ))[1] AS lowest_price_atomic
     FROM merchant_catalog
     WHERE status != 'delisted'
       AND ($1::text[] IS NULL OR network = ANY($1::text[]))
@@ -163,12 +204,13 @@ const LIST_MERCHANTS_SQL = `
   SELECT ${MERCHANT_COLUMNS},
          (COALESCE(o.n, 0) + COALESCE(i.n, 0)) AS offer_count,
          COALESCE(o.networks, ARRAY[]::text[]) AS networks,
-         (COALESCE(o.any_verified, false) OR COALESCE(i.n, 0) > 0) AS verified_payable
+         (COALESCE(o.any_verified, false) OR COALESCE(i.n, 0) > 0) AS verified_payable,
+         o.lowest_price_atomic
   FROM merchants m
   LEFT JOIN operator o ON o.merchant_id = m.id
   LEFT JOIN ingestion i ON i.merchant_id = m.id
   WHERE (m.listing_status = 'live' AND (COALESCE(o.n, 0) + COALESCE(i.n, 0)) > 0)
-     OR ($2::boolean AND m.listing_status = 'coming_soon')
+     OR ($3::boolean AND m.listing_status = 'coming_soon')
   ORDER BY m.is_test_merchant ASC, m.listing_status ASC, m.name ASC, m.id ASC`
 
 const GET_MERCHANT_BY_SLUG_SQL = `
@@ -176,11 +218,12 @@ const GET_MERCHANT_BY_SLUG_SQL = `
   SELECT ${MERCHANT_COLUMNS},
          (COALESCE(o.n, 0) + COALESCE(i.n, 0)) AS offer_count,
          COALESCE(o.networks, ARRAY[]::text[]) AS networks,
-         (COALESCE(o.any_verified, false) OR COALESCE(i.n, 0) > 0) AS verified_payable
+         (COALESCE(o.any_verified, false) OR COALESCE(i.n, 0) > 0) AS verified_payable,
+         o.lowest_price_atomic
   FROM merchants m
   LEFT JOIN operator o ON o.merchant_id = m.id
   LEFT JOIN ingestion i ON i.merchant_id = m.id
-  WHERE m.slug = $2
+  WHERE m.slug = $3
   LIMIT 1`
 
 export interface ListMerchantsOptions {
@@ -201,6 +244,7 @@ export async function listMerchants(
 ): Promise<MerchantListingRow[]> {
   const result = await db.query<MerchantListingRow>(LIST_MERCHANTS_SQL, [
     networksOf(options.chainIds),
+    USDC_ASSET_IDENTIFIERS,
     options.includeProspects,
   ])
   return result.rows
@@ -212,7 +256,11 @@ export async function getMerchantBySlug(
   chainIds: ChainScope,
   db: Executor = pool,
 ): Promise<MerchantListingRow | null> {
-  const result = await db.query<MerchantListingRow>(GET_MERCHANT_BY_SLUG_SQL, [networksOf(chainIds), slug])
+  const result = await db.query<MerchantListingRow>(GET_MERCHANT_BY_SLUG_SQL, [
+    networksOf(chainIds),
+    USDC_ASSET_IDENTIFIERS,
+    slug,
+  ])
   return result.rows[0] ?? null
 }
 

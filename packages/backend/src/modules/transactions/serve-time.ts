@@ -33,3 +33,22 @@ export async function serveTimeAmount(
   const amount = values[currency.toLowerCase() as 'usd' | 'eur' | 'sek']
   return amount == null ? null : amount.toFixed(4)
 }
+
+/**
+ * All three currencies at once (#4323): the refusal read serves the full
+ * serve-time triple — the row has no single `approx_currency` of its own and
+ * `sek_value` is not stored, so the caller's display currency is chosen at
+ * render time from the complete set. Same null-for-unknown semantics as
+ * `serveTimeAmount` per currency, at the same four-decimal scale.
+ */
+export async function serveTimeAmountTriple(
+  tokenSymbol: string | null | undefined,
+  amountHuman: string | null | undefined,
+): Promise<{ usd: string | null; eur: string | null; sek: string | null }> {
+  const values = await getServeTimeFiatValues(tokenSymbol ?? '', amountHuman ?? '')
+  return {
+    usd: values.usd == null ? null : values.usd.toFixed(4),
+    eur: values.eur == null ? null : values.eur.toFixed(4),
+    sek: values.sek == null ? null : values.sek.toFixed(4),
+  }
+}

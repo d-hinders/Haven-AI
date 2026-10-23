@@ -69,7 +69,7 @@ describe('/demo page', () => {
     // (design review round 4).
     expect(screen.getAllByText(/Test funds only/)).toHaveLength(1)
     expect(screen.getByText(/works best on a laptop/)).toBeInTheDocument()
-    expect(screen.getByText(/passkey-capable device/)).toBeInTheDocument()
+    expect(screen.getByText(/A device that can create a passkey/)).toBeInTheDocument()
     // "harness" jargon dropped (design review round 4, nit 6).
     expect(pageText).not.toMatch(/harness/i)
     expect(screen.getByText(/One AI agent, such as Claude Code, Codex, or Hermes/)).toBeInTheDocument()
@@ -97,10 +97,10 @@ describe('/demo page', () => {
     // container's text rather than one leaf node.
     expect(pageText).toMatch(/under Network when onboarding/)
 
-    // Step 2: Base Sepolia named explicitly, pointing at the Add funds
-    // modal's own faucet card (#3478) AND a direct fallback link, now with
-    // an external-link affordance (design review round 4, nit 7).
-    expect(screen.getByText(/Get test funds/)).toBeInTheDocument()
+    // Step 2: Base Sepolia named explicitly, pointing at the Receive
+    // dialog's own faucet card (#3478, #4094) AND a direct fallback link,
+    // now with an external-link affordance (design review round 4, nit 7).
+    expect(screen.getByText(/Get test USDC/)).toBeInTheDocument()
     expect(screen.getByText(/Open Circle's faucet/)).toBeInTheDocument()
     expect(screen.getAllByText(/Base Sepolia/).length).toBeGreaterThan(0)
     const faucetLink = screen.getByRole('link', { name: /faucet\.circle\.com/ })
@@ -129,7 +129,7 @@ describe('/demo page', () => {
     // Step 8 is an UNNUMBERED summary surface now, not StepCard 8 (design
     // review round 4). No false "never held custody" claim either — EIP-3009
     // funds the agent's delegate transiently (review round 1, F4).
-    expect(screen.getByText(/budget you signed and it could not exceed/)).toBeInTheDocument()
+    expect(screen.getByText(/budget you approved and it could not exceed/)).toBeInTheDocument()
     expect(screen.queryByText('8')).not.toBeInTheDocument()
     // "Questions? Ask the team." is plain text: no contact destination exists
     // (the site has no contact page), and a link that goes nowhere

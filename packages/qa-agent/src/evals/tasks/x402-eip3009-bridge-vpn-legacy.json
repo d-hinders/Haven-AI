@@ -1,0 +1,41 @@
+{
+  "id": "x402-eip3009-bridge-vpn-legacy",
+  "title": "The EIP-3009 bridge: the agent buys the MCP merchant's legacy VPN plan end to end",
+  "category": "x402-paywall",
+  "tier": 1,
+  "instruction": "Buy the legacy VPN plan from the MCP merchant at {target}: its buy_vpn tool takes {\"plan\": \"legacy\"} and the plan costs about 0.001 USDC. Pay for it with your Haven payment tools — the merchant is an MCP server, so pay through your hosted Haven tools rather than by hand-crafting an HTTP request. This is a new purchase, not a retry: pass idempotency_key \"{purchase_key}\" to the paying tool. Then tell me what you received and what it cost.",
+  "requires": [
+    "delegation-agent-open-budget",
+    "funded-period-budget",
+    "mcp-merchant-eip3009-target"
+  ],
+  "amount": {
+    "rule": "fraction_of_remaining",
+    "fraction": "1/4"
+  },
+  "settled_amount_unknown": true,
+  "graders": [
+    {
+      "name": "payment_status_settled",
+      "options": {}
+    },
+    {
+      "name": "merchant_settlement_recorded",
+      "options": {}
+    },
+    {
+      "name": "eip3009_settlement_shape",
+      "options": {}
+    },
+    {
+      "name": "nothing_stranded_on_delegate",
+      "options": {}
+    }
+  ],
+  "expectTransfer": false,
+  "source": {
+    "kind": "issue",
+    "ref": "4205",
+    "note": "Each trial passes its own idempotency key ({purchase_key}): on 2026-10-23 (run 39914610364) trial 2 replayed trial 1's payment inside Haven's 5-minute idempotency bucket and graded green on one payment; graders now reject a trial whose only payment is an idempotent replay. The bridge has no agent-success coverage: every other x402 task buys `basic`, which the dev demo merchant serves on erc7710, so the EIP-3009 two-leg path — the path that reintroduces a hot balance on the delegate EOA — was never graded from an agent run. The agent must find the fast hosted flow itself (haven_pay_mcp_tool → haven_sign_x402 → haven_settle_mcp_tool): the merchant's `legacy` plan has no catalog row, so the instruction names the merchant and the tool. Graded on backend/chain evidence only: `merchant_settlement_recorded` on the machine-payment status (#4119), the receipt row's eip3009 two-leg shape (scheme eip3009, settlement_address = the delegate EOA, merchant_address different), and no stranded USDC left on the delegate EOA versus the resolve-time snapshot. The decomposed tools (haven_x402_sign_header / haven_submit / haven_complete_mcp_tool) and the sweep guidance are NOT claimed as covered."
+  }
+}

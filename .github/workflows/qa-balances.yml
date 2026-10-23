@@ -4,12 +4,14 @@ name: QA wallet balances
 # 2026-10-05) because the delegation treasury ran dry and nothing warned
 # beforehand. Once a day this reads every wallet the QA flows depend on
 # (delegation treasury USDC, demo-merchant settlement ETH, dev relayer ETH on
-# 84532), computes a runway from the observed daily burn, and keeps ONE
-# standing issue — "QA wallet balances low", label `qa-funding` — open while
-# any wallet is within 7 days of running dry (scripts/ci/qa-balance-issue.mjs).
+# 84532, and since #3997 the two agent-eval accounts' USDC), computes a runway
+# from the observed daily burn, and keeps ONE standing issue — "QA wallet
+# balances low", label `qa-funding` — open while any wallet is within 7 days
+# of running dry (scripts/ci/qa-balance-issue.mjs).
 #
-# Read-only except for testnet faucet requests for the demo merchant's
-# settlement wallet and the dev relayer (#3836): it never
+# Read-only except for testnet faucet requests — ETH for the demo merchant's
+# settlement wallet and the dev relayer (#3836), USDC for the two agent-eval
+# accounts (#3997): it never
 # signs or moves Haven or customer funds, and receives no delegate private key
 # or CDP wallet secret. Owner decisions (2026-10-05): a GitHub issue is the
 # only channel, once a day, 7 days ahead; Pimlico credit is out of scope.
@@ -85,6 +87,14 @@ jobs:
           # A non-secret repo VARIABLE (owner decision on #3631): the deliberate
           # exception to preflight's "derive, never restate" rule.
           QA_DEV_RELAYER_ADDRESS: ${{ vars.QA_DEV_RELAYER_ADDRESS }}
+          # Non-secret repo VARIABLES (#3997): each agent-eval lane's SMART
+          # account (the payer the eval graders probe, not the delegate EOA).
+          # The Claude lane's must hold the same address as the `agent-evals`
+          # environment's AGENT_EVALS_AGENT_ACCOUNT — this workflow has no
+          # environment and cannot read that one. Both optional: an unset or
+          # invalid variable is an `unknown` row that never turns the run red.
+          QA_EVAL_HERMES_ACCOUNT: ${{ vars.QA_EVAL_HERMES_ACCOUNT }}
+          QA_EVAL_CLAUDE_ACCOUNT: ${{ vars.QA_EVAL_CLAUDE_ACCOUNT }}
         run: |
           set +e
           npm run qa:balances -w packages/qa-agent -- \

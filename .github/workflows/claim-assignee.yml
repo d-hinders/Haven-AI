@@ -49,7 +49,8 @@ name: Claim to assignee
 # workflow: a comment posted with `GITHUB_TOKEN` does not trigger
 # `issue_comment` (GitHub's non-recursion rule), and the Bot gate below keeps
 # every bot out regardless. The parser still carries a `--author-type Bot`
-# grammar — a bot may only release, and only in a line naming its PR — so that
+# grammar — a bot may only release, and only in a workflow's shape: the
+# merge-time line naming its PR, or one of the per-claimant lines (#4176) — so that
 # if this gate is ever opened to an App-token poster the narrowing is already
 # the contract; today nothing depends on it, and the author type is passed
 # with `User` as the default so an empty field never widens the grammar.

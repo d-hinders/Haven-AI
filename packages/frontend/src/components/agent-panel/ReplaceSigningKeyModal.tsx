@@ -84,6 +84,9 @@ type Step = 'reason' | 'address' | 'consequences' | 'signing' | 'stalled' | 'don
 
 const STEP_ORDER: Step[] = ['reason', 'address', 'consequences', 'signing']
 
+/** StepProgress labels, index-aligned with STEP_ORDER. */
+const STEP_LABELS = ['Reason', 'New key', 'Review', 'Approve'] as const
+
 /** USDC everywhere the sweep helper is concerned; see `sweepUsdcAddress`. */
 const RESIDUAL_DECIMALS = 6
 
@@ -99,7 +102,7 @@ function formatUsdc(atomic: string): string {
 function failureCopy(failure: RekeyFailure): string {
   switch (failure.kind) {
     case 'cancelled':
-      return 'Signing was cancelled. Nothing changed.'
+      return 'Approval was cancelled. Nothing changed.'
     case 'delegate_in_use':
       return 'Another one of your agents is already using that signing address. Generate a fresh key on the agent’s machine and paste the new address.'
     case 'residual_read_failed':
@@ -115,7 +118,7 @@ function failureCopy(failure: RekeyFailure): string {
     case 'out_of_order':
       return 'This key replacement has already moved past that step. Reopen it to see where it stands.'
     case 'missing_signature':
-      return 'One of the replacement budget rules was not signed, so nothing was changed. Try again and approve every prompt.'
+      return 'One of the replacement budget rules was not approved, so nothing was changed. Try again and approve every prompt.'
     case 'completion_failed':
       return 'The replacement could not be finished, and nothing was changed by this attempt. You can try again.'
     default:
@@ -284,7 +287,7 @@ export function ReplaceSigningKeyModal({
     setStep('signing')
 
     if (rekey.resumeMode === 'full') {
-      setSigningLabel('Waiting for your signature to switch off the old key…')
+      setSigningLabel('Waiting for your approval to switch off the old key…')
       const revoked = await rekey.revoke()
       if (!revoked.ok) {
         // Nothing landed: the re-key is still at `preflight` and the old key
@@ -370,7 +373,10 @@ export function ReplaceSigningKeyModal({
   }, [rekey, issuedDelegations, runRekey])
 
   const blocked = rekey.signingBlockedReason
-  const stepIndex = step === 'done' ? STEP_ORDER.length : STEP_ORDER.indexOf(step)
+  // 'stalled' happens after the owner approved (the revoke landed), so it
+  // keeps the last step active rather than showing every step as unstarted.
+  const stepIndex =
+    step === 'done' ? STEP_ORDER.length : step === 'stalled' ? STEP_ORDER.length - 1 : STEP_ORDER.indexOf(step)
 
   /**
    * Whether the irreversibility gate is on screen — the red banner and the
@@ -396,7 +402,7 @@ export function ReplaceSigningKeyModal({
       closeOnEscape={closeIsSafe}
       showCloseButton={closeIsSafe}
       headerAccessory={
-        step === 'done' ? null : <StepProgress totalSteps={STEP_ORDER.length} currentStep={stepIndex} />
+        step === 'done' ? null : <StepProgress totalSteps={STEP_ORDER.length} currentStep={stepIndex} labels={STEP_LABELS} />
       }
       footer={renderFooter()}
     >
@@ -416,8 +422,8 @@ export function ReplaceSigningKeyModal({
         <ApprovalRequiredBanner title="You cannot replace this key from this device" tone="warning">
           <p className="text-sm leading-relaxed">
             Connect your account owner wallet, or use a device with one of the account’s
-            passkeys. Replacing a signing key needs the account owner’s signature, and Haven never
-            signs on your behalf.
+            passkeys. Replacing a signing key needs the account owner’s approval, and Haven can
+            never give it for you.
           </p>
           {/* #3812: the owner's wallet can be connected right here — only
               once the signer set is known, never while it loads or after a
@@ -714,7 +720,7 @@ export function ReplaceSigningKeyModal({
         {issuedDelegations.length > 0 ? (
           <p className="text-sm text-[var(--v2-ink-3)]">
             You will be asked to approve {issuedDelegations.length}{' '}
-            {issuedDelegations.length === 1 ? 'budget rule' : 'budget rules'} — one signature each.
+            {issuedDelegations.length === 1 ? 'budget rule' : 'budget rules'} — one approval each.
           </p>
         ) : null}
       </div>

@@ -53,7 +53,9 @@ The CLI talks to the hosted Haven backend by default. Point it elsewhere with
 
 The path an agent walks, and where it stops. Four of the six steps in
 [`/for-agents.md`](https://github.com/d-hinders/Haven-AI/blob/dev/packages/frontend/public/for-agents.md)
-are your user's; these are the two that are yours.
+are your user's. With a CLI session you can take step 3 — creating the agent
+and setting its budget — off their hands, and `--run` also does step 4, which
+is yours.
 
 ```bash
 # 1. Get a scoped session. Prints a code and a link for your user to approve in
@@ -109,7 +111,7 @@ haven logout
 
 # read
 haven wallets list
-haven wallets balances --safe <id|address>
+haven wallets balances [--safe <id|address>]
 haven wallets funding [--safe <id|address>] [--wait]   # the paste-ready funding instruction (#2534)
 haven agents list
 haven agents show <id>
@@ -164,7 +166,13 @@ never calls `activate` — that is the whole design.
   route). `--amount` is in
   whole tokens, read from your wallet's balances exactly like
   `agents connect`; `--recipient` pins the budget to one address (omit for an
-  open budget); `--expires` takes unix seconds (default: 90 days).
+  open budget); `--expires` takes unix seconds (default: 90 days). A grant
+  adds a budget to an EMPTY (token, recipient) slot only: when the agent
+  already has a live budget there, the build is refused (exit 4,
+  `error_code: BUDGET_SLOT_OCCUPIED` with `existing_delegation_hash` under
+  `--json`, #3933) and the hint says to edit that budget on the agent's page,
+  which replaces it and stops the old one on-chain. A grant cannot replace it
+  — that would leave the old delegation enabled.
 - `budget revoke <agentId> <delegationHash>` prepares the sponsored
   revocation (no gas, one signature). The hash comes from
   `haven budget show <agentId> --hashes` or the dashboard. (`agents show` does
@@ -177,7 +185,8 @@ never calls `activate` — that is the whole design.
   returns the same hash, so `--wait` converges instead of chasing a version
   that never activates.
 - Under `--json`, grant returns the backend's build object —
-  `{ build_id, typed_data_hash, signing_url, delegation_hash, version }`
+  `{ delegation_hash, version, delegate_account_address, signing_payload,
+  build_id, typed_data_hash, signing_url }`
   (`build_id` and `typed_data_hash` are the delegation hash, named for API
   clarity) — plus `agent_id` and `status`. The link first, the settled status
   after: the same two-emission shape as device login.
@@ -194,7 +203,7 @@ rather than rounding it away.
 The connector command is **printed, never composed** — it is the same string
 the dashboard shows for the same setup, because both render what the backend
 built. `--run` executes it for you as a child process with exactly `--json`
-appended and nothing else changed, streams the connector's output, and puts the
+appended and nothing else changed, streams the connector's stderr, and puts the
 thing you have to act on first.
 
 If the connector refuses — it cannot tell which runtime to wire, or the machine
@@ -217,7 +226,7 @@ Approving the budget stays with the human, in the browser, every time.
 
 ### `haven wallets funding`
 
-Prints the funding instruction a human acts on: what to send (each token's
+Prints the funding instruction a human acts on: what to send (the token's
 documented minimum-useful amount), to which address, on which chain, plus the
 explorer link and a faucet link on testnets. It reads
 `GET /user/accounts/:accountId/funding` — the same facts the dashboard's funding
@@ -225,7 +234,8 @@ card shows — and composes nothing locally, so the printed sentence and the
 dashboard can never disagree about the amount.
 
 `--wait` polls the same read until the account counts as funded, printing the
-elapsed time on stderr while it waits, and exits 0 the moment `funded` flips.
+elapsed time while it waits (on stderr under `--json`), and exits 0 the moment
+`funded` flips.
 On timeout it exits 1 with the elapsed time in the message. It is read-only in
 every mode: it never sends anything and never touches a faucet — the transfer
 itself stays with the human.
@@ -325,7 +335,7 @@ sentence, now emit an object as well.
 | `1` | Failed | Something broke that none of the below describes (a 5xx, an unexpected error). Retrying may help. |
 | `2` | Usage | The command line was wrong — unknown command, missing argument, bad flag, or a `--safe` that matches nothing. Fix the argv; retrying it unchanged will not help. |
 | `3` | Not authenticated | No stored session, or the backend rejected the one we have. Run `haven login`. |
-| `4` | Refused | The session is fine and the backend said no anyway (403, 410, other 4xx). The message is the backend's, echoed verbatim. |
+| `4` | Refused | The answer is no: a 403, 410 or other 4xx from the backend (its own `error` text is echoed when it sends one), or a refusal the CLI makes itself — for example a live budget on `agents revoke`, credential-shaped `feedback submit` text, the connector's refusal under `agents connect --run`, or a device login the human denied. |
 | `5` | Network | The backend could not be reached at all. Check connectivity and `--api`. |
 
 **Why a 401 is `3` and not `4`.** The two overlap by definition — a 401 *is* the
@@ -362,5 +372,5 @@ test; the copy exists so this package keeps **zero runtime dependencies** and
 The CLI authenticates as the user and talks to the same JWT API as the
 dashboard. It can read everything and perform backend-only management; anything
 that moves funds or changes on-chain authority is signed by your wallet/passkey
-in the dashboard. Haven never holds your Safe owner key or any delegate key
+in the dashboard. Haven never holds your account's owner key or any delegate key
 through this tool.

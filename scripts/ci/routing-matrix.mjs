@@ -193,6 +193,12 @@ export const ROUTING_MATRIX = [
     why: 'Must NOT be swallowed by the packages/mcp/* rule listed above it — the shared prefix is the ordering mistake that would silently stop routing mcp-server.',
   },
   {
+    files: ['packages/mcp-server/src/tools-list.snapshot.json'],
+    expect: ['code', 'mcp_server', 'qa_agent'],
+    kind: CONTRACT,
+    why: 'The hosted tools/list snapshot (#4121). qa-agent\'s tools.test.ts holds the eval graders\' copy of the hosted tool names equal to this file, and only qa_agent_checks runs it. qa-agent does not depend on mcp-server, so the dependency table cannot carry it; without this arm a snapshot-only change never runs the test that exists to catch it. Any other packages/mcp-server/ file still routes mcp_server alone (the tools.ts row above).',
+  },
+  {
     files: ['packages/cli/src/index.ts'],
     expect: ['code', 'cli'],
     kind: CONTRACT,
@@ -329,14 +335,14 @@ export const ROUTING_MATRIX = [
     kind: CONTRACT,
     why:
       'The canonical agent runbook (#2727). Other packages hold pinned derivations of it so they ' +
-      'stay installable alone — the CLI a full-text copy, the frontend a full-text copy PLUS two ' +
-      'partial ones (agent-onboarding-prompt.ts, agent-skill-bundle.ts) — and each is byte-pinned ' +
+      'stay installable alone — the CLI a full-text copy, the frontend a full-text copy PLUS a ' +
+      'partial one (agent-skill-bundle.ts; #4065 deleted agent-onboarding-prompt.ts) — and each is byte-pinned ' +
       'by a test in its own job. Before this row, an SDK-only change reached neither cli nor ' +
       'frontend, so none of those tests ran: #2713 edited this file and left the CLI copy stale, ' +
       'and dev did not even go red — cli_checks was skipped, so the stale copy was carried until ' +
       'an unrelated backend PR (#2719) regenerated it. lint:runbook-parity covers the two ' +
       'full-text copies from every job that owns the source; the ' +
-      'partial ones are not readable back, so frontend is ROUTED rather than checked. That is the ' +
+      'partial one is not readable back, so frontend is ROUTED rather than checked. That is the ' +
       'reason both jobs are here, and why removing either silently uncovers a pin test.',
   },
   {
@@ -536,6 +542,18 @@ export const ROUTING_MATRIX = [
     why: 'The ratchet’s self-test, same reason as dep-lint’s.',
   },
   {
+    files: ['scripts/lint-budget-liveness.mjs'],
+    expect: ['code', 'backend'],
+    kind: CONTRACT,
+    why: 'The shrink-only budget-liveness census (#3924, epic #3919 slice E) polices packages/backend SQL and the client packages’ TypeScript but only the backend job runs it.',
+  },
+  {
+    files: ['scripts/lint-budget-liveness.test.mjs'],
+    expect: ['code', 'backend'],
+    kind: CONTRACT,
+    why: 'The ratchet’s self-test, same reason as dep-lint’s.',
+  },
+  {
     files: ['scripts/lint-next-steps.mjs'],
     expect: ['code', 'backend', 'mcp_server', 'signer', 'mcp', 'connect', 'qa_agent'],
     kind: CONTRACT,
@@ -590,8 +608,8 @@ export const ROUTING_MATRIX = [
     expect: ['code', 'backend', 'frontend', 'ops'],
     kind: CONTRACT,
     why:
-      'The shared ratchet engine backs NINE gates as of #3131 (eight as of #3104, ' +
-      'seven as of #3029, six as of #2747): the ' +
+      'The shared ratchet engine backs TEN gates as of #3924 (nine as of #3131, ' +
+      'eight as of #3104, ' +
       'backend db-mock gate, the ' +
       'frontend wire-type gate (#1447), the retired-rail prose ratchet, the frontend copy ' +
       'lint, packages/frontend/scripts/design-lint.mjs — which an earlier draft of this row ' +
@@ -693,6 +711,13 @@ export const ROUTING_MATRIX = [
     kind: CONTRACT,
     why:
       'The committed baseline the request-schema ratchet (#3029) compares against. Lowering a count here without the code change that earns it is exactly the weakening the ratchet refuses, and lint:request-schemas runs only in backend_checks — the ratchet and its self-test were registered but the data they read was not, so a baseline-only edit routed nowhere.',
+  },
+  {
+    files: ['scripts/lint-budget-liveness-baseline.json'],
+    expect: ['code', 'backend'],
+    kind: CONTRACT,
+    why:
+      'The committed baseline the budget-liveness census (#3924) compares against. Lowering a count here without the code change that earns it is exactly the weakening the ratchet refuses, and lint:budget-liveness runs only in backend_checks — the same baseline-not-registered hole the request-schema baseline closed.',
   },
   {
     files: ['scripts/lint-next-steps-baseline.json'],

@@ -24,7 +24,12 @@ export interface FeedTransaction {
   paymentId: string
   settledAt: string
   direction: 'out' | 'in'
-  counterparty: { address: string | null; name: string | null }
+  /**
+   * The counterparty the payment went to. `country` (#3918) is the supplier
+   * country from the merchant catalog (ISO-2) — the field a reverse-VAT
+   * coding needs on the underlag; null when the catalog has none.
+   */
+  counterparty: { address: string | null; name: string | null; country: string | null }
   resourceUrl: string | null
   token: string
   amountAtomic: string
@@ -170,7 +175,11 @@ export function toFeedTransaction(
     // rendered on the #498 receipt underlag) — same normalization.
     settledAt: new Date(entry.settledAt).toISOString(),
     direction: entry.direction,
-    counterparty: { address: entry.counterparty.address, name: entry.counterparty.name },
+    counterparty: {
+      address: entry.counterparty.address,
+      name: entry.counterparty.name,
+      country: entry.counterparty.country,
+    },
     resourceUrl: entry.resourceUrl,
     token: entry.token,
     amountAtomic: entry.amountAtomic,

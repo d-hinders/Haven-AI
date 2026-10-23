@@ -295,6 +295,63 @@ describeDb('POST /machine-payments/budget-precheck (#3054)', () => {
     expect(userId).toBeTruthy()
   })
 
+  // ── #3967: record_refusal: false — the QUOTE surfaces' opt-out ────────────
+  // A quote is not a payment attempt: it asks the SAME decision but must
+  // write NO refusal row (the later prepare records its own if the agent goes
+  // ahead). The decision body is byte-identical to the recording one.
+
+  it('record_refusal:false answers the SAME decided 403 but writes NO payment_refusals row', async () => {
+    const { agentId } = await seedDelegationAgent()
+    await seedActiveDelegation(agentId, '500000') // 0.50 USDC remaining
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/machine-payments/budget-precheck',
+      headers,
+      payload: precheckBody({ recordRefusal: false }),
+    })
+    expect(res.statusCode).toBe(403)
+    // Byte-identical decision body to the recording branch above.
+    const body = res.json()
+    expect(body.error_code).toBe('delegation_budget_exceeded')
+    expect(body.remaining_atomic).toBe('500000')
+    expect(body.amount_atomic).toBe('1000000')
+
+    // The whole point: nothing lands in the ledger. Wait one macrotask past
+    // the response so a fire-and-forget write would have surfaced by now —
+    // the recording branch's own waitFor proves the write path is fast.
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(await refusalRows(agentId)).toHaveLength(0)
+  })
+
+  it('record_refusal absent still records — the default is unchanged for existing callers', async () => {
+    const { agentId } = await seedDelegationAgent()
+    await seedActiveDelegation(agentId, '500000')
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/machine-payments/budget-precheck',
+      headers,
+      payload: precheckBody(), // no recordRefusal field at all
+    })
+    expect(res.statusCode).toBe(403)
+    await vi.waitFor(async () => {
+      expect(await refusalRows(agentId)).toHaveLength(1)
+    })
+  })
+
+  it('a non-boolean recordRefusal is a 400 before any comparison runs', async () => {
+    await seedDelegationAgent()
+    const res = await app.inject({
+      method: 'POST',
+      url: '/machine-payments/budget-precheck',
+      headers,
+      payload: precheckBody({ recordRefusal: 'no' }),
+    })
+    expect(res.statusCode).toBe(400)
+    expect(res.json().error).toBe('recordRefusal must be a boolean')
+  })
+
   // ── Sufficient: 200, no row ──────────────────────────────────────────────
 
   it('a sufficient quote answers 200 sufficient:true with the remaining figure and writes no row', async () => {

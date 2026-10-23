@@ -112,7 +112,7 @@ const boundary: ClientBoundary = {
     "async openTaskBudget(request: { tokenAddress?: string; maxAmountAtomic: string; ttlSeconds: number; recipientAddress?: string; label?: string; }): Promise<OpenTaskBudgetResult>",
     "async pay(request: PaymentRequest): Promise<PaymentResult>",
     "async payX402Quote(quote: X402Quote, options: X402AuthorizationOptions = {}): Promise<Response>",
-    "async precheckBudget(input: { chainId?: number; token: string; amountAtomic: string; merchantTo?: string; resourceUrl?: string; idempotencyKey?: string; }): Promise<BudgetPrecheckResult>", // #3492, #3518
+    "async precheckBudget(input: { chainId?: number; token: string; amountAtomic: string; merchantTo?: string; resourceUrl?: string; idempotencyKey?: string; recordRefusal?: boolean; }): Promise<BudgetPrecheckResult>", // #3492, #3518, #3967
     "async prepareSweep(): Promise<SweepPrepareResponse>",
     // #3329: taskBudgetId added — build the settlement child under an open task budget's own
     // child delegation ([settlement, task, budget]) instead of the agent's budget delegation
@@ -126,7 +126,7 @@ const boundary: ClientBoundary = {
     "async resumeAuthorizedX402(input: ResumeAuthorizedX402Input): Promise<X402Receipt>",
     "async resumeX402Payment(input: ResumeX402PaymentInput | X402ResumeState): Promise<Response>",
     "async reportX402MerchantOutcome(input: { paymentId: string; outcome: X402MerchantOutcome; merchantStatus: number; merchantBody?: string; deliveryReference?: string; }): Promise<X402MerchantOutcomeReport>",
-    "async reportSettlementEvidence(paymentId: string, settlementTxHash: string): Promise<EvidenceReportOutcome>",
+    "async reportSettlementEvidence(paymentId: string, settlementTxHash: string, options: { paymentHeader?: string; } = {}): Promise<EvidenceReportOutcome>", // #4061 paymentHeader
     "async settleX402Erc7710(paymentRequired: X402PaymentRequired, options: { resourceUrl?: string; } = {}): Promise<X402Erc7710Settlement>",
     "async submitCatalogEntry(resourceUrl: string, options: { website?: string; } = {}): Promise<HavenCatalogSubmission>",
     "async submitSignature(paymentId: string, signature: string): Promise<{ status: string; txHash?: string; }>",
@@ -167,6 +167,7 @@ const boundary: ClientBoundary = {
     './direct-payment-guard.js', // #3283: the signing-surface allowlist signForData runs
     './haven-api-transport.js',
     './mcp-merchant-transport.js',
+    './merchant-answer.js', // #4120: the shared post-funding merchant-answer decision both paths consume
     './merchant-completion.js',
     './merchant-egress.js', // #3747
     './payment-mappers.js',

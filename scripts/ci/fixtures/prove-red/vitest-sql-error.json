@@ -1,0 +1,29 @@
+{
+  "numTotalTests": 2,
+  "success": false,
+  "testResults": [
+    {
+      "name": "<fixture>/vt/d.test.ts",
+      "status": "failed",
+      "message": "",
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "title": "owner join holds",
+          "fullName": "owner join holds",
+          "status": "failed",
+          "failureMessages": [
+            "error: could not determine data type of parameter $1"
+          ]
+        },
+        {
+          "ancestorTitles": [],
+          "title": "other",
+          "fullName": "other",
+          "status": "passed",
+          "failureMessages": []
+        }
+      ]
+    }
+  ]
+}

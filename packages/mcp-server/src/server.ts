@@ -19,7 +19,7 @@ export { AGENT_IDENTITY_UNVERIFIED, IDENTITY_GATE_EXEMPT } from './tools/identit
 export { HOSTED_CONTRACT_FINGERPRINT } from './contract-fingerprint.js'
 
 export const HOSTED_SERVER_NAME = '@haven_ai/mcp-server'
-export const HOSTED_SERVER_VERSION = '0.10.0-alpha.0'
+export const HOSTED_SERVER_VERSION = '0.11.0-alpha.0'
 
 /**
  * MCP `instructions` — the critical path, surfaced to the model at
@@ -70,6 +70,12 @@ export const HOSTED_INSTRUCTIONS = [
   'user for a number they did not volunteer. If the price then rises before',
   'prepare, the cap check refuses safely — re-quote and confirm the new price',
   'with the user. A cap the user DID state always wins over this convention.',
+  'Every quote now also checks the agent\'s remaining budget at quote time and',
+  'carries the answer in budget_check. When a quote returns safe_to_continue',
+  'false — the quoted amount exceeds the budget, or it does not match an',
+  'expected_amount you stated — do NOT proceed to pay: no cap is prefilled, and',
+  'the price or the budget needs the user first. (This is advisory only: the',
+  'on-chain policy still gates the actual payment.)',
   'Every payment tool response carries next_action,',
   'next_tool, and next_arguments — follow those fields first; description prose',
   'is fallback, not the source of truth. When no tool follows, next_tool is absent and',
@@ -80,11 +86,18 @@ export const HOSTED_INSTRUCTIONS = [
   'https paywall), call haven_quote_x402, then haven_pay_x402_quote with the',
   "quote's next_arguments { url, method, headers, body, max_amount_human } and no",
   'payment_required: Haven fetches the challenge itself, so never copy it.',
+  'When the price is stated up front (an invoice total, for example), pass it',
+  'as expected_amount on the quote: if the challenge quotes anything else, the',
+  'quote returns safe_to_continue false with no cap and no next tool — stop',
+  'and tell the user; paying the invoice\'s own deposit address is an option',
+  'only with the user\'s explicit go-ahead, and never once anything has been',
+  'paid via x402.',
   "url is the quote's request_url, never its resource_url, which is the",
   "merchant's own declaration and may differ. Then follow the pay response's",
   'signer and scheme-specific guidance. EIP-3009 (funding leg): haven_sign_x402,',
   'then haven_submit, then retry the merchant yourself with the returned',
-  'payment_header (both header names, below), then haven_report_x402_outcome.',
+  'payment_header (both header names, below), then haven_report_x402_outcome',
+  'with that same payment_header (a reported settlement is recorded only with it).',
   'erc7710: haven_sign, then haven_submit with settlement_scheme "erc7710", then',
   'retry the merchant yourself with the payment_header haven_submit returns',
   '(PAYMENT-SIGNATURE only), then record the merchant\'s settlement with',

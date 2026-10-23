@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import { useState, type ComponentType } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import ConnectAgentModal from '../ConnectAgentModal'
@@ -108,6 +108,45 @@ describe('ConnectAgentModal', () => {
     expect(screen.getByText('Agent details')).toBeInTheDocument()
     expect(screen.queryByText('Haven no longer sends payments from this account.')).not.toBeInTheDocument()
   })
+  it('is top-anchored, so the header holds one y across steps of different heights', () => {
+    render(<ConnectAgentModal open onClose={vi.fn()} accountAddress="0x111" accountId="safe-1" />)
+
+    expect(screen.getByRole('dialog')).toHaveAttribute('data-modal-placement', 'top')
+  })
+
+  it.each(['expired', 'cancelled', 'failed'])('shows the band stopped, not in progress, on a %s setup', (kind) => {
+    mockUseAgentConnectionSetup.mockReturnValue(
+      flow({ step: 'connect', currentStepIndex: 2, connectView: { kind } }),
+    )
+    render(<ConnectAgentModal open onClose={vi.fn()} accountAddress="0x111" accountId="safe-1" />)
+
+    const band = screen.getAllByRole('list')[0]
+    const items = within(band).getAllByRole('listitem')
+    expect(items[2]).toHaveTextContent(/Step 3 of 3, stopped/)
+    items.forEach((item) => expect(item).not.toHaveAttribute('aria-current'))
+  })
+
+  it('does not halt the band off the connect step (a restart before the status clears)', () => {
+    mockUseAgentConnectionSetup.mockReturnValue(
+      flow({ step: 'policy', currentStepIndex: 1, connectView: { kind: 'expired' } }),
+    )
+    render(<ConnectAgentModal open onClose={vi.fn()} accountAddress="0x111" accountId="safe-1" />)
+
+    const items = within(screen.getAllByRole('list')[0]).getAllByRole('listitem')
+    expect(items[1]).toHaveAttribute('aria-current', 'step')
+    items.forEach((item) => expect(item).not.toHaveTextContent(/stopped/))
+  })
+
+  it('keeps Connect current while the setup is live', () => {
+    mockUseAgentConnectionSetup.mockReturnValue(
+      flow({ step: 'connect', currentStepIndex: 2, connectView: { kind: 'waiting_for_connector' } }),
+    )
+    render(<ConnectAgentModal open onClose={vi.fn()} accountAddress="0x111" accountId="safe-1" />)
+
+    const items = within(screen.getAllByRole('list')[0]).getAllByRole('listitem')
+    expect(items[2]).toHaveAttribute('aria-current', 'step')
+    expect(items[2]).not.toHaveTextContent(/stopped/)
+  })
 })
 
 describe('ConnectAgentModal focus (#3687)', () => {
@@ -165,5 +204,36 @@ describe('ConnectAgentModal focus (#3687)', () => {
     rerender(<ConnectAgentModal open onClose={vi.fn()} />)
 
     expect(description).toHaveFocus()
+  })
+})
+
+/**
+ * One counter for the whole flow (owner review, 2026-10-16, superseding
+ * #1418): the header StepProgress renders on every step, Connect active on
+ * step 3, where it used to be hidden in favour of the step-3 list.
+ */
+describe('ConnectAgentModal stepper', () => {
+  it.each([
+    ['details', 0, 'Name'],
+    ['policy', 1, 'Budget'],
+    ['connect', 2, 'Connect'],
+  ] as const)('renders the band on %s with %s active', (step, index, label) => {
+    mockUseAgentConnectionSetup.mockReturnValue(flow({ step, currentStepIndex: index }))
+    render(<ConnectAgentModal open onClose={vi.fn()} />)
+    const current = document.querySelectorAll('[aria-current="step"]')
+    // The mocked ConnectStep renders no checklist, so the band's item is the
+    // only current step here; the real step 3 adds the checklist's own.
+    expect(current).toHaveLength(1)
+    expect(current[0]).toHaveTextContent(`Step ${index + 1} of 3`)
+    expect(current[0]).toHaveTextContent(label)
+  })
+
+  it('reads all-done once the budget is approved: no step is current', () => {
+    mockUseAgentConnectionSetup.mockReturnValue(
+      flow({ step: 'connect', currentStepIndex: 2, connectView: { kind: 'active' } }),
+    )
+    render(<ConnectAgentModal open onClose={vi.fn()} />)
+    expect(document.querySelectorAll('[aria-current="step"]')).toHaveLength(0)
+    expect(screen.getByText(/Step 3 of 3, completed/)).toBeInTheDocument()
   })
 })

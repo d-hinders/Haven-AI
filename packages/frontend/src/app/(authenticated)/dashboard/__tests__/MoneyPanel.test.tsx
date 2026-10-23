@@ -33,8 +33,8 @@ const baseProps = {
   watchingForDeposit: false,
   requiresOtherDevice: false,
   showSpending: true,
-  onDepositAddress: vi.fn(),
-  onAddFunds: vi.fn(),
+  onReceive: vi.fn(),
+  onSend: vi.fn(),
 }
 
 function agent(id: string, name: string, d30NetUsd: number): DashboardAgentPreview {
@@ -71,7 +71,13 @@ function agent(id: string, name: string, d30NetUsd: number): DashboardAgentPrevi
 
 function overview(overrides: {
   d30NetUsd: number
+  d30NetSek?: number
+  /** #4288: the pre-sweep gross the "—" test reads; omitted = 0. */
+  d30GrossUsd?: number
   d30Approx?: boolean
+  /** #4165: the server's per-currency "≈" decision; omitted = an older backend. */
+  d30ApproxByCurrency?: { usd: boolean; eur: boolean; sek: boolean }
+  d30UnpricedByCurrency?: { usd: boolean; eur: boolean; sek: boolean }
   agents: DashboardAgentPreview[]
 }): DashboardOverviewResponse {
   return {
@@ -101,9 +107,11 @@ function overview(overrides: {
         budgetStops: 0,
       },
       d30: {
-        gross: { usd: 0, eur: 0, sek: 0 },
-        net: { usd: overrides.d30NetUsd, eur: 0, sek: 0 },
+        gross: { usd: overrides.d30GrossUsd ?? 0, eur: 0, sek: 0 },
+        net: { usd: overrides.d30NetUsd, eur: 0, sek: overrides.d30NetSek ?? 0 },
         approx: overrides.d30Approx ?? false,
+        ...(overrides.d30ApproxByCurrency ? { approxByCurrency: overrides.d30ApproxByCurrency } : {}),
+        ...(overrides.d30UnpricedByCurrency ? { unpricedByCurrency: overrides.d30UnpricedByCurrency } : {}),
         payments: 0,
         distinctMerchants: 0,
         budgetStops: 0,
@@ -134,7 +142,48 @@ describe('MoneyPanel — spending breakdown reconciles with the headline (#3807 
     expect(row).toHaveTextContent('$16.79')
   })
 
-  it('marks the remainder ≈ when the window it is derived from is re-priced', () => {
+  it('re-priced USDC in USD carries no ≈ — on the total or the remainder (#4165)', () => {
+    render(
+      <MoneyPanel
+        {...baseProps}
+        overview={overview({
+          d30NetUsd: 51.76,
+          d30Approx: true,
+          d30ApproxByCurrency: { usd: false, eur: true, sek: true },
+          agents: [agent('a1', 'Research agent', 17.485), agent('a2', 'Data-feed agent', 17.485)],
+        })}
+      />,
+    )
+
+    const row = screen.getByText('Agents since removed').closest('div')
+    expect(row).not.toHaveTextContent('\u2248')
+    expect(screen.queryByTitle("Converted at today's rate")).not.toBeInTheDocument()
+  })
+
+  it('marks the total and the remainder ≈ in another currency, where the conversion changes the number', () => {
+    render(
+      <MoneyPanel
+        {...baseProps}
+        currency="SEK"
+        overview={overview({
+          d30NetUsd: 51.76,
+          d30NetSek: 556.94,
+          d30Approx: true,
+          d30ApproxByCurrency: { usd: false, eur: true, sek: true },
+          agents: [agent('a1', 'Research agent', 0), agent('a2', 'Data-feed agent', 0)].map((row) => ({
+            ...row,
+            stats: { ...row.stats, d30: { ...row.stats.d30, net: { usd: 0, eur: 0, sek: 188.14 } } },
+          })),
+        })}
+      />,
+    )
+
+    const row = screen.getByText('Agents since removed').closest('div')
+    expect(row).toHaveTextContent('\u2248')
+    expect(screen.getAllByTitle("Converted at today's rate").length).toBeGreaterThan(1)
+  })
+
+  it('falls back to the provenance flag when an older backend sends no per-currency decision', () => {
     render(
       <MoneyPanel
         {...baseProps}
@@ -148,6 +197,54 @@ describe('MoneyPanel — spending breakdown reconciles with the headline (#3807 
 
     const row = screen.getByText('Agents since removed').closest('div')
     expect(row).toHaveTextContent('\u2248')
+  })
+
+  it('an unpriced 30-day total says so in words, and with nothing priced reads "—", never "$0.00" (#4165)', () => {
+    render(
+      <MoneyPanel
+        {...baseProps}
+        overview={overview({
+          d30NetUsd: 0,
+          d30Approx: true,
+          d30ApproxByCurrency: { usd: false, eur: false, sek: false },
+          d30UnpricedByCurrency: { usd: true, eur: false, sek: false },
+          agents: [],
+        })}
+      />,
+    )
+
+    expect(screen.getByText('Some amounts couldn’t be valued and aren’t included.')).toBeInTheDocument()
+    // The spend half's headline — not the balance half, which has its own $0.00.
+    const spending = screen.getByText('Agent spending, last 30 days').parentElement!
+    expect(spending).not.toHaveTextContent('$0.00')
+    expect(within(spending).getByText('\u2014')).toBeInTheDocument()
+    expect(spending).not.toHaveTextContent('\u2248')
+  })
+
+  it('priced rows that net to 0 through sweep netting render "$0.00" plus the note, not an em dash (#4288)', () => {
+    // Partly unpriced AND gross > 0: rows were priced (gross carries the
+    // pre-sweep fiat), the netting only zeroed the NET. The total was
+    // decided, it just nets to nothing — "—" would claim the window was
+    // unknown. The old net-based test rendered "—" here.
+    render(
+      <MoneyPanel
+        {...baseProps}
+        overview={overview({
+          d30NetUsd: 0,
+          d30GrossUsd: 25,
+          d30Approx: true,
+          d30ApproxByCurrency: { usd: false, eur: false, sek: false },
+          d30UnpricedByCurrency: { usd: true, eur: false, sek: false },
+          agents: [],
+        })}
+      />,
+    )
+
+    const spending = screen.getByText('Agent spending, last 30 days').parentElement!
+    expect(spending).toHaveTextContent('$0.00')
+    expect(spending).not.toHaveTextContent('\u2248$0.00')
+    expect(screen.getByText('Some amounts couldn’t be valued and aren’t included.')).toBeInTheDocument()
+    expect(within(spending).queryByText('\u2014')).not.toBeInTheDocument()
   })
 
   it('renders no remainder row when the agent rows already account for the total', () => {
@@ -241,34 +338,60 @@ describe('MoneyPanel — spending half to the mockup (#3902)', () => {
   })
 })
 
-describe('MoneyPanel — exactly one primary "Add funds" (#3902)', () => {
-  const addFunds = () => screen.getByRole('button', { name: 'Add funds' })
+describe('MoneyPanel — the balance figures say what they measure (#3977)', () => {
+  it('the sparkline aria-label names the UTC days the series is dated by', () => {
+    // The snapshot rows are UTC-dated (builder's choice (b) on #3977), so the
+    // label must not read like the Activity card's local-day windows beside
+    // it. The empty-state variant carries the same qualifier — the flat
+    // placeholder renders with < 3 measured days, and this fixture has none.
+    render(
+      <MoneyPanel
+        {...baseProps}
+        currency="USD"
+        totalFiat={0}
+        overview={overview({ d30NetUsd: 0, agents: [] })}
+      />,
+    )
+    expect(screen.getByRole('img', { name: 'Balance over the last 30 UTC days. No snapshots yet.' })).toBeInTheDocument()
+  })
+})
 
-  it('renders "Add funds" primary by default', () => {
+describe('MoneyPanel — the ONE primary-button rule (#4167)', () => {
+  const receive = () => screen.getByRole('button', { name: 'Receive' })
+  const send = () => screen.getByRole('button', { name: 'Send' })
+
+  it('keeps "Send" primary and enabled while the funding state is unknown', () => {
+    // `usdcFunded` null (loading, or the read failed): never read as empty —
+    // the card does not flip on a load-shaped condition.
     render(<MoneyPanel {...baseProps} overview={null} />)
 
-    expect(addFunds()).toHaveClass('bg-[var(--v2-brand)]')
-    expect(addFunds()).not.toHaveClass('border-[var(--v2-border-strong)]')
+    expect(send()).toHaveClass('bg-[var(--v2-brand)]')
+    expect(send()).toBeEnabled()
+    expect(receive()).not.toHaveClass('bg-[var(--v2-brand)]')
   })
 
-  it('renders "Add funds" primary when addFundsSecondary is false', () => {
-    render(<MoneyPanel {...baseProps} addFundsSecondary={false} overview={null} />)
+  it('makes "Send" primary once the account holds USDC', () => {
+    render(<MoneyPanel {...baseProps} usdcFunded overview={null} />)
 
-    expect(addFunds()).toHaveClass('bg-[var(--v2-brand)]')
+    expect(send()).toHaveClass('bg-[var(--v2-brand)]')
+    expect(send()).toBeEnabled()
+    expect(receive()).not.toHaveClass('bg-[var(--v2-brand)]')
+    expect(receive()).toHaveClass('border-[var(--v2-border-strong)]')
   })
 
-  it('steps "Add funds" down to ghost when addFundsSecondary is true', () => {
-    render(<MoneyPanel {...baseProps} addFundsSecondary overview={null} />)
+  it('makes "Receive" primary and disables "Send" when the account is known empty', () => {
+    render(<MoneyPanel {...baseProps} usdcFunded={false} overview={null} />)
 
-    expect(addFunds()).toHaveClass('border-[var(--v2-border-strong)]')
-    expect(addFunds()).not.toHaveClass('bg-[var(--v2-brand)]')
+    expect(receive()).toHaveClass('bg-[var(--v2-brand)]')
+    expect(send()).toBeDisabled()
+    expect(send()).not.toHaveClass('bg-[var(--v2-brand)]')
   })
 
-  it('keeps "Deposit address" ghost either way', () => {
-    const { rerender } = render(<MoneyPanel {...baseProps} overview={null} />)
-    const deposit = () => screen.getByRole('button', { name: 'Deposit address' })
-    expect(deposit()).toHaveClass('border-[var(--v2-border-strong)]')
-    rerender(<MoneyPanel {...baseProps} addFundsSecondary overview={null} />)
-    expect(deposit()).toHaveClass('border-[var(--v2-border-strong)]')
+  it('steps "Receive" down to ghost while the first-run guide owns the primary (#3902, #4167)', () => {
+    render(<MoneyPanel {...baseProps} usdcFunded={false} receiveSecondary overview={null} />)
+
+    expect(receive()).toHaveClass('border-[var(--v2-border-strong)]')
+    expect(receive()).not.toHaveClass('bg-[var(--v2-brand)]')
+    expect(send()).toBeDisabled()
   })
 })

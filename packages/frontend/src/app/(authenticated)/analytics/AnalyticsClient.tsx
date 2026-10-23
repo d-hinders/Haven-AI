@@ -16,9 +16,13 @@ import type { AnalyticsOverviewResponse, AnalyticsRangeValue } from '@/types/ana
 import {
   isAnalyticsRangeValue,
   readStoredAnalyticsRange,
+  readUrlAnalyticsRange,
   writeStoredAnalyticsRange,
+  writeUrlAnalyticsRange,
 } from '@/lib/analytics-range'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { PeriodPicker } from '@/components/ui/PeriodPicker'
+import type { PeriodValue } from '@/components/ui/list-url-codec'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { StatTile } from '@/components/ui/StatTile'
 import { AgentsTable } from '@/components/analytics/AgentsTable'
@@ -26,7 +30,6 @@ import { BalanceSection } from '@/components/analytics/BalanceSection'
 import { SpendSection } from '@/components/analytics/SpendSection'
 import { orderAgentsForDisplay, seriesIndexByAgent } from '@/lib/analytics-series'
 import { MerchantsTable } from '@/components/analytics/MerchantsTable'
-import { RangeControl } from '@/components/analytics/RangeControl'
 // The floor slice D fixed for "too little data to chart" — ONE home: the
 // page's sparse rule and every section's own guard read this constant, so
 // the tiles-only branch and the primitives' "render nothing" agree by
@@ -272,10 +275,14 @@ type AnalyticsData = NonNullable<ReturnType<typeof useAnalyticsOverview>>['data'
 export default function AnalyticsClient() {
   const { currency } = usePreferences()
 
-  // The stored window is read in the initialiser, not in an effect, so the
-  // FIRST request carries the reader's chosen range — see the note in
+  // The window comes from the URL when it carries one — `?period=7d` opens on
+  // Last 7 days, the sharable answer — and otherwise from the device's stored
+  // choice. Both are read in the initialiser, not in an effect, so the FIRST
+  // request carries the resolved window — see the note in
   // `lib/analytics-range.ts` (the `haven.theme` reasoning again).
-  const [range, setRange] = useState<AnalyticsRangeValue>(readStoredAnalyticsRange)
+  const [range, setRange] = useState<AnalyticsRangeValue>(
+    () => readUrlAnalyticsRange() ?? readStoredAnalyticsRange(),
+  )
 
   // The Settings currency is the one source for both halves of the page: the
   // value on the wire and the symbol in the tiles. The endpoint echoes it on
@@ -287,13 +294,16 @@ export default function AnalyticsClient() {
     currency === 'EUR' ? 'eur' : currency === 'SEK' ? 'sek' : 'usd',
   )
 
-  const changeRange = (next: AnalyticsRangeValue) => {
-    // Storage is a cache of the reader's choice, not the source of it: a
-    // value the endpoint would answer 400 to is not a range, and must not
-    // leave this page either way (see `isAnalyticsRangeValue`).
-    if (!isAnalyticsRangeValue(next)) return
-    setRange(next)
-    writeStoredAnalyticsRange(next)
+  const changeRange = (next: PeriodValue) => {
+    // The picker here offers presets only (no All time, no custom range), so
+    // the menu can only hand back a preset — but the guard is the same one
+    // `changeRange` has always applied: a value the endpoint would answer 400
+    // to is not a range, and must not leave this page either way (see
+    // `isAnalyticsRangeValue`).
+    if (!next.preset || !isAnalyticsRangeValue(next.preset)) return
+    setRange(next.preset)
+    writeStoredAnalyticsRange(next.preset)
+    writeUrlAnalyticsRange(next.preset)
   }
 
   const days = data?.range.days ?? RANGE_DAYS[range]
@@ -398,7 +408,13 @@ export default function AnalyticsClient() {
         actions={
           <div className="flex items-center gap-3">
             <span className="text-xs text-[var(--v2-ink-3)]">{rangeCaption(days)}</span>
-            <RangeControl value={range} onChange={changeRange} />
+            {/* The list-controls period control (#4110, #4116): presets only,
+                no All time and no custom range — the endpoint takes a rolling
+                `range`, not dates. With All time absent the picker treats the
+                current value as its own default, so the trigger never tints:
+                a returning reader's stored window is not a filter, it is the
+                page's resting state. */}
+            <PeriodPicker value={{ preset: range }} onChange={changeRange} allowAllTime={false} />
           </div>
         }
       />

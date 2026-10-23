@@ -463,25 +463,30 @@ export const SETTLEMENT_HASH_TAKEN_SQL = settlementHashTakenSql({ hash: '$1', id
  * agent, token, delegate, merchant and amount, overlapping in time) a transfer
  * settled. Since #3888 the nonce itself is attributable — signers derive it
  * from the payment id, and the settlement sweep finds
- * `AuthorizationUsed(delegate, derived nonce)` — but the AGENT-REPORTED path
- * here still never sees the nonce (the report carries a hash, not a header),
- * so a same-shaped sibling report cannot be told apart and this writer keeps
- * the bounding rules: one hash backs at most one eip3009 payment
+ * `AuthorizationUsed(delegate, derived nonce)`. Since #3925 the CALLER of this
+ * writer must have that proof before writing: the verifier's check 9 binds
+ * the recorded hash to an `AuthorizationUsed` nonce derived from this
+ * payment's id (sweep) or signed by its delegate in the posted X-PAYMENT
+ * header (agent-reported), so the same-shaped sibling report that this
+ * comment used to name can no longer reach the write. The bounding rules
+ * stand unchanged: one hash backs at most one eip3009 payment
  * (`settlementHashTakenSql`), a payment takes one hash only
  * (`merchant_settlement_tx_hash IS NULL` makes the UPDATE a compare-and-set).
- * The residual: a hash can be recorded on ANY payment with the same agent,
- * amount, token, delegate and merchant whose funding confirmed before the
- * transfer was mined (within the skew), including one whose merchant leg
- * failed, and that payment's receipt and funded-retry remedy
- * (`isFundedX402AwaitingMerchantLeg`) then follow the attribution. It takes
- * an agent misreporting a payment id; the record itself moves no money. The
- * sweep's nonce-proven attributions go through the same writer, and where
- * they collide with an earlier agent-reported hash the tick logs and records
- * nothing — the precedence is the owner's call, not this module's (#3888).
+ * Since #3927 the writer also locks the INTENT, so two different hashes for
+ * one payment serialize too and the compare-and-set is the backstop, not the
+ * only guard.
+ * The residual that REMAINS: attribution rests on the nonce proof the caller
+ * derived (a header signed by the delegate for a different payment id is
+ * refused upstream as "settles another payment"), and on the funding window —
+ * not on the agent's `payment_id` alone. The sweep's nonce-proven
+ * attributions go through the same writer, and where they collide with an
+ * earlier agent-reported hash the tick logs and records nothing — the
+ * precedence is the owner's call, not this module's (#3888).
  */
 export const RECORD_EIP3009_MERCHANT_SETTLEMENT_SQL = `UPDATE payment_intents target
            SET machine_metadata = COALESCE(target.machine_metadata, '{}'::jsonb)
                  || jsonb_build_object('merchant_settlement_tx_hash', LOWER($1))
+                 || COALESCE($4::jsonb, '{}'::jsonb)
          WHERE target.id = $2
            AND target.agent_id = $3
            AND COALESCE(target.payment_rail, target.source) = 'x402'
@@ -501,8 +506,33 @@ export interface Eip3009SettlementRecord {
   txHash: string
   intentId: string
   agentId: string
+  /**
+   * #3925: the nonce attribution the verifier just proved, recorded beside
+   * the hash for auditability. `nonceBound` is check 9's own verdict (the
+   * receipt's `AuthorizationUsed` named this proof); `nonceDerived` is the
+   * consistency check — the header's nonce equals
+   * `deriveX402PaymentNonce(intent.id)`, i.e. the client derives nonces.
+   * Absent (a caller with no proof, which the callers no longer are) writes
+   * nothing extra.
+   *
+   * #4319 Tier 2: a receipt-attributed record passes the tagged
+   * `{ kind: 'receipt' }` instead — the writer stamps
+   * `merchant_settlement_proof: 'receipt'` and deliberately NO nonce flags
+   * (a receipt proves a pull, not a nonce bound to this payment; the issue's
+   * limits 2–6 are what make it honest enough to record at all).
+   */
+  proof?: { nonceBound: boolean; nonceDerived: boolean } | { kind: 'receipt' }
 }
 
+/**
+ * #4319 Tier 2: the tagged receipt proof. When a settlement is recorded from
+ * the merchant receipt's transaction hash (`observeEip3009ReceiptSettlement`),
+ * the record carries `merchant_settlement_proof: 'receipt'` and deliberately
+ * NO nonce flags — a receipt proves a pull, not a nonce bound to this
+ * payment's id (limits 2–6 of the issue are what make it honest enough to
+ * record at all). Absent from the writer's output, `null` metadata reads stay
+ * clean.
+ */
 export type Eip3009SettlementRecordOutcome =
   /** Written now, or this exact hash was already recorded for this payment. */
   | 'recorded'
@@ -510,12 +540,39 @@ export type Eip3009SettlementRecordOutcome =
   | 'conflict'
   /** Another payment already holds this hash. */
   | 'hash_taken'
-  /** Not a confirmed eip3009 delegation-rail x402 intent of this agent. */
+  /**
+   * Not a confirmed eip3009 delegation-rail x402 intent of this agent. (Since
+   * #3927 a losing concurrent writer of a different hash answers `conflict`,
+   * never this: the intent lock makes its pre-read see the winner's hash.)
+   */
   | 'not_eligible'
+
+/** Per settlement hash: the same keyspace the erc7710 confirm locks in. */
+export const EIP3009_SETTLEMENT_HASH_LOCK_SQL = 'SELECT pg_advisory_xact_lock(hashtext($1))'
+
+/**
+ * Per payment (#3927). The prefix keeps its inputs disjoint from the bare
+ * hashes the hash locks use; `hashtext` is 32-bit, so two keys can still
+ * collide in the shared advisory space, which is astronomically unlikely and
+ * costs only extra serialization (a crossed double collision would at worst
+ * be a deadlock Postgres aborts, never a hang). The id is lowercased so a
+ * caller's spelling cannot split one payment across two keys. Always taken
+ * AFTER the hash lock: every writer locks hash → intent.
+ */
+export const EIP3009_SETTLEMENT_INTENT_LOCK_SQL =
+  "SELECT pg_advisory_xact_lock(hashtext('eip3009-intent:' || LOWER($1)))"
 
 /**
  * {@link RECORD_EIP3009_MERCHANT_SETTLEMENT_SQL}, serialized per settlement
- * hash with the same advisory lock the erc7710 confirm takes. The uniqueness
+ * hash with the same advisory lock the erc7710 confirm takes, and per payment
+ * with a prefixed intent lock (#3927), in the fixed order hash → intent.
+ *
+ * The hash lock serializes one hash across payments (the pre-read then answers
+ * `hash_taken`). The intent lock serializes different hashes for ONE payment:
+ * without it two writers took different hash locks, both pre-reads saw no
+ * recorded hash, and only the UPDATE's compare-and-set stopped the second —
+ * which then answered `not_eligible`. With it, the second writer's pre-read
+ * sees the first's hash and answers `conflict`. The uniqueness
  * this enforces is one-directional: an eip3009 record refuses a hash an
  * erc7710 row already confirmed with, but the erc7710 confirm checks only
  * `tx_hash`. The reverse collision would need one transaction to be both an
@@ -527,7 +584,8 @@ export async function recordEip3009MerchantSettlement(
   db: Executor = pool,
 ): Promise<Eip3009SettlementRecordOutcome> {
   return withTransaction(db, async (tx) => {
-    await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))', [input.txHash.toLowerCase()])
+    await tx.query(EIP3009_SETTLEMENT_HASH_LOCK_SQL, [input.txHash.toLowerCase()])
+    await tx.query(EIP3009_SETTLEMENT_INTENT_LOCK_SQL, [input.intentId])
     const existing = await tx.query<{ recorded: string | null }>(FIND_RECORDED_EIP3009_SETTLEMENT_SQL, [
       input.intentId,
       input.agentId,
@@ -543,9 +601,134 @@ export async function recordEip3009MerchantSettlement(
       input.txHash,
       input.intentId,
       input.agentId,
+      input.proof
+        ? JSON.stringify(
+            'kind' in input.proof
+              ? // #4319 Tier 2: the receipt label, and deliberately no nonce
+                // flags — `merchant_settlement_nonce_bound` must not appear
+                // on a receipt record (the issue, against `:597`).
+                { merchant_settlement_proof: 'receipt' }
+              : {
+                  // Only true flags are written — an absent/absent-shaped proof must
+                  // not plant `false` rows into historical metadata reads.
+                  ...(input.proof.nonceBound ? { merchant_settlement_nonce_bound: true } : {}),
+                  ...(input.proof.nonceDerived ? { merchant_settlement_nonce_derived: true } : {}),
+                },
+          )
+        : null,
     ])
     return written.rows.length > 0 ? 'recorded' : 'not_eligible'
   })
+}
+
+// ── receipt-attribution verdict persistence (#4319 Tier 2) ──────────────────
+
+/** The persisted verdicts for `merchant_settlement_receipt_verdict` (#4319). */
+export const EIP3009_RECEIPT_VERDICTS = [
+  'recorded',
+  'refused_ambiguous',
+  'refused_mismatch',
+  'retryable',
+] as const
+export type Eip3009ReceiptVerdict = (typeof EIP3009_RECEIPT_VERDICTS)[number]
+
+export const RECORD_EIP3009_RECEIPT_VERDICT_SQL = `UPDATE payment_intents
+  SET machine_metadata = COALESCE(machine_metadata, '{}'::jsonb)
+        || jsonb_build_object('merchant_settlement_receipt_verdict', $1::text)
+  WHERE id = $2 AND agent_id = $3
+  RETURNING id`
+
+/**
+ * Persist the receipt-attribution verdict beside the payment (#4319 limit 7).
+ * A `refused_*` verdict is final — the arrival path and the backfill never
+ * re-check it; a `retryable` one is re-checked with backoff (each new
+ * evidence attach, and every idempotent backfill write run). JSONB, so no
+ * migration.
+ */
+export async function recordEip3009ReceiptVerdict(
+  intentId: string,
+  agentId: string,
+  verdict: Eip3009ReceiptVerdict,
+  db: Executor = pool,
+): Promise<boolean> {
+  const result = await db.query<{ id: string }>(RECORD_EIP3009_RECEIPT_VERDICT_SQL, [
+    verdict,
+    intentId,
+    agentId,
+  ])
+  return result.rows.length > 0
+}
+
+// ── sibling attribution lookup (#3925) ──────────────────────────────────────
+
+/**
+ * The ids of this agent's OTHER x402 delegation-rail payments funded to the
+ * SAME delegate — the rows whose settlements are attributed by a derived
+ * nonce, so a burned nonce can name a sibling payment
+ * (`deriveX402PaymentNonce(id)`). Used only to REFUSE, never to attribute:
+ * to refine a check-9 refusal from "the nonce does not match" into "settles
+ * another payment" (#3925), and to refuse a proof header lifted from a
+ * sibling (#4061). #4061 review: scoped to `to_address = delegate`, because
+ * an `AuthorizationUsed(delegate, nonce)` can only be a sibling's if that
+ * sibling's authorization was the same delegate's — and the scan stays
+ * bounded by one key's payments instead of all of the agent's.
+ */
+export async function findSiblingX402DelegationPaymentIds(
+  agentId: string,
+  excludeIntentId: string,
+  delegateAddress: string,
+  db: Executor = pool,
+): Promise<string[]> {
+  const result = await db.query<{ id: string }>(
+    `SELECT id FROM payment_intents
+      WHERE agent_id = $1
+        AND id <> $2
+        AND LOWER(to_address) = LOWER($3)
+        AND COALESCE(payment_rail, source) = 'x402'
+        AND execution_rail = 'delegation'`,
+    [agentId, excludeIntentId, delegateAddress],
+  )
+  return result.rows.map((r) => r.id)
+}
+
+/**
+ * The sibling ROWS the #4319 Tier 2 block guards read: every other x402
+ * delegation-rail payment of this agent funded to the SAME delegate, with the
+ * fields the symmetric ambiguity guard (limit 4) and the next-funding guard
+ * (limit 5) compare — the funding hash (whose block is read over RPC), the
+ * amount and merchant (same-shape filter), and the metadata that may name an
+ * already-recorded settlement (the "provably settled" proof). Like
+ * {@link findSiblingX402DelegationPaymentIds}, used only to REFUSE, never to
+ * attribute.
+ */
+export interface SiblingX402DelegationRow {
+  id: string
+  tx_hash: string | null
+  amount_raw: string
+  merchant_address: string | null
+  x402_merchant_address: string | null
+  machine_metadata: Record<string, unknown> | string | null
+  confirmed_at: string | null
+}
+
+export async function findSiblingX402DelegationPayments(
+  agentId: string,
+  excludeIntentId: string,
+  delegateAddress: string,
+  db: Executor = pool,
+): Promise<SiblingX402DelegationRow[]> {
+  const result = await db.query<SiblingX402DelegationRow>(
+    `SELECT id, tx_hash, amount_raw, merchant_address, x402_merchant_address,
+            machine_metadata, confirmed_at
+       FROM payment_intents
+      WHERE agent_id = $1
+        AND id <> $2
+        AND LOWER(to_address) = LOWER($3)
+        AND COALESCE(payment_rail, source) = 'x402'
+        AND execution_rail = 'delegation'`,
+    [agentId, excludeIntentId, delegateAddress],
+  )
+  return result.rows
 }
 
 // ── passive settlement sweep candidates (#2117) ──────────────────────────────

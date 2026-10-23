@@ -9,6 +9,20 @@ import type {
   TransactionsFeedResponse,
 } from '@/types/transactions'
 
+/**
+ * The user's IANA zone — the server cuts custom `from`/`to` calendar days in
+ * it (#4095). Resolved per request rather than captured once, so a zone
+ * change mid-session is honoured; `UTC` is the fallback the API itself
+ * defaults to.
+ */
+export function browserTimeZone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+  } catch {
+    return 'UTC'
+  }
+}
+
 interface UseTransactionsFeedReturn {
   transactions: AggregatedTransaction[]
   total: number
@@ -28,16 +42,56 @@ interface UseTransactionsFeedReturn {
   refresh: () => Promise<void>
 }
 
-function toQueryString(
+/**
+ * Serialize the filter state into its URL/export spelling (#4095) — the same
+ * dimensions, the same spellings the page URL carries, WITHOUT the
+ * request-only extras (`tz`, paging). The account page's Activity tab (#4098)
+ * uses this for BOTH its URL and its CSV export request, so the address bar
+ * names exactly what the server filtered and the file names exactly what the
+ * on-screen rows show — including the fixed `accountId` the page pins.
+ */
+export function transactionFilterParams(filters: TransactionFilterState): URLSearchParams {
+  const params = new URLSearchParams()
+  if (filters.accountId) params.set('accountId', filters.accountId)
+  if (filters.agentId) params.set('agentId', filters.agentId)
+  if (filters.tokenKey) params.set('tokenKey', filters.tokenKey)
+  // #4095: every filter dimension rides the request now — the browser
+  // filtered direction and network over the loaded page only, so the list,
+  // its count and the CSV export could disagree. The server applies all of
+  // them before paging.
+  if (filters.direction) params.set('direction', filters.direction)
+  if (filters.chainId !== undefined) params.set('chainId', String(filters.chainId))
+  const search = filters.search?.trim()
+  if (search) params.set('search', search)
+  if (filters.period) {
+    params.set('period', filters.period)
+  } else if (filters.from && filters.to) {
+    params.set('from', filters.from)
+    params.set('to', filters.to)
+  }
+  // #4266: the fold is a projection, not a filter — but the list, the totals
+  // walk and the export must all ask for it, or In/Out count both legs of a
+  // move the list shows once.
+  if (filters.foldOwnTransfers) params.set('foldOwnTransfers', '1')
+  return params
+}
+
+/**
+ * One feed page's REQUEST query: the filter dimensions above, the `tz` the
+ * server cuts a custom range's calendar days in, and the paging window.
+ * Exported since #4098 — the account Activity tab's in/out totals walk the
+ * SAME server-filtered feed page by page, and a second copy of this
+ * serialization would be one edit away from counting a different set than
+ * the list shows.
+ */
+export function transactionFeedQuery(
   filters: TransactionFilterState,
   offset: number,
   limit: number,
   fresh = false,
 ): string {
-  const params = new URLSearchParams()
-  if (filters.accountId) params.set('accountId', filters.accountId)
-  if (filters.agentId) params.set('agentId', filters.agentId)
-  if (filters.tokenKey) params.set('tokenKey', filters.tokenKey)
+  const params = transactionFilterParams(filters)
+  if (!filters.period && filters.from && filters.to) params.set('tz', browserTimeZone())
   params.set('offset', String(offset))
   params.set('limit', String(limit))
   if (fresh) params.set('fresh', '1')
@@ -124,7 +178,7 @@ export function useTransactionsFeed(
 
       try {
         const data = await api.get<TransactionsFeedResponse>(
-          `/transactions?${toQueryString(filtersForRequest, offset, effectiveLimit, fresh)}`,
+          `/transactions?${transactionFeedQuery(filtersForRequest, offset, effectiveLimit, fresh)}`,
         )
         if (requestId !== requestIdRef.current) return
 
@@ -185,7 +239,22 @@ export function useTransactionsFeed(
     setLoadingInitial(true)
     setError(null)
     void fetchPage(0, false, false)
-  }, [fetchPage, filters.accountId, filters.agentId, filters.tokenKey])
+    // #4095: every filter dimension now changes the request, so every one
+    // must reset the feed — the old three-field list missed direction (the
+    // URL carried it while the hook filtered nothing) and would have missed
+    // the four new dimensions the same way.
+  }, [
+    fetchPage,
+    filters.accountId,
+    filters.agentId,
+    filters.tokenKey,
+    filters.direction,
+    filters.chainId,
+    filters.search,
+    filters.period,
+    filters.from,
+    filters.to,
+  ])
 
   const loadMore = useCallback(async () => {
     if (loadingInitial || loadingMore || refreshing || !hasMore) return

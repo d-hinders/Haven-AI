@@ -33,15 +33,16 @@
  * `packages/sdk/*` arm.
  *
  * It is NOT the whole story, and must not be described as one. The frontend
- * also holds `packages/frontend/src/lib/agent-onboarding-prompt.ts` (a copy
- * of one constant) and `packages/frontend/src/lib/agent-skill-bundle.ts` (text
- * composed from four of them by `packages/sdk/src/skill-content.ts`) —
+ * also holds `packages/frontend/src/lib/agent-skill-bundle.ts` (text composed
+ * from four of the constants by `packages/sdk/src/skill-content.ts`) —
  * resolved text, not an extractable literal, so no check here can read it
- * back. Those are covered by routing: the manifest names `frontend` as an
- * owner of the canonical source, so their own pin tests run on a change to
+ * back. It is covered by routing: the manifest names `frontend` as an owner
+ * of the canonical source, so its own pin test runs on a change to
  * `agent-guidance.ts` (#2727) — and `skill-content.ts`, which the skill bundle
  * is pinned to as well, carries its own manifest entry for the same reason
- * (#2743). Routing, not this script, is what covers both.
+ * (#2743). Routing, not this script, is what covers it. (A second partial
+ * copy, `src/lib/agent-onboarding-prompt.ts`, was deleted by #4065 with the
+ * `/agents` card that rendered it.)
  */
 import { readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
@@ -105,12 +106,11 @@ function nextLinkSuffix(next) {
  * i.e. those embedding the whole string, or a boundary-exact slice of it, as
  * a literal or as raw Markdown.
  *
- * Deliberately not named "every copy": the frontend's partial derivations
- * (`packages/frontend/src/lib/agent-onboarding-prompt.ts` and
- * `packages/frontend/src/lib/agent-skill-bundle.ts`) are not in here and
+ * Deliberately not named "every copy": the frontend's partial derivation
+ * (`packages/frontend/src/lib/agent-skill-bundle.ts`) is not in here and
  * cannot be, because the skill bundle embeds text composed at build
- * time rather than a literal. Their pin tests are the check for those, and
- * routing is what makes those tests run (see the header).
+ * time rather than a literal. Its pin test is the check for it, and
+ * routing is what makes that test run (see the header).
  *
  * `extract` turns a file's bytes into the runbook string (or slice) it
  * embeds; for a raw Markdown copy that is the identity function. `expected`

@@ -10,10 +10,13 @@ covers:
   - packages/frontend/src/app/for-agents/**
   - packages/frontend/src/components/marketing/site/**
   - packages/frontend/src/app/onboarding/**
+  - packages/frontend/src/components/NewAccountDialog.tsx
   - packages/frontend/src/app/login/page.tsx
   - packages/frontend/src/app/signup/page.tsx
   - packages/frontend/src/components/onboarding/AgentHandoffNote.tsx
   - packages/frontend/src/components/ConnectAgentModal.tsx
+  - packages/frontend/src/components/connect-agent/ConnectAgentFlow.tsx
+  - packages/frontend/src/components/connect-agent/InlineAgentSetup.tsx
   - packages/frontend/src/components/UsingYourAgentInfo.tsx
   - packages/frontend/src/lib/agent-credential.ts
   - packages/frontend/src/lib/agent-handoff.ts
@@ -25,12 +28,11 @@ covers:
   - packages/frontend/src/lib/transaction-presentation.tsx
   - packages/sdk/src/skill-content.ts
   - packages/sdk/src/agent-guidance.ts
-  - packages/frontend/src/lib/agent-onboarding-prompt.ts
   - packages/frontend/src/lib/agent-skill-steps.ts
   - packages/frontend/src/lib/agent-skill-index.ts
   - scripts/frontend-copy-lint.mjs
   - scripts/lib/ratchet.mjs
-last-verified: "2026-09-26"
+last-verified: 2026-10-16
 ---
 
 # Haven UX Copy Guidelines
@@ -145,14 +147,52 @@ Avoid:
 
 The user does not need to understand ownership architecture during onboarding.
 
-### Use “passkey” but anchor it in familiar actions
+### The owner approves; only an agent's key signs (owner decision 2026-10-16)
 
-It is okay to mention passkeys. Say “passkey” first, then connect it to familiar
-examples such as Face ID, Touch ID, Windows Hello, or a device PIN.
+When the account holder authorises a money action — granting, editing or
+stopping a budget, removing an agent, approving a transfer, or changing who can
+approve for the account — the copy says **approve**, never **sign**. The passkey or wallet prompt is how they approve,
+not a separate act the copy should name. That covers buttons, busy labels
+("Waiting for your approval…"), counts ("two more approvals") and the
+cancelled/"nothing changed" lines around them.
+
+"Sign" stays where it is literally true and is not the owner's action: the
+agent's own key signs payments ("private signing key", "Replace signing key"),
+a sharing agent signs the sub-budget its owner issues (the owner neither signs
+nor approves there: "{agent} signs it with its own key — no passkey prompt for
+you"), an attestation is a "signed record", retired-rail or protocol prose
+names real signatures, and dated verification or changelog records keep the
+wording they recorded.
+
+`npm run lint:copy` bans the common owner phrasings ("waiting for your
+signature", "signature was cancelled", "no signature yet", "sign new budget",
+"you sign once").
+
+Prefer:
+- “Approve new budget”, “Approve transfer”
+- “You approve once and every budget it holds ends”
+- “Waiting for your approval…”, “No approval yet — nothing changed.”
+
+Avoid:
+- “Sign new budget”, “Sign transfer”
+- “You sign once to give …”
+- “Waiting for your signature…”, “Signature was cancelled.”
+
+### Say “passkey”, never a platform or biometric name
+
+It is okay to mention passkeys. Say “passkey”, and nothing else, for the thing
+the user approves with: no platform or biometric names, in any position — not
+as a label, not as an example in brackets, not as subtext (owner decision,
+2026-10-20, on [#4093](https://github.com/d-hinders/Haven-AI/issues/4093)).
+Platform names are false on some devices and change with the device; the
+passkey is the one fact that holds everywhere. When a familiar anchor helps,
+point at the device's screen lock, hedged with “usually”: a passkey can also
+live on a security key, a password manager or another phone.
 
 Preferred:
 - “Use a passkey”
-- “Approve with Face ID, Touch ID, Windows Hello, or your device PIN”
+- “Approve with your passkey (usually your device's screen lock).”
+- “One passkey prompt”
 - “Create a secure passkey to approve actions in your Haven account”
 - “Fastest option. Creates a secure passkey.”
 - “Continue with a passkey”
@@ -170,11 +210,11 @@ device or browser the user should return to and give a concrete recovery action.
 
 ### Name credentials “passkey”, never a platform brand ([#1679](https://github.com/d-hinders/Haven-AI/issues/1679))
 
-A platform name is an anchor, never the *name* of a credential. “Face ID /
-Touch ID” as a row label is wrong three ways: it inverts the anchor rule above,
-it is false on Windows and Android, and any positional variant (“Face ID for
-the first key, Backup N for the rest”) silently misnames the surviving key
-after a recovery removes the original.
+A platform name is never the *name* of a credential. A platform brand as a row
+label is wrong three ways: it breaks the passkey-only rule above, it is false
+on other platforms, and any positional variant (a brand for the first key,
+“Backup N” for the rest) silently misnames the surviving key after a recovery
+removes the original.
 
 Credential rows (signer lists, “ways to approve”):
 
@@ -190,20 +230,25 @@ Credential rows (signer lists, “ways to approve”):
   which one. When the wallet is the one connected on this device, the row may
   name the connector: “Browser wallet · MetaMask”.
 
-Action copy keeps the anchor pattern — passkey first, familiar examples second,
-ideally as subtext:
+Action copy names the passkey, with the screen-lock anchor as subtext when one
+helps:
 
-- Button “Add a backup passkey” with subtext “Approve with Face ID, Touch ID,
-  Windows Hello, or your device PIN”
+- Button “Add a backup passkey” with subtext “Approve with your passkey
+  (usually your device's screen lock).”
 - “Create account with a passkey”
 - “Waiting for your passkey…” / “The passkey prompt was cancelled.”
 
-Avoid:
+Avoid — a platform or biometric name in any position (copy lint enforces the
+three platform names in product copy):
 
-- “Face ID / Touch ID” as a row label or credential name
-- “Add a backup with Face ID / Touch ID”
-- “Waiting for Face ID or Touch ID...”
-- “a second Face ID” (say “a backup passkey”)
+- “Face ID / Touch ID” as a row label or credential name <!-- copy-lint-ignore -->
+- “Add a backup with Face ID / Touch ID” <!-- copy-lint-ignore -->
+- “Waiting for Face ID or Touch ID...” <!-- copy-lint-ignore -->
+- “a second Face ID” (say “a backup passkey”) <!-- copy-lint-ignore -->
+- “Approve with Face ID, Touch ID, Windows Hello, or your device PIN” <!-- copy-lint-ignore -->
+- “One Face ID prompt” (say “one passkey prompt”) <!-- copy-lint-ignore -->
+- “Your face or fingerprint approves everything” (say “Your passkey approves
+  everything”)
 
 User-editable credential nicknames are deliberately deferred (#1679) — date +
 kind is enough at two or three credentials; revisit if users accumulate more.
@@ -300,7 +345,8 @@ recovery as a separate action where relevant.
 
 Onboarding is **one screen and passkey-only** (#1162). There is no sign-in method
 to choose, so there is no copy for choosing one — a wallet is something the user
-adds to an existing account later (Accounts → Add account, or Backup & recovery),
+adds to an existing account later (Backup & recovery, in the Security &
+details tab on the account's page),
 described in that surface's copy rather than here.
 
 Preferred:
@@ -310,7 +356,7 @@ Welcome, Ada
 
 Create your Haven account
 
-Your face or fingerprint approves everything — budgets, agents, changes.
+Your passkey approves everything — budgets, agents, changes.
 No wallet, no seed phrase, nothing to install.
 
 Network
@@ -344,7 +390,7 @@ Preferred:
 
 ```text
 This browser can't create a passkey, and Haven needs one. Open Haven in Safari,
-Chrome, or Edge on a device with Face ID, Touch ID, Windows Hello, or a device PIN.
+Chrome, or Edge on a device with a screen lock.
 ```
 
 Avoid:
@@ -489,7 +535,7 @@ Use this mapping when replacing technical language with product-facing language.
 | Transaction hash in advanced or transaction detail | Transaction ID / explorer link |
 | Safe address in primary account UI | Account address / Haven wallet address |
 | Agent delegate address | Agent wallet address (advanced and recovery copy) |
-| `x402` / `mpp_demo` as a transaction ROW TITLE | Agent payment / Machine payment — the protocol name belongs on the detail drawer, not the row people scan (#2357) |
+| `x402` / `mpp_demo` as a transaction ROW TITLE | Agent payment / Machine payment — never the protocol name on the row people scan (#2357); the detail drawer says "Paid request" and keeps the settlement method under Technical details (#4267) |
 | Connected or recipient wallet address | Wallet address when the control or destination distinction matters |
 
 ### Agent-facing vocabulary — one term each ([#2533](https://github.com/d-hinders/Haven-AI/issues/2533))
@@ -508,7 +554,7 @@ artifact that was already self-consistent.
 | Thing | The term | Never |
 | --- | --- | --- |
 | The text the connect modal hands back for ONE agent, carrying its one-time setup token and the connector command | **setup prompt** | connect prompt, setup text |
-| The whole-onboarding text the dashboard offers a signed-in user with no agents, carrying no token | **onboarding prompt** | setup prompt (a different object — see below), agent prompt |
+| The whole-onboarding text a user pastes to an agent before any agent exists, carrying no token (served to agents by `/for-agents.md` and `llms.txt`; no dashboard screen shows it since #4065) | **onboarding prompt** | setup prompt (a different object — see below), agent prompt |
 | The `npx -y @haven_ai/connect@…` line the agent runs | **connector command** | connect command, setup command, connection command |
 | The agent's API key, `sk_agent_…`, written to `~/.haven` | **agent credential** | `sk_live_…` (a different product's shape and never Haven's), agent key, API token |
 | The agent's signing key, made locally and never sent anywhere | **delegate key** | signing key (ambiguous — the user also signs), private key |
@@ -521,9 +567,27 @@ so the table that exists to stop this class of ambiguity had acquired one. The
 row is now scoped by what makes the two genuinely different rather than by where
 they appear: the **setup prompt** is per-agent, carries a one-time setup token,
 and cannot exist until a setup does; the **onboarding prompt** is static, carries
-no token or credential (asserted by test, not intended), and is shown precisely
-when no agent exists yet. Anything that can be pasted before there is an agent to
-paste it for is the onboarding prompt.
+no token or credential (asserted by test, not intended), and exists precisely
+for the moment before any agent does. Anything that can be pasted before there is
+an agent to paste it for is the onboarding prompt.
+
+**Where each is shown ([#4065](https://github.com/d-hinders/Haven-AI/issues/4065)).**
+The dashboard no longer offers the onboarding prompt. #2535 put it on `/agents`
+for a signed-in user with no agents, as a "Set up with your AI agent" card beside
+the empty state; owner decision 2026-10-16 moved it off, because that user is
+already signed in and the connect flow already ends by handing the agent a setup
+prompt. `/agents` now runs that flow inline for the first agent, under the card
+title **Connect your first agent**, with the modal's own step copy. The
+onboarding prompt stays published for agents — `/for-agents.md`, `llms.txt` and
+the SDK's `AGENT_ONBOARDING_PROMPT` export — so the two terms still name two
+objects; only one of them has a dashboard surface.
+
+The same change gave `/agents` its page subtitle: "Agents pay for things up to a
+budget you set. You approve each budget yourself, and anything over it is refused
+on-chain." It says **approve**, never "sign", for the owner's action, and
+**yourself** rather than "with your passkey" (owner decision 2026-10-19): an
+account can add a wallet as a signer and the approval step has a wallet path, so
+a passkey-only wording would be false for some accounts.
 
 Neither row has an instrument. A literal matcher can catch a banned SPELLING,
 which is why `connect command` and `setup command` are enforceable; it cannot
@@ -682,10 +746,78 @@ procedure: its shared label copy lives in `lib/label-copy.ts` and is named in
 4. Explain control and safety in plain language.
 5. Avoid crypto jargon in onboarding unless it is necessary.
 6. Use “Haven account” and “Haven wallet” consistently.
-7. Mention passkeys first, then use the user's biometric or device PIN as a familiar example.
+7. Say “passkey”; never name a platform or biometric (Face ID, Touch ID, Windows Hello, a fingerprint). <!-- copy-lint-ignore -->
 8. Use “rules” and “budgets” for agent spending controls.
 9. Keep advanced details available, but not central.
 10. Prefer confidence over over-explanation.
+
+### Accounts: New account ([#4024](https://github.com/d-hinders/Haven-AI/issues/4024))
+
+The live reference is `components/NewAccountDialog.tsx`. A further account is
+secured by a passkey the user already has, so the dialog asks for **one**
+passkey prompt and no new passkey. Before that prompt it states three facts,
+each as an outcome:
+
+```text
+Secured by the passkey you use next. Your device asks for it once, and it
+becomes the only way to approve actions in the new account.
+
+Backups don't carry over. A backup passkey or wallet on another account
+doesn't protect this one, so add one on the new account's page.
+Signers, in Settings, shows which accounts each passkey and wallet approves.
+
+Nothing is set up on Base yet. That happens the first time you use the
+account, for example to give an agent a budget. You can add funds before then.
+```
+
+The waiting labels are onboarding's (`Waiting for your passkey…`,
+`Setting up your account…`). A dismissed passkey prompt returns to the form
+and shows **no message**. A refusal names the limit or the account involved
+and the next step; it never says only that something went wrong. A definite
+refusal makes no retry promise: "Haven couldn't create the account." plus the
+reason when there is one.
+
+When the outcome is unknown (no answer, or a server error), the account may
+exist. The dialog says so, locks the details so a retry repeats the same
+request, and lets the owner check from inside the dialog:
+
+```text
+Haven couldn't confirm the account. It may have been created anyway. Check
+again before trying again: trying again here won't create a second one.
+
+To keep this from creating a second account, the details are locked until
+Haven knows what happened.
+```
+
+That message stays until the account is created (a retry answers it) or
+found: whenever the account list changes between attempts ("Check again", or
+any other refresh), an account with the submitted name on that network ends
+it. If the account the details came from can no longer secure a new account,
+"Try again" is disabled and the dialog says so: "Operating can no longer
+secure a new account, so Haven can't try again from here. Check again to see
+whether the account was created anyway." Nothing else removes it: a refusal
+on a retry, of any kind, shows its own message beside it, and a cancelled
+passkey prompt shows nothing at all. A retry offers only the passkey the
+first try used, because the request is tied to it ("That's a different
+passkey from your first try. Try again with the same one: this request is
+tied to it."); when the backend says the request already made an account,
+the dialog looks for it and otherwise says "Your earlier try already created
+an account with this request. Check again to see it." (Since #4024 the backend replays a
+retried create before it checks anything else, so a retry of a create that
+went through returns that account; the rule still holds for any refusal.) "Check again" reports one of three things: the
+account, as created; a read that worked and found nothing ("No new account
+named Reserve on Base yet."); or a read that failed ("Couldn't read your
+accounts just now. Check again in a moment."), never confused with the
+second. Closing the dialog drops the record, which is why the message says
+to check before trying again.
+
+Avoid:
+
+```text
+Deploy a new smart account
+Copy signers from your existing account
+Your new account is protected by all your existing backups.
+```
 
 ## Money and authority copy
 

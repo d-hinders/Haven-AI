@@ -59,12 +59,6 @@
   "packages/frontend/src/app/(authenticated)/accounts/[accountId]/AccountDetailClient.tsx": {
     "both-rails": 1
   },
-  "packages/frontend/src/app/(authenticated)/agents/page.tsx": {
-    "remain-readable": 1
-  },
-  "packages/frontend/src/components/AgentPanel.tsx": {
-    "stays-readable": 1
-  },
   "packages/frontend/src/components/__tests__/AgentPassportCard.test.tsx": {
     "remain-readable": 1
   },
@@ -95,5 +89,14 @@
   },
   "packages/sdk/src/x402.test.ts": {
     "both-rails": 1
+  },
+  "packages/frontend/src/app/(authenticated)/design-system/page.tsx": {
+    "stays-readable": 1
+  },
+  "packages/frontend/src/components/ui/Monogram.tsx": {
+    "stays-readable": 1
+  },
+  "packages/frontend/src/components/ui/__tests__/Monogram.test.tsx": {
+    "stays-readable": 1
   }
 }

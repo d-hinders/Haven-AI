@@ -55,7 +55,8 @@
  * the page padding ever moves — and that the sawtooth stops having to be
  * rediscovered per table. The names are kept familiar on purpose; the numbers
  * are what is asserted, in `e2e/table-container-collapse.spec.ts`, by
- * resizing the CONTAINER at a fixed viewport.
+ * resizing the CONTAINER at a fixed viewport — the `xl` stage on the
+ * analytics Agents table since #4266 retired the `/transactions` table.
  *
  * ⚠️ HEADER AND BODY MUST BE CONVERTED TOGETHER. A `<th>` on a container
  * stage over `<td>`s on a viewport variant is the #1774 failure one layer
@@ -68,11 +69,12 @@
  * mounts the shell hands the table ~256px it is about to take back, and a
  * container query answers against the WIDER box for those frames. Measured
  * deterministically (stage with the sidebar in layout vs `display:none`, at a
- * fixed viewport): `/transactions` is SAME-STAGE at 768/1024/1100/1279/1280,
- * so no mount transition can change its column set. The `/design-system`
- * showcase DIFFERS between roughly 1040 and 1279 — pre-mount container 1034
- * shows seven columns where the settled 794 shows five. Accepted there: it is
- * an internal showcase route, and the whole page shifts 240px in the same
+ * fixed viewport, on the since-retired `/transactions` table, #4266):
+ * `/transactions` was SAME-STAGE at 768/1024/1100/1279/1280,
+ * so no mount transition could change its column set. The `/design-system`
+ * transactions showcase (retired with the table, #4266) DIFFERED between
+ * roughly 1040 and 1279 — pre-mount container 1034 showed seven columns where
+ * the settled 794 showed five. Accepted there: it was an internal showcase route, and the whole page shifts 240px in the same
  * frame anyway. Worth knowing before keying a NEW surface on the container,
  * because the mechanism generalises even though this instance is benign.
  *
@@ -101,10 +103,17 @@ import { Tooltip } from './Tooltip'
 const TH_BASE =
   'bg-[var(--v2-table-header-bg)] border-b border-[var(--v2-table-row-border)] text-[11px] uppercase tracking-wide text-[var(--v2-table-header-ink)] px-4 py-3 font-medium' // design-lint-disable-line
 
-// Sticky compensation for <main>'s p-6/lg:p-8 padding so a pinned header
-// sits flush against the TopBar. thead pins at z-10, cells at z-20.
-const STICKY_HEAD = 'sticky -top-6 lg:-top-8 z-10'
-const STICKY_CELL = 'sticky -top-6 lg:-top-8 z-20'
+// Sticky compensation for the scroll container's top padding so a pinned
+// header sits flush against the top of the scrollport, not floating 8px above
+// it (#4029). The offset is a VARIABLE, not a responsive class: the scroll
+// container's top padding is the shell's to set — the authenticated app drops
+// to 16px below `lg` and uses 32px at `lg` (`--v2-sticky-head` is overridden on
+// `AuthenticatedShell`'s frame), while ops keeps its 24px `py-6` and the
+// token's -1.5rem default. The token value is negative and is used as-is
+// (`top: var(...)`), so no shell ever rewrites the primitive. thead pins at
+// z-10, cells at z-20.
+const STICKY_HEAD = 'sticky top-[var(--v2-sticky-head)] z-10'
+const STICKY_CELL = 'sticky top-[var(--v2-sticky-head)] z-20'
 
 /**
  * The inline-size container the stages below query. Named (`v2table`) rather

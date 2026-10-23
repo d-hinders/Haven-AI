@@ -57,88 +57,165 @@ describe('MobileTabBar — the presentational copy is inert (#2819)', () => {
 })
 
 /**
- * The one active idiom, asserted on the RENDERED markup (#2818).
+ * The bar's own active idiom, asserted on the RENDERED markup (#2818, #4058,
+ * #4237).
  *
- * Before this, the bar's active state had no unit coverage at all — the only
+ * Before #2818 the bar's active state had no unit coverage at all — the only
  * automated evidence was the visual baselines, which is evidence a reviewer
- * reads rather than evidence a gate reports, and which was stale on this very
- * change until the Linux regeneration ran. These three cases are what would
- * have gone red if the rail were dropped, applied to every cell, or left
- * visible to the accessibility tree.
+ * reads rather than evidence a gate reports. #4058 gave the bar the app's
+ * selection idiom (#4056's `SegmentedControl`); #4237 (owner decision:
+ * Revolut's tab bar) replaced it with a NEUTRAL CONCENTRIC CAPSULE — a full
+ * `rounded-full` indicator filled with `--v2-tab-bar-indicator`, no outline —
+ * and moved the active cell to `--v2-ink` + semibold. The one-active-idiom
+ * rule is deliberately relaxed for the bar (the More sheet keeps its brand
+ * tint, and the sheet covers the bar while open). These cases go red if the
+ * capsule reverts to a different radius, a brand tint or an outline, or if
+ * the active cell loses its ink/weight step.
  *
  * Asserted on the element, not on a class string in the source: the defect
  * class here is "the active cell renders like the inactive one", and a source
- * grep for `--v2-brand` finds the token in a comment just as happily.
+ * grep for `--v2-tab-bar-indicator` finds the token in a comment just as
+ * happily. jsdom computes no `box-shadow`, so the outset focus ring is pinned
+ * here by class and in `navigation.mobile.spec.ts` by computed style.
  */
-describe('MobileTabBar — active cell marks itself the way the drawer does (#2818)', () => {
+describe('MobileTabBar — active cell carries the selection idiom (#2818, #4058, #4237)', () => {
   const renderBar = () =>
     render(<MobileTabBar items={baseNavItems} presentational activeHref="/agents" />)
+  const classes = (el: Element) => el.className.split(/\s+/)
+  /** The active shape is painted by an indicator span; the cell stays a rectangle for hit-testing. */
+  const indicatorOf = (cell: HTMLElement) => cell.querySelector('[data-tab-indicator]')!
 
-  /** The rail: a 2px brand span, absolutely placed on the cell's top edge. */
-  const railOf = (link: HTMLElement) =>
-    link.querySelector('span[aria-hidden="true"].absolute')
-
-  it('gives the active cell brand ink and a rail the a11y tree cannot see', () => {
+  it('gives the active cell ink + semibold on a rounded-full neutral capsule, with no outline', () => {
     renderBar()
 
     const active = screen.getByRole('link', { name: 'Agents' })
-    expect(active.className).toContain('text-[var(--v2-brand)]')
-    // `relative` is what SCOPES the rail to this cell. Drop it — a plausible
-    // tidy-up in a 240-char class stack — and the absolutely-positioned rail
-    // resolves against the nearest positioned ancestor, which for the live bar
-    // is the `fixed` <nav>: one 2px line across the WHOLE bar instead of over
-    // the active cell. Every other assertion here stays green through that
-    // edit, which is exactly why this one is separate (round-two review).
-    // `classList.contains`, not `className.toContain`: the substring form also
-    // passes on `lg:relative` or `sm:relative`, neither of which scopes the
-    // rail unconditionally.
-    expect(active.classList.contains('relative')).toBe(true)
-
-    const rail = railOf(active)
-    expect(rail).not.toBeNull()
-    // `aria-hidden` because the rail restates `aria-current`, which is already
-    // on the link — announcing it twice is the accessibility defect, not the
-    // decoration.
-    expect(rail?.getAttribute('aria-hidden')).toBe('true')
-    expect(rail?.className).toContain('top-0')
-    expect(rail?.className).toContain('h-0.5')
-    expect(rail?.className).toContain('bg-[var(--v2-brand)]')
+    expect(classes(active)).toContain('text-[var(--v2-ink)]')
+    expect(classes(active)).toContain('font-semibold')
+    const capsule = indicatorOf(active)
+    expect(capsule.getAttribute('aria-hidden')).toBe('true')
+    expect(classes(capsule)).toEqual(
+      expect.arrayContaining(['absolute', 'inset-0', 'rounded-full', 'bg-[var(--v2-tab-bar-indicator)]']),
+    )
+    // No outline anywhere on the indicator — the #4058 brand outline is gone,
+    // and with it the `-outline-offset-1` bookkeeping that cleared it under
+    // focus. The focus RING (outset, on this same span) is the next test.
+    expect(classes(capsule)).not.toContain('outline')
+    expect(classes(capsule)).not.toContain('outline-1')
+    expect(classes(capsule)).not.toContain('outline-brand')
+    // The cell itself is NOT rounded: Chromium hit-tests border-radius, and a
+    // rounded cell has dead corners. `relative` scopes the indicator to it.
+    expect(classes(active)).not.toContain('rounded-full')
+    expect(classes(active)).toContain('relative')
+    // The rail is gone: no top-edge decoration.
+    expect(active.querySelector('.top-0')).toBeNull()
   })
 
-  it('leaves every inactive cell in ink-3, with no rail', () => {
-    // The control. Without it, a rail rendered unconditionally would satisfy
-    // the case above while erasing the distinction the rail exists to draw.
+  it('leaves every inactive cell in ink-3 at font-medium, with no capsule fill and no semibold', () => {
+    // The control. Without it, a fill rendered unconditionally would
+    // satisfy the case above while erasing the distinction it exists to draw.
     renderBar()
 
-    for (const name of ['Dashboard', 'Transactions', 'Accounts']) {
+    for (const name of ['Home', 'Activity', 'Accounts']) {
       const inactive = screen.getByRole('link', { name })
-      expect(inactive.className).toContain('text-[var(--v2-ink-3)]')
-      expect(inactive.className).not.toContain('text-[var(--v2-brand)]')
-      expect(railOf(inactive)).toBeNull()
+      expect(classes(inactive)).toContain('text-[var(--v2-ink-3)]')
+      expect(classes(inactive)).toContain('font-medium')
+      expect(classes(inactive)).not.toContain('text-[var(--v2-ink)]')
+      expect(classes(inactive)).not.toContain('font-semibold')
+      const pill = indicatorOf(inactive)
+      expect(classes(pill)).not.toContain('bg-[var(--v2-tab-bar-indicator)]')
+      expect(classes(pill)).not.toContain('bg-[var(--v2-brand-soft)]')
     }
   })
 
-  it('keeps aria-current on exactly one tab — the rail did not replace it', () => {
-    // The rail is a second, VISUAL cue. It must not have become the only one:
-    // `aria-current` is what a screen reader has, and it is unaffected by
-    // anything above.
+  it('gives every cell an OUTSET focus ring — no ring-inset anywhere in the bar', () => {
+    renderBar()
+    for (const name of ['Home', 'Agents', 'Activity', 'Accounts']) {
+      const cell = screen.getByRole('link', { name })
+      expect(classes(cell)).toEqual(expect.arrayContaining(['group', 'focus-visible:outline-none']))
+      const pill = indicatorOf(cell)
+      expect(classes(pill)).toEqual(expect.arrayContaining(['group-focus-visible:ring-2', 'group-focus-visible:ring-brand/80']))
+      for (const el of [cell, pill]) {
+        expect(classes(el)).not.toContain('ring-inset')
+        expect(classes(el)).not.toContain('focus-visible:ring-inset')
+      }
+    }
+  })
+
+  it('keeps aria-current on exactly one tab — the visual cue did not replace it', () => {
+    // The capsule fill is a second, SUPPLEMENTARY cue. It must not have
+    // become the only one: `aria-current` is what a screen reader has.
     const { container } = renderBar()
 
     const current = container.querySelectorAll('a[aria-current="page"]')
     expect(current).toHaveLength(1)
     expect(current[0]).toHaveAttribute('href', '/agents')
   })
+
+  it('labels /transactions "Activity" in the bar only (#4058)', () => {
+    renderBar()
+    const activity = screen.getByRole('link', { name: 'Activity' })
+    expect(activity).toHaveAttribute('href', '/transactions')
+    expect(screen.queryByRole('link', { name: 'Transactions' })).toBeNull()
+    // The rail's own item list is untouched: the override is the bar's.
+    expect(baseNavItems.find((i) => i.href === '/transactions')?.label).toBe('Transactions')
+  })
+
+  it('labels /dashboard "Home" in the bar only (#4237)', () => {
+    // The twin of the Activity override above: the capsule's curved ends must
+    // stay off the landing tab's label, so the bar shortens it to "Home"
+    // while the rail, the page `h1` and the route keep "Dashboard".
+    renderBar()
+    const home = screen.getByRole('link', { name: 'Home' })
+    expect(home).toHaveAttribute('href', '/dashboard')
+    expect(screen.queryByRole('link', { name: 'Dashboard' })).toBeNull()
+    // The rail's own item list is untouched: the override is the bar's.
+    expect(baseNavItems.find((i) => i.href === '/dashboard')?.label).toBe('Dashboard')
+  })
+})
+
+/**
+ * The pill's own surface and edge tokens, pinned on the RENDERED nav (#4063).
+ *
+ * Before #4063 no test asserted what the pill itself paints: the dark mode
+ * read flat because the bar was `bg-[var(--v2-bg)]` on a `--v2-bg` page with
+ * only a 1.41:1 `--v2-border` edge (the dark popover shadow is black on
+ * near-black). The fix moved the bar to its own token pair —
+ * `--v2-tab-bar-bg` / `--v2-tab-bar-border`, aliased to the page ground and
+ * plain border in light and redeclared to `--v2-surface-2` /
+ * `--v2-border-strong` in both dark blocks — and this pin goes red if the
+ * nav silently reverts to the page tokens. Asserted on the element, not the
+ * source: a source grep finds the token in a comment just as happily.
+ */
+describe('MobileTabBar — the pill paints from the tab-bar token pair (#4063)', () => {
+  const renderBar = () =>
+    render(<MobileTabBar items={baseNavItems} presentational activeHref="/agents" />)
+
+  it('carries the tab-bar surface and edge classes', () => {
+    const { container } = renderBar()
+    const bar = container.querySelector('[data-mobile-tab-bar]')!
+    const classes = bar.className.split(/\s+/)
+    expect(classes).toContain('bg-[var(--v2-tab-bar-bg)]')
+    expect(classes).toContain('border-[var(--v2-tab-bar-border)]')
+  })
+
+  it('no longer paints the page ground and border directly', () => {
+    // The control for the pin above: the pre-#4063 classes made the dark pill
+    // disappear into the page. Their absence is the regression guard.
+    const { container } = renderBar()
+    const bar = container.querySelector('[data-mobile-tab-bar]')!
+    expect(bar.className).not.toContain('bg-[var(--v2-bg)]')
+    expect(bar.className).not.toContain('border-[var(--v2-border)]')
+  })
 })
 
 /**
  * The bar is still five cells and the theme row is not in it (#2928).
  *
- * The quick toggle's mobile home is the More SHEET — the full-width drawer
- * `Sidebar` renders and opens from this bar's fifth slot — and the row lives
- * there, in the drawer's footer (asserted in Sidebar.test.tsx). This bar must
- * not acquire it: #2731 fixed the cell count at five and the e2e geometry spec
- * measures five tappable slots, and a button added to the grid would break
- * both — a sixth tab's width for a control that is not a tab.
+ * The phone theme control lives in the More SHEET this bar's fifth cell opens
+ * (#4053; asserted in Sidebar.test.tsx). This bar must not acquire it: #2731
+ * fixed the cell count at five and the e2e geometry spec measures five
+ * tappable slots, and a control added to the grid would break both — a sixth
+ * tab's width for a control that is not a tab.
  *
  * So the claim this file carries for the slice is a negative one over the
  * bar's own subtree, plus the positive control that keeps it honest: the grid
@@ -163,10 +240,41 @@ describe('MobileTabBar — five cells, and the theme row is not one of them (#29
   it('contains no theme control; the sheet owns it', () => {
     const { container } = renderBar()
     const bar = container.querySelector('[data-mobile-tab-bar]')!
-    // A button inside the bar would be a sixth interactive cell; the present-
-    // ational copy already has none, and the live copy gets one only outside
-    // it (`Sidebar`'s toggle button, painted on the nav-toggle tier).
+    // The presentational copy has no button at all: its fifth cell is a
+    // picture of More.
     expect(bar.querySelectorAll('button')).toHaveLength(0)
     expect(bar.querySelectorAll('[aria-label^="Theme:"]')).toHaveLength(0)
+  })
+
+  it('the live bar carries More as its fifth cell — its only button (#4053)', () => {
+    const ref = { current: null }
+    const { container } = render(
+      <MobileTabBar items={baseNavItems} more={{ open: false, onToggle: () => {}, buttonRef: ref }} />,
+    )
+    const bar = container.querySelector('[data-mobile-tab-bar]')!
+    expect(bar.children).toHaveLength(5)
+    const buttons = bar.querySelectorAll('button')
+    expect(buttons).toHaveLength(1)
+    expect(bar.children[4]).toBe(buttons[0])
+    expect(buttons[0].getAttribute('aria-label')).toBe('Open sidebar')
+    expect(bar.querySelectorAll('[aria-label^="Theme:"], [role="radiogroup"]')).toHaveLength(0)
+  })
+})
+
+/**
+ * More only opens (#4058). The sheet covers the bar and carries its own ✕
+ * named `Close sidebar`; if this cell still flipped to that name, the harness
+ * would find two buttons by it and Playwright's strict mode would fail.
+ */
+describe('MobileTabBar — the More cell is named Open sidebar in both states (#4058)', () => {
+  it.each([false, true])('open=%s', (open) => {
+    const ref = { current: null }
+    const { container } = render(
+      <MobileTabBar items={baseNavItems} more={{ open, onToggle: () => {}, buttonRef: ref }} />,
+    )
+    const more = container.querySelector('[data-more-toggle]')!
+    expect(more.getAttribute('aria-label')).toBe('Open sidebar')
+    expect(more.getAttribute('aria-expanded')).toBe(String(open))
+    expect(more.textContent).toBe('More')
   })
 })

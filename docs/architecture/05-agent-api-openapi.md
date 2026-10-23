@@ -214,7 +214,7 @@ includes three read-only query parameters: `category`, `search`, and `rail`.
 whitespace, accepts at most eight words, and requires every word to match the
 product `name`, `description`, or `category`; merchant name is deliberately
 excluded because it belongs to the separate merchant table. `rail` keeps its
-existing filter. This surface only returns curated metadata and may yield zero
+existing filter. This surface only returns catalog metadata and may yield zero
 or multiple entries. It never quotes, signs, or authorizes a payment, and
 catalog prices remain indicative rather than authoritative.
 
@@ -523,7 +523,14 @@ The contract exposes four authentication schemes:
   deleted in #2847) — it is the source for the frontend's
   generated response types, so it must describe what the routes actually
   emit, not an idealization (e.g. `from`/`to` can be the empty string;
-  `amountSek` is present on enriched rows).
+  `amountSek` is present on enriched rows). The agent-activity reads
+  (`/agent-activity/{id}/activity`, `/agent-activity/{id}/stats`,
+  `/agent-activity/feed`) are `Dashboard`-tagged too: the per-agent activity
+  read serves ONE population per `kind` (#4229) — `payments`, `tool_calls`,
+  and since #4323 `refusals`, the agent's `payment_refusals` rows under their
+  own `RefusalActivityEntry` item schema (atomic `amount`, the closed
+  five-value `reason` set, folded `attempts`, and a serve-time fiat triple in
+  all three currencies — `sek_value` is not stored on a refusal).
 - `SetupToken` is a narrowly scoped, expiring connector pairing credential.
 - `OpsJwt` is the ops console session (#3509): read authority over `/ops/*`
   only, refused by every customer route, never payment authority.

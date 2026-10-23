@@ -159,11 +159,17 @@ that code is:
 [`04-x402-payment-sequence.md`](../architecture/04-x402-payment-sequence.md)
 § *Completing an erc7710 settlement* and § *Completing a settlement nobody
 reported*. If `/accounting` has **no row** for a payment the user can see on
-Transactions, start there; if it has a row, stay here.
+Transactions, start there; if it has a row, stay here. For eip3009 rows the
+sweep missed, the #4319 backfill is the remaining door:
+`npm run x402:eip3009-backfill -w @haven/backend` — `--dry-run` first (the
+default; per-tier and per-verdict counts, nothing written), then `--write`
+(idempotent, fires `feedSettledPaymentBestEffort` after each record, Tier 2
+honouring `HAVEN_EIP3009_RECEIPT_ATTRIBUTION`).
 
 **Settlement-side reasons and fixes** (`settlement-sweeper.ts`, verified at
 this head). Three `warn` lines can name such a payment; only the first carries
-a `remedy` field, the other two carry a `reason`:
+a `remedy` field, the other two carry a `reason`. A fourth, chain-level line
+(#4012) explains why NO erc7710 payment on a chain is being swept:
 
 | line | `reason` | what it means | fix |
 |---|---|---|---|
@@ -172,6 +178,7 @@ a `remedy` field, the other two carry a `reason`:
 | `Settlement sweep confirmed an erc7710 payment but no evidence row landed` (`paymentId`, `agentId`, `txHash`, `chainId`, `outcome`, `reason`) | `missing_resource_url`, `intent_not_found`, `write_threw` | the intent flipped `submitted → confirmed` but the `machine_payment_evidence` write failed; the tick counts it as `evidenceFailed`, not `evidencePushed` | nothing, at first: the recovery pass re-derives the hole from state (confirmed erc7710 intent, no evidence row) and retries it every tick — `evidenceRecovered` counts the ones that close |
 | `Settled erc7710 payment is confirmed with no evidence row and the row could not be written` (same fields, from the recovery pass, every attempt it cannot satisfy) | `missing_resource_url` | the one non-transient cause: `machine_payment_evidence.resource_url` is NOT NULL and the intent's `payment_resource_url` and `x402_resource_url` are both null, so the row can never be written | set the intent's resource URL to the merchant resource the payment paid for. The recovery pass backs a repeatedly failing payment off exponentially from the 2-minute tick to a ceiling of **1 h** (`SCAN_BACKOFF_MAX_MS`), so a long-stuck payment may wait up to an hour after the fix; the backoff is in-memory, so **restarting the leader clears it**. After **24 h** (`SWEEP_RECOVERY_HORIZON_SECONDS`) the payment leaves the recovery horizon and needs a manual evidence write — the same `POST /machine-payments/evidence` re-report |
 | same line | `intent_not_found`, `write_threw` | transient (a database blip, a lost connection) | the next tick closes it; if it repeats, read `err` on the neighbouring `Settlement sweep evidence recovery failed` line |
+| `Settlement sweep: settlement windows exceed the eth_getLogs call budget at this provider's block-range limit` (`chainId`, `reason`, `batchBlocks`, `maxBatches`, `windows`, `remedy`; #4012) — chain-level, names no payment | `provider_log_range_limit` | the RPC provider serves fewer `eth_getLogs` blocks per call than a settlement window needs inside the 20-call budget (Alchemy's free plan serves 10), so the sweep scans nothing on that chain and backs its candidates off (≤ 1 h). The same `reason` on `…refused the eth_getLogs block range — narrowing the span` is the hourly learning call, which is expected | upgrade the RPC plan (a learned limit expires within the hour, so no redeploy is needed). Until then the payments are recovered the way `remedy` says: re-report the settlement hash. `ETH_GETLOGS_MAX_BLOCK_RANGE` only removes the learning call. It cannot make a window fit |
 
 ## Where it shows
 
@@ -336,8 +343,10 @@ any secret is stored — 409 `UNSUPPORTED_BASE_CURRENCY`, or the OAuth callback'
 `reason=unsupported_currency`. A provider that cannot say (`base_currency` null)
 passes and books in SEK, the default.
 
-> **No production connection is non-SEK today.** Fortnox is the only `live`
-> provider and its `getCompanyInfo` reports `SEK` by construction. The machinery
+> **No production connection is non-SEK today.** Two providers are `live`:
+> Fortnox, whose `getCompanyInfo` reports `SEK` by construction, and Accounted,
+> whose company read exposes no currency (`base_currency` null), so it books in
+> SEK by the default above. The machinery
 > below ships ahead of its first user — the `coming_soon` providers.
 
 **What is pushed, and when the rate was taken.** The record carries the amount in
@@ -381,7 +390,12 @@ float tail or exponent notation reaches a supplier invoice.
 figure on the record it backs: `Book value` in the invoiced currency, with the
 SEK capture kept below it as `Haven SEK ref` when they differ. One document,
 two clearly-labelled figures — never a DKK invoice backed by a receipt quoting
-kronor.
+kronor. When the merchant's own invoice is captured (#956), the underlag also
+carries the SELLER BLOCK (#3918): the seller's legal name (`Merchant` line),
+the catalog's supplier `Country`, and the invoice's `VAT reg no` / `Org no` —
+the fields a Swedish consultant needs to code omvänd (reverse) VAT. Every
+seller line renders only when its value is actually known; the document never
+states an empty-looking fact.
 
 **A USD ledger records the quoted rate, not an assumed 1:1.** A USDC payment into
 a USD-booking company carries the rate the source actually quoted, with its
@@ -390,7 +404,7 @@ named after; the rate is factual provenance on an unattested document.
 
 ## Sync statuses
 
-`accounting_feed_syncs`, one row per (user, provider, payment):
+`accounting_feed_syncs`, one row per (user, provider, payment, document_kind):
 `pending → pushed | failed | skipped`. `failed` and `skipped` are re-claimable
 (#1365); `pushed` is FINAL with one sanctioned exception, the verification-gated
 reopen. `error` carries the failure, the skip reason, the non-fatal note on a
@@ -843,10 +857,10 @@ Haven's own record per the epic Notes; Accounted keys are revoked in their
 dashboard, so `revoke` clears local secrets only).
 
 **The document push (#3018, slice 2).** `pushTransaction` renders the verifiable
-receipt underlag (`receipt-underlag.ts`, deterministic bytes; the merchant
-receipt and the suggested-account hint are excluded by owner decision — the
-upload takes exactly `file` + `upload_source=api`, and the sync row holds one
-ref) and uploads it with `POST /api/v1/companies/{companyId}/documents`,
+receipt underlag (`receipt-underlag.ts`, deterministic bytes; the
+suggested-account hint is excluded by owner decision — the upload takes exactly
+`file` + `upload_source=api`) and uploads it with
+`POST /api/v1/companies/{companyId}/documents`,
 `Idempotency-Key = uuid5(paymentId)`. Delivery proof: a **2xx** (the spec
 declares `200`, not `201`) whose `data.sha256_hash` equals the local SHA-256
 of the sent bytes — anything else is `skipped` and no ref is stored. Error
@@ -859,6 +873,26 @@ terminal `skipped` (same key, different bytes — never retried); 400
 `ProviderError` with `retryAfterMs` from `Retry-After` (seconds → ms; the
 sweep reads the field, `retry-sweep.ts`). Oversize underlag (> 10 MB) is
 gated locally BEFORE any request.
+
+**The merchant's own invoice, as a second document (#3918).** #3016 scoped
+"one upload is one file, one ref per sync row"; #3918 revisits the ROW, not
+the upload: when the agent captured the merchant's own receipt/invoice, the
+push uploads it as a SECOND document on the same sync — its own WORM id, its
+own idempotency key (`uuid5(paymentId:merchant-invoice)`, so the two uploads
+can never collide on a key) — and records its delivery as a second ledger row
+under `document_kind = 'merchant_invoice'` (migration 113 widened the unique
+key to `(provider, payment_id, user_id, document_kind)`; every generic
+claim/mark/sweep/backfill statement is scoped to `'underlag'`, so a
+merchant-invoice row is never claimed, rewritten or counted — it is written
+once, only after the sha256 proof, by `recordMerchantInvoiceSync`). The
+second upload is best-effort like the Fortnox attachment (#956): a failure is
+a NOTE on the pushed underlag row, never a failed row — re-pushing to reach
+the invoice would re-file the underlag. Because the x402 merchant receipt
+arrives at the settle retry — seconds AFTER the funding-confirmation push —
+the capture route also late-attaches (`lateAttachAccountedMerchantReceipt`,
+the #956 Fortnox shape): pushed underlag + no recorded row yet → upload +
+record; anything else → no-op. Idempotent from three directions: the ledger
+key, the idempotency key, and the row check.
 
 **Verify from Haven's own record.** `capabilities.verify: false`: there is no
 `GET /documents/{id}` on the 2026-05-12 spec and `/download` writes a

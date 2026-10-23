@@ -137,7 +137,7 @@ export function HomeHowItWorks() {
           <span className={`text-[12px] text-[var(--v2-brand)] ${SITE_TYPE.mono}`}>Step 1</span>
           <h3 className={`${SITE_TYPE.h3} mb-2 mt-3.5`}>Create your account with a passkey</h3>
           <p className="text-[15px] text-[var(--v2-ink-2)]">
-            One Face ID prompt creates an account only you control. No seed phrase, no credit card.
+            One passkey prompt creates an account only you control. No seed phrase, no credit card.
           </p>
           <div aria-hidden="true" className="mt-2 flex min-w-0 flex-1 flex-col">
             <AnimatedPasskeyMiniCard />
@@ -357,7 +357,7 @@ export function HomeClosing() {
         Give your agent a budget.
       </h2>
       <p className={`${SITE_TYPE.lede} mx-auto mt-[18px] text-center`}>
-        One passkey, one budget, one command. Nothing spends without your signature.
+        One passkey, one budget, one command. Nothing spends without your approval.
       </p>
       <SiteCtaRow center>
         <BrandBandButton href="/signup" trailingArrow>

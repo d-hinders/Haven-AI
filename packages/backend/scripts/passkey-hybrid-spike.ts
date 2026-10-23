@@ -23,6 +23,8 @@
  *
  * Run: npm run pilot:passkey-spike -w @haven/backend
  */
+// #4216: kit analytics off before anything here can load @metamask/smart-accounts-kit.
+import '../src/telemetry/kit-analytics-off.js'
 import { createHash } from 'node:crypto'
 import {
   http,

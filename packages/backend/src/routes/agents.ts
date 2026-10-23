@@ -18,6 +18,7 @@ import {
 } from '../modules/passport/index.js'
 import { formatTokenValue } from '../domain/tokens.js'
 import { deriveDelegationAllowances } from '../rails/delegation-budget-view.js'
+import { listReceivedGrantsForAgents, type ReceivedGrantRow } from '../infra/repositories/sub-budgets.js'
 import { config } from '../config.js'
 import { retiredNameVerdict, retiredSafeField } from '../middleware/retired-safe-names.js'
 import {
@@ -92,6 +93,19 @@ interface UpdateAgentBody {
 
 // ── Routes ─────────────────────────────────────────────────────────
 
+/**
+ * #3988: the wire shape of one received sub-budget grant — the qualifying
+ * chain read's row, snake-cased to the `Agent` schema's convention. Shared
+ * by the list and detail responses so they cannot disagree.
+ */
+function toReceivedWire(rows: ReceivedGrantRow[]) {
+  return rows.map(({ parent_agent_id, parent_agent_name, open }) => ({
+    parent_agent_id,
+    parent_agent_name,
+    open,
+  }))
+}
+
 export default async function agentRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('onRequest', authMiddleware)
 
@@ -115,6 +129,13 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
       .map((a) => a.id)
     const derivedByAgent = await deriveDelegationAllowances(delegationAgentIds)
 
+    // #3988: the received sub-budget grants the same read serves — ONE
+    // qualifying-chain verdict (`open` = the payment path would accept the
+    // chain) shared with the dashboard overview, so a grant holder never
+    // reads "No budget" here either. Legacy-rail agents cannot hold grants
+    // (a grant hangs from a delegation-rail budget) and carry [].
+    const receivedByAgent = await listReceivedGrantsForAgents(sub, delegationAgentIds)
+
     // #3167: labels ride along on the same read — one round trip for the
     // cards and the #3165 filter facet. DISPLAY ONLY; never read by the
     // delegation, budget, or enforcement path.
@@ -125,6 +146,12 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
       allowances:
         agent.account_type === 'delegator_hybrid'
           ? (derivedByAgent.get(agent.id) ?? [])
+          : [],
+      // #3988: [] for legacy-rail agents — the read above is scoped to the
+      // delegation-rail ids, and a legacy agent cannot hold a grant anyway.
+      receivedSubBudgets:
+        agent.account_type === 'delegator_hybrid'
+          ? toReceivedWire(receivedByAgent.filter((row) => row.agent_id === agent.id))
           : [],
       labels: labelsByAgent.get(agent.id) ?? [],
     }))
@@ -147,13 +174,23 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
       // Live budget = the active delegations, not an onboarding mirror (#1090).
       const derived = await deriveDelegationAllowances([id])
       const labels = (await listLabelsForAgents([id])).get(id) ?? []
-      return { ...agent, allowances: derived.get(id) ?? [], labels }
+      // #3988: the same qualifying-chain read the list serves, so the detail
+      // page and the list cannot disagree about "does this agent have a
+      // budget".
+      const received = await listReceivedGrantsForAgents(sub, [id])
+      return {
+        ...agent,
+        allowances: derived.get(id) ?? [],
+        receivedSubBudgets: toReceivedWire(received),
+        labels,
+      }
     }
 
     // Legacy rail retired (#1440/#2020): no allowance config to show.
     return {
       ...agent,
       allowances: [],
+      receivedSubBudgets: [],
       labels: (await listLabelsForAgents([id])).get(id) ?? [],
     }
   })
@@ -324,6 +361,8 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
         // Always empty since #2020 — kept for response-shape compatibility;
         // budgets arrive later as delegation grants.
         allowances: [],
+        // #3988: a brand-new agent has had no grants issued to it yet.
+        receivedSubBudgets: [],
         // A brand-new agent carries no labels yet (#3167).
         labels: [],
         passport_requested: passportChainId != null,
@@ -377,10 +416,17 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
         updated.account_type === 'delegator_hybrid'
           ? ((await deriveDelegationAllowances([id])).get(id) ?? [])
           : []
+      // #3988: the received grants ride along under the same rule, so the
+      // PATCH response mirrors the GET contract it exists to re-render.
+      const receivedSubBudgets =
+        updated.account_type === 'delegator_hybrid'
+          ? toReceivedWire(await listReceivedGrantsForAgents(sub, [id]))
+          : []
 
       return {
         ...updated,
         allowances,
+        receivedSubBudgets,
         // #3167: the identity edit modal also edits labels, so the response
         // carries them for a re-render without a second call.
         labels: (await listLabelsForAgents([id])).get(id) ?? [],

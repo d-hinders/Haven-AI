@@ -12,9 +12,10 @@ covers:
   - packages/frontend/tailwind.config.js
   - packages/frontend/src/components/ui/**
   - packages/frontend/src/components/haven/**
-  - packages/frontend/src/components/ReceiveFundsModal.tsx
-  - packages/frontend/src/components/AddFundsModal.tsx
+  - packages/frontend/src/components/ReceiveDialog.tsx
   - packages/frontend/src/components/ConnectAgentModal.tsx
+  - packages/frontend/src/components/connect-agent/ConnectAgentFlow.tsx
+  - packages/frontend/src/components/connect-agent/InlineAgentSetup.tsx
   - packages/frontend/src/components/EditAgentModal.tsx
   - packages/frontend/src/components/DelegationBudgetCard.tsx
   - packages/frontend/src/components/OnchainActionGate.tsx
@@ -47,7 +48,7 @@ Use this checklist before finishing any Haven UI task. It is written for AI impl
   user-held or agent-held key signs, distinguishes API identity from payment
   authority, and never implies an API key or Haven backend can spend.
 - There is no retired-rail notice to review. #2413 deleted `RetiredRailNotice`
-  and the six list queries filter to `account_type = 'delegator_hybrid'`, so no
+  and the list queries filter to `account_type = 'delegator_hybrid'`, so no
   legacy account reaches a screen; this criterion is retained only so a reviewer
   who meets such a notice in a diff knows it should not be there.
 - Payment execution, agent authority, credentials, Safe setup, relaying, SDK
@@ -60,9 +61,9 @@ Use this checklist before finishing any Haven UI task. It is written for AI impl
 - Existing primitives in `packages/frontend/src/components/ui` are reused before adding new styles.
 - Haven-domain components in `packages/frontend/src/components/haven` are reused for agent budget, wallet identity, and risk explanations.
 - Authenticated pages use `PageHeader` unless the route has a deliberate special layout.
-- Dashboard compact previews use `TransactionActivityRow`. Semantic transaction
-  lists, including card/compact account and agent histories, use the appropriate
-  `TransactionsTable` variant.
+- Dashboard compact previews use `TransactionActivityRow`. Full transaction
+  lists, including `/transactions` and the account and agent Activity tabs, use
+  `TransactionActivityRow` in ledger mode under day bands.
 - Cards, buttons, inputs, shadows, radii, and typography match `docs/product/design-system.md`.
 - `Card elevation="raised"` is used only for prominent page-anchor surfaces, not ordinary cards.
 - The shared `Card` primitive's implemented `anchor` elevation is used only as
@@ -112,10 +113,17 @@ Any remaining matches should be deliberate technical disclosure, developer copy,
 - Loading regions that replace meaningful content use `role="status"`, `aria-busy`, and `aria-live` when practical.
 - Toasts supplement visible state and use the correct live-region tone.
 - Tooltips are available on hover and focus, are tap-openable where the trigger is not inside an interactive control, and do not hide essential instructions. A tooltip nested in a button, link, or composite card stays hover-only by design (#2038) — check that nothing essential is behind it.
-- Transaction tables preserve mobile readability and expose `aria-sort` on sortable headers.
+- Generic tables preserve mobile readability and expose `aria-sort` on sortable headers; transaction lists are ledger rows, not tables.
 
 ## Final Verification
 
+- Compare the rendered screen with the documented
+  [Patterns](design-system.md#patterns): a page that rebuilds one instead of
+  using it is a `should-fix`. A composition with no shipped instance and no
+  `/design-system` entry is a **new pattern** that needs its own earlier,
+  owner-approved design-system slice (#4109); extracting a shape the product
+  already ships, on the diff that writes its second copy, is absorption and
+  stays in the same PR.
 - Inspect `/design-system` when adding or changing shared UI patterns — and be
   clear what that buys. The page is a rendering of a component's APPEARANCE, not
   a test of its behaviour, and a showcase copy held permanently open (today only
@@ -155,7 +163,7 @@ Any remaining matches should be deliberate technical disclosure, developer copy,
   excluded work, review status, risk level, merge rationale, residual risk, and
   recommended merge order when multiple PRs are open.
 - For table changes, verify amount sorting uses raw values rather than formatted strings.
-- For app-shell changes, verify sidebar active state, TopBar back links,
+- For app-shell changes, verify sidebar active state, detail-page back links,
   environment badge, skip link, and mobile navigation. (The
   Approvals badge was on this list until
   [#1989](https://github.com/d-hinders/Haven-AI/issues/1989) deleted the nav
@@ -180,4 +188,4 @@ sorts amount on the raw `value` field, not the display string; the
 hooks as described. The intervening UI drift (#3442 token-label wrap, #3437
 releases wrap, #3482 faucet/onramp, #3408 receive side, #3198 agent labels,
 #3205 chart callouts, #3087 marketplace) changed screens the checklist reviews
-without changing any review criterion, primitive name, or process step here.
+without changing any review criterion, primitive name, or process step here. (`TransactionsTable` was deleted after this re-verification, with #4266.)

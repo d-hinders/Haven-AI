@@ -4,6 +4,7 @@ import fastifyJwt from '@fastify/jwt'
 // #2392: the spec's own schema decides whether the overview matches what the
 // dashboard's generated wire types promise — see the #1090 block below.
 import { expectMatchesSpec } from '../../openapi/response-shape.js'
+import type { DashboardActivityGroup } from '../../modules/transactions/activity.js'
 // The double below replaces only the FETCHING half of the accounts barrel;
 // the route also reads the pure freshness combiner from it (#3295), which
 // stays real so the marker math this file pins is the production math.
@@ -27,7 +28,26 @@ const { mockQuery, portfolioMocks, transactionMocks } = vi.hoisted(() => ({
     // #3824: the route derives the tz validity check and the grouped rows
     // from this module; the characterization below feeds it directly.
     isValidActivityTimeZone: vi.fn(() => true),
-    buildActivityGroups: vi.fn(async () => []),
+    // #3975: the route derives the rolling 7-day boundary (`from7Iso`) from
+    // the real predicate — the tests pin it against the wire below.
+    activityWindowStartIso: vi.fn(
+      (nowMs: number) => new Date(nowMs - 7 * 24 * 60 * 60 * 1000).toISOString(),
+    ),
+    // #4099: the route hands the feed an own-account name lookup built from
+    // its account list.
+    ownAccountNameResolver: vi.fn((_accounts: unknown[]) => (_address: string, _chainId: number): string | null => null),
+    // #4268: the route folds own-account moves before grouping. This suite
+    // feeds the feed builder directly, so the fold passes rows through; the
+    // fold itself is pinned against the real route in dashboard-activity.test.ts.
+    foldOwnAccountTransfers: vi.fn((rows: unknown[]) => rows),
+    // #3944: the route reads the feed BUILDER — rows plus the two
+    // empty-state facts — not the bare group list any more.
+    buildActivityFeed: vi.fn(async () => ({
+      groups: [] as never[],
+      hasOlderActivity: false,
+      windowDays: 7,
+      windowStartIso: '2026-10-08T07:12:00.000Z',
+    })),
     enrichedTransactionIdentityKey: vi.fn((tx: {
       chainId: number
       safeId: string
@@ -391,10 +411,122 @@ describe('dashboard routes', () => {
     // the two chains' rows arrive as two rows — never collapsed into one.
     expect(body.metrics).toBeUndefined()
     expect(body.transactions).toBeUndefined()
-    const groupCalls = transactionMocks.buildActivityGroups.mock
+    const feedCalls = transactionMocks.buildActivityFeed.mock
       .calls as unknown as Array<[{ transactions: { chainId: number }[] }]>
-    const feed = groupCalls.at(-1)?.[0].transactions
+    const feed = feedCalls.at(-1)?.[0].transactions
     expect(feed?.map((item) => item.chainId).sort()).toEqual([100, 8453])
+    // #4099: the own-account lookup is built from the route's account list
+    // and is the one the feed receives.
+    const resolverCall = transactionMocks.ownAccountNameResolver.mock.calls.at(-1)?.[0] as
+      | Array<{ account_address: string }>
+      | undefined
+    expect(resolverCall?.map((a) => a.account_address)).toContain(SAFE.account_address)
+    const lastFeed = feedCalls.at(-1)?.[0] as unknown as { resolveOwnAccountName?: unknown }
+    expect(lastFeed.resolveOwnAccountName).toBe(transactionMocks.ownAccountNameResolver.mock.results.at(-1)?.value)
+  })
+
+  // #3944: the overview carries the two empty-state facts the Activity
+  // card's empty state branches on. Passthrough in BOTH directions — the
+  // handler owns no window math of its own, `buildActivityFeed` does — and
+  // the shape gate runs with the fields present (they are OPTIONAL in the
+  // schema so a pre-#3944 response still validates; the route always emits
+  // them). The computation itself is pinned against the REAL module in
+  // modules/transactions/__tests__/activity-window.test.ts.
+  it('carries hasOlderActivity and activityWindowDays from the feed builder', async () => {
+    // expectMatchesSpec needs a payload whose uuid-format fields ARE uuids —
+    // the beforeEach defaults keep the older tests' short ids on purpose.
+    mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes('AS has_first_agent_payment')) return Promise.resolve({ rows: [{ has_first_agent_payment: true }] })
+      if (sql.includes('FROM smart_accounts us') && sql.includes('GROUP BY us.id')) {
+        return Promise.resolve({ rows: [{ ...SAFE, id: SAFE_UUID }] })
+      }
+      if (sql.includes('FROM agents a')) return Promise.resolve({ rows: [] })
+      if (sql.includes('FROM user_daily_portfolio_snapshots')) return Promise.resolve({ rows: [] })
+      if (sql.includes('INSERT INTO user_daily_portfolio_snapshots')) return Promise.resolve({ rows: [] })
+      if (sql.includes('GROUP BY token_symbol')) return Promise.resolve({ rows: [] })
+      const overviewDefaults = overview3803(sql)
+      if (overviewDefaults) return Promise.resolve(overviewDefaults)
+      throw new Error(`Unexpected query: ${sql}`)
+    })
+    transactionMocks.buildActivityFeed.mockResolvedValue({
+      // #4117: one outbound group carrying the optional `fromAccountName`, so
+      // the shape gate below sees the field (the schema is
+      // additionalProperties: false — a field the spec lacks fails it).
+      groups: [
+        {
+          count: 1,
+          sumAtomic: '1000000',
+          tokenSymbol: 'USDC',
+          decimals: 6,
+          latestAt: '2026-10-14T07:12:00.000Z',
+          agentId: null,
+          agentName: null,
+          source: null,
+          x402ResourceUrl: null,
+          to: '0x2222222222222222222222222222222222222222',
+          merchantName: 'My account',
+          fromAccountName: 'Savings',
+          activityType: null,
+          direction: 'out',
+          status: 'confirmed',
+          approxAmount: '10.7600',
+          approxCurrency: 'SEK',
+        } satisfies DashboardActivityGroup as never,
+      ],
+      hasOlderActivity: true,
+      windowDays: 7,
+      windowStartIso: '2026-10-08T07:12:00.000Z',
+    })
+
+    const older = await app.inject({
+      method: 'GET',
+      url: '/dashboard/overview',
+      headers: { authorization: `Bearer ${token}` },
+    })
+
+    expect(older.statusCode).toBe(200)
+    const olderBody = older.json()
+    expect(olderBody.hasOlderActivity).toBe(true)
+    expect(olderBody.activityWindowDays).toBe(7)
+    expect(olderBody.activity[0].fromAccountName).toBe('Savings')
+    // #3975: the rolling window's start instant rides the wire — the same
+    // boundary the spend SQL received (pinned below) and the instant the
+    // Activity card's partial-day heading reads. The route emits it from its
+    // OWN now, the one it handed the feed builder, not the mock's value.
+    const feedCalls = transactionMocks.buildActivityFeed.mock
+      .calls as unknown as Array<[{ now?: number }]>
+    const feedNow = feedCalls.at(-1)?.[0].now
+    expect(feedNow).toBeTypeOf('number')
+    expect(olderBody.activityWindowStart).toBe(
+      new Date((feedNow as number) - 7 * 24 * 60 * 60 * 1000).toISOString(),
+    )
+    expectMatchesSpec('GET', '/dashboard/overview', olderBody)
+
+    // The ONE window predicate, pinned at the route: the instant the spend
+    // SQL binds as its 7-day boundary ($3 of the in_7d queries) IS the wire
+    // instant above — a confirmed agent payment is inside `spend.d7` iff it
+    // is inside the Activity card, by construction.
+    const queryCalls = mockQuery.mock.calls as unknown as Array<[string, unknown[]]>
+    const spendCalls = queryCalls.filter(([sql]) => sql.includes('AS in_7d'))
+    expect(spendCalls.length).toBeGreaterThan(0)
+    for (const [, params] of spendCalls) expect(params[2]).toBe(olderBody.activityWindowStart)
+
+    transactionMocks.buildActivityFeed.mockResolvedValue({
+      groups: [],
+      hasOlderActivity: false,
+      windowDays: 7,
+      windowStartIso: '2026-10-08T07:12:00.000Z',
+    })
+
+    const fresh = await app.inject({
+      method: 'GET',
+      url: '/dashboard/overview',
+      headers: { authorization: `Bearer ${token}` },
+    })
+
+    expect(fresh.statusCode).toBe(200)
+    expect(fresh.json().hasOlderActivity).toBe(false)
+    expect(fresh.json().activityWindowDays).toBe(7)
   })
 
   // #3803: an unavailable USDC leg answers null (unknown), NEVER 0 —
@@ -471,6 +603,12 @@ describe('dashboard derives delegation-rail budgets from active delegations (#10
       if (sql.includes('FROM agent_allowances')) {
         // The frozen onboarding mirror — must NOT be what the dashboard shows.
         return Promise.resolve({ rows: [{ agent_id: AGENT.id, token_symbol: 'USDC', allowance_amount: '10.00', reset_period_min: 1440 }] })
+      }
+      // #3988: the received-grant read is answered EMPTY — this pin is about
+      // the agent's own delegation, and the read must not inherit the
+      // delegation row below (its SQL names agent_delegations in the EXISTS).
+      if (sql.includes('FROM agent_sub_budgets')) {
+        return Promise.resolve({ rows: [] })
       }
       if (sql.includes('FROM agent_delegations')) {
         // #3803: the full ActiveDelegationRow shape — the budget wire now

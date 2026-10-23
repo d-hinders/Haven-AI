@@ -5,8 +5,9 @@
  * 2026-10-05T06:08Z, about 40 runs) because the delegation treasury ran dry
  * and nothing warned beforehand: the treasury check has only a FAIL floor
  * (one run's cost), and preflight output only reaches a run log. This module
- * is read-only except for Base Sepolia faucet requests for the demo merchant's
- * settlement wallet and the dev relayer —
+ * is read-only except for Base Sepolia faucet requests — test ETH for the
+ * demo merchant's settlement wallet and the dev relayer, and test USDC for
+ * the two agent-eval accounts (#3997) —
  * one row per wallet the QA flows depend on, with a runway in days — and
  * `scripts/ci/qa-balance-issue.mjs` turns the rows into one standing issue.
  *
@@ -16,8 +17,9 @@
  * readings exist, each wallet falls back to a fixed floor and says so.
  *
  * Nothing here signs or moves Haven or customer funds. The caller may request
- * testnet ETH for the demo merchant's settlement wallet and the dev relayer
- * between the first reading and final report.
+ * testnet ETH for the demo merchant's settlement wallet and the dev relayer,
+ * and testnet USDC for the eval accounts, between the first reading and
+ * final report.
  */
 import { ethers } from 'ethers'
 import { ERC20_BALANCE_ABI, SEPOLIA_USDC, USDC_DECIMALS } from './chain.js'
@@ -25,11 +27,17 @@ import { TREASURY_RUN_COST_ATOMIC } from './preflight.js'
 import type { HavenApi } from './haven-api.js'
 
 export type Band = 'ok' | 'warn' | 'critical' | 'unknown'
-export type WalletKey = 'treasury' | 'merchant' | 'relayer'
+export type WalletKey = 'treasury' | 'merchant' | 'relayer' | 'eval-hermes' | 'eval-claude'
 export type Unit = 'USDC' | 'ETH'
 
-/** The order rows are emitted and rendered in. Every run emits all three. */
-export const WALLET_KEYS: readonly WalletKey[] = ['treasury', 'merchant', 'relayer']
+/** The order rows are emitted and rendered in. Every run emits all five. */
+export const WALLET_KEYS: readonly WalletKey[] = [
+  'treasury',
+  'merchant',
+  'relayer',
+  'eval-hermes',
+  'eval-claude',
+]
 
 /** Runway below this many days is `warn` (owner decision, 2026-10-05). */
 export const WARN_DAYS = 7
@@ -68,6 +76,31 @@ export const MERCHANT_TOPUP_TARGET_WEI = 4_000_000_000_000_000n
 
 /** The treasury's warn floor until enough history exists: 1.0 USDC, ~30 runs. */
 export const TREASURY_FALLBACK_FLOOR_ATOMIC = 1_000_000n
+
+/**
+ * The eval accounts' floors (#3997), from the budgets actually configured:
+ * the Hermes lane's eval agent carries a **3 USDC Daily** budget
+ * (`allowance_amount: 3000000`, `reset_period_min: 1440`, checked 2026-10-15),
+ * and the Claude Code lane is provisioned to the same size — both lanes run
+ * the same 11-task suite, and its drainer (`direct-send-full-remaining`) can
+ * spend the WHOLE remaining budget in one night, so one night's budget is the
+ * Daily allowance itself.
+ *
+ * - **Target (the top-up trigger):** 21 USDC = seven nights. The USDC faucet
+ *   pays 1 USDC per claim, at most 10 USDC per address per rolling 24 hours
+ *   (Coinbase's documented limits), so refilling an empty account takes about
+ *   three nightly runs; the per-run cap in `balances-cli.ts` matches the
+ *   per-address limit so a run never burns guaranteed 429s.
+ * - **Critical floor:** 3 USDC = one night's budget: below it the next
+ *   nightly run's drainer cannot be covered.
+ * - **Fallback floor (until MIN_READINGS readings exist):** the target —
+ *   a fresh account below seven nights of runway is `warn`.
+ *
+ * If a lane's Daily budget changes, adjust these and the runbook.
+ */
+export const EVAL_TOPUP_TARGET_ATOMIC = 21_000_000n
+export const EVAL_CRITICAL_FLOOR_ATOMIC = 3_000_000n
+export const EVAL_FALLBACK_FLOOR_ATOMIC = 21_000_000n
 
 /** One wallet's reading, ready for the issue. Amounts are decimal strings in `unit`. */
 export interface BalanceRow {
@@ -254,6 +287,17 @@ export interface BalanceSources {
    * and putting an ops token into CI to read it was the rejected alternative.
    */
   relayerAddress?: string
+  /**
+   * `QA_EVAL_HERMES_ACCOUNT` / `QA_EVAL_CLAUDE_ACCOUNT` — non-secret repo
+   * variables holding each agent-eval lane's SMART account (the payer the
+   * eval graders probe, not the delegate EOA). The Claude lane's duplicates
+   * the `agent-evals` environment's `AGENT_EVALS_AGENT_ACCOUNT` because this
+   * workflow has no environment and cannot see that one (#3997). Optional:
+   * an unset or invalid variable is an `unknown` row that never turns the
+   * run red.
+   */
+  evalHermesAccount?: string
+  evalClaudeAccount?: string
   provider: ethers.Provider
   fetchImpl?: typeof fetch
 }
@@ -353,14 +397,57 @@ export async function readRelayer(src: BalanceSources): Promise<Reading> {
   }
 }
 
+const EVAL_VAR: Record<'eval-hermes' | 'eval-claude', string> = {
+  'eval-hermes': 'QA_EVAL_HERMES_ACCOUNT',
+  'eval-claude': 'QA_EVAL_CLAUDE_ACCOUNT',
+}
+
+/**
+ * One agent-eval account by public address (#3997). Unlike the three core
+ * wallets, an unset or invalid variable is `unknown` WITHOUT `configMissing`:
+ * the Hermes address depends on the partner, so a required variable could
+ * leave every daily run red indefinitely and erode the signal that red is
+ * supposed to carry for the core wallets. The balance is read directly — no
+ * API key, no delegate key, no new secret, nothing signs.
+ */
+export async function readEvalAccount(
+  src: BalanceSources,
+  key: 'eval-hermes' | 'eval-claude',
+): Promise<Reading> {
+  const name = EVAL_VAR[key]
+  const value = key === 'eval-hermes' ? src.evalHermesAccount : src.evalClaudeAccount
+  if (!value) return { ok: false, reason: `not configured: ${name} is unset` }
+  if (!ethers.isAddress(value)) {
+    return { ok: false, reason: `${name} is not an address: ${value}` }
+  }
+  try {
+    const usdc = new ethers.Contract(SEPOLIA_USDC, [...ERC20_BALANCE_ABI], src.provider)
+    const atomic: bigint = await usdc.balanceOf(value)
+    return {
+      ok: true,
+      address: value,
+      atomic,
+      criticalFloor: EVAL_CRITICAL_FLOOR_ATOMIC,
+      fallbackFloor: EVAL_FALLBACK_FLOOR_ATOMIC,
+    }
+  } catch (error) {
+    return { ok: false, address: value, reason: safeReason('read failed', error) }
+  }
+}
+
+export const readEvalHermes = (src: BalanceSources): Promise<Reading> => readEvalAccount(src, 'eval-hermes')
+export const readEvalClaude = (src: BalanceSources): Promise<Reading> => readEvalAccount(src, 'eval-claude')
+
 const META: Record<WalletKey, { name: string; unit: Unit; decimals: number; token?: string }> = {
   treasury: { name: 'Delegation treasury', unit: 'USDC', decimals: USDC_DECIMALS, token: SEPOLIA_USDC },
   merchant: { name: 'Demo-merchant settlement wallet', unit: 'ETH', decimals: 18 },
   relayer: { name: 'Dev backend relayer (84532)', unit: 'ETH', decimals: 18 },
+  'eval-hermes': { name: 'Eval agent (Hermes lane)', unit: 'USDC', decimals: USDC_DECIMALS, token: SEPOLIA_USDC },
+  'eval-claude': { name: 'Eval agent (Claude Code lane)', unit: 'USDC', decimals: USDC_DECIMALS, token: SEPOLIA_USDC },
 }
 
 /** Format an atomic amount, trimming trailing zeros (`0.412` rather than `0.412000`). */
-function fmt(atomic: bigint, decimals: number): string {
+export function fmt(atomic: bigint, decimals: number): string {
   const s = ethers.formatUnits(atomic, decimals)
   return s.includes('.') ? s.replace(/\.?0+$/, '') || '0' : s
 }
@@ -412,15 +499,24 @@ export interface BalancesReport {
   topUps?: Partial<Record<TopUpWallet, TopUpOutcome>>
 }
 
-/** The wallets the CLI may request testnet ETH for, in the order it requests it. */
-export type TopUpWallet = 'merchant' | 'relayer'
-export const TOP_UP_WALLETS: readonly TopUpWallet[] = ['merchant', 'relayer']
+/**
+ * The wallets the CLI may request faucet funds for, in the order it requests
+ * them (#3997): the merchant, then the two eval accounts' USDC loops, then
+ * the relayer — the eval loops run BEFORE the relayer's, whose up to 300
+ * claims could otherwise use up the shared deadline.
+ */
+export type TopUpWallet = 'merchant' | 'relayer' | 'eval-hermes' | 'eval-claude'
+export const TOP_UP_WALLETS: readonly TopUpWallet[] = ['merchant', 'eval-hermes', 'eval-claude', 'relayer']
+/** The loops whose accepted claims are waited on before their re-read (#3896, #3997). */
+export const WAIT_FOR_MINED_WALLETS: readonly TopUpWallet[] = ['merchant', 'eval-hermes', 'eval-claude']
 
 /** One wallet's faucet outcome. */
 export interface TopUpOutcome {
   status: 'skipped' | 'attempted'
   claimsMade: number
   amountReceivedAtomic: string
+  /** The unit the claim size and amount are denominated in. */
+  unit: Unit
   stopReason:
     | 'not-needed'
     | 'missing-credentials'
@@ -446,6 +542,8 @@ export async function collectBalanceReadings(
     treasury: readTreasury,
     merchant: readMerchant,
     relayer: readRelayer,
+    'eval-hermes': readEvalHermes,
+    'eval-claude': readEvalClaude,
   }
   const readingsByKey = {} as Record<WalletKey, Reading>
   for (const key of WALLET_KEYS) {

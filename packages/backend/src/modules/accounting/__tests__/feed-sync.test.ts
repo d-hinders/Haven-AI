@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 const { mockQuery } = vi.hoisted(() => ({ mockQuery: vi.fn() }))
 vi.mock('../../../db.js', () => ({ default: { query: (...a: unknown[]) => mockQuery(...a) } }))
 
-import { claimSync, markPushed, markFailed } from '../feed-sync.js'
+import { claimSync, markPushed, markFailed, recordMerchantInvoiceSync, getMerchantInvoiceSyncRef } from '../feed-sync.js'
 
 describe('feed-sync dedup ledger (#497)', () => {
   beforeEach(() => mockQuery.mockReset())
@@ -53,6 +53,25 @@ describe('feed-sync dedup ledger (#497)', () => {
     await markFailed('u1', 'fortnox', 'pi1', 'boom')
     expect(mockQuery.mock.calls[0][0]).toContain("status = 'failed'")
     expect((mockQuery.mock.calls[0][1] as unknown[])[3]).toBe('boom')
+  })
+
+  /**
+   * #3918: a merchant-invoice row is delivery bookkeeping, not retry state —
+   * no claim/mark statement may reach it, and its own writer names the kind.
+   * (Assertions on the SQL text, not positional chains — the ratchet counts
+   * those.)
+   */
+  it('the generic statements are scoped to the underlag kind; the merchant-invoice writer names its own', async () => {
+    mockQuery.mockReset().mockResolvedValue({ rows: [] })
+    await markPushed('u1', 'accounted', 'pi1', 'accounted:document:d1')
+    expect(mockQuery.mock.calls[0][0]).toContain("document_kind = 'underlag'")
+    await markFailed('u1', 'accounted', 'pi1', 'boom')
+    expect(mockQuery.mock.calls[1][0]).toContain("document_kind = 'underlag'")
+    await recordMerchantInvoiceSync('u1', 'accounted', 'pi1', 'accounted:document:d2')
+    expect(mockQuery.mock.calls[2][0]).toContain("'merchant_invoice'")
+    expect(mockQuery.mock.calls[2][0]).toContain('ON CONFLICT (provider, payment_id, user_id, document_kind) DO NOTHING')
+    await getMerchantInvoiceSyncRef('u1', 'accounted', 'pi1')
+    expect(mockQuery.mock.calls[3][0]).toContain("'merchant_invoice'")
   })
 
 })

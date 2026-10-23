@@ -43,3 +43,26 @@ export function formatTokenValue(
 
   return `${intPart}.${capped}`
 }
+
+/**
+ * Atomic → human token amount through the chain registry's decimals — the
+ * registry is the ONE decimal source, so every reader of an atomic string
+ * (the refusal ledger's booking, #4323's refusal wire and its serve-time
+ * fiat) converts through here rather than restating the scale. An unknown
+ * chain or token leaves the atomic string as the honest fallback.
+ */
+export function humanTokenAmount(
+  chainId: number,
+  tokenSymbol: string,
+  amountAtomic: string,
+): string {
+  try {
+    const chain = getChain(chainId)
+    const token = Object.values(chain.tokens).find((t) => t.symbol === tokenSymbol)
+    if (token) return formatTokenValue(amountAtomic, token.decimals)
+  } catch {
+    // Unknown chain or token — the atomic string is the honest fallback and
+    // the fiat lookup keys on the symbol either way.
+  }
+  return amountAtomic
+}

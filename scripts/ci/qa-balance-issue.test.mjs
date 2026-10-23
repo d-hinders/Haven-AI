@@ -55,6 +55,8 @@ function row(key, band, extra = {}) {
     treasury: { name: 'Delegation treasury', unit: 'USDC', token: '0x036CbD53842c5426634e7929541eC2318f3dCF7e', address: TREASURY },
     merchant: { name: 'Demo-merchant settlement wallet', unit: 'ETH', address: '0x' + 'cd'.repeat(20) },
     relayer: { name: 'Dev backend relayer (84532)', unit: 'ETH', address: '0x' + 'ab'.repeat(20) },
+    'eval-hermes': { name: 'Eval agent (Hermes lane)', unit: 'USDC', token: '0x036CbD53842c5426634e7929541eC2318f3dCF7e', address: '0x' + 'ef'.repeat(20) },
+    'eval-claude': { name: 'Eval agent (Claude Code lane)', unit: 'USDC', token: '0x036CbD53842c5426634e7929541eC2318f3dCF7e', address: '0x' + 'fe'.repeat(20) },
   }[key]
   return { key, band, balance: '0.5', basis: 'observed', burnPerDay: '0.1', runwayDays: 5, ...meta, ...extra }
 }
@@ -225,15 +227,41 @@ test('selection prefers the open standing issue, then the lowest closed one', ()
 })
 
 test('band memory: an unknown wallet keeps its last known band, and is never a change', () => {
-  const rows = [row('treasury', 'unknown'), row('merchant', 'warn'), row('relayer', 'ok')]
-  assert.deepEqual(nextBands({ treasury: 'critical' }, rows), { treasury: 'critical', merchant: 'warn', relayer: 'ok' })
+  const rows = [row('treasury', 'unknown'), row('merchant', 'warn'), row('relayer', 'ok'), row('eval-hermes', 'unknown'), row('eval-claude', 'ok')]
+  assert.deepEqual(nextBands({ treasury: 'critical' }, rows), {
+    treasury: 'critical', merchant: 'warn', relayer: 'ok', 'eval-hermes': 'ok', 'eval-claude': 'ok',
+  })
   assert.deepEqual(
-    bandChanges({ treasury: 'critical', merchant: 'ok' }, rows).map((c) => c.key),
+    bandChanges({ treasury: 'critical', merchant: 'ok', 'eval-hermes': 'ok' }, rows).map((c) => c.key),
     ['merchant'],
   )
-  const body = buildBody(report(rows), { runUrl: 'u', repo: 'd-hinders/Haven-AI', bands: { treasury: 'critical', merchant: 'warn', relayer: 'ok' } })
-  assert.deepEqual(readBands(body), { treasury: 'critical', merchant: 'warn', relayer: 'ok' })
+  const body = buildBody(report(rows), { runUrl: 'u', repo: 'd-hinders/Haven-AI', bands: { treasury: 'critical', merchant: 'warn', relayer: 'ok', 'eval-hermes': 'ok', 'eval-claude': 'ok' } })
+  assert.deepEqual(readBands(body), { treasury: 'critical', merchant: 'warn', relayer: 'ok', 'eval-hermes': 'ok', 'eval-claude': 'ok' })
   assert.deepEqual(readBands('no marker here'), {})
+})
+
+test('a steady warn eval row posts no second band-change comment, because eval bands persist in the marker (#3997)', () => {
+  const rows = [...ok, row('eval-hermes', 'warn', { balance: '5' }), row('eval-claude', 'ok', { balance: '21' })]
+  const first = run({ rows, issues: [standing('CLOSED', { treasury: 'ok', merchant: 'ok', relayer: 'ok', 'eval-hermes': 'ok', 'eval-claude': 'ok' })] })
+  assert.deepEqual(first.verbs, ['label create', 'issue list', 'issue reopen', 'issue edit', 'issue comment'])
+  const second = run({ rows, issues: [standing('OPEN', { treasury: 'ok', merchant: 'ok', relayer: 'ok', 'eval-hermes': 'warn', 'eval-claude': 'ok' })] })
+  assert.deepEqual(second.verbs, ['label create', 'issue list', 'issue edit'])
+})
+
+test('eval rows render with USDC units, their own anchor, and no #undefined link (#3997)', () => {
+  const body = buildBody(report([row('eval-hermes', 'warn', { balance: '5' }), row('eval-claude', 'ok', { balance: '21' })]), { runUrl: 'u', repo: 'd-hinders/Haven-AI', bands: {} })
+  assert.match(body, /\| Eval agent \(Hermes lane\) \| \*\*warn\*\*.*\| 5 USDC \|/)
+  assert.match(body, /\| Eval agent \(Claude Code lane\) \| \*\*ok\*\*.*\| 21 USDC \|/)
+  assert.match(body, /agent-qa\.md#top-up-the-eval-agent-hermes-lane/)
+  assert.match(body, /agent-qa\.md#top-up-the-eval-agent-claude-code-lane/)
+  assert.doesNotMatch(body, /#undefined/)
+})
+
+test('a USDC top-up summary formats in USDC, not ETH (#3997)', () => {
+  const line = topUpSummary('eval-hermes', {
+    status: 'attempted', claimsMade: 10, amountReceivedAtomic: '10000000', unit: 'USDC', stopReason: 'claim-cap-reached',
+  })
+  assert.match(line, /Eval agent \(Hermes lane\) testnet faucet top-up: 10 accepted claim\(s\), 10 USDC received; stop: `claim-cap-reached`/)
 })
 
 test('every top-up link resolves to a heading in agent-qa.md (the body cannot link to a missing anchor)', () => {

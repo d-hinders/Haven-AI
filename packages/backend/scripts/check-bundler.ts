@@ -19,6 +19,8 @@
  * Run: npm run ops:check-bundler -w @haven/backend
  *      CHECK_BUNDLER_CHAIN_ID=8453 npm run ops:check-bundler -w @haven/backend
  */
+// #4216: kit analytics off before anything here can load @metamask/smart-accounts-kit.
+import '../src/telemetry/kit-analytics-off.js'
 import { delegationRailBundlerUrl } from '../src/rails/delegation-rail.js'
 import { DELEGATION_RAIL_CHAIN_IDS } from '../src/rails/delegation-contracts.js'
 

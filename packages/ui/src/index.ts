@@ -4,6 +4,8 @@
 // (`@haven_ai/ui/Button`) keep working for files this barrel has not
 // enumerated. This barrel exists so a consumer can import the whole set from
 // one module; it re-exports ONLY, and adds nothing.
+export { BackLink } from './BackLink'
+export type { BackLinkProps } from './BackLink'
 export { Button } from './Button'
 export { Card } from './Card'
 export { tableColumnClass, tableHideFromClass, Table } from './Table'
@@ -26,4 +28,6 @@ export type { StatTilePolarity, StatTileVariant } from './StatTile'
 export { InlineAlert } from './InlineAlert'
 export { FilterPill } from './FilterPill'
 export { SegmentedControl } from './SegmentedControl'
+export { Tabs } from './Tabs'
+export type { TabItem } from './Tabs'
 export { useCopyTimeout } from './hooks/useCopyTimeout'

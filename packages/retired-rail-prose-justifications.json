@@ -119,18 +119,6 @@
       "note": "Past-tense narration: '#1083 gave Send to BOTH rails. #1989 (epic #1440) took it' — history, not a present claim."
     }
   },
-  "packages/frontend/src/app/(authenticated)/agents/page.tsx": {
-    "remain-readable": {
-      "category": "archived-agents",
-      "note": "Live user-facing subtitle: historical agent records remain readable. Verified true — archived agents (#1401/#1402) stay under Removed with their history."
-    }
-  },
-  "packages/frontend/src/components/AgentPanel.tsx": {
-    "stays-readable": {
-      "category": "archived-agents",
-      "note": "#1402: Removed = archived agents; history stays readable, Restore returns list placement only."
-    }
-  },
   "packages/frontend/src/components/__tests__/AgentPassportCard.test.tsx": {
     "remain-readable": {
       "category": "test-instrument",
@@ -146,11 +134,11 @@
   "packages/frontend/src/components/agent-panel/RemoveAgentDialog.tsx": {
     "remain-readable": {
       "category": "archived-agents",
-      "note": "The agent moves to Removed, where every payment and record remains readable; the archived-agent (#1401/#1402) contract."
+      "note": "The agent is archived (hidden from the list until Archived: Shown, #4113), where every payment and record remains readable; the archived-agent (#1401/#1402) contract."
     },
     "stays-readable": {
       "category": "archived-agents",
-      "note": "Archive (#1401) — the agent moves to Removed; history stays readable. The archived-agent contract."
+      "note": "Archive (#1401) — the agent is archived; history stays readable. The archived-agent contract."
     }
   },
   "packages/ui/src/CopyButton.tsx": {
@@ -162,7 +150,7 @@
   "packages/frontend/src/hooks/useAgents.ts": {
     "stays-readable": {
       "category": "archived-agents",
-      "note": "#1402: removal is an archive; the row and its history stay readable under Removed."
+      "note": "#1402: removal is an archive; the row and its history stay readable under Archived: Shown (#4113)."
     }
   },
   "packages/frontend/src/lib/__tests__/agent-credential.test.ts": {
@@ -193,6 +181,24 @@
     "both-rails": {
       "category": "test-instrument",
       "note": "3009-only merchant -> 3009 on BOTH rails, byte-identical option; a test assertion."
+    }
+  },
+  "packages/frontend/src/app/(authenticated)/design-system/page.tsx": {
+    "stays-readable": {
+      "category": "ui-affordance",
+      "note": "The phrase matches but the referent is accessibility: a screen reader still announces the Monogram initials when `decorative` is off (#4210) — a UI affordance, not a rail, account or history claim."
+    }
+  },
+  "packages/frontend/src/components/ui/Monogram.tsx": {
+    "stays-readable": {
+      "category": "ui-affordance",
+      "note": "The phrase matches but the referent is accessibility: a screen reader still announces the Monogram initials when `decorative` is off (#4210) — a UI affordance, not a rail, account or history claim."
+    }
+  },
+  "packages/frontend/src/components/ui/__tests__/Monogram.test.tsx": {
+    "stays-readable": {
+      "category": "ui-affordance",
+      "note": "The phrase matches but the referent is accessibility: a screen reader still announces the Monogram initials when `decorative` is off (#4210) — a UI affordance, not a rail, account or history claim."
     }
   }
 }

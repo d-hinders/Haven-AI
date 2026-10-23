@@ -10,6 +10,10 @@ dev stack (which the mocked Playwright suite structurally can't):
 - **#575** — the deterministic, no-LLM money-flow harness (the deploy-confidence
   core): drives the real SDK/API payment path on **Base Sepolia** against the
   shared dev backend + the dev demo-merchant, asserting the #420 invariants.
+- **#3958** — the **agent evals** (`src/evals/`, epic #3957): a REAL model
+  agent runs task files through a runner (Hermes lane, `npm run evals`) and
+  graders check its tool-call log, the dev backend and Base Sepolia. Task
+  format, graders and runbook: [`docs/operations/agent-evals.md`](../../docs/operations/agent-evals.md).
 
 ## Status
 

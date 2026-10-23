@@ -74,6 +74,19 @@ export const TRANSACTION_CSV_COLUMNS = [
 
 export type TransactionCsvColumn = (typeof TRANSACTION_CSV_COLUMNS)[number]
 
+/**
+ * Opt-in extension used only by `foldOwnTransfers=1` exports (#4265).
+ * Keeping the default column constant untouched is what makes an export
+ * without the flag byte-identical to the pre-fold contract.
+ */
+export const FOLDED_TRANSACTION_CSV_COLUMNS = [
+  ...TRANSACTION_CSV_COLUMNS,
+  'to_account_name',
+] as const
+
+export type FoldedTransactionCsvColumn =
+  (typeof FOLDED_TRANSACTION_CSV_COLUMNS)[number]
+
 export interface TransactionCsvLookups {
   /**
    * Human-readable counterparty name — address book first, then the user's
@@ -94,6 +107,7 @@ export interface TransactionCsvLookups {
 }
 
 function rowType(tx: EnrichedTransaction): string {
+  if (tx.ownTransfer) return 'own_transfer'
   if (tx.activityType === 'delegate_sweep') return 'allowance funding'
   if (tx.source === 'x402') return 'x402'
   if (tx.source === 'mpp_demo') return 'mpp'
@@ -115,9 +129,10 @@ function counterparty(tx: EnrichedTransaction): string {
 export function transactionCsvRow(
   tx: EnrichedTransaction,
   lookups: TransactionCsvLookups,
-): Record<TransactionCsvColumn, string> {
+  includeOwnTransferColumn = false,
+): Record<TransactionCsvColumn, string> & Partial<Record<'to_account_name', string>> {
   const cp = counterparty(tx)
-  return {
+  const row: Record<TransactionCsvColumn, string> & Partial<Record<'to_account_name', string>> = {
     settled_at: new Date(tx.timestamp * 1000).toISOString(),
     type: rowType(tx),
     status: rowStatus(tx),
@@ -135,10 +150,11 @@ export function transactionCsvRow(
     tx_hash: tx.hash,
     payment_id: tx.paymentId ?? '',
     agent_name: tx.agentName ?? '',
-    // The raw attribution enum — `human` | `agent` | `unknown`, empty for
-    // inbound and unattributed rows. Never the display string "You", so the
-    // export stays unambiguous for an accountant reading it cold.
-    initiator: tx.initiatedBy ?? '',
+    // #4099 (owner decision, 2026-10-19): the app's words, not the raw
+    // enum — "You", the agent's name, or "Unknown"; empty on inbound rows,
+    // which carry no initiator record — except a delegate sweep, which is
+    // agent-attributed and carries its agent's name.
+    initiator: csvInitiator(tx),
     account_address: tx.accountAddress,
     // #3127: the file reports in fixed SEK (see the route); the user's
     // effective feed currency rides along from the row's own converted
@@ -150,15 +166,49 @@ export function transactionCsvRow(
     // and never a placeholder promising a later record.
     settlement_tx_hash: tx.settlementTxHash ?? '',
   }
+  if (includeOwnTransferColumn) {
+    row.to_account_name = tx.ownTransfer?.toAccountName ?? ''
+  }
+  return row
+}
+
+/**
+ * The `initiator` cell (#4099): the same words the app shows. Empty only on
+ * an inbound row with no initiator record (every inbound row bar an agent's
+ * delegate sweep); an outbound row with no record, including one whose
+ * enrichment failed, is "Unknown". `'human'` is a
+ * recorded owner send; `'unknown'` an outbound row with no agent and no
+ * record, which includes every owner send made before the record existed.
+ * An agent-attributed row always carries its agent's name (both attribution
+ * queries join `agents`); "Agent" is only the guard for a row that does not.
+ */
+export function csvInitiator(tx: EnrichedTransaction): string {
+  switch (tx.initiatedBy) {
+    case 'human':
+      return 'You'
+    case 'agent':
+      return tx.agentName || 'Agent'
+    case 'unknown':
+      return 'Unknown'
+    default:
+      // No record at all: an inbound row, or an outbound one whose enrichment
+      // failed (the step returns rows unclassified). An outbound row with no
+      // record is still not known to be the owner's — "Unknown", never "".
+      return tx.direction === 'out' ? 'Unknown' : ''
+  }
 }
 
 export function transactionsToCsv(
   transactions: EnrichedTransaction[],
   lookups: TransactionCsvLookups,
+  includeOwnTransferColumn = false,
 ): string {
+  const columns = includeOwnTransferColumn
+    ? FOLDED_TRANSACTION_CSV_COLUMNS
+    : TRANSACTION_CSV_COLUMNS
   return toCsv(
-    TRANSACTION_CSV_COLUMNS,
-    transactions.map((tx) => transactionCsvRow(tx, lookups)),
+    columns,
+    transactions.map((tx) => transactionCsvRow(tx, lookups, includeOwnTransferColumn)),
   )
 }
 

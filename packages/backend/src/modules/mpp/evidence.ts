@@ -17,6 +17,7 @@
 import {
   attachEvidenceProof,
   findEvidenceForIntent,
+  findEvidenceProofsForIntent,
   findIntentEvidenceSource,
   findIntentForEvidenceScoped,
   getIntentSettlementFields,
@@ -41,7 +42,14 @@ import { observeErc7710Settlement } from '../x402/settlement-observed.js'
 import {
   isFundedEip3009Payment,
   observeEip3009MerchantSettlement,
+  eip3009SettlementProofFromHeader,
+  type SettlementProofErrorCode,
 } from '../x402/eip3009-settlement-evidence.js'
+import {
+  observeEip3009ReceiptSettlement,
+  receiptPayloadTransaction,
+  recordTier1SettlementFromStoredHeader,
+} from '../x402/eip3009-receipt-settlement.js'
 import { withParties } from '../../openapi/party-model.js'
 import { toCanonicalAddress } from '../transactions/index.js'
 import type { EvidenceBody, MppHandlerResult } from './types.js'
@@ -61,6 +69,11 @@ export class SettlementReportRefusal extends Error {
     marker: 'settlement_unobservable' | 'settlement_unverified',
     readonly scheme: 'eip3009',
     readonly reason: string,
+    /**
+     * #4061: the refusal's machine code, when it has one — relayed as the
+     * body's `error_code` so a client branches on it, not on `reason`.
+     */
+    readonly errorCode?: SettlementProofErrorCode,
   ) {
     super(marker)
     this.name = 'SettlementReportRefusal'
@@ -232,6 +245,50 @@ interface EvidenceLogger {
 
 function railForPayment(intent: MachinePaymentEvidenceSource): string | null {
   return intent.payment_rail ?? intent.source ?? null
+}
+
+/**
+ * #4319: the generic attach path's eip3009 bridge population — a confirmed
+ * x402 delegation-rail payment whose settlement scheme is eip3009. This is
+ * the shape the funding-hash report (Lovable Dev's) produces, which the
+ * eip3009 settlement branch above (reported hash ≠ funding hash) never sees;
+ * the proof ladder runs here for it and nowhere else.
+ */
+function isEip3009BridgePayment(intent: MachinePaymentEvidenceSource): boolean {
+  const raw = intent.machine_metadata
+  let metadata: Record<string, unknown> = {}
+  if (raw && typeof raw === 'string') {
+    try {
+      metadata = JSON.parse(raw) as Record<string, unknown>
+    } catch {
+      metadata = {}
+    }
+  } else if (raw && typeof raw === 'object') {
+    metadata = raw
+  }
+  return (
+    intent.status === 'confirmed' &&
+    (intent.payment_rail ?? intent.source) === 'x402' &&
+    intent.execution_rail === 'delegation' &&
+    metadata.settlement_scheme === 'eip3009'
+  )
+}
+
+/** The payment's persisted receipt-attribution verdict, when one is stored (#4319 limit 7). */
+function storedReceiptVerdict(intent: MachinePaymentEvidenceSource): string | null {
+  const raw = intent.machine_metadata
+  let metadata: Record<string, unknown> = {}
+  if (raw && typeof raw === 'string') {
+    try {
+      metadata = JSON.parse(raw) as Record<string, unknown>
+    } catch {
+      metadata = {}
+    }
+  } else if (raw && typeof raw === 'object') {
+    metadata = raw
+  }
+  const verdict = metadata.merchant_settlement_receipt_verdict
+  return typeof verdict === 'string' ? verdict : null
 }
 
 function resourceUrlForPayment(intent: MachinePaymentEvidenceSource): string | null {
@@ -561,7 +618,22 @@ export async function attachMachinePaymentEvidence(
     const base = await recordMachinePaymentEvidenceBase(payment, { suppressFeed: true })
     if (base.status === 'failed' && base.reason === 'missing_resource_url') throw new Error('resource_missing')
     if (base.status !== 'recorded') throw new Error(`evidence_base_${base.reason}`)
-    const settled = await observeEip3009MerchantSettlement(payment, input.txHash)
+    // #3925: the header the SDK posts WITH the evidence is the nonce proof.
+    // The eip3009 branch returns before `attachEvidenceProof` below would
+    // store it, so it is read HERE, before the observe call: its own
+    // `authorization.nonce` — signature-checked against the delegate — is the
+    // attribution the record is bound to. A report without a header (an older
+    // client, or one after the retry path) is refused rather than attributed
+    // by transfer shape; the passive sweep still attributes derived-nonce
+    // payments without any report. #4061: that refusal carries
+    // `error_code: settlement_proof_header_missing` — the one refusal whose
+    // remedy is to report again, WITH the header (the hosted report tools
+    // take it as `payment_header`).
+    const proof = eip3009SettlementProofFromHeader(payment, input.paymentProofHeader ?? null)
+    if (!proof.ok) {
+      throw new SettlementReportRefusal('settlement_unverified', 'eip3009', proof.reason, proof.errorCode)
+    }
+    const settled = await observeEip3009MerchantSettlement(payment, input.txHash, undefined, proof.proof)
     if (settled.outcome === 'unverified') {
       // Nothing was fed: the evidence row exists, but the settlement report
       // was refused — the feed fires on the next evidence call, Sync now,
@@ -570,6 +642,7 @@ export async function attachMachinePaymentEvidence(
         settled.retryable ? 'settlement_unobservable' : 'settlement_unverified',
         'eip3009',
         settled.reason,
+        settled.errorCode,
       )
     }
     // The settlement write has landed (or, for the defensively-handled
@@ -608,7 +681,13 @@ export async function attachMachinePaymentEvidence(
     throw new Error('resource_mismatch')
   }
 
-  await recordMachinePaymentEvidenceBase(payment)
+  // #4319 (B1): the base row's feed fire is SUPPRESSED here — the generic
+  // attach path is about to store the proof header and the receipt, and the
+  // #3767 rule is that the feed must never fire before the settlement hash
+  // write it could carry. ONE fire below, after the attach and the proof
+  // ladder, for every rail. (Previously the feed fired here, BEFORE the
+  // attach — the other rails' only behaviour change is that later timing.)
+  await recordMachinePaymentEvidenceBase(payment, { suppressFeed: true })
 
   const proofStatus = proofStatusForAttach(input)
   const evidence = await attachEvidenceProof<MachinePaymentEvidenceRow>({
@@ -625,6 +704,69 @@ export async function attachMachinePaymentEvidence(
     merchantStatus: input.merchantStatus ?? null,
     deliveryReference: normalizedDeliveryReference || null,
   })
+
+  // #4319: the proof ladder, strongest first, for eip3009 bridge payments on
+  // the generic attach path — the shape clients like Lovable Dev's produce
+  // (they report the FUNDING hash, so the eip3009 settlement branch above
+  // never runs for them, and today nothing ever recorded their settlement).
+  //   Tier 1 — the X-PAYMENT header (input, or the row just attached):
+  //   delegate-signed nonce, recorded nonce-bound through the standard seam.
+  //   Tier 2 — the stored receipt's transaction hash, under the flag and the
+  //   seven limits, labelled `receipt` — and ONLY when no header is stored:
+  //   a header-holding payment gets Tier 1 or nothing, never a weaker
+  //   receipt record that would pin the one hash the CAS writer allows and
+  //   pre-empt a later Tier 1. A final refused verdict is never
+  //   re-checked. Both best-effort around the attach: a ladder refusal does
+  //   NOT fail the evidence post — the report itself is valid — but the feed
+  //   still fires exactly once, AFTER whatever the ladder wrote.
+  if (isEip3009BridgePayment(payment)) {
+    try {
+      const inputHeader = cleanHeaderValue(input.paymentProofHeader)
+      // One proofs read serves both tiers: the STORED header must reach
+      // Tier 1 even on a re-attach that carries no input header (the row
+      // holds the strongest proof), and Tier 2 reads the receipt payload
+      // from the same row.
+      const storedProofs = inputHeader ? null : await findEvidenceProofsForIntent(payment.id, input.agentId)
+      const headerForLadder = inputHeader ?? storedProofs?.payment_proof_header ?? null
+      let tier1Recorded = false
+      if (headerForLadder) {
+        const tier1 = await recordTier1SettlementFromStoredHeader(payment, {
+          findProofs: async () => ({
+            payment_proof_header: headerForLadder,
+          }),
+        })
+        tier1Recorded = tier1.outcome === 'recorded'
+      }
+      if (
+        !tier1Recorded &&
+        // Owner decision: Tier 1 is preferred wherever a signed header
+        // exists — Tier 2 (the receipt hash) runs ONLY when no header is
+        // stored. The CAS writer allows ONE hash per payment, so a weaker
+        // receipt record would pin the settlement hash and permanently
+        // pre-empt a later Tier 1 sweep/backfill (`hash_taken`) — the same
+        // hazard limit 6 exists to prevent.
+        !headerForLadder &&
+        storedReceiptVerdict(payment) !== 'refused_ambiguous' &&
+        storedReceiptVerdict(payment) !== 'refused_mismatch'
+      ) {
+        const receiptPayload = input.protocolReceiptPayload
+          ? normalizeJson(input.protocolReceiptPayload)
+          : storedProofs?.protocol_receipt_payload
+        const candidate = receiptPayloadTransaction(receiptPayload)
+        if (candidate) {
+          await observeEip3009ReceiptSettlement(payment, candidate)
+        }
+      }
+    } catch {
+      // Fail-open around the ladder: the evidence attach stands, the feed
+      // fires, and the sweep/backfill remain the retry. A ladder failure
+      // must never lose a valid evidence report.
+    }
+    feedSettledPaymentBestEffort(payment.user_id, payment.id)
+  } else {
+    // Every other rail: the feed fires after the attach (previously before).
+    feedSettledPaymentBestEffort(payment.user_id, payment.id)
+  }
 
   if (evidence) {
     await resolveReconciliationForPayment(payment.id, input.agentId)
@@ -982,6 +1124,9 @@ export async function attachEvidenceHandler(
             'The reported settlement transaction was not recorded for this payment — ' +
             'the payment is unchanged',
           reason: refusal.reason,
+          // #4061: present only when the refusal has a code (the missing
+          // proof header) — absent, not null, on every other refusal.
+          ...(refusal.errorCode ? { error_code: refusal.errorCode } : {}),
         },
       }
     }

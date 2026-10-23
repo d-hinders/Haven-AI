@@ -1,10 +1,10 @@
 'use client'
 
-import { ArrowDown, ArrowUp, Bot, Check, Circle, EllipsisVertical, Info, OctagonAlert, Sparkles, TriangleAlert, X } from 'lucide-react'
+import { ArrowDown, ArrowLeftRight, ArrowUp, Bot, Check, ChevronDown, Circle, CirclePause, CreditCard, EllipsisVertical, Info, OctagonAlert, Sparkles, TriangleAlert, X } from 'lucide-react'
 import { MobileTabBar } from '@/components/sidebar/MobileTabBar'
 import { baseNavItems } from '@/components/sidebar/Sidebar'
 import { Icon } from '@/components/ui/Icon'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
@@ -17,19 +17,26 @@ import {
 } from '@/components/ui/DropdownMenu'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { FilterPill } from '@/components/ui/FilterPill'
+import { FacetMenu, type ListFacet } from '@/components/ui/FacetMenu'
+import { ListNoMatch, ListShowMore, ListToolbar } from '@/components/ui/ListToolbar'
+import { PeriodPicker } from '@/components/ui/PeriodPicker'
+import { clearedListState, type ListState, type PeriodValue } from '@/components/ui/list-url-codec'
 import { Monogram } from '@/components/ui/Monogram'
 import { MerchantCard } from '@/components/marketplace/MerchantCard'
+import { ComingSoonMerchants } from '@/components/marketplace/ComingSoonMerchants'
 import { Input, MaxButton, PasteButton } from '@/components/ui/Input'
 import { InlineAlert } from '@/components/ui/InlineAlert'
 import { Modal } from '@/components/ui/Modal'
 import { Checkbox } from '@/components/ui/Checkbox'
 import { Select } from '@/components/ui/Select'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
+import { Tabs } from '@/components/ui/Tabs'
 import { ThemeToggle } from '@/components/ui/ThemeToggle'
 import { Textarea } from '@/components/ui/Textarea'
-import { Table, tableColumnClass, tableHideFromClass } from '@/components/ui/Table'
+import { Table } from '@/components/ui/Table'
 import { SidePanel } from '@/components/ui/SidePanel'
 import { StepProgress } from '@/components/ui/StepProgress'
+import { DialogActions } from '@/components/ui/DialogActions'
 import { SeriesSwatch, StackedBarChart } from '@/components/ui/StackedBarChart'
 import type { StackedBarDay } from '@/components/ui/StackedBarChart'
 import { AreaChart } from '@/components/ui/AreaChart'
@@ -38,10 +45,15 @@ import { AttentionList } from '@/components/haven/AttentionList'
 import { NoticeRow } from '@/components/haven/NoticeRow'
 import type { AttentionListItem } from '@/components/haven/AttentionList'
 import { CodeBlock } from '@/components/ui/CodeBlock'
+import { AccountingBadge } from '@/components/accounting/AccountingBadge'
 import ConfirmDialog from '@/components/ConfirmDialog'
+import QRCode from 'qrcode'
 import ComingSoonModal from '@/components/ComingSoonModal'
+import ReceiveDialog from '@/components/ReceiveDialog'
+import type { SmartAccount } from '@/context/AuthContext'
 import InfoModal, { type InfoPage } from '@/components/InfoModal'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { BackLink } from '@haven_ai/ui/BackLink'
 import { CopyButton } from '@/components/ui/CopyButton'
 import { Row } from '@/components/ui/Row'
 import { Skeleton } from '@/components/ui/Skeleton'
@@ -52,20 +64,28 @@ import { useToast } from '@/components/ui/Toast'
 import { THEME_TOKENS, contrastTable } from '@/lib/theme-tokens'
 import { formatAnalyticsTick } from '@/lib/analytics-format'
 import { budgetCaption, type BudgetCaptionRow } from '@/lib/budget-caption'
+import type { DashboardBudgetRemaining, DashboardOverview } from '@/lib/dashboard-attention'
+import { timeAgo, truncate } from '@/lib/format'
+import type { DashboardAgentPreview } from '@/types/dashboard'
+import { AgentCard, type AgentCardDashboard } from '@/components/agent-panel/AgentCard'
+import type { Agent } from '@/hooks/useAgents'
 import DashboardOnboardingGuide, { SetupCompleteLine } from '@/components/DashboardOnboardingGuide'
 
 import { WalletPopover } from '@/components/WalletButton'
 import {
+  AgentBudget,
   AgentBudgetCard,
+  AgentRow,
   Address,
   AgentRulesSummary,
   Amount,
   ApprovalRequiredBanner,
   CredentialHandoffCard,
   DirectionMark,
-  ExternalDetailsLink,
   RiskExplainer,
+  TransactionActivityDayHeader,
   TransactionActivityRow,
+  transactionDayGroups,
   TransactionMovement,
   WalletIdentityBlock,
   LabelChip,
@@ -96,6 +116,7 @@ const TOKEN_USE: Record<string, string> = {
   'ink-on-brand': 'Text on brand fills.',
   border: 'Hairline borders.',
   'border-strong': 'Emphasised borders and control outlines.',
+  'border-subtle': 'Inset hairline between same-day ledger rows (#4165); day groups keep border.',
   'border-anchor': 'Anchor-card brand-tinted hairline.',
   brand: 'Primary actions, links, brand identity.',
   'brand-strong': 'Brand hover / pressed fill.',
@@ -108,6 +129,18 @@ const TOKEN_USE: Record<string, string> = {
   'warning-soft': 'Warning fill.',
   danger: 'Errors, destructive confirmations.',
   'danger-soft': 'Danger fill.',
+  'avatar-1': 'Monogram initials ink on tint 1 (terracotta).',
+  'avatar-1-soft': 'Monogram initials ground 1 (terracotta).',
+  'avatar-2': 'Monogram initials ink on tint 2 (teal).',
+  'avatar-2-soft': 'Monogram initials ground 2 (teal).',
+  'avatar-3': 'Monogram initials ink on tint 3 (violet).',
+  'avatar-3-soft': 'Monogram initials ground 3 (violet).',
+  'avatar-4': 'Monogram initials ink on tint 4 (moss).',
+  'avatar-4-soft': 'Monogram initials ground 4 (moss).',
+  'avatar-5': 'Monogram initials ink on tint 5 (rose).',
+  'avatar-5-soft': 'Monogram initials ground 5 (rose).',
+  'avatar-6': 'Monogram initials ink on tint 6 (steel).',
+  'avatar-6-soft': 'Monogram initials ground 6 (steel).',
   'series-1': 'Chart series 1: the first agent, and the balance line.',
   'series-2': 'Chart series 2: the second agent.',
   'series-3': 'Chart series 3: the third agent.',
@@ -129,6 +162,24 @@ const TOKEN_USE: Record<string, string> = {
   'table-row-border': 'Table row divider.',
   'table-row-hover': 'Table row hover fill.',
 }
+
+/**
+ * Six names, one per avatar tint (#4066). Pinned so the showcase always
+ * displays the whole family: `avatarTint` is a pure hash of the name, and
+ * `src/lib/__tests__/avatar-tint.test.ts` holds these six to the
+ * covers-all-six-tints property (it reads them out of this file as text —
+ * a Next.js page may not carry arbitrary named exports). Assignment is by
+ * NAME, never by index — the order here is display order, not an assignment
+ * contract.
+ */
+const MONOGRAM_TINT_EXAMPLES = [
+  'Meridian Labs', // tint 1 — terracotta
+  'Acme Services', // tint 2 — teal
+  'Kaffe & Kod', // tint 3 — violet
+  'Haven Demo Store', // tint 4 — moss
+  'Berget AI', // tint 5 — rose
+  'Ampersend Demo API', // tint 6 — steel
+]
 
 /** The acceptance pairs, measured once per theme for the page's table. */
 const CONTRAST_ROWS_BY_PAIR = (() => {
@@ -175,6 +226,20 @@ const modalInfoPages: InfoPage[] = [
 /** Deterministic demo values for the wallet-menu signing-credential states (#1952). */
 const DS_HYBRID_ACCOUNT = '0x8f2a55949038a9610f50fb23b5883af3b4ecb3c3'
 const DS_PASSKEY_KEY_ID = '0x1111111111111111111111111111111111111111111111111111111111111111'
+
+/**
+ * The Receive dialog's demo account (#4094): a Base Sepolia account, so the
+ * opened dialog shows the "Get test USDC" faucet card — the testnet half of
+ * the chain-gated "Other ways to add money" pair (#3478).
+ */
+const DS_RECEIVE_ACCOUNT: SmartAccount = {
+  id: 'ds-receive-account',
+  account_address: '0x8f4F0f6d712C5c5C9Bb02F4a5B5c0D7F462A6f4C',
+  chain_id: 84532,
+  name: 'Demo account',
+  is_default: true,
+  created_at: '2026-10-19T00:00:00Z',
+}
 const NOOP = () => {}
 
 /**
@@ -299,7 +364,16 @@ const DS_SPARKLINE_POINTS: SparklinePoint[] = [
 const DS_SPARKLINE_SUMMARY =
   'Balance over the last 14 days: ends at 1,240 USDC, up 60 USDC across the range, with 2 days without a snapshot.'
 
-/** The AttentionList sample's items — one per tone, one of them without a badge label. */
+/**
+ * The AttentionList sample's items — one per tone, one of them without a badge
+ * label, and one (the failure) without the dismiss, so the reserved slot and
+ * the one trailing column are on show. The badge-less item carries an action:
+ * the product's only badge-less kind (`haven-paused`) has neither badge nor
+ * action and is not dismissible, so a badge-less dismiss-only row would render
+ * a shape no product kind has — a lone × on its own line below `sm` (#4033).
+ * The `haven-paused`-shaped row shows that shape: nothing visible to align,
+ * so it renders no trailing slot at all and its tone word rides in the body.
+ */
 const DS_ATTENTION_ITEMS: AttentionListItem[] = [
   {
     id: 'budget-reached',
@@ -329,6 +403,11 @@ const DS_ATTENTION_ITEMS: AttentionListItem[] = [
     subtitle: 'The spending summary for the week ending Sunday is ready to read.',
     tone: 'brand',
     icon: Sparkles,
+    action: (
+      <Button size="sm" variant="ghost">
+        Read summary
+      </Button>
+    ),
   },
   {
     id: 'payment-failed',
@@ -337,6 +416,29 @@ const DS_ATTENTION_ITEMS: AttentionListItem[] = [
     tone: 'danger',
     badge: 'Failed',
     icon: OctagonAlert,
+    // As on the dashboard: a failure is resolved, not dismissed — so this row
+    // shows the reserved dismiss slot that keeps the trailing column aligned.
+    dismissible: false,
+    action: (
+      <Button size="sm" variant="ghost">
+        View activity
+      </Button>
+    ),
+  },
+  {
+    // The `haven-paused` shape (#4033): no badge, no action, not dismissible —
+    // nothing visible to align, so the row renders no trailing slot and the
+    // sr-only tone word rides in the body. Equal space above and below the
+    // body at every width.
+    id: 'haven-paused',
+    title: 'Haven paused sponsored payments',
+    subtitle: "Your budgets are untouched. Haven's own cap stopped a payment.",
+    tone: 'neutral',
+    icon: CirclePause,
+    // As in the product: `haven-paused` is not in DISMISSIBLE_ATTENTION_KINDS,
+    // so the default-true dismissible would hang a fourth × on the list —
+    // and this row's whole point is having nothing visible to align.
+    dismissible: false,
   },
 ]
 
@@ -397,6 +499,519 @@ const DS_METER_ROW: BudgetCaptionRow = {
 // Untouched: zero used on the same period — the caption still names the refill.
 const DS_METER_UNTOUCHED_ROW: BudgetCaptionRow = { ...DS_METER_ROW, usedAtomic: '0' }
 
+// ── #4096: the shared agent row and the activity ledger's fixtures ──────────
+
+// The agent row's clock and budget dates are RELATIVE TO NOW, unlike the
+// frozen meter instants above: the row reads the LIVE clock (the dashboard
+// passes `Date.now()`), so the fixture anchors its period end 22h out and the
+// caption renders "refills in 22h" on every machine.
+const DS_AGENT_NOW = Date.now()
+const DS_AGENT_TOKEN = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+// 300 USDC per week, 120 used (40%), period end 22h from now.
+const DS_AGENT: DashboardAgentPreview = {
+  id: '11111111-1111-4111-8111-111111111111',
+  name: 'Research agent',
+  status: 'active',
+  accountId: 'acct-1',
+  accountName: 'Main account',
+  accountChainId: 8453,
+  allowances: [],
+  budgets: [
+    {
+      id: 'budget-1',
+      delegationHash: `0x${'11'.repeat(32)}`,
+      chainId: 8453,
+      tokenAddress: DS_AGENT_TOKEN,
+      tokenSymbol: 'USDC',
+      decimals: 6,
+      budgetAtomic: '300000000',
+      periodSeconds: 604_800,
+      startDate: new Date(DS_AGENT_NOW - 2 * 86_400_000).toISOString(),
+      expiresAt: new Date(DS_AGENT_NOW + 160 * 86_400_000).toISOString(),
+      periodEnd: new Date(DS_AGENT_NOW + 22 * 3_600_000).toISOString(),
+    },
+  ],
+  receivedSubBudgets: [],
+  stats: {
+    d7: { gross: { usd: 12, eur: 0, sek: 0 }, net: { usd: 12, eur: 0, sek: 0 }, approx: false, payments: 1, refusals: { budget: 0, scope: 0, failed: 0, haven: 0 } },
+    d30: { gross: { usd: 120, eur: 0, sek: 0 }, net: { usd: 120, eur: 0, sek: 0 }, approx: false, payments: 6, refusals: { budget: 0, scope: 0, failed: 0, haven: 0 } },
+    lastPaymentAt: new Date(DS_AGENT_NOW - 6 * 3_600_000).toISOString(),
+    lastCounterparty: { source: 'api.vendor.com', x402ResourceUrl: null, to: null, merchantName: null },
+  },
+}
+// The chain read that matches the budget above — 180 USDC remaining, so the
+// meter paints 40% and the caption names the 22h refill.
+const DS_AGENT_BUDGET_REMAINING: DashboardBudgetRemaining = {
+  budgets: [
+    {
+      agent_id: DS_AGENT.id,
+      chain_id: 8453,
+      delegation_hash: `0x${'11'.repeat(32)}`,
+      token_address: DS_AGENT_TOKEN,
+      token_symbol: 'USDC',
+      token_decimals: 6,
+      budget_atomic: '300000000',
+      read_at: new Date(DS_AGENT_NOW - 3_600_000).toISOString(),
+      period_end: new Date(DS_AGENT_NOW + 22 * 3_600_000).toISOString(),
+      remaining_atomic: '180000000',
+      remaining_from_chain: true,
+      used_atomic: '120000000',
+      sub_budget_spend: [],
+    },
+  ],
+}
+// A second agent with NO budget and no payments — the "No budget" + "No
+// payments yet" arms of the row, exactly as the dashboard draws them.
+const DS_AGENT_NO_BUDGET: DashboardAgentPreview = {
+  ...DS_AGENT,
+  id: '22222222-2222-4222-8222-222222222222',
+  name: 'Watchtower',
+  budgets: [],
+  stats: {
+    d7: { gross: { usd: 0, eur: 0, sek: 0 }, net: { usd: 0, eur: 0, sek: 0 }, approx: false, payments: 0, refusals: { budget: 0, scope: 0, failed: 0, haven: 0 } },
+    d30: { gross: { usd: 0, eur: 0, sek: 0 }, net: { usd: 0, eur: 0, sek: 0 }, approx: false, payments: 0, refusals: { budget: 0, scope: 0, failed: 0, haven: 0 } },
+    lastPaymentAt: null,
+    lastCounterparty: null,
+  },
+}
+
+// #4209: the `/agents` card, from the SAME dashboard fixtures the agent row
+// reads — the card joins the overview by agent id, as `AgentPanel` does.
+const DS_CARD_AGENT = {
+  id: DS_AGENT.id,
+  name: DS_AGENT.name,
+  description: null,
+  delegate_address: '0x2222222222222222222222222222222222222222',
+  account_id: 'acct-1',
+  account_address: '0x1111111111111111111111111111111111111111',
+  account_name: 'Main account',
+  account_chain_id: 8453,
+  account_type: 'delegator_hybrid',
+  status: 'active',
+  created_at: new Date(DS_AGENT_NOW - 60 * 86_400_000).toISOString(),
+  allowances: [],
+  labels: [{ id: 'ds-label-research', name: 'research', color: 'blue' }],
+  organization_id: null,
+  tax_declaration_enabled: false,
+} as unknown as Agent
+const DS_CARD_ARCHIVED = {
+  ...DS_CARD_AGENT,
+  id: '33333333-3333-4333-8333-333333333333',
+  name: 'gate-3028',
+  status: 'revoked',
+  archived_at: new Date(DS_AGENT_NOW - 30 * 86_400_000).toISOString(),
+  labels: [],
+} as unknown as Agent
+const DS_CARD_DASHBOARD: AgentCardDashboard = {
+  ready: true,
+  agent: DS_AGENT,
+  budgetRemaining: DS_AGENT_BUDGET_REMAINING,
+  attentionItems: [],
+  nowMs: DS_AGENT_NOW,
+}
+const DS_CARD_NOOP = () => {}
+const DS_CARD_NOOP_ASYNC = async () => {}
+
+// The ledger showcase's rows — timestamps RELATIVE TO NOW so the day helpers
+// bucket them under live "Today" / "Yesterday" headings, exactly as the
+// account page's ledger will. Same agent, same merchant, same day: the
+// dashboard's preview MERGES these into one "×2" row; the ledger keeps one
+// row per transaction.
+//
+// #4266 adds the two `/transactions` shapes: a payment carrying the
+// accounting feed's badge as a plain pill (`extraBadges`, `interactive=
+// {false}` — the row is the button), and one folded move between the user's
+// own accounts (`direction="move"`, the bare `TransactionMovement`, no sign).
+const DS_LEDGER_ROWS: Array<{
+  id: string
+  at: string
+  title: string
+  description: ReactNode
+  value: string
+  direction?: 'out' | 'move'
+  accounting?: boolean
+}> = [
+  { id: 'l1', at: new Date(Date.now() - 5 * 60_000).toISOString(), title: 'api.vendor.com', description: 'Research assistant', value: '12.00', accounting: true },
+  {
+    id: 'l4',
+    at: new Date(Date.now() - 2 * 3_600_000).toISOString(),
+    title: 'Moved between your accounts',
+    // The `/transactions` row's own subline markup (TransactionsLedgerRow).
+    description: (
+      <span className="flex min-w-0 max-w-full items-center gap-x-1">
+        <span className="shrink-0">You ·{' '}</span>
+        <TransactionMovement bare from="Operations" to="Reserve" />
+      </span>
+    ),
+    value: '200.00',
+    direction: 'move',
+  },
+  { id: 'l2', at: new Date(Date.now() - 3 * 3_600_000).toISOString(), title: 'storage.provider.io', description: 'Data agent', value: '4.50' },
+  { id: 'l3', at: new Date(Date.now() - 26 * 3_600_000).toISOString(), title: 'api.vendor.com', description: 'Research assistant', value: '36.00' },
+]
+
+const DS_LEDGER_ACCOUNTING = {
+  provider: 'fortnox',
+  status: 'pushed' as const,
+  externalRef: 'fortnox:supplierinvoice:11',
+  error: null,
+}
+
+// ── List controls (#4110, epic #4108) ─────────────────────────────────────
+// Sample data for the ListToolbar showcase. Rows are filtered in memory, so
+// the count is the applied result exactly as a browser-filtered page wires it.
+
+const DS_LIST_NOUN = { one: 'agent', other: 'agents' }
+
+const DS_LIST_AGENTS = [
+  { id: 'a1', name: 'Agent naming', status: 'active', budget: 'recurring', seen: 3 },
+  { id: 'a2', name: 'Atlas', status: 'active', budget: 'recurring', seen: 1 },
+  { id: 'a3', name: 'Demo agent', status: 'paused', budget: 'none', seen: 5 },
+  { id: 'a4', name: 'Lovable Dev', status: 'active', budget: 'one_time', seen: 2 },
+  // `a5`'s long name + revoked status is the meta-slot fixture (#4150): the
+  // Initiator row shows the status even where the name loses its tail, and
+  // the sheet row wraps.
+  { id: 'a5', name: 'Lovable Dev preview deployment helper', status: 'revoked', budget: 'none', seen: 4 },
+]
+
+const DS_LIST_SORT = {
+  options: [
+    { value: 'name', label: 'Name' },
+    { value: 'seen', label: 'Recently seen' },
+  ],
+}
+
+function dsListFacets(rows: typeof DS_LIST_AGENTS): ListFacet[] {
+  const count = (key: 'status' | 'budget', value: string) => rows.filter((r) => r[key] === value).length
+  return [
+    {
+      id: 'status',
+      label: 'Status',
+      selection: 'multi',
+      values: ['active', 'paused', 'revoked'],
+      options: [
+        { value: 'active', label: 'Active', count: count('status', 'active') },
+        { value: 'paused', label: 'Paused', count: count('status', 'paused') },
+        { value: 'revoked', label: 'Revoked', count: count('status', 'revoked') },
+      ],
+    },
+    {
+      id: 'budget',
+      label: 'Budget',
+      values: ['recurring', 'one_time', 'none'],
+      options: [
+        { value: 'recurring', label: 'Recurring budget' },
+        { value: 'one_time', label: 'One-time budget' },
+        { value: 'none', label: 'No budget' },
+      ],
+    },
+    // The meta slot (#4150): a non-active agent's status rides in `meta`,
+    // the way Transactions moves its agent status out of the label.
+    {
+      id: 'initiator',
+      label: 'Initiator',
+      options: [
+        { value: 'user', label: 'User (manual)' },
+        ...rows.map((r) => ({
+          value: r.id,
+          label: r.name,
+          ...(r.status === 'active' ? {} : { meta: r.status[0].toUpperCase() + r.status.slice(1) }),
+        })),
+      ],
+    },
+    // One account: a single possible value, so the facet is hidden.
+    { id: 'account', label: 'Account', options: [{ value: 'acc-1', label: 'My account' }] },
+  ]
+}
+
+const DS_LIST_EMPTY: ListState = { q: '', facets: { status: [], budget: [], initiator: [], account: [] }, sort: 'name' }
+
+function dsApplyListState(state: ListState) {
+  const q = state.q.trim().toLowerCase()
+  const initiator = state.facets.initiator ?? []
+  return DS_LIST_AGENTS.filter(
+    (r) =>
+      (!q || r.name.toLowerCase().includes(q)) &&
+      (state.facets.status.length === 0 || state.facets.status.includes(r.status)) &&
+      (state.facets.budget.length === 0 || state.facets.budget.includes(r.budget)) &&
+      (initiator.length === 0 || initiator.includes(r.id)),
+  ).sort((a, b) => (state.sort === 'seen' ? a.seen - b.seen : a.name.localeCompare(b.name)))
+}
+
+/** One live, browser-filtered list: toolbar, rows, and the shared no-match. */
+function ListControlsExample({
+  initial = DS_LIST_EMPTY,
+  layout,
+  loading = false,
+  testId,
+  actions,
+}: {
+  initial?: ListState
+  layout?: 'responsive' | 'phone'
+  loading?: boolean
+  testId: string
+  /** Showcase only: the phone instance draws the actions slot's phone row. */
+  actions?: ReactNode
+}) {
+  const [state, setState] = useState<ListState>(initial)
+  // The clear generation (#4150): the no-match Clear filters bumps it so a
+  // pending search draft never commits after the clear.
+  const [searchEpoch, setSearchEpoch] = useState(0)
+  const bumpSearchEpoch = () => setSearchEpoch((n) => n + 1)
+  const rows = dsApplyListState(state)
+  const facets = dsListFacets(DS_LIST_AGENTS)
+  return (
+    <div className="space-y-3" data-testid={testId}>
+      <ListToolbar
+        noun={DS_LIST_NOUN}
+        state={state}
+        onChange={setState}
+        filtering="browser"
+        facets={facets}
+        sort={DS_LIST_SORT}
+        searchDescription="By name or delegate address"
+        searchEpoch={searchEpoch}
+        actions={actions}
+        count={loading ? null : { shown: rows.length, total: DS_LIST_AGENTS.length }}
+        layout={layout}
+      />
+      {/* ListNoMatch sits where the rows were — in place of the list card, not inside it. */}
+      {!loading && rows.length === 0 ? (
+        <ListNoMatch
+          noun={DS_LIST_NOUN}
+          onClear={() => {
+            bumpSearchEpoch()
+            setState(clearedListState(state, { facets }))
+          }}
+        />
+      ) : (
+        <Card hover={false} className="overflow-hidden">
+          <div className="divide-y divide-[var(--v2-border)]" aria-busy={loading || undefined}>
+            {loading
+              ? [0, 1, 2].map((i) => (
+                  <div key={i} className="flex items-center gap-3 px-4 py-3">
+                    <Skeleton className="h-4 w-40" />
+                    <Skeleton className="ml-auto h-5 w-14" />
+                  </div>
+                ))
+              : rows.map((row) => (
+                  <Row
+                    key={row.id}
+                    title={row.name}
+                    subtitle={row.budget === 'none' ? 'No budget' : 'Has a budget'}
+                    trailing={
+                      <StatusBadge tone={row.status === 'active' ? 'success' : 'neutral'}>
+                        {row.status[0].toUpperCase() + row.status.slice(1)}
+                      </StatusBadge>
+                    }
+                  />
+                ))}
+          </div>
+        </Card>
+      )}
+    </div>
+  )
+}
+
+/** The phone actions slot's drawing (#4150): a bare ghost `sm` Export CSV, no sizing classes. */
+function ExportCsvDrawing() {
+  const { toast } = useToast()
+  return (
+    <Button variant="ghost" size="sm" onClick={() => toast.info('Exports the filtered list')}>
+      Export CSV
+    </Button>
+  )
+}
+
+/**
+ * A server-filtered list: the search commits once per 300 ms pause, so the
+ * request counter moves once per pause, never per keystroke. Transactions-
+ * shaped: Export CSV in the actions slot, a Period with a custom range.
+ */
+function ServerListControlsExample() {
+  const [state, setState] = useState<ListState>({ q: '', facets: { chainId: [], direction: [] }, period: { preset: '30d' } })
+  const [requests, setRequests] = useState(1)
+  const { toast } = useToast()
+  return (
+    <div className="space-y-2" data-testid="ds-list-controls-server">
+      <ListToolbar
+        noun={{ one: 'transaction', other: 'transactions' }}
+        state={state}
+        onChange={(next) => {
+          setState(next)
+          setRequests((n) => n + 1)
+        }}
+        filtering="server"
+        facets={[
+          {
+            id: 'chainId',
+            label: 'Network',
+            options: [
+              { value: '8453', label: 'Base' },
+              { value: '84532', label: 'Base Sepolia' },
+            ],
+          },
+          {
+            id: 'direction',
+            label: 'Direction',
+            options: [
+              { value: 'in', label: 'Incoming' },
+              { value: 'out', label: 'Outgoing' },
+            ],
+          },
+        ]}
+        period={{ allowCustom: true }}
+        actions={
+          <Button variant="ghost" size="sm" onClick={() => toast.info('Exports the filtered list')}>
+            Export CSV
+          </Button>
+        }
+        count={{ shown: 12, total: 60 }}
+        // The page's totals join the list summary line, left of the count
+        // (#4196) — the account Activity tab's shape.
+        summary={
+          <>
+            {/* The account Activity tab's markup (`TotalFigure`): short visible
+                label, full name for screen readers before the figure. */}
+            <span aria-hidden="true">In</span>
+            <span className="sr-only">Money in</span> <Amount amount={1240} currency="USD" /> ·{' '}
+            <span aria-hidden="true">Out</span>
+            <span className="sr-only">Money out</span> <Amount amount={312.5} currency="USD" />
+          </>
+        }
+      />
+      <p className="text-xs text-[var(--v2-ink-3)]" data-testid="ds-list-controls-requests">
+        Requests sent: {requests}
+      </p>
+    </div>
+  )
+}
+
+/**
+ * The paging rule (#4196): the card ends with its last row and "Show N more"
+ * sits centred below it. Drawn with three rows standing in for a page of 25.
+ */
+function PagedListExample() {
+  const total = 49
+  const [loaded, setLoaded] = useState(25)
+  const [loading, setLoading] = useState(false)
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => () => {
+    if (timer.current) clearTimeout(timer.current)
+  }, [])
+  return (
+    <div data-testid="ds-list-controls-paging">
+      <Card hover={false} className="overflow-hidden">
+        <div className="divide-y divide-[var(--v2-border)]">
+          {['Research agent', 'Invoice agent', 'Travel agent'].map((name) => (
+            <Row key={name} title={name} subtitle="Has a budget" />
+          ))}
+        </div>
+      </Card>
+      <ListShowMore
+        loaded={loaded}
+        total={total}
+        pageSize={25}
+        hasMore={loaded < total}
+        loading={loading}
+        onShowMore={() => {
+          setLoading(true)
+          timer.current = setTimeout(() => {
+            setLoaded((n) => Math.min(total, n + 25))
+            setLoading(false)
+          }, 600)
+        }}
+      />
+      <p className="mt-3 text-xs text-[var(--v2-ink-3)]">
+        Loaded {loaded} of {total}.{' '}
+        {loaded >= total ? (
+          <button type="button" className="text-[var(--v2-brand)] underline-offset-2 hover:underline" onClick={() => setLoaded(25)}>
+            Reset the example
+          </button>
+        ) : null}
+      </p>
+    </div>
+  )
+}
+
+/** FacetMenu and PeriodPicker on their own: pills, and the Analytics period. */
+function FacetPrimitivesExample() {
+  const [category, setCategory] = useState<string[]>([])
+  const [network, setNetwork] = useState<string[]>(['8453'])
+  const [period, setPeriod] = useState<PeriodValue>({ preset: '30d' })
+  return (
+    <div className="flex flex-col gap-4" data-testid="ds-list-controls-primitives">
+      <FacetMenu
+        facet={{
+          id: 'category',
+          label: 'Category',
+          rendering: 'pills',
+          options: [
+            { value: 'ai', label: 'AI' },
+            { value: 'api', label: 'API' },
+            { value: 'data', label: 'Data' },
+            { value: 'storage', label: 'Storage' },
+          ],
+        }}
+        value={category}
+        onChange={setCategory}
+      />
+      <div className="flex flex-wrap items-center gap-2">
+        <FacetMenu
+          facet={{
+            id: 'chainId',
+            label: 'Network',
+            defaultValue: ['8453'],
+            options: [
+              { value: '8453', label: 'Base' },
+              { value: '84532', label: 'Base Sepolia' },
+            ],
+          }}
+          value={network}
+          onChange={setNetwork}
+        />
+        <PeriodPicker value={period} onChange={setPeriod} allowAllTime={false} defaultValue={{ preset: '30d' }} align="left" />
+      </div>
+    </div>
+  )
+}
+
+/**
+ * A single-select facet with no "All" row (`allLabel: null`, #4113): every
+ * value is a real choice, and the default is the unfiltered view: Agents'
+ * Archived facet.
+ */
+function NoAllFacetExample() {
+  const [archived, setArchived] = useState<string[]>(['hidden'])
+  return (
+    <div className="flex flex-wrap items-center gap-2" data-testid="ds-list-controls-no-all">
+      <FacetMenu
+        facet={{
+          id: 'archived',
+          label: 'Archived',
+          allLabel: null,
+          defaultValue: ['hidden'],
+          options: [
+            { value: 'hidden', label: 'Hidden' },
+            { value: 'shown', label: 'Shown' },
+          ],
+        }}
+        value={archived}
+        onChange={setArchived}
+      />
+    </div>
+  )
+}
+
+function ListControlsState({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="space-y-2">
+      <p className="max-w-3xl text-xs leading-relaxed text-[var(--v2-ink-3)]">{label}</p>
+      {children}
+    </div>
+  )
+}
+
 function Section({
   title,
   description,
@@ -445,17 +1060,72 @@ function DotIcon() {
   return <Icon icon={Circle} className="h-full w-full" />
 }
 
+/**
+ * The labelled CopyButton as its real caller uses it (#3998): the value is
+ * NOT printed, so a refused copy reveals it — the showcase models the rule
+ * its description states, rather than a no-op callback.
+ */
+function LabelledCopyDemo() {
+  const value = 'Pay https://services.ampersend.ai/api/fact and return the result'
+  const [revealed, setRevealed] = useState(false)
+  return (
+    <div className="mt-4">
+      <CopyButton
+        value={value}
+        label="prompt for Ampersend — fact"
+        text="Copy prompt"
+        onCopyFailed={() => setRevealed(true)}
+      />
+      {revealed ? (
+        <p className="mt-2 text-xs text-[var(--v2-ink-3)]" role="status">
+          <code className="select-all [overflow-wrap:anywhere] text-[var(--v2-ink-2)]">{value}</code> — copying was
+          blocked, so the value is shown instead.
+        </p>
+      ) : null}
+    </div>
+  )
+}
+
 export default function DesignSystemPage() {
   const [modalOpen, setModalOpen] = useState(false)
   const [dsFilterPillActive, setDsFilterPillActive] = useState<string | null>(null)
   const [infoModalOpen, setInfoModalOpen] = useState(false)
   const [comingSoonOpen, setComingSoonOpen] = useState(false)
+  const [receiveDialogOpen, setReceiveDialogOpen] = useState(false)
+  // #4167: the Receive example's inline QR, generated the same way the dialog
+  // generates its own (`ReceiveDialog.tsx`) — the showcase documents the real
+  // pattern, not a stand-in box.
+  const [dsReceiveQr, setDsReceiveQr] = useState<string | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    QRCode.toDataURL(sampleAddress, {
+      margin: 1,
+      width: 220,
+      color: { dark: '#1A2140', light: '#FFFFFF' }, // QR encoder needs literal hex for module colours — design-lint-disable-line
+    })
+      .then((url) => {
+        if (!cancelled) setDsReceiveQr(url)
+      })
+      .catch(() => {
+        if (!cancelled) setDsReceiveQr(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
   const [panelOpen, setPanelOpen] = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
+  const [topModalOpen, setTopModalOpen] = useState(false)
+  const [topModalTall, setTopModalTall] = useState(false)
   const [checkboxOn, setCheckboxOn] = useState(true)
   const [sampleAmount, setSampleAmount] = useState('')
   const [dsBudgetAmount, setDsBudgetAmount] = useState('')
   const [segmented, setSegmented] = useState<'light' | 'dark' | 'system'>('system')
+  // #4096: the Tabs showcase is a controlled primitive (the caller owns the
+  // value), and a ledger row's click stands in for the account page opening
+  // TransactionDetailPanel — the section names which row "opened".
+  const [dsTab, setDsTab] = useState<'overview' | 'agents' | 'activity'>('agents')
+  const [dsLedgerOpened, setDsLedgerOpened] = useState<string | null>(null)
   const { toast } = useToast()
 
   return (
@@ -463,7 +1133,7 @@ export default function DesignSystemPage() {
       <PageHeader
         eyebrow="Internal reference"
         title="Haven design system"
-        subtitle="The source of truth for Haven UI. Compose what's here before inventing new visual treatments — and add a new entry here in the same PR if you do."
+        subtitle="The source of truth for Haven UI. Compose what's here before inventing new visual treatments. A new pattern lands here first, in its own owner-approved slice; extracting a shape the product already ships lands here in the same PR."
         actions={
           <Button variant="ghost" size="sm" onClick={() => toast.info('Use shared primitives before adding a new pattern.')}>
             Show toast
@@ -490,10 +1160,12 @@ export default function DesignSystemPage() {
               shared primitive.
             </li>
             <li>
-              <span className="font-medium text-[var(--v2-ink)]">3. Add new entries in the same PR.</span> If
-              the system genuinely lacks what you need — a new colour token, a new primitive, a new pattern
-              — add it here alongside the implementation. Reviewers gate this: a PR that introduces a new
-              UI shape without updating this page should be sent back.
+              <span className="font-medium text-[var(--v2-ink)]">3. New patterns first, extractions in the same PR.</span>{' '}
+              A composition with no shipped instance and no entry here is a new pattern: it lands on this
+              page first, in its own owner-approved design-system slice, before any page uses it. Extracting
+              a shape the product already ships, on the diff that writes its second copy, stays in that same
+              PR (Pattern Absorption). Reviewers gate this: a PR that introduces a new UI shape without an
+              entry here should be sent back.
             </li>
             <li>
               <span className="font-medium text-[var(--v2-ink)]">4. Mind the copy conventions.</span> See the
@@ -1047,7 +1719,54 @@ export default function DesignSystemPage() {
               <code className="rounded bg-[var(--v2-surface)] px-1">aria-checked</code> options, because the
               choices are mutually exclusive. The group carries <code className="rounded bg-[var(--v2-surface)] px-1">aria-label</code>{' '}
               so a screen reader names the question first; options are real buttons, so keyboard
-              works without extra wiring. Never hand-roll a second control of this shape.
+              works without extra wiring. The selected option uses the app&rsquo;s active idiom —
+              brand ink on brand-soft inside an inset brand outline, a boundary of at least 3:1 against
+              the track in both themes — and every option&rsquo;s hit area is 44px tall while it
+              paints 32px (#4056, the same mechanism as Button). Never hand-roll a second control
+              of this shape.
+            </p>
+          </Card>
+
+          {/* #4096: the Tabs primitive — the first tab shape the design system
+              owns, shown controlled exactly as the account page drives it. */}
+          <Card hover={false} className="p-5">
+            <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Tabs</h3>
+            <div className="mt-4">
+              <Tabs
+                ariaLabel="Account"
+                value={dsTab}
+                onChange={setDsTab}
+                tabs={[
+                  { value: 'overview', label: 'Overview' },
+                  { value: 'agents', label: 'Agents', count: 2 },
+                  { value: 'activity', label: 'Activity', warningDot: true },
+                ]}
+              />
+              <p className="mt-2 text-xs text-[var(--v2-ink-3)]">
+                Selected: {dsTab} — the caller owns the value; the primitive re-renders nothing on
+                its own.
+              </p>
+            </div>
+            <p className="mt-3 text-[13px] leading-relaxed text-[var(--v2-ink-2)]">
+              The switch between views of one surface
+              (<code className="rounded bg-[var(--v2-surface)] px-1">ui/Tabs</code>, in{' '}
+              <code className="rounded bg-[var(--v2-surface)] px-1">@haven_ai/ui</code> since #4096).
+              Semantics follow the WAI-ARIA tabs pattern:
+              <code className="rounded bg-[var(--v2-surface)] px-1">role=&quot;tablist&quot;</code> of
+              real buttons with <code className="rounded bg-[var(--v2-surface)] px-1">aria-selected</code>;
+              a roving tabindex leaves only the selected tab in the Tab order, so Tab leaves the
+              list, and the arrow keys move selection WITH focus, wrapping at both ends (Home and
+              End jump). The primitive is CONTROLLED — <code className="rounded bg-[var(--v2-surface)] px-1">value</code> /{' '}
+              <code className="rounded bg-[var(--v2-surface)] px-1">onChange</code> — and knows
+              nothing about URLs: the ops console consumes the same package, so the page owns its{' '}
+              <code className="rounded bg-[var(--v2-surface)] px-1">?tab=</code> param. The selected
+              tab carries a 2px brand underline that overlaps the list&rsquo;s 1px border, reading as
+              one continuous rule; every tab&rsquo;s hit area extends to 44px vertically (the same
+              transparent-pseudo-element mechanism as SegmentedControl) while it paints 36px. An
+              optional muted <code className="rounded bg-[var(--v2-surface)] px-1">count</code> rides
+              beside the label, and an optional amber warning dot marks a view that needs the user —
+              decorative to the eye, named to the ear through its screen-reader text. The account
+              page&rsquo;s Overview / Agents / Activity sections (#4093) are the first consumer.
             </p>
           </Card>
 
@@ -1099,37 +1818,31 @@ export default function DesignSystemPage() {
 
           <Card hover={false} className="p-5">
             <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Theme toggle</h3>
-            <div className="mt-4 flex flex-wrap items-center gap-3">
-              <ThemeToggle />
-              <span className="text-xs text-[var(--v2-ink-3)]">
-                The icon button, as the top bar's right cluster renders it — one click
-                flips the palette, light to dark and back, and the accessible name says
-                what the click will do, not only what the icon is.
-              </span>
-            </div>
             <div className="mt-3 rounded-lg border border-[var(--v2-border)] p-2">
-              <ThemeToggle variant="row" />
-              <span className="sr-only">The row variant shown outside the sheet it lives in</span>
+              <ThemeToggle />
+              <span className="sr-only">The row shown outside the sidebar footer it lives in</span>
             </div>
             <p className="mt-3 text-[13px] leading-relaxed text-[var(--v2-ink-2)]">
               The one-gesture theme control, the quick half
               (<code className="rounded bg-[var(--v2-surface)] px-1">ui/ThemeToggle</code>,
-              from the top bar and the mobile sheet's control block — Settings keeps its
-              three explicit choices on its own screen). The glyph answers what you are
+              shown here outside the desktop rail&rsquo;s footer it lives in —
+              Settings and, below lg, the More sheet keep the three explicit choices). The glyph
+              answers what you are
               (<code className="rounded bg-[var(--v2-surface)] px-1">Sun</code> in light,{' '}
               <code className="rounded bg-[var(--v2-surface)] px-1">Moon</code> in dark;
-              the quick toggle has no system step — that choice lives in Settings); the
+              the quick toggle has no system step — that choice lives in Settings and the
+              phone More sheet); the
               name answers where you are going
               (&quot;Theme: dark. Switch to light&quot;), because a control whose label is only
-              its current state cannot be predicted. The icon is a plain clickable
-              button with no hover or focus tooltip (#2953): the icon alone is the
-              affordance, and the accessible name carries the whole message for screen
-              readers. The swap cross-fades under{' '}
+              its current state cannot be predicted. The swap cross-fades under{' '}
               <code className="rounded bg-[var(--v2-surface)] px-1">prefers-reduced-motion:
-              no-preference</code> and snaps otherwise, and the row variant's visible
-              label is a prefix of the name, so the label sits in the name. Never hand-roll
-              a second control of this shape; both surfaces here are the primitive's
-              variants, and the two call sites decide which one renders.
+              no-preference</code> and snaps otherwise, and the visible label is a prefix
+              of the name, so the label sits in the name. There is one rendering since
+              #4029: the icon variant that lived in the top bar's right cluster was
+              deleted with the bar, so the rail footer&rsquo;s row is the desktop&rsquo;s only
+              theme control (below lg the More sheet carries the three-way one, #4053)
+              and the primitive takes no variant prop at all. Never hand-roll a second
+              control of this shape.
             </p>
           </Card>
 
@@ -1220,7 +1933,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="Surface hierarchy — no nested filled cards"
-        description="One tinted surface per surface tier. Don't reach for a grey inner wrapper to 'group' siblings inside a Card — use Card.Section (white-on-white hairline) or Card.Section divided (row list). Tinted surfaces are reserved for callouts, table headers, anchor cards, chips, code blocks, and overlay surfaces."
+        description="One tinted surface per surface tier. Don't reach for a grey inner wrapper to 'group' siblings inside a Card — use Card.Section (white-on-white hairline) or Card.Section divided (row list). Tinted surfaces are reserved for callouts, table headers, day bands on day-grouped lists, anchor cards, chips, code blocks, and overlay surfaces."
       >
         <div className="grid gap-5 lg:grid-cols-2">
           {/* ❌ Anti-pattern */}
@@ -1317,12 +2030,12 @@ export default function DesignSystemPage() {
               {[
                 ['--v2-z-content', '10', 'In-flow overlaps: badges, gradient washes'],
                 ['--v2-z-sticky', '20', 'Sticky table headers'],
-                ['--v2-z-chrome', '100', 'TopBar — the app shell’s own bar'],
-                ['--v2-z-tab-bar', '105', 'The bottom tab bar (#2731) — the shell’s other bar'],
+                ['--v2-z-chrome', '100', 'App chrome — no consumer; the anchor the nav tiers are ordered against'],
+                ['--v2-z-tab-bar', '105', 'The bottom tab bar (#2731) — the shell’s only bar'],
                 ['--v2-z-chrome-popover', '110', 'Popovers anchored in the chrome (notifications, wallet, user menu)'],
-                ['--v2-z-nav-scrim', '130', 'Mobile drawer scrim'],
-                ['--v2-z-nav-drawer', '140', 'Mobile drawer itself'],
-                ['--v2-z-nav-toggle', '150', 'The Open / Close sidebar toggle'],
+                ['--v2-z-nav-scrim', '130', 'The phone More sheet’s scrim'],
+                ['--v2-z-nav-drawer', '140', 'The phone More sheet itself'],
+                ['--v2-z-nav-toggle', '150', 'No consumer since More moved into the tab bar — ordering anchor'],
                 ['--v2-z-modal', '200', 'Modal, SidePanel'],
                 ['--v2-z-tooltip', '210', 'Tooltip'],
                 ['--v2-z-panel', '250', 'AgentPanel'],
@@ -1345,14 +2058,13 @@ export default function DesignSystemPage() {
             The rule the numbers encode
           </h3>
           <p className="mt-2 text-sm leading-relaxed text-[var(--v2-ink-2)]">
-            The mobile navigation overlay outranks the app chrome it slides over, and modals
-            outrank the navigation. That direction is not arbitrary. The drawer is{' '}
-            <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">inset-y-0</code>, so its
-            own logo band shares the top 56px with the bar; its scrim exists to dim everything
-            behind it, and “everything” includes the bar. Let the bar win and the drawer is
-            decapitated, the scrim dims all but the top strip, and the toggle — which sits inside
-            that strip by design, in the gap the bar reserves for it — cannot be tapped at all.
-            Modals sit above both, because a dialog opened from a nav link has to cover the drawer.
+            The mobile navigation overlay outranks the app chrome, and modals outrank the
+            navigation. That direction is not arbitrary: let the chrome win and the navigation is
+            covered and its control cannot be tapped at all — #1749, a header and a toggle given
+            numbers independently. The open More sheet covers the floating tab bar by rank: its
+            scrim and card out-rank the bar, the scrim shades to the viewport bottom, and the
+            sheet closes itself with its own ✕ (#4058). Modals sit above both, because a dialog
+            opened from a nav link has to cover the sheet.
           </p>
           <p className="mt-3 text-sm leading-relaxed text-[var(--v2-ink-2)]">
             Adding a layer means picking the tier it belongs to, not picking a number. If none of
@@ -1372,15 +2084,20 @@ export default function DesignSystemPage() {
             Safe areas — <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">SafeAreaBand</code>
           </h3>
           <p className="mt-2 text-sm leading-relaxed text-[var(--v2-ink-2)]">
-            The strip behind the iOS status bar is its own element, never padding inside the bar.{' '}
+            The strip behind the iOS status bar is its own element, never padding inside a
+            bar.{' '}
             <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">ui/SafeAreaBand</code> renders
             it: unblurred, and opaque by default, sized by{' '}
-            <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">--v2-safe-top</code>, and a
-            sibling above the blurred bar. It has no rendered sample here because it is a zero-height
+            <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">--v2-safe-top</code>. The
+            authenticated shell renders it directly above the scroll region (#4029 — there
+            is no top bar for it to sit inside any more), and the marketing
+            <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">Header</code> takes it
+            with <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">bg-transparent</code>.
+            It has no rendered sample here because it is a zero-height
             box at every viewport this page can show — the inset is 0 without a notch. Keep{' '}
             <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">backdrop-filter</code> off
             anything that spans a safe-area band: blur is for content scrolling under a bar, and
-            nothing scrolls under the status bar. Opaque is the default, not the rule: a bar
+            nothing scrolls under the status bar. Opaque is the default, not the rule: a surface
             whose own background is translucent by design passes{' '}
             <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">bg-transparent</code> so its
             colour shows through — an exception to <em>opaque</em>, never to <em>unfiltered</em>.
@@ -1390,12 +2107,12 @@ export default function DesignSystemPage() {
 
       <Section
         title="Bottom tab bar — primary navigation below lg"
-        description="Below `lg` the drawer stops being the primary navigation: four tabs (Dashboard, Agents, Transactions, Accounts) plus More, which opens the drawer for everything else. The drawer is not deleted, it becomes secondary. Tabs are selected from the sidebar's own list BY ROUTE, never by index — the bar's order differs from the drawer's, so a positional read would reorder it the next time an entry is inserted. Active state follows the route including detail pages, so /agents/agent-research lights Agents."
+        description="Below `lg` the primary navigation: a floating pill of four tabs (Home — the bar's label for /dashboard — Agents, Activity — the bar's label for /transactions — and Accounts) plus More, which opens a floating card with everything the tabs do not carry. The active tab is ink + semibold on a neutral CONCENTRIC CAPSULE: a rounded-full indicator set in from the pill by the same 5px on every side, no outline — the bar's own idiom (#4237, Revolut-style), deliberately not SegmentedControl's. Tabs are selected from the sidebar's own list BY ROUTE, never by index — the bar's order differs from the rail's, so a positional read would reorder it the next time an entry is inserted. Active state follows the route including detail pages, so /agents/agent-research lights Agents."
       >
-        <Card hover={false} className="max-w-sm overflow-hidden">
+        <Card hover={false} className="max-w-sm p-4">
           {/*
             The REAL component, in `presentational` mode — not a hand-rolled
-            copy of it. The showcase's mirror of `TransactionsTable` taught this
+            copy of it. A hand-built showcase mirror of a screen taught this
             the expensive way: it kept teaching the pre-#2734 amount column for
             a merge, and #2792 was the issue that noticed. `presentational`
             swaps the fixed viewport placement for in-flow layout and drops the
@@ -1410,21 +2127,21 @@ export default function DesignSystemPage() {
           <MobileTabBar items={baseNavItems} presentational activeHref="/agents" />
         </Card>
         <p className="mt-3 text-sm leading-relaxed text-[var(--v2-ink-2)]">
-          Three surfaces reserve the bar&rsquo;s height from the{' '}
+          The pill floats{' '}
+          <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">--v2-tab-bar-bottom</code>{' '}
+          above the bottom edge — 12px, or the home-indicator inset on a notched phone — and is{' '}
           <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">--v2-tab-bar-h</code>{' '}
-          token, and only one of them is the bar: <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">&lt;main&gt;</code>{' '}
-          adds it to its bottom padding so the last row does not sit under the bar, and the toast
-          container lifts by it so the payoff notification is not hidden behind the navigation
-          everyone is looking at. The safe-area inset is added at each site rather than folded into
-          the token: the bar pads itself with it, the others clear the bar and the inset together.
+          tall. Two other surfaces clear it with the same sum:{' '}
+          <code className="rounded bg-[var(--v2-surface)] px-1 text-xs">&lt;main&gt;</code> adds it
+          to its bottom padding so the last row does not sit under the pill, and the toast container
+          lifts by it so the payoff notification is not hidden behind the navigation everyone is
+          looking at.
         </p>
         <p className="mt-3 text-sm leading-relaxed text-[var(--v2-ink-2)]">
-          <strong>More is not a cell of this bar.</strong> It is a sibling of it, on the
-          nav-toggle tier rather than the tab-bar tier, because one control both opens the drawer
-          and closes it while painted over the drawer — and a child cannot climb out of its
-          parent&rsquo;s stacking context. It keeps the accessible name{' '}
-          <em>Open sidebar</em>, which is load-bearing: the screenshot harness waits on that name
-          from 25 call sites.
+          <strong>More is the fifth cell, and only opens.</strong> The card it opens floats over
+          the bar with a scrim to the bottom edge, so the sheet carries its own ✕. The cell is
+          always <em>Open sidebar</em> and the ✕ is <em>Close sidebar</em> — names that are
+          load-bearing: the capture harness and the e2e fixtures click them.
         </p>
       </Section>
 
@@ -1457,6 +2174,11 @@ export default function DesignSystemPage() {
               <p><Amount value="12.00" symbol="USDC" direction="in" /> <span className="text-xs text-[var(--v2-ink-3)]">— incoming: the quiet success green</span></p>
               <p><Amount value="12.00" symbol="USDC" direction="out" /> <span className="text-xs text-[var(--v2-ink-3)]">— outgoing stays neutral; direction colour lives in DirectionMark</span></p>
               <p><Amount value="80.00" symbol="USDC" direction="out" failed /> <span className="text-xs text-[var(--v2-ink-3)]">— failed: the only red money gets</span></p>
+              <p className="flex items-center gap-2">
+                <DirectionMark direction="out" density="figure" />
+                <Amount value="42.00" symbol="USDC" direction="out" size="md" />{' '}
+                <span className="text-xs text-[var(--v2-ink-3)]">— size=&quot;md&quot; (20px) for a secondary figure, beside a DirectionMark figure</span>
+              </p>
               <p><Amount value="320.00" symbol="USDC" direction="out" size="lg" /> <span className="text-xs text-[var(--v2-ink-3)]">— size=&quot;lg&quot; for detail-panel headlines</span></p>
             </div>
           </Card>
@@ -1474,7 +2196,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="CopyButton — the one copy affordance"
-        description="The inline check-pop copy button, extracted from <Address> on its second call site (#1878). Any value a user is expected to paste elsewhere gets this, never a hand-rolled button: it owns the hit area, the focus ring, the 1.5s confirmation, and the silent catch around navigator.clipboard — which rejects on insecure origins, denied permissions, and in most headless captures. Failing quietly is correct for an accelerator; the value stays on screen and selectable. Pass `label` lowercase and name the thing, not the widget — it reads as “Copy address”, then “Address copied”."
+        description="The inline check-pop copy button, extracted from <Address> on its second call site (#1878). Any value a user is expected to paste elsewhere gets this, never a hand-rolled button: it owns the hit area, the focus ring, the 1.5s confirmation, and the catch around navigator.clipboard — which rejects on insecure origins, denied permissions, and in most headless captures. Where the value is printed beside the button, failing quietly is correct: the value stays on screen and selectable. Pass `label` lowercase and name the thing, not the widget — it reads as “Copy address”, then “Address copied”. Three additions (#3998, #4005): `text` renders the labelled ghost-button shape for a value that is NOT printed (the marketplace’s “Copy prompt”) — keep the visible words at the start of the accessible name (“Copy prompt for Fact”); `onCopyFailed`, which such a caller must pass to reveal the value when the clipboard refuses it; and `copiedText`, which replaces the confirmation when “Copied” alone would drop the caller’s next step (“Copied — paste it to Atlas”, #4005) — the longer label wraps instead of truncating."
       >
         <Card hover={false} className="p-5">
           <div className="flex flex-wrap items-center gap-6 text-sm text-[var(--v2-ink-2)]">
@@ -1483,12 +2205,22 @@ export default function DesignSystemPage() {
               <CopyButton value="haven-research" label="MCP server name" />
             </span>
             <span className="inline-flex items-center gap-1">
-              sk_agent_a1b2c3
-              <CopyButton value="sk_agent_a1b2c3" label="API key prefix" />
+              ***
+              <CopyButton value="***" label="API key prefix" />
             </span>
           </div>
+          <LabelledCopyDemo />
+          <div className="mt-3">
+            <CopyButton
+              value="Pay https://services.ampersend.ai/api/joke and return the result"
+              label="prompt for Ampersand — joke"
+              text="Copy prompt"
+              copiedText="Copied — paste it to Research agent"
+            />
+            <span className="ml-2 text-xs text-[var(--v2-ink-3)]">— `copiedText` (#4005): the confirmation names the next step.</span>
+          </div>
           <p className="mt-3 text-xs text-[var(--v2-ink-3)]">
-            Click one — the icon swaps to a success check for 1.5s, then reverts.
+            Click one — the icon swaps to a success check for 1.5s, then reverts; the labelled shape also reads “Copied”, or the caller’s `copiedText`.
           </p>
         </Card>
       </Section>
@@ -1496,8 +2228,9 @@ export default function DesignSystemPage() {
       <Section
         title="Card.Section — nested content without grey-on-white"
         description="When you need to group content inside a card, use Card.Section instead of a grey inner wrapper. Renders a hairline top border that bleeds to the card's edges — the canonical way to subsection a card. Pass `divided` for a row list (auto row dividers, no horizontal padding so child rows own theirs)."
+        testId="card-section-default"
       >
-        <Card hover={false} className="p-5">
+        <Card hover={false} className="p-5 md:p-6">
           <div>
             <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Operating wallet</h3>
             <p className="mt-1 text-xs text-[var(--v2-ink-3)]">Base · 0x8f4F…6f4C</p>
@@ -1675,12 +2408,28 @@ export default function DesignSystemPage() {
 
       <Section
         title="StepProgress"
-        description="Thin step indicator for multi-step flows (connect agent, onboarding). 0-indexed currentStep; pass totalSteps as currentStep to render everything completed."
+        description="Full-width step indicator for multi-step flows (connect agent, replace signing key): discs at the ends, connectors stretch between them, an optional short label under each disc. 0-indexed currentStep; pass totalSteps as currentStep to render everything completed."
       >
         <Card hover={false} className="max-w-sm space-y-4 p-5">
-          <StepProgress totalSteps={3} currentStep={0} />
-          <StepProgress totalSteps={3} currentStep={1} />
-          <StepProgress totalSteps={3} currentStep={3} />
+          <StepProgress totalSteps={3} currentStep={0} labels={['Name', 'Budget', 'Connect']} />
+          <StepProgress totalSteps={3} currentStep={1} labels={['Name', 'Budget', 'Connect']} />
+          <StepProgress totalSteps={3} currentStep={3} labels={['Name', 'Budget', 'Connect']} />
+          {/* `halted`: the flow stopped on Connect (expired / cancelled / failed). */}
+          <StepProgress totalSteps={3} currentStep={2} labels={['Name', 'Budget', 'Connect']} halted />
+        </Card>
+      </Section>
+
+      <Section
+        title="DialogActions"
+        description="A dialog screen's action pair: secondary then primary, equal halves on the body edges at 40px. Below sm (640px) the pair stacks, primary on top, both full width — resize to see it. A screen with a single action uses one full-width primary instead."
+      >
+        <Card hover={false} className="max-w-xl p-5" data-testid="ds-dialog-actions">
+          <DialogActions>
+            <Button variant="ghost" className="flex-1">
+              Back
+            </Button>
+            <Button className="flex-1">Create setup prompt</Button>
+          </DialogActions>
         </Card>
       </Section>
 
@@ -1724,8 +2473,8 @@ export default function DesignSystemPage() {
       </Section>
 
       <Section
-        title="Direction marks (in / out / pending)"
-        description="One shared `<DirectionMark>` for every transaction row in the app. Incoming uses success green, outgoing uses debit sky, pending uses neutral grey. Density `compact` (32px) for dashboard rows, `comfortable` (36px, default) for the dedicated transactions table."
+        title="Direction marks (in / out / pending / move)"
+        description="One shared `<DirectionMark>` for every transaction row in the app. Incoming uses success green, outgoing uses debit sky, pending uses neutral grey, and a move between your own accounts uses the two-way arrow on the same neutral grey ground (#4264) — neither income nor spend, so like pending it passes no sign to `Amount`. Density `compact` (32px) for dashboard rows, `comfortable` (36px, default) for the roomier row, `figure` (24px mark, 14px icon) beside a 20px secondary figure (Amount `md`, #4259), `inline` (18px mark, 11px icon) for a mark in dense inline text."
       >
         <Card hover={false} className="p-5">
           <div className="flex flex-wrap items-center gap-5">
@@ -1741,6 +2490,10 @@ export default function DesignSystemPage() {
               <DirectionMark direction="neutral" />
               <p className="text-xs text-[var(--v2-ink-3)]">pending · comfortable</p>
             </div>
+            <div className="flex flex-col items-center gap-1">
+              <DirectionMark direction="move" />
+              <p className="text-xs text-[var(--v2-ink-3)]">move · comfortable</p>
+            </div>
             <div className="ml-4 flex flex-col items-center gap-1">
               <DirectionMark direction="in" density="compact" />
               <p className="text-xs text-[var(--v2-ink-3)]">in · compact</p>
@@ -1749,12 +2502,96 @@ export default function DesignSystemPage() {
               <DirectionMark direction="out" density="compact" />
               <p className="text-xs text-[var(--v2-ink-3)]">out · compact</p>
             </div>
+            <div className="flex flex-col items-center gap-1">
+              <DirectionMark direction="move" density="compact" />
+              <p className="text-xs text-[var(--v2-ink-3)]">move · compact</p>
+            </div>
+            <div className="ml-4 flex flex-col items-center gap-1">
+              <DirectionMark direction="in" density="figure" />
+              <p className="text-xs text-[var(--v2-ink-3)]">in · figure</p>
+            </div>
+            <div className="flex flex-col items-center gap-1">
+              <DirectionMark direction="out" density="figure" />
+              <p className="text-xs text-[var(--v2-ink-3)]">out · figure</p>
+            </div>
+            <div className="ml-4 flex flex-col items-center gap-1">
+              <DirectionMark direction="in" density="inline" />
+              <p className="text-xs text-[var(--v2-ink-3)]">in · inline</p>
+            </div>
+            <div className="flex flex-col items-center gap-1">
+              <DirectionMark direction="out" density="inline" />
+              <p className="text-xs text-[var(--v2-ink-3)]">out · inline</p>
+            </div>
+            <div className="flex flex-col items-center gap-1">
+              <DirectionMark direction="move" density="inline" />
+              <p className="text-xs text-[var(--v2-ink-3)]">move · inline</p>
+            </div>
           </div>
           <p className="mt-4 text-xs leading-relaxed text-[var(--v2-ink-3)]">
             Don&apos;t reinline this markup. If you need a new direction state, add it to{' '}
             <code className="rounded bg-[var(--v2-surface)] px-1">DirectionMark</code> and document it here.
           </p>
         </Card>
+      </Section>
+
+      <Section
+        title="Technical details disclosure"
+        description="A markup pattern, not a component (#4264): a native <details>/<summary>, closed by default, for the technical disclosure surfaces (§ Vocabulary, voice, accessibility). The summary is a full-width row — label leading, a lucide ChevronDown trailing, rotating 180° on open via group-open:rotate-180, the same group-open rotation rule as § Arrows — and the default marker is suppressed. The content uses the panel's own detail rows (ink-3 dt label, ink-2 dd value), so the opened block reads as part of the panel. The hand-rolled <details> uses that predate the pattern (ErrorBoundary, SignersSection, OffersTable, connect-agent/*, the signers card's text-only Show address toggle) are not migrated; a new technical disclosure is written this way. Specimen content — the module address, the relayer hash, the token standard — is exactly the vocabulary this pattern exists to keep behind a deliberate fold."
+      >
+        <div className="grid gap-5 lg:grid-cols-2">
+          <Card hover={false} className="p-5">
+            <p className="mb-3 text-xs text-[var(--v2-ink-3)]">Closed by default</p>
+            <details className="group">
+              <summary className="flex w-full cursor-pointer select-none list-none items-center justify-between rounded text-sm text-[var(--v2-ink)] [&::-webkit-details-marker]:hidden">
+                Technical details
+                <Icon
+                  icon={ChevronDown}
+                  className="h-4 w-4 flex-shrink-0 text-[var(--v2-ink-3)] transition-transform group-open:rotate-180"
+                />
+              </summary>
+              <dl className="mt-3 space-y-1.5 border-t border-[var(--v2-border)] pt-3 text-xs">
+                <div className="flex items-center gap-2">
+                  <dt className="flex-shrink-0 text-[var(--v2-ink-3)]">Module:</dt>
+                  <dd className="min-w-0 truncate font-mono text-[var(--v2-ink-2)]">0x3fab…8c21</dd>
+                </div>
+                <div className="flex items-center gap-2">
+                  <dt className="flex-shrink-0 text-[var(--v2-ink-3)]">Token standard:</dt>
+                  <dd className="min-w-0 text-[var(--v2-ink-2)]">ERC-3009</dd>
+                </div>
+              </dl>
+            </details>
+          </Card>
+          <Card hover={false} className="p-5">
+            <p className="mb-3 text-xs text-[var(--v2-ink-3)]">Open (the `open` attribute, for the specimen only)</p>
+            {/*
+              `inert` + `aria-hidden`: this specimen is held open by a literal
+              `open` attribute, so the #2002 permanently-open rule applies — the
+              wrapper is what keeps the static illustration out of the
+              accessibility tree and the tab order.
+            */}
+            <div inert aria-hidden="true">
+              <details className="group" open>
+                <summary className="flex w-full cursor-pointer select-none list-none items-center justify-between rounded text-sm text-[var(--v2-ink)] [&::-webkit-details-marker]:hidden">
+                  Technical details
+                  <Icon
+                    icon={ChevronDown}
+                    className="h-4 w-4 flex-shrink-0 text-[var(--v2-ink-3)] transition-transform group-open:rotate-180"
+                  />
+                </summary>
+                <dl className="mt-3 space-y-1.5 border-t border-[var(--v2-border)] pt-3 text-xs">
+                  <div className="flex items-center gap-2">
+                    <dt className="flex-shrink-0 text-[var(--v2-ink-3)]">Module:</dt>
+                    <dd className="min-w-0 truncate font-mono text-[var(--v2-ink-2)]">0x3fab…8c21</dd>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <dt className="flex-shrink-0 text-[var(--v2-ink-3)]">Token standard:</dt>
+                    <dd className="min-w-0 text-[var(--v2-ink-2)]">ERC-3009</dd>
+                  </div>
+                </dl>
+              </details>
+            </div>
+          </Card>
+        </div>
       </Section>
 
       <Section
@@ -1802,7 +2639,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="First-run setup"
-        description="While setup is in progress the guide IS the Needs attention card (titled Get started), with the rule items that still apply listed below it. Step 1 completes on any USDC on an account — other tokens never count — and reads as unknown, with no funding action, when the USDC read is unavailable; its action opens Add funds, which carries the test-network faucet. Step 2 completes only on an agent that can pay (active or paused, with a usable budget) and names the newest agent still waiting for setup; it can be done before funding, at secondary weight. Step 3 unlocks on the same rule. Hide for now survives a reload until another step completes. The guide never shows an address. The steps own the card only until the first agent payment; from then on they never return — one You're set up line takes their place until dismissed, and the Needs attention rules speak for anything that changes later."
+        description="While setup is in progress the guide IS the Needs attention card (titled Get started), with the rule items that still apply listed below it. Step 1 completes on any USDC on an account — other tokens never count — and reads as unknown, with no funding action, when the USDC read is unavailable; its action keeps its task wording, Add funds (owner decision on #4094), and opens the one Receive dialog, which carries the test-network faucet. Step 2 completes only on an agent that can pay (active or paused, with a usable budget) and names the newest agent still waiting for setup; it can be done before funding, at secondary weight. Step 3 unlocks on the same rule. Hide for now survives a reload until another step completes. The guide never shows an address. The steps own the card only until the first agent payment; from then on they never return — one You're set up line takes their place until dismissed, and the Needs attention rules speak for anything that changes later."
       >
         <div className="max-w-3xl space-y-4">
           {/* A new account: no USDC yet, nothing connected. */}
@@ -2130,9 +2967,7 @@ export default function DesignSystemPage() {
             ['Research API', '0x31bc...8d04'],
           ].map(([name, address]) => (
             <div key={name} className="flex items-center gap-3 border-b border-[var(--v2-border)] px-5 py-3 last:border-b-0">
-              <div className="flex h-9 w-9 items-center justify-center rounded-full border border-brand/20 bg-[var(--v2-brand-soft)]">
-                <span className="text-xs font-semibold text-[var(--v2-brand)]">{name.slice(0, 2).toUpperCase()}</span>
-              </div>
+              <Monogram name={name} />
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium text-[var(--v2-ink)]">{name}</p>
                 <p className="mt-0.5 font-mono text-xs text-[var(--v2-ink-3)]">{address}</p>
@@ -2145,45 +2980,56 @@ export default function DesignSystemPage() {
 
       <Section
         title="Receive funds"
-        description="Manual funding surfaces must make the Haven wallet, network, supported tokens, and copy action obvious before the user sends anything on-chain."
+        description="The one Receive dialog: the address with an inline QR and Copy, one network rule, and the other ways to add money — nothing else asks to be read before the user sends."
       >
         <Card hover={false} className="max-w-xl p-5">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <p className="text-sm font-semibold text-[var(--v2-ink)]">Operating wallet</p>
-              <p className="mt-1 text-xs text-[var(--v2-ink-3)]">Base</p>
-            </div>
-            <StatusBadge>On-chain receive</StatusBadge>
-          </div>
-          <div className="mt-5 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-4">
+          <div className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-4">
             <p className="text-xs font-medium text-[var(--v2-ink-3)]">Haven wallet address</p>
             <p className="mt-2 break-all font-mono text-sm text-[var(--v2-ink)]">{sampleAddress}</p>
             <div className="mt-4 flex flex-wrap items-center gap-2">
               <Button size="sm">Copy address</Button>
-              <Button variant="ghost" size="sm">Show QR code</Button>
-              <Button variant="ghost" size="sm" href="#" target="_blank" rel="noopener noreferrer">
-                View on explorer
-              </Button>
             </div>
           </div>
+          {/* #2929: the QR is authored against white and a scanner reads its
+              module contrast — the box stays fixed-white in both themes via
+              `.v2-light-surface` (globals.css), as the dialog's does.
+              #4307: one frame, and no visible caption — the alt text names
+              the code and the address and Copy button above say what it
+              holds, exactly as the dialog renders. */}
+          <div className="v2-light-surface mt-4 rounded-[10px] border p-4">
+            <div className="flex flex-col items-center">
+              {dsReceiveQr ? (
+                <img
+                  src={dsReceiveQr}
+                  alt="QR code for Operating wallet on Base"
+                  className="h-[220px] w-[220px] rounded-lg"
+                />
+              ) : (
+                <div className="h-[220px] w-[220px] animate-pulse rounded-lg bg-[var(--v2-surface-2)]" />
+              )}
+            </div>
+          </div>
+          {/* #4094 mockup note 9 (#4167): ONE network rule, one line. */}
+          <p className="mt-4 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+            Send USDC on Base only. It arrives in about a minute and shows in Activity.
+          </p>
           <div className="mt-4 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] p-4">
-            <p className="text-xs font-medium text-[var(--v2-ink-3)]">Supported on Base</p>
-            <div className="mt-3 flex flex-wrap gap-2">
-              {['ETH', 'USDC'].map((token) => (
-                <span
-                  key={token}
-                  className="rounded-full border border-[var(--v2-border)] bg-[var(--v2-surface)] px-2.5 py-1 text-xs font-medium text-[var(--v2-ink-2)]"
-                >
-                  {token}
-                </span>
-              ))}
+            <p className="text-sm font-semibold text-[var(--v2-ink)]">Other ways to add money</p>
+            <div className="mt-3 flex items-start gap-3">
+              <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)]">
+                <Icon icon={CreditCard} className="h-4 w-4 text-[var(--v2-ink-2)]" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-[var(--v2-ink)]">Buy with card</p>
+                <p className="mt-0.5 text-xs text-[var(--v2-ink-3)]">
+                  Purchase USDC directly to your account via Coinbase. KYC is handled by Coinbase;
+                  Haven never holds your funds.
+                </p>
+              </div>
             </div>
-          </div>
-          <div className="mt-4 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-4">
-            <p className="text-sm font-semibold text-[var(--v2-ink)]">Before you send</p>
-            <p className="mt-2 text-xs leading-relaxed text-[var(--v2-ink-2)]">
-              Use the Base network, send only supported tokens, and wait for the on-chain transfer to confirm.
-            </p>
+            <Button className="mt-3 w-full" trailingIcon>
+              Buy with card
+            </Button>
           </div>
         </Card>
       </Section>
@@ -2202,7 +3048,7 @@ export default function DesignSystemPage() {
 
           {/* #3810: the grouped dashboard row — `countLabel` renders the muted
                 ×N beside the title, and `fiat` switches the amount to Amount's
-                currency mode (≈ marks a serve-time valuation). The dashboard's
+                currency mode (a row never carries ≈, #3950/#4165). The dashboard's
                 merchant-first activity list is this shape. The testid anchors
                 the design-system clip (#3064 pattern); `Card` does not spread
                 extra props, so the div carries it. */}
@@ -2220,7 +3066,8 @@ export default function DesignSystemPage() {
             />
             {/* #3810: the grouped dashboard row — `countLabel` renders the
                 muted ×N beside the title, and `fiat` switches the amount to
-                Amount's currency mode (≈ marks a serve-time valuation). The
+                Amount's currency mode, plain: a list row never carries ≈ —
+                the mark is for totals and the detail panel (#4165). The
                 dashboard's merchant-first activity list is this shape, and a
                 confirmed row there carries no badge (#3897) — only pending
                 and failed name their state. */}
@@ -2230,7 +3077,7 @@ export default function DesignSystemPage() {
               description="Research assistant"
               value="36.00"
               countLabel="×3"
-              fiat={{ amount: 134.5, currency: 'SEK', approx: true }}
+              fiat={{ amount: 134.5, currency: 'SEK' }}
             />
             <TransactionActivityRow
               direction="out"
@@ -2256,304 +3103,153 @@ export default function DesignSystemPage() {
         </div>
       </Section>
 
+      {/* #4096: the ledger mode — one row per transaction under day headers,
+          where the dashboard preview above merges same agent / merchant / day
+          into a "×N" row. */}
       <Section
-        title="Transaction history"
-        description="Tables render through the Table primitive: Table.Head (collapses when narrow, optional sticky), Table.HeaderCell (srLabel for icon columns, revealAt for container-keyed collapse), Table.SortableHeaderCell (aria-sort + focus-ring button + chevron), Table.Body (one row-border rule). Cell content stays plain <td>. Compact TransactionActivityRow remains for dashboard, account, and agent previews."
+        title="Activity ledger (day-grouped)"
+        description="TransactionActivityRow's ledger mode (#4096, epic #4093): one row per transaction, grouped under the tinted TransactionActivityDayHeader day bands (“Today”, “Yesterday”, then short dates) — the second sanctioned band after Card.Header, on the table-header tokens with a full-width --v2-border hairline below (#4225). Rows within one day are separated by an inset --v2-border-subtle hairline that starts at the text column (insetDivider on every row after a day's first, #4165) — the un-merged counterpart of the dashboard's merged preview, which folds same agent / same merchant / same day into one ×N row. A ledger row with onOpen becomes a button: click or Enter/Space opens the shared TransactionDetailPanel, exactly as the account page's Activity tab will. Nothing inside a ledger row may be a control, so the accounting feed's badge rides extraBadges as a plain pill (#4266). A move between the user's own accounts is one row (the /transactions fold, #4265): the neutral two-way mark, an unsigned amount, and the bare TransactionMovement — the actor, then the two account names joined by the movement arrow, without From/To words."
       >
-        <Card hover={false} className="overflow-hidden">
-          <Table>
-            <Table.Head>
-              <tr>
-                <Table.HeaderCell srLabel="Direction" className="w-10" />
-                <Table.HeaderCell align="left">Activity</Table.HeaderCell>
-                {/* Initiator and Date reveal at the `xl` CONTAINER stage
-                    (974px), not the `md` one (718px) — #1827, re-keyed onto
-                    the container by #1999.
-                    MEASURED, Failed row title measure / lines / row height on
-                    the seven-columns-at-`md` layout this replaced: 71.1px / 5
-                    / 156 at 768px, 82.5px / 4 / 132 at 800px, 118px / 3 / 92
-                    at 900px, then 71.1px / 5 / 156 AGAIN at 1024px. The
-                    repeat is the whole point: TWO things step at `lg` and
-                    both take width — `Sidebar.tsx` goes `fixed` ->
-                    `lg:static` at `w-[240px]` (border-box, so its 1px
-                    `border-r` is INSIDE the 240, measured: `main` is 784px at
-                    a 1024px viewport), AND the authenticated layout's `main`
-                    steps `p-6` -> `lg:p-8`, which is 16px more across the
-                    pair. 240 + 16 = 256px handed back in one breakpoint.
-                    (#1827 wrote 241 + 16 = 257 here. The conclusion was
-                    right and the number was not; corrected from a direct
-                    reading of the sidebar box.) So the content available to
-                    this table is a SAWTOOTH in viewport width:
-
-                      viewport   390  767  768  900  1023  1024  1279  1280
-                      container  340  717  718  850   973   718   973   974
-
-                    which is why the stages are CONTAINER queries now. A
-                    container query does NOT make the second stage
-                    unnecessary — the container really is 718px at a 1024px
-                    viewport, so a single-stage reveal starves the title there
-                    exactly as before. What it removes is the need to
-                    rediscover the sawtooth to pick the viewport that clears
-                    both teeth: 974px is simply the width at which seven
-                    columns fit.
-                    Pinning the `md`+ columns the way `TransactionsTable` does
-                    was tried during #1774 and is NOT the answer — it grew
-                    desktop rows 85px -> 133px, because a 140px `From / To`
-                    wraps this showcase's longer names.
-                    What the two deferred columns cost is NOT the same, and
-                    the difference is worth naming rather than smoothing over.
-                    The DATE rides under the Amount between the `md` and `xl`
-                    stages. Below `md` it is dropped with the Amount column
-                    itself (#2792) — the narrow layout no longer carries it,
-                    which is what the component does too. It is hidden by
-                    `tableHideFromClass('xl')` so it can never disagree with
-                    the column it stands in for. The INITIATOR genuinely is
-                    dropped between the two stages. For two of the three demo
-                    rows that costs nothing visible, because the title already
-                    says it ("AGENT PAYMENT BY RESEARCH ASSISTANT" and
-                    "FAILED PAYMENT BY RESEARCH ASSISTANT"). What carries the
-                    initiator there is the trailing `by <agent>` clause,
-                    which `transactionTitle` in
-                    `lib/transaction-presentation.tsx` appends to whatever
-                    `paymentSourceTitle` returns — so the argument never rested
-                    on the protocol name, and it survives #2357 taking the
-                    protocol out of the title (this quote previously named it;
-                    #2448 re-based it). The MEASUREMENTS above are unaffected
-                    for the same reason they were taken on the Failed row:
-                    that title is "Failed payment by Research assistant" and
-                    #2357 did not touch it.
-                    SCOPE: "the title already says it" holds in the `md`->`xl`
-                    band, and since #2792 it holds below `md` as well. The
-                    reading quoted here was "Agent payme…" / "Failed payme…",
-                    measured on a 390px capture when the Activity cell was
-                    138px and the title ellipsised. Collapsing the Amount
-                    column took the cell to 248px and the title now WRAPS, so
-                    the `by <agent>` clause survives and the narrow layout no
-                    longer loses the initiator. Re-measured on the 390px
-                    capture of this branch rather than left as prose: the
-                    instrument moved, so the reading had to be retaken. Raised by
-                    `haven-design-reviewer` on #2448, against the rendered
-                    mobile capture rather than from the source.
-                    For the first row it is a real loss — a human-initiated payment's
-                    initiator ("You") rests on the cell, and nothing else on
-                    the row says so. That is an acceptable trade here (the
-                    narrow layout drops the initiator outright) but it IS a
-                    loss, and a showcase whose job is to teach the collapse
-                    pattern should not claim otherwise. The first demo row is
-                    deliberately a HUMAN-initiated payment (#2097: 'You' is
-                    reserved for `initiatedBy: 'human'`; agent rows carry the
-                    agent name) — the only shape for which the initiator cell
-                    may read 'You'.
-                    WHY THE DATE IS NOT HANDED BACK EARLIER. It was MEASURED,
-                    not judged: restoring the Date column at a 973px container
-                    (a 1024px viewport is 718px, but 1023px and 1279px are
-                    both 973px) put the Failed row back to 109.9px across
-                    THREE lines in a 108px row at 1024px under the old
-                    viewport keying, because 1024px is the bottom tooth. The
-                    container query answers the same question directly: 973px
-                    is one pixel short of the stage, 974px clears it.
-                    After: 141.7px / 2 / 100 at 768px and 1024px; 1280px is
-                    unchanged to the pixel, so no visual baseline moves.
-                    Gated by geometry in `e2e/transaction-title-measure.spec.ts`
-                    (the pixel gate renders 1280 and 390 only, so it cannot
-                    see any width this is about) and by
-                    `e2e/table-container-collapse.spec.ts`, which resizes the
-                    CONTAINER at a fixed viewport — the only assertion that
-                    can tell a container query from a viewport one. */}
-                <Table.HeaderCell align="left" revealAt="xl">Initiator</Table.HeaderCell>
-                <Table.HeaderCell align="left" revealAt="md">From / To</Table.HeaderCell>
-                <Table.SortableHeaderCell label="Date" direction="desc" onSort={() => toast.info('Sorts the loaded set')} revealAt="xl" />
-                {/* `revealAt="md"` renders identically today — the header row
-                    is already `display: none` below the md stage — but this
-                    document's own rule is "header and body must be converted
-                    together, always", and a body cell on a stage its header
-                    does not name is the #1774 shape one layer down. */}
-                <Table.SortableHeaderCell label="Amount" direction={null} onSort={() => toast.info('Sorts the loaded set')} align="right" revealAt="md" />
-                <Table.HeaderCell srLabel="External details" className="w-8" />
-              </tr>
-            </Table.Head>
-            <Table.Body>
-              {[
-                {
-                  title: 'Payment sent',
-                  from: 'Operating wallet',
-                  to: 'Acme Operations',
-                  initiator: 'You',
-                  date: '12m ago',
-                  value: '500.00',
-                  direction: 'out' as const,
-                  failed: false,
-                },
-                {
-                  title: 'Agent payment by Research assistant',
-                  from: 'Operating wallet',
-                  to: 'API provider',
-                  initiator: 'Research assistant',
-                  date: '1h ago',
-                  value: '12.00',
-                  direction: 'out' as const,
-                  failed: false,
-                },
-                {
-                  title: 'Failed payment by Research assistant',
-                  from: 'Operating wallet',
-                  to: 'unknown.vendor',
-                  initiator: 'Research assistant',
-                  date: '2h ago',
-                  value: '25.00',
-                  direction: 'out' as const,
-                  failed: true,
-                },
-              ].map((row) => (
-                <tr key={row.title}>
-                  {/* Narrow gutters below md mirror TransactionsTable (#1772).
-                      Without them this showcase rendered 375px wide inside a
-                      343px Card at 393px — clipped by the Card's
-                      `overflow-hidden`, i.e. the very defect the table below
-                      is meant to document the correct shape of. */}
-                  {/* The BELOW-md widths live on the `<td>`s, not on the
-                      header cells, and that distinction is the whole defect
-                      (#1774/#1750). `Table.Head` is `hidden md:table-header-group`,
-                      so below md the header row is `display: none` and its
-                      width declarations take no part in column sizing at all —
-                      putting `w-[110px]` on the Amount HEADER measured a
-                      byte-identical mobile layout (Activity still 13px at
-                      390px) while making desktop rows grow 85px -> 133px.
-                      `TransactionsTable` carries these widths on its `<td>`s
-                      (`w-9`/`w-[110px]`/`w-8`, and UNCONDITIONALLY — it stays
-                      fixed-width at desktop too, which is the one place this
-                      showcase deliberately diverges), which is why its
-                      `max-w-0` Activity cell lands on a healthy 106px at 390px
-                      while this showcase's collapsed to
-                      3.7px at 320px / 13px at 390px. `md:w-auto` hands the
-                      columns back to content sizing at md and up, so THESE
-                      widths contribute nothing to the desktop baseline. (The
-                      desktop capture does still move by a few pixels — from
-                      the `TransactionMovement` change, which alters the
-                      From/To column's min-content: the middle row measured
-                      85px -> 73px at 1280px. Attributing that to these classes
-                      would send the next reader to the wrong file.) */}
-                  <td className="w-9 px-2 py-4 align-middle md:w-auto md:px-4">
-                    <DirectionMark direction={row.direction} />
-                  </td>
-                  {/* `max-w-0` BELOW md ONLY. Unconditional, it squashed the
-                      Activity column on DESKTOP too — the visual-regression
-                      gate caught all three Activity titles ellipsised at
-                      1280px ("Recei…" / "Faile…" and so on, quoting the demo
-                      titles AS THEY READ AT THE TIME; #2357 has since changed
-                      two of the three, and the incident is about the width,
-                      not about any particular string).
-                      TransactionsTable survives it unconditionally because
-                      every other column there carries an explicit `w-[…]`, so
-                      the leftover flows to Activity; this showcase sizes its
-                      columns purely from content, so capping one collapses it.
-                      Do not drop the `md:` here. */}
-                  <td className="max-w-0 px-4 py-4 align-middle md:max-w-none">
-                    {/* `break-words` + `flex-wrap` mirror TransactionsTable
-                        below `md`. This said `truncate` until #2792, on the
-                        reasoning that wrapping "would teach a shape the real
-                        component does not have" — which was true when the
-                        component ellipsised below `md` and stopped being true
-                        when #2734 gave it `break-words` and a 248px cell. The
-                        premise inverted and the class did not follow it, which
-                        is how a showcase drifts while looking deliberate. */}
-                    {/* `md:flex-nowrap` for the same reason as `md:max-w-none`
-                        above: this showcase's desktop titles WRAP to two
-                        lines, so a wrapping flex row pushed the Failed badge
-                        onto a third and grew the page by 12px. The visual
-                        gate measured it — 17746 -> 17758 — after the first
-                        attempt at this fix. Desktop must not move at all. */}
-                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 md:flex-nowrap">
-                      {/* Wrap below md (matching the component), wrap at md
-                          and up (this showcase's own desktop shape). The `md:`
-                          half is untouched, so desktop stays byte-identical —
-                          only the narrow rendering changes, and it changes
-                          TOWARDS the component. */}
-                      <p
-                        className="break-words text-sm font-semibold text-[var(--v2-ink)] md:overflow-visible md:whitespace-normal md:text-clip"
+        <div className="max-w-xl">
+          {/* #4288: the testid anchors the ledger clip — the day-grouped
+              card with its same-day inset divider, which no other baseline
+              pins. `Card` does not spread extra props, so the div carries it
+              (the ds-activity-row pattern). */}
+          <div data-testid="ds-activity-ledger">
+            <Card hover={false} className="overflow-hidden">
+              <div className="divide-y divide-[var(--v2-border)]">
+                {transactionDayGroups(DS_LEDGER_ROWS, (row) => row.at).map((group) => (
+                  <div key={group.dayKey}>
+                    <TransactionActivityDayHeader label={group.label} />
+                    {group.items.map((row, index) => (
+                      <TransactionActivityRow
+                        key={row.id}
+                        insetDivider={index > 0}
+                        direction={row.direction ?? 'out'}
                         title={row.title}
-                      >
-                        {row.title}
-                      </p>
-                      {row.failed ? <StatusBadge tone="danger">Failed</StatusBadge> : null}
-                    </div>
-                    <div className={`mt-1 ${tableHideFromClass('md')}`}>
-                      <TransactionMovement from={row.from} to={row.to} />
-                    </div>
-                    {/* The amount, riding under the title while its own column
-                        is collapsed (#2792). LEFT-aligned, hanging under the
-                        start of the title — the rule in this document's own
-                        § Transaction tables, which #2734 shipped the other way
-                        first and a design review reversed: right alignment is
-                        a property of a column of numbers, and a stacked amount
-                        is not a column. */}
-                    <div className={`mt-1 text-sm ${tableHideFromClass('md')}`}>
-                      <Amount value={row.value} symbol="USDC" direction={row.direction} failed={row.failed} />
-                    </div>
-                  </td>
-                  <td className={`px-4 py-4 align-middle text-sm text-[var(--v2-ink-2)] ${tableColumnClass('xl')}`}>
-                    {row.initiator}
-                  </td>
-                  <td className={`px-4 py-4 align-middle ${tableColumnClass('md')}`}>
-                    <TransactionMovement from={row.from} to={row.to} />
-                  </td>
-                  <td className={`px-4 py-4 align-middle text-sm text-[var(--v2-ink-3)] ${tableColumnClass('xl')}`}>
-                    {row.date}
-                  </td>
-                  {/* Collapsed below `md`, in step with `TransactionsTable`
-                      (#2734/#2792). The 110px this column cost came straight
-                      out of Activity — the only flexible column — and that is
-                      what the showcase is here to demonstrate. The date rider
-                      goes with it, which is correct rather than incidental:
-                      the real table shows no date below `md` either, so the
-                      two now agree at every stage instead of at most of them. */}
-                  <td className={`px-4 py-4 align-middle text-right ${tableColumnClass('md')}`}>
-                    <p>
-                      <Amount value={row.value} symbol="USDC" direction={row.direction} failed={row.failed} />
-                    </p>
-                    <p className={`mt-1 text-xs text-[var(--v2-ink-3)] ${tableHideFromClass('xl')}`}>{row.date}</p>
-                  </td>
-                  <td className="w-8 px-2 py-4 align-middle text-right md:w-auto md:px-4">
-                    <ExternalDetailsLink href="#" />
-                  </td>
-                </tr>
-              ))}
-            </Table.Body>
-          </Table>
-        </Card>
+                        description={row.description}
+                        value={row.value}
+                        extraBadges={
+                          row.accounting ? (
+                            <AccountingBadge accounting={DS_LEDGER_ACCOUNTING} interactive={false} />
+                          ) : undefined
+                        }
+                        asset="USDC"
+                        timestamp={timeAgo(row.at)}
+                        onOpen={() => setDsLedgerOpened(row.title)}
+                      />
+                    ))}
+                  </div>
+                ))}
+              </div>
+            </Card>
+          </div>
+          <p className="mt-3 text-xs text-[var(--v2-ink-3)]">
+            {dsLedgerOpened
+              ? `Opened "${dsLedgerOpened}" — the account page opens the shared TransactionDetailPanel from this row.`
+              : 'Click a row (or press Enter) — the account page opens the shared TransactionDetailPanel from the row.'}
+          </p>
+        </div>
       </Section>
 
       <Section
-        title="Section with a collapsed add (manage pattern)"
-        description="How a detail-page section manages a list (#3695, the agent page's Spending section). The heading and one-line description sit ABOVE the card; each row carries its own actions (Edit, Stop budget) beside the thing they change; and once one item exists, adding another is a collapsed control that opens the form in place — never a permanent second form competing with the rows. With no item yet, the form is the section's content. This replaced the action-footer pattern, whose buttons sat away from the data they affected."
+        testId="ds-list-controls"
+        title="List controls — ListToolbar, FacetMenu, PeriodPicker"
+        description="The one pattern for search, filters, sort, period, count and no-match on every list (#4110, epic #4108). A page declares its noun, facets, optional Sort and Period, and an actions slot; the toolbar owns layout, keyboard, the phone sheet, chips, count and copy. State lives in the URL through list-url-codec + useListUrlState. Full rules: the List controls section of design-system.md."
       >
-        <div>
-          <h3 className="v2-text-h3 text-[var(--v2-ink)]">Spending</h3>
-          <p className="mt-0.5 mb-3 text-sm text-[var(--v2-ink-muted)]">
-            What this agent can spend each period. Budgets are enforced on-chain: a payment over budget is declined before any money moves.
-          </p>
-          <Card hover={false} className="p-5 md:p-6">
-            <div className="flex items-start justify-between gap-3 py-3">
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium text-[var(--v2-ink)]">250 USDC per week</p>
-                <p className="truncate text-xs text-[var(--v2-ink-muted)]">to any recipient</p>
-                <div className="mt-2 max-w-sm">
-                  <BudgetMeter
-                    usedPercent={25}
-                    label="USDC budget used"
-                    caption={dsMeterCaption(DS_SPENDING_ROW)}
-                  />
+        <div className="grid gap-6">
+          <ListControlsState label="Default — browser-filtered, every keystroke re-renders the rows; Status is multi-select, Budget single-select, Sort is a chip (this list has no sortable headers). Account has one value, so it is hidden. No filter is active, so there is no status row: the count sits on the list summary line below the card.">
+            <ListControlsExample testId="ds-list-controls-default" />
+          </ListControlsState>
+          <ListControlsState label="Filtered — the status row appears to hold a removable chip per filter and Clear filters; the count stays on the summary line and reads “{shown} of {total}”, announced politely.">
+            <ListControlsExample
+              testId="ds-list-controls-filtered"
+              initial={{ ...DS_LIST_EMPTY, q: 'at', facets: { ...DS_LIST_EMPTY.facets, status: ['active'] } }}
+            />
+          </ListControlsState>
+          <ListControlsState label="No match — the shared ListNoMatch state sits where the rows were; the toolbar stays so the user can edit what caused it.">
+            <ListControlsExample testId="ds-list-controls-no-match" initial={{ ...DS_LIST_EMPTY, q: 'zzz' }} />
+          </ListControlsState>
+          <ListControlsState label="Loading — the count is a placeholder until the list answers.">
+            <ListControlsExample testId="ds-list-controls-loading" loading />
+          </ListControlsState>
+          <ListControlsState label="Phone — below 640px (forced here with layout=&quot;phone&quot;) the facets collapse into “Filters (n)”. The bottom sheet applies each tap live; its footer only closes and names the applied count. The actions slot keeps its own row after search and Filters, hugging its content (#4150) — Export CSV here is a drawing, not a wired export.">
+            <div className="max-w-[375px]">
+              <ListControlsExample
+                testId="ds-list-controls-phone"
+                layout="phone"
+                initial={{ ...DS_LIST_EMPTY, facets: { ...DS_LIST_EMPTY.facets, status: ['active'] } }}
+                actions={<ExportCsvDrawing />}
+              />
+            </div>
+          </ListControlsState>
+          <ListControlsState label="Server-filtered, with totals — the search commits once per 300ms pause (Enter at once, Escape clears), so one request per pause. Export CSV sits in the actions slot; Period offers a custom range. The page's totals (summary) sit on the left of the summary line, the count on the right.">
+            <ServerListControlsExample />
+          </ListControlsState>
+          <ListControlsState label="Paging — a paged list's card ends with its last row; “Show N more” (N = what the next page adds, at most the page size) is a ghost button centred below the card, “Loading…” while it fetches, and nothing once every page is loaded.">
+            <PagedListExample />
+          </ListControlsState>
+          <ListControlsState label="FacetMenu and PeriodPicker on their own — a pill facet (toggle buttons, aria-pressed) for a short category list, a single-select menu whose page default is not All (untinted at its default; tinted once changed), and the Analytics period: presets only, no All time, untinted at its 30-day default. Menu rows draw RadioMark (menuitemradio) or CheckboxMark (menuitemcheckbox).">
+            <FacetPrimitivesExample />
+          </ListControlsState>
+          <ListControlsState label="No All row — a single-select facet whose every value is a real choice (allLabel: null): Agents' Archived, Hidden by default. The default is untinted and raises no chip; Shown is a filter, and removing its chip returns to Hidden. A string allLabel renames the All row instead.">
+            <NoAllFacetExample />
+          </ListControlsState>
+        </div>
+      </Section>
+
+      <Section
+        title="Section with row actions in ⋯ (manage pattern)"
+        description="How a detail-page section manages a list (#3695; owner decision 4 on #4258, 2026-10-22, landed in the design system by #4259 and to be adopted by the agent page's Spending section in #4261). The heading and one-line description sit ABOVE the card. Each row's ⋯ menu holds that row's actions (Edit budget, then Stop budget… under a separator, danger tone) AND the section's add (Add budget) — no visible Edit, Stop or Add buttons compete with the rows, and the row's identity rides on the trigger's aria-label. Choosing Add opens the form in place. A section with no rows has no menu to hold the add, so it keeps a visible add (Set budget, a ghost button). This replaced the action-footer pattern, and then the visible row buttons it gave way to."
+      >
+        <div className="grid gap-5 lg:grid-cols-2">
+          <div>
+            <h3 className="v2-text-h3 text-[var(--v2-ink)]">Spending</h3>
+            <p className="mt-0.5 mb-3 text-sm text-[var(--v2-ink-muted)]">
+              What this agent can spend each period. Budgets are enforced on-chain: a payment over budget is declined before any money moves.
+            </p>
+            <Card hover={false} className="p-5 md:p-6">
+              <div className="flex items-start justify-between gap-3 py-3">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium text-[var(--v2-ink)]">250 USDC per week</p>
+                  <p className="truncate text-xs text-[var(--v2-ink-muted)]">to any recipient</p>
+                  <div className="mt-2">
+                    <BudgetMeter
+                      usedPercent={25}
+                      label="USDC budget used"
+                      caption={dsMeterCaption(DS_SPENDING_ROW)}
+                    />
+                  </div>
                 </div>
+                <DropdownMenu>
+                  <DropdownMenuTrigger
+                    aria-label="Budget options 250 USDC per week"
+                    className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-hover)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <Icon icon={EllipsisVertical} className="h-4 w-4" />
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="right">
+                    <DropdownMenuItem onSelect={() => toast.info('Edit budget')}>Edit budget</DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => toast.info('Add budget')}>Add budget</DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem tone="danger" onSelect={() => toast.error('Stop budget (demo only)')}>
+                      Stop budget…
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
-              <div className="flex shrink-0 items-center gap-1">
-                <Button size="sm" variant="ghost">Edit</Button>
-                <Button size="sm" variant="ghost">Stop budget</Button>
-              </div>
-            </div>
-            <div className="mt-3">
-              <Button size="sm" variant="ghost">Add budget</Button>
-            </div>
-          </Card>
+            </Card>
+          </div>
+          <div>
+            <h3 className="v2-text-h3 text-[var(--v2-ink)]">Spending</h3>
+            <p className="mt-0.5 mb-3 text-sm text-[var(--v2-ink-muted)]">
+              What this agent can spend each period. Budgets are enforced on-chain: a payment over budget is declined before any money moves.
+            </p>
+            <Card hover={false} className="p-5 md:p-6">
+              <p className="text-sm text-[var(--v2-ink-muted)]">No budget yet.</p>
+              <Button size="sm" variant="ghost" className="mt-2">Set budget</Button>
+            </Card>
+          </div>
         </div>
       </Section>
 
@@ -2730,11 +3426,52 @@ export default function DesignSystemPage() {
               </p>
             </div>
             <div>
+              <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Placement</h3>
+              <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+                Centred by default. A flow whose screens change height in one dialog passes{' '}
+                <code className="rounded bg-[var(--v2-surface)] px-1">placement=&quot;top&quot;</code> so the header holds
+                still and the body grows downward.
+              </p>
+              <Button variant="ghost" size="sm" className="mt-2" onClick={() => setTopModalOpen(true)}>
+                Open top-anchored modal
+              </Button>
+            </div>
+            <div>
               <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Close behavior</h3>
               <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
                 Backdrop, Escape, and the optional close button dismiss ordinary dialogs. Disable only the affordances an active execution step must protect.
               </p>
             </div>
+          </div>
+        </Card>
+      </Section>
+
+      <Section
+        title="Receive dialog"
+        description="The ONE receive dialog (#4094) — every funding entry point opens it: the dashboard money card's Receive, the first-run guide's Add funds step, the low-balance attention item, the accounts overview's Add funds link, and account detail's Receive button. The caller picks the account (the dashboard's account picker when there is more than one). In order: the account card; the Haven wallet address with a QR code, Copy, and an explorer link; ONE network rule — 'Send USDC on <network> only' (one token, never ETH — agents spend USDC, and a receive screen that lists tokens the product never spends invites the wrong deposit); then 'Other ways to add money', gated on the SELECTED account's chain (#3478): 'Get test USDC' on a test network, 'Buy with card' on Base when the Coinbase Onramp app id is configured. An unresolved chain gets no network instruction and no default (#1844): a warning banner and a Refresh page action instead of a guessed network — no address, no QR, no faucet, no onramp."
+      >
+        <Card hover={false} className="p-5">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <h3 className="text-sm font-semibold text-[var(--v2-ink)]">One token, one network</h3>
+              <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+                The network rule sits on the address — the one sentence a person must read before they
+                act on it. One token, one network, no second list to reconcile.
+              </p>
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-[var(--v2-ink)]">A refusal, not a guess</h3>
+              <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+                Without a resolved chain the dialog names no network and shows nothing network-addressed —
+                funds sent on the wrong network are usually unrecoverable, so the next action is an
+                honest <em>Refresh page</em>, not a default.
+              </p>
+            </div>
+          </div>
+          <div className="mt-5 flex flex-wrap gap-3">
+            <Button variant="ghost" size="sm" onClick={() => setReceiveDialogOpen(true)}>
+              Open the Receive dialog
+            </Button>
           </div>
         </Card>
       </Section>
@@ -2836,7 +3573,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="Amount: currency mode"
-        description="The other half of the Amount contract (#3805): for a figure that is already a fiat valuation server-side, pass the unsigned magnitude (amount) and the currency it is in — never a symbol string, never a conversion done here. It formats through formatFiatDisplay — formatFiat's output, plus <$0.01 for a non-zero figure under a cent (zero stays $0.00, #3897) — the one formatter, so a SEK figure reads the same on every screen; the sign comes only from direction, and a negative magnitude can never double-sign it. ≈ marks a figure converted at today's rate rather than booked, and it goes before the sign. Unknown — null, or a non-finite value — renders an em dash in secondary ink, never 0,00 kr: an unknown valuation is not a zero. A currency figure is a valuation of a token amount, not a fiat balance Haven holds."
+        description="The other half of the Amount contract (#3805): for a figure that is already a fiat valuation server-side, pass the unsigned magnitude (amount) and the currency it is in — never a symbol string, never a conversion done here. It formats through formatFiatDisplay — formatFiat's output, plus exactly 4 decimals for a non-zero figure under a cent, and <$0.0001 when even 4 decimals would still show 0.0000 (zero stays $0.00; owner decision 2026-10-22, superseding #3897's <$0.01) — the one formatter, so a SEK figure reads the same on every screen; the sign comes only from direction, and a negative magnitude can never double-sign it. ≈ marks a figure converted at today's rate where the conversion changes the number, and it goes before the sign; the caller decides it with the one rule, shouldMarkApprox (@haven_ai/core, #4165) — never on a list row, never on a booked figure, never for USDC shown in USD, otherwise on totals and the detail panel. Unknown — null, or a non-finite value — renders an em dash in secondary ink, never 0,00 kr: an unknown valuation is not a zero. A currency figure is a valuation of a token amount, not a fiat balance Haven holds."
       >
         {/* The testid rides a plain wrapper: `Card` forwards no extra props,
             and the visual spec clips this sample by it. */}
@@ -2846,9 +3583,11 @@ export default function DesignSystemPage() {
               <p><Amount amount={9.09} currency="SEK" direction="out" /> <span className="text-xs text-[var(--v2-ink-3)]">— SEK valuation, signed by direction</span></p>
               <p><Amount amount={0.96} currency="USD" direction="in" /> <span className="text-xs text-[var(--v2-ink-3)]">— incoming: the quiet success green</span></p>
               <p><Amount amount={0.88} currency="EUR" /> <span className="text-xs text-[var(--v2-ink-3)]">— signless figure (budgets, balances)</span></p>
-              <p><Amount amount={9.09} currency="SEK" direction="out" approx /> <span className="text-xs text-[var(--v2-ink-3)]">— approx: converted at today&apos;s rate, ≈ before the sign</span></p>
+              <p><Amount amount={9.09} currency="SEK" direction="out" approx /> <span className="text-xs text-[var(--v2-ink-3)]">— approx: a SEK total converted at today&apos;s rate, ≈ before the sign (never on a row, never USDC in USD)</span></p>
               <p><Amount amount={null} currency="SEK" direction="out" /> <span className="text-xs text-[var(--v2-ink-3)]">— unknown renders an em dash, never 0,00 kr</span></p>
               <p><Amount amount={0} currency="SEK" /> <span className="text-xs text-[var(--v2-ink-3)]">— zero is a real valuation and renders as one</span></p>
+              <p><Amount amount={0.0049} currency="USD" direction="out" /> <span className="text-xs text-[var(--v2-ink-3)]">— under a cent: exactly 4 decimals in the currency&apos;s own format (2026-10-22, superseding #3897&apos;s &lt;$0.01)</span></p>
+              <p><Amount amount={0.00003} currency="SEK" /> <span className="text-xs text-[var(--v2-ink-3)]">— under 0.00005: &quot;&lt;&quot; against the smallest figure the format can show</span></p>
             </div>
           </Card>
         </div>
@@ -2856,7 +3595,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="AttentionList"
-        description="The list of things that need your eye (#3805), built from Row, StatusBadge and Icon. The rows are static — the action and the dismiss live in trailing, never on the row itself, so an action is never nested inside another control. The tone always rides text as well as colour (Row's leading icon is aria-hidden): a StatusBadge label, or an sr-only tone word when the item has no badge. Budget reached is neutral — the budget did its job; danger is for real failures only. Dismiss is labelled Dismiss: {title} and calls onDismiss(id); the list holds no dismissal state, and after a dismiss focus moves to the next item, or to the list heading when the list empties. The title and subtitle each line-clamp to two lines at every width; the icon (and, from sm up, the trailing controls) centre on the title's first line; below sm the trailing slot wraps under the body. fullBleed is for a list that is the card's body, as on the dashboard: rows run edge to edge with hairline dividers and the card's 20px side inset, and this sample renders it so the first-line and clamp measurements cover the dashboard's shape. Zero items renders nothing — the caller shows the empty state."
+        description="The list of things that need your eye (#3805), built from Row, StatusBadge and Icon. The rows are static — the action and the dismiss live in trailing, never on the row itself, so an action is never nested inside another control. The tone always rides text as well as colour (Row's leading icon is aria-hidden): a StatusBadge label, or an sr-only tone word when the item has no badge. Budget reached is neutral — the budget did its job; danger is for real failures only. Dismiss is labelled Dismiss: {title} and calls onDismiss(id); the list holds no dismissal state, and after a dismiss focus moves to the next item, or to the list heading when the list empties. The title and subtitle each line-clamp to two lines at every width; the icon (and, from sm up, the trailing controls) are centred vertically in the row, with Row's symmetric padding; the trailing controls form one column — a row with a badge or action but no dismiss keeps an empty slot in its place whenever another row has one, and actions share a 7rem minimum width (a wider label grows past it); below sm the trailing slot wraps under the body — except on a row with nothing visible to align (no badge, no action, not dismissible), which renders no trailing slot at all and carries its sr-only tone word in the body instead (#4033). fullBleed is for a list that is the card's body, as on the dashboard: rows run edge to edge with hairline dividers and the card's 20px side inset, and this sample renders it so the centring and clamp measurements cover the dashboard's shape. Zero items renders nothing — the caller shows the empty state."
       >
         <div data-testid="ds-attention-list">
           <Card hover={false} className="overflow-hidden">
@@ -2946,8 +3685,8 @@ export default function DesignSystemPage() {
       </Section>
 
       <Section
-        title="Signing credential (wallet menu)"
-        description="Which passkey is about to sign, as the wallet menu states it. Two states, because they are two different facts: a credential this device's marker matched, and the passkeys[0] fallback used when no enrolled passkey carries this device's marker. The fallback is deliberate and load-bearing — see delegation-rail-security-model.md §6 — and until #1952 the menu rendered NOTHING in that case, going silent in exactly the case where the credential was chosen by array position."
+        title="Approving credential (wallet menu)"
+        description="Which passkey you are about to approve with, as the wallet menu states it. Two states, because they are two different facts: a credential this device's marker matched, and the passkeys[0] fallback used when no enrolled passkey carries this device's marker. The fallback is deliberate and load-bearing — see delegation-rail-security-model.md §6 — and until #1952 the menu rendered NOTHING in that case, going silent in exactly the case where the credential was chosen by array position."
       >
         {/*
           Rendered with props forced, as every gallery state is. Since #3825
@@ -2996,7 +3735,7 @@ export default function DesignSystemPage() {
               // shown on this illustration so the line has a rendered state.
               accountName="Operating wallet"
               signingWith={{
-                label: 'Passkey \u00b7 added March 3, 2026',
+                label: 'Passkey \u00b7 added 3 March 2026',
                 keyId: DS_PASSKEY_KEY_ID,
                 onThisDevice: true,
               }}
@@ -3030,7 +3769,7 @@ export default function DesignSystemPage() {
             <WalletPopover
               primary={{ label: 'Haven account', address: DS_HYBRID_ACCOUNT, chainName: 'Base Sepolia' }}
               signingWith={{
-                label: 'Passkey \u00b7 added March 3, 2026',
+                label: 'Passkey \u00b7 added 3 March 2026',
                 keyId: DS_PASSKEY_KEY_ID,
                 onThisDevice: false,
               }}
@@ -3066,18 +3805,30 @@ export default function DesignSystemPage() {
 
       <Section
         title="Monogram"
-        description="Initials-in-a-circle avatar, or the entity's logo when it has one. Promoted to components/ui on its third copy (#3079): the /contacts Initials avatar, the marketplace card and the merchant header all drew the same circle. sm (36px) for lists and cards, md (48px) for a page header."
+        testId="ds-monogram"
+        description="Initials-in-a-circle avatar, or the entity's logo when it has one. Promoted to components/ui on its third copy (#3079): the /contacts Initials avatar, the marketplace card and the merchant header all drew the same circle. xs (32px) for the agent row's 2rem mark track (#4208), sm (36px) for lists and cards, md (48px) for a page header. `decorative` sets aria-hidden for a caller that prints the name beside the mark; without it the initials stay readable. Initials are taken by visible character, so a flag or a joined emoji never renders half of one; a name that starts with an emoji shows that emoji alone. Since #4066 the initials variant is tinted from the entity's NAME — one of six muted avatar tints picked by a pure hash of the trimmed name, so the same entity keeps the same colour everywhere and neighbouring rows are told apart at a glance. Assigned by name, never by index, and never from a status or --v2-series-* chart colour (the hexes are disjoint from both)."
       >
         <div className="flex flex-wrap items-center gap-4">
-          <Monogram name="Ampersend Demo API" />
-          <Monogram name="Berget" />
+          {MONOGRAM_TINT_EXAMPLES.map((name) => (
+            <Monogram key={name} name={name} />
+          ))}
           <Monogram name="Haven Demo Store" size="md" />
+        </div>
+        <div className="mt-4 flex flex-wrap items-center gap-4">
+          <span className="flex items-center gap-3">
+            <Monogram name="Research agent" size="xs" decorative />
+            <span className="v2-text-body text-[var(--v2-ink)]">Research agent</span>
+          </span>
+          <span className="flex items-center gap-3">
+            <Monogram name="🤖 Shopping bot" size="xs" decorative />
+            <span className="v2-text-body text-[var(--v2-ink)]">🤖 Shopping bot</span>
+          </span>
         </div>
       </Section>
 
       <Section
         title="Merchant card (marketplace)"
-        description="The /marketplace grid's card (#3079, epic #3077): monogram or logo, name, category chip, description clamped to two lines, network chips, and one of three footer states — an offer count, 'Coming soon' for a prospect, or the Haven test-merchant label. The Verified badge follows verified_payable — the wire's own proof (#3078) — where the catalog card it replaces read the row's source."
+        description="The /marketplace grid's card (#3079, epic #3077; footer and markers per #3980): monogram or logo, name, the category as plain ink-3 text (not a chip — the network chips keep their surface-2 pills), description clamped to two lines, network chips, and a bottom-pinned footer: 'From <price> USDC' on the ONE frontend price format (#4008) — the backend's two-decimal rule, trailing zeros trimmed to at least two decimals ('0.10', '1.00'; '0.001' stays) — the price in ink and semibold, the offer count after it in ink-3 when there is more than one (#4052), the count alone when no counted offer prices in USDC. A test merchant carries a neutral 'Test' StatusBadge in the badge slot — the full 'payments are real, goods are demo' note is the merchant page's (#4052). Only payable merchants get a card: coming-soon ones list below the grid (next entry). Verified is a quiet check after the name — title = the meaning, sr-only 'Verified' — following verified_payable, the wire's own proof (#3078)."
       >
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <MerchantCard
@@ -3095,6 +3846,7 @@ export default function DesignSystemPage() {
               offer_count: 3,
               networks: ['eip155:84532', 'eip155:8453'],
               verified_payable: true,
+              lowest_price_atomic: '1000',
             }}
           />
           <MerchantCard
@@ -3112,10 +3864,19 @@ export default function DesignSystemPage() {
               offer_count: 1,
               networks: ['eip155:84532'],
               verified_payable: true,
+              lowest_price_atomic: '50000',
             }}
           />
-          <MerchantCard
-            merchant={{
+        </div>
+      </Section>
+
+      <Section
+        title="Coming-soon merchants (marketplace)"
+        description="The /marketplace section below the card grid (#4052): merchants not payable yet, as one Card — a Card.Header band titled 'Coming soon' (h2), then a Card.Section divided list of linked Rows (Monogram, name, one-line description, an ink-3 chevron trailing — the row's one affordance; a trailing category read as stray on a full-width row). Rows sit on the header's px-5 inset; the toneless leading box is sized to the 36px Monogram via leadingClassName. Renders nothing when the list is empty, so no heading stands over nothing."
+      >
+        <ComingSoonMerchants
+          merchants={[
+            {
               id: 'ds-merchant-coming-soon',
               slug: 'ds-merchant-coming-soon',
               name: 'Berget AI',
@@ -3129,14 +3890,31 @@ export default function DesignSystemPage() {
               offer_count: 0,
               networks: [],
               verified_payable: false,
-            }}
-          />
-        </div>
+              lowest_price_atomic: null,
+            },
+            {
+              id: 'ds-merchant-coming-soon-2',
+              slug: 'ds-merchant-coming-soon-2',
+              name: 'Redpine',
+              description: 'Retrieval and search APIs, metered per query.',
+              website: null,
+              logo_url: null,
+              category: 'search',
+              country: null,
+              listing_status: 'coming_soon',
+              is_test_merchant: false,
+              offer_count: 0,
+              networks: [],
+              verified_payable: false,
+              lowest_price_atomic: null,
+            },
+          ]}
+        />
       </Section>
 
       <Section
         title="BudgetMeter"
-        description="How much of a delegation's own period is spent — the ONE progress bar for a budget measurement (#3692). An h-1.5 `--v2-surface-2` track with a `--v2-brand` fill and a progressbar ARIA contract. `usedPercent` is clamped to 0–100, `label` is the accessible name, and an optional `caption` slot carries the “1.20 of 3.00 USDC used · refills …” line. The label row above the bar belongs to the caller — it is the caller's tabular typography, not part of the measurement."
+        description="How much of a delegation's own period is spent — the ONE progress bar for a budget measurement (#3692). An h-1.5 `--v2-surface-2` track with a `--v2-brand` fill and a progressbar ARIA contract. `usedPercent` is clamped to 0–100, `label` is the accessible name, and an optional `caption` slot carries the “1.20 of 3.00 USDC used · refills …” line. An optional `trailing` node (#3989) rides on that same line, right-aligned: it is a SIBLING of the caption `<p>`, never inside it, and when the two do not fit it wraps to its own right-aligned line — the caption is never squeezed. The label row above the bar belongs to the caller — it is the caller's tabular typography, not part of the measurement."
       >
         <div className="max-w-md space-y-6">
           <div>
@@ -3153,6 +3931,18 @@ export default function DesignSystemPage() {
             </p>
           </div>
           <div>
+            <BudgetMeter
+              usedPercent={40}
+              label="USDC budget used"
+              caption={dsMeterCaption(DS_METER_ROW)}
+              trailing={<p className="ml-auto whitespace-nowrap text-xs text-[var(--v2-ink-3)]">Last paid 6d ago</p>}
+            />
+            <p className="mt-2 text-xs text-[var(--v2-ink-3)]">
+              With a `trailing` node — the dashboard agent row's labelled “Last paid” time (#3989), a
+              sibling of the caption on one wrapping line.
+            </p>
+          </div>
+          <div>
             <BudgetMeter usedPercent={100} label="ETH budget used" />
             <p className="mt-2 text-xs text-[var(--v2-ink-3)]">
               Exhausted — clamped at 100. A malformed or overdrawn read can never push the fill
@@ -3163,6 +3953,65 @@ export default function DesignSystemPage() {
             <BudgetMeter usedPercent={0} label="USDC budget used" caption={dsMeterCaption(DS_METER_UNTOUCHED_ROW)} />
             <p className="mt-2 text-xs text-[var(--v2-ink-3)]">Untouched — clamped at 0.</p>
           </div>
+        </div>
+      </Section>
+
+      {/* #4096: the shared agent row — lifted out of the dashboard's
+          AgentsSection, drawn here with the dashboard wire shapes the
+          account page will pass from the same overview. */}
+      <Section
+        title="Agent row (shared)"
+        description="The dashboard's agent row (#4096, epic #4093), lifted out of AgentsSection into haven/AgentRow: a name-hashed xs Monogram leading mark (#4208), the BudgetMeter with its caption, the labelled “Last paid” time on the caption line (#3989), the badge (agentBadge: Needs setup / Paused / N% used), and the received-sub-budget or “No budget” line (#3803). Its props are the dashboard wire shapes (DashboardAgent, DashboardBudgetRemaining) and the budget caption reads in the budget's own token, “1.20 of 3.00 USDC” (#4165: no rate, no “≈”) — the account page reads the SAME overview (it lists all agents) and passes its slices straight through, so both surfaces draw the identical row. AgentBudget is exported beside it for a caller that wants the budget block without the row chrome."
+      >
+        <div className="max-w-xl space-y-4">
+          <Card hover={false} className="overflow-hidden">
+            <Card.Header title="Agents" />
+            <AgentRow
+              agent={DS_AGENT}
+              budgetRemaining={DS_AGENT_BUDGET_REMAINING}
+              attentionItems={[]}
+              accountNames={{}}
+              accountCount={1}
+              nowMs={DS_AGENT_NOW}
+            />
+            <AgentRow
+              agent={DS_AGENT_NO_BUDGET}
+              budgetRemaining={DS_AGENT_BUDGET_REMAINING}
+              attentionItems={[]}
+              accountNames={{}}
+              accountCount={1}
+              nowMs={DS_AGENT_NOW}
+            />
+          </Card>
+          <p className="text-xs text-[var(--v2-ink-3)]">
+            Above: a live budget with a chain read — the meter, the refill caption, and the labelled
+            “Last paid” time right-aligned on the caption line — and a no-budget agent (“No budget” +
+            “No payments yet”). The dashboard renders the same rows unchanged: its Agents section
+            imports this component since #4096.
+          </p>
+        </div>
+      </Section>
+
+      {/* #4209: the `/agents` card, rebuilt on the agent row's pieces. */}
+      <Section
+        title="Agent card (/agents)"
+        description="The Agents page card (#4209, epic #4207) on the entity-card shell (entityCardClassName, a stretched name link): an sm decorative Monogram, the name, ONE StatusBadge only when the agent needs attention (agentBadge, plus Archived and Revoked), label chips, and a ⋯ DropdownMenu — a sibling control raised above the stretched link (§ Cards). The body is the agent row's own AgentBudget, joined from the dashboard overview by agent id, so an agent's meter reads identically on both surfaces; a skeleton while the reads load, never “No budget”. At most one call to action (Finish setup, Set budget, Recover funds, Finish revoking), and one footer line pinned with mt-auto: “Last paid … · merchant” (never an address), “Connected …”, or “No payments yet”. Revoked and archived cards draw no meter. Open the ⋯ to see the actions."
+      >
+        <div className="grid max-w-3xl gap-4 lg:grid-cols-2">
+          {[DS_CARD_AGENT, DS_CARD_ARCHIVED].map((agent) => (
+            <AgentCard
+              key={agent.id}
+              agent={agent}
+              dashboard={{ ...DS_CARD_DASHBOARD, agent: agent.archived_at ? null : DS_AGENT }}
+              onPause={DS_CARD_NOOP}
+              onResume={DS_CARD_NOOP}
+              onRevokeCredential={DS_CARD_NOOP_ASYNC}
+              onArchive={DS_CARD_NOOP_ASYNC}
+              onRestore={DS_CARD_NOOP}
+              onMoveToOrganization={DS_CARD_NOOP}
+              busyAction={null}
+            />
+          ))}
         </div>
       </Section>
 
@@ -3189,6 +4038,93 @@ export default function DesignSystemPage() {
         </div>
       </Section>
 
+      <Section
+        title="PageHeader leading"
+        testId="ds-pageheader-leading"
+        description="A mark before the title, centred on it (#4210, epic #4207). Agent detail passes the same name-hashed Monogram as the shared agent row (#4208). The title prints beside it, so the mark is passed `decorative`. Optional and additive — a PageHeader without `leading` renders exactly as before."
+      >
+        <div className="max-w-2xl">
+          <PageHeader
+            back={{ href: '/agents', label: 'Agents' }}
+            leading={<Monogram name="Research agent" size="md" decorative />}
+            title="Research agent"
+            meta="My account · Created 3 weeks ago · Active 2h ago"
+            inlineActions
+            actions={
+              <Button variant="ghost" size="sm" aria-label="More actions">
+                ⋮
+              </Button>
+            }
+          />
+        </div>
+      </Section>
+
+      <Section
+        title="BackLink and PageHeader back"
+        description="The one way back from a detail page (#4028): above the title, named by the parent alone (“Agents”, never “Back to …”). Drawn at text height so it costs the title almost no room on a phone; a transparent ::after extends the target to 44 px, Button’s mechanism (#1726). Pass `back` to PageHeader; a branch without a PageHeader (a loading skeleton, a not-found card, the merchant page’s own header) renders BackLink directly with the same values, so every state of the page has the same way back."
+      >
+        <div className="max-w-2xl space-y-8">
+          <PageHeader
+            back={{ href: '/agents', label: 'Agents' }}
+            title="Research agent"
+            meta="My account · Created 3 weeks ago · Active 2h ago"
+            inlineActions
+            actions={
+              <Button variant="ghost" size="sm" aria-label="More actions">
+                ⋮
+              </Button>
+            }
+          />
+          <div>
+            <BackLink href="/accounts" label="Accounts" />
+            <p className="mt-4 text-sm text-[var(--v2-ink-3)]">Account not found</p>
+          </div>
+        </div>
+      </Section>
+
+      <Modal
+        open={topModalOpen}
+        onClose={() => {
+          setTopModalOpen(false)
+          setTopModalTall(false)
+        }}
+        title="Top-anchored modal"
+        subtitle="Change the body height — the header stays where it is."
+        showCloseButton
+        width="xl"
+        placement="top"
+      >
+        <div className="flex flex-col gap-5">
+          <p>
+            {topModalTall
+              ? 'A taller screen. In a centred dialog the title would have moved up by half the difference; here only the bottom edge moves.'
+              : 'A short screen.'}
+          </p>
+          {topModalTall && (
+            <div className="space-y-3">
+              <p>The budget refills at the end of each period. Nothing carries over.</p>
+              <p>The agent can spend up to the budget you set, from this Haven wallet only.</p>
+              <p>It cannot move funds anywhere else, and it never holds a key of its own.</p>
+            </div>
+          )}
+          <DialogActions>
+            <Button variant="ghost" className="flex-1" onClick={() => setTopModalOpen(false)}>
+              Close
+            </Button>
+            <Button className="flex-1" onClick={() => setTopModalTall((tall) => !tall)}>
+              {topModalTall ? 'Show short screen' : 'Show tall screen'}
+            </Button>
+          </DialogActions>
+        </div>
+      </Modal>
+
+      {/* #4094: the one Receive dialog, opened by its showcase section above. */}
+      <ReceiveDialog
+        open={receiveDialogOpen}
+        account={DS_RECEIVE_ACCOUNT}
+        onClose={() => setReceiveDialogOpen(false)}
+      />
+
       <Modal
         open={modalOpen}
         onClose={() => setModalOpen(false)}
@@ -3196,7 +4132,7 @@ export default function DesignSystemPage() {
         subtitle="Set the budget this agent may spend."
         showCloseButton
         width="lg"
-        headerAccessory={<StepProgress totalSteps={3} currentStep={1} />}
+        headerAccessory={<StepProgress totalSteps={3} currentStep={1} labels={['Name', 'Budget', 'Connect']} />}
         footer={
           <>
             <Button variant="ghost" onClick={() => setModalOpen(false)}>
@@ -3255,15 +4191,25 @@ export default function DesignSystemPage() {
         onClose={() => setComingSoonOpen(false)}
       />
 
+      {/* `leading` and `footer` are the two optional slots
+          `TransactionDetailPanel` fills (#4267): the counterparty's mark
+          before the title, and the explorer link. */}
       <SidePanel
         open={panelOpen}
         onClose={() => setPanelOpen(false)}
-        title="Agent payment"
-        subtitle="Operating wallet · just now"
+        leading={<Monogram name="api.vendor.com" decorative />}
+        title="api.vendor.com"
+        subtitle="Paid request"
+        footer={
+          <Button variant="tertiary" size="sm" onClick={() => setPanelOpen(false)}>
+            View on explorer
+          </Button>
+        }
       >
         <p className="text-sm text-[var(--v2-ink-2)]">
           Detail content goes here — the transactions route uses this panel for per-transaction
-          breakdowns (amount, movement, initiator, receipts).
+          breakdowns: a header summary, plain-word details and a closed Technical details
+          disclosure.
         </p>
       </SidePanel>
 

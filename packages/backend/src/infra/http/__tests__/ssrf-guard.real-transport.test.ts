@@ -215,3 +215,68 @@ describe('httpsTransport against a real local server (#3741)', () => {
     expect(elapsed).toBeLessThan(deadlineMs + 250)
   })
 })
+
+describe('httpsTransport connect phase (#4300)', () => {
+  it('opens a new connection for every attempt — no pooled socket carries one attempt onto another', async () => {
+    // The server keeps connections alive, so a pooling agent would serve the
+    // second request on the first one's socket: same client port twice.
+    const clientPorts: number[] = []
+    const server = await listenTls((req, res) => {
+      clientPorts.push(req.socket.remotePort ?? -1)
+      res.writeHead(200, { 'content-type': 'text/plain' })
+      res.end('ok')
+    })
+    const url = new URL(`https://real-transport.test:${server.port}/x`)
+    const first = await httpsTransport(pinnedRequest({ url }))
+    const second = await httpsTransport(pinnedRequest({ url }))
+    await server.close()
+    expect(first).toMatchObject({ status: 200 })
+    expect(second).toMatchObject({ status: 200 })
+    expect(clientPorts).toHaveLength(2)
+    expect(clientPorts[0]).not.toBe(clientPorts[1])
+  })
+
+  it('answers connect_error when nothing listens, so the caller may try another address', async () => {
+    // Bind a port, then close it: the connect is refused before any byte of
+    // the request leaves.
+    const probe = net.createServer()
+    await new Promise<void>((resolve) => probe.listen(0, '127.0.0.1', resolve))
+    const port = (probe.address() as net.AddressInfo).port
+    await new Promise<void>((resolve) => probe.close(() => resolve()))
+    const result = await httpsTransport(pinnedRequest({ url: new URL(`https://closed.test:${port}/x`) }))
+    expect(result).toMatchObject({ ok: false, reason: 'connect_error' })
+  })
+
+  it('answers connect_error at the connect cap when the handshake never completes', async () => {
+    const sockets = new Set<net.Socket>()
+    const server = net.createServer((socket) => {
+      sockets.add(socket)
+      socket.on('close', () => sockets.delete(socket))
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const port = (server.address() as net.AddressInfo).port
+    const started = Date.now()
+    const result = await httpsTransport(
+      pinnedRequest({ url: new URL(`https://silent.test:${port}/x`), timeoutMs: 2_000, connectTimeoutMs: 200 }),
+    )
+    const elapsed = Date.now() - started
+    for (const socket of sockets) socket.destroy()
+    await new Promise<void>((resolve) => server.close(() => resolve()))
+    expect(result).toMatchObject({ ok: false, reason: 'connect_error' })
+    // Cut at the connect cap, well before the total deadline.
+    expect(elapsed).toBeLessThan(1_000)
+  })
+
+  it('answers transport_error, not connect_error, once the request reached the server', async () => {
+    let received = false
+    const server = await listenTls((req) => {
+      received = true
+      // Kill the connection mid-response: the request is already on the server.
+      req.socket.destroy()
+    })
+    const result = await httpsTransport(pinnedRequest({ url: new URL(`https://reset.test:${server.port}/x`) }))
+    await server.close()
+    expect(received).toBe(true)
+    expect(result).toMatchObject({ ok: false, reason: 'transport_error' })
+  })
+})

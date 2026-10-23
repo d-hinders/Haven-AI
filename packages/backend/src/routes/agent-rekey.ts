@@ -622,6 +622,7 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
         const treasury = await createTreasuryOps({
           ownerAddress: owner.config.ownerAddress,
           passkeys: owner.config.passkeys,
+          deploySalt: owner.config.deploySalt,
           accountAddress: agent.treasury_address as Address,
           chainId: agent.chain_id,
           bundlerUrl: delegationRailBundlerUrl(agent.chain_id),
@@ -763,6 +764,7 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
       const treasury = await createTreasuryOps({
         ownerAddress: owner.config.ownerAddress,
         passkeys: owner.config.passkeys,
+        deploySalt: owner.config.deploySalt,
         accountAddress: agent.treasury_address as Address,
         chainId: agent.chain_id,
         bundlerUrl: delegationRailBundlerUrl(agent.chain_id),

@@ -15,6 +15,136 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+## 0.11.0-alpha.0 — 2026-10-23
+
+### Changed
+
+- **Without `merchantEgress`, the transport follows redirects itself, and a hop to another origin keeps credentials and payment headers at the origin they were sent to (#4257).** The default path (the SDK, the local MCP, connect and embedders) left redirects to the platform, which on a cross-origin hop drops `Authorization`, `Proxy-Authorization` and `Cookie` (and, on a hop it rewrites to GET, the body headers) but forwards other caller headers. An `X-Api-Key`, a `PAYMENT-SIGNATURE` / `X-PAYMENT` header and other caller headers reached the new origin, and an `https` → `http` hop sent them in clear. A 307/308 also re-sent a POST body there, and an MCP `tools/call` body carries the payment in `_meta["x402/payment"]`. Now:
+  - A cross-origin hop carries only the #4244 allow-list (`accept`, `accept-language`, `user-agent`, `x402-wallet`). Caller auth headers no longer follow a redirect to another origin.
+  - A paid request is never re-sent to another origin: on the paid delivery (`deliverPayment`), or a body with an x402 payment in `_meta` (a string body, a UTF-8 `Uint8Array`/`ArrayBuffer` body, or a JSON-RPC batch with any element carrying it; an unreadable body is not treated as paid), a cross-origin redirect that keeps the body (a 307/308, or a 301/302 on a method other than POST) is refused mid-flight with `MerchantEgressRefusedError` (`refusal: 'redirect_cross_origin_body'`, `beforeRequest: false`, `redirectStatus`). Every other request, such as MCP `initialize`, quote probes or a plain `fetch` POST, follows that redirect with its body as before, with the headers reduced.
+  - A refused paid delivery is the funded, undelivered state. `MerchantCompletion.retryRequest` records it as `merchant_retry_rejected_after_payment` (`retry_status` = the redirect status; `retry_body: null`; `details.refusal` plus `details.redirect_location` when the refusal names a redirect target, or `details.refused_url` when it stopped at the answering URL). The same applies to every refusal raised after the request was sent, including the policy refusals when an embedder sets `merchantEgress` on the local completion. `MerchantEgressRefusedError` gains three optional fields: `redirectStatus`, `redirectTarget` (set only when `url` is the redirect target) and `settlementScheme`; its inherited `paymentId` is now filled in. The completion re-throws the refusal with `paymentId` and `settlementScheme` set. Its message is worded for each refusal reason, says the payment header (and body, when there is one) reached the first URL, and says not to pay again.
+  - Everything else keeps the platform's behaviour: 20 hops (`NO_POLICY_MAX_REDIRECTS`); the Fetch spec's rewrite (a 301/302 rewrites only a POST; a 303 rewrites everything but GET/HEAD); a 3xx without `Location` returned as the answer; a non-HTTP(S) `Location` failing with a `TypeError`; and a caller's `redirect: 'manual'` / `'error'` passed straight through.
+  - For embedders with a custom `fetch`: it is now called once per hop with `redirect: 'manual'`, and must return the real 3xx response (with its `Location`) instead of following it itself. A followed response reports `redirected: false`.
+  - No update needed: SDK and local-MCP callers get this by upgrading.
+
+- **`HavenCatalogEntry.source` gains a third value, `'bazaar'` (#4245). BREAKING only for TypeScript code with an exhaustive `switch` over `source`.** It marks catalog rows the x402
+  Bazaar discovery cron wrote (seller-asserted, no operator review). A consumer with an exhaustive
+  `switch` over `source` must add the case; `discoverTools({ verified: 'operator' })` already excludes
+  these rows, no update needed.
+- **Under `merchantEgress`, a redirect to another origin no longer carries the caller's headers (#4244).** The manual GET-redirect follower re-sent the original request headers on every hop, so an `Authorization`, `Cookie`, API key or payment header supplied for one merchant reached any origin that merchant redirected to. A hop that changes origin (scheme, host or port) now carries only `accept`, `accept-language`, `user-agent` and `x402-wallet`; once dropped, headers are not restored on a later hop. Same-origin redirects are unchanged. No update needed for the hosted path, which takes the change on deploy. The path without a policy gets the same rule in #4257, above.
+
+- **The local EIP-3009 settlement-evidence report is retried while Haven
+  answers `retryable` (#4215).** On the local path (`fetch`,
+  `payX402Quote`, `resumeX402Payment`), the merchant's settlement report in
+  `MerchantCompletion.retryRequest` is re-posted — same body — while Haven
+  answers 503 `settlement_unobservable`, on the existing
+  `EVIDENCE_RETRY_DELAYS_MS` schedule: four attempts over ~7 s of backoff.
+  This adds worst-case latency to a completed local purchase of up to 7 s of
+  backoff plus 3 round trips, each bounded only by `requestTimeout` (30 s).
+  Any refusal (a 409, the `settlement_proof_header_missing` refusal, a
+  validation error, a transport failure with no HTTP status) is still one
+  attempt, the outcome stays swallowed, and the caller-visible result of a
+  completed purchase does not change. The hosted path keeps its one-attempt
+  report (D2) and its retryable handoff (D1). Local `@haven_ai/mcp` and
+  `@haven_ai/connect` runtimes pick this up only through their own releases
+  (both pin `@haven_ai/sdk` exactly).
+
+- **The agent runbook says "a passkey", never a platform name (#4168).** Step 1
+  of the sequence and the signup hand-off script in `HAVEN_AGENT_RUNBOOK_MD`
+  drop "(Face ID / Touch ID)" after "a passkey", following the copy rule that
+  user-facing text names the passkey only. Wording only; no API change, no
+  update needed.
+
+- **Hosted paid calls now accept a merchant answer whose `PAYMENT-RESPONSE`
+  header carries no transaction beside a `_meta` settlement that has one
+  (#4120).** The post-funding merchant-answer decision is now one shared
+  module (`merchant-answer.ts`) behind both `completeX402MerchantCall` and the
+  local retry, and it uses the local hash rule on both paths: the header's
+  transaction when it carries one, otherwise the
+  `_meta["x402/payment-response"]` transaction. Hosted callers therefore get,
+  on that input, what local callers always got: an `isError` answer beside a
+  `_meta` settlement is delivered as evidence instead of
+  `MERCHANT_REJECTED_AFTER_FUNDING`; without `isError` the result carries the
+  `_meta` settlement hash, the merchant's settlement is reported to Haven
+  (#3764), and an erc7710 completion anchors its evidence on it. Nothing here
+  requires a client update to keep paying. A 200 `text/plain` `isError` answer
+  is still rejected on the hosted path and accepted on the local path
+  (unchanged, per caller).
+
+- **EIP-3009 settlement reports carry the payment header again (#4061).** Since
+  #3925 the backend records an agent-reported EIP-3009 merchant settlement only
+  when the report carries the payment header that was sent to the merchant. The
+  SDK posted that header with its funding report but not with its settlement
+  report (#3764), so on a current backend those settlement reports were refused.
+  Both paid-retry paths (`completeX402MerchantCall` and the local retry) now
+  send it. `reportSettlementEvidence(paymentId, settlementTxHash, options)`
+  takes an optional `options.paymentHeader` and forwards it as
+  `paymentProofHeader` with the names `x402PaymentHeaderNamesSent` derives.
+  `EvidenceReportOutcome`'s `refused` arm gains an optional `errorCode`, the
+  backend's `error_code`. Today that is only `settlement_proof_header_missing`:
+  report again with the header. The shared `reportSettlementEvidence`
+  description and the haven-pay skill's plain-HTTP paragraph tell agents to
+  pass `payment_header`. No update needed to keep paying. Until you update,
+  your settlement reports are refused, so receipts show only the funding
+  transaction.
+
+- **`MerchantEgressRefusalReason` gains `'redirect_cross_origin_body'` (#4257).
+  BREAKING only for TypeScript code with an exhaustive `switch` over it.** It is
+  the refusal value the #4257 entry above describes; add the case. No update
+  needed to keep paying.
+
+- **A plain tool error after funding is a rejection, never a settlement
+  (#4062).** When a merchant answers the paid retry with `isError: true` and
+  carries neither a payment challenge nor a settlement transaction (no
+  `PAYMENT-RESPONSE` hash, no `_meta` settlement transaction), both paid-retry
+  paths (`completeX402MerchantCall` and `MerchantCompletion.retryRequest`) now
+  treat it as the merchant rejecting after funding:
+  `MERCHANT_REJECTED_AFTER_FUNDING`, never `settled: true`. On the local
+  `retryRequest` path the rejection-after-funding message now adds that the
+  merchant may still settle late, so check the payment status before sweeping
+  the delegate. A tool error
+  beside a settlement transaction is still delivered as evidence (#4120,
+  above). No update needed.
+
+- **Warning codes and skill text for quote-time stops (#3967). BREAKING only
+  for TypeScript code with an exhaustive `switch` over
+  `AgentPaymentWarningCode`.** The stops themselves run in the hosted quote
+  and, for price only, the local `haven_quote_x402`. `AgentPaymentWarningCode`
+  gains `QUOTE_EXCEEDS_REMAINING_BUDGET` (the quoted amount does not fit the
+  agent's remaining budget) and `MERCHANT_REPORTED_DENIAL` (the merchant
+  reported a denial on one of its payment options; informational).
+  `precheckBudget()` takes an optional `recordRefusal` (default `true`; quote
+  surfaces pass `false`, so a quote writes no refusal row). The
+  haven-pay skill tells agents to pass `expected_amount` when the price is
+  stated up front and to stop when a quote returns `safe_to_continue: false`.
+  Additive; the on-chain policy stays the gate. No update needed.
+
+- The `checkFunds` / `haven_check_funds` description says a `false` result means the
+  account holds less than the checked amount ("short"), not that it is empty
+  (#4079). Text only; no update needed.
+
+- The `discoverTools` / `haven_discover_tools` description no longer calls
+  every catalog row curated: rows come from any source, and Bazaar rows are
+  seller-asserted (#4245). Text only; no update needed.
+
+- Doc-only (#4023): `delegate-account.ts`'s salt comment now states precisely
+  what the package derives — DELEGATE accounts, always at the literal zero
+  salt. Haven's USER accounts gained per-account deploy salts
+  (epic #4022 slice S1) on the backend's `smart_accounts.deploy_salt`; that
+  salt never flows through this package, and no client update is needed.
+
+- Against an older backend that sends no `is_live`, the agent summary's
+  task-budget list now drops an expired `closing` task budget too (#3923), as
+  the backend has since #3773. A current backend already omits it, so nothing
+  visible changes there. No update needed.
+
+- The agent summary's client-side task-budget filter follows the backend's new
+  `is_live` flag (#3922) instead of restating the rule. Against a current
+  backend nothing visible changes: `status=live` already returns only live
+  rows. `HavenTaskBudget` (and `haven_get_task_budget`'s result) gains an
+  optional `isLive`. Against an older backend that sends no `is_live`, the
+  list is derived exactly as before. No update needed.
+
 ## 0.10.0-alpha.0 — 2026-10-14
 
 ### Changed

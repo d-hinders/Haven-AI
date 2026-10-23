@@ -328,8 +328,8 @@ describe('AccountSignersCard (#888)', () => {
       }),
     )
     render(<AccountSignersCard {...PROPS} />)
-    expect(screen.getByText('Passkey · added March 3, 2026')).toBeTruthy()
-    expect(screen.getByText('Passkey · added May 10, 2026')).toBeTruthy()
+    expect(screen.getByText('Passkey · added 3 March 2026')).toBeTruthy()
+    expect(screen.getByText('Passkey · added 10 May 2026')).toBeTruthy()
     expect(screen.getByText('Browser wallet')).toBeTruthy()
     // The banned platform-brand label and role words never render as names:
     expect(document.body.textContent).not.toMatch(/Face ID \/ Touch ID|External owner/)
@@ -353,7 +353,7 @@ describe('AccountSignersCard (#888)', () => {
     render(<AccountSignersCard {...PROPS} />)
     // Positive control: both signer rows rendered.
     expect(screen.getByText('Browser wallet')).toBeTruthy()
-    expect(screen.getByText('Passkey · added March 3, 2026')).toBeTruthy()
+    expect(screen.getByText('Passkey · added 3 March 2026')).toBeTruthy()
     // The key id never renders; the owner address only inside a CLOSED
     // "Show address" disclosure (#3825 design review: the card asks for THE
     // owner wallet, so the user must be able to tell which one).
@@ -381,7 +381,7 @@ describe('AccountSignersCard (#888)', () => {
     }
     mockUseSigners.mockReturnValue(base({ signers: backupOnly }))
     render(<AccountSignersCard {...PROPS} />)
-    expect(screen.getByText('Passkey · added May 10, 2026')).toBeTruthy()
+    expect(screen.getByText('Passkey · added 10 May 2026')).toBeTruthy()
     expect(document.body.textContent).not.toContain('Face ID / Touch ID')
   })
 

@@ -9,6 +9,7 @@ covers:
   - packages/sdk/src/delegate-account.ts
   - packages/sdk/src/settlement-child.ts
   - packages/backend/src/modules/payments/direct-sign-context.ts
+  - packages/backend/src/modules/x402/eip3009-settlement-sweeper.ts
   - packages/mcp-server/src/boot.ts
   - packages/mcp-server/src/auth.ts
   - packages/mcp-server/src/server.ts
@@ -24,6 +25,7 @@ covers:
   - packages/connect/src/storage.ts
   - packages/sdk/src/client.ts
   - packages/sdk/src/mcp-merchant-transport.ts
+  - packages/sdk/src/merchant-egress.ts
   - packages/sdk/src/signer.ts
   - packages/sdk/src/edge.ts
   - packages/sdk/src/sweep.ts
@@ -38,7 +40,12 @@ covers:
   - docs/regulatory/casp-risk-guardrails.md
   - packages/backend/src/modules/x402/delegation-authorize.ts
   - packages/backend/src/infra/chain/delegation-budget-reader.ts
-last-verified: "2026-09-30"
+  - packages/backend/src/modules/payments/prepare-failure.ts
+  - packages/backend/src/modules/x402/eip3009-settlement-evidence.ts
+  - packages/mcp-server/src/tools/plain-http-x402.ts
+  - packages/mcp-server/src/tools/contracts.ts
+  - packages/backend/src/modules/mpp/sweep.ts
+last-verified: "2026-10-19"
 ---
 
 # Haven — Edge Signer
@@ -83,7 +90,8 @@ The edge signer ships as **`@haven_ai/signer`** in two layers:
      signer's own account (never ROOT). It then returns the funding signature
      plus a process-local
      `x402_binding` that records the authenticated funding-intent and
-     merchant-header context returned by hosted MCP.
+     merchant-header context returned by hosted MCP, plus which of the two
+     shapes it signed (#4242).
    - `signDelegationTypedData(typedData)` → a verbatim primitive: signs
      whatever typed data it is handed. The allowlist that decides WHAT may be
      signed lives in the MCP tool layer (#3272, below); an embedder calling
@@ -91,12 +99,46 @@ The edge signer ships as **`@haven_ai/signer`** in two layers:
    - `buildX402PaymentHeader(paymentRequired, x402Binding)` → the EIP-3009
      merchant payment header for the merchant leg of an x402 payment, after
      consuming the recorded binding and checking the merchant challenge against
-     it. Reuses the SDK's `selectStandardPaymentOption` +
-     `toStandardPaymentRequirements` + the `x402` library.
+     it. Only a funding-leg binding builds a header (#4242): a binding minted
+     for an erc7710 settlement child is refused, because that payment has no
+     funding leg to back a delegate-EOA transfer. Since #4248 such a binding is
+     retired the moment it is minted and never held, so no payment context
+     outlives the call that signed the child. While its id is among the last
+     64 this process retired (`RETIRED_BINDING_MEMORY`), the refusal is the
+     structured `NO_FUNDING_LEG`; after that, or after a signer restart, the id
+     gets the unknown-binding refusal, which also builds nothing.
+     `NO_FUNDING_LEG` carries `next_action: sign_and_submit_payment`, no tool, and a
+     `next_tool_omitted_reason` per site: here, submit the child signature the
+     agent already holds to `haven_submit` with `settlement_scheme: 'erc7710'`;
+     on `haven_sign_x402`, sign the child with `haven_sign` first. No tool is
+     named because the signer's own next-step targets declare only `haven_get_payment_status`, and the refusal does not hold the signature argument a `haven_submit` step would need. Reuses the SDK's `selectStandardPaymentOption` +
+     `toStandardPaymentRequirements` + the `x402` library. Since #3888 the
+     authorization's nonce is not the library's random draw: the signer
+     overwrites it with `deriveX402PaymentNonce(expected.paymentId)` on the
+     unsigned payload `preparePaymentHeader` built, then lets the library's
+     `signPaymentHeader` sign it (`packages/signer/src/core.ts:448-454`). That
+     ties the merchant's on-chain `AuthorizationUsed(delegate, nonce)` to the
+     Haven payment, so the backend's settlement sweeper can attribute a
+     settlement the agent never reported
+     (`packages/backend/src/modules/x402/eip3009-settlement-sweeper.ts:464`, the nonce the scan looks up).
+     Signers older than #3888 still send a random nonce. Why this is safe is in
+     the [delegation-rail security model](../security/delegation-rail-security-model.md)
+     ("Since #3888 the 3009 header's nonce is derived, not random"); the
+     payment sequence is in [04](04-x402-payment-sequence.md). Since #4319 a
+     settlement can also be recorded from a STORED header (Tier 1, the same
+     nonce-bound standard, on the generic attach path and in the sweep tick)
+     or — flag-gated, under seven fail-closed limits — from the merchant
+     receipt's transaction hash (Tier 2, labelled `receipt`, never
+     nonce-bound); the ladder and its limits are documented in [04](04-x402-payment-sequence.md).
    - `signSweepAuthorization(authorization, expectedAuth)` → verifies Haven's
      authenticated recovery context, confirms the delegate and — when the
      local credential carries the agent's account (Haven wallet) address —
      the destination, and signs a Base-USDC EIP-3009 sweep authorization.
+   - `signSiwxMessage(message)` (#3728) → EIP-191 `personal_sign` over an
+     EIP-4361 message. The message always reaches it composed in-package by
+     the tool layer (`siwx.ts`) from grammar-validated challenge fields, with
+     the address read from this key — never a caller-supplied string, hash or
+     byte payload (see Sign-In-With-X below).
    - Returns signatures/headers only — never the key.
 
 2. **Local stdio MCP signer** — a thin MCP server exposing sign-only tools
@@ -135,7 +177,12 @@ The edge signer ships as **`@haven_ai/signer`** in two layers:
    `capabilities.experimental["haven/signer-compatibility"]` for machines, and
    the same numbers in MCP `instructions` for the model. Both are derived from
    `SUPPORTED_X402_EXPECTED_VERSIONS` / `SUPPORTED_SWEEP_BINDING_VERSIONS` in
-   `capabilities.ts`, never a second literal. It exists so version skew is
+   `capabilities.ts`, never a second literal. The same object also lists the
+   direct-payment, task-budget and sub-budget sign-context versions the
+   signer fetches (`direct_sign_context_versions`,
+   `task_sign_context_versions`, and since #3506
+   `sub_budget_sign_context_versions`, each derived from its
+   `SUPPORTED_*_SIGN_CONTEXT_VERSIONS` set in `sign-context.ts`). It exists so version skew is
    detectable *before* a payment: the hosted quote reports the version it will
    emit, the agent compares, and a mismatch is a warning naming the fix — never
    a refusal, which stays at signing time (#1143). Only the agent sees both
@@ -297,7 +344,16 @@ refuses otherwise).
 
 Merchant-facing fetches on the hosted path are bounded (#1300):
 `merchantTimeout` default 300 s, calibrated to the merchant's own
-`maxTimeoutSeconds: 300`; a timeout AFTER confirmed funding surfaces as
+`maxTimeoutSeconds: 300`. Since #3747 the hosted client also installs
+`strictMerchantEgressPolicy()` (`packages/sdk/src/merchant-egress.ts`):
+public https URLs only — a string check on the URL; a public name whose DNS
+answer points at private space is not blocked (#3742–#3744) — per-use byte
+caps, and per-use deadlines of 15 s for quote probes and MCP session setup,
+5 s for discovery and 300 s for paid delivery. In the SDK merchant transport
+every GET redirect hop is re-checked (at most 3, none on other methods) and
+each deadline is the minimum of the policy value and `merchantTimeout`;
+discovery and the #3739 request-mode probe use the policy deadline directly
+and follow no redirect (`redirect: 'error'`); a timeout AFTER confirmed funding surfaces as
 `MERCHANT_UNRESPONSIVE_AFTER_FUNDING` with verify-then-sweep guidance —
 never a blind sweep, since the merchant may still settle late.
 
@@ -336,9 +392,13 @@ branch will sign at all is narrowed by #3272: `haven_sign` signs typed data
 without an x402 context only when it is a `PackedUserOperation` for this
 signer's own derived delegate account, on a chain with pinned delegation
 contracts, whose `callData` is a single `execute` to the DelegationManager
-calling `redeemDelegations` with one of two chain shapes (#3329): a single
-grant made TO this account by a different account, or a two-link
-`[task child, budget]` chain whose leaf is self-delegated by this account, in
+calling `redeemDelegations` with one of three chain shapes: a single
+grant made TO this account by a different account, a two-link
+`[task child, budget]` chain whose leaf is self-delegated by this account
+(#3329), or a three-link `[sub grant, parent child, budget]` chain (#3330)
+whose leaf is granted TO this account by the delegating agent's account,
+whose middle link is that agent's self-narrowing, and whose root is that
+agent's budget grant from elsewhere — in
 `SingleDefault` mode, canonically encoded — an
 empty chain would make the DelegationManager execute as the account itself.
 Anything else is refused with
@@ -367,8 +427,15 @@ outside its validity window) gets a **403**; a period-budget pre-check refuses
 an amount the remaining budget cannot cover with a typed **403
 `delegation_budget_exceeded`** (#3503); anything out of policy that still
 reaches `prepareDelegationPayment`'s gas estimation (a budget the pre-check
-could not read, for one) is rejected by the caveat enforcer there, and the
-caller gets a **502 with the database untouched** (`routes/payments.ts`).
+could not read, for one) is rejected by the caveat enforcer there. A revert a
+fresh read confirms is the period budget's (#3503) or an open task budget's
+cap (#3500) answers the same typed 403 as that budget's pre-check
+(`delegation_budget_exceeded` / `task_budget_exceeded`); a chain with no
+bundler credential on this deployment is a typed, non-retryable **503**
+(#3416); anything else is a **502 with no payment row written**, typed since
+#3609 as `prepare_reverted` (an execution revert) or `prepare_failed`, both
+with bounded `details` (`routes/payments.ts`,
+`modules/payments/prepare-failure.ts`).
 In every case there is no intent row, no `payload_hash` to sign, and
 nothing to poll — tell the user to raise the budget in Haven.
 
@@ -384,12 +451,29 @@ hosted:  haven_settle_mcp_tool  -> relay funding, confirm, call merchant tool
 **Decomposed x402 flow — EIP-3009 bridge:**
 
 ```
+hosted:  haven_quote_x402         -> price + next_arguments { url, method, headers, body, max_amount_human }
 hosted:  haven_pay_x402_quote     -> { payment_id, payload_hash, x402.expected }
-local:   haven_sign + expected    -> funding signature + x402_binding
+local:   haven_sign               -> funding signature + x402_binding; pass { payment_id }
+                                    (preferred), or payload_hash + x402_expected together with
+                                    typed_data_b64 from a re-run quote with
+                                    include_signing_payload=true
 hosted:  haven_submit             -> fund delegated agent EOA from the account budget
 local:   haven_x402_sign_header   -> EIP-3009 payment header if binding matches
 agent:   retry merchant, setting BOTH PAYMENT-SIGNATURE + X-PAYMENT
+hosted:  haven_report_x402_outcome { payment_id, outcome, merchant_status, payment_header }
 ```
+
+Since #3739 (PR #3762) the pay step takes the quoted request (`url`, `method`,
+`headers`, `body`) and re-sends it itself, paying the 402 it got, so the agent
+never copies a challenge. The hosted guidance names the one-call local form,
+`haven_sign_x402` in place of the two local steps (its header is built before
+funding confirms; the `x402_binding` it returns is already spent). The header
+tools return `retry_headers`, the header names to set (#3727). The outcome
+report may fold in the settlement evidence. On this EIP-3009 path only (erc7710
+needs no header: Haven assembled it), since #3925 a reported settlement is
+recorded only when the report carries the `payment_header` the agent retried
+with; since #4061 a report without it is refused as
+`SETTLEMENT_PROOF_HEADER_MISSING`, and both report tools forward the header.
 
 **Decomposed x402 flow — erc7710 direct settlement**
 ([#2041](https://github.com/d-hinders/Haven-AI/issues/2041)), taken when the
@@ -402,12 +486,18 @@ local:   haven_sign { payment_id } -> child signature (caveats verified locally)
 hosted:  haven_submit { settlement_scheme: "erc7710" } -> payment_header
 agent:   retry merchant, setting PAYMENT-SIGNATURE ONLY (#2341 — this header
          carries the delegation chain; duplicating it is refused with 431)
+hosted:  haven_report_settlement_evidence { payment_id, settlement_tx_hash }
 ```
 
 The signer's step is the same tool, but what it signs is not: on the bridge the
 signature funds the delegate EOA, here it IS the settlement child. There is no
 funding transaction and therefore no `haven_x402_sign_header` step — see the
-custody note below on who assembles the header on this scheme.
+custody note below on who assembles the header on this scheme. Since #4242 the
+signer enforces this rather than leaving it to guidance: `haven_x402_sign_header`
+never builds a header from a settlement-child binding (it answers
+`NO_FUNDING_LEG` while the retired id is still remembered, the unknown-binding
+refusal after that), and `haven_sign_x402` refuses a settlement child before
+signing it. Only a funding-leg binding builds a header.
 
 `haven_sign_x402` creates the short-lived merchant authorization before funding
 confirms, so call `haven_settle_mcp_tool` promptly. If the payment window
@@ -471,7 +561,15 @@ account is permanently out of scope.
   On the **erc7710** scheme the relayed artifact is not a funding signature at
   all — it is the settlement child — and the header travels the other way, from
   Haven back to the agent. Still only a signature crosses the boundary, and
-  still never the key.
+  still never the key. On the plain-HTTP path the agent's settlement report
+  (`haven_report_x402_outcome` / `haven_report_settlement_evidence`) carries
+  the `payment_header` it retried with, after the merchant has used it: since
+  #3925 an agent-reported EIP-3009 settlement is recorded only with that
+  header, and only when the payment's delegate signed it. Since #4061 both
+  report tools forward it, and a header lifted from another payment of the
+  same agent is refused: its nonce is that payment's derived nonce.
+  The #3888 sweep records without one, from the nonce derived from the
+  payment id.
 - The merchant receives the standard signed EIP-3009 payment header, never the
   delegate key. Hosted paid-MCP completion also sends the requested MCP call and
   required session/handshake traffic. Haven never builds the payment header on
@@ -487,7 +585,7 @@ account is permanently out of scope.
 - The edge signer refuses to build the merchant header unless the caller first
   signed the funding hash with a Haven-authenticated `x402.expected`; the
   resulting binding is process-local and is consumed after one successful
-  merchant header. The fresh `payment_required` must match the authenticated
+  merchant header. Only a funding-leg binding qualifies (#4242). The fresh `payment_required` must match the authenticated
   funding-intent amount, merchant, resource URL, asset, and network.
 - Startup (#3173): the signer imports `@haven_ai/sdk/edge`, never the SDK
   barrel, and loads `x402/schemes` only on the merchant-header leg, so no
@@ -517,7 +615,11 @@ account is permanently out of scope.
   predecessor kept), a failed audit write never fails the signing call that
   already produced its signature, and `payload_hash` / `typed_data_hash` are
   bounded on the schema to a 32-byte hash so no audit field is
-  caller-controlled free text.
+  caller-controlled free text. A `haven_sign_siwx` row (#3728) records the
+  sha256 of the JSON-encoded composed EIP-4361 message (`hashPayloadForAudit`)
+  as its `payload_hash`, plus the
+  challenge's grammar-validated `domain` and `nonce`; never the message
+  itself.
 - Connect Agent 2 creates local credential files during pairing. Registration
   sends Haven the setup token, runtime/version, public signing address and
   proof, API-key hash/prefix, and non-secret connector/install metadata. Later
@@ -547,8 +649,10 @@ account is permanently out of scope.
   removed, #3169).
 - Standard merchant-verifiable x402 is exact-scheme USDC on Base and Base
   Sepolia.
-- Gasless `haven_sign_sweep_delegate` recovery currently supports canonical
-  USDC on Base mainnet only. It does not recover native ETH.
+- Gasless `haven_sign_sweep_delegate` recovery supports canonical Circle USDC
+  on Base mainnet and on Base Sepolia (dev/QA): the chains `isSweepableChain`
+  in `packages/sdk/src/sweep.ts` knows, which the backend's sweep prepare
+  gates on. It does not recover native ETH.
 - The signer needs no `api_key` — it only signs. Identity (the API key) lives
   with the hosted connection, not the signer.
 - Hosted x402 construct requires Haven to sign the expected context with a
@@ -561,3 +665,23 @@ account is permanently out of scope.
   allowances and agent-wallet balances small, retry the original merchant
   session after funding confirms, and reconcile or sweep stranded delegate
   balances when a merchant retry fails or the authorization expires unsettled.
+
+> **Re-verification (#3935, the derived EIP-3009 nonce, 2026-10-14):** the
+> `buildX402PaymentHeader` sentences were added against `origin/dev`
+> `686ac03c` (`packages/signer/src/core.ts`, the backend's
+> `eip3009-settlement-sweeper.ts`). Scope of this note: that bullet. The rest
+> of this document was not re-read for it, and `last-verified` is not bumped.
+
+> **Re-verified 2026-10-19 (weekly docs audit #3645, at dev `cf88627c`):** the
+> whole document was re-read against the code. Changed: the core lists
+> `signSiwxMessage` (#3728); the handshake paragraph names the sign-context
+> version sets (#3506 added the sub-budget one); the #3272 allowlist accepts
+> the #3330 three-link sub-budget chain, not two shapes; the over-budget 502 is
+> typed (#3609) and a confirmed budget revert answers 403; the hosted egress
+> policy's deadlines and caps (#3747); the decomposed x402 flows gain the quote
+> step (#3739) and the outcome / settlement-evidence report, with the proof
+> header #3925 requires; the SIWX audit row; and the sweep supports Base
+> Sepolia as well as Base mainnet (`isSweepableChain`). Checked and accurate:
+> the `core.ts:448-454` and sweeper `:464` line anchors, the tool set and
+> `--help` / unknown-option exit 2 (run), the consent and ack paths, the audit
+> rotation constants, the SIWX grammar limits, and the 300 s delivery default.

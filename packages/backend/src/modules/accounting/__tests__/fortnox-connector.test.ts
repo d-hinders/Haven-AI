@@ -44,7 +44,7 @@ const TX = {
   paymentId: 'pay-123',
   settledAt: '2026-07-15T09:30:00.000Z',
   direction: 'out' as const,
-  counterparty: { address: '0x' + 'ab'.repeat(20), name: 'NordShield VPN' },
+  counterparty: { address: '0x' + 'ab'.repeat(20), name: 'NordShield VPN', country: null },
   resourceUrl: 'https://merchant.example/vpn',
   token: 'USDC',
   amountAtomic: '1000',
@@ -396,11 +396,11 @@ describe('helpers', () => {
 
   it('supplierNameFor falls back from name to truncated address to unknown', () => {
     expect(supplierNameFor(TX)).toBe('NordShield VPN')
-    const fallback = supplierNameFor({ ...TX, counterparty: { name: null, address: '0x' + 'ab'.repeat(20) } })
+    const fallback = supplierNameFor({ ...TX, counterparty: { name: null, address: '0x' + 'ab'.repeat(20), country: null } })
     expect(fallback).toMatch(/^Merchant 0xabab/)
     // Fortnox-safe: no Unicode ellipsis in the Name field (live gotcha 2000359).
     expect(fallback).not.toMatch(/…/)
-    expect(supplierNameFor({ ...TX, counterparty: { name: null, address: null } })).toBe('Unknown merchant')
+    expect(supplierNameFor({ ...TX, counterparty: { name: null, address: null, country: null } })).toBe('Unknown merchant')
   })
 
   /**
@@ -417,10 +417,10 @@ describe('helpers', () => {
     // CONTROL: the two forms really differ, so this assertion can fail.
     expect(checksummed).not.toBe(lower)
 
-    const fromLower = supplierNameFor({ ...TX, counterparty: { name: null, address: lower } })
+    const fromLower = supplierNameFor({ ...TX, counterparty: { name: null, address: lower, country: null } })
     const fromChecksummed = supplierNameFor({
       ...TX,
-      counterparty: { name: null, address: checksummed },
+      counterparty: { name: null, address: checksummed, country: null },
     })
 
     expect(fromChecksummed).toBe(fromLower)
@@ -465,10 +465,16 @@ describe('merchant receipt dual-attach (#956)', () => {
 
   it('a failed merchant-receipt URL fetch degrades to a note; evidence attach + push survive', async () => {
     mockLoadUnderlag.mockResolvedValue(UNDERLAG)
-    // The receipt URL host resolves through the SAME injected fetchImpl —
-    // return 404 for it.
-    const { impl, calls } = stubs({ 'merchant.example/receipt.pdf': () => ({ status: 404, body: {} }) })
-    const res = await new FortnoxConnector(impl).pushTransaction('u1', {
+    // #4309: the receipt URL fetch no longer rides the connector's fetchImpl —
+    // a URL an agent or merchant chose goes through the SSRF guard, injected
+    // here via its seams: the host resolves public, the pinned transport
+    // answers 404.
+    const { impl, calls } = stubs()
+    const receiptFetchOptions = {
+      resolver: async () => [{ address: '93.184.216.34', family: 4 }],
+      transport: async () => ({ status: 404, location: null, body: '', headers: {} }),
+    }
+    const res = await new FortnoxConnector(impl, receiptFetchOptions).pushTransaction('u1', {
       ...TX,
       merchantReceipt: { url: 'https://merchant.example/receipt.pdf', inlineJson: null },
     })
@@ -481,6 +487,8 @@ describe('merchant receipt dual-attach (#956)', () => {
 
   it('a private-host receipt URL is refused by the SSRF guard — note, never fetched blind', async () => {
     mockLoadUnderlag.mockResolvedValue(UNDERLAG)
+    // No receipt seam at all: an IP literal is refused at the guard's URL
+    // policy, before resolution — the refusal needs no network.
     const { impl, calls } = stubs()
     const res = await new FortnoxConnector(impl).pushTransaction('u1', {
       ...TX,

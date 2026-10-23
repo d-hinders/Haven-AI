@@ -5,6 +5,7 @@ covers:
   - .github/CODEOWNERS
   - .github/workflows/dev-gate.yml
   - .github/workflows/pr-ownership-gate.yml
+  - .github/workflows/external-intake-gate.yml
   - scripts/ci/dev-push-health.mjs
   - .github/ISSUE_TEMPLATE/loop-task.md
   - .github/ISSUE_TEMPLATE/loop-epic.md
@@ -12,7 +13,7 @@ covers:
   - .agents/skills/new-task/SKILL.md
   - .claude/commands/ship-next.md
   - .claude/commands/new-task.md
-last-verified: "2026-10-10"
+last-verified: "2026-10-20"
 ---
 
 # Autonomous PR loop
@@ -34,12 +35,12 @@ and only comes back to you for a real decision, a blocking review finding, a
 live work overlap, or stuck CI.
 
 Pieces:
-- **`new-task`** ([canonical skill](../../.agents/skills/new-task/SKILL.md)) — **capture**: turns a one-line description into a well-formed backlog issue (Scope + Acceptance + Surface + Money-path), backlog-only by default, and the default route for **every** issue an agent files — never a bare `gh issue create`. Code claims in a filed body are measured commands at a named commit, and **every** filed issue — single task or epic — gets one independent spec-review pass plus a verdict comment before it is queued, shipped or announced — the skill's [§ *Issue review*](../../.agents/skills/new-task/SKILL.md#issue-review).
+- **`new-task`** ([canonical skill](../../.agents/skills/new-task/SKILL.md)) — **capture**: turns a one-line description into a well-formed backlog issue (Scope + Acceptance + Surface + Money-path, plus a Design system brief for `area:frontend`), backlog-only by default, and the default route for **every** issue an agent files — never a bare `gh issue create`. Code claims in a filed body are measured commands at a named commit, and **every** filed issue — single task or epic — gets one independent spec-review pass plus a verdict comment before it is queued, shipped or announced — the skill's [§ *Issue review*](../../.agents/skills/new-task/SKILL.md#issue-review).
 - **`ship-next`** ([canonical skill](../../.agents/skills/ship-next/SKILL.md)) — **execute**: does **one** PR end-to-end, then stops. `ship-next "<task>"` is `new-task` + ship in one go.
 - **Client adapters** — Claude Code exposes thin `/new-task` and `/ship-next` wrappers; `/loop /ship-next` re-invokes one item at a time. Other clients invoke the canonical skills through their supported skill and delegation mechanisms.
 - **haven-reviewer** — the per-PR quality gate.
 - **Docs acceptance gate** — `docs:check` and `docs:test` are **CI required checks** on every PR ([#1023](https://github.com/d-hinders/Haven-AI/issues/1023) — the *Docs front-matter & agent skills* job), so a PR with invalid front-matter or an unresolved `covers:` glob cannot reach auto-merge no matter how it was opened. `ship-next` still runs them locally before pushing, but only to save a round trip — it is no longer the thing that enforces them. Same shape for **Design-system coupling (strict)**.
-- **haven-doc-reviewer** — per-PR check that the docs describing the changed code are still accurate (see `docs/contributing/docs-quality-system.md`). Running it after implementation is a **hard definition-of-done step in the loop**, and the docs whose `covers:` front-matter maps to the changed code are the floor of what it reviews, not the scope — the pass derives that from the diff's claims (#2499): `ship-next` must review those docs and, in the same PR, update the stale claims (or genuinely re-verify and bump `last-verified`) before opening the PR. This is a loop requirement enforced by the skill, independent of GitHub required-checks — the **docs↔code** coupling comment (`docs-coupling.yml`) stays advisory and does not by itself block auto-merge, except for docs marked `contract: true`. (Not to be confused with the *design-system* coupling gate one bullet up, which does block.)
+- **haven-doc-reviewer** — per-PR check that the docs describing the changed code are still accurate (see `docs/contributing/docs-quality-system.md`). Running it after implementation is a **hard definition-of-done step in the loop**, and the docs whose `covers:` front-matter maps to the changed code are the floor of what it reviews, not the scope — the pass derives that from the diff's claims (#2499): `ship-next` must review those docs and, in the same PR, update the stale claims (or genuinely re-verify and bump `last-verified`) before opening the PR. This is a loop requirement enforced by the skill, independent of GitHub required-checks — the **docs↔code** coupling comment (`docs-coupling.yml`) stays advisory and does not by itself block auto-merge, except for docs marked `contract: true`. A wrong claim (now-wrong, or newly written by the diff) about custody, signing, spend authority or money movement is **blocking** in any doc, whether or not it is `contract: true` (#4174). (Not to be confused with the *design-system* coupling gate one bullet up, which does block.)
 - **Surface playbooks** — `ship-next` classifies each issue's surface from its `area:*` / `money-path` labels and loads the matching playbook from `docs/contributing/ship-playbooks/` (UX + design system for frontend, CASP for money-path, etc.), so the right standards apply without a long prompt. See [`ship-playbooks/README.md`](ship-playbooks/README.md).
 - **`.github/CODEOWNERS`** — the migration carve-out for independent GitHub review and merge.
 
@@ -58,10 +59,8 @@ Pieces:
 > live step, so an OPEN issue can already be implemented and on `dev` (#2276). What's actually in **prod** is
 > tracked separately (issue state is not overloaded with promotion state): each
 > `dev → main` promotion cuts a **prod GitHub Release** (`.github/workflows/release.yml`)
-> with auto-generated notes, and the **pending-promotion digest**
-> (`.github/workflows/promotion-digest.yml`) keeps a single pinned "📦 Pending
-> promotion" issue listing what's on `dev` but not yet in prod — refreshed on
-> every merge to `dev`, on every promotion, and daily. The `main..dev` compare is the same view on demand. Full details: [`branch-and-release-flow.md`](branch-and-release-flow.md).
+> with auto-generated notes, and what's on `dev` but not yet in prod is the
+> `main...dev` compare. Full details: [`branch-and-release-flow.md`](branch-and-release-flow.md).
 
 ## Quickstart
 
@@ -97,17 +96,26 @@ overlap, or stuck CI.
 
 The queue is always **GitHub issues** — nothing is tracked in the repo. Issue
 state *is* the backlog state: an open issue with no PR, no live claim or work
-overlap, and no `pending-review` label is ready (`pending-review` means its spec
-review or an owner decision is still outstanding — `new-task` § *Hold until
-ready*), an open issue with an open Haven PR is in flight, and a closed
+overlap, no `pending-review` label, and not external intake is ready
+(`pending-review` means its spec review or an owner decision is still
+outstanding — `new-task` § *Hold until ready*; external intake — an author
+neither a maintainer nor a Bot, not accepted by a maintainer removing its
+`external` label — is never ready, whatever its labels say: AGENTS.md §
+*Cross-session agent coordination*, rule 0b, #4200), an open issue with an open Haven PR is in flight, and a closed
 issue is done (its PR closed it via `Closes #`). One deliberate exception, and it
 reads as ready when it is not: an issue labelled **`operator-verify`** has merged
 code and is waiting on a human step, so its PR wrote `Refs #<n>` and the merge left
-it open (#2276).
+it open (#2276). Its machine-applied sibling is **`landed-partial`** (#4235): the
+merge-time release workflow adds it on every `Refs`-only merge to the open,
+non-epic, maintainer-authored issues the PR references, so part or all of such an
+issue has landed even when nobody applied `operator-verify`. The loop skips it and
+reads the merged PR first; no check reads it, so a later `Closes #<n>` PR needs no
+label removal.
 
 You don't have to hand-write those issues. **Capture is its own step:**
 [`new-task "<description>"`](../../.agents/skills/new-task/SKILL.md) turns a one-line
-task into a well-formed issue (Scope + Acceptance + Surface + Money-path), asking
+task into a well-formed issue (Scope + Acceptance + Surface + Money-path, plus
+a Design system brief for `area:frontend`), asking
 a clarifying question or two when needed. It's **backlog-only by default** — it
 applies `area:*` labels but *not* `code-quality`, so capturing a task doesn't
 queue it for the loop. In practice, most issues are picked up by a partner or
@@ -143,7 +151,9 @@ keys, a live end-to-end run — the code half ships and the issue must stay OPEN
 `Closes` is a GitHub keyword, so writing "this issue stays open" in the body does
 not survive the merge: #2268 said so three times, in the issue, in its release
 comment and in PR #2272's own body, and the merge closed it anyway. Such a PR
-writes **`Refs #<n>`** and the issue carries the **`operator-verify`** label. That
+writes **`Refs #<n>`** and the issue carries the **`operator-verify`** label,
+applied by hand when the PR opens (the merge then also adds the informational
+`landed-partial`, which nothing enforces). That
 is enforced, not merely conventional — `scripts/ci/operator-verify-close-guard.mjs`
 runs inside the required *Docs front-matter & agent skills* check and fails a pull
 request whose closing keyword targets a labelled issue, or one the pull request
@@ -396,8 +406,8 @@ Without this, `ship-next` can open PRs but cannot auto-merge them.
 1. **Settings → General → Default branch: set to `dev`.** This is what makes
    `Closes #<n>` close issues on the **dev-merge** (closed = implemented). `main`
    stays the protected prod branch (GitFlow-style: prod is a non-default branch).
-   Prod promotion is tracked by the release + pending-promotion-digest workflows,
-   not by issue state.
+   Prod promotion is tracked by the release workflow and the `main...dev`
+   compare, not by issue state.
 2. **Settings → General → Pull Requests:**
    - ☑ **Allow auto-merge** (required, or the auto-merge step is a no-op).
    - ☑ **Automatically delete head branches** (housekeeping).
@@ -432,10 +442,11 @@ Without this, `ship-next` can open PRs but cannot auto-merge them.
      (#3179):** add **PR ownership gate** (`.github/workflows/pr-ownership-gate.yml`)
      to this ruleset's required contexts — it fails a PR that would close an
      issue another session holds. Because *Haven automerge rules* targets both
-     branches, that makes it the **16th** required context on `dev` and the
-     **20th** on `main`. Until the owner adds it, the check runs and reports on
-     every PR but does not block; this list, the *Effective per branch* table
-     below (15 / 19), `branch-and-release-flow.md` § Promotion to production ("19 … the 15")
+     branches, that makes it the **17th** required context on `dev` (after the
+     `dev`-only External intake gate, below) and the **20th** on `main`. Until
+     the owner adds it, the check runs and reports on every PR but does not
+     block; this list, the *Effective per branch* table below (16 / 19),
+     `branch-and-release-flow.md` § Promotion to production ("19 … the 15")
      and `promoting-dev-to-main.md` ("19 … the 15") all describe the counts AS
      APPLIED — update all four when the step is done. The workflow uses `pull_request_target` so the default branch's copy of the script judges (it therefore cannot run on the PR that adds it); once the context is required, a PR for which the workflow does not run at all would have no check run and could not merge — a different failure than red, worth knowing when reading a stuck PR.
 
@@ -488,12 +499,25 @@ Without this, `ship-next` can open PRs but cannot auto-merge them.
    - **"Dev merge"** (targets `dev` only, added 2026-09-07 by O1) — a single
      `pull_request` rule with `allowed_merge_methods: ["squash"]` and
      `required_approving_review_count: 0`, plus block-deletion and
-     block-force-push. **No status checks of its own** — the shared ruleset
-     already carries those, and adding them here would be a second copy to
+     block-force-push. **No status checks of its own** except the `dev`-only
+     ones (External intake gate — below) — the shared ruleset
+     already carries the rest, and adding those here would be a second copy to
      drift. It exists only because merge methods intersect and *Haven automerge
      rules* cannot be narrowed without taking `main` down with it: squash-only
      on `dev` had to be expressed on a `dev`-only ruleset. (Its "require Copilot
      review" checkbox is ticked and inert while the approval count is zero.)
+     **Required: External intake gate (#4200)**
+     (`.github/workflows/external-intake-gate.yml`), applied to THIS ruleset by
+     the owner on 2026-10-21 and read back from `rules/branches/dev` the same
+     day (16 contexts, `strict` false on both rules). It fails a PR into `dev`
+     that is external, or that closes an open external issue, until a
+     maintainer accepts it. It lives here, not on *Haven automerge rules*,
+     because it judges `dev` only (it passes every other base), and not on
+     *Dev gate*, which targets `main`. So it is required on `dev` alone:
+     **16** on `dev`, `main` unchanged. *Require branches to be up to date* is
+     **unticked** on this rule and must stay so: the booleans union, so
+     ticking it would re-impose the up-to-date gate on `dev` that O1 turned
+     off.
    - **"Dev gate"** (targets `main` only) — reinforces the pull-request and
      force-push protections on `main`, and carries the strict up-to-date policy,
      one merge-method rule of its own, and **four** required checks. It carries
@@ -547,7 +571,7 @@ Without this, `ship-next` can open PRs but cannot auto-merge them.
 
    | | `dev` | `main` |
    |---|---|---|
-   | Required contexts | **15** (all from *Haven automerge rules*; a 16th, **PR ownership gate**, is pending — #3179, see One-time setup) | **19** (those 15 + `gate`, `qa-freshness`, Design visual regression, Frontend browser smoke; 20 once the pending step is applied) |
+   | Required contexts | **16** (15 from *Haven automerge rules* + **External intake gate**, #4200, from *Dev merge*; a 17th, **PR ownership gate**, #3179, is pending — see One-time setup) | **19** (those 15 + `gate`, `qa-freshness`, Design visual regression, Frontend browser smoke; 20 once the PR ownership gate step is applied) |
    | Branch must be up to date | **no** | **yes** |
    | Allowed merge method | **squash only** | **merge commit only** |
 

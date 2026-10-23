@@ -11,16 +11,15 @@ import { describe, expect, it } from 'vitest'
  *      navigation tiers, or drops a nav tier below the chrome, that is the
  *      exact inversion that made the mobile sidebar toggle unreachable;
  *   2. the shell components reaching for a token instead of a bare number —
- *      a fresh `z-[60]` in Sidebar or TopBar is how the defect is reintroduced,
- *      and it is invisible to every other frontend gate.
+ *      a fresh `z-[60]` in Sidebar or AuthenticatedShell is how the defect is
+ *      reintroduced, and it is invisible to every other frontend gate.
  *
  * ── What it CANNOT catch, and this matters ──────────────────────────────────
  * It cannot see stacking contexts, and it cannot hit-test. A correctly ordered
  * scale still fails to produce a clickable button if some ancestor creates a
  * stacking context that traps one of these layers — `transform`, `filter`,
- * `opacity < 1`, `will-change`, `backdrop-filter` (which TopBar HAS, via
- * `backdrop-blur-md`) all do that, and the numbers would still read correctly
- * here while the button stayed buried.
+ * `opacity < 1`, `will-change`, `backdrop-filter` all do that, and the numbers
+ * would still read correctly here while the button stayed buried.
  *
  * So this test is the cheap half of the guard and deliberately not the whole
  * one. The half that actually proves a user can tap the control is
@@ -39,7 +38,12 @@ function zToken(name: string): number {
   return Number(match[1])
 }
 
-const SHELL_FILES = ['components/TopBar.tsx', 'components/sidebar/Sidebar.tsx']
+const SHELL_FILES = [
+  'components/AuthenticatedShell.tsx',
+  'components/sidebar/Sidebar.tsx',
+  'components/sidebar/MoreSheet.tsx',
+  'components/sidebar/MobileTabBar.tsx',
+]
 
 describe('z-index scale (#1749)', () => {
   it('the mobile navigation tiers all outrank the app chrome', () => {
@@ -49,25 +53,50 @@ describe('z-index scale (#1749)', () => {
     }
   })
 
-  it('the bottom tab bar is covered by the navigation that opens over it (#2730)', () => {
-    // The tab bar is app chrome pinned to the bottom of the screen, and the
-    // "More" drawer (#2731) opens FROM it — so the drawer and its scrim have to
-    // cover the bar, or the control that opened the drawer stays painted on top
-    // of it. The upper bound is the whole point of the token: a bar at
-    // `--v2-z-nav-drawer` or above is the #1749 inversion, one surface over.
-    expect(zToken('tab-bar')).toBeLessThan(zToken('nav-scrim'))
-    expect(zToken('tab-bar')).toBeLessThan(zToken('nav-drawer'))
-    // And above the content it scrolls over, but below the popovers anchored in
-    // the top bar, which can extend down across the bar's band on a phone.
+  it('the bottom tab bar sits between the content and the overlays above it (#2730)', () => {
+    // Above the content it scrolls over, below the popovers anchored in the
+    // chrome, and below the nav overlay tiers — a bar at `--v2-z-nav-drawer`
+    // or above is the #1749 inversion one surface over: it would paint over
+    // a sheet that grew past its edge.
     expect(zToken('tab-bar')).toBeGreaterThan(zToken('sticky'))
     expect(zToken('tab-bar')).toBeLessThan(zToken('chrome-popover'))
+    expect(zToken('tab-bar')).toBeLessThan(zToken('nav-scrim'))
+    expect(zToken('tab-bar')).toBeLessThan(zToken('nav-drawer'))
   })
 
-  it('the toggle sits above its own drawer and scrim, so one control does both', () => {
-    // The Open and Close affordances are the SAME button. If the drawer or its
-    // scrim covered it, the sidebar could be opened and then never closed by
-    // the control that opened it.
-    expect(zToken('nav-toggle')).toBeGreaterThan(zToken('nav-drawer'))
+  it('the More sheet floats OVER the tab bar, its scrim shading to the viewport bottom (#4058)', () => {
+    // #4053 kept the bar reachable by GEOMETRY: sheet and scrim ended at the
+    // bar's top edge. Once the bar became a floating pill (#4058) that edge
+    // cut through the pill and left the strip around it undimmed, so the
+    // sheet now covers the bar BY RANK (the ordering assertions above) and
+    // carries its own ✕. This pins the half the ordering cannot see: the scrim
+    // runs to the bottom edge, and the card floats clear of it rather than
+    // stopping at the bar.
+    const sheet = readFileSync(resolve(root, 'components/sidebar/MoreSheet.tsx'), 'utf8')
+    const scrim = sheet.match(/data-more-sheet-scrim=""[\s\S]*?className="([^"]+)"/)
+    expect(scrim, 'scrim className not found').not.toBeNull()
+    expect(scrim![1].split(/\s+/)).toEqual(
+      expect.arrayContaining(['fixed', 'inset-x-0', 'top-[var(--v2-safe-top)]', 'bottom-0', 'z-[var(--v2-z-nav-scrim)]']),
+    )
+    // Never `inset-0` / `top-0`: the status band stays opaque (#2819).
+    expect(scrim![1]).not.toMatch(/\binset-0\b|\btop-0\b/)
+    expect(sheet).toContain('bottom-[max(0.5rem,var(--v2-safe-bottom))]')
+    expect(sheet).toContain('aria-label="Close sidebar"')
+    // The geometry `const bottom` that made the sheet stop at the bar is gone.
+    expect(sheet).not.toMatch(/const bottom = /)
+  })
+
+  it('the More control is a cell of the tab bar, not a control floating over a drawer (#4053)', () => {
+    // #2731–#2820 painted it from outside the bar on `--v2-z-nav-toggle`,
+    // because the full-screen drawer covered the bar and the same button had
+    // to stay on top of it to close it. Since #4058 the sheet covers the bar
+    // again, but it closes itself (its ✕), so no control has to float over
+    // it: the tier keeps no consumer, and one reappearing on it means the
+    // close control has moved back out of the sheet.
+    const bar = readFileSync(resolve(root, 'components/sidebar/MobileTabBar.tsx'), 'utf8')
+    const sidebar = readFileSync(resolve(root, 'components/sidebar/Sidebar.tsx'), 'utf8')
+    expect(bar).toContain('data-more-toggle')
+    for (const source of [bar, sidebar]) expect(source).not.toContain('z-[var(--v2-z-nav-toggle)]')
     expect(zToken('nav-drawer')).toBeGreaterThan(zToken('nav-scrim'))
   })
 
@@ -131,8 +160,10 @@ describe('z-index scale (#1749)', () => {
     // overlay is unambiguous — `fixed inset-0` is the shape — so a new one on
     // a fresh number fails here rather than being discovered by a user who
     // cannot dismiss a dialog.
-    // The mobile drawer's scrim is the one legitimate full-screen overlay that
-    // is NOT a modal — it belongs to the navigation tier by construction, and
+    // The mobile navigation scrim (the More sheet's, #4053 — full-height
+    // since #4058 but still below the status band, so not `inset-0`) is the
+    // one legitimate overlay
+    // that is NOT a modal — it belongs to the navigation tier by construction, and
     // is allowed here by its token rather than by filename, so renaming the
     // file cannot smuggle a modal through.
     const ALLOWED = new Set(['[var(--v2-z-modal)]', '[var(--v2-z-nav-scrim)]'])

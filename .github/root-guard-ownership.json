@@ -152,6 +152,26 @@
       "reason": "The ratchet's self-test, for the same reason as dep-lint's: a ratchet whose test is weakened can ratchet nothing."
     },
     {
+      "path": "scripts/lint-budget-liveness.mjs",
+      "jobs": [
+        "backend"
+      ],
+      "runsVia": [
+        "lint:budget-liveness"
+      ],
+      "reason": "The shrink-only census ratchet over inline budget-liveness predicates (#3924, epic #3919 slice E). It scans packages/backend SQL and the client packages' TypeScript but only backend_checks runs it."
+    },
+    {
+      "path": "scripts/lint-budget-liveness.test.mjs",
+      "jobs": [
+        "backend"
+      ],
+      "runsVia": [
+        "lint:budget-liveness:test"
+      ],
+      "reason": "The ratchet's self-test, for the same reason as dep-lint's: a ratchet whose test is weakened can ratchet nothing."
+    },
+    {
       "path": "scripts/lint-next-steps.mjs",
       "jobs": [
         "backend",
@@ -295,7 +315,7 @@
       "runsVia": [
         "lint:runbook-parity"
       ],
-      "reason": "The canonical agent runbook, and the source of several pinned derivations that live in other packages so those packages stay installable alone. Two are FULL-TEXT copies (packages/cli/src/agent-guidance-text.ts, packages/frontend/public/for-agents.md), and since #3596 nine more are byte-SLICES of it (packages/frontend/public/agent-skills/*.md); lint:runbook-parity verifies all eleven. The frontend holds two more that it cannot: src/lib/agent-onboarding-prompt.ts copies one constant, and src/lib/agent-skill-bundle.ts embeds text composed from four of them via sdk/src/skill-content.ts -- resolved text, not an extractable literal. Each derivation is byte-pinned by a test in ITS OWN package's job, and before #2727 an SDK-only change routed code, sdk, backend, connect, mcp, mcp_server and signer: neither cli nor frontend, so none of those pin tests ran. #2713 edited this file and left the CLI copy stale; the frontend copy survived only because that PR happened to touch frontend files too. dev did not even go red -- cli_checks was skipped, so the stale copy was simply carried until an unrelated backend PR (#2719) regenerated it. All three jobs are named so every pin test runs on a change here."
+      "reason": "The canonical agent runbook, and the source of several pinned derivations that live in other packages so those packages stay installable alone. Two are FULL-TEXT copies (packages/cli/src/agent-guidance-text.ts, packages/frontend/public/for-agents.md), and since #3596 nine more are byte-SLICES of it (packages/frontend/public/agent-skills/*.md); lint:runbook-parity verifies all eleven. The frontend holds one more that it cannot: src/lib/agent-skill-bundle.ts embeds text composed from four of them via sdk/src/skill-content.ts -- resolved text, not an extractable literal (#4065 deleted the other, src/lib/agent-onboarding-prompt.ts, with the /agents card that rendered it). Each derivation is byte-pinned by a test in ITS OWN package's job, and before #2727 an SDK-only change routed code, sdk, backend, connect, mcp, mcp_server and signer: neither cli nor frontend, so none of those pin tests ran. #2713 edited this file and left the CLI copy stale; the frontend copy survived only because that PR happened to touch frontend files too. dev did not even go red -- cli_checks was skipped, so the stale copy was simply carried until an unrelated backend PR (#2719) regenerated it. All three jobs are named so every pin test runs on a change here."
     },
     {
       "path": "packages/cli/scripts/sync-agent-guidance.mjs",
@@ -376,6 +396,16 @@
         "lint:request-schemas"
       ],
       "reason": "The committed baseline the request-schema ratchet (#3029, epic #3028) compares packages/backend route counts against. Lowering a count without the code change that earns it is the exact weakening the ratchet refuses, and the gate runs only in backend_checks — the ratchet and its self-test were registered but the data they compare against was not, so a baseline-only edit routed nowhere (quality scan 2026-09-22, candidate C4)."
+    },
+    {
+      "path": "scripts/lint-budget-liveness-baseline.json",
+      "jobs": [
+        "backend"
+      ],
+      "runsVia": [
+        "lint:budget-liveness"
+      ],
+      "reason": "The committed baseline the budget-liveness ratchet (#3924, epic #3919 slice E) compares inline-predicate counts against. Lowering a count without the code change that earns it is the exact weakening the ratchet refuses, and lint:budget-liveness runs only in backend_checks — the same baseline-not-registered hole the request-schema ratchet's was (quality scan 2026-09-22, candidate C4)."
     },
     {
       "path": "scripts/lint-next-steps-baseline.json",

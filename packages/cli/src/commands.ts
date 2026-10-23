@@ -23,7 +23,7 @@ import { checkTextForSecrets, MAX_FEEDBACK_TEXT_LENGTH } from './secret-check.js
 export const DEFAULT_API = 'https://havenbackend-production-8a00.up.railway.app'
 // Self-reported CLI version. Owned by scripts/release-bump.mjs, which rewrites
 // the string literal below on every release — keep it a bare quoted literal.
-export const CLI_VERSION = '0.10.0-alpha.0'
+export const CLI_VERSION = '0.11.0-alpha.0'
 
 /** #3303: the `X-Haven-Client` value every Haven API request from this CLI carries. */
 export const CLI_CLIENT_IDENTITY = `@haven_ai/cli/${CLI_VERSION}`
@@ -840,7 +840,28 @@ interface DelegationRow {
   delegation_hash: string
   version: number
   status: 'pending' | 'active' | 'replaced' | 'revoked'
+  /**
+   * #3922: the backend's budget-view liveness (`active` and unexpired). Absent
+   * on an older backend — a missing value means "derive from `status`", never
+   * false.
+   */
+  is_live?: boolean
 }
+
+/**
+ * The "still enabled" delegation statuses (#3922): a row is enabled on-chain
+ * until the chain confirms it dead, so only `revoked` is not. This is the CLI's
+ * ONE copy of `STILL_ENABLED_DELEGATION_STATUSES` from `@haven_ai/core` — the
+ * published CLI cannot depend on that private package — and
+ * `commands.test.ts` pins the two together. The revoke gate reads STATUS, not
+ * `is_live`: it guards against leaving on-chain authority behind and must work
+ * against an older backend that sends no `is_live`.
+ */
+const STILL_ENABLED_STATUSES: ReadonlySet<string> = new Set([
+  'pending',
+  'active',
+  'replaced',
+])
 
 /** The POST /agents/:id/delegations/:hash/revoke prepare response (#2539). */
 interface RevocationPrepare {
@@ -914,23 +935,41 @@ async function cmdBudgetGrant(args: ParsedArgs, d: ResolvedDeps): Promise<number
   const amount = parseTokenAmount(args.flags.amount, token.decimals, token.symbol)
   if (!amount.ok) throw new UsageError(amount.message)
 
-  const built = await api.post<DelegationBuild>(`/agents/${id}/delegations/build`, {
-    token_address: token.address,
-    recipient_address: args.flags.recipient ?? null,
-    budget_atomic: amount.atomic,
-    period_seconds: args.flags.period * 60,
-    ...(args.flags.expires !== undefined ? { expires_at: args.flags.expires } : {}),
-  })
+  let built: DelegationBuild
+  try {
+    built = await api.post<DelegationBuild>(`/agents/${id}/delegations/build`, {
+      token_address: token.address,
+      recipient_address: args.flags.recipient ?? null,
+      budget_atomic: amount.atomic,
+      period_seconds: args.flags.period * 60,
+      ...(args.flags.expires !== undefined ? { expires_at: args.flags.expires } : {}),
+    })
+  } catch (err) {
+    // #3933: a live budget already holds this (token, recipient) slot. A grant
+    // cannot replace it — that would leave the old one enabled on-chain — so
+    // the owner edits it on the agent page, which replaces it and stops the
+    // old one. Branch on the code, never the sentence.
+    const body = err instanceof CliApiError ? (err.body as { error_code?: string; existing_delegation_hash?: string } | undefined) : undefined
+    if (body?.error_code === 'BUDGET_SLOT_OCCUPIED') {
+      throw new HavenCliError(
+        err instanceof Error ? err.message : 'This agent already has a live budget for this token and recipient.',
+        EXIT.refused,
+        "Edit that budget on the agent's page in the Haven dashboard instead: editing replaces it and stops the old one on-chain. Open task and sub-budgets carved from the old budget end when it is stopped.",
+        { error_code: 'BUDGET_SLOT_OCCUPIED', existing_delegation_hash: body.existing_delegation_hash ?? null },
+      )
+    }
+    throw err
+  }
 
   const emitGrant = (status?: DelegationRow['status']) =>
     emit(d, args.flags.json, { ...built, agent_id: id, status: status ?? 'pending' }, () =>
       [
         `Budget of ${args.flags.amount} ${token.symbol} per ${args.flags.period} minutes built for agent ${id}.`,
         args.flags.recipient ? `Recipient pin: ${args.flags.recipient}` : null,
-        'Open this link and sign — the budget goes live the moment you do:',
+        'Open this link and approve — the budget goes live the moment you do:',
         built.signing_url,
         `Delegation: ${built.delegation_hash} (version ${built.version})`,
-        status === 'active' ? 'Signed and active.' : 'Waiting for your signature. Run the same command with --wait to poll until it is active.',
+        status === 'active' ? 'Approved and active.' : 'Waiting for your approval. Run the same command with --wait to poll until it is active.',
       ]
         .filter((line): line is string => line !== null)
         .join('\n'),
@@ -944,19 +983,21 @@ async function cmdBudgetGrant(args: ParsedArgs, d: ResolvedDeps): Promise<number
     await d.sleep(BUDGET_WAIT_INTERVAL_MS)
     const { delegations } = await api.get<{ delegations: DelegationRow[] }>(`/agents/${id}/delegations`)
     const mine = delegations.find((row) => row.delegation_hash === built.delegation_hash)
-    if (mine?.status === 'active') {
+    // #3922: the backend's `is_live` when sent; an older backend omits it, so
+    // fall back to the status it always sent (missing is never "not live").
+    if (mine && (mine.is_live ?? mine.status === 'active')) {
       emitGrant('active')
       return EXIT.ok
     }
     if (mine?.status === 'revoked' || mine?.status === 'replaced') {
       throw new HavenCliError(
-        `Delegation ${built.delegation_hash} is now ${mine.status} without being signed.`,
+        `Delegation ${built.delegation_hash} is now ${mine.status} without being approved.`,
         EXIT.refused,
       )
     }
   }
   throw new HavenCliError(
-    `Timed out waiting for delegation ${built.delegation_hash} to go active (${BUDGET_WAIT_TIMEOUT_S / 60} minutes). The signing link stays valid until it expires — sign it, or rerun with --wait.`,
+    `Timed out waiting for delegation ${built.delegation_hash} to go active (${BUDGET_WAIT_TIMEOUT_S / 60} minutes). The approval link stays valid until it expires — approve it, or rerun with --wait.`,
     EXIT.failed,
   )
 }
@@ -1006,11 +1047,11 @@ async function cmdBudgetRevoke(args: ParsedArgs, d: ResolvedDeps): Promise<numbe
   const emitRevoke = (status: DelegationRow['status'] | 'pending_revoke') =>
     emit(d, args.flags.json, { agent_id: id, delegation_hash: hash, status, ...prepared }, () =>
       [
-        'Revocation prepared — one signature, sponsored (no gas).',
-        'Open this link and sign to stop this budget:',
+        'Revocation prepared — one approval, sponsored (no gas).',
+        'Open this link and approve to stop this budget:',
         revokeUrl,
         `Delegation: ${hash}`,
-        status === 'revoked' ? 'Revoked.' : 'The budget keeps working until you sign. Run the same command with --wait to poll until it is revoked.',
+        status === 'revoked' ? 'Revoked.' : 'The budget keeps working until you approve. Run the same command with --wait to poll until it is revoked.',
       ]
         .filter((line): line is string => line !== null)
         .join('\n'),
@@ -1030,7 +1071,7 @@ async function cmdBudgetRevoke(args: ParsedArgs, d: ResolvedDeps): Promise<numbe
     }
   }
   throw new HavenCliError(
-    `Timed out waiting for delegation ${hash} to be revoked (${BUDGET_WAIT_TIMEOUT_S / 60} minutes). The link stays valid — sign it, or rerun with --wait.`,
+    `Timed out waiting for delegation ${hash} to be revoked (${BUDGET_WAIT_TIMEOUT_S / 60} minutes). The link stays valid — approve it, or rerun with --wait.`,
     EXIT.failed,
   )
 }
@@ -1085,7 +1126,7 @@ async function cmdAgentRevoke(args: ParsedArgs, d: ResolvedDeps): Promise<number
     const agent = await api.get<Agent>(`/agents/${id}`)
     if ((agent.live_delegation_count ?? 0) > 0) {
       const { delegations } = await api.get<{ delegations: DelegationRow[] }>(`/agents/${id}/delegations`)
-      live = delegations.filter((r) => r.status === 'pending' || r.status === 'active' || r.status === 'replaced')
+      live = delegations.filter((r) => STILL_ENABLED_STATUSES.has(r.status))
     }
   } catch (err) {
     // Fail closed: without the live set, no revoke. The read's own exit

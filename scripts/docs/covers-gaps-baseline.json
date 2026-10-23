@@ -1,8 +1,4 @@
 {
-  "AGENTS.md": [
-    "packages/frontend/src/app/globals.css",
-    "packages/frontend/tailwind.config.js"
-  ],
   "CLAUDE.md": [
     "scripts/docs/package-docs.mjs"
   ],
@@ -58,7 +54,6 @@
     "scripts/docs/coupling-gate.mjs"
   ],
   "docs/contributing/autonomous-pr-loop.md": [
-    ".github/workflows/promotion-digest.yml",
     ".github/workflows/release.yml",
     "packages/backend/src/infra/__tests__/helpers/__tests__/harness-call-budget.test.ts",
     "scripts/ci/operator-verify-close-guard.mjs",
@@ -104,12 +99,11 @@
     "packages/frontend/src/components/ErrorBoundary.tsx",
     "packages/frontend/src/components/InfoModal.tsx",
     "packages/frontend/src/components/ProtectedRoute.tsx",
-    "packages/frontend/src/components/ReceiveFundsModal.tsx",
+    "packages/frontend/src/components/ReceiveDialog.tsx",
     "packages/frontend/src/components/agent-panel/AgentCard.tsx",
     "packages/frontend/src/components/agent-panel/ReplaceSigningKeyModal.tsx",
     "packages/frontend/src/components/connect-agent/CopyBlock.tsx",
     "packages/frontend/src/components/sidebar/Sidebar.tsx",
-    "packages/frontend/src/components/ui/EmptyState.tsx",
     "packages/frontend/src/components/ui/Modal.tsx",
     "packages/frontend/src/components/ui/SidePanel.tsx",
     "packages/frontend/wire-type-baseline.json",
@@ -139,7 +133,6 @@
   ],
   "docs/operations/agent-discovery-listings.md": [
     "packages/frontend/src/components/AccountSignersCard.tsx",
-    "packages/frontend/src/components/onboarding/RecoveryNudge.tsx",
     "packages/frontend/src/lib/__tests__/discovery-surfaces.test.ts"
   ],
   "docs/operations/agent-qa.md": [
@@ -147,10 +140,7 @@
     "packages/frontend/e2e/fixtures/haven-api.ts",
     "packages/mcp-server/src/server.ts",
     "packages/signer/package.json",
-    "packages/signer/src/server.ts",
-    "scripts/ci/guard-freshness.mjs",
     "scripts/ci/guard-freshness.test.mjs",
-    "scripts/ci/qa-freshness.mjs",
     "scripts/release-bump.mjs"
   ],
   "docs/operations/backend-scaling.md": [
@@ -162,7 +152,6 @@
   "docs/operations/dev-environment.md": [
     "packages/backend/src/rails/delegation-contracts.ts",
     "packages/demo-merchant-mcp/src/erc7710.test.ts",
-    "packages/frontend/src/components/TopBar.tsx",
     "packages/qa-agent/src/scenarios/x402-erc7710-settle.ts"
   ],
   "docs/operations/mainnet-canary.md": [
@@ -185,12 +174,6 @@
     "packages/sdk/src/skill-content.test.ts",
     "scripts/frontend-copy-lint.test.mjs"
   ],
-  "docs/product/design-review.md": [
-    "packages/frontend/src/components/transactions/TransactionsTable.tsx"
-  ],
-  "docs/product/README.md": [
-    "packages/frontend/src/components/transactions/TransactionsTable.tsx"
-  ],
   "docs/product/screen-recipes.md": [
     "packages/backend/src/index.ts",
     "packages/frontend/src/components/AccountSignersCard.tsx",
@@ -202,7 +185,6 @@
   ],
   "docs/regulatory/casp-risk-guardrails.md": [
     ".github/money-path-globs.json",
-    "packages/backend/src/middleware/owner-cli.ts",
     "packages/backend/src/routes/__tests__/non-custody-onchain-enforcer.contract.test.ts",
     "packages/backend/src/routes/__tests__/non-custody-onchain-gate.contract.test.ts",
     "scripts/ci/money-path.test.mjs",

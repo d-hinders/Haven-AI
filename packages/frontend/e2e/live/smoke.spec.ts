@@ -25,8 +25,12 @@ test.describe('live smoke — deployed dev stack', () => {
 
     await expect(page.getByRole('heading', h1('Dashboard'))).toBeVisible()
     // EnvBadge renders only when NEXT_PUBLIC_HAVEN_ENV is a non-prod value —
-    // confirms we hit the dev deploy, not a stray prod build.
-    await expect(page.getByText(/dev/i).first()).toBeVisible()
+    // confirms we hit the dev deploy, not a stray prod build. Scoped to the
+    // sidebar's logo band (#4029 is where the badge lives now): a loose
+    // /dev/i matched any text containing "dev".
+    await expect(
+      page.locator('aside').getByText(/^dev$/i).first(),
+    ).toBeVisible()
     // A wired deploy renders clean; surface any real integration error.
     expect(unexpectedBrowserErrors(errors)).toEqual([])
   })

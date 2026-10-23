@@ -32,6 +32,17 @@ AND its acceptance criteria. -->
 
 -
 
+## Design system
+
+<!-- Required for area:frontend: name the existing /design-system Patterns this
+work uses; list every component changed and its other usages; identify any
+proposed NEW PATTERN and its separate, earlier design-system slice for owner
+approval. For non-frontend work, write "Not applicable — no frontend surface". -->
+
+- Patterns used:
+- Components changed and other usages:
+- New pattern:
+
 ## Surface
 
 <!-- Check all that apply, AND add the matching label(s) so ship-next can

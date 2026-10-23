@@ -156,17 +156,47 @@ export async function proveUsdcTransfer(
   }
 }
 
+/**
+ * Strip URLs from an RPC error before it reaches a grader detail: ethers v6
+ * errors can serialise the request URL, and the observer URL
+ * (`QA_RPC_URL_BASE_SEPOLIA`) embeds the provider API key. Grader details
+ * land in the eval report, a public artifact (this repo is public).
+ */
+export function redactUrls(text: string): string {
+  return text.replace(/\b(?:https?|wss?):\/\/[^\s"'<>)]+/gi, '<url redacted>')
+}
+
 /** The minimal log + height surface {@link proveUsdcTransferSince} reads. */
 export interface LogReader {
   getBlockNumber(): Promise<number>
-  getLogs(filter: { address: string; topics: Array<string | null>; fromBlock: number; toBlock: string }): Promise<
+  getLogs(filter: { address: string; topics: Array<string | null>; fromBlock: number; toBlock: number }): Promise<
     Array<{ data: string; transactionHash: string }>
   >
 }
 
 /**
+ * The widest `eth_getLogs` block range the probe asks for in one request
+ * (inclusive). Alchemy's free tier refuses anything over 10 blocks; an agent
+ * eval session spans ~70 Base Sepolia blocks, so one `fromBlock..latest` read
+ * always failed there and every real transfer graded as missing (eval pilot,
+ * 2026-10-19). Ten works on every plan.
+ */
+export const GET_LOGS_MAX_RANGE = 10
+
+/**
+ * Blocks at the tip the probe re-reads on every poll. A load-balanced
+ * provider can answer `getBlockNumber` from a node ahead of the one answering
+ * `getLogs`, so a block read right at the tip can come back empty before its
+ * logs are indexed; re-reading the last few heals that.
+ */
+export const GET_LOGS_TIP_RESCAN = 3
+
+/**
  * Prove an exact USDC `Transfer(from -> to, amount)` was emitted at or after
- * `fromBlock`, read from the observer's logs (#3505). For settlements whose tx
+ * `fromBlock`, read from the observer's logs (#3505), in windows of at most
+ * {@link GET_LOGS_MAX_RANGE} blocks. Each poll scans the blocks it has not
+ * scanned yet plus the last {@link GET_LOGS_TIP_RESCAN} below them; a failed
+ * window is retried on the next poll, so no block is skipped. For settlements whose tx
  * hash the merchant does not hand back (an erc7710 redemption is submitted by
  * the merchant's facilitator), the chain is still the evidence: a throwaway
  * treasury has exactly one reason to pay this payee. Polled to a deadline for
@@ -184,21 +214,43 @@ export async function proveUsdcTransferSince(
   const deadline = Date.now() + timeoutMs
   const pad = (address: string) => ethers.zeroPadValue(address, 32)
   let last = 'no read yet'
+  let next = fromBlock
+  const near = new Set<string>()
   for (;;) {
+    let head: number | undefined
     try {
-      const logs = await provider.getLogs({
-        address: SEPOLIA_USDC,
-        topics: [TRANSFER_TOPIC, pad(expected.from), pad(expected.to)],
-        fromBlock,
-        toBlock: 'latest',
-      })
-      const hit = logs.find((log) => BigInt(log.data) === expected.amount)
-      if (hit) return { ok: true, txHash: hit.transactionHash }
-      last = logs.length
-        ? `${logs.length} Transfer(s) from that payer to that payee, none of exactly ${expected.amount}`
-        : 'no Transfer from that payer to that payee'
+      head = await provider.getBlockNumber()
     } catch (err) {
-      last = `getLogs failed: ${(err as Error)?.message ?? err}`
+      last = `getBlockNumber failed: ${redactUrls(String((err as Error)?.message ?? err))}`
+    }
+    if (head !== undefined) {
+      try {
+        let start = Math.max(fromBlock, next - GET_LOGS_TIP_RESCAN)
+        let first = true
+        // At least one window per poll, even past the deadline: a call must
+        // never fail without reading the chain at all.
+        while (start <= head && (first || Date.now() < deadline)) {
+          first = false
+          const end = Math.min(start + GET_LOGS_MAX_RANGE - 1, head)
+          const logs = await provider.getLogs({
+            address: SEPOLIA_USDC,
+            topics: [TRANSFER_TOPIC, pad(expected.from), pad(expected.to)],
+            fromBlock: start,
+            toBlock: end,
+          })
+          const hit = logs.find((log) => BigInt(log.data) === expected.amount)
+          if (hit) return { ok: true, txHash: hit.transactionHash }
+          for (const log of logs) near.add(log.transactionHash)
+          next = Math.max(next, end + 1)
+          start = end + 1
+        }
+        const scanned = next > head ? `scanned to block ${head}` : `scanned to block ${next - 1} of head ${head} (deadline)`
+        last = near.size
+          ? `${near.size} Transfer(s) from that payer to that payee, none of exactly ${expected.amount}; ${scanned}`
+          : `no Transfer from that payer to that payee; ${scanned}`
+      } catch (err) {
+        last = `getLogs failed: ${redactUrls(String((err as Error)?.message ?? err))}`
+      }
     }
     if (Date.now() >= deadline) {
       return {
@@ -239,7 +291,7 @@ export async function waitForDisabled(
       if ((await read(delegationHash)) === true) return { ok: true }
       last = 'disabledDelegations returned false'
     } catch (err) {
-      last = `read failed: ${(err as Error)?.message ?? err}`
+      last = `read failed: ${redactUrls(String((err as Error)?.message ?? err))}`
     }
     if (Date.now() >= deadline) {
       return { ok: false, error: `delegation ${delegationHash} is not disabled on-chain after ${Math.round(timeoutMs / 1000)}s (${last}; observer: ${describeObserverRpc()})` }

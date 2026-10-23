@@ -70,7 +70,7 @@ vi.mock('../../../rails/hybrid-provisioning.js', async (importOriginal) => {
   return {
     ...actual,
     computeHybridAccountAddress: mockCompute,
-    ensureHybridDeployed: mockEnsureDeployed,
+    ensureDelegateHybridDeployed: mockEnsureDeployed,
   }
 })
 vi.mock('../../../infra/repositories/payment-intents.js', async (importOriginal) => {

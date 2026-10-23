@@ -11,8 +11,10 @@
  * database table and never becomes one.
  *
  * Group key — agent + token + counterparty + user-local day + outcome +
- * activityType. Two deliberate extensions to #3824's stated key, both stated
- * here so the PR can carry them:
+ * activityType, with the sending account inside the counterparty half on
+ * outbound rows (#4117, at `counterpartyKey`). Two further deliberate
+ * extensions to #3824's stated key, both stated here so the PR can carry
+ * them:
  *
  * - **token** (`chainId` + `tokenAddress`, with symbol/decimals): a group
  *   serves ONE `sumAtomic` in ONE `tokenSymbol` at ONE `decimals` — summing
@@ -39,7 +41,17 @@
  *   4. else → `'confirmed'`.
  *
  * Deposits (inbound rows) have no meaningful agent/merchant counterparty, so
- * they group per local day under the counterparty key `'deposit'`.
+ * they group per local day under the counterparty key `'deposit'` — except a
+ * transfer from another of the user's own accounts, keyed `own:<from>` and
+ * named by that account (#4099).
+ *
+ * A move between two of the user's own accounts arrives already folded into
+ * its outbound leg (#4268: the route runs #4265's `foldOwnAccountTransfers`
+ * before this builder), carrying `ownTransfer`. It groups under
+ * `move:<fromAccountId>:<toAccountId>` in place of the counterparty half, so
+ * same-day moves between the same two accounts merge into one "×N" row while
+ * chain, token, day, outcome and activityType still split it. `own:<from>`
+ * stays for an inbound leg that was not folded (its partner leg is missing).
  *
  * When the explorer window that produced the feed was truncated, EVERY group
  * carries `countIsFloor: true` — the count is a floor over an unknown total,
@@ -52,6 +64,7 @@ import {
   type TransactionCurrency,
 } from '../../domain/transaction-currency.js'
 import type { EnrichedTransaction } from './types.js'
+import { ownAccountDisplayName } from './own-account.js'
 
 /** The derived per-group status (#3824) — see the mapping in the module doc. */
 export type ActivityOutcome = 'confirmed' | 'pending' | 'failed'
@@ -66,8 +79,46 @@ const TERMINAL_PROOF_STATUSES = new Set([
  * The activity window and group budget. "Up to 8 groups over the last 7
  * days, newest first" — the route feeds this the whole merged feed; the
  * window and the slice bound the response.
+ *
+ * The window is ROLLING (owner decision, epic #3801, 2026-10-09: "Rolling 7
+ * and 30 days; no calendar month"): `[now − 7×24h, now)` on the transaction
+ * instant — the same definition the route's `spend.d7` window and
+ * `/analytics/overview` use. #3975 moved the card off its original 7
+ * user-local calendar days (#3824): the local-day HEADINGS stay (the group
+ * key still buckets per `tz` day), but window membership no longer walks
+ * local days — a payment is in the card iff it is in the header's 7-day
+ * window, so the two can never disagree. Because the rolling window spans
+ * one more local day than seven whenever a 23h DST day sits inside it, the
+ * oldest day's heading can cover part of a day — the client marks it
+ * partial, following the analytics precedent (`docs/product/analytics.md`).
  */
 export const ACTIVITY_WINDOW_DAYS = 7
+/** The rolling window in milliseconds — `ACTIVITY_WINDOW_DAYS × 24h`. */
+export const ACTIVITY_WINDOW_MS = ACTIVITY_WINDOW_DAYS * 24 * 60 * 60 * 1000
+
+/**
+ * The window's start instant, `now − ACTIVITY_WINDOW_MS`. THE window
+ * predicate: the route feeds its `spend.d7` SQL (`from7Iso`) this same
+ * derivation off the same `now` it hands the feed, so a confirmed agent
+ * payment is inside `spend.d7` IFF it is inside the Activity card — one
+ * function, every consumer (#3975).
+ */
+export function activityWindowStartIso(nowMs: number): string {
+  return new Date(nowMs - ACTIVITY_WINDOW_MS).toISOString()
+}
+
+/**
+ * The window membership predicate: a transaction (unix seconds) is in the
+ * Activity card iff it is in the rolling window that ends at `nowMs` — the
+ * same `[now − 7×24h, now)` interval `spend.d7` applies to `confirmed_at`.
+ * The window's start is INCLUSIVE, its end exclusive; feed rows are never in
+ * the future, so the end bound is enforced by the data, not here.
+ */
+export function isInsideActivityWindow(unixSeconds: number, nowMs: number): boolean {
+  return unixSeconds * 1000 >= nowMs - ACTIVITY_WINDOW_MS
+}
+
+/** The per-response group cap (#3824). */
 export const ACTIVITY_GROUP_LIMIT = 8
 
 /**
@@ -84,10 +135,9 @@ export function isValidActivityTimeZone(tz: string): boolean {
 
 /**
  * One `en-CA` day-key formatter per zone, cached: `localDayKey` runs once per
- * transaction in `buildActivityGroups` (and per hour-step in
- * `activityWindowDays`), and the constructor dominates that cost. The map is
- * bounded — the route only accepts zones from `Intl.supportedValuesOf` (or
- * 'UTC'), a fixed list of a few hundred.
+ * transaction in `buildActivityGroups`, and the constructor dominates that
+ * cost. The map is bounded — the route only accepts zones from
+ * `Intl.supportedValuesOf` (or 'UTC'), a fixed list of a few hundred.
  */
 const dayKeyFormatters = new Map<string, Intl.DateTimeFormat>()
 
@@ -106,45 +156,80 @@ export function localDayKey(unixSeconds: number, tz: string): string {
 }
 
 /**
- * The calendar day immediately before `dayKey` — pure `YYYY-MM-DD` arithmetic
- * on the UTC clock. A date decrements by exactly one day in every zone, so
- * no DST awareness belongs here.
+ * The UTC offset `tz` observes at `instantMs`, in milliseconds (positive east
+ * of UTC). `formatToParts` reads the zone's own wall clock; the difference to
+ * the instant IS the offset.
  */
-function previousDayKey(dayKey: string): string {
-  return new Date(Date.parse(`${dayKey}T00:00:00Z`) - 86_400_000)
-    .toISOString()
-    .slice(0, 10)
+function zoneOffsetMs(instantMs: number, tz: string): number {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz,
+    hourCycle: 'h23',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).formatToParts(new Date(instantMs))
+  const get = (type: string): number =>
+    Number(parts.find((part) => part.type === type)?.value ?? '0')
+  const asUtc = Date.UTC(
+    get('year'),
+    get('month') - 1,
+    get('day'),
+    get('hour'),
+    get('minute'),
+    get('second'),
+  )
+  return asUtc - instantMs
 }
 
 /**
- * The user-local days covered by "the last 7 days" ending now.
- *
- * The walk is LOCAL: starting from `now`'s own day key, each step targets
- * the previous calendar day and hour-steps an instant back until it lands
- * there. Sampling fixed 24h offsets instead (`now - i * 86_400`) silently
- * skips a local day: local days are 23/24/25h long, so on the morning after
- * a 23h spring-forward day the samples land twice in one day and never in
- * the transition day — and `buildActivityGroups` then drops every
- * transaction of that day from the dashboard. An hourly step can never jump
- * over a whole local day (none is shorter than 23h), so the walk always
- * lands in the target day itself, transition or not.
- *
- * (`activityWindowDays` is exported for the pinned-clock regression tests —
- * the window is the one piece of derived state a once-a-year wall-clock bug
- * can silently corrupt.)
+ * The UTC instant of local midnight for `day` (`YYYY-MM-DD`) in `tz`. Found by
+ * iterating the zone's offset at the candidate instant: start from the naive
+ * UTC parse, subtract the observed offset, repeat. Two rounds converge for
+ * every real zone — an offset only changes inside a DST transition, and a
+ * transition shifts the guess by at most one hour, which the second round
+ * absorbs. (A `Intl`-less library or a `SET TIME ZONE` round-trip is not
+ * available here, and this must work for any IANA zone the frontend sends.)
  */
-export function activityWindowDays(nowMs: number, tz: string): Set<string> {
-  const days = new Set<string>()
-  let cursor = Math.floor(nowMs / 1000)
-  let current = localDayKey(cursor, tz)
-  days.add(current)
-  while (days.size < ACTIVITY_WINDOW_DAYS) {
-    const target = previousDayKey(current)
-    while (localDayKey(cursor, tz) !== target) cursor -= 3_600
-    days.add(target)
-    current = target
+function zonedMidnightMs(day: string, tz: string): number {
+  let guess = Date.parse(`${day}T00:00:00Z`)
+  for (let i = 0; i < 2; i++) {
+    guess = Date.parse(`${day}T00:00:00Z`) - zoneOffsetMs(guess, tz)
   }
-  return days
+  return guess
+}
+
+/**
+ * Exported for the Period filter's custom-range bounds (`period.ts`): the
+ * same iterate-the-offset construction, so a calendar date converts to its
+ * zone midnight through DST exactly as `localDayBounds` does (#4095).
+ */
+export { zonedMidnightMs }
+
+export interface LocalDayBounds {
+  /** Inclusive ISO start of the local day. */
+  startIso: string
+  /** Exclusive ISO end of the local day (the next day's local midnight). */
+  endIso: string
+}
+
+/**
+ * The user-local calendar day containing `nowMs` in `tz`, as a half-open
+ * `[startIso, endIso)` instant pair — the bounds the agent stats route passes
+ * as SQL parameters (#3977). The end is derived from the START day, not from
+ * `nowMs`, so a clock landing exactly on local midnight still yields the full
+ * 24h (23h/25h on DST days) rather than a zero-width window.
+ */
+export function localDayBounds(nowMs: number, tz: string): LocalDayBounds {
+  const day = localDayKey(Math.floor(nowMs / 1000), tz)
+  const [year, month, dayOfMonth] = day.split('-').map(Number)
+  const nextDay = new Date(Date.UTC(year, month - 1, dayOfMonth + 1)).toISOString().slice(0, 10)
+  return {
+    startIso: new Date(zonedMidnightMs(day, tz)).toISOString(),
+    endIso: new Date(zonedMidnightMs(nextDay, tz)).toISOString(),
+  }
 }
 
 export function activityOutcome(tx: {
@@ -164,15 +249,25 @@ export function activityOutcome(tx: {
 
 /**
  * The counterparty half of the group key. Inbound rows are deposits: no
- * counterparty beyond the day. Outbound x402 rows name the RESOURCE when one
- * was recorded (the sharpest per-payment counterparty identity — two
- * resources at one merchant are two activity rows), else the merchant
- * address. Every other outbound row groups by the far-side address.
+ * counterparty beyond the day — except a transfer from another of the user's
+ * own accounts (#4099), which keys on that account so it can carry its name.
+ * Outbound x402 rows name the RESOURCE when one was recorded (the sharpest
+ * per-payment counterparty identity — two resources at one merchant are two
+ * activity rows), else the merchant address. Every other outbound row groups
+ * by the far-side address. Every outbound key also carries the sending
+ * account (#4117), so one group has one sender and can name it: without it,
+ * two own accounts' unattributed sends to one recipient on one day merged.
+ * Inbound rows stay unsplit — their day's deposits are one group whichever
+ * account received them. A folded own-account move (#4268) keys on its two
+ * accounts, `move:<from>:<to>`: it is neither a send to a counterparty nor a
+ * deposit.
  */
-function counterpartyKey(tx: EnrichedTransaction): string {
-  if (tx.direction === 'in') return 'deposit'
-  if (tx.source === 'x402' && tx.x402ResourceUrl) return tx.x402ResourceUrl
-  return tx.to.toLowerCase()
+function counterpartyKey(tx: EnrichedTransaction, fromOwnAccount: boolean): string {
+  if (tx.ownTransfer) return `move:${tx.accountId}:${tx.ownTransfer.toAccountId}`
+  if (tx.direction === 'in') return fromOwnAccount ? `own:${tx.from.toLowerCase()}` : 'deposit'
+  const counterparty =
+    tx.source === 'x402' && tx.x402ResourceUrl ? tx.x402ResourceUrl : tx.to.toLowerCase()
+  return `out:${tx.accountId}:${counterparty}`
 }
 
 /**
@@ -195,8 +290,30 @@ export interface DashboardActivityGroup {
   source: string | null
   x402ResourceUrl: string | null
   to: string
-  /** Contact or receipt-merchant name for the counterparty, when one exists. */
+  /**
+   * Contact or receipt-merchant name for the counterparty, else the name of
+   * the user's own account on the other side of a transfer between two of
+   * their accounts (#4099) — the receiving account on the sender's row, the
+   * sending account on the receiver's; null otherwise. Null on every other
+   * deposit.
+   */
   merchantName: string | null
+  /**
+   * #4117: the label of the user's own account the group's money LEFT — a
+   * contact name saved for it first, the account's own name otherwise (the
+   * order the receiving side's "From <account>" uses). Outbound groups only;
+   * absent on deposits and when no name resolves.
+   */
+  fromAccountName?: string
+  /**
+   * #4268: present only on a move between two of the user's own accounts,
+   * folded into one group (#4265's fold). The two accounts' own Haven names,
+   * "Unnamed account" when an account has none — never an address. The group
+   * keeps `direction: 'out'`, `merchantName` and `fromAccountName` as an
+   * unfolded send would, so a client that predates the field still renders a
+   * readable out row.
+   */
+  ownTransfer?: { fromAccountName: string; toAccountName: string }
   activityType: string | null
   direction: 'in' | 'out'
   status: ActivityOutcome
@@ -215,13 +332,40 @@ export interface BuildActivityGroupsParams {
   tz: string
   /** The user's preferred currency; the serve-time pricing denominator. */
   currency?: TransactionCurrency
-  /** Injectable for tests; defaults to Date.now(). */
+  /** Injectable; the route passes its own `now` so every 7-day window — the
+   * spend SQL's and this feed's — derives from ONE instant. Defaults to
+   * Date.now(). */
   now?: number
   /**
    * Contact/receipt merchant-name resolution, wired by the route (it owns
    * the two repository reads). Null/undefined name → the raw address stands.
    */
   resolveMerchantName?: (address: string) => string | null
+  /**
+   * #4099: the name of one of the user's OWN accounts at `address` on
+   * `chainId` (`ownAccountNameResolver`), or null. Names both sides of a
+   * transfer between two own accounts: the sender's row by the receiving
+   * account, the receiver's row by the sending one. The receiving side keys
+   * its own group (`counterpartyKey`), so it never merges into — or renames —
+   * the day's other deposits; the client's no-address inbound label reads
+   * `merchantName` before "Deposit" (#4099 frontend half).
+   */
+  resolveOwnAccountName?: (address: string, chainId: number) => string | null
+}
+
+/**
+ * #4099: own-account name lookup — the export route's rule
+ * (`routes/transactions.ts`): the address is case-insensitive, the chain is
+ * not, because an account exists only on the chain it was created on.
+ */
+export function ownAccountNameResolver(
+  accounts: ReadonlyArray<{ account_address: string; chain_id: number; name: string | null }>,
+): (address: string, chainId: number) => string | null {
+  const names = new Map<string, string>()
+  for (const account of accounts) {
+    if (account.name) names.set(`${account.account_address.toLowerCase()}:${account.chain_id}`, account.name)
+  }
+  return (address, chainId) => names.get(`${address.toLowerCase()}:${chainId}`) ?? null
 }
 
 interface GroupAccumulator {
@@ -253,20 +397,36 @@ export async function buildActivityGroups(
     currency = DEFAULT_TRANSACTION_CURRENCY,
     now = Date.now(),
     resolveMerchantName,
+    resolveOwnAccountName,
   } = params
 
-  const windowDays = activityWindowDays(now, tz)
+  /**
+   * The sending own account's label on an inbound row, when the sender is one
+   * of the user's own accounts (#4099) — a contact name the user saved for it
+   * first, the account's own name otherwise, the same order the send side
+   * uses. Null for every other inbound row: those stay unnamed deposits.
+   */
+  const ownSenderName = (tx: EnrichedTransaction): string | null => {
+    if (tx.direction !== 'in') return null
+    const ownName = resolveOwnAccountName?.(tx.from, tx.chainId) ?? null
+    return ownName === null ? null : (resolveMerchantName?.(tx.from) ?? ownName)
+  }
+
+  // One instant comparison, no tz: the rolling window `[now − 168h, now)` is
+  // the same predicate the route's `spend.d7` SQL applies to `confirmed_at`
+  // (`isInsideActivityWindow`), so the header and the card can never
+  // disagree (#3975). The local-day key still buckets the groups.
   const groups = new Map<string, GroupAccumulator>()
 
   for (const tx of transactions) {
+    if (!isInsideActivityWindow(tx.timestamp, now)) continue
     const day = localDayKey(tx.timestamp, tz)
-    if (!windowDays.has(day)) continue
 
     const key = [
       tx.agentId ?? '',
       tx.chainId,
       tx.tokenAddress?.toLowerCase() ?? 'native',
-      counterpartyKey(tx),
+      counterpartyKey(tx, ownSenderName(tx) !== null),
       day,
       activityOutcome(tx),
       tx.activityType ?? '',
@@ -303,13 +463,39 @@ export async function buildActivityGroups(
         source: sample.source ?? null,
         x402ResourceUrl: sample.x402ResourceUrl ?? null,
         to: sample.to,
+        // Contacts and receipts first, then the user's own accounts (#4099)
+        // — the export's order. A deposit is named only when it came from
+        // another own account; its group holds that sender alone.
         merchantName:
           sample.direction === 'out'
-            ? (resolveMerchantName?.(sample.to) ?? null)
-            : null,
+            ? (resolveMerchantName?.(sample.to) ??
+              resolveOwnAccountName?.(sample.to, sample.chainId) ??
+              null)
+            : ownSenderName(sample),
         activityType: sample.activityType ?? null,
         direction: sample.direction,
         status: activityOutcome(sample),
+      }
+
+      // #4117: the outbound key carries the sending account, so every member
+      // left the same one and the sample names it. A contact saved for that
+      // account is what the first lookup is for — the route prefetches
+      // receipt names for outbound `to` addresses only, so a receipt name
+      // applies here only incidentally.
+      if (sample.direction === 'out') {
+        const fromAccountName =
+          resolveMerchantName?.(sample.accountAddress) ?? (sample.accountName || null)
+        if (fromAccountName) wire.fromAccountName = fromAccountName
+      }
+
+      // #4268: the move key holds one (from, to) pair, so the sample names
+      // both ends. Each end is the account's own name (#4265's rule), not a
+      // contact label: the row reads as a move between the user's accounts.
+      if (sample.ownTransfer) {
+        wire.ownTransfer = {
+          fromAccountName: ownAccountDisplayName(sample.accountName),
+          toAccountName: sample.ownTransfer.toAccountName,
+        }
       }
 
       // Fiat sum: book-time when EVERY member converted (they were all struck
@@ -341,4 +527,49 @@ export async function buildActivityGroups(
       return wire
     }),
   )
+}
+
+/**
+ * The overview's whole activity payload (#3944): the grouped rows BESIDE the
+ * two empty-state facts the card needs but cannot derive from the rows.
+ *
+ * `hasOlderActivity` is true when the feed carries any transaction OUTSIDE
+ * the rolling 7-day window — activity exists, just not in the window, so the
+ * empty state may not say "No activity yet". The flag reads from the SAME
+ * feed the groups bucket (an explorer-read failure degrades it to false, the
+ * same posture as the rows), and applies the SAME instant predicate
+ * `buildActivityGroups` runs — identical inputs, so the flag can never
+ * disagree with the rows.
+ *
+ * `windowDays` rides the wire so the client can NAME the window ("No
+ * activity in the last N days") without hard-coding a 7 that would drift
+ * from `ACTIVITY_WINDOW_DAYS` — the dashboard has no window constant of its
+ * own, and #3944's rule is that the copy may not invent one.
+ *
+ * `windowStartIso` rides the wire too (#3975): the instant the rolling
+ * window starts. The client marks the oldest day heading partial when the
+ * window start cuts its own local day — the analytics precedent, computed
+ * from the boundary instant rather than re-derived from a second clock.
+ */
+export interface ActivityFeed {
+  groups: DashboardActivityGroup[]
+  hasOlderActivity: boolean
+  windowDays: number
+  windowStartIso: string
+}
+
+export async function buildActivityFeed(
+  params: BuildActivityGroupsParams,
+): Promise<ActivityFeed> {
+  const now = params.now ?? Date.now()
+  const groups = await buildActivityGroups({ ...params, now })
+  const hasOlderActivity = params.transactions.some(
+    (tx) => !isInsideActivityWindow(tx.timestamp, now),
+  )
+  return {
+    groups,
+    hasOlderActivity,
+    windowDays: ACTIVITY_WINDOW_DAYS,
+    windowStartIso: activityWindowStartIso(now),
+  }
 }

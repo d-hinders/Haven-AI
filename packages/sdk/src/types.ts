@@ -1163,9 +1163,9 @@ export interface HavenSubBudgetCloseSignData {
 /** #3506: `POST /sub-budgets/:id/close`. */
 export interface CloseSubBudgetResult {
   subBudget: HavenSubBudget
-  /** `closed` on a trivial close (never signed, or already expired); absent when a close signature is pending. */
+  /** `closed` on a trivial close (never signed, or `open` and already expired) or when the chain already shows it disabled; absent when a close signature is pending. */
   status?: 'closed'
-  /** Present only when the close needed a signature (a live child). */
+  /** Present only when the close needed a signature (a live child, or any `closing` row — #3923). */
   signData?: HavenSubBudgetCloseSignData
   nextAction?: string
 }
@@ -1221,6 +1221,12 @@ export interface RawTaskBudget {
   status: HavenTaskBudgetStatus
   expires_at: number
   is_expired: boolean
+  /**
+   * #3922: the backend's single liveness answer (pending/open/closing and not
+   * expired — the `status=live` set). Optional: an older backend omits it, and
+   * a missing value means "derive from `status` + `is_expired`", never false.
+   */
+  is_live?: boolean
   created_at: string
   opened_at: string | null
   closed_at: string | null
@@ -1257,6 +1263,8 @@ export interface HavenTaskBudget {
   status: HavenTaskBudgetStatus
   expiresAt: number
   isExpired: boolean
+  /** #3922: camelCase `is_live`; absent when the backend predates it (presence preserved). */
+  isLive?: boolean
   createdAt: string
   openedAt: string | null
   closedAt: string | null
@@ -2033,6 +2041,22 @@ export const AgentPaymentWarningCode = {
    * settlement can no longer land at all.
    */
   SettlementUnconfirmed: 'SETTLEMENT_UNCONFIRMED',
+  /**
+   * #3967: the quote-time budget pre-check decided the quoted amount does NOT
+   * fit the agent's remaining delegation budget — the same server-side compare
+   * the payment path runs before funding. Travels beside
+   * `budget_check.sufficient: false` and, on `haven_quote_x402`,
+   * `safe_to_continue: false` with no prefilled cap. The on-chain policy
+   * remains the actual gate either way.
+   */
+  QuoteExceedsRemainingBudget: 'QUOTE_EXCEEDS_REMAINING_BUDGET',
+  /**
+   * #3967: the MERCHANT reported a denial on one of its x402 payment options —
+   * a known denial key (starting with `issuanceDenied`) in `accepts[].extra`.
+   * Strictly informational: it flips neither `safe_to_continue` nor
+   * `expected_settleable`; the agent should surface it to the user.
+   */
+  MerchantReportedDenial: 'MERCHANT_REPORTED_DENIAL',
 } as const
 
 export type AgentPaymentWarningCode =
@@ -2676,9 +2700,11 @@ export interface HavenCatalogEntry {
    * (the operator vouches for the listing; the catalog refresh probe still
    * checks the endpoint, see `verifiedPayable`). `ingestion` = submitted
    * through the Verified Payable Directory and passed domain-ownership proof
-   * plus the read-only quote probe.
+   * plus the read-only quote probe. `bazaar` = written by the x402 Bazaar
+   * discovery cron (#4245): seller-chosen name and description, no operator
+   * review, no ownership proof.
    */
-  source: 'operator' | 'ingestion'
+  source: 'operator' | 'ingestion' | 'bazaar'
   /** True only for `ingestion` entries — the one ownership claim. See the epic's trust claim (never merchant honesty or quality). */
   domainVerified: boolean
   /**
@@ -2742,7 +2768,7 @@ export interface RawCatalogEntry {
   asset_transfer_methods?: string | null
   status: 'active' | 'degraded' | 'delisted'
   verified_at: string | null
-  source: 'operator' | 'ingestion'
+  source: 'operator' | 'ingestion' | 'bazaar'
   domain_verified: boolean
   verified_payable: boolean
   /** Absent from a backend older than #3078; null when the join resolved nothing. */

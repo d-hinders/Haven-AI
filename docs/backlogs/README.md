@@ -6,7 +6,7 @@ covers:
   - .github/ISSUE_TEMPLATE/loop-epic.md
   - .agents/skills/ship-next/SKILL.md
   - .github/CODEOWNERS
-last-verified: "2026-09-18"
+last-verified: "2026-10-20"
 ---
 
 # Backlogs moved to GitHub Issues
@@ -31,13 +31,19 @@ The loop reads **GitHub Issues**. Two sources (see
 | **Epic + sub-issues** | a multi-PR plan that burns down together | open a parent issue with sub-issues → run `ship-next epic=#<n>`; its **Promotion checklist** (operator steps + product verification on `dev`, each an unticked box) keeps the epic open until a human ticks the last one — `ship-next` reports it ready to close only then ([#2767](https://github.com/d-hinders/Haven-AI/issues/2767)) |
 
 Issue state *is* the backlog state: an open issue with no PR, no live claim or
-work overlap, and no **`pending-review`** label is **ready** (`pending-review`
-means its spec review or an owner decision is still outstanding — `new-task`
-§ *Hold until ready*), an open issue with an open Haven PR is **in
+work overlap, no **`pending-review`** label, and not from outside the
+maintainers is **ready** (`pending-review` means its spec review or an owner
+decision is still outstanding — `new-task` § *Hold until ready*; an
+**external** issue — author neither a maintainer nor a Bot, not yet accepted by
+a maintainer removing its `external` label — is never ready, whatever its labels
+say: AGENTS.md § *Cross-session agent coordination*, rule 0b, #4200), an open issue with an open Haven PR is **in
 flight**, and a **closed** issue is **done** (its PR closed it via
 `Closes #`). Exception: an open issue labelled **`operator-verify`** is already
 implemented and on `dev` — its PR wrote `Refs #<n>` so the merge would leave a
 human's outstanding step a home (#2276). It is not ready work; don't queue it.
+An open issue labelled **`landed-partial`** has a merged PR that references it
+with `Refs #<n>` — the merge-time release workflow adds the label (#4235) — so
+part or all of it has landed: read that PR before building any of it.
 
 ## Writing a loop-ready issue
 
@@ -48,6 +54,10 @@ old YAML `scope:` field demanded. The **🔁 Loop task** issue template
 - **Scope** — one paragraph the implementer can act on without guessing: the
   change *and* its acceptance criteria.
 - **Files** — the file(s) the change should own (best-effort).
+- **Design system** — for `area:frontend`, the existing `/design-system`
+  Patterns it uses, every changed component and its other usages, and any
+  proposed **new pattern**'s separate, earlier design-system slice for owner
+  approval.
 - **Surface** — which `area:*` / `money-path` label(s) apply, so `ship-next`
   loads the right playbook (see `docs/contributing/ship-playbooks/README.md`).
 - **Money-path?** — whether it touches x402, machine-payments, payment-coverage,

@@ -313,9 +313,11 @@ export function parkedRunsQueryArgs(repo, sha) {
  *
  * ## The unstated invariant, now stated
  *
- * On today's repo topology these two sets coincide: all 15 required contexts on
- * `dev` are declared by jobs inside the five workflows that park, so approving
- * every parked run clears every required check. Measured, not assumed
+ * On today's repo topology these two sets coincide: 15 of the 16 required
+ * contexts on `dev` are declared by jobs inside the five workflows that park, and
+ * the 16th, *External intake gate* (#4200), runs on `pull_request_target`, which
+ * never parks — so approving every parked run clears every required check that
+ * waits on approval. Measured, not assumed
  * (`gh api repos/<o>/<r>/rules/branches/dev` — the *rules* endpoint is readable
  * without admin; *protection* 404s).
  *

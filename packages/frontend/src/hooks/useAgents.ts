@@ -107,7 +107,7 @@ export function useAgents() {
   )
 
   // #1402: removal is an archive (#1401) — the agent leaves the primary list
-  // client-side; the row and its history stay readable under Removed.
+  // client-side; the row and its history stay readable under Archived: Shown (#4113).
   const archiveAgent = useCallback(async (id: string): Promise<void> => {
     const res = await api.post<{ archived_at: string }>(`/agents/${id}/archive`, {})
     setAgents((prev) =>

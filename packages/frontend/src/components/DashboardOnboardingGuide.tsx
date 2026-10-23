@@ -59,7 +59,15 @@ interface Props {
    * completes step 2.
    */
   hasSetUpAgent: boolean
-  /** When step 2 is open and an agent is waiting for setup, it names that agent. */
+  /**
+   * An agent waiting for setup, named by step 2's heading WHILE THE STEP IS
+   * OPEN. The caller only passes it while step 2 is incomplete
+   * (`DashboardClient`'s `stepTwoAgent`), but the title branches on
+   * `hasSetUpAgent` too (#3976): a completed step keeps the imperative
+   * "Connect your first agent" and names nobody, whatever this prop holds —
+   * a ticked step must not carry a "Finish setting up" for an agent whose
+   * row already renders below.
+   */
   pendingAgent?: PendingSetupAgent | null
   hasFirstAgentPayment: boolean
   /**
@@ -136,11 +144,13 @@ export default function DashboardOnboardingGuide({
     status: hasSetUpAgent ? 'complete' : activeStep === 2 ? 'active' : 'available',
     number: 2,
     // A connected agent waiting for its budget is named in the heading, not
-    // buried mid-sentence; the body keeps only the action (#3818 design review).
-    title: pendingAgent
+    // buried mid-sentence; the body keeps only the action (#3818 design
+    // review). #3976: only while the step is OPEN — a completed step keeps
+    // the imperative default and names nobody, whatever the caller passes.
+    title: pendingAgent && !hasSetUpAgent
       ? `Finish setting up ${pendingAgent.name}${pendingAgent.moreCount > 0 ? ` and ${pendingAgent.moreCount} more` : ''}`
       : 'Connect your first agent',
-    body: pendingAgent
+    body: pendingAgent && !hasSetUpAgent
       ? pendingAgent.awaiting === 'approval'
         ? 'Approve its budget so it can pay.'
         : 'Set a budget so it can pay.'

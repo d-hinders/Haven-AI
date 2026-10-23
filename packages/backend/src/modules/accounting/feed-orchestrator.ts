@@ -11,6 +11,7 @@ import { getConnector, listConnectors, type AccountingConnector, type DegradedCo
 import { isTokenDeadStatus } from './oauth-flow.js'
 import { missingScopesReason } from './provider.js'
 import { claimSync, markPushed, markFailed, markSkipped, listSyncs, type FeedSyncRow } from './feed-sync.js'
+import { recordMerchantInvoiceSync } from '../../infra/repositories/accounting-feed-syncs.js'
 
 /**
  * Sync orchestration for the reporting feed (epic #491, P2 #499).
@@ -270,6 +271,14 @@ export async function feedSettledPayment(userId: string, paymentId: string, opts
     const result = await connector.pushTransaction(userId, pushTx)
     if (result.status === 'pushed') {
       await markPushed(userId, connector.provider, paymentId, result.externalRef, result.note ?? null)
+      // #3918: a proven second document (the merchant's own invoice) gets its
+      // own ledger row — never claimed or swept, just the delivery record.
+      // Written after the underlag row is pushed, so a crash between the two
+      // leaves a pushed underlag and no merchant-invoice row: the honest
+      // state (the late-attach path re-delivers it from the capture route).
+      if (result.merchantInvoiceRef) {
+        await recordMerchantInvoiceSync(userId, connector.provider, paymentId, result.merchantInvoiceRef)
+      }
       // #2862/#2865 POST-push: a finding about the GRANT (the attachment step
       // lacked a scope) flips the CONNECTION's status so the dashboard can ask
       // for a re-consent. The sync row above stays pushed — never `skipped`,

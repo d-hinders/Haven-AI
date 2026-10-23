@@ -53,6 +53,7 @@ vi.mock('../../../infra/prices.js', async (importOriginal) => ({
 import { randomUUID } from 'node:crypto'
 import db from '../../../db.js'
 import { describeDb, initDbHarness, resetDb } from '../../../infra/__tests__/helpers/db-harness.js'
+import { findAuthorizationUsedTx } from '../../../infra/chain/authorization-used-scanner.js'
 import {
   findSweepableEip3009Intents,
   recordEip3009MerchantSettlement,
@@ -186,7 +187,11 @@ function chainCarries(opts: { authorizer?: string; nonce?: string; txHash?: stri
       return {
         status: 1,
         blockNumber: SETTLE_BLOCK,
-        logs: [transferLog()],
+        // #3925: the settlement's receipt carries the token's own
+        // `AuthorizationUsed(authorizer, nonce)` log — the proof the observe
+        // call now requires (the nonce the sweep derived for this payment).
+        // FiatToken v2 order (#4061 review): AuthorizationUsed, then its Transfer.
+        logs: [{ ...authorizationUsedLog(authorizer, nonce, txHash), transactionHash: undefined }, transferLog()],
       }
     }
     return null
@@ -219,6 +224,79 @@ describeDb('passive eip3009 settlement sweep (#3888)', () => {
     getBlockNumber.mockReset().mockResolvedValue(HEAD_BLOCK)
     getLogs.mockReset().mockResolvedValue([])
     silentLog.debug.mockReset(); silentLog.info.mockReset(); silentLog.warn.mockReset()
+  })
+
+  // ── #4319 Tier 1 in the tick ─────────────────────────────────────────────
+
+  it('#4319 Tier 1: a stored X-PAYMENT header names its own nonce — the tick records it nonce-bound, not nonce-derived', async () => {
+    const { agentId, userId } = await seedAgent()
+    const p = await fundedPayment(agentId, userId)
+    // The header nonce is RANDOM (not derived from the payment id) — the
+    // derived-nonce scan must come up empty and the HEADER scan find it.
+    const headerNonce = `0x${'77'.repeat(32)}`
+    const wallet = new ethers.Wallet('0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d')
+    await db.query(`UPDATE payment_intents SET to_address = $1 WHERE id = $2`, [wallet.address, p.id])
+    // The stored header: the delegate-signed authorization the report posted.
+    const authorization = {
+      from: wallet.address,
+      to: MERCHANT,
+      value: AMOUNT_RAW,
+      validAfter: '0',
+      validBefore: '9999999999',
+      nonce: headerNonce,
+    }
+    const signature = await wallet.signTypedData(
+      { name: 'USDC', version: '2', chainId: CHAIN, verifyingContract: TOKEN },
+      {
+        TransferWithAuthorization: [
+          { name: 'from', type: 'address' },
+          { name: 'to', type: 'address' },
+          { name: 'value', type: 'uint256' },
+          { name: 'validAfter', type: 'uint256' },
+          { name: 'validBefore', type: 'uint256' },
+          { name: 'nonce', type: 'bytes32' },
+        ],
+      },
+      { ...authorization, value: BigInt(AMOUNT_RAW), validAfter: 0n, validBefore: 9999999999n },
+    )
+    const header = Buffer.from(JSON.stringify({ payload: { signature, authorization } }), 'utf8').toString('base64')
+    await db.query(
+      `INSERT INTO machine_payment_evidence
+         (payment_intent_id, agent_id, user_id, rail, proof_status, tx_hash, chain_id, resource_url,
+          payer_address, settlement_address, token_symbol, token_address, amount_raw, amount_human,
+          payment_proof_header, confirmed_at)
+       VALUES ($1, $2, $3, 'x402', 'protocol_receipt_attached', $4, $5, $6, $7, $8, 'USDC', $9, $10, '0.10', $11, NOW())`,
+      [p.id, agentId, userId, FUNDING_TX, CHAIN, RESOURCE, wallet.address, MERCHANT, TOKEN, AMOUNT_RAW, header],
+    )
+    chainCarries({ authorizer: wallet.address, nonce: headerNonce })
+    // The settlement transfer leaves the DELEGATE (the wallet we signed the
+    // header with) — chainCarries' default transfer names the fixture PAYER.
+    getTransactionReceipt.mockImplementation(async (hash: string) => {
+      if (hash.toLowerCase() === FUNDING_TX.toLowerCase()) return { blockNumber: FUNDING_BLOCK }
+      if (hash.toLowerCase() === SWEEP_TX.toLowerCase()) {
+        const encoded = TRANSFER_IFACE.encodeEventLog('Transfer', [wallet.address, MERCHANT, BigInt(AMOUNT_RAW)])
+        return {
+          status: 1,
+          blockNumber: SETTLE_BLOCK,
+          logs: [
+            { ...authorizationUsedLog(wallet.address, headerNonce, SWEEP_TX), transactionHash: undefined },
+            { address: TOKEN, topics: encoded.topics, data: encoded.data },
+          ],
+        }
+      }
+      return null
+    })
+
+    const result = await runEip3009SettlementSweepTick(silentLog, { chain: chainDeps() })
+
+    expect(result).toMatchObject({ recorded: 1, refused: 0 })
+    const intent = await readIntent(p.id)
+    expect(intent.machine_metadata.merchant_settlement_tx_hash).toBe(SWEEP_TX)
+    // The record is nonce-BOUND (check 9 held the header's nonce to the tx),
+    // but NOT nonce-DERIVED — the header's nonce is not the payment id's.
+    expect(intent.machine_metadata.merchant_settlement_nonce_bound).toBe(true)
+    expect(intent.machine_metadata.merchant_settlement_nonce_derived).toBeUndefined()
+    expect(feedSettledPaymentBestEffort).toHaveBeenCalledTimes(1)
   })
 
   // ── AC 1, and the positive control ───────────────────────────────────────
@@ -380,21 +458,42 @@ describeDb('passive eip3009 settlement sweep (#3888)', () => {
     expect(feedSettledPaymentBestEffort).not.toHaveBeenCalled()
   })
 
-  it('AC 5: a failing log scan is "not known yet" — nothing written, nothing backoff-penalised', async () => {
+  it('AC 5 (#4012): a failing log scan is "not known yet" — nothing written, backed off without moving the cursor, never fruitless', async () => {
     const { agentId, userId } = await seedAgent()
     const p = await fundedPayment(agentId, userId)
     getBlockNumber.mockResolvedValue(HEAD_BLOCK)
     getTransactionReceipt.mockResolvedValue({ blockNumber: FUNDING_BLOCK })
+    let available = false
+    const findUsed = vi.fn(async (...args: Parameters<Eip3009ChainDeps['findUsed']>) =>
+      available ? findAuthorizationUsedTx(...args) : ({ status: 'unavailable' as const }))
 
-    const result = await runEip3009SettlementSweepTick(silentLog, {
-      chain: chainDeps({
-        findUsed: async () => ({ status: 'unavailable' as const }),
-      }),
-    })
+    const result = await runEip3009SettlementSweepTick(silentLog, { chain: chainDeps({ findUsed }) })
 
     expect(result.recorded).toBe(0)
     expect(result.chainsUnavailable).toBe(1)
+    expect(result.unresolved).toBe(0)
     expect((await readIntent(p.id)).machine_metadata.merchant_settlement_tx_hash ?? null).toBeNull()
+
+    // Backed off: the next tick does not ask again.
+    const held = await runEip3009SettlementSweepTick(silentLog, { chain: chainDeps({ findUsed }) })
+    expect(held.suppressed).toBe(1)
+    expect(findUsed).toHaveBeenCalledTimes(1)
+
+    // Once the backoff runs out and the chain answers, the scan starts at the
+    // FUNDING block again — the failure never advanced the cursor — and the
+    // settlement it would otherwise have skipped is recorded.
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      vi.setSystemTime(Date.now() + 2 * 60 * 1000)
+      available = true
+      chainCarries({ nonce: p.nonce })
+      const recovered = await runEip3009SettlementSweepTick(silentLog, { chain: chainDeps({ findUsed }) })
+      expect(findUsed).toHaveBeenCalledTimes(2)
+      expect((findUsed.mock.calls[1] as unknown as [number, string, string, string, { fromBlock: number }])[4].fromBlock).toBe(FUNDING_BLOCK)
+      expect(recovered.recorded).toBe(1)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('AC 5: block ranges are bounded to the span past the funding block', async () => {

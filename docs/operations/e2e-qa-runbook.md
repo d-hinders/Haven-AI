@@ -52,7 +52,7 @@ document for the remaining exploratory checklist.
 | Mobile-viewport layout overflow on the primary authenticated routes | `e2e/navigation.mobile.spec.ts` (Pixel 5 emulation, gates every PR since #1770) |
 | Dialog/overlay layout overflow **at a mobile viewport** | `e2e/receive-modal.mobile.spec.ts` (Pixel 5, #1797). The three desktop callers of `measureDialogOverflow` run only at 1280px, where a dialog is least likely to overflow |
 | **x402 tx displays in history + opens the per-type detail panel** (#420 UI half) | `e2e/transactions-detail.spec.ts` |
-| CSV export shape + injection guard | backend unit tests (`domain/__tests__/csv.test.ts` for RFC 4180 quoting and formula-injection neutralisation, `modules/transactions/__tests__/csv-export.test.ts` for the column contract) plus the route test `routes/__tests__/transactions-export-csv.test.ts`. #2871 moved generation server-side, so the frontend `transaction-csv` test no longer covers either property — it is down to the filename and the download shim. The `initiator` column (#2097 — `human` \| `agent` \| `unknown`, empty for inbound/unattributed rows) survives the move; column order is asserted against `TRANSACTION_CSV_COLUMNS` so the shape stays pinned (#3127 appended `reporting_currency` / `converted_currency` at the END — the fixed-SEK accounting branch keeps its indices) |
+| CSV export shape + injection guard | backend unit tests (`domain/__tests__/csv.test.ts` for RFC 4180 quoting and formula-injection neutralisation, `modules/transactions/__tests__/csv-export.test.ts` for the column contract) plus the route test `routes/__tests__/transactions-export-csv.test.ts`. #2871 moved generation server-side, so the frontend `transaction-csv` test no longer covers either property — it is down to the filename and the download shim. The `initiator` column (#2097) survives the move, and since #4099 carries the app's words — `You` \| the agent's name \| `Unknown`, empty for inbound rows other than an agent's delegate sweep, which carries the agent's name; column order is asserted against `TRANSACTION_CSV_COLUMNS` so the shape stays pinned (#3127 appended `reporting_currency` / `converted_currency` at the END — the fixed-SEK accounting branch keeps its indices) |
 
 Run the regular mocked frontend suite with:
 
@@ -138,8 +138,9 @@ merchants** found.
    such leg to queue against. Confirm either the expected on-chain settlement or the
    refusal — the edge-case note below says which refusal each path gives.
 2. **Displays correctly in the UI** — the payment appears in Transaction history
-   and its detail panel shows the x402 fields (resource host, merchant, amount,
-   payment id, on-chain section). *Happy path here is automated
+   and its detail panel shows the x402 fields (the resource host as the title
+   and the For row, the Settlement row, and the merchant address and
+   settlement transaction under Technical details, #4267). *Happy path here is automated
    (`transactions-detail.spec.ts`); hand-check only the real-merchant specifics
    the mock can't cover (actual amount, real merchant address, real tx hash).*
 3. **Receipt is logged** — payment evidence is recorded (smart account/delegate,

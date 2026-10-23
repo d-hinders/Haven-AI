@@ -28,10 +28,18 @@
  * setup" offer the control). The list holds NO dismissal state — #3813 owns
  * persistence; this component renders what it is given.
  * What it does own is where focus lands: after a dismiss it moves to the
- * next item's dismiss button (the caller re-renders without the dismissed
- * item, and this effect runs after that render), or — when the list emptied —
- * to the caller's list heading via `headingId`. A control that vanishes
- * under the pointer must not strand focus on `body`.
+ * next dismissible item's dismiss button, or the last remaining one when the
+ * dismissed row was the last dismissible row (the caller re-renders without
+ * the dismissed item, and this effect runs after that render), or — when no
+ * dismiss button remains — to the caller's list heading via `headingId`. A
+ * control that vanishes under the pointer must not strand focus on `body`.
+ * The heading fallback needs the caller to keep this list mounted through
+ * the dismiss that empties it; a list unmounted at zero items runs no
+ * effect. If the caller's next render still holds the dismissed item, the
+ * pending move is dropped rather than replayed on some later render. "Next" is
+ * counted among the DISMISSIBLE rows only: the focus targets are the dismiss
+ * buttons, and since #3813 a non-dismissible row has none, so an index into
+ * `items` would skip ahead by the number of non-dismissible rows above it.
  *
  * ── Two-line clamp, at every width ──────────────────────────────────────────
  *
@@ -43,19 +51,27 @@
  * with `line-clamp-none`: it sets `overflow: visible`, which defeats the
  * ellipsis (#3861).
  *
- * ── First-line alignment (#3880) ──────────────────────────────────────────
+ * ── Centred in the row (#4019) ─────────────────────────────────────────────
  *
- * With two-line titles and subtitles a row body runs to four lines, and
- * `Row`'s default centring left the icon beside the gap between title and
- * subtitle. The leading icon — and, from `sm` up, the trailing badge, action
- * and dismiss when they sit beside the body — are centred on the title's
- * FIRST line instead, so the item reads as one line with detail beneath.
+ * The row keeps `Row`'s own geometry: `items-center` with `py-3`, so the
+ * leading icon and — from `sm` up, beside the body — the trailing badge,
+ * action and dismiss are centred vertically in the row, with 12px above and
+ * below. This reverses #3880, which pinned the icon and controls to the
+ * title's first line by trading 6px of top padding for a title margin; the
+ * owner found the result top-heavy (2026-10-16). Accepted trade-off: on an
+ * item whose title and subtitle both wrap, the icon sits beside the middle
+ * of the text block rather than its first line.
  *
  * ── Mobile ────────────────────────────────────────────────────────────────
  *
  * Below `sm` the trailing slot wraps onto its own line under the body
  * (`basis-full` on the trailing wrapper, in a `flex-wrap` row). From `sm` up
- * it sits beside the body.
+ * it sits beside the body. The exception is a row with nothing visible to
+ * align — no badge, no action, not dismissible (#4033): it renders no
+ * trailing slot at all, because the wrapper would be a 0px flex line that
+ * still takes `Row`'s 12px row gap below `sm` (and a 12px column gap from
+ * `sm` up). That row's `sr-only` tone word moves into the body instead — the
+ * tone still rides text, just not in a trailing slot.
  *
  * ── A readable body, even beside a wide trailing ───────────────────────────
  *
@@ -67,13 +83,32 @@
  * the minimum in place the row's `flex-wrap` drops the trailing below the
  * body instead — the same place it already sits below `sm`.
  *
+ * ── One trailing column ────────────────────────────────────────────────────
+ *
+ * Mixed rows must not stagger. When ANY row in the list offers the dismiss,
+ * every row without one keeps an empty, `aria-hidden` 32px slot in its
+ * place, so the actions end on one right edge instead of the non-dismissible
+ * rows' controls sliding 40px right of the rest. A list with no dismissible
+ * row reserves nothing, and a row with nothing visible to align (no badge,
+ * no action, not dismissible) renders no trailing slot at all — wrapper
+ * included: below `sm` its slot would be a 0px flex line under the body
+ * that still takes the row gap (#4033), so the row's `sr-only` tone word
+ * moves into the body instead. The decision reads the items as given, so dismissing the
+ * last dismissible row (or "Show N more" revealing the first) shifts the
+ * column 40px — accepted: the list is consistent with itself at every render. The action also gets a shared minimum width
+ * (`ACTION_MIN`, 112px — room for "Finish setup" and "View activity"), so
+ * "Add funds" and "Review" match them and the badges end on one edge too. A
+ * longer label ("View transactions") grows past it: its action still ends on
+ * the shared edge, but its badge sits further left. Raising the minimum to
+ * fit it would bloat every short action, so that one case is accepted.
+ *
  * ── Full-bleed (#3902) ────────────────────────────────────────────────────
  *
  * `fullBleed` is for a list that IS the card body: rows run edge to edge
  * with hairline dividers between them and the card's own 20px side inset
  * (`px-5`), as the dashboard's "Needs attention" card draws them. Only the
- * horizontal padding changes — `ROW_TOP` still owns the top, so the
- * first-line alignment above holds. The `/design-system` showcase renders the
+ * horizontal padding changes, so the row stays centred as above. The
+ * `/design-system` showcase renders the
  * same prop, so `e2e/attention-list-title-measure.spec.ts` measures the shape
  * the dashboard uses. Without it the list keeps its inset, spaced rows.
  *
@@ -115,26 +150,16 @@ export interface AttentionListItem {
   action?: ReactNode
 }
 
-/**
- * Centre the 32px controls on the title's first line (#3880) without moving
- * anything by a negative margin: the row gives up 6px of top padding
- * (`pt-1.5` overrides Row's `py-3` top) and the title takes it back as a
- * margin (`mt-1.5`), so the text sits exactly where it did — for any item
- * with a subtitle, i.e. a body at least as tall as the 32px icon. Every
- * Needs attention kind has one; a title-only item would sit 3px high in a 6px
- * shorter row, and would need the body pinned too. The icon and,
- * beside the body, the trailing controls then align to the top of the row
- * — 6px above the first line, which is half of 32px minus half of the 20px
- * `text-sm` line, so their centres land on the line's centre. Controls that
- * wrap onto their own line keep Row's full 12px gap: nothing pulls them up
- * (the #3880 code review caught a `-mt-1.5` version doing exactly that to
- * three of the four dashboard rows).
- */
-const ROW_TOP = 'pt-1.5'
-const TITLE_TOP = 'mt-1.5'
-
 /** Two lines, then an ellipsis — see the clamp rule above. */
 const CLAMP = 'whitespace-normal line-clamp-2'
+
+/**
+ * The action's shared minimum width — see "One trailing column" above. The
+ * wrapper is a flex box with this minimum and the caller's control grows to
+ * fill it (Button centres its label), so short actions match the widest
+ * common one without the caller sizing anything.
+ */
+const ACTION_MIN = 'flex min-w-[7rem] [&>*]:grow'
 
 /** Full-bleed rows take the card's 20px side inset instead of `Row`'s 16px. */
 const FULL_BLEED_ROW = 'px-5'
@@ -157,8 +182,10 @@ export function AttentionList({
   items: AttentionListItem[]
   onDismiss: (id: string) => void
   /**
-   * DOM id of the caller's list heading. When a dismiss empties the list,
-   * focus moves there — the caller owns the heading and the empty state.
+   * DOM id of the caller's list heading. When a dismiss leaves no dismiss
+   * button — the list emptied, or only non-dismissible rows remain — focus
+   * moves there; the caller owns the heading and the empty state. The list
+   * must stay mounted through that dismiss for the move to run.
    */
   headingId?: string
   /** Edge-to-edge rows with dividers, for a list that is the card's body (#3902). */
@@ -168,12 +195,16 @@ export function AttentionList({
   const listRef = useRef<HTMLUListElement | null>(null)
   // Set at click time, consumed after the caller's re-render has removed the
   // item — focusing a still-mounted row would strand focus on a departing node.
-  const pendingFocusIndex = useRef<number | null>(null)
+  // It is the dismissed control's position among the DISMISS BUTTONS, not
+  // among `items` — the two orders differ once a row is non-dismissible.
+  const pendingFocus = useRef<{ id: string; index: number } | null>(null)
 
   useEffect(() => {
-    if (pendingFocusIndex.current === null) return
-    const index = pendingFocusIndex.current
-    pendingFocusIndex.current = null
+    if (pendingFocus.current === null) return
+    const { id, index } = pendingFocus.current
+    pendingFocus.current = null
+    // The caller kept the item: nothing vanished, so focus stays where it is.
+    if (items.some((item) => item.id === id)) return
     const buttons = listRef.current?.querySelectorAll<HTMLButtonElement>('[data-attention-dismiss]')
     if (buttons && buttons.length > 0) {
       buttons[Math.min(index, buttons.length - 1)]?.focus()
@@ -184,9 +215,16 @@ export function AttentionList({
 
   if (items.length === 0) return null
 
-  const handleDismiss = (index: number) => {
-    pendingFocusIndex.current = index
-    onDismiss(items[index].id)
+  // One trailing column: reserve the dismiss slot on every row once any row
+  // has the control (see the header comment).
+  const reserveDismissSlot = items.some((item) => item.dismissible !== false)
+
+  const handleDismiss = (item: AttentionListItem) => {
+    const index = items
+      .filter((candidate) => candidate.dismissible !== false)
+      .findIndex((candidate) => candidate.id === item.id)
+    pendingFocus.current = { id: item.id, index }
+    onDismiss(item.id)
   }
 
   return (
@@ -195,44 +233,68 @@ export function AttentionList({
       data-full-bleed={fullBleed ? '' : undefined}
       className={`${fullBleed ? 'divide-y divide-[var(--v2-border)]' : 'space-y-1'} ${className}`.trim()}
     >
-      {items.map((item, index) => (
-        <li key={item.id}>
-          <Row
-            leading={item.icon ? <Icon icon={item.icon} className="h-4 w-4" /> : undefined}
-            leadingTone={item.icon ? item.tone : undefined}
-            leadingClassName="self-start"
-            title={item.title}
-            subtitle={item.subtitle}
-            titleClassName={`${CLAMP} ${TITLE_TOP}`}
-            subtitleClassName={CLAMP}
-            bodyClassName="min-w-[10rem]"
-            trailingClassName="w-full basis-full self-start sm:w-auto sm:basis-auto"
-            className={`flex-wrap ${ROW_TOP}${fullBleed ? ` ${FULL_BLEED_ROW}` : ''}`}
-            trailing={
-              <div className="flex items-center justify-end gap-2">
-                {item.badge !== undefined ? (
-                  <StatusBadge tone={item.tone}>{item.badge}</StatusBadge>
-                ) : (
-                  <span className="sr-only">{TONE_TEXT[item.tone]}</span>
-                )}
-                {item.action}
-                {item.dismissible !== false && (
-                  <button
-                    type="button"
-                    data-attention-dismiss
-                    data-testid={`attention-dismiss-${item.id}`}
-                    aria-label={`Dismiss: ${item.title}`}
-                    onClick={() => handleDismiss(index)}
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-full text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
-                  >
-                    <Icon icon={X} className="h-4 w-4" />
-                  </button>
-                )}
-              </div>
-            }
-          />
-        </li>
-      ))}
+      {items.map((item) => {
+        // A trailing wrapper with nothing visible in it — badge-less, no
+        // action, not dismissible, and therefore no reserved slot either —
+        // would still be a flex item: a 0px line taking `Row`'s row gap
+        // below `sm` and a column gap from `sm` up (#4033). Render none, and
+        // carry the tone word in the body instead so it is still read out.
+        const hasVisibleTrailing =
+          item.badge !== undefined || item.action !== undefined || item.dismissible !== false
+        return (
+          <li key={item.id}>
+            <Row
+              leading={item.icon ? <Icon icon={item.icon} className="h-4 w-4" /> : undefined}
+              leadingTone={item.icon ? item.tone : undefined}
+              title={item.title}
+              subtitle={
+                hasVisibleTrailing
+                  ? item.subtitle
+                  : item.subtitle !== undefined
+                    ? (<>
+                        {item.subtitle} <span className="sr-only">{TONE_TEXT[item.tone]}</span>
+                      </>)
+                    : (<span className="sr-only">{TONE_TEXT[item.tone]}</span>)
+              }
+              titleClassName={CLAMP}
+              subtitleClassName={CLAMP}
+              bodyClassName="min-w-[10rem]"
+              trailingClassName="w-full basis-full sm:w-auto sm:basis-auto"
+              className={`flex-wrap${fullBleed ? ` ${FULL_BLEED_ROW}` : ''}`}
+              trailing={
+                hasVisibleTrailing ? (
+                  <div className="flex items-center justify-end gap-2">
+                    {item.badge !== undefined ? (
+                      <StatusBadge tone={item.tone}>{item.badge}</StatusBadge>
+                    ) : (
+                      <span className="sr-only">{TONE_TEXT[item.tone]}</span>
+                    )}
+                    {item.action ? <div className={ACTION_MIN}>{item.action}</div> : null}
+                    {item.dismissible !== false ? (
+                      <button
+                        type="button"
+                        data-attention-dismiss
+                        data-testid={`attention-dismiss-${item.id}`}
+                        aria-label={`Dismiss: ${item.title}`}
+                        onClick={() => handleDismiss(item)}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-full text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+                      >
+                        <Icon icon={X} className="h-4 w-4" />
+                      </button>
+                    ) : reserveDismissSlot && (item.badge !== undefined || item.action) ? (
+                      <span
+                        aria-hidden="true"
+                        data-attention-dismiss-slot
+                        className="h-8 w-8 flex-shrink-0"
+                      />
+                    ) : null}
+                  </div>
+                ) : undefined
+              }
+            />
+          </li>
+        )
+      })}
     </ul>
   )
 }

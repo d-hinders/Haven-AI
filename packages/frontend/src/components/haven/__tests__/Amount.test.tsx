@@ -7,10 +7,15 @@ function renderAmount(props: Parameters<typeof Amount>[0]) {
   return container.querySelector('span')!
 }
 
-describe('Amount currency mode under a cent (#3897)', () => {
-  it('an outgoing sub-cent figure reads "-<$0.01", never "-$0.00"', () => {
+describe('Amount currency mode under a cent (2026-10-22, superseding #3897)', () => {
+  it('an outgoing sub-cent figure reads exactly 4 decimals, never "-$0.00"', () => {
     const el = renderAmount({ amount: 0.004, currency: 'USD', direction: 'out' })
-    expect(el.textContent).toBe('-<$0.01')
+    expect(el.textContent).toBe('-$0.0040')
+  })
+
+  it('a figure below 0.00005 reads "<" against the smallest showable figure', () => {
+    const el = renderAmount({ amount: 0.00003, currency: 'USD', direction: 'out' })
+    expect(el.textContent).toBe('-<$0.0001')
   })
 
   it('zero stays "$0.00"', () => {
@@ -47,9 +52,34 @@ describe('Amount (#853)', () => {
     expect(el.className).not.toContain('success')
   })
 
+  // #4312 F, owner ruling 2026-10-23: a failed payment keeps the sign of the
+  // direction it WOULD have moved, with no strike-through — the failure reads
+  // through the danger tone, the "Failed" badge and the on-chain callout, not
+  // through the figure. Pinned whole, not just by class.
+  it('a failed figure keeps its direction’s sign, whole, in the danger tone', () => {
+    const outgoing = renderAmount({ amount: 0.5, currency: 'USD', direction: 'out', failed: true })
+    expect(outgoing.textContent).toBe('-$0.50')
+    expect(outgoing.className).toContain('text-[var(--v2-danger)]')
+    const incoming = renderAmount({ value: '0.50', symbol: 'USDC', direction: 'in', failed: true })
+    expect(incoming.textContent).toBe('+0.50 USDC')
+    expect(incoming.className).toContain('text-[var(--v2-danger)]')
+  })
+
   it('size="lg" renders the detail-panel headline scale', () => {
     const el = renderAmount({ value: '320.00', symbol: 'USDC', direction: 'out', size: 'lg' })
     expect(el.className).toContain('text-2xl')
+  })
+
+  it('size="md" puts the 20px secondary-figure scale on the span itself (#4259)', () => {
+    const el = renderAmount({ value: '42.00', symbol: 'USDC', direction: 'out', size: 'md' })
+    expect(el.className).toContain('text-xl')
+    expect(el.className).not.toContain('text-sm')
+    expect(el.className).not.toContain('text-2xl')
+  })
+
+  it('size="sm" stays the default row scale', () => {
+    expect(renderAmount({ value: '1.00' }).className).toContain('text-sm')
+    expect(renderAmount({ value: '1.00', size: 'sm' }).className).toContain('text-sm')
   })
 
   it('omits the symbol cleanly when not provided', () => {

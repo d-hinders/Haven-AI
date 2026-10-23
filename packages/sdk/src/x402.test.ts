@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { MockInstance } from 'vitest'
 import { HavenClient } from './client.js'
 import { HavenPaymentStateError } from './types.js'
 import {
@@ -1378,11 +1379,14 @@ describe('x402 helpers', () => {
     })
     // ...and the merchant's own settlement rides a SECOND post — the
     // transaction the merchant shows, recorded beside the funding hash.
+    // #4061: WITH the header the retry sent — the #3925 nonce proof.
     const settlementInit = fetchMock.mock.calls[5][1] as RequestInit
     expect(JSON.parse(settlementInit.body as string)).toEqual({
       paymentId: 'approval-123',
       rail: 'x402',
       txHash: settlementTxHash,
+      paymentProofHeaderName: 'PAYMENT-SIGNATURE, X-PAYMENT',
+      paymentProofHeader: retryHeaders.get('X-PAYMENT'),
     })
   })
 
@@ -2506,7 +2510,9 @@ describe('non-exact-only refusal names the scheme and the likely cause (#3735)',
 // ── #3764: the LOCAL paid retry (`retryRequest`, reached by fetch /
 // payX402Quote / resumeX402Payment) reports the merchant's settlement hash —
 // the one it already copies onto the local receipt — through the same
-// evidence endpoint, one attempt, after the funding report. ──
+// evidence endpoint, after the funding report. Since #4215 that report is
+// retried while Haven answers `retryable` (503) under the bounded
+// `EVIDENCE_RETRY_DELAYS_MS` schedule; refusals stay one attempt. ──
 
 describe('#3764 — the local retry reports the merchant settlement beside the funding evidence', () => {
   afterEach(() => {
@@ -2564,8 +2570,16 @@ describe('#3764 — the local retry reports the merchant settlement beside the f
     // FIRST: the funding report — the positional shape pinned at the #3475
     // funding check above, unchanged.
     expect(posts[0]).toMatchObject({ paymentId: 'pay_3764', rail: 'x402', txHash: FUNDING_TX, resourceUrl: paymentRequired.resource.url, merchantStatus: 200 })
-    // SECOND: the merchant's settlement, the minimal #3475 payload.
-    expect(posts[1]).toEqual({ paymentId: 'pay_3764', rail: 'x402', txHash: SETTLEMENT_TX })
+    // SECOND: the merchant's settlement, the minimal #3475 payload plus
+    // (#4061) the header the retry sent — the funding report's own copy.
+    expect(posts[0].paymentProofHeader).toEqual(expect.any(String))
+    expect(posts[1]).toEqual({
+      paymentId: 'pay_3764',
+      rail: 'x402',
+      txHash: SETTLEMENT_TX,
+      paymentProofHeaderName: posts[0].paymentProofHeaderName,
+      paymentProofHeader: posts[0].paymentProofHeader,
+    })
   })
 
   it('a settlement equal to the funding hash in any letter case makes NO second post', async () => {
@@ -2603,5 +2617,204 @@ describe('#3764 — the local retry reports the merchant settlement beside the f
     await haven.payX402Quote(quote)
 
     expect(evidenceCalls(fetchMock)).toHaveLength(1)
+  })
+})
+
+// ── #4215: the local settlement report is RETRIED while Haven answers
+// `retryable` (503, `settlement_unobservable`) under the bounded
+// `EVIDENCE_RETRY_DELAYS_MS` schedule — the qa-dev EIP-3009 legs red against
+// #4144's 45 s record window because the SDK posted once and swallowed the
+// 503 (the backend's node sees the merchant tx only seconds after the
+// funding confirm). A refusal of ANY kind — 409, the #4061 proof-header
+// refusal, a 408, a transport failure with no status, a non-JSON 503 — is
+// still exactly one attempt, and the purchase itself is unchanged. ──
+
+describe('#4215 — the local retry retries the settlement report on a retryable answer', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.useRealTimers()
+  })
+
+  const SETTLEMENT_TX = `0x${'ee'.repeat(32)}`
+  const FUNDING_TX = `0x${'ab'.repeat(32)}`
+
+  type SettlementAnswer = Response | (() => Promise<Response>)
+  type FetchMock = MockInstance<typeof globalThis.fetch>
+
+  /** The #3764 flow, with the settlement report's answers as the knob. The
+   *  funding evidence post is fixed at 202; every queued answer then goes to
+   *  a settlement attempt, in order. */
+  function flowWithSettlementAnswers(answers: SettlementAnswer[]) {
+    const fetchMock: FetchMock = vi.spyOn(globalThis, 'fetch')
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(paymentRequired), {
+      status: 402, headers: { 'Content-Type': 'application/json' },
+    }))
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      payment_id: 'pay_4215',
+      status: 'pending_signature',
+      chain_id: 8453,
+      account_address: safeAddress,
+      token: 'USDC', amount: '0.02', to: delegateAddress,
+      resource_url: paymentRequired.resource.url,
+      sign_data: { hash: userOpSignData.hash, signature_scheme: 'eip712_userop', typed_data: userOpTypedData, components: { payer_account: safeAddress }, instructions: 'sign' },
+    }), { status: 201 }))
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      payment_id: 'pay_4215', status: 'confirmed', tx_hash: FUNDING_TX, chain_id: 8453,
+      token: 'USDC', amount: '0.02', to: delegateAddress,
+    }), { status: 200 }))
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(X402_AGENT_RESPONSE), { status: 200 }))
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(X402_TAX_UNAVAILABLE), { status: 200 }))
+    fetchMock.mockResolvedValueOnce(new Response('paid content', {
+      status: 200,
+      headers: { 'PAYMENT-RESPONSE': btoa(JSON.stringify({ transaction: SETTLEMENT_TX })) },
+    }))
+    // The FUNDING evidence post — accepted, never retried.
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ evidence: { id: 'funding-ev' } }), { status: 202 }))
+    for (const answer of answers) {
+      if (typeof answer === 'function') fetchMock.mockImplementationOnce(answer as never)
+      else fetchMock.mockResolvedValueOnce(answer)
+    }
+    return { fetchMock }
+  }
+
+  /** Every evidence body whose txHash is the SETTLEMENT hash, in post order. */
+  function settlementPosts(fetchMock: FetchMock): Array<Record<string, unknown>> {
+    return fetchMock.mock.calls
+      .filter((c) => String(c[0]).endsWith('/machine-payments/evidence'))
+      .map((c) => JSON.parse((c[1] as RequestInit).body as string) as Record<string, unknown>)
+      .filter((b) => b.txHash === SETTLEMENT_TX)
+  }
+
+  /** The single FUNDING evidence body — throws if absent. */
+  function fundingPost(fetchMock: FetchMock): Record<string, unknown> {
+    const post = fetchMock.mock.calls
+      .filter((c) => String(c[0]).endsWith('/machine-payments/evidence'))
+      .map((c) => JSON.parse((c[1] as RequestInit).body as string) as Record<string, unknown>)
+      .find((b) => b.txHash === FUNDING_TX)
+    expect(post).toBeDefined()
+    return post as Record<string, unknown>
+  }
+
+  async function runFlow(): Promise<Response> {
+    const haven = new HavenClient({
+      apiKey: 'test' as never, delegateKey: `0x${'01'.repeat(32)}`, baseUrl: 'https://haven.example',
+    })
+    const quote = await haven.quoteX402(paymentRequired.resource.url, { method: 'POST', body: '{}' })
+    return haven.payX402Quote(quote)
+  }
+
+  /** Drive the fake clock in 25 ms steps (under the 1 000 ms first delay)
+   *  until `posted()` reports at least `count` settlement posts. Returns the
+   *  virtual milliseconds consumed so far. */
+  async function driveToPostCount(count: number, posted: () => number, elapsedMs = 0) {
+    let elapsed = elapsedMs
+    for (let i = 0; i < 200; i += 1) {
+      await vi.advanceTimersByTimeAsync(25)
+      elapsed += 25
+      if (posted() >= count) return elapsed
+    }
+    return elapsed
+  }
+
+  it('a 503 then a 2xx: the settlement post is RETRIED — funding post plus two identical settlement posts, the second only after the 1 000 ms first delay', async () => {
+    vi.useFakeTimers()
+    const { fetchMock } = flowWithSettlementAnswers([
+      new Response(JSON.stringify({ error: 'settlement_unobservable' }), { status: 503 }),
+      new Response(JSON.stringify({ evidence: { id: 'settlement-ev' } }), { status: 201 }),
+    ])
+    const posted = () => settlementPosts(fetchMock).length
+
+    const flow = runFlow().then((res) => {
+      // The purchase itself is unchanged: the merchant's own answer, verbatim.
+      expect(res.status).toBe(200)
+      return res
+    })
+    // Drain the pre-sleep chain: the funding post, then the FIRST settlement
+    // post (the 503). Track the virtual clock so the delay assertion below is
+    // measured from flow start — the first post lands on the first tick.
+    let elapsed = await driveToPostCount(1, posted)
+    expect(settlementPosts(fetchMock)).toHaveLength(1)
+    expect(fundingPost(fetchMock)).toMatchObject({ paymentId: 'pay_4215', rail: 'x402', txHash: FUNDING_TX })
+
+    // Up to (but not including) the schedule's first 1 000 ms delay: still
+    // exactly one settlement post.
+    while (elapsed < 975) {
+      await vi.advanceTimersByTimeAsync(25)
+      elapsed += 25
+      expect(settlementPosts(fetchMock)).toHaveLength(1)
+    }
+    // The delay elapses: the SECOND (identical) settlement post goes out —
+    // and not one tick before 1 000 virtual ms.
+    elapsed = await driveToPostCount(2, posted, elapsed)
+    expect(elapsed).toBeGreaterThanOrEqual(1_000)
+    const posts = settlementPosts(fetchMock)
+    expect(posts).toHaveLength(2)
+    expect(posts[0]).toEqual({
+      paymentId: 'pay_4215',
+      rail: 'x402',
+      txHash: SETTLEMENT_TX,
+      paymentProofHeaderName: expect.any(String),
+      paymentProofHeader: expect.any(String),
+    })
+    expect(posts[1]).toEqual(posts[0])
+
+    await flow
+    // No further posts: the retry landed on attempt two.
+    expect(settlementPosts(fetchMock)).toHaveLength(2)
+  })
+
+  it('a 503 on EVERY attempt stops after the schedule: exactly four settlement posts, purchase unchanged', async () => {
+    vi.useFakeTimers()
+    const { fetchMock } = flowWithSettlementAnswers([
+      new Response(JSON.stringify({ error: 'settlement_unobservable' }), { status: 503 }),
+      new Response(JSON.stringify({ error: 'settlement_unobservable' }), { status: 503 }),
+      new Response(JSON.stringify({ error: 'settlement_unobservable' }), { status: 503 }),
+      new Response(JSON.stringify({ error: 'settlement_unobservable' }), { status: 503 }),
+    ])
+
+    const flow = runFlow()
+    await vi.advanceTimersByTimeAsync(10_000)
+    const res = await flow
+
+    // 1 + EVIDENCE_RETRY_DELAYS_MS.length attempts, then the loop ends.
+    expect(settlementPosts(fetchMock)).toHaveLength(4)
+    // All four bodies identical — a retry, not a different report.
+    for (const post of settlementPosts(fetchMock)) {
+      expect(post).toEqual(settlementPosts(fetchMock)[0])
+    }
+    // The caller-visible result of the completed purchase is unchanged.
+    expect(res.status).toBe(200)
+    expect(res.ok).toBe(true)
+  })
+
+  const refusalCases: Array<[string, SettlementAnswer]> = [
+    ['a 409 with a reason', new Response(
+      JSON.stringify({
+        error: 'The reported settlement transaction was not recorded for this payment — the payment is unchanged',
+        reason: 'This payment already has a different verified settlement transaction recorded',
+      }),
+      { status: 409 },
+    )],
+    ['a 409 carrying error_code settlement_proof_header_missing', new Response(
+      JSON.stringify({
+        error: 'The reported settlement transaction was not recorded for this payment — the payment is unchanged',
+        reason: 'The settlement report carries no X-PAYMENT payment header',
+        error_code: 'settlement_proof_header_missing',
+      }),
+      { status: 409 },
+    )],
+    ['a transport failure with no HTTP status', () => Promise.reject(new TypeError('fetch failed'))],
+    ['a 408 (a timeout, classed refused)', new Response(JSON.stringify({ error: 'Request timed out' }), { status: 408 })],
+    ['a non-JSON 503 (classed refused, status 0)', new Response('gateway timed out', { status: 503 })],
+  ]
+
+  it.each(refusalCases)('%s — exactly ONE settlement post, never retried', async (_label: string, answer: SettlementAnswer) => {
+    const { fetchMock } = flowWithSettlementAnswers([answer])
+    const res = await runFlow()
+
+    expect(settlementPosts(fetchMock)).toHaveLength(1)
+    // The refusal is swallowed (D1): the purchase still returns the
+    // merchant's response unchanged.
+    expect(res.status).toBe(200)
   })
 })

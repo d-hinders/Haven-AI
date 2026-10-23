@@ -13,10 +13,24 @@
  * "Expired" is derived (`expires_at <= now`), never a stored status — see
  * the migration header. Callers needing the wire shape's `is_expired`
  * compute it themselves from `expires_at`.
+ *
+ * The module owns the TWO named liveness predicates every reader of
+ * `agent_sub_budgets` uses (#3919 S-B): {@link openSubBudgetSql} — an
+ * `open` row inside its spend window, the grant list, the payment-time
+ * parent-child proof and the reserved sums — and
+ * {@link awaitingSignatureSubBudgetSql} — every row the DELEGATING agent
+ * still owes a signature on (#3506). No reader spells the window inline.
+ * Like the task-budget predicates and unlike the delegation ones (slice A),
+ * BOTH take the app clock as a `$n` parameter placeholder rather than
+ * `NOW()`: the payment-time decision lives in TypeScript
+ * (`modules/sub-budgets/sub-budget-service.ts`) against the same `nowSec`
+ * the callers already hold, and the real-DB pin test passes the identical
+ * value to both sides — one clock per table, and it is the app's.
  */
 
 import pool from '../../db.js'
 import { type Executor } from '../transaction.js'
+import { spendableDelegationSql } from './delegation-budgets.js'
 
 export interface SubBudgetRow {
   id: string
@@ -166,8 +180,47 @@ export async function listRelatedForAgent(
   return result.rows
 }
 
+/**
+ * The ONE open predicate for `agent_sub_budgets` (#3919 S-B): an `open` row
+ * inside its spend window — what a payment may redeem against, what the
+ * parent-child proof requires, what the agent's own open list returns and
+ * what the reserved sums count. `nowParam` is a `$n` placeholder the CALLER
+ * indexes (the app clock — see the module header), not a value.
+ */
+export function openSubBudgetSql(tableAlias: string | undefined, nowParam: string): string {
+  const prefix = tableAlias ? `${tableAlias}.` : ''
+  return `${prefix}status = 'open' AND ${prefix}expires_at > ${nowParam}`
+}
+
+/**
+ * The wire `is_live` flag (#3922): {@link openSubBudgetSql} evaluated in JS
+ * for rows the route already holds, against the same app-clock `nowSec` the
+ * route uses for `is_expired`. A real-DB test pins JS == SQL on seeded rows.
+ */
+export function isOpenSubBudget(
+  row: { status: string; expires_at: string | number },
+  nowSec: number,
+): boolean {
+  return row.status === 'open' && Number(row.expires_at) > nowSec
+}
+
+/**
+ * The rows the DELEGATING agent still has to SIGN (#3506): its own
+ * parent-child row and every grant it issued, while `pending` (an open
+ * signature is owed) or `closing` (a close signature is owed). A `pending`
+ * row past its expiry is left out — it could only open an already-expired
+ * child (closing it is `/close`'s trivial path); a `closing` row stays
+ * regardless, because its stored disable op is still the thing to sign.
+ * `nowParam` is the caller's `$n` placeholder, the same app clock as
+ * {@link openSubBudgetSql}.
+ */
+export function awaitingSignatureSubBudgetSql(tableAlias: string | undefined, nowParam: string): string {
+  const prefix = tableAlias ? `${tableAlias}.` : ''
+  return `${prefix}status = 'closing' OR (${prefix}status = 'pending' AND ${prefix}expires_at > ${nowParam})`
+}
+
 export interface ListForAgentOptions {
-  /** 'open' = status open AND not expired (the default the routes use). */
+  /** 'open' = {@link openSubBudgetSql} (the default the routes use). */
   status?: 'open' | 'all'
   nowSec?: number
 }
@@ -181,7 +234,7 @@ export async function listForAgent(
     const nowSec = options.nowSec ?? Math.floor(Date.now() / 1000)
     const result = await executor.query<SubBudgetRow>(
       `SELECT ${SELECT_COLUMNS} FROM agent_sub_budgets
-       WHERE agent_id = $1 AND status = 'open' AND expires_at > $2
+       WHERE agent_id = $1 AND ${openSubBudgetSql(undefined, '$2')}
        ORDER BY created_at DESC`,
       [agentId, nowSec],
     )
@@ -215,7 +268,7 @@ export async function listAwaitingSignatureForDelegatingAgent(
   const result = await executor.query<SubBudgetRow>(
     `SELECT ${SELECT_COLUMNS} FROM agent_sub_budgets
      WHERE parent_agent_id = $1
-       AND (status = 'closing' OR (status = 'pending' AND expires_at > $2))
+       AND (${awaitingSignatureSubBudgetSql(undefined, '$2')})
      ORDER BY (parent_sub_budget_id IS NOT NULL), created_at ASC, id ASC`,
     [parentAgentId, nowSec],
   )
@@ -232,34 +285,40 @@ export interface AgentParentSubBudget {
   expires_at: string
   status: SubBudgetRow['status']
   is_expired: boolean
+  /** #3922: {@link openSubBudgetSql}, selected from SQL (`closing` rows are false). */
+  is_live: boolean
 }
 
 /**
  * #3330 `haven_get_agent` — agent B's OPEN sub-budget grants (this agent is
  * the sub-agent), each naming its parent agent and the effective (narrower)
  * limits. ADDITIVE ONLY: nothing existing on the `GET /agent` response moves,
- * and the array is empty unless this agent actually holds grants. Expired is
- * derived here (`expires_at <= now`), mirroring every other read — a row
- * past its expiry is reported `is_expired: true` rather than hidden, so a
- * consumer can tell "no budget" from "budget aged out".
+ * and the array is empty unless this agent actually holds grants. An `open`
+ * grant answers live through {@link openSubBudgetSql} — an EXPIRED open
+ * grant is NOT an open grant (#3919 P3: the same verdict the payment path
+ * and the agent's own open list reach), so it no longer appears here with a
+ * derived `is_expired: true`; a `closing` row — whose disable op may still
+ * be owed — stays listed, with `is_expired` derived (`expires_at <= now`)
+ * as before, so a consumer can still tell "no budget" from "budget aged out".
  */
 export async function findOpenGrantsForAgent(
   agentId: string,
   nowSec: number = Math.floor(Date.now() / 1000),
   executor: Executor = pool,
 ): Promise<AgentParentSubBudget[]> {
-  const result = await executor.query<SubBudgetRow & { parent_agent_name: string }>(
+  const result = await executor.query<SubBudgetRow & { parent_agent_name: string; is_live: boolean }>(
     `SELECT b.id, b.agent_id, b.parent_agent_id, b.parent_sub_budget_id, b.chain_id,
        b.token_address, b.recipient_address, b.parent_delegation_hash, b.delegation_hash,
        b.delegation_json, b.label, b.period_amount_atomic, b.status, b.expires_at,
        b.prepared_user_op, b.close_tx_hash, b.created_at, b.updated_at, b.opened_at,
-       b.closed_at, a.name AS parent_agent_name
+       b.closed_at, a.name AS parent_agent_name,
+       (${openSubBudgetSql('b', '$2')}) AS is_live
      FROM agent_sub_budgets b
      JOIN agents a ON a.id = b.parent_agent_id
      WHERE b.agent_id = $1 AND b.parent_sub_budget_id IS NOT NULL
-       AND b.status IN ('open', 'closing')
+       AND (b.status = 'closing' OR (${openSubBudgetSql('b', '$2')}))
      ORDER BY b.created_at DESC`,
-    [agentId],
+    [agentId, nowSec],
   )
   return result.rows.map((r) => ({
     sub_budget_id: r.id,
@@ -271,6 +330,7 @@ export async function findOpenGrantsForAgent(
     expires_at: r.expires_at,
     status: r.status,
     is_expired: Number(r.expires_at) <= nowSec,
+    is_live: r.is_live,
   }))
 }
 
@@ -404,31 +464,14 @@ export async function markClosed(
   return result.rows[0] ?? null
 }
 
-export const SELECT_OPEN_SUB_BUDGET_FOR_PAYMENT_SQL = `SELECT ${SELECT_COLUMNS} FROM agent_sub_budgets
-     WHERE id = $1 AND agent_id = $2 AND token_address = LOWER($3)
-       AND status = 'open' AND expires_at > $4`
-
-/**
- * The grant row a payment may redeem against: OPEN, unexpired, and matching
- * the token being spent. Recipient pin and parent-status checks are the
- * caller's (`modules/sub-budgets/sub-budget-service.ts`) — this is the
- * storage-scoped read only.
+/*
+ * The former payment-time storage selector (#3330) is deleted (#3919 S-B):
+ * it had NO production caller — the live payment-time decision is
+ * `checkSubBudgetForPayment` (`modules/sub-budgets/sub-budget-service.ts`),
+ * whose liveness half is pinned to {@link openSubBudgetSql} by a real-DB
+ * matrix test. Keeping a second storage-scoped spelling of "open" beside the
+ * named predicate is exactly the drift slice B exists to remove.
  */
-export async function selectOpenForPayment(
-  id: string,
-  agentId: string,
-  tokenAddress: string,
-  nowSec: number,
-  executor: Executor = pool,
-): Promise<SubBudgetRow | null> {
-  const result = await executor.query<SubBudgetRow>(SELECT_OPEN_SUB_BUDGET_FOR_PAYMENT_SQL, [
-    id,
-    agentId,
-    tokenAddress,
-    nowSec,
-  ])
-  return result.rows[0] ?? null
-}
 
 /**
  * The OPEN, unexpired parent-child row a grant names — read at payment time
@@ -439,7 +482,7 @@ export async function selectOpenForPayment(
  */
 export const SELECT_OPEN_PARENT_CHILD_SQL = `SELECT ${SELECT_COLUMNS} FROM agent_sub_budgets
      WHERE delegation_hash = $1 AND parent_sub_budget_id IS NULL
-       AND status = 'open' AND expires_at > $2`
+       AND ${openSubBudgetSql(undefined, '$2')}`
 
 export async function findOpenParentChildByHash(
   delegationHash: string,
@@ -468,7 +511,7 @@ export const SUM_OPEN_RESERVED_FOR_PARENT_SQL = `SELECT COALESCE(SUM(grant_.peri
      WHERE parent_child.agent_id = $1
        AND parent_child.parent_sub_budget_id IS NULL
        AND parent_child.delegation_hash = $2
-       AND grant_.status = 'open' AND grant_.expires_at > $3`
+       AND (${openSubBudgetSql('grant_', '$3')})`
 
 export async function sumOpenReservedForParent(
   parentAgentId: string,
@@ -505,7 +548,7 @@ export const SUM_OPEN_RESERVED_FOR_BUDGET_DELEGATION_SQL = `SELECT COALESCE(SUM(
      WHERE parent_child.agent_id = $1
        AND parent_child.parent_sub_budget_id IS NULL
        AND parent_child.parent_delegation_hash = $2
-       AND grant_.status = 'open' AND grant_.expires_at > $3`
+       AND (${openSubBudgetSql('grant_', '$3')})`
 
 export async function sumOpenReservedForBudgetDelegation(
   agentId: string,
@@ -519,4 +562,115 @@ export async function sumOpenReservedForBudgetDelegation(
     nowSec,
   ])
   return BigInt(result.rows[0]?.total ?? '0')
+}
+
+// ── #3988: the received-grant read the display surfaces share ───────────────
+
+/**
+ * The chain verdict a received sub-budget grant must pass before ANY display
+ * may present it as spendable (#3988, the spec's settled decision): "'Spends
+ * from' means the payment path would accept the chain, by Haven's own rows."
+ * This is {@link checkSubBudgetForPayment} as a WHERE expression, by Haven's
+ * rows alone:
+ *
+ *  1. the grant is a REAL grant — `parent_sub_budget_id IS NOT NULL`, which
+ *     also excludes the delegator's own parent-child row (a self row has
+ *     `agent_id = parent_agent_id` AND `parent_sub_budget_id NULL`,
+ *     migration 100);
+ *  2. the grant row is open and unexpired ({@link openSubBudgetSql});
+ *  3. its parent-child row exists, is a parent-child row
+ *     (`parent_sub_budget_id IS NULL`, `agent_id = parent_agent_id`), is open
+ *     and unexpired, and is the row the grant HANGS FROM
+ *     (`parent_delegation_hash = pc.delegation_hash`);
+ *  4. that parent-child row was carved from the parent agent's SPENDABLE
+ *     budget delegation — an `agent_delegations` row by that exact hash that
+ *     passes `spendableDelegationSql` with `requireStarted: true`, the same
+ *     validity window `SELECT_ACTIVE_DELEGATION_BY_HASH_SQL` (the per-hash
+ *     payment selector) enforces: a stopped, expired or not-yet-started
+ *     parent budget is a chain the payment path refuses
+ *     (`sub_budget_parent_mismatch`), so it is not "Spends from".
+ *
+ * Real grants that FAIL the chain still return, with `open = false` — a
+ * pending grant is still authority the owner can act on (close it, sign it),
+ * the same reason the pre-#3988 read kept them. Only SELF rows are dropped
+ * outright: a delegator's own narrowing is not something it "received"
+ * (the #3988 Wrong-1 bug: A read "Spends from A's budget").
+ */
+export const RECEIVED_GRANTS_FOR_AGENTS_SQL = `SELECT asb.agent_id,
+         asb.parent_agent_id,
+         pa.name AS parent_agent_name,
+         (${openSubBudgetSql('asb', '$3')}
+           AND pc.parent_sub_budget_id IS NULL
+           AND pc.agent_id = asb.parent_agent_id
+           AND (${openSubBudgetSql('pc', '$3')})
+           AND asb.parent_delegation_hash = pc.delegation_hash
+           AND EXISTS (
+             SELECT 1 FROM agent_delegations ad
+             WHERE ad.agent_id = asb.parent_agent_id
+               AND ad.delegation_hash = pc.parent_delegation_hash
+               AND ${spendableDelegationSql('ad', { requireStarted: true })}
+           )) AS open
+  FROM agent_sub_budgets asb
+  JOIN agents pa ON pa.id = asb.parent_agent_id
+  JOIN agents holder ON holder.id = asb.agent_id
+  LEFT JOIN agent_sub_budgets pc ON pc.id = asb.parent_sub_budget_id
+  WHERE holder.user_id = $1
+    AND asb.agent_id = ANY($2)
+    AND asb.parent_sub_budget_id IS NOT NULL
+  ORDER BY asb.agent_id, pa.name`
+
+export interface ReceivedGrantRow {
+  agent_id: string
+  parent_agent_id: string
+  parent_agent_name: string
+  open: boolean
+}
+
+/** `userId` is REQUIRED; `agentIds` must have been read under the same tenant. */
+export async function listReceivedGrantsForAgents(
+  userId: string,
+  agentIds: string[],
+  nowSec: number = Math.floor(Date.now() / 1000),
+  executor: Executor = pool,
+): Promise<ReceivedGrantRow[]> {
+  if (agentIds.length === 0) return []
+  const result = await executor.query<ReceivedGrantRow>(
+    RECEIVED_GRANTS_FOR_AGENTS_SQL,
+    [userId, agentIds, nowSec],
+  )
+  return result.rows
+}
+
+/**
+ * The grants ONE agent received that are not `closed`, with the parent
+ * agent's name joined — the holder's detail page's "Received budgets" block
+ * (#3988). This is the DISPLAY list, deliberately wider than the chain
+ * verdict above: a pending or closing grant is not spendable yet, but it is
+ * still a received budget the owner should see (and only the delegator can
+ * close). `open`-ness rides on the wire's `is_live`; the caller renders the
+ * status through `subBudgetEndLabel`.
+ */
+export interface ReceivedGrantForOwnerRow extends SubBudgetRow {
+  parent_agent_name: string
+}
+
+/** `userId` is REQUIRED (the holder's owner — the route scopes by both). */
+export async function listReceivedGrantsForOwner(
+  agentId: string,
+  userId: string,
+  executor: Executor = pool,
+): Promise<ReceivedGrantForOwnerRow[]> {
+  const result = await executor.query<ReceivedGrantForOwnerRow>(
+    `SELECT g.*, pa.name AS parent_agent_name
+       FROM agent_sub_budgets g
+       JOIN agents pa ON pa.id = g.parent_agent_id
+       JOIN agents holder ON holder.id = g.agent_id
+      WHERE g.agent_id = $1
+        AND holder.user_id = $2
+        AND g.parent_sub_budget_id IS NOT NULL
+        AND g.status <> 'closed'
+      ORDER BY g.created_at DESC`,
+    [agentId, userId],
+  )
+  return result.rows
 }

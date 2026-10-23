@@ -216,6 +216,20 @@ export function parseRpcFallbackUrl(raw: string | undefined): string {
   return raw?.trim() ?? ''
 }
 
+/**
+ * #4012: ETH_GETLOGS_MAX_BLOCK_RANGE — the widest `eth_getLogs` block range the
+ * RPC provider serves (Alchemy's free plan: 10). The settlement sweepers never
+ * ask for more. Unset, blank, zero, negative or non-integer is "no cap": the
+ * sweepers keep their own default span and still learn a provider's limit from
+ * its refusal (`infra/chain/log-range-limit.ts`), so this only saves the one
+ * refused call that learning costs.
+ */
+export function parseGetLogsMaxBlockRange(raw: string | undefined | null): number | null {
+  const n = Number(raw?.trim())
+  if (!raw?.trim() || !Number.isInteger(n) || n <= 0) return null
+  return n
+}
+
 /** #2511, kept as a named call site so the Sepolia consequence has one home. */
 export function warnPublicBaseSepoliaRpc(raw: string | undefined): string {
   return warnPublicRpc({
@@ -385,6 +399,8 @@ export const config = {
   // ahead of the public node in the failover transport. Never logged.
   rpcUrlBaseFallback: parseRpcFallbackUrl(process.env.RPC_URL_BASE_FALLBACK),
   rpcUrlBaseSepoliaFallback: parseRpcFallbackUrl(process.env.RPC_URL_BASE_SEPOLIA_FALLBACK),
+  // #4012: provider's `eth_getLogs` range cap, when known. Null = learn it.
+  getLogsMaxBlockRange: parseGetLogsMaxBlockRange(process.env.ETH_GETLOGS_MAX_BLOCK_RANGE),
 
   // Optional (features degrade gracefully without these)
   gnosisscanApiKey: process.env.GNOSISSCAN_API_KEY ?? '',
@@ -531,6 +547,17 @@ export const config = {
   dbPoolMax: Number(process.env.DB_POOL_MAX) || 20,
   dbPoolIdleTimeout: Number(process.env.DB_POOL_IDLE_TIMEOUT) || 30000,
   dbPoolConnectionTimeout: Number(process.env.DB_POOL_CONNECTION_TIMEOUT) || 5000,
+
+  // #4319 Tier 2: receipt-hash attribution for the EIP-3009 merchant
+  // settlement (the `observeEip3009ReceiptSettlement` path — evidence
+  // arrival and the backfill; NEVER the sweep tick). Off by default: the
+  // operator turns it on per the issue's rollout order (merge → dev dry run
+  // → dev write → dev flag → prod). Tier 1 (the stored signed header) is
+  // today's #3925 standard and is not gated.
+  eip3009ReceiptAttribution: parseBooleanFlag(
+    'HAVEN_EIP3009_RECEIPT_ATTRIBUTION',
+    process.env.HAVEN_EIP3009_RECEIPT_ATTRIBUTION,
+  ),
 } as const
 
 /**

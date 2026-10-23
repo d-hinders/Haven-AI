@@ -207,6 +207,11 @@ export const GOVERNED_PACKAGE_DOCS = [
     owner: '@d-hinders',
     status: 'current',
     covers: ['packages/mcp/src/**'],
+    // #3996: EDITED, scope = the new § "Per-chain RPC endpoints" (the
+    // HAVEN_RPC_URL_<chainId> env map read by resolveHavenClient in
+    // src/server.ts, and what wiring one changes on an x402 idempotency
+    // collision: a funded delegate resumes, a drained one refuses settled).
+    // Nothing else re-verified. Prior:
     // #3645: EDITED, scope = § Audit log (rows only for the backend's
     // MCP_TOOL_NAMES allowlist, named in full), verified against
     // packages/backend/src/middleware/agentToolAudit.ts. Nothing else
@@ -235,7 +240,7 @@ export const GOVERNED_PACKAGE_DOCS = [
     // SDK's own LLM tool schemas and REST /x402/authorize still spell it
     // `idempotencyKey`). Written against `packages/mcp/src/tools.ts` on this
     // branch. Rest of the README NOT re-verified.
-    'last-verified': '2026-10-01',
+    'last-verified': '2026-10-15',
   },
   {
     doc: 'packages/connect/README.md',
@@ -349,7 +354,13 @@ export const GOVERNED_PACKAGE_DOCS = [
     // need all four. That is the shape #2590/#2591 exist to prevent, and it is
     // recorded here rather than claimed solved. Prior: '2026-09-06' — see the
     // #2590 note above.
-    'last-verified': '2026-09-06',
+    //
+    // 2026-10-10 pass (#3645): the WHOLE README was re-measured at dev
+    // `22f49edd`, the exit-code table included, so the "NOT re-verified" list
+    // above no longer applies. Follow-up in the same PR: exit-code row 4's
+    // lead was false for a device login the human denied (exit 4, no session
+    // yet), and its list of CLI-side refusals read as complete; both fixed.
+    'last-verified': '2026-10-10',
   },
   {
     doc: 'packages/mcp-server/README.md',

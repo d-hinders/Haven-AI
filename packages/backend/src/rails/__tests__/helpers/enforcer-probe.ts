@@ -96,9 +96,25 @@ export function resolveProbeRpcUrl(env: NodeJS.ProcessEnv = process.env): string
   return env[RPC_URL_ENV] ?? DEFAULT_PROBE_RPC_URL
 }
 
+/**
+ * The endpoint as it may be printed: host, plus the port when it is not the
+ * scheme's default — never the userinfo, path or query (#4217). A paid
+ * endpoint in `HAVEN_ENFORCER_PROBE_RPC_URL` carries its API key in exactly
+ * those parts, and every message below reaches CI logs, which are public.
+ * Same rule as the test network net's messages.
+ */
+export function probeEndpointLabel(rpcUrl: string): string {
+  try {
+    // `URL.host` omits a default port and never includes credentials.
+    return new URL(rpcUrl).host || '(RPC URL with no host)'
+  } catch {
+    return '(unparseable RPC URL)'
+  }
+}
+
 export function unreachableMessage(rpcUrl: string, ci: boolean): string {
   return [
-    `on-chain caveat-enforcer probe: could not reach ${rpcUrl}.`,
+    `on-chain caveat-enforcer probe: could not reach ${probeEndpointLabel(rpcUrl)}.`,
     'THIS IS A TRANSPORT FAILURE, NOT A POLICY FAILURE — it says nothing about',
     'whether the enforcers refuse an out-of-policy redemption. Do not read it as',
     'either a pass or a breach of CASP Red Line #4.',
@@ -193,6 +209,33 @@ function decodeRevertReason(data: unknown): string {
   return Buffer.from(bytes, 'hex').toString('utf8')
 }
 
+/**
+ * The fetch failure as it may be kept: each error's `name` and `code` down the
+ * `cause` chain, and no message text. undici's own errors can quote the URL
+ * they were given ("Failed to parse URL from https://user:pass@…"), and vitest
+ * prints a thrown error's causes, so a raw cause would put the credentialed
+ * URL in a public CI log through the back door `probeEndpointLabel` closes.
+ */
+export function transportCauseSummary(cause: unknown): Error {
+  const links: string[] = []
+  let current: unknown = cause
+  for (let depth = 0; depth < 4 && current !== undefined && current !== null; depth += 1) {
+    if (typeof current === 'object') {
+      const { name, code } = current as { name?: unknown; code?: unknown }
+      links.push(
+        [typeof name === 'string' ? name : 'Error', typeof code === 'string' ? `(${code})` : '']
+          .filter(Boolean)
+          .join(' '),
+      )
+      current = (current as { cause?: unknown }).cause
+    } else {
+      links.push(typeof current)
+      break
+    }
+  }
+  return new Error(`transport failure: ${links.join(' ← ') || 'unknown'} (message text withheld: it can carry the RPC URL)`)
+}
+
 async function rpc(rpcUrl: string, method: string, params: unknown[]): Promise<unknown> {
   let response: Response
   try {
@@ -203,7 +246,9 @@ async function rpc(rpcUrl: string, method: string, params: unknown[]): Promise<u
       signal: AbortSignal.timeout(15_000),
     })
   } catch (cause) {
-    throw new EnforcerProbeTransportError(`${method} failed to reach ${rpcUrl}`, { cause })
+    throw new EnforcerProbeTransportError(`${method} failed to reach ${probeEndpointLabel(rpcUrl)}`, {
+      cause: transportCauseSummary(cause),
+    })
   }
   if (!response.ok) {
     // 429/5xx are the endpoint, not the enforcer. The HTTP status is
@@ -211,7 +256,7 @@ async function rpc(rpcUrl: string, method: string, params: unknown[]): Promise<u
     // limiter is free to return a body that looks like anything, including
     // something that would decode as a revert, and letting the body win would
     // let an endpoint under load fabricate a Red Line #4 verdict.
-    throw new EnforcerProbeTransportError(`${method} → HTTP ${response.status} from ${rpcUrl}`)
+    throw new EnforcerProbeTransportError(`${method} → HTTP ${response.status} from ${probeEndpointLabel(rpcUrl)}`)
   }
   try {
     return (await response.json()) as unknown

@@ -3,7 +3,7 @@
  * naming the variable (never a missing row) and a non-zero exit; a read
  * failure yields `unknown` and exit zero.
  */
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { ethers } from 'ethers'
 import { CdpFaucetError } from './lib/faucet.js'
 import {
@@ -13,11 +13,14 @@ import {
   type BalancesReport,
 } from './lib/balances.js'
 import {
+  CDP_FAUCET_CLAIM_USDC_ATOMIC,
   CDP_FAUCET_CLAIM_WEI,
   deterministicClaimId,
+  EVAL_TOPUP_MAX_CLAIMS,
   RELAYER_TOPUP_MAX_CLAIMS,
   runBalances,
   runTopUps,
+  topUpEvalAccount,
   topUpLogLine,
   topUpMerchant,
   topUpRelayer,
@@ -26,15 +29,20 @@ import {
   CLAIM_CONFIRM_POLL_MS,
   waitForClaims,
 } from './balances-cli.js'
+import { EVAL_TOPUP_TARGET_ATOMIC } from './lib/balances.js'
 
 const TREASURY = '0x9281d7c312e67859c65f4A3449F0548ea2f90974'
 const RELAYER = '0x' + 'ab'.repeat(20)
+const EVAL_HERMES = '0x' + 'ef'.repeat(20)
+const EVAL_CLAUDE = '0x' + 'fe'.repeat(20)
 
 const provider = (fail = false) =>
   ({
     call: async () => {
       if (fail) throw new Error('rpc down')
-      return ethers.AbiCoder.defaultAbiCoder().encode(['uint256'], [5_000_000n])
+      // 25 USDC: above the eval target, so the eval loops are `not-needed`
+      // unless a test drives the eval balance below it.
+      return ethers.AbiCoder.defaultAbiCoder().encode(['uint256'], [25_000_000n])
     },
     getBalance: async () => {
       if (fail) throw new Error('rpc down')
@@ -61,20 +69,24 @@ const api = { getAgent: async () => ({ ok: true, status: 200, data: { account_ad
 
 const FULL = {
   QA_HAVEN_API_URL: 'https://api.test',
-  QA_DELEGATION_AGENT_API_KEY: 'sk_agent_test',
+  QA_DELEGATION_AGENT_API_KEY: '«redacted:sk_…»',
   QA_DEMO_MERCHANT_URL: 'https://merchant.test',
   QA_DEV_RELAYER_ADDRESS: RELAYER,
+  QA_EVAL_HERMES_ACCOUNT: EVAL_HERMES,
+  QA_EVAL_CLAUDE_ACCOUNT: EVAL_CLAUDE,
 }
 const deps = (fail = false) => ({ provider: provider(fail), fetchImpl: healthz, api, now: new Date('2026-10-05T06:00:00Z') })
 
 describe('qa:balances entry point', () => {
-  it('full config: three rows, exit 0', async () => {
+  it('full config: five rows, exit 0', async () => {
     const { report, exitCode } = await runBalances([], FULL, deps())
     expect(exitCode).toBe(0)
     expect(report.rows.map((r) => [r.key, r.band])).toEqual([
       ['treasury', 'ok'],
       ['merchant', 'ok'],
       ['relayer', 'ok'],
+      ['eval-hermes', 'ok'],
+      ['eval-claude', 'ok'],
     ])
   })
 
@@ -89,7 +101,7 @@ describe('qa:balances entry point', () => {
       delete env[missing]
       const { report, exitCode } = await runBalances([], env, deps())
       expect(exitCode).toBe(1)
-      expect(report.rows).toHaveLength(3)
+      expect(report.rows).toHaveLength(5)
       const row = report.rows.find((r) => r.key === key)!
       expect(row).toMatchObject({ band: 'unknown', configMissing: true, reason: `config missing: ${missing}` })
     })
@@ -101,7 +113,7 @@ describe('qa:balances entry point', () => {
     }) as unknown as typeof fetch
     const { report, exitCode } = await runBalances([], FULL, { ...deps(true), fetchImpl: failingFetch })
     expect(exitCode).toBe(0)
-    expect(report.rows.map((r) => r.band)).toEqual(['unknown', 'unknown', 'unknown'])
+    expect(report.rows.map((r) => r.band)).toEqual(['unknown', 'unknown', 'unknown', 'unknown', 'unknown'])
     expect(report.rows.every((r) => !r.configMissing && /read failed|could not reach/.test(r.reason ?? ''))).toBe(true)
   })
 
@@ -118,7 +130,12 @@ describe('qa:balances entry point', () => {
     expect(report.configMissing).toBe(false)
     expect(report.rows.find((r) => r.key === 'relayer')?.band).toBe('critical')
     const skipped = { status: 'skipped', claimsMade: 0, amountReceivedAtomic: '0', stopReason: 'missing-credentials' }
-    expect(report.topUps).toEqual({ merchant: skipped, relayer: skipped })
+    expect(report.topUps).toEqual({
+      merchant: { ...skipped, unit: 'ETH' },
+      'eval-hermes': { ...skipped, unit: 'USDC' },
+      'eval-claude': { ...skipped, unit: 'USDC' },
+      relayer: { ...skipped, unit: 'ETH' },
+    })
   })
 
   it('uses the post-top-up relayer reading for both the row and today’s history', async () => {
@@ -375,13 +392,23 @@ describe('qa:balances merchant claim confirmation (#3896)', () => {
   })
 
   it('waitForClaims cuts off a hung receipt read at the cap', async () => {
-    const t0 = Date.now()
-    const unconfirmed = await waitForClaims([nextHash()], {
-      getTransactionReceipt: () => new Promise(() => {}),
-    } as never, { capAt: Date.now() + 100 })
-    expect(unconfirmed).toBe(1)
-    expect(Date.now() - t0).toBeLessThan(1_000)
-  }, 5_000)
+    // Faked clock (the repo-wide x402-scenario pattern). A real-timer
+    // wall-clock assertion here measured the CI runner, not the code: on a
+    // contended runner the 100 ms deadline fired ~3 s late and the cap went
+    // red (#3963) — one failed run on a sha that passed it five other times.
+    // With faked timers the property is exact: the never-settling read is
+    // provably not awaited once the simulated clock reaches the cap.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+    try {
+      const wait = waitForClaims([nextHash()], {
+        getTransactionReceipt: () => new Promise(() => {}),
+      } as never, { capAt: Date.now() + 100 })
+      await vi.advanceTimersByTimeAsync(100)
+      expect(await wait).toBe(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 
   it('waitForClaims keeps at most 5 receipt reads in flight', async () => {
     let inFlight = 0
@@ -452,6 +479,8 @@ const merchantReadings = (
       ? { ok: false, address, reason: 'read failed' }
       : { ok: true, address, atomic, criticalFloor: 30_000_000_000_000n, fallbackFloor: 62_500_000_000_000n, ...(chainId !== undefined ? { chainId } : {}) },
     relayer: { ok: false, reason: 'unused' },
+    'eval-hermes': { ok: false, reason: 'unused' },
+    'eval-claude': { ok: false, reason: 'unused' },
   } as BalanceReadings
 }
 
@@ -586,13 +615,20 @@ describe('both wallets under one budget (#3836)', () => {
 
 describe('top-up log lines', () => {
   it('one line per wallet, naming it, with distinct skip wording', () => {
-    expect(topUpLogLine('merchant', { status: 'skipped', claimsMade: 0, amountReceivedAtomic: '0', stopReason: 'missing-credentials' }))
+    expect(topUpLogLine('merchant', { status: 'skipped', claimsMade: 0, amountReceivedAtomic: '0', unit: 'ETH', stopReason: 'missing-credentials' }))
       .toBe('merchant top-up: skipped: no CDP credentials')
-    expect(topUpLogLine('merchant', { status: 'skipped', claimsMade: 0, amountReceivedAtomic: '0', stopReason: 'wrong-chain', reason: 'merchant /healthz reports chain 8453, not 84532' }))
+    expect(topUpLogLine('merchant', { status: 'skipped', claimsMade: 0, amountReceivedAtomic: '0', unit: 'ETH', stopReason: 'wrong-chain', reason: 'merchant /healthz reports chain 8453, not 84532' }))
       .toBe('merchant top-up: skipped (wrong-chain) — merchant /healthz reports chain 8453, not 84532')
-    expect(topUpLogLine('relayer', { status: 'attempted', claimsMade: 2, amountReceivedAtomic: '200000000000000', stopReason: 'target-requests-complete' }))
+    expect(topUpLogLine('relayer', { status: 'attempted', claimsMade: 2, amountReceivedAtomic: '200000000000000', unit: 'ETH', stopReason: 'target-requests-complete' }))
       .toBe('relayer top-up: 2 claim(s), 0.0002 ETH, target-requests-complete')
     expect(topUpLogLine('relayer', undefined)).toBeNull()
+  })
+
+  it('the eval lines carry USDC units (#3997)', () => {
+    expect(topUpLogLine('eval-hermes', { status: 'attempted', claimsMade: 3, amountReceivedAtomic: '3000000', unit: 'USDC', stopReason: 'target-requests-complete' }))
+      .toBe('eval-hermes top-up: 3 claim(s), 3 USDC, target-requests-complete')
+    expect(topUpLogLine('eval-claude', { status: 'skipped', claimsMade: 0, amountReceivedAtomic: '0', unit: 'USDC', stopReason: 'unreadable', reason: 'the eval account is not configured (QA_EVAL_CLAUDE_ACCOUNT)' }))
+      .toBe('eval-claude top-up: skipped (unreadable) — the eval account is not configured (QA_EVAL_CLAUDE_ACCOUNT)')
   })
 })
 
@@ -603,6 +639,8 @@ const topUpFixture = (band: 'ok' | 'warn' | 'critical' | 'unknown', atomic = 0n)
     relayer: band === 'unknown'
       ? { ok: false, reason: 'read failed' }
       : { ok: true, address: RELAYER, atomic, criticalFloor: 1n, fallbackFloor: 1n },
+    'eval-hermes': { ok: false, reason: 'unused' },
+    'eval-claude': { ok: false, reason: 'unused' },
   } as BalanceReadings
   const report = {
     checkedAt: '2026-10-05T06:00:00Z', history: [], configMissing: false,
@@ -701,5 +739,176 @@ describe('relayer faucet top-up loop', () => {
     })
     expect(calls).toBe(0)
     expect(result.stopReason).toBe('run-budget-exhausted')
+  })
+})
+
+const evalReadings = (hermes: bigint | null, claude: bigint | null = null, hermesAddress = EVAL_HERMES): BalanceReadings =>
+  ({
+    treasury: { ok: false, reason: 'unused' },
+    merchant: { ok: false, reason: 'unused' },
+    relayer: { ok: false, reason: 'unused' },
+    'eval-hermes': hermes === null
+      ? { ok: false, reason: 'not configured: QA_EVAL_HERMES_ACCOUNT is unset' }
+      : { ok: true, address: hermesAddress, atomic: hermes, criticalFloor: 3_000_000n, fallbackFloor: 21_000_000n },
+    'eval-claude': claude === null
+      ? { ok: false, reason: 'not configured: QA_EVAL_CLAUDE_ACCOUNT is unset' }
+      : { ok: true, address: EVAL_CLAUDE, atomic: claude, criticalFloor: 3_000_000n, fallbackFloor: 21_000_000n },
+  }) as BalanceReadings
+
+describe('eval faucet top-up loop (#3997)', () => {
+  const env = { ...CDP, GITHUB_RUN_ID: '123' }
+
+  it('below the 21 USDC target: bounded 1-USDC claims with token "usdc", capped at 10', async () => {
+    const calls: { address: string; token: string }[] = []
+    const result = await topUpEvalAccount('eval-hermes', evalReadings(5_000_000n), env, {
+      requestFaucet: async ({ address, token }) => {
+        calls.push({ address, token: token! })
+        return { transactionHash: nextHash() }
+      },
+      sleep: async () => {},
+    })
+    // 21 - 5 = 16 USDC needed at 1 per claim, capped at the per-run cap.
+    expect(calls).toHaveLength(EVAL_TOPUP_MAX_CLAIMS)
+    expect(calls.every((c) => c.address === EVAL_HERMES && c.token === 'usdc')).toBe(true)
+    expect(result).toMatchObject({ status: 'attempted', claimsMade: EVAL_TOPUP_MAX_CLAIMS, unit: 'USDC', stopReason: 'claim-cap-reached' })
+  })
+
+  it('at or above the target: makes no faucet request', async () => {
+    let calls = 0
+    const result = await topUpEvalAccount('eval-hermes', evalReadings(EVAL_TOPUP_TARGET_ATOMIC), env, {
+      requestFaucet: async () => { calls++; throw new Error('unexpected') },
+    })
+    expect(calls).toBe(0)
+    expect(result).toMatchObject({ status: 'skipped', stopReason: 'not-needed', unit: 'USDC' })
+    expect(result.reason).toMatch(/at or above its 21 USDC target/)
+  })
+
+  it('a 429 stops after one call', async () => {
+    let calls = 0
+    const result = await topUpEvalAccount('eval-hermes', evalReadings(0n), env, {
+      requestFaucet: async () => { calls++; throw new CdpFaucetError('rate_limited', 'CDP faucet returned HTTP 429', 429) },
+      sleep: async () => {},
+    })
+    expect(calls).toBe(1)
+    expect(result).toMatchObject({ claimsMade: 0, stopReason: 'rate-limited', unit: 'USDC' })
+  })
+
+  it('an unconfigured account is skipped with its variable named, and never requested', async () => {
+    let calls = 0
+    const result = await topUpEvalAccount('eval-hermes', evalReadings(null), env, {
+      requestFaucet: async () => { calls++; throw new Error('unexpected') },
+    })
+    expect(calls).toBe(0)
+    expect(result).toMatchObject({ status: 'skipped', stopReason: 'unreadable', unit: 'USDC' })
+    expect(result.reason).toMatch(/not configured: QA_EVAL_HERMES_ACCOUNT is unset/)
+  })
+})
+
+it('the eval claim ids carry their own token-bearing namespaces; merchant and relayer pins stay unchanged', () => {
+  for (const claim of [1, 2, 20]) {
+    expect(deterministicClaimId('eval-hermes', '123', '1', claim)).not.toBe(deterministicClaimId('eval-claude', '123', '1', claim))
+    expect(deterministicClaimId('eval-hermes', '123', '1', claim)).not.toBe(deterministicClaimId('relayer', '123', '1', claim))
+    expect(deterministicClaimId('eval-hermes', '123', '1', claim)).not.toBe(deterministicClaimId('merchant', '123', '1', claim))
+  }
+})
+
+describe('eval top-up end to end (#3997)', () => {
+  it('claims USDC, waits for the claims to be mined, then re-reads the eval account', async () => {
+    const events: string[] = []
+    let calls = 0
+    const sequenced = {
+      getBalance: async () => ethers.parseEther('0.5'),
+      getTransactionReceipt: async () => { events.push('receipt'); return { status: 1 } },
+      call: async () => {
+        // Reads 1-2: the treasury and the pre-top-up eval read (5 USDC);
+        // later reads: the post-top-up re-read (5 + 10 claims = 15 USDC).
+        const atomic = ++calls <= 2 ? 5_000_000n : 15_000_000n
+        events.push(calls <= 2 ? 'eval-read-pre' : 'eval-read-post')
+        return ethers.AbiCoder.defaultAbiCoder().encode(['uint256'], [atomic])
+      },
+    } as unknown as ethers.Provider
+    const env: Record<string, string> = { ...FULL, ...CDP }
+    delete env.QA_EVAL_CLAUDE_ACCOUNT
+    const { report, exitCode } = await runBalances([], env, {
+      ...deps(),
+      provider: sequenced,
+      requestFaucet: async ({ address, token }) => {
+        events.push(`claim:${token}:${address === EVAL_HERMES ? 'eval' : 'other'}`)
+        return { transactionHash: nextHash() }
+      },
+      sleep: async () => {},
+    })
+    expect(exitCode).toBe(0)
+    expect(events.filter((e) => e.startsWith('claim:'))).toEqual(Array(10).fill('claim:usdc:eval'))
+    // The wait happens before the re-read (#3896).
+    expect(events.lastIndexOf('receipt')).toBeLessThan(events.indexOf('eval-read-post'))
+    const row = report.rows.find((r) => r.key === 'eval-hermes')!
+    expect(row).toMatchObject({ balance: '15', unit: 'USDC' })
+    expect(report.topUps?.['eval-hermes']).toMatchObject({
+      status: 'attempted',
+      claimsMade: 10,
+      unit: 'USDC',
+      amountReceivedAtomic: '10000000',
+    })
+    expect(report.topUps?.['eval-claude']).toMatchObject({ status: 'skipped', stopReason: 'unreadable' })
+    expect(report.topUps?.['eval-claude']?.reason).toMatch(/not configured: QA_EVAL_CLAUDE_ACCOUNT is unset/)
+  })
+
+  it('with both eval variables unset: exit 0, not-configured unknown rows, and no faucet request at all', async () => {
+    const env: Record<string, string> = { ...FULL, ...CDP }
+    delete env.QA_EVAL_HERMES_ACCOUNT
+    delete env.QA_EVAL_CLAUDE_ACCOUNT
+    let requests = 0
+    const { report, exitCode } = await runBalances([], env, {
+      ...deps(),
+      requestFaucet: async () => { requests++; throw new Error('unexpected faucet request') },
+      sleep: async () => {},
+    })
+    expect(exitCode).toBe(0)
+    expect(requests).toBe(0)
+    for (const key of ['eval-hermes', 'eval-claude'] as const) {
+      const row = report.rows.find((r) => r.key === key)!
+      expect(row.band).toBe('unknown')
+      expect(row.configMissing).toBeUndefined()
+      expect(row.reason).toMatch(/not configured/)
+    }
+    expect(report.topUps?.['eval-hermes']).toMatchObject({ status: 'skipped', stopReason: 'unreadable' })
+  })
+})
+
+describe('the USDC loops run before the relayer under one deadline (#3997)', () => {
+  const env = { ...CDP, GITHUB_RUN_ID: '123' }
+  const fixtures = () => {
+    const readings = {
+      treasury: { ok: false, reason: 'unused' },
+      merchant: { ok: true, address: MERCHANT, atomic: MERCHANT_TOPUP_TARGET_WEI, criticalFloor: 1n, fallbackFloor: 1n, chainId: 84532 },
+      relayer: { ok: true, address: RELAYER, atomic: 5_000_000_000_000_000n, criticalFloor: 1n, fallbackFloor: 1n },
+      'eval-hermes': { ok: true, address: EVAL_HERMES, atomic: 5_000_000n, criticalFloor: 3_000_000n, fallbackFloor: 21_000_000n },
+      'eval-claude': { ok: false, reason: 'unused' },
+    } as BalanceReadings
+    const report = {
+      checkedAt: '2026-10-05T06:00:00Z', history: [], configMissing: false,
+      rows: [{ key: 'relayer', name: 'Dev backend relayer (84532)', unit: 'ETH', band: 'critical' }],
+    } as BalancesReport
+    return { readings, report }
+  }
+
+  it('a relayer loop that would use up the deadline cannot starve the USDC loops', async () => {
+    const { readings, report } = fixtures()
+    let now = 0
+    const order: string[] = []
+    const result = await runTopUps(readings, report, env, {
+      // Each accepted claim spends the whole budget: the first loop to claim ends it.
+      requestFaucet: async ({ address, token }) => {
+        order.push(`${token}:${address}`)
+        now += TOPUP_RUN_BUDGET_MS
+        return { transactionHash: nextHash() }
+      },
+      sleep: async () => {},
+      nowMs: () => now,
+    })
+    expect(order[0]).toBe(`usdc:${EVAL_HERMES}`)
+    expect(result['eval-hermes']).toMatchObject({ claimsMade: 1, unit: 'USDC' })
+    expect(result.relayer).toMatchObject({ claimsMade: 0, stopReason: 'run-budget-exhausted' })
   })
 })

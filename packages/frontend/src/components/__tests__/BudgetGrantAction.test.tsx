@@ -47,7 +47,7 @@ describe('BudgetGrantAction (#1073)', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Approve budget' }))
 
-    const message = await screen.findByText(/No signature yet — nothing changed/)
+    const message = await screen.findByText(/No approval yet — nothing changed/)
     expect(message.className).not.toMatch(/danger/)
     expect(screen.getByRole('button', { name: 'Approve budget' })).toBeEnabled()
     expect(onGranted).not.toHaveBeenCalled()
@@ -88,10 +88,38 @@ describe('BudgetGrantAction (#1073)', () => {
     renderAction({ grant })
 
     fireEvent.click(screen.getByRole('button', { name: 'Approve budget' }))
-    await screen.findByText(/No signature yet/)
+    await screen.findByText(/No approval yet/)
 
     fireEvent.click(screen.getByRole('button', { name: 'Approve budget' }))
-    await waitFor(() => expect(screen.queryByText(/No signature yet/)).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByText(/No approval yet/)).not.toBeInTheDocument())
+  })
+
+  it('UNCONFIRMED (#3930) gets its OWN sentence: never "nothing changed", sends the owner to check the budgets first', async () => {
+    // The activation response was lost — the grant may already be in place.
+    // The caller's generic failure sentence ("… Nothing changed — try again.")
+    // would be false, so it must not render here.
+    const grant = vi.fn().mockResolvedValue({ ok: false, reason: 'unconfirmed' })
+    renderAction({
+      grant,
+      failureMessage: 'Haven could not set the budget. Nothing changed — try again.',
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Approve budget' }))
+
+    const message = await screen.findByText(/could not be confirmed/i)
+    // Danger-styled (the owner must act), but NOT the generic failure text.
+    expect(message.className).toMatch(/danger/)
+    expect(screen.queryByText(/Nothing changed/)).toBeNull()
+    // Directs the owner to check the agent's budgets BEFORE trying again,
+    // and never names Haven as the approver.
+    expect(message.textContent).toMatch(/check the agent's budgets before trying again/i)
+    // #3971: since #3933 the backend refuses a second live budget in the same
+    // slot, and the retry re-reads the attempt first — the old warning that a
+    // second grant "would add a second budget" is no longer true.
+    expect(message.textContent).toMatch(/a retry never adds a second budget for the same token and recipient/i)
+    expect(message.textContent).not.toMatch(/would add a second budget/i)
+    expect(message.textContent).not.toMatch(/haven/i)
+    expect(screen.queryByText(/could not set the budget/i)).toBeNull()
   })
 
   it('is disabled while busy, while not ready, and while the input is incomplete', () => {
@@ -176,5 +204,41 @@ describe('BudgetGrantAction trailingAction (#3695)', () => {
       trailingAction: <button type="button">Cancel</button>,
     })
     expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull()
+  })
+})
+
+/**
+ * #3933: `slot_occupied` is the backend sending the owner to edit the budget
+ * already in the slot — never the caller's failure sentence.
+ */
+describe('BudgetGrantAction — occupied slot (#3933)', () => {
+  const EXISTING = '0x' + 'e1'.repeat(32)
+
+  it('hands the existing hash to the caller that can route, and shows no failure', async () => {
+    const grant = vi.fn().mockResolvedValue({ ok: false, reason: 'slot_occupied', existingDelegationHash: EXISTING })
+    const onSlotOccupied = vi.fn()
+    renderAction({ grant, onSlotOccupied })
+    fireEvent.click(screen.getByRole('button', { name: 'Approve budget' }))
+    await waitFor(() => expect(onSlotOccupied).toHaveBeenCalledWith(EXISTING))
+    expect(screen.queryByText(/Haven could not set the budget/)).toBeNull()
+  })
+
+  it("without a route, shows the caller's notice and disables the control — the same grant cannot succeed", async () => {
+    const grant = vi.fn().mockResolvedValue({ ok: false, reason: 'slot_occupied', existingDelegationHash: EXISTING })
+    renderAction({ grant, slotOccupiedNotice: 'Already has one — edit it on the agent page.' })
+    fireEvent.click(screen.getByRole('button', { name: 'Approve budget' }))
+    await screen.findByText('Already has one — edit it on the agent page.')
+    expect(screen.queryByText(/Haven could not set the budget/)).toBeNull()
+    expect(screen.getByRole('button', { name: 'Approve budget' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: 'Approve budget' }))
+    expect(grant).toHaveBeenCalledTimes(1)
+  })
+
+  it('without a route or a notice, a default sentence — still not the failure', async () => {
+    const grant = vi.fn().mockResolvedValue({ ok: false, reason: 'slot_occupied', existingDelegationHash: null })
+    renderAction({ grant })
+    fireEvent.click(screen.getByRole('button', { name: 'Approve budget' }))
+    await screen.findByText(/already has a live budget for this token and recipient/)
+    expect(screen.queryByText(/Haven could not set the budget/)).toBeNull()
   })
 })

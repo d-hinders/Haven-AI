@@ -51,7 +51,7 @@ vi.mock('../../../rails/hybrid-provisioning.js', async (importOriginal) => {
   return {
     ...actual,
     computeHybridAccountAddress: vi.fn().mockResolvedValue('0x' + 'dd'.repeat(20)),
-    ensureHybridDeployed: vi.fn().mockResolvedValue(undefined),
+    ensureDelegateHybridDeployed: vi.fn().mockResolvedValue(undefined),
   }
 })
 // The lost insert: createPaymentIntent's ON CONFLICT DO NOTHING returns null.

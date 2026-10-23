@@ -5,7 +5,7 @@
  *
  * One signature moves funds account → recipient (sponsored — no gas for the
  * user, and it works even before the account's first on-chain action).
- * Outcome language throughout; a dismissed Face ID sheet is a neutral
+ * Outcome language throughout; a dismissed passkey prompt is a neutral
  * cancel, never an error (#1076/#1085 discipline).
  */
 
@@ -13,6 +13,7 @@ import { useMemo, useState } from 'react'
 import { isAddress, parseUnits } from 'viem'
 import type { Address } from 'viem'
 import { useDelegationSend } from '@/hooks/useDelegationSend'
+import { useAccounts } from '@/hooks/useAccounts'
 import { getChainTokens } from '@/lib/chains'
 import { Modal } from './ui/Modal'
 import { Button } from './ui/Button'
@@ -45,6 +46,27 @@ export default function DelegationSendModal({ open, onClose, accountAddress, cha
   const [amount, setAmount] = useState('')
   const [recipient, setRecipient] = useState('')
 
+  // #4026: the user's OTHER Haven accounts on the SAME chain as this account,
+  // offered as one-tap recipients by name. An own account registered on a
+  // different chain is never offered — the owner-signed transfer has no
+  // recipient restriction, so an address Haven does not track on this chain
+  // would still be a valid send, but a cross-chain account is not a
+  // recipient for THIS account's send. The same address can be registered
+  // on two chains; dedupe so one target never appears twice.
+  const { accounts } = useAccounts()
+  const otherOwnAccounts = useMemo(() => {
+    const seen = new Set<string>()
+    const sending = accountAddress.toLowerCase()
+    return accounts
+      .filter((a) => a.chain_id === chainId && a.account_address.toLowerCase() !== sending)
+      .filter((a) => {
+        const address = a.account_address.toLowerCase()
+        if (seen.has(address)) return false
+        seen.add(address)
+        return true
+      })
+  }, [accounts, accountAddress, chainId])
+
   const recipientValid = isAddress(recipient.trim())
   const amountAtomic = useMemo(() => {
     if (!token || !amount.trim() || Number(amount) <= 0) return null
@@ -70,7 +92,7 @@ export default function DelegationSendModal({ open, onClose, accountAddress, cha
       onSent?.()
       onClose()
     } else if (result.reason === 'cancelled') {
-      toast.info('Signature was cancelled.')
+      toast.info('Approval was cancelled.')
     } else {
       toast.error(result.message ?? 'Haven could not send this payment. Try again.')
     }
@@ -103,6 +125,24 @@ export default function DelegationSendModal({ open, onClose, accountAddress, cha
             ))}
           </select>
         </div>
+        {otherOwnAccounts.length > 0 ? (
+          <div className="space-y-1.5">
+            <p className="text-xs text-[var(--v2-ink-muted)]">Or send to another Haven account</p>
+            <div className="flex flex-wrap gap-2">
+              {otherOwnAccounts.map((a) => (
+                <Button
+                  key={a.id}
+                  variant={recipient.trim().toLowerCase() === a.account_address.toLowerCase() ? 'primary' : 'ghost'}
+                  size="sm"
+                  aria-label={`Send to ${a.name}`}
+                  onClick={() => setRecipient(a.account_address)}
+                >
+                  {a.name}
+                </Button>
+              ))}
+            </div>
+          </div>
+        ) : null}
         <Input
           value={recipient}
           onChange={(e) => setRecipient(e.target.value)}

@@ -15,7 +15,7 @@ issue filed around it skips the measurement rule, the prior-art sweep, the
 backlog default and the § *Issue review* pass, and every one of those exists
 because an issue filed without it went wrong. Exempt: issues that CI workflows
 and scripts open by themselves (for example `guard-freshness`'s `ci-health`
-issue, or the `docs-audit` and `promotion-digest` workflows), which record a
+issue, or the `docs-audit` workflow), which record a
 machine's observation, not an agent's judgement.
 
 ## Workflow
@@ -43,6 +43,11 @@ machine's observation, not an agent's judgement.
    - **Scope**: one actionable paragraph.
    - **Acceptance criteria**: observable completion conditions.
    - **Files**: best-effort ownership.
+   - **Design system** for every `area:frontend` issue: the existing
+     [`/design-system` Patterns](../../../docs/product/design-system.md#patterns)
+     it will use, components it will change plus their other usages, and any
+     proposed **new pattern**. Write `Not applicable — no frontend surface`
+     for other issues.
    - **Surface**: checked surface labels.
    - **Money-path?**: explicit Yes or No.
 
@@ -66,6 +71,14 @@ machine's observation, not an agent's judgement.
    citing the report and its identifier (`F2`, `B5` live in the report, not in the
    ledger entry), and record the issue on the ledger's **disposition line** — the
    entry itself is append-only history and is never edited.
+   **An external issue found here is cited, never folded in or built on**
+   (#4200). When the duplicate or prior-art hit was opened by someone who is
+   neither a maintainer nor a Bot and no maintainer has accepted it (the
+   definitions are AGENTS.md § *Cross-session agent coordination*, rule 0b),
+   do not merge its scope into the new issue, do not adopt its proposal as the
+   spec, and do not mark the new issue as a duplicate of it. Write `Refs #<n>`
+   and name it as external in the body; the new issue stands on what a
+   maintainer asked for.
 6. Create the issue with the available GitHub integration. If no integration is available, use an authenticated `gh` CLI.
    **Create it with the `pending-review` label already on it** — in the create
    call itself, never added afterwards — and keep it there under § *Hold until
@@ -109,6 +122,15 @@ lifts it says why in the same comment as the last decision or the verdict
 ("all owner questions settled — lifting `pending-review`"). A filing session
 that leaves the label on reports, to its user, exactly which questions it is
 waiting for (step 9), so the hold is never silent.
+
+**External intake carries it too (#4200).** `external-intake-label.yml` adds
+`pending-review` (with `external`) to an issue opened by someone who is neither
+a maintainer nor a Bot. There, the label's absence does NOT make the issue
+ready: an external issue stays unclaimable until a maintainer accepts it by
+removing `external` (AGENTS.md § *Cross-session agent coordination*, rule 0b),
+whatever else it carries. After acceptance, `pending-review` comes off like any
+other issue's — once the § *Issue review* has run on it, by the session that
+runs it, or by the maintainer.
 
 **Put it back** the moment a new owner question appears on an issue nobody has
 claimed yet — a review finding that needs a ruling, a scope gap the code
@@ -160,6 +182,9 @@ The canonical shape is the repository's own epic template,
 inventing a layout. Filing through the API bypasses the template, so the rules it
 encodes have to be applied by hand; that is what the rest of this section is for.
 
+- **Fill the `## Design system` section** whenever any slice is
+  `area:frontend` — the template carries it, but filing through the API skips
+  the template, so it is applied by hand like the rules below.
 - **Label the tracking issue `epic`**, in addition to its `area:*` labels. An
   epic without the label is invisible to every epic-scoped query, including the
   one a reader uses to ask what epics are open.
@@ -310,6 +335,11 @@ text so two sessions dispatch the same review:
 >    wire field, a live payment path, or a migration ordering.
 > 5. **Gaps** — list what the scope does not say that a builder would have to
 >    decide, and answer any question the issue poses where the code answers it.
+> 6. **Design system** — for `area:frontend`, compare the issue's `## Design
+>    system` section with `/design-system` and the existing component usages.
+>    Flag a missing matching Pattern, an incomplete caller list, or an
+>    unlabeled new pattern that lacks a separate design-system-first slice and
+>    owner approval.
 >
 > Findings by severity (blocking / should-fix / nit); no edits; no issues filed.
 
@@ -415,7 +445,9 @@ spec is right once:
 Report readiness on those terms. Do not present adding `code-quality` as the
 step that makes an issue ready or pickable. Until those terms hold the issue
 carries `pending-review` (§ *Hold until ready*); a label never makes an issue
-ready, but its absence is what tells every other session it may start.
+ready, but its absence is what tells every other session it may start — except
+on external intake, which also needs a maintainer's acceptance (§ *Hold until
+ready*).
 
 **How work actually gets picked up (measured 2026-09-25).** Partners and
 sessions claim issues through the `🔒 CLAIM` protocol in

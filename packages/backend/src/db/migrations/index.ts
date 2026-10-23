@@ -111,6 +111,11 @@ import * as machinePaymentDeliveryReports from './109_machine_payment_delivery_r
 import * as sponsoredUseropGasEvents from './110_sponsored_userop_gas_events.js'
 import * as attentionDismissals from './111_attention_dismissals.js'
 import * as agentSupersededBy from './112_agent_superseded_by.js'
+import * as syncDocumentKind from './113_sync_document_kind.js'
+import * as smartAccountDeploySalt from './114_smart_account_deploy_salt.js'
+import * as feedbackExpiresAtFixedWindow from './115_feedback_expires_at_fixed_window.js'
+import * as ownerTransfers from './116_owner_transfers.js'
+import * as merchantCatalogSource from './117_merchant_catalog_source.js'
 
 /**
  * The shape every entry in `migrations` must have.
@@ -281,4 +286,9 @@ export const migrations: Migration[] = [
   sponsoredUseropGasEvents,
   attentionDismissals,
   agentSupersededBy,
+  syncDocumentKind,
+  smartAccountDeploySalt,
+  feedbackExpiresAtFixedWindow,
+  ownerTransfers,
+  merchantCatalogSource,
 ]

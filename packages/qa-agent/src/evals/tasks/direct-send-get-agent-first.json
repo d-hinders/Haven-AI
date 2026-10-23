@@ -1,0 +1,19 @@
+{
+  "id": "direct-send-get-agent-first",
+  "title": "The agent grounds on haven_get_agent before any payment tool",
+  "category": "direct-payment",
+  "tier": 1,
+  "instruction": "Before you move anything, check which Haven deployment, account and budget you are actually operating with. Then pay {amount} USDC to {recipient} on Base Sepolia and confirm the outcome to me.",
+  "requires": ["delegation-agent-open-budget", "funded-period-budget", "payment-recipient"],
+  "amount": { "rule": "fraction_of_remaining", "fraction": "1/4" },
+  "graders": [
+    { "name": "agent_status_before_payment", "options": {} },
+    { "name": "transfer_settled", "options": {} }
+  ],
+  "expectTransfer": true,
+  "source": {
+    "kind": "bug-report",
+    "ref": "docs/bug-reports/qa-explore-agent-onboarding-2026-09-28.md",
+    "note": "Finding 2: dev's manifest named Base MAINNET as its default chain on a Base Sepolia deployment — 'a less careful agent could send a user to fund on mainnet'. The countermeasure an agent controls is grounding on haven_get_agent's own deployment facts before touching money."
+  }
+}

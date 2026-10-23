@@ -7,6 +7,7 @@ covers:
   - .github/workflows/qa-dev.yml
   - .github/workflows/qa-balances.yml
   - scripts/ci/qa-failure-issue.mjs
+  - scripts/ci/dev-push-health.mjs
   - scripts/ci/qa-balance-issue.mjs
   - scripts/ci/qa-retry.mjs
   - scripts/ci/qa-freshness.mjs
@@ -30,7 +31,7 @@ covers:
   - packages/mcp-server/src/x402-expected-wire-contract.test.ts
   - packages/demo-merchant-mcp/src/x402.ts
   - packages/demo-merchant-mcp/src/http.ts
-last-verified: "2026-10-05"
+last-verified: "2026-10-14"
 ---
 
 # Agent QA — run the automated QA layers against dev
@@ -368,16 +369,16 @@ The deterministic harness runs seventeen scenarios in order:
 | `over-budget-refused` | An over-budget payment is refused **before it becomes signable** — since #3503 by a period-budget pre-check in `POST /payments`, HTTP 403 `delegation_budget_exceeded` with no UserOp and no intent row (before it, the on-chain caveat enforcer's gas-estimation revert, HTTP 502). Renamed from `over-budget-queue` by #2016: that leg asserted `pending_approval`, and the approval queue was legacy-rail-only and no longer exists anywhere (#1986/#1989). A bare 502 is NOT accepted as proof — the amount is derived from a **live** enforcer read (a fallback reading or an exhausted budget fails the leg rather than passing it), a within-budget request against the same account must still be offered, and the refusal must carry `error_code: delegation_budget_exceeded` with a `remaining_atomic` equal to the live read — a missing delegation also refuses with 403. A 502 fails the leg with both causes named: the pre-check removed, or failed open on a degraded read. Until #3503 the leg decoded the enforcer's revert reason instead; no live leg watches that revert now, and the deployed enforcer's own refusal is proven by the backend's `non-custody-onchain-enforcer.contract.test.ts` |
 | `x402-over-budget-rejected` | The same *guarantee* on the x402 **EIP-3009 funding leg**, but no longer the same refusal. Until #2706 (PR #2719) this leg reached gas estimation and asserted the enforcer's 502; that PR added a typed **403 pre-check before any prepare**, so on a healthy budget read the enforcer is never asked and the leg now asserts `error_code: delegation_budget_exceeded`, a `remaining_atomic` matching the live on-chain read, and a within-budget **control that IS still offered** (added by #2738 — without it a dead merchant URL, a retired rail or a revoked delegation reads exactly like working enforcement). **State what is now uncovered, not just what still is**: no leg observes the on-chain refusal of an x402 3009 *funding redemption* any more — that observation is gone, not relocated. Gone from the SUITE rather than from the system: the pre-check **fails open** (#2706, inherited from #2082), so a degraded `fromChain: false` read falls through to prepare where the enforcer still refuses with the 502, which is why a 502 on this leg has two causes and the failure text names both. Delete the pre-check and this leg goes red (403 becomes 502). Until #3503, deleting the enforcer turned `over-budget-refused` above red, since `POST /payments` reached the chain; #3503 gave that route the same pre-check, so the enforcer's own refusal now rests on the backend's `non-custody-onchain-enforcer.contract.test.ts`. Re-based by #2016, which found it **passing for the wrong reason**: driven against the retired legacy identity it was satisfied by the rail-retirement 410, and would have passed with over-budget enforcement deleted outright. Its erc7710 sibling below closes what used to be flagged here as a known gap (#2082) |
 | `x402-erc7710-over-budget-rejected` | The same refusal on the **preferred** scheme (#2082). Until then the case did not exist to assert: erc7710 authorize returned 201 `pending_signature` WITH `sign_data` for ANY amount, so the #420 invariant's own words ("refused before it becomes signable") were FALSE on the path most payments take — measured live against dev 2026-08-25 and handed to #1993 rather than asserted around. The fail-fast pre-check refuses **HTTP 403 `delegation_budget_exceeded`** with no settlement child, no intent row and no relayer-paid delegate deploy. The discriminators are different from its 3009 sibling's, because the vacuous pass this shape invites is a different one: a bare 403 is ALSO what a MISSING delegation returns, so the leg requires the `error_code` AND requires the refusal's `remaining_atomic` to equal the live budget it derived the over-budget amount from, with a within-budget erc7710 authorize offered first as the control (and its `signature_scheme` checked, so a dispatch regression onto the funding leg cannot pass as this one). **What it does not claim:** that the CHAIN refuses the redemption — the caveat stack was always the gate and #2082 did not touch it; proving the redemption-side revert still needs a merchant that attempts one, and no leg does. Needs `QA_DELEGATION_AGENT_API_KEY`; **skips** without it |
-| `x402-delegation-3009` | A **delegation-rail** agent pays an EIP-3009-only merchant through the funding-leg bridge (#946); the evidence row must show `settlement_scheme = eip3009` and the funding transfer going to the delegate EOA, the treasury must decrease, and the delegate must not still be holding this payment's own amount. Two thresholds, because they answer different questions (#2444): residue at or above the 0.01 USDC sweep floor is stranding, and residue reaching the amount just funded is the payment itself, undelivered — which the floor alone waved through, since `buy_vpn/basic` costs 0.001 USDC. The undelivered case is polled for 20s first, because the facilitator settles outside Haven's view, and its failure text names both possible causes — an unsettled merchant leg, or the harness's own node not having caught up, since it reads a different node from the one the backend writes through (#2445). **Skips** without `QA_DELEGATION_*` |
-| `x402-delegation-3009-grace-resume` | Reproduces the #2145 crash shape against dev: the raw API authorizes and signs the EIP-3009 funding leg, then deliberately **does not** retry the merchant. After the Base-Sepolia-only `MERCHANT_REPORT_GRACE_MIN_OVERRIDE=0`, it requires `GET /machine-payments/:id/status` to answer `funded_but_unsettled` / `retry_original_x402_request`, then calls `resumeX402Payment()` through that real gate. The resumed purchase must debit the treasury and credit the merchant by the same amount — counting only the merchant credit this scenario CAUSED, with any drain off the delegate's pre-existing balance subtracted out (#2444), since the delegate EOA and the merchant are shared with the scenario above — and must leave no unsettled funding of its own on the delegate; a failed post-funding path attempts a gasless sweep before reporting. The override is refused outside `HAVEN_DEPLOY_CHAIN_IDS=84532`; production remains 15 minutes. **Skips** without `QA_DELEGATION_*` |
-| `delegation-lifecycle` | Authority can be TAKEN AWAY: on a **throwaway per-run identity** (funded ~0.006 USDC from the standing delegation identity; its agent is revoked when the leg ends, pass or fail, #3459) — grant → activate (relayer-deploys) → within-budget payment settles (its USDC `Transfer` read on the observer node, #3344) → replace leaves **exactly one** active row (the #1053-finding-4 transactional-activate regression) → owner-signed revoke, **confirmed on-chain**: `DelegationManager.disabledDelegations(grant 2)` reads `true` on the observer, polled because it can lag (#3344) → the same payment shape is refused **403 "no active budget delegation"**, never a 502 (a 502 would mean authority was still offered to the chain). The replaced grant 1 is only marked replaced in the DB — its on-chain kill is the revoke flow — so the leg reports its on-chain state rather than claim it was taken away. Ephemeral keys, all signing client-side |
+| `x402-delegation-3009` | A **delegation-rail** agent pays an EIP-3009-only merchant through the funding-leg bridge (#946); the evidence row must show `settlement_scheme = eip3009` and the funding transfer going to the delegate EOA, the treasury must decrease, and the delegate must not still be holding this payment's own amount. Two thresholds, because they answer different questions (#2444): residue at or above the 0.01 USDC sweep floor is stranding, and residue reaching the amount just funded is the payment itself, undelivered — which the floor alone waved through, since `buy_vpn/basic` costs 0.001 USDC. The undelivered case is polled for 20s first, because the facilitator settles outside Haven's view, and its failure text names both possible causes — an unsettled merchant leg, or the harness's own node not having caught up, since it reads a different node from the one the backend writes through (#2445). Since #4119 it also proves the **merchant settlement itself and Haven's record of it**: the hash comes from the paid response's `PAYMENT-RESPONSE` (the tool result's `_meta` as fallback) and its receipt must be `status = 1` on the observer, the payment status must carry `merchant_settlement_recorded` within 45 s of `client.fetch`, and the receipt's `settlement_tx_hash` must equal that hash (see *Haven recorded the merchant settlement*, below). **Skips** without `QA_DELEGATION_*` |
+| `x402-delegation-3009-grace-resume` | Reproduces the #2145 crash shape against dev: the raw API authorizes and signs the EIP-3009 funding leg, then deliberately **does not** retry the merchant. After the Base-Sepolia-only `MERCHANT_REPORT_GRACE_MIN_OVERRIDE=0`, it requires `GET /machine-payments/:id/status` to answer `funded_but_unsettled` / `retry_original_x402_request`, then calls `resumeX402Payment()` through that real gate. The resumed purchase must debit the treasury and credit the merchant by the same amount — counting only the merchant credit this scenario CAUSED, with any drain off the delegate's pre-existing balance subtracted out (#2444), since the delegate EOA and the merchant are shared with the scenario above — and must leave no unsettled funding of its own on the delegate; a failed post-funding path attempts a gasless sweep before reporting. Since #4119 the resumed response's merchant settlement must also be proved on-chain and **recorded by Haven** — `merchant_settlement_recorded` within 45 s of the funding submit, with the matching receipt hash. The override is refused outside `HAVEN_DEPLOY_CHAIN_IDS=84532`; production remains 15 minutes. **Skips** without `QA_DELEGATION_*` |
+| `delegation-lifecycle` | Authority can be TAKEN AWAY: on a **throwaway per-run identity** (funded ~0.006 USDC from the standing delegation identity; its agent is revoked when the leg ends, pass or fail, #3459) — grant → activate (relayer-deploys) → within-budget payment settles (its USDC `Transfer` read on the observer node, #3344) → a **plain** second grant into the occupied slot is **refused** `409 BUDGET_SLOT_OCCUPIED` (#3933: activation's database sweep alone would leave grant 1 enabled on-chain) → the **edit flow** — a grant naming grant 1 as `replaces` — leaves **exactly one** active row (the #1053-finding-4 transactional-activate regression) and grant 1 is **stopped on-chain**: `DelegationManager.disabledDelegations(grant 1)` reads `true` on the observer → owner-signed revoke of grant 2, **confirmed on-chain** the same way, polled because the observer can lag (#3344) → the same payment shape is refused **403 "no active budget delegation"**, never a 502 (a 502 would mean authority was still offered to the chain). Until #3933 the leg replaced with a plain grant and could only REPORT grant 1's on-chain state; now it proves both grants disabled. Ephemeral keys, all signing client-side |
 | `x402-erc7710-settle` | The delegation rail's PRIMARY x402 path: authorize (payTo = merchant) builds a narrowed child delegation, the delegate signs it, `POST /x402/:id/settle` wraps the header, and the MERCHANT redeems `[child, budget]` on-chain — treasury pays the merchant **directly**, budget metered by the settlement itself (treasury −amount exactly), **delegate EOA untouched** (no funding leg — the #713 stranded-funds class structurally absent). Needs `MERCHANT_X402_ERC7710=1` + `MERCHANT_ERC7710_DELEGATION_MANAGER` on the dev merchant; skips (→ run FAILS under #1066) with that exact remedy when the merchant is 3009-only |
 | `x402-erc7710-fresh-agent` | The COLD START (#1674, regression net for #1667): a per-run throwaway identity (its agent revoked when the leg ends, #3459) whose delegate hybrid account is asserted counterfactual on-chain (`getCode` = `0x` before any payment), then the agent's FIRST-EVER payment runs the erc7710 settlement — asserting authorize deployed the account (code exists between authorize and settle, pinning WHERE the deploy happens), the merchant redemption settles treasury→merchant exactly, and the delegate EOA is untouched. The between-authorize-and-settle `getCode` is **polled to a 30 s deadline** (#2445), because the harness reads `QA_RPC_URL_BASE_SEPOLIA` (defaulting to the public `https://sepolia.base.org`, `packages/qa-agent/src/lib/chain.ts`) while the backend writes through `RPC_URL_BASE_SEPOLIA` — deliberately a second node, which is what makes the money proofs independent rather than self-reported, and which therefore lags a deploy the backend confirmed at one confirmation. When that poll runs out the leg fails saying **this node has not caught up**, not that the deploy did not run: authorize is fail-closed on the deploy (an unconfirmed or reverted deploy 502s), so a 200 means the backend's node saw the account deployed. Funded per run from the standing identity; same env needs as `x402-erc7710-settle` |
 | `x402-erc7710-sdk` | The same settlement through **`HavenClient`** instead of the raw API (#1457). The leg above deliberately excludes the SDK, so it stays green whether or not Haven's own client works; this one drives `settleX402Erc7710()` end to end and asserts the same money proof — treasury −amount exactly, merchant +amount exactly, **delegate EOA unchanged**. That last assertion is the point: a silent reroute to the EIP-3009 bridge would still deliver the goods and still debit the treasury, and would only be visible in the delegate's balance. Needs `QA_DELEGATION_DELEGATE_PRIVATE_KEY` (the SDK signs in-process, unlike the hosted topology). The hosted MCP + local signer variant waits on #1456 |
 | `x402-erc7710-hosted` | The same settlement through the **default topology** — hosted MCP + local edge signer, what `npx @haven_ai/connect@alpha` installs (#1457). The two legs above cover the raw API and the SDK; neither exercises the hosted boundary, where the server must never hold a delegate key and the signature has to come from the local signer. Asserts the hosted quote **reports** `settlement_scheme: erc7710` (a silent reroute to the 3009 bridge would still deliver the goods), that settle reports **no funding tx**, and that the delegate EOA is unchanged. Signs with `haven_sign` rather than `haven_sign_x402` — the latter builds an EIP-3009 header this scheme has no use for. Ordered right after `x402-hosted-mcp-signer` so a failure is diagnosable against a topology that leg has already shown healthy |
 | `x402-delegation-3009-sweep` | The other half of the bridge: a delegation-rail 3009 payment the merchant **verifies but never settles** strands funds on the delegate EOA, and the gasless sweep returns them to the treasury. Needs `MERCHANT_SKIP_SETTLE_PRODUCT=storage_50gb` and `SWEEP_MIN_USDC=0` on dev; **skips** rather than fails when either is unset, since a settling merchant is an unmet precondition, not a regression |
-| `x402-hosted-mcp-signer` | The **default user topology** (#1154): the DEPLOYED hosted MCP over HTTP plus a local `@haven_ai/signer` edge signer in-process — `haven_pay_mcp_tool` → local `haven_sign_x402` → `haven_settle_mcp_tool` → merchant settles. Asserts the quote is a **v2 (delegation-rail) context** (a v1 quote FAILS the leg: the #1138 seam would have gone untouched), that the signer really signed it, that **both** on-chain legs confirmed as distinct `status = 1` transactions, that the treasury fell, and that the delegate residual is **unchanged** (exact-amount funding nets to zero). Needs `QA_HOSTED_MCP_URL` + `QA_X402_BINDING_SIGNER` on top of `QA_DELEGATION_*`. **Skips** (#1441) when the hosted quote comes back **erc7710-shaped**: #1450's preference rule selects erc7710 whenever the merchant advertises it, and this leg's invariant is the FUNDING-LEG one, so against such a merchant it is unreachable rather than violated. Nothing goes uncovered — hosted erc7710 is `x402-erc7710-hosted`, and `x402-catalog-guided-purchase` is scheme-aware since #1547 (erc7710 expected on dev, the 3009 two-leg proof kept as its fallback shape; same topology, zero residual either way). What this leg alone still covers is the `haven_pay_mcp_tool` ENTRY POINT on the funding path; point it at a merchant that does not advertise erc7710 to exercise that, and note `QA_REQUIRE_ALL_LEGS=1` turns the skip into a run failure |
-| `x402-catalog-guided-purchase` | The **GUIDED catalog purchase path** (epic #1305, #1312): resolves a catalog entry via `GET /catalog` (never a hardcoded id), calls `haven_prepare_catalog_purchase(catalog_id, max_amount | max_amount_human)`, then branches on the preflight's `settlement_scheme` (#1547 — the guided prepare runs the #1450 preference): on **erc7710** (expected on dev) it signs via `haven_sign` by **`payment_id`** alone and settles with **only `payment_id` + `signature`** — no `payment_header` (Haven assembles it at settle), money proof inverted (a `funding_tx_hash` is a FAILURE, treasury debit = merchant credit, delegate untouched); on the **eip3009 fallback shape** it signs via `haven_sign_x402` by `payment_id` alone (#1549 — the compact preflight no longer echoes `payment_required`; the signer fetches it by payment_id, and the leg FAILS if the echo reappears) and settles with **only `payment_id` + `signature` + `payment_header`**. Neither shape ever re-sends `merchant_url`/`tool_name`/`arguments`/`mcp_transport` (that re-threading is exactly what the epic exists to eliminate; needing it FAILS the leg, does not soften it). Asserts the preflight is COMPACT, carries the #1308 machine-readable next step and a rail-labeled allowance block, marks the catalog price indicative next to the live amount, and that the settled response carries the #1310 post-purchase allowance block. Buys NordShield VPN Basic (`buy_vpn`/`{plan:"basic"}`) — a SETTLING product; never CloudNest 50 GB, which is dev's verify-without-settle sweep fixture. Same env as `x402-hosted-mcp-signer` (`QA_HOSTED_MCP_URL`, `QA_X402_BINDING_SIGNER`, `QA_DELEGATION_*`, `QA_DEMO_MERCHANT_URL`) — no new secrets. **Skips** (not fails) when no catalog row matches on dev (#1299 seed not applied) or the hosted MCP does not yet expose `haven_prepare_catalog_purchase` (pre-#1306 deploy). **FAILS (never skips)**, before any of that, if the merchant's discovery document is unreachable, a `qa_fixture` product it names has a listed catalog row on this host, or a `qa_fixture` product cannot be mapped to a catalog `(tool_name, tool_arguments)` pair (#3421 tripwire) |
+| `x402-hosted-mcp-signer` | The **default user topology** (#1154): the DEPLOYED hosted MCP over HTTP plus a local `@haven_ai/signer` edge signer in-process — `haven_pay_mcp_tool` → local `haven_sign_x402` → `haven_settle_mcp_tool` → merchant settles. Asserts the quote is a **v2 (delegation-rail) context** (a v1 quote FAILS the leg: the #1138 seam would have gone untouched), that the signer really signed it, that **both** on-chain legs confirmed as distinct `status = 1` transactions, that **Haven recorded the merchant settlement** (#4119: `merchant_settlement_recorded` read right after settle returns, the receipt hash equal to the settle's `settlement_tx_hash`, and the settle's evidence guidance followed), that the treasury fell, and that the delegate residual is **unchanged** (exact-amount funding nets to zero). Needs `QA_HOSTED_MCP_URL` + `QA_X402_BINDING_SIGNER` on top of `QA_DELEGATION_*`. **Skips** (#1441) when the hosted quote comes back **erc7710-shaped**: #1450's preference rule selects erc7710 whenever the merchant advertises it, and this leg's invariant is the FUNDING-LEG one, so against such a merchant it is unreachable rather than violated. Nothing goes uncovered — hosted erc7710 is `x402-erc7710-hosted`, and `x402-catalog-guided-purchase` is scheme-aware since #1547 (erc7710 expected on dev, the 3009 two-leg proof kept as its fallback shape; same topology, zero residual either way). What this leg alone still covers is the `haven_pay_mcp_tool` ENTRY POINT on the funding path; point it at a merchant that does not advertise erc7710 to exercise that, and note `QA_REQUIRE_ALL_LEGS=1` turns the skip into a run failure |
+| `x402-catalog-guided-purchase` | The **GUIDED catalog purchase path** (epic #1305, #1312): resolves a catalog entry via `GET /catalog` (never a hardcoded id), calls `haven_prepare_catalog_purchase(catalog_id, max_amount | max_amount_human)`, then branches on the preflight's `settlement_scheme` (#1547 — the guided prepare runs the #1450 preference): on **erc7710** (expected on dev) it signs via `haven_sign` by **`payment_id`** alone and settles with **only `payment_id` + `signature`** — no `payment_header` (Haven assembles it at settle), money proof inverted (a `funding_tx_hash` is a FAILURE, treasury debit = merchant credit, delegate untouched); on the **eip3009 fallback shape** it signs via `haven_sign_x402` by `payment_id` alone (#1549 — the compact preflight no longer echoes `payment_required`; the signer fetches it by payment_id, and the leg FAILS if the echo reappears) and settles with **only `payment_id` + `signature` + `payment_header`**, then requires Haven to have **recorded the merchant settlement** exactly as `x402-hosted-mcp-signer` does (#4119; on dev this shape is reached only by unit tests, because dev routes the leg to erc7710). Neither shape ever re-sends `merchant_url`/`tool_name`/`arguments`/`mcp_transport` (that re-threading is exactly what the epic exists to eliminate; needing it FAILS the leg, does not soften it). Asserts the preflight is COMPACT, carries the #1308 machine-readable next step and a rail-labeled allowance block, marks the catalog price indicative next to the live amount, and that the settled response carries the #1310 post-purchase allowance block. Buys NordShield VPN Basic (`buy_vpn`/`{plan:"basic"}`) — a SETTLING product; never CloudNest 50 GB, which is dev's verify-without-settle sweep fixture. Same env as `x402-hosted-mcp-signer` (`QA_HOSTED_MCP_URL`, `QA_X402_BINDING_SIGNER`, `QA_DELEGATION_*`, `QA_DEMO_MERCHANT_URL`) — no new secrets. **Skips** (not fails) when no catalog row matches on dev (#1299 seed not applied) or the hosted MCP does not yet expose `haven_prepare_catalog_purchase` (pre-#1306 deploy). **FAILS (never skips)**, before any of that, if the merchant's discovery document is unreachable, a `qa_fixture` product it names has a listed catalog row on this host, or a `qa_fixture` product cannot be mapped to a catalog `(tool_name, tool_arguments)` pair (#3421 tripwire) |
 | `task-budget-lifecycle` | A task budget opens and closes from **re-served bytes** (#3505, #3491): on a throwaway identity (its agent revoked when the leg ends, #3459; funds nothing) `POST /task-budgets`, then **both** the open and the close are signed from `GET /task-budgets/:id/sign-context` — never the inline typed data `POST /close` also returns, which is the path that passed on the pre-#3491 500 — and the close must return `closed` + `close_tx_hash` and the child must read **disabled on-chain** on the observer. Env: none beyond the base config |
 | `sub-budget-redemption` | An A→B sub-budget is redeemable and its own cap refuses (#3505, #3519): throwaway identity funded ~0.006 USDC from the standing delegation identity; A's budget is partly spent, A issues B a 0.003 grant (the parent-child link is built from the same amount, so the two links are equal by construction), both signed from `GET /sub-budgets/:id/sign-context`; B redeems 0.001 USDC (exact `Transfer` on the observer); then an amount **above both child links and at or below A's root remaining** must be refused **403 `delegation_budget_exceeded`** whose `remaining_atomic` equals **both** child-link readings (read by delegation hash) and is strictly below A's root. **A 502 is a failure, not a pass** — since #3519 the pre-check refuses on a healthy run, so a 502 means the per-link read failed open AND the on-chain enforcer then caught the payment; the result names both causes. The grant is closed through `GET /sub-budgets/:id/sign-context` and read disabled on-chain. Both agents are revoked on every exit. Env: `QA_DELEGATION_AGENT_API_KEY` / `QA_DELEGATION_DELEGATE_PRIVATE_KEY` (funding source only; the standing delegation is never revoked or replaced) |
 | `merchant-locked-budget` | A merchant-locked budget is spent before the open one (#3505, #3331): throwaway identity (open grant from provisioning) plus a second grant built with `merchant_slug: haven-demo-store` and owner-signed client-side; it asserts the merchant **qualifies at run time** (`GET /merchants/haven-demo-store` `funding`: verified payTo + erc7710 — otherwise the leg **fails with the cause, it never skips**), buys a settling product (NordShield VPN Basic) by erc7710, requires the exact USDC `Transfer` treasury→payTo from the observer's logs, and reads both delegations **by hash** (`readOnchainBudget` is by symbol and cannot tell two USDC grants apart): the pinned delegation's remaining dropped by exactly the amount and the open one did not move. Funded ~0.003 USDC per run from the standing identity. Env: `QA_DEMO_MERCHANT_URL` plus the standing delegation identity, as `x402-erc7710-fresh-agent` |
@@ -505,6 +506,68 @@ These scenarios have not run live yet. They are unit-covered and typechecked;
 their first real run is this seeding step, so treat an initial red as
 information about the setup as much as about the code.
 
+#### Haven recorded the merchant settlement (#4119)
+
+Money moving is not the property the receipts headline (#3763) and the
+accounting feed (#3767) book under: that is Haven's **record** of the merchant
+settlement, written only after Haven verified the transaction on-chain. For five
+days in October 2026 the backend refused every SDK settlement report (#3925
+required a payment header the SDK did not yet send, fixed by #4075), and every
+EIP-3009 leg stayed green; a hand-run purchase found it (#4061). So the four
+EIP-3009 legs — `x402-delegation-3009`, `-grace-resume`,
+`x402-hosted-mcp-signer`, and the catalog leg's eip3009 continuation — share one
+check (`packages/qa-agent/src/lib/settlement-record.ts`):
+
+- **The record.** `GET /machine-payments/:id/status` must carry
+  `merchant_settlement_recorded: true`. Absent fails the leg with a message
+  naming the payment id. On the SDK legs it names both causes: the report was
+  refused, or the backend answered it `retryable` (the merchant tx was not yet
+  visible to its node) through every bounded retry (#4215). On the hosted
+  no-tool arm it says the settle's report was not recorded, or was never
+  posted.
+- **The same transaction.** The receipt's `settlement_tx_hash` must equal,
+  case-insensitively, the hash the leg proved on-chain. On its own the receipt
+  hash proves nothing — with no record it falls back to the merchant's
+  unverified echo — which is why the flag is read first.
+- **Not the sweep's record.** The #3888 eip3009 sweep records the same
+  settlement from the chain, but never earlier than 60 s after the funding
+  confirm (its candidate floor; the tick runs every 120 s). Each leg takes an
+  anchor the confirm cannot precede — immediately before `client.fetch`, or
+  before `haven_settle_mcp_tool` — and a record must be seen within **45 s** of
+  it: the 60 s floor less a 15 s margin. `-grace-resume` anchors on its funding
+  submit (`signPayment`) instead, because its funding confirms BEFORE the
+  resume by design; the whole leg runs in about 7–12 s on dev. A record first
+  seen after the window fails the leg — the window is never extended to wait
+  for the sweep.
+- **SDK legs source the hash themselves**, from the paid response's
+  `PAYMENT-RESPONSE` header via the SDK's public `parseMerchantSettlement`, or
+  the tool result's `_meta["x402/payment-response"].transaction` when the
+  header carries none, and prove its receipt `status = 1`.
+- **Hosted legs follow the settle's evidence guidance.** With no next tool and
+  the omitted reason "the purchase is settled; no Haven tool follows" (recorded,
+  or nothing posted — one string for both), the status read taken right at
+  settle-return decides: a record that appears only later is red. The omitted
+  reason saying the hash "was refused" is red whatever the status says. When
+  the settle names `haven_report_settlement_evidence`, the leg calls it with the
+  prefilled `next_arguments` **plus its own `payment_header`** — the prefilled
+  arguments never carry it, and the backend refuses an eip3009 report without
+  it before reading the chain — at most four calls while the answer
+  is retryable, inside the window. Any refusal is red.
+
+The flake risk is stated, not hidden: the backend checks the transaction once
+per report with no wait. On the SDK-direct legs the SDK retries a `retryable`
+answer on its bounded `EVIDENCE_RETRY_DELAYS_MS` schedule — four attempts over
+~7 s, inside the window — since #4215, so a short visibility lag no longer reds
+them; a red now means the transaction was still invisible to the backend's node
+through the last attempt, or the report was refused outright. The #4119 spec
+(spec-review correction 3) keeps the SDK legs strict: a red is investigated,
+not absorbed — never a re-post from the leg.
+
+A second residual is bounded and rare: on the hosted report-tool arm, a
+follow-up Haven accepts but whose status read lands after the 45 s deadline is
+red although the leg's own report made the record. It is left strict on
+purpose.
+
 #### The hosted-MCP leg (`x402-hosted-mcp-signer`, #1154)
 
 This is the topology **every connect-flow user actually runs**, and until #1154
@@ -544,6 +607,11 @@ before `npm run qa:dev` — a stale or absent signer `dist` makes the leg die on
 an import error, or (worse, if merely stale) refuse the v2 context with a Zod
 message about `auth.version`.
 
+Since #4119 the leg also requires Haven to have **recorded** the merchant
+settlement, read right after settle returns and following the settle's
+evidence guidance — see *Haven recorded the merchant settlement*, above. Its
+PASS line names the recorded hash.
+
 Unit coverage for the same seam, which does not need credentials:
 `packages/mcp-server/src/x402-expected-wire-contract.test.ts` pins that the
 backend's expected-context message and the signer's independent reconstruction
@@ -553,7 +621,7 @@ tool schema accepts the real hosted quote shape.
 #### The guided catalog purchase leg (`x402-catalog-guided-purchase`, #1312)
 
 Epic #1305 shipped the GUIDED entry point — `haven_prepare_catalog_purchase` —
-so a coding agent starts from a curated `catalog_id` instead of hand-copying a
+so a coding agent starts from a `catalog_id` instead of hand-copying a
 `merchant_url`/`tool_name`/`tool_arguments` triple, and finishes without ever
 re-threading `payment_required`/`merchant_url`/`tool_name`/`arguments`/
 `mcp_transport` between tool calls. #1306–#1310 landed and unit-proved the five
@@ -580,7 +648,10 @@ preflight's `settlement_scheme`:
   signer fetches it by payment_id, #1355), and settling with `payment_id` +
   `signature` + `payment_header` alone — proving `haven_settle_mcp_tool`'s
   #1307 rehydration actually serves the merchant context rather than merely
-  documenting that it does.
+  documenting that it does. Then, as on `x402-hosted-mcp-signer`, Haven must
+  have **recorded** the merchant settlement (#4119, *Haven recorded the merchant
+  settlement*, above). Dev routes this leg to erc7710, so this shape — and with
+  it the record check — is proven by the leg's unit tests, not by the live run.
 
 Both shapes assert the #1308 guidance, the rail-labeled allowance block, the
 indicative catalog price, and the #1310 post-purchase allowance block.
@@ -778,9 +849,10 @@ beforehand. Preflight's treasury check has only a FAIL floor (one run's cost),
 and preflight output reaches only a run log.
 
 `qa-balances.yml` runs once a day (06:00 UTC, and on `workflow_dispatch`). It
-calls `npm run qa:balances -w packages/qa-agent`, which reads three wallets on
+calls `npm run qa:balances -w packages/qa-agent`, which reads five wallets on
 Base Sepolia and may request testnet faucet ETH for the demo merchant's
-settlement wallet and the dev relayer. Then
+settlement wallet and the dev relayer, and testnet faucet USDC for the two
+agent-eval accounts (#3997). Then
 `scripts/ci/qa-balance-issue.mjs` keeps **one standing issue**, `QA wallet
 balances low` (label `qa-funding`):
 
@@ -789,6 +861,8 @@ balances low` (label `qa-funding`):
 | Delegation treasury | USDC | `GET /machine-payments/agent` with the QA agent key, the same derivation as preflight |
 | Demo-merchant settlement wallet | ETH (gas) | the merchant's own `/healthz` |
 | Dev backend relayer (84532) | ETH (gas) | the repo **variable** `QA_DEV_RELAYER_ADDRESS`, a recorded exception to preflight's "derive, never restate" rule, because no CI-readable source exists (owner decision on #3631) |
+| Eval agent (Hermes lane) | USDC | the repo **variable** `QA_EVAL_HERMES_ACCOUNT` — the lane's eval **smart account** (the payer the eval graders probe), not the delegate EOA (#3997) |
+| Eval agent (Claude Code lane) | USDC | the repo **variable** `QA_EVAL_CLAUDE_ACCOUNT`, which must hold the same address as the `agent-evals` environment's `AGENT_EVALS_AGENT_ACCOUNT` — the balances workflow has no environment and cannot read that one (#3997) |
 
 **What the bands mean.** Runway is the balance divided by the median observed
 daily drop over the last 14 daily readings; a top-up (a rise) is ignored. The
@@ -798,17 +872,23 @@ readings exist, a fixed fallback floor decides, and the row says so:
 - delegation treasury: 1.0 USDC (about 30 runs);
 - demo merchant: its own `warn_floor`, from `/healthz`;
 - dev relayer: 0.01 ETH, the backend's `RELAYER_LOW_BALANCE_WEI`, restated in
-  qa-agent.
+  qa-agent;
+- eval agents: 21 USDC, seven nights of the configured 3 USDC Daily budget
+  (#3997). The Hermes lane's eval agent carries 3 USDC Daily
+  (`allowance_amount: 3000000`, `reset_period_min: 1440`, checked 2026-10-15)
+  and the Claude Code lane is provisioned to the same size; if a lane's Daily
+  budget changes, adjust its row's target and floor.
 
 `warn` means under 7 days of runway. `critical` means under 1 day, or below one
-run's cost: 0.034 USDC for the treasury, the merchant's `fail_floor`, or 0.01 ETH
-for the relayer. `unknown` means a missing config value or a failed read.
+run's cost: 0.034 USDC for the treasury, the merchant's `fail_floor`, 0.01 ETH
+for the relayer, or below one night's eval budget (3 USDC). `unknown` means a
+missing config value or a failed read.
 
 **How the issue behaves.**
 
 - **Before reporting:** bounded CDP Base Sepolia ETH faucet requests, one wallet
   at a time, each accepted claim 0.0001 ETH; a 429 or any faucet error stops
-  that wallet's loop only. Both loops share one six-minute budget.
+  that wallet's loop only. All four loops share one six-minute budget (#3997).
   - **The demo merchant goes first** (#3836). It is topped up whenever it is
     below a 0.004 ETH target (1,600 settlements; #3896), **whatever its band**:
     its `critical` floor is its own payment-refusal point and its fallback
@@ -816,10 +896,22 @@ for the relayer. `unknown` means a missing config value or a failed read.
     between two runs on 2026-10-09. It needs at most 40 claims. It is topped up only when
     its `/healthz` reports `chain_id` 84532 and a valid settlement address;
     otherwise the top-up is skipped with that reason and the row keeps its band.
+  - **The eval agents' USDC loops run before the relayer's** (#3997): each is
+    topped up whenever it is readable and below a 21 USDC target (seven nights
+    of the configured 3 USDC Daily budget — the drainer task can spend the
+    whole remaining budget in one night, so a band trigger fires too late), at
+    most 10 claims of 1 USDC. The faucet limits USDC to 10 USDC per address
+    per rolling 24 hours, separately from ETH, so the cap matches the limit
+    and refilling an empty account takes about three nightly runs. An unset or
+    invalid `QA_EVAL_*` variable is a skipped loop and an `unknown` row —
+    never a request and never a red run. Each eval loop's accepted claims are
+    waited on (like the merchant's) before its re-read.
   - **The dev relayer** is topped up when it is `warn` or `critical`, toward a
-    0.03 ETH target, at most 300 claims.
-  - After both loops, the job waits for the merchant's accepted claims to be
-    mined (#3896): it polls each claim's transaction receipt, every 3 s, for up
+    0.03 ETH target, at most 300 claims. It runs last so its claims cannot use
+    up the shared deadline ahead of the USDC loops.
+  - After the loops, the job waits for the merchant's and the eval accounts'
+    accepted claims to be mined (#3896, #3997): it polls each claim's
+    transaction receipt, every 3 s, for up
     to 60 s or until the shared budget ends. Re-reading straight away recorded
     the pre-top-up balance on 2026-10-10 and 10-11. A claim still unmined then
     is reported as unconfirmed, not as missing. The relayer's claims are spread
@@ -851,7 +943,8 @@ for the relayer. `unknown` means a missing config value or a failed read.
   or one whose title contains the words, is never edited or closed.
 
 The check is read-only except for testnet faucet requests for the demo
-merchant's settlement wallet and the dev relayer. It never signs or moves Haven
+merchant's settlement wallet, the dev relayer, and the two agent-eval accounts
+(USDC only; it receives no eval API or delegate key). It never signs or moves Haven
 or customer funds, and it receives neither a
 delegate private key nor a CDP Wallet Secret.
 
@@ -925,6 +1018,45 @@ is 0.01 ETH.
    `merchant top-up:` log line with accepted claims and more than 0 ETH
    received, a post-top-up merchant balance of at least 0.0039 ETH (the target
    minus one claim), and an `ok` merchant row, before closing #3836 and #3896.
+
+### Top up the eval agent (Hermes lane)
+
+The job does this automatically (#3997): when `QA_EVAL_HERMES_ACCOUNT` holds a
+valid address and the account's USDC balance is below 21 USDC (seven nights of
+the configured 3 USDC Daily budget), it requests Base Sepolia test USDC from
+CDP in 1 USDC claims, at most 10 per run (the faucet's own 10 USDC per-address
+rolling-24h limit), until the balance reaches the target, the cap is hit, the
+shared six-minute budget expires, or CDP returns an error or 429. It waits for
+the claims to be mined before re-reading the account, and logs an
+`eval-hermes top-up:` line. Eval payments are **paymaster-sponsored**
+(`agent-qa.md` § QA wallet balances; `agent-evals.md` § Funding), so the eval
+account needs no ETH. Until the operator sets `QA_EVAL_HERMES_ACCOUNT`, the
+row is `unknown` (not configured) and the run stays green.
+
+Manual fallback: send Base Sepolia USDC (`0x036CbD53842c5426634e7929541eC2318f3dCF7e`)
+to the address the issue names.
+
+### Top up the eval agent (Claude Code lane)
+
+The same loop as the Hermes lane, for the Claude Code lane's eval smart
+account: `QA_EVAL_CLAUDE_ACCOUNT` must hold the SAME address as the
+`agent-evals` environment's `AGENT_EVALS_AGENT_ACCOUNT` (the balances workflow
+has no environment and cannot read that variable). Until it is set, the row is
+`unknown` (not configured) and the run stays green. It logs an
+`eval-claude top-up:` line.
+
+**Operator steps (once, #3997):**
+
+1. Set the repo variables `QA_EVAL_HERMES_ACCOUNT` (the partner supplies the
+   address) and `QA_EVAL_CLAUDE_ACCOUNT` (equal to `AGENT_EVALS_AGENT_ACCOUNT`)
+   in Settings → Secrets and variables → Actions → Variables. Both are the
+   eval agents' SMART accounts (the payer `graders.ts` probes), not the
+   delegate EOAs.
+2. With an eval account below 21 USDC, manually dispatch **QA wallet balances**
+   and require an `eval-hermes top-up:` (and/or `eval-claude top-up:`) log
+   line with accepted USDC claims, a post-top-up balance reflecting them, and
+   the on-chain USDC transfer landing in the Hybrid DeleGator eval account —
+   record the tx hash on #3997 before closing it.
 
 ## Automation & gating
 
@@ -1419,7 +1551,75 @@ standing one (the closed lookup is title-bound and will not reopen a dated one).
 #3337 the issue records a **failure class and its signature**, per run and per failing
 leg, read from the run's attempt logs — triage it by class via
 [Classify the failure](#classify-the-failure), open a [`bug-reports/`](../bug-reports/)
-report for a real regression, and close the `qa-failure` issue once green.
+report for a real regression. **The issue closes itself** (#4069): the
+money-flow job's *Close the standing qa-failure issue on green* step, after
+*Coverage completeness*, runs `qa-failure-issue.mjs --green` on a full-coverage
+green and closes the open standing issue (bot-authored, exact title — a human
+issue carrying the label is never closed) with one comment naming the run; a
+failed lookup writes nothing. Only a run that tested dev counts: a
+`workflow_dispatch` with a `haven_api_url` override, or one from a branch other
+than `dev`, never closes it, while a scheduled or post-deploy green — or a plain
+dispatch on `dev` — does. A failed close is a workflow warning, so an issue-API
+error never turns a green run red. Do not close it by hand; the next failure reopens it.
+
+**The window line (#4236).** Each failure's body and comment also carry one
+`window:` line naming where the red episode started, so the suspect is in the
+thread from its first comment. On 2026-10-20 the first issue attributing a red
+(#4215) came 23.7 h after #2769 reopened, for a one-PR window. The script
+recomputes the line on every failure from the API and never reads it back from
+the body:
+
+- **Last green** is the newest qa-dev run created before this one that
+  `qa-freshness.mjs`'s `selectGreenRun` admits. The run has an evidence event,
+  a branch-labelled event on `dev`, a commit in the failing commit's history
+  (checked through the compare API, because the job's checkout is depth 1),
+  and a `money-flow` **job** success. A run-level `success` is not enough,
+  since a gate-skipped run has one, and the rows `preFilterHarnessCandidates`
+  drops are never read. When a `schedule` green and a `deployment_status`
+  green share a commit, the post-deploy run wins.
+- **First red** is the oldest such run after it whose `money-flow` job failed,
+  or this run. A `schedule` or `workflow_dispatch` endpoint is labelled
+  "(`<event>`; dev tip, deploy not verified)", for example "(schedule; dev tip,
+  deploy not verified)", because its SHA is `dev`'s tip when the run started,
+  not necessarily the deployed commit.
+- **The PRs** are the first-parent chain from first red back to last green.
+  The compare API lists every commit in the range, a merged branch's own
+  commits included, so the chain is walked through `parents[0]`. Each PR is
+  marked for whether it touches a money-path file (the runtime perimeter
+  `moneyPathFiles` matches) and whether it touches the harness
+  (`packages/qa-agent/`), from one `commits/{sha}` read per PR.
+
+The line can also read:
+
+- "window: not a dev run (…)": a dispatch from another branch or with a
+  `haven_api_url` override. Nothing is computed for it.
+- "window: 0 PRs — first red is at the last green's commit (…)": green and
+  red at one commit, so no code changed between them. Read it as a flake, the
+  provider or the environment. Nobody is mentioned.
+- "window: unavailable (…)": a failed or timed-out read, a jobs answer that is
+  not a list or lists no `money-flow` job, a compare that is not `ahead`, or a
+  first-parent line that leaves the compare page or does not reach last green.
+- "window: open-ended — …": no green within the newest 300 runs, or within the
+  lookup budget of calls or of time (the reason says which), so the break may
+  be older.
+
+Every `gh` call has a 30 s bound, and one lookup is capped at 80 calls and
+120 s. The failure step runs inside the `money-flow` job, which holds the
+`qa-dev-money-flow` concurrency group and has no `timeout-minutes`. No window
+outcome can stop the body edit, the comment or the reopen.
+
+**The mention** (captain decision on #4236, 2026-10-21) names the author with
+`@` exactly once per episode: in the reopen comment, or in the body when the
+issue is created. It needs all of these:
+
+- the window is one PR, by a human author;
+- that PR touches a money-path file or the harness;
+- the run class is `haven`, `harness` or `unclassified`. A `provider`,
+  `rate_limit`, `preflight` or `mixed` run is not the author's to fix.
+
+A later failure while the issue is open recomputes the line and names the
+author without `@`. The job's `actions: read` grant (job-level, restating the
+other three) is what lets it list the runs.
 
 ### The dev → main freshness gate
 
@@ -1701,7 +1901,7 @@ everything else is `unclassified`, never a guess. Read the class before reading 
 | `preflight` | the run-level `✗ preflight:` line, and the resource line above it that failed its floor | The harness stopped before any leg ran. #2485: the merchant settlement wallet's gas below its floor. 2026-10-01 → 10-05 (#3631): the delegation treasury at 0.0 USDC, about 40 failing runs. | Top up or fix the named resource; no leg result exists to read. |
 | `harness` | the message of a JS runtime error (`… is not a function`, `… is not defined`, `Cannot read properties of undefined`) — the harness prints `err.message`, never the error's name, so a relayed body quoting `TypeError` does not count — or the run-level `✗ harness crashed:` line | The harness itself threw. No failure in the 40-run sample below carries this signature. A harness defect does not always announce itself: #2443's second failure was intra-attempt contamination between scenarios, and this classifier records it as `unclassified`. | Fix the harness; the product may be fine. |
 | `rate_limit` | `Rate limit exceeded: max <n> x402 payments per hour`, however the leg relays it (`authorize failed (429)`, the SDK's `settleX402Erc7710 failed:`, a hosted `API_ERROR`, a bare FAIL line, `(HTTP 429: …)`); checked first, ahead of every other class (#3541) | Haven's own per-agent x402 cap (`max_x402_per_hour`, default 100, a sliding one-hour window) working as designed, out-run by the harness's own volume. Run 36840685285: about four hand dispatches plus post-deploy runs in an hour on the one QA identity, ten x402 legs refused; attempt 2 passed about 30 s later. Only that body: Haven's other limiters — `moneyPathRateLimit`'s 429 (`Rate limit exceeded, retry in 1 minute`) and `Relayer budget exceeded` — land in `haven` when relayed as `failed (429)`, and in `unclassified` when the status is lost (the SDK, the sweep scenario). | Never a product defect. Stop hand-dispatching runs back to back; the window slides, so the in-step retry often clears it, and a further hand dispatch should be spaced out. |
-| `haven` | the leg's own Haven API call answered `… failed (4xx)` | Haven refused a request the leg expected to succeed. | Read the Haven change that landed before the run. |
+| `haven` | the leg's own Haven API call answered `… failed (4xx)` | Haven refused a request the leg expected to succeed. | Read the Haven change that landed before the run: the issue's `window:` line names the PRs between the last green and the first red, and which of them touch a money-path file or the harness ([the window line](#automated-failure-reporting), #4236). |
 | `unclassified` | none of the above — including the backend's masked `activate failed (502): Could not deploy the account for this budget` and timeouts on a Haven endpoint | Could be the provider underneath or Haven; the masked message does not say. | Read the run log and the backend log for that window. Do not re-dispatch it away: if it recurs, it is a finding. |
 
 The run takes its legs' class when they agree and is `mixed` (with a count per class)
@@ -1716,6 +1916,15 @@ appeared only in an earlier attempt.
 If nothing below matches, the cause may simply be somewhere this session
 cannot look — see [What this session cannot see, and what to ask for](#what-this-session-cannot-see-and-what-to-ask-for) for the artifacts to
 request before proposing a mechanism.
+
+Whatever the class, read the issue's `window:` line before bisecting by hand. It
+names the last green run, the first red run and the first-parent PRs between them
+(#4236). One PR that touches the harness or a money-path file is the first suspect.
+Its author is mentioned on the episode's first comment only when the run class is
+`haven`, `harness` or `unclassified` (the gate in
+[Automated failure reporting](#automated-failure-reporting)). Several PRs, or an
+`open-ended` or `unavailable` window, leave the bisect to you; see
+[Automated failure reporting](#automated-failure-reporting) for what each form means.
 
 ### `ERR_MODULE_NOT_FOUND ... @haven_ai/sdk/dist/index.js`
 
@@ -1949,7 +2158,8 @@ The step that clears it: set `RPC_URL_BASE_SEPOLIA` on the dev backend to a
 dedicated provider endpoint and let it redeploy — after the candidate passes
 `node scripts/ci/rpc-conformance.mjs --url "$CANDIDATE_URL" --chain 84532` (#3336; required,
 see dev-environment.md → *Two Base Sepolia RPCs*), which checks the batch limit,
-the `pending` tag, `eth_sendRawTransaction` and a bounded burst. That is an owner action on the
+the `pending` tag, an `eth_getLogs` block range (500 blocks, #4118),
+`eth_sendRawTransaction` and a bounded burst. That is an owner action on the
 Railway environment, not a code change — until it is done, an outage of the
 public endpoint shows up in qa-dev as if it were a defect.
 
@@ -1959,11 +2169,16 @@ moves the observer node the scenarios assert through. Keep the two variables on
 DIFFERENT endpoints: the harness deliberately reads a second node, so an
 on-chain assertion is never verified against the very node the backend wrote
 through — pointing both at the same URL would reduce every on-chain proof to a
-check that the backend agrees with itself.
+check that the backend agrees with itself. Before `QA_RPC_URL_BASE_SEPOLIA`
+points at a new endpoint, run the same probe with `--logs-range 10`
+(`node scripts/ci/rpc-conformance.mjs --url "$CANDIDATE_URL" --chain 84532 --logs-range 10`):
+the observer reads 10-block `eth_getLogs` windows (`GET_LOGS_MAX_RANGE` in
+`chain.ts`, PR #4086), so the default 500 would measure nothing it does.
 
 ## Related documentation
 
 - [`packages/qa-agent/README.md`](../../packages/qa-agent/README.md) — package and scenario details
+- [`agent-evals.md`](./agent-evals.md) — the model-in-the-loop agent eval suite (#3958, epic #3957): task format, graders, starter tasks, the Hermes runner and its credential inventory
 - [`e2e-qa-runbook.md`](./e2e-qa-runbook.md) — manual agent/merchant coverage
 - [`dev-environment.md`](./dev-environment.md) — shared dev topology
 - [`promoting-dev-to-main.md`](./promoting-dev-to-main.md) — promotion checks

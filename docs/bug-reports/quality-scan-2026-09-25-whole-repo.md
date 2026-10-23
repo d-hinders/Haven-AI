@@ -3,7 +3,6 @@ owner: "@AntonioSaaranen"
 status: current
 covers:
   - .github/workflows/qa-dev.yml
-  - .github/workflows/promotion-digest.yml
   - scripts/ci/qa-failure-issue.mjs
   - scripts/ci/guard-freshness.mjs
   - scripts/ci/change-classifier.mjs

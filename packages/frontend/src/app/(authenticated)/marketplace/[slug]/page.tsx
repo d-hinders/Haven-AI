@@ -1,7 +1,8 @@
 'use client'
 
 import { useState } from 'react'
-import { AlertTriangle, ChevronLeft } from 'lucide-react'
+import { AlertTriangle } from 'lucide-react'
+import { BackLink } from '@haven_ai/ui/BackLink'
 import { Icon } from '@/components/ui/Icon'
 import { notFound as nextNotFound, useParams } from 'next/navigation'
 import { EmptyState } from '@/components/ui/EmptyState'
@@ -9,29 +10,29 @@ import { Skeleton } from '@/components/ui/Skeleton'
 import { Button } from '@/components/ui/Button'
 import Link from 'next/link'
 import { MerchantHeader } from '@/components/marketplace/MerchantHeader'
+import { HowToBuyPanel } from '@/components/marketplace/HowToBuyPanel'
 import { OffersTable } from '@/components/marketplace/OffersTable'
-import { PayWithHavenBlock } from '@/components/marketplace/PayWithHavenBlock'
 import FundMerchantModal, { eligibleFundingAgents } from '@/components/marketplace/FundMerchantModal'
 import { MerchantBudgetsList } from '@/components/marketplace/MerchantBudgetsList'
-import CatalogSubmitModal from '@/components/CatalogSubmitModal'
 import { useAgents } from '@/hooks/useAgents'
-import { chainName } from '@/lib/marketplace'
+import { isActiveAgent, offersOnUserNetwork, openBudgetCoversOffers } from '@/lib/marketplace'
+import { useAuth } from '@/context/AuthContext'
+import { resolveDefaultAccount } from '@/lib/default-account'
+import { useBudgetRemaining } from '@/hooks/useBudgetRemaining'
 import { useMerchant } from '@/hooks/useCatalog'
 import { useMerchantBudgets } from '@/hooks/useMerchantBudgets'
 
 /**
- * The way back on a phone, where Marketplace lives in the More drawer —
+ * The way back on a phone, where Marketplace lives in the More sheet —
  * rendered by EVERY branch of the page (loading, error, merchant-less,
- * success), the `Button` primitive (44 px hit area, focus ring), the same
- * shape as the sweep page's "Back to agent".
+ * success). The app's one back link, `BackLink` (#4028): above the title,
+ * named by the parent alone. The merchant page has no `PageHeader` (its
+ * header is `MerchantHeader`), so it renders the link directly.
  */
 function BackToMarketplace() {
   return (
-    <div className="mb-4">
-      <Button href="/marketplace" variant="tertiary" size="sm" className="-ml-3">
-        <Icon icon={ChevronLeft} className="h-3.5 w-3.5" />
-        Back to Marketplace
-      </Button>
+    <div className="mb-2">
+      <BackLink href="/marketplace" label="Marketplace" />
     </div>
   )
 }
@@ -41,26 +42,40 @@ export default function MerchantPage() {
   const slug = params.slug
   const { merchant, offers, funding = [], loading, error, notFound, refetch } = useMerchant(slug)
   const { agents, loading: agentsLoading, error: agentsError } = useAgents()
-  const [submitOpen, setSubmitOpen] = useState(false)
   const [fundOpen, setFundOpen] = useState(false)
+  // #3981: the offers on the user's own network come first — the chain of the
+  // account a surface falls back to when it needs one (`resolveDefaultAccount`),
+  // the same read the marketplace grid's network filter starts from.
+  const { user } = useAuth()
+  const defaultChainId = resolveDefaultAccount(user?.accounts)?.chain_id ?? null
   const comingSoonForBudgets = merchant?.listing_status === 'coming_soon'
   const {
     budgets: merchantBudgets,
+    loading: merchantBudgetsLoading,
     error: merchantBudgetsError,
     refetch: refetchMerchantBudgets,
   } = useMerchantBudgets(slug, {
     enabled: !comingSoonForBudgets,
   })
+  // #4004: the per-offer budget answer reads what is LEFT on each budget (the
+  // cached, 60 s-polled enforcer read) — not just the cap `GET /agents`
+  // projects, which could answer yes when no agent could actually pay.
+  // #4005: the "How to buy" panel reads the same two wires, so its step 2
+  // and the offers' per-row answers come from one set of verdicts.
+  const { data: budgetRemaining, loading: budgetRemainingLoading, error: budgetRemainingError, refetch: refetchBudgetRemaining } = useBudgetRemaining()
 
   if (loading) {
     return (
       // `aria-busy` + `role="status"`: the skeletons are aria-hidden, so the
       // capture harness's content floor must not certify this frame (and a
       // screen reader must hear that the merchant is still loading).
-      <div className="max-w-5xl space-y-4" role="status" aria-busy="true" aria-label="Loading merchant">
+      <div className="max-w-5xl">
+        {/* Outside the live region, as on agent and account detail (#4028). */}
         <BackToMarketplace />
-        <Skeleton className="h-16 rounded-xl" />
-        <Skeleton className="h-64 rounded-xl" />
+        <div className="space-y-4" role="status" aria-busy="true" aria-label="Loading merchant">
+          <Skeleton className="h-16 rounded-xl" />
+          <Skeleton className="h-64 rounded-xl" />
+        </div>
       </div>
     )
   }
@@ -127,40 +142,58 @@ export default function MerchantPage() {
   const pinnableFunding = verifiedFunding.filter((f) => f.erc7710)
   const hasEligibleAgent = eligibleFundingAgents(agents, funding).length > 0
   const showFundAction = !comingSoon && pinnableFunding.length > 0 && hasEligibleAgent
-  const showOpenBudgetNote = !comingSoon && pinnableFunding.length === 0 && verifiedFunding.length > 0
-  // Round 2 review finding R2-5 (design 3): the merchant CAN be pinned to, but
-  // none of the owner's own agents qualify (wrong chain, revoked, archived) —
-  // the page used to show nothing at all where the action would be. Gated on
-  // `!agentsLoading` so the note never flashes on then off again once agents
-  // resolves and `hasEligibleAgent` flips true (or the plain Fund button
-  // takes over) — before that resolves, this slot renders nothing, exactly
-  // like `showFundAction` already does with an empty `agents` array.
-  // Design review round 3, finding C (code F5): `agents` reads `[]` on a
-  // failed `useAgents` fetch, which is indistinguishable from "no eligible
-  // agent" here — that used to claim "Connect an agent" for a read that
-  // simply failed. `agentsError` splits the two: the note below only fires
-  // once the read actually succeeded and came up empty.
-  const showConnectAgentNote =
-    !comingSoon && !agentsLoading && !agentsError && pinnableFunding.length > 0 && !hasEligibleAgent
-  const showAgentsErrorNote =
-    !comingSoon && !agentsLoading && agentsError && pinnableFunding.length > 0 && !hasEligibleAgent
-  // Design review round 3, finding C: name every pinnable chain rather than
-  // always reading the first — a merchant qualifying on two chains used to
-  // silently drop the second from this sentence.
-  const pinnableChainIds = Array.from(new Set(pinnableFunding.map((f) => f.chain_id)))
-  const pinnableChainLabel =
-    pinnableChainIds.length === 1
-      ? chainName(pinnableChainIds[0]!)
-      : pinnableChainIds.length > 1
-        ? pinnableChainIds.map(chainName).join(' or ')
-        : 'a supported network'
+  // #4005: the panel's step 2 may offer the same action, but only when an
+  // agent it could name is ACTIVE — `eligibleFundingAgents` admits paused and
+  // pending agents (the modal's own shape), and the panel must not point a
+  // paused agent at an action it cannot complete.
+  const hasActiveEligibleAgent = eligibleFundingAgents(agents, funding).some(isActiveAgent)
+  // #4015 owner decision (a), 2026-10-16 — "No need to push for merchant
+  // specific budgets here.": the header hides the action when an active
+  // agent's OPEN budget already pays every offer on the user's network
+  // (the same per-offer verdicts step 2 reads). Only once both budget wires
+  // have answered: unread, it shows as before; it may reappear later as
+  // the budget drains, which is accepted.
+  const budgetsRead = !merchantBudgetsLoading && !budgetRemainingLoading && !merchantBudgetsError && !budgetRemainingError
+  const openBudgetCoversHere =
+    budgetsRead &&
+    openBudgetCoversOffers({
+      offers: offersOnUserNetwork(offers, defaultChainId),
+      agents,
+      budgets: budgetRemaining?.budgets ?? [],
+      merchantBudgets: merchantBudgets ?? [],
+      funding,
+    })
+  const showHeaderFundAction = showFundAction && !openBudgetCoversHere
 
   return (
     <div className="max-w-5xl space-y-6" data-testid="merchant-page">
-      <BackToMarketplace />
-      {/* The merchant header IS the page header — one h1 (a second `PageHeader`
-          made the name two headings, which the visual spec's anchor refused). */}
-      <MerchantHeader merchant={merchant} />
+      {/* The link and the header are one block, so the link sits 8px above
+          the title as it does under PageHeader, not a section gap away. */}
+      <div>
+        <BackToMarketplace />
+        {/* The merchant header IS the page header — one h1 (a second `PageHeader`
+            made the name two headings, which the visual spec's anchor refused).
+            #3981: "Set a budget for this merchant" (#4003 wording) sits in its
+            right-hand actions slot, the way `PageHeader` places actions —
+            withheld when an open budget already covers the offers here
+            (#4015). The helper's width is capped so it never squeezes the
+            merchant's own text (#4015). */}
+        <MerchantHeader
+          merchant={merchant}
+          actions={
+            showHeaderFundAction ? (
+              <div className="flex flex-col items-start gap-1 xl:items-end">
+                <Button size="sm" onClick={() => setFundOpen(true)}>
+                  Set a budget for this merchant
+                </Button>
+                <p className="max-w-[16rem] text-xs text-[var(--v2-ink-3)] xl:text-right">
+                  Give one of your agents a budget that pays only {merchant.name}.
+                </p>
+              </div>
+            ) : undefined
+          }
+        />
+      </div>
 
       {comingSoon ? (
         <EmptyState
@@ -174,46 +207,30 @@ export default function MerchantPage() {
         />
       ) : (
         <>
-          <section>
-            <h2 className="mb-2 text-sm font-semibold text-[var(--v2-ink)]">Pay this with Haven</h2>
-            <PayWithHavenBlock offers={offers} />
-          </section>
-
-          {showFundAction ? (
-            <div>
-              <Button size="sm" onClick={() => setFundOpen(true)}>
-                Fund this merchant
-              </Button>
-              <p className="mt-1 text-xs text-[var(--v2-ink-3)]">
-                Give one of your agents a budget that pays only {merchant.name}.
-              </p>
-            </div>
-          ) : showAgentsErrorNote ? (
-            // Design review round 3, finding C: a failed agents read must not
-            // claim "Connect an agent" — that would tell an owner who already
-            // has an eligible agent to connect a new one, over a read that
-            // simply failed.
-            <p className="text-xs leading-relaxed text-[var(--v2-ink-2)]">
-              Haven could not load your agents just now, so funding is unavailable. Reload the page to try again.
-            </p>
-          ) : showConnectAgentNote ? (
-            <p className="text-xs leading-relaxed text-[var(--v2-ink-2)]">
-              Connect an agent on {pinnableChainLabel} to give it a budget for {merchant.name}.{' '}
-              <Link href="/agents" className="font-medium text-[var(--v2-brand)] hover:underline">
-                Go to Agents
-              </Link>
-            </p>
-          ) : showOpenBudgetNote ? (
-            // #3331 review finding design-12: plain wording, no "pinning it to
-            // a recipient", and its own small heading rather than a bare line.
-            <div className="rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] p-3">
-              <p className="text-xs font-medium text-[var(--v2-ink-3)]">How this merchant is paid</p>
-              <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
-                Payments to {merchant.name} use an agent's open budget, not a merchant-only one — keep that budget
-                open on the agent's page.
-              </p>
-            </div>
-          ) : null}
+          {/* #4005: the "How to buy" panel sits between the header and the
+              offers, and owns what the old connect-agent / agents-error
+              paragraphs above the table used to say — its step 1 names the
+              user's real agents (or the failed read), its step 2 names the
+              budget fix. Coming-soon and no-offer merchants show no panel. */}
+          <HowToBuyPanel
+            merchantName={merchant.name}
+            offers={offers}
+            agents={agents}
+            agentsLoading={agentsLoading}
+            agentsError={agentsError}
+            budgets={budgetRemaining?.budgets ?? []}
+            budgetsPending={merchantBudgetsLoading || budgetRemainingLoading}
+            budgetsError={merchantBudgetsError ?? budgetRemainingError}
+            merchantBudgets={merchantBudgets ?? []}
+            funding={funding}
+            defaultChainId={defaultChainId}
+            fundActionAvailable={showFundAction && hasActiveEligibleAgent}
+            onSetBudget={() => setFundOpen(true)}
+            onRetryBudgets={() => {
+              void refetchMerchantBudgets()
+              void refetchBudgetRemaining()
+            }}
+          />
 
           {merchantBudgetsError ? (
             // #3331 review finding design-8: `useMerchantBudgets().error` was
@@ -231,22 +248,17 @@ export default function MerchantPage() {
 
           <section>
             <h2 className="mb-2 text-sm font-semibold text-[var(--v2-ink)]">Offers</h2>
-            <OffersTable offers={offers} agents={agents} />
+            <OffersTable
+              offers={offers}
+              agents={agents}
+              budgets={budgetRemaining?.budgets ?? []}
+              merchantBudgets={merchantBudgets ?? []}
+              funding={funding}
+              defaultChainId={defaultChainId}
+            />
           </section>
         </>
       )}
-
-      <div>
-        <Button variant="ghost" size="sm" onClick={() => setSubmitOpen(true)}>
-          List your payable service
-        </Button>
-      </div>
-
-      <CatalogSubmitModal
-        open={submitOpen}
-        onClose={() => setSubmitOpen(false)}
-        onVerifiedPayable={() => void refetch()}
-      />
 
       {fundOpen ? (
         <FundMerchantModal

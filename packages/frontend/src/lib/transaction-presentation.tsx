@@ -1,6 +1,8 @@
 import { TransactionMovement } from '@/components/haven'
 import type { AmountCurrency } from '@/components/haven/Amount'
+import { shouldMarkApprox, type ApproxMarkKind } from '@haven_ai/core'
 import type { StatusTone } from '@/components/ui/StatusBadge'
+import { machinePaymentLifecyclePresentation } from '@/lib/machine-payment-lifecycle'
 import { isMachinePaymentSource, parseX402Hostname, paymentSourceTitle } from '@/lib/transaction-labels'
 import { truncate } from '@/lib/format'
 import type { AggregatedTransaction } from '@/types/transactions'
@@ -21,27 +23,12 @@ export type CounterpartyFields = Pick<
   'activityType' | 'agentName' | 'source' | 'x402ResourceUrl' | 'direction' | 'to' | 'from' | 'chainId'
 >
 
-export function transactionTitle(tx: AggregatedTransaction): string {
-  if (tx.titleOverride) return tx.titleOverride
-  if (isDelegateSweep(tx)) return 'Agent funds swept back'
-  if (tx.direction === 'in') return 'Received payment'
-
-  const sourceTitle = paymentSourceTitle(tx.source)
-  if (sourceTitle && tx.agentName) return `${sourceTitle} by ${tx.agentName}`
-  if (sourceTitle) return sourceTitle
-  if (tx.agentName) return `Agent payment by ${tx.agentName}`
-  // "Payment sent by you" is reserved for human-initiated payments; a row
-  // with no human marker renders neutral copy — the Initiator field carries
-  // the attribution state (#2097).
-  if (tx.initiatedBy === 'human') return 'Payment sent by you'
-  return 'Payment sent'
-}
-
 /**
  * Who initiated the row (#2097). "You" is reserved for human-initiated
- * payments (`initiatedBy === 'human'`); agent rows render the agent identity;
- * inbound rows carry no initiator; and missing attribution renders as
- * explicit "Unknown" — never "You".
+ * payments (`initiatedBy === 'human'`, an owner send recorded at submit,
+ * #4099); agent rows render the agent identity; inbound rows carry no
+ * initiator, bar an agent's delegate sweep; and missing attribution renders
+ * as explicit "Unknown" — never "You".
  */
 export function transactionInitiator(tx: AggregatedTransaction): string {
   // Delegate sweeps are agent-attributed regardless of direction — they read
@@ -60,14 +47,32 @@ export function transactionStatus(
   return { label: 'Recovered', tone: 'success' }
 }
 
+/**
+ * The ONE row-badge precedence, shared by every ledger surface (#4288):
+ * a delegate sweep's "Recovered", then the machine-payment lifecycle
+ * ("Confirming", "Needs attention"), then the wire's `statusBadge`, and
+ * finally a failed on-chain payment as "Failed" — the same fallback
+ * `/transactions` renders, so an `isError` row never shows an unlabelled
+ * red amount. One precedence everywhere: a screen that builds its own chain
+ * drifts from this the moment a rule changes.
+ */
+export function transactionRowBadge(
+  tx: AggregatedTransaction,
+): { label: string; tone: StatusTone } | null {
+  return (
+    transactionStatus(tx) ??
+    machinePaymentLifecyclePresentation(tx) ??
+    tx.statusBadge ??
+    (tx.isError ? { label: 'Failed', tone: 'danger' } : null)
+  )
+}
+
 export function transactionMovement(
   tx: AggregatedTransaction,
   resolveAddress?: (address: string) => string | null,
   accountNamesByAddress?: Map<string, string>,
   options?: { noAddress?: boolean },
 ) {
-  if (tx.movementOverride) return tx.movementOverride
-
   if (isDelegateSweep(tx)) {
     return (
       <TransactionMovement
@@ -78,10 +83,34 @@ export function transactionMovement(
   }
 
   const counterparty = counterpartyLabel(tx, resolveAddress, accountNamesByAddress, options)
-  const from = tx.direction === 'in' ? counterparty : tx.accountName
+  // The movement line prints its own "From", so an own-account sender goes in
+  // bare — `counterpartyLabel`'s "From <account>" is the dashboard's title.
+  const ownSender =
+    options?.noAddress && tx.direction === 'in'
+      ? ownAccountSenderName(tx, accountNamesByAddress)
+      : null
+  const from = tx.direction === 'in' ? (ownSender ?? counterparty) : tx.accountName
   const to = tx.direction === 'in' ? tx.accountName : counterparty
 
   return <TransactionMovement from={from} to={to} />
+}
+
+/**
+ * The name of the user's own account an inbound row came from (#4099): the
+ * server-resolved name when one rode along, else the chain-keyed own-account
+ * map entry for `tx.from`. Own accounts only — a contact never names a
+ * deposit. Null for every other deposit.
+ */
+function ownAccountSenderName(
+  tx: Pick<CounterpartyFields, 'from' | 'chainId'>,
+  accountNamesByAddress?: Map<string, string>,
+  resolvedName?: string | null,
+): string | null {
+  return (
+    resolvedName ||
+    accountNamesByAddress?.get(`${tx.from.toLowerCase()}:${tx.chainId}`) ||
+    null
+  )
 }
 
 /**
@@ -93,16 +122,20 @@ export function transactionMovement(
  * surfaces, so every `truncate()` fallback is replaced by calm copy — a sweep
  * reads "Returned from <agent>", an x402 row without a recorded resource URL
  * falls back to its source title ("Agent payment"), an inbound row reads
- * "Deposit", and an address nothing resolves (no own-account name, no
+ * "Deposit" — or "From <account>" when its sender is another of the user's
+ * own accounts (the backend's `resolvedName`, else the chain-keyed
+ * `accountNamesByAddress` entry, #4099) — and an address
+ * nothing resolves (no own-account name, no
  * contact, no pre-resolved counterparty name) reads "New recipient" rather
  * than `0xA873…DD35`. `options.resolvedName` carries a name resolved
  * server-side for the counterparty (the activity groups' `merchantName`,
  * #3824) — the groups expose no chain-scoped address map, so the client
  * cannot re-run the `accountNamesByAddress` lookup itself.
  *
- * The default mode is byte-identical to the pre-#3810 behaviour:
- * `TransactionsTable` and `TransactionDetailPanel` keep rendering truncated
- * addresses until #3811 retires them.
+ * The default mode is byte-identical to the pre-#3810 behaviour. The list
+ * rows pass `{ noAddress: true }` (#3811), and so does
+ * `TransactionDetailPanel` since #4267: its title matches the row, and every
+ * address sits shortened under its Technical details.
  */
 export function counterpartyLabel(
   tx: CounterpartyFields,
@@ -123,7 +156,17 @@ export function counterpartyLabel(
         'Agent payment'
       )
     }
-    if (tx.direction === 'in') return 'Deposit'
+    // #4099 (owner decision, 2026-10-20): a server-resolved sender name — only
+    // a transfer from another of the user's own accounts — reads "From
+    // <account>", so the title says the money LEFT that account (a bare name
+    // reads as the account that received it). Screens without a server name
+    // (the account page, /transactions) look the sender up in the own-account
+    // map — chain-keyed only, never a contact. Every other deposit stays
+    // "Deposit".
+    if (tx.direction === 'in') {
+      const sender = ownAccountSenderName(tx, accountNamesByAddress, options.resolvedName)
+      return sender ? `From ${sender}` : 'Deposit'
+    }
 
     const address = tx.to
     const addressKey = address.toLowerCase()
@@ -191,11 +234,16 @@ export function activityCounterparty(item: PaymentActivityItem): CounterpartyFie
 }
 
 /**
- * The fiat figure a transaction row renders in the user's currency (#3805,
- * #3824), as `<Amount>`'s currency mode wants it: book-time `convertedAmount`
- * plain, or the serve-time `approxAmount` with `≈` — one or the other, never
- * both on the wire. A row with neither prices to `amount: null`, which
- * `<Amount>` renders as an em dash: an unknown valuation is never 0.
+ * The fiat figure a transaction renders in the user's currency (#3805,
+ * #3824), as `<Amount>`'s currency mode wants it: book-time `convertedAmount`,
+ * or the serve-time `approxAmount` — one or the other, never both on the
+ * wire. A row with neither prices to `amount: null`, which `<Amount>` renders
+ * as an em dash: an unknown valuation is never 0.
+ *
+ * `approx` is the "≈" DECISION for where the figure renders (`kind`), taken
+ * by the one rule in `@haven_ai/core`'s `shouldMarkApprox` (#4165): never on
+ * a list row (#3950), never on a booked figure, never for USDC shown in USD;
+ * otherwise on the detail panel. Callers pass it straight to `<Amount>`.
  *
  * The backend strikes both amounts in the user's `currency_preference`, so
  * the currency arrives ON the row; nothing here reads preferences. The
@@ -203,16 +251,27 @@ export function activityCounterparty(item: PaymentActivityItem): CounterpartyFie
  * (`DEFAULT_TRANSACTION_CURRENCY`), reached only if a producer ever omits the
  * currency beside a present amount.
  */
-export function transactionFiat(tx: Pick<
-  AggregatedTransaction,
-  'convertedAmount' | 'convertedCurrency' | 'approxAmount' | 'approxCurrency'
->): { amount: number | null; currency: AmountCurrency; approx: boolean } {
+export function transactionFiat(
+  tx: Pick<AggregatedTransaction, 'convertedAmount' | 'convertedCurrency' | 'approxAmount' | 'approxCurrency'> &
+    Partial<Pick<AggregatedTransaction, 'chainId' | 'tokenSymbol' | 'asset'>>,
+  kind: ApproxMarkKind,
+): { amount: number | null; currency: AmountCurrency; approx: boolean } {
   if (tx.convertedAmount != null && tx.convertedCurrency) {
     return { amount: Number(tx.convertedAmount), currency: tx.convertedCurrency, approx: false }
   }
+  const currency = tx.approxCurrency ?? 'SEK'
+  const amount = tx.approxAmount != null ? Number(tx.approxAmount) : null
   return {
-    amount: tx.approxAmount != null ? Number(tx.approxAmount) : null,
-    currency: tx.approxCurrency ?? 'SEK',
-    approx: true,
+    amount,
+    currency,
+    approx:
+      amount != null &&
+      shouldMarkApprox({
+        repriced: true,
+        chainId: tx.chainId,
+        tokenSymbol: tx.tokenSymbol ?? tx.asset,
+        displayCurrency: currency,
+        kind,
+      }),
   }
 }

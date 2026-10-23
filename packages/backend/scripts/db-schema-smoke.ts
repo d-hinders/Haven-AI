@@ -47,7 +47,6 @@ import {
   MARK_TASK_BUDGET_CLOSED_SQL,
   MARK_TASK_BUDGET_CLOSING_SQL,
   MARK_TASK_BUDGET_OPEN_SQL,
-  SELECT_OPEN_TASK_BUDGET_FOR_PAYMENT_SQL,
   SUM_OPEN_RESERVED_ATOMIC_SQL,
 } from '../src/infra/repositories/task-budgets.js'
 import {
@@ -67,6 +66,7 @@ import {
   LIST_LIVE_BROADCAST_NONCES_FROM_SQL,
 } from '../src/infra/repositories/outbound-txs.js'
 import {
+  RECEIVED_GRANTS_FOR_AGENTS_SQL,
   SUM_OPEN_RESERVED_FOR_BUDGET_DELEGATION_SQL,
   SUM_OPEN_RESERVED_FOR_PARENT_SQL,
 } from '../src/infra/repositories/sub-budgets.js'
@@ -215,6 +215,9 @@ import {
 import {
   CONFIRM_X402_INTENT_SQL,
   COUNT_RECENT_X402_INTENTS_SQL,
+  EIP3009_SETTLEMENT_HASH_LOCK_SQL,
+  EIP3009_SETTLEMENT_INTENT_LOCK_SQL,
+  FIND_RECORDED_EIP3009_SETTLEMENT_SQL,
   FAIL_X402_INTENT_SQL,
   FIND_ACTIVE_X402_INTENT_BY_KEY_SQL,
   FIND_EVIDENCE_ORPHANED_ERC7710_INTENTS_SQL,
@@ -223,6 +226,7 @@ import {
   FIND_X402_INTENT_BY_KEY_SQL,
   GET_MAX_X402_PER_HOUR_SQL,
   MARK_INTENT_SUBMITTED_FOR_SETTLEMENT_SQL,
+  RECORD_EIP3009_MERCHANT_SETTLEMENT_SQL,
   RECORD_X402_SIGNATURE_SQL,
 } from '../src/infra/repositories/x402-authorizations.js'
 import {
@@ -281,6 +285,10 @@ import {
   LIST_SESSION_ACCOUNTS_FOR_USER_SQL,
 } from '../src/infra/repositories/smart-accounts.js'
 import {
+  FIND_OWNER_TRANSFER_MATCHES_SQL,
+  RECORD_OWNER_TRANSFER_SQL,
+} from '../src/infra/repositories/owner-transfers.js'
+import {
   FIND_CONFIRMED_X402_PAYMENT_INTENTS_SQL,
   FIND_DELEGATE_SWEEP_AGENT_MATCHES_SQL,
   FIND_MACHINE_PAYMENT_EVIDENCE_DETAIL_SQL,
@@ -328,19 +336,25 @@ import {
   DASHBOARD_SPEND_GROUPS_SQL,
   FAILED_INTENTS_7D_SQL,
   PENDING_AGENT_SETUP_STATUSES_SQL,
-  RECEIVED_SUB_BUDGETS_FOR_AGENTS_SQL,
   REFUSAL_BUCKETS_BY_AGENT_SQL,
 } from '../src/infra/repositories/dashboard.js'
 import {
   LIST_AGENT_PAYMENTS_SQL,
+  LIST_AGENT_PAYMENTS_FILTERED_SQL,
+  COUNT_AGENT_PAYMENTS_FILTERED_SQL,
   LIST_FEED_PAYMENTS_SQL,
   SUM_AGENT_SPEND_ALL_TIME_SQL,
   SUM_AGENT_SPEND_TODAY_SQL,
-  SUM_AGENT_SPEND_WEEK_SQL,
 } from '../src/infra/repositories/agent-activity.js'
+import {
+  LIST_AGENT_REFUSALS_FILTERED_SQL,
+  COUNT_AGENT_REFUSALS_FILTERED_SQL,
+} from '../src/infra/repositories/payment-refusals.js'
 import {
   LIST_TOOL_INVOCATIONS_FOR_AGENT_SQL,
   LIST_TOOL_INVOCATIONS_FOR_AGENTS_SQL,
+  LIST_TOOL_INVOCATIONS_FOR_AGENT_FILTERED_SQL,
+  COUNT_TOOL_INVOCATIONS_FOR_AGENT_FILTERED_SQL,
 } from '../src/infra/repositories/agent-tool-invocations.js'
 import {
   LIST_AGENT_NAMES_FOR_USER_SQL,
@@ -514,7 +528,7 @@ const QUERIES: SmokeQuery[] = [
   // against the real schema — the ANY($n) array parameters and the
   // `WITH legs AS` CTEs are part of the checked surface, same as the rest.
   { name: 'dashboard: pending-agent setup statuses', sql: PENDING_AGENT_SETUP_STATUSES_SQL },
-  { name: 'dashboard: received sub-budgets', sql: RECEIVED_SUB_BUDGETS_FOR_AGENTS_SQL },
+  { name: 'agents: received grants (chain-qualified)', sql: RECEIVED_GRANTS_FOR_AGENTS_SQL },
   { name: 'dashboard: 7/30-day spend groups (netting + pace)', sql: DASHBOARD_SPEND_GROUPS_SQL },
   { name: 'dashboard: distinct merchants + top merchant', sql: DASHBOARD_MERCHANTS_SQL },
   { name: 'dashboard: per-agent last payment', sql: AGENT_LAST_PAYMENT_SQL },
@@ -528,11 +542,24 @@ const QUERIES: SmokeQuery[] = [
   { name: 'agent-activity: single-agent payments (evidence joins)', sql: LIST_AGENT_PAYMENTS_SQL },
   { name: 'agent-activity: feed payments (evidence joins)', sql: LIST_FEED_PAYMENTS_SQL },
   { name: 'agent-activity: spend all time', sql: SUM_AGENT_SPEND_ALL_TIME_SQL },
-  { name: 'agent-activity: spend today', sql: SUM_AGENT_SPEND_TODAY_SQL },
-  { name: 'agent-activity: spend this week', sql: SUM_AGENT_SPEND_WEEK_SQL },
+  // #3977: the today window is parameterised — the route derives the caller's
+  // local-day bounds and passes them as $2/$3, which PREPARE type-checks.
+  { name: 'agent-activity: spend today (parameterised local day)', sql: SUM_AGENT_SPEND_TODAY_SQL },
+  // #4229: the kinded read. The nullable-parameter predicates are part of the
+  // checked surface — PREPARE type-checks every `$n::t IS NULL OR …` arm.
+  { name: 'agent-activity: filtered single-agent payments (page)', sql: LIST_AGENT_PAYMENTS_FILTERED_SQL },
+  { name: 'agent-activity: filtered single-agent payments (count)', sql: COUNT_AGENT_PAYMENTS_FILTERED_SQL },
+  // #4323: the kind=refusals read — page + total over the (agent_id,
+  // created_at)-indexed refusal ledger. The nullable-parameter predicates and
+  // the two-column ILIKE are the checked surface.
+  { name: 'agent-activity: filtered refusals for agent (page)', sql: LIST_AGENT_REFUSALS_FILTERED_SQL },
+  { name: 'agent-activity: filtered refusals for agent (count)', sql: COUNT_AGENT_REFUSALS_FILTERED_SQL },
   // One statement, two surfaces (#1179) — the dashboard and the activity feed.
   { name: 'agent-tool-invocations: read for agent', sql: LIST_TOOL_INVOCATIONS_FOR_AGENT_SQL },
   { name: 'agent-tool-invocations: read for agent set', sql: LIST_TOOL_INVOCATIONS_FOR_AGENTS_SQL },
+  // #4229: the kind=tool_calls read — page + the total/error-count pair.
+  { name: 'agent-tool-invocations: filtered read for agent (page)', sql: LIST_TOOL_INVOCATIONS_FOR_AGENT_FILTERED_SQL },
+  { name: 'agent-tool-invocations: filtered counts (total + error)', sql: COUNT_TOOL_INVOCATIONS_FOR_AGENT_FILTERED_SQL },
   { name: 'agents: name map for activity feed', sql: LIST_AGENT_NAMES_FOR_USER_SQL },
   {
     // Every authenticated agent request runs this, and it is where
@@ -579,6 +606,12 @@ const QUERIES: SmokeQuery[] = [
     name: 'x402: exact-amount idempotency reload',
     sql: FIND_X402_INTENT_BY_KEY_SQL,
   },
+  // #3927: the eip3009 merchant-settlement writer — its two advisory locks
+  // (hash, then the prefixed intent key), the pre-read and the guarded write.
+  { name: 'x402: eip3009 settlement hash lock (#3927, imported)', sql: EIP3009_SETTLEMENT_HASH_LOCK_SQL },
+  { name: 'x402: eip3009 settlement intent lock (#3927, imported)', sql: EIP3009_SETTLEMENT_INTENT_LOCK_SQL },
+  { name: 'x402: eip3009 recorded settlement pre-read (#3927, imported)', sql: FIND_RECORDED_EIP3009_SETTLEMENT_SQL },
+  { name: 'x402: eip3009 merchant-settlement record (#3927, imported)', sql: RECORD_EIP3009_MERCHANT_SETTLEMENT_SQL },
   // Two pasted session-rail entries were DELETED here (#1165): the
   // recordRotatedSession guarded switch (its source died with the #834
   // retirement — no such function exists in src) and a session-shaped
@@ -711,10 +744,10 @@ const QUERIES: SmokeQuery[] = [
     name: 'task budgets: mark closed (open/closing/pending, #3329)',
     sql: MARK_TASK_BUDGET_CLOSED_SQL,
   },
-  {
-    name: 'task budgets: select open for payment (#3329)',
-    sql: SELECT_OPEN_TASK_BUDGET_FOR_PAYMENT_SQL,
-  },
+  // #3919 S-B: the former 'task budgets: select open for payment (#3329)'
+  // PREPARE is gone with the deleted payment-time selector — no production
+  // caller, and the named openTaskBudgetSql predicate is the one spelling of
+  // "open" now (it PREPAREs inside the statements above).
   {
     name: 'agents: lock before opening re-key',
     sql: LOCK_OWNED_AGENT_FOR_REKEY_OPENING_SQL,
@@ -941,6 +974,8 @@ const QUERIES: SmokeQuery[] = [
   { name: 'tx-history: account ownership, pinned chain', sql: FIND_ACCOUNT_OWNERSHIP_FOR_CHAIN_SQL },
   { name: 'tx-history: payment_intents agent attribution', sql: FIND_PAYMENT_INTENT_AGENT_MATCHES_SQL },
   { name: 'tx-history: delegate_sweeps agent attribution', sql: FIND_DELEGATE_SWEEP_AGENT_MATCHES_SQL },
+  { name: 'owner-transfers: owner send attribution (#4099)', sql: FIND_OWNER_TRANSFER_MATCHES_SQL },
+  { name: 'owner-transfers: record an owner send (#4099)', sql: RECORD_OWNER_TRANSFER_SQL },
   { name: 'tx-history: confirmed x402 payment_intents funding', sql: FIND_CONFIRMED_X402_PAYMENT_INTENTS_SQL },
   { name: 'tx-history: machine-payment evidence detail', sql: FIND_MACHINE_PAYMENT_EVIDENCE_DETAIL_SQL },
   { name: 'catalog-submissions: insert with pending-host dedupe', sql: INSERT_CATALOG_SUBMISSION_SQL },

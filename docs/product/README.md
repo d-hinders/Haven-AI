@@ -12,14 +12,25 @@ covers:
   - packages/frontend/tailwind.config.js
   - packages/frontend/src/components/ui/**
   - packages/frontend/src/components/haven/**
-  - packages/frontend/src/components/ReceiveFundsModal.tsx
-  - packages/frontend/src/components/AddFundsModal.tsx
+  - packages/frontend/src/components/ReceiveDialog.tsx
   - packages/frontend/src/components/ConnectAgentModal.tsx
+  - packages/frontend/src/components/connect-agent/ConnectAgentFlow.tsx
+  - packages/frontend/src/components/connect-agent/InlineAgentSetup.tsx
   - packages/frontend/src/components/EditAgentModal.tsx
   - packages/frontend/src/components/DelegationBudgetCard.tsx
   - packages/frontend/src/components/OnchainActionGate.tsx
   - packages/frontend/src/hooks/useEscapeToClose.ts
-last-verified: "2026-10-12"
+  - packages/ui/src/tokens.css
+  - packages/ui/src/BackLink.tsx
+  - packages/ui/src/Button.tsx
+  - packages/ui/src/Card.tsx
+  - packages/ui/src/Input.tsx
+  - packages/ui/src/Tooltip.tsx
+  - packages/frontend/src/app/(authenticated)/dashboard/**
+  - packages/frontend/src/components/DashboardOnboardingGuide.tsx
+  - packages/frontend/src/components/AuthenticatedShell.tsx
+  - packages/frontend/src/components/sidebar/Sidebar.tsx
+last-verified: "2026-10-16"
 ---
 
 # Haven Product & UX Guide
@@ -44,7 +55,8 @@ When these docs overlap, use this order of authority:
 
 The old dark app system is retired. Dark mode since #2927 is a different thing:
 the sanctioned v2 token set now carries a dark palette (re-declared in the two
-mechanically-enforced blocks in `globals.css`), `ThemeProvider` and
+mechanically-enforced blocks in `packages/ui/src/tokens.css`, where the palette
+moved from `globals.css` in #3508), `ThemeProvider` and
 `ThemeToggle` exist, and users choose light, dark, or system in Settings → Theme. Do
 not extend old dark token patterns, gradient buttons, glow shadows, or hard
 dark-modal surfaces — dark styling comes from the v2 tokens flipping under the
@@ -79,6 +91,25 @@ explainers all at once just because those components exist. Add detail
 progressively inside the relevant action flow, detail page, modal, or after the
 user dismisses setup.
 
+On the dashboard today, the setup steps are the "Needs attention" card, titled
+"Get started" with an "N of 3 done" count, until the first agent payment. "Hide
+for now" hides them in that browser until another step completes; after the
+first payment one dismissible "You're set up" line takes their place. Only the
+active step carries a primary button; connecting an agent early is offered at
+secondary weight. While the steps show and the USDC step is not done, the card
+holds back its low-balance and zero-USDC items. When every account is also
+known to hold no USDC, the page is a focused view: the money card and this card
+only, with Agents and Activity hidden, and the money card's Add funds steps
+down beside Deposit address so step 1's is the one primary Add funds.
+
+On `/agents`, a user with no agents gets the connect flow itself, inline, in
+place of an empty state (#4065): the card "Connect your first agent" with the
+same steps as the connect dialog. While it shows, the page hides what would be
+empty or competing — the header Connect agent, the list summary's count, the
+toolbar and the list — so the one setup action is the screen. (The page has no
+"Agents N" count chip since #4209; the summary line owns the count.) See
+[screen-recipes.md](./screen-recipes.md) § Agent List.
+
 ---
 
 ## 2. Language
@@ -101,12 +132,12 @@ High-level voice rules:
 - `/analytics` is the reporting surface of the authenticated app (epic
   [#2944](https://github.com/d-hinders/Haven-AI/issues/2944)): what the
   account's agents did with their money in a chosen window, read-only, with
-  its sidebar entry after *Transactions* and its recipe in
+  its sidebar entry after *Dashboard* in the Overview group and its recipe in
   [screen-recipes.md](./screen-recipes.md#analytics).
 - Detail routes use an id: `/accounts/[accountId]`, `/agents/[agentId]`.
 - Legacy singular collection routes should redirect to the plural route.
 - Navigation items are stable nouns. Actions such as Send, Receive, Add funds, and Approve live inside the relevant screen.
-- Authenticated pages use the shared shell: sidebar navigation, TopBar breadcrumbs/back links on detail routes, and a PageHeader in the page body.
+- Authenticated pages use the shared shell: sidebar navigation and a PageHeader in the page body. Detail pages carry their back link in the page, above the title.
 - Every "View all" must resolve to a real page and preserve useful filters in the URL.
 - Empty states need a clear next action.
 - Reused concepts should share components. Transaction lists, action buttons, modals, and empty states should not fork visually without a reason.
@@ -124,16 +155,16 @@ Core rules:
   `color-scheme`/`data-theme` — never hard-coded light-only colors.
 - Primary buttons use solid brand color: `bg-[var(--v2-brand)]` with `hover:bg-[var(--v2-brand-strong)]`.
 - No gradient buttons. The brand gradient is reserved for the app wordmark and one restrained hero accent phrase.
-- Flat cards use the `--v2-surface` token (white in light, its dark counterpart
+- Flat cards use the `--v2-bg` token (white in light, its dark counterpart
   in dark) with `border-[var(--v2-border)]`, v2 radius, and the v2 card shadow.
 - Raised cards are prominent page anchors such as the account detail total balance card; the dashboard money panel is ONE raised card (#3897): balance, sparkline and actions on the left, the 30-day spending on the right as a divided section, stacked below `lg`.
 - Other elevations already present in the shared `Card` primitive, including
   the restrained tinted `anchor` tier, must match the live `/design-system`
-  reference and remain secondary to the page's primary anchor. The static
-  `design-system.md` card table does not yet document `anchor`; treat that as
-  documentation debt, not permission to invent another tier.
-- Modals use the themed surface token and a darkened blurred backdrop (the
-  backdrop darkens whichever theme is active).
+  reference and remain secondary to the page's primary anchor.
+  `design-system.md` § Cards says when to use `anchor`; do not invent another
+  tier.
+- Modals use the themed `--v2-bg` token and a solid darkened backdrop with no
+  blur (the backdrop darkens whichever theme is active).
 - Avoid old dark app classes for new work: `bg-gray-*`, `text-gray-*`, dark-only `zinc` surfaces, glow shadows, and white alpha borders.
 - Use semantic colors only for their meaning: success, warning, danger.
 - Use `.v2-tabular` on financial values, counters, percentages, addresses, and other numeric strings that need visual stability.
@@ -146,7 +177,7 @@ Before shipping a UI change, compare it against an existing v2 screen with the s
 
 ### Buttons
 
-- Primary: solid brand, white text, v2 button shadow.
+- Primary: solid brand, `--v2-ink-on-brand` text (white in light, dark ink in dark), v2 button shadow.
 - Secondary/ghost: themed surface background, subtle border, themed ink text.
 - Destructive: danger color and explicit verb label.
 - Loading buttons keep their dimensions and clearly indicate work is in progress.
@@ -155,7 +186,7 @@ Before shipping a UI change, compare it against an existing v2 screen with the s
 
 - Authenticated pages use `PageHeader`.
 - One h1 per page. Use the PageHeader action slot for page-level CTAs.
-- Detail pages rely on TopBar back links; do not duplicate a second large back affordance unless the workflow needs it.
+- Detail pages carry one back link above the title: `PageHeader`'s `back` prop, or `BackLink` in a branch with no `PageHeader` (loading, not found, the merchant page's own header), so every state of the page has it. It names the parent only ("Agents", never "Back to …"); a sub-page of a detail route (e.g. `/agents/:id/sweep`) points at that detail page. Do not add a second back affordance unless the workflow needs it.
 - Do not use marketing hero type on dashboards, tables, settings, or operational views.
 
 ### Cards And Rows
@@ -167,22 +198,22 @@ Before shipping a UI change, compare it against an existing v2 screen with the s
 
 ### Tables And Activity
 
-- Full `/transactions` history uses the semantic full-page `TransactionsTable`.
-- Sortable headers need `aria-sort` and clear labels.
-- Amount sorting must use raw numeric values, not formatted strings.
-- Account and agent detail pages may use the card/compact `TransactionsTable`
-  variants for scoped, sortable histories.
-- Short non-sortable previews such as Dashboard use `TransactionActivityRow`.
+- Every transaction list uses `TransactionActivityRow`: compact previews such
+  as Dashboard, and in ledger mode under day bands the full `/transactions`
+  history and the account and agent Activity tabs (per #4266).
+- Where a generic `Table` has sortable headers, they need `aria-sort` and clear
+  labels, and amount sorting must use raw numeric values, not formatted strings.
 - Mobile table views should collapse secondary metadata while preserving the
-  direction, activity/movement, amount, and external detail link. Date may move
-  to a detail surface.
+  row's primary label and figures; secondary detail may move to a detail
+  surface.
 
 ### Modals
 
 - Modal body should fit within the viewport and scroll internally when needed.
 - Close affordances: close button, Escape, and backdrop click unless an irreversible signing/execution step is running.
-- Backdrop should blur and slightly darken the page so the modal stands out on
-  the themed surfaces behind it.
+- Backdrop darkens the page with a solid overlay so the modal stands out on the
+  themed surfaces behind it. No `backdrop-filter` blur: it is deliberately left
+  out for performance (`.v2-modal-backdrop` in `globals.css`).
 - Modals must use dialog semantics, labelled titles, focus trap, and focus return after close.
 - Never nest modals. Use inline confirmation panels or close the parent before opening a confirm dialog.
 

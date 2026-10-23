@@ -115,12 +115,6 @@ export const SCAN_FILES = [
   // skill" button (SetupStates.tsx) as `haven-pay/SKILL.md`, then read by an
   // agent as instructions. The originating case for this allowlist.
   'packages/frontend/src/lib/agent-skill-bundle.ts',
-  // #2535: the onboarding prompt a user pastes to their agent. Agent-facing
-  // prose living outside SCAN_DIRS, exactly like the skill bundle above — its
-  // canonical twin `packages/sdk/src/agent-guidance.ts` is already listed below,
-  // so listing this copy keeps the gate reading BOTH sides of a byte-pinned pair
-  // rather than only the source.
-  'packages/frontend/src/lib/agent-onboarding-prompt.ts',
   // The other artifact of that same download flow: `buildHandoff` /
   // `buildDotenv` become README.md and .env.example inside the SDK-starter zip.
   'packages/frontend/src/lib/agent-handoff.ts',
@@ -137,18 +131,28 @@ export const SCAN_FILES = [
   // note, the delete confirm's promotion promise. Extracted from the modals
   // the same way #2195/#3167 extracted theirs, so the same gate must read it.
   'packages/frontend/src/lib/organization-copy.ts',
+  // #3988: the budget-authority helper — owns the "Spends from <parent>'s
+  // budget(s)" line and the "No budget" decision shared by the dashboard row,
+  // the /agents card, the Budget facet, the Largest-budget sort and the
+  // account detail page. User-facing prose living outside SCAN_DIRS, exactly
+  // like the copy modules above.
+  'packages/frontend/src/lib/agent-budget.ts',
   // Credential-row labels ("Passkey · added {date}", "Passkey N") rendered by
   // WalletButton.tsx and AccountSignersCard.tsx. copy-guidelines.md § "Name
   // credentials 'passkey'" (#1679) specifies this string by name (#2333).
   'packages/frontend/src/lib/passkeyLabels.ts',
   // Transaction-row copy — titles, initiator, status and the settlement-scheme
-  // label ("Payment sent by you", "Agent funds swept back", "Recovered",
-  // "x402 payment"). Extracted out of the row components so the table, the
+  // label ("Agent payment", "Returned from <agent>",
+  // "Recovered", "EIP-3009"). Extracted out of the row components so the table, the
   // detail drawer and the CSV agree (#2333). `transaction-presentation.tsx`
   // renders JSX: it is a file the DIRECTORY scan would already have caught had
   // it lived one level up in `components/`.
   'packages/frontend/src/lib/transaction-labels.ts',
   'packages/frontend/src/lib/transaction-presentation.tsx',
+  // #4227: the Tool calls tab's row labels ("Checked a payment", "Quoted a
+  // paid API") and the error-code words — extracted UI copy living outside
+  // SCAN_DIRS, exactly like the label modules above.
+  'packages/frontend/src/lib/tool-call-labels.ts',
   // The dashboard's 7-day summary sentences (#3807) — fixed templates built
   // from the overview's own figures; every branch's exact output is pinned by
   // its unit test. Lives in lib/ so the pure function is testable, so it is
@@ -190,7 +194,7 @@ export const SCAN_FILES = [
   // `src/app/demo.md/route.ts`, a Route Handler under `src/app` that the
   // directory scan DOES cover — but the route handler only imports this
   // constant, so the actual prose lives here, one level outside SCAN_DIRS,
-  // exactly like the skill bundle and onboarding prompt above.
+  // exactly like the skill bundle above.
   'packages/frontend/src/lib/demo-md-content.ts',
 ]
 
@@ -279,6 +283,20 @@ export function missingTargets(entries, exists) {
 // Multi-word banned phrases (from copy-guidelines.md's terminology mapping +
 // the Vale Haven.Terminology list). Each maps to the preferred user-facing term.
 export const BANNED = [
+  // Owner money actions say approve, not sign (copy-guidelines.md, owner decision 2026-10-16).
+  ['waiting for your signature', "'Waiting for your approval…'"],
+  ['signature was cancelled', "'Approval was cancelled.'"],
+  ['no signature yet', "'No approval yet'"],
+  ['sign new budget', "'Approve new budget'"],
+  ['you sign once', "'You approve once'"],
+  // Say passkey, never a platform name (copy-guidelines.md, owner decision
+  // 2026-10-20, #4168). Measured before adding: every hit in the scanned set
+  // was reworded in the same change, so no baseline entry. A biometric
+  // ("your face or fingerprint") has no unambiguous literal and is left to
+  // review.
+  ['face id', "'passkey' ('one passkey prompt')"],
+  ['touch id', "'passkey' ('one passkey prompt')"],
+  ['windows hello', "'passkey' ('usually your device's screen lock')"],
   ['spending policies', 'agent rules'],
   ['spending policy', 'agent rule'],
   ['policy engine', 'agent rules'],
@@ -387,7 +405,7 @@ export const BANNED = [
   // a single-line literal match. Reword the claim ("the key we issued you") and
   // it goes green. The claim is what the avoid list bans; the phrase is only
   // what a matcher can hold.
-  ['haven signs and settles', "the real actor: 'signed by your agent's key and constrained by the budget you signed'"],
+  ['haven signs and settles', "the real actor: 'signed by your agent's key and constrained by the budget you approved'"],
   ['haven gave you', 'the credential is generated on the user’s device; Haven never receives the signing key'],
 ]
 

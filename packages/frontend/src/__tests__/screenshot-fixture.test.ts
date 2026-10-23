@@ -135,6 +135,40 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
     expect(fx('/contacts/ct-1/history')).toBeNull()
   })
 
+  // #4307: the empty fixture and the guards it exercises.
+  describe('empty-fixture robustness (#4307)', () => {
+    it('carries `balances: []` — the account page can show a brand-new header', () => {
+      // `useBalances` maps over `data.balances`; a MISSING key threw inside
+      // its own try (swallowed into an error state) and the page read
+      // "Unavailable" instead of "0,00 kr" with Receive primary.
+      expect(FIXTURE_EMPTY_FALLBACK).toMatchObject({ balances: [] })
+    })
+
+    it('carries neither `totals` nor `change` — DashboardClient must guard a partial overview', () => {
+      // The empty /dashboard capture passes BECAUSE the client guards its
+      // nested reads. Adding either key here would photograph a shape
+      // production never serves and hide a guard regression.
+      expect(FIXTURE_EMPTY_FALLBACK).not.toHaveProperty('totals')
+      expect(FIXTURE_EMPTY_FALLBACK).not.toHaveProperty('change')
+    })
+
+    it('Holdings fixture amounts are UNGROUPED, as formatTokenValue serves', () => {
+      // The wire (`backend/src/domain/tokens.ts:29`) returns an ungrouped
+      // dot-decimal string; a grouped `11,890.55` beside proportional fiat
+      // was the reviewed defect. Both surfaces that carry `formatted` are
+      // pinned — the portfolio breakdown (Holdings) and the balances list.
+      const portfolio = fx('/portfolio/0x1111?chain_id=84532') as {
+        breakdown: { symbol: string; formatted: string }[]
+      }
+      const balances = fx('/balances/0x1111?chain_id=84532') as {
+        balances: { symbol: string; formatted: string }[]
+      }
+      for (const { symbol, formatted } of [...portfolio.breakdown, ...balances.balances]) {
+        expect([symbol, formatted]).toEqual([symbol, expect.stringMatching(/^\d+(\.\d+)?$/)])
+      }
+    })
+  })
+
   // #2106: `/agents/:id`'s budget card (formerly also `/custody`, deleted in
   // #3024) renders a delegation-rail account's real spend authority from this
   // endpoint. Both recipient states are seeded on purpose — a PINNED recipient
@@ -224,7 +258,6 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
       expect(fx('/agent-activity/agent-research/stats')).toMatchObject({
         all_time: expect.any(Array),
         today: expect.any(Array),
-        this_week: expect.any(Array),
         pending_approvals: expect.any(Number),
       })
 
@@ -1242,7 +1275,7 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
       // kept the field would shoot the resolved screen under the unresolved
       // filename, which is exactly the confidently-wrong-evidence shape #1800
       // exists to prevent.
-      const unresolved = scenarioWithApi('add-funds-unresolved-chain')
+      const unresolved = scenarioWithApi('receive-dialog-unresolved-chain')
       const me = unresolved.api('/auth/me', 'GET') as { accounts: Record<string, unknown>[] }
       // #2914: asserted once, off `/auth/me`. The harness used to answer
       // `/user/safes` beside it and this loop checked both — but the live
@@ -1265,14 +1298,14 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
       expect(unresolved.api('/agents', 'GET')).toBeUndefined()
     })
 
-    it('keeps the resolved add-funds capture on the shared chain_id (#1844)', () => {
+    it('keeps the resolved receive-dialog capture on the shared chain_id (#1844)', () => {
       // The pair is only evidence about the CHAIN if the chain is the only
       // thing that differs. The resolved half must therefore still carry
       // chain_id 84532 — the shared fixture's — while sharing its counterpart's
       // rail override (dropping `account_type`, which exists purely so the hero
       // renders its action buttons instead of the passkey-on-another-device
       // notice).
-      const resolved = scenarioWithApi('add-funds')
+      const resolved = scenarioWithApi('receive-dialog')
       const me = resolved.api('/auth/me', 'GET') as { accounts: Record<string, unknown>[] }
       expect(me.accounts).toHaveLength(1)
       expect(me.accounts[0].chain_id).toBe(84532)
@@ -1292,40 +1325,6 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
       expect(resolved.api('/agents', 'GET')).toBeUndefined()
     })
 
-    it('serves the receive-funds pair differing by chain_id and nothing else (#1852)', () => {
-      // Same contract as the #1844 pair above, asserted for the receive
-      // surface. The pair is only evidence about the CHAIN if the chain is the
-      // only thing that differs — and the unresolved capture only proves
-      // suppression if its safe genuinely lacks `chain_id` on BOTH endpoints.
-      const resolved = scenarioWithApi('receive-funds')
-      const unresolved = scenarioWithApi('receive-funds-unresolved-chain')
-
-      // #2914: one endpoint, not two — `/auth/me` is where the product reads
-      // the account list. The `/user/safes` half of this loop was a harness
-      // double for a path that now answers 410 and that no caller reaches.
-      {
-        const r = resolved.api('/auth/me', 'GET') as Record<string, Record<string, unknown>[] | undefined>
-        const u = unresolved.api('/auth/me', 'GET') as Record<string, Record<string, unknown>[] | undefined>
-        const rList = r.accounts
-        const uList = u.accounts
-        expect(rList).toHaveLength(1)
-        expect(uList).toHaveLength(1)
-        expect(rList?.[0].chain_id).toBe(84532)
-        expect(uList?.[0]).not.toHaveProperty('chain_id')
-        // A MISSING chain beside a PRESENT address is the hazard; an empty safe
-        // would prove something else entirely.
-        expect(uList?.[0].account_address).toMatch(/^0x[0-9a-fA-F]{40}$/)
-        expect(uList?.[0].id).toBe(FIXTURE_ACCOUNT_ID)
-        // The rail override is the ONLY other difference from the shared
-        // fixture, and both halves carry it, so `chain_id` is the sole variable.
-        // #2202: named rather than absent — see the #1844 pair above. Both
-        // halves carry it, which is the invariant this line is really for.
-        expect(rList?.[0].account_type).toBe('legacy_safe')
-        expect(uList?.[0].account_type).toBe('legacy_safe')
-      }
-      expect(resolved.api('/agents', 'GET')).toBeUndefined()
-      expect(unresolved.api('/agents', 'GET')).toBeUndefined()
-    })
 
     it('answers the setup CREATE that the shared fixture does not key', () => {
       // Without this the modal's create step falls into the empty fallback and

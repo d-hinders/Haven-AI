@@ -155,7 +155,21 @@ not, and cannot be.
 npm run preflight            # the gates this diff can redden
 npm run preflight -- --list  # the plan, without running it
 npm run preflight:all        # every gate
+npm run preflight -- --static  # only the static ratchets your diff selects, then stop
 ```
+
+Static ratchets run first. `--static` runs only the static ratchets your diff
+selects (`--static --all` runs all of them), then stops. A timeout-shaped red is
+re-run alone at the end, at any load; the load read before each run is printed as
+evidence only (#4191). A red that is not timeout-shaped is never re-run. A gate
+that goes SILENT — no output for `PREFLIGHT_SILENCE_MS` — is killed with its whole
+process group and reported as a STALL: a plain red (exit 1) that is never re-run,
+because a gate that hung once hangs again (#4276). When the
+re-run reds are the only reds and each is green alone, preflight exits 3: not
+green, and not a reason to re-run until green. Open the timed-out test and look for
+work in the timed body that is slow only under contention (#4126 and #4134 were real
+defects of this shape). If it is not plainly load, file an issue and link it next to
+the list you quote in the PR body. An unknown flag exits 2; pass flags after `--`.
 
 The table below is the **smallest reliable set for fast iteration** — what to
 re-run in a tight loop while you are still changing code. It is deliberately
@@ -199,10 +213,10 @@ mistake a fifth time.
 | Any source file | `npm run docs:coupling` — the strict contract-doc gate, keyed on **code**, so the docs row above never covers the pure-code PR that needs it |
 | Payment, Safe, relayer, SDK payment APIs, or agent authority | Relevant package checks plus the checklist in `docs/regulatory/casp-risk-guardrails.md` |
 | Backend/API | `npm run typecheck -w packages/backend`, `npm run test -w packages/backend`, `npm run lint:deps` (dependency boundaries, #982), `npm run lint:db-mocks` (positional DB-mock ratchet, #1227), `npm run lint:retired-rail-prose` (retired-rail prose ratchet, #2685 — scans all of `packages/**`, not just the backend), and `npm run lint:request-schemas` (request-schema ratchet, #3029 — shrink-only over the request-validation rollout, epic #3028), `npm run lint:next-steps` (typed next-step ratchet, #3104 — scans `packages/mcp-server`, `packages/signer` and `packages/mcp`, and runs in their jobs as well as here), and `npm run lint:vocabulary` (vocabulary guard, #3131 and #3133 — adding a property to the OpenAPI transaction base fails CI until the field is declared in the vocabulary map beside the guard; it runs in **Repo CI config checks**, not *Backend checks*, because its other two inputs are on the SDK receipt surface and in the CLI, #3133) |
-| Frontend unit/UI | `npm run typecheck -w packages/frontend`, `npm run design:lint -w packages/frontend`, `npm run lint:copy`, `npm run test -w packages/frontend`, `npm run build -w packages/frontend`, and `npm run lint:runbook-parity` (generated runbook copies, #2727 — the frontend holds pinned derivations of the SDK's canonical agent runbook) |
+| Frontend unit/UI | `npm run typecheck -w packages/frontend`, `npm run design:lint -w packages/frontend`, `npm run lint:copy`, `npm run test:local -w packages/frontend -- <paths…>` (scoped to the directories the diff touches, #4271 — the full suite is preflight's frontend gate in CI; deselect that gate locally and say so in the PR), `npm run build -w packages/frontend`, and `npm run lint:runbook-parity` (generated runbook copies, #2727 — the frontend holds pinned derivations of the SDK's canonical agent runbook) |
 | SDK | `npm run typecheck -w packages/sdk`, `npm run test -w packages/sdk`, `npm run build -w packages/sdk`, `npm run lint:runbook-parity` (generated runbook copies, #2727 — blocking in `sdk_checks`, `cli_checks` and `frontend_checks` alike), and `npm run lint:vocabulary` when the change touches the receipt mapper (#3131, as in the Backend/API row) |
 | CLI | `npm run typecheck -w packages/cli`, `npm run test -w packages/cli`, `npm run build -w packages/cli`, `npm run lint:runbook-parity` (generated runbook copies, #2727 — the CLI holds a full-text copy of the SDK's canonical agent runbook), and `npm run lint:vocabulary` (#3133 — an object literal the CLI constructs itself and hands to `emit()`, any `emit*` helper, `d.o.data()` or `d.o.text()`, directly or through a same-function `const`, fails CI until `cliConventions` records which casing convention it chose and why; adding a key to an already-declared envelope fails it too) |
-| Cross-package or release-risk | `npm run quality` |
+| Cross-package or release-risk | `npm run preflight` (above) — not `npm run quality`, which runs typecheck, tests and build and no ratchet |
 | Browser UX or routing | Relevant unit/build checks plus `npm run test:e2e:gate:built -w packages/frontend` — both gating projects, desktop **and** mobile (#1768), plus the visual specs' structural assertions (#2827), against a built server rather than `next dev`, which is minutes rather than tens of minutes (#2730; see the frontend playbook § *Verification*). `test:e2e:desktop:built` / `test:e2e:mobile:built` narrow it to one while iterating — neither sets `VISUAL_STRUCTURE_ONLY=1`, so narrowing also drops the visual locators |
 
 Notes:

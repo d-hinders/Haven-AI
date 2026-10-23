@@ -22,6 +22,7 @@ import type {
   VerifyOutcome,
 } from './connector.js'
 import type { FeedTransaction } from './feed-transaction.js'
+import type { SafeFetchOptions } from '../../infra/http/ssrf-guard.js'
 import { ProviderError, type ProviderCompanyInfo } from './provider.js'
 
 /**
@@ -35,8 +36,7 @@ export const FORTNOX_REQUEST_TIMEOUT_MS = 15_000
 export const FORTNOX_UPLOAD_TIMEOUT_MS = 60_000
 import {
   loadReceiptUnderlag,
-  merchantReceiptPdf,
-  fetchMerchantReceiptDocument,
+  merchantReceiptDocument,
   type ReceiptUnderlag,
 } from './receipt-underlag.js'
 
@@ -288,7 +288,16 @@ async function fortnoxUploadPdf(
 export class FortnoxConnector implements AccountingConnector {
   provider = 'fortnox'
 
-  constructor(private readonly fetchImpl: typeof fetch = fetch) {}
+  constructor(
+    private readonly fetchImpl: typeof fetch = fetch,
+    /**
+     * #4309: the merchant-receipt URL fetch no longer rides `fetchImpl` (a
+     * URL an agent or merchant chose must never share the connector's
+     * provider transport) — it goes through the SSRF guard. This is the
+     * guard's test seam (resolver/transport/budgets); production defaults.
+     */
+    private readonly receiptFetchOptions: SafeFetchOptions = {},
+  ) {}
 
   async isConnected(userId: string): Promise<boolean> {
     if (!fortnoxConfigured()) return false
@@ -450,7 +459,7 @@ export class FortnoxConnector implements AccountingConnector {
       if (tx.merchantReceipt) {
         try {
           await attachMerchantReceiptFiles(
-            accessToken, givenNumber, tx.paymentId, tx.merchantReceipt, this.fetchImpl,
+            accessToken, givenNumber, tx.paymentId, tx.merchantReceipt, this.fetchImpl, this.receiptFetchOptions,
           )
         } catch (err) {
           notes.push(`merchant receipt attachment failed: ${err instanceof Error ? err.message : String(err)}`)
@@ -570,19 +579,16 @@ async function attachMerchantReceiptFiles(
   paymentId: string,
   receipt: { url: string | null; inlineJson: unknown | null },
   fetchImpl: typeof fetch,
+  receiptFetchOptions: SafeFetchOptions = {},
 ): Promise<void> {
-  let file: ReceiptUnderlag
-  let contentType = 'application/pdf'
-  if (receipt.inlineJson != null) {
-    file = merchantReceiptPdf(paymentId, receipt.inlineJson)
-  } else if (receipt.url) {
-    const doc = await fetchMerchantReceiptDocument(receipt.url, fetchImpl)
-    file = { filename: doc.filename, pdf: doc.bytes }
-    contentType = doc.contentType
-  } else {
-    return
-  }
-  const fileId = await fortnoxUploadPdf(accessToken, file, fetchImpl, contentType)
+  const doc = await merchantReceiptDocument(paymentId, receipt, receiptFetchOptions)
+  if (!doc) return
+  const fileId = await fortnoxUploadPdf(
+    accessToken,
+    { filename: doc.filename, pdf: doc.bytes },
+    fetchImpl,
+    doc.contentType,
+  )
   await fortnoxPost(
     accessToken,
     '/supplierinvoicefileconnections',
@@ -706,6 +712,7 @@ export async function lateAttachMerchantReceipt(
   paymentId: string,
   receipt: { url: string | null; inlineJson: unknown | null },
   fetchImpl: typeof fetch = fetch,
+  receiptFetchOptions: SafeFetchOptions = {},
 ): Promise<void> {
   const sync = await getSyncState(userId, 'fortnox', paymentId)
   if (!sync || sync.status !== 'pushed') return // not pushed — in-order flow attaches at push time
@@ -726,7 +733,7 @@ export async function lateAttachMerchantReceipt(
       (c) => String(c.SupplierInvoiceNumber) === String(givenNumber) && (c.Name ?? '').startsWith('merchant-receipt'),
     )
     if (already) return
-    await attachMerchantReceiptFiles(accessToken, givenNumber, paymentId, receipt, fetchImpl)
+    await attachMerchantReceiptFiles(accessToken, givenNumber, paymentId, receipt, fetchImpl, receiptFetchOptions)
   } catch (err) {
     await markPushed(
       userId, 'fortnox', paymentId, sync.external_ref,

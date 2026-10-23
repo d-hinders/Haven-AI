@@ -64,7 +64,42 @@ A verified submission therefore renders on its merchant's page with the
 Verified badge and `source: 'ingestion'` — an operator did not curate it, and
 the page does not pretend otherwise. The Bazaar discovery cron
 (`catalog-discovery.ts`) goes through the same writer before its insert, so
-`merchant_catalog.merchant_id NOT NULL` holds by construction.
+`merchant_catalog.merchant_id NOT NULL` holds by construction. Its rows carry
+`merchant_catalog.source = 'bazaar'` (migration 117, #4245) and are served as
+`source: 'bazaar'`: a third party's own name and description, which no
+operator reviewed and which have no ownership proof. `GET /catalog` sorts them
+after operator and ingestion rows. Every other writer gets the column's `'operator'` default.
+
+Since #4281, those URLs are probed under the same SSRF guard as a
+submission (`infra/http/ssrf-guard.ts`). That holds for discovery's probe of
+a candidate and for the hourly refresh of every listed row, whatever its
+`source`. The guard requires https on the default port and refuses IP literals
+and locally-bound names. It resolves the host and refuses any address outside
+public unicast. It pins the socket to an address it checked. If that address
+cannot complete a TLS handshake, it tries the next checked address (#4300);
+it never tries one the policy refused, and never retries once the request
+may have reached a server. It caps the response at 256 KiB. The total
+deadline, name resolution included, is 15 s for a refresh probe, enough for
+a sleeping merchant's cold start, and 5 s for a discovery candidate, the
+ingestion probe's budget. It follows at most 3 redirects on a GET or HEAD, and
+refuses any redirect on a method that carries a body. A refusal counts as a
+failed probe: discovery skips the candidate, and the refresh adds one to the
+row's failure streak.
+
+Each run also has a wall-clock budget (#4300). Without one, a run's length
+grew with the number of rows, while it held the leader lock, which has no
+TTL.
+- **Refresh:** 10 min (`CATALOG_REFRESH_RUN_BUDGET_MS`). It takes rows least
+  recently updated first and starts a probe only while that probe's whole
+  15 s budget still fits. A row it does not reach is left untouched. That
+  means no miss and no step toward `degraded`. The row comes first next run,
+  and the run logs how many rows it deferred.
+- **Discovery:** 2 min for candidate probes (`DISCOVERY_RUN_BUDGET_MS`). A
+  candidate it does not reach is not inserted, so the next run considers it
+  again.
+- **Bazaar index read:** keeps the caller's `fetch` (its URL is the
+  operator's `CATALOG_DISCOVERY_URL`). It reads at most 5 pages a run, each
+  within 15 s and 2 MiB.
 
 ## Cadences and thresholds (module constants)
 

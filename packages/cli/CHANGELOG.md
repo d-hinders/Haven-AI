@@ -15,6 +15,33 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+## 0.11.0-alpha.0 — 2026-10-23
+
+### Changed
+
+- `haven budget grant` into an agent's occupied (token, recipient) slot is
+  refused instead of silently replacing the live budget (#3933): exit 4,
+  `error_code: BUDGET_SLOT_OCCUPIED` and `existing_delegation_hash` under
+  `--json`, and a hint to edit that budget on the agent's page, which
+  replaces it and stops the old one on-chain. A grant into an empty slot is
+  unchanged. No update needed.
+- `haven guide` says "a passkey", never a platform name (#4168). Its copy of
+  the agent runbook drops "(Face ID / Touch ID)" from the account step and
+  the signup hand-off script, regenerated from the SDK runbook. Wording only;
+  no update needed.
+- `haven budget grant` and `haven budget revoke` now say "approve" instead of
+  "sign" in what they print: "Open this link and approve", "Waiting for your
+  approval", "Approved and active", "one approval, sponsored", "The budget
+  keeps working until you approve", and the `--wait` timeout and refusal
+  messages; `haven --help` reads "the human approves in the dashboard".
+  Wording only; the link, the `--json` output, exit codes and `--wait` are
+  unchanged. No update needed.
+- Waiting for a budget grant now reads the backend's `is_live` flag (#3922),
+  so an expired `active` row no longer counts as the grant landing. It falls
+  back to the row's status against an older backend. The revoke refusal is
+  unchanged: it still checks every status still enabled on-chain, not
+  `is_live`. No update needed.
+
 ## 0.10.0-alpha.0 — 2026-10-14
 
 ### Changed

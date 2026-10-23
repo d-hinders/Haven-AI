@@ -820,11 +820,11 @@ const tx = (i, over = {}) => {
 // fourth state the capture has to show: an unfed row renders no badge.
 const accounting = (status, extra = {}) => ({ provider: 'fortnox', status, externalRef: null, error: null, ...extra })
 export const FIXTURE_TXS = [
-  // #3763: eip3009 WITH a recorded settlement — the drawer headlines it
-  // ("Merchant settlement (reported by the agent or detected on-chain,
-  // verified)") and names the funding leg ("Funding from your account"). The
-  // `transactions-detail-network` capture photographs THIS row's drawer, so
-  // the regenerated evidence carries the recorded state's visible text.
+  // #3763: eip3009 WITH a recorded settlement — the drawer reads
+  // "Settlement: Recorded (verified)" and, under Technical details, names
+  // both legs ("Transaction" for the funding leg, "Settlement transaction",
+  // #4267). The `transactions-detail-network` capture photographs THIS row's
+  // drawer, so the regenerated evidence carries the recorded state's text.
   tx(1, {
     agentName: 'Research agent', source: 'x402', x402ResourceUrl: 'https://api.example.dev/reports',
     settlementScheme: 'eip3009',
@@ -929,6 +929,10 @@ export const FIXTURE_AGENTS = [
       token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
       token_symbol: 'USDC', allowance_amount: '250.000000', reset_period_min: 10080,
     }],
+    // #3988: the received grants ride on every Agent read. The default
+    // dataset carries none — the dedicated `received-sub-budgets` scenario
+    // is the one place the grant-holder states photograph.
+    receivedSubBudgets: [],
     // #3167: labels ride on every agent read — the showcase agent carries two,
     // so the /agents screenshot photographs chips and the "+N" overflow rule.
     labels: [
@@ -970,6 +974,7 @@ export const FIXTURE_AGENTS = [
       token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
       token_symbol: 'USDC', allowance_amount: '500.000000', reset_period_min: 1440,
     }],
+    receivedSubBudgets: [],
     // #3167: the paused agent is unlabelled — the empty state photographs too.
     labels: [],
     // #3164: the paused agent is filed under DevOps (a sub-organization), so
@@ -1010,7 +1015,7 @@ export const FIXTURE_ORGANIZATIONS = [
 
 /**
  * #3542: the two HALF-REVOKED agents — credential ended in Haven (revoked) or
- * filed under Removed (archived), while the budget delegation is still
+ * been archived (Remove), while the budget delegation is still
  * redeemable on-chain, so `live_delegation_count` is 1 on each.
  *
  * Deliberately NOT part of `FIXTURE_AGENTS`: that list feeds the dashboard
@@ -1053,6 +1058,7 @@ export const FIXTURE_HALF_REVOKED_AGENTS = [
       token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
       token_symbol: 'USDC', allowance_amount: '150.000000', reset_period_min: 10080,
     }],
+    receivedSubBudgets: [],
     archived_at: null,
   },
   {
@@ -1066,6 +1072,7 @@ export const FIXTURE_HALF_REVOKED_AGENTS = [
       token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
       token_symbol: 'USDC', allowance_amount: '75.000000', reset_period_min: 1440,
     }],
+    receivedSubBudgets: [],
     archived_at: '2026-08-02T10:00:00.000Z',
   },
 ]
@@ -1075,13 +1082,17 @@ const FIXTURE_PORTFOLIO = {
   // the token rows' `sekValue` summing to it.
   totalUsd: 12_640.55, totalEur: 11_690.21, totalSek: 136_050.75,
   breakdown: [
-    { symbol: 'USDC', balance: '11890550000', formatted: '11,890.55', usdValue: 11_890.55, eurValue: 10_996.57, sekValue: 127_970.41 },
+    // #4307: `formatted` is the real wire shape — `formatTokenValue` serves
+    // an ungrouped dot-decimal string (as Activity rows' `valueFormatted`
+    // does), so the Holdings column never renders a grouped figure beside
+    // proportional fiat.
+    { symbol: 'USDC', balance: '11890550000', formatted: '11890.55', usdValue: 11_890.55, eurValue: 10_996.57, sekValue: 127_970.41 },
     { symbol: 'ETH', balance: '250000000000000000', formatted: '0.25', usdValue: 750.0, eurValue: 693.64, sekValue: 8_080.34 },
   ],
 }
 const FIXTURE_BALANCES = {
   balances: [
-    { symbol: 'USDC', address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e', balance: '11890550000', formatted: '11,890.55', decimals: 6, chainId: FIXTURE_ACCOUNT.chain_id },
+    { symbol: 'USDC', address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e', balance: '11890550000', formatted: '11890.55', decimals: 6, chainId: FIXTURE_ACCOUNT.chain_id },
     { symbol: 'ETH', address: null, balance: '250000000000000000', formatted: '0.25', decimals: 18, chainId: FIXTURE_ACCOUNT.chain_id },
   ],
 }
@@ -1262,6 +1273,15 @@ export const FIXTURE_OVERVIEW = {
       approxCurrency: 'SEK',
     },
   ],
+  // #3944: the two empty-state facts (shape parity with the e2e fixture —
+  // fixture-shape-parity.test.ts compares the top-level key SETS). Rows
+  // render, so `hasOlderActivity` is false; `activityWindowDays` mirrors
+  // the backend's ACTIVITY_WINDOW_DAYS; `activityWindowStart` (#3975) is
+  // 7×24h before T0, so the rows sit inside the window and no heading
+  // reads partial.
+  hasOlderActivity: false,
+  activityWindowDays: 7,
+  activityWindowStart: new Date((T0 - 7 * 86_400) * 1000).toISOString(),
 }
 
 // #3804: the cached budget-remaining read. One KNOWN row (chain-backed,
@@ -1549,8 +1569,8 @@ export const FIXTURE_DELEGATE_BALANCES = {
 export const FIXTURE_AGENT_STATS = {
   all_time: [{ token: 'USDC', total_spent: '482.50', tx_count: 37 }],
   today: [{ token: 'USDC', total_spent: '25.00', tx_count: 1 }],
-  this_week: [{ token: 'USDC', total_spent: '109.75', tx_count: 6 }],
-  // #2120: 0, not 1 — `routes/agent-activity.ts:129` hardcodes it.
+  // #2120: 0, not 1 — `routes/agent-activity.ts` hardcodes it. #3977: the
+  // dead `this_week` bucket is gone with the wire field.
   pending_approvals: 0,
 }
 
@@ -1990,7 +2010,7 @@ const FIXTURE_MERCHANT_OFFERS = [
     resource_url: 'https://services.sandbox.ampersend.ai/api/fact',
     merchant: { id: 'merchant-ampersend', slug: 'ampersend-demo-api', name: 'Ampersend Demo API', listing_status: 'live', is_test_merchant: false },
     rail: 'x402', protocol: 'http', tool_name: null, tool_arguments: null,
-    price_display: '$0.001 USDC', price_atomic: '1000', asset: 'USDC', network: 'eip155:84532',
+    price_display: '0.001 USDC', price_atomic: '1000', asset: 'USDC', network: 'eip155:84532',
     asset_transfer_methods: null, status: 'active', verified_at: '2026-09-15T12:00:00.000Z',
     source: 'operator', domain_verified: true, verified_payable: true,
   },
@@ -1999,7 +2019,7 @@ const FIXTURE_MERCHANT_OFFERS = [
     resource_url: 'https://services.ampersend.ai/api/quote',
     merchant: { id: 'merchant-ampersend', slug: 'ampersend-demo-api', name: 'Ampersend Demo API', listing_status: 'live', is_test_merchant: false },
     rail: 'x402', protocol: 'http', tool_name: null, tool_arguments: null,
-    price_display: '$0.001 USDC', price_atomic: '1000', asset: 'USDC', network: 'eip155:8453',
+    price_display: '0.001 USDC', price_atomic: '1000', asset: 'USDC', network: 'eip155:8453',
     asset_transfer_methods: null, status: 'active', verified_at: '2026-09-15T12:00:00.000Z',
     source: 'operator', domain_verified: true, verified_payable: true,
   },
@@ -2008,7 +2028,7 @@ const FIXTURE_MERCHANT_OFFERS = [
     resource_url: 'https://demo-merchant-dev.example/mcp',
     merchant: { id: 'merchant-haven-demo-store', slug: 'haven-demo-store', name: 'Haven Demo Store', listing_status: 'live', is_test_merchant: true },
     rail: 'x402', protocol: 'mcp', tool_name: 'buy_vpn', tool_arguments: null,
-    price_display: '$0.10 USDC', price_atomic: '100000', asset: 'USDC', network: 'eip155:84532',
+    price_display: '0.10 USDC', price_atomic: '100000', asset: 'USDC', network: 'eip155:84532',
     asset_transfer_methods: 'eip3009,erc7710', status: 'active', verified_at: '2026-09-15T12:00:00.000Z',
     source: 'operator', domain_verified: true, verified_payable: true,
   },
@@ -2068,7 +2088,59 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
     return { activity: FIXTURE_AGENT_ACTIVITY, pending_approvals: FIXTURE_AGENT_STATS.pending_approvals }
   }
   if (pathname.endsWith('/activity') && pathname.startsWith('/agent-activity/')) {
-    return { activity: FIXTURE_AGENT_ACTIVITY }
+    // #4229: the kinded read is pageable and filterable, so the capture
+    // fixture honours kind, status and offset — a filtered capture never
+    // bakes in mixed or unfiltered rows. Omitting kind serves the legacy
+    // merged list, unchanged. (from/to/q/paymentId are not capture inputs.)
+    const query = new URLSearchParams(apiPath.split('?')[1] ?? '')
+    const kind = query.get('kind')
+    if (!kind) return { activity: FIXTURE_AGENT_ACTIVITY }
+    const status = query.get('status')
+    const offset = Number(query.get('offset')) || 0
+    const paymentStatuses = new Set(['sent', 'pending', 'failed', 'needs_attention'])
+    // #4323: the refusal population — one refused attempt so the Refused
+    // facet's capture has a row to show. Atomic on the wire; the serve-time
+    // triple is the fixture's priced view.
+    const refusalRow = {
+      type: 'refusal',
+      id: 'refusal-fixture-1',
+      created_at: '2026-08-31T09:36:00.000Z',
+      amount: '25000',
+      token_symbol: 'USDC',
+      chain_id: 84532,
+      merchant_to: '0x0000000000000000000000000000000000000009',
+      resource_url: 'https://research.example/report',
+      reason: 'delegation_budget_exceeded',
+      attempts: 2,
+      approx_amount_usd: '0.0250',
+      approx_amount_eur: null,
+      approx_amount_sek: null,
+    }
+    const rows = FIXTURE_AGENT_ACTIVITY.filter((row) =>
+      kind === 'payments' ? row.type === 'payment' : kind === 'refusals' ? row.type === 'refusal' : row.type === 'mcp_tool_call',
+    )
+    const filtered = rows.filter((row) => {
+      if (!status) return true
+      if (kind === 'refusals') return status === 'refused'
+      if (kind === 'tool_calls') return row.result_status === status
+      if (!paymentStatuses.has(status)) return true
+      if (status === 'sent') return row.status === 'confirmed'
+      if (status === 'pending') return row.status === 'pending_signature' || row.status === 'submitted'
+      if (status === 'failed') return row.status === 'failed'
+      return row.payment_attention_reason != null
+    })
+    const page = filtered.slice(offset)
+    const body = {
+      activity: page,
+      total: filtered.length,
+      hasMore: offset + page.length < filtered.length,
+    }
+    // The summary-line count ignores the status filter (same contract as the
+    // route), so it stays stable while the status selection flips.
+    if (kind === 'tool_calls') {
+      body.counts = { error: rows.filter((row) => row.result_status === 'error').length }
+    }
+    return body
   }
   if (pathname.endsWith('/stats') && pathname.startsWith('/agent-activity/')) {
     return FIXTURE_AGENT_STATS
@@ -2164,7 +2236,7 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
         parent_delegation_hash: '0x' + '4d'.repeat(32),
         delegation_hash: '0x' + '5e'.repeat(32),
         label: 'Nightly market scan', max_atomic: '15000000',
-        status: 'open', expires_at: Math.floor(Date.now() / 1000) + 3 * 3600, is_expired: false,
+        status: 'open', expires_at: Math.floor(Date.now() / 1000) + 3 * 3600, is_expired: false, is_live: true,
         created_at: '2026-09-25T20:00:00.000Z', opened_at: '2026-09-25T20:01:00.000Z',
         closed_at: null, close_tx_hash: null,
       }],
@@ -2199,7 +2271,7 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
           token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
           recipient_address: ADDR.merchant,
           delegation_hash: '0x' + '4d'.repeat(32),
-          version: 1, status: 'active',
+          version: 1, status: 'active', is_live: true,
           budget_atomic: '250000000', period_seconds: 604_800,
           start_date: '2026-06-02T10:00:00.000Z',
           expires_at: Math.floor(Date.UTC(2027, 5, 2) / 1000),
@@ -2213,7 +2285,7 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
           token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
           recipient_address: null,
           delegation_hash: '0x' + '5e'.repeat(32),
-          version: 2, status: 'active',
+          version: 2, status: 'active', is_live: true,
           budget_atomic: '500000000', period_seconds: 86_400,
           start_date: '2026-05-18T10:00:00.000Z',
           expires_at: Math.floor(Date.UTC(2027, 4, 18) / 1000),
@@ -2230,7 +2302,7 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
           token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
           recipient_address: null,
           delegation_hash: '0x' + '6f'.repeat(32),
-          version: 1, status: 'active',
+          version: 1, status: 'active', is_live: true,
           budget_atomic: '150000000', period_seconds: 604_800,
           start_date: '2026-05-20T10:00:00.000Z',
           expires_at: Math.floor(Date.UTC(2027, 4, 20) / 1000),
@@ -2244,7 +2316,7 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
           token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
           recipient_address: null,
           delegation_hash: '0x' + '7a'.repeat(32),
-          version: 1, status: 'active',
+          version: 1, status: 'active', is_live: true,
           budget_atomic: '75000000', period_seconds: 86_400,
           start_date: '2026-04-12T10:00:00.000Z',
           expires_at: Math.floor(Date.UTC(2027, 3, 12) / 1000),
@@ -2298,6 +2370,18 @@ export const FIXTURE_EMPTY_FALLBACK = {
   // the ErrorBoundary. The hook now defaults it too, so this is belt AND
   // braces — deliberately, because the fixture is what a reviewer looks at.
   failedAccountIds: [],
+  // #4307: `balances` is `GET /balances/:address`'s collection key — the
+  // hook maps over it (`data.balances.map`), and with a `chainId` a MISSING
+  // key threw inside `useBalances`'s own try and was swallowed into an
+  // error state, so the account page read "Unavailable" instead of the
+  // brand-new header a zero answer is. The wire answers one zero item per
+  // configured token (`formatted: '0'`); `[]` and all-zero rows reach the
+  // same header because `nonZeroBreakdown` filters on the raw balance.
+  balances: [],
+  // #4307: `totals` and `change` stay ABSENT on purpose — a PARTIAL
+  // overview is the state the DashboardClient's nested-read guards must
+  // render. Adding them here would photograph a shape production never
+  // serves and would hide a guard regression behind green captures.
   recipients: [], delegations: [], owners: [], passkeys: [], tokens: [],
   payments: [], receipts: [], catalog: [], activity: [],
   // #2295: `entries` is `GET /catalog`'s collection key. It was missing, so
@@ -2764,6 +2848,9 @@ export const STALE_BUSY_DECLARATIONS = []
 async function newFixtureContext(browser, vp, scenario, { signedOut = false, colorScheme = 'light' } = {}) {
   const context = await browser.newContext({
     viewport: { width: vp.width, height: vp.height },
+    // #4293: local times render in UTC whatever the host's zone, matching
+    // the Playwright config and the fixtures' `tz: 'UTC'`.
+    timezoneId: 'UTC',
     deviceScaleFactor: DEVICE_SCALE_FACTOR,
     reducedMotion: 'reduce',
     // The OS-preference half of the scheme contract (#2929). The DETERMINISTIC
@@ -2942,19 +3029,18 @@ async function newFixtureContext(browser, vp, scenario, { signedOut = false, col
   return context
 }
 
-// The sidebar covers the page below `lg`; the e2e suite dismisses it the same
-// way before driving mobile UI.
+// The phone More sheet (#4053) covers the page — and since #4058 the floating
+// tab bar too — while it is open, and closes on its own ✕ (`Close sidebar`);
+// the e2e suite dismisses it the same way before driving mobile UI. It
+// exists in the DOM only while open, so presence is the whole check — the
+// e2e twin in `e2e/fixtures/haven-api.ts` explains why nothing needs settling.
 async function dismissMobileSidebar(page, vp) {
   if (vp.width >= 1024) return
-  const close = page.getByRole('button', { name: 'Close sidebar' })
-  if (await close.isVisible({ timeout: 1_000 }).catch(() => false)) {
-    // No `{ force: true }` (#1749) — see the note on the e2e twin in
-    // `e2e/fixtures/haven-api.ts`. The forced click was this bug's only
-    // footprint in the repo: the capture tooling had been routing around an
-    // unreachable navigation toggle for months without anyone naming it.
-    await close.click()
-    await page.getByRole('button', { name: 'Open sidebar' }).waitFor({ state: 'visible' })
-  }
+  const sheet = page.locator('[data-more-sheet]')
+  if ((await sheet.count()) === 0) return
+  // No `{ force: true }` (#1749) — see the note on the e2e twin.
+  await page.getByRole('button', { name: 'Close sidebar' }).click()
+  await sheet.waitFor({ state: 'detached' })
 }
 
 /**
@@ -3137,7 +3223,7 @@ const AGENT_BUDGET_TWO_ROWS = [
     token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
     recipient_address: null,
     delegation_hash: '0x' + '6a'.repeat(32),
-    version: 1, status: 'active',
+    version: 1, status: 'active', is_live: true,
     budget_atomic: '250000000', period_seconds: 604_800,
     start_date: '2026-06-02T10:00:00.000Z',
     expires_at: Math.floor(Date.UTC(2027, 5, 2) / 1000),
@@ -3148,7 +3234,7 @@ const AGENT_BUDGET_TWO_ROWS = [
     token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
     recipient_address: ADDR.merchant,
     delegation_hash: '0x' + '6b'.repeat(32),
-    version: 1, status: 'active',
+    version: 1, status: 'active', is_live: true,
     budget_atomic: '20000000', period_seconds: 86_400,
     start_date: '2026-06-02T10:00:00.000Z',
     expires_at: Math.floor(Date.UTC(2027, 5, 2) / 1000),
@@ -3522,6 +3608,143 @@ export const FIXTURE_PAUSED_AGENT = {
   has_stranded_funds: false,
 }
 
+/**
+ * #4024: the "New account" dialog, behind the Accounts header action. Route
+ * capture cannot see it. Four captures:
+ *
+ *   new-account          — the form (name, network, the three facts);
+ *   new-account-cap      — the per-user cap refusal, by `error_code`;
+ *   new-account-created  — the success state;
+ *   new-account-no-passkey — every account wallet-only: the explanation.
+ *
+ * The passkey prompt is the one browser seam no API answer reaches, so the
+ * submitting captures stub `navigator.credentials.get` in the page (the same
+ * posture as the `connectedWallet` provider stub: the app's own
+ * `getPasskeyAssertion`, key-id conversion and create call all run). The stub
+ * returns a credential whose raw id is the fixture passkey's, so the dialog's
+ * own "is this key on the source account" check passes for real.
+ */
+const NEW_ACCOUNT_KEY_ID = '0x' + '11'.repeat(32)
+
+function newAccountSigners({ walletOnly = false } = {}) {
+  const main = {
+    account_id: FIXTURE_ACCOUNT.id,
+    account_address: FIXTURE_ACCOUNT.account_address,
+    account_name: FIXTURE_ACCOUNT.name,
+    chain_id: FIXTURE_ACCOUNT.chain_id,
+  }
+  return {
+    signers: walletOnly
+      ? [{ kind: 'wallet', address: '0x' + 'ee'.repeat(20), accounts: [main] }]
+      : [{ kind: 'passkey', key_id: NEW_ACCOUNT_KEY_ID, created_at: '2026-03-03T12:00:00.000Z', accounts: [main] }],
+  }
+}
+
+async function stubPasskeyAssertion(page) {
+  await page.addInitScript(() => {
+    const credentials = navigator.credentials
+    if (!credentials || typeof PublicKeyCredential === 'undefined') return
+    credentials.get = async () => {
+      const credential = Object.create(PublicKeyCredential.prototype)
+      Object.defineProperty(credential, 'rawId', { value: new Uint8Array(32).fill(0x11).buffer })
+      Object.defineProperty(credential, 'response', {
+        value: {
+          signature: new ArrayBuffer(64),
+          authenticatorData: new ArrayBuffer(37),
+          clientDataJSON: new ArrayBuffer(16),
+        },
+      })
+      return credential
+    }
+  })
+}
+
+async function openNewAccountDialog(page, vp) {
+  await page.goto(`${BASE_URL}/accounts`, { waitUntil: 'networkidle', timeout: 60_000 })
+  await dismissMobileSidebar(page, vp)
+  await page.getByRole('button', { name: 'New account', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: 'New account' })
+  await dialog.waitFor({ timeout: 15_000 })
+  return { dialog, panel: page.getByTestId('new-account-dialog') }
+}
+
+function newAccountScenarios() {
+  const chains = (apiPath) => (apiPath === '/chains' ? { deployable: [8453, 84532] } : undefined)
+  return {
+    'new-account': {
+      description: 'The New account dialog (#4024): name, network and the three facts, before the passkey prompt',
+      api(apiPath) {
+        if (apiPath === '/user/signers') return newAccountSigners()
+        return chains(apiPath)
+      },
+      async run({ page, vp, shoot }) {
+        const { dialog, panel } = await openNewAccountDialog(page, vp)
+        await dialog.getByTestId('new-account-facts').waitFor({ timeout: 15_000 })
+        await shoot(panel, 'form')
+      },
+    },
+    'new-account-cap': {
+      description: 'The New account dialog at the per-user cap: the typed refusal, mapped by error_code (#4024)',
+      api(apiPath, method) {
+        if (apiPath === '/user/signers') return newAccountSigners()
+        if (apiPath === '/accounts/hybrid' && method === 'POST') {
+          return httpError(422, {
+            error: 'This user already has 10 accounts on chain 84532',
+            error_code: 'ACCOUNT_CAP_REACHED',
+            cap: 10,
+          })
+        }
+        return chains(apiPath)
+      },
+      async run({ page, vp, shoot }) {
+        await stubPasskeyAssertion(page)
+        const { dialog, panel } = await openNewAccountDialog(page, vp)
+        await dialog.getByLabel('Account name').fill('Reserve')
+        await dialog.getByRole('button', { name: 'Create account with a passkey' }).click()
+        await dialog.getByText(/You already have 10 accounts on Base Sepolia/).waitFor({ timeout: 15_000 })
+        await shoot(panel, 'refusal')
+      },
+    },
+    'new-account-created': {
+      description: 'The New account dialog after a successful create (#4024)',
+      api(apiPath, method) {
+        if (apiPath === '/user/signers') return newAccountSigners()
+        if (apiPath === '/accounts/hybrid' && method === 'POST') {
+          return {
+            id: 'acc-new',
+            account_address: '0x' + '40'.repeat(20),
+            chain_id: 84532,
+            account_type: 'delegator_hybrid',
+            deployed: false,
+            created_at: '2026-10-16T09:00:00.000Z',
+          }
+        }
+        return chains(apiPath)
+      },
+      async run({ page, vp, shoot }) {
+        await stubPasskeyAssertion(page)
+        const { dialog, panel } = await openNewAccountDialog(page, vp)
+        await dialog.getByLabel('Account name').fill('Reserve')
+        await dialog.getByRole('button', { name: 'Create account with a passkey' }).click()
+        await dialog.getByTestId('new-account-created').waitFor({ timeout: 15_000 })
+        await shoot(panel, 'success')
+      },
+    },
+    'new-account-no-passkey': {
+      description: 'The New account dialog when every account is wallet-only: the explanation instead of a form (#4024)',
+      api(apiPath) {
+        if (apiPath === '/user/signers') return newAccountSigners({ walletOnly: true })
+        return chains(apiPath)
+      },
+      async run({ page, vp, shoot }) {
+        const { dialog, panel } = await openNewAccountDialog(page, vp)
+        await dialog.getByTestId('new-account-needs-passkey').waitFor({ timeout: 15_000 })
+        await shoot(panel, 'explanation')
+      },
+    },
+  }
+}
+
 export const SCENARIOS = {
   'auth-shell-states': {
     description:
@@ -3668,7 +3891,7 @@ export const SCENARIOS = {
       const settle = async (navigate) => {
         await navigate()
         await page.evaluate(() => document.fonts.ready)
-        await page.locator('button[aria-label="User menu"]').waitFor({ timeout: 15_000 })
+        await page.locator('button[aria-label="User menu"]').waitFor({ state: 'attached', timeout: 15_000 })
         await dismissMobileSidebar(page, vp)
         await heading.waitFor({ timeout: 15_000 })
         // The rows, not the heading: the card shows a skeleton until BOTH
@@ -3771,7 +3994,7 @@ export const SCENARIOS = {
         setSettingsAccountingStage(stage)
         await page.goto(`${BASE_URL}/settings`, { waitUntil: 'domcontentloaded', timeout: 30_000 })
         await page.evaluate(() => document.fonts.ready)
-        await page.locator('button[aria-label="User menu"]').waitFor({ timeout: 15_000 })
+        await page.locator('button[aria-label="User menu"]').waitFor({ state: 'attached', timeout: 15_000 })
         await dismissMobileSidebar(page, vp)
         await heading.waitFor({ timeout: 15_000 })
         await card.getByTestId(testId).waitFor({ timeout: 15_000 })
@@ -3837,7 +4060,7 @@ export const SCENARIOS = {
       const settle = async () => {
         await page.goto(`${BASE_URL}/accounting`, { waitUntil: 'networkidle', timeout: 60_000 })
         await page.evaluate(() => document.fonts.ready)
-        await page.locator('button[aria-label="User menu"]').waitFor({ timeout: 15_000 })
+        await page.locator('button[aria-label="User menu"]').waitFor({ state: 'attached', timeout: 15_000 })
         await dismissMobileSidebar(page, vp)
       }
       const openStage = async (stage) => {
@@ -3932,8 +4155,8 @@ export const SCENARIOS = {
       await refuseFeedControls('coming-soon')
       await shoot(main, 'coming-soon')
       // The sidebar reads the same answer: the Accounting entry stays, with
-      // its muted "Soon" pill. Desktop only — below `lg` the drawer is
-      // off-canvas and contributes nothing to a capture.
+      // its muted "Soon" pill. Desktop only — below `lg` the rail is
+      // hidden and contributes nothing to a capture (#4053).
       if (vp.width >= 1024) {
         const entry = page.locator('nav[aria-label="All sections"] a[href="/accounting"]')
         // Visible "Soon" on the rail; the full phrase is the accessible name.
@@ -4008,7 +4231,7 @@ export const SCENARIOS = {
 
   'agents-multi-account': {
     description:
-      'The /agents list for a user with TWO accounts (#3719): every agent shows, each row names its account and chain, and the Account filter is offered — there is no global active account narrowing the list',
+      'The /agents list for a user with TWO accounts (#3719): every agent shows, each card names its account (the network is the account’s, #4209), and the Account filter is offered — there is no global active account narrowing the list',
     // The shared fixture has one account, so the filter (registered only with
     // more than one) and a row on a second account are unreachable without
     // this. Two endpoints, and they agree: `/auth/me` serves both accounts and
@@ -4044,8 +4267,7 @@ export const SCENARIOS = {
       for (const name of ['Research agent', 'Data-feed agent']) {
         await page.getByText(name, { exact: true }).first().waitFor({ timeout: 20_000 })
       }
-      // Positive control: the second account's row label is on screen. Not
-      // `exact`: the row reads "Account: Treasury · Base" across three nodes.
+      // Positive control: the second account's name is on its card.
       await page.getByText(/Treasury/).first().waitFor({ timeout: 20_000 })
       await shoot(page.locator('main').first(), 'list')
 
@@ -4054,75 +4276,55 @@ export const SCENARIOS = {
       await shoot(page.locator('main').first(), 'account-filter')
     },
   },
-  /**
-   * #2043: the agent list with NOTHING unrecorded — the note's absent half.
-   *
-   * The present half needs no scenario: the shared fixture's `agent-retired`
-   * carries no `mcp_server_name` at all, so the plain `/agents` route capture
-   * already shows the hoisted explanation. The conditional IS the design, and
-   * a capture that only ever shows the note present proves half of it — a
-   * note that rendered unconditionally would look identical.
-   *
-   * ── Why this override is reachable, per field (#2205/#2227/#2233) ────────
-   *
-   * Only ONE field changes, and only on `agent-retired`:
-   *
-   * | field | value | why the product can produce it |
-   * |---|---|---|
-   * | `mcp_server_name` | `'haven-data-feed'` | `normalizeMcpServerName` accepts it: 15 chars (≤64) and matching `/^haven(?:-[a-z0-9]+(?:-[a-z0-9]+)*)?$/` (`backend/src/routes/agent-connection-setups.ts:143-149`). Written once at `POST /agent-connection-setups/register`. |
-   *
-   * The combination with this agent's OTHER fields is reachable too, which is
-   * the check #2233 was filed over:
-   *
-   * | co-field | value | compatible because |
-   * |---|---|---|
-   * | `mcp_last_seen_at` | `null` | the name is written at REGISTRATION; `mcp_last_seen_at` is written by MCP tool calls. An agent wired with a current connector that has not yet called a tool has exactly this pair. |
-   * | `status` | `'paused'` | pausing is a Haven-side status flip; it neither writes nor clears `mcp_server_name` (`infra/repositories/agents.ts:472-481` — "This UPDATE never touches mcp_server_name"). |
-   * | `delegate_address` | `null` | orthogonal: a pre-column legacy artefact on this agent, unrelated to the wiring label. Unchanged from the shared fixture. |
-   *
-   * Nothing else in `FIXTURE_AGENTS` is touched: `agent-research` already
-   * carries a recorded name, which is why it is not overridden here.
-   */
-  'mcp-name-all-recorded': {
+  'send-own-accounts': {
     description:
-      'The /agents list with every agent reporting an MCP server name — the hoisted "not recorded" explanation must be ABSENT (#2043)',
+      'The owner send modal with a SECOND Haven account on the SENDING chain (#4026): the same-chain account is offered as a one-tap recipient by name, and an own account on a different chain is NOT offered. The shared fixture has one account, so both the offer and its negative are unreachable from a route capture.',
     api(apiPath) {
-      if (apiPath === '/agents') {
-        return {
-          agents: FIXTURE_AGENTS.map((a) =>
-            a.mcp_server_name ? a : { ...a, mcp_server_name: 'haven-data-feed' },
-          ),
-        }
+      // Two extra registrations: 'Savings' rides the SAME chain as the
+      // fixture account (84532) — it is the one-tap recipient — and
+      // 'Ethereum account' rides 11155111, the never-offered control. The
+      // signers read falls through to the shared fixture (one passkey), so
+      // the modal renders its ready state, not the owner-wallet blocker.
+      const sameChain = {
+        ...FIXTURE_ACCOUNT,
+        id: 'safe-savings',
+        name: 'Savings',
+        account_address: '0x2222222222222222222222222222222222222222',
+        is_default: false,
+      }
+      const otherChain = {
+        ...FIXTURE_ACCOUNT,
+        id: 'safe-ethereum',
+        name: 'Ethereum account',
+        account_address: '0x3333333333333333333333333333333333333333',
+        chain_id: 11155111,
+        is_default: false,
+      }
+      if (apiPath === '/auth/me') {
+        return { ...FIXTURE_USER, accounts: [{ ...FIXTURE_ACCOUNT }, sameChain, otherChain] }
       }
       return undefined
     },
     async run({ page, vp, shoot }) {
-      await page.goto(`${BASE_URL}/agents`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await page.goto(`${BASE_URL}/accounts/${FIXTURE_ACCOUNT.id}`, {
+        waitUntil: 'domcontentloaded',
+        timeout: 60_000,
+      })
       await dismissMobileSidebar(page, vp)
-
-      // Wait for EVERY card, not the first: the claim is about the whole list,
-      // so a capture that raced the second card would be evidence of nothing —
-      // and "no note" is exactly what a half-rendered list also looks like.
-      // #2687: 'Ops agent' was in this list and is not an agent — it is a
-      // transaction's `agentName` (`:396`). `getByText(exact)` on /agents could
-      // never match it, so this loop was a guaranteed 20s timeout. Removing it
-      // does NOT make this scenario pass: it fails earlier, rendering 33 chars
-      // with no `#main-content`, measured against a warm server that captured
-      // `agents` cleanly in the same session. Tracked as #2689.
-      for (const name of ['Research agent', 'Data-feed agent']) {
-        await page.getByText(name, { exact: true }).first().waitFor({ timeout: 20_000 })
+      const dialog = page.getByRole('dialog', { name: 'Send' })
+      // Positive control: the same-chain own account is offered BY NAME.
+      await page.getByRole('button', { name: 'Send', exact: true }).click()
+      await dialog.getByRole('button', { name: 'Send to Savings' }).waitFor({ timeout: 20_000 })
+      // Negative control: the cross-chain own account must never appear.
+      if (await dialog.getByText('Ethereum account').count()) {
+        throw new Error('send-own-accounts: the cross-chain own account is offered — the #4026 chain filter regressed')
       }
-      // Positive control for the absence: both recorded names are on screen,
-      // so the list really did render its MCP row.
-      await page.getByText('haven-data-feed', { exact: true }).first().waitFor({ timeout: 20_000 })
-
-      await shoot(page.locator('main').first(), 'list')
+      await shoot(dialog, 'modal')
     },
   },
-
   'half-revoked-agents': {
     description:
-      'Half-revoked agents (#3542) — a REVOKED agent and an ARCHIVED agent whose budget delegation is still live on-chain: the /agents list card with Finish revoking, the collapsed Removed toggle carrying its warning, the expanded Removed group, both agent detail pages with the warning callout above the budget card, and the account page summary that no longer says "Access revoked"',
+      'Half-revoked agents (#3542) — a REVOKED agent and an ARCHIVED agent whose budget delegation is still live on-chain: the /agents list card with Finish revoking, the hidden-archived callout carrying its warning (#4113), the archived card once Show archived is pressed, both agent detail pages with the warning callout above the budget card, and the account page summary that no longer says "Access revoked"',
     api(apiPath, method) {
       if (apiPath === '/agents' && method === 'GET') {
         return {
@@ -4143,7 +4345,7 @@ export const SCENARIOS = {
       return undefined
     },
     async run({ page, vp, shoot }) {
-      // ── /agents: list card, collapsed toggle, expanded Removed group ──────
+      // ── /agents: list card, the hidden-archived callout, archived shown ───
       await page.goto(`${BASE_URL}/agents`, { waitUntil: 'networkidle', timeout: 60_000 })
       await dismissMobileSidebar(page, vp)
 
@@ -4156,23 +4358,23 @@ export const SCENARIOS = {
       await revokedCard.getByRole('button', { name: 'Finish revoking Legacy research agent' }).click()
       const finishDialog = page.getByRole('dialog', { name: 'Finish revoking Legacy research agent?' })
       await finishDialog.waitFor({ timeout: 20_000 })
-      await finishDialog.getByText(/You sign once and every budget it still holds ends/).waitFor({ timeout: 20_000 })
+      await finishDialog.getByText(/You approve once and every budget it still holds ends/).waitFor({ timeout: 20_000 })
       await shoot(finishDialog, 'finish-dialog')
       await finishDialog.getByRole('button', { name: 'Cancel' }).click()
       await finishDialog.waitFor({ state: 'detached', timeout: 20_000 })
 
-      // The toggle carries the warning while the group is COLLAPSED — that is
-      // the state the owner sees by default, and the whole reason for it.
-      const toggle = page.getByRole('button', { name: /Removed/ })
-      await toggle.getByText(/still has an active budget/).waitFor({ timeout: 20_000 })
-      await toggle.scrollIntoViewIfNeeded()
-      await shoot(toggle.locator('xpath=..'), 'removed-toggle-collapsed')
+      // The callout carries the warning while archived agents are HIDDEN
+      // (#4113's default) — the state the owner sees, and the whole reason for it.
+      const callout = page.getByTestId('hidden-active-budget-callout')
+      await callout.getByText(/still ha(s|ve) an active budget/).waitFor({ timeout: 20_000 })
+      await callout.scrollIntoViewIfNeeded()
+      await shoot(callout, 'hidden-archived-callout')
 
-      await toggle.click()
-      const removedGroup = page.getByRole('group', { name: 'Removed agents' })
-      await removedGroup.getByRole('button', { name: 'Finish revoking Old data-feed agent' }).waitFor({ timeout: 20_000 })
-      await removedGroup.scrollIntoViewIfNeeded()
-      await shoot(removedGroup, 'removed-expanded')
+      await callout.getByRole('button', { name: 'Show archived' }).click()
+      const archivedCard = page.getByTestId('agent-card').filter({ hasText: 'Old data-feed agent' })
+      await archivedCard.getByRole('button', { name: 'Finish revoking Old data-feed agent' }).waitFor({ timeout: 20_000 })
+      await archivedCard.scrollIntoViewIfNeeded()
+      await shoot(archivedCard, 'archived-shown-card')
 
       // ── Agent detail: the callout above the budget card ───────────────────
       for (const [id, label] of [
@@ -4191,6 +4393,106 @@ export const SCENARIOS = {
       await dismissMobileSidebar(page, vp)
       await page.getByText(/Budget still active/).first().waitFor({ timeout: 20_000 })
       await shoot(page.locator('main').first(), 'account-summary')
+    },
+  },
+
+  /**
+   * #3988: the received sub-budget states. A grant HOLDER with no budget of
+   * its own used to read "No budget" on /agents and got no trace of the
+   * grant on its own page; both are the fix's visible halves.
+   *
+   * Reachability: `agent-research` is remapped to the holder — its own
+   * allowances EMPTY (so the helper's received line takes over) and an OPEN
+   * received grant from the paused agent, exactly the chain the server's
+   * qualifying-chain read would answer `open: true` for (real grant, live
+   * parent-child, spendable parent budget). The detail read for the same
+   * agent serves the received list (`useReceivedSubBudgets`' endpoint);
+   * every other read keeps the default dataset, so the page is otherwise the
+   * ordinary agent page.
+   */
+  'received-sub-budgets': {
+    description:
+      'Received sub-budgets (#3988) — the /agents card Spends-from line for a grant holder with no own budget, and the holder Spending card Received budgets block',
+    api(apiPath, method) {
+      if (apiPath === '/agents' && method === 'GET') {
+        return {
+          agents: FIXTURE_AGENTS.map((a) =>
+            a.id === 'agent-research'
+              ? {
+                  ...a,
+                  allowances: [],
+                  receivedSubBudgets: [
+                    { parent_agent_id: 'agent-retired', parent_agent_name: 'Data-feed agent', open: true },
+                  ],
+                }
+              : a,
+          ),
+          organizations: FIXTURE_ORGANIZATIONS,
+        }
+      }
+      // #4209: the `/agents` card draws its budget from the dashboard
+      // overview (the row's `AgentBudget`), so the holder's grant rides there
+      // too, in the overview's camelCase shape.
+      if (apiPath === '/dashboard/overview') {
+        return {
+          ...FIXTURE_OVERVIEW,
+          agents: FIXTURE_OVERVIEW.agents.map((a) =>
+            a.id === 'agent-research'
+              ? {
+                  ...a,
+                  budgets: [],
+                  receivedSubBudgets: [{ parentAgentId: 'agent-retired', parentAgentName: 'Data-feed agent', open: true }],
+                }
+              : a,
+          ),
+        }
+      }
+      if (apiPath === '/agents/agent-research/sub-budgets/received') {
+        return {
+          agent_id: 'agent-research',
+          received: [
+            {
+              id: 'recv-e2e-1',
+              agent_id: 'agent-research',
+              parent_agent_id: 'agent-retired',
+              parent_agent_name: 'Data-feed agent',
+              parent_sub_budget_id: 'pc-e2e-1',
+              chain_id: 8453,
+              token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+              recipient_address: null,
+              parent_delegation_hash: '0x' + 'ab'.repeat(32),
+              delegation_hash: '0x' + 'cd'.repeat(32),
+              label: null,
+              period_amount_atomic: '25000000',
+              status: 'open',
+              expires_at: 9_999_999_999,
+              is_expired: false,
+              is_live: true,
+              created_at: '2026-09-01T10:00:00.000Z',
+              opened_at: '2026-09-01T10:00:00.000Z',
+              closed_at: null,
+              close_tx_hash: null,
+            },
+          ],
+        }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      // ── /agents: the grant-holder card's budget block ──────────────────────
+      await page.goto(`${BASE_URL}/agents`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+      const card = page.getByTestId('agent-card').filter({ hasText: 'Research agent' })
+      await card.getByText("Spends from Data-feed agent's budget").waitFor({ timeout: 20_000 })
+      await card.scrollIntoViewIfNeeded()
+      await shoot(card, 'agents-card-grant-holder')
+
+      // ── Holder detail: the Received budgets block inside the Spending card ─
+      await page.goto(`${BASE_URL}/agents/agent-research`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+      await page.getByText('Received budgets').waitFor({ timeout: 20_000 })
+      await page.getByText('From Data-feed agent').waitFor({ timeout: 20_000 })
+      await shoot(page.locator('main').first(), 'detail-received-budgets')
     },
   },
 
@@ -4306,32 +4608,61 @@ export const SCENARIOS = {
       await shoot(block, 'block')
     },
   },
+  'design-system-monogram-leading': {
+    description:
+      'The Monogram and PageHeader leading sections on /design-system — the xs size, decorative marks and the leading slot (#4210)',
+    // Element capture for the same reason as design-system-buttons: both
+    // sections sit below Chromium's full-page surface cap, where a route
+    // capture comes back blank (#4210's first design review).
+    api() {
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/design-system`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+      for (const [testId, heading, name] of [
+        ['ds-monogram', 'Monogram', 'monogram'],
+        ['ds-pageheader-leading', 'PageHeader leading', 'pageheader-leading'],
+      ]) {
+        const section = page.getByTestId(testId)
+        // The section's own h2, not just the testid: a capture that raced the
+        // paint would be evidence of nothing.
+        await section.getByRole('heading', { name: heading, exact: true }).waitFor({ timeout: 20_000 })
+        await section.scrollIntoViewIfNeeded()
+        await shoot(section, name)
+      }
+    },
+  },
   'transactions-detail-network': {
     description:
-      'The /transactions detail drawer for the first fixture row — its Network row now renders the NetworkPill (#3670)',
+      'The /transactions detail drawer for the first fixture row, Technical details opened — its Network row renders the NetworkPill (#3670, #4267)',
     api() {
       return undefined
     },
     async run({ page, vp, shoot }) {
       await page.goto(`${BASE_URL}/transactions`, { waitUntil: 'domcontentloaded', timeout: 60_000 })
       await dismissMobileSidebar(page, vp)
-      const select = page.locator('button[data-row-select]').first()
+      // #4266: a ledger row is the control.
+      const select = page.locator('[data-testid="transactions-ledger"] [role="button"][aria-haspopup="dialog"]').first()
       await select.waitFor({ timeout: 30_000 })
       await select.click()
       const drawer = page.getByRole('dialog').first()
       await drawer.waitFor({ timeout: 20_000 })
-      await drawer.getByText('Network', { exact: true }).waitFor({ timeout: 20_000 })
       await shoot(drawer, 'drawer')
+      // #4267: the Network row sits under Technical details, closed by default.
+      await drawer.locator('[data-testid="transaction-technical-details"] summary').click()
+      await drawer.getByText('Network', { exact: true }).waitFor({ timeout: 20_000 })
+      await shoot(drawer, 'drawer-technical')
     },
   },
   // #3763: the second eip3009 state — the LAST fixture row carries NO
-  // recorded settlement, so its drawer reads "Merchant settlement / Not
-  // recorded" and names the funding leg. Photographed beside
+  // recorded settlement, so its drawer reads "Settlement: Not recorded yet"
+  // with what the record proves (#4267). Photographed beside
   // `transactions-detail-network` (the recorded state's drawer, same
   // mechanism) so the reviewer evidence carries visible text for both.
   'transactions-detail-settlement-unrecorded': {
     description:
-      'The /transactions detail drawer for the unrecorded-settlement fixture row — "Merchant settlement / Not recorded" plus the funding leg, labelled (#3763)',
+      'The /transactions detail drawer for the unrecorded-settlement fixture row — "Settlement: Not recorded yet" and what the record proves (#3763, #4267)',
     api() {
       return undefined
     },
@@ -4339,12 +4670,12 @@ export const SCENARIOS = {
       await page.goto(`${BASE_URL}/transactions`, { waitUntil: 'domcontentloaded', timeout: 60_000 })
       await dismissMobileSidebar(page, vp)
       // Rows render sorted date-descending; the tx(7) row is the oldest.
-      const select = page.locator('button[data-row-select]').last()
+      const select = page.locator('[data-testid="transactions-ledger"] [role="button"][aria-haspopup="dialog"]').last()
       await select.waitFor({ timeout: 30_000 })
       await select.click()
       const drawer = page.getByRole('dialog').first()
       await drawer.waitFor({ timeout: 20_000 })
-      await drawer.getByText('Not recorded', { exact: true }).waitFor({ timeout: 20_000 })
+      await drawer.getByText('Not recorded yet', { exact: true }).waitFor({ timeout: 20_000 })
       await shoot(drawer, 'drawer')
     },
   },
@@ -4435,7 +4766,7 @@ export const SCENARIOS = {
       const settle = async (url) => {
         await page.goto(url, { waitUntil: 'networkidle', timeout: 30_000 })
         await page.evaluate(() => document.fonts.ready)
-        await page.locator('button[aria-label="User menu"]').waitFor({ timeout: 15_000 })
+        await page.locator('button[aria-label="User menu"]').waitFor({ state: 'attached', timeout: 15_000 })
         await dismissMobileSidebar(page, vp)
       }
 
@@ -4556,7 +4887,7 @@ export const SCENARIOS = {
         // The sidebar's own ARIA contract — the handle the visual specs use for
         // this widget. Its presence is the proof the chunk mounted and `<main>`
         // has settled to its final width.
-        await page.locator('button[aria-label="User menu"]').waitFor({ timeout: 15_000 })
+        await page.locator('button[aria-label="User menu"]').waitFor({ state: 'attached', timeout: 15_000 })
         await dismissMobileSidebar(page, vp)
         await heading.waitFor({ timeout: 15_000 })
       }
@@ -4929,7 +5260,7 @@ export const SCENARIOS = {
 
       await page.getByRole('heading', { name: 'Backup & recovery' }).waitFor({ timeout: 15_000 })
       // The wallet row is first; this opens the confirmation for the remaining
-      // Face ID / Touch ID without executing any signer change.
+      // passkey without executing any signer change.
       await page.getByRole('button', { name: 'Remove', exact: true }).nth(1).click()
       const dialog = page.getByRole('dialog')
       await dialog.getByRole('heading', { name: 'Remove this approval?' }).waitFor({ timeout: 15_000 })
@@ -5140,7 +5471,7 @@ export const SCENARIOS = {
 
 
       await dialog.getByRole('button', { name: 'Create setup prompt' }).click()
-      // #3832: the connect step is a numbered list whose row 1 is the copy
+      // #3832: the connect step is a status checklist whose row 1 is the copy
       // action. Captured BEFORE the copy (the ready frame), then with the
       // prompt disclosure open, then copied, at each stage.
       const copyPrompt = dialog.getByRole('button', { name: 'Copy setup prompt' })
@@ -5191,6 +5522,109 @@ export const SCENARIOS = {
       await dialog.getByRole('button', { name: 'Generate credentials' }).click()
       await dialog.getByText('HAVEN_API_KEY=').waitFor({ timeout: 10_000 })
       await shoot(dialog, 'server-credential-result')
+    },
+  },
+  'connect-agent-inline': {
+    description:
+      '#4065: the inline first-agent flow on /agents for a user with no agents — the whole page at rest (subtitle, header with its ⋯ menu and without Connect agent; no count chip since #4209), then the card at step 1, step 2 (starter budget prefilled) and step 3 with BOTH disclosures open, where the copy blocks must not be a card inside the card',
+    // Same pin as `connect-agent`: the setup stays at awaiting_connection, so
+    // step 3 holds still for the capture. No agents and no organizations:
+    // the state a brand-new user meets.
+    api(apiPath, method) {
+      if (apiPath === '/agents' && method === 'GET') return { agents: [] }
+      if (apiPath === '/organizations' && method === 'GET') return { organizations: [] }
+      if (apiPath === '/agent-connection-setups' && method === 'POST') {
+        return {
+          setup_id: CONNECT_SETUP_ID,
+          status: 'awaiting_connection',
+          setup_token: CONNECT_SETUP_TOKEN,
+          expires_at: '2099-01-01T00:00:00.000Z',
+          connector_command: CONNECT_COMMAND,
+          setup_prompt: ['Please connect this workspace to Haven.', '', 'Run this exact command:', '', CONNECT_COMMAND].join('\n'),
+        }
+      }
+      // The server-credential round-trip, so the .env copy block — the other
+      // CopyBlock inside the disclosures — is captured too.
+      if (apiPath === '/agent-connection-setups/resolve') {
+        return {
+          agent: { name: 'Research agent', description: null },
+          haven_wallet: {
+            id: FIXTURE_ACCOUNT.id,
+            name: FIXTURE_ACCOUNT.name,
+            address: FIXTURE_ACCOUNT.account_address,
+            chain_id: FIXTURE_ACCOUNT.chain_id,
+            network: 'Base Sepolia',
+          },
+          agent_budget: [],
+          challenge: { id: 'challenge-capture-1', message: 'Sign to prove control of this delegate address' },
+          hosted_mcp_url: 'https://mcp.haven.example',
+        }
+      }
+      if (apiPath === '/agent-connection-setups/register') {
+        return {
+          setup_id: CONNECT_SETUP_ID,
+          agent_id: 'agent-capture-1',
+          status: 'connected_local',
+          delegate_address: '0x3333333333333333333333333333333333333333',
+          hosted_mcp_url: 'https://mcp.haven.example',
+        }
+      }
+      if (apiPath === `/agent-connection-setups/${CONNECT_SETUP_ID}`) {
+        return {
+          setup_id: CONNECT_SETUP_ID,
+          agent_id: null,
+          status: 'awaiting_connection',
+          expires_at: '2099-01-01T00:00:00.000Z',
+          agent: { name: 'Research agent', description: null },
+          haven_wallet: {
+            id: FIXTURE_ACCOUNT.id,
+            name: FIXTURE_ACCOUNT.name,
+            address: FIXTURE_ACCOUNT.account_address,
+            chain_id: FIXTURE_ACCOUNT.chain_id,
+            network: 'Base Sepolia',
+          },
+          agent_budget: [],
+        }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/agents`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+      const flow = page.getByRole('region', { name: 'Connect your first agent' })
+      await flow.waitFor({ timeout: 30_000 })
+      // The page first: the subtitle, and a header with Labels and
+      // Organizations only. Neither the chip nor the header button may
+      // render while the flow shows — fail the run rather than shoot it.
+      if (await page.getByRole('button', { name: 'Connect agent', exact: true }).count()) {
+        throw new Error('connect-agent-inline: the header Connect agent rendered beside the inline flow')
+      }
+      await shoot(page.locator('main').first(), 'page')
+
+      await flow.getByText('Advanced', { exact: true }).click()
+      await shoot(flow, 'step1-details')
+
+      await flow.getByLabel('Agent name').fill('Research agent')
+      await flow.getByRole('button', { name: 'Set agent budget' }).click()
+      // The starter budget is the point of this frame (owner decision
+      // 2026-10-19): confirm it before capturing it.
+      await flow.getByPlaceholder('Amount').waitFor({ timeout: 10_000 })
+      const amount = await flow.getByPlaceholder('Amount').inputValue()
+      if (amount !== '10') throw new Error(`connect-agent-inline: starter budget is ${JSON.stringify(amount)}, not "10"`)
+      await shoot(flow, 'step2-policy')
+
+      await flow.getByRole('button', { name: 'Create setup prompt' }).click()
+      await flow.getByRole('button', { name: 'Copy setup prompt' }).waitFor({ timeout: 30_000 })
+      await shoot(flow, 'step3-waiting')
+      // Both disclosures open: inside the inline Card their copy blocks drop
+      // their own Card shell (#4065) — this is the frame that shows it.
+      await flow.getByText('Running in a server or hosted backend?').click()
+      await flow.getByText('Having trouble connecting?').click()
+      await flow.getByText('Local command').waitFor({ timeout: 10_000 })
+      await shoot(flow, 'step3-disclosures-open')
+      await flow.getByRole('button', { name: 'Generate credentials' }).click()
+      await flow.getByText('HAVEN_API_KEY=').waitFor({ timeout: 10_000 })
+      await shoot(flow, 'step3-server-credential')
     },
   },
   'connect-agent-approve': {
@@ -5634,6 +6068,7 @@ export const SCENARIOS = {
       await shoot(section, 'section')
     },
   },
+  ...newAccountScenarios(),
   'modal-migrations': {
     description: 'InfoModal and ComingSoonModal rendered from the design-system reference',
     api() {
@@ -5657,10 +6092,10 @@ export const SCENARIOS = {
       await shoot(comingSoonDialog, 'coming-soon-modal')
     },
   },
-  'add-funds': {
-    description: 'Add funds modal with a RESOLVED chain — the normal path (#1844)',
+  'receive-dialog': {
+    description: 'Receive dialog with a RESOLVED chain — the normal path (#4094, gate #1844)',
     // Route capture cannot see this: it is a dialog behind the dashboard hero's
-    // "Add funds" button. The chain data is the shared fixture's, untouched —
+    // "Receive" button. The chain data is the shared fixture's, untouched —
     // its safe carries chain_id 84532, which is the whole point of the
     // "resolved" capture.
     //
@@ -5668,13 +6103,13 @@ export const SCENARIOS = {
     // than about this issue: the shared fixture's safe is a `delegator_hybrid`
     // whose hydrated signer set holds a passkey that is not on this device, so
     // the hero renders `PasskeyOtherDeviceNotice` INSTEAD of the action buttons
-    // and "Add funds" is unclickable. Measured, not assumed — the first run of
+    // and "Receive" is unclickable. Measured, not assumed — the first run of
     // this scenario timed out waiting for the button while the unresolved
     // counterpart found it, because a missing chain_id happens to route the
     // gate down a different branch. Putting the account on the Safe rail
     // (`account_type: 'legacy_safe'`) leaves it with no stored passkey, i.e.
     // `no_signer`, which is a hero that offers its actions. Nothing about the
-    // modal under capture changes.
+    // dialog under capture changes.
     //
     // #2202: this used to DROP `account_type` rather than set it. `railOf`
     // read the two identically at the time (it is deleted since #2413, and
@@ -5691,22 +6126,27 @@ export const SCENARIOS = {
       await page.goto(`${BASE_URL}/dashboard`, { waitUntil: 'networkidle', timeout: 60_000 })
       await dismissMobileSidebar(page, vp)
 
-      await page.getByRole('button', { name: 'Add funds', exact: true }).first().click()
+      await page.getByRole('button', { name: 'Receive', exact: true }).first().click()
       const dialog = page.getByRole('dialog')
-      // Confirmed by the RESOLVED sentence, not by a bare timeout. A run that
+      // Confirmed by the RESOLVED rule, not by a bare timeout. A run that
       // somehow lands on the unknown-network state fails here rather than
       // shooting it under the resolved filename — which is the whole point of
       // having two scenarios.
       await dialog
-        .getByText('Send USDC to your account address on Base Sepolia.')
+        .getByText('Send USDC on Base Sepolia only. It arrives in about a minute and shows in Activity.')
         .waitFor({ timeout: 20_000 })
+      // The QR is half of what this screen refuses in the other state, so the
+      // resolved capture has to actually show one for the pair to be evidence
+      // about the QR at all. #4167: it is INLINE — generated when the dialog
+      // opens, nothing to click.
+      await dialog.getByAltText(/^QR code for /).waitFor({ timeout: 20_000 })
       await shoot(dialog, 'resolved')
     },
   },
-  'add-funds-unresolved-chain': {
+  'receive-dialog-unresolved-chain': {
     description:
-      'Add funds modal with an UNRESOLVED chain — names no network, offers no onramp (#1844)',
-    // A separate scenario rather than a second state of `add-funds`: the two
+      'Receive dialog with an UNRESOLVED chain — names no network, shows no address or QR (#4094, gate #1844)',
+    // A separate scenario rather than a second state of `receive-dialog`: the two
     // need opposite pins on the SAME endpoints for their whole run, and one run
     // cannot hold both (same reason `connect-agent-approved` is split out).
     //
@@ -5720,7 +6160,7 @@ export const SCENARIOS = {
     // capture is therefore evidence of the real fallback path, not of a
     // hand-edited render.
     //
-    // It carries the same rail override as `add-funds` for the same
+    // It carries the same rail override as `receive-dialog` for the same
     // reachability reason, so the two captures differ by EXACTLY one field —
     // `chain_id` — and the pair is therefore evidence about the chain and
     // nothing else.
@@ -5742,80 +6182,10 @@ export const SCENARIOS = {
       await page.goto(`${BASE_URL}/dashboard`, { waitUntil: 'networkidle', timeout: 60_000 })
       await dismissMobileSidebar(page, vp)
 
-      await page.getByRole('button', { name: 'Add funds', exact: true }).first().click()
+      await page.getByRole('button', { name: 'Receive', exact: true }).first().click()
       const dialog = page.getByRole('dialog')
       await dialog
         .getByText(/We can't confirm which network this account uses/)
-        .waitFor({ timeout: 20_000 })
-      await shoot(dialog, 'unresolved')
-    },
-  },
-  'receive-funds': {
-    description: 'Receive funds modal with a RESOLVED chain — the normal path (#1852)',
-    // The resolved half of the #1852 pair. Same construction as `add-funds`
-    // above and for the same reasons: the chain data is the shared fixture's
-    // (84532), and the ONE override is the rail marker (`account_type: 'legacy_safe'`,
-    // #2202 — see `add-funds` for why it is SET rather than dropped) so the
-    // hero renders its action buttons instead of `PasskeyOtherDeviceNotice`.
-    api(apiPath) {
-      if (apiPath === '/auth/me') return { ...FIXTURE_USER, accounts: [{ ...FIXTURE_ACCOUNT, account_type: 'legacy_safe' }] }
-      return undefined
-    },
-    async run({ page, vp, shoot }) {
-      await page.goto(`${BASE_URL}/dashboard`, { waitUntil: 'networkidle', timeout: 60_000 })
-      await dismissMobileSidebar(page, vp)
-
-      // The hero's deposit action is named "Deposit address" everywhere since
-      // #3807 (the funded/unfunded distinction moved to the meta-line under
-      // the sparkline, not the button label).
-      await page.getByRole('button', { name: /^Deposit address$/ }).first().click()
-      const dialog = page.getByRole('dialog')
-      // Confirmed by the RESOLVED sentence rather than by a bare timeout, so a
-      // run that lands on the refusal fails here instead of being shot under
-      // the resolved filename.
-      await dialog
-        .getByText('Send supported tokens to this Haven wallet on Base Sepolia.')
-        .waitFor({ timeout: 20_000 })
-      // The QR is half of what this screen refuses in the other state, so the
-      // resolved capture has to actually show one for the pair to be evidence
-      // about the QR at all.
-      await dialog.getByRole('button', { name: 'Show QR code' }).click()
-      await dialog.getByAltText(/^QR code for /).waitFor({ timeout: 20_000 })
-      await shoot(dialog, 'resolved')
-    },
-  },
-  'receive-funds-unresolved-chain': {
-    description:
-      'Receive funds modal with an UNRESOLVED chain — names no network, shows no address or QR (#1852)',
-    // Separate scenario rather than a second state of `receive-funds`, for the
-    // same reason as the add-funds pair: the two need opposite pins on the SAME
-    // endpoints for their whole run.
-    //
-    // The state is not reachable through the UI today (`chain_id` is
-    // non-nullable in `SmartAccount`, and the hero only offers Receive when an
-    // account exists). What IS reachable is the wire condition: a safe that
-    // arrives WITHOUT `chain_id`. That is what this serves — at the API
-    // boundary, with no component code mutated — so the capture evidences the
-    // real refusal path rather than a hand-edited render.
-    //
-    // Same rail override as its twin, so the two differ by EXACTLY one field.
-    api(apiPath) {
-      // #2202: the rail is NAMED here too, exactly as its resolved twin names
-      // it — the pair is only evidence about `chain_id` if `chain_id` is the
-      // one thing that differs, and `screenshot-fixture.test.ts` pins that.
-      const safeWithoutChain = { ...FIXTURE_ACCOUNT, account_type: 'legacy_safe' }
-      delete safeWithoutChain.chain_id
-      if (apiPath === '/auth/me') return { ...FIXTURE_USER, accounts: [safeWithoutChain] }
-      return undefined
-    },
-    async run({ page, vp, shoot }) {
-      await page.goto(`${BASE_URL}/dashboard`, { waitUntil: 'networkidle', timeout: 60_000 })
-      await dismissMobileSidebar(page, vp)
-
-      await page.getByRole('button', { name: /^Deposit address$/ }).first().click()
-      const dialog = page.getByRole('dialog')
-      await dialog
-        .getByText(/can't confirm which network this account uses/)
         .waitFor({ timeout: 20_000 })
       await shoot(dialog, 'unresolved')
     },
@@ -5842,7 +6212,7 @@ export const SCENARIOS = {
     //    untouched, so steps 1 and 2 are genuinely complete and step 3 is
     //    genuinely the active one.
     // 2. `account_type: 'legacy_safe'` on the account. Same override, same reason, as
-    //    the `add-funds` scenario above: the shared fixture's
+    //    the `receive-dialog` scenario above: the shared fixture's
     //    `delegator_hybrid` hydrates a signer set whose passkey is not on this
     //    device, so `requiresOtherDevice` is true — and that flag gates
     //    `showOnboardingGuide` itself (`DashboardClient.tsx:853-857`), so the
@@ -5873,7 +6243,7 @@ export const SCENARIOS = {
   },
   'catalog-budget-states': {
     description:
-      'A merchant page\'s offers table with all three budget states side by side — within budget, above budget, and unknown (#2295; re-pointed from the /catalog card grid by #3079)',
+      'A merchant page\'s offers table with all three budget states side by side — a named "can pay", a named "more than left", and the silent unknown (#4004; re-pointed from the /catalog card grid by #3079)',
     // ── Why this scenario exists ─────────────────────────────────────────
     //
     // Before #2295, `withinBudget` compared a HUMAN-DECIMAL `allowance_amount`
@@ -5884,28 +6254,40 @@ export const SCENARIOS = {
     // were unreachable in production. The `false` copy in particular had gone
     // stale unnoticed while dead, still promising the retired approval queue.
     //
+    // #4004 replaced the cap-only answer with `agentsThatCanPay`: the row now
+    // names WHO can pay and, for a known no, what period ran out — reading
+    // what is LEFT (`GET /dashboard/budget-remaining`, cached and polled at
+    // 60 s) rather than the cap, plus the merchant-budgets wire. So the three
+    // states are now: one open USDC budget with 20 USDC left answers both
+    // priced offers (can / more-than-left), and an EURe budget whose chain
+    // read went UNKNOWN renders as an absence — never as a warning. The old
+    // `/agent budget/` absence check would have passed vacuously forever; the
+    // new one checks the actual answer phrases.
+    //
     // A route capture cannot evidence this on its own: the shared fixture
     // serves no merchants, so `/marketplace` photographs its empty state.
-    // Three offers against one agent's single 25 USDC budget produce all
-    // three states in one frame, which is the only way to judge whether they
-    // read as answer / answer / absence rather than as error states.
+    // Three offers against one agent produce all three states in one frame,
+    // which is the only way to judge whether they read as answer / answer /
+    // absence rather than as error states.
     //
     // #3079 moved the hint from the `/catalog` card to the merchant page's
-    // `OfferRow` (`withinBudget` itself moved byte-identical to
-    // `lib/marketplace.ts`), so the scenario now answers `GET /merchants/{slug}`
-    // and captures `/marketplace/{slug}`. The three fixture offers are the
-    // same three, under one fixture merchant.
+    // `OfferRow` (`withinBudget` itself lived in `lib/marketplace.ts` until
+    // #4004 replaced it), so the scenario still answers `GET
+    // /merchants/{slug}` and captures `/marketplace/{slug}` — plus the two
+    // reads the helper now consumes.
     api(apiPath) {
       if (apiPath === '/agents') {
-        // ONE active agent, ONE USDC budget, in the shape `GET /agents`
-        // actually returns: human-decimal, per `allowanceHumanAmount` and
-        // `rails/delegation-budget-view.ts`. An atomic string here would make
-        // the capture evidence of the bug rather than of the fix.
+        // ONE active agent on the offer's chain. `GET /agents` still carries
+        // the human-decimal CAP (`allowance_amount`) — the period word reads
+        // it (weekly → "this week"); the ANSWER reads what is left.
         return {
           agents: [
             {
               ...FIXTURE_AGENTS[0],
+              name: 'Atlas',
               status: 'active',
+              account_chain_id: FIXTURE_ACCOUNT.chain_id,
+              receivedSubBudgets: [],
               allowances: [
                 {
                   id: 'alw-catalog-fixture',
@@ -5919,6 +6301,49 @@ export const SCENARIOS = {
             },
           ],
         }
+      }
+      if (apiPath === '/dashboard/budget-remaining') {
+        // What is LEFT, per budget: 20 of 25 USDC on the open USDC budget —
+        // covers $0.01, not $99. The EURe budget's read went unknown, so the
+        // EURe row renders nothing at all.
+        return {
+          budgets: [
+            {
+              agent_id: FIXTURE_AGENTS[0].id,
+              chain_id: FIXTURE_ACCOUNT.chain_id,
+              delegation_hash: `0x${'a'.repeat(64)}`,
+              token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+              token_symbol: 'USDC',
+              token_decimals: 6,
+              budget_atomic: '25000000',
+              read_at: new Date().toISOString(),
+              period_end: new Date(Date.now() + 86_400_000).toISOString(),
+              remaining_atomic: '20000000',
+              remaining_from_chain: true,
+              used_atomic: '5000000',
+              sub_budget_spend: [],
+            },
+            {
+              agent_id: FIXTURE_AGENTS[0].id,
+              chain_id: FIXTURE_ACCOUNT.chain_id,
+              delegation_hash: `0x${'b'.repeat(64)}`,
+              token_address: `0x${'e'.repeat(40)}`,
+              token_symbol: 'EURe',
+              token_decimals: 18,
+              budget_atomic: '5000000000000000000',
+              read_at: null,
+              period_end: new Date(Date.now() + 86_400_000).toISOString(),
+              remaining_atomic: null,
+              remaining_from_chain: false,
+              used_atomic: null,
+              sub_budget_spend: [],
+            },
+          ],
+        }
+      }
+      if (apiPath === '/merchants/budget-fixture/budgets') {
+        // No merchant-locked budgets — the open budget is the selected one.
+        return { budgets: [] }
       }
       if (apiPath === '/merchants/budget-fixture') {
         const merchant = {
@@ -5946,7 +6371,7 @@ export const SCENARIOS = {
               ...base, id: 'cat-within', name: 'Text generation',
               description: 'Generate short-form text. Priced well inside the agent budget.',
               resource_url: 'https://mcp.text.example/mcp',
-              price_display: '$0.01 USDC', price_atomic: '10000', asset: 'USDC',
+              price_display: '0.01 USDC', price_atomic: '10000', asset: 'USDC',
             },
             {
               // 99 USDC against a 25 USDC budget — the state that could not
@@ -5954,7 +6379,7 @@ export const SCENARIOS = {
               ...base, id: 'cat-above', name: 'Bulk video render',
               description: 'Render a full video. Priced above every configured agent budget.',
               resource_url: 'https://mcp.video.example/mcp',
-              price_display: '$99.00 USDC', price_atomic: '99000000', asset: 'USDC',
+              price_display: '99.00 USDC', price_atomic: '99000000', asset: 'USDC',
             },
             {
               // No agent holds an EURe budget, so the comparison has nothing
@@ -5975,21 +6400,20 @@ export const SCENARIOS = {
       await dismissMobileSidebar(page, vp)
 
       // Wait on the two ANSWERING states by their copy, not on the table. The
-      // table renders as soon as offers arrive, and the pre-#2295 defect
-      // rendered a complete, plausible-looking grid with no budget line on any
-      // card — so a capture that waited on the rows alone would have
-      // photographed the bug and called it evidence.
-      await page.getByText('Within your agent budget').first().waitFor({ timeout: 20_000 })
-      await page.getByText(/^Above every agent budget/).first().waitFor({ timeout: 20_000 })
+      // table renders as soon as offers arrive, and a defect that rendered a
+      // complete, plausible-looking grid with no budget line on any row — the
+      // pre-#2295 shape — would otherwise photograph as evidence.
+      await page.getByText('Atlas can pay this').first().waitFor({ timeout: 20_000 })
+      await page.getByText(/^More than Atlas has left this week$/).first().waitFor({ timeout: 20_000 })
 
       // Positive control for the ABSENCE. The third row must render (its name
-      // is on screen) while carrying neither budget line — otherwise "no
-      // warning" would be indistinguishable from "row never rendered".
+      // is on screen) while carrying neither answer — otherwise "unknown is
+      // silent" would be indistinguishable from "row never rendered".
       const unknownRow = page.locator('[data-testid="offer-row-cat-unknown"]')
       await unknownRow.waitFor({ timeout: 20_000 })
-      if ((await unknownRow.getByText(/agent budget/).count()) > 0) {
+      if ((await unknownRow.getByText(/can pay this|has left/).count()) > 0) {
         throw new Error(
-          'catalog-budget-states: the EURe row rendered a budget line; the unknown state is not absent',
+          'catalog-budget-states: the EURe row rendered a budget answer; the unknown state is not absent',
         )
       }
 
@@ -6053,7 +6477,7 @@ export const SCENARIOS = {
       const settle = async (navigate) => {
         await navigate()
         await page.evaluate(() => document.fonts.ready)
-        await page.locator('button[aria-label="User menu"]').waitFor({ timeout: 15_000 })
+        await page.locator('button[aria-label="User menu"]').waitFor({ state: 'attached', timeout: 15_000 })
         await dismissMobileSidebar(page, vp)
         await heading.waitFor({ timeout: 15_000 })
       }
@@ -6313,9 +6737,67 @@ export const SCENARIOS = {
       await shoot(page.locator('main').first(), 'page')
     },
   },
+  'dashboard-own-account-transfer': {
+    description:
+      '#4268: a move between two of the user\'s own accounts on the dashboard\'s Activity card is ONE row — "Moved between your accounts", "Operating wallet → Savings", unsigned — the backend folds both legs (#4265\'s fold). This supersedes, for paired legs, the 2026-10-20 owner decision that showed the send as "Savings" and the arrival as "From Savings". An UNPAIRED arrival (its sending account\'s read failed, so no partner leg) still reads "From Savings" (#4099, decision kept), and an outside deposit on the same day still reads "Deposit". #4117: an agent send\'s subtitle names the account the money left ("From Operating wallet"), never a fixed "From My account". The shared fixture has one account and no inbound row, so none of this is reachable from a route capture.',
+    api(apiPath) {
+      const savings = {
+        ...FIXTURE_ACCOUNT,
+        id: 'safe-savings',
+        name: 'Savings',
+        account_address: '0x2222222222222222222222222222222222222222',
+        is_default: false,
+      }
+      if (apiPath === '/auth/me') {
+        return { ...FIXTURE_USER, accounts: [{ ...FIXTURE_ACCOUNT }, savings] }
+      }
+      if (apiPath === '/dashboard/overview') {
+        const [base] = FIXTURE_OVERVIEW.activity
+        const at = (secondsBefore) => new Date(Date.parse(base.latestAt) - secondsBefore * 1000).toISOString()
+        // Single, exact payments: the fixture group's floored count would read "×3+" on rows that are one transfer each.
+        const plainTransfer = { ...base, count: 1, countIsFloor: undefined, agentId: null, agentName: null, source: null, x402ResourceUrl: null }
+        return {
+          ...FIXTURE_OVERVIEW,
+          activity: [
+            // An unpaired arrival from Savings (its partner leg was not read): named by the sender (#4099).
+            { ...plainTransfer, direction: 'in', to: FIXTURE_ACCOUNT.account_address, merchantName: 'Savings', sumAtomic: '50000000', approxAmount: '538.0000', latestAt: at(60) },
+            // Operating wallet → Savings, both legs folded into one move row (#4268).
+            { ...plainTransfer, direction: 'out', to: savings.account_address, merchantName: 'Savings', fromAccountName: FIXTURE_ACCOUNT.name, ownTransfer: { fromAccountName: FIXTURE_ACCOUNT.name, toAccountName: 'Savings' }, sumAtomic: '20000000', approxAmount: '215.2000', latestAt: at(120) },
+            // An outside deposit the same day: still the generic word.
+            { ...plainTransfer, direction: 'in', to: FIXTURE_ACCOUNT.account_address, merchantName: null, sumAtomic: '10000000', approxAmount: '107.6000', latestAt: at(180) },
+            // The agent's x402 payment, sent from the same account (#4117).
+            { ...base, fromAccountName: FIXTURE_ACCOUNT.name },
+          ],
+        }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.addInitScript((userId) => {
+        window.localStorage.setItem(`haven-onboarding-complete-dismissed:${userId}`, '1')
+      }, FIXTURE_USER.id)
+      await page.goto(`${BASE_URL}/dashboard`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+      // #4268: the folded move is one row, naming both accounts.
+      await page.getByText('Moved between your accounts', { exact: true }).first().waitFor({ timeout: 30_000 })
+      if ((await page.getByText('Moved between your accounts', { exact: true }).count()) !== 1) {
+        throw new Error('#4268: expected exactly one move row')
+      }
+      // The unpaired arrival still reads "From Savings" (#4099).
+      await page.getByText('From Savings', { exact: true }).first().waitFor({ timeout: 10_000 })
+      // #4117: the agent send's subtitle names the account the money left.
+      await page.getByText(`From ${FIXTURE_ACCOUNT.name}`, { exact: true }).first().waitFor({ timeout: 10_000 })
+      if (await page.getByText('From My account', { exact: false }).count()) {
+        throw new Error('#4117: a fixed "From My account" subtitle rendered')
+      }
+      // Negative control: the outside deposit keeps "Deposit".
+      await page.getByText('Deposit', { exact: true }).first().waitFor({ timeout: 10_000 })
+      await shoot(page.locator('main').first(), 'page')
+    },
+  },
   'dashboard-sub-cent': {
     description:
-      '#3897: a week of sub-cent agent payments — the count-form summary and "<$0.01" in the spending half and the activity row, never "$0.00" (the agent caption\'s sub-cent form is unit-tested, not shown here: the shared budget read is not sub-cent)',
+      '#4264: a week of sub-cent agent payments — the count-form summary and the 4-decimal sub-cent figures in the spending half and the activity row, "<0,0001 kr" only below 0.00005 (owner decision 2026-10-22, superseding #3897\'s "<$0.01"; the agent caption\'s sub-cent form is unit-tested, not shown here: the shared budget read is not sub-cent)',
     api(apiPath) {
       if (apiPath === '/dashboard/overview') {
         // Under a cent in EVERY display currency (the fixture user's default is SEK).
@@ -6418,7 +6900,7 @@ export const SCENARIOS = {
             token_address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
             recipient_address: null,
             delegation_hash: '0x' + '8b'.repeat(32),
-            version: 1, status: 'active',
+            version: 1, status: 'active', is_live: true,
             budget_atomic: '150000000', period_seconds: 604_800,
             start_date: '2026-06-02T10:00:00.000Z',
             expires_at: Math.floor(Date.UTC(2027, 5, 2) / 1000),
@@ -6638,7 +7120,7 @@ async function main() {
       server = spawn('npm', ['run', 'dev', '--', '--hostname', '127.0.0.1', '--port', String(port)], {
         cwd: ROOT,
         stdio: 'ignore',
-        env: { ...process.env, NEXT_TELEMETRY_DISABLED: '1' },
+        env: { ...process.env, NEXT_TELEMETRY_DISABLED: '1', TZ: 'UTC' }, // #4293: the server's zone matches the browser's
       })
       server.on('exit', (code) => {
         if (code && code !== 0 && code !== null) console.error(`dev server exited ${code}`)

@@ -170,6 +170,9 @@ describeDb('merchants routes (#3078)', () => {
     expect(slugsOf(res.json())).toEqual(['base-only', 'both-chains'])
     const both = res.json().merchants.find((m: { slug: string }) => m.slug === 'both-chains')
     expect(both).toMatchObject({ offer_count: 1, networks: ['eip155:8453'], listing_status: 'live' })
+    // The seeded offers carry no price, so the field reaches the wire as null
+    // — the additive field is on every response, never absent.
+    expect(both.lowest_price_atomic).toBeNull()
   })
 
   it('dev lists both chains (decision 11): every live merchant, network chips per chain', async () => {

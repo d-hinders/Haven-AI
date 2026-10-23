@@ -357,12 +357,18 @@ describeDb('catalog ingestion lifecycle (#1714)', () => {
     const claim = await seed('stuck.example.com')
     await db.query(`UPDATE catalog_submissions SET created_at = now() - interval '3 days' WHERE id = $1`, [claim.submissionId])
 
-    const first = await runCatalogIngestTick(tickDeps({}))
+    // Inject the inert fetcher: with no fetchText the tick dials the REAL
+    // network for the well-known proof, and on a CI runner whose resolver is
+    // slow to return NXDOMAIN one safeGetText burned its full 5s deadline —
+    // tripping the 5000ms testTimeout (#3963). A refused fetch is exactly the
+    // condition under test (the row stays 'submitted'), so the stub is
+    // semantics-preserving, and the test makes no outbound calls.
+    const first = await runCatalogIngestTick(tickDeps({ fetchText: inertServer }))
     expect(first.stuckSubmitted).toBe(1)
     expect(first.alerts.some((a) => a.includes('stuck'))).toBe(true)
 
     // Same condition on the next tick: no repeat alert.
-    const second = await runCatalogIngestTick(tickDeps({}))
+    const second = await runCatalogIngestTick(tickDeps({ fetchText: inertServer }))
     expect(second.stuckSubmitted).toBe(1)
     expect(second.alerts).toHaveLength(0)
   })

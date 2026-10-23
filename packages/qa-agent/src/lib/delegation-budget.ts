@@ -41,18 +41,24 @@ export interface OnchainBudget {
 /**
  * The agent's live remaining budget for `symbol`, or a reason string.
  *
- * Refuses (rather than returning a number) when the read is a fallback or the
- * budget is already exhausted: in both cases an "over-budget" request would be
- * refused for a reason the leg did not establish, which is the exact vacuous
- * pass #2016 was filed about.
+ * Refuses (rather than returning a number) when the read is a fallback, or —
+ * except with `use: 'exhausted-ok'`, whose caller EXPECTS an exhausted budget
+ * (#3992) — when the budget is already exhausted: in both cases an
+ * "over-budget" request would be refused for a reason the leg did not
+ * establish, which is the exact vacuous pass #2016 was filed about.
  */
 /**
  * What the caller does with the number, which decides why a fallback is unusable.
  *
  * `ceiling` — the leg derives an amount ABOVE the budget and expects a refusal.
  * `floor` — the leg needs the budget to be at least its fixed amount.
+ * `exhausted-ok` (#3992 A2/A3) — the caller is a tier-3 task whose
+ *   precondition IS an exhausted budget: an exhausted read is the expected
+ *   setup and is returned (possibly 0), never an error. A fallback is still
+ *   refused — it would report a funded budget where none exists, so the
+ *   precondition the task grades would not be real.
  */
-export type BudgetUse = 'ceiling' | 'floor'
+export type BudgetUse = 'ceiling' | 'floor' | 'exhausted-ok'
 
 const FALLBACK_REASON: Record<BudgetUse, string> = {
   ceiling:
@@ -65,6 +71,9 @@ const FALLBACK_REASON: Record<BudgetUse, string> = {
     'the fallback reports the FULL configured budget, so it can clear a floor the real ' +
     'remaining would not — and this leg would then report a settlement failure for a ' +
     'budget that was simply spent',
+  'exhausted-ok':
+    'the fallback reports the FULL configured budget, so an exhausted-budget precondition ' +
+    'would not be established — the tier-3 task would grade a refusal that the real chain state never caused',
 }
 
 export async function readOnchainBudget(
@@ -90,7 +99,7 @@ export async function readOnchainBudget(
     }
   }
   const remaining = BigInt(onchain.remaining)
-  if (remaining <= 0n) {
+  if (remaining <= 0n && use !== 'exhausted-ok') {
     return {
       error:
         `the ${symbol} budget is already exhausted (remaining 0 of ${row.configured_amount ?? '?'}) — ` +

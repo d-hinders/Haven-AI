@@ -2,13 +2,13 @@
 
 import Link from 'next/link'
 import { useMemo } from 'react'
-import type { ApiSchema } from '@haven_ai/core'
+import { shouldMarkApprox, type ApiSchema } from '@haven_ai/core'
 import { ArrowLeftRight } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { EmptyState } from '@/components/ui/EmptyState'
-import { TransactionActivityRow } from '@/components/haven'
+import { TransactionActivityDayHeader, TransactionActivityRow, TransactionMovement, transactionDayKey, transactionDayLabel } from '@/components/haven'
 import type { StatusTone } from '@/components/ui/StatusBadge'
 import { timeAgo } from '@/lib/format'
 import { counterpartyLabel, type CounterpartyFields } from '@/lib/transaction-presentation'
@@ -19,24 +19,57 @@ type ActivityGroup = ApiSchema<'DashboardActivityGroup'>
 /**
  * The dashboard's merchant-first activity list (#3810, epic #3801).
  *
- * Replaces the old 5-row `transactions` preview (still on the wire until the
- * follow-up removes it — the dashboard no longer reads it). The rows are
- * #3824's server-side groups (agent + counterparty + token + user-local day
- * + outcome + activityType, capped at 8 over the last 7 local days), so the
- * list is: day headings, one row per group, "×N" when a group bundles more
- * than one payment.
+ * The rows are #3824's server-side groups (agent + counterparty + token +
+ * user-local day + outcome + activityType, outbound groups split by sending
+ * account too (#4117), capped at 8 over the ROLLING last
+ * 7 days — 24h × 7, the owner decision #3975), so the list is: day headings,
+ * one row per group, "×N" when a group bundles more than one payment. The
+ * old 5-row `transactions` preview left the wire in #3858 — nothing has read
+ * it since #3810.
+ *
+ * Two empty states (#3944). `activity.length === 0` is ambiguous — an empty
+ * 7-day window is also a feed with no activity at all — so the overview
+ * carries `hasOlderActivity` (any feed transaction outside the window) and
+ * `activityWindowDays` (the backend's window, on the wire because this
+ * component has no window constant and the copy may not hard-code a 7 that
+ * can drift from `ACTIVITY_WINDOW_DAYS`). With the signal absent or false,
+ * today's copy stands unchanged — an older backend renders exactly what it
+ * always has. The window state implies accounts exist (the flag is derived
+ * from account transactions), so its action is always the transactions page.
+ *
+ * The rolling window starts at an instant, not at a local midnight, so its
+ * oldest day heading can cover part of a day (#3975): when the wire's
+ * `activityWindowStart` cuts its own local day, the day heading carrying
+ * that key reads "(partial)" — the analytics precedent
+ * (`docs/product/analytics.md`), computed from the boundary instant the
+ * SERVER served rather than a client clock re-derivation. Absent (an older
+ * backend), no heading is ever marked.
  *
  * Merchant first means the TITLE is the counterparty — read through
  * `counterpartyLabel`'s no-address mode, so a raw address can never surface
  * here: the merchant's site for x402, the receipt/contact name the backend
- * resolved (`merchantName`), "Deposit" for inbound, "New recipient" when
+ * resolved (`merchantName`), "Deposit" for inbound — or "From <account>"
+ * when the money came from another of the user's own accounts (#4099) —
+ * "New recipient" when
  * nothing resolves, "Agent payment" for an x402 row without a resource URL,
- * "Returned from <agent>" for sweeps. The SUBTITLE is the agent's name; the
- * movement's "From My account" half is dropped when the user has exactly one
- * account (everything necessarily comes from it) and shown when there are
- * several. Inbound rows name no origin: a group does not carry which account
- * received, so "To My account" would be a guess — the "Deposit" title and
- * the success tone carry the direction already.
+ * "Returned from <agent>" for sweeps. The SUBTITLE is the agent's name; on an
+ * outbound row it adds "From <account>", the account the money left
+ * (`fromAccountName`, #4117), when the user has several accounts — dropped
+ * with exactly one (everything necessarily comes from it), and when no name
+ * came back (an older backend). Inbound rows name no receiving account: a group does not carry
+ * which account received, so "To My account" would be a guess — the title
+ * ("Deposit", or "From <account>") and the success tone carry the
+ * direction already.
+ *
+ * A move between two of the user's own accounts arrives as ONE group
+ * (`ownTransfer`, #4268 — #4265's fold, the same one `/transactions` uses).
+ * It reads "Moved between your accounts" with the neutral two-way mark, an
+ * unsigned amount (it is neither money in nor money out) and a
+ * "<from> → <to>" subline drawn by the shared `TransactionMovement`, so the
+ * arrow never strands at 375px. It carries no "From <account>" subtitle (the
+ * subline already names both ends) and no initiator, unlike `/transactions`'
+ * "You · …": the card's subtitle has only ever named the agent, and a move
+ * that folds is never agent-initiated.
  */
 export function ActivitySection({
   activity,
@@ -45,6 +78,9 @@ export function ActivitySection({
   loading,
   unavailable,
   onRetry,
+  hasOlderActivity,
+  activityWindowDays,
+  activityWindowStart,
 }: {
   activity: ActivityGroup[]
   accountCount: number
@@ -52,9 +88,21 @@ export function ActivitySection({
   loading: boolean
   unavailable: boolean
   onRetry: () => void
+  /** #3944 — present only on a current backend; absent keeps the "No activity yet" copy. */
+  hasOlderActivity?: boolean
+  /** #3944 — the backend's window (`ACTIVITY_WINDOW_DAYS`); the empty-state copy names it. */
+  activityWindowDays?: number
+  /** #3975 — the rolling window's start instant; marks the oldest day heading partial. */
+  activityWindowStart?: string
 }) {
+  // The window-naming empty state needs BOTH fields: a `hasOlderActivity`
+  // without its window cannot state the window it means. Both arrive
+  // together from the route, so the pairing is the well-formed signal.
+  const hasWindowOnlyActivity =
+    hasOlderActivity === true && typeof activityWindowDays === 'number'
+  const windowEmptyTitle = `No activity in the last ${activityWindowDays} days`
   return (
-    <div className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] shadow-card overflow-hidden">
+    <div data-testid="dashboard-activity" className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] shadow-card overflow-hidden">
       <Card.Header
         as="h2"
         title="Activity"
@@ -92,6 +140,20 @@ export function ActivitySection({
             action={<Button variant="ghost" size="sm" onClick={onRetry}>Try again</Button>}
           />
         </div>
+      ) : activity.length === 0 && hasWindowOnlyActivity ? (
+        <div className="p-6">
+          <EmptyState
+            tone="brand"
+            icon={<EmptyActivityIcon />}
+            title={windowEmptyTitle}
+            body="Payments and deposits from before this window are still on your transactions page."
+            action={
+              <Button href="/transactions" variant="ghost" size="sm">
+                Open transactions
+              </Button>
+            }
+          />
+        </div>
       ) : activity.length === 0 ? (
         <div className="p-6">
           <EmptyState
@@ -115,7 +177,11 @@ export function ActivitySection({
           />
         </div>
       ) : (
-        <ActivityRows activity={activity} accountCount={accountCount} />
+        <ActivityRows
+          activity={activity}
+          accountCount={accountCount}
+          activityWindowStart={activityWindowStart}
+        />
       )}
     </div>
   )
@@ -124,42 +190,65 @@ export function ActivitySection({
 /**
  * Day buckets + rows. The server grouped by the USER's local day already
  * (#3824) — the client only derives each heading from the group's
- * `latestAt`, so the buckets cannot disagree with the grouping.
+ * `latestAt`, so the buckets cannot disagree with the grouping. Bucketing
+ * and labelling use the ledger's shared `transactionDayKey` /
+ * `transactionDayLabel` (#4225): the same helpers the account page's ledger
+ * uses, so the two surfaces cannot drift.
+ *
+ * The oldest heading can cover part of a day (#3975): when
+ * `activityWindowStart` is present and cuts its own local day (the
+ * analytics rule — a boundary that is not local midnight), the bucket whose
+ * key is that day reads "(partial)". The bucket keys and the partial check
+ * use the same runtime zone, so they cannot disagree.
+ *
+ * The card's own tinted `Card.Header` sits directly above the first day, so
+ * the first heading renders unbanded (`band={false}` — the owner decision
+ * on #4225) and every later day gets the tinted band.
  */
 function ActivityRows({
   activity,
   accountCount,
+  activityWindowStart,
 }: {
   activity: ActivityGroup[]
   accountCount: number
+  activityWindowStart?: string
 }) {
+  const partialDayKey = useMemo(() => {
+    if (activityWindowStart == null || !cutsItsDay(activityWindowStart)) return null
+    return transactionDayKey(activityWindowStart)
+  }, [activityWindowStart])
+
   const days = useMemo(() => {
     const buckets = new Map<string, ActivityGroup[]>()
     for (const group of activity) {
-      const key = localDayKey(group.latestAt)
+      const key = transactionDayKey(group.latestAt)
       const bucket = buckets.get(key)
       if (bucket) bucket.push(group)
       else buckets.set(key, [group])
     }
     return Array.from(buckets.entries(), ([key, groups]) => ({
       key,
-      label: activityDayLabel(key),
+      label: transactionDayLabel(key),
+      partial: key === partialDayKey,
       groups,
     }))
-  }, [activity])
+  }, [activity, partialDayKey])
 
   return (
     <div className="divide-y divide-[var(--v2-border)] v2-animate-fade-in">
-      {days.map((day) => (
+      {days.map((day, dayIndex) => (
         <div key={day.key}>
-          <p className="px-4 pt-3 pb-1 text-xs font-medium text-[var(--v2-ink-3)] sm:px-5">
-            {day.label}
-          </p>
+          <TransactionActivityDayHeader
+            label={day.label}
+            partial={day.partial}
+            band={dayIndex > 0}
+          />
           {day.groups.map((group, index) => {
             const groupKey = `${group.latestAt}-${group.to}-${group.tokenSymbol}-${index}`
             return (
               <Link key={groupKey} href="/transactions" className="block">
-                <ActivityRow group={group} accountCount={accountCount} />
+                <ActivityRow group={group} accountCount={accountCount} insetDivider={index > 0} />
               </Link>
             )
           })}
@@ -172,9 +261,12 @@ function ActivityRows({
 function ActivityRow({
   group,
   accountCount,
+  insetDivider,
 }: {
   group: ActivityGroup
   accountCount: number
+  /** #4165: the same-day inset hairline, on every row after a day's first. */
+  insetDivider: boolean
 }) {
   // The group carries the counterparty fields of its NEWEST member (#3824)
   // plus the name the backend resolved for that counterparty. No chain-scoped
@@ -192,40 +284,58 @@ function ActivityRow({
     from: group.to,
     chainId: 0,
   }
-  const title = counterpartyLabel(counterparty, undefined, undefined, {
-    noAddress: true,
-    resolvedName: group.merchantName,
-  })
+  const ownTransfer = group.ownTransfer
+  const title = ownTransfer
+    ? 'Moved between your accounts'
+    : counterpartyLabel(counterparty, undefined, undefined, {
+        noAddress: true,
+        resolvedName: group.merchantName,
+      })
 
   // "×40" — and "×40+" when the count is a floor over a truncated explorer
   // window: a count is never presented as exact when it is not.
   const countLabel =
     group.count > 1 ? `×${group.count}${group.countIsFloor ? '+' : ''}` : undefined
 
-  // Subtitle: the agent's name; "From My account" appears only when the user
-  // has more than one account (see the section docblock for the one-account
-  // and inbound decisions).
+  // Subtitle: the agent's name; "From <account>" — the account the money
+  // left — appears only when the user has more than one account (see the
+  // section docblock for the one-account and inbound decisions).
   const subtitleParts: string[] = []
   if (group.agentName) subtitleParts.push(group.agentName)
-  if (accountCount > 1 && group.direction === 'out') subtitleParts.push('From My account')
-  const description = subtitleParts.length > 0 ? subtitleParts.join(' · ') : undefined
+  if (accountCount > 1 && group.direction === 'out' && group.fromAccountName) {
+    subtitleParts.push(`From ${group.fromAccountName}`)
+  }
+  // #4268: a move names both of its accounts, and nothing else.
+  const description = ownTransfer ? (
+    <TransactionMovement bare from={ownTransfer.fromAccountName} to={ownTransfer.toAccountName} />
+  ) : subtitleParts.length > 0 ? (
+    subtitleParts.join(' · ')
+  ) : undefined
 
-  // Amounts are #3805's currency mode: book-time `convertedAmount` plain,
-  // serve-time `approxAmount` with "≈" — and an unknown valuation renders
-  // the em dash, never 0. A group serves one or the other, never both
-  // (#3824).
-  const fiat =
+  // Amounts are #3805's currency mode: book-time `convertedAmount` or
+  // serve-time `approxAmount`, and an unknown valuation renders the em dash,
+  // never 0. A group serves one or the other, never both (#3824). The "≈"
+  // is the one rule's answer for a list row (#4165, `shouldMarkApprox`):
+  // never — the row stays plain on every surface (#3950).
+  const valuation =
     group.convertedAmount != null && group.convertedCurrency
-      ? {
-          amount: Number(group.convertedAmount),
-          currency: group.convertedCurrency,
-          approx: false,
-        }
+      ? { amount: Number(group.convertedAmount), currency: group.convertedCurrency, repriced: false }
       : {
           amount: group.approxAmount != null ? Number(group.approxAmount) : null,
           currency: group.approxCurrency ?? 'USD',
-          approx: true,
+          repriced: true,
         }
+  const fiat = {
+    amount: valuation.amount,
+    currency: valuation.currency,
+    approx: shouldMarkApprox({
+      repriced: valuation.repriced,
+      chainId: null,
+      tokenSymbol: group.tokenSymbol,
+      displayCurrency: valuation.currency,
+      kind: 'row',
+    }),
+  }
 
   return (
     <TransactionActivityRow
@@ -238,8 +348,9 @@ function ActivityRow({
       status={statusLabel(group)}
       statusTone={statusTone(group)}
       timestamp={timeAgo(group.latestAt)}
-      direction={group.direction}
+      direction={ownTransfer ? 'move' : group.direction}
       density="compact"
+      insetDivider={insetDivider}
     />
   )
 }
@@ -267,34 +378,19 @@ function EmptyActivityIcon() {
   return <Icon icon={ArrowLeftRight} className="w-full h-full" />
 }
 
-/** Local calendar day of an ISO instant, `YYYY-MM-DD` (en-CA's ISO format). */
-function localDayKey(iso: string): string {
-  return new Intl.DateTimeFormat('en-CA', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(new Date(iso))
-}
-
 /**
- * Heading for a day bucket: "Today", "Yesterday", else the short date
- * ("17 May"). Derived from the group's own local day key, so a group rendered
- * under "Today" IS from today — the label and the bucket cannot drift apart
- * the way a label recomputed from the raw instant could across midnight.
+ * True when the instant is not local midnight in the runtime zone — a
+ * boundary that cuts its day. The analytics page applies the same rule to
+ * its range edges (`SpendSection`'s `cutsItsDay`); #3975 applies it to the
+ * Activity window's start so the oldest day heading can say "(partial)".
  */
-export function activityDayLabel(dayKey: string): string {
-  const today = new Date()
-  const localDay = (date: Date) =>
-    new Intl.DateTimeFormat('en-CA', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-    }).format(date)
-  if (dayKey === localDay(today)) return 'Today'
-  const yesterday = new Date(today)
-  yesterday.setDate(today.getDate() - 1)
-  if (dayKey === localDay(yesterday)) return 'Yesterday'
-  const [year, month, day] = dayKey.split('-').map(Number)
-  const date = new Date(year, month - 1, day)
-  return new Intl.DateTimeFormat('en-GB', { month: 'short', day: 'numeric' }).format(date)
+function cutsItsDay(iso: string): boolean {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(new Date(iso))
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '00'
+  return !(get('hour') === '00' && get('minute') === '00' && get('second') === '00')
 }

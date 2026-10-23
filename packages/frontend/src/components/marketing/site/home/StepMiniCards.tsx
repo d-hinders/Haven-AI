@@ -63,7 +63,7 @@ export function PasskeyMiniCard({ state }: { state?: PasskeyCardState } = {}) {
           {done ? 'Account created' : 'Create your passkey'}
         </b>
         <span className="block min-h-[2.6em] text-[12px] text-[var(--v2-ink-3)]">
-          {done ? 'Passkey saved on this device.' : 'Face ID or Touch ID. You stay in control of the account.'}
+          {done ? 'Passkey saved on this device.' : 'One passkey prompt. You stay in control of the account.'}
         </span>
         <span className="inline-flex min-h-[36px] items-center justify-end">
           {done ? (

@@ -1,0 +1,65 @@
+name: External intake label
+
+# Marks issues and pull requests from outside the maintainers (#4200 part A).
+# Opened by an external author (neither a maintainer — `author_association`
+# OWNER/MEMBER/COLLABORATOR — nor a Bot): add `external` (plus `pending-review`
+# on an issue), prefix the title with `[external] `, post one comment saying a
+# maintainer accepts it by removing the label. `external` removed by a
+# maintainer: strip the prefix so it never reaches a squash subject. Decision
+# logic and tests: `scripts/ci/external-intake-label.mjs`; the shared
+# definitions: `scripts/ci/external-intake.mjs`.
+#
+# The label is a marker, not the control. The `External intake gate` check and
+# the agent refusal (AGENTS.md § Cross-session agent coordination) both decide
+# from the author and the events, so an item this workflow missed is exactly as
+# blocked as one it labelled.
+#
+# ## Hardening — this runs on public input with a write token
+#
+# - `permissions` are exactly `issues: write` + `pull-requests: write`.
+# - `pull_request_target` runs the DEFAULT branch's workflow and script; the
+#   checkout below has no `ref:`, so a PR's code is never checked out or run.
+# - The title and body are public text. They reach the script only through the
+#   event file GitHub provides (`$GITHUB_EVENT_PATH`) — never as an expression
+#   inside `run:` — and every write is `gh api` with argv, no shell.
+# - No `concurrency` group: GitHub cancels a PENDING run when a newer one
+#   queues, and dropping an `opened` run would leave an item unmarked (the
+#   claim-assignee.yml reasoning). Each run touches only its own item.
+# - Writes made with `GITHUB_TOKEN` fire no further workflow events, so adding
+#   the label here does not re-trigger this workflow or the gate.
+
+on:
+  issues:
+    types: [opened, unlabeled]
+  pull_request_target:
+    types: [opened, unlabeled]
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  mark:
+    name: Mark external intake
+    if: >-
+      github.repository == 'd-hinders/Haven-AI' &&
+      (github.event.action == 'opened' || github.event.label.name == 'external')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # Default checkout = the DEFAULT branch (`dev`) on both triggers. Do not
+      # add `ref:` here.
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+      - name: Decide and apply
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        # `shell: bash` gives `-eo pipefail`, so the script's exit 1 survives
+        # the `| tee` (the default `bash -e {0}` has no pipefail).
+        shell: bash
+        run: |
+          set -o pipefail
+          node scripts/ci/external-intake-label.mjs --event "$GITHUB_EVENT_PATH" --event-name "$GITHUB_EVENT_NAME" --apply | tee -a "$GITHUB_STEP_SUMMARY"

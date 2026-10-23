@@ -43,7 +43,23 @@ const { mockQuery, portfolioMocks, transactionMocks, fiatMocks } = vi.hoisted(()
     // #3824: the route derives the tz check and the grouped rows from this
     // module; this file characterizes the aggregates, not the grouping.
     isValidActivityTimeZone: vi.fn(() => true),
-    buildActivityGroups: vi.fn(async () => []),
+    // #3975: the route derives the rolling 7-day boundary from this module.
+    activityWindowStartIso: vi.fn(
+      (nowMs: number) => new Date(nowMs - 7 * 24 * 60 * 60 * 1000).toISOString(),
+    ),
+    // #4099: the route hands the feed an own-account name lookup built from
+    // its account list.
+    ownAccountNameResolver: vi.fn((_accounts: unknown[]) => (_address: string, _chainId: number): string | null => null),
+    // #4268: the route folds own-account moves before grouping. This suite
+    // feeds the feed builder directly, so the fold passes rows through; the
+    // fold itself is pinned against the real route in dashboard-activity.test.ts.
+    foldOwnAccountTransfers: vi.fn((rows: unknown[]) => rows),
+    buildActivityFeed: vi.fn(async () => ({
+      groups: [] as never[],
+      hasOlderActivity: false,
+      windowDays: 7,
+      windowStartIso: '2026-10-08T07:12:00.000Z',
+    })),
     enrichedTransactionIdentityKey: vi.fn((tx: { hash: string }) => tx.hash),
     enrichTransactionsWithAgents: vi.fn(
       async (_userId: string, transactions: unknown[]) => transactions,

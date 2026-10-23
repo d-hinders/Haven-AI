@@ -12,7 +12,12 @@
  *
  * The kit deployParams MUST match what provisioning derived the address from
  * (#885's stored signer set) — a mismatch means signing as a different
- * account, which the callers guard by comparing addresses.
+ * account, which the callers guard by comparing addresses. The DEPLOY SALT is
+ * part of that derivation too (#4023): each user account carries a per-account
+ * salt on its server-side smart_accounts row. It is deliberately NOT part of
+ * this signer-set wire shape — the client signs with the signers it is handed
+ * and never re-derives the address, so the salt never needs to leave the
+ * backend. Delegate accounts stay at the literal salt `'0x'`.
  *
  * Heavy deps (the kit) load lazily so this stays out of the main bundle.
  */
@@ -68,7 +73,7 @@ async function buildAccount(signers: AccountSigners) {
   // `undefined` here means an EMPTY signer set and nothing else, so this is
   // also the account-has-no-passkey guard — one check, not two.
   const signWith = hybridPasskeyToSignWith(signers)
-  if (!signWith) throw new Error('Account has no passkey to sign with')
+  if (!signWith) throw new Error('This account has no passkey to approve with')
 
   const [{ Implementation, toMetaMaskSmartAccount }, { toWebAuthnAccount }] = await Promise.all([
     import('@metamask/smart-accounts-kit'),

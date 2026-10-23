@@ -195,7 +195,7 @@ Your user gives you a **budget on their own account** — not their wallet, and 
 
 Four of the six steps are your user's — each needs a human signature or a human decision. The rest is yours. If they already have a funded account, start at step 3.
 
-1. **HUMAN — create the account.** Name, email, password, then a passkey (Face ID / Touch ID) or a wallet. Never offer to enter any of it: you must not have their password, and the passkey is bound to their device. With a terminal, \`<packages.cli.one_liner> login --api <api-url>\` afterwards gets you a scoped session for steps 3-4 (that flag or \`HAVEN_API_URL\`, on the first command — the session then remembers the backend; **the CLI's built-in default is Haven's hosted production backend**, so on any other deployment an omitted flag connects you somewhere real and wrong rather than failing) — they approve a code in the browser, you never hold their password. That command is the manifest's \`packages.cli.one_liner\` (\`/.well-known/haven.json\`) — run it as given: \`packages.cli.channel\` serves the full spec. Do not hold the process open while you wait: under \`--json\`, pass \`--no-wait\` to get the link object back at once, then poll it with \`haven login --poll <device_code>\` — one round per invocation, exit 3 while it is still pending, 0 once approved. It can set up agents and read the account; it cannot sign, approve a budget, move funds, or rotate any agent's keys.
+1. **HUMAN — create the account.** Name, email, password, then a passkey or a wallet. Never offer to enter any of it: you must not have their password, and the passkey is bound to their device. With a terminal, \`<packages.cli.one_liner> login --api <api-url>\` afterwards gets you a scoped session for steps 3-4 (that flag or \`HAVEN_API_URL\`, on the first command — the session then remembers the backend; **the CLI's built-in default is Haven's hosted production backend**, so on any other deployment an omitted flag connects you somewhere real and wrong rather than failing) — they approve a code in the browser, you never hold their password. That command is the manifest's \`packages.cli.one_liner\` (\`/.well-known/haven.json\`) — run it as given: \`packages.cli.channel\` serves the full spec. Do not hold the process open while you wait: under \`--json\`, pass \`--no-wait\` to get the link object back at once, then poll it with \`haven login --poll <device_code>\` — one round per invocation, exit 3 while it is still pending, 0 once approved. It can set up agents and read the account; it cannot sign, approve a budget, move funds, or rotate any agent's keys.
 2. **HUMAN — fund it.** USDC only, no ETH: Haven sponsors the gas. \`/.well-known/haven.json\` names \`chains.default\` as the deployment's expected chain, but after login \`haven wallets funding\` prints the address, the amount and which chain in one place; confirm that chain before you message your user. Without a CLI session, the dashboard's funding card shows the address and amount and its Receive-funds screen names the chain; never assume one: a testnet deployment and production both call themselves Haven. Before you write that message, read the manifest: \`environment\` says whether this deployment is \`production\`, and each \`chains.supported\` entry says whether that chain is a \`testnet\`. Real money is at stake only on a non-testnet chain of a \`production\` deployment — tell your user which case theirs is.
 3. **HUMAN — create the agent, set its budget**, and paste you the **setup prompt** it hands back. With a CLI session (step 1) you can do this step yourself: \`haven agents connect --name <n> --budget <amount> --token USDC --period <minutes>\` prints the same connector command and approval link; add \`--run\` to do step 4 too.
 4. **YOU — run the connector command** in that prompt (see What you run). It makes your signing key locally, registering only the public address.
@@ -219,7 +219,7 @@ Send these as your own message, \`<host>\` replaced by the host you fetched this
 
 **Before signup** (step 1):
 
-> I can do everything except the parts that need your signature. Please open \`<host>/signup?next=/agents&via=agent\` — name, email, password, then a passkey (Face ID / Touch ID) or a wallet. That is your account's key: I should not have it, and I will never ask for your password. Already have one? \`<host>/login?next=/agents\`.
+> I can do everything except the parts that need your signature. Please open \`<host>/signup?next=/agents&via=agent\` — name, email, password, then a passkey or a wallet. That is your account's key: I should not have it, and I will never ask for your password. Already have one? \`<host>/login?next=/agents\`.
 
 **At the passkey step:**
 
@@ -291,8 +291,10 @@ Next: [your agent hit a 402](/402.md) · [everything agent-readable](/llms.txt)
 `
 
 /**
- * The **onboarding prompt** — the whole-onboarding text the dashboard offers a
- * signed-in user to paste to their agent (#2535, epic #2519).
+ * The **onboarding prompt** — the whole-onboarding text a user pastes to their
+ * agent (#2535, epic #2519). The dashboard offered it on `/agents` to a
+ * signed-in user with no agents until #4065 put the connect flow there
+ * instead.
  *
  * ## It is NOT the "setup prompt", and the distinction is load-bearing
  *
@@ -323,11 +325,12 @@ Next: [your agent hit a 402](/402.md) · [everything agent-readable](/llms.txt)
  * containment, so a reworded copy here fails rather than quietly disagreeing
  * with what `buildSetupPrompt` tells the same agent minutes later.
  *
- * The frontend cannot import this: `packages/frontend` has zero `@haven_ai/*`
- * runtime dependencies by design (standalone Vercel deploys). It keeps a copy
- * in `src/lib/agent-onboarding-prompt.ts`, byte-pinned to this string by
- * `src/lib/__tests__/agent-onboarding-prompt.test.ts`, exactly as the runbook
- * and the skill are pinned.
+ * The frontend no longer renders this. It kept a byte-pinned copy for the
+ * `/agents` "Set up with your AI agent" card until #4065 replaced that card
+ * with the inline connect flow (a signed-in user with no agents is already
+ * in the flow that ends by handing the agent a setup prompt). Agents still
+ * reach the onboarding path through `/for-agents.md` and `llms.txt`; this
+ * export stays published.
  *
  * ## The origin placeholder
  *

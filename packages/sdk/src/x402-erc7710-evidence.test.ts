@@ -269,12 +269,16 @@ describe('#3764 — the merchant settlement is reported after the funding report
       paymentProofHeader: 'header-abc',
       protocolReceiptHeaderName: 'PAYMENT-RESPONSE',
     })
-    // SECOND post: the merchant's settlement, exactly the minimal #3475
-    // payload — the backend reads rail/amount/merchant from its own record.
+    // SECOND post: the merchant's settlement — the minimal #3475 payload
+    // (the backend reads rail/amount/merchant from its own record) plus,
+    // since #4061, the header this call sent the merchant: the #3925 nonce
+    // proof the backend refuses the record without.
     expect(evidencePosts[1].body).toEqual({
       paymentId: 'pay_1',
       rail: 'x402',
       txHash: SETTLEMENT_TX,
+      paymentProofHeaderName: 'PAYMENT-SIGNATURE, X-PAYMENT',
+      paymentProofHeader: 'header-abc',
     })
     // The merchant-receipt capture stays after the evidence posts (D3).
     const receiptIdx = posts.findIndex((p) => p.path === '/machine-payments/pay_1/merchant-receipt')
@@ -300,7 +304,13 @@ describe('#3764 — the merchant settlement is reported after the funding report
     const evidencePosts = posts.filter((p) => p.path === '/machine-payments/evidence')
     expect(evidencePosts).toHaveLength(2)
     expect(evidencePosts[0].body).toMatchObject({ txHash: FUNDING_TX })
-    expect(evidencePosts[1].body).toEqual({ paymentId: 'pay_1', rail: 'x402', txHash: SETTLEMENT_TX })
+    expect(evidencePosts[1].body).toEqual({
+      paymentId: 'pay_1',
+      rail: 'x402',
+      txHash: SETTLEMENT_TX,
+      paymentProofHeaderName: 'PAYMENT-SIGNATURE, X-PAYMENT',
+      paymentProofHeader: 'header-abc',
+    })
   })
 
   it('the settlement report is ONE attempt (D2): a retryable 503 answers retryable immediately, no backoff', async () => {

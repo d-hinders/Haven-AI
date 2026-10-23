@@ -106,6 +106,9 @@ describe('the @haven_ai/ui import boundary (#3508)', () => {
     // — or one moving here without the move list gaining it — breaks the shim
     // contract silently, so the set is pinned.
     const expected = [
+      // BackLink is not an ops need on its own: PageHeader renders it for its
+      // `back` prop (#4028), so it has to live beside PageHeader.
+      'BackLink.tsx',
       'Button.tsx',
       'Card.tsx',
       'CopyButton.tsx',
@@ -121,6 +124,9 @@ describe('the @haven_ai/ui import boundary (#3508)', () => {
       'StatTile.tsx',
       'StatusBadge.tsx',
       'Table.tsx',
+      // #4096: the account page's view switcher — the first tab shape the
+      // design system owns; the ops console consumes the same primitive.
+      'Tabs.tsx',
       'Tooltip.tsx',
     ].sort()
     const actual = readdirSync(SRC)

@@ -10,6 +10,8 @@
  *
  * Run: npm run pilot:delegation-payment-smoke -w @haven/backend
  */
+// #4216: kit analytics off before anything here can load @metamask/smart-accounts-kit.
+import '../src/telemetry/kit-analytics-off.js'
 import { http, createPublicClient, type Hex, type Address } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import { baseSepolia } from 'viem/chains'

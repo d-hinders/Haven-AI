@@ -86,8 +86,14 @@ the live EIP-3009 bridge.
 **Accounts.** Signup provisions **one** passkey-owned Hybrid DeleGator, on the
 network chosen at signup (`POST /accounts/hybrid` takes one `chain_id`),
 counterfactually and with zero transactions — one passkey prompt, the only
-onboarding path. There is no in-app path to a second account yet. The
-**signer set** is user-managed (`/agents/:id/account-signers/*`): every change
+onboarding path. A **further account** comes from the Accounts screen's
+**New account** dialog (#4024, epic #4022): one passkey *assertion* picks a
+passkey an existing account already has, and `POST /accounts/hybrid`'s
+create-additional request (#4023) copies it server-side and derives the new
+account at its own per-account deploy salt. The new account's only signer is
+that passkey; it is never the default and starts with no agents or budgets.
+Signer sets are **per account** — a backup on one account protects no other.
+The **signer set** is user-managed (`/agents/:id/account-signers/*`): every change
 is signed by an existing signer, never by Haven; recovery is a backup signer
 replacing a lost one.
 **Single-signer accounts are permitted and have no recovery** — recommended
@@ -316,11 +322,14 @@ from branches; `@haven_ai/core` is workspace-private.
 
 ## UI Surface Hierarchy
 
+Build product UI from the documented [`/design-system` Patterns](docs/product/design-system.md#patterns). If no pattern fits, extend the design system in its own slice and obtain owner approval before a page consumes the new pattern.
+
 No nested filled cards. To group content inside a `Card`, use `Card.Section` or
 `Card.Section divided`; list items use `Row`. Tinted surfaces
 (`--v2-surface`, `--v2-surface-2`) are reserved for callouts, table headers
-(`--v2-table-header-bg`), the `anchor` Card elevation, chips, code blocks and
-overlays. A grey inner wrapper "grouping" siblings creates a phantom surface
+(`--v2-table-header-bg`), day bands on day-grouped lists (the same
+`--v2-table-header-bg` tokens — `TransactionActivityDayHeader`, #4225), the
+`anchor` Card elevation, chips, code blocks and overlays. A grey inner wrapper "grouping" siblings creates a phantom surface
 tier and fights the parent Card's lift. See `/design-system` → "Surface
 hierarchy".
 
@@ -370,7 +379,9 @@ one-liner as a backlog issue, and is the route for **every** issue an agent
 files — never a bare `gh issue create` — with a mandatory review on each;
 `release` ships one production release, with or without a version bump;
 `quality-scan` reports structural findings, bounded improvement candidates, and
-coverage limits, then stops for a decision.
+coverage limits, then stops for a decision; `prove-red` runs the mutation cells
+those workflows and reviewers require, with one tested runner instead of a
+hand rig.
 
 ### How shipping is governed (#1025)
 

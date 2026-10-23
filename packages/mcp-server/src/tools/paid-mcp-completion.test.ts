@@ -42,6 +42,7 @@ import {
   recordedCalls,
   stubFetch,
   keylessClient,
+  x402PreflightStatus,
   VALID_PAYMENT_HEADER_REF,
   type RouteDefinition,
 } from '../test-support/hosted-mcp.js'
@@ -359,6 +360,73 @@ describe('haven_settle_mcp_tool', () => {
     expect(payload.statusCode).toBe(402)
     expect(payload.message).toMatch(/HTTP 200, refused in-band/)
     expect(payload.suggested_tool).toBe('haven_sweep_delegate')
+  })
+
+  // #4062: the LIVE prod failure — the merchant answers the paid call with a
+  // PLAIN `isError: true` tool result (no challenge, no settlement receipt)
+  // under HTTP 200. Unlike the two in-band signals above, this used to fall
+  // through as `settled: true` with the USDC stranded on the delegate. The
+  // REAL completeX402MerchantCall runs against a fake MCP merchant here: the
+  // tool error must surface as MERCHANT_REJECTED_AFTER_FUNDING (settled never
+  // true), the rejection must be recorded so haven_get_payment_status shows
+  // the stranded funds, and the sweep guidance must say verify-then-sweep.
+  it('#4062: a fake MCP merchant answering the paid call with a plain isError result and no settlement is MERCHANT_REJECTED_AFTER_FUNDING — never settled:true', async () => {
+    stubFetch({
+      'POST /payments/pay_x402/sign': { status: 200, body: { status: 'confirmed', tx_hash: '0xfund' } },
+      // The readiness gate + ensureFundingConfirmed read the intent CONFIRMED
+      // with the funding hash — the state a live eip3009 payment is in when
+      // the settle tool delivers to the merchant.
+      'GET /machine-payments/pay_x402/status': {
+        status: 200,
+        body: x402PreflightStatus({ status: 'confirmed', phase: 'payment_confirmed', next_action: 'none', tx_hash: '0xfund' }),
+      },
+      // The fake merchant: HTTP 200, a plain failed tool result, no receipt.
+      'POST /paid': {
+        status: 200,
+        body: { jsonrpc: '2.0', id: 1, result: { isError: true, content: [{ type: 'text', text: "Text generation failed : 'NoneType' object has no attribute 'parts'" }] } },
+      },
+    })
+    const haven = new HavenClient({ apiKey: 'test-key', baseUrl: 'http://haven.test' })
+    // After the merchant answered (and the rejection was recorded), Haven's
+    // own state shows the stranded balance: funded_but_unsettled + sweep.
+    const realStatus = haven.getPaymentStatus.bind(haven)
+    vi.spyOn(haven, 'getPaymentStatus').mockImplementation(async (id) => {
+      const merchantWasCalled = recordedCalls().some((c) => new URL(c.url).host === 'merchant.test')
+      if (!merchantWasCalled) return realStatus(id)
+      return {
+        paymentId: 'pay_x402', kind: 'payment_intent', rail: 'x402', status: 'funded_but_unsettled', phase: 'funded_but_unsettled',
+        nextAction: AgentPaymentNextAction.SweepStrandedFunds, message: 'm', amount: '1.50', token: 'USDC', txHash: '0xfund',
+        expiresAt: '2099-01-01T00:00:00.000Z', chainId: 8453, resourceUrl: 'http://merchant.test/mcp', merchantAddress: '0xMerchant', idempotencyKey: 'idem-tool-error',
+      } as never
+    })
+    vi.spyOn(haven, 'getPostPurchaseAllowanceSummary').mockResolvedValue({
+      allowance: null, warnings: [], payment: null,
+    } as never)
+
+    const payload = await createToolHandlers(haven).haven_settle_mcp_tool({
+      payment_id: 'pay_x402',
+      signature: SIG,
+      merchant_url: 'https://merchant.test/paid',
+      tool_name: 'create_text',
+      arguments: { prompt: 'Hello' },
+      payment_header: VALID_PAYMENT_HEADER_REF.v1,
+    })
+
+    // The merchant WAS called — the refusal is about its answer, not the wire.
+    expect(recordedCalls().some((c) => new URL(c.url).host === 'merchant.test')).toBe(true)
+    if (payload.success) throw new Error(`expected a failure payload, got success: ${JSON.stringify(payload.data)}`)
+    expect(payload.code).toBe(AgentPaymentFailureCode.MerchantRejectedAfterFunding)
+    // No failure object rides an HTTP-200 status: the in-band tool error is 402.
+    expect(payload.statusCode).toBe(402)
+    expect(payload.message).toMatch(/HTTP 200, refused in-band/)
+    expect(payload.message).toMatch(/stranded funds/)
+    // #4062 scope 3: verify-then-sweep, never a blind sweep.
+    expect(payload.message).toMatch(/check haven_get_payment_status before sweeping/)
+    expect(payload.suggested_tool).toBe('haven_sweep_delegate')
+    expect(payload.next_tool).toBe('mcp__haven__haven_sweep_delegate')
+    // The rejection was RECORDED — this is what makes haven_get_payment_status
+    // show the stranded balance instead of nextAction none.
+    expect(recordedCalls().some((c) => c.url.includes('/machine-payments/reconciliation-events'))).toBe(true)
   })
 
   /**

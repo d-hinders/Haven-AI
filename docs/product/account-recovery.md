@@ -11,7 +11,8 @@ covers:
   - packages/backend/src/rails/hybrid-signer-actions.ts
   - packages/frontend/src/app/(authenticated)/accounts/[accountId]/AccountDetailClient.tsx
   - packages/backend/src/routes/passkeys.ts
-last-verified: "2026-10-09"
+  - packages/frontend/src/components/NewAccountDialog.tsx
+last-verified: "2026-10-16"
 ---
 
 # Account recovery (delegation-rail accounts)
@@ -26,11 +27,11 @@ do; Haven only prepares the on-chain operations.
 
 ## The model in one line
 
-An account has one or more **ways to approve** it — a passkey (Face ID / Touch
-ID) and/or a connected wallet. Any enrolled signer can add or remove other
-signers. So a **backup** signer is the whole recovery story: if you lose the
-device holding your primary passkey, the backup can remove the lost one and
-enroll a replacement.
+An account has one or more **ways to approve** it — a passkey and/or a
+connected wallet. Any enrolled signer can add or remove other signers. So a
+**backup** signer is the whole recovery story: if you lose the device holding
+your primary passkey, the backup can remove the lost one and enroll a
+replacement.
 
 ## Not the same thing: replacing an agent's key
 
@@ -78,16 +79,18 @@ signup.** Signup is one screen and one passkey prompt (#1162). The prompt to add
 a backup appears on the dashboard after money arrives, because before that
 there is nothing to protect and no reason for the question. It is dismissible,
 it stops appearing once you add a backup, and you can add one at any time from
-**Backup & recovery** on your account page.
+**Backup & recovery**, in the **Security & details** tab on your account page
+(#4097).
 
 ## Add a backup (do this early)
 
-On your account page, open **Backup & recovery** and choose one:
+On your account page, open the **Security & details** tab and choose one,
+under **Backup & recovery**:
 
-- **Add a backup passkey** — creates a second passkey (approve with Face ID,
-  Touch ID, Windows Hello, or your device PIN). On the
-  same device it's a second credential; on a *different* device (your phone as
-  well as your laptop) it's true device redundancy. One prompt, no transaction
+- **Add a backup passkey** — creates a second passkey (usually approved with
+  your device's screen lock). On the same device it's a second credential; on a
+  *different* device (your phone as well as your laptop) it's true device
+  redundancy. One prompt, no transaction
   you pay for.
 - **Add a wallet** — enrols a browser wallet address as an owner. Useful if you
   already keep a hardware or browser wallet. Adding a wallet is reversible:
@@ -99,11 +102,30 @@ On your account page, open **Backup & recovery** and choose one:
 
 Each takes one approval from a signer you already have.
 
+## Several accounts: a backup protects one account
+
+You can hold more than one Haven account: **New account** on the Accounts
+screen creates another one, secured by a passkey one of your accounts
+already has (#4024). Ways to approve belong to **one account each**:
+
+- **A backup on one account does not protect another.** The new account gets
+  only the passkey you used in the New account dialog. A backup passkey or
+  wallet you added to another account is not copied, so the new account
+  starts with exactly one way to approve, and with no recovery until you add
+  a backup on **its own** page.
+- **Losing a shared passkey affects every account it approves.** Accounts
+  created from the same passkey share it. Recover each one from its own
+  **Backup & recovery** card, with a backup enrolled on that account.
+- **Settings → Signers** lists each passkey and wallet once, with every
+  account it approves, so you can check which accounts a backup actually
+  covers.
+
 ## Recover after a lost device
 
 1. Open Haven on a device that still has a working signer (your backup passkey,
    or the wallet you enrolled).
-2. Go to **Backup & recovery** on your account page.
+2. Go to **Backup & recovery**, in the **Security & details** tab on your
+   account page.
 3. **Add a replacement** for the device you lost (a new passkey on the device
    you're on now), so you're back to two ways to approve.
 4. **Remove** the lost signer from the list.

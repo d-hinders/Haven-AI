@@ -11,29 +11,45 @@
  * budget is "a budget that refills itself".
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type Ref } from 'react'
+import { EllipsisVertical } from 'lucide-react'
+import { Icon } from './ui/Icon'
 import { isAddress, parseUnits, formatUnits } from 'viem'
 import type { Address } from 'viem'
-import { useDelegationBudget, type DelegationBudget, type GrantInput } from '@/hooks/useDelegationBudget'
+import { useDelegationBudget, type DelegationBudget, type GrantInput, type GrantResult } from '@/hooks/useDelegationBudget'
+import { findOccupyingBudget, occupiesSlot, replacedButEnabledBudgets, slotOccupantHashesForEdit } from '@/lib/budget-slot'
 import { useTaskBudgets, type TaskBudget } from '@/hooks/useTaskBudgets'
-import { useSubBudgetTrees, type SubBudgetTree } from '@/hooks/useSubBudgets'
+import { useReceivedSubBudgets, useSubBudgetTrees, type ReceivedSubBudgetGrant, type SubBudgetTree } from '@/hooks/useSubBudgets'
 import BudgetGrantAction from './BudgetGrantAction'
 import WalletConnectAction from './WalletConnectAction'
 import PasskeyElsewhereHint from './PasskeyElsewhereHint'
 import EditBudgetModal from './EditBudgetModal'
 import IssueSubBudgetModal from './IssueSubBudgetModal'
 import ConfirmDialog from './ConfirmDialog'
-import { eligibleSubBudgetParents } from '@/lib/sub-budget'
+import { delegationIsLive, eligibleSubBudgetParents, subBudgetEndLabel } from '@/lib/sub-budget'
+import { receivedGrantStatusNote } from '@/lib/agent-budget'
+import { agentMerchantLabel } from '@/lib/agent-merchant-label'
+import { AGENT_PAUSED_SHORT } from '@/lib/agent-pause-copy'
+import { usePreferences } from '@/hooks/usePreferences'
 import { Card } from './ui/Card'
 import { Skeleton } from './ui/Skeleton'
 import { Button } from './ui/Button'
 import { Input } from './ui/Input'
 import { Select } from './ui/Select'
 import { Row } from './ui/Row'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from './ui/DropdownMenu'
 import { useToast } from './ui/Toast'
+import { Amount, type AmountCurrency } from '@/components/haven/Amount'
 import { BudgetMeter, NoticeRow, truncateAddress } from '@/components/haven'
-import { timeUntil } from '@/lib/format'
+import { timeAgo, timeUntil } from '@/lib/format'
 import { budgetCaption, budgetPeriodWords, budgetReservedNote, type BudgetCaption } from '@/lib/budget-caption'
+import type { DashboardAgentStats } from '@/types/dashboard'
 
 interface TokenOption {
   address: string
@@ -65,6 +81,26 @@ interface Props {
    * The backend refuses build/activate for a revoked agent anyway.
    */
   retired?: 'revoked' | 'archived'
+  /**
+   * #4226: the agent's status as the page sees it. `paused` greys the meters
+   * and adds the shared pause line under each caption (as the dashboard row
+   * does) — the caption itself is unchanged.
+   */
+  agentStatus?: string
+  /**
+   * #4226: the dashboard overview's per-agent stats block — the Last 30 days
+   * column's spent figure, payment count and last-paid line (the same source
+   * #4209's card footer reads, read the way the account page reads the
+   * overview). Absent/null — an agent the overview does not cover, a revoked
+   * one among them — renders no column.
+   */
+  stats?: DashboardAgentStats | null
+  /**
+   * #4226: the overview read is still in flight. A skeleton column reserves
+   * the shape so arrival is not a layout jump; with `stats` present this is
+   * ignored.
+   */
+  statsLoading?: boolean
 }
 
 /**
@@ -79,7 +115,23 @@ export const DELEGATION_BUDGET_CARD_ID = 'delegation-budget-card'
 // option instead of silently desyncing the Select from the state it shows).
 const PERIODS = [86_400, 604_800, 2_592_000] as const
 
-export default function DelegationBudgetCard({ agentId, chainId, tokens, agentName, onBudgetChange, retired }: Props) {
+export default function DelegationBudgetCard({
+  agentId,
+  chainId,
+  tokens,
+  agentName,
+  onBudgetChange,
+  retired,
+  agentStatus,
+  stats,
+  statsLoading,
+}: Props) {
+  const { currency } = usePreferences()
+  // #4226: `paused` greys the meters and adds the shared pause line under
+  // each caption. Keyed on the status STRING, never on "not active" — a
+  // pending_approval agent is not paused, and a retired agent comes through
+  // `retired` with its own copy.
+  const isPaused = agentStatus === 'paused'
   // #3695: this card is the one caller that asks for remaining-this-period —
   // the meter on each row is drawn from it.
   const { budgets, grant, editBudget, revoke, busy, ready, budgetsError, reload, signersError, reloadSigners, signersLoading, passkeyElsewhere } =
@@ -96,21 +148,72 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, agentNa
   // #3330: the parent→child sub-budget trees this agent ISSUES, read the
   // same defensive way — `trees` stays `null` (nothing rendered) on failure.
   const { trees: subBudgetTrees, reload: reloadSubBudgets } = useSubBudgetTrees(agentId)
+  // #3988: the grants this agent RECEIVES — the holder's side of the same
+  // table, the same defensive read. A holder with no budget of its own must
+  // not read as if it cannot pay.
+  const { grants: receivedGrants } = useReceivedSubBudgets(agentId)
   // #3506: the issue-sub-budget modal's open flag.
   const [issuingSubBudget, setIssuingSubBudget] = useState(false)
-  const openTaskBudgets = useMemo(() => {
-    const nowSec = Math.floor(Date.now() / 1000)
-    return (taskBudgets ?? []).filter((t) => t.status === 'open' && !t.is_expired && t.expires_at > nowSec)
-  }, [taskBudgets])
+  // #3922: `is_live` is the server's answer (pending/open/closing and not
+  // expired); an OPEN live row is the open, unexpired set this card lists.
+  const openTaskBudgets = useMemo(
+    () => (taskBudgets ?? []).filter((t) => t.status === 'open' && (t.is_live ?? !t.is_expired)),
+    [taskBudgets],
+  )
   const { toast } = useToast()
   // #3166: the ACTIVE budget whose limits are being edited in place, and the
   // modal's open flag — one state so closing the modal and clearing the
   // anchor cannot disagree.
   const [editing, setEditing] = useState<DelegationBudget | null>(null)
+  // #3933: the limits typed into the Add budget form when its submit was
+  // routed to the edit flow — the edit opens with them, not the current ones.
+  const [editPrefill, setEditPrefill] = useState<{ budgetAtomic: string; periodSeconds: number } | null>(null)
+  // #3933: a routed submit waiting for its budget to appear in the list (the
+  // server's 409 names a hash the list may not have caught up with yet).
+  const [pendingEdit, setPendingEdit] = useState<{
+    hash: string | null
+    slot: { tokenAddress: string; recipientAddress: string | null }
+    prefill: { budgetAtomic: string; periodSeconds: number }
+  } | null>(null)
+
+  // #4154: the rows an edit flow owns while it settles. Between the edit's
+  // two approvals the old row reads `replaced`, and a background poll can
+  // show it here before the second approval has had its chance — so the
+  // replaced-budget notice stands down for the rows that edit will Stop while
+  // the modal is open (its own `revoke_unfinished` screen names them if the
+  // Stop does not land). The set is the edit's Stop set SNAPSHOT when the
+  // modal opens: those rows are still live then, and a `replaced` row already
+  // in the slot (an earlier abandoned edit) is not in it and keeps its
+  // notice. A FINISHED edit keeps the suppression only until a fresh reload
+  // after close settles — the list held at close may predate the Stop. Any
+  // other close shows the notice at once.
+  const budgetsRef = useRef(budgets)
+  budgetsRef.current = budgets
+  const editingHashes = useMemo(
+    () =>
+      editing
+        ? slotOccupantHashesForEdit(
+            budgetsRef.current ?? [],
+            editing.delegation_hash,
+            { tokenAddress: editing.token_address, recipientAddress: editing.recipient_address },
+            Math.floor(Date.now() / 1000),
+          ).map((h) => h.toLowerCase())
+        : null,
+    [editing],
+  )
+  const editFinished = useRef(false)
+  const [settlingHashes, setSettlingHashes] = useState<string[] | null>(null)
 
   const handleEditClosed = useCallback(() => {
+    if (editFinished.current && editingHashes) {
+      const hashes = editingHashes
+      setSettlingHashes(hashes)
+      void Promise.resolve(reload()).finally(() => setSettlingHashes((current) => (current === hashes ? null : current)))
+    }
+    editFinished.current = false
     setEditing(null)
-  }, [])
+    setEditPrefill(null)
+  }, [editingHashes, reload])
 
   const [token, setToken] = useState(tokens[0]?.address ?? '')
   const [amount, setAmount] = useState('')
@@ -141,10 +244,17 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, agentNa
   // this flag is not consulted. A `?grant=` prefill opens it (#2539): the
   // human must see the build they are about to sign.
   const [formOpen, setFormOpen] = useState(false)
+  // #4261: the form's opener is a row's ⋯ menu item, so the collapse has to
+  // know WHICH trigger to hand focus back to. The menu item records its row's
+  // delegation hash here; a `?grant=` prefill (no menu) leaves it null.
+  const formOriginRef = useRef<string | null>(null)
+  const budgetCardRef = useRef<HTMLElement | null>(null)
+  const headingRef = useRef<HTMLHeadingElement | null>(null)
   // Opening and collapsing swap the pressed control for another, so focus
   // would fall to <body> (#3695 review). An owner-initiated toggle says where
-  // focus goes next — the amount field on open, Add budget on collapse; the
-  // `?grant=` prefill opens without one, so a page load never steals focus.
+  // focus goes next — the amount field on open, the originating ⋯ trigger on
+  // collapse; the `?grant=` prefill opens without one, so a page load never
+  // steals focus.
   const addBudgetRef = useRef<HTMLButtonElement>(null)
   const amountRef = useRef<HTMLInputElement>(null)
   const pendingFocus = useRef<'amount' | 'add' | null>(null)
@@ -152,9 +262,42 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, agentNa
     pendingFocus.current = 'amount'
     setFormOpen(true)
   }, [])
+  // #4261: the row menu's Add budget item — remembers which row opened the
+  // form so the collapse can return to that row's trigger.
+  const openFormFromRow = useCallback(
+    (hash: string) => {
+      formOriginRef.current = hash
+      openForm()
+    },
+    [openForm],
+  )
   const collapseForm = useCallback(() => {
     pendingFocus.current = 'add'
     setFormOpen(false)
+  }, [])
+  // Where collapse focus lands (#4261): the ⋯ trigger that opened the form —
+  // resolved fresh, the list may have reloaded while it was up — else the
+  // first row's trigger, else Set budget, else the section heading. A trigger
+  // that is disabled (`busy`) cannot take focus, so the heading takes it
+  // instead. It never lands on <body>.
+  const focusAfterCollapse = useCallback(() => {
+    const root = budgetCardRef.current
+    const origin = formOriginRef.current
+    const trigger =
+      (origin
+        ? root?.querySelector<HTMLButtonElement>(`[data-budget-trigger="${CSS.escape(origin)}"]`)
+        : null) ??
+      root?.querySelector<HTMLButtonElement>('[data-budget-trigger]') ??
+      null
+    if (trigger && !trigger.disabled) {
+      trigger.focus()
+      return
+    }
+    if (trigger && trigger.disabled) {
+      headingRef.current?.focus()
+      return
+    }
+    ;(addBudgetRef.current ?? headingRef.current)?.focus()
   }, [])
   // #3716: the sub-budget entry lives in the Add budget panel, below the
   // grant form. Clicking it collapses the form and opens the modal. It
@@ -171,23 +314,30 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, agentNa
     const target = pendingFocus.current
     if (!target) return
     pendingFocus.current = null
-    ;(target === 'amount' ? amountRef.current : addBudgetRef.current)?.focus()
-  }, [formOpen])
+    if (target === 'amount') {
+      amountRef.current?.focus()
+      return
+    }
+    // #4261: collapse (Cancel or save) returns focus to the ⋯ trigger that
+    // opened the form, via the chain in `focusAfterCollapse`.
+    focusAfterCollapse()
+  }, [formOpen, focusAfterCollapse])
 
   // #3716: when the modal closes, `formOpen` does not change, so the effect
   // above does not run — and `Modal` restores focus to the clicked entry
-  // (ui/Modal.tsx), which the collapsed form has unmounted. Focus Add budget
-  // explicitly, once per open→close cycle; the guard keeps the initial
-  // render (and a close without a modal) from stealing focus.
+  // (ui/Modal.tsx), which the collapsed form has unmounted. Focus the form's
+  // origin trigger explicitly, once per open→close cycle, through the same
+  // chain a Cancel uses (#4261); the guard keeps the initial render (and a
+  // close without a modal) from stealing focus.
   const wasIssuingSubBudget = useRef(false)
   useEffect(() => {
     if (issuingSubBudget) {
       wasIssuingSubBudget.current = true
     } else if (wasIssuingSubBudget.current) {
       wasIssuingSubBudget.current = false
-      addBudgetRef.current?.focus()
+      focusAfterCollapse()
     }
-  }, [issuingSubBudget])
+  }, [issuingSubBudget, focusAfterCollapse])
 
   useEffect(() => {
     // #3549: a retired agent's card has no grant form to fill — leave the
@@ -206,6 +356,9 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, agentNa
     setPeriod(row.period_seconds)
     setRecipient(row.recipient_address ?? '')
     setPrefill({ hash: grantHash, periodSeconds: row.period_seconds })
+    // #4261: a prefill opens with no menu origin — the collapse falls back to
+    // the first row's trigger (or Set budget) instead of a stale one.
+    formOriginRef.current = null
     setFormOpen(true)
     try {
       window.history.replaceState(null, '', `/agents/${agentId}`)
@@ -254,6 +407,57 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, agentNa
     }
   }, [amount, amountValid, period, recipient, recipientValid, tokenCfg])
 
+  // #3933: a submit whose (token, recipient) slot already holds a live budget
+  // is never signed as a plain grant — the backend refuses it, because the old
+  // budget would stay enabled on-chain. It goes to the edit flow for that
+  // budget instead, with the typed limits. The client-side check answers
+  // before anything is built; when it misses (a stale list), the server's
+  // `slot_occupied` takes the same route through `handleSlotOccupied`.
+  const grantOrEdit = useCallback(
+    async (input: GrantInput): Promise<GrantResult> => {
+      const match = findOccupyingBudget(budgets, input, Math.floor(Date.now() / 1000))
+      if (match) return { ok: false, reason: 'slot_occupied', existingDelegationHash: match.delegation_hash }
+      return grant(input)
+    },
+    [budgets, grant],
+  )
+
+  const handleSlotOccupied = useCallback(
+    (existingDelegationHash: string | null) => {
+      if (!grantInput) return
+      setPendingEdit({
+        hash: existingDelegationHash,
+        slot: { tokenAddress: grantInput.tokenAddress, recipientAddress: grantInput.recipientAddress ?? null },
+        prefill: { budgetAtomic: grantInput.budgetAtomic, periodSeconds: grantInput.periodSeconds },
+      })
+    },
+    [grantInput],
+  )
+
+  // Resolve a routed submit to its row once the list has it: by the hash the
+  // check (or the server) named, else whatever live budget holds the slot.
+  const pendingEditTarget = useMemo(() => {
+    if (!pendingEdit || !budgets) return null
+    const nowSec = Math.floor(Date.now() / 1000)
+    const byHash = pendingEdit.hash
+      ? budgets.find(
+          (b) => b.delegation_hash.toLowerCase() === pendingEdit.hash!.toLowerCase() && occupiesSlot(b, nowSec),
+        )
+      : undefined
+    return byHash ?? findOccupyingBudget(budgets, pendingEdit.slot, nowSec)
+  }, [budgets, pendingEdit])
+
+  useEffect(() => {
+    if (!pendingEdit || !pendingEditTarget) return
+    setEditPrefill(pendingEdit.prefill)
+    setEditing(pendingEditTarget)
+    setPendingEdit(null)
+    // The edit carries the typed limits from here. Collapse the form like
+    // Cancel does (typed values kept), and NOT through `pendingFocus`: the
+    // modal that just opened owns focus (the #3716 note on `openSubBudget`).
+    setFormOpen(false)
+  }, [pendingEdit, pendingEditTarget])
+
   const handleGranted = useCallback(() => {
     setAmount('')
     setRecipient('')
@@ -272,9 +476,28 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, agentNa
       } else if (result.reason === 'cancelled') {
         // #1085: a dismissed sheet is a decision, not a failure — neutral
         // tone, matching BudgetGrantAction's inline treatment.
-        toast.info('Signature was cancelled.')
+        toast.info('Approval was cancelled.')
       }
       else toast.error('Could not stop the budget. Try again.')
+    },
+    [onBudgetChange, revoke, toast],
+  )
+
+  // #3933: the finish action for an old budget a replace left enabled — the
+  // same per-hash revoke as Stop. "Already revoked" comes back as `ok` with
+  // `alreadyStopped` (stopped out-of-band, or a revoke-all got there first):
+  // finished, not an error.
+  const handleFinishStop = useCallback(
+    async (hash: string) => {
+      const result = await revoke(hash)
+      if (result.ok) {
+        toast.success(result.alreadyStopped ? 'That old budget was already stopped.' : 'Old budget stopped.')
+        onBudgetChange?.()
+      } else if (result.reason === 'cancelled') {
+        toast.info('Approval was cancelled.')
+      } else {
+        toast.error('Could not stop the old budget. Try again.')
+      }
     },
     [onBudgetChange, revoke, toast],
   )
@@ -309,14 +532,28 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, agentNa
   // row's status when `expires_at` passes, so gating on status alone would
   // keep the form hidden behind "Add budget" forever for an agent whose only
   // budget expired.
-  const active = (budgets ?? []).filter((b) => b.status === 'active')
   const nowSec = Math.floor(Date.now() / 1000)
-  const hasActive = active.some((b) => b.expires_at > nowSec)
+  const active = (budgets ?? []).filter((b) => b.status === 'active')
+  // #3922: the owner predicate is the server's `is_live` (active AND unexpired).
+  const hasActive = active.some((b) => delegationIsLive(b))
   // #3506: a sub-budget is carved from a LIVE budget — the entry point, now
   // inside the Add budget panel below (#3716), exists only when this agent
   // has an active, unexpired one (the card itself renders only on the
   // delegation rail). The modal offers a picker when several qualify.
-  const subBudgetParents = retired ? [] : eligibleSubBudgetParents(budgets, Math.floor(Date.now() / 1000))
+  const subBudgetParents = retired ? [] : eligibleSubBudgetParents(budgets)
+  // #3933: old budgets a replace retired in Haven but nobody stopped on-chain.
+  // Row-level, from this list (every status) — never `live_delegation_count`.
+  // A retired agent's "Finish revoking" (revoke-all) already covers them.
+  // #4154: minus the rows an open edit flow owns, and those a just-finished
+  // one owns until its reload settles — both, so reopening Edit inside that
+  // window does not bring the flash back.
+  const flowHashes = [...(editingHashes ?? []), ...(settlingHashes ?? [])]
+  const stillEnabled = retired
+    ? []
+    : replacedButEnabledBudgets(budgets, nowSec).filter((b) => !flowHashes.includes(b.delegation_hash.toLowerCase()))
+  // #3933: the live budget the form's current input would collide with — the
+  // submit then opens the edit flow, and the hint says what that does.
+  const formSlotMatch = grantInput && !budgetsError ? findOccupyingBudget(budgets, grantInput, nowSec) : null
 
   // #3695: with no active budget the grant form IS the section's content;
   // with one, it waits behind "Add budget" unless opened (or `?grant=` opened
@@ -324,12 +561,24 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, agentNa
   // gated below on knowing the current budgets — stays reachable. #3802:
   // "active" here is the owner predicate (see above) — an expired-only row
   // counts as no active budget, so the form shows.
-  const showForm = !hasActive || formOpen
+  // #4226: both entry states are now COLLAPSED — budgets listed show "Add
+  // budget" at the foot; none shows "No budget yet." with Set budget — and
+  // the form opens on either (or on a `?grant=` prefill), per mockup v2.
+  // A FAILED read is the exception (#2473's contract): an unknown list must
+  // never read as "you have no budget", so the form stays open exactly as it
+  // did when it was the section's content.
+  const showForm = formOpen || Boolean(budgetsError)
 
   return (
-    <section className="mt-6">
-      <SpendingHeading retired={retired} />
-      <Card hover={false} className="p-5 md:p-6">
+    <section ref={budgetCardRef} className="mt-6">
+      <SpendingHeading retired={retired} headingRef={headingRef} />
+      {/* #4226: the dashboard money-card pattern (design-system.md, #3897) —
+          budgets on the left, Last 30 days on the right as a divided section,
+          stacked below `lg`. The card itself carries no padding: the halves
+          own it, so the right hairline runs edge-to-edge at `lg`. */}
+      <Card hover={false} className="overflow-hidden">
+        <div className="grid lg:grid-cols-2">
+          <section aria-label="Budgets" className="min-w-0 p-5 sm:p-6">
 
       {/* A failed signer-set fetch must be retryable (#1079) — without it the
           card is stranded at ready=false with no way out. */}
@@ -363,6 +612,39 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, agentNa
         <PasskeyElsewhereHint className="mb-4" />
       ) : null}
 
+      {stillEnabled.length > 0 && !budgetsError ? (
+        <div className="mb-4 space-y-2">
+          {stillEnabled.map((b) => (
+            <ReplacedBudgetNotice
+              key={b.delegation_hash}
+              budget={b}
+              tokens={tokens}
+              onStop={handleFinishStop}
+              busy={busy}
+              ready={ready}
+              needsOwnerWallet={needsOwnerWallet}
+            />
+          ))}
+        </div>
+      ) : null}
+
+      {pendingEdit && !pendingEditTarget && budgets !== null ? (
+        // #3933: the server refused the grant (the slot holds a live budget)
+        // but the list does not show that budget yet. Never the generic
+        // failure: say what happened and offer the refresh that finds it.
+        <NoticeRow
+          className="mb-4"
+          action={
+            <Button size="sm" variant="ghost" onClick={() => void reload()}>
+              Reload budgets
+            </Button>
+          }
+        >
+          This agent already has a live budget for this token and recipient. Nothing was approved. Edit that
+          budget to change its limits.
+        </NoticeRow>
+      ) : null}
+
       <div className="divide-y divide-[var(--v2-border)]">
         {budgetsError ? (
           <div className="flex flex-wrap items-center justify-between gap-3 py-3">
@@ -386,8 +668,10 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, agentNa
               agentName={agentName}
               chainId={chainId}
               openTaskBudgets={openTaskBudgets}
+              paused={isPaused}
               onRevoke={handleRevoke}
               onEdit={retired ? undefined : setEditing}
+              onAdd={!retired && hasActive && tokens.length > 0 && !showForm ? openFormFromRow : undefined}
               busy={busy}
               ready={ready}
             />
@@ -407,11 +691,28 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, agentNa
           </p>
         ) : null
       ) : tokens.length > 0 && !showForm ? (
-        <div className="mt-3">
-          <Button ref={addBudgetRef} size="sm" variant="ghost" onClick={openForm}>
-            Add budget
-          </Button>
-        </div>
+        !hasActive ? (
+          // #4226: needs setup — "No budget yet." with Set budget (mockup
+          // v2). The form opens on the button, or expanded straight away on
+          // a `?grant=` prefill; the received-grants nuance lives on the
+          // form's own line when it opens. #4261: with an active budget
+          // there is NO control here — Add budget is the rows' ⋯ menu item.
+          <div className="mt-3">
+            <p className="text-sm text-[var(--v2-ink-muted)]">No budget yet.</p>
+            <Button
+              ref={addBudgetRef}
+              size="sm"
+              variant="ghost"
+              className="mt-2"
+              onClick={() => {
+                formOriginRef.current = null
+                openForm()
+              }}
+            >
+              Set budget
+            </Button>
+          </div>
+        ) : null
       ) : tokens.length > 0 ? (
         <div className={hasActive ? 'mt-4 space-y-2' : 'space-y-2'}>
           {hasActive ? (
@@ -422,7 +723,12 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, agentNa
                 {budgetsError ? 'Set a budget' : 'Set its first budget'}
               </p>
               <p className="mt-0.5 text-sm text-[var(--v2-ink-muted)]">
-                The agent can start paying within it.
+                {/* #3988: a grant holder CAN pay — through the received
+                    budgets listed below. The line must never imply it
+                    cannot. */}
+                {receivedGrants && receivedGrants.length > 0
+                  ? 'It spends through the received budgets below; a budget of its own adds to that.'
+                  : 'The agent can start paying within it.'}
               </p>
             </div>
           )}
@@ -465,20 +771,24 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, agentNa
               the action is gated on knowing the current budgets rather than
               on the owner reading a warning. `Try again` is the way out. */}
           <BudgetGrantAction
-            grant={grant}
+            grant={grantOrEdit}
             busy={busy}
             ready={ready}
             input={budgetsError ? null : grantInput}
-            label="Set budget"
+            // #3933: a matching slot opens the edit flow, so the button says so.
+            label={formSlotMatch ? 'Edit existing budget' : 'Set budget'}
             busyLabel="Setting…"
             // #3895: the agent page's verb is "set" — its failure sentence
             // keeps the exact wording the shared control used to hard-code.
             failureMessage="Haven could not set the budget. Nothing changed — try again."
             helper={
               budgetsError
-                ? 'Reload the current budgets before setting one — a new budget replaces the one it matches.'
-                : 'One signature. Refills every period automatically.'
+                ? 'Reload the current budgets before setting one — a budget for a token and recipient that already has one is edited, not added.'
+                : formSlotMatch
+                  ? 'This agent already has a budget for this token and recipient, so you edit it: you approve the new budget, then approve once more to stop the old one. The review step shows how many approvals that takes. Stopping it ends any open task budget or sub-budget taken from it.'
+                  : 'One approval. Refills every period automatically.'
             }
+            onSlotOccupied={handleSlotOccupied}
             onGranted={handleGranted}
             notReadyHint={needsOwnerWallet ? 'Connect your account owner wallet to set a budget.' : undefined}
             notReadyAction={needsOwnerWallet ? <WalletConnectAction /> : undefined}
@@ -544,6 +854,25 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, agentNa
           section so the two carve-outs read narrowest-first. The chain is
           the enforcement: stopping the budget above strands every row here
           (stated in the copy, not implied). */}
+      {/* #3988: the grants this agent RECEIVES — the holder's side, read-only.
+          Listed only when at least one exists, never as an empty section
+          (the trees section's own rule). Closing a grant stays the
+          delegator's action; nothing here mutates. */}
+      {receivedGrants && receivedGrants.length > 0 ? (
+        <Card.Section divided className="mt-4">
+          <div className="py-2">
+            <p className="text-sm font-medium text-[var(--v2-ink)]">Received budgets</p>
+            <p className="mt-0.5 text-xs text-[var(--v2-ink-muted)]">
+              Slices of another agent&rsquo;s budget that this agent spends through. Each stays inside its
+              slice and inside the budget it comes from; stopping the budget above stops them too.
+            </p>
+          </div>
+          {receivedGrants.map((grant) => (
+            <ReceivedBudgetGrantRow key={grant.id} grant={grant} tokens={tokens} />
+          ))}
+        </Card.Section>
+      ) : null}
+
       {subBudgetTrees && subBudgetTrees.length > 0 ? (
         <Card.Section divided className="mt-4">
           <div className="py-2">
@@ -558,6 +887,35 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, agentNa
           ))}
         </Card.Section>
       ) : null}
+
+        </section>
+
+        {/* #4226: the hero's right half — the Last 30 days from the
+            dashboard overview's per-agent stats, the source #4209's card
+            footer reads. Revoked and archived agents are not in the
+            overview, so a retired card renders no column at all; their
+            history is under Activity. */}
+        {!retired && (stats || statsLoading) ? (
+          <Card.Section divided className="min-w-0 lg:border-t-0 lg:border-l p-5 sm:p-6">
+            {stats ? (
+              <LastThirtyDays stats={stats} currency={currency} />
+            ) : (
+              <div role="status" aria-busy="true" aria-label="Loading the last 30 days">
+                <Skeleton className="h-4 w-24" />
+                {/* #4260: three label-and-value pairs, the shape of the figures. */}
+                <div className="mt-2.5 grid grid-cols-3 gap-3">
+                  {[0, 1, 2].map((i) => (
+                    <div key={i} className="space-y-1.5">
+                      <Skeleton className="h-3 w-12" />
+                      <Skeleton className="h-6 w-16" />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </Card.Section>
+        ) : null}
+      </div>
 
       {subBudgetParents.length > 0 && issuingSubBudget ? (
         <IssueSubBudgetModal
@@ -581,7 +939,16 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, agentNa
           chainId={chainId}
           tokens={tokens}
           budget={editing}
-          onBudgetChange={onBudgetChange}
+          prefill={editPrefill ?? undefined}
+          // #3933: refresh this card's own list too — a partial edit leaves
+          // the old budget `replaced`, and the notice above must show it.
+          onBudgetChange={() => {
+            void reload()
+            onBudgetChange?.()
+          }}
+          onFinished={() => {
+            editFinished.current = true
+          }}
         />
       ) : null}
       </Card>
@@ -593,10 +960,19 @@ export default function DelegationBudgetCard({ agentId, chainId, tokens, agentNa
  * The section's heading and one-line description, ABOVE its card — the
  * detail-page section rule (design-system.md, #3692).
  */
-function SpendingHeading({ retired }: { retired?: 'revoked' | 'archived' }) {
+function SpendingHeading({
+  retired,
+  headingRef,
+}: {
+  retired?: 'revoked' | 'archived'
+  /** #4261: the collapse-focus chain's last resort when every trigger is gone. */
+  headingRef?: React.Ref<HTMLHeadingElement>
+}) {
   return (
     <div className="mb-3">
-      <h2 className="v2-text-h3 text-[var(--v2-ink)]">Spending</h2>
+      <h2 ref={headingRef} tabIndex={-1} className="v2-text-h3 text-[var(--v2-ink)] outline-none">
+        Spending
+      </h2>
       <p className="mt-0.5 text-sm text-[var(--v2-ink-muted)]">
         {retired
           ? 'What this agent can still spend each period.'
@@ -632,14 +1008,95 @@ function periodNounFromLabel(label: string): string | null {
   }
 }
 
+/**
+ * #3933: an old budget a replace retired in Haven (`replaced`, unexpired) that
+ * has not been stopped on-chain — or not that Haven has seen: the status is
+ * Haven's record, not a chain read, so the copy says what the record allows
+ * ("can still be spent outside Haven until it is stopped") and nothing more.
+ * The action is the card's per-hash Stop; a row already disabled on-chain
+ * answers "Already revoked", which the hook reports as finished.
+ */
+function ReplacedBudgetNotice({
+  budget,
+  tokens,
+  onStop,
+  busy,
+  ready,
+  needsOwnerWallet,
+}: {
+  budget: DelegationBudget
+  tokens: TokenOption[]
+  onStop: (hash: string) => void | Promise<void>
+  busy: boolean
+  ready: boolean
+  needsOwnerWallet: boolean
+}) {
+  const t = tokens.find((x) => x.address.toLowerCase() === budget.token_address.toLowerCase())
+  let amount: string
+  try {
+    amount = t ? formatUnits(BigInt(budget.budget_atomic), t.decimals) : budget.budget_atomic
+  } catch {
+    amount = budget.budget_atomic
+  }
+  const phrase = `${amount} ${t?.symbol ?? ''} ${budgetPeriodWords(budget.period_seconds)}`.replace(/\s+/g, ' ')
+  const scope = budget.merchant_name
+    ? `that pays ${budget.merchant_name}`
+    : budget.recipient_address
+      ? `to ${truncateAddress(budget.recipient_address)}`
+      : 'to any recipient'
+  const [stopping, setStopping] = useState(false)
+
+  async function handleStop() {
+    setStopping(true)
+    try {
+      await onStop(budget.delegation_hash)
+    } finally {
+      setStopping(false)
+    }
+  }
+
+  return (
+    <div
+      role="status"
+      className="space-y-2 rounded-lg border border-warning/30 bg-[var(--v2-warning-soft)] px-4 py-3 text-sm text-[var(--v2-ink)]"
+    >
+      <p className="font-medium">An old budget has not been stopped</p>
+      <p className="text-xs leading-relaxed text-[var(--v2-ink-2)]">
+        The {phrase} budget {scope} was replaced, but it can still be spent outside Haven until it is stopped.
+        Stopping it also ends any open task budget or sub-budget taken from it.
+      </p>
+      {needsOwnerWallet ? (
+        <WalletConnectAction />
+      ) : (
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => void handleStop()}
+          disabled={busy || !ready || stopping}
+          aria-label={`Stop old budget ${phrase}`}
+        >
+          {stopping ? 'Stopping…' : 'Stop old budget'}
+        </Button>
+      )}
+    </div>
+  )
+}
+
+// The ⋯ trigger class — the same quiet icon button the page header's menu
+// uses, sized to the 44px tap-target overlay.
+const MENU_TRIGGER_CLASS =
+  'inline-flex min-h-11 min-w-11 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-hover)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 disabled:cursor-not-allowed disabled:opacity-50'
+
 function BudgetRow({
   budget,
   tokens,
   agentName,
   chainId,
   openTaskBudgets,
+  paused,
   onRevoke,
   onEdit,
+  onAdd,
   busy,
   ready,
 }: {
@@ -651,9 +1108,18 @@ function BudgetRow({
   chainId: number
   /** Open, unexpired task budgets across the agent (#3329) — filtered to this row's parent below. */
   openTaskBudgets: TaskBudget[]
+  /** #4226: the agent is paused — greyed meter and the shared pause line. */
+  paused: boolean
   onRevoke: (hash: string) => void | Promise<void>
   /** Opens the edit-in-place flow (#3166) for THIS row; absent on a retired agent (#3549). */
   onEdit?: (budget: DelegationBudget) => void
+  /**
+   * #4261: opens the collapsed grant form, remembering this row as the form's
+   * origin (its trigger takes the collapse focus). Present only when the old
+   * Add budget button showed: an active budget, tokens on this network, the
+   * form not already open, and not retired.
+   */
+  onAdd?: (hash: string) => void
   busy: boolean
   ready: boolean
 }) {
@@ -685,7 +1151,7 @@ function BudgetRow({
     .filter((tb) => tb.parent_delegation_hash === budget.delegation_hash)
     .reduce((sum, tb) => sum + BigInt(tb.max_atomic), 0n)
 
-  const usage = budgetCaptionFor(budget, chainId, t?.symbol ?? '')
+  const usage = budgetCaptionFor(budget, chainId, t?.symbol ?? '', 'row')
 
   return (
     <div className="flex items-start justify-between gap-3 py-3">
@@ -708,38 +1174,56 @@ function BudgetRow({
           </p>
         ) : null}
         {usage.kind === 'meter' ? (
-          <div className="mt-2 max-w-sm">
-            <BudgetMeter usedPercent={usage.usedPercent} label={usage.label} caption={usage.caption} />
+          // #4226: the meter spans its column — the hero's money-card grid
+          // already constrains the row, so the old `max-w-sm` is gone.
+          <div className="mt-2">
+            <BudgetMeter
+              usedPercent={usage.usedPercent}
+              label={usage.label}
+              caption={usage.caption}
+              tone={paused ? 'muted' : usage.usedPercent >= 90 ? 'warning' : 'brand'}
+            />
           </div>
         ) : usage.kind === 'expired' || usage.kind === 'unknown' || usage.kind === 'refilled-updating' || usage.kind === 'not-started' ? (
           <p className="mt-2 text-xs text-[var(--v2-ink-3)]">{usage.caption}</p>
         ) : null}
+        {/* #4226: paused — the shared short pause line UNDER the caption, the
+            dashboard row's own placement (AgentRow); the caption text itself
+            is unchanged. The line names the state the greyed meter implies. */}
+        {paused ? <p className="mt-1 text-xs text-[var(--v2-ink-3)]">{AGENT_PAUSED_SHORT}</p> : null}
       </div>
-      {/* #3166: Edit changes this budget's limits in place — same slot, same
-          agent key, new owner-signed delegation. It is hidden while a
-          lifecycle action is busy, exactly like Stop, and requires a
-          reachable signer like every affordance that asks for one. */}
+      {/* #4261: everything a row can do lives in its ⋯ menu — Edit budget,
+          Add budget, then the irreversible Stop budget… behind its confirm.
+          #3166: Edit changes this budget's limits in place — same slot, same
+          agent key, new owner-signed delegation. The trigger is disabled only
+          while a lifecycle action is busy; with no reachable signer the menu
+          still opens — Stop is a disabled item there (it needs the signer),
+          while Edit and Add open controls that explain how to connect. The
+          data attribute is how the card finds a row's trigger for focus
+          without a second ref on the React-19 trigger. */}
       <div className="flex shrink-0 items-center gap-1">
-        {onEdit ? (
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => onEdit(budget)}
-            disabled={busy || !ready}
-            aria-label={`Edit budget ${amount} ${t?.symbol ?? ''} ${periodLabel}`.replace(/\s+/g, ' ')}
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            aria-label={`Budget options ${amount} ${t?.symbol ?? ''} ${periodLabel}`.replace(/\s+/g, ' ')}
+            data-budget-trigger={budget.delegation_hash}
+            disabled={busy}
+            className={MENU_TRIGGER_CLASS}
           >
-            Edit
-          </Button>
-        ) : null}
-        <Button
-          size="sm"
-          variant="ghost"
-          onClick={() => setConfirmOpen(true)}
-          disabled={busy || !ready}
-          aria-label={`Stop budget ${amount} ${t?.symbol ?? ''} ${periodLabel}`.replace(/\s+/g, ' ')}
-        >
-          Stop budget
-        </Button>
+            <Icon icon={EllipsisVertical} className="h-4 w-4" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="right">
+            {onEdit ? (
+              <DropdownMenuItem onSelect={() => onEdit(budget)}>Edit budget</DropdownMenuItem>
+            ) : null}
+            {onAdd ? (
+              <DropdownMenuItem onSelect={() => onAdd(budget.delegation_hash)}>Add budget</DropdownMenuItem>
+            ) : null}
+            {onEdit || onAdd ? <DropdownMenuSeparator /> : null}
+            <DropdownMenuItem tone="danger" disabled={!ready} onSelect={() => setConfirmOpen(true)}>
+              Stop budget…
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
       <ConfirmDialog
@@ -763,6 +1247,94 @@ function BudgetRow({
   )
 }
 
+/**
+ * The hero's right half (#4226): the agent's Last 30 days from the dashboard
+ * overview's per-agent stats — #3803's NET figure in the user's display
+ * currency (the same booked-or-repriced, sweep-netted number the dashboard's
+ * money card and per-agent rows read, so the two surfaces cannot disagree —
+ * #4274), the payment count, and the "Last paid …"
+ * line with #4209's merchant label (name → x402 host → nothing, never an
+ * address). All-time latest payment: `lastPaymentAt` is not windowed on the
+ * wire, matching the card footer's read.
+ *
+ * Unpriced follows the dashboard's per-agent rows, not its headline: a
+ * bucket the server could not price with net 0 renders "—" (`Amount
+ * amount={null}`, #4274), but the hero carries no unpriced note — that note
+ * is account-level, and the dashboard's per-agent rows have none either.
+ *
+ * #4260: three labelled figures across the column at the secondary-figure
+ * size (20px, `Amount size="md"`), the dashboard money card's three-figure
+ * row built by hand — `StatTile.value` is a `string` and cannot carry an
+ * `Amount` (its "≈" and currency mode), and `StatTile` lives in
+ * `packages/ui`, shared with ops. The merchant sits on its own line below,
+ * with no divider. A long figure wraps inside its cell; nothing truncates.
+ */
+function LastThirtyDays({
+  stats,
+  currency,
+}: {
+  stats: DashboardAgentStats
+  currency: AmountCurrency
+}) {
+  const d30 = stats.d30
+  // #4274: the NET window, the same figure the dashboard's money card
+  // (`MoneyPanel.tsx` per-agent rows) and agents section read — never the
+  // gross window, which the two surfaces would then disagree on.
+  const net = currency === 'EUR' ? d30.net.eur : currency === 'SEK' ? d30.net.sek : d30.net.usd
+  // #4165: the per-currency "≈" DECISION, from the one rule — fall back to
+  // the window's overall flag when an older backend omits the split.
+  const approx = d30.approxByCurrency?.[currency.toLowerCase() as 'usd' | 'eur' | 'sek'] ?? d30.approx
+  // #4274: a bucket the server could not price and nothing booked nets to —
+  // the figure is unknown, "—" — never a fabricated $0.00. The unpriced NOTE
+  // stays account-level (dashboard headline only); the per-agent rows carry
+  // none, and neither does the hero.
+  const unpriced = d30.unpricedByCurrency?.[currency.toLowerCase() as 'usd' | 'eur' | 'sek'] ?? false
+  const merchant = agentMerchantLabel(stats.lastCounterparty)
+  return (
+    <div>
+      <p className="text-sm font-medium text-[var(--v2-ink-2)]">Last 30 days</p>
+      {d30.payments === 0 ? (
+        <>
+          <p className="mt-2 text-sm text-[var(--v2-ink-3)]">No payments in the last 30 days.</p>
+          {/* An older payment still says when, and to whom. */}
+          {stats.lastPaymentAt ? (
+            <p className="mt-1 text-sm text-[var(--v2-ink-3)]">
+              Last paid {timeAgo(stats.lastPaymentAt)}
+              {merchant ? ` to ${merchant}` : ''}
+            </p>
+          ) : null}
+        </>
+      ) : (
+        <>
+          <dl className="mt-2.5 grid grid-cols-3 gap-3">
+            <div className="min-w-0">
+              <dt className="text-xs text-[var(--v2-ink-3)]">Spent</dt>
+              <dd className="mt-0.5 break-words text-[var(--v2-ink)]">
+                <Amount amount={unpriced && net === 0 ? null : net} currency={currency} approx={approx} size="md" />
+              </dd>
+            </div>
+            <div className="min-w-0">
+              <dt className="text-xs text-[var(--v2-ink-3)]">Payments</dt>
+              <dd className="mt-0.5 break-words text-xl font-semibold text-[var(--v2-ink)] v2-tabular">
+                {d30.payments}
+              </dd>
+            </div>
+            <div className="min-w-0">
+              <dt className="text-xs text-[var(--v2-ink-3)]">Last paid</dt>
+              <dd className="mt-0.5 break-words text-xl font-semibold text-[var(--v2-ink)]">
+                {stats.lastPaymentAt ? timeAgo(stats.lastPaymentAt) : '—'}
+              </dd>
+            </div>
+          </dl>
+          {merchant ? (
+            <p className="mt-2.5 break-words text-xs text-[var(--v2-ink-3)]">Last paid to {merchant}</p>
+          ) : null}
+        </>
+      )}
+    </div>
+  )
+}
+
 type BudgetUsage = BudgetCaption
 
 /**
@@ -777,7 +1349,12 @@ type BudgetUsage = BudgetCaption
  * A null `remaining_from_chain` is "no figure on the row", which renders
  * nothing at all rather than a zero.
  */
-function budgetCaptionFor(budget: DelegationBudget, chainId: number, symbol: string): BudgetUsage {
+function budgetCaptionFor(
+  budget: DelegationBudget,
+  chainId: number,
+  symbol: string,
+  style: 'full' | 'row' = 'full',
+): BudgetUsage {
   let hasParseableAmounts = true
   try {
     BigInt(budget.budget_atomic)
@@ -799,6 +1376,7 @@ function budgetCaptionFor(budget: DelegationBudget, chainId: number, symbol: str
       startSec: Number(budget.start_date),
       periodSeconds: budget.period_seconds,
       expiresSec: budget.expires_at,
+      isLive: budget.is_live,
       budgetAtomic: budget.budget_atomic,
       usedAtomic,
       readFromChain: budget.remaining_from_chain !== false,
@@ -808,7 +1386,9 @@ function budgetCaptionFor(budget: DelegationBudget, chainId: number, symbol: str
       chainId,
     },
     // #1995: the clock enters as a value — the helper never reads it itself.
-    { nowMs: Date.now() },
+    // #4226: the hero asks for the dashboard row's compact wording — the
+    // same `style: 'row'` caption, so the two surfaces cannot drift.
+    { nowMs: Date.now(), style },
   )
 }
 
@@ -835,6 +1415,12 @@ function TaskBudgetRow({ taskBudget, tokens }: { taskBudget: TaskBudget; tokens:
   )
 }
 
+/** "ends in 3d" / "ended" / "closed" for a sub-budget row (#3923: closed wins). */
+function subBudgetEndText(b: { is_live?: boolean; status: string; expires_at: number }): string {
+  const label = subBudgetEndLabel(b)
+  return label === 'ends' ? `ends ${timeUntil(b.expires_at * 1000)}` : label
+}
+
 /**
  * One sub-budget tree (#3330): the parent agent's own narrowing row with the
  * grants to sub-agents nested under it. Reuses the `Row` primitive (the
@@ -845,13 +1431,12 @@ function SubBudgetTreeRow({ tree, tokens }: { tree: SubBudgetTree; tokens: Token
   const parent = tree.parent_child_sub_budget
   const t = tokens.find((x) => x.address.toLowerCase() === parent.token_address.toLowerCase())
   const amount = t ? formatUnits(BigInt(parent.period_amount_atomic), t.decimals) : parent.period_amount_atomic
-  const nowSec = Math.floor(Date.now() / 1000)
   const parentParts = [
     `${amount} ${t?.symbol ?? ''}`.trim(),
-    parent.expires_at > nowSec ? `ends ${timeUntil(parent.expires_at * 1000)}` : 'ended',
+    subBudgetEndText(parent),
   ]
   if (parent.recipient_address) parentParts.push(`to ${truncateAddress(parent.recipient_address)}`)
-  if (parent.status === 'pending') parentParts.push('waiting for signature')
+  if (parent.status === 'pending') parentParts.push('waiting for the sharing agent to sign it')
   return (
     <div className="py-3">
       <Row density="flush" title={parent.label || 'Sub-agent budget'} subtitle={parentParts.join(' · ')} />
@@ -870,17 +1455,43 @@ function SubBudgetTreeRow({ tree, tokens }: { tree: SubBudgetTree; tokens: Token
 function SubBudgetGrantRow({ grant, tokens }: { grant: SubBudgetTree['grants'][number]; tokens: TokenOption[] }) {
   const t = tokens.find((x) => x.address.toLowerCase() === grant.token_address.toLowerCase())
   const amount = t ? formatUnits(BigInt(grant.period_amount_atomic), t.decimals) : grant.period_amount_atomic
-  const nowSec = Math.floor(Date.now() / 1000)
   const parts = [
     `up to ${amount} ${t?.symbol ?? ''}`.trim(),
-    grant.expires_at > nowSec ? `ends ${timeUntil(grant.expires_at * 1000)}` : 'ended',
+    subBudgetEndText(grant),
   ]
   // #3506: a freshly issued slice is pending until the sharing agent signs.
-  if (grant.status === 'pending') parts.push('waiting for signature')
+  if (grant.status === 'pending') parts.push('waiting for the sharing agent to sign it')
   if (grant.recipient_address) parts.push(`to ${truncateAddress(grant.recipient_address)}`)
   return (
     <div className="py-2">
       <Row density="flush" title={grant.label || 'Sub-agent slice'} subtitle={parts.join(' · ')} />
+    </div>
+  )
+}
+
+/**
+ * One RECEIVED grant on the holder's page (#3988): the parent agent's name
+ * as the title, the slice's amount per period and its end as the subtitle.
+ * Pending and closing wording (#3988 builder copy, design-reviewed): a
+ * pending grant pays nothing yet (the sharing agent has not signed it); a
+ * closing one keeps working until its disable lands — both still listed,
+ * because the owner can act on them, but they are not presented as live
+ * authority. Closed grants never arrive (the read excludes them).
+ */
+function ReceivedBudgetGrantRow({ grant, tokens }: { grant: ReceivedSubBudgetGrant; tokens: TokenOption[] }) {
+  const t = tokens.find((x) => x.address.toLowerCase() === grant.token_address.toLowerCase())
+  const amount = t ? formatUnits(BigInt(grant.period_amount_atomic), t.decimals) : grant.period_amount_atomic
+  const statusNote = receivedGrantStatusNote(grant)
+  const parts = [`${amount} ${t?.symbol ?? ''}`.trim(), subBudgetEndText(grant)]
+  if (statusNote) parts.push(statusNote)
+  if (grant.recipient_address) parts.push(`to ${truncateAddress(grant.recipient_address)}`)
+  return (
+    <div className="py-2">
+      <Row
+        density="flush"
+        title={`From ${grant.parent_agent_name}`}
+        subtitle={parts.join(' · ')}
+      />
     </div>
   )
 }

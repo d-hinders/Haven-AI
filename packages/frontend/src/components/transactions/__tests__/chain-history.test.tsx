@@ -1,16 +1,16 @@
 /**
  * #3670 (epic #3634): Gnosis (100) is history-only. A persisted chain-100 row
- * must render in the history table and its detail panel — network pill and
+ * must render in the history ledger and its detail panel — network pill and
  * explorer link included — without throwing, and a row on a chain the registry
  * has never heard of must degrade (no link, generic label) instead of taking
- * the screen down.
+ * the screen down. Since #4266 the ledger row carries no explorer link of its
+ * own (the link column went with `TransactionsTable`); the panel holds it.
  */
 import { render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { LocaleProvider } from '@/context/LocaleContext'
-import TransactionsTable from '@/components/transactions/TransactionsTable'
+import TransactionsLedgerRow from '@/components/transactions/TransactionsLedgerRow'
 import TransactionDetailPanel from '@/components/transactions/TransactionDetailPanel'
-import FilterBar from '@/components/transactions/FilterBar'
 import NetworkPill from '@/components/NetworkPill'
 import { getChainConfig } from '@/lib/chains'
 import type { AggregatedTransaction } from '@/types/transactions'
@@ -43,12 +43,13 @@ function tx(chainId: number): AggregatedTransaction {
 function renderTable(t: AggregatedTransaction) {
   return render(
     <LocaleProvider>
-      <TransactionsTable
-        transactions={[t]}
-        loading={false}
-        error={null}
-        onRefresh={vi.fn()}
-        hasActiveFilters={false}
+      <TransactionsLedgerRow
+        tx={t}
+        resolveAddress={() => null}
+        accountNamesByAddress={new Map()}
+        showAccount={false}
+        onOpen={vi.fn()}
+        insetDivider={false}
       />
     </LocaleProvider>,
   )
@@ -57,11 +58,11 @@ function renderTable(t: AggregatedTransaction) {
 describe('chain-100 history rows', () => {
   const gnosisName = getChainConfig(100).name
 
-  it('table row links to the Gnosis explorer', () => {
+  it('ledger row renders, opening the panel that holds the explorer link', () => {
     renderTable(tx(100))
-    const row = screen.getAllByRole('row')[1]
-    const link = within(row).getByRole('link', { name: 'Open externally' })
-    expect(link.getAttribute('href')).toBe(`${getChainConfig(100).explorerUrl}/tx/0xabc123`)
+    const row = screen.getByRole('button')
+    expect(within(row).getByText('Unknown')).toBeTruthy()
+    expect(within(row).queryByRole('link')).toBeNull()
   })
 
   it('detail panel shows the network pill and the Gnosis explorer link', () => {
@@ -78,10 +79,10 @@ describe('chain-100 history rows', () => {
 })
 
 describe('rows on a chain the registry does not know', () => {
-  it('table row renders with no explorer link', () => {
+  it('ledger row renders with no explorer link', () => {
     renderTable(tx(999999))
-    const row = screen.getAllByRole('row')[1]
-    expect(within(row).queryByRole('link', { name: 'Open externally' })).toBeNull()
+    const row = screen.getByRole('button')
+    expect(within(row).queryByRole('link')).toBeNull()
   })
 
   it('detail panel renders the transaction hash as plain text and a fallback pill', () => {
@@ -92,33 +93,9 @@ describe('rows on a chain the registry does not know', () => {
     expect(screen.queryByRole('link', { name: /0xabc123/ })).toBeNull()
   })
 
-  it('filter bar names a selected token on an unknown chain generically', () => {
-    render(
-      <FilterBar
-        filters={{ tokenKey: 't' }}
-        onChange={vi.fn()}
-        accounts={[]}
-        agents={[]}
-        tokens={[{ key: 't', symbol: 'FOO', chainId: 999999, isNative: false } as never]}
-        loading={false}
-        error={null}
-      />,
-    )
-    expect(screen.getAllByText(/FOO \(Chain 999999\)/).length).toBeGreaterThan(0)
-  })
-
-  it('filter bar names a chain-100 token with the Gnosis name', () => {
-    render(
-      <FilterBar
-        filters={{ tokenKey: 't' }}
-        onChange={vi.fn()}
-        accounts={[]}
-        agents={[]}
-        tokens={[{ key: 't', symbol: 'USDC.e', chainId: 100, isNative: false } as never]}
-        loading={false}
-        error={null}
-      />,
-    )
-    expect(screen.getAllByText(/USDC\.e \(Gnosis\)/).length).toBeGreaterThan(0)
-  })
+  // The two token-naming behaviours this file used to pin through
+  // `FilterBar` ("names a selected token on an unknown chain generically" /
+  // "names a chain-100 token with the Gnosis name") moved to the account
+  // Activity tab's tests with #4130, which retargeted them onto the
+  // `ListToolbar` Token facet the tab now renders.
 })

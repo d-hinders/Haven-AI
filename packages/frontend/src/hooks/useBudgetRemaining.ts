@@ -24,6 +24,7 @@ import { useVisiblePolling } from '@/hooks/useVisiblePolling'
 import type { ApiSchema } from '@haven_ai/core'
 
 export type DashboardBudgetRemainingResponse = ApiSchema<'DashboardBudgetRemainingResponse'>
+export type DashboardBudgetRemainingEntry = ApiSchema<'DashboardBudgetRemainingEntry'>
 
 /** Matches the backend cache TTL — the fastest a poll can learn anything new. */
 export const BUDGET_REMAINING_POLL_INTERVAL_MS = 60_000

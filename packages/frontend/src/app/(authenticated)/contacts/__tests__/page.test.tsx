@@ -1,11 +1,11 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { mockUseContacts, chainsState, scopeState, mockSetScope } = vi.hoisted(() => ({
+const { mockUseContacts, chainsState, urlState } = vi.hoisted(() => ({
   mockUseContacts: vi.fn(),
   chainsState: { map: new Map<string, number[]>() },
-  scopeState: { scope: 'all' as number | 'all' },
-  mockSetScope: vi.fn(),
+  // The page URL, read by `useListUrlState` through `next/navigation`.
+  urlState: { query: '' },
 }))
 
 vi.mock('@/hooks/useContacts', () => ({
@@ -16,12 +16,12 @@ vi.mock('@/hooks/useContactChains', () => ({
   useContactChains: () => ({ chainsByAddress: chainsState.map, loading: false }),
 }))
 
-vi.mock('@/hooks/useChainScope', () => ({
-  useChainScope: () => ({
-    scope: scopeState.scope,
-    setScope: mockSetScope,
-    chains: [],
-  }),
+// `useChainScope` is deliberately NOT mocked — it is gone from the page
+// (#4115): the network scope lives in the URL through the list-controls
+// codec, so what is mocked is the router the codec reads.
+vi.mock('next/navigation', () => ({
+  usePathname: () => '/contacts',
+  useSearchParams: () => new URLSearchParams(urlState.query),
 }))
 
 import ContactsPage from '../page'
@@ -63,7 +63,8 @@ describe('ContactsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     chainsState.map = new Map()
-    scopeState.scope = 'all'
+    urlState.query = ''
+    window.history.replaceState(null, '', '/contacts')
   })
 
   it('shows a retryable error state when contacts cannot load', () => {
@@ -85,6 +86,8 @@ describe('ContactsPage', () => {
     render(<ContactsPage />)
 
     expect(screen.getByText('No saved recipients yet')).toBeInTheDocument()
+    // A user with no contacts gets no toolbar: there is nothing to search.
+    expect(screen.queryByTestId('list-toolbar')).toBeNull()
 
     fireEvent.click(screen.getByRole('button', { name: 'Add your first contact' }))
 
@@ -125,13 +128,48 @@ describe('ContactsPage', () => {
 
     render(<ContactsPage />)
 
-    // Scope to the "Used on" badge row so we don't match the filter dropdown's options.
+    // Scope to the "Used on" badge row so we don't match the facet's options.
     const badges = screen.getByText('Used on').parentElement as HTMLElement
     expect(within(badges).getByText('Base')).toBeInTheDocument()
     expect(within(badges).getByText('Gnosis Chain')).toBeInTheDocument()
   })
 
-  it('offers a network filter and shows every chain by default', () => {
+  it('renders the ListToolbar with the standard placeholder, and no hand-built input', () => {
+    setupContacts({ contacts: [CONTACT] })
+
+    render(<ContactsPage />)
+
+    const search = screen.getByRole('searchbox', { name: 'Search contacts' })
+    expect(search).toHaveAttribute('placeholder', 'Search contacts')
+    // The fields the search matches are the accessible description, not the
+    // placeholder.
+    expect(screen.getByText('by name or address')).toHaveClass('sr-only')
+    // The hand-built search is gone: no pl-9 Input with a floating icon.
+    expect(screen.queryByLabelText('Search contacts', { selector: 'input[type="text"]' })).toBeNull()
+  })
+
+  it('filters by an address fragment', () => {
+    chainsState.map = new Map([
+      [CONTACT.address.toLowerCase(), [8453]],
+      [SECOND_CONTACT.address.toLowerCase(), [100]],
+    ])
+    setupContacts({ contacts: [CONTACT, SECOND_CONTACT] })
+
+    render(<ContactsPage />)
+
+    expect(within(screen.getByTestId('list-summary')).getByTestId('list-toolbar-count')).toHaveTextContent(/^2 contacts$/)
+
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search contacts' }), {
+      target: { value: '2222' },
+    })
+
+    // Browser filtering: every keystroke re-renders the list.
+    expect(screen.getByText('Acme Services')).toBeInTheDocument()
+    expect(screen.queryByText('Gnosis Vendor')).not.toBeInTheDocument()
+    expect(within(screen.getByTestId('list-summary')).getByTestId('list-toolbar-count')).toHaveTextContent(/^1 of 2 contacts$/)
+  })
+
+  it('offers the network facet only with more than one chain, and filters with it', async () => {
     chainsState.map = new Map([
       [CONTACT.address.toLowerCase(), [8453]],
       [SECOND_CONTACT.address.toLowerCase(), [100]],
@@ -144,22 +182,78 @@ describe('ContactsPage', () => {
     expect(screen.getByText('Acme Services')).toBeInTheDocument()
     expect(screen.getByText('Gnosis Vendor')).toBeInTheDocument()
 
-    const select = screen.getByLabelText('Filter contacts by network')
-    fireEvent.change(select, { target: { value: '100' } })
-    expect(mockSetScope).toHaveBeenCalledWith(100)
+    fireEvent.click(screen.getByRole('button', { name: /^Network: All$/ }))
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'Gnosis Chain' }))
+
+    expect(screen.getByText('Gnosis Vendor')).toBeInTheDocument()
+    expect(screen.queryByText('Acme Services')).not.toBeInTheDocument()
+    // The network scope round-trips through the URL under the key every
+    // page uses.
+    await waitFor(() => expect(window.location.search).toContain('chainId=100'))
   })
 
-  it('filters to contacts with activity on the selected chain', () => {
+  it('hides the network facet when every contact is on one chain', () => {
+    chainsState.map = new Map([[CONTACT.address.toLowerCase(), [8453]]])
+    setupContacts({ contacts: [CONTACT] })
+
+    render(<ContactsPage />)
+
+    expect(screen.getByTestId('list-toolbar')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Network:/ })).toBeNull()
+  })
+
+  it('applies q and chainId read back from the URL', () => {
     chainsState.map = new Map([
       [CONTACT.address.toLowerCase(), [8453]],
       [SECOND_CONTACT.address.toLowerCase(), [100]],
     ])
-    scopeState.scope = 8453 // manual override active
+    urlState.query = 'q=gnosis&chainId=100'
     setupContacts({ contacts: [CONTACT, SECOND_CONTACT] })
 
     render(<ContactsPage />)
 
+    expect(screen.getByRole('searchbox', { name: 'Search contacts' })).toHaveValue('gnosis')
+    expect(screen.getByText('Gnosis Vendor')).toBeInTheDocument()
+    expect(screen.queryByText('Acme Services')).not.toBeInTheDocument()
+    expect(within(screen.getByTestId('list-summary')).getByTestId('list-toolbar-count')).toHaveTextContent(/^1 of 2 contacts$/)
+  })
+
+  it('drops a chainId that is not a network id instead of showing it as a filter', async () => {
+    setupContacts({ contacts: [CONTACT] })
+
+    urlState.query = 'chainId=abc'
+    window.history.replaceState(null, '', '/contacts?chainId=abc')
+    render(<ContactsPage />)
+
+    await waitFor(() => expect(window.location.search).toBe(''))
+    expect(screen.queryByRole('button', { name: /^Remove Network/ })).toBeNull()
+    expect(within(screen.getByTestId('list-summary')).getByTestId('list-toolbar-count')).toHaveTextContent(/^1 contact$/)
+  })
+
+  it('shows the standard no-match state, and its Clear filters returns to the default', async () => {
+    chainsState.map = new Map([
+      [CONTACT.address.toLowerCase(), [8453]],
+      [SECOND_CONTACT.address.toLowerCase(), [100]],
+    ])
+    urlState.query = 'q=zzz'
+    window.history.replaceState(null, '', '/contacts?q=zzz')
+    setupContacts({ contacts: [CONTACT, SECOND_CONTACT] })
+
+    render(<ContactsPage />)
+
+    expect(screen.getByText('No contacts match these filters')).toBeInTheDocument()
+    expect(
+      screen.getByText('Try a different search, or clear filters to see everything.'),
+    ).toBeInTheDocument()
+    // The toolbar stays, so the cause stays editable.
+    expect(screen.getByTestId('list-toolbar')).toBeInTheDocument()
+
+    fireEvent.click(
+      within(screen.getByTestId('contacts-no-match')).getByRole('button', { name: 'Clear filters' }),
+    )
+    await waitFor(() => expect(window.location.search).toBe(''))
+    expect(screen.getByRole('searchbox', { name: 'Search contacts' })).toHaveValue('')
     expect(screen.getByText('Acme Services')).toBeInTheDocument()
-    expect(screen.queryByText('Gnosis Vendor')).not.toBeInTheDocument()
+    expect(screen.getByText('Gnosis Vendor')).toBeInTheDocument()
   })
 })

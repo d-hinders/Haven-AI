@@ -153,8 +153,8 @@ export const en = {
        * the 240px rail cannot hold "Accounting" and "Coming soon" side by
        * side at 13px (the first #2869 capture truncated the label to
        * "Accoun…"). The full phrase (`common.comingSoon`) is the pill's
-       * accessible name and its visible text below `lg`, where the drawer
-       * is full-width.
+       * accessible name, and its visible text in the phone More sheet, which
+       * has the room (#4053).
        */
       comingSoon: 'Soon',
     },
@@ -181,14 +181,15 @@ export const en = {
     },
     /**
      * The quick toggle (#2928, epic #2925 slice 2; two-state flip per
-     * #2953): the TopBar icon button and the More sheet's row. The
-     * accessible name states the palette on screen and the one a click
-     * brings — "Theme: dark. Switch to light" — so a user can predict the
-     * flip from the name alone. The values arrive lower-case because the
-     * sentence reads them as values, not as button labels.
+     * #2953) — since #4029 the sidebar footer's row, the app's only quick
+     * theme control. The accessible name states the palette on screen and
+     * the one a click brings — "Theme: dark. Switch to light" — so a user
+     * can predict the flip from the name alone. The values arrive
+     * lower-case because the sentence reads them as values, not as button
+     * labels.
      */
     themeToggle: {
-      /** Visible label of the More-sheet row. */
+      /** Visible label of the sidebar footer's theme row. */
       label: 'Theme',
       ariaLabel: (current: string, next: string) => `Theme: ${current}. Switch to ${next}`,
     },

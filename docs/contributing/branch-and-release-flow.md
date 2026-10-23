@@ -5,14 +5,11 @@ contract: true
 covers:
   - .github/workflows/dev-gate.yml
   - .github/workflows/release.yml
-  - .github/workflows/promotion-digest.yml
-  - scripts/ci/promotion-digest-metrics.mjs
-  - scripts/ci/standing-issue-upsert.mjs
   - scripts/release-bump.mjs
   - scripts/release-version-constants.mjs
   - scripts/ci/qa-freshness.mjs
   - .github/workflows/publish.yml
-last-verified: "2026-10-09"
+last-verified: "2026-10-21"
 ---
 
 # Branch & release flow
@@ -39,8 +36,7 @@ feature/* or claude/*  →  dev  →  main
   (#2320).
 - **A closed issue means "implemented and on `dev`"**, not "in production".
 - **`main` is production.** Only `dev` or `hotfix/*` may merge in (enforced by
-  `dev-gate`). Each promotion to `main` cuts a **`prod-*` GitHub Release** and
-  refreshes the **pending-promotion** issue.
+  `dev-gate`). Each promotion to `main` cuts a **`prod-*` GitHub Release**.
 
 > **Every keyword in this document is quoted, never emitted — write yours bare
 > (#2382).** The code spans around `Closes #<n>` and `Refs #<n>` on this page are
@@ -172,6 +168,7 @@ resyncs and 1 divergence.
 | open, with an open PR | in progress |
 | **closed** | **implemented and on `dev`** (the dev-merge fired `Closes #`) |
 | open, labelled `operator-verify` | **implemented and on `dev`**, waiting on a human step — its PR wrote `Refs #<n>` on purpose (#2276) |
+| open, labelled `landed-partial` | **part or all on `dev`** — a merged PR references it with `Refs #<n>` (#4235). Read that PR before building. Which issues get the label, and the fact that no check reads it, are in AGENTS.md § *Cross-session agent coordination* (*Release what you drop*) |
 
 Issue state tracks **implementation**, never prod. Don't reopen an issue to mean
 "not in prod yet" — that's what the promotion tracking below is for. For an
@@ -320,7 +317,8 @@ the epic when its last sub-issue lands on `dev`.
      and neither a bump nor a promotion is involved in producing one; the
      loop and its operator steps are in
      [`../operations/package-dev-channel.md`](../operations/package-dev-channel.md).
-3. The pending-promotion digest updates to show `dev` and `main` back in sync.
+3. `git rev-list --count --first-parent origin/main..origin/dev` reads `0`:
+   `dev` and `main` are back in sync.
 
 > **Never revert a published release bump — cut forward instead
 > ([#2580](https://github.com/d-hinders/Haven-AI/issues/2580)).** Once a version
@@ -391,7 +389,10 @@ do not restate them here.
 
 **The prod bar, as a list.** A promotion PR must satisfy **19** required
 contexts — the 15 that every PR into `dev` also meets, plus four that are
-required on `main` only:
+required on `main` only. (`dev` also requires contexts that judge `dev`
+alone — **External intake gate**, #4200, on the *Dev merge* ruleset, so `dev`
+requires 16 — and those do not count toward `main`'s 19; see the ruleset
+inventory in `autonomous-pr-loop.md`.)
 
 - **`gate`** — only `dev` or `hotfix/*` may merge into `main`.
 - **`qa-freshness`** — a green money-flow QA run must cover the promoted
@@ -452,32 +453,12 @@ the next promotion may conflict with it.
 
 - **In prod (history):** the [**`prod-*` GitHub Releases**](https://github.com/d-hinders/Haven-AI/releases)
   — one per promotion, each with its PR list.
-- **Awaiting promotion:** the **📦 "Pending promotion: dev → main"** issue, kept
-  current by `promotion-digest.yml` — refreshed on **every merge to `dev`** (each
-  one adds to the pending count) and **on every promotion** (push to `main`, so it
-  flips to ✅ as soon as prod catches up), daily for the trailing-7-day figures,
-  which age with time rather than with pushes, and on-demand via *Run workflow*.
-  The `main..dev` compare is the same view on demand.
-
-  The `dev` trigger is the load-bearing one, and it is the load-bearing one
-  because of how this digest fails. Refreshing only on a push to `main` means a
-  stalled promotion — no push to `main`, by definition — leaves a stale count
-  standing, and a stale count here is an *understated* one, so the breakage reads
-  as reassurance. `dev` is the branch whose movement is the number, so it cannot
-  go quiet while the backlog grows. `guard-freshness.yml` documents the same
-  principle: a cron watching a cron dies with it.
-
-  It is **one long-lived issue, deliberately**: the workflow upserts the issue it
-  selects by **author** (`app/github-actions` — the one attribute a human cannot
-  set) plus an **exact title** (`📦 Pending promotion: dev → main`, compared
-  exactly in `scripts/ci/standing-issue-upsert.mjs`, never by a tokenised
-  `in:title` search), so an issue a human labelled `promotion` is never adopted
-  or overwritten — a human label finds no bot-owned digest and the workflow
-  creates its own beside it (#3341; #3262 lost its body to this upsert 33+
-  times under the old label-first selection). Closing the digest just makes the
-  next run open a duplicate under a new number. It's **pinned** rather than
-  recreated — a bot-maintained tracker wants a stable identity, and pinning is
-  what keeps it visible. Leave it open.
+- **Awaiting promotion:** the
+  [`main...dev` compare](https://github.com/d-hinders/Haven-AI/compare/main...dev),
+  or `git log --first-parent --oneline origin/main..origin/dev` locally. There is
+  no standing tracker issue: the pending-promotion digest (#666, kept by
+  `promotion-digest.yml`) was not being used and was retired on 2026-10-21; the compare
+  is the same view on demand.
 
 ## Workflows in this flow
 
@@ -485,7 +466,6 @@ the next promotion may conflict with it.
 |---|---|---|
 | `dev-gate.yml` | PR into `main` | `gate`: blocks anything but `dev`/`hotfix/*`. `qa-freshness`: blocks unless a green money-flow QA run covers the promoted money-path code; a money-path `hotfix/*` blocks outright ([#1030](https://github.com/d-hinders/Haven-AI/issues/1030)). Bypass: `qa-override`. |
 | `release.yml` | push to `main` | cuts the `prod-*` Release |
-| `promotion-digest.yml` | push to `dev` + push to `main` + daily + manual | upserts the pending-promotion issue; since [#2767](https://github.com/d-hinders/Haven-AI/issues/2767) the body also carries two trailing-7-day figures with their reproducing commands — issues filed per issue closed and product PRs as a share of `dev` merges (`scripts/ci/promotion-digest-metrics.mjs`). The filing bar they were the trend line for was reverted by #3248 under #2781's re-measure; the figures stay as kept machinery |
 | `publish.yml` | push to `main` | **prod channel**: publishes packages whose version isn't yet on npm, under the tag its version implies (`alpha`/`latest`), then hands them to the `promote-tags` job, which moves `latest` onto each one (#2536, split out by [#2647](https://github.com/d-hinders/Haven-AI/issues/2647)) so a bare `npm install`/`npx` gets the newest release. A package whose internal `@haven_ai/*` dependency did not publish in the same run is held back and marked FAILED, never nominated (#3797). Two jobs, two outcomes: publish can succeed while the tag move fails |
 | `publish.yml` | push to `dev` | **dev channel** ([#2421](https://github.com/d-hinders/Haven-AI/issues/2421)): publishes a `0.0.0-dev.<ts>.<sha>` snapshot of all five packages under the `dev` tag. Same file, by necessity — npm trusted publishing is pinned to the workflow filename. Runbook: [`../operations/package-dev-channel.md`](../operations/package-dev-channel.md) |
 
@@ -508,4 +488,4 @@ close on dev-merge). Full ruleset/auto-merge setup is in
   a closing keyword targets such an issue, wherever on the PR it is written — the
   rule is enforced rather than remembered (#2276).
 - Promotion to prod is a separate human step; prod state lives in the `prod-*`
-  Releases and the pending-promotion issue.
+  Releases; what is pending is the `main...dev` compare.

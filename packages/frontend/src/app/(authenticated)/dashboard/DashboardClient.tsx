@@ -15,8 +15,8 @@ import DashboardOnboardingGuide, { SetupCompleteLine } from '@/components/Dashbo
 import UsingYourAgentInfo from '@/components/UsingYourAgentInfo'
 import ConnectAgentModal from '@/components/ConnectAgentModal'
 import DashboardActionPickerModal from '@/components/DashboardActionPickerModal'
-import ReceiveFundsModal from '@/components/ReceiveFundsModal'
-import AddFundsModal from '@/components/AddFundsModal'
+import ReceiveDialog from '@/components/ReceiveDialog'
+import DelegationSendModal from '@/components/DelegationSendModal'
 import { Button } from '@/components/ui/Button'
 import { useToast } from '@/components/ui/Toast'
 import MoneyPanel from './MoneyPanel'
@@ -126,6 +126,11 @@ export default function DashboardClient() {
   const usdcFunded = firstRun?.usdcFunded ?? null
   const hasSetUpAgent = Boolean(firstRun?.hasSetUpAgent)
   const pendingSetupAgent = firstRun?.pendingAgent ?? null
+  // #3976: the agent step 2 names, only while step 2 is OPEN. Once a set-up
+  // agent completes the step, it names nobody — the waiting agent's own
+  // "X is waiting to be set up" row renders instead (in the focused view
+  // it is the only place that names it).
+  const stepTwoAgent = hasSetUpAgent ? null : pendingSetupAgent
   // #2534: the suggested amount for step 1, from the endpoint `haven wallets
   // funding` prints. Fetched only while the account is known to hold no USDC.
   const { funding: fundingForOnboarding } = useAccountFunding(
@@ -152,19 +157,21 @@ export default function DashboardClient() {
   const defaultAccount = useMemo(() => resolveDefaultAccount(accounts), [accounts])
   const hasDelegationAccounts = accounts.length > 0
 
-  // Owner-initiated send from the DASHBOARD is gone (#1989, epic #1440). It was
-  // a legacy-Safe transaction signed through `SendModal`, and that rail is
-  // retired — the modal and its `useSendTransaction` hook are deleted. The
-  // delegation rail's owner-send lives on the account detail page
-  // (`DelegationSendModal`) and is untouched. #1079's "hidden, not disabled"
-  // mechanism is reused: no Send affordance renders anywhere on the dashboard
-  // and nothing dead-ends. The money panel (#3807) offers "Deposit address"
-  // and "Add funds" only.
+  // #4094: the dashboard's money verbs are Send / Receive. The owner-send is
+  // the DELEGATION rail's (`DelegationSendModal`), reached through the account
+  // picker when there is more than one account; the LEGACY Safe send stays
+  // retired (#1989, epic #1440) — it was a Safe transaction signed through
+  // `SendModal`, and that rail and its hook are deleted. The retired-rail
+  // guard from #1987 still holds in rewritten form: the delegation Send is
+  // present, and no approvals route renders. The old two-dialog funding pair
+  // ("Add funds" + "Deposit address") merged into one Receive dialog.
+  // #1079's "hidden, not disabled" mechanism applies to what is gone, not to
+  // what is here: nothing dead-ends.
 
   const [connectAgentOpen, setConnectAgentOpen] = useState(false)
-  const [pickerAction, setPickerAction] = useState<'receive' | 'add-funds' | null>(null)
+  const [pickerAction, setPickerAction] = useState<'receive' | 'send' | null>(null)
   const [receiveOpen, setReceiveOpen] = useState(false)
-  const [addFundsOpen, setAddFundsOpen] = useState(false)
+  const [sendOpen, setSendOpen] = useState(false)
   const [agentUsageOpen, setAgentUsageOpen] = useState(false)
   // Set true the first time the user opens Receive in this session. Combined
   // with !hasFunds it drives the hero's "Watching for incoming deposits…"
@@ -300,24 +307,30 @@ export default function DashboardClient() {
   // STALE set of totals still diffs normally. `change.balancesFreshness`
   // also tells the hero to render its subtle stale indicator beside the
   // headline figure.
+  // #4307: every nested read is guarded, not just `overview` — a PARTIAL
+  // overview body (the screenshot harness's empty fixture answers
+  // `/dashboard/overview` with `FIXTURE_EMPTY_FALLBACK`, which carries
+  // neither `totals` nor `change`) crashed the client on `.sek`. The child
+  // helpers (`dashboard-attention.ts`, `AgentsSection`, `MoneyPanel`) were
+  // already defaulting with `??`.
   const totalFiat = currency === 'EUR'
-    ? (overview?.totals.eur ?? 0)
+    ? (overview?.totals?.eur ?? 0)
     : currency === 'SEK'
-      ? (overview?.totals.sek ?? 0)
-      : (overview?.totals.usd ?? 0)
-  const sekChangeUnavailable = currency === 'SEK' && overview?.change.sekAmount == null
-  const balancesFreshness = overview?.change.balancesFreshness
+      ? (overview?.totals?.sek ?? 0)
+      : (overview?.totals?.usd ?? 0)
+  const sekChangeUnavailable = currency === 'SEK' && overview?.change?.sekAmount == null
+  const balancesFreshness = overview?.change?.balancesFreshness
   const changeUnavailable = balancesFreshness?.status === 'unavailable'
   const changeAmount = currency === 'EUR'
-    ? (overview?.change.eurAmount ?? 0)
+    ? (overview?.change?.eurAmount ?? 0)
     : currency === 'SEK'
-      ? (overview?.change.sekAmount ?? 0)
-      : (overview?.change.usdAmount ?? 0)
+      ? (overview?.change?.sekAmount ?? 0)
+      : (overview?.change?.usdAmount ?? 0)
   const changePercent = currency === 'EUR'
-    ? (overview?.change.eurPercent ?? 0)
+    ? (overview?.change?.eurPercent ?? 0)
     : currency === 'SEK'
-      ? (overview?.change.sekPercent ?? 0)
-      : (overview?.change.usdPercent ?? 0)
+      ? (overview?.change?.sekPercent ?? 0)
+      : (overview?.change?.usdPercent ?? 0)
   const overviewUnavailable = Boolean(overviewError && !overview)
   // Render the guide whenever the user has at least one account and either:
   // (a) the first agent payment hasn't happened and the steps aren't hidden
@@ -389,14 +402,17 @@ export default function DashboardClient() {
         : null,
     [overview, budgetRemaining, budgetRemainingLoading],
   )
-  // The agent step 2 names is not listed twice: its "Needs setup" row drops
-  // while the steps show. Other waiting agents keep theirs.
+  // The agent step 2 names is not listed twice: while the steps show AND step
+  // 2 is open, its "Needs setup" row drops. Other waiting agents keep theirs.
+  // #3976: with step 2 complete, `stepTwoAgent` is null, so nothing is
+  // dropped and the waiting agent's row renders again (the guide no longer
+  // names it, either).
   const cardItems = useMemo(
     () =>
-      showSetupSteps && pendingSetupAgent
-        ? attentionItems.filter((item) => item.id !== `needs-setup:${pendingSetupAgent.id}`)
+      showSetupSteps && stepTwoAgent
+        ? attentionItems.filter((item) => item.id !== `needs-setup:${stepTwoAgent.id}`)
         : attentionItems,
-    [attentionItems, showSetupSteps, pendingSetupAgent],
+    [attentionItems, showSetupSteps, stepTwoAgent],
   )
 
   const attentionVisible = Boolean(overview) || Boolean(overviewError)
@@ -413,11 +429,11 @@ export default function DashboardClient() {
     setConnectAgentOpen(true)
   }
 
-  function openHeroAction(action: 'receive' | 'add-funds') {
-    if (accounts.length === 0) {
-      if (action === 'add-funds') setAddFundsOpen(true)
-      return
-    }
+  function openHeroAction(action: 'receive' | 'send') {
+    // No accounts: the money card renders "Create Haven account" instead of
+    // these buttons, so this is unreachable from the UI; do nothing rather
+    // than open a dialog about nothing.
+    if (accounts.length === 0) return
 
     if (accounts.length > 1) {
       setPickerAction(action)
@@ -429,13 +445,16 @@ export default function DashboardClient() {
       setHasOpenedReceive(true)
       setReceiveOpen(true)
     }
-    if (action === 'add-funds') setAddFundsOpen(true)
+    if (action === 'send') setSendOpen(true)
   }
 
   function handleActionAccountSelected(accountId: string) {
     setActionAccountId(accountId)
-    if (pickerAction === 'receive') setReceiveOpen(true)
-    if (pickerAction === 'add-funds') setAddFundsOpen(true)
+    if (pickerAction === 'receive') {
+      setHasOpenedReceive(true)
+      setReceiveOpen(true)
+    }
+    if (pickerAction === 'send') setSendOpen(true)
     setPickerAction(null)
   }
 
@@ -466,7 +485,8 @@ export default function DashboardClient() {
 
   function openAddFundsForAccount(accountId: string) {
     setActionAccountId(accountId)
-    setAddFundsOpen(true)
+    setHasOpenedReceive(true)
+    setReceiveOpen(true)
   }
 
   function handleDismissAttention(item: AttentionRuleItem) {
@@ -493,7 +513,8 @@ export default function DashboardClient() {
       unavailable={overviewUnavailable}
       currency={currency}
       totalFiat={totalFiat}
-      changeAvailable={Boolean(overview?.change.available)}
+      // #4307: guarded — a partial overview has no `change` at all.
+      changeAvailable={Boolean(overview?.change?.available)}
       sekChangeUnavailable={sekChangeUnavailable}
       balancesFreshness={balancesFreshness}
       changeUnavailable={changeUnavailable}
@@ -506,11 +527,16 @@ export default function DashboardClient() {
       watchingForDeposit={fundingStateKnown && !hasFunds && hasOpenedReceive}
       requiresOtherDevice={requiresOtherDevice}
       noPaymentsYet={firstAgentPaymentKnown && !hasFirstAgentPayment}
-      onDepositAddress={() => openHeroAction('receive')}
-      onAddFunds={() => openHeroAction('add-funds')}
-      // #3902: one primary "Add funds" — while the guide's step 1 is the
-      // active step, its button is the primary one and this one steps back.
-      addFundsSecondary={isFocusedView}
+      onReceive={() => openHeroAction('receive')}
+      onSend={() => openHeroAction('send')}
+      // #4167: the ONE primary-button rule — Send primary once any account
+      // holds USDC (`usdcFunded`), Receive primary with Send disabled when
+      // known empty, Send primary while the read is loading or failed.
+      usdcFunded={usdcFunded}
+      // #3902: one primary funding action — while the guide's step 1 is the
+      // active step, its "Add funds" is the primary one and the card's
+      // "Receive" steps back.
+      receiveSecondary={isFocusedView}
     />
   )
 
@@ -537,10 +563,10 @@ export default function DashboardClient() {
           <DashboardOnboardingGuide
             usdcFunded={usdcFunded}
             hasSetUpAgent={hasSetUpAgent}
-            pendingAgent={pendingSetupAgent}
+            pendingAgent={stepTwoAgent}
             hasFirstAgentPayment={hasFirstAgentPayment}
             funding={fundingForOnboarding}
-            onAddFunds={() => openHeroAction('add-funds')}
+            onAddFunds={() => openHeroAction('receive')}
             onAddAgent={openConnectAgent}
             onShowAgentUsage={() => setAgentUsageOpen(true)}
           />
@@ -572,6 +598,9 @@ export default function DashboardClient() {
       />
       <ActivitySection
         activity={overview?.activity ?? []}
+        hasOlderActivity={overview?.hasOlderActivity}
+        activityWindowDays={overview?.activityWindowDays}
+        activityWindowStart={overview?.activityWindowStart}
         accountCount={accounts.length}
         hasAccounts={accounts.length > 0}
         loading={overviewInitialLoading}
@@ -589,7 +618,10 @@ export default function DashboardClient() {
           The old hero-plus-aside row put this card ("Needs you" then) in a side column beside
           the balance. A brand-new, unfunded user (the focused view) sees the
           money panel and the guide only; the backup and pending-agent items
-          that still apply render below the guide's steps (#3808). */}
+          that still apply render below the guide's steps (#3808). #3976:
+          once a set-up agent completes step 2, that set includes the waiting
+          agent's "Needs setup" row — the completed guide names nobody, so
+          the row is the only place the agent is named. */}
       <div className="space-y-6">
         {moneyPanel}
         {attentionPanel}
@@ -616,22 +648,31 @@ export default function DashboardClient() {
       />
 
 
-      <ReceiveFundsModal
+      <ReceiveDialog
         open={receiveOpen}
         account={selectedActionAccount}
+        // #4167: with several accounts the dialog's card is a picker, so a
+        // wrong pre-pick is one switch away; one account renders no card.
+        accounts={accounts}
         onClose={() => setReceiveOpen(false)}
       />
 
-      <AddFundsModal
-        open={addFundsOpen}
-        onClose={() => setAddFundsOpen(false)}
-        accountAddress={selectedActionAccount?.account_address}
-        chainId={selectedActionAccount?.chain_id}
-        onReceive={() => {
-          setHasOpenedReceive(true)
-          setReceiveOpen(true)
-        }}
-      />
+      {/*
+        Mount the send modal only while open so its wallet hooks
+        (useDelegationSend backs wagmi wallet-client subscriptions) don't run
+        in the background on every dashboard view — the same pattern the
+        account detail page uses. Needs an account with a resolved chain: the
+        delegation send signs on a network.
+      */}
+      {sendOpen && selectedActionAccount?.account_address && selectedActionAccount.chain_id != null && (
+        <DelegationSendModal
+          open
+          onClose={() => setSendOpen(false)}
+          accountAddress={selectedActionAccount.account_address}
+          chainId={selectedActionAccount.chain_id}
+          onSent={refreshDashboardData}
+        />
+      )}
 
       <UsingYourAgentInfo
         open={agentUsageOpen}

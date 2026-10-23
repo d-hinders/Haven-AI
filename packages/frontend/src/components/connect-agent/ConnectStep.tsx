@@ -33,7 +33,14 @@ function connectedRows(approve: ConnectStepRow, manual: boolean): ConnectStepRow
   ]
 }
 
-export function ConnectStep({ flow }: { flow: AgentConnectionSetupFlow }) {
+export function ConnectStep({
+  flow,
+  nestedCopyBlocks = false,
+}: {
+  flow: AgentConnectionSetupFlow
+  /** See WaitingForConnector's prop of the same name (#4065). */
+  nestedCopyBlocks?: boolean
+}) {
   const { setup, setupStatus, connectView, resumed } = flow
   // #2522: `setup` is the CREATE response, and a session resumed from a
   // hand-off link (`/agents?setup=<id>`) never has one — it renders from the
@@ -133,6 +140,7 @@ export function ConnectStep({ flow }: { flow: AgentConnectionSetupFlow }) {
           connectionStage={flow.awaitingConnectionStage}
           expiresAt={setup.expires_at}
           onCancel={flow.handleCancelSetup}
+          nestedCopyBlocks={nestedCopyBlocks}
         />
       )}
 
@@ -141,11 +149,21 @@ export function ConnectStep({ flow }: { flow: AgentConnectionSetupFlow }) {
           rows={connectedRows({
             id: 'approve',
             state: 'working',
-            title: 'Approve the budget',
+            // `connected_local` before the install is approval-ready: the
+            // agent IS connected (row 2 is honestly done) and the approval is
+            // not open yet, so the in-flight row says what it is doing — the
+            // approval being prepared — not the gate it leads to. "Approve
+            // the budget" over "the connector is finishing local setup" named
+            // one thing and described another. The row stays row 3 and stays
+            // working, so the list never steps backwards on its way to
+            // "Review and approve".
+            title: 'Preparing the approval',
             children: (
-              // #1377 C: static text — polling must never swap it.
+              // #1377 C: static text — polling must never swap it. The modal
+              // subtitle already says "Finishing local setup"; this line only
+              // sets the wait, so the work is named once per viewport.
               <p className="text-xs leading-relaxed text-[var(--v2-ink-3)]">
-                The connector is finishing local setup. This usually takes a few seconds.
+                This usually takes a few seconds.
               </p>
             ),
           }, manualPath)}
@@ -157,11 +175,12 @@ export function ConnectStep({ flow }: { flow: AgentConnectionSetupFlow }) {
           rows={connectedRows({
             id: 'approve',
             state: 'active',
-            // #1684: the modal subtitle names the gate here ("Approve the
-            // agent budget", pinned by e2e/connect-agent.spec.ts), so this
-            // heading says what the row asks for in other words. One sentence,
-            // once per viewport.
-            title: 'Review and sign',
+            // The modal subtitle names the gate ("Approve the agent budget",
+            // pinned by e2e/connect-agent.spec.ts). The heading shares its
+            // verb on purpose: owner decision 2026-10-16 that this step says
+            // "approve", not "sign" (copy-guidelines.md prefers "approve
+            // actions"), which outranks #1684's "say it in other words" here.
+            title: 'Review and approve',
             wideBodyOnMobile: true,
             children: (
               <DelegationApprovalStep

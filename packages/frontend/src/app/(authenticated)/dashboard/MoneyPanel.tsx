@@ -18,8 +18,10 @@
  * - **The spending figures are #3803's NET definition** (`spend.d30.net`) —
  *   the same booked-or-repriced, sweep-netted numbers the analytics page
  *   shows, so the two surfaces cannot disagree. `≈` marks a window whose
- *   NULL-booked rows were priced at today's rate (owner decision 1): a
- *   re-priced total is never shown as booked.
+ *   NULL-booked rows were priced at today's rate (owner decision 1) where the
+ *   conversion changes the number — the server's per-currency
+ *   `approxByCurrency` (#4165), so re-priced USDC in USD carries none — and a
+ *   bucket it could not price says so in words (`unpricedByCurrency`).
  * - **The sparkline is #3805's**, fed from `spend.balance_by_day`: a day with
  *   no snapshot is skipped, never zero, and the line connects across it
  *   (#3897) in a dense 30-day window; fewer than 3 measured days renders the
@@ -38,6 +40,7 @@ import { BalanceFreshnessIndicator } from '@/components/haven'
 import PasskeyOtherDeviceNotice from '@/components/PasskeyOtherDeviceNotice'
 import { PageHeader } from '@haven_ai/ui/PageHeader'
 import { formatFiat, currencyLocale, SUB_CENT_THRESHOLD } from '@/lib/format'
+import { UNPRICED_TOTALS_NOTE } from '@/lib/money-flow-tally'
 import {
   buildDashboardSummary,
   type DashboardSummaryAgent,
@@ -71,7 +74,14 @@ function formatSignedCurrency(value: number, currency: 'USD' | 'EUR' | 'SEK'): s
   return `${sign}${formatFiat(Math.abs(value), currency)}`
 }
 
-/** UTC `YYYY-MM-DD`, `offset` days from today — the snapshot date key. */
+/**
+ * UTC `YYYY-MM-DD`, `offset` days from today — the snapshot date key.
+ * Deliberately UTC (#3977, builder's choice (b)): the snapshot rows are
+ * UTC-dated — `GET /dashboard/overview` writes one per UTC day, and
+ * `/analytics/overview`'s contract declares the table "a UTC-dated daily
+ * snapshot … regardless of the caller's `tz`" — so re-keying the client side
+ * would mislabel the rows. The copy below says what is measured instead.
+ */
 function snapshotDate(offset: number): string {
   const day = new Date()
   day.setUTCDate(day.getUTCDate() + offset)
@@ -122,13 +132,16 @@ function seriesColor(index: number): string {
 }
 
 function sparklineAriaLabel(points: SparklinePoint[], currency: 'USD' | 'EUR' | 'SEK'): string {
+  // #3977: the series is UTC-dated — the aria-label names what it measures
+  // rather than implying the viewer's local days (the Activity card beside
+  // it buckets the USER's local days, so the two must not read alike).
   const measured = points.filter((point) => point.value !== null)
   if (measured.length === 0) {
-    return 'Balance over the last 30 days. No snapshots yet.'
+    return 'Balance over the last 30 UTC days. No snapshots yet.'
   }
   const first = measured[0]
   const last = measured[measured.length - 1]
-  return `Balance over the last 30 days, from ${formatFiat(first.value as number, currency)} to ${formatFiat(last.value as number, currency)}.`
+  return `Balance over the last 30 UTC days, from ${formatFiat(first.value as number, currency)} to ${formatFiat(last.value as number, currency)}.`
 }
 
 export interface MoneyPanelProps {
@@ -171,15 +184,26 @@ export interface MoneyPanelProps {
    */
   noPaymentsYet?: boolean
   /**
-   * True only while the first-run guide's step 1 ("Add funds") is the active
-   * step (#3902, captain decision 2026-10-12): the guide then carries the one
-   * primary "Add funds" and this card's button steps down to the ghost
-   * variant, so exactly one primary "Add funds" shows. Default false — the
-   * card's "Add funds" is the primary action.
+   * #4167 — the ONE primary-button rule (owner decision 2026-10-20): the
+   * dashboard follows the account page. `true` once the account (or, with
+   * several accounts, any account) holds USDC — Send primary; `false` (KNOWN
+   * empty) — Receive primary and Send disabled; `null` (the balance is
+   * loading or failed to read) — Send stays primary and enabled rather than
+   * flipping mid-load, the account page's rule (`AccountDetailClient.tsx`).
+   * Undefined reads as null. The default account's aggregate `hasFunds` is a
+   * different signal — agents spend USDC, so the rule keys on USDC.
    */
-  addFundsSecondary?: boolean
-  onDepositAddress: () => void
-  onAddFunds: () => void
+  usdcFunded?: boolean | null
+  /**
+   * #3902: no other money action is primary while the first-run guide's
+   * step 1 ("Add funds") is the active step (#4094 rename: the card's button
+   * is "Receive"). The guide then carries the one primary funding action and
+   * this card's button steps down to the ghost variant, so exactly one
+   * primary money action shows. Default false — the card's own rule decides.
+   */
+  receiveSecondary?: boolean
+  onReceive: () => void
+  onSend: () => void
 }
 
 export default function MoneyPanel({
@@ -201,14 +225,21 @@ export default function MoneyPanel({
   requiresOtherDevice,
   showSpending = true,
   noPaymentsYet = false,
-  addFundsSecondary = false,
-  onDepositAddress,
-  onAddFunds,
+  receiveSecondary = false,
+  usdcFunded = null,
+  onReceive,
+  onSend,
 }: MoneyPanelProps) {
   // Animate the balance from 0 → totalFiat on first paint after data loads.
   // Subsequent changes (currency switches, polled refresh) snap instantly.
   // Respects prefers-reduced-motion via the hook.
   const animatedTotal = useCountUp(totalFiat, { enabled: !loading && !unavailable })
+
+  // #4167's primary-button rule: Send primary once funded (and while the
+  // state is unknown — null never reads as empty); Receive primary and Send
+  // disabled only when the emptiness is KNOWN.
+  const sendPrimary = usdcFunded !== false
+  const sendDisabled = usdcFunded === false
 
   const spend = overview?.spend ?? null
   const isTestNetwork = spend?.scope === 'testnet'
@@ -242,12 +273,18 @@ export default function MoneyPanel({
     ? balanceSparkPoints(spend.balance_by_day, currency)
     : []
 
+  // #4165: the server's per-currency "≈" decision and unpriced flag. A
+  // backend older than #4165 sends neither; the provenance `approx` is the
+  // fallback, which only ever shows MORE marks, never a missing one.
+  const spendApprox = d30 ? (d30.approxByCurrency?.[bucket] ?? d30.approx) : false
+  const spendUnpriced = d30?.unpricedByCurrency?.[bucket] ?? false
+
   const perAgentSpend = (overview?.agents ?? [])
     .map((agent: DashboardAgentPreview) => ({
       id: agent.id,
       name: agent.name,
       value: agent.stats.d30.net[bucket],
-      approx: agent.stats.d30.approx,
+      approx: agent.stats.d30.approxByCurrency?.[bucket] ?? agent.stats.d30.approx,
     }))
     .filter((row) => row.value > 0)
     .sort((a, b) => b.value - a.value)
@@ -309,12 +346,26 @@ export default function MoneyPanel({
         ) : unavailable ? (
           <p className="text-2xl font-semibold tracking-tight text-[var(--v2-ink-3)] v2-tabular">—</p>
         ) : d30 ? (
-          <Amount
-            amount={d30.net[bucket]}
-            currency={currency}
-            approx={d30.approx}
-            size="lg"
-          />
+          <>
+            {/* #4165: the server applies the one "≈" rule per currency
+                (`approxByCurrency`, so USDC in USD never marks), and a
+                bucket it could not price says so in words. With every
+                re-priced row unpriced and nothing booked, the total is
+                unknown — "—", never "$0.00". The "—" test reads the GROSS
+                figure (#4288): gross is the booked or re-priced fiat before
+                the #3755 sweep netting, so gross > 0 means something was
+                priced — priced rows that genuinely net to 0 render
+                "$0.00" plus the note, not an em dash. */}
+            <Amount
+              amount={spendUnpriced && d30.gross[bucket] === 0 ? null : d30.net[bucket]}
+              currency={currency}
+              approx={spendApprox}
+              size="lg"
+            />
+            {spendUnpriced ? (
+              <p className="mt-1 text-xs text-[var(--v2-ink-3)]">{UNPRICED_TOTALS_NOTE}</p>
+            ) : null}
+          </>
         ) : null}
       </div>
 
@@ -369,7 +420,7 @@ export default function MoneyPanel({
                 <span className="min-w-0 truncate">Agents since removed</span>
               </dt>
               <dd className="v2-tabular shrink-0">
-                <Amount amount={unattributedValue} currency={currency} approx={d30?.approx} />
+                <Amount amount={unattributedValue} currency={currency} approx={spendApprox} />
               </dd>
             </div>
           ) : null}
@@ -471,9 +522,15 @@ export default function MoneyPanel({
                 </p>
               ) : changeAvailable && !sekChangeUnavailable && !changeUnavailable && changeAmount !== null ? (
                 <p className={`mt-2 text-sm font-medium ${changeAmount >= 0 ? 'text-[var(--v2-success)]' : 'text-[var(--v2-danger)]'}`}>
-                  {formatSignedCurrency(changeAmount, currency)} ({formatPercent(changePercent, currency)}) since yesterday
+                  {formatSignedCurrency(changeAmount, currency)} ({formatPercent(changePercent, currency)}) since yesterday (UTC)
                 </p>
               ) : null}
+              {/* #3977: "(UTC)" is the honest label — the snapshot the change
+                  diffs against is keyed by the first clean dashboard load of
+                  each UTC day (there is no end-of-day job), so a Stockholm
+                  user's "yesterday" is the UTC yesterday. The Activity card
+                  beside it buckets the USER's local days; without the
+                  qualifier the two windows would read as the same thing. */}
             </div>
 
             {/* #3908: side by side (lg), the balance half shares a grid row
@@ -492,21 +549,33 @@ export default function MoneyPanel({
               </div>
             ) : null}
 
-            {/* #3897: "Add funds" is the primary action, "Deposit address" the
-                secondary (#3807, the mockup). */}
+            {/* #4094: the money verbs everywhere, per the owner decision —
+                and #4167's one primary-button rule: Send primary once funded
+                (and while the funding state is unknown), Receive primary with
+                Send disabled when known empty. #3902 carries over: while the
+                first-run guide's step 1 is the active step, the guide's
+                "Add funds" is the one primary funding action and this card's
+                "Receive" steps down to ghost. */}
             {hasAccounts ? (
               requiresOtherDevice ? (
                 <PasskeyOtherDeviceNotice className="max-w-sm lg:mt-auto" />
               ) : (
                 // `lg:mt-auto`: with no sparkline (spend still loading or
                 // unavailable) the spare height sits above the actions,
-                // never below them (#3908).
+                // never below them (#3908). #4307 owner decision (a):
+                // Send, then Receive, everywhere — the account header's
+                // order, which the card here now matches. The primacy rule
+                // is unchanged (#4167): Send primary once funded, Receive
+                // primary with Send disabled when known empty.
                 <div className="flex flex-wrap gap-3 lg:mt-auto">
-                  <Button onClick={onAddFunds} variant={addFundsSecondary ? 'ghost' : 'primary'}>
-                    Add funds
+                  <Button onClick={onSend} variant={sendPrimary ? 'primary' : 'ghost'} disabled={sendDisabled}>
+                    Send
                   </Button>
-                  <Button onClick={onDepositAddress} variant="ghost">
-                    Deposit address
+                  <Button
+                    onClick={onReceive}
+                    variant={sendPrimary || receiveSecondary ? 'ghost' : 'primary'}
+                  >
+                    Receive
                   </Button>
                 </div>
               )

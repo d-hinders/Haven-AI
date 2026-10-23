@@ -320,10 +320,13 @@ request, this is the only way it can learn the purchase failed — without it a
 failed purchase reads as complete for fifteen minutes. If the merchant's
 \`PAYMENT-RESPONSE\` header names a \`transaction\`, pass that raw header as
 \`payment_response\` on the SAME \`mcp__haven__haven_report_x402_outcome\`
-call: Haven decodes it, verifies the settlement on-chain, and the receipt then
-shows the merchant's settlement, not only the funding transaction. Call
+call, together with \`payment_header\`: the exact header you retried the
+merchant with. Haven records a reported settlement only with that header,
+which proves the settlement is this payment's. It decodes the response,
+verifies the settlement on-chain, and the receipt then shows the merchant's
+settlement, not only the funding transaction. Call
 \`mcp__haven__haven_report_settlement_evidence\` only when the outcome answer
-names it as the next step. On the **erc7710** scheme (the pay result says
+names it as the next step, and pass the same \`payment_header\` there too. On the **erc7710** scheme (the pay result says
 \`settlement_scheme: "erc7710"\`), sign with \`mcp__haven-signer__haven_sign\`,
 then \`mcp__haven__haven_submit\` with \`settlement_scheme: "erc7710"\`
 returns the \`payment_header\`; retry the merchant yourself with it as
@@ -353,7 +356,9 @@ for example, an invoice carrying an \`x402_payment_url\` to POST with its
 \`invoice_id\`, beside a raw deposit address and a web payment link.
 - **Quote the exact request:** \`mcp__haven__haven_quote_x402\` with \`url\`,
   \`method\`, \`headers\` and \`body\`, exactly as the merchant described it.
-  \`body\` is a JSON **string**, not an object. On a JSON POST always pass
+  \`body\` is a JSON **string**, not an object. When the price is stated up
+  front (an invoice total, say), also pass \`expected_amount\` — the price you
+  expect, in whole tokens (\`"0.10"\`). On a JSON POST always pass
   \`headers: {"Content-Type": "application/json"}\` — the tool does not infer
   it, and a merchant may answer a request without it with a generic challenge
   Haven cannot pay (for example, only the \`upto\` scheme).
@@ -382,6 +387,16 @@ for example, an invoice carrying an \`x402_payment_url\` to POST with its
   report it, the merchant's settlement evidence. (A deposit transfer is bound
   to its payee and amount on-chain too; the difference is the record, not
   the binding.)
+- **If the quote says stop, stop.** The quote checks the agent's remaining
+  budget at quote time, and it can check a price you state (\`expected_amount\`).
+  When it returns \`safe_to_continue: false\` — the amount exceeds the budget, or
+  the price does not match what you expected — it prefills no cap and names no
+  next tool: stop and tell the user. If the x402 challenge itself is wrong (a
+  price wildly off the invoice) and NOTHING has been paid via x402, the
+  invoice's own deposit address MAY be an alternative, but only with the
+  user's explicit go-ahead — never automatically. Once an x402 payment has
+  been attempted or refused, never pay the deposit address: it can pay the
+  invoice twice.
 - **Pay exactly one route, and never fall back silently.** If the x402 route
   is refused or fails, do not then pay the deposit address — that pays the
   invoice twice. Follow the result's guidance fields instead: on EIP-3009, a

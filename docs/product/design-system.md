@@ -2,8 +2,12 @@
 owner: "@d-hinders"
 status: current
 covers:
+  - packages/core/src/approx-mark.ts
+  - packages/frontend/src/lib/money-flow-tally.ts
   - packages/frontend/src/app/globals.css
   - packages/frontend/src/components/connect-agent/ConnectSteps.tsx
+  - packages/frontend/src/components/ui/DialogActions.tsx
+  - packages/frontend/src/components/connect-agent/ConnectStepShell.tsx
   - packages/frontend/src/context/ThemeContext.tsx
   - packages/frontend/src/lib/theme-bootstrap.ts
   - packages/frontend/src/lib/theme-tokens.ts
@@ -27,8 +31,12 @@ covers:
   - packages/frontend/src/app/(authenticated)/accounts/[accountId]/AccountDetailClient.tsx
   - packages/frontend/src/components/marketing/**
   - packages/frontend/src/components/sidebar/**
-  - packages/frontend/src/components/TopBar.tsx
   - packages/frontend/src/components/haven/TransactionActivityRow.tsx
+  - packages/frontend/src/components/haven/AgentRow.tsx
+  - packages/frontend/src/app/(authenticated)/agents/[agentId]/AgentDetailClient.tsx
+  - packages/frontend/src/app/(authenticated)/dashboard/AgentsSection.tsx
+  - packages/frontend/src/components/ui/Tabs.tsx
+  - packages/ui/src/Tabs.tsx
   - packages/frontend/src/components/haven/BudgetMeter.tsx
   - packages/frontend/src/components/haven/ApprovalRequiredBanner.tsx
   - packages/frontend/src/components/haven/TransactionMovement.tsx
@@ -51,8 +59,6 @@ covers:
   - packages/frontend/src/components/EnvBadge.tsx
   - packages/frontend/src/components/__tests__/WalletButton.test.tsx
   - packages/frontend/e2e/accounts-card-tap-target.mobile.spec.ts
-  - packages/frontend/e2e/agent-card-fit-measure.spec.ts
-  - packages/frontend/e2e/agent-card-mcp-chip-measure.spec.ts
   - packages/frontend/e2e/marketing-cta-focus.spec.ts
   - packages/frontend/e2e/mobile-nav-layering.mobile.spec.ts
   - packages/frontend/e2e/mobile-nav-tap-target.mobile.spec.ts
@@ -61,6 +67,7 @@ covers:
   - packages/frontend/e2e/table-container-collapse.spec.ts
   - packages/frontend/e2e/transaction-title-measure.spec.ts
   - packages/frontend/scripts/design-lint.mjs
+  - packages/frontend/design-lint-baseline.json
   - packages/frontend/scripts/evidence-viewports.mjs
   - packages/frontend/scripts/full-page-capture.mjs
   - packages/frontend/src/__tests__/compiled-colour-utilities.test.ts
@@ -90,18 +97,36 @@ covers:
   - packages/frontend/src/components/ErrorBoundary.tsx
   - packages/frontend/src/components/NetworkPill.tsx
   - packages/frontend/src/components/OnchainActionGate.tsx
-  - packages/frontend/src/components/ReceiveFundsModal.tsx
+  - packages/frontend/src/components/ReceiveDialog.tsx
   - packages/frontend/src/components/agent-panel/McpServerName.tsx
   - packages/frontend/src/components/haven/Address.tsx
   - packages/frontend/src/app/(authenticated)/dashboard/DashboardClient.tsx
-  - packages/frontend/src/components/AddFundsModal.tsx
   - packages/frontend/src/components/connect-agent/CopyBlock.tsx
   - packages/frontend/src/components/connect-agent/SetupStates.tsx
   - packages/frontend/src/components/haven/DirectionMark.tsx
-last-verified: "2026-10-13"
+last-verified: 2026-10-21
 ---
 
 # Haven Design System
+
+> Re-verified 2026-10-22 for #4237: the navigation bullets (floating tab bar —
+> the concentric-capsule indicator, the pill's `p-1` inset, the bar-only
+> "Home" label and the relaxed one-active-idiom rule for the bar). This note
+> covers those passages only.
+
+> Re-verified 2026-10-19 for #4063: the navigation bullets (floating tab bar —
+> the dark pill's own token pair and the re-measured ratios — and active
+> idiom). This note covers those passages only.
+
+> Re-verified 2026-10-17 for #4058: § z-index scale (the rule paragraph and the
+> nav-tier paragraph), § Safe areas (the phone-navigation paragraph), the
+> navigation bullets (floating tab bar, active idiom, More cell, More sheet) and
+> § Tap targets' "both states" bullet.
+> This note covers those passages only.
+
+> Re-verified 2026-10-17 for #4056: § Tap targets' `SegmentedControl` passage
+> (44px hit area, inset brand outline on the selected option). This note covers
+> that passage only.
 
 > Re-verified 2026-09-03 for #2468: the investor-briefing route, its tap-target
 > borrower, and its marketing exemption were retired; the surviving focus-ring
@@ -141,6 +166,7 @@ All tokens live as CSS custom properties at `:root` in `packages/ui/src/tokens.c
 |---|---|---|---|
 | `--v2-bg` | `#ffffff` | `#12151c` | Page background |
 | `--v2-surface` | `#f6f9fc` | `#191d26` | Alternating section bands, card hover backgrounds |
+| `--v2-table-header-bg` / `--v2-table-header-ink` | `#f6f9fc` / `#5d6c85` | `#191d26` / `#97a3b6` | Table headers and the day bands on day-grouped lists (`TransactionActivityDayHeader`, #4225) — the second sanctioned band, for list groups, not card titles |
 | `--v2-surface-2` | `#eef2f7` | `#20252f` | Disabled states, deeper card stacking |
 | `--v2-surface-code` | `#0b1120` | `#0b1120` | Dark code blocks (deliberately **not** re-tinted in dark — content keeps its own colours) |
 | `--v2-surface-hover` | `#f0f4f9` | `#232837` | Sidebar/user-menu row hover and subtle interactive shells |
@@ -163,6 +189,7 @@ Dark surfaces step **lighter** with elevation (`bg` < `surface` < `surface-2` < 
 |---|---|---|---|
 | `--v2-border` | `#e6ebf1` | `#2b3140` | Default hairline (cards, dividers) |
 | `--v2-border-strong` | `#d6dbe3` | `#3a4152` | Hover, ghost button borders, flow arrows, the local-hint marker's left rule (§ 3) |
+| `--v2-border-subtle` | `#edf0f4` | `#232834` | The inset hairline between rows of one day in a ledger ([#4165](https://github.com/d-hinders/Haven-AI/issues/4165)) — quieter than `--v2-border`, which keeps separating the day groups |
 
 ### Brand
 
@@ -185,12 +212,40 @@ Use `.v2-brand-gradient-text` for the production app wordmark. In product UI, do
 |---|---|---|---|---|
 | `--v2-success` | `#047857` | `#34d399` | `--v2-success-soft` `#ecfdf5` / `#12312a` | Settled, confirmed, incoming |
 | `--v2-debit` | `#0369a1` | `#38bdf8` | `--v2-debit-soft` `#f0f9ff` / `#0e2a3a` | Outgoing / sent money (sibling to success; never a warning) |
-| `--v2-warning` | `#b54708` | `#fcd34d` | `--v2-warning-soft` `#fef3c7` / `#33260e` | 402 Payment Required, pending review; environment identity — the `DEV` chip (`EnvBadge`) and the dev install's icon badge; a paused agent's status markers — `AgentCard`'s header pill (`:146`) and bot tile (`:94`), the same fact on two surfaces (#2764) |
+| `--v2-warning` | `#b54708` | `#fcd34d` | `--v2-warning-soft` `#fef3c7` / `#33260e` | 402 Payment Required, pending review; environment identity — the `DEV` chip (`EnvBadge`) and the dev install's icon badge; a paused agent's status marker — the "Paused" `StatusBadge` that `agentBadge` gives both the dashboard's agent row and the `/agents` card, one fact in one voice (#2764; since #4209 the card's bot tile and its separate pill are gone) |
 | `--v2-danger` | `#b42318` | `#f87171` | `--v2-danger-soft` `#fef2f2` / `#3a1512` | Failed, destructive |
 
 Same rule as v1: **never repurpose a semantic color**.
 
 **Contrast guarantee:** every ink and semantic text token meets WCAG AA (≥4.5:1) against white, its own `-soft` background, and the tinted surfaces (`--v2-surface`, `--v2-surface-2`, hover) — in BOTH themes since [#2927](https://github.com/d-hinders/Haven-AI/issues/2927) (every `ink*`-on-ground pair ≥ 4.5:1, `ink-on-brand` on brand ≥ 4.5:1, each `-soft` tint vs its foreground ≥ 3:1). Guarded per theme by `packages/frontend/scripts/contrast-check.mjs` (run in the unit suite via `src/lib/__tests__/theme-tokens.test.ts`, table on `/design-system`) on top of `packages/frontend/src/__tests__/token-contrast.test.ts` — if you change a token, the tests tell you whether it still clears the bar, in both palettes.
+
+### Categorical data-viz series ([#2948](https://github.com/d-hinders/Haven-AI/issues/2948))
+
+| Token | Light | Dark |
+|---|---|---|
+| `--v2-series-1` | `#4f46e5` | `#8f8ef5` |
+| `--v2-series-2` | `#0d7f63` | `#59c9a3` |
+| `--v2-series-3` | `#b0500a` | `#f2c94a` |
+| `--v2-series-4` | `#0369a1` | `#59bdf2` |
+| `--v2-series-5` | `#8a1290` | `#c28fff` |
+| `--v2-series-6` | `#a01a63` | `#e878b5` |
+
+The ordered set the chart primitives (`ui/StackedBarChart`, `ui/AreaChart`) paint their series from. Colour identifies the SERIES, never the meaning of a value — a refusal is not red and an incoming payment is not green here; those semantics stay with the ink scale and the semantic tokens above. **Order is the contract: assign series by index, never by hash or by name**, so an agent that keeps the first slot keeps the same colour across the chart, the legend, and the agents table's share column. Series 1 deliberately opens on `--v2-brand`. Never reuse a series colour outside a chart.
+
+### Avatar tints ([#4066](https://github.com/d-hinders/Haven-AI/issues/4066))
+
+| Token | Light ink | Light ground | Dark ink | Dark ground |
+|---|---|---|---|---|
+| `--v2-avatar-1` (terracotta) | `#8a3a1a` | `#f8e6d8` | `#f2a884` | `#39211a` |
+| `--v2-avatar-2` (teal) | `#0c6b5a` | `#dcf1eb` | `#74d6c2` | `#0f2f2a` |
+| `--v2-avatar-3` (violet) | `#6b2fa8` | `#e9dbf8` | `#c6a8f2` | `#2a2044` |
+| `--v2-avatar-4` (moss) | `#4f661a` | `#e9efd6` | `#b8cd82` | `#242d15` |
+| `--v2-avatar-5` (rose) | `#9c2759` | `#fbe2ec` | `#f193bd` | `#381b2b` |
+| `--v2-avatar-6` (steel) | `#2e5d8f` | `#d5e3f1` | `#93c1ea` | `#152639` |
+
+Six muted tints for the `Monogram` initials avatar (the `-soft` ground carries the initials, the ink is the initials colour). Assigned **by hashing the entity's name** (`lib/avatar-tint.ts` — djb2 mod 6 over the trimmed name, a pure function, so the same merchant or contact (and agent, from #4208) keeps the same tint everywhere, in light and dark, and SSR hydration agrees). Unlike the series palette there is deliberately **no order contract** — assignment is by name, never by index — which is exactly why the family is separate from `--v2-series-*`: the series contract forbids hashing, the charts own those hexes, and an avatar must not collide with a chart colour on the same screen. The avatar hexes are also disjoint from every status and brand hex (asserted in `theme-tokens.test.ts`), so a tint never reads as success, warning, danger or debit.
+
+Each ink clears 4.5:1 on its own ground in both themes (in `CONTRAST_PAIRS`, unlike the series stops' 3:1 non-text bar — initials are text), and the six grounds and six inks stay pairwise separable (a minimum CIE76 ΔE is pinned in the same test). Do not reach for a `-soft` semantic tint, `brand-soft` or a series stop for an avatar — `Monogram` owns this family.
 
 ### Opacity on a token colour ([#1708](https://github.com/d-hinders/Haven-AI/issues/1708))
 
@@ -236,8 +291,10 @@ The third is the one that matters for how you read this section. It carries no
 `var()` at all — the colour is a perfectly ordinary `white` — and it shipped on a
 marketing surface that design-lint exempts. Every guard written before it matched
 a *shape*, so each new occurrence arrived wearing a shape the previous guard
-could not see. `TopBar`'s dead background was found only because a mutation
-during unrelated work went green when both renders came out byte-identical.
+could not see. The top bar's dead background (a `bg-[var(--v2-bg)]/85` quoted in
+its own source comment until the bar was deleted, #4029) was found only because
+a mutation during unrelated work went green when both renders came out
+byte-identical.
 
 So the check that binds is not a spelling rule. `src/__tests__/compiled-colour-utilities.test.ts`
 reads every opacity-modified colour utility out of the product source, compiles
@@ -350,8 +407,8 @@ scroll-continuation cue.
 Dark UIs elevate by **surface**, not by shadow: each step sits lighter than the
 one below it (`--v2-bg` < `--v2-surface` < `--v2-surface-2`), and a light
 theme's grey shadow on `#12151c` reads as a smear rather than as height. So the
-five tiers above are **redeclared** in both dark blocks of `globals.css`, and a
-call site never needs to know which theme it is in — write `shadow-card`, never
+five tiers above are **redeclared** in both dark blocks of
+`packages/ui/src/tokens.css`, and a call site never needs to know which theme it is in — write `shadow-card`, never
 a theme-conditional shadow.
 
 The dark form of every tier leads with a translucent **white hairline**
@@ -443,16 +500,16 @@ the wrapper *is* the dim layer. Named by shape rather than by component on
 purpose — a list of file names here is a claim `covers:` has to reach, and the
 gate is right to ask for one fewer of those, not one more.)
 
-The drawer reaches the same strip by the third route: it is `inset-y-0` and,
-below `lg`, `w-full`, with the notch reserved in its own `max-lg:pt-*`. Since
-[#2820](https://github.com/d-hinders/Haven-AI/issues/2820) deleted the nav
-scrim, that drawer is what covers the band when the navigation is open, and it
-covers it **opaquely** with `--v2-surface` where a backdrop covers it dim. Both
-facts are asserted in `e2e/safe-area-insets.mobile.spec.ts`, and the opaque one
-is load-bearing: a translucent value there would mean a dim layer had returned
-to the strip under another name, which is the state
-[#2819](https://github.com/d-hinders/Haven-AI/issues/2819) is trying to get out
-of.
+The phone navigation deliberately does **not** reach that strip. Since
+[#4053](https://github.com/d-hinders/Haven-AI/issues/4053) the More menu is a
+sheet — a floating card since #4058, whose scrim runs to the viewport bottom —
+and its scrim's TOP stops at `--v2-safe-top` — unlike a modal
+backdrop — so with the sheet open the status-bar band is still the shell's
+opaque `SafeAreaBand`. That is the line [#2820](https://github.com/d-hinders/Haven-AI/issues/2820)
+drew for the full-screen drawer (cover the band opaquely, never dimly), kept
+by covering it not at all: a translucent layer in that strip is the state
+[#2819](https://github.com/d-hinders/Haven-AI/issues/2819) saw stick on a
+device. Both facts are asserted in `e2e/safe-area-insets.mobile.spec.ts`.
 
 That also leaves a modal backdrop as the only `.v2-modal-backdrop` reaching the
 safe area on the demo path, which is what #2819's remaining device test turns
@@ -476,7 +533,8 @@ clamp it an over-tall panel overflows both ends with no scroll path.
 design, so a gutter on its wrapper would un-flush it at every width. Its insets
 go on the panel, where `box-sizing: border-box` takes them out of the scroll
 body between the header and footer rows — not on the rows themselves, because
-`footer` is optional and the only shipped caller passes none.
+`footer` is optional: `TransactionDetailPanel` passes one only for a record with
+a real transaction hash (#4267), so the inset has to hold with and without it.
 
 **Keep `backdrop-filter` off anything that spans a safe-area band** (#2819). The
 top bar originally grew the blurred `<header>` itself by `--v2-safe-top`, putting
@@ -485,7 +543,9 @@ that band was seen keeping the nav scrim's grey after the drawer closed. **The
 mechanism is unconfirmed** — the symptom needs a standalone shell with non-zero
 insets and no engine in CI has one — so the rule removes the class of failure
 rather than resting on a diagnosis. Use `ui/SafeAreaBand`: a strip as a sibling
-*above* the bar, never padding inside it.
+*above* whatever carries a blur, never padding inside it. (Since #4029 the
+authenticated shell renders the band itself, directly above the scroll region —
+there is no bar for it to sit inside.)
 
 The **filter** half is absolute; the **opacity** half is a default. Blur is for
 content scrolling under a bar, and nothing scrolls under the status bar, so the
@@ -504,29 +564,31 @@ Every stacking layer has a named token. **Reach for a token, never a fresh numbe
 ```css
 --v2-z-content:        10;   /* in-flow overlaps: badges, gradient washes */
 --v2-z-sticky:         20;   /* sticky table headers */
---v2-z-chrome:        100;   /* TopBar */
+--v2-z-chrome:        100;   /* app chrome — no consumer; the ordering anchor */
 --v2-z-tab-bar:       105;   /* reserved for the bottom tab bar (#2730, used by #2731) */
 --v2-z-chrome-popover: 110;  /* popovers anchored in the chrome */
---v2-z-nav-scrim:     130;   /* mobile navigation tier (consumer retired by #2820, ordering kept) */
---v2-z-nav-drawer:    140;   /* mobile drawer */
---v2-z-nav-toggle:    150;   /* the Open / Close sidebar toggle */
+--v2-z-nav-scrim:     130;   /* the phone More sheet's scrim (#4053) */
+--v2-z-nav-drawer:    140;   /* the phone More sheet (#4053) */
+--v2-z-nav-toggle:    150;   /* no consumer since #4053; ordering kept */
 --v2-z-modal:         200;   /* Modal, SidePanel */
 --v2-z-tooltip:       210;
 --v2-z-panel:         250;   /* AgentPanel */
 --v2-z-toast:        9999;   /* Toast, skip-to-content link */
 ```
 
-The rule the numbers encode: **the mobile navigation overlay outranks the app chrome it opens over, and modals outrank the navigation.** The drawer is `inset-y-0`, so its own logo band shares the top 56px with the bar. Let the bar win and the drawer is decapitated, and the toggle (which sits *inside* that band by design, in the gap the bar reserves for it) cannot be tapped at all. That was #1749: a `z-[100]` header and a `z-[60]` toggle chosen independently in different files left mobile primary navigation unopenable on every authenticated route.
+The rule the numbers encode: **the mobile navigation overlay outranks the app chrome it opens over, and modals outrank the navigation.** Let the chrome win and the navigation is covered and its control cannot be tapped at all. That was #1749: a `z-[100]` header and a `z-[60]` toggle chosen independently in different files left mobile primary navigation unopenable on every authenticated route. The More sheet ([#4053](https://github.com/d-hinders/Haven-AI/issues/4053)) covers the floating tab bar **by rank** since [#4058](https://github.com/d-hinders/Haven-AI/issues/4058): its scrim (130) and the card (140) out-rank the bar (105), the scrim shades to the viewport bottom, and the sheet carries its own ✕ — so nothing has to stay tappable beneath it. (From #4053 to #4058 the bar was kept reachable by geometry instead: the sheet and scrim ended at the bar's top edge, which cut through a floating pill.)
 
-`--v2-z-nav-scrim` has no consumer since #2820 — the drawer is full width below `lg`, so the slide-over scrim it used to carry was deleted — and the tier stays anyway. The scale's job is ordering, not inventory: removing the tier would renumber the ascent the tests pin and retire a landing place the day a second navigation overlay returns. Nothing new may take the tier back without a consumer that needs it.
+`--v2-z-chrome` has no consumer. The top bar that owned it was deleted (#4029, epic #4027), and the non-production warning line that briefly inherited it was removed the next day — on a phone it read as a rendering bug. The tier stays at 100 so the ordering the tests pin is unchanged; it is kept as the anchor the nav, tab-bar and popover tiers are ordered against, the same reason `--v2-z-nav-scrim` survives without a consumer.
 
-Tiers are spaced by 10 so a new layer lands between two without renumbering — `--v2-z-tab-bar` is that mechanism's first use, at 105, in the gap 100 left. It sits under `--v2-z-chrome-popover` because a popover anchored in the top bar can hang down across the bar's band on a phone, and under the nav tiers because the drawer the bar opens has to cover it. Adding a layer means picking the tier it belongs to; if none fits, add one to the scale first. A raw `z-[…]` in a shell component is the failure this scale prevents — `src/__tests__/z-index-scale.test.ts` fails on one, and on any inversion of the order above.
+`--v2-z-nav-scrim` has a consumer again since #4053 — the More sheet's scrim — after #2820 had left it empty for the full-width drawer. `--v2-z-nav-toggle` is now the empty one: More became a cell of the tab bar (#4053), and since #4058 the sheet that covers the bar closes itself with its own ✕, so no control has to float above an overlay. The tier stays anyway. The scale's job is ordering, not inventory: removing it would renumber the ascent the tests pin. Nothing new may take it without a consumer that needs it — `z-index-scale.test.ts` fails if the shell files use it.
+
+Tiers are spaced by 10 so a new layer lands between two without renumbering — `--v2-z-tab-bar` is that mechanism's first use, at 105, in the gap 100 left. It sits under `--v2-z-chrome-popover` because a popover anchored in the chrome can hang down across the tab bar's band on a phone, and under the nav tiers so nothing in the bar can paint over a navigation overlay. Adding a layer means picking the tier it belongs to; if none fits, add one to the scale first. A raw `z-[…]` in a shell component is the failure this scale prevents — `src/__tests__/z-index-scale.test.ts` fails on one, and on any inversion of the order above.
 
 That test reads source, so it cannot see stacking contexts or hit-testing. `e2e/mobile-nav-layering.mobile.spec.ts` is the half that can: it drives a real engine at four widths below `lg` and asserts `document.elementFromPoint` at the toggle's centre returns the toggle.
 
 **One dim treatment for every overlay: `v2-modal-backdrop`** ([#1818](https://github.com/d-hinders/Haven-AI/issues/1818)). `Modal` and `SidePanel` use it. It is a solid `--v2-modal-backdrop` fill and it deliberately carries **no `backdrop-filter`** — the reason is written at its definition in `globals.css`: a full-viewport blur makes the compositor hold a GPU snapshot of the whole page and re-blur it on every paint, which on tall pages ballooned VRAM and made the overlay feel sluggish.
 
-The mobile nav scrim used this token too, until #2820 deleted the scrim outright: with the drawer full width below `lg` there is nothing left to dim, and an element that exists only to be deleted is not a consumer to keep. The paragraph below survives because it is still the best record of WHY the token carries no blur — and because the failure it describes (an opacity modifier that compiles to nothing, making a `backdrop-filter` free by accident) is a trap waiting for the next overlay author, wherever that overlay lives.
+The mobile nav scrim used this token, until #2820 deleted the scrim with the full-width drawer; #4053's More sheet brought a scrim back on the same class, stopped below the status-bar band (§ *Safe areas*). The paragraph below survives because it is still the best record of WHY the token carries no blur — and because the failure it describes (an opacity modifier that compiles to nothing, making a `backdrop-filter` free by accident) is a trap waiting for the next overlay author, wherever that overlay lives.
 
 The nav scrim was the exception until #1818, and instructively so: it read `bg-[var(--v2-ink)]/40 backdrop-blur-sm`, but the opacity modifier on a bare `var()` compiled to nothing (see § "Opacity on a token colour"), so the scrim painted no background — and a `backdrop-filter` with nothing behind it to composite costs nothing. **The blur was free only by accident.** Fixing the fill would have made it real, on a `fixed inset-0` element, which is precisely the shape the rule above exists to prevent. So the fix reused the shared token rather than reviving a second convention.
 
@@ -545,6 +607,7 @@ Authenticated app pages use compact product typography utilities from `@haven_ai
 | `.v2-text-display` | 40 / 48px | 600 | -0.02em | Rare app hero display, not ordinary dashboards |
 | `.v2-text-h1` | 28 / 34px | 600 | -0.015em | PageHeader title |
 | `.v2-text-h2` | 20 / 28px | 600 | -0.01em | Major section titles |
+| `Amount size="md"` (`text-xl`) | 20 / 28px | 600 | 0 | Secondary figure, 20px — a figure beside a headline: the Last 30 days figures on the account summary card and the agent Spending hero (#4260); pair it with `DirectionMark density="figure"` (#4259). Set on `Amount`'s own span: a wrapper's `text-*` never resizes the figure |
 | `.v2-text-h3` | 16 / 24px | 600 | 0 | Card and panel titles |
 | `.v2-text-body` | 14 / 22px | 400 | 0 | Main app body copy |
 | `.v2-text-meta` | 12 / 18px | 400 | 0 | Labels, captions, metadata |
@@ -568,25 +631,38 @@ Marketing pages may still use larger hero type:
 
 ---
 
+<a id="patterns"></a>
+
 ## 3. Component patterns
+
+**The Patterns catalog (#4109).** This section and the compositions shown on
+`/design-system` are the documented Patterns that `CLAUDE.md`, `AGENTS.md`, the
+frontend playbook and the design reviewer point to. List controls join it with
+#4110. A composition with no shipped instance and no entry here is a **new
+pattern**: extend the design system first, in its own owner-approved slice,
+before a page uses it. Extracting a shape the product already ships, on the
+diff that writes its second copy, is not a new pattern; that extraction stays
+in the same PR (Pattern Absorption, #901).
 
 ### Authenticated shell
 
 The authenticated app uses one stable product shell:
 
-- Sidebar: 240px desktop rail, full-screen mobile sheet below `lg` (#2820), white surface, subtle active tint, and a 2px brand accent bar on the active route.
-- **Below `lg` the drawer is SECONDARY navigation** ([#2731](https://github.com/d-hinders/Haven-AI/issues/2731)). Primary is a five-slot bottom tab bar — Dashboard, Agents, Transactions, Accounts, and More, which opens the drawer for everything else. Four properties are worth knowing before touching it:
-  - **Tabs are selected from `baseNavItems` by ROUTE, never by index.** The bar's order differs from the drawer's, so a positional read reorders the bar the next time an entry is inserted.
-  - **Active state prefix-matches on a `/` boundary**, so `/agents/agent-research` lights Agents — the screen the demo spends its time on — while `/accounts` cannot light for a hypothetical `/accounts-archive`.
-  - **One active idiom across the bar and the drawer it opens** ([#2818](https://github.com/d-hinders/Haven-AI/issues/2818)): active is brand ink plus a 2px brand rail — on the drawer the rail runs down the row's left edge, on the tab bar across the cell's top edge — and the drawer additionally tints the row, which the bar does not, because a fill in a 56px cell reads as a pressed button. The rail carries the accessibility weight rather than decorating: measured against `--v2-bg`, `--v2-ink` is 16.24:1 and `--v2-ink-3` 5.32:1 (the pre-#2818 active/inactive pair, ~3:1 in contrast with each other), while `--v2-brand` is 6.29:1 and `--v2-brand` against `--v2-ink-3` only **1.18:1** — hue with no luminance, so brand ink *alone* would fail WCAG 1.4.1 in greyscale and for a colour-blind user. Both text states clear AA at 12px; the rail is `aria-hidden` and `aria-current="page"` remains the programmatic cue.
-  - **"More" is a sibling of the bar, not a cell in it.** The bar sits on the `--v2-z-tab-bar` tier so the drawer covers it; the control sits on the higher `--v2-z-nav-toggle` tier so one button both opens the drawer and closes it while painted over it. A child cannot climb out of its parent's stacking context, so the bar lays out five columns, fills four, and the button takes the fifth by geometry. It keeps the accessible name *Open sidebar*, which the screenshot harness waits on from 25 call sites.
-- **The drawer is FULL WIDTH below `lg`** ([#2820](https://github.com/d-hinders/Haven-AI/issues/2820)). A tab bar's More is a full-height sheet in the iOS idiom, not a 240px slide-over — so below the breakpoint the drawer takes `w-full`, carries **no scrim** (there is nothing left to dim), drops its `border-r` (a full-width column has no edge against the page), and distributes the space its old dead middle band wasted between the nav groups (`max-lg` auto margins between groups, which resolve to zero when the nav runs out of room, so short and landscape viewports scroll instead of clipping). Its surface shows through the Close control while open — the toggle paints `--v2-bg` only while the drawer is closed — and the drawer's footer reserves the toggle's fifth-of-a-screen column on the right (`max-lg:pr-[calc(20%+var(--v2-safe-right))]`), so the fixed control never sits over the user card's kebab. At `lg` and above none of this exists: the rail is the same 240px static column it has always been.
-- **`--v2-tab-bar-h` is reserved by three surfaces and only one of them is the bar**: `<main>` adds it to its bottom padding so the last row does not sit under the bar, and the toast container lifts by it so a notification is not hidden behind the navigation. The safe-area inset is added at each site rather than folded into the token — the bar pads itself with it, the others clear the bar *and* the inset. Note the toast offset carries on the `sm:` variant as well: `sm:bottom-…` overrides the base, so an offset applied only to the base is silently lost between 640px and 1023px, the band where the bar still renders.
+- Sidebar: 240px desktop rail at `lg` and above, white surface, subtle active tint, and a 2px brand accent bar on the active route. Below `lg` the rail is `hidden` (still in the DOM — the visual specs wait on its `User menu` kebab as a "shell has mounted" signal).
+- **Below `lg`, navigation is the floating tab bar plus the More sheet** ([#2731](https://github.com/d-hinders/Haven-AI/issues/2731), [#4053](https://github.com/d-hinders/Haven-AI/issues/4053), [#4058](https://github.com/d-hinders/Haven-AI/issues/4058), [#4237](https://github.com/d-hinders/Haven-AI/issues/4237)). Primary is a five-cell pill — Home (the bar's label for `/dashboard`; the rail, the page `h1` and the route keep "Dashboard"), Agents, Activity (the bar's label for `/transactions`; the rail and the page keep "Transactions"), Accounts, and More, which opens a floating card holding everything else. Properties worth knowing before touching it:
+  - **A floating pill** (#4058, dark lift #4063, concentric capsule #4237): `rounded-full`, a 1px token edge and `shadow-popover`, inset `max(12px, inset)` from the sides, `--v2-tab-bar-bottom` (`max(12px, inset)`) above the bottom edge, capped at `max-w-md` and centred. The pill paints from its own token pair, `--v2-tab-bar-bg` / `--v2-tab-bar-border` — **solid** and opaque, with no `backdrop-filter`: the owner chose near-solid over glass, and at 95% opacity page text ghosted through behind the labels. In light mode the pair aliases `--v2-bg` / `--v2-border` exactly and the popover shadow lifts the pill. In dark mode both blocks redeclare it — fill `--v2-surface-2` (`#20252f`) and edge `--v2-border-strong` (`#3a4152`) — because the dark shadow is black on near-black: against `--v2-bg` the dark edge measures **1.79:1** (up from `--v2-border`'s 1.41:1) and the fill 1.19:1, so the pill reads as a distinct surface. `--v2-tab-bar-h` is its outer height (62px): 52px cells, `p-1` (4px) on every side and the 1px border. It stays the `fixed` `<nav data-mobile-tab-bar>` itself — specs select it that way. Each cell is a full rectangle for hit-testing (Chromium hit-tests `border-radius`, so a rounded cell has dead corners); the active shape is painted by an inner `[data-tab-indicator]` span — a full capsule, concentric with the pill: it is set in by the same 5px on every side (the `p-1` padding plus the border), so its 26px radius follows the pill's 31px curve. #4058 had it `rounded-2xl` because a capsule crossed the letters of "Dashboard"; #4237 pairs the capsule with the bar-only "Home" label (`TAB_LABELS`), which keeps the curved ends off the landing tab's label instead.
+  - **Tabs are selected from `baseNavItems` by ROUTE, never by index.** The bar's order differs from the rail's, so a positional read reorders the bar the next time an entry is inserted.
+  - **The bar's active idiom is its own: a neutral concentric capsule** ([#4237](https://github.com/d-hinders/Haven-AI/issues/4237), owner decision 2026-10-21, Revolut-style). The active cell is `--v2-ink` + semibold on a `rounded-full` `--v2-tab-bar-indicator` fill with NO outline; inactive cells and More stay `--v2-ink-3` + medium. This deliberately relaxes the **one active idiom** rule ([#2818](https://github.com/d-hinders/Haven-AI/issues/2818)) for the bar: the More sheet's rows keep their `--v2-brand-soft` + brand ink, and `SegmentedControl`'s selected option is untouched. The two idioms are never on screen together — the sheet covers the bar while open (`design-system.md` § *More sheet*) — and co-visibility was #2818's failure case. The fill is a SUPPLEMENTARY cue, recorded here with its measured ratios: it reads 1.12:1 on the light pill (`#eef2f7` on `#ffffff`) and 1.18:1 on the dark pill (`#2b3140` on `#20252f`) — a subtle neutral fill cannot reach WCAG 1.4.11's 3:1 without becoming the heavy block the owner declined (and dark `--v2-surface-2` equals the pill fill outright, 1.00:1). Selection is carried by three cues on the cell: `--v2-ink` vs `--v2-ink-3` (3.05:1 light, 2.50:1 dark — in dark mode the 600-vs-500 weight is load-bearing), the weight step, and `aria-current="page"`. Both text states clear 4.5:1 on their grounds (`CONTRAST_PAIRS`: ink on `tab-bar-indicator` 14.44 light / 11.68 dark; ink-3 on `tab-bar-bg` 5.32 light / 5.52 dark). The focus ring stays the outset `ring-2 ring-brand/80` on the indicator.
+  - **More is a cell of the bar, and only opens** (#4053, #4058). Until #4053 it was a sibling painted over the bar on `--v2-z-nav-toggle`, because #2820's full-screen drawer covered the bar. Since #4058 its name is the constant *Open sidebar* (with `aria-expanded`) and its label always "More": the sheet covers the cell, and *Close sidebar* belongs to the sheet's ✕ alone — two buttons with that name would break the harness under Playwright's strict mode.
+- **The More sheet** (#4053, `components/sidebar/MoreSheet.tsx`) replaced #2820's full-screen drawer — the desktop rail stretched to the screen. Since #4058 it is a floating card over the floating bar.
+  - **Geometry:** a card `max(8px, inset)` in from the sides and the bottom, `rounded-3xl`, capped at `max-w-lg` and centred; it covers the tab bar. Sized to its content up to a max height, scrolling inside beyond that. Its scrim dims everything from below the status-bar band (§ *Safe areas*) to the viewport **bottom**, edge to edge — no scrim edge across the pill, no undimmed strip.
+  - **Content:** a drag handle; the logo band (wordmark — not a link here — and the environment badge) beside the sheet's ✕ (44px, *Close sidebar*); the account row (name, email, links to `/profile`); one compact list of only the destinations the tab bar lacks, derived from `TAB_ROUTES` (Analytics, Accounting when shown, Marketplace, Contacts, Settings); the theme control as a three-way `SegmentedControl`; and a visible **Log out** row — no kebab.
+  - **Behaviour:** a modal `role="dialog"` (`aria-modal`, #4058): while it is open the tab bar and `<main>` are `inert` and Tab cycles inside the card. Closes on the ✕, scrim tap, Escape, a downward swipe on the handle (`SWIPE_DISMISS_PX`), a destination tap and any route change; focus moves in on open and back to More on a dismissal — not on a destination tap or route change, which is why `useFocusTrap` (restore on every close) is not reused. It exists in the DOM only while open, and `data-state="open"` marks the end of its enter animation (`.v2-sheet-enter`, motion-gated) — the e2e helpers key on both.
 - Sidebar nav: 36px row height, 16px icon box, 13px medium label. (The Approvals item and its live actionable-count badge were the nav's only dynamic entry; both are deleted with the Safe rail, [#1989](https://github.com/d-hinders/Haven-AI/issues/1989) — every nav item is static now.)
 - Brand: the wordmark may use `.v2-brand-gradient-text`; do not repeat the gradient elsewhere in nav.
 - User menu: two-line user card with a kebab menu using popover shadow; destructive menu items use danger styling.
-- Top bar: a 56px blurred white bar with an unblurred status-bar band above it — the `<header>` is the whole chrome band and grows by `--v2-safe-top`, the blurred bar inside it stays 56px (§ *Safe areas*). The band is not breakpoint-gated: the inset is 0 on anything without a notch, so it collapses on its own rather than needing `max-lg:`. Detail routes show a back link to the parent collection; page-level CTAs go in the `actionSlot`.
-- Main content: scrolls inside the shell, with `p-6 lg:p-8` — below `lg` its bottom, left and right also take the safe-area insets (§ *Safe areas*) — and a skip link targeting `main#main-content`.
+- **No top bar** ([#4029](https://github.com/d-hinders/Haven-AI/issues/4029), epic #4027): the authenticated chrome above the scroll region is the `SafeAreaBand` — the opaque status-bar strip — and nothing else; the 2px non-production warning line #4029 added was removed the next day, because on a phone, with no label in view, it read as a rendering bug. There is no `banner` landmark; `nav` and `main` remain. Page-level CTAs go in the `PageHeader` actions, and detail pages carry their own back link above the title (#4028). The environment badge lives beside the wordmark in the logo band (rail and More sheet), with a gap between them — the app's only environment marker. Each width shows exactly one theme control: the rail footer's two-state flip at `lg` and above, the More sheet's three-way choice below it (#4053, superseding #2953 for the phone).
+- Main content: scrolls inside the shell, with `p-6 pt-4 lg:p-8` — 16px of top padding below `lg` (#4029), 24px elsewhere, 32px at `lg` — below `lg` its bottom, left and right also take the safe-area insets (§ *Safe areas*) — and a skip link targeting `main#main-content`. Sticky table headers compensate through the `--v2-sticky-head` variable the shell sets (`-1rem` below `lg`, `-2rem` at `lg`; the token's `-1.5rem` default is ops' `py-6`).
 
 ### PageHeader
 
@@ -603,6 +679,19 @@ Use `components/ui/PageHeader.tsx` on authenticated pages instead of hand-rolled
   a quiet identity line is text that can break, not a control that must stay
   whole.
   Additive — a `PageHeader` without `meta` renders exactly as before.
+- Optional `back` link above the title
+  ([#4028](https://github.com/d-hinders/Haven-AI/issues/4028)): `{ href, label }`,
+  naming the parent only ("Agents"). It renders `BackLink`
+  (`packages/ui/src/BackLink.tsx`), drawn at text height with a 44px target. A
+  branch of the page with no `PageHeader` (loading, not found) renders
+  `BackLink` directly, so every state has the same way back. Additive — a
+  `PageHeader` without `back` renders exactly as before.
+- Optional `leading` mark before the title
+  ([#4210](https://github.com/d-hinders/Haven-AI/issues/4210), epic #4207),
+  vertically centred on the title. Agent detail passes the same name-hashed
+  `Monogram` as the shared agent row (#4208). The title prints beside it, so pass the mark
+  `decorative`. Additive — a `PageHeader` without `leading` renders exactly as
+  before.
 - Right-side actions that wrap on narrow viewports — and **stack onto their own
   row below `sm`**, which is right for a row of labelled buttons and wrong for a
   single icon-only control.
@@ -622,6 +711,27 @@ Use `components/ui/PageHeader.tsx` on authenticated pages instead of hand-rolled
   the primitive owns what to do about it.
 
 Do not use marketing hero typography for normal authenticated pages.
+
+### Monogram
+
+`components/ui/Monogram.tsx` is the initials-in-a-circle avatar, or the
+entity's logo when it has one — merchants and contacts today, agents from
+#4208. Sizes:
+
+- `xs` — 32px, used by the shared agent row's `2rem` mark track, the width
+  `DirectionMark compact` shares
+  ([#4210](https://github.com/d-hinders/Haven-AI/issues/4210)).
+- `sm` (default) — 36px, for lists and cards.
+- `md` — 48px, for a page header.
+
+The initials variant is readable to a screen reader by default; the logo is
+`alt=""`. Pass `decorative` (`aria-hidden` on the root) where the name always
+prints beside the mark, so it is not read twice. `Monogram` takes initials by
+visible character (grapheme), so a user-typed name that starts with an emoji
+or a flag never renders half of one (where the browser has `Intl.Segmenter`,
+as every current one does; the fallback still never splits a surrogate pair).
+A name that starts with an emoji shows that emoji alone, never an emoji beside
+a letter ([owner decision on #4210](https://github.com/d-hinders/Haven-AI/issues/4210#issuecomment-6315168790), 2026-10-21). Tints are the avatar family above.
 
 ### Detail-page section rule (#3692)
 
@@ -650,6 +760,17 @@ which this rule does not touch).
 - The `PageHeader`'s own `meta` line (above) carries the entity's quiet
   identity row — account, network, created, last activity — so the section
   headings below stay about their sections.
+- **Manage pattern: row actions in ⋯** (#3695; rewritten by #4259 under the
+  [owner decisions of 2026-10-22 on #4258](https://github.com/d-hinders/Haven-AI/issues/4258)).
+  A section that manages a list — the agent page's Spending section, to be
+  adopted there by #4261 — puts each
+  row's actions AND the section's add in that row's ⋯ `DropdownMenu`: Edit
+  budget, Add budget, a separator, then Stop budget… in the danger tone. No
+  visible Edit, Stop or Add button competes with the rows; the row's identity
+  rides on the trigger's `aria-label` ("Budget options 250 USDC per week").
+  Choosing Add opens the form in place. A section with **no rows** has no menu
+  to carry the add, so it keeps a visible add (Set budget, a ghost button). The
+  `/design-system` specimen shows both states.
 
 ### BudgetMeter (#3692)
 
@@ -662,25 +783,35 @@ or malformed read can never push the fill past its track or the ARIA value
 outside its own declared range — and a `label`; an optional `caption` slot
 carries the meter's line. That caption is the shared budget-caption helper's
 output (`lib/budget-caption.ts`, #3806): token amounts at two decimals
-("1.25 of 5.00 USDC used this period") — or ONE leading "≈" in fiat when the
-caller supplies a rate — followed by the earlier of the refill and the
+("1.25 of 5.00 USDC used this period") — or fiat when the caller supplies a
+rate, with at most ONE leading "≈", and only where the one rule
+(`shouldMarkApprox`, § Amount: currency mode) says the conversion changes the
+number: USDC shown in USD carries none — followed by the earlier of the refill and the
 expiry, phrased under 24 h relative ("refills in 45m"), under 7 days as
 weekday and 24-hour time ("refills Thu 14:02"), otherwise day and month
 ("refills 14 Nov"). The states that replace the bar: a failed or stale read
 shows "Usage this period couldn't be read" (never a 0 % bar, never a
 "snapshot" claim), an expired budget its own line, and a future `start_date`
-shows when the budget starts. The dashboard's agent rows ask for the compact
-`style: 'row'` wording (#3908), as the mockup draws a row: the period word in
-place of "used this period" ("≈$0.40 of $1.00 · per day · refills in 5h"),
+shows when the budget starts. The shared agent row (`AgentRow` — the dashboard's
+Agents card and the account page's Agents tab) asks for the compact
+`style: 'row'` wording (#3908), and passes **no rate** (#4165, owner decision
+2026-10-20: budgets read in USDC wherever one is set): the period word in
+place of "used this period" ("1.20 of 3.00 USDC · per day · refills in 5h"),
 with an extra-budget count riding in the same line ("· +1 budget"); every
 other surface keeps the full wording. In token mode the row joins the cap and
-its symbol with a no-break space (#3910), so "3.00 USDC" never splits. Beside
-the caption the row has a right-hand column: the last payment's time, and the
-merchant under it from `sm`, in one fixed 10rem column in every row so every
-budget bar has the same length (#3912; the merchant truncates with its full
-name as a tooltip); below `sm` the time sits
-on the name line and the merchant is hidden, so the bar and caption span the
-row (#3910). The label row above the bar (token value,
+its symbol with a no-break space (#3910), so "3.00 USDC" never splits. The
+caption line can also carry an optional `trailing` node (#3989) — the
+dashboard agent row's labelled "Last paid" time: a SIBLING of the caption
+`<p>`, never inside it, on one `flex flex-wrap items-baseline
+justify-between gap-x-3` line. When the caption and the trailing node do not
+fit (a phone, a long SEK caption), the trailing node — `whitespace-nowrap`,
+so a label never splits from its time — wraps to its OWN right-aligned line
+below the caption; the caption is never squeezed. The row itself is one
+three-track grid (icon, body, chevron) at every width: the bar and its
+caption line span the row between the icon and the chevron, with no time
+column and no `time` area, and the row renders no counterparty or merchant —
+the last payment shows as the time only (the wire's `lastCounterparty` is
+unchanged). The label row above the bar (token value,
 percentage) belongs to the caller: it is the caller's tabular typography, not
 part of the measurement. The fill is a token surface colour, never a series
 colour — a budget bar measures one delegation against its own period, it is
@@ -722,10 +853,14 @@ the component), and optionally `approx`. It formats through
 `Intl.NumberFormat` — so `9,09 kr`, `$0.96` and `0,88 €` are byte-for-byte
 the formatter's output, NBSPs included.
 
-**Under a cent (#3897, owner decision 2026-10-12):** a non-zero figure with
-`|value| < 0.005`, which would round to `0.00`, renders `<$0.01` (`<0,01 kr`,
-`<0,01 €`); the sign still comes from the caller (`-<$0.01` in activity,
-`≈<$0.01 of $1.00` in a budget caption). Zero stays `$0.00`. The rule lives
+**Under a cent (owner decision 2026-10-22, superseding #3897's "<$0.01"):** a
+non-zero figure with `|value| < 0.005` (`isSubCent`) renders with EXACTLY 4
+decimals in the currency's own format — `$0.0010`, `$0.0049`, `0,0010 kr`,
+`0,0010 €` — and one that would still show `0.0000` (`|value| < 0.00005`)
+renders `<$0.0001` (`<0,0001 kr`, `<0,0001 €`). The sign still comes from the
+caller (`-$0.0040` in activity, `≈0,0040 kr of 10,00 kr` in a SEK budget
+caption). Zero stays `$0.00`; everything from `0.005` up rounds at 2 decimals
+as before. The rule lives
 in `formatFiatDisplay`, not `formatFiat`, which also drives the balance
 count-up, the "since yesterday" line and /accounts and keeps plain rounding.
 `Amount`'s currency mode, the budget caption's fiat mode and the dashboard
@@ -733,9 +868,42 @@ summary use it; the summary goes further and reads a week under a cent as a
 payment count rather than any figure. The sign comes only
 from `direction` (a negative magnitude cannot double-sign it); `symbol` is
 not allowed in this mode. `≈` (with `title="Converted at today's rate"`) goes
-before the sign: `≈ -9,09 kr`. Unknown — `null` or a non-finite value —
-renders `—` in `--v2-ink-3`, never `0,00 kr`: existing callers turned unknown
-into zero, and this mode must not.
+before the sign: `≈ -9,09 kr`.
+
+**The "≈" rule — one helper (#4165, owner decision 2026-10-20: "it is over
+complicating things").** `Amount` gets only a currency, not the token, so it
+does not decide the mark: every caller passes `approx` from ONE rule,
+`shouldMarkApprox` in `@haven_ai/core` (`approx-mark.ts`), which the backend's
+dashboard spend windows ask too. "≈" means a figure was converted at today's
+rate AND the conversion changed the number:
+
+- **A list row never carries it** (#3950) — the transactions ledger, the
+  account page's ledger and the dashboard's activity rows alike. Rows render
+  the figure plain inside a `whitespace-nowrap` cell, so a money figure never
+  wraps or truncates.
+- **A booked figure never carries it** — book-time `convertedAmount` is the
+  value struck when the payment happened.
+- **A token shown in the currency it is pegged to never carries it** — USDC in
+  USD is dollars. The peg is a fact in the shared chain registry
+  (`CoreTokenConfig.pegged`), never a guess from the symbol.
+- Otherwise — a re-priced figure in another display currency (kr, €), or a
+  token that floats — **totals and the detail panel** carry it: the account
+  summary card, the Activity tab's totals on its list summary line, the Agents
+  tab's mixed-token budget summary line (the one converted figure on that tab
+  — a same-token line reads in token units and never carries it), the
+  dashboard's 30-day spend
+  (the server applies the rule per currency, `approxByCurrency`), budget
+  captions in fiat, and `TransactionDetailPanel`.
+
+**"≈" means converted, never "couldn't price".** A total that leaves rows out
+because they have no price in the display currency says so in words — "Some
+amounts couldn’t be valued and aren’t included." (`UNPRICED_TOTALS_NOTE`,
+`lib/money-flow-tally.ts`) — and a total with nothing priceable renders `—`,
+never `≈ $0.00`. (Every transaction list — `/transactions`, the account page and the agent
+page — renders through the `TransactionActivityRow` ledger.)
+
+Unknown — `null` or a non-finite value — renders `—` in `--v2-ink-3`, never
+`0,00 kr`: existing callers turned unknown into zero, and this mode must not.
 
 A currency figure is a **valuation of a token amount**, not a fiat balance
 Haven holds — the budget's own token where a budget is set, the user's
@@ -754,18 +922,34 @@ reached — the banner ladder above says the same), `brand`, `warning`, and
 `danger` for real failures only. The dismiss is a button labelled
 `Dismiss: {title}` calling `onDismiss(id)`; the list holds no dismissal
 state (persistence is #3813's), and after a dismiss focus moves to the next
-item, or to the caller's list heading (`headingId`) when the list emptied.
+dismissible item's dismiss button (the last remaining one when the dismissed
+row was the last dismissible row) — counted among dismissible rows only, so
+non-dismissible rows above it never push focus past it — or to the caller's
+list heading (`headingId`) when no dismiss button remains. That fallback
+needs the caller to keep the list mounted through the emptying dismiss.
 The title and the subtitle each line-clamp to two lines at every width
 (`Row` truncates both to one), so an item is never cut to a line that
 cannot be judged — the narrow desktop "Needs attention" card included (#3876).
 The leading icon, and from `sm` up the trailing badge, action and dismiss,
-centre on the title's first line rather than on the whole body, so a
-four-line item still reads as one line with detail beneath (#3880).
-Below `sm` the trailing slot also wraps under the body. `fullBleed` is for
+are centred vertically in the row, which keeps `Row`'s symmetric 12px
+padding (#4019, reversing #3880's first-line alignment); on an item whose
+title and subtitle both wrap, the icon sits beside the middle of the text.
+The trailing controls form **one column**: once any row in the list offers
+the dismiss, a row with a badge or action but no dismiss keeps an empty,
+`aria-hidden` slot in its place, so every row's actions end on the same edge
+instead of staggering by the dismiss's width. Actions also share a 7rem
+minimum width (room for "Finish setup" and "View activity"), so badges beside
+actions up to that width end on one edge too; a wider label ("View
+transactions") grows past it and its badge sits further left.
+Below `sm` the trailing slot also wraps under the body — except on a row
+with nothing visible to align (no badge, no action, not dismissible), which
+renders no trailing slot at all: the wrapper would be a 0px flex line that
+still takes the row gap, so its `sr-only` tone word moves into the body
+instead (#4033). `fullBleed` is for
 a list that **is** the card's body, as on the dashboard (#3902): rows run
 edge to edge with hairline dividers and take the card's 20px side inset
-instead of `Row`'s 16px; only the horizontal padding changes, so the
-first-line alignment holds. The `/design-system` sample renders it, so the
+instead of `Row`'s 16px; only the horizontal padding changes, so the row
+stays centred. The `/design-system` sample renders it, so the
 geometry guards in `e2e/attention-list-title-measure.spec.ts` measure the
 dashboard's shape. Zero items renders nothing — the caller owns the empty
 state.
@@ -834,6 +1018,15 @@ dashboard money card's payments / merchants / stopped by budget (#3897) —
 stay three across at every width. The figure still carries no colour in any state — the card
 tile's contract, at a smaller scale.
 
+**Hand-built where a figure is money (#4260).** The agent Spending hero's Last
+30 days (`DelegationBudgetCard.tsx`, `LastThirtyDays`) is this three-across
+composition — Spent, Payments and Last paid, a small label above each — built
+by hand rather than from `StatTile`, deliberately: `StatTile.value` is a
+`string` and cannot carry an `Amount` (its "≈" and currency mode), and
+`StatTile` lives in `packages/ui`, shared with ops. Its values sit at the
+secondary-figure size (20px, `Amount size="md"`), not the inline tile's
+`text-base`; a long value wraps inside its cell, never truncates.
+
 ### Money panel (#3807)
 
 The dashboard's top section is `dashboard/MoneyPanel.tsx`, built from four
@@ -845,10 +1038,15 @@ one merchant and describing budget stops neutrally), then ONE money card
 surface — with the balance on the left (the figure, the "since yesterday"
 line, the § AreaChart sparkline fed from `spend.balance_by_day` — a missing
 day is skipped, never zero; under 3 measured days the flat placeholder
-draws — and the two actions, "Add funds" primary and "Deposit address"
-secondary; "Add funds" steps down to ghost through `addFundsSecondary` while
-the first-run guide's step 1 is the active step, so exactly one primary
-"Add funds" shows, #3902) and the 30-day spending on the right as a
+draws — and the two actions, following #4167's ONE primary-button rule (owner
+decision 2026-10-20): **Send** primary once the account (or, with several
+accounts, any account) holds USDC (`usdcFunded`), **Receive** primary with
+Send **disabled** when the account is known empty, and Send stays primary and
+enabled while the balance is loading or failed to read — never flipping on a
+load-shaped condition (the account page's rule,
+`AccountDetailClient.tsx`). "Receive" also steps down to ghost through
+`receiveSecondary` while the first-run guide's step 1 is the active step, so
+exactly one primary money action shows, #3902) and the 30-day spending on the right as a
 `Card.Section divided`, stacked below `lg`. The spending half (#3902) is a
 muted "Agent spending, last 30 days" label — still the section's heading —
 with the 30-day total large and left-aligned beneath it, the per-agent split
@@ -867,16 +1065,34 @@ the runway and budget-room facts were measured and hold
 (`attentionEmptyState`, #3902); otherwise a neutral line
 that claims nothing, and nothing at all while the budget reads load. That total — and the per-agent split below it —
 renders through § Amount: currency mode with `approx` from the
-wire's `spend` windows, so a total that includes rows priced at today's
-rate carries the `≈` and a booked total does not. The four KPI tiles and
+wire's per-currency `spend.d30.approxByCurrency` (#4165) — the server applies
+the one "≈" rule, so a total re-priced at today's rate carries the `≈` only
+where the conversion changes the number (never USDC in USD), and a booked
+total never does. A bucket with rows the server could not price
+(`unpricedByCurrency`) also carries the unpriced line — never a "≈" for
+it — and reads `—` when its priced GROSS is zero. Gross, not net (#4288):
+gross is the booked or re-priced fiat before the #3755 sweep netting, so
+gross > 0 means something was priced — priced rows that genuinely net to 0
+show "$0.00" plus the unpriced note, and only a bucket with nothing priced
+at all collapses to `—`. The four KPI tiles and
 their `metrics.*` wire fields are gone with this panel: agent counts live
 in the agents section (#3809), the spend total is the analytics page's own
 #3803 net figure, and "Successful transactions" counted receives, so it
 has no honest successor. When every linked account is a test account
 (`spend.scope === 'testnet'`, #3803 owner decision 3) the balance carries
 a quiet "Test network" label rather than a silently mislabelled total,
-and the balance's change line reads "since yesterday" — the diff is against
-the yesterday snapshot.
+and the balance's change line reads "since yesterday (UTC)" — the diff is
+against the yesterday snapshot. **The snapshot rows are UTC-dated, and the
+copy says so (#3977).** There is no end-of-day job: `GET /dashboard/overview`
+inserts one row per UTC day on the first clean load, and
+`/analytics/overview`'s contract declares the table "a UTC-dated daily
+snapshot … regardless of the caller's `tz`". Re-keying the writer by local
+date would mix history, let the zone vary per device, and change that
+contract, so the figures keep their UTC keys and the label names what is
+measured: the change line reads "since yesterday (UTC)" and the sparkline's
+aria-label reads "over the last 30 UTC days". The Activity card beside it
+buckets the USER's local days — the two windows deliberately do not read
+alike.
 
 ### Buttons
 
@@ -919,10 +1135,11 @@ rather than repeated per entry:
   differently again.
 - **`trailingIcon`** renders a 14px lucide `ArrowRight` after the label, at the base
   `gap-1.5`. It is available on **every** variant and on **both** elements. In
-  `AddFundsModal.tsx`, the only `onClick` call sites are the modal's two,
-  `:144` (Buy with card) and `:187` (Show receive address); every other call
-  site, including the faucet link added by #3478 (`:258`, Open Circle's
-  faucet), is the `href`/`<a>` form. **It does not animate.**
+  `ReceiveDialog.tsx` (since #4094) the `onClick` call sites are the dialog's own
+  controls — Copy address, the QR toggle, Buy with card, and the refusal state's
+  Refresh page; the link-style affordances, including the faucet card's Open
+  Circle's faucet and the explorer link, are the `href`/`<a>` form. **It does
+  not animate.**
   (Through #1829 this section claimed the icon "slides 2px on hover via wrapper
   `group-hover:gap-2`". It never did: `Button` sets no `group` class and no call site wraps
   one. `group-hover:gap-2` is real, but it belongs to three hand-rolled marketing link
@@ -979,7 +1196,7 @@ its *text* colour on hover (`ink-2` → `ink`), pinned by
 That difference has a shipped consequence, and it is the rule to take from it: **tertiary
 needs surrounding structure to be legible as pressable.** It works inside a dialog's action
 row or at the end of a card, where position tells you it is a control. It fails in running
-content — `connect-agent/SetupStates.tsx:208` records the case where a tertiary button
+content — `connect-agent/SetupStates.tsx:214` records the case where a tertiary button
 "rendered as stray bold text in the middle of a checklist rather than a control", and was
 changed to ghost for the border alone while keeping secondary weight. Reach for ghost when
 the control has to announce itself; tertiary when its context already has.
@@ -1007,9 +1224,10 @@ The command is published because it has to be: during review of #1830 two reason
 counting methods disagreed by roughly a factor of two, and a call-site number without its
 command is not reproducible. It misses two things by construction. **`variant` is optional**,
 so every unadorned `<Button>` is an uncounted `primary` — which is why primary shows 0 and is
-nonetheless the most common button in the product. And it cannot see the four dynamic call
-sites (`DashboardClient.tsx:361`, `ConfirmDialog.tsx:60`, `agent-panel/ReplaceSigningKeyModal.tsx:904`,
-`connect-agent/CopyBlock.tsx:62`). The shape of the distribution is the point, not the integer.
+nonetheless the most common button in the product. And it cannot see the dynamic call
+sites (`DashboardClient.tsx:361`, `ConfirmDialog.tsx:60`, `agent-panel/ReplaceSigningKeyModal.tsx:904`;
+a fourth, `connect-agent/CopyBlock.tsx`, became a literal `ghost` in #4065 when its `primary`
+prop lost its last caller). The shape of the distribution is the point, not the integer.
 Re-derived 2026-09-30 for #3195 by running the published command: the previous figure
 (112/11/5/1 — 129, derived by #2203 at `ba4e045b`) had drifted through merged work to
 155/31/7/0 — 193, the same shape (ghost dominates, primary lives in the unadorned call
@@ -1072,9 +1290,14 @@ a code change nobody has scoped yet, not a longer paragraph here.
 One member of that class is no longer hand-rolled: the **copy affordance** is now
 `components/ui/CopyButton.tsx` ([#1878](https://github.com/d-hinders/Haven-AI/issues/1878)),
 extracted from `Address` on its second call site per the pattern-absorption preflight. It owns
-the hit area, the focus ring, the 1.5s check-pop and the silent catch around
+the hit area, the focus ring, the 1.5s check-pop and the catch around
 `navigator.clipboard` — which rejects on insecure origins, denied permissions, and in most
-headless captures, so every hand-rolled copy has to rediscover that. `CodeBlock`'s copy button
+headless captures, so every hand-rolled copy has to rediscover that. The catch is silent by
+default, which is right only while the value is printed beside the button. Since
+[#3998](https://github.com/d-hinders/Haven-AI/issues/3998) it has a labelled shape (`text`, a
+ghost `Button` reading "Copy prompt" → "Copied" (#4003), the visible words kept at the start of the
+accessible name) for a value that is *not* printed, and `onCopyFailed`, which such a caller must
+pass to reveal the value when the clipboard refuses it. `CodeBlock`'s copy button
 is still its own implementation and is the obvious next adopter; it is listed above as a blind
 spot of the *check*, which it remains, but it is no longer a shape with nowhere to go.
 
@@ -1153,6 +1376,18 @@ Consequences worth knowing:
   controls, adjacent targets meet but never overlap. Tighter than that and two buttons
   fight over the same pixels — this is the one new constraint the mechanism introduces.
 - Choosing `size` therefore stays a **density** decision, not an ergonomics one.
+- **`SegmentedControl` carries the same mechanism** ([#4056](https://github.com/d-hinders/Haven-AI/issues/4056)).
+  Each option paints 32px and extends its hit area to 44px vertically (never sideways —
+  the options abut). The overhang is 6px per edge from the option, 1px past the track, so
+  the 8px rule above applies to whatever is stacked above or below the control. Its
+  selected option is brand ink on `--v2-brand-soft` inside a 1px inset brand outline
+  (`-outline-offset-1`, not `ring-inset`, which would leak into the focus ring and
+  leave the selected option's focus a 1px thickening; focus stays the outset
+  `ring-2`): the outline is the component boundary, 5.95:1 (light) / 7.99:1 (dark) against the
+  `--v2-surface` track, where the old `--v2-surface-2` thumb measured 1.06:1 / 1.10:1 and
+  read as sunken in light. It is a **settings-type** control — theme, appearance, any
+  persisted preference — never a list or period filter: filtering is the list controls'
+  job, and the period is `PeriodPicker`'s (#4116).
 
 **The rule outlives the primitive ([#1766](https://github.com/d-hinders/Haven-AI/issues/1766)).**
 A control that is not a `Button` inherits none of the above automatically, and the
@@ -1168,13 +1403,16 @@ on the entry point to primary navigation. It borrows the same mechanism (transpa
   reaches, in **both** states the control has. For the toggle, closed: right box edge
   x=54, nearest interactive control (`NetworkSwitcher`, since removed by
   [#3719](https://github.com/d-hinders/Haven-AI/issues/3719)) at x=68, 14px of clearance.
-  Open: the target floats over the drawer's own logo band, which it already did at 32px
-  — what is asserted there is that the logo link is still reachable at its centre, not
-  that nothing overlaps. Both are pinned in `e2e/mobile-nav-tap-target.mobile.spec.ts`.
+  Open (until #4053): the target floated over the drawer's own logo band — what was
+  asserted there was that the logo link stayed reachable at its centre. Since #4053 More is
+  a tab-bar cell, and since #4058 the sheet floats over the bar: the open-state test asserts
+  the sheet's account row and its ✕ (*Close sidebar*) are each reachable, and that the More
+  cell is covered by the sheet or its scrim. Both are pinned in
+  `e2e/mobile-nav-tap-target.mobile.spec.ts`.
 - **The clearance is only as real as the space the neighbour is standing in
   ([#1767](https://github.com/d-hinders/Haven-AI/issues/1767)).** The 14px above was
-  measured at 768px and assumed to hold on a phone. It did not. `TopBar` reserves the
-  toggle's room with a `w-8` spacer, and `w-8` on a flex item still carries
+  measured at 768px and assumed to hold on a phone. It did not. The then-top bar
+  reserved the toggle's room with a `w-8` spacer, and `w-8` on a flex item still carries
   `flex-shrink: 1` — in a row that does not fit, it is the first thing given away. The
   spacer collapsed to **width 0** below about 700px, `NetworkSwitcher` slid left to
   x=36, and the painted toggle sat on top of it with 18px of the chip's own tap area
@@ -1190,13 +1428,14 @@ on the entry point to primary navigation. It borrows the same mechanism (transpa
   control, not to be concentric with it.
 - **Do not add `relative` to an already-positioned element.** `Button` needs it because
   it is static. A `fixed` or `absolute` control is already a positioning context, and
-  adding `relative` un-fixes it — on the toggle that shifts the whole app shell 32px
-  and drops the control back under `TopBar`, which was #1749. Do not take this on the
+  adding `relative` un-fixes it — on the toggle that shifts the whole app shell 32px,
+  the #1749 defect class. Do not take this on the
   prose's word: it is a claim about which of two same-property utilities the cascade
   keeps, so it is pinned by a test rather than by this paragraph —
-  `e2e/mobile-nav-tap-target.mobile.spec.ts` asserts `header.left === 0` as an absolute
-  anchor, and that assertion exists **because** the mutation passed three other mobile
-  specs first.
+  `e2e/mobile-nav-tap-target.mobile.spec.ts` asserts `frameLeft === 0` (the app
+  frame's left edge; it was the top bar header's until #4029 deleted the bar) as an
+  absolute anchor, and that assertion exists **because** the mutation passed three
+  other mobile specs first.
 
 **The second borrower, and what makes a control need the mechanism
 ([#1803](https://github.com/d-hinders/Haven-AI/issues/1803)).** `WalletButton` collapses
@@ -1204,13 +1443,14 @@ to a 40px icon/avatar square below `sm` — the label is not rendered there — 
 the same `::after` extension for the same reason the toggle did: 40px painted is 4px
 short, and an icon-only square grows in both axes. Two rules generalise from it:
 
-- **In an over-subscribed bar, drop a label rather than squeeze every control.** `TopBar`
-  does not fit three labelled controls at 320px and never did. #1767 removed the
+- **In an over-subscribed row, drop a label rather than squeeze every control.** The
+  chrome row this once shared does not fit three labelled controls at 320px and never
+  did. #1767 removed the
   overlapping by making the account chip (removed with the global active account in #3719)
   the only compressible item, which paid for the
   whole deficit out of one label — the account name rendered **17px** wide, orderly and
-  unreadable — and the brand CTA wrapped to two lines, painting taller than the 56px
-  band. Collapsing the widest control's label returns 48.64px to the row and takes the
+  unreadable — and the brand CTA wrapped to two lines. Collapsing the widest control's
+  label returns 48.64px to the row and takes the
   account name to 66px. Squeezing distributes a deficit; dropping decides what the width
   is for. The decision of WHAT to drop is a product one — it was escalated and taken by
   the owner, not by the layout.
@@ -1221,20 +1461,19 @@ short, and an icon-only square grows in both axes. Two rules generalise from it:
   applies no CSS, so a unit test that queries by role and name keeps passing on text the
   real browser never renders — `WalletButton.test.tsx` asserts the attribute rather than
   the name. (`e2e/mobile-nav-tap-target.mobile.spec.ts` measured the rendered label width
-  and the name together until #3825 took the pill out of the top bar; the spec now
-  asserts the bar's right cluster holds no control at all.)
+  and the name together until #3825 took the pill out of the top bar.)
 
 A collapsed control also takes its neighbour's radius (`rounded-xl` here, the
-notification bell's), because two adjacent 40px squares in one 56px band read as a row
+notification bell's), because two adjacent 40px squares in one band read as a row
 only if they are the same shape.
 
-**Since [#3825](https://github.com/d-hinders/Haven-AI/issues/3825) the top bar carries
-no wallet pill.** Most users sign with a passkey, and a signer with a raw address on every
+**Since [#3825](https://github.com/d-hinders/Haven-AI/issues/3825) no global chrome
+carries a wallet pill** — and the top bar that used to host it is gone entirely
+(#4029). Most users sign with a passkey, and a signer with a raw address on every
 screen is the wrong level of detail; signers have their own home in Settings → Signers,
 and every signing flow offers its own in-flow connect (#3812). `WalletButton` still
 renders in the connect flow's approval step, so the collapse rules above still describe
-it; the over-subscribed-bar argument is history. Below `lg` the bar's right cluster is
-now empty — the theme toggle lives in the More sheet there.
+it; the over-subscribed-bar argument is history.
 
 **The former investor-briefing borrower was retired with the page in #2468.** The
 remaining borrowers and their guards are the live tap-target examples; do not infer a
@@ -1338,19 +1577,35 @@ assertion dressed up as a layout one — it did, once. Pin the geometry (the two
 and the icon square's 6 + 14 + 6) and express the sideways rule as a relationship
 (`hit width − painted width ≈ 0` for an `inset-x-0` overlay) instead.
 
-`e2e/accounts-card-tap-target.mobile.spec.ts` pins all of it, and `/accounts` has no
-committed pixel baseline at any width — so, as with #2038, the blocking visual gate could
-not have seen any of this. Since #3719 that spec pins the **absence** of both controls
-(the star, #2374, and `Set active`), page-wide and against both spellings a reintroduction
-could take, with the card's own name link as its non-vacuity check; its geometry checks
-left with the control.
+`e2e/accounts-card-tap-target.mobile.spec.ts` pins all of it. Since #3719 that spec pins the
+**absence** of both controls (the star, #2374, and `Set active`), page-wide and against both
+spellings a reintroduction could take, with the card's own name link as its non-vacuity
+check; its geometry checks left with the control. Its body tap point is the headline
+balance figure — the #4021 card no longer renders a token row for a single-holding account
+to tap. `/accounts` DOES carry committed pixel baselines now (the #4021 correction of the
+sentence this one replaced): `accounts-mobile` (the one-account layout plus the create
+tile), `accounts-multi` (the two-or-more grid, priced distinctly per #2225),
+`currency-sek-accounts-{desktop,mobile}` and `balance-freshness-accounts-overview-desktop`.
 
-**Current account-card interaction (#3550).** The card container is not itself a link or
-tab stop. Its account-name `Link` owns a stretched pseudo-element that covers the card;
-clicking the card body therefore navigates to that account. Since #3719 the card holds no
-other control. If an action ever returns to it, it must be a sibling above the overlay with
-its own vertical 44px hit-area expansion and no propagation guards — the historical
-`preventDefault()` behaviour above must not be reintroduced.
+**Current account-card interaction (#3550, #4021).** The card container is not itself a link
+or tab stop. Its account-name `Link` owns a stretched pseudo-element that covers the card;
+clicking the card body therefore navigates to that account. #4021 slimmed the card to name,
+balance and one line about agents (`Bot` + "Last payment {relative}" / "No payments yet"),
+removed the "Added {timeAgo}" caption and the faint "Open →" affordance (hover and focus
+already signal the card is clickable), hid token rows for a single non-zero holding (a row
+would only repeat the headline; two or more holdings get one row each, and a token whose
+RAW `balance` is zero — not its fiat value — renders nowhere, while the freshness marker
+keeps reading the FULL breakdown, #3295), and replaced the chain-name pill with a "Test
+network" chip beside the name on testnets only (via the shared `isTestnetChain`; mainnet
+renders no network marker). One action DID return to the card under #4021, on the
+empty-balance state only: an **Add funds** link — the task wording stays (owner
+decision on #4094: wording that names a task, not a button, keeps its words) —
+that opens the Receive dialog, the exact
+sibling-above-the-overlay shape this section has always demanded: `relative z-[content]`,
+its own `min-h-[44px]` vertical hit area, no propagation guards, and a LINK rather than a
+button so the card still holds no buttons. A second holding area — the "Create another
+account" tile beside the one-account card — is NOT on the card at all; it is a page-level
+dashed button that opens the same dialog as the header's "New account" action.
 
 **Prove it rendered, not in the class string.** A pseudo-element overlay has several
 silent no-op failure modes (a clipping ancestor, a positioning context resolving
@@ -1358,6 +1613,133 @@ elsewhere, another element winning the band), and none of them exist in jsdom �
 has no layout, no stacking contexts and no hit-testing. Measure the hit rectangle by
 walking `elementFromPoint` outward from the centre in a real engine; `getBoundingClientRect`
 returns the border box and reports 32×32 even when the overlay works perfectly.
+
+### Tabs ([#4096](https://github.com/d-hinders/Haven-AI/issues/4096))
+
+`ui/Tabs` — in `@haven_ai/ui` since #4096 (moved with the shared primitives in #3508),
+re-exported through the `components/ui/Tabs.tsx` shim — is the switch between views of
+one surface. Before #4096 the app had no tabs at all; the first consumer is the account
+page's Overview / Agents / Activity sections (epic
+[#4093](https://github.com/d-hinders/Haven-AI/issues/4093)), shown on `/design-system`
+with a count and a warning dot.
+
+- **Controlled, URL-blind.** `value` / `onChange` — the caller owns the selection, and
+  the primitive re-renders nothing on its own. `packages/ui` is also consumed by the ops
+  console, so the primitive knows nothing about URLs; the page owns its `?tab=` param.
+- **Semantics: the WAI-ARIA tabs pattern.** `role="tablist"` of real buttons with
+  `aria-selected`, named by the list's `aria-label` so a screen reader names the surface
+  first. Roving tabindex: only the selected tab is in the Tab order, so Tab leaves the
+  list; the arrow keys move selection WITH focus (automatic activation — this primitive
+  has no lazy panels to defer), wrapping at both ends; Home and End jump.
+- **The underline.** The selected tab carries a 2px brand underline that overlaps the
+  list's 1px border by 1px (`-mb-px`), so the two read as one continuous rule rather
+  than a floating dash. Unselected tabs are ink-3, brand ink when selected.
+- **Hit area.** Every tab paints 36px and extends its hit area to 44px vertically —
+  never sideways, the tabs abut — the same transparent-pseudo-element mechanism as
+  `SegmentedControl` ([#4056](https://github.com/d-hinders/Haven-AI/issues/4056)); the
+  § Tap targets rules above apply.
+- **Adornments.** An optional muted `count` rides beside the label — visible text that
+  reads with the tab's accessible name — and an optional amber `warningDot` marks a view
+  that needs the user: decorative to the eye, named to the ear through its screen-reader
+  text.
+
+### Agent row — shared `AgentRow` / `AgentBudget` ([#4096](https://github.com/d-hinders/Haven-AI/issues/4096))
+
+The dashboard's agent row, lifted out of `AgentsSection` into
+`haven/AgentRow.tsx` so the account page's Agents tab draws agents exactly as the
+dashboard does: a name-hashed `Monogram` (`xs`, decorative) as the leading mark,
+the BudgetMeter with its caption, the labelled "Last paid" time on the
+caption line ([#3989](https://github.com/d-hinders/Haven-AI/issues/3989)), the badge
+(`agentBadge`: Needs setup / Paused / N% used), and the received-sub-budget or "No
+budget" line ([#3803](https://github.com/d-hinders/Haven-AI/issues/3803)).
+
+The props deliberately stay the dashboard-overview wire shapes (`DashboardAgent`,
+`DashboardBudgetRemaining`) — the caption reads in the budget's own token, with no
+rate (#4165) — rather than a narrowed summary: the account page reads the SAME
+dashboard overview — it lists all agents — and passes its slices straight through, so
+both surfaces draw the identical row and a second projection of the wire never exists
+for the caption pipeline to re-derive. `AgentBudget` is exported beside the row for a
+caller that wants the budget block without the row chrome; the dashboard's Agents
+section imports the shared component and renders unchanged.
+
+### Activity ledger — day-grouped `TransactionActivityRow` ([#4096](https://github.com/d-hinders/Haven-AI/issues/4096))
+
+`TransactionActivityRow` gains a **ledger mode** for full transaction history, without a
+second component. The dashboard's preview MERGES same agent, same merchant, same day
+into one "×N" row; a full ledger needs one row per transaction, and gets it:
+
+- `onOpen` (optional): when provided, the whole row is a button — click or Enter/Space
+  calls it — so the ledger's rows open the shared `TransactionDetailPanel` from the row
+  itself. Omitted (the dashboard's merged preview), the row is inert: the whole list is
+  one link and rows carry no interaction of their own.
+- `transactionDayGroups` / `transactionDayKey` / `transactionDayLabel` bucket a feed
+  into local calendar-day groups — "Today", "Yesterday", then short dates ("17 May") —
+  keeping the caller's order (a newest-first feed yields newest day first) and merging
+  nothing.
+- `TransactionActivityDayHeader` renders the tinted day band above each bucket — the
+  second sanctioned band after `Card.Header`, on the table-header tokens
+  (`--v2-table-header-bg` / `--v2-table-header-ink`) with a full-width hairline below
+  and the label uppercased by CSS (#4225). A `band={false}` prop keeps the plain
+  label for the dashboard's first day, where the Activity card's own tinted
+  `Card.Header` sits directly above. A `partial`
+  flag marks a bucket whose day is cut by a window boundary ([#3975](https://github.com/d-hinders/Haven-AI/issues/3975)).
+- **Row dividers ([#4165](https://github.com/d-hinders/Haven-AI/issues/4165), owner
+  decision 2026-10-20):** rows of the SAME day are separated by an inset hairline —
+  `insetDivider` on every row after a day's first draws a 1px `--v2-border-subtle` line
+  along the row's top edge, starting at the text column (padding + direction mark +
+  gap) and ending at the row's padding. Day groups keep their full-width `--v2-border`
+  separation (`divide-y` on the list) — and since #4225 the day band itself ends in
+  the same hairline — so a day still reads stronger than a row. Both
+  ledgers draw it: the account page's Activity tab and the dashboard's Activity card.
+
+### Direction marks — `DirectionMark` ([#4197](https://github.com/d-hinders/Haven-AI/issues/4197))
+
+One shared `<DirectionMark>` for every in/out/pending/move direction in the app: incoming uses
+success green, outgoing uses debit sky, pending uses neutral grey. Four densities:
+
+- `comfortable` (default): 36px mark, 16px icon — the roomier row; `/transactions` and the Activity tabs use `compact`.
+- `compact`: 32px mark, 14px icon — dashboard rows, on the same rhythm as agent rows.
+- `figure`: 24px mark, 14px icon, 7px radius — beside a 20px secondary figure
+  (`Amount size="md"`), such as the account summary card's Last 30 days In/Out
+  pair (#4260). Added by #4259.
+- `inline`: 18px mark, 11px icon — the size for a mark in dense inline text, where a
+  line of body copy sets the height.
+
+The mark is always `aria-hidden`. The accessible name is the CALLER's job: sr-only text
+before the figure ("Money in" / "Money out" on the account page), so a screen reader
+hears "Money in ≈ $19.99" when the mark applies. A tooltip belongs on the mark, through
+`ui/Tooltip` — never around the figure: `Amount` already draws the "≈" with its own
+`title`, and two tooltips would stack. Don't hand-draw the icon or inline a copy of the
+markup; pick a density, and add a new direction state to the component itself.
+
+`move` (#4264, owner decision 2026-10-22, mockup version 2): a two-way lucide
+`ArrowLeftRight` on the same neutral grey ground as pending — a transfer between your
+own accounts is neither income nor spend. A `move` row passes no sign to `Amount`,
+exactly like pending.
+
+### Technical details disclosure (#4264)
+
+Technical terms are allowed on technical disclosure surfaces (§ Vocabulary, voice,
+accessibility), and a **"Technical details" disclosure is a markup pattern, not a
+component** — a native `<details>`/`<summary>`, closed by default:
+
+- `<details className="group">` — the `group` class is what lets the chevron key off
+  the open state;
+- `<summary>` is a full-width row: `flex cursor-pointer select-none list-none
+  items-center justify-between [&::-webkit-details-marker]:hidden`, with the label
+  ("Technical details") leading and the marker trailing. The label carries the
+  affordance — never a bare "Show"/"Hide" toggle whose state is only implied;
+- the marker is a lucide `ChevronDown` with `transition-transform
+  group-open:rotate-180` — the same group-open rotation rule as § Arrows. Never a raw
+  glyph, and never no marker at all;
+- the content uses the panel's detail rows — the label/value `dl` rows the rest of the
+  panel already renders (`dt` ink-3 label, `dd` ink-2 value), so the opened block reads
+  as part of the panel, not a bolted-on sub-card.
+
+The hand-rolled `<details>` uses that predate the pattern (`ErrorBoundary`,
+`settings/SignersSection.tsx`, `marketplace/OffersTable.tsx`, `connect-agent/*`, and
+the account signers card's text-only "Show address" toggle, which has no marker and
+does not match) are NOT migrated here. A new technical disclosure is written this way.
 
 ### Cards (`Card`)
 
@@ -1385,16 +1767,18 @@ jsdom cannot evaluate the pseudo-element's stacking or hit testing.
 
 `Card` supports `elevation="flat" | "raised" | "anchor"` and `hover={false}`. Use `raised` only for the page's single most prominent surface (the dashboard money card, #3897), `anchor` for a second focal point where a page has one (the sweep page's "How to recover" card; the dashboard has none since #3910, when "Needs attention" became a normal card), and keep nested or data-dense cards flat.
 
-**A card in a grid has to fit its track, and by default it cannot ([#2251](https://github.com/d-hinders/Haven-AI/issues/2251)).** This is the card sibling of the `truncate`d-table-cell rule under *Transaction tables* below, and it has the same shape: a `truncate` descendant is `white-space: nowrap`, so its min-content is the whole string, and a container that is never allowed to go below its min-content grows instead of ellipsising.
+**A card in a grid has to fit its track, and by default it cannot ([#2251](https://github.com/d-hinders/Haven-AI/issues/2251)).** This is the card sibling of the `truncate`d-table-cell rule under *Table column collapse* below, and it has the same shape: a `truncate` descendant is `white-space: nowrap`, so its min-content is the whole string, and a container that is never allowed to go below its min-content grows instead of ellipsising.
 
-What makes it a *grid* rule is where the "never allowed" comes from. A grid item's `min-width` defaults to `auto`, which resolves to its min-content — and an implicit `auto` column takes its minimum from that. Tailwind's `grid-cols-N` is `repeat(N, minmax(0, 1fr))`, whose explicit `0` overrides it, so **a responsive grid is safe at the breakpoint where its columns are declared and unsafe below it**. `/agents` is `grid items-start gap-4 lg:grid-cols-2`: correct at `lg` and up, and below `lg` its single implicit column was sized by the widest card's min-content. At 390 that put a 488.3px card in a 342px track — clipped rather than scrollable, because `main` is `overflow-x: auto` inside an `overflow-hidden` parent, so `documentElement.scrollWidth` stayed 390. The shared `expectNoHorizontalOverflow()` helper still sees it, on its `main#main-content` reading (#1779): measured `contentOverflowBy: 122` before the fix and `0` after. It was the SEED that was missing, not the assertion — the standing `/agents` mobile check is green on the shared fixture because that leaves `mcp_server_name` absent, and the `not recorded` branch is a 66px label with nothing to truncate.
+What makes it a *grid* rule is where the "never allowed" comes from. A grid item's `min-width` defaults to `auto`, which resolves to its min-content — and an implicit `auto` column takes its minimum from that. Tailwind's `grid-cols-N` is `repeat(N, minmax(0, 1fr))`, whose explicit `0` overrides it, so **a responsive grid is safe at the breakpoint where its columns are declared and unsafe below it**. `/agents` was `grid items-start gap-4 lg:grid-cols-2` (`grid gap-4 lg:grid-cols-2` since #4209): correct at `lg` and up, and below `lg` its single implicit column was sized by the widest card's min-content. At 390 that put a 488.3px card in a 342px track — clipped rather than scrollable, because `main` is `overflow-x: auto` inside an `overflow-hidden` parent, so `documentElement.scrollWidth` stayed 390. The shared `expectNoHorizontalOverflow()` helper still sees it, on its `main#main-content` reading (#1779): measured `contentOverflowBy: 122` before the fix and `0` after. It was the SEED that was missing, not the assertion — the standing `/agents` mobile check is green on the shared fixture because that leaves `mcp_server_name` absent, and the `not recorded` branch is a 66px label with nothing to truncate.
 
 Two things follow for anyone building one:
 
 - **Put `min-w-0` on the grid item itself.** It is what stops one card's content setting every sibling's width, and it is invisible until some real value gets long enough.
 - **`min-w-0` has to reach the truncating element without a gap.** On `/agents` there were already three of them — the header's `flex-1` block, the MCP row, `McpServerName`'s wrapper — and the chain still failed, because `Tooltip` renders its non-`block` trigger as a bare `<span className="inline-flex">` with no `min-width: 0` and no `className` passthrough. One un-shrinkable link defeats every `min-w-0` above it. When a `truncate` element sits inside a wrapper you do not control, give that wrapper the `min-w-0` from its parent.
 
-Both halves are needed and neither is sufficient: with only the card's `min-w-0` the card fits the track and the chip spills out of the card instead. Proven by rendered geometry, not by a class assertion or a baseline, in `e2e/agent-card-fit-measure.spec.ts` — the numbers, the per-seed floors and the mutation results live in that file's docstring.
+Both halves are needed and neither is sufficient: with only the card's `min-w-0` the card fits the track and the chip spills out of the card instead. This was proven by rendered geometry in `e2e/agent-card-fit-measure.spec.ts`, retired by #4209 with the MCP chip it measured (the spec's history is in git); the card keeps its own `min-w-0`, and the rule stands for every grid of cards.
+
+> **Superseded by #4209.** The `/agents` card no longer shows the MCP name or a separate "Last activity" stamp, so the decision below — "the MCP wiring outranks the last-activity stamp on a narrow card" — no longer has a card to apply to, and its two measure specs were retired. It is kept as the record of how a narrow card's priorities were measured.
 
 **Fitting the track does not fit the header — what a narrow card drops is a product decision ([#2325](https://github.com/d-hinders/Haven-AI/issues/2325)).** The grid-track rule above stopped `/agents` cards growing past their column; the space the card then had to divide exposed the next defect in the same header row. At 390 the card's header row is 300px, and it splits: bot tile 36 + gap 12 + the name/account/MCP block (`min-w-0 flex-1`) 121.2 + gap 12 + the `ml-auto shrink-0` "Last activity" stamp **118.8**. The stamp takes 40% of the row and cannot yield, so the MCP chip inside the block gets **38.5px** — which ellipsises even a short slug: `haven-research` measures **113px** and renders as `haven…` on every card, the opposite of what #1878 added the chip for.
 
@@ -1404,7 +1788,22 @@ The decision taken: **the MCP wiring outranks the last-activity stamp on a narro
 
 **Why the breakpoint is `sm` and not the width the short slug needs.** Below `sm` the wrap is unconditional, so between roughly 466 and 639 a card whose slug is short takes a line it did not strictly need — the review pass on this change measured that band and asked whether the breakpoint should move down into it. It should not, and the answer is a measurement rather than a preference. Sweeping the UNWRAPPED layout: `haven-research` (natural 113px) renders whole from 466 up, but a 34-character slug (natural 258px) is still cut to **148.5px at 500** and **208.5px at 560**, and only renders whole from **639**. So 640 is the width at which the unwrapped header stops truncating a long slug too, not a convenient default; moving it down to spare the short slug its extra line would hand the 466-639 band back to this same defect, for exactly the agents whose names are hardest to tell apart. What the band actually costs is one line of vertical space on a short-slug card, against no slug being truncated anywhere below `sm` — the same trade as the wrap itself. Pinned by the spec's 500px arm.
 
-Proven by rendered geometry in `e2e/agent-card-mcp-chip-measure.spec.ts`: at 390 the chip must render at least its own `scrollWidth` (re-measured at runtime, so the bar is not a literal tuned to one renderer) and the stamp's top must sit at or below the block's bottom; a 768 control arm pins the breakpoint in both directions. Mutation-proven by reverting the two classes: the 390 arm goes red on the mechanism guard (measured on the revert: stamp top 263px against block bottom 347px, and the chip 38.5px of its 113px natural width) while the 768 control stays green. `e2e/agent-card-fit-measure.spec.ts` stays green alongside — the width handed to the block comes from the stamp's own line, not from letting the card overflow its track again.
+Proven, until #4209 retired it with the chip, by rendered geometry in `e2e/agent-card-mcp-chip-measure.spec.ts`: at 390 the chip must render at least its own `scrollWidth` (re-measured at runtime, so the bar is not a literal tuned to one renderer) and the stamp's top must sit at or below the block's bottom; a 768 control arm pins the breakpoint in both directions. Mutation-proven by reverting the two classes: the 390 arm goes red on the mechanism guard (measured on the revert: stamp top 263px against block bottom 347px, and the chip 38.5px of its 113px natural width) while the 768 control stays green. `e2e/agent-card-fit-measure.spec.ts` stayed green alongside — the width handed to the block comes from the stamp's own line, not from letting the card overflow its track again.
+
+### Agent card (`/agents`, #4209)
+
+`agent-panel/AgentCard.tsx` is built from the agent row's pieces rather than its own:
+the stretched name-link shell above, a decorative `sm` `Monogram`, ONE `StatusBadge`
+(`agentBadge` from `haven/AgentRow` plus Archived and Revoked), `LabelChipRow`, the
+row's exported `AgentBudget` for the body, and a ⋯ `DropdownMenu` as the sibling
+control. The card is `flex flex-col` and its one-line footer sits on `mt-auto`;
+the panel's grid does NOT use `items-start`, so cards stretch to the tallest in
+their row and footers line up, as on `/accounts`. That reverses #2237, whose
+`items-start` kept one wrapping title from padding its neighbour (owner decision
+2026-10-21: aligned footers win). Every footer is one 16px line, empty included,
+so a card with nothing true to say still lines up. An open menu raises its card
+above the next one (`has-[[aria-expanded=true]]:z-…`). Shown on `/design-system`
+→ *Agent card (/agents)*.
 
 ### Agent label chips (#3167)
 
@@ -1423,6 +1822,47 @@ is the picker line: the shared `Checkbox` owns the row and the chip rides in as
 its label node, so a picker row reads exactly like the chip the agent will
 carry. A label is the user's own ad-hoc word ("prod", "finance") — it never
 borrows status language, and it never encodes authority. Recorded on `/design-system` → *Agent label chips*.
+
+### The Receive dialog (`ReceiveDialog.tsx`, #4094, mockup note 9 via #4167)
+
+One dialog serves every funding entry point — the dashboard money card's
+**Receive**, the first-run guide's Add funds step, the low-balance attention
+item, the accounts overview's Add funds link, and account detail's Receive
+button (the old `AddFundsModal` and `ReceiveFundsModal` are deleted). The
+caller picks the account: the dashboard's account picker when there is more
+than one account, the page's own account everywhere else. In
+order, top to bottom:
+
+1. The account card — ONLY with several accounts, where it is a **picker**
+   (the shared `Select`, plus the resolved chain's name); with one account
+   there is no account card at all (#4167). The old "On-chain receive" chip
+   is gone.
+2. The address card — the full address (the shared `Address` primitive,
+   untruncated) and **Copy address** — and, directly below it, the **inline
+   QR** (#4167): always visible whenever the address is, generated the
+   moment the dialog opens, in the fixed-white `.v2-light-surface` box
+   (#2929 — a scanner reads module contrast, never a themed background).
+   There is no "Show QR code" toggle and no "View on explorer" button; the
+   explorer link lives in the account page's Account details.
+3. The ONE network rule, one line (#4167): *Send USDC on `<network>` only.
+   It arrives in about a minute and shows in Activity.* One token, one
+   network (#4094); ETH is never listed — agents spend USDC, and the old
+   receive screen's registry-token list invited the wrong deposit. The old
+   "Before you send" box is gone: a loss-of-funds risk must not wear the
+   visual weight of a checklist.
+4. "Other ways to add money", each card gated on the SELECTED account's
+   chain (#3478), never the deployment default: **Get test USDC** (Circle's
+   faucet) on a test network, **Buy with card** (Coinbase Onramp) on Base —
+   the onramp only when the build carried
+   `NEXT_PUBLIC_COINBASE_ONRAMP_APP_ID`, and never on a testnet.
+
+**An unresolved chain gets no network instruction and no default (#1844):**
+the rule, the address card, the QR, the explorer link and both "other ways"
+cards all stay gone, and an `ApprovalRequiredBanner` warning ("Network not
+confirmed") with a **Refresh page** action renders instead — funds sent on
+the wrong network are usually unrecoverable, so the dialog refuses to guess.
+A resolved chain with no address yet gets the same honest retry without the
+network warning. Showcased on `/design-system` → *Receive dialog*.
 
 ### Modal (`ui/Modal`)
 
@@ -1444,7 +1884,8 @@ Two consequences, both of which have already cost real time:
 
 - **A test that reads scroll geometry off `getByRole('dialog')` cannot fail** —
   it is measuring the wrapper. Use `[data-modal-body]`. Note that
-  `ReceiveFundsModal` is a bespoke dialog, *not* built on this primitive, and it
+  `ReceiveDialog` (the merged receive dialog since #4094) is a bespoke dialog,
+  *not* built on this primitive, and it
   puts `role="dialog"` on its scrolling panel — so the two are not
   interchangeable and a helper written against one is wrong for the other.
 - **The `footer` prop renders OUTSIDE the scroll box**, as a flex sibling. It is
@@ -1496,6 +1937,23 @@ no information a screen reader user needs, and hit-testing must pass straight
 through it so a control at the bottom of a scrolled body stays clickable. See
 also the `role="dialog"` bullet in § 6.
 
+**Placement: centred, or `placement="top"`.** The panel centres vertically by
+default. A dialog that walks through several screens of different heights
+passes `placement="top"`: the panel hangs from a fixed line — `sm:mt-16` below
+the wrapper's own `max(1rem, safe-top)` padding, so `4rem` + `1rem` on a
+desktop, and just the safe-area padding below `sm` — and grows **downward
+only**, so the title holds one y on every screen. The `headerAccessory` below
+it moves only by the subtitle's own height: below `sm` a long subtitle wraps to
+a second line (the Connect flow's budget and waiting screens), which drops the
+band about 19px there.
+The ceiling subtracts the extra offset for the reason it subtracts the padding
+(#2730): otherwise the footer is what overflows. The Connect agent modal is the
+one caller. Centred, its title moved between y 130 and y 294 across the flow at
+1280×900 and between 43 and 255 at 375×812; anchored it holds one y at each
+width. A one-screen dialog keeps the default — a centred dialog that never
+changes height never moves. The wrapper exposes the choice as
+`data-modal-placement`.
+
 **Actions belong in the `footer` prop.** `ConfirmDialog`, `AccountSignersCard`,
 `ReplaceSigningKeyModal` and `contacts/page.tsx` do this. Do not add new dialogs
 that render an action row as the last children *inside* the scroll body.
@@ -1540,17 +1998,73 @@ button placed there is no longer a descendant of a `<form>` in the body.
 resolves rather than that the attribute string matches — a stale id compares
 equal and still submits nothing.
 
+### Dialog actions (`ui/DialogActions`)
+
+The one footer rule for a multi-screen dialog: **the screen's main action pair
+sits full width at the bottom, at `Button`'s default `md` (40px), on the body's
+edges — secondary left, primary right, equal halves.** A screen with a single
+action gets one full-width primary. Below `sm` the pair **stacks**, primary on
+top, both full width: two 140px halves at 375px wrapped "Set agent budget" and
+"Create a new setup" onto two lines. `DialogActions` owns only that layout
+(`flex-col-reverse` → `sm:flex-row`); its children are `Button`s with `flex-1`,
+secondary first in the markup, so the desktop Tab order matches the screen.
+Below `sm` the stack is visually reversed, so Tab reaches the lower secondary
+before the upper primary — accepted, since reordering the markup would break
+the desktop order instead and a phone is rarely tabbed.
+
+In the Connect agent modal it carries every pair — Cancel / Set agent budget,
+Back / Create setup prompt, Cancel / Approve budget (through
+the budget-grant control's own action row) and Close / Create a new setup on
+the expired, cancelled and failed screens. Where those screens draw them inside
+the scroll body rather than in Modal's `footer`, that is the flow's existing
+shape (each screen owns its actions and their state), not a pattern for a new
+dialog. Three placements in that flow are decided rather than incidental:
+
+- **Approve.** The pair lives inside the checklist's last row, so it is pulled
+  out over the marker column (`ROW_FOOTER_OUTDENT_CLASS` in `ConnectSteps`)
+  to the body edges instead of the text column.
+- **Waiting for the agent.** The forward action is the in-row "Copy setup
+  prompt" primary — #3832's one allowed exception to the rule, kept, at 40px
+  like everything else — and after that the screen advances on its own. Its
+  only footer action is the exit, so "Cancel setup" is a full-width **ghost**
+  — the same weight as every other secondary in the flow's pairs. Ghost is
+  not a quieter tier, and after the copy it is the largest control on screen;
+  that is accepted because the forward action has already happened by then
+  and the screen advances on its own, so nothing is left for the exit to
+  compete with (#1391's concern). Before the copy, the filled "Copy setup
+  prompt" leads. The expiry line sits on its own line above it.
+- **Done.** One full-width primary, "Done"; the in-list "Download the skill" is
+  a 40px ghost, not a 44px one-off (Button's own hit area keeps the 44px tap
+  target).
+
 ### Wizard progress (`StepProgress`)
 
 `ui/StepProgress` is the numbered disc band a multi-step modal carries in its
 header (`Modal`'s `headerAccessory`): one disc per step, the current one
 brand-soft with a brand ring, finished ones success-soft with a tick, the rest
-a `--v2-border` ring, joined by 1px lines. It says **where the user is in a
-wizard**, and nothing else: a step's own instructions live in its body. Call
-sites: the Connect agent modal (steps 1-2) and `ReplaceSigningKeyModal`; its `/design-system` specimen is the "StepProgress"
-section, after SidePanel.
+a `--v2-border` ring, joined by 1px lines that **stretch to fill the band**, so
+the track spans the same edges as the content below it. Each disc may carry a
+short `labels` entry beneath it (a word or two — "Name", "Budget"), `--v2-ink`
+and medium on the active step, `--v2-ink-3` otherwise. It says **where the user
+is in a wizard**, and nothing else: a step's own instructions live in its body.
+It renders as an `<ol>`: `aria-current="step"` on the active item, an `sr-only`
+"Step N of M" prefix before the label, the disc glyph and connectors
+`aria-hidden`. The tick is lucide `Check` at `h-3.5 w-3.5`, stroke 2 — the
+same mark, size and stroke as `ConnectSteps`' done disc, so the band and the
+step-3 checklist draw one check when they share a screen (it was a text "✓",
+which rendered visibly different beside it).
 
-### Numbered step list (`ConnectSteps`, #3832)
+**`halted`** marks a flow that stopped on `currentStep` — the Connect agent
+modal's expired, cancelled and failed screens. That step renders with the
+pending ring and numeral instead of the brand "in progress" ring, loses
+`aria-current`, and its `sr-only` prefix says "stopped"; earlier steps stay
+done, because they were. Neutral, not an error tone: a cancel is the user's own
+choice, and the screen's status badge already carries the tone of what
+happened. Call sites: the Connect agent modal (every step: Name / Budget /
+Connect) and `ReplaceSigningKeyModal` (Reason / New key / Review / Approve);
+its `/design-system` specimen is the "StepProgress" section, after SidePanel.
+
+### Step status checklist (`ConnectSteps`, #3832)
 
 A vertical list in which **each row is both an instruction and its status**:
 a disc, a section-tier heading, and the row's own body (a control, a line of
@@ -1558,33 +2072,63 @@ copy, or a whole sub-flow) beneath it. Use it when one screen walks the user
 through a short sequence they act on in order and the screen itself observes
 the progress — today, step 3 of the Connect agent modal (copy → paste →
 approve), where the old Waiting → Connected → Approved ticker said where the
-user was without saying what to do. Use `StepProgress` instead when the steps
-are separate screens of a wizard.
+user was without saying what to do.
 
-Done, active and pending reuse `StepProgress`'s disc treatments, so the wizard
-band and the list read as one progress language rather than two; working adds
-the brand spinner:
+**It reports progress within a step and never counts.** `StepProgress` counts
+the wizard's steps; this list says how far the current step has got. So its
+discs carry no numerals — a numbered column under a numbered band reads as a
+second stepper. The discs share `StepProgress`'s size (`h-7 w-7 sm:h-8 sm:w-8`)
+and tokens, so the two read as one progress language, a counter above and a
+status column below, and every state fills the same disc, so the marker column
+is a straight edge:
 
 | State | Disc | Heading |
 |---|---|---|
 | done | `--v2-success-soft` fill, `border-success/30`, lucide `Check` | `--v2-ink-3` |
-| active | `--v2-brand-soft` fill, `--v2-brand` ring and numeral | `--v2-ink` |
-| working | lucide `Loader2` in `--v2-brand`, `motion-safe:animate-spin` | `--v2-ink` |
-| pending | `--v2-border` ring, `--v2-ink-3` numeral | `--v2-ink-2` |
+| active | `--v2-brand-soft` fill, `--v2-brand` ring, a `--v2-brand` dot | `--v2-ink` |
+| working | `--v2-brand-soft` fill, lucide `Loader2` in `--v2-brand`, `motion-safe:animate-spin` | `--v2-ink` |
+| pending | empty `--v2-border` ring | `--v2-ink-2` |
+
+The disc is `aria-hidden`; the row heading is the accessible content, with an
+`sr-only` "Done: " / "In progress: " / "Not started: " prefix. The active row —
+the one the user acts on — carries `aria-current="step"`; a working row is
+Haven's to finish, so it is not current.
 
 Rules:
-- **One progress signal per surface** (#1418). A screen that renders this list
-  renders no ticker, badge or wizard band saying the same thing — the Connect
-  agent modal hides its `StepProgress` on step 3 for exactly this reason.
+- **One counter per flow** (owner review, 2026-10-16, superseding #1418's
+  "one progress signal per surface"). A wizard that uses this list inside a
+  step keeps its `StepProgress` band on that step too — the Connect agent modal
+  shows Name / Budget / Connect on every step, Connect active on step 3. Hiding
+  the band there swapped one progress model for another mid-flow. Two
+  `aria-current="step"` items on step 3 are intended: one for the wizard step,
+  one for the row within it. What the rule still forbids is a third signal — a
+  ticker or badge restating either.
+- **A row heading says what is happening now.** A working row names the work
+  in flight, not the gate it leads to: while the connector finishes local
+  setup, row 3 reads "Preparing the approval", and becomes "Review and approve"
+  once the approval opens.
 - **Name a gate once per viewport** (#1684). When the modal subtitle names the
-  action, the row heading says it in other words ("Review and sign" under
-  "Approve the agent budget").
+  action, the row heading says what the row asks for rather than repeating the
+  subtitle. One exception: the approve row reads "Review and approve" under
+  "Approve the agent budget": owner decision 2026-10-16 that this step says
+  "approve", not "sign" (copy-guidelines.md prefers "approve actions"), which
+  outranks avoiding a shared verb.
 - A row's done state comes from state that only moves forward (the
   connect flow's `promptCopied`, latched per setup and keyed by `setup_id`, so
   "Create a new setup" starts uncopied), never from a value a later action can
   overwrite.
 - Live status inside a row goes in an `aria-live="polite"` region with a
   reserved height, so a status change swaps words without moving the rows below.
+- The frame around it (`ConnectStepShell`) **sizes to its content** and
+  top-aligns it: no reserved floor, no centring. Between sub-states it eases
+  its height from the old content to the new (200ms, none under
+  `prefers-reduced-motion: reduce`), which is how #1377's no-jump intent is
+  kept for the body now that a short sub-state no longer sits in a 340px band.
+  The dialog itself is still vertically centred by `Modal`, so a height change
+  also slides its header and band; the ease turns that into motion rather than
+  a jump, but it is not a still header.
+- Once the step is finished (budget approved) the band reads all-done
+  (`currentStep={totalSteps}`), not Connect in progress over a success screen.
 
 It is local to `components/connect-agent/` because it has one call site; a
 second call site is the trigger to promote it to `components/ui/` with a
@@ -1603,11 +2147,10 @@ only place it renders (the pill no longer opens for a ready user).
 **Reach for it instead of a semantic tone when nothing has failed.** There is no
 `--v2-info` family, and `--v2-warning` is scoped to 402/pending-review, to
 environment identity — the `DEV` chip and the dev install's icon badge (§ 1) —
-and to a paused agent's status MARKERS, the pill and bot tile in `AgentCard`. It
-is not for a paused agent's prose: that card's own comment argues the tone
-belongs on a marker rather than a paragraph, which is a narrower claim than the
-enumeration and is why the two read as contradicting each other until you check
-(#2764). So
+and to a paused agent's status MARKER, the "Paused" badge on the agent row and
+`AgentCard` (#4209). It is not for a paused agent's prose: the tone belongs on a
+marker rather than a paragraph, which is why the card's paused notice is the
+neutral `ApprovalRequiredBanner` (#2764). So
 the honest options for "legible but not alarming" are this or plain muted text.
 Muted text is the right weight for mild friction — the #1097 "passkey may be on
 another device" hint (shown on every owner-signing flow since #3825) is
@@ -1676,9 +2219,9 @@ Use `components/ui/Tooltip.tsx` for brief clarification that ELABORATES on somet
 
 Tooltips must not hide essential instructions, money/risk information, or the only copy of a raw address that the user must copy. If the value is required to complete the task, show it inline. #2017 is the worked example: an explanation a user needs in order to judge whether they still control their account was moved out of a tooltip and into visible text, and that decision stands.
 
-**Reachability, and its one deliberate limit (#2038).** The trigger takes focus and a tap only when it is nobody else's control — nothing focusable inside it, and no interactive element around it. Where the trigger already is (or sits inside) a button, link, or composite `role="link"` card, the primitive stays out of the way: adding a tab stop would nest one inside a single control, and adding a tap-toggle would fire alongside that control's own action and strand a bubble over whatever the tap opened. `AgentCard` no longer uses that composite-card structure: its stretched name link and `McpServerName` tooltip are siblings, and the tooltip trigger is raised above the overlay, so it keeps its normal keyboard and tap reachability.
+**Reachability, and its one deliberate limit (#2038).** The trigger takes focus and a tap only when it is nobody else's control — nothing focusable inside it, and no interactive element around it. Where the trigger already is (or sits inside) a button, link, or composite `role="link"` card, the primitive stays out of the way: adding a tab stop would nest one inside a single control, and adding a tap-toggle would fire alongside that control's own action and strand a bubble over whatever the tap opened. `AgentCard` no longer uses that composite-card structure (#3550), and since #4209 `McpServerName` is not on the card at all: it lives on the agent detail page's MCP server name row, a standalone trigger with its normal keyboard and tap reachability.
 
-**Essential vs elaboration, worked on one component (#2043).** `McpServerName` carried BOTH kinds and is the clearest test the codebase has. Its `not recorded` branch held a 169-character explanation of an ABSENCE — there was no visible value for it to elaborate, and its whole job was to stop a user concluding their agent is broken. That is essential, so it moved to visible text: one sentence above the agent list, rendered only when some listed agent is unrecorded, following #2017's shape rather than inventing a second one. Its recorded branch kept its tooltip, and the difference is not a matter of degree:
+**Essential vs elaboration, worked on one component (#2043).** `McpServerName` carried BOTH kinds and is the clearest test the codebase has. Its `not recorded` branch held a 169-character explanation of an ABSENCE — there was no visible value for it to elaborate, and its whole job was to stop a user concluding their agent is broken. That is essential, so it moved to visible text, following #2017's shape rather than inventing a second one: one sentence above the agent list, rendered only when some listed agent was unrecorded — and since #4209, when the name moved to the agent detail page, beside the `not recorded` label on that page's MCP server name row. Its recorded branch kept its tooltip, and the difference is not a matter of degree:
 
 | ask | essential | elaboration |
 |---|---|---|
@@ -1692,94 +2235,359 @@ A standalone trigger takes the same `focus-visible` ring as every other focusabl
 
 **Width.** The bubble wraps inside `max-w-[min(20rem,calc(100vw-1rem))]` and is clamped back inside the viewport with an 8px gutter after layout. It was `whitespace-nowrap` with no cap until #2038: a 169-character label rendered 988px wide on a 320px screen. No pixel gate could see it, because a tooltip that is not open is in no screenshot.
 
-### Transaction tables
+**Named exception — icon-only direction figures (#4197, owner decision 2026-10-21).** The account summary card's Last 30 days row carries "Money in" / "Money out" ONLY on the direction icon's tooltip — by the rule above, that would be barred. The owner chose icon-only there deliberately, and it is recorded as the standing exception: the meaning is carried four ways (the arrow's direction, its in/out colour, the tooltip, and sr-only text before each figure), the row is a two-figure summary rather than an instruction the user must act on, and the words sit one tab stop away on the icon trigger. It is an exception to the essential-information bar, not a licence: essential instructions and money/risk copy still never live only in a tooltip.
 
-Use `components/transactions/TransactionsTable.tsx` for full transaction history routes. It is a semantic sortable table:
+### List controls — `ListToolbar`, `FacetMenu`, `PeriodPicker` ([#4110](https://github.com/d-hinders/Haven-AI/issues/4110))
 
-- Desktop columns: direction icon, Activity, Initiator, From/To, Date, Amount, external link.
-- **Initiator semantics (#2097):** the Initiator column reads the transaction record's explicit `initiatedBy` — the agent identity for agent-initiated rows, `You` only for `initiatedBy === 'human'` (no dashboard-send path sets it today), and an explicit unknown (`Unknown`) for un-attributed outbound rows; it never defaults to `You`. The detail panel's Initiator row shares the same helper (`transactionInitiator`).
-- Sticky header on desktop.
-- **A row click is convenience only; the title button is the accessible path
-  (#3554).** On a selectable table the `<tr>` keeps its native `row` role and an
-  `onClick` for the mouse, and the activity cell's title is a real `<button>`
-  ("View details for …") that opens the drawer on click, Enter and Space. The
-  accounting badge and the explorer link are SIBLINGS of that button, never
-  descendants of an element with `role="button"` — an interactive control nested
-  inside another is invalid ARIA. The row handler focuses the button before
-  opening, so the drawer's focus trap returns focus there on close. The links
-  keep a click stop, because Enter on an `<a>` fires a click that would bubble to
-  the row.
-- A narrow container hides secondary columns and keeps icon, activity and
-  external link readable. The amount stays readable too, but below `md` it is no
-  longer a column: it rides under the title inside the activity cell (#2734).
-- **A stacked amount hangs under the START of the title, never right-aligned.**
-  This is the rule both mobile transaction rows follow, written down here
-  because #2734 shipped the other way first and a design review reversed it:
-  right alignment is a property of a column of numbers, and a stacked amount is
-  not a column — aligning it right leaves one cell carrying two alignment rails.
-  How much indent that takes differs by component and is not part of the rule:
-  `TransactionActivityRow` needs `pl-11` because its `DirectionMark` is a
-  sibling in the same box, while `TransactionsTable`'s mark is its own `<td>`,
-  so its `px-4` content edge already is the title's text start.
-- The stacked amount is nested inside the **activity** cell, so a call site
-  passing `amount` without `activity` would lose the amount entirely below `md`.
-  All three call sites include both today.
-- **Sorting is a `md`+ affordance, by decision and not by omission** (owner
-  decision 2026-09-09, #2790). Date and Amount are sortable at `md` and up;
-  amount sorting uses the raw transaction value, never the formatted display
-  string. Both headers are `revealAt="md"` and there is no sort control outside
-  the header row, so below `md` the table offers no way to re-sort. (It is still
-  sorted — by the default below — it just cannot be changed.)
+One pattern for search, filters, sort, period, count and no-match on every
+list in the app (epic [#4108](https://github.com/d-hinders/Haven-AI/issues/4108)).
+A page declares **what** it filters; the toolbar owns **how** it looks and
+behaves. A page that needs a control or a string the pattern lacks extends the
+pattern here first; it never hand-builds one. The internal ops console
+(`packages/ops`) is exempt, and `FilterPill` stays in `packages/ui` for it.
 
-  Written down because its absence looks like a bug to the next reader. What
-  makes it safe rather than merely accepted: the default is
-  `{ column: 'date', direction: 'desc' }` — newest first — and the sort state is
-  component-local, neither persisted nor in the URL, so a phone always lands on
-  a deterministic order and can never be stranded in an unexplained one. The
-  only path to a hidden active sort is narrowing the window below **768px**
-  mid-session — the viewport at which this shell's table container drops under
-  the 718px `md` stage. Note which number is which: 718px is the CONTAINER
-  stage, and the first draft of this sentence attached it to a window width,
-  contradicting the sawtooth measured two subsections below. "Desktop" was wrong
-  too — a tablet rotating landscape to portrait across 768px is the same event.
-  A resize does preserve the sort: `sort` is `useState` inside the table and the
-  collapse is pure container-query CSS, so nothing remounts and the rows keep
-  their order while the header is gone.
+All of it lives in `packages/frontend/src/components/ui/`:
 
-  **Do not add a mobile sort control on suspicion.** The reason this is a
-  decision is that #2734 removed the last sortable header below `md` as a side
-  effect of collapsing the amount column, and the alternative considered and
-  rejected was bolting a sort button onto a screen the mobile epic (#2736) is
-  already reshaping. If a real need appears, it belongs with that epic.
-- Empty state renders inside the table with the correct column span.
+| Module | What it is |
+|---|---|
+| `ListToolbar.tsx` | The toolbar, its list summary line, the phone sheet, `ListNoMatch`, and `ListShowMore` |
+| `FacetMenu.tsx` | One facet as a chip menu or as pills; `RadioMark` / `CheckboxMark` |
+| `PeriodPicker.tsx` | The one Period control, for the toolbar and the Analytics header |
+| `list-url-codec.ts` | Pure parse/serialize of `ListState` to and from the URL |
+| `useListUrlState.ts` | The hook a page owns: state mirrored to the URL |
+| `list-controls-copy.ts` | Every string the pattern shows |
+| `list-menu.ts` | The shared menu-button keyboard contract and viewport clamp |
 
-Use `TransactionActivityRow` for compact dashboard, account detail, or agent detail previews.
+`/design-system` → **List controls** shows every state: default (no status
+row, the count alone on the summary line), filtered, no match, loading, phone,
+server-filtered with page totals on the summary line, paging, and the two
+primitives on their own.
+
+#### Anatomy
+
+One card (`rounded-[10px]`, `p-4`, `shadow-card`), then one line, directly
+above the list; the card is never repeated inside a parent card.
+
+1. **Search**, then the **actions slot**: actions on the *filtered list*, such
+   as Export CSV. Page actions (Connect agent, Add contact) stay in the page
+   header. The slot is content-width on every breakpoint: below `sm` it wraps
+   to its own row after search and Filters rather than stretching full-width
+   (#4150 — the approved phone board draws no action row). The pattern owns
+   the action's sizing: pages pass a bare `Button` (no width/height classes),
+   the button paints at its own size, and its 44px phone target comes from
+   `Button`'s tap-target overlay.
+2. **Facets**, then **Sort** and **Period** on the right. A pill facet gets its
+   own row.
+3. **Status row**, only while a filter is active (#4196): one removable chip per
+   active filter and **Clear filters**. With no active filter there is no row
+   and no divider. Sort is a view choice, not a filter: it gets no chip and
+   Clear filters keeps it.
+4. **List summary line**, outside the card (#4196): the count on the right,
+   and the page's own totals, when it has any, on the left — the account
+   Activity tab's "In · Out" (short visible labels, so the line fits a phone
+   beside the count; sr-only "Money in" / "Money out" before each figure),
+   and Transactions' "In · Out" too (#4266; a Direction filter shows only its
+   half). The page passes
+   its figures in the toolbar's `summary` slot and never builds the line, so
+   "filtered" is decided once, inside the toolbar. The count keeps one place
+   whether or not a filter is active.
+
+Under the summary line, in this order: the hedges that qualify it
+(`UNPRICED_TOTALS_NOTE` for the totals, then the `truncated` note for the
+count), then page callouts and alerts (the Agents hidden-budget banner, a
+filter-options load error), then the list. On Marketplace the line sits above the
+card grid and Coming soon.
+
+**Active means "differs from the page's default".** One rule decides the
+trigger's tint, the chip, the count on **Filters (n)** (the active filters the
+sheet holds), and whether the count
+reads "{shown} of {total}". A page whose default is not All (Marketplace's
+network, Analytics' 30 days) opens untinted and unfiltered. Removing a chip
+returns that filter to the default; **Clear filters** returns the whole list to
+its default view. Choosing All on a facet whose default is something else is a
+filter in its own right ("Network: All").
+
+Below `sm` (640 px) the facet row collapses into a **Filters (n)** button that
+opens a bottom sheet: every facet, Sort and Period as native radio and checkbox
+rows, 44 px tall. **Filters in the sheet apply live, as on desktop.** The footer
+button only closes the sheet and names the applied result ("Show 12
+transactions"). There is no preview count of unapplied choices, so a
+server-filtered list makes no extra request per tap. `layout="phone"` forces
+this layout in a narrow container on a wide screen.
+
+#### Facets
+
+- **Single-select** is the default: `menuitemradio` rows, "All" first. Choosing
+  one applies it and closes the menu.
+- **Multi-select** where a facet needs it: `menuitemcheckbox` rows with counts.
+  The menu stays open while you tick; the trigger reads "Status: Active,
+  Paused", or "Status: 3 selected" past two.
+- **Pills** only for a short category list (Marketplace): a group of
+  `aria-pressed` toggle buttons drawn with `FilterPill`. Pills are not menu
+  items.
+- A facet with **one possible value is hidden**. If it carries a value anyway
+  (from a URL), its chip still shows, because the chip is the only way out.
+- A facet option may carry **`meta`** (#4150): a short suffix such as an
+  agent's status ("Revoked") that must never be lost to truncation. The menu
+  row, the phone-sheet row and the status-row chip draw it as its own slot —
+  non-truncating, so the status shows even where the label loses its tail.
+  The **trigger summary excludes it** (`facetValueLabel` reads labels only);
+  the **chip includes it** (the chip spells the filter out in full). A page
+  moves a status out of its option label and into `meta`; the label is then
+  the plain name.
+- **`allLabel`** names a single-select facet's "no filter" row (#4113). A
+  string renames it ("Shown" in place of "All"). `null` drops it,
+  for a facet whose every value is a real choice: Agents' **Archived: Hidden /
+  Shown**. A facet without All needs a `defaultValue`, which is its unfiltered
+  view: untinted, no chip, no Clear filters, and no URL key; an explicit `all`
+  in the URL reads as that default. Its phone-sheet group has no All radio.
+  The Sort chip is not this: it is a view choice and never tints.
+- A **Sort chip** appears only on lists without sortable column headers. Tables
+  that sort by header keep header sort.
+
+#### Period
+
+`PeriodPicker` offers rolling presets, Last 7 / 30 / 90 days, as
+`[now − N×24h, now)`: the rule the backend applies in
+`modules/transactions/period.ts`. Values stay `7d` / `30d` / `90d`. Props choose
+which presets show, whether **All time** shows (it is the absent filter, not a
+fourth value), and whether a **Custom range** is allowed. Analytics uses
+presets only, with no All time. Analytics has no `ListToolbar`, so it mirrors
+its choice onto `?period=` itself — read ahead of storage in the initialiser
+and written back with a `replaceState` (`lib/analytics-range.ts`, #4116) —
+where the lists get the same key from `useListUrlState`.
+
+`SegmentedControl` is not this: it stays in the system for settings-type
+choices (theme, appearance) and is **not used for list or period filtering**
+— the one period control is `PeriodPicker`, the one filter controls are the
+facets (#4116).
+
+#### Behaviour
+
+- **Where filtering runs.** Each page declares `filtering`. The browser is
+  allowed only for small, unpaged lists with no export (Agents, Marketplace,
+  Contacts). A list that pages or exports filters on the server, so its count,
+  rows and CSV are the same set.
+- **Search.** On a server-filtered list a request, and the URL write, follow a
+  300 ms pause in typing. A browser-filtered list re-renders on every keystroke,
+  and only its URL write waits. Enter searches at once; Escape in the field
+  clears it. A too-long placeholder ends in an ellipsis (`text-ellipsis` on the
+  input) — the copy itself is never shortened (#4150). A clear issued OUTSIDE
+  the toolbar — the page's no-match `ListNoMatch` Clear filters — bumps the
+  clear generation the page owns (`useListUrlState`'s `bumpSearchEpoch`,
+  passed to the toolbar as `searchEpoch`), so a draft typed inside the 300 ms
+  window before the click never commits after it, even when `q` was already
+  empty (#4150).
+- **Keyboard and ARIA.** Each trigger is a menu button (`aria-haspopup="menu"`,
+  `aria-expanded`, `aria-controls` while open). Enter, Space or Arrow Down open
+  it on the checked row; Arrow Up opens it on the last. Arrows move with wrap,
+  Home and End jump, Escape closes with focus back on the trigger, and Tab
+  leaves the menu. The system focus ring applies (`focus-visible.visual.spec.ts`
+  covers the triggers). Menu roles supersede the Agents list's toggle-button
+  facets: its listbox objection was that `role="option"` forbids an interactive
+  control inside an option, and a menu item *is* the control.
+- **Menus never extend past the viewport.** An opened panel is measured and
+  shifted back inside an 8 px margin, and its width is capped to the viewport
+  (`e2e/list-controls.spec.ts` proves it at 375 px).
+- **Tap targets.** Triggers, menu rows and sheet rows are 44 px below `sm`.
+  The status-row chips' remove controls paint small (24 px) and reach 44 px
+  through the same vertical `::after` overlay `Button` uses — the drawn status
+  row does not change (#4150). A trigger whose SELECTED label is longer than
+  the facet row truncates inside it (`max-w-full` on the trigger) instead of
+  stretching it.
+
+#### Paging (#4196)
+
+One rule for every paged list (today the account Activity tab and
+Transactions, both 25 per page):
+
+- the list card ends with its last row — no button, divider or footer band
+  inside it;
+- the next page is `ListShowMore`: a default-size ghost button centred below
+  the card, labelled "Show {n} more", where n is what the next page adds,
+  min(page size, total − loaded), from the feed's own loaded rows and server
+  total;
+- "Show more" when the server still reports more but the totals leave nothing
+  to count (a poll moved the total between reads); "Loading…", disabled, while
+  the page fetches;
+- once every page is loaded, nothing renders below the list. A truncated read
+  is said by its hedge under the summary line, not here.
+
+The dashboard's **Needs attention** expand (`NeedsYou.tsx`) is a local
+disclosure over rows already loaded, not a paged list, and is out of this
+rule's scope.
+
+#### URL state
+
+`useListUrlState(schema, { filtering })` mirrors `ListState` to the URL with
+`replaceState`, so there is no history entry per change, and back/forward
+re-seeds it. The codec's rules:
+
+- keys: `q`, one key per facet id, `sort`, `period` (`7d`/`30d`/`90d`), and
+  `from` / `to` for a custom range. The network facet is `chainId` on every
+  page;
+- **no key means the page's default** (not always All: Marketplace defaults to
+  the user's chain); an explicit `all` means All, except on a facet without
+  All (`allLabel: null`), where it reads as the default;
+- multi-select values are comma-joined, the `lib/agent-list-filters.ts`
+  encoding, so existing links keep parsing;
+- params it does not own (Agents' `setup`, a page's tab key) are never
+  touched;
+- a legacy key is read as an alias and never written (Transactions' `search`
+  reads as `q`).
+
+The codec is **separate from any API param builder**. A page maps `ListState`
+to its request itself, so renaming a URL key never changes what reaches the
+backend.
+
+#### Copy
+
+| Slot | Copy |
+|---|---|
+| Search placeholder | "Search {things}". What it matches goes in `searchDescription`, read to screen readers, not in the placeholder |
+| Facet trigger | "{Label}: {value}", "All" when unset |
+| Count (summary line, right) | "{n} {things}" unfiltered; "{shown} of {total} {things}" filtered; "Showing the first {n} {things}" when the server capped the read |
+| Paging | "Show {n} more", n = min(page size, total − loaded); "Show more" when the server reports more but the totals leave nothing; "Loading…" while fetching |
+| No match | "No {things} match these filters" / "Try a different search, or clear filters to see everything." + Clear filters |
+| Period | "Last 7 days", "Last 30 days", "Last 90 days", "All time", "Custom range" |
+| Clear | "Clear filters" |
+| Search chip | the term in curly quotes, “savings” |
+| Phone | "Filters" with a count badge; its accessible name is "Filters (n)". Footer "Show {n} {things}" |
+
+On a server-paged list both count numbers come from the server: a count never
+mixes loaded rows with a server total. The count is a polite live region
+(`role="status"`, `data-testid="list-toolbar-count"`) on the summary line. The
+toolbar keeps its `count` prop for the phone sheet's footer as well.
+`ListNoMatch` sits where the rows were and never replaces the toolbar. A list
+with *nothing yet* keeps its own empty state ("No contacts yet").
+
+#### Design-lint guard (#4129)
+
+A hand-built list control cannot ship quietly: `design-lint`
+(`npm run design:lint -w packages/frontend`) flags one in `src/app` and
+`src/components` by its tells — a search field (`type="search"`, or a
+placeholder containing the word "search"), a hand-rolled Filters trigger
+(the `SlidersHorizontal` glyph outside the family), or a direct `<FilterPill>`
+use. `aria-haspopup` was measured and rejected as the signal: it appears 0
+times in the hand-built toolbars and it DOES appear in `Sidebar`,
+`WalletButton`, `DropdownMenu` and `TransactionActivityRow`. The rule is NOT
+silenced by `design-lint-disable-line` — the baseline
+(`packages/frontend/design-lint-baseline.json`) is the only way to carry this
+debt. When the rule fires on your diff, delete the hand-built control and
+render `ListToolbar`; an intentional exception is a hand edit to the baseline
+in its own reviewed commit, and the ratchet only ever shrinks. `packages/ops`
+is exempt (owner decision 2026-10-20), as are `packages/ui/src`, the
+`FilterPill` shim, and the `/design-system` demos.
+
+### Transaction ledger
+
+Use `TransactionActivityRow` for compact dashboard previews and, in its ledger mode
+(#4096), a full day-grouped transaction ledger — there is no transaction table.
+The account page's Activity tab is its first consumer (#4097), one row per
+transaction opening the shared `TransactionDetailPanel`. The agent page's
+Activity tab is the second (#4226): the agent's own payments in the same ledger
+pieces, with the "by <agent>" title and the movement line dropped — the page
+fixes both. The full `/transactions` history is the third (per #4266), on the
+same anatomy under `TransactionActivityDayHeader` bands in compact density: the
+title is the counterparty, the subline names who acted ("You" or the agent) plus
+" · <account>" when the user has two or more accounts, the amount carries the
+time under it, and the badge is `transactionRowBadge(tx)` plus
+the accounting badge. An own-account transfer (the backend's `foldOwnTransfers=1`,
+#4265) reads "Moved between your accounts" with `DirectionMark direction="move"`
+and an unsigned amount, its subline the actor then the bare `TransactionMovement`
+("You · Operations → Reserve"; see § Arrows). Its list summary line reads "In <total> · Out <total>"
+beside the count. There are no Initiator, From/To or link columns and no column
+sorting; filters and search live in `ListToolbar`, and the order is date only,
+with no Sort. A ledger row is a whole-row `role="button"`, so nothing inside it
+may be a control — an interactive element nested in a button is invalid ARIA.
+The accounting badge renders as a plain pill there (`interactive={false}`); its
+`/accounting` link and reason live in the detail panel's Accounting row.
 
 **Merchant-first titles (#3810).** The dashboard's activity list reads
 `counterpartyLabel` in `lib/transaction-presentation.tsx` with the opt-in
 `noAddress` mode, so a raw address never titles a row there: the merchant's
 site for x402, the receipt/contact name the backend resolved, "Deposit" for
-inbound, "New recipient" when nothing resolves, "Agent payment" when an x402
+inbound — or "From <account>" for money that came from another of the user's
+own accounts (#4099) — "New recipient" when nothing resolves, "Agent payment" when an x402
 row carries no resource URL, and "Returned from <agent>" for sweeps. The
-subtitle is the agent's name; "From My account" appears only when the user
-has more than one account. A confirmed row carries no status badge — its
+subtitle is the agent's name; on a send it adds "From <account>", the account
+the money left (#4117), only when the user has more than one account and a
+name came back. A move between two of the user's own accounts (`ownTransfer`,
+#4268) titles "Moved between your accounts" with the `move` mark, draws
+"<from> → <to>" through `TransactionMovement` in place of the subtitle, and
+shows an unsigned amount. A confirmed row carries no status badge — its
 direction is already the amount's sign and tone; only "Pending" and "Failed"
-name a state (#3897). The shared screens (`TransactionsTable`,
-`TransactionDetailPanel`) pass no mode and keep the truncated address until
-#3811 — the two supports on the same helper must not drift apart silently,
+name a state (#3897). `/transactions` reads the same mode (per #4266), and so does
+`TransactionDetailPanel`'s title (#4267); the default mode stays for the
+movement line — the supports on the same helper must not drift apart silently,
 which is what the characterization tests in
 `lib/__tests__/transaction-presentation.test.tsx` pin. Two row props exist for
 the grouped dashboard shape: `countLabel` renders the muted ×N beside the
 title (×N+ when the count is a floor over a truncated window — a count is
 never presented as exact when it is not), and `fiat` switches the amount to
-`Amount`'s currency mode (book-time plain, serve-time `≈`, unknown valuation
-an em dash). Rows group under user-local day headings ("Today" /
+`Amount`'s currency mode (plain — a row never carries `≈`, #4165 — and an
+unknown valuation an em dash). Rows group under user-local day headings ("Today" /
 "Yesterday" / a short date); the server buckets the groups per day (#3824),
 the client only names the bucket.
 
-A collapsing table like this one has to **fit** at mobile widths, not scroll: the `overflow-x-auto` wrapper the `Table` primitive recommends for dense admin tables is mutually exclusive with `Table.Head sticky`, because `overflow-x: auto` forces the computed `overflow-y` to `auto` and the wrapper then becomes the sticky scroll ancestor. When such a table overflows, the cause is usually a `truncate`d cell — `truncate` is `white-space: nowrap`, and an auto-layout column can never be narrower than its min-content, so the untruncated text widens the table instead of ellipsising. Put `max-w-0` on the one flexible cell. Both findings, with their measured numbers, live in `components/ui/Table.tsx`'s docstring ([#1772](https://github.com/d-hinders/Haven-AI/issues/1772)).
+### Transaction detail panel
 
-**Column collapse is keyed on the table's CONTAINER, not on the viewport, and it still takes more than one stage.** Two things step at `lg` and both take width: the sidebar goes `fixed` to `lg:static` at `w-[240px]` — border-box, so its 1px `border-r` is *inside* the 240 (`main` measures 784px at a 1024px viewport) — and the authenticated layout's `main` steps `p-6` to `lg:p-8`, 16px more across the pair. **240 + 16 = 256px** handed back in a single breakpoint, so the content available to a table is a **sawtooth** in viewport width, not a ramp. Attributing it to the sidebar alone is wrong and invites a reader who checks `Sidebar.tsx`, finds 240px, and discards the whole claim. Measured in real Chromium on `/design-system`, `/transactions`, `/accounts/:id` and `/agents/:id` — the same numbers on all four, because they share the shell:
+`TransactionDetailPanel` (#4267, epic #4263) is the one detail drawer for a
+transaction — `/transactions` and the account and agent Activity tabs all open
+it. It is a local composition of documented pieces on `ui/SidePanel`, not a new
+pattern, and it leads with the answer:
+
+1. **Header.** `SidePanel`'s `leading` slot carries the mark — a decorative
+   `Monogram` of the counterparty, or `DirectionMark` for a deposit, a sweep,
+   a move between your own accounts and a send nothing names ("New
+   recipient"), which have no counterparty to draw. The title
+   is the ledger row's title (`counterpartyLabel` no-address mode, or "Moved
+   between your accounts"), the subtitle the kind in words ("Paid request",
+   "Payment", "Deposit", "Transfer", "Payment attempt"; dropped where it would
+   only repeat the title, as on a deposit). Below it: `Amount
+   size="lg"` with the token amount beside it (a move passes no sign), the
+   `StatusBadge` from `transactionRowBadge(tx)` with "Executed" as the panel's
+   own fallback, one line saying who, where and when ("Paid by Atlas from Main
+   · <date>"), and, when the record needs one, a `NoticeRow` callout: needs
+   attention (the shared stranded-funds sentence for a merchant retry rejected
+   after payment, otherwise "This payment needs your attention", and an "Open
+   agent" link when the row names its agent) or
+   an on-chain failure ("The transaction failed on-chain. Nothing left your
+   account.").
+2. **Details** — a few plain-word rows per kind, never repeating the header:
+   amount, date, agent and account appear once, in the header. An x402
+   payment shows For, Receipt ("Attached" / "Not attached", never the raw
+   proof status) and, on the eip3009 bridge, Settlement worded to what the
+   record proves ("Recorded (verified)", or "Not recorded yet" with one line —
+   never "confirmed by the merchant"). A send shows To, a deposit From, a move
+   By, a sweep what happened; the Accounting row carries the accounting
+   badge, linked to `/accounting`, and a failure reason in words.
+3. **Technical details** — § Technical details disclosure, closed by
+   default: Network (`NetworkPill`), Payment ID, Settlement method, the
+   delivered reference, every address and both hashes (the account's
+   transaction and the merchant's settlement transaction). Each address and
+   hash is shortened (`0x0415…b195`), on one line, with `CopyButton` and an
+   explorer link — superseding #3811's "in full" rule. **Trailing slot
+   (#4312):** every copy-bearing row reserves a fixed 44px slot after the
+   copy target — the explorer link sits in it when the chain has one, and an
+   empty slot stands in when it does not (the Payment ID row, or an address
+   on a chain the registry does not know) — so the copy glyphs share one
+   column centre and the explorer glyphs another, whether or not a link is
+   present. Text-only rows (Network, Settlement method, Delivered) do not
+   reserve it.
+4. **Footer** — `SidePanel`'s `footer` slot: "View on explorer" for the
+   transaction that left or entered the account (the funding leg on eip3009).
+   `explorerUrl: null` hides it; any other value is used only where the chain
+   registry builds no link. It is absent for a record with
+   no real hash, such as the agent tab's synthetic `activity-…` rows.
+
+### Table column collapse
+
+The generic `Table` primitive (`components/ui/Table.tsx`) collapses secondary columns in a narrow container. No transaction surface renders one any more (per #4266); the rules below stay for the tables that do.
+
+A collapsing table has to **fit** at mobile widths, not scroll: the `overflow-x-auto` wrapper the `Table` primitive recommends for dense admin tables is mutually exclusive with `Table.Head sticky`, because `overflow-x: auto` forces the computed `overflow-y` to `auto` and the wrapper then becomes the sticky scroll ancestor. When such a table overflows, the cause is usually a `truncate`d cell — `truncate` is `white-space: nowrap`, and an auto-layout column can never be narrower than its min-content, so the untruncated text widens the table instead of ellipsising. Put `max-w-0` on the one flexible cell. Both findings, with their measured numbers, live in `components/ui/Table.tsx`'s docstring ([#1772](https://github.com/d-hinders/Haven-AI/issues/1772)).
+
+**Column collapse is keyed on the table's CONTAINER, not on the viewport, and it still takes more than one stage.** Two things step at `lg` and both take width: the sidebar rail goes from `hidden` to an in-flow column at `w-[240px]` (#4053; before that, a `fixed` drawer going `lg:static`) — border-box, so its 1px `border-r` is *inside* the 240 (`main` measures 784px at a 1024px viewport) — and the authenticated layout's `main` steps `p-6` to `lg:p-8`, 16px more across the pair. **240 + 16 = 256px** handed back in a single breakpoint, so the content available to a table is a **sawtooth** in viewport width, not a ramp. Attributing it to the sidebar alone is wrong and invites a reader who checks `Sidebar.tsx`, finds 240px, and discards the whole claim. Measured in real Chromium on `/design-system`, `/transactions`, `/accounts/:id` and `/agents/:id` — the same numbers on all four, because they share the shell:
 
 | viewport | 390 | 767 | 768 | 900 | 1023 | 1024 | 1279 | 1280 |
 |---|---|---|---|---|---|---|---|---|
@@ -1793,43 +2601,13 @@ So `Table.HeaderCell` / `Table.SortableHeaderCell` take **`revealAt="md" | "xl"`
 - **Header and body must be converted together, always.** The `<th>` takes `revealAt`; the matching `<td>` takes `tableColumnClass(stage)` from the same module, and relocated content (a movement line under a narrow title, a date under the Amount) takes `tableHideFromClass(stage)`. A `<th>` on a container stage over `<td>`s on a `md:` variant is #1774 one layer down — width declarations on a `display: none` cell take no part in column sizing, and the result measures byte-identical to a fix.
 - **Every table gets the container; there is no opt-out, and that is deliberate.** A dense table that scrolls (`Table.Head collapseWhenNarrow={false}` plus an `overflow-x-auto` wrapper) keeps it too. The containment does **not** defeat the scroll — measured on the z-index table at 390px, which is `min-w-[560px]` inside its wrapper: with the container in place the table still lays out at 560px and the wrapper still reports `scrollWidth` 560 / `clientWidth` 340 with `scrollLeft` reaching 220, identical to the reading without it. An opt-out would be worse than useless: a caller pairing it with `revealAt` emits a `@container v2table` condition with no container-named ancestor, and per spec such a query never matches — so the base `hidden` wins **permanently, at every viewport, in every browser**. Silent and total, and strictly worse than the unsupporting-browser case the `@supports` fallback exists for.
 
-- **Container-keying makes DOM mount order a layout input**, which viewport-keying never did. `Sidebar` is `dynamic(ssr:false)`, so for the frames before its chunk mounts the shell hands the table ~256px it is about to take back. Measured two ways. Deterministically (stage with the sidebar in layout vs `display: none`, fixed viewport): `/transactions` is same-stage at 768/1024/1100/1279/1280, so no mount transition can change its column set. By timing, at low load: the `/design-system` showcase paints **seven** columns at a 1034px container and collapses to **five** at 794px roughly **106ms** later at a 1100px viewport (98ms at 1279px); 1024px is same-stage. Accepted on an internal showcase route where the whole page shifts 240px in the same window — but check it before keying a **new** surface on the container.
+- **Container-keying makes DOM mount order a layout input**, which viewport-keying never did. `Sidebar` is `dynamic(ssr:false)`, so for the frames before its chunk mounts the shell hands a container-keyed table ~256px it is about to take back; a table can paint one column stage and collapse to the next a moment later. Check it before keying a **new** surface on the container.
 
-Pinning the `md`+ columns instead of staging them is the tempting alternative and it is wrong: it was measured during #1774 and grew desktop rows 85px → 133px. Prefer moving low-priority content rather than dropping it — this table moves the date under the Amount for the `md`→`xl` band. Note the limit of that example, since it was written before #2792: below `md` the Amount column collapses too and the date goes with it, so the narrow layout drops the date rather than relocating it. Moving beats dropping where there is somewhere to move to.
+Pinning the `md`+ columns instead of staging them is the tempting alternative and it is wrong: it was measured during #1774 and grew desktop rows 85px → 133px. Prefer moving low-priority content rather than dropping it — a date can ride under the Amount for a band before it goes. Moving beats dropping where there is somewhere to move to.
 
-**`TransactionsTable.tsx` still reveals everything at the single `md` stage, and must not be restructured to match the showcase's two.** It is also a seven-column table and it escapes measure starvation a different way, by **truncating its title to one line instead of wrapping it**. Re-measured under the container keying: one line at every width, 89.6px at 768px *and* at 1024px (ellipsised, with the full string on the `title` attribute), 225.1px at 1280px — so the defect above simply does not arise there. The staging rule is about tables whose flexible cell *wraps*. Restructuring `TransactionsTable` for consistency with a showcase would be a change against a defect measurement says is absent, which is the trap § *Local hint marker* already warns about. What #1999 did change there is only the *key*: the same columns collapse at the same widths, from the container instead of the viewport.
+A new container-keyed table takes `tableColumnClass` / `tableHideFromClass`, never a `md:` width: a viewport-keyed width on a container-keyed collapse is harmless only while this shell makes the two coincide (container ≥ 718px ⟺ viewport ≥ 768px), and splits under any container resize that does not track the viewport.
 
-**Where the two DO now agree: the amount column collapses below `md` in both**
-([#2734](https://github.com/d-hinders/Haven-AI/issues/2734) for the component,
-[#2792](https://github.com/d-hinders/Haven-AI/issues/2792) for the showcase),
-with the amount riding under the title and the date going with it. The showcase
-carried the old column for one merge and
-`e2e/table-container-collapse.spec.ts` measured the gap — 3 surviving body cells
-at a 717px container on `/transactions`, still 4 here.
-
-**Scope that assertion honestly: it counts surviving CELLS.** It is the check
-that the two tables collapse the same number of columns, and nothing more. It
-cannot see the amount stacked in the wrong place, an alignment divergence, or
-the title-wrap inversion #2792 found and fixed — the showcase ellipsised below
-`md` while the component wrapped, at the same 248px cell, so both tables passed
-this spec while rendering different rows. A green tick here is not a statement
-that the two render alike.
-
-Two axes still diverge **on purpose**, and neither is drift: the showcase stages
-in two steps (`md` + `xl`) where the component reveals at one, per the paragraph
-above; and the component carries its narrow widths unconditionally into desktop
-while the showcase hands them back with `md:w-auto`, because the showcase sizes
-its columns from content and the component does not.
-
-Do not read that `md:w-auto` as a pattern to copy. It is a **viewport**-keyed
-width on a table whose collapse is **container**-keyed, and it is harmless only
-because this shell makes the two coincide (container ≥ 718px ⟺ viewport ≥ 768px).
-Under a container resize that does not track the viewport they split — the exact
-trap the paragraphs above spend three passes warning about. A new
-container-keyed table takes `tableColumnClass` / `tableHideFromClass`, never a
-`md:` width.
-
-Note what can and cannot see this class of defect. The visual-regression gate compares every committed baseline — `/design-system` is one route among several since [#2318](https://github.com/d-hinders/Haven-AI/issues/2318), and `scripts/ci/visual-baseline-inventory.mjs` (printed into the job's own summary) is the authority for which captures those are, not this sentence — but every one of those captures is rendered at a width read from `scripts/evidence-viewports.mjs`, which holds exactly two: 1280 and 390 (pinned by [`packages/frontend/src/__tests__/capture-viewports.test.ts`](../../packages/frontend/src/__tests__/capture-viewports.test.ts), #2680). So **every width in the table above other than its two endpoints is invisible to the gate**, whichever route is captured, before and after. Geometry assertions are the guard — see `e2e/transaction-title-measure.spec.ts`, which asserts the measure floor and the row-height ceiling *together*, because either alone is satisfiable by a change that destroys the other. And note what a viewport-driven test *cannot* prove here: because container width is a function of viewport width on this shell, every viewport-driven assertion passes identically against the old viewport-keyed implementation. `e2e/table-container-collapse.spec.ts` therefore holds the viewport fixed and resizes the query container itself, in both halves (header labels and body cells) at once.
+Note what can and cannot see this class of defect. The visual-regression gate compares every committed baseline — `/design-system` is one route among several since [#2318](https://github.com/d-hinders/Haven-AI/issues/2318), and `scripts/ci/visual-baseline-inventory.mjs` (printed into the job's own summary) is the authority for which captures those are, not this sentence — but every one of those captures is rendered at a width read from `scripts/evidence-viewports.mjs`, which holds exactly two: 1280 and 390 (pinned by [`packages/frontend/src/__tests__/capture-viewports.test.ts`](../../packages/frontend/src/__tests__/capture-viewports.test.ts), #2680). So **every width in the table above other than its two endpoints is invisible to the gate**, whichever route is captured, before and after. Geometry assertions are the guard, and they should assert the measure floor and the row-height ceiling *together*, because either alone is satisfiable by a change that destroys the other. And note what a viewport-driven test *cannot* prove here: because container width is a function of viewport width on this shell, every viewport-driven assertion passes identically against the old viewport-keyed implementation, so a test of the collapse holds the viewport fixed and resizes the query container itself, reading header labels and body cells together.
 
 ### Sections (`Section`)
 
@@ -1901,7 +2679,7 @@ The public website (epic [#3572](https://github.com/d-hinders/Haven-AI/issues/35
 
 | px | Class | Where it is used (the built precedent, not a preference) |
 |---|---|---|
-| 12 | `h-3 w-3` | A glyph in a run of the product's **smallest type** — a disclosure chevron before a `<summary>`, a trailing arrow after a 12 px link label, a copy glyph after a mono address, a sort caret in a table header — including when that glyph is wrapped in its own small button, as long as it sits **inside** the type run rather than beside it. It is **not** the rung for a remove/dismiss control on a data row; that is 14, per [#1923](https://github.com/d-hinders/Haven-AI/issues/1923) below. Mostly `text-xs`, but **not exclusively, and the exception is the point**: `Table`'s header is `text-[11px]`, `FilterBar`'s is `text-sm`. Read it as *the dense-affordance rung*, not as a `text-xs` lookup |
+| 12 | `h-3 w-3` | A glyph in a run of the product's **smallest type** — a disclosure chevron before a `<summary>`, a trailing arrow after a 12 px link label, a copy glyph after a mono address, a sort caret in a table header — including when that glyph is wrapped in its own small button, as long as it sits **inside** the type run rather than beside it. It is **not** the rung for a remove/dismiss control on a data row; that is 14, per [#1923](https://github.com/d-hinders/Haven-AI/issues/1923) below. Mostly `text-xs`, but **not exclusively, and the exception is the point**: `Table`'s header is `text-[11px]`, and the `ListToolbar` pattern's `FacetMenu` rows are `text-sm`. Read it as *the dense-affordance rung*, not as a `text-xs` lookup |
 | 14 | `h-3.5 w-3.5` | The default beside `text-sm`; the **block-leading indicator** on a banner or callout (`flex items-start` + `mt-0.5` + `flex-shrink-0`) whatever the body type is — it aligns to the first line's cap height, not to the em box; and the glyph in a **remove / dismiss control on a data row**, whether its box is a fixed `h-6 w-6` or padding-only `p-1` ([#1923](https://github.com/d-hinders/Haven-AI/issues/1923), below) |
 | 16 | `h-4 w-4` | Beside `text-base`, and the icon in a **32–36 px tile** (`h-8 w-8` / `h-9 w-9`) |
 | 20 | `h-5 w-5` | A standalone icon with no container, and `EmptyState`'s icon slot — which is literally `h-5 w-5` inside a 40 px halo, so a call site that passes anything else is fighting the primitive |
@@ -1959,8 +2737,8 @@ Clean output of the census today is **`UNCLASSIFIED: 0`** and **`OFF-SCALE: 0`**
 ### Arrows
 
 - **The marketing exemption in the first bullet covers this whole section, including these arrow rules.** `components/brand`, `components/marketing`, the landing page, `/how-it-works`, `/developers` and `/for-agents` are intentionally bespoke and exempt from every icon rule here (#874). The authoritative list is `MARKETING_SURFACES` in `packages/frontend/scripts/design-lint.mjs` — read it there; this sentence is a pointer, not a copy.
-- **In a gated surface, an arrow that is an affordance comes from lucide.** A control's trailing arrow (`Button`'s `trailingIcon`, which renders lucide `ArrowRight` for you), a list/row chevron, a disclosure marker, anything that animates (`ErrorBoundary`'s `group-open:rotate-90`, `AgentPanel`'s removed-agents toggle). Never a raw glyph — it cannot be rotated, sized on the icon scale, or stroked at 1.5, and it lands wherever the label's typeface puts it rather than where the icon system does.
-- **Exactly one gated file may render a raw arrow:** `components/haven/TransactionMovement.tsx`, the `From <a> → To <b>` movement line (the one-file allowlist is pinned by [`packages/frontend/src/__tests__/design-system-arrows-allowlist.test.ts`](../../packages/frontend/src/__tests__/design-system-arrows-allowlist.test.ts), #2680). The glyph joins two operands the way a colon would — `aria-hidden`, on the text baseline at the run's own size and weight, with the words `From` and `To` carrying the direction. A lucide glyph would sit at a fixed pixel size beside text it must match, and since #1774 it is nested *inside* the `From` half to stop it wrapping alone, so there is no separable icon slot to fill. **Every other raw arrow in a gated surface is a defect**, whatever it is called.
+- **In a gated surface, an arrow that is an affordance comes from lucide.** A control's trailing arrow (`Button`'s `trailingIcon`, which renders lucide `ArrowRight` for you), a list/row chevron, a disclosure marker, anything that animates (`ErrorBoundary`'s `group-open:rotate-90`). Never a raw glyph — it cannot be rotated, sized on the icon scale, or stroked at 1.5, and it lands wherever the label's typeface puts it rather than where the icon system does.
+- **Exactly one gated file may render a raw arrow:** `components/haven/TransactionMovement.tsx`, the `From <a> → To <b>` movement line (the one-file allowlist is pinned by [`packages/frontend/src/__tests__/design-system-arrows-allowlist.test.ts`](../../packages/frontend/src/__tests__/design-system-arrows-allowlist.test.ts), #2680). The glyph joins two operands the way a colon would — `aria-hidden`, on the text baseline at the run's own size and weight, with the words `From` and `To` carrying the direction. Its `bare` variant (#4266) drops the two words for a ledger subline that already names the actor — "You · Operations → Reserve", a move between the user's own accounts — and an sr-only "to" then carries the direction for screen readers. Bare is one line that never wraps — each name shrinks to an ellipsis instead — because its host, the compact ledger subline, sits in a 72px row from `sm` up, where a wrapped line overflows the row (#1833). A lucide glyph would sit at a fixed pixel size beside text it must match, and since #1774 it is nested *inside* the `From` half to stop it wrapping alone, so there is no separable icon slot to fill. **Every other raw arrow in a gated surface is a defect**, whatever it is called.
 
   **Why a one-file allowlist and not a rule of thumb.** This section has now been wrong three times in the same way, and the shape is worth keeping:
 
@@ -2084,7 +2862,8 @@ produced:
 - a `Tooltip` trigger inside a composite `role="link"` cannot be made focusable because
   the composite owns the tab stop — visible only in context. `AgentCard` was the original
   #2038 example; #3550 retired that structure by making the stretched name link and
-  tooltip siblings, so the live rendered check now proves the tooltip remains reachable;
+  tooltip siblings, and #4209 moved the tooltip to the agent detail page, where the
+  live rendered check (`tooltip-reachability*.spec.ts`) now proves it reachable;
 - the `wrong_wallet` gate state
   ([#2073](https://github.com/d-hinders/Haven-AI/issues/2073)) is illustrated on
   this page by hand-built markup rather than by `OnchainActionGate`, so its
@@ -2199,13 +2978,13 @@ element-scoped capture clips the very thing it photographs (#1873).
 | UI primitives | `packages/frontend/src/components/ui/Button.tsx`, `Card.tsx`, `CodeBlock.tsx`, `InlineAlert.tsx`, `Input.tsx`, `Modal.tsx`, `PageHeader.tsx`, `Skeleton.tsx`, `Toast.tsx`, `Tooltip.tsx` |
 | Marketing components | `packages/frontend/src/components/marketing/site/**` (the public site), `marketing/Section.tsx`, `BrandBandButton.tsx`, `TrailingArrow.tsx` |
 | Marketing pages | `packages/frontend/src/app/page.tsx`, `app/how-it-works/page.tsx`, `app/how-it-works/protocols/page.tsx`, `app/developers/page.tsx`, `app/for-agents/page.tsx` |
-| Authenticated shell | `packages/frontend/src/components/sidebar/Sidebar.tsx`, `packages/frontend/src/components/TopBar.tsx`, authenticated routes under `packages/frontend/src/app/(authenticated)` |
+| Authenticated shell | `packages/frontend/src/components/AuthenticatedShell.tsx`, `packages/frontend/src/components/sidebar/Sidebar.tsx`, authenticated routes under `packages/frontend/src/app/(authenticated)` |
 | Live product reference | `packages/frontend/src/app/(authenticated)/design-system/page.tsx` |
 | App entity cards | `packages/frontend/src/components/ui/entityCardStyles.ts` shared by Accounts and Agents; linked cards use a stretched semantic name link with sibling controls above its overlay |
 | App modals | `packages/frontend/src/components/ui/Modal.tsx` plus Send, Receive, Add funds, and agent modals in `packages/frontend/src/components` |
 | Agent & transaction activity rows | `packages/frontend/src/components/haven/TransactionActivityRow.tsx` |
 | Transaction previews | `packages/frontend/src/components/haven/TransactionActivityRow.tsx`, `packages/frontend/src/components/haven/TransactionMovement.tsx` |
-| Full transaction history | `packages/frontend/src/components/transactions/TransactionsTable.tsx` |
+| Full transaction history | `packages/frontend/src/app/(authenticated)/transactions/TransactionsClient.tsx`, `packages/frontend/src/components/haven/TransactionActivityRow.tsx` |
 
 The handoff plan in `docs/archive/redesign-handoff.md` is now project history.
 

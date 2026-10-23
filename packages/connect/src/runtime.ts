@@ -53,7 +53,7 @@ import { tombstonesDirForCredentialRoot } from './tombstone.js'
 import { assertSupportedNodeVersion } from './local-mcp-runtime.js'
 import { MCP_RUNTIME_MANIFEST } from './runtime-manifest.js'
 
-export const CONNECTOR_VERSION = '0.10.0-alpha.0'
+export const CONNECTOR_VERSION = '0.11.0-alpha.0'
 
 /**
  * #3737 owner decision 4: the derived slug marks NON-production backends

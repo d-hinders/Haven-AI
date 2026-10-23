@@ -7,11 +7,11 @@ import {
   transactionFiat,
   transactionInitiator,
   transactionMovement,
+  transactionRowBadge,
   transactionStatus,
-  transactionTitle,
 } from '../transaction-presentation'
 import { truncate } from '@/lib/format'
-import TransactionsTable from '@/components/transactions/TransactionsTable'
+import TransactionsLedgerRow from '@/components/transactions/TransactionsLedgerRow'
 import TransactionDetailPanel from '@/components/transactions/TransactionDetailPanel'
 import type { AggregatedTransaction } from '@/types/transactions'
 
@@ -51,7 +51,6 @@ describe('transaction presentation', () => {
       paymentId: 'sweep-id',
     })
 
-    expect(transactionTitle(sweep)).toBe('Agent funds swept back')
     expect(transactionInitiator(sweep)).toBe('Research assistant')
     expect(transactionStatus(sweep)).toEqual({ label: 'Recovered', tone: 'success' })
 
@@ -64,7 +63,6 @@ describe('transaction presentation', () => {
   it('keeps ordinary incoming transfers generic', () => {
     const incoming = tx()
 
-    expect(transactionTitle(incoming)).toBe('Received payment')
     expect(transactionInitiator(incoming)).toBe('')
     expect(transactionStatus(incoming)).toBeNull()
   })
@@ -83,7 +81,6 @@ describe('transaction presentation', () => {
 
     expect(transactionInitiator(row)).toBe('Research assistant')
     expect(transactionInitiator(row)).not.toBe('You')
-    expect(transactionTitle(row)).toBe('Agent payment by Research assistant')
   })
 
   it('attributes an erc7710 x402 row to its agent — never "You"', () => {
@@ -97,14 +94,12 @@ describe('transaction presentation', () => {
 
     expect(transactionInitiator(row)).toBe('Research assistant')
     expect(transactionInitiator(row)).not.toBe('You')
-    expect(transactionTitle(row)).toBe('Agent payment by Research assistant')
   })
 
   it('renders "You" only for human-initiated rows', () => {
     const row = tx({ direction: 'out', source: 'direct', initiatedBy: 'human' })
 
     expect(transactionInitiator(row)).toBe('You')
-    expect(transactionTitle(row)).toBe('Payment sent by you')
   })
 
   it('renders explicit "Unknown" for outbound rows with missing attribution — never "You"', () => {
@@ -112,7 +107,6 @@ describe('transaction presentation', () => {
 
     expect(transactionInitiator(row)).toBe('Unknown')
     expect(transactionInitiator(row)).not.toBe('You')
-    expect(transactionTitle(row)).toBe('Payment sent')
   })
 
   it('maps the settlement scheme to its display label, null-in null-out', () => {
@@ -130,7 +124,7 @@ describe('transaction presentation', () => {
  * chain) on `blockscout-v2`, which already checksummed — the opposite of what
  * the provider names suggest, and pinned by a test in
  * `packages/backend/src/modules/transactions/__tests__/normalize.test.ts`.
- * Every rendered counterparty label resolves through `transactionTitle`, and
+ * Every rendered counterparty label resolves through `counterpartyLabel`, and
  * both lookups inside it lowercase before matching — so the change is inert.
  *
  * These pin that. The failure mode if the lowercasing is ever dropped is
@@ -247,6 +241,68 @@ describe('counterpartyLabel no-address mode (#3810)', () => {
     expect(label).not.toContain('…')
   })
 
+  it('#4099: an inbound row reads "From <sender>" when the server resolved one — a transfer from an own account', () => {
+    const named = counterpartyLabel(tx({ direction: 'in', from: UNKNOWN }), undefined, undefined, {
+      noAddress: true,
+      resolvedName: 'Reserve',
+    })
+    // "From …", never the bare name: a bare account name reads as the
+    // account that RECEIVED the money (owner decision, 2026-10-20).
+    expect(named).toBe('From Reserve')
+
+    // No name from the server — every other deposit — is still "Deposit".
+    for (const resolvedName of [null, undefined]) {
+      expect(
+        counterpartyLabel(tx({ direction: 'in', from: UNKNOWN }), undefined, undefined, {
+          noAddress: true,
+          resolvedName,
+        }),
+      ).toBe('Deposit')
+    }
+
+    // A sweep keeps its own title even if a name rode along.
+    expect(
+      counterpartyLabel(
+        tx({ direction: 'in', from: UNKNOWN, activityType: 'delegate_sweep', agentName: 'Research assistant' }),
+        undefined,
+        undefined,
+        { noAddress: true, resolvedName: 'Reserve' },
+      ),
+    ).toBe('Returned from Research assistant')
+  })
+
+  it('#4099: an inbound row from an own account reads "From <account>" through the client own-account map', () => {
+    // The account page and /transactions get no server-resolved name; they
+    // carry the user's own accounts as a chain-keyed map instead.
+    const accounts = new Map([[`${UNKNOWN.toLowerCase()}:8453`, 'Reserve']])
+    expect(
+      counterpartyLabel(tx({ direction: 'in', from: UNKNOWN, chainId: 8453 }), () => null, accounts, {
+        noAddress: true,
+      }),
+    ).toBe('From Reserve')
+
+    // Own accounts only: a contact name never names a deposit, and an own
+    // account on another chain is a different account.
+    expect(
+      counterpartyLabel(tx({ direction: 'in', from: UNKNOWN, chainId: 8453 }), () => 'Alice', undefined, {
+        noAddress: true,
+      }),
+    ).toBe('Deposit')
+    expect(
+      counterpartyLabel(tx({ direction: 'in', from: UNKNOWN, chainId: 84532 }), () => null, accounts, {
+        noAddress: true,
+      }),
+    ).toBe('Deposit')
+
+    // A server-resolved name still wins.
+    expect(
+      counterpartyLabel(tx({ direction: 'in', from: UNKNOWN, chainId: 8453 }), () => null, accounts, {
+        noAddress: true,
+        resolvedName: 'Savings',
+      }),
+    ).toBe('From Savings')
+  })
+
   it('prefers the server-resolved counterparty name, then the client lookups', () => {
     const resolved = counterpartyLabel(
       tx({ direction: 'out', source: 'direct', to: UNKNOWN }),
@@ -279,9 +335,10 @@ describe('counterpartyLabel no-address mode (#3810)', () => {
 
 /**
  * #3811 — the shared list screens ADOPT the no-address rules. The
- * transactions table (and, through `activityCounterparty`, the agent detail
- * Activity table) never render a truncated address in a row; the detail
- * panel is where the address lives, in full, with a copy button.
+ * `/transactions` ledger rows (#4266; the transactions table before them)
+ * and, through `activityCounterparty`, the agent detail Activity rows never
+ * render a truncated address in a row; the detail panel is where the address
+ * lives, shortened under Technical details, with a copy button (#4267).
  */
 describe('shared screens adopt the no-address rules (#3811)', () => {
   const UNKNOWN = '0x9999999999999999999999999999999999999999'
@@ -291,26 +348,33 @@ describe('shared screens adopt the no-address rules (#3811)', () => {
 
   function renderTable() {
     return render(
-      <TransactionsTable
-        transactions={[row]}
-        loading={false}
-        error={null}
-        onRefresh={() => {}}
-        hasActiveFilters={false}
-      />,
+      <div>
+        {[row].map((r, i) => (
+          <TransactionsLedgerRow
+            key={i}
+            tx={r}
+            resolveAddress={() => null}
+            accountNamesByAddress={new Map()}
+            showAccount={false}
+            onOpen={() => {}}
+            insetDivider={false}
+          />
+        ))}
+      </div>,
     )
   }
 
-  it('TransactionsTable renders the calm counterparty — never a truncated address', () => {
+  it('the /transactions ledger row renders the calm counterparty — never a truncated address', () => {
     renderTable()
 
-    // The counterparty falls back to calm copy in BOTH the desktop and the
-    // stacked mobile layout of the same table.
-    expect(screen.getAllByText('New recipient').length).toBeGreaterThan(0)
+    expect(screen.getByText('New recipient')).toBeInTheDocument()
     expect(screen.queryByText(TRUNCATED)).not.toBeInTheDocument()
   })
 
-  it('TransactionDetailPanel renders the FULL address with a copy affordance', () => {
+  // #4267 supersedes #3811's "in full" rule for the panel: the title follows
+  // the row's no-address rule, and the address sits shortened under
+  // Technical details — the full value one copy (or the explorer link) away.
+  it('TransactionDetailPanel titles by the no-address rule and shortens the address, with copy', () => {
     render(
       <TransactionDetailPanel
         transaction={row}
@@ -320,10 +384,10 @@ describe('shared screens adopt the no-address rules (#3811)', () => {
       />,
     )
 
-    // The full address is on the screen (not the truncated form)…
-    expect(screen.getAllByText(UNKNOWN).length).toBeGreaterThan(0)
-    expect(screen.queryByText(TRUNCATED)).not.toBeInTheDocument()
-    // …and the copy affordance names the thing, not the widget (the fixture
+    expect(screen.getByRole('dialog', { name: 'New recipient' })).toBeInTheDocument()
+    expect(screen.queryByText(UNKNOWN)).not.toBeInTheDocument()
+    expect(screen.getAllByText(TRUNCATED).some((el) => el.getAttribute('title') === UNKNOWN)).toBe(true)
+    // The copy affordance names the thing, not the widget (the fixture
     // carries token + account addresses too, so there are several).
     expect(screen.getAllByRole('button', { name: 'Copy address' }).length).toBeGreaterThan(0)
   })
@@ -356,26 +420,42 @@ describe('shared screens adopt the no-address rules (#3811)', () => {
 
 /**
  * #3811 — the user's currency on the shared tables (#3805's currency mode,
- * #3824's amounts). The acceptance cases, verbatim from the issue: a sweep
- * row and a direct row with no book-time fiat render `≈`; a confirmed x402
- * row with `convertedAmount` renders without it; an unpriced row renders an
- * em dash, never 0. The agent Activity table feeds the SAME path through
- * `activityToTransaction` (covered in AgentDetailClient.test.tsx).
+ * #3824's amounts). The acceptance cases, verbatim from the issue as amended
+ * by #3950: a sweep row and a direct row with no book-time fiat render the
+ * converted figure with NO `≈` mark (the owner dropped the mark so the
+ * figure cannot wrap); a confirmed x402 row with `convertedAmount` renders
+ * plain; an unpriced row renders an em dash, never 0. The agent Activity
+ * table feeds the SAME path through `activityToTransaction` (covered in
+ * AgentDetailClient.test.tsx).
  */
-describe('the transactions table renders the user currency (#3811)', () => {
+describe('the /transactions ledger rows render the user currency (#3811, #4266)', () => {
   function renderTable(rows: AggregatedTransaction[]) {
     return render(
-      <TransactionsTable
-        transactions={rows}
-        loading={false}
-        error={null}
-        onRefresh={() => {}}
-        hasActiveFilters={false}
-      />,
+      <div>
+        {rows.map((r, i) => (
+          <TransactionsLedgerRow
+            key={i}
+            tx={r}
+            resolveAddress={() => null}
+            accountNamesByAddress={new Map()}
+            showAccount={false}
+            onOpen={() => {}}
+            insetDivider={false}
+          />
+        ))}
+      </div>,
     )
   }
 
-  it('renders "≈" on a sweep row priced serve-time (no book-time fiat)', () => {
+  // #3950 (owner decision 2026-10-14): list rows render the converted figure
+  // with NO `≈` mark. The mark — a span plus a breakable space in front of
+  // an otherwise-NBSP figure — was the only break opportunity a list amount
+  // had, so every approx-valued row wrapped onto two lines. Both inverted
+  // tests below assert the row's one rendering shows the converted figure,
+  // sign stripped and NBSP-normalised, and that no `≈` survives anywhere in
+  // the row. (The table rendered the amount twice — an `md`+ column and a
+  // block under the title; the ledger row has one amount, #4266.)
+  it('renders the converted figure without "≈" on a sweep row priced serve-time (no book-time fiat)', () => {
     renderTable([
       tx({
         activityType: 'delegate_sweep',
@@ -384,13 +464,48 @@ describe('the transactions table renders the user currency (#3811)', () => {
         approxCurrency: 'SEK',
       }),
     ])
-    expect(screen.getAllByText('≈').length).toBeGreaterThan(0)
+    expect(screen.queryByText('≈')).not.toBeInTheDocument()
+    // Exactly one match — the ledger row renders the amount once. The
+    // matcher anchors on `<Amount>`'s own span (`v2-tabular`): a function
+    // matcher sees every ancestor's full textContent, so the wrappers would
+    // otherwise inflate the count.
+    expect(
+      screen.getAllByText((_, element) =>
+        element?.classList.contains('v2-tabular') === true &&
+        (element?.textContent ?? '').replace(/\u00a0/g, ' ').replace(/^[-+]/, '') === '10,50 kr',
+      ).length,
+    ).toBe(1)
   })
 
-  it('renders "≈" on a direct row with no book-time fiat', () => {
+  it('renders the converted figure without "≈" on a direct row with no book-time fiat', () => {
     renderTable([
       tx({ direction: 'out', source: 'direct', approxAmount: '10.50', approxCurrency: 'SEK' }),
     ])
+    expect(screen.queryByText('≈')).not.toBeInTheDocument()
+    expect(
+      screen.getAllByText((_, element) =>
+        element?.classList.contains('v2-tabular') === true &&
+        (element?.textContent ?? '').replace(/\u00a0/g, ' ').replace(/^[-+]/, '') === '10,50 kr',
+      ).length,
+    ).toBe(1)
+  })
+
+  // #3950 guard: the mark moved OFF the list rows and nowhere else. The
+  // detail panel is where `≈` stays — beside the token amount, it explains
+  // why the two figures differ (`≈ +0,10 kr  0.10 USDC`).
+  it('the detail panel still renders "≈" on an approx-valued transaction', () => {
+    render(
+      <TransactionDetailPanel
+        transaction={tx({
+          direction: 'in',
+          approxAmount: '0.10',
+          approxCurrency: 'SEK',
+        })}
+        open
+        onClose={() => {}}
+        resolveAddress={() => null}
+      />,
+    )
     expect(screen.getAllByText('≈').length).toBeGreaterThan(0)
   })
 
@@ -422,29 +537,94 @@ describe('the transactions table renders the user currency (#3811)', () => {
   })
 })
 
-describe('transactionFiat (#3811)', () => {
-  it('prefers book-time convertedAmount, plain', () => {
+describe('transactionFiat (#3811, #4165)', () => {
+  it('prefers book-time convertedAmount, plain — even in the detail panel', () => {
     expect(
-      transactionFiat({
-        convertedAmount: '134.5000',
-        convertedCurrency: 'SEK',
-        approxAmount: '99.00',
-        approxCurrency: 'USD',
-      }),
+      transactionFiat(
+        {
+          convertedAmount: '134.5000',
+          convertedCurrency: 'SEK',
+          approxAmount: '99.00',
+          approxCurrency: 'USD',
+          chainId: 8453,
+          asset: 'USDC',
+        },
+        'detail',
+      ),
     ).toEqual({ amount: 134.5, currency: 'SEK', approx: false })
   })
 
-  it('falls back to the serve-time approxAmount with the ≈ mark', () => {
-    expect(
-      transactionFiat({ convertedAmount: null, convertedCurrency: undefined, approxAmount: '12.25', approxCurrency: 'USD' }),
-    ).toEqual({ amount: 12.25, currency: 'USD', approx: true })
+  it('marks a serve-time figure in another currency ≈ in the detail panel, never in a row', () => {
+    const sek = { convertedAmount: null, approxAmount: '134.50', approxCurrency: 'SEK' as const, chainId: 8453, asset: 'USDC' }
+    expect(transactionFiat(sek, 'detail')).toEqual({ amount: 134.5, currency: 'SEK', approx: true })
+    expect(transactionFiat(sek, 'row')).toEqual({ amount: 134.5, currency: 'SEK', approx: false })
   })
 
-  it('prices an unknown valuation as null — never 0', () => {
-    expect(transactionFiat({ convertedAmount: null, approxAmount: null })).toEqual({
+  it('never marks USDC shown in USD — the figure is dollars', () => {
+    const usd = { convertedAmount: null, approxAmount: '12.25', approxCurrency: 'USD' as const, chainId: 8453, asset: 'USDC' }
+    expect(transactionFiat(usd, 'detail')).toEqual({ amount: 12.25, currency: 'USD', approx: false })
+    // `tokenSymbol` wins over `asset` when the feed serves both.
+    expect(transactionFiat({ ...usd, asset: '0xabc', tokenSymbol: 'USDC' }, 'detail').approx).toBe(false)
+  })
+
+  it('keeps the mark for a token that floats, even in USD', () => {
+    expect(
+      transactionFiat({ convertedAmount: null, approxAmount: '30.00', approxCurrency: 'USD', chainId: 8453, asset: 'ETH' }, 'detail'),
+    ).toEqual({ amount: 30, currency: 'USD', approx: true })
+  })
+
+  it('prices an unknown valuation as null — never 0, and never marked', () => {
+    expect(transactionFiat({ convertedAmount: null, approxAmount: null }, 'detail')).toEqual({
       amount: null,
       currency: 'SEK',
-      approx: true,
+      approx: false,
+    })
+  })
+
+  // #4288 — the ONE row-badge precedence. The account Activity tab now
+  // renders the same badges `/transactions` does for the same rows; each
+  // rule below is the order the helper fixes.
+  describe('transactionRowBadge', () => {
+    it('falls back to "Failed" for an errored row with no other badge', () => {
+      // The production shape the account page showed unlabelled: an errored
+      // on-chain payment with no lifecycle and no wire badge.
+      expect(
+        transactionRowBadge(
+          tx({ isError: true, direction: 'out', paymentFlowStatus: null, statusBadge: undefined }),
+        ),
+      ).toEqual({ label: 'Failed', tone: 'danger' })
+    })
+
+    it('labels a clean row nothing', () => {
+      expect(transactionRowBadge(tx({}))).toBeNull()
+    })
+
+    it('puts the sweep status first — a sweep reads "Recovered"', () => {
+      const sweep = tx({ activityType: 'delegate_sweep', isError: true })
+      expect(transactionRowBadge(sweep)).toEqual({ label: 'Recovered', tone: 'success' })
+    })
+
+    it('puts the machine-payment lifecycle over the wire badge', () => {
+      expect(
+        transactionRowBadge(
+          tx({
+            direction: 'out',
+            paymentFlowStatus: 'needs_attention',
+            statusBadge: { label: 'Sent', tone: 'success' },
+          }),
+        ),
+      ).toEqual({ label: 'Needs attention', tone: 'warning' })
+      expect(
+        transactionRowBadge(tx({ direction: 'out', paymentFlowStatus: 'confirming_merchant' })),
+      ).toEqual({ label: 'Confirming', tone: 'warning' })
+    })
+
+    it('uses the wire badge when no lifecycle applies', () => {
+      expect(
+        transactionRowBadge(
+          tx({ direction: 'out', statusBadge: { label: 'Sent', tone: 'success' } }),
+        ),
+      ).toEqual({ label: 'Sent', tone: 'success' })
     })
   })
 })

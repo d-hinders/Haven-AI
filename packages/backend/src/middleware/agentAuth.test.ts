@@ -1,6 +1,7 @@
 import Fastify from 'fastify'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { agentAuthMiddleware } from './agentAuth.js'
+import { SWEEP_RECOVERY_ROUTES, agentAuthMiddleware } from './agentAuth.js'
+import { ROUTE_MODULE_BY_OPERATION } from '../openapi/route-modules.generated.js'
 
 const { mockQuery } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
@@ -17,6 +18,9 @@ function buildApp() {
   app.get('/payment-tool', { preHandler: agentAuthMiddleware }, async () => ({ ok: true }))
   app.post('/machine-payments/sweep/prepare', { preHandler: agentAuthMiddleware }, async () => ({ ok: true }))
   app.post('/machine-payments/sweep/submit', { preHandler: agentAuthMiddleware }, async () => ({ ok: true }))
+  // Same path, different method: not a recovery route (the exemption is
+  // keyed on METHOD + matched pattern).
+  app.get('/machine-payments/sweep/prepare', { preHandler: agentAuthMiddleware }, async () => ({ ok: true }))
   return app
 }
 
@@ -243,5 +247,35 @@ describe('agentAuthMiddleware', () => {
     expect(response.statusCode).toBe(403)
     expect(response.json().error).toBe('Agent is no longer linked to a Haven wallet')
     await app.close()
+  })
+
+  it('the recovery exemption is keyed on the method too: GET on a sweep path is refused for a paused key', async () => {
+    const app = buildApp()
+    mockQuery.mockImplementation(async () => ({
+      rows: [{
+        id: 'agent-1', user_id: 'user-1', name: 'A',
+        delegate_address: '0x1111111111111111111111111111111111111111',
+        account_address: '0x2222222222222222222222222222222222222222',
+        chain_id: 100, status: 'paused',
+      }],
+    }))
+    const response = await app.inject({
+      method: 'GET',
+      url: '/machine-payments/sweep/prepare',
+      headers: { authorization: 'Bearer sk_agent_paused' },
+    })
+    expect(response.statusCode).toBe(403)
+    expect(response.json().error).toBe('agent_paused')
+    await app.close()
+  })
+
+  it('every recovery route names a real registered operation of routes/machine-payments.ts', () => {
+    // A renamed mount prefix or route would otherwise leave the exemption
+    // naming a route that no longer exists — recovery would fail closed, and
+    // only an operator with a stranded balance would notice.
+    expect(SWEEP_RECOVERY_ROUTES.size).toBe(2)
+    for (const operation of SWEEP_RECOVERY_ROUTES) {
+      expect(ROUTE_MODULE_BY_OPERATION[operation], operation).toBe('routes/machine-payments.ts')
+    }
   })
 })

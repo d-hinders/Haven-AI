@@ -1,24 +1,27 @@
 'use client'
 
 import { type ReactNode } from 'react'
+import { ChevronDown, ExternalLink } from 'lucide-react'
 import { SidePanel } from '@/components/ui/SidePanel'
-import { Amount } from '@/components/haven'
+import { Amount, DirectionMark, NoticeRow } from '@/components/haven'
+import { Button } from '@haven_ai/ui/Button'
 import { CopyButton } from '@haven_ai/ui/CopyButton'
+import { Icon } from '@/components/ui/Icon'
+import { Monogram } from '@/components/ui/Monogram'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { AccountingBadge } from '@/components/accounting/AccountingBadge'
 import { getExplorerUrlOrNull } from '@/lib/chains'
 import NetworkPill from '@/components/NetworkPill'
 import { truncate } from '@/lib/format'
-import { parseX402Hostname } from '@/lib/transaction-labels'
+import { parseX402Hostname, paymentSourceTitle } from '@/lib/transaction-labels'
+import { strandedFundsCauseWithLocation } from '@/lib/stranded-funds-copy'
 import {
+  counterpartyLabel,
   isDelegateSweep,
   settlementSchemeLabel,
   transactionFiat,
-  transactionInitiator,
-  transactionStatus,
-  transactionTitle,
+  transactionRowBadge,
 } from '@/lib/transaction-presentation'
-import { machinePaymentLifecyclePresentation } from '@/lib/machine-payment-lifecycle'
 import type { AggregatedTransaction } from '@/types/transactions'
 
 interface Props {
@@ -31,114 +34,195 @@ interface Props {
 
 // ── Small presentational helpers ───────────────────────────────────
 
-function DetailRow({ label, value }: { label: string; value: ReactNode }) {
+/**
+ * One label/value row — the `dl` row the Details block and the Technical
+ * details disclosure share (design-system § Technical details disclosure), so
+ * the opened block reads as part of the panel. `note` is a one-line
+ * explanation under the value.
+ */
+function DetailRow({ label, value, note }: { label: string; value: ReactNode; note?: string }) {
   return (
-    <div className="flex items-start justify-between gap-4 border-b border-[var(--v2-table-row-border)] py-2.5 last:border-b-0">
-      <span className="text-xs text-[var(--v2-ink-3)]">{label}</span>
-      <span className="min-w-0 text-right text-sm text-[var(--v2-ink)]">{value}</span>
+    <div className="grid grid-cols-[max-content_minmax(0,1fr)] items-baseline gap-3 border-b border-[var(--v2-table-row-border)] py-2.5 last:border-b-0">
+      {/* `max-content`: a label never wraps ("Settlement transaction"). */}
+      <dt className="whitespace-nowrap text-xs text-[var(--v2-ink-3)]">{label}</dt>
+      <dd className="min-w-0 text-right text-sm text-[var(--v2-ink-2)]">
+        <div>{value}</div>
+        {/* #4312 C: right-aligned like the value above it — `text-left` put
+            the note's left edge on the value column's start, lining up with
+            neither the labels nor the right-aligned values. */}
+        {note ? <p className="mt-0.5 text-right text-xs text-[var(--v2-ink-3)]">{note}</p> : null}
+      </dd>
     </div>
   )
 }
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <div className="mb-5 last:mb-0">
-      <p className="mb-1 text-xs font-medium uppercase tracking-wide text-[var(--v2-ink-3)]">
-        {title}
-      </p>
-      <div>{children}</div>
-    </div>
-  )
-}
-
-function ExplorerLink({
+/**
+ * An address or hash in Technical details (#4267): shortened (`0x0415…b195`),
+ * never wrapping, with copy and an explorer link. The full value is one copy
+ * or one click away — this supersedes #3811's "render it in full" rule, whose
+ * two-line wraps the shortened form stops. A row on a chain the registry does
+ * not know keeps the copy and drops the link.
+ */
+function OnChainValue({
   chainId,
   type,
   value,
-  label,
 }: {
   chainId: number
   type: 'tx' | 'address'
   value: string
-  label?: string
 }) {
   const href = getExplorerUrlOrNull(chainId, type, value)
-  // A persisted row on a chain the registry does not know: show the value, no link.
-  // `break-all` because #3811 renders addresses and hashes IN FULL here — the
-  // drawer is where users verify, so the value must be readable (wrapped) and
-  // copyable, not ellipsised.
-  if (!href) {
-    return (
-      <span className="v2-tabular break-all" title={value}>
-        {label ?? truncate(value)}
-      </span>
-    )
-  }
+  const noun = type === 'tx' ? 'transaction' : 'address'
   return (
-    <a
-      href={href}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="v2-tabular break-all text-[var(--v2-brand)] underline-offset-2 hover:underline"
-      title={value}
-    >
-      {label ?? truncate(value)}
-    </a>
+    // `-my-3`: the two 44px targets (#1726) would otherwise make every
+    // address row ~65px against the 40px of a text row.
+    <span className="-my-3 inline-flex max-w-full items-center justify-end whitespace-nowrap">
+      <span className="v2-tabular mr-1 font-mono text-xs text-[var(--v2-ink-2)]" title={value}>
+        {truncate(value)}
+      </span>
+      <CopyButton value={value} label={noun} />
+      {/* #4312 D: the trailing 44px slot is ALWAYS reserved, whether or not
+          the link fills it — with it the copy glyph's centre sits one 44px
+          target in from the content edge on EVERY row, so a registry-unknown
+          chain can no longer pull the copy icon into the explorer column. */}
+      {href ? (
+        <a
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label={`Open ${noun} in explorer`}
+          title={value}
+          className="inline-flex h-11 w-11 items-center justify-center rounded text-[var(--v2-ink-3)] hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
+        >
+          <Icon icon={ExternalLink} className="h-3.5 w-3.5" />
+        </a>
+      ) : (
+        <span aria-hidden className="h-11 w-11 flex-shrink-0" />
+      )}
+    </span>
   )
 }
 
 // ── Field resolution ───────────────────────────────────────────────
 
-function counterpartyName(
-  tx: AggregatedTransaction,
-  address: string,
-  resolveAddress?: (address: string) => string | null,
-  accountNamesByAddress?: Map<string, string>,
-): string | null {
-  return (
-    resolveAddress?.(address) ??
-    accountNamesByAddress?.get(`${address.toLowerCase()}:${tx.chainId}`) ??
-    null
-  )
-}
+type Kind = 'x402' | 'mpp' | 'sweep' | 'move' | 'send' | 'receive'
 
-function AddressValue({
-  tx,
-  address,
-  resolveAddress,
-  accountNamesByAddress,
-}: {
-  tx: AggregatedTransaction
-  address: string
-  resolveAddress?: (address: string) => string | null
-  accountNamesByAddress?: Map<string, string>
-}) {
-  const name = counterpartyName(tx, address, resolveAddress, accountNamesByAddress)
-  return (
-    <span className="inline-flex flex-col items-end gap-0.5">
-      {name ? <span className="text-[var(--v2-ink)]">{name}</span> : null}
-      {/* #3811: the drawer is where users go to verify, so the address
-          renders IN FULL — the copy button is the one copy affordance
-          (`CopyButton` owns the hit area, the confirmation, and the silent
-          catch); the explorer link stays beside it. The row previously
-          ellipsised the address behind the link. */}
-      <span className="inline-flex items-center gap-1">
-        <ExplorerLink chainId={tx.chainId} type="address" value={address} label={address} />
-        <CopyButton value={address} label="address" />
-      </span>
-    </span>
-  )
-}
-
-// ── Per-type bodies ────────────────────────────────────────────────
-
-function rowType(tx: AggregatedTransaction): 'x402' | 'mpp' | 'sweep' | 'send' | 'receive' {
+function rowKind(tx: AggregatedTransaction): Kind {
   if (isDelegateSweep(tx)) return 'sweep'
+  if (tx.ownTransfer) return 'move'
   if (tx.source === 'x402') return 'x402'
   if (tx.source === 'mpp_demo') return 'mpp'
   return tx.direction === 'in' ? 'receive' : 'send'
 }
 
+/** The kind in words, under the title (#4267). */
+function kindLabel(tx: AggregatedTransaction, kind: Kind): string {
+  if (tx.isError) return 'Payment attempt'
+  if (kind === 'x402') return 'Paid request'
+  if (kind === 'receive') return 'Deposit'
+  if (kind === 'move' || kind === 'sweep') return 'Transfer'
+  return 'Payment'
+}
+
+/** The name an account carries; the backend's own fallback (#4265). */
+function accountLabel(name: string | null | undefined): string {
+  return name?.trim() || 'Unnamed account'
+}
+
+function savedName(
+  tx: AggregatedTransaction,
+  address: string,
+  resolveAddress?: (address: string) => string | null,
+  accountNamesByAddress?: Map<string, string>,
+): string | null {
+  if (!address) return null
+  return (
+    accountNamesByAddress?.get(`${address.toLowerCase()}:${tx.chainId}`) ??
+    resolveAddress?.(address) ??
+    null
+  )
+}
+
+/**
+ * A hash the explorer can open. Agent-tab rows built from
+ * `payment_intents` carry a synthetic `activity-<type>-<id>` hash
+ * (`AgentActivityTab`'s `activityToTransaction`), so the record decides,
+ * never the status.
+ */
+function isRealHash(hash: string | null | undefined): hash is string {
+  return !!hash && !hash.startsWith('activity-')
+}
+
+/**
+ * The transaction that left or entered the user's account — on the eip3009
+ * bridge, the FUNDING leg. This supersedes #3763's settlement-first link: the
+ * merchant's settlement hash keeps its own row under Technical details.
+ */
+function accountTxHash(tx: AggregatedTransaction): string | null {
+  const hash = tx.settlementScheme === 'eip3009' ? (tx.fundingTxHash ?? tx.hash) : tx.hash
+  return isRealHash(hash) ? hash : null
+}
+
+/**
+ * The footer's explorer URL: the account's transaction on the chain's
+ * explorer. `explorerUrl` is honoured as the row link always honoured it —
+ * `null` → no footer — but a supplied value is only the fallback for a chain
+ * the registry cannot build a link on: the agent feed's `explorer_url` is
+ * settlement-first (#3763), which this panel supersedes (#4267). None for a
+ * synthetic hash.
+ */
+function footerExplorerUrl(tx: AggregatedTransaction): string | null {
+  if (tx.explorerUrl === null) return null
+  const hash = accountTxHash(tx)
+  if (!hash) return null
+  return getExplorerUrlOrNull(tx.chainId, 'tx', hash) ?? tx.explorerUrl ?? null
+}
+
+/**
+ * The Receipt row's words, from `paymentProofStatus`. Never the raw value
+ * ("protocol_receipt_attached"): the wire's three states read as attached or
+ * not, the merchant's observed response said in words.
+ */
+function receiptLabel(status: string | null | undefined): string {
+  if (status === 'protocol_receipt_attached') return 'Attached'
+  if (status === 'merchant_response_observed') return 'Not attached (the merchant responded)'
+  return 'Not attached'
+}
+
+/**
+ * The header's one line: who, where and when. Owner attribution follows
+ * #2097 — "you" only for a recorded owner send.
+ */
+function headerLine(tx: AggregatedTransaction, kind: Kind): string {
+  const account = accountLabel(tx.accountName)
+  if (kind === 'move') {
+    return `From ${account} to ${accountLabel(tx.ownTransfer?.toAccountName)}`
+  }
+  // A sweep's title already names the agent ("Returned from <agent>").
+  if (kind === 'sweep' || kind === 'receive') return `Into ${account}`
+  const verb = tx.isError ? 'Attempted' : kind === 'send' ? 'Sent' : 'Paid'
+  if (tx.initiatedBy === 'human') return `${verb} by you from ${account}`
+  if (tx.agentName) return `${verb} by ${tx.agentName} from ${account}`
+  return `${verb} from ${account}`
+}
+
+/** The header's "when": the date and the time to the minute, in the viewer's locale. */
+export function formatWhen(timestamp: number): string {
+  return new Date(timestamp * 1000).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+}
+
+// ── The panel ──────────────────────────────────────────────────────
+
+/**
+ * The transaction detail panel (#4267, epic #4263) — opened from
+ * `/transactions` and the account and agent Activity tabs. It leads with the
+ * answer: a header summary (who, how much, the status, when), a few
+ * plain-word Details rows per kind, and every raw value — addresses, hashes,
+ * the payment id, the settlement method — behind a Technical details
+ * disclosure, closed by default. Amount, date, agent and account appear once,
+ * in the header; nothing the panel showed before is gone.
+ */
 export default function TransactionDetailPanel({
   transaction: tx,
   open,
@@ -148,184 +232,267 @@ export default function TransactionDetailPanel({
 }: Props) {
   if (!tx) return null
 
-  const kind = rowType(tx)
-  const status =
-    transactionStatus(tx) ??
-    machinePaymentLifecyclePresentation(tx) ??
-    tx.statusBadge ??
-    (tx.isError ? { label: 'Failed', tone: 'danger' as const } : { label: 'Executed', tone: 'success' as const })
+  const kind = rowKind(tx)
+  // The rows' one precedence (`transactionRowBadge`, #4266); the panel
+  // alone names a plain settled payment "Executed".
+  const status = transactionRowBadge(tx) ?? { label: 'Executed', tone: 'success' as const }
+  // The title matches the list row: who was paid (or who paid), never a raw
+  // address; a folded move reads as the ledger row does.
+  const title =
+    kind === 'move'
+      ? 'Moved between your accounts'
+      : counterpartyLabel(tx, resolveAddress, accountNamesByAddress, { noAddress: true })
+  // No seconds, and the date renders whole (`whitespace-nowrap` below), so a
+  // wrapping line never strands "AM" on its own.
+  const when = formatWhen(tx.timestamp)
+  const fiat = transactionFiat(tx, 'detail')
+  const explorerUrl = footerExplorerUrl(tx)
 
-  const addr = (address: string) => (
-    <AddressValue
-      tx={tx}
-      address={address}
-      resolveAddress={resolveAddress}
-      accountNamesByAddress={accountNamesByAddress}
-    />
+  // The mark: a named counterparty gets its monogram. A deposit, a sweep, a
+  // move between your own accounts and a send nothing names ("New recipient",
+  // or an x402 row with no resource URL) have no counterparty to draw, so
+  // they take the direction mark the ledger row shows.
+  const unnamed = title === 'New recipient' || title === paymentSourceTitle(tx.source)
+  const leading =
+    kind === 'move' || kind === 'receive' || kind === 'sweep' || unnamed ? (
+      <DirectionMark direction={kind === 'move' ? 'move' : tx.direction} />
+    ) : (
+      <Monogram name={title} decorative />
+    )
+
+  const nameOr = (address: string) =>
+    savedName(tx, address, resolveAddress, accountNamesByAddress) ?? truncate(address)
+
+  // ── Details: a few plain-word rows per kind ──
+  // What the header line does not already say: amount, date, agent and
+  // account appear once, in the header (#4267), so no row repeats them.
+  const details: ReactNode[] = []
+  if (kind === 'x402') {
+    const host = parseX402Hostname(tx.x402ResourceUrl) ?? tx.x402ResourceUrl
+    if (host) details.push(<DetailRow key="for" label="For" value={host} />)
+    details.push(<DetailRow key="receipt" label="Receipt" value={receiptLabel(tx.paymentProofStatus)} />)
+    // #3763: on the eip3009 bridge the merchant settles in a SECOND
+    // transaction. The words state only what the record proves — the
+    // settlement hash was reported by the agent or detected by Haven's
+    // settlement sweep (#3888) and verified on-chain (#3475) — never that the
+    // merchant confirmed anything, and a missing record is "not recorded",
+    // never "failed": the SDK's default evidence post reports the funding
+    // hash (refused by the writer), so many eip3009 rows never get one.
+    // erc7710 is one transaction: the merchant's redemption IS the payment.
+    if (tx.settlementScheme === 'eip3009') {
+      details.push(
+        tx.settlementTxHash ? (
+          <DetailRow key="settlement" label="Settlement" value="Recorded (verified)" />
+        ) : (
+          <DetailRow
+            key="settlement"
+            label="Settlement"
+            value="Not recorded yet"
+            note="The payment left your account; no settlement from the merchant has been recorded."
+          />
+        ),
+      )
+    }
+  } else if (kind === 'mpp' || kind === 'send') {
+    details.push(<DetailRow key="to" label="To" value={nameOr(tx.to)} />)
+  } else if (kind === 'receive') {
+    details.push(
+      <DetailRow
+        key="from"
+        label="From"
+        value={savedName(tx, tx.from, resolveAddress, accountNamesByAddress) ?? 'An outside wallet'}
+      />,
+    )
+  } else if (kind === 'move') {
+    // "You" only for a recorded owner send; otherwise the wallet set (#2097).
+    details.push(
+      <DetailRow key="by" label="By" value={tx.initiatedBy === 'human' ? 'You' : 'Your accounts'} />,
+    )
+  } else {
+    // A delegate sweep: the agent's unspent allowance funding, returned.
+    details.push(
+      <DetailRow key="what" label="What happened" value="Unspent allowance returned" />,
+    )
+  }
+  // #2870: only when the list joined a sync row for this payment — the same
+  // absence contract as the row badge. The badge here keeps its link to
+  // /accounting; the row's copy is a plain pill.
+  if (tx.accounting) {
+    details.push(
+      <DetailRow key="accounting" label="Accounting" value={<AccountingBadge accounting={tx.accounting} />} />,
+    )
+    // The failure reason as plain text: the badge's tooltip has no tab stop
+    // and no hover on touch (review, #2893).
+    if ((tx.accounting.status === 'failed' || tx.accounting.status === 'skipped') && tx.accounting.error) {
+      details.push(<DetailRow key="reason" label="Reason" value={tx.accounting.error} />)
+    }
+  }
+
+  // ── Technical details: every raw value, shortened ──
+  const onChain = (type: 'tx' | 'address', value: string) => (
+    <OnChainValue chainId={tx.chainId} type={type} value={value} />
   )
+  const technical: ReactNode[] = [
+    <DetailRow key="network" label="Network" value={<NetworkPill chainId={tx.chainId} />} />,
+  ]
+  if (tx.paymentId) {
+    technical.push(
+      <DetailRow
+        key="payment-id"
+        label="Payment ID"
+        value={
+          // #4312 D: same shape as `OnChainValue` — `max-w-full`, the value's
+          // ink, and a reserved 44px trailing slot after the copy target, so
+          // this row's copy glyph lines up with every other row's (a Payment
+          // ID never has an explorer link).
+          <span className="-my-3 inline-flex max-w-full items-center justify-end whitespace-nowrap">
+            <span className="v2-tabular mr-1 font-mono text-xs text-[var(--v2-ink-2)]" title={tx.paymentId}>
+              {truncate(tx.paymentId)}
+            </span>
+            <CopyButton value={tx.paymentId} label="payment ID" />
+            <span aria-hidden className="h-11 w-11 flex-shrink-0" />
+          </span>
+        }
+      />,
+    )
+  }
+  const scheme = kind === 'x402' ? settlementSchemeLabel(tx.settlementScheme) : null
+  if (scheme) technical.push(<DetailRow key="scheme" label="Settlement method" value={scheme} />)
+  if (kind === 'x402' && tx.deliveryReference) {
+    technical.push(<DetailRow key="delivered" label="Delivered" value={tx.deliveryReference} />)
+  }
+  if (kind === 'x402' && tx.x402MerchantAddress) {
+    technical.push(<DetailRow key="merchant" label="Merchant address" value={onChain('address', tx.x402MerchantAddress)} />)
+  }
+  if ((kind === 'send' || kind === 'mpp') && tx.to) {
+    technical.push(<DetailRow key="to" label="To address" value={onChain('address', tx.to)} />)
+  }
+  if ((kind === 'receive' || kind === 'sweep') && tx.from) {
+    technical.push(<DetailRow key="from" label="From address" value={onChain('address', tx.from)} />)
+  }
+  if (kind === 'move') {
+    if (tx.accountAddress) {
+      technical.push(<DetailRow key="from" label="From address" value={onChain('address', tx.accountAddress)} />)
+    }
+    if (tx.ownTransfer?.toAccountAddress) {
+      technical.push(
+        <DetailRow key="to" label="To address" value={onChain('address', tx.ownTransfer.toAccountAddress)} />,
+      )
+    }
+  } else if (tx.accountAddress) {
+    technical.push(<DetailRow key="account" label="Your account" value={onChain('address', tx.accountAddress)} />)
+  }
+  if (tx.tokenAddress) {
+    technical.push(<DetailRow key="token" label="Token contract" value={onChain('address', tx.tokenAddress)} />)
+  }
+  const txHash = accountTxHash(tx)
+  if (txHash) technical.push(<DetailRow key="tx" label="Transaction" value={onChain('tx', txHash)} />)
+  if (tx.settlementScheme === 'eip3009' && tx.settlementTxHash) {
+    technical.push(
+      <DetailRow key="settlement-tx" label="Settlement transaction" value={onChain('tx', tx.settlementTxHash)} />,
+    )
+  }
 
-  // #3811: the headline is the user's currency — book-time `convertedAmount`
-  // plain, serve-time `approxAmount` with `≈`, an unknown valuation as an em
-  // dash — and the token amount stays beside it (owner decision, #3811): the
-  // drawer is where users verify a payment, so the exact on-chain figure is
-  // on the same glance as the valuation. The currency figure carries the
-  // sign; the token amount reads signless beside it.
-  const fiat = transactionFiat(tx)
+  // ── The callout, when the record needs one ──
+  let callout: ReactNode = null
+  if (tx.paymentFlowStatus === 'needs_attention') {
+    const cause =
+      tx.paymentAttentionReason === 'merchant_retry_rejected_after_payment'
+        ? strandedFundsCauseWithLocation(1)
+        : 'This payment needs your attention.'
+    callout = (
+      <NoticeRow
+        className="mt-4"
+        action={
+          tx.agentId ? (
+            <Button variant="ghost" size="sm" href={`/agents/${tx.agentId}`}>
+              Open agent
+            </Button>
+          ) : undefined
+        }
+      >
+        {cause}
+      </NoticeRow>
+    )
+  } else if (tx.isError && isRealHash(tx.hash)) {
+    callout = (
+      <NoticeRow className="mt-4">The transaction failed on-chain. Nothing left your account.</NoticeRow>
+    )
+  }
 
   return (
     <SidePanel
       open={open}
       onClose={onClose}
-      title={transactionTitle(tx)}
-      subtitle={`${tx.accountName} · ${new Date(tx.timestamp * 1000).toLocaleString()}`}
+      leading={leading}
+      title={title}
+      // "Deposit" titles a deposit already; the kind would only repeat it.
+      subtitle={kindLabel(tx, kind) === title ? undefined : kindLabel(tx, kind)}
+      footer={
+        explorerUrl ? (
+          // `-ml-3.5` cancels the button's own padding: the label starts on
+          // the panel's content edge.
+          <Button
+            variant="tertiary"
+            size="sm"
+            href={explorerUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="-ml-3.5"
+          >
+            View on explorer
+            <Icon icon={ExternalLink} className="h-3.5 w-3.5" />
+          </Button>
+        ) : undefined
+      }
     >
-      <div className="mb-5 flex items-center justify-between gap-3">
-        <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
-          <Amount
-            amount={fiat.amount}
-            currency={fiat.currency}
-            approx={fiat.approx}
-            direction={tx.direction}
-            failed={tx.isError}
-            size="lg"
-          />
-          <Amount value={tx.valueFormatted} symbol={tx.asset} />
+      <div data-testid="transaction-detail-header" className="mb-5">
+        <div className="flex items-center justify-between gap-3">
+          {/* The user's currency headlines — book-time `convertedAmount`
+              plain, serve-time `approxAmount` with `≈` when the conversion
+              changes the number (#4165) — and the exact token amount stays
+              beside it (#3811). A move between your own accounts is neither
+              in nor out, so it passes no sign. */}
+          <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
+            <Amount
+              amount={fiat.amount}
+              currency={fiat.currency}
+              approx={fiat.approx}
+              direction={kind === 'move' ? undefined : tx.direction}
+              failed={tx.isError}
+              size="lg"
+            />
+            <Amount value={tx.valueFormatted} symbol={tx.asset} />
+          </div>
+          <StatusBadge tone={status.tone}>{status.label}</StatusBadge>
         </div>
-        <StatusBadge tone={status.tone}>{status.label}</StatusBadge>
+        <p className="mt-2 text-sm text-[var(--v2-ink-2)]">
+          {/* #4312 B: the separator lives INSIDE the `whitespace-nowrap` span
+              with the date, so a wrap carries "· <date>" to line 2 together —
+              a stranded "·" ending line 1 is what both committed baselines
+              showed. The literal space before the date is pinned by the
+              visual spec's `when:` regexes and by design-system's "… · <date>". */}
+          {headerLine(tx, kind)}{' '}
+          <span className="whitespace-nowrap">· {when}</span>
+        </p>
+        {callout}
       </div>
 
-      {kind === 'x402' ? (
-        // #2357: the protocol name moved OFF the primary row title and onto
-        // this heading, rather than out of the product. The detail drawer is
-        // the advanced surface `docs/product/copy-guidelines.md` allows
-        // technical vocabulary on — the same reason the "Settlement" row below
-        // may say "ERC-7710" — and this heading now matches the `mpp` section's
-        // long-standing shape ("Machine payment") one block down.
-        <Section title="x402 payment">
-          {tx.x402ResourceUrl ? (
-            <DetailRow label="Resource" value={parseX402Hostname(tx.x402ResourceUrl) ?? tx.x402ResourceUrl} />
-          ) : null}
-          {tx.x402MerchantAddress ? <DetailRow label="Merchant" value={addr(tx.x402MerchantAddress)} /> : null}
-          {tx.agentName ? <DetailRow label="Agent" value={tx.agentName} /> : null}
-          <DetailRow label="Amount" value={`${tx.valueFormatted} ${tx.asset}`} />
-          {tx.deliveryReference ? <DetailRow label="Delivered" value={tx.deliveryReference} /> : null}
-          {tx.paymentId ? <DetailRow label="Payment ID" value={<span className="v2-tabular">{truncate(tx.paymentId)}</span>} /> : null}
-          {tx.paymentProofStatus ? <DetailRow label="Proof" value={tx.paymentProofStatus} /> : null}
-          {tx.settlementScheme ? (
-            <DetailRow label="Settlement" value={settlementSchemeLabel(tx.settlementScheme)} />
-          ) : null}
-        </Section>
-      ) : null}
+      <dl data-testid="transaction-detail-details">{details}</dl>
 
-      {kind === 'mpp' ? (
-        <Section title="Machine payment">
-          {tx.agentName ? <DetailRow label="Agent" value={tx.agentName} /> : null}
-          <DetailRow label="Recipient" value={addr(tx.to)} />
-          <DetailRow label="Amount" value={`${tx.valueFormatted} ${tx.asset}`} />
-          {tx.paymentId ? <DetailRow label="Payment ID" value={<span className="v2-tabular">{truncate(tx.paymentId)}</span>} /> : null}
-        </Section>
-      ) : null}
-
-      {kind === 'send' ? (
-        <Section title="Transfer">
-          <DetailRow label="To" value={addr(tx.to)} />
-          <DetailRow label="Amount" value={`${tx.valueFormatted} ${tx.asset}`} />
-          {/* Shared with the table column: human-initiated → "You", agent rows →
-              agent identity, missing attribution → explicit "Unknown" (#2097). */}
-          <DetailRow label="Initiator" value={transactionInitiator(tx)} />
-        </Section>
-      ) : null}
-
-      {kind === 'receive' ? (
-        <Section title="Transfer">
-          <DetailRow label="From" value={addr(tx.from)} />
-          <DetailRow label="Amount" value={`${tx.valueFormatted} ${tx.asset}`} />
-        </Section>
-      ) : null}
-
-      {kind === 'sweep' ? (
-        <Section title="Allowance funding">
-          <DetailRow label="From" value={addr(tx.from)} />
-          <DetailRow label="To" value={addr(tx.to)} />
-          <DetailRow label="Amount" value={`${tx.valueFormatted} ${tx.asset}`} />
-          {tx.agentName ? <DetailRow label="Agent" value={tx.agentName} /> : null}
-        </Section>
-      ) : null}
-
-      {/* #2870: only when the list joined a sync row for this payment — the
-          same absence contract as the table badge. */}
-      {tx.accounting ? (
-        <Section title="Accounting">
-          <DetailRow label="Feed" value={<AccountingBadge accounting={tx.accounting} />} />
-          {/* The failure reason as plain text: the badge's tooltip has no
-              tab stop inside the row and no hover on touch (review, #2893). */}
-          {(tx.accounting.status === 'failed' || tx.accounting.status === 'skipped') && tx.accounting.error ? (
-            <DetailRow label="Reason" value={tx.accounting.error} />
-          ) : null}
-        </Section>
-      ) : null}
-
-      <Section title="On-chain">
-        <DetailRow label="Token" value={tx.tokenSymbol ?? tx.asset} />
-        {tx.tokenAddress ? <DetailRow label="Token address" value={addr(tx.tokenAddress)} /> : null}
-        <DetailRow label="Account" value={addr(tx.accountAddress)} />
-        <DetailRow label="Network" value={<NetworkPill chainId={tx.chainId} />} />
-        {/*
-          #3763: on the eip3009 bridge one x402 purchase is TWO on-chain
-          transactions, and the merchant names the SETTLEMENT one. The detail
-          drawer headlines it when it is recorded, and names the funding leg
-          as the funding leg — never as "the" payment. Without a recorded
-          settlement it says so plainly: null is "not recorded", never
-          "failed" — the SDK's default evidence post reports the funding hash
-          (refused by the writer), so many eip3009 rows never get one, and the
-          copy must not promise a later record. The attribution wording states
-          only what the record proves: the hash was reported by the agent or
-          detected by Haven's settlement sweep (#3888) and verified on-chain
-          (#3475) — nothing here claims the merchant's own books agree.
-          erc7710 and scheme-less rows are one transaction and keep the plain
-          "Transaction" row.
-        */}
-        {tx.settlementScheme === 'eip3009' ? (
-          <>
-            {tx.settlementTxHash ? (
-              <DetailRow
-                label="Merchant settlement (reported by the agent or detected on-chain, verified)"
-                value={
-                  <ExplorerLink
-                    chainId={tx.chainId}
-                    type="tx"
-                    value={tx.settlementTxHash}
-                    label={tx.settlementTxHash}
-                  />
-                }
-              />
-            ) : (
-              <DetailRow
-                label="Merchant settlement"
-                value={<span className="text-[var(--v2-ink-3)]">Not recorded</span>}
-              />
-            )}
-            <DetailRow
-              label="Funding from your account"
-              value={
-                <ExplorerLink
-                  chainId={tx.chainId}
-                  type="tx"
-                  value={tx.fundingTxHash ?? tx.hash}
-                  label={tx.fundingTxHash ?? tx.hash}
-                />
-              }
-            />
-          </>
-        ) : (
-          // #3811: the hash renders in full — the drawer is where users verify.
-          <DetailRow
-            label="Transaction"
-            value={<ExplorerLink chainId={tx.chainId} type="tx" value={tx.hash} label={tx.hash} />}
+      <details data-testid="transaction-technical-details" className="group mt-5 border-t border-[var(--v2-border)] pt-3">
+        <summary className="flex w-full cursor-pointer select-none list-none items-center justify-between rounded py-1 text-sm font-medium text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 [&::-webkit-details-marker]:hidden">
+          Technical details
+          {/* `mr-1`: mid-rotation the chevron's box is ~3px wider than the
+              icon, and flush to the panel edge that overflows the scroll
+              body for the length of the transition. */}
+          <Icon
+            icon={ChevronDown}
+            className="mr-1 h-4 w-4 flex-shrink-0 text-[var(--v2-ink-3)] transition-transform group-open:rotate-180"
           />
-        )}
-        <DetailRow label="Date" value={new Date(tx.timestamp * 1000).toLocaleString()} />
-      </Section>
+        </summary>
+        <dl className="mt-2">{technical}</dl>
+      </details>
     </SidePanel>
   )
 }

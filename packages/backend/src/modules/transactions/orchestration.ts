@@ -20,10 +20,17 @@ import {
 import { findCurrencyPreference } from '../../infra/repositories/users.js'
 import { fetchAccountTransactions } from './aggregate.js'
 import { toCanonicalAddress } from './normalize.js'
-import { compareEnrichedTransactions, enrichedTransactionIdentityKey } from './ordering.js'
+import { ownAccountDisplayName } from './own-account.js'
+import {
+  compareEnrichedTransactions,
+  enrichedTransactionIdentityKey,
+  transactionDedupKey,
+} from './ordering.js'
 import { enrichTransactionsWithAgents } from './enrichment.js'
 import { enrichTransactionsWithAccounting } from './accounting.js'
 import { fetchConfirmedX402Transactions, mergeX402Transactions } from './x402.js'
+import { EMPTY_SEARCH_INDEX, foldForSearch, transactionMatchesSearch, type TransactionSearchIndex } from './search.js'
+import type { TransactionWindow } from './period.js'
 import type { EnrichedTransaction, ParsedTokenFilter, Transaction, SmartAccountRow } from './types.js'
 
 // ── GET / (paginated, filterable feed across every owned account) ─────────────
@@ -126,6 +133,85 @@ export async function mergeSortDedupeAndEnrich(
   return enrichTransactionsWithAgents(userId, deduped, currency)
 }
 
+function accountLocationKey(address: string, chainId: number): string {
+  return `${address.toLowerCase()}:${chainId}`
+}
+
+
+/**
+ * Fold the two explorer legs of a transfer between this user's own accounts
+ * into the outbound leg (#4265).
+ *
+ * Pairing is by chain plus the provider-independent transaction key and by
+ * the account each leg belongs to. Candidate discovery is separate from
+ * projection, so whether the inbound or outbound leg appears first has no
+ * bearing on which rows pair. A failed agent-enrichment pass is deliberately
+ * fail-closed: its outbound row has no `initiatedBy` classification and is
+ * left untouched rather than risking hiding an agent payment.
+ */
+export function foldOwnAccountTransfers(
+  transactions: EnrichedTransaction[],
+  accounts: SmartAccountRow[],
+): EnrichedTransaction[] {
+  const accountsByLocation = new Map(
+    accounts.map((account) => [
+      accountLocationKey(account.account_address, account.chain_id),
+      account,
+    ]),
+  )
+  const groups = new Map<
+    string,
+    { outbound: number[]; inbound: number[]; destination: SmartAccountRow }
+  >()
+
+  for (const [index, tx] of transactions.entries()) {
+    const source = accountsByLocation.get(accountLocationKey(tx.from, tx.chainId))
+    const destination = accountsByLocation.get(accountLocationKey(tx.to, tx.chainId))
+    if (!source || !destination || source.id === destination.id) continue
+
+    const groupKey = `${tx.chainId}:${transactionDedupKey(tx)}`
+    const group = groups.get(groupKey) ?? { outbound: [], inbound: [], destination }
+
+    if (
+      tx.direction === 'out' &&
+      tx.accountId === source.id &&
+      tx.agentId === undefined &&
+      tx.initiatedBy !== undefined
+    ) {
+      group.outbound.push(index)
+    } else if (tx.direction === 'in' && tx.accountId === destination.id) {
+      group.inbound.push(index)
+    }
+
+    groups.set(groupKey, group)
+  }
+
+  const foldedByIndex = new Map<number, EnrichedTransaction>()
+  const removed = new Set<number>()
+  for (const group of groups.values()) {
+    const pairCount = Math.min(group.outbound.length, group.inbound.length)
+    for (let pair = 0; pair < pairCount; pair += 1) {
+      const outboundIndex = group.outbound[pair]
+      const inboundIndex = group.inbound[pair]
+      const outbound = transactions[outboundIndex]
+      foldedByIndex.set(outboundIndex, {
+        ...outbound,
+        ownTransfer: {
+          toAccountId: group.destination.id,
+          toAccountName: ownAccountDisplayName(group.destination.name),
+          toAccountAddress: toCanonicalAddress(group.destination.account_address),
+        },
+      })
+      removed.add(inboundIndex)
+    }
+  }
+
+  return transactions.flatMap((tx, index) => {
+    if (removed.has(index)) return []
+    return [foldedByIndex.get(index) ?? tx]
+  })
+}
+
 /**
  * The currency this user's converted amounts are struck in (#3127): their
  * stored `currency_preference`, or SEK when none is set — the documented
@@ -147,9 +233,26 @@ export interface TransactionFilterOptions {
    * runs over the whole result set, so it has to apply them here or the file
    * would not match the list it was taken from. Both are optional and the
    * `GET /` feed passes neither, so its behaviour is unchanged.
+   *
+   * #4095: the feed takes them too now — the browser-side filter over the
+   * loaded page is gone, so list, count, totals and CSV all agree.
    */
   direction?: 'in' | 'out'
   chainId?: number
+  /**
+   * #4095: free-text search over what a row shows (counterparty resolved
+   * name, agent name, counterparty address). Applied against the name index
+   * below — which the route builds BEFORE calling this, because the names
+   * are what the filter matches on. Absent/blank means no filter.
+   */
+  search?: string
+  /** Name sources for `search`; an absent index still matches agent names and addresses. */
+  searchIndex?: TransactionSearchIndex
+  /**
+   * #4095: the Period window, half-open `[startMs, endMs)` over the row's
+   * `timestamp` (unix seconds → ms). Absent means no date filter.
+   */
+  window?: TransactionWindow
 }
 
 /** The agentId (including the synthetic `user`) and tokenKey filters applied to the GET / feed. */
@@ -157,9 +260,31 @@ export function filterEnrichedTransactions(
   transactions: EnrichedTransaction[],
   options: TransactionFilterOptions,
 ): EnrichedTransaction[] {
+  const foldedSearch = options.search !== undefined ? foldForSearch(options.search.trim()) : ''
+  const searchIndex = options.searchIndex ?? EMPTY_SEARCH_INDEX
   return transactions.filter((tx) => {
+    // A move is neither money in nor money out of the user's wallet set.
+    if (options.direction && tx.ownTransfer) return false
     if (options.direction && tx.direction !== options.direction) return false
     if (options.chainId !== undefined && tx.chainId !== options.chainId) return false
+
+    if (options.window) {
+      const timestampMs = tx.timestamp * 1000
+      // Half-open: the window start is INCLUSIVE, its end EXCLUSIVE — the
+      // same `[now − N×24h, now)` shape `isInsideActivityWindow` applies.
+      if (timestampMs < options.window.startMs || timestampMs >= options.window.endMs) {
+        return false
+      }
+    }
+
+    if (foldedSearch !== '' && !transactionMatchesSearch(tx, searchIndex, foldedSearch)) {
+      const ownAccountNameMatches = tx.ownTransfer
+        ? [tx.accountName, tx.ownTransfer.toAccountName]
+            .map(foldForSearch)
+            .some((name) => name.includes(foldedSearch))
+        : false
+      if (!ownAccountNameMatches) return false
+    }
 
     if (options.agentId === 'user') {
       return tx.direction === 'out' && !tx.agentId

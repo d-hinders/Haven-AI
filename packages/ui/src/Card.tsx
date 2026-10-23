@@ -68,8 +68,10 @@ function CardRoot({
  * Modes:
  * - **default** — hairline `border-t` above, white background, standard
  *   horizontal padding matching the parent Card. Use for a single content
- *   block under a section heading inside a Card with `p-5`/`p-6` padding.
- *   Negative margins bleed the border edge-to-edge.
+ *   block under a section heading inside a Card with `p-5 md:p-6` padding —
+ *   both declarations together, switching at `md`; the section's bleed does
+ *   the same, so `p-5` alone misaligns the hairline from `md` up. Negative
+ *   margins bleed the border edge-to-edge.
  * - **divided** — hairline `border-t` above, row dividers between each child.
  *   Assumes the parent Card has **no inner padding** (the dividers bleed
  *   naturally to the card edges) and children supply their own horizontal
@@ -89,7 +91,7 @@ function CardSection({
   divided?: boolean
 }) {
   if (inset) {
-    // Negative horizontal margin negates the parent Card's p-5/p-6 so the
+    // Negative horizontal margin negates the parent Card's p-5 md:p-6 so the
     // tinted background bleeds edge-to-edge.
     return (
       <div
@@ -111,7 +113,8 @@ function CardSection({
       </div>
     )
   }
-  // Default: subsection inside a Card with p-5/p-6 padding. Negative margins
+  // Default: subsection inside a Card with p-5 md:p-6 padding — both, switching
+  // at md, matching the bleed below. Negative margins
   // bleed the hairline top border to the card's inner edges.
   return (
     <div
@@ -125,13 +128,17 @@ function CardSection({
 /**
  * The grey header band on a card — title on a `--v2-surface` tint with a
  * hairline bottom border. The canonical way to give a Card (or a padding-0
- * card with a row list) a titled header; never hand-roll the band.
+ * card with a row list) a titled header; never hand-roll the band. The day
+ * band (`TransactionActivityDayHeader`) is the second sanctioned band — for
+ * day-grouped lists, not card titles (#4225).
  *
  * Assumes the parent Card has no top padding and `overflow-hidden` (so the
  * band's corners clip to the card radius). For a standalone header on a card
  * without `overflow-hidden`, add `rounded-t-[10px]` via className.
  *
- * Slots: `title` (rendered in a heading — `as` picks the level), optional
+ * Slots: `title` (rendered in a heading — `as` picks the level; `titleId`
+ * gives that heading an id, so a landmark can name itself with
+ * `aria-labelledby` instead of repeating the title), optional
  * `description`, optional `actions` (right-aligned). For bespoke content
  * (badges, balances, skeletons) pass `children` instead of the slots.
  *
@@ -141,6 +148,7 @@ function CardSection({
  */
 function CardHeader({
   title,
+  titleId,
   as: Heading = 'h3',
   description,
   actions,
@@ -149,6 +157,7 @@ function CardHeader({
   children,
 }: {
   title?: ReactNode
+  titleId?: string
   as?: 'h2' | 'h3'
   description?: ReactNode
   actions?: ReactNode
@@ -166,7 +175,7 @@ function CardHeader({
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="min-w-0">
             {title !== undefined ? (
-              <Heading className="text-sm font-semibold text-[var(--v2-ink)]">{title}</Heading>
+              <Heading id={titleId} className="text-sm font-semibold text-[var(--v2-ink)]">{title}</Heading>
             ) : null}
             {description !== undefined ? (
               <p className="mt-1 text-xs text-[var(--v2-ink-3)]">{description}</p>

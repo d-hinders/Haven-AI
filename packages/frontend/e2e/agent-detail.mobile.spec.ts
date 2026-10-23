@@ -42,6 +42,10 @@
  *   painted box IS the target and must clear the floor outright.
  * - **No horizontal overflow:** `expectNoHorizontalOverflow` (#1771), the
  *   two-metric union over the document and `#main-content`.
+ * - **Spending hero's Last 30 days at 375px (#4260):** a separate test at
+ *   375px, not 390 — the three labelled figures render (non-vacuity), no
+ *   figure is wider than its cell or leaves the grid, and the page does not
+ *   overflow horizontally.
  */
 
 import { expect, test, type Page } from '@playwright/test'
@@ -70,11 +74,11 @@ const MOBILE_HEIGHT = 844
  *
  * This used to be `MOBILE_HEIGHT`, and that was written when the bottom of the
  * viewport was empty. Since #2731 the bottom of every authenticated route is
- * the tab bar — `--v2-tab-bar-h` (56pt) plus the home-indicator inset it
- * reserves, which is 34pt in the installed shell and 0 in a headless engine.
- * A fold of 844 therefore measured up to 90pt of screen that is covered, in the
- * direction that HIDES a defect: the budget row can sit under the bar and the
- * assertion still passes.
+ * the tab bar — since #4058 a floating pill, `--v2-tab-bar-h` (62pt) tall and
+ * `--v2-tab-bar-bottom` above the edge (12pt in a headless engine, the 34pt
+ * home-indicator inset in the installed shell). A fold of 844 therefore
+ * measured up to 96pt of screen that is covered, in the direction that HIDES a
+ * defect: the budget row can sit under the bar and the assertion still passes.
  *
  * Read from the live bar rather than recomputed from the tokens. The bar's own
  * top edge already is the answer, it carries the safe-area inset without this
@@ -209,11 +213,13 @@ test.describe('agent detail at 390px (#2733)', () => {
     )
 
     // ── 2. "Set budget" is one line in its pill ────────────────────────────
-    // #3695: with an active budget the grant form waits behind "Add budget",
-    // so it is opened first — and asserted ABSENT before that, which is the
-    // collapsed-form claim measured in a real browser.
+    // #3695: with an active budget the grant form waits behind the row's ⋯
+    // menu (#4261), so it is opened first — and the form is asserted ABSENT
+    // before that, which is the collapsed-form claim measured in a real
+    // browser.
     await expect(page.getByLabel('Recipient')).toHaveCount(0)
-    await page.getByRole('button', { name: 'Add budget', exact: true }).click()
+    await page.getByRole('button', { name: /^Budget options/ }).click()
+    await page.getByRole('menuitem', { name: 'Add budget' }).click()
     await expect(page.getByRole('button', { name: 'Set budget', exact: true })).toBeVisible()
     // The `sm` Button's height is the fixed `h-9` regardless of line count,
     // so the PILL height cannot detect wrapping. The label's rendered line
@@ -388,6 +394,48 @@ test.describe('agent detail at 390px (#2733)', () => {
     expect(overflow).toMatchObject({ hasOverflow: false })
 
     // The page made no unexpected API noise while being measured.
+    expect(unexpectedBrowserErrors(errors)).toEqual([])
+  })
+
+  test('the Spending hero\'s Last 30 days fits 375px: three figures, merchant line, no overflow (#4260)', async ({ page }) => {
+    const errors = collectBrowserErrors(page)
+    await page.clock.setFixedTime(FROZEN_NOW)
+    await mockHavenApi(page)
+    await serveAgentDetailResponses(page, 'agent-research')
+    await seedAuthenticatedSession(page)
+
+    await page.setViewportSize({ width: 375, height: MOBILE_HEIGHT })
+    await page.goto('/agents/agent-research')
+    await expect(page.getByRole('heading', { name: 'Research agent', exact: true })).toBeVisible({
+      timeout: 60_000,
+    })
+    await dismissMobileSidebar(page)
+
+    // Non-vacuity: the fixture's overview stats reached the hero, so the
+    // three figures and the merchant line are on the page.
+    const figures = page.locator('dl').filter({ has: page.locator('dt', { hasText: 'Spent' }) })
+    await expect(figures).toBeVisible()
+    await expect(figures.locator('dt')).toHaveText(['Spent', 'Payments', 'Last paid'])
+    await expect(figures.locator('dd').nth(1)).toHaveText('48')
+    await expect(figures.locator('dd').nth(2)).toHaveText('1d ago')
+    await expect(page.getByText('Last paid to research.example')).toBeVisible()
+
+    // Every figure stays inside the column: no cell's content is wider than
+    // its cell, and no cell sticks out of the grid.
+    const clipped = await figures.evaluate((dl) => {
+      const grid = dl.getBoundingClientRect()
+      return Array.from(dl.querySelectorAll('dd')).flatMap((dd) => {
+        const cell = dd.getBoundingClientRect()
+        const out: string[] = []
+        if (dd.scrollWidth > dd.clientWidth + 1) out.push(`${dd.textContent} overflows its cell`)
+        if (cell.right > grid.right + 1 || cell.left < grid.left - 1) out.push(`${dd.textContent} leaves the grid`)
+        return out
+      })
+    })
+    expect(clipped).toEqual([])
+
+    const overflow = await expectNoHorizontalOverflow(page)
+    expect(overflow).toMatchObject({ hasOverflow: false })
     expect(unexpectedBrowserErrors(errors)).toEqual([])
   })
 })

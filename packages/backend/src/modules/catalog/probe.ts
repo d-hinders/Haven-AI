@@ -30,9 +30,12 @@
  * can resolve privately a second later. So every outbound call from here goes
  * through the shared SSRF guard (`infra/http/ssrf-guard.ts`, #1712), which
  * classifies the **resolved address** and pins the socket to it. Do not
- * reintroduce a bare `fetch` in this file; `modules/catalog/merchant-catalog.ts`
- * legitimately uses one because its URLs are operator-curated, and that
- * difference is the entire reason this module exists separately.
+ * reintroduce a bare `fetch` in this file. `modules/catalog/merchant-catalog.ts`
+ * (the catalogue refresh and the discovery probe) goes through the same guard
+ * since #4281, because a `merchant_catalog` row may also carry a URL a third
+ * party chose (an x402 Bazaar listing, #4245). This module exists separately
+ * for a different reason: it walks an MCP handshake against an unverified
+ * submission, with its own concurrency cap and per-host cooldown.
  *
  * ## Two budgets that are not the timeout
  *
@@ -116,7 +119,7 @@ export interface ProbeFailure {
 
 /**
  * Named `SubmissionProbeResult`, not `ProbeResult`: `merchant-catalog.ts`
- * already exports a `ProbeResult` for the operator-curated refresh, and both
+ * already exports a `ProbeResult` for the catalogue refresh, and both
  * leave this module directory through the same `index.ts`.
  */
 export type SubmissionProbeResult = ProbeSuccess | ProbeFailure

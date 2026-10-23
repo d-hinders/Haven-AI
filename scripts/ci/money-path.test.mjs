@@ -19,6 +19,7 @@ import { fileURLToPath } from 'node:url'
 import { loadMoneyPathGlobs, loadMoneyPathControlGlobs, matchesGlob, moneyPathFiles } from './qa-freshness.mjs'
 import { parseFrontMatter, globToRegExp } from '../docs/validate-frontmatter.mjs'
 import {
+  KNOWN_COPIES,
   allGlobs,
   perimeterMatchers,
   plantedCopy,
@@ -61,83 +62,71 @@ function labelerMoneyPathGlobs() {
 }
 
 /**
- * The Merge Gate's annotated file list, WITHOUT the prose that frames it.
+ * The annotated perimeter, `.agents/skills/ship-next/references/money-path-perimeter.md`
+ * (#4177), read under its own line grammar.
  *
- * Scoped deliberately. The surrounding prose legitimately names source files
- * while talking *about* the mechanism (`scripts/ci/money-path.test.mjs`,
- * `index.ts`), and a token scan over the whole section would read those as
- * perimeter claims and fail on a sentence. The bullet list between the
- * "Classify" line and the "The label matters" line is the list itself.
+ * Only a line of exactly the form ``- `<path>` `` is an entry. A backticked path
+ * anywhere else (a sentence, a heading, a parenthetical) is prose and is not read.
+ * The list used to live in ship-next's Merge Gate section, mixed with that prose, and this
+ * file matched backticked prose tokens against the END of a glob. That matcher was
+ * a class of blind spots: `src/**` named six of the eight SDK globs and a file that
+ * does not exist (#4122, PR #4131), and a suffix (`routes/payments.ts`) or a
+ * concrete file a pattern covers (`infra/relayer-balance-monitor.ts`) stood in for
+ * a glob. With one exact path per line the sections are compared for EQUALITY.
+ *
+ * `## ` headings switch the section; `### ` group headings do not. Every list
+ * item (`-`, `*`, `+`, `1.` or `1)`, indented or inside a `>` blockquote) must be
+ * an entry: a list item that names a path and then explains it is a near miss,
+ * reported as `malformed` so the test fails on it instead of skipping a line a
+ * human reads as perimeter. Code fences are not special: an entry inside one
+ * counts and a `## ` line inside one switches the section, so a fence can only
+ * add a finding, never hide one.
  */
-function mergeGateFileList(skill) {
-  const gate = skill.slice(skill.indexOf('## Merge Gate'), skill.indexOf('Route the merge:'))
-  assert.ok(gate.length > 200, 'could not locate the Merge Gate section in SKILL.md')
-  const start = gate.indexOf('Classify a change as money-path')
-  const end = gate.indexOf('The label matters because')
-  assert.ok(start !== -1 && end > start, 'could not locate the Merge Gate file list boundaries')
-  return gate.slice(start, end)
+const PERIMETER_DOC = '.agents/skills/ship-next/references/money-path-perimeter.md'
+const RUNTIME_HEADING = '## Runtime perimeter: `globs`'
+const CONTROL_HEADING = '## Control surface: `controlGlobs`'
+
+function perimeterEntries(text) {
+  const out = { runtime: [], control: [], outside: [], malformed: [], headings: { runtime: 0, control: 0 } }
+  let section = null
+  for (const [i, line] of text.split('\n').entries()) {
+    if (line.startsWith('## ')) {
+      section = line === RUNTIME_HEADING ? 'runtime' : line === CONTROL_HEADING ? 'control' : null
+      if (section) out.headings[section] += 1
+      continue
+    }
+    const entry = line.match(/^- `([^`\s]+)`$/)
+    if (entry) (section ? out[section] : out.outside).push(entry[1])
+    else if (/^\s*(?:>\s*)*(?:[-*+]|\d+[.)])\s/.test(line)) out.malformed.push(`${i + 1}: ${line}`)
+  }
+  return out
 }
 
-/** Backticked, path-shaped tokens (anything containing a `/`). */
-function listedTokens(list) {
-  return [...list.matchAll(/`([^`]+)`/g)]
-    .map((m) => m[1])
-    .filter((t) => t.includes('/'))
-}
+/** A path listed more than once in one section, sorted. */
+const duplicates = (list) => [...new Set(list.filter((p, i) => list.indexOf(p) !== i))].sort()
+
+/** Set difference both ways, sorted, for a failure message that names the paths. */
+const setDiff = (listed, canonical) => ({
+  missing: canonical.filter((g) => !listed.includes(g)).sort(),
+  extra: listed.filter((p) => !canonical.includes(p)).sort(),
+})
 
 /**
- * Placeholder for `**` while `*` is being translated, so the two-star form is
- * not eaten by the one-star rule. It must be a character no glob contains.
- *
- * Written as an escape ON PURPOSE (#1897). It was a literal NUL byte in the
- * source until now, which worked at runtime and broke everything that reads the
- * file as text: git marked this file binary and showed `Bin 10325 -> 16418
- * bytes` instead of a diff — so the drift guard for the money path was the one
- * file in the repository nobody could review in a pull request — and plain
- * `grep` skipped it silently rather than reporting no match. Same byte at
- * runtime, same behaviour; only the encoding of the source changed.
+ * Everything the two live tests below assert, computed once so the fixture test
+ * can drive the same code. Per group, never the union: qa-freshness reads
+ * `globs` alone, so a runtime path under the control heading is wrong even when
+ * the union is unchanged.
  */
-const NUL = '\u0000'
-
-/**
- * Does a backend-relative prose token name this repo-root-relative glob?
- * Suffix match, with `*` treated as a single path segment's wildcard so
- * `rails/delegation-*.ts` covers `packages/backend/src/rails/delegation-*.ts`.
- */
-function tokenNamesGlob(token, glob) {
-  const needle = token.replace(/\/$/, '')
-  const stripped = glob.replace(/\/\*\*$/, '')
-  // Anchor every match at a path boundary. A bare `endsWith` would let a token
-  // satisfy any glob merely ENDING in those characters, so two canonical globs
-  // sharing a trailing segment in different directories could both be marked
-  // "named" when the prose names one. No such collision exists today; this
-  // keeps it from becoming exploitable later.
-  const boundedEnd = (haystack) => haystack === needle || haystack.endsWith(`/${needle}`)
-  if (boundedEnd(stripped) || boundedEnd(glob)) return true
-
-  // Wildcards on the TOKEN side: prose says `rails/delegation-*.ts`, the
-  // canonical glob is the same pattern under packages/backend/src/.
-  if (needle.includes('*')) {
-    const pattern = needle.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^/]*')
-    if (new RegExp(`(?:^|/)${pattern}$`).test(stripped)) return true
+function perimeterFindings(text, globs, controlGlobs) {
+  const parsed = perimeterEntries(text)
+  return {
+    headings: parsed.headings,
+    malformed: parsed.malformed,
+    outside: parsed.outside,
+    duplicates: { runtime: duplicates(parsed.runtime), control: duplicates(parsed.control) },
+    runtime: setDiff(parsed.runtime, globs),
+    control: setDiff(parsed.control, controlGlobs),
   }
-
-  // Wildcards on the GLOB side: prose may name a concrete file that only a
-  // pattern covers — `infra/relayer-balance-monitor.ts` is matched solely by
-  // `infra/relayer*.ts`. Without this the forward assertion rejects a file
-  // that IS on the perimeter, which is a false alarm in the direction that
-  // teaches people to edit the guard rather than the list.
-  if (glob.includes('*')) {
-    const rx = new RegExp(
-      `^${glob
-        .replace(/[.+^${}()|[\]\\]/g, '\\$&')
-        .replace(/\*\*/g, NUL)
-        .replace(/\*/g, '[^/]*')
-        .replace(new RegExp(NUL, 'g'), '.*')}$`,
-    )
-    return rx.test(needle) || rx.test(`packages/backend/src/${needle}`)
-  }
-  return false
 }
 
 describe('money-path list stays in one piece', () => {
@@ -156,57 +145,124 @@ describe('money-path list stays in one piece', () => {
     )
   })
 
-  test('every money-path file named in the SKILL.md Merge Gate is in the canonical list', () => {
-    // Direction 1: someone documents a new money-path file in the prose
-    // everyone reads, and the machinery never learns about it.
-    //
-    // The Merge Gate prose describes CLASSIFICATION (which diffs are
-    // money-path), and classification is the UNION — controlGlobs are
-    // labelled money-path too, they just skip the QA-freshness re-run. A
-    // file named in the prose is "known to the machinery" if either list
-    // has it (#1045 moved release-bump/publish.yml to controlGlobs, which
-    // is where this distinction first bit).
-    const globs = [...loadMoneyPathGlobs(), ...loadMoneyPathControlGlobs()]
-    const tokens = listedTokens(mergeGateFileList(read('.agents/skills/ship-next/SKILL.md')))
-
-    assert.ok(tokens.length >= 10, `expected the Merge Gate to name many files, saw ${tokens.length}`)
-
-    const missing = tokens.filter((token) => !globs.some((g) => tokenNamesGlob(token, g)))
-
+  test('the perimeter reference parses: both sections once, every list item an entry, nothing outside a section', () => {
+    const parsed = perimeterFindings(read(PERIMETER_DOC), loadMoneyPathGlobs(), loadMoneyPathControlGlobs())
+    assert.deepEqual(parsed.headings, { runtime: 1, control: 1 }, `${PERIMETER_DOC} must carry each section heading exactly once`)
     assert.deepEqual(
-      missing,
+      parsed.malformed,
       [],
-      'SKILL.md names money-path files absent from .github/money-path-globs.json. ' +
-        'Add them to the JSON and to labeler.yml — prose that the machinery does not ' +
-        'know about is the exact drift #1030 closed.',
+      `${PERIMETER_DOC} has list items that are not entries. Only a line of the form - \`<path>\` counts; ` +
+        'move the explanation into the prose above the entries (#4177).',
+    )
+    assert.deepEqual(parsed.outside, [], `${PERIMETER_DOC} has entries outside the runtime and control sections`)
+    assert.deepEqual(parsed.duplicates, { runtime: [], control: [] }, `${PERIMETER_DOC}: a path is listed twice`)
+  })
+
+  test('the perimeter reference lists exactly `globs` and exactly `controlGlobs` (#1030, #1892, #4177)', () => {
+    // Both directions, as one equality per group. Direction 1 (#1030): a path
+    // documented in the file everyone reads that the machinery never learns
+    // about. Direction 2 (#1892), the one that bit: a glob the JSON has and the
+    // annotated list lacks is a perimeter an agent classifying its own diff
+    // cannot see — seven runtime and five control globs had accumulated in that
+    // state. Equality is also what membership was not (#4177): a suffix
+    // (`routes/payments.ts`) or a concrete file a pattern covers
+    // (`packages/backend/src/infra/relayer-balance-monitor.ts`) passed the old
+    // suffix matcher and is an `extra` here. Per group, because qa-freshness
+    // reads `globs` alone: a runtime path listed under control is wrong even
+    // though the labeler's union would not notice.
+    const parsed = perimeterFindings(read(PERIMETER_DOC), loadMoneyPathGlobs(), loadMoneyPathControlGlobs())
+    assert.deepEqual(
+      parsed.runtime,
+      { missing: [], extra: [] },
+      `${PERIMETER_DOC}'s runtime section and \`globs\` in .github/money-path-globs.json disagree. ` +
+        'Write each glob exactly as the JSON does, one per line. An extra path that IS money-path ' +
+        'belongs in the JSON and labeler.yml first; a missing one is a perimeter the reader cannot see (#1892).',
+    )
+    assert.deepEqual(
+      parsed.control,
+      { missing: [], extra: [] },
+      `${PERIMETER_DOC}'s control section and \`controlGlobs\` in .github/money-path-globs.json disagree. ` +
+        'Write each glob exactly as the JSON does, one per line, in the section its JSON list names.',
     )
   })
 
-  test('every canonical glob is named in the SKILL.md Merge Gate', () => {
-    // Direction 2, and the one that actually bit (#1892).
-    //
-    // Direction 1 above called itself "the dangerous direction" and guarded
-    // only SKILL.md ⊆ JSON. But SKILL.md is the file an agent reads WHILE
-    // classifying its own diff, so a glob the JSON has and the prose lacks is
-    // a perimeter the human half of the process cannot see. Seven runtime
-    // globs and five control globs had accumulated in exactly that state, and
-    // the Merge Gate still described routes/x402.ts and routes/machine-payments.ts
-    // as "dissolved" while both were registered in index.ts and listed here.
-    //
-    // Subset in one direction is not agreement. Both directions, or neither.
+  test('the perimeter line grammar: only a list item that is one backticked path counts, a near miss is reported, prose is not read (#4177)', () => {
+    // The parser's own controls. Mutations: widen the entry regex to accept
+    // trailing text and the parenthetical line becomes an entry; drop the
+    // malformed branch and the near miss is silently skipped.
+    const fixture = [
+      '# Title naming `packages/backend/src/routes/health.ts`',
+      'Prose naming `packages/sdk/src/client.ts` is not read.',
+      '- `outside/a-section.ts`',
+      RUNTIME_HEADING,
+      '### A group heading naming `packages/backend/src/rails/sweep.ts`',
+      'A sentence naming `src/**` and `routes/payments.ts` (a parenthetical with `infra/x.ts`).',
+      '- `packages/backend/src/routes/x402.ts`',
+      '- `packages/backend/src/routes/payments.ts` (a near miss: an entry with an explanation)',
+      '  - `packages/backend/src/indented.ts`',
+      '* `packages/backend/src/star.ts`',
+      '1. `packages/backend/src/ordered.ts`',
+      '> - `packages/backend/src/quoted.ts`',
+      CONTROL_HEADING,
+      '- `scripts/ci/qa-freshness.mjs`',
+      '## Another section',
+      '- `after/the-control-section.ts`',
+    ].join('\n')
+    const parsed = perimeterEntries(fixture)
+    assert.deepEqual(parsed.runtime, ['packages/backend/src/routes/x402.ts'])
+    assert.deepEqual(parsed.control, ['scripts/ci/qa-freshness.mjs'])
+    assert.deepEqual(parsed.outside, ['outside/a-section.ts', 'after/the-control-section.ts'])
+    assert.deepEqual(parsed.malformed, [
+      '8: - `packages/backend/src/routes/payments.ts` (a near miss: an entry with an explanation)',
+      '9:   - `packages/backend/src/indented.ts`',
+      '10: * `packages/backend/src/star.ts`',
+      '11: 1. `packages/backend/src/ordered.ts`',
+      '12: > - `packages/backend/src/quoted.ts`',
+    ])
+    assert.deepEqual(parsed.headings, { runtime: 1, control: 1 })
+  })
+
+  test('the perimeter comparison is per group, and a duplicate is reported (#4177)', () => {
+    // Fixture controls for perimeterFindings. Mutations: compare each section
+    // with the union of both lists and the moved-path case goes green; drop the
+    // duplicates computation and the doubled entry goes unreported.
+    const globs = ['packages/a/runtime.ts', 'packages/a/moved.ts']
+    const controlGlobs = ['scripts/control.mjs']
+    const moved = [
+      RUNTIME_HEADING,
+      '- `packages/a/runtime.ts`',
+      CONTROL_HEADING,
+      '- `scripts/control.mjs`',
+      '- `packages/a/moved.ts`',
+    ].join('\n')
+    const m = perimeterFindings(moved, globs, controlGlobs)
+    assert.deepEqual(m.runtime, { missing: ['packages/a/moved.ts'], extra: [] })
+    assert.deepEqual(m.control, { missing: [], extra: ['packages/a/moved.ts'] })
+
+    const doubled = [
+      RUNTIME_HEADING,
+      '- `packages/a/runtime.ts`',
+      '- `packages/a/moved.ts`',
+      '- `packages/a/runtime.ts`',
+      CONTROL_HEADING,
+      '- `scripts/control.mjs`',
+    ].join('\n')
+    const d = perimeterFindings(doubled, globs, controlGlobs)
+    assert.deepEqual(d.runtime, { missing: [], extra: [] }, 'set equality alone cannot see a duplicate')
+    assert.deepEqual(d.duplicates, { runtime: ['packages/a/runtime.ts'], control: [] })
+  })
+
+  test('the ship-next Merge Gate section points at the perimeter reference (#4177)', () => {
+    // The list left the Merge Gate; the pointer is what sends a reader to it.
+    // Mutation: delete the pointer link and this fails.
     const skill = read('.agents/skills/ship-next/SKILL.md')
-    const tokens = listedTokens(mergeGateFileList(skill))
-    const globs = [...loadMoneyPathGlobs(), ...loadMoneyPathControlGlobs()]
-
-    const unnamed = globs.filter((g) => !tokens.some((token) => tokenNamesGlob(token, g)))
-
-    assert.deepEqual(
-      unnamed,
-      [],
-      'the canonical money-path list has globs the SKILL.md Merge Gate never names. ' +
-        'Add them to the Merge Gate list — an agent classifying its own diff reads ' +
-        'that prose, not this JSON, so a perimeter missing from it is a perimeter ' +
-        'the human half of the union cannot apply (#1892).',
+    const start = skill.indexOf('\n## Merge Gate\n')
+    assert.notEqual(start, -1, 'SKILL.md has no Merge Gate section')
+    const next = skill.indexOf('\n## ', start + 1)
+    const gate = skill.slice(start, next === -1 ? undefined : next)
+    assert.ok(
+      gate.includes('](references/money-path-perimeter.md)'),
+      'the Merge Gate section of ship-next/SKILL.md no longer links references/money-path-perimeter.md',
     )
   })
 
@@ -240,8 +296,8 @@ describe('money-path list stays in one piece', () => {
   const PRE_EMPTIVE_GLOBS = Object.freeze([])
 
   test('no phantom globs — every glob names code that exists', () => {
-    // The enumeration in #1892 compares the JSON against SKILL.md and never
-    // against the code, so it cannot see a glob that matches nothing. That is
+    // The enumeration in #1892 compares the JSON against the annotated perimeter
+    // (references/money-path-perimeter.md since #4177) and never against the code, so it cannot see a glob that matches nothing. That is
     // how a pre-emptive entry for a directory that was never created survived
     // from #1158 to #1897, making the perimeter read as though it covered a
     // module layout the repository has never had.
@@ -339,8 +395,8 @@ describe('money-path list stays in one piece', () => {
     // itself, under "What `covers:` must span (#1736)":
     //
     //   "The list is therefore maintained against one reference: the money-path
-    //    file list in ship-next's Merge Gate. [...] Adding a file to that list
-    //    without adding it here re-opens this hole."
+    //    file list, annotated in ship-next's perimeter reference [...]. Adding a
+    //    file to that list without adding it here re-opens this hole."
     //
     // Nothing checked it. It is a `contract: true` doc, so a money-path file
     // missing from `covers:` is never asked the perimeter question at all, and
@@ -427,9 +483,10 @@ describe('money-path list stays in one piece', () => {
     // deleted the inline copy. PR #3622 (#3616) then touched only the new
     // module and carried no money-path label. Runtime, not control: both x402
     // authorize legs and POST /payments decide through it inside the deployed
-    // backend, so a green money-flow run does exercise it. The labeler and
-    // SKILL.md pins read the UNION of both lists, so without this test the
-    // glob could drift into controlGlobs silently. Mutation: move the glob to
+    // backend, so a green money-flow run does exercise it. The labeler reads
+    // the UNION of both lists, and the perimeter reference follows whichever
+    // list the JSON names, so without this test the glob could drift into
+    // controlGlobs silently. Mutation: move the glob to
     // controlGlobs (or drop it) and this fails by name.
     const runtime = loadMoneyPathGlobs()
     for (const f of ['packages/backend/src/modules/budget-scope/precheck.ts', 'packages/backend/src/modules/budget-scope/resolver.ts']) {
@@ -472,6 +529,68 @@ describe('money-path list stays in one piece', () => {
           'authority and the money-flow harness exercises it (#3661)',
       )
     }
+  })
+
+  test('the SDK merchant-answer decision is RUNTIME money-path — a change to it gates promotion (#4122)', () => {
+    // MerchantCompletion.retryRequest makes the paid retry after the funding
+    // leg has moved USDC, acts on the answer (the merchant accepted, or the
+    // payment is a rejection after funding; the decision itself is
+    // merchant-answer.ts since #4120) and reports the settlement hash Haven
+    // records. It matched no
+    // glob: of the 17 commits that touched it since the facade refactor
+    // 399b1c00f, three touched no perimeter file and went unlabelled
+    // (4e52d4b35, fefd9dc45, 98e1c9cc8). Runtime, not control: qa-dev's
+    // x402-delegation-3009 and x402-delegation-3009-grace-resume legs drive
+    // retryRequest through client.fetch / resumeX402Payment. The labeler reads
+    // the UNION of both lists, and the perimeter reference follows whichever
+    // list the JSON names, so without this test the glob could drift into
+    // controlGlobs silently. Mutation: move the glob to
+    // controlGlobs (or drop it) and this fails by name.
+    const f = 'packages/sdk/src/merchant-completion.ts'
+    assert.ok(trackedFiles().includes(f), `${f} no longer exists — repoint this pin`)
+    assert.ok(
+      moneyPathFiles([f], loadMoneyPathGlobs()).length === 1,
+      `${f} must be matched by a RUNTIME money-path glob — it acts on a funded payment's ` +
+        'merchant outcome, and the money-flow harness exercises it (#4122)',
+    )
+  })
+
+  test('the shared post-funding merchant-answer decision is RUNTIME money-path — a change to it gates promotion (#4120)', () => {
+    // The #4122 shape, one hop over: #4120 moved the accepted/rejected-after-
+    // funding decision OUT of the listed merchant-completion.ts into the new
+    // packages/sdk/src/merchant-answer.ts (owner decision 2 on #4120 — the
+    // module is tracked by its own issue), shared by the hosted
+    // completeX402MerchantCall and the local MerchantCompletion.retryRequest.
+    // Without this pin the move would have taken the decision off the
+    // perimeter silently. Runtime, not control: qa-dev's x402-delegation-3009
+    // legs drive the local path through client.fetch / resumeX402Payment and
+    // the hosted legs drive completeX402MerchantCall through the deployed
+    // server. Mutation: move the glob to controlGlobs (or drop it) and this
+    // fails by name.
+    const f = 'packages/sdk/src/merchant-answer.ts'
+    assert.ok(trackedFiles().includes(f), `${f} no longer exists — repoint this pin`)
+    assert.ok(
+      moneyPathFiles([f], loadMoneyPathGlobs()).length === 1,
+      `${f} must be matched by a RUNTIME money-path glob — it decides a funded payment's ` +
+        'merchant outcome and which settlement hash Haven records (#4120)',
+    )
+  })
+
+  test('the SDK client stays off the money-path list — it only wires the guards in (#3283, #4122)', () => {
+    // A deliberate decision, recorded by #3283 and re-taken by the owner on
+    // #4120 (2026-10-20): client.ts calls the listed guards and
+    // merchant-completion.ts, and listing it would put every SDK transport
+    // change on the runtime list. If it starts deciding spend itself, list the
+    // deciding code as its own file; do not delete this pin to list client.ts.
+    // Mutation: add packages/sdk/src/client.ts to `globs` and this fails.
+    const f = 'packages/sdk/src/client.ts'
+    assert.ok(trackedFiles().includes(f), `${f} no longer exists — drop this pin`)
+    const all = [...loadMoneyPathGlobs(), ...loadMoneyPathControlGlobs()]
+    assert.equal(
+      moneyPathFiles([f], all).length,
+      0,
+      `a money-path glob now matches ${f}, which #3283 and #4122 deliberately left off the list`,
+    )
   })
 
   test('the deliberately off-list neighbours stay off — scope a glob down, do not widen to the module (#3661)', () => {
@@ -529,15 +648,17 @@ describe('money-path list stays in one piece', () => {
       // binding check (userop-binding) and the signing-surface guard moved in
       // by #3283 (delegate-account, direct-payment-guard, redemption-guard,
       // settlement-child), joined by the task/sub-budget guards (#3661), are
-      // spend authority, and those files ARE on the runtime list; the rest is
-      // transport.
+      // spend authority, merchant-completion (#4122) decides a funded
+      // payment's merchant outcome, and merchant-answer.ts (#4120) is the one
+      // shared copy of that decision; those ten files ARE on the runtime list.
+      // The rest is transport — client.ts among it, pinned off above.
       // The doc covers all four because the CASP perimeter question (does
       // Haven hold or move funds?) still applies to what they ship. Widening
       // any of these to `globs` is an owner decision: every SDK/connector/CLI/
       // local-runtime PR would then owe a covering QA run.
       // A DOC_ONLY entry whose files are ALL on the list is stale and fails
       // below — an exclusion must exclude something.
-      ['packages/sdk/src/**', 'client library; only signer.ts, userop-binding.ts, the #3283 signing guard and the #3661 budget guards are on the runtime list — see #3098'],
+      ['packages/sdk/src/**', 'client library; only signer.ts, userop-binding.ts, the #3283 signing guard, the #3661 budget guards, merchant-completion.ts (#4122) and merchant-answer.ts (#4120) are on the runtime list — see #3098'],
       ['packages/cli/src/**', 'client CLI; not deployed by Haven — see #3098'],
       ['packages/connect/src/**', 'the dashboard\'s connector, runs on the user\'s machine — see #3098'],
       ['packages/mcp/src/**', 'the local MCP runtime, runs in the agent\'s process — see #3098'],
@@ -568,7 +689,7 @@ describe('money-path list stays in one piece', () => {
       `${doc} spans packages the money-path list does not: the doc asks the CASP ` +
         'perimeter question of them while the classifier, the labeler and qa-freshness ' +
         'never will. Add the glob to .github/money-path-globs.json (and labeler.yml and ' +
-        'the SKILL.md Merge Gate), or name it in DOC_ONLY here with the reason it stays ' +
+        `${PERIMETER_DOC}), or name it in DOC_ONLY here with the reason it stays ` +
         'doc-only (#3098).',
     )
 
@@ -637,13 +758,25 @@ describe('money-path list stays in one piece', () => {
     )
   })
 
+  test('KNOWN_COPIES names the perimeter reference and not SKILL.md (#1904, #4177)', () => {
+    // The #1904 test above scores everything OUTSIDE KNOWN_COPIES. The annotated
+    // list moved out of ship-next's Merge Gate section into
+    // references/money-path-perimeter.md, so the reference is a known home and
+    // SKILL.md is ordinary prose: a full copy pasted back into SKILL.md must be
+    // scored, and leaving SKILL.md in KNOWN_COPIES would hide it. Mutations:
+    // drop the reference from KNOWN_COPIES, or add SKILL.md, and this fails.
+    assert.ok(KNOWN_COPIES.includes(PERIMETER_DOC), `KNOWN_COPIES must name ${PERIMETER_DOC}`)
+    assert.ok(
+      !KNOWN_COPIES.includes('.agents/skills/ship-next/SKILL.md'),
+      'KNOWN_COPIES must not name .agents/skills/ship-next/SKILL.md: the list no longer lives there, ' +
+        'and a known home is never scored, so a copy pasted back would be invisible',
+    )
+  })
+
   test('the canonical file is well-formed and non-empty', () => {
-    // The Merge Gate prose describes CLASSIFICATION (which diffs are
-    // money-path), and classification is the UNION — controlGlobs are
-    // labelled money-path too, they just skip the QA-freshness re-run. A
-    // file named in the prose is "known to the machinery" if either list
-    // has it (#1045 moved release-bump/publish.yml to controlGlobs, which
-    // is where this distinction first bit).
+    // Both lists, because both label money-path; they differ only in whether
+    // the QA-freshness re-run counts them (#1045 moved release-bump/publish.yml
+    // to controlGlobs, which is where that distinction first bit).
     const globs = [...loadMoneyPathGlobs(), ...loadMoneyPathControlGlobs()]
     assert.ok(globs.length >= 15, `expected the full money-path list, saw ${globs.length}`)
     for (const g of globs) {

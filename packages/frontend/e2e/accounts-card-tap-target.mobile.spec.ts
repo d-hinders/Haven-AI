@@ -79,8 +79,9 @@ async function openAccountsWithBothCards(page: Page) {
   await page.goto('/accounts')
   await page.waitForSelector('[data-testid="account-card"] h3 a', { timeout: 60_000 })
   /*
-    Below `lg` the nav drawer overlays the grid and would own every
-    `elementFromPoint` reading underneath it (#1749). The established call, and
+    Below `lg` an open More sheet would cover the grid and own every
+    `elementFromPoint` reading underneath it (#1749, #4053; the sheet starts
+    closed, so the helper is a presence check). The established call, and
     the same one `accounts-name-measure.spec.ts` and
     `tooltip-reachability.spec.ts` make before their own hit-dependent reads.
   */
@@ -133,10 +134,13 @@ test('/accounts: a real tap on the card body opens the account, with no set-defa
   })
 
   const card = page.getByTestId('account-card').filter({ hasText: SECOND_CARD })
-  // Use the token row rather than the footer: at 390px the fixed bottom nav
-  // can overlap the footer after scrolling, which would test that nav instead
-  // of the stretched card link.
-  const bodyText = card.getByText('USDC', { exact: true }).first()
+  // Use the balance figure rather than the footer: at 390px the fixed bottom
+  // nav can overlap the footer after scrolling, which would test that nav
+  // instead of the stretched card link. (#4021 retarget: the USDC token row
+  // this used to tap no longer renders — a single holding gets no rows — so
+  // the headline figure is the body point, and still the only real-engine
+  // proof of the #3550 overlay.)
+  const bodyText = card.getByText('$1,250.00', { exact: true }).first()
   const box = await bodyText.boundingBox()
   if (!box) throw new Error('the account-card body point has no rendered box')
   await page.evaluate(() => {

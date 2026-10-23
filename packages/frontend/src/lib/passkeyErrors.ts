@@ -2,7 +2,7 @@
  * The ONE passkey-cancellation predicate (#1079, defect 3 — the #1076
  * regression).
  *
- * A dismissed Face ID / passkey sheet must never render as a failure. The
+ * A dismissed passkey prompt must never render as a failure. The
  * real error the WebAuthn path throws is ox's `SignFailedError` ("Failed to
  * request credential. Details: … NotAllowedError …") wrapping a DOMException
  * named `NotAllowedError` as its `cause` — substring checks for

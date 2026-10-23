@@ -2,7 +2,7 @@
  * /design-system visual regression (#897, epic #904) — the one UNIVERSAL
  * (CI-blocking, not ship-next-dependent) visual guard. The page renders
  * deterministic demo data for every shared primitive, so any unreviewed pixel
- * drift in the app shell (top bar, sidebar) fails the PR here with a visible
+ * drift in the app chrome (shell, sidebar) fails the PR here with a visible
  * diff.
  *
  * ── The whole-page capture is GONE (#2635) ───────────────────────────────────
@@ -39,9 +39,10 @@
  * everything else below the shell on that page is still compared against
  * nothing. `product-routes.visual.spec.ts`'s whole-page
  * `/dashboard` and `/transactions` baselines remain the only whole-page pixel
- * coverage in the suite. The scoped top-bar and sidebar clips below are what is left
- * of this spec, and they are unaffected by the removal — they were never the flaky
- * half.
+ * coverage in the suite. The scoped sidebar and showcase-sample clips below are
+ * what is left of this spec; the top-bar clip that shared the file was removed
+ * with the bar itself (#4029), and the authenticated whole-page baselines carry
+ * the rest of the shell.
  *
  * BASELINES ARE LINUX-RENDERED (committed under e2e/__screenshots__/<spec>/,
  * one directory per spec file — there is no platform segment in the path, which
@@ -75,28 +76,28 @@ const VIEWPORTS = SHARED_VIEWPORTS as ReadonlyArray<{
   height: number
 }>
 
-/**
- * The app shell's top bar, located by its POSITION IN THE SHELL rather than by
- * tag or class. `<header>` alone is ambiguous — `ui/PageHeader` renders one too,
- * and `/design-system` shows it — and a class string is the thing this gate is
- * supposed to be checking, not the thing it should trust to find its subject.
- * The top bar is the header immediately preceding the shell's scroll root
- * (`(authenticated)/layout.tsx`), and nothing else on any route is.
- */
-const APP_TOP_BAR = 'xpath=//*[@id="main-content"]/preceding-sibling::header[1]'
+// #4288: the ledger capture's clock. The day buckets are LOCAL days, so the
+// spec pins its own zone — a declared override of the config's UTC (#4293),
+// kept so these baselines do not move; the freeze sits
+// 06:00 local (≥ 3 h past midnight) so `DS_LEDGER_ROWS`' two recent rows
+// bucket under the same "Today" band and the inset divider renders.
+const LEDGER_TZ = 'Europe/Stockholm'
+const FROZEN_LEDGER_NOW = new Date('2026-10-20T06:00:00+02:00')
 
 /**
- * The app shell's sidebar — the other half of the same chrome (#1820), located
- * the same structural way and for the same reason.
+ * The app shell's sidebar — the other half of the chrome (#1820), located
+ * structurally and for the same reason the (since #4029 deleted) top bar
+ * locator was.
  *
- * `<aside>` alone is no safer than `<header>` alone was, and a class string is
- * again the thing under test rather than something to locate by. The sidebar is
- * the `<aside>` immediately preceding the COLUMN that holds the scroll root:
- * the shell is `<div class="flex h-screen"><aside/><div><TopBar/><main
- * id="main-content"/></div></div>`, so the sidebar is a sibling of
+ * `<aside>` alone is no safer than `<header>` alone would have been, and a
+ * class string is again the thing under test rather than something to locate
+ * by. The sidebar is the `<aside>` immediately preceding the COLUMN that holds
+ * the scroll root: the shell is `<div class="flex h-screen"><aside/><div>
+ * <main id="main-content"/></div></div>`, so the sidebar is a sibling of
  * `#main-content`'s PARENT, not of `#main-content` itself. That one level is
- * the whole difference between this locator and the top bar's, and getting it
- * wrong yields a locator that matches nothing — which `toHaveCount(1)` catches.
+ * the whole difference between this locator and a bare-tag read, and getting
+ * it wrong yields a locator that matches nothing — which `toHaveCount(1)`
+ * catches.
  *
  * Be honest about what that assertion does and does not buy. It closes the
  * "matches nothing" and "matches several" failures. It does NOT make the
@@ -111,28 +112,20 @@ const APP_TOP_BAR = 'xpath=//*[@id="main-content"]/preceding-sibling::header[1]'
 const APP_SIDEBAR = 'xpath=//*[@id="main-content"]/parent::*/preceding-sibling::aside[1]'
 
 /**
- * Below this width the sidebar is an off-canvas drawer (`fixed`,
- * `-translate-x-full`), not shell chrome — `Sidebar.tsx`'s own
+ * Below this width the sidebar rail is `hidden` (#4053; until then an
+ * off-canvas `fixed` drawer), not shell chrome — `Sidebar.tsx`'s own
  * `DESKTOP_BREAKPOINT_PX`, and the `lg:` breakpoint its classes are gated on.
  *
  * Keyed on the viewport WIDTH rather than on `vp.name === 'desktop'`, so a
  * viewport added to `evidence-viewports.mjs` later is covered or excluded by
  * what it actually renders instead of by what it is called.
  *
- * Measured rather than assumed — and measured on the ELEMENT, because the
- * obvious pixel check is wrong here in a way that looks right. At 390px the
- * aside reports `position: fixed`, `transform: matrix(1,0,0,1,-240,0)` and a
- * bounding rect of `x: -240, width: 240, right: 0`: its right edge is exactly
- * the viewport's left edge, so it contributes nothing to the capture and there
- * is nothing there to scope. At 1280px it is `position: static`, untransformed,
- * `x: 0, width: 240` — in flow, part of the shell.
- *
- * The tempting shortcut is to assert the mobile baseline's x=0..239 band is
- * white. It is NOT: because the drawer is `fixed`, it reserves no space, so
- * `<main>` paints straight through that band and the pixels there are ordinary
- * page content. An earlier draft of this comment claimed whiteness off a
- * too-sparse sample and was wrong — the band being non-white is a CONSEQUENCE
- * of the sidebar being absent, not evidence against it. Measure the element.
+ * Measured on the ELEMENT, not on pixels: at 390px the aside is
+ * `display: none` with an empty bounding rect, so it contributes nothing to
+ * the capture and there is nothing there to scope (under the pre-#4053 drawer
+ * it was `fixed` at `x: -240, right: 0` — absent for a different reason). At
+ * 1280px it is `position: static`, `x: 0, width: 240` — in flow, part of the
+ * shell. The phone More sheet has its own baseline (`more-sheet.visual.spec.ts`).
  */
 const SIDEBAR_MIN_VIEWPORT_WIDTH = 1024
 
@@ -178,9 +171,10 @@ const SIDEBAR_MIN_VIEWPORT_WIDTH = 1024
  *
  * So these sit just off the floor rather than "comfortably above jitter":
  *
- *   top bar     100 px   0.46% of the mobile band, 0.17% of the desktop one.
- *                        Catches #1804's change by 20x, and a 1px hairline
- *                        across the mobile bar (390px) by 3.9x.
+ *   sidebar     100 px   0.05% of the 240 x 800 capture. Catches a nav-row
+ *                        recolour (~200 px of glyph and label) by orders of
+ *                        magnitude, and a 1px hairline across the 240px width
+ *                        (800px tall) by 3.2x.
  *
  * Not zero on purpose: a runner-image or Chromium bump can legitimately
  * nudge a few pixels, and a gate that goes flat red for every PR is a gate
@@ -231,16 +225,19 @@ const SIDEBAR_MIN_VIEWPORT_WIDTH = 1024
  * right shape for the paragraph above: the un-refreshable window is real, and
  * it is also a small pixel window that nothing real fits in, so it should cost
  * a deliberate choice rather than be open on every dispatch.
+ * The top-bar clip this budget used to belong to is gone with the bar
+ * (#4029); the absolute-count reasoning below carries over to the sidebar and
+ * showcase budgets unchanged. The #1805 arithmetic that justified the shape is
+ * kept as the historical record (see the table above).
  */
-const TOP_BAR_MAX_DIFF_PIXELS = 100
 
 /**
  * ── The sidebar's budget (#1820) ─────────────────────────────────────────────
  *
- * Same reasoning as the top bar's, with the arithmetic recomputed rather than
- * copied — and the arithmetic is the point, because the sidebar's position in
- * the whole-page capture is worse than the top bar's in a way its raw area
- * hides.
+ * The same absolute-count reasoning, with the arithmetic recomputed rather
+ * than copied — and the arithmetic is the point, because the sidebar's position
+ * in the whole-page capture is worse than a chrome band's in a way its raw
+ * area hides.
  *
  * Measured off the (since-deleted, #2635) `design-system-desktop.png`
  * (1,280 x 17,746) by scanning the x=0..239 band row by row:
@@ -285,11 +282,11 @@ const TOP_BAR_MAX_DIFF_PIXELS = 100
  * down (pixelmatch runs with `includeAA: false`, so antialiased pixels are
  * excluded before any budget is consulted).
  *
- * 100 is then the same absolute slack the top bar carries, which on this region
- * is far tighter proportionally — 0.05% of the 240 x 800 capture against the top
- * bar's 0.17% of its desktop band. It is not zero for the reason the top bar's
- * is not: a runner-image or Chromium bump may legitimately nudge a few pixels,
- * and a gate that goes flat red every week is a gate someone turns off.
+ * 100 is then the same absolute slack every clip in this file carries, and on
+ * this region it is proportionally the tightest — 0.05% of the 240 x 800
+ * capture. It is not zero for the reason any of them is not: a runner-image or
+ * Chromium bump may legitimately nudge a few pixels, and a gate that goes flat
+ * red every week is a gate someone turns off.
  *
  * ── What 100 buys, from the mutation this shipped with ───────────────────────
  *
@@ -310,7 +307,7 @@ const TOP_BAR_MAX_DIFF_PIXELS = 100
  * regression that the whole-page gate passed at the time — now moot, since
  * that capture no longer exists to pass anything. The third is the
  * desktop-only decision paying off in the same run — the mutated headings are
- * not painted on mobile at all, because the drawer is off-canvas there.
+ * not painted on mobile at all, because the rail is not rendered there.
  *
  * Two things this measurement teaches that a single number would have hidden.
  * **Local counts are not the gate's counts:** the same mutation is 282 px
@@ -326,9 +323,8 @@ const TOP_BAR_MAX_DIFF_PIXELS = 100
  * Focus indicators. PR #1831 added eleven of them to `Sidebar`, and a scoped
  * capture of the resting state sees none of them — nothing is focused in a
  * screenshot. This gate protects the sidebar's RESTING appearance; focus,
- * hover, the open mobile drawer and the collapse transition are all out of its
- * reach, and closing that gap needs a driven scenario rather than a wider
- * region. Recorded here so the next reader does not infer coverage from the
+ * hover and the collapse transition are out of its reach (the phone More
+ * sheet has its own driven baseline, `more-sheet.visual.spec.ts`, #4053). Recorded here so the next reader does not infer coverage from the
  * fact that a sidebar capture exists.
  */
 const SIDEBAR_MAX_DIFF_PIXELS = 100
@@ -398,25 +394,14 @@ test.describe('design-system visual regression', () => {
       await page.waitForLoadState('networkidle')
 
       // ── The app shell ───────────────────────────────────────────────────────
-      // Scoping the region is what makes "the shell is protected" a property
-      // rather than a coincidence of how quiet the rest of the page happens to
-      // be — and it makes an INTENDED shell change reviewable as a 390x56 image
-      // diff instead of a full-page one (#2635 dropped the whole-page capture
-      // this comment used to contrast against; see the file header).
-      const topBar = page.locator(APP_TOP_BAR)
-      // A locator matching nothing would make the screenshot below error, but
-      // one matching TWO would silently capture the first — the failure shape
-      // this gate exists to close. Assert the count, don't assume it.
-      await expect(topBar).toHaveCount(1)
-      await expect(topBar).toHaveScreenshot(`design-system-topbar-${vp.name}${schemeSuffix}.png`, {
-        animations: 'disabled',
-        caret: 'hide',
-        maxDiffPixels: TOP_BAR_MAX_DIFF_PIXELS,
-        threshold: PIXEL_THRESHOLD,
-      })
-
-      // ── The sidebar, the other half of the same chrome (#1820) ────────────
-      // Desktop only — below `lg` it is an off-canvas drawer absent from the
+      // There is NO top bar to clip since #4029: the shell's chrome above the
+      // page is the safe-area band (zero-height here). The gate fails on
+      // pixels, never on a missing element, so there is deliberately no
+      // chrome locator here to go stale; the whole authenticated render is
+      // covered by the visual baselines regenerated in the same PR.
+      //
+      // ── The sidebar, the other half of the chrome (#1820) ─────────────────
+      // Desktop only — below `lg` the rail is hidden and absent from the
       // capture (see SIDEBAR_MIN_VIEWPORT_WIDTH above for the measurement).
       if (vp.width >= SIDEBAR_MIN_VIEWPORT_WIDTH) {
         const sidebar = page.locator(APP_SIDEBAR)
@@ -479,8 +464,8 @@ test.describe('design-system visual regression', () => {
    * paint with). A diff with none of these having moved is a paint/token
    * drift; a diff WITH one of them moved names its own cause.
    *
-   * The budget is the same 100-px absolute slack the shell clips carry
-   * (TOP_BAR_MAX_DIFF_PIXELS / SIDEBAR_MAX_DIFF_PIXELS): the measured jitter
+   * The budget is the same 100-px absolute slack every clip in this file
+   * carries (SIDEBAR_MAX_DIFF_PIXELS is the named one): the measured jitter
    * floor is the same zero (includeAA off, threshold 0.02), so the budget is
    * sized to catch one hatched bar recoloured (~300 px here) and to ignore a
    * runner-image nudge. Threshold rides the shared PIXEL_THRESHOLD — at the
@@ -611,9 +596,13 @@ test.describe('design-system visual regression', () => {
 
       const sample = page.getByTestId('ds-attention-list')
       await expect(sample).toHaveCount(1)
-      // All four tone items rendered — a dismiss here is interaction state,
-      // and this gate photographs the resting page only.
-      await expect(sample.getByTestId(/^attention-dismiss-/)).toHaveCount(4)
+      // All five tone items rendered — a dismiss here is interaction state,
+      // and this gate photographs the resting page only. Still exactly three
+      // dismiss controls: the badge-less summary stays dismissible, the
+      // failure row keeps only the reserved slot, and the haven-paused row
+      // (#4033) has no dismiss at all — nothing visible to align.
+      await expect(sample.locator('li')).toHaveCount(5)
+      await expect(sample.getByTestId(/^attention-dismiss-/)).toHaveCount(3)
       await expectShowcaseClip(sample, vp.height, 'the AttentionList sample', `design-system-attention-list-${vp.name}${schemeSuffix}.png`, SAMPLE_MAX_DIFF_PIXELS)
     })
 
@@ -651,6 +640,10 @@ test.describe('design-system visual regression', () => {
       await expectShowcaseClip(sample, vp.height, 'the activity row sample', `design-system-activity-row-${vp.name}${schemeSuffix}.png`, SAMPLE_MAX_DIFF_PIXELS)
     })
 
+    // #4288: the day-grouped ledger — the same-day inset divider is the one
+    // layout the ds-activity-row clip cannot show. Captured in the
+    // clock-frozen describe BELOW (the ledger needs a pinned timezone, which
+    // cannot vary per test inside this viewport loop).
     test(`/design-system AreaChart sparkline sample renders pixel-stable (${vp.name})`, async ({ page }, testInfo) => {
       const scheme = schemeOf(testInfo)
       const schemeSuffix = scheme === 'dark' ? '-dark' : ''
@@ -676,7 +669,74 @@ test.describe('design-system visual regression', () => {
       await expect(sample).toHaveCount(1)
       await expectShowcaseClip(sample, vp.height, 'the StatTile inline sample', `design-system-stat-tile-inline-${vp.name}${schemeSuffix}.png`, SAMPLE_MAX_DIFF_PIXELS)
     })
+
+    // #4208: these are the two standing examples for the agent identity mark.
+    // The first protects the compact row-sized Monogram, including the emoji
+    // grapheme case; the second protects its title alignment in PageHeader.
+    test(`/design-system Monogram agent-row sample renders pixel-stable (${vp.name})`, async ({ page }, testInfo) => {
+      const scheme = schemeOf(testInfo)
+      const schemeSuffix = scheme === 'dark' ? '-dark' : ''
+      await page.setViewportSize({ width: vp.width, height: vp.height })
+      await page.goto('/design-system')
+      await page.evaluate(() => document.fonts.ready)
+      await page.waitForLoadState('networkidle')
+
+      const sample = page.getByTestId('ds-monogram')
+      await expect(sample).toHaveCount(1)
+      await expect(sample.locator('[aria-hidden="true"].h-8.w-8')).toHaveCount(2)
+      await expect(sample.getByText('Research agent', { exact: true })).toBeVisible()
+      await expectShowcaseClip(sample, vp.height, 'the Monogram sample', `design-system-monogram-${vp.name}${schemeSuffix}.png`, SAMPLE_MAX_DIFF_PIXELS)
+    })
+
+    test(`/design-system PageHeader leading sample renders pixel-stable (${vp.name})`, async ({ page }, testInfo) => {
+      const scheme = schemeOf(testInfo)
+      const schemeSuffix = scheme === 'dark' ? '-dark' : ''
+      await page.setViewportSize({ width: vp.width, height: vp.height })
+      await page.goto('/design-system')
+      await page.evaluate(() => document.fonts.ready)
+      await page.waitForLoadState('networkidle')
+
+      const sample = page.getByTestId('ds-pageheader-leading')
+      await expect(sample).toHaveCount(1)
+      await expect(sample.getByRole('heading', { name: 'Research agent', exact: true })).toHaveCount(1)
+      await expect(sample.locator('[aria-hidden="true"].h-12.w-12')).toHaveCount(1)
+      await expectShowcaseClip(sample, vp.height, 'the PageHeader leading sample', `design-system-pageheader-leading-${vp.name}${schemeSuffix}.png`, SAMPLE_MAX_DIFF_PIXELS)
+    })
   }
+
+  // #4288: the day-grouped ledger — the same-day inset divider is the one
+  // layout the ds-activity-row clip cannot show. `DS_LEDGER_ROWS` stamps its
+  // timestamps from `Date.now()` at module load, so the capture needs a
+  // FROZEN clock, set BEFORE `goto`, at least 3 hours past local midnight
+  // (else l1 and l2 fall on different days and no inset divider renders) —
+  // with the timezone pinned to LEDGER_TZ — overriding the config's UTC
+  // (#4293) — because the day buckets are LOCAL days. A separate describe, because the
+  // timezone is a context option and this viewport loop declares its own.
+  test.describe('clock-frozen ledger (#4288)', () => {
+    test.use({ timezoneId: LEDGER_TZ })
+
+    for (const vp of VIEWPORTS) {
+      test(`/design-system activity ledger sample renders pixel-stable (${vp.name})`, async ({ page }, testInfo) => {
+        const scheme = schemeOf(testInfo)
+        const schemeSuffix = scheme === 'dark' ? '-dark' : ''
+        await page.clock.setFixedTime(FROZEN_LEDGER_NOW)
+        await page.setViewportSize({ width: vp.width, height: vp.height })
+        await page.goto('/design-system')
+        await page.evaluate(() => document.fonts.ready)
+        await page.waitForLoadState('networkidle')
+
+        const ledger = page.getByTestId('ds-activity-ledger')
+        await expect(ledger).toHaveCount(1)
+        // The point of the freeze: l1 and l2 share one day, so the second
+        // renders WITH its same-day inset divider. If the clock were free
+        // (or frozen too near midnight) the two would split across day bands
+        // and the divider would vanish.
+        await expect(ledger.getByText('Today')).toHaveCount(1)
+        await expect(ledger.getByRole('button', { name: 'storage.provider.io' })).toHaveCount(1)
+        await expectShowcaseClip(ledger, vp.height, 'the activity ledger sample', `design-system-activity-ledger-${vp.name}${schemeSuffix}.png`, SAMPLE_MAX_DIFF_PIXELS)
+      })
+    }
+  })
 
   /**
    * ── The #3441 guard: content above a showcase sample cannot move its clip ──
@@ -707,6 +767,8 @@ test.describe('design-system visual regression', () => {
     ['activity row sample', (p) => p.getByTestId('ds-activity-row')],
     ['AreaChart sparkline sample', (p) => p.getByTestId('ds-area-chart-sparkline')],
     ['StatTile inline sample', (p) => p.getByTestId('ds-stat-tile-inline')],
+    ['Monogram sample', (p) => p.getByTestId('ds-monogram')],
+    ['PageHeader leading sample', (p) => p.getByTestId('ds-pageheader-leading')],
   ]
 
   const FRACTIONAL_SPACERS_PX = [0.25, 0.5, 0.75]

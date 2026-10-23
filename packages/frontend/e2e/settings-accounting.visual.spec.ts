@@ -247,7 +247,11 @@ test.describe('settings accounting connection states', () => {
       await expect(page.getByRole('heading', { name: 'Accounting', exact: true })).toHaveCount(0)
       await expect(page.getByTestId('accounting-coming-soon')).toHaveCount(0)
       await expect(page.getByText('Nothing can be connected yet.')).toHaveCount(0)
-      await expect(page.getByText('Coming soon', { exact: false })).toHaveCount(0)
+      // Scoped to the content region: the sidebar's Accounting pill
+      // legitimately carries `common.comingSoon` (it is hidden on mobile,
+      // but present in the DOM).
+      const main = page.locator('#main-content')
+      await expect(main.getByText('Coming soon', { exact: false })).toHaveCount(0)
     })
   }
 })

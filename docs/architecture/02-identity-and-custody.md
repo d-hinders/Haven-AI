@@ -250,15 +250,23 @@ radius shifts in a few ways worth mapping explicitly:
   inside the UserOp the agent signs for a direct payment, and, on erc7710,
   inside the `payment_header` Haven returns for the agent to forward to the
   merchant (the encoded `[settlement child, …, budget]` chain,
-  `modules/x402/x402-delegation.ts` `assembleSettlementPayload`). So the agent,
-  and every erc7710 merchant it pays, does see the signed budget delegation.
-  No connector credential file stores it (`packages/connect/src/storage.ts`).
+  `modules/x402/x402-delegation.ts` `assembleSettlementPayload`). On erc7710 a
+  second Haven-side copy rides the settlement evidence
+  (`machine_payment_evidence.payment_proof_header`), and every mined
+  redemption, on any rail, leaves the signed chain in public transaction
+  calldata. So the agent, every erc7710 merchant it pays, and anyone reading
+  the chain after its first payment can see the signed budget delegation. No
+  connector credential file stores it (`packages/connect/src/storage.ts`).
   It is **not key material**, but it is spend-enabling *in combination with*
   the delegate key, so migration `042_agent_delegations.ts` specifies it be
   handled like `api_key_hash`-class data: platform-level encryption at rest,
-  never logged.
-- **The delegate key alone still cannot spend**, and the delegation alone still
-  cannot spend. Full agent compromise (both) is bounded by the caveat stack:
+  never logged. That care is defence in depth before first use, not a
+  secrecy guarantee.
+- **The delegation alone still cannot spend; the delegate key alone can, once
+  any redemption has published the delegation** — every `redeemDelegations`
+  call carries the signed chain in its calldata, and on erc7710 the
+  `payment_header` carries it too (security model §3). Either way, compromise
+  is bounded by the caveat stack:
   the sum of every enabled budget delegation's period amount per period (each
   slot's live grant and every `replaced` row until its Stop lands), each to its
   pinned recipient or to any recipient for an open budget, until expiry or the
@@ -340,7 +348,10 @@ and embeds it in every redemption it prepares (the direct-payment UserOp,
 `assembleSettlementPayload`), and no connector credential file stores it
 (`connect/src/storage.ts`). Review round 1 (#4377) added the setup token and
 challenge id to the registration's list, the dashboard manual-credential
-path, and the exact `hybrid_account_passkeys` columns. Re-checked without change: `identity.json` /
+path, and the exact `hybrid_account_passkeys` columns. Review round 2 made
+the delegation-exposure bullets say the delegation is public after first use
+on every rail (calldata, the erc7710 header, the evidence copy) and that the
+delegate key alone can spend within the caveat stack once it is. Re-checked without change: `identity.json` /
 `signer.json`, the manual `/agents` key (`routes/agents.ts`), the re-key
 split and `refuseAgentCaller` (`connect/src/rekey.ts`,
 `routes/agent-rekey.ts`), relayer deployment (`rails/hybrid-provisioning.ts`),

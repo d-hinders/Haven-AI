@@ -550,3 +550,104 @@ describe('safeRequest (#4281)', () => {
     expect(transport).not.toHaveBeenCalled()
   })
 })
+
+describe('safeFetch deadline and address fallback (#4300)', () => {
+  const ok402: PinnedResponse = { status: 402, location: null, body: '{}', headers: {} }
+  const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+  it('gives a redirect hop only the budget left, not the full budget again', async () => {
+    const calls: PinnedRequest[] = []
+    const transport: PinnedTransport = async (req) => {
+      calls.push(req)
+      if (calls.length === 1) {
+        await delay(150)
+        return { status: 302, location: 'https://next.example/b', body: '', headers: {} }
+      }
+      return { status: 200, location: null, body: 'done', headers: {} }
+    }
+    const result = await safeGetText('https://first.example/a', { timeoutMs: 1_000, resolver: publicResolver, transport })
+    expect(result.ok).toBe(true)
+    expect(calls).toHaveLength(2)
+    expect(calls[0]!.timeoutMs).toBeLessThanOrEqual(1_000)
+    // The first hop spent about 150 ms; the second must not get the whole 1 s back.
+    expect(calls[1]!.timeoutMs).toBeLessThanOrEqual(1_000 - 140)
+  })
+
+  it('counts name resolution against the deadline and never sends when it runs out', async () => {
+    const transport = vi.fn(transportReturning(ok402))
+    const slowResolver = async (): Promise<ResolvedAddress[]> => {
+      await delay(300)
+      return [{ address: '93.184.216.34', family: 4 }]
+    }
+    const result = await safeGetText('https://slow-dns.example/', { timeoutMs: 100, resolver: slowResolver, transport })
+    expect(result).toMatchObject({ ok: false, reason: 'timeout' })
+    expect(transport).not.toHaveBeenCalled()
+  })
+
+  it('takes the time spent resolving out of the request budget', async () => {
+    const calls: PinnedRequest[] = []
+    const transport: PinnedTransport = async (req) => {
+      calls.push(req)
+      return ok402
+    }
+    const slowResolver = async (): Promise<ResolvedAddress[]> => {
+      await delay(150)
+      return [{ address: '93.184.216.34', family: 4 }]
+    }
+    await safeRequest('https://slow-dns.example/', { method: 'GET', body: null }, { timeoutMs: 1_000, resolver: slowResolver, transport })
+    expect(calls).toHaveLength(1)
+    expect(calls[0]!.timeoutMs).toBeLessThanOrEqual(1_000 - 140)
+  })
+
+  it('falls back to the next public address when the first cannot connect', async () => {
+    const calls: PinnedRequest[] = []
+    const transport: PinnedTransport = async (req) => {
+      calls.push(req)
+      if (req.address === '2606:2800:220:1:248:1893:25c8:1946') {
+        return { ok: false, reason: 'connect_error', detail: 'ENETUNREACH' }
+      }
+      return ok402
+    }
+    const resolver = async (): Promise<ResolvedAddress[]> => [
+      { address: '2606:2800:220:1:248:1893:25c8:1946', family: 6 },
+      { address: '93.184.216.34', family: 4 },
+    ]
+    const result = await safeRequest('https://dual.example/', { method: 'GET', body: null }, { resolver, transport })
+    expect(result).toMatchObject({ ok: true, status: 402 })
+    expect(calls.map((c) => c.address)).toEqual(['2606:2800:220:1:248:1893:25c8:1946', '93.184.216.34'])
+    // An attempt with another address left is capped on its connect phase; the last one is not.
+    expect(calls[0]!.connectTimeoutMs).toBeGreaterThan(0)
+    expect(calls[1]!.connectTimeoutMs).toBeUndefined()
+  })
+
+  it('never falls back to an address the policy refused, even when every public one fails', async () => {
+    const calls: PinnedRequest[] = []
+    const transport: PinnedTransport = async (req) => {
+      calls.push(req)
+      return { ok: false, reason: 'connect_error', detail: 'ECONNREFUSED' }
+    }
+    const resolver = async (): Promise<ResolvedAddress[]> => [
+      { address: '93.184.216.34', family: 4 },
+      { address: '10.0.0.5', family: 4 },
+      { address: '169.254.169.254', family: 4 },
+    ]
+    const result = await safeRequest('https://mixed.example/', { method: 'GET', body: null }, { resolver, transport })
+    expect(result).toMatchObject({ ok: false, reason: 'connect_error' })
+    expect(calls.map((c) => c.address)).toEqual(['93.184.216.34'])
+  })
+
+  it('does not retry another address once the request may have reached the server', async () => {
+    const calls: PinnedRequest[] = []
+    const transport: PinnedTransport = async (req) => {
+      calls.push(req)
+      return { ok: false, reason: 'transport_error', detail: 'socket hang up' }
+    }
+    const resolver = async (): Promise<ResolvedAddress[]> => [
+      { address: '93.184.216.34', family: 4 },
+      { address: '93.184.216.35', family: 4 },
+    ]
+    const result = await safePostJson('https://once.example/', { jsonrpc: '2.0' }, { resolver, transport })
+    expect(result).toMatchObject({ ok: false, reason: 'transport_error' })
+    expect(calls).toHaveLength(1)
+  })
+})

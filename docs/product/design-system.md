@@ -2540,7 +2540,8 @@ pattern, and it leads with the answer:
    recipient"), which have no counterparty to draw. The title
    is the ledger row's title (`counterpartyLabel` no-address mode, or "Moved
    between your accounts"), the subtitle the kind in words ("Paid request",
-   "Payment", "Deposit", "Transfer", "Payment attempt"). Below it: `Amount
+   "Payment", "Deposit", "Transfer", "Payment attempt"; dropped where it would
+   only repeat the title, as on a deposit). Below it: `Amount
    size="lg"` with the token amount beside it (a move passes no sign), the
    `StatusBadge` from `transactionRowBadge(tx)` with "Executed" as the panel's
    own fallback, one line saying who, where and when ("Paid by Atlas from Main

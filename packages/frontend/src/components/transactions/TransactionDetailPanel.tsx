@@ -42,11 +42,12 @@ interface Props {
  */
 function DetailRow({ label, value, note }: { label: string; value: ReactNode; note?: string }) {
   return (
-    <div className="grid grid-cols-[minmax(0,7.5rem)_minmax(0,1fr)] items-baseline gap-3 border-b border-[var(--v2-table-row-border)] py-2.5 last:border-b-0">
-      <dt className="text-xs text-[var(--v2-ink-3)]">{label}</dt>
+    <div className="grid grid-cols-[max-content_minmax(0,1fr)] items-baseline gap-3 border-b border-[var(--v2-table-row-border)] py-2.5 last:border-b-0">
+      {/* `max-content`: a label never wraps ("Settlement transaction"). */}
+      <dt className="whitespace-nowrap text-xs text-[var(--v2-ink-3)]">{label}</dt>
       <dd className="min-w-0 text-right text-sm text-[var(--v2-ink-2)]">
         <div>{value}</div>
-        {note ? <p className="mt-0.5 text-xs text-[var(--v2-ink-3)]">{note}</p> : null}
+        {note ? <p className="mt-0.5 text-left text-xs text-[var(--v2-ink-3)]">{note}</p> : null}
       </dd>
     </div>
   )
@@ -71,8 +72,10 @@ function OnChainValue({
   const href = getExplorerUrlOrNull(chainId, type, value)
   const noun = type === 'tx' ? 'transaction' : 'address'
   return (
-    <span className="inline-flex max-w-full items-center justify-end gap-1 whitespace-nowrap">
-      <span className="v2-tabular font-mono text-xs text-[var(--v2-ink-2)]" title={value}>
+    // `-my-3`: the two 44px targets (#1726) would otherwise make every
+    // address row ~65px against the 40px of a text row.
+    <span className="-my-3 inline-flex max-w-full items-center justify-end whitespace-nowrap">
+      <span className="v2-tabular mr-1 font-mono text-xs text-[var(--v2-ink-2)]" title={value}>
         {truncate(value)}
       </span>
       <CopyButton value={value} label={noun} />
@@ -83,7 +86,7 @@ function OnChainValue({
           rel="noopener noreferrer"
           aria-label={`Open ${noun} in explorer`}
           title={value}
-          className="inline-flex h-6 w-6 items-center justify-center rounded text-[var(--v2-ink-3)] hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
+          className="inline-flex h-11 w-11 items-center justify-center rounded text-[var(--v2-ink-3)] hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
         >
           <Icon icon={ExternalLink} className="h-3.5 w-3.5" />
         </a>
@@ -181,17 +184,22 @@ function receiptLabel(status: string | null | undefined): string {
  * The header's one line: who, where and when. Owner attribution follows
  * #2097 — "you" only for a recorded owner send.
  */
-function headerLine(tx: AggregatedTransaction, kind: Kind, when: string): string {
+function headerLine(tx: AggregatedTransaction, kind: Kind): string {
   const account = accountLabel(tx.accountName)
   if (kind === 'move') {
-    return `From ${account} to ${accountLabel(tx.ownTransfer?.toAccountName)} · ${when}`
+    return `From ${account} to ${accountLabel(tx.ownTransfer?.toAccountName)}`
   }
   // A sweep's title already names the agent ("Returned from <agent>").
-  if (kind === 'sweep' || kind === 'receive') return `Into ${account} · ${when}`
+  if (kind === 'sweep' || kind === 'receive') return `Into ${account}`
   const verb = tx.isError ? 'Attempted' : kind === 'send' ? 'Sent' : 'Paid'
-  if (tx.initiatedBy === 'human') return `${verb} by you from ${account} · ${when}`
-  if (tx.agentName) return `${verb} by ${tx.agentName} from ${account} · ${when}`
-  return `${verb} from ${account} · ${when}`
+  if (tx.initiatedBy === 'human') return `${verb} by you from ${account}`
+  if (tx.agentName) return `${verb} by ${tx.agentName} from ${account}`
+  return `${verb} from ${account}`
+}
+
+/** The header's "when": the date and the time to the minute, in the viewer's locale. */
+export function formatWhen(timestamp: number): string {
+  return new Date(timestamp * 1000).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
 }
 
 // ── The panel ──────────────────────────────────────────────────────
@@ -224,7 +232,9 @@ export default function TransactionDetailPanel({
     kind === 'move'
       ? 'Moved between your accounts'
       : counterpartyLabel(tx, resolveAddress, accountNamesByAddress, { noAddress: true })
-  const when = new Date(tx.timestamp * 1000).toLocaleString()
+  // No seconds, and the date renders whole (`whitespace-nowrap` below), so a
+  // wrapping line never strands "AM" on its own.
+  const when = formatWhen(tx.timestamp)
   const fiat = transactionFiat(tx, 'detail')
   const explorerUrl = footerExplorerUrl(tx)
 
@@ -321,8 +331,8 @@ export default function TransactionDetailPanel({
         key="payment-id"
         label="Payment ID"
         value={
-          <span className="inline-flex items-center justify-end gap-1 whitespace-nowrap">
-            <span className="v2-tabular font-mono text-xs" title={tx.paymentId}>
+          <span className="-my-3 inline-flex items-center justify-end whitespace-nowrap">
+            <span className="v2-tabular mr-1 font-mono text-xs" title={tx.paymentId}>
               {truncate(tx.paymentId)}
             </span>
             <CopyButton value={tx.paymentId} label="payment ID" />
@@ -401,10 +411,20 @@ export default function TransactionDetailPanel({
       onClose={onClose}
       leading={leading}
       title={title}
-      subtitle={kindLabel(tx, kind)}
+      // "Deposit" titles a deposit already; the kind would only repeat it.
+      subtitle={kindLabel(tx, kind) === title ? undefined : kindLabel(tx, kind)}
       footer={
         explorerUrl ? (
-          <Button variant="tertiary" size="sm" href={explorerUrl} target="_blank" rel="noopener noreferrer">
+          // `-ml-3.5` cancels the button's own padding: the label starts on
+          // the panel's content edge.
+          <Button
+            variant="tertiary"
+            size="sm"
+            href={explorerUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="-ml-3.5"
+          >
             View on explorer
             <Icon icon={ExternalLink} className="h-3.5 w-3.5" />
           </Button>
@@ -431,14 +451,16 @@ export default function TransactionDetailPanel({
           </div>
           <StatusBadge tone={status.tone}>{status.label}</StatusBadge>
         </div>
-        <p className="mt-2 text-sm text-[var(--v2-ink-2)]">{headerLine(tx, kind, when)}</p>
+        <p className="mt-2 text-sm text-[var(--v2-ink-2)]">
+          {headerLine(tx, kind)} · <span className="whitespace-nowrap">{when}</span>
+        </p>
         {callout}
       </div>
 
       <dl data-testid="transaction-detail-details">{details}</dl>
 
       <details data-testid="transaction-technical-details" className="group mt-5 border-t border-[var(--v2-border)] pt-3">
-        <summary className="flex w-full cursor-pointer select-none list-none items-center justify-between rounded py-1 text-sm font-medium text-[var(--v2-ink)] [&::-webkit-details-marker]:hidden">
+        <summary className="flex w-full cursor-pointer select-none list-none items-center justify-between rounded py-1 text-sm font-medium text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 [&::-webkit-details-marker]:hidden">
           Technical details
           {/* `mr-1`: mid-rotation the chevron's box is ~3px wider than the
               icon, and flush to the panel edge that overflows the scroll

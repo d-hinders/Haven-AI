@@ -9,7 +9,7 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { LocaleProvider } from '@/context/LocaleContext'
-import TransactionDetailPanel from '@/components/transactions/TransactionDetailPanel'
+import TransactionDetailPanel, { formatWhen } from '@/components/transactions/TransactionDetailPanel'
 import { truncate } from '@/lib/format'
 import type { AggregatedTransaction } from '@/types/transactions'
 
@@ -285,7 +285,7 @@ describe('TransactionDetailPanel — once, in the header', () => {
     // The header is the panel's title row plus the summary block; neither
     // Details nor Technical details repeats what it says.
     const below = `${details().textContent}${technical().textContent}`
-    const date = new Date(t.timestamp * 1000).toLocaleString()
+    const date = formatWhen(t.timestamp)
     for (const needle of [date, `${t.valueFormatted} ${t.asset}`, 'Main', ...(t.agentName ? [t.agentName] : [])]) {
       expect(count(needle), needle).toBe(1)
       expect(below, needle).not.toContain(needle)

@@ -121,10 +121,10 @@ severity and unconditional** (#999). Enforcement status:
 |---|---|---|
 | 1. `domain/` is pure | ✅ `core-stays-pure` covers the shared kernel (#983); `domain-stays-pure` covers the backend's own `domain/` (#998), zero violations on both | landed |
 | 2. `modules/` may not import `http/` | ✗ | the `http/` directory (routes/ → http/ is not part of #998's scope — a separate future rename) |
-| 3. Only `infra/` touches the DB | ✅ `pg-only-in-infra`, absolute | #985 / #988 / #995 extracted the money path; #999 drove the residue to zero, #1167 retired three more waivers and #1180 the signup/login one — deliberate exceptions carry inline `dep-lint-exempt` waivers with their reasons (9 today, of the 10 waived edges the lint prints; live count printed by every lint run) |
+| 3. Only `infra/` touches the DB | ✅ `pg-only-in-infra`, absolute | #985 / #988 / #995 extracted the money path; #999 drove the residue to zero, #1167 retired three more waivers and #1180 the signup/login one — deliberate exceptions carry inline `dep-lint-exempt` waivers with their reasons (8 at #4379, of the 15 waived edges the lint prints; live count printed by every lint run) |
 | 4. Only `rails/` + `infra/` touch a chain SDK | ✅ `chain-sdk-not-in-routes`, zeroed for `routes/**` (#994) | `rails/` itself landed with #998; the rule's positive form (asserting infra/rails ARE the only importers, everywhere) is still follow-up work |
 | 5. `http/` imports module entry points only | ✗ | the `http/` directory (see rule 2 — not part of #998) |
-| 6. Cross-module imports go through `index.ts` | ✅ every `modules/**` directory (accounts, accounting, agents, catalog, fee, feedback, mpp, ops, owner-profile, passport, payments, sub-budgets, task-budgets, transactions, x402) — zero violations | landed (#998 widened from the five `lib/{reporting,fee}` + `modules/{transactions,x402,mpp}` directories to all of `modules/**`; the 2026-09-11 #2881 rename dissolved `modules/reporting/` into `modules/accounting/` and split its asserting code out; `modules/task-budgets/` joined with #3329; `modules/owner-profile/` joined with #3332; `modules/sub-budgets/` joined with #3444; `modules/ops/` joined with #3509; `modules/feedback/` joined with #3597 — `domain-stays-pure` forbids its `viem/accounts` import inside `domain/`, and it lives here carrying no waiver today) |
+| 6. Cross-module imports go through `index.ts` | ✅ two arms, absolute: `no-deep-cross-module-import` (an import into `modules/<name>/` from outside `modules/`) and `no-deep-module-to-module-import` (one module importing another module's private file, #4379 — before it, the first arm's `from` excluded every `modules/` file, so 14 such imports were unchecked). Every `modules/**` directory — zero violations, 3 + 4 inline waivers (see below). `modules/dashboard/` (#3847) is the one directory without an `index.ts`, deliberately: #3804's owner decision makes `routes/dashboard-budget-remaining.ts` the only importer of its display-only budget-remaining cache, through one of the 3 `no-deep-cross-module-import` waivers, and `modules/dashboard/__tests__/budget-remaining-import-guard.test.ts` pins that no other file imports it | landed (#998 widened from the five `lib/{reporting,fee}` + `modules/{transactions,x402,mpp}` directories to all of `modules/**`; the 2026-09-11 #2881 rename dissolved `modules/reporting/` into `modules/accounting/` and split its asserting code out; `modules/task-budgets/` joined with #3329; `modules/owner-profile/` joined with #3332; `modules/sub-budgets/` joined with #3444; `modules/ops/` joined with #3509; `modules/feedback/` joined with #3597 — `domain-stays-pure` forbids its `viem/accounts` import inside `domain/`, and it lives here carrying no waiver today) |
 | 7. The graph is acyclic | ✅ `no-circular` | at zero — held absolutely, and the one rule an inline waiver can never silence |
 
 `@haven_ai/core` also carries the GENERATED API wire types (#984):
@@ -141,10 +141,14 @@ inherited debt), and `domain-stays-pure` (#998 — every file placed in the
 backend's own `domain/` was verified pure before landing there; one candidate,
 `execution-rail.ts`, was kept OUT of `domain/` specifically because it reached
 the database directly, and lives in `rails/` instead — its query itself moved
-behind `infra/repositories/` in #999). `no-deep-cross-module-import` likewise
-carries no waivers today (#998 emptied it), though unlike `no-circular` it is
-not mechanically unwaivable — a future module could, in principle, need a
-reviewed, temporary exception.
+behind `infra/repositories/` in #999). Rule 6's two rules are not among them:
+at #4379 `no-deep-cross-module-import` carries 3 inline waivers (`index.ts`,
+`routes/accounting.ts`, `routes/dashboard-budget-remaining.ts`) and
+`no-deep-module-to-module-import` carries 4 (`modules/accounting/entry.ts` →
+`transactions/normalize.ts`, and three `modules/mpp/evidence.ts` → `x402/`
+leaves), each naming the cycle an `index.ts` import would close — `no-circular`
+is the one rule no waiver can silence, so a deep import into a zero-cycle leaf
+is the reviewed alternative. Unlike `no-circular`, both are waivable.
 
 1. **`domain/` is pure.** It may not import `fastify`, `pg`, `ethers`, `viem`,
    `permissionless`, `@metamask/smart-accounts-kit`, or any path under
@@ -159,7 +163,10 @@ reviewed, temporary exception.
 5. **`http/` may import module public entry points only.** A route may not
    reach past `modules/<name>/index.ts`.
 6. **Cross-module imports resolve to `modules/<name>/index.ts`.** Never a deep
-   path into another module's private files.
+   path into another module's private files — from outside `modules/`
+   (`no-deep-cross-module-import`) or from another module
+   (`no-deep-module-to-module-import`, #4379). A module's own files import
+   each other freely.
 7. **The graph is acyclic.** No cycles between modules, ever. Cycles are what
    make a codebase impossible to test in isolation, split, or delete from.
 
@@ -268,7 +275,7 @@ Achieved state as of 2026-08-07 (#999, the epic's closing issue):
 | Inline SQL call sites | 40 `.query(` call sites across 10 production files outside `db/`, `db.ts` and `infra/repositories/` — gauged on every lint run (`node scripts/dep-lint.mjs`, re-measured 2026-09-30 for this audit: unchanged since the 2026-09-15 measure, all per-file counts still at their committed ceiling) and capped by the shrink-only ceiling of 58 (#1166; `packages/backend/dep-lint-callsite-ceiling.json`). Was 108 across 18 files; #1167 emptied `routes/user.ts`, `routes/dashboard.ts` and `routes/agent-activity.ts`, #1180 `routes/auth.ts`; the epic-#1440 deletions (incl. #2055 removing `routes/approvals.ts`) account for the rest |
 | Chain SDK imported in `routes/` | **0** (#994 — `ChainClient` port + `@haven_ai/core` amount helpers) |
 | Rail branching outside the seam | The retirement gate is decided ONCE, in `rails/execution-rail.ts` (#993); outside migrations, no non-test file but the seam itself mentions `session_key` as a live value — the remaining mentions are the passport rail-domain enum and its OpenAPI mirror, which list `session_key` only as a retired member (#2110) |
-| Boundary enforcement | `npm run lint:deps`, blocking, **0 baseline entries — the baseline file and its ratchet machinery are deleted**; 10 deliberate exceptions carry inline `dep-lint-exempt` waivers, each printed with its reason — 9 `pg-only-in-infra` plus the #2881 `no-deep-cross-module-import` one on `routes/accounting.ts` (re-measured 2026-09-30; the 2026-09-15 wording said 10 `pg-only-in-infra`, but the deep-cross waiver landed 2026-09-11, four days before that measure) |
+| Boundary enforcement | `npm run lint:deps`, blocking, **0 baseline entries — the baseline file and its ratchet machinery are deleted**; 15 deliberate exceptions carry inline `dep-lint-exempt` waivers, each printed with its reason — 8 `pg-only-in-infra`, 3 `no-deep-cross-module-import` and 4 `no-deep-module-to-module-import` (re-measured at #4379: "No dependency-boundary violations across 501 source files (15 import edge(s) waived)") |
 | Dependency cycles | **0** — `no-circular` is absolute and unwaivable |
 
 The gauge exists because the retired baseline was a file-edge count, and that

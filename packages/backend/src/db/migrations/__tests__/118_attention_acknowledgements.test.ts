@@ -144,21 +144,26 @@ describeDb('migration 118 — attention acknowledgements (#4324)', () => {
     const userId = await insertTestUser()
     const agentId = await insertTestAgent(userId)
     const accountId = await insertTestAccount(userId)
-    // One at a time: a rejection must be awaited where it happens.
-    const refused = [
-      () => insert(userId, 'low-balance', { accountId }),
-      () => insert(userId, 'zero-usdc'),
-      () => insert(userId, 'budget-usage', { agentId }),
-      () => insert(userId, 'budget-reached'),
-      () => insert(userId, 'budget-reached', { agentId, periodEnd: PERIOD_END }),
-      () => insert(userId, 'budget-scope', { agentId, accountId }),
-      () => insert(userId, 'haven-paused', { agentId }),
-      () => insert(userId, 'payments-failed', { accountId }),
-      () => insert(userId, 'needs-setup', { agentId, periodEnd: PERIOD_END }),
-      () => insert(userId, 'no-backup', { accountId, periodEnd: PERIOD_END }),
+    // One at a time: a rejection must be awaited where it happens. Each case
+    // asserts the error code it got (null when the row was accepted).
+    const refused: Array<[string, () => Promise<unknown>]> = [
+      ['an unknown kind', () => insert(userId, 'low-balance', { accountId })],
+      ['zero-usdc', () => insert(userId, 'zero-usdc')],
+      ['budget-usage without its period end', () => insert(userId, 'budget-usage', { agentId })],
+      ['budget-reached without an agent', () => insert(userId, 'budget-reached')],
+      ['budget-reached with a period end', () => insert(userId, 'budget-reached', { agentId, periodEnd: PERIOD_END })],
+      ['budget-scope with an account', () => insert(userId, 'budget-scope', { agentId, accountId })],
+      ['haven-paused with an agent', () => insert(userId, 'haven-paused', { agentId })],
+      ['payments-failed with an account', () => insert(userId, 'payments-failed', { accountId })],
+      ['needs-setup with a period end', () => insert(userId, 'needs-setup', { agentId, periodEnd: PERIOD_END })],
+      ['no-backup with a period end', () => insert(userId, 'no-backup', { accountId, periodEnd: PERIOD_END })],
     ]
-    for (const attempt of refused) {
-      await expect(attempt()).rejects.toMatchObject({ code: '23514' })
+    for (const [label, attempt] of refused) {
+      const code = await attempt().then(
+        () => null,
+        (error: { code?: string }) => error.code ?? 'unknown',
+      )
+      expect(code, `${label} is refused by the CHECK`).toBe('23514')
     }
   })
 

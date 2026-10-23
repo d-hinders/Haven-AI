@@ -207,12 +207,6 @@ function toToolCallEntry(inv: AgentToolInvocationRow) {
 }
 
 /**
- * Normalizes the query's optional filters into the repository shape: the UI's
- * `sent` is `payment_intents`' `confirmed`, whitespace around `q` is not
- * part of the search term, and an empty string filters nothing.
- */
-
-/**
  * The one refusal-entry builder for the kinded read (#4323).
  *
  * `amount` is ATOMIC on the wire — the reviewer's contract — and the renderer

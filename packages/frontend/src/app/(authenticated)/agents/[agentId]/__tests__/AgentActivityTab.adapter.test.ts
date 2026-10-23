@@ -38,6 +38,15 @@ describe('activityToTransaction — the eip3009 legs (#4267)', () => {
     expect(row.fundingTxHash).toBe(FUNDING)
   })
 
+  it('carries erc7710 too — one transaction, so no settlement hash', () => {
+    const row = activityToTransaction(
+      item({ settlement_scheme: 'erc7710', settlement_tx_hash: null, funding_tx_hash: null }),
+      'Atlas',
+      'Main',
+    )
+    expect(row.settlementScheme).toBe('erc7710')
+  })
+
   it('maps an unknown scheme to null and absent hashes to null', () => {
     const row = activityToTransaction(
       item({ settlement_scheme: 'something-new', settlement_tx_hash: undefined, funding_tx_hash: undefined }),

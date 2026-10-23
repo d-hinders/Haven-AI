@@ -320,7 +320,9 @@ describe('ingestDiscoveredCatalog', () => {
       return paid402()
     })
 
-    const result = await ingestDiscoveredCatalog(db, fetchMock as unknown as typeof fetch, undefined, stubMerchants().merchants, fetchMock as unknown as typeof fetch)
+    const result = await ingestDiscoveredCatalog(db, fetchMock as unknown as typeof fetch, undefined, stubMerchants().merchants, fetchMock as unknown as typeof fetch).catch((err: unknown) => ({ threw: String(err) }))
+    // An escaping throw (the pre-#4341 behaviour) reads as `threw`, not as a result.
+    expect(result).not.toHaveProperty('threw')
     // Both candidates were probed…
     expect(probedUrls).toContain('https://api.nulls.example/paid')
     expect(probedUrls).toContain('https://api.clean.example/paid')

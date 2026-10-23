@@ -523,4 +523,98 @@ describe('refreshCatalog', () => {
     const result = await refreshCatalog(db, vi.fn() as unknown as typeof fetch)
     expect(result).toEqual({ verified: 0, degraded: 0, deferred: 0 })
   })
+
+  // #4341: a probe result the database cannot store (the reviewer's repro: a
+  // well-formed 402 whose string field carries a NUL byte — Postgres rejects
+  // 0x00 in text) must not leave the row unchanged forever. It is recorded
+  // as a miss, so the row degrades after the usual streak.
+  it('records a miss when the verified write fails, and counts the degrade it causes (#4341)', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const queries: Array<[string, unknown[] | undefined]> = []
+    const db = {
+      query: async (sql: string, values?: unknown[]) => {
+        queries.push([sql, values])
+        if (sql.includes(`status = 'active'`)) {
+          // The verified write (the only statement naming the status literal)
+          // fails, the way a real Postgres write of a NUL-bearing string does.
+          throw new Error('invalid byte sequence for encoding "UTF8": 0x00')
+        }
+        if (sql.startsWith('SELECT')) {
+          return { rows: [rowFor({ id: 'cat-1', consecutive_failures: 2 })] }
+        }
+        return { rows: [] as CatalogRow[] }
+      },
+    }
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(null, { status: 402, headers: { 'PAYMENT-REQUIRED': b64(X402_BODY) } }),
+    )
+
+    const result = await refreshCatalog(db, fetchMock as typeof fetch)
+    // The verified write is never counted, and the fallback miss — the row
+    // had already missed twice — moves the row to `degraded` this run.
+    expect(result).toEqual({ verified: 0, degraded: 1, deferred: 0 })
+    const miss = queries.find(([sql, v]) => sql.includes('consecutive_failures = $2') && v?.[0] === 'cat-1')
+    expect(miss?.[1]).toEqual(['cat-1', 3, 'degraded'])
+    // The failure is logged with the row's URL, like every other write failure.
+    expect(warnSpy).toHaveBeenCalledTimes(1)
+    expect(String(warnSpy.mock.calls[0]?.[0])).toContain('https://api.merchant.example/paid')
+    expect(String(warnSpy.mock.calls[0]?.[0])).toContain('0x00')
+    warnSpy.mockRestore()
+  })
+
+  // Reviewer cell that survived on #4317: `degraded` counted even when the
+  // miss write fails. The count may only move when the write DID land.
+  it('does not count degraded when the miss write itself fails (#4317 reviewer cell)', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const db = {
+      query: async (sql: string) => {
+        if (sql.startsWith('SELECT')) {
+          return { rows: [rowFor({ id: 'cat-dead', resource_url: 'https://dead.example/x' })] }
+        }
+        // The miss write fails, the way a real Postgres write under an
+        // unreachable database does.
+        throw new Error('connection terminated unexpectedly')
+      },
+    }
+    const fetchMock = vi.fn().mockResolvedValue(new Response('gone', { status: 404 }))
+
+    const result = await refreshCatalog(db, fetchMock as typeof fetch)
+    expect(result).toEqual({ verified: 0, degraded: 0, deferred: 0 })
+    expect(warnSpy).toHaveBeenCalledTimes(1)
+    expect(String(warnSpy.mock.calls[0]?.[0])).toContain('https://dead.example/x')
+    warnSpy.mockRestore()
+  })
+})
+
+describe('probe parse-error surfacing (#4341)', () => {
+  // A numeric `amount` passes parseAccepts' regex (test() stringifies) and
+  // throws in formatPriceDisplay — the same shape #4300's comment names.
+  it('logs a thrown parse error with the resource URL and the message, and nothing from the payload', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const body = { accepts: [{ amount: 1000, network: 'eip155:8453', secretMerchantField: 'must-not-be-logged' }] }
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(body), { status: 402, headers: { 'Content-Type': 'application/json' } }),
+    )
+
+    const result = await probeCatalogEntry(X402_ENTRY, fetchMock as typeof fetch)
+    expect(result.ok).toBe(false)
+    expect(warnSpy).toHaveBeenCalledTimes(1)
+    const logged = String(warnSpy.mock.calls[0]?.[0])
+    expect(logged).toContain('https://api.merchant.example/paid')
+    expect(logged).toContain('padStart')
+    // Nothing from the merchant payload reaches the log.
+    expect(logged).not.toContain('must-not-be-logged')
+    expect(logged).not.toContain(JSON.stringify(body))
+    warnSpy.mockRestore()
+  })
+
+  it('logs nothing when the challenge parses (no spurious warnings)', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(null, { status: 402, headers: { 'PAYMENT-REQUIRED': b64(X402_BODY) } }),
+    )
+    await probeCatalogEntry(X402_ENTRY, fetchMock as typeof fetch)
+    expect(warnSpy).not.toHaveBeenCalled()
+    warnSpy.mockRestore()
+  })
 })

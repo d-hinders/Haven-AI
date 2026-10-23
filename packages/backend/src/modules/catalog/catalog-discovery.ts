@@ -145,6 +145,13 @@ export interface DiscoveryResult {
   skippedUnparseableHost: number
   /** A candidate that did not answer a parsable 402. */
   failedProbe: number
+  /**
+   * #4341: a candidate the run could not WRITE (the merchant upsert or the
+   * insert threw — e.g. an index entry whose name carries a NUL byte, which
+   * Postgres rejects in text). The run moves on to the later candidates
+   * instead of stopping at this one; the next run considers it again.
+   */
+  failedWrite: number
   /** #4300: a candidate the run budget did not reach; the next run considers it again. */
   deferred: number
 }
@@ -232,6 +239,7 @@ export async function ingestDiscoveredCatalog(
     skippedUnsupported: 0,
     skippedUnparseableHost: 0,
     failedProbe: 0,
+    failedWrite: 0,
     deferred: 0,
   }
 
@@ -292,33 +300,47 @@ export async function ingestDiscoveredCatalog(
       result.skippedUnparseableHost += 1
       continue
     }
-    const merchant = await merchants.findOrCreateMerchantByHost(host, { name, description, category }, db)
+    // #4341: a candidate whose write fails (the reviewer's repro: an index
+    // entry whose name carries a NUL byte — Postgres rejects 0x00 in text)
+    // must not stop the run from reaching later candidates. Before, the
+    // throw escaped `ingestDiscoveredCatalog` and every run after it died at
+    // the same candidate. Count it and go on; the next run considers it
+    // again.
+    try {
+      const merchant = await merchants.findOrCreateMerchantByHost(host, { name, description, category }, db)
 
-    await db.query(
-      // #4245: `source = 'bazaar'` — the row's name and description are the
-      // seller's own words, and the listing must not present them as an
-      // operator's. Every other writer gets the column's `'operator'` default.
-      `INSERT INTO merchant_catalog
-         (name, description, category, resource_url, rail, protocol, tool_name,
-          price_display, price_atomic, asset, network, asset_transfer_methods, status, verified_at, merchant_id,
-          pay_to, source)
-       VALUES ($1, $2, $3, $4, 'x402', 'http', NULL, $5, $6, $7, $8, $9, 'active', now(), $10, $11, 'bazaar')
-       ON CONFLICT DO NOTHING`,
-      [
-        name,
-        description,
-        category,
-        resourceUrl,
-        probe.priceDisplay ?? null,
-        probe.priceAtomic ?? null,
-        probe.asset ?? null,
-        probe.network ?? network,
-        probe.assetTransferMethods?.join(',') ?? null,
-        merchant.id,
-        // #3331: the same probe's payTo the hourly refresh records.
-        probe.payTo ?? null,
-      ],
-    )
+      await db.query(
+        // #4245: `source = 'bazaar'` — the row's name and description are the
+        // seller's own words, and the listing must not present them as an
+        // operator's. Every other writer gets the column's `'operator'` default.
+        `INSERT INTO merchant_catalog
+           (name, description, category, resource_url, rail, protocol, tool_name,
+            price_display, price_atomic, asset, network, asset_transfer_methods, status, verified_at, merchant_id,
+            pay_to, source)
+         VALUES ($1, $2, $3, $4, 'x402', 'http', NULL, $5, $6, $7, $8, $9, 'active', now(), $10, $11, 'bazaar')
+         ON CONFLICT DO NOTHING`,
+        [
+          name,
+          description,
+          category,
+          resourceUrl,
+          probe.priceDisplay ?? null,
+          probe.priceAtomic ?? null,
+          probe.asset ?? null,
+          probe.network ?? network,
+          probe.assetTransferMethods?.join(',') ?? null,
+          merchant.id,
+          // #3331: the same probe's payTo the hourly refresh records.
+          probe.payTo ?? null,
+        ],
+      )
+    } catch (err) {
+      console.warn(
+        `[catalog] discovery could not record ${resourceUrl}; skipping it for this run: ${err instanceof Error ? err.message : String(err)}`,
+      )
+      result.failedWrite += 1
+      continue
+    }
     known.add(resourceUrl)
     result.ingested += 1
   }

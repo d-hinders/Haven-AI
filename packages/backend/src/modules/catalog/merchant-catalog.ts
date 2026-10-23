@@ -240,6 +240,25 @@ export const CATALOG_REFRESH_PROBE_TIMEOUT_MS = 15_000
 export const CATALOG_DISCOVERY_PROBE_TIMEOUT_MS = 5_000
 /** Response cap for one catalog probe; a 402 challenge is a few KiB at most. */
 export const CATALOG_PROBE_MAX_BYTES = 256 * 1024
+/**
+ * #4300: wall-clock budget for one whole refresh run. The refresh runs hourly
+ * under a leader lock (`platform/leader-lock.ts`) that has no TTL, so an
+ * unbounded run would hold it, and delay the next run, for as long as its
+ * slowest rows take. 10 min leaves the hourly tick most of its hour, and fits
+ * the 26 seeded rows even if every one of them used its full 15 s probe budget
+ * (6.5 min). A probe is started only when its whole budget still fits, so a
+ * run ends within this figure.
+ */
+export const CATALOG_REFRESH_RUN_BUDGET_MS = 10 * 60_000
+
+export interface RefreshOptions {
+  /** Wall-clock budget for the run. Defaults to `CATALOG_REFRESH_RUN_BUDGET_MS`. */
+  runBudgetMs?: number
+  /** The longest one probe can take. Defaults to `CATALOG_REFRESH_PROBE_TIMEOUT_MS`. */
+  probeBudgetMs?: number
+  /** Clock seam for tests. */
+  now?: () => number
+}
 
 /**
  * Statuses a `Response` must be constructed without a body. The pinned
@@ -401,20 +420,38 @@ export interface QueryableLike {
 }
 
 /**
- * Probe every non-delisted entry and persist the outcome. Returns counts for
- * observability. Failures on individual entries never abort the run.
+ * Probe non-delisted entries and persist each outcome, within a run budget.
+ * Returns counts for observability. Failures on individual entries never
+ * abort the run.
+ *
+ * #4300: rows are taken least recently updated first, and a probe is started
+ * only while its whole budget still fits in the run's. Rows the run does not
+ * reach are left untouched, so they are neither counted as misses nor moved
+ * toward `degraded`, and they come first next run. That rotation rests on
+ * `updated_at`: both outcome writes below set it, and nothing else writes it
+ * outside migrations.
  */
 export async function refreshCatalog(
   db: QueryableLike = pool as unknown as QueryableLike,
   fetchImpl: typeof fetch = guardedCatalogFetch,
-): Promise<{ verified: number; degraded: number }> {
+  options: RefreshOptions = {},
+): Promise<{ verified: number; degraded: number; deferred: number }> {
+  const runBudgetMs = options.runBudgetMs ?? CATALOG_REFRESH_RUN_BUDGET_MS
+  const probeBudgetMs = options.probeBudgetMs ?? CATALOG_REFRESH_PROBE_TIMEOUT_MS
+  const now = options.now ?? Date.now
+  const started = now()
   const { rows } = await db.query(
-    `SELECT * FROM merchant_catalog WHERE status != 'delisted'`,
+    `SELECT * FROM merchant_catalog WHERE status != 'delisted' ORDER BY updated_at ASC, id ASC`,
   )
 
   let verified = 0
   let degraded = 0
-  for (const entry of rows) {
+  let deferred = 0
+  for (const [index, entry] of rows.entries()) {
+    if (now() - started + probeBudgetMs > runBudgetMs) {
+      deferred = rows.length - index
+      break
+    }
     const result = await probeCatalogEntry(entry, fetchImpl)
     if (result.ok) {
       verified++
@@ -465,5 +502,5 @@ export async function refreshCatalog(
       )
     }
   }
-  return { verified, degraded }
+  return { verified, degraded, deferred }
 }

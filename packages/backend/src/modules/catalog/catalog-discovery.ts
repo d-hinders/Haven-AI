@@ -17,6 +17,7 @@ import type { Executor } from '../../infra/transaction.js'
 import { findOrCreateMerchantByHost, merchantHostOf } from '../../infra/repositories/merchants.js'
 import { SUPPORTED_CHAIN_IDS } from '../../domain/chains.js'
 import {
+  CATALOG_DISCOVERY_PROBE_TIMEOUT_MS,
   guardedDiscoveryProbeFetch,
   probeCatalogEntry,
   type CatalogRow,
@@ -55,6 +56,50 @@ function categoryFromTags(tags: string[] | undefined): string {
 /** Safety cap so one run never probes thousands of endpoints. */
 const DEFAULT_MAX_ITEMS = 50
 const PAGE_SIZE = 100
+/**
+ * #4300: the Bazaar index read. Its URL is operator-configured
+ * (`CATALOG_DISCOVERY_URL`), so it keeps the caller's `fetch`, but one page
+ * may take at most this long and be at most this large, and a run reads at
+ * most this many pages. Before #4300 none of the three was bounded.
+ */
+export const DISCOVERY_INDEX_PAGE_TIMEOUT_MS = 15_000
+export const DISCOVERY_INDEX_PAGE_MAX_BYTES = 2 * 1024 * 1024
+export const DISCOVERY_INDEX_MAX_PAGES = 5
+/**
+ * #4300: wall-clock budget for probing one run's candidates. With the 5 s
+ * candidate probe budget that is at least 24 probes a run. A candidate the run
+ * does not reach is not in the catalog yet, so the next run considers it
+ * again; nothing is lost.
+ */
+export const DISCOVERY_RUN_BUDGET_MS = 2 * 60_000
+
+export interface DiscoveryOptions {
+  /** Wall-clock budget for the candidate probes. Defaults to `DISCOVERY_RUN_BUDGET_MS`. */
+  runBudgetMs?: number
+  /** The longest one candidate probe can take. Defaults to `CATALOG_DISCOVERY_PROBE_TIMEOUT_MS`. */
+  probeBudgetMs?: number
+  /** Clock seam for tests. */
+  now?: () => number
+}
+
+/** Read a response body as text, refusing past `maxBytes`. */
+async function readCapped(res: Response, maxBytes: number): Promise<string> {
+  if (res.body === null) return ''
+  const reader = res.body.getReader()
+  const chunks: Uint8Array[] = []
+  let bytes = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    bytes += value.byteLength
+    if (bytes > maxBytes) {
+      await reader.cancel()
+      throw new Error(`Bazaar discovery page exceeded ${maxBytes} bytes`)
+    }
+    chunks.push(value)
+  }
+  return Buffer.concat(chunks).toString('utf8')
+}
 
 interface BazaarAccept {
   scheme?: string
@@ -97,6 +142,8 @@ export interface DiscoveryResult {
   skippedUnparseableHost: number
   /** A candidate that did not answer a parsable 402. */
   failedProbe: number
+  /** #4300: a candidate the run budget did not reach; the next run considers it again. */
+  deferred: number
 }
 
 /** A title-cased name derived from the resource host when none is provided. */
@@ -116,12 +163,14 @@ export async function fetchBazaarResources(
   const out: BazaarResource[] = []
   let offset = 0
 
-  while (out.length < maxItems) {
+  for (let pageNumber = 0; out.length < maxItems && pageNumber < DISCOVERY_INDEX_MAX_PAGES; pageNumber += 1) {
     const url = `${config.catalogDiscoveryUrl}?type=http&limit=${PAGE_SIZE}&offset=${offset}`
-    const res = await fetchImpl(url, { headers: { Accept: 'application/json' } })
+    // The signal bounds the whole page, body read included.
+    const signal = AbortSignal.timeout(DISCOVERY_INDEX_PAGE_TIMEOUT_MS)
+    const res = await fetchImpl(url, { headers: { Accept: 'application/json' }, signal })
     if (!res.ok) throw new Error(`Bazaar discovery error: ${res.status}`)
 
-    const page = (await res.json()) as BazaarPage
+    const page = JSON.parse(await readCapped(res, DISCOVERY_INDEX_PAGE_MAX_BYTES)) as BazaarPage
     const items = page.items ?? []
     if (items.length === 0) break
 
@@ -167,7 +216,11 @@ export async function ingestDiscoveredCatalog(
   // SSRF guard, never through `fetchImpl`. That one reads only the Bazaar
   // index, whose URL is operator-configured (`CATALOG_DISCOVERY_URL`).
   probeFetch: typeof fetch = guardedDiscoveryProbeFetch,
+  options: DiscoveryOptions = {},
 ): Promise<DiscoveryResult> {
+  const runBudgetMs = options.runBudgetMs ?? DISCOVERY_RUN_BUDGET_MS
+  const probeBudgetMs = options.probeBudgetMs ?? CATALOG_DISCOVERY_PROBE_TIMEOUT_MS
+  const now = options.now ?? Date.now
   const result: DiscoveryResult = {
     scanned: 0,
     candidates: 0,
@@ -176,6 +229,7 @@ export async function ingestDiscoveredCatalog(
     skippedUnsupported: 0,
     skippedUnparseableHost: 0,
     failedProbe: 0,
+    deferred: 0,
   }
 
   const resources = await fetchBazaarResources(fetchImpl, maxItems)
@@ -187,6 +241,7 @@ export async function ingestDiscoveredCatalog(
   // removed.
   const existingRows = await db.query(`SELECT resource_url FROM merchant_catalog`)
   const known = new Set(existingRows.rows.map((r) => r.resource_url))
+  const started = now()
 
   for (const item of resources) {
     const resourceUrl = item.resource
@@ -203,6 +258,10 @@ export async function ingestDiscoveredCatalog(
     }
 
     result.candidates += 1
+    if (now() - started + probeBudgetMs > runBudgetMs) {
+      result.deferred += 1
+      continue
+    }
 
     // Verify with the same read-only probe the refresh uses. Bazaar lists only
     // plain-HTTP x402 resources today, so probe as an x402 http merchant.

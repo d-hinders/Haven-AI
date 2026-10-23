@@ -389,7 +389,7 @@ describe('refreshCatalog', () => {
     )
 
     const result = await refreshCatalog(db, fetchMock as typeof fetch)
-    expect(result).toEqual({ verified: 1, degraded: 0 })
+    expect(result).toEqual({ verified: 1, degraded: 0, deferred: 0 })
 
     const liveUpdate = queries.find(([sql, v]) => sql.includes(`status = 'active'`) && v?.[0] === 'cat-live')
     expect(liveUpdate?.[0]).toContain('consecutive_failures = 0')
@@ -485,7 +485,7 @@ describe('refreshCatalog', () => {
 
     const result = await refreshCatalog(db, fetchMock as typeof fetch)
     // First miss: counted but still active — no spurious warning.
-    expect(result).toEqual({ verified: 0, degraded: 0 })
+    expect(result).toEqual({ verified: 0, degraded: 0, deferred: 0 })
     const update = queries.find(([sql, v]) => v?.[0] === 'cat-dead')
     expect(update?.[1]).toEqual(['cat-dead', 1, 'active'])
   })
@@ -505,7 +505,7 @@ describe('refreshCatalog', () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response('gone', { status: 404 }))
 
     const result = await refreshCatalog(db, fetchMock as typeof fetch)
-    expect(result).toEqual({ verified: 0, degraded: 1 })
+    expect(result).toEqual({ verified: 0, degraded: 1, deferred: 0 })
     const update = queries.find(([sql, v]) => v?.[0] === 'cat-dead')
     expect(update?.[1]).toEqual(['cat-dead', 3, 'degraded'])
   })
@@ -521,6 +521,6 @@ describe('refreshCatalog', () => {
       },
     }
     const result = await refreshCatalog(db, vi.fn() as unknown as typeof fetch)
-    expect(result).toEqual({ verified: 0, degraded: 0 })
+    expect(result).toEqual({ verified: 0, degraded: 0, deferred: 0 })
   })
 })

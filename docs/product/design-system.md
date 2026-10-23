@@ -1151,13 +1151,14 @@ disables its button and swaps the label to `Verbing…` — `Preparing…`,
 `Sending…`, `Pausing…`. That much is the pattern already used by the
 budget-grant action's `busyLabel`, the agent pause action and the accounting
 sync button. **`aria-busy` is the new part** (#2871): it was added to the
-primitive so the state is exposed rather than only painted, and the
-transactions CSV export is its first and so far only call site — the three
-older examples above do not set it. Read its scope narrowly: `aria-busy`
-exposes, it does not announce — a `disabled` button is not focusable, so
-anything the user must actually be told belongs in a `role="alert"` (failure)
-or `role="status"` (neutral) node, the way that export reports a refusal or an
-empty result.
+primitive so the state is exposed rather than only painted. The list pages'
+CSV export was its first call site; since #4328 that flow is the shared
+`ListExportAction` (`components/ui/ListExportAction.tsx`), which sets
+`aria-busy` while preparing and reports its outcomes in a `role="alert"`
+(failure) or `role="status"` (neutral) node. Read its scope narrowly:
+`aria-busy` exposes, it does not announce — a `disabled` button is not
+focusable, so anything the user must actually be told belongs in one of those
+nodes.
 
 #### The four variants
 
@@ -2251,6 +2252,7 @@ All of it lives in `packages/frontend/src/components/ui/`:
 | Module | What it is |
 |---|---|
 | `ListToolbar.tsx` | The toolbar, its list summary line, the phone sheet, `ListNoMatch`, and `ListShowMore` |
+| `ListExportAction.tsx` | The actions slot's shared export action: `useListExport`, `ListExportAction`, `ListExportNotice` (#4328) |
 | `FacetMenu.tsx` | One facet as a chip menu or as pills; `RadioMark` / `CheckboxMark` |
 | `PeriodPicker.tsx` | The one Period control, for the toolbar and the Analytics header |
 | `list-url-codec.ts` | Pure parse/serialize of `ListState` to and from the URL |
@@ -2260,7 +2262,8 @@ All of it lives in `packages/frontend/src/components/ui/`:
 
 `/design-system` → **List controls** shows every state: default (no status
 row, the count alone on the summary line), filtered, no match, loading, phone,
-server-filtered with page totals on the summary line, paging, and the two
+server-filtered with page totals on the summary line, the export action and
+its states, paging, and the two
 primitives on their own.
 
 #### Anatomy
@@ -2268,12 +2271,14 @@ primitives on their own.
 One card (`rounded-[10px]`, `p-4`, `shadow-card`), then one line, directly
 above the list; the card is never repeated inside a parent card.
 
-1. **Search**, then the **actions slot**: actions on the *filtered list*, such
-   as Export CSV. Page actions (Connect agent, Add contact) stay in the page
+1. **Search**, then the **actions slot**: actions on the *filtered list* —
+   for export, the shared `ListExportAction` (below). Page actions (Connect
+   agent, Add contact) stay in the page
    header. The slot is content-width on every breakpoint: below `sm` it wraps
    to its own row after search and Filters rather than stretching full-width
    (#4150 — the approved phone board draws no action row). The pattern owns
-   the action's sizing: pages pass a bare `Button` (no width/height classes),
+   the action's sizing: pages pass a bare `Button` (no width/height classes) —
+   or the shared export action, which passes none —
    the button paints at its own size, and its 44px phone target comes from
    `Button`'s tap-target overlay.
 2. **Facets**, then **Sort** and **Period** on the right. A pill facet gets its
@@ -2314,6 +2319,40 @@ button only closes the sheet and names the applied result ("Show 12
 transactions"). There is no preview count of unapplied choices, so a
 server-filtered list makes no extra request per tap. `layout="phone"` forces
 this layout in a narrow container on a wide screen.
+
+#### The export action (#4328)
+
+An extension of the List controls pattern, labelled as such: the actions
+slot's export is ONE shared piece — `ListExportAction` with the
+`useListExport` hook (`components/ui/ListExportAction.tsx`) — never a
+per-page Button. It owns the whole flow: the busy state, the fetch
+(`api.getText`), the empty-file check (`hasCsvRecords`), the download
+(`downloadCsv` + filename) and the notices (`exportFailureNotice`, both
+empty-result shapes). The page supplies only what differs: the request
+(`path` + `URLSearchParams`, memoised from its filters), whether export is
+enabled (`!loading && total > 0`), the empty-result copy, and the filename
+prefix (`haven-transactions`, `haven-agent-payments`, …) — the saved name is
+decided client-side, because `fetch` + `Blob` ignores the server's
+`Content-Disposition`. The notice block (`ListExportNotice`) renders where
+the page places it.
+
+The Button is bare ghost `sm`: no width or height classes — the pattern owns
+the sizing. Its states:
+
+- **idle** — "Export CSV", enabled while the list has rows;
+- **disabled** — while the list loads, or the server says there is nothing
+  to export;
+- **preparing** — "Preparing…", with `aria-busy` (§ Button, the busy state);
+- **empty notice** — a `role="status"` block: "Nothing to export." with the
+  widen-the-filters line, or "Nothing to export yet." when an explorer
+  outage is the likelier cause — the page arms that choice on its own state;
+- **failure notice** — a `role="alert"` block: the refusal's headline and
+  details (the 413 row cap is read out in full), or the written fallback.
+
+The notice clears when the request changes, so a filter edit never leaves a
+stale "Nothing to export." under new filters. **Export on any list page goes
+through this action**: a new export surface consumes it, it does not copy it
+(#4327's agent Activity tab does, with the `haven-agent-payments` prefix).
 
 #### Facets
 

@@ -30,12 +30,11 @@ vi.mock('@/lib/api', async () => {
     },
   }
 })
-vi.mock('@/lib/transaction-csv', async () => {
-  const actual = await vi.importActual<typeof import('@/lib/transaction-csv')>('@/lib/transaction-csv')
+vi.mock('@/lib/csv-export', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/csv-export')>('@/lib/csv-export')
   return {
     ...actual,
     downloadCsv: (...a: unknown[]) => mockDownloadCsv(...a),
-    buildCsvFilename: () => 'haven-transactions-20260911.csv',
   }
 })
 vi.mock('next/navigation', () => ({
@@ -163,7 +162,8 @@ describe('TransactionsClient — CSV export (#2871)', () => {
     expect(mockGetText).toHaveBeenCalledWith(expect.stringContaining('accountId=safe-1'))
     expect(mockDownloadCsv).toHaveBeenCalledWith(
       '﻿settled_at\r\n"x"',
-      'haven-transactions-20260911.csv',
+      // The page owns the prefix; the UTC stamp is the shared helper's.
+      expect.stringMatching(/^haven-transactions-\d{8}\.csv$/),
     )
   })
 

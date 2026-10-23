@@ -1,7 +1,7 @@
 /**
  * RFC 4180 CSV writer (#2871).
  *
- * Server-side successor to the frontend's `lib/transaction-csv.ts` generator,
+ * Server-side successor to the frontend's `lib/csv-export.ts` generator,
  * which could only ever serialize the page the browser had loaded. Pure and
  * dependency-free so the quoting rules are unit-testable on their own.
  */

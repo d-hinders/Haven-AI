@@ -139,8 +139,8 @@ merchants** found.
    refusal — the edge-case note below says which refusal each path gives.
 2. **Displays correctly in the UI** — the payment appears in Transaction history
    and its detail panel shows the x402 fields (the resource host as the title
-   and the For row, the amount, the Settlement row, and the merchant address and
-   payment id under Technical details, #4267). *Happy path here is automated
+   and the For row, the Settlement row, and the merchant address and
+   settlement transaction under Technical details, #4267). *Happy path here is automated
    (`transactions-detail.spec.ts`); hand-check only the real-merchant specifics
    the mock can't cover (actual amount, real merchant address, real tx hash).*
 3. **Receipt is logged** — payment evidence is recorded (smart account/delegate,

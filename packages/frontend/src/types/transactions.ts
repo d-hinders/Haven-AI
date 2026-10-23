@@ -22,8 +22,9 @@ import type { StatusTone } from '@/components/ui/StatusBadge'
  * (`packages/core/src/api-types.ts`, regenerated from the backend spec via
  * `npm run generate:api-types`) gains the same optional field. This keeps the
  * UI compiling before that regeneration lands, and stays consistent after it.
- * Rendering contract: "You" / "Payment sent by you" is RESERVED for `'human'`;
- * a missing value renders as explicit "Unknown" — never "You".
+ * Rendering contract: "You" is RESERVED for `'human'`; a missing value
+ * never renders as "You" (the ledger subline says "Unknown", the detail
+ * panel's header line names no actor, #4267).
  */
 type TransactionInitiator = 'agent' | 'human' | 'unknown'
 
@@ -44,8 +45,9 @@ export interface AggregatedTransaction extends ApiSchema<'Transaction'> {
    * dashboard, recorded at submit (#4099); `'unknown'` → outbound raw
    * transfer with no agent attribution or owner record. Direction `'in'`
    * rows carry no `initiatedBy`, bar an agent's delegate sweep.
-   * Rendering contract: "You" / "Payment sent by you" is RESERVED for
-   * `'human'`; a missing value renders as explicit "Unknown" — never "You".
+   * Rendering contract: "You" is RESERVED for `'human'`; a missing value
+   * never renders as "You" (the ledger subline says "Unknown", the detail
+   * panel's header line names no actor, #4267).
    * Frontend-only extension of the wire schema (see `Transaction`) — the
    * backend spec adds the field in the same PR (#2097).
    */

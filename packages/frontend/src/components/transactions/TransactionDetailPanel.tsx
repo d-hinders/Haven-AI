@@ -20,7 +20,6 @@ import {
   isDelegateSweep,
   settlementSchemeLabel,
   transactionFiat,
-  transactionInitiator,
   transactionRowBadge,
 } from '@/lib/transaction-presentation'
 import type { AggregatedTransaction } from '@/types/transactions'

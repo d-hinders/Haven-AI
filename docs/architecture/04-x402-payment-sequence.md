@@ -1706,13 +1706,9 @@ eip3009 when the hash is the verified report, Haven verified it on-chain; the
 eip3009 fallback is the merchant's claim as relayed in `PAYMENT-RESPONSE`, not
 verified on-chain by Haven — cite it as such. `tx_hash` /
 `txHash` are unchanged and kept for wire compatibility, marked deprecated in
-their OpenAPI/SDK description only. The DASHBOARD headlines the same split
-(#3763): on the history views and the agent activity feed, an eip3009 row
-with a recorded settlement links the SETTLEMENT as the payment (the
-transaction the merchant names) and shows the funding leg as a named
-secondary step ("Funding from your account"); without a recorded settlement
-it says so plainly rather than promising one, and links the funding leg
-labelled as the funding leg. `hash`/`tx_hash` on those views keep their
+their OpenAPI/SDK description only. The dashboard's Settlement row and
+both legs are described in `docs/product/design-system.md` § Transaction
+detail panel (#3763, #4267). `hash`/`tx_hash` on those views keep their
 funding meaning — the legs travel as named fields, so the row cannot split
 in two.
 

@@ -29,8 +29,8 @@ test.describe('transaction history — x402 display + detail panel', () => {
     await expect(page.getByRole('heading', { name: 'Transaction history' })).toBeVisible()
     // #4266: the page is the shared ledger now, not a table. The row title is
     // WHO WAS PAID — the x402 resource host, never "Agent payment" or an
-    // address — and the protocol name lives in the drawer's section heading,
-    // asserted below. Scoped to the ledger so the document <title> ("Haven,
+    // address — and the drawer calls it a "Paid request" (#4267), asserted
+    // below. Scoped to the ledger so the document <title> ("Haven,
     // agent payments within your rules"), which Next's dev server renders
     // into <body>, can never be what a text locator resolves to (#2834).
     // The fixture serves TWO x402 rows (recorded + unrecorded eip3009

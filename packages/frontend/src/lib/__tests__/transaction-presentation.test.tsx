@@ -338,7 +338,7 @@ describe('counterpartyLabel no-address mode (#3810)', () => {
  * `/transactions` ledger rows (#4266; the transactions table before them)
  * and, through `activityCounterparty`, the agent detail Activity rows never
  * render a truncated address in a row; the detail panel is where the address
- * lives, in full, with a copy button.
+ * lives, shortened under Technical details, with a copy button (#4267).
  */
 describe('shared screens adopt the no-address rules (#3811)', () => {
   const UNKNOWN = '0x9999999999999999999999999999999999999999'

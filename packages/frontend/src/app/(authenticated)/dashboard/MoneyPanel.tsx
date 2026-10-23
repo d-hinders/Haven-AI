@@ -562,16 +562,20 @@ export default function MoneyPanel({
               ) : (
                 // `lg:mt-auto`: with no sparkline (spend still loading or
                 // unavailable) the spare height sits above the actions,
-                // never below them (#3908).
+                // never below them (#3908). #4307 owner decision (a):
+                // Send, then Receive, everywhere — the account header's
+                // order, which the card here now matches. The primacy rule
+                // is unchanged (#4167): Send primary once funded, Receive
+                // primary with Send disabled when known empty.
                 <div className="flex flex-wrap gap-3 lg:mt-auto">
+                  <Button onClick={onSend} variant={sendPrimary ? 'primary' : 'ghost'} disabled={sendDisabled}>
+                    Send
+                  </Button>
                   <Button
                     onClick={onReceive}
                     variant={sendPrimary || receiveSecondary ? 'ghost' : 'primary'}
                   >
                     Receive
-                  </Button>
-                  <Button onClick={onSend} variant={sendPrimary ? 'primary' : 'ghost'} disabled={sendDisabled}>
-                    Send
                   </Button>
                 </div>
               )

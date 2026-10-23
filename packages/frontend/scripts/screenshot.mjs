@@ -1082,13 +1082,17 @@ const FIXTURE_PORTFOLIO = {
   // the token rows' `sekValue` summing to it.
   totalUsd: 12_640.55, totalEur: 11_690.21, totalSek: 136_050.75,
   breakdown: [
-    { symbol: 'USDC', balance: '11890550000', formatted: '11,890.55', usdValue: 11_890.55, eurValue: 10_996.57, sekValue: 127_970.41 },
+    // #4307: `formatted` is the real wire shape — `formatTokenValue` serves
+    // an ungrouped dot-decimal string (as Activity rows' `valueFormatted`
+    // does), so the Holdings column never renders a grouped figure beside
+    // proportional fiat.
+    { symbol: 'USDC', balance: '11890550000', formatted: '11890.55', usdValue: 11_890.55, eurValue: 10_996.57, sekValue: 127_970.41 },
     { symbol: 'ETH', balance: '250000000000000000', formatted: '0.25', usdValue: 750.0, eurValue: 693.64, sekValue: 8_080.34 },
   ],
 }
 const FIXTURE_BALANCES = {
   balances: [
-    { symbol: 'USDC', address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e', balance: '11890550000', formatted: '11,890.55', decimals: 6, chainId: FIXTURE_ACCOUNT.chain_id },
+    { symbol: 'USDC', address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e', balance: '11890550000', formatted: '11890.55', decimals: 6, chainId: FIXTURE_ACCOUNT.chain_id },
     { symbol: 'ETH', address: null, balance: '250000000000000000', formatted: '0.25', decimals: 18, chainId: FIXTURE_ACCOUNT.chain_id },
   ],
 }
@@ -2345,6 +2349,18 @@ export const FIXTURE_EMPTY_FALLBACK = {
   // the ErrorBoundary. The hook now defaults it too, so this is belt AND
   // braces — deliberately, because the fixture is what a reviewer looks at.
   failedAccountIds: [],
+  // #4307: `balances` is `GET /balances/:address`'s collection key — the
+  // hook maps over it (`data.balances.map`), and with a `chainId` a MISSING
+  // key threw inside `useBalances`'s own try and was swallowed into an
+  // error state, so the account page read "Unavailable" instead of the
+  // brand-new header a zero answer is. The wire answers one zero item per
+  // configured token (`formatted: '0'`); `[]` and all-zero rows reach the
+  // same header because `nonZeroBreakdown` filters on the raw balance.
+  balances: [],
+  // #4307: `totals` and `change` stay ABSENT on purpose — a PARTIAL
+  // overview is the state the DashboardClient's nested-read guards must
+  // render. Adding them here would photograph a shape production never
+  // serves and would hide a guard regression behind green captures.
   recipients: [], delegations: [], owners: [], passkeys: [], tokens: [],
   payments: [], receipts: [], catalog: [], activity: [],
   // #2295: `entries` is `GET /catalog`'s collection key. It was missing, so

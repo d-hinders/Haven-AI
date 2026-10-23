@@ -39,6 +39,21 @@ covers:
 last-verified: "2026-10-23"
 ---
 
+> **Re-verified #4307 (2026-10-23, Receive dialog QR chrome):** this diff
+> touched one file in this document's coverage list,
+> `packages/frontend/src/components/ReceiveDialog.tsx`. The change is
+> presentational: the visible "QR code for 0x…" caption under the QR image is
+> removed — the `<img>` alt text is unchanged and still names the code for
+> screen readers, and the address and the Copy button below still say what it
+> holds — and the QR image loses its inner `border` (the rounded frame box
+> that wraps it remains); the now-unused `truncate` import goes with the
+> caption. The claim § `NEXT_PUBLIC_COINBASE_ONRAMP_APP_ID` in the Playwright
+> builds makes about this file is unchanged: the id is still read at module
+> scope (`const ONRAMP_APP_ID = process.env.NEXT_PUBLIC_COINBASE_ONRAMP_APP_ID`),
+> so the build-time gate and every CI surface that sets the literal behave
+> exactly as written. Nothing else in this document was re-verified, and
+> `last-verified` already reads 2026-10-23 and is left as is.
+
 > **Re-verified #4192 (2026-10-21, ignore-step tests: event-loop yield and
 > real git):** this diff touched two files in this document's coverage list,
 > `scripts/vercel/ignore-build-harness.mjs` and

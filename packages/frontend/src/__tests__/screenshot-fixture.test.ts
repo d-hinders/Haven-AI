@@ -135,6 +135,40 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
     expect(fx('/contacts/ct-1/history')).toBeNull()
   })
 
+  // #4307: the empty fixture and the guards it exercises.
+  describe('empty-fixture robustness (#4307)', () => {
+    it('carries `balances: []` — the account page can show a brand-new header', () => {
+      // `useBalances` maps over `data.balances`; a MISSING key threw inside
+      // its own try (swallowed into an error state) and the page read
+      // "Unavailable" instead of "0,00 kr" with Receive primary.
+      expect(FIXTURE_EMPTY_FALLBACK).toMatchObject({ balances: [] })
+    })
+
+    it('carries neither `totals` nor `change` — DashboardClient must guard a partial overview', () => {
+      // The empty /dashboard capture passes BECAUSE the client guards its
+      // nested reads. Adding either key here would photograph a shape
+      // production never serves and hide a guard regression.
+      expect(FIXTURE_EMPTY_FALLBACK).not.toHaveProperty('totals')
+      expect(FIXTURE_EMPTY_FALLBACK).not.toHaveProperty('change')
+    })
+
+    it('Holdings fixture amounts are UNGROUPED, as formatTokenValue serves', () => {
+      // The wire (`backend/src/domain/tokens.ts:29`) returns an ungrouped
+      // dot-decimal string; a grouped `11,890.55` beside proportional fiat
+      // was the reviewed defect. Both surfaces that carry `formatted` are
+      // pinned — the portfolio breakdown (Holdings) and the balances list.
+      const portfolio = fx('/portfolio/0x1111?chain_id=84532') as {
+        breakdown: { symbol: string; formatted: string }[]
+      }
+      const balances = fx('/balances/0x1111?chain_id=84532') as {
+        balances: { symbol: string; formatted: string }[]
+      }
+      for (const { symbol, formatted } of [...portfolio.breakdown, ...balances.balances]) {
+        expect([symbol, formatted]).toEqual([symbol, expect.stringMatching(/^\d+(\.\d+)?$/)])
+      }
+    })
+  })
+
   // #2106: `/agents/:id`'s budget card (formerly also `/custody`, deleted in
   // #3024) renders a delegation-rail account's real spend authority from this
   // endpoint. Both recipient states are seeded on purpose — a PINNED recipient

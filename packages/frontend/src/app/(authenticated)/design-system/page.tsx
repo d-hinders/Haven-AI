@@ -2992,21 +2992,21 @@ export default function DesignSystemPage() {
           </div>
           {/* #2929: the QR is authored against white and a scanner reads its
               module contrast — the box stays fixed-white in both themes via
-              `.v2-light-surface` (globals.css), as the dialog's does. */}
+              `.v2-light-surface` (globals.css), as the dialog's does.
+              #4307: one frame, and no visible caption — the alt text names
+              the code and the address and Copy button above say what it
+              holds, exactly as the dialog renders. */}
           <div className="v2-light-surface mt-4 rounded-[10px] border p-4">
             <div className="flex flex-col items-center">
               {dsReceiveQr ? (
                 <img
                   src={dsReceiveQr}
                   alt="QR code for Operating wallet on Base"
-                  className="h-[220px] w-[220px] rounded-lg border border-[var(--v2-border)]"
+                  className="h-[220px] w-[220px] rounded-lg"
                 />
               ) : (
                 <div className="h-[220px] w-[220px] animate-pulse rounded-lg bg-[var(--v2-surface-2)]" />
               )}
-              <p className="mt-3 text-center text-xs text-[var(--v2-ink-3)]">
-                QR code for {truncate(sampleAddress)}
-              </p>
             </div>
           </div>
           {/* #4094 mockup note 9 (#4167): ONE network rule, one line. */}

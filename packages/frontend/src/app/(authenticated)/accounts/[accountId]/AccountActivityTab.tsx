@@ -20,9 +20,10 @@
  *   total as the denominator), never summed off whatever page happens to
  *   be loaded — with the #2882 qualifier when the feed is capped at the
  *   explorer window;
- * - rows grouped by day in #4096's ledger mode (`TransactionActivityRow`
- *   with `onOpen`, `TransactionActivityDayHeader`), merchant-first row
- *   titles with the agent as the subtitle (#4166), the shared
+ * - rows grouped by day in #4096's ledger mode (`transactionDayGroups`,
+ *   `TransactionActivityDayHeader`, the shared `TransactionsLedgerRow` with
+ *   `showAccount={false}` — #4307), merchant-first row titles with the
+ *   initiator as the subtitle, the shared
  *   `TransactionDetailPanel` on row open — click or Enter/Space, the row is
  *   a whole-row button — and "Show N more" below the card for the next page
  *   (#4196, `ListShowMore`);
@@ -35,12 +36,12 @@ import { useSearchParams } from 'next/navigation'
 import { Amount, type AmountCurrency } from '@/components/haven/Amount'
 import {
   TransactionActivityDayHeader,
-  TransactionActivityRow,
   transactionDayGroups,
 } from '@/components/haven'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { EmptyState } from '@/components/ui/EmptyState'
+import TransactionsLedgerRow from '@/components/transactions/TransactionsLedgerRow'
 import { ListNoMatch, ListShowMore, ListToolbar } from '@/components/ui/ListToolbar'
 import type { ListFacet } from '@/components/ui/FacetMenu'
 import type { ListCount, ListNoun } from '@/components/ui/list-controls-copy'
@@ -70,12 +71,6 @@ import {
   hasCsvRecords,
   type ExportNotice,
 } from '@/lib/transaction-csv'
-import {
-  counterpartyLabel,
-  transactionFiat,
-  transactionRowBadge,
-} from '@/lib/transaction-presentation'
-import { timeAgo } from '@/lib/format'
 import type { AggregatedTransaction, TransactionFilterState } from '@/types/transactions'
 
 interface AccountActivityTabProps {
@@ -175,16 +170,21 @@ function TotalFigure({ short, name, children }: { short: string; name: string; c
 
 /**
  * One feed row in the ledger — #4096's ledger mode, the account page's own
- * copy (#4166): the title is WHO WAS PAID — `counterpartyLabel` in the
- * dashboard's no-address mode, the merchant or counterparty first — with the
- * agent as the subtitle, exactly the dashboard row's anatomy — the same
- * title `/transactions` and the detail panel use (#4266, #4267).
+ * copy (#4166). Since #4307 the row IS the shared `TransactionsLedgerRow`
+ * (`showAccount={false}`): its title is WHO WAS PAID — `counterpartyLabel`
+ * in the dashboard's no-address mode, the merchant or counterparty first —
+ * and its subline is `transactionInitiator` — "You" for an owner send,
+ * the agent's name, "Unknown" when attribution is missing, and empty for
+ * inbound — the same anatomy `/transactions` renders. The account tab's
+ * own second subtitle rule (`tx.agentName ?? undefined`) dropped the
+ * initiator, so an owner send showed no "You" — #4099's acceptance names
+ * the account page, and one rule everywhere cannot drift.
  *
  * The movement line is gone with it: the page fixes the account, so its
- * "From <this account> →" half repeated the page on every row (#4166 — done
- * here in the row's props, not in the shared helper). What the movement line
- * used to say is carried by the row itself — the counterparty is the title,
- * the fixed account is the page — and the agent moves into the subtitle.
+ * "From <this account> →" half repeated the page on every row (#4166 — the
+ * shared row carries it in its props, not in a helper here). The account
+ * feed keeps both legs of a move between own accounts, so `ownTransfer`
+ * rows do not arise from this feed; the fold itself is the shared row's.
  */
 function ActivityLedgerRow({
   tx,
@@ -200,21 +200,12 @@ function ActivityLedgerRow({
   /** #4165: the same-day inset hairline, on every row after a day's first. */
   insetDivider: boolean
 }) {
-  const badge = transactionRowBadge(tx)
-  const fiat = transactionFiat(tx, 'row')
   return (
-    <TransactionActivityRow
-      title={counterpartyLabel(tx, resolveAddress, accountNamesByAddress, { noAddress: true })}
-      description={tx.agentName ?? undefined}
-      value={tx.valueFormatted}
-      asset={tx.tokenSymbol}
-      failed={tx.isError}
-      status={badge?.label}
-      statusTone={badge?.tone}
-      timestamp={timeAgo(tx.timestamp * 1000)}
-      direction={tx.direction}
-      fiat={fiat}
-      density="compact"
+    <TransactionsLedgerRow
+      tx={tx}
+      resolveAddress={resolveAddress}
+      accountNamesByAddress={accountNamesByAddress}
+      showAccount={false}
       onOpen={onOpen}
       insetDivider={insetDivider}
     />

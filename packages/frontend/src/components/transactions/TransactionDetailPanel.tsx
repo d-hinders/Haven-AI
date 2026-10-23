@@ -47,7 +47,10 @@ function DetailRow({ label, value, note }: { label: string; value: ReactNode; no
       <dt className="whitespace-nowrap text-xs text-[var(--v2-ink-3)]">{label}</dt>
       <dd className="min-w-0 text-right text-sm text-[var(--v2-ink-2)]">
         <div>{value}</div>
-        {note ? <p className="mt-0.5 text-left text-xs text-[var(--v2-ink-3)]">{note}</p> : null}
+        {/* #4312 C: right-aligned like the value above it — `text-left` put
+            the note's left edge on the value column's start, lining up with
+            neither the labels nor the right-aligned values. */}
+        {note ? <p className="mt-0.5 text-right text-xs text-[var(--v2-ink-3)]">{note}</p> : null}
       </dd>
     </div>
   )
@@ -79,6 +82,10 @@ function OnChainValue({
         {truncate(value)}
       </span>
       <CopyButton value={value} label={noun} />
+      {/* #4312 D: the trailing 44px slot is ALWAYS reserved, whether or not
+          the link fills it — with it the copy glyph's centre sits one 44px
+          target in from the content edge on EVERY row, so a registry-unknown
+          chain can no longer pull the copy icon into the explorer column. */}
       {href ? (
         <a
           href={href}
@@ -90,7 +97,9 @@ function OnChainValue({
         >
           <Icon icon={ExternalLink} className="h-3.5 w-3.5" />
         </a>
-      ) : null}
+      ) : (
+        <span aria-hidden className="h-11 w-11 flex-shrink-0" />
+      )}
     </span>
   )
 }
@@ -302,7 +311,7 @@ export default function TransactionDetailPanel({
   } else {
     // A delegate sweep: the agent's unspent allowance funding, returned.
     details.push(
-      <DetailRow key="what" label="What happened" value="Unspent funds returned from the agent's wallet" />,
+      <DetailRow key="what" label="What happened" value="Unspent allowance returned" />,
     )
   }
   // #2870: only when the list joined a sync row for this payment — the same
@@ -332,11 +341,16 @@ export default function TransactionDetailPanel({
         key="payment-id"
         label="Payment ID"
         value={
-          <span className="-my-3 inline-flex items-center justify-end whitespace-nowrap">
-            <span className="v2-tabular mr-1 font-mono text-xs" title={tx.paymentId}>
+          // #4312 D: same shape as `OnChainValue` — `max-w-full`, the value's
+          // ink, and a reserved 44px trailing slot after the copy target, so
+          // this row's copy glyph lines up with every other row's (a Payment
+          // ID never has an explorer link).
+          <span className="-my-3 inline-flex max-w-full items-center justify-end whitespace-nowrap">
+            <span className="v2-tabular mr-1 font-mono text-xs text-[var(--v2-ink-2)]" title={tx.paymentId}>
               {truncate(tx.paymentId)}
             </span>
             <CopyButton value={tx.paymentId} label="payment ID" />
+            <span aria-hidden className="h-11 w-11 flex-shrink-0" />
           </span>
         }
       />,
@@ -453,7 +467,13 @@ export default function TransactionDetailPanel({
           <StatusBadge tone={status.tone}>{status.label}</StatusBadge>
         </div>
         <p className="mt-2 text-sm text-[var(--v2-ink-2)]">
-          {headerLine(tx, kind)} · <span className="whitespace-nowrap">{when}</span>
+          {/* #4312 B: the separator lives INSIDE the `whitespace-nowrap` span
+              with the date, so a wrap carries "· <date>" to line 2 together —
+              a stranded "·" ending line 1 is what both committed baselines
+              showed. The literal space before the date is pinned by the
+              visual spec's `when:` regexes and by design-system's "… · <date>". */}
+          {headerLine(tx, kind)}{' '}
+          <span className="whitespace-nowrap">· {when}</span>
         </p>
         {callout}
       </div>

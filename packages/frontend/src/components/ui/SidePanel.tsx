@@ -70,7 +70,12 @@ export function SidePanel({
         */}
         <div className="flex items-start justify-between gap-3 border-b border-[var(--v2-border)] px-5 py-4">
           {leading ? <div className="shrink-0">{leading}</div> : null}
-          <div className="min-w-0 flex-1">
+          {/* #4312 A: the title block centres itself on the mark when it is
+              the row's only content (a deposit drops its subtitle): the row
+              stays `items-start`, so the close button keeps its top edge in
+              the two-line case — `items-center` on the ROW would move it
+              ~7px, which both committed baselines pin. */}
+          <div className={subtitle ? 'min-w-0 flex-1' : 'min-w-0 flex-1 self-center'}>
             <h2 className="text-sm font-semibold text-[var(--v2-ink)]">{title}</h2>
             {subtitle ? (
               <p className="mt-0.5 text-xs text-[var(--v2-ink-3)]">{subtitle}</p>

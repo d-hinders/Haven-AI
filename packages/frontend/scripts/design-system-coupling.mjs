@@ -89,19 +89,29 @@ function isPrimitiveFile(file) {
   return true
 }
 
-// A PascalCase identifier, optionally aliased (`Foo as Bar` → the alias is the
-// export). `type`-prefixed members are not components.
+// An all-caps name with an underscore (CURRENCY_KEY, VIEWPORT_MARGIN) is a
+// constant, not a component (#4344). Single-word caps (A, UI, QR) stay
+// components: nothing distinguishes them from a short PascalCase name.
+const CONSTANT_NAME = /^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$/
+const componentName = (name) => (name && !CONSTANT_NAME.test(name) ? name : null)
+
+// A capitalised identifier, underscores included, optionally aliased
+// (`Foo as Bar` → the alias is the export) — minus underscore constants.
+// `type`-prefixed members are not components.
 function pascalMember(part) {
   part = part.trim()
   if (!part || part.startsWith('type ')) return null
   const name = part.split(/\s+as\s+/).pop().trim()
-  return /^[A-Z][A-Za-z0-9]*$/.test(name) ? name : null
+  return /^[A-Z][A-Za-z0-9_]*$/.test(name) ? componentName(name) : null
 }
 
 /**
  * Extract exported COMPONENT symbols from a single line of CODE (comments must
  * already be stripped — see codeOf). Components are PascalCase; `type`-only
- * re-exports and lowercase helper exports (e.g. entityCardStyles) are ignored.
+ * re-exports, lowercase helper exports (e.g. entityCardStyles) and all-caps
+ * underscore constants (e.g. CURRENCY_KEY, #4344) are ignored. Names are
+ * captured whole, underscores included, so the page check looks for the real
+ * name rather than its first word.
  *
  * The `export` keyword is ANCHORED to the start of the (trimmed) line so a
  * `export const …` sitting inside a string literal or mid-line never counts —
@@ -121,10 +131,13 @@ function pascalMember(part) {
 export const DEFAULT_EXPORT = Symbol('default-export')
 export function exportedComponentsInLine(line) {
   const names = new Set()
-  const decl = line.match(/^\s*export\s+(?:const|function|class)\s+([A-Z][A-Za-z0-9]*)/)
-  if (decl) names.add(decl[1])
-  const dflt = line.match(/^\s*export\s+default\b\s*(?:function\s+)?([A-Z][A-Za-z0-9]*)?/)
-  if (dflt) names.add(dflt[1] ?? DEFAULT_EXPORT)
+  const decl = line.match(/^\s*export\s+(?:const|function|class)\s+([A-Z][A-Za-z0-9_]*)/)
+  if (decl && componentName(decl[1])) names.add(decl[1])
+  const dflt = line.match(/^\s*export\s+default\b\s*(?:function\s+)?([A-Z][A-Za-z0-9_]*)?/)
+  // A named constant default yields nothing — never the anonymous placeholder,
+  // which would report the file's basename.
+  if (dflt && dflt[1] === undefined) names.add(DEFAULT_EXPORT)
+  else if (dflt && componentName(dflt[1])) names.add(dflt[1])
   // Single-line list — or the OPENING line of a multi-line one: members on the
   // opening line must be collected here (brace state only covers later lines).
   const list = line.match(/^\s*export\s*\{([^}]*)(\}|$)/)

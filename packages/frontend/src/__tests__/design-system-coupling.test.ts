@@ -40,6 +40,22 @@ describe('design-system coupling gate (#898)', () => {
     expect(exportsInLine('export const entityCardStyles = {}')).toEqual([])
   })
 
+  it('captures underscore names whole and treats all-caps underscore constants as no primitive (#4344)', () => {
+    // export const|function|class
+    expect(exportsInLine('export const CURRENCY_KEY: X = {')).toEqual([])
+    expect(exportsInLine('export function Foo_Bar() {')).toEqual(['Foo_Bar'])
+    // export default: a named constant yields nothing — not the file-name placeholder
+    expect(exportsInLine('export default function Foo_Bar() {')).toEqual(['Foo_Bar'])
+    expect(exportsInLine('export default VIEWPORT_MARGIN')).toEqual([])
+    expect(fromDiff(diff('src/components/ui/Tooltip.tsx', 'export default VIEWPORT_MARGIN'))).toEqual([])
+    // re-export lists
+    expect(exportsInLine('export { Foo_Bar, CURRENCY_KEY }')).toEqual(['Foo_Bar'])
+    // the page check looks for the whole name, not its first word
+    const added = fromDiff(diff('src/components/ui/Foo.tsx', 'export const Foo_Bar = () => null'))
+    expect(undocumented(added, '<Foo />')).toEqual([{ file: 'src/components/ui/Foo.tsx', symbol: 'Foo_Bar' }])
+    expect(undocumented(added, '<Foo_Bar />')).toEqual([])
+  })
+
   it('flags a new ui/ export absent from the reference page', () => {
     const added = fromDiff(diff('src/components/ui/Gauge.tsx', 'export const Gauge = () => null'))
     expect(added).toEqual([{ file: 'src/components/ui/Gauge.tsx', symbol: 'Gauge', exempt: false }])

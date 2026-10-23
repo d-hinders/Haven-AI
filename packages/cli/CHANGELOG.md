@@ -15,6 +15,12 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+### Changed
+
+- **`haven guide`'s runbook gives `needs_approval` its two causes (#4355).**
+  No `allowances[]` rows: nobody approved a budget yet. Rows, all spent: the
+  budget refills at `budgetRefillsAt`. Wording only. No update needed.
+
 ## 0.11.0-alpha.0 — 2026-10-23
 
 ### Changed

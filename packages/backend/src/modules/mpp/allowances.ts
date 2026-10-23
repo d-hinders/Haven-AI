@@ -20,6 +20,7 @@ import { sumOpenReservedAtomic } from '../../infra/repositories/task-budgets.js'
 import { sumOpenReservedForBudgetDelegation } from '../../infra/repositories/sub-budgets.js'
 import { readRemainingBudget } from '../../infra/chain/delegation-budget-reader.js'
 import { getChainClient } from '../../infra/chain/index.js'
+import { currentPeriodBounds } from '@haven_ai/core'
 import { toCanonicalAddress } from '../transactions/index.js'
 import type { AgentContext } from '../../middleware/agentAuth.js'
 import type { MppHandlerResult } from './types.js'
@@ -200,6 +201,28 @@ export async function handleGetAllowances(agent: AgentContext): Promise<MppHandl
               : !fromChain || balance === undefined || balance === null
                 ? null
                 : balance >= BigInt(remainingAtomic)
+          // #4355: when THIS budget next refills — the end of its current
+          // period, from the row's own start/period (the same
+          // `currentPeriodBounds` the dashboard's "refills …" caption uses).
+          // null when it never refills again: the period boundary falls at or
+          // after `expires_at` (the budget ends first), or there is no period.
+          // A not-yet-started row (the dormant rotation "steady" grant)
+          // reports its start instead: that is when its authority first arms.
+          // Lets an agent at remaining 0 tell "spent for this period" from
+          // "nobody approved a budget" without a second read.
+          const nowSecForRefill = Math.floor(Date.now() / 1000)
+          const startSec = Number(b.start_date)
+          const expiresSec = Number(b.expires_at)
+          const refillSec =
+            nowSecForRefill < startSec
+              ? startSec
+              : b.period_seconds > 0
+                ? currentPeriodBounds(startSec, b.period_seconds, nowSecForRefill).end
+                : null
+          const nextRefillAt =
+            refillSec !== null && Number.isFinite(refillSec) && refillSec < expiresSec && refillSec * 1000 <= 8.64e15
+              ? new Date(refillSec * 1000).toISOString()
+              : null
           return {
             id: b.id,
             // #3319: checksummed at the response boundary like the
@@ -242,6 +265,9 @@ export async function handleGetAllowances(agent: AgentContext): Promise<MppHandl
             // balance itself never does (the #3126 posture). Each row is
             // compared ALONE: rows for one token do not add up.
             ...(fundsCoverRemaining === undefined ? {} : { funds_cover_remaining: fundsCoverRemaining }),
+            // #4355: additive — ISO time of the next period refill, or null
+            // when the budget ends before it would refill (see above).
+            next_refill_at: nextRefillAt,
             onchain: {
               amount: b.budget_atomic,
               spent: spentAtomic,

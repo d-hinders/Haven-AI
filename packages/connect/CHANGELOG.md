@@ -17,6 +17,12 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ### Changed
 
+- **The installed skill tells a spent budget from no budget (#4355).**
+  `needs_approval` with no `allowances[]` rows means nobody approved a budget
+  yet; with rows, the budget is spent for this period and `budgetRefillsAt`
+  says when it refills. An already installed `SKILL.md` stays stale until
+  reinstalled. No update needed.
+
 - **The installed skill says which quote checks the budget (#4345).** Only
   the hosted quote checks the agent's remaining budget; on the local runtime
   (`@haven_ai/mcp`) the quote checks only a stated price, and the budget is

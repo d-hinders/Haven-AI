@@ -61,6 +61,14 @@ describe('generic skill content', () => {
     expect(HAVEN_SKILL_MD).toContain('needs_approval')
   })
 
+  it('splits needs_approval into "never approved" and "spent for this period" (#4355)', () => {
+    expect(HAVEN_SKILL_MD).toContain(
+      '`needs_approval` with no `allowances[]`\n' +
+        '  rows means nobody approved a budget yet; with rows (all at remaining 0) the\n' +
+        '  budget is spent for this period, and `budgetRefillsAt` says when it refills',
+    )
+  })
+
   it('carries the stale-tool-list reconnect rule with the in-flight carve-out (#3816)', () => {
     // The hosted surface is stateless: a client that loaded tools/list before
     // a deploy is never told the schema moved. The skill is the agent's own

@@ -173,7 +173,11 @@ spending:
   the user, not a refusal — a budget above the balance is a normal setup, so
   still try the payment; \`null\` means the coverage read failed or the remaining
   figure was not read live; the key is absent when the remaining is 0. Rows for
-  one token are compared alone.
+  one token are compared alone. \`needs_approval\` with no \`allowances[]\`
+  rows means nobody approved a budget yet; with rows (all at remaining 0) the
+  budget is spent for this period, and \`budgetRefillsAt\` says when it refills
+  (\`null\`: it ends before it refills) — tell the user, then wait or ask them
+  to raise it.
 - \`mcp__haven__haven_get_allowances\` — detailed per-token breakdown
   (configured, spent, reset window) when you need more than the summary.
 - \`mcp__haven__haven_check_funds\` — whether the account actually HOLDS at

@@ -120,8 +120,12 @@ describe('haven guide text (#2525)', () => {
     // owner-chosen end date (30/90/180/365 days, on-chain, renewal a new
     // approval), with three em dashes (3 bytes over their unit count each).
     // Lands at 11942/11843.
-    expect(Buffer.byteLength(HAVEN_AGENT_RUNBOOK_MD, 'utf8')).toBe(11942)
-    expect(HAVEN_AGENT_RUNBOOK_MD.length).toBe(11843)
+    // #4355: +160 bytes / +158 units — the § How to verify `needs_approval`
+    // bullet names its two causes (no allowances[] rows vs rows spent for the
+    // period) and `budgetRefillsAt`, instead of "nobody approved yet" for
+    // both. Lands at 12102/12001.
+    expect(Buffer.byteLength(HAVEN_AGENT_RUNBOOK_MD, 'utf8')).toBe(12102)
+    expect(HAVEN_AGENT_RUNBOOK_MD.length).toBe(12001)
   })
 
   it('names the command that actually prints the revoke hash (#3892)', () => {

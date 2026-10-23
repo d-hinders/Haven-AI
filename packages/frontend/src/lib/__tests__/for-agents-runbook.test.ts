@@ -220,7 +220,14 @@ describe('/for-agents.md (#2523)', () => {
     // commit, 11703 before it): the "What Haven is" paragraph names the
     // owner-chosen end date — 30/90/180/365 days, on-chain, renewal a new
     // approval (+239 bytes). Nothing unrelated was trimmed to fit.
-    expect(Buffer.byteLength(served, 'utf8')).toBeLessThan(12000)
+    //
+    // 12000 -> 12200 for #4355 (2026-10-23; the page is 12102 bytes at this
+    // commit, 11942 before it): the "How to verify" `needs_approval` bullet
+    // stops saying "nobody approved yet" for an agent whose budget is merely
+    // spent for the period — it names both causes (no rows vs spent rows) and
+    // `budgetRefillsAt` (+160 bytes, after cutting the first draft by ~110).
+    // Nothing unrelated was trimmed to fit.
+    expect(Buffer.byteLength(served, 'utf8')).toBeLessThan(12200)
   })
 
   it('treats chains.default as expected only and confirms funding after login', () => {

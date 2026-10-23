@@ -762,6 +762,14 @@ export interface HavenAllowance {
    */
   fundsCoverRemaining: boolean | null
   /**
+   * #4355: when THIS budget next refills — the end of its current period
+   * (ISO 8601), or its start for a budget not yet started. `null` when it
+   * never refills again (it ends first), and on a backend that predates the
+   * field. With a remaining of 0 it says the budget is spent for this period
+   * and when it comes back — not that nobody approved one.
+   */
+  nextRefillAt: string | null
+  /**
    * #3518: this budget's SCOPE, so an agent holding more than one budget
    * for a token can name the merchant-locked one before paying. The
    * recipient pin is null for an open budget; `merchantId` is set only on a
@@ -1032,6 +1040,8 @@ export interface HavenAgentAllowanceSummary {
    * read: any non-boolean wire value maps to `null`, never `undefined`.
    */
   fundsCoverRemaining: boolean | null
+  /** #4355: the {@link HavenAllowance.nextRefillAt} projection. */
+  nextRefillAt: string | null
 }
 
 /**
@@ -1056,6 +1066,16 @@ export interface HavenAgentSummary extends HavenAgent {
    * renders from `HAVEN_CONNECTOR_CHANNEL` — see `connector-channel.ts`).
    */
   spend_authority_readiness: HavenAgentReadiness
+  /**
+   * #4355 (additive; the readiness values are unchanged — #4349 decision 5):
+   * set only when readiness is `needs_approval` BECAUSE every live budget is
+   * spent for its period — `allowances[]` has rows, all at remaining 0. It is
+   * the earliest {@link HavenAgentAllowanceSummary.nextRefillAt} among them:
+   * wait until then, or ask the owner to raise the budget. `null` otherwise:
+   * ready, revoked, no budget approved (`allowances[]` empty), or a spent
+   * budget that ends before it would refill.
+   */
+  budgetRefillsAt: string | null
   allowances: HavenAgentAllowanceSummary[]
   /**
    * #3329: open, unexpired task budgets — a derived VIEW, same discipline as
@@ -2592,6 +2612,8 @@ export interface RawHavenAllowance {
    * the mapping turns any non-boolean into `null`.
    */
   funds_cover_remaining?: boolean | null
+  /** #4355: see {@link HavenAllowance.nextRefillAt}; absent on an older backend. */
+  next_refill_at?: string | null
   onchain: {
     amount: string
     spent: string

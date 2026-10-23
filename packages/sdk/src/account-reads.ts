@@ -62,6 +62,26 @@ function deriveReadiness(
 }
 
 /**
+ * #4355: `needs_approval` covers two cases an agent must answer differently —
+ * no budget approved (`allowances` empty) and every live budget spent for its
+ * period (rows, all at remaining 0). The second gets the earliest refill time
+ * among the rows; the readiness values themselves are unchanged (#4349
+ * decision 5, additive). null whenever the agent is not in that second case,
+ * or when none of its spent budgets refills before it ends.
+ */
+function deriveBudgetRefillsAt(
+  readiness: HavenAgentReadiness,
+  allowances: ReadonlyArray<{ remainingAtomic: string; nextRefillAt: string | null }>,
+): string | null {
+  if (readiness !== 'needs_approval' || allowances.length === 0) return null
+  const times = allowances
+    .map((allowance) => allowance.nextRefillAt)
+    .filter((at): at is string => at !== null && !Number.isNaN(Date.parse(at)))
+  if (times.length === 0) return null
+  return times.reduce((earliest, at) => (Date.parse(at) < Date.parse(earliest) ? at : earliest))
+}
+
+/**
  * #3128: the ONE function behind every `remainingDisplay` the SDK emits —
  * `HavenAllowance.remainingDisplay` and the bootstrap summary's field are the
  * same call on the same inputs.
@@ -292,10 +312,20 @@ export class AccountReads {
         // #3731: same provenance as the detailed read's field — the compact
         // row is a projection of the same allowance, never a second source.
         fundsCoverRemaining: allowance.fundsCoverRemaining,
+        nextRefillAt: allowance.nextRefillAt,
       }
     })
     const readiness = deriveReadiness(agent.status, allowances)
-    return { ...agent, readiness, spend_authority_readiness: readiness, allowances, taskBudgets, pendingSubBudgetSignatures }
+    const budgetRefillsAt = deriveBudgetRefillsAt(readiness, allowances)
+    return {
+      ...agent,
+      readiness,
+      spend_authority_readiness: readiness,
+      budgetRefillsAt,
+      allowances,
+      taskBudgets,
+      pendingSubBudgetSignatures,
+    }
   }
 
   /**
@@ -433,6 +463,12 @@ export class AccountReads {
         fundsCoverRemaining:
           allowance.funds_cover_remaining === true || allowance.funds_cover_remaining === false
             ? allowance.funds_cover_remaining
+            : null,
+        // #4355: a non-empty string → itself; anything else (absent on an
+        // older backend, null when the budget never refills) → null.
+        nextRefillAt:
+          typeof allowance.next_refill_at === 'string' && allowance.next_refill_at !== ''
+            ? allowance.next_refill_at
             : null,
         remainingDisplay: formatRemainingDisplay(allowance.token_address, allowance.token_symbol, allowance.onchain.remaining),
         onchain: {

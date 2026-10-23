@@ -480,11 +480,21 @@ const PRE_TRIM_BASELINE_BYTES = 30_609
  * (#4062): 31,674 UTF-8 bytes (+324); the mean pin: 31,674 / 29 =
  * 1092.2068…, pinned at the two-decimal ceiling (1092.21). Shrink-only from
  * here.
+ *
+ * **Re-derived — round 29, #4355 (2026-10-23).** `haven_get_agent`'s description gives `needs_approval`
+ * its two causes — no allowances[] rows (nothing approved yet) vs rows spent
+ * for the period, refilling at the new `budgetRefillsAt` — and lists the
+ * rows' new `nextRefillAt`. Without it an agent with a spent budget is told
+ * to ask its owner for an approval that already happened. Trimmed once
+ * (+284 → +138 bytes) before this re-derivation; what remains is the two
+ * causes and the field name. No tool was added — 29 holds. 31,812 UTF-8
+ * bytes (+138); the mean pin: 31,812 / 29 = 1096.9655…, pinned at the
+ * two-decimal ceiling (1096.97). Shrink-only from here.
  */
-const MAX_TOTAL_BYTES = 31_674
-// Mean pin: round 28 (#4061 block above): 31,674 / 29 = 1092.2068…, pinned
-// at the two-decimal ceiling (1092.21). Shrink-only from here.
-const MAX_MEAN_BYTES = 1092.21
+const MAX_TOTAL_BYTES = 31_812
+// Mean pin: round 29 (#4355 block above): 31,812 / 29 = 1096.9655…, pinned
+// at the two-decimal ceiling (1096.97). Shrink-only from here.
+const MAX_MEAN_BYTES = 1096.97
 
 describe('tool description payload (#1591)', () => {
   it(`served descriptions average ≤${MAX_MEAN_BYTES} UTF-8 bytes (pre-trim total was ${PRE_TRIM_BASELINE_BYTES})`, () => {

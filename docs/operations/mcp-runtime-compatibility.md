@@ -6458,3 +6458,22 @@ to call next in structured fields, and those fields are typed end to end
 > expected-context version or signer contract changes; an installed `SKILL.md`
 > stays stale until reinstalled. Scope of this note: those two sentences. Nothing
 > else in this document was re-verified.
+
+> **Re-verified (#4355, 2026-10-23 — `haven_get_agent` tells a spent budget
+> from no budget).** Additive only. Each `/machine-payments/allowances` row
+> gains `next_refill_at` (ISO, or null when the budget ends before it would
+> refill), mapped by the SDK to `nextRefillAt`; `getAgentSummary()` — which
+> both the hosted and the local `haven_get_agent` return as-is — gains
+> `budgetRefillsAt`, set only when readiness is `needs_approval` because every
+> live budget is spent for its period. `HavenAgentReadiness` keeps its three
+> values (#4349 decision 5, additive), so a client that switches over them is
+> unaffected and an older backend simply yields `null` for both fields. The
+> runbook (`haven guide`, the agent-skills step file, `/for-agents.md`), the
+> skill text and the `haven_get_agent` description now give `needs_approval`
+> its two causes. No `haven_*` tool name, input schema, strict-input list,
+> `next_tool` value, expected-context version or signer contract changes —
+> but the `haven_get_agent` DESCRIPTION does, so `tools-list.snapshot.json`
+> and the hosted contract fingerprint move: an already-connected hosted
+> client gets the stale-list reconnect hint after deploy, as for any
+> description change. Scope of this note: those fields and that wording. Nothing else in this
+> document was re-verified.

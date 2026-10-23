@@ -379,3 +379,12 @@ describe('#2145: the shipped SDK README presents retry_original_x402_request as 
     )
   })
 })
+
+describe('haven_get_agent description: needs_approval has two causes (#4355)', () => {
+  it('names budgetRefillsAt for spent rows and "no budget approved" for no rows', () => {
+    const desc = composeDescription(toolDescriptions.getAgent)
+    expect(desc).toContain(
+      'needs_approval with no allowances[] rows: nothing approved yet; with rows: spent for this period, refilling at budgetRefillsAt (null: it ends first).',
+    )
+  })
+})

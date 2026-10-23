@@ -25,7 +25,7 @@ covers:
   - packages/backend/src/modules/x402/delegation-authorize.ts
   - packages/backend/src/modules/x402/authorize.ts
   - packages/frontend/src/components/connect-agent/WaitingForConnector.tsx
-last-verified: "2026-10-08"
+last-verified: "2026-10-23"
 ---
 
 # Haven — Hosted MCP Connect Flow And Edge-Signing Contract
@@ -148,9 +148,12 @@ longer fronts it with a warning panel and acknowledgement. Normal setup links
 and snippets may contain hosted identity configuration, but never a delegate
 key. The manual credential may display a one-time delegate private key only
 after the user generates it; it is not part of routine connection snippets.
-Its registration records the public address, proof, API-key hash/prefix, and a
-non-secret manual-fallback marker only. That marker does not create authority
-or activate the agent: the user still makes the same owner-signed budget
+The key pair and API key are generated in the browser
+(`hooks/useAgentConnectionSetup.ts`). Of credential material, its registration
+sends only the public address, proof and API-key hash/prefix; the rest is
+non-secret setup metadata: the manual-fallback marker (`connector_version:
+'browser-manual-fallback'`), connector context labels and install
+capabilities. That marker does not create authority or activate the agent: the user still makes the same owner-signed budget
 delegation in step 5.
 
 ## Direct payment
@@ -404,8 +407,9 @@ handler-level check remains for callers that import `createToolHandlers`
 directly. The advertised JSON Schema is unchanged — it already said
 `additionalProperties: false`.
 
-The edge signer exposes five local, sign-only tools. `haven_x402_sign_header`
-and `haven_sign_sweep_delegate` never reach the network; `haven_sign` and
+The edge signer exposes five local, sign-only tools (`SignerToolName` in
+`packages/signer/src/tools.ts`). `haven_x402_sign_header`,
+`haven_sign_sweep_delegate` and `haven_sign_siwx` never reach the network; `haven_sign` and
 `haven_sign_x402` do only in their by-id forms. Given a `payment_id`, both fetch
 that payment's exact signing context from Haven over an authenticated,
 read-only `GET /x402/:payment_id/sign-context` (since #1263) — and, for a
@@ -422,6 +426,7 @@ requests or their responses, and nothing here relays, submits, or broadcasts:
 | `haven_x402_sign_header` | Sign the decomposed merchant authorization |
 | `haven_sign_x402` | Sign the recommended paid-MCP funding and merchant contexts |
 | `haven_sign_sweep_delegate` | Sign a gasless delegate-to-wallet USDC sweep |
+| `haven_sign_siwx` | Sign a merchant's x402 Sign-In-With-X challenge as the delegate wallet (#3728): the signer composes the EIP-4361 message from the validated challenge; it moves no funds and grants no spend authority |
 
 ## Review checklist
 
@@ -454,6 +459,24 @@ connect steps and what registration sends, the boot-time key guard, the
 direct-payment fields and recovery text, the erc7710 pre-check and its 201
 shape, the `/x402/authorize` 410, the merchant-receipt capture, and the
 custody summary.
+
+
+Re-verified 2026-10-23 (#4372 part B, at dev `2d0713dad`), a full re-read. Changed:
+the signer section names all five tools — `haven_sign_siwx` (#3728) was
+missing from the table and from the never-reaches-the-network list
+(`SignerToolName`, `packages/signer/src/tools.ts`); the manual-credential
+paragraph says the key pair is generated in the browser and separates its
+credential material from the setup metadata it also sends
+(`hooks/useAgentConnectionSetup.ts`). Re-checked without change: the hosted
+egress limits (`HOSTED_MAX_GET_REDIRECTS = 3`, non-GET redirects refused,
+the DNS residual, all in the SDK's merchant egress policy), the boot-time key
+guard (`mcp-server/src/cli.ts`, `server.ts`), the #4065 containers, the
+registration payload, the `run_mode` 400, `approval_url`, the #3772 report
+window (30 minutes) and `superseded_by` reads, the erc7710 `haven_sign`
+next step (`tools/catalog-purchase.ts`), the #3768 redaction and
+`include_merchant_credentials`, the 15-minute grace window
+(`domain/merchant-report-grace.ts`), and both authorize pre-checks with
+their fail-open shapes (`modules/x402/delegation-authorize.ts`).
 
 ## Related docs
 

@@ -33,7 +33,7 @@ covers:
   - packages/sdk/src/x402.ts
   - packages/sdk/src/sweep.ts
   - packages/signer/src/core.ts
-last-verified: "2026-09-30"
+last-verified: "2026-10-23"
 ---
 
 # Haven — Identity & Key/Credential Custody
@@ -150,10 +150,12 @@ flowchart TB
 ## Provisioning Paths
 
 - **Default Connect Agent flow:** the connector generates both the API key and
-  delegate key locally. It sends Haven only the API-key hash/prefix, public
-  delegate address, challenge proof, and the MCP server name it wired the agent
-  as (#1878 — a non-secret display label, never authority), then writes separate
-  owner-only `identity.json` and `signer.json` files. Of the API key itself,
+  delegate key locally. Of credential material it sends Haven only the API-key
+  hash/prefix, the public delegate address and the challenge proof; the rest
+  of the registration is non-secret setup metadata (the runtime, connector
+  version and run mode, and the MCP server name it wired the agent as, #1878 —
+  a display label, never authority). It then writes separate owner-only
+  `identity.json` and `signer.json` files. Of the API key itself,
   registration sends only the hash/prefix; later API calls present the plaintext
   API key as a bearer
   credential that Haven hashes for lookup. Haven never stores that plaintext
@@ -178,10 +180,14 @@ flowchart TB
   enforces by refusing an agent credential on every re-key route
   ([re-key client flow](../../packages/connect/src/rekey.ts),
   [re-key routes](../../packages/backend/src/routes/agent-rekey.ts)).
-- **Passkey owner flow:** the authenticator retains the private key. Haven stores
-  the credential id, public P-256 coordinates, predicted signer address, chain,
-  Safe association, and optional raw attestation. The current registration
-  route stores the attestation but does not verify it
+- **Passkey owner flow:** the authenticator retains the private key. On the
+  legacy rail Haven stored the credential id, public P-256 coordinates,
+  predicted signer address, chain, account association, and optional raw
+  attestation, which the enrolment route stored without verifying. That route
+  (`POST /passkeys`, the Safe WebAuthn signer enrolment) was deleted with #2847;
+  `GET /passkeys` still lists the existing rows. On the delegation rail a
+  passkey is one of the account's own signers, and Haven stores only its public
+  key material (see the signer-set bullet below)
   ([passkey routes](../../packages/backend/src/routes/passkeys.ts),
   [browser passkey helper](../../packages/frontend/src/lib/passkey.ts)).
 
@@ -217,16 +223,22 @@ flowchart TB
 
 On the delegation rail the Haven wallet is a MetaMask Hybrid DeleGator smart
 account, not a Safe + AllowanceModule, and the policy primitive is a **signed
-delegation the agent holds** rather than on-chain allowance state. The custody
+delegation to the agent's delegate account** rather than on-chain allowance
+state. The custody
 line is unchanged — Haven never holds a signer that can spend — but the blast
 radius shifts in a few ways worth mapping explicitly:
 
-- **Authority is a held object.** The agent receives a signed budget delegation
-  (period budget with native refill + optional recipient pin + expiry) through the
-  same credential channel as its API key. Haven stores a copy for reconstruction,
-  revocation targeting, and observability. It is **not key material**, but it is
-  spend-enabling *in combination with* the delegate key, so it is protected like
-  `api_key_hash`-class data: encrypted at rest, never logged.
+- **Authority is a signed object, not account state.** The owner signs a budget
+  delegation (period budget with native refill + optional recipient pin +
+  expiry) to the agent's delegate account. Haven stores it
+  (`agent_delegations.delegation_json`) for reconstruction, revocation
+  targeting and observability, and embeds it in each redemption UserOp it
+  prepares; the agent sees it only inside the typed data it signs, and none
+  of the connector's credential files holds it (`packages/connect/src/storage.ts`).
+  It is **not key
+  material**, but it is spend-enabling *in combination with* the delegate key,
+  so it is handled like `api_key_hash`-class data: platform-level encryption at
+  rest, never logged (migration `042_agent_delegations.ts`).
 - **The delegate key alone still cannot spend**, and the delegation alone still
   cannot spend. Full agent compromise (both) is bounded by the caveat stack:
   the sum of every enabled budget delegation's period amount per period (each
@@ -295,3 +307,22 @@ child re-delegations, protected like the parent copies; #3423 receive-side;
 #3479 settlement recording; #3451 re-key activation; #3386 re-key merchant
 label) widened the delegation surface but moved no zone, invariant or custody
 boundary; nothing here needed rewriting.
+
+Re-verified 2026-10-23 (#4372 part B, at dev `2d0713dad`), a full re-read. Changed:
+the Connect provisioning bullet separates credential material (hash/prefix,
+delegate address, proof) from the non-secret setup metadata the
+registration also sends (`connect/src/runtime.ts`); the passkey bullet says
+the enrolment route (`POST /passkeys`) was deleted with #2847 and only the
+read remains (`routes/passkeys.ts`); the delegation-rail section no longer
+says the agent receives or holds the signed delegation — the owner signs it
+to the agent's delegate account, Haven stores it and embeds it in the
+redemption UserOp it prepares (`rails/delegation-rail.ts`
+`buildRedemptionCall`), and no connector credential file holds it
+(`connect/src/storage.ts`). Re-checked without change: `identity.json` /
+`signer.json`, the manual `/agents` key (`routes/agents.ts`), the re-key
+split and `refuseAgentCaller` (`connect/src/rekey.ts`,
+`routes/agent-rekey.ts`), relayer deployment (`rails/hybrid-provisioning.ts`),
+`X402_BINDING_PRIVATE_KEY` (`infra/chain/x402-binding-signer.ts`), the
+platform-level encryption at rest for `agent_delegations` (migration 042),
+and the signer-set ops (`rails/hybrid-signer-actions.ts`,
+`hybrid_account_passkeys`).

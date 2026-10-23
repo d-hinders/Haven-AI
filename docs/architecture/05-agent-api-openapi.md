@@ -43,7 +43,7 @@ covers:
   - packages/backend/src/middleware/auth.ts
   - packages/backend/src/middleware/agentAuth.ts
   - packages/frontend/next.config.ts
-last-verified: "2026-10-05"
+last-verified: "2026-10-23"
 ---
 
 # Haven Agent API OpenAPI Contract
@@ -189,9 +189,11 @@ servers, connector, and selected dashboard setup flows:
   a route with no caller is surface area, not API). Every agent read returns
   `labels[]` so cards and filters need no second round trip. Labels are
   display/categorization only: no delegation, budget, or enforcement path
-  reads them. #3165 (merged) built the `/agents` facet toolbar with status and
-  budget facets only; no label facet is registered yet (`BUILT_IN_FACETS` in
-  the frontend's agent-list filters). The decided behaviour for
+  reads them. #3165 (merged) built the `/agents` facet toolbar. It registers
+  the built-in status and budget facets (`BUILT_IN_FACETS` in the frontend's
+  agent-list filters), plus an account facet when the user has more than one
+  account (#3719) and an organization facet when the user has organizations
+  (`AgentPanel.tsx`); no label facet is registered yet. The decided behaviour for
   it: multi-select is **OR** by default — an agent matches when it carries ANY
   selected label — because the list's job at a glance is "show me the prod and
   finance agents", not intersection; the facet type already offers an `all`
@@ -545,7 +547,7 @@ on-chain budget delegation = enforcement
 ```
 
 This restates the `AgentApiKey` security-scheme description, which is attached
-to every agent-authenticated operation — 43 at `c3df5b19`
+to every agent-authenticated operation — 46 at `2d0713dad`
 (`grep -c "security: \[{ AgentApiKey" packages/backend/src/openapi/spec.ts`;
 five of them also accept `DashboardJwt` or `SetupToken`), the rest being
 `DashboardJwt`, `OpsJwt`, `SetupToken` or public. (Both figures move with every
@@ -592,7 +594,11 @@ the delegation rail, and the fail-closed 410 on BOTH retired rails — session
 (`session_key`, #993) and, since #2020 reversed #1986's left-readable
 decision, the legacy AllowanceModule rail too. The SDK derives its `readiness` signal from
 this endpoint, so both rails report honest spendability. On the delegation
-rail, each `onchain` row also carries an additive, optional
+rail, each row also carries an additive `next_refill_at` beside its
+`onchain` block (#4355: when that budget next refills — the end of its current
+period, null when its end date comes first), which the SDK uses to tell a
+budget spent for the period from no budget at all without adding a readiness
+value; and each `onchain` block an additive, optional
 `remaining_is_from_chain` boolean (#1319): true when `remaining` came from a
 live on-chain enforcer read, false when that read failed and `remaining` is
 the #1145 fallback (the full configured budget) — reporting only. The spec used
@@ -679,8 +685,8 @@ justified by future work outlives the work unless something re-checks it. That
 allowlist is now empty. Deep model:
 [`docs/security/delegation-rail-security-model.md`](../security/delegation-rail-security-model.md).
 
-**How much of the API the spec actually describes (#1443, measured 2026-08-15; total re-counted 2026-10-05 at `c3df5b19`):**
-199 registered routes, **1 of them undocumented** — only safe-deploy.ts, deliberately, under the #1440 Safe-rail retirement: the 410 tombstone stays fail-closed, and #2847 deleted safe-exec.ts (the other deliberately-undocumented module) and safe-details.ts together with the last live Safe-rail routes, taking the count from 137/2 to 131/1. (#1698's six re-key routes were documented in the same PR that added them, which is the gate working as intended: the undocumented count is shrink-only, so a new route module has nowhere to hide. Note that only the undocumented count is enforced — the TOTAL here is prose and goes stale silently with every route added, so re-count it rather than trusting it.)
+**How much of the API the spec actually describes (#1443, measured 2026-08-15; total re-counted 2026-10-23 at `2d0713dad`, with `route-inventory.ts`'s `registeredRouteModules` + `extractRoutes`, the same survey `route-coverage.test.ts` runs):**
+211 registered routes across 49 modules, **1 of them undocumented** — only safe-deploy.ts, deliberately, under the #1440 Safe-rail retirement: the 410 tombstone stays fail-closed, and #2847 deleted safe-exec.ts (the other deliberately-undocumented module) and safe-details.ts together with the last live Safe-rail routes, taking the count from 137/2 to 131/1. (#1698's six re-key routes were documented in the same PR that added them, which is the gate working as intended: the undocumented count is shrink-only, so a new route module has nowhere to hide. Note that only the undocumented count is enforced — the TOTAL here is prose and goes stale silently with every route added, so re-count it rather than trusting it.)
 (#1446 is working the backfill one domain at a time: `contacts.ts` came off the
 list first, then the whole `agent-delegations.ts` lifecycle — grant, activate,
 per-hash and batch revocation, signer management — then the x402 demo-resource
@@ -692,3 +698,18 @@ absent: `route-coverage.ts` carries a per-module deferral list with a reason per
 entry and a shrink-only ceiling, and #1446 documents the modules one domain at a
 time. Read the numbers there as the current truth; this paragraph is a pointer,
 not a second copy.
+
+Re-verified 2026-10-23 (#4372 part B, at dev `2d0713dad`), a full re-read. Changed:
+the `/agents` facet sentence names the account (#3719) and organization
+facets beside the built-in status and budget ones (`AgentPanel.tsx`); the
+spend-authority read names #4355's `next_refill_at` (spec entry beside each
+row's `onchain` block); the `AgentApiKey` operation count is 46 (five also
+accept `DashboardJwt` or `SetupToken`); the route total is 211 across 49
+modules, one undocumented (`safe-deploy.ts`), re-counted with the coverage
+gate's own survey. Re-checked without change: the four security schemes,
+`apiBaseUrl`'s four callers and its gating (`domain/request-origin.ts`),
+`PUBLIC_CATALOG_FIELDS` and the eight-word search, the SDK's `POST /x402`
+alias, the resume union, the empty `KNOWN_UNDOCUMENTED_ROUTES` and the
+1/1 ceilings (`openapi/route-coverage.ts`), the three `allOf` components,
+the five human-decimal emitters (`rails/delegation-budget-view.ts`
+importers), and `RefusalActivityEntry` (#4323).

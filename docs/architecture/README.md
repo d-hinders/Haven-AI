@@ -13,7 +13,7 @@ covers:
   - packages/connect/src/runtime.ts
   - packages/backend/src/modules/fee/fee-module.ts
   - packages/backend/src/middleware/safe-inflow-retired.ts
-last-verified: "2026-10-07"
+last-verified: "2026-10-23"
 ---
 
 # Haven — Architecture
@@ -123,6 +123,15 @@ done
   history-only status of chain 100; the Safe-import sentence says import is
   closed (410). Re-checked without change: every index row's target and the
   rest of the scope notes.
+- Re-verified 2026-10-23 (#4372 part B, at dev `2d0713dad`), a full re-read. No
+  claim needed rewriting. Re-checked: every index row's target exists and
+  describes what its row says (docs 00–11; 04 still holds the #2145 trigger
+  and #2290 leg, 07 the signer tool list), the archive and research links,
+  the decision-log anchor, chain 100's history-only status in all three
+  registries (`SUPPORTED_CHAIN_IDS = [8453, 84532]` in
+  `packages/backend/src/domain/chains.ts`), API-key-only agent auth
+  (`middleware/agentAuth.ts`), the Safe-import 410s (`routes/user.ts`), and
+  that no backend path generates a delegate key.
 - These docs and their mapped code are the implementation authority.
   [CLAUDE.md](../../CLAUDE.md) is current repository guidance, but broad claims
   must still be checked against implementation. Safe import is closed with the

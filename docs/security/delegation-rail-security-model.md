@@ -3858,3 +3858,11 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > on the card's affordances (this run of card notes, the #3812 owner-wallet
 > notice); nothing else in this document was re-read for it, and
 > `last-verified` stays 2026-10-22.
+
+> **Re-verified unchanged (#4371, 2026-10-23 — a JSDoc in the SDK client).**
+> The `getPostPurchaseAllowanceSummary` JSDoc in `packages/sdk/src/client.ts`
+> keeps that it reuses the read path `getAllowances` uses, and drops the claim that
+> #1306's catalog-purchase preflight reads it too: since #3054 that preflight
+> calls `POST /machine-payments/budget-precheck`. JSDoc only: no signing,
+> settlement, budget read or authority path changes. Scope of this note: that
+> comment. Nothing else in this document was re-read for it.

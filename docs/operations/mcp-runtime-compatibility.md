@@ -6495,3 +6495,14 @@ to call next in structured fields, and those fields are typed end to end
 > client gets the stale-list reconnect hint after deploy, as for any
 > description change. Scope of this note: those fields and that wording. Nothing else in this
 > document was re-verified.
+
+> **Re-verified unchanged (#4371, 2026-10-23 — four stale comments and README
+> lines).** The diff touches covered files only in prose: `packages/signer/README.md`
+> (the bridge flow's `haven_sign` step now names `{ payment_id }` as preferred, and
+> `payload_hash` + `x402_expected` with `typed_data_b64` as the decomposed form),
+> two comments in `packages/mcp-server/src/tools/catalog-purchase.test.ts`
+> (the budget read is `budget-precheck`, as the tests stub), and the comment in
+> `.github/workflows/publish.yml` (five enforcement places, as listed). No
+> `haven_*` tool, input schema, strict-input list, `next_tool` value,
+> expected-context version, signer contract or publish step changes. Scope of
+> this note: those lines. Nothing else in this document was re-verified.

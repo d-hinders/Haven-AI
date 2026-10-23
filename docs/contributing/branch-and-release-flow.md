@@ -489,3 +489,10 @@ close on dev-merge). Full ruleset/auto-merge setup is in
   rule is enforced rather than remembered (#2276).
 - Promotion to prod is a separate human step; prod state lives in the `prod-*`
   Releases; what is pending is the `main...dev` compare.
+
+> **Re-verified unchanged (#4371, 2026-10-23 — `publish.yml`'s invariant
+> comment).** The comment over the dev-tag invariant in
+> `.github/workflows/publish.yml` now says five enforcement places, matching the
+> five it lists. Comment only: no job, trigger, branch rule or release step
+> changes. Scope of this note: that comment. Nothing else in this document was
+> re-verified.

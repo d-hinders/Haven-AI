@@ -244,8 +244,9 @@ quote only, a quote-time budget pre-check against the agent's remaining
 delegation budget (asked about the option pay will actually select, with
 `record_refusal: false` so a quote writes no refusal row). The SDK's
 `quoteX402()` and the local `@haven_ai/mcp` `haven_quote_x402` run no budget
-pre-check (#4345); there the budget is checked when the agent pays. An over-budget or mismatched quote stops the agent —
-`safe_to_continue: false`, no prefilled cap, no next tool — but the quote data
+pre-check (#4345); there the budget is checked when the agent pays. An
+over-budget or mismatched quote stops the agent — `safe_to_continue: false`,
+no prefilled cap, no next tool — but the quote data
 itself is still returned, an unavailable pre-check fails OPEN with a warning
 (the on-chain policy remains the actual gate), and nothing about the payment
 path's own checks changes.

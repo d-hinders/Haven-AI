@@ -285,7 +285,8 @@ signer fetch the exact signing bytes and the expected context (preferred). The
 decomposed form is `payload_hash` plus `x402_expected` together with
 `typed_data_b64` from the quote re-run with `include_signing_payload=true`; a
 `payload_hash` with `x402_expected` and no typed data is refused, because the
-signer re-derives the funding payload's EIP-712 digest before signing. The signer records that context and returns a process-local `x402_binding`;
+signer re-derives the funding payload's EIP-712 digest before signing. The
+signer records that context and returns a process-local `x402_binding`;
 pass that binding into `haven_x402_sign_header` after `haven_submit` confirms.
 The signer refuses to authorize the merchant header when the fresh merchant
 challenge has a different amount, merchant recipient, resource URL, token asset

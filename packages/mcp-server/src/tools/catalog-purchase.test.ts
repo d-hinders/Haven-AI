@@ -1154,10 +1154,10 @@ describe('haven_prepare_catalog_purchase', () => {
 
     expect(payload.success).toBe(false)
     // No funding intent — the agent lookup is a hard stop before the intent
-    // is ever created. (#1348 changed one incidental detail: Haven's reads
-    // now overlap the merchant probe, so a read may already have fired — a
-    // harmless read. The load-bearing invariant is intent-creation, asserted
-    // here, plus the refusal itself.)
+    // is ever created. (#1348 moved the agent read to overlap the merchant
+    // probe; since #3054 the budget pre-check runs after the agent read, so
+    // it cannot fire here. The load-bearing invariant is intent-creation,
+    // asserted here, plus the refusal itself.)
     expect(recordedCalls().find((c) => c.url.endsWith('/x402'))).toBeUndefined()
   })
 

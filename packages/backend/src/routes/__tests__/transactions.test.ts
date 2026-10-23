@@ -1746,7 +1746,7 @@ describe('GET /transactions pagination and filtering (#992 characterization)', (
 })
 
 describe('GET /transactions CSV export field fidelity (#992 characterization)', () => {
-  // The CSV export (packages/frontend/src/lib/transaction-csv.ts) is a pure
+  // The CSV export (packages/frontend/src/lib/csv-export.ts) is a pure
   // client-side transform over whatever this endpoint returns — there is no
   // separate backend export route. This test locks the field set and values
   // transactionsToCsv() depends on, sourced through the full aggregation +
@@ -1825,7 +1825,7 @@ describe('GET /transactions CSV export field fidelity (#992 characterization)', 
     expect(response.statusCode).toBe(200)
     const [tx] = response.json().transactions
 
-    // Every column transactionsToCsv() reads (see transaction-csv.ts COLUMNS).
+    // Every column transactionsToCsv() reads (see csv-export.ts COLUMNS).
     expect(tx).toMatchObject({
       hash: TX_HASH,
       direction: 'out',

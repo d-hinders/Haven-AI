@@ -24,15 +24,7 @@ import type {
   AggregatedTransaction,
   TransactionFilterState,
 } from '@/types/transactions'
-import {
-  buildCsvFilename,
-  downloadCsv,
-  exportFailureNotice,
-  hasCsvRecords,
-  type ExportNotice,
-} from '@/lib/transaction-csv'
 import { UNPRICED_TOTALS_NOTE } from '@/lib/money-flow-tally'
-import { api } from '@/lib/api'
 import { Amount, type AmountCurrency } from '@/components/haven/Amount'
 import {
   TransactionActivityDayHeader,
@@ -44,6 +36,7 @@ import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { ListExportAction, ListExportNotice, useListExport, type ListExportRequest } from '@/components/ui/ListExportAction'
 import { ListNoMatch, ListShowMore, ListToolbar } from '@/components/ui/ListToolbar'
 import type { ListFacet } from '@/components/ui/FacetMenu'
 import type { ListCount, ListNoun } from '@/components/ui/list-controls-copy'
@@ -127,8 +120,6 @@ export default function TransactionsClient() {
   const { resolveAddress } = useContacts()
   const { currency } = usePreferences()
   const [selectedTx, setSelectedTx] = useState<AggregatedTransaction | null>(null)
-  const [exporting, setExporting] = useState(false)
-  const [exportNotice, setExportNotice] = useState<ExportNotice | null>(null)
   // #4111: every filter dimension lives in the URL through the list-controls
   // codec — a shared link (or a refresh) lands on the same filtered feed the
   // sender saw (#4095), and back/forward re-seeds it.
@@ -294,8 +285,8 @@ export default function TransactionsClient() {
   const handleListChange = (next: ListState) => {
     setListState(next)
     // Both notices name the filters as the thing to change; leaving one up
-    // once the user has makes it assert something no longer true.
-    setExportNotice(null)
+    // once the user has makes it assert something no longer true. The
+    // export's clears itself: the request below moves with the filters.
   }
 
   // Clear filters returns to the page default, the same state the toolbar's
@@ -314,42 +305,36 @@ export default function TransactionsClient() {
   // separate from the URL codec since #4111 — the fold rides it too, #4266),
   // plus the `tz` the server cuts a custom range's calendar days in — so the
   // file and the on-screen rows agree.
-  const handleExportCsv = async () => {
+  const exportRequest = useMemo<ListExportRequest>(() => {
     const params = transactionFilterParams(filters)
     if (filters.from && filters.to) params.set('tz', browserTimeZone())
+    return { path: '/transactions/export.csv', params }
+  }, [filters])
 
-    setExporting(true)
-    setExportNotice(null)
-    try {
-      const csv = await api.getText(`/transactions/export.csv?${params.toString()}`)
-      if (!hasCsvRecords(csv)) {
-        // An empty body has two causes and they need different copy: no row
-        // matched, or the explorers that feed the aggregation failed. Claiming
-        // "nothing matched" during an outage is a confident wrong diagnosis.
-        setExportNotice(
-          partialFailure
-            ? {
-                tone: 'info',
-                headline: 'Nothing to export yet.',
-                detail:
-                  'Some accounts failed to load, so there was nothing to write. ' +
-                  'Reload the page and try again.',
-              }
-            : {
-                tone: 'info',
-                headline: 'Nothing to export.',
-                detail: 'No transactions match these filters. Widen them and try again.',
-              },
-        )
-        return
-      }
-      downloadCsv(csv, buildCsvFilename(new Date()))
-    } catch (err) {
-      setExportNotice(exportFailureNotice(err))
-    } finally {
-      setExporting(false)
-    }
-  }
+  // The export is gated on the server's total for the FETCHED filter scope.
+  // Since #4095 every filter dimension — direction, network, search and
+  // Period included — rides the list request, so `total` counts exactly the
+  // set the export will write: an enabled button cannot produce a no-row
+  // file unless an explorer leg failed, and that outage has its own notice.
+  const listExport = useListExport({
+    request: exportRequest,
+    exportable: !loadingInitial && total > 0,
+    filenamePrefix: 'haven-transactions',
+    emptyNotice: () =>
+      partialFailure
+        ? {
+            tone: 'info',
+            headline: 'Nothing to export yet.',
+            detail:
+              'Some accounts failed to load, so there was nothing to write. ' +
+              'Reload the page and try again.',
+          }
+        : {
+            tone: 'info',
+            headline: 'Nothing to export.',
+            detail: 'No transactions match these filters. Widen them and try again.',
+          },
+  })
 
   if (!hasAccounts) {
     return (
@@ -367,13 +352,6 @@ export default function TransactionsClient() {
       </div>
     )
   }
-
-  // Gated on the server's total for the FETCHED filter scope. Since #4095
-  // every filter dimension — direction, network, search and Period
-  // included — rides the list request, so `total` counts exactly the set the
-  // export will write: an enabled button cannot produce a no-row file unless
-  // an explorer leg failed, and that outage has its own notice below.
-  const canExport = !loadingInitial && total > 0
 
   // #4111: the standard count, both numbers from the server. Unfiltered it
   // is the feed's total; filtered, "{shown} of {total}" against the
@@ -396,27 +374,7 @@ export default function TransactionsClient() {
     <div className="max-w-6xl">
       <PageHeader title="Transaction history" subtitle={subtitle} />
 
-      {exportNotice && (
-        <div
-          role={exportNotice.tone === 'error' ? 'alert' : 'status'}
-          className={
-            exportNotice.tone === 'error'
-              ? 'mb-4 rounded-lg border border-danger/20 bg-[var(--v2-danger-soft)] px-4 py-3 text-sm text-[var(--v2-danger)]'
-              : 'mb-4 rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] px-4 py-3 text-sm text-[var(--v2-ink-2)]'
-          }
-        >
-          <div
-            className={
-              exportNotice.tone === 'error' ? 'font-medium' : 'font-medium text-[var(--v2-ink)]'
-            }
-          >
-            {exportNotice.headline}
-          </div>
-          {exportNotice.detail && (
-            <div className="mt-1 text-xs">{exportNotice.detail}</div>
-          )}
-        </div>
-      )}
+      <ListExportNotice notice={listExport.notice} className="mb-4" />
 
       {partialFailure && (
         <div className="mb-4 rounded-lg border border-warning/20 bg-[var(--v2-warning-soft)] px-4 py-3 text-sm text-[var(--v2-warning)]">
@@ -463,17 +421,7 @@ export default function TransactionsClient() {
           </span>
         ) : undefined}
         searchEpoch={searchEpoch}
-        actions={
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => void handleExportCsv()}
-            disabled={!canExport || exporting}
-            aria-busy={exporting}
-          >
-            {exporting ? 'Preparing…' : 'Export CSV'}
-          </Button>
-        }
+        actions={<ListExportAction state={listExport} />}
       />
 
       {/*

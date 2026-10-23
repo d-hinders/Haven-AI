@@ -57,8 +57,8 @@ vi.mock('@/lib/api', async () => {
   }
 })
 
-vi.mock('@/lib/transaction-csv', async () => {
-  const actual = await vi.importActual<typeof import('@/lib/transaction-csv')>('@/lib/transaction-csv')
+vi.mock('@/lib/csv-export', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/csv-export')>('@/lib/csv-export')
   return { ...actual, downloadCsv: (...a: unknown[]) => mockDownloadCsv(...a) }
 })
 
@@ -713,6 +713,11 @@ describe('AccountActivityTab — CSV export (#4098)', () => {
     expect(mockGetText).toHaveBeenCalledWith(expect.stringContaining('accountId=safe-1'))
     // The API's own spelling: the URL writes `q`, the backend reads `search`.
     expect(mockGetText).toHaveBeenCalledWith(expect.stringContaining('search=coffee'))
+    // The page owns the prefix; the UTC stamp is the shared helper's.
+    expect(mockDownloadCsv).toHaveBeenCalledWith(
+      '﻿hash\r\n"0xabc"',
+      expect.stringMatching(/^haven-transactions-\d{8}\.csv$/),
+    )
   })
 
   it('stays disabled while the server says there is nothing to export', () => {

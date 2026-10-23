@@ -19,6 +19,7 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { FilterPill } from '@/components/ui/FilterPill'
 import { FacetMenu, type ListFacet } from '@/components/ui/FacetMenu'
 import { ListNoMatch, ListShowMore, ListToolbar } from '@/components/ui/ListToolbar'
+import { ListExportAction, ListExportNotice } from '@/components/ui/ListExportAction'
 import { PeriodPicker } from '@/components/ui/PeriodPicker'
 import { clearedListState, type ListState, type PeriodValue } from '@/components/ui/list-url-codec'
 import { Monogram } from '@/components/ui/Monogram'
@@ -813,13 +814,13 @@ function ListControlsExample({
   )
 }
 
-/** The phone actions slot's drawing (#4150): a bare ghost `sm` Export CSV, no sizing classes. */
+/** The phone actions slot's drawing (#4150): the shared export action — the real `ListExportAction`, demo state, not wired to a request here. */
 function ExportCsvDrawing() {
   const { toast } = useToast()
   return (
-    <Button variant="ghost" size="sm" onClick={() => toast.info('Exports the filtered list')}>
-      Export CSV
-    </Button>
+    <ListExportAction
+      state={{ exporting: false, exportable: true, onExport: () => toast.info('Exports the filtered list') }}
+    />
   )
 }
 
@@ -862,9 +863,9 @@ function ServerListControlsExample() {
         ]}
         period={{ allowCustom: true }}
         actions={
-          <Button variant="ghost" size="sm" onClick={() => toast.info('Exports the filtered list')}>
-            Export CSV
-          </Button>
+          <ListExportAction
+            state={{ exporting: false, exportable: true, onExport: () => toast.info('Exports the filtered list') }}
+          />
         }
         count={{ shown: 12, total: 60 }}
         // The page's totals join the list summary line, left of the count
@@ -883,6 +884,43 @@ function ServerListControlsExample() {
       <p className="text-xs text-[var(--v2-ink-3)]" data-testid="ds-list-controls-requests">
         Requests sent: {requests}
       </p>
+    </div>
+  )
+}
+
+/**
+ * The export action's states (#4328): the real components with demo state —
+ * nothing here is wired to a request. Idle, preparing (`aria-busy`),
+ * disabled, and the two notice tones the flow can report.
+ */
+function ExportActionStatesExample() {
+  const { toast } = useToast()
+  return (
+    <div className="flex flex-col items-start gap-2" data-testid="ds-list-export-states">
+      <div className="flex items-center gap-4">
+        <span className="w-24 shrink-0 text-xs text-[var(--v2-ink-3)]">Idle</span>
+        <ListExportAction state={{ exporting: false, exportable: true, onExport: () => toast.info('Exports the filtered list') }} />
+      </div>
+      <div className="flex items-center gap-4">
+        <span className="w-24 shrink-0 text-xs text-[var(--v2-ink-3)]">Preparing</span>
+        <ListExportAction state={{ exporting: true, exportable: true, onExport: () => undefined }} />
+      </div>
+      <div className="flex items-center gap-4">
+        <span className="w-24 shrink-0 text-xs text-[var(--v2-ink-3)]">Disabled</span>
+        <ListExportAction state={{ exporting: false, exportable: false, onExport: () => undefined }} />
+      </div>
+      <ListExportNotice
+        notice={{ tone: 'info', headline: 'Nothing to export.', detail: 'No transactions match these filters. Widen them and try again.' }}
+        className="w-full"
+      />
+      <ListExportNotice
+        notice={{ tone: 'info', headline: 'Nothing to export yet.', detail: 'Some account history failed to load, so there was nothing to write. Reload the page and try again.' }}
+        className="w-full"
+      />
+      <ListExportNotice
+        notice={{ tone: 'error', headline: 'Export too large.', detail: 'This export would contain 10,001 rows; the limit is 10,000. Narrow the filters — by account, agent, token, network or direction — and export again.' }}
+        className="w-full"
+      />
     </div>
   )
 }
@@ -3173,7 +3211,7 @@ export default function DesignSystemPage() {
           <ListControlsState label="Loading — the count is a placeholder until the list answers.">
             <ListControlsExample testId="ds-list-controls-loading" loading />
           </ListControlsState>
-          <ListControlsState label="Phone — below 640px (forced here with layout=&quot;phone&quot;) the facets collapse into “Filters (n)”. The bottom sheet applies each tap live; its footer only closes and names the applied count. The actions slot keeps its own row after search and Filters, hugging its content (#4150) — Export CSV here is a drawing, not a wired export.">
+          <ListControlsState label="Phone — below 640px (forced here with layout=&quot;phone&quot;) the facets collapse into “Filters (n)”. The bottom sheet applies each tap live; its footer only closes and names the applied count. The actions slot keeps its own row after search and Filters, hugging its content (#4150) — the shared export action in demo state.">
             <div className="max-w-[375px]">
               <ListControlsExample
                 testId="ds-list-controls-phone"
@@ -3185,6 +3223,9 @@ export default function DesignSystemPage() {
           </ListControlsState>
           <ListControlsState label="Server-filtered, with totals — the search commits once per 300ms pause (Enter at once, Escape clears), so one request per pause. Export CSV sits in the actions slot; Period offers a custom range. The page's totals (summary) sit on the left of the summary line, the count on the right.">
             <ServerListControlsExample />
+          </ListControlsState>
+          <ListControlsState label="The export action (#4328) — the actions slot's Export CSV is one shared piece (ListExportAction + useListExport): the page supplies the request, the enabled gate, the empty copy and the filename prefix; the action owns busy, fetch, download and notices. Drawn here in its states — idle, preparing (aria-busy), disabled, the two empty notices and a refusal. Demo state; nothing is wired to a request. Export on any list page goes through it.">
+            <ExportActionStatesExample />
           </ListControlsState>
           <ListControlsState label="Paging — a paged list's card ends with its last row; “Show N more” (N = what the next page adds, at most the page size) is a ghost button centred below the card, “Loading…” while it fetches, and nothing once every page is loaded.">
             <PagedListExample />

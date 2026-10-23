@@ -85,6 +85,19 @@ covers:
 last-verified: "2026-10-23"
 ---
 
+> **Re-verified unchanged (#4328, 2026-10-23, a comment-only path reference in
+> `packages/backend/src/modules/transactions/csv-export.ts`).** The only
+> covered file this PR touches is
+> `packages/backend/src/modules/transactions/csv-export.ts`: its doc comment
+> named the frontend helper module by its old path (`lib/transaction-csv.ts`)
+> and now names the moved one (`lib/csv-export.ts`, part of the #4328 shared
+> export action slice). The CSV column contract, the quoting rules and every
+> byte of the generated file are unchanged — the CLI and MCP consumers read
+> the same output. No tool, argument, input schema, expected-context version,
+> consent surface or runtime channel moves. Scope: the comment-only edit
+> only; `last-verified` is re-stamped to 2026-10-23 for this note. Nothing
+> else in this document was re-verified.
+
 > **Re-verified unchanged (#4319, 2026-10-23, a comment-only doc comment in
 > `packages/backend/src/modules/payments/agent-payment-status.ts`).** The only
 > covered file this PR touches is `agent-payment-status.ts`: the #3475 doc

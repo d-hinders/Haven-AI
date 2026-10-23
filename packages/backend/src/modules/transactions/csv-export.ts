@@ -1,7 +1,7 @@
 /**
  * CSV projection of the enriched transaction feed (#2871).
  *
- * Server-side successor to the frontend's `lib/transaction-csv.ts`, which
+ * Server-side successor to the frontend's `lib/csv-export.ts`, which
  * could only serialize the page the browser had loaded. The quoting rules live
  * in `domain/csv.ts`; this file owns the column contract and the mapping from
  * `EnrichedTransaction`.

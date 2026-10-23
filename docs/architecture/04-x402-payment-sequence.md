@@ -65,7 +65,7 @@ covers:
 # merge conflicts in one day between PRs that were not otherwise in conflict.
 satisfied-by:
   - docs/regulatory/casp-changelog/**
-last-verified: "2026-10-15"
+last-verified: "2026-10-23"
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -479,21 +479,33 @@ sequenceDiagram
   MCP->>API: Construct funding intent
   alt signable funding intent
     API-->>MCP: { payment_id, payload_hash, x402.expected }
-    MCP-->>Agent: Unsigned funding context
-    Agent->>Signer: haven_sign { payload_hash, x402_expected }
-    Signer-->>Agent: { signature, x402_binding }
+    MCP-->>Agent: Compact signing context, next_tool haven_sign_x402 { payment_id }
+    Agent->>Signer: haven_sign_x402 { payment_id }
+    Signer->>API: GET /x402/:id/sign-context
+    Signer-->>Agent: { signature, payment_header }
     Agent->>MCP: haven_submit { payment_id, signature }
     MCP->>API: Relay funding signature
     API-->>MCP: funding status
-    Agent->>Signer: haven_x402_sign_header { payment_required, x402_binding }
-    Signer-->>Agent: { payment_header }
-    Agent->>Resource: Retry with PAYMENT-SIGNATURE + X-PAYMENT
+    Agent->>Resource: Retry retry_url with PAYMENT-SIGNATURE + X-PAYMENT
     Resource-->>Agent: 200 OK / merchant response
+    Agent->>MCP: haven_report_x402_outcome { payment_id, outcome, merchant_status, payment_header }
   else outside the on-chain budget
     API-->>MCP: refusal — no intent row, no payload_hash, nothing queued
     MCP-->>Agent: Stop and tell the user to raise the budget — do NOT poll
   end
 ```
+
+The drawing shows the default the pay response names (`next_tool:
+haven_sign_x402`, `packages/mcp-server/src/tools/plain-http-x402.ts`).
+`haven_sign_x402` is a one-shot: it signs the funding payload and builds the
+merchant header in one call (#2291). The decomposed form remains for agents
+that call it: `haven_sign { payment_id }` returns `{ signature, x402_binding }`,
+and after `haven_submit` the agent passes that binding to
+`haven_x402_sign_header` for the header. A `payload_hash` with
+`x402_expected` and no typed data is refused: the delegation-rail funding
+payload is EIP-712 typed data, and the signer re-derives its digest before
+signing (`packages/signer/src/core.ts`). A `payload_hash` with neither is
+refused as `BARE_HASH_REFUSED` (`packages/signer/src/bare-hash.ts`).
 
 > **What this branch used to say, and why it changed** (#2121). It read `else
 > pending approval` and ended `Stop, notify user, poll status` — an
@@ -579,7 +591,7 @@ trusted signer.
 > two plausible sources, the signed one wins by definition. Before building the merchant header, it rejects expired context
 and verifies that the live challenge still matches the recorded funded context.
 
-### Expected context v1 / v2 — which payload may be signed (#1138)
+### Expected context v1 / v2 / v3 — which payload may be signed (#1138)
 
 The hosted flow above works on the **delegation rail** too, with one difference
 that the signer, not the caller, enforces. On that rail the account validates
@@ -595,6 +607,7 @@ contents rather than announced:
 |---|---|---|
 | v1 | no `typedDataHash` | **nothing — retired (#3272).** Refused as an unsupported version; the backend can no longer emit it (`signX402ExpectedContext` requires `typedDataHash`) |
 | v2 | `typedDataHash` | `sign_data.typed_data` (EIP-712) — delegation rail. Preferred transport (#1263): the signer fetches the exact payload itself via `GET /x402/:id/sign-context` when handed just `payment_id` — and the hosted x402 quote tools are accordingly **compact by default** (#1272): no `typed_data`/`typed_data_b64` in the response unless `include_signing_payload=true`. Fallback (#1255): re-run the quote with the same `idempotency_key` plus that flag (the replay returns the ORIGINAL sign_data, #1207), then relay `typed_data_b64` as one opaque base64 string, unchanged. All transports land in this same digest check |
+| v3 (#1690) | `typedDataHash` + `payerDelegate` / `payerAgentId` | The same payload as v2, signed the same way, and the signer also refuses unless `payerDelegate` equals its own delegate address (`assertPayerMatchesDelegate`, `packages/signer/src/core.ts`). The backend emits v3 only where `X402_EMIT_PAYER_CONTEXT` is on (`x402PayerContextFields`, `packages/backend/src/infra/chain/x402-binding-signer.ts`); elsewhere every context is v2 |
 
 Since #3272 there is no raw-hash signing path, so only one mismatch remains to
 refuse: a context that carries no `typedDataHash` (v1) is refused as an
@@ -602,11 +615,10 @@ unsupported version before any content check. For v2 and v3 the signer
 re-derives the digest from the typed data in hand and requires it to equal the
 committed one, so the Haven-signed declaration covers
 the exact bytes signed. `buildX402ExpectedMessage` puts the version in both the
-header line and the signed payload, so neither context can be replayed as the
-other.
+header line and the signed payload, so no context can be replayed as another.
 
-A version outside the table is a **third** refusal, and the one an operator is
-most likely to meet (#1143). The set a given signer understands is
+A version outside the table is refused by the same version check that refuses
+v1, and it is the refusal an operator is most likely to meet (#1143). The set a given signer understands is
 `SUPPORTED_X402_EXPECTED_VERSIONS` in `packages/signer/src/core.ts`; anything else
 fails closed before any content check, with an error naming the received version,
 the signer's ceiling, and the fix. This is not hypothetical housekeeping: the
@@ -663,6 +675,15 @@ The recommended three-call fast path for an x402-protected MCP tool is:
    performs a fresh merchant MCP handshake, delivers the signed header, and
    returns `agent_summary.purchase_summary` as the default report; raw `result`
    remains optional merchant evidence.
+
+The steps above are the EIP-3009 shape. When the shared scheme selector picks
+erc7710 (#1456), step 1 returns a settlement child (`settlement_scheme:
+'erc7710'`, `settlement.funding_leg: false`) instead of a funding payload, and
+step 2 is `haven_sign { payment_id }`: the signer fetches the child itself
+(`packages/mcp-server/src/tools/catalog-purchase.ts`, the `haven_pay_mcp_tool`
+erc7710 branch). Step 3 then carries the signature and no `payment_header`.
+Haven assembles the header at settle, and there is no funding transaction to
+wait for.
 
 **Hosted header preflight (#1398).** Before step 3 relays the funding
 signature, hosted MCP validates the bounded, signed `X-PAYMENT` header against
@@ -797,10 +818,12 @@ another origin carries only the #4244 header allow-list. Without a
 merchant-egress policy, a redirect that would re-send the paid body to another
 origin is refused mid-flight (`redirect_cross_origin_body`); under a policy, a
 paid POST answered with a redirect is refused as `redirect_on_non_get`. On the
-local path, `MerchantCompletion.retryRequest` records any merchant-egress
-refusal (`MerchantEgressRefusedError` with `beforeRequest: false`) as
-`merchant_retry_rejected_after_payment`, and re-throws it
-with the `paymentId`. The local MCP answers it as funded and undelivered, with
+local path, `MerchantCompletion.retryRequest` records a merchant-egress
+refusal raised after the paid request was sent (`MerchantEgressRefusedError`
+with `beforeRequest: false`) as `merchant_retry_rejected_after_payment`, and
+re-throws it with the `paymentId`. Any other error, a `beforeRequest: true`
+refusal included, is re-thrown unchanged without that record
+(`packages/sdk/src/merchant-completion.ts`). The local MCP answers it as funded and undelivered, with
 `haven_get_payment_status` next and an instruction not to pay again. The
 policy path's own refusals (for example `redirect_on_non_get`) reach that
 record only when an embedder sets `merchantEgress` on the local completion;
@@ -921,22 +944,24 @@ Sequence:
    carries and what the response's `arguments` reports.
    Run the LIVE quote against the entry's own `resource_url` / `tool_name` /
    resolved `arguments` — the shared probe, including the #1271 same-origin
-   discovery fallback. **Round-trip budget (#1348):** the two Haven reads
-   steps 5–6 need (agent, allowances) are independent of this probe, so they
-   are DISPATCHED here and overlap the merchant leg — the slowest part of the
-   preflight — instead of following it. Failure semantics are unchanged: the
-   quote is awaited first (its error wins deterministically when several legs
-   fail), the agent read remains a hard pre-intent refusal, and the allowance
-   read still degrades to a warning. Additionally, `getAgent` coalesces
+   discovery fallback. **Round-trip budget (#1348):** the agent read steps
+   5–6 need is independent of this probe, so it is DISPATCHED here and
+   overlaps the merchant leg — the slowest part of the preflight — instead of
+   following it. The budget read does not overlap: since #3054 it is one
+   `POST /machine-payments/budget-precheck`, which needs the SELECTED
+   option's asset and amount (#2051), so it runs after the quote. The quote
+   is awaited first (its error wins deterministically when several legs
+   fail), the agent read remains a hard pre-intent refusal, and a failed
+   budget read still degrades to a warning. Additionally, `getAgent` coalesces
    CONCURRENT calls into one HTTP GET (in-flight dedupe only, never a cache —
    sequential calls stay fresh reads), and `createX402Intent` accepts the
    already-fetched `delegateAddress` instead of re-fetching the agent. Net: a
    successful preflight makes exactly ONE call per Haven surface — catalog,
-   agent, allowances, `POST /x402` — inside the handler (through the hosted
-   server, the dispatch identity gate in `tools/identity-gate.ts` makes one
-   agent read before the handler runs), pinned by
-   [`packages/mcp-server/src/tools.test.ts`](../../packages/mcp-server/src/tools.test.ts)
-   ("ROUND-TRIP BUDGET", #1348), which counts every stubbed fetch per surface;
+   agent, budget pre-check, `POST /x402` — inside the handler (through the
+   hosted server, the dispatch identity gate in `tools/identity-gate.ts` makes
+   one agent read before the handler runs), pinned by
+   [`packages/mcp-server/src/tools/catalog-purchase.test.ts`](../../packages/mcp-server/src/tools/catalog-purchase.test.ts)
+   ("ROUND-TRIP BUDGET", #1348), which counts the stubbed fetches per surface;
    per-step wall-clock telemetry rides the
    promotion-gating QA scenario's pass detail.
 4. A spending cap is **required** on this tool, as on `haven_pay_mcp_tool` —
@@ -959,9 +984,9 @@ Sequence:
    (`resolveTokenFromAddress(option.asset, option.network)` inside
    `priceSelectedOption` — the same address→token binding that produces
    `token`) — never the unselected standard entry's, never a caller-supplied
-   token name, never an assumed 6. Three refusals, all before any
-   merchant probe, funding intent, or signature, and none of which can widen the
-   on-chain budget:
+   token name, never an assumed 6. The refusals below all fire before any
+   funding intent or signature, and none of them can widen the on-chain
+   budget; the last column says when each fires:
 
    | Condition | Code | When it fires |
    |---|---|---|
@@ -1020,7 +1045,7 @@ Sequence:
    and the authorize step that follows falls through to the #3417 done
    state for the same settled replay, rather than a fresh purchase. **#3527:**
    the same bypass extends to a settled EIP-3009 replay (confirmed funding
-   leg); step 9's `createX402Intent` call then reaches its own confirmed
+   leg); step 7's `createX402Intent` call then reaches its own confirmed
    state, answered either as the `eip3009ConfirmedReplayResponse` done state
    (funding_tx_hash set, settlement_tx_hash always null; `settled: true` only when the merchant settlement is verified) or, with no
    merchant-leg evidence yet, the funded-awaiting-merchant / check-status-later
@@ -1059,9 +1084,9 @@ Sequence:
    > constructs a queued payment on any rail. This section carries no
    > retirement banner, so it was the last live doc text telling a reader a
    > Haven payment can queue.
-7. `createX402Intent` runs identically to `haven_pay_mcp_tool`, persisting
-   the same `mcpCallContext` (#1307) for settle-leg rehydration by
-   `payment_id`.
+7. `createX402Intent` (EIP-3009) or `prepareX402Erc7710` (erc7710) runs
+   identically to `haven_pay_mcp_tool`, persisting the same `mcpCallContext`
+   (#1307) for settle-leg rehydration by `payment_id`.
 8. The catalog's `price_atomic`/`price_display` are surfaced as
    `catalog_price_atomic`/`catalog_price_display` with
    `catalog_price_is_indicative: true` — NEVER authoritative. The amount actually
@@ -1072,7 +1097,9 @@ Sequence:
 
 No new backend endpoint was needed: `GET /catalog/:id`, `GET
 /machine-payments/agent`, `GET /machine-payments/allowances`, and `POST
-/x402` are all existing, composed reads/writes. `GET /machine-payments/agent`
+/x402` are all existing, composed reads/writes. Since #3054 the budget read is
+`POST /machine-payments/budget-precheck` in place of the allowances GET
+(step 5). `GET /machine-payments/agent`
 gained one additive field (`execution_rail: 'legacy' | 'delegation'`) so the
 hosted tool can label the allowance block correctly without a second
 derivation.
@@ -1292,8 +1319,7 @@ predicate permanently rather than until the window elapses.
 > verified on-chain BEFORE recording (a mismatching or zero hash refuses
 > before anything is written; the decoded header contributes `transaction`
 > only, never `payer`). With evidence supplied the response names no next
-> tool, so the plain-HTTP eip3009 purchase is six hosted/signer calls, not
-> seven; the standalone `haven_report_settlement_evidence` stays for agents
+> tool, so the plain-HTTP eip3009 purchase needs one call fewer; the standalone `haven_report_settlement_evidence` stays for agents
 > that call it and for the paid-MCP/erc7710 handoffs that already name it.
 >
 > **The proof header rides the report (#4061, passage only).** Since #3925 a
@@ -1375,11 +1401,13 @@ and called by both `intentStateFor` and `getX402SignContext`
 so a published remedy and the permission to act on it cannot drift apart. That
 two-site roster is pinned by
 [`packages/backend/src/__tests__/resume-gate-call-census-pin.test.ts`](../../packages/backend/src/__tests__/resume-gate-call-census-pin.test.ts)
-(#2680). A real-Postgres test asserts that biconditional across nine evidence states.
-Everything else still refuses: erc7710, a reported merchant leg, a
-client-reported rejection (whose remedy stays `sweep_stranded_funds`), an
-intent inside the grace window, absent scheme metadata, and a pending intent
-past its quote window.
+(#2680). A real-Postgres test (the suite "#2290 — the resume predicate
+agrees with the status remedy") asserts that biconditional over every case
+in its table. Everything else still refuses: erc7710, a reported
+merchant leg, a client-reported rejection (whose remedy stays
+`sweep_stranded_funds`), a verified merchant settlement already recorded
+(#3475), an intent inside the grace window, absent scheme metadata, and a
+pending intent past its quote window.
 
 Two things about the rebuild are worth stating, because neither is obvious
 from the gate alone:
@@ -2067,9 +2095,23 @@ because @x402/core's v2 matcher demands the advertised `extra` as a subset of
 the echo. The demo merchant advertises its settlement account this way, so the
 QA leg exercises the pinned path end-to-end.
 
-When a merchant advertises **no** facilitators there is nothing to pin and the
-child remains a bearer instrument — whoever holds it can redeem it — within
-hard bounds that are the actual guarantee:
+Whenever authorize receives no `facilitatorAddresses`, the child carries no
+redeemer caveat (`buildSettlementDelegation` adds one only for a non-empty list,
+`modules/x402/x402-delegation.ts`) and remains a bearer instrument — whoever
+holds it can redeem it. That happens in three cases:
+
+- the merchant advertised none;
+- every advertised entry was malformed: `x402FacilitatorAddresses`
+  (`packages/sdk/src/x402.ts`) drops each entry that is not an address and
+  forwards nothing when none is left;
+- a direct API caller omitted the field. The authorize-time match against the
+  stored challenge (`selectStoredAccepted`, called from
+  `modules/x402/delegation-authorize.ts`) treats an empty pin list as
+  advertised (`pinsAdvertised`), so it does not refuse the omission even when
+  the merchant did advertise facilitators.
+
+In every case the child stays within hard bounds that are the actual
+guarantee:
 
 - the **exact** payment amount (`erc20TransferAmount` scope),
 - **pinned to the merchant** `payTo`,
@@ -2311,7 +2353,9 @@ runs the same match at authorize time and answers **400** when the caller's
 it sent alongside them — those are independent fields of one request, and
 refusing there costs a retry instead of stranding an intent the agent has
 already signed. The SDK derives all three from the same option, so only a
-direct-API caller can trip it.
+direct-API caller can trip it. Omitting `facilitatorAddresses` does not trip
+it: an empty pin list matches, and the child is then unpinned (see "What the
+settlement child delegation actually constrains").
 
 **Since #2361 the envelope also echoes the merchant challenge's `resource`
 and `extensions` objects VERBATIM** — on this erc7710 path sourced from the
@@ -2731,6 +2775,12 @@ effective (narrower) limits, and the dashboard shows the parent→child tree.
 - Use [`docs/regulatory/casp-risk-guardrails.md`](../regulatory/casp-risk-guardrails.md)
   before changing x402/MPP flows or merchant-facing demos.
 
+The dated notes below record what each diff changed when it landed. Their
+census figures (call sites, refusal steps) are as of that diff. The current
+hosted figures are `EMISSION_SITE_COUNT` and `REFUSAL_STEP_CALLS` in
+[`packages/mcp-server/src/test-support/next-step-fixtures.ts`](../../packages/mcp-server/src/test-support/next-step-fixtures.ts),
+which the characterization tests enforce.
+
 > **Re-verification (#3097, the paid retry's target, 2026-09-18):** this diff
 > touches the hosted plain-HTTP handlers, the hosted tool contracts and the
 > SDK's quote/transport modules in this document's coverage list. What changed:
@@ -2909,3 +2959,14 @@ effective (narrower) limits, and the dashboard shows the parent→child tree.
 > unchanged. Scope of this
 > note: that harness assertion. Nothing else in this document was
 > re-verified; `last-verified` is not re-stamped.
+
+> **Re-verified #4303 part E (2026-10-23, full re-read).** Every section of
+> this document was re-read against the code at `d061a2b90`. Corrected: the
+> hosted EIP-3009 diagram now draws the default `haven_sign_x402` one-shot and
+> the outcome report; the expected-context table gains its v3 row; the
+> paid-MCP fast path states its erc7710 shape; the catalog preflight's step
+> reference, refusal summary and round-trip budget match the code after
+> #3054; the unpinned settlement child lists all three ways authorize
+> receives no `facilitatorAddresses`; and several counts were replaced with
+> pointers to the instruments that hold them. `last-verified` is bumped for
+> this re-read.

@@ -243,6 +243,8 @@ describe('TransactionDetailPanel — structure per kind', () => {
   it('a deposit: "Deposit", into the account, from an outside wallet', () => {
     renderPanel(KINDS.deposit)
     expect(screen.getByRole('dialog', { name: 'Deposit' })).toBeInTheDocument()
+    // The kind would only repeat the title: it is dropped, not shown twice.
+    expect(screen.getAllByText('Deposit')).toHaveLength(1)
     expect(within(header()).getByText('Into Main', { exact: false })).toBeInTheDocument()
     expect(rows(details())).toEqual({ From: 'An outside wallet' })
   })

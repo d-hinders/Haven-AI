@@ -20,6 +20,7 @@ import {
 import { findCurrencyPreference } from '../../infra/repositories/users.js'
 import { fetchAccountTransactions } from './aggregate.js'
 import { toCanonicalAddress } from './normalize.js'
+import { ownAccountDisplayName } from './own-account.js'
 import {
   compareEnrichedTransactions,
   enrichedTransactionIdentityKey,
@@ -136,9 +137,6 @@ function accountLocationKey(address: string, chainId: number): string {
   return `${address.toLowerCase()}:${chainId}`
 }
 
-function accountDisplayName(account: SmartAccountRow): string {
-  return account.name?.trim() || 'Unnamed account'
-}
 
 /**
  * Fold the two explorer legs of a transfer between this user's own accounts
@@ -200,7 +198,7 @@ export function foldOwnAccountTransfers(
         ...outbound,
         ownTransfer: {
           toAccountId: group.destination.id,
-          toAccountName: accountDisplayName(group.destination),
+          toAccountName: ownAccountDisplayName(group.destination.name),
           toAccountAddress: toCanonicalAddress(group.destination.account_address),
         },
       })

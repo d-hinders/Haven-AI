@@ -38,6 +38,7 @@ import {
   type EnrichedTransaction,
   enrichedTransactionIdentityKey,
   enrichTransactionsWithAgents,
+  foldOwnAccountTransfers,
   fetchAccountTransactions,
   mergeX402Transactions,
   resolveTransactionCurrency,
@@ -580,6 +581,16 @@ export default async function dashboardRoutes(
       currency,
     )
 
+    // #4268: a move between two of the user's own accounts becomes ONE row,
+    // as on `/transactions` (#4265) — the same fold, one definition. Always
+    // on here: the web app is this route's only reader. It runs after
+    // enrichment, because the fold refuses an outbound row with no initiator
+    // classification (an enrichment outage) rather than risk hiding an agent
+    // payment, and its pairing does not depend on the sort above. Ownership
+    // is this surface's account set (`listDashboardAccounts`, hybrid only),
+    // so a transfer from an account this route does not fetch stays a send.
+    const foldedTransactions = foldOwnAccountTransfers(enrichedTransactions, accounts)
+
     // #3824: the grouped activity rows — server-side over the SAME feed the
     // preview slices, so the counts are not bounded by any client window.
     // Merchant labels come from the same two lookups analytics resolves them
@@ -615,7 +626,7 @@ export default async function dashboardRoutes(
     // the SAME instant `from7Iso` was derived from — one clock, one window.
     const { groups: activity, hasOlderActivity, windowDays: activityWindowDays } =
       await buildActivityFeed({
-        transactions: enrichedTransactions,
+        transactions: foldedTransactions,
         truncated: explorerTruncated,
         tz,
         currency,

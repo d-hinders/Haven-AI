@@ -911,8 +911,15 @@ from another of the user's own accounts — "From <account>" (#4099), "New
 recipient" — never a truncated address); the subtitle is the agent's name, plus
 "From <account>" — the account the money left — on a send when the user has
 more than one account and a name came back (#4117); a group of N
-renders "×N" ("×N+" when the count is a floor). The 5-row `transactions`
-preview is removed from the wire (#3858) — no dashboard surface reads it.
+renders "×N" ("×N+" when the count is a floor). A move between two of the
+user's own accounts is ONE group (`ownTransfer`, #4268 — the server runs
+#4265's fold before grouping): "Moved between your accounts", `DirectionMark
+direction="move"`, the subline "<from> → <to>" through `TransactionMovement`,
+an unsigned amount, and no "From <account>" subtitle. Unlike `/transactions`'
+"You · …", the card names no initiator — its subtitle has only ever named the
+agent. An arrival whose partner leg was not read stays "From <account>"
+(#4099). The 5-row `transactions` preview is removed from the wire (#3858) —
+no dashboard surface reads it.
 
 The local day is the HEADING, not the window: the groups bucket by the
 user's local day (`tz`), but membership is the rolling instant, so a
@@ -987,7 +994,8 @@ Structure:
    amount sits right with the time under it. An own-account transfer (the
    backend's `foldOwnTransfers=1`, #4265) reads "Moved between your accounts"
    with `DirectionMark direction="move"`, the subline "You · <from> → <to>" (or
-   "Your accounts · …"), and an unsigned amount. The summary line carries
+   "Your accounts · …"), and an unsigned amount. The dashboard's Activity card
+   shows the same move as one row too (#4268), without the actor. The summary line carries
    "In <total> · Out <total>" beside the count. No Initiator, From/To or link
    columns. A row opens `TransactionDetailPanel`, where the full address and
    explorer link live.

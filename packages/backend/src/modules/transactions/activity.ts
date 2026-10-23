@@ -45,6 +45,14 @@
  * transfer from another of the user's own accounts, keyed `own:<from>` and
  * named by that account (#4099).
  *
+ * A move between two of the user's own accounts arrives already folded into
+ * its outbound leg (#4268: the route runs #4265's `foldOwnAccountTransfers`
+ * before this builder), carrying `ownTransfer`. It groups under
+ * `move:<fromAccountId>:<toAccountId>` in place of the counterparty half, so
+ * same-day moves between the same two accounts merge into one "×N" row while
+ * chain, token, day, outcome and activityType still split it. `own:<from>`
+ * stays for an inbound leg that was not folded (its partner leg is missing).
+ *
  * When the explorer window that produced the feed was truncated, EVERY group
  * carries `countIsFloor: true` — the count is a floor over an unknown total,
  * and the client renders "×40+". A count is never presented as exact when it
@@ -56,6 +64,7 @@ import {
   type TransactionCurrency,
 } from '../../domain/transaction-currency.js'
 import type { EnrichedTransaction } from './types.js'
+import { ownAccountDisplayName } from './own-account.js'
 
 /** The derived per-group status (#3824) — see the mapping in the module doc. */
 export type ActivityOutcome = 'confirmed' | 'pending' | 'failed'
@@ -249,9 +258,12 @@ export function activityOutcome(tx: {
  * account (#4117), so one group has one sender and can name it: without it,
  * two own accounts' unattributed sends to one recipient on one day merged.
  * Inbound rows stay unsplit — their day's deposits are one group whichever
- * account received them.
+ * account received them. A folded own-account move (#4268) keys on its two
+ * accounts, `move:<from>:<to>`: it is neither a send to a counterparty nor a
+ * deposit.
  */
 function counterpartyKey(tx: EnrichedTransaction, fromOwnAccount: boolean): string {
+  if (tx.ownTransfer) return `move:${tx.accountId}:${tx.ownTransfer.toAccountId}`
   if (tx.direction === 'in') return fromOwnAccount ? `own:${tx.from.toLowerCase()}` : 'deposit'
   const counterparty =
     tx.source === 'x402' && tx.x402ResourceUrl ? tx.x402ResourceUrl : tx.to.toLowerCase()
@@ -293,6 +305,15 @@ export interface DashboardActivityGroup {
    * absent on deposits and when no name resolves.
    */
   fromAccountName?: string
+  /**
+   * #4268: present only on a move between two of the user's own accounts,
+   * folded into one group (#4265's fold). The two accounts' own Haven names,
+   * "Unnamed account" when an account has none — never an address. The group
+   * keeps `direction: 'out'`, `merchantName` and `fromAccountName` as an
+   * unfolded send would, so a client that predates the field still renders a
+   * readable out row.
+   */
+  ownTransfer?: { fromAccountName: string; toAccountName: string }
   activityType: string | null
   direction: 'in' | 'out'
   status: ActivityOutcome
@@ -465,6 +486,16 @@ export async function buildActivityGroups(
         const fromAccountName =
           resolveMerchantName?.(sample.accountAddress) ?? (sample.accountName || null)
         if (fromAccountName) wire.fromAccountName = fromAccountName
+      }
+
+      // #4268: the move key holds one (from, to) pair, so the sample names
+      // both ends. Each end is the account's own name (#4265's rule), not a
+      // contact label: the row reads as a move between the user's accounts.
+      if (sample.ownTransfer) {
+        wire.ownTransfer = {
+          fromAccountName: ownAccountDisplayName(sample.accountName),
+          toAccountName: sample.ownTransfer.toAccountName,
+        }
       }
 
       // Fiat sum: book-time when EVERY member converted (they were all struck

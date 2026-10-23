@@ -6556,12 +6556,19 @@ export type components = {
             source: string | null;
             /** @description The newest member’s x402 resource URL, when it is an x402 payment. */
             x402ResourceUrl: string | null;
-            /** @description The newest member’s raw `to` field — the merchant address on outbound payments, the account’s own address on deposits. */
+            /** @description The newest member’s raw `to` field — the merchant address on outbound payments, the account’s own address on deposits, and the receiving own account’s address on a folded move (`ownTransfer`, #4268). */
             to: string;
-            /** @description Contact or receipt-merchant name resolved for the counterparty, else the name of the user's own account on the other side of a transfer between two of their accounts (#4099); null otherwise. On a deposit it is set only for a transfer from another of the user's own accounts, and that deposit is its own group. */
+            /** @description Contact or receipt-merchant name resolved for the counterparty, else the name of the user's own account on the other side of a transfer between two of their accounts (#4099); null otherwise. On a deposit it is set only for a transfer from another of the user's own accounts, and that deposit is its own group. A folded move (`ownTransfer`, #4268) keeps the value an unfolded send would carry, so a client that predates `ownTransfer` still renders a readable out row. */
             merchantName: string | null;
             /** @description Outbound groups only (#4117): the label of the user's own account the money left — a contact name saved for it first, else the account's own name. Every member of the group left that one account. Absent on deposits and when no name resolves. */
             fromAccountName?: string;
+            /** @description #4268: present only on a move between two of the user's own accounts, its two explorer legs folded into one group (#4265's fold, the same one `GET /transactions?foldOwnTransfers=1` applies). Same-day moves between the same two accounts form one group. The group keeps `direction: out`, `merchantName` and `fromAccountName` as an unfolded send would. Not set for an agent-initiated transfer, a self-send, an outbound row whose agent enrichment failed, or a leg whose partner leg was not read; each of those stays the row it was before. */
+            ownTransfer?: {
+                /** @description The own Haven name of the account the money left; "Unnamed account" when it has none, never an address. */
+                fromAccountName: string;
+                /** @description The own Haven name of the account the money reached; "Unnamed account" when it has none, never an address. */
+                toAccountName: string;
+            };
             /** @description The activity class, e.g. `delegate_sweep`; null for plain transfers and x402 payments. */
             activityType: string | null;
             /** @enum {string} */

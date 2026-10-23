@@ -8,7 +8,7 @@ import { Icon } from '@/components/ui/Icon'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { EmptyState } from '@/components/ui/EmptyState'
-import { TransactionActivityDayHeader, TransactionActivityRow, transactionDayKey, transactionDayLabel } from '@/components/haven'
+import { TransactionActivityDayHeader, TransactionActivityRow, TransactionMovement, transactionDayKey, transactionDayLabel } from '@/components/haven'
 import type { StatusTone } from '@/components/ui/StatusBadge'
 import { timeAgo } from '@/lib/format'
 import { counterpartyLabel, type CounterpartyFields } from '@/lib/transaction-presentation'
@@ -60,6 +60,16 @@ type ActivityGroup = ApiSchema<'DashboardActivityGroup'>
  * which account received, so "To My account" would be a guess — the title
  * ("Deposit", or "From <account>") and the success tone carry the
  * direction already.
+ *
+ * A move between two of the user's own accounts arrives as ONE group
+ * (`ownTransfer`, #4268 — #4265's fold, the same one `/transactions` uses).
+ * It reads "Moved between your accounts" with the neutral two-way mark, an
+ * unsigned amount (it is neither money in nor money out) and a
+ * "<from> → <to>" subline drawn by the shared `TransactionMovement`, so the
+ * arrow never strands at 375px. It carries no "From <account>" subtitle (the
+ * subline already names both ends) and no initiator, unlike `/transactions`'
+ * "You · …": the card's subtitle has only ever named the agent, and a move
+ * that folds is never agent-initiated.
  */
 export function ActivitySection({
   activity,
@@ -92,7 +102,7 @@ export function ActivitySection({
     hasOlderActivity === true && typeof activityWindowDays === 'number'
   const windowEmptyTitle = `No activity in the last ${activityWindowDays} days`
   return (
-    <div className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] shadow-card overflow-hidden">
+    <div data-testid="dashboard-activity" className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] shadow-card overflow-hidden">
       <Card.Header
         as="h2"
         title="Activity"
@@ -274,10 +284,13 @@ function ActivityRow({
     from: group.to,
     chainId: 0,
   }
-  const title = counterpartyLabel(counterparty, undefined, undefined, {
-    noAddress: true,
-    resolvedName: group.merchantName,
-  })
+  const ownTransfer = group.ownTransfer
+  const title = ownTransfer
+    ? 'Moved between your accounts'
+    : counterpartyLabel(counterparty, undefined, undefined, {
+        noAddress: true,
+        resolvedName: group.merchantName,
+      })
 
   // "×40" — and "×40+" when the count is a floor over a truncated explorer
   // window: a count is never presented as exact when it is not.
@@ -292,7 +305,12 @@ function ActivityRow({
   if (accountCount > 1 && group.direction === 'out' && group.fromAccountName) {
     subtitleParts.push(`From ${group.fromAccountName}`)
   }
-  const description = subtitleParts.length > 0 ? subtitleParts.join(' · ') : undefined
+  // #4268: a move names both of its accounts, and nothing else.
+  const description = ownTransfer ? (
+    <TransactionMovement bare from={ownTransfer.fromAccountName} to={ownTransfer.toAccountName} />
+  ) : subtitleParts.length > 0 ? (
+    subtitleParts.join(' · ')
+  ) : undefined
 
   // Amounts are #3805's currency mode: book-time `convertedAmount` or
   // serve-time `approxAmount`, and an unknown valuation renders the em dash,
@@ -330,7 +348,7 @@ function ActivityRow({
       status={statusLabel(group)}
       statusTone={statusTone(group)}
       timestamp={timeAgo(group.latestAt)}
-      direction={group.direction}
+      direction={ownTransfer ? 'move' : group.direction}
       density="compact"
       insetDivider={insetDivider}
     />

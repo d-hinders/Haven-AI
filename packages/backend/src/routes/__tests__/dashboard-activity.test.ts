@@ -75,6 +75,7 @@ import db from '../../db.js'
 import dashboardRoutes from '../dashboard.js'
 import transactionRoutes from '../transactions.js'
 import { transactionsToCsv } from '../../modules/transactions/index.js'
+import { expectMatchesSpec } from '../../openapi/response-shape.js'
 import {
   assertWorkerSchemaAtHead,
   describeDb,
@@ -133,12 +134,15 @@ async function seedUser(): Promise<string> {
 }
 
 /** A delegator_hybrid smart account with a distinct address (per-test cache isolation). */
-async function seedAccount(userId: string): Promise<{ id: string; address: string }> {
-  const address = `0x${String(++seq).padStart(4, '0').repeat(2)}${'cd'.repeat(16)}`
+async function seedAccount(
+  userId: string,
+  opts: { name?: string; chainId?: number; address?: string } = {},
+): Promise<{ id: string; address: string }> {
+  const address = opts.address ?? `0x${String(++seq).padStart(4, '0').repeat(2)}${'cd'.repeat(16)}`
   const { rows } = await db.query<{ id: string }>(
     `INSERT INTO smart_accounts (user_id, account_address, chain_id, execution_rail, account_type, name)
-     VALUES ($1, $2, $3, 'delegation', 'delegator_hybrid', 'Activity account') RETURNING id`,
-    [userId, address, CHAIN],
+     VALUES ($1, $2, $3, 'delegation', 'delegator_hybrid', $4) RETURNING id`,
+    [userId, address, opts.chainId ?? CHAIN, opts.name ?? 'Activity account'],
   )
   return { id: rows[0].id, address }
 }
@@ -525,6 +529,327 @@ describeDb('#3824 — grouped activity + serve-time approx amounts on the wire',
     expect(body.transactions[0].approxAmount).toBe('10.7600')
     expect(body.transactions[0].approxCurrency).toBe('SEK')
     expect(body.transactions[0].convertedAmount).toBeNull()
+  })
+})
+
+/**
+ * #4268: a move between two of the user's own accounts is ONE row in the
+ * Activity preview, as on `/transactions` (#4265's fold, one definition). The
+ * explorer returns each leg to the account it belongs to — the out leg on the
+ * sender's read, the in leg on the receiver's — exactly as the real
+ * aggregator sees a transfer between two of the user's own accounts.
+ */
+describeDb('#4268 — an own-account move is one Activity group', () => {
+  let app: FastifyInstance
+  let token: string
+  let userId: string
+
+  beforeAll(async () => {
+    await initDbHarness()
+    app = Fastify({ logger: false })
+    await app.register(fastifyJwt, { secret: 'test-secret' })
+    await app.register(dashboardRoutes, { prefix: '/dashboard' })
+  })
+
+  afterAll(async () => {
+    await app.close()
+    await assertWorkerSchemaAtHead()
+  })
+
+  /** Every transfer the explorer knows; each account's read returns the rows touching it. */
+  let transfers: Array<{ hash: string; from: string; to: string; value: string; ts: number; chainId?: number; hiddenFrom?: string }>
+  /** Account addresses whose explorer read fails (a missing partner leg). */
+  let failingReads: Set<string>
+  /** When true every read reports more rows upstream (a truncated window). */
+  let truncated: boolean
+
+  beforeEach(async () => {
+    await resetDb()
+    transfers = []
+    failingReads = new Set()
+    truncated = false
+    explorerMocks.fetchNormalTransactions.mockReset()
+    explorerMocks.fetchInternalTransactions.mockReset()
+    explorerMocks.fetchERC20Transfers.mockReset()
+    explorerMocks.fetchNormalTransactions.mockResolvedValue({ rows: [], hasMore: false })
+    explorerMocks.fetchInternalTransactions.mockResolvedValue({ rows: [], hasMore: false })
+    explorerMocks.fetchERC20Transfers.mockImplementation((async (chainId: number, address: string) => {
+      const self = address.toLowerCase()
+      if (failingReads.has(self)) throw new Error('explorer read failed')
+      return {
+        rows: transfers
+          .filter((t) => (t.chainId ?? CHAIN) === chainId)
+          .filter((t) => t.from.toLowerCase() === self || t.to.toLowerCase() === self)
+          .filter((t) => t.hiddenFrom?.toLowerCase() !== self)
+          .map((t, i) => ({
+            blockNumber: String(46_000_000 + i),
+            timeStamp: String(t.ts),
+            hash: t.hash,
+            from: t.from,
+            to: t.to,
+            value: t.value,
+            contractAddress: USDC,
+            tokenName: 'USD Coin',
+            tokenSymbol: 'USDC',
+            tokenDecimal: '6',
+          })),
+        hasMore: truncated,
+      }
+    }) as never)
+    priceMocks.getTokenPrice.mockReset()
+    priceMocks.getTokenPrice.mockResolvedValue({ usd: 1, eur: 0.9, sek: 10.76 })
+
+    userId = await seedUser()
+    token = app.jwt.sign({ sub: userId, email: 'a4268@test.example' })
+  })
+
+  const getOverviewBody = async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: `/dashboard/overview?tz=${encodeURIComponent(TZ)}`,
+      headers: { authorization: `Bearer ${token}` },
+    })
+    expect(res.statusCode).toBe(200)
+    return res.json() as { activity: Array<Record<string, unknown>>; hasOlderActivity?: boolean }
+  }
+  const getActivity = async () => (await getOverviewBody()).activity
+
+  const hash = (n: number) => `0x${String(n).padStart(4, '0').repeat(16)}`
+
+  it('folds the two legs of a move into ONE out group carrying ownTransfer, with no own:<from> group', async () => {
+    const main = await seedAccount(userId, { name: 'Main' })
+    const savings = await seedAccount(userId, { name: 'Savings' })
+    transfers.push({ hash: hash(1), from: main.address, to: savings.address, value: '1000000', ts: tsInLocalDay(TZ, 0) })
+
+    const body = await getOverviewBody()
+    // The new field is in the documented shape (`additionalProperties: false`).
+    expectMatchesSpec('GET', '/dashboard/overview', body)
+    const activity = body.activity
+    expect(activity).toHaveLength(1)
+    expect(activity[0]).toMatchObject({
+      direction: 'out',
+      count: 1,
+      sumAtomic: '1000000',
+      ownTransfer: { fromAccountName: 'Main', toAccountName: 'Savings' },
+      // An open pre-deploy tab still reads a sane out row (#4268 § Wire).
+      merchantName: 'Savings',
+      fromAccountName: 'Main',
+    })
+  })
+
+  it('two same-day moves between the same two accounts are one ×2 group', async () => {
+    const main = await seedAccount(userId, { name: 'Main' })
+    const savings = await seedAccount(userId, { name: 'Savings' })
+    const ts = tsInLocalDay(TZ, 0)
+    transfers.push({ hash: hash(1), from: main.address, to: savings.address, value: '1000000', ts })
+    transfers.push({ hash: hash(2), from: main.address, to: savings.address, value: '2000000', ts: ts - 60 })
+
+    const activity = await getActivity()
+    expect(activity).toHaveLength(1)
+    expect(activity[0]).toMatchObject({ count: 2, sumAtomic: '3000000', ownTransfer: { fromAccountName: 'Main', toAccountName: 'Savings' } })
+  })
+
+  it('a folded group keeps the serve-time pricing and countIsFloor of any group', async () => {
+    const main = await seedAccount(userId, { name: 'Main' })
+    const savings = await seedAccount(userId, { name: 'Savings' })
+    transfers.push({ hash: hash(1), from: main.address, to: savings.address, value: '1000000', ts: tsInLocalDay(TZ, 0) })
+    truncated = true
+
+    const activity = await getActivity()
+    expect(activity).toHaveLength(1)
+    // One leg's amount, never both: 1 USDC at the stubbed 10.76 SEK.
+    expect(activity[0]).toMatchObject({ ownTransfer: { toAccountName: 'Savings' }, countIsFloor: true, approxAmount: '10.7600', approxCurrency: 'SEK' })
+  })
+
+  it('MoneyPanel figures (spend, totals, change) are equal for a folded and an unfolded move (non-regression)', async () => {
+    // A non-regression check, not proof about the fold: no MoneyPanel figure
+    // reads the Activity feed today (spend is SQL over payment_intents and
+    // delegate_sweeps; totals and change come from the portfolio read), so no
+    // mutation of the fold can turn this red. It pins that the two reads
+    // agree, the #4268 acceptance criterion.
+    // Two users with the same transfer, on distinct addresses (the explorer
+    // cache is keyed by address): for the second, the receiving account's
+    // read fails, so its move cannot fold.
+    const read = async (as: string) => {
+      const res = await app.inject({
+        method: 'GET',
+        url: `/dashboard/overview?tz=${encodeURIComponent(TZ)}`,
+        headers: { authorization: `Bearer ${as}` },
+      })
+      return res.json() as { activity: Array<Record<string, unknown>>; spend: unknown; totals: unknown; change: unknown }
+    }
+    const ts = tsInLocalDay(TZ, 0)
+
+    const main = await seedAccount(userId, { name: 'Main' })
+    const savings = await seedAccount(userId, { name: 'Savings' })
+    transfers.push({ hash: hash(1), from: main.address, to: savings.address, value: '1000000', ts })
+    const folded = await read(token)
+    expect(folded.activity.some((g) => g.ownTransfer !== undefined)).toBe(true)
+
+    const otherUser = await seedUser()
+    const otherToken = app.jwt.sign({ sub: otherUser, email: 'a4268-b@test.example' })
+    const otherMain = await seedAccount(otherUser, { name: 'Main' })
+    const otherSavings = await seedAccount(otherUser, { name: 'Savings' })
+    transfers.push({ hash: hash(2), from: otherMain.address, to: otherSavings.address, value: '1000000', ts })
+    failingReads.add(otherSavings.address.toLowerCase())
+    const unfolded = await read(otherToken)
+    expect(unfolded.activity.some((g) => g.ownTransfer !== undefined)).toBe(false)
+
+    expect(folded.spend).toEqual(unfolded.spend)
+    expect(folded.totals).toEqual(unfolded.totals)
+    expect(folded.change).toEqual(unfolded.change)
+  })
+
+  it('a move outside the rolling window is no group, and still counts as older activity', async () => {
+    const main = await seedAccount(userId, { name: 'Main' })
+    const savings = await seedAccount(userId, { name: 'Savings' })
+    transfers.push({ hash: hash(1), from: main.address, to: savings.address, value: '1000000', ts: tsInLocalDay(TZ, 9) })
+
+    const body = await getOverviewBody()
+    expect(body.activity).toHaveLength(0)
+    expect(body.hasOlderActivity).toBe(true)
+  })
+
+  it('same-day moves between three own accounts are one group per (from, to) pair', async () => {
+    const main = await seedAccount(userId, { name: 'Main' })
+    const savings = await seedAccount(userId, { name: 'Savings' })
+    const reserve = await seedAccount(userId, { name: 'Reserve' })
+    const ts = tsInLocalDay(TZ, 0)
+    // Main→Savings and Main→Reserve share a sender; Main→Savings and
+    // Reserve→Savings share a receiver. The move key carries both ends, so
+    // neither pair merges.
+    transfers.push({ hash: hash(1), from: main.address, to: savings.address, value: '1000000', ts })
+    transfers.push({ hash: hash(2), from: main.address, to: reserve.address, value: '2000000', ts: ts - 60 })
+    transfers.push({ hash: hash(3), from: reserve.address, to: savings.address, value: '4000000', ts: ts - 120 })
+
+    const activity = await getActivity()
+    expect(activity).toHaveLength(3)
+    const pairs = activity.map((g) => ({ ...(g.ownTransfer as object), count: g.count, sumAtomic: g.sumAtomic }))
+    expect(pairs).toEqual(
+      expect.arrayContaining([
+        { fromAccountName: 'Main', toAccountName: 'Savings', count: 1, sumAtomic: '1000000' },
+        { fromAccountName: 'Main', toAccountName: 'Reserve', count: 1, sumAtomic: '2000000' },
+        { fromAccountName: 'Reserve', toAccountName: 'Savings', count: 1, sumAtomic: '4000000' },
+      ]),
+    )
+  })
+
+  it('a folded move does not merge with an unpaired send to the same account on the same day', async () => {
+    const main = await seedAccount(userId, { name: 'Main' })
+    const savings = await seedAccount(userId, { name: 'Savings' })
+    const ts = tsInLocalDay(TZ, 0)
+    transfers.push({ hash: hash(1), from: main.address, to: savings.address, value: '1000000', ts })
+    // The receiving account's read does not return this one: its partner leg is missing.
+    transfers.push({ hash: hash(2), from: main.address, to: savings.address, value: '2000000', ts: ts - 60, hiddenFrom: savings.address })
+
+    const activity = await getActivity()
+    const sends = activity.filter((g) => g.direction === 'out')
+    expect(sends).toHaveLength(2)
+    expect(sends.find((g) => g.ownTransfer !== undefined)).toMatchObject({ count: 1, sumAtomic: '1000000' })
+    expect(sends.find((g) => g.ownTransfer === undefined)).toMatchObject({ count: 1, sumAtomic: '2000000', merchantName: 'Savings' })
+  })
+
+  it('names an unnamed account "Unnamed account", never an address', async () => {
+    const main = await seedAccount(userId, { name: '' })
+    const savings = await seedAccount(userId, { name: '  ' })
+    transfers.push({ hash: hash(1), from: main.address, to: savings.address, value: '1000000', ts: tsInLocalDay(TZ, 0) })
+
+    const activity = await getActivity()
+    expect(activity).toHaveLength(1)
+    expect(activity[0].ownTransfer).toEqual({ fromAccountName: 'Unnamed account', toAccountName: 'Unnamed account' })
+  })
+
+  it('does not fold a send to an outside address', async () => {
+    const main = await seedAccount(userId, { name: 'Main' })
+    await seedAccount(userId, { name: 'Savings' })
+    transfers.push({ hash: hash(1), from: main.address, to: MERCHANT, value: '1000000', ts: tsInLocalDay(TZ, 0) })
+
+    const activity = await getActivity()
+    expect(activity).toHaveLength(1)
+    expect(activity[0].direction).toBe('out')
+    expect(activity[0].ownTransfer).toBeUndefined()
+  })
+
+  it('does not fold an outside deposit', async () => {
+    const savings = await seedAccount(userId, { name: 'Savings' })
+    await seedAccount(userId, { name: 'Main' })
+    transfers.push({ hash: hash(1), from: MERCHANT, to: savings.address, value: '1000000', ts: tsInLocalDay(TZ, 0) })
+
+    const activity = await getActivity()
+    expect(activity).toHaveLength(1)
+    expect(activity[0].direction).toBe('in')
+    expect(activity[0].ownTransfer).toBeUndefined()
+  })
+
+  it('does not fold a self-send', async () => {
+    const main = await seedAccount(userId, { name: 'Main' })
+    await seedAccount(userId, { name: 'Savings' })
+    transfers.push({ hash: hash(1), from: main.address, to: main.address, value: '1000000', ts: tsInLocalDay(TZ, 0) })
+
+    const activity = await getActivity()
+    expect(activity.some((g) => g.ownTransfer !== undefined)).toBe(false)
+  })
+
+  it('keeps a leg whose partner read failed as today: the send stays an out row', async () => {
+    const main = await seedAccount(userId, { name: 'Main' })
+    const savings = await seedAccount(userId, { name: 'Savings' })
+    transfers.push({ hash: hash(1), from: main.address, to: savings.address, value: '1000000', ts: tsInLocalDay(TZ, 0) })
+    failingReads.add(savings.address.toLowerCase())
+
+    const activity = await getActivity()
+    expect(activity).toHaveLength(1)
+    expect(activity[0]).toMatchObject({ direction: 'out', merchantName: 'Savings' })
+    expect(activity[0].ownTransfer).toBeUndefined()
+  })
+
+  it('an in leg whose sender read failed keeps its own:<from> group, named by the sender', async () => {
+    const main = await seedAccount(userId, { name: 'Main' })
+    const savings = await seedAccount(userId, { name: 'Savings' })
+    transfers.push({ hash: hash(1), from: main.address, to: savings.address, value: '1000000', ts: tsInLocalDay(TZ, 0) })
+    failingReads.add(main.address.toLowerCase())
+
+    const activity = await getActivity()
+    expect(activity).toHaveLength(1)
+    expect(activity[0]).toMatchObject({ direction: 'in', merchantName: 'Main' })
+    expect(activity[0].ownTransfer).toBeUndefined()
+  })
+
+  it('does not fold when the same address is the user’s account on a DIFFERENT chain', async () => {
+    const main = await seedAccount(userId, { name: 'Main' })
+    // The receiving address is the user's account on another chain only.
+    const otherChainAddress = `0x${'ef'.repeat(20)}`
+    await seedAccount(userId, { name: 'Elsewhere', chainId: 8453, address: otherChainAddress })
+    transfers.push({ hash: hash(1), from: main.address, to: otherChainAddress, value: '1000000', ts: tsInLocalDay(TZ, 0) })
+
+    const activity = await getActivity()
+    const sends = activity.filter((g) => g.direction === 'out')
+    expect(sends).toHaveLength(1)
+    expect(sends[0].ownTransfer).toBeUndefined()
+  })
+
+  it('does not fold an agent-initiated move', async () => {
+    const main = await seedAccount(userId, { name: 'Main' })
+    const savings = await seedAccount(userId, { name: 'Savings' })
+    const agentId = await seedAgent(userId, main.id)
+    transfers.push({ hash: hash(1), from: main.address, to: savings.address, value: '1000000', ts: tsInLocalDay(TZ, 0) })
+    // The agent's confirmed send carries the transfer's hash on the sending
+    // account: enrichment attributes the out leg to the agent.
+    await db.query(
+      `INSERT INTO payment_intents
+         (agent_id, user_id, account_address, token_symbol, token_address, to_address,
+          amount_raw, amount_human, delegate_address, allowance_nonce, sign_hash,
+          status, tx_hash, expires_at, execution_rail, chain_id, source)
+       VALUES ($1, $2, $3, 'USDC', $4, $5, '1000000', '1.0', '0x' || repeat('ab', 20), 0, $6,
+               'confirmed', $7, NOW() + interval '10 minutes', 'delegation', $8, 'direct')`,
+      [agentId, userId, main.address, USDC, savings.address, `0x${'5'.repeat(64)}`, hash(1), CHAIN],
+    )
+
+    const activity = await getActivity()
+    const agentSend = activity.find((g) => g.direction === 'out')
+    expect(agentSend).toMatchObject({ agentId })
+    expect(agentSend?.ownTransfer).toBeUndefined()
+    // No fold, so the receiving leg keeps its own group.
+    expect(activity.some((g) => g.direction === 'in')).toBe(true)
   })
 })
 

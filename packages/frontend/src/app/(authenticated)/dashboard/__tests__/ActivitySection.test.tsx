@@ -333,6 +333,51 @@ describe('ActivitySection (#3810)', () => {
   })
 })
 
+describe('ActivitySection — a move between your own accounts (#4268)', () => {
+  // The backend folds both legs into one out group carrying `ownTransfer`;
+  // `merchantName` / `fromAccountName` stay populated for an older client.
+  const move = (overrides: Partial<ActivityGroup> = {}) =>
+    group({
+      agentId: null,
+      agentName: null,
+      source: null,
+      x402ResourceUrl: null,
+      to: '0x2222222222222222222222222222222222222222',
+      merchantName: 'Savings',
+      fromAccountName: 'Main',
+      ownTransfer: { fromAccountName: 'Main', toAccountName: 'Savings' },
+      sumAtomic: '1000000',
+      approxAmount: '10.7600',
+      ...overrides,
+    })
+
+  it('one row: the move title, the move mark, Main → Savings, an unsigned amount, no "From" subtitle', () => {
+    const { container } = renderSection({ activity: [move()], accountCount: 2 })
+    expect(screen.getByText('Moved between your accounts')).toBeInTheDocument()
+    expect(container.querySelector('svg.lucide-arrow-left-right')).not.toBeNull()
+    const subline = screen.getByText('Main').closest('span.inline-flex')
+    // The arrow is aria-hidden; an sr-only "to" stands in for it.
+    expect(subline?.textContent).toBe('Main→toSavings')
+    expect(screen.queryByText(/^From /)).not.toBeInTheDocument()
+    const amount = container.querySelector('.v2-tabular')
+    expect(amount?.textContent).not.toMatch(/^[-+−]/)
+    expect(container.textContent).not.toMatch(/0x[0-9a-fA-F]{4}/)
+  })
+
+  it('a same-day ×2 move keeps the count label', () => {
+    renderSection({ activity: [move({ count: 2, sumAtomic: '3000000' })], accountCount: 2 })
+    expect(screen.getByText('×2')).toBeInTheDocument()
+    expect(screen.getByText('Moved between your accounts')).toBeInTheDocument()
+  })
+
+  it('a group without ownTransfer still reads as the send it is (an older backend)', () => {
+    renderSection({ activity: [move({ ownTransfer: undefined })], accountCount: 2 })
+    expect(screen.queryByText('Moved between your accounts')).not.toBeInTheDocument()
+    expect(screen.getByText('Savings')).toBeInTheDocument()
+    expect(screen.getByText('From Main')).toBeInTheDocument()
+  })
+})
+
 describe('the shared day helpers match the dropped local copies (#4225)', () => {
   // ActivitySection used to carry its own `localDayKey` and `activityDayLabel`,
   // word-for-word copies of the ledger's `transactionDayKey` /

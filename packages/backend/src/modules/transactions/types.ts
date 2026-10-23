@@ -86,6 +86,21 @@ export interface Transaction {
    */
   settlementTxHash?: string | null
   /**
+   * #4319: what Haven knows about the merchant settlement — `verified` (a
+   * hash is recorded), `checking` (a source can still produce one inside the
+   * 24-hour window, or a receipt verdict is retryable), `untracked`
+   * (everything else). Computed from stored state only.
+   */
+  settlementTracking?: 'verified' | 'checking' | 'untracked'
+  /**
+   * #4319: WHICH proof the recorded settlement carries — `nonce` (derived
+   * from the payment id, the sweep's standard), `signed_header` (the
+   * delegate-signed X-PAYMENT header, #3925), `receipt` (the owner-approved
+   * Tier 2 relaxation, #4319), `legacy` (records from 2026-09-29 to 10-14,
+   * before the flags). Null when nothing is recorded.
+   */
+  settlementProof?: 'nonce' | 'signed_header' | 'receipt' | 'legacy' | null
+  /**
    * The book-time FX rate `amountSek` was struck at, and where it came from —
    * `machine_payment_evidence.fx_rate_sek` / `.fx_source` (#463, migration
    * 026), surfaced for the CSV export (#2871). Null wherever `amountSek` is:

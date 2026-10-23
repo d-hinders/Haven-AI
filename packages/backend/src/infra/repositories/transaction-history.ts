@@ -117,6 +117,17 @@ export interface X402PaymentIntentRow {
   /** `machine_metadata.settlement_scheme` (#1705). */
   settlement_scheme: string | null
   /**
+   * #4319: the stored settlement proof state — the Tier 2 label, the nonce
+   * flags, the persisted receipt verdict, and whether an X-PAYMENT header is
+   * stored — all read off `payment_intents.machine_metadata` and the evidence
+   * row, from which `deriveSettlementTracking` computes the wire fields.
+   */
+  settlement_proof_label: string | null
+  settlement_nonce_bound: boolean | null
+  settlement_nonce_derived: boolean | null
+  receipt_verdict: string | null
+  has_stored_header: boolean | null
+  /**
    * #3763: `machine_metadata.merchant_settlement_tx_hash` — the merchant's
    * own delegate → merchant settlement transaction, recorded when an agent
    * reported it or the #3888 settlement sweep detected it on-chain, and it
@@ -348,6 +359,11 @@ export const FIND_CONFIRMED_X402_PAYMENT_INTENTS_SQL = `SELECT pi.id,
             mpe.fx_rates AS fx_rates,
             pi.machine_metadata->>'settlement_scheme' AS settlement_scheme,
             pi.machine_metadata->>'merchant_settlement_tx_hash' AS settlement_tx_hash,
+            pi.machine_metadata->>'merchant_settlement_proof' AS settlement_proof_label,
+            (pi.machine_metadata->>'merchant_settlement_nonce_bound')::boolean AS settlement_nonce_bound,
+            (pi.machine_metadata->>'merchant_settlement_nonce_derived')::boolean AS settlement_nonce_derived,
+            pi.machine_metadata->>'merchant_settlement_receipt_verdict' AS receipt_verdict,
+            (mpe.payment_proof_header IS NOT NULL) AS has_stored_header,
             mpre.event_type AS payment_reconciliation_event_type,
             pi.confirmed_at,
             pi.created_at

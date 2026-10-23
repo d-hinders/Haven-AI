@@ -86,8 +86,12 @@
  *   header does not prove the burned nonce, so a random-nonce settlement is
  *   unattributable there too. Exactly the accepted residual.
  * - Since #3925 the observe call passes THIS payment's derived nonce as the
- *   proof (`nonceDerived: true`), so a recorded settlement is always
- *   nonce-bound — the sweep can no longer be the weaker attribution path.
+ *   proof (`nonceDerived: true`), so a settlement recorded THROUGH THIS SWEEP
+ *   is always nonce-bound — the sweep can no longer be the weaker
+ *   attribution path. Since #4319 the tick ALSO runs Tier 1 from a stored
+ *   X-PAYMENT header (same nonce-bound standard, the header's nonce as the
+ *   key); Tier 2 (the receipt hash) never runs in the tick — historic and
+ *   receipt-only rows belong to the backfill.
  * - Past the recovery horizon the tick stops looking; the payment is still
  *   reachable through the agent-reported path, which is not horizon-bound.
  * - The cursor, both backoffs and the learned range limit are in-memory on purpose (losing them costs
@@ -107,8 +111,9 @@ import {
   LOG_RANGE_LIMIT_REASON,
 } from '../../infra/chain/log-range-limit.js'
 import { deriveX402PaymentNonce } from '@haven_ai/sdk/edge'
-import { observeEip3009MerchantSettlement } from './eip3009-settlement-evidence.js'
-import { findIntentEvidenceSource } from '../../infra/repositories/machine-payments.js'
+import { observeEip3009MerchantSettlement, type Eip3009SettlementNonceProof } from './eip3009-settlement-evidence.js'
+import { eip3009SettlementProofFromHeader } from './eip3009-settlement-evidence.js'
+import { findIntentEvidenceSource, findEvidenceProofsForIntent } from '../../infra/repositories/machine-payments.js'
 import {
   recordMachinePaymentEvidenceBase,
   type MachinePaymentEvidenceSource,
@@ -316,6 +321,7 @@ export async function runEip3009SettlementSweepTick(
     findCandidates?: typeof findSweepableEip3009Intents
     chain?: Partial<Eip3009ChainDeps>
     findEvidenceSource?: (paymentIntentId: string, agentId: string | null) => Promise<MachinePaymentEvidenceSource | null>
+    findProofs?: (paymentIntentId: string, agentId: string | null) => Promise<{ payment_proof_header: string | null } | null>
     recordBase?: (intent: MachinePaymentEvidenceSource, opts?: { suppressFeed?: boolean }) => Promise<EvidenceRecordOutcome>
     observe?: typeof observeEip3009MerchantSettlement
     feed?: typeof feedSettledPaymentBestEffort
@@ -324,6 +330,7 @@ export async function runEip3009SettlementSweepTick(
   const findCandidates = deps.findCandidates ?? findSweepableEip3009Intents
   const chain: Eip3009ChainDeps = { ...defaultChainDeps, ...deps.chain }
   const findEvidenceSource = deps.findEvidenceSource ?? findIntentEvidenceSource
+  const findProofs = deps.findProofs ?? findEvidenceProofsForIntent
   const recordBase = deps.recordBase ?? recordMachinePaymentEvidenceBase
   const observe = deps.observe ?? observeEip3009MerchantSettlement
   const feed = deps.feed ?? feedSettledPaymentBestEffort
@@ -381,7 +388,7 @@ export async function runEip3009SettlementSweepTick(
     const budget = { logCallsLeft: EIP3009_MAX_LOG_CALLS_PER_CHAIN, rangeLimitLogged: false }
     for (const row of rows) {
       try {
-        await sweepOne(row, head, chain, { findEvidenceSource, recordBase, observe, feed }, log, result, nowMs, budget)
+        await sweepOne(row, head, chain, { findEvidenceSource, findProofs, recordBase, observe, feed }, log, result, nowMs, budget)
       } catch (err) {
         log.warn({ err, paymentId: row.id }, 'Eip3009 settlement sweep candidate failed')
       }
@@ -419,6 +426,7 @@ async function sweepOne(
   chain: Eip3009ChainDeps,
   fns: {
     findEvidenceSource: (paymentIntentId: string, agentId: string | null) => Promise<MachinePaymentEvidenceSource | null>
+    findProofs: (paymentIntentId: string, agentId: string | null) => Promise<{ payment_proof_header: string | null } | null>
     recordBase: (intent: MachinePaymentEvidenceSource, opts?: { suppressFeed?: boolean }) => Promise<EvidenceRecordOutcome>
     observe: typeof observeEip3009MerchantSettlement
     feed: typeof feedSettledPaymentBestEffort
@@ -528,6 +536,15 @@ async function sweepOne(
       return
     }
 
+    // #4319 Tier 1, second key: when the DERIVED nonce names nothing, a
+    // stored X-PAYMENT header names a nonce of its own (a random-nonce
+    // client's report carries it) — the same strongest-first proof, scanned
+    // over the range just covered, under the same budget.
+    if (scan.status === 'none') {
+      const tier1Handled = await tier1FromStoredHeader(row, cursor, toBlock, chain, fns, log, result, nowMs, budget)
+      if (tier1Handled) return
+    }
+
     if (scan.status === 'ambiguous') {
       // The token refuses a reused nonce; a second sighting is a fact we do
       // not understand and will not resolve by choosing. Loud, and refused.
@@ -572,6 +589,63 @@ async function sweepOne(
 }
 
 /**
+ * #4319 Tier 1 inside the tick: the payment's stored X-PAYMENT header names
+ * its own nonce — derive the proof from it and scan the SAME range just
+ * covered for `AuthorizationUsed(delegate, headerNonce)`, under the same
+ * per-chain budget. Skipped when the header carries the derived nonce (the
+ * scan above already asked that key) or the budget is spent. Returns whether
+ * the candidate was handled (recorded or definitively not found under this
+ * proof).
+ */
+async function tier1FromStoredHeader(
+  row: SweepableEip3009Row,
+  fromBlock: number,
+  toBlock: number,
+  chain: Eip3009ChainDeps,
+  fns: {
+    findProofs: (paymentIntentId: string, agentId: string | null) => Promise<{ payment_proof_header: string | null } | null>
+    recordBase: (intent: MachinePaymentEvidenceSource, opts?: { suppressFeed?: boolean }) => Promise<EvidenceRecordOutcome>
+    observe: typeof observeEip3009MerchantSettlement
+    feed: typeof feedSettledPaymentBestEffort
+    findEvidenceSource: (paymentIntentId: string, agentId: string | null) => Promise<MachinePaymentEvidenceSource | null>
+  },
+  log: SweepLogger,
+  result: Eip3009SweepTickResult,
+  nowMs: number,
+  budget: { logCallsLeft: number; rangeLimitLogged: boolean },
+): Promise<boolean> {
+  if (budget.logCallsLeft <= 0) return false
+  const proofs = await fns.findProofs(row.id, row.agent_id)
+  const header = proofs?.payment_proof_header ?? null
+  if (!header) return false
+  const proof = eip3009SettlementProofFromHeader(row, header)
+  if (!proof.ok) {
+    // An undecodable stored header is a stored fact, not a chain verdict —
+    // logged, not counted as refused. The next report can replace it.
+    log.debug({ paymentId: row.id, reason: proof.reason }, 'Eip3009 settlement sweep: the stored X-PAYMENT header does not decode — Tier 1 skipped')
+    return false
+  }
+  if (proof.proof.nonce === deriveX402PaymentNonce(row.id).toLowerCase()) return false
+
+  const batchBlocks = effectiveLogBatchBlocks(row.chain_id, EIP3009_LOG_BATCH_BLOCKS, nowMs)
+  const needed = Math.ceil((toBlock - fromBlock + 1) / batchBlocks)
+  const batches = Math.min(needed, EIP3009_MAX_BATCHES_PER_CANDIDATE, budget.logCallsLeft)
+  if (batches <= 0) return false
+  budget.logCallsLeft -= batches
+  const headerScan = await chain.findUsed(
+    row.chain_id,
+    row.token_address,
+    row.to_address,
+    proof.proof.nonce,
+    { fromBlock, toBlock },
+    { batchBlocks, maxBatches: batches },
+  )
+  if (headerScan.status !== 'found') return false
+  await recordOne(row, headerScan.txHash, fns, log, result, proof.proof)
+  return true
+}
+
+/**
  * The recorded write, in the reported path's order: base evidence row with
  * the feed SUPPRESSED, the verified hash recorded beside the funding hash,
  * then ONE feed fire. Mirrors `modules/mpp/evidence.ts`'s eip3009 branch —
@@ -582,12 +656,14 @@ async function recordOne(
   txHash: string,
   fns: {
     findEvidenceSource: (paymentIntentId: string, agentId: string | null) => Promise<MachinePaymentEvidenceSource | null>
+    findProofs: (paymentIntentId: string, agentId: string | null) => Promise<{ payment_proof_header: string | null } | null>
     recordBase: (intent: MachinePaymentEvidenceSource, opts?: { suppressFeed?: boolean }) => Promise<EvidenceRecordOutcome>
     observe: typeof observeEip3009MerchantSettlement
     feed: typeof feedSettledPaymentBestEffort
   },
   log: SweepLogger,
   result: Eip3009SweepTickResult,
+  proofOverride?: Eip3009SettlementNonceProof,
 ): Promise<void> {
   const source = await fns.findEvidenceSource(row.id, row.agent_id)
   if (!source) {
@@ -626,11 +702,12 @@ async function recordOne(
   // #3925: the sweep's proof is the nonce it derived from the payment id —
   // the very key `findAuthorizationUsedTx` found this transaction by. Passed
   // explicitly so the observe call is held to the same nonce-bound standard
-  // it now enforces on the agent-reported path.
-  const settled = await fns.observe(source, txHash, undefined, {
-    nonce: deriveX402PaymentNonce(row.id),
-    nonceDerived: true,
-  })
+  // it now enforces on the agent-reported path. #4319: a Tier 1 header proof
+  // (proofOverride) binds the record to the header's nonce instead —
+  // `nonce_derived` only when that nonce happens to equal the derived one.
+  const proof =
+    proofOverride ?? { nonce: deriveX402PaymentNonce(row.id), nonceDerived: true }
+  const settled = await fns.observe(source, txHash, undefined, proof)
   if (settled.outcome !== 'recorded') {
     if (settled.outcome === 'unverified' && settled.reason.includes('already recorded for another payment')) {
       // Owner question 2's conservative default: a nonce-proven attribution

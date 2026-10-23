@@ -266,6 +266,38 @@ export async function findIntentEvidenceSource(
   return result.rows[0] ?? null
 }
 
+/**
+ * The stored PROOFS the #4319 proof ladder reads off the evidence row: the
+ * X-PAYMENT header (Tier 1's attribution source) and the merchant receipt
+ * payload (Tier 2's candidate hash). Read-only; `null` when the payment has
+ * no evidence row yet — no header was stored, so Tier 1 cannot run and the
+ * ladder falls to Tier 2 (never the reverse: the strongest proof first).
+ */
+export interface EvidenceProofsRow {
+  payment_proof_header: string | null
+  protocol_receipt_header: string | null
+  protocol_receipt_payload: unknown
+}
+
+export const FIND_EVIDENCE_PROOFS_FOR_INTENT_SQL = `SELECT payment_proof_header,
+              protocol_receipt_header,
+              protocol_receipt_payload
+         FROM machine_payment_evidence
+        WHERE payment_intent_id = $1 AND ($2::UUID IS NULL OR agent_id = $2)
+        LIMIT 1`
+
+export async function findEvidenceProofsForIntent(
+  paymentIntentId: string,
+  agentId: string | null,
+  db: Executor = pool,
+): Promise<EvidenceProofsRow | null> {
+  const result = await db.query<EvidenceProofsRow>(FIND_EVIDENCE_PROOFS_FOR_INTENT_SQL, [
+    paymentIntentId,
+    agentId,
+  ])
+  return result.rows[0] ?? null
+}
+
 export const FIND_INTENT_FOR_EVIDENCE_SQL = `SELECT 'payment_intent'::TEXT AS kind,
             id, agent_id, user_id, account_address, chain_id, token_symbol, token_address,
             to_address, amount_raw, amount_human, tx_hash, status, source,

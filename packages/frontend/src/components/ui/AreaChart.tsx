@@ -1,8 +1,11 @@
 /**
  * The balance-over-time area chart (#2948, analytics slice D).
  *
- * One line, a faint area beneath it, and the range's spend annotated as the
- * delta between the two endpoints. Built on the same scale maths and the
+ * One line, a faint area beneath it, and the range's net change annotated as
+ * the signed delta between the two endpoints (#4333: "Net change +$X", not
+ * "gained"/"spent" — the balance moves for reasons the spend chart does not
+ * draw, so the movement is named, not judged). Built on the same scale maths
+ * and the
  * same house pattern as `ui/StackedBarChart`: a hand-drawn SVG inside the
  * primitive's home file (the design-lint `raw-svg` exemption the two chart
  * homes carry there), colour from the `--v2-series-*` tokens (#2948), and
@@ -645,16 +648,17 @@ function AreaChartFull({
             {points[i]?.label}
           </span>
         ))}
-        {/* The endpoint delta: the range's spend, annotated (see header).
+        {/* The endpoint delta: the range's net change, annotated (see header).
             Neutral ink — a fall is not a failure, and the series colours are
-            for series. */}
+            for series. The amount is SIGNED (#4333): "Net change -180.00"
+            states the movement once, in one voice, whichever way it went. */}
         <span
           data-testid="area-delta"
           aria-hidden="true"
           className="absolute block text-right text-xs leading-none text-[var(--v2-ink-3)]"
           style={{ right: pct(plot.pad.right, VIEW_W), top: pct(plot.pad.top - 2, VIEW_H) }}
         >
-          {deltaLabel(plot.delta)} {formatValue(Math.abs(plot.delta))}
+          {deltaLabel(plot.delta)} {signedDelta(plot.delta, formatValue)}
         </span>
       </div>
 
@@ -718,12 +722,28 @@ function AreaChartFull({
 }
 
 /**
- * The word before the endpoint delta. A fall in the balance over a spend
- * range is the range's spend, and saying "spent 180" is truer than saying
- * "net -180" next to a chart of payments; a rise is called a rise.
+ * The word before the endpoint delta (#4333, superseding the "spent"/"gained"
+ * pair): both directions are the same fact — the range's NET CHANGE — so both
+ * read "Net change", and the direction lives in the amount's sign, which the
+ * caller renders beside it (`signedDelta`). A fall in the balance is not a
+ * spend and a rise is not a gain; the balance is per-user and moves for
+ * reasons the spend chart does not draw. Zero is still "unchanged", which is
+ * not a direction to sign.
  */
 export function deltaLabel(delta: number): string {
-  if (delta < 0) return 'spent'
-  if (delta > 0) return 'gained'
-  return 'unchanged'
+  if (delta === 0) return 'unchanged'
+  return 'Net change'
+}
+
+/**
+ * The signed amount the endpoint delta renders: "+110.00" for a rise,
+ * "-120.00" for a fall, the plain figure for zero. The SIGN is added here,
+ * around the caller's formatter — the caller formats magnitudes and knows the
+ * currency; the primitive owns the direction mark so the annotation and the
+ * `deltaLabel` word above it can never disagree (#4333).
+ */
+export function signedDelta(delta: number, formatValue: (value: number) => string): string {
+  if (delta > 0) return `+${formatValue(delta)}`
+  if (delta < 0) return `-${formatValue(Math.abs(delta))}`
+  return formatValue(0)
 }

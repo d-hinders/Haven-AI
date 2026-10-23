@@ -5,6 +5,8 @@ covers:
   - packages/frontend/scripts/screenshot.mjs
   - packages/frontend/src/__tests__/screenshot-fixture.test.ts
   - packages/frontend/src/app/(authenticated)/analytics/AnalyticsClient.tsx
+  - packages/frontend/src/components/analytics/EmptyStates.tsx
+  - packages/frontend/src/hooks/useAnalyticsOverview.ts
   - packages/frontend/src/components/analytics/MerchantsTable.tsx
   - packages/frontend/src/components/analytics/SpendSection.tsx
   - packages/frontend/src/components/ui/StackedBarChart.tsx
@@ -60,52 +62,77 @@ Picking a period writes both: the stored key for this device (as since #2947)
 and the URL, with a `replaceState` — no history entry per change — so a reload
 or a shared link reopens the window on screen. The values on the wire stay the
 endpoint's `7d` / `30d` / `90d` (`analytics-range.test.ts` rejects a bare `7`).
-The header also carries the caption "Last 30 days" from the response's own
-`range.days` — the window the request was answered for, not the one asked for;
-the tiles' comparison text ("vs previous 30 days") is unchanged by any of this.
+
+## The Agent facet (#4333)
+
+Beside the `PeriodPicker` sits an **Agent** facet — the list-controls
+`FacetMenu`, single-select, "All agents" first — writing `?agentId=`, the same
+key `/transactions` reads, so an agent page can link `/analytics?agentId=<id>`
+and the filter lands already set. The facet is a URL state, not a device
+preference: the range keeps `haven.analytics.range`, the agent does not. Its
+options come from the agents LIST (`useAgents`), never the overview's filtered
+response, so the facet cannot vanish the moment an agent is picked. A stale or
+foreign id — the endpoint's 404 (#4332) — clears the filter with a one-line
+notice ("That agent isn't available"), never the page error: a page that
+showed the unfiltered report without saying so would look like the link
+worked. With an agent set, every agent-scoped section narrows; the Payments
+tile names the agent instead of counting agents, the Refused tile gains a
+Review link to that agent's refused attempts, and the balance section says
+"Balance isn't filtered by agent" (the series is per-user; see the epic).
 
 ## What each figure means
 
 **Spent.** The total booked value of confirmed agent payments in the range, in
-the display currency. The tile says "based on N payments"; that N is the
-number of confirmed rows summed. When payments are submitted but their
-settlement evidence has not arrived, the tile names them ("M awaiting
-settlement evidence are not counted") instead of silently shrinking N.
+the display currency. Under the figure sits the previous window's spent, as an
+AMOUNT: "vs $280.10 the 30 days before" — an absolute comparison the endpoint
+already reported (`totals.spent_previous`), not a percentage pill
+(`percentChange` is gone with the delta chips; a ratio of two booked totals is
+a derivation the response did not make).
+
+**Payments.** The count of confirmed payments in the range, captioned "by N of
+M agents" — the agents the window's payments came from, out of the agents the
+response lists — or the agent's own name when the facet narrows the page.
 
 **Refused.** How many payment attempts agents tried to make that were refused
 in the range, and — when they differ — how many attempts those refusals
-represent. The amount shown is the attempted amount. The page never says
-"saved": a refusal is a payment that did not happen, and treating every
-attempted amount as money saved would flatter the number. The tile carries
-only that basis; the two caveats that apply to the whole page — the day the
-refusal ledger starts recording, and the price-cap refusals the ledger never
-sees — are one line under the tile grid, not in the tile (#3204: joined into
-the tile they ran five to seven lines and made it twice its neighbours'
-height). The change chips on every tile write their percentage in the
-display currency's locale, so a `kr` figure sits beside `+15,9 %`, not
-`+15.9%`. (#3195: the dashboard's change line now renders through the same
-rule — the one shared locale helper in `lib/format.ts`, `currencyLocale` —
-where it had carried its own hand-rolled English percent scaffold beside the
-sv-SE `kr` figure. This doc's `formatAnalytics*` helpers delegate to the same
-helper instead of a byte-identical ternary copy; every rendered voice is
-unchanged.)
+represent (`N attempts` on the tile). When the page is filtered to one agent,
+the tile adds a **Review** link to that agent's refused attempts
+(`/agents/<id>?tab=activity&status=refused`, #4323); with all agents shown the
+link is absent, because there is no page-level refused list to review. The
+page never says "saved": a refusal is a payment that did not happen. The two
+recording caveats — the day the refusal ledger starts recording, and the
+price-cap refusals the ledger never sees — moved into an ⓘ hint on the tile's
+label (#4333): a tooltip elaborating on the count the reader is already
+looking at, not a footnote line making the tile twice its neighbours' height.
 
-**Budget used.** What each agent's own budget allows and how much of it is
-gone. The used amount is read from the chain per delegation, in token units,
-against that delegation's own period — not from a Haven-side running total.
-The tile's headline is the band count ("2 of 3 agents above 75% of their
-period budget"); per-agent detail lives in the agents table.
+**Agents near their budget.** "N of M" — of the agents WITH budgets, how many
+are above 75% of a period budget (the band count the endpoint reports). The
+old "Budget used 0/5" headline is retired: a band count without its
+denominator's context read as a budget figure. Per-agent detail lives in the
+agents table.
 
 **Agents table.** It lists every agent that is not revoked, even one with no
 activity in the range, since its budget column still informs. A revoked agent
 is listed only when it had a confirmed payment or a refusal in the range, or
 still holds an active budget (revoking flips only the agent's status, so that
-budget can still be spent and the Budget used tile counts it) (#3540).
+budget can still be spent and the Agents-near-their-budget tile counts it)
+(#3540). Its columns (#4333): the agent's Monogram and name (a revoked agent
+gets the shared "Revoked" badge, not a truncated row), **Spent** with "N% of
+spend" under it (the former Share column merged into the figure it was a share
+of), Payments, **Refused** as a link to that agent's refused attempts,
+**Budget** through the shared caption helper — whose symbol-decimals fallback
+(#4333) fixes the "0.00 of 0.00" caption a symbol-only row used to read —
+**Top merchant** by name with a merchant monogram (an unresolved one reads
+"Unknown recipient", the full address in its tooltip — no cell renders a
+`0x…` address AS a label), and **Last paid**. The whole row links to the
+agent.
 
-**Fees paid to Haven.** What Haven has charged, in the display currency.
-While fee charging is switched off, the tile says so plainly ("No fees yet —
-Haven is not charging fees") rather than rendering a bare 0. The API reports
-whether the flag is on so the tile cannot go stale in either direction.
+**Fees paid to Haven.** What Haven has charged, in the display currency. The
+tile EXISTS only while the fee flag is on — a fourth or fifth tile. While fee
+charging is switched off the tile is absent rather than rendering "No fees
+yet": its one job (saying the product charges nothing) is done by the absence,
+and a $0.00 would report "nothing charged this period", a different fact. The
+gas-sponsored count rides the tile when there is one to carry it.
 
 **Spend over time.** One bar per day *with activity* in the range — a day
 with no payment and no refusal is not drawn, so the axis is the days that
@@ -135,8 +162,11 @@ releases it — on touch too, where no pointer ever leaves. A bar too short
 for either drop (it would cover the whole bar to save a sliver) keeps the
 resting callout and loses its top instead. On a narrow screen the detail
 is a panel below the plot.
-Below three days of data the chart is not drawn (see the sparse rule below)
-— a line through one point agrees with every trend.
+Below three days of data the charts are not drawn — each chart's own floor
+(`MIN_CHARTABLE_DAYS`), not a page-level band: since #4333 the sections
+render whenever the window has any activity, each keeping its own guard, and
+the tiles and tables stay (a line through one point agrees with every trend,
+but a total over one day is still the total over that day).
 
 **Top merchants.** The recipients your agents paid most, ranked by spent.
 A merchant's label is resolved by the API in a fixed order: the host of the
@@ -145,17 +175,28 @@ one of your own accounts at that address (address-only, across chains; the
 oldest account wins a shared address), else your contact's name for that
 address, else the name on the payment's receipt, else nothing — the row
 shows "Unknown recipient" where the transaction history says "New
-recipient". Each row also carries `filter_address`, the address the
-transaction history's search matches, which the "View in Transactions" link
-targets. Each row also shows payments, paying agents (up to three,
-then "and N more"), and first and last seen in the range. A row links into
-the transaction history for that merchant; until the merchant filter exists
-there, it links to the transaction history unfiltered — the row never links
-somewhere that shows something else.
+recipient", with the naming step as a KIND line under the name: "Your
+account" (own account), "Paid API" (x402 host), or the short address for an
+unknown recipient (#4333). The Address COLUMN is gone — the address is
+metadata, carried in the unknown recipient's tooltip and the mobile row's
+disclosure, never as a label. Each row also carries `filter_address`, the
+address the transaction history's search matches: the "View in Transactions"
+link targets `/transactions?search=<filter_address>&direction=out&period=<
+current>` — plus `&agentId=<id>` when the Agent facet is set (#4333) — so the
+history opens already narrowed to that recipient. Each row also shows
+payments, paying agents as TEXT (up to three, then "and N more"; a monogram
+stack would be a new pattern where one line reads fine), and **Last paid**
+in the same relative voice the agents table uses.
 
-**Balance over time.** The total value of the tokens in your Haven account,
+**Balance over time.** The total value of the tokens in all your accounts,
 as Haven's daily snapshots recorded it at each day's end, in the display
-currency. This is a record of what was held, not a live portfolio valuation.
+currency — the subtitle says "all your accounts", and when the Agent facet is
+set it adds "Balance isn't filtered by agent": the series is per-user and is
+deliberately not narrowed (#4333). This is a record of what was held, not a
+live portfolio valuation. The endpoint's delta annotation reads "**Net
+change**" with a SIGNED amount ("Net change +298,43 kr") — a fall is not a
+spend and a rise is not a gain; the balance moves for reasons the spend chart
+does not draw (#4333).
 Under the SEK display currency, days snapshotted before the SEK column
 existed (migration 090) are omitted from the series rather than drawn as
 zero — the page distinguishes a day with no SEK figure from a day that was
@@ -185,7 +226,7 @@ desktop. A flat series pads by ±2 so every
 integer tick stays distinct (±1 stepped by 0,5 and printed one label twice
 without the öre). The annotation and
 the tooltip print the amount once, in the display currency's own format
-("gained 298,43 kr"), never with the currency code appended again.
+("Net change +298,43 kr", signed, #4333), never with the currency code appended again.
 
 ## Which payments count, and why
 
@@ -279,8 +320,9 @@ Three screenshot-harness scenarios are registered for this screen in
   merchants include a contact-labelled row, a receipt-named row and an
   address-only row, so all three label resolutions are on the capture.
 - `analytics-empty` — the endpoint answers the all-zero overview (no
-  payments, agents, merchants or balance rows in range): the page's own
-  empty state for an account with nothing in the range, not an error.
+  payments, agents, merchants or balance rows in range): the new-user empty
+  state ("No agent activity yet"), because the fixture carries no agents at
+  all (#4333) — not an error.
 - `analytics-error` — the endpoint answers `503` via the harness's
   `ScenarioHttpError`, so the capture shows the page's failure path.
 

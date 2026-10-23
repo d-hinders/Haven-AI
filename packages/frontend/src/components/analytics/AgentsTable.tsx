@@ -1,6 +1,8 @@
 'use client'
 
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
+import { useState } from 'react'
 import {
   budgetUsedPercent,
   formatAnalyticsAmount,
@@ -8,21 +10,21 @@ import {
   formatBudgetTokenValue,
   formatSharePercent,
   lastPaymentCaption,
-  merchantLabel,
 } from '@/lib/analytics-format'
 import type { AnalyticsCurrency } from '@/lib/analytics-format'
 import { agentStatusPresentation } from '@/lib/payment-status'
 import { budgetCaption, UNREAD_CAPTION } from '@/lib/budget-caption'
-import { useState } from 'react'
-import { BudgetMeter } from '@/components/haven'
+import { BudgetMeter } from '@/components/haven/BudgetMeter'
 import { Card } from '@/components/ui/Card'
+import { Monogram } from '@/components/ui/Monogram'
 import { Row } from '@/components/ui/Row'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Table, tableColumnClass } from '@/components/ui/Table'
+import { Tooltip } from '@/components/ui/Tooltip'
 import type { AnalyticsAgentRow } from '@/types/analytics'
 
 /**
- * The agents table (#2947, epic #2944 slice C).
+ * The agents table (#2947, epic #2944 slice C; the #4333 rebuild).
  *
  * One row per agent the endpoint lists (#3540: every non-revoked agent, plus
  * a revoked one that had activity in range or still holds a budget), in the
@@ -33,6 +35,18 @@ import type { AnalyticsAgentRow } from '@/types/analytics'
  * rather than choosing its own (two orders would be two answers to "which
  * agent spent most"). Every column is a field on one agent in the
  * response; the table computes nothing about the money.
+ *
+ * ── The columns (#4333) ─────────────────────────────────────────────────────
+ *
+ * Agent (Monogram, name, the revoked badge), Spent with "N% of spend" under
+ * it — the former Share column merged into the figure it was a share OF —
+ * Payments, Refused as a link to that agent's refused attempts
+ * (`/agents/<id>?tab=activity&status=refused`, #4323), Budget (the shared
+ * caption helper's meter), Top merchant by name with a merchant monogram (an
+ * unresolved one reads "Unknown recipient", the address riding the tooltip —
+ * no cell renders a `0x…` AS a label), and Last paid. The WHOLE row links to
+ * the agent: the row carries the pointer and the navigation, the Agent cell's
+ * `Link` stays the keyboard-reachable half of it.
  *
  * ── Why there are two renderings ────────────────────────────────────────────
  *
@@ -55,17 +69,24 @@ import type { AnalyticsAgentRow } from '@/types/analytics'
  * Columns the table itself drops (`revealAt="xl"`) are the ones that survive
  * the narrow-desktop case: below a 974px container — the shell's own `xl`
  * tooth — there is not room for seven columns and a sidebar, and losing
- * share/top-merchant first is the choice the primitive's stage ladder already
- * makes for every table in the app.
+ * top merchant first is the choice the primitive's stage ladder already
+ * makes for every table in the app (`e2e/table-container-collapse.spec.ts`
+ * anchors on it).
  */
 
 const COLUMN_PAD = 'px-4 py-3'
+
+/** The refused-attempts route (#4323): the agent's activity tab, pre-filtered. */
+function refusedAttemptsHref(agentId: string): string {
+  return `/agents/${agentId}?tab=activity&status=refused`
+}
 
 function StatusCell({ agent }: { agent: AnalyticsAgentRow }) {
   const presentation = agentStatusPresentation(agent.status)
   const revoked = agent.status === 'revoked'
   return (
     <span className="inline-flex items-center gap-2 min-w-0">
+      <Monogram name={agent.name} size="xs" decorative />
       <span className="truncate text-sm font-medium text-[var(--v2-ink)]">{agent.name}</span>
       {/* A revoked agent stays in the table rather than dropping out of it: it
           had activity in this range, or still holds a budget, and hiding the
@@ -87,6 +108,9 @@ function BudgetCell({ agent }: { agent: AnalyticsAgentRow }) {
         // the period length is derived from the response's own bounds
         // (period_end − period_start), the anchor is the bounds' start, and
         // there is no `expires_at` on this endpoint — no "expires" branch.
+        // #4333 fixed the helper itself: a symbol-only row (chainId null)
+        // divides by the SYMBOL's decimals, so the caption's figures agree
+        // with the figure above the bar instead of reading "0.00 of 0.00".
         const caption = budgetCaption(
           {
             token: budget.token,
@@ -128,29 +152,23 @@ function BudgetCell({ agent }: { agent: AnalyticsAgentRow }) {
 }
 
 /**
- * The ONE merchant-label rule lives in `lib/analytics-format.merchantLabel`
- * (shared with slice E's MerchantsTable, so the two tables cannot diverge on
- * how an unresolved address reads). It is imported, not restated here.
+ * The top-merchant cell. `top_merchant.label` is nullable since #4332 (null =
+ * nothing resolved — no contact, no receipt name, no x402 host), and #4333
+ * renders that as "Unknown recipient": the NAME cell never shows an address.
+ * The full address rides the tooltip (elaboration on a truncated form — the
+ * one thing a tooltip is for), and the monogram is keyed on the name either
+ * way so an unknown keeps a stable tint.
  */
-
 function MerchantCell({ agent }: { agent: AnalyticsAgentRow }) {
   if (agent.top_merchant === null) {
     return <span className="text-sm text-[var(--v2-ink-3)]">None in this range</span>
   }
-  // #4332: `top_merchant.label` is nullable now (null = nothing resolved).
-  // Pixel-neutral shim — an unresolved label renders the address exactly as
-  // the pre-#4332 wire did; #4333 replaces this with "Unknown recipient".
-  const { value, title } = merchantLabel(agent.top_merchant.label ?? agent.top_merchant.address)
+  const name = agent.top_merchant.label ?? 'Unknown recipient'
+  const known = agent.top_merchant.label !== null
   return (
-    <span
-      // Tabular numerals only on the address branch: a hexadecimal string is a
-      // measurement of identity, not of quantity, and the tabular ramp is what
-      // keeps two rows' addresses from jittering. A name keeps normal spacing.
-      className={`text-sm text-[var(--v2-ink)]${title ? ' v2-tabular' : ''}`}
-      title={title}
-    >
-      {value}
-    </span>
+    <Tooltip label={agent.top_merchant.address} mono={!known}>
+      <span className={`text-sm text-[var(--v2-ink)]${known ? '' : ' v2-tabular'}`}>{name}</span>
+    </Tooltip>
   )
 }
 
@@ -162,6 +180,7 @@ export function AgentsTable({
   agents: AnalyticsAgentRow[]
   currency: AnalyticsCurrency
 }) {
+  const router = useRouter()
   return (
     <Card hover={false} className="overflow-hidden">
       <Card.Header as="h2" title="Agents" />
@@ -171,22 +190,27 @@ export function AgentsTable({
           <Table.Head collapseWhenNarrow={false}>
             <tr>
               <Table.HeaderCell align="left">Agent</Table.HeaderCell>
-              <Table.HeaderCell align="right">Spend</Table.HeaderCell>
-              <Table.HeaderCell align="right" revealAt="xl">
-                Share
-              </Table.HeaderCell>
+              <Table.HeaderCell align="right">Spent</Table.HeaderCell>
               <Table.HeaderCell align="right">Payments</Table.HeaderCell>
-              <Table.HeaderCell align="right">Refusals</Table.HeaderCell>
-              <Table.HeaderCell align="left">Budget used</Table.HeaderCell>
+              <Table.HeaderCell align="right">Refused</Table.HeaderCell>
+              <Table.HeaderCell align="left">Budget</Table.HeaderCell>
               <Table.HeaderCell align="left" revealAt="xl">
                 Top merchant
               </Table.HeaderCell>
-              <Table.HeaderCell align="left">Last payment</Table.HeaderCell>
+              <Table.HeaderCell align="left">Last paid</Table.HeaderCell>
             </tr>
           </Table.Head>
           <Table.Body>
             {agents.map((agent) => (
-              <tr key={agent.id} className="hover:bg-[var(--v2-surface-hover)] transition-colors duration-150">
+              <tr
+                key={agent.id}
+                className="cursor-pointer hover:bg-[var(--v2-surface-hover)] transition-colors duration-150"
+                // The whole row is a way in (#4333). The navigation itself is
+                // client-side so the hover state never flashes a full reload;
+                // the Agent cell's Link is the keyboard/AT half of the same
+                // destination, so a pointer-less reader loses nothing.
+                onClick={() => router.push(`/agents/${agent.id}`)}
+              >
                 <td className={COLUMN_PAD}>
                   <Link
                     href={`/agents/${agent.id}`}
@@ -200,27 +224,31 @@ export function AgentsTable({
                       colour lives on its monogram, the same tint the spend
                       chart fills the agent with, so the table carries one
                       colour per agent without a second mark in this cell. */}
-                  <span className="v2-tabular text-sm font-medium text-[var(--v2-ink)]">
+                  <span className="v2-tabular block text-sm font-medium text-[var(--v2-ink)]">
                     {formatAnalyticsAmount(agent.spent, currency)}
                   </span>
-                </td>
-                <td className={`${COLUMN_PAD} text-right ${tableColumnClass('xl')}`}>
-                  <span className="v2-tabular text-sm text-[var(--v2-ink-2)]">
-                    {formatSharePercent(agent.share)}
+                  {/* The former Share column, merged into the figure it was a
+                      share of (#4333): one cell, the amount leading and its
+                      slice of the window's spend under it. */}
+                  <span className="v2-tabular block text-xs text-[var(--v2-ink-3)]">
+                    {formatSharePercent(agent.share)} of spend
                   </span>
                 </td>
                 <td className={`${COLUMN_PAD} text-right`}>
                   <span className="v2-tabular text-sm text-[var(--v2-ink-2)]">{agent.payments}</span>
                 </td>
                 <td className={`${COLUMN_PAD} text-right`}>
-                  {/* Refusals and the attempts behind them: one cell, because
-                      the pair is one fact (a dedupe upstream makes rows and
-                      attempts differ), and two columns would double the
-                      width of the loudest zero. */}
-                  <span className="v2-tabular text-sm text-[var(--v2-ink-2)]">
+                  {/* Refused attempts as a way in (#4333): the count links to
+                      the agent's activity tab, pre-filtered to its refusals
+                      (#4323 has landed). Rows and attempts can differ (a
+                      dedupe upstream), so the attempts ride the cell. */}
+                  <Link
+                    href={refusedAttemptsHref(agent.id)}
+                    className="v2-tabular text-sm text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 rounded"
+                  >
                     {agent.refusals}
                     {agent.refusal_attempts !== agent.refusals && ` · ${agent.refusal_attempts} attempts`}
-                  </span>
+                  </Link>
                 </td>
                 <td className={COLUMN_PAD}>
                   <BudgetCell agent={agent} />
@@ -278,6 +306,7 @@ function MobileAgentRow({
       <Row
         title={
           <span className="inline-flex items-center gap-2 min-w-0">
+            <Monogram name={agent.name} size="xs" decorative />
             <span className="truncate">{agent.name}</span>
             {agent.status === 'revoked' && <StatusBadge tone={presentation.tone}>{presentation.label}</StatusBadge>}
           </span>
@@ -306,14 +335,17 @@ function MobileAgentRow({
         <dl className="mt-2 space-y-1.5 rounded-md bg-[var(--v2-surface)] p-3 text-xs">
           <DisclosureLine term="Payments" value={String(agent.payments)} />
           <DisclosureLine
-            term="Refusals"
+            term="Share of spend"
+            value={formatSharePercent(agent.share)}
+          />
+          <DisclosureLine
+            term="Refused"
             value={`${agent.refusals}${agent.refusal_attempts !== agent.refusals ? ` · ${agent.refusal_attempts} attempts` : ''}`}
           />
-          <DisclosureLine term="Share" value={formatSharePercent(agent.share)} />
           <DisclosureLine term="Spend" value={formatAnalyticsAmount(agent.spent, currency)} />
           <DisclosureLine
             term="Top merchant"
-            {...merchantLabel(agent.top_merchant?.label ?? agent.top_merchant?.address ?? 'None in this range')}
+            value={agent.top_merchant?.label ?? (agent.top_merchant ? 'Unknown recipient' : 'None in this range')}
           />
           <DisclosureLine
             term="Last payment"
@@ -322,12 +354,20 @@ function MobileAgentRow({
           />
         </dl>
       )}
-      <Link
-        href={`/agents/${agent.id}`}
-        className="mt-2 inline-block text-xs font-medium text-[var(--v2-brand)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 rounded"
-      >
-        Open agent
-      </Link>
+      <div className="mt-2 flex items-center gap-3">
+        <Link
+          href={`/agents/${agent.id}`}
+          className="inline-block text-xs font-medium text-[var(--v2-brand)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 rounded"
+        >
+          Open agent
+        </Link>
+        <Link
+          href={refusedAttemptsHref(agent.id)}
+          className="inline-block text-xs font-medium text-[var(--v2-brand)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 rounded"
+        >
+          View refusals
+        </Link>
+      </div>
     </div>
   )
 }

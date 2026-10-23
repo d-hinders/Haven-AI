@@ -1,5 +1,5 @@
 import { currentPeriodBounds, shouldMarkApprox } from '@haven_ai/core'
-import { formatAllowanceAmount, getTokenDecimals } from './allowance-format'
+import { defaultTokenUnitDecimals, formatAllowanceAmount, getTokenDecimals } from './allowance-format'
 import { formatFiatDisplay } from './format'
 import { formatSubBudgetDate } from './sub-budget'
 
@@ -136,7 +136,12 @@ export interface BudgetAmountOptions {
 }
 
 function tokenAmount(atomic: string, symbol: string, chainId: number | null | undefined): string {
-  const decimals = chainId != null ? getTokenDecimals(chainId, symbol) : undefined
+  // #4333: a `chainId: null` row (the analytics read, which carries the token's
+  // SYMBOL only) falls back to the symbol's own decimals — the same table
+  // `formatAllowanceForToken` consults — instead of a blind 18. A 1.00 USDC
+  // budget divided by 10^18 read "0.00 of 0.00"; divided by 10^6 it reads
+  // "0.00 of 1.00". Unknown symbols still fall to 18.
+  const decimals = chainId != null ? getTokenDecimals(chainId, symbol) : defaultTokenUnitDecimals(symbol)
   // Always two decimals. The SYMBOL is appended by the phrase that uses the
   // amount — a caption names it once ("1.25 of 5.00 USDC"), a note names it
   // on its own figure ("incl. 1.25 USDC by Helper").
@@ -149,7 +154,8 @@ function tokenAmount(atomic: string, symbol: string, chainId: number | null | un
 
 /** Bare fiat — "$1.25", or 4 decimals under a cent ("<0,0001 kr" below 0.00005; 2026-10-22, superseding #3897). An unparseable amount falls back to token mode. */
 function fiatValue(atomic: string, symbol: string, rate: BudgetRate, chainId: number | null | undefined): string {
-  const decimals = chainId != null ? getTokenDecimals(chainId, symbol) : undefined
+  // Same #4333 fallback as `tokenAmount`: symbol decimals when no chain is given.
+  const decimals = chainId != null ? getTokenDecimals(chainId, symbol) : defaultTokenUnitDecimals(symbol)
   // Every token decimal, not the 4-digit display default (#3897): truncating
   // first turned a sub-cent amount into "0" before it was converted, so the
   // caption printed "≈$0.00" where "≈0,0001 kr" is the true figure.

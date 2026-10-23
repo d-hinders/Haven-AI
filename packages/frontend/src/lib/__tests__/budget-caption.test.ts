@@ -142,6 +142,32 @@ describe('states', () => {
     })
   })
 
+  // #4333: the analytics read projects a symbol-only row — `chainId: null` —
+  // because the overview carries the token's SYMBOL, not its chain. The
+  // caption must divide by the SYMBOL's decimals (the same table
+  // `formatAllowanceForToken` consults), not a blind 18: a 1.00 USDC budget
+  // is 1_000_000 atomic, and at 18 decimals it read "0.00 of 0.00".
+  it('a symbol-only row (chainId null) divides by the symbol\u2019s decimals, so 1.00 USDC reads 0.00 of 1.00 (#4333)', () => {
+    const caption = budgetCaption(
+      row({
+        budgetAtomic: '1000000',
+        usedAtomic: '0',
+        chainId: null,
+        // A period end after now, so the caption is the meter and its refill
+        // phrase is the deterministic relative band.
+        periodEndMs: ANCHOR_NOW + 3_600_000,
+      }),
+      { nowMs: ANCHOR_NOW, timeZone: 'UTC' },
+    )
+    expect(caption.kind).toBe('meter')
+    if (caption.kind !== 'meter') return
+    // Full style joins the figures and the symbol with a plain space; the
+    // " · " separators are the caption's own. Asserted as the whole string so
+    // a decimals regression cannot hide behind a partial match.
+    expect(caption.caption).toBe('0.00 of 1.00 USDC used this period · refills in 3h')
+    expect(caption.caption).not.toContain('0.00 of 0.00')
+  })
+
   it('expired: no meter, no countdown', () => {
     const caption = budgetCaption(row({ expiresSec: Math.floor(ANCHOR_NOW / 1000) - 60 }), { nowMs: ANCHOR_NOW })
     expect(caption).toEqual({ kind: 'expired', caption: 'This budget has expired and can no longer be spent.' })

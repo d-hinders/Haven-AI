@@ -100,7 +100,9 @@ Sign in on both installs if the demo will show both.
 6. **On the phone: open Analytics.** From the sidebar (the More sheet on the
    phone), open Analytics and show what the purchase just did to the numbers:
    the amount in **Spent**, the merchant in **Top merchants**, and — if the
-   run's budget allows — the **Budget used** band for the agent that paid.
+   run's budget allows — the **Agents near their budget** tile for the agent
+   that paid (#4333 renamed the band-count tile; per-agent detail is in the
+   agents table's Budget column).
    Point out **Refused** while you are there: the same screen that shows what
    the agent spent shows what it was not allowed to spend. Nothing on this
    screen is an action; it is the "what did that cost?" answer, and it stays

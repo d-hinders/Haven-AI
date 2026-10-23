@@ -182,41 +182,43 @@ const POPULATED_MIN_TEXT_CHARS = 60
 /** The five copy: the strings the page owns, quoted exactly as it renders them. */
 const COPY = {
   heading: 'Analytics',
-  rangeCaption: 'Last 30 days',
   /**
-   * #4116 retarget: the SegmentedControl wrapper is gone; the header carries
-   * the list-controls Period trigger — a resting menu button whose accessible
-   * name is "{label}: {value}" (`listTriggerClasses`), presets only. The
-   * "Analytics date range" radiogroup it replaced asserts ABSENT below.
+   * #4333 retarget: the header carries the Agent facet before the Period
+   * trigger, and the bare window caption beside the picker is gone — the
+   * trigger's own value span is the ONE element carrying the window words.
    */
+  agentFacetTrigger: 'Agent: All agents',
   periodTrigger: 'Period: Last 30 days',
   rangeControlLegacyName: 'Analytics date range',
-  spentBasis: 'based on 5 payments',
-  unsettled: '1 awaiting settlement evidence is not counted',
-  refusedCount: '2 refused payments',
-  refusedAttempts: 'across 3 attempts',
-  refusedAmount: '$3.00 attempted',
   /**
-   * The #3013 ledger-floor clause (`RefusalsRecordedFromFootnote`) inside the
-   * Refused tile's footnote: the fixture's `basis.refusals_recorded_from`
-   * ('2026-05-28', the harness's own key at `screenshot.mjs:1433`) rendered by
-   * the client's `formatFloorDate` — en-GB day numeric + short month gives
-   * '28 May'. The date on screen is the response's, so the locator pins the
-   * response's value, not an invented one.
+   * #4333: the Spent comparison is the previous window's booked total, as an
+   * AMOUNT — the fixture's `totals.spent_previous` ('280.10') under
+   * `$324.75`, formatted through the same money voice as the figure. No
+   * delta pill and no "based on N payments" basis line any more: the
+   * comparison is absolute and the Payments tile owns the count.
+   */
+  spentComparison: 'vs $280.10 the 30 days before',
+  paymentsCaption: 'by 2 of 2 agents',
+  /**
+   * #4333: the Refused tile's caption is the attempts behind the count
+   * ("3 attempts"); the attempted AMOUNT is no longer on the tile, and the
+   * Review link exists only under a single-agent filter — this page is
+   * unfiltered, so it is asserted absent.
+   */
+  refusedAttempts: '3 attempts',
+  /**
+   * #4333: the two recording caveats moved onto the label as an ⓘ hint (a
+   * `StatTile` hint + `Tooltip`). The ledger floor is the fixture's
+   * `refusals_recorded_from` ('2026-05-28') rendered by the client's
+   * `formatFloorDate` — en-GB day + short month gives '28 May' — and the
+   * price-cap clause is the same sentence the old footnote line printed.
+   * Both are read off the hint trigger's aria-label, which names the content
+   * for assistive tech whether or not the tooltip is open.
    */
   refusalsRecordedFrom: 'Refusals are recorded from 28 May',
-  /**
-   * The #3055 limit-of-visibility clause in the same footnote: the ONE
-   * refusal class the ledger never sees, named by who raises it — the price
-   * cap lives in the agent's own runtime. The hosted prepare-time budget
-   * refusal it once also named is recorded since #3109 (`source:
-   * 'hosted_prepare'`) and counted by the tile, so naming it as unrecorded
-   * would contradict the count; the negative pin below holds that.
-   */
   refusedUnrecorded: "Price-cap refusals in your agent's runtime are not recorded.",
-  budgetBands: '1 of 2 agents above 75% of their period budget',
-  feesOff: 'Haven is not charging fees.',
-  gasSponsored: 'Haven sponsored 7 operations',
+  nearBudgetCount: '1/2',
+  nearBudgetCaption: 'above 75% of a period budget',
   agentResearch: 'Research agent',
   agentRetired: 'Data-feed agent',
   merchantsHeading: 'Top merchants',
@@ -232,13 +234,6 @@ const COPY = {
   retry: 'Try again',
   frozenLastPaymentRecent: '1d ago',
   frozenLastPaymentOlder: '2d ago',
-  /**
-   * The tiles' own delta caption (`TileGrid`'s `windowCaption`): the window
-   * COMPARISON, not the window label. It rides the two tiles that carry a
-   * delta — Spent and Refused; Budget used shows a band count and Fees shows
-   * no delta while the fee flag is off.
-   */
-  tilesDeltaCaption: 'vs previous 30 days',
   /**
    * The two agents' budget figures, word for word what `formatBudgetTokenValue`
    * prints for the fixture delegations (`formatAllowanceForToken` at USDC's
@@ -261,6 +256,16 @@ const COPY = {
    */
   unreadBudget: 'Usage this period couldn’t be read',
 } as const
+
+/** The four tile test ids of the #4333 grid. The fees tile is absent while
+ *  the fixture's fee flag is off (the empty fixture too), asserted per
+ *  scenario below. */
+const TILE_IDS = [
+  'stat-tile-spent',
+  'stat-tile-payments',
+  'stat-tile-refused',
+  'stat-tile-agents-near-their-budget',
+] as const
 
 const OVERVIEW_PATH = '/analytics/overview'
 
@@ -308,63 +313,46 @@ const SCENARIOS: Scenario[] = [
     name: 'populated',
     body: analyticsOverview,
     async assert(page, vp) {
-      // ── The four tiles, and the basis each one quotes ─────────────────────
+      // ── The four tiles, and the basis each one quotes (#4333) ─────────────
       const tiles = section(page, 'analytics-tiles')
       await expect(tiles).toHaveCount(1)
-      for (const testId of [
-        'stat-tile-spent',
-        'stat-tile-refused',
-        'stat-tile-budget-used',
-        'stat-tile-fees-paid-to-haven',
-      ]) {
+      for (const testId of TILE_IDS) {
         await expect(page.getByTestId(testId)).toHaveCount(1)
       }
-      // The most load-bearing line on the page is the basis, not the figure:
-      // the count the total was computed over, and what was left out of it.
-      await expect(section(page, 'stat-tile-spent').getByText(COPY.spentBasis)).toHaveCount(1)
-      await expect(
-        section(page, 'stat-tile-spent').getByText(COPY.unsettled),
-        'the one submitted payment awaiting settlement evidence must be named on the ' +
-          'face of the tile: a silently smaller total is indistinguishable from a ' +
-          'total that was always that size',
-      ).toHaveCount(1)
-      await expect(section(page, 'stat-tile-refused').getByText(COPY.refusedCount)).toHaveCount(1)
+      // The fees tile is ABSENT while the fixture's fee flag is off (#4333):
+      // a $0.00 there would report "nothing charged this period", which is
+      // not the same fact as "the product is not charging fees" — and the
+      // absence IS the saying now.
+      await expect(page.getByTestId('stat-tile-fees-paid-to-haven')).toHaveCount(0)
+      // The Spent comparison is absolute: the previous window's booked total
+      // as an amount, never a percentage pill.
+      await expect(section(page, 'stat-tile-spent').getByText(COPY.spentComparison)).toHaveCount(1)
+      await expect(section(page, 'stat-tile-payments').getByText(COPY.paymentsCaption)).toHaveCount(1)
       await expect(section(page, 'stat-tile-refused').getByText(COPY.refusedAttempts)).toHaveCount(1)
-      await expect(section(page, 'stat-tile-refused').getByText(COPY.refusedAmount)).toHaveCount(1)
-      // The #3013 ledger-floor clause and the #3055 limit-of-visibility clause
-      // ride the page-level caveat line under the tile grid (#3204 moved them
-      // out of the Refused tile, which they made twice its neighbours' height):
-      // a floor the endpoint reports but the page drops is a silently larger
-      // refusals total, the same defect class the basis lines above pin, and
-      // the one class the ledger never sees is named rather than silently
-      // absent from the count. Neither rides the tile any more.
+      // Unfiltered page: no Review link — there is no page-level refused
+      // list to review (#4333), and no attempted amount on the tile.
+      await expect(section(page, 'stat-tile-refused').getByText('Review')).toHaveCount(0)
+      await expect(section(page, 'stat-tile-refused').getByText(/\$3\.00 attempted/)).toHaveCount(0)
+      // The two recording caveats ride the ⓘ hint on the label (#4333): the
+      // ledger floor the response reports and the one class the ledger never
+      // sees, named rather than silently absent from the count. Neither
+      // renders as visible tile text — they are the hint's aria-label and
+      // its tooltip — and no page-level caveat line exists any more.
+      const refusedHint = section(page, 'stat-tile-refused').getByTestId('analytics-refused-hint')
+      await expect(refusedHint).toHaveCount(1)
+      await expect(refusedHint).toHaveAttribute('aria-label', new RegExp(COPY.refusalsRecordedFrom.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+      await expect(refusedHint).toHaveAttribute('aria-label', new RegExp(COPY.refusedUnrecorded.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+      await expect(refusedHint).not.toHaveAttribute('aria-label', /hosted tools|quote/i)
+      await expect(page.getByTestId('analytics-refusal-caveats')).toHaveCount(0)
       await expect(
-        section(page, 'analytics-refusal-caveats').getByText(COPY.refusalsRecordedFrom),
-        'the ledger floor the response reports must be named on the page',
+        section(page, 'stat-tile-agents-near-their-budget').getByText(COPY.nearBudgetCount),
       ).toHaveCount(1)
-      await expect(section(page, 'stat-tile-refused').getByText(COPY.refusalsRecordedFrom)).toHaveCount(0)
       await expect(
-        section(page, 'analytics-refusal-caveats').getByText(COPY.refusedUnrecorded),
-        "the footnote must name the price cap the agent's own runtime applies, and nothing the ledger records",
+        section(page, 'stat-tile-agents-near-their-budget').getByText(COPY.nearBudgetCaption),
       ).toHaveCount(1)
-      // Held as negatives: the quote tools quote and refuse nothing, so naming
-      // a quote would describe a refusal no code path raises; and the hosted
-      // prepare-time budget refusal IS recorded since #3109, so a footnote
-      // calling it unrecorded would contradict the count above it (#3055).
-      await expect(section(page, 'analytics-refusal-caveats').getByText(/quote/i)).toHaveCount(0)
-      await expect(section(page, 'analytics-refusal-caveats').getByText(/hosted tools/i)).toHaveCount(0)
-      await expect(section(page, 'stat-tile-budget-used').getByText(COPY.budgetBands)).toHaveCount(1)
-      await expect(section(page, 'stat-tile-fees-paid-to-haven').getByText(COPY.feesOff)).toHaveCount(1)
-      await expect(
-        section(page, 'stat-tile-fees-paid-to-haven').getByText(COPY.gasSponsored),
-      ).toHaveCount(1)
-      // The tiles' delta captions: `vs previous 30 days` on the two tiles that
-      // carry a delta (Spent, Refused). The window LABEL itself ('Last 30
-      // days', `rangeCaption(30)`) is NOT a tile string — it renders in the
-      // page header beside the range control, and is asserted below on
-      // `analytics-page`, not here (#3038 structure run: scoping it to the
-      // tiles grid resolves 0 and every populated capture times out on it).
-      await expect(tiles.getByText(COPY.tilesDeltaCaption)).toHaveCount(2)
+      // No delta chips render anywhere on the grid (#4333): the comparison is
+      // the footnote, and no StatusBadge percent chip rides the figures.
+      await expect(tiles.getByText(/vs previous 30 days/)).toHaveCount(0)
 
       // ── Spend over time (#3051): the chart slice D built, on the page ────
       // One heading, the desktop/narrow chart pair with exactly one visible
@@ -394,15 +382,15 @@ const SCENARIOS: Scenario[] = [
       await expect(trigger).toHaveAttribute('aria-haspopup', 'menu')
       await expect(trigger).toHaveAttribute('aria-expanded', 'false')
       await expect(page.getByRole('radiogroup', { name: COPY.rangeControlLegacyName })).toHaveCount(0)
-      // The window label the header carries (`rangeCaption(days)` in the
-      // PageHeader's actions, beside the trigger): exactly TWO elements carry
-      // the exact words now — the response-owned caption and the trigger's
-      // value span inside the button. Page-level because that is where both
-      // render — the tiles carry the COMPARISON caption instead, asserted
-      // above (#3038 structure run: scoping it to the tiles grid resolves 0).
-      await expect(
-        page.getByTestId('analytics-page').getByText(COPY.rangeCaption, { exact: true }),
-      ).toHaveCount(2)
+      // #4333: the header carries the Agent facet BEFORE the Period trigger,
+      // and the bare window caption is gone — 'Last 30 days' now appears in
+      // exactly ONE element, the trigger's own value span. A second copy
+      // would be the retired caption back on the page.
+      const facet = page.getByRole('button', { name: COPY.agentFacetTrigger })
+      await expect(facet).toHaveCount(1)
+      await expect(facet).toHaveAttribute('aria-haspopup', 'menu')
+      await expect(facet).toHaveAttribute('aria-expanded', 'false')
+      await expect(page.getByText('Last 30 days', { exact: true })).toHaveCount(1)
 
       // ── The agents table ───────────────────────────────────────────────────
       const agents = section(page, 'analytics-agents-section')
@@ -473,10 +461,13 @@ const SCENARIOS: Scenario[] = [
       }
 
       // ── The states this page is NOT in ────────────────────────────────────
-      // The sparse branch and the two other states are mutually exclusive with
-      // this one by what they report about the request, so their absence is a
-      // fact about the render, not a hope.
+      // The new-user state and the two other states are mutually exclusive
+      // with this one by what they report about the request, so their absence
+      // is a fact about the render, not a hope. The sparse band is gone with
+      // #4333 — its test id must not come back with it.
       await expect(page.getByTestId('analytics-sparse-line')).toHaveCount(0)
+      await expect(page.getByTestId('analytics-agent-notice')).toHaveCount(0)
+      await expect(page.getByText('No agent activity yet')).toHaveCount(0)
       await expect(page.getByText(COPY.emptyTitle)).toHaveCount(0)
       await expect(page.getByTestId('analytics-page').getByRole('alert')).toHaveCount(0)
     },
@@ -488,7 +479,10 @@ const SCENARIOS: Scenario[] = [
       // The endpoint ANSWERED and found nothing, which is a different page from
       // the one that did not answer: the empty state names what was looked for,
       // and failure copy must be absent, asserted loudly — an outage must never
-      // be allowed to photograph itself as an empty state.
+      // be allowed to photograph itself as an empty state. NOTE: this is the
+      // QUIET-WINDOW state, not the new-user one — the shared fixture's
+      // `/agents` handler names agents, so the page can report something and
+      // simply has nothing in this range (#4333).
       await expect(
         page.getByRole('heading', { name: COPY.emptyTitle, exact: true }),
       ).toHaveCount(1)
@@ -505,31 +499,28 @@ const SCENARIOS: Scenario[] = [
       // confident layout of a working page — the screen-shape an outage passes
       // for free, which is why the tiles are asserted absent rather than zero.
       await expect(page.getByTestId('analytics-tiles')).toHaveCount(0)
-      for (const testId of [
-        'stat-tile-spent',
-        'stat-tile-refused',
-        'stat-tile-budget-used',
-        'stat-tile-fees-paid-to-haven',
-      ]) {
+      for (const testId of TILE_IDS) {
         await expect(page.getByTestId(testId)).toHaveCount(0)
       }
+      await expect(page.getByTestId('stat-tile-fees-paid-to-haven')).toHaveCount(0)
       await expect(page.getByTestId('analytics-agents-section')).toHaveCount(0)
       await expect(page.getByTestId('analytics-merchants-section')).toHaveCount(0)
       await expect(page.getByTestId('analytics-balance-section')).toHaveCount(0)
       await expect(page.getByTestId('area-chart')).toHaveCount(0)
       await expect(page.getByTestId('analytics-sparse-line')).toHaveCount(0)
+      await expect(page.getByText('No agent activity yet')).toHaveCount(0)
 
       // The empty response's floor is `null` (#3013), so the ledger-floor
       // clause has no date to name — absence asserted, because a floor
       // invented here would report a coverage the ledger does not hold.
       await expect(page.getByText(COPY.refusalsRecordedFrom)).toHaveCount(0)
 
-      // The header is rendered from the response the page did get, so the
-      // window the report covers is still named, and the control is still on
-      // the page to change it: an empty report is not an unavailable one. Two
-      // exact-text elements carry the words — the caption and the trigger's
-      // value span (#4116).
-      await expect(page.getByText(COPY.rangeCaption)).toHaveCount(2)
+      // The header survives an empty report: the facet and the control are
+      // still on the page to change it — an empty report is not an
+      // unavailable one. ONE exact-text element carries the window words —
+      // the trigger's value span (#4333; the bare caption is retired).
+      await expect(page.getByText('Last 30 days', { exact: true })).toHaveCount(1)
+      await expect(page.getByRole('button', { name: COPY.agentFacetTrigger })).toHaveCount(1)
       await expect(page.getByRole('button', { name: COPY.periodTrigger })).toHaveCount(1)
       await expect(page.getByRole('radiogroup', { name: COPY.rangeControlLegacyName })).toHaveCount(0)
     },
@@ -561,6 +552,7 @@ const SCENARIOS: Scenario[] = [
       await expect(page.getByTestId('area-chart')).toHaveCount(0)
       await expect(page.getByTestId('analytics-sparse-line')).toHaveCount(0)
       await expect(page.getByText(COPY.emptyTitle)).toHaveCount(0)
+      await expect(page.getByText('No agent activity yet')).toHaveCount(0)
 
       // The error scenario serves no overview at all — no basis, no floor — so
       // the ledger-floor clause has nothing to be printed from, and its absence
@@ -568,11 +560,12 @@ const SCENARIOS: Scenario[] = [
       // above pin.
       await expect(page.getByText(COPY.refusalsRecordedFrom)).toHaveCount(0)
 
-      // The header survives its endpoint: the page still says which window it
-      // tried to read and still offers the control, because what failed was the
-      // reading, not the page. Two exact-text elements carry the words — the
-      // caption and the trigger's value span (#4116).
-      await expect(page.getByText(COPY.rangeCaption)).toHaveCount(2)
+      // The header survives its endpoint: the facet and the control are still
+      // offered, because what failed was the reading, not the page. ONE
+      // exact-text element carries the window words — the trigger's value
+      // span (#4333).
+      await expect(page.getByText('Last 30 days', { exact: true })).toHaveCount(1)
+      await expect(page.getByRole('button', { name: COPY.agentFacetTrigger })).toHaveCount(1)
       await expect(page.getByRole('button', { name: COPY.periodTrigger })).toHaveCount(1)
       await expect(page.getByRole('radiogroup', { name: COPY.rangeControlLegacyName })).toHaveCount(0)
     },
@@ -608,6 +601,23 @@ async function serveOverview(page: Page, body: OverviewBody | null) {
   await page.route('**/api/**', async (route) => {
     const request = route.request()
     const path = new URL(request.url()).pathname.replace(/^\/api/, '')
+    // #4333: the Agent facet reads the agents LIST (`useAgents`), and the
+    // shared fixture names ONE agent — one option and `FacetMenu` hides
+    // itself. Name the overview's own two here (names only are read: id,
+    // name, status) so the header renders the facet the page ships with.
+    if (request.method() === 'GET' && path === '/agents') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          agents: [
+            { id: 'agent-research', name: 'Research agent', status: 'active' },
+            { id: 'agent-retired', name: 'Data-feed agent', status: 'paused' },
+          ],
+        }),
+      })
+      return
+    }
     if (request.method() !== 'GET' || path !== OVERVIEW_PATH) {
       await route.fallback()
       return

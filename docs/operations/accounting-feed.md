@@ -131,7 +131,8 @@ feedSettledPaymentBestEffort()          ← fire-and-forget: NEVER blocks settle
   │    a SEK ledger this is the same amount_sek check as before) → stop here,
   │    no claim; see 'Ledger currency' for when a retry can ever succeed
   ├─ claimSync(user, provider, payment) → accounting_feed_syncs row `pending`
-  │    (UNIQUE (provider, payment_id, user_id) — the double-post guard)
+  │    (UNIQUE (provider, payment_id, user_id, document_kind) since migration
+  │    113 — the double-post guard; generic claims are scoped to 'underlag')
   ├─ build the non-asserting FeedTransaction (account demoted to a hint,
   │    VAT structurally absent; the connection's suggested_account rides as
   │    the hint when no per-merchant override exists)
@@ -720,9 +721,10 @@ registered in the schema smoke (`npm run db:schema-smoke -w packages/backend`).
 - **`accounting_feed_syncs`**: `user_id`, `provider`, `payment_id`,
   `status`, `attempts`, `external_ref`, `error`, `delivery_confirmed_at`
   (092: when the provider's webhook confirmed the pushed document — its own
-  column, so `error` stays the failure vocabulary), `created_at`,
-  `updated_at`.
-  UNIQUE (`provider`, `payment_id`, `user_id`). No company column: a pushed
+  column, so `error` stays the failure vocabulary), `document_kind` (113:
+  `'underlag'` for the feed's own document, `'merchant_invoice'` for the
+  merchant's invoice uploaded beside it), `created_at`, `updated_at`.
+  UNIQUE (`provider`, `payment_id`, `user_id`, `document_kind`). No company column: a pushed
   row is attributed to a company by TIME against `settings.companySwitches`
   (`companyIdAt`), which is what makes the reopen refuse `previous_company`.
 

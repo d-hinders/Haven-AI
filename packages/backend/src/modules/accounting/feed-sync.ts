@@ -3,7 +3,8 @@
  *
  * Persists what's been fed to which provider so re-syncs, backfills, and retries
  * never double-post into the customer's ledger — duplicate entries are the
- * fastest way to lose trust. Keyed uniquely on (provider, payment_id, user_id).
+ * fastest way to lose trust. Keyed uniquely on (provider, payment_id, user_id,
+ * document_kind) since migration 113.
  *
  * The data access moved VERBATIM into
  * `infra/repositories/accounting-feed-syncs.ts` (#999, `pg-only-in-infra`);

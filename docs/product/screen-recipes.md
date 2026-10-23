@@ -143,7 +143,7 @@ Use when the user creates or edits what an agent may spend.
 
 Structure:
 1. Page header with a plain-language title such as `Set agent budget` and a short sentence about what the agent will be allowed to do.
-2. Primary configuration card for the agent name, Haven wallet, token, amount, and reset period.
+2. Primary configuration card for the agent name, Haven wallet, token, amount, reset period, and end date.
 3. Agent rules summary showing the budget in human terms.
 4. Risk explainer that states when Haven will ask for approval.
 5. Primary action: `Create setup prompt` for creation — the budget summary
@@ -153,6 +153,12 @@ Structure:
 Money and risk clarity:
 - Show the selected Haven wallet before the user reviews.
 - Show the budget amount with token and reset period together, for example `250 USDC per day`.
+- Show the end date as a CHOICE (#4350): 30, 90 (default), 180 or 365 days —
+  no "never" option — with the resulting absolute day stated under the control
+  before anything is signed. The pre-sign copy names it too ("One approval.
+  Refills every period automatically until 21 Jan 2027."). The choice rides
+  the grant's `expires_at`; the server's default of 90 days must never be
+  silently substituted for a date the owner was shown.
 - State the over-budget behaviour: **refused on-chain**. There is no queued-for-approval
   branch to describe — the approval queue died with the Safe rail (#1440), and a legacy
   Safe account cannot create a payment at all (HTTP 410).
@@ -184,6 +190,12 @@ Structure:
 
 Money and risk clarity:
 - Show whether the agent can make payments automatically within the budget.
+- Show the end date both ways (#4350): the budget's CURRENT end on the "Now"
+  line and the end the approval will set on the "After you approve" line,
+  both as absolute days. An end-date-only change — the renewal — is a change
+  on its own and enables the review; an edit whose owner touched nothing on
+  the end-date control keeps the current end (it is sent as `expires_at`, so
+  the server's 90-day default never silently restarts).
 - Show how the user can pause or disable the delegation later.
 - Keep raw addresses out of the primary summary unless there is no human-readable label.
 
@@ -245,7 +257,11 @@ approve — that is both the instructions and the progress within that step,
    connector or the manual fallback has registered that public address and
    proof.
 3. Show the registered public address and reviewed agent budget before the
-   delegation signature.
+   delegation signature. The approval step carries the end-date choice
+   (#4350): 30, 90 (default), 180 or 365 days, with the resulting absolute
+   day under the control and a line that says renewal is a new approval on
+   the agent's page — until this slice the connect flow showed no end date
+   at all.
 4. Ask the user to grant the agent budget in the modal; that signature activates
    the delegation agent.
 5. Finish with `Done` plus a compact runtime-specific activation step and a
@@ -670,7 +686,9 @@ rule). `?grant=` keeps working alongside `?tab=`. Sections, in order:
    by the shared budget-caption helper in the dashboard ROW style (#3806):
    "0.40 of 3.00 USDC · per day · refills in 24h" at two decimals, then the
    earlier of the refill and the expiry ("refills in 45m" / "refills Thu
-   14:02" / "refills 14 Nov"; "expires …" when the budget ends first). The
+   14:02" / "refills 14 Nov"), AND the budget's end date always stated as an
+   absolute day after it — "refills in 5h · ends 21 Jan 2027" (#4350); when
+   the budget ends first, "ends 1 Sept 2026" IS the next event. The
    refill is anchored on the row's `start_date`, never on the wall clock.
    When the chain read failed or the read's period has already ended, the row
    shows no meter and says usage couldn't be read — never "0 used", and the

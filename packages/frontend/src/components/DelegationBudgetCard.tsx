@@ -46,9 +46,10 @@ import {
 } from './ui/DropdownMenu'
 import { useToast } from './ui/Toast'
 import { Amount, type AmountCurrency } from '@/components/haven/Amount'
-import { BudgetMeter, NoticeRow, truncateAddress } from '@/components/haven'
+import { BudgetEndDateSelect, BudgetMeter, NoticeRow, truncateAddress } from '@/components/haven'
 import { timeAgo, timeUntil } from '@/lib/format'
 import { budgetCaption, budgetPeriodWords, budgetReservedNote, type BudgetCaption } from '@/lib/budget-caption'
+import { BUDGET_END_DEFAULT_DAYS, budgetEndsAt, formatBudgetEndDate } from '@/lib/budget-end'
 import type { DashboardAgentStats } from '@/types/dashboard'
 
 interface TokenOption {
@@ -219,6 +220,11 @@ export default function DelegationBudgetCard({
   const [amount, setAmount] = useState('')
   const [period, setPeriod] = useState(86_400)
   const [recipient, setRecipient] = useState('')
+  // #4350: the end date the owner picks for a NEW budget — 30/90/180/365
+  // days, 90 the default (owner decision 1 on #4349). Rides the build as
+  // `expires_at`; the select renders the resulting date before anything is
+  // signed.
+  const [endDays, setEndDays] = useState(BUDGET_END_DEFAULT_DAYS)
 
   // ── ?grant=<delegation hash> prefill (#2539) ──
   // The #2539 CLI's signing link lands here: the backend built a pending
@@ -399,13 +405,17 @@ export default function DelegationBudgetCard({
     } catch {
       return null
     }
+    // #4350: the chosen end date rides the build. The presets are always far
+    // enough ahead that the conversion is never null on a sane clock.
+    const expiresAt = budgetEndsAt(endDays, Math.floor(Date.now() / 1000))
     return {
       tokenAddress: tokenCfg.address as Address,
       recipientAddress: recipient.trim() ? (recipient.trim() as Address) : null,
       budgetAtomic,
       periodSeconds: period,
+      ...(expiresAt !== null ? { expiresAt } : {}),
     }
-  }, [amount, amountValid, period, recipient, recipientValid, tokenCfg])
+  }, [amount, amountValid, endDays, period, recipient, recipientValid, tokenCfg])
 
   // #3933: a submit whose (token, recipient) slot already holds a live budget
   // is never signed as a plain grant — the backend refuses it, because the old
@@ -764,6 +774,15 @@ export default function DelegationBudgetCard({
             className="font-mono"
             aria-label="Recipient"
           />
+          {/* #4350: the end date is a choice, shown with its resulting day —
+              the same control the connect flow's approval step and the edit
+              modal use, so all three surfaces cannot drift. */}
+          <BudgetEndDateSelect
+            id="grant-budget-end"
+            days={endDays}
+            onDaysChange={(d) => setEndDays(d ?? BUDGET_END_DEFAULT_DAYS)}
+            nowSec={nowSec}
+          />
           {/* #2473 (money-path review): a grant REPLACES the active budget in
               the same (token, recipient) slot, server-side and silently. In
               the normal state the rows above the form are what let an owner
@@ -786,7 +805,15 @@ export default function DelegationBudgetCard({
                 ? 'Reload the current budgets before setting one — a budget for a token and recipient that already has one is edited, not added.'
                 : formSlotMatch
                   ? 'This agent already has a budget for this token and recipient, so you edit it: you approve the new budget, then approve once more to stop the old one. The review step shows how many approvals that takes. Stopping it ends any open task budget or sub-budget taken from it.'
-                  : 'One approval. Refills every period automatically.'
+                  : // #4350: the pre-sign copy names the chosen end date — the
+                    // "One approval." line may never again hide when the
+                    // budget ends (the issue's copy rule).
+                    (() => {
+                      const endsAt = budgetEndsAt(endDays, nowSec)
+                      return endsAt != null
+                        ? `One approval. Refills every period automatically until ${formatBudgetEndDate(endsAt)}.`
+                        : 'One approval. Refills every period automatically.'
+                    })()
             }
             onSlotOccupied={handleSlotOccupied}
             onGranted={handleGranted}

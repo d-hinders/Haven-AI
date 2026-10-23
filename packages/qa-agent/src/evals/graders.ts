@@ -410,6 +410,8 @@ function paymentIdsIn(log: AgentRunLog): string[] {
  * idempotency bucket graded green on ONE payment). A replay of a payment the
  * same trial created (the agent repeating its own call) is still fresh.
  */
+const PAYMENT_CREATING_TOOLS = new Set(['haven_pay_mcp_tool', 'haven_pay_x402_quote', 'haven_prepare_catalog_purchase', 'haven_send', 'haven_pay'])
+
 export function replayOnlyPaymentIds(log: AgentRunLog): Set<string> {
   const replayed = new Set<string>()
   const created = new Set<string>()
@@ -417,7 +419,10 @@ export function replayOnlyPaymentIds(log: AgentRunLog): Set<string> {
     const id = call.result?.paymentId
     if (!id) continue
     if (call.result?.idempotentReplay === true) replayed.add(id)
-    else created.add(id)
+    // Only a payment-CREATING tool answering without the flag proves the
+    // trial created the payment; a later tool merely echoing the id (a sign,
+    // a settle, a status read) does not.
+    else if (PAYMENT_CREATING_TOOLS.has(bareToolName(call.name))) created.add(id)
   }
   return new Set([...replayed].filter((id) => !created.has(id)))
 }
@@ -425,7 +430,12 @@ export function replayOnlyPaymentIds(log: AgentRunLog): Set<string> {
 /** The failure for a trial whose only payment evidence is a replay of an earlier trial's payment. */
 function replayOnlyFailure(log: AgentRunLog): GraderResult | undefined {
   const replayed = replayOnlyPaymentIds(log)
-  if (replayed.size > 0 && paymentIdsIn(log).length === 0) {
+  // Fails when a replayed id exists and no payment-creating tool produced a
+  // different, fresh id in this trial.
+  const fresh = log.calls.some(
+    (c) => c.result?.paymentId && c.result.idempotentReplay !== true && PAYMENT_CREATING_TOOLS.has(bareToolName(c.name)) && !replayed.has(c.result.paymentId),
+  )
+  if (replayed.size > 0 && !fresh) {
     return fail(
       `the only payment in this trial was an idempotent replay of an earlier one (${[...replayed].join(', ')}) — nothing new was bought; ` +
         'give each purchase its own idempotency key',

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 /**
  * Loading + resolving eval tasks (#3958).
  *
@@ -258,7 +259,7 @@ export function renderInstruction(task: EvalTask, amountAtomic: bigint, recipien
     // A key unique to this render (= this trial): two trials of the same
     // purchase inside Haven's 5-minute idempotency bucket would otherwise
     // replay one payment instead of buying twice (2026-10-23).
-    .replaceAll('{purchase_key}', `eval-${task.id}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`)
+    .replaceAll('{purchase_key}', `eval-${task.id}-${randomUUID()}`)
 }
 
 /** True when any task renders `{target}` — the run then needs QA_EVAL_X402_TARGET set. */

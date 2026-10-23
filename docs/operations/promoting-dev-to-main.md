@@ -131,8 +131,14 @@ so this is a rule to point at rather than a question to ask the release runner.
       and is a green tick that is not coverage. The one-line check is in
       [`agent-qa.md` § *Automation & gating*](./agent-qa.md#automation--gating).
 - [ ] **Migrations:** list every migration included since the last promotion.
-      Confirm each is **forward-only / safe on existing rows**, and that a
-      **prod DB snapshot** exists before they run on deploy.
+      Confirm each is **forward-only / safe on existing rows**. A **prod DB
+      snapshot** before they run on deploy is **recommended, not required**
+      (owner decision, 2026-10-23: the current Railway plan cannot create
+      backups). Record on the PR whether one was taken. When none is, the
+      review above carries the risk of a migration that applies and writes
+      wrong data, and you run any data precondition a migration states
+      against prod before merging, for example a duplicate check before a new
+      unique index.
 - [ ] **Migration availability:** does any migration build an index, rewrite a
       table, or otherwise hold a lock on a hot table? If so, record the expected
       lock duration and mitigation. Since #2150 the first choice is in the repo,
@@ -333,7 +339,8 @@ so this is a rule to point at rather than a question to ask the release runner.
       and run one small real payment / x402 happy path as a canary.
 - [ ] Watch prod error logs for a few minutes. If anything is off, **roll back**
       (Railway redeploy-previous / Vercel instant rollback) and, if a migration is
-      implicated, restore from the pre-deploy snapshot.
+      implicated, restore from the pre-deploy snapshot if one was taken;
+      otherwise fix forward with a new migration.
 
 ## Run the prod smoke on the right hostname
 

@@ -579,6 +579,20 @@ caveat, so the authority is still the signed caveat stack and nothing else.
 > budgets section and the `merchant-catalog.ts` coverage it names; the rest
 > of the document was not re-read for it.
 
+> **Re-verified #4300 (2026-10-23):** #4300 bounds a `refreshCatalog` run to
+> 10 min and takes rows least recently updated first. What a probed row
+> writes is unchanged, `pay_to` included. A row the run does not reach is
+> not written at all: it keeps its current `pay_to`, status and failure
+> streak until a later run reaches it, which takes the least recently
+> updated rows first. A merchant's verified payTo can therefore stay
+> deferred until the rotation reaches it when a run hits its budget; with
+> the seeded rows a run finishes well inside it. A row whose write fails
+> (for example a 402 the database cannot store) is logged and not counted,
+> so it too keeps its current `pay_to`, status and failure streak. The
+> payTo contract above is unchanged. Scope of this re-read: the
+> Merchant-locked budgets section and the `merchant-catalog.ts` coverage
+> it names; the rest of the document was not re-read for it.
+
 Two limits are deliberate:
 - **Slot sharing.** A merchant-locked budget and a plain budget pinned to the
   same address share one `(agent, token, recipient)` slot. Activating either

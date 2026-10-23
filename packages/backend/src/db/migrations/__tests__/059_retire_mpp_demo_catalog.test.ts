@@ -143,7 +143,7 @@ describeDb('migration 059: retire mpp_demo catalog row (#1328)', () => {
     const counts = await refreshCatalog(db as never, fetchMock as unknown as typeof fetch)
 
     expect(fetchMock).not.toHaveBeenCalled()
-    expect(counts).toEqual({ verified: 0, degraded: 0 })
+    expect(counts).toEqual({ verified: 0, degraded: 0, deferred: 0 })
 
     const row = await db.query<{ status: string; consecutive_failures: number }>(
       `SELECT status, consecutive_failures FROM merchant_catalog WHERE id = $1`,

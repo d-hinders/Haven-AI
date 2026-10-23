@@ -90,7 +90,7 @@ describe('catalog probes do not reach the global fetch (#4281)', () => {
       },
     }
     const result = await refreshCatalog(db)
-    expect(result).toEqual({ verified: 0, degraded: 0 })
+    expect(result).toEqual({ verified: 0, degraded: 0, deferred: 0 })
     expect(globalFetch).not.toHaveBeenCalled()
     const miss = queries.find(([sql, v]) => sql.includes('consecutive_failures = $2') && v?.[0] === 'cat-bazaar')
     expect(miss?.[1]).toEqual(['cat-bazaar', 1, 'active'])
@@ -108,7 +108,7 @@ describe('catalog probes do not reach the global fetch (#4281)', () => {
       },
     }
     const result = await refreshCatalog(db)
-    expect(result).toEqual({ verified: 0, degraded: 0 })
+    expect(result).toEqual({ verified: 0, degraded: 0, deferred: 0 })
     expect(globalFetch).not.toHaveBeenCalled()
     const miss = queries.find(([sql, v]) => sql.includes('consecutive_failures = $2') && v?.[0] === 'cat-operator')
     expect(miss?.[1]).toEqual(['cat-operator', 1, 'active'])
@@ -207,7 +207,7 @@ describe('the guarded catalog transport (#4281)', () => {
       resolver: async () => [{ address: '169.254.169.254', family: 4 }],
       transport,
     }))
-    expect(result).toEqual({ verified: 0, degraded: 0 })
+    expect(result).toEqual({ verified: 0, degraded: 0, deferred: 0 })
     expect(transport).not.toHaveBeenCalled()
     const miss = queries.find(([sql, v]) => sql.includes('consecutive_failures = $2') && v?.[0] === 'cat-rebind')
     expect(miss?.[1]).toEqual(['cat-rebind', 1, 'active'])

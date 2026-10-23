@@ -799,6 +799,14 @@ Isolation rules that are non-negotiable for a payments product:
  > now fails its probe. Scope of this re-read: this bullet's catalog
  > paragraphs; nothing else in the document was re-read for it, and
  > `last-verified` is not bumped.
+ > **Re-verified #4300 (2026-10-23):** a refresh run is now bounded to
+ > 10 min, and a row it does not reach waits for the next run without being
+ > counted as a miss. The guard's deadline now covers name resolution, and it
+ > tries the next checked address when a connection fails before TLS. With
+ > the migration-seeded rows, a local dev refresh finishes well inside the run
+ > budget, so local behaviour is unchanged. Scope of this re-read: this
+ > bullet's catalog paragraphs; nothing else in the document was re-read for
+ > it, and `last-verified` is not bumped.
  - **Owner company details (#3332)** — `HAVEN_OWNER_COMPANY_DETAILS` (strict
   boolean) gates `/user/company-details*`, the additive `parties.buyer`
   field on payment evidence/receipts, and the Settings → Company details

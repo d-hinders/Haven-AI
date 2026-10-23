@@ -266,17 +266,44 @@ describe('refusalsCaption', () => {
   })
 })
 
-describe('formatAnalyticsTick — the y-axis tick, without cents (#3051)', () => {
-  it('prints whole currency units in USD, never the cents a figure carries', () => {
-    expect(formatAnalyticsTick(100, 'USD')).toBe('$100')
-    expect(formatAnalyticsTick(1240, 'USD')).toBe('$1,240')
+describe('formatAnalyticsTick — the y-axis tick, its decimals from the tick step (#4334)', () => {
+  it('prints whole currency units for a whole-unit step, never the cents a figure carries', () => {
+    expect(formatAnalyticsTick(100, 50, 'USD')).toBe('$100')
+    expect(formatAnalyticsTick(1240, 500, 'USD')).toBe('$1,240')
     // A figure in the same voice keeps its cents — the tick deliberately does not.
     expect(formatAnalyticsValue(100, 'USD')).toBe('$100.00')
   })
 
   it('keeps the EUR form (symbol after, no-break space) with no fraction digits', () => {
-    expect(formatAnalyticsTick(100, 'EUR')).toBe('100\u00a0€')
-    expect(formatAnalyticsTick(1240, 'EUR')).toBe('1.240\u00a0€')
+    expect(formatAnalyticsTick(100, 50, 'EUR')).toBe('100\u00a0€')
+    expect(formatAnalyticsTick(1240, 500, 'EUR')).toBe('1.240\u00a0€')
+  })
+
+  it('reads sub-cent ticks to 4 decimals so they stay DISTINCT, not "$0, $0" (#4334)', () => {
+    // The three peaks the issue names, at the steps chartScale gives them
+    // (pinned at the source in chart-scale's own suite): every step is
+    // under a cent, so every tick carries 4 decimals and no two ticks
+    // round onto each other.
+    expect(formatAnalyticsTick(0.001, 0.001, 'USD')).toBe('$0.0010')
+    expect(formatAnalyticsTick(0.003, 0.001, 'USD')).toBe('$0.0030')
+    expect(formatAnalyticsTick(0.004, 0.001, 'USD')).toBe('$0.0040')
+    expect(formatAnalyticsTick(0.004, 0.002, 'USD')).toBe('$0.0040')
+    expect(formatAnalyticsTick(0.008, 0.002, 'USD')).toBe('$0.0080')
+    expect(formatAnalyticsTick(0.005, 0.005, 'USD')).toBe('$0.0050')
+    expect(formatAnalyticsTick(0.02, 0.005, 'USD')).toBe('$0.0200')
+    // SEK reads the same rule in its own voice — the narrow-gutter case the
+    // review measured ("0,0040 kr" at 390).
+    expect(formatAnalyticsTick(0.004, 0.001, 'SEK')).toBe('0,0040\u00a0kr')
+  })
+
+  it('prints 2 decimals for a fractional step of a cent or more', () => {
+    expect(formatAnalyticsTick(0.05, 0.025, 'USD')).toBe('$0.05')
+    expect(formatAnalyticsTick(0.5, 0.5, 'USD')).toBe('$0.50')
+    expect(formatAnalyticsTick(2.5, 0.5, 'USD')).toBe('$2.50')
+  })
+
+  it('treats a degenerate step (no data) as the 2-decimal default', () => {
+    expect(formatAnalyticsTick(0, 0, 'USD')).toBe('$0.00')
   })
 })
 
@@ -300,6 +327,6 @@ describe('SEK renders in the sv-SE voice (#3127)', () => {
   it('compacts, values, and ticks in the same voice as the other currencies', () => {
     expect(formatAnalyticsAmountCompact('1234.00', 'SEK')).toBe('1,23\u00a0tn\u00a0kr')
     expect(formatAnalyticsValue(1234.56, 'SEK')).toBe('1\u00a0234,56\u00a0kr')
-    expect(formatAnalyticsTick(1240, 'SEK')).toBe('1\u00a0240\u00a0kr')
+    expect(formatAnalyticsTick(1240, 500, 'SEK')).toBe('1\u00a0240\u00a0kr')
   })
 })

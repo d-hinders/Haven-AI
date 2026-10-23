@@ -68,6 +68,14 @@ export const FIRST_X_LABEL_SEPARATION_FACTOR = 2
 export interface ChartScale {
   max: number
   ticks: number[]
+  /**
+   * The nice step the ticks count by — `max` is a multiple of it and
+   * consecutive ticks differ by it. Callers read it to choose a tick LABEL's
+   * fraction digits (#4334): a step under a cent needs 4 decimals for the
+   * ticks to be distinct, a whole-number step needs none, anything between
+   * reads 2. `0` when the scale is degenerate (`dataMax <= 0`).
+   */
+  step: number
 }
 
 export function roundNiceStep(span: number): number {
@@ -90,7 +98,7 @@ export function roundNiceStep(span: number): number {
  * no data would be the same lie in a different font.
  */
 export function chartScale(dataMax: number, target = 4): ChartScale {
-  if (!Number.isFinite(dataMax) || dataMax <= 0) return { max: 0, ticks: [] }
+  if (!Number.isFinite(dataMax) || dataMax <= 0) return { max: 0, ticks: [], step: 0 }
   const step = roundNiceStep(dataMax / target)
   const max = step * Math.floor(dataMax / step + 1)
   const ticks: number[] = []
@@ -99,7 +107,7 @@ export function chartScale(dataMax: number, target = 4): ChartScale {
     // 7.4999…); the ticks are labels, and labels must read like numbers.
     ticks.push(Number(v.toPrecision(12)))
   }
-  return { max, ticks }
+  return { max, ticks, step }
 }
 
 /**
@@ -122,7 +130,7 @@ export function chartScale(dataMax: number, target = 4): ChartScale {
  * caller's `span <= 0` branch already draws a flat line for that.
  */
 export function chartScaleRange(lo: number, hi: number, target = 4): ChartScale & { min: number } {
-  if (!Number.isFinite(lo) || !Number.isFinite(hi) || hi <= lo) return { min: lo, max: hi, ticks: [] }
+  if (!Number.isFinite(lo) || !Number.isFinite(hi) || hi <= lo) return { min: lo, max: hi, ticks: [], step: 0 }
   const step = roundNiceStep((hi - lo) / target)
   // Dust-rounded like the ticks, so `ticks[0] === min` holds for every input
   // (`lo = 0.3` gave `min = 0.30000000000000004` beside a tick of `0.3`).
@@ -132,7 +140,7 @@ export function chartScaleRange(lo: number, hi: number, target = 4): ChartScale 
   for (let v = min; v < max - step / 2; v += step) {
     ticks.push(Number(v.toPrecision(12)))
   }
-  return { min, max, ticks }
+  return { min, max, ticks, step }
 }
 
 /**

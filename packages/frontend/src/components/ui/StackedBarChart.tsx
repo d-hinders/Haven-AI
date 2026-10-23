@@ -2,11 +2,21 @@
  * The stacked-bar chart primitive (#2948, analytics slice D).
  *
  * Daily bars stacked by agent for a range, with refusals as a marker series:
- * a small cap drawn ABOVE the bar, not a second axis. A second axis is the
- * shape this refuses on purpose — a refusal count has no scale comparable to
- * a money total, and two y-scales in one view invite reading a tall bar as
- * "many refusals" or the other way round. A cap over a bar says exactly one
- * thing: that day refused something.
+ * a small grey mark drawn UNDER the day's slot, not a second axis and not a
+ * cap on the bar (#4334). A second axis is the shape this refuses on
+ * purpose — a refusal count has no scale comparable to a money total, and
+ * two y-scales in one view invite reading a tall bar as "many refusals" or
+ * the other way round. A cap over a bar could only sit on a day that SPENT;
+ * a mark under the slot says exactly one thing about any day, spent or not:
+ * that day refused something.
+ *
+ * ## The axis is whatever the caller hands it — slots, not activity
+ *
+ * The primitive draws one slot per `days` entry, in order; a day with an
+ * empty `series` is an EMPTY slot (no bar, its refusal mark still drawn) so
+ * a caller that hands it every calendar day in a window (#4334) gets a
+ * continuous time axis, not a scatter of the days that happened to carry a
+ * figure. Nothing here invents or drops days.
  *
  * ## The house pattern this is, and what it means for the lint gates
  *
@@ -23,7 +33,7 @@
  *
  * `--v2-series-*` (#2948) is an ordered categorical set: colour identifies
  * the SERIES, never the meaning of a value. A refusal is therefore a neutral
- * ink cap and not a red one — red is `--v2-danger`'s job when a row states a
+ * ink mark and not a red one — red is `--v2-danger`'s job when a row states a
  * failure, and this is a count of events. An AGENT-keyed series does not
  * read this palette at all (#4331): it carries `color` — the agent's avatar
  * tint from `seriesColorForAgent`, name-hashed, so one agent wears one
@@ -103,11 +113,17 @@ const VIEW_H = 220
 const PAD = { top: 14, right: 10, bottom: 30, left: 48 }
 /** The narrow treatment widens the tick gutter: at 390 the desktop 48/640
  *  is ~21 CSS px, and a currency tick painted over the first bar (#3051
- *  design review). Ticks also go through `formatTick`, which callers keep
- *  compact (no cents) for the same reason. */
-const PAD_NARROW = { ...PAD, left: 78 }
-/** The cap above a bar that refused something, in viewBox units. */
-const REFUSAL_MARKER_H = 7
+ *  design review). Since #4334 a sub-cent scale's ticks carry 4 decimals —
+ *  a SEK "0,0040 kr" needs ~55 CSS px of `text-xs` — so the narrow gutter
+ *  grew again: 100/640 at the 350px plot a 390 phone leaves (~54px) fits
+ *  the longest served tick with margin, where the old 78 (~43px) clipped it. */
+const PAD_NARROW = { ...PAD, left: 100 }
+/** The refusal mark under a day's slot, in viewBox units: a 3px dash
+ *  `REFUSAL_MARKER_GAP` below the axis baseline — under the slot, so a day
+ *  with refusals and NO spend still shows (#4334). The x labels start 8
+ *  units under the baseline, clear of the dash. */
+const REFUSAL_MARKER_H = 3
+const REFUSAL_MARKER_GAP = 3
 /** The desktop callout's resting offset under the wrapper's top edge — the
  *  CSS px behind its `top-3`; the clearance it keeps from the bar's highest
  *  mark (resting) or the axis baseline (dropped, #3063); and the least of a
@@ -137,7 +153,7 @@ export interface StackedBarDay {
   /** The per-agent amounts making up this bar. `tokens` is per-denomination
    *  detail for the tooltip only — the bar itself is one display currency. */
   series: StackedBarSeries[]
-  /** Refusals recorded that day; `0` or absent draws no cap. */
+  /** Refusals recorded that day; `0` or absent draws no mark. */
   refusals?: number
   /**
    * The bucket covers less than a full local day (#3051): the endpoint's
@@ -191,9 +207,12 @@ export interface StackedBarChartProps {
    *  fraction digits) — the same callback the tiles and the agents table
    *  print with, so one voice reads the page. */
   formatValue: (amount: number) => string
-  /** The y-axis tick formatter; defaults to `formatValue`. Callers pass a
-   *  compact form (no cents) so a tick fits the gutter at 390 (#3051). */
-  formatTick?: (amount: number) => string
+  /** The y-axis tick formatter; defaults to `formatValue`. Receives the
+   *  scale's own tick STEP as its second argument (#4334) so the caller can
+   *  choose the tick label's fraction digits from it — 4 decimals under a
+   *  cent, none for whole steps. Callers pass a compact form so a tick fits
+   *  the gutter at 390 (#3051). */
+  formatTick?: (amount: number, step: number) => string
   /** Fewer x ticks, a dot legend, a tap-to-pin panel: the 390px treatment,
    *  decided by the caller's breakpoint (see the file's header). */
   narrow?: boolean
@@ -227,7 +246,7 @@ interface StackedBarEntry {
   /** Total height of the stacked bar, display currency. */
   total: number
   segments: StackedBarSegment[]
-  /** Number of refused payments recorded that day; draws the cap. */
+  /** Number of refused payments recorded that day; draws the mark. */
   refusals: number
   partial: boolean
 }
@@ -315,8 +334,9 @@ export function StackedBarChart({
   // The callout's top, in CSS px from the wrapper's top, when the bar it
   // describes is tall enough to reach under the resting `top-3` position:
   // then the callout drops to sit just above the axis baseline instead, so
-  // the bar's top — its height against the neighbours, and the refusal cap
-  // the callout itself mentions — stays visible while the callout is open
+  // the bar's top — its height against the neighbours; the refusal mark now
+  // lives under the slot (#4334), out of any callout's reach but the legend
+  // slot's, and is scored below.
   // (#3063). `null` is the resting position. Measured after paint like the
   // half-width; in jsdom nothing has a height and the resting position stands.
   const [tipTop, setTipTop] = useState<number | null>(null)
@@ -429,10 +449,9 @@ export function StackedBarChart({
   )
 
   // The vertical drop (#3063). The resting callout hangs 12px (`top-3`) under
-  // the wrapper's top edge; if the described bar's top — or its refusal cap
-  // — would sit under the callout's box, the callout drops below the bar's
-  // top, but only where that leaves at least `TIP_MIN_VISIBLE` of the bar
-  // in view above it: its bottom `TIP_GAP` above the axis baseline when the
+  // the wrapper's top edge; if the described bar's top would sit under the
+  // callout's box, the callout drops below the bar's top, but only where that
+  // leaves at least `TIP_MIN_VISIBLE` of the bar in view: its bottom `TIP_GAP` above the axis baseline when the
   // bar is tall enough to hold it, else its bottom just above the legend
   // — over the axis labels beneath it (whole, never half of one; the day's
   // own it repeats) and never over a legend row. A bar too short for either (the
@@ -441,7 +460,7 @@ export function StackedBarChart({
   // instead. Between the two slots, the one that hides the fewest
   // NEIGHBOURS' tops wins (#3076): a 62px band above the baseline covers
   // the top of every bar shorter than ~68px within the callout's span,
-  // leaving a refusal cap floating over a hidden bar, while the same
+  // leaving a refusal mark floating over a hidden bar, while the same
   // callout above the legend clears them at the cost of the date labels it
   // partly repeats. Ties go to the baseline slot. The svg scales the
   // viewBox to its CSS box without preserving the ratio, so a viewBox y
@@ -462,26 +481,27 @@ export function StackedBarChart({
     }
     const cssY = (y: number) => (y / VIEW_H) * svg.clientHeight
     const barTop = cssY(yOf(entry.total))
-    // The highest mark the day draws: its refusal cap when it has one.
-    const markTop = cssY(yOf(entry.total) - (entry.refusals > 0 ? REFUSAL_MARKER_H + 3 : 0))
+    // The highest mark the day draws above the baseline is its bar top: the
+    // refusal mark lives UNDER the slot (#4334), below the axis, where no
+    // resting-or-dropped callout can sit.
+    const markTop = barTop
     const restingBottom = TIP_REST_TOP + tip.offsetHeight + TIP_GAP
     if (restingBottom <= markTop) {
       setTipTop(null)
       return
     }
     // Both candidates leave `TIP_MIN_VISIBLE` of the day's marks in view and
-    // clear the BAR's top edge by `TIP_GAP` — a cap counts towards the marks
-    // but never stands in for the bar's own top.
+    // clear the BAR's top edge by `TIP_GAP`.
     const least = Math.max(barTop + TIP_GAP, markTop + TIP_MIN_VISIBLE)
     const aboveBaseline = cssY(baseY) - tip.offsetHeight - TIP_GAP
     const onLegendTop = svg.clientHeight + LEGEND_GAP - TIP_GAP - tip.offsetHeight
     // The callout's horizontal span, in the wrapper's CSS px (the box its
     // `left: %` resolves against — the same one the half-width effect
     // measures): the same centre-and-clamp the `left` style uses, half its
-    // measured width each side. A neighbour whose bar top — or whose
-    // refusal cap — lies inside a slot's box has its top hidden by that
-    // slot (a cap just above the box over a hidden bar top is the floating
-    // cap the review saw).
+    // measured width each side. A neighbour whose bar top — or whose refusal
+    // mark under the slot — lies inside a slot's box has its mark hidden by
+    // that slot (the legend slot is the only one that reaches below the
+    // baseline, where the marks now live, #4334).
     const width = tip.parentElement?.clientWidth ?? 0
     const cssX = (x: number) => (x / VIEW_W) * width
     const centre =
@@ -499,11 +519,13 @@ export function StackedBarChart({
         // A day with nothing spent draws no bar: its "top" is the baseline
         // and must not score (it only ever falls in the legend slot's box,
         // which would bias the choice toward the baseline slot — review).
-        // Its cap, if it has one, still counts.
+        // Its refusal mark, if it has one, still counts: the dash sits under
+        // the slot (#4334), and the legend slot — the only one that reaches
+        // below the baseline — can cover it.
         const inside = (y: number) => y > slotTop && y < slotTop + tip.offsetHeight
         const barHidden = e.total > 0 && inside(cssY(yOf(e.total)))
-        const capHidden = e.refusals > 0 && inside(cssY(yOf(e.total) - REFUSAL_MARKER_H - 3))
-        if (barHidden || capHidden) n += 1
+        const markHidden = e.refusals > 0 && inside(cssY(baseY + REFUSAL_MARKER_GAP))
+        if (barHidden || markHidden) n += 1
       })
       return n
     }
@@ -638,16 +660,18 @@ export function StackedBarChart({
                     />
                   )
                 })}
-                {/* Refusals: the marker series. A cap above the bar, never a
-                    second axis (see the header for why). */}
+                {/* Refusals: the marker series. A grey dash UNDER the day's
+                    slot, never a second axis (see the header for why) and
+                    never a cap on the bar — a day with refusals and no spend
+                    has no bar to cap, and its refusals are still a fact. */}
                 {e.refusals > 0 && (
                   <rect
                     data-testid="chart-refusal-marker"
                     x={xOf(dayIdx)}
-                    y={yOf(e.total) - REFUSAL_MARKER_H - 3}
+                    y={baseY + REFUSAL_MARKER_GAP}
                     width={barW}
                     height={REFUSAL_MARKER_H}
-                    rx={2}
+                    rx={1.5}
                     fill={INK}
                     fillOpacity={isHl ? 0.85 : 0.55}
                   />
@@ -672,7 +696,7 @@ export function StackedBarChart({
               transform: 'translateY(-50%)',
             }}
           >
-            {formatTick(tick)}
+            {formatTick(tick, scale.step)}
           </span>
         ))}
         {labelIdx.map((i) => (
@@ -716,8 +740,8 @@ export function StackedBarChart({
           </li>
         ))}
         {entries.some((d) => d.refusals > 0) && (
-          // The one mark the series rows do not explain: the ink cap over a
-          // day that refused something. Named here, in the legend that names
+          // The one mark the series rows do not explain: the grey dash under
+          // a day that refused something. Named here, in the legend that names
           // everything else, rather than only in the card's prose (#3204).
           <li data-testid="chart-legend-refusal" className="inline-flex items-center gap-1.5">
             <span
@@ -725,7 +749,7 @@ export function StackedBarChart({
               className="inline-block h-[3px] w-2.5 flex-shrink-0 rounded-sm"
               style={{ backgroundColor: INK, opacity: 0.55 }}
             />
-            <span className="truncate">Refused (cap)</span>
+            <span className="truncate">Refused</span>
           </li>
         )}
       </ul>

@@ -116,9 +116,10 @@ export function BalanceSection({
 
   const ariaLabel = balanceSummary(points, currency, rangeDays)
   const formatValue = (value: number) => formatAnalyticsValue(value, currency)
-  // Ticks without cents, the same rule the spend chart keeps: the gutter is
-  // narrow on a phone and a tick is a round scale value, never a figure.
-  const formatTick = (value: number) => formatAnalyticsTick(value, currency)
+  // Ticks take their fraction digits from the scale's own step (#4334): a
+  // whole-unit step prints none, a sub-cent step prints 4 — a sub-cent
+  // BALANCE peak reads "$0.0010 …" instead of "$0, $0".
+  const formatTick = (value: number, step: number) => formatAnalyticsTick(value, step, currency)
 
   return (
     <div data-testid="analytics-balance-section">

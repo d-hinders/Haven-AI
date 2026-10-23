@@ -867,6 +867,16 @@ last-verified: "2026-10-23"
 > moves — the runtime manifest, connector channel, dist-tag and setup-prompt
 > rule sentences are byte-identical to before. `last-verified` stays
 > 2026-10-02. Nothing else in this document was re-verified.
+>
+> **Re-verified #4350 (2026-10-23, the budget end date):** the diff touches
+> `packages/sdk/src/agent-guidance.ts`, a covered file — the runbook's
+> "What Haven is" paragraph gains one sentence (the budget ends on a
+> user-chosen date — 30/90/180/365 days — enforced on-chain, and renewal is
+> a new approval on the agent's page). The served `for-agents.md`, the CLI
+> copy and the `what-haven-is` step file are regenerated from it; no
+> sentence constant, tool, schema, version-skew or consent-hash contract
+> moves. `last-verified` stays as recorded in the scope section. Nothing
+> else in this document was re-verified.
 
 > **Re-verified #3756 (2026-10-07, superseded-agent wording):** this diff
 > touches covered connect files in their human-readable output only:

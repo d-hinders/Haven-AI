@@ -99,6 +99,20 @@ last-verified: "2026-10-23"
 > merchant-acquiring surface changes. Scope: §7's factual-history preference
 > and the non-custody boundary for the published CLI only;
 > the document-wide `last-verified` date is not re-stamped.
+>
+> **Re-verified #4350 (2026-10-23, the budget end date):** the diff touches
+> covered SDK/CLI files only in their agent-facing PROSE — the runbook's
+> "What Haven is" paragraph (`packages/sdk/src/agent-guidance.ts`, its CLI
+> copy and the served skill files) now says the budget ends on a date the
+> user chose (30, 90, 180 or 365 days) and that renewal is a new approval.
+> That CLOSES the § *Make All Agent Authority User-Approved* ":725" gap for
+> expiry disclosure on the dashboard surfaces, and it is authority-NARROWING
+> only: the owner-facing presets keep an expiry mandatory (no "never"
+> option), the on-chain `Timestamp` caveat is unchanged, and #4351 adds the
+> server-side 365-day cap. No covered payment, signing, key, custody,
+> advice, settlement or merchant-acquiring surface changes; Haven still
+> signs nothing. Scope: the guidance text only; the document-wide
+> `last-verified` date is not re-stamped.
 
 # Haven CASP / MiCA Risk Minimisation Guardrails
 

@@ -215,7 +215,12 @@ describe('/for-agents.md (#2523)', () => {
     // prints the delegation hash `haven budget revoke` needs, instead of
     // `haven agents show <agentId>`, which prints none (+9 bytes). Nothing
     // unrelated was trimmed to fit.
-    expect(Buffer.byteLength(served, 'utf8')).toBeLessThan(11800)
+    //
+    // 11800 -> 12000 for #4350 (2026-10-23; the page is 11942 bytes at this
+    // commit, 11703 before it): the "What Haven is" paragraph names the
+    // owner-chosen end date — 30/90/180/365 days, on-chain, renewal a new
+    // approval (+239 bytes). Nothing unrelated was trimmed to fit.
+    expect(Buffer.byteLength(served, 'utf8')).toBeLessThan(12000)
   })
 
   it('treats chains.default as expected only and confirms funding after login', () => {

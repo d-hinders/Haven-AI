@@ -9,7 +9,6 @@ import {
   transactionMovement,
   transactionRowBadge,
   transactionStatus,
-  transactionTitle,
 } from '../transaction-presentation'
 import { truncate } from '@/lib/format'
 import TransactionsLedgerRow from '@/components/transactions/TransactionsLedgerRow'
@@ -52,7 +51,6 @@ describe('transaction presentation', () => {
       paymentId: 'sweep-id',
     })
 
-    expect(transactionTitle(sweep)).toBe('Agent funds swept back')
     expect(transactionInitiator(sweep)).toBe('Research assistant')
     expect(transactionStatus(sweep)).toEqual({ label: 'Recovered', tone: 'success' })
 
@@ -65,7 +63,6 @@ describe('transaction presentation', () => {
   it('keeps ordinary incoming transfers generic', () => {
     const incoming = tx()
 
-    expect(transactionTitle(incoming)).toBe('Received payment')
     expect(transactionInitiator(incoming)).toBe('')
     expect(transactionStatus(incoming)).toBeNull()
   })
@@ -84,7 +81,6 @@ describe('transaction presentation', () => {
 
     expect(transactionInitiator(row)).toBe('Research assistant')
     expect(transactionInitiator(row)).not.toBe('You')
-    expect(transactionTitle(row)).toBe('Agent payment by Research assistant')
   })
 
   it('attributes an erc7710 x402 row to its agent — never "You"', () => {
@@ -98,14 +94,12 @@ describe('transaction presentation', () => {
 
     expect(transactionInitiator(row)).toBe('Research assistant')
     expect(transactionInitiator(row)).not.toBe('You')
-    expect(transactionTitle(row)).toBe('Agent payment by Research assistant')
   })
 
   it('renders "You" only for human-initiated rows', () => {
     const row = tx({ direction: 'out', source: 'direct', initiatedBy: 'human' })
 
     expect(transactionInitiator(row)).toBe('You')
-    expect(transactionTitle(row)).toBe('Payment sent by you')
   })
 
   it('renders explicit "Unknown" for outbound rows with missing attribution — never "You"', () => {
@@ -113,7 +107,6 @@ describe('transaction presentation', () => {
 
     expect(transactionInitiator(row)).toBe('Unknown')
     expect(transactionInitiator(row)).not.toBe('You')
-    expect(transactionTitle(row)).toBe('Payment sent')
   })
 
   it('maps the settlement scheme to its display label, null-in null-out', () => {
@@ -131,7 +124,7 @@ describe('transaction presentation', () => {
  * chain) on `blockscout-v2`, which already checksummed — the opposite of what
  * the provider names suggest, and pinned by a test in
  * `packages/backend/src/modules/transactions/__tests__/normalize.test.ts`.
- * Every rendered counterparty label resolves through `transactionTitle`, and
+ * Every rendered counterparty label resolves through `counterpartyLabel`, and
  * both lookups inside it lowercase before matching — so the change is inert.
  *
  * These pin that. The failure mode if the lowercasing is ever dropped is
@@ -345,7 +338,7 @@ describe('counterpartyLabel no-address mode (#3810)', () => {
  * `/transactions` ledger rows (#4266; the transactions table before them)
  * and, through `activityCounterparty`, the agent detail Activity rows never
  * render a truncated address in a row; the detail panel is where the address
- * lives, in full, with a copy button.
+ * lives, shortened under Technical details, with a copy button (#4267).
  */
 describe('shared screens adopt the no-address rules (#3811)', () => {
   const UNKNOWN = '0x9999999999999999999999999999999999999999'
@@ -378,7 +371,10 @@ describe('shared screens adopt the no-address rules (#3811)', () => {
     expect(screen.queryByText(TRUNCATED)).not.toBeInTheDocument()
   })
 
-  it('TransactionDetailPanel renders the FULL address with a copy affordance', () => {
+  // #4267 supersedes #3811's "in full" rule for the panel: the title follows
+  // the row's no-address rule, and the address sits shortened under
+  // Technical details — the full value one copy (or the explorer link) away.
+  it('TransactionDetailPanel titles by the no-address rule and shortens the address, with copy', () => {
     render(
       <TransactionDetailPanel
         transaction={row}
@@ -388,10 +384,10 @@ describe('shared screens adopt the no-address rules (#3811)', () => {
       />,
     )
 
-    // The full address is on the screen (not the truncated form)…
-    expect(screen.getAllByText(UNKNOWN).length).toBeGreaterThan(0)
-    expect(screen.queryByText(TRUNCATED)).not.toBeInTheDocument()
-    // …and the copy affordance names the thing, not the widget (the fixture
+    expect(screen.getByRole('dialog', { name: 'New recipient' })).toBeInTheDocument()
+    expect(screen.queryByText(UNKNOWN)).not.toBeInTheDocument()
+    expect(screen.getAllByText(TRUNCATED).some((el) => el.getAttribute('title') === UNKNOWN)).toBe(true)
+    // The copy affordance names the thing, not the widget (the fixture
     // carries token + account addresses too, so there are several).
     expect(screen.getAllByRole('button', { name: 'Copy address' }).length).toBeGreaterThan(0)
   })

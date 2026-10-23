@@ -477,6 +477,24 @@ describe('agent info helpers', () => {
       expect(summary.allowances[0]).toMatchObject({ remainingAtomic: '0', nextRefillAt: REFILL })
     })
 
+    it('several spent rows: budgetRefillsAt is the EARLIEST refill, whatever the row order', async () => {
+      const LATER = '2026-10-25T09:00:00.000Z'
+      stub(() => {
+        const body = JSON.parse(JSON.stringify({
+          agent_id: 'agent-1', account_address: '0xSafe', delegate_address: '0xDelegate', chain_id: 8453,
+          allowances: [LATER, REFILL].map((at, i) => ({
+            id: `allowance-${i + 1}`, token_address: USDC_BASE, token_symbol: 'USDC', configured_amount: '10000',
+            reset_period_min: 60, next_refill_at: at,
+            onchain: { amount: '10000', spent: '10000', remaining: '0', effective_spent: '10000', reset_time_min: 60, last_reset_min: 0, nonce: 0, is_reset_pending: false },
+          })),
+        }))
+        return new Response(JSON.stringify(body))
+      })
+      const summary = await new HavenClient({ apiKey: 'sk_agent_test', baseUrl }).getAgentSummary()
+      expect(summary.spend_authority_readiness).toBe('needs_approval')
+      expect(summary.budgetRefillsAt).toBe(REFILL)
+    })
+
     it('never approved: needs_approval with NO rows, and budgetRefillsAt null', async () => {
       stub(() => delegationAllowancesResponse([]))
       const summary = await new HavenClient({ apiKey: 'sk_agent_test', baseUrl }).getAgentSummary()

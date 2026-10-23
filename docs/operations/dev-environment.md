@@ -39,6 +39,21 @@ covers:
 last-verified: "2026-10-23"
 ---
 
+> **Re-verified #4319 (2026-10-23, the EIP-3009 receipt-attribution flag):**
+> this diff touched one file in this document's coverage list,
+> `packages/backend/src/config.ts`. The change adds one entry to the `config`
+> object — `eip3009ReceiptAttribution`, read through `parseBooleanFlag` from a
+> NEW env scalar, `HAVEN_EIP3009_RECEIPT_ATTRIBUTION`. It follows the family's
+> standing rules this document already describes: unset/empty reads `false`
+> (the flag ships off, per the issue's rollout order — merge → dev dry run →
+> dev write → dev flag → prod), an unrecognised value refuses the boot
+> (#3015), and the flag is documented in `.env.example` beside its siblings.
+> No env variable this document names is renamed, re-read, or re-typed; no
+> dev-environment surface (ports, services, workflow env plumbing) moves.
+> Scope of this note: the one new flag and its env scalar. Nothing else in
+> this document was re-verified, and `last-verified` already reads 2026-10-23
+> and is left as is.
+
 > **Re-verified #4307 (2026-10-23, Receive dialog QR chrome):** this diff
 > touched one file in this document's coverage list,
 > `packages/frontend/src/components/ReceiveDialog.tsx`. The change is

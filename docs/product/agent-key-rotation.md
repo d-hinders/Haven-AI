@@ -13,7 +13,7 @@ covers:
   - packages/connect/src/storage.ts
   - packages/frontend/src/components/agent-panel/ReplaceSigningKeyModal.tsx
   - 'packages/frontend/src/app/(authenticated)/agents/[agentId]/AgentDetailClient.tsx'
-last-verified: "2026-09-07"
+last-verified: "2026-10-24"
 ---
 
 # Replacing an agent's signing key
@@ -47,8 +47,8 @@ So the order matters, and it is not recoverable afterwards:
   (`haven_sweep_delegate` over MCP, or `sweepDelegate()` if you drive the SDK
   directly).
 - **Key lost?** Anything left on that address is **permanently stranded** — by you and
-  by Haven alike. Haven's preflight reads the balance and refuses to continue until
-  you say what happened to it, so you find out now rather than later.
+  by Haven alike. Haven's preflight reads the address's USDC balance and refuses to continue
+  until you say what happened to it, so you find out now rather than later.
 
 ## What re-key does
 
@@ -70,6 +70,7 @@ the revoke can require you to set a new budget.
 | **The agent itself** | Same id, same name, same transaction history. Nothing downstream has to be re-pointed. |
 | **The budget remainder** | If the agent had 40 of 100 USDC left this period, the new key gets 40 — not 100. |
 | **The period boundary** | The carried 40 expires when the original period would have, and the full budget resumes then. Re-key is not a way to refill a budget. |
+| **The end date** | The replacement keeps the original grant's end date. Re-key does not extend a budget's lifetime. |
 | **Passport standing** | If the agent has an [Agent Passport](agent-passport.md), its standing is unbroken. |
 
 Three edges the example skips, all in your favour. A budget whose first period had
@@ -128,9 +129,9 @@ never leaves it. Haven only ever receives an address.
 > (a non-production deployment — the backend's setup response calls it
 > `connector_package`; see
 > [`package-dev-channel.md`](../operations/package-dev-channel.md)), use that package
-> in every command on this page. It matters most in step 3: `--rekey-finish`
-> reinstalls the signer runtime pinned by the connector that runs it, so finishing
-> from another channel replaces the signer you were re-keying. The connector prints
+> in every command on this page. It matters most in step 3: `--rekey-finish
+> --runtime` reinstalls the signer runtime pinned by the connector that runs it,
+> so finishing from another channel replaces the signer you were re-keying. The connector prints
 > the exact step-3 command for its own channel at the end of step 1.
 
 **1. On the machine that runs the agent**
@@ -147,9 +148,12 @@ owner-only and the connector never calls them — that is why step 2 is yours.
 
 **2. In the dashboard**
 
-Open the agent, choose **Replace signing key**, paste the address. You will sign a few
-times: once to revoke the old authority, then once per replacement budget. At the end
-it shows a **new API key, once**. Copy it.
+Open the agent, choose **Replace signing key**, paste the address. You will approve a
+few times: once to revoke the old authority, then once per replacement budget rule.
+A budget with a carried remainder is up to two rules: the remainder for the
+current period and, if the grant runs past that period, the full budget from its
+boundary. At the end it shows a **new API
+key, once**. Copy it.
 
 > **Finish the remaining steps while you are here.** The agent cannot pay while the
 > old key is off and the replacement is unfinished. If a budget period rolls over
@@ -249,8 +253,9 @@ originally granted.
 - **Agents connected before mid-2026 do not show their MCP server name.** The
   dashboard names the MCP pair each agent is wired as, so several agents in one
   harness can be told apart ([#1878](https://github.com/d-hinders/Haven-AI/issues/1878)) —
-  but only for agents a current connector registered. Older ones read "MCP name
-  not recorded", and re-keying does not fill it in: the finish step does not
+  but only for agents a current connector registered. Older ones read "not
+  recorded" in the MCP server name row of the agent's Settings tab, and
+  re-keying does not fill it in: the finish step does not
   re-register, so only a fresh connect records the name. `--doctor` on the
   machine maps them in the meantime.
 
@@ -261,3 +266,22 @@ originally granted.
 - [Agent Passport](agent-passport.md) — what standing means and why the anchor lags
 - [`@haven_ai/connect` README](../../packages/connect/README.md) — every flag, including
   multi-agent wiring
+
+Re-verified 2026-10-24 (#4372 part C, at dev `795c50fc7`), end to end. Changed:
+the preflight reads the old address's USDC balance (`sweepUsdcAddress`); the
+carry table gains the end date (the carry expires at `min(boundary, expires_at)`
+and the steady grant keeps the original `expires_at`, `rekey-carry.ts`); the
+dashboard step says approve, once per replacement budget rule, and that a
+carried budget is up to two rules (`ReplaceSigningKeyModal.tsx`, "one approval
+each"); `--rekey-finish` reinstalls the signer runtime only with `--runtime`
+(`rekey.ts`, `prepareSignerRuntime` inside the `options.runtime` branch); and an
+unrecorded MCP name reads "not recorded" in the agent Settings tab's MCP server
+name row (`McpServerName.tsx`, #4209). Re-checked without change: owner-only
+routes and `refuseAgentCaller`; revoke before issue; the remainder and boundary
+carry, the dormant re-issue, the expired grant and the dropped cross-period
+carry (`planCarry`); the old API key rotating in the completion transaction;
+`pending_signature` intents expiring (`INVALIDATE_OLD_PAYER_INTENTS_SQL`); the
+passport re-anchor and its `pending` case (`reanchor.ts`); the connector's
+legacy-rail and revoked refusals and its 24-hour parked keypair; `--doctor`'s
+`identity_match` and parked-re-key report; the #1868 adoption refused after a
+new grant; #1849, #1868, #1878, #1911, #2413 and #3728 closed.

@@ -19,7 +19,7 @@ covers:
   - packages/frontend/src/components/EditAgentModal.tsx
   - packages/frontend/src/components/DelegationBudgetCard.tsx
   - packages/frontend/src/components/OnchainActionGate.tsx
-last-verified: "2026-09-30"
+last-verified: "2026-10-24"
 ---
 
 # Haven AI UX Review
@@ -51,7 +51,7 @@ Use this checklist before finishing any Haven UI task. It is written for AI impl
   and the list queries filter to `account_type = 'delegator_hybrid'`, so no
   legacy account reaches a screen; this criterion is retained only so a reviewer
   who meets such a notice in a diff knows it should not be there.
-- Payment execution, agent authority, credentials, Safe setup, relaying, SDK
+- Payment execution, agent authority, credentials, account or signer setup, relaying, SDK
   payment APIs, x402/MPP, merchant, fiat/card, swap, yield, treasury,
   reporting/accounting, tax, and advice surfaces also pass
   `casp-risk-guardrails.md`.
@@ -66,10 +66,10 @@ Use this checklist before finishing any Haven UI task. It is written for AI impl
   `TransactionActivityRow` in ledger mode under day bands.
 - Cards, buttons, inputs, shadows, radii, and typography match `docs/product/design-system.md`.
 - `Card elevation="raised"` is used only for prominent page-anchor surfaces, not ordinary cards.
-- The shared `Card` primitive's implemented `anchor` elevation is used only as
-  a restrained tinted secondary focal tier. The static `design-system.md` card
-  table does not yet list this implemented tier; verify it against the live
-  `/design-system` reference and do not invent additional elevations.
+- The shared `Card` primitive's `anchor` elevation is used only as a
+  restrained tinted secondary focal tier. `design-system.md` § 3 lists the
+  three elevations `Card` implements (`flat`, `raised`, `anchor`); do not
+  invent additional elevations.
 - Inputs use the shared `Input` primitive for visible borders, focus, validation, Max/Paste actions, and helper text.
 - Skeleton loading uses `Skeleton` rather than inline pulse divs.
 - Toast and Tooltip are used through shared primitives, not one-off floating elements.
@@ -141,8 +141,9 @@ Any remaining matches should be deliberate technical disclosure, developer copy,
   Verification). A logic-only change to an existing route takes the headless
   equivalent instead — but check whether the route has a committed pixel baseline
   before you rely on that, because on a route without one nothing else is comparing
-  it. `/design-system` itself is pixel-guarded by the blocking
-  visual-regression CI job.
+  it. `/design-system`'s scoped captures (the whole-page capture was removed,
+  #2635) are pixel-compared by the visual-regression CI job (`Design visual
+  regression`), a required check on `main` and advisory on `dev`.
 - Run relevant frontend tests or `npm run build -w packages/frontend` when practical.
 - Run the matching Captain Self-Check Preflight items before final review.
 - If browser verification is skipped, record why and name the headless-equivalent
@@ -189,3 +190,18 @@ hooks as described. The intervening UI drift (#3442 token-label wrap, #3437
 releases wrap, #3482 faucet/onramp, #3408 receive side, #3198 agent labels,
 #3205 chart callouts, #3087 marketplace) changed screens the checklist reviews
 without changing any review criterion, primitive name, or process step here. (`TransactionsTable` was deleted after this re-verification, with #4266.)
+
+Re-verified 2026-10-24 (#4372 part C, at dev `795c50fc7`), end to end. Changed:
+the regulatory trigger says "account or signer setup", as `AGENTS.md` does;
+`design-system.md` § 3 now lists all three `Card` elevations, so the note that
+the static table lacked `anchor` is gone; `Design visual regression` is a
+required check on `main` and advisory on `dev` (the branch rulesets), not
+blocking everywhere, and compares `/design-system` through scoped captures
+only (#2635). Re-checked without change: the `#patterns` anchor and the
+#4109 rule; every ledger and the dashboard preview rendering
+`TransactionActivityRow`; the one
+permanently-open showcase (`WalletPopover`, pinned by
+`showcase-permanently-open-pin.test.ts`); the #2038 Tooltip rule; `aria-sort`
+in `Table`; the every-PR `haven-reviewer` rule in `CLAUDE.md` § How shipping
+is governed; the environment badge beside the sidebar wordmark and the
+`#main-content` skip link.

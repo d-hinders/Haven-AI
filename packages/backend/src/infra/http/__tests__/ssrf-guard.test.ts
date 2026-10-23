@@ -17,6 +17,7 @@ import {
   resolvePublicAddresses,
   safeGetText,
   safePostJson,
+  safeRequest,
   type PinnedRequest,
   type PinnedResponse,
   type PinnedTransport,
@@ -455,5 +456,97 @@ describe('safePostJson (#1713)', () => {
       }),
     })
     expect((result as { headers: Record<string, string> }).headers['mcp-session-id']).toBe('sess-9')
+  })
+})
+
+describe('safeRequest (#4281)', () => {
+  const payment402: PinnedResponse = { status: 402, location: null, body: '{"accepts":[]}', headers: { 'payment-required': 'e30=' } }
+
+  it('returns a 402 to the caller rather than refusing it, with headers', async () => {
+    const result = await safeRequest('https://api.merchant.example/paid', { method: 'GET', body: null }, {
+      resolver: publicResolver,
+      transport: transportReturning(payment402),
+    })
+    expect(result).toMatchObject({ ok: true, status: 402, headers: { 'payment-required': 'e30=' } })
+  })
+
+  it('sends the declared method, a JSON body and the caller accept, and nothing the caller cannot choose', async () => {
+    const transport = vi.fn<PinnedTransport>(async () => payment402)
+    await safeRequest('https://api.merchant.example/paid', { method: 'put', body: '{"a":1}', accept: 'application/json' }, {
+      resolver: publicResolver,
+      transport,
+    })
+    const sent = transport.mock.calls[0]![0] as PinnedRequest
+    expect(sent.method).toBe('PUT')
+    expect(sent.body).toBe('{"a":1}')
+    expect(sent.headers).toEqual({
+      'user-agent': expect.stringContaining('Haven-'),
+      accept: 'application/json',
+      'content-type': 'application/json',
+      'content-length': '7',
+    })
+  })
+
+  it('never sends a body on a GET or HEAD', async () => {
+    for (const method of ['GET', 'HEAD']) {
+      const transport = vi.fn<PinnedTransport>(async () => payment402)
+      await safeRequest('https://api.merchant.example/paid', { method, body: '{"a":1}' }, { resolver: publicResolver, transport })
+      const sent = transport.mock.calls[0]![0] as PinnedRequest
+      expect(sent.method).toBe(method)
+      expect(sent.body).toBeNull()
+      expect(sent.headers['content-type']).toBeUndefined()
+    }
+  })
+
+  it('drops an accept value that carries CR or LF', async () => {
+    const transport = vi.fn<PinnedTransport>(async () => payment402)
+    await safeRequest('https://api.merchant.example/paid', { method: 'GET', body: null, accept: 'a\r\nx-evil: 1' }, { resolver: publicResolver, transport })
+    expect((transport.mock.calls[0]![0] as PinnedRequest).headers.accept).toBe('*/*')
+  })
+
+  it('refuses a method outside the guarded set before any I/O', async () => {
+    const transport = vi.fn<PinnedTransport>(async () => payment402)
+    const resolver = vi.fn(publicResolver)
+    const result = await safeRequest('https://api.merchant.example/paid', { method: 'CONNECT', body: null }, { resolver, transport })
+    expect(result).toMatchObject({ ok: false, reason: 'method_not_allowed' })
+    expect(resolver).not.toHaveBeenCalled()
+    expect(transport).not.toHaveBeenCalled()
+  })
+
+  it('refuses a redirect on a method that can carry a body, and follows one on a GET', async () => {
+    const redirect: PinnedResponse = { status: 307, location: 'https://other.example/paid', body: '' }
+    const put = await safeRequest('https://api.merchant.example/paid', { method: 'PUT', body: '{}' }, {
+      resolver: publicResolver,
+      transport: transportReturning(redirect),
+    })
+    expect(put).toMatchObject({ ok: false, reason: 'redirect_on_non_get' })
+    for (const method of ['PATCH', 'DELETE']) {
+      const refused = await safeRequest('https://api.merchant.example/paid', { method, body: '{}' }, {
+        resolver: publicResolver,
+        transport: transportReturning(redirect),
+      })
+      expect(refused).toMatchObject({ ok: false, reason: 'redirect_on_non_get' })
+    }
+    const post = await safeRequest('https://api.merchant.example/paid', { method: 'POST', body: '{}' }, {
+      resolver: publicResolver,
+      transport: transportReturning(redirect),
+    })
+    expect(post).toMatchObject({ ok: false, reason: 'redirect_on_post' })
+
+    // Answer by host, not by call order: the first host redirects, the target pays.
+    const hops = vi.fn<PinnedTransport>(async (req) => (req.url.hostname === 'other.example' ? payment402 : redirect))
+    const get = await safeRequest('https://api.merchant.example/paid', { method: 'GET', body: null }, { resolver: publicResolver, transport: hops })
+    expect(get).toMatchObject({ ok: true, status: 402, finalUrl: 'https://other.example/paid' })
+    expect(hops).toHaveBeenCalledTimes(2)
+  })
+
+  it('refuses a host that resolves into blocked space without calling the transport', async () => {
+    const transport = vi.fn<PinnedTransport>(async () => payment402)
+    const result = await safeRequest('https://rebind.merchant.example/paid', { method: 'GET', body: null }, {
+      resolver: async () => [{ address: '10.0.0.7', family: 4 }],
+      transport,
+    })
+    expect(result).toMatchObject({ ok: false, reason: 'address_not_public' })
+    expect(transport).not.toHaveBeenCalled()
   })
 })

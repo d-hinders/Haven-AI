@@ -57,8 +57,11 @@ A sleeping service (Railway "serverless") stops after about 10 minutes without
 outbound traffic and cold-starts on the next request. It is on for both
 Demo-merchants and the dev hosted MCP. Dev Demo-merchant joined them on
 2026-10-05. It sees QA traffic and the dev backend's hourly catalog probe,
-which wakes it once an hour; a cold start fails at most one probe, and an
-entry is only marked degraded after three consecutive failures.
+which wakes it once an hour. Since #4281 that probe runs under the SSRF
+guard with a 15 s total deadline (`CATALOG_REFRESH_PROBE_TIMEOUT_MS`). That
+covers the cold start (3.8–5.0 s, measured 2026-10-22), so a cold start alone does not fail
+the probe, and an entry is only marked degraded after three consecutive
+failures.
 
 ## Reading cost
 

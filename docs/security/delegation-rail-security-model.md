@@ -559,6 +559,18 @@ caveat, so the authority is still the signed caveat stack and nothing else.
 > Scope of this re-read: the text named above and the `client.ts` coverage;
 > nothing else in this document was re-read for it.
 
+> **Re-verified #4281 (2026-10-22):** #4281 changes only the transport of the
+> catalog probe in `merchant-catalog.ts`: `probeCatalogEntry` and
+> `refreshCatalog` now default to `guardedCatalogFetch`, which goes through
+> the SSRF guard. What a successful probe writes is unchanged, `pay_to`
+> included: it is still written as the challenge names it. A refused probe
+> writes no `pay_to`. It counts a miss, exactly like a probe that
+> received no 402, so a row that stays unreachable is degraded after the
+> existing streak and leaves the merchant's active offers. The payTo
+> contract above is unchanged. Scope of this re-read: the Merchant-locked
+> budgets section and the `merchant-catalog.ts` coverage it names; the rest
+> of the document was not re-read for it.
+
 Two limits are deliberate:
 - **Slot sharing.** A merchant-locked budget and a plain budget pinned to the
   same address share one `(agent, token, recipient)` slot. Activating either

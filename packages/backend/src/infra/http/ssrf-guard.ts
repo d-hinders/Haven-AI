@@ -1,12 +1,15 @@
 /**
  * Shared SSRF guard for outbound requests to merchant-controlled URLs
- * (epic #1717, #1712; adopted by #1713's probe — do not write a second one).
+ * (epic #1717, #1712; adopted by #1713's probe and, since #4281, by the
+ * catalogue refresh and discovery probe — do not write a second one).
  *
- * Every request this guard makes goes to a host an ANONYMOUS SUBMITTER chose.
- * That is the whole threat model: without this, `POST /catalog/submit` turns
- * Haven into a request cannon aimed wherever the submitter likes — at cloud
- * instance metadata, at services on the private network, or at a third party
- * Haven would be DDoSing on their behalf.
+ * Every request this guard makes goes to a host a THIRD PARTY may have chosen:
+ * an anonymous submitter (`POST /catalog/submit`), or a seller listed in the
+ * x402 Bazaar whose URL discovery copied into `merchant_catalog` (#4245). That
+ * is the whole threat model: without this, Haven becomes a request cannon
+ * aimed wherever that party likes — at cloud instance metadata, at services on
+ * the private network, or at a third party Haven would be DDoSing on their
+ * behalf.
  *
  * Four controls, and the third is the one a string check cannot give you:
  *
@@ -47,6 +50,8 @@ export type SsrfRefusalReason =
   | 'transport_error'
   | 'http_status'
   | 'redirect_on_post'
+  | 'redirect_on_non_get'
+  | 'method_not_allowed'
 
 export interface SsrfRefusal {
   ok: false
@@ -195,6 +200,14 @@ export async function resolvePublicAddresses(
   return { ok: true, addresses: kept }
 }
 
+/**
+ * Request methods the guard sends. GET and HEAD may follow re-validated
+ * redirects; every other method refuses a redirect outright (see `safeFetch`).
+ */
+export type GuardedMethod = 'GET' | 'HEAD' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
+
+const GUARDED_METHODS: ReadonlySet<string> = new Set(['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'])
+
 /** One transport read of an already-validated URL, pinned to `address`. */
 export interface PinnedRequest {
   url: URL
@@ -202,9 +215,12 @@ export interface PinnedRequest {
   family: number
   timeoutMs: number
   maxBytes: number
-  /** #1713: the probe needs POST; the ownership proof stays GET. */
-  method: 'GET' | 'POST'
-  /** Request body, POST only. Never contains a secret — see `safePostJson`. */
+  /**
+   * #1713: the probe needs POST; the ownership proof stays GET. #4281: the
+   * catalogue refresh probes each row with its declared method.
+   */
+  method: GuardedMethod
+  /** Request body; never contains a secret — see `safePostJson` / `safeRequest`. */
   body: string | null
   headers: Record<string, string>
 }
@@ -332,7 +348,7 @@ const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308])
 
 /** What one guarded call sends, beyond the URL. */
 interface RequestShape {
-  method: 'GET' | 'POST'
+  method: GuardedMethod
   body: string | null
   headers: Record<string, string>
   /**
@@ -349,7 +365,7 @@ interface RequestShape {
 const HAVEN_USER_AGENT = 'Haven-CatalogVerification/1.0 (+https://haven.xyz)'
 
 /**
- * The single guarded-read loop. Both public entry points below go through
+ * The single guarded-read loop. Every public entry point below goes through
  * here, so there is exactly one place where the hop policy lives — a second
  * copy for POST is how the two drift until one of them stops re-validating.
  *
@@ -398,7 +414,7 @@ async function safeFetch(
 
     const res = response as PinnedResponse
     if (REDIRECT_STATUSES.has(res.status)) {
-      if (shape.method === 'POST') {
+      if (shape.method !== 'GET' && shape.method !== 'HEAD') {
         // A POST redirect is NOT followed, at any status, however public the
         // target resolves. Re-sending a body we composed to a host the first
         // host names turns the guard into a request forwarder with an
@@ -406,8 +422,12 @@ async function safeFetch(
         // amplifier that address classification cannot see, because the
         // victim is a perfectly ordinary public host. 307/308 preserve the
         // method and 301/302/303 downgrade it to GET; neither is a shape a
-        // JSON-RPC endpoint has any business asking us for.
-        return refuse('redirect_on_post', `HTTP ${res.status} redirect on a POST is not followed`)
+        // JSON-RPC endpoint has any business asking us for. #4281: the same
+        // holds for every other method that can carry a body.
+        if (shape.method === 'POST') {
+          return refuse('redirect_on_post', `HTTP ${res.status} redirect on a POST is not followed`)
+        }
+        return refuse('redirect_on_non_get', `HTTP ${res.status} redirect on a ${shape.method} is not followed`)
       }
       if (res.location === null) {
         return refuse('redirect_missing_location', `HTTP ${res.status} without a Location header`)
@@ -486,4 +506,52 @@ export async function safePostJson(
     headers[lower] = value
   }
   return safeFetch(raw, { method: 'POST', body, headers, acceptAnyStatus: true }, options)
+}
+
+/** What `safeRequest` sends, beyond the URL. */
+export interface GuardedRequest {
+  /** Uppercase; anything outside `GuardedMethod` is refused before any I/O. */
+  method: string
+  /** A serialised body, or null. Never a credential, signature or key-derived value. */
+  body: string | null
+  /** `accept`, sent as given (CR/LF refused). Defaults to any type. */
+  accept?: string
+}
+
+/**
+ * Send one request with a caller-chosen method to a merchant-controlled URL
+ * under the full guard, and return whatever status comes back (#4281).
+ *
+ * The catalogue refresh and the discovery probe (`modules/catalog/
+ * merchant-catalog.ts`) use this. Since #4245, a `merchant_catalog` row may
+ * carry a URL a third party chose (an x402 Bazaar listing), so those probes
+ * need the same four controls as `safePostJson`. A `402` is the answer they
+ * want, so any status is returned, exactly as `safePostJson` does.
+ *
+ * Headers are built here rather than passed through. A caller may choose the
+ * `accept` value. It cannot set `host`, `authorization`, `cookie` or anything
+ * else that would retarget or re-authenticate the guarded request. A body is
+ * always sent as JSON.
+ */
+export async function safeRequest(
+  raw: string,
+  request: GuardedRequest,
+  options: SafeFetchOptions = {},
+): Promise<SafeFetchResult> {
+  const method = request.method.toUpperCase()
+  if (!GUARDED_METHODS.has(method)) {
+    return refuse('method_not_allowed', `method ${method} is not sent by the guard`)
+  }
+  const headers: Record<string, string> = {
+    'user-agent': HAVEN_USER_AGENT,
+    accept: request.accept !== undefined && !/[\r\n]/.test(request.accept) ? request.accept : '*/*',
+  }
+  const body = method === 'GET' || method === 'HEAD' ? null : request.body
+  if (body !== null) {
+    // Only JSON bodies are declared on catalogue rows today (#3769); anything
+    // else is sent as JSON too rather than letting a row choose the header.
+    headers['content-type'] = 'application/json'
+    headers['content-length'] = String(Buffer.byteLength(body))
+  }
+  return safeFetch(raw, { method: method as GuardedMethod, body, headers, acceptAnyStatus: true }, options)
 }

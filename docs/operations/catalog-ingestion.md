@@ -70,6 +70,19 @@ the page does not pretend otherwise. The Bazaar discovery cron
 operator reviewed and which have no ownership proof. `GET /catalog` sorts them
 after operator and ingestion rows. Every other writer gets the column's `'operator'` default.
 
+Since #4281, those URLs are probed under the same SSRF guard as a
+submission (`infra/http/ssrf-guard.ts`). That holds for discovery's probe of
+a candidate and for the hourly refresh of every listed row, whatever its
+`source`. The guard requires https on the default port and refuses IP literals
+and locally-bound names. It resolves the host, refuses any address outside
+public unicast, pins the socket to the address it checked, and caps the
+response at 256 KiB. The total deadline is 15 s for a refresh probe, enough
+for a sleeping merchant's cold start, and 5 s for a discovery candidate, the
+ingestion probe's budget. It follows at most 3 redirects on a GET or HEAD, and
+refuses any redirect on a method that carries a body. A refusal counts as a
+failed probe: discovery skips the
+candidate, and the refresh adds one to the row's failure streak.
+
 ## Cadences and thresholds (module constants)
 
 All in `packages/backend/src/modules/catalog/lifecycle.ts` (and the probe's

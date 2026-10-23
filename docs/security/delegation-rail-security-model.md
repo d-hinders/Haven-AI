@@ -585,8 +585,10 @@ caveat, so the authority is still the signed caveat stack and nothing else.
 > not written at all: it keeps its current `pay_to`, status and failure
 > streak until a later run reaches it, which takes the least recently
 > updated rows first. A merchant's verified payTo can therefore stay
-> deferred until the rotation reaches it, but only when a run hits its
-> budget; with the seeded rows a run finishes well inside it. The
+> deferred until the rotation reaches it when a run hits its budget; with
+> the seeded rows a run finishes well inside it. A row whose write fails
+> (for example a 402 the database cannot store) is logged and not counted,
+> so it too keeps its current `pay_to`, status and failure streak. The
 > payTo contract above is unchanged. Scope of this re-read: the
 > Merchant-locked budgets section and the `merchant-catalog.ts` coverage
 > it names; the rest of the document was not re-read for it.

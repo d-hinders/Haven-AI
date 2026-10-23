@@ -43,7 +43,7 @@ export type DashboardAgent = DashboardOverview['agents'][number]
 /** The user's display currency, as the #3803 spend keys are spelled. */
 export type DashboardCurrency = 'USD' | 'EUR' | 'SEK'
 
-export const CURRENCY_KEY: Record<DashboardCurrency, 'usd' | 'eur' | 'sek'> = {
+export const CURRENCY_KEY: Record<DashboardCurrency, 'usd' | 'eur' | 'sek'> = { // design-system-exempt: a currency-to-wire-key lookup map (#4103), not a component; AgentRow is the registered primitive
   USD: 'usd',
   EUR: 'eur',
   SEK: 'sek',

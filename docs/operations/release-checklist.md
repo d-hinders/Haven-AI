@@ -27,8 +27,15 @@ unclear; this page is the order, not the reasoning.
 4. **When migrations are in range — code-owner approval** from someone other
    than the PR's author (`packages/backend/src/db/migrations/*.ts` is the one
    hard-gated path). Request it when opening, not when it blocks.
-5. **When migrations are in range — prod DB snapshot** must exist before the
-   migrations run on deploy (see `promoting-dev-to-main.md` § *Migrations*).
+5. **When migrations are in range — prod DB snapshot, recommended, not a
+   gate.** Take one before the migrations run on deploy when the plan allows
+   it. The current Railway plan cannot create backups, so skipping it is
+   allowed (owner decision, 2026-10-23). Say on the promotion PR which you
+   did. Without a snapshot, the mitigation is the migrations themselves:
+   each runs in its own transaction, so a failure rolls back. Run any
+   data precondition a migration states (for example a duplicate check
+   before a new unique index) against prod before merging. See
+   `promoting-dev-to-main.md` § *Migrations*.
 6. **Click Merge.** Any of the three maintainers: the ordinary **Merge pull
    request** button, **merge commit** form, in the web UI (`gh pr merge
    --merge` from a terminal works too). The PR showing as BEHIND `main` is

@@ -202,7 +202,7 @@ required check on `main` and advisory on `dev` (the branch rulesets), not
 blocking everywhere, and compares `/design-system` through scoped captures
 only (#2635); and, from review round 1, the token values live in
 `packages/ui/src/tokens.css` since #3508 (`.v2-tabular` in
-`packages/ui/src/type.css`), new code imports shared primitives from
+`packages/ui/src/type.css` since #3611), new code imports shared primitives from
 `@haven_ai/ui`, and `covers:` gains `packages/ui/src/**`. The 2026-09-30 note
 above predates #3508 and is left as written. Re-checked without change: the `#patterns` anchor and the
 #4109 rule; every ledger and the dashboard preview rendering

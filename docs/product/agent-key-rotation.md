@@ -115,7 +115,8 @@ The mechanics are identical. The difference is what you should look at.
 
 - **Lost** — the key is gone. Nobody else has it. Rotate at your convenience, minding
   the residual balance above.
-- **Compromised** — someone else may have it. Pick **Compromised** in the dialog
+- **Compromised** — someone else may have it. Pick *It may be in someone
+  else's hands* in the dialog
   and it lists the agent's most recent payments (up to five) under *Recent
   spending to review*, so you can look for any you did not authorise. Replacing
   the key stops further spending; it does not reverse a payment that already

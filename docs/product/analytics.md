@@ -51,7 +51,7 @@ figure the Payments tile shows). The endpoint
 
 The header carries the one `PeriodPicker` the list controls ship (#4110,
 #4116) — presets only, **Last 7 days / Last 30 days / Last 90 days** (the same
-wording as the response-owned caption, `rangeCaption`), no All time and no
+wording the `PeriodPicker` trigger shows, from `periodPresetLabels`), no All time and no
 custom range, because the endpoint takes a rolling `range`, not dates. The
 choice lives in two places, read once in that order on every mount:
 

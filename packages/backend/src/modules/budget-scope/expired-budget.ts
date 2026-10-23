@@ -37,13 +37,24 @@ const MAX_MS = 8.64e15
  * degraded storage degrades to the generic refusal, never to garbage prose).
  * `tokenAddress: null` asks across ALL of the agent's tokens on the chain
  * (the allowances read's `budget_ended_at`).
+ *
+ * Best-effort by construction: a FAILED read answers `null`, so the additive
+ * field and the expired-budget refusal can never take their callers down —
+ * the refusal sites degrade to their existing generic refusals (decision
+ * unchanged) and the allowances read omits the field, the same posture the
+ * #3518 reservation sum applies to its own side read.
  */
 export async function findExpiredBudgetForToken(
   agentId: string,
   chainId: number,
   tokenAddress: string | null,
 ): Promise<ExpiredBudget | null> {
-  const row = await findExpiredDelegationForToken(agentId, chainId, tokenAddress)
+  let row: Awaited<ReturnType<typeof findExpiredDelegationForToken>>
+  try {
+    row = await findExpiredDelegationForToken(agentId, chainId, tokenAddress)
+  } catch {
+    return null
+  }
   if (!row) return null
   const sec = Number(row.expires_at)
   if (!Number.isFinite(sec) || sec <= 0 || sec * 1000 > MAX_MS) return null

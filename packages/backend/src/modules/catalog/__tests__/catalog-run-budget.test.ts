@@ -126,7 +126,10 @@ describe('one bad entry does not abort a run (#4300)', () => {
         ? new Response(JSON.stringify({ accepts: [null] }), { status: 402 })
         : paid402()) as unknown as typeof fetch
 
-    const result = await ingestDiscoveredCatalog(db, (async () => indexPage(items)) as unknown as typeof fetch, 50, merchants, probeFetch)
+    // An escaping throw is caught into the result, so it fails the assertions below.
+    const result = await ingestDiscoveredCatalog(db, (async () => indexPage(items)) as unknown as typeof fetch, 50, merchants, probeFetch).catch(
+      (err: unknown) => ({ threw: String(err) }),
+    )
 
     expect(inserted).toEqual(items.slice(1).map((i) => i.resource))
     expect(result).toMatchObject({ candidates: 3, ingested: 2, failedProbe: 1 })
@@ -153,7 +156,7 @@ describe('one bad entry does not abort a run (#4300)', () => {
     }) as unknown as typeof fetch
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     try {
-      const result = await refreshCatalog(db, fetchImpl)
+      const result = await refreshCatalog(db, fetchImpl).catch((err: unknown) => ({ threw: String(err) }))
       expect(result).toEqual({ verified: 2, degraded: 0, deferred: 0 })
       expect(probed).toEqual(rows.map((r) => r.resource_url))
       expect(written).toEqual(['b', 'c'])

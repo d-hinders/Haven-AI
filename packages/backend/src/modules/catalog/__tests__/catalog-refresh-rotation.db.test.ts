@@ -93,7 +93,8 @@ describeDb('refresh run budget rotation (#4300)', () => {
     }) as unknown as typeof fetch
 
     for (let run = 0; run < 2; run += 1) {
-      const result = await refreshCatalog(db as unknown as QueryableLike, fetchImpl)
+      // An escaping throw is caught into the result, so it fails the assertion below.
+      const result = await refreshCatalog(db as unknown as QueryableLike, fetchImpl).catch((err: unknown) => ({ threw: String(err) }))
       expect(result, `run ${run}`).toEqual({ verified: ROWS - 1, degraded: 0, deferred: 0 })
     }
     // Both runs reached every row, the unparsable one included. The second

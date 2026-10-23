@@ -13,6 +13,7 @@ covers:
   - packages/frontend/src/components/ui/AreaChart.tsx
   - packages/frontend/src/components/charts/chart-scale.ts
   - packages/frontend/src/components/ui/StatTile.tsx
+  - packages/ui/src/StatTile.tsx
   - packages/frontend/src/components/analytics/AgentsTable.tsx
   - packages/frontend/src/lib/analytics-format.ts
   - packages/frontend/src/lib/analytics-series.ts
@@ -24,7 +25,7 @@ covers:
   - packages/backend/src/infra/repositories/analytics.ts
   - packages/backend/src/modules/mpp/budget-precheck.ts
   - packages/backend/src/routes/machine-payments.ts
-last-verified: "2026-09-30"
+last-verified: "2026-10-24"
 ---
 
 # Analytics
@@ -38,9 +39,11 @@ page deliberately does not do, so a reader can tell an honest zero from a
 missing number.
 
 The page renders from one endpoint, `GET /analytics/overview`
-(`range=7d|30d|90d`, `currency=usd|eur|sek`, `tz=<IANA zone>`), so every tile on
+(`range=7d|30d|90d`, `currency=usd|eur|sek`, `tz=<IANA zone>`, and `agentId`
+when the Agent facet is set), so every tile on
 the page describes the same range, the same currency and the same set of
-payments — one loading state, one "based on N payments" basis. The endpoint
+payments — one loading state, one payment basis (`basis.payments_counted`, the
+figure the Payments tile shows). The endpoint
 (#2946), the page shell (#2947), the chart primitives (#2948) and their wiring
 (#2949, #3051) have all shipped; this doc describes what renders.
 
@@ -48,7 +51,7 @@ payments — one loading state, one "based on N payments" basis. The endpoint
 
 The header carries the one `PeriodPicker` the list controls ship (#4110,
 #4116) — presets only, **Last 7 days / Last 30 days / Last 90 days** (the same
-wording as the response-owned caption, `rangeCaption`), no All time and no
+wording the `PeriodPicker` trigger shows, from `periodPresetLabels`), no All time and no
 custom range, because the endpoint takes a rolling `range`, not dates. The
 choice lives in two places, read once in that order on every mount:
 
@@ -84,7 +87,9 @@ Review link to that agent's refused attempts, and the balance section says
 ## What each figure means
 
 **Spent.** The total booked value of confirmed agent payments in the range, in
-the display currency. Under the figure sits the previous window's spent, as an
+the display currency, net of funds swept back from an agent's delegate
+address in the same window (a funding leg the merchant refused and the
+sweep returned is not spend, #3755). Under the figure sits the previous window's spent, as an
 AMOUNT: "vs $280.10 the 30 days before" — an absolute comparison the endpoint
 already reported (`totals.spent_previous`), not a percentage pill
 (`percentChange` is gone with the delta chips; a ratio of two booked totals is
@@ -95,8 +100,8 @@ M agents" — the agents the window's payments came from, out of the agents the
 response lists — or the agent's own name when the facet narrows the page.
 
 **Refused.** How many payment attempts agents tried to make that were refused
-in the range, and — when they differ — how many attempts those refusals
-represent (`N attempts` on the tile). When the page is filtered to one agent,
+in the range, with the attempts those refusals represent under the count
+(`N attempts` on the tile, always shown). When the page is filtered to one agent,
 the tile adds a **Review** link to that agent's refused attempts
 (`/agents/<id>?tab=activity&status=refused`, #4323); with all agents shown the
 link is absent, because there is no page-level refused list to review. The
@@ -106,8 +111,9 @@ price-cap refusals the ledger never sees — moved into an ⓘ hint on the tile'
 label (#4333): a tooltip elaborating on the count the reader is already
 looking at, not a footnote line making the tile twice its neighbours' height.
 
-**Agents near their budget.** "N of M" — of the agents WITH budgets, how many
-are above 75% of a period budget (the band count the endpoint reports). The
+**Agents near their budget.** "N/M" — of the agents WITH budgets, how many
+are above 75% of a period budget (the band count the endpoint reports); with
+no budget in the window the tile reads "—" and says so. The
 old "Budget used 0/5" headline is retired: a band count without its
 denominator's context read as a budget figure. Per-agent detail lives in the
 agents table.
@@ -129,7 +135,7 @@ of), Payments, **Refused** as a link to that agent's refused attempts,
 agent.
 
 **Fees paid to Haven.** What Haven has charged, in the display currency. The
-tile EXISTS only while the fee flag is on — a fourth or fifth tile. While fee
+tile EXISTS only while the fee flag is on — a fifth tile beside the four. While fee
 charging is switched off the tile is absent rather than rendering "No fees
 yet": its one job (saying the product charges nothing) is done by the absence,
 and a $0.00 would report "nothing charged this period", a different fact. The
@@ -142,9 +148,9 @@ a marker cap above a bar means the guardrails refused at least one payment
 that day (the tooltip and the data table say how many; the legend names the
 cap beside the agent rows whenever a day in the range has one). The bars are the same
 booked values the Spent tile sums, bucketed server-side in the page's time
-zone. Agents are ordered by spend, then id, and an agent that appears on the
-chart keeps one colour across the chart, its legend and the swatch beside its
-spend figure in the agents table above it. The window starts and ends at the
+zone. Agents are ordered by spend, then id, and an agent's fill is its own
+avatar tint — the colour of its monogram in the agents table above the
+chart — so it holds across ranges and ranks (#4331). The window starts and ends at the
 moment the page loads, not at midnight, so a bar on the window's first or
 last local day covers part of a day: it is striped and named as partial (the
 note under the chart says which end), never dropped or stretched. On a wide
@@ -238,11 +244,13 @@ the step that confirms the payment. Rows in earlier statuses
 so summing them would either report money that has not moved or force a
 conversion the product has deliberately not performed.
 
-`submitted` rows get their own sentence on the page rather than silence. An
-erc7710 payment whose hash was never reported back stays `submitted` —
-settlement recording is fail-closed — so "N payments awaiting settlement
-evidence are not counted" is the honest form: named, with the reason they are
-not in the sum.
+`submitted` rows are not counted. An erc7710 payment whose hash was never
+reported back stays `submitted` — settlement recording is fail-closed. The
+endpoint still reports how many there are (`basis.unsettled_submitted`), and
+a window that holds only such payments is not drawn as the no-activity empty
+state. The page no longer prints a sentence naming them: #4333 dropped the
+"N payments awaiting settlement evidence are not counted" footnote with the
+tile rework, and its PR noted the owner may want it back.
 
 ## Where the numbers come from
 
@@ -260,13 +268,15 @@ not in the sum.
   failure to send one), so a payment at 00:30 Stockholm time lands in the
   30th's bucket for a Stockholm user, not in the 29th's. The response echoes
   the zone it used, and the page renders dates in the user's zone.
-- **Previous-period deltas.** Computed server-side over the previous period
-  of the same length, on exactly the same definitions — a delta is never
-  taken against a differently-scoped number.
+- **Previous-period figures.** Computed server-side over the previous period
+  of the same length, on exactly the same definitions — the Spent tile's
+  comparison is never taken against a differently-scoped number.
 - **Refusals.** Recorded in the `payment_refusals` ledger, which exists from
   migration 086 (14 September 2026). A range reaching before that date simply
-  has no refusal rows for the days before it — the page shows an honest empty
-  there, and neither it nor the API claims a coverage floor it cannot read.
+  has no refusal rows for the days before it. The API reports the ledger's
+  floor — the earliest day with refusal rows (`basis.refusals_recorded_from`,
+  #3013) — and the Refused tile's ⓘ hint names that date, so an early window
+  reads as a coverage caveat, not a clean zero.
   Refusals are recorded with attempts. One kind of refusal never reaches the
   ledger, and the page says so rather than letting the count imply it: a
   price cap. Your agent's own runtime may apply one before asking Haven (no
@@ -278,7 +288,8 @@ not in the sum.
   holds back is throttling, not a refusal, and it is not counted as one.
 - **Sponsored gas.** Haven relays agent payments, and the relay's network fee
   is paid by Haven. The page shows this as a count — "Haven sponsored N
-  operations' gas" — of relayed operations on value-bearing chains. It is
+  operations' gas" — of relayed operations on value-bearing chains, as the
+  footnote of the Fees tile, so it is not shown while fee charging is off. It is
   deliberately a count, not a fiat figure: gas is not booked per payment in
   the display currency, and an invented conversion would disagree with every
   other number on the page.
@@ -289,8 +300,7 @@ not in the sum.
   a reading surface; its only actions are navigation.
 - It does not re-value. Every figure is a booked value or a snapshot value;
   the page never applies a live exchange rate or a token price.
-- It does not count unsettled payments, and it does not hide them — see the
-  status rule above.
+- It does not count unsettled payments — see the status rule above.
 - It does not attribute gas to individual agents. Sponsored gas is counted
   for the whole account, because the relay ledger attributes some operations
   to the account itself (deploys, user-level operations) rather than to any
@@ -319,11 +329,14 @@ Three screenshot-harness scenarios are registered for this screen in
 
 - `analytics-populated` — the endpoint answers a populated overview whose
   merchants include a contact-labelled row, a receipt-named row and an
-  address-only row, so all three label resolutions are on the capture.
+  unresolved row (`kind: 'unknown'`, shown as "Unknown recipient"), so the
+  capture shows names and the unknown case side by side.
 - `analytics-empty` — the endpoint answers the all-zero overview (no
-  payments, agents, merchants or balance rows in range): the new-user empty
-  state ("No agent activity yet"), because the fixture carries no agents at
-  all (#4333) — not an error.
+  payments, agents, merchants or balance rows in range) while the agents list
+  still names the harness's agents, so the capture is the no-activity empty
+  state ("No agent activity in this range") — not an error. The new-user
+  state ("No agent activity yet") needs an empty agents list, which no
+  scenario serves; `AnalyticsClient.test.tsx` covers it.
 - `analytics-error` — the endpoint answers `503` via the harness's
   `ScenarioHttpError`, so the capture shows the page's failure path.
 
@@ -350,3 +363,29 @@ requests `currency=sek` and renders the endpoint's booked figures, no client
 derivation. The stamp this bump replaces was set by #3205 (2026-09-21), which
 did not touch the SEK passages; they were never explicitly re-verified since
 they landed until this pass. Nothing else in this file was re-read.
+
+Re-verified 2026-10-24 (#4372 part C, at dev `795c50fc7`), end to end, after
+#4331, #4332 (#4373) and #4333 (#4380). Changed: the endpoint's parameters
+include `agentId`; Spent is net of delegate sweeps in the same window (#3755,
+the inline ratio in `TOTALS_SPEND_SQL`/`BY_DAY_SPEND_SQL`/`PER_AGENT_SPEND_SQL`); the Refused tile always shows its attempts; Agents near
+their budget renders "N/M" and "—" without budgets; the Fees tile is a fifth
+tile; an agent's chart fill is its avatar tint and the agents table carries no
+swatch (#4331); the page no longer prints the unsettled-payments sentence
+(#4380 dropped `UnsettledEvidenceFootnote`), while the endpoint still reports
+the count and the empty-window rule still treats it as activity; the API
+reports the refusal ledger's floor (`basis.refusals_recorded_from`, #3013);
+the sponsored-gas count rides the Fees tile; the populated fixture's third
+merchant is an unresolved row (`kind: 'unknown'`); review round 1 found two
+more stale claims and corrected them: there is no "based on N payments" basis
+line (`analytics.visual.spec.ts:197`), and `analytics-empty` captures the
+no-activity state, because `/agents` still answers the harness's agents
+(`analytics.visual.spec.ts:230`); `covers:` gains `packages/ui/src/StatTile.tsx`.
+Re-checked without change:
+`?period=` and `haven.analytics.range` with `replaceState`; the Agent facet
+from `useAgents`, its 404 notice and the agent-scoped Review link; the
+Payments caption; the agents-table columns and the #3540 inclusion rule; the
+merchant naming order (`counterparty-name.ts`), its kind lines and the
+`/transactions?search=…` target; the balance copy and "Net change"; the
+`tz` default and 400; `MIN_CHARTABLE_DAYS = 3`; migration 086's date.
+"Spend over time" beyond the colour sentence is unchanged here: #4334
+(claimed by @PhilipEriksson) rewrites that paragraph.

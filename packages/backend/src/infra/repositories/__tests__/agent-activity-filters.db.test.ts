@@ -393,3 +393,87 @@ describeDb('filtered agent tool-invocation read (#4229, real DB)', () => {
     expect(okOnly).toEqual({ total: 1, errorCount: 2 })
   })
 })
+
+// #4346: `q` is a SUBSTRING search (the spec's "Case-insensitive substring
+// search"), so `%`, `_` and `\` in the term are literal characters, never LIKE
+// wildcards. Each case asserts the page AND the count, because the list and
+// COUNT statements are separate texts and must agree on the population.
+describeDb('search terms match literally — % _ and \\ are not wildcards (#4346, real DB)', () => {
+  beforeEach(async () => {
+    await resetDb()
+    seq = 0
+  })
+
+  it('payments: `a_b` finds only a literal a_b — by resource URL and by contact name', async () => {
+    const seed = await seedUserWithAgent()
+    const literal = await seedIntent(seed, {
+      status: 'confirmed',
+      createdAt: '2026-07-10T08:00:00Z',
+      x402ResourceUrl: 'https://shop.example/a_b',
+    })
+    await seedIntent(seed, {
+      status: 'confirmed',
+      createdAt: '2026-07-10T07:00:00Z',
+      x402ResourceUrl: 'https://shop.example/axb',
+    })
+    const toLiteral = '0x00000000000000000000000000000000000000c1'
+    const toOther = '0x00000000000000000000000000000000000000c2'
+    const byContact = await seedIntent(seed, { status: 'confirmed', createdAt: '2026-07-10T06:00:00Z', toAddress: toLiteral })
+    await seedIntent(seed, { status: 'confirmed', createdAt: '2026-07-10T05:00:00Z', toAddress: toOther })
+    await seedContact(seed.userId, 'Team a_b', toLiteral)
+    await seedContact(seed.userId, 'Team axb', toOther)
+
+    const rows = await listAgentPaymentsFiltered(seed.agentId, filterWith({ q: 'a_b' }), 30, 0, db)
+    expect(rows.map((r) => r.id).sort()).toEqual([literal, byContact].sort())
+    expect(await countAgentPaymentsFiltered(seed.agentId, filterWith({ q: 'a_b' }), db)).toBe(2)
+  })
+
+  it('payments: `a\\b` finds only a literal backslash, not `ab`', async () => {
+    const seed = await seedUserWithAgent()
+    const literal = await seedIntent(seed, {
+      status: 'confirmed',
+      createdAt: '2026-07-10T08:00:00Z',
+      x402ResourceUrl: 'https://shop.example/a\\b',
+    })
+    await seedIntent(seed, {
+      status: 'confirmed',
+      createdAt: '2026-07-10T07:00:00Z',
+      x402ResourceUrl: 'https://shop.example/ab',
+    })
+
+    const rows = await listAgentPaymentsFiltered(seed.agentId, filterWith({ q: 'a\\b' }), 30, 0, db)
+    expect(rows.map((r) => r.id)).toEqual([literal])
+    expect(await countAgentPaymentsFiltered(seed.agentId, filterWith({ q: 'a\\b' }), db)).toBe(1)
+  })
+
+  it('payments: a lone `%` matches no row without a literal %', async () => {
+    const seed = await seedUserWithAgent()
+    await seedIntent(seed, {
+      status: 'confirmed',
+      createdAt: '2026-07-10T08:00:00Z',
+      x402ResourceUrl: 'https://shop.example/plain',
+    })
+
+    expect(await listAgentPaymentsFiltered(seed.agentId, filterWith({ q: '%' }), 30, 0, db)).toEqual([])
+    expect(await countAgentPaymentsFiltered(seed.agentId, filterWith({ q: '%' }), db)).toBe(0)
+  })
+
+  it('tool calls: `a_b`, `a\\b` and `%` are literal in the tool name — page and count agree', async () => {
+    const seed = await seedUserWithAgent()
+    await seedInvocation(seed, { toolName: 'tool a_b', paymentId: null, resultStatus: 'ok' })
+    await seedInvocation(seed, { toolName: 'tool axb', paymentId: null, resultStatus: 'ok' })
+    await seedInvocation(seed, { toolName: 'tool a\\b', paymentId: null, resultStatus: 'ok' })
+    await seedInvocation(seed, { toolName: 'tool ab', paymentId: null, resultStatus: 'error', errorCode: 'plain' })
+
+    const underscore = await listToolInvocationsForAgentFiltered(seed.agentId, { ...NO_TOOL_FILTER, q: 'a_b' }, 30, 0, db)
+    expect(underscore.map((r) => r.tool_name)).toEqual(['tool a_b'])
+    expect((await countToolInvocationsForAgentFiltered(seed.agentId, { ...NO_TOOL_FILTER, q: 'a_b' }, db)).total).toBe(1)
+
+    const backslash = await listToolInvocationsForAgentFiltered(seed.agentId, { ...NO_TOOL_FILTER, q: 'a\\b' }, 30, 0, db)
+    expect(backslash.map((r) => r.tool_name)).toEqual(['tool a\\b'])
+    expect((await countToolInvocationsForAgentFiltered(seed.agentId, { ...NO_TOOL_FILTER, q: 'a\\b' }, db)).total).toBe(1)
+
+    expect(await listToolInvocationsForAgentFiltered(seed.agentId, { ...NO_TOOL_FILTER, q: '%' }, 30, 0, db)).toEqual([])
+    expect((await countToolInvocationsForAgentFiltered(seed.agentId, { ...NO_TOOL_FILTER, q: '%' }, db)).total).toBe(0)
+  })
+})

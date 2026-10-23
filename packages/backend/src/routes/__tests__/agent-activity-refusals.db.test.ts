@@ -216,6 +216,27 @@ describeDb('GET /agent-activity/:id/activity?kind=refusals — the refusal read 
     expect(byMerchant.json().activity[0].merchant_to).toBe('0x00000000000000000000000000000000000000bb')
   })
 
+  // #4346: `q` is a substring search, so `%`, `_` and `\` are literal. The
+  // repository's list and COUNT statements are separate texts, so each case
+  // checks both: `total`/`hasMore` must agree with the page.
+  it('q matches `%`, `_` and `\\` literally — page and count agree (#4346)', async () => {
+    const seed = await seedUserWithAgent()
+    const underscore = await seedRefusal(seed, { createdAt: '2026-07-10T08:00:00Z', resourceUrl: 'https://r.example/a_b' })
+    await seedRefusal(seed, { createdAt: '2026-07-10T07:00:00Z', resourceUrl: 'https://r.example/axb' })
+    const backslash = await seedRefusal(seed, { createdAt: '2026-07-10T06:00:00Z', resourceUrl: 'https://r.example/a\\b' })
+    await seedRefusal(seed, { createdAt: '2026-07-10T05:00:00Z', resourceUrl: 'https://r.example/ab' })
+    const filter = (q: string) => ({ from: null, to: null, q })
+
+    expect((await listAgentRefusalsFiltered(seed.agentId, filter('a_b'), 30, 0, db)).map((r) => r.id)).toEqual([underscore])
+    expect(await countAgentRefusalsFiltered(seed.agentId, filter('a_b'), db)).toBe(1)
+
+    expect((await listAgentRefusalsFiltered(seed.agentId, filter('a\\b'), 30, 0, db)).map((r) => r.id)).toEqual([backslash])
+    expect(await countAgentRefusalsFiltered(seed.agentId, filter('a\\b'), db)).toBe(1)
+
+    expect(await listAgentRefusalsFiltered(seed.agentId, filter('%'), 30, 0, db)).toEqual([])
+    expect(await countAgentRefusalsFiltered(seed.agentId, filter('%'), db)).toBe(0)
+  })
+
   it('pages with total and hasMore — an offset past the end still reports the total', async () => {
     const seed = await seedUserWithAgent()
     await seedRefusal(seed, { createdAt: '2026-07-10T08:00:00Z' })

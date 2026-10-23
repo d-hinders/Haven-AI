@@ -7,6 +7,7 @@ import { Icon } from '@/components/ui/Icon'
 import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Button } from '@/components/ui/Button'
+import { SettingsSection, SettingsRow } from '@/components/ui/SettingsSection'
 import { Card } from '@/components/ui/Card'
 import {
   DropdownMenu,
@@ -3385,6 +3386,29 @@ export default function DesignSystemPage() {
               <Button size="sm" variant="ghost" className="mt-2">Set budget</Button>
             </Card>
           </div>
+        </div>
+      </Section>
+
+      <Section
+        title="Settings section (heading above the card)"
+        description="Settings pages follow the detail-page section rule (#4357, owner decision 2026-10-23): the shared `SettingsSection` (`components/ui/SettingsSection.tsx`) renders the sentence-case `v2-text-h3` heading, the one-line description and any note ABOVE the card; the card holds only the hairline-divided rows. Unlike the Manage pattern above — which does NOT extend to settings — a settings row keeps its visible actions (Connect / Settings), not a ⋯ menu. Callers never hand-write the shape; the component's props (title, description, note, children) stay identical wherever the section is used."
+      >
+        <div className="grid gap-5 lg:grid-cols-2">
+          <SettingsSection
+            title="Accounting"
+            description="Connect your accounting provider."
+            note="Fortnox is the only live provider today."
+          >
+            <SettingsRow
+              label="Fortnox"
+              detail="Connected to ACME AB."
+              action={<Button size="sm" variant="ghost">Settings</Button>}
+            />
+            <SettingsRow label="Visma eAccounting" detail="Coming soon." />
+          </SettingsSection>
+          <SettingsSection title="Data">
+            <SettingsRow label="Export data" detail="Download everything as CSV." />
+          </SettingsSection>
         </div>
       </Section>
 

@@ -51,7 +51,7 @@
 import { useLocale, useT } from '@/context/LocaleContext'
 import { Button } from '@/components/ui/Button'
 import { StatusBadge, type StatusTone } from '@/components/ui/StatusBadge'
-import { SettingsRow } from '@/app/(authenticated)/settings/SettingsSection'
+import { SettingsRow } from '@/components/ui/SettingsSection'
 import type { AccountingConnection, AccountingConnectionStatus, AccountingProvider } from '@/hooks/useAccounting'
 import { INTL_LOCALE, type Locale } from '@/lib/i18n'
 import { connectionSettingsRegionId } from './ConnectionSettings'

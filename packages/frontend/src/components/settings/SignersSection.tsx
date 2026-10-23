@@ -25,7 +25,7 @@ import { useUserSigners, type UserSigner, type UserSignerAccount } from '@/hooks
 import { passkeyRowLabel } from '@/lib/passkeyLabels'
 import { chainName } from '@/lib/marketplace'
 import { Button } from '@/components/ui/Button'
-import { SettingsSection, SettingsRow } from '@/app/(authenticated)/settings/SettingsSection'
+import { SettingsSection, SettingsRow } from '@/components/ui/SettingsSection'
 
 function accountsLine(accounts: UserSignerAccount[], fallbackName: string): string {
   return accounts

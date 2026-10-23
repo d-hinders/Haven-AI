@@ -437,8 +437,10 @@ probes: `haven_quote_x402`'s, and since #3739 request mode's) — so the outcome
 through a tool or it does not come back at all. erc7710 needs a different
 step, not none: there is no funding leg, so the funded-but-undelivered state
 the outcome report resolves is scoped to `settlement_scheme: 'eip3009'` (and
-`haven_report_x402_outcome` refuses an unconfirmed erc7710 payment and names
-the evidence tool, `mcp-server/src/tools/plain-http-x402.ts:139-175`), but the
+`haven_report_x402_outcome` refuses an unconfirmed erc7710 payment: an
+`accepted` report is pointed at the evidence tool, a `rejected` one at a
+status read after the payment window, #2987;
+`mcp-server/src/tools/plain-http-x402.ts:139-185`), but the
 payment stays
 `submitted` until its settlement is recorded — by
 `haven_report_settlement_evidence`, the next tool after the erc7710

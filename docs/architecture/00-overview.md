@@ -261,8 +261,10 @@ EIP-3009 funding leg, the merchant or its facilitator on erc7710 settlement
 connect flow's pre-payment read is `haven_get_agent`, as the hosted
 instructions say (`mcp-server/src/server.ts:35-36`), with `haven_get_allowances`
 for the breakdown; and PostgreSQL holds budget delegations, not allowances
-(`agent_allowances` retired, `infra/repositories/agents.ts:378`). Re-checked
-without change: the 13-package table and each package's `private` flag, the
+(`agent_allowances` retired, `infra/repositories/agents.ts:378`); and the
+package table's qa-agent row names the agent evals (`src/evals/`, epic
+#3957). Re-checked without change: the rest of the 13-package table and each
+package's `private` flag, the
 `core-stays-pure` rule and `"*"` pins, the accounting connectors (`fortnox`,
 `accounted` live; `light`, `igdrasil` coming soon), `/ops` answering 404 until
 configured, the retired rails' 410s (`isRetiredRailIntent`), the

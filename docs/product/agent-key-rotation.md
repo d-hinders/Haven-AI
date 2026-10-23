@@ -115,9 +115,12 @@ The mechanics are identical. The difference is what you should look at.
 
 - **Lost** — the key is gone. Nobody else has it. Rotate at your convenience, minding
   the residual balance above.
-- **Compromised** — someone else may have it. The dashboard shows the agent's spend
-  since the exposure you suspect, so you can judge the damage. Treat the budget
-  remainder as potentially already spent by someone who is not you.
+- **Compromised** — someone else may have it. Pick **Compromised** in the dialog
+  and it lists the agent's most recent payments (up to five) under *Recent
+  spending to review*, so you can look for any you did not authorise. Replacing
+  the key stops further spending; it does not reverse a payment that already
+  settled. Treat the budget remainder as potentially already spent by someone
+  who is not you.
 
 ## Doing it
 
@@ -276,7 +279,10 @@ carried budget is up to two rules (`ReplaceSigningKeyModal.tsx`, "one approval
 each"); `--rekey-finish` reinstalls the signer runtime only with `--runtime`
 (`rekey.ts`, `prepareSignerRuntime` inside the `options.runtime` branch); and an
 unrecorded MCP name reads "not recorded" in the agent Settings tab's MCP server
-name row (`McpServerName.tsx`, #4209). Re-checked without change: owner-only
+name row (`McpServerName.tsx`, #4209); and, from review round 1, the
+Compromised choice lists up to five recent payments under "Recent spending to
+review" — there is no exposure-time input (`ReplaceSigningKeyModal.tsx`).
+Re-checked without change: owner-only
 routes and `refuseAgentCaller`; revoke before issue; the remainder and boundary
 carry, the dormant re-issue, the expired grant and the dropped cross-period
 carry (`planCarry`); the old API key rotating in the completion transaction;

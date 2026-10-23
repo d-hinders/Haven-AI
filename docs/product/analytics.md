@@ -13,6 +13,7 @@ covers:
   - packages/frontend/src/components/ui/AreaChart.tsx
   - packages/frontend/src/components/charts/chart-scale.ts
   - packages/frontend/src/components/ui/StatTile.tsx
+  - packages/ui/src/StatTile.tsx
   - packages/frontend/src/components/analytics/AgentsTable.tsx
   - packages/frontend/src/lib/analytics-format.ts
   - packages/frontend/src/lib/analytics-series.ts
@@ -41,7 +42,8 @@ The page renders from one endpoint, `GET /analytics/overview`
 (`range=7d|30d|90d`, `currency=usd|eur|sek`, `tz=<IANA zone>`, and `agentId`
 when the Agent facet is set), so every tile on
 the page describes the same range, the same currency and the same set of
-payments — one loading state, one "based on N payments" basis. The endpoint
+payments — one loading state, one payment basis (`basis.payments_counted`, the
+figure the Payments tile shows). The endpoint
 (#2946), the page shell (#2947), the chart primitives (#2948) and their wiring
 (#2949, #3051) have all shipped; this doc describes what renders.
 
@@ -330,9 +332,11 @@ Three screenshot-harness scenarios are registered for this screen in
   unresolved row (`kind: 'unknown'`, shown as "Unknown recipient"), so the
   capture shows names and the unknown case side by side.
 - `analytics-empty` — the endpoint answers the all-zero overview (no
-  payments, agents, merchants or balance rows in range): the new-user empty
-  state ("No agent activity yet"), because the fixture carries no agents at
-  all (#4333) — not an error.
+  payments, agents, merchants or balance rows in range) while the agents list
+  still names the harness's agents, so the capture is the no-activity empty
+  state ("No agent activity in this range") — not an error. The new-user
+  state ("No agent activity yet") needs an empty agents list, which no
+  scenario serves; `AnalyticsClient.test.tsx` covers it.
 - `analytics-error` — the endpoint answers `503` via the harness's
   `ScenarioHttpError`, so the capture shows the page's failure path.
 
@@ -363,7 +367,7 @@ they landed until this pass. Nothing else in this file was re-read.
 Re-verified 2026-10-24 (#4372 part C, at dev `795c50fc7`), end to end, after
 #4331, #4332 (#4373) and #4333 (#4380). Changed: the endpoint's parameters
 include `agentId`; Spent is net of delegate sweeps in the same window (#3755,
-`spendNetFactorSql`); the Refused tile always shows its attempts; Agents near
+the inline ratio in `TOTALS_SPEND_SQL`/`BY_DAY_SPEND_SQL`/`PER_AGENT_SPEND_SQL`); the Refused tile always shows its attempts; Agents near
 their budget renders "N/M" and "—" without budgets; the Fees tile is a fifth
 tile; an agent's chart fill is its avatar tint and the agents table carries no
 swatch (#4331); the page no longer prints the unsettled-payments sentence
@@ -371,7 +375,12 @@ swatch (#4331); the page no longer prints the unsettled-payments sentence
 the count and the empty-window rule still treats it as activity; the API
 reports the refusal ledger's floor (`basis.refusals_recorded_from`, #3013);
 the sponsored-gas count rides the Fees tile; the populated fixture's third
-merchant is an unresolved row (`kind: 'unknown'`). Re-checked without change:
+merchant is an unresolved row (`kind: 'unknown'`); review round 1 found two
+more stale claims and corrected them: there is no "based on N payments" basis
+line (`analytics.visual.spec.ts:197`), and `analytics-empty` captures the
+no-activity state, because `/agents` still answers the harness's agents
+(`analytics.visual.spec.ts:230`); `covers:` gains `packages/ui/src/StatTile.tsx`.
+Re-checked without change:
 `?period=` and `haven.analytics.range` with `replaceState`; the Agent facet
 from `useAgents`, its 404 notice and the agent-scoped Review link; the
 Payments caption; the agents-table columns and the #3540 inclusion rule; the

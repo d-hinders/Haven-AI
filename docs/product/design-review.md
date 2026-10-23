@@ -11,6 +11,7 @@ covers:
   - packages/frontend/src/app/globals.css
   - packages/frontend/tailwind.config.js
   - packages/frontend/src/components/ui/**
+  - packages/ui/src/**
   - packages/frontend/src/components/haven/**
   - packages/frontend/src/components/ReceiveDialog.tsx
   - packages/frontend/src/components/ConnectAgentModal.tsx
@@ -58,7 +59,9 @@ Use this checklist before finishing any Haven UI task. It is written for AI impl
 
 ## Visual System
 
-- Existing primitives in `packages/frontend/src/components/ui` are reused before adding new styles.
+- Existing primitives are reused before adding new styles. The shared ones live in
+  `@haven_ai/ui` (`packages/ui/src`), which new code imports; the
+  `packages/frontend/src/components/ui` paths for them are re-export shims.
 - Haven-domain components in `packages/frontend/src/components/haven` are reused for agent budget, wallet identity, and risk explanations.
 - Authenticated pages use `PageHeader` unless the route has a deliberate special layout.
 - Dashboard compact previews use `TransactionActivityRow`. Full transaction
@@ -100,7 +103,7 @@ rg -i "policy engine|safe deployed|relayer|allowance module|session key|owner ty
 rg -n "bg-gradient-to-r from-indigo|from-indigo-500 to-violet-600|bg-gray-|text-gray-|dark:(bg|text|border)" packages/frontend/src/app packages/frontend/src/components
 ```
 
-Any remaining matches should be deliberate technical disclosure, developer copy, tests, or legacy content outside the touched surface. (The `dark:` pattern targets one-off Tailwind dark-variant classes; since #2927 dark mode flips the v2 token set instead, and the token values themselves live in `globals.css`, not in component classes.)
+Any remaining matches should be deliberate technical disclosure, developer copy, tests, or legacy content outside the touched surface. (The `dark:` pattern targets one-off Tailwind dark-variant classes; since #2927 dark mode flips the v2 token set instead, and the token values themselves live in `packages/ui/src/tokens.css` (moved from `globals.css` in #3508), not in component classes.)
 
 ## Responsive And States
 
@@ -197,7 +200,11 @@ the regulatory trigger says "account or signer setup", as `AGENTS.md` does;
 the static table lacked `anchor` is gone; `Design visual regression` is a
 required check on `main` and advisory on `dev` (the branch rulesets), not
 blocking everywhere, and compares `/design-system` through scoped captures
-only (#2635). Re-checked without change: the `#patterns` anchor and the
+only (#2635); and, from review round 1, the token values live in
+`packages/ui/src/tokens.css` since #3508 (`.v2-tabular` in
+`packages/ui/src/type.css`), new code imports shared primitives from
+`@haven_ai/ui`, and `covers:` gains `packages/ui/src/**`. The 2026-09-30 note
+above predates #3508 and is left as written. Re-checked without change: the `#patterns` anchor and the
 #4109 rule; every ledger and the dashboard preview rendering
 `TransactionActivityRow`; the one
 permanently-open showcase (`WalletPopover`, pinned by

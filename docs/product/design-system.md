@@ -1096,7 +1096,14 @@ zero and while the card is "Get started". With nothing listed it shows
 "You're all caught up" — the title alone, no reason line (#3908) — only when
 the runway and budget-room facts were measured and hold
 (`attentionEmptyState`, #3902); otherwise a neutral line
-that claims nothing, and nothing at all while the budget reads load. That total — and the per-agent split below it —
+that claims nothing, and nothing at all while the budget reads load. Since
+#4324 every item except low balance and zero USDC carries the list's dismiss
+control (`Dismiss: {title}`, no new `AttentionList` prop): the backup and
+"Needs setup" items are dismissed for good, the budget, scope, sponsorship
+and failure items are acknowledged until something new happens (the rules
+are `lib/dashboard-attention.ts`'s, and the recipe is in
+`screen-recipes.md` § First-Run Dashboard). An acknowledged stop counts as
+reviewed for "You're all caught up". That total — and the per-agent split below it —
 renders through § Amount: currency mode with `approx` from the
 wire's per-currency `spend.d30.approxByCurrency` (#4165) — the server applies
 the one "≈" rule, so a total re-priced at today's rate carries the `≈` only

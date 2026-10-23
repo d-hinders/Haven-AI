@@ -3538,6 +3538,26 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > endpoints above; nothing else in this document was re-read for it.
 > `last-verified` is bumped to 2026-10-10 for exactly this coverage.
 
+> **Re-verified (#4324, 2026-10-23, "Needs attention" acknowledgements):** the
+> #3813 note above says the spec's `oneOf` body and the table's CHECK "refuse
+> every kind except the two owner-approved ones". That is no longer true:
+> migration 118 widens the CHECK, and the `oneOf` gains `budget-reached`,
+> `budget-usage`, `budget-scope`, `payments-failed` and `haven-paused`
+> (owner decisions on epic #4322, 2026-10-23). The note stays as written; this
+> one supersedes that sentence. What the change touches in this document's
+> coverage: `routes/user.ts` (the POST now dispatches per kind and refuses a
+> kind it does not know) and `infra/repositories/dashboard.ts` (the overview's
+> 7-day refusal buckets also return each bucket's latest `created_at`, and the
+> failed-intent read returns its newest row's latest recorded step). The
+> properties the #3813 note relies on still hold: an acknowledgement hides a
+> dashboard row and nothing else, no payment-path code reads the table, the
+> per-agent writes select through an ownership `EXISTS` against `agents`, the
+> user-level rows carry no foreign id, and every row is scoped to the JWT
+> subject. No new spender, no authority grant, no custody change. Scope of
+> this re-read: the `routes/user.ts` endpoints and the two
+> `infra/repositories/dashboard.ts` statements above; nothing else in this
+> document was re-read for it, and `last-verified` is not bumped.
+
 > **Re-verified unchanged (#3895, 2026-10-12, connect-step failure copy):**
 > this diff touches one covered file, display-layer only:
 > `components/DelegationBudgetCard.tsx` passes the budget grant's failure

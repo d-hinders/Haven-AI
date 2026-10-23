@@ -256,7 +256,7 @@ describe('AccountDetailClient', () => {
       refetch: vi.fn(),
     })
     mockUseBudgetRemaining.mockReturnValue({ data: null, loading: false })
-    mockUseAttentionDismissals.mockReturnValue({ dismissedIds: [], dismiss: vi.fn() })
+    mockUseAttentionDismissals.mockReturnValue({ acknowledgements: new Map(), dismiss: vi.fn() })
     mockUseAccountSigners.mockReturnValue({
       signers: { account_address: SAFE.account_address, passkeys: [{ key_id: 'k1', created_at: '2026-05-12T00:00:00Z' }], owner_address: null },
       loadError: false,

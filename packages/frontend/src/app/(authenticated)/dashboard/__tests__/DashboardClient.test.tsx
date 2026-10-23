@@ -255,7 +255,7 @@ describe('DashboardClient', () => {
     window.localStorage.clear()
     window.sessionStorage.clear()
     mockUseAttentionDismissals.mockReturnValue({
-      dismissedIds: new Set<string>(),
+      acknowledgements: new Map(),
       dismiss: mockDismissOnServer,
     })
     mockBaseState()
@@ -1195,7 +1195,9 @@ describe('DashboardClient', () => {
 
     it('hides the backup item when its id is in the server-saved dismissals (#3813)', () => {
       mockUseAttentionDismissals.mockReturnValue({
-        dismissedIds: new Set([`no-backup:${RECOMMENDED_ACCOUNT.accountId}`]),
+        acknowledgements: new Map([
+          [`no-backup:${RECOMMENDED_ACCOUNT.accountId}`, { acknowledgedAt: '2026-10-09T00:00:00.000Z', acknowledgedPeriodEnd: null }],
+        ]),
         dismiss: mockDismissOnServer,
       })
       mockBaseState([], { accounts: [RECOMMENDED_ACCOUNT], spend: { failedIntents7d: 0 } })
@@ -1264,6 +1266,48 @@ describe('DashboardClient', () => {
 
       expect(mockDismissOnServer).toHaveBeenCalledWith(
         expect.objectContaining({ kind: 'needs-setup', agentId: 'agent-9' }),
+      )
+    })
+
+    it('#4324: acknowledging a budget-reached item writes through the server hook, not the session-only set', async () => {
+      const user = userEvent.setup()
+      window.localStorage.setItem('haven-setup-guide-hidden:user-1', '0')
+      const stoppedAgent: DashboardAgentPreview = {
+        id: 'agent-7',
+        name: 'Stopped agent',
+        status: 'active',
+        accountId: null,
+        accountName: null,
+        accountChainId: 8453,
+        allowances: [],
+        budgets: [],
+        receivedSubBudgets: [],
+        stats: {
+          d7: {
+            gross: { usd: 0, eur: 0, sek: 0 },
+            net: { usd: 0, eur: 0, sek: 0 },
+            approx: false,
+            payments: 0,
+            refusals: { budget: 2, scope: 0, failed: 0, haven: 0, lastBudgetAt: '2026-10-20T10:00:00.000Z' },
+          },
+          d30: {
+            gross: { usd: 0, eur: 0, sek: 0 },
+            net: { usd: 0, eur: 0, sek: 0 },
+            approx: false,
+            payments: 0,
+            refusals: { budget: 2, scope: 0, failed: 0, haven: 0 },
+          },
+          lastPaymentAt: null,
+          lastCounterparty: null,
+        },
+      }
+      mockBaseState([stoppedAgent])
+
+      render(<DashboardClient />)
+      await user.click(screen.getByTestId('attention-dismiss-budget-reached:agent-7'))
+
+      expect(mockDismissOnServer).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'budget-reached:agent-7', kind: 'budget-reached', agentId: 'agent-7' }),
       )
     })
   })

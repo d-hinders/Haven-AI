@@ -1,14 +1,22 @@
 'use client'
 
 /**
- * The dashboard's server-saved "Needs attention" dismissals (#3813).
+ * The dashboard's server-saved "Needs attention" dismissals (#3813) and
+ * acknowledgements (#4324).
  *
  * Reads `GET /user/attention-dismissals` once per mount and writes through
- * `POST /user/attention-dismissals` — permanent, stored per account (the
- * backup item) and per agent ("Needs setup" for an agent kept without a
- * budget on purpose), so a dismissal made on one device hides the item on
- * every device of the same user. `lib/dashboard-attention.ts` stays the pure
- * one definition and consumes the resulting id set; this hook is its I/O.
+ * `POST /user/attention-dismissals`, so a dismissal made on one device hides
+ * the item on every device of the same user. Two families: PERMANENT
+ * dismissals (the backup item per account, "Needs setup" per agent) and
+ * ACKNOWLEDGEMENTS of the event-driven items, which come back when
+ * something newer happens. `lib/dashboard-attention.ts` stays the pure one
+ * definition and consumes the resulting map (rule-item id → when it was
+ * acknowledged); this hook is its I/O.
+ *
+ * A row of a kind this build does not know is IGNORED (#4324 S1): before,
+ * every non-backup row mapped to `needs-setup:<agent_id>`, so a dashboard
+ * tab open across a deploy would have hidden an agent's "Needs setup" item
+ * and badge on reading a newer kind.
  *
  * ── The legacy key migration (#3813, owner decision 4) ────────────────────
  *
@@ -25,7 +33,7 @@
  * in place and the next load retries; the in-session hiding still holds,
  * exactly as the old key behaved.
  *
- * A failed READ hides nothing (`dismissedIds` stays empty): the nag is the
+ * A failed READ hides nothing (`acknowledgements` stays empty): the nag is the
  * safe direction, silence is the destructive one — the same unknown-value
  * rule the attention rules follow (#3295).
  */
@@ -33,22 +41,78 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '@/lib/api'
 import type { ApiSchema } from '@haven_ai/core'
-import { DISMISSIBLE_ATTENTION_KINDS, type AttentionRuleItem } from '@/lib/dashboard-attention'
+import {
+  DISMISSIBLE_ATTENTION_KINDS,
+  type AttentionAcknowledgement,
+  type AttentionRuleItem,
+} from '@/lib/dashboard-attention'
 
 export type AttentionDismissalsResponse = ApiSchema<'AttentionDismissalsResponse'>
 
 /** The RecoveryNudge browser-storage key this hook migrates once (#3813). */
 export const LEGACY_DISMISS_KEY = 'haven.recovery-nudge.dismissed'
 
-/** The rule-item id a dismissal row hides (`lib/dashboard-attention.ts` ids). */
-export function ruleItemIdForDismissal(row: {
+type DismissalRow = {
   item_kind: string
   account_id: string | null
   agent_id: string | null
-}): string {
-  return row.item_kind === 'no-backup'
-    ? `no-backup:${row.account_id}`
-    : `needs-setup:${row.agent_id}`
+}
+
+/**
+ * The rule-item id a dismissal row hides (`lib/dashboard-attention.ts` ids),
+ * or null for a kind — or a kind/id pairing — this build does not know.
+ * Mapped PER KIND (#4324 S1).
+ */
+export function ruleItemIdForDismissal(row: DismissalRow): string | null {
+  switch (row.item_kind) {
+    case 'no-backup':
+      return row.account_id ? `no-backup:${row.account_id}` : null
+    case 'needs-setup':
+    case 'budget-reached':
+    case 'budget-usage':
+    case 'budget-scope':
+      return row.agent_id ? `${row.item_kind}:${row.agent_id}` : null
+    case 'payments-failed':
+      return row.agent_id ? `payments-failed:${row.agent_id}` : 'payments-failed:unattributed'
+    case 'haven-paused':
+      return 'haven-paused'
+    default:
+      return null
+  }
+}
+
+type DismissBody =
+  | { item_kind: 'no-backup'; account_id: string }
+  | { item_kind: 'needs-setup' | 'budget-reached' | 'budget-scope' | 'payments-failed'; agent_id: string }
+  | { item_kind: 'budget-usage'; agent_id: string; period_end: string }
+  | { item_kind: 'haven-paused' | 'payments-failed' }
+
+/** The POST body that dismisses or acknowledges a rule item, or null when the item lacks the id its kind needs. */
+export function dismissalBodyFor(
+  item: Pick<AttentionRuleItem, 'id' | 'kind' | 'accountId' | 'agentId' | 'periodEnd'>,
+): DismissBody | null {
+  switch (item.kind) {
+    case 'no-backup':
+      return item.accountId !== undefined ? { item_kind: 'no-backup', account_id: item.accountId } : null
+    case 'needs-setup':
+    case 'budget-reached':
+    case 'budget-scope':
+      return item.agentId !== undefined ? { item_kind: item.kind, agent_id: item.agentId } : null
+    case 'budget-usage':
+      return item.agentId !== undefined && item.periodEnd !== undefined
+        ? { item_kind: 'budget-usage', agent_id: item.agentId, period_end: item.periodEnd }
+        : null
+    case 'payments-failed':
+      return item.agentId !== undefined
+        ? { item_kind: 'payments-failed', agent_id: item.agentId }
+        : item.id === 'payments-failed:unattributed'
+          ? { item_kind: 'payments-failed' }
+          : null
+    case 'haven-paused':
+      return { item_kind: 'haven-paused' }
+    default:
+      return null
+  }
 }
 
 // ui-local: a structural slice of the overview's account block the legacy-key migration reads — a props input, not a wire response shape.
@@ -67,8 +131,16 @@ export interface UseAttentionDismissalsOptions {
   }>
 }
 
+type AcknowledgementMap = ReadonlyMap<string, AttentionAcknowledgement>
+
+function withEntries(previous: AcknowledgementMap, entries: Array<[string, AttentionAcknowledgement]>): AcknowledgementMap {
+  const next = new Map(previous)
+  for (const [id, acknowledgement] of entries) next.set(id, acknowledgement)
+  return next
+}
+
 export function useAttentionDismissals({ accounts }: UseAttentionDismissalsOptions = {}) {
-  const [dismissedIds, setDismissedIds] = useState<ReadonlySet<string>>(() => new Set())
+  const [acknowledgements, setAcknowledgements] = useState<AcknowledgementMap>(() => new Map())
   const migratedRef = useRef(false)
 
   useEffect(() => {
@@ -78,20 +150,29 @@ export function useAttentionDismissals({ accounts }: UseAttentionDismissalsOptio
       .then((response) => {
         if (cancelled) return
         // #4288: a malformed body hides nothing — same as a failed read.
-        // The read ran inside a `setDismissedIds` updater once, and React
+        // The read ran inside a state updater once, and React
         // re-runs updaters while rendering, so a throw there never reached
         // the `.catch` below: it took the whole page down (the empty
         // account capture crashed on `FIXTURE_EMPTY_FALLBACK`, which has
         // no `dismissals` key). Guard the ITERATION, not the fixture.
         if (!Array.isArray(response?.dismissals)) return
-        // MERGE, never replace: the legacy-key migration may have optimistically
-        // added ids this session before the read landed; replacing the set
-        // would un-hide them.
-        setDismissedIds((previous) => {
-          const merged = new Set(previous)
-          for (const row of response.dismissals) merged.add(ruleItemIdForDismissal(row))
-          return merged
-        })
+        // MERGE, never replace: the legacy-key migration (or a dismiss) may
+        // have optimistically added ids this session before the read landed;
+        // replacing the map would un-hide them. The server row wins for the
+        // ids it carries — it holds the stored acknowledgement time.
+        const entries: Array<[string, AttentionAcknowledgement]> = []
+        for (const row of response.dismissals) {
+          const id = ruleItemIdForDismissal(row)
+          if (id === null) continue
+          entries.push([
+            id,
+            {
+              acknowledgedAt: row.acknowledged_at ?? row.created_at,
+              acknowledgedPeriodEnd: row.acknowledged_period_end ?? null,
+            },
+          ])
+        }
+        setAcknowledgements((previous) => withEntries(previous, entries))
       })
       .catch(() => {
         // A failed read hides nothing — see the header. The next mount
@@ -124,7 +205,10 @@ export function useAttentionDismissals({ accounts }: UseAttentionDismissalsOptio
 
     // Hide this session immediately — the old key hid these items, and a
     // slow POST must not make them flash back.
-    setDismissedIds((previous) => new Set([...previous, ...ids]))
+    const now = new Date().toISOString()
+    setAcknowledgements((previous) =>
+      withEntries(previous, ids.map((id) => [id, { acknowledgedAt: now, acknowledgedPeriodEnd: null }])),
+    )
 
     void Promise.all(
       toMigrate.map((account) =>
@@ -145,39 +229,58 @@ export function useAttentionDismissals({ accounts }: UseAttentionDismissalsOptio
   }, [accounts])
 
   /**
-   * Persist a dismissal for a dismissible rule item. Optimistic: the id is
-   * added before the POST, and REMOVED again if the write fails — an item
-   * the server did not store comes back on the next poll rather than
-   * silently staying hidden for the session.
+   * Persist a dismissal or acknowledgement for a dismissible rule item.
+   * Optimistic: the id is hidden before the POST (acknowledged "now", by
+   * this device's clock), replaced by the server's stored row when the
+   * write succeeds, and REMOVED again if it fails — an item the server did
+   * not store comes back on the next poll rather than silently staying
+   * hidden for the session.
    */
-  const dismiss = useCallback((item: Pick<AttentionRuleItem, 'kind' | 'accountId' | 'agentId'>) => {
-    if (!DISMISSIBLE_ATTENTION_KINDS.has(item.kind)) return
+  const dismiss = useCallback(
+    (item: Pick<AttentionRuleItem, 'id' | 'kind' | 'accountId' | 'agentId' | 'periodEnd'>) => {
+      if (!DISMISSIBLE_ATTENTION_KINDS.has(item.kind)) return
+      const body = dismissalBodyFor(item)
+      // A dismissible-kind item without its id is malformed — ignore rather
+      // than POST a body the spec would refuse.
+      if (body === null) return
+      const id = item.id
+      const previousEntry = { current: undefined as AttentionAcknowledgement | undefined }
 
-    const body =
-      item.kind === 'no-backup' && item.accountId !== undefined
-        ? { item_kind: 'no-backup' as const, account_id: item.accountId }
-        : item.kind === 'needs-setup' && item.agentId !== undefined
-          ? { item_kind: 'needs-setup' as const, agent_id: item.agentId }
-          : null
-    // A dismissible-kind item without its id is malformed — ignore rather
-    // than POST a body the spec would refuse.
-    if (body === null) return
-
-    const id =
-      body.item_kind === 'no-backup'
-        ? `no-backup:${body.account_id}`
-        : `needs-setup:${body.agent_id}`
-
-    setDismissedIds((previous) => new Set([...previous, id]))
-
-    void api.post('/user/attention-dismissals', body).catch(() => {
-      setDismissedIds((previous) => {
-        const next = new Set(previous)
-        next.delete(id)
-        return next
+      setAcknowledgements((previous) => {
+        previousEntry.current = previous.get(id)
+        return withEntries(previous, [
+          [
+            id,
+            {
+              acknowledgedAt: new Date().toISOString(),
+              acknowledgedPeriodEnd: 'period_end' in body ? body.period_end : null,
+            },
+          ],
+        ])
       })
-    })
-  }, [])
 
-  return { dismissedIds, dismiss }
+      void api
+        .post<AttentionDismissalsResponse['dismissals'][number]>('/user/attention-dismissals', body)
+        .then((row) => {
+          if (!row || typeof row.acknowledged_at !== 'string') return
+          setAcknowledgements((previous) =>
+            withEntries(previous, [
+              [id, { acknowledgedAt: row.acknowledged_at, acknowledgedPeriodEnd: row.acknowledged_period_end ?? null }],
+            ]),
+          )
+        })
+        .catch(() => {
+          setAcknowledgements((previous) => {
+            const next = new Map(previous)
+            // Restore what was there before (an older acknowledgement), or nothing.
+            if (previousEntry.current) next.set(id, previousEntry.current)
+            else next.delete(id)
+            return next
+          })
+        })
+    },
+    [],
+  )
+
+  return { acknowledgements, dismiss }
 }

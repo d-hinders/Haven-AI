@@ -31,7 +31,7 @@ vi.mock('@/hooks/useBudgetRemaining', () => ({
   useBudgetRemaining: () => mockUseBudgetRemaining(),
 }))
 vi.mock('@/hooks/useAttentionDismissals', () => ({
-  useAttentionDismissals: () => ({ dismissedIds: new Set<string>(), dismiss: vi.fn() }),
+  useAttentionDismissals: () => ({ acknowledgements: new Map(), dismiss: vi.fn() }),
 }))
 
 vi.mock('next/navigation', () => ({

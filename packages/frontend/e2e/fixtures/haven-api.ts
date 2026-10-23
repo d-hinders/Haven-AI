@@ -1198,13 +1198,18 @@ export async function mockHavenApi(page: Page) {
         item_kind: string
         account_id?: string
         agent_id?: string
+        period_end?: string
       }
+      // #4324: the stored shape carries the acknowledgement time, and the
+      // firing budget's period end on a `budget-usage` row.
       await fulfillJson(route, {
         id: '00000000-0000-4000-8000-000000000000',
         item_kind: body.item_kind,
         account_id: body.account_id ?? null,
         agent_id: body.agent_id ?? null,
         created_at: '2026-10-09T00:00:00.000Z',
+        acknowledged_at: '2026-10-09T00:00:00.000Z',
+        acknowledged_period_end: body.period_end ?? null,
       })
       return
     }

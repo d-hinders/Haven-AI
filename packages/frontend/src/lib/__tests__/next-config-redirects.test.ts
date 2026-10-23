@@ -33,6 +33,17 @@ describe('next.config redirects (#3024)', () => {
     expect(redirects.find((r) => r.source === '/not-a-real-route')).toBeUndefined()
   })
 
+  // #4358: the profile page is deleted; everything it carried renders in
+  // Settings → General. A bookmark 308s to /settings (query string
+  // preserved by default).
+  it('answers a permanent redirect from /profile to /settings', async () => {
+    const config = (await import('../../../next.config')).default
+    const redirects = await config(PHASE as never).redirects!()
+    const profile = redirects.find((r) => r.source === '/profile')
+    expect(profile, 'no /profile redirect entry in next.config.ts').toBeDefined()
+    expect(profile).toMatchObject({ source: '/profile', destination: '/settings', permanent: true })
+  })
+
   // #3079: /catalog is renamed Marketplace. Two entries — a bare `/catalog`
   // and a `:path*` form — so a deep link (`/catalog/ampersend-demo-api`,
   // `/catalog?category=x`) redirects too, not just the bare route.

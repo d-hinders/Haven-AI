@@ -1,7 +1,7 @@
 'use client'
 
-import { Suspense, useEffect, useRef, useState } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useState } from 'react'
+
 import {
   accountingFeedOffState,
   useAccountingFeed,
@@ -14,38 +14,11 @@ import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Skeleton } from '@/components/ui/Skeleton'
-import { CONNECT_OUTCOME_PARAMS, readConnectOutcome } from '@/components/accounting/ConnectionsCard'
+import { ConnectOutcomeForwarderInSuspense } from '@/components/accounting/ConnectOutcomeForwarder'
 import { ComingSoon, SelfHostedUnavailable } from '@/components/accounting/ComingSoon'
-import { ACCOUNTING_SETTINGS_HREF, FeedSummary } from '@/components/accounting/FeedSummary'
+import { FeedSummary } from '@/components/accounting/FeedSummary'
 import { providerDisplayName, RECORD_ONLY_PROVIDERS } from '@/components/accounting/AccountingBadge'
 import { truncate } from '@/lib/format'
-
-/**
- * The OAuth callback still redirects here (`routes/accounting-connections.ts`
- * builds `${frontendUrl}/accounting?provider=…&connect=…`), but the
- * connection surface moved to Settings (#2868). Forward the outcome query
- * verbatim so the Settings card reads it — `connected` opens the backfill
- * choice there, `denied`/`error` (and `reason=unsupported_currency`) become
- * its sentence. Rendered inside `Suspense` because `useSearchParams` needs
- * a boundary on a prerendered page.
- */
-function ConnectOutcomeForwarder() {
-  const router = useRouter()
-  const routerRef = useRef(router)
-  routerRef.current = router
-  const query = useSearchParams()?.toString() ?? ''
-  useEffect(() => {
-    const params = new URLSearchParams(query)
-    if (!readConnectOutcome(params)) return
-    const forwarded = new URLSearchParams()
-    for (const key of CONNECT_OUTCOME_PARAMS) {
-      const value = params.get(key)
-      if (value) forwarded.set(key, value)
-    }
-    routerRef.current.replace(`${ACCOUNTING_SETTINGS_HREF}?${forwarded.toString()}`)
-  }, [query])
-  return null
-}
 
 const STATUS: Record<AccountingSyncStatus, { label: string; cls: string }> = {
   pushed: { label: 'Synced', cls: 'bg-[var(--v2-success-soft)] text-[var(--v2-success)]' },
@@ -231,12 +204,6 @@ export default function AccountingPage() {
     }
   }
 
-  const forwarder = (
-    <Suspense fallback={null}>
-      <ConnectOutcomeForwarder />
-    </Suspense>
-  )
-
   // #2869 design review: the product subtitle ("…appears in your accounting
   // tool as draft transactions") sat directly above "Nothing can be connected
   // yet." / "Not available on self-hosted". The off states — and the two
@@ -253,7 +220,7 @@ export default function AccountingPage() {
   if (loading) {
     return (
       <div className="max-w-3xl">
-        {forwarder}
+        <ConnectOutcomeForwarderInSuspense />
         {header}
         <Skeleton variant="text" className="h-5 w-64" />
       </div>
@@ -263,7 +230,7 @@ export default function AccountingPage() {
   if (!status) {
     return (
       <div className="max-w-3xl">
-        {forwarder}
+        <ConnectOutcomeForwarderInSuspense />
         {header}
         {error ? <p className="text-sm text-[var(--v2-danger)]">{error}</p> : null}
       </div>
@@ -278,7 +245,7 @@ export default function AccountingPage() {
   if (off === 'self_hosted') {
     return (
       <div className="max-w-3xl">
-        {forwarder}
+        <ConnectOutcomeForwarderInSuspense />
         {header}
         <SelfHostedUnavailable />
       </div>
@@ -287,7 +254,7 @@ export default function AccountingPage() {
   if (off === 'coming_soon') {
     return (
       <div className="max-w-3xl">
-        {forwarder}
+        <ConnectOutcomeForwarderInSuspense />
         {header}
         <ComingSoon />
       </div>
@@ -296,7 +263,7 @@ export default function AccountingPage() {
 
   return (
     <div className="max-w-3xl">
-      {forwarder}
+      <ConnectOutcomeForwarderInSuspense />
       {header}
 
       {!status.available ? (

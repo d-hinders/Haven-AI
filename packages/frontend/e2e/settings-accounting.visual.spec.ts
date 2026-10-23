@@ -53,7 +53,10 @@ async function serveConnections(page: Page, connections: unknown[]) {
 }
 
 async function openSettings(page: Page, query = '') {
-  await page.goto(`/settings${query}`)
+  // #4358: the accounting card lives on the Business tab; `query` (an OAuth
+  // outcome string) joins AFTER `tab=business`, never appended to a
+  // `?tab=…`-bearing constant.
+  await page.goto(`/settings?tab=business${query ? `&${query.replace(/^\?/, '')}` : ''}`)
   await page.evaluate(() => document.fonts.ready)
   await expect(page.locator('button[aria-label="User menu"]')).toHaveCount(1)
   await dismissMobileSidebar(page)
@@ -167,7 +170,7 @@ test.describe('settings accounting connection states', () => {
    * off copy (#2869 design review).
    */
   async function openSettingsOff(page: Page, testId: string) {
-    await page.goto('/settings')
+    await page.goto('/settings?tab=business')
     await page.evaluate(() => document.fonts.ready)
     await expect(page.locator('button[aria-label="User menu"]')).toHaveCount(1)
     await dismissMobileSidebar(page)

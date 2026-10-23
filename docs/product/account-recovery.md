@@ -116,9 +116,9 @@ already has (#4024). Ways to approve belong to **one account each**:
 - **Losing a shared passkey affects every account it approves.** Accounts
   created from the same passkey share it. Recover each one from its own
   **Backup & recovery** card, with a backup enrolled on that account.
-- **Settings → Signers** lists each passkey and wallet once, with every
-  account it approves, so you can check which accounts a backup actually
-  covers.
+- **Settings → Passkeys and wallets** (the Security tab, #4358) lists each
+  passkey and wallet once, with every account it approves, so you can check
+  which accounts a backup actually covers.
 
 ## Recover after a lost device
 

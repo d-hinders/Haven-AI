@@ -364,7 +364,7 @@ describe('AccountSignersCard (#888)', () => {
     const outside = Array.from(document.body.querySelectorAll('p')).filter((p) => !p.closest('details'))
     expect(outside.some((p) => /0xeeee/i.test(p.textContent ?? ''))).toBe(false)
     const link = screen.getByRole('link', { name: /All your passkeys and wallets in Settings/ })
-    expect(link.getAttribute('href')).toBe('/settings#signers')
+    expect(link.getAttribute('href')).toBe('/settings?tab=security#signers')
   })
 
   it('REGRESSION (#1679): after a recovery removes the original key, the surviving backup keeps ITS OWN label', () => {

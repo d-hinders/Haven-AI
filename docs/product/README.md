@@ -57,7 +57,8 @@ The old dark app system is retired. Dark mode since #2927 is a different thing:
 the sanctioned v2 token set now carries a dark palette (re-declared in the two
 mechanically-enforced blocks in `packages/ui/src/tokens.css`, where the palette
 moved from `globals.css` in #3508), `ThemeProvider` and
-`ThemeToggle` exist, and users choose light, dark, or system in Settings → Theme. Do
+`ThemeToggle` exist, and users choose light, dark, or system in Settings →
+General → Preferences (#4358). Do
 not extend old dark token patterns, gradient buttons, glow shadows, or hard
 dark-modal surfaces — dark styling comes from the v2 tokens flipping under the
 active theme, not from one-off dark classes.

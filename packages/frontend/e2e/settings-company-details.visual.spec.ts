@@ -86,7 +86,8 @@ async function serveCompanyDetails(page: Page, body: unknown, status = 200) {
 }
 
 async function openSettings(page: Page) {
-  await page.goto('/settings')
+  // #4358: company details live on the Business tab.
+  await page.goto('/settings?tab=business')
   await page.evaluate(() => document.fonts.ready)
   await expect(page.locator('button[aria-label="User menu"]')).toHaveCount(1)
   await dismissMobileSidebar(page)

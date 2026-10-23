@@ -182,8 +182,15 @@ describeDb('migration 118 — attention acknowledgements (#4324)', () => {
 
     // Two backup dismissals of one user have no agent either: the user-level
     // index's `account_id IS NULL` keeps them out of its scope.
-    await insert(userId, 'no-backup', { accountId: await insertTestAccount(userId) })
-    await insert(userId, 'no-backup', { accountId: await insertTestAccount(userId) })
+    const secondBackup = async () => {
+      await insert(userId, 'no-backup', { accountId: await insertTestAccount(userId) })
+      await insert(userId, 'no-backup', { accountId: await insertTestAccount(userId) })
+    }
+    const backupError = await secondBackup().then(
+      () => null,
+      (error: unknown) => error,
+    )
+    expect(backupError, 'a user keeps one backup dismissal per account').toBeNull()
   })
 
   it('acknowledged_at defaults to now on a new row', async () => {
@@ -210,12 +217,16 @@ describeDb('migration 118 — attention acknowledgements (#4324)', () => {
     await insert(userId, 'haven-paused')
 
     // up() is the restore whatever happens, including a down() that throws
-    // halfway: the worker schema must be back at head for later files.
+    // halfway: the worker schema must be back at head for later files. A
+    // down() that fails on its own data is the regression this case pins.
+    const downError = await run(down).then(
+      () => null,
+      (error: unknown) => error,
+    )
+    if (downError !== null) await run(up)
+    expect(downError, 'down() must not fail on the rows up() allows').toBeNull()
     await withMigrationReverted(
-      () => run(down).catch(async (error) => {
-        await run(up)
-        throw error
-      }),
+      async () => {},
       async () => {
         const rows = await db.query<{ item_kind: string }>(
           `SELECT item_kind FROM attention_dismissals WHERE user_id = $1`,

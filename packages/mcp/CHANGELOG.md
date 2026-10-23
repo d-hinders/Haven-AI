@@ -15,9 +15,39 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+## 0.11.0-alpha.0 — 2026-10-23
+
 ### Changed
 
 - **A paid x402 call whose merchant redirects the paid request to another origin now reports the funded, undelivered state (#4257).** The embedded SDK no longer re-sends a paid request to a different origin. When it refuses to, `haven_pay_x402` and the other local paid tools answer `MERCHANT_EGRESS_REFUSED` with the `paymentId`, `status: merchant_unresponsive_after_funding`, `next_tool: haven_get_payment_status` and `next_arguments: { payment_id }`, and the message says not to pay again. EIP-3009 is `phase: funded_but_unsettled` and `next_action: sweep_stranded_funds` (verify-then-sweep). erc7710 is `phase: not_delivered` and `next_action: check_status_later`. This is the local twin of the hosted #1300 treatment. It ships only with an `@haven_ai/mcp` release (this package pins `@haven_ai/sdk` exactly).
+
+- **`haven_quote_x402` takes an optional `expected_amount` (#3967).** The price
+  the agent expects, in whole tokens (`"0.10"`). When it differs from the
+  amount of the option `haven_pay_x402` would actually authorize, the quote
+  answers `price_differs_from_expected: true`, `safe_to_continue: false` and
+  `next_action: stop_and_tell_user` with no next tool. Same field and price
+  check as the hosted quote; the local quote does not check the remaining
+  budget. Without the argument the quote is unchanged. No update needed.
+
+- **Local EIP-3009 settlement reports carry the payment header (#4061).** The
+  embedded SDK now sends the header it retried the merchant with on its
+  settlement report. A current backend records an agent-reported settlement
+  only with it, so before this release those reports were refused and
+  receipts showed only the funding transaction. No update needed to keep
+  paying.
+
+- **A plain tool error after funding is a rejection (#4062).** When a merchant
+  answers a local paid call with `isError: true` and no payment challenge or
+  settlement transaction, the local paid tools now report
+  `MERCHANT_REJECTED_AFTER_FUNDING`, never `settled: true`. A tool error beside
+  a settlement transaction is still delivered as evidence. No update needed.
+
+- **Per-chain RPC endpoints from `HAVEN_RPC_URL_<chainId>` (#3996).** Set one
+  read-only RPC URL per chain (for example `HAVEN_RPC_URL_8453`) and an x402
+  idempotency collision can read the delegate's balance: a still-funded
+  delegate resumes the payment instead of being refused as `unverifiable`. An
+  unset, malformed or unreachable value keeps today's refusal, and nothing is
+  written to stdout. Opt-in; no update needed.
 
 - **Local paid x402 tools can take up to ~7 s longer when Haven answers the
   merchant's settlement report `retryable` (#4215).** The embedded SDK now

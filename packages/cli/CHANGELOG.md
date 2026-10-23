@@ -15,8 +15,16 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+## 0.11.0-alpha.0 — 2026-10-23
+
 ### Changed
 
+- `haven budget grant` into an agent's occupied (token, recipient) slot is
+  refused instead of silently replacing the live budget (#3933): exit 4,
+  `error_code: BUDGET_SLOT_OCCUPIED` and `existing_delegation_hash` under
+  `--json`, and a hint to edit that budget on the agent's page, which
+  replaces it and stops the old one on-chain. A grant into an empty slot is
+  unchanged. No update needed.
 - `haven guide` says "a passkey", never a platform name (#4168). Its copy of
   the agent runbook drops "(Face ID / Touch ID)" from the account step and
   the signup hand-off script, regenerated from the SDK runbook. Wording only;

@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { LocaleProvider } from '@/context/LocaleContext'
 import { ThemeProvider } from '@/context/ThemeContext'
 import { THEME_STORAGE_KEY } from '@/lib/theme-bootstrap'
+import { ApiRequestError } from '@/lib/api'
 
 const mockUseAuth = vi.fn()
 const mockUsePreferences = vi.fn()
@@ -71,6 +72,16 @@ const FEED_ON = {
   missingScopes: [], syncs: [], counts: { pending: 0, failed: 0, exhausted: 0 },
 }
 
+/** Hosted with the flag off — the state where every provider is coming soon (#4359). */
+const FEED_COMING_SOON = { ...FEED_ON, enabled: false, flagEnabled: false, available: false, connected: false, destination: null }
+
+/** A saved company-details row — VIES-valid, the state the filled form shows. */
+const FILLED_COMPANY = {
+  legal_name: 'Ada Lovelace AB', country: 'SE', org_number: '556677-8899', vat_number: 'SE556677889901',
+  vies_status: 'valid', vies_checked_at: '2026-09-20T10:00:00.000Z',
+  created_at: '2026-09-01T00:00:00.000Z', updated_at: '2026-09-20T10:00:00.000Z',
+}
+
 /** One passkey approving two accounts and one wallet approving one (#4358). */
 const SIGNERS = [
   {
@@ -94,8 +105,20 @@ function serveAccounting(connections: unknown[]) {
     if (url === '/accounting/providers') return Promise.resolve({ providers: [FORTNOX, ...COMING_SOON] })
     if (url === '/accounting/connections') return Promise.resolve({ connections })
     if (url === '/accounting/feed/status') return Promise.resolve(FEED_ON)
+    // #3332: the flag-off default — company details contribute NOTHING to
+    // the Business tab's visibility here; the accounting rows are the
+    // content (#4359). Tests that need the flag on override this route.
+    if (url === '/user/company-details') return Promise.reject(new ApiRequestError('Not found', 404, { error: 'Not found' }))
     // #3825: the Signers section reads every signer once.
     if (url === '/user/signers') return Promise.resolve({ signers: SIGNERS })
+    return Promise.reject(new Error(`unexpected GET ${url}`))
+  })
+}
+
+/** The flag-ON company-details answers (#4359): `null` = nothing saved. */
+function serveCompanyDetails(body: unknown) {
+  mockApi.get.mockImplementation((url: string) => {
+    if (url === '/user/company-details') return Promise.resolve(body)
     return Promise.reject(new Error(`unexpected GET ${url}`))
   })
 }
@@ -164,12 +187,16 @@ describe('SettingsClient', () => {
     })
   })
 
-  it('renders the General, Security and Business tabs, General first', () => {
+  it('renders General and Security first; Business appears once a read shows content (#4359)', async () => {
     renderSettings()
 
     expect(screen.getByRole('tab', { name: 'General' })).toHaveAttribute('aria-selected', 'true')
     expect(screen.getByRole('tab', { name: 'Security' })).toHaveAttribute('aria-selected', 'false')
-    expect(screen.getByRole('tab', { name: 'Business' })).toHaveAttribute('aria-selected', 'false')
+    // While the Business reads are pending the tab is ABSENT — it must never
+    // flash in and then out (#4359).
+    expect(screen.queryByRole('tab', { name: 'Business' })).not.toBeInTheDocument()
+    // The accounting rows settle → the tab appears.
+    expect(await screen.findByRole('tab', { name: 'Business' })).toHaveAttribute('aria-selected', 'false')
     // General content, not Business content.
     expect(screen.getByRole('heading', { name: 'Profile' })).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Accounting' })).toBeNull()
@@ -194,7 +221,7 @@ describe('SettingsClient', () => {
 
   // The tab row must add no history entry: switching replaces, never
   // pushes, so Back leaves Settings entirely rather than walking the tabs.
-  it('switches tabs with router.replace and no history entry', () => {
+  it('switches tabs with router.replace and no history entry', async () => {
     const view = renderSettings()
 
     fireEvent.click(screen.getByRole('tab', { name: 'Security' }))
@@ -214,7 +241,9 @@ describe('SettingsClient', () => {
         </LocaleProvider>
       </div>,
     )
-    fireEvent.click(screen.getByRole('tab', { name: 'Business' }))
+    // #4359: the Business tab is in the row once its reads have settled —
+    // which they have by now (same mounted provider).
+    fireEvent.click(await screen.findByRole('tab', { name: 'Business' }))
     expect(mockReplace).toHaveBeenCalledWith('/settings?tab=business', { scroll: false })
 
     // The default tab is the canonical address: no `?tab=` in the URL.
@@ -243,6 +272,83 @@ describe('SettingsClient', () => {
 
     fireEvent.click(screen.getByRole('tab', { name: 'General' }))
     expect(mockReplace).toHaveBeenCalledWith('/settings?provider=fortnox&connect=connected', { scroll: false })
+  })
+
+  /**
+   * #4359: the Business tab's visibility is a tri-state over the two
+   * asynchronous reads — absent while unknown, present once either has
+   * content, and a `?tab=business` deep link falls back to the General BODY
+   * WITHOUT rewriting the URL when both settle empty.
+   */
+  describe('the Business tab visibility (#4359)', () => {
+    function servePending() {
+      mockApi.get.mockImplementation(() => new Promise(() => {}))
+    }
+
+    /** Flag-off accounting + flag-off company details — NOTHING can show. */
+    function serveAllOff() {
+      mockApi.get.mockImplementation((url: string) => {
+        if (url === '/accounting/providers') return Promise.resolve({ providers: [FORTNOX, ...COMING_SOON] })
+        if (url === '/accounting/connections') return Promise.resolve({ connections: [] })
+        if (url === '/accounting/feed/status') return Promise.resolve(FEED_COMING_SOON)
+        if (url === '/user/company-details') return Promise.reject(new ApiRequestError('Not found', 404, { error: 'Not found' }))
+        if (url === '/user/signers') return Promise.resolve({ signers: SIGNERS })
+        return Promise.reject(new Error(`unexpected GET ${url}`))
+      })
+    }
+
+    it('an explicit ?tab=business during the pending reads renders a skeleton, never General', async () => {
+      setTabParam('business')
+      servePending()
+      renderSettings()
+      // Selected, and its own skeleton — the OAuth return and "Open Settings"
+      // must never land on General while the reads are in flight.
+      expect(screen.getByRole('tab', { name: 'Business' })).toHaveAttribute('aria-selected', 'true')
+      expect(screen.getByRole('status', { busy: true })).toBeInTheDocument()
+      expect(screen.queryByRole('heading', { name: 'Profile' })).toBeNull()
+      // The fallback never rewrites the URL.
+      expect(mockReplace).not.toHaveBeenCalled()
+    })
+
+    it('both reads empty: ?tab=business falls back to the General body, and the URL keeps tab=business', async () => {
+      setTabParam('business')
+      serveAllOff()
+      renderSettings()
+      await waitFor(() => expect(screen.getByRole('heading', { name: 'Profile' })).toBeInTheDocument())
+      expect(screen.queryByRole('tab', { name: 'Business' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('heading', { name: 'Accounting' })).not.toBeInTheDocument()
+      // The deep link still works once data arrives: tab=business STAYS.
+      expect(mockReplace).not.toHaveBeenCalled()
+    })
+
+    it('the tab appears once company details have content, even with the feed off', async () => {
+      mockApi.get.mockImplementation((url: string) => {
+        if (url === '/accounting/providers') return Promise.resolve({ providers: [FORTNOX, ...COMING_SOON] })
+        if (url === '/accounting/connections') return Promise.resolve({ connections: [] })
+        if (url === '/accounting/feed/status') return Promise.resolve(FEED_COMING_SOON)
+        if (url === '/user/company-details') return Promise.resolve(FILLED_COMPANY)
+        if (url === '/user/signers') return Promise.resolve({ signers: SIGNERS })
+        return Promise.reject(new Error(`unexpected GET ${url}`))
+      })
+      renderSettings()
+      expect(await screen.findByRole('tab', { name: 'Business' })).toBeInTheDocument()
+      // General is still the active tab — the appearance does not navigate.
+      expect(screen.getByRole('tab', { name: 'General' })).toHaveAttribute('aria-selected', 'true')
+      expect(mockReplace).not.toHaveBeenCalled()
+    })
+
+    it('an ERROR from the company-details read counts as something to show', async () => {
+      mockApi.get.mockImplementation((url: string) => {
+        if (url === '/accounting/providers') return Promise.resolve({ providers: [FORTNOX, ...COMING_SOON] })
+        if (url === '/accounting/connections') return Promise.resolve({ connections: [] })
+        if (url === '/accounting/feed/status') return Promise.resolve(FEED_COMING_SOON)
+        if (url === '/user/company-details') return Promise.reject(new ApiRequestError('boom', 500))
+        if (url === '/user/signers') return Promise.resolve({ signers: SIGNERS })
+        return Promise.reject(new Error(`unexpected GET ${url}`))
+      })
+      renderSettings()
+      expect(await screen.findByRole('tab', { name: 'Business' })).toBeInTheDocument()
+    })
   })
 
   describe('General → Profile', () => {

@@ -41,9 +41,17 @@ the retry sweep, what on-call reads when something is stuck — is in
 ## Where it lives
 
 - **Settings → Accounting** is where a connection is made, changed and removed
-  (owner decision 2026-09-11; the card ships in #2868). One row per provider:
-  Fortnox, Accounted (live, over a pasted API key), and the platforms listed as
-  *Coming soon* below.
+  (owner decision 2026-09-11; the card ships in #2868). One row per provider
+  the user can actually connect to or has connected: Fortnox and Accounted
+  (live, over a pasted API key). **Coming-soon providers are hidden**
+  (2026-10-23, #4359 — superseding the 2026-09-11 decision to list them as
+  *Coming soon*): a provider that is not live, or live but not configured on
+  the deployment, renders no row, and when nothing qualifies the whole card
+  renders nothing. A footer link, *See synced payments on Accounting*, leads
+  to the feed page when at least one connector shows. The card lives on the
+  Business tab (`/settings?tab=business`), whose own visibility follows the
+  same rule — it appears only when company details or the accounting card
+  has something to show.
 - **`/accounting`** is the feed page (#2869): a one-line summary of the
   connection at the top — which platform, which company, when the last
   payment was delivered, or what needs your attention with a *Fix in
@@ -59,12 +67,14 @@ The feature is **dev-only for now**. Every account on the dev deployment is
 entitled; production shows the feature as *Coming soon* (#2869): the
 `/accounting` page says what the feed will do and which platforms are lined
 up, ending with "Nothing can be connected yet."; the sidebar entry carries a
-muted *Soon* pill; the Settings card lists every platform as *Coming soon*
-with no action. A self-hosted Haven shows *Not available on self-hosted*
-instead (the feed is part of the hosted service) and no sidebar entry.
-Exposing the feed in production is a separate, explicit decision (#2876).
-Agents and MCP get nothing new from any of this: the feed reads settled
-payments, it does not take part in making them.
+muted *Soon* pill; the Settings card renders NOTHING — the platforms it
+cannot offer are hidden, not listed (2026-10-23, #4359; until then the card
+listed every platform as *Coming soon* with no action). A self-hosted Haven
+shows *Not available on self-hosted* in the Settings card — the explanation
+is information, so it renders whenever the Business tab is visible — and no
+sidebar entry. Exposing the feed in production is a separate, explicit
+decision (#2876). Agents and MCP get nothing new from any of this: the feed
+reads settled payments, it does not take part in making them.
 
 ## Connecting Fortnox
 
@@ -275,13 +285,15 @@ the next payment settles or you press **Sync now**).
 ## The other platforms
 
 Accounted is **live**: connect it with an API key (the section above). Light
-and Igdrasil are listed on the Settings card as *Coming soon* with a disabled
-Connect. Listing is a product decision about what the module is built to hold,
-not an endorsement of any of them, and neither is connectable yet: each gets
-its own connector when access exists (#2874, #2875). Switching between
-platforms is first-class now that a second one is live — several connections,
-exactly one place payments go, and the starting point rule above means the
-switch never re-feeds history.
+and Igdrasil have their connectors built to the same shape, but **they do
+not render on the Settings card until they are live** (2026-10-23, #4359 —
+superseding the 2026-09-11 decision to list them as *Coming soon* with a
+disabled Connect: listing read as endorsement-adjacent and the rows offered
+a control that did nothing). Each gets its row the moment its connector
+exists and the deployment has it configured (#2874, #2875). Switching
+between platforms is first-class now that a second one is live — several
+connections, exactly one place payments go, and the starting point rule
+above means the switch never re-feeds history.
 
 ## What Haven does not do here
 

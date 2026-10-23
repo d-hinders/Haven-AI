@@ -89,7 +89,7 @@ covers:
   - packages/sdk/src/merchant-discovery.test.ts
 satisfied-by:
   - docs/regulatory/casp-changelog/**
-last-verified: "2026-10-05"
+last-verified: "2026-10-23"
 ---
 
 > **Re-verified unchanged (#4265, 2026-10-22, published CLI boundary):** the
@@ -402,7 +402,7 @@ Preserve these facts as non-negotiable implementation invariants:
 pinned by [`packages/backend/src/__tests__/execution-rail-live-census-pin.test.ts`](../../packages/backend/src/__tests__/execution-rail-live-census-pin.test.ts),
 #2680):** the MetaMask Hybrid DeleGator account type carries every invariant above one-to-one per [`docs/security/delegation-rail-security-model.md`](../security/delegation-rail-security-model.md) (§2, implemented as CI checks in #831). Two formerly Safe-specific formulations generalised rather than weakened: "Safe-compatible UIs" became the independent exit path (#832, DEMONSTRABLE — live-verified enumerate + owner-signed revoke with no Haven involvement; see [`docs/exit/README.md`](../exit/README.md)), and "Safe transactions approved by the user" became owner-signed delegations. The payment path (#829) moves funds ONLY via an owner-signed budget delegation (the agent's own, directly or through its task-budget child, or, for a sub-budget, the delegating agent's, reached through that agent's signed children), redeemed through audited enforcers that carry the budget, recipient and expiry on-chain; Haven relays sponsored operations and signs nothing (invariants 5-d/7-d/11/12 in CI).
 
-**The legacy Safe AllowanceModule rail is RETIRED (epic #1440, owner decision 2026-08-14, phasing approved 2026-08-24).** The closure sequence — inflow, spend, machinery, activation, the allowance read surface, the approval queue, and finally rendering — is recorded once in the [decision log](../archive/decision-log.md) and is not restated here (#2640). Two of its entries are recorded in a later section than the others: the [retire the Safe rail entirely (#1440)](../archive/decision-log.md#2026-08-14--retire-the-safe-rail-entirely-1440) section carries inflow, spend, machinery, activation and the approval queue, while the allowance read surface (#2020) and rendering (#2413) are under [retirement is deletion, not accommodation](../archive/decision-log.md#2026-09-02--retirement-is-deletion-not-accommodation-2413) — the log is ordered newest-first, so a reader following one anchor alone sees five of the seven. The dates this document must carry are the owner decisions themselves: **2026-08-14** to retire the rail, phasing approved **2026-08-24**, and **2026-09-02** that retirement is deletion rather than accommodation — the last of which is why six list queries filter to `account_type = 'delegator_hybrid'`. What survives is deliberate and narrow: existing Safe accounts stay user-owned, and their rows are untouched and still readable to a direct database query — but no account, agent or dashboard surface displays them, so "readable" is a statement about the data and about a narrow, named set of surfaces — never a blanket claim in either direction. The transactions surface is deliberately NOT among those six: `LIST_BASIC_ACCOUNTS_FOR_USER_SQL` (renamed from `LIST_BASIC_SAFES_FOR_USER_SQL` in #2932, query unchanged) **and** `LIST_AGENTS_FOR_TRANSACTION_FILTERS_SQL` (both in `infra/repositories/transaction-history.ts`, which carries no rail predicate anywhere) mean `GET /transactions`, `GET /transactions/filters` and — since #2871 — `GET /transactions/export.csv` still span every account **and agent** row a user owns, legacy included: a legacy account's name and its agents' names still render in that screen's account and initiator picklists, and since the export reads the same unfiltered account list, that history is downloadable as a file and not merely rendered. Stated with the agent half because a first pass named only the account half, which understated the exception. `POST /safe/exec` — owner-signed execution relayed for gas (owner authority, not a policy rail — it also carried #1229 passkey recovery) — stayed open as the rail's last live behaviour until **#2847 (2026-09-11, owner decision 2026-09-10) deleted it outright with the passkey signer deployer, the Safe details read, the `/user/owners` directory and `POST /passkeys` enrolment**, so no Safe-rail address answers with live behaviour any more: the six tombstones, the fail-closed middleware and `infra/chain/relayer-reads.ts` — named `rails/allowance-module.ts` until #2850 renamed it to what it is — as shared reads only, with no code path able to execute an AllowanceModule spend, are what remains. Where this document names Safe mechanics below, it is describing that retired baseline, never a live agent-spend control.
+**The legacy Safe AllowanceModule rail is RETIRED (epic #1440, owner decision 2026-08-14, phasing approved 2026-08-24).** The closure sequence — inflow, spend, machinery, activation, the allowance read surface, the approval queue, and finally rendering — is recorded once in the [decision log](../archive/decision-log.md) and is not restated here (#2640). Two of its entries are recorded in a later section than the others: the [retire the Safe rail entirely (#1440)](../archive/decision-log.md#2026-08-14--retire-the-safe-rail-entirely-1440) section carries inflow, spend, machinery, activation and the approval queue, while the allowance read surface (#2020) and rendering (#2413) are under [retirement is deletion, not accommodation](../archive/decision-log.md#2026-09-02--retirement-is-deletion-not-accommodation-2413) — the log is ordered newest-first, so a reader following one anchor alone sees five of the seven. The dates this document must carry are the owner decisions themselves: **2026-08-14** to retire the rail, phasing approved **2026-08-24**, and **2026-09-02** that retirement is deletion rather than accommodation — the last of which is why the account, agent and dashboard list queries filter to `account_type = 'delegator_hybrid'`. What survives is deliberate and narrow: existing Safe accounts stay user-owned, and their rows are untouched and still readable to a direct database query — but no account, agent or dashboard surface displays them, so "readable" is a statement about the data and about a narrow, named set of surfaces — never a blanket claim in either direction. The transactions surface is deliberately NOT among those: `LIST_BASIC_ACCOUNTS_FOR_USER_SQL` (renamed from `LIST_BASIC_SAFES_FOR_USER_SQL` in #2932, query unchanged) **and** `LIST_AGENTS_FOR_TRANSACTION_FILTERS_SQL` (both in `infra/repositories/transaction-history.ts`, which carries no rail predicate anywhere) mean `GET /transactions`, `GET /transactions/filters` and — since #2871 — `GET /transactions/export.csv` still span every account **and agent** row a user owns, legacy included: a legacy account's name and its agents' names still render in that screen's account and initiator picklists, and since the export reads the same unfiltered account list, that history is downloadable as a file and not merely rendered. Stated with the agent half because a first pass named only the account half, which understated the exception. `POST /safe/exec` — owner-signed execution relayed for gas (owner authority, not a policy rail — it also carried #1229 passkey recovery) — stayed open as the rail's last live behaviour until **#2847 (2026-09-11, owner decision 2026-09-10) deleted it outright with the passkey signer deployer, the Safe details read, the `/user/owners` directory and `POST /passkeys` enrolment**, so no Safe-rail address answers with live behaviour any more: the six tombstones, the fail-closed middleware and `infra/chain/relayer-reads.ts` — named `rails/allowance-module.ts` until #2850 renamed it to what it is — as shared reads only, with no code path able to execute an AllowanceModule spend, are what remains. Where this document names Safe mechanics below, it is describing that retired baseline, never a live agent-spend control.
 
 **Disclosed custody artifact — four relayer-owned dust Safes (#1985, owner-accepted 2026-08-26).** The custody claims above carry one bounded, deliberately disclosed exception rather than an asserted purity: the production relayer key is an on-chain owner of four retired test Safes on Base mainnet holding ~$0.14 USDC in total (largest single balance 0.109114 USDC; the two Safes with the AllowanceModule still enabled bound delegate-extractable value at $0.02). These are Haven-deployed test Safes, not traced to any external holder (the #1985 re-verification's on-chain reads show all four owned solely by the relayer, apart from the externally-owned population the epic #1440 census recorded), and the wind-down originally scoped in #1985 was waived by owner decision: no transaction is worth more than the dust it would move. Full addresses, per-Safe balances and per-delegate allowance state are recorded in [#1985's closing evidence comment](https://github.com/d-hinders/Haven-AI/issues/1985#issuecomment-5421759537); the Gnosis pilot import named there is externally owned and is not a Haven custody surface. Anything that would grow this set — a new relayer-owned account, or funding one of these — is a feature-review trigger, not routine.
 
@@ -614,6 +614,14 @@ attests it in Fortnox. The earlier asserting voucher-push surface
 `config.legacyBookkeepingEnabled` and returns 410 when off; re-enabling it is a
 review trigger under this red line.
 
+The second live connector, Accounted (epic #3016,
+`modules/accounting/accounted-connector.ts`), follows the same pattern by a
+different shape: it uploads Haven's payment-evidence document for each payment
+(and, since #3918, the merchant's own receipt as a second document when the
+agent captured one), and checks the provider's hash of each upload. Uploaded
+documents are immutable on Accounted's side. It creates no supplier invoice, no
+journal entry and no account or VAT coding.
+
 ### 10. Fiat And Card Rails
 
 Never implement without review:
@@ -718,7 +726,7 @@ Implementation rule:
 
 > Haven must not silently create or expand an agent's authority.
 
-**The dashboard's signing surfaces are rail-honest (#1079).** The signer layer types the two authorities apart: a Safe transaction can only be signed by a `SafeCapableSigner` (EOA or Safe passkey), never by a Hybrid account's passkey — the compiler enforces the exclusion at every remaining Safe-shaped call site, and Safe-only controls are hidden on delegation accounts rather than dead-ending at a signer they cannot use. #1989 has since deleted most legacy Safe surfaces outright; the type-level exclusion remains for any Safe-shaped call site left in the signer layer (the relayed `/safe/exec` route they existed for was deleted by #2847 with the last live Safe-rail behaviour). This is a UI/type-layer hardening only; the on-chain authority model above is unchanged.
+**The dashboard's signing surfaces are rail-honest (#1079).** The signer layer types the two authorities apart: a Safe transaction can only be signed by a `SafeCapableSigner` (EOA or Safe passkey), never by a Hybrid account's passkey — the compiler enforces the exclusion at every remaining Safe-shaped call site, and Safe-only controls are hidden on delegation accounts rather than dead-ending at a signer they cannot use. #1989 has since deleted most legacy Safe surfaces outright, #2847 deleted the relayed `/safe/exec` route they existed for with the last live Safe-rail behaviour, and #2848 then deleted `SafeCapableSigner` itself with its last importers, so no Safe-shaped signing call site remains in the signer layer. This is a UI/type-layer hardening only; the on-chain authority model above is unchanged.
 
 **Where a setup flow marks an agent approved, Haven verifies the authority rather than accepting the client's word for it.** **Since #2259 there is ONE such route** (`routes/agent-connection-setups.ts`): the delegation rail's `budget-approval`, which reads the agent's own active, owner-signed delegations. The legacy `wallet-approval` route — which read live AllowanceModule state on-chain — is **deleted**, together with `validateWalletApprovalBody`, `tryVerifySetupAuthority` and the last two AllowanceModule contract readers. No amount, recipient, or hash a caller supplies can influence the surviving route's outcome, and it refuses when the signed budget's amount or period differs from the one the user reviewed. Be exact about the mechanism, because the shape of the deleted route is now
 only history: `WalletApprovalBody` carried `chain_id`, `safe_address`,
@@ -843,7 +851,7 @@ Add comments, docs, tests, and PR notes around these points when touching paymen
 
 **The refusal record (`payment_refusals`, #2945) is the audit trail of this section, and it is a record, not a control.** When a fail-fast pre-check or an on-chain caveat enforcer refuses a payment, `modules/payments/refusal-ledger.ts` writes one row (reason, source, amounts, the fiat values booked through the same price path a settled payment uses, and a JSONB `detail` restricted to a named allowlist) so the user can see what their guardrails caught even though nothing moved. The posture is deliberately fire-and-forget: the write happens after the refusal is decided, its own failure is logged and swallowed, and characterization tests pin every refusal response byte-identical with the ledger succeeding and failing. That ordering is the regulatory point: a telemetry table must never be able to alter, delay, or soften a refusal the on-chain guardrails already made, because the enforcement is the enforcer's and the ledger only testifies to it. Two boundaries belong in the record and are stated rather than assumed: the hosted MCP's `PRICE_EXCEEDS_MAX` cap refusal happens in the agent's own runtime before any backend call and is the user's own instruction, so it is not in this table (a machine-side report of it is a possible follow-up, not filed); and there is no retention policy, because these rows are small and they are precisely the evidence trail this section asks the codebase to maintain.
 
-**The user-facing half of this was `/custody` (#2106), and the distinction it drew is the settled one.** The page separated what the chain enforces from what Haven merely asserts, and marked each claim accordingly rather than collapsing them into one reassurance: budget, period, expiry and any pinned recipient badged on-chain enforced — "a payment outside them reverts on-chain instead of waiting for anyone's approval" — while a recipient that is only advisory on a given account was badged as such. #3024 deleted the page (its two facts, the account's signer set and each agent's delegation terms, already render on `/accounts/:id` and `/agents/:id`, and the agent detail page's budget row keeps its four-word caption *Enforced on-chain* — no rendered surface carries the sentence below any more), but its framing is still the reference wording to match when a new surface has to make this distinction: *"Proof that you — not Haven — control your funds. Your agents' limits are enforced on-chain by your account, not by Haven's database."* Before #2106 that page told delegation-rail users their agent had no on-chain limits, which was the invariant above stated backwards on the one screen built to demonstrate it. Reach for this phrasing rather than inventing another.
+**The user-facing half of this was `/custody` (#2106), and the distinction it drew is the settled one.** The page separated what the chain enforces from what Haven merely asserts, and marked each claim accordingly rather than collapsing them into one reassurance: budget, period, expiry and any pinned recipient badged on-chain enforced — "a payment outside them reverts on-chain instead of waiting for anyone's approval" — while a recipient that is only advisory on a given account was badged as such. #3024 deleted the page (its two facts, the account's signer set and each agent's delegation terms, already render on `/accounts/:id` and `/agents/:id`, and the agent detail page's Spending section says *Budgets are enforced on-chain: a payment over budget is declined before any money moves* (`DelegationBudgetCard.tsx`) — no rendered surface carries the sentence below any more), but its framing is still the reference wording to match when a new surface has to make this distinction: *"Proof that you — not Haven — control your funds. Your agents' limits are enforced on-chain by your account, not by Haven's database."* Before #2106 that page told delegation-rail users their agent had no on-chain limits, which was the invariant above stated backwards on the one screen built to demonstrate it. Reach for this phrasing rather than inventing another.
 
 ## Feature Review Triggers
 
@@ -1078,27 +1086,32 @@ Their size is the whole friction argument, so state it with its measurement
 scope rather than as a bare number — the figures #1899 recorded ("11 files",
 "49 files") had no scope attached and one of them has since drifted. Measured
 on `46a0f580` against tracked files, excluding `__tests__/` and `*.test.ts`:
-**`infra/chain/**` is 11 files** (unchanged) and **`infra/repositories/**` is
+**`infra/chain/**` was 11 files** and **`infra/repositories/**` was
 29** — 28 `.ts` modules plus that directory's `README.md`; 55 tracked files in
-all, so 26 of them are tests. Neither reading lands on 49, so the old figure
-either counted a scope nobody wrote down or has simply moved, and the number
-alone cannot say which. That is the point: requote it with its denominator or
+all, so 26 of them were tests. Neither reading landed on 49, so the old figure
+either counted a scope nobody wrote down or had simply moved, and the number
+alone could not say which. Re-measured on `ffca80f36` with the same scope:
+**`infra/chain/**` is 16** and **`infra/repositories/**` is 49** (48 `.ts`
+modules plus the `README.md`; 103 tracked files in all). The second now matches
+the old "49" by coincidence, not because that figure had a scope. That is the point: requote it with its denominator or
 not at all. The `EXEMPT` map's own comments in
 `scripts/ci/money-path.test.mjs` carry the same two bare counts and drift the
 same way.
 
-**The floor is measured, and the number moves (#2300, #3098, #3283, #3649, #3661, #4122).**
-Measured at `82540f71b` with #4122 applied, the pin asserts **49 of the 66
-globs**: the 51 runtime `globs` minus the two `EXEMPT` entries above, and none
-of the 15 `controlGlobs`. #3098 added `packages/demo-merchant-mcp/src/**`,
+**The floor is measured, and the number moves (#2300, #3098, #3283, #3649, #3661, #4122, #4120).**
+Measured at `ffca80f36`, the pin asserts **50 of the 67
+globs**: the 52 runtime `globs` minus the two `EXEMPT` entries above, and none
+of the 15 `controlGlobs` (measured at `82540f71b` with #4122 applied, before
+#4120 added `packages/sdk/src/merchant-answer.ts`, it was 49 of 66). #3098 added `packages/demo-merchant-mcp/src/**`,
 #3283 (PR #3286) the four `packages/sdk/src/` signing-guard files and
 `userop-binding.ts`, #3649 `packages/backend/src/modules/budget-scope/**`
 (the #2099 period pre-check, moved out of `modules/x402/` by #3616/#3617),
 #3661 the task-budget and sub-budget families (`modules/task-budgets/**`,
 `modules/sub-budgets/**`, `routes/task-budgets.ts`, `routes/sub-budgets.ts`,
 `routes/agent-sub-budgets.ts`, and the SDK's `task-budget-guards.ts` and
-`sub-budget-guards.ts`), and #4122 `packages/sdk/src/merchant-completion.ts`
-(the SDK's post-funding merchant-answer decision); all were already covered
+`sub-budget-guards.ts`), #4122 `packages/sdk/src/merchant-completion.ts`
+(the SDK's post-funding merchant-answer decision), and #4120 (PR #4153)
+`packages/sdk/src/merchant-answer.ts`; all were already covered
 here — budget-scope since #3648, the budget families since #3659, the SDK
 files by `packages/sdk/src/**` — so the pin was satisfied on arrival each
 time. #3661 also added three `modules/payments/` files, `direct-sign-context.ts`,
@@ -1288,11 +1301,15 @@ to disk. The conclusion is yes — but **not for that reason**, and the correcti
 matters more than the verdict, because the stated reason would justify covering
 `curl`.
 
-**The CLI decides nothing.** It is a thin HTTP client with **zero runtime
+**The CLI grants no authority.** It is a thin HTTP client with **zero runtime
 dependencies** — no `viem`, no `ethers`, no crypto, no signing path, no key
-material of any kind. Every authority command is one bare call to a backend
-route that enforces its own checks: `cmdAgentRevoke` is `api.post('/agents/:id/revoke')`,
-`cmdAgentRotateKey` is `api.post('/agents/:id/rotate-key')`. The rotated API key
+material of any kind. Every authority command ends in one call to a backend
+route that enforces its own checks: `cmdAgentRotateKey` is `api.post('/agents/:id/rotate-key')`,
+and `cmdAgentRevoke` ends in `api.post('/agents/:id/revoke')`. Before that call
+`cmdAgentRevoke` reads the agent's live budgets and refuses to revoke while one
+is still redeemable unless `--keep-budget` is passed. That is a client-side
+guard that can only stop a revoke, stated in the code as not an authority
+control. The rotated API key
 is generated **server-side** in the route, and every route re-derives ownership
 from the JWT's `sub` rather than trusting anything the client sends. A CLI edit
 cannot grant authority the backend does not already grant. That is a materially
@@ -1318,7 +1335,7 @@ discipline — name the event coverage gates — the gated event is an *edit to 
 CLI's command surface*, never a user running `haven agents revoke`. Two things
 about that edit are perimeter-relevant even for a thin client. It holds a **user
 JWT**, owner-only at 0600, and sends it as a Bearer token to whatever `baseUrlFor` resolves —
-which reads a user-supplied `--api-url` flag first. An edit that logged the
+which reads a user-supplied `--api` flag first (then the saved session's base URL, then `HAVEN_API_URL`). An edit that logged the
 token, loosened those perms, or widened where it is sent is a credential change,
 and Red Line 3 treats a credential as a payment instrument. And it prints a
 freshly rotated agent API key to stdout. That is a real, bounded surface, and it
@@ -1329,9 +1346,11 @@ scope.** `haven login --email` still mints the ordinary session — the same
 credential the dashboard holds. The default path now has no password in it at
 all: a device-code flow the human approves in the browser, minting a token that
 carries `purpose: owner_cli` and reaches only the routes on the allow-list in
-`packages/backend/src/middleware/owner-cli.ts` — agents, connect setups and
-read-only account context, never signer changes, re-keying, credentials,
-provisioning, transfers, or delegation activation. Both are Bearer tokens sent
+`packages/backend/src/middleware/owner-cli.ts` — agents (including building an
+unsigned budget delegation and preparing a revoke, both handed to the owner to
+sign), connect setups, contacts, feedback and read-only account context, never
+signer changes, re-keying, credentials, provisioning, transfers, or delegation
+activation. Both are Bearer tokens sent
 to whatever `baseUrlFor` resolves, so the credential-change reasoning above
 applies unchanged to both; what the narrower one bounds is the blast radius if
 it leaks. The scope and its enforcement are recorded in
@@ -1369,7 +1388,7 @@ is still re-derived server-side from the authenticated subject, whether API-key
 generation stays server-side, where the user JWT is stored and sent, and whether
 anything in the client began deciding rather than relaying.
 
-## Scope of the current `last-verified` (2026-10-05, #3645)
+## Scope of the current `last-verified` (2026-10-23, #4303)
 
 The front-matter date is date-only by the #1496 chain reset, which leaves it
 unable to say **how much** of the document a re-verification covered. That
@@ -1379,25 +1398,44 @@ is the failure a `last-verified` exists to prevent. So the scope lives here,
 where it has room to be honest, and it is rewritten — not appended to — by
 whoever bumps the date next.
 
-**Re-read against the code on `c3df5b19`, claim by claim** (weekly audit
-#3645; the corrections landed in PR #3648 and this section's PR). The
-2026-09-27 stamp it replaces was set by feature PR #3408 and left this section
-describing the 2026-08-30 pass on `46a0f580`. Covered: Core Design Principle
-and every inline *Current state* note; Hard Architecture Invariants; Red Lines
-1–11 including #4's two executable-proof suites; every subsection of Required
-Architecture Patterns; Feature Review Triggers and the #3333 counsel note;
-Third-Party On-Ramp Integration; the Payment-Related Merge Checklist; Product
-Copy Rules; the Preferred Architecture Summary; *What `covers:` must span* with
-its pinning tests in `scripts/ci/money-path.test.mjs`; and the release-plumbing
-and agent-authority subsections, with the release-bump table re-measured with
-`scripts/docs/coupling-gate.mjs`. The owner-signature invariants were reworded
-to the task- and sub-budget children (#3329/#3330) on an owner decision taken
-2026-10-05; that rewording records how the code behaves and is not itself the
-legal and product review the Hard Architecture Invariants call for.
+**Re-read end to end against `ffca80f36`** (#4303, from the staleness audit
+#3645). The 2026-10-05 pass it replaces read `c3df5b19`. Between the two, 109
+CASP shards were added (`git diff --name-only --diff-filter=A c3df5b19
+ffca80f36 -- docs/regulatory/casp-changelog/`). Their perimeter verdicts were
+scanned, and none records an authority widening. The four marked WIDENED
+(#3649, #3661, #4120, #4122) widen the money-path classification list, recorded
+under *What `covers:` must span*. What was checked:
+
+- **Every file, symbol, route and test the body names** was checked to exist
+  at `ffca80f36`: every path-like token mechanically, plus the named tests
+  (`allowance-rail-retired.test.ts`'s #2245 and #2274 cases, both
+  `non-custody-onchain-*.contract.test.ts` suites, the census pin) and symbols
+  (`resolveExecutionRail`, `requireDelegationBound`, `assertNonAsserting`,
+  `SUPPORTED_X402_EXPECTED_VERSIONS`, `legacyBookkeepingEnabled`,
+  `HAVEN_HOSTED_MCP_URL`). Paths the body names as deleted or renamed are
+  history by its own wording and were left as such.
+- **Measured claims were re-measured:** the money-path pin
+  (`node --test scripts/ci/money-path.test.mjs`: 23/23, now 50 of 67 globs),
+  the `infra/chain/**` and `infra/repositories/**` sizes, and the release-bump
+  write set (six `package.json`, five `CHANGELOG.md`, six source version
+  constants).
+- **Behaviour claims were read against the code they name:** the owner-CLI
+  allow-list, the CLI's revoke, rotate-key and base-URL paths, the passport
+  receipt key's boot refusal, the merchant-receipt fetch (still string-level
+  host blocking, as the #956 note says), both accounting connectors, and the
+  agent detail page's on-chain caption.
+
+**Corrected in this pass:** the retired-rail list-query count, the deleted
+`SafeCapableSigner`, the agent page's caption, the CLI's `--api` flag and its
+revoke guard, the owner-CLI allow-list, the Accounted connector, and the two
+measurements under *What `covers:` must span*.
 
 **Deliberately NOT covered by this date, each for a reason that is not
 laziness:**
 
+- **The inline *Current state* notes' history.** Each note's present-tense
+  claims were checked as above. Its dated narrative of how a property came to
+  hold was read, not re-derived commit by commit.
 - **The historical bullet log below** — frozen as of 2026-08-12 by
   construction. Re-verifying it would be re-litigating merged shards, which
   `casp-changelog/README.md` forbids in as many words.

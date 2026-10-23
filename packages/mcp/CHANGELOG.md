@@ -25,9 +25,22 @@ required") is refused — reword to "no update needed", or quote it in a code sp
   the agent expects, in whole tokens (`"0.10"`). When it differs from the
   amount of the option `haven_pay_x402` would actually authorize, the quote
   answers `price_differs_from_expected: true`, `safe_to_continue: false` and
-  `next_action: stop_and_tell_user` with no next tool. Same field and
-  behaviour as the hosted quote. Without the argument the quote is unchanged.
-  No update needed.
+  `next_action: stop_and_tell_user` with no next tool. Same field and price
+  check as the hosted quote; the local quote does not check the remaining
+  budget. Without the argument the quote is unchanged. No update needed.
+
+- **Local EIP-3009 settlement reports carry the payment header (#4061).** The
+  embedded SDK now sends the header it retried the merchant with on its
+  settlement report. A current backend records an agent-reported settlement
+  only with it, so before this release those reports were refused and
+  receipts showed only the funding transaction. No update needed to keep
+  paying.
+
+- **A plain tool error after funding is a rejection (#4062).** When a merchant
+  answers a local paid call with `isError: true` and no payment challenge or
+  settlement transaction, the local paid tools now report
+  `MERCHANT_REJECTED_AFTER_FUNDING`, never `settled: true`. A tool error beside
+  a settlement transaction is still delivered as evidence. No update needed.
 
 - **Per-chain RPC endpoints from `HAVEN_RPC_URL_<chainId>` (#3996).** Set one
   read-only RPC URL per chain (for example `HAVEN_RPC_URL_8453`) and an x402

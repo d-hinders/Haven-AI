@@ -20,7 +20,7 @@ export const CLIENT_RELEASE_DATA = {
       {
         "version": "0.11.0-alpha.0",
         "date": "2026-10-23",
-        "summary": "Without merchantEgress, the transport follows redirects itself, and a hop to another origin keeps credentials and payment headers at the origin they were sent to. (+13 more in the changelog)",
+        "summary": "Without merchantEgress, the transport follows redirects itself, and a hop to another origin keeps credentials and payment headers at the origin they were sent to. (+14 more in the changelog)",
         "summary_segments": [
           {
             "text": "Without ",
@@ -31,7 +31,7 @@ export const CLIENT_RELEASE_DATA = {
             "code": true
           },
           {
-            "text": ", the transport follows redirects itself, and a hop to another origin keeps credentials and payment headers at the origin they were sent to. (+13 more in the changelog)",
+            "text": ", the transport follows redirects itself, and a hop to another origin keeps credentials and payment headers at the origin they were sent to. (+14 more in the changelog)",
             "code": false
           }
         ],
@@ -134,10 +134,10 @@ export const CLIENT_RELEASE_DATA = {
       {
         "version": "0.11.0-alpha.0",
         "date": "2026-10-23",
-        "summary": "A paid x402 call whose merchant redirects the paid request to another origin now reports the funded, undelivered state. The embedded SDK no longer re-sends a paid request to a different origin. (+4 more in the changelog)",
+        "summary": "A paid x402 call whose merchant redirects the paid request to another origin now reports the funded, undelivered state. The embedded SDK no longer re-sends a paid request to a different origin. (+6 more in the changelog)",
         "summary_segments": [
           {
-            "text": "A paid x402 call whose merchant redirects the paid request to another origin now reports the funded, undelivered state. The embedded SDK no longer re-sends a paid request to a different origin. (+4 more in the changelog)",
+            "text": "A paid x402 call whose merchant redirects the paid request to another origin now reports the funded, undelivered state. The embedded SDK no longer re-sends a paid request to a different origin. (+6 more in the changelog)",
             "code": false
           }
         ],
@@ -207,7 +207,7 @@ export const CLIENT_RELEASE_DATA = {
       {
         "version": "0.11.0-alpha.0",
         "date": "2026-10-23",
-        "summary": "The installed skill passes the payment header with the settlement report. On the EIP-3009 plain-HTTP path, the skill now tells the agent to pass payment_header (the exact header it retried the merchant with) on haven_report_x402_outcome and on haven_report_settlement_evidence.",
+        "summary": "The installed skill passes the payment header with the settlement report. On the EIP-3009 plain-HTTP path, the skill now tells the agent to pass payment_header (the exact header it retried the merchant with) on haven_report_x402_outcome and on haven_report_settlement_evidence. (+1 more in the changelog)",
         "summary_segments": [
           {
             "text": "The installed skill passes the payment header with the settlement report. On the EIP-3009 plain-HTTP path, the skill now tells the agent to pass ",
@@ -234,7 +234,7 @@ export const CLIENT_RELEASE_DATA = {
             "code": true
           },
           {
-            "text": ".",
+            "text": ". (+1 more in the changelog)",
             "code": false
           }
         ],
@@ -276,14 +276,38 @@ export const CLIENT_RELEASE_DATA = {
       {
         "version": "0.11.0-alpha.0",
         "date": "2026-10-23",
-        "summary": "haven guide says \"a passkey\", never a platform name. Its copy of the agent runbook drops \"(Face ID / Touch ID)\" from the account step and the signup hand-off script, regenerated from the SDK runbook. (+3 more in the changelog)",
+        "summary": "haven budget grant into an agent's occupied (token, recipient) slot is refused instead of silently replacing the live budget: exit 4, error_code: BUDGET_SLOT_OCCUPIED and existing_delegation_hash under --json, and a hint to edit that budget on the agent's page, which replaces it and stops the old one on-chain. (+3 more in the changelog)",
         "summary_segments": [
           {
-            "text": "haven guide",
+            "text": "haven budget grant",
             "code": true
           },
           {
-            "text": " says \"a passkey\", never a platform name. Its copy of the agent runbook drops \"(Face ID / Touch ID)\" from the account step and the signup hand-off script, regenerated from the SDK runbook. (+3 more in the changelog)",
+            "text": " into an agent's occupied (token, recipient) slot is refused instead of silently replacing the live budget: exit 4, ",
+            "code": false
+          },
+          {
+            "text": "error_code: BUDGET_SLOT_OCCUPIED",
+            "code": true
+          },
+          {
+            "text": " and ",
+            "code": false
+          },
+          {
+            "text": "existing_delegation_hash",
+            "code": true
+          },
+          {
+            "text": " under ",
+            "code": false
+          },
+          {
+            "text": "--json",
+            "code": true
+          },
+          {
+            "text": ", and a hint to edit that budget on the agent's page, which replaces it and stops the old one on-chain. (+3 more in the changelog)",
             "code": false
           }
         ],

@@ -2699,10 +2699,11 @@ and `@haven_ai/connect` its own `CONNECTOR_VERSION`).
 > `0.10.0-alpha.0` is **MINOR**: the range adds surfaces and removes none, and
 > no CHANGELOG entry is marked **Update required**.
 >
-> Two type-level changes for SDK consumers: `HavenCatalogEntry.source` gains
-> `'bazaar'` (#4245) and `MerchantEgressRefusalReason` gains
-> `'redirect_cross_origin_body'` (#4257). Only an exhaustive `switch` over
-> either needs the new case. The `.d.ts` comparison against the published
+> Three type-level widenings for SDK consumers: `HavenCatalogEntry.source`
+> gains `'bazaar'` (#4245), `MerchantEgressRefusalReason` gains
+> `'redirect_cross_origin_body'` (#4257), and `AgentPaymentWarningCode` gains
+> `QUOTE_EXCEEDS_REMAINING_BUDGET` and `MERCHANT_REPORTED_DENIAL` (#3967). Only
+> an exhaustive `switch` over one of them needs the new case. The `.d.ts` comparison against the published
 > `0.10.0-alpha.0` (`sdk`, `signer`, `mcp`) removes and adds no declaration
 > name; the other changes are optional fields and parameters.
 >
@@ -2720,12 +2721,14 @@ and `@haven_ai/connect` its own `CONNECTOR_VERSION`).
 >   settlement-child binding is refused with `NO_FUNDING_LEG` and retired at
 >   mint (#4242, #4248). Description text names the settlement report (#4061).
 >   Narrower, not wider: no new signing path.
-> - **Local MCP.** `haven_quote_x402` takes `expected_amount` (#3967),
->   `HAVEN_RPC_URL_<chainId>` wires per-chain RPC reads (#3996), a cross-origin
->   paid redirect reports the funded, undelivered state (#4257), the #4215
->   retry, and `isLive` on task budgets (#3922).
+> - **Local MCP.** `haven_quote_x402` takes `expected_amount` for a price
+>   check (#3967; no local budget check), `HAVEN_RPC_URL_<chainId>` wires
+>   per-chain RPC reads (#3996), a cross-origin paid redirect reports the
+>   funded, undelivered state (#4257), settlement reports carry the payment
+>   header (#4061) with the #4215 retry, a plain tool error after funding is a
+>   rejection (#4062), and `isLive` on task budgets (#3922).
 > - **Connect.** The installed skill passes `payment_header` with the
->   settlement report (#4061). Existing installs keep their `SKILL.md` until
+>   settlement report (#4061) and names the quote's stop signals (#3967). Existing installs keep their `SKILL.md` until
 >   reinstalled.
 > - **CLI.** `budget grant` refuses an occupied slot (#3933), approve wording
 >   (#4067), `is_live` on grant wait (#3922), passkey wording (#4168).

@@ -99,13 +99,17 @@ required") is refused — reword to "no update needed", or quote it in a code sp
   `PAYMENT-RESPONSE` hash, no `_meta` settlement transaction), both paid-retry
   paths (`completeX402MerchantCall` and `MerchantCompletion.retryRequest`) now
   treat it as the merchant rejecting after funding:
-  `MERCHANT_REJECTED_AFTER_FUNDING`, never `settled: true`. The
-  rejection-after-funding message now adds that the merchant may still settle
-  late, so check the payment status before sweeping the delegate. A tool error
+  `MERCHANT_REJECTED_AFTER_FUNDING`, never `settled: true`. On the local
+  `retryRequest` path the rejection-after-funding message now adds that the
+  merchant may still settle late, so check the payment status before sweeping
+  the delegate. A tool error
   beside a settlement transaction is still delivered as evidence (#4120,
   above). No update needed.
 
-- **Quote-time budget and price stops (#3967).** `AgentPaymentWarningCode`
+- **Warning codes and skill text for quote-time stops (#3967). BREAKING only
+  for TypeScript code with an exhaustive `switch` over
+  `AgentPaymentWarningCode`.** The stops themselves run in the hosted quote
+  and, for price only, the local `haven_quote_x402`. `AgentPaymentWarningCode`
   gains `QUOTE_EXCEEDS_REMAINING_BUDGET` (the quoted amount does not fit the
   agent's remaining budget) and `MERCHANT_REPORTED_DENIAL` (the merchant
   reported a denial on one of its payment options; informational). 
@@ -118,6 +122,10 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 - The `checkFunds` / `haven_check_funds` description says a `false` result means the
   account holds less than the checked amount ("short"), not that it is empty
   (#4079). Text only; no update needed.
+
+- The `discoverTools` / `haven_discover_tools` description no longer calls
+  every catalog row curated: rows come from any source, and Bazaar rows are
+  seller-asserted (#4245). Text only; no update needed.
 
 - Doc-only (#4023): `delegate-account.ts`'s salt comment now states precisely
   what the package derives — DELEGATE accounts, always at the literal zero

@@ -26,6 +26,11 @@ required") is refused — reword to "no update needed", or quote it in a code sp
   records the merchant's settlement only with that header. An already
   installed `SKILL.md` stays stale until reinstalled. No update needed.
 
+- **The installed skill names the quote's stop signals (#3967).** It tells the
+  agent to pass `expected_amount` when the price is stated up front, and to
+  stop and tell the user when a quote returns `safe_to_continue: false`.
+  Same reinstall note as above. No update needed.
+
 ## 0.10.0-alpha.0 — 2026-10-14
 
 ### Added

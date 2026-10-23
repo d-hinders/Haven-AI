@@ -1,4 +1,5 @@
 import { loadReceiptUnderlagSource } from '../../infra/repositories/machine-payments.js'
+import { safeGetBinary, type SafeFetchOptions, type SsrfRefusal } from '../../infra/http/ssrf-guard.js'
 import type { FeedTransaction } from './feed-transaction.js'
 
 /**
@@ -234,62 +235,79 @@ const MERCHANT_RECEIPT_CONTENT_TYPES = new Map([
   ['image/jpeg', 'jpg'],
 ])
 const MERCHANT_RECEIPT_MAX_BYTES = 5 * 1024 * 1024
-
-/** Hostname patterns that must never be fetched server-side (SSRF floor). */
-const BLOCKED_HOST_RE =
-  /^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.|100\.6[4-9]\.|100\.[7-9]\d\.|100\.1[01]\d\.|100\.12[0-7]\.|0\.|\[::1?\]|\[::ffff:.*|\[f[cd][0-9a-f]{2}:.*|\[fe80:.*|.*\.local|.*\.internal)/i
+/** Total wall-clock budget for one guarded receipt read, matching the old 15 s timeout. */
+const MERCHANT_RECEIPT_TIMEOUT_MS = 15_000
 
 /**
- * Fetch a merchant receipt DOCUMENT by URL at feed time (#956) — strictly
- * guarded: https only, private/internal hosts refused, content-type
- * whitelisted, size-capped. Throws with an actionable message on any
- * violation; the connector degrades to a note (never fails the push).
- *
- * Known residual: string-level host blocking does not defeat DNS rebinding,
- * and exotic address literals beyond the covered v4/v6 ranges may slip the
- * regex — the real fix is resolve-then-validate against private ranges.
- * Acceptable for the current dev/testnet posture, revisit before any
- * production rollout (noted in the security review).
+ * Human-readable refusal for the receipt fetch. `http_status` keeps the old
+ * "HTTP <status>" wording — connector notes surface it verbatim and the feed
+ * audit trail quotes the provider's answer; the private/internal wording is
+ * likewise kept so existing notes read the same.
+ */
+function merchantReceiptRefusalMessage(refusal: SsrfRefusal): string {
+  if (refusal.reason === 'scheme_not_https') return 'merchant receipt url must be https'
+  if (refusal.reason === 'host_not_public' || refusal.reason === 'address_not_public') {
+    return `merchant receipt url points at a private or internal host (${refusal.detail})`
+  }
+  if (refusal.reason === 'http_status') return `merchant receipt fetch failed (${refusal.detail})`
+  return `merchant receipt fetch refused: ${refusal.reason} (${refusal.detail})`
+}
+
+/**
+ * Fetch a merchant receipt DOCUMENT by URL at feed time (#956, #4309) — under
+ * the shared SSRF guard's `safeGetBinary` (resolve-validate-pin, the same
+ * four controls every third-party-chosen URL gets; do not write a second
+ * guard): https only, default port only, no IP literals or locally-bound
+ * names, the hostname resolved and EVERY address classified before any
+ * packet is sent, and the socket PINNED to a validated address — a resolver
+ * that answers "public" to the check and "127.0.0.1" to the connect cannot
+ * split the two. Redirects are refused outright (`maxRedirects: 0`), the
+ * same posture as the old `redirect: 'error'`. Content-type whitelisted
+ * (pdf/png/jpeg), 5 MB cap, 15 s total deadline. Throws with an actionable
+ * message on any violation; the connector degrades to a note (never fails
+ * the push).
  */
 export async function fetchMerchantReceiptDocument(
   url: string,
-  fetchImpl: typeof fetch = fetch,
+  options: SafeFetchOptions = {},
 ): Promise<{ filename: string; bytes: Buffer; contentType: string }> {
-  const parsed = new URL(url)
-  if (parsed.protocol !== 'https:') throw new Error('merchant receipt url must be https')
-  if (BLOCKED_HOST_RE.test(parsed.hostname)) {
-    throw new Error('merchant receipt url points at a private or internal host')
-  }
-  const res = await fetchImpl(url, { redirect: 'error', signal: AbortSignal.timeout(15_000) })
-  if (!res.ok) throw new Error(`merchant receipt fetch failed (HTTP ${res.status})`)
-  const contentType = (res.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase()
+  const result = await safeGetBinary(url, {
+    timeoutMs: MERCHANT_RECEIPT_TIMEOUT_MS,
+    maxBytes: MERCHANT_RECEIPT_MAX_BYTES,
+    maxRedirects: 0,
+    ...options,
+  })
+  if (!result.ok) throw new Error(merchantReceiptRefusalMessage(result))
+  const contentType = (result.headers['content-type'] ?? '').split(';')[0].trim().toLowerCase()
   const ext = MERCHANT_RECEIPT_CONTENT_TYPES.get(contentType)
   if (!ext) throw new Error(`merchant receipt content-type '${contentType}' is not allowed (pdf/png/jpg only)`)
-  const declared = Number(res.headers.get('content-length') ?? '0')
+  const declared = Number(result.headers['content-length'] ?? '0')
   if (declared > MERCHANT_RECEIPT_MAX_BYTES) throw new Error('merchant receipt exceeds the 5MB cap')
-  const bytes = Buffer.from(await res.arrayBuffer())
-  if (bytes.byteLength > MERCHANT_RECEIPT_MAX_BYTES) throw new Error('merchant receipt exceeds the 5MB cap')
-  return { filename: `merchant-receipt.${ext}`, bytes, contentType }
+  if (result.body.byteLength > MERCHANT_RECEIPT_MAX_BYTES) throw new Error('merchant receipt exceeds the 5MB cap')
+  return { filename: `merchant-receipt.${ext}`, bytes: result.body, contentType }
 }
 
 /**
  * The merchant's own receipt/invoice as an uploadable document (#956, shared
  * by the Fortnox attachment and the Accounted second upload #3918): an
  * inline JSON is rendered as the provenance PDF (`merchantReceiptPdf`), a
- * URL is fetched under the SSRF guards (`fetchMerchantReceiptDocument`).
- * Null when the receipt names neither.
+ * URL is fetched through the SSRF guard's `safeGetBinary`
+ * (`fetchMerchantReceiptDocument`) — resolve-validate-pin, https-only,
+ * pdf/png/jpeg only, 5 MB cap, redirects refused. Null when the receipt
+ * names neither. `options` is the guard's test seam (resolver, transport,
+ * budgets); production uses system DNS and the pinned `node:https` transport.
  */
 export async function merchantReceiptDocument(
   paymentId: string,
   receipt: { url: string | null; inlineJson: unknown | null },
-  fetchImpl: typeof fetch = fetch,
+  options: SafeFetchOptions = {},
 ): Promise<{ filename: string; bytes: Buffer; contentType: string } | null> {
   if (receipt.inlineJson != null) {
     const file = merchantReceiptPdf(paymentId, receipt.inlineJson)
     return { filename: file.filename, bytes: file.pdf, contentType: 'application/pdf' }
   }
   if (receipt.url) {
-    const doc = await fetchMerchantReceiptDocument(receipt.url, fetchImpl)
+    const doc = await fetchMerchantReceiptDocument(receipt.url, options)
     return { filename: doc.filename, bytes: doc.bytes, contentType: doc.contentType }
   }
   return null

@@ -295,7 +295,7 @@ Legacy Safe rows are untouched and still readable to a direct database query, bu
 since #2413 no account, agent or dashboard surface displays them: the six account, agent and dashboard list
 queries filter to `account_type = 'delegator_hybrid'`, so balances, activity and agent
 identity no longer render there, and `RetiredRailNotice` is deleted along with every
-`account_type` branch behind it. The transactions surface is deliberately NOT among those six: `LIST_BASIC_SAFES_FOR_USER_SQL` and `LIST_AGENTS_FOR_TRANSACTION_FILTERS_SQL` (`infra/repositories/transaction-history.ts`) carry no rail predicate, so `GET /transactions` and `GET /transactions/filters` still span every account AND agent row a user owns — a legacy account's name and its agents' names still appear in the transactions account and initiator picklists. The legacy rail had no agent create, budget,
+`account_type` branch behind it. The transactions surface is deliberately NOT among those six: `LIST_BASIC_ACCOUNTS_FOR_USER_SQL` (named `LIST_BASIC_SAFES_FOR_USER_SQL` before #2932) and `LIST_AGENTS_FOR_TRANSACTION_FILTERS_SQL` (`infra/repositories/transaction-history.ts`) carry no rail predicate, so `GET /transactions` and `GET /transactions/filters` still span every account AND agent row a user owns — a legacy account's name and its agents' names still appear in the transactions account and initiator picklists. The legacy rail had no agent create, budget,
 payment-credential, or Haven-mediated authority-revocation action before that, and has
 no Haven-rendered read surface of its own after it, the transactions
 picklists aside — the hook that gated the

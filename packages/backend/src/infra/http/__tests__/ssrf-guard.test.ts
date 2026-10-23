@@ -15,6 +15,7 @@ import {
   assertSafeUrl,
   ipLiteralRange,
   resolvePublicAddresses,
+  safeGetBinary,
   safeGetText,
   safePostJson,
   safeRequest,
@@ -344,6 +345,58 @@ describe('safeGetText', () => {
   })
 })
 
+/**
+ * `safeGetBinary` (#4309): the merchant-receipt path needs the RAW bytes of a
+ * PDF/PNG/JPEG — the utf8 decode `safeGetText` applies is lossless for text
+ * and corruption for anything else. Same loop, same controls, different
+ * encoding only.
+ */
+describe('safeGetBinary (#4309)', () => {
+  it('returns the body as raw bytes on a clean 200', async () => {
+    const bytes = Buffer.from([0x25, 0x50, 0x44, 0x46, 0xff, 0xfe, 0x00, 0x01]) // not valid utf8
+    const result = await safeGetBinary('https://receipts.example.com/invoice.pdf', {
+      resolver: publicResolver,
+      transport: transportReturning({ status: 200, location: null, body: '', bodyBytes: bytes }),
+    })
+    expect(result).toMatchObject({ ok: true })
+    expect((result as { body: Buffer }).body.equals(bytes)).toBe(true)
+  })
+
+  it('does not change the text path: safeGetText still decodes utf8, byte-identical headers flow either way', async () => {
+    const transport = vi.fn<PinnedTransport>()
+    transport.mockImplementationOnce(async () => ({ status: 200, location: null, body: 'héllo', headers: { 'content-type': 'text/plain' } }))
+    transport.mockImplementationOnce(async () => ({
+      status: 200,
+      location: null,
+      body: '',
+      bodyBytes: Buffer.from('héllo'),
+      headers: { 'content-type': 'text/plain' },
+    }))
+    const opts = { resolver: publicResolver, transport }
+    const text = await safeGetText('https://shop.example.com/x', opts)
+    const binary = await safeGetBinary('https://shop.example.com/x', opts)
+    expect(text).toMatchObject({ ok: true, body: 'héllo' })
+    expect(binary).toMatchObject({ ok: true, status: 200 })
+    expect((binary as { body: Buffer }).body.equals(Buffer.from('héllo'))).toBe(true)
+    // Both reads went through the same pinned transport with the same controls.
+    expect(transport).toHaveBeenCalledTimes(2)
+    expect(transport.mock.calls[0]![0]).toMatchObject({ address: '93.184.216.34' })
+    expect(transport.mock.calls[1]![0]).toMatchObject({ address: '93.184.216.34' })
+  })
+
+  it('applies every control the text path has: scheme, resolution, pinning, budgets', async () => {
+    const transport = vi.fn<PinnedTransport>(async () => ({ status: 200, location: null, body: '' }))
+    const refused = await safeGetBinary('https://shop.example.com:8443/x', { resolver: publicResolver, transport })
+    expect(refused).toMatchObject({ ok: false, reason: 'non_default_port' })
+    const privateSpace = await safeGetBinary('https://shop.example.com/x', {
+      resolver: async () => [{ address: '10.0.0.9', family: 4 }],
+      transport,
+    })
+    expect(privateSpace).toMatchObject({ ok: false, reason: 'address_not_public' })
+    expect(transport).not.toHaveBeenCalled()
+  })
+})
+
 describe('safePostJson (#1713)', () => {
   const okJson: PinnedResponse = { status: 200, location: null, body: '{"jsonrpc":"2.0"}' }
 
@@ -548,5 +601,110 @@ describe('safeRequest (#4281)', () => {
     })
     expect(result).toMatchObject({ ok: false, reason: 'address_not_public' })
     expect(transport).not.toHaveBeenCalled()
+  })
+})
+
+describe('safeFetch deadline and address fallback (#4300)', () => {
+  const ok402: PinnedResponse = { status: 402, location: null, body: '{}', headers: {} }
+  const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+  it('gives a redirect hop only the budget left, not the full budget again', async () => {
+    const calls: PinnedRequest[] = []
+    const transport: PinnedTransport = async (req) => {
+      calls.push(req)
+      if (calls.length === 1) {
+        await delay(150)
+        return { status: 302, location: 'https://next.example/b', body: '', headers: {} }
+      }
+      return { status: 200, location: null, body: 'done', headers: {} }
+    }
+    const result = await safeGetText('https://first.example/a', { timeoutMs: 1_000, resolver: publicResolver, transport })
+    expect(result.ok).toBe(true)
+    expect(calls).toHaveLength(2)
+    expect(calls[0]!.timeoutMs).toBeLessThanOrEqual(1_000)
+    // The first hop spent about 150 ms; the second must not get the whole 1 s back.
+    expect(calls[1]!.timeoutMs).toBeLessThanOrEqual(1_000 - 140)
+  })
+
+  it('counts name resolution against the deadline: refuses at the deadline, not when the resolver finally answers', async () => {
+    const transport = vi.fn(transportReturning(ok402))
+    const slowResolver = async (): Promise<ResolvedAddress[]> => {
+      await delay(800)
+      return [{ address: '93.184.216.34', family: 4 }]
+    }
+    const started = Date.now()
+    const result = await safeGetText('https://slow-dns.example/', { timeoutMs: 100, resolver: slowResolver, transport })
+    const elapsed = Date.now() - started
+    expect(result).toMatchObject({ ok: false, reason: 'timeout' })
+    expect(transport).not.toHaveBeenCalled()
+    // Without the bound the call would last as long as the resolver (800 ms).
+    expect(elapsed).toBeLessThan(500)
+  })
+
+  it('takes the time spent resolving out of the request budget', async () => {
+    const calls: PinnedRequest[] = []
+    const transport: PinnedTransport = async (req) => {
+      calls.push(req)
+      return ok402
+    }
+    const slowResolver = async (): Promise<ResolvedAddress[]> => {
+      await delay(150)
+      return [{ address: '93.184.216.34', family: 4 }]
+    }
+    await safeRequest('https://slow-dns.example/', { method: 'GET', body: null }, { timeoutMs: 1_000, resolver: slowResolver, transport })
+    expect(calls).toHaveLength(1)
+    expect(calls[0]!.timeoutMs).toBeLessThanOrEqual(1_000 - 140)
+  })
+
+  it('falls back to the next public address when the first cannot connect', async () => {
+    const calls: PinnedRequest[] = []
+    const transport: PinnedTransport = async (req) => {
+      calls.push(req)
+      if (req.address === '2606:2800:220:1:248:1893:25c8:1946') {
+        return { ok: false, reason: 'connect_error', detail: 'ENETUNREACH' }
+      }
+      return ok402
+    }
+    const resolver = async (): Promise<ResolvedAddress[]> => [
+      { address: '2606:2800:220:1:248:1893:25c8:1946', family: 6 },
+      { address: '93.184.216.34', family: 4 },
+    ]
+    const result = await safeRequest('https://dual.example/', { method: 'GET', body: null }, { resolver, transport })
+    expect(result).toMatchObject({ ok: true, status: 402 })
+    expect(calls.map((c) => c.address)).toEqual(['2606:2800:220:1:248:1893:25c8:1946', '93.184.216.34'])
+    // An attempt with another address left is capped on its connect phase; the last one is not.
+    expect(calls[0]!.connectTimeoutMs).toBeGreaterThan(0)
+    expect(calls[1]!.connectTimeoutMs).toBeUndefined()
+  })
+
+  it('never falls back to an address the policy refused, even when every public one fails', async () => {
+    const calls: PinnedRequest[] = []
+    const transport: PinnedTransport = async (req) => {
+      calls.push(req)
+      return { ok: false, reason: 'connect_error', detail: 'ECONNREFUSED' }
+    }
+    const resolver = async (): Promise<ResolvedAddress[]> => [
+      { address: '93.184.216.34', family: 4 },
+      { address: '10.0.0.5', family: 4 },
+      { address: '169.254.169.254', family: 4 },
+    ]
+    const result = await safeRequest('https://mixed.example/', { method: 'GET', body: null }, { resolver, transport })
+    expect(result).toMatchObject({ ok: false, reason: 'connect_error' })
+    expect(calls.map((c) => c.address)).toEqual(['93.184.216.34'])
+  })
+
+  it('does not retry another address once the request may have reached the server', async () => {
+    const calls: PinnedRequest[] = []
+    const transport: PinnedTransport = async (req) => {
+      calls.push(req)
+      return { ok: false, reason: 'transport_error', detail: 'socket hang up' }
+    }
+    const resolver = async (): Promise<ResolvedAddress[]> => [
+      { address: '93.184.216.34', family: 4 },
+      { address: '93.184.216.35', family: 4 },
+    ]
+    const result = await safePostJson('https://once.example/', { jsonrpc: '2.0' }, { resolver, transport })
+    expect(result).toMatchObject({ ok: false, reason: 'transport_error' })
+    expect(calls).toHaveLength(1)
   })
 })

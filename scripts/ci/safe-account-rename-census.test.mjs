@@ -27,7 +27,7 @@ import { test } from 'node:test'
 import { strict as assert } from 'node:assert'
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
-import { allowedReason, runCensus, zeroedTokens } from './safe-account-rename-census.mjs'
+import { ALLOWED_CEILING, allowedReason, filesOverCeiling, runCensus, zeroedTokens } from './safe-account-rename-census.mjs'
 
 test('positive control: the working tree is a real git repo the census can read', () => {
   // If this throws, every assertion below is meaningless — `runCensus` would
@@ -127,6 +127,47 @@ test('ALLOWED covers the classes this epic deliberately left alone', () => {
   ]) {
     assert.notEqual(allowedReason(file), null, `${file} lost its recorded reason`)
   }
+})
+
+test('every allow-listed file is at or under its ceiling (#4315)', () => {
+  // The per-file ceilings existed only in the CLI entry point before #4315:
+  // CI ran this test file, the test file checked only `unallowed`, and a file
+  // that GREW past its recorded count scrolled past green. This is the same
+  // comparison the CLI makes — `runCensus` computes `overCeiling` via the
+  // exported `filesOverCeiling`, not a second copy — asserted in the suite
+  // that actually runs under `node --test scripts/ci/*.test.mjs`.
+  const { overCeiling, total } = runCensus('')
+  assert.ok(ALLOWED_CEILING.size > 0, 'no ceilings are recorded — the ceiling check would be vacuous')
+  assert.deepEqual(
+    overCeiling,
+    [],
+    `allow-listed file(s) past their ceiling — reword the added hit (raising a ceiling is a decision to argue for):\n${overCeiling
+      .map(([f, n, c]) => `  ${f}: ${n} hit(s), ceiling ${c}`)
+      .join('\n')}`,
+  )
+  // Guards the guard, same shape as the `total > 0` check above: with the
+  // pathspecs broken every count is zero, `overCeiling` is trivially empty,
+  // and this would pass while reading nothing. A real total means the
+  // per-file counts were actually consulted.
+  assert.ok(
+    total > 0,
+    `census matched nothing at all (${total}) — the instrument is broken, not the repo clean`,
+  )
+})
+
+test('MUTATION: a ceiling below the current count turns the comparison red (#4315)', () => {
+  // Proves the failing path of `filesOverCeiling` is reachable — the mutation
+  // the issue asks for (lower a ceiling below the current count, watch the
+  // suite go red) without editing the map under a live run: same function the
+  // CLI calls, fed the same shape `runCensus` builds.
+  const perFile = new Map([['packages/signer/src/audit.ts', 4]])
+  const ceilings = new Map([['packages/signer/src/audit.ts', 3]])
+  assert.deepEqual(filesOverCeiling(perFile, ceilings), [['packages/signer/src/audit.ts', 4, 3]])
+  // …and the passing edges: exactly AT the ceiling is fine, below is fine,
+  // and a file absent from the tree counts as 0.
+  assert.deepEqual(filesOverCeiling(new Map([['f.ts', 3]]), new Map([['f.ts', 3]])), [])
+  assert.deepEqual(filesOverCeiling(new Map([['f.ts', 2]]), new Map([['f.ts', 3]])), [])
+  assert.deepEqual(filesOverCeiling(new Map(), ceilings), [])
 })
 
 test('zeroedTokens still reports a per-token zero, for the epic record', () => {

@@ -820,11 +820,11 @@ const tx = (i, over = {}) => {
 // fourth state the capture has to show: an unfed row renders no badge.
 const accounting = (status, extra = {}) => ({ provider: 'fortnox', status, externalRef: null, error: null, ...extra })
 export const FIXTURE_TXS = [
-  // #3763: eip3009 WITH a recorded settlement — the drawer headlines it
-  // ("Merchant settlement (reported by the agent or detected on-chain,
-  // verified)") and names the funding leg ("Funding from your account"). The
-  // `transactions-detail-network` capture photographs THIS row's drawer, so
-  // the regenerated evidence carries the recorded state's visible text.
+  // #3763: eip3009 WITH a recorded settlement — the drawer reads
+  // "Settlement: Recorded (verified)" and, under Technical details, names
+  // both legs ("Transaction" for the funding leg, "Settlement transaction",
+  // #4267). The `transactions-detail-network` capture photographs THIS row's
+  // drawer, so the regenerated evidence carries the recorded state's text.
   tx(1, {
     agentName: 'Research agent', source: 'x402', x402ResourceUrl: 'https://api.example.dev/reports',
     settlementScheme: 'eip3009',
@@ -4598,30 +4598,34 @@ export const SCENARIOS = {
   },
   'transactions-detail-network': {
     description:
-      'The /transactions detail drawer for the first fixture row — its Network row now renders the NetworkPill (#3670)',
+      'The /transactions detail drawer for the first fixture row, Technical details opened — its Network row renders the NetworkPill (#3670, #4267)',
     api() {
       return undefined
     },
     async run({ page, vp, shoot }) {
       await page.goto(`${BASE_URL}/transactions`, { waitUntil: 'domcontentloaded', timeout: 60_000 })
       await dismissMobileSidebar(page, vp)
-      const select = page.locator('button[data-row-select]').first()
+      // #4266: a ledger row is the control.
+      const select = page.locator('[data-testid="transactions-ledger"] [role="button"][aria-haspopup="dialog"]').first()
       await select.waitFor({ timeout: 30_000 })
       await select.click()
       const drawer = page.getByRole('dialog').first()
       await drawer.waitFor({ timeout: 20_000 })
-      await drawer.getByText('Network', { exact: true }).waitFor({ timeout: 20_000 })
       await shoot(drawer, 'drawer')
+      // #4267: the Network row sits under Technical details, closed by default.
+      await drawer.locator('[data-testid="transaction-technical-details"] summary').click()
+      await drawer.getByText('Network', { exact: true }).waitFor({ timeout: 20_000 })
+      await shoot(drawer, 'drawer-technical')
     },
   },
   // #3763: the second eip3009 state — the LAST fixture row carries NO
-  // recorded settlement, so its drawer reads "Merchant settlement / Not
-  // recorded" and names the funding leg. Photographed beside
+  // recorded settlement, so its drawer reads "Settlement: Not recorded yet"
+  // with what the record proves (#4267). Photographed beside
   // `transactions-detail-network` (the recorded state's drawer, same
   // mechanism) so the reviewer evidence carries visible text for both.
   'transactions-detail-settlement-unrecorded': {
     description:
-      'The /transactions detail drawer for the unrecorded-settlement fixture row — "Merchant settlement / Not recorded" plus the funding leg, labelled (#3763)',
+      'The /transactions detail drawer for the unrecorded-settlement fixture row — "Settlement: Not recorded yet" and what the record proves (#3763, #4267)',
     api() {
       return undefined
     },
@@ -4629,12 +4633,12 @@ export const SCENARIOS = {
       await page.goto(`${BASE_URL}/transactions`, { waitUntil: 'domcontentloaded', timeout: 60_000 })
       await dismissMobileSidebar(page, vp)
       // Rows render sorted date-descending; the tx(7) row is the oldest.
-      const select = page.locator('button[data-row-select]').last()
+      const select = page.locator('[data-testid="transactions-ledger"] [role="button"][aria-haspopup="dialog"]').last()
       await select.waitFor({ timeout: 30_000 })
       await select.click()
       const drawer = page.getByRole('dialog').first()
       await drawer.waitFor({ timeout: 20_000 })
-      await drawer.getByText('Not recorded', { exact: true }).waitFor({ timeout: 20_000 })
+      await drawer.getByText('Not recorded yet', { exact: true }).waitFor({ timeout: 20_000 })
       await shoot(drawer, 'drawer')
     },
   },
@@ -6698,7 +6702,7 @@ export const SCENARIOS = {
   },
   'dashboard-own-account-transfer': {
     description:
-      '#4099: a transfer between two of the user\'s own accounts on the dashboard\'s Activity card — the send reads "Savings" (the receiving account), the money arriving reads "From Savings" (the sending account, not "Deposit"; owner decision 2026-10-20), and an outside deposit on the same day still reads "Deposit". #4117: every send\'s subtitle names the account the money left ("From Operating wallet"), never a fixed "From My account". The shared fixture has one account and no inbound row, so none of this is reachable from a route capture.',
+      '#4268: a move between two of the user\'s own accounts on the dashboard\'s Activity card is ONE row — "Moved between your accounts", "Operating wallet → Savings", unsigned — the backend folds both legs (#4265\'s fold). This supersedes, for paired legs, the 2026-10-20 owner decision that showed the send as "Savings" and the arrival as "From Savings". An UNPAIRED arrival (its sending account\'s read failed, so no partner leg) still reads "From Savings" (#4099, decision kept), and an outside deposit on the same day still reads "Deposit". #4117: an agent send\'s subtitle names the account the money left ("From Operating wallet"), never a fixed "From My account". The shared fixture has one account and no inbound row, so none of this is reachable from a route capture.',
     api(apiPath) {
       const savings = {
         ...FIXTURE_ACCOUNT,
@@ -6718,10 +6722,10 @@ export const SCENARIOS = {
         return {
           ...FIXTURE_OVERVIEW,
           activity: [
-            // The money arriving in Operating wallet from Savings: named by the sender.
+            // An unpaired arrival from Savings (its partner leg was not read): named by the sender (#4099).
             { ...plainTransfer, direction: 'in', to: FIXTURE_ACCOUNT.account_address, merchantName: 'Savings', sumAtomic: '50000000', approxAmount: '538.0000', latestAt: at(60) },
-            // Operating wallet's own send to Savings: named by the receiver.
-            { ...plainTransfer, direction: 'out', to: savings.account_address, merchantName: 'Savings', fromAccountName: FIXTURE_ACCOUNT.name, sumAtomic: '20000000', approxAmount: '215.2000', latestAt: at(120) },
+            // Operating wallet → Savings, both legs folded into one move row (#4268).
+            { ...plainTransfer, direction: 'out', to: savings.account_address, merchantName: 'Savings', fromAccountName: FIXTURE_ACCOUNT.name, ownTransfer: { fromAccountName: FIXTURE_ACCOUNT.name, toAccountName: 'Savings' }, sumAtomic: '20000000', approxAmount: '215.2000', latestAt: at(120) },
             // An outside deposit the same day: still the generic word.
             { ...plainTransfer, direction: 'in', to: FIXTURE_ACCOUNT.account_address, merchantName: null, sumAtomic: '10000000', approxAmount: '107.6000', latestAt: at(180) },
             // The agent's x402 payment, sent from the same account (#4117).
@@ -6737,10 +6741,14 @@ export const SCENARIOS = {
       }, FIXTURE_USER.id)
       await page.goto(`${BASE_URL}/dashboard`, { waitUntil: 'networkidle', timeout: 60_000 })
       await dismissMobileSidebar(page, vp)
-      // Positive controls: the money arriving reads "From Savings", the send "Savings".
-      await page.getByText('From Savings', { exact: true }).first().waitFor({ timeout: 30_000 })
-      await page.getByText('Savings', { exact: true }).first().waitFor({ timeout: 10_000 })
-      // #4117: the send's subtitle names the account the money left.
+      // #4268: the folded move is one row, naming both accounts.
+      await page.getByText('Moved between your accounts', { exact: true }).first().waitFor({ timeout: 30_000 })
+      if ((await page.getByText('Moved between your accounts', { exact: true }).count()) !== 1) {
+        throw new Error('#4268: expected exactly one move row')
+      }
+      // The unpaired arrival still reads "From Savings" (#4099).
+      await page.getByText('From Savings', { exact: true }).first().waitFor({ timeout: 10_000 })
+      // #4117: the agent send's subtitle names the account the money left.
       await page.getByText(`From ${FIXTURE_ACCOUNT.name}`, { exact: true }).first().waitFor({ timeout: 10_000 })
       if (await page.getByText('From My account', { exact: false }).count()) {
         throw new Error('#4117: a fixed "From My account" subtitle rendered')

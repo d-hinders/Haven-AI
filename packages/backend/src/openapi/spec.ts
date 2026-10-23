@@ -1816,9 +1816,11 @@ export const openapiSpec = {
           'redemption is a single-use claim, so a poll loop that fires twice mints one ' +
           'session, not two. The token carries `purpose: owner_cli`, which every ' +
           'authenticated route refuses unless it is on the owner-CLI allow-list ' +
-          '(`middleware/owner-cli.ts`): agents, connect setups and read-only account ' +
-          'context — never signer changes, re-keying, credentials, provisioning, transfers, ' +
-          'or delegation build/activate/revoke. The human keeps every signature.',
+          '(`middleware/owner-cli.ts`): agents (including building an unsigned budget ' +
+          'delegation and preparing a revoke, both signed by the owner), connect setups, ' +
+          'contacts, feedback and read-only account context — never signer changes, ' +
+          're-keying, the user\'s own credentials, provisioning, transfers, or delegation ' +
+          'activation/submit. The human keeps every signature.',
         security: [],
         requestBody: {
           required: true,
@@ -13930,9 +13932,19 @@ export const openapiSpec = {
           agentName: { type: ['string', 'null'], description: 'Agent name of the newest member.' },
           source: { type: ['string', 'null'], description: "The newest member's source, e.g. `x402`." },
           x402ResourceUrl: { type: ['string', 'null'], description: 'The newest member’s x402 resource URL, when it is an x402 payment.' },
-          to: { type: 'string', description: 'The newest member’s raw `to` field — the merchant address on outbound payments, the account’s own address on deposits.' },
-          merchantName: { type: ['string', 'null'], description: 'Contact or receipt-merchant name resolved for the counterparty, else the name of the user\'s own account on the other side of a transfer between two of their accounts (#4099); null otherwise. On a deposit it is set only for a transfer from another of the user\'s own accounts, and that deposit is its own group.' },
+          to: { type: 'string', description: 'The newest member’s raw `to` field — the merchant address on outbound payments, the account’s own address on deposits, and the receiving own account’s address on a folded move (`ownTransfer`, #4268).' },
+          merchantName: { type: ['string', 'null'], description: 'Contact or receipt-merchant name resolved for the counterparty, else the name of the user\'s own account on the other side of a transfer between two of their accounts (#4099); null otherwise. On a deposit it is set only for a transfer from another of the user\'s own accounts, and that deposit is its own group. A folded move (`ownTransfer`, #4268) keeps the value an unfolded send would carry, so a client that predates `ownTransfer` still renders a readable out row.' },
           fromAccountName: { type: 'string', description: 'Outbound groups only (#4117): the label of the user\'s own account the money left — a contact name saved for it first, else the account\'s own name. Every member of the group left that one account. Absent on deposits and when no name resolves.' },
+          ownTransfer: {
+            type: 'object',
+            required: ['fromAccountName', 'toAccountName'],
+            properties: {
+              fromAccountName: { type: 'string', description: 'The own Haven name of the account the money left; "Unnamed account" when it has none, never an address.' },
+              toAccountName: { type: 'string', description: 'The own Haven name of the account the money reached; "Unnamed account" when it has none, never an address.' },
+            },
+            additionalProperties: false,
+            description: '#4268: present only on a move between two of the user\'s own accounts, its two explorer legs folded into one group (#4265\'s fold, the same one `GET /transactions?foldOwnTransfers=1` applies). Same-day moves between the same two accounts form one group. The group keeps `direction: out`, `merchantName` and `fromAccountName` as an unfolded send would. Not set for an agent-initiated transfer, a self-send, an outbound row whose agent enrichment failed, or a leg whose partner leg was not read; each of those stays the row it was before.',
+          },
           activityType: { type: ['string', 'null'], description: "The activity class, e.g. `delegate_sweep`; null for plain transfers and x402 payments." },
           direction: { type: 'string', enum: ['in', 'out'] },
           status: { type: 'string', enum: ['confirmed', 'pending', 'failed'], description: 'The DERIVED outcome: isError → failed; a paymentFlowStatus of confirming_merchant/needs_attention or a non-terminal paymentProofStatus → pending; else confirmed.' },

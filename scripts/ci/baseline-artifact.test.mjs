@@ -4,7 +4,10 @@
 // whose HEAD holds the "before" bytes and whose working tree holds the
 // regenerated "after" bytes — the exact state the workflow step runs in,
 // between the audit and the commit. A stub `compare` on PATH stands in for
-// ImageMagick, which the GitHub runner has and a laptop may not.
+// ImageMagick. The GitHub runner does not ship ImageMagick, so the workflow
+// installs it on demand (`update-visual-baselines.yml`); a laptop or a cloud
+// container may well have it. So the "no compare" case cannot rely on the
+// host lacking it: it runs the script with a PATH that holds only `git` (#4301).
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
@@ -53,6 +56,30 @@ function repo({ devVersion = null } = {}) {
   return root
 }
 
+// A PATH that resolves `git` and nothing else: a temp dir holding one symlink
+// to the host's `git`, found by walking PATH. The script needs only `git`
+// (`node` is spawned as process.execPath). A host `compare` is then invisible
+// wherever it is installed, and a `git` outside /usr/bin still resolves (#4301).
+function gitOnlyPath(root) {
+  const git = (process.env.PATH ?? '')
+    .split(path.delimiter)
+    .filter(Boolean)
+    .map((dir) => path.resolve(dir, 'git'))
+    .find((candidate) => {
+      try {
+        fs.accessSync(candidate, fs.constants.X_OK)
+        return fs.statSync(candidate).isFile()
+      } catch {
+        return false
+      }
+    })
+  assert.ok(git, 'test setup: no `git` on PATH')
+  const dir = path.join(root, 'git-only-bin')
+  fs.mkdirSync(dir)
+  fs.symlinkSync(git, path.join(dir, 'git'))
+  return dir
+}
+
 function run(root, moved, { withCompare = true } = {}) {
   const out = path.join(root, 'out')
   const summary = path.join(root, 'summary.md')
@@ -63,7 +90,7 @@ function run(root, moved, { withCompare = true } = {}) {
     OUT_DIR: out,
     GITHUB_STEP_SUMMARY: summary,
     GITHUB_OUTPUT: output,
-    PATH: withCompare ? `${path.join(root, 'bin')}${path.delimiter}${process.env.PATH}` : '/usr/bin:/bin',
+    PATH: withCompare ? `${path.join(root, 'bin')}${path.delimiter}${process.env.PATH}` : gitOnlyPath(root),
   }
   const res = spawnSync(process.execPath, [SCRIPT], { cwd: root, env, encoding: 'utf8' })
   const read = (p) => (fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : null)

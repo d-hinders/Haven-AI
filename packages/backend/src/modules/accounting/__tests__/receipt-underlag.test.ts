@@ -4,6 +4,7 @@
  * bytes directly.
  */
 import { describe, expect, it, vi } from 'vitest'
+import type { PinnedRequest, PinnedResponse } from '../../../infra/http/ssrf-guard.js'
 
 const { mockQuery } = vi.hoisted(() => ({ mockQuery: vi.fn() }))
 vi.mock('../../../db.js', () => ({ default: { query: (...a: unknown[]) => mockQuery(...a) } }))
@@ -183,42 +184,160 @@ describe('merchantReceiptPdf (#956)', () => {
   })
 })
 
-describe('fetchMerchantReceiptDocument (#956 SSRF guards)', () => {
-  const okResponse = (headers: Record<string, string>, bytes = 8) =>
-    new Response(new Uint8Array(bytes), { status: 200, headers })
+/**
+ * The guard's seams (#4309): a fake resolver answers the resolve step, a fake
+ * pinned transport answers the connect — no real network anywhere, and every
+ * assertion can name exactly what was resolved and what was asked to connect
+ * where. `PUBLIC_RESOLVED` is an ordinary global-unicast address.
+ */
+const PUBLIC_RESOLVED = { address: '93.184.216.34', family: 4 } as const
 
-  it('fetches a whitelisted https document', async () => {
-    const impl = vi.fn(async () => okResponse({ 'content-type': 'application/pdf' })) as unknown as typeof fetch
-    const doc = await fetchMerchantReceiptDocument('https://merchant.example/receipt.pdf', impl)
+function guardedSeam(resolved?: Array<{ address: string; family: number }>) {
+  const resolver = vi.fn(async () => resolved ?? [{ ...PUBLIC_RESOLVED }])
+  const transport = vi.fn(async (_req: PinnedRequest): Promise<PinnedResponse> => ({
+    status: 200,
+    location: null,
+    body: '',
+    bodyBytes: Buffer.from('%PDF-1.4 guarded seam'),
+    headers: { 'content-type': 'application/pdf' },
+  }))
+  return { resolver, transport }
+}
+
+describe('fetchMerchantReceiptDocument (#956, #4309 — fetched only through the SSRF guard)', () => {
+  // CHARACTERIZATION: a valid public https PDF still attaches as today.
+  it('fetches a whitelisted https document, as raw bytes', async () => {
+    const pdfBytes = Buffer.from('%PDF-1.4 real merchant receipt')
+    const { transport, resolver } = guardedSeam()
+    transport.mockImplementation(async () => ({
+      status: 200,
+      location: null,
+      body: '',
+      bodyBytes: pdfBytes,
+      headers: { 'content-type': 'application/pdf' },
+    }))
+    const doc = await fetchMerchantReceiptDocument('https://merchant.example/receipt.pdf', { resolver, transport })
     expect(doc.filename).toBe('merchant-receipt.pdf')
     expect(doc.contentType).toBe('application/pdf')
+    // #4309: the BODY ARRIVES AS BYTES — a utf8 round trip would corrupt a PDF.
+    expect(doc.bytes.equals(pdfBytes)).toBe(true)
+    expect(resolver).toHaveBeenCalledWith('merchant.example')
   })
 
-  it('refuses private/internal hosts and non-https', async () => {
-    const impl = vi.fn() as unknown as typeof fetch
+  // MUTATION TARGET (acceptance criterion 1): a host whose A record is the
+  // cloud-metadata endpoint is refused BEFORE any connection — in the
+  // hostname-regex era this fetched blind. Reintroduce string-level host
+  // checking (or drop resolvePublicAddresses) and the transport gets called.
+  it('refuses a host that resolves to a non-public address before any connection is opened', async () => {
+    const { transport, resolver } = guardedSeam([{ address: '169.254.169.254', family: 4 }])
+    await expect(
+      fetchMerchantReceiptDocument('https://rebind.example/receipt.pdf', { resolver, transport }),
+    ).rejects.toThrow(/private or internal/)
+    expect(transport).not.toHaveBeenCalled()
+  })
+
+  it('refuses a DNS failure the same way, without a connection', async () => {
+    const transport = vi.fn(async (_req: PinnedRequest): Promise<PinnedResponse> => {
+      throw new Error('must not be reached')
+    })
+    const resolver = vi.fn(async () => {
+      throw new Error('NXDOMAIN')
+    })
+    await expect(
+      fetchMerchantReceiptDocument('https://unresolvable.example/receipt.pdf', { resolver, transport }),
+    ).rejects.toThrow(/dns_failure/)
+    expect(transport).not.toHaveBeenCalled()
+  })
+
+  // MUTATION TARGET (acceptance criterion 2): the guard resolves ONCE and
+  // pins the socket to the validated address. The resolver answers public to
+  // the check and loopback to any later ask — a check-then-connect
+  // implementation (or an unpinned socket) would reach 127.0.0.1.
+  it('pins the connect to the address validated at resolution time — rebinding cannot split the two', async () => {
+    let resolves = 0
+    const resolver = vi.fn(async () => {
+      resolves += 1
+      return resolves === 1 ? [{ ...PUBLIC_RESOLVED }] : [{ address: '127.0.0.1', family: 4 }]
+    })
+    const transport = vi.fn(async (_req: PinnedRequest): Promise<PinnedResponse> => ({
+      status: 200,
+      location: null,
+      body: '',
+      bodyBytes: Buffer.from('%PDF-1.4'),
+      headers: { 'content-type': 'application/pdf' },
+    }))
+    const doc = await fetchMerchantReceiptDocument('https://rebind.example/receipt.pdf', { resolver, transport })
+    expect(doc.contentType).toBe('application/pdf')
+    // The one transport call was asked to connect to the PUBLIC answer:
+    expect(transport.mock.calls[0]![0]!.address).toBe('93.184.216.34')
+    expect(transport.mock.calls[0]![0]!.url.hostname).toBe('rebind.example')
+    expect(resolver).toHaveBeenCalledTimes(1) // resolved once, then pinned
+  })
+
+  it('refuses non-https, IP literals and locally-bound names at the URL policy — before resolution', async () => {
+    const { transport, resolver } = guardedSeam()
     for (const url of [
       'https://localhost/r.pdf',
       'https://127.0.0.1/r.pdf',
       'https://10.0.0.5/r.pdf',
       'https://192.168.1.1/r.pdf',
       'https://172.16.0.1/r.pdf',
-      'https://169.254.169.254/r.pdf', // cloud metadata
+      'https://169.254.169.254/r.pdf', // cloud metadata as a literal
       'https://internal.svc.local/r.pdf',
+      'https://m.example:8443/r.pdf', // non-default port
     ]) {
-      await expect(fetchMerchantReceiptDocument(url, impl)).rejects.toThrow(/private or internal/)
+      await expect(fetchMerchantReceiptDocument(url, { resolver, transport })).rejects.toThrow(
+        /private or internal|not the default https port/,
+      )
     }
-    await expect(fetchMerchantReceiptDocument('http://merchant.example/r.pdf' as string, impl))
+    await expect(fetchMerchantReceiptDocument('http://merchant.example/r.pdf', { resolver, transport }))
       .rejects.toThrow(/https/)
-    expect(impl).not.toHaveBeenCalled()
+    expect(transport).not.toHaveBeenCalled()
+    expect(resolver).not.toHaveBeenCalled() // URL policy precedes resolution
+  })
+
+  it('refuses a redirect outright — the old `redirect: error` posture, one refused hop', async () => {
+    const { transport, resolver } = guardedSeam()
+    transport.mockResolvedValue({ status: 302, location: 'https://other.example/x.pdf', body: '', headers: {} })
+    await expect(
+      fetchMerchantReceiptDocument('https://merchant.example/receipt.pdf', { resolver, transport }),
+    ).rejects.toThrow(/redirect/)
+    expect(transport).toHaveBeenCalledTimes(1)
+    expect(resolver).toHaveBeenCalledTimes(1) // no second hop was ever validated or fetched
   })
 
   it('refuses disallowed content types and oversized documents', async () => {
-    const htmlImpl = vi.fn(async () => okResponse({ 'content-type': 'text/html' })) as unknown as typeof fetch
-    await expect(fetchMerchantReceiptDocument('https://m.example/r', htmlImpl)).rejects.toThrow(/not allowed/)
-    const bigImpl = vi.fn(async () =>
-      okResponse({ 'content-type': 'application/pdf', 'content-length': String(6 * 1024 * 1024) }),
-    ) as unknown as typeof fetch
-    await expect(fetchMerchantReceiptDocument('https://m.example/r.pdf', bigImpl)).rejects.toThrow(/5MB cap/)
+    const { transport, resolver } = guardedSeam()
+    transport.mockImplementation(async () => ({
+      status: 200, location: null, body: '', bodyBytes: Buffer.from('<html>'), headers: { 'content-type': 'text/html' },
+    }))
+    await expect(fetchMerchantReceiptDocument('https://m.example/r', { resolver, transport }))
+      .rejects.toThrow(/not allowed/)
+
+    const declaredBig = guardedSeam()
+    declaredBig.transport.mockImplementation(async () => ({
+      status: 200, location: null, body: '',
+      bodyBytes: Buffer.alloc(8),
+      headers: { 'content-type': 'application/pdf', 'content-length': String(6 * 1024 * 1024) },
+    }))
+    await expect(fetchMerchantReceiptDocument('https://m.example/r.pdf', { resolver: declaredBig.resolver, transport: declaredBig.transport }))
+      .rejects.toThrow(/5MB cap/)
+
+    const bodyBig = guardedSeam()
+    bodyBig.transport.mockImplementation(async () => ({
+      status: 200, location: null, body: '',
+      bodyBytes: Buffer.alloc(6 * 1024 * 1024),
+      headers: { 'content-type': 'application/pdf' },
+    }))
+    await expect(fetchMerchantReceiptDocument('https://m.example/r.pdf', { resolver: bodyBig.resolver, transport: bodyBig.transport }))
+      .rejects.toThrow(/5MB cap/)
+  })
+
+  it('surfaces a non-200 as the HTTP status the note quotes', async () => {
+    const { transport, resolver } = guardedSeam()
+    transport.mockResolvedValue({ status: 404, location: null, body: '', headers: {} })
+    await expect(fetchMerchantReceiptDocument('https://merchant.example/receipt.pdf', { resolver, transport }))
+      .rejects.toThrow(/HTTP 404/)
   })
 })
 
@@ -349,9 +468,8 @@ describe('merchantReceiptDocument (#3918)', () => {
   })
 
   it('fetches a URL document under the SSRF guards', async () => {
-    const impl = (async () =>
-      new Response(new Uint8Array(8), { status: 200, headers: { 'content-type': 'application/pdf' } })) as unknown as typeof fetch
-    const doc = await merchantReceiptDocument('pay-123', { url: 'https://merchant.example/receipt.pdf', inlineJson: null }, impl)
+    const { resolver, transport } = guardedSeam()
+    const doc = await merchantReceiptDocument('pay-123', { url: 'https://merchant.example/receipt.pdf', inlineJson: null }, { resolver, transport })
     expect(doc?.filename).toBe('merchant-receipt.pdf')
     expect(doc?.contentType).toBe('application/pdf')
   })

@@ -31,7 +31,12 @@ covers:
   - packages/frontend/vercel.json
   - packages/frontend/src/lib/__tests__/vercel-ignore-build.test.ts
   - scripts/vercel/**
-last-verified: "2026-10-21"
+  - packages/backend/src/infra/chain/x402-binding-signer.ts
+  - packages/backend/src/config/boolean-flag.ts
+  - packages/frontend/package.json
+  - .github/workflows/ci.yml
+  - .github/workflows/update-visual-baselines.yml
+last-verified: "2026-10-23"
 ---
 
 > **Re-verified #4192 (2026-10-21, ignore-step tests: event-loop yield and
@@ -592,20 +597,24 @@ mirrors `.env.example` with dev-isolated values. Set these in the **dev Railway
 project** (backend / mcp-server) and the **dev Vercel project** (frontend) —
 never in code. **Every secret MUST differ from production.**
 
-**Boolean flags accept only lowercase `true` / `false` (#3015).** Every
-boolean flag the backend reads at boot — `CATALOG_DISCOVERY_ENABLED`,
+**Boolean flags accept only lowercase `true` / `false` (#3015).** The
+boolean flags `config.ts` reads at boot — `CATALOG_DISCOVERY_ENABLED`,
 `HAVEN_FEE_ENABLED`, `HAVEN_LEGACY_BOOKKEEPING_ENABLED`, `HAVEN_HOSTED`,
-`HAVEN_ACCOUNTING_ENABLED`, `HAVEN_OWNER_COMPANY_DETAILS` and the deprecated
+`HAVEN_ACCOUNTING_ENABLED`, `HAVEN_OWNER_COMPANY_DETAILS`,
+`HAVEN_MARKETPLACE_PROSPECTS` and the deprecated
 `HAVEN_REPORTING_FEED_ENABLED` —
-goes through `parseBooleanFlag`: unset or blank means false; any other value
+go through `parseBooleanFlag`: unset or blank means false; any other value
 (`TRUE`, `1`, `yes`, `on`, a trailing space) **refuses the boot**, naming the
 variable and the offending bytes. `HAVEN_HOSTED=TRUE` once reached production
 and silently read as off. Precision: the deprecated alias is parsed only when
 `HAVEN_ACCOUNTING_ENABLED` is unset (the new name shadows it), so a boot that
-succeeds proves the five active flags clean, not the alias. The Railway
-audit of all six (both projects, exact bytes) was completed 2026-09-15 and is
-recorded on PR #3022; `X402_EMIT_PAYER_CONTEXT` was not in that table and
-needs its own reading before #3021 deploys. The seventh, `X402_EMIT_PAYER_CONTEXT` (#3021), is the one exception to the
+succeeds proves the seven active flags clean, not the alias. The Railway
+audit (both projects, exact bytes) was completed 2026-09-15 and is
+recorded on PR #3022. It covered the flags that existed then;
+`HAVEN_MARKETPLACE_PROSPECTS` (#3078, 2026-09-17) and
+`HAVEN_OWNER_COMPANY_DETAILS` (#3332) came later, and `X402_EMIT_PAYER_CONTEXT`
+was not in that table either. `X402_EMIT_PAYER_CONTEXT` (#3021), read through
+`parseBooleanFlag` in `packages/backend/src/infra/chain/x402-binding-signer.ts`, is the one exception to the
 "only `true`/`false`" rule: it also accepts `1` (on) — the spelling every
 #1690 document and template names — trimmed, with a one-line boot warning
 that `true` is the preferred form. Anything else refuses the boot too. It is
@@ -790,6 +799,14 @@ Isolation rules that are non-negotiable for a payments product:
  > now fails its probe. Scope of this re-read: this bullet's catalog
  > paragraphs; nothing else in the document was re-read for it, and
  > `last-verified` is not bumped.
+ > **Re-verified #4300 (2026-10-23):** a refresh run is now bounded to
+ > 10 min, and a row it does not reach waits for the next run without being
+ > counted as a miss. The guard's deadline now covers name resolution, and it
+ > tries the next checked address when a connection fails before TLS. With
+ > the migration-seeded rows, a local dev refresh finishes well inside the run
+ > budget, so local behaviour is unchanged. Scope of this re-read: this
+ > bullet's catalog paragraphs; nothing else in the document was re-read for
+ > it, and `last-verified` is not bumped.
  - **Owner company details (#3332)** — `HAVEN_OWNER_COMPANY_DETAILS` (strict
   boolean) gates `/user/company-details*`, the additive `parties.buyer`
   field on payment evidence/receipts, and the Settings → Company details
@@ -1091,7 +1108,7 @@ credentials. The feed was live-proven against dev on 2026-07-16.
   > provider's ~87 h retry budget) and adds no variable. The
   > request-validation claims hold unchanged: the webhook module is NOT in
   > `enforcedModules` (public route, spec-documented, carries no session
-  > surface to shadow), and `route-modules.generated.ts` was regenerated in
+  > surface to shadow; since #3030 it is listed, see the enumeration above), and `route-modules.generated.ts` was regenerated in
   > the same commit (`npm run check:route-modules` green), including the
   > trailing-slash twin's spec entry so the provider never meets Fastify's
   > redirect. `HAVEN_SECRETS_KEY` now also protects the three webhook
@@ -1311,7 +1328,10 @@ uploaded artifact the design_visual job downloads),
 the webServer boots that standalone build; the non-CI branch runs `next dev`,
 which inlines the constant from `playwright.config.ts`'s `webServer.env`). All
 of them set the same fixed synthetic literal, `e2e-onramp-app-id-placeholder`.
-**It is CI-only by construction: nothing in the repo sets it anywhere else** —
+The frontend workspace's local equivalents of those gates set it too: the
+`test:visual:structure` and `test:e2e:gate:built` scripts in
+`packages/frontend/package.json` (#3487) build with the same literal.
+**It is test-only by construction: nothing else in the repo sets the literal** —
 no `.env*` file, no other workflow, no Docker or hosting config (the literal is
 grep-unique, so the leak check is mechanical), and it is not a secret: the id
 is never rendered, only its PRESENCE gates the card, so a fixed value keeps
@@ -1330,7 +1350,7 @@ unaffected; deleting it from a project's settings is tidying, not a fix.
 ## Inspecting the dev environment
 
 - **Railway → dev backend service → Deployments** — build and runtime logs.
-- **Railway → dev Postgres → Data** — inspect tables (read-only with Viewer role).
+- **Railway → dev Postgres → Database** — inspect tables. The service's tabs are Deployments, Database, Backups, Variables, Metrics, Console and Settings (owner screenshots of the dev and production projects, 2026-10-23). **Console** opens a shell on the service, where `psql` connects with an owner prompt (`railway=#`): run read-only queries only.
 - **Vercel → dev project** — frontend build logs, the branch-tracking `dev`
   preview (the canonical dev URL above) and the opt-in `preview/*` deployments
   (open one only to test that branch's build — remember each is a

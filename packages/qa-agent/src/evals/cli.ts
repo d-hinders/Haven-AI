@@ -296,6 +296,7 @@ export interface PerTrialResolver {
   resolve: (task: EvalTask, trial: number, prior?: PriorTrialOutcome) => Promise<ResolvedTask>
   /** Budget INCREASES detected between trials (a refill boundary crossed mid-run). */
   budgetEvents: BudgetIncreaseEvent[]
+  guardEvents: GuardEvent[]
 }
 
 /**
@@ -310,11 +311,26 @@ export interface PerTrialResolver {
  * 3. the amount from the budget read of THIS moment (tier-3 tasks read with
  *    `exhausted-ok`: their precondition IS a spent budget).
  */
+/** A guard decision the report must show (a skipped wait is never silent). */
+export interface GuardEvent {
+  kind: 'consistency_wait_skipped'
+  beforeTask: string
+  beforeTrial: number
+  priorKey: string
+  reason: string
+}
+
 export function createPerTrialResolver(deps: PerTrialResolverDeps): PerTrialResolver {
   const timeoutMs = deps.consistencyTimeoutMs ?? 120_000
   const pollMs = deps.consistencyPollMs ?? 2_000
   const sleep = deps.sleep ?? defaultSleep
   const budgetEvents: BudgetIncreaseEvent[] = []
+  // The prior trial whose consistency wait already timed out. A timeout makes
+  // ONE trial red; every later trial must not wait on the same expectation
+  // again — on 2026-10-23 one unmet wait turned into a two-minute timeout on
+  // all 13 remaining trials, and four tasks never ran at all.
+  let timedOutPriorKey: string | undefined
+  const guardEvents: GuardEvent[] = []
   let lastRemaining: bigint | undefined
 
   const readRemaining = async (use: BudgetUse): Promise<bigint> => {
@@ -355,8 +371,15 @@ export function createPerTrialResolver(deps: PerTrialResolverDeps): PerTrialReso
         if (known) derivedSpend = total
       }
     }
-    const spend = derivedSpend ?? 0n
-    const priorSpendSizeUnknown = prior?.settled === true && derivedSpend === undefined
+    const priorKey = prior ? `${prior.taskId}#${prior.trial}` : undefined
+    const skipWait = priorKey !== undefined && priorKey === timedOutPriorKey
+    if (skipWait) {
+      // Recorded, not silent: the report shows that this trial resolved on a
+      // fresh read instead of the guard's wait.
+      guardEvents.push({ kind: 'consistency_wait_skipped', beforeTask: task.id, beforeTrial: trial, priorKey: priorKey!, reason: 'the wait on this prior trial already timed out once' })
+    }
+    const spend = skipWait ? 0n : (derivedSpend ?? 0n)
+    const priorSpendSizeUnknown = !skipWait && prior?.settled === true && derivedSpend === undefined
     if ((spend > 0n || priorSpendSizeUnknown) && lastRemaining !== undefined) {
       const deadline = Date.now() + timeoutMs
       for (;;) {
@@ -384,6 +407,7 @@ export function createPerTrialResolver(deps: PerTrialResolverDeps): PerTrialReso
           break
         }
         if (Date.now() > deadline) {
+          timedOutPriorKey = priorKey
           throw new Error(
             spend > 0n
               ? `budget consistency timeout: the backend still reports ${remaining} after the previous ` +
@@ -435,7 +459,7 @@ export function createPerTrialResolver(deps: PerTrialResolverDeps): PerTrialReso
     return r.resolved
   }
 
-  return { resolve, budgetEvents }
+  return { resolve, budgetEvents, guardEvents }
 }
 
 /** The compare mode (#3992 D): no eval env, no agent, no chain — pure report reading. */
@@ -635,6 +659,7 @@ async function main() {
     graderContext: buildGraderContext({ api, provider }),
   })
   if (resolver.budgetEvents.length > 0) report.budgetEvents = resolver.budgetEvents
+  if (resolver.guardEvents.length > 0) report.guardEvents = resolver.guardEvents
 
   // Model identity in every report (#3992 C): env-supplied for the Hermes
   // lane (the runbook names the vars); the Claude Code lane's stream value

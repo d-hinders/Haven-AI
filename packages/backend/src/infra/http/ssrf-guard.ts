@@ -18,8 +18,9 @@
  *   2. **Resolution-time address validation.** The hostname is resolved and
  *      EVERY returned address is classified (`ip-classification.ts`); a
  *      hostname whose A record is `169.254.169.254` is refused here, where a
- *      hostname regex would wave it through. This is the DNS-rebinding gap
- *      that `modules/accounting/receipt-underlag.ts` documents as a residual.
+ *      hostname regex would wave it through. This was the DNS-rebinding gap
+ *      the receipt fetch ran with until #4309 moved
+ *      `modules/accounting/receipt-underlag.ts` behind this guard.
  *   3. **Connection pinning.** The socket connects to the address we just
  *      validated, because resolution happens INSIDE the connection through
  *      the `lookup` hook. A resolver that answers "public" to our check and
@@ -48,6 +49,7 @@ export type SsrfRefusalReason =
   | 'response_too_large'
   | 'timeout'
   | 'transport_error'
+  | 'connect_error'
   | 'http_status'
   | 'redirect_on_post'
   | 'redirect_on_non_get'
@@ -69,6 +71,11 @@ export interface SafeResponse {
    * may arrive in `payment-required` rather than the body.
    */
   headers: Record<string, string>
+  /**
+   * Raw body bytes, present ONLY when the read was requested binary
+   * (`safeGetBinary`) — `body` is empty then, the bytes ARE the body.
+   */
+  bodyBytes?: Buffer
   /** The URL actually read, after any re-validated redirects. */
   finalUrl: string
 }
@@ -81,6 +88,12 @@ export const DEFAULT_TIMEOUT_MS = 5_000
 export const DEFAULT_MAX_BYTES = 64 * 1024
 /** Redirect hops allowed. Every hop is re-validated; none may leave https. */
 export const DEFAULT_MAX_REDIRECTS = 3
+/**
+ * #4300: how long one address may take to finish its TLS handshake while
+ * another resolved address is still left to try. The last address gets the
+ * whole remaining budget instead, so a host with one address is unaffected.
+ */
+export const CONNECT_FALLBACK_TIMEOUT_MS = 3_000
 
 function refuse(reason: SsrfRefusalReason, detail: string): SsrfRefusal {
   return { ok: false, reason, detail }
@@ -214,6 +227,13 @@ export interface PinnedRequest {
   address: string
   family: number
   timeoutMs: number
+  /**
+   * #4300: a cap on the connect phase only (TCP plus TLS), set when another
+   * address is left to try. Past it, or on any error before the handshake
+   * completes, the transport answers `connect_error`: no request byte has
+   * reached the server, so the caller may try the next address.
+   */
+  connectTimeoutMs?: number
   maxBytes: number
   /**
    * #1713: the probe needs POST; the ownership proof stays GET. #4281: the
@@ -223,12 +243,23 @@ export interface PinnedRequest {
   /** Request body; never contains a secret — see `safePostJson` / `safeRequest`. */
   body: string | null
   headers: Record<string, string>
+  /**
+   * #4309: when true the body is collected as RAW BYTES and returned in
+   * `bodyBytes` (`body` is then empty) — a PDF receipt utf8-decoded would be
+   * corrupt bytes on the accountant's desk. Text reads are unchanged.
+   */
+  binary?: boolean
 }
 
 export interface PinnedResponse {
   status: number
   location: string | null
   body: string
+  /**
+   * Raw body bytes, present ONLY when the request set `binary` (#4309).
+   * `body` is empty in that mode — the bytes ARE the body.
+   */
+  bodyBytes?: Buffer
   /** Lowercased response headers. Absent from a fake transport means none. */
   headers?: Record<string, string>
 }
@@ -249,17 +280,32 @@ export const httpsTransport: PinnedTransport = async (req) =>
   await new Promise<PinnedResponse | SsrfRefusal>((resolve) => {
     let settled = false
     let deadlineTimer: ReturnType<typeof setTimeout> | undefined
+    let connectTimer: ReturnType<typeof setTimeout> | undefined
+    // #4300: true once the TLS handshake has completed. Before that no request
+    // byte has left, so a failure is a `connect_error` the caller may retry on
+    // another address; after it, a failure is a `transport_error` and is never
+    // retried, because the server may already have the request.
+    let connected = false
     const done = (value: PinnedResponse | SsrfRefusal) => {
       if (settled) return
       settled = true
       if (deadlineTimer !== undefined) clearTimeout(deadlineTimer)
+      if (connectTimer !== undefined) clearTimeout(connectTimer)
       resolve(value)
     }
+    const failed = (message: string) =>
+      done(refuse(connected ? 'transport_error' : 'connect_error', message))
 
     const request = https.request(
       req.url,
       {
         method: req.method,
+        // #4300: never a pooled socket. `https.globalAgent` keeps connections
+        // alive and keys its pool by host and port, not by the address the
+        // `lookup` hook pins, so a second attempt pinned to another address
+        // could ride the first attempt's socket. With no agent every attempt
+        // opens its own connection to its own address.
+        agent: false,
         // Pin the connection to the address we validated.
         lookup: (_hostname, options, callback) => {
           if ((options as { all?: boolean }).all === true) {
@@ -293,14 +339,16 @@ export const httpsTransport: PinnedTransport = async (req) =>
             if (typeof value === 'string') headers[name.toLowerCase()] = value
             else if (Array.isArray(value)) headers[name.toLowerCase()] = value.join(', ')
           }
+          const bodyBytes = Buffer.concat(chunks)
           done({
             status: res.statusCode ?? 0,
             location: typeof location === 'string' ? location : null,
-            body: Buffer.concat(chunks).toString('utf8'),
+            body: req.binary === true ? '' : bodyBytes.toString('utf8'),
+            ...(req.binary === true ? { bodyBytes } : {}),
             headers,
           })
         })
-        res.on('error', (err) => done(refuse('transport_error', err.message)))
+        res.on('error', (err) => failed(err.message))
       },
     )
 
@@ -316,11 +364,28 @@ export const httpsTransport: PinnedTransport = async (req) =>
       done(refuse('timeout', `total budget of ${req.timeoutMs}ms exhausted before the response completed`))
     }, req.timeoutMs)
 
+    request.on('socket', (socket) => {
+      const markConnected = () => {
+        connected = true
+        if (connectTimer !== undefined) clearTimeout(connectTimer)
+      }
+      // `agent: false` above: the socket is always new, so the handshake is
+      // still ahead of it and `secureConnect` is what marks it done.
+      socket.once('secureConnect', markConnected)
+    })
+    if (req.connectTimeoutMs !== undefined) {
+      connectTimer = setTimeout(() => {
+        if (connected) return
+        request.destroy()
+        done(refuse('connect_error', `no TLS handshake within ${req.connectTimeoutMs}ms`))
+      }, req.connectTimeoutMs)
+    }
+
     request.on('timeout', () => {
       request.destroy()
       done(refuse('timeout', `no response within ${req.timeoutMs}ms`))
     })
-    request.on('error', (err) => done(refuse('transport_error', err.message)))
+    request.on('error', (err) => failed(err.message))
     if (req.body !== null) request.write(req.body)
     request.end()
   })
@@ -360,9 +425,28 @@ interface RequestShape {
    * throw away the only response that matters.
    */
   acceptAnyStatus: boolean
+  /** #4309: collect the body as raw bytes (see `PinnedRequest.binary`). */
+  binary?: boolean
 }
 
 const HAVEN_USER_AGENT = 'Haven-CatalogVerification/1.0 (+https://haven.xyz)'
+
+/**
+ * Settle `work` within `budgetMs`, or refuse with `timeout` (#4300). The work
+ * itself is not cancelled; its late result is ignored. A timed-out
+ * `dns.lookup` keeps its libuv threadpool slot until getaddrinfo returns.
+ */
+async function withinBudget<T>(work: Promise<T>, budgetMs: number, totalMs: number): Promise<T | SsrfRefusal> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const expired = new Promise<SsrfRefusal>((resolve) => {
+    timer = setTimeout(() => resolve(refuse('timeout', `budget of ${totalMs}ms exhausted while resolving`)), budgetMs)
+  })
+  try {
+    return await Promise.race([work, expired])
+  } finally {
+    clearTimeout(timer)
+  }
+}
 
 /**
  * The single guarded-read loop. Every public entry point below goes through
@@ -396,20 +480,37 @@ async function safeFetch(
     const checked = assertSafeUrl(current)
     if (!checked.ok) return checked
 
-    const resolved = await resolvePublicAddresses(checked.url.hostname, resolver)
+    // #4300: resolution counts against the same wall clock as the request.
+    const resolved = await withinBudget(resolvePublicAddresses(checked.url.hostname, resolver), remaining, timeoutMs)
     if (!resolved.ok) return resolved
 
-    const pinned = resolved.addresses[0]!
-    const response = await transport({
-      url: checked.url,
-      address: pinned.address,
-      family: pinned.family,
-      timeoutMs: remaining,
-      maxBytes,
-      method: shape.method,
-      body: shape.body,
-      headers: shape.headers,
-    })
+    // #4300: try the classified addresses in order. Only `resolved.addresses`
+    // is walked: every entry in it has already been classified public, so a
+    // fallback can never reach an address the policy refused. Each attempt is
+    // pinned to its own address, and only a `connect_error` (nothing sent yet)
+    // moves on to the next one.
+    let response: PinnedResponse | SsrfRefusal | undefined
+    for (let index = 0; index < resolved.addresses.length; index += 1) {
+      const left = deadline - Date.now()
+      if (left <= 0) return refuse('timeout', `budget of ${timeoutMs}ms exhausted`)
+      const pinned = resolved.addresses[index]!
+      const isLast = index === resolved.addresses.length - 1
+      response = await transport({
+        url: checked.url,
+        address: pinned.address,
+        family: pinned.family,
+        timeoutMs: left,
+        ...(isLast ? {} : { connectTimeoutMs: Math.min(left, CONNECT_FALLBACK_TIMEOUT_MS) }),
+        maxBytes,
+        method: shape.method,
+        body: shape.body,
+        headers: shape.headers,
+        ...(shape.binary === true ? { binary: true } : {}),
+      })
+      if (!isLast && 'ok' in response && response.ok === false && response.reason === 'connect_error') continue
+      break
+    }
+    if (response === undefined) return refuse('dns_failure', 'host resolved to no addresses')
     if ('ok' in response && response.ok === false) return response
 
     const res = response as PinnedResponse
@@ -445,6 +546,7 @@ async function safeFetch(
       ok: true,
       status: res.status,
       body: res.body,
+      ...(res.bodyBytes !== undefined ? { bodyBytes: res.bodyBytes } : {}),
       headers: res.headers ?? {},
       finalUrl: checked.url.toString(),
     }
@@ -473,6 +575,56 @@ export async function safeGetText(raw: string, options: SafeFetchOptions = {}): 
     },
     options,
   )
+}
+
+/** A successful guarded read whose body is raw bytes (`safeGetBinary`, #4309). */
+export interface SafeBinaryResponse {
+  ok: true
+  status: number
+  body: Buffer
+  headers: Record<string, string>
+  finalUrl: string
+}
+
+export type SafeBinaryFetchResult = SafeBinaryResponse | SsrfRefusal
+
+/**
+ * Read a merchant-controlled URL under the full guard and return the RAW
+ * BYTES (#4309): the merchant-receipt path attaches a PDF/PNG/JPEG document,
+ * and a utf8 decode of those bytes is corruption on the accountant's desk.
+ * The same single loop as `safeGetText` — same resolver, same socket pinning,
+ * same per-hop re-validation, same deadlines — with only the body encoding
+ * different. Callers still own their content-type allow-list and size cap on
+ * top; this does not weaken anything, it only stops the lossy decode.
+ */
+export async function safeGetBinary(raw: string, options: SafeFetchOptions = {}): Promise<SafeBinaryFetchResult> {
+  const result = await safeFetch(
+    raw,
+    {
+      method: 'GET',
+      body: null,
+      binary: true,
+      headers: {
+        // Same courtesy as `safeGetText`: a merchant reading their access log
+        // can see who asked and why.
+        'user-agent': 'Haven-ReceiptFetch/1.0 (+https://haven.xyz)',
+        accept: 'application/pdf, image/png, image/jpeg, */*;q=0.1',
+      },
+      acceptAnyStatus: false,
+    },
+    options,
+  )
+  if (!result.ok) return result
+  if (result.bodyBytes === undefined) {
+    return refuse('transport_error', 'binary read returned no body bytes')
+  }
+  return {
+    ok: true,
+    status: result.status,
+    body: result.bodyBytes,
+    headers: result.headers,
+    finalUrl: result.finalUrl,
+  }
 }
 
 /**

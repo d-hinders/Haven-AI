@@ -402,6 +402,149 @@ export const x402UnrecordedSettlementTransaction = {
   initiatedBy: 'agent' as const,
 }
 
+/**
+ * #4312: the states the shared feed never serves — a deposit, a delegate
+ * sweep, a failed payment and a row on a chain the registry does not know —
+ * plus the overlay that serves them. The detail-panel polish spec
+ * (transactions-detail-polish.spec.ts) measures geometry A–E on panels the
+ * default fixture cannot open; the overlay registers AFTER `mockHavenApi`
+ * (later routes win) and replaces ONLY `GET /transactions`.
+ */
+export const depositTransaction = {
+  hash: `0x${'bd'.repeat(32)}`,
+  type: 'erc20' as const,
+  // An unnamed outside sender: the one-line header case (kindLabel === title,
+  // "Deposit"), which is what criterion A measures.
+  from: '0x7777777777777777777777777777777777777777',
+  to: testSafeAddress,
+  value: '5000000',
+  valueFormatted: '5.00',
+  // Serve-time strike in the served session's currency (the #3824/#4166
+  // convention); these rows are only served to the default USD session.
+  approxAmount: '5.0000',
+  approxCurrency: 'USD' as const,
+  asset: 'USDC',
+  decimals: 6,
+  direction: 'in' as const,
+  timestamp: 1_778_800_000,
+  blockNumber: 42,
+  isError: false,
+  tokenAddress: '0xddafbb505ad214d7b80b1f830fccc89b60fb7a83',
+  tokenSymbol: 'USDC',
+  chainId: 8453,
+  accountId: testSafe.id,
+  accountAddress: testSafeAddress,
+  accountName: testSafe.name,
+}
+
+export const sweepTransaction = {
+  hash: `0x${'71'.repeat(32)}`,
+  type: 'erc20' as const,
+  // The delegate's wallet is the source of a returned allowance.
+  from: '0x3333333333333333333333333333333333333333',
+  to: testSafeAddress,
+  value: '2000000',
+  valueFormatted: '2.00',
+  approxAmount: '2.0000',
+  approxCurrency: 'USD' as const,
+  asset: 'USDC',
+  decimals: 6,
+  direction: 'in' as const,
+  activityType: 'delegate_sweep' as const,
+  agentName: 'Atlas',
+  timestamp: 1_778_700_000,
+  blockNumber: 41,
+  isError: false,
+  tokenAddress: '0xddafbb505ad214d7b80b1f830fccc89b60fb7a83',
+  tokenSymbol: 'USDC',
+  chainId: 8453,
+  accountId: testSafe.id,
+  accountAddress: testSafeAddress,
+  accountName: testSafe.name,
+}
+
+export const failedTransaction = {
+  hash: `0x${'f0'.repeat(32)}`,
+  type: 'erc20' as const,
+  from: testSafeAddress,
+  to: '0x8888888888888888888888888888888888888888',
+  value: '500000',
+  valueFormatted: '0.50',
+  approxAmount: '0.5000',
+  approxCurrency: 'USD' as const,
+  asset: 'USDC',
+  decimals: 6,
+  direction: 'out' as const,
+  // A recorded owner attempt that failed on-chain: the headline keeps its
+  // sign ("-$0.50", #4312 F) in the danger tone, beside the Failed badge and
+  // the on-chain callout.
+  initiatedBy: 'human' as const,
+  isError: true,
+  timestamp: 1_778_600_000,
+  blockNumber: 40,
+  tokenAddress: '0xddafbb505ad214d7b80b1f830fccc89b60fb7a83',
+  tokenSymbol: 'USDC',
+  chainId: 8453,
+  accountId: testSafe.id,
+  accountAddress: testSafeAddress,
+  accountName: testSafe.name,
+}
+
+export const unknownChainTransaction = {
+  hash: `0x${'97'.repeat(32)}`,
+  type: 'erc20' as const,
+  from: testSafeAddress,
+  to: '0x8888888888888888888888888888888888888888',
+  value: '2500000',
+  valueFormatted: '2.50',
+  approxAmount: '2.5000',
+  approxCurrency: 'USD' as const,
+  asset: 'USDC',
+  decimals: 6,
+  direction: 'out' as const,
+  isError: false,
+  timestamp: 1_778_500_000,
+  blockNumber: 39,
+  // 999999 is in no registry: every Technical details row keeps its copy
+  // button and drops its explorer link (criterion D's unknown-chain panel).
+  chainId: 999_999,
+  accountId: testSafe.id,
+  accountAddress: testSafeAddress,
+  accountName: testSafe.name,
+  paymentId: 'pay-unknown-chain-1',
+  // A supplied value is only the fallback where the chain has no explorer;
+  // null hides the footer outright for this panel.
+  explorerUrl: null,
+}
+
+/**
+ * Overlay `GET /transactions` with a bespoke row list (#4312). Register AFTER
+ * `mockHavenApi` (later routes win); every other read falls through to the
+ * shared fixture untouched.
+ */
+export async function serveTransactions(page: Page, transactions: unknown[]) {
+  await page.route('**/api/**', async (route) => {
+    const request = route.request()
+    const path = new URL(request.url()).pathname.replace(/^\/api/, '')
+    if (request.method() === 'GET' && path === '/transactions') {
+      await route.fulfill({
+        json: {
+          transactions,
+          total: transactions.length,
+          offset: 0,
+          limit: 25,
+          hasMore: false,
+          partialFailure: false,
+          failedAccountIds: [],
+          truncated: false,
+        },
+      })
+      return
+    }
+    await route.fallback()
+  })
+}
+
 const balances = [
   {
     symbol: 'USDC',

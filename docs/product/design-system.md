@@ -2567,7 +2567,14 @@ pattern, and it leads with the answer:
    delivered reference, every address and both hashes (the account's
    transaction and the merchant's settlement transaction). Each address and
    hash is shortened (`0x0415…b195`), on one line, with `CopyButton` and an
-   explorer link — superseding #3811's "in full" rule.
+   explorer link — superseding #3811's "in full" rule. **Trailing slot
+   (#4312):** every copy-bearing row reserves a fixed 44px slot after the
+   copy target — the explorer link sits in it when the chain has one, and an
+   empty slot stands in when it does not (the Payment ID row, or an address
+   on a chain the registry does not know) — so the copy glyphs share one
+   column centre and the explorer glyphs another, whether or not a link is
+   present. Text-only rows (Network, Settlement method, Delivered) do not
+   reserve it.
 4. **Footer** — `SidePanel`'s `footer` slot: "View on explorer" for the
    transaction that left or entered the account (the funding leg on eip3009).
    `explorerUrl: null` hides it; any other value is used only where the chain

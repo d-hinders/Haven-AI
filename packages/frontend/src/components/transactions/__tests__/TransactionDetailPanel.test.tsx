@@ -271,7 +271,9 @@ describe('TransactionDetailPanel — structure per kind', () => {
     expect(within(header()).getByText('Recovered')).toBeInTheDocument()
     expect(screen.getByRole('dialog', { name: 'Returned from Atlas' })).toBeInTheDocument()
     expect(within(header()).getByText('Into Main', { exact: false })).toBeInTheDocument()
-    expect(rows(details())).toEqual({ 'What happened': "Unspent funds returned from the agent's wallet" })
+    // #4312 E: the copy must hold one line at 1280 AND 390 — the old sentence
+    // stranded "wallet" on line 2 (measured in the polish e2e spec).
+    expect(rows(details())).toEqual({ 'What happened': 'Unspent allowance returned' })
   })
 
   it('accounting present: the badge, linked to /accounting, and the failure reason in words', () => {

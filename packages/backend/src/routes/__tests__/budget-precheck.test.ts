@@ -1231,4 +1231,55 @@ describeDb('POST /machine-payments/budget-precheck (#3054)', () => {
     await new Promise((r) => setTimeout(r, 50))
     expect(await refusalRows(agentId)).toHaveLength(0)
   })
+
+  // ── #4352 characterization (written on the pre-#4352 base) ──────────────────
+  //
+  // When the ONLY delegation row for the token has expired, the derived read
+  // (#3802) hides it — so the compare sees no budget at all and answers the
+  // generic over-budget refusal. These tests pin the OUTCOME the issue says
+  // must not change: 403, phase/next_action, remaining 0, exactly one
+  // hosted_prepare ledger row, nothing created. After #4352 only `reason` and
+  // the words may differ; every assertion below that is not about the reason
+  // or the prose must keep passing verbatim.
+
+  it('an expired-only budget refuses 403 with remaining 0 — the same OUTCOME as the over-budget refusal (pre-#4352: also the same reason and words)', async () => {
+    const { agentId } = await seedDelegationAgent()
+    await seedActiveDelegation(agentId, '500000', {
+      expiresAt: Math.floor(Date.now() / 1000) - 3600, // ended an hour ago
+    })
+
+    const res = await app.inject({ method: 'POST', url: '/machine-payments/budget-precheck', headers, payload: precheckBody() })
+    expect(res.statusCode).toBe(403)
+    const body = res.json()
+    // Pre-#4352 the expired-only case rides the generic refusal whole.
+    expect(body.error_code).toBe('delegation_budget_exceeded')
+    expect(body.error).toContain('exceeds the agent\'s remaining budget for this period')
+    // The OUTCOME fields — these survive #4352 verbatim:
+    expect(body.phase).toBe('insufficient_funds')
+    expect(body.next_action).toBe('fund_account_or_raise_allowance')
+    expect(body.remaining_atomic).toBe('0')
+    expect(body.amount_atomic).toBe('1000000')
+    expect(body.shortfall_atomic).toBe('1000000')
+
+    await new Promise((r) => setTimeout(r, 50))
+    const rows = await refusalRows(agentId)
+    expect(rows).toHaveLength(1)
+    expect(rows[0].source).toBe('hosted_prepare')
+    expect(rows[0].reason).toBe('delegation_budget_exceeded') // pre-#4352
+    expect(rows[0].detail?.remaining_atomic).toBe('0')
+  })
+
+  it('an expired row beside a LIVE budget for the token is never treated as live — the compare answers from the live row', async () => {
+    const { agentId } = await seedDelegationAgent()
+    await seedActiveDelegation(agentId, '500000', {
+      expiresAt: Math.floor(Date.now() / 1000) - 3600, // expired: must not answer
+    })
+    await seedActiveDelegation(agentId, '300000') // live open budget: 0.30 remaining
+
+    const res = await app.inject({ method: 'POST', url: '/machine-payments/budget-precheck', headers, payload: precheckBody() })
+    // The live row decides (0.30 < 1.00 → refused with remaining 0.30), the
+    // expired row contributes nothing to the compare in either direction.
+    expect(res.statusCode).toBe(403)
+    expect(res.json().remaining_atomic).toBe('300000')
+  })
 })

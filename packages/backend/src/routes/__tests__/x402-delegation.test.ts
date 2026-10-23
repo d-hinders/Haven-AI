@@ -1137,6 +1137,66 @@ describe('x402 delegation-rail settlement (#830)', () => {
     expect(mockCreateIntent).not.toHaveBeenCalled()
   })
 
+  // ── #4352 characterization (written on the pre-#4352 base) ────────────────
+  //
+  // When the ONLY delegation row for the token has expired, the live reads
+  // (#3802) hide it and both authorize legs answer their no-delegation 403.
+  // #4352 changes only the reason and the words at those two answers; the
+  // outcome assertions below that are not about the reason or the prose must
+  // survive verbatim.
+
+  /** Routes the narrow expired-row query #4352 introduces (a no-op on the base SHA) plus the hourly-cap lookups. */
+  function routeExpiredRowQuery(): void {
+    mockQuery.mockImplementation(async (sql: string) => {
+      if (/expires_at <= EXTRACT/.test(String(sql))) {
+        return {
+          rows: [
+            {
+              id: 'expired-1',
+              delegation_hash: `0x${'aa'.repeat(32)}`,
+              recipient_address: null,
+              expires_at: String(Math.floor(Date.now() / 1000) - 3600), // ended an hour ago
+            },
+          ],
+        }
+      }
+      if (/max_x402_per_hour/.test(String(sql))) return { rows: [{ max_x402_per_hour: 100 }] }
+      if (/COUNT\(\*\)/.test(String(sql))) return { rows: [{ cnt: '0' }] }
+      return { rows: [] }
+    })
+  }
+
+  it('#4352 characterization: an expired-only budget answers the erc7710 no-active-budget 403 (pre-#4352 wording, nothing created)', async () => {
+    mockSelect.mockResolvedValue(null)
+    routeExpiredRowQuery()
+    const res = await app.inject({
+      method: 'POST', url: '/x402/authorize',
+      headers: { authorization: 'Bearer ' + ['sk', 'agent', 'test', 'key', '0001'].join('_') },
+      payload: authorizeBody(),
+    })
+    expect(res.statusCode).toBe(403)
+    expect(res.json().error).toMatch(/no active budget delegation/) // pre-#4352 words
+    expect(mockCreateIntent).not.toHaveBeenCalled()
+  })
+
+  it('#4352 characterization: an expired-only budget 403s the 3009 leg with the no-delegation reason (pre-#4352), one ledger row, nothing created', async () => {
+    mockSelect.mockResolvedValue(null)
+    routeExpiredRowQuery()
+    mockPrepareFunding.mockResolvedValue(null)
+    const res = await app.inject({
+      method: 'POST', url: '/x402/authorize',
+      headers: { authorization: 'Bearer ' + ['sk', 'agent', 'test', 'key', '0001'].join('_') },
+      payload: authorizeBody({ payTo: DELEGATE_SIGNER.address, merchantPayTo: MERCHANT }),
+    })
+    expect(res.statusCode).toBe(403)
+    expect(res.json().error).toMatch(/no delegation able to fund EIP-3009 settlement/) // pre-#4352 words
+    expect(mockRecordRefusal).toHaveBeenCalledTimes(1)
+    const ask = mockRecordRefusal.mock.calls[0][0] as Record<string, unknown>
+    expect(ask).toMatchObject({ reason: 'no_delegation_for_target', source: 'x402_authorize' }) // pre-#4352 reason
+    expect(ask.detail).toEqual({ error_code: 'no_delegation_for_target' })
+    expect(mockCreateIntent).not.toHaveBeenCalled()
+  })
+
   // ── #946: EIP-3009 fallback (delegation-metered funding leg) ──────────────
   const DELEGATE_EOA = DELEGATE_SIGNER.address // = the mocked agent.delegate_address
   const PREPARED = {

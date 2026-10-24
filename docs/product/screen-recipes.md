@@ -1191,6 +1191,8 @@ Structure:
    options named from the agents list) writing `?agentId=` — the key
    `/transactions` reads — and the period picker. There is no bare window
    caption beside the picker: the trigger's own value span names the window.
+   The two go to the header's wrapping actions row as a fragment, so at 390
+   the picker wraps under the facet (#4401).
    A stale or foreign `?agentId=` clears with a one-line notice ("That agent
    isn't available"), never the page error.
 2. One `PeriodPicker` — the list-controls period control (#4110) — for the

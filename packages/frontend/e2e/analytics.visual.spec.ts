@@ -14,7 +14,7 @@
  *
  * ── The capture matrix ───────────────────────────────────────────────────────
  *
- * Three scenarios × two viewports × two colour schemes = twelve baselines, all
+ * Four scenarios × two viewports × two colour schemes = sixteen baselines, all
  * named `<scenario>-<viewport>[-dark].png` under
  * `e2e/__screenshots__/analytics.visual.spec.ts/`.
  *
@@ -101,7 +101,12 @@
  */
 import { expect, test, type Page } from '@playwright/test'
 import { VISUAL_SKIP_REASON, VISUAL_SPECS_ENABLED } from './support/visual-mode'
-import { dismissMobileSidebar, mockHavenApi, seedAuthenticatedSession } from './fixtures/haven-api'
+import {
+  dismissMobileSidebar,
+  expectNoHorizontalOverflow,
+  mockHavenApi,
+  seedAuthenticatedSession,
+} from './fixtures/haven-api'
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — plain .mjs; the SINGLE source of evidence viewports, shared
 // with the #896 captures, the /design-system gate (#897) and product-routes.
@@ -275,7 +280,13 @@ const OVERVIEW_FAILURE = analyticsOverviewFailure
 type OverviewBody = typeof analyticsOverview | typeof analyticsOverviewEmpty
 
 type Scenario = {
-  name: 'populated' | 'empty' | 'error'
+  name: 'populated' | 'empty' | 'error' | 'filtered'
+  /**
+   * The query the page is opened with. `filtered` (#4401) lands on
+   * `?agentId=agent-research`, whose agent the `/agents` handler then names
+   * with {@link LONG_AGENT_NAME}: the header state that ran 420 px wide at 390.
+   */
+  query?: string
   /** What `GET /analytics/overview` answers with. `null` = the 503. */
   body: OverviewBody | null
   /**
@@ -307,6 +318,12 @@ function section(page: Page, testId: string) {
 async function expectExactlyOneVisible(row: ReturnType<Page['getByTestId']>, text: string) {
   await expect(row.getByText(text, { exact: true }).filter({ visible: true })).toHaveCount(1)
 }
+
+/**
+ * A long agent name (#4401): at 390 it fills the facet's row and truncates, so
+ * the Period picker wraps under it; from `sm` the facet's bound truncates it.
+ */
+const LONG_AGENT_NAME = 'Quarterly procurement research agent for the Nordic region'
 
 const SCENARIOS: Scenario[] = [
   {
@@ -532,6 +549,30 @@ const SCENARIOS: Scenario[] = [
     },
   },
   {
+    name: 'filtered',
+    query: '?agentId=agent-research',
+    body: analyticsOverview,
+    async assert(page, vp) {
+      // The filter landed: the facet names the long agent and tints.
+      const facet = page.getByRole('button', { name: `Agent: ${LONG_AGENT_NAME}` })
+      await expect(facet).toHaveCount(1)
+      await expect(facet).toHaveAttribute('data-active', 'true')
+      const period = page.getByRole('button', { name: COPY.periodTrigger })
+      await expect(period).toHaveCount(1)
+      await expect(page.getByTestId('analytics-tiles')).toHaveCount(1)
+      // The header holds both controls inside its own box: at 390 Period
+      // wraps to a second line rather than pushing the page (#4401).
+      const facetBox = await facet.boundingBox()
+      const periodBox = await period.boundingBox()
+      const headerBox = await page.getByTestId('analytics-page').locator('header').boundingBox()
+      expect(facetBox && periodBox && headerBox).toBeTruthy()
+      expect(periodBox!.x + periodBox!.width).toBeLessThanOrEqual(headerBox!.x + headerBox!.width + 1)
+      expect(facetBox!.x + facetBox!.width).toBeLessThanOrEqual(headerBox!.x + headerBox!.width + 1)
+      if (vp.width < 640) expect(periodBox!.y).toBeGreaterThan(facetBox!.y)
+      expect(await expectNoHorizontalOverflow(page)).toMatchObject({ hasOverflow: false })
+    },
+  },
+  {
     name: 'error',
     body: null,
     async assert(page) {
@@ -603,7 +644,7 @@ const SCENARIOS: Scenario[] = [
  *     from a same-named Next route or a static asset, so the house strips it
  *     before comparing and keeps the `GET` test.
  */
-async function serveOverview(page: Page, body: OverviewBody | null) {
+async function serveOverview(page: Page, body: OverviewBody | null, filtered = false) {
   await page.route('**/api/**', async (route) => {
     const request = route.request()
     const path = new URL(request.url()).pathname.replace(/^\/api/, '')
@@ -617,7 +658,7 @@ async function serveOverview(page: Page, body: OverviewBody | null) {
         contentType: 'application/json',
         body: JSON.stringify({
           agents: [
-            { id: 'agent-research', name: 'Research agent', status: 'active' },
+            { id: 'agent-research', name: filtered ? LONG_AGENT_NAME : 'Research agent', status: 'active' },
             { id: 'agent-retired', name: 'Data-feed agent', status: 'paused' },
           ],
         }),
@@ -698,10 +739,10 @@ test.describe('analytics visual regression', () => {
 
         // BEFORE `goto`: the page reads `Date.now()` during its first render.
         await page.clock.setFixedTime(FROZEN_NOW)
-        await serveOverview(page, scenario.body)
+        await serveOverview(page, scenario.body, scenario.query !== undefined)
 
         await page.setViewportSize({ width: vp.width, height: vp.height })
-        await page.goto('/analytics')
+        await page.goto(`/analytics${scenario.query ?? ''}`)
 
         // The route, not a redirect. `ProtectedRoute` renders `null` while auth
         // resolves and can send an unseeded session to /onboarding; a capture of

@@ -114,6 +114,29 @@ describe('FacetMenu — single-select', () => {
   })
 })
 
+describe('FacetMenu — a long selected name (#4401)', () => {
+  it('bounds the trigger from `sm` so the name truncates, and keeps the full name in its accessible name', () => {
+    const long = 'Quarterly procurement research agent for the Nordic region'
+    render(
+      <FacetMenu
+        facet={{ id: 'agent', label: 'Agent', options: [{ value: 'a', label: long }, { value: 'b', label: 'Other' }] }}
+        value={['a']}
+        onChange={() => {}}
+      />,
+    )
+    const trigger = screen.getByRole('button', { name: `Agent: ${long}` })
+    const root = trigger.parentElement as HTMLElement
+    const classes = root.className.split(/\s+/)
+    // Below `sm` the row is full width and `max-w-full` truncates; from `sm`
+    // the actions row is max-content, so only a fixed bound can.
+    expect(classes).toContain('max-w-full')
+    expect(classes).toContain('sm:max-w-[20rem]')
+    const summary = screen.getByText(long, { selector: 'button span' })
+    expect(summary.className.split(/\s+/)).toEqual(expect.arrayContaining(['min-w-0', 'truncate']))
+    expect(summary).toHaveAttribute('title', long)
+  })
+})
+
 describe('FacetMenu — no All row (allLabel: null, #4113)', () => {
   const ARCHIVED: ListFacet = {
     id: 'archived',

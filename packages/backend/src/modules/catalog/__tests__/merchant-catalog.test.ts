@@ -41,6 +41,8 @@ const X402_BODY = {
   }],
 }
 
+const BASE_SEPOLIA_USDC = '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
+
 describe('probeCatalogEntry', () => {
   it('verifies an x402 merchant from the PAYMENT-REQUIRED header', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(null, {
@@ -106,16 +108,17 @@ describe('probeCatalogEntry', () => {
     expect(result.assetTransferMethods).toEqual(['erc7710'])
   })
 
-  it('#3386 scopes assetTransferMethods to the recorded network — the accepts[0] network', async () => {
-    // A challenge naming EIP-3009 on 84532 (accepts[0], the recorded network)
-    // and ERC-7710 only on 8453: before #3386 this recorded the union
-    // (['eip3009', 'erc7710']) on the 84532 row, which could issue a
-    // merchant-locked budget for a network the merchant never accepts
-    // ERC-7710 on.
+  it('#3386 scopes assetTransferMethods to the recorded network — the selected option\'s (#4389)', async () => {
+    // A challenge naming EIP-3009 on 84532 and ERC-7710 only on 8453: before
+    // #3386 this recorded the union (['eip3009', 'erc7710']) on one row, which
+    // could issue a merchant-locked budget for a network the merchant never
+    // accepts ERC-7710 on. Since #4389 the row records the option the pay
+    // path selects for a delegation-rail account (erc7710, on 8453), and the
+    // methods are those payable on THAT network only.
     const body = {
       x402Version: 2,
       accepts: [
-        { ...X402_BODY.accepts[0], network: 'eip155:84532' },
+        { ...X402_BODY.accepts[0], network: 'eip155:84532', asset: BASE_SEPOLIA_USDC },
         { ...X402_BODY.accepts[0], network: 'eip155:8453', extra: { assetTransferMethod: 'erc7710' } },
       ],
     }
@@ -125,16 +128,18 @@ describe('probeCatalogEntry', () => {
     }))
 
     const result = await probeCatalogEntry(X402_ENTRY, fetchMock as typeof fetch)
-    expect(result.network).toBe('eip155:84532')
-    expect(result.assetTransferMethods).toEqual(['eip3009'])
+    expect(result.network).toBe('eip155:8453')
+    expect(result.assetTransferMethods).toEqual(['erc7710'])
   })
 
-  it('#3386 still scans every option ON the recorded network, not just accepts[0]', async () => {
+  it('#3386 still scans every option ON the recorded network, not just the selected one', async () => {
     const body = {
       x402Version: 2,
       accepts: [
-        { ...X402_BODY.accepts[0], network: 'eip155:84532' },
-        { ...X402_BODY.accepts[0], network: 'eip155:84532', extra: { assetTransferMethod: 'erc7710' } },
+        // Base Sepolia USDC on the 84532 options: since #4389 the asset is
+        // labelled on the option's own chain only, and Base USDC there is a miss.
+        { ...X402_BODY.accepts[0], network: 'eip155:84532', asset: BASE_SEPOLIA_USDC },
+        { ...X402_BODY.accepts[0], network: 'eip155:84532', asset: BASE_SEPOLIA_USDC, extra: { assetTransferMethod: 'erc7710' } },
         { ...X402_BODY.accepts[0], network: 'eip155:8453', extra: { assetTransferMethod: 'erc7710' } },
       ],
     }
@@ -303,7 +308,7 @@ describe('probeCatalogEntry', () => {
       return probeCatalogEntry(X402_ENTRY, fetchMock as typeof fetch)
     }
     const option = (payTo: unknown, extra?: Record<string, unknown>) => ({
-      scheme: 'exact', network: 'eip155:84532', amount: '1000', payTo, ...(extra ? { extra } : {}),
+      scheme: 'exact', network: 'eip155:84532', asset: BASE_SEPOLIA_USDC, amount: '1000', payTo, ...(extra ? { extra } : {}),
     })
 
     it('records the one payTo every option names, lowercased', async () => {
@@ -323,7 +328,7 @@ describe('probeCatalogEntry', () => {
       expect((await probeWith([option(undefined), option(A)])).payTo).toBeUndefined()
     })
 
-    it('agrees only across options on the recorded network (the first option\'s)', async () => {
+    it('agrees only across options on the recorded network (the selected option\'s)', async () => {
       // A Base + Solana merchant: the Solana option's base58 payTo is not a
       // disagreement about where it is paid on Base.
       const solana = { scheme: 'exact', network: 'solana:mainnet', amount: '1000', payTo: 'So1anaPayToBase58xxxxxxxxxxxxxxxxxxxxxxxx' }
@@ -457,8 +462,18 @@ describe('refreshCatalog', () => {
         return { rows: [] }
       },
     }
-    const { payTo: _dropped, ...acceptWithoutPayTo } = X402_BODY.accepts[0]
-    const body = { ...X402_BODY, accepts: [acceptWithoutPayTo] }
+    // Two options on the same chain naming different payTo addresses: the
+    // challenge is verified, but it names no single payTo. (Since #4389 an
+    // option with no payTo at all is dropped, as the pay path drops it, so a
+    // challenge whose only option lacks one is a miss rather than a row with
+    // a cleared pay_to.)
+    const body = {
+      ...X402_BODY,
+      accepts: [
+        { ...X402_BODY.accepts[0], payTo: '0x' + '44'.repeat(20) },
+        { ...X402_BODY.accepts[0], payTo: '0x' + '55'.repeat(20) },
+      ],
+    }
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(null, { status: 402, headers: { 'PAYMENT-REQUIRED': b64(body) } }),
     )
@@ -587,21 +602,26 @@ describe('refreshCatalog', () => {
 })
 
 describe('probe parse-error surfacing (#4341)', () => {
-  // A numeric `amount` passes parseAccepts' regex (test() stringifies) and
-  // throws in formatPriceDisplay — the same shape #4300's comment names.
+  // Since #4389 the challenge's own field types no longer throw (an option
+  // whose amount is a number is simply not an option), so the throw comes
+  // from the response the probe reads: a header accessor that throws, the
+  // shape of a broken transport object. The catch path is what is pinned.
   it('logs a thrown parse error with the resource URL and the message, and nothing from the payload', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const body = { accepts: [{ amount: 1000, network: 'eip155:8453', secretMerchantField: 'must-not-be-logged' }] }
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify(body), { status: 402, headers: { 'Content-Type': 'application/json' } }),
-    )
+    const brokenResponse = {
+      status: 402,
+      headers: { get: () => { throw new Error('header accessor exploded') } },
+      json: async () => body,
+    } as unknown as Response
+    const fetchMock = vi.fn().mockResolvedValue(brokenResponse)
 
     const result = await probeCatalogEntry(X402_ENTRY, fetchMock as typeof fetch)
     expect(result.ok).toBe(false)
     expect(warnSpy).toHaveBeenCalledTimes(1)
     const logged = String(warnSpy.mock.calls[0]?.[0])
     expect(logged).toContain('https://api.merchant.example/paid')
-    expect(logged).toContain('padStart')
+    expect(logged).toContain('header accessor exploded')
     // Nothing from the merchant payload reaches the log.
     expect(logged).not.toContain('must-not-be-logged')
     expect(logged).not.toContain(JSON.stringify(body))

@@ -13,6 +13,7 @@ import { describeDb, initDbHarness, resetDb } from '../../../infra/__tests__/hel
 import { refreshCatalog, type QueryableLike } from '../merchant-catalog.js'
 
 const ROWS = 6
+const BASE_USDC = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
 
 async function seedRows(): Promise<string[]> {
   const { rows: merchant } = await db.query<{ id: string }>(
@@ -88,7 +89,7 @@ describeDb('refresh run budget rotation (#4300)', () => {
       probed.push(url)
       const body = url === urls[0]
         ? { accepts: [{ amount: 1000 }] }
-        : { accepts: [{ amount: '20000', asset: 'USDC', network: 'eip155:8453', payTo: '0x00000000000000000000000000000000000000aa' }] }
+        : { accepts: [{ scheme: 'exact', amount: '20000', asset: BASE_USDC, network: 'eip155:8453', payTo: '0x00000000000000000000000000000000000000aa' }] }
       return new Response(JSON.stringify(body), { status: 402, headers: { 'Content-Type': 'application/json' } })
     }) as unknown as typeof fetch
 
@@ -131,11 +132,13 @@ describeDb('refresh run budget rotation (#4300)', () => {
 
     const fetchImpl = (async (input: string | URL | Request) => {
       const url = String(input)
-      // The NUL rides in the challenge's `asset` string: a well-formed 402
-      // the parsers accept but the database refuses to store.
+      // The NUL rides in the challenge's structured `resource.method`: a
+      // payable 402 the parsers accept (#4389: the asset is now read from the
+      // registry, so it can no longer carry one) but the database refuses to
+      // store in `http_method`.
       const body = url === nulUrl
-        ? { accepts: [{ amount: '20000', asset: 'US\u0000DC', network: 'eip155:8453' }] }
-        : { accepts: [{ amount: '20000', asset: 'USDC', network: 'eip155:8453', payTo: '0x00000000000000000000000000000000000000aa' }] }
+        ? { resource: { method: 'PO\u0000ST' }, accepts: [{ scheme: 'exact', amount: '20000', asset: BASE_USDC, network: 'eip155:8453', payTo: '0x00000000000000000000000000000000000000aa' }] }
+        : { accepts: [{ scheme: 'exact', amount: '20000', asset: BASE_USDC, network: 'eip155:8453', payTo: '0x00000000000000000000000000000000000000aa' }] }
       return new Response(JSON.stringify(body), { status: 402, headers: { 'Content-Type': 'application/json' } })
     }) as unknown as typeof fetch
 

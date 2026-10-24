@@ -124,7 +124,7 @@ if (VISUAL_STRUCTURE_ONLY) {
    *
    * Everything a spec does BEFORE the capture still runs: navigation, fixture
    * setup, and its own structural assertions — every `toHaveCount(1)` in the
-   * five specs, which is what actually catches a broken locator. Dropping the
+   * visual specs, which is what actually catches a broken locator. Dropping the
    * comparison leaves all of that intact and removes the one thing that needs
    * a Linux-rendered artefact.
    *

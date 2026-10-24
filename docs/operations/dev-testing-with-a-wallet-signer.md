@@ -119,7 +119,7 @@ See [`dev-environment.md`](dev-environment.md) for the rest of the dev stack.
 > #1153.
 >
 > **Review round 1 (haven-doc-reviewer @ `344d7ea91`).** The attribution was
-> wrong: *Who can approve* came with #4142 (`git log -S "Who can approve"` →
+> wrong: *Who can approve* came with #4142 (`git log -S'Who can approve</h2>'` →
 > `fa1c20399`), and #4166 (PR #4190, `37ec8b7ba`) removed the card's
 > duplicate "Backup & recovery" heading (`git log -S "Backup & recovery"` on
 > `AccountSignersCard.tsx`).

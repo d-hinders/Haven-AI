@@ -136,7 +136,7 @@ delegation's** period budget and period length. `SEED_RPC_URL` is no longer read
 |---|---|---|
 | Owner EOA | **No on-chain funding required** | Signs the budget delegation off-chain. Hybrid provisioning is counterfactual — zero transactions (#2007) |
 | Hybrid account | Base Sepolia test USDC | The treasury every QA payment spends from |
-| Dev relayer | Base Sepolia ETH | Pays gas for activations, passport attestations, revocations, sweeps, and the outbound queue's fee bumps and lane cancels. Agent payment UserOps are paymaster-sponsored and never use it (#3264) |
+| Dev relayer | Base Sepolia ETH | Pays gas for activations (the treasury deploy), a fresh agent's delegate-account deploy at its first erc7710 authorize, passport attestations, revocations, sweeps, and the outbound queue's fee bumps and lane cancels. Agent payment UserOps are paymaster-sponsored and never use it (#3264) |
 | Delegate EOA | No on-chain funding required | Signs payment and EIP-3009 sweep authorizations off-chain |
 | **Demo-merchant settlement wallet** | **Base Sepolia ETH** | **Submits `transferWithAuthorization` / `redeemDelegations`. Derived from the merchant's `SETTLEMENT_PRIVATE_KEY`; NOT the receiving wallet** |
 
@@ -1188,8 +1188,9 @@ that half is measured too.
 | `deployment_status` (Railway → `Haven AI / dev`, state `success`) | Test exactly what the Railway dev backend deploy just shipped, at the SHA it shipped. **Built by #2273; first observed firing 2026-09-02 — see below.** |
 
 > **All three now have a history; the post-deploy one starts on 2026-09-02.**
-> It has fired on dev deploys since then — the runs API's `total_count` for
-> `deployment_status` runs of `qa-dev.yml` read 2500 on 2026-10-24, most of
+> It has fired on dev deploys since then — hundreds a day (265
+> `deployment_status` runs of `qa-dev.yml` created on 2026-10-23, paged in
+> full; the filtered listing's own `total_count` stops at 2500), most of
 > them gate-skipped (see *Read the `money-flow` JOB's conclusion* below). Its
 > predecessor, `repository_dispatch` (`dev-deployed`), fired **0** times across
 > the repository's entire history — 156 `qa-dev.yml` runs, 2026-06-30 →
@@ -2220,9 +2221,9 @@ the observer reads 10-block `eth_getLogs` windows (`GET_LOGS_MAX_RANGE` in
 > **Review round 1 (haven-doc-reviewer @ `344d7ea91`).** Also changed:
 > `x402-erc7710-sdk` names `x402-erc7710-settle` rather than "the leg above",
 > and its hosted variant is `x402-erc7710-hosted` (#1456 is closed); the
-> post-deploy trigger's history is no longer "exactly one deploy" (the runs
-> API's `total_count` for its `deployment_status` runs read 2500 on
-> 2026-10-24); the 3009 scenarios run in every `qa-dev` money-flow job, not
+> post-deploy trigger's history is no longer "exactly one deploy" (hundreds of
+> `deployment_status` runs a day — 265 on 2026-10-23; round 2 corrected an
+> earlier 2500, which is the filtered listing's cap, not a count); the 3009 scenarios run in every `qa-dev` money-flow job, not
 > every run; the dev relayer deploys the treasury at first activation and a
 > fresh agent's delegate account at its first erc7710 authorize; #2268 is the
 > issue that reported the old trigger never fired; and two stale conditionals

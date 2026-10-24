@@ -3951,3 +3951,14 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > only: no re-key step, revocation order, credential swap or delegation
 > changes. Scope of this note: that comment. Nothing else in this document was
 > re-verified for it.
+
+> **Re-verified unchanged (#4400, 2026-10-24 — the agent Spending hero's
+> Last 30 days layout in `packages/frontend/src/components/DelegationBudgetCard.tsx`).**
+> The three figures (Spent, Payments, Last paid) take two rows below `sm`
+> instead of three equal tracks; from `sm` they sit across in equal thirds,
+> Spent's track widening past its third only when its figure needs it
+> (`minmax(max-content,1fr)`). The Spent cell drops `break-words`,
+> because the shared money figure is now `whitespace-nowrap`; the loading skeleton
+> takes the same shape. Layout only: no budget read, figure, caption,
+> delegation, revoke, grant or edit path changes. Scope of this note: that
+> grid. Nothing else in this document was re-verified for it.

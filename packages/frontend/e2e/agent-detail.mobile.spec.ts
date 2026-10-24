@@ -51,11 +51,13 @@
 import { expect, test, type Page } from '@playwright/test'
 import {
   collectBrowserErrors,
+  dashboardOverview,
   dismissMobileSidebar,
   expectNoHorizontalOverflow,
   mockHavenApi,
   seedAuthenticatedSession,
   serveAgentDetailResponses,
+  serveSekUser,
   unexpectedBrowserErrors,
 } from './fixtures/haven-api'
 
@@ -438,4 +440,93 @@ test.describe('agent detail at 390px (#2733)', () => {
     expect(overflow).toMatchObject({ hasOverflow: false })
     expect(unexpectedBrowserErrors(errors)).toEqual([])
   })
+
+  // #4400: the test above passes on a short fixture figure, and it passed
+  // while `break-words` wrapped "≈ 1 748,50 kr" over three lines at 390 — it
+  // proves nothing about wrapping. This one serves a LONG SEK Spent figure
+  // and counts its lines (Range client rects, the
+  // `transaction-amount-wrap.spec.ts` idiom): one line, and no overflow.
+  // 375 is stricter than the committed 390.
+  // 375: the issue's long figure — Spent has the whole first row. 1280: three
+  // across in the half-width column, so the largest REALISTIC 30-day figure
+  // (six digits of kronor) must fit its third — the design-system rule that
+  // an `Amount` never sits in a track too narrow for its longest realistic
+  // figure.
+  const CASES = [
+    { width: 375, sek: 12_345_678.9, shown: /12\s345\s678,90\s*kr/ },
+    // 1024: the narrowest `lg` — the hero's half-width column is tightest.
+    { width: 1024, sek: 123_456.78, shown: /123\s456,78\s*kr/ },
+    { width: 1280, sek: 123_456.78, shown: /123\s456,78\s*kr/ },
+  ] as const
+  for (const { width, sek, shown } of CASES) {
+    test(`a long SEK Spent figure stays on one line without overflow at ${width} (#4400)`, async ({ page }) => {
+      const errors = collectBrowserErrors(page)
+      await page.clock.setFixedTime(FROZEN_NOW)
+      await mockHavenApi(page)
+      await serveAgentDetailResponses(page, 'agent-research')
+      await serveSekUser(page)
+      // Test-local override, registered last so it wins this path alone.
+      const base = dashboardOverview.agents[0]
+      await page.route('**/api/**', async (route) => {
+        const path = new URL(route.request().url()).pathname.replace(/^\/api/, '')
+        if (route.request().method() !== 'GET' || path !== '/dashboard/overview') return route.fallback()
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            ...dashboardOverview,
+            agents: [
+              ...dashboardOverview.agents.filter((agent) => agent.id !== 'agent-research'),
+              {
+                ...base,
+                id: 'agent-research',
+                stats: {
+                  ...base.stats,
+                  d30: {
+                    ...base.stats.d30,
+                    net: { usd: sek / 10.7, eur: sek / 11.6, sek },
+                    approx: true,
+                    payments: 48,
+                  },
+                  lastPaymentAt: '2026-08-31T09:40:00.000Z',
+                },
+              },
+            ],
+          }),
+        })
+      })
+      await seedAuthenticatedSession(page)
+
+      await page.setViewportSize({ width, height: MOBILE_HEIGHT })
+      await page.goto('/agents/agent-research')
+      await expect(page.getByRole('heading', { name: 'Research agent', exact: true })).toBeVisible({
+        timeout: 60_000,
+      })
+      await dismissMobileSidebar(page)
+
+      const figures = page.locator('dl').filter({ has: page.locator('dt', { hasText: 'Spent' }) })
+      await expect(figures).toBeVisible()
+      const spent = figures.locator('dd').first()
+      // Non-vacuity: the long figure reached the hero.
+      await expect(spent).toHaveText(shown)
+
+      const reading = await spent.evaluate((dd) => {
+        const range = document.createRange()
+        range.selectNodeContents(dd)
+        const lines = new Set(Array.from(range.getClientRects()).map((r) => Math.round(r.top))).size
+        const cell = dd.getBoundingClientRect()
+        const grid = dd.closest('dl')!.getBoundingClientRect()
+        return {
+          lines,
+          overflowsCell: dd.scrollWidth > dd.clientWidth + 1,
+          leavesGrid: cell.right > grid.right + 1 || cell.left < grid.left - 1,
+        }
+      })
+      expect(reading).toEqual({ lines: 1, overflowsCell: false, leavesGrid: false })
+
+      const overflow = await expectNoHorizontalOverflow(page)
+      expect(overflow).toMatchObject({ hasOverflow: false })
+      expect(unexpectedBrowserErrors(errors)).toEqual([])
+    })
+  }
 })

@@ -144,9 +144,11 @@ you hold.
 - **Freeze, seize, or move your funds.** The delegation rail's whole point is
   that authority lives in your signers, not our servers.
 
-If Haven disappeared entirely, an account with an enrolled signer stays fully
+If Haven disappeared entirely, an account with a **wallet** signer stays fully
 recoverable through the public contracts — see the
-[independent exit path](../exit/README.md).
+[independent exit path](../exit/README.md). A passkey works only on the site it
+was created on (Haven's), so an account whose only signers are passkeys could
+no longer sign anything without Haven's site: one more reason to add a wallet.
 
 ## Legacy passkey Safes
 

@@ -66,6 +66,20 @@ export const GOVERNED_PACKAGE_DOCS = [
     owner: '@d-hinders',
     status: 'current',
     covers: ['packages/sdk/src/**', 'packages/sdk/package.json', 'packages/sdk/tsup.config.ts'],
+    // #4372 part E (2026-10-24, at dev `ee7fdd27`): a FULL re-read, EDITED.
+    // The x402 scheme sentence covers both payloads (EIP-3009 on the bridge,
+    // erc7710 by `extra.assetTransferMethod`, x402.ts); the manual-retry rule
+    // and the MCP/SSE paragraph name `x402RetryHeadersFor` (#3727) — the
+    // MCP/SSE paragraph still said BOTH names on every scheme, the #2341
+    // defect one site later; the decline paragraph no longer says "before
+    // anything is written" (the payment_refusals row, ledger #2945 /
+    // migration 086, written through refuse() since #3053);
+    // the phase table gained `insufficient_funds` / `funded_but_unsettled` and
+    // the nextAction table `retry_with_explicit_context` /
+    // `fund_account_or_raise_allowance`, from types.ts and their emitters
+    // (budget-scope/refusal-body.ts, agent-payment-status.ts). Re-checked
+    // without change: entries, edge exports, idempotency bucket (300 s),
+    // tools, config defaults, OpenAPI, resume, error classes. Prior:
     // #2341: re-verified and EDITED (every merchant-retry header instruction,
     // six sites). #2330 made them all say "both names" — correct then, and
     // wrong on erc7710 the moment #2341 scoped the send by scheme. This is the
@@ -113,7 +127,7 @@ export const GOVERNED_PACKAGE_DOCS = [
     // #3632: the networks table and the four EURe/gnosisscan examples (two
     // pay() samples, the Claude tool sample, the error-handling sample)
     // re-read against core chains.ts and src/tools.ts. Scope: those lines.
-    'last-verified': '2026-10-05',
+    'last-verified': '2026-10-24',
   },
   {
     doc: 'packages/signer/README.md',
@@ -367,6 +381,20 @@ export const GOVERNED_PACKAGE_DOCS = [
     owner: '@d-hinders',
     status: 'current',
     covers: ['packages/mcp-server/src/**'],
+    // #4372 part E (2026-10-24, at dev `ee7fdd27`): a FULL re-read, EDITED.
+    // The signer list gained `haven_sign_siwx` (signer/src/tools.ts); a line
+    // after the table names the 29-tool snapshot and the nine tools the
+    // table omits; the `haven_pay` paragraph states the #3495 compact result
+    // and its `haven_sign` next step (state-direct-recovery.ts); a paragraph
+    // after the paid-MCP steps scopes the diagram to the EIP-3009 bridge and
+    // states the erc7710 shape (catalog-purchase.ts: `haven_sign`, no
+    // `payment_header`) and the optional merchant context (contracts.ts,
+    // #1307); Run no longer says `npx @haven_ai/mcp-server` — the package is
+    // private (package.json; `npm view` answers E404). Review round 1: Run
+    // builds `packages/core` first (on a fresh `npm ci` the mcp-server build
+    // cannot resolve `@haven_ai/core` until core's dist/ exists) — build,
+    // start and `GET /healthz` 200 run by hand; the erc7710 sentence says the
+    // signer fetches the settlement child by payment_id and signs it. Prior:
     // #3506: EDITED, scope = the haven_submit table row (POST /sub-budgets/:id/submit
     // with sub_budget_id, exactly one id), verified against
     // tools/state-direct-recovery.ts. Nothing else re-verified. Prior:
@@ -395,7 +423,7 @@ export const GOVERNED_PACKAGE_DOCS = [
     // `createHostedHavenClient` still throws on a delegate key; the Run
     // endpoints are as written (`POST /v1` Bearer-authenticated, `GET
     // /healthz` unauthenticated per http.ts).
-    'last-verified': '2026-10-01',
+    'last-verified': '2026-10-24',
   },
   {
     // The private operations console (#3515). Its README documents the env

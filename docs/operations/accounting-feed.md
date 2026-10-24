@@ -36,7 +36,7 @@ covers:
   - packages/frontend/src/components/accounting/ConnectionRow.tsx
   - packages/frontend/src/components/accounting/ConnectionSettings.tsx
   - packages/frontend/src/components/accounting/BackfillDialog.tsx
-last-verified: "2026-09-21"
+last-verified: "2026-10-24"
 ---
 
 # Accounting feed — operations runbook
@@ -44,8 +44,9 @@ last-verified: "2026-09-21"
 How a settled agent payment becomes an unbooked source document in the user's
 accounting platform, how to tell that it did, and what to do when it did not.
 The feed is **provider-generic** (epic #2858): the connection model, routes,
-retry sweep, secrets and states below hold for every provider; Fortnox is the
-one live connector today and has its own section at the end. The feed is
+retry sweep, secrets and states below hold for every provider. Two connectors
+are live today, Fortnox and Accounted (#3017), and each has its own section at
+the end. The feed is
 **non-asserting** by principle (#491): Haven delivers the payment and its
 evidence as an unbooked object, and the accountant codes, books and files.
 Haven never posts voucher rows, accounts or VAT, never blocks a settlement, and
@@ -136,10 +137,11 @@ feedSettledPaymentBestEffort()          ← fire-and-forget: NEVER blocks settle
   ├─ build the non-asserting FeedTransaction (account demoted to a hint,
   │    VAT structurally absent; the connection's suggested_account rides as
   │    the hint when no per-merchant override exists)
-  ├─ <connector>.pushTransaction — Fortnox today: token refresh under the row
+  ├─ <connector>.pushTransaction — Fortnox: token refresh under the row
   │    lock if needed, find-or-create supplier by name, POST an UNATTESTED
   │    supplier invoice (ExternalInvoiceNumber = HAVEN-<paymentId>), attach
-  │    the payment-evidence PDF, attach the merchant receipt when captured
+  │    the payment-evidence PDF, attach the merchant receipt when captured;
+  │    Accounted: upload the receipt underlag as a document (provider notes)
   └─ markPushed(external_ref)  |  markSkipped(reason)  |  markFailed(error)
        └─ a push-time finding about the GRANT (scope) also flips the
           connection's status and emits accounting.connection.needs_attention
@@ -195,7 +197,7 @@ a `remedy` field, the other two carry a `reason`. A fourth, chain-level line
   ("Feeding Fortnox · Company AB · last push 2 minutes ago", or the attention
   state — `needs_reauthorisation` / `scope_missing` / `revoked_at_provider` —
   with its sentence and a *Fix in Settings* action), then every sync row with
-  **Check in Fortnox**, the re-open action, **Sync now** and the retry counts
+  **Check in <provider>**, the re-open action, **Sync now** and the retry counts
   `pending` / `failed` / `exhausted` (#2866; the row is hidden while every
   count is zero and there are no syncs). Nothing here connects or
   disconnects; that moved to Settings (#2868). The callback redirect lands
@@ -218,10 +220,18 @@ a `remedy` field, the other two carry a `reason`. A fourth, chain-level line
   backfill choice on connect. The product doc describes the states as the
   user sees them. A failed `GET /accounting/feed/status` read renders the
   card with the connection list (or its load error) and **no controls** —
-  the card fails closed until #2918 gates the connection routes server-side.
-- **`/transactions`** (#2870) — a badge per fed row: *In Fortnox* (`pushed`),
-  *Feeding…* (`pending`), *Not fed* (`failed` / `skipped`, the `error` on
-  hover), linking to `/accounting`. Emitted only when the account is
+  the card fails closed (a client-side guard that predates #2918, which now
+  also gates the connection routes server-side).
+- **`/transactions`** (#2870) — a badge per fed row: *In Fortnox* (`pushed`
+  on Fortnox; a pushed Accounted row reads *Evidence archived*, because that
+  connector only archives the document Haven pushed — `RECORD_ONLY_PROVIDERS`
+  in `AccountingBadge.tsx`),
+  *Feeding…* (`pending`), *Not fed* (`failed` / `skipped`). Since #4298 the
+  ledger row shows the pill alone (`interactive={false}` in
+  `TransactionsLedgerRow.tsx`: the row is itself a button, #4266); the
+  transaction's detail panel carries the linked badge, which opens
+  `/accounting` and shows the `error` on hover, plus a *Reason* row with the
+  same text (`TransactionDetailPanel.tsx`). Emitted only when the account is
   entitled, has an ACTIVE destination in `connected` (`hasActiveConnection`
   — a destination in `needs_reauthorisation` / `scope_missing` hides every
   badge on the page, including *In Fortnox* on rows already delivered) AND a
@@ -279,11 +289,11 @@ lands on `connect=error&reason=feature_off` instead of a bare 404, with the
 
 | auth | route | what it does |
 |---|---|---|
-| session | `GET /accounting/providers` | the registry: Fortnox `live`; Accounted, Light, Igdrasil `coming_soon`; `configured` per deployment. Never gated on the flag (#2918) — the Coming soon page reads it with the feed off |
+| session | `GET /accounting/providers` | the registry: Fortnox and Accounted `live`; Light and Igdrasil `coming_soon`; `configured` per deployment. Never gated on the flag (#2918) — the Coming soon page reads it with the feed off |
 | session + feature gate | `GET /accounting/connections` | the caller's connections — metadata only, never secrets: `status`, `statusReason`, `missingScopes`, `externalCompanyId` / `externalCompanyName`, `baseCurrency`, `feedFrom`, `isActiveDestination`, `settings: { suggestedAccount, autoFeed }`, `lastPushAt`. 404 (#2918) when not hosted or the flag is off |
 | session + feature gate | `POST /accounting/connections/:provider/connect-url` | consent URL for a live OAuth2 provider: signed, purpose-scoped, provider-bound, single-use `state` (10 min). Also the **re-consent** path — issued for an existing row whatever its status. 404 (#2918) when not hosted or the flag is off, ahead of the unknown-provider 404 |
 | public (signed `state`) | `GET /accounting/connections/:provider/callback` | authenticated by the `state` (its `jti` is consumed before the code exchange, and before the feature check — see below). Reads the company (`getCompanyInfo`), refuses a ledger outside the supported currencies before storing anything, UPSERTs the row: on an existing row it replaces secrets, `granted_scope`, `status → connected`, and keeps `settings`, `feed_from`, the active flag and the sync history. A grant narrower than `requiredScopes` is stored as `scope_missing`. Redirects to `/accounting?provider=…&connect=…`. NOT gated the same way as the other connection routes (#2918): a consent already in flight when the flag is flipped off redirects `connect=error&reason=feature_off` — never a bare 404 — with the state still consumed, so it cannot be replayed once the flag comes back on |
-| session + feature gate | `POST /accounting/connections/:provider/api-key` | validate a key at the provider, store encrypted (no live `api_key` provider today → 409); a ledger outside the supported currencies → 409 `UNSUPPORTED_BASE_CURRENCY`. 404 (#2918) when not hosted or the flag is off |
+| session + feature gate | `POST /accounting/connections/:provider/api-key` | validate a key at the provider, store encrypted (201 with the connection; Accounted is the live `api_key` provider). Refusals: a blank key → 400 `API_KEY_REQUIRED`; a key the provider rejects → 400 `INVALID_API_KEY`; a key that sees more than one company → 409 `MULTI_COMPANY_KEY`; a ledger outside the supported currencies → 409 `UNSUPPORTED_BASE_CURRENCY`; a provider that is not live or is OAuth2 → 409 `PROVIDER_NOT_LIVE` / `WRONG_AUTH_KIND`; an unknown provider → 404; one not configured on the deployment → 503. 404 (#2918) when not hosted or the flag is off |
 | session + feature gate | `DELETE /accounting/connections/:provider` | disconnect: revoke at the provider first when the descriptor declares `revoke` (Fortnox does), then secrets cleared, row kept as `disconnected`, active flag dropped; a failed revoke still disconnects locally (one `warn` line, error NAME only: `accounting provider revoke failed on disconnect`). For an Accounted connection (#3019) it also deletes the three webhook subscriptions at the provider, best effort — a provider outage never blocks the disconnect (subscriptions left behind are removed by hand; see *When the sandbox shows a subscription `dead'*). 404 (#2918) when not hosted or the flag is off |
 | session + feature gate | `POST /accounting/connections/:provider/activate` | make it the destination; stamps **`feed_from = now`** in the same transaction. 404 (#2918) when not hosted or the flag is off |
 | session + feature gate | `POST /accounting/connections/:provider/backfill` | `{ since }`: moves `feed_from` **earlier only** (400 `SINCE_INVALID` / `SINCE_NOT_EARLIER`, 409 `NOT_ACTIVE`), records `settings.backfill`, runs one bounded sync; answers `{ feedFrom, fed }`. 404 (#2918) when not hosted or the flag is off |
@@ -395,11 +405,12 @@ figure on the record it backs: `Book value` in the invoiced currency, with the
 SEK capture kept below it as `Haven SEK ref` when they differ. One document,
 two clearly-labelled figures — never a DKK invoice backed by a receipt quoting
 kronor. When the merchant's own invoice is captured (#956), the underlag also
-carries the SELLER BLOCK (#3918): the seller's legal name (`Merchant` line),
-the catalog's supplier `Country`, and the invoice's `VAT reg no` / `Org no` —
-the fields a Swedish consultant needs to code omvänd (reverse) VAT. Every
-seller line renders only when its value is actually known; the document never
-states an empty-looking fact.
+carries the SELLER BLOCK (#3918): the seller's legal name on the `Merchant`
+line, the catalog's supplier `Country`, and the invoice's `VAT reg no` /
+`Org no` — the fields a Swedish consultant needs to code omvänd (reverse) VAT.
+The `Merchant` line is on every underlag (falling back to the merchant address,
+then `unknown`); `Country`, `VAT reg no` and `Org no` render only when their
+value is known, so the document never states an empty-looking fact.
 
 **A USD ledger records the quoted rate, not an assumed 1:1.** A USDC payment into
 a USD-booking company carries the rate the source actually quoted, with its
@@ -417,7 +428,7 @@ pushed row (#498), or the `exhausted:` prefix once the sweep has given up.
 
 | status | meaning | action |
 |---|---|---|
-| `pushed` | delivered; `external_ref` names the record (`fortnox:supplierinvoice:<GivenNumber>`). `error` may carry a **note** (e.g. `receipt attachment failed: …`) — the record exists, the attachment degraded | *Check in Fortnox* for live state. A scope note means the connection is `scope_missing` — the user reconnects; the record is NEVER re-pushed and the attachment is not re-captured automatically |
+| `pushed` | delivered; `external_ref` names the record (`fortnox:supplierinvoice:<GivenNumber>`, or `accounted:document:<id>`). `error` may carry a **note** (e.g. `receipt attachment failed: …`) — the record exists, the attachment degraded | *Check in <provider>*: a live read-back on Fortnox; on Accounted (`capabilities.verify: false`) the answer comes from Haven's own record, not the provider. A scope note means the connection is `scope_missing` — the user reconnects; the record is NEVER re-pushed and the attachment is not re-captured automatically |
 | `failed` | the push failed; `error` is the provider message verbatim | nothing at first — the sweep retries with backoff (1 min doubling to 1 h, 8 attempts). Persisting: fix the named cause; **Sync now** retries immediately |
 | `failed`, `error` starts `exhausted:` | the sweep gave up at attempt 8; the last reason follows the prefix; `accounting.sync.exhausted` was logged | fix the cause, then **Sync now** — the cap bounds the sweep, not the human; a manual sync re-claims the row |
 | `pending` | claimed and in flight, or a crashed in-flight push | wait; the sweep releases a `pending` older than 15 min to `failed` (attempts untouched) and re-feeds it. Do not edit the row |
@@ -855,11 +866,12 @@ the product doc, because no scope-introspection endpoint exists and `dry_run`
 is unsupported on document upload — a short key connects fine and surfaces as
 `scope_missing` at the first push (#2865 path).
 
-**The connector in slice 1.** `AccountedConnector.getCompanyInfo` is the only
-live provider call. `pushTransaction`, `verify` and `revoke` are explicit
-no-ops until slice 2 (#3018 adds the document push; verify stays answered from
-Haven's own record per the epic Notes; Accounted keys are revoked in their
-dashboard, so `revoke` clears local secrets only).
+**The connector's first slice (#3017).** It shipped with
+`AccountedConnector.getCompanyInfo` as the only live provider call; slice 2
+(#3018, below) added the document push. `verify` is answered from Haven's own
+record (below), and `revoke` is a no-op (`capabilities.revoke: false`):
+Accounted keys are revoked in their dashboard, so a disconnect clears the local
+secrets only.
 
 **The document push (#3018, slice 2).** `pushTransaction` renders the verifiable
 receipt underlag (`receipt-underlag.ts`, deterministic bytes; the
@@ -1056,6 +1068,31 @@ confirmation and the product doc says booking is not observable. A
 `POST /webhooks/{id}/test` dispatch is the dry run: it arrives as
 `webhook.test` and is answered 200 (unknown_type counter) — proof the
 receiver is reachable and verifying, before the first real commit.
+
+> **Re-verified 2026-10-24 (#4372 part E, at dev `ee7fdd27`), a full re-read.**
+> Changed: the intro, the flow diagram and the providers row now say two
+> connectors are live (Fortnox and Accounted, live since #3017, `registry.ts`);
+> the `api-key` row lists the route's real answers (`accounting-connections.ts`
+> and `registry.ts`'s `ProviderNotConnectableError`) instead of "no live
+> `api_key` provider today → 409"; the Transactions badge says *Evidence
+> archived* for a pushed Accounted row and the *Check in* action names the
+> row's provider, a read-back only on Fortnox (`AccountingBadge.tsx`
+> `RECORD_ONLY_PROVIDERS`, `en.ts`), and on the ledger row it is the pill
+> alone since #4298, its link and reason living in the detail panel
+> (`TransactionsLedgerRow.tsx`, `TransactionDetailPanel.tsx`); the
+> `pushed` row names Accounted's `external_ref` shape; the Settings card's
+> fail-closed guard no longer reads as waiting on #2918 (closed); the seller
+> block says the `Merchant` line always renders (`receipt-underlag.ts`); and
+> the Accounted slice-1 paragraph is in the past tense, with `revoke` a no-op.
+> Re-checked without change: the configuration table, party identity, the
+> settlement-side reasons table, the off-state table, every other route row,
+> connection and sync states, ledger currency, feed-from/backfill/settings,
+> the retry sweep's constants (`retry-sweep.ts`: 25 requests / 5 s, 8 per
+> push, batch 200), the booked-hash section, ops signals, secrets at rest
+> (`CURRENT_KEY_VERSION = 1`), the schema section, and both provider notes.
+> A sweep of the doc's backticked identifiers against `packages/` matched all
+> of them except the Accounted webhook API's own field and scope names, which
+> are the provider's, not this repo's.
 
 > **Re-verified #3093 (frontend hooks: wire keys default instead of crashing):**
 > this diff touched `hooks/useAccounting.ts`, in this document's coverage list, by

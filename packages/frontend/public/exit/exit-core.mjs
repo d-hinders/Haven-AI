@@ -270,7 +270,7 @@ export const FOREIGN_NOTE =
   "Not this account's budget: its delegator is another account, and only that account can revoke it."
 
 export const PASTED_CHILD_NOTE =
-  'Issued under another delegation, not directly by an account — revoke the budget it was issued under. Only its own delegator could disable it directly.'
+  'Not a budget: it was issued under another delegation — revoke the budget it was issued under.'
 
 export const CHILD_NOTE =
   'Issued by your agent under one of your budgets — revoke that budget. A child stops working once the budget it was issued under is revoked; only its own delegator (your agent) could disable it directly.'

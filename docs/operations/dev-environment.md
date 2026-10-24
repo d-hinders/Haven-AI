@@ -861,6 +861,20 @@ Isolation rules that are non-negotiable for a payments product:
  > unchanged (their challenges are storable). Scope of this re-read: this
  > bullet's catalog paragraphs; nothing else in the document was re-read for
  > it, and `last-verified` is not bumped.
+ > **Re-verified #4389 (2026-10-24):** the refresh probe in
+ > `modules/catalog/merchant-catalog.ts` and the discovery pre-filter in
+ > `modules/catalog/catalog-discovery.ts` now judge a challenge with the pay
+ > path's own selector (`selectX402SettlementScheme`, delegation rail) over
+ > every `accepts[]` option instead of `accepts[0]`. The recorded network is
+ > the selected option's, as CAIP-2, so `pay_to` and `asset_transfer_methods`
+ > are scoped to it rather than to `accepts[0]`'s network as the #3769 note
+ > above says. A challenge with no option the pay path could settle is a
+ > miss and degrades after the usual three, and the asset is labelled from
+ > the `@haven_ai/core` chain registry rather than defaulting to USDC. No env
+ > scalar, workflow, dev service, port or seeded row in this document
+ > changes; the seeded rows were not re-probed for this note. Scope of this
+ > re-read: this bullet's catalog paragraphs; nothing else in the document
+ > was re-read for it, and `last-verified` is not bumped.
  - **Owner company details (#3332)** — `HAVEN_OWNER_COMPANY_DETAILS` (strict
   boolean) gates `/user/company-details*`, the additive `parties.buyer`
   field on payment evidence/receipts, and the Settings → Company details

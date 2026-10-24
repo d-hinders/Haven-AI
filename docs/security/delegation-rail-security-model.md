@@ -525,8 +525,9 @@ it (409 otherwise). No merchant-locked budget is issued when:
   address (`shared`);
 - any of the offers lacks ERC-7710, read per the offer's own RECORDED
   network — `merchant_catalog.asset_transfer_methods` reflects only the
-  `accepts[]` options on that row's `accepts[0]` network (#3386, the same
-  scoping `pay_to` already used), so an offer probed on a network where the
+  `accepts[]` options on that row's recorded network that the pay path
+  could settle (#3386, #4389; the same network scoping `pay_to` uses), so an
+  offer probed on a network where the
   merchant only accepts EIP-3009 counts as lacking ERC-7710 there even if a
   DIFFERENT network's challenge names it. A pinned budget cannot pay an
   EIP-3009 merchant, per the rule in §8 below;
@@ -627,6 +628,25 @@ caveat, so the authority is still the signed caveat stack and nothing else.
 > skipped, and the run reaches later candidates. Scope of this re-read:
 > the Merchant-locked budgets section and the `merchant-catalog.ts`
 > coverage it names; the rest of the document was not re-read for it.
+
+> **Re-verified #4389 (2026-10-24):** #4389 changes how the catalog probe
+> in `merchant-catalog.ts` chooses the option it records. It now runs the
+> pay path's own selector (`selectX402SettlementScheme` from `@haven_ai/sdk`,
+> with the delegation rail) over every `accepts[]` option instead of reading
+> `accepts[0]`. The recorded network, the one `pay_to` and
+> `asset_transfer_methods` are scoped to, is the selected option's, written
+> as CAIP-2. A challenge with no option the pay path could settle (a scheme
+> other than `exact`, a network other than Base or Base Sepolia, an asset
+> other than their USDC) is now a probe MISS, so such a row degrades after
+> the usual three misses instead of staying verified. `asset_transfer_methods`
+> counts only options on the recorded network that the SDK's erc7710 or
+> EIP-3009 selector accepts, so a `permit2` option no longer reads as
+> EIP-3009. The payTo contract above is unchanged: `pay_to` is still written
+> as seen from the challenge, still collected only across options on the
+> recorded network, and still refused when they disagree. Scope of this
+> re-read: the Merchant-locked budgets section and the `merchant-catalog.ts`
+> coverage it names; the rest of the document was not re-read for it, and
+> `last-verified` is not bumped.
 
 Two limits are deliberate:
 - **Slot sharing.** A merchant-locked budget and a plain budget pinned to the

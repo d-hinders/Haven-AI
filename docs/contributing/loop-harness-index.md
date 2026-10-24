@@ -9,14 +9,16 @@ covers:
   - .github/workflows/ci.yml
   - packages/frontend/src/components/DelegationBudgetCard.tsx
   - packages/backend/src/infra/chain/delegation-budget-reader.ts
-last-verified: "2026-10-07"
+  - packages/frontend/src/lib/budget-caption.ts
+last-verified: "2026-10-24"
 ---
 
 # Loop Harness Index
 
-Last updated: 2026-10-07 (#3645 — whole index re-read at dev `009bd611`: the
-live-loop sentence, LP-1's frontend-twin note and LP-2's closing paragraph
-changed; everything else unchanged)
+Last updated: 2026-10-24 (#4372 part G — whole index re-read at dev
+`b79b112ec`: LP-2's closing paragraph changed, because #3806 replaced the
+budget card's own period roll-forward with the shared caption helper;
+everything else unchanged)
 
 The portfolio of **oracle-grounded differential loops** in this repo — see
 [`loop-engineering.md`](./loop-engineering.md) for the concept and the template.
@@ -60,10 +62,13 @@ prediction keyed off the device clock; F-3: `nextResetTime` hardcoded
 in PR #383 by threading explicit chain `nowSec` and computing the next reset
 on the period grid) remain a good story in git history. With the display math
 retired there is no frontend allowance loop. The dashboard's budget rows
-render the delegation rail's signed terms; since #3695 the agent page's budget
-card carries one piece of period arithmetic — it rolls a stale server
-`period_end` forward by whole periods, mirroring the backend's
-`currentPeriodBounds` — and no loop guards it.
+render the delegation rail's signed terms. Since #3806 every budget meter in
+the app phrases periods and refills through `budgetCaption` in
+`packages/frontend/src/lib/budget-caption.ts`. It takes the next refill from
+`currentPeriodBounds` in `@haven_ai/core`, the same function the backend's
+reads import, so there is no frontend twin of the arithmetic to diff. A read
+whose `period_end` has passed renders as unknown until the next read; the
+caption does not roll it forward. No loop guards it.
 
 ## Candidate next targets
 

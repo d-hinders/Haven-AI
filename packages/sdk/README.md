@@ -477,7 +477,8 @@ answers HTTP 410 at every agent-payment entry point.
 If an agent requests a payment outside that policy, Haven **declines it before
 any money moves** — during prepare, before any payment intent is created and
 before the agent is asked to sign. The one row written is the refusal itself,
-in the `payment_refusals` ledger (#3053). `POST /payments` answers `403` when no active delegation
+in the `payment_refusals` ledger (#2945, migration 086; written through the
+`refuse()` choke point since #3053). `POST /payments` answers `403` when no active delegation
 authorizes that token and recipient, `403 delegation_budget_exceeded` when the
 remaining period budget cannot cover the amount (#3503; the x402 authorize path
 answers the same), and `502` when the on-chain caveat check rejects a

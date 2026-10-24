@@ -222,8 +222,10 @@ a `remedy` field, the other two carry a `reason`. A fourth, chain-level line
   card with the connection list (or its load error) and **no controls** —
   the card fails closed (a client-side guard that predates #2918, which now
   also gates the connection routes server-side).
-- **`/transactions`** (#2870) — a badge per fed row: *In <provider>* (`pushed`;
-  *In Fortnox*, *In Accounted* — the name comes from the sync row),
+- **`/transactions`** (#2870) — a badge per fed row: *In Fortnox* (`pushed`
+  on Fortnox; a pushed Accounted row reads *Evidence archived*, because that
+  connector only archives the document Haven pushed — `RECORD_ONLY_PROVIDERS`
+  in `AccountingBadge.tsx`),
   *Feeding…* (`pending`), *Not fed* (`failed` / `skipped`, the `error` on
   hover), linking to `/accounting`. Emitted only when the account is
   entitled, has an ACTIVE destination in `connected` (`hasActiveConnection`
@@ -422,7 +424,7 @@ pushed row (#498), or the `exhausted:` prefix once the sweep has given up.
 
 | status | meaning | action |
 |---|---|---|
-| `pushed` | delivered; `external_ref` names the record (`fortnox:supplierinvoice:<GivenNumber>`, or `accounted:document:<id>`). `error` may carry a **note** (e.g. `receipt attachment failed: …`) — the record exists, the attachment degraded | *Check in <provider>* for live state. A scope note means the connection is `scope_missing` — the user reconnects; the record is NEVER re-pushed and the attachment is not re-captured automatically |
+| `pushed` | delivered; `external_ref` names the record (`fortnox:supplierinvoice:<GivenNumber>`, or `accounted:document:<id>`). `error` may carry a **note** (e.g. `receipt attachment failed: …`) — the record exists, the attachment degraded | *Check in <provider>*: a live read-back on Fortnox; on Accounted (`capabilities.verify: false`) the answer comes from Haven's own record, not the provider. A scope note means the connection is `scope_missing` — the user reconnects; the record is NEVER re-pushed and the attachment is not re-captured automatically |
 | `failed` | the push failed; `error` is the provider message verbatim | nothing at first — the sweep retries with backoff (1 min doubling to 1 h, 8 attempts). Persisting: fix the named cause; **Sync now** retries immediately |
 | `failed`, `error` starts `exhausted:` | the sweep gave up at attempt 8; the last reason follows the prefix; `accounting.sync.exhausted` was logged | fix the cause, then **Sync now** — the cap bounds the sweep, not the human; a manual sync re-claims the row |
 | `pending` | claimed and in flight, or a crashed in-flight push | wait; the sweep releases a `pending` older than 15 min to `failed` (attempts untouched) and re-feeds it. Do not edit the row |
@@ -1068,8 +1070,10 @@ receiver is reachable and verifying, before the first real commit.
 > connectors are live (Fortnox and Accounted, live since #3017, `registry.ts`);
 > the `api-key` row lists the route's real answers (`accounting-connections.ts`
 > and `registry.ts`'s `ProviderNotConnectableError`) instead of "no live
-> `api_key` provider today → 409"; the Transactions badge and the *Check in*
-> action name the row's provider (`AccountingBadge.tsx`, `en.ts`); the
+> `api_key` provider today → 409"; the Transactions badge says *Evidence
+> archived* for a pushed Accounted row and the *Check in* action names the
+> row's provider, a read-back only on Fortnox (`AccountingBadge.tsx`
+> `RECORD_ONLY_PROVIDERS`, `en.ts`); the
 > `pushed` row names Accounted's `external_ref` shape; the Settings card's
 > fail-closed guard no longer reads as waiting on #2918 (closed); the seller
 > block says the `Merchant` line always renders (`receipt-underlag.ts`); and

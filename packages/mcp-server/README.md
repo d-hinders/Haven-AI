@@ -138,7 +138,8 @@ Use these fully-qualified next steps when an agent discovers tools at runtime:
 
 The diagram and steps above are the EIP-3009 bridge. On erc7710 (#1456) there
 is no funding leg: `haven_pay_mcp_tool` names `haven_sign` with the
-`payment_id`, the signature it returns is the settlement delegation itself, and
+`payment_id`, the signer fetches the settlement child delegation by that
+`payment_id` and signs it, and
 `haven_settle_mcp_tool` takes `{ payment_id, signature }` with no
 `payment_header` — Haven assembles the header at settle. On both schemes the
 merchant context (`merchant_url`, `tool_name`, `arguments`, `mcp_transport`) is
@@ -215,9 +216,13 @@ before the delegate hot wallet signs anything.
 
 ## Run
 
-The package is private (not published to npm), so run it from the workspace:
+The package is private (not published to npm), so run it from the workspace
+after `npm ci`. Build `@haven_ai/core` first: its package entry points at its
+built `dist/`, so on a fresh install the mcp-server build cannot resolve
+`@haven_ai/core` until core is built.
 
 ```sh
+npm run build -w packages/core
 npm run build -w packages/mcp-server
 PORT=8788 HAVEN_API_URL=https://havenbackend-production-8a00.up.railway.app \
   npm run start -w packages/mcp-server

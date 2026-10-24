@@ -87,8 +87,8 @@ QA, confusing on stage.
 ## Act 2 — The proof (~1 min)
 
 - Dashboard → the payment: status settled and the settlement tx (a funding tx
-  too only on the EIP-3009 bridge; the demo merchant also offers erc7710, which
-  has no funding leg).
+  too only on the EIP-3009 bridge; erc7710, which the demo merchant offers when
+  `MERCHANT_X402_SETTLEMENT_METHODS` enables it, has no funding leg).
 - Click through to Sepolia Basescan: the on-chain transfer.
 - The merchant receipt (x-receipt-json → invoice) captured next to the payment.
 
@@ -103,8 +103,10 @@ anything to sign: an off-chain read of the on-chain budget answers
 `403 delegation_budget_exceeded` (#3503) — no queue, no Haven discretion (if
 that read is degraded it fails open, and the caveat enforcer refuses the
 redemption instead). Then show the agent page's budget menu → **Stop budget…**:
-revoke, and the next agent attempt gets `403 no_delegation_for_target` ("Agent
-has no active budget delegation …"). This is the "budget, inte plånbok" story.
+revoke, and the next agent attempt gets a `403` saying "Agent has no active
+budget delegation for USDC to this recipient" (no `error_code` on the wire; the
+refusal ledger records it as `no_delegation_for_target`). This is the "budget,
+inte plånbok" story.
 
 ## Act 4 — The bookkeeping (~2 min)
 
@@ -138,7 +140,8 @@ reverse-charge VAT 2645/2614), then import in Fortnox
 - If dev is down: the local stack (backend + demo merchant) per
   `docs/operations/dev-environment.md`.
 - If the demo merchant's settlement wallet is out of gas (rare on dev, but
-  check the day before): the agent's `haven_pay_mcp_tool` call refuses
+  check the day before): the agent's quote or `haven_prepare_catalog_purchase`
+  call (or `haven_pay_mcp_tool`, for a merchant addressed by hand) refuses
   cleanly with `MERCHANT_NOT_READY` and a message that the merchant's
   settlement wallet is out of gas, with its `fail_floor`, and that its
   operator must top it up before any retry succeeds (#3834) — no botched purchase, no stranded funds, no confusing
@@ -155,11 +158,17 @@ check is `/accounting` or `GET /accounting/feed/status` (there is no
 Act 1 names `haven_prepare_catalog_purchase` and `haven_settle_mcp_tool`; Act 2
 shows a funding tx only on the EIP-3009 bridge; Act 3's refusal is the
 off-chain `403 delegation_budget_exceeded` pre-check (#3503) and the revoke
-answer is `403 no_delegation_for_target` (`routes/payments.ts`); Act 4A pushes
-through the live feed, not the legacy voucher route. Re-checked without change:
-the connector-package handout, the SIE flag and export route
-(`routes/accounting.ts`, 410 otherwise), the `storage_50gb` skip-settle fixture,
-the out-of-gas `MERCHANT_NOT_READY` fallback, and the rehearsal list.
+answer is a `403` with the "no active budget delegation" message and no
+`error_code` (`routes/payments.ts`; `no_delegation_for_target` is only the
+ledger reason); Act 4A pushes through the live feed, not the legacy voucher
+route; Act 5's out-of-gas `MERCHANT_NOT_READY` comes from the quote step that
+`haven_quote_mcp_tool`, `haven_pay_mcp_tool` and both catalog tools share
+(`quoteMcpToolCall` in `catalog-purchase.ts`, the refusal in
+`tools/support/mcp-context.ts`), so it
+names `haven_prepare_catalog_purchase` first (review round 1 on #4386).
+Re-checked without change: the connector-package handout, the SIE flag and
+export route (`routes/accounting.ts`, 410 otherwise), the `storage_50gb`
+skip-settle fixture, and the rehearsal list.
 
 ## Rehearsal checklist
 

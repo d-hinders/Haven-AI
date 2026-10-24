@@ -72,7 +72,8 @@ export const GOVERNED_PACKAGE_DOCS = [
     // and the MCP/SSE paragraph name `x402RetryHeadersFor` (#3727) — the
     // MCP/SSE paragraph still said BOTH names on every scheme, the #2341
     // defect one site later; the decline paragraph no longer says "before
-    // anything is written" (refuse() writes the payment_refusals row, #3053);
+    // anything is written" (the payment_refusals row, ledger #2945 /
+    // migration 086, written through refuse() since #3053);
     // the phase table gained `insufficient_funds` / `funded_but_unsettled` and
     // the nextAction table `retry_with_explicit_context` /
     // `fund_account_or_raise_allowance`, from types.ts and their emitters
@@ -389,7 +390,11 @@ export const GOVERNED_PACKAGE_DOCS = [
     // states the erc7710 shape (catalog-purchase.ts: `haven_sign`, no
     // `payment_header`) and the optional merchant context (contracts.ts,
     // #1307); Run no longer says `npx @haven_ai/mcp-server` — the package is
-    // private (package.json; `npm view` answers E404). Prior:
+    // private (package.json; `npm view` answers E404). Review round 1: Run
+    // builds `packages/core` first (on a fresh `npm ci` the mcp-server build
+    // cannot resolve `@haven_ai/core` until core's dist/ exists) — build,
+    // start and `GET /healthz` 200 run by hand; the erc7710 sentence says the
+    // signer fetches the settlement child by payment_id and signs it. Prior:
     // #3506: EDITED, scope = the haven_submit table row (POST /sub-budgets/:id/submit
     // with sub_budget_id, exactly one id), verified against
     // tools/state-direct-recovery.ts. Nothing else re-verified. Prior:

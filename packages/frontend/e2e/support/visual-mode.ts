@@ -15,10 +15,11 @@
  *     `//*[@id="main-content"]/preceding-sibling::header[1]` (#1820) and then
  *     asserts `toHaveCount(1)` on it — `focus-visible.visual.spec.ts` says why:
  *     that assertion "closes 'matches nothing' and 'matches several'".
- *     Every `toHaveCount(1)` in the five specs is one of these — 24 call sites
- *     at the time of writing, but the instrument is the point, not the count:
- *     `grep -cE '\)\.toHaveCount\(1\)' e2e/*.visual.spec.ts` — five per-file
- *     counts summing to 24. Anchor on `).`, or the count picks up the
+ *     Every `toHaveCount(1)` in the five visual specs of the time was one of
+ *     these — 24 call sites then (229 across 22 specs today), but the
+ *     instrument is the point, not the count:
+ *     `grep -cE '\)\.toHaveCount\(1\)' e2e/*.visual.spec.ts` — then five
+ *     per-file counts summing to 24. Anchor on `).`, or the count picks up the
  *     docstrings that merely name the matcher.
  *
  *     So the structural coverage was never missing. It was unreachable: nesting
@@ -168,7 +169,7 @@ export function visualModeRefusal(opts: {
 }
 
 /**
- * The `test.skip` reason, so the five specs cannot drift into describing
+ * The `test.skip` reason, so the visual specs cannot drift into describing
  * different conditions for the same predicate.
  */
 export const VISUAL_SKIP_REASON =

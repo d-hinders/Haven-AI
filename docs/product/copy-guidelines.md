@@ -45,7 +45,7 @@ Write for users first, not for the protocol.
 
 Avoid exposing implementation details unless they are necessary for trust, transparency, or advanced users. Haven can use Safe, passkeys, smart accounts, modules, spending policies, and relayers under the hood, but most onboarding and product copy should describe the user-facing outcome.
 
-For payment execution, agent authority, Safe setup, relaying, SDK payment APIs,
+For payment execution, agent authority, account or signer setup, relaying, SDK payment APIs,
 x402/MPP, merchant, fiat/card, swap, yield, treasury, reporting/accounting, tax,
 or advice copy, also apply `docs/regulatory/casp-risk-guardrails.md`. Product
 copy must not imply that Haven holds funds, controls keys, transfers money on

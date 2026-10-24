@@ -171,12 +171,14 @@ export async function handleGetAllowances(agent: AgentContext): Promise<MppHandl
           // #1319: the provenance IS on the wire now (`remaining_is_from_chain`,
           // additive/optional — the legacy branch below never sets it). An
           // agent still cannot act on it directly (no new refusal, no new
-          // authority), but the #1306 preflight uses it to warn when the
-          // number it is reporting is the #1145 fallback rather than a live
+          // authority), but a reader of `GET /machine-payments/allowances`
+          // can tell when the number is the #1145 fallback rather than a live
           // read, instead of silently presenting an optimistic number as
-          // certain. The fallback IS the pre-#1145 answer, never a fabricated
-          // zero that would stop a funded agent — this only makes it visibly
-          // optimistic. Still logged for operators too.
+          // certain. (The catalog preflight's warning reads the same
+          // provenance from `budget-precheck` since #3054.) The fallback IS
+          // the pre-#1145 answer, never a fabricated zero that would stop a
+          // funded agent — this only makes it visibly optimistic. Still
+          // logged for operators too.
           if (!fromChain) {
             console.warn(
               `delegation-budget: on-chain remaining unavailable for delegation ${b.id} ` +

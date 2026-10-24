@@ -105,9 +105,10 @@ export function ConnectionsCard() {
   // card would offer Connect on a deployment whose feed is switched off.
   const feedOff = accountingFeedOffState(feedStatus)
   // Fail CLOSED (#2869 review): with no status answer the card cannot tell a
-  // flagged-off deployment from a hosted one, and the connection routes are
-  // reachable either way until #2918 gates them server-side — so a failed
-  // read shows the load error and NO controls, never the Connect UI.
+  // flagged-off deployment from a hosted one. Since #2918 the connection
+  // routes themselves answer 404 when the feature is off, so this is defence
+  // in depth: a failed read shows the load error and NO controls, never the
+  // Connect UI.
   const feedUnknown = !feedLoading && !feedStatus
   const {
     connections,

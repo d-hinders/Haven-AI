@@ -220,8 +220,8 @@ a `remedy` field, the other two carry a `reason`. A fourth, chain-level line
   backfill choice on connect. The product doc describes the states as the
   user sees them. A failed `GET /accounting/feed/status` read renders the
   card with the connection list (or its load error) and **no controls** —
-  the card fails closed (a client-side guard that predates #2918, which now
-  also gates the connection routes server-side).
+  the card fails closed, as defence in depth: since #2918 the connection
+  routes themselves answer 404 when the feature is off.
 - **`/transactions`** (#2870) — a badge per fed row: *In Fortnox* (`pushed`
   on Fortnox; a pushed Accounted row reads *Evidence archived*, because that
   connector only archives the document Haven pushed — `RECORD_ONLY_PROVIDERS`

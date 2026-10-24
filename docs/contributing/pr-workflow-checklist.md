@@ -43,7 +43,7 @@ work (and `main` only for a `hotfix/*`).
 - Branch from `dev` unless the work truly depends on another unmerged branch.
 - Keep the branch scoped to one shippable outcome.
 - For non-trivial feature, UX feedback, or bug-fix work, use `docs/contributing/ai-agent-workflow.md` before implementation and decide the captain, explorer, worker, and reviewer shape up front.
-- If the work touches payments, agent authority, Safe setup, relaying, SDK payment APIs, x402/MPP, fiat/card, swaps, merchant flows, yield, or advice, read `docs/regulatory/casp-risk-guardrails.md` first.
+- If the work touches payments, agent authority, account or signer setup, relaying, SDK payment APIs, x402/MPP, fiat/card, swaps, merchant flows, yield, or advice, read `docs/regulatory/casp-risk-guardrails.md` first.
 - If the work spans backend, frontend, and migrations, ask whether it should be split into multiple PRs first.
 - If the change touches migrations, assume merge risk is high and keep the branch short-lived.
 
@@ -222,7 +222,7 @@ mistake a fifth time.
 Notes:
 
 - `npm run quality` means typecheck and unit tests across workspaces, then
-  `build` — which is **not** `--workspaces` but a hand-written nine-package
+  `build` — which is **not** `--workspaces` but a hand-written ten-package
   chain, omitting `demo-merchant-mcp` (a CI gate) and `qa-agent` (not one).
   `npm run preflight` covers what it misses.
 - Docs-only CI treats Markdown, agent-skill instructions, client adapters, and `.github/pull_request_template.md` as non-code, with three exceptions (#3346 made the third). Editing `CLAUDE.md` runs the backend suite, because `packages/backend/src/docs-drift` pins the CLAUDE.md API table and chain registry to backend code. Markdown under `packages/frontend/public/` is served content rather than documentation, so it routes `frontend` — and `for-agents.md`, a generated copy of the SDK runbook, additionally routes the `sdk` and `cli` jobs that run `lint:runbook-parity` — and, through the `sdk` dependency closure, every package job (#2743). The four sources on the serve-docs allowlist (see `docs/contributing/docs-quality-system.md` § *Docs served to agents*) and `docs/exit/README.md` (read by `non-custody-no-lockin.test.ts`) route `code` + `frontend` too — `code` because the CI gate exits 0 when no code changed, before it ever reads the frontend flag — and the arm is derived from that allowlist, so a fifth served source routes the moment it is allowlisted (#3346). The classifier also diffs with `--no-renames`, so renaming a served source still routes the old spelling. Editing `.github/workflows/*.yml` triggers full workflow checks.

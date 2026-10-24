@@ -1106,9 +1106,6 @@ describe('agent connection setup routes', () => {
         agentStatus = 'pending_approval'
         return { rows: [{ id: 'agent-1' }] }
       }
-      if (text.includes('INSERT INTO agent_allowances')) {
-        return { rows: [] }
-      }
       if (text.includes('UPDATE agent_connection_setups') && text.includes('agent_id = $2')) {
         setupRows[0] = {
           ...setupRows[0],

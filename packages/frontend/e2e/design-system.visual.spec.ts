@@ -37,12 +37,13 @@
  * day and swatch order), joined later by one clip per showcase sample from
  * #3805 (four), #3845 (NoticeRow) and #3810 (activity row);
  * everything else below the shell on that page is still compared against
- * nothing. `product-routes.visual.spec.ts`'s whole-page
- * `/dashboard` and `/transactions` baselines remain the only whole-page pixel
- * coverage in the suite. The scoped sidebar and showcase-sample clips below are
- * what is left of this spec; the top-bar clip that shared the file was removed
- * with the bar itself (#4029), and the authenticated whole-page baselines carry
- * the rest of the shell.
+ * nothing. Whole-page pixel coverage lives in `product-routes.visual.spec.ts`
+ * and seven other specs that capture `fullPage: true` (analytics, demo,
+ * dev-agent-pages, home, how-it-works, marketplace, releases). The scoped
+ * sidebar and showcase-sample clips below are what is left of this spec;
+ * the top-bar clip that shared the file was removed with the bar itself
+ * (#4029), and the authenticated whole-page baselines carry the rest of the
+ * shell.
  *
  * BASELINES ARE LINUX-RENDERED (committed under e2e/__screenshots__/<spec>/,
  * one directory per spec file — there is no platform segment in the path, which

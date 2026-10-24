@@ -1642,3 +1642,10 @@ project owner — collaborators have Viewer access, not env-var write access.
 > statements above still hold. `qa-freshness.mjs` is imported by the
 > reporter, not edited. The rest of this document was not re-read for it,
 > and `last-verified` is not bumped.
+
+> **Re-verified unchanged (#4387, 2026-10-24 — comments in
+> `packages/frontend/playwright.config.ts`).** Two comments there now say
+> "the 24 visual specs" and "the visual specs" where they said "the five
+> specs". No config value, project, `testIgnore` entry or matcher changed.
+> Scope of this note: those two comments. Nothing else in this document was
+> re-read for it, and `last-verified` is not bumped.

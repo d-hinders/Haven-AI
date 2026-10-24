@@ -72,9 +72,9 @@ import {
  *                caveats (the ledger's floor date, the unrecorded price-cap
  *                class) ride an ⓘ hint on the label instead of a footnote
  *                line: elaboration on the count, not a second figure.
- *   Agents near  "N of M" — of the agents WITH budgets, how many are above
+ *   Agents near  "N/M" — of the agents WITH budgets, how many are above
  *   their budget 75% of a period budget.
- *   Fees         Only when the fee flag is ON: a fourth or fifth tile. While
+ *   Fees         Only when the fee flag is ON: a fifth tile. While
  *                Haven charges nothing the tile is absent — a $0.00 there
  *                would report "nothing charged this period", which is not
  *                the same fact, and the old flag-off tile existed only
@@ -244,7 +244,7 @@ function TileGrid({
         }
       />
       {/* The fees tile EXISTS only while the fee flag is on (#4333): it is a
-          fourth or fifth tile when Haven charges, absent when it does not.
+          fifth tile when Haven charges, absent when it does not.
           The flag-off "No fees yet" tile is retired — its one job (saying the
           product charges nothing) is done by the tile's absence, and a $0.00
           would report "nothing charged this period", a different fact. The

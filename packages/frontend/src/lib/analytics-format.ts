@@ -183,18 +183,6 @@ export function lastPaymentCaption(iso: string | null): string {
 }
 
 /**
- * Refused-count with the attempts only when they differ, as one line:
- * "2 refused payments · across 3 attempts". A dedupe upstream means rows and
- * attempts are usually equal, and spelling out "3 · 3 attempts" every time
- * would train the reader to stop parsing that cell.
- */
-export function refusalsCaption(refusedCount: number, refusedAttempts: number): string {
-  const payments = refusedCount === 1 ? 'refused payment' : 'refused payments'
-  if (refusedAttempts === refusedCount) return `${refusedCount} ${payments}`
-  return `${refusedCount} ${payments} · across ${refusedAttempts} attempts`
-}
-
-/**
  * The short address an UNKNOWN recipient shows under its "Unknown recipient"
  * label (#4333): the one truncation rule in the app (#853) — "0x71C2…7128".
  * Since #4332 the overview's `label` is either a resolved NAME or null — it

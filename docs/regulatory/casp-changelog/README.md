@@ -3,7 +3,7 @@ owner: "@AntonioSaaranen"
 status: current
 covers:
   - docs/regulatory/casp-changelog/**
-last-verified: "2026-09-30"
+last-verified: "2026-10-24"
 ---
 
 # CASP verification log — sharded entries (#1366)
@@ -34,15 +34,23 @@ also edits.
   guess never fails anything; it just persists as a mislabelled compliance
   record. Existing shards keep their names — renaming a compliance log to match a
   new convention churns history for no benefit.
-- **Content:** the same single-paragraph analysis the EOF entries carried —
+- **Content:** the same analysis the EOF entries carried —
   what changed, the authority/custody argument for why the CASP perimeter is
   unaffected (or how it narrowed), what is mutation-tested, ending with the
-  verdict sentence (`Perimeter unchanged.` or stronger). No front-matter —
+  verdict sentence (`Perimeter unchanged.` or stronger). The EOF entries were
+  one paragraph each; many shards since September, and about half of
+  October's, are a lead bullet with nested sub-bullets instead. Nothing checks a shard's shape or its verdict
+  sentence: the gate reads only whether the file was added. No front-matter —
   shards are fragments of the parent contract doc, exempted in
-  `validate-frontmatter.mjs`.
+  `validate-frontmatter.mjs`. (One early shard, `2026-08-14-1398.md`, carries
+  front matter anyway; the exemption covers it like every other shard.)
 - **The gate:** `casp-risk-guardrails.md` declares
-  `satisfied-by: docs/regulatory/casp-changelog/**` — the docs coupling gate
-  accepts a PR that adds its shard here, without touching the parent doc.
+  `satisfied-by: docs/regulatory/casp-changelog/**`, and since #1496 so does
+  `docs/architecture/04-x402-payment-sequence.md`. The docs coupling gate
+  accepts a PR that adds its shard here, without touching either parent doc;
+  one added shard clears both. Since #2323 a shard-cleared parent is still
+  named, as an advisory "coupling satisfied, body NOT re-read" finding, so the
+  reviewer knows to re-read it; it never blocks.
   The DISCIPLINE is unchanged: every money-path change still writes its
   analysis; only the storage stopped colliding. The glob matches any changed file in
   this directory, but since #2192 only an **added** one satisfies it: editing a
@@ -51,8 +59,9 @@ also edits.
   compliance rule first and a gate behaviour second.
 - **The parent doc** keeps the guardrails body and the historical EOF log
   (frozen as of 2026-08-12). Its `last-verified` now reflects genuine
-  re-verification of the BODY claims (e.g. the weekly #1248 audit), not
-  per-PR bumps.
+  re-verification of the BODY claims (for example a pass the weekly docs
+  audit asks for: `docs-audit.yml` runs on Mondays and keeps one tracking
+  issue, #3645 at present), not per-PR bumps.
 
 ## Once merged, a shard is immutable
 
@@ -126,13 +135,38 @@ version rather than an issue:
   bump itself touches (version strings and pins only)>. Perimeter unchanged.
 ```
 
-Re-verified 2026-09-30 (weekly docs audit #3413, at dev `5b5bd059`): the
-directory holds 507 shards at verification time, every one still matching the
-`YYYY-MM-DD-<issue-or-version>` convention (the batch since the last
-verification is dominated by the #2769 dRPC incident shards, the #3423
-receive-side slices, the #3330 sub-budgets shard and the 0.5.0/0.6.0/0.7.0
-release shards); the newest entries are the 2026-09-29 shards (#3423, #3426,
-#3427, #3430, #3431, #3458, #3464, #3475, #3476, #3478). The added-file gate
-behaviour, the immutability rules and the release-shard convention above are
-unchanged since the last verification (#2192 was the last behaviour change;
-the gate's added-match logic is as documented).
+Re-verified 2026-10-24 (#4372 part G, at dev `b79b112ec`), end to end:
+
+- **Count and names.** The directory holds 677 shards plus this README
+  (`git ls-tree --name-only HEAD docs/regulatory/casp-changelog/`; the same
+  command at `5b5bd059` gives 507, the previous note's count). 39 of the 677
+  do not match `YYYY-MM-DD-<issue>.md` or `YYYY-MM-DD-<version>-release.md`
+  exactly: they carry a suffix (`-1441b`, `-2769-pending-nonce`), a topic
+  slug instead of an issue (`2026-10-07-blockscout-api-key.md`) or the
+  pre-#1789 release names. 28 of those were already present at `5b5bd059`, so
+  the previous note's "every one still matching" was wrong when written. That
+  is consistent with *Nothing validates a shard filename* above:
+  `git grep casp-changelog` over `scripts/` and `.github/` finds no name check.
+  The newest shard is `2026-10-24-4387.md`; the newest release shard is
+  `2026-10-23-0.11.0-alpha.0-release.md`.
+- **Shape.** 119 of the 677 shards use nested bullets (81 of October's 161),
+  and 96 have no match for `/perimeter (is )?(unchanged|narrow)/i`
+  (`2026-10-24-4387.md` matches, as a control). The
+  *Content* bullet now says so and that nothing checks either.
+- **Gate.** The added-match rule (#2192) is `implicatedDocs` in
+  `scripts/docs/coupling-gate.mjs`, with `parseNameStatus` counting only `A`
+  lines, so a rename does not count. The previous note said #2192 was the last
+  behaviour change; #2323 came after it and reports a shard-cleared parent as
+  an advisory finding. Editing a parent doc clears it because the gate skips
+  any doc the diff touches. `04-x402-payment-sequence.md` carries the same
+  `satisfied-by` glob (#1496); the *The gate* bullet named only the CASP doc.
+- **Release naming.** `scripts/release-bump.mjs` prints
+  `docs/regulatory/casp-changelog/<date>-${newVersion}-release.md` as its next
+  step, and every release shard from 0.1.30 on follows that pattern (0.1.29's is
+  `2026-08-22-1783-release.md`, the guess the *Filename, release PRs* bullet
+  describes).
+- **Weekly audit.** #1248 is a closed instance of the weekly audit issue.
+  `docs-audit.yml` (cron `0 6 * * 1`) upserts one open tracking issue, now
+  #3645.
+- **Exemption.** `validate-frontmatter.mjs:236` exempts every file here but
+  this README.

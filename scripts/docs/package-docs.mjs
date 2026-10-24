@@ -525,7 +525,20 @@ export const GOVERNED_PACKAGE_DOCS = [
     // redeploy does" verified against http.ts (SESSION_NOT_FOUND_RECOVERY,
     // SESSION_NOT_FOUND_MESSAGE, DEFAULT_SESSION_IDLE_TTL_MS, sweepIdleSessions)
     // and http-session-restart.test.ts. Nothing else re-verified.
-    'last-verified': '2026-09-19',
+    // #4372 part G: the WHOLE README re-read at dev b79b112ec and EDITED. The
+    // product table gains vpn_legacy (EIP-3009 only, #1441); the list_products
+    // metadata list names the fields the tool emits (no resource_url there;
+    // hosted_urls is the discovery document's); settlement_method orders the
+    // 402's accepts rather than choosing one option, and Haven's clients DO
+    // read extra.assetTransferMethod (the #1450 preference); the invoice text
+    // is English by default (#1550); backend /demo/mpp/* is retired (#1328);
+    // the echo-helper list names skip-settle-guard.test.ts. Re-checked
+    // unchanged against src and the live dev/prod discovery documents and
+    // /healthz: prices, the extensions echo rule and its three strings, the
+    // session 404 and 30-minute TTL, the readiness gate's 503 body and 15 s
+    // cache, the #3170 revert split and its 120/500-character caps, the
+    // DelegationManager pin, the skip-settle guard and migration 102.
+    'last-verified': '2026-10-24',
   },
   {
     doc: 'packages/backend/src/modules/accounting/README.md',

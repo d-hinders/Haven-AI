@@ -31,7 +31,7 @@ covers:
   - packages/mcp-server/src/x402-expected-wire-contract.test.ts
   - packages/demo-merchant-mcp/src/x402.ts
   - packages/demo-merchant-mcp/src/http.ts
-last-verified: "2026-10-14"
+last-verified: "2026-10-24"
 ---
 
 # Agent QA — run the automated QA layers against dev
@@ -1989,9 +1989,10 @@ Check balances by role:
 1. Hybrid account: enough test USDC, and budget remaining in the period. No
    harness leg drives a legacy Safe identity — #2011 removed the AllowanceModule
    credentials the config used to read, and no scenario has re-added one.
-2. Dev relayer: enough Base Sepolia ETH — it sponsors the UserOps, deploys a
-   counterfactual account on its first budget activation, and submits the
-   gasless EIP-3009 sweep.
+2. Dev relayer: enough Base Sepolia ETH — it deploys a counterfactual account
+   on its first budget activation and submits the gasless EIP-3009 sweep. The
+   payment UserOps are paymaster-sponsored and never use it (#3264, the
+   funding table above).
 3. Owner: **no ETH needed since #2007.** Reseeding on the delegation rail sends
    nothing on-chain; the owner only signs.
 
@@ -2185,3 +2186,27 @@ the observer reads 10-block `eth_getLogs` windows (`GET_LOGS_MAX_RANGE` in
 - [`e2e-qa-runbook.md`](./e2e-qa-runbook.md) — manual agent/merchant coverage
 - [`dev-environment.md`](./dev-environment.md) — shared dev topology
 - [`promoting-dev-to-main.md`](./promoting-dev-to-main.md) — promotion checks
+
+> **Re-verified 2026-10-24 (#4372 part F, at dev `6d87ddf95`), a full re-read.**
+> Changed: the scenario table now follows `SCENARIOS` in
+> `packages/qa-agent/src/run.ts` (the text says "in order"), and
+> `x402-erc7710-hosted` names its two sibling legs instead of "the two legs
+> above"; the sweep fixture spends 0.0005 USDC, not 0.001 (`storage_50gb`'s
+> `price_usdc: 500n`); an unconfigured `x402-delegation-3009` skip fails the
+> run under `QA_REQUIRE_ALL_LEGS=1`, which is set; the 3009 legs run live
+> (qa-dev run 40048064262 passed all three); the wire-contract test pins v2
+> only, v1 retired by #3272; #2268 closed on 2026-09-02; the exploratory
+> prompt's within-budget step names the hosted tools beside the local
+> `haven_pay_x402`; the dev relayer does not sponsor UserOps (#3264).
+> Re-checked without change: every file path and `npm run` script the
+> document names, the seed's routes and reuse rules, the preflight floors
+> (`TREASURY_RUN_COST_ATOMIC`, `MIN_SETTLEMENT_HEADROOM_FAIL`/`_WARN`), the
+> merchant's `/healthz` and 503 bodies, the #4119 record check and its
+> 45 s / 60 s / 120 s timings, the qa-dev and qa-balances workflows (secrets,
+> variables, cron, concurrency, the green-close step), the balance and faucet
+> constants, the freshness gate and guard constants, the window line's
+> budgets, the failure classifier's signatures, the sign-failure codes and
+> their 300-character bound, `SWEEP_MIN_USDC`, the merchant session TTL and
+> #3171 data, the RPC probe flags and the observer's 10-block range, and all
+> 137 cited issues with `gh api` (#3933 and #4215 are open, `landed-partial`;
+> the text describes their shipped parts).

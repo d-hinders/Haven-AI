@@ -863,14 +863,21 @@ Isolation rules that are non-negotiable for a payments product:
  > it, and `last-verified` is not bumped.
  > **Re-verified #4389 (2026-10-24):** the refresh probe in
  > `modules/catalog/merchant-catalog.ts` and the discovery pre-filter in
- > `modules/catalog/catalog-discovery.ts` now judge a challenge with the pay
- > path's own selector (`selectX402SettlementScheme`, delegation rail) over
- > every `accepts[]` option instead of `accepts[0]`. The recorded network is
- > the selected option's, as CAIP-2, so `pay_to` and `asset_transfer_methods`
- > are scoped to it rather than to `accepts[0]`'s network as the #3769 note
- > above says. A challenge with no option the pay path could settle is a
- > miss and degrades after the usual three, and the asset is labelled from
- > the `@haven_ai/core` chain registry rather than defaulting to USDC. No env
+ > `modules/catalog/catalog-discovery.ts` now keep the `accepts[]` options
+ > the pay path keeps (the SDK's `normalizePaymentRequired` rule) and judge
+ > them with the pay path's own selector (`selectX402SettlementScheme`,
+ > delegation rail), over all of them instead of `accepts[0]`. The recorded
+ > network is the selected option's, as CAIP-2, so `pay_to` and
+ > `asset_transfer_methods` are scoped to it rather than to `accepts[0]`'s
+ > network as the #3769 note above says. A challenge with no option the pay
+ > path could settle is a miss and degrades after the usual three, and the
+ > asset is labelled from the `@haven_ai/core` chain registry on the
+ > selected option's own chain rather than defaulting to USDC. A row stored
+ > before as `base` or `base-sepolia` was left out wherever rows are
+ > filtered by CAIP-2 network (an agent's catalog view, a chain-scoped
+ > marketplace listing, merchant funding targets); its first successful
+ > refresh after #4389 rewrites it as CAIP-2, and from then on it shows up
+ > in all three. No env
  > scalar, workflow, dev service, port or seeded row in this document
  > changes; the seeded rows were not re-probed for this note. Scope of this
  > re-read: this bullet's catalog paragraphs; nothing else in the document

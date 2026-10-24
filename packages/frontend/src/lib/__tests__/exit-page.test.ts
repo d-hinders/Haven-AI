@@ -376,7 +376,7 @@ describe('exit page: what the owner sees', () => {
     const html = read(`${EXIT_DIR}/index.html`)
     // `$('account')` in any quote style and spacing: a double-quoted
     // `$("account")` is the same reference by id.
-    const ACCOUNT = String.raw`\$\(\s*['"\`]account['"\`]\s*\)`
+    const ACCOUNT = String.raw`\$\s*\(\s*['"\`]account['"\`]\s*\)`
     // No write of any form (=, ||=, &&=, ??=); every use of the field reads it.
     expect(html).not.toMatch(new RegExp(ACCOUNT + String.raw`\.value\s*(?:\|\||&&|\?\?)?=(?!=)`))
     const uses = html.match(new RegExp(ACCOUNT + '[^\\n]{0,20}', 'g')) ?? []

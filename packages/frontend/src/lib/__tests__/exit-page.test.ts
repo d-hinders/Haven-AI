@@ -326,6 +326,7 @@ describe('exit page: what the owner sees', () => {
       expect(row.dataset.kind).toBe('child')
       expect(row.querySelector('[data-revoke]')).toBeNull()
       expect(row.querySelector('[data-child]')?.textContent).toBe(exitCore.PASTED_CHILD_NOTE)
+      expect(exitCore.PASTED_CHILD_NOTE).toBe('Not a budget: it was issued under another delegation — revoke the budget it was issued under.')
       expect(row.querySelector('[data-note]')?.textContent).toBe(exitCore.PASTED_CHILD_ACTIVE_NOTE)
       const text = row.textContent ?? ''
       expect(text, acct).not.toMatch(/your agent|your budgets|that budget's row/i)

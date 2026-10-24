@@ -92,8 +92,9 @@ under **Backup & recovery**:
   *different* device (your phone as well as your laptop) it's true device
   redundancy. One prompt, no transaction
   you pay for.
-- **Add a wallet** — enrols a browser wallet address as an owner. Useful if you
-  already keep a hardware or browser wallet. Adding a wallet is reversible:
+- **Or add a wallet** (shown while the account has no wallet) — enrols a browser
+  wallet address as an owner. Useful if you already keep a hardware or browser
+  wallet. Adding a wallet is reversible:
   **Remove** next to it takes the account back to passkey-only. You can't
   remove it while it's your *only* way to approve — that would leave nothing
   able to approve anything, and the account refuses it on-chain. Removing it
@@ -144,9 +145,11 @@ you hold.
 - **Freeze, seize, or move your funds.** The delegation rail's whole point is
   that authority lives in your signers, not our servers.
 
-If Haven disappeared entirely, an account with an enrolled signer stays fully
+If Haven disappeared entirely, an account with a **wallet** signer stays fully
 recoverable through the public contracts — see the
-[independent exit path](../exit/README.md).
+[independent exit path](../exit/README.md). A passkey works only on the site it
+was created on (Haven's), so an account whose only signers are passkeys could
+no longer sign anything without Haven's site: one more reason to add a wallet.
 
 ## Legacy passkey Safes
 

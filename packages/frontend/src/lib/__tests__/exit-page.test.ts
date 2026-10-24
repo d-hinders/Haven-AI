@@ -82,8 +82,8 @@ describe('exit page: chain identity is read, not assumed', () => {
     },
   })
 
-  // The refusal, or null when assertChain accepted the RPC.
-  const refusal = (p: Promise<unknown>) => p.then(() => null, (e: Error) => e.message)
+  // The refusal's message, or 'accepted' when assertChain let the RPC through.
+  const refusal = (p: Promise<unknown>) => p.then(() => 'accepted', (e: Error) => e.message)
 
   it('accepts an RPC that serves the selected chain', async () => {
     await expect(exitCore.assertChain(answering('0x2105'), 8453)).resolves.toBeUndefined()

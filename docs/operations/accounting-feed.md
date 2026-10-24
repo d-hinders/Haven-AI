@@ -226,8 +226,12 @@ a `remedy` field, the other two carry a `reason`. A fourth, chain-level line
   on Fortnox; a pushed Accounted row reads *Evidence archived*, because that
   connector only archives the document Haven pushed — `RECORD_ONLY_PROVIDERS`
   in `AccountingBadge.tsx`),
-  *Feeding…* (`pending`), *Not fed* (`failed` / `skipped`, the `error` on
-  hover), linking to `/accounting`. Emitted only when the account is
+  *Feeding…* (`pending`), *Not fed* (`failed` / `skipped`). Since #4298 the
+  ledger row shows the pill alone (`interactive={false}` in
+  `TransactionsLedgerRow.tsx`: the row is itself a button, #4266); the
+  transaction's detail panel carries the linked badge, which opens
+  `/accounting` and shows the `error` on hover, plus a *Reason* row with the
+  same text (`TransactionDetailPanel.tsx`). Emitted only when the account is
   entitled, has an ACTIVE destination in `connected` (`hasActiveConnection`
   — a destination in `needs_reauthorisation` / `scope_missing` hides every
   badge on the page, including *In Fortnox* on rows already delivered) AND a
@@ -1073,7 +1077,9 @@ receiver is reachable and verifying, before the first real commit.
 > `api_key` provider today → 409"; the Transactions badge says *Evidence
 > archived* for a pushed Accounted row and the *Check in* action names the
 > row's provider, a read-back only on Fortnox (`AccountingBadge.tsx`
-> `RECORD_ONLY_PROVIDERS`, `en.ts`); the
+> `RECORD_ONLY_PROVIDERS`, `en.ts`), and on the ledger row it is the pill
+> alone since #4298, its link and reason living in the detail panel
+> (`TransactionsLedgerRow.tsx`, `TransactionDetailPanel.tsx`); the
 > `pushed` row names Accounted's `external_ref` shape; the Settings card's
 > fail-closed guard no longer reads as waiting on #2918 (closed); the seller
 > block says the `Merchant` line always renders (`receipt-underlag.ts`); and

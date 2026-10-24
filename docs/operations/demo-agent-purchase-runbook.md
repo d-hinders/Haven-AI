@@ -87,8 +87,10 @@ QA, confusing on stage.
 ## Act 2 — The proof (~1 min)
 
 - Dashboard → the payment: status settled and the settlement tx (a funding tx
-  too only on the EIP-3009 bridge; erc7710, which the demo merchant offers when
-  `MERCHANT_X402_SETTLEMENT_METHODS` enables it, has no funding leg).
+  too only on the EIP-3009 bridge). erc7710 has no funding leg; the demo
+  merchant advertises it only when `MERCHANT_ERC7710_DELEGATION_MANAGER` is set
+  to the pinned Haven DelegationManager for the chain and
+  `MERCHANT_X402_SETTLEMENT_METHODS`, if set, lists it.
 - Click through to Sepolia Basescan: the on-chain transfer.
 - The merchant receipt (x-receipt-json → invoice) captured next to the payment.
 
@@ -163,9 +165,12 @@ answer is a `403` with the "no active budget delegation" message and no
 ledger reason); Act 4A pushes through the live feed, not the legacy voucher
 route; Act 5's out-of-gas `MERCHANT_NOT_READY` comes from the quote step that
 `haven_quote_mcp_tool`, `haven_pay_mcp_tool` and both catalog tools share
-(`quoteMcpToolCall` in `catalog-purchase.ts`, the refusal in
-`tools/support/mcp-context.ts`), so it
-names `haven_prepare_catalog_purchase` first (review round 1 on #4386).
+(`quoteMcpToolCall`, defined with the refusal in
+`tools/support/mcp-context.ts` and called from `catalog-purchase.ts`), so it
+names `haven_prepare_catalog_purchase` first (review round 1 on #4386); Act
+2's erc7710 condition is the merchant's `MERCHANT_ERC7710_DELEGATION_MANAGER`
+pin plus its settlement-method list (`demo-merchant-mcp/src/index.ts`,
+`resolveErc7710Config`; review round 2).
 Re-checked without change: the connector-package handout, the SIE flag and
 export route (`routes/accounting.ts`, 410 otherwise), the `storage_50gb`
 skip-settle fixture, and the rehearsal list.

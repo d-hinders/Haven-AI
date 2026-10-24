@@ -234,4 +234,8 @@ the dist-tag pattern and `alpha` default (`sdk/src/connector-channel.ts`), the
 non-production refusal (`routes/agent-connection-setups.ts`
 `hostedMcpUrl`, reported rather than thrown by `routes/discovery.ts`), the
 eight-name `MCP_TOOL_NAMES` allowlist (`middleware/agentToolAudit.ts`), the
-compose port 8788, and the two CI job names.
+compose port 8788, and the CI job and step names ("MCP server checks" is a
+job, "Docker build (MCP server)" a step in it).
+
+Review round 1 (haven-doc-reviewer @ `344d7ea91`): "the two CI job names"
+became "the CI job and step names", because the Docker build is a step.

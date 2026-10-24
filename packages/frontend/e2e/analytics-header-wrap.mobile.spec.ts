@@ -74,8 +74,10 @@ async function measureHeader(page: Page) {
       return { left: Math.round(r.left), right: Math.round(r.right), top: Math.round(r.top), width: Math.round(r.width) }
     }
     const summary = facet.querySelector('span.truncate') as HTMLElement | null
+    const title = header.querySelector('h1') as HTMLElement | null
     return {
       header: box(header),
+      titleWidth: title ? Math.round(title.getBoundingClientRect().width) : 0,
       headerOverflowBy: header.scrollWidth - header.clientWidth,
       facet: box(facet),
       period: box(period),
@@ -90,12 +92,15 @@ async function open(page: Page, width: number, query: string) {
   await seedAuthenticatedSession(page)
   await page.setViewportSize({ width, height: 844 })
   await page.goto(`/analytics${query}`)
-  await expect(page.getByRole('heading', { name: 'Analytics', exact: true })).toBeVisible({ timeout: 60_000 })
+  // Attached, not visible: a header the controls push wide squeezes the title
+  // to zero width, and that must fail on the measurement below, not stall here.
+  await expect(page.getByRole('heading', { name: 'Analytics', exact: true })).toHaveCount(1, { timeout: 60_000 })
   await dismissMobileSidebar(page)
   // Non-vacuity: both controls rendered, and the filter landed when asked.
   const facetName = query === '' ? 'Agent: All agents' : `Agent: ${LONG_NAME}`
-  await expect(page.getByRole('button', { name: facetName })).toBeVisible()
-  await expect(page.getByRole('button', { name: /^Period:/ })).toBeVisible()
+  await expect(page.getByRole('button', { name: facetName })).toHaveCount(1)
+  await expect(page.getByRole('button', { name: /^Period:/ })).toHaveCount(1)
+  await page.waitForLoadState('networkidle')
 }
 
 test.describe('Analytics header controls (#4401)', () => {
@@ -108,6 +113,7 @@ test.describe('Analytics header controls (#4401)', () => {
       expect(m!.facet.right).toBeLessThanOrEqual(m!.header.right)
       expect(m!.period.right).toBeLessThanOrEqual(m!.header.right)
       expect(m!.headerOverflowBy).toBeLessThanOrEqual(1)
+      expect(m!.titleWidth, 'the title keeps its width').toBeGreaterThan(60)
       if (query !== '') {
         // The long name fills the row and truncates, so Period wraps under it.
         expect(m!.period.top).toBeGreaterThan(m!.facet.top)
@@ -121,6 +127,8 @@ test.describe('Analytics header controls (#4401)', () => {
     await open(page, 640, '?agentId=agent-research')
     const m = await measureHeader(page)
     expect(m, 'header and both controls rendered').not.toBeNull()
+    // The title is not squeezed out by the controls beside it.
+    expect(m!.titleWidth, 'the title keeps its width').toBeGreaterThan(60)
     // FacetMenu's `sm:max-w-[20rem]` bound.
     expect(m!.facet.width).toBeLessThanOrEqual(320)
     expect(m!.summaryTruncated).toBe(true)

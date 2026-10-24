@@ -82,18 +82,21 @@ describe('exit page: chain identity is read, not assumed', () => {
     },
   })
 
+  // The refusal, or null when assertChain accepted the RPC.
+  const refusal = (p: Promise<unknown>) => p.then(() => null, (e: Error) => e.message)
+
   it('accepts an RPC that serves the selected chain', async () => {
     await expect(exitCore.assertChain(answering('0x2105'), 8453)).resolves.toBeUndefined()
     await expect(exitCore.assertChain(answering('0x14a34'), 84532)).resolves.toBeUndefined()
   })
 
   it('refuses a Base Sepolia RPC with Base selected, and the reverse', async () => {
-    await expect(exitCore.assertChain(answering('0x14a34'), 8453)).rejects.toThrow(/serves chain 84532 \(Base Sepolia\), not Base \(8453\)/)
-    await expect(exitCore.assertChain(answering('0x2105'), 84532)).rejects.toThrow(/serves chain 8453 \(Base\), not Base Sepolia/)
+    expect(await refusal(exitCore.assertChain(answering('0x14a34'), 8453))).toMatch(/serves chain 84532 \(Base Sepolia\), not Base \(8453\)/)
+    expect(await refusal(exitCore.assertChain(answering('0x2105'), 84532))).toMatch(/serves chain 8453 \(Base\), not Base Sepolia/)
   })
 
   it('refuses when the chain id cannot be read', async () => {
-    await expect(exitCore.assertChain(answering(new Error('rpc down')), 8453)).rejects.toThrow(/Could not read this RPC's chain id/)
+    expect(await refusal(exitCore.assertChain(answering(new Error('rpc down')), 8453))).toMatch(/Could not read this RPC's chain id/)
   })
 
   it('the page checks the chain before every scan and check', () => {

@@ -107,15 +107,21 @@ describe('exit page: chain identity is read, not assumed', () => {
   })
 
   it('checkedManager reads only through the provider whose chain it checked', async () => {
+    // A wrongly refused provider fails here by assertion, not by a throw.
+    type Checked = { runner?: unknown; target?: unknown; refused?: string }
+    const accepted = (p: Promise<unknown>): Promise<Checked> =>
+      p.then((m) => m as Checked, (e: Error) => ({ refused: e.message }))
     const good = answering('0x2105')
-    const mgr = await exitCore.checkedManager(good, 8453)
+    const mgr = await accepted(exitCore.checkedManager(good, 8453))
+    expect(mgr).not.toHaveProperty('refused')
     expect(mgr.runner).toBe(good)
     expect(mgr.target).toBe(CHAINS[8453].manager)
     expect(await refusal(exitCore.checkedManager(answering('0x14a34'), 8453))).toMatch(/serves chain 84532/)
     expect(await refusal(exitCore.checkedManager(answering(new Error('rpc down')), 8453))).toMatch(/Could not read this RPC's chain id/)
     // It checks the chain it is given, not the default: Base Sepolia selected.
     const sepolia = answering('0x14a34')
-    const onSepolia = await exitCore.checkedManager(sepolia, 84532)
+    const onSepolia = await accepted(exitCore.checkedManager(sepolia, 84532))
+    expect(onSepolia).not.toHaveProperty('refused')
     expect(onSepolia.runner).toBe(sepolia)
     expect(onSepolia.target).toBe(CHAINS[84532].manager)
     expect(await refusal(exitCore.checkedManager(answering('0x2105'), 84532))).toMatch(/serves chain 8453 \(Base\), not Base Sepolia/)

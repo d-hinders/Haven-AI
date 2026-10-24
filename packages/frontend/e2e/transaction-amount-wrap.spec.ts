@@ -181,9 +181,10 @@ for (const width of WIDTHS) {
  * #4400: `Amount` is `whitespace-nowrap` everywhere now, so the transaction
  * detail panel's header — an `lg` fiat figure plus the exact token figure,
  * against a status badge — must make room rather than let a long figure push
- * past the panel. At 375 (stricter than the committed 390), with a long fiat
- * and a long token figure: each figure on one line, both inside the header,
- * and no page overflow.
+ * past the panel. Its figure group already wraps (`flex-wrap`), so the token
+ * figure drops to its own line; this pins that. At 375 (stricter than the
+ * committed 390), with a long fiat and a long token figure: each figure on
+ * one line, both inside the header, and no page overflow.
  */
 test('the detail panel header keeps a long fiat and a long token figure on one line each at 375 (#4400)', async ({
   page,

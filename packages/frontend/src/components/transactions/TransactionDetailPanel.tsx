@@ -486,16 +486,13 @@ export default function TransactionDetailPanel({
       }
     >
       <div data-testid="transaction-detail-header" className="mb-5">
-        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+        <div className="flex items-center justify-between gap-3">
           {/* The user's currency headlines — book-time `convertedAmount`
               plain, serve-time `approxAmount` with `≈` when the conversion
               changes the number (#4165) — and the exact token amount stays
               beside it (#3811). A move between your own accounts is neither
-              in nor out, so it passes no sign. #4400: neither figure wraps
-              (`Amount` is nowrap), so the row makes the room instead — the
-              token figure drops to its own line, and the status badge to the
-              next line when the figures fill it. */}
-          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+              in nor out, so it passes no sign. */}
+          <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
             <Amount
               amount={fiat.amount}
               currency={fiat.currency}

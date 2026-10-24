@@ -3,9 +3,16 @@
 Connect Agent 2 local connector.
 
 This command runs in the user's agent environment. It generates the agent
-signing key and API key locally, stores them locally, and sends Haven only the
-public signing address, proof signature, and API-key hash. Haven never receives
-the private key or plaintext API key.
+signing key and API key locally, stores them locally, and sends Haven the
+public signing address, a proof signature, and the API key's hash and display
+prefix. The same registration request also carries the one-time setup token
+and its challenge id, non-secret labels (runtime, connector version, MCP server
+name, run mode, connector context) and the install capabilities (whether the
+connector can write the runtime config, and whether a restart is required).
+Every request through its API client (setup resolve and register, status
+reports, the agent identity read) names the connector and its version in an
+`X-Haven-Client` header (#3303); the read-only hosted probes behind `--doctor`,
+`--unwire` and the post-install check send none. Haven never receives the private key or plaintext API key.
 
 ## Are you an AI agent whose user has no Haven account yet?
 
@@ -36,8 +43,13 @@ installs a signer that skews against it — the signer refuses to sign an
 
 The connector writes owner-only credential files outside the project by default:
 
-- `~/.haven/agents/<agent-id>/identity.json` contains the Haven API key.
-- `~/.haven/agents/<agent-id>/signer.json` contains the local signer key.
+- `~/.haven/agents/<slug>/identity.json` contains the Haven API key.
+- `~/.haven/agents/<slug>/signer.json` contains the local signer key.
+
+`<slug>` is the agent's MCP pair name: derived from its display name by
+default (#3737), or what you pass as `--name`. A `--bare` or `--replace` setup
+without `--name` uses `~/.haven/agents/<agent-id>/` instead (see
+[Running several agents in one runtime](#running-several-agents-in-one-runtime)).
 
 The API key identifies the agent. It cannot spend by itself. Payments still need
 the locally held signer key and the user-approved on-chain Haven wallet rules.
@@ -121,6 +133,7 @@ also select its OWN directory with `--doctor --name <slug>` or
 | `superseded` | It holds credentials, but no config entry points at it. Reported, never silently skipped — its API key may still spend. |
 | `retired` | Tombstoned (see below); key material removed. |
 | `orphaned` | No usable identity and no tombstone. |
+| `parked` | Holds only the `rekey-pending.json` of an unfinished `--rekey` (#1915): loose key material, no agent. |
 
 The exit code is non-zero if **any** wired agent fails **any** check
 (`level: failed` — see the next section; an advisory does not count) — not
@@ -556,8 +569,8 @@ already-configured machine behaves as follows (characterized in
 - **A default setup names its pair from the agent's display name
   ([#3737](https://github.com/d-hinders/Haven-AI/issues/3737)) and never
   collides.** Without `--name`, `--bare` or `--replace`, the connector derives
-  the slug itself (`proposeServerSlug`: slugified display name, `agent`
-  fallback, numeric suffix when taken) and wires `haven-<slug>` /
+  the slug itself (`deriveServerSlug`, over `proposeServerSlug`: slugified
+  display name, `agent` fallback, numeric suffix when taken) and wires `haven-<slug>` /
   `haven-signer-<slug>` — de-collided against **every** directory under the
   credential root (retired and key-removed ones included, so a slug freed by
   `--unwire` is never reused), and marked `-dev` on a non-production backend
@@ -604,8 +617,8 @@ already-configured machine behaves as follows (characterized in
 - **The previous agent is not revoked by a re-run — with or without
   `--replace`.** Local retirement is local: its authority remains whatever
   its on-chain rules and the Haven agent page say. Use **Remove agent…** on
-  the Haven agent page for agents you no longer use (or the superseded-agents
-  revoke on the setup screen). Connect never calls revoke — that
+  the Haven agent page for agents you no longer use; the setup screen lists
+  the other agents but offers no revoke (#3830). Connect never calls revoke — that
   route is owner-authenticated, and an agent credential revoking a sibling
   agent would be an agent editing its own authority.
 - **A re-run never overwrites an existing credential file.** A write that would
@@ -647,7 +660,8 @@ nothing already wired needs changing — it is the one flag (besides
 The slug is **1–32 lowercase letters, digits and single hyphens**, validated
 before anything is written, and **immutable once wired** — it is the server name
 and tool prefix every host depends on. `haven`, `signer` and `signer-*` are
-refused, because their derived names would collide with another pair's.
+refused, because their derived names would collide with another pair's;
+`haven-signer` is refused too.
 
 > A current connector reports the resolved server name (`haven`, or
 > `haven-<slug>`) to Haven at registration, and the dashboard shows it on each
@@ -739,9 +753,9 @@ a skew that is not there. Use the channel your dashboard hands out.
 Without the flag the doctor checks the runtime the setup recorded in the
 agent directory's `last-connect-outcome.json` (#3120), and the `runtime_config`
 verdict says which runtime it resolved and from which file; when no
-record names one, the `runtime_config` check FAILS with "Runtime is unknown —
-the runtime config was NOT checked" and the exit code is 1 — never a pass on a
-config it did not open. `--repair` rewrites that config, so the runtime it
+record names one, the `runtime_config` check FAILS ("Runtime is unknown — no
+runtime flag was given …", then "The runtime config was NOT checked.") and the
+exit code is 1 — never a pass on a config it did not open. `--repair` rewrites that config, so the runtime it
 rewrites is named on the command line rather than inherited from a record on
 disk: a flagless `--repair` is refused before anything runs.
 
@@ -771,7 +785,9 @@ probe is a note, never a verdict. Connect never revokes or deletes
 credentials itself — it reports, you decide. The setup completion output
 names the other agent directories the moment the new agent is created, for
 the same reason.
-One honest limit: "newest" is decided by file mtime, so a restored backup or
+One honest limit: when neither `--name` nor `--credentials-dir` picks the
+agent, the doctor describes the newest wired directory by file mtime, so a
+restored backup or
 a sync tool that rewrites timestamps can make doctor examine the wrong
 directory as current — before revoking anything, confirm the agent id
 against the Haven agent page, which is the authority on which agent is
@@ -785,9 +801,10 @@ the STORED credentials. It never touches keys and never needs a new token.
 from ONE agent's stored credentials. With more than one agent credential
 directory under `~/.haven/agents` — or when `--doctor` was itself given
 `--credentials-dir` — every repair line the doctor prints names the agent it is
-about with `--credentials-dir <dir>`, and a `--repair` without
+about with `--credentials-dir <dir>`, and a `--repair` without `--name` or
 `--credentials-dir` is refused — nothing is changed — with one exact command
-per live agent (its agent id beside it); a retired directory is listed as
+per live agent (its agent id and the pair it owns beside it: `--name <slug>`
+for a named pair, `--credentials-dir <dir>` for the bare one, #3799); a retired directory is listed as
 "retired — not a repair target" and never offered. Without that, "the newest directory" was a
 guess, and it re-wired a different agent than the one the doctor described.
 Every "update your signer" hint Haven emits names the flagless

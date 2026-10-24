@@ -4,13 +4,14 @@ status: current
 covers:
   - .github/workflows/**
   - .github/pull_request_template.md
+  - .github/CODEOWNERS
   - package.json
   - scripts/ci/change-classifier.mjs
   - scripts/ci/preflight.mjs
   - .agents/skills/haven-agent-workflow/references/reviewer.md
   - .agents/skills/haven-agent-workflow/references/design-reviewer.md
   - packages/frontend/package.json
-last-verified: "2026-10-10"
+last-verified: "2026-10-24"
 ---
 
 # PR Workflow Checklist
@@ -174,10 +175,10 @@ the list you quote in the PR body. An unknown flag exits 2; pass flags after `--
 The table below is the **smallest reliable set for fast iteration** — what to
 re-run in a tight loop while you are still changing code. It is deliberately
 shorter than the battery and maintained by hand, so treat it as a convenience
-and not as coverage: a backend diff selects **36** gates and this table names
-**11** of them, measured at this change's head against the workflows as they
-stand at `ce79bf0c` (the battery does not exist at that commit, so the figures
-are re-derivable here, not there).
+and not as coverage: a backend diff selects **39** gates and this table names
+**11** of them, measured with the snippet below at `b79b112ec` (2026-10-24).
+The 39 grows as the workflows gain gates; the 11 moves only when this table
+is edited.
 
 The most consequential omission is `npm run check:route-modules` (#3135), one of
 the three that reddened #3126's first CI run. Re-derive both figures — the count
@@ -209,9 +210,9 @@ mistake a fifth time.
 
 | Change type | Commands |
 | --- | --- |
-| Docs, prompts, or PR template only | `git diff --check` and `npm run docs:check` (front-matter + `covers` globs + agent-skill alignment + retired UI merge-gate wording, #2657) |
+| Docs, prompts, or PR template only | `git diff --check` and `npm run docs:check` (front-matter + `covers` globs + agent-skill alignment + README agent sections + retired UI merge-gate wording (#2657) + new `covers:` gaps) |
 | Any source file | `npm run docs:coupling` — the strict contract-doc gate, keyed on **code**, so the docs row above never covers the pure-code PR that needs it |
-| Payment, Safe, relayer, SDK payment APIs, or agent authority | Relevant package checks plus the checklist in `docs/regulatory/casp-risk-guardrails.md` |
+| Payment, account or signer setup, relayer, SDK payment APIs, or agent authority | Relevant package checks plus the checklist in `docs/regulatory/casp-risk-guardrails.md` |
 | Backend/API | `npm run typecheck -w packages/backend`, `npm run test -w packages/backend`, `npm run lint:deps` (dependency boundaries, #982), `npm run lint:db-mocks` (positional DB-mock ratchet, #1227), `npm run lint:retired-rail-prose` (retired-rail prose ratchet, #2685 — scans all of `packages/**`, not just the backend), and `npm run lint:request-schemas` (request-schema ratchet, #3029 — shrink-only over the request-validation rollout, epic #3028), `npm run lint:next-steps` (typed next-step ratchet, #3104 — scans `packages/mcp-server`, `packages/signer` and `packages/mcp`, and runs in their jobs as well as here), and `npm run lint:vocabulary` (vocabulary guard, #3131 and #3133 — adding a property to the OpenAPI transaction base fails CI until the field is declared in the vocabulary map beside the guard; it runs in **Repo CI config checks**, not *Backend checks*, because its other two inputs are on the SDK receipt surface and in the CLI, #3133) |
 | Frontend unit/UI | `npm run typecheck -w packages/frontend`, `npm run design:lint -w packages/frontend`, `npm run lint:copy`, `npm run test:local -w packages/frontend -- <paths…>` (scoped to the directories the diff touches, #4271 — the full suite is preflight's frontend gate in CI; deselect that gate locally and say so in the PR), `npm run build -w packages/frontend`, and `npm run lint:runbook-parity` (generated runbook copies, #2727 — the frontend holds pinned derivations of the SDK's canonical agent runbook) |
 | SDK | `npm run typecheck -w packages/sdk`, `npm run test -w packages/sdk`, `npm run build -w packages/sdk`, `npm run lint:runbook-parity` (generated runbook copies, #2727 — blocking in `sdk_checks`, `cli_checks` and `frontend_checks` alike), and `npm run lint:vocabulary` when the change touches the receipt mapper (#3131, as in the Backend/API row) |
@@ -223,13 +224,15 @@ Notes:
 
 - `npm run quality` means typecheck and unit tests across workspaces, then
   `build` — which is **not** `--workspaces` but a hand-written ten-package
-  chain, omitting `demo-merchant-mcp` (a CI gate) and `qa-agent` (not one).
-  `npm run preflight` covers what it misses.
+  chain, omitting `demo-merchant-mcp` and `qa-agent`. Both have a build
+  script and their own CI job (*Demo merchant checks*, *QA agent checks*),
+  and neither job is a required check. `npm run preflight` covers what
+  `quality` misses.
 - Docs-only CI treats Markdown, agent-skill instructions, client adapters, and `.github/pull_request_template.md` as non-code, with three exceptions (#3346 made the third). Editing `CLAUDE.md` runs the backend suite, because `packages/backend/src/docs-drift` pins the CLAUDE.md API table and chain registry to backend code. Markdown under `packages/frontend/public/` is served content rather than documentation, so it routes `frontend` — and `for-agents.md`, a generated copy of the SDK runbook, additionally routes the `sdk` and `cli` jobs that run `lint:runbook-parity` — and, through the `sdk` dependency closure, every package job (#2743). The four sources on the serve-docs allowlist (see `docs/contributing/docs-quality-system.md` § *Docs served to agents*) and `docs/exit/README.md` (read by `non-custody-no-lockin.test.ts`) route `code` + `frontend` too — `code` because the CI gate exits 0 when no code changed, before it ever reads the frontend flag — and the arm is derived from that allowlist, so a fifth served source routes the moment it is allowlisted (#3346). The classifier also diffs with `--no-renames`, so renaming a served source still routes the old spelling. Editing `.github/workflows/*.yml` triggers full workflow checks.
 - Frontend ESLint (`next lint`) is still not a required gate because it currently prompts for ESLint setup; add it only after a dedicated non-interactive lint migration. The blocking frontend **design and copy** gates that DO exist are design-lint (part of *Frontend checks*), the *Banned product-copy terms* copy lint (#902), and the *Design visual regression* job (#897) — both shrink-only-baseline lints fail on NEW violations only. Deliberately a scoped list, not every blocking step in *Frontend checks*: that job also runs typecheck, the wire-type ratchet, the *Visual baseline inventory* (#2318), the unit tests, the build and `lint:runbook-parity` (#2727), none of which is a design or copy gate. The visual-baseline step is the easiest of those to mistake for one: it inventories which screens have baselines, and is not the *Design visual regression* job named above.
 - The backend gate is stricter than the frontend baselines: **dependency-boundary lint** (#982, absolute since #999), a blocking step inside *Backend checks* enforcing `docs/architecture/10-module-boundaries.md` with **no baseline at all** — it fails on ANY violation. Fix the boundary; a reviewed, deliberate exception uses an inline `// dep-lint-exempt: <concrete reason>` comment on the offending import. `no-circular` can never be waived.
 - Auto-merge is gated by the required checks in the **"Haven automerge rules"** ruleset (per-surface checks plus the blocking gates such as *Banned product-copy terms*; *Design visual regression* is required on `main` only since #2632 O2 — read the live list, never a copy) — see `docs/contributing/autonomous-pr-loop.md` §One-time setup. A "blocking" job not in that list is advisory in practice.
-- **Two scheduled guards run outside the PR path and must never be added to that ruleset.** `db-concurrency-proof.yml` (nightly, #2208) re-proves end to end that a blocking `pg_advisory_lock()` waiter still deadlocks a concurrent `CREATE INDEX CONCURRENTLY` with SQLSTATE `40P01` and that the polled waiter in `packages/backend/src/db/advisory-lock.ts` still does not — the two cases stay behind `HAVEN_DB_CONCURRENCY_PROOF=1` because a `CONCURRENTLY` build's duration is unbounded inside the parallel suite (#2198), so a required check must not depend on it, and it is `paths:`-filtered on pull requests, which alone disqualifies it from the required list. `guard-freshness.yml` watches *that* job for having silently stopped — and, since #2268, also watches `qa-dev.yml`'s post-deploy trigger — the `repository_dispatch` (`dev-deployed`) one had never fired at all, and #2273 repointed the entry at its replacement, GitHub's `deployment_status` event; it counts only `deployment_status` runs whose exact SHA has a Railway-created `Haven AI / dev` deployment behind it (#2271), so the same workflow's live nightly and manual triggers cannot vouch for it, and neither `gh workflow run qa-dev.yml` nor a hand-made dispatch or Deployment will clear that finding. Neither fails a build: both escalate into one upserted issue labelled `ci-health` + `code-quality`, so the signal becomes a queue item rather than a red square people learn to ignore. A third, push-driven producer joined in #3890: `dev-push-health.yml` wakes on every completed CI run on `dev` (never on pull requests) and files its own `ci-health` + `code-quality` issue when a job on `dev` itself is red, closing it once each red job has run and passed again (or has been renamed or removed). It is not a scheduled guard and not a required check either. Reproduce the proof locally with `docker compose up -d postgres` and `HAVEN_DB_CONCURRENCY_PROOF=1 npm run test -w packages/backend -- src/infra/__tests__/db-harness-lock-concurrency.test.ts`.
+- **Two guards run outside the PR path and must never be added to that ruleset.** `db-concurrency-proof.yml` (nightly, #2208) re-proves end to end that a blocking `pg_advisory_lock()` waiter still deadlocks a concurrent `CREATE INDEX CONCURRENTLY` with SQLSTATE `40P01` and that the polled waiter in `packages/backend/src/db/advisory-lock.ts` still does not — the two cases stay behind `HAVEN_DB_CONCURRENCY_PROOF=1` because a `CONCURRENTLY` build's duration is unbounded inside the parallel suite (#2198), so a required check must not depend on it, and it is `paths:`-filtered on pull requests, which alone disqualifies it from the required list. `guard-freshness.yml` (on every push to `main` and `dev`, with a Monday cron as a floor) watches *that* job for having silently stopped — and, since #2268, also watches `qa-dev.yml`'s post-deploy trigger — the `repository_dispatch` (`dev-deployed`) one had never fired at all, and #2273 repointed the entry at its replacement, GitHub's `deployment_status` event; it counts only `deployment_status` runs whose exact SHA has a Railway-created `Haven AI / dev` deployment behind it (#2271), so the same workflow's live nightly and manual triggers cannot vouch for it, and neither `gh workflow run qa-dev.yml` nor a hand-made dispatch or Deployment will clear that finding. Neither fails a build: both escalate into one upserted issue labelled `ci-health` + `code-quality`, so the signal becomes a queue item rather than a red square people learn to ignore. A third, push-driven producer joined in #3890: `dev-push-health.yml` wakes on every completed CI run on `dev` (never on pull requests) and files its own `ci-health` + `code-quality` issue when a job on `dev` itself is red, closing it once each red job has run and passed again (or has been renamed or removed). It is not one of the two guards above and not a required check either. Reproduce the proof locally with `docker compose up -d postgres` and `HAVEN_DB_CONCURRENCY_PROOF=1 npm run test -w packages/backend -- src/infra/__tests__/db-harness-lock-concurrency.test.ts`.
 - Every PR also gets two sticky comments: doc↔code coupling (docs whose `covers:` match changed code the PR didn't touch — update the flagged doc in the same PR) and design-system coupling. The doc↔code comment is advisory **except** for docs marked `contract: true`, which the separate *Contract-doc coupling* check blocks on (#646). The doc↔code comment has a **second section** since #2323 — *"Parent docs cleared by a shard — body not re-read"* — listing contract docs whose coupling requirement a CASP shard genuinely satisfied. Nothing blocks there and the doc needs no edit; it is listed because the shard is written by the author of the change, so it certifies itself, and before #2323 such a doc was omitted from the comment entirely (which is how #2274 shipped a false sentence past a green tick). Re-read the named sections; saying "still accurate" in the PR is a legitimate outcome. Reproduce it locally with `npm run docs:coupling` — the bare `node scripts/docs/coupling-gate.mjs` always exits 0 and will not tell you what CI says.
 - **A doc sentence restating either UI merge-gate rule #2636 retired fails `docs:check` (#2657).** `node scripts/docs/ui-gate-wording.mjs` — inside `npm run docs:check`, and so inside the required *Docs front-matter & agent skills* check — reads whole file bodies and matches per SENTENCE with whitespace flattened, never line by line: #2636's ten sites took five review rounds precisely because every sweep before it was a `grep` and this repo hard-wraps its Markdown, so the canonical sentence in `.agents/skills/ship-next/SKILL.md` § *Merge Gate* survived four of them. Front matter is not scanned. Residue is a shrink-only baseline (`scripts/docs/ui-gate-wording-baseline.json`, one historical sentence in `ship-playbooks/frontend.md`); `node scripts/docs/ui-gate-wording.mjs --update` rewrites it and is for a reviewed, intentional change only — correcting the sentence is the normal answer. The live rules it protects are stated once each, in `ship-playbooks/frontend.md` §4 and §6.
 - Playwright desktop smoke is useful but currently known to be unreliable in some local environments; call out skipped or failed browser checks in the PR description.
@@ -265,3 +268,34 @@ Notes:
 - [ ] Migrations are uniquely ordered
 - [ ] PR target is `dev` (or `main` for a `hotfix/*`)
 - [ ] Conflicts with `dev` checked before merge
+
+> **Re-verified 2026-10-24 (#4372 part G, at dev `b79b112ec`), a full re-read.**
+> Changed: the backend gate count is 39, not 36 (the snippet above prints
+> `39 11`; the raw-string variant still prints 9 and the whole-document
+> variant 12). `qa-agent` has had a CI job since #3005 (*QA agent checks*),
+> so "not one" was wrong. The docs row names all five `docs:check` steps.
+> The payment row says "account or signer setup" for the retired Safe term.
+> `guard-freshness.yml` is push-driven with a weekly floor, so the two guards
+> are no longer both called scheduled.
+> Re-checked without change: `dev-gate.yml`'s `dev`/`hotfix/*` rule; the
+> three active rulesets (`gh api …/rulesets`): *Haven automerge rules* on
+> `main` and `dev`, with the 15 required checks (*Banned product-copy terms*
+> and *Design-system coupling (strict)* among them), strict policy off and
+> code-owner review required; *Dev gate* on `main`, requiring `gate`,
+> `qa-freshness`, *Design visual regression* and *Frontend browser smoke*,
+> strict policy on and code-owner review required; and *Dev merge* on `dev`,
+> requiring *External intake gate* (#4200), strict policy off and no
+> code-owner review of its own;
+> `CODEOWNERS` on migrations; every npm script the doc names; the preflight
+> flags and exit codes 0/1/2/3 and `PREFLIGHT_SILENCE_MS`; the CI jobs that
+> run `lint:next-steps`, `lint:vocabulary`, `lint:runbook-parity`,
+> `design:lint` and the backend ratchets; the classifier's CLAUDE.md,
+> `frontend/public`, allowlist and `docs/exit/README.md` arms and
+> `--no-renames`; the ten-package `build` chain; the dependency lint with no
+> baseline; the *Update visual baselines* `mode` default `changed`, the
+> *Baseline change audit* and `baseline-before-after` artifact, and
+> `BASELINE_PUSH_TOKEN` absent from `gh secret list` (which lists 12 others);
+> `verify-merged-head.mjs` taking a PR number; the coupling gate's #2323
+> section heading and its exit 0 without `--strict`; the `ui-gate-wording`
+> baseline's one sentence in `ship-playbooks/frontend.md`; the anchors into
+> `ship-playbooks/frontend.md`, `ship-next` and `autonomous-pr-loop.md`.

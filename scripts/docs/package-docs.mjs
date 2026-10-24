@@ -261,6 +261,26 @@ export const GOVERNED_PACKAGE_DOCS = [
     owner: '@d-hinders',
     status: 'current',
     covers: ['packages/connect/src/**'],
+    // #4372 part G: the WHOLE README re-read at dev b79b112ec (14 commits
+    // edited it after 2026-09-21 without moving this date; only #3210 and
+    // #3542 left a note) and EDITED.
+    // The credential paths are `~/.haven/agents/<slug>/` by default since
+    // #3737 (`<agent-id>` only for --bare/--replace without --name); the
+    // intro now names every field of the register body (api_key_prefix,
+    // setup token, challenge_id, the labels, install_capabilities) and the
+    // X-Haven-Client header (createConnectApiClient requests only, not the hosted probes), per api.ts; the doctor table gains `parked` (#1915); the runtime-unknown
+    // detail is quoted as the code writes it; the #3412 refusal accepts
+    // --name (#3799) and names each pair; "the superseded-agents revoke on
+    // the setup screen" is gone (#3830 removed it); the default slug comes
+    // from deriveServerSlug; `haven-signer` is a refused slug too. Re-checked
+    // unchanged: the backticked identifiers, each searched for in
+    // packages/connect/src with `git grep -F` (those not found there are
+    // file names, backend/SDK fields or placeholders), the runtime
+    // registry, doctor levels and check ids, teardown and prune JSON, the binding record, run_mode,
+    // the retired-agents report and its 404 tolerance, slug rules,
+    // DEFAULT_CONNECTOR_CHANNEL 'alpha', the override markers, publish.yml's
+    // five-package dev channel, and the dashboard labels the page names.
+    // Prior:
     // #3542: EDITED, scope = the "dashboard offers the revoke" paragraph (the
     // dashboard revoke now also ends the budget with one owner signature).
     // Nothing else re-verified. Prior:
@@ -297,7 +317,7 @@ export const GOVERNED_PACKAGE_DOCS = [
     // with no prior phase to quote, so they rely on the general caveat already
     // stated once at the top of the file. Nothing else re-verified. Prior:
     // '2026-09-01' carried no provenance note.
-    'last-verified': '2026-09-21',
+    'last-verified': '2026-10-24',
   },
   {
     doc: 'packages/cli/README.md',
@@ -454,6 +474,7 @@ export const GOVERNED_PACKAGE_DOCS = [
       'packages/qa-agent/src/**',
       'packages/backend/src/routes/payments.ts',
       'packages/backend/src/rails/execution-rail.ts',
+      '.github/workflows/qa-dev.yml',
     ],
     // #2756: the over-budget discriminator paragraph re-read against
     // `delegation-authorize.ts` and corrected — both x402 legs refuse at a
@@ -476,7 +497,17 @@ export const GOVERNED_PACKAGE_DOCS = [
     // Other QA scenario prose was not re-read.
     // #3896: the balances-check paragraph re-read against the raised 0.004 ETH
     // merchant target. Other QA scenario prose was not re-read.
-    'last-verified': '2026-10-12',
+    // #4372 part G: the WHOLE README re-read at dev b79b112ec and EDITED. The
+    // evals runner has two lanes (QA_EVAL_ADAPTER, #3959); qa-dev.yml runs
+    // post-deploy, nightly and on dispatch, not on dispatch alone; the local
+    // recipe builds the signer too, as the workflow does (the hosted-MCP leg
+    // imports its dist); loadQaConfig requires two vars and the rest skip
+    // their legs; the scenario list names the erc7710 sibling and the
+    // budget-authority legs. Re-checked unchanged: SCENARIOS order, the
+    // over-budget legs' 403/remaining/control assertions, revert-reason.ts
+    // deleted, the seed's routes, reuse statuses, SEED_* defaults and output
+    // block, the 410 on POST /user/safes, the balances faucet and cron.
+    'last-verified': '2026-10-24',
   },
   {
     doc: 'packages/demo-merchant-mcp/README.md',
@@ -484,7 +515,11 @@ export const GOVERNED_PACKAGE_DOCS = [
     status: 'current',
     // #3170: the README states the hosted relay's 500-character window, so a
     // change to that slice must re-implicate it.
-    covers: ['packages/demo-merchant-mcp/src/**', 'packages/mcp-server/src/tools/paid-mcp-completion.ts'],
+    covers: [
+      'packages/demo-merchant-mcp/src/**',
+      'packages/mcp-server/src/tools/paid-mcp-completion.ts',
+      'packages/sdk/src/x402.ts',
+    ],
     // #2403: the § "Extensions echo" fixture paragraph re-verified and EDITED.
     // It enumerated the echo-rule tests as a fixed list of four; #2401 made it
     // five and #2403 adds more, so the sentence now names the BRANCHES pinned
@@ -515,7 +550,21 @@ export const GOVERNED_PACKAGE_DOCS = [
     // redeploy does" verified against http.ts (SESSION_NOT_FOUND_RECOVERY,
     // SESSION_NOT_FOUND_MESSAGE, DEFAULT_SESSION_IDLE_TTL_MS, sweepIdleSessions)
     // and http-session-restart.test.ts. Nothing else re-verified.
-    'last-verified': '2026-09-19',
+    // #4372 part G: the WHOLE README re-read at dev b79b112ec and EDITED. The
+    // product table gains vpn_legacy (EIP-3009 only, #1441); the list_products
+    // metadata list names the fields the tool emits (no resource_url there;
+    // hosted_urls is the discovery document's); settlement_method orders the
+    // 402's accepts rather than choosing one option, and Haven's clients DO
+    // read extra.assetTransferMethod (the #1450 rule,
+    // selector from #1453); the invoice text
+    // is English by default (#1550); backend /demo/mpp/* is retired (#1328);
+    // the echo-helper list names skip-settle-guard.test.ts. Re-checked
+    // unchanged against src and the live dev/prod discovery documents and
+    // /healthz: prices, the extensions echo rule and its three strings, the
+    // session 404 and 30-minute TTL, the readiness gate's 503 body and 15 s
+    // cache, the #3170 revert split and its 120/500-character caps, the
+    // DelegationManager pin, the skip-settle guard and migration 102.
+    'last-verified': '2026-10-24',
   },
   {
     doc: 'packages/backend/src/modules/accounting/README.md',

@@ -27,7 +27,7 @@ covers:
   - packages/frontend/src/lib/signer.ts
   - packages/ops/**
   - packages/backend/src/routes/ops.ts
-last-verified: "2026-10-02"
+last-verified: "2026-10-23"
 ---
 
 # Haven — System Context
@@ -198,8 +198,9 @@ flowchart LR
   [signer tools](../../packages/signer/src/tools.ts)).
 - **Delegation rail (new accounts) keeps the same custody boundary with a
   different primitive.** On `account_type='delegator_hybrid'` there is no Safe
-  AllowanceModule and no Safe→delegate funding leg. The agent holds a signed
-  budget delegation (period budget + optional recipient pin + expiry); Haven
+  AllowanceModule and no Safe→delegate funding leg. The owner signs a budget
+  delegation (period budget + optional recipient pin + expiry; the build route caps
+  a new expiry at 365 days, #4351) to the agent's delegate account, and Haven stores it; Haven
   constructs a redeeming sponsored UserOp and the agent signs the account's exact
   EIP-712 typed data with its delegate key. Funds move account→recipient directly,
   metered on-chain by audited caveat enforcers during gas estimation — Haven never
@@ -217,7 +218,8 @@ flowchart LR
 - **Supported chains are Base (8453) and Base Sepolia (84532).** Base is the
   primary production network; Base Sepolia is the dev/QA testnet. Gnosis Chain
   (100) is not a Haven network; the registry still carries it (historical rows
-  render through it). Per-chain facts (token addresses, Safe contracts, explorers) live in
+  render through it). Per-chain facts (identity, token data, explorers and the
+  passkey deployment; the Safe contract addresses left it with #2849) live in
   the shared `@haven_ai/core` registry; the backend layers RPC endpoints and
   relayer configuration over it per chain
   ([core registry](../../packages/core/src/chains.ts),
@@ -228,7 +230,8 @@ flowchart LR
   [`../operations/ops-console.md`](../operations/ops-console.md)) that talks
   to a backend's `/ops/*` surface over bearer-token REST. Its boundary is
   **founder-only read, no spend authority**: sign-in is a GitHub OAuth
-  identity check against a numeric allowlist (2FA required) minting an 8-hour
+  identity check against a numeric allowlist (a sign-in GitHub reports with
+  two-factor authentication off is refused) minting an 8-hour
   ops JWT that authenticates nothing but reads; the backend re-checks the id
   on every request and every read is audited to `ops_access_log` before the
   response is sent. Nothing under `/ops` moves funds, signs, changes signers
@@ -264,3 +267,21 @@ flowchart LR
   slices; #3479 settlement recording; #3485 allowance-summary alignment)
   widened what a delegate may redeem but moved no custody boundary, actor or
   trust edge this diagram names.
+- Re-verified 2026-10-23 (#4372 part B, at dev `2d0713dad`), a full re-read.
+  Changed: the delegation-rail bullet no longer says the agent "holds" the
+  signed budget delegation. The owner signs it to the agent's delegate
+  account and Haven stores it (`agent_delegations.delegation_json`) and
+  embeds it in the redemptions it prepares; the build route caps a new expiry at 365 days (#4351,
+  `routes/agent-delegations.ts`). The chains bullet no longer lists Safe
+  contracts in the core registry (they left with #2849,
+  `packages/core/src/chains.ts`). The ops bullet no longer says "2FA
+  required": a sign-in is refused when GitHub reports
+  `two_factor_authentication: false` (`routes/ops.ts`,
+  `modules/ops/github.ts`), and one that does not report the field passes.
+  Re-checked without change: the 7-day JWT (`routes/auth.ts`), the
+  `RELAYER_PRIVATE_KEY_<chainId>` override (`config.ts`), the #2847
+  deletions (`index.ts`, `routes/safe-deploy.ts`; no `lib/safe-tx.ts`),
+  the `tools.ts` facade (#2812), the 8-hour ops token and 10-minute state
+  (`modules/ops/tokens.ts`), the audit-before-response rule and read-only
+  role (`routes/ops.ts`), the #946 fallback, and the watch-only owner
+  (`rails/delegation-rail.ts` `watchOnlyDelegateOwner`).

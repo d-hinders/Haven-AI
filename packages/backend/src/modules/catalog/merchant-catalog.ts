@@ -28,6 +28,7 @@
 import pool from '../../db.js'
 import { getChainData } from '@haven_ai/core'
 import {
+  normalizePaymentRequired,
   selectErc7710PaymentOption,
   selectStandardPaymentOption,
   selectX402SettlementScheme,
@@ -137,10 +138,14 @@ interface X402Accept {
 }
 
 /**
- * The x402 network names the pay path can settle on (the SDK's
- * `STANDARD_X402_NETWORKS`: Base and Base Sepolia, CAIP-2 or the x402 short
- * name), mapped to the chain id the row records as CAIP-2. The parity test
- * holds this list to the SDK's: a selected option always has one of these.
+ * The x402 network names the pay path can settle on, mapped to the chain id
+ * the row records as CAIP-2: Base and Base Sepolia, each as CAIP-2 or as the
+ * x402 short name. This is a copy of the SDK's `STANDARD_X402_NETWORKS`,
+ * which `@haven_ai/sdk` does not export, so no test can compare the two maps
+ * directly. Two things keep the copy honest instead: the parity test runs
+ * every name listed here through the SDK selector and expects it settled,
+ * and a selected option on a network missing from this map is a miss (see
+ * `selectCatalogPaymentOption`), never a row on a guessed chain.
  */
 const X402_NETWORK_CHAIN_ID: Record<string, number> = {
   'eip155:8453': 8453,
@@ -150,24 +155,40 @@ const X402_NETWORK_CHAIN_ID: Record<string, number> = {
 }
 
 /**
- * The `accepts[]` entries the SDK's selectors can read without throwing: an
- * object whose scheme, network, asset and amount are strings. A merchant's 402
- * is untrusted shape; anything else is simply not an option.
+ * A fixed envelope for `normalizePaymentRequired`, so the SDK applies its
+ * per-option rule to an `accepts[]` on its own (discovery has only the
+ * index's `accepts[]`, no envelope). The values are never read back: only
+ * the normalized `accepts` is used.
  */
-function wellTypedOptions(payload: unknown): X402PaymentOption[] {
-  const accepts = (payload as { accepts?: unknown })?.accepts
+const OPTION_RULE_ENVELOPE = { x402Version: 2, resource: { url: 'urn:haven:catalog-option-rule' } }
+
+/**
+ * The `accepts[]` options the pay path keeps (#4389), normalized exactly as
+ * it normalizes them. Every pay path first runs the 402 through the SDK's
+ * `normalizePaymentRequired` (`parsePaymentRequired`,
+ * `extractMcpPaymentRequired`), which drops an option whose scheme, network,
+ * asset or `payTo` is not a string, whose amount is not a positive decimal
+ * string, or whose `maxAmountRequired` is present but not one (null
+ * included). The catalog calls that same function rather than copying its
+ * rule, so the two cannot drift.
+ *
+ * Only the per-option rule is applied here. The envelope checks
+ * (`x402Version`, a resource URL) are not: the envelope above satisfies them.
+ *
+ * Total: the merchant's 402 is untrusted shape, and a dropped option is
+ * simply not an option. The SDK function does not throw on parsed JSON; the
+ * catch keeps the verdict a miss if that ever changes, and logs it (#4341)
+ * without the payload.
+ */
+function payPathOptions(payload: unknown): X402PaymentOption[] {
+  const accepts = (payload as { accepts?: unknown } | null | undefined)?.accepts
   if (!Array.isArray(accepts)) return []
-  return accepts.filter((entry): entry is X402PaymentOption => {
-    if (entry === null || typeof entry !== 'object') return false
-    const option = entry as Record<string, unknown>
-    const amount = option.maxAmountRequired ?? option.amount
-    return (
-      typeof option.scheme === 'string' &&
-      typeof option.network === 'string' &&
-      typeof option.asset === 'string' &&
-      typeof amount === 'string'
-    )
-  })
+  try {
+    return normalizePaymentRequired({ ...OPTION_RULE_ENVELOPE, accepts })?.accepts ?? []
+  } catch (err) {
+    console.warn(`[catalog] could not normalize a challenge's options: ${err instanceof Error ? err.message : String(err)}`)
+    return []
+  }
 }
 
 /** What the catalog's payability verdict selected from a challenge (#4389). */
@@ -187,8 +208,10 @@ export interface CatalogPaymentSelection {
  * THE catalog payability verdict (#4389), shared by the refresh probe and
  * discovery so the catalog judges a 402 the way the pay path does.
  *
- * It runs the pay path's own selector, `selectX402SettlementScheme` from
- * `@haven_ai/sdk`, over the WHOLE `accepts[]`, not `accepts[0]`. The rail
+ * It keeps the options the pay path keeps (`payPathOptions`, the SDK's own
+ * `normalizePaymentRequired` rule), then runs the pay path's own selector,
+ * `selectX402SettlementScheme` from `@haven_ai/sdk`, over ALL of them, not
+ * `accepts[0]`. The rail
  * half of that rule is fixed to `delegationRail: true`: the catalog has no
  * account in hand, every live account is on the delegation rail (the retired
  * rails answer 410, #1986), and `haven_quote_catalog_purchase` selects with
@@ -197,13 +220,18 @@ export interface CatalogPaymentSelection {
  * erc7710 entry, else the EIP-3009 bridge. `null` means no option is
  * payable, and the probe treats that as a miss.
  *
- * The asset is labelled from the chain registry. An asset the registry does
- * not know on that chain is not payable, never guessed: the SDK selector only
- * accepts Base and Base Sepolia USDC, so an unknown address here means the
- * two have drifted, and the safe answer is "not payable".
+ * The asset is labelled from the chain registry, on the selected option's own
+ * chain only. An asset the registry does not know on that chain is not
+ * payable, never guessed. Here the catalog is deliberately STRICTER than the
+ * SDK selector: the selector accepts either Base network's USDC address on
+ * either Base network, so it selects Base USDC on a Base Sepolia option. The
+ * backend's authorize step resolves the asset on the agent's own chain only
+ * (`resolvePaymentToken(agent.chain_id, asset)`), so no agent on that
+ * option's chain can pay it, and the catalog records a miss rather than a
+ * USDC row nobody there can buy.
  */
 export function selectCatalogPaymentOption(payload: unknown): CatalogPaymentSelection | null {
-  const selection = selectX402SettlementScheme(wellTypedOptions(payload), { delegationRail: true })
+  const selection = selectX402SettlementScheme(payPathOptions(payload), { delegationRail: true })
   if (!selection) return null
   const chainId = X402_NETWORK_CHAIN_ID[selection.option.network]
   if (chainId === undefined) return null
@@ -220,21 +248,13 @@ export function selectCatalogPaymentOption(payload: unknown): CatalogPaymentSele
 }
 
 /**
- * The registry's token for an asset address: on the option's own chain first,
- * then on the other chain the pay path settles on. The SDK selector accepts
- * either chain's USDC address on either Base network, so a merchant naming
- * Base USDC on a Base Sepolia option is payable there; labelling it from the
- * other chain keeps the catalog's verdict equal to the pay path's rather than
- * stricter.
+ * The registry's token for an asset address on the option's own chain, and
+ * only there: the chain the authorize step resolves it on (see
+ * `selectCatalogPaymentOption`).
  */
 function registryToken(asset: string, chainId: number): { symbol: string; decimals: number } | undefined {
   const lowered = asset.toLowerCase()
-  const chains = [chainId, ...new Set(Object.values(X402_NETWORK_CHAIN_ID))].filter((id, i, all) => all.indexOf(id) === i)
-  for (const id of chains) {
-    const token = getChainData(id).tokens.find((t) => t.address !== null && t.address.toLowerCase() === lowered)
-    if (token) return token
-  }
-  return undefined
+  return getChainData(chainId).tokens.find((t) => t.address !== null && t.address.toLowerCase() === lowered)
 }
 
 /** True when an `accepts[]` entry is on the given chain, whichever name it uses. */
@@ -254,7 +274,7 @@ function onChain(entry: unknown, chainId: number): boolean {
  */
 function collectAssetTransferMethods(payload: unknown, chainId: number): string[] | undefined {
   const methods: string[] = []
-  for (const option of wellTypedOptions(payload)) {
+  for (const option of payPathOptions(payload)) {
     if (!onChain(option, chainId)) continue
     const method = selectErc7710PaymentOption([option])
       ? 'erc7710'

@@ -118,7 +118,7 @@ describe('probeCatalogEntry', () => {
     const body = {
       x402Version: 2,
       accepts: [
-        { ...X402_BODY.accepts[0], network: 'eip155:84532' },
+        { ...X402_BODY.accepts[0], network: 'eip155:84532', asset: BASE_SEPOLIA_USDC },
         { ...X402_BODY.accepts[0], network: 'eip155:8453', extra: { assetTransferMethod: 'erc7710' } },
       ],
     }
@@ -136,8 +136,10 @@ describe('probeCatalogEntry', () => {
     const body = {
       x402Version: 2,
       accepts: [
-        { ...X402_BODY.accepts[0], network: 'eip155:84532' },
-        { ...X402_BODY.accepts[0], network: 'eip155:84532', extra: { assetTransferMethod: 'erc7710' } },
+        // Base Sepolia USDC on the 84532 options: since #4389 the asset is
+        // labelled on the option's own chain only, and Base USDC there is a miss.
+        { ...X402_BODY.accepts[0], network: 'eip155:84532', asset: BASE_SEPOLIA_USDC },
+        { ...X402_BODY.accepts[0], network: 'eip155:84532', asset: BASE_SEPOLIA_USDC, extra: { assetTransferMethod: 'erc7710' } },
         { ...X402_BODY.accepts[0], network: 'eip155:8453', extra: { assetTransferMethod: 'erc7710' } },
       ],
     }
@@ -460,8 +462,18 @@ describe('refreshCatalog', () => {
         return { rows: [] }
       },
     }
-    const { payTo: _dropped, ...acceptWithoutPayTo } = X402_BODY.accepts[0]
-    const body = { ...X402_BODY, accepts: [acceptWithoutPayTo] }
+    // Two options on the same chain naming different payTo addresses: the
+    // challenge is verified, but it names no single payTo. (Since #4389 an
+    // option with no payTo at all is dropped, as the pay path drops it, so a
+    // challenge whose only option lacks one is a miss rather than a row with
+    // a cleared pay_to.)
+    const body = {
+      ...X402_BODY,
+      accepts: [
+        { ...X402_BODY.accepts[0], payTo: '0x' + '44'.repeat(20) },
+        { ...X402_BODY.accepts[0], payTo: '0x' + '55'.repeat(20) },
+      ],
+    }
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(null, { status: 402, headers: { 'PAYMENT-REQUIRED': b64(body) } }),
     )

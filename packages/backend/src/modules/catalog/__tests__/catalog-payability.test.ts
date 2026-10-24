@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
-import { selectX402SettlementScheme, type X402PaymentOption } from '@haven_ai/sdk'
+import { normalizePaymentRequired, selectX402SettlementScheme } from '@haven_ai/sdk'
 import { probeCatalogEntry, selectCatalogPaymentOption, type CatalogRow } from '../merchant-catalog.js'
 import { ingestDiscoveredCatalog } from '../catalog-discovery.js'
+import { resolvePaymentToken } from '../../../domain/payment-token.js'
 
 /**
  * #4389: the catalog judges a merchant's 402 by the pay path's own scheme
@@ -30,6 +31,7 @@ const ENTRY = {
 const BASE_USDC = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
 const BASE_SEPOLIA_USDC = '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
 const PAY_TO = '0x' + '22'.repeat(20)
+const OTHER_PAY_TO = '0x' + '33'.repeat(20)
 
 /** A payable Base USDC EIP-3009 option. */
 const BASE_OPTION = {
@@ -109,6 +111,38 @@ describe('catalog payability (#4389) — the probe', () => {
     expect(result).toMatchObject({ ok: true, network: 'eip155:8453', assetTransferMethods: ['erc7710'] })
   })
 
+  it('records the payTo and the methods of the selected option\'s chain, not those of accepts[0]', async () => {
+    // EIP-3009 first on Base Sepolia, paid at one address; the payable
+    // erc7710 option is on Base, paid at another. A delegation-rail agent is
+    // quoted the Base option, so the row is a Base row paid at its payTo.
+    const sepolia = { ...BASE_OPTION, network: 'eip155:84532', asset: BASE_SEPOLIA_USDC, payTo: PAY_TO }
+    const erc7710 = { ...BASE_OPTION, payTo: OTHER_PAY_TO, extra: { assetTransferMethod: 'erc7710' } }
+    const result = await probeCatalogEntry(ENTRY, challenge([sepolia, erc7710]))
+    expect(result).toMatchObject({
+      ok: true,
+      network: 'eip155:8453',
+      payTo: OTHER_PAY_TO,
+      assetTransferMethods: ['erc7710'],
+    })
+  })
+
+  it('an option the pay path drops is not selected: no payTo, or a maxAmountRequired that is not a positive amount', async () => {
+    const erc7710NoPayTo = { ...BASE_OPTION, payTo: undefined, extra: { assetTransferMethod: 'erc7710' } }
+    const sepolia = { ...BASE_OPTION, network: 'eip155:84532', asset: BASE_SEPOLIA_USDC }
+    expect(await probeCatalogEntry(ENTRY, challenge([erc7710NoPayTo, sepolia]))).toMatchObject({
+      ok: true,
+      network: 'eip155:84532',
+      assetTransferMethods: ['eip3009'],
+    })
+    expect(await probeCatalogEntry(ENTRY, challenge([{ ...BASE_OPTION, payTo: undefined }]))).toEqual({ ok: false })
+    expect(await probeCatalogEntry(ENTRY, challenge([{ ...BASE_OPTION, maxAmountRequired: null }]))).toEqual({ ok: false })
+    expect(await probeCatalogEntry(ENTRY, challenge([{ ...BASE_OPTION, maxAmountRequired: '0' }]))).toEqual({ ok: false })
+  })
+
+  it('Base USDC on a Base Sepolia option is a miss: the catalog is stricter than the SDK selector here, as authorize is', async () => {
+    expect(await probeCatalogEntry(ENTRY, challenge([{ ...BASE_OPTION, network: 'eip155:84532' }]))).toEqual({ ok: false })
+  })
+
   it('records the x402 short network name as CAIP-2, the form agents are filtered on', async () => {
     const result = await probeCatalogEntry(ENTRY, challenge([{ ...BASE_OPTION, network: 'base-sepolia', asset: BASE_SEPOLIA_USDC }]))
     expect(result).toMatchObject({ ok: true, network: 'eip155:84532', asset: 'USDC' })
@@ -129,10 +163,23 @@ describe('catalog payability (#4389) — the probe', () => {
   })
 })
 
+/**
+ * The pay path's own verdict on a challenge: the SDK's normalization, which
+ * every pay path runs first (`parsePaymentRequired`,
+ * `extractMcpPaymentRequired`), then its scheme selection on the delegation
+ * rail.
+ */
+function payPathSelection(accepts: unknown[]) {
+  const normalized = normalizePaymentRequired({ x402Version: 2, resource: { url: ENTRY.resource_url }, accepts })
+  return normalized ? selectX402SettlementScheme(normalized.accepts, { delegationRail: true }) : null
+}
+
 describe('catalog payability (#4389) — agrees with the pay path', () => {
-  // The fixtures the probe tests use, plus the cases the SDK selector
-  // distinguishes. For each, the catalog verdict and the pay path's own
-  // selection (delegation rail) must pick the same option, or both none.
+  // The fixtures the probe tests use, plus the cases the SDK normalization
+  // and selector distinguish. For each, the catalog verdict and the pay
+  // path's own verdict must pick the same option, or both none.
+  const erc7710 = { assetTransferMethod: 'erc7710' }
+  const sepoliaOption = { ...BASE_OPTION, network: 'eip155:84532', asset: BASE_SEPOLIA_USDC }
   const cases: Array<[string, unknown[]]> = [
     ['solana then base', [SOLANA_OPTION, BASE_OPTION]],
     ['upto on base', [{ ...BASE_OPTION, scheme: 'upto' }]],
@@ -142,20 +189,43 @@ describe('catalog payability (#4389) — agrees with the pay path', () => {
     ['eip3009 then erc7710', [BASE_OPTION, { ...BASE_OPTION, amount: '25000', extra: { assetTransferMethod: 'erc7710' } }]],
     ['erc7710 only', [{ ...BASE_OPTION, extra: { assetTransferMethod: 'erc7710' } }]],
     ['permit2 only', [{ ...BASE_OPTION, extra: { assetTransferMethod: 'permit2' } }]],
+    ['a paymentFlow other than authorization', [{ ...BASE_OPTION, extra: { paymentFlow: 'permit2' } }]],
+    // Every network name the catalog maps to a chain, each settled by the
+    // SDK selector (the SDK does not export its network map).
+    ['base short name', [{ ...BASE_OPTION, network: 'base' }]],
     ['base sepolia short name', [{ ...BASE_OPTION, network: 'base-sepolia', asset: BASE_SEPOLIA_USDC }]],
-    ['mainnet USDC address on a sepolia option', [{ ...BASE_OPTION, network: 'eip155:84532' }]],
+    ['base sepolia CAIP-2', [sepoliaOption]],
     ['zero amount', [{ ...BASE_OPTION, amount: '0' }]],
     ['empty', []],
+    // The options the SDK's normalization drops before any selector runs.
+    ['A: erc7710 on base without payTo, then eip3009 on sepolia', [
+      { ...BASE_OPTION, payTo: undefined, extra: erc7710 }, sepoliaOption,
+    ]],
+    ['B: the only option has no payTo', [{ ...BASE_OPTION, payTo: undefined }]],
+    ['C: maxAmountRequired null beside a valid amount', [{ ...BASE_OPTION, maxAmountRequired: null }]],
+    ['maxAmountRequired zero beside a valid amount', [{ ...BASE_OPTION, maxAmountRequired: '0' }]],
+    ['payTo not a string', [{ ...BASE_OPTION, payTo: 42 }]],
+    ['maxAmountRequired present and valid', [{ ...BASE_OPTION, maxAmountRequired: '30000' }]],
   ]
 
   for (const [name, accepts] of cases) {
     it(`agrees on: ${name}`, () => {
-      const pay = selectX402SettlementScheme(accepts as X402PaymentOption[], { delegationRail: true })
+      const pay = payPathSelection(accepts)
       const catalog = selectCatalogPaymentOption({ accepts })
       expect(catalog?.option ?? null).toEqual(pay?.option ?? null)
       expect(catalog?.scheme ?? null).toEqual(pay?.scheme ?? null)
     })
   }
+
+  it('is deliberately stricter on Base USDC named on a Base Sepolia option, as authorize is', () => {
+    const accepts = [{ ...BASE_OPTION, network: 'eip155:84532' }]
+    // The SDK selector settles it...
+    expect(payPathSelection(accepts)).toMatchObject({ scheme: 'eip3009', option: { network: 'eip155:84532' } })
+    // ...but authorize resolves the asset on the agent's own chain, where an
+    // agent on Base Sepolia has no such token, so the catalog records a miss.
+    expect(resolvePaymentToken(84532, BASE_USDC).ok).toBe(false)
+    expect(selectCatalogPaymentOption({ accepts })).toBeNull()
+  })
 })
 
 /** A Bazaar page and a 402 for every probe; the fake db records inserts. */

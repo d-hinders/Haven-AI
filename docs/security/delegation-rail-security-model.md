@@ -661,8 +661,10 @@ caveat, so the authority is still the signed caveat stack and nothing else.
 > written as seen from the challenge, still collected only across options on
 > the recorded network, and still refused when they disagree, but a challenge
 > that is now a miss (its only option names no `payTo`, or no option is
-> payable) leaves the stored `pay_to` in place, as every miss does, until the
-> row degrades after three failed refreshes. Before, a challenge whose only
+> payable) leaves the stored `pay_to` in place, as every miss does (a miss
+> writes only the failure count, and `degraded` on the third in a row). Until
+> the row degrades, that `pay_to` keeps counting toward its merchant's
+> funding target. Before, a challenge whose only
 > option named no `payTo` verified the row and cleared `pay_to`. A pin still
 > pays only the address it was signed for. Scope of this re-read: the
 > Merchant-locked budgets section and the `merchant-catalog.ts` coverage it

@@ -1589,8 +1589,9 @@ describe('timeout shapes (#4175)', () => {
 // Every live test here runs a REAL gate with sub-second knobs and carries its
 // own `{ timeout }`: a watchdog removed by a future edit must fail RED, not
 // hang the `ci_config_checks` job (5-minute budget, no workspace install).
-// The stalling fixtures also carry a self-cap `process.exit`, so a removed
-// watchdog leaves nothing hung behind a failed red either.
+// The stalling fixtures also carry a self-cap (`process.exit`, or `exit 9` in
+// the sh gate), so a removed watchdog leaves nothing hung behind a failed red
+// either.
 describe('the silence watchdog (#4276)', () => {
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
@@ -1646,7 +1647,8 @@ describe('the silence watchdog (#4276)', () => {
     // the grandchild in the background (same process group: a non-interactive
     // shell has no job control; its stdio detached from the gate's pipes, or
     // `runGate`'s close would wait for the grandchild and a missing kill would
-    // pass late instead of failing) and heartbeats until the pid file is
+    // fail late on the test timeout instead of on its assertion) and
+    // heartbeats until the pid file is
     // non-empty. Only then does it go silent. Both loops are bounded, so a
     // grandchild that never registers still ends the gate (exit 9) and the
     // test fails red instead of hanging the file.

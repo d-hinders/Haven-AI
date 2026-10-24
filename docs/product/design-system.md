@@ -698,6 +698,11 @@ Use `components/ui/PageHeader.tsx` on authenticated pages instead of hand-rolled
   a quiet identity line is text that can break, not a control that must stay
   whole.
   Additive — a `PageHeader` without `meta` renders exactly as before.
+- A wrapping actions row (`actions`): `flex flex-wrap`, so two or more
+  controls drop to a second line at phone width. **Pass them as a fragment**
+  — a wrapper of the page's own without `flex-wrap` makes them one unbreakable
+  child, which is how `/analytics` ran 420 px wide at 390
+  ([#4401](https://github.com/d-hinders/Haven-AI/issues/4401)).
 - Optional `back` link above the title
   ([#4028](https://github.com/d-hinders/Haven-AI/issues/4028)): `{ href, label }`,
   naming the parent only ("Agents"). It renders `BackLink`
@@ -2479,7 +2484,10 @@ header is the documented list-controls PLACEMENT outside a `ListToolbar`: a
 `PeriodPicker`, exactly as a toolbar would — single-select, "All agents"
 first, the trigger tinting while a filter is set. A page that has no list
 summary line may mount the two chips directly; the toolbar is for pages that
-have one.
+have one. The two go in as a fragment, so at 390 the picker wraps under the
+facet (#4401). From `sm` the actions row sizes to max-content, so the facet
+trigger is bounded (`sm:max-w-[20rem]`) and a long selected name truncates,
+the full name staying in the trigger's accessible name.
 
 #### Behaviour
 
@@ -2513,7 +2521,8 @@ have one.
   through the same vertical `::after` overlay `Button` uses — the drawn status
   row does not change (#4150). A trigger whose SELECTED label is longer than
   the facet row truncates inside it (`max-w-full` on the trigger) instead of
-  stretching it.
+  stretching it; from `sm` the trigger is also capped at 20rem, so it
+  truncates there in a max-content row too (#4401).
 
 #### Paging (#4196)
 

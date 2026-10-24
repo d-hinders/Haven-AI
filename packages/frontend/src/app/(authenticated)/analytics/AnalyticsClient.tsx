@@ -498,7 +498,10 @@ export default function AnalyticsClient() {
         title="Analytics"
         subtitle="What your agents did with your money."
         actions={
-          <div className="flex items-center gap-3">
+          // A fragment, never a wrapper of our own (#4401): PageHeader's
+          // actions row is the one that wraps, so at 390 the Period picker
+          // drops to a second line instead of pushing the page sideways.
+          <>
             {/* The Agent facet (#4333) before the PeriodPicker, per the
                 mockup: a list-controls facet (single-select, "All agents"
                 first) that writes `?agentId=` — the key `/transactions`
@@ -513,7 +516,7 @@ export default function AnalyticsClient() {
                 a returning reader's stored window is not a filter, it is the
                 page's resting state. */}
             <PeriodPicker value={{ preset: range }} onChange={changeRange} allowAllTime={false} />
-          </div>
+          </>
         }
       />
       {agentNotice && (

@@ -289,7 +289,9 @@ export default function AgentPanel() {
         title={AGENTS_TITLE}
         subtitle={AGENTS_SUBTITLE}
         actions={
-          <div className="flex items-center gap-2">
+          // A fragment (#4401): PageHeader's own actions row wraps; a wrapper
+          // here would make the pair one unbreakable child.
+          <>
             {!showInlineSetup && (
               <Button onClick={() => panel.setConnectAgentOpen(true)}>
                 <Icon icon={Plus} className="h-4 w-4" />
@@ -314,7 +316,7 @@ export default function AgentPanel() {
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
-          </div>
+          </>
         }
       />
 

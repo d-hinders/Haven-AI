@@ -151,6 +151,22 @@ describe('Analytics — the header the capture harness waits on', () => {
     expect(copies[0].closest('button')).not.toBeNull()
   })
 
+  it("hands both controls to PageHeader's own wrapping actions row, with no wrapper of its own (#4401)", () => {
+    // A non-wrapping wrapper made the pair ONE unbreakable child, so at 390
+    // the header ran 420 px wide. Each control's root must be a DIRECT child
+    // of the row that wraps.
+    render(<AnalyticsClient />)
+    const header = screen.getByTestId('analytics-page').querySelector('header') as HTMLElement
+    const row = header.lastElementChild as HTMLElement
+    expect(row.className.split(/\s+/)).toContain('flex-wrap')
+    const facetRoot = agentFacetTrigger().parentElement
+    const periodRoot = screen.getByRole('button', { name: 'Period: Last 30 days' }).parentElement
+    expect(facetRoot?.parentElement).toBe(row)
+    expect(periodRoot?.parentElement).toBe(row)
+    // Facet first, then Period (design-system § Analytics header).
+    expect(Array.from(row.children)).toEqual([facetRoot, periodRoot])
+  })
+
   it('stacks the range control under the title below `sm` rather than beside it', () => {
     render(<AnalyticsClient />)
     const header = screen.getByTestId('analytics-page').querySelector('header') as HTMLElement

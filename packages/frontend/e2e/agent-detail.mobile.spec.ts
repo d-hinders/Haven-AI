@@ -454,6 +454,8 @@ test.describe('agent detail at 390px (#2733)', () => {
   // figure.
   const CASES = [
     { width: 375, sek: 12_345_678.9, shown: /12\s345\s678,90\s*kr/ },
+    // 1024: the narrowest `lg` — the hero's half-width column is tightest.
+    { width: 1024, sek: 123_456.78, shown: /123\s456,78\s*kr/ },
     { width: 1280, sek: 123_456.78, shown: /123\s456,78\s*kr/ },
   ] as const
   for (const { width, sek, shown } of CASES) {

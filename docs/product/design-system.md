@@ -933,7 +933,7 @@ rate AND the conversion changed the number:
 - **A list row never carries it** (#3950) — the transactions ledger, the
   account page's ledger and the dashboard's activity rows alike. Rows render
   the figure plain, and never truncate it; `Amount` itself never wraps
-  (#4400, below the modes).
+  (#4400, "A money figure never wraps" above).
 - **A booked figure never carries it** — book-time `convertedAmount` is the
   value struck when the payment happened.
 - **A token shown in the currency it is pegged to never carries it** — USDC in

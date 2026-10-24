@@ -224,7 +224,7 @@ $('checkPasted').onclick = async () => {
   $('revStatus').textContent = ''
   try {
     const mgr = await checkedManager(provider(), chainId())
-    await showDelegation($('pasted'), del, { manager: mgr, account: $('account').value.trim(), onDetails: revocationDetails })
+    await showDelegation($('pasted'), del, { manager: mgr, account: $('account').value.trim(), onDetails: revocationDetails, source: 'paste' })
   } catch (e) { $('revStatus').textContent = 'Could not check it: ' + (e.message || e) }
 }
 </script>

@@ -152,7 +152,8 @@ issued under), lists budgets first, marks each child "issued by your agent under
 one of your budgets — revoke that budget", and gives no calldata for it. A
 child's own status is not its authority: it reads "not revoked on its own" while
 its budget decides. Revoking the budget ends the child too, because redemption
-checks every link.
+checks every link. A child you paste is not placed under any account: it reads
+"issued under another delegation … revoke the budget it was issued under".
 
 Enter your **account's** address, not your wallet's: a Haven account is a smart
 account with its own address, and the wallet you connect is one of its signers.

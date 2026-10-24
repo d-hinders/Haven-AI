@@ -140,6 +140,11 @@ export const STATUS_VIEW = {
  * A child's own flag says nothing about its budget: it stops working when the
  * budget it was issued under is revoked, whatever its own flag says.
  */
+// A pasted child has no budget row next to it, and the page cannot tell whose
+// budget it was issued under: its copy claims no ownership.
+export const PASTED_CHILD_ACTIVE_NOTE =
+  'Not revoked on its own; it stops when the budget it was issued under is revoked.'
+
 export const CHILD_ACTIVE_NOTE =
   "Not revoked on its own; it stops when the budget it was issued under is revoked — see that budget's row."
 
@@ -147,9 +152,11 @@ export const CHILD_ACTIVE_NOTE =
  * The view for a status; anything unrecognised is shown as unknown. A child
  * delegation's not-revoked note claims no authority of its own.
  */
-export function statusView(status, kind = 'root') {
+export function statusView(status, kind = 'root', source = 'scan') {
   const view = Object.hasOwn(STATUS_VIEW, status) ? STATUS_VIEW[status] : STATUS_VIEW.unknown
-  return kind === 'child' && view === STATUS_VIEW.active ? { ...view, note: CHILD_ACTIVE_NOTE } : view
+  return kind === 'child' && view === STATUS_VIEW.active
+    ? { ...view, note: source === 'paste' ? PASTED_CHILD_ACTIVE_NOTE : CHILD_ACTIVE_NOTE }
+    : view
 }
 
 export const ROOT_AUTHORITY = '0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff'
@@ -262,6 +269,9 @@ export function rootFirst(dels) {
 export const FOREIGN_NOTE =
   "Not this account's budget: its delegator is another account, and only that account can revoke it."
 
+export const PASTED_CHILD_NOTE =
+  'Issued under another delegation, not directly by an account — revoke the budget it was issued under. Only its own delegator could disable it directly.'
+
 export const CHILD_NOTE =
   'Issued by your agent under one of your budgets — revoke that budget. A child stops working once the budget it was issued under is revoked; only its own delegator (your agent) could disable it directly.'
 
@@ -269,10 +279,11 @@ export const CHILD_NOTE =
  * One delegation row. Every delegation field goes in as text, never as HTML:
  * a pasted object or an RPC answer is untrusted.
  */
-export function delegationRow(doc, del, { hash, kind, foreign = false }) {
+export function delegationRow(doc, del, { hash, kind, foreign = false, source = 'scan' }) {
   const row = doc.createElement('div')
   row.className = 'del'
   row.dataset.kind = kind
+  row.dataset.source = source
   const top = doc.createElement('div')
   top.className = 'row'
   top.style.justifyContent = 'space-between'
@@ -297,7 +308,7 @@ export function delegationRow(doc, del, { hash, kind, foreign = false }) {
   note.dataset.note = ''
   row.append(
     top,
-    line('delegator', `delegator ${del.delegator}${kind === 'child' ? ' (your agent)' : foreign ? ' (not this account)' : ''}`),
+    line('delegator', `delegator ${del.delegator}${kind === 'child' && source === 'scan' ? ' (your agent)' : foreign ? ' (not this account)' : ''}`),
     line('hash', `hash ${hash}`),
     line('salt', `salt ${del.salt} · ${del.caveats.length} caveat(s)`),
     note,
@@ -306,7 +317,7 @@ export function delegationRow(doc, del, { hash, kind, foreign = false }) {
     const child = doc.createElement('div')
     child.className = 'muted'
     child.dataset.child = ''
-    child.textContent = CHILD_NOTE
+    child.textContent = source === 'paste' ? PASTED_CHILD_NOTE : CHILD_NOTE
     row.append(child)
   } else {
     if (foreign) {
@@ -334,7 +345,7 @@ export function delegationRow(doc, del, { hash, kind, foreign = false }) {
 
 /** Show a status on a row: the pill and note come from statusView alone. */
 export function applyStatus(row, status) {
-  const view = statusView(status, row.dataset.kind)
+  const view = statusView(status, row.dataset.kind, row.dataset.source)
   const pill = row.querySelector('[data-pill]')
   pill.textContent = view.label
   pill.className = `pill ${view.cls}`
@@ -347,11 +358,11 @@ export function applyStatus(row, status) {
  * child, disableDelegation from the owner's account reverts); a root budget of
  * another account says so.
  */
-export async function showDelegation(container, del, { manager, account, onDetails }) {
+export async function showDelegation(container, del, { manager, account, onDetails, source = 'scan' }) {
   const hash = delegationHash(del)
   const kind = delegationKind(del)
   const foreign = kind === 'root' && !isAccountsBudget(del, account)
-  const row = delegationRow(container.ownerDocument, del, { hash, kind, foreign })
+  const row = delegationRow(container.ownerDocument, del, { hash, kind, foreign, source })
   container.appendChild(row)
   applyStatus(row, await readStatus(manager, hash))
   const button = row.querySelector('[data-revoke]')

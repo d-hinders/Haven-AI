@@ -113,18 +113,29 @@ describe('exit page: chain identity is read, not assumed', () => {
     expect(mgr.target).toBe(CHAINS[8453].manager)
     expect(await refusal(exitCore.checkedManager(answering('0x14a34'), 8453))).toMatch(/serves chain 84532/)
     expect(await refusal(exitCore.checkedManager(answering(new Error('rpc down')), 8453))).toMatch(/Could not read this RPC's chain id/)
+    // It checks the chain it is given, not the default: Base Sepolia selected.
+    const sepolia = answering('0x14a34')
+    const onSepolia = await exitCore.checkedManager(sepolia, 84532)
+    expect(onSepolia.runner).toBe(sepolia)
+    expect(onSepolia.target).toBe(CHAINS[84532].manager)
+    expect(await refusal(exitCore.checkedManager(answering('0x2105'), 84532))).toMatch(/serves chain 8453 \(Base\), not Base Sepolia/)
   })
 
   it('the page checks the chain before every scan and check', () => {
     const html = read(`${EXIT_DIR}/index.html`)
     // Both entry points get their manager only through core's checkedManager,
-    // on the one provider the page builds; nothing else builds a contract or
-    // a provider.
+    // on the one JSON-RPC provider the page builds. The only other provider is
+    // the wallet's, built in the Connect handler to show the signer, and no
+    // contract is ever re-connected to it.
     expect(html.match(/const mgr = await checkedManager\(provider\(\), chainId\(\)\)/g)).toHaveLength(2)
     expect(html.match(/checkedManager\(/g)).toHaveLength(2)
     expect(html).not.toMatch(/new Contract\(|\bContract\b.*from '\.\/vendor/)
     expect(html.match(/new JsonRpcProvider\(/g)).toHaveLength(1)
     expect(html).toMatch(/function provider\(\) \{ return new JsonRpcProvider\(/)
+    expect(html.match(/new BrowserProvider\(/g)).toHaveLength(1)
+    expect(html).toMatch(/\$\('connect'\)\.onclick = async \(\) => \{\n[^\n]*\n  const bp = new BrowserProvider\(window\.ethereum\)\n/)
+    expect(html.match(/new \w*Provider\(/g)).toHaveLength(2)
+    expect(html).not.toMatch(/\.connect\(|getDefaultProvider/)
   })
 })
 
@@ -234,12 +245,13 @@ describe('exit page: what the owner sees', () => {
       return answer
     },
   })
-  const show = async (del: unknown, answer: unknown, opts: { account?: string; onDetails?: () => void } = {}) => {
+  const show = async (del: unknown, answer: unknown, opts: { account?: string; onDetails?: () => void; source?: string } = {}) => {
     const container = document.createElement('div')
     const row = await exitCore.showDelegation(container, exitCore.toPlainDelegation(del), {
       manager: answering(answer),
       account: opts.account ?? account,
       onDetails: opts.onDetails ?? (() => {}),
+      ...(opts.source ? { source: opts.source } : {}),
     })
     return { container, row, pill: row.querySelector('[data-pill]') as HTMLElement }
   }
@@ -299,6 +311,24 @@ describe('exit page: what the owner sees', () => {
     expect((await show(child, true)).row.querySelector('[data-note]')?.textContent).toBe(exitCore.STATUS_VIEW.revoked.note)
   })
 
+  // A pasted child may not be under this account's budget at all, and there is
+  // no budget row beside it: its copy claims no ownership and points to the
+  // budget it was issued under.
+  it('tells a pasted child to revoke the budget it was issued under, claiming no owner', async () => {
+    for (const acct of [account, '0x4444444444444444444444444444444444444444', '']) {
+      const { row } = await show(child, false, { account: acct, source: 'paste' })
+      expect(row.dataset.kind).toBe('child')
+      expect(row.querySelector('[data-revoke]')).toBeNull()
+      expect(row.querySelector('[data-child]')?.textContent).toBe(exitCore.PASTED_CHILD_NOTE)
+      expect(row.querySelector('[data-note]')?.textContent).toBe(exitCore.PASTED_CHILD_ACTIVE_NOTE)
+      const text = row.textContent ?? ''
+      expect(text, acct).not.toMatch(/your agent|your budgets|that budget's row/i)
+      expect(text).toContain('revoke the budget it was issued under')
+    }
+    expect(exitCore.PASTED_CHILD_ACTIVE_NOTE).toMatch(/^Not revoked on its own; it stops when the budget it was issued under is revoked\.$/)
+    expect(read(`${EXIT_DIR}/index.html`)).toMatch(/await showDelegation\(\$\('pasted'\), del, \{[^}]*source: 'paste' \}\)/)
+  })
+
   // Connect wallet gives the owner's signer (an EOA); a Haven account is a
   // smart account. A root budget pasted with that address entered is still a
   // root budget: it says it is not this account's, and keeps its details.
@@ -337,7 +367,12 @@ describe('exit page: what the owner sees', () => {
 
   it('never fills the account field with the connected wallet', () => {
     const html = read(`${EXIT_DIR}/index.html`)
-    expect(html).not.toMatch(/\$\('account'\)\.value\s*=/)
+    // No write of any form (=, ||=, &&=, ??=); every use of the field reads it.
+    expect(html).not.toMatch(/\$\('account'\)\.value\s*(?:\|\||&&|\?\?)?=(?!=)/)
+    const uses = html.match(/\$\('account'\)[^\n]{0,20}/g) ?? []
+    expect(uses.length).toBeGreaterThan(0)
+    for (const use of uses) expect(use, use).toMatch(/^\$\('account'\)\.value\.trim\(\)/)
+    expect(html).not.toMatch(/getElementById\(['"]account['"]\)|#account/)
     expect(html).toContain('Connected signer ${ownerAddr}')
   })
 

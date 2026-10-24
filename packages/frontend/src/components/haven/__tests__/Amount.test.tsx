@@ -155,3 +155,18 @@ describe('Amount — currency mode (#3805)', () => {
     expect(el.className).toContain('v2-tabular')
   })
 })
+
+describe('Amount never wraps (#4400)', () => {
+  it('every mode renders a whitespace-nowrap span — currency, token, unknown, every size', () => {
+    const spans = [
+      render(<Amount amount={1748.5} currency="SEK" approx size="md" />).container.firstElementChild,
+      render(<Amount value="0.123456789" symbol="USDC" />).container.firstElementChild,
+      render(<Amount amount={null} currency="USD" size="lg" />).container.firstElementChild,
+      render(<Amount amount={12} currency="EUR" size="sm" direction="out" />).container.firstElementChild,
+    ]
+    for (const span of spans) {
+      expect(span?.tagName).toBe('SPAN')
+      expect(span?.className.split(/\s+/)).toContain('whitespace-nowrap')
+    }
+  })
+})

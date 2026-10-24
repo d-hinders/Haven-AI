@@ -888,6 +888,15 @@ pre-formatted, unsigned string (`value`) with an optional `symbol`, the sign
 coming only from `direction` — callers own formatting, so a `+`/`-` can never
 disagree with the tone.
 
+**A money figure never wraps (#4400).** `Amount`'s own span is
+`whitespace-nowrap`, in both modes and at every size, so the rule holds for
+every caller, not only list cells: "≈ 1 748,50 kr" never breaks into "≈" /
+"1 748,50" / "kr". The layout gives the figure room instead — a grid that
+stacks below `sm`, a row that wraps between figures — and an `Amount` must
+never sit in a track too narrow for its longest realistic figure. The rule
+covers `Amount`; a raw `formatFiat` string placed outside it is the caller's
+to keep whole.
+
 The **currency mode** (#3805) is for a figure that is already a fiat
 valuation server-side (book-time `convertedAmount`, or `approxAmount`): pass
 the unsigned magnitude (`amount`), the currency it is IN (`currency: 'SEK' |
@@ -923,8 +932,8 @@ rate AND the conversion changed the number:
 
 - **A list row never carries it** (#3950) — the transactions ledger, the
   account page's ledger and the dashboard's activity rows alike. Rows render
-  the figure plain inside a `whitespace-nowrap` cell, so a money figure never
-  wraps or truncates.
+  the figure plain, and never truncate it; `Amount` itself never wraps
+  (#4400, below the modes).
 - **A booked figure never carries it** — book-time `convertedAmount` is the
   value struck when the payment happened.
 - **A token shown in the currency it is pegged to never carries it** — USDC in
@@ -1075,7 +1084,12 @@ by hand rather than from `StatTile`, deliberately: `StatTile.value` is a
 `string` and cannot carry an `Amount` (its "≈" and currency mode), and
 `StatTile` lives in `packages/ui`, shared with ops. Its values sit at the
 secondary-figure size (20px, `Amount size="md"`), not the inline tile's
-`text-base`; a long value wraps inside its cell, never truncates.
+`text-base`; a money figure never wraps (#4400, `Amount` is nowrap), so the
+layout gives it room: below `sm` Spent takes the whole first row and Payments
+and Last paid share the second; from `sm` the three sit across in equal
+thirds, and Spent's track widens past its third
+(`minmax(max-content, 1fr)`) only when a larger figure needs it. Nothing
+truncates.
 
 ### Money panel (#3807)
 

@@ -176,3 +176,80 @@ for (const width of WIDTHS) {
     expect(overflow, `horizontal overflow @ ${width}`).toBeLessThanOrEqual(0.5)
   })
 }
+
+/**
+ * #4400: `Amount` is `whitespace-nowrap` everywhere now, so the transaction
+ * detail panel's header — an `lg` fiat figure plus the exact token figure,
+ * against a status badge — must make room rather than let a long figure push
+ * past the panel. At 375 (stricter than the committed 390), with a long fiat
+ * and a long token figure: each figure on one line, both inside the header,
+ * and no page overflow.
+ */
+test('the detail panel header keeps a long fiat and a long token figure on one line each at 375 (#4400)', async ({
+  page,
+}) => {
+  const row = JSON.parse(JSON.stringify(dashboardTransaction)) as typeof dashboardTransaction
+  row.hash = `0x${'ab'.repeat(32)}`
+  row.fundingTxHash = row.hash
+  row.approxAmount = '12345678.9000'
+  row.valueFormatted = '12345678.123456'
+  await page.route('**/api/transactions*', async (route) => {
+    const url = new URL(route.request().url())
+    if (route.request().method() === 'GET' && url.pathname === '/api/transactions') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          transactions: [row],
+          total: 1,
+          offset: 0,
+          limit: 25,
+          hasMore: false,
+          partialFailure: false,
+          failedAccountIds: [],
+          truncated: false,
+        }),
+      })
+      return
+    }
+    await route.fallback()
+  })
+
+  await page.setViewportSize({ width: 375, height: 900 })
+  await page.goto('/transactions')
+  await dismissMobileSidebar(page)
+  const ledger = page.getByTestId('transactions-ledger')
+  await ledger.locator('[role="button"][aria-haspopup="dialog"]').first().click()
+  const header = page.getByRole('dialog').getByTestId('transaction-detail-header')
+  await expect(header).toBeVisible()
+  // Non-vacuity: both long figures reached the header.
+  await expect(header).toContainText(/12[ ,  ]?345[ ,  ]?678/)
+  await expect(header).toContainText('12345678.123456')
+
+  const reading = await header.evaluate((el) => {
+    const box = el.getBoundingClientRect()
+    const AMOUNT = /\d[\d.,   ]*\s*(?:USDC|kr|€|\$)|[$€]\s?\d/u
+    const amounts = Array.from(el.querySelectorAll('span.v2-tabular')).filter((span) =>
+      AMOUNT.test(span.textContent ?? ''),
+    )
+    return amounts.map((span) => {
+      const range = document.createRange()
+      range.selectNodeContents(span)
+      const r = span.getBoundingClientRect()
+      return {
+        text: (span.textContent ?? '').replace(/ /g, ' ').trim(),
+        lines: new Set(Array.from(range.getClientRects()).map((rect) => Math.round(rect.top))).size,
+        inside: r.left >= box.left - 1 && r.right <= box.right + 1,
+      }
+    })
+  })
+  expect(reading.length, JSON.stringify(reading)).toBeGreaterThanOrEqual(2)
+  for (const amount of reading) {
+    expect(amount, JSON.stringify(reading)).toMatchObject({ lines: 1, inside: true })
+  }
+
+  const overflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  )
+  expect(overflow, 'horizontal overflow @ 375').toBeLessThanOrEqual(0.5)
+})

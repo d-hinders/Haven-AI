@@ -731,7 +731,8 @@ rule). `?grant=` keeps working alongside `?tab=`. Sections, in order:
    ("Payments paused in Haven — its budget is still live on-chain."); the
    caption itself is unchanged. A budget at or past 90% used renders the
    warning meter. **Last 30 days** comes from the dashboard overview's
-   per-agent stats as three labelled figures across the column (#4260):
+   per-agent stats as three labelled figures across the column (#4260; two
+   rows below `sm` — Spent alone, then Payments and Last paid, #4400):
    **Spent** — #3803's NET figure in the display currency, the same
    booked-or-repriced, sweep-netted number the dashboard's money card and
    agents section read, so the two surfaces cannot disagree (#4274; an

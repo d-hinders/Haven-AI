@@ -1834,8 +1834,15 @@ describe('DelegationBudgetCard hero states (#4226)', () => {
     expect(screen.getByText('Last 30 days')).toBeTruthy()
     const grid = screen.getByText('Spent', { selector: 'dt' }).closest('dl')!
     // Plain matchers over the class list, so a miss is an AssertionError.
-    expect([...grid.classList]).toEqual(expect.arrayContaining(['grid', 'grid-cols-3']))
+    // #4400: two rows below `sm` (Spent alone, then Payments and Last paid),
+    // three across from `sm` — changed on purpose from #4260's grid-cols-3.
+    expect([...grid.classList]).toEqual(expect.arrayContaining(['grid', 'grid-cols-2', 'sm:grid-cols-[minmax(max-content,1fr)_minmax(0,1fr)_minmax(0,1fr)]']))
+    expect([...grid.classList]).not.toContain('grid-cols-3')
     expect(grid.querySelectorAll(':scope > div')).toHaveLength(3)
+    const spentCell = grid.querySelector(':scope > div') as HTMLElement
+    expect([...spentCell.classList]).toEqual(expect.arrayContaining(['col-span-2', 'sm:col-span-1']))
+    // #4400: no break-words on the Spent cell — the figure never wraps.
+    expect([...figure('Spent').classList]).not.toContain('break-words')
     // Spent is Amount size="md": text-xl on the Amount span itself (#4259).
     // #4274: the figure is d30's NET — 8.25, never the 12.50 gross the hero
     // used to read and the dashboard does not show.
@@ -1950,8 +1957,12 @@ describe('DelegationBudgetCard hero states (#4226)', () => {
     mockGet.mockReturnValue([heroBudget()])
     render(<DelegationBudgetCard {...PROPS} statsLoading />)
     const skeleton = screen.getByLabelText('Loading the last 30 days')
-    // #4260: three label-and-value bar pairs, the shape of the figures.
-    expect(skeleton.querySelector('.grid-cols-3')?.children).toHaveLength(3)
+    // #4260: three label-and-value bar pairs, the shape of the figures —
+    // #4400: in the loaded layout's grid (two rows below `sm`).
+    const bars = skeleton.querySelector('.grid-cols-2')
+    expect([...(bars?.classList ?? [])]).toContain('sm:grid-cols-3')
+    expect(bars?.children).toHaveLength(3)
+    expect([...(bars?.children[0]?.classList ?? [])]).toEqual(expect.arrayContaining(['col-span-2', 'sm:col-span-1']))
   })
 
   it('a retired agent renders no Last 30 days column, even when handed stats', () => {

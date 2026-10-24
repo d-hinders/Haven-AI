@@ -655,7 +655,8 @@ refused, because their derived names would collide with another pair's.
 > browser ([#1878](https://github.com/d-hinders/Haven-AI/issues/1878)). It is a
 > label, not authority — nothing keys off it.
 >
-> Agents connected before that shipped read **"MCP name not recorded"**: Haven
+> Agents connected before that shipped show **not recorded** in the *MCP server
+> name* row of their Settings tab: Haven
 > genuinely does not know, and guessing would name the wrong pair for anyone who
 > used `--name`. They keep working exactly as they are; `--doctor` on the machine
 > still maps them, and reconnecting records the name.

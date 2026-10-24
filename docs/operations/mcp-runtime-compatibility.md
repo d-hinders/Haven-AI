@@ -6520,3 +6520,12 @@ to call next in structured fields, and those fields are typed end to end
 > `next_tool` value, status projection or expected-context version changes.
 > Scope of this note: those import lines. Nothing else in this document was
 > re-verified.
+
+> **Re-verified unchanged (#4387, 2026-10-24 — one sentence in
+> `packages/connect/README.md`).** The README now says agents connected
+> before the MCP server name was recorded show **not recorded** in the *MCP
+> server name* row of their Settings tab, instead of quoting a "MCP name not
+> recorded" label the dashboard does not render. No connector behaviour,
+> flag or published version changed. Scope of this note: that sentence.
+> Nothing else in this document was re-read for it, and `last-verified` is
+> not bumped.

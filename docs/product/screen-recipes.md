@@ -167,7 +167,7 @@ Money and risk clarity:
 - Do not say `AllowanceModule`, `delegate`, `policy engine`, or `session key` in primary UI.
 
 States:
-- Empty: prompt the user to create or link a Haven account before creating an agent budget.
+- Empty: prompt the user to create a Haven account before creating an agent budget.
 - Loading: preserve card dimensions while loading accounts or balances.
 - Error: explain what the user can do next, such as choosing another wallet or trying again.
 - Success: move to the review or ready state rather than showing a dead-end confirmation.
@@ -1189,7 +1189,7 @@ Structure:
    caveats (the ledger's floor date, the unrecorded price-cap class) ride an
    ⓘ `Tooltip` hint on the Refused label — `StatTile`'s optional `hint`
    (#4333), an elaboration on the count, not essential copy. *Fees paid to
-   Haven* renders ONLY while `fees.flag_on` is true (fourth or fifth tile);
+   Haven* renders ONLY while `fees.flag_on` is true (a fifth tile);
    while Haven charges nothing the tile is absent — a $0.00 would report
    "nothing charged this period", which is not the same fact — and the
    gas-sponsored count rides the tile when it exists. (`StatTile` lives in

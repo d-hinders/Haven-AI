@@ -58,7 +58,7 @@ Use `docs/contributing/ai-review-patterns.md` as shared memory for recurring PR 
 
 Before final review, the captain should do a risk-specific self-check based on the changed surface:
 
-- regulatory perimeter: for payment execution, agent authority, Safe setup, relaying, SDK payment APIs, x402/MPP, merchant, fiat/card, swap, yield, treasury, or advice surfaces, apply `docs/regulatory/casp-risk-guardrails.md`
+- regulatory perimeter: for payment execution, agent authority, account or signer setup, relaying, SDK payment APIs, x402/MPP, merchant, fiat/card, swap, yield, treasury, or advice surfaces, apply `docs/regulatory/casp-risk-guardrails.md`
 - transactions and feeds: raw vs formatted values, totals, dedupe, pagination, source labels, and cross-surface consistency
 - budget grants, revocation and re-key — the owner signatures that DO exist: status transitions, migrations or constraints, expiry, activation and replacement behavior, and post-action copy. Not a per-payment approval queue: an over-budget payment is declined on-chain, never held (#1440/#2055 deleted the queue, its routes and its table; `pendingApprovals` is a hardcoded 0 kept for wire compatibility, so "notification counts" and "single vs multi-approval behavior" name nothing the app can render)
 - send, receive, contacts, and other modals: primary action hierarchy, scroll, z-index, close behavior, typing behavior, duplicate handling, and network context

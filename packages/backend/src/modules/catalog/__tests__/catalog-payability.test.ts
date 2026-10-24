@@ -108,9 +108,17 @@ describe('catalog payability (#4389) — the probe', () => {
   })
 
   it('an option whose fields are not strings is not an option — a clean miss, no throw', async () => {
-    expect(await probeCatalogEntry(ENTRY, challenge([{ ...BASE_OPTION, amount: 1000 }]))).toEqual({ ok: false })
-    expect(await probeCatalogEntry(ENTRY, challenge([{ ...BASE_OPTION, asset: 42 }]))).toEqual({ ok: false })
-    expect(await probeCatalogEntry(ENTRY, challenge([null, BASE_OPTION]))).toMatchObject({ ok: true })
+    // A throw would still read as a miss (#4300), but it is logged as a parse
+    // bug (#4341); a mistyped option is not a bug, so nothing is logged.
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      expect(await probeCatalogEntry(ENTRY, challenge([{ ...BASE_OPTION, amount: 1000 }]))).toEqual({ ok: false })
+      expect(await probeCatalogEntry(ENTRY, challenge([{ ...BASE_OPTION, asset: 42 }]))).toEqual({ ok: false })
+      expect(await probeCatalogEntry(ENTRY, challenge([null, BASE_OPTION]))).toMatchObject({ ok: true })
+      expect(warnSpy).not.toHaveBeenCalled()
+    } finally {
+      warnSpy.mockRestore()
+    }
   })
 })
 

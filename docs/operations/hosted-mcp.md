@@ -9,7 +9,7 @@ covers:
   - packages/backend/src/routes/agent-connection-setups.ts
   - packages/backend/src/routes/discovery.ts
   - packages/sdk/src/x402-funding-leg.ts
-last-verified: "2026-10-05"
+last-verified: "2026-10-24"
 ---
 
 # Deploy — Hosted MCP server (`@haven_ai/mcp-server`)
@@ -49,7 +49,7 @@ for the wire contract and the custody invariant.
    Haven repo.
 2. **Build → Dockerfile path:** `packages/mcp-server/Dockerfile`.
    (Leave context as the repo root — the Dockerfile copies workspace
-   `package.json`s and builds the SDK before the server.)
+   `package.json`s and builds `@haven_ai/core`, then the SDK, before the server.)
 3. **Variables:**
    - `HAVEN_API_URL` = the existing backend's public URL,
      e.g. `https://havenbackend-production-8a00.up.railway.app`.
@@ -105,7 +105,7 @@ for the wire contract and the custody invariant.
 ## Local development
 
 ```sh
-# Brings up backend + frontend + mcp-server (builds an image only when it is
+# Brings up postgres + backend + frontend + mcp-server (builds an image only when it is
 # missing — after a code change, run `docker compose up -d --build`):
 npm run docker:up
 # Hosted MCP: http://localhost:8788 (POST /v1, GET /healthz)
@@ -219,3 +219,19 @@ intervening commits:
   on the variable merely being set.
 
 `covers:` gains the backend and SDK files those claims rest on.
+
+Re-verified 2026-10-24 (#4372 part F, at dev `6d87ddf95`), a full re-read.
+Changed: the Dockerfile builds `@haven_ai/core` before the SDK and the server
+(`packages/mcp-server/Dockerfile`), and `npm run docker:up` also starts
+`postgres` (`docker-compose.yml`). Re-checked without change: the
+`HAVEN_DELEGATE_KEY` non-blank refusal (`boot.ts`), the keyless
+`createHostedHavenClient` (`server.ts`), `GET`/`HEAD /healthz` answering
+`{"status":"ok"}` and a missing Bearer token answering 401 (`http.ts`), the
+access-log fields (`log.ts`), `HAVEN_MCP_PATH` defaulting to `/v1` (`cli.ts`),
+the dist-tag pattern and `alpha` default (`sdk/src/connector-channel.ts`), the
+`BASE_RPC_URL` one-confirmation wait of up to 30 s on 8453
+(`sdk/src/x402-funding-leg.ts`), the hosted-URL resolution and its
+non-production refusal (`routes/agent-connection-setups.ts`
+`hostedMcpUrl`, reported rather than thrown by `routes/discovery.ts`), the
+eight-name `MCP_TOOL_NAMES` allowlist (`middleware/agentToolAudit.ts`), the
+compose port 8788, and the two CI job names.

@@ -551,6 +551,10 @@ const SCENARIOS: Scenario[] = [
   {
     name: 'filtered',
     query: '?agentId=agent-research',
+    // The UNFILTERED body on purpose: this scenario pins the header (the
+    // facet set to a long name), not a filtered report — the Agents table
+    // below still lists both agents. A filtered body is not a fixture shape
+    // the harness declares (#4401 design review, nit).
     body: analyticsOverview,
     async assert(page, vp) {
       // The filter landed: the facet names the long agent and tints.

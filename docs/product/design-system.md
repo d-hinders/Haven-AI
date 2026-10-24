@@ -2521,7 +2521,8 @@ the full name staying in the trigger's accessible name.
   through the same vertical `::after` overlay `Button` uses — the drawn status
   row does not change (#4150). A trigger whose SELECTED label is longer than
   the facet row truncates inside it (`max-w-full` on the trigger) instead of
-  stretching it.
+  stretching it; from `sm` the trigger is also capped at 20rem, so it
+  truncates there in a max-content row too (#4401).
 
 #### Paging (#4196)
 

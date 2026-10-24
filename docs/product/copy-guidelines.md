@@ -112,7 +112,7 @@ Avoid leading with:
 - “Smart wallet”
 - “Safe smart account”
 
-The account's technical name (a smart account — a MetaMask Hybrid DeleGator on the live rail) can be shown later in account details, transaction details, advanced settings, or developer-facing documentation. Safe itself is no longer part of the product: the Safe rail is retired (epic #1440) and legacy Safe accounts are not rendered anywhere in Haven (#2413), so do not introduce it as the account's name.
+The account's technical name (a smart account — a MetaMask Hybrid DeleGator on the live rail) can be shown later in account details, transaction details, advanced settings, or developer-facing documentation. Safe itself is no longer part of the product: the Safe rail is retired (epic #1440) and legacy Safe accounts are not shown on any account, agent or dashboard screen since #2413 (transaction history still lists them), so do not introduce it as the account's name.
 
 ### Use “Haven wallet” for where the user's treasury funds are held
 

@@ -261,6 +261,25 @@ export const GOVERNED_PACKAGE_DOCS = [
     owner: '@d-hinders',
     status: 'current',
     covers: ['packages/connect/src/**'],
+    // #4372 part G: the WHOLE README re-read at dev b79b112ec (14 commits
+    // edited it after 2026-09-21 without moving this date; only #3210 and
+    // #3542 left a note) and EDITED.
+    // The credential paths are `~/.haven/agents/<slug>/` by default since
+    // #3737 (`<agent-id>` only for --bare/--replace without --name); the
+    // intro names everything register sends (api_key_prefix, setup token,
+    // labels); the doctor table gains `parked` (#1915); the runtime-unknown
+    // detail is quoted as the code writes it; the #3412 refusal accepts
+    // --name (#3799) and names each pair; "the superseded-agents revoke on
+    // the setup screen" is gone (#3830 removed it); the default slug comes
+    // from deriveServerSlug; `haven-signer` is a refused slug too. Re-checked
+    // unchanged: every backticked identifier against connect/src (159
+    // tokens; the 16 not found there are file names, backend/SDK
+    // fields or placeholders), the runtime registry, doctor levels and
+    // check ids, teardown and prune JSON, the binding record, run_mode,
+    // the retired-agents report and its 404 tolerance, slug rules,
+    // DEFAULT_CONNECTOR_CHANNEL 'alpha', the override markers, publish.yml's
+    // five-package dev channel, and the dashboard labels the page names.
+    // Prior:
     // #3542: EDITED, scope = the "dashboard offers the revoke" paragraph (the
     // dashboard revoke now also ends the budget with one owner signature).
     // Nothing else re-verified. Prior:
@@ -297,7 +316,7 @@ export const GOVERNED_PACKAGE_DOCS = [
     // with no prior phase to quote, so they rely on the general caveat already
     // stated once at the top of the file. Nothing else re-verified. Prior:
     // '2026-09-01' carried no provenance note.
-    'last-verified': '2026-09-21',
+    'last-verified': '2026-10-24',
   },
   {
     doc: 'packages/cli/README.md',

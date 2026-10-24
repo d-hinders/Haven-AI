@@ -635,7 +635,10 @@ caveat, so the authority is still the signed caveat stack and nothing else.
 > with the delegation rail) over every `accepts[]` option instead of reading
 > `accepts[0]`. The recorded network, the one `pay_to` and
 > `asset_transfer_methods` are scoped to, is the selected option's, written
-> as CAIP-2. A challenge with no option the pay path could settle (a scheme
+> as CAIP-2. A payable erc7710 option is always selected first, so a challenge
+> that names one on either Base network is recorded on that network; the
+> bullet's "lacking ERC-7710 there" case now needs the other network's
+> erc7710 option to be one the pay path could not settle. A challenge with no option the pay path could settle (a scheme
 > other than `exact`, a network other than Base or Base Sepolia, an asset
 > other than their USDC) is now a probe MISS, so such a row degrades after
 > the usual three misses instead of staying verified. `asset_transfer_methods`

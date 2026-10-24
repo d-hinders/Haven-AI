@@ -374,7 +374,7 @@ The deterministic harness runs seventeen scenarios in order:
 | `x402-delegation-3009-sweep` | The other half of the bridge: a delegation-rail 3009 payment the merchant **verifies but never settles** strands funds on the delegate EOA, and the gasless sweep returns them to the treasury. Needs `MERCHANT_SKIP_SETTLE_PRODUCT=storage_50gb` and `SWEEP_MIN_USDC=0` on dev; **skips** rather than fails when either is unset, since a settling merchant is an unmet precondition, not a regression |
 | `x402-erc7710-settle` | The delegation rail's PRIMARY x402 path: authorize (payTo = merchant) builds a narrowed child delegation, the delegate signs it, `POST /x402/:id/settle` wraps the header, and the MERCHANT redeems `[child, budget]` on-chain — treasury pays the merchant **directly**, budget metered by the settlement itself (treasury −amount exactly), **delegate EOA untouched** (no funding leg — the #713 stranded-funds class structurally absent). Needs `MERCHANT_X402_ERC7710=1` + `MERCHANT_ERC7710_DELEGATION_MANAGER` on the dev merchant; skips (→ run FAILS under #1066) with that exact remedy when the merchant is 3009-only |
 | `x402-erc7710-fresh-agent` | The COLD START (#1674, regression net for #1667): a per-run throwaway identity (its agent revoked when the leg ends, #3459) whose delegate hybrid account is asserted counterfactual on-chain (`getCode` = `0x` before any payment), then the agent's FIRST-EVER payment runs the erc7710 settlement — asserting authorize deployed the account (code exists between authorize and settle, pinning WHERE the deploy happens), the merchant redemption settles treasury→merchant exactly, and the delegate EOA is untouched. The between-authorize-and-settle `getCode` is **polled to a 30 s deadline** (#2445), because the harness reads `QA_RPC_URL_BASE_SEPOLIA` (defaulting to the public `https://sepolia.base.org`, `packages/qa-agent/src/lib/chain.ts`) while the backend writes through `RPC_URL_BASE_SEPOLIA` — deliberately a second node, which is what makes the money proofs independent rather than self-reported, and which therefore lags a deploy the backend confirmed at one confirmation. When that poll runs out the leg fails saying **this node has not caught up**, not that the deploy did not run: authorize is fail-closed on the deploy (an unconfirmed or reverted deploy 502s), so a 200 means the backend's node saw the account deployed. Funded per run from the standing identity; same env needs as `x402-erc7710-settle` |
-| `x402-erc7710-sdk` | The same settlement through **`HavenClient`** instead of the raw API (#1457). The leg above deliberately excludes the SDK, so it stays green whether or not Haven's own client works; this one drives `settleX402Erc7710()` end to end and asserts the same money proof — treasury −amount exactly, merchant +amount exactly, **delegate EOA unchanged**. That last assertion is the point: a silent reroute to the EIP-3009 bridge would still deliver the goods and still debit the treasury, and would only be visible in the delegate's balance. Needs `QA_DELEGATION_DELEGATE_PRIVATE_KEY` (the SDK signs in-process, unlike the hosted topology). The hosted MCP + local signer variant waits on #1456 |
+| `x402-erc7710-sdk` | The same settlement through **`HavenClient`** instead of the raw API (#1457). `x402-erc7710-settle` deliberately excludes the SDK, so it stays green whether or not Haven's own client works; this one drives `settleX402Erc7710()` end to end and asserts the same money proof — treasury −amount exactly, merchant +amount exactly, **delegate EOA unchanged**. That last assertion is the point: a silent reroute to the EIP-3009 bridge would still deliver the goods and still debit the treasury, and would only be visible in the delegate's balance. Needs `QA_DELEGATION_DELEGATE_PRIVATE_KEY` (the SDK signs in-process, unlike the hosted topology). The hosted MCP + local signer variant is `x402-erc7710-hosted`, below (#1456 is closed) |
 | `x402-hosted-mcp-signer` | The **default user topology** (#1154): the DEPLOYED hosted MCP over HTTP plus a local `@haven_ai/signer` edge signer in-process — `haven_pay_mcp_tool` → local `haven_sign_x402` → `haven_settle_mcp_tool` → merchant settles. Asserts the quote is a **v2 (delegation-rail) context** (a v1 quote FAILS the leg: the #1138 seam would have gone untouched), that the signer really signed it, that **both** on-chain legs confirmed as distinct `status = 1` transactions, that **Haven recorded the merchant settlement** (#4119: `merchant_settlement_recorded` read right after settle returns, the receipt hash equal to the settle's `settlement_tx_hash`, and the settle's evidence guidance followed), that the treasury fell, and that the delegate residual is **unchanged** (exact-amount funding nets to zero). Needs `QA_HOSTED_MCP_URL` + `QA_X402_BINDING_SIGNER` on top of `QA_DELEGATION_*`. **Skips** (#1441) when the hosted quote comes back **erc7710-shaped**: #1450's preference rule selects erc7710 whenever the merchant advertises it, and this leg's invariant is the FUNDING-LEG one, so against such a merchant it is unreachable rather than violated. Nothing goes uncovered — hosted erc7710 is `x402-erc7710-hosted`, and `x402-catalog-guided-purchase` is scheme-aware since #1547 (erc7710 expected on dev, the 3009 two-leg proof kept as its fallback shape; same topology, zero residual either way). What this leg alone still covers is the `haven_pay_mcp_tool` ENTRY POINT on the funding path; point it at a merchant that does not advertise erc7710 to exercise that, and note `QA_REQUIRE_ALL_LEGS=1` turns the skip into a run failure |
 | `x402-erc7710-hosted` | The same settlement through the **default topology** — hosted MCP + local edge signer, what `npx @haven_ai/connect@alpha` installs (#1457). `x402-erc7710-settle` and `x402-erc7710-sdk` cover the raw API and the SDK; neither exercises the hosted boundary, where the server must never hold a delegate key and the signature has to come from the local signer. Asserts the hosted quote **reports** `settlement_scheme: erc7710` (a silent reroute to the 3009 bridge would still deliver the goods), that settle reports **no funding tx**, and that the delegate EOA is unchanged. Signs with `haven_sign` rather than `haven_sign_x402` — the latter builds an EIP-3009 header this scheme has no use for. Ordered right after `x402-hosted-mcp-signer` so a failure is diagnosable against a topology that leg has already shown healthy |
 | `x402-catalog-guided-purchase` | The **GUIDED catalog purchase path** (epic #1305, #1312): resolves a catalog entry via `GET /catalog` (never a hardcoded id), calls `haven_prepare_catalog_purchase(catalog_id, max_amount | max_amount_human)`, then branches on the preflight's `settlement_scheme` (#1547 — the guided prepare runs the #1450 preference): on **erc7710** (expected on dev) it signs via `haven_sign` by **`payment_id`** alone and settles with **only `payment_id` + `signature`** — no `payment_header` (Haven assembles it at settle), money proof inverted (a `funding_tx_hash` is a FAILURE, treasury debit = merchant credit, delegate untouched); on the **eip3009 fallback shape** it signs via `haven_sign_x402` by `payment_id` alone (#1549 — the compact preflight no longer echoes `payment_required`; the signer fetches it by payment_id, and the leg FAILS if the echo reappears) and settles with **only `payment_id` + `signature` + `payment_header`**, then requires Haven to have **recorded the merchant settlement** exactly as `x402-hosted-mcp-signer` does (#4119; on dev this shape is reached only by unit tests, because dev routes the leg to erc7710). Neither shape ever re-sends `merchant_url`/`tool_name`/`arguments`/`mcp_transport` (that re-threading is exactly what the epic exists to eliminate; needing it FAILS the leg, does not soften it). Asserts the preflight is COMPACT, carries the #1308 machine-readable next step and a rail-labeled allowance block, marks the catalog price indicative next to the live amount, and that the settled response carries the #1310 post-purchase allowance block. Buys NordShield VPN Basic (`buy_vpn`/`{plan:"basic"}`) — a SETTLING product; never CloudNest 50 GB, which is dev's verify-without-settle sweep fixture. Same env as `x402-hosted-mcp-signer` (`QA_HOSTED_MCP_URL`, `QA_X402_BINDING_SIGNER`, `QA_DELEGATION_*`, `QA_DEMO_MERCHANT_URL`) — no new secrets. **Skips** (not fails) when no catalog row matches on dev (#1299 seed not applied) or the hosted MCP does not yet expose `haven_prepare_catalog_purchase` (pre-#1306 deploy). **FAILS (never skips)**, before any of that, if the merchant's discovery document is unreachable, a `qa_fixture` product it names has a listed catalog row on this host, or a `qa_fixture` product cannot be mapped to a catalog `(tool_name, tool_arguments)` pair (#3421 tripwire) |
@@ -502,7 +502,7 @@ override leaves the production-safe 15-minute grace period intact. The scenario
 then resumes the original request through the server-issued `next_action`; it
 does not create a second payment or use the merchant skip-settle fixture.
 
-These scenarios run on every `qa-dev` run (the 2026-10-24 01:04Z run passed
+These scenarios run in every `qa-dev` money-flow job (the 2026-10-24 01:04Z run passed
 all three). On a hand-provisioned extra identity, the first run is the test of
 the seeding step, so treat an initial red there as information about the setup
 as much as about the code.
@@ -723,9 +723,9 @@ code defect:
   (`058_demo_merchant_catalog`) has not been applied to the target
   environment, or the QA identity is scoped to a different chain, no row
   matches and the leg skips naming the migration.
-- **A fresh deploy that has not picked up #1306 yet.** Since this leg is NEW,
-  its very first run against a given dev deploy can predate the merge that
-  registers `haven_prepare_catalog_purchase` on the hosted MCP. The leg
+- **A fresh deploy that has not picked up #1306 yet.** The leg was written
+  while #1306 was new, when a first run against a dev deploy could predate the
+  merge that registers `haven_prepare_catalog_purchase` on the hosted MCP. The leg
   recognizes the MCP SDK's own "tool not found" JSON-RPC error and treats it
   as a deploy-skew skip, not a failure — any OTHER error calling the tool
   (a real refusal, a transport fault) still fails the leg normally.
@@ -1187,8 +1187,10 @@ that half is measured too.
 | `schedule` (nightly, `17 3 * * *` UTC) | Always have a fresh green signal without anyone triggering it. |
 | `deployment_status` (Railway → `Haven AI / dev`, state `success`) | Test exactly what the Railway dev backend deploy just shipped, at the SHA it shipped. **Built by #2273; first observed firing 2026-09-02 — see below.** |
 
-> **Two of these three have a long history; the post-deploy one has a history
-> of exactly one deploy (2026-09-02).** Its
+> **All three now have a history; the post-deploy one starts on 2026-09-02.**
+> It has fired on dev deploys since then — the runs API's `total_count` for
+> `deployment_status` runs of `qa-dev.yml` read 2500 on 2026-10-24, most of
+> them gate-skipped (see *Read the `money-flow` JOB's conclusion* below). Its
 > predecessor, `repository_dispatch` (`dev-deployed`), fired **0** times across
 > the repository's entire history — 156 `qa-dev.yml` runs, 2026-06-30 →
 > 2026-08-31 (`workflow_dispatch` 96, `schedule` 60) — because nothing ever sent
@@ -1501,8 +1503,9 @@ there rather than assumed here:
    have returned 33609836970, a run-level `success` whose `money-flow` job was
    skipped; that decoy, not a missing label, is the defect the job rule closes.
 
-#2273 closed on that observation, and #2268 (its operator-verify checklist)
-closed the same day, 2026-09-02. The guard will file a `ci-health` issue on the very next push to `dev`
+#2273 closed on that observation (2026-09-02T08:45Z), and #2268 — the
+`operator-verify` issue reporting that the old `dev-deployed` trigger had
+never fired — closed the same day (10:13Z). The guard will file a `ci-health` issue on the very next push to `dev`
 after the merge (it reads `never-run` at that moment, before the deploy has
 finished) and close it on the push after the first post-deploy run succeeds —
 one round of noise, and an honest one.
@@ -1989,8 +1992,9 @@ Check balances by role:
 1. Hybrid account: enough test USDC, and budget remaining in the period. No
    harness leg drives a legacy Safe identity — #2011 removed the AllowanceModule
    credentials the config used to read, and no scenario has re-added one.
-2. Dev relayer: enough Base Sepolia ETH — it deploys a counterfactual account
-   on its first budget activation and submits the gasless EIP-3009 sweep. The
+2. Dev relayer: enough Base Sepolia ETH — it deploys the counterfactual
+   treasury on its first budget activation and a fresh agent's delegate account
+   on its first erc7710 authorize, and submits the gasless EIP-3009 sweep. The
    payment UserOps are paymaster-sponsored and never use it (#3264, the
    funding table above).
 3. Owner: **no ETH needed since #2007.** Reseeding on the delegation rail sends
@@ -2093,10 +2097,12 @@ distinguishes have opposite causes:
   'reinitialize_then_retry_same_payment_header' }`; the SDK's paid retry
   (local `fetch()`/`payX402Quote()`/`resumeX402Payment()` and the hosted
   `completeX402MerchantCall()` alike) reads that data, re-initializes and
-  resends the same header once. Once dev's demo merchant AND the hosted MCP
-  are both running the #3171 build, a run should no longer surface this 404 as
-  `merchant_status=404` after funding; until both are deployed, a bare
-  `-32001` 404 on dev is still the #2769 mode, not a regression. The merchant
+  resends the same header once. #3171 (`41dae782`, merged 2026-09-19) is in
+  the deployed builds — dev's demo merchant answers an unknown session with
+  the #3171 data (probed 2026-10-24), and the commit is in the
+  `prod-20260925-170512` tag — so a run that surfaces this 404 as
+  `merchant_status=404` after funding is a regression, no longer the #2769
+  mode. The merchant
   also sweeps sessions idle longer than 30 minutes (`sessionIdleTtlMs`), which
   answer the same 404. A bare re-challenge from a lost session should no
   longer occur; if one appears, it is a regression, not a known mode.
@@ -2210,3 +2216,16 @@ the observer reads 10-block `eth_getLogs` windows (`GET_LOGS_MAX_RANGE` in
 > #3171 data, the RPC probe flags and the observer's 10-block range, and all
 > 137 cited issues with `gh api` (#3933 and #4215 are open, `landed-partial`;
 > the text describes their shipped parts).
+>
+> **Review round 1 (haven-doc-reviewer @ `344d7ea91`).** Also changed:
+> `x402-erc7710-sdk` names `x402-erc7710-settle` rather than "the leg above",
+> and its hosted variant is `x402-erc7710-hosted` (#1456 is closed); the
+> post-deploy trigger's history is no longer "exactly one deploy" (the runs
+> API's `total_count` for its `deployment_status` runs read 2500 on
+> 2026-10-24); the 3009 scenarios run in every `qa-dev` money-flow job, not
+> every run; the dev relayer deploys the treasury at first activation and a
+> fresh agent's delegate account at its first erc7710 authorize; #2268 is the
+> issue that reported the old trigger never fired; and two stale conditionals
+> found re-scanning for the same class — the catalog leg is no longer "NEW",
+> and #3171 is deployed (dev's demo merchant answers an unknown session with
+> its data, probed 2026-10-24).

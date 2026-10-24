@@ -33,7 +33,8 @@ which is production.)
 1. **Sign up** with email + password, then create your account with a passkey
    (usually approved with your device's screen lock).
 2. **Account page → Security & details tab → *Who can approve* → Or add a
-   wallet** (the tab since #4142, the heading since #4166). Paste your wallet's
+   wallet** (the tab and the *Who can approve* heading since #4142; #4166
+   removed the card's second "Backup & recovery" heading). Paste your wallet's
    address, choose *Add wallet* and approve with your passkey. You supply the
    address only — the wallet doesn't need to be connected, and you pay no gas.
 3. **Check the card now lists two ways to approve:** your wallet (labeled
@@ -101,10 +102,11 @@ See [`dev-environment.md`](dev-environment.md) for the rest of the dev stack.
 
 > **Re-verified 2026-10-24 (#4372 part F, at dev `6d87ddf95`), a full re-read.**
 > Changed: the add-a-wallet and add-a-backup-passkey steps name where the card
-> lives now — the account page's *Security & details* tab (#4142), under *Who
-> can approve* (#4166), with its *Or add a wallet* / *Add wallet* and *Add a
+> lives now — the account page's *Security & details* tab, under *Who can
+> approve* (both #4142), with its *Or add a wallet* / *Add wallet* and *Add a
 > backup passkey* buttons (`components/AccountSignersCard.tsx`) — instead of a
-> "Backup & recovery" card heading the page no longer renders. Re-checked
+> "Backup & recovery" card heading the page no longer renders (#4166, PR #4190,
+> removed it). Re-checked
 > without change: the stable dev URL (`dev-environment.md`), the opt-in PR
 > previews (#3821), the "Browser wallet" / "Show address" (#3825) and
 > "Passkey · added {date}" (#1679, `lib/passkeyLabels.ts`) labels, Settings →
@@ -115,3 +117,9 @@ See [`dev-environment.md`](dev-environment.md) for the rest of the dev stack.
 > path signs), the single `transferOwnership` owner slot
 > (`rails/hybrid-signer-actions.ts`), removal disabled below two signers, and
 > #1153.
+>
+> **Review round 1 (haven-doc-reviewer @ `344d7ea91`).** The attribution was
+> wrong: *Who can approve* came with #4142 (`git log -S "Who can approve"` →
+> `fa1c20399`), and #4166 (PR #4190, `37ec8b7ba`) removed the card's
+> duplicate "Backup & recovery" heading (`git log -S "Backup & recovery"` on
+> `AccountSignersCard.tsx`).

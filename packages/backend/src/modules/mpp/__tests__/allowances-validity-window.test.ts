@@ -157,4 +157,27 @@ describeDb('#3802 — allowances read vs the validity window (characterization)'
     const dormantBody = (await handleGetAllowances(dormant)).body as { allowances: { next_refill_at: string | null }[] }
     expect(dormantBody.allowances[0].next_refill_at).toBe(new Date(start * 1000).toISOString())
   })
+
+  it('#4352: an expired-only budget answers budget_ended_at with the row\'s expiry — and a live budget answers null', async () => {
+    // The ended case: allowances[] stays empty (#3802) and the additive field
+    // carries the ended row's expires_at — the same narrow query the refusal
+    // answers use, never a live row.
+    const endedSec = Math.floor(Date.now() / 1000) - 60
+    const ended = await seedAgentWithDelegation({ expiresAt: endedSec })
+    const endedBody = (await handleGetAllowances(ended)).body as {
+      allowances: unknown[]
+      budget_ended_at: string | null
+    }
+    expect(endedBody.allowances).toHaveLength(0)
+    expect(endedBody.budget_ended_at).toBe(new Date(endedSec * 1000).toISOString())
+
+    // A live budget never sets it — the field NEVER reports a live row.
+    const live = await seedAgentWithDelegation()
+    const liveBody = (await handleGetAllowances(live)).body as {
+      allowances: unknown[]
+      budget_ended_at: string | null
+    }
+    expect(liveBody.allowances).toHaveLength(1)
+    expect(liveBody.budget_ended_at).toBeNull()
+  })
 })

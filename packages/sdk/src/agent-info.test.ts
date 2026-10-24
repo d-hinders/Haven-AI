@@ -219,6 +219,8 @@ describe('agent info helpers', () => {
       spend_authority_readiness: 'ready',
       // #4355: set only when needs_approval comes from spent rows.
       budgetRefillsAt: null,
+      // #4352: set only when needs_approval comes from an ENDED budget.
+      budgetEndedAt: null,
       allowances: [{
         // #3128: the HavenAllowance's own id and token address ride along.
         id: 'allowance-1',
@@ -501,6 +503,39 @@ describe('agent info helpers', () => {
       expect(summary.spend_authority_readiness).toBe('needs_approval')
       expect(summary.allowances).toEqual([])
       expect(summary.budgetRefillsAt).toBeNull()
+    })
+
+    it('budget ENDED: needs_approval with NO rows and budgetEndedAt = the server\u2019s ended row (#4352)', async () => {
+      const ENDED = '2026-10-20T00:00:00.000Z'
+      const body = JSON.parse(JSON.stringify({
+        agent_id: 'agent-1', account_address: '0xSafe', delegate_address: '0xDelegate', chain_id: 8453,
+        budget_ended_at: ENDED,
+        allowances: [],
+      }))
+      stub(() => new Response(JSON.stringify(body)))
+      const summary = await new HavenClient({ apiKey: 'sk_agent_test', baseUrl }).getAgentSummary()
+      expect(summary.spend_authority_readiness).toBe('needs_approval')
+      expect(summary.allowances).toEqual([])
+      expect(summary.budgetEndedAt).toBe(ENDED)
+      expect(summary.budgetRefillsAt).toBeNull()
+
+      // A live row beside the ended one means the summary is about the LIVE
+      // rows — budgetEndedAt stays null (the spent case is budgetRefillsAt's).
+      vi.restoreAllMocks()
+      const withLive = JSON.parse(JSON.stringify({
+        agent_id: 'agent-1', account_address: '0xSafe', delegate_address: '0xDelegate', chain_id: 8453,
+        budget_ended_at: ENDED,
+        allowances: [{
+          id: 'allowance-1', token_address: USDC_BASE, token_symbol: 'USDC', configured_amount: '10.00',
+          reset_period_min: 1440, next_refill_at: '2026-10-25T09:00:00.000Z',
+          onchain: { amount: '10000000', spent: '10000000', remaining: '0', effective_spent: '0', reset_time_min: 1440, last_reset_min: 0, nonce: 0, is_reset_pending: false },
+        }],
+      }))
+      stub(() => new Response(JSON.stringify(withLive)))
+      const live = await new HavenClient({ apiKey: 'sk_agent_test', baseUrl }).getAgentSummary()
+      expect(live.spend_authority_readiness).toBe('needs_approval')
+      expect(live.budgetEndedAt).toBeNull()
+      expect(live.budgetRefillsAt).not.toBeNull()
     })
 
     it('ready: budgetRefillsAt null even though the live row has a next refill', async () => {
@@ -870,6 +905,8 @@ const mappedAllowances = {
   accountAddress: '0xSafe',
   delegateAddress: '0xDelegate',
   chainId: 8453,
+  // #4352: the stub carries no budget_ended_at (an older backend) — null.
+  budgetEndedAt: null,
   supersededBy: null,
   allowances: [{
     id: 'allowance-1',

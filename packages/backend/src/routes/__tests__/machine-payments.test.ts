@@ -550,6 +550,9 @@ describe('machine payment routes', () => {
         account_address: AGENT.account_address,
         delegate_address: AGENT.delegate_address,
         chain_id: 84532,
+        // #4352: always present; null when no budget for the token has ended
+        // (the live row below is never reported as over).
+        budget_ended_at: null,
         // #3772: always present; null when never superseded.
         superseded_by: null,
         allowances: [{
@@ -747,6 +750,8 @@ describe('machine payment routes', () => {
         delegate_address: AGENT.delegate_address,
         chain_id: 84532,
         allowances: [],
+        // #4352: the additive ended-budget field, null when nothing has ended.
+        budget_ended_at: null,
         superseded_by: null,
       })
     })

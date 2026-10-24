@@ -102,6 +102,13 @@ describe('catalog payability (#4389) — the probe', () => {
     expect(result).toMatchObject({ ok: true, assetTransferMethods: ['eip3009'] })
   })
 
+  it('a payable scheme on the other Base network does not count toward the recorded methods', async () => {
+    const erc7710 = { ...BASE_OPTION, extra: { assetTransferMethod: 'erc7710' } }
+    const sepolia = { ...BASE_OPTION, network: 'eip155:84532', asset: BASE_SEPOLIA_USDC }
+    const result = await probeCatalogEntry(ENTRY, challenge([erc7710, sepolia]))
+    expect(result).toMatchObject({ ok: true, network: 'eip155:8453', assetTransferMethods: ['erc7710'] })
+  })
+
   it('records the x402 short network name as CAIP-2, the form agents are filtered on', async () => {
     const result = await probeCatalogEntry(ENTRY, challenge([{ ...BASE_OPTION, network: 'base-sepolia', asset: BASE_SEPOLIA_USDC }]))
     expect(result).toMatchObject({ ok: true, network: 'eip155:84532', asset: 'USDC' })

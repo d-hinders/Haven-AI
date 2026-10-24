@@ -12,6 +12,12 @@
  * #3386, the union recorded on the 84532 row (`eip3009,erc7710`) would have
  * let this build through and issued a budget the merchant can never actually
  * pay through ERC-7710 there.
+ *
+ * Since #4389 the probe records the option the pay path would select, and a
+ * PAYABLE erc7710 option is always selected first, so its network becomes the
+ * recorded one. The 8453 option therefore names ERC-7710 on an asset the pay
+ * path cannot settle: the row stays on 84532, and the erc7710 entry is
+ * excluded twice over (another network, and not payable).
  */
 import Fastify, { type FastifyInstance } from 'fastify'
 import fastifyJwt from '@fastify/jwt'
@@ -31,7 +37,8 @@ function b64(value: unknown): string {
 }
 
 /** A challenge whose accepts[0] names 84532 with only EIP-3009, and whose
- * second option names 8453 with ERC-7710. */
+ * second option names 8453 with ERC-7710 on an asset the pay path does not
+ * settle (WETH), so the payable 84532 option is the selected one (#4389). */
 const TWO_NETWORK_CHALLENGE = {
   x402Version: 2,
   accepts: [
@@ -46,7 +53,7 @@ const TWO_NETWORK_CHALLENGE = {
     {
       scheme: 'exact',
       network: 'eip155:8453',
-      asset: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+      asset: '0x4200000000000000000000000000000000000006',
       amount: '20000',
       payTo: PAY_TO,
       maxTimeoutSeconds: 300,
@@ -114,8 +121,10 @@ describeDb('a two-network x402 challenge drives the build route (#3386)', () => 
       `SELECT network, asset_transfer_methods FROM merchant_catalog WHERE merchant_id = $1`,
       [merchant.id],
     )
-    // The row is recorded on accepts[0]'s network — MUTATION TARGET: without
-    // #3386's network scoping this would read 'eip3009,erc7710' (the union).
+    // The row is recorded on the selected (payable) option's network, and its
+    // method set holds only what the pay path can settle there — without
+    // #3386's scoping and #4389's payability check this would read
+    // 'eip3009,erc7710' (the union).
     expect(row.rows[0].network).toBe('eip155:84532')
     expect(row.rows[0].asset_transfer_methods).toBe('eip3009')
 

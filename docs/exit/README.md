@@ -14,7 +14,8 @@ last-verified: "2026-07-12"
 This is Haven's non-custody guarantee made operational (#832, epic #821): a
 person holding only their account credentials can **inspect and revoke every
 agent budget on their account, and keep control of the account itself, without
-Haven's website, servers, or support.** The self-hosted [exit page](../../packages/frontend/public/exit/index.html)
+Haven's website, servers, or support** — with a wallet signer on the account (a
+passkey works only on Haven's site; see the passkey note in §2). The self-hosted [exit page](../../packages/frontend/public/exit/index.html)
 is a convenience wrapper; THIS document is the guarantee, and it needs nothing
 but a block explorer and a wallet.
 
@@ -93,7 +94,9 @@ further redemption reverts.
 **b. The universal backstop (no UserOp tooling).** Your account's own signers
 can rotate/remove the delegate key or move funds to a fresh account at any
 time. This ends every budget without needing to revoke each one individually,
-and needs nothing but your wallet and the account's standard owner operations.
+and needs nothing but your wallet and the account's standard owner operations —
+with a wallet signer on the account; a passkey-only owner needs Haven's site for
+this too (below).
 
 **Passkey-only owners: a passkey works only on the site it was created on.**
 WebAuthn binds a passkey to its relying party, and Haven's passkeys use the
@@ -110,12 +113,13 @@ wallet signs the UserOp from anywhere.
 owner-signed disableDelegation → redemption then reverts. tx links in the
 epic #832 / DoD record.*
 
-### 3. Why the guarantee is unconditional
+### 3. Why the guarantee holds (with a wallet signer on the account)
 
 - **You can revoke any delegation you can reconstruct** — `disableDelegation`
   needs only the object, not Haven's cooperation or prior on-chain use.
-- **Your account's own signers always win** — they can rotate/remove keys and
-  move funds directly, regardless of any delegation (§2b). In the worst case,
+- **With a wallet signer on the account, your account's own signers always
+  win** — they can rotate/remove keys and move funds directly, regardless of
+  any delegation (§2b). In the worst case,
   moving funds to a fresh account ends every budget at once.
 
 ## Honest limitation
@@ -137,6 +141,20 @@ budgets via public events, shows each one's **delegation hash** and its
 hash and `disableDelegation` calldata you need to revoke (§2). Paste a delegation
 to check one the scan did not find.
 
+A scan by your account also finds **child delegations**: the settlement, task and
+sub-budget delegations your agent issues under one of your budgets (the manager
+emits its redemption event for every link with the root budget's delegator).
+Their delegator is your agent, not your account, so `disableDelegation` from your
+account would revert. The page lists your own budgets first, marks each child
+"issued by your agent under one of your budgets — revoke that budget", and gives
+no calldata for it. Revoking the budget ends the child too, because redemption
+checks every link.
+
+Before it reads anything, the page asks the RPC for its chain id
+(`eth_chainId`) and refuses one that serves another chain than the one selected.
+Both chains use the same manager address, so a Base Sepolia RPC with Base
+selected would otherwise answer every read, from the wrong chain.
+
 It talks only to an RPC and the pinned manager — **no Haven backend**. Its logic
 is in [`exit-core.mjs`](../../packages/frontend/public/exit/exit-core.mjs), which
 computes the hash the way the DelegationManager does (checked against the
@@ -149,9 +167,9 @@ UserOp signer); the guarantee is identical to the manual path.
 **Discovery and public RPCs.** The public Base endpoints the page uses by default
 cap `eth_getLogs` at a few hundred blocks per query (measured 2026-10-24:
 `sepolia.base.org` answers "limited to a 200 range"; `mainnet.base.org` also
-rate-limits). The page scans from the manager's first block in chunks of the
-size the RPC names and stops after a few hundred queries, telling you how far
-it got. For a full scan, enter an RPC that allows wider log queries or a later
-"from block", use the manager's event log on the explorer, or paste the
-delegation to check it by hash — the status read is a single call that any RPC
-answers.
+rate-limits). The page scans newest first, back to the manager's first block,
+in chunks of the size the RPC names, and stops after 300 queries, telling you
+how far back it got; on a 200-block endpoint that is the newest 60,000 blocks.
+For a full scan, enter an RPC that allows wider log queries, use the manager's
+event log on the explorer, or paste the delegation to check it by hash — the
+status read is a single call that any RPC answers.

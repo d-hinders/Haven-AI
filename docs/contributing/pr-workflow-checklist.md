@@ -4,6 +4,7 @@ status: current
 covers:
   - .github/workflows/**
   - .github/pull_request_template.md
+  - .github/CODEOWNERS
   - package.json
   - scripts/ci/change-classifier.mjs
   - scripts/ci/preflight.mjs

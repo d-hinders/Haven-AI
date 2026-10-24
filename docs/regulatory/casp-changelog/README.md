@@ -3,6 +3,8 @@ owner: "@AntonioSaaranen"
 status: current
 covers:
   - docs/regulatory/casp-changelog/**
+  - scripts/docs/coupling-gate.mjs
+  - scripts/release-bump.mjs
 last-verified: "2026-10-24"
 ---
 

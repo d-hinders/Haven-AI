@@ -105,9 +105,10 @@ Haven site's hostname as that relying party
 the passkey only on that site, so an owner whose **only** signer is a passkey
 can produce the owner signature for 2a only through Haven's site — and not at
 all if that site is gone. To keep a signer that works without Haven, add a
-wallet to the account (**Add a wallet**, in the **Security & details** tab on
-your account page; see [account recovery](../product/account-recovery.md)). A
-wallet signs the UserOp from anywhere.
+wallet to the account (**Or add a wallet**, next to **Add a backup passkey** in
+the **Security & details** tab on your account page, shown while the account
+has no wallet; see [account recovery](../product/account-recovery.md)). A wallet
+signs the UserOp from anywhere.
 
 *Live-verified (2026-07-11) via `pilot:exit-proof` on Base Sepolia: enumerate →
 owner-signed disableDelegation → redemption then reverts. tx links in the
@@ -145,10 +146,19 @@ A scan by your account also finds **child delegations**: the settlement, task an
 sub-budget delegations your agent issues under one of your budgets (the manager
 emits its redemption event for every link with the root budget's delegator).
 Their delegator is your agent, not your account, so `disableDelegation` from your
-account would revert. The page lists your own budgets first, marks each child
-"issued by your agent under one of your budgets — revoke that budget", and gives
-no calldata for it. Revoking the budget ends the child too, because redemption
+account would revert. The page tells them apart by the delegation's authority (a
+budget's is the root authority; a child's is the hash of the delegation it was
+issued under), lists budgets first, marks each child "issued by your agent under
+one of your budgets — revoke that budget", and gives no calldata for it. A
+child's own status is not its authority: it reads "not revoked on its own" while
+its budget decides. Revoking the budget ends the child too, because redemption
 checks every link.
+
+Enter your **account's** address, not your wallet's: a Haven account is a smart
+account with its own address, and the wallet you connect is one of its signers.
+The page does not fill the account in from the wallet. A budget whose delegator
+is not the entered account is still shown as a budget, marked "not this
+account's budget", since only its own delegator can revoke it.
 
 Before it reads anything, the page asks the RPC for its chain id
 (`eth_chainId`) and refuses one that serves another chain than the one selected.

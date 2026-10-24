@@ -4,7 +4,7 @@
 //
 // ethers is vendored next to this file (vendor/ethers-6.16.0.min.js, the npm
 // build byte for byte) so the page loads no third-party script.
-import { TypedDataEncoder } from './vendor/ethers-6.16.0.min.js'
+import { Contract, TypedDataEncoder } from './vendor/ethers-6.16.0.min.js'
 
 // Pinned, audited contracts. They must match Haven's
 // packages/backend/src/rails/delegation-contracts.ts (a test checks this).
@@ -41,6 +41,9 @@ export async function assertChain(provider, expectedId) {
     answer = await provider.send('eth_chainId', [])
   } catch (err) {
     throw new Error(`Could not read this RPC's chain id (${err?.message ?? err}); nothing was checked.`)
+  }
+  if (typeof answer !== 'string' || !/^0x[0-9a-fA-F]+$/.test(answer)) {
+    throw new Error(`This RPC answered eth_chainId with ${JSON.stringify(answer) ?? 'nothing'}, not a chain id; nothing was checked.`)
   }
   const actual = Number(BigInt(answer))
   if (actual !== expectedId) {
@@ -89,6 +92,16 @@ export function delegationHash(del) {
 }
 
 /**
+ * The manager contract on `provider`, after checking that the provider serves
+ * `chainId`. The page reads through nothing else, so every read goes through
+ * the provider whose chain was checked.
+ */
+export async function checkedManager(provider, chainId) {
+  await assertChain(provider, chainId)
+  return new Contract(CHAINS[chainId].manager, MANAGER_ABI, provider)
+}
+
+/**
  * Read a delegation's status from the manager: 'active' (still spendable,
  * within its caveats), 'revoked', or 'unknown' when the read failed. Never a
  * guess: anything other than a boolean answer is 'unknown'.
@@ -123,26 +136,44 @@ export const STATUS_VIEW = {
   },
 }
 
-/** The view for a status; anything unrecognised is shown as unknown. */
-export function statusView(status) {
-  return Object.hasOwn(STATUS_VIEW, status) ? STATUS_VIEW[status] : STATUS_VIEW.unknown
+/**
+ * A child's own flag says nothing about its budget: it stops working when the
+ * budget it was issued under is revoked, whatever its own flag says.
+ */
+export const CHILD_ACTIVE_NOTE =
+  "Not revoked on its own; it stops when the budget it was issued under is revoked — see that budget's row."
+
+/**
+ * The view for a status; anything unrecognised is shown as unknown. A child
+ * delegation's not-revoked note claims no authority of its own.
+ */
+export function statusView(status, kind = 'root') {
+  const view = Object.hasOwn(STATUS_VIEW, status) ? STATUS_VIEW[status] : STATUS_VIEW.unknown
+  return kind === 'child' && view === STATUS_VIEW.active ? { ...view, note: CHILD_ACTIVE_NOTE } : view
 }
 
 export const ROOT_AUTHORITY = '0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff'
 
 /**
- * 'root' for a budget the account itself issued (it can revoke it), 'child'
- * for one issued under a budget by another account — the agent's settlement,
- * task and sub-budget delegations. The manager emits RedeemedDelegation for
- * every link of a chain with the root's delegator, so a scan by account finds
- * both. A child is revoked by revoking its root budget: redemption checks every
- * link, and only a child's own delegator can disable it.
+ * 'root' for a budget (authority = ROOT_AUTHORITY: issued directly by its
+ * delegator's account), 'child' for a delegation issued under another one —
+ * the agent's settlement, task and sub-budget delegations. The manager emits
+ * RedeemedDelegation for every link of a chain with the root's delegator, so a
+ * scan by account finds both. A child is revoked by revoking its root budget:
+ * redemption checks every link, and only a child's own delegator can disable it.
  */
-export function delegationKind(del, account) {
-  if (/^0x[0-9a-fA-F]{40}$/.test(account ?? '')) {
-    return del.delegator.toLowerCase() === account.toLowerCase() ? 'root' : 'child'
-  }
+export function delegationKind(del) {
   return del.authority.toLowerCase() === ROOT_AUTHORITY ? 'root' : 'child'
+}
+
+/**
+ * Whether a root budget belongs to the entered account: false when an account
+ * is entered and the budget's delegator is a different one (only that
+ * delegator can revoke it), true otherwise.
+ */
+export function isAccountsBudget(del, account) {
+  if (!/^0x[0-9a-fA-F]{40}$/.test(account ?? '')) return true
+  return del.delegator.toLowerCase() === account.toLowerCase()
 }
 
 /** Normalise a delegation from an event or a pasted object into plain JSON. */
@@ -197,6 +228,7 @@ export function rangeLimitFromError(err) {
  * scannedFrom..toBlock were covered (scannedFrom = toBlock + 1 when none were).
  */
 export async function scanEvents({ queryRange, fromBlock, toBlock, chunk = 50_000, maxRequests = 300 }) {
+  if (fromBlock > toBlock) throw new Error(`The from block (${fromBlock}) is after the latest block (${toBlock}).`)
   const events = []
   let cursor = toBlock
   let requests = 0
@@ -223,9 +255,12 @@ export async function scanEvents({ queryRange, fromBlock, toBlock, chunk = 50_00
 }
 
 /** Root budgets first (the ones the account can revoke), then children. */
-export function rootFirst(dels, account) {
-  return [...dels].sort((a, b) => (delegationKind(a, account) === 'root' ? 0 : 1) - (delegationKind(b, account) === 'root' ? 0 : 1))
+export function rootFirst(dels) {
+  return [...dels].sort((a, b) => (delegationKind(a) === 'root' ? 0 : 1) - (delegationKind(b) === 'root' ? 0 : 1))
 }
+
+export const FOREIGN_NOTE =
+  "Not this account's budget: its delegator is another account, and only that account can revoke it."
 
 export const CHILD_NOTE =
   'Issued by your agent under one of your budgets — revoke that budget. A child stops working once the budget it was issued under is revoked; only its own delegator (your agent) could disable it directly.'
@@ -234,7 +269,7 @@ export const CHILD_NOTE =
  * One delegation row. Every delegation field goes in as text, never as HTML:
  * a pasted object or an RPC answer is untrusted.
  */
-export function delegationRow(doc, del, { hash, kind }) {
+export function delegationRow(doc, del, { hash, kind, foreign = false }) {
   const row = doc.createElement('div')
   row.className = 'del'
   row.dataset.kind = kind
@@ -262,7 +297,7 @@ export function delegationRow(doc, del, { hash, kind }) {
   note.dataset.note = ''
   row.append(
     top,
-    line('delegator', `delegator ${del.delegator}${kind === 'child' ? ' (not your account)' : ''}`),
+    line('delegator', `delegator ${del.delegator}${kind === 'child' ? ' (your agent)' : foreign ? ' (not this account)' : ''}`),
     line('hash', `hash ${hash}`),
     line('salt', `salt ${del.salt} · ${del.caveats.length} caveat(s)`),
     note,
@@ -274,6 +309,13 @@ export function delegationRow(doc, del, { hash, kind }) {
     child.textContent = CHILD_NOTE
     row.append(child)
   } else {
+    if (foreign) {
+      const other = doc.createElement('div')
+      other.className = 'muted'
+      other.dataset.foreign = ''
+      other.textContent = FOREIGN_NOTE
+      row.append(other)
+    }
     const actions = doc.createElement('div')
     actions.className = 'row'
     actions.style.marginTop = '8px'
@@ -292,7 +334,7 @@ export function delegationRow(doc, del, { hash, kind }) {
 
 /** Show a status on a row: the pill and note come from statusView alone. */
 export function applyStatus(row, status) {
-  const view = statusView(status)
+  const view = statusView(status, row.dataset.kind)
   const pill = row.querySelector('[data-pill]')
   pill.textContent = view.label
   pill.className = `pill ${view.cls}`
@@ -301,18 +343,35 @@ export function applyStatus(row, status) {
 
 /**
  * Hash a delegation, read its status from the manager and render it into
- * `container`. Revocation details are offered only for a root budget: for a
- * child, disableDelegation from the owner's account reverts.
+ * `container`. Revocation details are offered only for a root budget (for a
+ * child, disableDelegation from the owner's account reverts); a root budget of
+ * another account says so.
  */
 export async function showDelegation(container, del, { manager, account, onDetails }) {
   const hash = delegationHash(del)
-  const kind = delegationKind(del, account)
-  const row = delegationRow(container.ownerDocument, del, { hash, kind })
+  const kind = delegationKind(del)
+  const foreign = kind === 'root' && !isAccountsBudget(del, account)
+  const row = delegationRow(container.ownerDocument, del, { hash, kind, foreign })
   container.appendChild(row)
   applyStatus(row, await readStatus(manager, hash))
   const button = row.querySelector('[data-revoke]')
   if (button) button.onclick = () => onDetails(del, hash, row.querySelector('[data-st]'))
   return row
+}
+
+/** The page's one-line account of a scan (`found` = distinct delegations). */
+export function scanSummary(result, latest, found) {
+  const where = `blocks ${result.scannedFrom}–${latest}`
+  if (!result.complete) {
+    const why = result.reason === 'request-cap'
+      ? `This RPC allows ${result.chunk} blocks per query, so the page stopped after ${result.requests} queries.`
+      : `The RPC refused a query: ${result.error}.`
+    return `Scanned the newest ${where} only. ${why} Older budgets were not searched: use an RPC that allows wider log queries, the manager's event log on the explorer (linked above), or paste a delegation below to check it by hash. ${found} delegation(s) found so far.`
+  }
+  if (found === 0) {
+    return `No redeemed delegations found for this account in ${where}. Un-used delegations must be checked or revoked by pasting them below.`
+  }
+  return `${found} delegation(s) found in ${where}.`
 }
 
 /** ABI-encode the disableDelegation call for the owner's UserOp (`account.execute`). */

@@ -92,8 +92,9 @@ under **Backup & recovery**:
   *different* device (your phone as well as your laptop) it's true device
   redundancy. One prompt, no transaction
   you pay for.
-- **Add a wallet** — enrols a browser wallet address as an owner. Useful if you
-  already keep a hardware or browser wallet. Adding a wallet is reversible:
+- **Or add a wallet** (shown while the account has no wallet) — enrols a browser
+  wallet address as an owner. Useful if you already keep a hardware or browser
+  wallet. Adding a wallet is reversible:
   **Remove** next to it takes the account back to passkey-only. You can't
   remove it while it's your *only* way to approve — that would leave nothing
   able to approve anything, and the account refuses it on-chain. Removing it

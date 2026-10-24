@@ -11,6 +11,7 @@ import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { hashDelegation } from '@metamask/smart-accounts-kit/utils'
 import { describe, expect, it } from 'vitest'
+import { Interface } from '../../../public/exit/vendor/ethers-6.16.0.min.js'
 // A plain browser ES module served from public/; its types are inferred.
 import * as exitCore from '../../../public/exit/exit-core.mjs'
 
@@ -99,12 +100,31 @@ describe('exit page: chain identity is read, not assumed', () => {
     expect(await refusal(exitCore.assertChain(answering(new Error('rpc down')), 8453))).toMatch(/Could not read this RPC's chain id/)
   })
 
+  it('refuses an answer that is not a chain id, with a clear message', async () => {
+    for (const odd of [undefined, null, 'abc', '0x', 8453]) {
+      expect(await refusal(exitCore.assertChain(answering(odd), 8453)), String(odd)).toMatch(/answered eth_chainId with .*, not a chain id; nothing was checked/)
+    }
+  })
+
+  it('checkedManager reads only through the provider whose chain it checked', async () => {
+    const good = answering('0x2105')
+    const mgr = await exitCore.checkedManager(good, 8453)
+    expect(mgr.runner).toBe(good)
+    expect(mgr.target).toBe(CHAINS[8453].manager)
+    expect(await refusal(exitCore.checkedManager(answering('0x14a34'), 8453))).toMatch(/serves chain 84532/)
+    expect(await refusal(exitCore.checkedManager(answering(new Error('rpc down')), 8453))).toMatch(/Could not read this RPC's chain id/)
+  })
+
   it('the page checks the chain before every scan and check', () => {
     const html = read(`${EXIT_DIR}/index.html`)
-    expect(html).toContain('await assertChain(p, chainId())')
-    // Both entry points get their manager only through checkedManager().
-    expect(html.match(/const mgr = await checkedManager\(\)/g)).toHaveLength(2)
-    expect(html).not.toMatch(/new Contract\([^)]*provider\(\)\)/)
+    // Both entry points get their manager only through core's checkedManager,
+    // on the one provider the page builds; nothing else builds a contract or
+    // a provider.
+    expect(html.match(/const mgr = await checkedManager\(provider\(\), chainId\(\)\)/g)).toHaveLength(2)
+    expect(html.match(/checkedManager\(/g)).toHaveLength(2)
+    expect(html).not.toMatch(/new Contract\(|\bContract\b.*from '\.\/vendor/)
+    expect(html.match(/new JsonRpcProvider\(/g)).toHaveLength(1)
+    expect(html).toMatch(/function provider\(\) \{ return new JsonRpcProvider\(/)
   })
 })
 
@@ -131,6 +151,25 @@ describe('exit page: delegation hash', () => {
       caveats: sample.caveats.map((c) => ({ ...c, args: '0x99' })),
     }
     expect(exitCore.delegationHash(other)).toBe(exitCore.delegationHash(sample))
+  })
+
+  it('encodes disableDelegation calldata for the same delegation', () => {
+    const iface = new Interface(exitCore.MANAGER_ABI)
+    const del = exitCore.toPlainDelegation(sample)
+    const data = exitCore.disableDelegationCalldata(iface, del)
+    expect(data.slice(0, 10)).toBe('0x49934047')
+    expect(iface.getFunction('disableDelegation')!.selector).toBe('0x49934047')
+    const [decoded] = iface.decodeFunctionData('disableDelegation', data)
+    const back = {
+      delegate: decoded.delegate,
+      delegator: decoded.delegator,
+      authority: decoded.authority,
+      caveats: decoded.caveats.map((c: { enforcer: string; terms: string; args: string }) => ({ enforcer: c.enforcer, terms: c.terms, args: c.args })),
+      salt: decoded.salt.toString(),
+      signature: decoded.signature,
+    }
+    expect(exitCore.delegationHash(back)).toBe(exitCore.delegationHash(del))
+    expect(back).toEqual({ ...del, delegate: decoded.delegate, delegator: decoded.delegator })
   })
 
   it('takes a salt as a string or bigint, never a lossy JSON number', () => {
@@ -239,34 +278,67 @@ describe('exit page: what the owner sees', () => {
     expect(called).toBe(1)
   })
 
+  const child = { ...sample, delegator: '0x3333333333333333333333333333333333333333', authority: exitCore.delegationHash(sample) }
+
   it("marks a child delegation and gives no calldata that would revert", async () => {
-    const child = { ...sample, delegator: '0x3333333333333333333333333333333333333333', authority: exitCore.delegationHash(sample) }
     const { row } = await show(child, false)
     expect(row.dataset.kind).toBe('child')
     expect(row.querySelector('[data-revoke]')).toBeNull()
     expect(row.querySelector('[data-child]')!.textContent).toBe(exitCore.CHILD_NOTE)
     expect(exitCore.CHILD_NOTE).toMatch(/^Issued by your agent under one of your budgets — revoke that budget\./)
-    expect(row.querySelector('[data-delegator]')!.textContent).toContain('(not your account)')
+    expect(row.querySelector('[data-delegator]')!.textContent).toContain('(your agent)')
   })
 
-  it('classifies by the account when given, by the authority when not, and lists root budgets first', () => {
-    const child = { ...sample, delegator: '0x3333333333333333333333333333333333333333', authority: '0x' + '12'.repeat(32) }
-    expect(exitCore.delegationKind(sample, account.toUpperCase().replace('0X', '0x'))).toBe('root')
-    expect(exitCore.delegationKind(child, account)).toBe('child')
-    expect(exitCore.delegationKind(sample, '')).toBe('root')
-    expect(exitCore.delegationKind(child, '')).toBe('child')
-    expect(exitCore.rootFirst([child, sample, child], account).map((d: { delegator: string }) => d.delegator)).toEqual([
-      sample.delegator,
-      child.delegator,
-      child.delegator,
-    ])
+  it('never tells the owner a child still has authority of its own', async () => {
+    const { row } = await show(child, false)
+    const note = row.querySelector('[data-note]')!.textContent
+    expect(note).toBe(exitCore.CHILD_ACTIVE_NOTE)
+    expect(note).not.toBe(exitCore.STATUS_VIEW.active.note)
+    expect(note).toMatch(/^Not revoked on its own; it stops when the budget it was issued under is revoked/)
+    // A revoked or unknown child shows the ordinary note.
+    expect((await show(child, true)).row.querySelector('[data-note]')!.textContent).toBe(exitCore.STATUS_VIEW.revoked.note)
+  })
+
+  // Connect wallet gives the owner's signer (an EOA); a Haven account is a
+  // smart account. A root budget pasted with that address entered is still a
+  // root budget: it says it is not this account's, and keeps its details.
+  it("keeps a root budget a root when the entered account is another address", async () => {
+    const eoa = '0x4444444444444444444444444444444444444444'
+    const { row } = await show(sample, false, { account: eoa })
+    expect(row.dataset.kind).toBe('root')
+    expect(row.querySelector('[data-child]')).toBeNull()
+    expect(row.querySelector('[data-revoke]')).not.toBeNull()
+    expect(row.querySelector('[data-foreign]')!.textContent).toBe(exitCore.FOREIGN_NOTE)
+    expect(exitCore.FOREIGN_NOTE).toMatch(/^Not this account's budget/)
+    expect(row.querySelector('[data-delegator]')!.textContent).toContain('(not this account)')
+    expect(row.querySelector('[data-note]')!.textContent).toBe(exitCore.STATUS_VIEW.active.note)
+    // With the right account, or none, there is no such marker.
+    expect((await show(sample, false, { account })).row.querySelector('[data-foreign]')).toBeNull()
+    expect((await show(sample, false, { account: '' })).row.querySelector('[data-foreign]')).toBeNull()
+  })
+
+  it('classifies by the authority alone, and lists root budgets first', () => {
+    const other = { ...child, delegator: account }
+    expect(exitCore.delegationKind(sample)).toBe('root')
+    expect(exitCore.delegationKind(child)).toBe('child')
+    expect(exitCore.delegationKind(other)).toBe('child')
+    expect(exitCore.isAccountsBudget(sample, account.toUpperCase().replace('0X', '0x'))).toBe(true)
+    expect(exitCore.isAccountsBudget(sample, '0x4444444444444444444444444444444444444444')).toBe(false)
+    expect(exitCore.isAccountsBudget(sample, '')).toBe(true)
+    expect(exitCore.rootFirst([child, sample, other]).map((d: { authority: string }) => exitCore.delegationKind(d))).toEqual(['root', 'child', 'child'])
   })
 
   it('the page renders every delegation through showDelegation, root budgets first', () => {
     const html = read(`${EXIT_DIR}/index.html`)
     expect(html.match(/await showDelegation\(/g)).toHaveLength(2)
-    expect(html).toContain('for (const del of rootFirst(seen.values(), account))')
+    expect(html).toContain('for (const del of rootFirst(seen.values()))')
     expect(html).not.toMatch(/readStatus|STATUS_TEXT|data-pill/)
+  })
+
+  it('never fills the account field with the connected wallet', () => {
+    const html = read(`${EXIT_DIR}/index.html`)
+    expect(html).not.toMatch(/\$\('account'\)\.value\s*=/)
+    expect(html).toContain('Connected signer ${ownerAddr}')
   })
 
   it('shows "Not revoked" in a warning tone, not the success green', () => {
@@ -293,6 +365,27 @@ describe('exit page: event scan', () => {
     const queryRange = async () => []
     const r = await exitCore.scanEvents({ queryRange, fromBlock: 0, toBlock: 99_999, chunk: 100, maxRequests: 10 })
     expect(r).toMatchObject({ complete: false, reason: 'request-cap', scannedFrom: 99_000, requests: 10 })
+  })
+
+  it('refuses a from block after the latest block', async () => {
+    const r = await exitCore.scanEvents({ queryRange: async () => [], fromBlock: 10, toBlock: 5 }).then(
+      () => 'scanned',
+      (e: Error) => e.message,
+    )
+    expect(r).toBe('The from block (10) is after the latest block (5).')
+  })
+
+  it('says older budgets were not searched when the scan stops early', async () => {
+    const capped = await exitCore.scanEvents({ queryRange: async () => [], fromBlock: 0, toBlock: 99_999, chunk: 100, maxRequests: 10 })
+    const text = exitCore.scanSummary(capped, 99_999, 2)
+    expect(text).toMatch(/^Scanned the newest blocks 99000–99999 only\. This RPC allows 100 blocks per query, so the page stopped after 10 queries\. Older budgets were not searched: /)
+    expect(text).toMatch(/2 delegation\(s\) found so far\.$/)
+    const failed = exitCore.scanSummary({ complete: false, reason: 'error', error: 'boom', scannedFrom: 11, requests: 1, chunk: 50_000 }, 10, 0)
+    expect(failed).toContain('The RPC refused a query: boom. Older budgets were not searched')
+    const done = await exitCore.scanEvents({ queryRange: async () => [], fromBlock: 0, toBlock: 99, chunk: 100 })
+    expect(exitCore.scanSummary(done, 99, 0)).toMatch(/^No redeemed delegations found for this account in blocks 0–99\./)
+    expect(exitCore.scanSummary(done, 99, 3)).toBe('3 delegation(s) found in blocks 0–99.')
+    expect(read(`${EXIT_DIR}/index.html`)).toContain("$('scanStatus').textContent = scanSummary(result, latest, seen.size)")
   })
 
   it('reports an error it cannot narrow, without pretending to be complete', async () => {

@@ -99,7 +99,7 @@
     </div>
     <label for="rpc">RPC URL (a public endpoint by default; any Base RPC works)</label>
     <input id="rpc" class="mono" />
-    <label for="account">Your account address (the delegator — the account your agent spends from)</label>
+    <label for="account">Your account address (the delegator — the smart account your agent spends from, not your wallet's address)</label>
     <input id="account" placeholder="0x…" />
     <label for="fromBlock">Scan back to block (the manager's first block by default; the scan starts at the newest block)</label>
     <input id="fromBlock" class="mono" />
@@ -142,8 +142,8 @@
 </div>
 
 <script type="module">
-import { BrowserProvider, Contract, Interface, JsonRpcProvider } from './vendor/ethers-6.16.0.min.js'
-import { CHAINS, DEFAULT_CHAIN_ID, MANAGER_ABI, assertChain, delegationHash, disableDelegationCalldata, rootFirst, scanEvents, showDelegation, toPlainDelegation } from './exit-core.mjs'
+import { BrowserProvider, Interface, JsonRpcProvider } from './vendor/ethers-6.16.0.min.js'
+import { CHAINS, DEFAULT_CHAIN_ID, MANAGER_ABI, checkedManager, delegationHash, disableDelegationCalldata, rootFirst, scanEvents, scanSummary, showDelegation, toPlainDelegation } from './exit-core.mjs'
 
 const $ = (id) => document.getElementById(id)
 const iface = new Interface(MANAGER_ABI)
@@ -152,14 +152,6 @@ let signer = null, ownerAddr = null
 function chainId() { return Number($('chain').value) }
 function chain() { return CHAINS[chainId()] }
 function provider() { return new JsonRpcProvider($('rpc').value.trim() || chain().rpc, chainId(), { staticNetwork: true }) }
-
-// A manager on a provider whose chain id has been checked against the selected
-// network (assertChain throws on a mismatch, before anything is read).
-async function checkedManager() {
-  const p = provider()
-  await assertChain(p, chainId())
-  return new Contract(chain().manager, MANAGER_ABI, p)
-}
 
 function showChain() {
   const c = chain()
@@ -177,8 +169,9 @@ $('connect').onclick = async () => {
   const bp = new BrowserProvider(window.ethereum)
   signer = await bp.getSigner()
   ownerAddr = await signer.getAddress()
-  $('acct').textContent = ownerAddr
-  if (!$('account').value) $('account').value = ownerAddr
+  // The wallet is a signer of the account, not the account: a Haven account is
+  // a smart account with its own address, so the account field is not filled in.
+  $('acct').textContent = `Connected signer ${ownerAddr} (enter your account's own address below)`
 }
 
 $('scan').onclick = async () => {
@@ -188,7 +181,7 @@ $('scan').onclick = async () => {
   if (!Number.isInteger(from) || from < 0) { $('scanStatus').textContent = 'Enter a valid block number.'; return }
   $('list').replaceChildren()
   try {
-    const mgr = await checkedManager()
+    const mgr = await checkedManager(provider(), chainId())
     const latest = await mgr.runner.provider.getBlockNumber()
     $('scanStatus').textContent = 'Scanning public redemption events, newest first…'
     const filter = mgr.filters.RedeemedDelegation(account)
@@ -198,19 +191,8 @@ $('scan').onclick = async () => {
       const del = toPlainDelegation(ev.args.delegation)
       seen.set(delegationHash(del), del)
     }
-    const where = `blocks ${result.scannedFrom}–${latest}`
-    if (!result.complete) {
-      const why = result.reason === 'request-cap'
-        ? `This RPC allows ${result.chunk} blocks per query, so the page stopped after ${result.requests} queries.`
-        : `The RPC refused a query: ${result.error}.`
-      $('scanStatus').textContent = `Scanned the newest ${where} only. ${why} Older budgets were not searched: use an RPC that allows wider log queries, the manager's event log on the explorer (linked above), or paste a delegation below to check it by hash. ${seen.size} delegation(s) found so far.`
-    } else if (seen.size === 0) {
-      $('scanStatus').textContent = `No redeemed delegations found for this account in ${where}. Un-used delegations must be checked or revoked by pasting them below.`
-      return
-    } else {
-      $('scanStatus').textContent = `${seen.size} delegation(s) found in ${where}.`
-    }
-    for (const del of rootFirst(seen.values(), account)) {
+    $('scanStatus').textContent = scanSummary(result, latest, seen.size)
+    for (const del of rootFirst(seen.values())) {
       await showDelegation($('list'), del, { manager: mgr, account, onDetails: revocationDetails })
     }
   } catch (e) { $('scanStatus').textContent = 'Scan failed: ' + (e.shortMessage || e.message || e) }
@@ -227,7 +209,7 @@ $('scan').onclick = async () => {
 // offers this for root budgets only.
 function revocationDetails(del, hash, statusEl) {
   const calldata = disableDelegationCalldata(iface, del)
-  statusEl.innerHTML = 'To revoke, your ACCOUNT calls disableDelegation (a UserOp your owner signs — see the docs).' +
+  statusEl.innerHTML = "To revoke, the delegation's delegator ACCOUNT calls disableDelegation (a UserOp that account's owner signs — see the docs)." +
     '<br>Delegation hash: <code></code><br>disableDelegation calldata (to the DelegationManager): <code></code><br>Delegation: <code></code>'
   const codes = statusEl.querySelectorAll('code')
   codes[0].textContent = hash
@@ -241,7 +223,7 @@ $('checkPasted').onclick = async () => {
   try { del = toPlainDelegation(JSON.parse($('delJson').value)) } catch (e) { $('revStatus').textContent = 'Not a valid delegation object' + (e instanceof SyntaxError ? '.' : `: ${e.message}.`); return }
   $('revStatus').textContent = ''
   try {
-    const mgr = await checkedManager()
+    const mgr = await checkedManager(provider(), chainId())
     await showDelegation($('pasted'), del, { manager: mgr, account: $('account').value.trim(), onDetails: revocationDetails })
   } catch (e) { $('revStatus').textContent = 'Could not check it: ' + (e.message || e) }
 }

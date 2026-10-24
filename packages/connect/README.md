@@ -5,9 +5,12 @@ Connect Agent 2 local connector.
 This command runs in the user's agent environment. It generates the agent
 signing key and API key locally, stores them locally, and sends Haven the
 public signing address, a proof signature, and the API key's hash and display
-prefix. The same registration carries the one-time setup token and non-secret
-labels (runtime, connector version, MCP server name, run mode, connector
-context). Haven never receives the private key or plaintext API key.
+prefix. The same registration request also carries the one-time setup token
+and its challenge id, non-secret labels (runtime, connector version, MCP server
+name, run mode, connector context) and the install capabilities (whether the
+connector can write the runtime config, and whether a restart is required).
+Every request names the connector and its version in an `X-Haven-Client`
+header (#3303). Haven never receives the private key or plaintext API key.
 
 ## Are you an AI agent whose user has no Haven account yet?
 

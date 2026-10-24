@@ -98,13 +98,14 @@ and the merchant support is still offered after it:
 - `eip3009`: the EIP-3009 option first
 
 A method the merchant has not enabled, or the product does not support, is
-refused. The tools also take `locale`
-(`sv` for Swedish text) and `result_detail` (`summary` drops the rendered
-invoice from the text; the structured `summary` is the same either way).
+refused. The tools also take `locale` (`sv` for Swedish text) and
+`result_detail` (`summary` drops the rendered invoice and the bookkeeping JSON
+from the text; the structured content, including `summary`, and the
+`x-receipt-json` header are the same either way).
 
 A generic client that takes the first matching Base USDC `exact` option gets
-EIP-3009 by default. Haven's clients read `extra.assetTransferMethod`: since
-#1450 they prefer the option tagged `assetTransferMethod: "erc7710"` when the
+EIP-3009 by default. Haven's clients read `extra.assetTransferMethod`: under
+the #1450 preference rule, whose selector came with #1453, they prefer the option tagged `assetTransferMethod: "erc7710"` when the
 account is on the delegation rail and fall back to EIP-3009 otherwise
 (`selectX402SettlementScheme` in `packages/sdk/src/x402.ts`).
 

@@ -266,16 +266,17 @@ export const GOVERNED_PACKAGE_DOCS = [
     // #3542 left a note) and EDITED.
     // The credential paths are `~/.haven/agents/<slug>/` by default since
     // #3737 (`<agent-id>` only for --bare/--replace without --name); the
-    // intro names everything register sends (api_key_prefix, setup token,
-    // labels); the doctor table gains `parked` (#1915); the runtime-unknown
+    // intro now names every field of the register body (api_key_prefix,
+    // setup token, challenge_id, the labels, install_capabilities) and the
+    // X-Haven-Client header, per api.ts registerSetup; the doctor table gains `parked` (#1915); the runtime-unknown
     // detail is quoted as the code writes it; the #3412 refusal accepts
     // --name (#3799) and names each pair; "the superseded-agents revoke on
     // the setup screen" is gone (#3830 removed it); the default slug comes
     // from deriveServerSlug; `haven-signer` is a refused slug too. Re-checked
-    // unchanged: every backticked identifier against connect/src (159
-    // tokens; the 16 not found there are file names, backend/SDK
-    // fields or placeholders), the runtime registry, doctor levels and
-    // check ids, teardown and prune JSON, the binding record, run_mode,
+    // unchanged: the backticked identifiers, each searched for in
+    // packages/connect/src with `git grep -F` (those not found there are
+    // file names, backend/SDK fields or placeholders), the runtime
+    // registry, doctor levels and check ids, teardown and prune JSON, the binding record, run_mode,
     // the retired-agents report and its 404 tolerance, slug rules,
     // DEFAULT_CONNECTOR_CHANNEL 'alpha', the override markers, publish.yml's
     // five-package dev channel, and the dashboard labels the page names.
@@ -473,6 +474,7 @@ export const GOVERNED_PACKAGE_DOCS = [
       'packages/qa-agent/src/**',
       'packages/backend/src/routes/payments.ts',
       'packages/backend/src/rails/execution-rail.ts',
+      '.github/workflows/qa-dev.yml',
     ],
     // #2756: the over-budget discriminator paragraph re-read against
     // `delegation-authorize.ts` and corrected — both x402 legs refuse at a
@@ -513,7 +515,11 @@ export const GOVERNED_PACKAGE_DOCS = [
     status: 'current',
     // #3170: the README states the hosted relay's 500-character window, so a
     // change to that slice must re-implicate it.
-    covers: ['packages/demo-merchant-mcp/src/**', 'packages/mcp-server/src/tools/paid-mcp-completion.ts'],
+    covers: [
+      'packages/demo-merchant-mcp/src/**',
+      'packages/mcp-server/src/tools/paid-mcp-completion.ts',
+      'packages/sdk/src/x402.ts',
+    ],
     // #2403: the § "Extensions echo" fixture paragraph re-verified and EDITED.
     // It enumerated the echo-rule tests as a fixed list of four; #2401 made it
     // five and #2403 adds more, so the sentence now names the BRANCHES pinned
@@ -549,7 +555,8 @@ export const GOVERNED_PACKAGE_DOCS = [
     // metadata list names the fields the tool emits (no resource_url there;
     // hosted_urls is the discovery document's); settlement_method orders the
     // 402's accepts rather than choosing one option, and Haven's clients DO
-    // read extra.assetTransferMethod (the #1450 preference); the invoice text
+    // read extra.assetTransferMethod (the #1450 rule,
+    // selector from #1453); the invoice text
     // is English by default (#1550); backend /demo/mpp/* is retired (#1328);
     // the echo-helper list names skip-settle-guard.test.ts. Re-checked
     // unchanged against src and the live dev/prod discovery documents and

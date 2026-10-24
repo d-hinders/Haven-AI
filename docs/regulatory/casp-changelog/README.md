@@ -139,9 +139,10 @@ version rather than an issue:
 
 Re-verified 2026-10-24 (#4372 part G, at dev `b79b112ec`), end to end:
 
-- **Count and names.** The directory holds 677 shards plus this README
-  (`git ls-tree --name-only HEAD docs/regulatory/casp-changelog/`; the same
-  command at `5b5bd059` gives 507, the previous note's count). 39 of the 677
+- **Count and names.** The directory holds 677 shards plus this README:
+  `git ls-tree --name-only b79b112ec docs/regulatory/casp-changelog/` prints
+  678 lines. The same command at `5b5bd059` prints 508, which is 507 shards
+  plus the README, the previous note's count. 39 of the 677
   do not match `YYYY-MM-DD-<issue>.md` or `YYYY-MM-DD-<version>-release.md`
   exactly: they carry a suffix (`-1441b`, `-2769-pending-nonce`), a topic
   slug instead of an issue (`2026-10-07-blockscout-api-key.md`) or the
@@ -152,8 +153,10 @@ Re-verified 2026-10-24 (#4372 part G, at dev `b79b112ec`), end to end:
   The newest shard is `2026-10-24-4387.md`; the newest release shard is
   `2026-10-23-0.11.0-alpha.0-release.md`.
 - **Shape.** 119 of the 677 shards use nested bullets (81 of October's 161),
-  and 96 have no match for `/perimeter (is )?(unchanged|narrow)/i`
-  (`2026-10-24-4387.md` matches, as a control). The
+  and 78 have no match for `/perimeter (is )?(unchanged|narrow)/i` once
+  whitespace is flattened (`\s+` to one space). Without flattening the count
+  is 96, because 18 shards carry the verdict across a hard line wrap.
+  `2026-10-24-4387.md` matches either way, as a control. The
   *Content* bullet now says so and that nothing checks either.
 - **Gate.** The added-match rule (#2192) is `implicatedDocs` in
   `scripts/docs/coupling-gate.mjs`, with `parseNameStatus` counting only `A`

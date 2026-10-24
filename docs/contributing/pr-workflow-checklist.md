@@ -278,11 +278,14 @@ Notes:
 > `guard-freshness.yml` is push-driven with a weekly floor, so the two guards
 > are no longer both called scheduled.
 > Re-checked without change: `dev-gate.yml`'s `dev`/`hotfix/*` rule; the
-> rulesets (`gh api …/rulesets`: *Haven automerge rules* on `main` and `dev`
-> with the 15 required checks, *Banned product-copy terms* and
-> *Design-system coupling (strict)* among them, strict policy off; *Dev gate*
-> on `main` requiring `gate`, `qa-freshness`, *Design visual regression* and
-> *Frontend browser smoke*, strict policy on; code-owner review on both);
+> three active rulesets (`gh api …/rulesets`): *Haven automerge rules* on
+> `main` and `dev`, with the 15 required checks (*Banned product-copy terms*
+> and *Design-system coupling (strict)* among them), strict policy off and
+> code-owner review required; *Dev gate* on `main`, requiring `gate`,
+> `qa-freshness`, *Design visual regression* and *Frontend browser smoke*,
+> strict policy on and code-owner review required; and *Dev merge* on `dev`,
+> requiring *External intake gate* (#4200), strict policy off and no
+> code-owner review of its own;
 > `CODEOWNERS` on migrations; every npm script the doc names; the preflight
 > flags and exit codes 0/1/2/3 and `PREFLIGHT_SILENCE_MS`; the CI jobs that
 > run `lint:next-steps`, `lint:vocabulary`, `lint:runbook-parity`,
@@ -296,4 +299,3 @@ Notes:
 > section heading and its exit 0 without `--strict`; the `ui-gate-wording`
 > baseline's one sentence in `ship-playbooks/frontend.md`; the anchors into
 > `ship-playbooks/frontend.md`, `ship-next` and `autonomous-pr-loop.md`.
-

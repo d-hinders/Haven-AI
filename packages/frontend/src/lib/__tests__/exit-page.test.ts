@@ -250,7 +250,7 @@ describe('exit page: what the owner sees', () => {
       const view = exitCore.STATUS_VIEW[status]
       expect(pill.textContent).toBe(view.label)
       expect(pill.className).toBe(`pill ${view.cls}`)
-      expect(row.querySelector('[data-note]')!.textContent).toBe(view.note)
+      expect(row.querySelector('[data-note]')?.textContent).toBe(view.note)
     }
   })
 
@@ -262,10 +262,10 @@ describe('exit page: what the owner sees', () => {
     for (const kind of ['root', 'child']) {
       const row = exitCore.delegationRow(document, del, { hash: tag(4), kind })
       expect(row.querySelector('img'), kind).toBeNull()
-      expect(row.querySelector('[data-delegate]')!.textContent).toBe(`delegate ${tag(1)}`)
-      expect(row.querySelector('[data-delegator]')!.textContent).toContain(tag(2))
-      expect(row.querySelector('[data-salt]')!.textContent).toContain(tag(3))
-      expect(row.querySelector('[data-hash]')!.textContent).toBe(`hash ${tag(4)}`)
+      expect(row.querySelector('[data-delegate]')?.textContent).toBe(`delegate ${tag(1)}`)
+      expect(row.querySelector('[data-delegator]')?.textContent).toContain(tag(2))
+      expect(row.querySelector('[data-salt]')?.textContent).toContain(tag(3))
+      expect(row.querySelector('[data-hash]')?.textContent).toBe(`hash ${tag(4)}`)
     }
   })
 
@@ -284,19 +284,19 @@ describe('exit page: what the owner sees', () => {
     const { row } = await show(child, false)
     expect(row.dataset.kind).toBe('child')
     expect(row.querySelector('[data-revoke]')).toBeNull()
-    expect(row.querySelector('[data-child]')!.textContent).toBe(exitCore.CHILD_NOTE)
+    expect(row.querySelector('[data-child]')?.textContent).toBe(exitCore.CHILD_NOTE)
     expect(exitCore.CHILD_NOTE).toMatch(/^Issued by your agent under one of your budgets — revoke that budget\./)
-    expect(row.querySelector('[data-delegator]')!.textContent).toContain('(your agent)')
+    expect(row.querySelector('[data-delegator]')?.textContent).toContain('(your agent)')
   })
 
   it('never tells the owner a child still has authority of its own', async () => {
     const { row } = await show(child, false)
-    const note = row.querySelector('[data-note]')!.textContent
+    const note = row.querySelector('[data-note]')?.textContent
     expect(note).toBe(exitCore.CHILD_ACTIVE_NOTE)
     expect(note).not.toBe(exitCore.STATUS_VIEW.active.note)
     expect(note).toMatch(/^Not revoked on its own; it stops when the budget it was issued under is revoked/)
     // A revoked or unknown child shows the ordinary note.
-    expect((await show(child, true)).row.querySelector('[data-note]')!.textContent).toBe(exitCore.STATUS_VIEW.revoked.note)
+    expect((await show(child, true)).row.querySelector('[data-note]')?.textContent).toBe(exitCore.STATUS_VIEW.revoked.note)
   })
 
   // Connect wallet gives the owner's signer (an EOA); a Haven account is a
@@ -308,10 +308,10 @@ describe('exit page: what the owner sees', () => {
     expect(row.dataset.kind).toBe('root')
     expect(row.querySelector('[data-child]')).toBeNull()
     expect(row.querySelector('[data-revoke]')).not.toBeNull()
-    expect(row.querySelector('[data-foreign]')!.textContent).toBe(exitCore.FOREIGN_NOTE)
+    expect(row.querySelector('[data-foreign]')?.textContent).toBe(exitCore.FOREIGN_NOTE)
     expect(exitCore.FOREIGN_NOTE).toMatch(/^Not this account's budget/)
-    expect(row.querySelector('[data-delegator]')!.textContent).toContain('(not this account)')
-    expect(row.querySelector('[data-note]')!.textContent).toBe(exitCore.STATUS_VIEW.active.note)
+    expect(row.querySelector('[data-delegator]')?.textContent).toContain('(not this account)')
+    expect(row.querySelector('[data-note]')?.textContent).toBe(exitCore.STATUS_VIEW.active.note)
     // With the right account, or none, there is no such marker.
     expect((await show(sample, false, { account })).row.querySelector('[data-foreign]')).toBeNull()
     expect((await show(sample, false, { account: '' })).row.querySelector('[data-foreign]')).toBeNull()

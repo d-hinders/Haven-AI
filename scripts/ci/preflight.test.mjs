@@ -1621,8 +1621,8 @@ describe('the silence watchdog (#4276)', () => {
   }
 
   /**
-   * A gate that writes one line, spawns a grandchild that registers its pid
-   * and then sleeps, and goes silent forever. The grandchild is spawned
+   * A gate that spawns a grandchild, waits until it has registered its pid,
+   * writes one line, and goes silent forever. The grandchild is spawned
    * WITHOUT `detached`: it stays in the gate's process group, so it is
    * exactly the "outlives its parent" case the group kill exists for. (A
    * `setsid`/detached escapee is stated residue in `runGate`'s comment.)
@@ -1644,22 +1644,37 @@ describe('the silence watchdog (#4276)', () => {
       hang,
       [
         `import { spawn } from 'node:child_process'`,
+        `import { existsSync } from 'node:fs'`,
         `spawn(process.execPath, [${JSON.stringify(gc)}], { stdio: 'ignore' })`,
-        `console.log('gate alive; silent from here')`,
-        `setTimeout(() => process.exit(9), 5000) // self-cap: fails red, never hangs`,
+        // Go silent only once the grandchild has registered (#4398): under
+        // load its Node startup can outlast the watchdog's threshold, and a
+        // grandchild killed while still booting never writes its pid, so the
+        // test would report "never registered" instead of testing the kill.
+        // Until then the gate writes a heartbeat line every 20 ms, so the
+        // watchdog (silence counts from spawn) cannot fire during the wait.
+        `const registered = () => existsSync(${JSON.stringify(pidFile)})`,
+        `const ready = setInterval(() => {`,
+        `  if (!registered()) return void console.log('waiting for the grandchild')`,
+        `  clearInterval(ready)`,
+        `  console.log('gate alive; silent from here')`,
+        `  setTimeout(() => process.exit(9), 5000) // self-cap: fails red, never hangs`,
+        `}, 20)`,
         ``,
       ].join('\n'),
     )
     return { pidFile, command: `node ${JSON.stringify(hang)}` }
   }
 
-  test('a gate silent past the threshold is killed with its process group, grandchild included', { timeout: 10_000 }, async () => {
+  test('a gate silent past the threshold is killed with its process group, grandchild included', { timeout: 30_000 }, async () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'preflight-stall-'))
     try {
       const { pidFile, command } = hangFixture(dir)
-      const result = await runGate({ command, jobs: ['fixture'] }, { silenceMs: 300, graceMs: 100 })
+      // Silence counts from spawn, before the gate's own Node has printed
+      // anything: under load that startup alone measured over 300 ms (#4398),
+      // so the threshold leaves room for it, still well under the self-cap.
+      const result = await runGate({ command, jobs: ['fixture'] }, { silenceMs: 2000, graceMs: 100 })
       assert.equal(result.stalled, true, JSON.stringify({ ...result, output: result.output.slice(0, 200) }))
-      assert.ok(result.silentFor >= 300, `silentFor=${result.silentFor}`)
+      assert.ok(result.silentFor >= 2000, `silentFor=${result.silentFor}`)
       assert.ok(result.silentFor < 5000, `the self-cap must not fire first: silentFor=${result.silentFor}`)
       assert.equal(result.ok, false)
       assert.equal(result.status, null, 'killed, not exited')
@@ -1667,7 +1682,7 @@ describe('the silence watchdog (#4276)', () => {
       assert.equal(isTimeoutShaped(result), false, 'a stall is its own outcome, never a re-run candidate')
       // The grandchild outlives its parent the moment the group is signalled;
       // it must be dead afterwards.
-      const gpid = Number(await untilFile(pidFile, 3000))
+      const gpid = Number(await untilFile(pidFile, 15_000))
       assert.ok(gpid > 0, 'the grandchild never registered its pid')
       assert.ok(await untilDead(gpid, 3000), 'the grandchild survived the process-group kill')
     } finally {
@@ -1749,14 +1764,14 @@ describe('the silence watchdog (#4276)', () => {
     }
   })
 
-  test('SIGINT to preflight kills the running gate process group: the grandchild is dead', { timeout: 10_000 }, async () => {
+  test('SIGINT to preflight kills the running gate process group: the grandchild is dead', { timeout: 30_000 }, async () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'preflight-stall-'))
     try {
       const { pidFile, command } = hangFixture(dir)
       // Far above the test's own timeout: only the signal path below may end
       // this gate, so a removed handler fails red instead of passing late.
       const pending = runGate({ command, jobs: ['fixture'] }, { silenceMs: 60_000, graceMs: 60_000 })
-      const gpid = Number(await untilFile(pidFile, 3000))
+      const gpid = Number(await untilFile(pidFile, 15_000))
       assert.ok(gpid > 0, 'the grandchild never registered its pid')
       killRunningGateGroups()
       const result = await pending

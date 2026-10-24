@@ -476,7 +476,17 @@ export const GOVERNED_PACKAGE_DOCS = [
     // Other QA scenario prose was not re-read.
     // #3896: the balances-check paragraph re-read against the raised 0.004 ETH
     // merchant target. Other QA scenario prose was not re-read.
-    'last-verified': '2026-10-12',
+    // #4372 part G: the WHOLE README re-read at dev b79b112ec and EDITED. The
+    // evals runner has two lanes (QA_EVAL_ADAPTER, #3959); qa-dev.yml runs
+    // post-deploy, nightly and on dispatch, not on dispatch alone; the local
+    // recipe builds the signer too, as the workflow does (the hosted-MCP leg
+    // imports its dist); loadQaConfig requires two vars and the rest skip
+    // their legs; the scenario list names the erc7710 sibling and the
+    // budget-authority legs. Re-checked unchanged: SCENARIOS order, the
+    // over-budget legs' 403/remaining/control assertions, revert-reason.ts
+    // deleted, the seed's routes, reuse statuses, SEED_* defaults and output
+    // block, the 410 on POST /user/safes, the balances faucet and cron.
+    'last-verified': '2026-10-24',
   },
   {
     doc: 'packages/demo-merchant-mcp/README.md',

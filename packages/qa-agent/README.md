@@ -11,16 +11,18 @@ dev stack (which the mocked Playwright suite structurally can't):
   core): drives the real SDK/API payment path on **Base Sepolia** against the
   shared dev backend + the dev demo-merchant, asserting the #420 invariants.
 - **#3958** — the **agent evals** (`src/evals/`, epic #3957): a REAL model
-  agent runs task files through a runner (Hermes lane, `npm run evals`) and
-  graders check its tool-call log, the dev backend and Base Sepolia. Task
+  agent runs task files through a runner (`npm run evals`; the Hermes lane by
+  default, the Claude Code headless lane with `QA_EVAL_ADAPTER=claude-code`,
+  #3959) and graders check its tool-call log, the dev backend and Base
+  Sepolia. Task
   format, graders and runbook: [`docs/operations/agent-evals.md`](../../docs/operations/agent-evals.md).
 
 ## Status
 
 Implemented: the shared **config contract** (`src/config.ts`), the **dev seed**
 (`src/seed.ts`, #574 item 1), and the **money-flow harness** (`src/run.ts`, #575)
-with the scenarios registered in `SCENARIOS` — three direct money-path legs plus the
-delegation-rail suite. `run.ts` is the source of truth for the list and its
+with the scenarios registered in `SCENARIOS`: the over-budget and within-budget
+legs below, the delegation-rail suite and the three budget-authority legs. `run.ts` is the source of truth for the list and its
 order; the canonical per-scenario table lives in
 [`docs/operations/agent-qa.md`](../../docs/operations/agent-qa.md). The
 **balances check** (`npm run qa:balances`, `src/balances-cli.ts`, #3631) reads
@@ -32,8 +34,8 @@ doc's § QA wallet balances.
 
 ⚠️ The seed's **on-chain steps are not exercised in CI** (no funded testnet
 wallets there). Run it locally against funded Base Sepolia accounts. The
-money-flow harness itself runs both locally and through the manual GitHub Actions
-workflow. See the canonical operator runbook:
+money-flow harness itself runs both locally and through the `qa-dev.yml` GitHub
+Actions workflow. See the canonical operator runbook:
 [`docs/operations/agent-qa.md`](../../docs/operations/agent-qa.md).
 
 ## Money-flow harness — `qa:dev` (#575)
@@ -42,11 +44,14 @@ workflow. See the canonical operator runbook:
 Sepolia** against the shared dev backend using the seeded QA identity, asserts the
 #420 invariants (no LLM, fixed inputs), prints a per-scenario pass/fail + a run
 report, and **exits non-zero on any failure**. It reads the `QA_*` env (see
-[the config table below](#config-contract)). A manual `workflow_dispatch` job
-([`.github/workflows/qa-dev.yml`](../../.github/workflows/qa-dev.yml)) runs it in
-CI from the `QA_*` Actions secrets.
+[the config table below](#config-contract)).
+[`.github/workflows/qa-dev.yml`](../../.github/workflows/qa-dev.yml) runs it in
+CI from the `QA_*` Actions secrets after each dev deploy (`deployment_status`,
+filtered by its `gate` job), nightly at 03:17 UTC, and on manual
+`workflow_dispatch`.
 
-Scenarios (`src/scenarios/`) — the three direct money-path legs. All three ran
+Scenarios (`src/scenarios/`) — the three direct money-path legs, plus
+`x402-erc7710-over-budget-rejected`, the erc7710 sibling #2082 added. The three ran
 the legacy AllowanceModule identity until #2016 and were **re-based onto the
 delegation rail**: since #1986 that account answers HTTP 410 from `POST
 /payments` and the x402 path, so two of them were guaranteed red and the third
@@ -131,15 +136,18 @@ with scripted fetches, because the legs themselves only run against deployed dev
 > a sponsorship or bundler failure surfaces as `execution failed: …` with the
 > on-chain reason, not just a 502.
 
-For a clean local checkout, build the workspace SDK before the harness:
+For a clean local checkout, build the workspace SDK and the edge signer before
+the harness. The hosted-MCP leg runs the real `@haven_ai/signer` in-process,
+and a workspace dependency resolves to its `dist/`:
 
 ```bash
 npm ci
 npm run build -w packages/sdk
+npm run build -w packages/signer
 npm run qa:dev -w packages/qa-agent
 ```
 
-The GitHub workflow performs the SDK build automatically.
+The GitHub workflow runs the same two builds before the harness.
 
 ## Seed — provision the QA identity (#574)
 
@@ -191,7 +199,13 @@ for the `QA_*` env (all **testnet/dev-only**). The seed reads the separate
 | `QA_PAYMENT_TO` | Recipient for direct-send scenarios |
 | `QA_DEMO_MERCHANT_URL` | Dev demo-merchant base URL; required for every merchant round-trip leg |
 
-`loadQaConfig()` fails fast with a clear error listing every missing var.
+`loadQaConfig()` fails fast with a clear error listing every missing var of the
+two it requires, `QA_HAVEN_API_URL` and `QA_PAYMENT_TO`. Every other `QA_*`
+value is optional, and a leg that needs one skips without it:
+`QA_DEMO_MERCHANT_URL`, `QA_DELEGATION_AGENT_API_KEY`,
+`QA_DELEGATION_DELEGATE_PRIVATE_KEY`, `QA_HOSTED_MCP_URL` and
+`QA_X402_BINDING_SIGNER`. `QA_REQUIRE_ALL_LEGS=1`, which `qa-dev.yml` passes from the repository
+variable of that name (set to `1`, #1066), turns such a skip into a failure.
 
 `QA_AGENT_API_KEY` and `QA_DELEGATE_PRIVATE_KEY` belonged to the retired
 AllowanceModule rail and are intentionally not part of the harness. The seed

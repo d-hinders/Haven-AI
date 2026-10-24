@@ -657,9 +657,14 @@ caveat, so the authority is still the signed caveat stack and nothing else.
 > `permit2` option was recorded as `permit2` and an option with an
 > unsupported `extra.paymentFlow` and no method as `eip3009`; options with an
 > unsupported transfer method or payment flow are now not recorded at all.
-> The payTo contract above is unchanged: `pay_to` is still written as seen
-> from the challenge, still collected only across options on the recorded
-> network, and still refused when they disagree. Scope of this re-read: the
+> The payTo contract above holds with one new consequence: `pay_to` is still
+> written as seen from the challenge, still collected only across options on
+> the recorded network, and still refused when they disagree, but a challenge
+> that is now a miss (its only option names no `payTo`, or no option is
+> payable) leaves the stored `pay_to` in place, as every miss does, until the
+> row degrades after three failed refreshes. Before, a challenge whose only
+> option named no `payTo` verified the row and cleared `pay_to`. A pin still
+> pays only the address it was signed for. Scope of this re-read: the
 > Merchant-locked budgets section and the `merchant-catalog.ts` coverage it
 > names; the rest of the document was not re-read for it, and
 > `last-verified` is not bumped.

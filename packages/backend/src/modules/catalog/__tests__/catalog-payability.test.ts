@@ -134,6 +134,15 @@ describe('catalog payability (#4389) — the probe', () => {
       network: 'eip155:84532',
       assetTransferMethods: ['eip3009'],
     })
+    // The recorded methods come from the same normalized options: a dropped
+    // erc7710 option must not make the row read as erc7710-capable, or a
+    // merchant-locked budget could be built that the pay path can never use.
+    const erc7710NoAmount = { ...BASE_OPTION, maxAmountRequired: null, extra: { assetTransferMethod: 'erc7710' } }
+    expect(await probeCatalogEntry(ENTRY, challenge([BASE_OPTION, erc7710NoAmount]))).toMatchObject({
+      ok: true,
+      network: 'eip155:8453',
+      assetTransferMethods: ['eip3009'],
+    })
     expect(await probeCatalogEntry(ENTRY, challenge([{ ...BASE_OPTION, payTo: undefined }]))).toEqual({ ok: false })
     expect(await probeCatalogEntry(ENTRY, challenge([{ ...BASE_OPTION, maxAmountRequired: null }]))).toEqual({ ok: false })
     expect(await probeCatalogEntry(ENTRY, challenge([{ ...BASE_OPTION, maxAmountRequired: '0' }]))).toEqual({ ok: false })

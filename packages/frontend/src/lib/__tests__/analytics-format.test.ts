@@ -12,7 +12,6 @@ import {
   paymentsAgentsCaption,
   spentComparisonCaption,
   unknownRecipientShortAddress,
-  refusalsCaption,
   formatAnalyticsTick,
   formatAnalyticsValue,
 } from '../analytics-format'
@@ -245,24 +244,6 @@ describe('lastPaymentCaption', () => {
     // rot as "now" moves, and a rotting pin that fails in a month is worse
     // than no pin. The absolute instant rides on the element's title instead.
     expect(lastPaymentCaption('2020-01-01T00:00:00.000Z')).toMatch(/^[0-9]+(m|h|d|mo|y) ago$/)
-  })
-})
-
-describe('refusalsCaption', () => {
-  it('states the rows and the attempts behind them as one line when they differ', () => {
-    // One attempt can carry two refusal rows upstream, so the counts differ;
-    // the pair is one fact and gets one cell, not two columns doubling the
-    // width of the loudest zero.
-    expect(refusalsCaption(2, 3)).toBe('2 refused payments · across 3 attempts')
-    expect(refusalsCaption(1, 2)).toBe('1 refused payment · across 2 attempts')
-  })
-
-  it('drops the attempts clause when the counts are equal, which is the usual case', () => {
-    // Spelling "2 refused payments · across 2 attempts" every time would
-    // train the reader to stop parsing the cell.
-    expect(refusalsCaption(2, 2)).toBe('2 refused payments')
-    expect(refusalsCaption(1, 1)).toBe('1 refused payment')
-    expect(refusalsCaption(0, 0)).toBe('0 refused payments')
   })
 })
 

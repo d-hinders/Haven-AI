@@ -415,9 +415,9 @@ describe('ConnectionsCard', () => {
 
     /**
      * Fail CLOSED (#2869 review): a failed status read cannot tell a
-     * flagged-off deployment from a hosted one, and the connection routes
-     * answer either way until #2918 gates them — so no controls, not the
-     * full Connect UI.
+     * flagged-off deployment from a hosted one. The connection routes 404
+     * when the feature is off (#2918), and the card still shows no controls,
+     * not the full Connect UI.
      */
     it('a failed feed-status read shows the load error and NO controls, even though the listings answered', async () => {
       mockApi.get.mockImplementation((url: string) => {

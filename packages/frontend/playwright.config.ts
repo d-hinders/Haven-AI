@@ -105,7 +105,7 @@ const SUITE_IGNORE = [
   // Visual specs are out of the default suite because their PIXEL comparison
   // needs Linux-rendered baselines — VISUAL_REGRESSION=1 opts into that (#897),
   // and VISUAL_STRUCTURE_ONLY=1 admits them for their LOCATORS only (#2827). Both conditions live in
-  // e2e/support/visual-mode.ts, which is also where the five specs read their
+  // e2e/support/visual-mode.ts, which is also where the 24 visual specs read their
   // own `test.skip` from — one predicate, so a third mode cannot reach the
   // config and miss a spec.
   ...(VISUAL_SPECS_ENABLED ? [] : ['**/*.visual.spec.ts']),
@@ -145,7 +145,7 @@ if (VISUAL_STRUCTURE_ONLY) {
    * timeout — the latter reads as the contention signature the frontend
    * playbook teaches you to re-run rather than investigate.
    *
-   * Overriding the built-in matcher rather than editing the five specs means
+   * Overriding the built-in matcher rather than editing the visual specs means
    * there is no second copy of any locator to drift, and the specs stay
    * readable as what they are: pixel gates.
    *

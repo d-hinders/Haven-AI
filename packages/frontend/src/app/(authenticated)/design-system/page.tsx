@@ -1902,7 +1902,7 @@ export default function DesignSystemPage() {
                 polarity="neutral"
                 delta={15.9}
                 deltaCaption="vs previous 30 days"
-                footnote="based on 5 payments · 1 awaiting settlement evidence is not counted"
+                footnote="based on 5 payments"
               />
               <StatTile
                 label="Refused"
@@ -3451,7 +3451,7 @@ export default function DesignSystemPage() {
           <SettingsSection
             title="Accounting"
             description="Connect your accounting provider."
-            note="Fortnox is the only live provider today."
+            note="Fortnox and Accounted are live today."
           >
             <SettingsRow
               label="Fortnox"

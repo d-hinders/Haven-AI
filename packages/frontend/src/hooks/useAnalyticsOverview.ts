@@ -29,7 +29,7 @@ export type UseAnalyticsOverviewResult = {
  *
  * One request per window, which is what the endpoint exists to provide — its
  * own description in the spec says the page should have "one loading state and
- * one 'based on N payments' basis". So this hook does not fan out into
+ * one payment basis". So this hook does not fan out into
  * per-tile fetches, and it does not poll: the figures are a report over
  * history rather than a live tape, and re-running a full aggregate every few
  * seconds would buy no figure that changes on its own.

@@ -1188,10 +1188,10 @@ that half is measured too.
 | `deployment_status` (Railway → `Haven AI / dev`, state `success`) | Test exactly what the Railway dev backend deploy just shipped, at the SHA it shipped. **Built by #2273; first observed firing 2026-09-02 — see below.** |
 
 > **All three now have a history; the post-deploy one starts on 2026-09-02.**
-> It has fired on dev deploys since then — hundreds a day (265
-> `deployment_status` runs of `qa-dev.yml` created on 2026-10-23, paged in
-> full; the filtered listing's own `total_count` stops at 2500), most of
-> them gate-skipped (see *Read the `money-flow` JOB's conclusion* below). Its
+> It has fired on dev deploys since then — 2,685 `deployment_status` runs
+> of `qa-dev.yml` were created 2026-10-01 → 10-23 (per-day `created=` counts
+> summed, 0 to 265 a day; the filtered listing's own `total_count` stops at
+> 2500), most of them gate-skipped (see *Read the `money-flow` JOB's conclusion* below). Its
 > predecessor, `repository_dispatch` (`dev-deployed`), fired **0** times across
 > the repository's entire history — 156 `qa-dev.yml` runs, 2026-06-30 →
 > 2026-08-31 (`workflow_dispatch` 96, `schedule` 60) — because nothing ever sent
@@ -2221,9 +2221,10 @@ the observer reads 10-block `eth_getLogs` windows (`GET_LOGS_MAX_RANGE` in
 > **Review round 1 (haven-doc-reviewer @ `344d7ea91`).** Also changed:
 > `x402-erc7710-sdk` names `x402-erc7710-settle` rather than "the leg above",
 > and its hosted variant is `x402-erc7710-hosted` (#1456 is closed); the
-> post-deploy trigger's history is no longer "exactly one deploy" (hundreds of
-> `deployment_status` runs a day — 265 on 2026-10-23; round 2 corrected an
-> earlier 2500, which is the filtered listing's cap, not a count); the 3009 scenarios run in every `qa-dev` money-flow job, not
+> post-deploy trigger's history is no longer "exactly one deploy" (2,685
+> `deployment_status` runs created 2026-10-01 → 10-23, 0 to 265 a day, from
+> per-day `created=` counts; rounds 2 and 3 corrected an earlier 2500, the
+> filtered listing's cap, and a "hundreds a day" drawn from one peak day); the 3009 scenarios run in every `qa-dev` money-flow job, not
 > every run; the dev relayer deploys the treasury at first activation and a
 > fresh agent's delegate account at its first erc7710 authorize; #2268 is the
 > issue that reported the old trigger never fired; and two stale conditionals

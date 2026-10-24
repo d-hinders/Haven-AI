@@ -48,9 +48,9 @@ DelegationManager, call the read function:
 disabledDelegations(bytes32 delegationHash) → bool
 ```
 
-`false` = still spendable; `true` = already revoked. Haven shows you each
-budget's hash in the dashboard and in the delegation object it hands your
-agent, but you never need Haven to read this — the contract answers directly.
+`false` = still spendable; `true` = already revoked. The hash is computed from
+the delegation itself (the exit page below does it for you), so you never need
+Haven to read this — the contract answers directly.
 
 To DISCOVER budgets without Haven, scan the manager's public events for your
 account:

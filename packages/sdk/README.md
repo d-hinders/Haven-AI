@@ -273,7 +273,7 @@ const response = await haven.payX402Quote(quote)
 const data = await response.json()
 ```
 
-Merchant-verified x402 retries use the official EIP-3009 `exact` scheme on Base USDC (`base` / `eip155:8453`). `haven.fetch()` sends the payment under `PAYMENT-SIGNATURE` (the x402 v2 name), and on the EIP-3009 bridge also under `X-PAYMENT` (v1), so a merchant on either version reads it. **On erc7710 it sends the v2 name ALONE**: that payload is always x402 v2, and its header carries a whole delegation chain, so duplicating it overflows the merchant's header limit and the request is refused with HTTP 431. If you build the retry yourself, follow the same rule. Haven's older tx-hash proof helper remains exported for Haven-native integrations; it is a different payload that happens to have shared the v2 name, and it is not what `haven.fetch()` sends.
+Merchant-verified x402 retries use the x402 `exact` scheme on Base USDC (`base` / `eip155:8453`, or Base Sepolia `eip155:84532`): the EIP-3009 `authorization` payload on the bridge, or a delegation when the merchant's entry carries `extra.assetTransferMethod: 'erc7710'`. `haven.fetch()` sends the payment under `PAYMENT-SIGNATURE` (the x402 v2 name), and on the EIP-3009 bridge also under `X-PAYMENT` (v1), so a merchant on either version reads it. **On erc7710 it sends the v2 name ALONE**: that payload is always x402 v2, and its header carries a whole delegation chain, so duplicating it overflows the merchant's header limit and the request is refused with HTTP 431. If you build the retry yourself, follow the same rule: `x402RetryHeadersFor(paymentHeader)` returns exactly those headers (#3727). Haven's older tx-hash proof helper remains exported for Haven-native integrations; it is a different payload that happens to have shared the v2 name, and it is not what `haven.fetch()` sends.
 
 For standard x402, the `x402-wallet` identity is the agent delegate wallet, because that is the wallet that signs and settles the merchant payment. Integrations that scope access by Haven wallet address should use a Haven-native flow instead of standard merchant x402.
 
@@ -428,6 +428,8 @@ x402 tool-window failures:
 | `rejected` | The payment was rejected and cannot proceed. | yes |
 | `expired` | Payment expired before completion. | yes |
 | `failed` | Haven could not complete the payment. | yes |
+| `insufficient_funds` | Carried by the `delegation_budget_exceeded` refusal — `403` at prepare, or `502` when the budget ran out by the time the payment was signed — with `nextAction: fund_account_or_raise_allowance`. The budget must be raised, or the period reset, before a new payment can succeed. | yes |
+| `funded_but_unsettled` | The EIP-3009 bridge's funding leg confirmed, but the merchant leg has not settled: either the merchant rejected the retry (`nextAction: sweep_stranded_funds`) or no merchant response was ever recorded (`nextAction: retry_original_x402_request`). Follow `nextAction`. | no |
 | `delivered_unverified` | **#3420: terminal.** The merchant delivered, but the settlement window and the sweep's last attribution chance have both passed with no verified on-chain evidence. Polling cannot change this; the only remedy is reporting a real settlement hash (`haven_report_settlement_evidence`). | yes |
 
 The merchant settlement leg of x402 (and the MPP retry) is the agent's own request to the merchant — it does not have a Haven `phase`. The payment is `funding_sent` until the agent retries with the payment header (`PAYMENT-SIGNATURE`, plus `X-PAYMENT` on this bridged path) (x402) or the MPP proof header; from Haven's perspective the payment becomes `executed` only after the agent successfully resumes.
@@ -445,6 +447,8 @@ The merchant settlement leg of x402 (and the MPP retry) is the agent's own reque
 | `retry_original_x402_request` | Haven's funding leg confirmed but no merchant response was ever recorded — most often because the process crashed between the funding confirmation and the merchant retry (a 15-minute grace window applies before this fires; a client-reported merchant rejection instead yields `sweep_stranded_funds`). Call `resumeX402Payment()` with the preserved `resumeState`, or rehydrate it first with `getResumeState(payment_id)`. Do not start a new payment for the same purchase. |
 | `stop_and_tell_user` | Stop retrying and tell the user what happened — the payment failed, was rejected, or (#3420) was delivered but its settlement can no longer be verified. |
 | `request_again_if_user_still_wants_it` | The request expired; ask again only if the user still wants the payment. |
+| `retry_with_explicit_context` | #1307: retry the same tool call, passing `merchant_url`, `tool_name`, `arguments` and `mcp_transport` explicitly — the server had no stored context to rehydrate for this payment id. |
+| `fund_account_or_raise_allowance` | Stop and tell the user the agent's budget must be raised (or its period reset) before a new payment can succeed; it rides on the `delegation_budget_exceeded` refusal. An approval will not fix it. |
 | `payment_window_expired` | The x402 funding/quote window expired. Re-quote the same paid MCP tool call with the same `idempotency_key`, then sign the fresh `payload_hash`. |
 | `sweep_stranded_funds` | A funding leg succeeded but the merchant/protocol leg did not settle. Stop retrying and use `haven_sweep_delegate` to recover stranded delegate funds. |
 
@@ -471,8 +475,9 @@ queue**: the queue-and-approve path belonged to the retired Safe rail, which now
 answers HTTP 410 at every agent-payment entry point.
 
 If an agent requests a payment outside that policy, Haven **declines it before
-any money moves** — during prepare, before anything is written and before the
-agent is asked to sign. `POST /payments` answers `403` when no active delegation
+any money moves** — during prepare, before any payment intent is created and
+before the agent is asked to sign. The one row written is the refusal itself,
+in the `payment_refusals` ledger (#3053). `POST /payments` answers `403` when no active delegation
 authorizes that token and recipient, `403 delegation_budget_exceeded` when the
 remaining period budget cannot cover the amount (#3503; the x402 authorize path
 answers the same), and `502` when the on-chain caveat check rejects a
@@ -609,7 +614,9 @@ For MCP/SSE x402 tools, keep the same MCP session and JSON-RPC payload where the
 merchant requires it: initialize, retain `mcp-session-id`, send the original
 `tools/call`, parse the 402 challenge, wait for the funding leg to confirm if
 the payment is bridged, then resume with the same `payment_id` and retry the
-original `tools/call`, setting BOTH `PAYMENT-SIGNATURE` (x402 v2) and `X-PAYMENT` (v1) to the header. Use a stable `idempotencyKey` for the
+original `tools/call` with the headers `x402RetryHeadersFor(paymentHeader)`
+returns — `PAYMENT-SIGNATURE` (x402 v2), plus `X-PAYMENT` (v1) only on the
+EIP-3009 bridge; erc7710 sends the v2 name alone. Use a stable `idempotencyKey` for the
 user intent so fresh merchant quotes or sessions do not become duplicate Haven
 payments.
 

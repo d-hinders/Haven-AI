@@ -22,7 +22,7 @@ covers:
   - packages/backend/src/modules/transactions/__tests__/csv-export.test.ts
   - packages/backend/src/routes/__tests__/transactions-export-csv.test.ts
   - docs/bug-reports/_run-report-template.md
-last-verified: "2026-09-30"
+last-verified: "2026-10-24"
 ---
 
 # E2E QA runbook — agent connection (#419) & x402 payments (#420)
@@ -50,7 +50,7 @@ document for the remaining exploratory checklist.
 | Unmocked login/dashboard smoke against a deployed dev frontend (the `dev` host or a `preview/*` deployment) + dev backend | `packages/frontend/e2e/live`; local `test:e2e:live` or Actions `qa-live.yml` |
 | Connect-agent modal for delegation accounts: create setup → prompt → connected-local → budget-approval screen, no secrets leaked | `e2e/connect-agent.spec.ts` |
 | Hosted-MCP agent/allowance/CTA states | `e2e/hosted-mcp.spec.ts` |
-| Mobile-viewport layout overflow on the primary authenticated routes | `e2e/navigation.mobile.spec.ts` (Pixel 5 emulation, gates every PR since #1770) |
+| Mobile-viewport layout overflow on the primary authenticated routes | `e2e/navigation.mobile.spec.ts` (Pixel 5 emulation; since #1770 it runs on every PR that touches the frontend, in the *Frontend browser smoke* job — a required check on `main`, advisory on `dev`) |
 | Dialog/overlay layout overflow **at a mobile viewport** | `e2e/receive-modal.mobile.spec.ts` (Pixel 5, #1797). The three desktop callers of `measureDialogOverflow` run only at 1280px, where a dialog is least likely to overflow |
 | **x402 tx displays in history + opens the per-type detail panel** (#420 UI half) | `e2e/transactions-detail.spec.ts` |
 | CSV export shape + injection guard | backend unit tests (`domain/__tests__/csv.test.ts` for RFC 4180 quoting and formula-injection neutralisation, `modules/transactions/__tests__/csv-export.test.ts` for the column contract) plus the route test `routes/__tests__/transactions-export-csv.test.ts`. #2871 moved generation server-side, so the frontend `csv-export` test no longer covers either property — it is down to the filename and the download shim. The `initiator` column (#2097) survives the move, and since #4099 carries the app's words — `You` \| the agent's name \| `Unknown`, empty for inbound rows other than an agent's delegate sweep, which carries the agent's name; column order is asserted against `TRANSACTION_CSV_COLUMNS` so the shape stays pinned (#3127 appended `reporting_currency` / `converted_currency` at the END — the fixed-SEK accounting branch keeps its indices) |
@@ -172,3 +172,16 @@ Record mode and targets, exact command and exit code, pass/fail/skip per check,
 evidence and artifact paths, cleanup, and secret review. A required skip makes
 the run partial/blocked even if its process exits zero. File concrete bugs as
 separate issues.
+
+## Verification notes
+
+Re-verified 2026-10-24 (#4372 part E, at dev `ee7fdd27`), a full re-read.
+Changed: the mobile-viewport row no longer says the spec "gates every PR" —
+the *Frontend browser smoke* job (`ci.yml`, `browser_smoke`) runs it on PRs
+that touch the frontend, and the repository rulesets require that check on
+`main` only (`gh api repos/d-hinders/Haven-AI/rules/branches/<branch>`).
+Re-checked without change: the automated-coverage table's other rows, the
+mocked-suite command, the #419 steps (no runtime picker since #1720, the
+per-deployment connector package since #2422, the per-agent pair names since
+#3737, the over-budget pre-checks #3503 / #2082 / #2706), the #420 steps and
+edge cases, and the reporting rules.

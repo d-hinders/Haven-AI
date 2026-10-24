@@ -30,7 +30,7 @@ Hosted MCP tools are deliberately split:
 
 It does not expose local signing tools. Those live in `@haven_ai/signer`
 (`haven_sign`, `haven_sign_x402`, `haven_x402_sign_header`,
-`haven_sign_sweep_delegate`).
+`haven_sign_sweep_delegate`, `haven_sign_siwx`).
 
 ## Custody invariant
 
@@ -73,8 +73,18 @@ instructions means the agent's tool list is stale — reconnect. See
 | `haven_report_x402_outcome` | `POST /machine-payments/reconciliation-events` (rejected) or `POST /machine-payments/evidence` (accepted) | no — records a caller-asserted outcome; contacts no merchant |
 | `haven_report_settlement_evidence` | `POST /machine-payments/evidence` (fail-closed on-chain verification of a settlement hash the agent holds: an erc7710 settlement, #2972, or an eip3009 merchant settlement from a plain-HTTP retry, #3475) | no — hands over a hash; contacts no merchant |
 
-`haven_pay` returns `{ payment_id, payload_hash, expires_at }` in-budget. A
-payment outside the agent's on-chain budget, recipient pin or expiry is declined
+The table covers 20 tools. The full hosted list is 29,
+pinned in [`src/tools-list.snapshot.json`](src/tools-list.snapshot.json); the
+others are `haven_check_funds`, `haven_get_task_budget`,
+`haven_prepare_catalog_purchase`, `haven_quote_catalog_purchase`,
+`haven_quote_mcp_tool`, `haven_report_delivery_quality`,
+`haven_resume_x402_payment`, `haven_send` and `haven_verify_receipt`.
+
+`haven_pay` returns `payment_id`, `payload_hash` and `expires_at` in-budget,
+with `next_tool: haven_sign` and `next_arguments: { payment_id }` — the signer
+fetches the bytes itself. Since #3495 the result is compact: the typed-data
+relay pair comes back only on a re-run with the same `idempotency_key` and
+`include_signing_payload: true`. A payment outside the agent's on-chain budget, recipient pin or expiry is declined
 during prepare — before any money moves and before there is anything to sign.
 Haven holds no approval queue, so nothing is held back for a human to sign off
 later.
@@ -125,6 +135,14 @@ Use these fully-qualified next steps when an agent discovers tools at runtime:
    holding the merchant's settlement hash can hand it to
    `mcp__haven__haven_report_settlement_evidence` (#2972) for fail-closed
    verification.
+
+The diagram and steps above are the EIP-3009 bridge. On erc7710 (#1456) there
+is no funding leg: `haven_pay_mcp_tool` names `haven_sign` with the
+`payment_id`, the signature it returns is the settlement delegation itself, and
+`haven_settle_mcp_tool` takes `{ payment_id, signature }` with no
+`payment_header` — Haven assembles the header at settle. On both schemes the
+merchant context (`merchant_url`, `tool_name`, `arguments`, `mcp_transport`) is
+optional on settle: Haven rehydrates it from the `payment_id` (#1307).
 
 The five-call decomposed path remains available for debugging and advanced
 agents:
@@ -197,10 +215,15 @@ before the delegate hot wallet signs anything.
 
 ## Run
 
+The package is private (not published to npm), so run it from the workspace:
+
 ```sh
+npm run build -w packages/mcp-server
 PORT=8788 HAVEN_API_URL=https://havenbackend-production-8a00.up.railway.app \
-  npx @haven_ai/mcp-server
+  npm run start -w packages/mcp-server
 ```
+
+`HAVEN_MCP_PATH` overrides the MCP path (default `/v1`).
 
 Endpoints: `POST /v1` (MCP, requires `Authorization: Bearer sk_agent_*`),
 `GET /healthz` (liveness). The server is stateless and multi-tenant — each

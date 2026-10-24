@@ -1165,6 +1165,8 @@ export const FIXTURE_OVERVIEW = {
       merchantName: null,
     },
     failedIntents7d: 1,
+    // #4324: the latest recorded step of any failed intent in the window (sent when there is one).
+    lastFailedIntentAt: '2026-10-08T14:20:00.000Z',
     balance_by_day: Array.from({ length: 30 }, (_, i) => {
       const day = new Date(Date.UTC(2026, 8, 10 + i))
       return {
@@ -1210,7 +1212,8 @@ export const FIXTURE_OVERVIEW = {
         net: { usd: 37.5, eur: 34.43, sek: 403.5 },
         approx: false,
         payments: 4,
-        refusals: { budget: 1, scope: 0, failed: 0, haven: 0 },
+        // #4324: d7 carries the latest refusal time of each non-empty bucket.
+        refusals: { budget: 1, scope: 0, failed: 0, haven: 0, lastBudgetAt: '2026-10-08T11:05:00.000Z' },
       },
       d30: {
         gross: { usd: 250.0, eur: 229.5, sek: 2690.0 },

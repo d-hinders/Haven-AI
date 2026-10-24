@@ -1,6 +1,6 @@
 'use client'
 
-import { ArrowDown, ArrowLeftRight, ArrowUp, Bot, Check, ChevronDown, Circle, CirclePause, CreditCard, EllipsisVertical, Info, OctagonAlert, Sparkles, TriangleAlert, X } from 'lucide-react'
+import { ArrowDown, ArrowLeftRight, ArrowUp, Bot, Check, ChevronDown, Circle, CreditCard, EllipsisVertical, Info, OctagonAlert, Sparkles, TriangleAlert, X } from 'lucide-react'
 import { MobileTabBar } from '@/components/sidebar/MobileTabBar'
 import { baseNavItems } from '@/components/sidebar/Sidebar'
 import { Icon } from '@/components/ui/Icon'
@@ -384,13 +384,17 @@ const DS_SPARKLINE_SUMMARY =
 
 /**
  * The AttentionList sample's items — one per tone, one of them without a badge
- * label, and one (the failure) without the dismiss, so the reserved slot and
- * the one trailing column are on show. The badge-less item carries an action:
- * the product's only badge-less kind (`haven-paused`) has neither badge nor
- * action and is not dismissible, so a badge-less dismiss-only row would render
- * a shape no product kind has — a lone × on its own line below `sm` (#4033).
- * The `haven-paused`-shaped row shows that shape: nothing visible to align,
- * so it renders no trailing slot at all and its tone word rides in the body.
+ * label, and one without the dismiss, so the reserved slot and the one
+ * trailing column are on show. The row without a dismiss is the low-balance
+ * shape: low balance and zero USDC are the product kinds that stay
+ * non-dismissible (#4324 — money is at stake, and "Add funds" is the action).
+ * The failure row is dismissible, as in the product since #4324 (failures are
+ * acknowledged until the next one). The badge-less item carries an action:
+ * a badge-less dismiss-only row would put a lone × on its own line below `sm`
+ * (#4033), so the sample does not draw one. The last row has nothing visible
+ * to align — no badge, no action, no dismiss — so it renders no trailing slot
+ * at all and its tone word rides in the body; it keeps #4033's guard on that
+ * path.
  */
 const DS_ATTENTION_ITEMS: AttentionListItem[] = [
   {
@@ -403,15 +407,19 @@ const DS_ATTENTION_ITEMS: AttentionListItem[] = [
     icon: Info,
   },
   {
-    id: 'reapproval',
-    title: 'Re-approval needed',
-    subtitle: 'Spending paused while Travel planner awaits your approval of the new agent rules.',
+    id: 'low-balance',
+    title: "Main account's USDC is running low",
+    subtitle: 'At the current pace, its USDC lasts under 7 days.',
     tone: 'warning',
-    badge: 'Review needed',
+    badge: 'Low balance',
     icon: TriangleAlert,
+    // As on the dashboard: low balance is resolved by adding funds, not
+    // dismissed — so this row shows the reserved dismiss slot that keeps the
+    // trailing column aligned.
+    dismissible: false,
     action: (
       <Button size="sm" variant="ghost">
-        Review
+        Add funds
       </Button>
     ),
   },
@@ -429,33 +437,26 @@ const DS_ATTENTION_ITEMS: AttentionListItem[] = [
   },
   {
     id: 'payment-failed',
-    title: 'Payment failed',
-    subtitle: 'The payment to acme.dev failed at signing. Nothing was spent.',
+    title: 'Travel planner had 3 failed payments',
+    subtitle: 'Payments keep failing — check the agent.',
     tone: 'danger',
     badge: 'Failed',
     icon: OctagonAlert,
-    // As on the dashboard: a failure is resolved, not dismissed — so this row
-    // shows the reserved dismiss slot that keeps the trailing column aligned.
-    dismissible: false,
     action: (
       <Button size="sm" variant="ghost">
-        View activity
+        Review
       </Button>
     ),
   },
   {
-    // The `haven-paused` shape (#4033): no badge, no action, not dismissible —
-    // nothing visible to align, so the row renders no trailing slot and the
-    // sr-only tone word rides in the body. Equal space above and below the
-    // body at every width.
-    id: 'haven-paused',
-    title: 'Haven paused sponsored payments',
-    subtitle: "Your budgets are untouched. Haven's own cap stopped a payment.",
+    // Nothing visible to align (#4033): no badge, no action, not dismissible —
+    // the row renders no trailing slot and the sr-only tone word rides in the
+    // body. Equal space above and below the body at every width.
+    id: 'nothing-to-align',
+    title: 'No summary this week',
+    subtitle: 'There were no payments in the week ending Sunday, so there is nothing to summarise.',
     tone: 'neutral',
-    icon: CirclePause,
-    // As in the product: `haven-paused` is not in DISMISSIBLE_ATTENTION_KINDS,
-    // so the default-true dismissible would hang a fourth × on the list —
-    // and this row's whole point is having nothing visible to align.
+    icon: Info,
     dismissible: false,
   },
 ]

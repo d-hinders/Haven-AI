@@ -139,6 +139,35 @@ States:
 - An agent waiting for setup: step 2 names it with `Finish setup`.
 - Dismissed: keep the dashboard usable; other empty states should still offer the same next action.
 
+Needs attention items after setup (#4324, owner decisions 2026-10-23):
+- Every item can be acted on, and every item except low balance and zero USDC
+  can be dismissed with its × (`Dismiss: {title}`). "No backup signer" (per
+  account) and "Needs setup" (per agent) are dismissed for good, as before.
+  The rest are **acknowledged until something new happens**:
+  - "Budget reached" (a budget refusal), "Outside its rules" (a recipient
+    outside the agent's rules) and a failed payment return on that agent's
+    next refusal of the same kind; "Haven paused sponsored payments" on the
+    next sponsorship-cap refusal; the unattributed "A payment failed" on the
+    next failed intent.
+  - "Has used 90% of its budget" returns in the next budget period. It shows
+    only while the agent's "Budget reached" item is not showing, so an agent
+    never carries two budget items at once.
+- "Review" on a refusal-based item opens the agent's Activity tab filtered to
+  its refused attempts (`/agents/:id?tab=activity&status=refused`); on the 90%
+  item it opens the agent page, where the Spending hero leads. "Haven paused"
+  opens the refused attempts of the agent with the latest one, and shows no
+  action when that is unknown.
+- A failed payment is calm (neutral) until an agent has 3 in 7 days, then it
+  reads "<agent> had N failed payments" over "Payments keep failing — check
+  the agent" in danger. A refusal-based
+  failure says no money moved; the unattributed one does not claim that.
+- Zero USDC reads "No USDC", not "Low balance".
+- "You're all caught up" can show once every budget and scope stop has been
+  acknowledged with none newer, if the runway and budget-room facts hold. A
+  budget at 90% or more still blocks it until the period turns.
+- Acknowledging never changes an agent's "N% used" badge: the badge is a
+  status read from the budget, not a reminder.
+
 ## Agent Budget Setup
 
 Use when the user creates or edits what an agent may spend.

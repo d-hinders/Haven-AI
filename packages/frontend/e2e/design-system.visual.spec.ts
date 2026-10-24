@@ -621,9 +621,10 @@ test.describe('design-system visual regression', () => {
       await expect(sample).toHaveCount(1)
       // All five tone items rendered — a dismiss here is interaction state,
       // and this gate photographs the resting page only. Still exactly three
-      // dismiss controls: the badge-less summary stays dismissible, the
-      // failure row keeps only the reserved slot, and the haven-paused row
-      // (#4033) has no dismiss at all — nothing visible to align.
+      // dismiss controls: budget reached, the badge-less summary and the
+      // failure row (#4324: failures are acknowledged). The low-balance row
+      // keeps only the reserved slot, and the nothing-to-align row (#4033)
+      // has no dismiss at all.
       await expect(sample.locator('li')).toHaveCount(5)
       await expect(sample.getByTestId(/^attention-dismiss-/)).toHaveCount(3)
       await expectShowcaseClip(sample, vp.height, 'the AttentionList sample', `design-system-attention-list-${vp.name}${schemeSuffix}.png`, SAMPLE_MAX_DIFF_PIXELS)

@@ -168,7 +168,7 @@ function mockBaseState() {
   })
   mockUseDashboardOverview.mockReturnValue({ data: null, loading: false, error: null, refetch: vi.fn() })
   mockUseBudgetRemaining.mockReturnValue({ data: null, loading: false })
-  mockUseAttentionDismissals.mockReturnValue({ dismissedIds: [], dismiss: vi.fn() })
+  mockUseAttentionDismissals.mockReturnValue({ acknowledgements: new Map(), dismiss: vi.fn() })
   mockUseAccountSigners.mockReturnValue({
     signers: null,
     loadError: false,

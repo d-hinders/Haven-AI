@@ -207,7 +207,7 @@ export default function AgentPanel() {
   // page never runs the dashboard's one-time legacy-key migration.
   const { data: overview, loading: overviewLoading } = useDashboardOverview()
   const { data: budgetRemaining, loading: budgetRemainingLoading } = useBudgetRemaining()
-  const { dismissedIds } = useAttentionDismissals()
+  const { acknowledgements } = useAttentionDismissals()
   const accountNames = useMemo(
     () => Object.fromEntries(panel.accounts.map((account) => [account.id, account.name])),
     [panel.accounts],
@@ -219,10 +219,10 @@ export default function AgentPanel() {
             overview,
             budgetRemaining: budgetRemaining ?? null,
             accountNames,
-            dismissedIds: new Set(dismissedIds),
+            acknowledgements,
           })
         : [],
-    [overview, budgetRemaining, accountNames, dismissedIds],
+    [overview, budgetRemaining, accountNames, acknowledgements],
   )
   const overviewAgentsById = useMemo(
     () => new Map((overview?.agents ?? []).map((agent) => [agent.id, agent])),

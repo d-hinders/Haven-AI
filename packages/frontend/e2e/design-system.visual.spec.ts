@@ -39,10 +39,11 @@
  * everything else below the shell on that page is still compared against
  * nothing. Whole-page pixel coverage lives in `product-routes.visual.spec.ts`
  * and seven other specs that capture `fullPage: true` (analytics, demo,
- * dev-agent-pages, home, how-it-works, marketplace, releases). The scoped sidebar and showcase-sample clips below are
- * what is left of this spec; the top-bar clip that shared the file was removed
- * with the bar itself (#4029), and the authenticated whole-page baselines carry
- * the rest of the shell.
+ * dev-agent-pages, home, how-it-works, marketplace, releases). The scoped
+ * sidebar and showcase-sample clips below are what is left of this spec;
+ * the top-bar clip that shared the file was removed with the bar itself
+ * (#4029), and the authenticated whole-page baselines carry the rest of the
+ * shell.
  *
  * BASELINES ARE LINUX-RENDERED (committed under e2e/__screenshots__/<spec>/,
  * one directory per spec file — there is no platform segment in the path, which

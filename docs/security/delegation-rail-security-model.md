@@ -3883,8 +3883,8 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > **Re-verified unchanged (#4387, 2026-10-24 — a JSDoc in
 > `packages/backend/src/routes/agent-rekey.ts`).** The route's "Where the SQL
 > is" comment no longer refers to a `dep-lint-exempt` waiver the file does
-> not carry: the completion transaction runs through
-> `withRekeyIssueTransaction` in `infra/repositories/agent-rekeys.ts`. Comment
+> not carry: the completion runs as one `withTransaction` inside
+> `completeRekey` in `infra/repositories/agent-rekeys.ts`. Comment
 > only: no re-key step, revocation order, credential swap or delegation
 > changes. Scope of this note: that comment. Nothing else in this document was
 > re-verified for it.

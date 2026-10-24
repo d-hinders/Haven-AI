@@ -116,11 +116,11 @@
  * In THIS FILE's own route override (`seedAgents` below), never in the shared
  * `mockHavenApi` fixture. Measured rather than assumed: **58 other specs
  * call `mockHavenApi`** — including `design-system.visual.spec.ts`, the
- * resting-state half of this same pixel gate — and **14 of them navigate to
+ * resting-state half of this same pixel gate — and **many of them navigate to
  * `/agents` or an agent page** (among them `connect-agent`, `hosted-mcp`,
  * `navigation.mobile`, `mobile-nav-layering.mobile`). Adding a paused,
  * revoked, delegation and archived agent to the shared fixture changes the
- * payload all of them receive and the rendered output of those 14, none of
+ * payload all of them receive and the rendered output of those, none of
  * which is about focus. The
  * override is registered per test, AFTER `mockHavenApi`, so Playwright matches
  * it first, and it defers to the shared fixture for every other route via

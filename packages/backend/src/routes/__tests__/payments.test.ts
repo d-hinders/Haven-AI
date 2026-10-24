@@ -993,7 +993,7 @@ describe('payment routes', () => {
       return { token: 'xDAI', amount: '1', to: RECIPIENT }
     }
 
-    /** Create-path routes: rail state (none → legacy), allowance config, inserts. */
+    /** Create-path routes: auth and the intent insert. */
     const createRoutes: DbRoute[] = [
       AUTH,
       [/INSERT INTO payment_intents/, () => ({ rows: [pendingIntent()] })],

@@ -2968,7 +2968,7 @@ async function newFixtureContext(browser, vp, scenario, { signedOut = false, col
     const api = pathname.startsWith('/api/') ? pathname.slice(4) : null
     if (api === null) {
       // Everything else passes through untouched, including any JSON-RPC a
-      // page sends to a public node: the harness answers no JSON-RPC. The
+      // page sends to a public node: the route handler answers no JSON-RPC. The
       // allowance chain reads this branch once had to fence (#1935) went
       // with the legacy rail (#2331).
         return route.continue()

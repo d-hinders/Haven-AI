@@ -1184,7 +1184,7 @@ Structure:
    and — when filtered to one agent — a **Review** link to that agent's
    refused attempts (`/agents/<id>?tab=activity&status=refused`, #4323;
    hidden with all agents, where no page-level refused list exists), and
-   *Agents near their budget* as "N of M" over the agents with budgets,
+   *Agents near their budget* as "N/M" over the agents with budgets,
    captioned "above 75% of a period budget". The two refusal recording
    caveats (the ledger's floor date, the unrecorded price-cap class) ride an
    ⓘ `Tooltip` hint on the Refused label — `StatTile`'s optional `hint`

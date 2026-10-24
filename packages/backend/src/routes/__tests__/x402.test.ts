@@ -141,9 +141,9 @@ const findCall = (re: RegExp) => sqlCalls().find((c) => re.test(c.sql))
 
 const AUTH: DbRoute = [/api_key_hash = \$1/, () => ({ rows: [AGENT] })]
 
-// The three reads a legacy-rail authorize always needs once it clears the
-// idempotency lookups: the on-chain-allowance policy check, and the hourly
-// cap's two-part read. Defaults answer the common "policy is fine" case.
+// The hourly cap's two-part read (`infra/repositories/x402-authorizations.ts`)
+// an authorize needs once it clears the idempotency lookups. Defaults answer
+// the common "policy is fine" case.
 const HOURLY_OK: DbRoute = [/max_x402_per_hour FROM agents/, () => ({ rows: [{ max_x402_per_hour: 100 }] })]
 const COUNT_OK: DbRoute = [/as cnt FROM payment_intents/, () => ({ rows: [{ cnt: '0' }] })]
 const POLICY_ROUTES: DbRoute[] = [HOURLY_OK, COUNT_OK]

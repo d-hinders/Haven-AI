@@ -18,7 +18,7 @@ covers:
   - packages/backend/src/modules/transactions/receive.ts
   - packages/backend/src/modules/transactions/off-ramp.ts
   - packages/backend/src/infra/repositories/inbound-transfers.ts
-last-verified: "2026-09-30"
+last-verified: "2026-10-24"
 ---
 
 # Haven — Payment Execution Sequence
@@ -136,8 +136,8 @@ sequenceDiagram
 > ⚠️ **This section describes the retired AllowanceModule rail, exactly like
 > the diagram above.** The banner earlier in this document scoped only the
 > *diagram*, so this section read as current until #2265. Nothing here is
-> live: the BACKEND's `computeEffectiveAllowance` and the AllowanceModule
-> signature path were deleted by #1987 — the frontend's same-named helper and
+> live: the AllowanceModule signature path was deleted by #1987 and the
+> BACKEND's `computeEffectiveAllowance` by #2020 — the frontend's same-named helper and
 > its `AllowanceBar` consumer are gone too since #2848 (epic #1440) — and the owner
 > approval state machine went with `approval_requests` (#2055 / migration 070
 > — the routes now answer **404**). For the live rail see
@@ -150,9 +150,10 @@ sequenceDiagram
   AllowanceModule state and latest chain timestamp. `computeEffectiveAllowance`
   applies the module's reset semantics, so out-of-band AllowanceModule transfers
   under the same delegate/token allowance are already reflected and reset
-  decisions use chain time
-  ([packages/backend/src/infra/chain/relayer-reads.ts](../../packages/backend/src/infra/chain/relayer-reads.ts) —
-  `rails/allowance-module.ts` before #2850 renamed it).
+  decisions use chain time (it lived in `rails/allowance-module.ts`, which
+  #2850 renamed to
+  [packages/backend/src/infra/chain/relayer-reads.ts](../../packages/backend/src/infra/chain/relayer-reads.ts);
+  the function itself was deleted by #2020).
 - **The delegate signature is independently re-verified by the
   AllowanceModule.** Even if the backend skipped its own `ecrecover` check,
   the on-chain module would reject a bad signature.
@@ -320,7 +321,10 @@ both keyed on the transaction hash:
   intent whose `payTo`/merchant address is THIS account and whose tx hash is
   the row's. The intent belongs to the PAYER — the match is cross-user by
   construction and deliberately read-only: the matched intent id is stored on
-  the row for audit and is never served to the receiver.
+  the row for audit. The owner's ledger read does return it, as
+  `matched_payment_intent_id` on each row (`routes/receive.ts`), although the
+  repository comment on `findX402PaytoSettlementIntent` says it is never
+  served.
 - **A supplied receipt** (`match_kind: 'receipt'`): a merchant receipt
   document the paying agent captured (#956), or a receipt the PAYER drops on
   `POST /receive/{accountAddress}/receipt-drop`.
@@ -362,3 +366,24 @@ their OWN saved deposit address at an off-ramp venue (Safello, Coinbase):
 Haven never holds the settlement key, never off-ramps, and never settles for
 third parties — the position recorded with counsel in
 [docs/regulatory/casp-risk-guardrails.md](../regulatory/casp-risk-guardrails.md).
+
+> **Re-verified 2026-10-24 (#4372 part F, at dev `6d87ddf95`), a full re-read.**
+> Changed: the retired-rail section credits #2020, not #1987, with deleting
+> the backend's `computeEffectiveAllowance` (#1987 deleted the signature path
+> and the callers), and the key-invariants bullet no longer points at
+> `relayer-reads.ts` as the function's home; the x402-payTo match no longer
+> says the matched intent id is never served — `GET /receive/{accountAddress}`
+> returns it as `matched_payment_intent_id`. Re-checked without change: the
+> 410 rail gates on `/payments` and `/x402` (`rails/execution-rail.ts`,
+> `modules/x402/authorize.ts`), `/safe/exec` and `/approvals` gone (#2847,
+> #2055 / migration 070), the 10-minute signing window, the delegation-rail
+> steps (native-token 400, selection by hash, the #3503 pre-check body and
+> its fail-open, the smallest-link rule, the #3500 and period-revert 403s,
+> the 502, the `eip712_userop` 201), the erc7710 child (600s cap,
+> `/x402/:id/settle`, `eip712_delegation`), the EIP-3009 bridge
+> (`merchantPayTo`, open budget, `settlement_scheme`), the #961 one-shot 400,
+> replay and hourly cap (default 100, replays exempt), the #956 receipt
+> capture (first write wins), and the receive side (migration 097 keying,
+> the explorer-fed index, the payer-signed drop, the owner-only off-ramp
+> routes, the submit-time calldata pin, the panel removed by #4142 under
+> #4097). Every cited issue was read with `gh api`; all are closed.

@@ -64,7 +64,7 @@ Do not continue unless every relevant scope is clean.
    `@alpha` by hand against a `@dev` backend installs a signer that skews
    against it.
 
-3. Verify the new `~/.haven/agents/<id>/signer.json` contains `x402_binding_signer`. If missing, report the likely deployed backend configuration fault; do not patch it manually.
+3. Verify the new agent's `signer.json` contains `x402_binding_signer`. A default setup writes it to `~/.haven/agents/<slug>/signer.json`, where `<slug>` is the name in the new `haven-<slug>` pair; only a `--bare` run, or `--replace` without `--name`, names the directory by the agent id instead. The connector's output names the file (`Stored local signer credential locally: …`); otherwise list `~/.haven/agents/` — a directory holding `TOMBSTONE.json` is a retired one, not the new one. If missing, report the likely deployed backend configuration fault; do not patch it manually.
 4. Confirm `codex mcp list` shows the agent's pair — `haven-<slug>` and `haven-signer-<slug>` on a named-by-default setup, `haven` and `haven_signer` on older installs — connected and the signer tools are available.
 5. Run a small real payment only after separate explicit authorization. Confirm signing and settlement without manual intervention.
 

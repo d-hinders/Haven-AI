@@ -11,12 +11,13 @@ import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { hashDelegation } from '@metamask/smart-accounts-kit/utils'
 import { describe, expect, it } from 'vitest'
-// @ts-expect-error — a plain browser ES module served from public/, no types.
+// A plain browser ES module served from public/; its types are inferred.
 import * as exitCore from '../../../public/exit/exit-core.mjs'
 
 const repo = path.resolve(process.cwd(), '../..')
 const read = (p: string) => readFileSync(path.join(repo, p), 'utf8')
 const EXIT_DIR = 'packages/frontend/public/exit'
+const CHAINS: Record<number, { manager: string; rpc: string }> = exitCore.CHAINS
 
 const sample = {
   delegate: '0x1111111111111111111111111111111111111111',
@@ -32,7 +33,7 @@ const sample = {
 
 describe('exit page: pinned contracts', () => {
   it('covers Base and Base Sepolia, defaulting to Base', () => {
-    expect(Object.keys(exitCore.CHAINS).map(Number).sort()).toEqual([8453, 84532])
+    expect(Object.keys(CHAINS).map(Number).sort()).toEqual([8453, 84532])
     expect(exitCore.DEFAULT_CHAIN_ID).toBe(8453)
   })
 
@@ -41,19 +42,19 @@ describe('exit page: pinned contracts', () => {
     for (const id of [8453, 84532]) {
       const block = src.match(new RegExp(`\\n  ${id}: \\{[\\s\\S]*?delegationManager: '(0x[0-9a-fA-F]{40})'`))
       expect(block, `no pin for ${id} in delegation-contracts.ts`).not.toBeNull()
-      expect(exitCore.CHAINS[id].manager).toBe(block![1])
+      expect(CHAINS[id].manager).toBe(block![1])
     }
   })
 
   it('lists the same managers in docs/exit/README.md', () => {
     const readme = read('docs/exit/README.md')
     for (const id of [8453, 84532]) {
-      expect(readme).toMatch(new RegExp(`\\(${id}\\) \\| \`${exitCore.CHAINS[id].manager}\``))
+      expect(readme).toMatch(new RegExp(`\\(${id}\\) \\| \`${CHAINS[id].manager}\``))
     }
   })
 
   it('uses only public, keyless RPC endpoints by default', () => {
-    for (const c of Object.values(exitCore.CHAINS) as Array<{ rpc: string }>) {
+    for (const c of Object.values(CHAINS)) {
       expect(c.rpc).toMatch(/^https:\/\/(mainnet|sepolia)\.base\.org$/)
     }
   })

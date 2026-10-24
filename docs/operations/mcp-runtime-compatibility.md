@@ -6529,3 +6529,16 @@ to call next in structured fields, and those fields are typed end to end
 > flag or published version changed. Scope of this note: that sentence.
 > Nothing else in this document was re-read for it, and `last-verified` is
 > not bumped.
+
+> **Re-verified unchanged (#4372 part G, 2026-10-24 — prose in
+> `packages/connect/README.md`).** The README is the only covered file this PR
+> touches, and it changes prose only: the default credential directory is
+> `~/.haven/agents/<slug>/` (#3737), the register body is named in full, the
+> doctor table lists `parked`, the runtime-unknown detail is quoted as
+> `doctor.ts` writes it, the multi-agent `--repair` refusal accepts `--name`
+> (#3799), and the setup screen is no longer said to offer a revoke (#3830).
+> No connector code, flag, pin, tool, consent surface or published version
+> changed. Scope of this note: those README sentences. Nothing else in this
+> document was re-read for it, and `last-verified` is not bumped. Two passages
+> here still say `<agent-id>` where #3737 made `<slug>` the default
+> (`:2645`, `:5508`); they are listed in that PR's *Not filed* section.

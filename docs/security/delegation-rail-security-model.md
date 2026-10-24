@@ -98,7 +98,7 @@ last-verified: "2026-10-23"
 > expired redemption still reverts on-chain, and the new prose says so.
 > The ledger row is still the #3053 choke point's record (same sources, the
 > `delegation_expired` reason's second producer documented in the migration
-> 086/118 pair); nothing agent-asserted. A live row for the token keeps
+> 086/119 pair); nothing agent-asserted. A live row for the token keeps
 > every selection and compare exactly as before (pinned by a test). Nothing
 > else in this document was re-verified, and `last-verified` is re-stamped
 > to 2026-10-23 for this note.

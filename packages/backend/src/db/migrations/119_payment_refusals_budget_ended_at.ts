@@ -31,7 +31,7 @@ export const version = '119_payment_refusals_budget_ended_at'
  * ## down() refuses loudly when budget_ended_at rows exist (#1139)
  *
  * The rows this key introduces are audit records of Haven's own guardrail
- * decisions; deleting or rewriting them is not an option, and the pre-118
+ * decisions; deleting or rewriting them is not an option, and the pre-119
  * CHECK would reject them (23514) on any data-preserving rewrite attempt
  * anyway. When no such rows exist (the clean-clone / not-yet-used case),
  * the rollback restores the 086 shape exactly.
@@ -59,7 +59,7 @@ export async function down(client: PoolClient): Promise<void> {
     throw new Error(
       `migration 119 down(): ${rows[0].count} payment_refusals row(s) carry detail.budget_ended_at. ` +
         'These are audit records of Haven guardrail decisions (#4352) — deleting or rewriting them is not an option, ' +
-        'and the pre-118 CHECK would reject them. Roll back only after the pre-flight expired-budget writer is retired ' +
+        'and the pre-119 CHECK would reject them. Roll back only after the pre-flight expired-budget writer is retired ' +
         'AND the rows are exported/archived by an explicit data-migration decision, never silently here.',
     )
   }

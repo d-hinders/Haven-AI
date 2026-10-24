@@ -9,8 +9,10 @@ prefix. The same registration request also carries the one-time setup token
 and its challenge id, non-secret labels (runtime, connector version, MCP server
 name, run mode, connector context) and the install capabilities (whether the
 connector can write the runtime config, and whether a restart is required).
-Every request names the connector and its version in an `X-Haven-Client`
-header (#3303). Haven never receives the private key or plaintext API key.
+Every request through its API client (setup resolve and register, status
+reports, the agent identity read) names the connector and its version in an
+`X-Haven-Client` header (#3303); the read-only hosted probes behind `--doctor`,
+`--unwire` and the post-install check send none. Haven never receives the private key or plaintext API key.
 
 ## Are you an AI agent whose user has no Haven account yet?
 

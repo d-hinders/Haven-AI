@@ -268,7 +268,7 @@ export const GOVERNED_PACKAGE_DOCS = [
     // #3737 (`<agent-id>` only for --bare/--replace without --name); the
     // intro now names every field of the register body (api_key_prefix,
     // setup token, challenge_id, the labels, install_capabilities) and the
-    // X-Haven-Client header, per api.ts registerSetup; the doctor table gains `parked` (#1915); the runtime-unknown
+    // X-Haven-Client header (createConnectApiClient requests only, not the hosted probes), per api.ts; the doctor table gains `parked` (#1915); the runtime-unknown
     // detail is quoted as the code writes it; the #3412 refusal accepts
     // --name (#3799) and names each pair; "the superseded-agents revoke on
     // the setup screen" is gone (#3830 removed it); the default slug comes

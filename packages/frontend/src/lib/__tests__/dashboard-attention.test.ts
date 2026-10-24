@@ -5,7 +5,10 @@ import {
   ATTENTION_QUIET_LINE,
   attentionEmptyState,
   computeAttentionItems,
+  DISMISSIBLE_ATTENTION_KINDS,
   firstRunSetupState,
+  PAYMENTS_FAILED_DANGER_COUNT,
+  type AttentionAcknowledgement,
   type DashboardBudgetRemaining,
   type DashboardOverview,
 } from '../dashboard-attention'
@@ -27,7 +30,16 @@ type AgentSlice = {
   setupStatus?: string
   budgets?: Array<Record<string, unknown>>
   receivedSubBudgets?: Array<{ open: boolean; parentAgentName?: string }>
-  refusalBuckets?: { budget: number; scope: number; failed: number; haven: number }
+  refusalBuckets?: {
+    budget: number
+    scope: number
+    failed: number
+    haven: number
+    lastBudgetAt?: string
+    lastScopeAt?: string
+    lastFailedAt?: string
+    lastHavenAt?: string
+  }
 }
 
 type AccountSlice = {
@@ -43,6 +55,7 @@ function makeOverview(
   agents: AgentSlice[],
   accounts: AccountSlice[],
   failedIntents7d = 0,
+  lastFailedIntentAt?: string,
 ): DashboardOverview {
   return {
     agents: agents.map((agent) => ({
@@ -71,15 +84,16 @@ function makeOverview(
       needs_backup_recommendation: account.needs_backup_recommendation ?? false,
       usdcPace7dAtomic: account.usdcPace7dAtomic ?? '0',
     })),
-    spend: { failedIntents7d },
+    spend: { failedIntents7d, ...(lastFailedIntentAt !== undefined ? { lastFailedIntentAt } : {}) },
   } as unknown as DashboardOverview
 }
 
 function budgetRemaining(
-  entries: Array<{ agent_id: string; budget_atomic: string; used_atomic: string | null }>,
+  entries: Array<{ agent_id: string; budget_atomic: string; used_atomic: string | null; period_end?: string }>,
 ): DashboardBudgetRemaining {
   return {
     budgets: entries.map((entry) => ({
+      period_end: '2026-10-16T00:00:00Z',
       ...entry,
       chain_id: 8453,
       delegation_hash: '0xhash',
@@ -87,7 +101,6 @@ function budgetRemaining(
       token_symbol: 'USDC',
       token_decimals: 6,
       read_at: entry.used_atomic === null ? null : '2026-10-09T00:00:00Z',
-      period_end: '2026-10-16T00:00:00Z',
       remaining_atomic: null,
       remaining_from_chain: true,
       sub_budget_spend: [],
@@ -96,6 +109,18 @@ function budgetRemaining(
 }
 
 const EMPTY_BUDGETS = null
+
+/** A server-saved acknowledgement map, keyed by rule-item id (#4324). */
+function acks(entries: Record<string, string | { at: string; periodEnd: string }>): Map<string, AttentionAcknowledgement> {
+  return new Map(
+    Object.entries(entries).map(([id, value]) => [
+      id,
+      typeof value === 'string'
+        ? { acknowledgedAt: value, acknowledgedPeriodEnd: null }
+        : { acknowledgedAt: value.at, acknowledgedPeriodEnd: value.periodEnd },
+    ]),
+  )
+}
 
 describe('computeAttentionItems — needs setup (rule 1)', () => {
   it('gives a pending agent and an active agent without budgets exactly one item each', () => {
@@ -233,9 +258,19 @@ describe('computeAttentionItems — low balance (rule 2)', () => {
       accountNames: { 'acct-empty': 'Main' },
     })
     const zero = items.filter((item) => item.kind === 'zero-usdc')
-    expect(zero).toHaveLength(1)
-    expect(zero[0].title).toContain('Main')
-    expect(zero[0].tone).toBe('warning')
+    expect(zero).toEqual([
+      {
+        id: 'zero-usdc:acct-empty',
+        kind: 'zero-usdc',
+        tone: 'warning',
+        // #4324: "No USDC", so it is not the same word as low balance.
+        badge: 'No USDC',
+        title: 'Main is out of USDC',
+        subtitle: 'Its agents have budgets to spend, but no USDC left to spend.',
+        actionLabel: 'Add funds',
+        accountId: 'acct-empty',
+      },
+    ])
   })
 
   it('gives an account whose USDC read is unknown no low-balance or zero item', () => {
@@ -300,9 +335,20 @@ describe('computeAttentionItems — budget reached (rule 3)', () => {
       budgetRemaining: EMPTY_BUDGETS,
     })
     const reached = items.filter((item) => item.kind === 'budget-reached')
-    expect(reached).toHaveLength(1)
-    expect(reached[0].tone).toBe('neutral')
-    expect(reached[0].badge).toBe('Budget reached')
+    expect(reached).toEqual([
+      {
+        id: 'budget-reached:a1',
+        kind: 'budget-reached',
+        tone: 'neutral',
+        badge: 'Budget reached',
+        title: 'Scout reached its budget',
+        subtitle: 'Its budget stopped a payment in the last 7 days.',
+        actionLabel: 'Review',
+        // #4324: Review opens the agent's refused attempts (#4323).
+        href: '/agents/a1?tab=activity&status=refused',
+        agentId: 'a1',
+      },
+    ])
   })
 
   it('gives scope refusals their own wording, still neutral', () => {
@@ -322,9 +368,20 @@ describe('computeAttentionItems — budget reached (rule 3)', () => {
       budgetRemaining: EMPTY_BUDGETS,
     })
     const scope = items.filter((item) => item.kind === 'budget-scope')
-    expect(scope).toHaveLength(1)
-    expect(scope[0].title).toMatch(/recipient its budget doesn't cover/)
-    expect(scope[0].tone).toBe('neutral')
+    expect(scope).toEqual([
+      {
+        id: 'budget-scope:a1',
+        kind: 'budget-scope',
+        tone: 'neutral',
+        // #4324: its own badge — not the same word as a budget cap.
+        badge: 'Outside its rules',
+        title: "Scout tried to pay a recipient its budget doesn't cover",
+        subtitle: 'The payment was refused — the recipient is outside its rules.',
+        actionLabel: 'Review',
+        href: '/agents/a1?tab=activity&status=refused',
+        agentId: 'a1',
+      },
+    ])
   })
 
   it('fires the ≥90%-of-period rule on a known read only', () => {
@@ -338,7 +395,22 @@ describe('computeAttentionItems — budget reached (rule 3)', () => {
         { agent_id: 'a1', budget_atomic: '1000000', used_atomic: '950000' },
       ]),
     })
-    expect(items.filter((item) => item.kind === 'budget-reached')).toHaveLength(1)
+    // #4324: its own kind, carrying the firing budget's period end.
+    expect(items.filter((item) => item.kind === 'budget-usage')).toEqual([
+      {
+        id: 'budget-usage:a1',
+        kind: 'budget-usage',
+        tone: 'neutral',
+        badge: 'Budget reached',
+        title: 'Scout has used 90% of its budget',
+        subtitle: 'Its current budget period is nearly spent.',
+        actionLabel: 'Review',
+        href: '/agents/a1',
+        agentId: 'a1',
+        periodEnd: '2026-10-16T00:00:00Z',
+      },
+    ])
+    expect(items.filter((item) => item.kind === 'budget-reached')).toHaveLength(0)
 
     // Unknown read (used_atomic null) never counts as reached (#3804).
     const unknown = computeAttentionItems({
@@ -347,7 +419,35 @@ describe('computeAttentionItems — budget reached (rule 3)', () => {
         { agent_id: 'a1', budget_atomic: '1000000', used_atomic: null },
       ]),
     })
-    expect(unknown.filter((item) => item.kind === 'budget-reached')).toHaveLength(0)
+    expect(unknown.filter((item) => item.kind === 'budget-usage')).toHaveLength(0)
+  })
+
+  it('#4324: 89.99% does not fire the 90% item; exactly 90% does', () => {
+    const overview = makeOverview(
+      [{ id: 'a1', name: 'Scout', status: 'active', budgets: [{ budgetAtomic: '1' }] }],
+      [],
+    )
+    const at = (used: string) =>
+      computeAttentionItems({
+        overview,
+        budgetRemaining: budgetRemaining([{ agent_id: 'a1', budget_atomic: '1000000', used_atomic: used }]),
+      }).filter((item) => item.kind === 'budget-usage')
+    expect(at('899999')).toHaveLength(0)
+    expect(at('900000')).toHaveLength(1)
+  })
+
+  it("#4324: the 90% item names the budget with the highest share spent, and carries that budget's period end", () => {
+    const items = computeAttentionItems({
+      overview: makeOverview(
+        [{ id: 'a1', name: 'Scout', status: 'active', budgets: [{ budgetAtomic: '1' }] }],
+        [],
+      ),
+      budgetRemaining: budgetRemaining([
+        { agent_id: 'a1', budget_atomic: '1000000', used_atomic: '910000', period_end: '2026-10-24T00:00:00Z' },
+        { agent_id: 'a1', budget_atomic: '1000000', used_atomic: '990000', period_end: '2026-11-01T00:00:00Z' },
+      ]),
+    })
+    expect(items.find((item) => item.kind === 'budget-usage')?.periodEnd).toBe('2026-11-01T00:00:00Z')
   })
 
   it('never produces a budget item from relayer_budget refusals — Haven paused instead', () => {
@@ -394,9 +494,90 @@ describe('computeAttentionItems — payments failed (rule 4)', () => {
       budgetRemaining: EMPTY_BUDGETS,
     })
     const failed = items.filter((item) => item.kind === 'payments-failed')
-    expect(failed).toHaveLength(1)
-    expect(failed[0].tone).toBe('danger')
-    expect(failed[0].title).toContain('Scout')
+    // #4324: one failure reads calm — neutral, and says no money moved.
+    expect(failed).toEqual([
+      {
+        id: 'payments-failed:a1',
+        kind: 'payments-failed',
+        tone: 'neutral',
+        badge: 'Failed',
+        title: 'Scout had a failed payment',
+        subtitle: 'A payment was refused by the network. No money moved.',
+        actionLabel: 'Review',
+        href: '/agents/a1?tab=activity&status=refused',
+        agentId: 'a1',
+      },
+    ])
+  })
+
+  it('#4324: an agent with 3 failures in 7 days is danger; 2 stays neutral', () => {
+    expect(PAYMENTS_FAILED_DANGER_COUNT).toBe(3)
+    const failedItem = (failed: number) =>
+      computeAttentionItems({
+        overview: makeOverview(
+          [
+            {
+              id: 'a1',
+              name: 'Scout',
+              status: 'active',
+              budgets: [{ budgetAtomic: '1' }],
+              refusalBuckets: { budget: 0, scope: 0, failed, haven: 0 },
+            },
+          ],
+          [],
+        ),
+        budgetRemaining: EMPTY_BUDGETS,
+      }).find((item) => item.kind === 'payments-failed')
+    expect(failedItem(2)).toMatchObject({
+      tone: 'neutral',
+      subtitle: 'A payment was refused by the network. No money moved.',
+    })
+    expect(failedItem(3)).toEqual({
+      id: 'payments-failed:a1',
+      kind: 'payments-failed',
+      tone: 'danger',
+      badge: 'Failed',
+      title: 'Scout had 3 failed payments',
+      subtitle: 'Payments keep failing — check the agent.',
+      actionLabel: 'Review',
+      href: '/agents/a1?tab=activity&status=refused',
+      agentId: 'a1',
+    })
+    // Above the threshold the title carries the real count, not the threshold.
+    expect(failedItem(5)).toMatchObject({ tone: 'danger', title: 'Scout had 5 failed payments' })
+  })
+
+  it('#4324: the unattributed item is neutral below 3 failed intents and danger at 3, never claiming no money moved', () => {
+    const unattributed = (count: number) =>
+      computeAttentionItems({
+        overview: makeOverview(
+          [{ id: 'a1', name: 'Scout', status: 'active', budgets: [{ budgetAtomic: '1' }] }],
+          [],
+          count,
+        ),
+        budgetRemaining: EMPTY_BUDGETS,
+      }).find((item) => item.kind === 'payments-failed')
+    expect(unattributed(2)).toEqual({
+      id: 'payments-failed:unattributed',
+      kind: 'payments-failed',
+      tone: 'neutral',
+      badge: 'Failed',
+      title: 'A payment failed',
+      subtitle: 'A payment did not go through in the last 7 days.',
+      actionLabel: 'View transactions',
+      href: '/transactions',
+    })
+    expect(unattributed(3)).toEqual({
+      id: 'payments-failed:unattributed',
+      kind: 'payments-failed',
+      tone: 'danger',
+      badge: 'Failed',
+      title: '3 payments failed',
+      subtitle: 'Payments keep failing — check your agents.',
+      actionLabel: 'View transactions',
+      href: '/transactions',
+    })
+    expect(unattributed(5)).toMatchObject({ tone: 'danger', title: '5 payments failed' })
   })
 
   it('surfaces the user-level failed-intent count when no agent is named', () => {
@@ -457,16 +638,23 @@ describe('computeAttentionItems — backup signer (rule 5)', () => {
     expect(backup[1].title).toContain('Ops')
   })
 
-  it('stays hidden for an id in dismissedIds — the server-saved list (#3813)', () => {
-    const items = computeAttentionItems({
-      overview: makeOverview(
-        [],
-        [{ accountId: 'acct-1', needs_backup_recommendation: true, funded: true }],
-      ),
+  it('stays hidden for an id in the server-saved dismissals (#3813) — and in the session-only set', () => {
+    const overview = makeOverview(
+      [],
+      [{ accountId: 'acct-1', needs_backup_recommendation: true, funded: true }],
+    )
+    const saved = computeAttentionItems({
+      overview,
+      budgetRemaining: EMPTY_BUDGETS,
+      acknowledgements: acks({ 'no-backup:acct-1': '2026-10-09T00:00:00Z' }),
+    })
+    expect(saved.filter((item) => item.kind === 'no-backup')).toHaveLength(0)
+    const session = computeAttentionItems({
+      overview,
       budgetRemaining: EMPTY_BUDGETS,
       dismissedIds: new Set(['no-backup:acct-1']),
     })
-    expect(items.filter((item) => item.kind === 'no-backup')).toHaveLength(0)
+    expect(session.filter((item) => item.kind === 'no-backup')).toHaveLength(0)
   })
 
   it('a backup dismissal for one account does not hide another account\u2019s item', () => {
@@ -481,8 +669,8 @@ describe('computeAttentionItems — backup signer (rule 5)', () => {
       budgetRemaining: EMPTY_BUDGETS,
       // The dismissal belongs to the account it was made on: acct-2 still
       // raises its own item (and an account funded after the dismissal
-      // elsewhere would too — its id is simply not in the set).
-      dismissedIds: new Set(['no-backup:acct-1']),
+      // elsewhere would too — its id is simply not in the map).
+      acknowledgements: acks({ 'no-backup:acct-1': '2026-10-09T00:00:00Z' }),
     })
     expect(items.filter((item) => item.kind === 'no-backup').map((item) => item.accountId)).toEqual([
       'acct-2',
@@ -499,11 +687,148 @@ describe('computeAttentionItems — backup signer (rule 5)', () => {
         [],
       ),
       budgetRemaining: EMPTY_BUDGETS,
-      dismissedIds: new Set(['needs-setup:a1']),
+      acknowledgements: acks({ 'needs-setup:a1': '2026-10-09T00:00:00Z' }),
     })
     expect(items.filter((item) => item.kind === 'needs-setup').map((item) => item.id)).toEqual([
       'needs-setup:a2',
     ])
+  })
+})
+
+// ── #4324: acknowledge until something new ─────────────────────────────────
+describe('computeAttentionItems — acknowledgements (#4324)', () => {
+  const ACK = '2026-10-20T12:00:00.000Z'
+  const BEFORE = '2026-10-20T11:00:00.000Z'
+  const AFTER = '2026-10-20T13:00:00.000Z'
+
+  const agentWith = (refusalBuckets: AgentSlice['refusalBuckets']): AgentSlice => ({
+    id: 'a1',
+    name: 'Scout',
+    status: 'active',
+    budgets: [{ budgetAtomic: '1' }],
+    refusalBuckets,
+  })
+  const visibleIds = (overview: DashboardOverview, acknowledgements: Map<string, AttentionAcknowledgement>, reads: DashboardBudgetRemaining | null = EMPTY_BUDGETS) =>
+    computeAttentionItems({ overview, budgetRemaining: reads, acknowledgements }).map((item) => item.id)
+
+  it('every event-driven kind is dismissible; low balance and zero USDC are not', () => {
+    expect([...DISMISSIBLE_ATTENTION_KINDS].sort()).toEqual(
+      ['budget-reached', 'budget-scope', 'budget-usage', 'haven-paused', 'needs-setup', 'no-backup', 'payments-failed'].sort(),
+    )
+    expect(DISMISSIBLE_ATTENTION_KINDS.has('low-balance')).toBe(false)
+    expect(DISMISSIBLE_ATTENTION_KINDS.has('zero-usdc')).toBe(false)
+  })
+
+  const CASES = [
+    { id: 'budget-reached:a1', bucket: { budget: 2, scope: 0, failed: 0, haven: 0 }, field: 'lastBudgetAt' },
+    { id: 'budget-scope:a1', bucket: { budget: 0, scope: 1, failed: 0, haven: 0 }, field: 'lastScopeAt' },
+    { id: 'payments-failed:a1', bucket: { budget: 0, scope: 0, failed: 1, haven: 0 }, field: 'lastFailedAt' },
+    { id: 'haven-paused', bucket: { budget: 0, scope: 0, failed: 0, haven: 1 }, field: 'lastHavenAt' },
+  ] as const
+
+  for (const { id, bucket, field } of CASES) {
+    it(`${id}: an older or equal event keeps it hidden; a newer one brings it back`, () => {
+      const at = (when: string) => makeOverview([agentWith({ ...bucket, [field]: when })], [])
+      const ack = acks({ [id]: ACK })
+      expect(visibleIds(at(BEFORE), ack)).not.toContain(id)
+      expect(visibleIds(at(ACK), ack)).not.toContain(id)
+      expect(visibleIds(at(AFTER), ack)).toContain(id)
+      // Without an acknowledgement it shows as today.
+      expect(visibleIds(at(BEFORE), acks({}))).toContain(id)
+    })
+
+    it(`${id}: a response without ${field} never hides the item (#3295)`, () => {
+      const overview = makeOverview([agentWith(bucket)], [])
+      expect(visibleIds(overview, acks({ [id]: ACK }))).toContain(id)
+    })
+  }
+
+  it('the unattributed payments-failed item re-arms on lastFailedIntentAt', () => {
+    const overview = (when?: string) =>
+      makeOverview([{ id: 'a1', name: 'Scout', status: 'active', budgets: [{ budgetAtomic: '1' }] }], [], 1, when)
+    const ack = acks({ 'payments-failed:unattributed': ACK })
+    expect(visibleIds(overview(BEFORE), ack)).not.toContain('payments-failed:unattributed')
+    expect(visibleIds(overview(AFTER), ack)).toContain('payments-failed:unattributed')
+    expect(visibleIds(overview(undefined), ack)).toContain('payments-failed:unattributed')
+  })
+
+  it('an acknowledgement for one agent does not hide another agent\'s item of the same kind', () => {
+    const overview = makeOverview(
+      [
+        { ...agentWith({ budget: 1, scope: 0, failed: 0, haven: 0, lastBudgetAt: BEFORE }) },
+        { ...agentWith({ budget: 1, scope: 0, failed: 0, haven: 0, lastBudgetAt: BEFORE }), id: 'a2', name: 'Runner' },
+      ],
+      [],
+    )
+    expect(visibleIds(overview, acks({ 'budget-reached:a1': ACK }))).toEqual(['budget-reached:a2'])
+  })
+
+  describe('the 90%-used item', () => {
+    const scout = { id: 'a1', name: 'Scout', status: 'active' as const, budgets: [{ budgetAtomic: '1' }] }
+    const nearlySpent = (periodEnd: string) =>
+      budgetRemaining([{ agent_id: 'a1', budget_atomic: '1000000', used_atomic: '950000', period_end: periodEnd }])
+
+    it('stays hidden in the acknowledged period and returns in the next', () => {
+      const ack = acks({ 'budget-usage:a1': { at: ACK, periodEnd: '2026-10-21T00:00:00Z' } })
+      const overview = makeOverview([scout], [])
+      expect(visibleIds(overview, ack, nearlySpent('2026-10-21T00:00:00Z'))).not.toContain('budget-usage:a1')
+      expect(visibleIds(overview, ack, nearlySpent('2026-10-22T00:00:00Z'))).toContain('budget-usage:a1')
+    })
+
+    it('an acknowledgement without a stored period end never hides it', () => {
+      const ack = acks({ 'budget-usage:a1': ACK })
+      expect(visibleIds(makeOverview([scout], []), ack, nearlySpent('2026-10-21T00:00:00Z'))).toContain('budget-usage:a1')
+    })
+
+    it('is independent of the refusal item: hidden while the refusal item shows, shown once that is acknowledged', () => {
+      const overview = makeOverview([{ ...scout, refusalBuckets: { budget: 1, scope: 0, failed: 0, haven: 0, lastBudgetAt: BEFORE } }], [])
+      const reads = nearlySpent('2026-10-21T00:00:00Z')
+      expect(visibleIds(overview, acks({}), reads)).toEqual(['budget-reached:a1'])
+      expect(visibleIds(overview, acks({ 'budget-reached:a1': ACK }), reads)).toEqual(['budget-usage:a1'])
+      // Acknowledging the 90% item does not hide a newer refusal.
+      const newer = makeOverview([{ ...scout, refusalBuckets: { budget: 1, scope: 0, failed: 0, haven: 0, lastBudgetAt: AFTER } }], [])
+      expect(
+        visibleIds(newer, acks({ 'budget-reached:a1': ACK, 'budget-usage:a1': { at: ACK, periodEnd: '2026-10-21T00:00:00Z' } }), reads),
+      ).toEqual(['budget-reached:a1'])
+    })
+  })
+
+  describe('haven-paused', () => {
+    it('Review opens the refused attempts of the agent with the latest sponsorship refusal', () => {
+      const overview = makeOverview(
+        [
+          agentWith({ budget: 0, scope: 0, failed: 0, haven: 1, lastHavenAt: BEFORE }),
+          { ...agentWith({ budget: 0, scope: 0, failed: 0, haven: 2, lastHavenAt: AFTER }), id: 'a2', name: 'Runner' },
+        ],
+        [],
+      )
+      const paused = computeAttentionItems({ overview, budgetRemaining: EMPTY_BUDGETS }).find((item) => item.kind === 'haven-paused')
+      expect(paused).toEqual({
+        id: 'haven-paused',
+        kind: 'haven-paused',
+        tone: 'neutral',
+        title: 'Haven paused sponsored payments',
+        subtitle: "Your budgets are untouched. Haven's own cap stopped a payment.",
+        actionLabel: 'Review',
+        href: '/agents/a2?tab=activity&status=refused',
+      })
+    })
+
+    it('shows no action when a contributing agent\'s time is unknown, and still is dismissible', () => {
+      const overview = makeOverview(
+        [
+          agentWith({ budget: 0, scope: 0, failed: 0, haven: 1, lastHavenAt: AFTER }),
+          { ...agentWith({ budget: 0, scope: 0, failed: 0, haven: 1 }), id: 'a2', name: 'Runner' },
+        ],
+        [],
+      )
+      const paused = computeAttentionItems({ overview, budgetRemaining: EMPTY_BUDGETS }).find((item) => item.kind === 'haven-paused')
+      expect(paused?.actionLabel).toBeUndefined()
+      expect(paused?.href).toBeUndefined()
+      expect(DISMISSIBLE_ATTENTION_KINDS.has('haven-paused')).toBe(true)
+      // Unknown latest time: an acknowledgement never hides it.
+      expect(visibleIds(overview, acks({ 'haven-paused': '2099-01-01T00:00:00Z' }))).toContain('haven-paused')
+    })
   })
 })
 
@@ -685,8 +1010,36 @@ describe('attentionEmptyState (#3902) — the achievement only on measured facts
   const roomy = budgetRemaining([{ agent_id: 'a1', budget_atomic: '10000000', used_atomic: '1000000' }])
   // 100 USDC at 10 USDC a week: 70 days — well over a month.
   const month = { accountId: 'acct-1', usdcBalanceAtomic: '100000000', usdcPace7dAtomic: '10000000', funded: true }
-  const state = (overview: DashboardOverview, reads: DashboardBudgetRemaining | null, loading = false) =>
-    attentionEmptyState({ overview, budgetRemaining: reads, budgetRemainingLoading: loading })
+  const state = (
+    overview: DashboardOverview,
+    reads: DashboardBudgetRemaining | null,
+    loading = false,
+    acknowledgements?: Map<string, AttentionAcknowledgement>,
+  ) => attentionEmptyState({ overview, budgetRemaining: reads, budgetRemainingLoading: loading, acknowledgements })
+
+  it('#4324: is the achievement after every budget and scope stop is acknowledged, with no newer one', () => {
+    const stopped = {
+      ...scout,
+      refusalBuckets: {
+        budget: 1,
+        scope: 1,
+        failed: 0,
+        haven: 0,
+        lastBudgetAt: '2026-10-20T10:00:00Z',
+        lastScopeAt: '2026-10-20T10:30:00Z',
+      },
+    }
+    const both = acks({ 'budget-reached:a1': '2026-10-20T11:00:00Z', 'budget-scope:a1': '2026-10-20T11:00:00Z' })
+    expect(state(makeOverview([stopped], [month]), roomy, false, both)).toEqual({
+      kind: 'caught-up',
+      title: ATTENTION_CAUGHT_UP_TITLE,
+    })
+    // One stop still unacknowledged: the neutral line.
+    expect(state(makeOverview([stopped], [month]), roomy, false, acks({ 'budget-reached:a1': '2026-10-20T11:00:00Z' })).kind).toBe('quiet')
+    // A stop newer than its acknowledgement: the neutral line.
+    const newer = acks({ 'budget-reached:a1': '2026-10-20T09:00:00Z', 'budget-scope:a1': '2026-10-20T11:00:00Z' })
+    expect(state(makeOverview([stopped], [month]), roomy, false, newer).kind).toBe('quiet')
+  })
 
   it('is the achievement when the runway and the budget room are both measured and holding', () => {
     const result = state(makeOverview([scout], [month]), roomy)

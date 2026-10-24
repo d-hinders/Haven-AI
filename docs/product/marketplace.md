@@ -133,7 +133,10 @@ for the modal's own shape.
   also records the challenge's `payTo` (`merchant_catalog.pay_to`,
   lowercased). It records one only when every `accepts[]` option on the
   offer's recorded network names the same well-formed address; options on
-  other networks do not count. A merchant's **verified payTo** on a chain is
+  other networks do not count. The recorded network is the network of the
+  option the pay path would select (`selectX402SettlementScheme` from
+  `@haven_ai/sdk`, over every option, not `accepts[0]`; #4389), and a
+  challenge with no option the pay path could settle is a probe miss. A merchant's **verified payTo** on a chain is
   derived, never stored: it is the one address all its active, verified x402
   `merchant_catalog` offers on that network agree on — operator-curated or
   Bazaar-discovered alike (`source` is a label and does not filter here,
@@ -153,7 +156,8 @@ for the modal's own shape.
     can recover without anyone re-issuing the budget, and only a delisted one
     does not).
   - `erc7710` is true only when **every** such offer on that recorded network
-    advertises the ERC-7710 transfer method. A pinned budget cannot fund an
+    advertises a payable ERC-7710 option there (one the SDK's erc7710
+    selector accepts, #4389). A pinned budget cannot fund an
     EIP-3009 payment, because that leg pays the agent's own wallet first, so
     an EIP-3009 merchant is paid from the open budget, if the agent has one.
 - **Issuing one.** `POST /agents/{id}/delegations/build` with `merchant_slug`.

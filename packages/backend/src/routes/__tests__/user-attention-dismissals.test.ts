@@ -20,16 +20,20 @@ import { FastifyInstance } from 'fastify'
  * migration's own test, both on the real-DB harness).
  */
 
-const { mockList, mockDismissBackup, mockDismissSetup } = vi.hoisted(() => ({
+const { mockList, mockDismissBackup, mockDismissSetup, mockAckAgent, mockAckUser } = vi.hoisted(() => ({
   mockList: vi.fn(),
   mockDismissBackup: vi.fn(),
   mockDismissSetup: vi.fn(),
+  mockAckAgent: vi.fn(),
+  mockAckUser: vi.fn(),
 }))
 
 vi.mock('../../infra/repositories/attention-dismissals.js', () => ({
   listAttentionDismissals: mockList,
   dismissBackupSigner: mockDismissBackup,
   dismissNeedsSetup: mockDismissSetup,
+  acknowledgeAgentItem: mockAckAgent,
+  acknowledgeUserItem: mockAckUser,
 }))
 
 import { buildApp } from '../../__tests__/helpers.js'
@@ -47,6 +51,8 @@ const STORED_BACKUP = {
   account_id: ACCOUNT_ID,
   agent_id: null,
   created_at: '2026-10-09T21:00:00.000Z',
+  acknowledged_at: '2026-10-09T21:00:00.000Z',
+  acknowledged_period_end: null,
 }
 
 describe('user attention-dismissals routes (#3813)', () => {
@@ -64,6 +70,8 @@ describe('user attention-dismissals routes (#3813)', () => {
     mockList.mockReset()
     mockDismissBackup.mockReset()
     mockDismissSetup.mockReset()
+    mockAckAgent.mockReset()
+    mockAckUser.mockReset()
   })
 
   function token(sub: string): string {
@@ -106,6 +114,8 @@ describe('user attention-dismissals routes (#3813)', () => {
         account_id: ACCOUNT_ID,
         agent_id: null,
         created_at: STORED_BACKUP.created_at,
+        acknowledged_at: STORED_BACKUP.acknowledged_at,
+        acknowledged_period_end: null,
       })
       expect(mockDismissBackup).toHaveBeenCalledExactlyOnceWith(USER, ACCOUNT_ID)
       expectMatchesSpec('POST', '/user/attention-dismissals', res.json(), '201')
@@ -160,6 +170,100 @@ describe('user attention-dismissals routes (#3813)', () => {
       expect(mockDismissSetup).not.toHaveBeenCalled()
     })
 
+    // ── #4324: acknowledgements, dispatched PER KIND ──────────────────────
+    const ACK = (kind: string, agentId: string | null, periodEnd: string | null = null) => ({
+      ...STORED_BACKUP,
+      item_kind: kind,
+      account_id: null,
+      agent_id: agentId,
+      acknowledged_at: '2026-10-23T10:00:00.000Z',
+      acknowledged_period_end: periodEnd,
+    })
+
+    for (const kind of ['budget-reached', 'budget-scope', 'payments-failed'] as const) {
+      it(`#4324: ${kind} with an agent is an agent acknowledgement — never written as needs-setup`, async () => {
+        mockAckAgent.mockResolvedValue(ACK(kind, AGENT_ID))
+        const res = await app.inject({
+          method: 'POST',
+          url: '/user/attention-dismissals',
+          headers: { authorization: `Bearer ${token(USER)}` },
+          payload: { item_kind: kind, agent_id: AGENT_ID },
+        })
+        expect(res.statusCode).toBe(201)
+        expect(res.json().item_kind).toBe(kind)
+        expect(mockAckAgent).toHaveBeenCalledExactlyOnceWith(USER, kind, AGENT_ID, null)
+        expect(mockDismissSetup).not.toHaveBeenCalled()
+        expect(mockAckUser).not.toHaveBeenCalled()
+        expectMatchesSpec('POST', '/user/attention-dismissals', res.json(), '201')
+      })
+    }
+
+    it('#4324: budget-usage carries the firing budget\'s period end to the repository', async () => {
+      const periodEnd = '2026-11-01T00:00:00.000Z'
+      mockAckAgent.mockResolvedValue(ACK('budget-usage', AGENT_ID, periodEnd))
+      const res = await app.inject({
+        method: 'POST',
+        url: '/user/attention-dismissals',
+        headers: { authorization: `Bearer ${token(USER)}` },
+        payload: { item_kind: 'budget-usage', agent_id: AGENT_ID, period_end: periodEnd },
+      })
+      expect(res.statusCode).toBe(201)
+      expect(res.json().acknowledged_period_end).toBe(periodEnd)
+      expect(mockAckAgent).toHaveBeenCalledExactlyOnceWith(USER, 'budget-usage', AGENT_ID, periodEnd)
+      expectMatchesSpec('POST', '/user/attention-dismissals', res.json(), '201')
+    })
+
+    for (const kind of ['haven-paused', 'payments-failed'] as const) {
+      it(`#4324: ${kind} without an agent is a user-level acknowledgement`, async () => {
+        mockAckUser.mockResolvedValue(ACK(kind, null))
+        const res = await app.inject({
+          method: 'POST',
+          url: '/user/attention-dismissals',
+          headers: { authorization: `Bearer ${token(USER)}` },
+          payload: { item_kind: kind },
+        })
+        expect(res.statusCode).toBe(201)
+        expect(mockAckUser).toHaveBeenCalledExactlyOnceWith(USER, kind)
+        expect(mockAckAgent).not.toHaveBeenCalled()
+        expect(mockDismissSetup).not.toHaveBeenCalled()
+        expectMatchesSpec('POST', '/user/attention-dismissals', res.json(), '201')
+      })
+    }
+
+    it('#4324: refuses the new kinds\' wrong shapes before the handler', async () => {
+      const bodies = [
+        { item_kind: 'budget-usage', agent_id: AGENT_ID }, // no period_end
+        { item_kind: 'budget-reached' }, // no agent
+        { item_kind: 'budget-scope', agent_id: AGENT_ID, period_end: '2026-11-01T00:00:00.000Z' },
+        { item_kind: 'haven-paused', agent_id: AGENT_ID },
+        { item_kind: 'budget-reached', account_id: ACCOUNT_ID },
+        { item_kind: 'zero-usdc', account_id: ACCOUNT_ID },
+      ]
+      for (const payload of bodies) {
+        const res = await app.inject({
+          method: 'POST',
+          url: '/user/attention-dismissals',
+          headers: { authorization: `Bearer ${token(USER)}` },
+          payload,
+        })
+        expect(res.statusCode, JSON.stringify(payload)).toBe(400)
+      }
+      expect(mockAckAgent).not.toHaveBeenCalled()
+      expect(mockAckUser).not.toHaveBeenCalled()
+      expect(mockDismissSetup).not.toHaveBeenCalled()
+    })
+
+    it('#4324: a foreign agent on an acknowledgement is a 404', async () => {
+      mockAckAgent.mockResolvedValue(null)
+      const res = await app.inject({
+        method: 'POST',
+        url: '/user/attention-dismissals',
+        headers: { authorization: `Bearer ${token(USER)}` },
+        payload: { item_kind: 'budget-reached', agent_id: AGENT_ID },
+      })
+      expect(res.statusCode).toBe(404)
+    })
+
     it('a foreign or unknown account is a 404, never a 403', async () => {
       mockDismissBackup.mockResolvedValue(null)
 
@@ -204,6 +308,8 @@ describe('user attention-dismissals routes (#3813)', () => {
             account_id: ACCOUNT_ID,
             agent_id: null,
             created_at: STORED_BACKUP.created_at,
+            acknowledged_at: STORED_BACKUP.acknowledged_at,
+            acknowledged_period_end: null,
           },
         ],
       })

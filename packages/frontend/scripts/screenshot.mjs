@@ -16,8 +16,9 @@
  * ── Looking at a width outside the committed set (#2006) ─────────────────────
  * `--viewport=<W>[xH]` (repeatable/comma-separated, or `SCREENSHOT_VIEWPORTS`)
  * shoots the requested widths INSTEAD OF the committed pair, for that run only.
- * Nothing a gate compares changes: the four gate consumers import `VIEWPORTS`
- * from `evidence-viewports.mjs` and never the override. Overridden viewports
+ * Nothing a gate compares changes: every gate consumer (24 e2e files — 23 of
+ * the 24 visual specs and `capture-integrity`) imports `VIEWPORTS` from
+ * `evidence-viewports.mjs` and never the override. Overridden viewports
  * are named after their dimensions, so the PNG filenames and the manifest's
  * `viewports` / `viewport_source` state the widths the run actually used.
  * The reasoning — and why 320 is deliberately NOT in the committed set — is in
@@ -1164,6 +1165,8 @@ export const FIXTURE_OVERVIEW = {
       merchantName: null,
     },
     failedIntents7d: 1,
+    // #4324: the latest recorded step of any failed intent in the window (sent when there is one).
+    lastFailedIntentAt: '2026-10-08T14:20:00.000Z',
     balance_by_day: Array.from({ length: 30 }, (_, i) => {
       const day = new Date(Date.UTC(2026, 8, 10 + i))
       return {
@@ -1209,7 +1212,8 @@ export const FIXTURE_OVERVIEW = {
         net: { usd: 37.5, eur: 34.43, sek: 403.5 },
         approx: false,
         payments: 4,
-        refusals: { budget: 1, scope: 0, failed: 0, haven: 0 },
+        // #4324: d7 carries the latest refusal time of each non-empty bucket.
+        refusals: { budget: 1, scope: 0, failed: 0, haven: 0, lastBudgetAt: '2026-10-08T11:05:00.000Z' },
       },
       d30: {
         gross: { usd: 250.0, eur: 229.5, sek: 2690.0 },
@@ -1799,8 +1803,8 @@ export const FIXTURE_TXS_ACCOUNTED_BADGE = FIXTURE_TXS.map((t, i) =>
 // `GET /analytics/overview` is analytics slice B (#2946, PR #2957 — review at
 // the time of writing). The fixture pins the response shape THAT PR specifies:
 // one range-scoped aggregate whose sums cover confirmed `payment_intents`
-// only, with `basis` carrying the counts the page quotes ("based on N
-// payments", "M awaiting settlement evidence are not counted", the refusal
+// only, with `basis` carrying the counts the page reads (`payments_counted`,
+// the Payments tile's figure since #4333; `unsettled_submitted`; the refusal
 // ledger's coverage window). Keyed here so the `analytics-*` scenarios below
 // and C's page (#2947) read ONE declared shape.
 //
@@ -2966,9 +2970,10 @@ async function newFixtureContext(browser, vp, scenario, { signedOut = false, col
     // frontend origin (pages, `/_next` assets) loads normally.
     const api = pathname.startsWith('/api/') ? pathname.slice(4) : null
     if (api === null) {
-      // Chain reads leave the browser as JSON-RPC POSTs to a public node, not
-      // through `/api/*` — so they land here, in the `route.continue()` branch
-      // that used to let them onto the real internet (#1935).
+      // Everything else passes through untouched, including any JSON-RPC a
+      // page sends to a public node: the route handler answers no JSON-RPC. The
+      // allowance chain reads this branch once had to fence (#1935) went
+      // with the legacy rail (#2331).
         return route.continue()
     }
 

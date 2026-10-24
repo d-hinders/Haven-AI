@@ -35,7 +35,7 @@ export const version = '086_payment_refusals'
  *   pre-check and both x402 legs, via
  *   `modules/budget-scope/expired-budget.ts`). Provenance rides `detail`:
  *   a pre-flight row carries `budget_ended_at` (the ended budget's
- *   `expires_at`, allowlist-widened by migration 118); a revert-detected
+ *   `expires_at`, allowlist-widened by migration 119); a revert-detected
  *   row never does.
  * - `relayer_budget` — the sign-route `RelayerBudgetExceededError` refusal
  *   before broadcast.

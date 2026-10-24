@@ -704,6 +704,11 @@ export async function findLastOutgoingIntentAt(
  * row has exactly one agent, so summing per-agent row counts IS the row
  * count — the "not a sum of per-agent counts" rule is about DISTINCT
  * merchants, not refusal rows).
+ *
+ * #4324: the `last_*_7` columns are the 7-day window's latest refusal time
+ * per bucket — the event an acknowledged "Needs attention" item re-arms on.
+ * They come from the same scan as the counts (no second read), and only the
+ * 7-day window carries them: the items fire on 7-day counts.
  */
 export const REFUSAL_BUCKETS_BY_AGENT_SQL = `SELECT r.agent_id,
     COUNT(*) FILTER (WHERE r.reason IN ('delegation_budget_exceeded', 'delegation_expired')
@@ -721,7 +726,15 @@ export const REFUSAL_BUCKETS_BY_AGENT_SQL = `SELECT r.agent_id,
     COUNT(*) FILTER (WHERE r.reason = 'onchain_revert'
                        AND r.created_at >= $4 AND r.created_at < $3)::text AS failed_30,
     COUNT(*) FILTER (WHERE r.reason = 'relayer_budget'
-                       AND r.created_at >= $4 AND r.created_at < $3)::text AS haven_30
+                       AND r.created_at >= $4 AND r.created_at < $3)::text AS haven_30,
+    MAX(r.created_at) FILTER (WHERE r.reason IN ('delegation_budget_exceeded', 'delegation_expired')
+                       AND r.created_at >= $2 AND r.created_at < $3) AS last_budget_7,
+    MAX(r.created_at) FILTER (WHERE r.reason = 'no_delegation_for_target'
+                       AND r.created_at >= $2 AND r.created_at < $3) AS last_scope_7,
+    MAX(r.created_at) FILTER (WHERE r.reason = 'onchain_revert'
+                       AND r.created_at >= $2 AND r.created_at < $3) AS last_failed_7,
+    MAX(r.created_at) FILTER (WHERE r.reason = 'relayer_budget'
+                       AND r.created_at >= $2 AND r.created_at < $3) AS last_haven_7
   FROM payment_refusals r
   JOIN agents a ON a.id = r.agent_id
   ${DELEGATION_RAIL_JOIN}
@@ -741,6 +754,10 @@ export interface RefusalBucketRow {
   scope_30: string
   failed_30: string
   haven_30: string
+  last_budget_7: Date | null
+  last_scope_7: Date | null
+  last_failed_7: Date | null
+  last_haven_7: Date | null
 }
 
 /** Same parameter contract as `listDashboardSpendGroups`. */
@@ -762,8 +779,20 @@ export async function listRefusalBucketsByAgent(
   return result.rows
 }
 
-/** Failed payment intents in the 7-day window — a COUNT, not a fiat sum. */
-export const FAILED_INTENTS_7D_SQL = `SELECT COUNT(*)::text AS failed_intents
+/**
+ * Failed payment intents in the 7-day window — a COUNT, not a fiat sum — and
+ * (#4324) the latest recorded step of any failed intent in the window, which
+ * the unattributed "Payments failed" acknowledgement re-arms on.
+ *
+ * `payment_intents` has no column that records WHEN a row became `failed`
+ * (no `updated_at`; the failure writers set `status` and `error_message`
+ * only). The latest recorded step — `GREATEST(created_at, signed_at,
+ * submitted_at)`, which ignores NULLs — is the closest time the row carries.
+ * So an intent submitted BEFORE an acknowledgement that fails AFTER it does
+ * not re-arm the item; a new failed intent does.
+ */
+export const FAILED_INTENTS_7D_SQL = `SELECT COUNT(*)::text AS failed_intents,
+    MAX(GREATEST(pi.created_at, pi.signed_at, pi.submitted_at)) AS last_failed_intent_at
   FROM payment_intents pi
   JOIN agents a ON a.id = pi.agent_id
   ${DELEGATION_RAIL_JOIN}
@@ -773,6 +802,12 @@ export const FAILED_INTENTS_7D_SQL = `SELECT COUNT(*)::text AS failed_intents
     AND pi.created_at < $3
     AND COALESCE(pi.chain_id, 0) = ANY($4)`
 
+export interface FailedIntents7d {
+  count: number
+  /** Null when the window holds no failed intent. */
+  lastAt: Date | null
+}
+
 /** `userId` is REQUIRED; `[from7, to)` on `created_at`. */
 export async function countFailedIntents7d(
   userId: string,
@@ -780,12 +815,14 @@ export async function countFailedIntents7d(
   from7: string,
   to: string,
   db: Executor = pool,
-): Promise<number> {
-  const result = await db.query<{ failed_intents: string }>(FAILED_INTENTS_7D_SQL, [
-    userId,
-    from7,
-    to,
-    chainIds,
-  ])
-  return Number(result.rows[0]?.failed_intents ?? '0')
+): Promise<FailedIntents7d> {
+  const result = await db.query<{ failed_intents: string; last_failed_intent_at: Date | null }>(
+    FAILED_INTENTS_7D_SQL,
+    [userId, from7, to, chainIds],
+  )
+  const row = result.rows[0]
+  return {
+    count: Number(row?.failed_intents ?? '0'),
+    lastAt: row?.last_failed_intent_at ? new Date(row.last_failed_intent_at) : null,
+  }
 }

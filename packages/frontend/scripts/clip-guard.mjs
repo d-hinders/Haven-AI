@@ -39,10 +39,11 @@ export const CLIP_TOLERANCE_PX = 4
  * scrolling box in its SUBTREE, not on `target` itself (#1879).
  *
  * `shoot()` has no selector of its own; it measures whatever locator the caller
- * hands it, and 19 of its call sites hand it `page.getByRole('dialog')`. That
- * role sits on `ui/Modal`'s `fixed inset-0` wrapper (`Modal.tsx:109`), which is
- * viewport-sized and never scrolls: its `scrollHeight - clientHeight` is 0 no
- * matter how much the nested `min-h-0 flex-1 overflow-y-auto` body at `:153` is
+ * hands it, and 19 of its call sites handed it `page.getByRole('dialog')` at
+ * #1879 (many still do). That role sits on `ui/Modal`'s `fixed inset-0`
+ * wrapper (`components/ui/Modal.tsx:205`), which is viewport-sized and never
+ * scrolls: its `scrollHeight - clientHeight` is 0 no matter how much the
+ * nested `min-h-0 flex-1 overflow-y-auto` body at `:259` is
  * hiding. Instrumented across ten dialog stages, the wrapper read 0px in all
  * ten while six had genuinely hidden content, up to 1060px. `ui/SidePanel` has
  * the same nested-scroller shape, and the two `card` call sites benefit for

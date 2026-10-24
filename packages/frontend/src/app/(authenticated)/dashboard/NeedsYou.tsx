@@ -27,11 +27,13 @@
  *   "You're all caught up" achievement (title only since #3908, still gated
  *   on measured facts), a neutral line that claims nothing, and — while the
  *   budget reads load — nothing at all.
- * - Dismissal is handed back to the caller (`onDismiss`) — #3813 owns
- *   persistence: "No backup signer" (per account) and "Needs setup" (per
- *   agent) write server-saved dismissals; everything else stays
- *   session-only. Which kinds are dismissible comes from the rules layer
- *   (`DISMISSIBLE_ATTENTION_KINDS`).
+ * - Dismissal is handed back to the caller (`onDismiss`) — #3813 and #4324
+ *   own persistence: "No backup signer" (per account) and "Needs setup"
+ *   (per agent) write permanent server-saved dismissals; the budget, scope,
+ *   sponsorship and failure items write ACKNOWLEDGEMENTS that last until
+ *   something new happens. Which kinds are dismissible comes from the
+ *   rules layer (`DISMISSIBLE_ATTENTION_KINDS`); low balance and zero USDC
+ *   are not.
  *
  * Every row action is a real `Button` (never a nested link), so the list is
  * fully keyboard-operable: rows are static, and the action + dismiss
@@ -69,6 +71,7 @@ const KIND_ICON: Record<AttentionRuleItem['kind'], LucideIcon> = {
   'low-balance': Coins,
   'zero-usdc': Coins,
   'budget-reached': Gauge,
+  'budget-usage': Gauge,
   'budget-scope': CircleDollarSign,
   'haven-paused': CirclePause,
   'payments-failed': TriangleAlert,

@@ -141,37 +141,50 @@ yet": its one job (saying the product charges nothing) is done by the absence,
 and a $0.00 would report "nothing charged this period", a different fact. The
 gas-sponsored count rides the tile when there is one to carry it.
 
-**Spend over time.** One bar per day *with activity* in the range — a day
-with no payment and no refusal is not drawn, so the axis is the days that
-carry a figure, not the calendar — stacked by agent, in the display currency;
-a marker cap above a bar means the guardrails refused at least one payment
-that day (the tooltip and the data table say how many; the legend names the
-cap beside the agent rows whenever a day in the range has one). The bars are the same
+**Spend over time.** One slot for EVERY local calendar date the window
+touches — empty days included (#4334), so the axis reads as time rather than
+as a scatter of the days that happened to carry a figure; a 7-day window
+draws 8 or 7 slots (N+1 unless the window ends exactly at local midnight),
+a 30-day one 31 or 30, a 90-day one 91 or 90 — stacked by agent, in the
+display currency; a small grey mark UNDER a day's slot means the guardrails
+refused at least one payment that day, and a day with refusals and no spend
+still shows it (the tooltip and the data table say how many; the legend
+names the mark "Refused" beside the agent rows whenever a day in the range
+has one). The bars are the same
 booked values the Spent tile sums, bucketed server-side in the page's time
-zone. Agents are ordered by spend, then id, and an agent's fill is its own
+zone; the y-ticks take their fraction digits from the tick step (#4334) —
+four decimals when the step is under a cent, so a sub-cent peak reads
+"$0.0010 … $0.0040" instead of "$0, $0", none for whole-unit steps. X labels
+sit at fixed intervals (weekly on 30 days) and never overlap; on 90 days the
+bars are thin, and that is accepted — the chart never scrolls horizontally.
+Agents are ordered by spend, then id, and an agent's fill is its own
 avatar tint — the colour of its monogram in the agents table above the
 chart — so it holds across ranges and ranks (#4331). The window starts and ends at the
 moment the page loads, not at midnight, so a bar on the window's first or
 last local day covers part of a day: it is striped and named as partial (the
-note under the chart says which end), never dropped or stretched. On a wide
+note under the chart says which end, and only claims stripes that are
+drawn — a partial day with no spend is an empty slot, named partial in the
+tooltip and the table), never dropped or stretched. On a wide
 screen a day's detail opens as a two-line callout — the day, its refusal
 count and its total, then each agent's share as a chip — anchored over that
 bar, kept inside
-the plot at either edge; when the bar (or its refusal cap) is tall enough to
+the plot at either edge; when the bar is tall enough to
 reach under the callout, the callout drops below the bar's top instead — its
 bottom just above the axis when the bar can hold it, otherwise just above
 the legend, over the date labels beneath it; between the two, the slot that
-hides the fewest neighbouring bars' tops wins — so the bar's top, its
-height against its neighbours and any refusal cap stay visible while it is
+hides the fewest neighbouring bars' tops or refusal marks wins — so the bar's
+top, its height against its neighbours and the marks under the slots stay
+visible while it is
 open. The callout takes no pointer, so hovering the next bar through it
 moves the detail on; a tap pins a day, and a second tap on it, or Escape,
 releases it — on touch too, where no pointer ever leaves. A bar too short
 for either drop (it would cover the whole bar to save a sliver) keeps the
 resting callout and loses its top instead. On a narrow screen the detail
 is a panel below the plot.
-Below three days of data the charts are not drawn — each chart's own floor
-(`MIN_CHARTABLE_DAYS`), not a page-level band: since #4333 the sections
-render whenever the window has any activity, each keeping its own guard, and
+A period with NO activity renders the section's empty state, and the
+balance chart's floor (`MIN_CHARTABLE_DAYS`) still applies to it alone —
+since #4333 the sections render whenever the window has any activity, each
+keeping its own guard, and
 the tiles and tables stay (a line through one point agrees with every trend,
 but a total over one day is still the total over that day).
 

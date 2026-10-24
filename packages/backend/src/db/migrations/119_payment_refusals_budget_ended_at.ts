@@ -1,6 +1,6 @@
 import type { PoolClient } from 'pg'
 
-export const version = '118_payment_refusals_budget_ended_at'
+export const version = '119_payment_refusals_budget_ended_at'
 
 /**
  * Widens `payment_refusals_detail_allowlist_check` with `budget_ended_at`
@@ -57,7 +57,7 @@ export async function down(client: PoolClient): Promise<void> {
   )
   if (Number(rows[0]?.count ?? '0') > 0) {
     throw new Error(
-      `migration 118 down(): ${rows[0].count} payment_refusals row(s) carry detail.budget_ended_at. ` +
+      `migration 119 down(): ${rows[0].count} payment_refusals row(s) carry detail.budget_ended_at. ` +
         'These are audit records of Haven guardrail decisions (#4352) — deleting or rewriting them is not an option, ' +
         'and the pre-118 CHECK would reject them. Roll back only after the pre-flight expired-budget writer is retired ' +
         'AND the rows are exported/archived by an explicit data-migration decision, never silently here.',

@@ -50,7 +50,7 @@ describe('SettingsSection', () => {
       <SettingsSection
         title="Accounting"
         description="Connect your accounting provider."
-        note="Fortnox is the only live provider."
+        note="Fortnox and Accounted are live."
       >
         <SettingsRow label="Fortnox" />
       </SettingsSection>,
@@ -61,7 +61,7 @@ describe('SettingsSection', () => {
       p.textContent?.includes('Connect your accounting'),
     ) as HTMLElement
     const note = Array.from(section.querySelectorAll('p')).find((p) =>
-      p.textContent?.includes('Fortnox is the only live'),
+      p.textContent?.includes('Fortnox and Accounted are live'),
     ) as HTMLElement
     expect(description).toBeTruthy()
     expect(card.contains(description)).toBe(false)

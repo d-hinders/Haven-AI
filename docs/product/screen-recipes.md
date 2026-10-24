@@ -139,6 +139,35 @@ States:
 - An agent waiting for setup: step 2 names it with `Finish setup`.
 - Dismissed: keep the dashboard usable; other empty states should still offer the same next action.
 
+Needs attention items after setup (#4324, owner decisions 2026-10-23):
+- Every item can be acted on, and every item except low balance and zero USDC
+  can be dismissed with its × (`Dismiss: {title}`). "No backup signer" (per
+  account) and "Needs setup" (per agent) are dismissed for good, as before.
+  The rest are **acknowledged until something new happens**:
+  - "Budget reached" (a budget refusal), "Outside its rules" (a recipient
+    outside the agent's rules) and a failed payment return on that agent's
+    next refusal of the same kind; "Haven paused sponsored payments" on the
+    next sponsorship-cap refusal; the unattributed "A payment failed" on the
+    next failed intent.
+  - "Has used 90% of its budget" returns in the next budget period. It shows
+    only while the agent's "Budget reached" item is not showing, so an agent
+    never carries two budget items at once.
+- "Review" on a refusal-based item opens the agent's Activity tab filtered to
+  its refused attempts (`/agents/:id?tab=activity&status=refused`); on the 90%
+  item it opens the agent page, where the Spending hero leads. "Haven paused"
+  opens the refused attempts of the agent with the latest one, and shows no
+  action when that is unknown.
+- A failed payment is calm (neutral) until an agent has 3 in 7 days, then it
+  reads "<agent> had N failed payments" over "Payments keep failing — check
+  the agent" in danger. A refusal-based
+  failure says no money moved; the unattributed one does not claim that.
+- Zero USDC reads "No USDC", not "Low balance".
+- "You're all caught up" can show once every budget and scope stop has been
+  acknowledged with none newer, if the runway and budget-room facts hold. A
+  budget at 90% or more still blocks it until the period turns.
+- Acknowledging never changes an agent's "N% used" badge: the badge is a
+  status read from the budget, not a reminder.
+
 ## Agent Budget Setup
 
 Use when the user creates or edits what an agent may spend.
@@ -167,7 +196,7 @@ Money and risk clarity:
 - Do not say `AllowanceModule`, `delegate`, `policy engine`, or `session key` in primary UI.
 
 States:
-- Empty: prompt the user to create or link a Haven account before creating an agent budget.
+- Empty: prompt the user to create a Haven account before creating an agent budget.
 - Loading: preserve card dimensions while loading accounts or balances.
 - Error: explain what the user can do next, such as choosing another wallet or trying again.
 - Success: move to the review or ready state rather than showing a dead-end confirmation.
@@ -1184,12 +1213,12 @@ Structure:
    and — when filtered to one agent — a **Review** link to that agent's
    refused attempts (`/agents/<id>?tab=activity&status=refused`, #4323;
    hidden with all agents, where no page-level refused list exists), and
-   *Agents near their budget* as "N of M" over the agents with budgets,
+   *Agents near their budget* as "N/M" over the agents with budgets,
    captioned "above 75% of a period budget". The two refusal recording
    caveats (the ledger's floor date, the unrecorded price-cap class) ride an
    ⓘ `Tooltip` hint on the Refused label — `StatTile`'s optional `hint`
    (#4333), an elaboration on the count, not essential copy. *Fees paid to
-   Haven* renders ONLY while `fees.flag_on` is true (fourth or fifth tile);
+   Haven* renders ONLY while `fees.flag_on` is true (a fifth tile);
    while Haven charges nothing the tile is absent — a $0.00 would report
    "nothing charged this period", which is not the same fact — and the
    gas-sponsored count rides the tile when it exists. (`StatTile` lives in

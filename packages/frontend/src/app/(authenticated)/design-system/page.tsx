@@ -1,6 +1,6 @@
 'use client'
 
-import { ArrowDown, ArrowLeftRight, ArrowUp, Bot, Check, ChevronDown, Circle, CirclePause, CreditCard, EllipsisVertical, Info, OctagonAlert, Sparkles, TriangleAlert, X } from 'lucide-react'
+import { ArrowDown, ArrowLeftRight, ArrowUp, Bot, Check, ChevronDown, Circle, CreditCard, EllipsisVertical, Info, OctagonAlert, Sparkles, TriangleAlert, X } from 'lucide-react'
 import { MobileTabBar } from '@/components/sidebar/MobileTabBar'
 import { baseNavItems } from '@/components/sidebar/Sidebar'
 import { Icon } from '@/components/ui/Icon'
@@ -306,10 +306,11 @@ const DS_CHART_DAYS: StackedBarDay[] = [
   {
     label: 'Thu 4',
     refusals: 2,
-    series: [
-      { id: 'research', name: 'Research agent', amount: 180, color: DS_RESEARCH_COLOR },
-      { id: 'ops', name: 'Ops agent', amount: 70, color: DS_OPS_COLOR },
-    ],
+    // The continuous axis (#4334), shown not described: a day with NO spend
+    // is an empty slot — no segments at all — and its refusals still draw,
+    // as the grey dash under the slot that a cap-on-the-bar could never
+    // have shown on a barless day.
+    series: [],
   },
   {
     label: 'Fri 5',
@@ -383,13 +384,17 @@ const DS_SPARKLINE_SUMMARY =
 
 /**
  * The AttentionList sample's items — one per tone, one of them without a badge
- * label, and one (the failure) without the dismiss, so the reserved slot and
- * the one trailing column are on show. The badge-less item carries an action:
- * the product's only badge-less kind (`haven-paused`) has neither badge nor
- * action and is not dismissible, so a badge-less dismiss-only row would render
- * a shape no product kind has — a lone × on its own line below `sm` (#4033).
- * The `haven-paused`-shaped row shows that shape: nothing visible to align,
- * so it renders no trailing slot at all and its tone word rides in the body.
+ * label, and one without the dismiss, so the reserved slot and the one
+ * trailing column are on show. The row without a dismiss is the low-balance
+ * shape: low balance and zero USDC are the product kinds that stay
+ * non-dismissible (#4324 — money is at stake, and "Add funds" is the action).
+ * The failure row is dismissible, as in the product since #4324 (failures are
+ * acknowledged until the next one). The badge-less item carries an action:
+ * a badge-less dismiss-only row would put a lone × on its own line below `sm`
+ * (#4033), so the sample does not draw one. The last row has nothing visible
+ * to align — no badge, no action, no dismiss — so it renders no trailing slot
+ * at all and its tone word rides in the body; it keeps #4033's guard on that
+ * path.
  */
 const DS_ATTENTION_ITEMS: AttentionListItem[] = [
   {
@@ -402,15 +407,19 @@ const DS_ATTENTION_ITEMS: AttentionListItem[] = [
     icon: Info,
   },
   {
-    id: 'reapproval',
-    title: 'Re-approval needed',
-    subtitle: 'Spending paused while Travel planner awaits your approval of the new agent rules.',
+    id: 'low-balance',
+    title: "Main account's USDC is running low",
+    subtitle: 'At the current pace, its USDC lasts under 7 days.',
     tone: 'warning',
-    badge: 'Review needed',
+    badge: 'Low balance',
     icon: TriangleAlert,
+    // As on the dashboard: low balance is resolved by adding funds, not
+    // dismissed — so this row shows the reserved dismiss slot that keeps the
+    // trailing column aligned.
+    dismissible: false,
     action: (
       <Button size="sm" variant="ghost">
-        Review
+        Add funds
       </Button>
     ),
   },
@@ -428,33 +437,26 @@ const DS_ATTENTION_ITEMS: AttentionListItem[] = [
   },
   {
     id: 'payment-failed',
-    title: 'Payment failed',
-    subtitle: 'The payment to acme.dev failed at signing. Nothing was spent.',
+    title: 'Travel planner had 3 failed payments',
+    subtitle: 'Payments keep failing — check the agent.',
     tone: 'danger',
     badge: 'Failed',
     icon: OctagonAlert,
-    // As on the dashboard: a failure is resolved, not dismissed — so this row
-    // shows the reserved dismiss slot that keeps the trailing column aligned.
-    dismissible: false,
     action: (
       <Button size="sm" variant="ghost">
-        View activity
+        Review
       </Button>
     ),
   },
   {
-    // The `haven-paused` shape (#4033): no badge, no action, not dismissible —
-    // nothing visible to align, so the row renders no trailing slot and the
-    // sr-only tone word rides in the body. Equal space above and below the
-    // body at every width.
-    id: 'haven-paused',
-    title: 'Haven paused sponsored payments',
-    subtitle: "Your budgets are untouched. Haven's own cap stopped a payment.",
+    // Nothing visible to align (#4033): no badge, no action, not dismissible —
+    // the row renders no trailing slot and the sr-only tone word rides in the
+    // body. Equal space above and below the body at every width.
+    id: 'nothing-to-align',
+    title: 'No summary this week',
+    subtitle: 'There were no payments in the week ending Sunday, so there is nothing to summarise.',
     tone: 'neutral',
-    icon: CirclePause,
-    // As in the product: `haven-paused` is not in DISMISSIBLE_ATTENTION_KINDS,
-    // so the default-true dismissible would hang a fourth × on the list —
-    // and this row's whole point is having nothing visible to align.
+    icon: Info,
     dismissible: false,
   },
 ]
@@ -1901,7 +1903,7 @@ export default function DesignSystemPage() {
                 polarity="neutral"
                 delta={15.9}
                 deltaCaption="vs previous 30 days"
-                footnote="based on 5 payments · 1 awaiting settlement evidence is not counted"
+                footnote="based on 5 payments"
               />
               <StatTile
                 label="Refused"
@@ -3450,7 +3452,7 @@ export default function DesignSystemPage() {
           <SettingsSection
             title="Accounting"
             description="Connect your accounting provider."
-            note="Fortnox is the only live provider today."
+            note="Fortnox and Accounted are live today."
           >
             <SettingsRow
               label="Fortnox"
@@ -3731,7 +3733,7 @@ export default function DesignSystemPage() {
       <Section
         title="StackedBarChart"
         testId="ds-stacked-bar-chart"
-        description="Daily bars stacked by agent for a spend range, refusals as a marker cap above the bar (a refusal count has no money scale, so never a second axis). Since #4331 an agent's fill is its own avatar tint (seriesColorForAgent, hashed from the name): the chart, the legend, the tooltip and the agent's monogram all wear one colour, in every period and on every page, no matter how its spend ranks. Two agents can hash to the same tint — six tints, unbounded agents — and the legend and tooltip tell them apart by name. A partial day — the window's cut first or last day — is striped with the series fill at full strength (not faded: an opacity blend would read lighter on the light ground and darker on the dark one, and drop under 3:1). Below three days it renders nothing; the page shows tiles instead (#2948). Focus the figure and use the arrow keys for a day's detail: a two-line callout (day, refusal count and total, then the agents as wrapping swatch·name·amount chips, capped at 24rem so a token breakdown wraps inside its chip instead of stretching the callout — #3067, so it fits above or below almost any bar) anchored over the day, clamped inside the plot by its own measured width, and dropped below the described bar's top when the bar or its cap would otherwise hide under it — bottom just above the axis when the bar can hold it, else just above the legend over the date labels beneath it — whichever of the two hides the fewest neighbouring tops (#3076) — and not at all for a bar the drop would swallow (#3063 — the bar's top and its refusal cap stay visible; on this sample the days whose bars reach under the resting callout drop, the rest keep it). The callout takes no pointer: hover the next bar through it and the detail moves on; a tap pins a day, a second tap or Escape releases it (#3066). On a narrow screen the tooltip becomes a panel pinned below the plot."
+        description="Daily bars stacked by agent for a spend range. Since #4334 the axis is CONTINUOUS — the caller hands it every calendar day in the window, and a day with no spend is an empty slot (Thu 4 below), not a skipped column; refusals are the marker series, a small grey dash UNDER the day's slot (never a second axis, never a cap on the bar — a barless day's refusals would be undrawable as a cap), named 'Refused' in the legend. A tick label's fraction digits come from the tick STEP (#4334): whole steps print none, a sub-cent step prints 4, so '$0.0010 … $0.0040' reads instead of '$0, $0'. Since #4331 an agent's fill is its own avatar tint (seriesColorForAgent, hashed from the name): the chart, the legend, the tooltip and the agent's monogram all wear one colour, in every period and on every page, no matter how its spend ranks. Two agents can hash to the same tint — six tints, unbounded agents — and the legend and tooltip tell them apart by name. A partial day — the window's cut first or last day — is striped with the series fill at full strength (not faded: an opacity blend would read lighter on the light ground and darker on the dark one, and drop under 3:1). Below three days it renders nothing; the page shows tiles instead (#2948). Focus the figure and use the arrow keys for a day's detail: a two-line callout (day, refusal count and total, then the agents as wrapping swatch·name·amount chips, capped at 24rem so a token breakdown wraps inside its chip instead of stretching the callout — #3067, so it fits above or below almost any bar) anchored over the day, clamped inside the plot by its own measured width, and dropped below the described bar's top when the bar would otherwise hide under it — bottom just above the axis when the bar can hold it, else just above the legend over the date labels beneath it — whichever of the two hides the fewest neighbouring tops or refusal marks (#3076) — and not at all for a bar the drop would swallow (#3063 — the bar's top stays visible; on this sample the days whose bars reach under the resting callout drop, the rest keep it). The callout takes no pointer: hover the next bar through it and the detail moves on; a tap pins a day, a second tap or Escape releases it (#3066). On a narrow screen the tooltip becomes a panel pinned below the plot."
       >
         <Card hover={false} className="p-5">
           <StackedBarChart
@@ -3739,7 +3741,7 @@ export default function DesignSystemPage() {
             currency="USD"
             ariaLabel={DS_CHART_SUMMARY}
             formatValue={dsMoney}
-            formatTick={(n) => formatAnalyticsTick(n, 'USD')}
+            formatTick={(n, step) => formatAnalyticsTick(n, step, 'USD')}
           />
           {/* The narrow treatment, as the page mounts it below `lg`: wider
               tick gutter, dot legend, tap-to-pin panel. */}
@@ -3749,7 +3751,7 @@ export default function DesignSystemPage() {
               currency="USD"
               ariaLabel={DS_CHART_SUMMARY}
               formatValue={dsMoney}
-              formatTick={(n) => formatAnalyticsTick(n, 'USD')}
+              formatTick={(n, step) => formatAnalyticsTick(n, step, 'USD')}
               narrow
             />
           </div>

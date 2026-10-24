@@ -541,8 +541,9 @@ it (409 otherwise). No merchant-locked budget is issued when:
   address (`shared`);
 - any of the offers lacks ERC-7710, read per the offer's own RECORDED
   network — `merchant_catalog.asset_transfer_methods` reflects only the
-  `accepts[]` options on that row's `accepts[0]` network (#3386, the same
-  scoping `pay_to` already used), so an offer probed on a network where the
+  `accepts[]` options on that row's recorded network that the pay path
+  could settle (#3386, #4389; the same network scoping `pay_to` uses), so an
+  offer probed on a network where the
   merchant only accepts EIP-3009 counts as lacking ERC-7710 there even if a
   DIFFERENT network's challenge names it. A pinned budget cannot pay an
   EIP-3009 merchant, per the rule in §8 below;
@@ -643,6 +644,48 @@ caveat, so the authority is still the signed caveat stack and nothing else.
 > skipped, and the run reaches later candidates. Scope of this re-read:
 > the Merchant-locked budgets section and the `merchant-catalog.ts`
 > coverage it names; the rest of the document was not re-read for it.
+
+> **Re-verified #4389 (2026-10-24):** #4389 changes how the catalog probe
+> in `merchant-catalog.ts` chooses the option it records. It keeps the
+> `accepts[]` options the pay path keeps (the SDK's `normalizePaymentRequired`,
+> which every pay path runs first: an option with no string `payTo`, or with
+> a `maxAmountRequired` that is present but not a positive decimal string, is
+> dropped), then runs the pay path's own selector (`selectX402SettlementScheme`
+> from `@haven_ai/sdk`, with the delegation rail) over all of them instead of
+> reading `accepts[0]`. The recorded network, the one `pay_to` and
+> `asset_transfer_methods` are scoped to, is the selected option's, written
+> as CAIP-2. A payable erc7710 option is always selected first, so a challenge
+> that names one on either Base network is recorded on that network; the
+> bullet's "lacking ERC-7710 there" case now needs the other network's
+> erc7710 option to be one the pay path could not settle. A challenge with no
+> option the pay path could settle (for example a scheme other than `exact`,
+> a network other than Base or Base Sepolia, an asset other than their USDC,
+> an unsupported transfer method or payment flow, or no `payTo`) is now a
+> probe MISS, so such a row degrades after the usual three misses instead of
+> staying verified. The asset is labelled from the chain registry on the
+> selected option's own chain only, the chain authorize resolves it on
+> (`resolvePaymentToken(agent.chain_id, asset)`); Base USDC named on a Base
+> Sepolia option is a miss although the SDK selector accepts it, so the
+> catalog is deliberately stricter than the selector there.
+> `asset_transfer_methods` counts only options on the recorded network that
+> the SDK's erc7710 or EIP-3009 selector accepts. Before, every option there
+> was recorded by its `extra.assetTransferMethod` (default `eip3009`), so a
+> `permit2` option was recorded as `permit2` and an option with an
+> unsupported `extra.paymentFlow` and no method as `eip3009`; options with an
+> unsupported transfer method or payment flow are now not recorded at all.
+> The payTo contract above holds with one new consequence: `pay_to` is still
+> written as seen from the challenge, still collected only across options on
+> the recorded network, and still refused when they disagree, but a challenge
+> that is now a miss (its only option names no `payTo`, or no option is
+> payable) leaves the stored `pay_to` in place, as every miss does (a miss
+> writes only the failure count, and `degraded` on the third in a row). Until
+> the row degrades, that `pay_to` keeps counting toward its merchant's
+> funding target. Before, a challenge whose only
+> option named no `payTo` verified the row and cleared `pay_to`. A pin still
+> pays only the address it was signed for. Scope of this re-read: the
+> Merchant-locked budgets section and the `merchant-catalog.ts` coverage it
+> names; the rest of the document was not re-read for it, and
+> `last-verified` is not bumped.
 
 Two limits are deliberate:
 - **Slot sharing.** A merchant-locked budget and a plain budget pinned to the
@@ -3555,6 +3598,26 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > endpoints above; nothing else in this document was re-read for it.
 > `last-verified` is bumped to 2026-10-10 for exactly this coverage.
 
+> **Re-verified (#4324, 2026-10-23, "Needs attention" acknowledgements):** the
+> #3813 note above says the spec's `oneOf` body and the table's CHECK "refuse
+> every kind except the two owner-approved ones". That is no longer true:
+> migration 118 widens the CHECK, and the `oneOf` gains `budget-reached`,
+> `budget-usage`, `budget-scope`, `payments-failed` and `haven-paused`
+> (owner decisions on epic #4322, 2026-10-23). The note stays as written; this
+> one supersedes that sentence. What the change touches in this document's
+> coverage: `routes/user.ts` (the POST now dispatches per kind and refuses a
+> kind it does not know) and `infra/repositories/dashboard.ts` (the overview's
+> 7-day refusal buckets also return each bucket's latest `created_at`, and the
+> failed-intent read returns the latest recorded step of any failed intent in
+> the window). The properties the #3813 note relies on still hold: an
+> acknowledgement hides a dashboard row and nothing else, no payment-path code
+> reads the table, the per-agent writes select through an ownership `EXISTS`
+> against `agents`, the user-level rows carry no foreign id, and every row is
+> scoped to the JWT subject. No new spender, no authority grant, no custody
+> change. Scope of this re-read: the `routes/user.ts` endpoints and the two
+> `infra/repositories/dashboard.ts` statements above; nothing else in this
+> document was re-read for it, and `last-verified` is not bumped.
+
 > **Re-verified unchanged (#3895, 2026-10-12, connect-step failure copy):**
 > this diff touches one covered file, display-layer only:
 > `components/DelegationBudgetCard.tsx` passes the budget grant's failure
@@ -3895,3 +3958,12 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > matter covers, and the money-path globs. No delegation, caveat, enforcer term, settlement
 > window, budget pre-check or refusal changes. Scope of this note: those lines.
 > Nothing else in this document was re-verified.
+
+> **Re-verified unchanged (#4387, 2026-10-24 — a JSDoc in
+> `packages/backend/src/routes/agent-rekey.ts`).** The route's "Where the SQL
+> is" comment no longer refers to a `dep-lint-exempt` waiver the file does
+> not carry: the completion runs as one `withTransaction` inside
+> `completeRekey` in `infra/repositories/agent-rekeys.ts`. Comment
+> only: no re-key step, revocation order, credential swap or delegation
+> changes. Scope of this note: that comment. Nothing else in this document was
+> re-verified for it.

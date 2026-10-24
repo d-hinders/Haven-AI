@@ -1,0 +1,269 @@
+/**
+ * Real-Postgres proof for migration 118 — "Needs attention" acknowledgements
+ * (#4324). No mocks — #1219's rule.
+ *
+ * Pins:
+ *   - the widened kind/shape CHECK accepts exactly the new shapes and still
+ *     refuses an unknown kind and every wrong pairing (`budget-usage` without
+ *     its period end, `haven-paused` with an agent, a period end on any other
+ *     kind);
+ *   - the two new partial unique indexes dedupe per (user, kind, agent) and
+ *     per (user, kind) for the user-level kinds, while a user's two backup
+ *     dismissals (both agent-less) still coexist;
+ *   - `acknowledged_at` is NOT NULL, defaults to now, and the backfill set an
+ *     existing 111 row's `acknowledged_at` to its `created_at`;
+ *   - `down()` deletes the new-kind rows before narrowing the CHECK, keeps the
+ *     111 rows, and `up()` restores the schema (idempotent).
+ */
+import { beforeAll, beforeEach, expect, it } from 'vitest'
+import { randomBytes, randomUUID } from 'node:crypto'
+import db from '../../../db.js'
+import {
+  assertWorkerSchemaAtHead,
+  describeDb,
+  initDbHarness,
+  resetDb,
+  withMigrationReverted,
+} from '../../../infra/__tests__/helpers/db-harness.js'
+import { down, up, version } from '../118_attention_acknowledgements.js'
+
+async function run(step: typeof up): Promise<void> {
+  const client = await db.connect()
+  try {
+    await step(client)
+  } finally {
+    client.release()
+  }
+}
+
+async function insertTestUser(): Promise<string> {
+  const email = `${randomBytes(8).toString('hex')}@example.com`
+  const { rows } = await db.query<{ id: string }>(
+    `INSERT INTO users (email, password_hash) VALUES ($1, 'x') RETURNING id`,
+    [email],
+  )
+  return rows[0].id
+}
+
+async function insertTestAccount(userId: string): Promise<string> {
+  const { rows } = await db.query<{ id: string }>(
+    `INSERT INTO smart_accounts (user_id, account_address) VALUES ($1, $2) RETURNING id`,
+    [userId, `0x${randomUUID().replaceAll('-', '').padEnd(40, '0')}`],
+  )
+  return rows[0].id
+}
+
+async function insertTestAgent(userId: string): Promise<string> {
+  const { rows } = await db.query<{ id: string }>(
+    `INSERT INTO agents (user_id, name, api_key_hash, delegate_address)
+     VALUES ($1, 'ack-agent', 'hash', $2)
+     RETURNING id`,
+    // A distinct delegate per agent: (user_id, delegate_address) is unique
+    // among non-revoked agents.
+    [userId, `0x${randomUUID().replaceAll('-', '').padEnd(40, 'c')}`],
+  )
+  return rows[0].id
+}
+
+const insert = (
+  userId: string,
+  kind: string,
+  ids: { accountId?: string | null; agentId?: string | null; periodEnd?: string | null } = {},
+) =>
+  db.query(
+    `INSERT INTO attention_dismissals (user_id, item_kind, account_id, agent_id, acknowledged_period_end)
+     VALUES ($1, $2, $3, $4, $5::timestamptz)`,
+    [userId, kind, ids.accountId ?? null, ids.agentId ?? null, ids.periodEnd ?? null],
+  )
+
+const PERIOD_END = '2026-11-01T00:00:00.000Z'
+
+describeDb('migration 118 — attention acknowledgements (#4324)', () => {
+  beforeAll(async () => {
+    await initDbHarness()
+    // Re-apply THIS source over the worker schema, so every case below tests
+    // the migration as written now — not a schema an earlier run (or a
+    // mutation run) left behind. Emptied first, so down() has no rows to
+    // trip on; up() runs even when down() throws, so a broken down() cannot
+    // leave the worker schema off head for the files after this one.
+    await resetDb()
+    try {
+      await run(down)
+    } finally {
+      await run(up)
+    }
+  })
+
+  beforeEach(async () => {
+    await resetDb()
+  })
+
+  it('is registered as version 118_attention_acknowledgements', () => {
+    expect(version).toBe('118_attention_acknowledgements')
+  })
+
+  it('the schema is at head with both new indexes and columns', async () => {
+    await assertWorkerSchemaAtHead()
+    const indexes = await db.query<{ indexname: string }>(
+      `SELECT indexname FROM pg_indexes
+        WHERE schemaname = current_schema() AND tablename = 'attention_dismissals'`,
+    )
+    const names = indexes.rows.map((row) => row.indexname)
+    expect(names).toContain('idx_attention_ack_per_agent')
+    expect(names).toContain('idx_attention_ack_per_user')
+
+    const columns = await db.query<{ column_name: string; is_nullable: string; column_default: string | null }>(
+      `SELECT column_name, is_nullable, column_default FROM information_schema.columns
+        WHERE table_schema = current_schema() AND table_name = 'attention_dismissals'
+          AND column_name IN ('acknowledged_at', 'acknowledged_period_end')
+        ORDER BY column_name`,
+    )
+    expect(columns.rows).toEqual([
+      { column_name: 'acknowledged_at', is_nullable: 'NO', column_default: 'now()' },
+      { column_name: 'acknowledged_period_end', is_nullable: 'YES', column_default: null },
+    ])
+  })
+
+  it('accepts every new shape', async () => {
+    const userId = await insertTestUser()
+    const agentId = await insertTestAgent(userId)
+    for (const kind of ['budget-reached', 'budget-scope', 'payments-failed']) {
+      await insert(userId, kind, { agentId })
+    }
+    await insert(userId, 'budget-usage', { agentId, periodEnd: PERIOD_END })
+    await insert(userId, 'haven-paused')
+    await insert(userId, 'payments-failed')
+    const { rows } = await db.query<{ n: number }>(
+      `SELECT COUNT(*)::int AS n FROM attention_dismissals WHERE user_id = $1`,
+      [userId],
+    )
+    expect(rows[0].n).toBe(6)
+  })
+
+  it('refuses an unknown kind and every wrong pairing (CHECK)', async () => {
+    const userId = await insertTestUser()
+    const agentId = await insertTestAgent(userId)
+    const accountId = await insertTestAccount(userId)
+    // One at a time: a rejection must be awaited where it happens. Each case
+    // asserts the error code it got (null when the row was accepted).
+    const refused: Array<[string, () => Promise<unknown>]> = [
+      ['an unknown kind', () => insert(userId, 'low-balance', { accountId })],
+      ['zero-usdc', () => insert(userId, 'zero-usdc')],
+      ['budget-usage without its period end', () => insert(userId, 'budget-usage', { agentId })],
+      ['budget-reached without an agent', () => insert(userId, 'budget-reached')],
+      ['budget-reached with a period end', () => insert(userId, 'budget-reached', { agentId, periodEnd: PERIOD_END })],
+      ['budget-scope with an account', () => insert(userId, 'budget-scope', { agentId, accountId })],
+      ['haven-paused with an agent', () => insert(userId, 'haven-paused', { agentId })],
+      ['payments-failed with an account', () => insert(userId, 'payments-failed', { accountId })],
+      ['needs-setup with a period end', () => insert(userId, 'needs-setup', { agentId, periodEnd: PERIOD_END })],
+      ['no-backup with a period end', () => insert(userId, 'no-backup', { accountId, periodEnd: PERIOD_END })],
+    ]
+    for (const [label, attempt] of refused) {
+      const code = await attempt().then(
+        () => null,
+        (error: { code?: string }) => error.code ?? 'unknown',
+      )
+      expect(code, `${label} is refused by the CHECK`).toBe('23514')
+    }
+  })
+
+  it('dedupes per (user, kind, agent) and per (user, kind) for user-level kinds; backup rows still coexist', async () => {
+    const userId = await insertTestUser()
+    const agentId = await insertTestAgent(userId)
+    const otherAgent = await insertTestAgent(userId)
+
+    await insert(userId, 'budget-reached', { agentId })
+    await expect(insert(userId, 'budget-reached', { agentId })).rejects.toMatchObject({ code: '23505' })
+    // Another kind for the same agent, and the same kind for another agent, are separate rows.
+    await insert(userId, 'budget-scope', { agentId })
+    await insert(userId, 'budget-reached', { agentId: otherAgent })
+
+    await insert(userId, 'haven-paused')
+    await expect(insert(userId, 'haven-paused')).rejects.toMatchObject({ code: '23505' })
+    // The unattributed payments-failed is its own user-level row, beside the agent one.
+    await insert(userId, 'payments-failed')
+    await insert(userId, 'payments-failed', { agentId })
+    await expect(insert(userId, 'payments-failed')).rejects.toMatchObject({ code: '23505' })
+
+    // Two backup dismissals of one user have no agent either: the user-level
+    // index's `account_id IS NULL` keeps them out of its scope.
+    const secondBackup = async () => {
+      await insert(userId, 'no-backup', { accountId: await insertTestAccount(userId) })
+      await insert(userId, 'no-backup', { accountId: await insertTestAccount(userId) })
+    }
+    const backupError = await secondBackup().then(
+      () => null,
+      (error: unknown) => error,
+    )
+    expect(backupError, 'a user keeps one backup dismissal per account').toBeNull()
+  })
+
+  it('acknowledged_at defaults to now on a new row', async () => {
+    const userId = await insertTestUser()
+    await insert(userId, 'haven-paused')
+    const { rows } = await db.query<{ lag: number }>(
+      `SELECT EXTRACT(EPOCH FROM (NOW() - acknowledged_at))::float AS lag
+         FROM attention_dismissals WHERE user_id = $1`,
+      [userId],
+    )
+    expect(Math.abs(rows[0].lag)).toBeLessThan(60)
+  })
+
+  it('down() deletes the new-kind rows first and keeps 111 rows; up() backfills acknowledged_at from created_at', async () => {
+    const userId = await insertTestUser()
+    const agentId = await insertTestAgent(userId)
+    const accountId = await insertTestAccount(userId)
+    await db.query(
+      `INSERT INTO attention_dismissals (user_id, item_kind, account_id, created_at)
+       VALUES ($1, 'no-backup', $2, '2026-10-10T12:00:00Z')`,
+      [userId, accountId],
+    )
+    await insert(userId, 'budget-reached', { agentId })
+    await insert(userId, 'haven-paused')
+
+    // up() is the restore whatever happens, including a down() that throws
+    // halfway: the worker schema must be back at head for later files. A
+    // down() that fails on its own data is the regression this case pins.
+    const downError = await run(down).then(
+      () => null,
+      (error: unknown) => error,
+    )
+    if (downError !== null) await run(up)
+    expect(downError, 'down() must not fail on the rows up() allows').toBeNull()
+    await withMigrationReverted(
+      async () => {},
+      async () => {
+        const rows = await db.query<{ item_kind: string }>(
+          `SELECT item_kind FROM attention_dismissals WHERE user_id = $1`,
+          [userId],
+        )
+        expect(rows.rows.map((row) => row.item_kind)).toEqual(['no-backup'])
+        const columns = await db.query(
+          `SELECT 1 FROM information_schema.columns
+            WHERE table_schema = current_schema() AND table_name = 'attention_dismissals'
+              AND column_name IN ('acknowledged_at', 'acknowledged_period_end')`,
+        )
+        expect(columns.rowCount).toBe(0)
+        // The narrow 111 CHECK is back: a new kind is refused again. (The
+        // insert names only 111's columns — 118's are gone here.)
+        await expect(
+          db.query(`INSERT INTO attention_dismissals (user_id, item_kind) VALUES ($1, 'haven-paused')`, [userId]),
+        ).rejects.toMatchObject({ code: '23514' })
+      },
+      () => run(up),
+    )
+
+    // Restored by up(): the surviving 111 row was backfilled from its created_at.
+    const { rows } = await db.query<{ acknowledged_at: Date }>(
+      `SELECT acknowledged_at FROM attention_dismissals WHERE user_id = $1 AND item_kind = 'no-backup'`,
+      [userId],
+    )
+    expect(rows[0].acknowledged_at.toISOString()).toBe('2026-10-10T12:00:00.000Z')
+    // Restored by up(): a second backup dismissal of the same user (another
+    // account, again no agent) still coexists with the first — the user-level
+    // index's predicate keeps account rows out of its scope.
+    await insert(userId, 'no-backup', { accountId: await insertTestAccount(userId) })
+    await run(up) // idempotent
+    await assertWorkerSchemaAtHead()
+  })
+})

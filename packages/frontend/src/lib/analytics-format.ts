@@ -183,18 +183,6 @@ export function lastPaymentCaption(iso: string | null): string {
 }
 
 /**
- * Refused-count with the attempts only when they differ, as one line:
- * "2 refused payments · across 3 attempts". A dedupe upstream means rows and
- * attempts are usually equal, and spelling out "3 · 3 attempts" every time
- * would train the reader to stop parsing that cell.
- */
-export function refusalsCaption(refusedCount: number, refusedAttempts: number): string {
-  const payments = refusedCount === 1 ? 'refused payment' : 'refused payments'
-  if (refusedAttempts === refusedCount) return `${refusedCount} ${payments}`
-  return `${refusedCount} ${payments} · across ${refusedAttempts} attempts`
-}
-
-/**
  * The short address an UNKNOWN recipient shows under its "Unknown recipient"
  * label (#4333): the one truncation rule in the app (#853) — "0x71C2…7128".
  * Since #4332 the overview's `label` is either a resolved NAME or null — it
@@ -243,15 +231,20 @@ export function formatAnalyticsValue(value: number, currency: AnalyticsCurrency)
 
 /**
  * The y-axis tick: the same currency voice as `formatAnalyticsValue`, with
- * NO fraction digits — an axis needs no more precision than its grid, and a
- * `$100.00` tick overran the 390 gutter and sat on the first bar (#3051
- * design review). Values are the scale's own round ticks, never a figure.
+ * the fraction digits the TICK STEP chooses (#4334) — 0 for a whole-unit
+ * step, 2 otherwise, and 4 when the step is under a cent, so a sub-cent
+ * scale's ticks stay distinct instead of printing "$0, $0". The decimals
+ * come from the STEP and not from each value (S5 on #4334): per-value
+ * formatting would print "$0.0020, $0.0040, $0.01, $0.01" up one axis —
+ * the two coarse ticks rounding away the very distinction the fine ones
+ * carry. Values are the scale's own round ticks, never a figure.
  */
-export function formatAnalyticsTick(value: number, currency: AnalyticsCurrency): string {
+export function formatAnalyticsTick(value: number, step: number, currency: AnalyticsCurrency): string {
+  const decimals = step >= 1 ? 0 : step > 0 && step < 0.01 ? 4 : 2
   return new Intl.NumberFormat(analyticsCurrencyLocale(currency), {
     style: 'currency',
     currency,
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
   }).format(value)
 }

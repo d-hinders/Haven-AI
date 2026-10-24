@@ -106,6 +106,29 @@ function emptyRefusalBuckets(): { budget: number; scope: number; failed: number;
 }
 
 /**
+ * #4324: the 7-day window's latest refusal time per bucket, keyed as the
+ * wire names it — only the buckets that have one. An acknowledged "Needs
+ * attention" item re-arms when its bucket's time is after the
+ * acknowledgement; an absent key never hides anything (#3295).
+ */
+export function latestRefusalTimes(row: RefusalBucketRow | undefined): {
+  lastBudgetAt?: string
+  lastScopeAt?: string
+  lastFailedAt?: string
+  lastHavenAt?: string
+} {
+  if (!row) return {}
+  const iso = (value: Date | null) => (value ? new Date(value).toISOString() : undefined)
+  const pairs = [
+    ['lastBudgetAt', iso(row.last_budget_7)],
+    ['lastScopeAt', iso(row.last_scope_7)],
+    ['lastFailedAt', iso(row.last_failed_7)],
+    ['lastHavenAt', iso(row.last_haven_7)],
+  ] as const
+  return Object.fromEntries(pairs.filter(([, value]) => value !== undefined))
+}
+
+/**
  * Folds a spend GROUP into a window accumulator. `fb*` is the token amount of
  * rows whose booked fiat was NULL — priced at TODAY's rate here (owner
  * decision 1) and added to the same bucket. `approx` records that a
@@ -284,7 +307,7 @@ export default async function dashboardRoutes(
       spendGroups,
       merchants,
       refusalBuckets,
-      failedIntents7d,
+      failedIntentsRead,
       lastPayments,
       contacts,
       balanceByDayRows,
@@ -745,7 +768,7 @@ export default async function dashboardRoutes(
           // status lets the client decide without a second round trip.
           ...(setupStatus != null ? { setupStatus } : {}),
           stats: {
-            d7: { ...windowWire(stats7), refusals: refusals7 },
+            d7: { ...windowWire(stats7), refusals: { ...refusals7, ...latestRefusalTimes(refusalRow) } },
             d30: { ...windowWire(stats30), refusals: refusals30 },
             lastPaymentAt: lastPayment?.confirmed_at ? lastPayment.confirmed_at.toISOString() : null,
             lastCounterparty: lastPayment
@@ -789,7 +812,9 @@ export default async function dashboardRoutes(
           budgetStops: budgetStops30,
         },
         topMerchant7d,
-        failedIntents7d,
+        failedIntents7d: failedIntentsRead.count,
+        // #4324: the unattributed "Payments failed" item re-arms on this.
+        ...(failedIntentsRead.lastAt ? { lastFailedIntentAt: failedIntentsRead.lastAt.toISOString() } : {}),
         balance_by_day: balanceByDay,
       },
       // #3824: up to 8 grouped-activity rows over the rolling last 7 days

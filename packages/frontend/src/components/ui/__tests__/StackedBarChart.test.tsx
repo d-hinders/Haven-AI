@@ -18,7 +18,7 @@ import type { StackedBarDay } from '../StackedBarChart'
  *
  * The fixtures are three days and two agents: the smallest set that has a
  * stack (two segments), a stable order (the same two agents on all three
- * days), and a refusal cap over exactly one bar.
+ * days), and a refusal mark under exactly one slot.
  *
  * The reveal is driven through `mouseDown` (the tap-to-pin path) and the
  * arrow keys, not through `mouseEnter`: React synthesises `onMouseEnter`
@@ -152,18 +152,45 @@ describe('StackedBarChart — the drawing says what the data says', () => {
     expect(dayThree[1].y + dayThree[1].height).toBeCloseTo(dayThree[0].y, 6)
   })
 
-  it('marks refusals as a cap above the bar, and only where there were refusals', () => {
+  it('marks refusals as a grey dash UNDER the day slot, and only where there were refusals', () => {
     // The marker series is a second SERIES and not a second axis: a count
     // of refused payments has no scale comparable to a sum of spend, and
     // two y-axes in one frame invite a reader to compare the two wrongly.
+    // Under the slot (#4334), not a cap on the bar: the axis baseline is at
+    // viewBox y 190, the mark sits 3 units below it — a cap could only sit
+    // on a day that spent, and a barless day's refusals are still a fact.
     renderChart()
-    const caps = screen.getAllByTestId('chart-refusal-marker')
-    expect(caps).toHaveLength(1)
-    const cappedGroup = dayGroups()[1]
-    expect(cappedGroup.contains(caps[0])).toBe(true)
-    // The cap sits above the bar: its top edge is above the bar's top.
-    const topOfBar = Math.min(...segmentsOf(cappedGroup).map((s) => s.y))
-    expect(Number(caps[0].getAttribute('y'))).toBeLessThan(topOfBar)
+    const marks = screen.getAllByTestId('chart-refusal-marker')
+    expect(marks).toHaveLength(1)
+    const markedGroup = dayGroups()[1]
+    expect(markedGroup.contains(marks[0])).toBe(true)
+    const y = Number(marks[0].getAttribute('y'))
+    expect(y).toBeGreaterThan(190) // below the axis line the bars grow from
+    expect(y + Number(marks[0].getAttribute('height'))).toBeLessThanOrEqual(196)
+  })
+
+  it('draws the refusal mark on a day with NO spend: an empty slot still shows its refusals (#4334)', () => {
+    const days: StackedBarDay[] = [
+      { label: 'Mon 8', refusals: 1, series: [] },
+      { label: 'Tue 9', series: [{ id: 'alpha', name: 'Research agent', amount: 100, seriesIndex: 0 }] },
+      { label: 'Wed 10', series: [{ id: 'alpha', name: 'Research agent', amount: 90, seriesIndex: 0 }] },
+    ]
+    renderChart({}, days)
+    const empty = dayGroups()[0]!
+    expect(empty.querySelectorAll('[data-testid="chart-segment"]')).toHaveLength(0)
+    const mark = within(empty as HTMLElement).getByTestId('chart-refusal-marker')
+    expect(Number(mark.getAttribute('y'))).toBeGreaterThan(190)
+    // And the spent day beside it has no mark of its own.
+    expect(dayGroups()[1]!.querySelector('[data-testid="chart-refusal-marker"]')).toBeNull()
+  })
+
+  it('hands the scale tick STEP to the formatter, so sub-cent ticks can choose 4 decimals (#4334)', () => {
+    // The tallest day is 450: the nice step is 200. The formatter's second
+    // argument is that step — the caller's decimals rule reads it (4 under
+    // a cent, none for whole steps), and it is the SCALE's, not per value.
+    const tickFn = vi.fn((n: number) => String(n))
+    renderChart({ formatTick: tickFn })
+    expect(tickFn).toHaveBeenCalledWith(expect.anything(), 200)
   })
 
   it('paints the series from the ordered tokens by index, and wraps past the sixth', () => {
@@ -390,13 +417,16 @@ describe('StackedBarChart — the desktop callout drops above the baseline when 
     expect(tip.getAttribute('data-flipped')).toBeNull()
   })
 
-  it('prefers the slot above the legend when the baseline slot would hide a neighbour\'s top (#3076)', () => {
+  it('scores a refusal MARK the legend slot would cover: a 1-v-1 tie goes to the baseline (#3076, #4334)', () => {
     layOut()
-    // A 360px callout (the 60% cap of a 600px wrapper) spans 30–70%: at
-    // Wed 10 it reaches over Tue 9 (x 260–376), whose cap top (97.0) lies
-    // inside the baseline slot's box (76.7..166.7) — so that slot would hide
-    // a neighbour's top. Above the legend (116) it hides none: Mon 8's top
-    // (132.7) is outside the span. The legend slot wins.
+    // A 360px callout (the 60% cap of a 600px wrapper) at Wed 10 spans
+    // 240–600: Tue 9's BAR top (106.1) lies inside the baseline slot's box
+    // (76.7..166.7) — the baseline slot hides a neighbour's top. The legend
+    // slot (116..206) misses the bar but REACHES the refusal mark under
+    // Tue's slot (175.5) — the only slot that gets below the baseline since
+    // the marks moved there (#4334). One hidden thing each: a tie goes to
+    // the baseline. Without scoring the mark, the legend slot's 0 would
+    // have won it (116) — this assertion is what pins the scoring.
     vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(360)
     const { container, getByTestId } = render(
       <StackedBarChart days={THREE_DAYS} currency="USD" ariaLabel="s" formatValue={fmt} />,
@@ -405,44 +435,39 @@ describe('StackedBarChart — the desktop callout drops above the baseline when 
     fireEvent.keyDown(svg, { key: 'End' })
     const tip = getByTestId('chart-tooltip')
     expect(tip.getAttribute('data-flipped')).toBe('true')
-    expect(tip.style.top).toBe('116px')
-    // The narrow 200px callout of the test above does not reach Tue 9, so
-    // the baseline slot keeps winning there (76.7px) — a tie goes to it.
+    expect(tip.style.top).toBe('76.7px')
   })
 
-  it('counts a neighbour\'s BAR top as hidden, not only its cap: a cap floating above the box does not clear the bar under it (#3076)', () => {
+  it('scores a neighbour BAR top, and the mark adds to the same count: 2 v 2 ties to the baseline (#3076, #4334)', () => {
     layOut()
-    // Described: a tall middle bar B. Neighbour A (capless, top 132.7) sits
-    // inside both slots' boxes (baseline 76.7..166.7, legend 116..206).
-    // Neighbour C carries a cap: its bar top (79.9) sits inside the
-    // baseline box but its cap (70.8) floats just above it — the floating
-    // cap over a hidden bar the review saw. A 400px callout spans both.
-    // Counting bar tops, the baseline slot hides A and C, the legend slot
-    // only A: legend wins. Counting caps only, each slot hides one (A) and
-    // the baseline slot keeps the tie.
-    const capless: StackedBarDay[] = [
+    // A (150, capless): top 132.7 — inside BOTH boxes (76.7..166.7 and
+    // 116..206). C (348 + a refusal): bar top 79.9 inside the baseline box
+    // only; its refusal mark (175.5) inside the legend box only. A 400px
+    // callout spans both. Baseline hides A + C = 2; the legend hides A's
+    // bar and C's mark = 2. Tie → the baseline (76.7). A bar top scores —
+    // the legend's A would be invisible to a marks-only rule — and the
+    // mark scores beside it, not instead of it.
+    const days: StackedBarDay[] = [
       { label: 'A', series: [{ id: 'x', name: 'x', amount: 150, seriesIndex: 0 }] },
       { label: 'B', series: [{ id: 'x', name: 'x', amount: 450, seriesIndex: 0 }] },
       { label: 'C', refusals: 1, series: [{ id: 'x', name: 'x', amount: 348, seriesIndex: 0 }] },
     ]
-    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(360)
+    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(400)
     const { container, getByTestId } = render(
-      <StackedBarChart days={capless} currency="USD" ariaLabel="s" formatValue={fmt} />,
+      <StackedBarChart days={days} currency="USD" ariaLabel="s" formatValue={fmt} />,
     )
     fireEvent.keyDown(container.querySelector('svg')!, { key: 'ArrowRight' })
     const tip = getByTestId('chart-tooltip')
     expect(tip).toHaveTextContent(/^B/)
-    expect(tip.style.top).toBe('116px')
+    expect(tip.style.top).toBe('76.7px')
   })
 
-  it('counts a neighbour\'s CAP as hidden even when its bar top is below the box (#3076 review)', () => {
+  it('scores a day whose bar top fell out of the boxes but whose refusal mark did not (#3076 review, #4334)', () => {
     layOut()
-    // A (250, capless): top 106.1 — inside the baseline box (76.7..166.7)
-    // only. C (15 + a refusal): a 4px bar whose top (168.7) is BELOW the
-    // baseline box but whose cap (159.6) is inside it; both inside the
-    // legend box (116..206). Baseline slot hides A + C(cap) = 2, legend
-    // slot hides C = 1 → legend wins. A bar-only rule scores 1 v 1 and
-    // keeps the baseline.
+    // A (250, capless): top 106.1 — inside the baseline box only. C (15 + a
+    // refusal): its 4px bar's top (167.9) sits BELOW the baseline box and
+    // inside the legend box; its mark (175.5) is inside the legend box too.
+    // Baseline hides A = 1; the legend hides C = 1. Tie → the baseline.
     const days: StackedBarDay[] = [
       { label: 'A', series: [{ id: 'x', name: 'x', amount: 250, seriesIndex: 0 }] },
       { label: 'B', series: [{ id: 'x', name: 'x', amount: 450, seriesIndex: 0 }] },
@@ -455,7 +480,7 @@ describe('StackedBarChart — the desktop callout drops above the baseline when 
     fireEvent.keyDown(container.querySelector('svg')!, { key: 'ArrowRight' })
     const tip = getByTestId('chart-tooltip')
     expect(tip).toHaveTextContent(/^B/)
-    expect(tip.style.top).toBe('116px')
+    expect(tip.style.top).toBe('76.7px')
   })
 
   it('never scores the "top" of a day that drew no bar (#3076 review)', () => {
@@ -481,32 +506,27 @@ describe('StackedBarChart — the desktop callout drops above the baseline when 
     expect(tip.style.top).toBe('116px')
   })
 
-  it('counts the refusal cap as part of the bar: a day whose CAP alone would hide flips too', () => {
+  it('decides the drop on the BAR top alone: the refusal mark under the slot never raises it (#4334)', () => {
     layOut()
-    // Tue 9's bar top is at 106.1, the 90px callout's resting bottom at
-    // 108 → drops on the bar alone. Shrink the callout to 80px (bottom at
-    // 98): the bar clears it, the cap (97.0) does not — so it still drops
-    // with the cap (to just above the legend: 126, leaving the cap and 20px
-    // of the bar) and rests without it.
+    // Tue 9's bar top is at 106.1. An 80px callout's resting bottom is 98 —
+    // under the OLD cap geometry the cap (97.0) poked above it and forced a
+    // drop; under the slot geometry the cap is gone, the mark lives below
+    // the baseline out of the resting callout's reach, and the callout
+    // RESTS on the bar top alone.
     vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(80)
-    const withCap = render(<StackedBarChart days={THREE_DAYS} currency="USD" ariaLabel="s" formatValue={fmt} />)
-    fireEvent.keyDown(withCap.container.querySelector('svg')!, { key: 'ArrowRight' })
-    expect(withCap.getByTestId('chart-tooltip').getAttribute('data-flipped')).toBe('true')
-    expect(withCap.getByTestId('chart-tooltip').style.top).toBe('126px')
-    withCap.unmount()
-    // The cap counts towards the 12px of marks but never stands in for the
-    // bar's own top edge: a 95px callout lands at 111 — 14px under the
-    // cap, but only 4.9px under the bar's top — so it rests.
-    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(95)
-    const tooTall = render(<StackedBarChart days={THREE_DAYS} currency="USD" ariaLabel="s" formatValue={fmt} />)
-    fireEvent.keyDown(tooTall.container.querySelector('svg')!, { key: 'ArrowRight' })
-    expect(tooTall.getByTestId('chart-tooltip').getAttribute('data-flipped')).toBeNull()
-    tooTall.unmount()
+    const rests = render(<StackedBarChart days={THREE_DAYS} currency="USD" ariaLabel="s" formatValue={fmt} />)
+    fireEvent.keyDown(rests.container.querySelector('svg')!, { key: 'ArrowRight' })
+    expect(rests.getByTestId('chart-tooltip').getAttribute('data-flipped')).toBeNull()
+    rests.unmount()
+    // And the drop itself is unchanged where the bar forces it: an 80px
+    // callout over Wed 10 (bar top 52.7) cannot rest under it — it drops to
+    // just above the baseline, 6px clear.
     vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(80)
-    const noCap = THREE_DAYS.map((d, i) => (i === 1 ? { ...d, refusals: 0 } : d))
-    const without = render(<StackedBarChart days={noCap} currency="USD" ariaLabel="s" formatValue={fmt} />)
-    fireEvent.keyDown(without.container.querySelector('svg')!, { key: 'ArrowRight' })
-    expect(without.getByTestId('chart-tooltip').getAttribute('data-flipped')).toBeNull()
+    const drops = render(<StackedBarChart days={THREE_DAYS} currency="USD" ariaLabel="s" formatValue={fmt} />)
+    fireEvent.keyDown(drops.container.querySelector('svg')!, { key: 'End' })
+    expect(drops.getByTestId('chart-tooltip').getAttribute('data-flipped')).toBe('true')
+    expect(drops.getByTestId('chart-tooltip').style.top).toBe('86.7px')
+    drops.unmount()
   })
 
   it('never flips the narrow panel, and rests where nothing has a height (jsdom, first paint)', () => {
@@ -918,10 +938,10 @@ describe('StackedBarChart — the two things that must not happen', () => {
   })
 })
 
-describe('StackedBarChart — the legend names the refusal cap (#3204)', () => {
-  it('lists "Refused (cap)" when any day in the range refused something, beside the series rows', () => {
+describe('StackedBarChart — the legend names the refusal mark (#3204, #4334)', () => {
+  it('lists "Refused" when any day in the range refused something, beside the series rows', () => {
     renderChart()
-    expect(screen.getByTestId('chart-legend-refusal')).toHaveTextContent('Refused (cap)')
+    expect(screen.getByTestId('chart-legend-refusal')).toHaveTextContent('Refused')
   })
 
   it('omits the entry when no day refused anything — a legend row for a mark that is not drawn would be a false key', () => {

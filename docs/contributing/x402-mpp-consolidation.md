@@ -11,7 +11,7 @@ covers:
   - packages/backend/src/routes/__tests__/x402.test.ts
   - packages/backend/src/routes/__tests__/machine-payments.test.ts
   - docs/contributing/ai-agent-workflow.md
-last-verified: "2026-09-15"
+last-verified: "2026-10-24"
 ---
 
 # x402 / Machine-Payment Consolidation (PT-1)
@@ -21,7 +21,7 @@ the resulting shared contract, not an active implementation plan.
 
 ## Current design
 
-The x402 and generic/MPP money paths share four policy-first primitives:
+The x402 and generic/MPP money paths shared four policy-first primitives; the last two remain:
 
 - `decideCoverage` (`src/domain/payment-coverage.ts` — file and helper both
   DELETED by #1987, and removed from the money-path glob list with it)
@@ -43,7 +43,7 @@ conditional-heavy common handler.
 
 ## Coverage strategies
 
-`decideCoverage` has two explicit strategies:
+`decideCoverage` had two explicit strategies:
 
 - **Balance-aware (x402):** execute at or below remaining allowance; queue when
   the amount is above remaining but within remaining plus delegate balance;
@@ -51,20 +51,18 @@ conditional-heavy common handler.
 - **Allowance-only (MPP/generic):** execute at or below remaining allowance;
   queue amounts above it.
 
-Delegate balance is coverage for an approval request, not permission to bypass
+Delegate balance was coverage for an approval request, not permission to bypass
 the configured allowance.
 
-Both strategies apply to the legacy AllowanceModule rail only — and since
-#1986 that rail fails closed, so `decideCoverage`'s legacy branch is
-**unreachable in production traffic**: every route that used to reach it now
-answers HTTP 410 first. The description below is kept because the code is
-**deleted by #1987** — `domain/payment-coverage.ts` and `decideCoverage`
-are gone, along with every caller; it documents what the consolidation did, not
-a path live traffic takes. Delegation-rail
-requests (#830) branch before coverage: they reuse `insertMachineIntent` (with
-`execution_rail='delegation'` and a prepared settlement delegation) but skip
-`decideCoverage` entirely — budget, recipient, and expiry are enforced on-chain
-by the caveat enforcers, with no approval queue. Retired session-rail intents
+Both strategies applied to the legacy AllowanceModule rail only. #1986 made
+that rail fail closed, so every route that reached `decideCoverage` answered
+HTTP 410 first, and #1987 then deleted `domain/payment-coverage.ts`,
+`decideCoverage` and every caller. The description above records what the
+consolidation did, not a path live traffic takes. Delegation-rail requests
+(#830) never had a coverage step: they reuse `insertMachineIntent` (with
+`execution_rail='delegation'` and a prepared settlement delegation), and
+budget, recipient and expiry are enforced on-chain by the caveat enforcers,
+with no approval queue. Retired session-rail intents
 get HTTP 410 before any coverage decision (#834).
 
 ## Deliberate boundaries
@@ -87,9 +85,10 @@ and its money-path review bar.
 
 `POST /machine-payments/authorize` now refuses unconditionally (410) — the
 `mpp_demo` demo flow it served (`routes/demo-mpp.ts`) is retired outright. The
-"Allowance-only (MPP/generic)" coverage strategy above, and the intent/token
-primitives it lists, are UNCHANGED and still live — the route stopped calling
-them because its only caller is gone, not because they were removed. One
+intent/token primitives listed above are UNCHANGED and still live — the route
+stopped calling them because its only caller is gone, not because they were
+removed. The "Allowance-only (MPP/generic)" coverage strategy did not survive:
+it went with `decideCoverage` in #1987. One
 primitive has since gone with it: `authorizeMachinePayment` and
 `modules/mpp/authorize.ts` were DELETED by #1987 (epic #1440) — the route had
 been a `mppDemoRetired()` stub since #1328 and #1986 then 410'd the rail
@@ -100,3 +99,19 @@ non-demo MPP rail (`mpp_crypto`), which is out of #1328's scope by its own
 file-ownership note. Historical `mpp_demo`
 payment/receipt/evidence/status rows stay readable through the generic
 `/machine-payments/*` reads this document does not otherwise cover.
+
+Re-verified 2026-10-24 (#4372 part D, at dev `f590d946c`). Changed: the
+intro and *Coverage strategies* now speak of `decideCoverage` in the past
+tense (deleted by #1987, with its two strategies), the #1328 section no longer
+calls the "Allowance-only" strategy live, a "below" that pointed at the
+paragraph above now says "above", and (review round 1) the paragraph after
+*Coverage strategies* states the legacy branch and the delegation rail's lack
+of a coverage step in the past tense. Re-checked without change:
+`insertMachineIntent` in `infra/repositories/payment-intents.ts`, called with
+`executionRail: 'delegation'` from `modules/x402/delegation-authorize.ts`;
+`resolvePaymentToken` in `domain/payment-token.ts`; the deleted files
+(`domain/payment-coverage.ts`, `infra/repositories/approval-requests.ts`,
+`modules/mpp/authorize.ts`, `routes/demo-mpp.ts`, `routes/x402-resources.ts`);
+`POST /machine-payments/authorize` answering through `mppDemoRetired()` in
+`routes/machine-payments.ts`; and #830, #834, #1328, #1986, #1987, #2055 and
+#2257, all closed.

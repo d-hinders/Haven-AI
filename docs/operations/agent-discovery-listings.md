@@ -85,7 +85,8 @@ One allow-list entry WAS temporary and said so: the product docs had no served
 home, so `account-recovery` pointed at the public repository meanwhile, and the
 entry leaving the allow-list was named as the test that
 [#2532](https://github.com/d-hinders/Haven-AI/issues/2532) had finished.
-It has. #2532 serves four product docs from this origin under `/docs/`,
+It has. #2532 serves the allowlisted docs (`serve-docs.mjs`'s `ALLOWLIST`:
+three product docs and the security model) from this origin under `/docs/`,
 `llms.txt` links the path instead of the repository, and `ALLOWED_HOSTS` in the
 guard test carries only `www.npmjs.com`. The artifacts are back to the rule
 with no exception: own-product links are same-origin paths.

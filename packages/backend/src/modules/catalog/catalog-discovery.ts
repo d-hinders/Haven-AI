@@ -20,6 +20,7 @@ import {
   CATALOG_DISCOVERY_PROBE_TIMEOUT_MS,
   guardedDiscoveryProbeFetch,
   probeCatalogEntry,
+  selectCatalogPaymentOption,
   type CatalogRow,
   type QueryableLike,
 } from './merchant-catalog.js'
@@ -133,13 +134,17 @@ interface BazaarPage {
 export interface DiscoveryResult {
   /** Resources returned by the Bazaar (after the maxItems cap). */
   scanned: number
-  /** On a supported network and not already in the catalog. */
+  /** Payable by the catalog's verdict on a supported network (#4389), and not already in the catalog. */
   candidates: number
   /** Probed OK and inserted. */
   ingested: number
   /** Already present in the catalog (any status — respects operator delisting). */
   skippedExisting: number
-  /** On an unsupported network (e.g. Solana) — can't pay, never probed. */
+  /**
+   * No option the index lists is payable on a supported network (#4389: the
+   * same verdict the probe applies, over every option) — e.g. Solana-only, a
+   * scheme Haven cannot settle, a non-USDC asset. Never probed.
+   */
   skippedUnsupported: number
   /** #3078: a resource whose URL host the merchant rule cannot read — never inserted. */
   skippedUnparseableHost: number
@@ -258,8 +263,13 @@ export async function ingestDiscoveredCatalog(
     const resourceUrl = item.resource
     if (!resourceUrl) continue
 
-    const network = item.accepts?.[0]?.network
-    if (!network || !SUPPORTED_NETWORKS.has(network)) {
+    // #4389: the same payability verdict the probe applies, over every
+    // option the index lists. Before, only `accepts[0].network` was read, so
+    // a payable Base option listed second was never probed and an
+    // unsettleable first option on Base was. The live 402 is judged again by
+    // the probe below; this only decides whether to spend a probe on it.
+    const indexed = selectCatalogPaymentOption({ accepts: item.accepts })
+    if (!indexed || !SUPPORTED_NETWORKS.has(indexed.network)) {
       result.skippedUnsupported += 1
       continue
     }
@@ -327,7 +337,7 @@ export async function ingestDiscoveredCatalog(
           probe.priceDisplay ?? null,
           probe.priceAtomic ?? null,
           probe.asset ?? null,
-          probe.network ?? network,
+          probe.network ?? indexed.network,
           probe.assetTransferMethods?.join(',') ?? null,
           merchant.id,
           // #3331: the same probe's payTo the hourly refresh records.

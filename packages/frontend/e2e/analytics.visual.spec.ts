@@ -356,17 +356,23 @@ const SCENARIOS: Scenario[] = [
 
       // ── Spend over time (#3051): the chart slice D built, on the page ────
       // One heading, the desktop/narrow chart pair with exactly one visible
-      // at this viewport, and the refusal marker caps the fixture's two
-      // refusal days earn (two per rendering).
+      // at this viewport, and a grey refusal dash under the slot for each of
+      // the fixture's two refusal days (two per rendering) — the marker is
+      // drawn under the slot, not as a cap, and barless days included.
       const spend = section(page, 'analytics-spend-section')
       await expect(spend).toHaveCount(1)
       await expect(spend.getByRole('heading', { name: COPY.spendHeading })).toHaveCount(1)
       await expect(spend.getByTestId('stacked-bar-chart').filter({ visible: true })).toHaveCount(1)
       await expect(spend.getByTestId('chart-refusal-marker')).toHaveCount(4)
-      // The partial-day treatment on the capture itself: the window's last
-      // bucket is cut (14:30Z end), so exactly one day per rendering is marked
-      // and the note names that end.
-      await expect(spend.locator('[data-testid="chart-day"][data-partial="true"]')).toHaveCount(2)
+      // The partial-day treatment on the capture itself: under the
+      // continuous axis (#4334) the section hands the chart every local
+      // date the window touches, so BOTH cut edge days render per view —
+      // the window's first day (June 10) is an empty partial slot (no
+      // by_day row), the last (July 10) has a bar — 2 chart-days × 2
+      // renderings = 4. The partial note still names the last end only:
+      // it claims stripes for partial days that have a bar, while empty
+      // partial slots are named in the tooltip and the table.
+      await expect(spend.locator('[data-testid="chart-day"][data-partial="true"]')).toHaveCount(4)
       await expect(spend.getByText(COPY.spendPartialNote, { exact: false })).toHaveCount(1)
 
       // ── The period control, in its resting state ─────────────────────────

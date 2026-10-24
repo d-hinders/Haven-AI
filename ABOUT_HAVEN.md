@@ -10,7 +10,7 @@ last-verified: "2026-09-08"
 
 ## Product Summary
 
-Haven is an agentic stablecoin payment wallet. Users create or link a Haven account, add funds to a Haven wallet, and give AI agents constrained spending ability through agent rules and budgets.
+Haven is an agentic stablecoin payment wallet. Users create a Haven account, add funds to a Haven wallet, and give AI agents constrained spending ability through agent rules and budgets.
 
 Haven is non-custodial smart account software. It helps users configure, verify, relay, and understand payment activity, but it does not hold funds, hold user or agent private keys, make API credentials sufficient to spend, or make discretionary transfer decisions.
 
@@ -147,7 +147,7 @@ Haven must stay within these product and architecture constraints:
 - Users can enumerate and revoke live delegation authority without Haven. Legacy Safe permissions are owner-managed outside Haven; Haven does not revoke them.
 - Haven must not operate swaps, ramps, fiat/card rails, merchant settlement, yield, treasury management, or financial advice flows without separate product, legal, and security review.
 
-Use `docs/regulatory/casp-risk-guardrails.md` before changing payment execution, agent authority, Safe setup, relaying, SDK payment APIs, x402/MPP flows, merchant-facing demos, fiat/card surfaces, swaps, yield, or treasury features.
+Use `docs/regulatory/casp-risk-guardrails.md` before changing payment execution, agent authority, account or signer setup, relaying, SDK payment APIs, x402/MPP flows, merchant-facing demos, fiat/card surfaces, swaps, yield, or treasury features.
 
 ## Product Language
 

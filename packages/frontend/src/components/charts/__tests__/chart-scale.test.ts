@@ -64,12 +64,12 @@ describe('chartScale — ticks hit values the data reaches, never beyond the max
     // The failure the nice steps prevent: a 743-tall range split four ways
     // is 185.75 / 371.5 / 557.25, and no day ever spent those amounts. The
     // snapped scale is the one whose ticks the data can be said to reach.
-    expect(chartScale(743)).toEqual({ max: 800, ticks: [200, 400, 600] })
+    expect(chartScale(743)).toEqual({ max: 800, ticks: [200, 400, 600], step: 200 })
     // 1240 → step roundNiceStep(310): the 3.1 unit snaps up to the 5, so the
     // step is 500 and the scale reads 500 / 1000 under a 1500 ceiling.
-    expect(chartScale(1240)).toEqual({ max: 1500, ticks: [500, 1000] })
+    expect(chartScale(1240)).toEqual({ max: 1500, ticks: [500, 1000], step: 500 })
     // 2.5 is on the family, so 99 reaches it: 25 / 50 / 75 under 100.
-    expect(chartScale(99)).toEqual({ max: 100, ticks: [25, 50, 75] })
+    expect(chartScale(99)).toEqual({ max: 100, ticks: [25, 50, 75], step: 25 })
   })
 
   it('lifts the ceiling past a data max that is already a round step', () => {
@@ -105,14 +105,37 @@ describe('chartScale — ticks hit values the data reaches, never beyond the max
     }
   })
 
+  it('keeps the step with the scale, so a sub-cent peak yields a sub-cent step (#4334)', () => {
+    // The tick formatter reads its fraction digits from `step` — the three
+    // peaks #4334 names, and the steps the nice family gives them: a 0.004
+    // peak steps by 0.001, a 0.008 peak by 0.002, a 0.025 peak by 0.005 —
+    // each under a cent, each needing 4 decimals to stay distinct. (Compared
+    // field-by-field: the binary floats carry dust a toEqual would trip on.)
+    const s4 = chartScale(0.004)
+    expect(s4.step).toBe(0.001)
+    expect(s4.max).toBeCloseTo(0.005, 12)
+    expect(s4.ticks.map((t) => Number(t.toFixed(4)))).toEqual([0.001, 0.002, 0.003, 0.004])
+    const s8 = chartScale(0.008)
+    expect(s8.step).toBe(0.002)
+    expect(s8.max).toBeCloseTo(0.01, 12)
+    expect(s8.ticks.map((t) => Number(t.toFixed(4)))).toEqual([0.002, 0.004, 0.006, 0.008])
+    const s25 = chartScale(0.025)
+    // 0.025/4 = 0.00625: the unit 6.25 snaps UP to the 10, so a peak of two
+    // and a half cents steps by a whole cent — 2-decimal ticks, still
+    // distinct ($0.01 / $0.02).
+    expect(s25.step).toBe(0.01)
+    expect(s25.max).toBeCloseTo(0.03, 12)
+    expect(s25.ticks.map((t) => Number(t.toFixed(4)))).toEqual([0.01, 0.02])
+  })
+
   it('degenerates honestly on an empty range instead of inventing headroom', () => {
     // A chart with nothing plotted has nothing to tick. The alternative — a
     // scale of 0..10 — is a lie in a serif face: it shows a y-axis with
     // values on it, for a chart about nothing.
-    expect(chartScale(0)).toEqual({ max: 0, ticks: [] })
-    expect(chartScale(-5)).toEqual({ max: 0, ticks: [] })
-    expect(chartScale(Number.NaN)).toEqual({ max: 0, ticks: [] })
-    expect(chartScale(Number.POSITIVE_INFINITY)).toEqual({ max: 0, ticks: [] })
+    expect(chartScale(0)).toEqual({ max: 0, ticks: [], step: 0 })
+    expect(chartScale(-5)).toEqual({ max: 0, ticks: [], step: 0 })
+    expect(chartScale(Number.NaN)).toEqual({ max: 0, ticks: [], step: 0 })
+    expect(chartScale(Number.POSITIVE_INFINITY)).toEqual({ max: 0, ticks: [], step: 0 })
   })
 
   it('honours a coarser interval when asked for fewer gridlines', () => {
@@ -121,8 +144,8 @@ describe('chartScale — ticks hit values the data reaches, never beyond the max
     const two = chartScale(1240, 2)
     const four = chartScale(1240, 4)
     expect(two.ticks.length).toBeLessThanOrEqual(four.ticks.length)
-    expect(two).toEqual({ max: 2000, ticks: [1000] })
-    expect(four).toEqual({ max: 1500, ticks: [500, 1000] })
+    expect(two).toEqual({ max: 2000, ticks: [1000], step: 1000 })
+    expect(four).toEqual({ max: 1500, ticks: [500, 1000], step: 500 })
   })
 })
 
@@ -378,7 +401,7 @@ describe('chartScaleRange — a scale for a chart that does not start at zero (#
   })
 
   it('a degenerate range returns the bounds and no ticks', () => {
-    expect(chartScaleRange(5, 5)).toEqual({ min: 5, max: 5, ticks: [] })
+    expect(chartScaleRange(5, 5)).toEqual({ min: 5, max: 5, ticks: [], step: 0 })
     expect(chartScaleRange(Number.NaN, 1).ticks).toEqual([])
   })
 

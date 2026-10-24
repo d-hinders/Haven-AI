@@ -43,7 +43,7 @@ Haven’s UX copy should make agentic stablecoin payments feel simple, safe, and
 
 Write for users first, not for the protocol.
 
-Avoid exposing implementation details unless they are necessary for trust, transparency, or advanced users. Haven can use Safe, passkeys, smart accounts, modules, spending policies, and relayers under the hood, but most onboarding and product copy should describe the user-facing outcome.
+Avoid exposing implementation details unless they are necessary for trust, transparency, or advanced users. Haven uses passkeys, a smart account, signed budget delegations enforced on-chain, and relayers under the hood, but most onboarding and product copy should describe the user-facing outcome.
 
 For payment execution, agent authority, account or signer setup, relaying, SDK payment APIs,
 x402/MPP, merchant, fiat/card, swap, yield, treasury, reporting/accounting, tax,
@@ -112,7 +112,7 @@ Avoid leading with:
 - “Smart wallet”
 - “Safe smart account”
 
-Safe can be shown later in account details, transaction details, advanced settings, or developer-facing documentation.
+The account's technical name (a smart account — a MetaMask Hybrid DeleGator on the live rail) can be shown later in account details, transaction details, advanced settings, or developer-facing documentation. Safe itself is no longer part of the product: the Safe rail is retired (epic #1440) and legacy Safe accounts are not shown on any account, agent or dashboard screen since #2413 (transaction history still lists them), so do not introduce it as the account's name.
 
 ### Use “Haven wallet” for where the user's treasury funds are held
 

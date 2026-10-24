@@ -1470,7 +1470,7 @@ gh run list --workflow qa-dev.yml --event deployment_status --limit 10 \
   --json databaseId,displayTitle,conclusion,headBranch,headSha,createdAt
 ```
 
-#### Status: observed on 2026-09-02 (#2273 closed on it; #2268 stays operator-verify)
+#### Status: observed on 2026-09-02 (#2273 closed on it; #2268 closed the same day)
 
 `deployment_status`, like `repository_dispatch`, runs only the **default
 branch's** workflow file, so this trigger could not be seen firing from a pull
@@ -1501,8 +1501,8 @@ there rather than assumed here:
    have returned 33609836970, a run-level `success` whose `money-flow` job was
    skipped; that decoy, not a missing label, is the defect the job rule closes.
 
-#2273 closed on that observation; #2268 stays open in operator-verify mode
-for its own checklist. The guard will file a `ci-health` issue on the very next push to `dev`
+#2273 closed on that observation, and #2268 (its operator-verify checklist)
+closed the same day, 2026-09-02. The guard will file a `ci-health` issue on the very next push to `dev`
 after the merge (it reads `never-run` at that moment, before the deploy has
 finished) and close it on the push after the first post-deploy run succeeds —
 one round of noise, and an honest one.
@@ -1730,7 +1730,7 @@ exploratory.
 > Sepolia, capped QA delegate — never prod). Using the already-connected Haven MCP
 > (or connect with `npx -y <connector_package> --setup <QA setup token> --api <dev backend URL>`, where `<connector_package>` is the `connector_package` value the dev backend's own setup response returns (the same package is named inside its `connector_command`, which is the whole `npx -y … --setup … --api …` string — do not paste that in here) — NOT necessarily `@alpha` since #2422; the token and URL are owner-provisioned, see "QA identity, funding & secrets" below). A default connect names its own pair from the agent's display name (#3737) and installs alongside anything already wired, so it does not refuse; if it DOES refuse with `wiring_collision` (#2551 — the run targeted the bare `haven` / `haven-signer` pair, via `--bare`/`--replace`, on a machine that already holds a spend-capable Haven agent), relay the refusal to the owner and stop; do not add `--replace` or `--name` on your own — on the dedicated QA runner the owner's usual answer is `--replace`, on a developer machine `--name`:
 > 1. `haven_get_agent` + `haven_get_allowances` — confirm the dev QA agent and note the live remaining budget.
-> 2. Pay the demo-merchant x402 call **within** budget (`haven_pay_x402`) → expect settlement + a receipt.
+> 2. Pay the demo-merchant x402 call **within** budget (`haven_pay_x402` on the local `@haven_ai/mcp` server; the hosted server the connector installs has no tool by that name — there, `haven_quote_mcp_tool` then `haven_pay_mcp_tool`) → expect settlement + a receipt.
 > 3. Use direct `haven_pay` for an amount **over** the remaining budget → expect it to be
 > **refused before it becomes signable**. Assert all three: no settlement, nothing
 > queued or pending approval, and nothing silently spent. The refusal IS the pass —

@@ -6,8 +6,9 @@ covers:
   - packages/frontend/src/hooks/useDelegationBudget.ts
   - packages/frontend/src/hooks/useAccountSigners.ts
   - packages/frontend/src/components/AccountSignersCard.tsx
+  - packages/frontend/src/components/PasskeyElsewhereHint.tsx
   - packages/backend/src/rails/hybrid-signer-actions.ts
-last-verified: "2026-08-26"
+last-verified: "2026-10-24"
 ---
 
 # Dev testing with a wallet signer
@@ -31,9 +32,10 @@ which is production.)
 
 1. **Sign up** with email + password, then create your account with a passkey
    (usually approved with your device's screen lock).
-2. **Account page → Backup & recovery → add a wallet.** Paste your wallet's
-   address and approve with your passkey. You supply the address only — the wallet
-   doesn't need to be connected, and you pay no gas.
+2. **Account page → Security & details tab → *Who can approve* → Or add a
+   wallet** (the tab since #4142, the heading since #4166). Paste your wallet's
+   address, choose *Add wallet* and approve with your passkey. You supply the
+   address only — the wallet doesn't need to be connected, and you pay no gas.
 3. **Check the card now lists two ways to approve:** your wallet (labeled
    "Browser wallet", its address behind "Show address", #3825), and your
    passkey (labeled "Passkey · added {date}", #1679).
@@ -70,9 +72,9 @@ on the passkey path). Connect the enrolled wallet and retry.
 
 You don't need a new account. Sign in, connect your wallet (Settings → Security
 → Passkeys and wallets),
-then **Backup &
-recovery → add a backup passkey** — the wallet signs the change and the new
-passkey is created on that domain. Only onboarding itself still needs a
+then on the account page's **Security & details** tab choose **Add a backup
+passkey** — the wallet signs the change and the new passkey is created on
+that domain. Only onboarding itself still needs a
 throwaway account.
 
 ## Notes
@@ -96,3 +98,20 @@ See [`dev-environment.md`](dev-environment.md) for the rest of the dev stack.
 > of sending the route into the ErrorBoundary. No endpoint, flow or
 > behaviour this document describes changes. Scope of this note: those
 > expressions. Nothing else in this document was re-verified.
+
+> **Re-verified 2026-10-24 (#4372 part F, at dev `6d87ddf95`), a full re-read.**
+> Changed: the add-a-wallet and add-a-backup-passkey steps name where the card
+> lives now — the account page's *Security & details* tab (#4142), under *Who
+> can approve* (#4166), with its *Or add a wallet* / *Add wallet* and *Add a
+> backup passkey* buttons (`components/AccountSignersCard.tsx`) — instead of a
+> "Backup & recovery" card heading the page no longer renders. Re-checked
+> without change: the stable dev URL (`dev-environment.md`), the opt-in PR
+> previews (#3821), the "Browser wallet" / "Show address" (#3825) and
+> "Passkey · added {date}" (#1679, `lib/passkeyLabels.ts`) labels, Settings →
+> Security → *Passkeys and wallets* → *Connect wallet*
+> (`components/settings/SignersSection.tsx`), the #2068 client-side owner
+> check (`lib/signer.ts`), the "passkey may be on another device" line
+> (`PasskeyElsewhereHint`, shown on the owner-signing flows when the passkey
+> path signs), the single `transferOwnership` owner slot
+> (`rails/hybrid-signer-actions.ts`), removal disabled below two signers, and
+> #1153.

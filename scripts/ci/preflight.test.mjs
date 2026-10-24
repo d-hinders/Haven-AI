@@ -1608,12 +1608,13 @@ describe('the silence watchdog (#4276)', () => {
     }
   }
 
-  /** The contents of `file` as soon as it exists, else null after `ms`. */
+  /** The contents of `file` once it exists and is non-empty, else null after `ms`. */
   const untilFile = async (file, ms) => {
     const deadline = Date.now() + ms
     for (;;) {
       try {
-        return readFileSync(file, 'utf8')
+        const text = readFileSync(file, 'utf8')
+        if (text.trim() !== '') return text
       } catch {}
       if (Date.now() > deadline) return null
       await sleep(25)
@@ -1621,8 +1622,8 @@ describe('the silence watchdog (#4276)', () => {
   }
 
   /**
-   * A gate that spawns a grandchild, waits until it has registered its pid,
-   * writes one line, and goes silent forever. The grandchild is spawned
+   * A gate that spawns a grandchild, heartbeats until it has registered its
+   * pid, and then goes silent. The grandchild is spawned
    * WITHOUT `detached`: it stays in the gate's process group, so it is
    * exactly the "outlives its parent" case the group kill exists for. (A
    * `setsid`/detached escapee is stated residue in `runGate`'s comment.)
@@ -1639,39 +1640,42 @@ describe('the silence watchdog (#4276)', () => {
         ``,
       ].join('\n'),
     )
-    const hang = path.join(dir, 'hang.mjs')
+    // The gate is a POSIX `sh` script, not Node (#4398): silence counts from
+    // spawn, and a loaded Node startup alone outlasted a 2 s threshold with
+    // zero output. `sh` prints its first line within milliseconds, then runs
+    // the grandchild in the background (same process group: a non-interactive
+    // shell has no job control; its stdio detached from the gate's pipes, or
+    // `runGate`'s close would wait for the grandchild and a missing kill would
+    // pass late instead of failing) and heartbeats until the pid file is
+    // non-empty. Only then does it go silent. Both loops are bounded, so a
+    // grandchild that never registers still ends the gate (exit 9) and the
+    // test fails red instead of hanging the file.
+    const hang = path.join(dir, 'hang.sh')
     writeFileSync(
       hang,
       [
-        `import { spawn } from 'node:child_process'`,
-        `import { existsSync } from 'node:fs'`,
-        `spawn(process.execPath, [${JSON.stringify(gc)}], { stdio: 'ignore' })`,
-        // Go silent only once the grandchild has registered (#4398): under
-        // load its Node startup can outlast the watchdog's threshold, and a
-        // grandchild killed while still booting never writes its pid, so the
-        // test would report "never registered" instead of testing the kill.
-        // Until then the gate writes a heartbeat line every 20 ms, so the
-        // watchdog (silence counts from spawn) cannot fire during the wait.
-        `const registered = () => existsSync(${JSON.stringify(pidFile)})`,
-        `const ready = setInterval(() => {`,
-        `  if (!registered()) return void console.log('waiting for the grandchild')`,
-        `  clearInterval(ready)`,
-        `  console.log('gate alive; silent from here')`,
-        `  setTimeout(() => process.exit(9), 5000) // self-cap: fails red, never hangs`,
-        `}, 20)`,
+        `echo 'gate starting'`,
+        `${JSON.stringify(process.execPath)} ${JSON.stringify(gc)} </dev/null >/dev/null 2>&1 &`,
+        `n=0`,
+        `while [ ! -s ${JSON.stringify(pidFile)} ]; do`,
+        `  n=$((n + 1)); [ "$n" -gt 400 ] && exit 9`,
+        `  echo 'waiting for the grandchild'; sleep 0.05`,
+        `done`,
+        `echo 'gate alive; silent from here'`,
+        `sleep 5; exit 9 # self-cap: fails red, never hangs`,
         ``,
       ].join('\n'),
     )
-    return { pidFile, command: `node ${JSON.stringify(hang)}` }
+    return { pidFile, command: `sh ${JSON.stringify(hang)}` }
   }
 
   test('a gate silent past the threshold is killed with its process group, grandchild included', { timeout: 30_000 }, async () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'preflight-stall-'))
     try {
       const { pidFile, command } = hangFixture(dir)
-      // Silence counts from spawn, before the gate's own Node has printed
-      // anything: under load that startup alone measured over 300 ms (#4398),
-      // so the threshold leaves room for it, still well under the self-cap.
+      // Silence counts from spawn, before the gate has printed anything: under
+      // load even the gate's startup measured over 300 ms (#4398), so the
+      // threshold leaves room for it, still well under the 5 s self-cap.
       const result = await runGate({ command, jobs: ['fixture'] }, { silenceMs: 2000, graceMs: 100 })
       assert.equal(result.stalled, true, JSON.stringify({ ...result, output: result.output.slice(0, 200) }))
       assert.ok(result.silentFor >= 2000, `silentFor=${result.silentFor}`)

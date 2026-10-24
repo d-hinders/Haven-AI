@@ -321,10 +321,11 @@ both keyed on the transaction hash:
   intent whose `payTo`/merchant address is THIS account and whose tx hash is
   the row's. The intent belongs to the PAYER — the match is cross-user by
   construction and deliberately read-only: the matched intent id is stored on
-  the row for audit. The owner's ledger read does return it, as
-  `matched_payment_intent_id` on each row (`routes/receive.ts`), although the
-  repository comment on `findX402PaytoSettlementIntent` says it is never
-  served.
+  the row for audit, and the owner's ledger read returns it as
+  `matched_payment_intent_id` — null unless `match_kind` is `x402_payto`
+  (`routes/receive.ts`; the OpenAPI `ReceiveLedgerTransfer` schema lists the
+  field). The repository comment on `findX402PaytoSettlementIntent` that says
+  it is never served is stale.
 - **A supplied receipt** (`match_kind: 'receipt'`): a merchant receipt
   document the paying agent captured (#956), or a receipt the PAYER drops on
   `POST /receive/{accountAddress}/receipt-drop`.
@@ -387,3 +388,9 @@ third parties — the position recorded with counsel in
 > the explorer-fed index, the payer-signed drop, the owner-only off-ramp
 > routes, the submit-time calldata pin, the panel removed by #4142 under
 > #4097). Every cited issue was read with `gh api`; all are closed.
+>
+> **Review round 1 (haven-doc-reviewer @ `344d7ea91`).** The matched-intent
+> sentence now says the field is null unless `match_kind` is `x402_payto`
+> (the repository's `matchInboundTransfer` comment; the OpenAPI
+> `ReceiveLedgerTransfer` description) and that it is documented in the
+> OpenAPI schema.

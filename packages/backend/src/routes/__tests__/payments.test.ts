@@ -830,7 +830,6 @@ describe('payment routes', () => {
       primeDb(
         AUTH,
         intentKeyLookup([sendReplayRow({ expires_at: '2020-01-01T00:00:00.000Z' })]),
-        [/FROM agent_allowances/, () => ({ rows: [{ allowance_amount: '1000' }] })],
         [/INSERT INTO payment_intents/, () => ({ rows: [pendingIntent()] })],
       )
 
@@ -852,7 +851,6 @@ describe('payment routes', () => {
       primeDb(
         AUTH,
         intentKeyLookup([]),
-        [/FROM agent_allowances/, () => ({ rows: [{ allowance_amount: '1000' }] })],
         [/INSERT INTO payment_intents/, () => ({ rows: [pendingIntent()] })],
       )
 
@@ -876,7 +874,6 @@ describe('payment routes', () => {
           // First lookup (pre-insert): nothing. Second (post-race): the winner.
           () => ({ rows: ++lookups === 1 ? [] : [sendReplayRow()] }),
         ],
-        [/FROM agent_allowances/, () => ({ rows: [{ allowance_amount: '1000' }] })],
         [/INSERT INTO payment_intents/, () => {
           const err = new Error('duplicate key') as Error & { code: string }
           err.code = '23505'
@@ -963,7 +960,6 @@ describe('payment routes', () => {
     it('a request without a key behaves exactly as before — no lookups, no key persisted', async () => {
       primeDb(
         AUTH,
-        [/FROM agent_allowances/, () => ({ rows: [{ allowance_amount: '1000' }] })],
         [/INSERT INTO payment_intents/, () => ({ rows: [pendingIntent()] })],
       )
 
@@ -1000,7 +996,6 @@ describe('payment routes', () => {
     /** Create-path routes: rail state (none → legacy), allowance config, inserts. */
     const createRoutes: DbRoute[] = [
       AUTH,
-      [/FROM agent_allowances/, () => ({ rows: [{ allowance_amount: '1000' }] })],
       [/INSERT INTO payment_intents/, () => ({ rows: [pendingIntent()] })],
     ]
 

@@ -144,10 +144,9 @@ const AUTH: DbRoute = [/api_key_hash = \$1/, () => ({ rows: [AGENT] })]
 // The three reads a legacy-rail authorize always needs once it clears the
 // idempotency lookups: the on-chain-allowance policy check, and the hourly
 // cap's two-part read. Defaults answer the common "policy is fine" case.
-const ALLOWANCE_OK: DbRoute = [/FROM agent_allowances/, () => ({ rows: [{ allowance_amount: '10' }] })]
 const HOURLY_OK: DbRoute = [/max_x402_per_hour FROM agents/, () => ({ rows: [{ max_x402_per_hour: 100 }] })]
 const COUNT_OK: DbRoute = [/as cnt FROM payment_intents/, () => ({ rows: [{ cnt: '0' }] })]
-const POLICY_ROUTES: DbRoute[] = [ALLOWANCE_OK, HOURLY_OK, COUNT_OK]
+const POLICY_ROUTES: DbRoute[] = [HOURLY_OK, COUNT_OK]
 
 /** INSERT INTO payment_intents (the ON CONFLICT DO NOTHING ... RETURNING *). */
 const insertIntent = (row: Record<string, unknown> | null): DbRoute => [

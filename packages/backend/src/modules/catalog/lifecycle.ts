@@ -15,8 +15,11 @@
  *      bounds how long a "submitted forever" row can occupy the pending cap.
  *   2. **Probe** — `ownership_verified` rows, plus `verified_payable` rows
  *      whose last success is older than the re-verification cadence, go
- *      through `runProbeBatch` under the shared per-hostname cooldown (a
- *      merchant is never hammered). Success persiss the pointer metadata
+ *      through `runProbeBatch` under the per-hostname cooldown, which the
+ *      monitor (`createCatalogIngestMonitor`) holds for its lifetime so it
+ *      spans ticks (#4407): a host is probed at most once per 15-minute
+ *      window, so a failing merchant waits that long between probes, not
+ *      one 5-minute tick. Success persists the pointer metadata
  *      (`name`/`description`/`entrypoint`). Failure increments the
  *      consecutive-failure streak; at the threshold the row degrades to
  *      `failed` — for a never-verified candidate that is the end of its
@@ -101,7 +104,11 @@ export interface CatalogIngestDeps {
   post?: GuardedPost
   now?: () => Date
   ttlMs?: number
-  /** Shared across ticks by the caller so cooldown survives between runs. */
+  /**
+   * Per-hostname probe cooldown. Omitted, the tick builds a fresh one, which
+   * spans nothing: production gets its lifetime instance from
+   * `createCatalogIngestMonitor` (#4407), never by passing this directly.
+   */
   cooldown?: HostCooldown
   maxConcurrency?: number
   cadenceMs?: number
@@ -164,6 +171,33 @@ export async function runCatalogIngestTick(deps: CatalogIngestDeps = {}): Promis
     report.alerts.length > 0
 
   return report
+}
+
+export interface CatalogIngestMonitor {
+  /** One ingestion tick, under the monitor's lifetime cooldown. */
+  tick(): Promise<CatalogIngestTickResult>
+}
+
+/**
+ * The entry point `index.ts` drives (#4407): it owns ONE `HostCooldown` for
+ * the monitor's lifetime and threads it through every tick, so the 15-minute
+ * per-host window spans ticks.
+ *
+ * Before #4407 index.ts called `runCatalogIngestTick()` with no cooldown, so
+ * `runProbeBatch` built a fresh one per tick. Within a tick it could never
+ * fire (migration 066 allows one pending row per host), so a failing
+ * merchant was probed on every 5-minute tick and degraded after about 10
+ * minutes instead of about 30. The cooldown is per process: a restart or a
+ * leader move starts it empty, which is the replica-local bound `probe.ts`
+ * already accepts for a politeness budget.
+ */
+export function createCatalogIngestMonitor(
+  deps: Omit<CatalogIngestDeps, 'cooldown'> = {},
+): CatalogIngestMonitor {
+  const cooldown = new HostCooldown()
+  return {
+    tick: () => runCatalogIngestTick({ ...deps, cooldown }),
+  }
 }
 
 // ---------------------------------------------------------------------------

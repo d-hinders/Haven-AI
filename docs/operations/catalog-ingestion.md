@@ -8,7 +8,7 @@ covers:
   - packages/backend/src/index.ts
   - packages/backend/src/db/migrations/068_catalog_lifecycle.ts
   - packages/backend/src/db/migrations/088_merchants.ts
-last-verified: "2026-09-17"
+last-verified: "2026-10-25"
 ---
 
 # Operations Runbook — Verified Payable Directory ingestion (#1714)
@@ -109,7 +109,7 @@ All in `packages/backend/src/modules/catalog/lifecycle.ts` (and the probe's
 | Knob | Value | Effect |
 |---|---|---|
 | Monitor tick | 5 min (`CATALOG_INGEST_INTERVAL_MS`, index.ts) | How often the leader scans the queue |
-| Probe cooldown | 15 min / host (`DEFAULT_HOST_COOLDOWN_MS`) | A merchant is never probed more than once per window |
+| Probe cooldown | 15 min / host (`DEFAULT_HOST_COOLDOWN_MS`) | A merchant is never probed more than once per window. The monitor (`createCatalogIngestMonitor`) holds one cooldown for the process lifetime, so the window spans ticks (#4407); a restart or a leader move starts it empty |
 | Re-verification cadence | 24 h (`REVERIFY_CADENCE_MS`) | `verified_payable` entries are re-probed when `last_verified_at` is older |
 | Failure threshold | 3 (`FAIL_AFTER_CONSECUTIVE_FAILURES`) | Consecutive probe failures before a row degrades to `failed` |
 | Ownership token TTL | 7 d (`TOKEN_TTL_MS`, ownership.ts) | A proof is only accepted inside this window; expiry fails the row |
@@ -177,9 +177,13 @@ characterization-tested against real Postgres in
 
 ### A listed entry stops verifying (`verified_payable` → `failed`)
 
-Normal: the merchant endpoint changed or went down; the row degrades after 3
-consecutive daily failures and is purged 30 days later. The merchant can
-resubmit. No action required unless the mass-failure alarm fires (above).
+Normal: the merchant endpoint changed or went down. A failed re-probe leaves
+`last_verified_at` unchanged, so the row stays due and is probed again as soon
+as the per-host cooldown allows: probes at T, ≥T+15 min and ≥T+30 min on the
+5-minute ticks. The third consecutive failure degrades the row, about 30
+minutes after the first failed re-probe (up to about 40, depending on where
+the ticks fall). It is purged 30 days later. The merchant can resubmit. No
+action required unless the mass-failure alarm fires (above).
 
 ### Turning the pipeline off for an incident
 

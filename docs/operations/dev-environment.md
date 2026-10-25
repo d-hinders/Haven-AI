@@ -39,6 +39,15 @@ covers:
 last-verified: "2026-10-23"
 ---
 
+> **Re-verified #4407 (2026-10-25, the catalog ingestion cooldown):** this
+> diff touched one file in this document's coverage list,
+> `packages/backend/src/index.ts`. The catalog ingestion tick now
+> calls a monitor built once at boot (`createCatalogIngestMonitor`) instead
+> of `runCatalogIngestTick()`; the leader lock, the 5-minute interval and the
+> alert delivery are unchanged. No env variable, port, service or workflow
+> moves. Nothing else in this document was re-verified, and `last-verified`
+> is not bumped.
+
 > **Re-verified #4327 (2026-10-23, the agent Activity ledger export):** this
 > diff touched one file in this document's coverage list,
 > `packages/backend/src/openapi/route-modules.generated.ts`, and none of this

@@ -3978,3 +3978,17 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > takes the same shape. Layout only: no budget read, figure, caption,
 > delegation, revoke, grant or edit path changes. Scope of this note: that
 > grid. Nothing else in this document was re-verified for it.
+
+> **Re-verified unchanged (#4353, 2026-10-25 — `GET /dashboard/overview`
+> gains a per-agent `budgetEndedAt` and splits `delegation_expired` out of the
+> refusal `budget` bucket).** Both are display-only reads in
+> `infra/repositories/dashboard.ts` / `routes/dashboard.ts`: the first is a
+> grouped `SELECT` over the agent's `active` `agent_delegations` rows whose
+> `expires_at` has passed, on the agent's own account chain (liveness doubled
+> in SQL and in the route, so a live row is never reported as ended), the
+> second regroups existing `payment_refusals` counts. Nothing writes, signs,
+> selects a delegation for payment or widens authority; the enforcers
+> (including the TimestampEnforcer) remain the only gate on an expired
+> redemption, and the user-level `budgetStops` figure is unchanged. Scope of
+> this note: those two reads. Nothing else in this document was re-verified
+> for it.

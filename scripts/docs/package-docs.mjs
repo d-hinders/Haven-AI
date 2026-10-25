@@ -134,6 +134,26 @@ export const GOVERNED_PACKAGE_DOCS = [
     owner: '@d-hinders',
     status: 'current',
     covers: ['packages/signer/src/**', 'packages/sdk/src/edge.ts', 'packages/sdk/src/edge-imports.test.ts'],
+    // #4372 part I: the WHOLE README re-read at dev 6a0486711 and EDITED. The
+    // haven_sign row and the unbound-branch allowlist name the third
+    // redemption shape, the three-link [sub grant, parent child, budget]
+    // chain (#3330, sdk redemption-guard.ts refuse()); the library has five
+    // methods, not six (EdgeSigner in core.ts); the --help pin no longer says
+    // "a fifth tool" (five are registered); the direct-payment diagram shows
+    // the #3495 compact haven_pay result and the payment_id sign; the
+    // trust-model note credits the local allowlist and #3271 binding with
+    // what they prove (shape and integrity, not amount or recipient); the
+    // Connect Agent 2 paragraph lists the register body field by field
+    // (connect api.ts registerSetup) instead of "only" four items, and names
+    // the connector's other calls in that file (review round 1, A2).
+    // Re-checked unchanged: the five SignerToolName tools, the five version
+    // constants and the capability key, SIGN_CONTEXT_TIMEOUT_MS 15 s, the four
+    // sign-context routes, RETIRED_BINDING_MEMORY 64, MAX_SETTLEMENT_WINDOW
+    // 600 s, the SIWX limits (300 s + 30 s skew, version 1, https, nonce),
+    // AUDIT_ROTATE_BYTES 8 MiB, the sidecar paths, the CLI flags and exit 2,
+    // the Node >= 22 floor, the consent-hash inputs, HAVEN_X402_BINDING_SIGNER
+    // and the account-address keys. The startup timings are #3173's measured
+    // numbers, not re-measured. Prior:
     // #3645: EDITED, scope = the network-call paragraph (the task- and
     // sub-budget sign-context reads and the X-Haven-Client header), verified
     // against src/sign-context.ts. Nothing else re-verified. Prior:
@@ -214,7 +234,7 @@ export const GOVERNED_PACKAGE_DOCS = [
     // #3173: new § "Startup, CLI options and the consent screen" verified
     // against cli-args.ts, consent.ts, server.ts, core.ts (lazy x402) and the
     // measured numbers in the PR; nothing else re-verified.
-    'last-verified': '2026-10-01',
+    'last-verified': '2026-10-25',
   },
   {
     doc: 'packages/mcp/README.md',
@@ -590,7 +610,26 @@ export const GOVERNED_PACKAGE_DOCS = [
       'packages/backend/src/domain/ledger-currency.ts',
       'packages/backend/src/modules/accounting/feed-transaction.ts',
     ],
-    'last-verified': '2026-09-12',
+    // #4372 part I: the WHOLE README re-read at dev 6a0486711 (16 commits
+    // touched its covers after 2026-09-12; PRs #3110, #3196, #3783, #3893, #3936 and
+    // #4337 edited the body without moving this date) and EDITED. Accounted
+    // is `live` since #3017, so only Light and Igdrasil are `coming_soon`
+    // (registry.ts); webhooks are wired by `registerAccountedWebhooksAdapter`,
+    // not a descriptor field (api-key-flow.ts header); the active destination
+    // is AT MOST one per user (migration 080's partial unique index); a
+    // verify:false is Accounted's connector answering from Haven's own record
+    // (accounted-connector.ts), not a generic path; the conformance runner's
+    // skips are named (capabilities plus harness.declares.baseCurrency,
+    // connector-conformance.ts:165)
+    // (connector-conformance-skips.test.ts); the grace window's override is
+    // allowed only when HAVEN_DEPLOY_CHAIN_IDS=84532 (merchant-report-grace.ts). Re-checked unchanged:
+    // the descriptor and connector fields (provider.ts, connector.ts), the six
+    // ledger currencies, the retry constants (8 attempts, 1 min doubling to
+    // 1 h, 25 requests / 5 s), NEEDS_ATTENTION_STATUSES, pinAccountingBookedTx,
+    // the OAuth state (accounting_oauth, 10 min, jti consumed via
+    // rate_limit_counters, UNLOGGED), the legacy Fortnox push flag and the
+    // Accounted webhook route, and every named function and file.
+    'last-verified': '2026-10-25',
   },
 ]
 

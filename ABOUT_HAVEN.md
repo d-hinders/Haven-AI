@@ -3,7 +3,7 @@ owner: "@d-hinders"
 status: current
 covers:
   - docs/product/README.md
-last-verified: "2026-09-08"
+last-verified: "2026-10-25"
 ---
 
 # About Haven
@@ -24,7 +24,7 @@ Haven is non-custodial smart account software. It helps users configure, verify,
 - Spending authority comes from a valid agent/delegate signature redeeming an on-chain delegation the user signed.
 - Payments within the remaining on-chain budget execute automatically.
 - Payments outside the budget, recipient pin or expiry **revert on-chain during gas estimation**. They are not queued: the delegation rail has no approval queue.
-- Users can pause, revoke, reject, or stop agent authority.
+- Users can pause, revoke, or stop agent authority.
 
 ## What Exists Today
 
@@ -36,7 +36,7 @@ Haven is non-custodial smart account software. It helps users configure, verify,
 - Local MCP server for runtime-local credential-file integrations.
 - Direct agent payments through the Haven SDK.
 - x402 and Haven machine-payment challenge quote/pay/resume handling in the SDK and local MCP.
-- `get_allowances` tooling for live "what can this agent spend?" questions.
+- `haven_get_allowances` tooling for live "what can this agent spend?" questions.
 - Dashboard, account, agent, transaction, activity, and tool-invocation surfaces.
 - Agent pause, resume, revoke, and API-key rotation flows.
 - Internal demo merchant MCP package for Base USDC x402 test purchases and Swedish invoice output.
@@ -51,7 +51,7 @@ Current credential context should include:
 - Haven API URL.
 - Agent ID.
 - API key.
-- Haven wallet / Safe address.
+- Haven wallet (smart account) address, as `account_address`; a pre-#2908 file's `safe_address` is still read.
 - Credential address / delegate address.
 - Chain ID and token context when needed by the runtime.
 - Current budget summary as a snapshot, not the authority source.
@@ -60,7 +60,7 @@ Current credential context should include:
 
 If the user brings their own credential address, Haven must not invent, recover, or store the private key. The generated instructions should tell the user or agent runtime to provide the matching delegate key through their own secret handling.
 
-Haven stores only API-key hashes and display prefixes. Rotating an API key creates a new one-time-visible key and invalidates the old API key immediately. API-key rotation is useful when the API key was exposed or lost; it does not rotate the delegate signing key. If the delegate private key was exposed or lost, a delegation-rail agent is **re-keyed** (epic #1694): the owner authorises a rotation that revokes the old delegation, issues a new one to a freshly generated key, and rotates the API key alongside it — the agent keeps its id, name and history, and its budget remainder and period boundary carry over. The delegate never held owner authority, which is why losing it is recoverable at all. Legacy AllowanceModule agents are historical records only in the dashboard: Haven does not offer payment credentials, pause/resume, re-key, or revoke controls for them there. Owners manage any remaining Safe permission outside Haven where they have access; replacement agents use the live delegation flow.
+Haven stores only API-key hashes and display prefixes. Rotating an API key creates a new one-time-visible key and invalidates the old API key immediately. API-key rotation is useful when the API key was exposed or lost; it does not rotate the delegate signing key. If the delegate private key was exposed or lost, a delegation-rail agent is **re-keyed** (epic #1694): the owner authorises a rotation that revokes the old delegation, issues a new one to a freshly generated key, and rotates the API key alongside it — the agent keeps its id, name and history, and its budget remainder and period boundary carry over. The delegate never held owner authority, which is why losing it is recoverable at all. Legacy AllowanceModule agents are not shown on any account, agent or dashboard screen (since #2413, transaction history's picklists aside; see *Retired rails*), so Haven offers no payment credentials, pause/resume, re-key, or revoke controls for them. Owners manage any remaining Safe permission outside Haven where they have access; replacement agents use the live delegation flow.
 
 ## Connect-Agent And MCP
 
@@ -121,7 +121,7 @@ Haven runs **one live on-chain policy rail**: the delegation rail.
   and is not restated here (#2640). **Existing Safe rows are untouched and still readable to a
   direct database query, but since #2413 no account, agent or dashboard surface displays them** —
   balances, tokens and agents no longer render there. Transaction history is the named
-  exception: `GET /transactions` carries no rail predicate on either its account or its
+  exception: `GET /transactions/filters` carries no rail predicate on either its account or its
   agent list, so legacy names still appear in its picklists. `POST /safe/exec`, the
   last live Safe-rail route (owner-signed execution relayed for gas), was deleted by
   #2847, so Haven neither composes nor relays a legacy Safe transaction: a

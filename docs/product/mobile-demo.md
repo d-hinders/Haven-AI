@@ -8,7 +8,7 @@ covers:
   - packages/frontend/src/context/ThemeContext.tsx
   - packages/frontend/src/components/ui/ThemeToggle.tsx
   - packages/frontend/src/lib/installed-app.ts
-last-verified: "2026-09-15"
+last-verified: "2026-10-25"
 ---
 
 # Mobile demo runbook
@@ -88,10 +88,13 @@ Sign in on both installs if the demo will show both.
    demo-agent-purchase-runbook Act 1 — e.g. NordShield VPN Basic). The hosted
    MCP is keyless and cannot sign from a phone: the agent pays from the
    harness with its own delegate key.
-3. **The user picks the product.** The agent proposes the purchase and the
-   choice happens on the phone, in the installed shell.
-4. **Go-ahead in chat.** The approval is granted and the agent completes the
-   purchase on-chain, inside the already-granted budget.
+3. **The user picks the product.** The agent proposes the purchase in chat and
+   the user picks. Haven's app has no screen where the user picks or
+   approves the agent's proposed purchase, so this happens in the chat channel — on the phone only when the chat runs
+   there (a partner on Telegram, for example).
+4. **Go-ahead in chat.** The go-ahead is a chat message, not a Haven approval,
+   and the agent completes the purchase on-chain, inside the already-granted
+   budget.
 5. **The payoff, no refresh.** The purchase lands on the phone on its own.
    The dashboard screens poll only while visible (#2732, shipped in `dev` as
    `3f9ba290`), so the completed purchase is on screen the moment the phone
@@ -113,8 +116,8 @@ Sign in on both installs if the demo will show both.
 ## Why the phone never signs
 
 The standard demo has the phone sign nothing. The agent pays inside a budget
-the owner already granted, with the agent's delegate key, and the on-chain
-allowance module is what enforces the ceiling. That is the story: an agent
+the owner already granted, with the agent's delegate key, and the budget
+delegation's on-chain caveat enforcers are what enforce the ceiling. That is the story: an agent
 gets a budget, not a wallet.
 
 The budget-change variant is different: granting or raising a budget is an
@@ -156,7 +159,7 @@ a row.
 | 7 | Demo end to end: agent told to buy at the harness, product picked and go-ahead on the phone, purchase lands with no refresh | iPhone 12 | iOS 26.6.1 | 2026-09-10 | @d-hinders | **pass**, both halves. Three x402 purchases of 0.001 USDC from `services.sandbox.ampersend.ai/api/joke` on Base Sepolia, driven through the real agent path (quote → local sign → relay → merchant retry). Foreground: row appeared unaided, "just now", no interaction. Backgrounded: app closed at the home screen during the purchase, and on reopen the row was **already present** — the visibility handler fires an immediate fetch on return rather than waiting out the 10s interval. No spinner or skeleton flashed over the balance, the stat cards or the list in either half, and the page held its scroll position — the refetch is silent, which is the qualifier that separates "appears without a refresh" from "appears acceptably". Evidence below. |
 | 8 | Budget-change variant: passkey ceremony from the installed shell completes (per #2729 device checklist) | iPhone 12 | iOS 26.6.1 | 2026-09-09 | @d-hinders | **pass** — carried from the #2729 device pass, on an account the phone had never seen |
 | 9 | First end-to-end demo run for epic #2736 | iPhone 12 | iOS 26.6.1 | 2026-09-15 | @d-hinders | **pass, phone side** — every phone-side behaviour the epic claims is verified: rows 1–8 all pass, row 1 included now that prod serves a manifest. What is **not** covered is the laptop-side choreography of the demo script — all of it, Acts 0–5 of [`../operations/demo-agent-purchase-runbook.md`](../operations/demo-agent-purchase-runbook.md), the Fortnox and SIE bookkeeping act and the fallbacks included — deliberately not run before closeout (owner decision, 2026-09-15). That is presentation rehearsal, not a product claim — row 7 already drove the real agent path end to end. Anyone presenting this cold should still walk the script once. |
-| 10 | Theme: `System` follows the OS live, and an explicit `Light` / `Dark` overrides it — content, safe-area bands and status bar (epic #2925) | iPhone 12 | iOS 26.6.1 | 2026-09-15 | @d-hinders | **pass**, all three states, on the prod install. `System`: flipping iOS appearance from Control Centre with the app foregrounded repaints it live. Explicit `Light` under a dark OS and explicit `Dark` under a light OS both hold their own palette against the device. The status bar followed in every state. Attributing that correctly matters, because the obvious explanation is the wrong one on this device: the runtime `theme-color` override tag `ThemeContext` appends is documented in both `ThemeContext.tsx` and `lib/installed-app.ts` as the **Android** path (the build-time media pair beneath it is platform-generic), and iOS ships `statusBarStyle: 'default'`, under which the status bar reads through the page rather than from a meta tag. So what rows 2 and 5 already credit is what carried it here too: `viewport-fit: cover`, plus bands painted with `--v2-bg` — `<body>` above, the tab bar's own background below — which both dark blocks in `globals.css` redefine. Not the `--v2-safe-*` tokens: those are `env()` lengths and carry no colour to swap. The `theme-color` override remains **unverified on device** — it needs an Android phone in standalone mode, which this epic never had. Note for future testers: the quick sun/moon toggle is **two-state** by decision (#2953), so one tap leaves `System` permanently — `System` is reachable only from Settings → Theme, and an app that "stops following the phone" has almost certainly just been pinned. |
+| 10 | Theme: `System` follows the OS live, and an explicit `Light` / `Dark` overrides it — content, safe-area bands and status bar (epic #2925) | iPhone 12 | iOS 26.6.1 | 2026-09-15 | @d-hinders | **pass**, all three states, on the prod install. `System`: flipping iOS appearance from Control Centre with the app foregrounded repaints it live. Explicit `Light` under a dark OS and explicit `Dark` under a light OS both hold their own palette against the device. The status bar followed in every state. Attributing that correctly matters, because the obvious explanation is the wrong one on this device: the runtime `theme-color` override tag `ThemeContext` appends is documented in both `ThemeContext.tsx` and `lib/installed-app.ts` as the **Android** path (the build-time media pair beneath it is platform-generic), and iOS ships `statusBarStyle: 'default'`, under which the status bar reads through the page rather than from a meta tag. So what rows 2 and 5 already credit is what carried it here too: `viewport-fit: cover`, plus bands painted with `--v2-bg` — `<body>` above, the tab bar's own background below — which both dark blocks in `globals.css` redefine. Not the `--v2-safe-*` tokens: those are `env()` lengths and carry no colour to swap. The `theme-color` override remains **unverified on device** — it needs an Android phone in standalone mode, which this epic never had. Note for future testers (re-checked 2026-10-25): on the phone there is no quick toggle any more. Below `lg` the rail is hidden and the More sheet carries the three-way Light / Dark / System control (#4053), the same setting Settings → General → Theme writes. The two-state sun/moon toggle (#2953) is the desktop rail's, where one click leaves `System` until Settings restores it; an app that "stops following the phone" has almost certainly just been pinned to Light or Dark. |
 | 11 | First run on a NEW account (#3818): the Get started card shows the three steps, Add funds opens the dialog (faucet on a testnet account), "Hide for now" survives force-quit and relaunch, and the card turns into one "You're set up" line after the first agent payment | | | | | `pending-operator` |
 
 ### Row 7 evidence — the 2026-09-10 payoff run

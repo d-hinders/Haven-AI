@@ -5,9 +5,12 @@ import { OWNER_CLI_PURPOSE, routeAllowsOwnerCli } from './owner-cli.js'
  * Dashboard session auth.
  *
  * A verified signature is NOT sufficient on its own (#1640). The app signs a
- * few short-lived tokens for narrow, single-purpose flows — today the Fortnox
- * OAuth `state` (`purpose: 'fortnox_oauth'`, 10 minutes, carried in a URL
- * query string). Those tokens verify with the same secret as a session token,
+ * few short-lived tokens for narrow, single-purpose flows — today the
+ * accounting OAuth connect `state` (`purpose: 'accounting_oauth'` —
+ * `OAUTH_STATE_PURPOSE` in `modules/accounting/oauth-state.ts`, the flow is
+ * provider-generic and Fortnox is today's only OAuth2 provider; 10 minutes,
+ * carried in a URL query string). Those tokens verify with the same secret
+ * as a session token,
  * so without this check they were accepted as ordinary Bearer credentials on
  * every authenticated route: a "purpose-scoped" token that was not scoped at
  * all, sitting in browser history, provider logs and proxy logs.

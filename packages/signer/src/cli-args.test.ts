@@ -29,7 +29,7 @@ describe('signer CLI arguments (#3173)', () => {
     expect(decision.text).toMatch(/belongs to the connector/)
   })
 
-  it('--help names EVERY registered tool — pinned against toolSchemas so a fifth tool cannot drift out', () => {
+  it('--help names EVERY registered tool — pinned against toolSchemas so a sixth tool cannot drift out', () => {
     const text = helpText()
     const registered = Object.keys(toolSchemas)
     expect(registered.length).toBeGreaterThanOrEqual(4)

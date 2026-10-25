@@ -13,7 +13,7 @@ covers:
   - .agents/skills/new-task/SKILL.md
   - .claude/commands/ship-next.md
   - .claude/commands/new-task.md
-last-verified: "2026-10-20"
+last-verified: "2026-10-25"
 ---
 
 # Autonomous PR loop
@@ -96,7 +96,9 @@ overlap, or stuck CI.
 
 The queue is always **GitHub issues** — nothing is tracked in the repo. Issue
 state *is* the backlog state: an open issue with no PR, no live claim or work
-overlap, no `pending-review` label, and not external intake is ready
+overlap, no open dependency (a `Depends on` issue still open — ship-next §
+*Select The Work* lists the blockers), no `pending-review` label, and not
+external intake is ready
 (`pending-review` means its spec review or an owner decision is still
 outstanding — `new-task` § *Hold until ready*; external intake — an author
 neither a maintainer nor a Bot, not accepted by a maintainer removing its
@@ -132,7 +134,7 @@ the paperwork. Then the loop consumes those issues one of these ways:
    label (the loop's default selector label). The "🔁 Loop task" issue template
    (`.github/ISSUE_TEMPLATE/`) prompts for the fields the loop needs and applies
    the label for you. Run `/loop /ship-next` (or `label=<name>` for a different
-   loop label); the loop takes them oldest-first.
+   loop label); the loop takes them lowest number first.
 
 2. **A GitHub epic + sub-issues** — for a multi-PR plan that should burn down
    together. Open a parent (epic) issue with well-scoped **sub-issues**, then run
@@ -213,9 +215,9 @@ PR go through before handing it the whole queue.
   proceeds; a blank one does not, and neither does a `passed` with no SHA. The loop's whole safety
   claim below is "CI + haven-reviewer", and a silently skipped pass is that
   claim being false with nothing to read it off.
-- A **money-path** PR (x402 / payments / machine-payments / payment-coverage /
-  allowance-module / agentAuth / release tooling) auto-merges on the same terms
-  (#1024). The label still selects `money.md` and its characterization-test
+- A **money-path** PR (one touching a file inside the money-path perimeter,
+  which [`ship-playbooks/money.md`](ship-playbooks/money.md) links rather than
+  restates) auto-merges on the same terms (#1024). The label still selects `money.md` and its characterization-test
   bar; it no longer pauses the merge. See "Money-path safety model" below for
   what replaced the pause, **and for what that replacement does not cover**.
 - A PR changing a **direct migration implementation file**
@@ -422,13 +424,17 @@ Without this, `ship-next` can open PRs but cannot auto-merge them.
      **Require a pull request before merging**, ☑ **Block force pushes**, and ☑
      **Require status checks to pass** on **15 contexts**: **Lint, Type-check &
      Build**, **Detect changed surfaces** and **Repo CI config checks** — the
-     last runs the whole `scripts/ci/*.test.mjs` glob plus the dist-freshness
-     self-test, the workspace-pin lint and the MCP↔CLI vocabulary guard
-     (#3131, whose two inputs sit behind the `sdk` and `backend` gates, so it
-     cannot live in either job) — plus every per-surface quality
-     check: **Backend checks**, **Frontend checks**, **SDK checks**, **CLI
+     last runs the whole `scripts/ci/*.test.mjs` glob plus eight more steps,
+     among them the dist-freshness self-test, the workspace-pin lint and the
+     MCP↔CLI vocabulary guard (#3131, whose two inputs sit behind the `sdk` and `backend` gates, so it
+     cannot live in either job) — plus eight per-surface checks by name:
+     **Backend checks**, **Frontend checks**, **SDK checks**, **CLI
      checks**, **MCP server checks**, **MCP checks**, **Connect checks**,
-     **Signer checks** — and the blocking gates **Banned product-copy terms**
+     **Signer checks**. The other per-surface `ci.yml` jobs (**Core**, **UI**,
+     **Ops**, **Demo merchant** and **QA agent checks**, and **Install-path
+     smoke**) are not listed; they gate through **Lint, Type-check & Build**,
+     whose `needs` includes them and which fails when a job its surface routed
+     did not succeed. Then the blocking gates **Banned product-copy terms**
      (#902), **Design-system coupling (strict)** (#1023), **Docs front-matter &
      agent skills** (#1023) and **Contract-doc coupling** (#646). Inside
      *Backend checks*, the shrink-only ratchet steps gain the request-schema
@@ -504,8 +510,9 @@ Without this, `ship-next` can open PRs but cannot auto-merge them.
      already carries the rest, and adding those here would be a second copy to
      drift. It exists only because merge methods intersect and *Haven automerge
      rules* cannot be narrowed without taking `main` down with it: squash-only
-     on `dev` had to be expressed on a `dev`-only ruleset. (Its "require Copilot
-     review" checkbox is ticked and inert while the approval count is zero.)
+     on `dev` had to be expressed on a `dev`-only ruleset. (The 2026-10-25 API
+     read shows four rules on it — deletion, force-push, pull request and the
+     one status check — and no Copilot-review rule.)
      **Required: External intake gate (#4200)**
      (`.github/workflows/external-intake-gate.yml`), applied to THIS ruleset by
      the owner on 2026-10-21 and read back from `rules/branches/dev` the same
@@ -600,7 +607,11 @@ Without this, `ship-next` can open PRs but cannot auto-merge them.
 
    Re-verified **2026-10-13** (#3798): the strict flags, the required-check
    lists (15 on `dev`, 19 on `main`), the merge methods and the code-owner
-   requirements are unchanged. The 2026-10-09 authenticated read also shows
+   requirements are unchanged. Re-verified **2026-10-25** (#4372) with the same
+   commands: three active rulesets; 16 required contexts on `dev` and 19 on
+   `main`; strict only on *Dev gate*; squash only on `dev` and merge only on
+   `main`; code-owner review on *Haven automerge rules* and *Dev gate*, not on
+   *Dev merge*; PR ownership gate still not required. The 2026-10-09 authenticated read also shows
    `Dev gate` with **no bypass actors** (the admin-role `always` bypass lives
    only on *Haven automerge rules*) — see
    [`branch-and-release-flow.md`](branch-and-release-flow.md) § *Promotion to
@@ -609,9 +620,10 @@ Without this, `ship-next` can open PRs but cannot auto-merge them.
    effective branch rules without admin UI access: it reports each rule once per
    matching ruleset, which is the union above seen from the other side. Two
    rulesets match each branch, so both report `pull_request`, `deletion` and
-   `non_fast_forward` twice; `required_status_checks` comes back **once** on
-   `dev` (only *Haven automerge rules* sets it) and **twice** on `main` (that
-   ruleset plus *Dev gate*).
+   `non_fast_forward` twice. Since the External intake gate went on *Dev
+   merge*, `required_status_checks` also comes back **twice** on each branch:
+   on `dev` from *Haven automerge rules* and *Dev merge*, on `main` from that
+   ruleset and *Dev gate*.
 
    **How a red push run gets noticed (#3890).** Nothing watched that run.
    #3886 is the case: #3855's merge broke `MCP server checks` on its own push,

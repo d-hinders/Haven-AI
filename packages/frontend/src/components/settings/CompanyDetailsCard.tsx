@@ -1,7 +1,8 @@
 'use client'
 
 /**
- * Settings → Company details (#3332), behind `HAVEN_OWNER_COMPANY_DETAILS`.
+ * Company details card on the Settings → Business tab (#3332; moved to the
+ * Business tab by #4359), behind `HAVEN_OWNER_COMPANY_DETAILS`.
  *
  * ── Gating ───────────────────────────────────────────────────────────────
  * `useCompanyDetails`'s `status` decides everything this component renders:
@@ -13,8 +14,8 @@
  * company details", the purpose line and **Add company details**, which
  * reveals the form — because a first-time owner no longer meets a wall of
  * empty inputs; the purpose line stays above it either way
- * (`owner-company-details.md`: the purpose and retention text is shown
- * above the form, always).
+ * (`owner-company-details.md`: the purpose text is shown above the form —
+ * in the empty state too — and the error state does not show it).
  *
  * The reads come from `BusinessDataProvider` (#4359): the card, the
  * Connections card and the Business tab's visibility rule share ONE

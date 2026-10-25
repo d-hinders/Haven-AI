@@ -60,7 +60,7 @@ export interface PaymentReceipt {
      * #2960: one party vocabulary for "who paid", additive alongside `account`
      * above (which is `parties.treasury_account` only). Optional: a server
      * from before #2960 emits neither. Ignored by `verifyPaymentReceipt`,
-     * which reads only `authorization`.
+     * which reads only the bundle's `authorization` and `onChain.chainId`.
      */
     parties?: RawPaymentParties
     chainId: number
@@ -71,8 +71,9 @@ export interface PaymentReceipt {
      * merchant DELIVERED (`ok` / `unusable` / `partial`, plus a bounded
      * note). Additive and OPTIONAL: a server from before #3770 emits
      * neither, and `null` means the agent has not reported. Ignored by
-     * `verifyPaymentReceipt`, which reads only `authorization` — the same
-     * rule `parties` follows. Evidence only: it never changes what the
+     * `verifyPaymentReceipt`, which reads only the bundle's `authorization`
+     * and `onChain.chainId` — the same rule `parties` follows. Evidence
+     * only: it never changes what the
      * payment itself is, and `settled`/amounts are untouched by a report.
      */
     deliveryQuality?: {

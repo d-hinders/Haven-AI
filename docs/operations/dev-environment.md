@@ -893,9 +893,16 @@ Isolation rules that are non-negotiable for a payments product:
  > was re-read for it, and `last-verified` is not bumped.
  - **Owner company details (#3332)** — `HAVEN_OWNER_COMPANY_DETAILS` (strict
   boolean) gates `/user/company-details*`, the additive `parties.buyer`
-  field on payment evidence/receipts, and the Settings → Company details
-  screen. Dark by default; GET/PUT and POST vies-check answer 404 when off, and
-  the Settings screen itself renders nothing (no title, no form) while off —
+  field on payment evidence/receipts, and the Company details card on the
+  Settings → Business tab (the card moved there in #4359/PR #4382; #4415
+  corrects the name and the flag-off sentence in this bullet only —
+  nothing else in this document was re-read for it, and `last-verified` is
+  not bumped). Dark by default; GET/PUT
+  and POST vies-check answer 404 when off, and
+  the card itself renders nothing (no title, no form) while off — the
+  Settings page still renders General and Security, and once the reads
+  settle the Business tab is listed only when this card or the accounting
+  connections card has something to show (`SettingsClient.tsx:38-56`) —
   so with the flag off there is no dashboard way to erase, even though the
   DELETE route stays ungated (it erases only the caller's own row). Erasure
   then goes through Haven support, who removes the row directly in the

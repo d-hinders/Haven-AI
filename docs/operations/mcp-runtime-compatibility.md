@@ -87,6 +87,18 @@ covers:
 last-verified: "2026-10-23"
 ---
 
+> **Re-verified #4415 (2026-10-25, stale comment sweep):** the only covered
+> file this diff touches is `packages/signer/src/cli-args.test.ts` — one test
+> TITLE now says "a sixth tool" (the signer library exposes five tools, so a
+> new one is the sixth), and the `:35` floor assertion is raised from
+> `toBeGreaterThanOrEqual(4)` to `toBeGreaterThanOrEqual(5)` — the one test
+> change that is not a title. The `:38` `toHaveLength(registered.length)`
+> bullet-count pin is unchanged and still pins `--help` against
+> `Object.keys(toolSchemas)`. No signer source, help text, consent
+> input or protocol surface changes. Every other file in the diff is outside
+> this document's coverage. Nothing else in this document was re-verified,
+> and `last-verified` is not bumped.
+
 > **Re-verified #4352 (2026-10-23, the additive `budget_ended_at` /
 > `budgetEndedAt` read):** two covered surfaces change. The backend
 > machine-payments allowances read adds ONE top-level response field (the

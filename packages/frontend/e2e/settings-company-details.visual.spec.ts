@@ -1,6 +1,6 @@
 /**
- * Visual regression for Settings → Company details (#3332, reshaped #4359):
- * the owner company-details + VIES section, behind
+ * Visual regression for the Company details card on Settings → Business
+ * (#3332, reshaped #4359): the owner company-details + VIES section, behind
  * `HAVEN_OWNER_COMPANY_DETAILS`.
  *
  * Two states, light + dark (desktop only — no mobile dark baseline exists

@@ -2,10 +2,12 @@
  * Accounting provider registry (#2862, epic #2858).
  *
  * The list of providers Haven knows about, as descriptors (`provider.ts`).
- * Owner decision 2026-09-11: Accounted, Light and Igdrasil are LISTED now as
- * *Coming soon* — listing is a product decision, and the dashboard shows
- * them before any code for them exists. Only a `live` provider accepts a
- * connect; the generic routes enforce that through `assertConnectable`.
+ * Owner decision 2026-09-11: a provider can be LISTED as *Coming soon*
+ * before any code for it exists — listing is a product decision, and the
+ * dashboard shows it. Light and Igdrasil are the two listed that way today
+ * (Accounted joined them the same way and has been `live` since #3017).
+ * Only a `live` provider accepts a connect; the generic routes enforce
+ * that through `assertConnectable`.
  *
  * `registerConnector` (connector.ts) is the OTHER registry — the instances
  * that actually talk to a provider. A provider can be listed here without an

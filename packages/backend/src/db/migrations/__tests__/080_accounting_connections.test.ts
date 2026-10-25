@@ -198,7 +198,7 @@ describeDb('080_accounting_connections (#2860)', () => {
     })
   })
 
-  it('exactly ONE active destination per user is a constraint, not a convention', async () => {
+  it('AT MOST ONE active destination per user is a constraint, not a convention', async () => {
     const userId = await seedUser('mig080-active@example.test')
     const insert = (provider: string) =>
       db.query(

@@ -31,6 +31,15 @@ covers:
 last-verified: "2026-10-23"
 ---
 
+> **Re-verified #4415 (2026-10-25, stale comment sweep):** the only covered
+> file this diff touches is `packages/backend/src/config.ts` — one COMMENT
+> renames the screen it cites (the Company details card has lived on the
+> Settings → Business tab since #4359). No flag, env scalar, parser call or
+> default changes: `ownerCompanyDetailsEnabled` and every other entry keep
+> their values. Every other file in the diff is outside this document's
+> coverage. Nothing else in this document was re-verified, and
+> `last-verified` is not bumped.
+
 > **Re-verified unchanged (#4319, 2026-10-23, one added backend feature flag
 > in `packages/backend/src/config.ts`).** The only covered file this PR
 > touches is `config.ts`: it adds `eip3009ReceiptAttribution`, a

@@ -414,7 +414,19 @@ export const GOVERNED_PACKAGE_DOCS = [
     // above no longer applies. Follow-up in the same PR: exit-code row 4's
     // lead was false for a device login the human denied (exit 4, no session
     // yet), and its list of CLI-side refusals read as complete; both fixed.
-    'last-verified': '2026-10-10',
+    //
+    // #4372 part K: the WHOLE README re-read at dev fb2da6b92 against
+    // `haven --help` (built from this tree) and `src/commands.ts`, and EDITED.
+    // `haven whoami` prints the email and name only; session expiry and the
+    // API URL come only under `--json` (run against a local stub backend).
+    // "A failure is always { ok: false, error }" had one exception: an
+    // `agents connect --run` refusal exits 4 with the run object, the
+    // connector's error under `outcome.error`. A device-code session also
+    // cannot run `wallets rename` or `activity export --format sie`: their
+    // routes are not in `OWNER_CLI_ALLOWED_ROUTES`, and the 401 exits 3.
+    // `HAVEN_EMAIL` alone switches `haven login` to the password path. The
+    // usage block gains `--expires`. Prior: '2026-10-10' (see above).
+    'last-verified': '2026-10-25',
   },
   {
     doc: 'packages/mcp-server/README.md',
@@ -481,7 +493,20 @@ export const GOVERNED_PACKAGE_DOCS = [
     ],
     // Registered at the scaffold's own build (#3515); the coupling gate's
     // first implicated PR re-reads the body and bumps this date.
-    'last-verified': '2026-10-02',
+    // #4372 part K: the WHOLE README re-read at dev fb2da6b92 and EDITED.
+    // Doc health reads a build-time JSON, not `/ops/*`; "everything visual
+    // comes from @haven_ai/ui" was false (the sign-in card's backend picker
+    // is a native <select>); http is allowed for every loopback host, not
+    // only `localhost` (`LOCAL_HOSTNAMES`); the CSP's font-src is
+    // `'self' data:`; the fragment scrub runs in an effect while the client
+    // root renders nothing, not "before the first render"; the prod banner
+    // is the shell's, on signed-in pages. Checked unchanged: the error codes
+    // (`SIGN_IN_ERRORS`), origin-keyed tokens, the 401 drop in `opsFetch`,
+    // sign-out clearing every token, `VERCEL_ENV=preview` stripping prod,
+    // `OPS_REDIRECT_ORIGINS`, audit rows on every `dataRead` and on reveal,
+    // and the render smoke's steps, `OPS_SMOKE_CHROMIUM` and its blind spot.
+    // Prior: '2026-10-02' (the scaffold registration above).
+    'last-verified': '2026-10-25',
   },
   {
     // The #1992 file. Its prose is mostly about BACKEND behaviour — which

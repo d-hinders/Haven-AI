@@ -1,16 +1,18 @@
 /**
- * The `@haven_ai/core` barrel imports nothing a production image lacks.
+ * The `@haven_ai/core` barrel reaches no package outside its runtime
+ * dependencies (none today) and Node built-ins.
  *
- * The backend and mcp-server images install with `npm ci --omit=dev`, and
- * every runtime service imports this barrel, so a module reachable from
- * `index.ts` that imports a devDependency stops every service from booting.
- * #4413 did exactly that: re-exporting the comment stripper put a bare
- * `import ts from 'typescript'` at the top of `dist/index.js`, and every dev
- * deploy failed until the stripper moved to its own subpath.
+ * Packages that bundle the barrel inline whatever it imports: mcp-server's
+ * tsup build inlines @haven_ai/core (a devDependency there). #4413 re-exported
+ * the comment stripper, which imports `typescript`, so the hosted MCP bundle
+ * inlined the whole compiler (~9.8 MB) and crashed at boot on "Dynamic require
+ * of fs"; every hosted MCP deploy on dev failed until the stripper moved to
+ * its own subpath.
  *
  * This walks the barrel's RELATIVE import graph in source (so an indirect
- * re-export is caught too) and checks every bare specifier it reaches against
- * the package's runtime `dependencies` (none today) and Node built-ins.
+ * re-export is caught too) and checks the bare specifiers of static
+ * `import`/`export … from` declarations and of `import(…)` / `require(…)`
+ * calls with a string literal. A specifier built at runtime is not seen.
  */
 import { readFileSync } from 'node:fs'
 import { builtinModules } from 'node:module'
@@ -23,8 +25,10 @@ const PKG = JSON.parse(readFileSync(resolve(SRC, '../package.json'), 'utf8')) as
   dependencies?: Record<string, string>
 }
 const RUNTIME = new Set(Object.keys(PKG.dependencies ?? {}))
-// `import`/`export … from`, and side-effect imports; type-only ones are erased.
-const SPECIFIER = /^\s*(?:import|export)\s+(?!type\b)(?:[^'"]*?\sfrom\s+)?['"]([^'"]+)['"]/gm
+// Static `import`/`export … from` and side-effect imports (type-only ones are
+// erased), plus `import('…')` and `require('…')` calls, anywhere on a line.
+const SPECIFIER =
+  /(?:\b(?:import|export)\s+(?!type\b)(?:[^'"]*?\sfrom\s+)?|\b(?:import|require)\s*\(\s*)['"]([^'"]+)['"]/g
 
 function reachable(entry: string): Map<string, string[]> {
   const seen = new Map<string, string[]>()

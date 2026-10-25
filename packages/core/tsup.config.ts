@@ -11,5 +11,6 @@ export default defineConfig({
   // comment-stripper (its own entry, never in the barrel) imports typescript;
   // keep it external rather than bundling the compiler into dist. Only test
   // code imports that entry, and the workspace's devDependency satisfies it.
+  // A bundler that inlines the barrel must never reach it (#4413).
   external: ['typescript'],
 })

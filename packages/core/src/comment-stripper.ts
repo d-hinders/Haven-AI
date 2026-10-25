@@ -22,12 +22,11 @@
  *
  * Note for `packages/core` consumers: this module is its own entry,
  * `@haven_ai/core/comment-stripper`, and is deliberately absent from the
- * `@haven_ai/core` barrel. It is re-emitted into `dist/` with a bare
- * `import 'typescript'`, which only the workspace's hoisted devDependency
- * satisfies: the backend and mcp-server images install with
- * `npm ci --omit=dev`, so a barrel re-export would make every service fail
- * to boot (it did, from #4413 until this subpath). Import it from test code
- * only.
+ * `@haven_ai/core` barrel. Anything that bundles the barrel would otherwise
+ * inline the TypeScript compiler: from #4413 until this subpath, mcp-server's
+ * tsup build (which inlines @haven_ai/core) produced a ~9.8 MB `dist/cli.js`
+ * that crashed at boot on "Dynamic require of fs" inside typescript.js, so
+ * every hosted MCP deploy on dev failed. Import it from test code only.
  */
 import ts from 'typescript'
 

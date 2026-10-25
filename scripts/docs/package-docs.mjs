@@ -134,6 +134,25 @@ export const GOVERNED_PACKAGE_DOCS = [
     owner: '@d-hinders',
     status: 'current',
     covers: ['packages/signer/src/**', 'packages/sdk/src/edge.ts', 'packages/sdk/src/edge-imports.test.ts'],
+    // #4372 part I: the WHOLE README re-read at dev 6a0486711 and EDITED. The
+    // haven_sign row and the unbound-branch allowlist name the third
+    // redemption shape, the three-link [sub grant, parent child, budget]
+    // chain (#3330, sdk redemption-guard.ts refuse()); the library has five
+    // methods, not six (EdgeSigner in core.ts); the --help pin no longer says
+    // "a fifth tool" (five are registered); the direct-payment diagram shows
+    // the #3495 compact haven_pay result and the payment_id sign; the
+    // trust-model note credits the local allowlist and #3271 binding with
+    // what they prove (shape and integrity, not amount or recipient); the
+    // Connect Agent 2 paragraph lists the register body field by field
+    // (connect api.ts registerSetup) instead of "only" four items.
+    // Re-checked unchanged: the five SignerToolName tools, the five version
+    // constants and the capability key, SIGN_CONTEXT_TIMEOUT_MS 15 s, the four
+    // sign-context routes, RETIRED_BINDING_MEMORY 64, MAX_SETTLEMENT_WINDOW
+    // 600 s, the SIWX limits (300 s + 30 s skew, version 1, https, nonce),
+    // AUDIT_ROTATE_BYTES 8 MiB, the sidecar paths, the CLI flags and exit 2,
+    // the Node >= 22 floor, the consent-hash inputs, HAVEN_X402_BINDING_SIGNER
+    // and the account-address keys. The startup timings are #3173's measured
+    // numbers, not re-measured. Prior:
     // #3645: EDITED, scope = the network-call paragraph (the task- and
     // sub-budget sign-context reads and the X-Haven-Client header), verified
     // against src/sign-context.ts. Nothing else re-verified. Prior:
@@ -214,7 +233,7 @@ export const GOVERNED_PACKAGE_DOCS = [
     // #3173: new § "Startup, CLI options and the consent screen" verified
     // against cli-args.ts, consent.ts, server.ts, core.ts (lazy x402) and the
     // measured numbers in the PR; nothing else re-verified.
-    'last-verified': '2026-10-01',
+    'last-verified': '2026-10-25',
   },
   {
     doc: 'packages/mcp/README.md',

@@ -45,25 +45,33 @@ describe('catalog ingestion monitor wiring in index.ts (#4407)', () => {
     expect(CODE).not.toMatch(/#2862: provider-generic connections/)
   })
 
-  const create = /const\s+(\w+)\s*=\s*createCatalogIngestMonitor\s*\(\s*\)/g
-  const created = [...CODE.matchAll(create)]
+  // Every call counts, whatever its arguments or declaration keyword: a
+  // second `createCatalogIngestMonitor({})` inside the tick is the #4407
+  // defect itself (#4410 review, cells D7/D8).
+  const calls = [...CODE.matchAll(/\bcreateCatalogIngestMonitor\s*\(/g)]
+  const declared = CODE.match(/\b(?:const|let|var)\s+(\w+)\s*=\s*createCatalogIngestMonitor\s*\(/)
 
   it('builds the monitor exactly once', () => {
-    expect(created).toHaveLength(1)
+    expect(calls).toHaveLength(1)
+    expect(declared).not.toBeNull()
   })
 
   it('builds it BEFORE the tick closure, so it outlives every tick', () => {
     const closure = CODE.indexOf('const runCatalogIngest = async')
     expect(closure).toBeGreaterThan(-1)
-    expect(created[0]!.index!).toBeLessThan(closure)
+    expect(calls[0]!.index!).toBeLessThan(closure)
   })
 
   it('the leader-locked tick calls that monitor, not a bare runCatalogIngestTick', () => {
-    const name = created[0]![1]
+    const name = declared![1]
     const closure = CODE.slice(CODE.indexOf('const runCatalogIngest = async'))
     const body = closure.slice(0, closure.indexOf('setInterval(runCatalogIngest'))
     expect(body).toMatch(/runIfLeader\(\s*LEADER_LOCK_KEYS\.catalogIngest/)
     expect(body).toMatch(new RegExp(`\\b${name}\\.tick\\(\\s*\\)`))
-    expect(CODE).not.toMatch(/\brunCatalogIngestTick\s*\(/)
+    // The bare name, not a call: an aliased import, a destructured dynamic
+    // import or a log string that fakes `name.tick()` all still spell it
+    // (#4410 review, cells D3-D5). Comments are already gone, so a hit is code
+    // or a string, and a string naming it is worth a look either way.
+    expect(CODE).not.toMatch(/\brunCatalogIngestTick\b/)
   })
 })

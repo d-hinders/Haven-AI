@@ -187,9 +187,10 @@ export interface CatalogIngestMonitor {
  * `runProbeBatch` built a fresh one per tick. Within a tick it could never
  * fire (migration 066 allows one pending row per host), so a failing
  * merchant was probed on every 5-minute tick and degraded after about 10
- * minutes instead of about 30. The cooldown is per process: a restart or a
- * leader move starts it empty, which is the replica-local bound `probe.ts`
- * already accepts for a politeness budget.
+ * minutes instead of about 30. The cooldown is per process: a restart
+ * starts it empty, and since the leader lock is taken per tick, each replica
+ * that wins a tick consults its own. That is the replica-local bound
+ * `probe.ts` already accepts for a politeness budget.
  */
 export function createCatalogIngestMonitor(
   deps: Omit<CatalogIngestDeps, 'cooldown'> = {},

@@ -143,7 +143,7 @@ All in `packages/backend/src/modules/catalog/lifecycle.ts` (and the probe's
 | Knob | Value | Effect |
 |---|---|---|
 | Monitor tick | 5 min (`CATALOG_INGEST_INTERVAL_MS`, index.ts) | How often the leader scans the queue |
-| Probe cooldown | 15 min / host (`DEFAULT_HOST_COOLDOWN_MS`) | A host is probed at most once per window by the leader process. The monitor (`createCatalogIngestMonitor`) holds one cooldown for the process lifetime, so the window spans ticks (#4407); a restart or a leader move starts it empty |
+| Probe cooldown | 15 min / host (`DEFAULT_HOST_COOLDOWN_MS`) | The cooldown is per process: the monitor (`createCatalogIngestMonitor`) holds one for the process lifetime, so the window spans that process's ticks (#4407), and a restart starts it empty. The leader lock is taken per tick, so with more than one replica the tick can land on a different replica, and each replica holds its own window: a host is probed at most once per window per replica, off by at most the replica count |
 | Re-verification cadence | 24 h (`REVERIFY_CADENCE_MS`) | `verified_payable` entries are re-probed when `last_verified_at` is older. A failed re-probe does not move `last_verified_at`, so the row stays due and is probed again as soon as the per-host cooldown allows, until it passes or degrades |
 | Failure threshold | 3 (`FAIL_AFTER_CONSECUTIVE_FAILURES`) | Consecutive probe failures before a row degrades to `failed` |
 | Ownership token TTL | 7 d (`TOKEN_TTL_MS`, ownership.ts) | A proof is only accepted inside this window; expiry fails the row |

@@ -12,15 +12,39 @@
  * `passport/__tests__/anchor-seams-wired.test.ts`: importing `index.ts` builds
  * a Fastify app, opens a pool and starts timers. Comments are stripped first,
  * so a call that survives only as a comment does not count.
+ *
+ * The stripping is TypeScript's own (`transpileModule` with
+ * `removeComments`), not a regex. A block-comment regex run over this file
+ * opened a fake block at the `/accounting/connections/*` text inside a line
+ * comment and closed it at the next jsdoc, so about 35 lines of real code
+ * vanished from the scan (#4410 review, cell R1). Only the parser knows where
+ * a comment starts; the sanity test below pins a statement from that region.
  */
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
 
 const INDEX = readFileSync(fileURLToPath(new URL('../../../index.ts', import.meta.url)), 'utf8')
-const CODE = INDEX.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
+const CODE = ts.transpileModule(INDEX, {
+  compilerOptions: {
+    removeComments: true,
+    target: ts.ScriptTarget.ES2022,
+    module: ts.ModuleKind.ESNext,
+  },
+}).outputText
 
 describe('catalog ingestion monitor wiring in index.ts (#4407)', () => {
+  it('the comment stripper keeps real code: no region of index.ts is swallowed', () => {
+    // Statements from the stretch the old regex swallowed, and from either
+    // side of it. If a stripper ever eats code again, these go red first.
+    expect(CODE).toMatch(/await app\.register\(accountingConnectionsRoutes/)
+    expect(CODE).toMatch(/registerConnector\(new AccountedConnector\(\)\)/)
+    expect(CODE).toMatch(/const CATALOG_INGEST_INTERVAL_MS\s*=/)
+    // And comments really are gone.
+    expect(CODE).not.toMatch(/#2862: provider-generic connections/)
+  })
+
   const create = /const\s+(\w+)\s*=\s*createCatalogIngestMonitor\s*\(\s*\)/g
   const created = [...CODE.matchAll(create)]
 

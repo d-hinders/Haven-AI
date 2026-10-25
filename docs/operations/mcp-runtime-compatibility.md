@@ -87,6 +87,24 @@ covers:
 last-verified: "2026-10-23"
 ---
 
+> **Re-verified #4352 (2026-10-23, the additive `budget_ended_at` /
+> `budgetEndedAt` read):** two covered surfaces change. The backend
+> machine-payments allowances read adds ONE top-level response field (the
+> latest ended budget's expiry, null unless an expired row exists — the
+> same narrow query the refusal answers use), and
+> `packages/sdk/src/account-reads.ts` maps it and derives `budgetEndedAt`
+> on `getAgentSummary()` for an agent whose only budgets have ended. Additive both ways: an older backend's
+> rows omit the key and map to `null`; the readiness values, the
+> tools/list shape (one description sentence) and every other response
+> field are unchanged, so local and hosted surfaces stay in lockstep — the
+> hosted `haven_get_agent` description moves with the SDK's
+> `tool-descriptions.ts` in the same commit, and the
+> `tools-list.snapshot.json` golden is regenerated in the same commit.
+> Description budget round 30: the new sentence is offset inside the same
+> description, total unchanged at 31,812. Nothing else in this document was
+> re-verified, and `last-verified` is re-stamped to 2026-10-23 for this
+> note.
+
 > **Re-verified unchanged (#4327, 2026-10-23, the CSV export's response
 > plumbing moves into `packages/backend/src/domain/csv.ts`).** Two covered
 > files change: `packages/backend/src/routes/transactions.ts` and

@@ -227,7 +227,13 @@ describe('/for-agents.md (#2523)', () => {
     // spent for the period — it names both causes (no rows vs spent rows) and
     // `budgetRefillsAt` (+160 bytes, after cutting the first draft by ~110).
     // Nothing unrelated was trimmed to fit.
-    expect(Buffer.byteLength(served, 'utf8')).toBeLessThan(12200)
+    //
+    // 12200 -> 12400 for #4352 (2026-10-23; the page is 12264 bytes at this
+    // commit, 12102 before it): the same bullet now names THREE causes —
+    // `budgetEndedAt` set (the budget ended; waiting will not help), no rows
+    // without it (nobody approved), spent rows (`budgetRefillsAt`) —
+    // +162 bytes. Nothing unrelated was trimmed to fit.
+    expect(Buffer.byteLength(served, 'utf8')).toBeLessThan(12400)
   })
 
   it('treats chains.default as expected only and confirms funding after login', () => {

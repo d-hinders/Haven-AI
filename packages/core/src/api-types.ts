@@ -5741,6 +5741,11 @@ export type components = {
             delegate_address: string;
             chain_id: number;
             superseded_by: components["schemas"]["AgentSupersession"];
+            /**
+             * Format: date-time
+             * @description #4352 (decision 5, additive): when the agent’s only budgets for this chain have ENDED, the latest ended budget’s expiry (ISO 8601) — read by the same narrow expired-row query the refusal answers use. `null` when no expired row exists; the field NEVER reports a live budget. Lets an agent whose `allowances[]` is empty tell “nobody approved yet” from “the budget ended on this date”. Optional on the schema so an older backend that omits it stays valid.
+             */
+            budget_ended_at?: string | null;
             allowances: {
                 /** Format: uuid */
                 id: string;
@@ -21236,7 +21241,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description The amount exceeds the agent's remaining delegation budget — decided here and recorded in the payment_refusals ledger (source "hosted_prepare"). Carries error_code "delegation_budget_exceeded", phase "insufficient_funds", next_action "fund_account_or_raise_allowance", plus remaining/remaining_atomic, amount/amount_atomic and shortfall/shortfall_atomic, and resource_url / merchant_address when the request carried them. */
+            /** @description The agent has no spend authority that can pay this. Since #4352 there are two shapes: the amount exceeds a LIVE budget’s remaining period figure — error_code "delegation_budget_exceeded", recorded in the payment_refusals ledger (source "hosted_prepare") — or the only budget row for the token has ENDED — error_code "delegation_expired", with budget_ended_at and the end-date prose ("this budget ended on <date>; ask the owner to set a new one"). Both carry phase "insufficient_funds", next_action "fund_account_or_raise_allowance", plus remaining/remaining_atomic, amount/amount_atomic and shortfall/shortfall_atomic, and resource_url / merchant_address when the request carried them. */
             403: {
                 headers: {
                     [name: string]: unknown;

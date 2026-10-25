@@ -44,6 +44,8 @@ import { checkTaskBudgetCap, taskBudgetExceededBody } from '../task-budgets/inde
 import {
   buildPeriodExceededBody,
   evaluatePeriodPrecheck,
+  expiredBudgetLedgerDetail,
+  findExpiredBudgetForToken,
   periodExceededLedgerDetail,
   periodPrecheckLinks,
   refuseBothScopeIds,
@@ -463,6 +465,39 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
       )
     }
     if (!fundingAuth) {
+      // #4352: `null` here covers "no live row" AND "the only row has expired"
+      // (the #3802 read hides expired rows). When the only row for the token
+      // has ENDED, name it: `delegation_expired` with the end date, not a
+      // no-delegation refusal that sends the agent to ask for an approval
+      // that already happened. The decision is unchanged (same 403, nothing
+      // created or signed) — only the reason and the words differ. The
+      // expired row is never live (`budget-scope/expired-budget.ts`).
+      const expired = await findExpiredBudgetForToken(agent.id, agent.chain_id, tokenAddress)
+      if (expired) {
+        return refuse(
+          {
+            code: 403,
+            body: {
+              error:
+                `Agent has no delegation able to fund EIP-3009 settlement for ${tokenConfig.symbol} — ` +
+                `this budget ended on ${expired.endedOnDate}; ask the owner to set a new one.`,
+            },
+          },
+          {
+            userId: agent.user_id,
+            agentId: agent.id,
+            chainId: agent.chain_id,
+            tokenSymbol: tokenConfig.symbol,
+            amountAtomic: amountRaw.toString(),
+            accountAddress: agent.account_address,
+            merchantTo: merchantPayTo.toLowerCase(),
+            resourceUrl: url,
+            reason: 'delegation_expired',
+            source: 'x402_authorize',
+            detail: expiredBudgetLedgerDetail(expired.endedAtIso),
+          },
+        )
+      }
       // #3052: the sibling writers for this condition — the erc7710
       // no-delegation 403 below and the funding-leg 403 on POST /payments —
       // already recorded it; this leg answered the same refusal with nothing
@@ -648,6 +683,37 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
   const budget =
     erc7710Scope.subBudget?.parentDelegation ?? erc7710Scope.taskBudget?.parentDelegation ?? erc7710Scope.delegation
   if (!budget) {
+    // #4352: the only row for the token may have EXPIRED (the #3802 read hides
+    // it) — answer `delegation_expired` with the end date instead of a
+    // no-delegation refusal. Same decision (403, fire-and-forget row through
+    // the choke point, nothing created), only the reason and the words
+    // change. The expired row is never live (`budget-scope/expired-budget.ts`).
+    const expired = await findExpiredBudgetForToken(agent.id, agent.chain_id, tokenAddress)
+    if (expired) {
+      return refuse(
+        {
+          code: 403,
+          body: {
+            error:
+              `Agent has no active budget delegation for ${tokenConfig.symbol} to this merchant — ` +
+              `this budget ended on ${expired.endedOnDate}; ask the owner to set a new one.`,
+          },
+        },
+        {
+          userId: agent.user_id,
+          agentId: agent.id,
+          chainId: agent.chain_id,
+          tokenSymbol: tokenConfig.symbol,
+          amountAtomic: amountRaw.toString(),
+          accountAddress: agent.account_address,
+          merchantTo: payTo.toLowerCase(),
+          resourceUrl: url,
+          reason: 'delegation_expired',
+          source: 'x402_authorize',
+          detail: expiredBudgetLedgerDetail(expired.endedAtIso),
+        },
+      )
+    }
     // #2945: this 403 is how a recipient pin refuses on this rail — named
     // for what it is, not distinguishable from no-delegation. Fire-and-forget.
     // #3053: through the shared choke point.

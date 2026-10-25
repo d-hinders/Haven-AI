@@ -52,3 +52,10 @@ export type {
   MppPeriodExceededInput,
   SignLegPeriodExceededInput,
 } from './refusal-body.js'
+
+// #4352: the shared expired-budget answer — the narrow expired-row lookup and
+// the `delegation_expired` body/detail builders.
+export { findExpiredBudgetForToken } from './expired-budget.js'
+export type { ExpiredBudget } from './expired-budget.js'
+export { buildExpiredBudgetBody, expiredBudgetLedgerDetail } from './refusal-body.js'
+export type { ExpiredBudgetBodyInput } from './refusal-body.js'

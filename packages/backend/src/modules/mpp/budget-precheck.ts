@@ -114,7 +114,10 @@ import {
 } from '../../infra/repositories/delegation-budgets.js'
 import { readRemainingBudget } from '../../infra/chain/delegation-budget-reader.js'
 import {
+  buildExpiredBudgetBody,
   buildPeriodExceededBody,
+  expiredBudgetLedgerDetail,
+  findExpiredBudgetForToken,
   periodExceededLedgerDetail,
 } from '../budget-scope/index.js'
 import { refuse, type DecidedResponse } from '../payments/index.js'
@@ -361,6 +364,55 @@ export async function handleBudgetPrecheck(
           budget_recipient_addresses: pins,
         },
       }
+    }
+  }
+  // #4352: no live budget matched — but the only row for the token may have
+  // EXPIRED, which the #3802 derived read hides by design. Answer
+  // `delegation_expired` with the end date instead of an over-budget refusal
+  // that tells the agent to wait for a period that will never reset. The
+  // DECISION is otherwise identical to the generic refusal below (same 403,
+  // same choke point, same taxonomy phase/next_action, remaining 0): only the
+  // reason and the words change. The expired row is read by the shared narrow
+  // query alone (`budget-scope/expired-budget.ts`) — it is never live, never
+  // part of this compare, and a live row for the token keeps every path above
+  // (including the #3518 409) exactly as it was.
+  if (!match) {
+    const expired = await findExpiredBudgetForToken(agent.id, agent.chain_id, tokenAddress)
+    if (expired) {
+      const symbolView = tokenView(agent.chain_id, tokenAddress)
+      const expiredBody = buildExpiredBudgetBody({
+        flavor: 'mpp',
+        chainId: agent.chain_id,
+        tokenSymbol: symbolView.symbol,
+        tokenAddress,
+        decimals: symbolView.decimals,
+        amountAtomic: amountAtomicString,
+        endedAtIso: expired.endedAtIso,
+        endedOnDate: expired.endedOnDate,
+        resourceUrl: body.resourceUrl,
+        merchantAddress: merchantTo ?? undefined,
+      })
+      if (body.recordRefusal === false) {
+        // #3967: same decided 403, no ledger write — see the comment above.
+        return { statusCode: 403, body: expiredBody as Record<string, unknown> }
+      }
+      const decided: DecidedResponse = refuse(
+        { code: 403, body: expiredBody },
+        {
+          userId: agent.user_id,
+          agentId: agent.id,
+          chainId: agent.chain_id,
+          tokenSymbol: symbolView.symbol,
+          amountAtomic: amountAtomicString,
+          accountAddress: agent.account_address,
+          merchantTo,
+          resourceUrl: body.resourceUrl,
+          reason: 'delegation_expired',
+          source: 'hosted_prepare',
+          detail: expiredBudgetLedgerDetail(expired.endedAtIso),
+        },
+      )
+      return { statusCode: decided.code, body: decided.body as Record<string, unknown> }
     }
   }
   const remainingAtomic = match ? (remainingById.get(match.id)?.remainingAtomic ?? match.budget_atomic) : '0'

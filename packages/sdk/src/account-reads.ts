@@ -82,6 +82,25 @@ function deriveBudgetRefillsAt(
 }
 
 /**
+ * #4352: `needs_approval` covers a third case an agent must answer
+ * differently — the agent's only budget(s) have ENDED (allowances[] empty,
+ * the server's expired-row read found one). Waiting will not help; the
+ * guidance says to ask the owner to set a new one. null whenever the agent is
+ * not in that case, or when the read carried no usable date (an older
+ * backend, or a live row present — the spent case is
+ * {@link deriveBudgetRefillsAt}'s).
+ */
+function deriveBudgetEndedAt(
+  readiness: HavenAgentReadiness,
+  allowances: ReadonlyArray<{ remainingAtomic: string }>,
+  budgetEndedAt: string | null,
+): string | null {
+  if (readiness !== 'needs_approval' || allowances.length > 0) return null
+  if (!budgetEndedAt || Number.isNaN(Date.parse(budgetEndedAt))) return null
+  return budgetEndedAt
+}
+
+/**
  * #3128: the ONE function behind every `remainingDisplay` the SDK emits —
  * `HavenAllowance.remainingDisplay` and the bootstrap summary's field are the
  * same call on the same inputs.
@@ -317,11 +336,13 @@ export class AccountReads {
     })
     const readiness = deriveReadiness(agent.status, allowances)
     const budgetRefillsAt = deriveBudgetRefillsAt(readiness, allowances)
+    const budgetEndedAt = deriveBudgetEndedAt(readiness, allowances, allowanceSummary.budgetEndedAt)
     return {
       ...agent,
       readiness,
       spend_authority_readiness: readiness,
       budgetRefillsAt,
+      budgetEndedAt,
       allowances,
       taskBudgets,
       pendingSubBudgetSignatures,
@@ -441,6 +462,12 @@ export class AccountReads {
       accountAddress: raw.account_address as string,
       delegateAddress: raw.delegate_address,
       chainId: raw.chain_id,
+      // #4352: a non-empty parseable date → itself; anything else (absent on
+      // an older backend, null when no budget has ended) → null.
+      budgetEndedAt:
+        typeof raw.budget_ended_at === 'string' && !Number.isNaN(Date.parse(raw.budget_ended_at))
+          ? raw.budget_ended_at
+          : null,
       supersededBy: mapSupersession(raw.superseded_by),
       allowances: raw.allowances.map((allowance) => ({
         id: allowance.id,

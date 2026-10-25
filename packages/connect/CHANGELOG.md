@@ -15,7 +15,11 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
-### Changed
+- **The installed skill names the ended budget (#4352).** `needs_approval`
+  with no `allowances[]` rows and `budgetEndedAt` set means the budget ENDED
+  on that date — waiting will not help, ask the owner to set a new one; with
+  no rows and no `budgetEndedAt`, nobody approved a budget yet. An already
+  installed `SKILL.md` stays stale until reinstalled. No update needed.
 
 - **The installed skill tells a spent budget from no budget (#4355).**
   `needs_approval` with no `allowances[]` rows means nobody approved a budget

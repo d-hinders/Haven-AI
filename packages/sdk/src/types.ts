@@ -824,6 +824,14 @@ export interface HavenAllowanceSummary {
   delegateAddress: string
   chainId: number
   allowances: HavenAllowance[]
+  /**
+   * #4352 (additive, decision 5): when the agent's only budgets for this
+   * chain have ENDED, the latest ended budget's expiry (ISO 8601) — read by
+   * the same narrow expired-row query the refusal answers use. `null` when no
+   * expired row exists; the field NEVER reports a live budget. `null` on a
+   * backend that predates the field.
+   */
+  budgetEndedAt: string | null
   /** #3772: see {@link HavenAgent.supersededBy}. */
   supersededBy: HavenAgentSupersession | null
 }
@@ -1076,6 +1084,17 @@ export interface HavenAgentSummary extends HavenAgent {
    * budget that ends before it would refill.
    */
   budgetRefillsAt: string | null
+  /**
+   * #4352 (additive; the readiness values are unchanged — #4349 decision 5):
+   * set only when readiness is `needs_approval` BECAUSE the agent's only
+   * budget(s) have ENDED — `allowances[]` is empty and the server's
+   * expired-row read found one. The ended budget's expiry (ISO 8601): waiting
+   * will not help; ask the owner to set a new one. `null` otherwise — ready,
+   * revoked, no budget approved at all, live rows present (whether spendable
+   * or all spent — the latter is {@link HavenAgentSummary.budgetRefillsAt}'s
+   * case), or a backend that predates the field.
+   */
+  budgetEndedAt: string | null
   allowances: HavenAgentAllowanceSummary[]
   /**
    * #3329: open, unexpired task budgets — a derived VIEW, same discipline as
@@ -2637,6 +2656,8 @@ export interface RawHavenAllowanceSummary {
   allowances: RawHavenAllowance[]
   /** #3772: absent on an older backend. */
   superseded_by?: { agent_id: string; superseded_at: string } | null
+  /** #4352: see {@link HavenAllowanceSummary.budgetEndedAt}; absent on an older backend. */
+  budget_ended_at?: string | null
 }
 
 /** @internal */

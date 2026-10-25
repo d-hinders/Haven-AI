@@ -490,6 +490,24 @@ const PRE_TRIM_BASELINE_BYTES = 30_609
  * causes and the field name. No tool was added — 29 holds. 31,812 UTF-8
  * bytes (+138); the mean pin: 31,812 / 29 = 1096.9655…, pinned at the
  * two-decimal ceiling (1096.97). Shrink-only from here.
+ *
+ * **Re-derived — round 30, #4352 (2026-10-23).** `haven_get_agent`'s
+ * description gives `needs_approval` its THIRD cause — the agent's only
+ * budget has ENDED, named by the additive `budgetEndedAt` — per #4349
+ * decision 5. The new sentence cost +162 bytes; the same description was
+ * trimmed by the same amount elsewhere (the two-cause `needs_approval`
+ * sentence compressed to its three-cause form, the signer/over-budget
+ * sentences tightened, redundant taskBudgets prose dropped), landing back on
+ * EXACTLY 31,812 UTF-8 bytes — the cap does not move and 29 tools hold.
+ *
+ * **Re-derived — round 31, #4352 (2026-10-23).** The round-30 three-cause
+ * `needs_approval` sentence had drifted from the pinned copy in
+ * `packages/sdk/src/tool-descriptions.test.ts` (same meaning, compressed
+ * prose). Restored to the pinned sentence verbatim (+36 bytes on the catalog)
+ * and re-trimmed the same description by 40 (the "closed and expired omitted"
+ * parenthetical dropped — "only live rows are listed" already says it — the
+ * full-cap aside shortened, "next step" tightened): 31,808 UTF-8 bytes, back
+ * under the cap. No tool was added — 29 holds. Shrink-only from here.
  */
 const MAX_TOTAL_BYTES = 31_812
 // Mean pin: round 29 (#4355 block above): 31,812 / 29 = 1096.9655…, pinned

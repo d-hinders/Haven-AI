@@ -87,6 +87,22 @@ covers:
 last-verified: "2026-10-23"
 ---
 
+> **Re-verified #4352 (2026-10-23, an expired-only budget is refused as
+> `delegation_expired` with the end date):** the covered files that change —
+> `infra/repositories/delegation-budgets.ts` (one narrow read-only query
+> that can see an EXPIRED row, consulted only on already-refusing paths),
+> `modules/mpp/budget-precheck.ts` and `modules/x402/
+> delegation-authorize.ts` (the refusal REASON and PROSE at three existing
+> refusal sites) — add no signing step, no gate, no write path and no
+> authority surface. The enforcers remain the only spend control: an
+> expired redemption still reverts on-chain, and the new prose says so.
+> The ledger row is still the #3053 choke point's record (same sources, the
+> `delegation_expired` reason's second producer documented in the migration
+> 086/119 pair); nothing agent-asserted. A live row for the token keeps
+> every selection and compare exactly as before (pinned by a test). Nothing
+> else in this document was re-verified, and `last-verified` is re-stamped
+> to 2026-10-23 for this note.
+
 > **Re-verified #4327 (2026-10-23, the CSV export's response plumbing
 > moves into `domain/csv.ts`):** this diff touches one file in this
 > document's coverage list, `routes/transactions.ts`, and adds no signing

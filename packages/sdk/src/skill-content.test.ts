@@ -61,11 +61,12 @@ describe('generic skill content', () => {
     expect(HAVEN_SKILL_MD).toContain('needs_approval')
   })
 
-  it('splits needs_approval into "never approved" and "spent for this period" (#4355)', () => {
+  it('splits needs_approval into "ended", "never approved" and "spent for this period" (#4355, #4352)', () => {
     expect(HAVEN_SKILL_MD).toContain(
       '`needs_approval` with no `allowances[]`\n' +
-        '  rows means nobody approved a budget yet; with rows (all at remaining 0) the\n' +
-        '  budget is spent for this period, and `budgetRefillsAt` says when it refills',
+        '  rows and `budgetEndedAt` set means the budget ENDED on that date — waiting\n' +
+        '  will not help, ask the owner to set a new one; with no rows and no\n' +
+        '  `budgetEndedAt`, nobody approved a budget yet; with rows (all at remaining 0) the',
     )
   })
 

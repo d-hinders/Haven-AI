@@ -372,6 +372,64 @@ export async function selectDelegationForPayment(
   return result.rows[0] ?? null
 }
 
+// ── The EXPIRED-row read (#4352) ─────────────────────────────────────────────
+
+/**
+ * #4352: the ONE query that can see an EXPIRED budget row. #3802 removed
+ * expired rows from every live read (the owner predicate above) — correctly:
+ * an expired grant is not spend authority. But refusing an agent whose only
+ * budget ENDED with "exceeds the remaining budget for this period … wait for
+ * the period to reset" is wrong on both counts: nothing resets, and the row
+ * exists, dated. The refusal sites consult this read ONLY on their
+ * already-refusing path — it can never turn a refusal into an approval, and
+ * it must never feed a live selection: an expired row is not spendable
+ * (`spendableDelegationSql` is the only liveness predicate; the mutation cell
+ * pinning "an expired row beside a live one never enters the compare" is
+ * `routes/__tests__/budget-precheck.test.ts`).
+ *
+ * Token-scoped, per the issue's "the only row for the token": a LIVE row for
+ * the token keeps every caller on its normal path (the payment selection, the
+ * derived view and the 409 pin check all run first), so whatever expired row
+ * this returns is the most recently ENDED budget for that token — the one the
+ * agent would have been paying from. The token bind is optional: the
+ * agent-facing allowances read (#4352's `budget_ended_at`) asks for the
+ * latest ended row across ALL of the agent's tokens on the chain. `status =
+ * 'active'` because the status CHECK has no expired value (#3542): expiry is
+ * a window question, the row stays active. DATABASE clock, for the same
+ * reason as the predicates above.
+ */
+export const FIND_EXPIRED_DELEGATION_FOR_TOKEN_SQL = `
+     SELECT id, delegation_hash, recipient_address, expires_at
+       FROM agent_delegations
+      WHERE agent_id = $1
+        AND chain_id = $2
+        AND ($3::text IS NULL OR token_address = LOWER($3))
+        AND status = 'active'
+        AND expires_at <= EXTRACT(EPOCH FROM NOW())
+      ORDER BY expires_at DESC, created_at DESC
+      LIMIT 1`
+
+export interface ExpiredDelegationRow {
+  id: string
+  delegation_hash: string
+  recipient_address: string | null
+  /** Unix-second BIGINT (node-postgres decodes it as a string). */
+  expires_at: string
+}
+
+export async function findExpiredDelegationForToken(
+  agentId: string,
+  chainId: number,
+  tokenAddress: string | null,
+): Promise<ExpiredDelegationRow | null> {
+  const result = await pool.query<ExpiredDelegationRow>(FIND_EXPIRED_DELEGATION_FOR_TOKEN_SQL, [
+    agentId,
+    chainId,
+    tokenAddress,
+  ])
+  return result.rows[0] ?? null
+}
+
 // ── Budget REPORT selection (#3518) ──────────────────────────────────────────
 
 /**

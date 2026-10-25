@@ -6759,7 +6759,14 @@ export const SCENARIOS = {
               ...research,
               budgets: research.budgets.map((budget) => ({ ...budget, expiresAt: new Date(now + 3 * 86_400_000).toISOString() })),
             }),
-            quiet({ ...dataFeed, status: 'active', budgets: [], budgetEndedAt: new Date(now - 2 * 86_400_000).toISOString() }),
+            // No live budget and no open sub-budget: its only budget ended.
+            quiet({
+              ...dataFeed,
+              status: 'active',
+              budgets: [],
+              receivedSubBudgets: [],
+              budgetEndedAt: new Date(now - 2 * 86_400_000).toISOString(),
+            }),
           ],
         }
       }

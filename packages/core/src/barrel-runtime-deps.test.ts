@@ -13,8 +13,10 @@
  * re-export is caught too) and checks the bare specifiers of static
  * `import`/`export … from` declarations and of `import('…')` / `require('…')`
  * calls with a string literal. Comments are stripped first (#4421), with the
- * parser-based `stripComments`, so prose naming an import is not one. Not
- * seen: a specifier built at runtime, or a function obtained another way
+ * parser-based `stripComments`, so prose naming an import is not one. The
+ * transpile drops `import x = require('…')` (and `export import … =`), so
+ * those are read from the parsed syntax tree instead. Not seen: a specifier
+ * built at runtime, or a function obtained another way
  * (`createRequire(import.meta.url)('…')`). Still matched falsely:
  * specifier-shaped text inside a string or template literal, which the
  * stripper keeps.
@@ -23,6 +25,7 @@ import { readFileSync } from 'node:fs'
 import { builtinModules } from 'node:module'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
 import { stripComments } from './comment-stripper.js'
 
@@ -39,7 +42,21 @@ const SPECIFIER =
 
 /** The specifiers one source imports, comments stripped first (#4421). */
 function specifiers(source: string, fileName: string): string[] {
-  return [...stripComments(source, fileName).matchAll(SPECIFIER)].map(([, spec]) => spec)
+  const found = [...stripComments(source, fileName).matchAll(SPECIFIER)].map(([, spec]) => spec)
+  // `import x = require('…')` is a runtime import the transpile drops without a
+  // trace; read it from the syntax tree, where comments are not nodes.
+  const tree = ts.createSourceFile(fileName, source, ts.ScriptTarget.ES2022, false)
+  for (const statement of tree.statements) {
+    if (
+      ts.isImportEqualsDeclaration(statement) &&
+      !statement.isTypeOnly &&
+      ts.isExternalModuleReference(statement.moduleReference) &&
+      ts.isStringLiteral(statement.moduleReference.expression)
+    ) {
+      found.push(statement.moduleReference.expression.text)
+    }
+  }
+  return found
 }
 
 function reachable(entry: string): Map<string, string[]> {
@@ -74,6 +91,12 @@ describe('the per-source specifier scan', () => {
       specifiers("import a from 'x'\nexport { b } from './y.js'\nconst c = await import('z')\nconst d = require('w')\n", 'c.ts'),
     ).toEqual(['x', './y.js', 'z', 'w'])
   })
+
+  it('reads an import-equals require, which the transpile drops', () => {
+    expect(specifiers("import t = require('w')\nexport const v = t\n", 'd.ts')).toEqual(['w'])
+    expect(specifiers("export import t = require('w')\n", 'e.ts')).toEqual(['w'])
+    expect(specifiers("import type t = require('w')\n", 'f.ts')).toEqual([])
+  })
 })
 
 describe('@haven_ai/core barrel runtime dependencies', () => {
@@ -95,8 +118,9 @@ describe('@haven_ai/core barrel runtime dependencies', () => {
   it('does not reach the comment stripper, which imports typescript', () => {
     expect([...graph.keys()].some((file) => file.endsWith('comment-stripper.ts'))).toBe(false)
     // and the stripper really is the kind of module this guard exists for
-    expect(reachable(resolve(SRC, 'comment-stripper.ts')).get(resolve(SRC, 'comment-stripper.ts'))).toContain(
+    // (exactly that: the `viem` its header comment names is prose, not an import)
+    expect(reachable(resolve(SRC, 'comment-stripper.ts')).get(resolve(SRC, 'comment-stripper.ts'))).toEqual([
       'typescript',
-    )
+    ])
   })
 })

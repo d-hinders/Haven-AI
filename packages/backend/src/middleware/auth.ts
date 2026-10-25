@@ -8,7 +8,7 @@ import { OWNER_CLI_PURPOSE, routeAllowsOwnerCli } from './owner-cli.js'
  * few short-lived tokens for narrow, single-purpose flows — today the
  * accounting OAuth connect `state` (`purpose: 'accounting_oauth'` —
  * `OAUTH_STATE_PURPOSE` in `modules/accounting/oauth-state.ts`, the flow is
- * provider-generic and Fortnox is today's only OAuth2 provider; 10 minutes,
+ * provider-generic and Fortnox is today's only live OAuth2 provider; 10 minutes,
  * carried in a URL query string). Those tokens verify with the same secret
  * as a session token,
  * so without this check they were accepted as ordinary Bearer credentials on

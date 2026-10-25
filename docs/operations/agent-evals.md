@@ -24,7 +24,7 @@ covers:
   - packages/connect/src/server-names.ts
   - packages/signer/src/consent.ts
   - packages/signer/src/cli-args.ts
-last-verified: "2026-10-20"
+last-verified: "2026-10-25"
 ---
 
 # Agent Evals — the model-in-the-loop eval suite (epic #3957)
@@ -103,9 +103,10 @@ its own key with the `{purchase_key}` placeholder.
 trial's settled spend — `/allowances` can lag the observer node. When the
 previous trial's settled spend IS its resolved amount (the direct sends), the
 guard expects that exact drop. When the task is marked
-`settled_amount_unknown` (`x402-catalog-guided-purchase`, #4071 — the agent
-buys whatever the catalog prices, so the spend size is the merchant's, not
-the resolver's), the guard expects ANY decrease instead: deducting the
+`settled_amount_unknown` (`x402-catalog-guided-purchase`, #4071, and
+`x402-eip3009-bridge-vpn-legacy`, #4205 — the agent buys whatever the
+merchant prices, so the spend size is the merchant's, not the resolver's),
+the guard expects ANY decrease instead: deducting the
 resolved amount would invent a drop that never happened and red every later
 trial (the 2026-10-17 run: resolved 316406, actually spent 1000, four
 innocent trials timed out). A budget INCREASE observed between trials is
@@ -196,7 +197,7 @@ unattended start.
   remains the operator step; the standing issue reports a low balance instead
   of a failed night finding it.
 - **Period:** give the eval agent a **Daily** period (the dashboard supports
-  it — `PERIODS` in `packages/frontend/src/components/haven/DelegationBudgetCard.tsx`),
+  it — `PERIODS` in `packages/frontend/src/components/DelegationBudgetCard.tsx`),
   sized so the tiered run fits inside one refill: the tier-1 slices shrink
   geometrically, the drainer takes the rest once, and the tier-3 refusal
   tasks spend nothing — the full 11-task run moves a bounded fraction over
@@ -219,7 +220,8 @@ unattended start.
   exhausted, it stops before any agent session (exit 3) and writes one
   message to the job summary. To run again in the same period, edit the eval
   agent's budget on the dev dashboard. The edit dialog only accepts a real
-  change (e.g. the amount by 0.01 USDC, or the period), and it needs two
+  change (e.g. the amount by 0.01 USDC, the period, or, since #4350, the end
+  date on its own), and it needs two
   passkey approvals: activate the new budget, then retire the old one. That
   issues a new delegation whose period starts when it is built, so the full
   amount is available; the agent, its delegate key and its API key stay the
@@ -260,7 +262,8 @@ Env the run needs (all dev/testnet):
   USDC) — its `requires` label `mcp-merchant-eip3009-target` stands for that
   provisioning, and the plan has no catalog row, so the instruction names
   merchant and tool instead of a `catalog_id`. A PINNED budget refuses the
-  bridge task with 403 BEFORE any funding (`delegation-authorize.ts:483`),
+  bridge task with 403 BEFORE any funding (`modules/x402/delegation-authorize.ts`,
+  the "3009-mode needs an open (unpinned) budget delegation" refusal),
   so its open-budget precondition (`delegation-agent-open-budget`) is real:
   a pinned-budget run reds the task without spending. The eval is the
   SECOND buyer of `vpn_legacy` (after `packages/qa-agent/src/scenarios/
@@ -451,6 +454,7 @@ inventory:
 | `AGENT_EVALS_HAVEN_API_URL` | var (or secret) | the dev backend URL |
 | `AGENT_EVALS_RECIPIENT` / `AGENT_EVALS_AGENT_ACCOUNT` / `AGENT_EVALS_X402_TARGET` | vars | the graders' address/URL fixtures (same roles as the `QA_EVAL_*` env) |
 | `QA_RPC_URL_BASE_SEPOLIA` | repo secret | the observer RPC URL, which embeds the provider key; shared with `qa-dev.yml` and `qa-balances.yml`, so it is NOT an `agent-evals` environment secret |
+| `QA_HOSTED_MCP_URL` | repo var (or secret) | the deployed dev hosted MCP URL the **full** suite wires; shared with `qa-dev.yml`. The subset boots its own server at `127.0.0.1:8788` instead |
 | `QA_X402_BINDING_SIGNER` | repo var | the public address the signer verifies x402 bindings against, passed as `HAVEN_X402_BINDING_SIGNER`; the job fails before any session when it is unset |
 
 **Token rotation.** The token does not refresh on its own (reportedly about
@@ -735,8 +739,9 @@ before #3992:
    above. (Whether the `state.db` wrapper is committed into the repo is
    also the partner's call; it is documented, not yet committed.)
 
-The real 10 x 3 partner-machine run remains an issue-level acceptance
-criterion reported on #3958, not a build gate for this slice.
+The real 10 × 3 partner-machine run was an acceptance criterion of #3958,
+which closed when PR #3965 merged (2026-10-14) without that run reported on
+it. It was never a build gate for this slice.
 
 ## Where this fits
 

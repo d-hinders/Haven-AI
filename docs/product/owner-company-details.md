@@ -15,7 +15,14 @@ covers:
   - packages/frontend/src/components/settings/CompanyDetailsCard.tsx
   - packages/frontend/src/lib/countries.ts
   - packages/frontend/src/components/ui/Select.tsx
-last-verified: "2026-09-28"
+  - packages/frontend/src/components/settings/BusinessDataContext.tsx
+  - packages/frontend/src/app/(authenticated)/settings/SettingsClient.tsx
+  - packages/sdk/src/receipt.ts
+  - packages/backend/src/routes/agent-tax-declaration.ts
+  - packages/backend/src/modules/agents/tax-declaration.ts
+  - packages/sdk/src/client-tax-declaration.ts
+  - packages/frontend/src/components/agent-panel/TaxDeclarationToggle.tsx
+last-verified: "2026-10-25"
 ---
 
 # Owner company details
@@ -90,7 +97,7 @@ guarded on `vies_status = 'pending'` and staleness), not a plain read, so two
 concurrent `GET`s never both start a check for the same row.
 
 **Naming discipline:** wherever this reaches a person — the API's own
-responses, and the Settings → Company details screen
+responses, and the Company details card on Settings → Business
 (`CompanyDetailsCard`) — the copy must say "checked against VIES" (the
 valid badge; with the date beside it), never "verified".
 `docs/product/agent-passport.md` reserves that word for a passport tier
@@ -111,10 +118,13 @@ just the settings screen built on top of it; `DELETE` is the one exception
 | `DELETE /user/company-details` | **Works regardless of the flag** — the owner's erasure path always works, even after an operator turns the feature back off (owner-privacy default). `{ ok: true }` whether or not a row existed. |
 | `POST /user/company-details/vies-check` | 404 when the flag is off. Re-runs the check for the saved VAT number; 404 if there is none. Rate-limited per session credential (a count shared with the credential's other rate-limited routes). |
 
-An agent API key is refused with a named `403` on every route above,
-including `DELETE` — this is an owner-only surface (Settings → Company
-details in the dashboard, on top of the same owner-scoped routes), and an
-agent must never manage — or erase — its own owner's company details.
+An agent API key (a bearer token or `x-api-key` value starting `sk_agent_`)
+is refused with a named `403` on `DELETE` always, and on the other three
+routes whenever the flag is on. With the flag off those three answer the
+flag's `404` first, because `requireFeatureEnabled` runs before
+`refuseAgentKey`. This is an owner-only surface (the Company details card on
+Settings → Business, on top of the same owner-scoped routes), and an agent
+must never manage — or erase — its own owner's company details.
 
 ## Where it surfaces: `parties.buyer`
 
@@ -161,8 +171,10 @@ runtime on any SDK version (its own published type,
 is not a type/runtime mismatch, just a different surface than the mapped one).
 
 This block is **not** part of the receipt's signed payload —
-`verifyPaymentReceipt` reads only `receipt.authorization`, so a merchant that
-verifies a receipt is checking the delegate's authorisation signature, not the
+`verifyPaymentReceipt` reads only the bundle's `authorization` and
+`onChain.chainId` (the chain id rebuilds the delegation digest; a
+`{ receipt, verification }` wrapper is unwrapped one level first), so a
+merchant that verifies a receipt is checking the delegate's authorisation signature, not the
 buyer's company details. It is not checking Haven's payment facts either: the
 signature binds only the hash named by `verifiedOver`, so amount and recipient
 stay Haven-asserted and settlement stays an on-chain check.
@@ -185,25 +197,55 @@ details, and adding it there is a separate, unreviewed change. The OpenAPI
 `Parties.buyer` field description is scoped to the receipt surfaces for the
 same reason.
 
+### A second reader: the per-agent tax declaration (#3426, #3427)
+
+`parties.buyer` is not the only place these details leave the table. An owner
+can opt one agent in to a buyer-side x402 tax declaration with
+`PUT /agents/:id/tax-declaration` (owner session only; the toggle on the
+agent's Settings tab, `TaxDeclarationToggle`, renders only while the saved VAT
+number is VIES `valid`). The route refuses an opt-in with a `409` naming why:
+the flag is off, no VAT number is saved, or VIES is not `valid` now.
+
+The agent then reads `GET /agents/:id/tax-declaration` with its own key, for
+its own id only. The answer is `200` either way: `{ available: false, reason }`,
+or a declaration built at read time from the owner's current row —
+`jurisdiction` (the saved `country`), `taxId` (the saved VAT number) and a
+`validUntil` that is the earlier of 24 hours from the read and 24 hours after
+the last VIES check (`resolveTaxDeclaration`). Only the opt-in bit is stored;
+the declaration itself is not.
+
+A local SDK client built with the delegate key signs that declaration and
+sends it to the merchant as the `X-Tax-Declaration` header on the paid retry
+of an EIP-3009 payment (`resolveTaxDeclarationHeader`). An erc7710 payment
+never carries one, and neither the hosted server nor the edge signer builds
+one. So with an agent opted in, each EIP-3009 paid retry it makes through
+such a client carries the country and VAT number to the merchant, whether or
+not a receipt is ever handed over. The legal name and organisation number
+are not in it.
+
 ## The settings screen
 
-Settings → Company details (`CompanyDetailsCard`, `useCompanyDetails`) is the
-#3332 frontend slice on top of the API above. Things worth naming about how
-it is built:
+The Company details card on Settings → Business (`CompanyDetailsCard`,
+`useCompanyDetails`) is the #3332 frontend slice on top of the API above,
+reshaped and moved onto the Business tab by #4359 (PR #4382). Things worth
+naming about how it is built:
 
-- **Gating without a second flag.** The screen has no frontend-side feature
+- **Gating without a second flag.** The card has no frontend-side feature
   flag of its own; it reads the STATUS of `GET /user/company-details`, never
   its body. `404` means only one thing — the feature is off
   (`requireFeatureEnabled` in `routes/owner-company-details.ts`) — and the
-  screen renders nothing. `200` with a `null` body means the flag is on and
-  the owner has never saved a row: the screen shows **"No company details"**
+  card renders nothing. `200` with a `null` body means the flag is on and
+  the owner has never saved a row: the card shows **"No company details"**
   with **Add company details**, which reveals the blank form (#4359).
-  `200` with a row renders the filled form. The purpose and retention text
-  is visible in every state — see the next bullet.
-- **The purpose and retention text is shown above the form, always** — not
-  behind a tooltip or a second screen — because *Purpose, retention and GDPR
-  basis* below is what the owner is agreeing to by filling it in. It sits
-  above the Add button in the empty state too (#4359).
+  `200` with a row renders the filled form. A failed read renders the card's
+  description, a load error and a retry. The Business tab itself is listed
+  only when this card or the accounting connections card has something to
+  show (`SettingsClient`), so with the flag off the tab appears only when the
+  accounting card has something of its own to show.
+- **The purpose text is shown above the form** — not behind a tooltip or a
+  second screen — because *Purpose, retention and GDPR basis* below is what
+  the owner is agreeing to by filling it in. It sits above the Add button in
+  the empty state too (#4359). The error state does not show it.
 - **Country is a picker, not a text field (#4359).** A native `Select` of the
   officially ASSIGNED ISO 3166-1 alpha-2 codes, labelled in the user's
   locale (`lib/countries.ts`), starting on "Choose a country". It saves the
@@ -221,16 +263,19 @@ it is built:
   check this" (NEUTRAL — never danger, never warning; see *The VIES
   states*). No VAT number or an edited-away one: no badge at all.
 - **"Remove company details" lives in the footer row** — a `ghost` button to
-  the LEFT of Save (#4359); a past design review rejected `tertiary` here
-  because it reads as a secondary call to action.
+  the LEFT of Save, shown once a row is saved (#4359); a past design review
+  rejected `tertiary` here because it reads as a secondary call to action.
 
-The VIES status polls `GET /user/company-details` every few seconds
-while `vies_status` is `pending`, bounded (a check that never resolves stops
-being polled rather than polling forever) and stopped on navigating away;
-"Check again" calls `POST /user/company-details/vies-check` on demand and
-surfaces its `429` in plain words. "Remove company details" asks for
-confirmation before calling `DELETE /user/company-details`; the card then
-falls back to the "No company details" state (#4359).
+The VIES status polls `GET /user/company-details` every 4 seconds
+(`VIES_POLL_INTERVAL_MS`) while `vies_status` is `pending`, bounded at 60
+seconds (`VIES_POLL_MAX_MS`: a check that never resolves stops being polled
+rather than polling forever). The read runs once in `BusinessDataProvider`,
+which wraps all three Settings tabs, so switching to General or Security does
+not stop the poll; leaving Settings does. "Check again" calls
+`POST /user/company-details/vies-check` on demand and surfaces its `429` in
+plain words. "Remove company details" asks for confirmation before calling
+`DELETE /user/company-details`; the card then falls back to the "No company
+details" state (#4359).
 
 ## Purpose, retention and GDPR basis
 
@@ -244,15 +289,17 @@ personal-number encoding (`SE` + personal number + `01`) for the same reason;
 the form no longer repeats that detail.
 
 - **Basis**: consent — the owner opts in by calling `PUT
-  /user/company-details` or filling in the Settings → Company details form;
-  nothing here is required for an agent or a payment to work.
+  /user/company-details` or filling in the Company details form on Settings →
+  Business; nothing here is required for an agent or a payment to work.
 - **Purpose**: stating the buyer on a payment receipt the owner's own agent may
-  give to a merchant, and (asynchronously) validating the VAT number against
-  VIES.
+  give to a merchant, (asynchronously) validating the VAT number against
+  VIES, and, for an agent the owner opts in, stating the country and VAT
+  number in the buyer-side tax declaration on its EIP-3009 payments (see *A
+  second reader* above).
 - **Retention**: kept until the owner deletes it. `DELETE
   /user/company-details` works regardless of the feature flag, and with the
-  flag ON the owner calls it themselves from Settings → Company details. With
-  the flag OFF, though, that screen renders nothing at all (#3332 review round
+  flag ON the owner calls it themselves from the Company details card on
+  Settings → Business. With the flag OFF, though, that card renders nothing at all (#3332 review round
   2, M3) — so there is no dashboard way to erase in that state. The owner can
   still call the ungated `DELETE` with their own session, but in practice
   they ask Haven support, who removes the row directly in the database: the

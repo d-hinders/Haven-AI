@@ -609,7 +609,24 @@ export const GOVERNED_PACKAGE_DOCS = [
       'packages/backend/src/domain/ledger-currency.ts',
       'packages/backend/src/modules/accounting/feed-transaction.ts',
     ],
-    'last-verified': '2026-09-12',
+    // #4372 part I: the WHOLE README re-read at dev 6a0486711 (16 commits
+    // touched its covers after 2026-09-12; PRs #3110, #3196, #3783, #3893, #3936 and
+    // #4337 edited the body without moving this date) and EDITED. Accounted
+    // is `live` since #3017, so only Light and Igdrasil are `coming_soon`
+    // (registry.ts); webhooks are wired by `registerAccountedWebhooksAdapter`,
+    // not a descriptor field (api-key-flow.ts header); the active destination
+    // is AT MOST one per user (migration 080's partial unique index); a
+    // `capabilities.verify: false` provider answers verify from Haven's own
+    // record; the conformance runner's capability skips are named
+    // (connector-conformance-skips.test.ts); the grace window has a Base
+    // Sepolia-only override (merchant-report-grace.ts). Re-checked unchanged:
+    // the descriptor and connector fields (provider.ts, connector.ts), the six
+    // ledger currencies, the retry constants (8 attempts, 1 min doubling to
+    // 1 h, 25 requests / 5 s), NEEDS_ATTENTION_STATUSES, pinAccountingBookedTx,
+    // the OAuth state (accounting_oauth, 10 min, jti consumed via
+    // rate_limit_counters, UNLOGGED), the legacy Fortnox push flag and the
+    // Accounted webhook route, and every named function and file.
+    'last-verified': '2026-10-25',
   },
 ]
 

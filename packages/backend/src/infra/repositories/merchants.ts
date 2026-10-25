@@ -171,7 +171,8 @@ const MERCHANT_COLUMNS = `
  * count is: every non-delisted offer (a degraded offer is still listed),
  * whose `price_atomic` is a plain digit string (the value is the merchant's
  * own advertisement — a malformed one is excluded, not cast, the same
- * defensiveness `withinBudget` applies client-side) and whose asset is USDC.
+ * defensiveness `agentsThatCanPay` applies client-side) and whose asset is
+ * USDC.
  * The original text wins through `array_agg ... ORDER BY numeric` — no
  * reformatting round-trip, and a lexicographic MIN over text would answer
  * "1000" over "900".

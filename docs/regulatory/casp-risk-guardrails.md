@@ -116,6 +116,16 @@ last-verified: "2026-10-25"
 > signs nothing. Scope: the guidance text only; the document-wide
 > `last-verified` date is not re-stamped.
 
+> **Re-verified unchanged (#4408, 2026-10-25, migration comment truthing):**
+> the diff touches one covered file — `db/migrations/066_catalog_submissions.ts`
+> — in its doc comment only: the status-progression block now says `delisted`
+> is set by operator SQL and that no lifecycle path sets it (verified by
+> sweep on `dev`), replacing the stale "operator action, or lifecycle expiry"
+> wording. No covered payment, signing, key, custody, advice, settlement or
+> merchant-acquiring surface changes; the migration's DDL is untouched.
+> Scope: the migration comment only; the document-wide `last-verified` date
+> is not re-stamped.
+
 # Haven CASP / MiCA Risk Minimisation Guardrails
 
 ## Purpose

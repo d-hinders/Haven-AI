@@ -1206,13 +1206,13 @@ describe('AgentDetailClient last-activity metadata', () => {
     expect(openAgentMenu()).not.toContain('Update budget')
   })
 
-  // ── Backup & recovery pointer, not a second copy (#1089) ────────────────
+  // ── Who can approve pointer, not a second copy (#1089) ──────────────────
 
   it('points a delegation agent at the account page instead of rendering signer controls', () => {
     mockDelegationAgent()
     renderOnSettingsTab(<AgentDetailClient agentId="agent-1" />)
 
-    const link = screen.getByRole('link', { name: /Backup & recovery/ })
+    const link = screen.getByRole('link', { name: /Who can approve/ })
     // #4228: the pointer targets the account's Security & details tab.
     expect(link).toHaveAttribute('href', '/accounts/safe-1?tab=security')
     // No enrollment controls on the agent page — those live only on the account page now.
@@ -1243,13 +1243,13 @@ describe('AgentDetailClient last-activity metadata', () => {
     expect(within(card).getByTestId('tax-declaration-row')).toBeTruthy()
     expect(within(card).getByTestId('agent-passport-row')).toBeTruthy()
 
-    // The account-level section carries the Backup & recovery pointer under
+    // The account-level section carries the Who can approve pointer under
     // its own "On {account name}" label — the label sits ABOVE the card, so
     // the assertion scopes to the section, not the card.
     const accountSection = screen.getByTestId('agent-account-section')
     expect(accountSection.textContent).toContain('On Main account')
     expect(
-      within(accountSection).getByRole('link', { name: /Backup & recovery/ }),
+      within(accountSection).getByRole('link', { name: /Who can approve/ }),
     ).toHaveAttribute('href', '/accounts/safe-1?tab=security')
   })
 

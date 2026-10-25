@@ -8,7 +8,8 @@
  * dashboard, where `DashboardOnboardingGuide` takes over. There is no signer
  * fork here — the delegation rail (epic #821/#836) is passkey-first, and an
  * EOA is a later addition to an account's signer set, not a starting choice.
- * A wallet can join an existing account's signer set from Backup & recovery.
+ * A wallet can join an existing account's signer set from its Who can approve
+ * section.
  *
  * There is no RAIL fork here either, since #1984 (epic #1440): onboarding
  * always provisions a Hybrid delegation-rail account. The Safe rail is

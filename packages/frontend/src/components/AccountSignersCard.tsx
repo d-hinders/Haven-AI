@@ -1,7 +1,7 @@
 'use client'
 
 /**
- * Backup & recovery signers for a delegation-rail account (#888, epic #836).
+ * The Who can approve section for a delegation-rail account (#888, epic #836).
  *
  * Outcome-language signer management: see the ways this account can be
  * approved, add a backup (so a lost device isn't a lost account), remove one.

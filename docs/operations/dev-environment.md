@@ -36,7 +36,7 @@ covers:
   - packages/frontend/package.json
   - .github/workflows/ci.yml
   - .github/workflows/update-visual-baselines.yml
-last-verified: "2026-10-23"
+last-verified: "2026-10-25"
 ---
 
 > **Re-verified #4407 (2026-10-25, the catalog ingestion cooldown):** this
@@ -813,6 +813,17 @@ Isolation rules that are non-negotiable for a payments product:
  > Scope of this re-read: this bullet's marketplace paragraphs and the
  > merchants repo/route coverage it names; the rest of the document was not
  > re-read for it.
+
+ > **Re-verified #4408 (2026-10-25):** #4408 touches
+ > `infra/repositories/merchants.ts` comment text only — the
+ > OFFER_AGGREGATES_SQL doc block now cites `agentsThatCanPay` (the #4004
+ > client-side replacement for the deleted `withinBudget`) where it names the
+ > malformed-`price_atomic` defense. No SQL, bind placeholder, flag or scoping
+ > change; every claim in the marketplace bullet above is untouched. Scope of
+ > this re-read: this bullet's marketplace paragraphs and the merchants repo
+ > coverage they name; the rest of the document was not re-read for it, and
+ > `last-verified` is bumped to 2026-10-25 for exactly this coverage.
+
  > **Re-verified #3769 (2026-10-08):** the catalog verifier
  > (`modules/catalog/merchant-catalog.ts`) now probes a plain-HTTP row with
  > the row's DECLARED method and body example (`http_method`/`body_type`/

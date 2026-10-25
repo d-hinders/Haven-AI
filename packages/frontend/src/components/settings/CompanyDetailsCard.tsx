@@ -1,7 +1,8 @@
 'use client'
 
 /**
- * Settings → Company details (#3332), behind `HAVEN_OWNER_COMPANY_DETAILS`.
+ * Company details card on the Settings → Business tab (#3332; moved to the
+ * Business tab by #4359), behind `HAVEN_OWNER_COMPANY_DETAILS`.
  *
  * ── Gating ───────────────────────────────────────────────────────────────
  * `useCompanyDetails`'s `status` decides everything this component renders:

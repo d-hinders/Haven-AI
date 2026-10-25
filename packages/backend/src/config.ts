@@ -497,8 +497,8 @@ export const config = {
   // (DELETE is the deliberate exception — erasure always works), and the
   // evidence `parties.buyer` block (`openapi/party-model.ts`) is omitted
   // regardless of what the table holds — the flag gates the FEATURE, not the
-  // Settings → Company details screen built on top of it (the #3332
-  // frontend slice).
+  // Company details card on the Settings → Business tab built on top of it
+  // (the #3332 frontend slice; the card moved to the Business tab in #4359).
   ownerCompanyDetailsEnabled: parseBooleanFlag(
     'HAVEN_OWNER_COMPANY_DETAILS',
     process.env.HAVEN_OWNER_COMPANY_DETAILS,

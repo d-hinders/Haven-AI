@@ -143,8 +143,8 @@ All in `packages/backend/src/modules/catalog/lifecycle.ts` (and the probe's
 | Knob | Value | Effect |
 |---|---|---|
 | Monitor tick | 5 min (`CATALOG_INGEST_INTERVAL_MS`, index.ts) | How often the leader scans the queue |
-| Probe cooldown | 15 min / host (`DEFAULT_HOST_COOLDOWN_MS`) | Has no effect today (#4407): `index.ts` passes no shared `HostCooldown`, so each tick starts a fresh one and the window does not span ticks, and within a tick the unique `hostname` index (migration 066) already allows one row per host, so nothing is skipped |
-| Re-verification cadence | 24 h (`REVERIFY_CADENCE_MS`) | `verified_payable` entries are re-probed when `last_verified_at` is older. A failed re-probe does not move `last_verified_at`, so the row is probed again on every tick until it passes or degrades |
+| Probe cooldown | 15 min / host (`DEFAULT_HOST_COOLDOWN_MS`) | The cooldown is per process: the monitor (`createCatalogIngestMonitor`) holds one for the process lifetime, so the window spans that process's ticks (#4407), and a restart starts it empty. The leader lock is taken per tick, so with more than one replica the tick can land on a different replica, and each replica holds its own window: a host is probed at most once per window per replica, off by at most the replica count |
+| Re-verification cadence | 24 h (`REVERIFY_CADENCE_MS`) | `verified_payable` entries are re-probed when `last_verified_at` is older. A failed re-probe does not move `last_verified_at`, so the row stays due and is probed again as soon as the per-host cooldown allows, until it passes or degrades |
 | Failure threshold | 3 (`FAIL_AFTER_CONSECUTIVE_FAILURES`) | Consecutive probe failures before a row degrades to `failed` |
 | Ownership token TTL | 7 d (`TOKEN_TTL_MS`, ownership.ts) | A proof is only accepted inside this window; expiry fails the row |
 | Retention TTL | 30 d (`RETENTION_TTL_MS`) | Terminal rows are deleted after this long |
@@ -178,8 +178,8 @@ backend log warning is the whole alert, as before.
    the failure threshold and `submitted` rows whose token expired. Causes to
    check: the probe transport or verification DNS resolver misbehaving, or a
    network-wide outage at a cluster of merchants. The global concurrency cap
-   (4 in flight) bounds the blast radius either way; the per-host cooldown
-   does not today (#4407).
+   (4 in flight) and the per-host cooldown (one probe per host per 15
+   minutes, held across ticks) bound the blast radius either way.
 
 Both appear in the backend log as `Catalog ingestion alert` (warn) and, when
 `DELEGATE_ALERT_WEBHOOK_URL` is set, as a webhook message.
@@ -214,10 +214,13 @@ characterization-tested against real Postgres in
 ### A listed entry stops verifying (`verified_payable` → `failed`)
 
 Normal: the merchant endpoint changed or went down. The first failure comes on
-the first tick after the 24 h cadence; the row is then probed on every tick, so
-it degrades after 3 consecutive failures, about 10 minutes later, and is
-purged 30 days after that. The merchant can
-resubmit. No action required unless the mass-failure alarm fires (above).
+the first tick after the 24 h cadence, at T. A failed re-probe leaves
+`last_verified_at` unchanged, so the row stays due and is probed again as soon
+as the per-host cooldown allows: probes at T, ≥T+15 min and ≥T+30 min on the
+5-minute ticks. The third consecutive failure degrades the row, about 30
+minutes after the first failure (up to about 40, depending on where the ticks
+fall). It is purged 30 days after that. The merchant can resubmit. No action
+required unless the mass-failure alarm fires (above).
 
 ### Turning the pipeline off for an incident
 

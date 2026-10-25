@@ -324,6 +324,25 @@ describe('runProbeBatch — the two budgets', () => {
     expect(second[0]!.status).toBe('verified_payable')
   })
 
+  it('prunes hosts whose window has passed, so a lifetime cooldown stays bounded (#4407)', async () => {
+    const { post } = concurrencyTracking(0)
+    const cooldown = new HostCooldown(1_000)
+    const t0 = new Date('2026-10-25T10:00:00Z').getTime()
+    const hosts = (names: string[]) => names.map((n) => ({ id: n, resourceUrl: `https://${n}.example/mcp` }))
+
+    await runProbeBatch(hosts(['a', 'b', 'c']), { post, cooldown, now: () => new Date(t0) })
+    expect(cooldown.size).toBe(3)
+
+    // Inside the window: nothing is pruned, and a tracked host is still skipped.
+    const inside = await runProbeBatch(hosts(['a', 'd']), { post, cooldown, now: () => new Date(t0 + 500) })
+    expect(inside.find((o) => o.id === 'a')!.status).toBe('skipped')
+    expect(cooldown.size).toBe(4)
+
+    // At t0 + 1000 the first three expire; d (recorded at t0 + 500) stays, e joins.
+    await runProbeBatch(hosts(['e']), { post, cooldown, now: () => new Date(t0 + 1_000) })
+    expect(cooldown.size).toBe(2)
+  })
+
   it('records the cooldown BEFORE dispatch, so a concurrent burst cannot slip past a check-then-act', async () => {
     // #1711's queue cap was a non-atomic count-then-insert and was proven not
     // to be a cap at all. The same shape here — record on completion — would

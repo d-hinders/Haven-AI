@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { buildConnectorCommand } from '../agent-connection-setups.js'
-import { stripComments } from '@haven_ai/core'
+import { stripComments } from '@haven_ai/core/comment-stripper'
 
 /**
  * One connector command, two surfaces (#2527).

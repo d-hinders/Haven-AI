@@ -13,7 +13,7 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, it, expect, vi } from 'vitest'
-import { stripComments } from '@haven_ai/core'
+import { stripComments } from '@haven_ai/core/comment-stripper'
 import {
   HostCooldown,
   candidateHostname,

@@ -20,11 +20,14 @@
  * is preserved. The result is for TEXT scanning (regex guards), not for
  * execution or import.
  *
- * Note for `packages/core` consumers: this module is re-emitted into
- * `dist/` with a bare `import 'typescript'`, so the workspace's hoisted
- * devDependency satisfies it. `@haven_ai/core` is private and
- * workspace-only (never packed), so typescript stays a devDependency and
- * tsup keeps it external rather than bundling the compiler into `dist/`.
+ * Note for `packages/core` consumers: this module is its own entry,
+ * `@haven_ai/core/comment-stripper`, and is deliberately absent from the
+ * `@haven_ai/core` barrel. It is re-emitted into `dist/` with a bare
+ * `import 'typescript'`, which only the workspace's hoisted devDependency
+ * satisfies: the backend and mcp-server images install with
+ * `npm ci --omit=dev`, so a barrel re-export would make every service fail
+ * to boot (it did, from #4413 until this subpath). Import it from test code
+ * only.
  */
 import ts from 'typescript'
 

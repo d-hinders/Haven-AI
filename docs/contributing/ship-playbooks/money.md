@@ -4,7 +4,10 @@ status: current
 covers:
   - .github/money-path-globs.json
   - docs/regulatory/casp-risk-guardrails.md
-last-verified: "2026-09-18"
+  - scripts/ci/money-path.test.mjs
+  - .github/CODEOWNERS
+  - .github/workflows/dev-gate.yml
+last-verified: "2026-10-25"
 ---
 
 # Money / agent-authority playbook
@@ -13,7 +16,7 @@ Loaded by `ship-next` for `money-path` issues (and any backend change touching t
 
 ## 1. Required reading (before implementing)
 
-Read [`docs/regulatory/casp-risk-guardrails.md`](../../regulatory/casp-risk-guardrails.md) and its payment-code merge checklist first. It is the authoritative perimeter for every payment, agent-authority, Safe-setup, relaying, x402/MPP, fiat/card, swap, yield, or advice change.
+Read [`docs/regulatory/casp-risk-guardrails.md`](../../regulatory/casp-risk-guardrails.md) and its payment-code merge checklist first. It is the authoritative perimeter for every payment, agent-authority, account-setup, relaying, x402/MPP, fiat/card, swap, yield, or advice change.
 
 ## 2. Characterization-tests-first
 
@@ -42,7 +45,7 @@ The change must not, and generated artifacts must not imply Haven can:
 - rely on **off-chain policy** as the real spend control;
 - mutate **signed payment intent** (amount, token, recipient, route);
 - operate swaps / ramps / fiat / card / merchant settlement / yield / advice flows **without review**;
-- prevent users from accessing and **revoking** Safe permissions outside Haven.
+- prevent users from enumerating and **revoking** the delegations on their account outside Haven. (The retired Safe rail's permissions are outside Haven's control, as `casp-risk-guardrails.md` records under *Maintain Evidence That Haven Does Not Control Funds*.)
 
 ## 4. Merge gate (automatic, not a prompt)
 

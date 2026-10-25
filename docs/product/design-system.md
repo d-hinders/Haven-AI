@@ -2485,8 +2485,11 @@ header is the documented list-controls PLACEMENT outside a `ListToolbar`: a
 first, the trigger tinting while a filter is set. A page that has no list
 summary line may mount the two chips directly; the toolbar is for pages that
 have one. The two go in as a fragment, so at 390 the picker wraps under the
-facet (#4401). From `sm` the actions row sizes to max-content, so the facet
-trigger is bounded (`sm:max-w-[20rem]`) and a long selected name truncates,
+facet (#4401). From `sm` the actions row sizes to max-content while it fits
+beside a readable title, and shrinks — its own wrap dropping the picker under
+the facet — when it would not (#3963: a rigid max-content row squeezed the
+title column to 59px at 640, under the title's own text width). The facet
+trigger is bounded (`sm:max-w-[20rem]`) so a long selected name truncates,
 the full name staying in the trigger's accessible name.
 
 #### Behaviour
@@ -2522,7 +2525,9 @@ the full name staying in the trigger's accessible name.
   row does not change (#4150). A trigger whose SELECTED label is longer than
   the facet row truncates inside it (`max-w-full` on the trigger) instead of
   stretching it; from `sm` the trigger is also capped at 20rem, so it
-  truncates there in a max-content row too (#4401).
+  truncates there in a max-content row too (#4401) — a row that gives way and
+  wraps, rather than squeezing the title, when the two chips would not fit
+  beside it (#3963).
 
 #### Paging (#4196)
 

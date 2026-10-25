@@ -13,6 +13,7 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, it, expect, vi } from 'vitest'
+import { stripComments } from '@haven_ai/core'
 import {
   HostCooldown,
   candidateHostname,
@@ -194,9 +195,11 @@ describe('read-only discipline, pinned structurally (#1713 AC1)', () => {
    * Executable source only. The docstrings deliberately DISCUSS signing,
    * settling and x402 — that prose is the instruction to the next reader, and
    * an assertion that forbade the words would push the explanation out of the
-   * file to keep itself green.
+   * file to keep itself green. Stripped with the shared core helper (#4411):
+   * the old regex pair opened a fake block at a `/*` inside a line comment
+   * and swallowed the real code a guard below was scanning.
    */
-  const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+  const code = stripComments(source)
 
   it('imports nothing that can sign or settle', () => {
     // "The probe never signs" is easy to say and easy to stop being true. This

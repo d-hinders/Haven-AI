@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { stripComments } from '@haven_ai/core'
 import { describe, expect, it } from 'vitest'
 import {
   chartScale,
@@ -33,12 +34,14 @@ import {
  * maxima so a single lucky number cannot be what makes the suite green.
  */
 
-/** The module under test is pure; this is how its doc comment reads above. */
+/**
+ * Comments stripped with the shared core `stripComments` (#4411) — the old
+ * regex chain ran a block-comment regex first, which a `/*` inside a line
+ * comment could turn into a fake block swallowing the code the assertions
+ * below scan. Only the parser knows where a comment starts.
+ */
 function codeOf(source: string): string {
-  return source
-    .replace(/\/\*[\s\S]*?\*\//g, ' ') // JSDoc is prose about the code, not code
-    .replace(/^\s*\*.*$/gm, '') // a block-comment gutter, likewise
-    .replace(/(?<!:)\/\/.*$/gm, '') // line comments; keep `://` intact
+  return stripComments(source, 'chart-scale.ts')
 }
 
 describe('chartScale — ticks hit values the data reaches, never beyond the max', () => {

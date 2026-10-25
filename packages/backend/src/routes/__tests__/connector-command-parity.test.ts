@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { buildConnectorCommand } from '../agent-connection-setups.js'
+import { stripComments } from '@haven_ai/core'
 
 /**
  * One connector command, two surfaces (#2527).
@@ -65,7 +66,10 @@ describe('connector command parity (#2527)', () => {
     // does not match what their dashboard shows.
     for (const file of ['commands.ts', 'connect-runner.ts']) {
       const source = await readFile(join(CLI_SRC, file), 'utf8')
-      const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
+      // #4411: the shared core stripper, not a regex pair — a `/*` inside a
+      // line comment used to open a fake block that swallowed the code below
+      // it, hiding a forbidden command from this guard.
+      const code = stripComments(source, file)
       expect(code, file).not.toMatch(/@haven_ai\/connect/)
       expect(code, file).not.toMatch(/--ack-local-tools/)
       expect(code, file).not.toMatch(/npx\s+-y/)

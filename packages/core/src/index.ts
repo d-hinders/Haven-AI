@@ -134,3 +134,7 @@ export {
   type PackageReleaseCompat,
   type BuildReleaseCompatOptions,
 } from './client-releases.js'
+// #4411: the comment stripper the source-scan guards share — TypeScript's own
+// removeComments pass, so a `/*` inside a line comment or a string cannot open
+// a fake block that swallows the code a guard is scanning.
+export { stripComments } from './comment-stripper.js'

@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
+import { stripComments } from '@haven_ai/core'
 import postcss from 'postcss'
 import tailwindcss from 'tailwindcss'
 import { describe, expect, it } from 'vitest'
@@ -150,13 +151,13 @@ function sourceFiles(dir: string, acc: string[] = []): string[] {
  * silently lost six real call-sites across four files. The `orphaned` assertion
  * below is what caught it — which is the argument for keeping that assertion
  * even though its stated purpose is inventory hygiene.
+ *
+ * Since #4411 the stripping is the shared core `stripComments` (TypeScript's
+ * own removeComments pass, imported below): even the guarded line-comment
+ * regex above still ran the block regex first, so a `/*` inside a line
+ * comment could open a fake block and hide live call-sites. The file name is
+ * passed so `.tsx` sources keep their JSX verbatim.
  */
-function stripComments(src: string): string {
-  return src
-    .replace(/\/\*[\s\S]*?\*\//g, ' ') // block comments, incl. the JSX {/* … */} form
-    .replace(/(^|[^:"'`\w])\/\/[^\n]*/gm, '$1')
-}
-
 /** Colour-bearing utility prefixes that accept an opacity modifier. */
 const PREFIX =
   '(?:bg|text|border|border-[trblxyse]|ring|ring-offset|from|via|to|fill|stroke|outline|divide|accent|caret|decoration|placeholder|shadow)'
@@ -189,7 +190,7 @@ function uses(): Use[] {
   for (const root of roots)
     for (const file of sourceFiles(root)) {
       const rel = relative(FRONTEND, file)
-      const text = stripComments(readFileSync(file, 'utf8'))
+      const text = stripComments(readFileSync(file, 'utf8'), file)
       for (const m of text.matchAll(UTILITY)) out.push({ base: m[2], file: rel })
     }
   return out

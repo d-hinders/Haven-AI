@@ -524,6 +524,41 @@ describe('DelegationBudgetCard (#833)', () => {
     }
   })
 
+  // #4353: "Budget ending"'s Renew links `?renew=<hash>`, which opens that
+  // live budget's Edit, prefilled with its own limits, and tidies the URL.
+  it('?renew= opens the live budget\'s Edit and tidies the URL (#4353)', async () => {
+    const restore = withSearch(`?renew=${'0x' + 'ab'.repeat(32)}`)
+    const replace = vi.spyOn(window.history, 'replaceState')
+    try {
+      mockGet.mockReturnValue([budget()])
+      render(<DelegationBudgetCard {...PROPS} />)
+      expect(await screen.findByRole('dialog', { name: 'Edit budget' })).toBeTruthy()
+      expect(replace).toHaveBeenCalledWith(null, '', '/agents/agent-1')
+    } finally {
+      replace.mockRestore()
+      restore()
+    }
+  })
+
+  it('?renew= with an unknown or no-longer-active hash opens nothing (#4353)', async () => {
+    for (const [hash, rows] of [
+      ['0x' + 'ef'.repeat(32), [budget()]],
+      ['0x' + 'ab'.repeat(32), [budget({ status: 'revoked', is_live: false })]],
+    ] as const) {
+      const restore = withSearch(`?renew=${hash}`)
+      try {
+        mockGet.mockReturnValue([...rows])
+        const { unmount } = render(<DelegationBudgetCard {...PROPS} />)
+        await waitFor(() => expect(mockGet).toHaveBeenCalled())
+        await act(async () => {})
+        expect(screen.queryByRole('dialog', { name: 'Edit budget' })).toBeNull()
+        unmount()
+      } finally {
+        restore()
+      }
+    }
+  })
+
   // #3695 (B3): the grant form is collapsed once a budget exists — but a
   // `?grant=` link must still land on the build it carries, prefilled.
   it('?grant= opens the collapsed form prefilled even with an active budget present (#3695)', async () => {

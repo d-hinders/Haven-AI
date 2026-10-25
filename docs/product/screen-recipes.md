@@ -168,6 +168,23 @@ Needs attention items after setup (#4324, owner decisions 2026-10-23):
 - Acknowledging never changes an agent's "N% used" badge: the badge is a
   status read from the budget, not a reminder.
 
+Budget end dates in Needs attention (#4353, owner decisions 2026-10-25 on #4349):
+- **"Budget ending"** — "<agent>'s budget ends <date>" — shows 7 days before a
+  live budget's end date, naming the budget that ends soonest. Its action,
+  **Renew**, opens that budget's Edit on the agent page, prefilled with its own
+  limits (`?renew=<delegation hash>`), where the end date is the field to
+  change. It has no dismiss control: renewing, or the end, resolves it.
+- **"Budget ended"** — "<agent>'s budget ended <date>", "It can't spend until
+  you set a new budget.", action **Set budget** — replaces "<agent> has no
+  budget" for an active agent whose budget ended (the overview's
+  `budgetEndedAt`), and that agent's "reached its budget" item does not show
+  beside it. The agent's row badge reads "Budget ended" instead of "Needs
+  setup". Dismissing it acknowledges it **until the agent's next budget ends**:
+  it lights again for a later end date, even after a dismissal.
+- An ended budget's refusals are counted apart from over-budget ones (the
+  overview's per-agent `expired` bucket), so "reached its budget" means the
+  cap, not the end date.
+
 ## Agent Budget Setup
 
 Use when the user creates or edits what an agent may spend.

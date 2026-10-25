@@ -100,6 +100,10 @@ export function dismissalBodyFor(
     case 'budget-reached':
     case 'budget-scope':
       return item.agentId !== undefined ? { item_kind: item.kind, agent_id: item.agentId } : null
+    case 'budget-ended':
+      // #4353: shares the budget item's slot (`dashboard-attention.ts`
+      // `budgetItemId`) — stored as `budget-reached`, re-armed by the end date.
+      return item.agentId !== undefined ? { item_kind: 'budget-reached', agent_id: item.agentId } : null
     case 'budget-usage':
       return item.agentId !== undefined && item.periodEnd !== undefined
         ? { item_kind: 'budget-usage', agent_id: item.agentId, period_end: item.periodEnd }

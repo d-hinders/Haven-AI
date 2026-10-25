@@ -17,9 +17,10 @@
  *
  * ── Item order ────────────────────────────────────────────────────────────
  *
- * The returned array follows the issue's fixed order: needs setup, low
- * balance / zero USDC (per account), budget reached and scope refusals (per
- * agent), Haven paused sponsored payments, payments failed (per agent), no
+ * The returned array follows the issue's fixed order: needs setup (or, for
+ * an agent whose only budget ended, "Budget ended", #4353), low balance /
+ * zero USDC (per account), budget reached, 90% used, budget ending and scope
+ * refusals (per agent), Haven paused sponsored payments, payments failed (per agent), no
  * backup signer (per account). Renderers must not re-sort.
  *
  * ── Attribution decision (recorded, #3808) ────────────────────────────────
@@ -48,10 +49,20 @@
  * never hides an item: the unknown-value rule holds. Low balance and zero
  * USDC are never dismissible — money is at stake and "Add funds" is the
  * action.
+ *
+ * ── Budget end dates (#4353, owner decisions 2026-10-25 on #4349) ─────────
+ *
+ * "Budget ending" fires `BUDGET_ENDING_LEAD_DAYS` (7) before a live budget's
+ * `expiresAt`, with Renew opening that budget's Edit; it is not dismissible —
+ * renewing (or the end) resolves it. "Budget ended <date>" replaces
+ * "<agent> has no budget" when the overview names an ended budget
+ * (`budgetEndedAt`), and drops the duplicate "reached its budget". It is
+ * acknowledged until the agent's NEXT budget ends.
  */
 
 import type { ApiSchema } from '@haven_ai/core'
 import { hasPositiveCap, receivedBudgetLine } from './agent-budget'
+import { formatSubBudgetDate } from './sub-budget'
 
 export type DashboardOverview = ApiSchema<'DashboardOverviewResponse'>
 export type DashboardBudgetRemaining = ApiSchema<'DashboardBudgetRemainingResponse'>
@@ -76,6 +87,8 @@ export type AttentionItemKind =
   | 'zero-usdc'
   | 'budget-reached'
   | 'budget-usage'
+  | 'budget-ending'
+  | 'budget-ended'
   | 'budget-scope'
   | 'haven-paused'
   | 'payments-failed'
@@ -136,6 +149,8 @@ export interface DashboardAttentionInput {
   acknowledgements?: ReadonlyMap<string, AttentionAcknowledgement>
   /** Ids hidden for this session only — never persisted. */
   dismissedIds?: ReadonlySet<string>
+  /** The clock "Budget ending" compares against (#4353); `Date.now()` when omitted. */
+  nowMs?: number
   /**
    * While the setup guide's "Add USDC" step is open (#3818), the low-balance
    * and zero-USDC items are held back — the guide IS the ask for funds.
@@ -159,6 +174,9 @@ export const DISMISSIBLE_ATTENTION_KINDS: ReadonlySet<AttentionItemKind> = new S
   'no-backup',
   'budget-reached',
   'budget-usage',
+  // #4353: acknowledged until the agent's NEXT budget ends. "Budget ending"
+  // is not here: Renew is the action, and the item ends with the budget.
+  'budget-ended',
   'budget-scope',
   'haven-paused',
   'payments-failed',
@@ -176,6 +194,44 @@ export const PERMANENT_ATTENTION_KINDS: ReadonlySet<AttentionItemKind> = new Set
  * ROWS (a retry folded within 60 s is one row).
  */
 export const PAYMENTS_FAILED_DANGER_COUNT = 3
+
+/** #4353 (owner decision 2026-10-25, #4349 decision 3): "Budget ending" shows this many days before the end. */
+export const BUDGET_ENDING_LEAD_DAYS = 7
+
+/**
+ * #4353: the "Budget ended" item shares the budget item's acknowledgement
+ * slot (`budget-reached:<agentId>`, stored as kind `budget-reached`), so no
+ * new stored kind is needed. The two never show for one agent at once —
+ * an agent whose only budget ended gets the ended item, and its
+ * "reached its budget" item is dropped — and the ended item re-arms on
+ * `budgetEndedAt`, so an acknowledgement holds until the NEXT budget ends.
+ */
+function budgetItemId(agentId: string): string {
+  return `budget-reached:${agentId}`
+}
+
+/** `expiresAt` → Unix seconds, or null when unknown. */
+function unixSeconds(value: string | null | undefined): number | null {
+  const ms = instant(value)
+  return ms === null ? null : Math.floor(ms / 1000)
+}
+
+/**
+ * #4353: the agent's live budget that ends soonest within the lead time —
+ * after `nowMs`, at most `BUDGET_ENDING_LEAD_DAYS` ahead. A zero cap is no
+ * budget, and an unparseable end is unknown (#3295): neither fires.
+ */
+function endingBudget(agent: DashboardAgent, nowMs: number): DashboardAgent['budgets'][number] | null {
+  const horizon = nowMs + BUDGET_ENDING_LEAD_DAYS * 86_400_000
+  let soonest: { budget: DashboardAgent['budgets'][number]; ms: number } | null = null
+  for (const budget of agent.budgets ?? []) {
+    if (!hasPositiveCap(budget.budgetAtomic)) continue
+    const ms = instant(budget.expiresAt)
+    if (ms === null || ms <= nowMs || ms > horizon) continue
+    if (soonest === null || ms < soonest.ms) soonest = { budget, ms }
+  }
+  return soonest?.budget ?? null
+}
 
 /** The agent Activity tab filtered to its refused attempts (#4323). */
 function refusedAttemptsHref(agentId: string): string {
@@ -415,6 +471,9 @@ function firingUsageBudget(
  */
 export function computeAttentionItems(input: DashboardAttentionInput): AttentionRuleItem[] {
   const { overview, budgetRemaining, accountNames, acknowledgements, dismissedIds, holdBackLowBalance } = input
+  const nowMs = input.nowMs ?? Date.now()
+  /** #4353: agents shown "Budget ended" — their "reached its budget" item is dropped. */
+  const endedAgentIds = new Set<string>()
   const items: AttentionRuleItem[] = []
   /** #4324: each acknowledgeable item's latest event time, by item id. */
   const latestEventById = new Map<string, string | undefined>()
@@ -444,6 +503,24 @@ export function computeAttentionItems(input: DashboardAttentionInput): Attention
         href: `/agents/${agent.id}`,
         agentId: agent.id,
       })
+    } else if (agent.status === 'active' && !hasUsableBudget(agent) && unixSeconds(agent.budgetEndedAt) !== null) {
+      // #4353: the agent HAD a budget and it ended — say so, with the date,
+      // instead of "has no budget". Re-armed by the end date (see
+      // `budgetItemId`).
+      const id = budgetItemId(agent.id)
+      endedAgentIds.add(agent.id)
+      items.push({
+        id,
+        kind: 'budget-ended',
+        tone: 'neutral',
+        badge: 'Budget ended',
+        title: `${agent.name}'s budget ended ${formatSubBudgetDate(unixSeconds(agent.budgetEndedAt)!)}`,
+        subtitle: "It can't spend until you set a new budget.",
+        actionLabel: 'Set budget',
+        href: `/agents/${agent.id}`,
+        agentId: agent.id,
+      })
+      latestEventById.set(id, agent.budgetEndedAt ?? undefined)
     } else if (agent.status === 'active' && !hasUsableBudget(agent)) {
       items.push({
         id: `needs-setup:${agent.id}`,
@@ -505,8 +582,10 @@ export function computeAttentionItems(input: DashboardAttentionInput): Attention
   // ── 3. Budget reached (neutral, owner decision 2026-10-09) — per agent ──
   for (const agent of agents) {
     const refusals = agent.stats?.d7?.refusals
-    const refusalItemId = `budget-reached:${agent.id}`
-    const refusalFires = (refusals?.budget ?? 0) > 0
+    const refusalItemId = budgetItemId(agent.id)
+    // #4353: `budget` counts over-budget stops only (an ended budget's stops
+    // are `expired`), and an agent shown "Budget ended" drops this item.
+    const refusalFires = (refusals?.budget ?? 0) > 0 && !endedAgentIds.has(agent.id)
     if (refusalFires) {
       items.push({
         id: refusalItemId,
@@ -544,6 +623,24 @@ export function computeAttentionItems(input: DashboardAttentionInput): Attention
         agentId: agent.id,
         periodEnd: firing.period_end,
       })
+    }
+    // #4353: a live budget that ends within the lead time. Renew opens its
+    // Edit, prefilled, on the agent page (`?renew=<delegationHash>`).
+    if (agent.status === 'active' || agent.status === 'paused') {
+      const ending = endingBudget(agent, nowMs)
+      if (ending !== null) {
+        items.push({
+          id: `budget-ending:${agent.id}`,
+          kind: 'budget-ending',
+          tone: 'neutral',
+          badge: 'Ending soon',
+          title: `${agent.name}'s budget ends ${formatSubBudgetDate(unixSeconds(ending.expiresAt)!)}`,
+          subtitle: 'Renew it to keep it paying.',
+          actionLabel: 'Renew',
+          href: `/agents/${agent.id}?renew=${ending.delegationHash}`,
+          agentId: agent.id,
+        })
+      }
     }
     // `scope` refusals (no budget for that target) are reported here too,
     // with their own wording and badge. A budget did its job — but the

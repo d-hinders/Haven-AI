@@ -10,6 +10,7 @@ vi.mock('@/lib/api', () => ({
 
 import { api } from '@/lib/api'
 import {
+  dismissalBodyFor,
   LEGACY_DISMISS_KEY,
   ruleItemIdForDismissal,
   useAttentionDismissals,
@@ -388,5 +389,17 @@ describe('useAttentionDismissals (#3813, #4324)', () => {
     expect(ruleItemIdForDismissal({ item_kind: 'some-future-kind', account_id: null, agent_id: 'g' })).toBeNull()
     expect(ruleItemIdForDismissal({ item_kind: 'budget-reached', account_id: null, agent_id: null })).toBeNull()
     expect(ruleItemIdForDismissal({ item_kind: 'no-backup', account_id: null, agent_id: null })).toBeNull()
+  })
+})
+
+describe('dismissalBodyFor — budget ended (#4353)', () => {
+  it('stores "Budget ended" in the budget item slot, and the row maps back to the same id', () => {
+    const body = dismissalBodyFor({ id: 'budget-reached:a1', kind: 'budget-ended', agentId: 'a1' })
+    expect(body).toEqual({ item_kind: 'budget-reached', agent_id: 'a1' })
+    expect(ruleItemIdForDismissal({ item_kind: 'budget-reached', agent_id: 'a1', account_id: null })).toBe('budget-reached:a1')
+  })
+
+  it('"Budget ending" has no stored form', () => {
+    expect(dismissalBodyFor({ id: 'budget-ending:a1', kind: 'budget-ending', agentId: 'a1' })).toBeNull()
   })
 })

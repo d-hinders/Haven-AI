@@ -43,6 +43,8 @@
 import { useState, type ReactNode } from 'react'
 import {
   Bot,
+  CalendarClock,
+  CalendarX,
   Check,
   CircleDollarSign,
   Coins,
@@ -72,6 +74,8 @@ const KIND_ICON: Record<AttentionRuleItem['kind'], LucideIcon> = {
   'zero-usdc': Coins,
   'budget-reached': Gauge,
   'budget-usage': Gauge,
+  'budget-ending': CalendarClock,
+  'budget-ended': CalendarX,
   'budget-scope': CircleDollarSign,
   'haven-paused': CirclePause,
   'payments-failed': TriangleAlert,

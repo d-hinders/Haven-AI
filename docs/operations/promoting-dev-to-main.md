@@ -10,7 +10,7 @@ covers:
   - docs/operations/dev-environment.md
   - packages/backend/src/index.ts
   - scripts/release-scope.mjs
-last-verified: "2026-10-19"
+last-verified: "2026-10-25"
 ---
 
 # Promoting `dev → main` (production release)
@@ -223,7 +223,10 @@ so this is a rule to point at rather than a question to ask the release runner.
 ## Merge, deploy, and verify prod
 
 - [ ] Merge the promotion PR **with a merge commit** (`gh pr merge --merge`),
-      never squash. A squash-promotion puts a history-less copy of the batch on
+      never squash. The *Dev gate* ruleset on `main` now allows only the
+      `merge` method, so GitHub refuses a squash or rebase there (`gh api
+      repos/d-hinders/Haven-AI/rulesets/18134280`, `allowed_merge_methods`).
+      A squash-promotion puts a history-less copy of the batch on
       `main`; the moment `dev` refactors any of those files, the next promotion
       PR goes DIRTY with mass conflicts (this happened with #1152 → #1172, and
       took a `-s ours` reconcile merge, #1173, to repair).
@@ -382,7 +385,7 @@ deployment holding a confusing name.
 Separately: when this section was written (2026-08-06), `main` had not moved
 since **2026-06-26**. That was a promotion backlog, not a deploy bug, and
 promotions have run since: the latest at this doc's last verification is
-#3934, merged to `main` on 2026-10-14.
+#4338 (0.11.0-alpha.0), merged to `main` on 2026-10-23 with a merge commit.
 
 > **Re-verified 2026-10-19 (weekly docs audit #3645, at dev `cf88627c`):**
 > the whole checklist was re-read. Changed: the npm item names the #3797
@@ -396,3 +399,17 @@ promotions have run since: the latest at this doc's last verification is
 > RPC probe's defaults (batch 10, burst 20, cap 50), the public RPC defaults,
 > `SWEEP_MIN_USDC`'s `0.01` default, and the `enforce` default. Not checkable
 > from the repo: the npm token's expiry date.
+
+> **Re-verified 2026-10-25 (#4372 part H, at dev `e778da444`):** the whole
+> checklist was re-read. Changed: the merge item records that *Dev gate* now
+> allows only the `merge` method on `main`, and the closing note names #4338
+> as the latest promotion. Checked and accurate: the 19 required contexts (15
+> on *Haven automerge rules* for `main` and `dev`, plus `gate`, `qa-freshness`,
+> *Design visual regression* and *Frontend browser smoke* on *Dev gate*), the
+> strict up-to-date rule on `main` only, `dismiss_stale_reviews_on_push`, the
+> one CODEOWNERS rule (migration files), *External intake gate* required on
+> `dev` only, the workflow names, `publish.yml`'s `promote-tags` job and its
+> FAILED rows, `release:scope`'s exit codes 2 and 1, the RPC probe's defaults
+> (batch 10, burst 20, cap 50, logs range 500), `SWEEP_MIN_USDC`'s `0.01`
+> default, the `enforce` default, and every link anchor. Not checkable from the
+> repo: the npm token's expiry date.

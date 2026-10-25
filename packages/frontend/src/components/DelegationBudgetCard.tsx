@@ -388,7 +388,8 @@ export default function DelegationBudgetCard({
     renewApplied.current = true
     const nowSec = Math.floor(Date.now() / 1000)
     const row = budgets.find(
-      (b) => b.delegation_hash.toLowerCase() === renewHash.toLowerCase() && b.status === 'active' && occupiesSlot(b, nowSec),
+      // The same liveness the routed-edit lookup uses (`occupiesSlot`).
+      (b) => b.delegation_hash.toLowerCase() === renewHash.toLowerCase() && occupiesSlot(b, nowSec),
     )
     if (row) setEditing(row)
     try {

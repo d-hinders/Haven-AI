@@ -27,7 +27,7 @@ covers:
   - packages/frontend/src/lib/signer.ts
   - packages/ops/**
   - packages/backend/src/routes/ops.ts
-last-verified: "2026-10-02"
+last-verified: "2026-10-25"
 ---
 
 # Haven — System Context
@@ -263,4 +263,19 @@ flowchart LR
   at the root and metered by the same caveat enforcers; #3423 receive-side
   slices; #3479 settlement recording; #3485 allowance-summary alignment)
   widened what a delegate may redeem but moved no custody boundary, actor or
+  trust edge this diagram names.
+- Re-verified 2026-10-25 (weekly docs audit #3645, at dev `615686369`): the
+  custody claims re-checked at this head — `middleware/agentAuth.ts` and
+  `routes/agents.ts` still store only the public `delegate_address`,
+  `config.ts` still resolves `RELAYER_PRIVATE_KEY_<chainId>` over the global
+  fallback (`config.ts:574`), `POST /safe/exec` stays deleted (`index.ts:533`
+  records the #2847 removal) and `lib/safe-tx.ts` is still absent, the
+  signer still composes the SIGN-IN-WITH-X header in-package (`siwx.ts`,
+  never caller-supplied bytes, #3728), the hosted MCP facade stays keyless,
+  the chain registry still carries Gnosis (100) as the historical entry with
+  no backend RPC, and the ops console claims (numeric allowlist, 2FA,
+  `ops_access_log` audit) hold. The week's drift (x402 proof-header
+  settlement reports #4075, request-mode x402, SIWX sign-in promotion,
+  expired-only budgets #4376, catalog probe cooldown #4407) changed what the
+  covered surfaces report and refuse but moved no custody boundary, actor or
   trust edge this diagram names.

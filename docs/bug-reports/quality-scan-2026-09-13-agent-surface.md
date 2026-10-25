@@ -22,7 +22,7 @@ covers:
   - packages/demo-merchant-mcp/src/x402.ts
   - packages/demo-merchant-mcp/src/http.ts
   - packages/demo-merchant-mcp/src/invoice.ts
-last-verified: "2026-09-21"
+last-verified: "2026-10-25"
 ---
 
 # Quality scan — the agent surface (safe-retirement, MCP, signer, demo merchant) — 2026-09-13
@@ -312,3 +312,25 @@ assumed:
 - No disposition found in the repo for B1, B2, B3, B6, B7, B8, B10, B11, B12
   or F1/F3's remaining slices; they read as open, and this note does not
   declare them closed.
+
+## 9. Dispositions re-checked 2026-10-25 (weekly docs audit #3645, at dev `615686369`)
+
+The report body and §8 above are left as written. Every standing "in code"
+claim still holds at this head: `fetchX402SignContext` fails with the four
+distinct signer-local refusal codes (`SIGN_CONTEXT_TIMEOUT`,
+`SIGN_CONTEXT_UNREACHABLE`, `SIGN_CONTEXT_REFUSED`, `SIGN_CONTEXT_MALFORMED`,
+B9); the retired-rail guard documents its `PAYMENT_ENTRY_POINTS` rule in its
+own comment and the stale "five" is gone (B13); the rail decision resolves
+through `sessionRailRetired()` / `allowanceModuleRailRetired()` in
+`rails/execution-rail.ts` with the census pin test present; the x402
+idempotency bucket is still 300 000 ms (`X402_IDEMPOTENCY_BUCKET_MS`,
+`sdk/src/x402.ts`); the `haven_sign` success shape is still
+`{ signature, x402_binding }` with the next step in description prose (B4);
+and the zero hash is treated as "no hash to settle" —
+`completeX402MerchantCall` answers `delivered_unsettled` rather than
+`settled` (F2 slices (a)/(b)), with the demo merchant's already-used path
+carrying the explicit `already_settled_earlier` settlement state (#2969).
+All 20 covered paths in `covers:` still exist. The intervening covered
+commits (x402 proof-header settlement #4075, SIWX, expired-only budgets
+#4376, catalog probe cooldown #4407) changed the covered files but
+supersede nothing measured here.

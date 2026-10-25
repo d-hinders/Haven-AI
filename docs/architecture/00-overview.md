@@ -69,7 +69,7 @@ covers:
   - docs/architecture/08-local-vs-hosted-mcp.md
   - docs/architecture/11-agent-passport-schema.md
   - docs/regulatory/casp-risk-guardrails.md
-last-verified: "2026-10-23"
+last-verified: "2026-10-25"
 ---
 
 # Haven — Architecture Overview
@@ -272,3 +272,20 @@ configured, the retired rails' 410s (`isRetiredRailIntent`), the
 the named-pair default (`connect/src/server-names.ts`), first-grant activation
 (`routes/agent-delegations.ts:988-996`), the passport chain (84532 only), and
 Gnosis as history-only.
+
+Re-verified 2026-10-25 (weekly docs audit #3645, at dev `615686369`). No claim
+needed rewriting. Re-checked at this head: the package table against
+`packages/*` (still 13 packages — the two `retired-rail-prose-*.json` files
+at that level are baseline data, not packages), the accounting registry
+(`fortnox` + `accounted` live, `light` + `igdrasil` coming soon,
+`modules/accounting/registry.ts`), the hosted instructions' pre-payment read
+(`haven_get_agent` first, `haven_get_allowances` for the breakdown,
+`mcp-server/src/server.ts`), the retired rails' 410s
+(`isRetiredRailIntent` in `routes/payments.ts`), the nine runtime profiles
+(`connect/src/runtime-registry.ts`), `/ops` answering 404 until configured
+with the read-only role (#3510), and passports carrying a `chainId` through
+`infra/repositories/agent-passports.ts`. The week's drift (x402
+proof-header settlement reports #4075, request-mode x402, SIWX sign-in,
+multi-account overview #4080, expired-only budgets #4376, catalog probe
+cooldown #4407) changed what covered surfaces report and render without
+moving any boundary, actor or custody split this overview states.

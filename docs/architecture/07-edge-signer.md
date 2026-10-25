@@ -45,7 +45,7 @@ covers:
   - packages/mcp-server/src/tools/plain-http-x402.ts
   - packages/mcp-server/src/tools/contracts.ts
   - packages/backend/src/modules/mpp/sweep.ts
-last-verified: "2026-10-23"
+last-verified: "2026-10-25"
 ---
 
 # Haven — Edge Signer
@@ -116,7 +116,7 @@ The edge signer ships as **`@haven_ai/signer`** in two layers:
      authorization's nonce is not the library's random draw: the signer
      overwrites it with `deriveX402PaymentNonce(expected.paymentId)` on the
      unsigned payload `preparePaymentHeader` built, then lets the library's
-     `signPaymentHeader` sign it (`packages/signer/src/core.ts:495-501`). That
+     signPaymentHeader` sign it (`packages/signer/src/core.ts:496-503`). That
      ties the merchant's on-chain `AuthorizationUsed(delegate, nonce)` to the
      Haven payment, so the backend's settlement sweeper can attribute a
      settlement the agent never reported
@@ -699,3 +699,18 @@ account is permanently out of scope.
 > quote and session, 300 s delivery, ≤3 GET redirects), the sweep chains
 > (`isSweepableChain`: Base, Base Sepolia), `X402_BINDING_PRIVATE_KEY` with no
 > fallback, `HAVEN_SIGNER_ACK` and the ack sidecar, and the 8 MiB audit rotation.
+
+> **Re-verified 2026-10-25 (weekly docs audit #3645, at dev `615686369`):**
+> the whole document's standing claims were re-spot-checked at this head.
+> Changed: the derived-nonce line anchor is now `core.ts:496-503` (the
+> overwrite and the library's `signPaymentHeader` call moved down three
+> lines); the sweeper's `:472` nonce anchor still lands exactly. Checked and
+> accurate: `RETIRED_BINDING_MEMORY` (64, `core.ts:270`), the
+> `client.ts:668-697` scheme dispatch, the 8 MiB audit rotation
+> (`AUDIT_ROTATE_BYTES`), the SIWX 300 s window plus pinned skew tolerance
+> (`SIWX_MAX_AGE_SECONDS`, `siwx.ts`), the dedicated binding key still read
+> from `X402_BINDING_PRIVATE_KEY` with a throw (never the relayer key — it
+> lives in `infra/chain/x402-binding-signer.ts:90`), and
+> `isSweepableChain` in `packages/sdk/src/sweep.ts`. The week's covered
+> drift (x402 proof-header settlement reports #4075, expired-only budgets
+> #4376) changed what reports carry and refuse, not any signer boundary.

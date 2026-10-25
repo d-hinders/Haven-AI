@@ -136,7 +136,7 @@ vi.mock('@/components/ConfirmDialog', () => ({
 vi.mock('@/components/AccountSignersCard', () => ({
   default: (props: { accountAddress?: string }) => (
     <div data-testid="account-signers-card" data-safe-address={props.accountAddress}>
-      Backup &amp; recovery
+      Who can approve
     </div>
   ),
 }))

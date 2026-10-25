@@ -733,7 +733,7 @@ export const FIXTURE_USER = {
   wallet_address: null,
   account_address: FIXTURE_ACCOUNT.account_address,
   // Delegation-rail on the `/auth/me`-shaped safes list only — so the account
-  // page's Backup & recovery card (#1089) has something real to render,
+  // page's Who can approve section (#1089) has something real to render,
   // without perturbing FIXTURE_ACCOUNT's identity shape (pinned against the e2e
   // fixture by fixture-shape-parity.test.ts).
   //
@@ -2179,7 +2179,7 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
   }
   if (pathname.startsWith('/accounts/hybrid/') && pathname.endsWith('/signers')) {
     // The account-scoped signer set (#1081/#1089) — one passkey, so the
-    // Backup & recovery card renders its "only one way to approve" state.
+    // Who can approve section renders its "only one way to approve" state.
     return {
       account_address: FIXTURE_ACCOUNT.account_address,
       chain_id: FIXTURE_ACCOUNT.chain_id,
@@ -4790,9 +4790,9 @@ export const SCENARIOS = {
         await dismissMobileSidebar(page, vp)
       }
 
-      // ── account page: Backup & recovery ──────────────────────────────────
+      // ── account page: Who can approve ────────────────────────────────────
       await settle(`${BASE_URL}/accounts/${FIXTURE_ACCOUNT.id}`)
-      const signersHeading = page.getByRole('heading', { name: 'Backup & recovery' })
+      const signersHeading = page.getByRole('heading', { name: 'Who can approve' })
       await signersHeading.waitFor({ timeout: 15_000 })
       const signersCard = page.locator('div.rounded-\\[10px\\]', { has: signersHeading })
       await signersCard.getByRole('button', { name: 'Connect wallet' }).waitFor({ timeout: 15_000 })
@@ -4816,7 +4816,7 @@ export const SCENARIOS = {
   },
   'account-backup-recovery': {
     description:
-      'Backup & recovery card at both viewports, in all three of its rendered states — the healthy multi-signer layout, the one-way-to-approve warning, and the load failure',
+      'Who can approve card at both viewports, in all three of its rendered states — the healthy multi-signer layout, the one-way-to-approve warning, and the load failure',
     // ── The three states, and why they are one scenario (#1693, #1725) ───────
     //
     // #1693 evidenced the HEALTHY layout only, and #1725's review found the
@@ -4867,7 +4867,7 @@ export const SCENARIOS = {
       // shoot a failure under the healthy capture's name.
       setBackupRecoveryStage('healthy')
 
-      const heading = page.getByRole('heading', { name: 'Backup & recovery' })
+      const heading = page.getByRole('heading', { name: 'Who can approve' })
 
       /**
        * Get the account page onto the currently-served stage and let it settle.
@@ -5047,8 +5047,8 @@ export const SCENARIOS = {
       // Wait for the passport ROW's badge and note, not just the section
       // heading. The row's own heading renders in the loading skeleton and the
       // load-error branch too, so waiting on it alone would happily accept
-      // either as the evidence — the same trap the Backup & recovery scenario
-      // documents above.
+      // either as the evidence — the same trap the account-backup-recovery
+      // scenario documents above.
       await card.getByText('Agent Passport').waitFor({ timeout: 15_000 })
       await card.getByText('Updating on-chain').waitFor({ timeout: 15_000 })
       await card.getByText(/signing key was replaced/).waitFor({ timeout: 15_000 })
@@ -5063,7 +5063,7 @@ export const SCENARIOS = {
   },
   'identity-settings-not-issued': {
     description:
-      'The Identity and settings card with the passport NOT issued — the opt-in row and the Backup & recovery pointer, no tax row (flag off)',
+      'The Identity and settings card with the passport NOT issued — the opt-in row and the Who can approve pointer, no tax row (flag off)',
     // No URL reaches a clean not-issued capture of the card: agent-research
     // carries an anchored passport, so the only fixture agent without one is
     // the revoked one — which is exactly the state worth photographing, since
@@ -5278,7 +5278,7 @@ export const SCENARIOS = {
       await page.goto(`${BASE_URL}/accounts/${FIXTURE_ACCOUNT.id}`, { waitUntil: 'networkidle', timeout: 30_000 })
       await dismissMobileSidebar(page, vp)
 
-      await page.getByRole('heading', { name: 'Backup & recovery' }).waitFor({ timeout: 15_000 })
+      await page.getByRole('heading', { name: 'Who can approve' }).waitFor({ timeout: 15_000 })
       // The wallet row is first; this opens the confirmation for the remaining
       // passkey without executing any signer change.
       await page.getByRole('button', { name: 'Remove', exact: true }).nth(1).click()
@@ -6007,7 +6007,7 @@ export const SCENARIOS = {
 
   'wrong-wallet': {
     description:
-      'The wrong-wallet gate state (#2073): a hydrated hybrid signer set naming an EOA owner, a connected wallet that is NOT it — the account page Backup & recovery card offering Switch wallet in place (the header pill left the top bar in #3825)',
+      'The wrong-wallet gate state (#2073): a hydrated hybrid signer set naming an EOA owner, a connected wallet that is NOT it — the account page Who can approve section offering Switch wallet in place (the header pill left the top bar in #3825)',
     // ── Why this scenario exists ─────────────────────────────────────────────
     //
     // #2068 made the signer gate fail closed for an unrelated wallet, and
@@ -6038,7 +6038,7 @@ export const SCENARIOS = {
     },
     async run({ page, vp, shoot }) {
       // #3825: the header pill is gone; the mismatch is now named where it
-      // blocks — the account's Backup & recovery card, whose in-flow
+      // blocks — the account's Who can approve section, whose in-flow
       // `WalletConnectAction` (#3812) reads "Switch wallet" for a connected
       // wallet that is not the owner. Waiting on that name pins the state
       // through the real path — reconnect, hydration, gate — and a run where
@@ -6048,7 +6048,7 @@ export const SCENARIOS = {
         timeout: 60_000,
       })
       await dismissMobileSidebar(page, vp)
-      const heading = page.getByRole('heading', { name: 'Backup & recovery' })
+      const heading = page.getByRole('heading', { name: 'Who can approve' })
       await heading.waitFor({ timeout: 30_000 })
       const card = page.locator('div.rounded-\\[10px\\]', { has: heading })
       await card.getByRole('button', { name: 'Switch wallet' }).waitFor({ timeout: 30_000 })

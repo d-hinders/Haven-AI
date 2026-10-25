@@ -108,7 +108,7 @@ export default function DashboardClient() {
   // dismissal key survives as the backup items' dismissal until #3813 owns
   // per-item persistence.
 
-  // The DELEGATION-rail nudge above is untouched — `Backup & recovery` is live
+  // The DELEGATION-rail nudge above is untouched — `Who can approve` is live
   // and this is still the rail where new accounts land.
   // #3818: the first-run guide's facts come from the overview through the
   // shared rules module — the same per-account USDC (#3803) and agent list the

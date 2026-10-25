@@ -37,9 +37,9 @@
  * 5. **Agent Passport** — `AgentPassportCard`'s content as a row. Its own
  *    revoked-only gate stands (archived agents are not newly gated).
  *
- * Under "On {account name}": a linked row to the account's Backup & recovery
- * — the account's Security & details tab (`?tab=security`). A pointer, not a
- * second copy (#1089).
+ * Under "On {account name}": a linked row to the account's Who can approve
+ * section — the account's Security & details tab (`?tab=security`). A pointer,
+ * not a second copy (#1089).
  */
 
 import { ArrowRight } from 'lucide-react'
@@ -223,7 +223,7 @@ export default function AgentSettingsTab({
           <Card hover={false} className="mt-2">
             <Row
               href={`/accounts/${account.id}?tab=security`}
-              title="Backup & recovery"
+              title="Who can approve"
               subtitle={`Managed on ${account.name}: it covers every agent on it`}
               trailing={<Icon icon={ArrowRight} className="h-4 w-4 text-[var(--v2-ink-3)]" />}
             />

@@ -84,7 +84,7 @@ covers:
   - packages/backend/src/middleware/ops-auth.ts
   - packages/ops/**
   - packages/frontend/scripts/check-kit-analytics-define.mjs
-last-verified: "2026-10-23"
+last-verified: "2026-10-25"
 ---
 
 > **Re-verified #4352 (2026-10-23, an expired-only budget is refused as
@@ -577,6 +577,17 @@ caveat, so the authority is still the signed caveat stack and nothing else.
 > this re-read: the Merchant-locked budgets section above and the
 > `merchant-catalog.ts`/`merchants.ts` coverage it names; the rest of the
 > document was not re-read for it.
+
+> **Re-verified #4408 (2026-10-25):** #4408 touches `merchants.ts` comment
+> text only — the offer-aggregates doc block now cites `agentsThatCanPay`
+> (the #4004 client-side replacement for the deleted `withinBudget`) where it
+> named a function that no longer exists. The payTo path is untouched:
+> `pay_to` is still written as seen from the challenge and never COALESCEd,
+> and a comment rename feeds no budget pin, no caveat, and no authority path.
+> Scope of this re-read: the Merchant-locked budgets section above and the
+> `merchants.ts` coverage it names; the rest of the document was not re-read
+> for it, and `last-verified` is bumped to 2026-10-25 for exactly this
+> coverage.
 
 > **Re-verified #4245 (2026-10-22):** #4245 adds `merchant_catalog.source`
 > (`'operator'` | `'bazaar'`, migration 117) and widens the `CatalogRow` type

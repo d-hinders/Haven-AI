@@ -32,7 +32,7 @@ describe('signer CLI arguments (#3173)', () => {
   it('--help names EVERY registered tool — pinned against toolSchemas so a sixth tool cannot drift out', () => {
     const text = helpText()
     const registered = Object.keys(toolSchemas)
-    expect(registered.length).toBeGreaterThanOrEqual(4)
+    expect(registered.length).toBeGreaterThanOrEqual(5)
     for (const name of registered) expect(text).toContain(`  - ${name}`)
     // and the bullet list has exactly that many entries
     expect(text.match(/^ {2}- haven_/gm)).toHaveLength(registered.length)

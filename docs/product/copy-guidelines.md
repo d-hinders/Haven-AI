@@ -32,7 +32,7 @@ covers:
   - packages/frontend/src/lib/agent-skill-index.ts
   - scripts/frontend-copy-lint.mjs
   - scripts/lib/ratchet.mjs
-last-verified: 2026-10-16
+last-verified: 2026-10-25
 ---
 
 # Haven UX Copy Guidelines
@@ -350,7 +350,7 @@ Welcome, Ada
 
 Create your Haven account
 
-Your passkey approves everything — budgets, agents, changes.
+Your passkey approves everything: budgets, agents, changes.
 No wallet, no seed phrase, nothing to install.
 
 Network
@@ -362,7 +362,7 @@ Create account with a passkey
 While it runs, the intro becomes the reassurance:
 
 ```text
-Setting up your account. Stay on this tab — it takes a few seconds.
+Setting up your account. Stay on this tab, it takes a few seconds.
 ```
 
 Avoid:
@@ -480,6 +480,13 @@ Haven is asking the relayer to deploy your Safe.
 
 ### How it works page
 
+Not the live page, and partly out of date. The shipped `/how-it-works`
+(`components/marketing/site/how-it-works/HowItWorksPage.tsx`) has no numbered
+setup sequence (`git grep "Choose how you sign in"` over `packages/frontend/src`
+finds nothing), and step 02 below offers "connect your wallet", which
+contradicts the passkey-only onboarding above (#1162). Read the block as a tone
+reference only; replacing it is an owner call.
+
 Preferred:
 
 ```text
@@ -548,7 +555,7 @@ artifact that was already self-consistent.
 | Thing | The term | Never |
 | --- | --- | --- |
 | The text the connect modal hands back for ONE agent, carrying its one-time setup token and the connector command | **setup prompt** | connect prompt, setup text |
-| The whole-onboarding text a user pastes to an agent before any agent exists, carrying no token (served to agents by `/for-agents.md` and `llms.txt`; no dashboard screen shows it since #4065) | **onboarding prompt** | setup prompt (a different object — see below), agent prompt |
+| The whole-onboarding text a user pastes to an agent before any agent exists, carrying no token (published as the SDK's `AGENT_ONBOARDING_PROMPT` export; no dashboard screen shows it since #4065) | **onboarding prompt** | setup prompt (a different object — see below), agent prompt |
 | The `npx -y @haven_ai/connect@…` line the agent runs | **connector command** | connect command, setup command, connection command |
 | The agent's API key, `sk_agent_…`, written to `~/.haven` | **agent credential** | `sk_live_…` (a different product's shape and never Haven's), agent key, API token |
 | The agent's signing key, made locally and never sent anywhere | **delegate key** | signing key (ambiguous — the user also signs), private key |
@@ -572,9 +579,10 @@ the empty state; owner decision 2026-10-16 moved it off, because that user is
 already signed in and the connect flow already ends by handing the agent a setup
 prompt. `/agents` now runs that flow inline for the first agent, under the card
 title **Connect your first agent**, with the modal's own step copy. The
-onboarding prompt stays published for agents — `/for-agents.md`, `llms.txt` and
-the SDK's `AGENT_ONBOARDING_PROMPT` export — so the two terms still name two
-objects; only one of them has a dashboard surface.
+onboarding prompt stays published for agents as the SDK's
+`AGENT_ONBOARDING_PROMPT` export (`packages/sdk/src/agent-guidance.ts`;
+`/for-agents.md` and `llms.txt` do not carry its text), so the two terms still
+name two objects; only one of them has a dashboard surface.
 
 The same change gave `/agents` its page subtitle: "Agents pay for things up to a
 budget you set. You approve each budget yourself, and anything over it is refused
@@ -599,11 +607,12 @@ fifth, and it has none for the reason given above):
 
 - **`connect command` / `setup command` are blocked** by the frontend copy lint
   (`scripts/frontend-copy-lint.mjs`, `BANNED`), which is a required check. It
-  reads `src/app`, `src/components`, `src/hooks` (since #3884) and the named
-  prose files in `SCAN_FILES` — so the connect modal and both copies of the
-  downloadable skill are covered, and `packages/connect/src`, `packages/backend/src` and every
-  `*.test.ts` are **not**: `walk()` skips test files by name and the scan trees
-  are frontend-only.
+  reads the frontend's `src/app`, `src/components`, `src/hooks` (since #3884),
+  `packages/ui/src` (#3508) and the named prose files in `SCAN_FILES` — so the
+  connect modal and both copies of the downloadable skill are covered, and
+  `packages/connect/src`, `packages/backend/src` and every `*.test.ts` are
+  **not**: `walk()` skips test files by name and no scan tree is a backend or
+  connector tree.
 - **`setup prompt`, `agent credential` and `delegate key` have no checker.** A
   literal matcher cannot catch the absence of a term, and the retired spellings
   for those rows (`agent key`, `signing key`, `private key`) have legitimate
@@ -633,22 +642,20 @@ use — found by `haven-doc-reviewer`, not by the author.
 
 It returned **58 across 24 files** before #2576 (the original case-sensitive
 form returned 54 across 23, missing the four sites the note above describes).
-After the sweep the same command returns **6**, and every one of the six is a
-`last-verified:` front-matter line this sweep itself wrote — an audit note
-quoting the retired term in order to say which term was replaced. Filter those
-out and the live-copy figure is **0**: append
+After the sweep the same command returned **6**, every one a `last-verified:`
+front-matter line the sweep itself wrote, and **0** with those filtered out
+(`| grep -v ':last-verified:'`).
 
-```
-| grep -v ':last-verified:'
-```
-
-Both numbers are stated because the first one is what a future reader actually
-gets, and a lone "0" here would make them think the sweep had regressed. The
-remaining occurrences are historical records, not live product copy.
+Re-run at `fb2da6b92` (2026-10-25, in bash; in zsh, quote the `--include` globs
+or the shell aborts with "no matches found", an empty result that reads like a
+clean one) it returns **4**, none of them `last-verified:` lines: all four are
+operations prose in `docs/operations/mcp-runtime-compatibility.md` (lines 4752,
+5018, 5032 and 5179) that use the retired terms. They are docs, not product copy,
+which is why the frontend lint does not see them.
 
 Positive control: `grep -rn "connector command" packages/frontend/public README.md`
-returns 9 both before and after, so the 0 above means the sweep landed rather
-than that the command is broken. Note what the command itself cannot see — it
+returned 9 at the #2576 sweep and returns 16 at `fb2da6b92`, so the command
+can find the term. Note what the command itself cannot see — it
 does not read `packages/backend/src`, where the setup prompt's own consent line
 lived, or `docs/**` outside those two folders. Dated records keep the old
 wording on purpose: the CASP changelog shards, `docs/archive/**` and the
@@ -670,7 +677,7 @@ never a README copy — the shared-prose rule this epic follows throughout.
 
 ## Enforcement
 
-These guidelines are enforced on frontend copy, not just documented. `npm run lint:copy` (`scripts/frontend-copy-lint.mjs`) scans user-facing source (`packages/frontend/src/app/**` + `components/**` + `hooks/**` since #3884, and `packages/ui/src`) for the unambiguous **multi-word** banned phrases drawn from this guide and **fails the PR on any new occurrence** (#902). It is deliberately conservative — only multi-word phrases, never bare words like "safe"/"owner"/"deploy" — so false positives stay near zero. Its `BANNED` list is a superset of the mapping table (it also covers e.g. "policy engine", "smart contract wallet", "webauthn credential"), and it does **not** reach `packages/backend/**` — rules about strings that live there are documentation-only. The i18n message catalog (`src/lib/i18n/messages/en.ts`, the app's copy) **is** scanned (#3347): it is in the script's `SCAN_FILES` allowlist, and any other `.ts` file in that directory counts as convention copy, so a new locale fails the run until it is listed.
+These guidelines are enforced on frontend copy, not just documented. `npm run lint:copy` (`scripts/frontend-copy-lint.mjs`) scans user-facing source (`packages/frontend/src/app/**` + `components/**` + `hooks/**` since #3884, and `packages/ui/src`) for the unambiguous **multi-word** banned phrases drawn from this guide and **fails the PR on any new occurrence** (#902). It is deliberately conservative — only multi-word phrases, never bare words like "safe"/"owner"/"deploy" — so false positives stay near zero. Its `BANNED` list covers the mapping table's unambiguous multi-word rows (smart account, smart wallet, passkey signer, enroll signer, spending policy, allowance module, session key, transaction hash), adds others (e.g. "policy engine", "smart contract wallet", "webauthn credential"), and leaves some rows out ("Safe deployed", "Owner type", "Safe address", "delegate address" have no entry), and it does **not** reach `packages/backend/**` — rules about strings that live there are documentation-only. The i18n message catalog (`src/lib/i18n/messages/en.ts`, the app's copy) **is** scanned (#3347): it is in the script's `SCAN_FILES` allowlist, and any other `.ts` file in that directory counts as convention copy, so a new locale fails the run until it is listed.
 
 - **Prose outside those directories is scanned only if it is named (#2317).** `src/lib` is excluded by directory on purpose (`src/hooks` was too, until #3884) — there the banned phrases are legitimate code identifiers, and widening the rule would bury a blocking check in false positives. But a handful of `lib/` files hold nothing but user-facing prose, and for those the gate was green while reading none of them: `agent-skill-bundle.ts` is downloaded verbatim as `SKILL.md` from the connect-agent success screen, and `agent-pause-copy.ts` / `stranded-funds-copy.ts` are single sentences extracted out of `components/` so two surfaces agree (#2195, #2230). Those files, plus `agent-handoff.ts`, `passkeyLabels.ts`, `transaction-labels.ts` / `transaction-presentation.tsx` (#2333) and the SDK's canonical `packages/sdk/src/skill-content.ts`, are listed individually in the script's `SCAN_FILES` allowlist. **The script is the list, not this sentence** — the enumeration above had drifted three entries behind it by #2926 (`agent-onboarding-prompt.ts`, the SDK's `agent-guidance.ts`, `public/for-agents.md`), which is what an enumeration in prose does; `npm run lint:copy` prints the live count in its own summary line. **If you add a prose file under `lib/`, the gate will not see it until you add it there** — a green check on a PR that touched only such a file carries no information about it. Entries must resolve to real files; an emptied allowlist or a path matching nothing fails the run rather than passing quietly.
 
@@ -874,8 +881,10 @@ precedents:
   (a leaked private signing key controls funds already held in the agent
   wallet, and rotation does not recover them). That page was deleted by
   #3579, and the redesigned home does not carry the sentence
-  (`git grep -n "stay exactly where" -- packages/frontend/src` finds only an
-  unrelated comment in `Sidebar.tsx`). The entry's earlier history — #2246 fixing
+  (`git grep -n "stay exactly where" -- packages/frontend/src` finds nothing at
+  `fb2da6b92`; the unrelated `Sidebar.tsx` comment it used to find went with
+  PR #4042 (#4029), and the same search finds "Haven signs nothing" twice, so it can
+  find a hit). The entry's earlier history — #2246 fixing
   `UsingYourAgentInfo.tsx`, and the protocol marketing pages' "Client signs
   and settles on‑chain" measured as a correct sentence, not a defect — is in
   this file's git history; those pages were retired by #3579 too.
@@ -891,18 +900,21 @@ precedents:
   exactly this term. #2926 deleted that file, which is what makes the claim
   true now rather than any correction to the copy. The bullet also
   named the approval and send surfaces as labelling it "Payment receipt"; those
-  surfaces were deleted with the Safe rail (#1989) and the label survives on no
-  RENDERED DASHBOARD surface — the generated document below is the exception,
-  and saying "no surface at all" made this bullet contradict its own quotes two
-  sentences later. Checked over `packages/` rather than `packages/frontend`,
-  case-insensitively: that returns 15 hits in 9 files, and none of them is a
-  rendered label — they are comments, OpenAPI summaries, SDK tool descriptions
-  and the underlag document itself. The rule is
+  surfaces were deleted with the Safe rail (#1989) and the label for the
+  accounting attachment survives on no RENDERED DASHBOARD surface — the
+  generated document below is the exception. Checked over `packages/` rather
+  than `packages/frontend`, case-insensitively, at `fb2da6b92`: that returns 20
+  hits in 13 files. One is a rendered label, and it names a different object:
+  the agent Tool calls tab shows `haven_list_receipts` as "Listed payment
+  receipts" (`lib/tool-call-labels.ts`, #4227), meaning the agent's
+  machine-payment receipts, not the accounting attachment. The rest are
+  comments, OpenAPI summaries, SDK tool descriptions and the underlag document
+  itself. The rule is
   still unenforced — the remaining drift sits in the generated underlag
   document under `packages/backend/**`, which the copy lint does not scan. A
   SCOPE claim, deliberately, not a count: the title above is not the only
-  string there — the document's closing paragraph says "the verifiable Haven
-  payment receipt" and names the receipt JSON, and the attachment is filed as
+  string there — the document's closing paragraph says "This document renders the
+  Haven payment receipt." and names the receipt JSON, and the attachment is filed as
   `haven-receipt-<id>.pdf`. An earlier draft of this bullet said "the backend
   string alone" and was wrong for that reason. The English catalog is clear of
   it either way: it uses the preferred wording ("payment evidence attached")

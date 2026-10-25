@@ -1503,7 +1503,9 @@ appending bullets to one shared EOF inherited exactly that collision (four
 PRs in one day, 2026-08-12, #1366). Separate FILES merge cleanly the way
 separate lines never quite did. The bullet list below is the frozen
 historical log up to 2026-08-12; `last-verified` above now means a genuine
-re-read of the BODY claims (the weekly #1248 audit), never a per-PR bump.
+re-read of the BODY claims (the weekly docs audit — `docs-audit.yml`, Mondays,
+upserting tracking issue #3645; #1248 was one closed instance of it), never a
+per-PR bump.
 
 - **#997** — covers updated (lib/machine-payments.ts moved into modules/mpp/**; the shared token-resolution primitive lives in domain/payment-token.ts) — no perimeter change, the same routes/repositories still enforce it.
 - **#998** — covers + body re-read after the lib/ fold (execution-rail.ts -> rails/, fortnox-connector.ts already under modules/reporting/, accounting-entry.ts/catalog-discovery.ts/merchant-catalog.ts/safe-deployer.ts relocated) — pure path move, the perimeter and the non-asserting Fortnox invariant are unchanged.

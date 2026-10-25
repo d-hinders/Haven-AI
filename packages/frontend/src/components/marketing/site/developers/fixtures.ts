@@ -58,8 +58,8 @@ export const QUICKSTART_TERMINAL = {
   comment: '# from the setup prompt your dashboard hands you',
   command: 'npx -y @haven_ai/connect@<channel> --setup hv_setup_… --api <api-url> --ack-local-tools',
   files: [
-    ['~/.haven/agents/<agent-id>/identity.json', 'API key: identifies, cannot spend'],
-    ['~/.haven/agents/<agent-id>/signer.json', 'signing key: never leaves the machine'],
+    ['~/.haven/agents/<slug>/identity.json', 'API key: identifies, cannot spend'],
+    ['~/.haven/agents/<slug>/signer.json', 'signing key: never leaves the machine'],
   ] as const,
   tailComment: '# verify from your agent',
   probe: 'haven_get_agent → spend_authority_readiness: ready',

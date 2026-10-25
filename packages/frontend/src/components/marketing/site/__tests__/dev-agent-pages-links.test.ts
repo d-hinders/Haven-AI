@@ -108,3 +108,19 @@ describe('the new public pages’ links resolve (#3577)', () => {
     expect([...hrefs(developers), ...fixtureHrefs(developers)]).toContain('/exit')
   })
 })
+
+describe('the /developers quickstart names the default credential directory (#4396)', () => {
+  // Headless equivalent for the rendered-screen evidence: since #3737 the
+  // connector writes to ~/.haven/agents/<slug>/ by default; <agent-id> is
+  // only the --bare / --replace-without---name directory name. The terminal
+  // mockup must not send a reader into the wrong folder.
+  it('QUICKSTART_TERMINAL.files points at ~/.haven/agents/<slug>/, never <agent-id>', async () => {
+    const { QUICKSTART_TERMINAL } = await import('../developers/fixtures')
+    const paths = QUICKSTART_TERMINAL.files.map(([path]) => path)
+    expect(paths.length).toBeGreaterThan(0)
+    for (const path of paths) {
+      expect(path).toMatch(/^~\/\.haven\/agents\/<slug>\//)
+      expect(path).not.toContain('<agent-id>')
+    }
+  })
+})

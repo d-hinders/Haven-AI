@@ -87,6 +87,19 @@ covers:
 last-verified: "2026-10-23"
 ---
 
+> **Re-verified #4411 (2026-10-25, source-scan guard tests strip comments with
+> the parser):** the only covered file this diff touches is
+> `packages/ops/src/__tests__/card-inset-guard.test.ts` (under
+> `packages/ops/**`) — a guard test that reads ops sources as text. It replaces
+> its hand-rolled two-regex comment stripper with the shared
+> `@haven_ai/core` `stripComments` (passing each file's name so `.tsx` sources
+> keep their JSX verbatim); the assertions and the sources they scan keep their
+> meaning. It adds no signing step, no gate, no write path and no authority
+> surface. Every other file in the diff is outside this document's coverage
+> (backend/frontend guard tests, a new test-only core helper and its
+> re-export). Nothing else in this document was re-verified, and
+> `last-verified` is not bumped.
+
 > **Re-verified #4352 (2026-10-23, an expired-only budget is refused as
 > `delegation_expired` with the end date):** the covered files that change —
 > `infra/repositories/delegation-budgets.ts` (one narrow read-only query

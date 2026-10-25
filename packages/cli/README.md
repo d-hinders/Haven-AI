@@ -85,7 +85,8 @@ prints the address, the amount **and which chain** — read the chain from there
 rather than assuming one. You can compose the message; you cannot send the money.
 
 **Every command takes `--json`**, and every refusal is a JSON object with a
-machine-readable `code`. The contract and the six exit codes are in
+machine-readable `code` (an `agents connect --run` refusal carries the
+connector's own code, under `outcome.error`). The contract and the six exit codes are in
 [*For agents and scripts*](#for-agents-and-scripts) below — read that before
 branching on anything.
 
@@ -105,7 +106,7 @@ haven login                              # browser device-code approval (the def
 haven login --email you@example.com      # password path instead (prompt or HAVEN_PASSWORD)
 haven login --no-wait --json             # print the link object and exit — resume with --poll
 haven login --poll <device_code>         # one poll round: 0 approved, 3 pending, 4 denied
-haven whoami                             # user, session expiry, API URL
+haven whoami                             # email and name; --json adds session expiry and API URL
 haven guide                              # the agent onboarding runbook
 haven logout
 
@@ -147,6 +148,7 @@ haven agents connect --status <setupId> [--wait]
 # budgets: construct-and-hand-off (#2539) — the CLI never signs
 haven budget grant <agentId> --amount 25 --token USDC --period 1440
 haven budget grant <agentId> --amount 25 --token USDC --period 1440 --recipient <address> --wait
+haven budget grant <agentId> --amount 25 --token USDC --period 1440 --expires <unix-seconds>
 haven budget revoke <agentId> <delegationHash> [--wait]
 ```
 
@@ -304,7 +306,12 @@ budget, change signers, move funds, change your credentials, or rotate an
 agent's keys — neither the delegate key (`/agents/:id/rekey/*`) nor the API key
 (`/agents/:id/rotate-key`). `haven agents rotate-key` therefore needs an
 ordinary session (`haven login --email`), not a device-code one: issuing a
-fresh credential is a change of authority, and the human keeps those. The allow-list lives in
+fresh credential is a change of authority, and the human keeps those. Two more
+commands call routes the allow-list leaves out, so they need an ordinary
+session too: `haven wallets rename` (`PUT /user/accounts/:id`) and
+`haven activity export --format sie` (`GET /accounting/export`). Under a
+device-code session the backend answers all three with a 401, so they exit
+**3**, the same as a missing session. The allow-list lives in
 `packages/backend/src/middleware/owner-cli.ts`; a route that is not on it
 refuses, because #1640 already refuses every purpose-carrying token everywhere
 and this is a single opt-in exception. A census test measures what the
@@ -317,11 +324,16 @@ haven agents list --json                 # success: the payload, unchanged
 haven agents show missing --json         # failure: one object, still parseable
 ```
 
-A failure is always:
+A failure is this object, with one exception below:
 
 ```json
 { "ok": false, "error": { "code": "not_authenticated", "message": "Not authenticated.", "hint": "Run `haven login` ..." } }
 ```
+
+The exception is a connector refusal under `haven agents connect --run`. It
+exits **4** with the run object (`setup_id`, `approval_url`,
+`connector_command`, `connector_exit_code`, `outcome`, `relay`), and the
+connector's own error (`code`, `next_action`) is under `outcome.error`.
 
 Success keeps whatever shape the command already returned — including the bare
 arrays the list commands emit — so a script that parses a success today keeps
@@ -364,7 +376,9 @@ test; the copy exists so this package keeps **zero runtime dependencies** and
 
 - `--api <url>` or `HAVEN_API_URL` — backend URL (defaults to the hosted Haven
   backend). The backend is pinned into the saved session at login.
-- `HAVEN_EMAIL` / `HAVEN_PASSWORD` — non-interactive login (CI/scripts).
+- `HAVEN_EMAIL` / `HAVEN_PASSWORD` — non-interactive login (CI/scripts). With
+  `HAVEN_EMAIL` set, a bare `haven login` takes the password path, not the
+  device flow.
 - Session is stored owner-only at `~/.haven/session.json`. Treat it like a
   secret; `haven logout` removes it.
 

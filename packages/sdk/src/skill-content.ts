@@ -162,8 +162,10 @@ Do not guess the wallet address, network, or budget.
 
 For instant orientation at the start of a session, read the non-secret
 \`agent.json\` the connector wrote to your Haven credential directory (typically
-\`~/.haven/agents/<agent-id>/agent.json\` — if you don't know the agent id, list
-\`~/.haven/agents/\` to find the folder). It
+\`~/.haven/agents/<slug>/agent.json\`, where \`<slug>\` is the wiring name of the
+\`haven-<slug>\` pair — only a \`--bare\` run, or a \`--replace\` without \`--name\`,
+names the directory by the agent id instead; if you don't know the folder, list
+\`~/.haven/agents/\` to find it). It
 holds your agent id, Haven wallet address, network, and *configured* per-token
 budget, and contains no keys — the fastest way to answer "who am I and what may
 I spend" with no round trip. If that file is absent (some setups don't write

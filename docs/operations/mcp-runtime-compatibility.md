@@ -2660,8 +2660,12 @@ plus the read-only quote probe still gate any listing on the backend.
 > block degrades to `sufficient: null` with the warning).
 
 ```text
-~/.haven/agents/<agent-id>/bin/haven-mcp
+~/.haven/agents/<slug>/bin/haven-mcp
 ```
+
+The wrapper lives in the agent's credential directory, named from the wiring
+slug (`haven-<slug>` pair) by default; only a `--bare` run, or a `--replace`
+without `--name`, names the directory by the agent id instead (#3737).
 
 ## Supported Runtime Manifest
 
@@ -5523,8 +5527,10 @@ to call next in structured fields, and those fields are typed end to end
   or lacks tools reports `local_signer_probe_<status>` with a re-run
   instruction — setup can no longer exit 0 on an unstartable signer.
 - **Credential safety:** private signing keys live only in the agent's own
-  credential directory — `~/.haven/agents/<agent-id>/signer.json`, or
-  `~/.haven/agents/<slug>/signer.json` for a `--name`d agent (#1696). During a
+  credential directory — `~/.haven/agents/<slug>/signer.json` for a default
+  setup, or `~/.haven/agents/<agent-id>/signer.json` when the pair is unnamed
+  (a `--bare` run, or a `--replace` without `--name`; #1696, default
+  re-derived in #3737). During a
   re-key there is a SECOND, transient private key in that same directory:
   `rekey-pending.json` holds the newly generated key between `--rekey` and
   `--rekey-finish`, at the same `0600` mode, and is deleted once the rewrite

@@ -87,6 +87,16 @@ covers:
 last-verified: "2026-10-23"
 ---
 
+> **Re-verified #4415 (2026-10-25, stale comment sweep):** the only covered
+> file this diff touches is `packages/sdk/src/redemption-guard.ts` — the
+> `assertRedeemsOwnBudgetDelegation` JSDoc now names the THREE shapes the
+> function already enforces (single grant, #3329 two-link task-budget chain,
+> #3330 three-link sub-budget chain), matching the `refuse()` error text and
+> the 1/2/3-link checks verbatim. No check, refusal string, ABI constant or
+> control-flow change: what the signer accepts and refuses is byte-identical.
+> Every other file in the diff is outside this document's coverage. Nothing
+> else in this document was re-verified, and `last-verified` is not bumped.
+
 > **Re-verified #4411 (2026-10-25, source-scan guard tests strip comments with
 > the parser):** the only covered file this diff touches is
 > `packages/ops/src/__tests__/card-inset-guard.test.ts` (under

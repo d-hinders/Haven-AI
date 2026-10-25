@@ -12,7 +12,7 @@ covers:
   - packages/frontend/src/app/(authenticated)/accounts/[accountId]/AccountDetailClient.tsx
   - packages/backend/src/routes/passkeys.ts
   - packages/frontend/src/components/NewAccountDialog.tsx
-last-verified: "2026-10-16"
+last-verified: "2026-10-25"
 ---
 
 # Account recovery (delegation-rail accounts)
@@ -76,16 +76,17 @@ in it. What changed is that Haven tells you rather than stopping you.
 
 **You'll be asked to add a backup once the account holds funds — not during
 signup.** Signup is one screen and one passkey prompt (#1162). The prompt to add
-a backup appears on the dashboard after money arrives, because before that
-there is nothing to protect and no reason for the question. It is dismissible,
-it stops appearing once you add a backup, and you can add one at any time from
-**Backup & recovery**, in the **Security & details** tab on your account page
-(#4097).
+a backup appears on the dashboard after money arrives on a mainnet account,
+because before that there is nothing to protect and no reason for the question;
+a test-network account never shows it. It is dismissible (a dismissal is for
+good, per account), it stops appearing once you add a backup, and you can add
+one at any time under **Who can approve**, in the **Security & details** tab on
+your account page (#4097).
 
 ## Add a backup (do this early)
 
 On your account page, open the **Security & details** tab and choose one,
-under **Backup & recovery**:
+under **Who can approve**:
 
 - **Add a backup passkey** — creates a second passkey (usually approved with
   your device's screen lock). On the same device it's a second credential; on a
@@ -116,7 +117,7 @@ already has (#4024). Ways to approve belong to **one account each**:
   a backup on **its own** page.
 - **Losing a shared passkey affects every account it approves.** Accounts
   created from the same passkey share it. Recover each one from its own
-  **Backup & recovery** card, with a backup enrolled on that account.
+  **Security & details** tab, with a backup enrolled on that account.
 - **Settings → Passkeys and wallets** (the Security tab, #4358) lists each
   passkey and wallet once, with every account it approves, so you can check
   which accounts a backup actually covers.
@@ -125,8 +126,8 @@ already has (#4024). Ways to approve belong to **one account each**:
 
 1. Open Haven on a device that still has a working signer (your backup passkey,
    or the wallet you enrolled).
-2. Go to **Backup & recovery**, in the **Security & details** tab on your
-   account page.
+2. Go to **Who can approve**, in the **Security & details** tab on your
+   account page. (**Lost a device?** there summarises these steps.)
 3. **Add a replacement** for the device you lost (a new passkey on the device
    you're on now), so you're back to two ways to approve.
 4. **Remove** the lost signer from the list.
@@ -190,8 +191,8 @@ What you can still do, and it is the whole of it:
     self-serve way to move the funds out**. Haven's passkey Safe
     signer is a custom WebAuthn scheme that Safe's own interfaces do not
     understand, and Haven no longer offers a screen that builds the transfer.
-    The capability still exists in the API; the product surface for it does
-    not. If this is your situation, contact Haven rather than assuming the
+    Since #2847 there is no API path for it either: the route that relayed
+    an owner-signed Safe transaction is deleted. If this is your situation, contact Haven rather than assuming the
     funds are stuck — and note that the on-chain census taken for
     [#1440](https://github.com/d-hinders/Haven-AI/issues/1440) found no
     passkey-owned Safe on Base mainnet, which is why this was accepted as a
@@ -201,15 +202,18 @@ What you can still do, and it is the whole of it:
   Haven. This was always true; it is the point of a non-custodial account, and
   it is why removing Haven's builder takes away a convenience rather than your
   control.
-- **A backup owner you already added still works.** If a second passkey is
-  already on the Safe's owner list, it still signs, and Haven still relays for
-  it.
+- **A backup owner you already added is still an owner on-chain.** A wallet
+  owner signs at [app.safe.global](https://app.safe.global), as above. A second
+  passkey owner has the same limit as the first: Haven no longer relays a Safe
+  transaction (#2847), and Safe's own interfaces do not understand Haven's
+  passkey signer.
 
 If your Safe's only owner is a passkey and you never added a backup, treat the
 account as move-the-funds-out-and-close rather than as something to keep.
 
-> Until [#1229](https://github.com/d-hinders/Haven-AI/issues/1229) the second
-> passkey could not be added at all — enrolment refused a second credential on
-> the same network, so the only backup available was a wallet. If you created
-> your account before that fix and never added a wallet, adding a second
-> passkey now is the single most useful thing you can do to it.
+> Until [#1229](https://github.com/d-hinders/Haven-AI/issues/1229) a second
+> passkey could not be added to a legacy Safe at all — enrolment refused a
+> second credential on the same network, so the only backup available was a
+> wallet. Since [#1988](https://github.com/d-hinders/Haven-AI/issues/1988)
+> Haven offers no way to add any backup owner to a Safe, so for a Safe with no
+> wallet owner, the steps above are what remains.

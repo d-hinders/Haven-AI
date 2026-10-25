@@ -11,8 +11,9 @@
  *
  * This walks the barrel's RELATIVE import graph in source (so an indirect
  * re-export is caught too) and checks the bare specifiers of static
- * `import`/`export … from` declarations and of `import(…)` / `require(…)`
- * calls with a string literal. A specifier built at runtime is not seen.
+ * `import`/`export … from` declarations and of `import('…')` / `require('…')`
+ * calls with a string literal. Not seen: a specifier built at runtime, or a
+ * function obtained another way (`createRequire(import.meta.url)('…')`).
  */
 import { readFileSync } from 'node:fs'
 import { builtinModules } from 'node:module'

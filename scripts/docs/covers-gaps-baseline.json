@@ -114,8 +114,7 @@
     "scripts/frontend-copy-lint.mjs"
   ],
   "docs/contributing/ship-playbooks/money.md": [
-    "scripts/ci/money-path-restatement-scan.mjs",
-    "scripts/ci/money-path.test.mjs"
+    "scripts/ci/money-path-restatement-scan.mjs"
   ],
   "docs/contributing/ship-playbooks/README.md": [
     ".github/labeler.yml",

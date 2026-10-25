@@ -196,8 +196,8 @@ unattended start.
   `unknown` row that never turns the run red. The one-time setup below
   remains the operator step; the standing issue reports a low balance instead
   of a failed night finding it.
-- **Period:** give the eval agent a **Daily** period (the dashboard supports
-  it — `PERIODS` in `packages/frontend/src/components/DelegationBudgetCard.tsx`),
+- **Period:** give the eval agent a **Daily** period (the dashboard's budget
+  form offers a day, a week or 30 days),
   sized so the tiered run fits inside one refill: the tier-1 slices shrink
   geometrically, the drainer takes the rest once, and the tier-3 refusal
   tasks spend nothing — the full 11-task run moves a bounded fraction over

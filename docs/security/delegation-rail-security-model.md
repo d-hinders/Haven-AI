@@ -2336,6 +2336,18 @@ authority, and the same scope note holds.
 > claim above holds verbatim. Scope of this re-read: this section only;
 > `last-verified` is not bumped.
 
+> **Re-verified #4372 part K (2026-10-25, ops README re-read):** the only
+> file under `packages/ops/**` this change touches is `packages/ops/README.md`,
+> prose only. It now says that the Doc health page reads the build-time
+> `/ops-doc-health.json` from the console's own origin, that http is allowed
+> for every loopback registry host (`LOCAL_HOSTNAMES` in
+> `src/lib/environments.ts`), that the CSP's font rule is `'self' data:`, and
+> that the client root renders nothing until the sign-in fragment is
+> scrubbed. No source, client method, read, reveal, sign-in navigation or
+> backend file changes, and the console still reaches no backend route
+> outside `/ops/*`, so the no-rail-authority claim above holds verbatim.
+> Scope of this re-read: this section only; `last-verified` is not bumped.
+
 ## 9. Owner CLI sessions — the device-code login (#2526)
 
 `haven login` mints an owner session through a browser approval rather than a

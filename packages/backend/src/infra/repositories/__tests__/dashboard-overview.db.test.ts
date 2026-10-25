@@ -22,6 +22,7 @@ import db from '../../../db.js'
 import { sumTotalsSpendForUser } from '../../../infra/repositories/analytics.js'
 import { deriveDelegationBudgets } from '../../../rails/delegation-budget-view.js'
 import { describeDb, initDbHarness, resetDb } from '../../__tests__/helpers/db-harness.js'
+import { bookSubmittedOutcomePending, reconcileOutcomeFailed } from '../payment-intents.js'
 import {
   countFailedIntents7d,
   DASHBOARD_SPEND_GROUPS_SQL,
@@ -155,9 +156,9 @@ async function seedRefusal(seed: Seed, reason: string, createdAt?: string): Prom
 async function failedIntent(
   seed: Seed,
   times: { createdAt: string; signedAt?: string | null; submittedAt?: string | null },
-): Promise<void> {
+): Promise<string> {
   const n = ++seq
-  await db.query(
+  const inserted = await db.query<{ id: string }>(
     `INSERT INTO payment_intents (
        agent_id, user_id, account_address, token_symbol, token_address,
        to_address, amount_raw, amount_human, delegate_address,
@@ -168,7 +169,7 @@ async function failedIntent(
        '0x00000000000000000000000000000000000000aa', '1000000', '1.00', $4,
        0, $5, 'failed', NOW() + INTERVAL '1 day', 84532,
        $6::timestamptz, $7::timestamptz, $8::timestamptz
-     )`,
+     ) RETURNING id`,
     [
       seed.agentId,
       seed.userId,
@@ -180,6 +181,7 @@ async function failedIntent(
       times.submittedAt ?? null,
     ],
   )
+  return inserted.rows[0].id
 }
 
 // Window bounds are computed PER TEST, not at module load — and `to` carries
@@ -420,6 +422,68 @@ describeDb('#3803 overview statements', () => {
     const lastMs = (read.lastAt as Date).getTime()
     expect(lastMs).toBeGreaterThan(Date.now() - 1.1 * 3_600_000)
     expect(lastMs).toBeLessThan(Date.now() - 0.9 * 3_600_000)
+  })
+
+  it('#4378: a reconcile-to-failed AFTER the acknowledgement re-arms the unattributed item', async () => {
+    const userId = await seedUser()
+    const { from7, to } = window()
+    const seed = await seedAccountAndAgent(userId)
+    const hoursAgo = (h: number) => new Date(Date.now() - h * 3_600_000).toISOString()
+
+    // The intent's last recorded step is 3 h ago — under the #4370 fallback
+    // this row sits BEHIND the acknowledgement the owner is about to make,
+    // so #4370 would leave the item acknowledged. Booked outcome-pending
+    // first, the real reconciler flow.
+    const intentId = await failedIntent(seed, { createdAt: hoursAgo(5), signedAt: hoursAgo(4), submittedAt: hoursAgo(3) })
+    await db.query(`UPDATE payment_intents SET status = 'submitted' WHERE id = $1`, [intentId])
+    await bookSubmittedOutcomePending({ userOpHash: `0x${'4378'.repeat(16)}`, intentId, agentId: seed.agentId })
+
+    // The owner acknowledges the unattributed item NOW.
+    const ack = await db.query<{ acknowledged_at: Date }>(
+      `INSERT INTO attention_dismissals (user_id, item_kind, agent_id, account_id)
+       VALUES ($1, 'payments-failed', NULL, NULL) RETURNING acknowledged_at`,
+      [userId],
+    )
+    const ackAt = new Date(ack.rows[0].acknowledged_at)
+
+    // The reconciler moves the row to `failed` long after its last recorded
+    // step — and after the acknowledgement. The stamp is the failure time:
+    expect(await reconcileOutcomeFailed(intentId, ' was never seen on chain after the bounded reconciliation window')).toBe(true)
+
+    const read = await countFailedIntents7d(userId, [84532], from7, to)
+    expect(read.count).toBe(1)
+    // Re-armed: lastFailedIntentAt is the reconcile time, AFTER the ack —
+    // not the 3 h-old submitted_at the #4370 fallback would have answered.
+    expect((read.lastAt as Date).getTime()).toBeGreaterThan(ackAt.getTime())
+  })
+
+  it('#4378: a stamped failed_at wins over the recorded steps; an unstamped row keeps the #4370 fallback', async () => {
+    const userId = await seedUser()
+    const { from7, to } = window()
+    const seed = await seedAccountAndAgent(userId)
+    const hoursAgo = (h: number) => new Date(Date.now() - h * 3_600_000).toISOString()
+
+    // Stamped: steps 5 h / 1 h ago, but the failure time is NOW.
+    const stampedId = await failedIntent(seed, { createdAt: hoursAgo(5), submittedAt: hoursAgo(1) })
+    await db.query(`UPDATE payment_intents SET failed_at = NOW() WHERE id = $1`, [stampedId])
+    // Unstamped (a pre-120 row): no `failed_at`, the fallback applies.
+    await failedIntent(seed, { createdAt: hoursAgo(2) })
+
+    const read = await countFailedIntents7d(userId, [84532], from7, to)
+    expect(read.count).toBe(2)
+    expect((read.lastAt as Date).getTime()).toBeGreaterThan(Date.now() - 60_000)
+
+    // And an unstamped row ALONE still answers its latest recorded step.
+    await resetDb()
+    const userId2 = await seedUser()
+    const { from7: f7, to: t2 } = window()
+    const seed2 = await seedAccountAndAgent(userId2)
+    await failedIntent(seed2, { createdAt: hoursAgo(2) })
+    const fallback = await countFailedIntents7d(userId2, [84532], f7, t2)
+    expect(fallback.count).toBe(1)
+    const fbMs = (fallback.lastAt as Date).getTime()
+    expect(fbMs).toBeGreaterThan(Date.now() - 2.1 * 3_600_000)
+    expect(fbMs).toBeLessThan(Date.now() - 1.9 * 3_600_000)
   })
 
   it('distinct merchants over two agents paying the SAME merchant count 1 — not a sum of per-agent counts', async () => {

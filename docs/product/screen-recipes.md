@@ -148,7 +148,9 @@ Needs attention items after setup (#4324, owner decisions 2026-10-23):
     outside the agent's rules) and a failed payment return on that agent's
     next refusal of the same kind; "Haven paused sponsored payments" on the
     next sponsorship-cap refusal; the unattributed "A payment failed" on the
-    next failed intent.
+    next failed intent — at the time the intent actually BECAME failed
+    (`failed_at`, #4378), so a failure the reconciler marks long after its
+    last recorded step still re-arms the item.
   - "Has used 90% of its budget" returns in the next budget period. It shows
     only while the agent's "Budget reached" item is not showing, so an agent
     never carries two budget items at once.

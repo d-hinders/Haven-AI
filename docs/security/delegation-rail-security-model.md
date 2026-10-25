@@ -3617,6 +3617,21 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > change. Scope of this re-read: the `routes/user.ts` endpoints and the two
 > `infra/repositories/dashboard.ts` statements above; nothing else in this
 > document was re-read for it, and `last-verified` is not bumped.
+>
+> **Re-verified (#4378, 2026-10-25, `payment_intents.failed_at`):** the
+> #4324 note above describes the failed-intent read as returning "the latest
+> recorded step of any failed intent in the window". That is no longer the
+> whole truth: migration 120 adds `payment_intents.failed_at` and the three
+> failure writers in `infra/repositories/payment-intents.ts` stamp it, so
+> `FAILED_INTENTS_7D_SQL` now returns the true failure time where one is
+> stamped and the recorded-step fallback only for pre-120 rows. The item
+> this document's presentation rests on is unchanged — the read is still
+> scoped to the JWT subject's rows, nothing on the payment path gates on
+> `failed_at`, and the writers' CAS guards are untouched. No new spender, no
+> authority grant, no custody change. Scope of this re-read: migration
+> `120_payment_intents_failed_at.ts`, the three writer statements and
+> `FAILED_INTENTS_7D_SQL`; nothing else in this document was re-read for it,
+> and `last-verified` is not bumped.
 
 > **Re-verified unchanged (#3895, 2026-10-12, connect-step failure copy):**
 > this diff touches one covered file, display-layer only:

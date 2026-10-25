@@ -143,7 +143,7 @@ All in `packages/backend/src/modules/catalog/lifecycle.ts` (and the probe's
 | Knob | Value | Effect |
 |---|---|---|
 | Monitor tick | 5 min (`CATALOG_INGEST_INTERVAL_MS`, index.ts) | How often the leader scans the queue |
-| Probe cooldown | 15 min / host (`DEFAULT_HOST_COOLDOWN_MS`) | One host is probed at most once per window within a batch. `index.ts` passes no shared `HostCooldown`, so each tick starts a fresh one and the window does not span ticks |
+| Probe cooldown | 15 min / host (`DEFAULT_HOST_COOLDOWN_MS`) | Has no effect today (#4407): `index.ts` passes no shared `HostCooldown`, so each tick starts a fresh one and the window does not span ticks, and within a tick the unique `hostname` index (migration 066) already allows one row per host, so nothing is skipped |
 | Re-verification cadence | 24 h (`REVERIFY_CADENCE_MS`) | `verified_payable` entries are re-probed when `last_verified_at` is older. A failed re-probe does not move `last_verified_at`, so the row is probed again on every tick until it passes or degrades |
 | Failure threshold | 3 (`FAIL_AFTER_CONSECUTIVE_FAILURES`) | Consecutive probe failures before a row degrades to `failed` |
 | Ownership token TTL | 7 d (`TOKEN_TTL_MS`, ownership.ts) | A proof is only accepted inside this window; expiry fails the row |
@@ -178,8 +178,8 @@ backend log warning is the whole alert, as before.
    the failure threshold and `submitted` rows whose token expired. Causes to
    check: the probe transport or verification DNS resolver misbehaving, or a
    network-wide outage at a cluster of merchants. The global concurrency cap
-   (4 in flight) and the per-host cooldown within a tick bound the blast
-   radius either way.
+   (4 in flight) bounds the blast radius either way; the per-host cooldown
+   does not today (#4407).
 
 Both appear in the backend log as `Catalog ingestion alert` (warn) and, when
 `DELEGATE_ALERT_WEBHOOK_URL` is set, as a webhook message.

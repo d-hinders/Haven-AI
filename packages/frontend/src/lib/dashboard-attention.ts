@@ -220,14 +220,32 @@ function unixSeconds(value: string | null | undefined): number | null {
  * #4353: the agent's live budget that ends soonest within the lead time —
  * after `nowMs`, at most `BUDGET_ENDING_LEAD_DAYS` ahead. A zero cap is no
  * budget, and an unparseable end is unknown (#3295): neither fires.
+ *
+ * A budget whose token has another live budget running PAST it is not
+ * ending: a credential rotation issues a carry row that ends at the period
+ * boundary beside a steady row that runs to the old end
+ * (`rails/rekey-carry.ts`), and the carry must not read as "ending". So a
+ * budget counts only when it is the LATEST-ending live budget of its token
+ * on its chain.
  */
 function endingBudget(agent: DashboardAgent, nowMs: number): DashboardAgent['budgets'][number] | null {
   const horizon = nowMs + BUDGET_ENDING_LEAD_DAYS * 86_400_000
+  const tokenKey = (budget: DashboardAgent['budgets'][number]) =>
+    `${budget.chainId}:${(budget.tokenAddress ?? '').toLowerCase()}`
+  const latestByToken = new Map<string, number>()
+  for (const budget of agent.budgets ?? []) {
+    if (!hasPositiveCap(budget.budgetAtomic)) continue
+    const ms = instant(budget.expiresAt)
+    if (ms === null) continue
+    const key = tokenKey(budget)
+    latestByToken.set(key, Math.max(latestByToken.get(key) ?? ms, ms))
+  }
   let soonest: { budget: DashboardAgent['budgets'][number]; ms: number } | null = null
   for (const budget of agent.budgets ?? []) {
     if (!hasPositiveCap(budget.budgetAtomic)) continue
     const ms = instant(budget.expiresAt)
     if (ms === null || ms <= nowMs || ms > horizon) continue
+    if (ms < (latestByToken.get(tokenKey(budget)) ?? ms)) continue
     if (soonest === null || ms < soonest.ms) soonest = { budget, ms }
   }
   return soonest?.budget ?? null
@@ -867,10 +885,16 @@ function budgetRoomFact(
     const budgetStopOpen =
       (refusals?.budget ?? 0) > 0 &&
       !acknowledgedSinceLatestEvent(acknowledgements?.get(`budget-reached:${agent.id}`), refusals?.lastBudgetAt)
+    // #4353: an ENDED budget's stops are counted apart (`expired`). An agent
+    // still budgeted on another token can have them with no item showing,
+    // so they block "caught up" until acknowledged on the budget slot.
+    const expiredStopOpen =
+      (refusals?.expired ?? 0) > 0 &&
+      !acknowledgedSinceLatestEvent(acknowledgements?.get(`budget-reached:${agent.id}`), refusals?.lastExpiredAt)
     const scopeStopOpen =
       (refusals?.scope ?? 0) > 0 &&
       !acknowledgedSinceLatestEvent(acknowledgements?.get(`budget-scope:${agent.id}`), refusals?.lastScopeAt)
-    if (budgetStopOpen || scopeStopOpen) return false
+    if (budgetStopOpen || expiredStopOpen || scopeStopOpen) return false
     // EVERY read of the agent's budgets must be known: `agentUsedPercent`
     // returns the highest KNOWN percent, so one known 10% beside an unknown
     // read would otherwise claim room in a budget nobody measured.

@@ -34,6 +34,8 @@ type AgentSlice = {
   receivedSubBudgets?: Array<{ open: boolean; parentAgentName?: string }>
   refusalBuckets?: {
     budget: number
+    expired?: number
+    lastExpiredAt?: string
     scope: number
     failed: number
     haven: number
@@ -1047,6 +1049,16 @@ describe('attentionEmptyState (#3902) — the achievement only on measured facts
     expect(state(makeOverview([stopped], [month]), roomy, false, newer).kind).toBe('quiet')
   })
 
+  it('#4353: an ended budget\'s stop (`expired`) blocks the achievement until acknowledged', () => {
+    const stopped = {
+      ...scout,
+      refusalBuckets: { budget: 0, expired: 1, scope: 0, failed: 0, haven: 0, lastExpiredAt: '2026-10-20T10:00:00Z' },
+    } as AgentSlice
+    expect(state(makeOverview([stopped], [month]), roomy).kind).toBe('quiet')
+    expect(state(makeOverview([stopped], [month]), roomy, false, acks({ 'budget-reached:a1': '2026-10-20T11:00:00Z' })).kind).toBe('caught-up')
+    expect(state(makeOverview([stopped], [month]), roomy, false, acks({ 'budget-reached:a1': '2026-10-20T09:00:00Z' })).kind).toBe('quiet')
+  })
+
   it('is the achievement when the runway and the budget room are both measured and holding', () => {
     const result = state(makeOverview([scout], [month]), roomy)
     // #3908: the title alone — exact equality pins that no body rides along.
@@ -1188,14 +1200,47 @@ describe('computeAttentionItems — budget ending and budget ended (#4353)', () 
         name: 'Scout',
         status: 'active',
         budgets: [
-          liveBudget(NOW + 5 * DAY, { delegationHash: '0xlater' }),
-          liveBudget(NOW + 1 * DAY, { delegationHash: '0xzero', budgetAtomic: '0' }),
-          liveBudget(NOW + 2 * DAY, { delegationHash: '0xsoonest' }),
-          { budgetAtomic: '1', expiresAt: 'not-a-date', delegationHash: '0xbad' },
+          // Different tokens, so each is its token's only budget.
+          liveBudget(NOW + 5 * DAY, { delegationHash: '0xlater', chainId: 8453, tokenAddress: '0xa' }),
+          liveBudget(NOW + 1 * DAY, { delegationHash: '0xzero', budgetAtomic: '0', chainId: 8453, tokenAddress: '0xb' }),
+          liveBudget(NOW + 2 * DAY, { delegationHash: '0xsoonest', chainId: 8453, tokenAddress: '0xc' }),
+          { budgetAtomic: '1', expiresAt: 'not-a-date', delegationHash: '0xbad', chainId: 8453, tokenAddress: '0xd' },
         ],
       },
     ])
     expect(items.map((item) => item.href)).toEqual(['/agents/a1?renew=0xsoonest'])
+  })
+
+  it('a rotation carry beside its steady row is not "ending" — the token runs on (review S1)', () => {
+    const items = run([
+      {
+        id: 'a1',
+        name: 'Scout',
+        status: 'active',
+        budgets: [
+          // rails/rekey-carry.ts: the carry ends at the period boundary, the
+          // steady row runs from there to the old end.
+          liveBudget(NOW + 3 * DAY, { delegationHash: '0xcarry', chainId: 8453, tokenAddress: '0xUSDC' }),
+          liveBudget(NOW + 300 * DAY, { delegationHash: '0xsteady', chainId: 8453, tokenAddress: '0xusdc' }),
+        ],
+      },
+    ])
+    expect(items).toEqual([])
+  })
+
+  it('the latest-ending budget of a token still warns when it ends within 7 days', () => {
+    const items = run([
+      {
+        id: 'a1',
+        name: 'Scout',
+        status: 'active',
+        budgets: [
+          liveBudget(NOW + 1 * DAY, { delegationHash: '0xcarry', chainId: 8453, tokenAddress: '0xusdc' }),
+          liveBudget(NOW + 4 * DAY, { delegationHash: '0xsteady', chainId: 8453, tokenAddress: '0xusdc' }),
+        ],
+      },
+    ])
+    expect(items.map((item) => item.href)).toEqual(['/agents/a1?renew=0xsteady'])
   })
 
   it('"Budget ending" is not dismissible', () => {

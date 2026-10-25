@@ -210,7 +210,9 @@ report body above stays as written. The pointers still land, all twelve
 covered paths exist, `DEFAULT_API` in `packages/cli/src/commands.ts:23` is
 still the production Railway URL, `packages/backend/src/index.ts` still
 returns `{ deployable, supported }`, and `git grep 'worktree remove --force'`
-over `.agents/skills/` and `docs/contributing/` is empty. One anchor moved:
+over `.agents/skills/` is empty, with the only hits under `docs/contributing/`
+being this retrospective's own #2601 narrative quoting the instruction it
+rejected and this sentence's own quotation of the grep. One anchor moved:
 `delegation-budget.ts` now types `BudgetUse = 'ceiling' | 'floor' |
 'exhausted-ok'` — the `use` argument still defaults to `'ceiling'`, so §4's
 point (the #2594 caller choice is now asserted on behaviour) stands, but the

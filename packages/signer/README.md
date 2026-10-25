@@ -200,7 +200,7 @@ refused with one stderr line naming `--help` and exit code 2 — before #3173 an
 unknown flag was silently ignored, so `--ack-local-tools` (the connector's
 flag, which the connector's doctor tells you to pass to the *connector*)
 produced only the consent wall. `--help` lists every registered tool (pinned
-against `toolSchemas`, so a fifth tool cannot drift out of the text) and names
+against `toolSchemas`, so a sixth tool cannot drift out of the text) and names
 `npx @haven_ai/connect --doctor`.
 
 **Consent screen.** The first-launch block summarises each tool in one

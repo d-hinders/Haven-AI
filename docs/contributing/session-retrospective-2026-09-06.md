@@ -14,7 +14,7 @@ covers:
   - docs/contributing/ai-agent-workflow.md
   - docs/contributing/ai-review-patterns.md
   - docs/bug-reports/qa-explore-agent-onboarding-2026-09-06.md
-last-verified: "2026-09-21"
+last-verified: "2026-10-25"
 ---
 
 # The one-session retrospective (2026-09-06)
@@ -204,3 +204,14 @@ behaviour as the text claims (`delegation-budget.ts` still types
 `BudgetUse = 'ceiling' | 'floor'`, `mcp/src/tools.ts` still pins the per-tool
 wiring), and the CLI default figure still matches
 `packages/cli/src/commands.ts` (`DEFAULT_API`, the production Railway URL).
+
+Re-verified 2026-10-25 (weekly docs audit #3645, at dev `615686369`): the
+report body above stays as written. The pointers still land, all twelve
+covered paths exist, `DEFAULT_API` in `packages/cli/src/commands.ts:23` is
+still the production Railway URL, `packages/backend/src/index.ts` still
+returns `{ deployable, supported }`, and `git grep 'worktree remove --force'`
+over `.agents/skills/` and `docs/contributing/` is empty. One anchor moved:
+`delegation-budget.ts` now types `BudgetUse = 'ceiling' | 'floor' |
+'exhausted-ok'` — the `use` argument still defaults to `'ceiling'`, so §4's
+point (the #2594 caller choice is now asserted on behaviour) stands, but the
+2026-09-21 note's exact type figure is superseded.

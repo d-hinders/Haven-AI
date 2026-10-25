@@ -91,7 +91,7 @@ covers:
   - packages/sdk/src/merchant-discovery.test.ts
 satisfied-by:
   - docs/regulatory/casp-changelog/**
-last-verified: "2026-10-23"
+last-verified: "2026-10-25"
 ---
 
 > **Re-verified unchanged (#4265, 2026-10-22, published CLI boundary):** the
@@ -1412,7 +1412,7 @@ is still re-derived server-side from the authenticated subject, whether API-key
 generation stays server-side, where the user JWT is stored and sent, and whether
 anything in the client began deciding rather than relaying.
 
-## Scope of the current `last-verified` (2026-10-23, #4303)
+## Scope of the current `last-verified` (2026-10-25, weekly docs audit #3645)
 
 The front-matter date is date-only by the #1496 chain reset, which leaves it
 unable to say **how much** of the document a re-verification covered. That
@@ -1422,58 +1422,42 @@ is the failure a `last-verified` exists to prevent. So the scope lives here,
 where it has room to be honest, and it is rewritten — not appended to — by
 whoever bumps the date next.
 
-**Re-read end to end against `ffca80f36`** (#4303, from the staleness audit
-#3645). The 2026-10-05 pass it replaces read `c3df5b19`. Between the two, 109
-CASP shards were added (`git diff --name-only --diff-filter=A c3df5b19
-ffca80f36 -- docs/regulatory/casp-changelog/`). Their perimeter verdicts were
-scanned, and none records an authority widening. The four marked WIDENED
-(#3649, #3661, #4120, #4122) widen the money-path classification list, recorded
-under *What `covers:` must span*. What was checked:
+**Re-verified against `615686369`** (from the staleness audit #3645; the
+replaced 2026-10-23 pass read `ffca80f36` end to end, #4303). This was a
+targeted pass over the week's drift, not a second full re-read: 27 covered
+commits since 10-23, all narrowing or doc-fix in kind.
 
-- **Every file, symbol, route and test the body names** was checked to exist
-  at `ffca80f36`: every path-like token mechanically, plus the named tests
-  (`allowance-rail-retired.test.ts`'s #2245 and #2274 cases, both
-  `non-custody-onchain-*.contract.test.ts` suites, the census pin) and symbols
-  (`resolveExecutionRail`, `requireDelegationBound`, `assertNonAsserting`,
-  `SUPPORTED_X402_EXPECTED_VERSIONS`, `legacyBookkeepingEnabled`,
-  `HAVEN_HOSTED_MCP_URL`). Paths the body names as deleted or renamed are
-  history by its own wording and were left as such.
-- **Measured claims were re-measured:** the money-path pin
-  (`node --test scripts/ci/money-path.test.mjs`: 23/23, now 50 of 67 globs),
-  the `infra/chain/**` and `infra/repositories/**` sizes, and the release-bump
-  write set (six `package.json`, five `CHANGELOG.md`, six source version
-  constants).
-- **Behaviour claims were read against the code they name:** the owner-CLI
-  allow-list, the CLI's revoke, rotate-key and base-URL paths, the passport
-  receipt key's boot refusal, the merchant-receipt fetch (still string-level
-  host blocking, as the #956 note says), both accounting connectors, and the
-  agent detail page's on-chain caption.
-
-**Corrected in this pass:** the retired-rail list-query count, the deleted
-`SafeCapableSigner`, the agent page's caption, the CLI's `--api` flag and its
-revoke guard, the owner-CLI allow-list, the Accounted connector, and the two
-measurements under *What `covers:` must span*.
-
-**Deliberately NOT covered by this date, each for a reason that is not
-laziness:**
-
-- **The inline *Current state* notes' history.** Each note's present-tense
-  claims were checked as above. Its dated narrative of how a property came to
-  hold was read, not re-derived commit by commit.
-- **The historical bullet log below** — frozen as of 2026-08-12 by
-  construction. Re-verifying it would be re-litigating merged shards, which
-  `casp-changelog/README.md` forbids in as many words.
-- **The MiCA / ESMA / Finansinspektionen / EBA citations under *Regulatory
-  Context*** — these are legal claims, not code claims. Nothing in this pass
-  was a legal review, and a date that implied one would be worse than no date.
-- **The #1985 relayer-owned dust-Safe balances** — the four addresses, their
-  ~$0.14 in USDC and their per-delegate allowance state are live Base mainnet
-  reads. Operator work; unchanged here, and unverified here.
-- **The #832 exit story's live demonstration** — cross-referenced to
-  `docs/exit/README.md`, not re-executed. The claim that it *was* demonstrated
-  stands on that document, not on this pass.
-- **The #3333 receive-side counsel position** — recorded, not asserted;
-  whether counsel has confirmed it is outside a code re-read.
+- **Every named file, symbol and test was re-checked to exist at this head:**
+  `requireDelegationBound` (`modules/x402/settlement-sweeper.ts`),
+  `assertNonAsserting` (`modules/accounting/fortnox-connector.ts`),
+  `resolveExecutionRail`, `SUPPORTED_X402_EXPECTED_VERSIONS`
+  (`signer/src/capabilities.ts`), `legacyBookkeepingEnabled` and
+  `HAVEN_HOSTED_MCP_URL` (`config.ts`), `modules/passport/issuance.ts`,
+  `routes/__tests__/allowance-rail-retired.test.ts`, both
+  `non-custody-onchain-*.contract.test.ts` suites, and the census pin.
+- **Measured claims were re-measured:** `node --test
+  scripts/ci/money-path.test.mjs` — 23/23 pass, the pin holds at the current
+  globs (the "50 of 67" figure stands as measured at #4303).
+- **The fail-closed sweep attribution is intact after #4075** (proof-header
+  settlement reports, AuthorizationUsed↔Transfer pairing): the observation
+  path still passes `requireDelegationBound: true`
+  (`settlement-sweeper.ts:764`), and the never-from-transfer-shape property
+  is unchanged.
+- **The week's behaviour changes are narrowings, each shard-covered:**
+  #4376's `delegation_expired` refusal (an expired-only budget now answers
+  403 with the end date — authority-narrowing, in `modules/budget-scope/`),
+  #4407's catalog probe cooldown (availability), #4372 part I (README prose),
+  #4405 (skill-text paths). CASP shards exist for the week
+  (`2026-10-24-4389.md`, `2026-10-24-4390.md`, `2026-10-25-4372.md`,
+  `2026-10-25-4407.md`, `2026-10-25-4415.md`, and the
+  `2026-10-23-0.11.0-alpha.0-release.md` release shard that carries #4075
+  and #4376).
+- **Deliberately NOT covered by this date, as before:** the inline *Current
+  state* notes' dated history (present-tense claims were checked; narratives
+  were read, not re-derived), the frozen historical bullet log, the MiCA /
+  ESMA / Finansinspektionen / EBA citations (legal claims, no legal review
+  here), the #1985 dust-Safe live balances, the #832 exit story's live
+  demonstration, and the #3333 counsel position (recorded, not asserted).
 
 ## Verification log
 

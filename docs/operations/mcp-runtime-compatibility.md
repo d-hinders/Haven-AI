@@ -6567,3 +6567,17 @@ to call next in structured fields, and those fields are typed end to end
 > document was re-read for it, and `last-verified` is not bumped. Two passages
 > here still say `<agent-id>` where #3737 made `<slug>` the default
 > (`:2645`, `:5508`); follow-up #4396 covers them.
+
+> **Re-verified unchanged (#4372 part I, 2026-10-25 — prose in
+> `packages/signer/README.md`).** The README is the only covered file this PR
+> touches, and it changes prose only: the redemption allowlist names the
+> third chain shape, `[sub grant, parent child, budget]` (#3330, as
+> `redemption-guard.ts` in `@haven_ai/sdk` already enforces); the library
+> surface is five methods on `createEdgeSigner`'s object; the direct-payment
+> diagram shows the compact `haven_pay` result (#3495); the trust-model note
+> says the local checks prove shape and integrity, not amount or recipient;
+> and the Connect Agent 2 paragraph lists the register body as `registerSetup`
+> sends it. No signer code, tool, version constant, consent surface or
+> published version changed. Scope of this note: those README sentences.
+> Nothing else in this document was re-read for it, and `last-verified` is
+> not bumped.

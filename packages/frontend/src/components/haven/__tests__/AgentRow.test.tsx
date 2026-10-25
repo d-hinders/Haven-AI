@@ -10,7 +10,7 @@ const AGENT: DashboardAgent = {
   status: 'active',
   accountId: 'account-1',
   accountName: 'Main account',
-  accountChainId: 8453,
+  accountChainId: 8453, budgetEndedAt: null,
   allowances: [],
   budgets: [],
   receivedSubBudgets: [],
@@ -20,14 +20,14 @@ const AGENT: DashboardAgent = {
       net: { usd: 0, eur: 0, sek: 0 },
       approx: false,
       payments: 0,
-      refusals: { budget: 0, scope: 0, failed: 0, haven: 0 },
+      refusals: { budget: 0, expired: 0, scope: 0, failed: 0, haven: 0 },
     },
     d30: {
       gross: { usd: 0, eur: 0, sek: 0 },
       net: { usd: 0, eur: 0, sek: 0 },
       approx: false,
       payments: 0,
-      refusals: { budget: 0, scope: 0, failed: 0, haven: 0 },
+      refusals: { budget: 0, expired: 0, scope: 0, failed: 0, haven: 0 },
     },
     lastPaymentAt: null,
     lastCounterparty: null,
@@ -79,7 +79,7 @@ describe('agentBadge after an acknowledgement (#4324)', () => {
     budgets: [{ budgetAtomic: '1000000' }] as never,
     stats: {
       ...AGENT.stats,
-      d7: { ...AGENT.stats.d7, refusals: { budget: 1, scope: 0, failed: 0, haven: 0, lastBudgetAt: '2026-10-20T10:00:00.000Z' } },
+      d7: { ...AGENT.stats.d7, refusals: { budget: 1, expired: 0, scope: 0, failed: 0, haven: 0, lastBudgetAt: '2026-10-20T10:00:00.000Z' } },
     },
   }
   const reads = {

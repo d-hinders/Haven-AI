@@ -1771,7 +1771,7 @@ describe('DelegationBudgetCard hero states (#4226)', () => {
     net: { usd: netUsd, eur: netUsd, sek: netUsd * 10 },
     approx: false,
     payments,
-    refusals: { budget: 0, scope: 0, failed: 0, haven: 0 },
+    refusals: { budget: 0, expired: 0, scope: 0, failed: 0, haven: 0 },
   })
 
   const stats: DashboardAgentStats = {

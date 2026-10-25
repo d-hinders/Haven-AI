@@ -1,15 +1,16 @@
 import { defineConfig } from 'tsup'
 
 export default defineConfig({
-  entry: ['src/index.ts'],
+  entry: ['src/index.ts', 'src/comment-stripper.ts'],
   format: ['esm', 'cjs'],
   dts: true,
   clean: true,
   sourcemap: true,
   splitting: false,
   treeshake: true,
-  // comment-stripper imports typescript (see its header note); it must be a
-  // runtime import, never bundled into dist. Satisfied by the workspace's
-  // hoisted devDependency — @haven_ai/core is private and never packed.
+  // comment-stripper (its own entry, never in the barrel) imports typescript;
+  // keep it external rather than bundling the compiler into dist. Only test
+  // code imports that entry, and the workspace's devDependency satisfies it.
+  // A bundler that inlines the barrel must never reach it (#4413).
   external: ['typescript'],
 })

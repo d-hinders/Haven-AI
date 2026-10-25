@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
-import { stripComments } from '@haven_ai/core'
+import { stripComments } from '@haven_ai/core/comment-stripper'
 import postcss from 'postcss'
 import tailwindcss from 'tailwindcss'
 import { describe, expect, it } from 'vitest'

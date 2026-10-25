@@ -97,6 +97,18 @@ last-verified: "2026-10-25"
 > Every other file in the diff is outside this document's coverage. Nothing
 > else in this document was re-verified, and `last-verified` is not bumped.
 
+> **Re-verified, #4411 follow-up (2026-10-25, the comment stripper leaves the
+> `@haven_ai/core` barrel):** the only covered file this diff touches is
+> `packages/ops/src/__tests__/card-inset-guard.test.ts`, and only its import
+> line: it now takes `stripComments` from the `@haven_ai/core/comment-stripper`
+> subpath instead of the barrel. The stripper imports `typescript`, and
+> mcp-server's build inlines `@haven_ai/core`, so the barrel re-export had put
+> the TypeScript compiler into the hosted MCP bundle, which then crashed at
+> boot on dev. The guard's
+> assertions and the sources it scans are unchanged. It adds no signing step,
+> no gate, no write path and no authority surface. Nothing else in this
+> document was re-verified, and `last-verified` is not bumped.
+>
 > **Re-verified #4411 (2026-10-25, source-scan guard tests strip comments with
 > the parser):** the only covered file this diff touches is
 > `packages/ops/src/__tests__/card-inset-guard.test.ts` (under

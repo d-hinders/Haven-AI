@@ -17,6 +17,16 @@
         "types": "./dist/index.d.cts",
         "default": "./dist/index.cjs"
       }
+    },
+    "./comment-stripper": {
+      "import": {
+        "types": "./dist/comment-stripper.d.ts",
+        "default": "./dist/comment-stripper.js"
+      },
+      "require": {
+        "types": "./dist/comment-stripper.d.cts",
+        "default": "./dist/comment-stripper.cjs"
+      }
     }
   },
   "scripts": {

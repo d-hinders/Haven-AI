@@ -134,7 +134,9 @@ export {
   type PackageReleaseCompat,
   type BuildReleaseCompatOptions,
 } from './client-releases.js'
-// #4411: the comment stripper the source-scan guards share — TypeScript's own
-// removeComments pass, so a `/*` inside a line comment or a string cannot open
-// a fake block that swallows the code a guard is scanning.
-export { stripComments } from './comment-stripper.js'
+// #4411's comment stripper is NOT exported here: it imports `typescript`, and
+// packages that bundle this barrel (mcp-server's tsup build inlines
+// @haven_ai/core, a devDependency there) would inline the whole compiler. That
+// is what #4413 did: the hosted MCP bundle grew to ~9.8 MB and crashed at boot
+// on "Dynamic require of fs". Test code imports the stripper from the
+// `@haven_ai/core/comment-stripper` subpath instead.

@@ -25,7 +25,7 @@
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
-import { stripComments } from '@haven_ai/core'
+import { stripComments } from '@haven_ai/core/comment-stripper'
 import { describe, expect, it } from 'vitest'
 
 const PACKAGE_ROOT = join(__dirname, '..', '..')

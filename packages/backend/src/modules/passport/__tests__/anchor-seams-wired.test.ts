@@ -20,7 +20,7 @@
  */
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { stripComments } from '@haven_ai/core'
+import { stripComments } from '@haven_ai/core/comment-stripper'
 import { describe, expect, it } from 'vitest'
 
 const INDEX = readFileSync(

@@ -481,9 +481,11 @@ Haven is asking the relayer to deploy your Safe.
 ### How it works page
 
 Not the live page, and partly out of date. The shipped `/how-it-works`
-(`components/marketing/site/how-it-works/HowItWorksPage.tsx`) has no numbered
-setup sequence (`git grep "Choose how you sign in"` over `packages/frontend/src`
-finds nothing), and step 02 below offers "connect your wallet", which
+(`components/marketing/site/how-it-works/HowItWorksPage.tsx`) does not carry
+this six-step sequence (`git grep "Choose how you sign in"` over
+`packages/frontend/src` finds nothing); it is organised as five numbered
+sections, `1 · Your account` through `5 · The receipt and the books`. Step 02
+below offers "connect your wallet", which
 contradicts the passkey-only onboarding above (#1162). Read the block as a tone
 reference only; replacing it is an owner call.
 

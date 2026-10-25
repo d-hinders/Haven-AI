@@ -387,7 +387,9 @@ Structure (`ReceiveDialog`, the one receive dialog since #4094, cleaned by
    account, and `Buy with card` on a mainnet account when the on-ramp is
    configured.
 
-Money and risk clarity:
+Money and risk clarity (with one account the dialog shows no account card, so
+the network appears only in the network rule under the address and QR, and the
+first bullet is met only when the account picker shows):
 - Show the network before the address.
 - Make it clear users must send on the same network shown in the modal.
 - `Buy with card` is configuration-gated. When shown, it opens the licensed

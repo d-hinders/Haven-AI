@@ -220,8 +220,11 @@ the declaration itself is not.
 A local SDK client built with the delegate key signs that declaration and
 sends it to the merchant as the `X-Tax-Declaration` header on the paid retry
 of an EIP-3009 payment (`resolveTaxDeclarationHeader`, attached in
-`MerchantCompletion.retryRequest`). The main carrier is the local MCP server,
-`@haven_ai/mcp`: it builds its `HavenClient` with the delegate key
+`MerchantCompletion.retryRequest`). Of the installs the connector writes, only
+the local MCP server, `@haven_ai/mcp`, carries it, and that is an opt-in
+(`--local`); the default install (hosted server plus edge signer) carries none.
+A developer's own SDK client built with the delegate key carries it too.
+`@haven_ai/mcp` builds its `HavenClient` with the delegate key
 (`packages/mcp/src/server.ts`), and its `haven_pay_x402`,
 `haven_pay_x402_quote` and `haven_resume_x402_payment` tools reach that retry
 through `fetch`, `payX402Quote` and `resumeX402Payment`. An erc7710 payment
@@ -305,8 +308,9 @@ the form no longer repeats that detail.
 - **Purpose**: stating the buyer on a payment receipt the owner's own agent may
   give to a merchant, (asynchronously) validating the VAT number against
   VIES, and, for an agent the owner opts in, stating the country and VAT
-  number in the buyer-side tax declaration that a key-holding client — chiefly
-  the local MCP server, `@haven_ai/mcp` — sends on its EIP-3009 payments (see
+  number in the buyer-side tax declaration that a key-holding client — the opt-in local MCP server,
+  `@haven_ai/mcp`, or a developer's own SDK client — sends on its EIP-3009
+  payments; an agent on the connector's default hosted install sends none (see
   *A second reader* above).
 - **Retention**: kept until the owner deletes it. `DELETE
   /user/company-details` works regardless of the feature flag, and with the

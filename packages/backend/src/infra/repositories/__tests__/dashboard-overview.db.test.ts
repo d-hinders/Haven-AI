@@ -29,6 +29,7 @@ import {
   listDashboardAgents,
   listDashboardMerchants,
   listDashboardSpendGroups,
+  listLatestEndedBudgetByAgent,
   listPendingAgentSetupStatuses,
   listReceivedSubBudgetsForAgents,
   listRefusalBucketsByAgent,
@@ -394,15 +395,103 @@ describeDb('#3803 overview statements', () => {
     await seedRefusal(seed, 'no_delegation_for_target', new Date(Date.now() - 10 * 86_400_000).toISOString())
 
     const [row] = await listRefusalBucketsByAgent(userId, [84532], from30, from7, to)
-    // `delegation_expired` (30 min ago) is newer than `delegation_budget_exceeded`
-    // (90 min ago): both are the budget bucket, and the latest wins.
-    expect(new Date(row.last_budget_7 as Date).getTime()).toBeGreaterThan(Date.now() - 31 * 60_000)
-    expect(new Date(row.last_budget_7 as Date).getTime()).toBeLessThan(Date.now() - 29 * 60_000)
+    // #4353: `delegation_expired` (30 min ago) no longer shares the budget
+    // bucket — `last_budget_7` is the 90-minute-old budget_exceeded alone and
+    // `last_expired_7` is its own 30-minute-old time. (Intentional behaviour
+    // change: this used to assert the combined bucket's latest.)
+    expect(new Date(row.last_budget_7 as Date).getTime()).toBeGreaterThan(Date.now() - 91 * 60_000)
+    expect(new Date(row.last_budget_7 as Date).getTime()).toBeLessThan(Date.now() - 89 * 60_000)
+    expect(new Date(row.last_expired_7 as Date).getTime()).toBeGreaterThan(Date.now() - 31 * 60_000)
+    expect(new Date(row.last_expired_7 as Date).getTime()).toBeLessThan(Date.now() - 29 * 60_000)
     expect(new Date(row.last_failed_7 as Date).getTime()).toBeLessThan(Date.now() - 44 * 60_000)
     expect(new Date(row.last_failed_7 as Date).getTime()).toBeGreaterThan(Date.now() - 46 * 60_000)
     expect(row.scope_30).toBe('1')
     expect(row.last_scope_7).toBeNull()
     expect(row.last_haven_7).toBeNull()
+  })
+
+  it('#4353: delegation_expired lands in `expired`, never in `budget`; the 7-day latest is its own', async () => {
+    const userId = await seedUser()
+    const { from7, from30, to } = window()
+    const seed = await seedAccountAndAgent(userId)
+    const minutesAgo = (m: number) => new Date(Date.now() - m * 60_000).toISOString()
+    await seedRefusal(seed, 'delegation_expired', minutesAgo(10))
+    await seedRefusal(seed, 'delegation_expired', minutesAgo(20))
+    await seedRefusal(seed, 'delegation_budget_exceeded', minutesAgo(60))
+    // 10 days old: 30-day window only.
+    await seedRefusal(seed, 'delegation_expired', new Date(Date.now() - 10 * 86_400_000).toISOString())
+
+    const [row] = await listRefusalBucketsByAgent(userId, [84532], from30, from7, to)
+    expect(row.budget_7).toBe('1')
+    expect(row.budget_30).toBe('1')
+    expect(row.expired_7).toBe('2')
+    expect(row.expired_30).toBe('3')
+    expect(new Date(row.last_expired_7 as Date).getTime()).toBeGreaterThan(Date.now() - 11 * 60_000)
+
+    // An agent with only budget refusals has an empty expired bucket.
+    const other = await seedAccountAndAgent(userId)
+    await seedRefusal(other, 'delegation_budget_exceeded')
+    const rows = await listRefusalBucketsByAgent(userId, [84532], from30, from7, to)
+    const otherRow = rows.find((r) => r.agent_id === other.agentId)!
+    expect(otherRow.expired_7).toBe('0')
+    expect(otherRow.last_expired_7).toBeNull()
+  })
+
+  it('#4353: budgetEndedAt — the latest expired-active row wins; revoked, live and other-chain rows never count', async () => {
+    const userId = await seedUser()
+    const seed = await seedAccountAndAgent(userId)
+    const bare = await seedAccountAndAgent(userId)
+    const revokedOnly = await seedAccountAndAgent(userId)
+    const liveOnly = await seedAccountAndAgent(userId)
+    const otherChain = await seedAccountAndAgent(userId)
+
+    const insert = async (
+      agentId: string,
+      opts: { status?: string; expiresInSec: number; chainId?: number },
+    ): Promise<void> => {
+      await db.query(
+        `INSERT INTO agent_delegations
+           (agent_id, chain_id, token_address, recipient_address, delegation_hash,
+            delegation_json, version, status, budget_atomic, period_seconds,
+            start_date, expires_at, created_at)
+         VALUES ($1, $2, $3, NULL, $4, '{}', 1, $5, '1000000', 86400,
+                 EXTRACT(EPOCH FROM NOW())::bigint - 999999,
+                 EXTRACT(EPOCH FROM NOW())::bigint + $6::bigint, NOW())`,
+        [
+          agentId,
+          opts.chainId ?? 84532,
+          USDC_84532,
+          `0x${String(++seq).padStart(64, '0')}`,
+          opts.status ?? 'active',
+          opts.expiresInSec,
+        ],
+      )
+    }
+    await insert(seed.agentId, { expiresInSec: -86_400 })
+    await insert(seed.agentId, { expiresInSec: -3_600 }) // the latest ended
+    await insert(seed.agentId, { expiresInSec: -60, status: 'revoked' }) // newer, but revoked
+    await insert(seed.agentId, { expiresInSec: 86_400 }) // live: not an ended budget
+    await insert(revokedOnly.agentId, { expiresInSec: -3_600, status: 'revoked' })
+    await insert(liveOnly.agentId, { expiresInSec: 86_400 })
+    // An expired row stamped with a chain the agent's account is not on.
+    await insert(otherChain.agentId, { expiresInSec: -3_600, chainId: 8453 })
+
+    const ended = await listLatestEndedBudgetByAgent([
+      seed.agentId,
+      bare.agentId,
+      revokedOnly.agentId,
+      liveOnly.agentId,
+      otherChain.agentId,
+    ])
+    const nowSec = Date.now() / 1000
+    expect(ended.size).toBe(1)
+    expect(Number(ended.get(seed.agentId))).toBeLessThan(nowSec - 3_500)
+    expect(Number(ended.get(seed.agentId))).toBeGreaterThan(nowSec - 3_700)
+    expect(ended.has(bare.agentId)).toBe(false)
+    expect(ended.has(revokedOnly.agentId)).toBe(false)
+    expect(ended.has(liveOnly.agentId)).toBe(false)
+    expect(ended.has(otherChain.agentId)).toBe(false)
+    expect((await listLatestEndedBudgetByAgent([])).size).toBe(0)
   })
 
   it('#4324: the failed-intent read returns the latest recorded step of any failed intent in the window', async () => {

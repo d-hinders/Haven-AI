@@ -119,6 +119,20 @@ export function spendableDelegationSql(
   return `${prefix}status = 'active' AND ${prefix}expires_at > EXTRACT(EPOCH FROM NOW())${started}`
 }
 
+/**
+ * #4353 — the third liveness question: "has this grant's window CLOSED?"
+ * An `active` row whose `expires_at` is at or before the DATABASE clock's now
+ * — exactly the rows {@link spendableDelegationSql} (`requireStarted: false`)
+ * drops from every budget-viewing read, so the two partition the `active`
+ * set. The status CHECK has no expired value (#3542), so "ended" is a window
+ * question on an `active` row; a revoked/replaced/pending row never matches.
+ * Display-only consumers (the overview's `budgetEndedAt`).
+ */
+export function endedDelegationSql(tableAlias?: string): string {
+  const prefix = tableAlias ? `${tableAlias}.` : ''
+  return `${prefix}status = 'active' AND ${prefix}expires_at <= EXTRACT(EPOCH FROM NOW())`
+}
+
 export function stillEnabledDelegationSql(tableAlias?: string): string {
   const prefix = tableAlias ? `${tableAlias}.` : ''
   return `${prefix}status IN ('pending', 'active', 'replaced')`

@@ -11,6 +11,7 @@ import {
   listDashboardAccounts,
   listDashboardMerchants,
   listDashboardSpendGroups,
+  listLatestEndedBudgetByAgent,
   listPendingAgentSetupStatuses,
   listReceivedSubBudgetsForAgents,
   listRefusalBucketsByAgent,
@@ -101,8 +102,14 @@ export interface GroupPricing {
   rates: TokenRates | null
 }
 
-function emptyRefusalBuckets(): { budget: number; scope: number; failed: number; haven: number } {
-  return { budget: 0, scope: 0, failed: 0, haven: 0 }
+function emptyRefusalBuckets(): {
+  budget: number
+  expired: number
+  scope: number
+  failed: number
+  haven: number
+} {
+  return { budget: 0, expired: 0, scope: 0, failed: 0, haven: 0 }
 }
 
 /**
@@ -113,6 +120,7 @@ function emptyRefusalBuckets(): { budget: number; scope: number; failed: number;
  */
 export function latestRefusalTimes(row: RefusalBucketRow | undefined): {
   lastBudgetAt?: string
+  lastExpiredAt?: string
   lastScopeAt?: string
   lastFailedAt?: string
   lastHavenAt?: string
@@ -121,6 +129,7 @@ export function latestRefusalTimes(row: RefusalBucketRow | undefined): {
   const iso = (value: Date | null) => (value ? new Date(value).toISOString() : undefined)
   const pairs = [
     ['lastBudgetAt', iso(row.last_budget_7)],
+    ['lastExpiredAt', iso(row.last_expired_7)],
     ['lastScopeAt', iso(row.last_scope_7)],
     ['lastFailedAt', iso(row.last_failed_7)],
     ['lastHavenAt', iso(row.last_haven_7)],
@@ -197,9 +206,23 @@ export function accumulateGroup(
 
 function accumulateRefusalRow(target: ReturnType<typeof emptyRefusalBuckets>, row: RefusalBucketRow, suffix: '7' | '30'): void {
   target.budget += Number(row[`budget_${suffix}`] ?? '0')
+  target.expired += Number(row[`expired_${suffix}`] ?? '0')
   target.scope += Number(row[`scope_${suffix}`] ?? '0')
   target.failed += Number(row[`failed_${suffix}`] ?? '0')
   target.haven += Number(row[`haven_${suffix}`] ?? '0')
+}
+
+/**
+ * #4353: the wire `budgetEndedAt` — ISO of the unix-second expiry, or `null`
+ * when there is none, it is unrepresentable, or it is NOT in the past (a live
+ * budget is never "ended", whatever the read returned).
+ */
+export function budgetEndedAtIso(endedAtSec: string | undefined, now: Date): string | null {
+  if (endedAtSec === undefined) return null
+  const sec = Number(endedAtSec)
+  if (!Number.isFinite(sec) || sec <= 0 || sec * 1000 > 8.64e15) return null
+  if (sec * 1000 > now.getTime()) return null
+  return new Date(sec * 1000).toISOString()
 }
 
 function getSnapshotDate(offsetDays = 0): string {
@@ -311,6 +334,7 @@ export default async function dashboardRoutes(
       lastPayments,
       contacts,
       balanceByDayRows,
+      endedBudgetByAgent,
     ] = await Promise.all([
       listDashboardSpendGroups(sub, scopeChainIds, from30Iso, from7Iso, toIso),
       listDashboardMerchants(sub, scopeChainIds, from30Iso, from7Iso, toIso),
@@ -319,6 +343,7 @@ export default async function dashboardRoutes(
       listAgentLastPayments(sub),
       listContactsForUser(sub),
       listBalanceByDayForUser(sub, { from: getSnapshotDate(-30), to: getSnapshotDate(0) }),
+      listLatestEndedBudgetByAgent(delegationAgentIds),
     ])
     // One preference read per request — the same resolved currency the
     // transaction enrichment below receives (#3127).
@@ -388,8 +413,17 @@ export default async function dashboardRoutes(
       accumulateGroup(d30, group, '30', rates)
     }
     const refusalsByAgent = new Map(refusalBuckets.map((row) => [row.agent_id, row]))
-    const budgetStops7 = refusalBuckets.reduce((sum, row) => sum + Number(row.budget_7 ?? '0'), 0)
-    const budgetStops30 = refusalBuckets.reduce((sum, row) => sum + Number(row.budget_30 ?? '0'), 0)
+    // The user-level `budgetStops` stays COMBINED (#4353): the per-agent
+    // `budget` bucket now counts delegation_budget_exceeded only and `expired`
+    // counts delegation_expired, so a budget stop is their sum.
+    const budgetStops7 = refusalBuckets.reduce(
+      (sum, row) => sum + Number(row.budget_7 ?? '0') + Number(row.expired_7 ?? '0'),
+      0,
+    )
+    const budgetStops30 = refusalBuckets.reduce(
+      (sum, row) => sum + Number(row.budget_30 ?? '0') + Number(row.expired_30 ?? '0'),
+      0,
+    )
 
     // Counterparty names: contacts win, then merchant receipts (analytics'
     // label order) — but only as `merchantName` beside the raw fields.
@@ -756,6 +790,10 @@ export default async function dashboardRoutes(
               periodEnd: new Date(end * 1000).toISOString(),
             }
           }),
+          // #4353: when the agent's latest budget ended (ISO), or null. The
+          // SQL already filters to closed windows; re-checking `<= now` here
+          // means a live row is never reported as ended (#4352's posture).
+          budgetEndedAt: budgetEndedAtIso(endedBudgetByAgent.get(agent.id), now),
           receivedSubBudgets: receivedSubBudgets
             .filter((row) => row.agent_id === agent.id)
             .map((row) => ({

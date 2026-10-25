@@ -484,8 +484,13 @@ that flow the connector's register call (`registerSetup` in
 `packages/connect/src/api.ts`) sends Haven the setup token and challenge id,
 the public signing address and its proof, the API-key hash and prefix, the
 runtime labels (runtime, connector version, MCP server name, run mode,
-connector context) and the install capabilities; the plaintext API key and
-delegate key stay in local protected storage/runtime config.
+connector context) and the install capabilities. Its other calls in the same
+file — `resolveSetup`, the `/install-status` and `/retired-agents` reports,
+the `/connector-status` read and the `/machine-payments/agent` identity read —
+carry the setup token or setup id, install status, runtime labels and agent
+ids; all but `resolveSetup` authenticate with the new API key. The
+plaintext API key and delegate key stay in local protected storage/runtime
+config.
 
 ## Local audit
 

@@ -84,9 +84,10 @@ The routes (`routes/accounting-connections.ts`) and the feed (`feed-orchestrator
      which is what `missingScopes` on the API reads back.
    - `verify(userId, externalRef, paymentId)` reads back the record and
      reports `registered` / `booked` / `missing: 'deleted' | 'foreign_invoice'`
-     (a record at that number that is not ours). A provider whose descriptor
-     sets `capabilities.verify: false` (Accounted) answers from Haven's own
-     record and cannot report a booking.
+     (a record at that number that is not ours). Accounted's descriptor sets
+     `capabilities.verify: false`, and its connector answers verify from
+     Haven's own record with zero provider calls, so it cannot report a
+     booking (`accounted-connector.ts`); nothing generic does that for you.
    - `getCompanyInfo(secrets)` reports the company behind the grant —
      `externalCompanyId` (the provider's tenant id; Fortnox: `DatabaseNumber`),
      `name`, and the ledger's `baseCurrency` — which is also the currency the
@@ -185,9 +186,10 @@ The routes (`routes/accounting-connections.ts`) and the feed (`feed-orchestrator
    on reconnect — and runs the real orchestrator and flows; your harness supplies HTTP fixtures
    under `__tests__/fixtures/<provider>/` (see the Fortnox runner — its
    fixtures are hand-authored in the shapes the #494 spike recorded, not raw
-   captures). The runner skips the cases a descriptor's capabilities rule
-   out (`conformanceSkipsFor`: Accounted skips the attachment cases, case 4's
-   booking halves and the base-currency cases), and
+   captures). The conformance runner's skips (`conformanceSkipsFor`) come
+   from the descriptor's capabilities and from the harness's own
+   `declares.baseCurrency: false`: Accounted skips the attachment cases,
+   case 4's booking halves and the base-currency cases, and
    `connector-conformance-skips.test.ts` pins exactly which. An `api_key`
    connector's `getCompanyInfo` must throw a
    `ProviderError` with status 401/403 for a rejected key — that is what the
@@ -211,9 +213,10 @@ the #3888 settlement sweep, or recorded by the #4319 proof ladder (Tier 1
 signed header; Tier 2 receipt hash under the flag and its seven limits));
 the funding leg rides along as `fundingTxHash`
 for the receipt PDF. When no verified settlement was recorded inside the
-merchant-report grace window (15 minutes, `domain/merchant-report-grace.ts`;
-a Base Sepolia-only deployment may shorten it with
-`MERCHANT_REPORT_GRACE_MIN_OVERRIDE` — the same clock the payment status uses; the #3888 sweep scans from the
+merchant-report grace window (15 minutes, `domain/merchant-report-grace.ts` —
+the same clock the payment status uses; only a deployment whose sole chain is
+Base Sepolia, `HAVEN_DEPLOY_CHAIN_IDS=84532`, may lower it to 0–15 minutes
+with `MERCHANT_REPORT_GRACE_MIN_OVERRIDE`; the #3888 sweep scans from the
 funding confirm, so a chain-detected hash lands inside it), the payment is
 pushed once under the FUNDING hash, and `txHashIsFunding` is true — render
 that as a labelled funding reference (Fortnox: `Tx 0x… (funding leg).`). The

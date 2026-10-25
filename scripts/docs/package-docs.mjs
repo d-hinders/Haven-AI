@@ -144,7 +144,8 @@ export const GOVERNED_PACKAGE_DOCS = [
     // trust-model note credits the local allowlist and #3271 binding with
     // what they prove (shape and integrity, not amount or recipient); the
     // Connect Agent 2 paragraph lists the register body field by field
-    // (connect api.ts registerSetup) instead of "only" four items.
+    // (connect api.ts registerSetup) instead of "only" four items, and names
+    // the connector's other calls in that file (review round 1, A2).
     // Re-checked unchanged: the five SignerToolName tools, the five version
     // constants and the capability key, SIGN_CONTEXT_TIMEOUT_MS 15 s, the four
     // sign-context routes, RETIRED_BINDING_MEMORY 64, MAX_SETTLEMENT_WINDOW
@@ -616,10 +617,12 @@ export const GOVERNED_PACKAGE_DOCS = [
     // (registry.ts); webhooks are wired by `registerAccountedWebhooksAdapter`,
     // not a descriptor field (api-key-flow.ts header); the active destination
     // is AT MOST one per user (migration 080's partial unique index); a
-    // `capabilities.verify: false` provider answers verify from Haven's own
-    // record; the conformance runner's capability skips are named
-    // (connector-conformance-skips.test.ts); the grace window has a Base
-    // Sepolia-only override (merchant-report-grace.ts). Re-checked unchanged:
+    // verify:false is Accounted's connector answering from Haven's own record
+    // (accounted-connector.ts), not a generic path; the conformance runner's
+    // skips are named (capabilities plus harness.declares.baseCurrency,
+    // connector-conformance.ts:165)
+    // (connector-conformance-skips.test.ts); the grace window's override is
+    // allowed only when HAVEN_DEPLOY_CHAIN_IDS=84532 (merchant-report-grace.ts). Re-checked unchanged:
     // the descriptor and connector fields (provider.ts, connector.ts), the six
     // ledger currencies, the retry constants (8 attempts, 1 min doubling to
     // 1 h, 25 requests / 5 s), NEEDS_ATTENTION_STATUSES, pinAccountingBookedTx,

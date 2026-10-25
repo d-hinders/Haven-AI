@@ -434,7 +434,10 @@ Without this, `ship-next` can open PRs but cannot auto-merge them.
      **Ops**, **Demo merchant** and **QA agent checks**, and **Install-path
      smoke**) are not listed; they gate through **Lint, Type-check & Build**,
      whose `needs` includes them and which fails when a job its surface routed
-     did not succeed. Then the blocking gates **Banned product-copy terms**
+     did not succeed. Two `ci.yml` jobs are in neither place: **Frontend
+     browser smoke** and **Design visual regression** are outside Lint's
+     `needs`, and are required only on `main`, through *Dev gate* (below).
+     Then the blocking gates **Banned product-copy terms**
      (#902), **Design-system coupling (strict)** (#1023), **Docs front-matter &
      agent skills** (#1023) and **Contract-doc coupling** (#646). Inside
      *Backend checks*, the shrink-only ratchet steps gain the request-schema

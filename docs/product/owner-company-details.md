@@ -22,6 +22,8 @@ covers:
   - packages/backend/src/modules/agents/tax-declaration.ts
   - packages/sdk/src/client-tax-declaration.ts
   - packages/frontend/src/components/agent-panel/TaxDeclarationToggle.tsx
+  - packages/mcp/src/server.ts
+  - packages/sdk/src/merchant-completion.ts
 last-verified: "2026-10-25"
 ---
 
@@ -207,8 +209,9 @@ number is VIES `valid`). The route refuses an opt-in with a `409` naming why:
 the flag is off, no VAT number is saved, or VIES is not `valid` now.
 
 The agent then reads `GET /agents/:id/tax-declaration` with its own key, for
-its own id only. The answer is `200` either way: `{ available: false, reason }`,
-or a declaration built at read time from the owner's current row —
+its own id only: an id that is not the authenticated agent's is refused with a
+`403` before any company-details row is read. For its own id the answer is
+`200` either way: `{ available: false, reason }`, or a declaration built at read time from the owner's current row —
 `jurisdiction` (the saved `country`), `taxId` (the saved VAT number) and a
 `validUntil` that is the earlier of 24 hours from the read and 24 hours after
 the last VIES check (`resolveTaxDeclaration`). Only the opt-in bit is stored;
@@ -216,7 +219,12 @@ the declaration itself is not.
 
 A local SDK client built with the delegate key signs that declaration and
 sends it to the merchant as the `X-Tax-Declaration` header on the paid retry
-of an EIP-3009 payment (`resolveTaxDeclarationHeader`). An erc7710 payment
+of an EIP-3009 payment (`resolveTaxDeclarationHeader`, attached in
+`MerchantCompletion.retryRequest`). The main carrier is the local MCP server,
+`@haven_ai/mcp`: it builds its `HavenClient` with the delegate key
+(`packages/mcp/src/server.ts`), and its `haven_pay_x402`,
+`haven_pay_x402_quote` and `haven_resume_x402_payment` tools reach that retry
+through `fetch`, `payX402Quote` and `resumeX402Payment`. An erc7710 payment
 never carries one, and neither the hosted server nor the edge signer builds
 one. So with an agent opted in, each EIP-3009 paid retry it makes through
 such a client carries the country and VAT number to the merchant, whether or
@@ -238,10 +246,13 @@ naming about how it is built:
   the owner has never saved a row: the card shows **"No company details"**
   with **Add company details**, which reveals the blank form (#4359).
   `200` with a row renders the filled form. A failed read renders the card's
-  description, a load error and a retry. The Business tab itself is listed
-  only when this card or the accounting connections card has something to
-  show (`SettingsClient`), so with the flag off the tab appears only when the
-  accounting card has something of its own to show.
+  description, a load error and a retry. Once the reads settle, the Business
+  tab is listed only when this card or the accounting connections card has
+  something to show (`SettingsClient`), so with the flag off the tab appears
+  only when the accounting card has something of its own to show. While the
+  reads are pending the tab is absent, except that an explicit
+  `?tab=business` (or an accounting OAuth return) keeps it listed, with a
+  skeleton body, until they settle.
 - **The purpose text is shown above the form** — not behind a tooltip or a
   second screen — because *Purpose, retention and GDPR basis* below is what
   the owner is agreeing to by filling it in. It sits above the Add button in
@@ -294,8 +305,9 @@ the form no longer repeats that detail.
 - **Purpose**: stating the buyer on a payment receipt the owner's own agent may
   give to a merchant, (asynchronously) validating the VAT number against
   VIES, and, for an agent the owner opts in, stating the country and VAT
-  number in the buyer-side tax declaration on its EIP-3009 payments (see *A
-  second reader* above).
+  number in the buyer-side tax declaration that a key-holding client — chiefly
+  the local MCP server, `@haven_ai/mcp` — sends on its EIP-3009 payments (see
+  *A second reader* above).
 - **Retention**: kept until the owner deletes it. `DELETE
   /user/company-details` works regardless of the feature flag, and with the
   flag ON the owner calls it themselves from the Company details card on

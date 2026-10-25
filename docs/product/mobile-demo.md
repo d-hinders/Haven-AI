@@ -89,8 +89,8 @@ Sign in on both installs if the demo will show both.
    MCP is keyless and cannot sign from a phone: the agent pays from the
    harness with its own delegate key.
 3. **The user picks the product.** The agent proposes the purchase in chat and
-   the user picks. Haven's app has no product picker or approval screen, so
-   this happens in the chat channel — on the phone only when the chat runs
+   the user picks. Haven's app has no screen where the user picks or
+   approves the agent's proposed purchase, so this happens in the chat channel — on the phone only when the chat runs
    there (a partner on Telegram, for example).
 4. **Go-ahead in chat.** The go-ahead is a chat message, not a Haven approval,
    and the agent completes the purchase on-chain, inside the already-granted

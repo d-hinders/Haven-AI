@@ -69,10 +69,10 @@ When a submission reaches `verified_payable` the lifecycle attaches it to a
 merchant (`merchants` table, migration 088) through the one writer every
 catalog path shares, `findOrCreateMerchantByHost` in
 `infra/repositories/merchants.ts`. The **hostname is the find key**: a
-submission on a host that already has offers in the catalog — a curated
-merchant's host, say `services.ampersend.ai` — or an earlier attached
-submission joins that live merchant (a `coming_soon` prospect never matches), and the
-submitter's `merchant_name` / `merchant_website` are ignored (the host proves
+submission on a host that already has offers in the catalog (a curated
+merchant's host, say `services.ampersend.ai`) or an earlier attached
+submission joins that live merchant (a `coming_soon` prospect never
+matches), and the submitter's `merchant_name` / `merchant_website` are ignored (the host proves
 the seller; `verified_payable` proves the offer). On a host nobody owns, a
 merchant is founded from `merchant_name` (else the probe's own name for the
 endpoint) and `merchant_website`, with a slug from the name and a numeric

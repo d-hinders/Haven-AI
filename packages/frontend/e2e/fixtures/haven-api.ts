@@ -691,7 +691,7 @@ export const dashboardOverview = {
       status: testAgent.status,
       accountId: testSafe.id,
       accountName: testSafe.name,
-      accountChainId: testSafe.chain_id,
+      accountChainId: testSafe.chain_id, budgetEndedAt: null,
       // #2264: same derived projection as `testAgent.allowances`, in the
       // dashboard route's camelCase wire shape (`routes/dashboard.ts`).
       allowances: [
@@ -732,7 +732,7 @@ export const dashboardOverview = {
           approx: false,
           payments: 4,
           // #4324: d7 carries the latest refusal time of each non-empty bucket.
-          refusals: { budget: 1, scope: 0, failed: 0, haven: 0, lastBudgetAt: '2026-10-08T11:05:00.000Z' },
+          refusals: { budget: 1, expired: 0, scope: 0, failed: 0, haven: 0, lastBudgetAt: '2026-10-08T11:05:00.000Z' },
         },
         d30: {
           gross: { usd: 50.0, eur: 45.5, sek: 538.0 },
@@ -741,7 +741,7 @@ export const dashboardOverview = {
           approxByCurrency: { usd: false, eur: true, sek: true },
           unpricedByCurrency: { usd: false, eur: false, sek: false },
           payments: 14,
-          refusals: { budget: 2, scope: 1, failed: 1, haven: 0 },
+          refusals: { budget: 2, expired: 0, scope: 1, failed: 1, haven: 0 },
         },
         lastPaymentAt: '2026-10-09T09:41:00.000Z',
         lastCounterparty: {
@@ -758,7 +758,7 @@ export const dashboardOverview = {
       status: 'paused' as const,
       accountId: testSafe.id,
       accountName: testSafe.name,
-      accountChainId: testSafe.chain_id,
+      accountChainId: testSafe.chain_id, budgetEndedAt: null,
       allowances: [],
       budgets: [
         {
@@ -788,6 +788,7 @@ export const dashboardOverview = {
           payments: 2,
           refusals: {
             budget: 0,
+            expired: 0,
             scope: 0,
             failed: 1,
             haven: 1,
@@ -800,7 +801,7 @@ export const dashboardOverview = {
           net: { usd: 15.6, eur: 14.2, sek: 167.96 },
           approx: false,
           payments: 7,
-          refusals: { budget: 1, scope: 0, failed: 1, haven: 2 },
+          refusals: { budget: 1, expired: 0, scope: 0, failed: 1, haven: 2 },
         },
         lastPaymentAt: '2026-10-07T18:02:00.000Z',
         lastCounterparty: {
@@ -820,7 +821,7 @@ export const dashboardOverview = {
       status: 'pending_approval' as const,
       accountId: 'safe-sepolia',
       accountName: 'Showcase account',
-      accountChainId: 84532,
+      accountChainId: 84532, budgetEndedAt: null,
       setupStatus: 'awaiting_connection',
       allowances: [],
       budgets: [],
@@ -831,14 +832,14 @@ export const dashboardOverview = {
           net: { usd: 0, eur: 0, sek: 0 },
           approx: false,
           payments: 0,
-          refusals: { budget: 0, scope: 0, failed: 0, haven: 0 },
+          refusals: { budget: 0, expired: 0, scope: 0, failed: 0, haven: 0 },
         },
         d30: {
           gross: { usd: 0, eur: 0, sek: 0 },
           net: { usd: 0, eur: 0, sek: 0 },
           approx: false,
           payments: 0,
-          refusals: { budget: 0, scope: 0, failed: 0, haven: 0 },
+          refusals: { budget: 0, expired: 0, scope: 0, failed: 0, haven: 0 },
         },
         lastPaymentAt: null,
         lastCounterparty: null,

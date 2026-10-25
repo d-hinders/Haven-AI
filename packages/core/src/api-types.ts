@@ -6398,6 +6398,11 @@ export type components = {
             setupStatus?: string;
             /** @description #3803: every live budget from the active delegation set — expired rows follow the #3802 predicate and are absent. */
             budgets: components["schemas"]["DashboardAgentBudget"][];
+            /**
+             * Format: date-time
+             * @description #4353 — when this agent's latest budget ENDED: the latest `expires_at` among its `active` delegation rows on its own account's chain whose window has closed (the rows the live `budgets` read drops, #3802). `null` when it has none; a revoked row never counts. Always sent. Display-only — it feeds the "Budget ended" Needs-attention item and authorises nothing.
+             */
+            budgetEndedAt: string | null;
             /** @description #3803: sub-budget grants this agent RECEIVED, so an agent whose only authority is a received sub-budget does not read "No budget". */
             receivedSubBudgets: components["schemas"]["DashboardReceivedSubBudget"][];
             stats: components["schemas"]["DashboardAgentStats"];
@@ -6475,7 +6480,7 @@ export type components = {
             payments: number;
             /** @description DISTINCT merchants over the window — merchant = the x402 resource host, else the recipient address. A user-level figure, never a sum of per-agent counts. */
             distinctMerchants: number;
-            /** @description Refusal rows whose reason was delegation_budget_exceeded or delegation_expired — a budget stopped a payment. */
+            /** @description Refusal rows whose reason was delegation_budget_exceeded or delegation_expired — a budget stopped a payment. Stays the COMBINED figure (#4353): the per-agent `refusals.budget` and `refusals.expired` buckets are separate, this is their sum. */
             budgetStops: number;
         };
         /** @description #3803 — one window of a PER-AGENT stats block. Same gross/net/approx/payments definitions as the user-level DashboardSpendWindow; per-agent refusals instead of the user-level distinctMerchants/budgetStops rollups. */
@@ -6510,8 +6515,10 @@ export type components = {
         };
         /** @description #3803 — refusal ROW counts per bucket (not distinct reasons — #3815). relayer_budget is Haven’s own cap and is never shown as the user’s budget. */
         DashboardRefusalBuckets: {
-            /** @description delegation_budget_exceeded + delegation_expired. */
+            /** @description delegation_budget_exceeded only (#4353 split delegation_expired out into `expired`). */
             budget: number;
+            /** @description #4353 — delegation_expired: the agent tried to pay after its budget ended. Its own "Budget ended" Needs-attention item. */
+            expired: number;
             /** @description no_delegation_for_target. */
             scope: number;
             /** @description onchain_revert. */
@@ -6523,6 +6530,11 @@ export type components = {
              * @description #4324 — the latest `budget` refusal in the window. Sent on `d7` only, and only when the bucket has a row: the "Needs attention" items fire on the 7-day counts and re-arm an acknowledgement when this is after it. Absent never hides an item.
              */
             lastBudgetAt?: string;
+            /**
+             * Format: date-time
+             * @description #4353 — the latest `expired` refusal in the window. `d7` only; absent when the bucket has no row (same rule as `lastBudgetAt`).
+             */
+            lastExpiredAt?: string;
             /**
              * Format: date-time
              * @description #4324 — the latest `scope` refusal in the window. `d7` only; absent when the bucket is empty.

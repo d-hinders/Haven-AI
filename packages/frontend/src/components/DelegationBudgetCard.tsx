@@ -244,6 +244,16 @@ export default function DelegationBudgetCard({
     return g && /^0x[0-9a-fA-F]{64}$/.test(g) ? g : null
   }, [])
   const [prefill, setPrefill] = useState<{ hash: string; periodSeconds: number } | null>(null)
+  // #4353: "Budget ending"'s Renew links `?renew=<delegationHash>` — open
+  // that live budget's Edit, prefilled with its own limits (the end date is
+  // the field to change, #4350). Applied once, then the URL is tidied; an
+  // unknown, foreign or no-longer-live hash opens nothing, like `?grant=`.
+  const renewHash = useMemo(() => {
+    if (typeof window === 'undefined') return null
+    const r = new URLSearchParams(window.location.search).get('renew')
+    return r && /^0x[0-9a-fA-F]{64}$/.test(r) ? r : null
+  }, [])
+  const renewApplied = useRef(false)
   // #3695: once a budget exists, the grant form is collapsed behind "Add
   // budget" — a permanent second form made "Set budget" the strongest element
   // on the page. With no active budget the form is the section's content and
@@ -372,6 +382,22 @@ export default function DelegationBudgetCard({
       // A URL that stays untidy is not worth a thrown render.
     }
   }, [retired, grantHash, budgets, tokens, agentId, prefill])
+
+  useEffect(() => {
+    if (retired || !renewHash || budgets === null || renewApplied.current) return
+    renewApplied.current = true
+    const nowSec = Math.floor(Date.now() / 1000)
+    const row = budgets.find(
+      // The same liveness the routed-edit lookup uses (`occupiesSlot`).
+      (b) => b.delegation_hash.toLowerCase() === renewHash.toLowerCase() && occupiesSlot(b, nowSec),
+    )
+    if (row) setEditing(row)
+    try {
+      window.history.replaceState(null, '', `/agents/${agentId}`)
+    } catch {
+      // A URL that stays untidy is not worth a thrown render.
+    }
+  }, [retired, renewHash, budgets, agentId])
 
   // The period picker offers the day/week/month rhythm; a prefilled build may
   // carry any period the CLI chose (an hour, a minute-floor of 60s), so the

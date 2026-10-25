@@ -531,6 +531,13 @@ The contract exposes four authentication schemes:
   own `RefusalActivityEntry` item schema (atomic `amount`, the closed
   five-value `reason` set, folded `attempts`, and a serve-time fiat triple in
   all three currencies — `sek_value` is not stored on a refusal).
+  `/dashboard/overview`'s per-agent block (#4353) reports an ended budget two
+  ways, both display-only: `stats.d7|d30.refusals.expired` (+ a `d7`-only
+  `lastExpiredAt`) counts `delegation_expired` refusals apart from
+  `refusals.budget` (`delegation_budget_exceeded` only; the user-level
+  `budgetStops` stays their combined sum), and `budgetEndedAt` (date-time or
+  `null`, always sent) is the latest `expires_at` of the agent's
+  closed-window `active` delegation rows on its account's chain.
 - `SetupToken` is a narrowly scoped, expiring connector pairing credential.
 - `OpsJwt` is the ops console session (#3509): read authority over `/ops/*`
   only, refused by every customer route, never payment authority.

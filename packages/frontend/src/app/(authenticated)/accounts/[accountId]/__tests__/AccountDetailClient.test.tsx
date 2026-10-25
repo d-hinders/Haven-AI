@@ -178,8 +178,8 @@ function overview(
     accounts: [],
     spend: {
       scope: 'mainnet',
-      d7: { ...zeroWindow, refusals: { budget: 0, scope: 0, failed: 0, haven: 0 } },
-      d30: { ...zeroWindow, refusals: { budget: 0, scope: 0, failed: 0, haven: 0 } },
+      d7: { ...zeroWindow, refusals: { budget: 0, expired: 0, scope: 0, failed: 0, haven: 0 } },
+      d30: { ...zeroWindow, refusals: { budget: 0, expired: 0, scope: 0, failed: 0, haven: 0 } },
       topMerchant7d: null,
       failedIntents7d: 0,
       balance_by_day: [],
@@ -621,7 +621,7 @@ describe('AccountDetailClient', () => {
             status: 'active',
             accountId: 'safe-1',
             accountName: 'Main account',
-            accountChainId: 8453,
+            accountChainId: 8453, budgetEndedAt: null,
             allowances: [],
             budgets: [
               {
@@ -640,8 +640,8 @@ describe('AccountDetailClient', () => {
             ],
             receivedSubBudgets: [],
             stats: {
-              d7: { gross: { usd: 0, eur: 0, sek: 0 }, net: { usd: 0, eur: 0, sek: 0 }, approx: false, payments: 0, refusals: { budget: 0, scope: 0, failed: 0, haven: 0 } },
-              d30: { gross: { usd: 0, eur: 0, sek: 0 }, net: { usd: 0, eur: 0, sek: 0 }, approx: false, payments: 0, refusals: { budget: 0, scope: 0, failed: 0, haven: 0 } },
+              d7: { gross: { usd: 0, eur: 0, sek: 0 }, net: { usd: 0, eur: 0, sek: 0 }, approx: false, payments: 0, refusals: { budget: 0, expired: 0, scope: 0, failed: 0, haven: 0 } },
+              d30: { gross: { usd: 0, eur: 0, sek: 0 }, net: { usd: 0, eur: 0, sek: 0 }, approx: false, payments: 0, refusals: { budget: 0, expired: 0, scope: 0, failed: 0, haven: 0 } },
               lastPaymentAt: null,
               lastCounterparty: null,
             },

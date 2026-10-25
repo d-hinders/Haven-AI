@@ -533,7 +533,7 @@ const DS_AGENT: DashboardAgentPreview = {
   status: 'active',
   accountId: 'acct-1',
   accountName: 'Main account',
-  accountChainId: 8453,
+  accountChainId: 8453, budgetEndedAt: null,
   allowances: [],
   budgets: [
     {
@@ -552,8 +552,8 @@ const DS_AGENT: DashboardAgentPreview = {
   ],
   receivedSubBudgets: [],
   stats: {
-    d7: { gross: { usd: 12, eur: 0, sek: 0 }, net: { usd: 12, eur: 0, sek: 0 }, approx: false, payments: 1, refusals: { budget: 0, scope: 0, failed: 0, haven: 0 } },
-    d30: { gross: { usd: 120, eur: 0, sek: 0 }, net: { usd: 120, eur: 0, sek: 0 }, approx: false, payments: 6, refusals: { budget: 0, scope: 0, failed: 0, haven: 0 } },
+    d7: { gross: { usd: 12, eur: 0, sek: 0 }, net: { usd: 12, eur: 0, sek: 0 }, approx: false, payments: 1, refusals: { budget: 0, expired: 0, scope: 0, failed: 0, haven: 0 } },
+    d30: { gross: { usd: 120, eur: 0, sek: 0 }, net: { usd: 120, eur: 0, sek: 0 }, approx: false, payments: 6, refusals: { budget: 0, expired: 0, scope: 0, failed: 0, haven: 0 } },
     lastPaymentAt: new Date(DS_AGENT_NOW - 6 * 3_600_000).toISOString(),
     lastCounterparty: { source: 'api.vendor.com', x402ResourceUrl: null, to: null, merchantName: null },
   },
@@ -587,8 +587,8 @@ const DS_AGENT_NO_BUDGET: DashboardAgentPreview = {
   name: 'Watchtower',
   budgets: [],
   stats: {
-    d7: { gross: { usd: 0, eur: 0, sek: 0 }, net: { usd: 0, eur: 0, sek: 0 }, approx: false, payments: 0, refusals: { budget: 0, scope: 0, failed: 0, haven: 0 } },
-    d30: { gross: { usd: 0, eur: 0, sek: 0 }, net: { usd: 0, eur: 0, sek: 0 }, approx: false, payments: 0, refusals: { budget: 0, scope: 0, failed: 0, haven: 0 } },
+    d7: { gross: { usd: 0, eur: 0, sek: 0 }, net: { usd: 0, eur: 0, sek: 0 }, approx: false, payments: 0, refusals: { budget: 0, expired: 0, scope: 0, failed: 0, haven: 0 } },
+    d30: { gross: { usd: 0, eur: 0, sek: 0 }, net: { usd: 0, eur: 0, sek: 0 }, approx: false, payments: 0, refusals: { budget: 0, expired: 0, scope: 0, failed: 0, haven: 0 } },
     lastPaymentAt: null,
     lastCounterparty: null,
   },

@@ -64,6 +64,12 @@ export function agentBadge(
   if (attentionItems.some((item) => item.kind === 'needs-setup' && item.agentId === agent.id)) {
     return { label: 'Needs setup', tone: 'brand' }
   }
+  // #4353: the ended item replaces "Needs setup" for an agent whose only
+  // budget ended, so its row says why it cannot spend. Same coupling as
+  // needs-setup: acknowledging the item clears the badge.
+  if (attentionItems.some((item) => item.kind === 'budget-ended' && item.agentId === agent.id)) {
+    return { label: 'Budget ended', tone: 'neutral' }
+  }
   if (agent.status === 'paused') {
     return { label: 'Paused', tone: 'warning' }
   }

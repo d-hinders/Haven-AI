@@ -5,6 +5,7 @@ import {
   ATTENTION_QUIET_LINE,
   attentionEmptyState,
   computeAttentionItems,
+  BUDGET_ENDING_LEAD_DAYS,
   DISMISSIBLE_ATTENTION_KINDS,
   firstRunSetupState,
   PAYMENTS_FAILED_DANGER_COUNT,
@@ -28,10 +29,13 @@ type AgentSlice = {
   accountId?: string | null
   accountName?: string | null
   setupStatus?: string
+  budgetEndedAt?: string | null
   budgets?: Array<Record<string, unknown>>
   receivedSubBudgets?: Array<{ open: boolean; parentAgentName?: string }>
   refusalBuckets?: {
     budget: number
+    expired?: number
+    lastExpiredAt?: string
     scope: number
     failed: number
     haven: number
@@ -67,6 +71,7 @@ function makeOverview(
       accountChainId: null,
       allowances: [],
       ...(agent.setupStatus !== undefined ? { setupStatus: agent.setupStatus } : {}),
+      ...(agent.budgetEndedAt !== undefined ? { budgetEndedAt: agent.budgetEndedAt } : {}),
       budgets: (agent.budgets ?? []) as never,
       receivedSubBudgets: agent.receivedSubBudgets ?? [],
       stats: {
@@ -713,10 +718,13 @@ describe('computeAttentionItems — acknowledgements (#4324)', () => {
 
   it('every event-driven kind is dismissible; low balance and zero USDC are not', () => {
     expect([...DISMISSIBLE_ATTENTION_KINDS].sort()).toEqual(
-      ['budget-reached', 'budget-scope', 'budget-usage', 'haven-paused', 'needs-setup', 'no-backup', 'payments-failed'].sort(),
+      // #4353 adds `budget-ended` (acknowledged until the next end) on purpose;
+      // `budget-ending` stays out — Renew resolves it.
+      ['budget-ended', 'budget-reached', 'budget-scope', 'budget-usage', 'haven-paused', 'needs-setup', 'no-backup', 'payments-failed'].sort(),
     )
     expect(DISMISSIBLE_ATTENTION_KINDS.has('low-balance')).toBe(false)
     expect(DISMISSIBLE_ATTENTION_KINDS.has('zero-usdc')).toBe(false)
+    expect(DISMISSIBLE_ATTENTION_KINDS.has('budget-ending')).toBe(false)
   })
 
   const CASES = [
@@ -1041,6 +1049,16 @@ describe('attentionEmptyState (#3902) — the achievement only on measured facts
     expect(state(makeOverview([stopped], [month]), roomy, false, newer).kind).toBe('quiet')
   })
 
+  it('#4353: an ended budget\'s stop (`expired`) blocks the achievement until acknowledged', () => {
+    const stopped = {
+      ...scout,
+      refusalBuckets: { budget: 0, expired: 1, scope: 0, failed: 0, haven: 0, lastExpiredAt: '2026-10-20T10:00:00Z' },
+    } as AgentSlice
+    expect(state(makeOverview([stopped], [month]), roomy).kind).toBe('quiet')
+    expect(state(makeOverview([stopped], [month]), roomy, false, acks({ 'budget-reached:a1': '2026-10-20T11:00:00Z' })).kind).toBe('caught-up')
+    expect(state(makeOverview([stopped], [month]), roomy, false, acks({ 'budget-reached:a1': '2026-10-20T09:00:00Z' })).kind).toBe('quiet')
+  })
+
   it('is the achievement when the runway and the budget room are both measured and holding', () => {
     const result = state(makeOverview([scout], [month]), roomy)
     // #3908: the title alone — exact equality pins that no body rides along.
@@ -1127,5 +1145,179 @@ describe('attentionEmptyState (#3902) — the achievement only on measured facts
     const short = { accountId: 'acct-2', usdcBalanceAtomic: '20000000', usdcPace7dAtomic: '10000000', funded: true }
     // Summed: 1020 USDC at 10 a week is years. Per account: acct-2 has 14 days.
     expect(state(makeOverview([scout], [rich, short]), roomy).kind).toBe('quiet')
+  })
+})
+
+// ── #4353: budget end dates in Needs attention ──────────────────────────────
+describe('computeAttentionItems — budget ending and budget ended (#4353)', () => {
+  const NOW = Date.parse('2026-10-25T12:00:00.000Z')
+  const DAY = 86_400_000
+  const iso = (ms: number) => new Date(ms).toISOString()
+  const HASH = `0x${'ab'.repeat(32)}`
+  const liveBudget = (expiresMs: number, extra: Record<string, unknown> = {}) => ({
+    budgetAtomic: '1000000',
+    expiresAt: iso(expiresMs),
+    delegationHash: HASH,
+    ...extra,
+  })
+  const run = (agents: AgentSlice[], acknowledgements?: Map<string, AttentionAcknowledgement>) =>
+    computeAttentionItems({ overview: makeOverview(agents, []), budgetRemaining: EMPTY_BUDGETS, acknowledgements, nowMs: NOW })
+
+  it('the lead time is 7 days (owner decision 2026-10-25)', () => {
+    expect(BUDGET_ENDING_LEAD_DAYS).toBe(7)
+  })
+
+  it('a live budget ending within 7 days raises "Budget ending" with Renew to its Edit', () => {
+    const items = run([{ id: 'a1', name: 'Scout', status: 'active', budgets: [liveBudget(NOW + 3 * DAY)] }])
+    expect(items).toEqual([
+      {
+        id: 'budget-ending:a1',
+        kind: 'budget-ending',
+        tone: 'neutral',
+        badge: 'Ending soon',
+        title: "Scout's budget ends 28 Oct 2026",
+        subtitle: 'Renew it to keep it paying.',
+        actionLabel: 'Renew',
+        href: `/agents/a1?renew=${HASH}`,
+        agentId: 'a1',
+      },
+    ])
+  })
+
+  it('the threshold: exactly 7 days ahead fires, a second later does not, an already-past end does not', () => {
+    const at = (ms: number) =>
+      run([{ id: 'a1', name: 'Scout', status: 'active', budgets: [liveBudget(ms)] }]).map((item) => item.kind)
+    expect(at(NOW + 7 * DAY)).toEqual(['budget-ending'])
+    expect(at(NOW + 7 * DAY + 1000)).toEqual([])
+    expect(at(NOW)).toEqual([])
+    expect(at(NOW - DAY)).toEqual([])
+  })
+
+  it('names the budget that ends soonest, ignores a zero cap and an unparseable end', () => {
+    const items = run([
+      {
+        id: 'a1',
+        name: 'Scout',
+        status: 'active',
+        budgets: [
+          // Different tokens, so each is its token's only budget.
+          liveBudget(NOW + 5 * DAY, { delegationHash: '0xlater', chainId: 8453, tokenAddress: '0xa' }),
+          liveBudget(NOW + 1 * DAY, { delegationHash: '0xzero', budgetAtomic: '0', chainId: 8453, tokenAddress: '0xb' }),
+          liveBudget(NOW + 2 * DAY, { delegationHash: '0xsoonest', chainId: 8453, tokenAddress: '0xc' }),
+          { budgetAtomic: '1', expiresAt: 'not-a-date', delegationHash: '0xbad', chainId: 8453, tokenAddress: '0xd' },
+        ],
+      },
+    ])
+    expect(items.map((item) => item.href)).toEqual(['/agents/a1?renew=0xsoonest'])
+  })
+
+  it('a rotation carry beside its steady row is not "ending" — the token runs on (review S1)', () => {
+    const items = run([
+      {
+        id: 'a1',
+        name: 'Scout',
+        status: 'active',
+        budgets: [
+          // rails/rekey-carry.ts: the carry ends at the period boundary, the
+          // steady row runs from there to the old end.
+          liveBudget(NOW + 3 * DAY, { delegationHash: '0xcarry', chainId: 8453, tokenAddress: '0xUSDC' }),
+          liveBudget(NOW + 300 * DAY, { delegationHash: '0xsteady', chainId: 8453, tokenAddress: '0xusdc' }),
+        ],
+      },
+    ])
+    expect(items).toEqual([])
+  })
+
+  it('the latest-ending budget of a token still warns when it ends within 7 days', () => {
+    const items = run([
+      {
+        id: 'a1',
+        name: 'Scout',
+        status: 'active',
+        budgets: [
+          liveBudget(NOW + 1 * DAY, { delegationHash: '0xcarry', chainId: 8453, tokenAddress: '0xusdc' }),
+          liveBudget(NOW + 4 * DAY, { delegationHash: '0xsteady', chainId: 8453, tokenAddress: '0xusdc' }),
+        ],
+      },
+    ])
+    expect(items.map((item) => item.href)).toEqual(['/agents/a1?renew=0xsteady'])
+  })
+
+  it('"Budget ending" is not dismissible', () => {
+    expect(DISMISSIBLE_ATTENTION_KINDS.has('budget-ending')).toBe(false)
+  })
+
+  it('an active agent whose only budget ended gets "Budget ended <date>" instead of "has no budget"', () => {
+    const items = run([{ id: 'a1', name: 'Scout', status: 'active', budgetEndedAt: '2026-10-20T09:30:00.000Z' }])
+    expect(items).toEqual([
+      {
+        id: 'budget-reached:a1',
+        kind: 'budget-ended',
+        tone: 'neutral',
+        badge: 'Budget ended',
+        title: "Scout's budget ended 20 Oct 2026",
+        subtitle: "It can't spend until you set a new budget.",
+        actionLabel: 'Set budget',
+        href: '/agents/a1',
+        agentId: 'a1',
+      },
+    ])
+    expect(items.some((item) => item.title === 'Scout has no budget')).toBe(false)
+  })
+
+  it('no ended budget (null, absent or unparseable) keeps "has no budget" as before', () => {
+    for (const budgetEndedAt of [null, undefined, 'garbage']) {
+      const items = run([{ id: 'a1', name: 'Scout', status: 'active', budgetEndedAt }])
+      expect(items.map((item) => [item.kind, item.title])).toEqual([['needs-setup', 'Scout has no budget']])
+    }
+  })
+
+  it('an agent with a live budget never shows "Budget ended", even when an older one ended', () => {
+    const items = run([
+      { id: 'a1', name: 'Scout', status: 'active', budgetEndedAt: '2026-10-20T09:30:00.000Z', budgets: [liveBudget(NOW + 30 * DAY)] },
+    ])
+    expect(items).toEqual([])
+  })
+
+  it('drops the duplicate "reached its budget" for an agent shown "Budget ended"', () => {
+    const items = run([
+      {
+        id: 'a1',
+        name: 'Scout',
+        status: 'active',
+        budgetEndedAt: '2026-10-20T09:30:00.000Z',
+        refusalBuckets: { budget: 2, scope: 0, failed: 0, haven: 0, lastBudgetAt: '2026-10-19T00:00:00.000Z' },
+      },
+    ])
+    expect(items.map((item) => item.kind)).toEqual(['budget-ended'])
+  })
+
+  it('a dismissed "Budget ended" stays hidden until the NEXT budget ends, then lights again', () => {
+    const ENDED_1 = '2026-10-20T09:30:00.000Z'
+    const ACK = '2026-10-21T08:00:00.000Z'
+    const ENDED_2 = '2026-10-24T09:30:00.000Z'
+    const ack = acks({ 'budget-reached:a1': ACK })
+    const ended = (budgetEndedAt: string) =>
+      run([{ id: 'a1', name: 'Scout', status: 'active', budgetEndedAt }], ack).map((item) => item.kind)
+    expect(ended(ENDED_1)).toEqual([])
+    expect(ended(ACK)).toEqual([])
+    expect(ended(ENDED_2)).toEqual(['budget-ended'])
+  })
+
+  it('an acknowledgement made before the budget ended does not hide it', () => {
+    const items = run(
+      [{ id: 'a1', name: 'Scout', status: 'active', budgetEndedAt: '2026-10-20T09:30:00.000Z' }],
+      acks({ 'budget-reached:a1': '2026-10-19T00:00:00.000Z' }),
+    )
+    expect(items.map((item) => item.kind)).toEqual(['budget-ended'])
+  })
+
+  it('a paused or pending agent never gets "Budget ended"', () => {
+    const items = run([
+      { id: 'a1', name: 'Scout', status: 'paused', budgetEndedAt: '2026-10-20T09:30:00.000Z' },
+      { id: 'a2', name: 'Runner', status: 'pending_approval', setupStatus: 'awaiting_connection', budgetEndedAt: '2026-10-20T09:30:00.000Z' },
+    ])
+    expect(items.map((item) => item.kind)).toEqual(['needs-setup'])
+    expect(items[0].agentId).toBe('a2')
   })
 })

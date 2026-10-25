@@ -1179,7 +1179,7 @@ export const FIXTURE_OVERVIEW = {
   },
   agents: FIXTURE_AGENTS.map((a) => ({
     id: a.id, name: a.name, status: a.status, accountId: a.account_id,
-    accountName: a.account_name, accountChainId: a.account_chain_id,
+    accountName: a.account_name, accountChainId: a.account_chain_id, budgetEndedAt: null,
     ...(a.status === 'pending_approval' ? { setupStatus: 'awaiting_connection' } : {}),
     allowances: a.allowances.map((x) => ({
       tokenSymbol: x.token_symbol, allowanceAmount: x.allowance_amount, resetPeriodMin: x.reset_period_min,
@@ -1213,14 +1213,14 @@ export const FIXTURE_OVERVIEW = {
         approx: false,
         payments: 4,
         // #4324: d7 carries the latest refusal time of each non-empty bucket.
-        refusals: { budget: 1, scope: 0, failed: 0, haven: 0, lastBudgetAt: '2026-10-08T11:05:00.000Z' },
+        refusals: { budget: 1, expired: 0, scope: 0, failed: 0, haven: 0, lastBudgetAt: '2026-10-08T11:05:00.000Z' },
       },
       d30: {
         gross: { usd: 250.0, eur: 229.5, sek: 2690.0 },
         net: { usd: 162.5, eur: 149.18, sek: 1748.5 },
         approx: true,
         payments: 14,
-        refusals: { budget: 2, scope: 1, failed: 1, haven: 0 },
+        refusals: { budget: 2, expired: 0, scope: 1, failed: 1, haven: 0 },
       },
       lastPaymentAt: '2026-10-09T09:41:00.000Z',
       lastCounterparty: a.status === 'pending_approval' ? null : {
@@ -6705,7 +6705,7 @@ export const SCENARIOS = {
     api(apiPath) {
       if (apiPath === '/dashboard/overview') {
         const research = FIXTURE_OVERVIEW.agents.find((agent) => agent.id === 'agent-research')
-        const calm = (window) => ({ ...window, refusals: { budget: 0, scope: 0, failed: 0, haven: 0 } })
+        const calm = (window) => ({ ...window, refusals: { budget: 0, expired: 0, scope: 0, failed: 0, haven: 0 } })
         return {
           ...FIXTURE_OVERVIEW,
           agentCount: { active: 1, paused: 0, pending_approval: 0 },
@@ -6736,6 +6736,53 @@ export const SCENARIOS = {
       await page.goto(`${BASE_URL}/dashboard`, { waitUntil: 'networkidle', timeout: 60_000 })
       await dismissMobileSidebar(page, vp)
       await page.getByRole('heading', { name: "You're all caught up" }).waitFor({ timeout: 30_000 })
+      await shoot(page.locator('main').first(), 'page')
+    },
+  },
+  'dashboard-budget-end-dates': {
+    description:
+      '#4353: the two budget end-date items in Needs attention — "Budget ending" (Research agent\'s live budget ends in 3 days, Renew) and "Budget ended <date>" (Data-feed agent, active, its only budget ended 2 days ago), which replaces "has no budget"',
+    api(apiPath) {
+      if (apiPath === '/dashboard/overview') {
+        const now = Date.now()
+        const calm = (window) => ({ ...window, refusals: { budget: 0, expired: 0, scope: 0, failed: 0, haven: 0 } })
+        const quiet = (agent) => ({ ...agent, stats: { ...agent.stats, d7: calm(agent.stats.d7), d30: calm(agent.stats.d30) } })
+        const research = FIXTURE_OVERVIEW.agents.find((agent) => agent.id === 'agent-research')
+        const dataFeed = FIXTURE_OVERVIEW.agents.find((agent) => agent.id === 'agent-retired')
+        return {
+          ...FIXTURE_OVERVIEW,
+          agentCount: { active: 2, paused: 0, pending_approval: 0 },
+          accounts: FIXTURE_OVERVIEW.accounts.slice(0, 1).map((account) => ({ ...account, usdcBalanceFreshness: undefined })),
+          spend: { ...FIXTURE_OVERVIEW.spend, failedIntents7d: 0 },
+          agents: [
+            quiet({
+              ...research,
+              budgets: research.budgets.map((budget) => ({ ...budget, expiresAt: new Date(now + 3 * 86_400_000).toISOString() })),
+            }),
+            // No live budget and no open sub-budget: its only budget ended.
+            quiet({
+              ...dataFeed,
+              status: 'active',
+              budgets: [],
+              receivedSubBudgets: [],
+              budgetEndedAt: new Date(now - 2 * 86_400_000).toISOString(),
+            }),
+          ],
+        }
+      }
+      if (apiPath === '/dashboard/budget-remaining') {
+        return { budgets: FIXTURE_BUDGET_REMAINING.budgets.filter((row) => row.agent_id === 'agent-research') }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.addInitScript((userId) => {
+        window.localStorage.setItem(`haven-onboarding-complete-dismissed:${userId}`, '1')
+      }, FIXTURE_USER.id)
+      await page.goto(`${BASE_URL}/dashboard`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+      await page.getByText(/budget ended /).first().waitFor({ timeout: 30_000 })
+      await page.getByText(/budget ends /).first().waitFor({ timeout: 30_000 })
       await shoot(page.locator('main').first(), 'page')
     },
   },

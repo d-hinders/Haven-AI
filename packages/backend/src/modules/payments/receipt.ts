@@ -51,7 +51,7 @@ export interface PaymentReceiptRow extends Partial<BuyerJoinColumns> {
    * #3770: the owning agent's evidence-only delivery verdict, joined from
    * `machine_payment_delivery_reports`. Null while unreported; additive on
    * the receipt (`payment.deliveryQuality`) and ignored by the verifier,
-   * which reads only `authorization`.
+   * which reads only the bundle's `authorization` and `onChain.chainId`.
    */
   delivery_quality?: string | null
   delivery_note?: string | null

@@ -14,8 +14,8 @@
  * company details", the purpose line and **Add company details**, which
  * reveals the form — because a first-time owner no longer meets a wall of
  * empty inputs; the purpose line stays above it either way
- * (`owner-company-details.md`: the purpose and retention text is shown
- * above the form, always).
+ * (`owner-company-details.md`: the purpose text is shown above the form —
+ * in the empty state too — and the error state does not show it).
  *
  * The reads come from `BusinessDataProvider` (#4359): the card, the
  * Connections card and the Business tab's visibility rule share ONE

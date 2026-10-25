@@ -41,7 +41,6 @@ covers:
   - packages/frontend/src/app/(authenticated)/transactions/TransactionsClient.tsx
   - packages/frontend/src/components/AgentPanel.tsx
   - packages/frontend/src/hooks/useAgentListFilters.ts
-  - packages/frontend/src/lib/agent-list-filters.ts
   - packages/frontend/src/hooks/useAgentPanelState.ts
   - packages/frontend/src/lib/half-revoked.ts
   - packages/backend/src/routes/agents.ts
@@ -53,7 +52,7 @@ covers:
   - packages/backend/src/rails/sweep.ts
   - packages/backend/src/routes/machine-payments.ts
   - packages/sdk/src/sweep.ts
-last-verified: "2026-10-21"
+last-verified: "2026-10-25"
 ---
 
 # Haven Screen Recipes
@@ -114,9 +113,9 @@ What completes a step — never a weaker signal:
 - Step 3: the first agent payment.
 
 Money and risk clarity:
-- The funding step's action opens `Add funds` (after the account picker when the
-  user has several accounts), which shows the exact address and network and
-  carries the test-network faucet. Do not show the raw address, token
+- The funding step's `Add funds` action opens the `Receive` dialog (after the
+  account picker when the user has several accounts, #4094), which shows the
+  exact address and network and, on a test network, Circle's faucet. Do not show the raw address, token
   list, QR code, or network detail in the guide; suggest an amount ("We suggest
   N USDC") rather than require one.
 - For the first-agent step, say the user will connect an agent and approve a
@@ -140,8 +139,10 @@ States:
 - Dismissed: keep the dashboard usable; other empty states should still offer the same next action.
 
 Needs attention items after setup (#4324, owner decisions 2026-10-23):
-- Every item can be acted on, and every item except low balance and zero USDC
-  can be dismissed with its × (`Dismiss: {title}`). "No backup signer" (per
+- Every item carries an action except "Haven paused" when the agent with the
+  latest refusal is unknown (below). Every item except low balance, zero USDC
+  and "Budget ending" can be dismissed with its × (`Dismiss: {title}`,
+  `DISMISSIBLE_ATTENTION_KINDS`). "No backup signer" (per
   account) and "Needs setup" (per agent) are dismissed for good, as before.
   The rest are **acknowledged until something new happens**:
   - "Budget reached" (a budget refusal), "Outside its rules" (a recipient
@@ -161,8 +162,9 @@ Needs attention items after setup (#4324, owner decisions 2026-10-23):
   action when that is unknown.
 - A failed payment is calm (neutral) until an agent has 3 in 7 days, then it
   reads "<agent> had N failed payments" over "Payments keep failing — check
-  the agent" in danger. A refusal-based
-  failure says no money moved; the unattributed one does not claim that.
+  the agent" in danger. A single refusal-based failure says no money moved
+  ("A payment was refused by the network. No money moved."); the unattributed
+  one ("A payment did not go through in the last 7 days.") does not claim that.
 - Zero USDC reads "No USDC", not "Low balance".
 - "You're all caught up" can show once every budget and scope stop has been
   acknowledged with none newer, if the runway and budget-room facts hold. A
@@ -337,19 +339,26 @@ Money and risk clarity:
 Use when the user manually sends funds from a Haven wallet.
 
 Structure:
-1. Single form step for Haven wallet, token, amount, and recipient — there is no
+1. Single form step for token, amount, and recipient — there is no
    separate review step. `DelegationSendModal` is titled `Send` and submits from
-   the same step it collects on.
-2. Shared `Input` fields with inline validation. Use `MaxButton` for available balances and `PasteButton` for recipient addresses when available.
+   the same step it collects on. The account is chosen before it opens: the
+   dashboard's account picker when the user has several accounts, or the
+   account page's own account. The recipient is a pasted address, or one of
+   the user's other Haven accounts ("Or send to another Haven account").
+2. Shared `Input` fields with inline validation. `MaxButton` and `PasteButton`
+   exist in `packages/ui` but the send modal does not use them today.
 3. Lead with the amount and token as the dominant information.
 4. Compact context for network.
 5. Primary action: `Send`; secondary action: `Cancel`.
 
-Money and risk clarity:
+Money and risk clarity (today the modal names neither the account nor its
+network, so the first bullet and structure item 4 are not met yet):
 - Show the selected Haven wallet before money moves.
 - Show the recipient as a contact name when available; keep raw addresses subordinate.
 - Say that the send takes one approval and costs the user no network fee.
-- Result states should say `Payment sent` or `Payment was not sent`.
+- Result toasts: `Sent.` on success, `Approval was cancelled.` when the
+  approval is cancelled, and "Haven could not send this payment. Try again."
+  (or the server's message) on failure.
 - Use toasts for short success/copy feedback, but keep blocking validation next to the field.
 
 > **Why there is no review step or approval hold here (#2265).** Both were the
@@ -365,20 +374,26 @@ Money and risk clarity:
 
 Use when the user manually funds a Haven wallet with an on-chain transfer.
 
-Structure:
-1. Header that makes this a manual on-chain receive flow.
-2. Haven wallet summary with account name and network.
-3. Address block with copy as the primary action, plus optional QR code and explorer link.
-4. Supported tokens for the selected network.
-5. Short checklist explaining network, token, and confirmation requirements.
+Structure (`ReceiveDialog`, the one receive dialog since #4094, cleaned by
+#4167; it replaced both `AddFundsModal` and `ReceiveFundsModal`):
+1. A dialog titled `Receive`.
+2. An account picker (with the network under it) only when the caller offers
+   more than one account; with one account no account card renders.
+3. The address with an inline QR code and Copy as the primary action. The
+   explorer link is not here; it lives in the account page's Account details.
+4. One network rule naming one token: "Send USDC on <network> only. It arrives
+   in about a minute and shows in Activity."
+5. "Other ways to add money": `Get test USDC` (Circle's faucet) on a testnet
+   account, and `Buy with card` on a mainnet account when the on-ramp is
+   configured.
 
 Money and risk clarity:
-- Show the exact Haven wallet and network before the address.
+- Show the network before the address.
 - Make it clear users must send on the same network shown in the modal.
-- `Add funds` is configuration- and review-gated. When enabled, it opens the
-  licensed provider flow with the selected Haven wallet as destination; the
-  provider handles KYC and funds. When unavailable, route to `Receive` without
-  implying Haven operates an on-ramp.
+- `Buy with card` is configuration-gated. When shown, it opens the licensed
+  provider flow (Coinbase) with the selected Haven wallet as destination; the
+  provider handles KYC and funds. When it is not configured the card is simply
+  absent, without implying Haven operates an on-ramp.
 - On a **testnet account** (the selected account's chain, never the
   deployment's default — both Base and Base Sepolia are offered as an account
   network in every environment), hide the card-purchase on-ramp entirely
@@ -403,20 +418,21 @@ Money and risk clarity:
   instruction to send in its most one-click form, and a user who scans it sends
   on whatever network their wallet is already on. Withholding an address costs a
   refresh; a transfer to the right address on the wrong network is often
-  unrecoverable. Suppress the address, the copy action, the QR, the explorer
-  link, the supported-token list and the send checklist together — a screen that
+  unrecoverable. Suppress the address, the copy action, the QR, the network
+  rule and the "Other ways to add money" card together — a screen that
   keeps any one of them is still instructing
   ([#1852](https://github.com/d-hinders/Haven-AI/issues/1852)).
 - The refusal still owes the user a next action, and the action must not
   re-promise what the sentence above it refused. `Refresh page` is the honest
   one — it promises only a retry — and it carries no accompanying sentence:
   "refreshing usually resolves it" would restate the network claim the refusal
-  just withdrew. Do not offer a route to the other funding surface either; both
-  refuse identically, so the handoff reads as the product forgetting what it
-  just said (#1852).
-- Keep the account name (and its `Default` badge) visible even while refusing.
-  The refusal has to be about something, the name is true on every network, and
-  it names no network and offers no way to send (#1852).
+  just withdrew. No route to another funding surface either: when #1852 set
+  this rule there were two and both refused identically; since #4094 there is
+  one dialog.
+- When the dialog offers several accounts, the account picker stays visible
+  even while refusing: the refusal has to be about something, the name is true
+  on every network, and it names no network and offers no way to send (#1852).
+  With one account there is no account card in any state.
 - With the network confirmed, keep the raw address visible because receiving
   funds requires it, but label it as the Haven wallet address.
 - Do not imply Haven holds custody or can recover funds sent on the wrong network.
@@ -432,10 +448,13 @@ Structure:
 2. Searchable list with contact name first and recipient address subordinate.
 3. Add/edit modal with contact name and recipient address labels.
 4. Delete confirmation that says past payments are not affected.
-5. Send flow selector that lets users choose a saved recipient or paste an address directly.
+5. Send flow selector that lets users choose a saved recipient or paste an
+   address directly. Not built: `DelegationSendModal` offers the user's other
+   Haven accounts and a pasted address, and no saved-contact picker
+   (`grep -ci contact` on it prints 0).
 
 Money and risk clarity:
-- In Send, show the contact name as the primary recipient label and keep the raw address subordinate.
+- In Send (once the selector exists), show the contact name as the primary recipient label and keep the raw address subordinate.
 - If contacts cannot load, say saved recipients are unavailable and that the user can still paste an address.
 - If no contacts are saved, offer a clear path to add contacts without blocking manual address entry.
 - Prevent duplicate saved recipient addresses; do not imply duplicate contacts can be created.
@@ -495,8 +514,9 @@ Money and risk clarity:
 - Every offer's instruction is the exact text an agent pastes to pay it —
   never a shortened or paraphrased form, so what the user copies is what the
   agent sends.
-- Show the per-agent "within budget" / "above every agent budget" hint next to
-  the price, never as a claim that a payment will succeed — the on-chain
+- Show the per-agent budget answer next to the price (`budgetAnswerLine`:
+  "<agent> can pay this", "More than <agent> has left …", "No agent can pay
+  this yet"), never as a claim that a payment will succeed — the on-chain
   caveat enforcer is what actually decides.
 - State the payment requirement once, in plain language: what makes the
   payment work is a budget that can pay any recipient — the agent's budget
@@ -609,7 +629,7 @@ with a stretched name link:
 - **Head:** the agent's `Monogram` (`sm`, decorative), the name, one
   `StatusBadge` only when the agent needs attention, up to three label chips
   then "+N", and a ⋯ menu. The badge is the dashboard row's (`agentBadge`:
-  "Needs setup", "Paused", "N% used" at 90% or more) plus "Archived" and
+  "Needs setup", "Budget ended", "Paused", "N% used" at 90% or more) plus "Archived" and
   "Revoked"; a healthy active agent shows none. The account name prints only
   with two or more accounts.
 - **Body:** the dashboard row's own `AgentBudget` — meter, caption, "+N
@@ -783,7 +803,8 @@ rule). `?grant=` keeps working alongside `?tab=`. Sections, in order:
    section is read-only plus Stop (#3549). The one read-only budget summary
    on the page is the **Received budgets** block (#3988): when the agent
    RECEIVES sub-budget grants (not closed), the card lists each — the
-   granting agent's name, the amount per period and its end ("ends …",
+   granting agent ("From {name}"), the per-period amount and token (the row
+   names no period word) and its end ("ends …",
    "ended"; a pending grant reads "waiting for the sharing agent to sign it",
    a closing one "closing") — inside the same card, with no actions: closing
    a grant is the granting agent's owner's move. When the agent holds
@@ -869,8 +890,9 @@ rule). `?grant=` keeps working alongside `?tab=`. Sections, in order:
    5. **Agent Passport**: `AgentPassportCard`'s content as a row. Its own
       revoked-only gate stands — archived agents are not newly gated.
 
-   Under **On {account name}**, a linked row to the account's **Backup &
-   recovery** — the account's Security & details tab (`?tab=security`). A
+   Under **On {account name}**, a linked row, **Who can approve** ("Managed
+   on {account}: it covers every agent on it"), to the account's Security &
+   details tab (`?tab=security`), whose section has the same heading. A
    pointer, not a second copy (#1089). The old standalone "Identity and
    settings" section is gone; its tests moved with the rows.
 
@@ -1213,7 +1235,7 @@ Structure:
    The two go to the header's wrapping actions row as a fragment, so at 390
    the picker wraps under the facet (#4401) — and from `sm` the row also
    gives way and wraps rather than squeeze the title column when the pair
-   would not fit beside it (#3963).
+   would not fit beside it (#4409).
    A stale or foreign `?agentId=` clears with a one-line notice ("That agent
    isn't available"), never the page error.
 2. One `PeriodPicker` — the list-controls period control (#4110) — for the
@@ -1254,20 +1276,24 @@ Structure:
    spend" under it (the Share column merged in), Payments, Refused as a link
    to that agent's refused attempts, Budget captioned by the shared
    budget-caption helper (#3806 — whose symbol-decimals fallback, #4333,
-   makes a 1.00 USDC budget read "0.00 of 1.00 USDC · used this period ·
-   refills …", never "0.00 of 0.00"), Top merchant by name with a merchant
+   makes a 1.00 USDC budget read "0.00 of 1.00 USDC used this period ·
+   refills …", never "0.00 of 0.00"), Top merchant by name, as text with no
    monogram (an unresolved one reads "Unknown recipient", the full address in
-   the tooltip — no cell renders a `0x…` address AS a label), and Last paid.
+   the tooltip — no cell renders a `0x…` address AS a label; "None in this
+   range" when there is none), and Last paid.
    The whole row links to the agent. There is no `expires_at` on this
    endpoint, so no "expires" branch.
-5. Below the table: the spend-over-time chart (one bar per day with activity,
-   stacked by agent, refusal caps, partial edge days striped; #3051), then the
+5. Below the table: the spend-over-time chart (one slot for every local
+   calendar day of the window, empty days included, #4334; stacked by agent,
+   refusals as a marker series, partial edge days striped; #3051), then the
    top-merchants table, then the balance-over-time chart (#2949). The table
    stays on the first screen; the charts are the same figures over time. The
    former page-level sparse band is GONE (#4333): sections render whenever
-   the window has any activity, each keeping its own guard — the charts
-   decline to draw below `MIN_CHARTABLE_DAYS` points, the tiles and tables
-   stay. The merchants table's "Paid to" carries the kind line ("Your
+   the window has any activity, each keeping its own guard — the balance
+   chart declines to draw below `MIN_CHARTABLE_DAYS` points, the spend chart
+   shows its own empty state only for a window with no activity (its
+   `MIN_CHARTABLE_DAYS` floor is unreachable from a 7/30/90-day window), and
+   the tiles and tables stay. The merchants table's "Paid to" carries the kind line ("Your
    account", "Paid API", or the short address for an unknown recipient), the
    Address column is gone, and "View in Transactions" links to
    `/transactions?search=<filter_address>&direction=out&period=<current>`
@@ -1284,8 +1310,9 @@ whole-window empty state; a sparse window keeps the tiles and the table.
 Money and risk clarity:
 - A value is a reading, never a judgement: the figure is ink in every state.
   The tile's delta chips are gone (#4333) — the Spent comparison is absolute,
-  so there is no percentage to colour; the only colour the Refused tile
-  carries is the ⓘ hint's, and it carries no judgement either.
+  so there is no percentage to colour; the Refused tile's only colour is the
+  ⓘ hint and, when filtered to one agent, the brand-coloured **Review** link,
+  and neither carries a judgement.
 - The refused figure is the *attempted* amount. Never "saved": a refused
   payment is money that was not spent, not money that was kept. The count's
   limit is said in the ⓘ hint — price-cap refusals in the agent's runtime are
@@ -1364,8 +1391,8 @@ it):
    - **Security & details** — "Who can approve": the section carries ONE
      heading and ONE intro sentence (#4166 — the card no longer repeats
      them); it is the ONLY place in the app that can add or remove a signer
-     or run recovery (`AccountSignersCard` renders here; Settings' Signers
-     section lists signers without add or remove flows). With one signer a
+     or run recovery (`AccountSignersCard` renders here; Settings → Security's "Passkeys and
+     wallets" section lists them without add or remove flows). With one signer a
      warning sits above the list and the tab carries its dot. Account
      details below: short address with copy and explorer link, network,
      created date.
@@ -1386,12 +1413,13 @@ account details", and the 10-row transactions preview.
 Money and risk clarity:
 - Primary UX uses `Haven account` or `Haven wallet`.
 - Technical disclosure is allowed here, but label it gently and keep it visually subordinate.
-- The transaction count on this page comes from the same capped feed as
-  Transaction History, so it softens with it (#2882) — see that section's
-  rule. A preview card earns the shortened form ("N recent transactions",
-  the count marked "loaded") rather than the full caveat sentence: a
-  disclaimer longer than the thing it qualifies is worse than the terse one,
-  and `View all` carries the reader to the surface that explains itself.
+- The Activity tab's count and In · Out totals come from the same capped feed
+  as Transaction History, so they soften with it (#2882) — see that section's
+  rule: when the feed is truncated a caveat line reads "Counts and totals
+  cover the history Haven could load, which may not be your full history."
+  The summary card's Last 30 days figures carry their own qualifier
+  ("Figures cover the history Haven could load, which may not cover the full
+  30 days."). The page has no transactions preview card since #4097.
 
 ## Recover Agent-Wallet Funds
 
@@ -1483,11 +1511,15 @@ Structure:
    pill (its accessible name, and its visible text below `lg`, is *Coming
    soon*), and the page explains what the feed will do and which platforms
    are being lined up — with no connect and no sync control reachable,
-   disabled ones included. The page header and the Settings card carry a
-   neutral one-liner in both off states; the product subtitle ("…your
+   disabled ones included. The page header carries a neutral one-liner in
+   both off states. In Settings the hosted flag-off card renders nothing
+   (only a just-returned OAuth outcome would show), and the off states do not
+   count toward the Business tab's visibility (#4359); the product subtitle ("…your
    accountant codes and confirms them") is earned by the feed that is on. **Self-hosted** is *not available on self-hosted*: the copy
    must never read as coming soon (nothing is scheduled for that deployment),
-   the sidebar entry is hidden, and the Settings card lists no providers.
+   the sidebar entry is hidden, and the Settings card, when the Business tab
+   is visible for another reason, shows the not-available note and lists no
+   providers.
 2. Show add-on availability before connection controls (the flag-on,
    not-entitled case).
 3. State whether live delivery is ready. A preview must say that nothing is
@@ -1495,7 +1527,8 @@ Structure:
 4. Show connected/disconnected provider state with ONE summary line at the
    top of the feed — where spend is going, or what needs the user's hand and
    where to fix it. The connect/disconnect actions themselves live in
-   Settings → Accounting (#2868); the feed page links there and offers none.
+   the Accounting section of Settings → Business (#2868, #4359); the feed page
+   links there and offers none.
 5. Show draft transaction states with retry where supported. Only a live
    connector may say `Synced`. Preview/local tracking must say `Tracked`,
    `Prepared`, or `Not delivered`; it must not imply external delivery.

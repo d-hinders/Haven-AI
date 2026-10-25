@@ -6666,7 +6666,7 @@ export type components = {
                 failedIntents7d: number;
                 /**
                  * Format: date-time
-                 * @description #4324 — the latest recorded step of any failed intent in the window (`created_at`, `signed_at` or `submitted_at`; no column records the failure itself). Absent when the window has none. The unattributed "Payments failed" acknowledgement re-arms when this is after it.
+                 * @description #4324/#4378 — the latest failure time of any failed intent in the window: `failed_at`, the time the intent became `failed` (stamped by the failure writers); rows with no stamp fall back to the latest recorded step (`created_at`, `signed_at` or `submitted_at`). Absent when the window has none. The unattributed "Payments failed" acknowledgement re-arms when this is after it.
                  */
                 lastFailedIntentAt?: string;
                 /** @description 30 days of portfolio totals, shared with analytics’ BALANCE_BY_DAY_SQL. Days with no snapshot are ABSENT, not zero; totalSek is null on pre-migration-090 days. */

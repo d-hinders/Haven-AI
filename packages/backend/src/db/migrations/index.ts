@@ -118,6 +118,7 @@ import * as ownerTransfers from './116_owner_transfers.js'
 import * as merchantCatalogSource from './117_merchant_catalog_source.js'
 import * as attentionAcknowledgements from './118_attention_acknowledgements.js'
 import * as paymentRefusalsBudgetEndedAt from './119_payment_refusals_budget_ended_at.js'
+import * as paymentIntentsFailedAt from './120_payment_intents_failed_at.js'
 
 /**
  * The shape every entry in `migrations` must have.
@@ -295,4 +296,5 @@ export const migrations: Migration[] = [
   merchantCatalogSource,
   attentionAcknowledgements,
   paymentRefusalsBudgetEndedAt,
+  paymentIntentsFailedAt,
 ]

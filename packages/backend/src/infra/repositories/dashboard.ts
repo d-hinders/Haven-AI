@@ -826,18 +826,19 @@ export async function listLatestEndedBudgetByAgent(
 
 /**
  * Failed payment intents in the 7-day window — a COUNT, not a fiat sum — and
- * (#4324) the latest recorded step of any failed intent in the window, which
+ * (#4324) the latest failure time of any failed intent in the window, which
  * the unattributed "Payments failed" acknowledgement re-arms on.
  *
- * `payment_intents` has no column that records WHEN a row became `failed`
- * (no `updated_at`; the failure writers set `status` and `error_message`
- * only). The latest recorded step — `GREATEST(created_at, signed_at,
- * submitted_at)`, which ignores NULLs — is the closest time the row carries.
- * So an intent submitted BEFORE an acknowledgement that fails AFTER it does
- * not re-arm the item; a new failed intent does.
+ * (#4378) `failed_at` records WHEN a row became `failed` — the three failure
+ * writers stamp it in the same UPDATE. A row stamped at its true failure
+ * time re-arms the item at that time: an intent the reconciler moves to
+ * `failed` long after its last recorded step, and after the owner
+ * acknowledged, DOES re-arm. Rows with no stamp (pre-migration rows) keep
+ * the #4370 fallback — `GREATEST(created_at, signed_at, submitted_at)`,
+ * which ignores NULLs — the closest time such a row carries.
  */
 export const FAILED_INTENTS_7D_SQL = `SELECT COUNT(*)::text AS failed_intents,
-    MAX(GREATEST(pi.created_at, pi.signed_at, pi.submitted_at)) AS last_failed_intent_at
+    MAX(COALESCE(pi.failed_at, GREATEST(pi.created_at, pi.signed_at, pi.submitted_at))) AS last_failed_intent_at
   FROM payment_intents pi
   JOIN agents a ON a.id = pi.agent_id
   ${DELEGATION_RAIL_JOIN}

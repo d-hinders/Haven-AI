@@ -25,6 +25,7 @@
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
+import { stripComments } from '@haven_ai/core'
 import { describe, expect, it } from 'vitest'
 
 const PACKAGE_ROOT = join(__dirname, '..', '..')
@@ -43,10 +44,12 @@ function* walk(dir: string): Generator<string> {
   }
 }
 
-/** Strip /* *\/ block comments and // line comments, same contract as source-guard. */
-function stripComments(source: string): string {
-  return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
-}
+/**
+ * Stripped with the shared core helper (#4411), passing the file name so the
+ * `.tsx` sources keep their JSX verbatim — the old two-regex pair opened a
+ * fake block at a `/*` inside a line comment (or a string) and silently
+ * dropped the tags below it from the scan.
+ */
 
 /** The opening tag containing `needle`, from its `<` to its closing `>`. */
 function enclosingTag(source: string, needleIndex: number): string {
@@ -58,7 +61,10 @@ function enclosingTag(source: string, needleIndex: number): string {
 describe('card inset guard (#4016)', () => {
   const sources = new Map<string, string>()
   for (const file of walk(SRC)) {
-    sources.set(relative(PACKAGE_ROOT, file).split(sep).join('/'), stripComments(readFileSync(file, 'utf8')))
+    sources.set(
+      relative(PACKAGE_ROOT, file).split(sep).join('/'),
+      stripComments(readFileSync(file, 'utf8'), file),
+    )
   }
 
   it('gives every padding="none" Card.Header an explicit px-5', () => {

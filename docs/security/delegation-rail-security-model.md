@@ -3264,6 +3264,27 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > column feeds no path that authorises a payment. Scope of this note: the new
 > column, its migration registration, and the two new repository functions.
 > Nothing else in this document was re-verified.
+>
+> **Re-verified unchanged (#4435, 2026-10-26, tax-declaration toggle disabled
+> for the default setup):** this diff touches one file in this document's
+> coverage list, `infra/repositories/agents.ts`, and the change is
+> DISPLAY-only by construction. The agents LIST read gains one correlated
+> subquery — `install_status->>'runtime_mcp_mode'` from the agent's most
+> recent `agent_connection_setups` row — so the Settings tab can disable the
+> tax-declaration toggle for `hosted_plus_signer`: a hosted server with a
+> separate signer cannot attach a declaration to a payment, so an opt-in
+> there would do nothing. No delegation, budget, re-key, activation, signing
+> or refusal query is touched, and the field is read by exactly one component
+> (the agent Settings tab's tax-declaration toggle); nothing in the
+> delegation, budget, enforcement or client-compat path reads it. The write
+> path is unchanged:
+> `PUT /agents/:id/tax-declaration` keeps its own gates and is still never
+> gated on OFF, so an owner can always withdraw an opt-in. Nothing this
+> document claims about authority, custody or signing moves: no delegation
+> graph shape, caveat enforcer, redemption guard, settlement child or signer
+> allowlist changes. Scope of this note: the one new subquery in the list
+> read. Nothing else in this document was re-verified, and `last-verified` is
+> not bumped.
 
 > **Re-verified unchanged (#3495 review round 1, 2026-09-30):** this diff
 > touches one file in this document's coverage list,

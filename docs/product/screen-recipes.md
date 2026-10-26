@@ -888,7 +888,13 @@ rule). `?grant=` keeps working alongside `?tab=`. Sections, in order:
       revoked).
    4. **Tax declaration**: `TaxDeclarationToggle`, rendered only when the
       company details are VIES-valid (the toggle owns its row and divider;
-      the row is absent otherwise).
+      the row is absent otherwise). The toggle is **disabled**, with a
+      one-line reason as a sibling paragraph below the checkbox row, when the
+      agent's most recent connector setup is `hosted_plus_signer` — the
+      default setup, a hosted server with a separate signer, cannot attach a
+      declaration to a payment. `local_stdio`, `manual` and an unknown setup
+      leave it enabled, and an agent whose opt-in is already ON stays
+      interactive so the owner can switch it off (#4435).
    5. **Agent Passport**: `AgentPassportCard`'s content as a row. Its own
       revoked-only gate stands — archived agents are not newly gated.
 

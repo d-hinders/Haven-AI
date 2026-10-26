@@ -5158,6 +5158,7 @@ export type components = {
             labels: components["schemas"]["Label"][];
             organization_id: string | null;
             tax_declaration_enabled: boolean;
+            runtime_mcp_mode?: string | null;
             mcp_last_seen_at?: string | null;
             mcp_server_name?: string | null;
             has_stranded_funds?: boolean;

@@ -707,14 +707,14 @@ test.describe('design-system visual regression', () => {
 
       const sample = page.getByTestId('ds-monogram')
       await expect(sample).toHaveCount(1)
-      // Four xs marks: the agent-row sample, the emoji sample, and the
-      // hash-alike pair #4428 added.
-      await expect(sample.locator('[aria-hidden="true"].h-8.w-8')).toHaveCount(4)
+      // Three xs marks: the agent-row sample, the hash-alike pair #4428
+      // added, and the emoji sample.
+      await expect(sample.locator('[aria-hidden="true"].h-8.w-8')).toHaveCount(3)
       await expect(sample.getByText('Research agent', { exact: true })).toBeVisible()
       // #4428: the pair whose names hash alike (both tint 6) wears two
       // different STORED tints — the rule the epic changed, on the page.
-      const researchMark = sample.locator('[aria-hidden="true"].h-8.w-8').nth(2)
-      const dataFeedMark = sample.locator('[aria-hidden="true"].h-8.w-8').nth(3)
+      const researchMark = sample.locator('[aria-hidden="true"].h-8.w-8').nth(0)
+      const dataFeedMark = sample.locator('[aria-hidden="true"].h-8.w-8').nth(1)
       await expect(researchMark).toHaveClass(/bg-\[var\(--v2-avatar-6-soft\)\]/)
       await expect(dataFeedMark).toHaveClass(/bg-\[var\(--v2-avatar-2-soft\)\]/)
       await expectShowcaseClip(sample, vp.height, 'the Monogram sample', `design-system-monogram-${vp.name}${schemeSuffix}.png`, SAMPLE_MAX_DIFF_PIXELS)

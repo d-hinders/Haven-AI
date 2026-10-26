@@ -4039,7 +4039,7 @@ export default function DesignSystemPage() {
       <Section
         title="Monogram"
         testId="ds-monogram"
-        description="Initials-in-a-circle avatar, or the entity's logo when it has one. Promoted to components/ui on its third copy (#3079). xs (32px) for the agent row's 2rem mark track (#4208), sm (36px) for lists and cards, md (48px) for a page header. `decorative` sets aria-hidden for a caller that prints the name beside the mark; a name that starts with an emoji shows that emoji alone. Since #4066 the initials are tinted from one of six muted avatar tints, never from a status or semantic colour and never by index. An AGENT passes its STORED tint (`tint`, 1..6 — `agents.avatar_tint`, assigned at creation and unique among the user's first six agents, #4428), so two agents whose names hash alike still wear different colours and renaming an agent no longer changes its colour. A MERCHANT or a CONTACT passes nothing and keeps the hash of its trimmed name — a pure function, so the same merchant keeps the same tint everywhere. Since #4331 the tint is also the agent's chart fill (seriesColorForAgent) — one colour per agent: the chart swatch beside the monogram above matches it."
+        description="Initials-in-a-circle avatar, or the entity's logo when it has one. Promoted to components/ui on its third copy (#3079). xs (32px) for the agent row's 2rem mark track (#4208), sm (36px) for lists and cards, md (48px) for a page header. `decorative` sets aria-hidden for a caller that prints the name beside the mark; a name that starts with an emoji shows that emoji alone. Since #4066 the initials are tinted from one of six muted avatar tints, never a status or semantic colour and never by index. An AGENT passes its STORED tint (`tint`, 1..6 — `agents.avatar_tint`, unique among the user's first six agents, #4428), so two agents whose names hash alike still wear different colours and renaming an agent no longer changes its colour. A MERCHANT or a CONTACT passes nothing and keeps the hash of its trimmed name. Since #4331 the tint is also the agent's chart fill (seriesColorForAgent) — one colour per agent."
       >
         <div className="flex flex-wrap items-center gap-4">
           {MONOGRAM_TINT_EXAMPLES.map((name) => (
@@ -4047,32 +4047,23 @@ export default function DesignSystemPage() {
           ))}
           <Monogram name="Haven Demo Store" size="md" />
         </div>
+        {/* The last two are the rule #4428 changed, shown rather than
+            described: 'Research agent' and 'Data-feed agent' hash to the SAME
+            tint (6 under djb2 mod 6) and wear different colours because each
+            agent carries its own stored tint. Before the epic they were
+            indistinguishable circles. */}
         <div className="mt-4 flex flex-wrap items-center gap-4">
           <span className="flex items-center gap-3">
             <Monogram name="Research agent" tint={DS_RESEARCH_TINT} size="xs" decorative />
             <span className="v2-text-body text-[var(--v2-ink)]">Research agent</span>
           </span>
           <span className="flex items-center gap-3">
+            <Monogram name="Data-feed agent" tint={DS_DATAFEED_TINT} size="xs" decorative />
+            <span className="v2-text-body text-[var(--v2-ink)]">Data-feed agent</span>
+          </span>
+          <span className="flex items-center gap-3">
             <Monogram name="🤖 Shopping bot" size="xs" decorative />
             <span className="v2-text-body text-[var(--v2-ink)]">🤖 Shopping bot</span>
-          </span>
-        </div>
-        {/* The rule #4428 changed, shown rather than described: these two
-            names hash to the SAME tint (6 under djb2 mod 6), and wear
-            different colours because each agent carries its own stored tint.
-            Before the epic they were indistinguishable circles. */}
-        <div className="mt-4 flex flex-wrap items-center gap-4">
-          <span className="flex items-center gap-3">
-            <Monogram name="Research agent" tint={DS_RESEARCH_TINT} size="xs" decorative />
-            <span className="v2-text-body text-[var(--v2-ink)]">
-              Research agent — stored tint {DS_RESEARCH_TINT}
-            </span>
-          </span>
-          <span className="flex items-center gap-3">
-            <Monogram name="Data-feed agent" tint={DS_DATAFEED_TINT} size="xs" decorative />
-            <span className="v2-text-body text-[var(--v2-ink)]">
-              Data-feed agent — stored tint {DS_DATAFEED_TINT}, same name hash
-            </span>
           </span>
         </div>
       </Section>

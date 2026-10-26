@@ -286,14 +286,6 @@ function legendRows(entries: StackedBarEntry[]): StackedBarSegment[] {
   return [...seen.values()]
 }
 
-/**
- * The legend dot as a component, exported so a showcase beside the chart can
- * key a row to the same fill the chart paints (#3051; #4331 added `color` for
- * agent-keyed series — an agent's monogram beside its chart swatch). One home
- * for "what colour is this series": the chart's segments, its legend and its
- * tooltip all read `seriesFill`; a caller passes the same `color` the series
- * carries (or the same `seriesIndex` for a non-agent series).
- */
 /** Every box `SeriesSwatch` can draw, written out whole so each is greppable. */
 const SWATCH_BOX = {
   sm: {
@@ -306,6 +298,14 @@ const SWATCH_BOX = {
   },
 } as const
 
+/**
+ * The legend dot as a component, exported so a showcase beside the chart can
+ * key a row to the same fill the chart paints (#3051; #4331 added `color` for
+ * agent-keyed series — an agent's monogram beside its chart swatch). One home
+ * for "what colour is this series": the chart's segments, its legend and its
+ * tooltip all read `seriesFill`; a caller passes the same `color` the series
+ * carries (or the same `seriesIndex` for a non-agent series).
+ */
 export function SeriesSwatch({
   seriesIndex,
   color,

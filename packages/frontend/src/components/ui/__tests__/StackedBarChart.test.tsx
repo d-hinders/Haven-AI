@@ -997,12 +997,17 @@ describe('StackedBarChart — one legend swatch (#4426)', () => {
     const legendSwatches = within(legend).getAllByTestId('series-swatch')
     expect(legendSwatches).toHaveLength(2)
     expect(legendSwatches[0]!.className).toContain('h-2.5 w-2.5')
+    // The default shape is the circle: only the money card's list keys pass `square` (#4426).
+    expect(legendSwatches[0]!.className.split(/\s+/)).toContain('rounded-full')
+    expect(legendSwatches[0]!.className).not.toContain('rounded-sm')
     fireEvent.keyDown(document.querySelector('svg')!, { key: 'Home' })
     const rows = screen.getAllByTestId('chart-tooltip-row')
     for (const row of rows) {
       const swatch = within(row).getByTestId('series-swatch')
       expect(swatch.className.split(/\s+/)).toEqual(expect.arrayContaining(['h-2', 'w-2', 'self-center']))
       expect(swatch.className).not.toContain('h-2.5')
+      expect(swatch.className.split(/\s+/)).toContain('rounded-full')
+      expect(swatch.className).not.toContain('rounded-sm')
     }
   })
 })

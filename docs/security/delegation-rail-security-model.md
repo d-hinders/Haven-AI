@@ -87,6 +87,20 @@ covers:
 last-verified: "2026-10-25"
 ---
 
+> **Re-verified #4425 (2026-10-26, undefined `--v2-*` tokens mapped onto the
+> existing ink tiers):** the only covered file this diff touches is
+> `packages/frontend/src/components/PasskeyElsewhereHint.tsx`, and only one
+> class on its `<p>`: `text-[var(--v2-ink-muted)]` becomes
+> `text-[var(--v2-ink-3)]`. `--v2-ink-muted` was never defined anywhere in the
+> repo, so the declaration was invalid at computed-value time and the hint
+> inherited its ancestor's ink; it now resolves to the tertiary ink the
+> `text-xs` caption role uses. No copy, no markup, no handler, no gate, no
+> write path and no authority surface changes — the hint still says the same
+> thing in the same place, in a colour that resolves. Every other file in the
+> diff is outside this document's coverage (frontend colour classes, one ops
+> border token, a docs line and a new token guard test). Nothing else in this
+> document was re-verified, and `last-verified` is not bumped.
+
 > **Re-verified #4415 (2026-10-25, stale comment sweep):** the only covered
 > file this diff touches is `packages/sdk/src/redemption-guard.ts` — the
 > `assertRedeemsOwnBudgetDelegation` JSDoc now names the THREE shapes the

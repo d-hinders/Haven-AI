@@ -2255,3 +2255,34 @@ report path and the ledger's append point — read the other first and
 reconcile item by item.
 
 **Disposition: pending owner decision** (C1, C2).
+
+**Disposition (owner, 2026-10-26): file C1 and C2; merge the scan PR.** The
+owner answered in the captain's session: file both through new-task; for C2
+use a `status: record` front-matter value rather than a folder rule, and keep
+the reports' `covers:` for now; for C1, the two no-delegation x402 403s that
+share the prose-only shape stay as they are (expired bodies only). The scan PR
+#4455 merged as `01551ec84`.
+
+- C1 → [#4458](https://github.com/d-hinders/Haven-AI/issues/4458)
+  (`money-path`, `area:backend`, `area:mcp`, `area:sdk`, `area:docs`),
+  filed as slice 5 of epic #4349 (sub-issue and build-order line added). Its
+  spec review re-ran 27 claims, 24 reproduced, 3 wrong and fixed; 12
+  corrections, among them a third hosted reader the scan had not named (the
+  catalog prepare preflight decides a budget refusal on the same single
+  `error_code`), the funding leg's `merchant_address` pinned to the merchant
+  address, and the hosted criterion moved to the agent-visible warning and
+  next-step text. No owner question open; `pending-review` lifted.
+- C2 → [#4459](https://github.com/d-hinders/Haven-AI/issues/4459)
+  (`area:docs`, `area:ci`, `money-path` by file — the front-matter
+  validator is a control glob, #2200). Its spec review re-ran 24 claims, 22
+  reproduced, 2 wrong and fixed; 11 corrections, among them: the run-report
+  template stays `current` and the four report writers set `record` on the
+  copy; eight vocabulary copies in comments and prose join the scope; the
+  audit's self-test must drive the real CLI with a positive control; a
+  record-disposition rule for the doc-reviewer (never append a re-check,
+  never bump the date) joins the contract doc. No owner question open;
+  `pending-review` lifted.
+- Notes: not filed. The runner's `.rejects` misclassification is run A's C1,
+  decided in that entry's disposition.
+
+Drive: `ship-next epic=#4349` (C1 is its only open slice), `ship-next 4459`.

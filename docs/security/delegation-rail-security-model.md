@@ -202,10 +202,12 @@ enforcers referenced below — all Consensys Diligence-audited (Aug 2024 / Apr
    is a new surface (the Safe proxy pattern had owner-controlled masterCopy
    semantics, but our stack never exercised it). Consequence: "who can
    upgrade" becomes part of the custody perimeter and must be provable.
-2. **Authority is a held object, not account state.** A Smart Sessions grant
-   lives in account storage; a delegation is a **signed message the agent
-   holds**. Different theft model: exfiltrating a delegation (plus the
-   delegate key) is sufficient to spend — but only within the caveat stack.
+2. **Authority is a signed object, not account state.** A Smart Sessions
+   grant lives in account storage; a delegation is a **signed message, and
+   not a secret one**: Haven stores it and every redemption publishes it in
+   its calldata. Different theft model: the delegate key is what must be
+   protected — once the agent has paid under a budget, the key alone spends,
+   but only within the caveat stack (§3 leak table; #4377 note in §3).
 3. **The exit story loses Safe{Wallet}.** Haven's CASP/GTM line — "inspect
    and revoke everything without us" — was demonstrable via a mature
    third-party UI. On this stack it must be **rebuilt and demonstrated**
@@ -429,20 +431,58 @@ and a recording failure is swallowed: metrics can never gate a payment. See
 > caption stand. `last-verified` is not re-stamped: this note is the scope,
 > and nothing else in this document was re-verified.
 
-**Where the signed delegation lives:** the agent receives it through the
-existing credential channel (same trust envelope as the agent API key).
-Haven stores a copy server-side for reconstruction, revocation targeting and
-observability. It is **not** key material — but it is spend-enabling in
-combination with the delegate key, so it is stored with the same care as
-`api_key_hash`-class data: encrypted at rest, never logged, never in error
-surfaces.
+> **Re-verified #4377 (2026-10-23, #4372 part B).** Scope of this note:
+> the "Where the signed delegation lives" paragraph below, the leak table's
+> "Delegate key alone" row, and §1 item 2. They said the agent "receives it
+> through the existing credential channel", that a delegate key alone gets
+> "no delegation", and that a delegation is "a signed message the agent
+> holds" whose exfiltration is "sufficient to spend" with the key. None holds.
+> The connector's credential files hold no delegation (see
+> `docs/architecture/02-identity-and-custody.md`); Haven stores it
+> (`agent_delegations.delegation_json`) and every redemption carries the
+> owner-signed chain in its `DelegationManager.redeemDelegations` calldata, on
+> every rail: the UserOp Haven prepares for a direct payment and for the
+> EIP-3009 funding leg (`rails/delegation-rail.ts` `prepareRedemption` →
+> `buildRedemptionCall`), and the merchant's or facilitator's redemption on
+> erc7710, whose `payment_header` carries the encoded `[settlement child, …,
+> budget]` chain (`modules/x402/x402-delegation.ts`
+> `assembleSettlementPayload`, called from `modules/x402/settle.ts`). The
+> delegation is therefore not secret: the agent's signer sees it in the
+> typed data it fetches, the bundler sees it on submission, an erc7710
+> merchant or facilitator sees it in the header, and a mined redemption
+> leaves it in public transaction calldata. Its delegate is the agent's
+> delegate account (`rails/delegation-policy.ts`, `to:
+> policy.delegateAccountAddress`), which the delegate key controls, so once
+> the agent has paid under a budget the key alone reaches the "Both" row's
+> bound. That bound — the caveat stack — is unchanged. This matches the
+> 2026-10-07 owner decision behind the dashboard's pause copy (#3717;
+> `agent-pause-copy.ts`: a raw-key holder "can still redeem within the budget
+> OUTSIDE Haven"), which assumed the key holder has the delegation; this
+> note adds that the delegation is obtainable. `last-verified` is not
+> re-stamped: nothing else in this document was re-verified for this note.
+
+**Where the signed delegation lives:** Haven stores it server-side for
+reconstruction, revocation targeting and observability, and embeds it in
+every redemption it prepares — inside the UserOp the agent signs for a direct
+payment or the EIP-3009 funding leg, and, on erc7710, inside the
+`payment_header` the agent forwards to the merchant. On erc7710 a second
+Haven-side copy rides the settlement evidence: the SDK's settlement report
+posts that header, which is stored in
+`machine_payment_evidence.payment_proof_header` and returned to the owner by
+`GET /payment-intents/:paymentId/evidence`. Once any redemption under it is
+mined, it is also public chain data. No connector credential file stores it.
+It is **not** key material — but it is spend-enabling in combination with the
+delegate key, so it is stored with the same care as `api_key_hash`-class
+data: encrypted at rest, never logged, never in error surfaces. That care is
+defence in depth for the window before first use, not a secrecy guarantee:
+the delegate key is what must be protected.
 
 **Leak analysis:**
 
 | Compromised | Attacker gets | Bounded by |
 |---|---|---|
 | Delegation object alone | Nothing — redemption requires the delegate key's signature | — |
-| Delegate key alone | Nothing beyond existing agent-credential risk — no delegation, no authority | — |
+| Delegate key alone | The same as the next row once the agent has paid under a budget, on any rail: every redemption carries the owner-signed chain in its `redeemDelegations` calldata (public once mined, and seen before that by the bundler, by the merchant and facilitator on erc7710, and by the agent's signer), so treat the delegation as public. Before the first redemption: nothing beyond existing agent-credential risk (the sign-context read needs the API key). In either phase, plus any delegate-EOA residue the EIP-3009 bridge left (§8, compensating control 1), which the budget already metered at the funding hop | As the next row |
 | Both (agent fully compromised) | Spend **within the caveat stack**: ≤ each budget's period amount per period, only to pinned recipients (any recipient for an open budget, which the EIP-3009 bridge requires), until expiry or revocation | `ERC20PeriodTransferEnforcer` + `allowedCalldata` when pinned + `Timestamp`; owner kill-switch `disableDelegation` |
 | Haven fully compromised | Constructs malicious payloads but **cannot sign** grants, redemptions, or upgrades (invariants 3/5/7/11/12); worst case = denial of service | The perimeter this doc exists to prove |
 

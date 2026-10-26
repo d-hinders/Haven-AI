@@ -250,8 +250,9 @@ export function normalizeNodeEvents(records, exitCode, timedOut = false) {
  * The backend's idiom does not either (#4456): vitest's `.rejects` on a promise
  * that resolved throws a chai `AssertionError` but overwrites its stack with a
  * plain `new Error`'s, so the JSON report starts `Error: promise resolved "…"
- * instead of rejecting` (the payload is always one line — vitest's inspect
- * escapes newlines); and the OpenAPI test helpers throw a plain `Error` —
+ * instead of rejecting` (the payload is one line — vitest's inspect escapes
+ * newlines — except a resolved `Error` value with a multi-line message, which
+ * misses the stem and stays an error, fail closed); and the OpenAPI test helpers throw a plain `Error` —
  * `expectMatchesSpec` as `Error: Response from <METHOD> <path> does not match
  * the '<status>' schema in openapi/spec.ts:`, `expectRejectsOffSpec` as
  * `Error: <METHOD> <path> did not refuse the off-spec body the way the

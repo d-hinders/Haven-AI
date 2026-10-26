@@ -268,6 +268,10 @@ describe('classifier over recorded runner output', () => {
     // recorded message with its stack (the anchor ends at a newline or the end).
     assert.equal(VITEST_ASSERTION_SHAPE.test('Error: promise resolved "x" instead of rejecting'), true)
     assert.equal(VITEST_ASSERTION_SHAPE.test('Error: promise resolved "x" instead of rejecting later'), false)
+    // The helper stems need the helper's `<METHOD> <path>` before the sentence,
+    // so a wrapper that reuses the sentence after its own prefix stays an error.
+    assert.equal(VITEST_ASSERTION_SHAPE.test('Error: wrapped: /contacts did not refuse the off-spec body the way the request-validation plugin refuses it:'), false)
+    assert.equal(VITEST_ASSERTION_SHAPE.test("Error: Response from the stub does not match the '200' schema in openapi/spec.ts:"), false)
   })
   test('incident 5: the SQL-error shape in vitest is mutation-red', () => {
     const mutant = normalizeVitestJson(readJson('vitest-sql-error.json'), 1)

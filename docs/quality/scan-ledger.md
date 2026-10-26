@@ -5,7 +5,7 @@ covers:
   - .agents/skills/quality-scan/SKILL.md
   - .agents/skills/quality-scan/references/dimensions.md
   - scripts/test-support/guard-cli.mjs
-last-verified: "2026-10-14"
+last-verified: "2026-10-26"
 ---
 
 # Quality-Scan Ledger
@@ -1891,3 +1891,170 @@ Main changes per issue:
 No owner question remains open, so `pending-review` is lifted on all three.
 They were filed to the backlog (no `code-quality`); shipping was not
 requested with the filing.
+
+## 2026-10-26 — whole repo, weighted to the landings since 2026-10-21 (owner invocation 2026-10-26, no scope named)
+
+Full report: [`docs/bug-reports/quality-scan-2026-10-26-whole-repo.md`](../bug-reports/quality-scan-2026-10-26-whole-repo.md).
+The report holds the file:line evidence; this entry stays path-free. Measured
+on `origin/dev` @ `b9f9f1e47` by the captain in the main checkout for every
+read-only count, one read-only worker for the GitHub reads, and the block-1
+census through the new mutation runner in a detached, `npm ci`'d worktree at
+the scan SHA with core, the SDK and the signer built, against a disposable
+database dropped at the end. One cell the runner cannot drive ran as a hand
+rig behind a `cp` backup, restored and proven with `cmp` and
+`git diff --quiet`. The window is `8cc3717c8..b9f9f1e47` → 135 first-parent
+landings (the 2026-10-21 entry covered `595b43c07..8cc3717c8`). GitHub was
+read-only. No live call was made. The worktree ended clean with no runner
+journal.
+
+**Excluded this run:** every prior finding and candidate, whatever its
+disposition, including the 2026-10-21 candidates (#4215, #4216, #4217 — all
+open at the scan SHA) and that entry's refusal of the "tests depend on the
+machine" pattern, which this window's ten host- or load-dependent test issues
+would otherwise re-raise. None is re-surfaced. C1 sits beside the 2026-10-03
+S1 (epic #3615, `shipped`): a refusal reason added after the epic closed,
+spelled through the shared builder at one of its three sites; the S1 figure
+(9 typed-code sites) now reads 3, so the epic held and C1 is a candidate, not
+a re-surface. None of the re-measured figures worsened materially.
+
+**Structural findings:** none in the examined sample. Six recurring
+mechanisms in the window's 172 issues; four untracked by any one issue, each
+with a one-PR remedy or a standing refusal, none with a census that would
+make it splittable work. The two largest verbatim copies in the tree are both
+parity-pinned and not proposed.
+
+**Improvement candidates (one PR each), pending owner decision:**
+- C1 — the x402 legs answer an expired-only budget (the #4352 refusal, landed
+  2026-10-25) with a prose-only 403 — `error` text, no `error_code`, no
+  `next_action`, no `budget_ended_at` — while the direct route answers the
+  typed body from the shared builder. The builder has 1 caller; 2 inline
+  bodies sit in the x402 authorize module; 5 of that module's 7 403 sites
+  carry a typed code, the two without are these. By execution: misnaming the
+  builder's reason reddens the direct route's suite 3 of 45 and leaves the
+  x402 suite 119 of 119 green (block-1 probes M6 / M7). The hosted tool keys
+  its budget branch on `error_code` (#3504), so the x402 expired refusal
+  lands in the generic branch — the 2026-09-21 D2 class, re-created for one
+  reason. No incident recorded. Money-path by file.
+- C2 — the weekly docs staleness audit ranks dated records: it excludes only
+  `archived` and `research`, every one of the 18 bug reports is
+  `status: current` with `covers:`, 10 of the 15 docs in the 2026-10-26
+  audit issue are bug reports (prior scan reports first, since their
+  `covers:` is the widest in the tree), and the landing that closed it
+  appended +425 of its +536 lines as re-check sections to dated reports
+  (the previous audit: 3 of 9 files). The script's own #2638 comment states
+  the principle for `research`. One PR; the owner picks the mechanism (a
+  folder rule or a `record` status) and whether the reports keep `covers:`.
+- C3 — five issues in four days (#4244, #4257, #4281, #4300, #4309) routed
+  one outbound fetch at a time through the SSRF seam, the SDK's redirect
+  follower twice; no issue or ratchet names the perimeter. Left outside the
+  seam: 5 bare fetch sites in 3 backend files, every one an
+  operator-configured host; the SDK's 4 bare-fetch files all import the
+  egress policy; 0 tests enumerate fetch sites. One PR: a shrink-only
+  perimeter ratchet with the three files allowlisted by name.
+- C4 — the mutation runner filed block-1 cell M1 as mutation-red on vitest's
+  own "promise resolved … instead of rejecting" text, which is a failed
+  `.rejects` expectation — the guard caught the mutation and the runner
+  called it the author's error. Third unrecorded assertion stem in nine days
+  after #4284 and #4294. One PR: the `.rejects` / `.resolves` stems with a
+  fixture.
+- Notes, not proposed: three block-1 survivors on the #4429 display-only
+  colour column (dropped from the single-agent read: 29 / 29 green in the
+  mocked route suite and 39 / 39 in the real-DB repository sibling; dropped
+  from the analytics select: 8 / 8, stripped by design; a constant tint on
+  the analytics route: 38 / 38) — the wire field is pinned by the spec alone,
+  the 2026-09-15 mock-families shape (`accepted-as-debt`); one mobile e2e
+  spec is 5 of the window's 7 browser-smoke failures, both `dev` reds among
+  them, and two PRs merged over it (advisory on `dev` by the recorded
+  decision; green since 10-25 with no change; untracked); a source-reading
+  guard census that is not an instrument (a hand-written comment skipper
+  defeats it, and the one probe came back clean); the 21-copy #1464 call-site
+  comment (reading cost, bar 3); agent evals 2 / 12 / 4 over 18 runs
+  (tracked under the closed epic #3957's fix wave).
+
+**Dispositions observed (upkeep):** 2026-10-21 C1 → #4215, C2 → #4216,
+C3 → #4217 — open, none shipped yet. No change to earlier items.
+
+**Probed clean** (block → examined / partial / not examined → command → number, all at `b9f9f1e47`; parentheses are the 10-21 entry at `8cc3717c8`):
+- sizing → examined → the 09-22 command pinned with `git ls-tree`/`git show`;
+  the control at `8cc3717c8` reproduces backend 113,538 / 147,443 and
+  frontend 71,713 / 73,900. Now: backend 119,096 / 158,650 (+4.9 % /
+  +7.6 %); frontend 75,800 / 81,996 (+5.7 % / +11.0 %); sdk 19,149 / 21,941;
+  core 25,740 / 945; qa-agent 15,073 / 13,145; mcp-server 13,332 / 24,389;
+  signer 5,422 / 8,788; connect 12,436 / 15,676; cli 3,207 / 3,609; ops
+  3,143 / 2,222; ui 2,574 / 2,023; mcp 2,817 / 5,038; demo-merchant-mcp
+  3,788 / 4,210. Fat controllers: examined as a census only (largest route
+  file 1,561 lines), no finding.
+- block 1 (guard falsifiability) → examined. The census script → 23
+  candidate test files over 3 of the last 20 landings; the runner took the
+  first five, all from the avatar-tint landing. 5 census cells + 2 probes →
+  runner line "1 caught, 4 survived, 0 shadowed, 1 mutation-red, 0 refused,
+  1 not run"; read with two corrections: **3 caught** (M1 by its message —
+  C4; M2 by the hand rig, 2 red of 14 on a fresh database, since the
+  real-DB harness memoises applied migrations and the runner's baseline
+  installs the unmutated function; M6, 3 of 45), **4 survived with
+  diagnoses** (M3 weak test at both layers, M4 not load-bearing by design,
+  M5 weak test, M7 not load-bearing → C1). Census files exercised 5 of 23,
+  plus 2 probe files and 1 sibling; 18 of 23 not exercised (budget).
+- block 2 (`covers:` completeness) → examined. The reference loop under bash
+  with `set -f`, each miss confirmed with the strict gate → **17 across 6 of
+  8** (18 across 6 of 8); the runtime-compatibility contract 0. `npm run
+  docs:covers-gaps` → **124 pairs / 33 docs** (129 / 35).
+- block 3 (stale numbers) → partial. Positive control 3 / 3. The 25 newest
+  shards → **7 figure lines, 0 with a command** (9 / 0); 3 of the 7 are
+  measured figures. `any` **39** (38); db-mock gauge **54 / 270 / 57**
+  (unchanged); guard scripts **75** (71); non-spawning self-tests **25 of
+  75** (25 of 74); zod 0. One stale comment found by execution (M4). *First
+  reading corrected:* the shard sample read 0 under an unexpanded zsh
+  variable; the figure above is the corrected run.
+- block 4 (retired vocabulary) → examined. Positive control 36 shards. **196
+  files, 47 historical / 149 live** (196 / 46 / 150). Ratchet green, **34 /
+  31** (30 / 28 — within the ceiling, not re-measured per file). Code half
+  unchanged.
+- block 5 (merge-method drift) → examined. Since 2026-10-19T00:00:00Z → **0
+  merge-commit / 213 squash** (clean); the window 0 / 135. Since
+  2026-08-10T00:00:00Z → 282 / 1,345 of 1,630.
+- block 6 (nets with holes) → examined, all four halves → copy lint **64
+  unscanned / 4 with hits** (60 / 4); money perimeter **32 / 20**
+  (unchanged); visual gate **15 of 27** (16 of 28); docs boundary **43**
+  (41; the prove-red skill and command); freshness-gate exit branches
+  unchanged. Probes beyond the reference: the advisory-check merge census
+  (2 merged PRs with a red smoke job at merge in the two date slices that
+  answered; the third slice answered HTTP 504 twice and was read per PR) and
+  the classifier routing the staleness audit to no surface (C2; its own
+  workflow's path filter still runs it).
+- incident clustering → examined. Issues created since 2026-10-19T00:00:00Z
+  → **172 (161 closed / 11 open)**; by mechanism: outbound fetch outside the
+  seam 5 (C3), agent-facing text asserting a false state 6, host- or
+  load-dependent test reds 10 (refused 10-21), source-parsing guards 8,
+  catalog ingestion 7, docs drift 12 (C2), EIP-3009 settlement 10 (epic
+  #4318), agent evals 9 (epic #3957). Open PRs 0; open issues 18;
+  `code-quality` on 2 of the 172.
+- workflow archaeology → examined. `ci.yml` newest 100 → **72 / 14 / 13**
+  (1 in progress); 7 with attempt > 1, all feature branches; `dev` 34 → 28 /
+  2 / 4, both failures the one smoke spec. Failing jobs: browser smoke 7,
+  visual regression 7, lint-type-build 2, SDK 1, CI-config 1. qa-dev at the
+  `money-flow` job level: newest 30 runs → ran in **6 (6 success, all on
+  attempt 1/2, 17 legs PASS)**, gate-skipped in 24; scheduled 10-19 → 10-26
+  → 7 success / 1 failure (10-21, the #4215 check). Agent evals → 18 runs,
+  2 / 12 / 4.
+- comment archaeology → TODO / FIXME / HACK / XXX → **0** (control `import`
+  → 2,175 files); most-repeated non-lint comment 21 copies (notes).
+- cross-package duplication → examined as a census (10-line normalised
+  windows over 1,216 non-test files) → 52 file pairs, 11 cross-package; the
+  two largest (431 and 48 windows) are parity-pinned copies; not proposed.
+- validation and contract enforcement → partial (the enforce list read; no
+  shadow-residue census). Data-layer coverage → not examined beyond the
+  db-mock gauge. Live exercise → not taken.
+- Novelty: the tracker was searched per candidate; the ledger and bug
+  reports were grepped for each candidate's terms. Bug-report bodies were
+  not otherwise re-read.
+
+Instrument lessons: a migration-body mutation whose test goes through the
+memoising harness needs a test that re-applies the migration itself, or a
+fresh database per run; a failed `.rejects` expectation reads as
+mutation-red (C4); `${=S}` in zsh for a newline list; `statusCheckRollup`
+over ~200 merged PRs answers HTTP 504 — slice by `merged:` date; job logs
+need `--allow-escape-sequences`; the dimensions reference changed under the
+scan when the checkout moved — re-read it.
+
+**Disposition: pending owner decision** (C1, C2, C3, C4).

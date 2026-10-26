@@ -442,6 +442,79 @@ export async function accountedDeleteWebhookSubscription(input: {
 }
 
 /**
+ * The four states a subscription's endpoint verification can be in
+ * (docs.gnubok.se/docs/api/reference/webhooks). Only `verified` and
+ * `grace_period` receive events; `pending` and `paused` receive NOTHING —
+ * which is why a connect that never runs the handshake delivers no
+ * `journal_entry.committed` at all.
+ */
+export type AccountedWebhookVerificationStatus = 'pending' | 'grace_period' | 'paused' | 'verified'
+
+/** The verify answer's `data` — the subscription with its new status. */
+export interface AccountedWebhookVerifyResponse {
+  data: AccountedWebhook & { verification_status?: AccountedWebhookVerificationStatus }
+  meta: { request_id: string; api_version: string }
+}
+
+/**
+ * `POST /api/v1/companies/{companyId}/webhooks/{webhookId}/verify` — run the
+ * endpoint-verification handshake (#3019 delta). The provider dispatches a
+ * `webhook.verification` delivery to the callback URL and expects the
+ * receiver to echo `data.object.challenge`; a pass answers 200 with
+ * `verification_status: "verified"`, a failure answers 422
+ * `WEBHOOK_VERIFICATION_FAILED` with `details.reason` (`challenge_missing`,
+ * `http_401`).
+ *
+ * `Idempotency-Key` rides every write in this file, so it rides this one too
+ * (the cookbook's verify curl omits it; the provider ignores an unknown
+ * header, and sending it keeps the rule uniform).
+ *
+ * The verify verb needs a LIVE key — a test key cannot run it. Errors carry
+ * the provider's `error.code` (`providerCode`) and `details` (whose `reason`
+ * is the handshake verdict); never the key, never a secret.
+ */
+export async function accountedVerifyWebhook(input: {
+  apiKey: string
+  companyId: string
+  webhookId: string
+  fetchImpl: typeof fetch
+}): Promise<AccountedWebhookVerifyResponse['data']> {
+  const path = `/api/v1/companies/${encodeURIComponent(input.companyId)}/webhooks/${encodeURIComponent(input.webhookId)}/verify`
+  let res: Response
+  try {
+    res = await input.fetchImpl(`${ACCOUNTED_API_BASE}${path}`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${input.apiKey}`,
+        Accept: 'application/json',
+        'Idempotency-Key': randomUUID(),
+      },
+      signal: AbortSignal.timeout(ACCOUNTED_REQUEST_TIMEOUT_MS),
+    })
+  } catch (err) {
+    throw new ProviderError(`Could not reach Accounted: ${err instanceof Error ? err.message : String(err)}`, 0, 'accounted')
+  }
+  if (!res.ok) {
+    const envelope = await accountedErrorEnvelope(res)
+    const code = typeof envelope?.code === 'string' && envelope.code.length > 0 ? envelope.code : null
+    const err = new ProviderError(
+      `Accounted POST ${path} failed (HTTP ${res.status}${code ? `: ${code}` : ''}).`,
+      res.status,
+      'accounted',
+    )
+    if (code) (err as ProviderError & { providerCode?: string }).providerCode = code
+    if (envelope?.details) (err as ProviderError & { details?: Record<string, unknown> }).details = envelope.details
+    throw err
+  }
+  const body = (await res.json()) as AccountedWebhookVerifyResponse
+  const data = body?.data
+  if (!data || typeof data.id !== 'string' || data.id.length === 0) {
+    throw new ProviderError(`Accounted webhook verification for ${input.webhookId} returned no subscription.`, res.status, 'accounted')
+  }
+  return data
+}
+
+/**
  * `GET /api/v1/companies/{companyId}/webhooks` — the subscription list (never
  * carries secrets). The rollback sweep uses it to catch ORPHANS: a create
  * whose response was lost left a live subscription with a secret nobody

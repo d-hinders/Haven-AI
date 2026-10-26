@@ -48,8 +48,9 @@ import {
 } from '../../infra/repositories/accounting-connections.js'
 import { flagConnectionStatus } from './ops-signals.js'
 import { decryptSecrets } from '../../infra/secrets.js'
-import { connectWithApiKey, webhookApiOrigin } from './api-key-flow.js'
+import { connectWithApiKey, webhookApiOrigin, type ProviderWebhookRegistration } from './api-key-flow.js'
 import { deleteAccountedWebhooks, registerAccountedWebhooks, type AccountedWebhookSubscriptionSecret } from './accounted-webhooks.js'
+import { accountedVerifyWebhook } from './accounted-client.js'
 import { companySwitchLog } from './company-info.js'
 import { getConnector, type AccountingVerification, type ProviderSecrets } from './connector.js'
 import { syncUser } from './feed-orchestrator.js'
@@ -210,7 +211,7 @@ export async function connectProviderWithApiKey(
     connector,
     userId,
     apiKey,
-    webhooks: provider.id === 'accounted' ? { register: registerAccountedWebhooksAdapter } : undefined,
+    webhooks: provider.id === 'accounted' ? accountedWebhookRegistration : undefined,
   })
   return toConnectionSummary(row)
 }
@@ -222,21 +223,30 @@ export async function connectProviderWithApiKey(
  * none is configured — the flow flags the connection `needs_attention`,
  * S5), and returns the triples to store. Failures propagate — the flow
  * flags the connection `needs_attention`.
+ *
+ * `verify` (#3019 delta) is the endpoint-verification handshake the flow runs
+ * once per subscription AFTER the triples are stored. It is best effort at
+ * the flow's level: a throw here is logged (provider error code only) and the
+ * connect still succeeds.
  */
-async function registerAccountedWebhooksAdapter(reg: {
-  secrets: { apiKey: string }
-  companyId: string
-  token: string
-  /** The public origin the callback URL is built on (S5: the FLOW resolves it). */
-  apiOrigin: string
-}): Promise<AccountedWebhookSubscriptionSecret[]> {
-  return registerAccountedWebhooks({
-    apiKey: reg.secrets.apiKey,
-    companyId: reg.companyId,
-    apiOrigin: reg.apiOrigin,
-    token: reg.token,
-    fetchImpl: fetch,
-  })
+const accountedWebhookRegistration: ProviderWebhookRegistration = {
+  register: async (reg) =>
+    registerAccountedWebhooks({
+      apiKey: reg.secrets.apiKey,
+      companyId: reg.companyId,
+      apiOrigin: reg.apiOrigin,
+      token: reg.token,
+      fetchImpl: fetch,
+    }),
+  verify: async (input) => {
+    const data = await accountedVerifyWebhook({
+      apiKey: input.apiKey,
+      companyId: input.companyId,
+      webhookId: input.webhookId,
+      fetchImpl: fetch,
+    })
+    return { verificationStatus: data.verification_status ?? 'unknown' }
+  },
 }
 
 // ── Disconnect / activate ────────────────────────────────────────────────────

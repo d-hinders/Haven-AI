@@ -4703,7 +4703,7 @@ export type components = {
                 hops: number;
                 authRateLimitArmed: boolean;
             };
-            /** @description Accounting-feed on-call counters (#2872, widened by #3019). `exhaustedSyncs`: sync rows the retry sweep has given up on (`failed` at the attempt cap) — fix the cause, then the user presses Sync now. `connectionsNeedingAttention`: connections in `needs_reauthorisation`, `scope_missing`, `revoked_at_provider` or `needs_attention` — only the user's re-consent (or, for `needs_attention`, a reconnect after the deployment fix) resolves them. `webhookCounters`: the Accounted webhook receiver’s nine per-answer-class counters (received / bad_signature / stale / unknown_token / duplicate / processed / feature_off / unknown_type / confirmed) — IN-PROCESS, process-lifetime, reset on restart; the durable facts are the `accounting_webhook_deliveries` rows, not these. Thresholds: docs/operations/accounting-feed.md. The two integer counters are the one database read on this payload: when the queries throw, both are `null` (and `webhookCounters` with them) and `unavailable` is `true` while the in-memory siblings still answer. */
+            /** @description Accounting-feed on-call counters (#2872, widened by #3019). `exhaustedSyncs`: sync rows the retry sweep has given up on (`failed` at the attempt cap) — fix the cause, then the user presses Sync now. `connectionsNeedingAttention`: connections in `needs_reauthorisation`, `scope_missing`, `revoked_at_provider` or `needs_attention` — only the user's re-consent (or, for `needs_attention`, a reconnect after the deployment fix) resolves them. `webhookCounters`: the Accounted webhook receiver’s ten per-answer-class counters (received / bad_signature / stale / unknown_token / duplicate / processed / feature_off / unknown_type / confirmed / verification) — IN-PROCESS, process-lifetime, reset on restart; the durable facts are the `accounting_webhook_deliveries` rows, not these. Thresholds: docs/operations/accounting-feed.md. The two integer counters are the one database read on this payload: when the queries throw, both are `null` (and `webhookCounters` with them) and `unavailable` is `true` while the in-memory siblings still answer. */
             accounting: {
                 exhaustedSyncs: number | null;
                 connectionsNeedingAttention: number | null;
@@ -4717,6 +4717,7 @@ export type components = {
                     feature_off: number;
                     unknown_type: number;
                     confirmed: number;
+                    verification: number;
                 } | null;
                 /** @description Present and `true` only when the counters could not be read; the two integers and `webhookCounters` are then `null`. */
                 unavailable?: boolean;

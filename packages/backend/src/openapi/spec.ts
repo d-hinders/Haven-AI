@@ -11226,8 +11226,8 @@ export const openapiSpec = {
               'attempt cap) — fix the cause, then the user presses Sync now. `connectionsNeedingAttention`: ' +
               'connections in `needs_reauthorisation`, `scope_missing`, `revoked_at_provider` or `needs_attention` — only the ' +
               "user's re-consent (or, for `needs_attention`, a reconnect after the deployment fix) resolves them. `webhookCounters`: " +
-              'the Accounted webhook receiver\u2019s nine per-answer-class counters (received / bad_signature / stale / unknown_token / duplicate / ' +
-              'processed / feature_off / unknown_type / confirmed) — IN-PROCESS, process-lifetime, reset on restart; the durable facts are the ' +
+              'the Accounted webhook receiver\u2019s ten per-answer-class counters (received / bad_signature / stale / unknown_token / duplicate / ' +
+              'processed / feature_off / unknown_type / confirmed / verification) — IN-PROCESS, process-lifetime, reset on restart; the durable facts are the ' +
               '`accounting_webhook_deliveries` rows, not these. Thresholds: docs/operations/accounting-feed.md. ' +
               'The two integer counters are the one database read on this payload: when the queries throw, both ' +
               'are `null` (and `webhookCounters` with them) and `unavailable` is `true` while the in-memory siblings still answer.',
@@ -11239,7 +11239,7 @@ export const openapiSpec = {
                 anyOf: [
                   {
                     type: 'object',
-                    required: ['received', 'bad_signature', 'stale', 'unknown_token', 'duplicate', 'processed', 'feature_off', 'unknown_type', 'confirmed'],
+                    required: ['received', 'bad_signature', 'stale', 'unknown_token', 'duplicate', 'processed', 'feature_off', 'unknown_type', 'confirmed', 'verification'],
                     properties: {
                       received: { type: 'integer', minimum: 0 },
                       bad_signature: { type: 'integer', minimum: 0 },
@@ -11250,6 +11250,7 @@ export const openapiSpec = {
                       feature_off: { type: 'integer', minimum: 0 },
                       unknown_type: { type: 'integer', minimum: 0 },
                       confirmed: { type: 'integer', minimum: 0 },
+                      verification: { type: 'integer', minimum: 0 },
                     },
                     additionalProperties: false,
                   },

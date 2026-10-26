@@ -15,6 +15,7 @@ function zeroWebhookCounters() {
     feature_off: 0,
     unknown_type: 0,
     confirmed: 0,
+    verification: 0,
   }
 }
 

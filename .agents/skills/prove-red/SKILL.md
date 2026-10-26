@@ -146,8 +146,16 @@ blank line reads as an error) — and for vitest (`VITEST_ASSERTION_SHAPE`, #428
 or the frontend's idiom: a jest-dom matcher (`Error: expect(element)…`), a
 `getBy*` (`TestingLibraryElementError`), or a `findBy*` / `waitFor` timeout
 (a plain `Error:` with the query library's "Unable to find …" or "Found …"
-message). Only the recorded stems count; an unrecorded query shape reads as an
-error, so a new one is added with a recorded fixture case. Caveats the runner cannot see past:
+message); or the backend's idiom (#4456): a `.rejects` on a promise that
+resolved (`Error: promise resolved "…" instead of rejecting`), or a failing
+OpenAPI helper (`expectMatchesSpec`'s `Error: Response from … does not match
+the '…' schema in openapi/spec.ts:`, `expectRejectsOffSpec`'s `Error: <METHOD>
+<path> did not refuse the off-spec body …`). Deliberately an error: a
+`.resolves` on a rejected promise (`Error: promise rejected "…" instead of
+resolving`), which wraps whatever the code threw, and the OpenAPI helpers'
+own contract throws ("OpenAPI spec has no path …"). Only the recorded stems
+count; an unrecorded shape reads as an error, so a new one is added with a
+recorded fixture case. Caveats the runner cannot see past:
 `expect(fn).toThrow(/X/)` turns a thrown non-assertion error into an assertion
 failure, so a SQL error inside such a test reads as caught — check the message.
 A jest-dom matcher handed a non-element (`expect(undefined).toHaveClass(…)`) and a

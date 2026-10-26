@@ -259,15 +259,28 @@ const dsMoney = (n: number) =>
   n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
 /**
- * The two showcase agents' fills (#4331): their own avatar tints, read
+ * The two showcase agents' fills (#4331, #4428): their own STORED tints, read
  * through the same `seriesColorForAgent` the charts use — so the swatch list
  * under the chart and the `Monogram` section show the SAME colour for the
- * SAME name, by construction. ('Research agent' hashes to tint 6, 'Ops
- * agent' to tint 5 — two different tints, checked in
- * `avatar-tint.test.ts`.)
+ * SAME name, by construction. The pair is chosen to show the rule the epic
+ * changed: 'Research agent' and 'Data-feed agent' both hash to tint 6 under
+ * djb2 mod 6, and wear different colours because each carries its own stored
+ * tint (6 and 2). Before #4428 they were indistinguishable in a chart.
  */
-const DS_RESEARCH_COLOR = seriesColorForAgent('Research agent')
-const DS_OPS_COLOR = seriesColorForAgent('Ops agent')
+const DS_RESEARCH_TINT = 6
+const DS_DATAFEED_TINT = 2
+const DS_RESEARCH_COLOR = seriesColorForAgent({ name: 'Research agent', avatarTint: DS_RESEARCH_TINT })
+const DS_DATAFEED_COLOR = seriesColorForAgent({ name: 'Data-feed agent', avatarTint: DS_DATAFEED_TINT })
+
+/**
+ * The stored tint per showcase agent, so the swatch list's `Monogram` wears
+ * the same colour as the chart fill beside it — the pairing the specimen
+ * exists to show. A merchant or a contact would pass no tint at all.
+ */
+const DS_AGENT_TINTS: Record<string, number> = {
+  'Research agent': DS_RESEARCH_TINT,
+  'Data-feed agent': DS_DATAFEED_TINT,
+}
 
 const DS_CHART_DAYS: StackedBarDay[] = [
   {
@@ -275,7 +288,7 @@ const DS_CHART_DAYS: StackedBarDay[] = [
     refusals: 0,
     series: [
       { id: 'research', name: 'Research agent', amount: 140, color: DS_RESEARCH_COLOR, tokens: [['USDC', 140]] },
-      { id: 'ops', name: 'Ops agent', amount: 60, color: DS_OPS_COLOR },
+      { id: 'data-feed', name: 'Data-feed agent', amount: 60, color: DS_DATAFEED_COLOR },
     ],
   },
   {
@@ -292,7 +305,7 @@ const DS_CHART_DAYS: StackedBarDay[] = [
           ['PYUSD', 59.6],
         ],
       },
-      { id: 'ops', name: 'Ops agent', amount: 45, color: DS_OPS_COLOR },
+      { id: 'data-feed', name: 'Data-feed agent', amount: 45, color: DS_DATAFEED_COLOR },
     ],
   },
   {
@@ -300,7 +313,7 @@ const DS_CHART_DAYS: StackedBarDay[] = [
     refusals: 0,
     series: [
       { id: 'research', name: 'Research agent', amount: 95, color: DS_RESEARCH_COLOR },
-      { id: 'ops', name: 'Ops agent', amount: 310, color: DS_OPS_COLOR },
+      { id: 'data-feed', name: 'Data-feed agent', amount: 310, color: DS_DATAFEED_COLOR },
     ],
   },
   {
@@ -317,7 +330,7 @@ const DS_CHART_DAYS: StackedBarDay[] = [
     refusals: 0,
     series: [
       { id: 'research', name: 'Research agent', amount: 260, color: DS_RESEARCH_COLOR },
-      { id: 'ops', name: 'Ops agent', amount: 55, color: DS_OPS_COLOR },
+      { id: 'data-feed', name: 'Data-feed agent', amount: 55, color: DS_DATAFEED_COLOR },
     ],
   },
   {
@@ -325,7 +338,7 @@ const DS_CHART_DAYS: StackedBarDay[] = [
     refusals: 0,
     series: [
       { id: 'research', name: 'Research agent', amount: 60, color: DS_RESEARCH_COLOR },
-      { id: 'ops', name: 'Ops agent', amount: 40, color: DS_OPS_COLOR },
+      { id: 'data-feed', name: 'Data-feed agent', amount: 40, color: DS_DATAFEED_COLOR },
     ],
   },
   {
@@ -333,7 +346,7 @@ const DS_CHART_DAYS: StackedBarDay[] = [
     refusals: 0,
     series: [
       { id: 'research', name: 'Research agent', amount: 150, color: DS_RESEARCH_COLOR },
-      { id: 'ops', name: 'Ops agent', amount: 90, color: DS_OPS_COLOR },
+      { id: 'data-feed', name: 'Data-feed agent', amount: 90, color: DS_DATAFEED_COLOR },
     ],
   },
 ]
@@ -3734,7 +3747,7 @@ export default function DesignSystemPage() {
       <Section
         title="StackedBarChart"
         testId="ds-stacked-bar-chart"
-        description="Daily bars stacked by agent for a spend range. Since #4334 the axis is CONTINUOUS — the caller hands it every calendar day in the window, and a day with no spend is an empty slot (Thu 4 below), not a skipped column; refusals are the marker series, a small grey dash UNDER the day's slot (never a second axis, never a cap on the bar — a barless day's refusals would be undrawable as a cap), named 'Refused' in the legend. A tick label's fraction digits come from the tick STEP (#4334): whole steps print none, a sub-cent step prints 4, so '$0.0010 … $0.0040' reads instead of '$0, $0'. Since #4331 an agent's fill is its own avatar tint (seriesColorForAgent, hashed from the name): the chart, the legend, the tooltip and the agent's monogram all wear one colour, in every period and on every page, no matter how its spend ranks. Two agents can hash to the same tint — six tints, unbounded agents — and the legend and tooltip tell them apart by name. A partial day — the window's cut first or last day — is striped with the series fill at full strength (not faded: an opacity blend would read lighter on the light ground and darker on the dark one, and drop under 3:1). Below three days it renders nothing; the page shows tiles instead (#2948). Focus the figure and use the arrow keys for a day's detail: a two-line callout (day, refusal count and total, then the agents as wrapping swatch·name·amount chips, capped at 24rem so a token breakdown wraps inside its chip instead of stretching the callout — #3067, so it fits above or below almost any bar) anchored over the day, clamped inside the plot by its own measured width, and dropped below the described bar's top when the bar would otherwise hide under it — bottom just above the axis when the bar can hold it, else just above the legend over the date labels beneath it — whichever of the two hides the fewest neighbouring tops or refusal marks (#3076) — and not at all for a bar the drop would swallow (#3063 — the bar's top stays visible; on this sample the days whose bars reach under the resting callout drop, the rest keep it). The callout takes no pointer: hover the next bar through it and the detail moves on; a tap pins a day, a second tap or Escape releases it (#3066). On a narrow screen the tooltip becomes a panel pinned below the plot."
+        description="Daily bars stacked by agent for a spend range. Since #4334 the axis is CONTINUOUS — the caller hands it every calendar day in the window, and a day with no spend is an empty slot (Thu 4 below), not a skipped column; refusals are the marker series, a small grey dash UNDER the day's slot (never a second axis, never a cap on the bar — a barless day's refusals would be undrawable as a cap), named 'Refused' in the legend. A tick label's fraction digits come from the tick STEP (#4334): whole steps print none, a sub-cent step prints 4, so '$0.0010 … $0.0040' reads instead of '$0, $0'. Since #4331 an agent's fill is its own avatar tint (seriesColorForAgent), and since #4428 that tint is STORED on the agent rather than hashed from its name: the chart, the legend, the tooltip and the agent's monogram all wear one colour, in every period and on every page, no matter how its spend ranks. The two agents below are the proof — 'Research agent' and 'Data-feed agent' both hash to tint 6, and wear different colours because each carries its own stored tint. Past a user's first six agents a tint repeats, and the legend and tooltip tell same-tint agents apart by name. A partial day — the window's cut first or last day — is striped with the series fill at full strength (not faded: an opacity blend would read lighter on the light ground and darker on the dark one, and drop under 3:1). Below three days it renders nothing; the page shows tiles instead (#2948). Focus the figure and use the arrow keys for a day's detail: a two-line callout (day, refusal count and total, then the agents as wrapping swatch·name·amount chips, capped at 24rem so a token breakdown wraps inside its chip instead of stretching the callout — #3067, so it fits above or below almost any bar) anchored over the day, clamped inside the plot by its own measured width, and dropped below the described bar's top when the bar would otherwise hide under it — bottom just above the axis when the bar can hold it, else just above the legend over the date labels beneath it — whichever of the two hides the fewest neighbouring tops or refusal marks (#3076) — and not at all for a bar the drop would swallow (#3063 — the bar's top stays visible; on this sample the days whose bars reach under the resting callout drop, the rest keep it). The callout takes no pointer: hover the next bar through it and the detail moves on; a tap pins a day, a second tap or Escape releases it (#3066). On a narrow screen the tooltip becomes a panel pinned below the plot."
       >
         <Card hover={false} className="p-5">
           <StackedBarChart
@@ -3756,18 +3769,19 @@ export default function DesignSystemPage() {
               narrow
             />
           </div>
-          {/* One colour per agent (#4331): the monogram and the chart swatch
-              read the same avatar tint for the same name — `seriesColorForAgent`
-              — so this list is the pairing the rule promises, not a mock-up.
-              (The agents table no longer carries a swatch; the monogram in
-              its row IS the colour key.) */}
+          {/* One colour per agent (#4331, #4428): the monogram and the chart
+              swatch read the same STORED tint for the same agent —
+              `seriesColorForAgent` — so this list is the pairing the rule
+              promises, not a mock-up. The two names hash alike (both tint 6)
+              and still read as two colours. (The agents table no longer
+              carries a swatch; the monogram in its row IS the colour key.) */}
           <ul
             data-testid="ds-stacked-bar-swatch-list"
             className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-[var(--v2-ink-2)]"
           >
             {DS_CHART_DAYS[0]?.series.map((s) => (
               <li key={s.id} className="inline-flex items-center gap-1.5">
-                <Monogram name={s.name} size="xs" decorative />
+                <Monogram name={s.name} tint={DS_AGENT_TINTS[s.name]} size="xs" decorative />
                 <SeriesSwatch color={s.color} />
                 <span>{s.name} — one colour: monogram and chart fill</span>
               </li>
@@ -4025,7 +4039,7 @@ export default function DesignSystemPage() {
       <Section
         title="Monogram"
         testId="ds-monogram"
-        description="Initials-in-a-circle avatar, or the entity's logo when it has one. Promoted to components/ui on its third copy (#3079). xs (32px) for the agent row's 2rem mark track (#4208), sm (36px) for lists and cards, md (48px) for a page header. `decorative` sets aria-hidden for a caller that prints the name beside the mark; a name that starts with an emoji shows that emoji alone. Since #4066 the initials are tinted from the entity's NAME — one of six muted avatar tints, a pure hash of the trimmed name (assigned by name, never by index, and never a status or semantic colour). Since #4331 the tint is also the agent's chart fill (seriesColorForAgent) — one colour per agent: the chart swatch beside the monogram above matches it, and renaming an agent changes its colour, as it changes its monogram."
+        description="Initials-in-a-circle avatar, or the entity's logo when it has one. Promoted to components/ui on its third copy (#3079). xs (32px) for the agent row's 2rem mark track (#4208), sm (36px) for lists and cards, md (48px) for a page header. `decorative` sets aria-hidden for a caller that prints the name beside the mark; a name that starts with an emoji shows that emoji alone. Since #4066 the initials are tinted from one of six muted avatar tints, never from a status or semantic colour and never by index. An AGENT passes its STORED tint (`tint`, 1..6 — `agents.avatar_tint`, assigned at creation and unique among the user's first six agents, #4428), so two agents whose names hash alike still wear different colours and renaming an agent no longer changes its colour. A MERCHANT or a CONTACT passes nothing and keeps the hash of its trimmed name — a pure function, so the same merchant keeps the same tint everywhere. Since #4331 the tint is also the agent's chart fill (seriesColorForAgent) — one colour per agent: the chart swatch beside the monogram above matches it."
       >
         <div className="flex flex-wrap items-center gap-4">
           {MONOGRAM_TINT_EXAMPLES.map((name) => (
@@ -4035,12 +4049,30 @@ export default function DesignSystemPage() {
         </div>
         <div className="mt-4 flex flex-wrap items-center gap-4">
           <span className="flex items-center gap-3">
-            <Monogram name="Research agent" size="xs" decorative />
+            <Monogram name="Research agent" tint={DS_RESEARCH_TINT} size="xs" decorative />
             <span className="v2-text-body text-[var(--v2-ink)]">Research agent</span>
           </span>
           <span className="flex items-center gap-3">
             <Monogram name="🤖 Shopping bot" size="xs" decorative />
             <span className="v2-text-body text-[var(--v2-ink)]">🤖 Shopping bot</span>
+          </span>
+        </div>
+        {/* The rule #4428 changed, shown rather than described: these two
+            names hash to the SAME tint (6 under djb2 mod 6), and wear
+            different colours because each agent carries its own stored tint.
+            Before the epic they were indistinguishable circles. */}
+        <div className="mt-4 flex flex-wrap items-center gap-4">
+          <span className="flex items-center gap-3">
+            <Monogram name="Research agent" tint={DS_RESEARCH_TINT} size="xs" decorative />
+            <span className="v2-text-body text-[var(--v2-ink)]">
+              Research agent — stored tint {DS_RESEARCH_TINT}
+            </span>
+          </span>
+          <span className="flex items-center gap-3">
+            <Monogram name="Data-feed agent" tint={DS_DATAFEED_TINT} size="xs" decorative />
+            <span className="v2-text-body text-[var(--v2-ink)]">
+              Data-feed agent — stored tint {DS_DATAFEED_TINT}, same name hash
+            </span>
           </span>
         </div>
       </Section>
@@ -4180,7 +4212,7 @@ export default function DesignSystemPage() {
           account page will pass from the same overview. */}
       <Section
         title="Agent row (shared)"
-        description="The dashboard's agent row (#4096, epic #4093), lifted out of AgentsSection into haven/AgentRow: a name-hashed xs Monogram leading mark (#4208), the BudgetMeter with its caption, the labelled “Last paid” time on the caption line (#3989), the badge (agentBadge: Needs setup / Paused / N% used), and the received-sub-budget or “No budget” line (#3803). Its props are the dashboard wire shapes (DashboardAgent, DashboardBudgetRemaining) and the budget caption reads in the budget's own token, “1.20 of 3.00 USDC” (#4165: no rate, no “≈”) — the account page reads the SAME overview (it lists all agents) and passes its slices straight through, so both surfaces draw the identical row. AgentBudget is exported beside it for a caller that wants the budget block without the row chrome."
+        description="The dashboard's agent row (#4096, epic #4093), lifted out of AgentsSection into haven/AgentRow: a `Monogram` (`xs`, decorative) as the leading mark — an agent's mark wears its STORED tint (#4428), the same colour its chart series fills with, so two agents whose names hash alike are still told apart — the BudgetMeter with its caption, the labelled “Last paid” time on the caption line (#3989), the badge (agentBadge: Needs setup / Paused / N% used), and the received-sub-budget or “No budget” line (#3803). Its props are the dashboard wire shapes (DashboardAgent, DashboardBudgetRemaining) and the budget caption reads in the budget's own token, “1.20 of 3.00 USDC” (#4165: no rate, no “≈”) — the account page reads the SAME overview (it lists all agents) and passes its slices straight through, so both surfaces draw the identical row. AgentBudget is exported beside it for a caller that wants the budget block without the row chrome."
       >
         <div className="max-w-xl space-y-4">
           <Card hover={false} className="overflow-hidden">
@@ -4260,7 +4292,7 @@ export default function DesignSystemPage() {
       <Section
         title="PageHeader leading"
         testId="ds-pageheader-leading"
-        description="A mark before the title, centred on it (#4210, epic #4207). Agent detail passes the same name-hashed Monogram as the shared agent row (#4208). The title prints beside it, so the mark is passed `decorative`. Optional and additive — a PageHeader without `leading` renders exactly as before."
+        description="A mark before the title, centred on it (#4210, epic #4207). Agent detail passes the same `Monogram` as the shared agent row — the agent's STORED tint (#4428), so the header mark and the row mark are one colour. The title prints beside it, so the mark is passed `decorative`. Optional and additive — a PageHeader without `leading` renders exactly as before."
       >
         <div className="max-w-2xl">
           <PageHeader

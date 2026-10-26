@@ -1,5 +1,5 @@
 import { merchantInitials } from '@/lib/marketplace'
-import { avatarTint } from '@/lib/avatar-tint'
+import { resolveAvatarTint } from '@/lib/avatar-tint'
 
 /**
  * Initials-in-a-circle avatar, or the entity's logo when it has one (#3079).
@@ -8,15 +8,18 @@ import { avatarTint } from '@/lib/avatar-tint'
  * pattern-absorption trigger (epic #904). Initials: first letter of the first
  * and last word, or the first two letters of a one-word name.
  *
- * The initials variant is tinted from the entity's NAME (#4066): one of six
- * muted `--v2-avatar-*` tints picked by `avatarTint` (a pure hash of the
- * trimmed name — djb2 mod 6), so the same entity keeps the same colour
- * everywhere and neighbouring rows are told apart at a glance. Assignment is
- * by name, never by index, and never from a status colour — the ink hexes
- * are disjoint from every status/semantic hex and from the `--v2-series-*`
- * stops themselves (`theme-tokens.test.ts`). Since #4331 the SAME tint fills
- * the agent's chart series (`seriesColorForAgent`): one colour per agent,
- * chart fill matching monogram. Logos are untinted.
+ * The initials variant is tinted from the entity's STORED tint when it has one
+ * and from its NAME otherwise (#4066, #4428): one of six muted `--v2-avatar-*`
+ * tints. An agent carries a stored tint (`agents.avatar_tint`, assigned at
+ * creation and unique among the user's first six agents), so two agents whose
+ * names hash alike still wear different colours; a merchant or a contact
+ * passes nothing and keeps the hash of its trimmed name (djb2 mod 6), so the
+ * same entity keeps the same colour everywhere and neighbouring rows are told
+ * apart at a glance. Assignment is never by index, and never from a status
+ * colour — the ink hexes are disjoint from every status/semantic hex and from
+ * the `--v2-series-*` stops themselves (`theme-tokens.test.ts`). Since #4331
+ * the SAME tint fills the agent's chart series (`seriesColorForAgent`): one
+ * colour per agent, chart fill matching monogram. Logos are untinted.
  *
  * `alt=""` on the logo: the name is always printed beside the avatar, so the
  * image is decorative to a screen reader. The initials variant stays readable
@@ -45,6 +48,7 @@ export function Monogram({
   name,
   logoUrl = null,
   size = 'sm',
+  tint: storedTint = null,
   decorative = false,
 }: {
   name: string
@@ -55,6 +59,11 @@ export function Monogram({
    * `md` — a 48px page-header avatar.
    */
   size?: 'xs' | 'sm' | 'md'
+  /**
+   * The entity's STORED tint (an agent's `avatarTint`, 1..6). Overrides the
+   * name hash; omit it for a merchant or a contact, which keep the hash.
+   */
+  tint?: number | null
   /** Hide the mark from assistive tech: the caller prints the name beside it. */
   decorative?: boolean
 }) {
@@ -70,7 +79,7 @@ export function Monogram({
       />
     )
   }
-  const tint = TINT_CLASSES[avatarTint(name)]
+  const tint = TINT_CLASSES[resolveAvatarTint({ name, avatarTint: storedTint })]
   return (
     <div
       aria-hidden={decorative || undefined}

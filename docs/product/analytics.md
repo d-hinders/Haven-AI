@@ -136,7 +136,13 @@ symbol-only row used to read —
 **Top merchant** by name with a merchant monogram (an unresolved one reads
 "Unknown recipient", the full address in its tooltip — no cell renders a
 `0x…` address AS a label), and **Last paid**. The whole row links to the
-agent.
+agent. Below `lg` each agent renders as a phone row instead, with spend,
+refusals and the budget on its face and the other columns in a disclosure. Its
+budget line is one line per budget, and each line is the desktop cell's caption
+text from the same projection (#4432): the figures and the period for a
+readable read, "Usage this period couldn't be read" for a failed or stale one,
+"Starts …" for a budget that has not started, "No budget" for an agent with none. It is text
+only, with no meter and no percentage.
 
 **Fees paid to Haven.** What Haven has charged, in the display currency. The
 tile EXISTS only while the fee flag is on — a fifth tile beside the four. While fee

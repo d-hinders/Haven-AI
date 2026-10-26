@@ -12157,6 +12157,28 @@ export const openapiSpec = {
            * read is GET /agents/{id}/tax-declaration.
            */
           tax_declaration_enabled: { type: 'boolean' },
+          /**
+           * #4435: the payment client the agent's MOST RECENT connector setup
+           * reported — `agent_connection_setups.install_status.runtime_mcp_mode`,
+           * one of `local_stdio`, `hosted_plus_signer` or `manual` (the
+           * connector's closed set). The agent Settings tab uses it to disable
+           * the tax-declaration toggle for `hosted_plus_signer`: a hosted
+           * server with a separate signer cannot attach a declaration to a
+           * payment, so an opt-in there would do nothing.
+           *
+           * DISPLAY ONLY — the same boundary as `tax_declaration_enabled`:
+           * nothing in the delegation, budget, enforcement or client-compat
+           * path may read it.
+           *
+           * NOT required, and null/absent means "cannot tell" rather than
+           * "cannot send": no setup row, an `agent_id` set to NULL by a
+           * delete, or a setup whose `install_status` never carried the key.
+           * The UI treats that as enabled — disabling every agent that
+           * predates the signal would be a user-visible regression. Only the
+           * LIST read selects it (the Settings tab reads the agent from the
+           * list response); the single-agent read omits it.
+           */
+          runtime_mcp_mode: { type: ['string', 'null'] },
           /** Timestamp of the most recent MCP tool call from this agent. Null until first call. */
           mcp_last_seen_at: { anyOf: [isoDateTime, { type: 'null' }] },
           /**

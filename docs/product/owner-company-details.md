@@ -247,6 +247,25 @@ link to the agent's wallet address when it accepts the declaration. The card
 does not name the payment rail — the owner's copy review of 2026-09-30
 (PR #3490) removed that sentence, and the rail stays stated here instead.
 
+The toggle is **disabled** for an agent whose most recent connector setup
+reported `hosted_plus_signer` — the default setup, a hosted server with a
+separate signer — because that client cannot attach a declaration to a
+payment, so an opt-in there would do nothing (#4435). The reason renders as a
+paragraph BELOW the checkbox row, never as the checkbox's helper text: a
+disabled checkbox is not focusable and its helper text sits inside the
+`<label>`, so a reason placed there is never announced. Every other value
+stays enabled, deliberately: `local_stdio` (the local MCP server holds the
+delegate key), `manual` (a developer's own SDK client with a delegate key can
+send one, and Haven cannot know), and unknown — no setup row, an `agent_id`
+set to NULL by a delete, or a setup that never reported the key. "Cannot tell"
+is not "cannot send", and disabling every agent that predates the signal would
+be a user-visible regression on deploy. An agent whose bit is already ON stays
+interactive even on that setup, so the owner can still switch it off; the PUT
+is never gated on OFF. The signal is display-only: `runtime_mcp_mode` on the
+agents list read, taken from the sanitized `install_status` of the agent's
+latest setup, and nothing in the delegation, budget, enforcement or
+client-compat path reads it.
+
 ## The settings screen
 
 The Company details card on Settings → Business (`CompanyDetailsCard`,

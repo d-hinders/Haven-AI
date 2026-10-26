@@ -12,7 +12,12 @@
  *   "verified");
  * - a successful toggle PUTs exactly the wire shape; a failed one keeps the
  *   checkbox's server-truth state and surfaces the error inline (never an
- *   optimistic flip).
+ *   optimistic flip);
+ * - #4435: the toggle is DISABLED for an agent whose most recent setup is
+ *   `hosted_plus_signer` with the bit OFF, with the reason as a sibling
+ *   paragraph (outside the checkbox's label, reachable by role); every other
+ *   value — `local_stdio`, `manual`, unknown — stays enabled, and an agent
+ *   whose bit is already ON stays interactive so withdrawal is reachable.
  */
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
@@ -268,6 +273,130 @@ describe('TaxDeclarationToggle interaction', () => {
       expect(mockApiPut).toHaveBeenCalled()
     })
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+})
+
+describe('TaxDeclarationToggle disabled state (#4435)', () => {
+  beforeEach(() => {
+    mockUseCompanyDetails.mockReturnValue({ status: 'ready', details: VIES_VALID_ROW })
+    mockApiPut.mockReset()
+  })
+
+  // The literal the issue pins, whole. `toBe`, not `toContain`: the reason is
+  // the only thing telling an owner why the control they can see is dead.
+  const REASON =
+    'This agent pays through the default setup, a hosted server with a separate signer, so no declaration is sent.'
+
+  it('disables the toggle for hosted_plus_signer with the bit OFF and states the reason', () => {
+    render(
+      <TaxDeclarationToggle
+        agentId="agent-1"
+        taxDeclarationEnabled={false}
+        runtimeMcpMode="hosted_plus_signer"
+        onAgentsChanged={() => {}}
+      />,
+    )
+    expect(screen.getByRole('checkbox')).toBeDisabled()
+    expect(screen.getByTestId('tax-declaration-disabled-reason').textContent).toBe(REASON)
+  })
+
+  it('renders the reason OUTSIDE the checkbox label, reachable by role', () => {
+    render(
+      <TaxDeclarationToggle
+        agentId="agent-1"
+        taxDeclarationEnabled={false}
+        runtimeMcpMode="hosted_plus_signer"
+        onAgentsChanged={() => {}}
+      />,
+    )
+    // A disabled checkbox is not focusable and `helperText` sits inside the
+    // `<label>`, so a reason placed there is never announced. The paragraph is
+    // a sibling of the row: reachable by role, and not inside any label.
+    const reason = screen.getByRole('paragraph')
+    expect(reason.textContent).toBe(REASON)
+    expect(reason.closest('label')).toBeNull()
+    // The checkbox's own label carries the helper text, never the reason.
+    const label = screen.getByRole('checkbox').closest('label')
+    expect(label?.textContent ?? '').not.toContain('no declaration is sent')
+  })
+
+  it('keeps the toggle enabled and PUTs the same body for local_stdio', async () => {
+    mockApiPut.mockResolvedValue({ id: 'agent-1', tax_declaration_enabled: true })
+    render(
+      <TaxDeclarationToggle
+        agentId="agent-1"
+        taxDeclarationEnabled={false}
+        runtimeMcpMode="local_stdio"
+        onAgentsChanged={() => {}}
+      />,
+    )
+    const checkbox = screen.getByRole('checkbox')
+    expect(checkbox).not.toBeDisabled()
+    expect(screen.queryByTestId('tax-declaration-disabled-reason')).not.toBeInTheDocument()
+    fireEvent.click(checkbox)
+    await waitFor(() => {
+      expect(mockApiPut).toHaveBeenCalledWith('/agents/agent-1/tax-declaration', {
+        tax_declaration_enabled: true,
+      })
+    })
+  })
+
+  it('keeps the toggle enabled for manual — a developer client with a delegate key can send one', () => {
+    render(
+      <TaxDeclarationToggle
+        agentId="agent-1"
+        taxDeclarationEnabled={false}
+        runtimeMcpMode="manual"
+        onAgentsChanged={() => {}}
+      />,
+    )
+    expect(screen.getByRole('checkbox')).not.toBeDisabled()
+    expect(screen.queryByTestId('tax-declaration-disabled-reason')).not.toBeInTheDocument()
+  })
+
+  it('keeps the toggle enabled when the signal is unknown — null, absent, or an unrecognised value', () => {
+    // "Cannot tell" is not "cannot send": no setup row, an agent_id NULLed by
+    // a delete, or a setup whose install_status never carried the key all read
+    // as null/absent. Disabling every agent that predates the signal would be
+    // a user-visible regression on deploy.
+    for (const runtimeMcpMode of [null, undefined, 'something_else'] as const) {
+      const { unmount } = render(
+        <TaxDeclarationToggle
+          agentId="agent-1"
+          taxDeclarationEnabled={false}
+          runtimeMcpMode={runtimeMcpMode}
+          onAgentsChanged={() => {}}
+        />,
+      )
+      expect(screen.getByRole('checkbox')).not.toBeDisabled()
+      expect(screen.queryByTestId('tax-declaration-disabled-reason')).not.toBeInTheDocument()
+      unmount()
+    }
+  })
+
+  it('keeps the toggle INTERACTIVE when the bit is already ON on hosted_plus_signer, so withdrawal is reachable', async () => {
+    // The PUT is deliberately never gated on OFF
+    // (routes/agent-tax-declaration.ts:118-121). A disabled control here would
+    // trap an opt-in the owner cannot undo.
+    mockApiPut.mockResolvedValue({ id: 'agent-1', tax_declaration_enabled: false })
+    render(
+      <TaxDeclarationToggle
+        agentId="agent-1"
+        taxDeclarationEnabled
+        runtimeMcpMode="hosted_plus_signer"
+        onAgentsChanged={() => {}}
+      />,
+    )
+    const checkbox = screen.getByRole('checkbox')
+    expect(checkbox).not.toBeDisabled()
+    expect(checkbox).toBeChecked()
+    expect(screen.queryByTestId('tax-declaration-disabled-reason')).not.toBeInTheDocument()
+    fireEvent.click(checkbox)
+    await waitFor(() => {
+      expect(mockApiPut).toHaveBeenCalledWith('/agents/agent-1/tax-declaration', {
+        tax_declaration_enabled: false,
+      })
+    })
   })
 })
 

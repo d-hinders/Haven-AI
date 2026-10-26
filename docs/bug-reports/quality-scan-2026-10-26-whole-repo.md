@@ -72,7 +72,7 @@ tracked as #4449 (§3) and are not presented here.
 
 ## 1. Structural findings
 
-None in the examined sample. Two clusters were weighed: 15 of the 119 issues
+None in the examined sample. Two clusters were weighed: 14 of the 119 issues
 filed in the window are test tooling (§5, incident clustering), and 5 are
 egress (§2 notes). Both were refused at this level. The tooling issues have
 several mechanisms, each already fixed per site; under a hostile host
@@ -82,14 +82,15 @@ instance at the SHA (§2 notes).
 
 ## 2. Improvement candidates (one PR each) — pending the owner's word
 
-### C1 — `prove-red` reads the backend's two commonest failing-assertion shapes as "mutation-red", so 4 of this run's 7 cells were reported "not counted; fix the mutation" when the guard's own assertion had failed
+### C1 — `prove-red` reads the backend's two commonest failing-assertion shapes as "mutation-red", so 4 of this run's 7 cells were reported "not counted; fix the mutation" when an assertion had failed (3 on the named guard, 1 on a sibling)
 
 - **Observed by execution.** This run's block-1 census
   (`node scripts/ci/prove-red.mjs census --issue qs1026 --candidates <census file>`,
   five backend census cells and two probes, §5 block 1) printed **5
   mutation-red, 1 caught, 1 shadowed**. Four of the five mutation-red cells
-  were reds on the guard's own check, read from each mutant's vitest JSON
-  report:
+  were assertion reds, read from each mutant's vitest JSON report: three on
+  the named guard (M1, M3, M5) and one on a sibling test (P1, which the
+  runner's own rule classes `shadowed`):
   - M1 (migration 121's CHECK widened to 1..7). The named test
     `the CHECK refuses a tint outside 1..6` failed with
     `Error: promise resolved "Result{ command: 'INSERT', …(9) }" instead of rejecting`.
@@ -146,8 +147,8 @@ instance at the SHA (§2 notes).
 - **Expected benefit.** A backend guard caught through `expectMatchesSpec` or
   a resolved-promise `.rejects` reads as caught. The author and the reviewer
   stop rewriting a mutation that worked, and the census table stops
-  under-reporting caught guards. This run's table read 1 caught; by hand the
-  catches are 5 (M1, M3, M4, M5, P1).
+  under-reporting caught guards. This run's table read 1 caught; by hand, under the
+  runner's own classes, 4 are caught (M1, M3, M4, M5) and P1 is shadowed.
 - **Scope.** One PR. Either record the two stems in `VITEST_ASSERTION_SHAPE`
   with a fixture case each, as the skill prescribes, or have
   `expectMatchesSpec` throw an `AssertionError`
@@ -166,7 +167,7 @@ instance at the SHA (§2 notes).
   - Mutation recipe built once and run: this census (M1, M3, M5, P1 are the
     specimens).
 - **Verification still needed.** Re-run the four cells (the cells file is in
-  the session scratchpad and can be handed on): each must read `caught`. A
+  the session scratchpad and can be handed on): M1, M3 and M5 must read `caught`, and P1 `shadowed`. A
   self-test fixture per stem, red when the stem is removed. A plain code
   throw inside a spec-shape test, say a `TypeError` before the helper runs,
   must still read as an error.
@@ -187,7 +188,8 @@ instance at the SHA (§2 notes).
   tests re-apply migration 121. The fingerprint is table columns and indexes
   (`db-harness.ts:603`). Routines are in 1 of 121 migrations
   (`git grep -l -i -P 'CREATE\s+(OR\s+REPLACE\s+)?(FUNCTION|TRIGGER)'` → 1)
-  and CHECK constraints are in 37. The leak is narrow and was observed once,
+  and CHECK constraints are in 37
+  (`git grep -l -P 'CHECK\s*\(' b9f9f1e47 -- 'packages/backend/src/db/migrations/*.ts' ':!packages/backend/src/db/migrations/__tests__/**'` → 37; 39 with `__tests__`). The leak is narrow and was observed once,
   so it is not proposed. A builder who mutates a migration should drop the
   `test_w*` schemas after the run.
 - **Egress: one invariant, written per site.** "A URL a third party chose is
@@ -221,7 +223,7 @@ instance at the SHA (§2 notes).
 
 ## 3. Context for tracked work (not new items)
 
-- **#4449** (open, `pending-review`) holds both live signer observations from
+- **#4449** (open, spec-reviewed; `pending-review` lifted 2026-10-26 20:03Z) holds both live signer observations from
   the brief. The tree instruments agree with it:
   - `next-step-characterization.test.ts`, `x402-binding-rail.test.ts` and
     `server.test.ts` → 3 files / 68 tests green. The characterization file
@@ -255,7 +257,7 @@ instance at the SHA (§2 notes).
 - **The 2026-10-24 `dev` red was on an advisory check.** #4403 merged at
   14:39:43Z. Its own *Frontend browser smoke* run (40103118915, head
   `079842488`) completed red at 14:43:33Z: the new
-  `analytics-header-wrap.mobile.spec.ts:126` test "the title keeps its width".
+  `analytics-header-wrap.mobile.spec.ts:126` test "at sm (640) a very long agent name truncates and does not push the header" (its failing assertion message: "the title keeps its width").
   `dev` stayed red on that test until #4409 (2026-10-25 02:07Z). Over all
   134 readable landings of the window, 9 merged with *Design visual
   regression* or *Frontend browser smoke* red at their head (7 visual on
@@ -312,7 +314,7 @@ instance at the SHA (§2 notes).
   - M5 — `avatar_tint` removed from the analytics agent item. Runner:
     mutation-red. By hand: **caught**, 1 red of 38 (`expectMatchesSpec`). C1.
   - P1 (second copy of M3's guard) — the dashboard emits `avatarTint: 0`.
-    Runner: mutation-red. By hand: **caught, held elsewhere**, 1 red of 15.
+    Runner: mutation-red. By hand: **shadowed**, 1 red of 15.
     A sibling spec-shape test failed, not the one named.
   - P2 (count-only pin) — migration 120's `down()/up()` restore test asserts
     only `toHaveLength(1)`. The mutation `failed_at TIMESTAMPTZ` → `TEXT`,
@@ -328,8 +330,9 @@ instance at the SHA (§2 notes).
   `bash` with `set -f` → 19 raw misses over 8 contract docs, 2 of them glob
   strings (dropped). Each of the other 17 was confirmed with
   `node scripts/docs/coupling-gate.mjs --strict --changed=<path>`. None names
-  the loop's doc (control `--changed=packages/backend/src/rails/sweep.ts` → 9
-  docs named) → **17 across 6 of 8**: x402 sequence 3, docs-quality system
+  the loop's doc (control `--changed=packages/backend/src/rails/sweep.ts` → 8
+  docs named at `b9f9f1e47`; 9 on this branch, which adds this report to its
+  `covers:`) → **17 across 6 of 8**: x402 sequence 3, docs-quality system
   2, dev-environment 4, package-dev-channel 2, CASP guardrails 5 (10-21: 6),
   security model 1. `npm run docs:covers-gaps` → 124 baselined pairs / 33
   docs (10-21: 129 / 35). The same 2 docs are outside the governed set.
@@ -439,13 +442,13 @@ instance at the SHA (§2 notes).
 
 - `prove-red`'s census table is the runner's class. Read each mutant's
   `.report` JSON before quoting caught counts: this run's table said 1
-  caught where the guards had caught 5 (C1).
+  caught where the guards had caught 4, with 1 more shadowed (C1).
 - A migration-file mutation is unsafe under the real-DB harness. The worker
   schema persists across runs, so a column-type mutant is refused as
   inherited drift, and a routine mutant outlives the file restore unseen
   (§2 notes). Drop `test_w*` before and after such a cell.
 - `git grep -E` with `\b` silently matched nothing (`CHECK` → 0 files where
-  `-P` gives 39). Use `-P` for word boundaries, with a control.
+  `-P` gives 39 with the migrations' `__tests__`, 37 without). Use `-P` for word boundaries, with a control.
 - `rg` resolves only in the harness's zsh, not in `bash -c`. Run block 3
   under zsh with an array, or the second count prints nothing.
 - The census sample is all one landing when the newest money-path landing

@@ -1928,8 +1928,9 @@ shows a live instance at the SHA.
   shapes as "mutation-red, fix the mutation": vitest's `.rejects` on a
   resolved promise, and the OpenAPI response-shape helper's plain `Error`.
   This run's census table read 5 mutation-red / 1 caught / 1 shadowed. By
-  the mutants' own JSON reports, 4 of the 5 mutation-red cells were reds on
-  the guard's own check, so the guards caught 5. The runner's stem
+  the mutants' own JSON reports, 4 of the 5 mutation-red cells were assertion reds
+  (3 on the named guard, 1 on a sibling), so under the runner's own classes
+  the guards caught 4 and 1 more is shadowed. The runner's stem
   allowlist, executed on the observed first lines → `false`, `false`
   (controls `true`, `true`). Reach: the helper in 53 backend test files / 199
   call lines; `.rejects.` in 156 test files / 598 lines (85 backend files;
@@ -1978,8 +1979,8 @@ via PR #4223 (`715b294bd`) → `shipped`. 2026-10-21 C3 → #4217 closed via PR
   29; analytics golden count, 1 of 8; analytics spec item, 1 of 38) and **1
   shadowed** (supersession dropped from the held predicate; diagnosis: not
   load-bearing at the tested condition). The runner's own table read 1 caught
-  (C1). Two probes → the dashboard twin of the schema guard, **caught
-  elsewhere**, 1 of 15; a count-only restore pin, **not run to a class**,
+  (C1). Two probes → the dashboard twin of the schema guard, **shadowed**
+  (a sibling test red), 1 of 15; a count-only restore pin, **not run to a class**,
   refused twice by the harness's drift guard. Census files exercised: 5 of 23.
 - block 2 (`covers:` completeness) → examined. The reference loop under bash
   with `set -f`, each miss confirmed with the strict gate → 17 across 6 of 8

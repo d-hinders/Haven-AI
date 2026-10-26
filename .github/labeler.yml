@@ -66,6 +66,8 @@
           - "packages/backend/src/modules/accounts/mainnet-gate.ts"
           - "packages/backend/src/modules/agents/rekey-*.ts"
           - "packages/backend/src/modules/budget-scope/**"
+          - "packages/backend/src/modules/catalog/catalog-discovery.ts"
+          - "packages/backend/src/modules/catalog/merchant-catalog.ts"
           - "packages/backend/src/modules/payments/agent-payment-status.ts"
           - "packages/backend/src/modules/payments/direct-sign-context.ts"
           - "packages/backend/src/modules/payments/submission-reconciler.ts"

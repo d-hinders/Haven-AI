@@ -51,7 +51,7 @@ import {
   type FetchedTaskBudgetSignContext,
   type FetchedSubBudgetSignContext,
 } from './sign-context.js'
-import { nextStepWireFields, signerRefusalStep } from './next-step.js'
+import { nextStepWireFields, signerRefusalStep, signerSuccessWireFields } from './next-step.js'
 import {
   buildSiwxPayload,
   composeSiwxMessage,
@@ -385,8 +385,12 @@ const SIGN_DESCRIPTION = [
   'intent against a Haven-signed context — never an arbitrary typed_data payload, however it is shaped.',
   'Next: call mcp__haven__haven_submit with signature, then pass x402_binding',
   'to mcp__haven-signer__haven_x402_sign_header — on the EIP-3009 bridge only. An erc7710 settlement',
-  "child has no header step (#4242): haven_submit with settlement_scheme 'erc7710' returns the header,",
-  'and haven_x402_sign_header refuses that binding. A bare payload_hash with no payment_id, typed_data',
+  "child has no header step (#4242): on a plain-HTTP merchant, haven_submit with settlement_scheme 'erc7710'",
+  'returns the header; on an MCP merchant reached through haven_prepare_catalog_purchase or',
+  'haven_pay_mcp_tool, call mcp__haven__haven_settle_mcp_tool with payment_id and signature and NO',
+  'payment_header — Haven assembles it at settle. haven_x402_sign_header refuses that binding, and the',
+  'x402_binding this result carries for a settlement child is ALREADY RETIRED (#4256), so it is unusable.',
+  'A bare payload_hash with no payment_id, typed_data',
   'or x402_expected is REFUSED (BARE_HASH_REFUSED): a hash carries nothing this signer can verify.',
   'TASK BUDGETS (#3329): pass task_budget_id ALONE — mutually exclusive with payment_id and',
   'payload_hash — to sign a task budget’s own child delegation (opening it) or its early-close',
@@ -404,7 +408,9 @@ const X402_SIGN_HEADER_DESCRIPTION = [
   'do not call this tool. The signer validates the merchant, amount, resource, asset, and',
   'network against the recorded funding context before signing, checks expires_at when present,',
   'and rejects mismatches or expired payment windows. It refuses a binding minted for an erc7710',
-  'settlement child (#4242): that payment has no funding leg, so no EIP-3009 header exists for it.',
+  'settlement child (#4242): that payment has no funding leg, so no EIP-3009 header exists for it —',
+  "on a plain-HTTP merchant, haven_submit with settlement_scheme 'erc7710' returns the header, and on an",
+  'MCP merchant haven_settle_mcp_tool settles with no payment_header at all.',
   'Returns { payment_header, retry_headers, accepted }. On your retry set EVERY header named in',
   'retry_headers to <payment_header> — the names come from the same rule the wire uses (both',
   'PAYMENT-SIGNATURE (x402 v2) and X-PAYMENT (v1) on the EIP-3009 bridge; a strict v2 merchant reads',
@@ -433,7 +439,9 @@ const SIGN_X402_DESCRIPTION = [
   'The returned x402_binding is ALREADY SPENT — this tool consumed it building payment_header —',
   'so never pass it to mcp__haven-signer__haven_x402_sign_header; that tool is the follow-up to',
   'haven_sign, not to this one. payment_header IS the header to use. An erc7710 settlement child is',
-  "refused before anything is signed (#4242): sign it with haven_sign and pass settlement_scheme 'erc7710' to haven_submit.",
+  "refused before anything is signed (#4242): sign it with haven_sign, then on a plain-HTTP merchant pass",
+  "settlement_scheme 'erc7710' to haven_submit, and on an MCP merchant call haven_settle_mcp_tool with",
+  'payment_id and signature and NO payment_header — Haven assembles it at settle.',
   'Next: for a paid MCP tool, call mcp__haven__haven_settle_mcp_tool. For a direct plain-HTTP x402',
   'merchant (the haven_pay_x402_quote path), relay signature via mcp__haven__haven_submit and then',
   'retry the original merchant URL YOURSELF, setting EVERY header the result names in',
@@ -480,6 +488,48 @@ export const toolDescriptions: Record<SignerToolName, string> = {
   haven_sign_x402: SIGN_X402_DESCRIPTION,
   haven_sign_sweep_delegate: SIGN_SWEEP_DELEGATE_DESCRIPTION,
 }
+
+/**
+ * #4449: the `next_tool_omitted_reason` the three x402 SUCCESS sites emit.
+ *
+ * The signer cannot tell an MCP merchant from a plain-HTTP one, nor a fresh
+ * signature from a funded-retry resume: the fetched sign context keeps only
+ * `paymentId`, `payloadHash`, `typedData`, `x402Expected`, `paymentRequired`
+ * and `clientUpdate` (`sign-context.ts`), and the caller-supplied
+ * `x402_expected` path has no context at all. A guessed `haven_submit` would
+ * be wrong on an MCP merchant and on the resume path, so each site names the
+ * route for every flow it cannot tell apart instead of naming one tool.
+ *
+ * These are literals, pinned whole by `next-step-success.test.ts` — the
+ * success walk is their only guard (`lint:next-steps` counts emission blocks
+ * that carry a `next_action` decision, and a success result carries none).
+ */
+export const SIGN_X402_CONTEXT_NEXT_STEP_REASON =
+  'the signer cannot tell an MCP merchant from a plain-HTTP one, or a fresh signature from a funded-retry resume: ' +
+  'on an MCP merchant call haven_settle_mcp_tool with { payment_id, signature } — add payment_header on EIP-3009 only; ' +
+  "on a plain-HTTP merchant call haven_submit with { payment_id, signature } (settlement_scheme 'erc7710' for a " +
+  'settlement child, which returns the payment_header) and then retry the merchant yourself; a settlement child’s ' +
+  'returned x402_binding is already retired and builds no header'
+
+export const SIGN_HEADER_NEXT_STEP_REASON =
+  'the signer cannot tell an MCP merchant from a plain-HTTP one: for a paid MCP tool call haven_complete_mcp_tool ' +
+  'with { payment_id, payment_header } once haven_submit has confirmed funding; for a plain-HTTP merchant retry the ' +
+  'merchant URL yourself with payment_header in every header named in retry_headers, then report the answer with ' +
+  'haven_report_x402_outcome'
+
+export const SIGN_X402_ONE_SHOT_NEXT_STEP_REASON =
+  'the signer cannot tell an MCP merchant from a plain-HTTP one: for a paid MCP tool call haven_settle_mcp_tool ' +
+  'with { payment_id, signature, payment_header }; for a plain-HTTP merchant relay signature with haven_submit, then ' +
+  'retry the merchant URL yourself with payment_header in every header named in retry_headers and report the answer ' +
+  'with haven_report_x402_outcome'
+
+export const SIGN_DIRECT_NO_PAYMENT_ID_REASON =
+  'this signature was built from caller-supplied typed_data, so the signer holds no payment_id to name: call ' +
+  'haven_submit with the payment_id from the pay result and this signature'
+
+export const SIGN_SIWX_NEXT_STEP_REASON =
+  'retry the merchant request with the SIGN-IN-WITH-X header this result carries (sign_in_with_x_header) — no hosted ' +
+  'Haven tool follows a sign-in'
 
 /** Map the wire-shaped x402_expected (snake_case) to the EdgeSigner's camelCase context. */
 /**
@@ -1066,7 +1116,19 @@ export function createToolHandlers(
             // payload_hash (the ERC-4337 UserOp hash, a DIFFERENT value the
             // #3271 check above merely cross-checked this typed data against).
             await auditSigning('haven_sign', hashTypedData(typedData as Parameters<typeof hashTypedData>[0]))
-            return { signature, ...clientUpdateField(resolved) }
+            // #4449: a direct payment's next call is the hosted `haven_submit`
+            // with the payment_id the fetch carried. A caller-supplied
+            // typed_data carries no payment_id, so that path says why instead.
+            return {
+              signature,
+              ...(resolved?.kind === 'direct'
+                ? signerSuccessWireFields({
+                    nextTool: 'haven_submit#payment',
+                    nextArguments: { payment_id: resolved.ctx.paymentId, signature },
+                  })
+                : signerSuccessWireFields({ nextTool: null, nextToolOmittedReason: SIGN_DIRECT_NO_PAYMENT_ID_REASON })),
+              ...clientUpdateField(resolved),
+            }
           }
           // #3169: bare hash, nothing to verify against — refused, never signed.
           // Not audited as a signing operation: nothing was signed.
@@ -1078,7 +1140,15 @@ export function createToolHandlers(
         // payload_hash, a different value the expected-context binding
         // merely cross-checks this typed data against.
         await auditSigning('haven_sign', hashTypedData(typedData as Parameters<typeof hashTypedData>[0]))
-        return { signature: result.signature, x402_binding: result.x402Binding, ...clientUpdateField(resolved) }
+        // #4449: the x402 success site. It cannot tell an MCP merchant from a
+        // plain-HTTP one, nor a fresh signature from a funded-retry resume, so
+        // it names the route for each flow instead of guessing a tool.
+        return {
+          signature: result.signature,
+          x402_binding: result.x402Binding,
+          ...signerSuccessWireFields({ nextTool: null, nextToolOmittedReason: SIGN_X402_CONTEXT_NEXT_STEP_REASON }),
+          ...clientUpdateField(resolved),
+        }
       }),
 
     haven_x402_sign_header: async (input) =>
@@ -1103,6 +1173,9 @@ export function createToolHandlers(
           // #3727: the ready-made retry headers beside the prose — the names
           // come from the SDK's live rule, never re-derived here.
           retry_headers: x402RetryHeadersFor(result.paymentHeader),
+          // #4449: the header is built, but who consumes it depends on the
+          // merchant transport the signer cannot see.
+          ...signerSuccessWireFields({ nextTool: null, nextToolOmittedReason: SIGN_HEADER_NEXT_STEP_REASON }),
         }
       }),
 
@@ -1195,6 +1268,9 @@ export function createToolHandlers(
           // #3727: the ready-made retry headers beside the prose — the names
           // come from the SDK's live rule, never re-derived here.
           retry_headers: x402RetryHeadersFor(header.paymentHeader),
+          // #4449: the one-shot built the header, but the settle route depends
+          // on the merchant transport the signer cannot see.
+          ...signerSuccessWireFields({ nextTool: null, nextToolOmittedReason: SIGN_X402_ONE_SHOT_NEXT_STEP_REASON }),
           ...clientUpdateField(resolved),
         }
       }),
@@ -1213,7 +1289,15 @@ export function createToolHandlers(
           'haven_sign_sweep_delegate',
           hashPayloadForAudit(args.authorization),
         )
-        return { signature: result.signature }
+        return {
+          signature: result.signature,
+          // #4449: the hosted phase-2 call that consumes this signature takes
+          // the authorization it prepared plus the signature — both are here.
+          ...signerSuccessWireFields({
+            nextTool: 'haven_sweep_delegate#sweep',
+            nextArguments: { authorization: args.authorization, signature: result.signature },
+          }),
+        }
       }),
 
     haven_sign_siwx: async (input) =>
@@ -1249,7 +1333,12 @@ export function createToolHandlers(
           domain: fields.domain,
           nonce: fields.nonce,
         })
-        return { sign_in_with_x_header: header }
+        return {
+          sign_in_with_x_header: header,
+          // #4449: a sign-in has no hosted successor — the agent retries the
+          // merchant itself with the header this result carries.
+          ...signerSuccessWireFields({ nextTool: null, nextToolOmittedReason: SIGN_SIWX_NEXT_STEP_REASON }),
+        }
       }),
   }
 

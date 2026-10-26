@@ -88,6 +88,35 @@ covers:
 last-verified: "2026-10-26"
 ---
 
+> **Contract change, additive (#4449, 2026-10-26): the edge signer's SUCCESS
+> results carry the next-step family.** Covered files: `packages/signer/**`
+> (`tools.ts`, `next-step.ts`, `no-funding-leg.ts`), `packages/sdk/src/next-step.ts`
+> (an optional `name` on `NextStepTarget`, so a `<tool>#<variant>` target key
+> renders the bare tool name) and
+> `packages/mcp-server/src/next-step-signer-parity.test.ts` (the two new
+> variants pinned to the hosted schemas).
+>
+> Each of the six signer success sites now carries either `next_tool_name` +
+> `next_tool_server_role: 'hosted'` + `next_arguments`, or a literal
+> `next_tool_omitted_reason`. The `next_tool` family only: no success result
+> gains `next_action` or `safe_to_continue`, which stay on refusals.
+>
+> **Installed runtimes do not emit the step.** The signers observed live on
+> 2026-10-26 (`0.10.0-alpha.0`, `0.8.1-alpha.0`) return the same results they
+> always did, so an agent on either runtime sees no `next_tool*` field on a
+> successful signature. **The hosted prepare and pay guidance stays
+> authoritative** and must not be trimmed in favour of the signer step: it is
+> the only next-step source those runtimes have, and it is the only one that
+> knows the merchant transport.
+>
+> Nothing else moves. No tool name, argument, input schema, strict-input list,
+> expected-context version, consent hash, `tools-list.snapshot.json` entry or
+> `next-arguments-corpus.json` row changes — no signer description is mirrored
+> in the hosted snapshot, and the consent hash ignores descriptions
+> (`packages/signer/src/consent.ts`). `SUPPORTED_X402_EXPECTED_VERSIONS` is
+> untouched and no signing decision changes. `last-verified` already reads
+> 2026-10-26 and is left as is. Nothing else in this document was re-verified.
+
 > **Re-verified #4415 (2026-10-25, stale comment sweep):** the only covered
 > file this diff touches is `packages/signer/src/cli-args.test.ts` — one test
 > TITLE now says "a sixth tool" (the signer library exposes five tools, so a

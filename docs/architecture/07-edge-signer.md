@@ -109,9 +109,13 @@ The edge signer ships as **`@haven_ai/signer`** in two layers:
      gets the unknown-binding refusal, which also builds nothing.
      `NO_FUNDING_LEG` carries `next_action: sign_and_submit_payment`, no tool, and a
      `next_tool_omitted_reason` per site: here, submit the child signature the
-     agent already holds to `haven_submit` with `settlement_scheme: 'erc7710'`;
-     on `haven_sign_x402`, sign the child with `haven_sign` first. No tool is
-     named because the signer's own next-step targets declare only `haven_get_payment_status`, and the refusal does not hold the signature argument a `haven_submit` step would need. Reuses the SDK's `selectStandardPaymentOption` +
+     agent already holds to `haven_submit` with `settlement_scheme: 'erc7710'`
+     on a plain-HTTP merchant, or to `haven_settle_mcp_tool` with no
+     `payment_header` on an MCP merchant; on `haven_sign_x402`, sign the child
+     with `haven_sign` first. No tool is named because the refusal does not hold
+     the signature argument a `haven_submit` / `haven_settle_mcp_tool` step would
+     need, and because the signer cannot tell the two merchant transports apart
+     (#4449). Reuses the SDK's `selectStandardPaymentOption` +
      `toStandardPaymentRequirements` + the `x402` library. Since #3888 the
      authorization's nonce is not the library's random draw: the signer
      overwrites it with `deriveX402PaymentNonce(expected.paymentId)` on the
@@ -220,6 +224,39 @@ The edge signer ships as **`@haven_ai/signer`** in two layers:
    that only ever reads MCP `instructions` still learns the refusal carries
    `code` / `supported_versions` / `received_version` / `fallback` as data,
    not just a message to pattern-match.
+
+   **Success results name their next step too (#4449).** Until #4449 only the
+   signer's REFUSALS carried the next-step family (#3103); a successful
+   signature said nothing about what to call next, so `CLAUDE.md`'s "every MCP
+   payment-flow response names its next tool" was false for the six success
+   sites. Each now carries either `next_tool_name` +
+   `next_tool_server_role: 'hosted'` + `next_arguments`, or a literal
+   `next_tool_omitted_reason` — the `next_tool` family only, never
+   `next_action` / `safe_to_continue`, which stay on refusals (the task-budget
+   and sub-budget successes have never carried them either). Where the signer
+   KNOWS the next tool it names it through the SDK builder: a direct-payment
+   `haven_sign` hands off to `haven_submit` with `{ payment_id, signature }`
+   (the `haven_submit#payment` variant beside `#task_budget` / `#sub_budget`),
+   and `haven_sign_sweep_delegate` hands its signature back to
+   `haven_sweep_delegate` with `{ authorization, signature }` (the
+   `haven_sweep_delegate#sweep` variant). Where it cannot know, it says why
+   instead of guessing: the three x402 success sites (`haven_sign` on an x402
+   context, `haven_sign_x402`, `haven_x402_sign_header`) cannot tell an MCP
+   merchant from a plain-HTTP one, nor a fresh signature from a funded-retry
+   resume — the fetched sign context keeps only `paymentId`, `payloadHash`,
+   `typedData`, `x402Expected`, `paymentRequired` and `clientUpdate`, and the
+   caller-supplied `x402_expected` path has no context at all — so each reason
+   names BOTH settle routes (`haven_submit` with `settlement_scheme: 'erc7710'`
+   for a plain-HTTP merchant, `haven_settle_mcp_tool` with no `payment_header`
+   for an MCP merchant). A guessed `haven_submit` would be wrong on an MCP
+   merchant and on the resume path. `haven_sign_siwx` names no tool because no
+   hosted tool follows a sign-in. The erc7710 `haven_sign` result still carries
+   `x402_binding` (the change is additive), and the tool description now says
+   that id is already retired (#4256), so it is unusable. No signing decision
+   changes and `SUPPORTED_X402_EXPECTED_VERSIONS` is untouched. The success
+   walk (`packages/signer/src/next-step-success.test.ts`) is these sites' only
+   guard — `lint:next-steps` counts emission blocks that carry a `next_action`
+   decision, and a success result carries none.
 
    **MCP `instructions` on the two payment-brain servers (agent-prompt audit,
    items A/B).** Since #1306–#1311 shipped the guided catalog-purchase flow
@@ -714,3 +751,10 @@ account is permanently out of scope.
 > `isSweepableChain` in `packages/sdk/src/sweep.ts`. The week's covered
 > drift (x402 proof-header settlement reports #4075, expired-only budgets
 > #4376) changed what reports carry and refuse, not any signer boundary.
+
+> **Re-verified 2026-10-26 (#4449, the signer's success next-step family):** the
+> six success sites and the settlement-child guidance were re-read against
+> `packages/signer/src/tools.ts`, `next-step.ts` and `no-funding-leg.ts` at
+> `origin/dev` `b9f9f1e47`. Scope of this note: the success-result paragraph and
+> the `NO_FUNDING_LEG` bullet. The rest of this document was not re-read for it,
+> and `last-verified` is not bumped.

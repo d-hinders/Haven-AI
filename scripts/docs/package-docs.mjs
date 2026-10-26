@@ -234,7 +234,11 @@ export const GOVERNED_PACKAGE_DOCS = [
     // #3173: new § "Startup, CLI options and the consent screen" verified
     // against cli-args.ts, consent.ts, server.ts, core.ts (lazy x402) and the
     // measured numbers in the PR; nothing else re-verified.
-    'last-verified': '2026-10-25',
+    // #4449: EDITED, scope = the settlement-child paragraph (both settle routes
+    // now named) and a new "Every success result names its next step" paragraph,
+    // verified against tools.ts, next-step.ts and no-funding-leg.ts. Nothing
+    // else in the README re-verified.
+    'last-verified': '2026-10-26',
   },
   {
     doc: 'packages/mcp/README.md',

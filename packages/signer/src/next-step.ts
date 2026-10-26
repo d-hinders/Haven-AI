@@ -1,4 +1,4 @@
-import { createNextStepBuilder, type NextStep, type NextStepHandoff, type NextStepTarget } from '@haven_ai/sdk/edge'
+import { AgentPaymentNextAction, createNextStepBuilder, type NextStep, type NextStepHandoff, type NextStepTarget } from '@haven_ai/sdk/edge'
 import { z } from 'zod'
 
 /**
@@ -24,12 +24,34 @@ export const SIGNER_HOSTED_HANDOFF_SHAPES = {
   // part before `#` as the hosted tool it checks the entry against.
   'haven_submit#task_budget': { task_budget_id: z.string().min(1), signature: z.string().regex(/^0x[0-9a-fA-F]+$/) },
   'haven_submit#sub_budget': { sub_budget_id: z.string().min(1), signature: z.string().regex(/^0x[0-9a-fA-F]+$/) },
+  // #4449: the third `haven_submit` shape — a DIRECT payment's signed UserOp,
+  // relayed by `payment_id` (the hosted schema's `payment_id` arm).
+  'haven_submit#payment': { payment_id: z.string().min(1), signature: z.string().regex(/^0x[0-9a-fA-F]+$/) },
+  // #4449: `haven_sign_sweep_delegate` hands its signature back to the hosted
+  // `haven_sweep_delegate` phase 2, which takes the authorization it prepared
+  // plus that signature. The authorization shape is the hosted tool's own
+  // (`packages/mcp-server/src/tools/contracts.ts`), restated here because the
+  // signer must not import the hosted server.
+  'haven_sweep_delegate#sweep': {
+    authorization: z.object({
+      from: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
+      to: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
+      value: z.string().regex(/^[0-9]+$/),
+      validAfter: z.string().regex(/^[0-9]+$/),
+      validBefore: z.string().regex(/^[0-9]+$/),
+      nonce: z.string().regex(/^0x[0-9a-fA-F]{64}$/),
+      token: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
+      chainId: z.number().int().positive(),
+    }),
+    signature: z.string().regex(/^0x[0-9a-fA-F]+$/),
+  },
 } as const satisfies Record<string, z.ZodRawShape>
 
-function target<S extends z.ZodRawShape>(shape: S): NextStepTarget<z.input<z.ZodObject<S>>> {
+function target<S extends z.ZodRawShape>(shape: S, name?: string): NextStepTarget<z.input<z.ZodObject<S>>> {
   const schema = z.object(shape).strict()
   return {
     role: 'hosted',
+    ...(name ? { name } : {}),
     validate: (input) => {
       const r = schema.safeParse(input ?? {})
       return r.success ? null : r.error.errors.map((e) => `${e.path.join('.') || '(root)'}: ${e.message}`).join('; ')
@@ -39,6 +61,11 @@ function target<S extends z.ZodRawShape>(shape: S): NextStepTarget<z.input<z.Zod
 
 const SIGNER_NEXT_STEP_TARGETS = {
   haven_get_payment_status: target(SIGNER_HOSTED_HANDOFF_SHAPES.haven_get_payment_status),
+  // #4449: variant keys select the argument shape; `name` renders the bare
+  // hosted tool, so `next_tool_name` is `haven_submit`, never
+  // `haven_submit#payment`.
+  'haven_submit#payment': target(SIGNER_HOSTED_HANDOFF_SHAPES['haven_submit#payment'], 'haven_submit'),
+  'haven_sweep_delegate#sweep': target(SIGNER_HOSTED_HANDOFF_SHAPES['haven_sweep_delegate#sweep'], 'haven_sweep_delegate'),
 }
 export type SignerNextStepTargets = typeof SIGNER_NEXT_STEP_TARGETS
 export type SignerHandoff = NextStepHandoff<SignerNextStepTargets>
@@ -48,6 +75,26 @@ const nextStep = createNextStepBuilder(SIGNER_NEXT_STEP_TARGETS)
 /** A signer refusal's next step: a hosted tool with arguments it declares, or `null` + the reason. */
 export function signerRefusalStep(input: { nextAction: NextStep['next_action'] } & SignerHandoff): NextStep {
   return nextStep({ ...input, safeToContinue: false, reason: '' } as Parameters<typeof nextStep>[0])
+}
+
+/**
+ * #4449: a signer SUCCESS result's next step, as the `next_tool` family only.
+ *
+ * Success results carry no `next_action` / `safe_to_continue` — those stay on
+ * refusals, and the budget successes (`signTaskBudget` / `signSubBudget`) have
+ * never carried them either. The builder still needs an action to render, so
+ * one is passed and then dropped by {@link nextStepWireFields}: nothing here
+ * can put a decision on a success wire.
+ */
+export function signerSuccessWireFields(handoff: SignerHandoff): ReturnType<typeof nextStepWireFields> {
+  return nextStepWireFields(
+    nextStep({
+      ...handoff,
+      nextAction: AgentPaymentNextAction.SignAndSubmitPayment,
+      safeToContinue: true,
+      reason: '',
+    } as Parameters<typeof nextStep>[0]),
+  )
 }
 
 /** The `next_tool` family of a step, for the failure envelope (additive; `next_tool` never null). */

@@ -21,10 +21,11 @@ covers:
   - packages/backend/src/routes/agent-tax-declaration.ts
   - packages/backend/src/modules/agents/tax-declaration.ts
   - packages/sdk/src/client-tax-declaration.ts
+  - packages/sdk/src/tax-declaration.ts
   - packages/frontend/src/components/agent-panel/TaxDeclarationToggle.tsx
   - packages/mcp/src/server.ts
   - packages/sdk/src/merchant-completion.ts
-last-verified: "2026-10-25"
+last-verified: "2026-10-26"
 ---
 
 # Owner company details
@@ -230,9 +231,21 @@ A developer's own SDK client built with the delegate key carries it too.
 through `fetch`, `payX402Quote` and `resumeX402Payment`. An erc7710 payment
 never carries one, and neither the hosted server nor the edge signer builds
 one. So with an agent opted in, each EIP-3009 paid retry it makes through
-such a client carries the country and VAT number to the merchant, whether or
-not a receipt is ever handed over. The legal name and organisation number
-are not in it.
+such a client carries the country, the VAT number, the taxable-person status
+and a signed link to the agent's wallet address to the merchant, whether or
+not a receipt is ever handed over. The link is the declaration's
+`principalId` (`did:pkh:<network>:<delegate EOA>`) plus its
+`principalAttributionHash`, signed with the same delegate key that signs the
+payment (`packages/sdk/src/tax-declaration.ts`). The legal name and
+organisation number are not in it.
+
+The agent Settings tab's toggle says the same thing in the owner's words
+(#4416): the declaration travels only when the agent pays through a client
+that holds its own signing key, the default setup sends none, and the
+merchant receives the country, the VAT number, the taxable-person status and
+the signed link to the agent's wallet address. The card does not name the
+payment rail — the owner's copy review of 2026-09-30 (PR #3490) removed that
+sentence, and the rail stays stated here instead.
 
 ## The settings screen
 

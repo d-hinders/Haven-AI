@@ -141,7 +141,7 @@ refusals and the budget on its face and the other columns in a disclosure. Its
 budget line is one line per budget, and each line is the desktop cell's caption
 text from the same projection (#4432): the figures and the period for a
 readable read, "Usage this period couldn't be read" for a failed or stale one,
-"Starts …" for a budget that has not started, "No budget" for none. It is text
+"Starts …" for a budget that has not started, "No budget" for an agent with none. It is text
 only, with no meter and no percentage.
 
 **Fees paid to Haven.** What Haven has charged, in the display currency. The

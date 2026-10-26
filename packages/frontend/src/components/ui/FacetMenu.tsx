@@ -1,9 +1,11 @@
 'use client'
 
+import { Fragment, useState } from 'react'
 import { Check, ChevronDown } from 'lucide-react'
 import { FilterPill } from '@haven_ai/ui/FilterPill'
 import { Icon } from '@/components/ui/Icon'
 import { allOptionLabel, facetValueLabel } from './list-controls-copy'
+import { planFacetOptions, toggleFacetGroup, type FacetOptionGroup } from './list-facet-groups'
 import { listMenuItemClasses, listMenuPanelClasses, listTriggerClasses, useListMenu } from './list-menu'
 import { sameValues, type FacetUrlSpec } from './list-url-codec'
 
@@ -19,6 +21,12 @@ export interface ListFacetOption {
   meta?: string
   /** Rows matching this value; shown on the right of a multi-select row. */
   count?: number
+  /**
+   * A collapsed option group (#4452): a long tail of options behind one
+   * disclosure row ("Show 14 inactive"). Options stay one flat array, so the
+   * URL codec, the chip summary and value clearing are unchanged.
+   */
+  group?: FacetOptionGroup
 }
 
 /**
@@ -59,6 +67,13 @@ export interface FacetMenuProps {
  * - **Pills**: the same facet drawn as a row of toggle buttons
  *   (`aria-pressed`, the `FilterPill` primitive) for a short category list.
  *   Pills are not menu items.
+ * - **Collapsed option groups** (#4452): an option may carry a `group`, and a
+ *   facet's long tail collapses behind one `menuitem` reading "Show 14
+ *   inactive" with `aria-expanded`. Ungrouped rows come first. The toggle
+ *   stays mounted when the group expands, so focus is not lost and the next
+ *   arrow key continues from it; a group holding the selection is open on
+ *   every render and cannot be collapsed. The split itself lives in
+ *   `list-facet-groups.ts`, shared with the phone sheet.
  * - A facet with one possible value is hidden — there is nothing to choose.
  * - `facet.allLabel` renames the "no filter" row, or (`null`, #4113) drops
  *   it for a single-select facet whose every value is a real choice
@@ -111,10 +126,39 @@ export function FacetMenu({ facet, value, onChange, allLabel: allLabelOverride, 
     if (!multi) menu.close(true)
   }
 
-  const rows: { value: string | null; label: string; meta?: string; count?: number; checked: boolean }[] = []
-  if (!multi && allLabel !== null) rows.push({ value: null, label: allLabel, checked: value.length === 0 })
-  for (const option of facet.options) {
-    rows.push({ value: option.value, label: option.label, meta: option.meta, count: option.count, checked: value.includes(option.value) })
+  // The user's own expansions (#4452). The open state itself is derived on
+  // every render by `planFacetOptions`, because the URL value loads after
+  // mount and a selected grouped row must exist for `focusItem('checked')`.
+  const [expandedGroups, setExpandedGroups] = useState<string[]>([])
+  const plan = planFacetOptions(facet.options, value, expandedGroups)
+
+  const optionRow = (option: ListFacetOption) => {
+    const checked = value.includes(option.value)
+    return (
+      <button
+        key={option.value}
+        type="button"
+        role={multi ? 'menuitemcheckbox' : 'menuitemradio'}
+        aria-checked={checked}
+        tabIndex={-1}
+        onClick={() => {
+          if (!multi) return choose([option.value])
+          choose(checked ? value.filter((v) => v !== option.value) : [...value, option.value])
+        }}
+        className={listMenuItemClasses}
+      >
+        {multi ? <CheckboxMark checked={checked} /> : <RadioMark checked={checked} />}
+        <span className="truncate" title={option.label}>
+          {option.label}
+        </span>
+        {/* `meta` (#4150) is the non-truncating detail slot: a status
+            suffix the label's `truncate` may not leave room for. */}
+        <span className="flex items-center gap-2 text-xs text-[var(--v2-ink-3)]">
+          {option.meta && <span className="whitespace-nowrap">{option.meta}</span>}
+          <span className="tabular-nums">{option.count ?? ''}</span>
+        </span>
+      </button>
+    )
   }
 
   return (
@@ -144,31 +188,48 @@ export function FacetMenu({ facet, value, onChange, allLabel: allLabelOverride, 
           style={menu.panelStyle}
           className={`${listMenuPanelClasses} ${align === 'right' ? 'right-0' : 'left-0'}`}
         >
-          {rows.map((row) => (
+          {!multi && allLabel !== null && (
             <button
-              key={row.value ?? '__all'}
+              key="__all"
               type="button"
-              role={multi ? 'menuitemcheckbox' : 'menuitemradio'}
-              aria-checked={row.checked}
+              role="menuitemradio"
+              aria-checked={value.length === 0}
               tabIndex={-1}
-              onClick={() => {
-                if (row.value === null) return choose([])
-                if (!multi) return choose([row.value])
-                choose(row.checked ? value.filter((v) => v !== row.value) : [...value, row.value])
-              }}
+              onClick={() => choose([])}
               className={listMenuItemClasses}
             >
-              {multi ? <CheckboxMark checked={row.checked} /> : <RadioMark checked={row.checked} />}
-              <span className="truncate" title={row.label}>
-                {row.label}
+              <RadioMark checked={value.length === 0} />
+              <span className="truncate" title={allLabel}>
+                {allLabel}
               </span>
-              {/* `meta` (#4150) is the non-truncating detail slot: a status
-                  suffix the label's `truncate` may not leave room for. */}
-              <span className="flex items-center gap-2 text-xs text-[var(--v2-ink-3)]">
-                {row.meta && <span className="whitespace-nowrap">{row.meta}</span>}
-                <span className="tabular-nums">{row.count ?? ''}</span>
-              </span>
+              <span className="flex items-center gap-2 text-xs text-[var(--v2-ink-3)]" />
             </button>
+          )}
+          {plan.ungrouped.map(optionRow)}
+          {plan.groups.map((group) => (
+            <Fragment key={`group-${group.group.id}`}>
+              {/* The disclosure row (#4452) is a `menuitem`, which
+                  `ITEM_SELECTOR` already counts, so arrows, Home and End reach
+                  it. It STAYS MOUNTED when the group expands: focus is not
+                  lost, and the next arrow key continues from it. */}
+              <button
+                type="button"
+                role="menuitem"
+                aria-expanded={group.open}
+                tabIndex={-1}
+                onClick={() => setExpandedGroups((ids) => toggleFacetGroup(ids, group))}
+                className={listMenuItemClasses}
+              >
+                <Icon
+                  icon={ChevronDown}
+                  className={`h-3.5 w-3.5 text-[var(--v2-ink-3)] motion-safe:transition-transform ${group.open ? '' : '-rotate-90'}`}
+                />
+                <span className="truncate">{group.toggleLabel}</span>
+              </button>
+              {/* No `role="group"` around these rows: it would split one radio
+                  set for screen readers. */}
+              {group.open && group.options.map(optionRow)}
+            </Fragment>
           ))}
         </div>
       )}

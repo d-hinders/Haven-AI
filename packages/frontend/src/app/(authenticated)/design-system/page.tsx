@@ -1124,6 +1124,46 @@ function FacetPrimitivesExample() {
 }
 
 /**
+ * A collapsed option group (#4452): a long facet whose inactive tail hides
+ * behind one disclosure row, "Show 4 inactive". Ungrouped rows come first; the
+ * toggle is a `menuitem` with `aria-expanded`, so arrows, Home and End reach
+ * it, and it stays mounted when the group expands.
+ */
+function GroupedFacetExample() {
+  const [agent, setAgent] = useState<string[]>([])
+  return (
+    <div className="flex flex-wrap items-center gap-2" data-testid="ds-list-controls-grouped">
+      <FacetMenu
+        facet={{
+          id: 'agent',
+          label: 'Initiator',
+          options: [
+            { value: 'a1', label: 'Agent naming' },
+            { value: 'a2', label: 'Atlas' },
+            { value: 'a3', label: 'Demo agent', group: { id: 'inactive', label: 'inactive' } },
+            { value: 'a4', label: 'Lovable Dev', group: { id: 'inactive', label: 'inactive' } },
+            {
+              value: 'a5',
+              label: 'Lovable Dev preview deployment helper',
+              meta: 'Revoked',
+              group: { id: 'inactive', label: 'inactive' },
+            },
+            {
+              value: 'a6',
+              label: 'Quarterly procurement research agent',
+              meta: 'Paused',
+              group: { id: 'inactive', label: 'inactive' },
+            },
+          ],
+        }}
+        value={agent}
+        onChange={setAgent}
+      />
+    </div>
+  )
+}
+
+/**
  * A single-select facet with no "All" row (`allLabel: null`, #4113): every
  * value is a real choice, and the default is the unfiltered view: Agents'
  * Archived facet.
@@ -3412,6 +3452,9 @@ export default function DesignSystemPage() {
           </ListControlsState>
           <ListControlsState label="No All row — a single-select facet whose every value is a real choice (allLabel: null): Agents' Archived, Hidden by default. The default is untinted and raises no chip; Shown is a filter, and removing its chip returns to Hidden. A string allLabel renames the All row instead.">
             <NoAllFacetExample />
+          </ListControlsState>
+          <ListControlsState label="A collapsed option group (#4452) — a facet's long tail hides behind one disclosure row, “Show 4 inactive”. Ungrouped rows come first, then one toggle per group. The toggle is a menuitem with aria-expanded, so arrows, Home and End reach it, and it stays mounted when the group expands: focus is not lost and the next arrow continues from it. A group holding the selected value is open on every render and cannot be collapsed. The phone sheet draws the same split as a Tab-reachable disclosure button.">
+            <GroupedFacetExample />
           </ListControlsState>
         </div>
       </Section>

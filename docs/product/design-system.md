@@ -785,7 +785,7 @@ follows without edits.
   **above** its `Card`, not inside it — on detail pages **and on settings
   pages**. On settings the shared `SettingsSection` enforces the shape: the
   heading is sentence case `v2-text-h3` (never the old uppercase band), the
-  description is `mt-0.5 mb-3 text-sm text-[var(--v2-ink-muted)]` and any
+  description is `mt-0.5 mb-3 text-sm text-[var(--v2-ink-2)]` and any
   note rides under it in `text-xs text-[var(--v2-ink-3)]`, all above the
   card; the card holds only the hairline-divided rows. The card can load,
   swap or be replaced without moving its heading, and a skimming reader gets

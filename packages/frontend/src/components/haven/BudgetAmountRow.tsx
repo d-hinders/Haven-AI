@@ -169,7 +169,7 @@ export default function BudgetAmountRow({
         {suffix ? (
           <span
             aria-hidden="true"
-            className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-[var(--v2-ink-muted)]"
+            className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-[var(--v2-ink-2)]"
           >
             {selectedToken!.symbol}
           </span>

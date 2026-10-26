@@ -71,7 +71,7 @@ describe('SettingsSection', () => {
     expect(description.className).toMatch(/\bmt-0\.5\b/)
     expect(description.className).toMatch(/\bmb-3\b/)
     expect(description.className).toMatch(/\btext-sm\b/)
-    expect(description.className).toMatch(/text-\[var\(--v2-ink-muted\)\]/)
+    expect(description.className).toMatch(/text-\[var\(--v2-ink-2\)\]/)
     // The note is quieter still.
     expect(note.className).toMatch(/\btext-xs\b/)
     expect(note.className).toMatch(/text-\[var\(--v2-ink-3\)\]/)

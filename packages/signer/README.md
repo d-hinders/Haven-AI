@@ -121,12 +121,35 @@ and `haven_x402_sign_header` answers its binding with `NO_FUNDING_LEG` while
 that id is among the last 64 the process retired; after eviction or a restart
 it gets the unknown-binding refusal (#4242/#4248; `NO_FUNDING_LEG` carries
 `next_action: sign_and_submit_payment` and a `next_tool_omitted_reason` naming
-`haven_submit` with `settlement_scheme: 'erc7710'`). Either way no header is
+BOTH settle routes — `haven_submit` with `settlement_scheme: 'erc7710'` for a
+plain-HTTP merchant, `haven_settle_mcp_tool` with no `payment_header` for an MCP
+merchant). Either way no header is
 built. An embedder that calls
 `signDelegationTypedData` directly owns that check itself. The core's
 `signX402FundingTypedData` is not a verbatim primitive: since #3281 it runs
 the x402 shape checks itself (a guarded funding leg or a verified settlement
 child only), whoever calls it.
+
+**Every success result names its next step (#4449).** Until #4449 only the
+refusals carried the next-step family (#3103); a successful signature said
+nothing about what to call next. Each of the six success sites now carries
+either `next_tool_name` + `next_tool_server_role: 'hosted'` + `next_arguments`,
+or a literal `next_tool_omitted_reason` — the `next_tool` family only, never
+`next_action` / `safe_to_continue`, which stay on refusals. Where the signer
+knows the tool it names it: a direct-payment `haven_sign` hands off to
+`haven_submit` with `{ payment_id, signature }`, and
+`haven_sign_sweep_delegate` hands its signature back to `haven_sweep_delegate`
+with `{ authorization, signature }`. Where it cannot know, it says why instead
+of guessing: `haven_sign` on an x402 context, `haven_sign_x402` and
+`haven_x402_sign_header` cannot tell an MCP merchant from a plain-HTTP one, nor
+a fresh signature from a funded-retry resume, so each reason names both settle
+routes. `haven_sign_siwx` names no tool because no hosted tool follows a
+sign-in. The change is additive — no field is removed (including
+`x402_binding`, whose retirement for a settlement child the `haven_sign`
+description now states), no signing decision changes, and
+`SUPPORTED_X402_EXPECTED_VERSIONS` is untouched. Installed signers
+(`0.10.0-alpha.0`, `0.8.1-alpha.0`, observed live 2026-10-26) never emit these
+steps, so the hosted prepare and pay guidance stays authoritative.
 
 **The unbound-branch allowlist (#3272).** Without an x402 context, `haven_sign`
 signs typed data only when ALL of these hold; otherwise it refuses, with no

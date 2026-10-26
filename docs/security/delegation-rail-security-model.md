@@ -4156,3 +4156,15 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > cannot recolour a released agent or cross a tenant. No route, signing,
 > revocation or grant path changes. Scope of this note: those two reads and the
 > migration. Nothing else in this document was re-verified for it.
+
+> **Re-verified unchanged (#4449, 2026-10-26 — the signer's success next-step
+> family).** The covered files this diff touches are
+> `packages/signer/src/tools.ts` and `packages/signer/src/no-funding-leg.ts`, and
+> in both the change is guidance only: six success results gain the `next_tool`
+> family (or a literal `next_tool_omitted_reason`), and the settlement-child
+> prose names the MCP-merchant settle beside the plain-HTTP one. No signing
+> decision, typed-data check, allowlist, binding, delegation, caveat, enforcer
+> term, budget pre-check, allowance, settlement window or refusal changes;
+> `SUPPORTED_X402_EXPECTED_VERSIONS` is untouched and no field is removed.
+> Scope of this note: those two files. Nothing else in this document was
+> re-verified for it, and `last-verified` already reads 2026-10-26.

@@ -15,6 +15,34 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+### Added
+
+- Every successful signature now names the agent's next step (#4449). Each of
+  the six success sites carries either `next_tool_name` +
+  `next_tool_server_role: 'hosted'` + `next_arguments`, or a literal
+  `next_tool_omitted_reason` — the `next_tool` family only, never `next_action`
+  or `safe_to_continue`, which stay on refusals. A direct-payment `haven_sign`
+  names `haven_submit` with `{ payment_id, signature }`, and
+  `haven_sign_sweep_delegate` names `haven_sweep_delegate` with
+  `{ authorization, signature }`. The three x402 success sites name no tool and
+  say why instead: the signer cannot tell an MCP merchant from a plain-HTTP
+  one, nor a fresh signature from a funded-retry resume, so each reason names
+  both settle routes. `haven_sign_siwx` names no tool because no hosted tool
+  follows a sign-in. Additive: no field is removed, no signing decision
+  changes, and `SUPPORTED_X402_EXPECTED_VERSIONS` is untouched. No update
+  needed.
+
+### Changed
+
+- The settlement-child guidance names the MCP-merchant route beside the
+  plain-HTTP one (#4449). `NO_FUNDING_LEG`'s message and both per-site
+  `next_tool_omitted_reason`s, and the `haven_sign`, `haven_sign_x402` and
+  `haven_x402_sign_header` descriptions, now say that an MCP merchant settles
+  with `haven_settle_mcp_tool` and no `payment_header`, while a plain-HTTP
+  merchant uses `haven_submit` with `settlement_scheme: 'erc7710'`. The
+  `haven_sign` description also says a settlement child's returned
+  `x402_binding` is already retired (#4256). No update needed.
+
 ## 0.11.0-alpha.0 — 2026-10-23
 
 ### Fixed

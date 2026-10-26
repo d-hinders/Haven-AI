@@ -88,6 +88,12 @@ export interface FacetMenuProps {
  */
 export function FacetMenu({ facet, value, onChange, allLabel: allLabelOverride, align = 'left' }: FacetMenuProps) {
   const menu = useListMenu()
+  // The user's own group expansions (#4452). Declared before the early
+  // returns below, so the hook order never depends on the facet's shape. The
+  // open state itself is derived on every render by `planFacetOptions`,
+  // because the URL value loads after mount and a selected grouped row must
+  // exist for `focusItem('checked')`.
+  const [expandedGroups, setExpandedGroups] = useState<string[]>([])
   const multi = facet.selection === 'multi'
   const viewChoice = allLabelOverride === null
   const allLabel = allLabelOverride !== undefined ? allLabelOverride : facet.allLabel !== undefined ? facet.allLabel : allOptionLabel
@@ -126,10 +132,7 @@ export function FacetMenu({ facet, value, onChange, allLabel: allLabelOverride, 
     if (!multi) menu.close(true)
   }
 
-  // The user's own expansions (#4452). The open state itself is derived on
-  // every render by `planFacetOptions`, because the URL value loads after
-  // mount and a selected grouped row must exist for `focusItem('checked')`.
-  const [expandedGroups, setExpandedGroups] = useState<string[]>([])
+  // The user's own expansions feed the derived plan below.
   const plan = planFacetOptions(facet.options, value, expandedGroups)
 
   const optionRow = (option: ListFacetOption) => {

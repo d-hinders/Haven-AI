@@ -300,6 +300,17 @@ describe('FacetMenu — a collapsed option group (#4452)', () => {
     expect(screen.getByRole('menuitemcheckbox', { name: /^Inactive/ })).toBeInTheDocument()
   })
 
+  it('keeps its hook order when the facet starts hidden and gains options', () => {
+    // The group state is a hook, so it must be declared before the early
+    // returns: a facet that renders nothing first and a menu second would
+    // otherwise change the hook count between renders.
+    const { rerender } = render(
+      <FacetMenu facet={{ ...GROUPED, options: [GROUPED.options[0]] }} value={[]} onChange={() => {}} />,
+    )
+    rerender(<FacetMenu facet={GROUPED} value={[]} onChange={() => {}} />)
+    expect(screen.getByRole('button', { name: 'Status: All' })).toBeInTheDocument()
+  })
+
   it('does not wrap the grouped rows in role="group" — one radio set stays one set', async () => {
     const user = userEvent.setup()
     render(<Controlled facet={{ ...GROUPED, selection: 'single' }} />)

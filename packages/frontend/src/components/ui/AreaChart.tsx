@@ -85,7 +85,13 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent } from 'react'
-import { chartScaleRange, MIN_CHARTABLE_DAYS, xLabelIndices } from '@/components/charts/chart-scale'
+import {
+  chartScaleRange,
+  MIN_CHARTABLE_DAYS,
+  xLabelEdge,
+  xLabelIndices,
+  type XLabelAnchoring,
+} from '@/components/charts/chart-scale'
 
 /** The viewBox coordinate space; see `pct` for how the HTML labels read it. */
 const VIEW_W = 640
@@ -100,6 +106,11 @@ const PAD = { top: 14, right: 10, bottom: 30, left: 48 }
  *  the label — `text-right`, no break opportunity — spilled into the plot.
  *  128 gives a ~56 px box, wider than the widest supported tick. */
 const PAD_NARROW = { ...PAD, left: 128 }
+/** The x axis pins both edge labels inside the plot: day 0 grows right from
+ *  its point, the last day grows left from its point, the rest centre. One
+ *  declaration, read by both the label spacing (`xLabelIndices`) and the
+ *  label rendering (`xLabelEdge`), so the two cannot disagree (#4426). */
+const X_LABEL_ANCHORING: XLabelAnchoring = { startAnchoredLeft: true, endAnchoredRight: true }
 /** The fraction of the data's own span held free at each end, so the line
  *  clears the frame and no point sits on a gridline. The pad is RANGE-relative
  *  only: an earlier level-relative term (`|max| × 3%`) meant a 300 kr movement
@@ -430,9 +441,10 @@ function AreaChartFull({
       pad: P,
       xOf,
       yOf,
-      // The first x label is anchored at its left edge (see the label's
-      // transform below), so the helper gives it two label-widths.
-      labelIdx: xLabelIndices(points.length, { narrow, startAnchoredLeft: true }),
+      // Both edge labels are pinned to the plot's edges (see the label's
+      // transform below), so the helper gives each edge pair two
+      // label-widths.
+      labelIdx: xLabelIndices(points.length, { narrow, ...X_LABEL_ANCHORING }),
       delta: values.length >= 2 ? values[values.length - 1] - values[0] : 0,
       // Two points make a line, which is the minimum the drawing can be;
       // below that there is nothing to connect.
@@ -644,7 +656,7 @@ function AreaChartFull({
             style={{
               left: pct(plot.xOf(i), VIEW_W),
               top: pct(plot.baseY + 8, VIEW_H),
-              transform: `translateX(${i === 0 ? '0' : i === points.length - 1 ? '-100%' : '-50%'})`,
+              transform: xLabelEdge(i, points.length, X_LABEL_ANCHORING).transform,
             }}
           >
             {points[i]?.label}

@@ -7,6 +7,7 @@ import {
   formatAnalyticsAmountCompact,
   formatBudgetResetDate,
   formatBudgetTokenValue,
+  formatRefusedCount,
   formatSharePercent,
   lastPaymentCaption,
   paymentsAgentsCaption,
@@ -92,6 +93,17 @@ describe('formatSharePercent', () => {
     expect(formatSharePercent(0.0385)).toBe('4%')
     expect(formatSharePercent(0)).toBe('0%')
     expect(formatSharePercent(1)).toBe('100%')
+  })
+})
+
+describe('formatRefusedCount (#4426)', () => {
+  it('prints the count alone when the attempts agree, and the attempts beside it when they do not', () => {
+    // One home for the Refused string the desktop cell and the phone row
+    // both print. Mutations: always append the attempts → the first pin is
+    // red; a different separator → the second is red.
+    expect(formatRefusedCount(1, 1)).toBe('1')
+    expect(formatRefusedCount(1, 2)).toBe('1 · 2 attempts')
+    expect(formatRefusedCount(0, 0)).toBe('0')
   })
 })
 

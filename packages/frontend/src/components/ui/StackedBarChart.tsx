@@ -101,7 +101,13 @@
 
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent } from 'react'
-import { chartScale, MIN_CHARTABLE_DAYS, xLabelIndices } from '@/components/charts/chart-scale'
+import {
+  chartScale,
+  MIN_CHARTABLE_DAYS,
+  xLabelEdge,
+  xLabelIndices,
+  type XLabelAnchoring,
+} from '@/components/charts/chart-scale'
 
 /**
  * The viewBox coordinate space. The svg stretches its whole drawing through
@@ -118,6 +124,12 @@ const PAD = { top: 14, right: 10, bottom: 30, left: 48 }
  *  grew again: 100/640 at the 350px plot a 390 phone leaves (~54px) fits
  *  the longest served tick with margin, where the old 78 (~43px) clipped it. */
 const PAD_NARROW = { ...PAD, left: 100 }
+/** The x axis pins only its END label, to the last bar's right edge, growing
+ *  left inside the plot (#4426). The start label stays centred on its bar:
+ *  the y gutter gives it room, and anchoring it costs the phone chart a label
+ *  that never collided (#3204 round 4). One declaration, read by both the
+ *  label spacing (`xLabelIndices`) and the label rendering (`xLabelEdge`). */
+const X_LABEL_ANCHORING: XLabelAnchoring = { endAnchoredRight: true }
 /** The refusal mark under a day's slot, in viewBox units: a 3px dash
  *  `REFUSAL_MARKER_GAP` below the axis baseline — under the slot, so a day
  *  with refusals and NO spend still shows (#4334). The x labels start 8
@@ -285,18 +297,25 @@ function legendRows(entries: StackedBarEntry[]): StackedBarSegment[] {
 export function SeriesSwatch({
   seriesIndex,
   color,
+  size = 'md',
   className = '',
 }: {
   seriesIndex?: number
   color?: string
+  /** `md` (10px) beside a legend name; `sm` (8px) inside a tooltip row. */
+  size?: 'sm' | 'md'
   className?: string
 }) {
+  // The size is a prop, not a className override: two height utilities on
+  // one element resolve by stylesheet order, not by the order they are
+  // written, so `className="h-2 w-2"` would not reliably shrink it.
+  const box = size === 'sm' ? 'h-2 w-2 flex-shrink-0 rounded-full' : 'h-2.5 w-2.5 flex-shrink-0 rounded-full'
   return (
     <span
       aria-hidden="true"
       data-testid="series-swatch"
       data-series-index={seriesIndex}
-      className={`inline-block h-2.5 w-2.5 flex-shrink-0 rounded-full ${className}`.trim()}
+      className={`inline-block ${box} ${className}`.trim()}
       style={{ backgroundColor: color ?? seriesColor(seriesIndex ?? 0) }}
     />
   )
@@ -376,7 +395,7 @@ export function StackedBarChart({
 
   const { scale, labelIdx } = useMemo(() => {
     const dataMax = Math.max(0, ...entries.map((e) => e.total))
-    return { scale: chartScale(dataMax), labelIdx: xLabelIndices(entries.length, { narrow }) }
+    return { scale: chartScale(dataMax), labelIdx: xLabelIndices(entries.length, { narrow, ...X_LABEL_ANCHORING }) }
   }, [entries, narrow])
 
   // The sparse-data decision, held as a value and ACTED ON after the last
@@ -699,21 +718,28 @@ export function StackedBarChart({
             {formatTick(tick, scale.step)}
           </span>
         ))}
-        {labelIdx.map((i) => (
-          <span
-            key={`x-${i}`}
-            data-testid="chart-x-label"
-            aria-hidden="true"
-            className="absolute block text-center text-xs leading-none text-[var(--v2-ink-3)]"
-            style={{
-              left: pct(xOf(i) + barW / 2, VIEW_W),
-              top: pct(baseY + 8, VIEW_H),
-              transform: 'translateX(-50%)',
-            }}
-          >
-            {entries[i]?.label}
-          </span>
-        ))}
+        {labelIdx.map((i) => {
+          // One line always (#4426): an absolutely positioned label with no
+          // width shrinks to the room left of the card's edge, so the last
+          // day wrapped ("10 Jul" on two lines). The end label is pinned to
+          // its bar's right edge and grows left, inside the plot.
+          const at = xLabelEdge(i, entries.length, X_LABEL_ANCHORING)
+          return (
+            <span
+              key={`x-${i}`}
+              data-testid="chart-x-label"
+              aria-hidden="true"
+              className="absolute block whitespace-nowrap text-xs leading-none text-[var(--v2-ink-3)]"
+              style={{
+                left: pct(xOf(i) + barW * at.bandOffset, VIEW_W),
+                top: pct(baseY + 8, VIEW_H),
+                transform: at.transform,
+              }}
+            >
+              {entries[i]?.label}
+            </span>
+          )
+        })}
       </div>
 
       {/* The legend: the same colours, read by name. A column on a wide
@@ -731,11 +757,7 @@ export function StackedBarChart({
             data-testid="chart-legend-item"
             className="inline-flex items-center gap-1.5"
           >
-            <span
-              aria-hidden="true"
-              className="inline-block h-2.5 w-2.5 flex-shrink-0 rounded-full"
-              style={{ backgroundColor: seriesFill(row) }}
-            />
+            <SeriesSwatch color={seriesFill(row)} seriesIndex={row.seriesIndex} />
             <span className="truncate">{row.name}</span>
           </li>
         ))}
@@ -855,11 +877,7 @@ export function StackedBarChart({
                       truncates against the amount; only the token breakdown
                       folds to the chip's next line. */}
                   <span data-testid="chart-tooltip-figure" className="inline-flex min-w-0 max-w-full items-baseline gap-1.5">
-                    <span
-                      aria-hidden="true"
-                      className="inline-block h-2 w-2 flex-shrink-0 self-center rounded-full"
-                      style={{ backgroundColor: seriesFill(s) }}
-                    />
+                    <SeriesSwatch color={seriesFill(s)} seriesIndex={s.seriesIndex} size="sm" className="self-center" />
                     <span data-testid="chart-tooltip-name" className="min-w-0 truncate text-[var(--v2-ink-2)]">{s.name}</span>
                     <span data-testid="chart-tooltip-amount" className="v2-tabular flex-shrink-0 whitespace-nowrap text-[var(--v2-ink)]">
                       {formatValue(s.amount)}

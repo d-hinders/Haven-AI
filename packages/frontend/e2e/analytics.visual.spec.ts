@@ -243,11 +243,13 @@ const COPY = {
    * The two agents' budget figures, word for word what `formatBudgetTokenValue`
    * prints for the fixture delegations (`formatAllowanceForToken` at USDC's
    * 6 decimals, minimumFractionDigits 2): '214.00 of 250.00 USDC' and
-   * '5.00 of 500.00 USDC'. Rendered TWICE per agent — above the desktop
-   * cell's bar, and inside the mobile row's `budgetLine` — so 2 at either
-   * width, exactly one of them on screen (#3038 structure run: the first
-   * draft omitted the '.00' and resolved 0; the house vitest pin is
-   * AgentsTable.test.tsx's `214\.00 of 250\.00 USDC`).
+   * '5.00 of 500.00 USDC'. Rendered ONCE per agent, inside the mobile row's
+   * `budgetLine`: the desktop cell's own figure line is gone (#4426) — its
+   * figures ride the shared `style: 'row'` caption, which a stale read
+   * replaces with the unread caption — so 1 in the DOM, on screen at mobile
+   * only (#3038 structure run: the first draft omitted the '.00' and
+   * resolved 0; the house vitest pin is AgentsTable.test.tsx's
+   * `214\.00 of 250\.00 USDC`).
    */
   budgetOf250: '214.00 of 250.00 USDC',
   budgetOf500: '5.00 of 500.00 USDC',
@@ -422,20 +424,22 @@ const SCENARIOS: Scenario[] = [
       await expect(agents.getByText(COPY.agentRetired)).toHaveCount(2)
       await expectExactlyOneVisible(agents, COPY.agentResearch)
       await expectExactlyOneVisible(agents, COPY.agentRetired)
-      // Each delegation's budget renders its FIGURES by a different medium per
-      // half: the desktop table prints them above the cell, the mobile rows
+      // Each delegation's budget FIGURES print once per half at most: the
+      // desktop cell states them only through the shared `style: 'row'`
+      // caption (#4426 dropped the figure line above it), the mobile rows
       // join them with `budgetLine`. Neither half measures the budget any
       // more (#3806): the fixture's read is stale — its `period_end` precedes
       // `FROZEN_NOW`, the `refilled-updating` state — so the used amount
       // belongs to a finished period, no `role=progressbar` renders, and the
-      // row says the period couldn't be read. (The role is an
-      // accessibility-tree role, so at mobile, where the desktop half is
-      // `display:none`, a bar count reads 0 on both halves for the same
-      // page.)
-      await expect(agents.getByText(COPY.budgetOf250)).toHaveCount(2)
-      await expect(agents.getByText(COPY.budgetOf500)).toHaveCount(2)
-      await expect(agents.getByText(COPY.budgetOf250).filter({ visible: true })).toHaveCount(1)
-      await expect(agents.getByText(COPY.budgetOf500).filter({ visible: true })).toHaveCount(1)
+      // desktop cell says the period couldn't be read instead of stating
+      // figures. (The role is an accessibility-tree role, so at mobile, where
+      // the desktop half is `display:none`, a bar count reads 0 on both
+      // halves for the same page.)
+      await expect(agents.getByText(COPY.budgetOf250)).toHaveCount(1)
+      await expect(agents.getByText(COPY.budgetOf500)).toHaveCount(1)
+      const figuresOnScreen = vp.width >= 1024 ? 0 : 1
+      await expect(agents.getByText(COPY.budgetOf250).filter({ visible: true })).toHaveCount(figuresOnScreen)
+      await expect(agents.getByText(COPY.budgetOf500).filter({ visible: true })).toHaveCount(figuresOnScreen)
       await expect(agents.getByRole('progressbar')).toHaveCount(0)
       await expect(agents.getByText(COPY.unreadBudget)).toHaveCount(2)
       // The caption lives in the DESKTOP cell only (`BudgetCell`); the mobile

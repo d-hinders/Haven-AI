@@ -35,6 +35,7 @@ import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { StatTile } from '@/components/ui/StatTile'
 import { AreaChart, type SparklinePoint } from '@/components/ui/AreaChart'
+import { SeriesSwatch } from '@/components/ui/StackedBarChart'
 import { seriesColorForAgent } from '@/lib/avatar-tint'
 import { Amount } from '@/components/haven'
 import { BalanceFreshnessIndicator } from '@/components/haven'
@@ -373,9 +374,10 @@ export default function MoneyPanel({
       {!loading && !unavailable && topAgents.length > 0 ? (
         <>
         {/* #3897: the mockup's split bar — one segment per named agent in
-            its `--v2-series-*` colour (colour identifies the series, never
-            the meaning), the rest in neutral ink. Decorative: the list
-            below carries every figure, so the bar is aria-hidden. */}
+            its chart colour, the avatar tint `seriesColorForAgent` gives it
+            (#4331; colour identifies the series, never the meaning), the
+            rest in neutral ink. Decorative: the list below carries every
+            figure, so the bar is aria-hidden. */}
         <div aria-hidden="true" data-testid="spending-split-bar" className="mt-4 flex h-2.5 gap-0.5 overflow-hidden rounded-full bg-[var(--v2-surface-2)]">
           {splitSegments.map((segment) => (
             <span
@@ -389,11 +391,7 @@ export default function MoneyPanel({
           {topAgents.map((row) => (
             <div key={row.id} className="flex items-baseline justify-between gap-4">
               <dt className="flex min-w-0 items-center gap-2 text-sm text-[var(--v2-ink-2)]">
-                <span
-                  aria-hidden="true"
-                  className="h-2 w-2 flex-shrink-0 rounded-sm"
-                  style={{ background: seriesColorForAgent(row.name) }}
-                />
+                <SeriesSwatch color={seriesColorForAgent(row.name)} size="sm" />
                 <span className="min-w-0 truncate">{row.name}</span>
               </dt>
               <dd className="v2-tabular shrink-0">
@@ -404,7 +402,7 @@ export default function MoneyPanel({
           {otherAgentCount > 0 ? (
             <div className="flex items-baseline justify-between gap-4">
               <dt className="flex min-w-0 items-center gap-2 text-sm text-[var(--v2-ink-3)]">
-                <span aria-hidden="true" className="h-2 w-2 flex-shrink-0 rounded-sm bg-[var(--v2-ink-3)]" />
+                <SeriesSwatch color="var(--v2-ink-3)" size="sm" />
                 <span className="min-w-0 truncate">
                   {otherAgentCount} other agent{otherAgentCount === 1 ? '' : 's'}
                 </span>
@@ -417,7 +415,7 @@ export default function MoneyPanel({
           {showUnattributed ? (
             <div className="flex items-baseline justify-between gap-4">
               <dt className="flex min-w-0 items-center gap-2 text-sm text-[var(--v2-ink-3)]">
-                <span aria-hidden="true" className="h-2 w-2 flex-shrink-0 rounded-sm bg-[var(--v2-ink-3)]" />
+                <SeriesSwatch color="var(--v2-ink-3)" size="sm" />
                 <span className="min-w-0 truncate">Agents since removed</span>
               </dt>
               <dd className="v2-tabular shrink-0">

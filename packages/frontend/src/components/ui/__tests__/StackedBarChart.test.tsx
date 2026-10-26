@@ -950,3 +950,59 @@ describe('StackedBarChart — the legend names the refusal mark (#3204, #4334)',
     expect(screen.queryByTestId('chart-legend-refusal')).toBeNull()
   })
 })
+
+describe('StackedBarChart — the x labels sit on one line inside the plot (#4426)', () => {
+  // The analytics fixture's window is June 10 – July 10: 31 calendar days.
+  // A centred, width-less last label shrank to the room left of the card's
+  // edge and wrapped ("10 Jul" on two lines), crowding "8 Jul" (day 28) two
+  // days before it.
+  const days31: StackedBarDay[] = Array.from({ length: 31 }, (_, i) => ({
+    label: `d${i}`,
+    series: [{ id: 'a', name: 'A', amount: 10 + i, seriesIndex: 0 }],
+  }))
+
+  it('never wraps a label, pins the last one to its bar’s right edge, and centres the rest', () => {
+    // Mutations: drop `whitespace-nowrap` → red; stop reading `xLabelEdge`
+    // (back to an inline `translateX(-50%)` for every label) → the end
+    // label's transform and left are red; drop `endAnchoredRight` from the
+    // chart's anchoring → day 28 returns and the list is red.
+    renderChart({}, days31)
+    const labels = screen.getAllByTestId('chart-x-label') as HTMLElement[]
+    expect(labels.map((el) => el.textContent)).toEqual(['d0', 'd14', 'd30'])
+    for (const el of labels) expect(el.className.split(/\s+/)).toContain('whitespace-nowrap')
+    const last = labels[labels.length - 1]!
+    expect(last.style.transform).toBe('translateX(-100%)')
+    // The label's right edge is the last bar's right edge, as a percentage
+    // of the same 640-unit viewBox the bars are drawn in.
+    const lastBar = dayGroups()[30]!.querySelector('[data-testid="chart-segment"]')!
+    const right = Number(lastBar.getAttribute('x')) + Number(lastBar.getAttribute('width'))
+    expect(Number.parseFloat(last.style.left)).toBeCloseTo((right / 640) * 100, 3)
+    // The start label stays centred on its bar: the bar chart never anchors
+    // its start (#3204 round 4).
+    const first = labels[0]!
+    expect(first.style.transform).toBe('translateX(-50%)')
+    const firstBar = dayGroups()[0]!.querySelector('[data-testid="chart-segment"]')!
+    const centre = Number(firstBar.getAttribute('x')) + Number(firstBar.getAttribute('width')) / 2
+    expect(Number.parseFloat(first.style.left)).toBeCloseTo((centre / 640) * 100, 3)
+  })
+})
+
+describe('StackedBarChart — one legend swatch (#4426)', () => {
+  it('renders SeriesSwatch in the legend and in the tooltip, the tooltip at the small size', () => {
+    // The legend dot and the tooltip dot were hand-built copies of
+    // `SeriesSwatch`. Mutation: hand-build either again → its
+    // `series-swatch` test id is gone → red.
+    const { container } = renderChart()
+    const legend = container.querySelector('[data-testid="chart-legend"]') as HTMLElement
+    const legendSwatches = within(legend).getAllByTestId('series-swatch')
+    expect(legendSwatches).toHaveLength(2)
+    expect(legendSwatches[0]!.className).toContain('h-2.5 w-2.5')
+    fireEvent.keyDown(document.querySelector('svg')!, { key: 'Home' })
+    const rows = screen.getAllByTestId('chart-tooltip-row')
+    for (const row of rows) {
+      const swatch = within(row).getByTestId('series-swatch')
+      expect(swatch.className.split(/\s+/)).toEqual(expect.arrayContaining(['h-2', 'w-2', 'self-center']))
+      expect(swatch.className).not.toContain('h-2.5')
+    }
+  })
+})

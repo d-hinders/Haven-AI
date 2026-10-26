@@ -34,8 +34,9 @@ export const MIN_CHARTABLE_DAYS = 3
  * bands above already keep most labels far wider than this; the rule
  * exists for the two places a collision can actually form: the endpoint
  * label moved next to a stride neighbour, and — for a caller that anchors
- * its START label at its left edge, so the whole label sits to the right
- * of day 0 — the first pair; see `FIRST_X_LABEL_SEPARATION_FACTOR`.
+ * an EDGE label (the start at its left edge, so the whole label sits to the
+ * right of day 0, or the end at its right edge) — that edge's pair; see
+ * `FIRST_X_LABEL_SEPARATION_FACTOR` and `END_X_LABEL_SEPARATION_FACTOR`.
  */
 export const MIN_X_LABEL_SEPARATION_WIDE = 0.06
 export const MIN_X_LABEL_SEPARATION_NARROW = 0.15
@@ -52,6 +53,55 @@ export const MIN_X_LABEL_SEPARATION_NARROW = 0.15
  * collided.
  */
 export const FIRST_X_LABEL_SEPARATION_FACTOR = 2
+
+/**
+ * The same rule at the right edge (#4426), for a caller whose LAST label is
+ * pinned at its right edge (`endAnchoredRight`) so the whole label sits left
+ * of the last day: its full width plus half of its neighbour is one and a
+ * half label-widths centre to centre. Not the start factor's two: the end
+ * pair the product's ranges print is wider than the measured start pair
+ * (30 days: 8/29 of the plot against 7/29), and two would drop the phone's
+ * day-21 label on both charts — a label the #4330 design reviews passed —
+ * the round-4 mistake at the other edge. What one and a half does drop is
+ * the pair that collides: a 31-day range's day 28 beside its pinned day 30,
+ * 2/30 of the plot apart, printed "8 Jul" against "10 Jul" on Spend over
+ * time at 1280.
+ */
+export const END_X_LABEL_SEPARATION_FACTOR = 1.5
+
+/** Which of a chart's two edge labels it pins to the edge of the plot. */
+export interface XLabelAnchoring {
+  /** The first label grows right from day 0 instead of centring on it. */
+  startAnchoredLeft?: boolean
+  /** The last label grows left from the last day instead of centring on it. */
+  endAnchoredRight?: boolean
+}
+
+/**
+ * How one x label sits on its x coordinate, for the caller that declared
+ * `anchoring` — the same declaration it passes to `xLabelIndices`, so the
+ * spacing and the rendering cannot disagree about which edge is pinned (#4426:
+ * one helper for both charts, not an inline copy in each).
+ *
+ * - `transform` is the CSS for a label whose `left` is the coordinate: the
+ *   start label grows right from it, the end label grows left from it, and
+ *   every other label centres on it.
+ * - `bandOffset` is where in a band the coordinate falls, as a fraction of
+ *   the band — for a chart whose x is a band (a bar), not a point: a pinned
+ *   edge label lines up with the band's own edge, a centred one with its
+ *   middle. A point chart has no band and ignores it.
+ */
+export function xLabelEdge(
+  index: number,
+  count: number,
+  { startAnchoredLeft = false, endAnchoredRight = false }: XLabelAnchoring = {},
+): { transform: string; bandOffset: number } {
+  if (startAnchoredLeft && index === 0) return { transform: 'translateX(0)', bandOffset: 0 }
+  if (endAnchoredRight && index === count - 1 && index > 0) {
+    return { transform: 'translateX(-100%)', bandOffset: 1 }
+  }
+  return { transform: 'translateX(-50%)', bandOffset: 0.5 }
+}
 
 /**
  * The y-scale: `max` is the ceiling (never below the data), `ticks` are the
@@ -159,7 +209,11 @@ export function chartScaleRange(lo: number, hi: number, target = 4): ChartScale 
  */
 export function xLabelIndices(
   count: number,
-  { narrow = false, startAnchoredLeft = false }: { narrow?: boolean; startAnchoredLeft?: boolean } = {},
+  {
+    narrow = false,
+    startAnchoredLeft = false,
+    endAnchoredRight = false,
+  }: { narrow?: boolean } & XLabelAnchoring = {},
 ): number[] {
   if (count <= 0) return []
   let stride: number
@@ -206,6 +260,19 @@ export function xLabelIndices(
   if (startAnchoredLeft) {
     while (indices.length > 2 && indices[1] / (count - 1) < minSeparation * FIRST_X_LABEL_SEPARATION_FACTOR) {
       indices.splice(1, 1)
+    }
+  }
+  // The mirror for a caller whose END label is anchored at its right edge
+  // (#4426): the pair (previous, last) is checked at the end factor,
+  // and it is the PREVIOUS label that drops, never the last day (the right
+  // edge is where the range ends). Day 0 is never a candidate either — the
+  // loop stops at two labels.
+  if (endAnchoredRight) {
+    while (
+      indices.length > 2 &&
+      (count - 1 - indices[indices.length - 2]) / (count - 1) < minSeparation * END_X_LABEL_SEPARATION_FACTOR
+    ) {
+      indices.splice(indices.length - 2, 1)
     }
   }
   return indices

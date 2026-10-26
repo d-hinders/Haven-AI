@@ -15,6 +15,7 @@ import { render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import MoneyPanel from '../MoneyPanel'
+import { seriesColorForAgent } from '@/lib/avatar-tint'
 import type { DashboardAgentPreview, DashboardOverviewResponse } from '@/types/dashboard'
 
 const baseProps = {
@@ -393,5 +394,33 @@ describe('MoneyPanel — the ONE primary-button rule (#4167)', () => {
     expect(receive()).toHaveClass('border-[var(--v2-border-strong)]')
     expect(receive()).not.toHaveClass('bg-[var(--v2-brand)]')
     expect(send()).toBeDisabled()
+  })
+})
+
+describe('MoneyPanel — the legend dots are the chart SeriesSwatch (#4426)', () => {
+  it('keys each agent row, and the removed-agents remainder, with SeriesSwatch at the small size', () => {
+    // The money card hand-built its legend dot (a square, `rounded-sm`)
+    // beside the chart's own `SeriesSwatch`. Mutation: hand-build a row's
+    // dot again → that row has no `series-swatch` → red.
+    render(
+      <MoneyPanel
+        {...baseProps}
+        overview={overview({
+          d30NetUsd: 51.76,
+          agents: [agent('a1', 'Research agent', 17.485), agent('a2', 'Data-feed agent', 17.485)],
+        })}
+      />,
+    )
+    const spending = screen.getByRole('region', { name: 'Spending' })
+    const terms = spending.querySelectorAll('dl dt')
+    expect(terms.length).toBe(3) // two agents + "Agents since removed"
+    for (const dt of terms) {
+      const swatch = within(dt as HTMLElement).getByTestId('series-swatch')
+      expect(swatch.className.split(/\s+/)).toEqual(expect.arrayContaining(['h-2', 'w-2', 'rounded-full']))
+    }
+    expect(within(terms[0] as HTMLElement).getByTestId('series-swatch').style.backgroundColor).toBe(
+      seriesColorForAgent('Research agent'),
+    )
+    expect(within(terms[2] as HTMLElement).getByTestId('series-swatch').style.backgroundColor).toBe('var(--v2-ink-3)')
   })
 })

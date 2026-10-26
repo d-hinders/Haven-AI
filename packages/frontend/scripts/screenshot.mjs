@@ -6910,11 +6910,13 @@ export const SCENARIOS = {
       await page.getByRole('region', { name: 'Balance' }).waitFor({ timeout: 20_000 })
       await page.getByText('136 050,75 kr').first().waitFor({ timeout: 20_000 })
       // The change line renders the SEK swing, not the quiet caption. The
-      // percent renders in sv-SE through Intl (#3195 round-2 finding b):
-      // decimal comma, NBSP before `%` — `\s` rather than literal spaces,
-      // sv-SE's separators are NBSPs and a regex is tested against the
-      // node's raw text (string needles normalize, this does not).
-      await page.getByText(/2\s*285,40\s*kr\s*\(\+1,70\s*%\)\s*today/).first().waitFor({ timeout: 20_000 })
+      // wait is on the FIGURE alone (#4426): the line's words are inline JSX
+      // this script cannot import, and restating them here broke the
+      // scenario when "today" became "since yesterday (UTC)" (#3986) — the
+      // wait timed out and nothing was captured. `\s` rather than literal
+      // spaces: sv-SE's separators are NBSPs and a regex is tested against
+      // the node's raw text (string needles normalize, this does not).
+      await page.getByText(/2\s*285,40\s*kr/).first().waitFor({ timeout: 20_000 })
       await shoot(page.locator('main').first(), 'dashboard')
 
       // ── Settings → Preferences: the kr SEK radio active ──────────────────

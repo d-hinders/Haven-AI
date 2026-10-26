@@ -32,7 +32,8 @@ export const version = '121_agents_avatar_tint'
  * - **Released:** archiving or superseding an agent frees its tint for the
  *   NEXT new agent. No existing agent is recoloured.
  * - **Inherited:** when `superseded_by_agent_id` is set (`POST
- *   /agents/retired`, the `RecordRetiredAgents` path), the replacement takes
+ *   /agent-connection-setups/{setupId}/retired-agents`, the
+ *   `RecordRetiredAgents` path), the replacement takes
  *   the predecessor's tint unless another held agent holds it. An `AFTER
  *   UPDATE OF superseded_by_agent_id` trigger does it, so there is one copy
  *   and no route code. It fires once, on the run that retires the

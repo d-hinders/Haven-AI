@@ -194,7 +194,8 @@ reports are such records, and every one of them declares `covers:` under
   under `docs/bug-reports/` (seven prior quality-scan reports, two
   onboarding-exploration reports, one cold test), ranked first because a
   scan report's `covers:` is the widest in the tree (the 2026-09-25 report
-  declares 25 paths; the 2026-10-19 report 26; this one 36)
+  declares 25 paths; the 2026-10-19 report 27; this one 36 —
+  `awk '/^---$/{c++; next} c==1' <doc> | grep -c '^  - '`)
 - the landing that closed it, `ba99cdc5d`: `git show --format= --numstat`
   → 14 files, +536/−16; **10 files and +425 of the +536 lines** are bug
   reports, each gaining a "Dispositions re-checked 2026-10-26" section

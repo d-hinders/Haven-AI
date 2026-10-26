@@ -36,7 +36,7 @@ covers:
   - packages/frontend/src/lib/budget-caption.ts
   - scripts/docs/covers-gaps.mjs
   - .agents/skills/quality-scan/references/dimensions.md
-last-verified: "2026-10-13"
+last-verified: "2026-10-26"
 ---
 
 # Quality scan 2026-10-13 — whole repo, weighted to the landings since 2026-10-03
@@ -462,3 +462,43 @@ can start now; 5 lands last.
 
 Nothing was filed. On approval the ledger decision goes in a **separate**
 pull request and the handoff is `new-task`, per the skill.
+
+## 8. Dispositions re-checked 2026-10-26 (weekly docs audit #4438, at dev `ebf567f1c`)
+
+The report body and §7 above are left as written. Every finding and candidate
+has since been remediated, re-read at this head:
+
+- **S1 (whether a budget is live was decided at about forty sites with three
+  different answers)** — closed. The three answers are now three named
+  predicates, each with one home:
+  - spendability: `spendableDelegationSql(tableAlias, { requireStarted })` in
+    `infra/repositories/delegation-budgets.ts:110-120` — the former
+    `delegationLiveWindowSql`, which no longer exists anywhere in the tree;
+  - still-enabled: `STILL_ENABLED_DELEGATION_STATUSES` in `@haven_ai/core`,
+    imported by the CLI (`commands.ts:854`) and the frontend
+    (`RemoveAgentDialog.tsx:4`) instead of hand-copied;
+  - window-closed: the third question, added as `#4353` beside the other two.
+  Task budgets got the same treatment: `liveTaskBudgetSql` /
+  `isLiveTaskBudget` (`task-budgets.ts:141,152`) with the wire `is_live` flag
+  (#3922), consumed by `routes/task-budgets.ts:94` and
+  `routes/agent-task-budgets.ts:36`.
+- **C1 (the agent-reported EIP-3009 settlement hash was attributed by shape)** —
+  closed (#3925). `modules/x402/eip3009-settlement-evidence.ts:130-136` now
+  carries the nonce attribution a merchant-settlement record must have: the
+  EIP-3009 nonce the transaction burned and `nonceDerived`, whether it is the
+  one derived from this payment's id.
+- **C2 (the 2026-10-03 scan report never landed, and the ledger named a path
+  that is not in the tree)** — closed. `docs/bug-reports/quality-scan-2026-10-03-whole-repo.md`
+  is in the tree at this head and is one of the documents this audit
+  re-verifies.
+- **C3 (the "one hash per payment" compare-and-set was the only guard for a
+  two-hashes-one-payment race, and nothing tested it)** — closed (#3927).
+  `infra/repositories/__tests__/x402-authorizations.test.ts:402` is a real-DB
+  suite titled *eip3009 merchant-settlement writer: one hash per payment
+  (#3927)*, and `:478` pins the compare-and-set alone by direct SQL: the
+  blocked UPDATE writes 0 rows.
+
+All 34 covered paths in `covers:` still exist. The 50 covered commits since
+2026-10-13 — the #4372 doc sweeps, the 0.11.0-alpha.0 release and the budget
+end-date landings — changed the covered files but supersede nothing measured
+here.

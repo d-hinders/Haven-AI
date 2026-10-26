@@ -8,6 +8,9 @@ covers:
   - package.json
   - packages/backend/package.json
   - packages/frontend/package.json
+  - packages/core/package.json
+  - packages/ui/package.json
+  - packages/ops/package.json
   - packages/sdk/package.json
   - packages/mcp/package.json
   - packages/mcp-server/package.json
@@ -16,7 +19,7 @@ covers:
   - packages/demo-merchant-mcp/package.json
   - .github/workflows/publish.yml
   - scripts/release-bump.mjs
-last-verified: "2026-09-30"
+last-verified: "2026-10-26"
 ---
 
 # Haven
@@ -85,6 +88,9 @@ This is a TypeScript monorepo:
 |---|---|
 | `packages/backend` | Fastify API for auth, Haven wallets, agents, payments, x402/MPP, receipts, the Fortnox accounting feed, and OpenAPI (the legacy approval queue is gone entirely — its route was deregistered and its table dropped by #2055) |
 | `packages/frontend` | Next.js dashboard for Haven accounts, Haven wallets, agent rules, connect-agent handoff, and activity |
+| `packages/core` | `@haven_ai/core` — the shared kernel: pure domain types and helpers (chain facts, delegation statuses, client release data) used by the backend and frontend. Workspace-private, never published |
+| `packages/ui` | `@haven_ai/ui` — the shared design system: v2 tokens, the Tailwind preset and the primitives the ops console consumes. Workspace-private, never published |
+| `packages/ops` | `@haven/ops` — the private operations console. Reads through the ops backend surface (#3509); every sign-in and read is audited server-side. Ships dark: off unless every `OPS_*` variable is set |
 | `packages/sdk` | `@haven_ai/sdk` for direct agent integrations, tool definitions, x402/MPP quote/pay/resume helpers, and payment state handling |
 | `packages/mcp` | `@haven_ai/mcp` local stdio MCP server that reads a local credential file and signs locally |
 | `packages/mcp-server` | `@haven_ai/mcp-server` hosted/keyless Streamable HTTP MCP server that constructs and relays but never signs |
@@ -430,7 +436,7 @@ Response on success:
 | Command | What it does |
 |---|---|
 | `npm run dev` | Start backend + frontend in dev mode |
-| `npm run build` | Build SDK, connect, MCP packages, signer, CLI, backend, and frontend |
+| `npm run build` | Build core, SDK, connect, MCP packages, signer, CLI, backend, frontend and the ops console |
 | `npm run test` | Run workspace tests where configured |
 | `npm run typecheck` | Run workspace type checks |
 | `npm run preflight` | **Run the gates CI will run on your diff**, derived from the workflow files (#3150). Start here before pushing. `preflight:all` ignores the diff and runs every gate; `preflight:list` prints the plan without running it |
@@ -448,6 +454,9 @@ Haven-AI/
 |-- packages/
 |   |-- backend/               # Fastify API, database migrations, relaying, OpenAPI
 |   |-- frontend/              # Next.js dashboard and connect-agent UX
+|   |-- core/                  # @haven_ai/core — shared domain types and helpers (workspace-private)
+|   |-- ui/                    # @haven_ai/ui — v2 tokens, Tailwind preset, shared primitives (workspace-private)
+|   |-- ops/                   # @haven/ops — private operations console (ships dark)
 |   |-- sdk/                   # @haven_ai/sdk
 |   |-- mcp/                   # Local stdio MCP server; signs locally from a credential file
 |   |-- mcp-server/            # Hosted/keyless Streamable HTTP MCP server

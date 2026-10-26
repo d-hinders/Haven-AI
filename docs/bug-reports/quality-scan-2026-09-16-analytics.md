@@ -10,7 +10,7 @@ covers:
   - packages/frontend/src/components/ui/AreaChart.tsx
   - packages/frontend/src/components/ui/StatTile.tsx
   - scripts/docs/covers-gaps.mjs
-last-verified: "2026-09-16"
+last-verified: "2026-10-26"
 ---
 
 # Quality scan — Analytics page (epic #2944), 2026-09-16
@@ -105,3 +105,49 @@ The epic's owner decision 2 made refusals a **first-class metric** ("count and a
 ## 5. Dispositions
 
 Owner decision 2026-09-16: **F1 filed as epic #3056** (sub-issues #3052–#3055, `pending-review`); **C1 filed as #3051 and shipped in PR #3057** (the PR that carries this report). C2–C5 pending owner decision.
+
+## 6. Dispositions re-checked 2026-10-26 (weekly docs audit #4438, at dev `ebf567f1c`)
+
+The report body and §5 above are left as written. The structural finding and
+every candidate now have a landed remedy, re-read at this head:
+
+- **F1 (refusal recording was per-site opt-in with no choke point)** — closed
+  by epic #3056, all four sub-issues closed. The choke point exists: one
+  `refuse()` helper is the only call that writes the ledger, and every
+  delegation-rail refusal site now goes through it (14 call sites in
+  `delegation-authorize.ts`, 14 in `payments.ts`). The
+  hosted prepare refusal reaches the ledger: migration
+  `087_payment_refusals_source_hosted.ts` widens the CHECK with
+  `'hosted_prepare'`, and `routes/machine-payments.ts:322-329` is the
+  `POST /machine-payments/budget-precheck` writer. The three unwritten x402
+  siblings the scan named are written.
+- **C1 (StackedBarChart never mounted on `/analytics`)** — closed. #3051
+  shipped in PR #3057; `components/analytics/SpendSection.tsx:297,300` mounts
+  `StackedBarChart` (desktop and `narrow`), and the partial-edge-day rule is
+  pinned by `StackedBarChart.test.tsx` § *a partial day is drawn as one
+  (#3051)*. The refusal marker series landed with #4334.
+- **C2 (seam guards the mutations proved absent)** — closed. The route test now
+  asserts the fields the scan listed as unasserted: `by_day[].spent_by_agent`
+  (`analytics-overview.test.ts:303`), `merchants[].label` / `.kind` /
+  `.filter_address` (`:630-662`), `balance_by_day` (`:319-325,404,466`) and the
+  `spent_previous_*` columns (`:108-111`).
+- **C3 (`docs/product/analytics.md` contradicted the code)** — closed. The doc
+  is now `last-verified: "2026-10-24"` with 23 `covers:` entries (was 7),
+  including `SpendSection.tsx`, `chart-scale.ts`, `analytics-series.ts`,
+  `analytics-range.ts`, `FacetMenu.tsx`, `PeriodPicker.tsx` and
+  `BalanceSection.tsx`. It is still not `contract: true` — the scan offered
+  that as one of two decisions and the advisory posture was kept.
+- **C4 (two states nothing ever renders: fee-flag-on, and sparse)** — still
+  open as recorded. `flag_on` is `false` at every fixture and assertion
+  (`screenshot.mjs:1913-1915,1981`, `screenshot-fixture.test.ts:1137`,
+  `analytics-overview.test.ts:461`, `e2e/fixtures/analytics-overview.ts:97,393`),
+  and the `true` branch is still unasserted. Not filed; unchanged.
+- **C5 (a PR-body deferral needs a home on the target issue)** — closed.
+  `.agents/skills/ship-next/SKILL.md:518-523` now requires a deferred finding
+  to be recorded with its reason and filed against the target issue or epic,
+  not left in the PR body.
+
+All 8 covered paths in `covers:` still exist. The 52 covered commits since
+2026-09-16 — the analytics epic's own slices (#4331–#4334, #4426), the #4372 doc
+sweeps and the shared-UI extraction — changed the covered files but supersede
+nothing measured here.

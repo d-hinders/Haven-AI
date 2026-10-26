@@ -6,7 +6,7 @@ covers:
   - packages/frontend/public/for-agents.md
   - packages/frontend/src/lib/capability-manifest.ts
   - packages/cli/src/args.ts
-last-verified: "2026-09-28"
+last-verified: "2026-10-26"
 ---
 
 # agent-onboarding-cold — run 2 (2026-09-28)
@@ -154,3 +154,42 @@ Message 4, at budget approval (drafted; not reached; relays the link the connect
 - The device login was started and left pending after one poll. It expired unapproved.
 - The environment was dev throughout.
 - No token, key or cookie appears in this report.
+
+## Dispositions re-checked 2026-10-26 (weekly docs audit #4438, at dev `ebf567f1c`)
+
+The run record above is left as written — it describes 2026-09-28. What was
+re-read at this head is whether the surfaces it measured still behave as
+recorded, and whether its findings are closed:
+
+- **Finding 1 (#3430, `packages.cli.channel` is a full spec, not a tag)** —
+  closed. `packages/frontend/public/for-agents.md:15` now says *"run it as
+  given: `packages.cli.channel` serves the full spec"*, so the literal
+  substitution the run flagged cannot be made. The manifest still serves the
+  full spec (`capability-manifest.ts:300,306` set `channel` to
+  `facts.connector_package` / `facts.cli_package`), which is now the documented
+  contract rather than a trap.
+- **Finding 2 (#3431, dev's manifest named Base mainnet as `chains.default`)**
+  — closed. `5cdfbfe75` (#3471) added `effectiveDefaultChainId(deployable)` to
+  `@haven_ai/core`, and the capability manifest now passes through the
+  backend's effective default rather than a bare product constant. A deployment
+  scoped to Base Sepolia reports 84532.
+- **Finding 3 (`--doctor` reads as a health check, not the upgrade path)** —
+  unchanged and still not filed; `for-agents.md:85` still presents it as a
+  check, with § *If something breaks* carrying the upgrade path.
+- **Finding 4 (release notes say "see the changelog" without a link)** —
+  unchanged; not filed, noted for the #3302 owner.
+- **Finding 5 (the rubric drifted, so score 2's denominator is ambiguous)** —
+  unchanged. The manifest's `human_only_steps` is still the three setup steps
+  (`capability-manifest.ts:178`), so the rubric/product disagreement the run
+  recorded still stands.
+- **Finding 6 (`haven login --poll --json` echoes `device_code`)** — unchanged;
+  still listed for triage, not filed.
+- **Finding 7 (the 0.6.0 notes say "breaking" for connect as well)** — a
+  historical note about that release's text; the release data has since moved
+  on (it is generated from the CHANGELOGs, and the current line is
+  0.11.0-alpha.0).
+
+All 4 covered paths in `covers:` still exist. The 19 covered commits since
+2026-09-28 — the discovery and manifest work, the budget end-date landings
+(#4350–#4352, #4355) and the #4372 doc sweeps — changed the covered files but
+supersede nothing measured here.

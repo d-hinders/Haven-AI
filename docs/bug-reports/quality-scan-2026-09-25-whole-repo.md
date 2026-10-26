@@ -27,7 +27,7 @@ covers:
   - packages/qa-agent/src/scenarios/delegation-lifecycle.ts
   - packages/qa-agent/src/lib/chain.ts
   - .agents/skills/quality-scan/references/dimensions.md
-last-verified: "2026-09-25"
+last-verified: "2026-10-26"
 ---
 
 # Quality scan 2026-09-25 — whole repo, weighted to the least recently scanned surfaces and today's landings
@@ -530,3 +530,51 @@ landed today in PR #3327. All three are the captain's re-runs.
 3. C-extra-1 … C-extra-4 — swap any into the five, file separately, or leave
    recorded here?
 4. §3 — post the nonce-gap analysis as a comment on #2769?
+
+## 8. Dispositions re-checked 2026-10-26 (weekly docs audit #4438, at dev `ebf567f1c`)
+
+The report body and §7 above are left as written. Every finding and candidate
+has since been remediated, and each remediation was re-read at this head:
+
+- **S1 (the RPC-provider failure class)** — slice (a) shipped: the RPC
+  conformance probe exists with its self-test, and it now also carries the
+  `eth_getLogs` range check (#4118) that the 2026-10-19 scan asked for. Slice
+  (b) shipped: `scripts/ci/qa-failure-issue.mjs` records a per-leg `class` and
+  `signature` (`:243-254`) and the issue body points at
+  `docs/operations/agent-qa.md` → Troubleshooting → *Classify the failure*
+  (`:1558`). Slice (d) shipped with it. Slice (c)'s attempt-2 reporting was not
+  re-derived here.
+- **C1 (the promotion digest overwrote any open `promotion` issue)** — the
+  surface is gone: `.github/workflows/promotion-digest.yml` was retired by
+  `85b4bef55` (*chore(ci): retire the pending-promotion digest (Closes #666)*,
+  #4213), after `f74b07787` (#3355) had already moved selection to bot author +
+  exact title. No file in `.github/workflows/` matches `promotion` or `digest`.
+- **C2 (the #3327 passport UID repair)** — all three defects closed.
+  `LIST_ANCHOR_REPAIRS_DUE_SQL` (`agent-passports.ts:335`) now takes a
+  `minAgeSeconds` parameter, so a correct row leaves the head of the queue;
+  `recoverAnchorFromReceipt` re-derives through `readMinedAttestationUid`
+  (`attestation.ts:412,437`), the same schema-and-attester-checked reader the
+  mint path uses; and the fixture's attester topic is now a 32-byte padded
+  value (`'0x' + '00'.repeat(12) + '77'.repeat(20)`,
+  `passport-outbound-record.test.ts:189`), so the guard's mutation can fail.
+- **C3 (revoke submit routes recorded a revocation without checking the signed
+  calldata)** — closed. All three owner-submit sites now decode the userOp and
+  refuse a mismatch: `assertUserOperationDisablesDelegations(…, 'exact')` in
+  `routes/agent-rekey.ts:743`, and the same guard in
+  `routes/agent-delegations.ts` and the two `rails/hybrid-*` sites. The decoder
+  in `rails/delegation-policy.ts:300` is deliberately independent of
+  `buildRevocation`, which is the property the scan asked for.
+- **C4 (two gating qa-dev scenarios claimed an on-chain effect they never
+  read)** — closed. `packages/qa-agent/src/scenarios/within-budget-settle.ts:99`
+  now calls `proveUsdcTransfer` and fails with *"the backend reports
+  'confirmed', but the chain does not show it"* when the chain disagrees.
+- **C5 (both balance monitors dropped an alert after one failed webhook
+  delivery)** — closed (#3345). `delegate-balance-monitor.ts:257-259,383` and
+  `relayer-balance-monitor.ts:44` commit an edge only after its webhook was
+  ACCEPTED, so a 4xx/5xx or network error leaves the condition un-armed and the
+  next scan retries it.
+
+All 25 covered paths in `covers:` still exist. The 81 covered commits since
+2026-09-25 — dominated by the #4372 doc sweeps, the 0.11.0-alpha.0 release and
+the settings/transaction landings — changed the covered files but supersede
+nothing measured here.

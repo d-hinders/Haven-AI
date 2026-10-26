@@ -6,7 +6,7 @@ covers:
   - packages/frontend/public/for-agents.md
   - packages/frontend/src/app/layout.tsx
   - packages/cli/src/args.ts
-last-verified: "2026-09-06"
+last-verified: "2026-10-26"
 ---
 
 # agent-onboarding-cold — run 1 (2026-09-06)
@@ -153,3 +153,34 @@ At step 1 of 6, account creation, which the deployment declares unreachable for 
 No JWT, cookie, setup token, API key, private key or `Authorization` header appears in
 this report or in the run log it was written from. No password was entered, no passkey
 created, no budget approved, no payment submitted.
+
+## Dispositions re-checked 2026-10-26 (weekly docs audit #4438, at dev `ebf567f1c`)
+
+The run record above is left as written — it describes 2026-09-06. What was
+re-read at this head is whether the surfaces it measured still behave as
+recorded, and whether its three findings are closed:
+
+- **The discovery chain still holds.** `packages/frontend/src/app/layout.tsx:65`
+  still emits `<link rel="alternate" type="text/plain" href="/llms.txt" title="llms.txt" />`,
+  and the discovery-surfaces suite still asserts the chain from that hook
+  through to `/for-agents.md` — the mutation-proven assertion this report's §1
+  says was added in the same PR. `scripts/qa/discovery-reach.mjs` is still the
+  ceiling instrument.
+- **Finding A (#2590, `--help` omitted `agents connect`)** — closed.
+  `packages/cli/src/args.ts:201,204` now lists `agents connect` and
+  `agents connect --status`.
+- **Finding B (#2591, agent-facing docs never named the backend URL)** —
+  closed. `packages/frontend/public/for-agents.md:15` names `--api <api-url>`
+  and `HAVEN_API_URL`, and states that the CLI's built-in default is the hosted
+  production backend, so an omitted flag connects somewhere real and wrong
+  rather than failing.
+- **Finding C (an unrecognised subcommand printed general help and exited 0)** —
+  folded into #2590, closed with it.
+- **The manifest's human-only steps are unchanged**: the capability manifest
+  still serves `['signup_and_passkey', 'fund', 'approve_budget']`, which is what
+  § *Where it stopped* quotes.
+
+All 4 covered paths in `covers:` still exist. The 36 covered commits since
+2026-09-06 — the discovery and manifest work (#3430, #3431, #3455, #3596,
+#3657), the passkey copy change (#4178) and the #4372 doc sweeps — changed the
+covered files but supersede nothing measured here.

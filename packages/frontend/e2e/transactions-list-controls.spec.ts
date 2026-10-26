@@ -65,8 +65,32 @@ const filterOptions = {
   ],
 }
 
+/**
+ * Twelve agents, none grouped (#4451): the Initiator menu is longer than the
+ * panel's `min(24rem, 70vh)` cap, so the panel has to scroll. The shared
+ * fixture's three agents fit, which is why nothing caught the rows shrinking.
+ * All active, so every row is the same shape (no `meta` slot).
+ */
+const longAgentList = {
+  ...filterOptions,
+  agents: [
+    'Quarterly procurement and vendor reconciliation agent',
+    'Atlas',
+    'Lovable Dev preview deployment helper',
+    'Nordic payroll research assistant',
+    'Invoice matching agent',
+    'Treasury rebalancing agent',
+    'Subscription audit agent',
+    'Contract renewal watcher',
+    'Expense categoriser',
+    'Supplier onboarding agent',
+    'Refund reconciliation agent',
+    'Travel spend reviewer',
+  ].map((name, i) => ({ id: `agent-${i + 1}`, name, status: 'active' })),
+}
+
 /** Registered after `mockHavenApi`, so it wins for the two reads it answers. */
-async function serveTwoNetworkAccounts(page: Page) {
+async function serveTwoNetworkAccounts(page: Page, filters: typeof filterOptions = filterOptions) {
   await page.route('**/api/**', async (route) => {
     const request = route.request()
     const path = new URL(request.url()).pathname.replace(/^\/api/, '')
@@ -75,16 +99,16 @@ async function serveTwoNetworkAccounts(page: Page) {
       return
     }
     if (request.method() === 'GET' && path === '/transactions/filters') {
-      await route.fulfill({ json: filterOptions })
+      await route.fulfill({ json: filters })
       return
     }
     await route.fallback()
   })
 }
 
-async function open(page: Page, width: number, height: number, query = '') {
+async function open(page: Page, width: number, height: number, query = '', filters: typeof filterOptions = filterOptions) {
   await mockHavenApi(page)
-  await serveTwoNetworkAccounts(page)
+  await serveTwoNetworkAccounts(page, filters)
   await seedAuthenticatedSession(page)
   await page.emulateMedia({ colorScheme: SCHEME })
   await page.setViewportSize({ width, height })
@@ -234,6 +258,66 @@ test.describe('transactions list controls — desktop menus', () => {
       await page.keyboard.press('Escape')
       await expect(trigger).toBeFocused()
     }
+  })
+
+  test('a long Initiator menu scrolls instead of squashing its rows (#4451)', async ({ page }) => {
+    await open(page, 1280, 900, '', longAgentList)
+    const toolbar = page.getByTestId('list-toolbar')
+
+    // The natural row height, measured where nothing can shrink: the Account
+    // menu has three rows, well inside the panel's cap, and the same row
+    // classes as the Initiator menu.
+    const account = toolbar.getByRole('button', { name: /^Account:/ })
+    await account.click()
+    const accountPanel = page.locator(`[id="${await account.getAttribute('aria-controls')}"]`)
+    await expect(accountPanel).toBeVisible()
+    const natural = await accountPanel.getByRole('menuitemradio').first().evaluate((el) => el.getBoundingClientRect().height)
+    expect(natural, 'the three-row Account menu is itself squashed').toBeGreaterThan(0)
+    await page.keyboard.press('Escape')
+    await expect(accountPanel).toBeHidden()
+
+    const initiator = toolbar.getByRole('button', { name: /^Initiator:/ })
+    await initiator.click()
+    const panel = page.locator(`[id="${await initiator.getAttribute('aria-controls')}"]`)
+    await expect(panel).toBeVisible()
+
+    // All + User (manual) + twelve agents: more rows than the panel's cap holds.
+    const rows = panel.getByRole('menuitemradio')
+    await expect(rows).toHaveCount(14)
+
+    const box = await panel.evaluate((el) => ({
+      scrollHeight: el.scrollHeight,
+      clientHeight: el.clientHeight,
+      overflowY: getComputedStyle(el).overflowY,
+    }))
+    expect(box.overflowY, 'the panel is the scroll container').toBe('auto')
+    expect(
+      box.scrollHeight,
+      `the panel's ${box.scrollHeight}px of rows fit in ${box.clientHeight}px — nothing scrolls`,
+    ).toBeGreaterThan(box.clientHeight)
+
+    // Every row keeps its natural height: no row's content is taller than its
+    // box, and no row is shorter than the same row renders with three options.
+    // "All rows are equal height" would pass on the bug — they shrink equally.
+    const count = await rows.count()
+    for (let i = 0; i < count; i++) {
+      const row = rows.nth(i)
+      const text = (await row.innerText()).trim()
+      const measured = await row.evaluate((el) => ({
+        scrollHeight: el.scrollHeight,
+        clientHeight: el.clientHeight,
+        height: el.getBoundingClientRect().height,
+      }))
+      expect(
+        measured.scrollHeight,
+        `row "${text}" is squashed: ${measured.scrollHeight}px of content in a ${measured.clientHeight}px box`,
+      ).toBeLessThanOrEqual(measured.clientHeight + 1)
+      expect(
+        measured.height,
+        `row "${text}" is ${measured.height}px tall, under the natural ${natural}px`,
+      ).toBeGreaterThanOrEqual(natural - 1)
+    }
+    await evidence(page, 'initiator-menu-long-1280')
   })
 
   test('a long selected label stays inside the facet row at 640px (#4150)', async ({ page }) => {

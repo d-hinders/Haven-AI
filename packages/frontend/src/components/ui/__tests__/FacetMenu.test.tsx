@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { FacetMenu, type ListFacet } from '../FacetMenu'
-import { menuShift } from '../list-menu'
+import { listMenuItemClasses, listMenuPanelClasses, menuShift } from '../list-menu'
 import { PeriodPicker } from '../PeriodPicker'
 import type { PeriodValue } from '../list-url-codec'
 
@@ -242,6 +242,39 @@ describe('menu viewport clamp', () => {
     await user.click(screen.getByRole('button', { name: 'Direction: All' }))
     expect(screen.getByRole('menu').style.transform).toBe('translateX(-103px)')
     spy.mockRestore()
+  })
+})
+
+describe('list menu rows — a long menu scrolls instead of squashing its rows (#4451)', () => {
+  /**
+   * Whether a row can be squeezed below its natural height inside the panel.
+   *
+   * jsdom has no layout, so this reads the two declarations that decide it —
+   * `flex-shrink`, and a `min-height` that survives `sm` — rather than one
+   * particular class string: `shrink-0` and dropping `sm:min-h-0` are both
+   * valid fixes, and both make this false.
+   */
+  function rowCanShrink(classes: string): boolean {
+    const tokens = classes.split(/\s+/).filter(Boolean)
+    if (tokens.includes('shrink-0')) return false
+    const minHeight = tokens.some((token) => /^min-h-/.test(token))
+    const smMinHeight = tokens.some((token) => /^sm:min-h-/.test(token))
+    return !minHeight || smMinHeight
+  }
+
+  it('a rendered row cannot shrink below its natural height', async () => {
+    const user = userEvent.setup()
+    render(<Controlled facet={DIRECTION} />)
+    await user.click(screen.getByRole('button', { name: 'Direction: All' }))
+    const row = screen.getByRole('menuitemradio', { name: 'Incoming' })
+    expect(rowCanShrink(row.className), 'the row can be squeezed by the panel').toBe(false)
+    expect(rowCanShrink(listMenuItemClasses)).toBe(false)
+  })
+
+  it('the panel is the scroll container: a capped height and its own scrollbar', () => {
+    const tokens = listMenuPanelClasses.split(/\s+/).filter(Boolean)
+    expect(tokens).toContain('overflow-y-auto')
+    expect(tokens.some((token) => /^max-h-/.test(token)), 'the panel has no height cap to scroll against').toBe(true)
   })
 })
 

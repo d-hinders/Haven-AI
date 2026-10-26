@@ -2500,6 +2500,10 @@ through this action**: a new export surface consumes it, it does not copy it
   The Sort chip is not this: it is a view choice and never tints.
 - A **Sort chip** appears only on lists without sortable column headers. Tables
   that sort by header keep header sort.
+- **A long menu scrolls; its rows never shrink** ([#4451](https://github.com/d-hinders/Haven-AI/issues/4451)).
+  The panel is capped at `min(24rem, 70vh)` and scrolls inside it, and every
+  row keeps its natural height (44px below `sm`) instead of being squeezed to
+  fit.
 
 #### Period
 

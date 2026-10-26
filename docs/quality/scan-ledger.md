@@ -1892,27 +1892,38 @@ No owner question remains open, so `pending-review` is lifted on all three.
 They were filed to the backlog (no `code-quality`); shipping was not
 requested with the filing.
 
-## 2026-10-26 — whole repo, weighted to the landings since 2026-10-21 (owner invocation 2026-10-26, no scope named)
+## 2026-10-26 (run B) — whole repo, weighted to the landings since 2026-10-21 (owner invocation 2026-10-26, no scope named; a second run of the same day beside run A)
 
-Full report: [`docs/bug-reports/quality-scan-2026-10-26-whole-repo.md`](../bug-reports/quality-scan-2026-10-26-whole-repo.md).
+Full report: [`docs/bug-reports/quality-scan-2026-10-26-whole-repo-b.md`](../bug-reports/quality-scan-2026-10-26-whole-repo-b.md).
 The report holds the file:line evidence; this entry stays path-free. Measured
-on `origin/dev` @ `b9f9f1e47` by the captain in the main checkout for every
-read-only count, one read-only worker for the GitHub reads, and the block-1
-census through the new mutation runner in a detached, `npm ci`'d worktree at
-the scan SHA with core, the SDK and the signer built, against a disposable
-database dropped at the end. One cell the runner cannot drive ran as a hand
-rig behind a `cp` backup, restored and proven with `cmp` and
-`git diff --quiet`. The window is `8cc3717c8..b9f9f1e47` → 135 first-parent
-landings (the 2026-10-21 entry covered `595b43c07..8cc3717c8`). GitHub was
-read-only. No live call was made. The worktree ended clean with no runner
-journal.
+on `origin/dev` @ `b9f9f1e47` by the captain in the main checkout for the
+read-only counts (one re-taken in a pinned worktree, below), one read-only
+worker for the GitHub reads, and the block-1 census through the new mutation
+runner in a detached, `npm ci`'d worktree at the scan SHA with core, the SDK
+and the signer built, against a disposable database dropped at the end. One
+cell the runner cannot drive ran as a hand rig behind a `cp` backup, restored
+and proven with `cmp` and `git diff --quiet`. The window is
+`8cc3717c8..b9f9f1e47` → 135 first-parent landings (the 2026-10-21 entry
+covered `595b43c07..8cc3717c8`). GitHub was read-only. No live call was
+made. The worktree ended clean with no runner journal.
+
+**A concurrent run.** Run A (PR #4454, pushed 2026-10-26T20:21Z while this
+run was being written) measured the same SHA and window independently; its
+entry is the one above this when both have merged. Every re-measured figure
+agrees between the two once one reading here was re-taken in a clean
+worktree. Three first-draft claims of this run were corrected against run A's
+evidence and re-verified (the three 2026-10-21 issues are closed; the
+`dev` smoke red was fixed by a landing, not a flicker; a bare-fetch allowlist
+would not have caught the window's egress incidents), and one drafted
+candidate is run A's C1, cited as tracked. This entry carries the two
+candidates run A does not.
 
 **Excluded this run:** every prior finding and candidate, whatever its
-disposition, including the 2026-10-21 candidates (#4215, #4216, #4217 — all
-open at the scan SHA) and that entry's refusal of the "tests depend on the
-machine" pattern, which this window's ten host- or load-dependent test issues
-would otherwise re-raise. None is re-surfaced. C1 sits beside the 2026-10-03
-S1 (epic #3615, `shipped`): a refusal reason added after the epic closed,
+disposition, including the 2026-10-21 candidates (#4215, #4216, #4217, all
+`shipped`) and that entry's refusal of the "tests depend on the machine"
+pattern, which this window's ten host- or load-dependent test issues would
+otherwise re-raise. None is re-surfaced. C1 sits beside the 2026-10-03 S1
+(epic #3615, `shipped`): a refusal reason added after the epic closed,
 spelled through the shared builder at one of its three sites; the S1 figure
 (9 typed-code sites) now reads 3, so the epic held and C1 is a candidate, not
 a re-surface. None of the re-measured figures worsened materially.
@@ -1944,35 +1955,33 @@ parity-pinned and not proposed.
   (the previous audit: 3 of 9 files). The script's own #2638 comment states
   the principle for `research`. One PR; the owner picks the mechanism (a
   folder rule or a `record` status) and whether the reports keep `covers:`.
-- C3 — five issues in four days (#4244, #4257, #4281, #4300, #4309) routed
-  one outbound fetch at a time through the SSRF seam, the SDK's redirect
-  follower twice; no issue or ratchet names the perimeter. Left outside the
-  seam: 5 bare fetch sites in 3 backend files, every one an
-  operator-configured host; the SDK's 4 bare-fetch files all import the
-  egress policy; 0 tests enumerate fetch sites. One PR: a shrink-only
-  perimeter ratchet with the three files allowlisted by name.
-- C4 — the mutation runner filed block-1 cell M1 as mutation-red on vitest's
-  own "promise resolved … instead of rejecting" text, which is a failed
-  `.rejects` expectation — the guard caught the mutation and the runner
-  called it the author's error. Third unrecorded assertion stem in nine days
-  after #4284 and #4294. One PR: the `.rejects` / `.resolves` stems with a
-  fixture.
-- Notes, not proposed: three block-1 survivors on the #4429 display-only
-  colour column (dropped from the single-agent read: 29 / 29 green in the
-  mocked route suite and 39 / 39 in the real-DB repository sibling; dropped
-  from the analytics select: 8 / 8, stripped by design; a constant tint on
-  the analytics route: 38 / 38) — the wire field is pinned by the spec alone,
-  the 2026-09-15 mock-families shape (`accepted-as-debt`); one mobile e2e
-  spec is 5 of the window's 7 browser-smoke failures, both `dev` reds among
-  them, and two PRs merged over it (advisory on `dev` by the recorded
-  decision; green since 10-25 with no change; untracked); a source-reading
-  guard census that is not an instrument (a hand-written comment skipper
-  defeats it, and the one probe came back clean); the 21-copy #1464 call-site
-  comment (reading cost, bar 3); agent evals 2 / 12 / 4 over 18 runs
-  (tracked under the closed epic #3957's fix wave).
+- Notes, not proposed: the egress perimeter (5 bare fetch sites in 3
+  backend files outside the SSRF seam, all operator-configured hosts; 0
+  tests enumerate fetch sites; a by-file allowlist ratchet was drafted and
+  withdrawn on run A's reasoning that both of the window's backend
+  incidents were URL-source changes at existing sites); three block-1
+  survivors on the #4429 display-only colour column (dropped from the
+  single-agent read: 29 / 29 green in the mocked route suite and 39 / 39 in
+  the real-DB repository sibling; dropped from the analytics select: 8 / 8,
+  stripped by design; a constant tint on the analytics route: 38 / 38 — run
+  A's out-of-range mutations of the same three files were each caught by the
+  spec round trip, so the field is pinned by the spec's range alone; the
+  2026-09-15 mock-families shape, `accepted-as-debt`); one mobile e2e spec
+  is 5 of the window's 7 browser-smoke failures, both `dev` reds among them
+  and two merged PRs, red from its own merge until the PageHeader fix
+  landed eleven and a half hours later (advisory on `dev` by the recorded
+  decision; run A counts 9 of 134 landings merged over a red advisory
+  check); a source-reading guard census that is not an instrument (a
+  hand-written comment skipper defeats it, and the one probe came back
+  clean); the 21-copy #1464 call-site comment (reading cost, bar 3); agent
+  evals 2 / 12 / 4 over 18 runs (tracked under the closed epic #3957's fix
+  wave). The runner's `.rejects` misclassification, reproduced here on cell
+  M1, is run A's C1 and is decided there.
 
-**Dispositions observed (upkeep):** 2026-10-21 C1 → #4215, C2 → #4216,
-C3 → #4217 — open, none shipped yet. No change to earlier items.
+**Dispositions observed (upkeep):** 2026-10-21 C1 → #4215 closed 2026-10-25
+after its operator check (build PR #4222, 2026-10-21, `Refs`) → `shipped`;
+C2 → #4216 closed 2026-10-21 via PR #4223 → `shipped`; C3 → #4217 closed
+2026-10-21 via PR #4230 → `shipped`. (Run A records the same three.)
 
 **Probed clean** (block → examined / partial / not examined → command → number, all at `b9f9f1e47`; parentheses are the 10-21 entry at `8cc3717c8`):
 - sizing → examined → the 09-22 command pinned with `git ls-tree`/`git show`;
@@ -1989,54 +1998,62 @@ C3 → #4217 — open, none shipped yet. No change to earlier items.
   first five, all from the avatar-tint landing. 5 census cells + 2 probes →
   runner line "1 caught, 4 survived, 0 shadowed, 1 mutation-red, 0 refused,
   1 not run"; read with two corrections: **3 caught** (M1 by its message —
-  C4; M2 by the hand rig, 2 red of 14 on a fresh database, since the
-  real-DB harness memoises applied migrations and the runner's baseline
-  installs the unmutated function; M6, 3 of 45), **4 survived with
-  diagnoses** (M3 weak test at both layers, M4 not load-bearing by design,
-  M5 weak test, M7 not load-bearing → C1). Census files exercised 5 of 23,
-  plus 2 probe files and 1 sibling; 18 of 23 not exercised (budget).
+  the runner's `.rejects` gap, run A's C1; M2 by the hand rig, 2 red of 14
+  on a fresh database, since the real-DB harness memoises applied
+  migrations and the runner's baseline installs the unmutated function; M6,
+  3 of 45), **4 survived with diagnoses** (M3 weak test at both layers, M4
+  not load-bearing by design, M5 weak test, M7 not load-bearing → C1).
+  Census files exercised 5 of 23, plus 2 probe files and 1 sibling; 18 of 23
+  not exercised (budget). Run A took the same five files with different
+  edits (4 caught, 1 shadowed) and reaches the same reading of them.
 - block 2 (`covers:` completeness) → examined. The reference loop under bash
   with `set -f`, each miss confirmed with the strict gate → **17 across 6 of
   8** (18 across 6 of 8); the runtime-compatibility contract 0. `npm run
-  docs:covers-gaps` → **124 pairs / 33 docs** (129 / 35).
+  docs:covers-gaps` → **124 pairs / 33 docs** (129 / 35). Run A: the same.
 - block 3 (stale numbers) → partial. Positive control 3 / 3. The 25 newest
   shards → **7 figure lines, 0 with a command** (9 / 0); 3 of the 7 are
   measured figures. `any` **39** (38); db-mock gauge **54 / 270 / 57**
   (unchanged); guard scripts **75** (71); non-spawning self-tests **25 of
   75** (25 of 74); zod 0. One stale comment found by execution (M4). *First
   reading corrected:* the shard sample read 0 under an unexpanded zsh
-  variable; the figure above is the corrected run.
+  variable; the figure above is the corrected run. Run A: the same 7 / 0.
 - block 4 (retired vocabulary) → examined. Positive control 36 shards. **196
-  files, 47 historical / 149 live** (196 / 46 / 150). Ratchet green, **34 /
-  31** (30 / 28 — within the ceiling, not re-measured per file). Code half
-  unchanged.
+  files, 47 historical / 149 live** (196 / 46 / 150). Ratchet green, **32 /
+  30** at the scan SHA in a pinned worktree and with the report present
+  (30 / 28 — within the ceiling, not re-measured per file); the first
+  reading in the shared main checkout was 34 / 31, the 2 extra hits from a
+  gitignored build-generated doc copy under the frontend's public folder
+  (instrument lesson). Code half unchanged. Run A: the same 196 / 47 / 149
+  and 32 / 30.
 - block 5 (merge-method drift) → examined. Since 2026-10-19T00:00:00Z → **0
   merge-commit / 213 squash** (clean); the window 0 / 135. Since
-  2026-08-10T00:00:00Z → 282 / 1,345 of 1,630.
+  2026-08-10T00:00:00Z → 282 / 1,345 of 1,630. Run A: the same.
 - block 6 (nets with holes) → examined, all four halves → copy lint **64
   unscanned / 4 with hits** (60 / 4); money perimeter **32 / 20**
   (unchanged); visual gate **15 of 27** (16 of 28); docs boundary **43**
   (41; the prove-red skill and command); freshness-gate exit branches
   unchanged. Probes beyond the reference: the advisory-check merge census
   (2 merged PRs with a red smoke job at merge in the two date slices that
-  answered; the third slice answered HTTP 504 twice and was read per PR) and
-  the classifier routing the staleness audit to no surface (C2; its own
-  workflow's path filter still runs it).
+  answered; the third slice answered HTTP 504 twice and was read per PR; run
+  A's full read 9 of 134) and the classifier routing the staleness audit to
+  no surface (C2; its own workflow's path filter still runs it). Run A: the
+  same four halves.
 - incident clustering → examined. Issues created since 2026-10-19T00:00:00Z
-  → **172 (161 closed / 11 open)**; by mechanism: outbound fetch outside the
-  seam 5 (C3), agent-facing text asserting a false state 6, host- or
-  load-dependent test reds 10 (refused 10-21), source-parsing guards 8,
-  catalog ingestion 7, docs drift 12 (C2), EIP-3009 settlement 10 (epic
-  #4318), agent evals 9 (epic #3957). Open PRs 0; open issues 18;
-  `code-quality` on 2 of the 172.
+  → **172 (161 closed / 11 open)** (run A, from 10-21: 119 / 10 open); by
+  mechanism: outbound fetch outside the seam 5, agent-facing text asserting
+  a false state 6, host- or load-dependent test reds 10 (refused 10-21),
+  source-parsing guards 8, catalog ingestion 7, docs drift 12 (C2), EIP-3009
+  settlement 10 (epic #4318), agent evals 9 (epic #3957). Open PRs 0 at the
+  worker's read (run A's PR opened after it); open issues 18; `code-quality`
+  on 2 of the 172.
 - workflow archaeology → examined. `ci.yml` newest 100 → **72 / 14 / 13**
-  (1 in progress); 7 with attempt > 1, all feature branches; `dev` 34 → 28 /
-  2 / 4, both failures the one smoke spec. Failing jobs: browser smoke 7,
-  visual regression 7, lint-type-build 2, SDK 1, CI-config 1. qa-dev at the
-  `money-flow` job level: newest 30 runs → ran in **6 (6 success, all on
-  attempt 1/2, 17 legs PASS)**, gate-skipped in 24; scheduled 10-19 → 10-26
-  → 7 success / 1 failure (10-21, the #4215 check). Agent evals → 18 runs,
-  2 / 12 / 4.
+  (1 in progress; run A minutes later 73 / 14 / 13); 7 with attempt > 1, all
+  feature branches; `dev` 34 → 28 / 2 / 4, both failures the one smoke spec.
+  Failing jobs: browser smoke 7, visual regression 7, lint-type-build 2, SDK
+  1, CI-config 1. qa-dev at the `money-flow` job level: newest 30 runs → ran
+  in **6 (6 success, all on attempt 1/2, 17 legs PASS)**, gate-skipped in
+  24; scheduled 10-19 → 10-26 → 7 success / 1 failure (10-21, the #4215
+  check). Agent evals → 18 runs, 2 / 12 / 4.
 - comment archaeology → TODO / FIXME / HACK / XXX → **0** (control `import`
   → 2,175 files); most-repeated non-lint comment 21 copies (notes).
 - cross-package duplication → examined as a census (10-line normalised
@@ -2046,15 +2063,20 @@ C3 → #4217 — open, none shipped yet. No change to earlier items.
   shadow-residue census). Data-layer coverage → not examined beyond the
   db-mock gauge. Live exercise → not taken.
 - Novelty: the tracker was searched per candidate; the ledger and bug
-  reports were grepped for each candidate's terms. Bug-report bodies were
-  not otherwise re-read.
+  reports were grepped for each candidate's terms; run A's report and entry
+  were read in full for overlap. Bug-report bodies were not otherwise re-read.
 
-Instrument lessons: a migration-body mutation whose test goes through the
-memoising harness needs a test that re-applies the migration itself, or a
-fresh database per run; a failed `.rejects` expectation reads as
-mutation-red (C4); `${=S}` in zsh for a newline list; `statusCheckRollup`
-over ~200 merged PRs answers HTTP 504 — slice by `merged:` date; job logs
-need `--allow-escape-sequences`; the dimensions reference changed under the
-scan when the checkout moved — re-read it.
+Instrument lessons: a filesystem-walking gauge must run in a pinned worktree,
+not the shared main checkout (34 / 31 there, 32 / 30 clean, `git status`
+empty — a gitignored generated doc copy under a package's public folder is
+the difference); a migration-body mutation whose test goes through the memoising
+harness needs a test that re-applies the migration itself, or a fresh
+database per run; a failed `.rejects` expectation reads as mutation-red (run
+A's C1); `${=S}` in zsh for a newline list; `statusCheckRollup` over ~200
+merged PRs answers HTTP 504 — slice by `merged:` date; job logs need
+`--allow-escape-sequences`; the dimensions reference changed under the scan
+when the checkout moved — re-read it; two scans of one day collide on the
+report path and the ledger's append point — read the other first and
+reconcile item by item.
 
-**Disposition: pending owner decision** (C1, C2, C3, C4).
+**Disposition: pending owner decision** (C1, C2).

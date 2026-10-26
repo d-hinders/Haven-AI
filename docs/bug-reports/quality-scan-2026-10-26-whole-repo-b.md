@@ -4,10 +4,11 @@ status: current
 covers:
   - scripts/docs/audit-staleness.mjs
   - scripts/docs/audit-staleness.test.mjs
-  - scripts/ci/prove-red.mjs
-  - scripts/ci/prove-red.test.mjs
   - scripts/docs/coupling-gate.mjs
+  - scripts/ci/prove-red.mjs
+  - scripts/ci/change-classifier.mjs
   - scripts/lint-budget-liveness.mjs
+  - scripts/retired-rail-prose-ratchet.mjs
   - packages/backend/src/modules/x402/delegation-authorize.ts
   - packages/backend/src/modules/budget-scope/refusal-body.ts
   - packages/backend/src/modules/budget-scope/expired-budget.ts
@@ -34,39 +35,54 @@ covers:
   - packages/frontend/e2e/analytics-header-wrap.mobile.spec.ts
   - packages/frontend/src/lib/agent-skill-bundle.ts
   - packages/sdk/src/skill-content.ts
-  - scripts/ci/change-classifier.mjs
+  - packages/ui/src/PageHeader.tsx
   - .github/workflows/docs.yml
   - .github/workflows/docs-audit.yml
 last-verified: "2026-10-26"
 ---
 
-# Quality scan 2026-10-26 — whole repo, weighted to the landings since 2026-10-21
+# Quality scan 2026-10-26 (run B) — whole repo, weighted to the landings since 2026-10-21
 
 Measured on `origin/dev` @ `b9f9f1e47` (2026-10-26). The window is
 `8cc3717c8..b9f9f1e47` → 135 first-parent landings
 (`git log --first-parent 8cc3717c8..origin/dev --format=%h | wc -l`); the
 2026-10-21 scan had already covered `595b43c07..8cc3717c8`. Method: the
-captain in the main checkout for every read-only count; one `sonnet`
-read-only worker for the GitHub reads (issues, `ci.yml`, qa-dev at the
-`money-flow` job level, agent evals; every number beside its command); the
-block-1 census through the new `prove-red` runner in a detached, `npm ci`'d
-worktree at the scan SHA with core, the SDK and the signer built, against a
-disposable database (`haven_scan1026`, dropped at the end); one hand rig for
-the single cell the runner cannot drive (M2, below), behind a `cp` backup
-restored and proven with `cmp` and `git diff --quiet`. The worktree ended with
-`git status --porcelain` → 0 and no runner journal. GitHub was read-only. No
-live Haven call was made.
+captain in the main checkout for the read-only counts (one of them re-taken
+in a pinned worktree, §6); one `sonnet` read-only worker for the GitHub reads
+(issues, `ci.yml`, qa-dev at the `money-flow` job level, agent evals; every
+number beside its command); the block-1 census through the new mutation
+runner in a detached, `npm ci`'d worktree at the scan SHA with core, the SDK
+and the signer built, against a disposable database (`haven_scan1026`,
+dropped at the end); one hand rig for the single cell the runner cannot drive
+(M2, below), behind a `cp` backup restored and proven with `cmp` and
+`git diff --quiet`. The worktree ended with `git status --porcelain` → 0 and
+no runner journal. GitHub was read-only. No live Haven call was made.
+
+**A concurrent run.** A second scan of the same day — run A, PR #4454,
+branch `docs/quality-scan-2026-10-26`, pushed 2026-10-26T20:21Z while this
+one was being written — measured the same SHA and window independently. Its
+coverage record agrees with this one on every re-measured figure (sizing,
+blocks 2–6, workflow archaeology) once one reading here was re-taken in a
+clean worktree (§6). The two runs took the same five block-1 census files
+with different mutations and reach the same conclusion about them (§5). Three
+of this run's first-draft claims were corrected against run A's evidence and
+re-verified here (the three 2026-10-21 issues are closed, §4; the smoke red
+was fixed by a landing, not a flicker, §2 notes; a bare-fetch allowlist would
+not have caught the window's egress incidents, §2 notes), and one candidate
+this run had drafted is run A's C1 and is cited as tracked (§3). What this
+run adds is two candidates run A does not carry (C1, C2).
 
 **Excluded this run:** every prior finding and candidate, whatever its
 disposition — including the 2026-10-21 entry's three candidates (#4215,
-#4216, #4217) and its refusal of the "tests depend on the machine" pattern,
-which this window's ten host- or load-dependent test issues would otherwise
-re-raise. None is re-surfaced. Candidate C1 below sits beside the 2026-10-03
-S1 (epic #3615, `shipped`): that finding consolidated how each payment
-entrypoint spells the typed budget refusal; C1 is a new refusal reason, added
-after the epic closed, spelled through the shared builder at one of its three
-sites. It is reported as a one-PR candidate, not as a re-surface — the
-recorded figure for S1 (9 sites writing the typed code) now reads 3
+#4216, #4217, all `shipped`, §4) and its refusal of the "tests depend on the
+machine" pattern, which this window's ten host- or load-dependent test issues
+would otherwise re-raise. None is re-surfaced. Candidate C1 below sits beside
+the 2026-10-03 S1 (epic #3615, `shipped`): that finding consolidated how each
+payment entrypoint spells the typed budget refusal; C1 is a new refusal
+reason, added after the epic closed, spelled through the shared builder at
+one of its three sites. It is reported as a one-PR candidate, not as a
+re-surface — the recorded figure for S1 (9 sites writing the typed code) now
+reads 3
 (`git grep -h "error_code: 'delegation_budget_exceeded'" origin/dev -- 'packages/backend/src/*' ':!*.test.ts' ':!*__tests__*' | wc -l`
 → 3), so the shipped epic held.
 
@@ -129,10 +145,10 @@ to `delegation_budget_exceeded`; the local runtime reads `error_code` at its
 error seam), and #3504 made that key the contract. An expired budget on the
 x402 path therefore lands in the generic 403 branch with prose the agent has
 to parse — the class the 2026-09-21 D2 (#3214) fixed for the generic
-branches, re-created for one reason. The same spec comment
-(`api-types.ts`, the `/x402/authorize` 403: "Since #4352 there are two
-shapes") documents the asymmetry rather than closing it. No incident is
-recorded; this is observed, not hypothesised.
+branches, re-created for one reason. The spec comment on the
+`/x402/authorize` 403 ("Since #4352 there are two shapes") documents the
+asymmetry rather than closing it. No incident is recorded; this is observed,
+not hypothesised.
 
 **Expected benefit.** One body per refusal reason, whichever entrypoint
 answers it, and the agent-facing clients branch on the x402 expired refusal
@@ -150,11 +166,12 @@ instrument for this; the spec round trip is.
 
 **Verified at scan** (at `b9f9f1e47`): the three greps above (1 / 2 / 5 of 7);
 routing for `delegation-authorize.ts`, `refusal-body.ts`,
-`x402-delegation.test.ts` and `openapi/spec.ts` → `code backend`; money-path
-verdict → `delegation-authorize.ts` money-path, `refusal-body.ts` money-path,
-the test and the spec `off` (control `sweep.ts` → money-path); mutation
-recipe → run (M6 caught 3 of 45, M7 survived 119 of 119, cells in the census
-file in this run's scratch, edits quoted in §5).
+`x402-delegation.test.ts` and the OpenAPI module → `code backend`;
+money-path verdict → `delegation-authorize.ts` money-path, `refusal-body.ts`
+money-path, the test and the spec `off` (the positive control, the backend
+sweep module, → money-path); mutation recipe → run (M6 caught 3 of 45, M7
+survived 119 of 119, cells in the census file in this run's scratch, edits
+quoted in §5).
 
 **Verification still needed.** After the change: the same builder edit must
 redden both suites; the hosted tool's quote and pay paths answer an expired
@@ -177,7 +194,7 @@ reports are such records, and every one of them declares `covers:` under
   under `docs/bug-reports/` (seven prior quality-scan reports, two
   onboarding-exploration reports, one cold test), ranked first because a
   scan report's `covers:` is the widest in the tree (the 2026-09-25 report
-  declares 25 paths; the 2026-10-19 report 26)
+  declares 25 paths; the 2026-10-19 report 26; this one 36)
 - the landing that closed it, `ba99cdc5d`: `git show --format= --numstat`
   → 14 files, +536/−16; **10 files and +425 of the +536 lines** are bug
   reports, each gaining a "Dispositions re-checked 2026-10-26" section
@@ -188,7 +205,7 @@ reports are such records, and every one of them declares `covers:` under
 - the audit has run 13 times since 2026-07-20
   (`gh issue list --search "Docs staleness audit in:title" --state all`
   → 13 closed issues), and its top-15 refills from the same reports as each
-  scan lands a new one
+  scan lands a new one — two more today
 
 **Cost.** Observed contributor burden: a weekly batch whose largest share is
 re-verifying day-stamped records against code that has legitimately moved on,
@@ -213,120 +230,40 @@ drop it; that is a second decision.
 `(none)` from `classifyChangedFiles` — the classifier routes the script to
 no surface, and it is the `docs.yml` path filter (`scripts/docs/**`,
 `.github/workflows/docs.yml:64`) and the weekly `docs-audit.yml` that run it,
-so a change is still exercised; money-path verdict → `off` (control
-`sweep.ts` → money-path); mutation recipe → *unrun*: the exclusion the
-remedy adds does not exist yet, and the script's self-test is the place for
-its red.
+so a change is still exercised; money-path verdict → `off` (the positive
+control → money-path); mutation recipe → *unrun*: the exclusion the remedy
+adds does not exist yet, and the script's self-test is the place for its red.
 
 **Verification still needed.** After the change: the audit's own test gains
 the excluded status (or folder) as a fixture case; the next weekly issue's
 top-15 names no bug report.
 
-### C3 — five issues in four days routed one outbound fetch at a time through the SSRF guard, and nothing pins the perimeter
-
-**Opportunity and evidence.** `packages/backend/src/infra/http/ssrf-guard.ts`
-is the one outbound seam (`assertSafeUrl`, `resolvePublicAddresses`, the
-pinned transport, `safeGetText` / `safeGetBinary` / `safePostJson` /
-`safeRequest`). In the window the same mechanism — a fetch to a
-caller-influenced URL outside that seam, or a redirect that carries headers
-cross-origin — was found and fixed at a site at a time: #4244 and #4257 (the
-SDK's manual redirect follower, twice), #4281 and #4300 (catalog discovery
-and refresh probes, bare `fetch`), #4309 (accounting receipt documents,
-hostname regex only); #4341 and #4407 are follow-ups on the catalog probe.
-Each closed its own site. No issue, epic or ratchet names the perimeter
-(`gh issue list --search "ssrf ratchet OR \"bare fetch\" OR \"outbound fetch\" in:title"`
-→ only #4281 itself).
-
-What is left outside the seam at the scan SHA, backend non-test source:
-
-- `rg -n '(^|[^a-zA-Z_.])fetch\(' packages/backend/src -g '!*.test.ts' -g '!__tests__' --type ts`
-  (comment lines dropped) → **5 sites in 3 files**:
-  `packages/backend/src/infra/explorer-api.ts` (3, the block explorer),
-  `packages/backend/src/infra/prices.ts` (1, the price API),
-  `packages/backend/src/infra/delegate-alert-webhook.ts` (1, the operator's
-  alert webhook) — every one an operator-configured host, none
-  caller-influenced today
-- the SDK's four bare `fetch(` files all import the merchant-egress policy
-  (`rg -l '(^|[^a-zA-Z_.])fetch\(' packages/sdk/src -g '!*.test.ts'` → 4;
-  each with `merchant-egress|EgressPolicy` → 4 of 4)
-- a test that enumerates fetch sites against an allowlist →
-  `rg -l 'fetch\\(|bare fetch' packages/backend/src --glob '*.test.ts' | xargs rg -l -i 'allowlist|census|git ls-files'`
-  → **0**
-
-**Cost.** Five issues in four days (2026-10-22 → 10-25) at three or more
-sites, the SDK's redirect follower fixed twice; the next bare fetch to a
-seller-listed or merchant-declared URL is caught by review or not at all. The
-2026-09-25 C5 and the 2026-10-03 C1 are the same shape at other seams
-(alert senders; raw error text): a rule enforced by the last grep.
-
-**Expected benefit.** A new outbound call to a non-operator host either goes
-through the guard or fails CI naming the file.
-
-**Approximate scope.** One PR: a shrink-only ratchet under `scripts/ci/` in
-the money-path-restatement-scan's shape, listing the three operator-host
-files by name with a reason each, wired into the lint job; optionally the
-same for the SDK with its egress policy as the seam. No behaviour change.
-
-**Verified at scan** (at `b9f9f1e47`): the three greps above (5 in 3; 4 of 4;
-0); routing for the new script, its test, `ci.yml` and `ssrf-guard.ts` →
-`code … full` (the workflow file turns every surface on); money-path verdict
-→ the script and `ssrf-guard.ts` `off`, `explorer-api.ts` and `prices.ts`
-`off`, `delegate-alert-webhook.ts` money-path (control `sweep.ts` →
-money-path); mutation recipe → *unrun*: the ratchet does not exist yet; its
-red is a fourth bare `fetch(` added to a backend file and the script exiting
-1 naming it.
-
-**Verification still needed.** After the change: the ratchet's self-test
-drives the real CLI (the #2720 standard) against a fixture tree with one
-extra bare fetch; the three allowlisted files stay green.
-
-### C4 — the mutation runner files a rejected-promise assertion as mutation-red
-
-**Opportunity and evidence.** Block-1 cell M1 widened migration 121's
-`CHECK (avatar_tint BETWEEN 1 AND 6)` to `… AND 7`. The guard's own test,
-`the CHECK refuses a tint outside 1..6`, asserts
-`await expect(db.query(INSERT … 7)).rejects.toThrow(/agents_avatar_tint_range/)`
-(`packages/backend/src/db/migrations/__tests__/121_agents_avatar_tint.test.ts:172-177`).
-The mutant let the insert through, the expectation failed, and the runner
-classified the cell:
-
-> `[M1] mutation-red: … failed on a non-assertion error: Error: promise resolved "Result{ command: 'INSERT', …(9) }" instead of rejecting`
-
-That message is vitest's own text for a failed `.rejects` expectation — the
-guard did exactly what its title says — but it is not among the recorded
-assertion stems in `scripts/ci/prove-red.mjs` (`VITEST_ASSERTION_SHAPE`,
-#4284: `AssertionError`, the jest-dom and Testing Library shapes), so the
-runner reads it as the mutation's own error. The skill text says so in
-advance ("an unrecorded query shape reads as an error, so a new one is added
-with a recorded fixture case"); this is the third such shape in nine days
-after #4284 (jest-dom and Testing Library, 2026-10-22) and #4294 (a
-Playwright `expect` with a custom message, 2026-10-22).
-
-**Cost.** A caught mutation reported as the author's mistake: in a ship-next
-step-5 run the author re-works a correct cell; in a census the table loses a
-"caught" to a "mutation-red", and a reader who trusts the class under-counts
-the guard stock. Observed once this run, in the first cell.
-
-**Expected benefit.** `.rejects` / `.resolves` expectation failures classify
-as caught, with a fixture pinning the stem.
-
-**Approximate scope.** One PR: the stem (`promise resolved … instead of
-rejecting`, and its `.resolves` twin `promise rejected … instead of
-resolving`) added to the vitest shape with a recorded fixture case in
-`scripts/ci/prove-red.test.mjs`.
-
-**Verified at scan** (at `b9f9f1e47`): the runner's own output above (the
-log is in this run's scratch); `rg -n "promise resolved|instead of rejecting" scripts/ci/prove-red.mjs`
-→ 0; routing for `scripts/ci/prove-red.mjs` and its test → `code …` as a
-`scripts/ci` change (the same surface the 10-21 run recorded); money-path
-verdict → `off`; mutation recipe → *unrun* as a cell (the recipe is the M1
-cell itself, which reproduces the misclassification on demand).
-
-**Verification still needed.** After the change: M1 re-run through the
-runner reads `caught`; the fixture case fails if the stem is removed.
-
 ### Verified, held back (notes, not proposed)
 
+- **Egress perimeter — examined, not proposed.** Five issues in four days
+  (#4244, #4257, #4281, #4300, #4309) routed one outbound call at a time
+  through the SSRF seam
+  (`packages/backend/src/infra/http/ssrf-guard.ts`), the SDK's redirect
+  follower twice, and no ratchet names the perimeter
+  (`gh issue list --search "ssrf ratchet OR \"bare fetch\" OR \"outbound fetch\" in:title"`
+  → only #4281). Left outside the seam in backend non-test source:
+  `rg -n '(^|[^a-zA-Z_.])fetch\(' packages/backend/src -g '!*.test.ts' -g '!__tests__' --type ts`
+  (comment lines dropped) → **5 sites in 3 files** —
+  `packages/backend/src/infra/explorer-api.ts` (3),
+  `packages/backend/src/infra/prices.ts` (1),
+  `packages/backend/src/infra/delegate-alert-webhook.ts` (1) — every one an
+  operator-configured host; the SDK's 4 bare-`fetch(` files all import the
+  egress policy; 0 tests enumerate fetch sites. This run's first draft
+  proposed a shrink-only allowlist ratchet. Run A's wider census (13 files by
+  a regex that also sees `fetch` aliases, with positive controls at the two
+  remedied sites' parents) reached the same "all operator hosts" reading and
+  declined to propose the net, because both of the window's backend
+  incidents were URL-source changes at sites that already existed (#4281
+  became a hole when #4245 changed where the URLs came from; #4309's site
+  predates any net) — a by-file allowlist would have passed both. That
+  reasoning holds against this run's counts too; withdrawn. The design
+  question run A names (a process-wide default versus the guard's own pinned
+  transport) is the owner's, not a bounded candidate.
 - **Three block-1 survivors in one landing, all on a display-only column.**
   #4429 (`4a3f56847`) stores `avatar_tint` on agents and threads it through
   three reads. Dropping it from the single-agent read's select list
@@ -343,25 +280,30 @@ runner reads `caught`; the fixture case fails if the stem is removed.
   which never sees the SQL. Answering a constant tint
   (`packages/backend/src/routes/analytics-overview.ts:275` → `1`) survives
   that route test **38 of 38** (M5): *weak test* — fixtures carry tints 1 and
-  2, no assertion reads them. Not proposed: the column moves no money, the
-  spec requires it (an absent field would fail the spec round trip wherever
-  one runs), and the 2026-09-15 mock-families finding (`accepted-as-debt`)
-  already names the shape. Recorded because the three diagnoses together say
-  the wire field is pinned by the spec alone.
+  2, no assertion reads them. Run A mutated the same three files the other
+  way — a value outside 1..6 — and each was caught by the spec round trip
+  (3 of 29, 1 of 8, 1 of 38). Read together: the wire field is pinned by the
+  spec's range alone; its presence and its value are pinned by nothing. Not
+  proposed: the column moves no money, and the 2026-09-15 mock-families
+  finding (`accepted-as-debt`) already names the shape.
 - **One mobile e2e spec is 5 of the window's 7 browser-smoke failures, both
   `dev` reds among them, and two PRs merged over it.**
   `packages/frontend/e2e/analytics-header-wrap.mobile.spec.ts:126` ("at sm
   (640) a very long agent name truncates and does not push the header")
-  failed in `ci.yml` runs on `dev` at 2026-10-24T14:39Z and 10-25T00:03Z, on
-  PR #4403 (which added it) and PR #4406 at their merge
-  (`gh pr view … statusCheckRollup` → `Frontend browser smoke: FAILURE`),
-  and on a docs branch; it passes on every `dev` run since 10-25T09:43Z with
-  no change to the spec (`git log -- <spec>` → 1 commit). Browser smoke is
-  advisory on `dev` by the recorded ruleset decision (required on `main`
-  only), so this is the decided cost, not a gate hole; the spec is a
-  load-dependent red of the class the 2026-10-21 run refused. No issue names
-  it (`gh issue list --search '"very long agent name" OR "keeps its width"'`
-  → none). A `new-task` if the owner wants it tracked.
+  failed on `dev` from #4403's merge (2026-10-24T14:39Z, run 40103495834)
+  through the 10-25T00:03Z run (40145212714), on PR #4403 itself (which added
+  it) and PR #4406 at their merge (`gh pr view … statusCheckRollup` →
+  `Frontend browser smoke: FAILURE`), and on one docs branch. It went green
+  at the first `dev` run after #4409 (2026-10-25T02:07Z, `9c93a8807`, which
+  changed `packages/ui/src/PageHeader.tsx` — the spec file itself has one
+  commit): a real red, fixed by a landing, not a flicker — this run's first
+  draft read it as load-dependent and was wrong. Browser smoke is advisory on
+  `dev` by the recorded ruleset decision (required on `main` only; the `dev`
+  ruleset's 16 required contexts do not include it), so this is the decided
+  cost, not a gate hole; run A counts 9 of the window's 134 readable
+  landings merged with the smoke or visual job red at their head (7 visual on
+  2026-10-22, plus these two). Recorded as the cost of that decision in this
+  window; not proposed.
 - **Source-reading guards and comments — probed, clean in the sample.** Eight
   of the window's issues were a guard or classifier misreading source
   (#4284, #4294, #4344, #4379, #4411, #4421, #4315, #4193). A census of the
@@ -370,8 +312,9 @@ runner reads `caught`; the fixture case fails if the stem is removed.
   a hand-written skipper: `scripts/lint-budget-liveness.mjs` strips comments
   itself (`:234-258`), and a probe that appended a predicate inside a `//`
   comment to a backend file left its gauge unchanged (4 → 4
-  `ts-payment-window`). The census is not an instrument; C4 is the one
-  executed instance of the class this run.
+  `ts-payment-window`). The census is not an instrument. The one executed
+  instance of the class this run (the runner's own classifier, M1) is run
+  A's C1 (§3).
 - **The 21-copy comment.** The most-repeated non-lint comment in non-test
   source is the #1464 pair ("a malformed uuid in the path is a 400 (central
   22P02 mapping …), not a 500"), 21 copies
@@ -387,6 +330,19 @@ runner reads `caught`; the fixture case fails if the stem is removed.
 
 ## 3. Context for tracked work (not new items)
 
+- **The mutation runner filed a caught cell as mutation-red — run A's C1.**
+  Block-1 cell M1 widened migration 121's `CHECK (avatar_tint BETWEEN 1 AND 6)`
+  to `… AND 7`; the guard's own test asserts the insert rejects
+  (`packages/backend/src/db/migrations/__tests__/121_agents_avatar_tint.test.ts:172-177`),
+  the mutant let it through, and the runner classified the cell
+  "mutation-red: … Error: promise resolved "Result{ command: 'INSERT', …(9) }"
+  instead of rejecting" — vitest's own text for a failed `.rejects`
+  expectation, absent from the recorded assertion stems in
+  `scripts/ci/prove-red.mjs` (`VITEST_ASSERTION_SHAPE`, #4284). Run A found
+  the same shape in its own M1 plus a second (a plain `Error` from the spec
+  round-trip helper) and carries both as its C1, pending the owner; this run
+  reproduces the first independently and adds nothing. Third unrecorded stem
+  in nine days after #4284 and #4294.
 - **Host- and load-dependent test reds, 10 issues** (#4126, #4134, #4084,
   #4191, #4192, #4272, #4293, #4297, #4301, #4398): the pattern the
   2026-10-21 run weighed and refused on the repo's recorded decision to keep
@@ -394,28 +350,35 @@ runner reads `caught`; the fixture case fails if the stem is removed.
   count is recorded.
 - **qa-dev's one scheduled failure in the window** (2026-10-21, both attempts
   on the two EIP-3009 legs, "Haven did not record the merchant settlement …
-  within 45s") is the 2026-10-21 C1 (#4215). The seven other scheduled runs
-  10-19 → 10-26 passed on attempt 1 with 17 legs PASS.
+  within 45s") is the 2026-10-21 C1 (#4215, `shipped` 2026-10-25). The seven
+  other scheduled runs 10-19 → 10-26 passed on attempt 1 with 17 legs PASS.
 - **Catalog ingestion, 7 issues** (#4245, #4281, #4300, #4341, #4389,
-  #4394, #4407): a feature in flight with heterogeneous defects (SSRF — C3's
-  class — provenance, payability from `accepts[0]`, a per-host cooldown
-  rebuilt every tick, write degradation). No epic names it; not a scan item.
+  #4394, #4407): a feature in flight with heterogeneous defects (the egress
+  class in the notes, provenance, payability from `accepts[0]`, a per-host
+  cooldown rebuilt every tick, write degradation). No epic names it; not a
+  scan item.
 - **Agent-facing text asserting a false state, 6 issues** (#4061, #4062,
   #4079, #4123, #4345, #4355): the 2026-09-17 next-step class (#3105,
   `shipped`); #4123 is open and standalone; the rest closed at their sites.
 - **Docs drift and its leftovers, 12 issues**: #4303, #4372 (parts A–K), the
   "left unfiled" chain (#4371, #4387, #4408, #4415) and the two weekly audits
   (#3645, #4438). C2 is the one mechanism in it this run could measure.
+- **Run A's two live signer observations** are #4449 (open); this run made
+  no live call and adds nothing to them.
 
 ## 4. Dispositions observed (prior items, for the record)
 
-- 2026-10-21 C1 → #4215, C2 → #4216, C3 → #4217: open at the scan SHA
-  (`gh issue view`); none shipped yet.
+- 2026-10-21 C1 → #4215 closed 2026-10-25T09:07Z → `shipped`; its build
+  PR #4222 (`01ffaa494`) merged 2026-10-21T14:11Z with `Refs`, the issue
+  closed after its operator check. (This run's first draft wrote "open";
+  corrected against `gh issue view`.)
+- 2026-10-21 C2 → #4216 closed 2026-10-21T14:18Z via PR #4223 (`715b294bd`)
+  → `shipped`.
+- 2026-10-21 C3 → #4217 closed 2026-10-21T20:37Z via PR #4230 (`22790a587`)
+  → `shipped`.
 - 2026-10-19 C1–C4 and the two spec-review siblings: as the 2026-10-21 entry
   records (#4118, #4119, #4120, #4121 shipped; #4122 closed by hand; #4123
   open).
-- 2026-10-13 C2 and C3 → `shipped` (recorded 2026-10-14); S1 → epic #3919
-  closed 2026-10-19 → `shipped`.
 
 ## 5. Coverage record (block → examined / partial / not examined → command → result)
 
@@ -443,7 +406,7 @@ entry's, at `8cc3717c8`.
 
   | # | Guard file | Mutation | Baseline → mutant | Class |
   |---|---|---|---|---|
-  | M1 | `121_agents_avatar_tint.test.ts` | `CHECK (avatar_tint BETWEEN 1 AND 6)` → `… AND 7` in the migration | 6 → the CHECK test fails: "promise resolved … instead of rejecting" | runner: **mutation-red**; by the message: the guard's own `.rejects` assertion failed → caught (C4) |
+  | M1 | `121_agents_avatar_tint.test.ts` | `CHECK (avatar_tint BETWEEN 1 AND 6)` → `… AND 7` in the migration | 6 → the CHECK test fails: "promise resolved … instead of rejecting" | runner: **mutation-red**; by the message: the guard's own `.rejects` assertion failed → caught (§3, run A's C1) |
   | M2 | `agents-avatar-tint.db.test.ts` | the held predicate `p_archived_at IS NULL AND p_superseded_by_agent_id IS NULL` → `p_superseded_by_agent_id IS NULL` | 14 → **2 failed** (archived-agent tint free; held-before-released backfill) | **caught** — hand rig on a fresh database (below) |
   | M3 | `routes/__tests__/agents.test.ts` | drop `a.avatar_tint,` from the single-agent read | 29 → **29 passed** | survivor: *weak test* (also 39 / 39 on the real-DB repository sibling) |
   | M4 | `analytics-overview-golden.db.test.ts` | drop `a.avatar_tint,` from the per-agent spend select | 8 → **8 passed** | survivor: *not load-bearing at the tested condition* (stripped by design) |
@@ -462,9 +425,12 @@ entry's, at `8cc3717c8`.
   disposable database (14 passed), created a second fresh database, applied
   the one-line edit (occurrence count checked → 1), ran the file cold
   (2 failed / 12 passed), restored by `cp`, proved with `cmp` and
-  `git diff --quiet`, and dropped the second database. Census files
-  exercised: 5 of 23, plus 2 probe files and 1 sibling; 18 of 23 not
-  exercised (budget).
+  `git diff --quiet`, and dropped the second database. Run A hit the same
+  harness behaviour from the other side (its migration mutant leaked into
+  the memoised worker schema after the file restore) and records the same
+  remedy — drop the worker schemas, or use a fresh database, around a
+  migration mutation. Census files exercised: 5 of 23, plus 2 probe files and
+  1 sibling; 18 of 23 not exercised (budget).
 - **block 2 (`covers:` completeness)** → examined. The reference loop under
   `bash` with `set -f` (`grep -rl`, `rg` is absent there), each raw miss
   confirmed with `node scripts/docs/coupling-gate.mjs --strict --changed=<path>`
@@ -474,7 +440,8 @@ entry's, at `8cc3717c8`.
   the CASP guardrails 5, the security model 1; the runtime-compatibility
   contract 0 (declares 82, cites 88). `npm run docs:covers-gaps` → **124
   baselined pairs across 33 docs** (129 / 35), with the standing warning
-  that 2 docs sit outside the governed set.
+  that 2 docs sit outside the governed set. Run A: the same 17 / 6 of 8 and
+  124 / 33.
 - **block 3 (stale numbers)** → partial. Positive control 3 / 3 specimens.
   The 25 newest shards by dated name (`2026-10-23-4327` … `2026-10-26-4443`)
   → **7 figure-bearing lines, 0 with a command** (9 / 0); 3 of the 7 are
@@ -487,52 +454,63 @@ entry's, at `8cc3717c8`.
   trip", above). Instrument lesson: the shard sample must be expanded with
   `${=S}` in zsh — unquoted `$S` passed the 25 names as one argument and
   read **0** with an "IO error" on stderr; the figure above is the corrected
-  run.
+  run. Run A: the same 7 / 0.
 - **block 4 (retired vocabulary)** → examined. Positive control 36 shards.
   **196 files, 47 historical / 149 live** (196 / 46 / 150); the top live
   carriers are the drop-migration test (24), the machine-payments and x402
   route tests (22, 20), the OpenAPI module (16) and the retired-rail routing
   guard (15), all enforcement or history. `npm run lint:retired-rail-prose`
-  → green, **34 hits / 31 files**, below its baseline (10-21: 30 / 28 — a
-  rise of 4 hits within the ceiling, not re-measured per file). Code half:
-  the three x402 repository exports still have no non-test importer beyond a
-  comment in the QA runner.
+  → green, **32 hits / 30 files** at the scan SHA in a pinned worktree, and
+  32 / 30 with this report present (10-21: 30 / 28 — a rise of 2 within the
+  ceiling, not re-measured per file). The first reading, taken in the shared
+  main checkout, was 34 / 31: the ratchet walks `packages/**`, and the main
+  checkout holds a gitignored, build-generated copy of the security-model doc
+  under the frontend's public folder that the clean tree does not — its 2
+  hits are the whole difference (`scanAll()` from the ratchet, run in both
+  roots and diffed by file, §6). Code half: the three x402 repository exports still have
+  no non-test importer beyond a comment in the QA runner. Run A: the same
+  196 / 47 / 149 and 32 / 30.
 - **block 5 (merge-method drift)** → examined. Since 2026-10-19T00:00:00Z →
   **0 merge-commit / 213 squash** (clean); the window `8cc3717c8..` → 135
-  squash. Since 2026-08-10T00:00:00Z → 282 / 1,345 of 1,630.
+  squash. Since 2026-08-10T00:00:00Z → 282 / 1,345 of 1,630. Run A: the same.
 - **block 6 (nets with holes)** → examined, all four halves → copy lint **64
-  unscanned / 4 with hits** (60 / 4; the four are identifier-shaped, in
-  `context/AuthContext.tsx`, `lib/chains.ts`, `lib/delegationPasskeySigner.ts`,
-  `lib/signer.ts`); money perimeter **32 verb files / 20 outside** (unchanged
-  list); visual gate **15 of 27** app routes shot (16 of 28; the 12 unshot:
-  `/`, `/account`, the account and agent detail routes, `/agents/[id]/sweep`,
-  `/analytics`, `/device`, `/login`, `/marketplace/[slug]`, `/onboarding`,
-  `/reporting`, `/signup`); docs boundary, pinned with `git ls-tree` → **43**
-  (41; +2: the prove-red skill and its command file); freshness-gate exit
-  branches unchanged (`Gap 1` :30/:540, `#2164` :128/:1090, `qa-override`
-  :41/:150/:423/:493/:536/:1080, `KNOWN LIMIT` :131). Probes beyond the
-  reference: the advisory-check merge census (notes: 2 of the merged PRs in
-  the two date slices that answered carried a red smoke job at merge; the
-  10-25..26 slice answered HTTP 504 twice and was read per PR instead), and
-  the classifier routing the staleness audit to no surface (C2).
+  unscanned / 4 with hits** (60 / 4; the four are identifier-shaped, in the
+  frontend's auth context, chain facts, passkey signer and signer modules);
+  money perimeter **32 verb files / 20 outside** (unchanged list); visual
+  gate **15 of 27** app routes shot (16 of 28; the 12 unshot: `/`,
+  `/account`, the account and agent detail routes, the agent sweep route,
+  `/analytics`, `/device`, `/login`, the marketplace detail route,
+  `/onboarding`, `/reporting`, `/signup`); docs boundary, pinned with
+  `git ls-tree` → **43** (41; +2: the prove-red skill and its command file);
+  freshness-gate exit branches unchanged (`Gap 1` :30/:540, `#2164`
+  :128/:1090, `qa-override` :41/:150/:423/:493/:536/:1080, `KNOWN LIMIT`
+  :131). Probes beyond the reference: the advisory-check merge census (2 of
+  the merged PRs in the two date slices that answered carried a red smoke job
+  at merge; the 10-25..26 slice answered HTTP 504 twice and was read per PR;
+  run A's full read: 9 of 134), and the classifier routing the staleness
+  audit to no surface (C2). Run A: the same four halves.
 - **incident clustering** → examined (worker). Issues created since
-  2026-10-19T00:00:00Z → **172 (161 closed / 11 open)**; 13 epics, 61
-  numbered slices; `code-quality` on 2. By mechanism, read from titles and
-  bodies: outbound fetch outside the SSRF seam 5 (C3); agent-facing text
-  asserting a false state 6; host- or load-dependent test reds 10; source
-  parsing guards misreading input 8; catalog ingestion 7; docs drift and
-  leftovers 12; EIP-3009 settlement 10 (epic #4318 scoped to four of them);
-  agent evals 9 (epic #3957). Open PRs → 0; open issues → 18.
+  2026-10-19T00:00:00Z → **172 (161 closed / 11 open)** (run A counted from
+  10-21: 119, 10 open); 13 epics, 61 numbered slices; `code-quality` on 2.
+  By mechanism, read from titles and bodies: outbound fetch outside the SSRF
+  seam 5 (notes); agent-facing text asserting a false state 6; host- or
+  load-dependent test reds 10; source parsing guards misreading input 8;
+  catalog ingestion 7; docs drift and leftovers 12; EIP-3009 settlement 10
+  (epic #4318 scoped to four of them); agent evals 9 (epic #3957). Open PRs
+  → 0 at the worker's read (run A's PR #4454 opened after it); open issues →
+  18.
 - **workflow archaeology** → examined (worker). `ci.yml` newest 100
   (2026-10-24T07:47Z → 10-26T19:46Z) → **72 success / 14 failure / 13
-  cancelled**, 1 in progress; 7 with attempt > 1, all feature branches; on
-  `dev` 34 → 28 / 2 / 4, both failures the browser-smoke spec in the notes.
-  Failing jobs over the 14 failures: browser smoke 7, visual regression 7,
-  lint-type-build 2, SDK checks 1, CI-config checks 1. qa-dev at the
-  `money-flow` job level: newest 30 runs (all `deployment_status`, 10-26) →
-  ran in **6 (6 success, each on attempt 1/2 with 17 legs PASS)**, skipped in
-  24; scheduled runs 10-19 → 10-26 → 7 success / 1 failure (10-21, §3).
-  `agent-evals.yml` → 18 runs, 2 / 12 / 4 (notes).
+  cancelled**, 1 in progress (run A, minutes later: 73 / 14 / 13); 7 with
+  attempt > 1, all feature branches; on `dev` 34 → 28 / 2 / 4, both failures
+  the browser-smoke spec in the notes. Failing jobs over the 14 failures:
+  browser smoke 7, visual regression 7, lint-type-build 2, SDK checks 1,
+  CI-config checks 1. qa-dev at the `money-flow` job level: newest 30 runs
+  (all `deployment_status`, 10-26) → ran in **6 (6 success, each on attempt
+  1/2 with 17 legs PASS)**, skipped in 24; scheduled runs 10-19 → 10-26 → 7
+  success / 1 failure (10-21, §3). Run A read 615 runs since 10-21 at the
+  job level: 77 success / 3 failure / 535 skipped, the 3 the tail of the
+  #4215 red. `agent-evals.yml` → 18 runs, 2 / 12 / 4 (notes).
 - **comment archaeology** → examined → `git grep -c -w -E 'TODO|FIXME|HACK|XXX' origin/dev -- 'packages/*/src/*'`
   → **0** (control `import` → 2,175 files); the repeated-comment census is in
   the notes.
@@ -555,17 +533,25 @@ entry's, at `8cc3717c8`.
 - **novelty** → the tracker was searched per candidate (queries in each
   section); the ledger and bug reports were grepped for each candidate's
   terms (`audit-staleness`, `delegation_expired`, `ssrf`, `bare fetch`);
+  run A's report and ledger entry were read in full for overlap;
   bug-report bodies were not otherwise re-read.
 
 ## 6. Instrument lessons from this run
 
+- A gauge that walks the filesystem must run in a pinned worktree, not the
+  shared main checkout: the retired-rail prose ratchet read 34 / 31 there
+  and 32 / 30 at the same SHA in a clean worktree, and `git status` showed
+  nothing — the extra file is a gitignored, build-generated copy of a doc
+  under the frontend's public folder (`git status --ignored` shows it;
+  `scanAll()` diffed between the two roots names it). The
+  reviewer-own-root rule applies to the scan's own counts.
 - The runner cannot drive a migration-body mutation whose test goes through
   the memoising harness: its green baseline applies the unmutated migration
   and the mutant never reaches the database. Give such a cell a test that
   re-applies the migration itself (the 121 test's own down/up is why M1
   worked), or hand-rig it on a fresh database and say so.
-- A failed `.rejects` expectation reads as mutation-red (C4). Read the
-  message before trusting the class.
+- A failed `.rejects` expectation reads as mutation-red (run A's C1). Read
+  the message before trusting the class.
 - In zsh, `rg … $S` with a newline-separated list in `$S` passes one
   argument; use `${=S}`. The first block-3 reading was 0 for that reason.
 - `gh pr list --json statusCheckRollup` over ~200 merged PRs answers HTTP 504
@@ -575,6 +561,9 @@ entry's, at `8cc3717c8`.
   the prove-red rewrite of block 1); re-read it after moving the checkout.
 - The classifier's `(none)` for a `scripts/docs/**` file is not "unexercised":
   `docs.yml` has its own path filter.
+- Two scans of one day collide on the report path and the ledger's one
+  append point; read the other before presenting, name it, and reconcile
+  item by item rather than presenting a duplicate as new.
 
 ## 7. Decisions requested
 
@@ -583,9 +572,6 @@ entry's, at `8cc3717c8`.
 2. C2 — file (one PR): dated records leave the staleness audit; the owner
    picks the mechanism (folder rule, or a `record` status) and whether bug
    reports keep `covers:`.
-3. C3 — file (one PR): a shrink-only outbound-fetch perimeter ratchet with
-   the three operator-host files allowlisted by name.
-4. C4 — file (one PR): the `.rejects` / `.resolves` stems join the runner's
-   vitest assertion shape with a fixture.
-5. The notes (the smoke spec, the three display-column survivors): not
-   proposed; a `new-task` for the spec if the owner wants it tracked.
+3. The notes (the egress perimeter, the three display-column survivors, the
+   smoke spec): not proposed. The runner's `.rejects` stem is run A's C1 and
+   is decided there.

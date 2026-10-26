@@ -42,6 +42,11 @@ test('CLI (#4459): a `record` doc is never ranked; a `current` doc with the same
     files: {
       'packages/thing/index.ts': '// covered code\n',
       'docs/bug-reports/2020-01-01-run.md': doc('record'),
+      // The skip keys on the status, not the folder: a record outside
+      // docs/bug-reports/ is skipped, and a `current` doc inside it (the
+      // run-report template's stand-in) is ranked.
+      'docs/contributing/retro.md': doc('record'),
+      'docs/bug-reports/_template.md': doc('current'),
       'docs/area/live.md': doc('current'),
       'docs/research/spike.md': doc('research'),
       // The audit always reads the root gravity files; uncoupled here.
@@ -50,5 +55,5 @@ test('CLI (#4459): a `record` doc is never ranked; a `current` doc with the same
   })
   assert.equal(status, 0, out)
   const ranked = JSON.parse(out.slice(out.indexOf('{\n  "generated"'))).findings.map((f) => f.doc)
-  assert.deepEqual(ranked, ['docs/area/live.md'])
+  assert.deepEqual(ranked.sort(), ['docs/area/live.md', 'docs/bug-reports/_template.md'])
 })

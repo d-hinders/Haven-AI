@@ -38,7 +38,8 @@ document for the remaining exploratory checklist.
 
 > After **every** run, capture findings in a run report under
 > [`docs/bug-reports/`](../bug-reports/) using
-> [`_run-report-template.md`](../bug-reports/_run-report-template.md). That's the
+> [`_run-report-template.md`](../bug-reports/_run-report-template.md), with
+> `status: record` in the copy's front-matter (#4459). That's the
 > feedback loop both checklists call for — it feeds friction/bugs back to the
 > coding agent.
 

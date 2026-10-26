@@ -1742,7 +1742,8 @@ exploratory.
 > 4. Make a priced call **above the max price** → expect a `PRICE_EXCEEDS_MAX` rejection.
 > 5. `haven_list_receipts`, then `haven_get_receipt { payment_id }` + `haven_verify_receipt` on the step-2 payment. `haven_get_receipt` returns the signed bundle (`{ receipt }`, settled payments only); `haven_verify_receipt` accepts the `GET /payments/:id/receipt` response (`HavenClient.getReceipt`) as-is, not a list row — a row carries no signature and returns `not_a_signed_receipt`. A signed erc7710 bundle verifies; a direct or eip3009 bundle returns `not_verifiable_offline` (the signed user operation is not in the bundle).
 > Stop at the first failed step. Then write a run report from
-> `docs/bug-reports/_run-report-template.md` (per-goal pass/fail + friction) and file
+> `docs/bug-reports/_run-report-template.md` (per-goal pass/fail + friction; set
+> `status: record` in the copy's front-matter) and file
 > concrete bugs as issues. This is non-gating exploratory coverage.
 
 ## Layer 3 — AI-driven browser exploration (`/qa-explore-ui`, #579)
@@ -1790,7 +1791,8 @@ findings report under [`bug-reports/`](../bug-reports/).
 > (who can spend, from which wallet, how much, when approval is needed, how to
 > pause/revoke). Screenshot key screens.
 > Write a findings report from `docs/bug-reports/_run-report-template.md` (surfaces
-> visited + a Friction/Bugs table), run the secret review before committing, and file
+> visited + a Friction/Bugs table; set `status: record` in the copy's
+> front-matter), run the secret review before committing, and file
 > concrete UI bugs as issues. This is non-gating exploratory coverage.
 
 ## Layer 3b — the cold-agent onboarding scenario (`/qa-explore-agent-onboarding`, #2538)

@@ -67,6 +67,8 @@ test('archived, research and record docs are never unverified-90d', () => {
       { path: 'docs/research/spike.md', raw: fm({ status: 'research', lastVerified: '2025-01-01' }) },
       { path: 'docs/legacy.md', raw: fm({ status: 'archived', lastVerified: '2025-01-01' }) },
       { path: 'docs/bug-reports/old-run.md', raw: fm({ status: 'record', lastVerified: '2025-01-01' }) },
+      { path: 'docs/contributing/retro.md', raw: fm({ status: 'record', lastVerified: '2025-01-01' }) },
+      { path: 'docs/bug-reports/_template.md', raw: fm({ lastVerified: '2025-01-01' }) },
       { path: 'docs/current-old.md', raw: fm({ lastVerified: '2025-01-01' }) },
     ],
   })
@@ -76,6 +78,9 @@ test('archived, research and record docs are never unverified-90d', () => {
   // with the same date is the positive control.
   assert.deepEqual(flagsOf(r, 'docs/bug-reports/old-run.md'), [])
   assert.deepEqual(flagsOf(r, 'docs/current-old.md'), ['unverified-90d'])
+  // Keyed on the status, not the folder.
+  assert.deepEqual(flagsOf(r, 'docs/contributing/retro.md'), [])
+  assert.deepEqual(flagsOf(r, 'docs/bug-reports/_template.md'), ['unverified-90d'])
 })
 
 test('docs/archive/** is outside the population', () => {

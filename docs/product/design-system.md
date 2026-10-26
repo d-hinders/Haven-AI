@@ -2491,6 +2491,21 @@ through this action**: a new export surface consumes it, it does not copy it
   the **chip includes it** (the chip spells the filter out in full). A page
   moves a status out of its option label and into `meta`; the label is then
   the plain name.
+- A facet option may carry a **`group`** (#4452): `{ id, label }` collapses a
+  long tail of options behind one disclosure row. Options stay one flat array,
+  so the URL codec, the chip summary and value clearing are unchanged.
+  Ungrouped rows come first, then one toggle per group reading "Show 14
+  inactive" (`facetGroupToggleLabel`); the group's rows appear when it is open.
+  In the menu the toggle is a `menuitem` with `aria-expanded`, so arrows, Home
+  and End reach it, and it **stays mounted** when the group expands — focus is
+  not lost and the next arrow key continues from it. In the phone sheet it is a
+  disclosure `<button>` with `aria-expanded`, reached by Tab, because the sheet
+  is not a menu. A group holding the selected value is **open on every render**
+  (the URL value loads after mount, and `focusItem('checked')` must find the
+  row) and cannot be collapsed; any other group opens and closes on its toggle.
+  No `role="group"` wraps the grouped radios — that would split one radio set
+  for screen readers. The split itself is one shared helper
+  (`list-facet-groups.ts`), imported by both renderers.
 - **`allLabel`** names a single-select facet's "no filter" row (#4113). A
   string renames it ("Shown" in place of "All"). `null` drops it,
   for a facet whose every value is a real choice: Agents' **Archived: Hidden /

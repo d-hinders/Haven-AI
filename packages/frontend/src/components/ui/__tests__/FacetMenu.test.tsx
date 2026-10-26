@@ -197,6 +197,138 @@ describe('FacetMenu — multi-select', () => {
   })
 })
 
+describe('FacetMenu — a collapsed option group (#4452)', () => {
+  const GROUPED: ListFacet = {
+    id: 'status',
+    label: 'Status',
+    selection: 'multi',
+    options: [
+      { value: 'active', label: 'Active', count: 2 },
+      { value: 'paused', label: 'Paused', count: 1 },
+      { value: 'inactive', label: 'Inactive', count: 14, group: { id: 'inactive', label: 'inactive' } },
+      { value: 'archived', label: 'Archived', count: 3, group: { id: 'inactive', label: 'inactive' } },
+    ],
+  }
+
+  const toggle = () => screen.getByRole('menuitem', { name: 'Show 2 inactive' })
+
+  it('hides the group until its toggle is used, and the toggle names the count', async () => {
+    const user = userEvent.setup()
+    render(<Controlled facet={GROUPED} />)
+    await user.click(screen.getByRole('button', { name: 'Status: All' }))
+
+    // Ungrouped rows first, then one toggle row per group.
+    expect(screen.getAllByRole('menuitemcheckbox').map((r) => r.getAttribute('aria-checked'))).toEqual(['false', 'false'])
+    expect(screen.getByRole('menuitemcheckbox', { name: /^Active/ })).toBeInTheDocument()
+    expect(screen.getByRole('menuitemcheckbox', { name: /^Paused/ })).toBeInTheDocument()
+    expect(toggle()).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByRole('menuitemcheckbox', { name: /^Inactive/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('menuitemcheckbox', { name: /^Archived/ })).not.toBeInTheDocument()
+  })
+
+  it('Arrow, Home and End reach the toggle row', async () => {
+    const user = userEvent.setup()
+    render(<Controlled facet={GROUPED} />)
+    const trigger = screen.getByRole('button', { name: 'Status: All' })
+    trigger.focus()
+    await user.keyboard('{ArrowDown}')
+    expect(screen.getByRole('menuitemcheckbox', { name: /^Active/ })).toHaveFocus()
+    await user.keyboard('{ArrowDown}')
+    expect(screen.getByRole('menuitemcheckbox', { name: /^Paused/ })).toHaveFocus()
+    await user.keyboard('{ArrowDown}')
+    expect(toggle()).toHaveFocus()
+    await user.keyboard('{Home}')
+    expect(screen.getByRole('menuitemcheckbox', { name: /^Active/ })).toHaveFocus()
+    await user.keyboard('{End}')
+    expect(toggle()).toHaveFocus()
+  })
+
+  it('Enter and Space expand it, focus stays on it, and the next arrow continues from it', async () => {
+    const user = userEvent.setup()
+    render(<Controlled facet={GROUPED} />)
+    await user.click(screen.getByRole('button', { name: 'Status: All' }))
+    toggle().focus()
+
+    await user.keyboard('{Enter}')
+    // Still mounted, still focused, now expanded.
+    expect(toggle()).toHaveAttribute('aria-expanded', 'true')
+    expect(toggle()).toHaveFocus()
+    expect(screen.getByRole('menuitemcheckbox', { name: /^Inactive/ })).toBeInTheDocument()
+    expect(screen.getByRole('menuitemcheckbox', { name: /^Archived/ })).toBeInTheDocument()
+
+    await user.keyboard('{ArrowDown}')
+    expect(screen.getByRole('menuitemcheckbox', { name: /^Inactive/ })).toHaveFocus()
+    await user.keyboard('{ArrowUp}')
+    expect(toggle()).toHaveFocus()
+
+    await user.keyboard(' ')
+    expect(toggle()).toHaveAttribute('aria-expanded', 'false')
+    expect(toggle()).toHaveFocus()
+    expect(screen.queryByRole('menuitemcheckbox', { name: /^Inactive/ })).not.toBeInTheDocument()
+  })
+
+  it('a selected grouped value opens its group, and focusItem("checked") lands on it', async () => {
+    const user = userEvent.setup()
+    render(<Controlled facet={GROUPED} initial={['inactive']} />)
+    const trigger = screen.getByRole('button', { name: 'Status: Inactive' })
+    trigger.focus()
+    await user.keyboard('{ArrowDown}')
+    expect(toggle()).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('menuitemcheckbox', { name: /^Inactive/ })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByRole('menuitemcheckbox', { name: /^Inactive/ })).toHaveFocus()
+  })
+
+  it('opens the group when the value arrives after mount', async () => {
+    const user = userEvent.setup()
+    const { rerender } = render(<FacetMenu facet={GROUPED} value={[]} onChange={() => {}} />)
+    // The URL value loads after mount: the open state is derived, not initial state.
+    rerender(<FacetMenu facet={GROUPED} value={['archived']} onChange={() => {}} />)
+    const trigger = screen.getByRole('button', { name: 'Status: Archived' })
+    trigger.focus()
+    await user.keyboard('{ArrowDown}')
+    expect(toggle()).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('menuitemcheckbox', { name: /^Archived/ })).toHaveFocus()
+  })
+
+  it('a group holding the selection cannot be collapsed', async () => {
+    const user = userEvent.setup()
+    render(<Controlled facet={GROUPED} initial={['inactive']} />)
+    await user.click(screen.getByRole('button', { name: 'Status: Inactive' }))
+    expect(toggle()).toHaveAttribute('aria-expanded', 'true')
+    await user.click(toggle())
+    expect(toggle()).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('menuitemcheckbox', { name: /^Inactive/ })).toBeInTheDocument()
+  })
+
+  it('keeps its hook order when the facet starts hidden and gains options', () => {
+    // The group state is a hook, so it must be declared before the early
+    // returns: a facet that renders nothing first and a menu second would
+    // otherwise change the hook count between renders.
+    const { rerender } = render(
+      <FacetMenu facet={{ ...GROUPED, options: [GROUPED.options[0]] }} value={[]} onChange={() => {}} />,
+    )
+    rerender(<FacetMenu facet={GROUPED} value={[]} onChange={() => {}} />)
+    expect(screen.getByRole('button', { name: 'Status: All' })).toBeInTheDocument()
+  })
+
+  it('does not wrap the grouped rows in role="group" — one radio set stays one set', async () => {
+    const user = userEvent.setup()
+    render(<Controlled facet={{ ...GROUPED, selection: 'single' }} />)
+    await user.click(screen.getByRole('button', { name: 'Status: All' }))
+    await user.click(toggle())
+    expect(screen.queryByRole('group')).not.toBeInTheDocument()
+    // The toggle is a plain `menuitem`, not a radio: it never joins the set.
+    expect(screen.getAllByRole('menuitemradio').map((r) => r.textContent)).toEqual([
+      'All',
+      'Active2',
+      'Paused1',
+      'Inactive14',
+      'Archived3',
+    ])
+    expect(screen.getAllByRole('menuitem').map((r) => r.textContent)).toEqual(['Show 2 inactive'])
+  })
+})
+
 describe('FacetMenu — pills', () => {
   it('renders toggle buttons with aria-pressed, All first, and no menu roles', async () => {
     const user = userEvent.setup()

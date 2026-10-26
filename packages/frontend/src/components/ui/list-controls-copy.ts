@@ -70,6 +70,17 @@ export function showResultsLabel(noun: ListNoun, count: ListCount | null | undef
 export const filtersButtonLabel = (active: number): string => (active > 0 ? `Filters (${active})` : 'Filters')
 
 /**
+ * A collapsed option group's disclosure row (#4452): "Show 14 inactive".
+ *
+ * The group's `label` is the page's own noun phrase ("inactive", "archived
+ * agents"), so it is not pluralised here — the count carries the number, and
+ * the label reads the same at 1 and at 14.
+ */
+export function facetGroupToggleLabel(count: number, label: string): string {
+  return `Show ${count} ${label}`
+}
+
+/**
  * A facet's value as the trigger and its chip read it: "All", one option's
  * label, two labels joined, or "3 selected".
  *

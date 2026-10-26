@@ -621,6 +621,77 @@ describe('ListToolbar — phone sheet', () => {
   })
 })
 
+describe('ListToolbar — a collapsed option group in the phone sheet (#4452)', () => {
+  const GROUPED_FACETS: ListFacet[] = [
+    {
+      id: 'status',
+      label: 'Status',
+      selection: 'multi',
+      options: [
+        { value: 'active', label: 'Active', count: 2 },
+        { value: 'paused', label: 'Paused', count: 1 },
+        { value: 'inactive', label: 'Inactive', meta: 'Revoked', count: 14, group: { id: 'inactive', label: 'inactive' } },
+        { value: 'archived', label: 'Archived', count: 3, group: { id: 'inactive', label: 'inactive' } },
+      ],
+    },
+  ]
+  const GROUPED_EMPTY: ListState = { q: '', facets: { status: [] }, period: {} }
+
+  function renderSheet(initial: ListState = GROUPED_EMPTY) {
+    return render(
+      <ListToolbar
+        noun={noun}
+        state={initial}
+        onChange={() => {}}
+        filtering="browser"
+        facets={GROUPED_FACETS}
+        layout="phone"
+        count={{ shown: 3, total: 3 }}
+      />,
+    )
+  }
+
+  it('hides the group behind a Tab-reachable disclosure button with aria-expanded', async () => {
+    const user = userEvent.setup()
+    renderSheet()
+    await user.click(screen.getByRole('button', { name: 'Filters' }))
+    const sheet = screen.getByRole('dialog', { name: 'Filters' })
+
+    const toggle = within(sheet).getByRole('button', { name: 'Show 2 inactive' })
+    expect(toggle.tagName).toBe('BUTTON')
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    expect(within(sheet).getByRole('checkbox', { name: /^Active/ })).toBeInTheDocument()
+    expect(within(sheet).queryByRole('checkbox', { name: /^Inactive/ })).not.toBeInTheDocument()
+
+    // The sheet is not a menu: the disclosure is reached by Tab, not arrows.
+    // The focus trap moves focus in on the next frame; let it settle first.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    })
+    within(sheet).getByRole('checkbox', { name: /^Paused/ }).focus()
+    await user.tab()
+    expect(toggle).toHaveFocus()
+
+    await user.click(toggle)
+    expect(within(sheet).getByRole('button', { name: 'Show 2 inactive' })).toHaveAttribute('aria-expanded', 'true')
+    expect(within(sheet).getByRole('checkbox', { name: /^Inactive/ })).toBeInTheDocument()
+    expect(within(sheet).getByRole('checkbox', { name: /^Archived/ })).toBeInTheDocument()
+  })
+
+  it('opens the group holding the selected value, and the chip still names it with its meta', async () => {
+    const user = userEvent.setup()
+    renderSheet({ ...GROUPED_EMPTY, facets: { status: ['inactive'] } })
+
+    // The chip is unchanged by grouping: it spells the filter out in full.
+    expect(screen.getByText('Status: Inactive (Revoked)')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Filters (1)' }))
+    const sheet = screen.getByRole('dialog', { name: 'Filters' })
+    expect(within(sheet).getByRole('button', { name: 'Show 2 inactive' })).toHaveAttribute('aria-expanded', 'true')
+    expect(within(sheet).getByRole('checkbox', { name: /^Inactive/ })).toBeChecked()
+  })
+})
+
 describe('ListToolbar — long labels and the meta slot (#4150)', () => {
   const LONG = 'Lovable Dev preview deployment helper'
   const META_FACETS: ListFacet[] = [

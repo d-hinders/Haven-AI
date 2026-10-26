@@ -1,15 +1,16 @@
 'use client'
 
-import { SearchX, Search, SlidersHorizontal, X } from 'lucide-react'
-import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react'
+import { SearchX, Search, SlidersHorizontal, X, ChevronDown } from 'lucide-react'
+import { Fragment, useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { Button } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Icon } from '@/components/ui/Icon'
 import { useBodyScrollLock } from '@/hooks/useBodyScrollLock'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import { useFocusTrap } from '@/hooks/useFocusTrap'
-import { FacetMenu, type ListFacet } from './FacetMenu'
+import { FacetMenu, type ListFacet, type ListFacetOption } from './FacetMenu'
 import { PeriodPicker, isValidRange } from './PeriodPicker'
+import { planFacetOptions, toggleFacetGroup } from './list-facet-groups'
 import {
   allOptionLabel,
   allTimeLabel,
@@ -519,6 +520,13 @@ const SHEET_ROW_CLASSES =
 const SHEET_INPUT_CLASSES = 'h-4 w-4 shrink-0 accent-[var(--v2-brand)] focus-visible:outline-none'
 
 /**
+ * A collapsed option group's disclosure row in the phone sheet (#4452). A
+ * plain `<button>` with `aria-expanded`, reached by Tab: the sheet is a dialog
+ * of form controls, not a menu, so it takes no menu roles.
+ */
+const SHEET_GROUP_TOGGLE_CLASSES = `flex min-h-11 w-full items-center gap-2 rounded-md px-2.5 text-left text-sm text-[var(--v2-ink-2)] hover:bg-[var(--v2-surface)] ${listFocusRing}`
+
+/**
  * The phone sheet. Native radios and checkboxes in fieldsets — a dialog of
  * form controls, not menus — each change applied as it happens. Escape, the
  * backdrop and the footer close it; focus returns to the Filters button.
@@ -553,6 +561,10 @@ function FilterSheet({
   const panelRef = useRef<HTMLDivElement>(null)
   const titleId = useId()
   const name = useId()
+  // The user's own group expansions, per facet (#4452). The open state itself
+  // is derived on every render by `planFacetOptions`, so a selected grouped
+  // value is never hidden behind a collapsed row.
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, string[]>>({})
   useFocusTrap(panelRef, true)
   useEscapeToClose(true, onClose)
   useBodyScrollLock(true)
@@ -591,6 +603,40 @@ function FilterSheet({
           {facets.map((facet) => {
             const values = state.facets[facet.id] ?? []
             const multi = facet.selection === 'multi'
+            const plan = planFacetOptions(facet.options, values, expandedGroups[facet.id] ?? [])
+            const optionRow = (option: ListFacetOption) => {
+              const checked = values.includes(option.value)
+              return (
+                <label key={option.value} className={SHEET_ROW_CLASSES}>
+                  <input
+                    type={multi ? 'checkbox' : 'radio'}
+                    name={`${name}-${facet.id}`}
+                    checked={checked}
+                    onChange={() =>
+                      onFacet(
+                        facet.id,
+                        multi
+                          ? checked
+                            ? values.filter((v) => v !== option.value)
+                            : [...values, option.value]
+                          : [option.value],
+                      )
+                    }
+                    className={SHEET_INPUT_CLASSES}
+                  />
+                  {/* `line-clamp-2` + the `meta` slot (#4150): the row
+                      wraps and the status suffix always shows — no
+                      hover on a touch device. */}
+                  <span className="line-clamp-2 flex-1 text-ellipsis" title={option.label}>
+                    {option.label}
+                  </span>
+                  {option.meta && <span className="shrink-0 text-xs text-[var(--v2-ink-3)]">{option.meta}</span>}
+                  {option.count !== undefined && (
+                    <span className="text-xs tabular-nums text-[var(--v2-ink-3)]">{option.count}</span>
+                  )}
+                </label>
+              )
+            }
             return (
               <SheetGroup key={facet.id} legend={facet.label}>
                 {!multi && facet.allLabel !== null && (
@@ -605,39 +651,32 @@ function FilterSheet({
                     <span className="flex-1">{facet.allLabel ?? allOptionLabel}</span>
                   </label>
                 )}
-                {facet.options.map((option) => {
-                  const checked = values.includes(option.value)
-                  return (
-                    <label key={option.value} className={SHEET_ROW_CLASSES}>
-                      <input
-                        type={multi ? 'checkbox' : 'radio'}
-                        name={`${name}-${facet.id}`}
-                        checked={checked}
-                        onChange={() =>
-                          onFacet(
-                            facet.id,
-                            multi
-                              ? checked
-                                ? values.filter((v) => v !== option.value)
-                                : [...values, option.value]
-                              : [option.value],
-                          )
-                        }
-                        className={SHEET_INPUT_CLASSES}
+                {plan.ungrouped.map(optionRow)}
+                {plan.groups.map((group) => (
+                  <Fragment key={`group-${group.group.id}`}>
+                    {/* The same split as the menu, as a disclosure button
+                        (#4452): the sheet is not a menu, so this is reached by
+                        Tab and carries `aria-expanded` rather than a menu role. */}
+                    <button
+                      type="button"
+                      aria-expanded={group.open}
+                      onClick={() =>
+                        setExpandedGroups((prev) => ({
+                          ...prev,
+                          [facet.id]: toggleFacetGroup(prev[facet.id] ?? [], group),
+                        }))
+                      }
+                      className={SHEET_GROUP_TOGGLE_CLASSES}
+                    >
+                      <Icon
+                        icon={ChevronDown}
+                        className={`h-3.5 w-3.5 shrink-0 text-[var(--v2-ink-3)] motion-safe:transition-transform ${group.open ? '' : '-rotate-90'}`}
                       />
-                      {/* `line-clamp-2` + the `meta` slot (#4150): the row
-                          wraps and the status suffix always shows — no
-                          hover on a touch device. */}
-                      <span className="line-clamp-2 flex-1 text-ellipsis" title={option.label}>
-                        {option.label}
-                      </span>
-                      {option.meta && <span className="shrink-0 text-xs text-[var(--v2-ink-3)]">{option.meta}</span>}
-                      {option.count !== undefined && (
-                        <span className="text-xs tabular-nums text-[var(--v2-ink-3)]">{option.count}</span>
-                      )}
-                    </label>
-                  )
-                })}
+                      <span className="flex-1 text-left">{group.toggleLabel}</span>
+                    </button>
+                    {group.open && group.options.map(optionRow)}
+                  </Fragment>
+                ))}
               </SheetGroup>
             )
           })}

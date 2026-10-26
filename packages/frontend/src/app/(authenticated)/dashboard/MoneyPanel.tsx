@@ -391,7 +391,7 @@ export default function MoneyPanel({
           {topAgents.map((row) => (
             <div key={row.id} className="flex items-baseline justify-between gap-4">
               <dt className="flex min-w-0 items-center gap-2 text-sm text-[var(--v2-ink-2)]">
-                <SeriesSwatch color={seriesColorForAgent(row.name)} size="sm" />
+                <SeriesSwatch color={seriesColorForAgent(row.name)} size="sm" shape="square" />
                 <span className="min-w-0 truncate">{row.name}</span>
               </dt>
               <dd className="v2-tabular shrink-0">
@@ -402,7 +402,7 @@ export default function MoneyPanel({
           {otherAgentCount > 0 ? (
             <div className="flex items-baseline justify-between gap-4">
               <dt className="flex min-w-0 items-center gap-2 text-sm text-[var(--v2-ink-3)]">
-                <SeriesSwatch color="var(--v2-ink-3)" size="sm" />
+                <SeriesSwatch color="var(--v2-ink-3)" size="sm" shape="square" />
                 <span className="min-w-0 truncate">
                   {otherAgentCount} other agent{otherAgentCount === 1 ? '' : 's'}
                 </span>
@@ -415,7 +415,7 @@ export default function MoneyPanel({
           {showUnattributed ? (
             <div className="flex items-baseline justify-between gap-4">
               <dt className="flex min-w-0 items-center gap-2 text-sm text-[var(--v2-ink-3)]">
-                <SeriesSwatch color="var(--v2-ink-3)" size="sm" />
+                <SeriesSwatch color="var(--v2-ink-3)" size="sm" shape="square" />
                 <span className="min-w-0 truncate">Agents since removed</span>
               </dt>
               <dd className="v2-tabular shrink-0">

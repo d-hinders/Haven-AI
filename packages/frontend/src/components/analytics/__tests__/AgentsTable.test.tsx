@@ -154,6 +154,17 @@ describe('AgentsTable — the desktop table (#4333 columns)', () => {
     expect(term.nextElementSibling?.textContent).toBe('1 · 2 attempts')
   })
 
+  it('prints the phone row\u2019s Refused as the bare count when the attempts agree (#4426)', async () => {
+    // The other half of the one formatter on the phone: one refusal, one
+    // attempt → "1", no attempts clause. Mutation: an inline copy that
+    // always appends "· N attempts" → "1 · 1 attempts" → red.
+    const { container } = mount()
+    const retiredRow = mobileOf(container)!.querySelectorAll(':scope > div')[1] as HTMLElement
+    await userEvent.click(within(retiredRow).getByRole('button', { name: 'More' }))
+    const term = within(retiredRow).getByText('Refused')
+    expect(term.nextElementSibling?.textContent).toBe('1')
+  })
+
   it('does not pad the refusals cell with an attempts clause when the two agree', () => {
     // A dedupe upstream makes rows and attempts usually equal, and spelling
     // the pair every time would train the reader to stop parsing the cell.

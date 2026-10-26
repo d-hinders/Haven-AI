@@ -398,10 +398,20 @@ describe('MoneyPanel — the ONE primary-button rule (#4167)', () => {
 })
 
 describe('MoneyPanel — the legend dots are the chart SeriesSwatch (#4426)', () => {
-  it('keys each agent row, and the removed-agents remainder, with SeriesSwatch at the small size', () => {
-    // The money card hand-built its legend dot (a square, `rounded-sm`)
-    // beside the chart's own `SeriesSwatch`. Mutation: hand-build a row's
-    // dot again → that row has no `series-swatch` → red.
+  // The money card hand-built its list dots beside the chart's own
+  // `SeriesSwatch`. They are `SeriesSwatch` now, keeping the agreed
+  // mockup's small SQUARE (#3901, Refs #3897) through `shape="square"`, so
+  // the card's pixels do not move. Mutation: hand-build any row's dot again
+  // → that row has no `series-swatch` → red; drop `shape="square"` → the
+  // row's swatch is round → red.
+  const expectSquareSwatch = (dt: Element, background: string) => {
+    const swatch = within(dt as HTMLElement).getByTestId('series-swatch')
+    expect(swatch.className.split(/\s+/)).toEqual(expect.arrayContaining(['h-2', 'w-2', 'rounded-sm']))
+    expect(swatch.className).not.toContain('rounded-full')
+    expect(swatch.style.backgroundColor).toBe(background)
+  }
+
+  it('keys each agent row, and the removed-agents remainder, with a small square SeriesSwatch', () => {
     render(
       <MoneyPanel
         {...baseProps}
@@ -414,13 +424,29 @@ describe('MoneyPanel — the legend dots are the chart SeriesSwatch (#4426)', ()
     const spending = screen.getByRole('region', { name: 'Spending' })
     const terms = spending.querySelectorAll('dl dt')
     expect(terms.length).toBe(3) // two agents + "Agents since removed"
-    for (const dt of terms) {
-      const swatch = within(dt as HTMLElement).getByTestId('series-swatch')
-      expect(swatch.className.split(/\s+/)).toEqual(expect.arrayContaining(['h-2', 'w-2', 'rounded-full']))
-    }
-    expect(within(terms[0] as HTMLElement).getByTestId('series-swatch').style.backgroundColor).toBe(
-      seriesColorForAgent('Research agent'),
+    expectSquareSwatch(terms[0]!, seriesColorForAgent('Research agent'))
+    expectSquareSwatch(terms[1]!, seriesColorForAgent('Data-feed agent'))
+    expect(terms[2]).toHaveTextContent('Agents since removed')
+    expectSquareSwatch(terms[2]!, 'var(--v2-ink-3)')
+  })
+
+  it('keys the "N other agents" row past the top three with the same square SeriesSwatch', () => {
+    // Five spending agents: the list names the top three and folds the rest
+    // into one "2 other agents" row — the branch the two-agent fixture above
+    // never reaches.
+    const agents = [
+      agent('a1', 'Research agent', 20),
+      agent('a2', 'Data-feed agent', 15),
+      agent('a3', 'Ops agent', 10),
+      agent('a4', 'Billing agent', 5),
+      agent('a5', 'Support agent', 2),
+    ]
+    render(<MoneyPanel {...baseProps} overview={overview({ d30NetUsd: 52, agents })} />)
+    const spending = screen.getByRole('region', { name: 'Spending' })
+    const other = Array.from(spending.querySelectorAll('dl dt')).find((dt) =>
+      /2 other agents/.test(dt.textContent ?? ''),
     )
-    expect(within(terms[2] as HTMLElement).getByTestId('series-swatch').style.backgroundColor).toBe('var(--v2-ink-3)')
+    expect(other, 'no "2 other agents" row').toBeDefined()
+    expectSquareSwatch(other!, 'var(--v2-ink-3)')
   })
 })

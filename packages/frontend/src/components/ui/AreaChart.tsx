@@ -442,8 +442,9 @@ function AreaChartFull({
       xOf,
       yOf,
       // Both edge labels are pinned to the plot's edges (see the label's
-      // transform below), so the helper gives each edge pair two
-      // label-widths.
+      // transform below), so the helper widens each edge pair: two
+      // label-widths for the start pair, one and a half for the end pair
+      // (`FIRST_` / `END_X_LABEL_SEPARATION_FACTOR`).
       labelIdx: xLabelIndices(points.length, { narrow, ...X_LABEL_ANCHORING }),
       delta: values.length >= 2 ? values[values.length - 1] - values[0] : 0,
       // Two points make a line, which is the minimum the drawing can be;

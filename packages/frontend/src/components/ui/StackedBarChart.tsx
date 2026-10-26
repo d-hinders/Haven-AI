@@ -294,22 +294,41 @@ function legendRows(entries: StackedBarEntry[]): StackedBarSegment[] {
  * tooltip all read `seriesFill`; a caller passes the same `color` the series
  * carries (or the same `seriesIndex` for a non-agent series).
  */
+/** Every box `SeriesSwatch` can draw, written out whole so each is greppable. */
+const SWATCH_BOX = {
+  sm: {
+    circle: 'h-2 w-2 flex-shrink-0 rounded-full',
+    square: 'h-2 w-2 flex-shrink-0 rounded-sm',
+  },
+  md: {
+    circle: 'h-2.5 w-2.5 flex-shrink-0 rounded-full',
+    square: 'h-2.5 w-2.5 flex-shrink-0 rounded-sm',
+  },
+} as const
+
 export function SeriesSwatch({
   seriesIndex,
   color,
   size = 'md',
+  shape = 'circle',
   className = '',
 }: {
   seriesIndex?: number
   color?: string
   /** `md` (10px) beside a legend name; `sm` (8px) inside a tooltip row. */
   size?: 'sm' | 'md'
+  /**
+   * `circle` is the chart's own key (legend, tooltip, `/design-system`);
+   * `square` is the dashboard money card's list key beside its split bar
+   * (#3901, the agreed #3897 mockup).
+   */
+  shape?: 'circle' | 'square'
   className?: string
 }) {
-  // The size is a prop, not a className override: two height utilities on
-  // one element resolve by stylesheet order, not by the order they are
-  // written, so `className="h-2 w-2"` would not reliably shrink it.
-  const box = size === 'sm' ? 'h-2 w-2 flex-shrink-0 rounded-full' : 'h-2.5 w-2.5 flex-shrink-0 rounded-full'
+  // Size and shape are props, not className overrides: two height or radius
+  // utilities on one element resolve by stylesheet order, not by the order
+  // they are written, so `className="h-2 w-2"` would not reliably shrink it.
+  const box = SWATCH_BOX[size][shape]
   return (
     <span
       aria-hidden="true"

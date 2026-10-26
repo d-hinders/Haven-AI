@@ -4554,14 +4554,18 @@ export const SCENARIOS = {
       return undefined
     },
     async run({ page, vp, shoot }) {
-      await page.goto(`${BASE_URL}/agents/agent-research`, { waitUntil: 'networkidle', timeout: 60_000 })
+      // #4226 made the agent detail page tabbed with `activity` as the default,
+      // so the Settings tab (and the toggle inside it) only renders at
+      // `?tab=settings`. Without the param this scenario waited on a heading
+      // that could never appear.
+      await page.goto(`${BASE_URL}/agents/agent-research?tab=settings`, { waitUntil: 'networkidle', timeout: 60_000 })
       await dismissMobileSidebar(page, vp)
 
       // Both halves of the card, not just any rendered text: the heading
       // names the card and the checkbox names the control — a capture that
       // waited on one string could "prove" visibility with the wrong subtree.
       await page.getByRole('heading', { name: 'Tax declaration', exact: true }).waitFor({ timeout: 20_000 })
-      await page.getByRole('checkbox', { name: 'Send a tax declaration with payments' }).waitFor({ timeout: 20_000 })
+      await page.getByRole('checkbox', { name: 'Allow this agent to send a tax declaration' }).waitFor({ timeout: 20_000 })
 
       await shoot(page.locator('main').first(), 'visible')
     },

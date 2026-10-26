@@ -5,10 +5,11 @@
  * - the toggle renders ONLY when `GET /user/company-details` answers a row
  *   with VIES `valid` — a 404 (flag off), `null`, a non-valid status, a
  *   loading state and an error all render NOTHING;
- * - the copy does not overclaim: the declaration is only on EIP-3009
- *   payments, pinned-merchant payments never carry one, nothing is signed
- *   or submitted to an authority, and "checked" is the strongest word used
- *   (never "verified");
+ * - the copy does not overclaim in either direction (#4416): it names the
+ *   client condition (a client that holds its own signing key) rather than
+ *   the payment rail, says the default setup sends none, lists what the
+ *   merchant receives, and "checked" is the strongest word used (never
+ *   "verified");
  * - a successful toggle PUTs exactly the wire shape; a failed one keeps the
  *   checkbox's server-truth state and surfaces the error inline (never an
  *   optimistic flip).
@@ -138,7 +139,29 @@ describe('TaxDeclarationToggle copy', () => {
     mockUseCompanyDetails.mockReturnValue({ status: 'ready', details: VIES_VALID_ROW })
   })
 
-  it('does not overclaim: "can be declared", nothing submitted, never "verified"', () => {
+  // #4416 (owner decision 2026-10-26, option A): the behaviour did not move,
+  // the copy did. The old sentence said "can be declared to merchants that
+  // ask" — nothing in the SDK reads the merchant's 402 for an ask, so a local
+  // key-holding client sends the declaration to every merchant it pays. The
+  // new copy names the CLIENT condition instead of the payment rail (the
+  // owner's 2026-09-30 review, PR #3490, still stands: no rail on this card),
+  // names the merchant-acceptance half of the owner decision ("and only to
+  // merchants that accept it"), and lists what the merchant receives.
+  //
+  // Pinned WHOLE with `toBe`, not `toContain`: a substring pin passes a
+  // rewrite that reverses the meaning, which is exactly the defect #4416 is
+  // about. Every sentence below maps to a line that makes it true —
+  // `packages/sdk/src/client.ts:329-343` (resolver bound only with a delegate
+  // key), `packages/mcp/src/server.ts:83-85` (the local MCP passes one),
+  // `packages/sdk/src/merchant-completion.ts:187-203` (attached on the paid
+  // retry of an EIP-3009 payment only; the erc7710 branch attaches nothing),
+  // `packages/backend/src/modules/agents/tax-declaration.ts:34,138`
+  // (taxable status, country) and `packages/sdk/src/tax-declaration.ts:240-254`
+  // (principalId + attribution hash, signed by the delegate key).
+  const HELPER_TEXT =
+    "When this is on, your saved VAT number, checked against the EU's VIES register, can travel with payments your agent makes through a client that holds its own signing key: the Haven SDK with a delegate key, or the local Haven MCP server. The merchant your agent pays, when it accepts the declaration, receives your country, the VAT number, your taxable-person status and a signed link to the agent's wallet address. The default setup, a hosted server with a separate signer, sends none. Nothing is submitted to an authority, and you can switch it off here at any time."
+
+  it('pins the whole helper text: who receives the declaration and what it contains', () => {
     render(
       <TaxDeclarationToggle
         agentId="agent-1"
@@ -147,17 +170,32 @@ describe('TaxDeclarationToggle copy', () => {
       />,
     )
     const help = screen.getByText(/checked against the EU's VIES register/).textContent ?? ''
-    // Owner copy review, 2026-09-30: the EIP-3009-only / pinned-merchant
-    // sentence #3426 asked for was dropped from the card. The scope stays
-    // stated in docs/product/agent-passport.md (the EIP-3009-only
-    // declaration); the card keeps "can be declared", never a promise that
-    // every payment carries one (guarded below).
-    expect(help).toContain('can be declared to merchants that ask')
+    expect(help).toBe(HELPER_TEXT)
+  })
+
+  it('does not overclaim in either direction: no "merchants that ask", no "every payment", never "verified"', () => {
+    render(
+      <TaxDeclarationToggle
+        agentId="agent-1"
+        taxDeclarationEnabled={false}
+        onAgentsChanged={() => {}}
+      />,
+    )
+    const help = screen.getByText(/checked against the EU's VIES register/).textContent ?? ''
+    // The old claim, false in the direction the SDK actually behaves: nothing
+    // reads the merchant's 402 for an ask (option B would ship that; it did
+    // not). The other direction is guarded below.
+    expect(help).not.toContain('merchants that ask')
+    // Owner copy review, 2026-09-30 (PR #3490): the card does not name the
+    // payment rail. The rail and the full recipient set stay stated in
+    // docs/product/agent-passport.md and docs/product/owner-company-details.md.
     expect(help).not.toContain('settle by EIP-3009')
     expect(help).toContain('Nothing is submitted to an authority')
     // The overclaim guard: the strongest word about the VAT number is
     // "checked" — never "verified" (docs/product/owner-company-details.md).
     expect(help.toLowerCase()).not.toContain('verified')
+    // The default setup (hosted server plus separate signer) sends nothing,
+    // so the card must not promise a declaration on every payment.
     expect(help.toLowerCase()).not.toContain('every payment')
   })
 

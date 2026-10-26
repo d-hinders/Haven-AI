@@ -14,15 +14,30 @@
  * about, or tried.
  *
  * ── Copy discipline ──────────────────────────────────────────────────────
- * The help text must not overclaim: the declaration is sent ONLY on
- * EIP-3009 payments. A pinned agent, and a merchant that accepts ERC-7710,
- * never gets one. The card used to name that rail; the owner's copy review
- * (2026-09-30) dropped the sentence. The card now relies on "can be
- * declared", never a promise that every payment carries one, and the
- * EIP-3009 scope is stated in docs/product/agent-passport.md.
- * "checked" is the strongest word used: VIES `valid` says the VAT number
- * was checked against the EU's register on a date, never that anything
- * about the agent or owner is "verified" (see
+ * The help text must not overclaim in EITHER direction (#4416, owner
+ * decision 2026-10-26, option A: the behaviour stays, the copy moves).
+ * "merchants that ask" was false — nothing in the SDK reads the merchant's
+ * 402 for an ask — and "every payment" would be false the other way, since
+ * the default setup sends nothing. So the card names the CLIENT condition
+ * instead of the payment rail: the declaration rides only when the agent
+ * pays through a client that holds its own signing key (the Haven SDK with
+ * a delegate key, or the local `@haven_ai/mcp`), and only to a merchant that
+ * accepts it. The acceptance half is not decoration: the SDK attaches
+ * `X-Tax-Declaration` only on the EIP-3009 paid retry
+ * (`packages/sdk/src/merchant-completion.ts:189,200-203`), so an erc7710
+ * merchant receives nothing at all — and recipient-pinned agents are
+ * erc7710-only (`docs/security/delegation-rail-security-model.md:2111`), so
+ * every pinned agent is in that set. The owner's 2026-09-30 copy review
+ * (PR #3490) still stands: the card does not name the rail, and the test
+ * keeps its `not.toContain('settle by EIP-3009')` guard. The rail and the
+ * full recipient set are stated in docs/product/agent-passport.md and
+ * docs/product/owner-company-details.md § A second reader.
+ * The card also lists what the merchant receives — country, VAT number,
+ * taxable-person status and a signed link to the agent's wallet address —
+ * because "a tax declaration" alone does not tell an owner what leaves the
+ * account. "checked" is the strongest word used: VIES `valid` says the VAT
+ * number was checked against the EU's register on a date, never that
+ * anything about the agent or owner is "verified" (see
  * docs/product/owner-company-details.md § The VIES states).
  *
  * ── Failure ──────────────────────────────────────────────────────────────
@@ -90,14 +105,18 @@ export function TaxDeclarationToggle({
       <div className="px-4 py-4 md:px-6 md:py-5" data-testid="tax-declaration-row">
         <h3 className="text-base font-semibold text-[var(--v2-ink)]">Tax declaration</h3>
         <Checkbox
-          label="Send a tax declaration with payments"
+          label="Allow this agent to send a tax declaration"
           helperText={
             <>
               When this is on, your saved VAT number, checked against the
-              EU&apos;s VIES register, can be declared to merchants that ask
-              for it, with payments your agent signs under a budget. Nothing is
-              submitted to an authority, and you can switch it off here at any
-              time.
+              EU&apos;s VIES register, can travel with payments your agent makes
+              through a client that holds its own signing key: the Haven SDK with
+              a delegate key, or the local Haven MCP server. The merchant your
+              agent pays, when it accepts the declaration, receives your country,
+              the VAT number, your taxable-person status and a signed link to the
+              agent&apos;s wallet address. The default setup, a hosted server with
+              a separate signer, sends none. Nothing is submitted to an authority,
+              and you can switch it off here at any time.
             </>
           }
           disabled={saving}

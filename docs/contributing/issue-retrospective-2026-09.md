@@ -1,6 +1,6 @@
 ---
 owner: "@d-hinders"
-status: current
+status: record
 covers:
   - .agents/skills/ship-next/SKILL.md
   - .agents/skills/quality-scan/SKILL.md

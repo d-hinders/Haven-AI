@@ -1,6 +1,6 @@
 ---
 owner: "@d-hinders"
-status: current
+status: record
 covers:
   - scripts/docs/audit-staleness.mjs
   - scripts/docs/audit-staleness.test.mjs

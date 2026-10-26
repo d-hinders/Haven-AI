@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Docs staleness audit (Phase 4 of the docs-quality system, #646).
 //
-// For every non-archived, non-research doc with `covers:` front-matter, counts the commits
+// For every doc with `covers:` front-matter that is not `archived`, `research` or
+// `record`, counts the commits
 // that touched its covered paths SINCE the doc's `last-verified` date. A doc
 // with many covered-code commits and an old verification date is the one most
 // likely to be lying to its reader.
@@ -66,11 +67,14 @@ async function main() {
     const parsed = parseFrontMatter(await readFile(join(REPO_ROOT, rel), 'utf8'))
     if (!parsed.ok) continue
     const { status, covers, 'last-verified': lastVerified } = parsed.data
-    // #2638: `research` leaves the audited set alongside `archived`, matching
-    // the coupling gate's isGoverned(). A spike or pilot report is a dated
-    // record of what was true when it ran; ranking it as stale asks for a
-    // re-verification that would destroy what makes it useful.
-    if (status === 'archived' || status === 'research' || !covers?.length || !lastVerified) continue
+    // #2638: `research` leaves the audited set alongside `archived`. A spike or
+    // pilot report is a dated record of what was true when it ran; ranking it
+    // as stale asks for a re-verification that would destroy what makes it
+    // useful. #4459: `record` (a dated bug report, QA run or retrospective)
+    // leaves it for the same reason. Here the audit and the coupling gate's
+    // isGoverned() deliberately differ: a `record` doc stays governed there
+    // (its `covers:` still route it on a PR), it is only never ranked stale.
+    if (status === 'archived' || status === 'research' || status === 'record' || !covers?.length || !lastVerified) continue
     const commits = commitsSince(covers, lastVerified)
     if (commits.length === 0) continue
     findings.push({
@@ -88,7 +92,7 @@ async function main() {
   // verification — and excluding them is what let a package README describe
   // three impossible QA legs for weeks (#1992).
   for (const entry of GOVERNED_PACKAGE_DOCS) {
-    if (entry.status === 'archived' || entry.status === 'research') continue
+    if (entry.status === 'archived' || entry.status === 'research' || entry.status === 'record') continue
     const lastVerified = entry['last-verified']
     if (!entry.covers?.length || !lastVerified) continue
     const commits = commitsSince(entry.covers, lastVerified)

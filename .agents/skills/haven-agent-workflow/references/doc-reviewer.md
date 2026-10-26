@@ -83,7 +83,7 @@ A root with no `node_modules` cannot re-run anything, and every verdict that say
 
 ## 5. History is not staleness (#2408)
 
-A CASP shard, an archive doc, a `last-verified` `Prior:` entry or a quotation that correctly records what *was* true is not stale. Say so **per hit** — `historical record, correct` — rather than flagging it or skipping it silently. Every hit gets one of: `stale`, `historical record`, `conditional truth (still holds)`, `out of scope, why`.
+A CASP shard, an archive doc, a `status: record` doc (a dated bug report, QA run or retrospective, #4459), a `last-verified` `Prior:` entry or a quotation that correctly records what *was* true is not stale. An implicated `record` doc is dispositioned `historical record, correct as written`: never append a re-check section to it and never bump its `last-verified`. Say so **per hit** — `historical record, correct` — rather than flagging it or skipping it silently. Every hit gets one of: `stale`, `historical record`, `conditional truth (still holds)`, `out of scope, why`.
 
 ## 6. `last-verified`: a date records a re-read, never substitutes for one
 

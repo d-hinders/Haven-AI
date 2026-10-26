@@ -1,6 +1,6 @@
 ---
 owner: "@AntonioSaaranen"
-status: current
+status: record
 covers:
   - packages/mcp-server/src/tools/support/errors.ts
   - packages/mcp-server/src/tools/contracts.ts

@@ -1,6 +1,6 @@
 ---
 owner: "@d-hinders"
-status: current
+status: record
 covers:
   - scripts/ci/rpc-conformance.mjs
   - scripts/ci/rpc-conformance.test.mjs

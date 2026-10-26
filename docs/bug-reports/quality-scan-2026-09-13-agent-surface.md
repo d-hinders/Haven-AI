@@ -1,6 +1,6 @@
 ---
 owner: "@d-hinders"
-status: current
+status: record
 covers:
   - packages/mcp-server/src/tools/paid-mcp-completion.ts
   - packages/mcp-server/src/tools/catalog-purchase.ts

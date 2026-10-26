@@ -1,6 +1,6 @@
 ---
 owner: "@d-hinders"
-status: current
+status: record
 covers:
   - scripts/ci/prove-red.mjs
   - scripts/ci/prove-red.test.mjs

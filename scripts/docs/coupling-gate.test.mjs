@@ -978,8 +978,9 @@ test('#2638: a doc with NO status is governed — a broken front-matter is not a
   assert.equal(isGoverned(undefined), true)
 })
 
-test('#2638: isGoverned covers exactly the two non-current statuses', () => {
+test('#2638/#4459: isGoverned leaves out archived and research, and keeps record governed', () => {
   assert.equal(isGoverned('current'), true)
   assert.equal(isGoverned('archived'), false)
   assert.equal(isGoverned('research'), false)
+  assert.equal(isGoverned('record'), true)
 })

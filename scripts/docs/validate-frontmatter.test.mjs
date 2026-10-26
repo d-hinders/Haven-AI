@@ -331,3 +331,41 @@ test('CLI: a NON-ENOENT throw inside main() also exits non-zero', () => {
   assert.match(out, /ERR_MODULE_NOT_FOUND|Cannot find module/)
   assert.doesNotMatch(out, /✓ Front-matter valid/)
 })
+
+// #4459: the status vocabulary, characterized through the CLI before it was
+// widened (`STATUSES` is not exported). `validate-frontmatter.mjs` is a
+// money-path control-glob file (#2200), so today's refusals are pinned first.
+const withStatus = (status) => GOOD.replace("status: current", `status: ${status}`)
+
+test("CLI (#4459): an unknown status exits 1 and names the accepted vocabulary", () => {
+  const { status, out } = runGuard("docs/validate-frontmatter.mjs", {
+    ...OPTS,
+    files: baseFixture({ "docs/area/thing.md": withStatus("bogus") }),
+  })
+  assert.equal(status, 1)
+  assert.match(out, /docs\/area\/thing\.md: invalid status "bogus" \(expected current \| research \| archived \| record\)/)
+})
+
+test("CLI (#4459): `record` is a status", () => {
+  const { status, out } = runGuard("docs/validate-frontmatter.mjs", {
+    ...OPTS,
+    files: baseFixture({ "docs/area/thing.md": withStatus("record") }),
+  })
+  assert.equal(status, 0)
+  assert.match(out, /✓ Front-matter valid across 5 docs\./)
+})
+
+test("CLI (#4459): the archive/ and research/ folder rules hold", () => {
+  const archive = runGuard("docs/validate-frontmatter.mjs", {
+    ...OPTS,
+    files: baseFixture({ "docs/archive/old.md": GOOD }),
+  })
+  assert.equal(archive.status, 1)
+  assert.match(archive.out, /docs\/archive\/old\.md: docs under archive\/ must have status: archived/)
+  const research = runGuard("docs/validate-frontmatter.mjs", {
+    ...OPTS,
+    files: baseFixture({ "docs/research/idea.md": GOOD }),
+  })
+  assert.equal(research.status, 1)
+  assert.match(research.out, /docs\/research\/idea\.md: docs under research\/ must have status: research \(or archived\)/)
+})

@@ -30,6 +30,8 @@ last-verified: "2026-10-25"
 Per-run QA report.
 Copy to `<yyyy-mm-ddThhmmssZ>-<mode>-<flow>-<env>.md` using a slugged UTC
 timestamp, or include the CI run id/short SHA so concurrent runs cannot collide.
+In the copy's front-matter set `status: record`: a dated report is a record the
+staleness audit never ranks (#4459). This template itself stays `current`.
 File concrete bugs as separate GitHub issues and link them here.
 Procedures: ../operations/e2e-qa-runbook.md and ../operations/agent-qa.md.
 -->

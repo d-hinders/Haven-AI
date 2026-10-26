@@ -45,7 +45,7 @@ Every doc under `docs/` plus the root gravity files (`CLAUDE.md`, `AGENTS.md`,
 ```yaml
 ---
 owner: "@handle"           # who keeps this doc honest
-status: current            # current | research | archived
+status: current            # current | research | archived | record
 contract: true             # OPTIONAL (Phase 4): promotes the coupling gate
                            # from advisory to BLOCKING for this doc
 covers:                    # repo globs of the code this doc describes
@@ -169,11 +169,20 @@ filter — is what makes the blocking column above true (the haven-doc-reviewer 
 
 ## Rules the gates apply
 
-- **Only `current` docs are governed (#2638).** `archived` and `research` docs
-  are skipped by the coupling gate in both directions and by the staleness
-  audit. A doc with **no** `status` is treated as governed — a missing field is a
-  broken doc, not an exemption. The predicate is `isGoverned(status)` in
-  `coupling-gate.mjs`, inlined in `audit-staleness.mjs`.
+- **`archived` and `research` docs are not governed (#2638).** They are
+  skipped by the coupling gate in both directions and by the staleness audit. A
+  doc with **no** `status` is treated as governed — a missing field is a broken
+  doc, not an exemption. The predicate is `isGoverned(status)` in
+  `coupling-gate.mjs`.
+- **A `record` doc is governed but never ranked stale (#4459).** A dated bug
+  report, QA run or retrospective carries `status: record`. The coupling gate
+  and `docs:covers-gaps` still treat it as governed: its `covers:` route it on a
+  PR and its claims are checked. The staleness audit (`audit-staleness.mjs`) and
+  doc-health's `unverified-90d` skip it, beside `archived` and `research`. A
+  reviewer who finds a `record` doc implicated dispositions it "historical
+  record, correct as written": never append a re-check section, never bump its
+  `last-verified`. `npm run docs:new` scaffolds a path under `docs/bug-reports/`
+  as `record`; the run-report template there stays `current`.
 - **Test and generated files are incidental.** `__tests__/`, `*.test.*`,
   `*.spec.*`, `__screenshots__/` and `packages/core/src/api-types.ts` implicate a
   doc only when `covers` names the path exactly. Two carve-outs, in this order:

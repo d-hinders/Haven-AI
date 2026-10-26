@@ -1,6 +1,6 @@
 ---
 owner: "@d-hinders"
-status: current
+status: record
 covers:
   - packages/cli/src/args.ts
   - packages/cli/src/commands.ts

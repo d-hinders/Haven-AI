@@ -1,6 +1,6 @@
 ---
 owner: "@AntonioSaaranen"
-status: current
+status: record
 covers:
   - packages/frontend/public/llms.txt
   - packages/frontend/public/for-agents.md

@@ -559,9 +559,13 @@ has since been remediated, and each remediation was re-read at this head:
   `passport-outbound-record.test.ts:189`), so the guard's mutation can fail.
 - **C3 (revoke submit routes recorded a revocation without checking the signed
   calldata)** — closed. All three owner-submit sites now decode the userOp and
-  refuse a mismatch: `assertUserOperationDisablesDelegations(…, 'exact')` in
-  `routes/agent-rekey.ts:743`, and the same guard in
-  `routes/agent-delegations.ts` and the two `rails/hybrid-*` sites. The decoder
+  refuse a mismatch: `assertUserOperationDisablesDelegations(…, 'exact')` at
+  `routes/agent-rekey.ts:743`, `routes/agent-delegations.ts:1165` and
+  `routes/agent-delegations.ts:1349`. The two `rails/hybrid-*` sites are the
+  pre-existing positive control, not callers of this guard: each carries its own
+  binding check — `rails/hybrid-signer-actions.ts:303` (*"user_operation does
+  not match the requested signer change"*) and `rails/hybrid-transfers.ts:174`
+  (*"user_operation does not match the requested transfer"*). The decoder
   in `rails/delegation-policy.ts:300` is deliberately independent of
   `buildRevocation`, which is the property the scan asked for.
 - **C4 (two gating qa-dev scenarios claimed an on-chain effect they never

@@ -115,7 +115,9 @@ every candidate now have a landed remedy, re-read at this head:
   by epic #3056, all four sub-issues closed. The choke point exists: one
   `refuse()` helper is the only call that writes the ledger, and every
   delegation-rail refusal site now goes through it (14 call sites in
-  `delegation-authorize.ts`, 14 in `payments.ts`). The
+  `delegation-authorize.ts`, 15 in `payments.ts` — the payments count includes
+  the 503 rail-unavailable and 502 upstream-failure refusals; a 16th `refuse(`
+  grep hit at `payments.ts:1111` is a comment, not a call). The
   hosted prepare refusal reaches the ledger: migration
   `087_payment_refusals_source_hosted.ts` widens the CHECK with
   `'hosted_prepare'`, and `routes/machine-payments.ts:322-329` is the

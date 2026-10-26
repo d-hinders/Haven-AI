@@ -92,6 +92,7 @@ This is a TypeScript monorepo:
 | `packages/ui` | `@haven_ai/ui` — the shared design system: v2 tokens, the Tailwind preset and the primitives the ops console consumes. Workspace-private, never published |
 | `packages/ops` | `@haven/ops` — the private operations console. Reads through the ops backend surface (#3509); every sign-in and read is audited server-side. Ships dark: off unless every `OPS_*` variable is set |
 | `packages/sdk` | `@haven_ai/sdk` for direct agent integrations, tool definitions, x402/MPP quote/pay/resume helpers, and payment state handling |
+| `packages/connect` | `@haven_ai/connect` — the one-command connector the dashboard hands out: installs the MCP runtime and generates the agent signing key locally, registering only the public address. Writes owner-only credential files under `~/.haven/agents/` |
 | `packages/mcp` | `@haven_ai/mcp` local stdio MCP server that reads a local credential file and signs locally |
 | `packages/mcp-server` | `@haven_ai/mcp-server` hosted/keyless Streamable HTTP MCP server that constructs and relays but never signs |
 | `packages/signer` | `@haven_ai/signer` local edge signer used with hosted MCP; it holds the delegate key locally and exposes sign-only tools |
@@ -458,6 +459,7 @@ Haven-AI/
 |   |-- ui/                    # @haven_ai/ui — v2 tokens, Tailwind preset, shared primitives (workspace-private)
 |   |-- ops/                   # @haven/ops — private operations console (ships dark)
 |   |-- sdk/                   # @haven_ai/sdk
+|   |-- connect/               # @haven_ai/connect — one-command connector: installs the MCP runtime, generates the signing key locally
 |   |-- mcp/                   # Local stdio MCP server; signs locally from a credential file
 |   |-- mcp-server/            # Hosted/keyless Streamable HTTP MCP server
 |   |-- signer/                # Local edge signer paired with hosted MCP

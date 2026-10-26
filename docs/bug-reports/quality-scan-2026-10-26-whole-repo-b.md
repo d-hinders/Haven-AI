@@ -223,13 +223,14 @@ reports are such records, and every one of them declares `covers:` under
   under `docs/bug-reports/` (seven prior quality-scan reports, two
   onboarding-exploration reports, one cold test), at ranks 2–7, 8, 9, 11 and
   14. The ranking is by commits to the `covers:` since `last-verified`, so a
-  record ranks high because its `last-verified` is the day it was written
-  and its `covers:` is wide (the scan reports declare 25–42 paths — the
-  2026-09-25 report 25, the 2026-10-19 report 27, this one 36, by
-  `awk '/^---$/{c++; next} c==1' <doc> | grep -c '^  - '`; the widest
-  `covers:` in the tree are live docs at 50–103 paths, which are
-  re-verified and so rank low). The first draft wrote "the widest in the
-  tree"; corrected in review. The issue's rank 1 is the 2026-09 issue
+  record ranks high because its `last-verified` is the day it was written —
+  the date, not the width, carries it: the scan reports declare 8–42 paths
+  (the seven ranked in #4438 span 8–34, with the 8-path analytics report at
+  rank 5; the 2026-09-25 report 25, the 2026-10-19 report 27, this one 36,
+  by `awk '/^---$/{c++; next} c==1' <doc> | grep -c '^  - '`), while the
+  widest `covers:` in the tree are live docs at 50–103 paths that are
+  re-verified and so rank low. The first draft wrote "the widest in the
+  tree", and the first correction "25–42 paths"; both corrected in review. The issue's rank 1 is the 2026-09 issue
   retrospective (85 commits) — a dated record **outside** `docs/bug-reports/`,
   which bears on the mechanism below.
 - the landing that closed it, `ba99cdc5d`: `git show --format= --numstat`

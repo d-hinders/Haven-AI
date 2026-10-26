@@ -519,6 +519,7 @@ the report; refused under the bar as epics (one-PR remedies).
 The run was scoped to the owner's four areas and the live path; a full-repo
 run should take the seven blocks from the 2026-09-03 baselines.
 
+
 ## 2026-09-15 — full repo (all seven wave blocks taken)
 
 Measured on `origin/dev` @ `89fadec0` by three read-only workers in detached
@@ -2104,8 +2105,9 @@ parity-pinned and not proposed.
   `archived` and `research`, every one of the 18 bug reports is
   `status: current` with `covers:`, 10 of the 15 docs in the 2026-10-26
   audit issue are bug reports (ranked by commits since `last-verified`, so a
-  record's write-day date and 25–42-path `covers:` carry it high; the
-  issue's rank 1 is a dated retrospective outside the folder), and the
+  record's write-day date carries it high whatever its width — the scan
+  reports declare 8–42 paths; the issue's rank 1 is a dated retrospective
+  outside the folder), and the
   landing that closed it appended +425 of its +536 lines as re-check
   sections to dated reports (the previous audit: 3 of 9 files; 11 weekly
   audit issues since 2026-07-20). The script's own #2638 comment states the
@@ -2114,7 +2116,8 @@ parity-pinned and not proposed.
   and whether the reports keep `covers:`. *Corrected in review:* first
   written as "the widest `covers:` in the tree" and "13 audits".
 - Notes, not proposed: the egress perimeter (5 bare fetch sites in 3
-  backend files outside the SSRF seam, all operator-configured hosts; 0
+  backend files outside the SSRF seam, fixed or operator-configured hosts,
+  none caller-influenced; 0
   tests enumerate fetch sites; a by-file allowlist ratchet was drafted and
   withdrawn on run A's reasoning that both of the window's backend
   incidents were URL-source changes at existing sites); three block-1

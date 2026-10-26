@@ -284,6 +284,9 @@ export default function MoneyPanel({
     .map((agent: DashboardAgentPreview) => ({
       id: agent.id,
       name: agent.name,
+      // #4431: the agent's STORED tint, so the split bar and the legend dot
+      // wear the same colour its monogram does — not the name hash.
+      avatarTint: agent.avatarTint,
       value: agent.stats.d30.net[bucket],
       approx: agent.stats.d30.approxByCurrency?.[bucket] ?? agent.stats.d30.approx,
     }))
@@ -317,7 +320,7 @@ export default function MoneyPanel({
           ...topAgents.map((row) => ({
             key: row.id,
             share: (row.value / splitTotal) * 100,
-            color: seriesColorForAgent({ name: row.name }),
+            color: seriesColorForAgent({ name: row.name, avatarTint: row.avatarTint }),
           })),
           ...(restValue > 0
             ? [{ key: 'rest', share: (restValue / splitTotal) * 100, color: 'var(--v2-ink-3)' }]
@@ -392,7 +395,7 @@ export default function MoneyPanel({
           {topAgents.map((row) => (
             <div key={row.id} className="flex items-baseline justify-between gap-4">
               <dt className="flex min-w-0 items-center gap-2 text-sm text-[var(--v2-ink-2)]">
-                <SeriesSwatch color={seriesColorForAgent({ name: row.name })} size="sm" shape="square" />
+                <SeriesSwatch color={seriesColorForAgent({ name: row.name, avatarTint: row.avatarTint })} size="sm" shape="square" />
                 <span className="min-w-0 truncate">{row.name}</span>
               </dt>
               <dd className="v2-tabular shrink-0">

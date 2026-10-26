@@ -259,6 +259,10 @@ describe('AgentDetailClient last-activity metadata', () => {
           allowances: [],
           labels: [],
           account_type: 'delegator_hybrid',
+          // #4431: the stored display tint every agent read carries. Tint 1
+          // is deliberately NOT the name hash ('Research agent' hashes to 6),
+          // so the header/row tint test proves the STORED tint is read.
+          avatar_tint: 1,
         },
       ],
       loading: false,
@@ -558,6 +562,12 @@ describe('AgentDetailClient last-activity metadata', () => {
     expect(headerMark?.firstElementChild?.className.match(/text-\[var\(--v2-avatar-[^)]+\)\]/)?.[0]).toBe(
       rowMark.firstElementChild?.className.match(/text-\[var\(--v2-avatar-[^)]+\)\]/)?.[0],
     )
+    // #4431: both marks wear the agent's STORED tint (1), not the name hash
+    // ('Research agent' hashes to 6) — the header and the row read the same
+    // field, so they cannot disagree.
+    expect(headerMark?.className).toContain('bg-[var(--v2-avatar-1-soft)]')
+    expect(rowMark.className).toContain('bg-[var(--v2-avatar-1-soft)]')
+    expect(headerMark?.className).not.toContain('bg-[var(--v2-avatar-6-soft)]')
     expect(screen.getAllByRole('heading', { level: 1, name: 'Research agent' })).toHaveLength(1)
   })
 
@@ -1981,6 +1991,10 @@ describe('AgentDetailClient tabs and the Activity tab (#4226)', () => {
           allowances: [],
           labels: [],
           account_type: 'delegator_hybrid',
+          // #4431: the stored display tint every agent read carries. Tint 1
+          // is deliberately NOT the name hash ('Research agent' hashes to 6),
+          // so the header/row tint test proves the STORED tint is read.
+          avatar_tint: 1,
         },
       ],
       loading: false,

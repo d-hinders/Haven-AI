@@ -38,12 +38,14 @@ const baseProps = {
   onSend: vi.fn(),
 }
 
-function agent(id: string, name: string, d30NetUsd: number): DashboardAgentPreview {
+function agent(id: string, name: string, d30NetUsd: number, tint = 1): DashboardAgentPreview {
   return {
     id,
     name,
     status: 'active',
-    avatarTint: 1,
+    // #4431: the overview always carries the agent's stored tint; the split
+    // bar and the legend dot read it.
+    avatarTint: tint,
     accountId: null,
     accountName: null,
     accountChainId: 8453, budgetEndedAt: null,
@@ -418,15 +420,21 @@ describe('MoneyPanel — the legend dots are the chart SeriesSwatch (#4426)', ()
         {...baseProps}
         overview={overview({
           d30NetUsd: 51.76,
-          agents: [agent('a1', 'Research agent', 17.485), agent('a2', 'Data-feed agent', 17.485)],
+          agents: [agent('a1', 'Research agent', 17.485, 1), agent('a2', 'Data-feed agent', 17.485, 2)],
         })}
       />,
     )
     const spending = screen.getByRole('region', { name: 'Spending' })
     const terms = spending.querySelectorAll('dl dt')
     expect(terms.length).toBe(3) // two agents + "Agents since removed"
-    expectSquareSwatch(terms[0]!, seriesColorForAgent({ name: 'Research agent' }))
-    expectSquareSwatch(terms[1]!, seriesColorForAgent({ name: 'Data-feed agent' }))
+    // #4431: each dot wears the agent's STORED tint. The two fixture names
+    // hash alike (both 6), so the pair being two different colours is the
+    // rule the epic changed.
+    expectSquareSwatch(terms[0]!, seriesColorForAgent({ name: 'Research agent', avatarTint: 1 }))
+    expectSquareSwatch(terms[1]!, seriesColorForAgent({ name: 'Data-feed agent', avatarTint: 2 }))
+    expect(terms[0]!.querySelector('[data-testid="series-swatch"]')!.getAttribute('style')).not.toBe(
+      terms[1]!.querySelector('[data-testid="series-swatch"]')!.getAttribute('style'),
+    )
     expect(terms[2]).toHaveTextContent('Agents since removed')
     expectSquareSwatch(terms[2]!, 'var(--v2-ink-3)')
   })

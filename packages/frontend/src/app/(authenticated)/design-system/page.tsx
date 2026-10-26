@@ -544,7 +544,10 @@ const DS_AGENT: DashboardAgentPreview = {
   id: '11111111-1111-4111-8111-111111111111',
   name: 'Research agent',
   status: 'active',
-  avatarTint: 1,
+  // #4431: the specimen's stored tint is the SAME one the Monogram and chart
+  // sections above give 'Research agent' (6), so the row, the header mark and
+  // the swatch list cannot disagree about the colour.
+  avatarTint: DS_RESEARCH_TINT,
   accountId: 'acct-1',
   accountName: 'Main account',
   accountChainId: 8453, budgetEndedAt: null,
@@ -594,11 +597,15 @@ const DS_AGENT_BUDGET_REMAINING: DashboardBudgetRemaining = {
   ],
 }
 // A second agent with NO budget and no payments — the "No budget" + "No
-// payments yet" arms of the row, exactly as the dashboard draws them.
+// payments yet" arms of the row, exactly as the dashboard draws them. It is
+// the OTHER half of the collision pair (#4431): 'Data-feed agent' hashes to
+// the same tint as 'Research agent' (6), and wears tint 2 because that is
+// what it stores — the rule the epic changed, visible in one card.
 const DS_AGENT_NO_BUDGET: DashboardAgentPreview = {
   ...DS_AGENT,
   id: '22222222-2222-4222-8222-222222222222',
-  name: 'Watchtower',
+  name: 'Data-feed agent',
+  avatarTint: DS_DATAFEED_TINT,
   budgets: [],
   stats: {
     d7: { gross: { usd: 0, eur: 0, sek: 0 }, net: { usd: 0, eur: 0, sek: 0 }, approx: false, payments: 0, refusals: { budget: 0, expired: 0, scope: 0, failed: 0, haven: 0 } },
@@ -626,11 +633,17 @@ const DS_CARD_AGENT = {
   labels: [{ id: 'ds-label-research', name: 'research', color: 'blue' }],
   organization_id: null,
   tax_declaration_enabled: false,
+  // #4431: the card's mark reads the agent's STORED tint, the same one the
+  // row and the chart give it.
+  avatar_tint: DS_RESEARCH_TINT,
 } as unknown as Agent
 const DS_CARD_ARCHIVED = {
   ...DS_CARD_AGENT,
   id: '33333333-3333-4333-8333-333333333333',
-  name: 'gate-3028',
+  // The collision pair's other half (#4431): same name hash, different
+  // stored tint, so the two cards are told apart by colour.
+  name: 'Data-feed agent',
+  avatar_tint: DS_DATAFEED_TINT,
   status: 'revoked',
   archived_at: new Date(DS_AGENT_NOW - 30 * 86_400_000).toISOString(),
   labels: [],
@@ -4288,7 +4301,7 @@ export default function DesignSystemPage() {
         <div className="max-w-2xl">
           <PageHeader
             back={{ href: '/agents', label: 'Agents' }}
-            leading={<Monogram name="Research agent" size="md" decorative />}
+            leading={<Monogram name="Research agent" tint={DS_RESEARCH_TINT} size="md" decorative />}
             title="Research agent"
             meta="My account · Created 3 weeks ago · Active 2h ago"
             inlineActions

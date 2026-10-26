@@ -431,7 +431,7 @@ export default function AgentDetailClient({ agentId }: Props) {
     <div className="max-w-5xl">
       <PageHeader
         back={{ href: '/agents', label: 'Agents' }}
-        leading={<Monogram name={currentAgent.name} size="md" decorative />}
+        leading={<Monogram name={currentAgent.name} tint={currentAgent.avatar_tint} size="md" decorative />}
         title={currentAgent.name}
         subtitle={currentAgent.description || undefined}
         // #3694: the identity row that was the "About this agent" card —

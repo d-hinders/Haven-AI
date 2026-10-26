@@ -2046,9 +2046,10 @@ answer in the captain's session was "ja fila c1 och merga scan-pr:en". The
 scan PR #4454 merged as `d270642c7`.
 
 - C1 → [#4456](https://github.com/d-hinders/Haven-AI/issues/4456)
-  (`area:ci`). The mutation runner records vitest's resolved-promise
-  `.rejects` and the backend's two OpenAPI test helpers as assertion shapes,
-  with recorded fixtures and counter-cases. The spec review added the
+  (`area:ci`). The mutation runner reads vitest's resolved-promise
+  `.rejects` and the backend's two OpenAPI test helpers as assertions (a
+  runner stem, or the helpers throwing `AssertionError`; the builder
+  chooses), with recorded fixtures and counter-cases. The spec review added the
   helpers' twin, a guard against a stem broad enough to catch
   `.resolves`-rejected (which stays an error on purpose), and the rule's
   docblock copy. Verdict: 9 corrections, no owner question. `pending-review`

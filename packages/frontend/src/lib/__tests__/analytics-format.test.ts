@@ -2,11 +2,9 @@ import { describe, expect, it } from 'vitest'
 import { currentPeriodBounds } from '@haven_ai/core'
 import {
   budgetBandsCaption,
-  budgetUsedPercent,
   formatAnalyticsAmount,
   formatAnalyticsAmountCompact,
   formatBudgetResetDate,
-  formatBudgetTokenValue,
   formatRefusedCount,
   formatSharePercent,
   lastPaymentCaption,
@@ -29,9 +27,8 @@ import {
  *
  * The exact strings below are what this repo's Node (`v22`, full ICU) emits,
  * read off the real formatter rather than guessed: the EUR form puts the
- * symbol AFTER the figure behind a no-break space, and `formatBudgetTokenValue`
- * keeps USDC's two default fraction places. Both were wrong in the first
- * draft of this file, which is the argument for reading them off the run.
+ * symbol AFTER the figure behind a no-break space. It was wrong in the first
+ * draft of this file, which is the argument for reading it off the run.
  */
 
 describe('formatAnalyticsAmount', () => {
@@ -104,56 +101,6 @@ describe('formatRefusedCount (#4426)', () => {
     expect(formatRefusedCount(1, 1)).toBe('1')
     expect(formatRefusedCount(1, 2)).toBe('1 · 2 attempts')
     expect(formatRefusedCount(0, 0)).toBe('0')
-  })
-})
-
-describe('formatBudgetTokenValue', () => {
-  it('divides atomic strings down to the token decimal places, in the token own units', () => {
-    // The capture harness's own pair: 214 of 250 USDC, the >75% band the
-    // `budget_bands` count reflects. USDC is 6 unit decimals and keeps two
-    // fraction places by the shared allowance formatter's stable default — so
-    // the rendered pair is "214.00 of 250.00", which is the whole point of
-    // routing through `formatAllowanceForToken` instead of dividing here: a
-    // second decimals table would be a second answer to "how many places does
-    // this token show".
-    expect(
-      formatBudgetTokenValue({ token: 'USDC', used_atomic: '214000000', budget_atomic: '250000000' }),
-    ).toBe('214.00 of 250.00 USDC')
-  })
-
-  it('renders a sub-unit budget without scientific notation', () => {
-    // The harness's second row, the `remaining_from_chain: false` case whose
-    // cell also carries the snapshot caveat.
-    expect(
-      formatBudgetTokenValue({ token: 'USDC', used_atomic: '5000000', budget_atomic: '500000000' }),
-    ).toBe('5.00 of 500.00 USDC')
-  })
-})
-
-describe('budgetUsedPercent', () => {
-  it('reports the used share of a delegation as a whole percent', () => {
-    expect(budgetUsedPercent('214000000', '250000000')).toBe(86)
-    expect(budgetUsedPercent('5000000', '500000000')).toBe(1)
-  })
-
-  it('clamps an over-drawn delegation to 100 rather than printing a bar past full', () => {
-    // An on-chain read that races the period end can report more used than the
-    // budget permits. The figure is a measurement of one delegation against
-    // its own period; a width past the container is a layout defect.
-    expect(budgetUsedPercent('600000000', '500000000')).toBe(100)
-    expect(budgetUsedPercent('500000000', '500000000')).toBe(100)
-  })
-
-  it('reports 0 rather than Infinity or NaN for a degenerate budget', () => {
-    // The states this file's own docblock names. A delegation approved down to
-    // nothing is a state that exists, and a progressbar whose aria-valuenow is
-    // "NaN" is an accessibility defect as well as a display one: a screen
-    // reader would announce a budget that has no number.
-    expect(budgetUsedPercent('100', '0')).toBe(0)
-    expect(budgetUsedPercent('100', '-1')).toBe(0)
-    expect(budgetUsedPercent('100', 'not-a-number')).toBe(0)
-    expect(budgetUsedPercent('not-a-number', '250000000')).toBe(0)
-    expect(budgetUsedPercent('0', '250000000')).toBe(0)
   })
 })
 

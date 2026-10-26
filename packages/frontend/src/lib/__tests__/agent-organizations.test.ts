@@ -48,6 +48,8 @@ function agent(organizationId: string | null): Agent {
     // #3426: the fixture is type-checked against the wire schema; the opt-in
     // defaults OFF on every agent read.
     tax_declaration_enabled: false,
+    // #4429: the stored display colour (1..6). DISPLAY ONLY.
+    avatar_tint: 1,
   } as Agent
 }
 

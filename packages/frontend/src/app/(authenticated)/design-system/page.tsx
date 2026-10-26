@@ -531,6 +531,7 @@ const DS_AGENT: DashboardAgentPreview = {
   id: '11111111-1111-4111-8111-111111111111',
   name: 'Research agent',
   status: 'active',
+  avatarTint: 1,
   accountId: 'acct-1',
   accountName: 'Main account',
   accountChainId: 8453, budgetEndedAt: null,

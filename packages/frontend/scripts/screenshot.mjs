@@ -946,6 +946,8 @@ export const FIXTURE_AGENTS = [
     // #3426: the opt-in defaults OFF; the /agents screenshot photographs the
     // unchecked state.
     tax_declaration_enabled: false,
+    // #4429: the stored display colour (1..6). DISPLAY ONLY.
+    avatar_tint: 1,
   },
   {
     id: 'agent-retired', name: 'Data-feed agent',
@@ -984,6 +986,8 @@ export const FIXTURE_AGENTS = [
     organization_id: 'org-devops',
     // #3426: the opt-in defaults OFF on every agent.
     tax_declaration_enabled: false,
+    // #4429: the stored display colour (1..6). DISPLAY ONLY.
+    avatar_tint: 2,
   },
 ]
 
@@ -1179,6 +1183,8 @@ export const FIXTURE_OVERVIEW = {
   },
   agents: FIXTURE_AGENTS.map((a) => ({
     id: a.id, name: a.name, status: a.status, accountId: a.account_id,
+    // #4429: the stored display colour (1..6). DISPLAY ONLY.
+    avatarTint: a.avatar_tint,
     accountName: a.account_name, accountChainId: a.account_chain_id, budgetEndedAt: null,
     ...(a.status === 'pending_approval' ? { setupStatus: 'awaiting_connection' } : {}),
     allowances: a.allowances.map((x) => ({
@@ -1925,6 +1931,8 @@ export const FIXTURE_ANALYTICS_OVERVIEW = {
     const raw = [
       {
         id: 'agent-research', name: 'Research agent', status: 'active',
+        // #4429: the stored display colour (1..6). DISPLAY ONLY.
+        avatar_tint: 1,
         spent: '312.25', payments: 4, refusals: 1, refusal_attempts: 2,
         budgets: [{
           token: 'USDC', recipient: null,
@@ -1938,6 +1946,8 @@ export const FIXTURE_ANALYTICS_OVERVIEW = {
       },
       {
         id: 'agent-retired', name: 'Data-feed agent', status: 'paused',
+        // #4429: the stored display colour (1..6). DISPLAY ONLY.
+        avatar_tint: 2,
         spent: '12.50', payments: 1, refusals: 1, refusal_attempts: 1,
         budgets: [{
           token: 'USDC', recipient: '0x9995F3aB1e2C4d6087A1b3E5f6C7D890aB1244E2',

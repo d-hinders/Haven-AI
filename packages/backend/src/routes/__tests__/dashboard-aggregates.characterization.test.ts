@@ -103,6 +103,8 @@ const AGENT = {
   id: 'agent-1',
   name: 'Research agent',
   status: 'active',
+  // #4429: the stored display colour, required on DashboardAgentPreview.
+  avatar_tint: 1,
   account_id: ACCOUNT.id,
   account_name: ACCOUNT.name,
   account_chain_id: ACCOUNT.chain_id,

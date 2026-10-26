@@ -619,6 +619,7 @@ describe('AccountDetailClient', () => {
             id: 'agent-1',
             name: 'Research agent',
             status: 'active',
+            avatarTint: 1,
             accountId: 'safe-1',
             accountName: 'Main account',
             accountChainId: 8453, budgetEndedAt: null,

@@ -118,6 +118,8 @@ function emptyFixtures(userId: string) {
       agent_id: AGENT_UUID,
       name: 'agent-1',
       status: 'active',
+      // #4429: the stored display colour, required on the analytics agent item.
+      avatar_tint: 1,
       spent_usd: '10.00',
       spent_eur: '9.00',
       spent_sek: '95.00',
@@ -556,8 +558,8 @@ describe('GET /analytics/overview', () => {
     function twoAgentFixtures() {
       emptyFixtures(USER)
       mockListPerAgentSpendForUser.mockResolvedValue([
-        { agent_id: AGENT_A, name: 'a', status: 'active', spent_usd: '10.00', spent_eur: '9.00', spent_sek: '95.00', payments: '2', last_payment_at: '2030-06-01T12:00:00.000Z' },
-        { agent_id: AGENT_B, name: 'b', status: 'active', spent_usd: '5.00', spent_eur: '4.50', spent_sek: '47.50', payments: '1', last_payment_at: '2030-06-02T12:00:00.000Z' },
+        { agent_id: AGENT_A, name: 'a', status: 'active', avatar_tint: 1, spent_usd: '10.00', spent_eur: '9.00', spent_sek: '95.00', payments: '2', last_payment_at: '2030-06-01T12:00:00.000Z' },
+        { agent_id: AGENT_B, name: 'b', status: 'active', avatar_tint: 2, spent_usd: '5.00', spent_eur: '4.50', spent_sek: '47.50', payments: '1', last_payment_at: '2030-06-02T12:00:00.000Z' },
       ])
       mockAggregateRefusalsForUserByAgent.mockResolvedValue([
         { agent_id: AGENT_A, refusals: 2, attempts: 3 },

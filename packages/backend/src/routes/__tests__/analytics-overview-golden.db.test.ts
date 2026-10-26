@@ -300,6 +300,10 @@ function stableGolden(body: Record<string, unknown>): unknown {
     // budgets[].chain_id is the OPTIONAL #4333 hardening — present after the
     // change, absent on the base SHA; not a figure the golden pins.
     for (const b of a.budgets ?? []) delete b.chain_id
+    // #4429: `avatar_tint` is the new stored display colour — present after
+    // the change, absent on the base SHA. It is a display hint, not a figure
+    // the golden pins; the spec round trip still requires it.
+    delete (a as { avatar_tint?: unknown }).avatar_tint
   }
   // `agents[]` is unordered by the spec ("The tenant's delegation-rail agents,
   // unordered") — the read has no ORDER BY, so plan order is not a figure the

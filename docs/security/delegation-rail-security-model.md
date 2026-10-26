@@ -84,7 +84,7 @@ covers:
   - packages/backend/src/middleware/ops-auth.ts
   - packages/ops/**
   - packages/frontend/scripts/check-kit-analytics-define.mjs
-last-verified: "2026-10-25"
+last-verified: "2026-10-26"
 ---
 
 > **Re-verified #4425 (2026-10-26, undefined `--v2-*` tokens mapped onto the
@@ -4140,3 +4140,19 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > redemption, and the user-level `budgetStops` figure is unchanged. Scope of
 > this note: those two reads. Nothing else in this document was re-verified
 > for it.
+
+> **Re-verified unchanged (#4429, 2026-10-26 — a stored display colour on
+> `agents`, migration 121).** The covered files this diff touches are
+> `infra/repositories/agents.ts` and `infra/repositories/dashboard.ts`, and in
+> both the change is one added `SELECT` column (`a.avatar_tint`) plus the
+> matching row-shape field. The column is `SMALLINT NOT NULL CHECK
+> (avatar_tint BETWEEN 1 AND 6)`, filled by a `BEFORE INSERT` trigger from the
+> lowest tint no held agent of that user holds, handed to a replacement by an
+> `AFTER UPDATE OF superseded_by_agent_id` trigger, and backfilled once. It is
+> display data on the same boundary as `labels` (#3167) and `organization_id`
+> (#3164): no delegation, caveat, enforcer term, budget pre-check, allowance,
+> settlement window or refusal reads it, and the inherit trigger's `UPDATE` is
+> scoped to the replacement's own `id` and `user_id` and to a held row, so it
+> cannot recolour a released agent or cross a tenant. No route, signing,
+> revocation or grant path changes. Scope of this note: those two reads and the
+> migration. Nothing else in this document was re-verified for it.

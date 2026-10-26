@@ -6945,9 +6945,11 @@ export const SCENARIOS = {
       await shoot(page.locator('main').first(), 'accounts-overview')
 
       // ── /accounts/<id>: the account priced in SEK ────────────────────────
+      // The wait is on the figure alone (#4426): the "Value (SEK)" column
+      // header it also waited on left with the holdings table in #4097
+      // (#4142), and that copy wait timed out the scenario's last capture.
       await page.goto(`${BASE_URL}/accounts/safe-fixture`, { waitUntil: 'networkidle', timeout: 60_000 })
       await dismissMobileSidebar(page, vp)
-      await page.getByText('Value (SEK)').waitFor({ timeout: 20_000 })
       await page.getByText('136 050,75 kr').first().waitFor({ timeout: 20_000 })
       await shoot(page.locator('main').first(), 'account-detail')
     },

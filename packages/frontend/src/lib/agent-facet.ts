@@ -46,14 +46,13 @@ export const INACTIVE_AGENT_GROUP = { id: 'inactive', label: 'inactive' } as con
 /**
  * The order the three pages have listed agents in since #4095: active, then
  * paused, then needs setup, then everything else. Names A–Z inside a status.
+ *
+ * This is the expression the three pages each carried their own copy of
+ * (`status === 'active' ? 0 : status === 'paused' ? 1 : 2`), extended by the
+ * needs-setup rung the issue asks for. It lives here now, once.
  */
-const STATUS_RANK: Record<string, number> = {
-  active: 0,
-  paused: 1,
-  pending_approval: 2,
-}
-
-const rankOf = (status: string): number => STATUS_RANK[status] ?? 3
+const rankOf = (status: string) =>
+  status === 'active' ? 0 : status === 'paused' ? 1 : status === 'pending_approval' ? 2 : 3
 
 /** An agent is inactive when it is revoked, or archived where the source says so. */
 function isInactive(agent: AgentFacetSource): boolean {

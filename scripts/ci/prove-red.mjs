@@ -247,12 +247,26 @@ export function normalizeNodeEvents(records, exitCode, timedOut = false) {
  * element …", "Unable to find role=…" (or, for a `getByRole` after an `await`
  * inside an async `waitFor` callback, "Unable to find an accessible element …"), "Unable to find a label with the text
  * of: …", "Found multiple elements …", "Found a label with the text of: …".
+ * The backend's idiom does not either (#4456): vitest's `.rejects` on a promise
+ * that resolved throws a chai `AssertionError` but overwrites its stack with a
+ * plain `new Error`'s, so the JSON report starts `Error: promise resolved "…"
+ * instead of rejecting` (the payload is always one line — vitest's inspect
+ * escapes newlines); and the OpenAPI test helpers throw a plain `Error` —
+ * `expectMatchesSpec` as `Error: Response from <METHOD> <path> does not match
+ * the '<status>' schema in openapi/spec.ts:`, `expectRejectsOffSpec` as
+ * `Error: <METHOD> <path> did not refuse the off-spec body the way the
+ * request-validation plugin refuses it:`. Deliberately NOT recorded:
+ * `.resolves` on a rejected promise (`Error: promise rejected "<err>" instead
+ * of resolving`) wraps whatever the code threw, so a mutation that makes code
+ * throw there must stay an error; and `responseSchema`'s own throws ("OpenAPI
+ * spec has no path …"), reached through `expectMatchesSpec`, are contract
+ * errors, not assertions.
  * Only those recorded stems, each anchored at the start: a code throw that
  * merely mentions one later in its message stays an error, and so does an
  * unrecorded query shape (fail closed).
  */
 export const VITEST_ASSERTION_SHAPE =
-  /^(?:AssertionError\b|TestingLibraryElementError\b|Error: expect\(|Error: Unable to find (?:an element |an accessible element |role=|a label with the text of: )|Error: Found (?:multiple elements |a label with the text of: ))/
+  /^(?:AssertionError\b|TestingLibraryElementError\b|Error: expect\(|Error: Unable to find (?:an element |an accessible element |role=|a label with the text of: )|Error: Found (?:multiple elements |a label with the text of: )|Error: promise resolved "[^\n]*" instead of rejecting(?:\n|$)|Error: Response from [A-Z]+ \S+ does not match the '[^'\n]*' schema in openapi\/spec\.ts:|Error: [A-Z]+ \S+ did not refuse the off-spec body the way the request-validation plugin refuses it:)/
 
 /** `vitest run --reporter=json` output → normalized result. Pure. */
 export function normalizeVitestJson(json, exitCode, timedOut = false) {

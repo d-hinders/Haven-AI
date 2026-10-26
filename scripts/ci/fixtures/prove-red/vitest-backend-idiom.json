@@ -1,0 +1,112 @@
+{
+  "numTotalTests": 9,
+  "success": false,
+  "testResults": [
+    {
+      "name": "<fixture>/vt/probe.test.ts",
+      "status": "failed",
+      "message": "",
+      "assertionResults": [
+        {
+          "ancestorTitles": [
+            "backend idiom"
+          ],
+          "title": "rejects on a promise that resolved",
+          "fullName": "backend idiom rejects on a promise that resolved",
+          "status": "failed",
+          "failureMessages": [
+            "Error: promise resolved \"{ ok: 1 }\" instead of rejecting\n    at _Assertion.__VITEST_REJECTS__ (file://<fixture>/repo/node_modules/@vitest/expect/dist/index.js:1610:17)\n    at _Assertion.propertyGetter (file://<fixture>/repo/node_modules/chai/index.js:1557:27)\n    at Reflect.get (<anonymous>)\n    at Object.proxyGetter [as get] (file://<fixture>/repo/node_modules/chai/index.js:1645:22)\n    at <fixture>/vt/probe.test.ts:10:44\n    at file://<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11\n    at file://<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26\n    at file://<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file://<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)"
+          ]
+        },
+        {
+          "ancestorTitles": [
+            "backend idiom"
+          ],
+          "title": "expectMatchesSpec mismatch",
+          "fullName": "backend idiom expectMatchesSpec mismatch",
+          "status": "failed",
+          "failureMessages": [
+            "Error: Response from GET /agents does not match the '200' schema in openapi/spec.ts:\n  /agents: must be array\n\nEither the route changed and the spec is now a lie, or the spec was always wrong. Fix whichever is untrue — do not loosen the schema to make this pass.\n    at expectMatchesSpec (<fixture>/repo/packages/backend/src/openapi/response-shape.ts:148:9)\n    at <fixture>/vt/probe.test.ts:13:5\n    at file://<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11\n    at file://<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26\n    at file://<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file://<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)\n    at runTest (file://<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)\n    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at runSuite (file://<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)"
+          ]
+        },
+        {
+          "ancestorTitles": [
+            "backend idiom"
+          ],
+          "title": "expectRejectsOffSpec on a route that accepted",
+          "fullName": "backend idiom expectRejectsOffSpec on a route that accepted",
+          "status": "failed",
+          "failureMessages": [
+            "Error: POST /contacts did not refuse the off-spec body the way the request-validation plugin refuses it:\n  expected 400, got 200\n  expected the plugin's envelope error, got undefined\n  expected error_code 'invalid_request', got undefined\n  expected details to name 'body/address', got \"\"\n\nEither the plugin is not installed on this test app with the module enforced, or the spec stopped describing the request the handler actually accepts. Fix the wiring or the spec — do not weaken the assertion.\n    at <fixture>/repo/packages/backend/src/openapi/response-shape.ts:198:15\n    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at <fixture>/vt/probe.test.ts:16:5\n    at file://<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20"
+          ]
+        },
+        {
+          "ancestorTitles": [
+            "backend idiom"
+          ],
+          "title": "resolves on a promise that rejected with a code throw",
+          "fullName": "backend idiom resolves on a promise that rejected with a code throw",
+          "status": "failed",
+          "failureMessages": [
+            "Error: promise rejected \"TypeError: x is not a function\" instead of resolving\n    at _Assertion.__VITEST_RESOLVES__ (file://<fixture>/repo/node_modules/@vitest/expect/dist/index.js:1577:17)\n    at _Assertion.propertyGetter (file://<fixture>/repo/node_modules/chai/index.js:1557:27)\n    at Reflect.get (<anonymous>)\n    at Object.proxyGetter [as get] (file://<fixture>/repo/node_modules/chai/index.js:1645:22)\n    at <fixture>/vt/probe.test.ts:20:70\n    at file://<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11\n    at file://<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26\n    at file://<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file://<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)"
+          ]
+        },
+        {
+          "ancestorTitles": [
+            "backend idiom"
+          ],
+          "title": "code throw wrapping the rejects stem",
+          "fullName": "backend idiom code throw wrapping the rejects stem",
+          "status": "failed",
+          "failureMessages": [
+            "Error: setup failed: promise resolved \"x\" instead of rejecting\n    at <fixture>/vt/probe.test.ts:23:11\n    at file://<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11\n    at file://<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26\n    at file://<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file://<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)\n    at runTest (file://<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)\n    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at runSuite (file://<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runSuite (file://<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)"
+          ]
+        },
+        {
+          "ancestorTitles": [
+            "backend idiom"
+          ],
+          "title": "responseSchema contract throw through expectMatchesSpec",
+          "fullName": "backend idiom responseSchema contract throw through expectMatchesSpec",
+          "status": "failed",
+          "failureMessages": [
+            "Error: OpenAPI spec has no path '/no-such-path'. Documented paths are the contract — add it, or fix the test.\n    at responseSchema (<fixture>/repo/packages/backend/src/openapi/response-shape.ts:62:11)\n    at expectMatchesSpec (<fixture>/repo/packages/backend/src/openapi/response-shape.ts:144:32)\n    at <fixture>/vt/probe.test.ts:26:5\n    at file://<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11\n    at file://<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26\n    at file://<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file://<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)\n    at runTest (file://<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)\n    at processTicksAndRejections (node:internal/process/task_queues:104:5)"
+          ]
+        },
+        {
+          "ancestorTitles": [
+            "backend idiom"
+          ],
+          "title": "code throw starting Response from",
+          "fullName": "backend idiom code throw starting Response from",
+          "status": "failed",
+          "failureMessages": [
+            "Error: Response from GET /agents was empty\n    at <fixture>/vt/probe.test.ts:29:11\n    at file://<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11\n    at file://<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26\n    at file://<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file://<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)\n    at runTest (file://<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)\n    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at runSuite (file://<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runSuite (file://<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)"
+          ]
+        },
+        {
+          "ancestorTitles": [
+            "backend idiom"
+          ],
+          "title": "code throw wrapping the off-spec stem",
+          "fullName": "backend idiom code throw wrapping the off-spec stem",
+          "status": "failed",
+          "failureMessages": [
+            "Error: wiring failed: POST /contacts did not refuse the off-spec body the way the request-validation plugin refuses it:\n    at <fixture>/vt/probe.test.ts:32:11\n    at file://<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11\n    at file://<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26\n    at file://<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file://<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)\n    at runTest (file://<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)\n    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at runSuite (file://<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runSuite (file://<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)"
+          ]
+        },
+        {
+          "ancestorTitles": [
+            "backend idiom"
+          ],
+          "title": "TypeError",
+          "fullName": "backend idiom TypeError",
+          "status": "failed",
+          "failureMessages": [
+            "TypeError: Cannot read properties of undefined (reading 'f')\n    at <fixture>/vt/probe.test.ts:35:46\n    at file://<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11\n    at file://<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26\n    at file://<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file://<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)\n    at runTest (file://<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)\n    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at runSuite (file://<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)\n    at runSuite (file://<fixture>/repo/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)"
+          ]
+        }
+      ]
+    }
+  ]
+}

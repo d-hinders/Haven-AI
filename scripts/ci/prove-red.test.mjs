@@ -57,6 +57,7 @@ import {
   reviewCellsProblem,
   selectCensus,
   validateCells,
+  VITEST_ASSERTION_SHAPE,
 } from './prove-red.mjs'
 
 const SCRIPT = fileURLToPath(new URL('./prove-red.mjs', import.meta.url))
@@ -239,6 +240,34 @@ describe('classifier over recorded runner output', () => {
       classify({ baseline: greenOf(r), mutant: r, expectRed: ['frontend idiom > jest-dom matcher fails'] }).class,
       'caught',
     )
+  })
+  test('vitest (#4456): the backend idiom — a resolved .rejects and the OpenAPI helpers — is assertion; its look-alikes are not', () => {
+    // Recorded from vitest 3.2.4 (paths redacted) against the real helpers in
+    // packages/backend/src/openapi/response-shape.ts. The counter-cases pin
+    // what stays an error on purpose: a rejected `.resolves` wraps whatever
+    // the code threw, and responseSchema's contract throw is not an assertion.
+    const r = normalizeVitestJson(readJson('vitest-backend-idiom.json'), 1)
+    assert.deepEqual(
+      r.tests.map((x) => [x.name, x.kind]),
+      [
+        ['backend idiom > rejects on a promise that resolved', 'assertion'],
+        ['backend idiom > expectMatchesSpec mismatch', 'assertion'],
+        ['backend idiom > expectRejectsOffSpec on a route that accepted', 'assertion'],
+        ['backend idiom > resolves on a promise that rejected with a code throw', 'error'],
+        ['backend idiom > code throw wrapping the rejects stem', 'error'],
+        ['backend idiom > responseSchema contract throw through expectMatchesSpec', 'error'],
+        ['backend idiom > code throw starting Response from', 'error'],
+        ['backend idiom > code throw wrapping the off-spec stem', 'error'],
+        ['backend idiom > TypeError', 'error'],
+      ],
+    )
+    for (const name of ['rejects on a promise that resolved', 'expectMatchesSpec mismatch', 'expectRejectsOffSpec on a route that accepted']) {
+      assert.equal(classify({ baseline: greenOf(r), mutant: r, expectRed: [`backend idiom > ${name}`] }).class, 'caught', name)
+    }
+    // The `.rejects` stem holds on the bare first line as well as on the
+    // recorded message with its stack (the anchor ends at a newline or the end).
+    assert.equal(VITEST_ASSERTION_SHAPE.test('Error: promise resolved "x" instead of rejecting'), true)
+    assert.equal(VITEST_ASSERTION_SHAPE.test('Error: promise resolved "x" instead of rejecting later'), false)
   })
   test('incident 5: the SQL-error shape in vitest is mutation-red', () => {
     const mutant = normalizeVitestJson(readJson('vitest-sql-error.json'), 1)

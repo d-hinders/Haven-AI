@@ -68,6 +68,13 @@ export interface AgentRow {
    * path never reads it.
    */
   tax_declaration_enabled: boolean
+  /**
+   * #4429: the agent's stored display colour, 1..6, assigned by the database
+   * on insert (migration 121) and never changed by a rename. DISPLAY ONLY —
+   * the same boundary as `organization_id`: nothing in the delegation,
+   * budget, or enforcement path reads it.
+   */
+  avatar_tint: number
   has_stranded_funds: boolean
   /**
    * #3542: how many of this agent's delegations are live (pending, active or
@@ -308,6 +315,9 @@ export const LIST_AGENTS_FOR_USER_ALL_STATUSES_SQL = `SELECT a.id, a.name, a.des
               -- the column itself; nothing in the delegation, budget, or
               -- enforcement path may read it.
               a.tax_declaration_enabled,
+              -- #4429: the stored display colour (1..6), assigned by the
+              -- database on insert. DISPLAY ONLY, like the fields above.
+              a.avatar_tint,
               (SELECT MAX(ati.created_at) FROM agent_tool_invocations ati WHERE ati.agent_id = a.id) AS mcp_last_seen_at,
               EXISTS(
                 SELECT 1 FROM machine_payment_reconciliation_events mpre
@@ -344,6 +354,9 @@ export const FIND_AGENT_FOR_USER_ALL_STATUSES_SQL = `SELECT a.id, a.name, a.desc
               a.organization_id,
               -- #3426: same display/settings-only field as the list read above.
               a.tax_declaration_enabled,
+              -- #4429: the stored display colour (1..6), assigned by the
+              -- database on insert. DISPLAY ONLY, like the fields above.
+              a.avatar_tint,
               (SELECT MAX(ati.created_at) FROM agent_tool_invocations ati WHERE ati.agent_id = a.id) AS mcp_last_seen_at,
               EXISTS(
                 SELECT 1 FROM machine_payment_reconciliation_events mpre
@@ -536,6 +549,9 @@ export const INSERT_AGENT_WITH_KEY_SQL = `INSERT INTO agents (user_id, name, des
                    -- #3426: the opt-in is never settable at creation; the
                    -- column default (false) is the honest value here.
                    tax_declaration_enabled,
+                   -- #4429: filled by the BEFORE INSERT trigger (migration
+                   -- 121) — the create response carries the assigned colour.
+                   avatar_tint,
                    NULL::timestamptz AS mcp_last_seen_at,
                    -- #1878: an agent created straight through the API was never
                    -- wired by the connector, so it has no MCP server name. NULL
@@ -581,6 +597,10 @@ export interface CreatedAgent {
     // Declared for the same reason: the query returns it (the column
     // default) and the Agent shape requires it.
     | 'tax_declaration_enabled'
+    // #4429: assigned by the BEFORE INSERT trigger, so the create response
+    // carries the colour the database chose. Declared for the same reason as
+    // the fields above: the query returns it and the Agent shape requires it.
+    | 'avatar_tint'
   >
   accountInfo: AccountInfoRow
 }
@@ -637,6 +657,9 @@ export const UPDATE_AGENT_PROFILE_SQL = `WITH updated AS (
            RETURNING id, name, description, delegate_address, account_id, api_key_prefix, status, created_at,
                      organization_id,
                      tax_declaration_enabled,
+                     -- #4429: carried unchanged by a profile update, but the
+                     -- Agent response shape requires it — read it back.
+                     avatar_tint,
                      mcp_server_name
          )
          SELECT updated.id, updated.name, updated.description, updated.delegate_address,
@@ -647,6 +670,8 @@ export const UPDATE_AGENT_PROFILE_SQL = `WITH updated AS (
                 -- #3426: carried unchanged by a profile update, but the
                 -- Agent response shape requires it — read it back.
                 updated.tax_declaration_enabled,
+                -- #4429: same — the tint is assigned once and never edited.
+                updated.avatar_tint,
                 -- #1878/#1694: the display name is editable, the wiring name is
                 -- not. This UPDATE never touches mcp_server_name; reading it
                 -- back keeps the renamed agent's card showing the same pair.

@@ -6575,13 +6575,19 @@ export const openapiSpec = {
                       items: {
                         type: 'object',
                         required: [
-                          'id', 'name', 'status', 'spent', 'share', 'payments', 'refusals', 'refusal_attempts',
+                          'id', 'name', 'status', 'avatar_tint', 'spent', 'share', 'payments', 'refusals', 'refusal_attempts',
                           'budgets', 'top_merchant', 'last_payment_at',
                         ],
                         properties: {
                           id: { type: 'string', format: 'uuid' },
                           name: { type: 'string' },
                           status: { type: 'string' },
+                          /**
+                           * #4429: the agent's stored display colour, 1..6.
+                           * DISPLAY ONLY — the client keys the row's monogram
+                           * off it instead of hashing the name.
+                           */
+                          avatar_tint: { type: 'integer', minimum: 1, maximum: 6 },
                           spent: { type: 'string', description: 'Net of `delegate_sweeps` clawbacks (#3755), same basis as `totals.spent`; `payments` and `last_payment_at` stay gross.' },
                           share: { type: 'number', description: 'This agent’s share of total spend across delegation-rail agents, in [0, 1].' },
                           payments: { type: 'integer' },
@@ -12093,7 +12099,7 @@ export const openapiSpec = {
           'id', 'name', 'delegate_address',
           'account_id', 'account_address', 'account_name', 'account_chain_id',
           'api_key_prefix', 'status', 'created_at', 'allowances', 'labels',
-          'organization_id', 'tax_declaration_enabled',
+          'organization_id', 'tax_declaration_enabled', 'avatar_tint',
         ],
         properties: {
           id: uuid,
@@ -12157,6 +12163,14 @@ export const openapiSpec = {
            * read is GET /agents/{id}/tax-declaration.
            */
           tax_declaration_enabled: { type: 'boolean' },
+          /**
+           * #4429: the agent's stored display colour, 1..6, assigned by the
+           * database on insert (migration 121) and never changed by a rename.
+           * DISPLAY ONLY — the same boundary as `labels`/`organization_id`:
+           * nothing in the delegation, budget, or enforcement path reads it.
+           * Always present: the column is NOT NULL and every read selects it.
+           */
+          avatar_tint: { type: 'integer', minimum: 1, maximum: 6 },
           /** Timestamp of the most recent MCP tool call from this agent. Null until first call. */
           mcp_last_seen_at: { anyOf: [isoDateTime, { type: 'null' }] },
           /**
@@ -13773,11 +13787,17 @@ export const openapiSpec = {
       },
       DashboardAgentPreview: {
         type: 'object',
-        required: ['id', 'name', 'status', 'accountId', 'accountName', 'accountChainId', 'allowances', 'budgets', 'budgetEndedAt', 'receivedSubBudgets', 'stats'],
+        required: ['id', 'name', 'status', 'avatarTint', 'accountId', 'accountName', 'accountChainId', 'allowances', 'budgets', 'budgetEndedAt', 'receivedSubBudgets', 'stats'],
         properties: {
           id: uuid,
           name: { type: 'string' },
           status: { type: 'string', enum: ['active', 'paused', 'pending_approval'], description: 'Revoked agents are excluded from the overview query. #3803: pending_approval joins — the redesigned overview must surface an agent still waiting for its connection.' },
+          /**
+           * #4429: the agent's stored display colour, 1..6. DISPLAY ONLY —
+           * the dashboard's agent rows key their monogram off it instead of
+           * hashing the name.
+           */
+          avatarTint: { type: 'integer', minimum: 1, maximum: 6 },
           accountId: { type: ['string', 'null'], format: 'uuid' },
           accountName: { type: ['string', 'null'] },
           accountChainId: { type: ['integer', 'null'] },

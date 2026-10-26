@@ -273,6 +273,9 @@ export default async function analyticsOverviewRoutes(app: FastifyInstance): Pro
           id: a.agent_id,
           name: a.name,
           status: a.status,
+          // #4429: the stored display colour (1..6), so the client keys the
+          // agent's monogram off it instead of hashing the name.
+          avatar_tint: a.avatar_tint,
           spent: cur === 'usd' ? a.spent_usd : cur === 'eur' ? a.spent_eur : a.spent_sek,
           share: totalSpentAcrossAgents > 0 ? spent / totalSpentAcrossAgents : 0,
           payments: Number(a.payments),

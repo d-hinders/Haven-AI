@@ -55,6 +55,8 @@ export interface DashboardAgentRow {
   id: string
   name: string
   status: string
+  /** #4429: the stored display colour (1..6). DISPLAY ONLY. */
+  avatar_tint: number
   account_id: string | null
   account_name: string | null
   account_chain_id: number | null
@@ -118,7 +120,9 @@ export const LIST_DASHBOARD_ACCOUNTS_SQL = `SELECT us.id, us.account_address, us
          ORDER BY us.created_at ASC`
 
 export const LIST_DASHBOARD_AGENTS_SQL = `SELECT a.id, a.name, a.status, a.account_id, us.name AS account_name, us.chain_id AS account_chain_id,
-                us.account_type
+                us.account_type,
+                -- #4429: the stored display colour (1..6). DISPLAY ONLY.
+                a.avatar_tint
          FROM agents a
          LEFT JOIN smart_accounts us ON us.id = a.account_id
          WHERE a.user_id = $1 AND us.account_type = 'delegator_hybrid'

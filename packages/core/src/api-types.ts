@@ -5157,6 +5157,7 @@ export type components = {
             labels: components["schemas"]["Label"][];
             organization_id: string | null;
             tax_declaration_enabled: boolean;
+            avatar_tint: number;
             mcp_last_seen_at?: string | null;
             mcp_server_name?: string | null;
             has_stranded_funds?: boolean;
@@ -6388,6 +6389,7 @@ export type components = {
              * @enum {string}
              */
             status: "active" | "paused" | "pending_approval";
+            avatarTint: number;
             /** Format: uuid */
             accountId: string | null;
             accountName: string | null;
@@ -17328,6 +17330,7 @@ export interface operations {
                             id: string;
                             name: string;
                             status: string;
+                            avatar_tint: number;
                             /** @description Net of `delegate_sweeps` clawbacks (#3755), same basis as `totals.spent`; `payments` and `last_payment_at` stay gross. */
                             spent: string;
                             /** @description This agent’s share of total spend across delegation-rail agents, in [0, 1]. */

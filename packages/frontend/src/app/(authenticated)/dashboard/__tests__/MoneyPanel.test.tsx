@@ -42,6 +42,7 @@ function agent(id: string, name: string, d30NetUsd: number): DashboardAgentPrevi
     id,
     name,
     status: 'active',
+    avatarTint: 1,
     accountId: null,
     accountName: null,
     accountChainId: 8453, budgetEndedAt: null,

@@ -163,6 +163,10 @@ export const testAgent = {
   // schema-checked against `ApiSchema<'Agent'>`, so the new required boolean
   // cannot be dropped silently here).
   tax_declaration_enabled: false,
+  // #4429: the stored display colour (1..6), assigned by the database on
+  // insert. DISPLAY ONLY — the fixture is schema-checked against
+  // `ApiSchema<'Agent'>`, so the new required field cannot be dropped here.
+  avatar_tint: 1,
   // #2264: the DERIVED delegation-budget projection, which is what fills this
   // array on the live rail (`rails/delegation-budget-view.ts`): 250 USDC per
   // 30 days, `allowance_amount` HUMAN-formatted and `reset_period_min` in
@@ -689,6 +693,8 @@ export const dashboardOverview = {
       id: testAgent.id,
       name: testAgent.name,
       status: testAgent.status,
+      // #4429: the stored display colour (1..6). DISPLAY ONLY.
+      avatarTint: 1,
       accountId: testSafe.id,
       accountName: testSafe.name,
       accountChainId: testSafe.chain_id, budgetEndedAt: null,
@@ -756,6 +762,8 @@ export const dashboardOverview = {
       id: 'agent-e2e-watcher',
       name: 'Watcher agent',
       status: 'paused' as const,
+      // #4429: the stored display colour (1..6). DISPLAY ONLY.
+      avatarTint: 2,
       accountId: testSafe.id,
       accountName: testSafe.name,
       accountChainId: testSafe.chain_id, budgetEndedAt: null,
@@ -819,6 +827,8 @@ export const dashboardOverview = {
       id: 'agent-e2e-pending',
       name: 'Connecting agent',
       status: 'pending_approval' as const,
+      // #4429: the stored display colour (1..6). DISPLAY ONLY.
+      avatarTint: 3,
       accountId: 'safe-sepolia',
       accountName: 'Showcase account',
       accountChainId: 84532, budgetEndedAt: null,

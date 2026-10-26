@@ -756,6 +756,9 @@ export default async function dashboardRoutes(
           id: agent.id,
           name: agent.name,
           status: agent.status,
+          // #4429: the stored display colour (1..6), so the dashboard's agent
+          // rows key their monogram off it instead of hashing the name.
+          avatarTint: agent.avatar_tint,
           accountId: agent.account_id,
           accountName: agent.account_name,
           accountChainId: agent.account_chain_id,

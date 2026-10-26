@@ -399,6 +399,8 @@ export interface PerAgentSpendRow {
   agent_id: string
   name: string
   status: string
+  /** #4429: the stored display colour (1..6). DISPLAY ONLY. */
+  avatar_tint: number
   spent_usd: string
   spent_eur: string
   spent_sek: string
@@ -471,6 +473,9 @@ export const PER_AGENT_SPEND_SQL = `WITH legs AS (
     a.id AS agent_id,
     a.name,
     a.status,
+    -- #4429: the stored display colour, so the analytics agent rows can key
+    -- their monogram off it. DISPLAY ONLY.
+    a.avatar_tint,
     COALESCE(n.spent_usd, 0)::text AS spent_usd,
     COALESCE(n.spent_eur, 0)::text AS spent_eur,
     COALESCE(n.spent_sek, 0)::text AS spent_sek,
@@ -491,6 +496,8 @@ interface PerAgentSpendRawRow {
   agent_id: string
   name: string
   status: string
+  /** #4429: the stored display colour (1..6). DISPLAY ONLY. */
+  avatar_tint: number
   spent_usd: string
   spent_eur: string
   spent_sek: string

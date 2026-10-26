@@ -67,6 +67,7 @@ function makeAgent(overrides: Partial<DashboardAgentPreview> = {}): DashboardAge
     id: AGENT_IDS.research,
     name: 'Research agent',
     status: 'active',
+    avatarTint: 1,
     accountId: 'acct-1',
     accountName: 'Main account',
     accountChainId: 8453, budgetEndedAt: null,

@@ -8,6 +8,7 @@ const AGENT: DashboardAgent = {
   id: 'agent-1',
   name: 'Research agent',
   status: 'active',
+  avatarTint: 1,
   accountId: 'account-1',
   accountName: 'Main account',
   accountChainId: 8453, budgetEndedAt: null,

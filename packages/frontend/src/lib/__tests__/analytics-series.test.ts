@@ -13,6 +13,7 @@ function agent(id: string, spent: string): AnalyticsAgentRow {
     id,
     name: id,
     status: 'active',
+    avatar_tint: 1,
     spent,
     share: 0,
     payments: 0,

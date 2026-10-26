@@ -1937,24 +1937,34 @@ parity-pinned and not proposed.
 **Improvement candidates (one PR each), pending owner decision:**
 - C1 — the x402 legs answer an expired-only budget (the #4352 refusal, landed
   2026-10-25) with a prose-only 403 — `error` text, no `error_code`, no
-  `next_action`, no `budget_ended_at` — while the direct route answers the
-  typed body from the shared builder. The builder has 1 caller; 2 inline
-  bodies sit in the x402 authorize module; 5 of that module's 7 403 sites
-  carry a typed code, the two without are these. By execution: misnaming the
-  builder's reason reddens the direct route's suite 3 of 45 and leaves the
-  x402 suite 119 of 119 green (block-1 probes M6 / M7). The hosted tool keys
-  its budget branch on `error_code` (#3504), so the x402 expired refusal
-  lands in the generic branch — the 2026-09-21 D2 class, re-created for one
-  reason. No incident recorded. Money-path by file.
+  `next_action`, no `budget_ended_at` — while the hosted pre-check answers
+  the typed body from the shared builder. The builder has 1 caller; 2 inline
+  expired bodies sit in the x402 authorize module, whose 7 403 sites read
+  as 3 typed (task budget, period exceeded on both legs) and 4 prose-only
+  (the two expired bodies and the two no-delegation bodies they were shaped
+  to match). By execution: misnaming the builder's reason reddens the
+  pre-check's suite 3 of 45 and leaves the x402 suite 119 of 119 green
+  (block-1 probes M6 / M7). No non-test client code reads
+  `delegation_expired` — the hosted pre-check handler and the error
+  normaliser branch on `delegation_budget_exceeded` alone — so the typed
+  body is unconsumed where it exists and absent where it does not: the
+  2026-09-21 D2 class, a refusal with nothing machine-readable to branch on.
+  No incident recorded. Money-path by file. *Corrected in review:* first
+  written as "the direct route", "5 of 7 typed" (a count of ledger `detail`
+  objects) and "the clients branch on it".
 - C2 — the weekly docs staleness audit ranks dated records: it excludes only
   `archived` and `research`, every one of the 18 bug reports is
   `status: current` with `covers:`, 10 of the 15 docs in the 2026-10-26
-  audit issue are bug reports (prior scan reports first, since their
-  `covers:` is the widest in the tree), and the landing that closed it
-  appended +425 of its +536 lines as re-check sections to dated reports
-  (the previous audit: 3 of 9 files). The script's own #2638 comment states
-  the principle for `research`. One PR; the owner picks the mechanism (a
-  folder rule or a `record` status) and whether the reports keep `covers:`.
+  audit issue are bug reports (ranked by commits since `last-verified`, so a
+  record's write-day date and 25–42-path `covers:` carry it high; the
+  issue's rank 1 is a dated retrospective outside the folder), and the
+  landing that closed it appended +425 of its +536 lines as re-check
+  sections to dated reports (the previous audit: 3 of 9 files; 11 weekly
+  audit issues since 2026-07-20). The script's own #2638 comment states the
+  principle for `research`. One PR; the owner picks the mechanism (a folder
+  rule, which would keep ranking the retrospective, or a `record` status)
+  and whether the reports keep `covers:`. *Corrected in review:* first
+  written as "the widest `covers:` in the tree" and "13 audits".
 - Notes, not proposed: the egress perimeter (5 bare fetch sites in 3
   backend files outside the SSRF seam, all operator-configured hosts; 0
   tests enumerate fetch sites; a by-file allowlist ratchet was drafted and
@@ -1967,8 +1977,8 @@ parity-pinned and not proposed.
   A's out-of-range mutations of the same three files were each caught by the
   spec round trip, so the field is pinned by the spec's range alone; the
   2026-09-15 mock-families shape, `accepted-as-debt`); one mobile e2e spec
-  is 5 of the window's 7 browser-smoke failures, both `dev` reds among them
-  and two merged PRs, red from its own merge until the PageHeader fix
+  is all 7 of the window's 7 browser-smoke failures, both `dev` reds among
+  them and two merged PRs, red from its own merge until the PageHeader fix
   landed eleven and a half hours later (advisory on `dev` by the recorded
   decision; run A counts 9 of 134 landings merged over a red advisory
   check); a source-reading guard census that is not an instrument (a

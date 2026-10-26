@@ -97,7 +97,7 @@ the duplication census found are both pinned byte-for-byte by a parity test
 
 ## 2. Improvement candidates (one PR each) — pending the owner's word
 
-### C1 — the x402 legs answer an expired-only budget with a prose-only 403, while the direct route answers the typed body; the shared builder reaches one of three sites
+### C1 — the x402 legs answer an expired-only budget with a prose-only 403, while the hosted pre-check answers the typed body; the shared builder reaches one of three sites, and four of the x402 module's seven 403 bodies are prose-only
 
 **Opportunity and evidence.** #4352 (landed 2026-10-25, `e778da444`) added
 the `delegation_expired` refusal: when the only budget for a token has ended,
@@ -108,9 +108,15 @@ The typed body lives in one builder,
 emits `error_code: 'delegation_expired'`, the taxonomy `phase` and
 `next_action`, and the additive wire field `budget_ended_at`. Callers:
 
-- `packages/backend/src/modules/mpp/budget-precheck.ts:383` — the direct
-  route. Its tests pin `error_code`, `budget_ended_at` and `next_action`
+- `packages/backend/src/modules/mpp/budget-precheck.ts:383` — the hosted
+  pre-check (`POST /machine-payments/budget-precheck`; its ledger `source` is
+  `hosted_prepare`, and the builder's input type names it "the only
+  full-body site today"). Its tests pin `error_code`, `budget_ended_at` and
+  `next_action`
   (`packages/backend/src/routes/__tests__/budget-precheck.test.ts:422,441,1251`).
+  The direct `POST /payments` route has no expired-only branch at all. (This
+  run's first draft called the pre-check "the direct route"; corrected in
+  review.)
 - the two x402 legs in
   `packages/backend/src/modules/x402/delegation-authorize.ts` (EIP-3009
   funding at `:475-500`, erc7710 at `:691-715`) call the shared
@@ -128,55 +134,78 @@ Counts at the scan SHA:
   minus the defining file → **1** caller
 - `rg -c 'this budget ended on \$' packages/backend/src -g '!*.test.ts' -g '!__tests__'`
   outside `budget-scope/` → **2** inline bodies
-- `rg -c "error_code:" … delegation-authorize.ts` → 5, against
-  `rg -c "code: 403"` → 7: **5 of the 7** 403 sites in that module carry a
-  typed code; the two without are the expired-budget bodies
+- `rg -n "code: 403" … delegation-authorize.ts` → 7 sites (`:121`, `:353`,
+  `:479`, `:518`, `:695`, `:721`, `:828`), each read: **3 carry a typed
+  body** (`:121` the task-budget body; `:353` and `:828` the period-exceeded
+  body from the shared builder, x402 flavor) and **4 are `{ error }` only**
+  — the two expired-budget bodies (`:479`, `:695`) and the two
+  **no-delegation** 403s beside them (`:518`, `:721`). The builder's own
+  docstring (`refusal-body.ts:263-265`) records that the expired bodies were
+  shaped to match "the same shape their no-delegation 403s carry". (This
+  run's first draft wrote "5 of the 7 carry a typed code; the two without are
+  the expired bodies", from `rg -c "error_code:"` → 5 — three of those five
+  are ledger `detail` objects, not wire bodies, and one is a scope-refusal
+  mapper; corrected in review.)
 
 **By execution (block-1 probes M6 and M7, same edit, two suites).** Changing
-the builder's `error_code` to `delegation_budget_exceeded` turns the direct
-route's suite red — **3 of 45** (`budget-precheck.test.ts`) — and leaves the
-x402 suite green — **119 of 119** (`x402-delegation.test.ts`): the x402 legs
-never consume the builder. Diagnosis for M7: *not load-bearing at the tested
-condition* — the x402 bodies are built elsewhere.
+the builder's `error_code` to `delegation_budget_exceeded` turns the hosted
+pre-check's suite red — **3 of 45** (`budget-precheck.test.ts`) — and leaves
+the x402 suite green — **119 of 119** (`x402-delegation.test.ts`): the x402
+legs never consume the builder. Diagnosis for M7: *not load-bearing at the
+tested condition* — the x402 bodies are built elsewhere.
 
 **Cost.** The hosted MCP keys its budget branch on the backend's `error_code`
-(`packages/mcp-server/src/tools/support/quote-response.ts:390-391` compares
-to `delegation_budget_exceeded`; the local runtime reads `error_code` at its
-error seam), and #3504 made that key the contract. An expired budget on the
-x402 path therefore lands in the generic 403 branch with prose the agent has
-to parse — the class the 2026-09-21 D2 (#3214) fixed for the generic
-branches, re-created for one reason. The spec comment on the
-`/x402/authorize` 403 ("Since #4352 there are two shapes") documents the
-asymmetry rather than closing it. No incident is recorded; this is observed,
-not hypothesised.
+and #3504 made that key the contract — but only for one value: the
+pre-check response handler
+(`packages/mcp-server/src/tools/support/quote-response.ts:387-391`) matches
+`delegation_budget_exceeded` and lets everything else fall open to
+"unavailable" (`:400`), and the shared error normaliser branches on the same
+single value. **No non-test code in the hosted MCP, the SDK, the local
+runtime or the signer reads `delegation_expired`**
+(`rg -l delegation_expired packages/{mcp-server,sdk,mcp,signer}/src -g '!*.test.ts'`
+→ one test-support fixture). So today the typed expired body is unconsumed
+on the one path that emits it, and absent on the two x402 paths; the agent
+is told "this budget ended" in prose on all three. The 2026-09-21 D2
+(#3214) is the class — a refusal with nothing machine-readable for the
+agent to branch on. No incident is recorded; this is observed, not
+hypothesised. (The first draft claimed the clients already branch on the
+typed body and cited a spec comment on the `/x402/authorize` 403; the
+comment is on the pre-check's 403 — `openapi/spec.ts:8302-8310` — and
+describes two typed shapes on that one endpoint. Both corrected in review.)
 
 **Expected benefit.** One body per refusal reason, whichever entrypoint
-answers it, and the agent-facing clients branch on the x402 expired refusal
-the same way they branch on the direct one.
+answers it, and one client branch that acts on it — so an expired budget
+sends the agent to the owner for a new one on every path, instead of to a
+retry or a generic "unavailable".
 
 **Approximate scope.** One PR, money-path by file: an x402 flavor on
 `buildExpiredBudgetBody` (the builder already takes `direct`, `x402`, `mpp`
-and `sign-leg` inputs for the period-exceeded body), the two inline sites
-routed through it, the x402 tests extended to pin `error_code`,
-`next_action` and `budget_ended_at`, and the `/x402/authorize` 403 schema in
-the spec gaining the field. The refusal census
+and `payments-sign-leg` inputs for the period-exceeded body), the two inline
+expired sites routed through it, the x402 tests extended to pin
+`error_code`, `next_action` and `budget_ended_at`, the `/x402/authorize` 403
+schema in the spec gaining the field, and the hosted MCP's pre-check handler
+and error normaliser gaining a `delegation_expired` branch. Owner decision:
+whether the two no-delegation 403s (`:518`, `:721`), which share the prose
+shape, are typed in the same PR (they already carry a typed ledger
+`detail`, `no_delegation_for_target`) or stay as they are. The refusal
+census
 (`packages/backend/src/modules/payments/__tests__/refusal-census.test.ts`)
 keys on status, not on `error_code`, by its own header, so it is not the
 instrument for this; the spec round trip is.
 
-**Verified at scan** (at `b9f9f1e47`): the three greps above (1 / 2 / 5 of 7);
-routing for `delegation-authorize.ts`, `refusal-body.ts`,
-`x402-delegation.test.ts` and the OpenAPI module → `code backend`;
-money-path verdict → `delegation-authorize.ts` money-path, `refusal-body.ts`
-money-path, the test and the spec `off` (the positive control, the backend
-sweep module, → money-path); mutation recipe → run (M6 caught 3 of 45, M7
-survived 119 of 119, cells in the census file in this run's scratch, edits
-quoted in §5).
+**Verified at scan** (at `b9f9f1e47`): the greps above (1 caller / 2 inline
+bodies / 3 typed of 7); routing for `delegation-authorize.ts`,
+`refusal-body.ts`, `x402-delegation.test.ts` and the OpenAPI module →
+`code backend`; money-path verdict → `delegation-authorize.ts` money-path,
+`refusal-body.ts` money-path, the test and the spec `off` (the positive
+control, the backend sweep module, → money-path); mutation recipe → run (M6
+caught 3 of 45, M7 survived 119 of 119, cells in the census file in this
+run's scratch, edits quoted in §5).
 
 **Verification still needed.** After the change: the same builder edit must
-redden both suites; the hosted tool's quote and pay paths answer an expired
-x402 budget with the same next step as the direct route (a hosted-suite case,
-not only the backend's).
+redden both suites; a hosted-suite case in which an expired x402 budget and
+an expired pre-check both answer the owner-renewal next step rather than a
+retry; the spec round trip on the x402 403.
 
 ### C2 — the weekly staleness audit ranks dated records as stale docs; two thirds of its last landing appended re-check sections to bug reports
 
@@ -192,10 +221,17 @@ reports are such records, and every one of them declares `covers:` under
   → **18 of 18**; `status` values → `18 current`
 - the audit issue of 2026-10-26 (#4438) lists 15 docs; **10 of the 15** are
   under `docs/bug-reports/` (seven prior quality-scan reports, two
-  onboarding-exploration reports, one cold test), ranked first because a
-  scan report's `covers:` is the widest in the tree (the 2026-09-25 report
-  declares 25 paths; the 2026-10-19 report 27; this one 36 —
-  `awk '/^---$/{c++; next} c==1' <doc> | grep -c '^  - '`)
+  onboarding-exploration reports, one cold test), at ranks 2–7, 8, 9, 11 and
+  14. The ranking is by commits to the `covers:` since `last-verified`, so a
+  record ranks high because its `last-verified` is the day it was written
+  and its `covers:` is wide (the scan reports declare 25–42 paths — the
+  2026-09-25 report 25, the 2026-10-19 report 27, this one 36, by
+  `awk '/^---$/{c++; next} c==1' <doc> | grep -c '^  - '`; the widest
+  `covers:` in the tree are live docs at 50–103 paths, which are
+  re-verified and so rank low). The first draft wrote "the widest in the
+  tree"; corrected in review. The issue's rank 1 is the 2026-09 issue
+  retrospective (85 commits) — a dated record **outside** `docs/bug-reports/`,
+  which bears on the mechanism below.
 - the landing that closed it, `ba99cdc5d`: `git show --format= --numstat`
   → 14 files, +536/−16; **10 files and +425 of the +536 lines** are bug
   reports, each gaining a "Dispositions re-checked 2026-10-26" section
@@ -203,10 +239,13 @@ reports are such records, and every one of them declares `covers:` under
   written
 - the previous weekly audit's landing, `61c61f3ed` (#3645): 9 files,
   +170/−74; 3 bug reports, +48
-- the audit has run 13 times since 2026-07-20
-  (`gh issue list --search "Docs staleness audit in:title" --state all`
-  → 13 closed issues), and its top-15 refills from the same reports as each
-  scan lands a new one — two more today
+- 11 weekly audit issues since 2026-07-20
+  (`gh issue list --search '"Docs staleness audit" in:title' --state all --limit 30`
+  → 11, all closed; the audit also regenerates into an open issue between
+  runs, so it runs more often than it files), and its top-15 refills from
+  the same reports as each scan lands a new one — two more today. (The
+  first draft's unquoted search returned 14, three of them re-verification
+  issues rather than audits; corrected in review.)
 
 **Cost.** Observed contributor burden: a weekly batch whose largest share is
 re-verifying day-stamped records against code that has legitimately moved on,
@@ -222,18 +261,24 @@ records stop being edited after the day they record.
 excludes dated records. Owner decision on the mechanism: a folder rule
 (`docs/bug-reports/**`), or a `status: record` value joining `archived` and
 `research` in the two exclusion sites — the status route is one line at each
-site plus the front-matter of 18 files and the validator's enum. Either way
-the bug reports keep their `covers:` for the coupling gate's reverse walk, or
+site plus the front-matter of the records and the validator's enum. Two
+facts bear on it: #4438's rank 1 is a dated record outside the folder (the
+2026-09 issue retrospective), which a folder rule would keep ranking; and
+one of the 18 files in the folder is the run-report template, not a record.
+The status route covers both; the folder route is one line. Either way the
+bug reports keep their `covers:` for the coupling gate's reverse walk, or
 drop it; that is a second decision.
 
-**Verified at scan** (at `b9f9f1e47`): the four counts above (18 of 18; 10 of
-15; +425 of +536; 3 of 9); routing for `audit-staleness.mjs` and its test →
-`(none)` from `classifyChangedFiles` — the classifier routes the script to
-no surface, and it is the `docs.yml` path filter (`scripts/docs/**`,
-`.github/workflows/docs.yml:64`) and the weekly `docs-audit.yml` that run it,
-so a change is still exercised; money-path verdict → `off` (the positive
-control → money-path); mutation recipe → *unrun*: the exclusion the remedy
-adds does not exist yet, and the script's self-test is the place for its red.
+**Verified at scan** (at `b9f9f1e47`): the counts above (18 of 18; 10 of 15;
++425 of +536; 3 of 9; 11 audits); routing for `audit-staleness.mjs` and its
+test → `(none)` from `classifyChangedFiles` — the classifier routes the
+script to no surface, but `docs.yml`'s `pull_request` trigger carries no
+path filter (`.github/workflows/docs.yml:27-31`; `:64` is the push filter)
+and always runs the `scripts/docs/*.test.mjs` suite, and the weekly
+`docs-audit.yml` runs the script itself, so a change is still exercised;
+money-path verdict → `off` (the positive control → money-path); mutation
+recipe → *unrun*: the exclusion the remedy adds does not exist yet, and the
+script's self-test is the place for its red.
 
 **Verification still needed.** After the change: the audit's own test gains
 the excluded status (or folder) as a fixture case; the next weekly issue's
@@ -241,8 +286,9 @@ top-15 names no bug report.
 
 ### Verified, held back (notes, not proposed)
 
-- **Egress perimeter — examined, not proposed.** Five issues in four days
-  (#4244, #4257, #4281, #4300, #4309) routed one outbound call at a time
+- **Egress perimeter — examined, not proposed.** Five issues in two days
+  (#4244, #4257, #4281, #4300, #4309, created 2026-10-22 → 10-23; #4300 is
+  probe hardening around the same seam) routed one outbound call at a time
   through the SSRF seam
   (`packages/backend/src/infra/http/ssrf-guard.ts`), the SDK's redirect
   follower twice, and no ratchet names the perimeter
@@ -250,11 +296,14 @@ top-15 names no bug report.
   → only #4281). Left outside the seam in backend non-test source:
   `rg -n '(^|[^a-zA-Z_.])fetch\(' packages/backend/src -g '!*.test.ts' -g '!__tests__' --type ts`
   (comment lines dropped) → **5 sites in 3 files** —
-  `packages/backend/src/infra/explorer-api.ts` (3),
-  `packages/backend/src/infra/prices.ts` (1),
-  `packages/backend/src/infra/delegate-alert-webhook.ts` (1) — every one an
-  operator-configured host; the SDK's 4 bare-`fetch(` files all import the
-  egress policy; 0 tests enumerate fetch sites. This run's first draft
+  `packages/backend/src/infra/explorer-api.ts` (3: the explorer, and the
+  RPC provider's transfers endpoint at `:425`),
+  `packages/backend/src/infra/prices.ts` (1, a hard-coded price-API
+  vendor host), `packages/backend/src/infra/delegate-alert-webhook.ts` (1,
+  the operator's webhook) — fixed or operator-configured hosts, none
+  caller-influenced; of the SDK's 4 bare-`fetch(` files, 3 import the
+  egress policy and the fourth is the transport to Haven's own API; 0 tests
+  enumerate fetch sites. This run's first draft
   proposed a shrink-only allowlist ratchet. Run A's wider census (13 files by
   a regex that also sees `fetch` aliases, with positive controls at the two
   remedied sites' parents) reached the same "all operator hosts" reading and
@@ -279,7 +328,7 @@ top-15 names no bug report.
   — the golden strips the field by design (`:300-306`), and the "spec round
   trip" its comment says still requires it lives in the mocked route test,
   which never sees the SQL. Answering a constant tint
-  (`packages/backend/src/routes/analytics-overview.ts:275` → `1`) survives
+  (`packages/backend/src/routes/analytics-overview.ts:278` → `1`) survives
   that route test **38 of 38** (M5): *weak test* — fixtures carry tints 1 and
   2, no assertion reads them. Run A mutated the same three files the other
   way — a value outside 1..6 — and each was caught by the spec round trip
@@ -287,14 +336,17 @@ top-15 names no bug report.
   spec's range alone; its presence and its value are pinned by nothing. Not
   proposed: the column moves no money, and the 2026-09-15 mock-families
   finding (`accepted-as-debt`) already names the shape.
-- **One mobile e2e spec is 5 of the window's 7 browser-smoke failures, both
-  `dev` reds among them, and two PRs merged over it.**
+- **One mobile e2e spec is all 7 of the window's 7 browser-smoke failures,
+  both `dev` reds among them, and two PRs merged over it.**
   `packages/frontend/e2e/analytics-header-wrap.mobile.spec.ts:126` ("at sm
-  (640) a very long agent name truncates and does not push the header")
-  failed on `dev` from #4403's merge (2026-10-24T14:39Z, run 40103495834)
-  through the 10-25T00:03Z run (40145212714), on PR #4403 itself (which added
-  it) and PR #4406 at their merge (`gh pr view … statusCheckRollup` →
-  `Frontend browser smoke: FAILURE`), and on one docs branch. It went green
+  (640) a very long agent name truncates and does not push the header") is
+  the single failing test (1 failed / 208 passed, then the same on retry) in
+  every failed smoke job of the window: on `dev` from #4403's merge
+  (2026-10-24T14:39Z, run 40103495834) through the 10-25T00:03Z run
+  (40145212714), on PR #4403 itself (which added it) and PR #4406 at their
+  merge (`gh pr view … statusCheckRollup` → `Frontend browser smoke:
+  FAILURE`), on PR #4405's branch twice and PR #4404's once (both green at
+  merge, after the fix). It went green
   at the first `dev` run after #4409 (2026-10-25T02:07Z, `9c93a8807`, which
   changed `packages/ui/src/PageHeader.tsx` — the spec file itself has one
   commit): a real red, fixed by a landing, not a flicker — this run's first
@@ -343,7 +395,7 @@ top-15 names no bug report.
   the same shape in its own M1 plus a second (a plain `Error` from the spec
   round-trip helper) and carries both as its C1, pending the owner; this run
   reproduces the first independently and adds nothing. Third unrecorded stem
-  in nine days after #4284 and #4294.
+  in four days after #4284 and #4294 (both filed 2026-10-22).
 - **Host- and load-dependent test reds, 10 issues** (#4126, #4134, #4084,
   #4191, #4192, #4272, #4293, #4297, #4301, #4398): the pattern the
   2026-10-21 run weighed and refused on the repo's recorded decision to keep
@@ -561,7 +613,13 @@ entry's, at `8cc3717c8`.
 - The dimensions reference changed under the scan (the fast-forward brought
   the prove-red rewrite of block 1); re-read it after moving the checkout.
 - The classifier's `(none)` for a `scripts/docs/**` file is not "unexercised":
-  `docs.yml` has its own path filter.
+  `docs.yml` runs its script tests on every pull request (no path filter on
+  that trigger; the filter at `:64` is for pushes).
+- A review brief that re-derives every figure pays for itself: this report's
+  first draft had one wrong count built from two greps that counted
+  different things (C1's 403 sites), one wrong route name, one wrong ranking
+  mechanism (C2), one search that over-matched by three, and a 5 that was a
+  7. All were found by re-running the command, not by reading the prose.
 - Two scans of one day collide on the report path and the ledger's one
   append point; read the other before presenting, name it, and reconcile
   item by item rather than presenting a duplicate as new.

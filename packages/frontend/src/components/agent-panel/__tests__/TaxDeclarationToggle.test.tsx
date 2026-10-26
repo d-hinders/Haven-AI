@@ -144,20 +144,22 @@ describe('TaxDeclarationToggle copy', () => {
   // ask" — nothing in the SDK reads the merchant's 402 for an ask, so a local
   // key-holding client sends the declaration to every merchant it pays. The
   // new copy names the CLIENT condition instead of the payment rail (the
-  // owner's 2026-09-30 review, PR #3490, still stands: no rail on this card)
-  // and lists what the merchant receives.
+  // owner's 2026-09-30 review, PR #3490, still stands: no rail on this card),
+  // names the merchant-acceptance half of the owner decision ("and only to
+  // merchants that accept it"), and lists what the merchant receives.
   //
   // Pinned WHOLE with `toBe`, not `toContain`: a substring pin passes a
   // rewrite that reverses the meaning, which is exactly the defect #4416 is
   // about. Every sentence below maps to a line that makes it true —
   // `packages/sdk/src/client.ts:329-343` (resolver bound only with a delegate
   // key), `packages/mcp/src/server.ts:83-85` (the local MCP passes one),
-  // `packages/sdk/src/merchant-completion.ts:187-195` (attached on the paid
-  // retry), `packages/backend/src/modules/agents/tax-declaration.ts:34,138`
+  // `packages/sdk/src/merchant-completion.ts:187-203` (attached on the paid
+  // retry of an EIP-3009 payment only; the erc7710 branch attaches nothing),
+  // `packages/backend/src/modules/agents/tax-declaration.ts:34,138`
   // (taxable status, country) and `packages/sdk/src/tax-declaration.ts:240-254`
   // (principalId + attribution hash, signed by the delegate key).
   const HELPER_TEXT =
-    "When this is on, your saved VAT number, checked against the EU's VIES register, can travel with payments your agent makes through a client that holds its own signing key: the Haven SDK with a delegate key, or the local Haven MCP server. The merchant your agent pays receives your country, the VAT number, your taxable-person status and a signed link to the agent's wallet address. The default setup, a hosted server with a separate signer, sends none. Nothing is submitted to an authority, and you can switch it off here at any time."
+    "When this is on, your saved VAT number, checked against the EU's VIES register, can travel with payments your agent makes through a client that holds its own signing key: the Haven SDK with a delegate key, or the local Haven MCP server. The merchant your agent pays, when it accepts the declaration, receives your country, the VAT number, your taxable-person status and a signed link to the agent's wallet address. The default setup, a hosted server with a separate signer, sends none. Nothing is submitted to an authority, and you can switch it off here at any time."
 
   it('pins the whole helper text: who receives the declaration and what it contains', () => {
     render(

@@ -241,11 +241,11 @@ organisation number are not in it.
 
 The agent Settings tab's toggle says the same thing in the owner's words
 (#4416): the declaration travels only when the agent pays through a client
-that holds its own signing key, the default setup sends none, and the
-merchant receives the country, the VAT number, the taxable-person status and
-the signed link to the agent's wallet address. The card does not name the
-payment rail — the owner's copy review of 2026-09-30 (PR #3490) removed that
-sentence, and the rail stays stated here instead.
+that holds its own signing key, the default setup sends none, and the merchant
+receives the country, the VAT number, the taxable-person status and the signed
+link to the agent's wallet address when it accepts the declaration. The card
+does not name the payment rail — the owner's copy review of 2026-09-30
+(PR #3490) removed that sentence, and the rail stays stated here instead.
 
 ## The settings screen
 

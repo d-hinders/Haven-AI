@@ -175,7 +175,7 @@ describe('Analytics — the header the capture harness waits on', () => {
     expect(header.className.split(/\s+/)).not.toContain('flex-row')
   })
 
-  it('offers the facet one option per agent on the LIST, names only, All agents first', async () => {
+  it('offers the facet one option per agent on the LIST, All agents first, and collapses the unusable ones (#4453)', async () => {
     // Options come from `useAgents` — NOT the overview's filtered response —
     // so the facet cannot vanish the moment an agent is picked
     // (FacetMenu hides itself at one option or fewer).
@@ -183,11 +183,28 @@ describe('Analytics — the header the capture harness waits on', () => {
     render(<AnalyticsClient />)
     await user.click(agentFacetTrigger())
     const radios = screen.getAllByRole('menuitemradio')
-    expect(radios.map((r) => r.textContent)).toEqual([
-      'All agents',
-      'Research agent',
-      'Data-feed agent',
-    ])
+    expect(radios.map((r) => r.textContent)).toEqual(['All agents', 'Research agent'])
+    // The revoked agent is not gone: it sits behind the inactive group's
+    // disclosure row, which names the count.
+    const toggle = screen.getByRole('menuitem', { name: 'Show 1 inactive' })
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  it('shows each agent’s status in `meta` and the inactive group, from the shared builder (#4453)', async () => {
+    const user = userEvent.setup()
+    render(<AnalyticsClient />)
+    await user.click(agentFacetTrigger())
+
+    // An active agent carries no status suffix — "Active" is the resting state.
+    const active = screen.getByRole('menuitemradio', { name: /Research agent/ })
+    expect(active).toHaveTextContent('Research agent')
+    expect(active).not.toHaveTextContent('Active')
+
+    await user.click(screen.getByRole('menuitem', { name: 'Show 1 inactive' }))
+    const revoked = screen.getByRole('menuitemradio', { name: /Data-feed agent/ })
+    // The label is the name alone; the status is the non-truncating `meta` slot.
+    expect(revoked).toHaveTextContent('Data-feed agent')
+    expect(revoked).toHaveTextContent('Revoked')
   })
 
   it('writes ?agentId= and re-asks the overview with it when an agent is picked', async () => {

@@ -43,6 +43,7 @@ import { StepProgress } from '@/components/ui/StepProgress'
 import { DialogActions } from '@/components/ui/DialogActions'
 import { SeriesSwatch, StackedBarChart } from '@/components/ui/StackedBarChart'
 import { seriesColorForAgent } from '@/lib/avatar-tint'
+import { agentFacetOptions } from '@/lib/agent-facet'
 import type { StackedBarDay } from '@/components/ui/StackedBarChart'
 import { AreaChart } from '@/components/ui/AreaChart'
 import type { AreaPoint, SparklinePoint } from '@/components/ui/AreaChart'
@@ -815,19 +816,13 @@ function dsListFacets(rows: typeof DS_LIST_AGENTS): ListFacet[] {
         { value: 'none', label: 'No budget' },
       ],
     },
-    // The meta slot (#4150): a non-active agent's status rides in `meta`,
-    // the way Transactions moves its agent status out of the label.
+    // The meta slot (#4150) and the inactive group (#4452), through the same
+    // builder the three product pages call (#4453): a non-active agent's
+    // status rides in `meta`, and the unusable ones collapse behind one row.
     {
       id: 'initiator',
       label: 'Initiator',
-      options: [
-        { value: 'user', label: 'User (manual)' },
-        ...rows.map((r) => ({
-          value: r.id,
-          label: r.name,
-          ...(r.status === 'active' ? {} : { meta: r.status[0].toUpperCase() + r.status.slice(1) }),
-        })),
-      ],
+      options: agentFacetOptions(rows, [{ value: 'user', label: 'User (manual)' }]),
     },
     // One account: a single possible value, so the facet is hidden.
     { id: 'account', label: 'Account', options: [{ value: 'acc-1', label: 'My account' }] },

@@ -1891,3 +1891,151 @@ Main changes per issue:
 No owner question remains open, so `pending-review` is lifted on all three.
 They were filed to the backlog (no `code-quality`); shipping was not
 requested with the filing.
+
+## 2026-10-26 — whole repo, weighted to the landings since 2026-10-21 (owner request 2026-10-26, no scope named)
+
+Full report: [`docs/bug-reports/quality-scan-2026-10-26-whole-repo.md`](../bug-reports/quality-scan-2026-10-26-whole-repo.md).
+The report holds the file:line evidence; this entry stays path-free. Measured
+on `origin/dev` @ `b9f9f1e47` by one agent in an `npm ci`'d worktree, one
+heavy job at a time, with core, the SDK, the signer and the local MCP built.
+The window is `8cc3717c8..b9f9f1e47` → 135 first-parent landings. The block-1
+census and one follow-up probe ran through the repo's mutation runner, which
+backs up, restores and checks each file itself. One more mutation and three
+temporary probe lines were made by hand behind `cp` backups, each restored
+with `cp` and checked with `cmp` and `git diff --quiet`. Real-DB runs used a
+disposable database, dropped at the end. GitHub was read-only. No MCP, dev or
+prod call was made.
+
+**Excluded this run:** every prior finding and candidate, whatever its
+disposition. None is re-surfaced and none of the re-measured figures worsened
+materially. The two live signer observations from the captain's purchases
+(no next step on a successful x402 sign; the erc7710 MCP-merchant successor
+not named) were filed as #4449 during the scan and are context, not items.
+Tree instruments agree with it: the characterization suite pins refusals
+only, and three temporary probes printed success keys with no next-step
+field. Runtime identity: prod signer 0.8.1-alpha.0, the dev pairs
+0.10.0-alpha.0, published alpha 0.11.0-alpha.0. That lag is the
+stale-runtime class.
+
+**Structural findings:** none in the examined sample. Test tooling (14 of
+the 119 window issues) has several mechanisms, each fixed per site; the
+repo-config self-tests ran 1778 / 1778 green under a hostile host
+environment. Egress (5 issues) has one mechanism, but no executed census
+shows a live instance at the SHA.
+
+**Improvement candidates (one PR each), pending owner decision:**
+- C1 — the mutation runner reads the backend's two commonest failing-assertion
+  shapes as "mutation-red, fix the mutation": vitest's `.rejects` on a
+  resolved promise, and the OpenAPI response-shape helper's plain `Error`.
+  This run's census table read 5 mutation-red / 1 caught / 1 shadowed. By
+  the mutants' own JSON reports, 4 of the 5 mutation-red cells were reds on
+  the guard's own check, so the guards caught 5. The runner's stem
+  allowlist, executed on the observed first lines → `false`, `false`
+  (controls `true`, `true`). Reach: the helper in 53 backend test files / 199
+  call lines; `.rejects.` in 156 test files / 598 lines (85 backend files;
+  only its resolved-promise arm is affected, uncounted). This is the
+  runner's third unrecorded idiom in five days, after the frontend's
+  Testing Library stems and Playwright's custom-message `expect`, both
+  fixed one at a time. Untracked. Off the money path; the runner files route
+  to the always-run repo-config job.
+- Notes, not proposed:
+  - Migration-file mutations under the real-DB harness. The worker schema
+    persists across runs, so a column-type mutant is refused as inherited
+    drift (this run's count-only probe never ran to a class). A routine
+    mutant outlived the verified file restore, unseen by a fingerprint of
+    columns and indexes. Routines are in 1 of 121 migrations.
+  - Egress. The third-party-URL rule is enforced per site, written as a
+    warning in three places, and was broken twice in two days (#4281, #4309,
+    both found by reading). 13 backend files reach the global `fetch`
+    (control: 15 and 14 at the two fixes' parents), all to fixed or
+    operator-configured hosts by reading. A file-level net would have caught
+    neither incident; a process-wide default is a design question.
+  - A shadowed tint guard whose title its test cannot fail; context for
+    #4448.
+  - The 2026-10-24 `dev` red came from a PR merged four minutes before its
+    advisory browser smoke finished red. 9 of 134 landings merged with an
+    advisory browser check red at head; advisory on `dev` is the recorded
+    design.
+
+**Dispositions observed (upkeep the ledger lacked):** 2026-10-21 C1 →
+#4215 closed 2026-10-25 → `shipped`. Its build landed as PR #4222
+(`01ffaa494`, `Refs`) and the issue closed after a qa-dev run with both SDK
+legs green; this run's qa-dev read confirms it. 2026-10-21 C2 → #4216 closed
+via PR #4223 (`715b294bd`) → `shipped`. 2026-10-21 C3 → #4217 closed via PR
+#4230 (`22790a587`) → `shipped`.
+
+**Probed clean** (block → examined / partial / not examined → command → number, all at `b9f9f1e47`):
+- sizing → examined → the 09-22 command pinned with `git ls-tree`/`git show`;
+  the control at `8cc3717c8` reproduces backend 113,538 / 147,443. Now:
+  backend 119,096 / 158,650 (+4.9 % / +7.6 %); frontend 75,800 / 81,996
+  (+5.7 % / +11.0 %); sdk 19,149 / 21,941; qa-agent 15,073 / 13,145;
+  mcp-server 13,332 / 24,389; core tests 669 → 945; the rest within a few
+  percent of 10-21.
+- block 1 (guard falsifiability) → examined. The census script → 23
+  candidate test files over 3 of the last 20 landings (all money-path); the
+  first five are one landing's. Five census mutations, by the mutants' JSON
+  reports → **4 caught** (CHECK widened, 2 red of 6; Agent schema range, 3 of
+  29; analytics golden count, 1 of 8; analytics spec item, 1 of 38) and **1
+  shadowed** (supersession dropped from the held predicate; diagnosis: not
+  load-bearing at the tested condition). The runner's own table read 1 caught
+  (C1). Two probes → the dashboard twin of the schema guard, **caught
+  elsewhere**, 1 of 15; a count-only restore pin, **not run to a class**,
+  refused twice by the harness's drift guard. Census files exercised: 5 of 23.
+- block 2 (`covers:` completeness) → examined. The reference loop under bash
+  with `set -f`, each miss confirmed with the strict gate → 17 across 6 of 8
+  (10-21: 18; the CASP guardrails doc 6 → 5); 2 raw misses were glob
+  strings. `npm run docs:covers-gaps` → 124 pairs / 33 docs (10-21: 129 / 35).
+- block 3 (stale numbers) → partial. Positive control 3 / 3. The 25 newest
+  shards → 7 figure lines, 0 with a command (10-21: 9 / 0). One shard figure
+  re-derived and matching (0 of 12 files at a PR head). `any` 38 → 39 (one
+  code line in a test helper). db-mock gauge 54 / 270 / 57 (unchanged).
+  Guard scripts 71 → 75, self-tests 74 → 75; non-spawning not re-derived.
+  Zod 0.
+- block 4 (retired vocabulary) → examined. Positive control 36 shards. 196
+  files, 47 historical / 149 live (10-21: 196 / 46 / 150; the 10-21 report
+  added, a settings component removed). Ratchet green, 32 / 30 (10-21: 30 /
+  28), below baseline. Code half unchanged.
+- block 5 (merge-method drift) → examined. Since 2026-10-21T00:00:00Z → 0
+  merge-commit / 139 squash (clean); the window 0 / 135. Since
+  2026-08-10T00:00:00Z → 282 / 1,345 of 1,630.
+- block 6 (nets with holes) → examined, all four halves → copy lint 64
+  unscanned / 4 with hits (10-21: 60 / 4); money perimeter 32 / 20
+  (unchanged); visual gate 15 of 27 (10-21: 16 of 28; one route merged away);
+  docs boundary 43 (10-21: 41; the runner's skill and command); freshness-gate
+  exit branches unchanged. Probes beyond the reference: the repo-config
+  self-tests under a hostile host environment (1778 / 1778 both ways); the
+  egress census; the advisory-check merge census.
+- incident clustering → examined. Issues created since 2026-10-21T00:00:00Z
+  → 119 (10 open / 109 closed). By a title regex, then by hand: product UI
+  epics 62, test tooling 14, documentation drift 13, egress 5, catalog 5,
+  signer / x402 4, the 10-21 candidates 3, agent evals 2, other 11. One
+  deploy incident: a comment stripper importing typescript was put in the
+  core barrel and crashed hosted-MCP dev deploys; it was fixed and then
+  guarded.
+- workflow archaeology → examined. `ci.yml` newest 100 → 73 / 14 / 13; 7
+  with attempt > 1, all on feature branches. `dev` 35 → 29 / 2 / 4, both
+  reds the one browser-smoke test. Failed jobs: browser smoke 7, visual
+  regression 7, lint/type/build 2, repo config 1, SDK 1. qa-dev at the
+  `money-flow` job level: 615 runs since 2026-10-21 → 77 success, 3 failure,
+  535 skipped. The 3 failures are the tail of the 10-21 C1 red, before its
+  fix. The 77 green jobs' logs → 77 passed on attempt 1/2, 0 on 2/2, no leg
+  FAIL lines (control: a failed job shows 4).
+- comment archaeology → TODO / FIXME / HACK / XXX → 0 (control `import` →
+  2,175 files). The egress rule is the repeated warning (notes).
+- live exercise → not taken by this agent. Runtime identity for the
+  captain's calls is recorded above; the observations are #4449's.
+- SKILL step 3's unnumbered probes → fat controllers: not examined.
+  Data-layer coverage: not examined as a census (db-mock gauge re-read).
+  Validation and contract enforcement: partial (three spec-shape guards
+  mutated). Cross-package duplication: not examined.
+- Novelty: the tracker was searched per item; the ledger and bug reports
+  were grepped for each item's terms. Bug-report bodies were not otherwise
+  re-read.
+
+Instrument lessons: the mutation runner's census table is its own class, so
+read each mutant's report before quoting caught counts. A migration-file
+mutation needs the worker schemas dropped around it. `git grep -E` with `\b`
+silently matched nothing where `-P` found 39 files. `rg` resolves only in the
+harness's zsh. The census sample can be all one landing.
+
+**Disposition: pending owner decision** (C1).

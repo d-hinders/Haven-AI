@@ -168,8 +168,31 @@ export function settlementPredictionFields(
 export type QuoteBudgetPrecheckOutcome =
   | { kind: 'sufficient'; requestedAtomic: string; remainingAtomic?: string }
   | { kind: 'refused'; requestedAtomic: string; remainingAtomic: string }
+  /**
+   * #4458: the agent's only budget for the token has ENDED — a decided 403
+   * `delegation_expired`, not an over-budget compare. Its own kind because
+   * the remedy differs: waiting for a period to reset cannot help, the owner
+   * must set a new budget. `budgetEndedAt` is the backend's ISO 8601
+   * `budget_ended_at` (absent on an older backend).
+   */
+  | { kind: 'expired'; requestedAtomic: string; budgetEndedAt?: string }
   | { kind: 'unavailable'; requestedAtomic: string; detail?: string }
   | { kind: 'skipped'; requestedAtomic: string }
+
+/**
+ * #4458: the words for an ENDED budget, shared by the quote warning and the
+ * catalog prepare preflight so the two surfaces cannot drift. Names the end
+ * date when the backend sent one, and the owner's next step — never "wait for
+ * the period to reset", which is the over-budget remedy and is false here.
+ */
+export function budgetEndedWarningMessage(budgetEndedAt?: string): string {
+  const endedOn = budgetEndedAt ? ` (it ended on ${budgetEndedAt.slice(0, 10)})` : ''
+  return (
+    `The agent's budget for this token has ENDED${endedOn} — decided by Haven's server-side ` +
+    'budget pre-check. Waiting will not help: the wallet owner must set a new budget in Haven ' +
+    'before this payment can be made. Stop and tell the user before any payment.'
+  )
+}
 
 /**
  * #3967: the `budget_check` block and its advisory warning, shared by ALL
@@ -204,6 +227,25 @@ export function quoteBudgetCheckFields(outcome: QuoteBudgetPrecheckOutcome): {
             'budget pre-check — the same compare the payment path runs before funding. An ' +
             'over-budget redemption would revert on-chain. Stop and tell the user before any ' +
             'payment; the wallet owner can grant or raise the budget in Haven.',
+        },
+      ],
+    }
+  }
+  if (outcome.kind === 'expired') {
+    // #4458: an ENDED budget is a decided refusal too — `sufficient: false`,
+    // so `safe_to_continue` stops the agent — but the warning must not reuse
+    // QUOTE_EXCEEDS_REMAINING_BUDGET's "grant or raise the budget" wording:
+    // there is no period left to wait for, the owner sets a NEW budget.
+    return {
+      budget_check: {
+        sufficient: false,
+        remaining_atomic: '0',
+        requested_atomic: outcome.requestedAtomic,
+      },
+      warnings: [
+        {
+          code: AgentPaymentWarningCode.QuoteBudgetEnded,
+          message: budgetEndedWarningMessage(outcome.budgetEndedAt),
         },
       ],
     }
@@ -382,20 +424,35 @@ export async function runQuoteBudgetPrecheck(
   } catch (err: unknown) {
     // The decided over-budget refusal is the ONE failure that is not a
     // degrade (catalog-purchase.ts, verbatim in semantics): a typed 403
-    // delegation_budget_exceeded. Everything else — transport down, a retired
-    // rail's 410, an older backend without the route — fails OPEN.
+    // delegation_budget_exceeded. #4458 adds its sibling: a typed 403
+    // delegation_expired, the agent's only budget for the token having ENDED
+    // — also a decision, also a stop, but with the owner-sets-a-new-budget
+    // remedy rather than "wait for the period to reset". Everything else —
+    // transport down, a retired rail's 410, an older backend without the
+    // route — fails OPEN.
+    const refusalBody =
+      err instanceof HavenApiError
+        ? (err.body as
+            | { error_code?: string; remaining_atomic?: string; budget_ended_at?: string }
+            | undefined)
+        : undefined
     const decided =
       err instanceof HavenApiError &&
       err.statusCode === 403 &&
-      (err.body as { error_code?: string } | undefined)?.error_code ===
-        'delegation_budget_exceeded'
+      refusalBody?.error_code === 'delegation_budget_exceeded'
     if (decided) {
       return {
         kind: 'refused',
         requestedAtomic,
-        remainingAtomic:
-          (err.body as { remaining_atomic?: string } | undefined)?.remaining_atomic ?? '0',
+        remainingAtomic: refusalBody?.remaining_atomic ?? '0',
       }
+    }
+    const expired =
+      err instanceof HavenApiError &&
+      err.statusCode === 403 &&
+      refusalBody?.error_code === 'delegation_expired'
+    if (expired) {
+      return { kind: 'expired', requestedAtomic, budgetEndedAt: refusalBody?.budget_ended_at }
     }
     return {
       kind: 'unavailable',

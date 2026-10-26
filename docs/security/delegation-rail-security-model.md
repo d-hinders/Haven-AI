@@ -152,6 +152,29 @@ last-verified: "2026-10-26"
 > else in this document was re-verified, and `last-verified` is re-stamped
 > to 2026-10-23 for this note.
 
+> **Re-verified #4458 (2026-10-26, the expired refusal's BODY becomes typed on
+> both x402 legs and the hosted quote stops on it):** three covered files
+> change, and none of them moves a gate, a signing step, a write path or an
+> authority surface. `modules/x402/delegation-authorize.ts` — the two
+> expired-only 403s now answer the shared typed body (`error_code`,
+> `phase`, `next_action`, `budget_ended_at`, the atomic figures, `rail`,
+> `network`, `resource_url`, `merchant_address`) instead of a one-line
+> `{ error }`; the DECISION is byte-for-byte the same (403, one
+> `payment_refusals` row through the #3053 choke point, nothing created or
+> signed), and on the EIP-3009 funding leg `merchant_address` is
+> `merchantPayTo`, never `payTo` — the funding EOA is still never recorded as
+> the merchant, which is the account confusion the 086 allowlist exists to
+> prevent. `packages/mcp-server/src/tools/support/quote-response.ts` — the
+> quote-time budget reader now recognises that typed 403 and reports
+> `sufficient: false` instead of degrading to "unavailable"; that NARROWS
+> what an agent may proceed with (it used to fail open and let authorize
+> refuse), and the on-chain enforcers remain the only spend control.
+> `packages/sdk/src/client.ts` — a JSDoc paragraph on `precheckBudget` naming
+> the second refusal shape; no code. Nothing agent-asserted is trusted: the
+> end date and the reason come from the server's own read, and the ledger row
+> is unchanged. Nothing else in this document was re-verified, and
+> `last-verified` already reads 2026-10-26.
+
 > **Re-verified #4327 (2026-10-23, the CSV export's response plumbing
 > moves into `domain/csv.ts`):** this diff touches one file in this
 > document's coverage list, `routes/transactions.ts`, and adds no signing

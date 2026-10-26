@@ -212,6 +212,50 @@ describe('the typed delegation-budget 403 is fund_account_or_raise_allowance wit
   })
 })
 
+describe('the typed delegation-EXPIRED 403 asks the owner for a NEW budget (#4458)', () => {
+  const delegationExpired = () =>
+    new HavenApiError(
+      'This x402 payment of 0.001 USDC cannot proceed — this budget ended on 2026-10-23; ask the owner to set a new one.',
+      403,
+      {
+        error:
+          'This x402 payment of 0.001 USDC cannot proceed — this budget ended on 2026-10-23; ask the owner to set a new one. There is no approval queue on the delegation rail — an expired redemption reverts on-chain.',
+        error_code: 'delegation_expired',
+        phase: 'insufficient_funds',
+        next_action: 'fund_account_or_raise_allowance',
+        rail: 'x402',
+        remaining_atomic: '0',
+        amount_atomic: '1000',
+        budget_ended_at: '2026-10-23T00:00:00.000Z',
+      },
+    )
+
+  it('carries DELEGATION_EXPIRED — its own code, not the over-budget one', () => {
+    const out = normalizeError(delegationExpired()) as unknown as Record<string, unknown>
+    expect(out.code).toBe('DELEGATION_EXPIRED')
+    expect(out.statusCode).toBe(403)
+    expect(out.phase).toBe('insufficient_funds')
+    expect(out.rail).toBe('x402')
+    expect(out.budget_ended_at).toBe('2026-10-23T00:00:00.000Z')
+  })
+
+  it('says the owner sets a new budget and never "wait for the period to reset"', () => {
+    const out = normalizeError(delegationExpired()) as unknown as Record<string, unknown>
+    expect(out.next_action).toBe(AgentPaymentNextAction.FundAccountOrRaiseAllowance)
+    const reason = String(out.next_tool_omitted_reason)
+    expect(reason).toMatch(/ask the owner to set a new one/)
+    expect(reason).toMatch(/waiting will not help/)
+    expect(reason).not.toMatch(/period to reset/)
+  })
+
+  it('a 403 with the same code but a non-403 status is not this branch', () => {
+    const out = normalizeError(
+      new HavenApiError('refused', 400, { error_code: 'delegation_expired' }),
+    ) as unknown as Record<string, unknown>
+    expect(out.code).toBe('API_ERROR')
+  })
+})
+
 describe('the typed prepare 502s split on whether the simulation reverted (#3609)', () => {
   const prepareReverted = () =>
     new HavenApiError(

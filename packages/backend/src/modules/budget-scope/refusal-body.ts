@@ -234,9 +234,7 @@ export function taskCapExceededLedgerDetail(remainingAtomic: string): Record<str
 
 // ── The expired-budget answer (#4352) ────────────────────────────────────────
 
-export interface ExpiredBudgetBodyInput {
-  /** The hosted pre-check's flavor — the #3616 `mpp` shape, the only full-body site today. */
-  flavor: 'mpp'
+export interface ExpiredBudgetBodyCommon {
   chainId: number
   tokenSymbol: string
   /** The registry address the body's `asset` carries (lowercased per the callers' conventions). */
@@ -248,38 +246,71 @@ export interface ExpiredBudgetBodyInput {
   endedAtIso: string
   /** `YYYY-MM-DD` for the prose ("this budget ended on 2026-10-23"). */
   endedOnDate: string
+}
+
+export interface MppExpiredBudgetInput extends ExpiredBudgetBodyCommon {
+  /** The hosted pre-check's flavor — the #3616 `mpp` shape. */
+  flavor: 'mpp'
   resourceUrl?: string
   /** Present only when the quote named a payee (lowercased), like the over-budget mpp body. */
   merchantAddress?: string
 }
 
+export interface X402ExpiredBudgetInput extends ExpiredBudgetBodyCommon {
+  /** The x402 legs' flavor — the #3616 `x402` shape, both authorize legs (#4458). */
+  flavor: 'x402'
+  /** The human amount (`amountHuman`) the authorize input carried. */
+  amount: string
+  /** The network string only the x402 bodies carry. */
+  network: string
+  /** The merchant resource being bought. */
+  resourceUrl: string
+  /** The lowercased payee (`payTo` on erc7710, `merchantPayTo` on the funding leg). */
+  merchantAddress: string
+}
+
+export type ExpiredBudgetBodyInput = MppExpiredBudgetInput | X402ExpiredBudgetInput
+
 /**
  * The `delegation_expired` 403 body for an agent whose only budget for the
- * token has ENDED (#4352). Field-for-field the over-budget `mpp` body's shape
- * — the hosted tool parses it (#3504) — with `error_code:
+ * token has ENDED (#4352). Field-for-field the over-budget body's shape for
+ * the same flavor — the hosted tool parses it (#3504) — with `error_code:
  * 'delegation_expired'` and the end-date prose: the DECISION is identical
  * (same 403, same taxonomy phase/next_action, remaining 0), only the reason
  * and the words change. `budget_ended_at` is the new, additive wire field
- * (full ISO 8601). The x402 legs' expired answers are one-line `{ error }`
- * bodies at their own sites (same shape their no-delegation 403s carry), not
- * this builder.
+ * (full ISO 8601).
+ *
+ * Both flavors are full-body sites since #4458: the hosted pre-check (`mpp`)
+ * and the two x402 authorize legs (`x402`), which used to answer a one-line
+ * `{ error }` body at their own sites. The x402 flavor carries `rail`,
+ * `network` and `merchant_address` exactly as the over-budget x402 body does
+ * — on the EIP-3009 funding leg `merchant_address` is `merchantPayTo`, never
+ * `payTo` (the agent's own funding EOA).
  */
 export function buildExpiredBudgetBody(input: ExpiredBudgetBodyInput): Record<string, unknown> {
   const symbol = input.tokenSymbol
-  const amount = formatTokenValue(input.amountAtomic, input.decimals)
+  const amount =
+    input.flavor === 'mpp' ? formatTokenValue(input.amountAtomic, input.decimals) : input.amount
+  // One spelling of the end-date sentence, shared by both flavors: the
+  // `this budget ended on` literal has exactly one home (the ratchet in
+  // `__tests__/builder-literal-ratchet.test.ts` pins it).
+  const endedProse = `this budget ended on ${input.endedOnDate}; ask the owner to set a new one.`
   const body: Record<string, unknown> = {
     error:
-      `This payment of ${amount} ${symbol} cannot proceed — this budget ended on ` +
-      `${input.endedOnDate}; ask the owner to set a new one. There is no approval queue on the ` +
+      `${input.flavor === 'x402' ? 'This x402 payment' : 'This payment'} of ${amount} ${symbol} ` +
+      `cannot proceed — ${endedProse} There is no approval queue on the ` +
       'delegation rail — an expired redemption reverts on-chain.',
     error_code: 'delegation_expired',
     phase: AgentPaymentPhase.InsufficientFunds,
     next_action: AgentPaymentNextAction.FundAccountOrRaiseAllowance,
   }
 
+  if (input.flavor === 'x402') body.rail = 'x402'
   body.chain_id = input.chainId
   body.token = symbol
   body.asset = input.tokenAddress
+  // network: only the x402 legs carry it.
+  if (input.flavor === 'x402') body.network = input.network
   body.amount = amount
   body.amount_atomic = input.amountAtomic
   body.remaining = '0'

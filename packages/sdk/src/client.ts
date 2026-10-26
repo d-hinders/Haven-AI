@@ -844,6 +844,12 @@ export class HavenClient {
    * degrade-to-warning path and the ledger row would still land while the
    * purchase proceeded.
    *
+   * #4458: an agent whose only budget for the token has ENDED is refused the
+   * same way with `error_code: 'delegation_expired'` and `budget_ended_at`
+   * (ISO 8601) — also thrown, also recorded (`source: 'hosted_prepare'`).
+   * The remedy differs: the owner sets a NEW budget, waiting for a period to
+   * reset cannot help.
+   *
    * #3518: without `merchantTo`, an agent whose budgets for the token are all
    * merchant-locked gets 409 `budget_requires_recipient` (thrown, nothing
    * recorded) naming the pins in `budget_recipient_addresses` — repeat the

@@ -147,6 +147,31 @@ last-verified: "2026-10-26"
 > re-verified, and `last-verified` is re-stamped to 2026-10-23 for this
 > note.
 
+> **Re-verified #4458 (2026-10-26, the typed `delegation_expired` body and the
+> hosted readers that branch on it):** four covered surfaces change, all
+> additively. (1) `packages/backend/src/modules/x402/delegation-authorize.ts`
+> — both authorize legs now answer an expired-only budget with the typed 403
+> body (`error_code: "delegation_expired"`, `phase`, `next_action`,
+> `budget_ended_at`, `remaining`/`remaining_atomic` `"0"`, amount/shortfall,
+> `rail`, `network`, `resource_url`, `merchant_address`) instead of a one-line
+> `{ error }`; the decision is unchanged (403, one `payment_refusals` row,
+> nothing created or signed), and on the EIP-3009 funding leg
+> `merchant_address` is `merchantPayTo`, never `payTo`. (2)
+> `packages/mcp-server/src/tools/**` — the quote pre-check, the catalog prepare
+> preflight and the shared error normaliser recognise a 403 with that code and
+> stop with the owner-sets-a-new-budget remedy; the quote warning is the new
+> additive `QUOTE_BUDGET_ENDED` code. (3) `packages/sdk/src/types.ts` gains
+> that one `AgentPaymentWarningCode` member — additive, so a client that
+> switches over the enum keeps compiling and an older backend never emits it.
+> (4) `packages/mcp-server/src/server.ts`'s instructions gain the ended-budget
+> cause for `safe_to_continue: false`; the `tools/list` payload is unchanged,
+> so `tools-list.snapshot.json` and the description budget do not move. An
+> older hosted server against a new backend ignores the extra body fields and
+> keeps its previous (fail-open) behaviour; a new hosted server against an
+> older backend never sees the code and degrades exactly as before. Nothing
+> else in this document was re-verified, and `last-verified` stays
+> 2026-10-26.
+
 > **Re-verified unchanged (#4327, 2026-10-23, the CSV export's response
 > plumbing moves into `packages/backend/src/domain/csv.ts`).** Two covered
 > files change: `packages/backend/src/routes/transactions.ts` and

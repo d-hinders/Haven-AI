@@ -2090,6 +2090,18 @@ export const AgentPaymentWarningCode = {
    */
   QuoteExceedsRemainingBudget: 'QUOTE_EXCEEDS_REMAINING_BUDGET',
   /**
+   * #4458: the agent's only budget for the token has ENDED — the quote-time
+   * pre-check answered the typed 403 `delegation_expired`, not an over-budget
+   * compare. Travels beside `budget_check.sufficient: false` and, on
+   * `haven_quote_x402`, `safe_to_continue: false` with no prefilled cap. The
+   * remedy is the owner setting a NEW budget: waiting for a period to reset
+   * cannot help, which is why this is its own code rather than
+   * {@link AgentPaymentWarningCode.QuoteExceedsRemainingBudget}. Additive: an
+   * older backend never emits it, and the on-chain policy remains the actual
+   * gate either way.
+   */
+  QuoteBudgetEnded: 'QUOTE_BUDGET_ENDED',
+  /**
    * #3967: the MERCHANT reported a denial on one of its x402 payment options —
    * a known denial key (starting with `issuanceDenied`) in `accepts[].extra`.
    * Strictly informational: it flips neither `safe_to_continue` nor

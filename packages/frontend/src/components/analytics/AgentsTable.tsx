@@ -8,12 +8,13 @@ import {
   formatAnalyticsAmount,
   formatAnalyticsAmountCompact,
   formatBudgetTokenValue,
+  formatRefusedCount,
   formatSharePercent,
   lastPaymentCaption,
 } from '@/lib/analytics-format'
 import type { AnalyticsCurrency } from '@/lib/analytics-format'
 import { agentStatusPresentation } from '@/lib/payment-status'
-import { budgetCaption, UNREAD_CAPTION } from '@/lib/budget-caption'
+import { budgetCaption } from '@/lib/budget-caption'
 import { BudgetMeter } from '@/components/haven/BudgetMeter'
 import { Card } from '@/components/ui/Card'
 import { Monogram } from '@/components/ui/Monogram'
@@ -103,14 +104,17 @@ function BudgetCell({ agent }: { agent: AnalyticsAgentRow }) {
   return (
     <div className="space-y-2">
       {agent.budgets.map((budget) => {
-        const used = budgetUsedPercent(budget.used_atomic, budget.budget_atomic)
         // #3806: the caption is the shared helper's. The row projects onto it:
         // the period length is derived from the response's own bounds
         // (period_end − period_start), the anchor is the bounds' start, and
         // there is no `expires_at` on this endpoint — no "expires" branch.
         // #4333 fixed the helper itself: a symbol-only row (chainId null)
-        // divides by the SYMBOL's decimals, so the caption's figures agree
-        // with the figure above the bar instead of reading "0.00 of 0.00".
+        // divides by the SYMBOL's decimals, so a token budget reads in its
+        // own units instead of "0.00 of 0.00".
+        // #4426: the compact `style: 'row'` caption, as the dashboard agent
+        // row and the agent hero use it, and no figure line above the meter —
+        // the caption already states "214.00 of 250.00 USDC", and the cell
+        // used to print it twice.
         const caption = budgetCaption(
           {
             token: budget.token,
@@ -125,24 +129,21 @@ function BudgetCell({ agent }: { agent: AnalyticsAgentRow }) {
             symbol: budget.token,
             chainId: null,
           },
-          { nowMs: Date.now() },
+          { nowMs: Date.now(), style: 'row' },
         )
         return (
           <div key={`${budget.token}:${budget.recipient ?? 'any'}`}>
-            <div className="flex items-center justify-between gap-2">
-              <span className="v2-tabular text-xs font-medium text-[var(--v2-ink)]">
-                {formatBudgetTokenValue(budget)}
-              </span>
-              <span className="v2-tabular text-xs text-[var(--v2-ink-3)]">{used}%</span>
-            </div>
             {caption.kind === 'meter' ? (
               <BudgetMeter usedPercent={caption.usedPercent} label={caption.label} caption={caption.caption} />
-            ) : caption.kind === 'unknown' || caption.kind === 'refilled-updating' ? (
+            ) : caption.kind !== 'none' ? (
               // A failed read is not a 0 % bar — the used amount the endpoint
               // reports is a fallback, so the cell says the reading is missing
-              // instead of rendering a measurement it does not have. The old
-              // "read from Haven's last snapshot" suffix is gone with it.
-              <p className="text-xs text-[var(--v2-ink-3)]">{UNREAD_CAPTION}</p>
+              // (`UNREAD_CAPTION`) instead of rendering a measurement it does
+              // not have. The old "read from Haven's last snapshot" suffix is
+              // gone with it. An expired or not-yet-started budget says so in
+              // the helper's own words: with no figure line above the meter
+              // (#4426) the cell would otherwise be empty.
+              <p className="text-xs text-[var(--v2-ink-3)]">{caption.caption}</p>
             ) : null}
           </div>
         )
@@ -244,10 +245,9 @@ export function AgentsTable({
                       dedupe upstream), so the attempts ride the cell. */}
                   <Link
                     href={refusedAttemptsHref(agent.id)}
-                    className="v2-tabular text-sm text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 rounded"
+                    className="v2-tabular whitespace-nowrap text-sm text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 rounded"
                   >
-                    {agent.refusals}
-                    {agent.refusal_attempts !== agent.refusals && ` · ${agent.refusal_attempts} attempts`}
+                    {formatRefusedCount(agent.refusals, agent.refusal_attempts)}
                   </Link>
                 </td>
                 <td className={COLUMN_PAD}>
@@ -340,7 +340,7 @@ function MobileAgentRow({
           />
           <DisclosureLine
             term="Refused"
-            value={`${agent.refusals}${agent.refusal_attempts !== agent.refusals ? ` · ${agent.refusal_attempts} attempts` : ''}`}
+            value={formatRefusedCount(agent.refusals, agent.refusal_attempts)}
           />
           <DisclosureLine term="Spend" value={formatAnalyticsAmount(agent.spent, currency)} />
           <DisclosureLine

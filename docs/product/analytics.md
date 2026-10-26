@@ -126,9 +126,13 @@ budget can still be spent and the Agents-near-their-budget tile counts it)
 (#3540). Its columns (#4333): the agent's Monogram and name (a revoked agent
 gets the shared "Revoked" badge, not a truncated row), **Spent** with "N% of
 spend" under it (the former Share column merged into the figure it was a share
-of), Payments, **Refused** as a link to that agent's refused attempts,
-**Budget** through the shared caption helper — whose symbol-decimals fallback
-(#4333) fixes the "0.00 of 0.00" caption a symbol-only row used to read —
+of), Payments, **Refused** as a link to that agent's refused attempts
+("1 · 2 attempts" when the attempts differ, on one line, the same string the
+phone row prints — #4426), **Budget** through the shared caption helper's
+compact `style: 'row'` caption, the one the dashboard agent row uses, with no
+figure line above the meter, so the figures are stated once (#4426); its
+symbol-decimals fallback (#4333) fixes the "0.00 of 0.00" caption a
+symbol-only row used to read —
 **Top merchant** by name with a merchant monogram (an unresolved one reads
 "Unknown recipient", the full address in its tooltip — no cell renders a
 `0x…` address AS a label), and **Last paid**. The whole row links to the
@@ -155,7 +159,11 @@ booked values the Spent tile sums, bucketed server-side in the page's time
 zone; the y-ticks take their fraction digits from the tick step (#4334) —
 four decimals when the step is under a cent, so a sub-cent peak reads
 "$0.0010 … $0.0040" instead of "$0, $0", none for whole-unit steps. X labels
-sit at fixed intervals (weekly on 30 days) and never overlap; on 90 days the
+sit at fixed intervals (weekly on 30 days), on one line, and never overlap;
+the last day's label is pinned to its bar's right edge so it stays inside the
+plot, and the label before it drops when it would crowd it — a 31-day window
+labels days 1, 15 and 31 rather than printing "8 Jul" against "10 Jul"
+(#4426); on 90 days the
 bars are thin, and that is accepted — the chart never scrolls horizontally.
 Agents are ordered by spend, then id, and an agent's fill is its own
 avatar tint — the colour of its monogram in the agents table above the
@@ -240,9 +248,11 @@ the first two date labels to a word-space apart at 390 ("11 Jun 18 Jun" read
 as one run): the balance chart anchors its start label at its left edge,
 so the shared label rule gives that chart's first pair two label-widths —
 a 30-day range at 390 labels days 1, 15, 22 and 30, a 90-day range days
-1, 37, 55 and 90. The spend chart centres every label on its bar and keeps
-its weekly labels; the product's 7/30/90-day ranges are unchanged on
-desktop. A flat series pads by ±2 so every
+1, 37, 55 and 90. The spend chart centres its start label on its bar and
+keeps its weekly labels; the product's 7/30/90-day ranges are unchanged on
+desktop. Both charts pin their last label at its right edge, and the same
+rule gives that end pair one and a half label-widths (#4426), which leaves
+the 7/30/90-day lists as they were and thins a 31-day window's day 29. A flat series pads by ±2 so every
 integer tick stays distinct (±1 stepped by 0,5 and printed one label twice
 without the öre). The annotation and
 the tooltip print the amount once, in the display currency's own format

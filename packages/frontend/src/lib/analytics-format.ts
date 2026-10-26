@@ -74,6 +74,17 @@ export function formatSharePercent(share: number): string {
 }
 
 /**
+ * An agent's refused count, with its attempts when they differ ("1 · 2
+ * attempts"). Rows and attempts can differ — a dedupe upstream folds retries
+ * of one refusal into one row — so the attempts ride the count only when they
+ * say something the count does not. One home for the string (#4426): the
+ * desktop Refused cell and the phone row's disclosure both print it.
+ */
+export function formatRefusedCount(refusals: number, attempts: number): string {
+  return attempts === refusals ? String(refusals) : `${refusals} · ${attempts} attempts`
+}
+
+/**
  * A budget position in the delegation's own token units ("180 of 250 USDC").
  *
  * Token units, not fiat: a budget is what the owner-signed delegation permits

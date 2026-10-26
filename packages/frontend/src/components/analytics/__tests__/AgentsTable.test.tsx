@@ -93,7 +93,6 @@ describe('AgentsTable — the desktop table (#4333 columns)', () => {
     const cells = row.querySelectorAll('td')
     expect(cells[2].textContent).toBe('4') // payments, as the integer it is
     expect(text).toContain('1 · 2 attempts') // refusals plus the attempts behind them
-    expect(text).toContain('214.00 of 250.00 USDC') // the delegation's own units
     expect(text).toContain('NordShield VPN') // a label the API resolved, not this table
   })
 
@@ -139,6 +138,33 @@ describe('AgentsTable — the desktop table (#4333 columns)', () => {
     expect(link?.textContent).toContain('2 attempts')
   })
 
+  it('keeps "1 · 2 attempts" on one line, built by the one formatter the phone row uses too (#4426)', async () => {
+    // The desktop link wrapped at 1280 ("1 · 2" over "attempts"), and the
+    // string was built twice — once here, once in the phone disclosure. Both
+    // now read `formatRefusedCount`, so the two renderings print the same
+    // bytes. Mutations: drop `whitespace-nowrap` from the link → red; build
+    // either half inline with a different separator → red.
+    const { container } = mount()
+    const link = container.querySelectorAll('tbody tr')[0].querySelectorAll('td')[3].querySelector('a')!
+    expect(link.textContent).toBe('1 · 2 attempts')
+    expect(link.className.split(/\s+/)).toContain('whitespace-nowrap')
+    const firstRow = mobileOf(container)!.querySelector('div') as HTMLElement
+    await userEvent.click(within(firstRow).getByRole('button', { name: 'More' }))
+    const term = within(firstRow).getByText('Refused')
+    expect(term.nextElementSibling?.textContent).toBe('1 · 2 attempts')
+  })
+
+  it('prints the phone row\u2019s Refused as the bare count when the attempts agree (#4426)', async () => {
+    // The other half of the one formatter on the phone: one refusal, one
+    // attempt → "1", no attempts clause. Mutation: an inline copy that
+    // always appends "· N attempts" → "1 · 1 attempts" → red.
+    const { container } = mount()
+    const retiredRow = mobileOf(container)!.querySelectorAll(':scope > div')[1] as HTMLElement
+    await userEvent.click(within(retiredRow).getByRole('button', { name: 'More' }))
+    const term = within(retiredRow).getByText('Refused')
+    expect(term.nextElementSibling?.textContent).toBe('1')
+  })
+
   it('does not pad the refusals cell with an attempts clause when the two agree', () => {
     // A dedupe upstream makes rows and attempts usually equal, and spelling
     // the pair every time would train the reader to stop parsing the cell.
@@ -168,12 +194,17 @@ describe('AgentsTable — the desktop table (#4333 columns)', () => {
     }
   })
 
-  it('the budget caption agrees with the figure above it: a 1.00 USDC budget never reads 0.00 of 0.00 (#4333)', () => {
+  it('states the budget figures once, through the shared row caption — never 0.00 of 0.00 (#4333, #4426)', () => {
     // The #4333 root cause: the caption helper divided a symbol-only row
     // (chainId null — the analytics read carries the SYMBOL, not the chain)
-    // by 18 decimals, so a 1.00 USDC budget read "0.00 of 0.00" under a
-    // "1.00 of 1.00" figure. Asserted as the FULL caption style — the exact
-    // string, spaces included — so a decimals regression cannot hide behind a
+    // by 18 decimals, so a 1.00 USDC budget read "0.00 of 0.00". #4426: the
+    // cell printed its own figure line ("0.00 of 1.00 USDC", 0%) above the
+    // meter and then the caption said the same figures again. Now the cell
+    // asks for the compact `style: 'row'` caption the dashboard agent row and
+    // the agent hero use, and prints no figure line. Asserted as the EXACT
+    // caption — the period word in place of "used this period", the no-break
+    // space between the cap and its symbol — and as one occurrence, so a
+    // returning figure line or a `'full'` caption cannot hide behind a
     // partial match.
     const agent: AnalyticsAgentRow = {
       ...RESEARCH,
@@ -197,12 +228,47 @@ describe('AgentsTable — the desktop table (#4333 columns)', () => {
     vi.setSystemTime(new Date('2026-07-12T09:00:00Z'))
     try {
       const { container } = render(<AgentsTable agents={[agent]} currency="USD" />)
-      const text = (container.querySelector('tbody tr') as HTMLElement).textContent ?? ''
-      // The figure line and the caption AGREE — both divide by the symbol's
-      // 6 decimals — and the caption is the exact full-style string, so a
-      // decimals regression cannot hide behind a partial match.
-      expect(text).toContain('0.00 of 1.00 USDC used this period · refills in 15h')
+      const cell = (container.querySelector('tbody tr') as HTMLElement).querySelectorAll('td')[4]
+      const text = cell.textContent ?? ''
+      expect(text).toBe('0.00 of 1.00\u00a0USDC · every 3 days · refills in 15h')
+      expect(text.match(/of 1\.00/g)).toHaveLength(1)
+      expect(text).not.toContain('used this period')
       expect(text).not.toContain('0.00 of 0.00')
+      expect(text).not.toMatch(/\d%/)
+      expect(cell.querySelectorAll('[role="progressbar"]')).toHaveLength(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('says a budget that has not started yet in the helper\u2019s words, rather than an empty cell (#4426)', () => {
+    // With no figure line above the meter, a caption kind that draws no bar
+    // must still say something: the helper's own words, not a blank cell.
+    // The analytics read carries no `expires_at`, so the reachable kinds
+    // without a bar are unknown, refilled-updating (both UNREAD_CAPTION,
+    // pinned above) and not-started — a period that begins after the clock.
+    // Mutation: render the unread kinds only → the cell is empty → red.
+    const agent: AnalyticsAgentRow = {
+      ...RESEARCH,
+      budgets: [
+        {
+          token: 'USDC',
+          recipient: null,
+          used_atomic: '0',
+          budget_atomic: '1000000',
+          remaining_from_chain: true,
+          period_start: '2026-07-10T00:00:00.000Z',
+          period_end: '2026-07-13T00:00:00.000Z',
+        },
+      ],
+    }
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-07-09T09:00:00Z'))
+    try {
+      const { container } = render(<AgentsTable agents={[agent]} currency="USD" />)
+      const cell = (container.querySelector('tbody tr') as HTMLElement).querySelectorAll('td')[4]
+      expect(cell.textContent).toMatch(/^Starts /)
+      expect(cell.querySelectorAll('[role="progressbar"]')).toHaveLength(0)
     } finally {
       vi.useRealTimers()
     }

@@ -472,3 +472,23 @@ describe('AreaChart — the reveal, the mobile half, the sparse half', () => {
     expect(pathLen).toBe('1')
   })
 })
+
+describe('AreaChart — both edge labels pinned through the shared helper (#4426)', () => {
+  it('anchors day 0 left and the last day right, and spaces the end pair for it on a 31-day range', () => {
+    // The transform used to be an inline copy here; it is now
+    // `xLabelEdge` in chart-scale, read with the same anchoring the spacing
+    // reads. A 31-day range left day 28 two days from the pinned day 30.
+    // Mutations: drop `endAnchoredRight` from the chart's anchoring → day 28
+    // returns and the transform of d30 centres → red.
+    const points = Array.from({ length: 31 }, (_, i) => ({ label: `d${i}`, value: 1000 + i }))
+    renderChart({}, points)
+    const labels = screen.getAllByTestId('chart-x-label') as HTMLElement[]
+    expect(labels.map((el) => el.textContent)).toEqual(['d0', 'd14', 'd30'])
+    expect(labels.map((el) => el.style.transform)).toEqual([
+      'translateX(0)',
+      'translateX(-50%)',
+      'translateX(-100%)',
+    ])
+    for (const el of labels) expect(el.className.split(/\s+/)).toContain('whitespace-nowrap')
+  })
+})

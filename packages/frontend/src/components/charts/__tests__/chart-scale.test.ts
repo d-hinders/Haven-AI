@@ -6,12 +6,14 @@ import {
   chartScale,
   chartScaleRange,
   MAX_X_LABELS_DESKTOP,
+  END_X_LABEL_SEPARATION_FACTOR,
   FIRST_X_LABEL_SEPARATION_FACTOR,
   MAX_X_LABELS_MOBILE,
   MIN_CHARTABLE_DAYS,
   MIN_X_LABEL_SEPARATION_NARROW,
   MIN_X_LABEL_SEPARATION_WIDE,
   roundNiceStep,
+  xLabelEdge,
   xLabelIndices,
 } from '../chart-scale'
 
@@ -349,6 +351,74 @@ describe('xLabelIndices — the density the issue fixes for 7d, 30d, 90d', () =>
     // The number is the contract between the scale, both charts, and slice
     // C, so it is exported rather than written twice.
     expect(MIN_CHARTABLE_DAYS).toBe(3)
+  })
+})
+
+describe('xLabelIndices — an end label pinned at its right edge (#4426)', () => {
+  it('drops the label before a pinned end label that would crowd it, never the last day or day 0', () => {
+    // The analytics fixture's 31-day window (June 10 – July 10) printed day
+    // 28 ("8 Jul") two days from day 30 ("10 Jul"): 2/30 of the plot is
+    // past the one-label-width rule (6%) but inside the one and a half a
+    // right-anchored end label needs. Mutations: factor 1 → day 28 stays;
+    // the option ignored → day 28 stays; drop day 30 instead → red.
+    expect(END_X_LABEL_SEPARATION_FACTOR).toBe(1.5)
+    expect(xLabelIndices(31)).toEqual([0, 14, 28, 30])
+    expect(xLabelIndices(31, { endAnchoredRight: true })).toEqual([0, 14, 30])
+    expect(xLabelIndices(31, { narrow: true, endAnchoredRight: true })).toEqual([0, 14, 30])
+    for (const count of [3, 4, 5, 8, 12, 31, 45, 60, 74, 120, 365]) {
+      for (const narrow of [false, true]) {
+        const idx = xLabelIndices(count, { narrow, endAnchoredRight: true, startAnchoredLeft: true })
+        expect(idx[0]).toBe(0)
+        expect(idx[idx.length - 1]).toBe(count - 1)
+        if (idx.length > 2) {
+          const sep = narrow ? MIN_X_LABEL_SEPARATION_NARROW : MIN_X_LABEL_SEPARATION_WIDE
+          expect(
+            (count - 1 - idx[idx.length - 2]) / (count - 1),
+            `the end pair of ${count}${narrow ? ' narrow' : ''} crowds the pinned end label`,
+          ).toBeGreaterThanOrEqual(sep * END_X_LABEL_SEPARATION_FACTOR)
+        }
+      }
+    }
+  })
+
+  it('leaves the product ranges (7d, 30d, 90d) exactly as they were, in both treatments', () => {
+    // The lists the #4330 design reviews passed: the end option only thins
+    // a pair that collides. A factor of two would drop the phone's day 21
+    // on the 30-day range — a label 8/29 of the plot from the end that
+    // never collided. Mutation: factor 2 → the narrow 30-day lists are red.
+    for (const count of [7, 30, 90]) {
+      for (const narrow of [false, true]) {
+        expect(xLabelIndices(count, { narrow, endAnchoredRight: true })).toEqual(xLabelIndices(count, { narrow }))
+        expect(xLabelIndices(count, { narrow, startAnchoredLeft: true, endAnchoredRight: true })).toEqual(
+          xLabelIndices(count, { narrow, startAnchoredLeft: true }),
+        )
+      }
+    }
+  })
+})
+
+describe('xLabelEdge — the one edge-anchoring helper both charts read (#4426)', () => {
+  it('centres every label when nothing is anchored', () => {
+    for (const i of [0, 3, 6]) {
+      expect(xLabelEdge(i, 7)).toEqual({ transform: 'translateX(-50%)', bandOffset: 0.5 })
+    }
+  })
+
+  it('pins the first label left and the last right only where the caller anchors them', () => {
+    const both = { startAnchoredLeft: true, endAnchoredRight: true }
+    expect(xLabelEdge(0, 7, both)).toEqual({ transform: 'translateX(0)', bandOffset: 0 })
+    expect(xLabelEdge(3, 7, both)).toEqual({ transform: 'translateX(-50%)', bandOffset: 0.5 })
+    expect(xLabelEdge(6, 7, both)).toEqual({ transform: 'translateX(-100%)', bandOffset: 1 })
+    // End only (the bar chart): day 0 stays centred on its bar.
+    expect(xLabelEdge(0, 7, { endAnchoredRight: true })).toEqual({ transform: 'translateX(-50%)', bandOffset: 0.5 })
+    expect(xLabelEdge(6, 7, { endAnchoredRight: true })).toEqual({ transform: 'translateX(-100%)', bandOffset: 1 })
+    // Start only: the last day stays centred.
+    expect(xLabelEdge(6, 7, { startAnchoredLeft: true })).toEqual({ transform: 'translateX(-50%)', bandOffset: 0.5 })
+  })
+
+  it('treats a one-point range as a start, never as both edges at once', () => {
+    expect(xLabelEdge(0, 1, { startAnchoredLeft: true, endAnchoredRight: true }).transform).toBe('translateX(0)')
+    expect(xLabelEdge(0, 1, { endAnchoredRight: true }).transform).toBe('translateX(-50%)')
   })
 })
 

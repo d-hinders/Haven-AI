@@ -27,8 +27,16 @@ export const version = '086_payment_refusals'
  * - `no_delegation_for_target` — the "no active budget delegation for this
  *   token/merchant" 403, which is how a recipient pin refuses on this rail
  *   (not distinguishable from no-delegation, so it is named for what it is).
- * - `delegation_expired` — the timestamp-caveat revert detected at gas
- *   estimation (the classification in `modules/payments/refusal-ledger.ts`).
+ * - `delegation_expired` — TWO producers, per #4349 decision 6 option 1
+ *   (widened by #4352): the timestamp-caveat revert detected at gas
+ *   estimation (the classification in
+ *   `modules/payments/refusal-ledger.ts`), and — since #4352 — the PRE-FLIGHT
+ *   refusal when the only budget row for a token has ENDED (the hosted
+ *   pre-check and both x402 legs, via
+ *   `modules/budget-scope/expired-budget.ts`). Provenance rides `detail`:
+ *   a pre-flight row carries `budget_ended_at` (the ended budget's
+ *   `expires_at`, allowlist-widened by migration 119); a revert-detected
+ *   row never does.
  * - `relayer_budget` — the sign-route `RelayerBudgetExceededError` refusal
  *   before broadcast.
  * - `onchain_revert` — any other gas-estimation revert. Rare since #2706:

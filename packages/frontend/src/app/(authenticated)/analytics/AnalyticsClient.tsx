@@ -72,9 +72,9 @@ import {
  *                caveats (the ledger's floor date, the unrecorded price-cap
  *                class) ride an ⓘ hint on the label instead of a footnote
  *                line: elaboration on the count, not a second figure.
- *   Agents near  "N of M" — of the agents WITH budgets, how many are above
+ *   Agents near  "N/M" — of the agents WITH budgets, how many are above
  *   their budget 75% of a period budget.
- *   Fees         Only when the fee flag is ON: a fourth or fifth tile. While
+ *   Fees         Only when the fee flag is ON: a fifth tile. While
  *                Haven charges nothing the tile is absent — a $0.00 there
  *                would report "nothing charged this period", which is not
  *                the same fact, and the old flag-off tile existed only
@@ -244,7 +244,7 @@ function TileGrid({
         }
       />
       {/* The fees tile EXISTS only while the fee flag is on (#4333): it is a
-          fourth or fifth tile when Haven charges, absent when it does not.
+          fifth tile when Haven charges, absent when it does not.
           The flag-off "No fees yet" tile is retired — its one job (saying the
           product charges nothing) is done by the tile's absence, and a $0.00
           would report "nothing charged this period", a different fact. The
@@ -498,7 +498,10 @@ export default function AnalyticsClient() {
         title="Analytics"
         subtitle="What your agents did with your money."
         actions={
-          <div className="flex items-center gap-3">
+          // A fragment, never a wrapper of our own (#4401): PageHeader's
+          // actions row is the one that wraps, so at 390 the Period picker
+          // drops to a second line instead of pushing the page sideways.
+          <>
             {/* The Agent facet (#4333) before the PeriodPicker, per the
                 mockup: a list-controls facet (single-select, "All agents"
                 first) that writes `?agentId=` — the key `/transactions`
@@ -513,7 +516,7 @@ export default function AnalyticsClient() {
                 a returning reader's stored window is not a filter, it is the
                 page's resting state. */}
             <PeriodPicker value={{ preset: range }} onChange={changeRange} allowAllTime={false} />
-          </div>
+          </>
         }
       />
       {agentNotice && (

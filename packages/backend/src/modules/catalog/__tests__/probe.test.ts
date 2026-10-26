@@ -13,6 +13,7 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, it, expect, vi } from 'vitest'
+import { stripComments } from '@haven_ai/core/comment-stripper'
 import {
   HostCooldown,
   candidateHostname,
@@ -194,9 +195,11 @@ describe('read-only discipline, pinned structurally (#1713 AC1)', () => {
    * Executable source only. The docstrings deliberately DISCUSS signing,
    * settling and x402 — that prose is the instruction to the next reader, and
    * an assertion that forbade the words would push the explanation out of the
-   * file to keep itself green.
+   * file to keep itself green. Stripped with the shared core helper (#4411):
+   * the old regex pair opened a fake block at a `/*` inside a line comment
+   * and swallowed the real code a guard below was scanning.
    */
-  const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+  const code = stripComments(source)
 
   it('imports nothing that can sign or settle', () => {
     // "The probe never signs" is easy to say and easy to stop being true. This
@@ -322,6 +325,25 @@ describe('runProbeBatch — the two budgets', () => {
 
     expect(first[0]!.status).toBe('verified_payable')
     expect(second[0]!.status).toBe('verified_payable')
+  })
+
+  it('prunes hosts whose window has passed, so a lifetime cooldown stays bounded (#4407)', async () => {
+    const { post } = concurrencyTracking(0)
+    const cooldown = new HostCooldown(1_000)
+    const t0 = new Date('2026-10-25T10:00:00Z').getTime()
+    const hosts = (names: string[]) => names.map((n) => ({ id: n, resourceUrl: `https://${n}.example/mcp` }))
+
+    await runProbeBatch(hosts(['a', 'b', 'c']), { post, cooldown, now: () => new Date(t0) })
+    expect(cooldown.size).toBe(3)
+
+    // Inside the window: nothing is pruned, and a tracked host is still skipped.
+    const inside = await runProbeBatch(hosts(['a', 'd']), { post, cooldown, now: () => new Date(t0 + 500) })
+    expect(inside.find((o) => o.id === 'a')!.status).toBe('skipped')
+    expect(cooldown.size).toBe(4)
+
+    // At t0 + 1000 the first three expire; d (recorded at t0 + 500) stays, e joins.
+    await runProbeBatch(hosts(['e']), { post, cooldown, now: () => new Date(t0 + 1_000) })
+    expect(cooldown.size).toBe(2)
   })
 
   it('records the cooldown BEFORE dispatch, so a concurrent burst cannot slip past a check-then-act', async () => {

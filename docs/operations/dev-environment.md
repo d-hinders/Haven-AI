@@ -36,8 +36,17 @@ covers:
   - packages/frontend/package.json
   - .github/workflows/ci.yml
   - .github/workflows/update-visual-baselines.yml
-last-verified: "2026-10-23"
+last-verified: "2026-10-25"
 ---
+
+> **Re-verified #4407 (2026-10-25, the catalog ingestion cooldown):** this
+> diff touched one file in this document's coverage list,
+> `packages/backend/src/index.ts`. The catalog ingestion tick now
+> calls a monitor built once at boot (`createCatalogIngestMonitor`) instead
+> of `runCatalogIngestTick()`; the leader lock, the 5-minute interval and the
+> alert delivery are unchanged. No env variable, port, service or workflow
+> moves. Nothing else in this document was re-verified, and `last-verified`
+> is not bumped.
 
 > **Re-verified #4327 (2026-10-23, the agent Activity ledger export):** this
 > diff touched one file in this document's coverage list,
@@ -804,6 +813,17 @@ Isolation rules that are non-negotiable for a payments product:
  > Scope of this re-read: this bullet's marketplace paragraphs and the
  > merchants repo/route coverage it names; the rest of the document was not
  > re-read for it.
+
+ > **Re-verified #4408 (2026-10-25):** #4408 touches
+ > `infra/repositories/merchants.ts` comment text only — the
+ > OFFER_AGGREGATES_SQL doc block now cites `agentsThatCanPay` (the #4004
+ > client-side replacement for the deleted `withinBudget`) where it names the
+ > malformed-`price_atomic` defense. No SQL, bind placeholder, flag or scoping
+ > change; every claim in the marketplace bullet above is untouched. Scope of
+ > this re-read: this bullet's marketplace paragraphs and the merchants repo
+ > coverage they name; the rest of the document was not re-read for it, and
+ > `last-verified` is bumped to 2026-10-25 for exactly this coverage.
+
  > **Re-verified #3769 (2026-10-08):** the catalog verifier
  > (`modules/catalog/merchant-catalog.ts`) now probes a plain-HTTP row with
  > the row's DECLARED method and body example (`http_method`/`body_type`/
@@ -861,11 +881,39 @@ Isolation rules that are non-negotiable for a payments product:
  > unchanged (their challenges are storable). Scope of this re-read: this
  > bullet's catalog paragraphs; nothing else in the document was re-read for
  > it, and `last-verified` is not bumped.
+ > **Re-verified #4389 (2026-10-24):** the refresh probe in
+ > `modules/catalog/merchant-catalog.ts` and the discovery pre-filter in
+ > `modules/catalog/catalog-discovery.ts` now keep the `accepts[]` options
+ > the pay path keeps (the SDK's `normalizePaymentRequired` rule) and judge
+ > them with the pay path's own selector (`selectX402SettlementScheme`,
+ > delegation rail), over all of them instead of `accepts[0]`. The recorded
+ > network is the selected option's, as CAIP-2, so `pay_to` and
+ > `asset_transfer_methods` are scoped to it rather than to `accepts[0]`'s
+ > network as the #3769 note above says. A challenge with no option the pay
+ > path could settle is a miss and degrades after the usual three, and the
+ > asset is labelled from the `@haven_ai/core` chain registry on the
+ > selected option's own chain rather than defaulting to USDC. A row stored
+ > before as `base` or `base-sepolia` was left out wherever rows are
+ > filtered by CAIP-2 network (an agent's catalog view, a chain-scoped
+ > marketplace listing, merchant funding targets); its first successful
+ > refresh after #4389 rewrites it as CAIP-2, and from then on it shows up
+ > in all three. No env
+ > scalar, workflow, dev service, port or seeded row in this document
+ > changes; the seeded rows were not re-probed for this note. Scope of this
+ > re-read: this bullet's catalog paragraphs; nothing else in the document
+ > was re-read for it, and `last-verified` is not bumped.
  - **Owner company details (#3332)** — `HAVEN_OWNER_COMPANY_DETAILS` (strict
   boolean) gates `/user/company-details*`, the additive `parties.buyer`
-  field on payment evidence/receipts, and the Settings → Company details
-  screen. Dark by default; GET/PUT and POST vies-check answer 404 when off, and
-  the Settings screen itself renders nothing (no title, no form) while off —
+  field on payment evidence/receipts, and the Company details card on the
+  Settings → Business tab (the card moved there in #4359/PR #4382; #4415
+  corrects the name and the flag-off sentence in this bullet only —
+  nothing else in this document was re-read for it, and `last-verified` is
+  not bumped). Dark by default; GET/PUT
+  and POST vies-check answer 404 when off, and
+  the card itself renders nothing (no title, no form) while off — the
+  Settings page still renders General and Security, and once the reads
+  settle the Business tab is listed only when this card or the accounting
+  connections card has something to show (`SettingsClient.tsx:38-56`) —
   so with the flag off there is no dashboard way to erase, even though the
   DELETE route stays ungated (it erases only the caller's own row). Erasure
   then goes through Haven support, who removes the row directly in the
@@ -1642,3 +1690,10 @@ project owner — collaborators have Viewer access, not env-var write access.
 > statements above still hold. `qa-freshness.mjs` is imported by the
 > reporter, not edited. The rest of this document was not re-read for it,
 > and `last-verified` is not bumped.
+
+> **Re-verified unchanged (#4387, 2026-10-24 — comments in
+> `packages/frontend/playwright.config.ts`).** Two comments there now say
+> "the 24 visual specs" and "the visual specs" where they said "the five
+> specs". No config value, project, `testIgnore` entry or matcher changed.
+> Scope of this note: those two comments. Nothing else in this document was
+> re-read for it, and `last-verified` is not bumped.

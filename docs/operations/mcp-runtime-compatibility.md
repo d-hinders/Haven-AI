@@ -87,6 +87,36 @@ covers:
 last-verified: "2026-10-23"
 ---
 
+> **Re-verified #4415 (2026-10-25, stale comment sweep):** the only covered
+> file this diff touches is `packages/signer/src/cli-args.test.ts` — one test
+> TITLE now says "a sixth tool" (the signer library exposes five tools, so a
+> new one is the sixth), and the `:35` floor assertion is raised from
+> `toBeGreaterThanOrEqual(4)` to `toBeGreaterThanOrEqual(5)` — the one test
+> change that is not a title. The `:38` `toHaveLength(registered.length)`
+> bullet-count pin is unchanged and still pins `--help` against
+> `Object.keys(toolSchemas)`. No signer source, help text, consent
+> input or protocol surface changes. Every other file in the diff is outside
+> this document's coverage. Nothing else in this document was re-verified,
+> and `last-verified` is not bumped.
+
+> **Re-verified #4352 (2026-10-23, the additive `budget_ended_at` /
+> `budgetEndedAt` read):** two covered surfaces change. The backend
+> machine-payments allowances read adds ONE top-level response field (the
+> latest ended budget's expiry, null unless an expired row exists — the
+> same narrow query the refusal answers use), and
+> `packages/sdk/src/account-reads.ts` maps it and derives `budgetEndedAt`
+> on `getAgentSummary()` for an agent whose only budgets have ended. Additive both ways: an older backend's
+> rows omit the key and map to `null`; the readiness values, the
+> tools/list shape (one description sentence) and every other response
+> field are unchanged, so local and hosted surfaces stay in lockstep — the
+> hosted `haven_get_agent` description moves with the SDK's
+> `tool-descriptions.ts` in the same commit, and the
+> `tools-list.snapshot.json` golden is regenerated in the same commit.
+> Description budget round 30: the new sentence is offset inside the same
+> description, total unchanged at 31,812. Nothing else in this document was
+> re-verified, and `last-verified` is re-stamped to 2026-10-23 for this
+> note.
+
 > **Re-verified unchanged (#4327, 2026-10-23, the CSV export's response
 > plumbing moves into `packages/backend/src/domain/csv.ts`).** Two covered
 > files change: `packages/backend/src/routes/transactions.ts` and
@@ -2642,8 +2672,12 @@ plus the read-only quote probe still gate any listing on the backend.
 > block degrades to `sufficient: null` with the warning).
 
 ```text
-~/.haven/agents/<agent-id>/bin/haven-mcp
+~/.haven/agents/<slug>/bin/haven-mcp
 ```
+
+The wrapper lives in the agent's credential directory, named from the wiring
+slug (`haven-<slug>` pair) by default; only a `--bare` run, or a `--replace`
+without `--name`, names the directory by the agent id instead (#3737).
 
 ## Supported Runtime Manifest
 
@@ -5505,8 +5539,10 @@ to call next in structured fields, and those fields are typed end to end
   or lacks tools reports `local_signer_probe_<status>` with a re-run
   instruction — setup can no longer exit 0 on an unstartable signer.
 - **Credential safety:** private signing keys live only in the agent's own
-  credential directory — `~/.haven/agents/<agent-id>/signer.json`, or
-  `~/.haven/agents/<slug>/signer.json` for a `--name`d agent (#1696). During a
+  credential directory — `~/.haven/agents/<slug>/signer.json` for a default
+  setup, or `~/.haven/agents/<agent-id>/signer.json` when the pair is unnamed
+  (a `--bare` run, or a `--replace` without `--name`; #1696, default
+  re-derived in #3737). During a
   re-key there is a SECOND, transient private key in that same directory:
   `rekey-pending.json` holds the newly generated key between `--rekey` and
   `--rekey-finish`, at the same `0600` mode, and is deleted once the rewrite
@@ -6520,3 +6556,40 @@ to call next in structured fields, and those fields are typed end to end
 > `next_tool` value, status projection or expected-context version changes.
 > Scope of this note: those import lines. Nothing else in this document was
 > re-verified.
+
+> **Re-verified unchanged (#4387, 2026-10-24 — one sentence in
+> `packages/connect/README.md`).** The README now says agents connected
+> before the MCP server name was recorded show **not recorded** in the *MCP
+> server name* row of their Settings tab, instead of quoting a "MCP name not
+> recorded" label the dashboard does not render. No connector behaviour,
+> flag or published version changed. Scope of this note: that sentence.
+> Nothing else in this document was re-read for it, and `last-verified` is
+> not bumped.
+
+> **Re-verified unchanged (#4372 part G, 2026-10-24 — prose in
+> `packages/connect/README.md`).** The README is the only covered file this PR
+> touches, and it changes prose only: the default credential directory is
+> `~/.haven/agents/<slug>/` (#3737), the intro names each field of the
+> register body (`registerSetup` in `packages/connect/src/api.ts`) and the
+> `X-Haven-Client` header, the doctor table lists `parked`, the runtime-unknown detail is quoted as
+> `doctor.ts` writes it, the multi-agent `--repair` refusal accepts `--name`
+> (#3799), and the setup screen is no longer said to offer a revoke (#3830).
+> No connector code, flag, pin, tool, consent surface or published version
+> changed. Scope of this note: those README sentences. Nothing else in this
+> document was re-read for it, and `last-verified` is not bumped. Two passages
+> here still say `<agent-id>` where #3737 made `<slug>` the default
+> (`:2645`, `:5508`); follow-up #4396 covers them.
+
+> **Re-verified unchanged (#4372 part I, 2026-10-25 — prose in
+> `packages/signer/README.md`).** The README is the only covered file this PR
+> touches, and it changes prose only: the redemption allowlist names the
+> third chain shape, `[sub grant, parent child, budget]` (#3330, as
+> `redemption-guard.ts` in `@haven_ai/sdk` already enforces); the library
+> surface is five methods on `createEdgeSigner`'s object; the direct-payment
+> diagram shows the compact `haven_pay` result (#3495); the trust-model note
+> says the local checks prove shape and integrity, not amount or recipient;
+> and the Connect Agent 2 paragraph lists the register body as `registerSetup`
+> sends it. No signer code, tool, version constant, consent surface or
+> published version changed. Scope of this note: those README sentences.
+> Nothing else in this document was re-read for it, and `last-verified` is
+> not bumped.

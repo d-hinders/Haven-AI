@@ -151,8 +151,10 @@ Do not guess the wallet address, network, or budget.
 
 For instant orientation at the start of a session, read the non-secret
 \`agent.json\` the connector wrote to your Haven credential directory (typically
-\`~/.haven/agents/<agent-id>/agent.json\` — if you don't know the agent id, list
-\`~/.haven/agents/\` to find the folder). It
+\`~/.haven/agents/<slug>/agent.json\`, where \`<slug>\` is the wiring name of the
+\`haven-<slug>\` pair — only a \`--bare\` run, or a \`--replace\` without \`--name\`,
+names the directory by the agent id instead; if you don't know the folder, list
+\`~/.haven/agents/\` to find it). It
 holds your agent id, Haven wallet address, network, and *configured* per-token
 budget, and contains no keys — the fastest way to answer "who am I and what may
 I spend" with no round trip. If that file is absent (some setups don't write
@@ -174,7 +176,9 @@ spending:
   still try the payment; \`null\` means the coverage read failed or the remaining
   figure was not read live; the key is absent when the remaining is 0. Rows for
   one token are compared alone. \`needs_approval\` with no \`allowances[]\`
-  rows means nobody approved a budget yet; with rows (all at remaining 0) the
+  rows and \`budgetEndedAt\` set means the budget ENDED on that date — waiting
+  will not help, ask the owner to set a new one; with no rows and no
+  \`budgetEndedAt\`, nobody approved a budget yet; with rows (all at remaining 0) the
   budget is spent for this period, and \`budgetRefillsAt\` says when it refills
   (\`null\`: it ends before it refills) — tell the user, then wait or ask them
   to raise it.

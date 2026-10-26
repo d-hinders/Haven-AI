@@ -11,7 +11,7 @@ covers:
   - docs/contributing/autonomous-pr-loop.md
   - docs/contributing/ai-review-patterns.md
   - scripts/ci/review-isolation.mjs
-last-verified: "2026-09-19"
+last-verified: "2026-10-24"
 ---
 
 # Haven AI Agent Workflow
@@ -58,7 +58,7 @@ Use `docs/contributing/ai-review-patterns.md` as shared memory for recurring PR 
 
 Before final review, the captain should do a risk-specific self-check based on the changed surface:
 
-- regulatory perimeter: for payment execution, agent authority, Safe setup, relaying, SDK payment APIs, x402/MPP, merchant, fiat/card, swap, yield, treasury, or advice surfaces, apply `docs/regulatory/casp-risk-guardrails.md`
+- regulatory perimeter: for payment execution, agent authority, account or signer setup, relaying, SDK payment APIs, x402/MPP, merchant, fiat/card, swap, yield, treasury, or advice surfaces, apply `docs/regulatory/casp-risk-guardrails.md`
 - transactions and feeds: raw vs formatted values, totals, dedupe, pagination, source labels, and cross-surface consistency
 - budget grants, revocation and re-key — the owner signatures that DO exist: status transitions, migrations or constraints, expiry, activation and replacement behavior, and post-action copy. Not a per-payment approval queue: an over-budget payment is declined on-chain, never held (#1440/#2055 deleted the queue, its routes and its table; `pendingApprovals` is a hardcoded 0 kept for wire compatibility, so "notification counts" and "single vs multi-approval behavior" name nothing the app can render)
 - send, receive, contacts, and other modals: primary action hierarchy, scroll, z-index, close behavior, typing behavior, duplicate handling, and network context
@@ -85,7 +85,7 @@ Run only the items that match the changed surface. Skip the rest.
 - **Async Hook Requests.** If the diff changes a hook that fetches keyed data (address, chain, agent id, filters, or enabled state): confirm late responses from older keys cannot overwrite current state, and add a staggered-resolution test for the smallest risky key change.
 - **Signer Readiness Gates.** If the diff changes wallet, passkey, `useActiveSigner`, `useAccountOperationGate`, `OnchainActionGate`, `WalletButton`, or wallet-approval copy: confirm gated actions do not treat `address` or `isConnected` alone as signer readiness. EOA readiness must match the signer hook's `address && walletClient` requirement, and tests should cover address-present / walletClient-missing with a visible recovery action.
 - **Animation Discipline.** If the diff adds or moves CSS animations: confirm every animation-bearing class or declaration is gated by `@media (prefers-reduced-motion: no-preference)`, including pre-existing animations moved into a prominent placement. Keyframes may remain at top level. Confirm the animated element's className stack does not toggle one animation class while another remains.
-- **Inline Gate Placement.** If the diff renders a separate `<OnchainActionNotice />`: confirm it sits **above** the action row, not inside the `flex-1` wrapper, and use `showNotice={false}` on `OnchainActionGate`. `NetworkGate` intentionally renders its mismatch hint and replacement network action in place; do not force it into the separate-notice pattern. Match the hoisted-notice layout in `EditAgentModal`.
+- **Inline Gate Placement.** If the diff renders a separate `<OnchainActionNotice />`: confirm it sits **above** the action row, not inside the `flex-1` wrapper, and use `showNotice={false}` on `OnchainActionGate`. `NetworkGate` intentionally renders its mismatch hint and replacement network action in place; do not force it into the separate-notice pattern. No product surface renders a separate notice today — `EditAgentModal`'s, the layout this item used to point at, went with #2331 — so there is no in-tree copy to match.
 - **Cross-Surface Display Drift.** If the diff changes a value rendered in 2+ surfaces (dashboard preview + detail card + agent page + transactions): confirm there is one shared formatter, that the input carries chain/token context, and that the API response includes the metadata each row needs.
 - **Loading-State Inference.** If the diff infers onboarding or completion progress from a paginated preview list: reject and require an explicit `onboardingProgress.*` API field. Gate the dependent UI until **all** prerequisite hooks have resolved, not just the first one.
 - **Multi-Entrypoint Parity.** If the diff changes a payment, x402/MPP, MCP, SDK, demo merchant, or hosted/local signing path: confirm every supported entrypoint uses the same validated payment state or has a parity test. Header, tool-argument, SDK helper, and direct API paths must not drift.
@@ -587,3 +587,18 @@ Do not run git mutation commands. The captain owns branch, commit, push, and PR 
 
 If you need a shared change, report it instead of making it.
 ```
+
+> **Re-verified 2026-10-24 (#4372 part F, at dev `6d87ddf95`), a full re-read.**
+> Changed: *Inline Gate Placement* no longer points at a hoisted-notice layout
+> in `EditAgentModal` — #2331 removed it, and no product file renders
+> `<OnchainActionNotice />` now. The rule itself is unchanged, and the
+> *Safe setup* phrase in the self-check list is left to open PR #4388.
+> Re-checked without change: the three rulesets (`gh api …/rulesets`: code
+> owner review required on `dev` and `main`), `CLAUDE.md` § *How shipping is
+> governed*, `AGENTS.md` § *Agentic Workflow*, `.claude/hooks/ship-next-guard.sh`,
+> the seven `.claude/agents/` adapters and their canonical references,
+> `npm run preflight`, the named frontend symbols, `pendingApprovals` always 0
+> (`routes/agent-activity.ts`), the ship-next verdict-line and arming rules,
+> the Proportionality lane anchor, `scripts/ci/review-isolation.mjs`'s flags
+> and its "not asserted" lines, prove-red's backup naming, `npm run
+> screenshot`, and every cited issue's state with `gh api`.

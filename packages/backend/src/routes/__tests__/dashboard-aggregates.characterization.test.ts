@@ -89,6 +89,7 @@ vi.mock('../../infra/prices.js', () => ({
 }))
 
 import dashboardRoutes from '../dashboard.js'
+import { expectMatchesSpec } from '../../openapi/response-shape.js'
 
 const ACCOUNT = {
   id: 'account-1',
@@ -123,6 +124,10 @@ function installQueryMock(overrides: {
   accounts?: unknown[]
   agents?: unknown[]
   snapshots?: unknown[]
+  refusals?: unknown[]
+  failedIntents?: { failed_intents: string; last_failed_intent_at: Date | null }
+  /** #4353: the grouped ended-budget read's rows (`agent_id`, unix-second `ended_at`). */
+  endedBudgets?: Array<{ agent_id: string; ended_at: string }>
 } = {}) {
   mockQuery.mockImplementation((sql: string) => {
     if (sql.includes('AS has_first_agent_payment')) {
@@ -168,10 +173,12 @@ function installQueryMock(overrides: {
       })
     }
     if (sql.includes('FROM payment_refusals')) {
-      return Promise.resolve({ rows: [] })
+      return Promise.resolve({ rows: overrides.refusals ?? [] })
     }
     if (sql.includes('AS failed_intents')) {
-      return Promise.resolve({ rows: [{ failed_intents: '0' }] })
+      return Promise.resolve({
+        rows: [overrides.failedIntents ?? { failed_intents: '0', last_failed_intent_at: null }],
+      })
     }
     if (sql.includes('DISTINCT ON (pi.agent_id)')) {
       return Promise.resolve({ rows: [] })
@@ -184,6 +191,9 @@ function installQueryMock(overrides: {
     }
     if (sql.includes('agent_sub_budgets')) {
       return Promise.resolve({ rows: [] })
+    }
+    if (sql.includes('AS ended_at')) {
+      return Promise.resolve({ rows: overrides.endedBudgets ?? [] })
     }
     if (sql.includes('FROM agent_delegations')) {
       return Promise.resolve({ rows: [] })
@@ -379,6 +389,125 @@ describe('dashboard aggregates (characterization, #1167)', () => {
       expect(response.statusCode).toBe(200)
       expect(callsMatching('FROM agent_allowances')).toHaveLength(0)
       expect(response.json().agents).toEqual([])
+    })
+  })
+
+  describe('#4324 latest-event times', () => {
+    // UUID ids: these cases also check the response against the spec.
+    const UUID_ACCOUNT = { ...ACCOUNT, id: '6b0a2f1e-8c4d-4e7a-9b3f-1d2c3e4f5a6b' }
+    const UUID_AGENT = { ...AGENT, id: '9e8d7c6b-5a4f-4e3d-8c2b-1a0f9e8d7c6b', account_id: UUID_ACCOUNT.id }
+    const REFUSAL_ROW = {
+      agent_id: UUID_AGENT.id,
+      budget_7: '2',
+      expired_7: '1',
+      scope_7: '0',
+      failed_7: '1',
+      haven_7: '0',
+      budget_30: '3',
+      expired_30: '2',
+      scope_30: '1',
+      failed_30: '1',
+      haven_30: '0',
+      last_budget_7: new Date('2026-10-22T10:00:00.000Z'),
+      last_expired_7: new Date('2026-10-22T11:00:00.000Z'),
+      last_scope_7: null,
+      last_failed_7: new Date('2026-10-21T08:30:00.000Z'),
+      last_haven_7: null,
+    }
+
+    it("puts each non-empty 7-day bucket's latest refusal on d7 only, and the latest failed intent on spend", async () => {
+      installQueryMock({
+        accounts: [UUID_ACCOUNT],
+        agents: [UUID_AGENT],
+        refusals: [REFUSAL_ROW],
+        failedIntents: { failed_intents: '2', last_failed_intent_at: new Date('2026-10-22T12:00:00.000Z') },
+      })
+      const res = await getOverview()
+      expect(res.statusCode).toBe(200)
+      const body = res.json()
+      const stats = body.agents[0].stats
+      // #4353: `budget` is delegation_budget_exceeded only; `expired` is its
+      // own bucket with its own d7-only latest time.
+      expect(stats.d7.refusals).toEqual({
+        budget: 2,
+        expired: 1,
+        scope: 0,
+        failed: 1,
+        haven: 0,
+        lastBudgetAt: '2026-10-22T10:00:00.000Z',
+        lastExpiredAt: '2026-10-22T11:00:00.000Z',
+        lastFailedAt: '2026-10-21T08:30:00.000Z',
+      })
+      // The 30-day window carries counts only.
+      expect(stats.d30.refusals).toEqual({ budget: 3, expired: 2, scope: 1, failed: 1, haven: 0 })
+      // The user-level budgetStops stays the COMBINED budget + expired figure.
+      expect(body.spend.d7.budgetStops).toBe(3)
+      expect(body.spend.d30.budgetStops).toBe(5)
+      expect(body.spend.failedIntents7d).toBe(2)
+      expect(body.spend.lastFailedIntentAt).toBe('2026-10-22T12:00:00.000Z')
+      expectMatchesSpec('GET', '/dashboard/overview', body)
+    })
+
+    it('sends no latest-event key when the window holds no event', async () => {
+      installQueryMock({ accounts: [UUID_ACCOUNT], agents: [UUID_AGENT] })
+      const res = await getOverview()
+      const body = res.json()
+      expect(body.agents[0].stats.d7.refusals).toEqual({
+        budget: 0,
+        expired: 0,
+        scope: 0,
+        failed: 0,
+        haven: 0,
+      })
+      expect('lastFailedIntentAt' in body.spend).toBe(false)
+      expectMatchesSpec('GET', '/dashboard/overview', body)
+    })
+  })
+
+  describe('#4353 budgetEndedAt', () => {
+    const UUID_ACCOUNT = { ...ACCOUNT, id: '6b0a2f1e-8c4d-4e7a-9b3f-1d2c3e4f5a6b' }
+    const DELEGATION_AGENT = {
+      ...AGENT,
+      id: '9e8d7c6b-5a4f-4e3d-8c2b-1a0f9e8d7c6b',
+      account_id: UUID_ACCOUNT.id,
+      account_type: 'delegator_hybrid',
+    }
+
+    it('is an ISO date-time when the agent has an ended budget, null when it has none', async () => {
+      const endedSec = Math.floor(Date.now() / 1000) - 3600
+      const SECOND_AGENT = { ...DELEGATION_AGENT, id: '1a2b3c4d-5e6f-4a8b-9c0d-1e2f3a4b5c6d' }
+      installQueryMock({
+        accounts: [UUID_ACCOUNT],
+        agents: [DELEGATION_AGENT, SECOND_AGENT],
+        endedBudgets: [{ agent_id: DELEGATION_AGENT.id, ended_at: String(endedSec) }],
+      })
+      const body = (await getOverview()).json()
+      const byId = new Map(body.agents.map((a: { id: string }) => [a.id, a]))
+      expect((byId.get(DELEGATION_AGENT.id) as { budgetEndedAt: unknown }).budgetEndedAt).toBe(
+        new Date(endedSec * 1000).toISOString(),
+      )
+      expect((byId.get(SECOND_AGENT.id) as { budgetEndedAt: unknown }).budgetEndedAt).toBeNull()
+      // One grouped read for every delegation agent, never one per agent.
+      expect(callsMatching('AS ended_at')).toHaveLength(1)
+      expectMatchesSpec('GET', '/dashboard/overview', body)
+    })
+
+    it('never reports a still-live row as ended, even if the read returns one', async () => {
+      const liveSec = Math.floor(Date.now() / 1000) + 3600
+      installQueryMock({
+        accounts: [UUID_ACCOUNT],
+        agents: [DELEGATION_AGENT],
+        endedBudgets: [{ agent_id: DELEGATION_AGENT.id, ended_at: String(liveSec) }],
+      })
+      const body = (await getOverview()).json()
+      expect(body.agents[0].budgetEndedAt).toBeNull()
+    })
+
+    it('is null for a legacy (non-delegation) agent, which is never read', async () => {
+      installQueryMock({ accounts: [UUID_ACCOUNT], agents: [{ ...DELEGATION_AGENT, account_type: null }] })
+      const body = (await getOverview()).json()
+      expect(body.agents[0].budgetEndedAt).toBeNull()
+      expect(callsMatching('AS ended_at')).toHaveLength(0)
     })
   })
 })

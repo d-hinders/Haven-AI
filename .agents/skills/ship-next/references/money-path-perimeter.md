@@ -312,3 +312,34 @@ spend-authority action, but a human should read it (#1903).
 
 - `packages/frontend/src/lib/signer.ts`
 - `packages/frontend/src/hooks/useAgentRekey.ts`
+
+### The catalog `pay_to` writers
+
+#4394, from haven-reviewer F7 on PR #4393. Two files in `modules/catalog/` write
+`merchant_catalog.pay_to`, the value the server fills a merchant-locked budget's
+`recipient_address` from (`routes/agent-delegations.ts:578`), and neither matched
+any glob: #4389 assumed `modules/catalog/**` was on the list and it was not, and
+PR #4393 — which changes which `accepts[]` option `pay_to` comes from —
+classified 0 of 12 files at its head. The miss had already happened: #4348
+changed both write paths and merged with `area:backend,area:docs` only.
+`merchant-catalog.ts` is the hourly refresh's `persistVerified` (the UPDATE at
+`:621-645`); `catalog-discovery.ts` is the Bazaar ingest INSERT (`:326-345`),
+which records the same probe's `payTo` the refresh records (#3331).
+
+Control, not runtime (owner decision 2026-10-26): a change to either is
+money-path and owes this analysis and the CASP shard, but it must not count
+toward `qa-freshness`. The refresh's output is exercised in qa-dev by the
+`merchant-locked-budget` scenario, but discovery has no qa-dev scenario at all,
+so the runtime claim is weak for one of the two and the pair is one decision;
+and the churn is 13 and 10 first-parent commits in 90 days, so a runtime entry
+would hold promotion on a real-payment QA run for a catalog metadata write.
+
+`routes/merchants.ts` (`merchantPinStatus`, `:80-81`) is considered and
+excluded: it reads the funding target to report a pin as `current`, `stale`,
+`unverified` or `not_erc7710`, and it authorizes nothing. The value's own
+derivation is already covered — `collectPayTo` sits in `merchant-catalog.ts`,
+and `resolveFundingTarget` (`infra/repositories/merchants.ts:441-497`) is on the
+runtime list through `infra/repositories/**`.
+
+- `packages/backend/src/modules/catalog/catalog-discovery.ts`
+- `packages/backend/src/modules/catalog/merchant-catalog.ts`

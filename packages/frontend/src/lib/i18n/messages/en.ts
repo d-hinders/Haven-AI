@@ -490,7 +490,7 @@ export const en = {
     companyDetails: {
       title: 'Company details',
       description:
-        'Add your legal name, country, organisation number and VAT number so they can appear on receipts your agents hand to merchants.',
+        'Add your legal name, country, organisation number and VAT number so they can appear on receipts your agents hand to merchants and feed the per-agent tax declaration an agent opts into.',
       // History: #3332's review rounds shaped a longer paragraph (VIES named,
       // the SE VAT encoding, a support-erasure sentence), and the "receipts"
       // sentence stays in `description` above.

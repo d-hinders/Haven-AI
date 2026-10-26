@@ -84,8 +84,59 @@ covers:
   - packages/backend/src/middleware/ops-auth.ts
   - packages/ops/**
   - packages/frontend/scripts/check-kit-analytics-define.mjs
-last-verified: "2026-10-23"
+last-verified: "2026-10-25"
 ---
+
+> **Re-verified #4415 (2026-10-25, stale comment sweep):** the only covered
+> file this diff touches is `packages/sdk/src/redemption-guard.ts` — the
+> `assertRedeemsOwnBudgetDelegation` JSDoc now names the THREE shapes the
+> function already enforces (single grant, #3329 two-link task-budget chain,
+> #3330 three-link sub-budget chain), matching the `refuse()` error text and
+> the 1/2/3-link checks verbatim. No check, refusal string, ABI constant or
+> control-flow change: what the signer accepts and refuses is byte-identical.
+> Every other file in the diff is outside this document's coverage. Nothing
+> else in this document was re-verified, and `last-verified` is not bumped.
+
+> **Re-verified, #4411 follow-up (2026-10-25, the comment stripper leaves the
+> `@haven_ai/core` barrel):** the only covered file this diff touches is
+> `packages/ops/src/__tests__/card-inset-guard.test.ts`, and only its import
+> line: it now takes `stripComments` from the `@haven_ai/core/comment-stripper`
+> subpath instead of the barrel. The stripper imports `typescript`, and
+> mcp-server's build inlines `@haven_ai/core`, so the barrel re-export had put
+> the TypeScript compiler into the hosted MCP bundle, which then crashed at
+> boot on dev. The guard's
+> assertions and the sources it scans are unchanged. It adds no signing step,
+> no gate, no write path and no authority surface. Nothing else in this
+> document was re-verified, and `last-verified` is not bumped.
+>
+> **Re-verified #4411 (2026-10-25, source-scan guard tests strip comments with
+> the parser):** the only covered file this diff touches is
+> `packages/ops/src/__tests__/card-inset-guard.test.ts` (under
+> `packages/ops/**`) — a guard test that reads ops sources as text. It replaces
+> its hand-rolled two-regex comment stripper with the shared
+> `@haven_ai/core` `stripComments` (passing each file's name so `.tsx` sources
+> keep their JSX verbatim); the assertions and the sources they scan keep their
+> meaning. It adds no signing step, no gate, no write path and no authority
+> surface. Every other file in the diff is outside this document's coverage
+> (backend/frontend guard tests, a new test-only core helper and its
+> re-export). Nothing else in this document was re-verified, and
+> `last-verified` is not bumped.
+
+> **Re-verified #4352 (2026-10-23, an expired-only budget is refused as
+> `delegation_expired` with the end date):** the covered files that change —
+> `infra/repositories/delegation-budgets.ts` (one narrow read-only query
+> that can see an EXPIRED row, consulted only on already-refusing paths),
+> `modules/mpp/budget-precheck.ts` and `modules/x402/
+> delegation-authorize.ts` (the refusal REASON and PROSE at three existing
+> refusal sites) — add no signing step, no gate, no write path and no
+> authority surface. The enforcers remain the only spend control: an
+> expired redemption still reverts on-chain, and the new prose says so.
+> The ledger row is still the #3053 choke point's record (same sources, the
+> `delegation_expired` reason's second producer documented in the migration
+> 086/119 pair); nothing agent-asserted. A live row for the token keeps
+> every selection and compare exactly as before (pinned by a test). Nothing
+> else in this document was re-verified, and `last-verified` is re-stamped
+> to 2026-10-23 for this note.
 
 > **Re-verified #4327 (2026-10-23, the CSV export's response plumbing
 > moves into `domain/csv.ts`):** this diff touches one file in this
@@ -565,8 +616,9 @@ it (409 otherwise). No merchant-locked budget is issued when:
   address (`shared`);
 - any of the offers lacks ERC-7710, read per the offer's own RECORDED
   network — `merchant_catalog.asset_transfer_methods` reflects only the
-  `accepts[]` options on that row's `accepts[0]` network (#3386, the same
-  scoping `pay_to` already used), so an offer probed on a network where the
+  `accepts[]` options on that row's recorded network that the pay path
+  could settle (#3386, #4389; the same network scoping `pay_to` uses), so an
+  offer probed on a network where the
   merchant only accepts EIP-3009 counts as lacking ERC-7710 there even if a
   DIFFERENT network's challenge names it. A pinned budget cannot pay an
   EIP-3009 merchant, per the rule in §8 below;
@@ -600,6 +652,17 @@ caveat, so the authority is still the signed caveat stack and nothing else.
 > this re-read: the Merchant-locked budgets section above and the
 > `merchant-catalog.ts`/`merchants.ts` coverage it names; the rest of the
 > document was not re-read for it.
+
+> **Re-verified #4408 (2026-10-25):** #4408 touches `merchants.ts` comment
+> text only — the offer-aggregates doc block now cites `agentsThatCanPay`
+> (the #4004 client-side replacement for the deleted `withinBudget`) where it
+> named a function that no longer exists. The payTo path is untouched:
+> `pay_to` is still written as seen from the challenge and never COALESCEd,
+> and a comment rename feeds no budget pin, no caveat, and no authority path.
+> Scope of this re-read: the Merchant-locked budgets section above and the
+> `merchants.ts` coverage it names; the rest of the document was not re-read
+> for it, and `last-verified` is bumped to 2026-10-25 for exactly this
+> coverage.
 
 > **Re-verified #4245 (2026-10-22):** #4245 adds `merchant_catalog.source`
 > (`'operator'` | `'bazaar'`, migration 117) and widens the `CatalogRow` type
@@ -667,6 +730,48 @@ caveat, so the authority is still the signed caveat stack and nothing else.
 > skipped, and the run reaches later candidates. Scope of this re-read:
 > the Merchant-locked budgets section and the `merchant-catalog.ts`
 > coverage it names; the rest of the document was not re-read for it.
+
+> **Re-verified #4389 (2026-10-24):** #4389 changes how the catalog probe
+> in `merchant-catalog.ts` chooses the option it records. It keeps the
+> `accepts[]` options the pay path keeps (the SDK's `normalizePaymentRequired`,
+> which every pay path runs first: an option with no string `payTo`, or with
+> a `maxAmountRequired` that is present but not a positive decimal string, is
+> dropped), then runs the pay path's own selector (`selectX402SettlementScheme`
+> from `@haven_ai/sdk`, with the delegation rail) over all of them instead of
+> reading `accepts[0]`. The recorded network, the one `pay_to` and
+> `asset_transfer_methods` are scoped to, is the selected option's, written
+> as CAIP-2. A payable erc7710 option is always selected first, so a challenge
+> that names one on either Base network is recorded on that network; the
+> bullet's "lacking ERC-7710 there" case now needs the other network's
+> erc7710 option to be one the pay path could not settle. A challenge with no
+> option the pay path could settle (for example a scheme other than `exact`,
+> a network other than Base or Base Sepolia, an asset other than their USDC,
+> an unsupported transfer method or payment flow, or no `payTo`) is now a
+> probe MISS, so such a row degrades after the usual three misses instead of
+> staying verified. The asset is labelled from the chain registry on the
+> selected option's own chain only, the chain authorize resolves it on
+> (`resolvePaymentToken(agent.chain_id, asset)`); Base USDC named on a Base
+> Sepolia option is a miss although the SDK selector accepts it, so the
+> catalog is deliberately stricter than the selector there.
+> `asset_transfer_methods` counts only options on the recorded network that
+> the SDK's erc7710 or EIP-3009 selector accepts. Before, every option there
+> was recorded by its `extra.assetTransferMethod` (default `eip3009`), so a
+> `permit2` option was recorded as `permit2` and an option with an
+> unsupported `extra.paymentFlow` and no method as `eip3009`; options with an
+> unsupported transfer method or payment flow are now not recorded at all.
+> The payTo contract above holds with one new consequence: `pay_to` is still
+> written as seen from the challenge, still collected only across options on
+> the recorded network, and still refused when they disagree, but a challenge
+> that is now a miss (its only option names no `payTo`, or no option is
+> payable) leaves the stored `pay_to` in place, as every miss does (a miss
+> writes only the failure count, and `degraded` on the third in a row). Until
+> the row degrades, that `pay_to` keeps counting toward its merchant's
+> funding target. Before, a challenge whose only
+> option named no `payTo` verified the row and cleared `pay_to`. A pin still
+> pays only the address it was signed for. Scope of this re-read: the
+> Merchant-locked budgets section and the `merchant-catalog.ts` coverage it
+> names; the rest of the document was not re-read for it, and
+> `last-verified` is not bumped.
 
 Two limits are deliberate:
 - **Slot sharing.** A merchant-locked budget and a plain budget pinned to the
@@ -2271,6 +2376,18 @@ authority, and the same scope note holds.
 > claim above holds verbatim. Scope of this re-read: this section only;
 > `last-verified` is not bumped.
 
+> **Re-verified #4372 part K (2026-10-25, ops README re-read):** the only
+> file under `packages/ops/**` this change touches is `packages/ops/README.md`,
+> prose only. It now says that the Doc health page reads the build-time
+> `/ops-doc-health.json` from the console's own origin, that http is allowed
+> for every loopback registry host (`LOCAL_HOSTNAMES` in
+> `src/lib/environments.ts`), that the CSP's font rule is `'self' data:`, and
+> that the client root renders nothing until the sign-in fragment is
+> scrubbed. No source, client method, read, reveal, sign-in navigation or
+> backend file changes, and the console still reaches no backend route
+> outside `/ops/*`, so the no-rail-authority claim above holds verbatim.
+> Scope of this re-read: this section only; `last-verified` is not bumped.
+
 ## 9. Owner CLI sessions — the device-code login (#2526)
 
 `haven login` mints an owner session through a browser approval rather than a
@@ -3579,6 +3696,41 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > endpoints above; nothing else in this document was re-read for it.
 > `last-verified` is bumped to 2026-10-10 for exactly this coverage.
 
+> **Re-verified (#4324, 2026-10-23, "Needs attention" acknowledgements):** the
+> #3813 note above says the spec's `oneOf` body and the table's CHECK "refuse
+> every kind except the two owner-approved ones". That is no longer true:
+> migration 118 widens the CHECK, and the `oneOf` gains `budget-reached`,
+> `budget-usage`, `budget-scope`, `payments-failed` and `haven-paused`
+> (owner decisions on epic #4322, 2026-10-23). The note stays as written; this
+> one supersedes that sentence. What the change touches in this document's
+> coverage: `routes/user.ts` (the POST now dispatches per kind and refuses a
+> kind it does not know) and `infra/repositories/dashboard.ts` (the overview's
+> 7-day refusal buckets also return each bucket's latest `created_at`, and the
+> failed-intent read returns the latest recorded step of any failed intent in
+> the window). The properties the #3813 note relies on still hold: an
+> acknowledgement hides a dashboard row and nothing else, no payment-path code
+> reads the table, the per-agent writes select through an ownership `EXISTS`
+> against `agents`, the user-level rows carry no foreign id, and every row is
+> scoped to the JWT subject. No new spender, no authority grant, no custody
+> change. Scope of this re-read: the `routes/user.ts` endpoints and the two
+> `infra/repositories/dashboard.ts` statements above; nothing else in this
+> document was re-read for it, and `last-verified` is not bumped.
+>
+> **Re-verified (#4378, 2026-10-25, `payment_intents.failed_at`):** the
+> #4324 note above describes the failed-intent read as returning "the latest
+> recorded step of any failed intent in the window". That is no longer the
+> whole truth: migration 120 adds `payment_intents.failed_at` and the three
+> failure writers in `infra/repositories/payment-intents.ts` stamp it, so
+> `FAILED_INTENTS_7D_SQL` now returns the true failure time where one is
+> stamped and the recorded-step fallback only for pre-120 rows. The item
+> this document's presentation rests on is unchanged — the read is still
+> scoped to the JWT subject's rows, nothing on the payment path gates on
+> `failed_at`, and the writers' CAS guards are untouched. No new spender, no
+> authority grant, no custody change. Scope of this re-read: migration
+> `120_payment_intents_failed_at.ts`, the three writer statements and
+> `FAILED_INTENTS_7D_SQL`; nothing else in this document was re-read for it,
+> and `last-verified` is not bumped.
+
 > **Re-verified unchanged (#3895, 2026-10-12, connect-step failure copy):**
 > this diff touches one covered file, display-layer only:
 > `components/DelegationBudgetCard.tsx` passes the budget grant's failure
@@ -3919,3 +4071,37 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > matter covers, and the money-path globs. No delegation, caveat, enforcer term, settlement
 > window, budget pre-check or refusal changes. Scope of this note: those lines.
 > Nothing else in this document was re-verified.
+
+> **Re-verified unchanged (#4387, 2026-10-24 — a JSDoc in
+> `packages/backend/src/routes/agent-rekey.ts`).** The route's "Where the SQL
+> is" comment no longer refers to a `dep-lint-exempt` waiver the file does
+> not carry: the completion runs as one `withTransaction` inside
+> `completeRekey` in `infra/repositories/agent-rekeys.ts`. Comment
+> only: no re-key step, revocation order, credential swap or delegation
+> changes. Scope of this note: that comment. Nothing else in this document was
+> re-verified for it.
+
+> **Re-verified unchanged (#4400, 2026-10-24 — the agent Spending hero's
+> Last 30 days layout in `packages/frontend/src/components/DelegationBudgetCard.tsx`).**
+> The three figures (Spent, Payments, Last paid) take two rows below `sm`
+> instead of three equal tracks; from `sm` they sit across in equal thirds,
+> Spent's track widening past its third only when its figure needs it
+> (`minmax(max-content,1fr)`). The Spent cell drops `break-words`,
+> because the shared money figure is now `whitespace-nowrap`; the loading skeleton
+> takes the same shape. Layout only: no budget read, figure, caption,
+> delegation, revoke, grant or edit path changes. Scope of this note: that
+> grid. Nothing else in this document was re-verified for it.
+
+> **Re-verified unchanged (#4353, 2026-10-25 — `GET /dashboard/overview`
+> gains a per-agent `budgetEndedAt` and splits `delegation_expired` out of the
+> refusal `budget` bucket).** Both are display-only reads in
+> `infra/repositories/dashboard.ts` / `routes/dashboard.ts`: the first is a
+> grouped `SELECT` over the agent's `active` `agent_delegations` rows whose
+> `expires_at` has passed, on the agent's own account chain (liveness doubled
+> in SQL and in the route, so a live row is never reported as ended), the
+> second regroups existing `payment_refusals` counts. Nothing writes, signs,
+> selects a delegation for payment or widens authority; the enforcers
+> (including the TimestampEnforcer) remain the only gate on an expired
+> redemption, and the user-level `budgetStops` figure is unchanged. Scope of
+> this note: those two reads. Nothing else in this document was re-verified
+> for it.

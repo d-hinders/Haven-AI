@@ -75,7 +75,7 @@ const ZERO_WINDOW = {
   net: { usd: 0, eur: 0, sek: 0 },
   approx: false,
   payments: 0,
-  refusals: { budget: 0, scope: 0, failed: 0, haven: 0 },
+  refusals: { budget: 0, expired: 0, scope: 0, failed: 0, haven: 0 },
 }
 
 function makeBudget(
@@ -104,7 +104,7 @@ function overviewAgent(overrides: Partial<DashboardAgent> = {}): DashboardAgent 
     status: 'active',
     accountId: 'safe-1',
     accountName: 'Main account',
-    accountChainId: 84532,
+    accountChainId: 84532, budgetEndedAt: null,
     allowances: [],
     budgets: [makeBudget()],
     receivedSubBudgets: [],

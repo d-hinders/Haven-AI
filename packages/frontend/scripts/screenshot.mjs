@@ -16,8 +16,9 @@
  * ── Looking at a width outside the committed set (#2006) ─────────────────────
  * `--viewport=<W>[xH]` (repeatable/comma-separated, or `SCREENSHOT_VIEWPORTS`)
  * shoots the requested widths INSTEAD OF the committed pair, for that run only.
- * Nothing a gate compares changes: the four gate consumers import `VIEWPORTS`
- * from `evidence-viewports.mjs` and never the override. Overridden viewports
+ * Nothing a gate compares changes: every gate consumer (24 e2e files — 23 of
+ * the 24 visual specs and `capture-integrity`) imports `VIEWPORTS` from
+ * `evidence-viewports.mjs` and never the override. Overridden viewports
  * are named after their dimensions, so the PNG filenames and the manifest's
  * `viewports` / `viewport_source` state the widths the run actually used.
  * The reasoning — and why 320 is deliberately NOT in the committed set — is in
@@ -732,7 +733,7 @@ export const FIXTURE_USER = {
   wallet_address: null,
   account_address: FIXTURE_ACCOUNT.account_address,
   // Delegation-rail on the `/auth/me`-shaped safes list only — so the account
-  // page's Backup & recovery card (#1089) has something real to render,
+  // page's Who can approve section (#1089) has something real to render,
   // without perturbing FIXTURE_ACCOUNT's identity shape (pinned against the e2e
   // fixture by fixture-shape-parity.test.ts).
   //
@@ -1164,6 +1165,8 @@ export const FIXTURE_OVERVIEW = {
       merchantName: null,
     },
     failedIntents7d: 1,
+    // #4324: the latest recorded step of any failed intent in the window (sent when there is one).
+    lastFailedIntentAt: '2026-10-08T14:20:00.000Z',
     balance_by_day: Array.from({ length: 30 }, (_, i) => {
       const day = new Date(Date.UTC(2026, 8, 10 + i))
       return {
@@ -1176,7 +1179,7 @@ export const FIXTURE_OVERVIEW = {
   },
   agents: FIXTURE_AGENTS.map((a) => ({
     id: a.id, name: a.name, status: a.status, accountId: a.account_id,
-    accountName: a.account_name, accountChainId: a.account_chain_id,
+    accountName: a.account_name, accountChainId: a.account_chain_id, budgetEndedAt: null,
     ...(a.status === 'pending_approval' ? { setupStatus: 'awaiting_connection' } : {}),
     allowances: a.allowances.map((x) => ({
       tokenSymbol: x.token_symbol, allowanceAmount: x.allowance_amount, resetPeriodMin: x.reset_period_min,
@@ -1209,14 +1212,15 @@ export const FIXTURE_OVERVIEW = {
         net: { usd: 37.5, eur: 34.43, sek: 403.5 },
         approx: false,
         payments: 4,
-        refusals: { budget: 1, scope: 0, failed: 0, haven: 0 },
+        // #4324: d7 carries the latest refusal time of each non-empty bucket.
+        refusals: { budget: 1, expired: 0, scope: 0, failed: 0, haven: 0, lastBudgetAt: '2026-10-08T11:05:00.000Z' },
       },
       d30: {
         gross: { usd: 250.0, eur: 229.5, sek: 2690.0 },
         net: { usd: 162.5, eur: 149.18, sek: 1748.5 },
         approx: true,
         payments: 14,
-        refusals: { budget: 2, scope: 1, failed: 1, haven: 0 },
+        refusals: { budget: 2, expired: 0, scope: 1, failed: 1, haven: 0 },
       },
       lastPaymentAt: '2026-10-09T09:41:00.000Z',
       lastCounterparty: a.status === 'pending_approval' ? null : {
@@ -1799,8 +1803,8 @@ export const FIXTURE_TXS_ACCOUNTED_BADGE = FIXTURE_TXS.map((t, i) =>
 // `GET /analytics/overview` is analytics slice B (#2946, PR #2957 — review at
 // the time of writing). The fixture pins the response shape THAT PR specifies:
 // one range-scoped aggregate whose sums cover confirmed `payment_intents`
-// only, with `basis` carrying the counts the page quotes ("based on N
-// payments", "M awaiting settlement evidence are not counted", the refusal
+// only, with `basis` carrying the counts the page reads (`payments_counted`,
+// the Payments tile's figure since #4333; `unsettled_submitted`; the refusal
 // ledger's coverage window). Keyed here so the `analytics-*` scenarios below
 // and C's page (#2947) read ONE declared shape.
 //
@@ -2175,7 +2179,7 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
   }
   if (pathname.startsWith('/accounts/hybrid/') && pathname.endsWith('/signers')) {
     // The account-scoped signer set (#1081/#1089) — one passkey, so the
-    // Backup & recovery card renders its "only one way to approve" state.
+    // Who can approve section renders its "only one way to approve" state.
     return {
       account_address: FIXTURE_ACCOUNT.account_address,
       chain_id: FIXTURE_ACCOUNT.chain_id,
@@ -2966,9 +2970,10 @@ async function newFixtureContext(browser, vp, scenario, { signedOut = false, col
     // frontend origin (pages, `/_next` assets) loads normally.
     const api = pathname.startsWith('/api/') ? pathname.slice(4) : null
     if (api === null) {
-      // Chain reads leave the browser as JSON-RPC POSTs to a public node, not
-      // through `/api/*` — so they land here, in the `route.continue()` branch
-      // that used to let them onto the real internet (#1935).
+      // Everything else passes through untouched, including any JSON-RPC a
+      // page sends to a public node: the route handler answers no JSON-RPC. The
+      // allowance chain reads this branch once had to fence (#1935) went
+      // with the legacy rail (#2331).
         return route.continue()
     }
 
@@ -4785,9 +4790,9 @@ export const SCENARIOS = {
         await dismissMobileSidebar(page, vp)
       }
 
-      // ── account page: Backup & recovery ──────────────────────────────────
+      // ── account page: Who can approve ────────────────────────────────────
       await settle(`${BASE_URL}/accounts/${FIXTURE_ACCOUNT.id}`)
-      const signersHeading = page.getByRole('heading', { name: 'Backup & recovery' })
+      const signersHeading = page.getByRole('heading', { name: 'Who can approve' })
       await signersHeading.waitFor({ timeout: 15_000 })
       const signersCard = page.locator('div.rounded-\\[10px\\]', { has: signersHeading })
       await signersCard.getByRole('button', { name: 'Connect wallet' }).waitFor({ timeout: 15_000 })
@@ -4811,7 +4816,7 @@ export const SCENARIOS = {
   },
   'account-backup-recovery': {
     description:
-      'Backup & recovery card at both viewports, in all three of its rendered states — the healthy multi-signer layout, the one-way-to-approve warning, and the load failure',
+      'Who can approve card at both viewports, in all three of its rendered states — the healthy multi-signer layout, the one-way-to-approve warning, and the load failure',
     // ── The three states, and why they are one scenario (#1693, #1725) ───────
     //
     // #1693 evidenced the HEALTHY layout only, and #1725's review found the
@@ -4862,7 +4867,7 @@ export const SCENARIOS = {
       // shoot a failure under the healthy capture's name.
       setBackupRecoveryStage('healthy')
 
-      const heading = page.getByRole('heading', { name: 'Backup & recovery' })
+      const heading = page.getByRole('heading', { name: 'Who can approve' })
 
       /**
        * Get the account page onto the currently-served stage and let it settle.
@@ -5042,8 +5047,8 @@ export const SCENARIOS = {
       // Wait for the passport ROW's badge and note, not just the section
       // heading. The row's own heading renders in the loading skeleton and the
       // load-error branch too, so waiting on it alone would happily accept
-      // either as the evidence — the same trap the Backup & recovery scenario
-      // documents above.
+      // either as the evidence — the same trap the account-backup-recovery
+      // scenario documents above.
       await card.getByText('Agent Passport').waitFor({ timeout: 15_000 })
       await card.getByText('Updating on-chain').waitFor({ timeout: 15_000 })
       await card.getByText(/signing key was replaced/).waitFor({ timeout: 15_000 })
@@ -5058,7 +5063,7 @@ export const SCENARIOS = {
   },
   'identity-settings-not-issued': {
     description:
-      'The Identity and settings card with the passport NOT issued — the opt-in row and the Backup & recovery pointer, no tax row (flag off)',
+      'The Identity and settings card with the passport NOT issued — the opt-in row and the Who can approve pointer, no tax row (flag off)',
     // No URL reaches a clean not-issued capture of the card: agent-research
     // carries an anchored passport, so the only fixture agent without one is
     // the revoked one — which is exactly the state worth photographing, since
@@ -5273,7 +5278,7 @@ export const SCENARIOS = {
       await page.goto(`${BASE_URL}/accounts/${FIXTURE_ACCOUNT.id}`, { waitUntil: 'networkidle', timeout: 30_000 })
       await dismissMobileSidebar(page, vp)
 
-      await page.getByRole('heading', { name: 'Backup & recovery' }).waitFor({ timeout: 15_000 })
+      await page.getByRole('heading', { name: 'Who can approve' }).waitFor({ timeout: 15_000 })
       // The wallet row is first; this opens the confirmation for the remaining
       // passkey without executing any signer change.
       await page.getByRole('button', { name: 'Remove', exact: true }).nth(1).click()
@@ -6002,7 +6007,7 @@ export const SCENARIOS = {
 
   'wrong-wallet': {
     description:
-      'The wrong-wallet gate state (#2073): a hydrated hybrid signer set naming an EOA owner, a connected wallet that is NOT it — the account page Backup & recovery card offering Switch wallet in place (the header pill left the top bar in #3825)',
+      'The wrong-wallet gate state (#2073): a hydrated hybrid signer set naming an EOA owner, a connected wallet that is NOT it — the account page Who can approve section offering Switch wallet in place (the header pill left the top bar in #3825)',
     // ── Why this scenario exists ─────────────────────────────────────────────
     //
     // #2068 made the signer gate fail closed for an unrelated wallet, and
@@ -6033,7 +6038,7 @@ export const SCENARIOS = {
     },
     async run({ page, vp, shoot }) {
       // #3825: the header pill is gone; the mismatch is now named where it
-      // blocks — the account's Backup & recovery card, whose in-flow
+      // blocks — the account's Who can approve section, whose in-flow
       // `WalletConnectAction` (#3812) reads "Switch wallet" for a connected
       // wallet that is not the owner. Waiting on that name pins the state
       // through the real path — reconnect, hydration, gate — and a run where
@@ -6043,7 +6048,7 @@ export const SCENARIOS = {
         timeout: 60_000,
       })
       await dismissMobileSidebar(page, vp)
-      const heading = page.getByRole('heading', { name: 'Backup & recovery' })
+      const heading = page.getByRole('heading', { name: 'Who can approve' })
       await heading.waitFor({ timeout: 30_000 })
       const card = page.locator('div.rounded-\\[10px\\]', { has: heading })
       await card.getByRole('button', { name: 'Switch wallet' }).waitFor({ timeout: 30_000 })
@@ -6700,7 +6705,7 @@ export const SCENARIOS = {
     api(apiPath) {
       if (apiPath === '/dashboard/overview') {
         const research = FIXTURE_OVERVIEW.agents.find((agent) => agent.id === 'agent-research')
-        const calm = (window) => ({ ...window, refusals: { budget: 0, scope: 0, failed: 0, haven: 0 } })
+        const calm = (window) => ({ ...window, refusals: { budget: 0, expired: 0, scope: 0, failed: 0, haven: 0 } })
         return {
           ...FIXTURE_OVERVIEW,
           agentCount: { active: 1, paused: 0, pending_approval: 0 },
@@ -6731,6 +6736,53 @@ export const SCENARIOS = {
       await page.goto(`${BASE_URL}/dashboard`, { waitUntil: 'networkidle', timeout: 60_000 })
       await dismissMobileSidebar(page, vp)
       await page.getByRole('heading', { name: "You're all caught up" }).waitFor({ timeout: 30_000 })
+      await shoot(page.locator('main').first(), 'page')
+    },
+  },
+  'dashboard-budget-end-dates': {
+    description:
+      '#4353: the two budget end-date items in Needs attention — "Budget ending" (Research agent\'s live budget ends in 3 days, Renew) and "Budget ended <date>" (Data-feed agent, active, its only budget ended 2 days ago), which replaces "has no budget"',
+    api(apiPath) {
+      if (apiPath === '/dashboard/overview') {
+        const now = Date.now()
+        const calm = (window) => ({ ...window, refusals: { budget: 0, expired: 0, scope: 0, failed: 0, haven: 0 } })
+        const quiet = (agent) => ({ ...agent, stats: { ...agent.stats, d7: calm(agent.stats.d7), d30: calm(agent.stats.d30) } })
+        const research = FIXTURE_OVERVIEW.agents.find((agent) => agent.id === 'agent-research')
+        const dataFeed = FIXTURE_OVERVIEW.agents.find((agent) => agent.id === 'agent-retired')
+        return {
+          ...FIXTURE_OVERVIEW,
+          agentCount: { active: 2, paused: 0, pending_approval: 0 },
+          accounts: FIXTURE_OVERVIEW.accounts.slice(0, 1).map((account) => ({ ...account, usdcBalanceFreshness: undefined })),
+          spend: { ...FIXTURE_OVERVIEW.spend, failedIntents7d: 0 },
+          agents: [
+            quiet({
+              ...research,
+              budgets: research.budgets.map((budget) => ({ ...budget, expiresAt: new Date(now + 3 * 86_400_000).toISOString() })),
+            }),
+            // No live budget and no open sub-budget: its only budget ended.
+            quiet({
+              ...dataFeed,
+              status: 'active',
+              budgets: [],
+              receivedSubBudgets: [],
+              budgetEndedAt: new Date(now - 2 * 86_400_000).toISOString(),
+            }),
+          ],
+        }
+      }
+      if (apiPath === '/dashboard/budget-remaining') {
+        return { budgets: FIXTURE_BUDGET_REMAINING.budgets.filter((row) => row.agent_id === 'agent-research') }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.addInitScript((userId) => {
+        window.localStorage.setItem(`haven-onboarding-complete-dismissed:${userId}`, '1')
+      }, FIXTURE_USER.id)
+      await page.goto(`${BASE_URL}/dashboard`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+      await page.getByText(/budget ended /).first().waitFor({ timeout: 30_000 })
+      await page.getByText(/budget ends /).first().waitFor({ timeout: 30_000 })
       await shoot(page.locator('main').first(), 'page')
     },
   },
@@ -6858,11 +6910,13 @@ export const SCENARIOS = {
       await page.getByRole('region', { name: 'Balance' }).waitFor({ timeout: 20_000 })
       await page.getByText('136 050,75 kr').first().waitFor({ timeout: 20_000 })
       // The change line renders the SEK swing, not the quiet caption. The
-      // percent renders in sv-SE through Intl (#3195 round-2 finding b):
-      // decimal comma, NBSP before `%` — `\s` rather than literal spaces,
-      // sv-SE's separators are NBSPs and a regex is tested against the
-      // node's raw text (string needles normalize, this does not).
-      await page.getByText(/2\s*285,40\s*kr\s*\(\+1,70\s*%\)\s*today/).first().waitFor({ timeout: 20_000 })
+      // wait is on the FIGURE alone (#4426): the line's words are inline JSX
+      // this script cannot import, and restating them here broke the
+      // scenario when "today" became "since yesterday (UTC)" (#3986) — the
+      // wait timed out and nothing was captured. `\s` rather than literal
+      // spaces: sv-SE's separators are NBSPs and a regex is tested against
+      // the node's raw text (string needles normalize, this does not).
+      await page.getByText(/2\s*285,40\s*kr/).first().waitFor({ timeout: 20_000 })
       await shoot(page.locator('main').first(), 'dashboard')
 
       // ── Settings → Preferences: the kr SEK radio active ──────────────────
@@ -6891,9 +6945,11 @@ export const SCENARIOS = {
       await shoot(page.locator('main').first(), 'accounts-overview')
 
       // ── /accounts/<id>: the account priced in SEK ────────────────────────
+      // The wait is on the figure alone (#4426): the "Value (SEK)" column
+      // header it also waited on left with the holdings table in #4097
+      // (#4142), and that copy wait timed out the scenario's last capture.
       await page.goto(`${BASE_URL}/accounts/safe-fixture`, { waitUntil: 'networkidle', timeout: 60_000 })
       await dismissMobileSidebar(page, vp)
-      await page.getByText('Value (SEK)').waitFor({ timeout: 20_000 })
       await page.getByText('136 050,75 kr').first().waitFor({ timeout: 20_000 })
       await shoot(page.locator('main').first(), 'account-detail')
     },

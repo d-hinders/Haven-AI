@@ -34,7 +34,7 @@ covers:
   - packages/frontend/src/lib/merchantBudgetRefusal.ts
   - packages/frontend/src/hooks/useCatalog.ts
   - packages/frontend/src/components/CatalogSubmitModal.tsx
-last-verified: "2026-10-17"
+last-verified: "2026-10-25"
 ---
 
 # Marketplace
@@ -133,7 +133,10 @@ for the modal's own shape.
   also records the challenge's `payTo` (`merchant_catalog.pay_to`,
   lowercased). It records one only when every `accepts[]` option on the
   offer's recorded network names the same well-formed address; options on
-  other networks do not count. A merchant's **verified payTo** on a chain is
+  other networks do not count. The recorded network is the network of the
+  option the pay path would select (`selectX402SettlementScheme` from
+  `@haven_ai/sdk`, over every option, not `accepts[0]`; #4389), and a
+  challenge with no option the pay path could settle is a probe miss. A merchant's **verified payTo** on a chain is
   derived, never stored: it is the one address all its active, verified x402
   `merchant_catalog` offers on that network agree on — operator-curated or
   Bazaar-discovered alike (`source` is a label and does not filter here,
@@ -153,7 +156,8 @@ for the modal's own shape.
     can recover without anyone re-issuing the budget, and only a delisted one
     does not).
   - `erc7710` is true only when **every** such offer on that recorded network
-    advertises the ERC-7710 transfer method. A pinned budget cannot fund an
+    advertises a payable ERC-7710 option there (one the SDK's erc7710
+    selector accepts, #4389). A pinned budget cannot fund an
     EIP-3009 payment, because that leg pays the agent's own wallet first, so
     an EIP-3009 merchant is paid from the open budget, if the agent has one.
 - **Issuing one.** `POST /agents/{id}/delegations/build` with `merchant_slug`.
@@ -231,10 +235,12 @@ for the modal's own shape.
   reason (the 409s listed under *Issuing one*, above; an unlisted merchant is a
   404, not a 409), so nothing changes and the old budget keeps working exactly
   as before the edit was attempted (round 2 review finding R2-2). The way
-  forward is named per status, matching `editMerchantRefusalCopy` exactly: a
-  `stale` row's way out is **Stop budget**, then fund the merchant again from its
+  forward is named per status, as `editMerchantRefusalCopy`
+  (`EditBudgetModal.tsx`) words it: a
+  `stale` row's way out is to stop the budget (**Stop budget…** in the budget's
+  ⋯ menu, #4261), then fund the merchant again from its
   page, which derives a fresh recipient; an `unverified` row's is the same
-  **Stop budget**, then fund again, but only once the merchant confirms an address —
+  stop, then fund again, but only once the merchant confirms an address —
   there is nothing to fund yet. A `not_erc7710` refusal names no single step:
   the build checks ERC-7710 before it compares addresses, so the same refusal
   also comes back when the merchant has BOTH moved to a new address and lost
@@ -549,10 +555,11 @@ string, `next.config.ts`); the sidebar label is "Marketplace", same index in
   coming-soon merchants list below the grid in `ComingSoonMerchants`, one
   Card titled "Coming soon" with a divided list of linked rows (monogram,
   name, one-line description, an ink-3 chevron) and nothing comparable — no price, no
-  count; its header says "Not payable through Haven yet.". The section renders only when it has rows, and "No merchants match
-  this filter" shows only when both the grid and the section are empty. The
+  count; its header says "Not payable through Haven yet.". The section renders only when it has rows, and the no-match
+  state shows only when both the grid and the section are empty. The
   split (#3980 sorted, #4052 partitions) is CLIENT-side in `MerchantGrid` —
-  the endpoint's own order (test merchants last, then by name) is preserved
+  the endpoint's own order (test merchants last, then coming-soon before live,
+  then by name: `LIST_MERCHANTS_SQL`'s `ORDER BY`) is preserved
   within each group and must not change for its other clients. Verified is a
   quiet check after the name (`title` = the meaning, sr-only "Verified" so
   the card link's accessible name stays the merchant's) — the merchant page
@@ -588,13 +595,15 @@ string, `next.config.ts`); the sidebar label is "Marketplace", same index in
   network facet currently hides is not an active filter — a deep link such
   as `?category=media` under the Base Sepolia default opens as "All" with no
   chip over it (#4008), the same no-filter-without-a-pill rule. The count is
-  the standard one (rendered merchants at the defaults; "n of all listed"
-  once a chip is up), the no-match copy is `ListNoMatch`'s ("No merchants
+  the standard one, on the pattern's list summary line below the toolbar card
+  (#4196): the rendered merchants at the defaults, "{shown} of {total}"
+  against every listed merchant once a filter differs from the defaults. The
+  no-match copy is `ListNoMatch`'s ("No merchants
   match these filters" — plural, per the pattern), and a filter that hides
   everything offers "Clear filters", which returns the whole list to the
   page defaults (the user's own network, not All). A failed load offers
   "Try again"; an empty marketplace shows no toolbar, only the submit entry
-  point. Below a populated grid, a note for
+  point. Below the grid, or below the no-match state, a note for
   sellers ("Sell an API or MCP tool?") opens the submit modal — listing a
   service is not a toolbar action.
 - **Merchant page** (`app/(authenticated)/marketplace/[slug]/page.tsx`,
@@ -609,8 +618,9 @@ string, `next.config.ts`); the sidebar label is "Marketplace", same index in
   (1280px), beside it from there, so the merchant's own text keeps the
   width (#4015, `merchant-page-fit-measure.spec.ts`)), and ONE offers section (#3981): each offer is a single row —
   a table from `md` up, one stacked card below — carrying name, description,
-  price with the `withinBudget()` per-agent hint (so the warning is never
-  behind a horizontal scroll on a phone), the network's chain name and a
+  price with the per-offer budget answer under it (`agentsThatCanPay`, see
+  *The per-offer budget answer*; so the answer is never behind a horizontal
+  scroll on a phone), the network's chain name and a
   labelled **Copy prompt** button (#3998, #4003 wording) that copies the full
   paste-into-agent instruction (`agentInstruction()`, byte-stable in
   `lib/marketplace.ts`). The instruction is not printed under every offer:
@@ -674,12 +684,16 @@ string, `next.config.ts`); the sidebar label is "Marketplace", same index in
   specific budgets here." A merchant-locked budget does not count, so the
   action stays beside one; it may reappear as the open budget drains. The
   modal is unchanged. The action's old funding-level
-  "open-budget note" is gone since #3981: the offers section's own
-  plain-language payment note (above) is offer-level and covers it — when no
-  offer is `erc7710` the note shows and the action is withheld. The modal: pick
+  "open-budget note" is gone since #3981, and the offer-level note that
+  replaced it is gone since #4005: the "How to buy" panel's step 2 states the
+  any-recipient requirement (above). When no offer is `erc7710` the action is
+  withheld. The modal: pick
   one of the eligible agents, an amount in whichever token the merchant
   actually sells in on that chain (`merchantTokenOptions`, restricted to its
-  ERC-7710 offers) and a period, a review step naming the agent, the budget
+  ERC-7710 offers) and a period (the modal sends no `expires_at`, so the budget ends on the build
+  route's default, 90 days out; #4350's end-date choice is in the agent page's
+  grant form, the connect approval step and `EditBudgetModal`, not here), a
+  review step naming the agent, the budget
   (the SIGNED atomic amount, not the typed string), and the merchant's payTo
   (shortened, never editable in the UI — but SENT as `recipientAddress`
   alongside `merchant_slug`, so the server's own comparison catches a payTo
@@ -694,9 +708,10 @@ string, `next.config.ts`); the sidebar label is "Marketplace", same index in
   one it is; a budget for this merchant in another token, or one pinned to a
   payTo the merchant has rotated away from, is a different slot and survives
   with no warning. `grant()`'s build-step refusals — the four merchant-locked
-  409s AND the ordinary grant refusals any caller can hit (revoked agent, off
-  the delegation rail, chain not enabled, re-key in flight) — each surface
-  their own plain sentence; anything else falls to one generic sentence
+  409s, the unknown-merchant 404, AND the ordinary grant refusals any caller
+  can hit (revoked agent, off the delegation rail or chain not enabled, re-key
+  in flight, account temporarily unavailable; `classifyMerchantBudgetRefusal`
+  in `lib/merchantBudgetRefusal.ts`) — each surface their own plain sentence; anything else falls to one generic sentence
   ("Haven could not set up this budget."), always followed by "Nothing
   changed." Copy never says "delegation", "recipient pin" or "ERC-7710" —
   outcome language only, per `EditBudgetModal.tsx`'s established shape

@@ -244,6 +244,16 @@ export default function DelegationBudgetCard({
     return g && /^0x[0-9a-fA-F]{64}$/.test(g) ? g : null
   }, [])
   const [prefill, setPrefill] = useState<{ hash: string; periodSeconds: number } | null>(null)
+  // #4353: "Budget ending"'s Renew links `?renew=<delegationHash>` — open
+  // that live budget's Edit, prefilled with its own limits (the end date is
+  // the field to change, #4350). Applied once, then the URL is tidied; an
+  // unknown, foreign or no-longer-live hash opens nothing, like `?grant=`.
+  const renewHash = useMemo(() => {
+    if (typeof window === 'undefined') return null
+    const r = new URLSearchParams(window.location.search).get('renew')
+    return r && /^0x[0-9a-fA-F]{64}$/.test(r) ? r : null
+  }, [])
+  const renewApplied = useRef(false)
   // #3695: once a budget exists, the grant form is collapsed behind "Add
   // budget" — a permanent second form made "Set budget" the strongest element
   // on the page. With no active budget the form is the section's content and
@@ -372,6 +382,22 @@ export default function DelegationBudgetCard({
       // A URL that stays untidy is not worth a thrown render.
     }
   }, [retired, grantHash, budgets, tokens, agentId, prefill])
+
+  useEffect(() => {
+    if (retired || !renewHash || budgets === null || renewApplied.current) return
+    renewApplied.current = true
+    const nowSec = Math.floor(Date.now() / 1000)
+    const row = budgets.find(
+      // The same liveness the routed-edit lookup uses (`occupiesSlot`).
+      (b) => b.delegation_hash.toLowerCase() === renewHash.toLowerCase() && occupiesSlot(b, nowSec),
+    )
+    if (row) setEditing(row)
+    try {
+      window.history.replaceState(null, '', `/agents/${agentId}`)
+    } catch {
+      // A URL that stays untidy is not worth a thrown render.
+    }
+  }, [retired, renewHash, budgets, agentId])
 
   // The period picker offers the day/week/month rhythm; a prefilled build may
   // carry any period the CLI chose (an hour, a minute-floor of 60s), so the
@@ -929,10 +955,11 @@ export default function DelegationBudgetCard({
             ) : (
               <div role="status" aria-busy="true" aria-label="Loading the last 30 days">
                 <Skeleton className="h-4 w-24" />
-                {/* #4260: three label-and-value pairs, the shape of the figures. */}
-                <div className="mt-2.5 grid grid-cols-3 gap-3">
+                {/* #4260: three label-and-value pairs, the shape of the figures —
+                    #4400: in the loaded layout's two rows below `sm`. */}
+                <div className="mt-2.5 grid grid-cols-2 gap-3 sm:grid-cols-3">
                   {[0, 1, 2].map((i) => (
-                    <div key={i} className="space-y-1.5">
+                    <div key={i} className={`space-y-1.5${i === 0 ? ' col-span-2 sm:col-span-1' : ''}`}>
                       <Skeleton className="h-3 w-12" />
                       <Skeleton className="h-6 w-16" />
                     </div>
@@ -1294,7 +1321,11 @@ function BudgetRow({
  * row built by hand — `StatTile.value` is a `string` and cannot carry an
  * `Amount` (its "≈" and currency mode), and `StatTile` lives in
  * `packages/ui`, shared with ops. The merchant sits on its own line below,
- * with no divider. A long figure wraps inside its cell; nothing truncates.
+ * with no divider. A money figure never wraps (#4400, `Amount` is
+ * `whitespace-nowrap`); the layout gives it room: below `sm` Spent takes the
+ * whole first row and Payments and Last paid share the second; from `sm` the
+ * three sit across, Spent's track never narrower than its figure. Nothing
+ * truncates.
  */
 function LastThirtyDays({
   stats,
@@ -1333,10 +1364,13 @@ function LastThirtyDays({
         </>
       ) : (
         <>
-          <dl className="mt-2.5 grid grid-cols-3 gap-3">
-            <div className="min-w-0">
+          {/* #4400: from `sm`, three across — equal thirds while Spent fits
+              its third, and Spent widens (the short Payments and Last paid
+              give way) when a larger figure needs the room. */}
+          <dl className="mt-2.5 grid grid-cols-2 gap-3 sm:grid-cols-[minmax(max-content,1fr)_minmax(0,1fr)_minmax(0,1fr)]">
+            <div className="col-span-2 min-w-0 sm:col-span-1">
               <dt className="text-xs text-[var(--v2-ink-3)]">Spent</dt>
-              <dd className="mt-0.5 break-words text-[var(--v2-ink)]">
+              <dd className="mt-0.5 text-[var(--v2-ink)]">
                 <Amount amount={unpriced && net === 0 ? null : net} currency={currency} approx={approx} size="md" />
               </dd>
             </div>

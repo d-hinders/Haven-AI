@@ -37,12 +37,13 @@
  * day and swatch order), joined later by one clip per showcase sample from
  * #3805 (four), #3845 (NoticeRow) and #3810 (activity row);
  * everything else below the shell on that page is still compared against
- * nothing. `product-routes.visual.spec.ts`'s whole-page
- * `/dashboard` and `/transactions` baselines remain the only whole-page pixel
- * coverage in the suite. The scoped sidebar and showcase-sample clips below are
- * what is left of this spec; the top-bar clip that shared the file was removed
- * with the bar itself (#4029), and the authenticated whole-page baselines carry
- * the rest of the shell.
+ * nothing. Whole-page pixel coverage lives in `product-routes.visual.spec.ts`
+ * and seven other specs that capture `fullPage: true` (analytics, demo,
+ * dev-agent-pages, home, how-it-works, marketplace, releases). The scoped
+ * sidebar and showcase-sample clips below are what is left of this spec;
+ * the top-bar clip that shared the file was removed with the bar itself
+ * (#4029), and the authenticated whole-page baselines carry the rest of the
+ * shell.
  *
  * BASELINES ARE LINUX-RENDERED (committed under e2e/__screenshots__/<spec>/,
  * one directory per spec file — there is no platform segment in the path, which
@@ -620,9 +621,10 @@ test.describe('design-system visual regression', () => {
       await expect(sample).toHaveCount(1)
       // All five tone items rendered — a dismiss here is interaction state,
       // and this gate photographs the resting page only. Still exactly three
-      // dismiss controls: the badge-less summary stays dismissible, the
-      // failure row keeps only the reserved slot, and the haven-paused row
-      // (#4033) has no dismiss at all — nothing visible to align.
+      // dismiss controls: budget reached, the badge-less summary and the
+      // failure row (#4324: failures are acknowledged). The low-balance row
+      // keeps only the reserved slot, and the nothing-to-align row (#4033)
+      // has no dismiss at all.
       await expect(sample.locator('li')).toHaveCount(5)
       await expect(sample.getByTestId(/^attention-dismiss-/)).toHaveCount(3)
       await expectShowcaseClip(sample, vp.height, 'the AttentionList sample', `design-system-attention-list-${vp.name}${schemeSuffix}.png`, SAMPLE_MAX_DIFF_PIXELS)

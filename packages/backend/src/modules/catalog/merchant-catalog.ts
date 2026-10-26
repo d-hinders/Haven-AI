@@ -26,6 +26,15 @@
  */
 // dep-lint-exempt: pool appears only as the default of the injectable QueryableLike executor (index.ts and tests inject their own); the probe-driven refresh/ingest updates it feeds await a catalog repository (beyond #999's ~100-line budget)
 import pool from '../../db.js'
+import { getChainData } from '@haven_ai/core'
+import {
+  normalizePaymentRequired,
+  selectErc7710PaymentOption,
+  selectStandardPaymentOption,
+  selectX402SettlementScheme,
+  x402AuthorizationAmount,
+  type X402PaymentOption,
+} from '@haven_ai/sdk'
 import { safeRequest, type SafeFetchOptions } from '../../infra/http/ssrf-guard.js'
 
 export interface CatalogRow {
@@ -124,42 +133,155 @@ export interface ProbeResult {
 }
 
 interface X402Accept {
-  amount?: string
-  maxAmountRequired?: string
-  asset?: string
   network?: string
   payTo?: string
-  extra?: { assetTransferMethod?: string }
 }
 
-/** x402 exact-EVM default when an `accepts[]` option omits the method. */
-const DEFAULT_ASSET_TRANSFER_METHOD = 'eip3009'
+/**
+ * The x402 network names the pay path can settle on, mapped to the chain id
+ * the row records as CAIP-2: Base and Base Sepolia, each as CAIP-2 or as the
+ * x402 short name. This is a copy of the SDK's `STANDARD_X402_NETWORKS`,
+ * which `@haven_ai/sdk` does not export, so no test can compare the two maps
+ * directly. Two things keep the copy honest instead: the parity test runs
+ * every name listed here through the SDK selector and expects it settled,
+ * and a selected option on a network missing from this map is a miss (see
+ * `selectCatalogPaymentOption`), never a row on a guessed chain.
+ */
+const X402_NETWORK_CHAIN_ID: Record<string, number> = {
+  'eip155:8453': 8453,
+  base: 8453,
+  'eip155:84532': 84532,
+  'base-sepolia': 84532,
+}
 
 /**
- * The distinct `assetTransferMethod`s a merchant advertises on the RECORDED
- * network (#3386) — `accepts[0]`'s, the same scoping `collectPayTo` already
- * uses and the one the row's own `network`/price columns are read from. Per
- * the x402 exact-EVM spec an omitted method means EIP-3009, so a plain
- * merchant reports `['eip3009']` and an ERC-7710-capable one that lists both
- * on that network reports `['eip3009', 'erc7710']`. Scanning every option ON
- * THAT NETWORK (not just the first) still matters — merchants keep the
- * EIP-3009 option first for compatibility and add `erc7710` alongside it —
- * but an option on a DIFFERENT network says nothing about what this row's
- * network accepts. Before this, a challenge listing EIP-3009 on one network
- * and ERC-7710 on another recorded the union on whichever network happened to
- * be `accepts[0]`'s, so a merchant-locked budget could be built for a network
- * the merchant never accepts ERC-7710 on there — stranding the budget, never
- * misdirecting money.
+ * A fixed envelope for `normalizePaymentRequired`, so the SDK applies its
+ * per-option rule to an `accepts[]` on its own (discovery has only the
+ * index's `accepts[]`, no envelope). The values are never read back: only
+ * the normalized `accepts` is used.
  */
-function collectAssetTransferMethods(payload: unknown): string[] | undefined {
-  const accepts = (payload as { accepts?: unknown[] })?.accepts
-  if (!Array.isArray(accepts) || accepts.length === 0) return undefined
-  const network = (accepts[0] as X402Accept | null)?.network
+const OPTION_RULE_ENVELOPE = { x402Version: 2, resource: { url: 'urn:haven:catalog-option-rule' } }
+
+/**
+ * The `accepts[]` options the pay path keeps (#4389), normalized exactly as
+ * it normalizes them. Every pay path first runs the 402 through the SDK's
+ * `normalizePaymentRequired` (`parsePaymentRequired`,
+ * `extractMcpPaymentRequired`), which drops an option whose scheme, network,
+ * asset or `payTo` is not a string, whose amount is not a positive decimal
+ * string, or whose `maxAmountRequired` is present but not one (null
+ * included). The catalog calls that same function rather than copying its
+ * rule, so the two cannot drift.
+ *
+ * Only the per-option rule is applied here. The envelope checks
+ * (`x402Version`, a resource URL) are not: the envelope above satisfies them.
+ *
+ * Total: the merchant's 402 is untrusted shape, and a dropped option is
+ * simply not an option. The SDK function does not throw on parsed JSON; the
+ * catch keeps the verdict a miss if that ever changes, and logs it (#4341)
+ * without the payload.
+ */
+function payPathOptions(payload: unknown): X402PaymentOption[] {
+  const accepts = (payload as { accepts?: unknown } | null | undefined)?.accepts
+  if (!Array.isArray(accepts)) return []
+  try {
+    return normalizePaymentRequired({ ...OPTION_RULE_ENVELOPE, accepts })?.accepts ?? []
+  } catch (err) {
+    console.warn(`[catalog] could not normalize a challenge's options: ${err instanceof Error ? err.message : String(err)}`)
+    return []
+  }
+}
+
+/** What the catalog's payability verdict selected from a challenge (#4389). */
+export interface CatalogPaymentSelection {
+  option: X402PaymentOption
+  scheme: 'erc7710' | 'eip3009'
+  /** The selected option's chain, e.g. 8453. */
+  chainId: number
+  /** The same chain as CAIP-2, the form the row's `network` column holds. */
+  network: string
+  /** The asset's symbol from the chain registry (`@haven_ai/core`). */
+  assetSymbol: string
+  assetDecimals: number
+}
+
+/**
+ * THE catalog payability verdict (#4389), shared by the refresh probe and
+ * discovery so the catalog judges a 402 the way the pay path does.
+ *
+ * It keeps the options the pay path keeps (`payPathOptions`, the SDK's own
+ * `normalizePaymentRequired` rule), then runs the pay path's own selector,
+ * `selectX402SettlementScheme` from `@haven_ai/sdk`, over ALL of them, not
+ * `accepts[0]`. The rail
+ * half of that rule is fixed to `delegationRail: true`: the catalog has no
+ * account in hand, every live account is on the delegation rail (the retired
+ * rails answer 410, #1986), and `haven_quote_catalog_purchase` selects with
+ * the rail it reads from the agent. So the row records the option a live
+ * agent will actually be quoted: erc7710 where the merchant offers a payable
+ * erc7710 entry, else the EIP-3009 bridge. `null` means no option is
+ * payable, and the probe treats that as a miss.
+ *
+ * The asset is labelled from the chain registry, on the selected option's own
+ * chain only. An asset the registry does not know on that chain is not
+ * payable, never guessed. Here the catalog is deliberately STRICTER than the
+ * SDK selector: the selector accepts either Base network's USDC address on
+ * either Base network, so it selects Base USDC on a Base Sepolia option. The
+ * backend's authorize step resolves the asset on the agent's own chain only
+ * (`resolvePaymentToken(agent.chain_id, asset)`), so no agent on that
+ * option's chain can pay it, and the catalog records a miss rather than a
+ * USDC row nobody there can buy.
+ */
+export function selectCatalogPaymentOption(payload: unknown): CatalogPaymentSelection | null {
+  const selection = selectX402SettlementScheme(payPathOptions(payload), { delegationRail: true })
+  if (!selection) return null
+  const chainId = X402_NETWORK_CHAIN_ID[selection.option.network]
+  if (chainId === undefined) return null
+  const token = registryToken(selection.option.asset, chainId)
+  if (!token) return null
+  return {
+    option: selection.option,
+    scheme: selection.scheme,
+    chainId,
+    network: `eip155:${chainId}`,
+    assetSymbol: token.symbol,
+    assetDecimals: token.decimals,
+  }
+}
+
+/**
+ * The registry's token for an asset address on the option's own chain, and
+ * only there: the chain the authorize step resolves it on (see
+ * `selectCatalogPaymentOption`).
+ */
+function registryToken(asset: string, chainId: number): { symbol: string; decimals: number } | undefined {
+  const lowered = asset.toLowerCase()
+  return getChainData(chainId).tokens.find((t) => t.address !== null && t.address.toLowerCase() === lowered)
+}
+
+/** True when an `accepts[]` entry is on the given chain, whichever name it uses. */
+function onChain(entry: unknown, chainId: number): boolean {
+  const network = (entry as X402Accept | null)?.network
+  return typeof network === 'string' && X402_NETWORK_CHAIN_ID[network] === chainId
+}
+
+/**
+ * The settlement schemes a merchant offers PAYABLY on the recorded chain
+ * (#3386, #4389), in first-seen order: an option counts as `erc7710` when the
+ * SDK's erc7710 selector accepts it, as `eip3009` when the standard selector
+ * does, and not at all otherwise. Scanning every option on that chain still
+ * matters — merchants keep the EIP-3009 option first for compatibility and add
+ * `erc7710` alongside it — but an option on a different chain, or one the pay
+ * path could not settle, says nothing about what a budget on this row can use.
+ */
+function collectAssetTransferMethods(payload: unknown, chainId: number): string[] | undefined {
   const methods: string[] = []
-  for (const entry of accepts) {
-    if ((entry as X402Accept | null)?.network !== network) continue
-    const method = (entry as X402Accept).extra?.assetTransferMethod ?? DEFAULT_ASSET_TRANSFER_METHOD
-    if (!methods.includes(method)) methods.push(method)
+  for (const option of payPathOptions(payload)) {
+    if (!onChain(option, chainId)) continue
+    const method = selectErc7710PaymentOption([option])
+      ? 'erc7710'
+      : selectStandardPaymentOption([option])
+        ? 'eip3009'
+        : undefined
+    if (method && !methods.includes(method)) methods.push(method)
   }
   return methods.length > 0 ? methods : undefined
 }
@@ -168,23 +290,23 @@ const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/
 
 /**
  * The one `payTo` a challenge names, lowercased (#3331). Every `accepts[]`
- * option on the recorded network must name a well-formed address and they must all be the same one:
- * a merchant-locked budget pins `transfer(to)` to this address, so a
- * challenge that names two (or one option that names none) has not told us
- * where "this merchant" is paid, and the answer is none rather than the
- * first one seen.
+ * option on the recorded chain must name a well-formed address and they must
+ * all be the same one: a merchant-locked budget pins `transfer(to)` to this
+ * address, so a challenge that names two (or one option that names none) has
+ * not told us where "this merchant" is paid, and the answer is none rather
+ * than the first one seen.
  */
-function collectPayTo(payload: unknown): string | undefined {
+function collectPayTo(payload: unknown, chainId: number): string | undefined {
   const accepts = (payload as { accepts?: unknown[] })?.accepts
-  if (!Array.isArray(accepts) || accepts.length === 0) return undefined
-  // Only the options on the network this row records (accepts[0]'s, the one
-  // the price is read from): a Base + Solana merchant names a base58 payTo on
-  // the other option, and a merchant may be paid at different addresses on
-  // different chains. Neither says anything about where it is paid HERE.
-  const network = (accepts[0] as X402Accept | null)?.network
+  if (!Array.isArray(accepts)) return undefined
+  // Only the options on the chain this row records (the selected option's,
+  // the one the price is read from): a Base + Solana merchant names a base58
+  // payTo on the other option, and a merchant may be paid at different
+  // addresses on different chains. Neither says anything about where it is
+  // paid HERE.
   let payTo: string | undefined
   for (const entry of accepts) {
-    if ((entry as X402Accept | null)?.network !== network) continue
+    if (!onChain(entry, chainId)) continue
     const candidate = (entry as X402Accept | null)?.payTo
     if (typeof candidate !== 'string' || !EVM_ADDRESS.test(candidate)) return undefined
     const lowered = candidate.toLowerCase()
@@ -194,35 +316,13 @@ function collectPayTo(payload: unknown): string | undefined {
   return payTo
 }
 
-const TOKEN_DECIMALS: Record<string, number> = { USDC: 6 }
-
-function formatPriceDisplay(atomic: string, assetSymbol: string): string {
-  const decimals = TOKEN_DECIMALS[assetSymbol] ?? 6
+function formatPriceDisplay(atomic: string, assetSymbol: string, decimals = 6): string {
   const padded = atomic.padStart(decimals + 1, '0')
   const intPart = padded.slice(0, padded.length - decimals)
   const frac = padded.slice(padded.length - decimals).replace(/0+$/, '').padEnd(2, '0')
   // #1592: `<human amount> <asset code>`, no `$` prefix — the symbol plus the
   // code double-states the currency, and no catalog asset is actual USD.
   return `${intPart}.${frac} ${assetSymbol}`
-}
-
-function parseAccepts(payload: unknown): X402Accept | null {
-  const accepts = (payload as { accepts?: unknown[] })?.accepts
-  if (!Array.isArray(accepts) || accepts.length === 0) return null
-  const first = accepts[0] as X402Accept
-  const amount = first.maxAmountRequired ?? first.amount
-  if (!amount || !/^[0-9]+$/.test(amount)) return null
-  return first
-}
-
-/** Resolve a known asset address to a display symbol; pass symbols through. */
-function assetSymbol(asset: string | undefined): string {
-  if (!asset) return 'USDC'
-  if (!asset.startsWith('0x')) return asset
-  const known: Record<string, string> = {
-    '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913': 'USDC',
-  }
-  return known[asset.toLowerCase()] ?? 'USDC'
 }
 
 /**
@@ -358,11 +458,11 @@ export async function probeCatalogEntry(
     return { ok: false }
   }
 
-  // #4300: the 402 is merchant-controlled, and the parsing below assumes its
-  // field types (a numeric `amount`, a null `accepts[0]`, a non-string `asset`
-  // all throw). A throw must read as a miss like any other unusable answer:
-  // escaping here would abort the refresh run, leave this row unwritten and
-  // so oldest, and stop every later run at the same row.
+  // #4300: the 402 is merchant-controlled. Since #4389 an option whose fields
+  // are not strings is simply not an option, but anything that still throws
+  // while reading the response must read as a miss like any other unusable
+  // answer: escaping here would abort the refresh run, leave this row
+  // unwritten and so oldest, and stop every later run at the same row.
   try {
     return await readProbeChallenge(entry, response)
   } catch (err) {
@@ -414,8 +514,10 @@ async function readProbeChallenge(
   if (!payload) {
     try { payload = await response.json() } catch { return { ok: false } }
   }
-  const accept = parseAccepts(payload)
-  if (!accept) return { ok: false }
+  // #4389: the pay path's own scheme selection over every option, not
+  // accepts[0]. No payable option is a miss.
+  const selected = selectCatalogPaymentOption(payload)
+  if (!selected) return { ok: false }
 
   // #3769: a challenge that STRUCTUREDLY advertises its own method (a
   // `resource.method` on the 402) — Anchor's challenge only describes the
@@ -424,16 +526,15 @@ async function readProbeChallenge(
   const advertised = (payload as { resource?: { method?: unknown } })?.resource?.method
   const advertisedMethod = typeof advertised === 'string' && advertised.trim() ? advertised.trim().toUpperCase() : undefined
 
-  const atomic = (accept.maxAmountRequired ?? accept.amount)!
-  const symbol = assetSymbol(accept.asset)
+  const atomic = x402AuthorizationAmount(selected.option)
   return {
     ok: true,
     priceAtomic: atomic,
-    priceDisplay: formatPriceDisplay(atomic, symbol),
-    asset: symbol,
-    network: accept.network,
-    assetTransferMethods: collectAssetTransferMethods(payload),
-    payTo: collectPayTo(payload),
+    priceDisplay: formatPriceDisplay(atomic, selected.assetSymbol, selected.assetDecimals),
+    asset: selected.assetSymbol,
+    network: selected.network,
+    assetTransferMethods: collectAssetTransferMethods(payload, selected.chainId),
+    payTo: collectPayTo(payload, selected.chainId),
     ...(advertisedMethod ? { advertisedMethod } : {}),
   }
 }

@@ -136,7 +136,7 @@ vi.mock('@/components/ConfirmDialog', () => ({
 vi.mock('@/components/AccountSignersCard', () => ({
   default: (props: { accountAddress?: string }) => (
     <div data-testid="account-signers-card" data-safe-address={props.accountAddress}>
-      Backup &amp; recovery
+      Who can approve
     </div>
   ),
 }))
@@ -178,8 +178,8 @@ function overview(
     accounts: [],
     spend: {
       scope: 'mainnet',
-      d7: { ...zeroWindow, refusals: { budget: 0, scope: 0, failed: 0, haven: 0 } },
-      d30: { ...zeroWindow, refusals: { budget: 0, scope: 0, failed: 0, haven: 0 } },
+      d7: { ...zeroWindow, refusals: { budget: 0, expired: 0, scope: 0, failed: 0, haven: 0 } },
+      d30: { ...zeroWindow, refusals: { budget: 0, expired: 0, scope: 0, failed: 0, haven: 0 } },
       topMerchant7d: null,
       failedIntents7d: 0,
       balance_by_day: [],
@@ -256,7 +256,7 @@ describe('AccountDetailClient', () => {
       refetch: vi.fn(),
     })
     mockUseBudgetRemaining.mockReturnValue({ data: null, loading: false })
-    mockUseAttentionDismissals.mockReturnValue({ dismissedIds: [], dismiss: vi.fn() })
+    mockUseAttentionDismissals.mockReturnValue({ acknowledgements: new Map(), dismiss: vi.fn() })
     mockUseAccountSigners.mockReturnValue({
       signers: { account_address: SAFE.account_address, passkeys: [{ key_id: 'k1', created_at: '2026-05-12T00:00:00Z' }], owner_address: null },
       loadError: false,
@@ -621,7 +621,7 @@ describe('AccountDetailClient', () => {
             status: 'active',
             accountId: 'safe-1',
             accountName: 'Main account',
-            accountChainId: 8453,
+            accountChainId: 8453, budgetEndedAt: null,
             allowances: [],
             budgets: [
               {
@@ -640,8 +640,8 @@ describe('AccountDetailClient', () => {
             ],
             receivedSubBudgets: [],
             stats: {
-              d7: { gross: { usd: 0, eur: 0, sek: 0 }, net: { usd: 0, eur: 0, sek: 0 }, approx: false, payments: 0, refusals: { budget: 0, scope: 0, failed: 0, haven: 0 } },
-              d30: { gross: { usd: 0, eur: 0, sek: 0 }, net: { usd: 0, eur: 0, sek: 0 }, approx: false, payments: 0, refusals: { budget: 0, scope: 0, failed: 0, haven: 0 } },
+              d7: { gross: { usd: 0, eur: 0, sek: 0 }, net: { usd: 0, eur: 0, sek: 0 }, approx: false, payments: 0, refusals: { budget: 0, expired: 0, scope: 0, failed: 0, haven: 0 } },
+              d30: { gross: { usd: 0, eur: 0, sek: 0 }, net: { usd: 0, eur: 0, sek: 0 }, approx: false, payments: 0, refusals: { budget: 0, expired: 0, scope: 0, failed: 0, haven: 0 } },
               lastPaymentAt: null,
               lastCounterparty: null,
             },

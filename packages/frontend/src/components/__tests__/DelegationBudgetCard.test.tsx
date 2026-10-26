@@ -524,6 +524,41 @@ describe('DelegationBudgetCard (#833)', () => {
     }
   })
 
+  // #4353: "Budget ending"'s Renew links `?renew=<hash>`, which opens that
+  // live budget's Edit, prefilled with its own limits, and tidies the URL.
+  it('?renew= opens the live budget\'s Edit and tidies the URL (#4353)', async () => {
+    const restore = withSearch(`?renew=${'0x' + 'ab'.repeat(32)}`)
+    const replace = vi.spyOn(window.history, 'replaceState')
+    try {
+      mockGet.mockReturnValue([budget()])
+      render(<DelegationBudgetCard {...PROPS} />)
+      expect(await screen.findByRole('dialog', { name: 'Edit budget' })).toBeTruthy()
+      expect(replace).toHaveBeenCalledWith(null, '', '/agents/agent-1')
+    } finally {
+      replace.mockRestore()
+      restore()
+    }
+  })
+
+  it('?renew= with an unknown or no-longer-active hash opens nothing (#4353)', async () => {
+    for (const [hash, rows] of [
+      ['0x' + 'ef'.repeat(32), [budget()]],
+      ['0x' + 'ab'.repeat(32), [budget({ status: 'revoked', is_live: false })]],
+    ] as const) {
+      const restore = withSearch(`?renew=${hash}`)
+      try {
+        mockGet.mockReturnValue([...rows])
+        const { unmount } = render(<DelegationBudgetCard {...PROPS} />)
+        await waitFor(() => expect(mockGet).toHaveBeenCalled())
+        await act(async () => {})
+        expect(screen.queryByRole('dialog', { name: 'Edit budget' })).toBeNull()
+        unmount()
+      } finally {
+        restore()
+      }
+    }
+  })
+
   // #3695 (B3): the grant form is collapsed once a budget exists — but a
   // `?grant=` link must still land on the build it carries, prefilled.
   it('?grant= opens the collapsed form prefilled even with an active budget present (#3695)', async () => {
@@ -1736,7 +1771,7 @@ describe('DelegationBudgetCard hero states (#4226)', () => {
     net: { usd: netUsd, eur: netUsd, sek: netUsd * 10 },
     approx: false,
     payments,
-    refusals: { budget: 0, scope: 0, failed: 0, haven: 0 },
+    refusals: { budget: 0, expired: 0, scope: 0, failed: 0, haven: 0 },
   })
 
   const stats: DashboardAgentStats = {
@@ -1834,8 +1869,15 @@ describe('DelegationBudgetCard hero states (#4226)', () => {
     expect(screen.getByText('Last 30 days')).toBeTruthy()
     const grid = screen.getByText('Spent', { selector: 'dt' }).closest('dl')!
     // Plain matchers over the class list, so a miss is an AssertionError.
-    expect([...grid.classList]).toEqual(expect.arrayContaining(['grid', 'grid-cols-3']))
+    // #4400: two rows below `sm` (Spent alone, then Payments and Last paid),
+    // three across from `sm` — changed on purpose from #4260's grid-cols-3.
+    expect([...grid.classList]).toEqual(expect.arrayContaining(['grid', 'grid-cols-2', 'sm:grid-cols-[minmax(max-content,1fr)_minmax(0,1fr)_minmax(0,1fr)]']))
+    expect([...grid.classList]).not.toContain('grid-cols-3')
     expect(grid.querySelectorAll(':scope > div')).toHaveLength(3)
+    const spentCell = grid.querySelector(':scope > div') as HTMLElement
+    expect([...spentCell.classList]).toEqual(expect.arrayContaining(['col-span-2', 'sm:col-span-1']))
+    // #4400: no break-words on the Spent cell — the figure never wraps.
+    expect([...figure('Spent').classList]).not.toContain('break-words')
     // Spent is Amount size="md": text-xl on the Amount span itself (#4259).
     // #4274: the figure is d30's NET — 8.25, never the 12.50 gross the hero
     // used to read and the dashboard does not show.
@@ -1950,8 +1992,12 @@ describe('DelegationBudgetCard hero states (#4226)', () => {
     mockGet.mockReturnValue([heroBudget()])
     render(<DelegationBudgetCard {...PROPS} statsLoading />)
     const skeleton = screen.getByLabelText('Loading the last 30 days')
-    // #4260: three label-and-value bar pairs, the shape of the figures.
-    expect(skeleton.querySelector('.grid-cols-3')?.children).toHaveLength(3)
+    // #4260: three label-and-value bar pairs, the shape of the figures —
+    // #4400: in the loaded layout's grid (two rows below `sm`).
+    const bars = skeleton.querySelector('.grid-cols-2')
+    expect([...(bars?.classList ?? [])]).toContain('sm:grid-cols-3')
+    expect(bars?.children).toHaveLength(3)
+    expect([...(bars?.children[0]?.classList ?? [])]).toEqual(expect.arrayContaining(['col-span-2', 'sm:col-span-1']))
   })
 
   it('a retired agent renders no Last 30 days column, even when handed stats', () => {

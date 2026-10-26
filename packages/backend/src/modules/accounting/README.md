@@ -3,8 +3,8 @@
 The non-asserting accounting feed (epic #491) delivers each settled agent
 payment to the user's accounting software as a **draft source document**:
 supplier, amount, date, description, receipt attached — never a voucher row, a
-BAS account or a VAT verdict. Fortnox is the first provider; the module is
-provider-generic since #2862 (epic #2858), and this note is the recipe for the
+BAS account or a VAT verdict. Fortnox was the first provider and Accounted
+(#3017) the second; the module is provider-generic since #2862 (epic #2858), and this note is the recipe for the
 next one. Operations are in
 [`docs/operations/accounting-feed.md`](../../../../../docs/operations/accounting-feed.md);
 the architecture is in
@@ -16,10 +16,11 @@ the architecture is in
 |---|---|---|
 | **descriptor** | `registry.ts` (`AccountingProvider` in `provider.ts`) | data: id, display name, `authKind` (`oauth2` \| `api_key`), `capabilities` (`attachments`, `verify`, `revoke`, `companyInfo`), `availability` (`live` \| `coming_soon`), `requiredScopes` |
 | **connector** | `<provider>-connector.ts`, implements `AccountingConnector` (`connector.ts`) | code: `isConnected`, `pushTransaction`, `verify`, `getCompanyInfo`, `revoke` |
-| **connection row** | `infra/repositories/accounting-connections.ts` | the user's grant, encrypted at rest (`infra/secrets.ts`), one row per (user, provider), exactly one active destination per user |
+| **connection row** | `infra/repositories/accounting-connections.ts` | the user's grant, encrypted at rest (`infra/secrets.ts`), one row per (user, provider), at most one active destination per user (a partial unique index, migration 080) |
 
-A provider can be **listed without code** — Accounted, Light and Igdrasil are
-`coming_soon` descriptors today, and `GET /accounting/providers` shows them.
+A provider can be **listed without code** — Light and Igdrasil are
+`coming_soon` descriptors today (Fortnox and Accounted are `live`), and
+`GET /accounting/providers` shows them.
 Only a `live` provider with a registered connector accepts a connect
 (`assertConnectable` in `registry.ts`).
 
@@ -44,8 +45,9 @@ The routes (`routes/accounting-connections.ts`) and the feed (`feed-orchestrator
    path — the row is updated, `settings`, `feed_from`, the active flag and
    the sync history are kept. `api_key`: `api-key-flow.ts` validates the
    key by calling your connector's `getCompanyInfo` and stores it encrypted;
-   for a provider that declares webhooks (Accounted, #3019) the same flow
-   then registers the three delivery-confirmation subscriptions against
+   for Accounted (#3019) — the one provider wired for webhooks, by
+   `registerAccountedWebhooksAdapter` in `connections.ts`, not by a
+   descriptor field — the same flow then registers the three delivery-confirmation subscriptions against
    the public API origin, tears the previous ones down on a reconnect, and
    flags the row `needs_attention` when that half fails — the feed keeps
    working (`accounted-webhooks.ts`).
@@ -82,7 +84,10 @@ The routes (`routes/accounting-connections.ts`) and the feed (`feed-orchestrator
      which is what `missingScopes` on the API reads back.
    - `verify(userId, externalRef, paymentId)` reads back the record and
      reports `registered` / `booked` / `missing: 'deleted' | 'foreign_invoice'`
-     (a record at that number that is not ours).
+     (a record at that number that is not ours). Accounted's descriptor sets
+     `capabilities.verify: false`, and its connector answers verify from
+     Haven's own record with zero provider calls, so it cannot report a
+     booking (`accounted-connector.ts`); nothing generic does that for you.
    - `getCompanyInfo(secrets)` reports the company behind the grant —
      `externalCompanyId` (the provider's tenant id; Fortnox: `DatabaseNumber`),
      `name`, and the ledger's `baseCurrency` — which is also the currency the
@@ -181,7 +186,12 @@ The routes (`routes/accounting-connections.ts`) and the feed (`feed-orchestrator
    on reconnect — and runs the real orchestrator and flows; your harness supplies HTTP fixtures
    under `__tests__/fixtures/<provider>/` (see the Fortnox runner — its
    fixtures are hand-authored in the shapes the #494 spike recorded, not raw
-   captures). An `api_key` connector's `getCompanyInfo` must throw a
+   captures). The conformance runner's skips (`conformanceSkipsFor`) come
+   from the descriptor's capabilities and from the harness's own
+   `declares.baseCurrency: false`: Accounted skips the attachment cases,
+   case 4's booking halves and the base-currency cases, and
+   `connector-conformance-skips.test.ts` pins exactly which. An `api_key`
+   connector's `getCompanyInfo` must throw a
    `ProviderError` with status 401/403 for a rejected key — that is what the
    flow maps to `InvalidApiKeyError`; anything else surfaces as a 500. It must
    pass before the descriptor goes `live`.
@@ -204,7 +214,9 @@ signed header; Tier 2 receipt hash under the flag and its seven limits));
 the funding leg rides along as `fundingTxHash`
 for the receipt PDF. When no verified settlement was recorded inside the
 merchant-report grace window (15 minutes, `domain/merchant-report-grace.ts` —
-the same clock the payment status uses; the #3888 sweep scans from the
+the same clock the payment status uses; only a deployment whose sole chain is
+Base Sepolia, `HAVEN_DEPLOY_CHAIN_IDS=84532`, may lower it to 0–15 minutes
+with `MERCHANT_REPORT_GRACE_MIN_OVERRIDE`; the #3888 sweep scans from the
 funding confirm, so a chain-detected hash lands inside it), the payment is
 pushed once under the FUNDING hash, and `txHashIsFunding` is true — render
 that as a labelled funding reference (Fortnox: `Tx 0x… (funding leg).`). The

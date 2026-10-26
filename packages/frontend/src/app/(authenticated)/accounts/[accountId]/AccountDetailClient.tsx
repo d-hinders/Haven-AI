@@ -141,7 +141,7 @@ export default function AccountDetailClient() {
   const { data: overview, loading: overviewLoading, error: overviewError, refetch: refetchOverview } =
     useDashboardOverview()
   const { data: budgetRemaining, loading: budgetRemainingLoading } = useBudgetRemaining()
-  const { dismissedIds: serverDismissedIds } = useAttentionDismissals({ accounts: overview?.accounts })
+  const { acknowledgements } = useAttentionDismissals({ accounts: overview?.accounts })
 
   // Find this account from user's list
   const account = user?.accounts?.find((s) => s.id === accountId)
@@ -202,7 +202,7 @@ export default function AccountDetailClient() {
           overview,
           budgetRemaining: budgetRemaining ?? null,
           accountNames,
-          dismissedIds: new Set(serverDismissedIds),
+          acknowledgements,
         })
       : []
 

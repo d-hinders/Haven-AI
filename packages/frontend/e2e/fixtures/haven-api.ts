@@ -670,6 +670,8 @@ export const dashboardOverview = {
       merchantName: null,
     },
     failedIntents7d: 1,
+    // #4324: the latest recorded step of any failed intent in the window (sent when there is one).
+    lastFailedIntentAt: '2026-10-08T14:20:00.000Z',
     // 30 days, most recent last — days WITHOUT a snapshot are ABSENT from the
     // real wire; the harness generates a dense series so a gap never renders.
     balance_by_day: Array.from({ length: 30 }, (_, i) => {
@@ -689,7 +691,7 @@ export const dashboardOverview = {
       status: testAgent.status,
       accountId: testSafe.id,
       accountName: testSafe.name,
-      accountChainId: testSafe.chain_id,
+      accountChainId: testSafe.chain_id, budgetEndedAt: null,
       // #2264: same derived projection as `testAgent.allowances`, in the
       // dashboard route's camelCase wire shape (`routes/dashboard.ts`).
       allowances: [
@@ -729,7 +731,8 @@ export const dashboardOverview = {
           net: { usd: 7.5, eur: 6.83, sek: 80.7 },
           approx: false,
           payments: 4,
-          refusals: { budget: 1, scope: 0, failed: 0, haven: 0 },
+          // #4324: d7 carries the latest refusal time of each non-empty bucket.
+          refusals: { budget: 1, expired: 0, scope: 0, failed: 0, haven: 0, lastBudgetAt: '2026-10-08T11:05:00.000Z' },
         },
         d30: {
           gross: { usd: 50.0, eur: 45.5, sek: 538.0 },
@@ -738,7 +741,7 @@ export const dashboardOverview = {
           approxByCurrency: { usd: false, eur: true, sek: true },
           unpricedByCurrency: { usd: false, eur: false, sek: false },
           payments: 14,
-          refusals: { budget: 2, scope: 1, failed: 1, haven: 0 },
+          refusals: { budget: 2, expired: 0, scope: 1, failed: 1, haven: 0 },
         },
         lastPaymentAt: '2026-10-09T09:41:00.000Z',
         lastCounterparty: {
@@ -755,7 +758,7 @@ export const dashboardOverview = {
       status: 'paused' as const,
       accountId: testSafe.id,
       accountName: testSafe.name,
-      accountChainId: testSafe.chain_id,
+      accountChainId: testSafe.chain_id, budgetEndedAt: null,
       allowances: [],
       budgets: [
         {
@@ -783,14 +786,22 @@ export const dashboardOverview = {
           net: { usd: 3.6, eur: 3.28, sek: 38.76 },
           approx: false,
           payments: 2,
-          refusals: { budget: 0, scope: 0, failed: 1, haven: 1 },
+          refusals: {
+            budget: 0,
+            expired: 0,
+            scope: 0,
+            failed: 1,
+            haven: 1,
+            lastFailedAt: '2026-10-07T16:40:00.000Z',
+            lastHavenAt: '2026-10-07T17:15:00.000Z',
+          },
         },
         d30: {
           gross: { usd: 24.0, eur: 21.84, sek: 258.4 },
           net: { usd: 15.6, eur: 14.2, sek: 167.96 },
           approx: false,
           payments: 7,
-          refusals: { budget: 1, scope: 0, failed: 1, haven: 2 },
+          refusals: { budget: 1, expired: 0, scope: 0, failed: 1, haven: 2 },
         },
         lastPaymentAt: '2026-10-07T18:02:00.000Z',
         lastCounterparty: {
@@ -810,7 +821,7 @@ export const dashboardOverview = {
       status: 'pending_approval' as const,
       accountId: 'safe-sepolia',
       accountName: 'Showcase account',
-      accountChainId: 84532,
+      accountChainId: 84532, budgetEndedAt: null,
       setupStatus: 'awaiting_connection',
       allowances: [],
       budgets: [],
@@ -821,14 +832,14 @@ export const dashboardOverview = {
           net: { usd: 0, eur: 0, sek: 0 },
           approx: false,
           payments: 0,
-          refusals: { budget: 0, scope: 0, failed: 0, haven: 0 },
+          refusals: { budget: 0, expired: 0, scope: 0, failed: 0, haven: 0 },
         },
         d30: {
           gross: { usd: 0, eur: 0, sek: 0 },
           net: { usd: 0, eur: 0, sek: 0 },
           approx: false,
           payments: 0,
-          refusals: { budget: 0, scope: 0, failed: 0, haven: 0 },
+          refusals: { budget: 0, expired: 0, scope: 0, failed: 0, haven: 0 },
         },
         lastPaymentAt: null,
         lastCounterparty: null,
@@ -1198,13 +1209,18 @@ export async function mockHavenApi(page: Page) {
         item_kind: string
         account_id?: string
         agent_id?: string
+        period_end?: string
       }
+      // #4324: the stored shape carries the acknowledgement time, and the
+      // firing budget's period end on a `budget-usage` row.
       await fulfillJson(route, {
         id: '00000000-0000-4000-8000-000000000000',
         item_kind: body.item_kind,
         account_id: body.account_id ?? null,
         agent_id: body.agent_id ?? null,
         created_at: '2026-10-09T00:00:00.000Z',
+        acknowledged_at: '2026-10-09T00:00:00.000Z',
+        acknowledged_period_end: body.period_end ?? null,
       })
       return
     }

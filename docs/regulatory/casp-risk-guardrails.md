@@ -91,7 +91,7 @@ covers:
   - packages/sdk/src/merchant-discovery.test.ts
 satisfied-by:
   - docs/regulatory/casp-changelog/**
-last-verified: "2026-10-23"
+last-verified: "2026-10-25"
 ---
 
 > **Re-verified unchanged (#4265, 2026-10-22, published CLI boundary):** the
@@ -115,6 +115,16 @@ last-verified: "2026-10-23"
 > advice, settlement or merchant-acquiring surface changes; Haven still
 > signs nothing. Scope: the guidance text only; the document-wide
 > `last-verified` date is not re-stamped.
+
+> **Re-verified unchanged (#4408, 2026-10-25, migration comment truthing):**
+> the diff touches one covered file — `db/migrations/066_catalog_submissions.ts`
+> — in its doc comment only: the status-progression block now says `delisted`
+> is set by operator SQL and that no lifecycle path sets it (verified by
+> sweep on `dev`), replacing the stale "operator action, or lifecycle expiry"
+> wording. No covered payment, signing, key, custody, advice, settlement or
+> merchant-acquiring surface changes; the migration's DDL is untouched.
+> Scope: the migration comment only; the document-wide `last-verified` date
+> is not re-stamped.
 
 # Haven CASP / MiCA Risk Minimisation Guardrails
 
@@ -420,7 +430,7 @@ Preserve these facts as non-negotiable implementation invariants:
 
 **Delegation rail (epic #821) — the only live rail (epic #1440, 2026-08; roster
 pinned by [`packages/backend/src/__tests__/execution-rail-live-census-pin.test.ts`](../../packages/backend/src/__tests__/execution-rail-live-census-pin.test.ts),
-#2680):** the MetaMask Hybrid DeleGator account type carries every invariant above one-to-one per [`docs/security/delegation-rail-security-model.md`](../security/delegation-rail-security-model.md) (§2, implemented as CI checks in #831). Two formerly Safe-specific formulations generalised rather than weakened: "Safe-compatible UIs" became the independent exit path (#832, DEMONSTRABLE — live-verified enumerate + owner-signed revoke with no Haven involvement; see [`docs/exit/README.md`](../exit/README.md)), and "Safe transactions approved by the user" became owner-signed delegations. The payment path (#829) moves funds ONLY via an owner-signed budget delegation (the agent's own, directly or through its task-budget child, or, for a sub-budget, the delegating agent's, reached through that agent's signed children), redeemed through audited enforcers that carry the budget, recipient and expiry on-chain; Haven relays sponsored operations and signs nothing (invariants 5-d/7-d/11/12 in CI).
+#2680):** the MetaMask Hybrid DeleGator account type carries every invariant above one-to-one per [`docs/security/delegation-rail-security-model.md`](../security/delegation-rail-security-model.md) (§2, implemented as CI checks in #831). Two formerly Safe-specific formulations generalised rather than weakened: "Safe-compatible UIs" became the independent exit path (#832, DEMONSTRABLE — live-verified enumerate + owner-signed revoke with no Haven involvement on Base Sepolia, 2026-07-11; the exit page covers Base and Base Sepolia and reads each delegation's revoke status on-chain since #4390. One boundary is stated rather than hidden: a passkey works only on the site it was created on, so an owner whose only signer is a passkey signs the revoke through Haven's site, and a Haven-independent exit needs a wallet signer on the account; see [`docs/exit/README.md`](../exit/README.md)), and "Safe transactions approved by the user" became owner-signed delegations. The payment path (#829) moves funds ONLY via an owner-signed budget delegation (the agent's own, directly or through its task-budget child, or, for a sub-budget, the delegating agent's, reached through that agent's signed children), redeemed through audited enforcers that carry the budget, recipient and expiry on-chain; Haven relays sponsored operations and signs nothing (invariants 5-d/7-d/11/12 in CI).
 
 **The legacy Safe AllowanceModule rail is RETIRED (epic #1440, owner decision 2026-08-14, phasing approved 2026-08-24).** The closure sequence — inflow, spend, machinery, activation, the allowance read surface, the approval queue, and finally rendering — is recorded once in the [decision log](../archive/decision-log.md) and is not restated here (#2640). Two of its entries are recorded in a later section than the others: the [retire the Safe rail entirely (#1440)](../archive/decision-log.md#2026-08-14--retire-the-safe-rail-entirely-1440) section carries inflow, spend, machinery, activation and the approval queue, while the allowance read surface (#2020) and rendering (#2413) are under [retirement is deletion, not accommodation](../archive/decision-log.md#2026-09-02--retirement-is-deletion-not-accommodation-2413) — the log is ordered newest-first, so a reader following one anchor alone sees five of the seven. The dates this document must carry are the owner decisions themselves: **2026-08-14** to retire the rail, phasing approved **2026-08-24**, and **2026-09-02** that retirement is deletion rather than accommodation — the last of which is why the account, agent and dashboard list queries filter to `account_type = 'delegator_hybrid'`. What survives is deliberate and narrow: existing Safe accounts stay user-owned, and their rows are untouched and still readable to a direct database query — but no account, agent or dashboard surface displays them, so "readable" is a statement about the data and about a narrow, named set of surfaces — never a blanket claim in either direction. The transactions surface is deliberately NOT among those: `LIST_BASIC_ACCOUNTS_FOR_USER_SQL` (renamed from `LIST_BASIC_SAFES_FOR_USER_SQL` in #2932, query unchanged) **and** `LIST_AGENTS_FOR_TRANSACTION_FILTERS_SQL` (both in `infra/repositories/transaction-history.ts`, which carries no rail predicate anywhere) mean `GET /transactions`, `GET /transactions/filters` and — since #2871 — `GET /transactions/export.csv` still span every account **and agent** row a user owns, legacy included: a legacy account's name and its agents' names still render in that screen's account and initiator picklists, and since the export reads the same unfiltered account list, that history is downloadable as a file and not merely rendered. Stated with the agent half because a first pass named only the account half, which understated the exception. `POST /safe/exec` — owner-signed execution relayed for gas (owner authority, not a policy rail — it also carried #1229 passkey recovery) — stayed open as the rail's last live behaviour until **#2847 (2026-09-11, owner decision 2026-09-10) deleted it outright with the passkey signer deployer, the Safe details read, the `/user/owners` directory and `POST /passkeys` enrolment**, so no Safe-rail address answers with live behaviour any more: the six tombstones, the fail-closed middleware and `infra/chain/relayer-reads.ts` — named `rails/allowance-module.ts` until #2850 renamed it to what it is — as shared reads only, with no code path able to execute an AllowanceModule spend, are what remains. Where this document names Safe mechanics below, it is describing that retired baseline, never a live agent-spend control.
 
@@ -1412,7 +1422,7 @@ is still re-derived server-side from the authenticated subject, whether API-key
 generation stays server-side, where the user JWT is stored and sent, and whether
 anything in the client began deciding rather than relaying.
 
-## Scope of the current `last-verified` (2026-10-23, #4303)
+## Scope of the current `last-verified` (2026-10-25, weekly docs audit #3645)
 
 The front-matter date is date-only by the #1496 chain reset, which leaves it
 unable to say **how much** of the document a re-verification covered. That
@@ -1422,58 +1432,42 @@ is the failure a `last-verified` exists to prevent. So the scope lives here,
 where it has room to be honest, and it is rewritten — not appended to — by
 whoever bumps the date next.
 
-**Re-read end to end against `ffca80f36`** (#4303, from the staleness audit
-#3645). The 2026-10-05 pass it replaces read `c3df5b19`. Between the two, 109
-CASP shards were added (`git diff --name-only --diff-filter=A c3df5b19
-ffca80f36 -- docs/regulatory/casp-changelog/`). Their perimeter verdicts were
-scanned, and none records an authority widening. The four marked WIDENED
-(#3649, #3661, #4120, #4122) widen the money-path classification list, recorded
-under *What `covers:` must span*. What was checked:
+**Re-verified against `615686369`** (from the staleness audit #3645; the
+replaced 2026-10-23 pass read `ffca80f36` end to end, #4303). This was a
+targeted pass over the week's drift, not a second full re-read: 27 covered
+commits since 10-23, all narrowing or doc-fix in kind.
 
-- **Every file, symbol, route and test the body names** was checked to exist
-  at `ffca80f36`: every path-like token mechanically, plus the named tests
-  (`allowance-rail-retired.test.ts`'s #2245 and #2274 cases, both
-  `non-custody-onchain-*.contract.test.ts` suites, the census pin) and symbols
-  (`resolveExecutionRail`, `requireDelegationBound`, `assertNonAsserting`,
-  `SUPPORTED_X402_EXPECTED_VERSIONS`, `legacyBookkeepingEnabled`,
-  `HAVEN_HOSTED_MCP_URL`). Paths the body names as deleted or renamed are
-  history by its own wording and were left as such.
-- **Measured claims were re-measured:** the money-path pin
-  (`node --test scripts/ci/money-path.test.mjs`: 23/23, now 50 of 67 globs),
-  the `infra/chain/**` and `infra/repositories/**` sizes, and the release-bump
-  write set (six `package.json`, five `CHANGELOG.md`, six source version
-  constants).
-- **Behaviour claims were read against the code they name:** the owner-CLI
-  allow-list, the CLI's revoke, rotate-key and base-URL paths, the passport
-  receipt key's boot refusal, the merchant-receipt fetch (still string-level
-  host blocking, as the #956 note says), both accounting connectors, and the
-  agent detail page's on-chain caption.
-
-**Corrected in this pass:** the retired-rail list-query count, the deleted
-`SafeCapableSigner`, the agent page's caption, the CLI's `--api` flag and its
-revoke guard, the owner-CLI allow-list, the Accounted connector, and the two
-measurements under *What `covers:` must span*.
-
-**Deliberately NOT covered by this date, each for a reason that is not
-laziness:**
-
-- **The inline *Current state* notes' history.** Each note's present-tense
-  claims were checked as above. Its dated narrative of how a property came to
-  hold was read, not re-derived commit by commit.
-- **The historical bullet log below** — frozen as of 2026-08-12 by
-  construction. Re-verifying it would be re-litigating merged shards, which
-  `casp-changelog/README.md` forbids in as many words.
-- **The MiCA / ESMA / Finansinspektionen / EBA citations under *Regulatory
-  Context*** — these are legal claims, not code claims. Nothing in this pass
-  was a legal review, and a date that implied one would be worse than no date.
-- **The #1985 relayer-owned dust-Safe balances** — the four addresses, their
-  ~$0.14 in USDC and their per-delegate allowance state are live Base mainnet
-  reads. Operator work; unchanged here, and unverified here.
-- **The #832 exit story's live demonstration** — cross-referenced to
-  `docs/exit/README.md`, not re-executed. The claim that it *was* demonstrated
-  stands on that document, not on this pass.
-- **The #3333 receive-side counsel position** — recorded, not asserted;
-  whether counsel has confirmed it is outside a code re-read.
+- **Every named file, symbol and test was re-checked to exist at this head:**
+  `requireDelegationBound` (`modules/x402/settlement-sweeper.ts`),
+  `assertNonAsserting` (`modules/accounting/fortnox-connector.ts`),
+  `resolveExecutionRail`, `SUPPORTED_X402_EXPECTED_VERSIONS`
+  (`signer/src/capabilities.ts`), `legacyBookkeepingEnabled` and
+  `HAVEN_HOSTED_MCP_URL` (`config.ts`), `modules/passport/issuance.ts`,
+  `routes/__tests__/allowance-rail-retired.test.ts`, both
+  `non-custody-onchain-*.contract.test.ts` suites, and the census pin.
+- **Measured claims were re-measured:** `node --test
+  scripts/ci/money-path.test.mjs` — 23/23 pass, the pin holds at the current
+  globs (the "50 of 67" figure stands as measured at #4303).
+- **The fail-closed sweep attribution is intact after #4075** (proof-header
+  settlement reports, AuthorizationUsed↔Transfer pairing): the observation
+  path still passes `requireDelegationBound: true`
+  (`settlement-sweeper.ts:764`), and the never-from-transfer-shape property
+  is unchanged.
+- **The week's behaviour changes are narrowings, each shard-covered:**
+  #4376's `delegation_expired` refusal (an expired-only budget now answers
+  403 with the end date — authority-narrowing, in `modules/budget-scope/`),
+  #4407's catalog probe cooldown (availability), #4372 part I (README prose),
+  #4405 (skill-text paths). CASP shards exist for the week
+  (`2026-10-24-4389.md`, `2026-10-24-4390.md`, `2026-10-25-4372.md`,
+  `2026-10-25-4407.md`, `2026-10-25-4415.md`, and the
+  `2026-10-23-0.11.0-alpha.0-release.md` release shard that carries #4075
+  and #4376).
+- **Deliberately NOT covered by this date, as before:** the inline *Current
+  state* notes' dated history (present-tense claims were checked; narratives
+  were read, not re-derived), the frozen historical bullet log, the MiCA /
+  ESMA / Finansinspektionen / EBA citations (legal claims, no legal review
+  here), the #1985 dust-Safe live balances, the #832 exit story's live
+  demonstration, and the #3333 counsel position (recorded, not asserted).
 
 ## Verification log
 
@@ -1503,7 +1497,9 @@ appending bullets to one shared EOF inherited exactly that collision (four
 PRs in one day, 2026-08-12, #1366). Separate FILES merge cleanly the way
 separate lines never quite did. The bullet list below is the frozen
 historical log up to 2026-08-12; `last-verified` above now means a genuine
-re-read of the BODY claims (the weekly #1248 audit), never a per-PR bump.
+re-read of the BODY claims (the weekly docs audit — `docs-audit.yml`, Mondays,
+upserting tracking issue #3645; #1248 was one closed instance of it), never a
+per-PR bump.
 
 - **#997** — covers updated (lib/machine-payments.ts moved into modules/mpp/**; the shared token-resolution primitive lives in domain/payment-token.ts) — no perimeter change, the same routes/repositories still enforce it.
 - **#998** — covers + body re-read after the lib/ fold (execution-rail.ts -> rails/, fortnox-connector.ts already under modules/reporting/, accounting-entry.ts/catalog-discovery.ts/merchant-catalog.ts/safe-deployer.ts relocated) — pure path move, the perimeter and the non-asserting Fortnox invariant are unchanged.

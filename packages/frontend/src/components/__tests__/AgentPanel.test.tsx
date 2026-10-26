@@ -31,7 +31,7 @@ vi.mock('@/hooks/useBudgetRemaining', () => ({
   useBudgetRemaining: () => mockUseBudgetRemaining(),
 }))
 vi.mock('@/hooks/useAttentionDismissals', () => ({
-  useAttentionDismissals: () => ({ dismissedIds: new Set<string>(), dismiss: vi.fn() }),
+  useAttentionDismissals: () => ({ acknowledgements: new Map(), dismiss: vi.fn() }),
 }))
 
 vi.mock('next/navigation', () => ({
@@ -612,6 +612,21 @@ describe('AgentPanel page header (#4209)', () => {
     expect(screen.queryByRole('button', { name: 'Organizations' })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'More agent actions' }))
     expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Labels', 'Organizations'])
+  })
+
+  it("passes Connect agent and the ⋯ trigger straight to PageHeader's wrapping actions row (#4401)", () => {
+    setAgents([agent()])
+    render(<AgentPanel />)
+
+    const connect = screen.getByRole('button', { name: 'Connect agent' })
+    const row = connect.parentElement as HTMLElement
+    expect(row.className.split(/\s+/)).toContain('flex-wrap')
+    expect(row.parentElement?.tagName).toBe('HEADER')
+    // The ⋯ menu's own root is the row's second child: its own item, not
+    // sharing a wrapper with Connect agent.
+    expect(row.children).toHaveLength(2)
+    expect(row.children[0]).toBe(connect)
+    expect(row.children[1].contains(screen.getByRole('button', { name: 'More agent actions' }))).toBe(true)
   })
 
   it('has no "Agents N" count chip: the summary line owns the count', () => {

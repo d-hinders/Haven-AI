@@ -2,15 +2,20 @@
 
 The private operations console (#3515, epic #3507). A Next.js app — the same
 Next major as `packages/frontend` — that signs founders in through GitHub and
-reads through the backend's `/ops/*` surface (#3509). It defines no primitives
-of its own; everything visual comes from `@haven_ai/ui` (#3508), and shared
+reads through the backend's `/ops/*` surface (#3509). The one page that does
+not is Doc health, which reads `/ops-doc-health.json`, a report the build
+writes (`next.config.ts`). The console defines no primitives of its own: its
+components, tokens and type ramp come from `@haven_ai/ui` (#3508), and shared
 primitives belong in `packages/ui`, not here.
 
-Two visual choices are made here rather than in `@haven_ai/ui`. The sign-in
-button uses the shared `lg` size, an ops-only density choice (#3584). And the
-font: the root layout loads Inter through `next/font/google`, exactly as the
-dashboard does (#3584). `next/font` fetches the files at build time and serves
-them from `/_next/static/media`, so the CSP's `font-src 'self'` holds and the
+Three visual choices are made here rather than in `@haven_ai/ui`. The sign-in
+button uses the shared `lg` size, an ops-only density choice (#3584). The
+sign-in card's backend picker, shown when the registry offers more than one
+environment, is a native `<select>` styled with the `--v2-*` tokens, because
+`@haven_ai/ui` has no select primitive. And the font: the root layout loads
+Inter through `next/font/google`, exactly as the dashboard does (#3584).
+`next/font` fetches the files at build time and serves them from
+`/_next/static/media`, so the CSP's `font-src 'self' data:` holds and the
 browser never contacts Google; a Google Fonts outage fails the build, not the
 page.
 
@@ -23,7 +28,8 @@ NEXT_PUBLIC_OPS_ENVIRONMENTS='{"dev":"https://api.dev.example","prod":"https://a
 ```
 
 Keys are environment labels; the key `prod` is production. Origins must be
-`https`, except `localhost`, which may use http. An environment absent from
+`https`, except a loopback host (`localhost`, `127.0.0.1` or `[::1]`), which may
+use http. An entry that fails that rule is dropped, not an error. An environment absent from
 the registry is not offered. A registry that cannot offer any environment
 shows a config error screen instead of a console.
 
@@ -31,7 +37,8 @@ The Vercel Preview scope never contains `prod` (`VERCEL_ENV=preview` strips
 it server-side), so preview deployments cannot be promoted into production by
 an env-var slip.
 
-A full-width red banner shows on every page whenever `prod` is selected.
+A full-width red banner shows on every signed-in page whenever `prod` is
+selected. It is part of the shell, which wraps every console page.
 
 ## Sign-in and token handling
 
@@ -40,8 +47,8 @@ The handoff contract is shared with the backend (#3509):
 1. The app generates a nonce, stores `{nonce, backendOrigin}` in
    `sessionStorage`, and navigates to
    `<backendOrigin>/ops/auth/github/start?return_to=<ops origin>&nonce=<n>`.
-2. On return, before the first render, the app scrubs the URL fragment with
-   `history.replaceState`. The fragment is either
+2. On return, the client root renders nothing until it has scrubbed the URL
+   fragment with `history.replaceState`, so no content paints from that URL. The fragment is either
    `#token=<ops token>&nonce=<n>` or `#error=<code>&nonce=<n>`; the error
    codes (`not_allowed`, `two_factor_required`, `github_denied`,
    `github_unavailable`, `missing_code`) each render as a sign-in message. A
@@ -61,7 +68,7 @@ sign-in.
 npm run dev -w packages/ops
 ```
 
-With no local backend running, set the registry to a backend that is:
+Point the registry at a backend that is running, for example a local one:
 
 ```
 NEXT_PUBLIC_OPS_ENVIRONMENTS='{"dev":"http://localhost:3001"}' npm run dev -w packages/ops

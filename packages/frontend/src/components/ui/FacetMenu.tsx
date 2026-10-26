@@ -118,13 +118,17 @@ export function FacetMenu({ facet, value, onChange, allLabel: allLabelOverride, 
   }
 
   return (
-    <div ref={menu.wrapperRef} className="relative inline-flex min-w-0 max-w-full">
+    // `sm:max-w-[20rem]` (#4401): from `sm` a header's actions row sizes to
+    // max-content, so `max-w-full` alone lets a long selected name push the
+    // header wide; the bound makes the summary below truncate there too. The
+    // full name stays in the trigger's text, so its accessible name keeps it.
+    <div ref={menu.wrapperRef} className="relative inline-flex min-w-0 max-w-full sm:max-w-[20rem]">
       <button {...menu.triggerProps} data-active={active} className={listTriggerClasses(active)}>
         <span className={active ? '' : 'text-[var(--v2-ink-3)]'}>{facet.label}:</span>
         {' '}
         {/* `min-w-0 truncate`: a long SELECTED label truncates inside the
             facet row instead of stretching the trigger past it (#4150). */}
-        <span className="min-w-0 truncate font-medium">{summary}</span>
+        <span className="min-w-0 truncate font-medium" title={summary}>{summary}</span>
         <Icon
           icon={ChevronDown}
           className={`h-3.5 w-3.5 shrink-0 motion-safe:transition-transform ${menu.open ? 'rotate-180' : ''}`}

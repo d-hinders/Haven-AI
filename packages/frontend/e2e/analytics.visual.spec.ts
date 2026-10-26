@@ -14,7 +14,7 @@
  *
  * ── The capture matrix ───────────────────────────────────────────────────────
  *
- * Three scenarios × two viewports × two colour schemes = twelve baselines, all
+ * Four scenarios × two viewports × two colour schemes = sixteen baselines, all
  * named `<scenario>-<viewport>[-dark].png` under
  * `e2e/__screenshots__/analytics.visual.spec.ts/`.
  *
@@ -101,7 +101,12 @@
  */
 import { expect, test, type Page } from '@playwright/test'
 import { VISUAL_SKIP_REASON, VISUAL_SPECS_ENABLED } from './support/visual-mode'
-import { dismissMobileSidebar, mockHavenApi, seedAuthenticatedSession } from './fixtures/haven-api'
+import {
+  dismissMobileSidebar,
+  expectNoHorizontalOverflow,
+  mockHavenApi,
+  seedAuthenticatedSession,
+} from './fixtures/haven-api'
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — plain .mjs; the SINGLE source of evidence viewports, shared
 // with the #896 captures, the /design-system gate (#897) and product-routes.
@@ -238,11 +243,13 @@ const COPY = {
    * The two agents' budget figures, word for word what `formatBudgetTokenValue`
    * prints for the fixture delegations (`formatAllowanceForToken` at USDC's
    * 6 decimals, minimumFractionDigits 2): '214.00 of 250.00 USDC' and
-   * '5.00 of 500.00 USDC'. Rendered TWICE per agent — above the desktop
-   * cell's bar, and inside the mobile row's `budgetLine` — so 2 at either
-   * width, exactly one of them on screen (#3038 structure run: the first
-   * draft omitted the '.00' and resolved 0; the house vitest pin is
-   * AgentsTable.test.tsx's `214\.00 of 250\.00 USDC`).
+   * '5.00 of 500.00 USDC'. Rendered ONCE per agent, inside the mobile row's
+   * `budgetLine`: the desktop cell's own figure line is gone (#4426) — its
+   * figures ride the shared `style: 'row'` caption, which a stale read
+   * replaces with the unread caption — so 1 in the DOM, on screen at mobile
+   * only (#3038 structure run: the first draft omitted the '.00' and
+   * resolved 0; the house vitest pin is AgentsTable.test.tsx's
+   * `214\.00 of 250\.00 USDC`).
    */
   budgetOf250: '214.00 of 250.00 USDC',
   budgetOf500: '5.00 of 500.00 USDC',
@@ -275,7 +282,13 @@ const OVERVIEW_FAILURE = analyticsOverviewFailure
 type OverviewBody = typeof analyticsOverview | typeof analyticsOverviewEmpty
 
 type Scenario = {
-  name: 'populated' | 'empty' | 'error'
+  name: 'populated' | 'empty' | 'error' | 'filtered'
+  /**
+   * The query the page is opened with. `filtered` (#4401) lands on
+   * `?agentId=agent-research`, whose agent the `/agents` handler then names
+   * with {@link LONG_AGENT_NAME}: the header state that ran 420 px wide at 390.
+   */
+  query?: string
   /** What `GET /analytics/overview` answers with. `null` = the 503. */
   body: OverviewBody | null
   /**
@@ -307,6 +320,12 @@ function section(page: Page, testId: string) {
 async function expectExactlyOneVisible(row: ReturnType<Page['getByTestId']>, text: string) {
   await expect(row.getByText(text, { exact: true }).filter({ visible: true })).toHaveCount(1)
 }
+
+/**
+ * A long agent name (#4401): at 390 it fills the facet's row and truncates, so
+ * the Period picker wraps under it; from `sm` the facet's bound truncates it.
+ */
+const LONG_AGENT_NAME = 'Quarterly procurement research agent for the Nordic region'
 
 const SCENARIOS: Scenario[] = [
   {
@@ -405,20 +424,22 @@ const SCENARIOS: Scenario[] = [
       await expect(agents.getByText(COPY.agentRetired)).toHaveCount(2)
       await expectExactlyOneVisible(agents, COPY.agentResearch)
       await expectExactlyOneVisible(agents, COPY.agentRetired)
-      // Each delegation's budget renders its FIGURES by a different medium per
-      // half: the desktop table prints them above the cell, the mobile rows
+      // Each delegation's budget FIGURES print once per half at most: the
+      // desktop cell states them only through the shared `style: 'row'`
+      // caption (#4426 dropped the figure line above it), the mobile rows
       // join them with `budgetLine`. Neither half measures the budget any
       // more (#3806): the fixture's read is stale — its `period_end` precedes
       // `FROZEN_NOW`, the `refilled-updating` state — so the used amount
       // belongs to a finished period, no `role=progressbar` renders, and the
-      // row says the period couldn't be read. (The role is an
-      // accessibility-tree role, so at mobile, where the desktop half is
-      // `display:none`, a bar count reads 0 on both halves for the same
-      // page.)
-      await expect(agents.getByText(COPY.budgetOf250)).toHaveCount(2)
-      await expect(agents.getByText(COPY.budgetOf500)).toHaveCount(2)
-      await expect(agents.getByText(COPY.budgetOf250).filter({ visible: true })).toHaveCount(1)
-      await expect(agents.getByText(COPY.budgetOf500).filter({ visible: true })).toHaveCount(1)
+      // desktop cell says the period couldn't be read instead of stating
+      // figures. (The role is an accessibility-tree role, so at mobile, where
+      // the desktop half is `display:none`, a bar count reads 0 on both
+      // halves for the same page.)
+      await expect(agents.getByText(COPY.budgetOf250)).toHaveCount(1)
+      await expect(agents.getByText(COPY.budgetOf500)).toHaveCount(1)
+      const figuresOnScreen = vp.width >= 1024 ? 0 : 1
+      await expect(agents.getByText(COPY.budgetOf250).filter({ visible: true })).toHaveCount(figuresOnScreen)
+      await expect(agents.getByText(COPY.budgetOf500).filter({ visible: true })).toHaveCount(figuresOnScreen)
       await expect(agents.getByRole('progressbar')).toHaveCount(0)
       await expect(agents.getByText(COPY.unreadBudget)).toHaveCount(2)
       // The caption lives in the DESKTOP cell only (`BudgetCell`); the mobile
@@ -532,6 +553,34 @@ const SCENARIOS: Scenario[] = [
     },
   },
   {
+    name: 'filtered',
+    query: '?agentId=agent-research',
+    // The UNFILTERED body on purpose: this scenario pins the header (the
+    // facet set to a long name), not a filtered report — the Agents table
+    // below still lists both agents. A filtered body is not a fixture shape
+    // the harness declares (#4401 design review, nit).
+    body: analyticsOverview,
+    async assert(page, vp) {
+      // The filter landed: the facet names the long agent and tints.
+      const facet = page.getByRole('button', { name: `Agent: ${LONG_AGENT_NAME}` })
+      await expect(facet).toHaveCount(1)
+      await expect(facet).toHaveAttribute('data-active', 'true')
+      const period = page.getByRole('button', { name: COPY.periodTrigger })
+      await expect(period).toHaveCount(1)
+      await expect(page.getByTestId('analytics-tiles')).toHaveCount(1)
+      // The header holds both controls inside its own box: at 390 Period
+      // wraps to a second line rather than pushing the page (#4401).
+      const facetBox = await facet.boundingBox()
+      const periodBox = await period.boundingBox()
+      const headerBox = await page.getByTestId('analytics-page').locator('header').boundingBox()
+      expect(facetBox && periodBox && headerBox).toBeTruthy()
+      expect(periodBox!.x + periodBox!.width).toBeLessThanOrEqual(headerBox!.x + headerBox!.width + 1)
+      expect(facetBox!.x + facetBox!.width).toBeLessThanOrEqual(headerBox!.x + headerBox!.width + 1)
+      if (vp.width < 640) expect(periodBox!.y).toBeGreaterThan(facetBox!.y)
+      expect(await expectNoHorizontalOverflow(page)).toMatchObject({ hasOverflow: false })
+    },
+  },
+  {
     name: 'error',
     body: null,
     async assert(page) {
@@ -603,7 +652,7 @@ const SCENARIOS: Scenario[] = [
  *     from a same-named Next route or a static asset, so the house strips it
  *     before comparing and keeps the `GET` test.
  */
-async function serveOverview(page: Page, body: OverviewBody | null) {
+async function serveOverview(page: Page, body: OverviewBody | null, filtered = false) {
   await page.route('**/api/**', async (route) => {
     const request = route.request()
     const path = new URL(request.url()).pathname.replace(/^\/api/, '')
@@ -617,7 +666,7 @@ async function serveOverview(page: Page, body: OverviewBody | null) {
         contentType: 'application/json',
         body: JSON.stringify({
           agents: [
-            { id: 'agent-research', name: 'Research agent', status: 'active' },
+            { id: 'agent-research', name: filtered ? LONG_AGENT_NAME : 'Research agent', status: 'active' },
             { id: 'agent-retired', name: 'Data-feed agent', status: 'paused' },
           ],
         }),
@@ -698,10 +747,10 @@ test.describe('analytics visual regression', () => {
 
         // BEFORE `goto`: the page reads `Date.now()` during its first render.
         await page.clock.setFixedTime(FROZEN_NOW)
-        await serveOverview(page, scenario.body)
+        await serveOverview(page, scenario.body, scenario.query !== undefined)
 
         await page.setViewportSize({ width: vp.width, height: vp.height })
-        await page.goto('/analytics')
+        await page.goto(`/analytics${scenario.query ?? ''}`)
 
         // The route, not a redirect. `ProtectedRoute` renders `null` while auth
         // resolves and can send an unseeded session to /onboarding; a capture of

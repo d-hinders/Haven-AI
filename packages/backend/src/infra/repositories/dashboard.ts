@@ -32,6 +32,7 @@
 
 import pool from '../../db.js'
 import type { Executor } from '../transaction.js'
+import { endedDelegationSql } from './delegation-budgets.js'
 import { DELEGATION_RAIL_JOIN, spendNetFactorSql } from './analytics.js'
 import { listReceivedGrantsForAgents, type ReceivedGrantRow } from './sub-budgets.js'
 
@@ -697,31 +698,52 @@ export async function findLastOutgoingIntentAt(
 /**
  * Refusal ROW counts per bucket, per agent, for both windows (#3803) — rows,
  * not distinct reasons (the `aggregateRefusalsForUserByAgent().refusals`
- * trap the issue names). Buckets: `budget` = delegation_budget_exceeded +
- * delegation_expired, `scope` = no_delegation_for_target, `failed` =
+ * trap the issue names). Buckets: `budget` = delegation_budget_exceeded,
+ * `expired` = delegation_expired (#4353: split out of `budget` — an ended
+ * budget is its own "Budget ended" item; the user-level `budgetStops` stays
+ * the route's COMBINED budget + expired sum), `scope` = no_delegation_for_target, `failed` =
  * onchain_revert, `haven` = relayer_budget. Chain-scoped like the spend
  * block; the user-level figure is the caller's SUM across agents (a refusal
  * row has exactly one agent, so summing per-agent row counts IS the row
  * count — the "not a sum of per-agent counts" rule is about DISTINCT
  * merchants, not refusal rows).
+ *
+ * #4324: the `last_*_7` columns are the 7-day window's latest refusal time
+ * per bucket — the event an acknowledged "Needs attention" item re-arms on.
+ * They come from the same scan as the counts (no second read), and only the
+ * 7-day window carries them: the items fire on 7-day counts.
  */
 export const REFUSAL_BUCKETS_BY_AGENT_SQL = `SELECT r.agent_id,
-    COUNT(*) FILTER (WHERE r.reason IN ('delegation_budget_exceeded', 'delegation_expired')
+    COUNT(*) FILTER (WHERE r.reason = 'delegation_budget_exceeded'
                        AND r.created_at >= $2 AND r.created_at < $3)::text AS budget_7,
+    COUNT(*) FILTER (WHERE r.reason = 'delegation_expired'
+                       AND r.created_at >= $2 AND r.created_at < $3)::text AS expired_7,
     COUNT(*) FILTER (WHERE r.reason = 'no_delegation_for_target'
                        AND r.created_at >= $2 AND r.created_at < $3)::text AS scope_7,
     COUNT(*) FILTER (WHERE r.reason = 'onchain_revert'
                        AND r.created_at >= $2 AND r.created_at < $3)::text AS failed_7,
     COUNT(*) FILTER (WHERE r.reason = 'relayer_budget'
                        AND r.created_at >= $2 AND r.created_at < $3)::text AS haven_7,
-    COUNT(*) FILTER (WHERE r.reason IN ('delegation_budget_exceeded', 'delegation_expired')
+    COUNT(*) FILTER (WHERE r.reason = 'delegation_budget_exceeded'
                        AND r.created_at >= $4 AND r.created_at < $3)::text AS budget_30,
+    COUNT(*) FILTER (WHERE r.reason = 'delegation_expired'
+                       AND r.created_at >= $4 AND r.created_at < $3)::text AS expired_30,
     COUNT(*) FILTER (WHERE r.reason = 'no_delegation_for_target'
                        AND r.created_at >= $4 AND r.created_at < $3)::text AS scope_30,
     COUNT(*) FILTER (WHERE r.reason = 'onchain_revert'
                        AND r.created_at >= $4 AND r.created_at < $3)::text AS failed_30,
     COUNT(*) FILTER (WHERE r.reason = 'relayer_budget'
-                       AND r.created_at >= $4 AND r.created_at < $3)::text AS haven_30
+                       AND r.created_at >= $4 AND r.created_at < $3)::text AS haven_30,
+    MAX(r.created_at) FILTER (WHERE r.reason = 'delegation_budget_exceeded'
+                       AND r.created_at >= $2 AND r.created_at < $3) AS last_budget_7,
+    MAX(r.created_at) FILTER (WHERE r.reason = 'delegation_expired'
+                       AND r.created_at >= $2 AND r.created_at < $3) AS last_expired_7,
+    MAX(r.created_at) FILTER (WHERE r.reason = 'no_delegation_for_target'
+                       AND r.created_at >= $2 AND r.created_at < $3) AS last_scope_7,
+    MAX(r.created_at) FILTER (WHERE r.reason = 'onchain_revert'
+                       AND r.created_at >= $2 AND r.created_at < $3) AS last_failed_7,
+    MAX(r.created_at) FILTER (WHERE r.reason = 'relayer_budget'
+                       AND r.created_at >= $2 AND r.created_at < $3) AS last_haven_7
   FROM payment_refusals r
   JOIN agents a ON a.id = r.agent_id
   ${DELEGATION_RAIL_JOIN}
@@ -734,13 +756,20 @@ export const REFUSAL_BUCKETS_BY_AGENT_SQL = `SELECT r.agent_id,
 export interface RefusalBucketRow {
   agent_id: string
   budget_7: string
+  expired_7: string
   scope_7: string
   failed_7: string
   haven_7: string
   budget_30: string
+  expired_30: string
   scope_30: string
   failed_30: string
   haven_30: string
+  last_budget_7: Date | null
+  last_expired_7: Date | null
+  last_scope_7: Date | null
+  last_failed_7: Date | null
+  last_haven_7: Date | null
 }
 
 /** Same parameter contract as `listDashboardSpendGroups`. */
@@ -762,8 +791,54 @@ export async function listRefusalBucketsByAgent(
   return result.rows
 }
 
-/** Failed payment intents in the 7-day window — a COUNT, not a fiat sum. */
-export const FAILED_INTENTS_7D_SQL = `SELECT COUNT(*)::text AS failed_intents
+/**
+ * #4353: per agent, the latest `expires_at` (unix seconds, string) among its
+ * `active` delegation rows whose window has CLOSED — exactly the rows #3802's
+ * live read (`spendableDelegationSql`) filters out, and the same narrow
+ * predicate as `FIND_EXPIRED_DELEGATION_FOR_TOKEN_SQL` (#4352), grouped for
+ * all agents in one read. `status = 'active'` because the status CHECK has no
+ * expired value (#3542), so a revoked/replaced/pending row never counts.
+ * Chain-scoped to the agent's own account (`d.chain_id = sa.chain_id`, on the
+ * delegation rail), so the field can never name another chain's row. DATABASE
+ * clock, like every other liveness predicate. Display-only: nothing here
+ * authorises or moves money.
+ */
+export const LATEST_ENDED_BUDGET_BY_AGENT_SQL = `SELECT d.agent_id, MAX(d.expires_at)::text AS ended_at
+  FROM agent_delegations d
+  JOIN agents a ON a.id = d.agent_id
+  ${DELEGATION_RAIL_JOIN}
+  WHERE d.agent_id = ANY($1)
+    AND d.chain_id = sa.chain_id
+    AND ${endedDelegationSql('d')}
+  GROUP BY d.agent_id`
+
+export async function listLatestEndedBudgetByAgent(
+  agentIds: string[],
+  db: Executor = pool,
+): Promise<Map<string, string>> {
+  if (agentIds.length === 0) return new Map()
+  const result = await db.query<{ agent_id: string; ended_at: string }>(
+    LATEST_ENDED_BUDGET_BY_AGENT_SQL,
+    [agentIds],
+  )
+  return new Map(result.rows.map((row) => [row.agent_id, row.ended_at]))
+}
+
+/**
+ * Failed payment intents in the 7-day window — a COUNT, not a fiat sum — and
+ * (#4324) the latest failure time of any failed intent in the window, which
+ * the unattributed "Payments failed" acknowledgement re-arms on.
+ *
+ * (#4378) `failed_at` records WHEN a row became `failed` — the three failure
+ * writers stamp it in the same UPDATE. A row stamped at its true failure
+ * time re-arms the item at that time: an intent the reconciler moves to
+ * `failed` long after its last recorded step, and after the owner
+ * acknowledged, DOES re-arm. Rows with no stamp (pre-migration rows) keep
+ * the #4370 fallback — `GREATEST(created_at, signed_at, submitted_at)`,
+ * which ignores NULLs — the closest time such a row carries.
+ */
+export const FAILED_INTENTS_7D_SQL = `SELECT COUNT(*)::text AS failed_intents,
+    MAX(COALESCE(pi.failed_at, GREATEST(pi.created_at, pi.signed_at, pi.submitted_at))) AS last_failed_intent_at
   FROM payment_intents pi
   JOIN agents a ON a.id = pi.agent_id
   ${DELEGATION_RAIL_JOIN}
@@ -773,6 +848,12 @@ export const FAILED_INTENTS_7D_SQL = `SELECT COUNT(*)::text AS failed_intents
     AND pi.created_at < $3
     AND COALESCE(pi.chain_id, 0) = ANY($4)`
 
+export interface FailedIntents7d {
+  count: number
+  /** Null when the window holds no failed intent. */
+  lastAt: Date | null
+}
+
 /** `userId` is REQUIRED; `[from7, to)` on `created_at`. */
 export async function countFailedIntents7d(
   userId: string,
@@ -780,12 +861,14 @@ export async function countFailedIntents7d(
   from7: string,
   to: string,
   db: Executor = pool,
-): Promise<number> {
-  const result = await db.query<{ failed_intents: string }>(FAILED_INTENTS_7D_SQL, [
-    userId,
-    from7,
-    to,
-    chainIds,
-  ])
-  return Number(result.rows[0]?.failed_intents ?? '0')
+): Promise<FailedIntents7d> {
+  const result = await db.query<{ failed_intents: string; last_failed_intent_at: Date | null }>(
+    FAILED_INTENTS_7D_SQL,
+    [userId, from7, to, chainIds],
+  )
+  const row = result.rows[0]
+  return {
+    count: Number(row?.failed_intents ?? '0'),
+    lastAt: row?.last_failed_intent_at ? new Date(row.last_failed_intent_at) : null,
+  }
 }

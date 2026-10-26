@@ -38,13 +38,18 @@ export type PaymentRefusalReason =
 /** The closed `source` set — mirrors migration 087's CHECK exactly. */
 export type PaymentRefusalSource = 'x402_authorize' | 'payment' | 'redeem' | 'hosted_prepare'
 
-/** The `detail` allowlist — mirrors migration 086's CHECK exactly. */
+/**
+ * The `detail` allowlist — mirrors migration 086's CHECK as widened by 118
+ * (#4352): `budget_ended_at` marks a PRE-FLIGHT expired-budget refusal (the
+ * revert-detected rows never carry it), per #4349 decision 6 option 1.
+ */
 export const REFUSAL_DETAIL_KEYS = [
   'error_code',
   'phase',
   'next_action',
   'remaining_atomic',
   'budget_atomic',
+  'budget_ended_at',
 ] as const
 
 export type PaymentRefusalDetail = Partial<Record<(typeof REFUSAL_DETAIL_KEYS)[number], string>>

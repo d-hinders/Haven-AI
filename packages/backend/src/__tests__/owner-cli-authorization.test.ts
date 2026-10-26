@@ -3,6 +3,7 @@ import fastifyJwt from '@fastify/jwt'
 import { describe, expect, it } from 'vitest'
 import { authMiddleware } from '../middleware/auth.js'
 import { OWNER_CLI_PURPOSE, allowOwnerCli } from '../middleware/owner-cli.js'
+import { OAUTH_STATE_PURPOSE } from '../modules/accounting/oauth-state.js'
 
 /**
  * The `owner_cli` token at the door (#2526).
@@ -89,10 +90,11 @@ describe('owner_cli at the door', () => {
   })
 
   it('a DIFFERENT purpose is refused even on an opted-in route', async () => {
-    // The Fortnox OAuth state token verifies with the same secret. An opted-in
-    // route must accept `owner_cli` specifically, not "any purpose".
+    // The accounting OAuth state token (minted with OAUTH_STATE_PURPOSE)
+    // verifies with the same secret. An opted-in route must accept
+    // `owner_cli` specifically, not "any purpose".
     const app = await buildApp()
-    const token = sign(app, { sub: 'u1', email: 'u@test.dev', purpose: 'fortnox_oauth' })
+    const token = sign(app, { sub: 'u1', email: 'u@test.dev', purpose: OAUTH_STATE_PURPOSE })
     const res = await app.inject({ method: 'GET', url: '/agents', headers: { authorization: `Bearer ${token}` } })
     expect(res.statusCode).toBe(401)
     await app.close()

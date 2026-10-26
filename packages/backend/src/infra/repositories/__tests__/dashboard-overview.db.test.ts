@@ -22,6 +22,7 @@ import db from '../../../db.js'
 import { sumTotalsSpendForUser } from '../../../infra/repositories/analytics.js'
 import { deriveDelegationBudgets } from '../../../rails/delegation-budget-view.js'
 import { describeDb, initDbHarness, resetDb } from '../../__tests__/helpers/db-harness.js'
+import { bookSubmittedOutcomePending, reconcileOutcomeFailed } from '../payment-intents.js'
 import {
   countFailedIntents7d,
   DASHBOARD_SPEND_GROUPS_SQL,
@@ -29,6 +30,7 @@ import {
   listDashboardAgents,
   listDashboardMerchants,
   listDashboardSpendGroups,
+  listLatestEndedBudgetByAgent,
   listPendingAgentSetupStatuses,
   listReceivedSubBudgetsForAgents,
   listRefusalBucketsByAgent,
@@ -143,12 +145,44 @@ async function seedSweep(seed: Seed, valueAtomic: string): Promise<void> {
   )
 }
 
-async function seedRefusal(seed: Seed, reason: string): Promise<void> {
+async function seedRefusal(seed: Seed, reason: string, createdAt?: string): Promise<void> {
   await db.query(
-    `INSERT INTO payment_refusals (user_id, agent_id, chain_id, token_symbol, amount_atomic, reason, source)
-     VALUES ($1, $2, 84532, 'USDC', '1000000', $3, 'payment')`,
-    [seed.userId, seed.agentId, reason],
+    `INSERT INTO payment_refusals (user_id, agent_id, chain_id, token_symbol, amount_atomic, reason, source, created_at)
+     VALUES ($1, $2, 84532, 'USDC', '1000000', $3, 'payment', COALESCE($4::timestamptz, NOW()))`,
+    [seed.userId, seed.agentId, reason, createdAt ?? null],
   )
+}
+
+/** A `failed` intent with chosen step times (#4324: the latest recorded step). */
+async function failedIntent(
+  seed: Seed,
+  times: { createdAt: string; signedAt?: string | null; submittedAt?: string | null },
+): Promise<string> {
+  const n = ++seq
+  const inserted = await db.query<{ id: string }>(
+    `INSERT INTO payment_intents (
+       agent_id, user_id, account_address, token_symbol, token_address,
+       to_address, amount_raw, amount_human, delegate_address,
+       allowance_nonce, sign_hash, status, expires_at, chain_id,
+       created_at, signed_at, submitted_at
+     ) VALUES (
+       $1, $2, $3, 'USDC', '0x036cbd53842c5426634e7929541ec2318f3dcf7e',
+       '0x00000000000000000000000000000000000000aa', '1000000', '1.00', $4,
+       0, $5, 'failed', NOW() + INTERVAL '1 day', 84532,
+       $6::timestamptz, $7::timestamptz, $8::timestamptz
+     ) RETURNING id`,
+    [
+      seed.agentId,
+      seed.userId,
+      `0x${String(n).padStart(40, 'c')}`,
+      `0x${String(n).padStart(40, 'd')}`,
+      `0x${String(n).padStart(64, 'e')}`,
+      times.createdAt,
+      times.signedAt ?? null,
+      times.submittedAt ?? null,
+    ],
+  )
+  return inserted.rows[0].id
 }
 
 // Window bounds are computed PER TEST, not at module load — and `to` carries
@@ -350,6 +384,197 @@ describeDb('#3803 overview statements', () => {
     expect(rows[0].scope_7).toBe('0')
   })
 
+  it('#4324: each 7-day bucket carries its latest refusal time, from the same read; an empty bucket is null', async () => {
+    const userId = await seedUser()
+    const { from7, from30, to } = window()
+    const seed = await seedAccountAndAgent(userId)
+    const minutesAgo = (m: number) => new Date(Date.now() - m * 60_000).toISOString()
+    await seedRefusal(seed, 'delegation_budget_exceeded', minutesAgo(90))
+    await seedRefusal(seed, 'delegation_expired', minutesAgo(30))
+    await seedRefusal(seed, 'onchain_revert', minutesAgo(45))
+    // A 10-day-old scope refusal sits in the 30-day window only: the 7-day
+    // latest stays null, because the items fire on the 7-day counts.
+    await seedRefusal(seed, 'no_delegation_for_target', new Date(Date.now() - 10 * 86_400_000).toISOString())
+
+    const [row] = await listRefusalBucketsByAgent(userId, [84532], from30, from7, to)
+    // #4353: `delegation_expired` (30 min ago) no longer shares the budget
+    // bucket — `last_budget_7` is the 90-minute-old budget_exceeded alone and
+    // `last_expired_7` is its own 30-minute-old time. (Intentional behaviour
+    // change: this used to assert the combined bucket's latest.)
+    expect(new Date(row.last_budget_7 as Date).getTime()).toBeGreaterThan(Date.now() - 91 * 60_000)
+    expect(new Date(row.last_budget_7 as Date).getTime()).toBeLessThan(Date.now() - 89 * 60_000)
+    expect(new Date(row.last_expired_7 as Date).getTime()).toBeGreaterThan(Date.now() - 31 * 60_000)
+    expect(new Date(row.last_expired_7 as Date).getTime()).toBeLessThan(Date.now() - 29 * 60_000)
+    expect(new Date(row.last_failed_7 as Date).getTime()).toBeLessThan(Date.now() - 44 * 60_000)
+    expect(new Date(row.last_failed_7 as Date).getTime()).toBeGreaterThan(Date.now() - 46 * 60_000)
+    expect(row.scope_30).toBe('1')
+    expect(row.last_scope_7).toBeNull()
+    expect(row.last_haven_7).toBeNull()
+  })
+
+  it('#4353: delegation_expired lands in `expired`, never in `budget`; the 7-day latest is its own', async () => {
+    const userId = await seedUser()
+    const { from7, from30, to } = window()
+    const seed = await seedAccountAndAgent(userId)
+    const minutesAgo = (m: number) => new Date(Date.now() - m * 60_000).toISOString()
+    await seedRefusal(seed, 'delegation_expired', minutesAgo(10))
+    await seedRefusal(seed, 'delegation_expired', minutesAgo(20))
+    await seedRefusal(seed, 'delegation_budget_exceeded', minutesAgo(60))
+    // 10 days old: 30-day window only.
+    await seedRefusal(seed, 'delegation_expired', new Date(Date.now() - 10 * 86_400_000).toISOString())
+
+    const [row] = await listRefusalBucketsByAgent(userId, [84532], from30, from7, to)
+    expect(row.budget_7).toBe('1')
+    expect(row.budget_30).toBe('1')
+    expect(row.expired_7).toBe('2')
+    expect(row.expired_30).toBe('3')
+    expect(new Date(row.last_expired_7 as Date).getTime()).toBeGreaterThan(Date.now() - 11 * 60_000)
+
+    // An agent with only budget refusals has an empty expired bucket.
+    const other = await seedAccountAndAgent(userId)
+    await seedRefusal(other, 'delegation_budget_exceeded')
+    const rows = await listRefusalBucketsByAgent(userId, [84532], from30, from7, to)
+    const otherRow = rows.find((r) => r.agent_id === other.agentId)!
+    expect(otherRow.expired_7).toBe('0')
+    expect(otherRow.last_expired_7).toBeNull()
+  })
+
+  it('#4353: budgetEndedAt — the latest expired-active row wins; revoked, live and other-chain rows never count', async () => {
+    const userId = await seedUser()
+    const seed = await seedAccountAndAgent(userId)
+    const bare = await seedAccountAndAgent(userId)
+    const revokedOnly = await seedAccountAndAgent(userId)
+    const liveOnly = await seedAccountAndAgent(userId)
+    const otherChain = await seedAccountAndAgent(userId)
+
+    const insert = async (
+      agentId: string,
+      opts: { status?: string; expiresInSec: number; chainId?: number },
+    ): Promise<void> => {
+      await db.query(
+        `INSERT INTO agent_delegations
+           (agent_id, chain_id, token_address, recipient_address, delegation_hash,
+            delegation_json, version, status, budget_atomic, period_seconds,
+            start_date, expires_at, created_at)
+         VALUES ($1, $2, $3, NULL, $4, '{}', 1, $5, '1000000', 86400,
+                 EXTRACT(EPOCH FROM NOW())::bigint - 999999,
+                 EXTRACT(EPOCH FROM NOW())::bigint + $6::bigint, NOW())`,
+        [
+          agentId,
+          opts.chainId ?? 84532,
+          USDC_84532,
+          `0x${String(++seq).padStart(64, '0')}`,
+          opts.status ?? 'active',
+          opts.expiresInSec,
+        ],
+      )
+    }
+    await insert(seed.agentId, { expiresInSec: -86_400 })
+    await insert(seed.agentId, { expiresInSec: -3_600 }) // the latest ended
+    await insert(seed.agentId, { expiresInSec: -60, status: 'revoked' }) // newer, but revoked
+    await insert(seed.agentId, { expiresInSec: 86_400 }) // live: not an ended budget
+    await insert(revokedOnly.agentId, { expiresInSec: -3_600, status: 'revoked' })
+    await insert(liveOnly.agentId, { expiresInSec: 86_400 })
+    // An expired row stamped with a chain the agent's account is not on.
+    await insert(otherChain.agentId, { expiresInSec: -3_600, chainId: 8453 })
+
+    const ended = await listLatestEndedBudgetByAgent([
+      seed.agentId,
+      bare.agentId,
+      revokedOnly.agentId,
+      liveOnly.agentId,
+      otherChain.agentId,
+    ])
+    const nowSec = Date.now() / 1000
+    expect(ended.size).toBe(1)
+    expect(Number(ended.get(seed.agentId))).toBeLessThan(nowSec - 3_500)
+    expect(Number(ended.get(seed.agentId))).toBeGreaterThan(nowSec - 3_700)
+    expect(ended.has(bare.agentId)).toBe(false)
+    expect(ended.has(revokedOnly.agentId)).toBe(false)
+    expect(ended.has(liveOnly.agentId)).toBe(false)
+    expect(ended.has(otherChain.agentId)).toBe(false)
+    expect((await listLatestEndedBudgetByAgent([])).size).toBe(0)
+  })
+
+  it('#4324: the failed-intent read returns the latest recorded step of any failed intent in the window', async () => {
+    const userId = await seedUser()
+    const { from7, to } = window()
+    const seed = await seedAccountAndAgent(userId)
+    const hoursAgo = (h: number) => new Date(Date.now() - h * 3_600_000).toISOString()
+    // Created 5 h ago, submitted 1 h ago: its latest recorded step is 1 h ago.
+    await failedIntent(seed, { createdAt: hoursAgo(5), signedAt: hoursAgo(4), submittedAt: hoursAgo(1) })
+    // Created 2 h ago, never signed: its latest step is its creation.
+    await failedIntent(seed, { createdAt: hoursAgo(2) })
+
+    const read = await countFailedIntents7d(userId, [84532], from7, to)
+    expect(read.count).toBe(2)
+    const lastMs = (read.lastAt as Date).getTime()
+    expect(lastMs).toBeGreaterThan(Date.now() - 1.1 * 3_600_000)
+    expect(lastMs).toBeLessThan(Date.now() - 0.9 * 3_600_000)
+  })
+
+  it('#4378: a reconcile-to-failed AFTER the acknowledgement re-arms the unattributed item', async () => {
+    const userId = await seedUser()
+    const { from7, to } = window()
+    const seed = await seedAccountAndAgent(userId)
+    const hoursAgo = (h: number) => new Date(Date.now() - h * 3_600_000).toISOString()
+
+    // The intent's last recorded step is 3 h ago — under the #4370 fallback
+    // this row sits BEHIND the acknowledgement the owner is about to make,
+    // so #4370 would leave the item acknowledged. Booked outcome-pending
+    // first, the real reconciler flow.
+    const intentId = await failedIntent(seed, { createdAt: hoursAgo(5), signedAt: hoursAgo(4), submittedAt: hoursAgo(3) })
+    await db.query(`UPDATE payment_intents SET status = 'submitted' WHERE id = $1`, [intentId])
+    await bookSubmittedOutcomePending({ userOpHash: `0x${'4378'.repeat(16)}`, intentId, agentId: seed.agentId })
+
+    // The owner acknowledges the unattributed item NOW.
+    const ack = await db.query<{ acknowledged_at: Date }>(
+      `INSERT INTO attention_dismissals (user_id, item_kind, agent_id, account_id)
+       VALUES ($1, 'payments-failed', NULL, NULL) RETURNING acknowledged_at`,
+      [userId],
+    )
+    const ackAt = new Date(ack.rows[0].acknowledged_at)
+
+    // The reconciler moves the row to `failed` long after its last recorded
+    // step — and after the acknowledgement. The stamp is the failure time:
+    expect(await reconcileOutcomeFailed(intentId, ' was never seen on chain after the bounded reconciliation window')).toBe(true)
+
+    const read = await countFailedIntents7d(userId, [84532], from7, to)
+    expect(read.count).toBe(1)
+    // Re-armed: lastFailedIntentAt is the reconcile time, AFTER the ack —
+    // not the 3 h-old submitted_at the #4370 fallback would have answered.
+    expect((read.lastAt as Date).getTime()).toBeGreaterThan(ackAt.getTime())
+  })
+
+  it('#4378: a stamped failed_at wins over the recorded steps; an unstamped row keeps the #4370 fallback', async () => {
+    const userId = await seedUser()
+    const { from7, to } = window()
+    const seed = await seedAccountAndAgent(userId)
+    const hoursAgo = (h: number) => new Date(Date.now() - h * 3_600_000).toISOString()
+
+    // Stamped: steps 5 h / 1 h ago, but the failure time is NOW.
+    const stampedId = await failedIntent(seed, { createdAt: hoursAgo(5), submittedAt: hoursAgo(1) })
+    await db.query(`UPDATE payment_intents SET failed_at = NOW() WHERE id = $1`, [stampedId])
+    // Unstamped (a pre-120 row): no `failed_at`, the fallback applies.
+    await failedIntent(seed, { createdAt: hoursAgo(2) })
+
+    const read = await countFailedIntents7d(userId, [84532], from7, to)
+    expect(read.count).toBe(2)
+    expect((read.lastAt as Date).getTime()).toBeGreaterThan(Date.now() - 60_000)
+
+    // And an unstamped row ALONE still answers its latest recorded step.
+    await resetDb()
+    const userId2 = await seedUser()
+    const { from7: f7, to: t2 } = window()
+    const seed2 = await seedAccountAndAgent(userId2)
+    await failedIntent(seed2, { createdAt: hoursAgo(2) })
+    const fallback = await countFailedIntents7d(userId2, [84532], f7, t2)
+    expect(fallback.count).toBe(1)
+    const fbMs = (fallback.lastAt as Date).getTime()
+    expect(fbMs).toBeGreaterThan(Date.now() - 2.1 * 3_600_000)
+    expect(fbMs).toBeLessThan(Date.now() - 1.9 * 3_600_000)
+  })
+
   it('distinct merchants over two agents paying the SAME merchant count 1 — not a sum of per-agent counts', async () => {
     const userId = await seedUser()
     const { from7, from30, to } = window()
@@ -398,7 +623,7 @@ describeDb('#3803 overview statements', () => {
     expect(last[0].x402_resource_url).toContain('api.example')
     expect(last[0].merchant_address).toBe('0x00000000000000000000000000000000000000aa')
 
-    expect(await countFailedIntents7d(userId, [84532], from7, to)).toBe(0)
+    expect(await countFailedIntents7d(userId, [84532], from7, to)).toEqual({ count: 0, lastAt: null })
     expect(await listPendingAgentSetupStatuses(userId, [seed.agentId])).toEqual(new Map())
     expect(await listReceivedSubBudgetsForAgents(userId, [seed.agentId])).toEqual([])
   })

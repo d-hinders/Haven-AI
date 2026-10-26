@@ -10,7 +10,7 @@ covers:
   - packages/backend/src/routes/discovery.ts
   - packages/connect/src/api.ts
   - packages/backend/src/middleware/agentAuth.ts
-last-verified: "2026-10-05"
+last-verified: "2026-10-24"
 ---
 
 # Migration - Local MCP To Hosted MCP
@@ -76,14 +76,16 @@ The split is deliberate:
   (#1440) — a legacy Safe account cannot pay at all, and every hosted-MCP payment
   tool bottoms out in a route that answers HTTP 410 for it (#1986).
 
-API auth is identity. Signature is authority. On-chain module state is
-enforcement.
+API auth is identity. Signature is authority. On-chain policy state — the
+delegation's caveat enforcers — is enforcement.
 
 For new agents, Connect Agent 2 can create this split automatically: Haven
 creates a pending setup, the local connector generates the signing key and API
-key on the user's machine, and Haven receives the public signing address, a
+key on the user's machine, and Haven receives the one-time setup token and
+challenge id that authenticate the registration, the public signing address, a
 proof signature, the API-key hash/prefix, and non-secret setup metadata (runtime and
-connector version, server name, run mode, install capabilities, then install
+connector version, server name, run mode, connector context labels —
+environment, runtime version, config target — install capabilities, then install
 status), never the signing key or the plaintext API
 key, before wallet approval. This
 migration guide still applies to existing agents and manual hosted-MCP setups.
@@ -245,7 +247,8 @@ Ask your agent a read-only question first:
 What is my Haven budget?
 ```
 
-It should call `haven_get_allowances`. The Haven dashboard should show recent
+It should call `haven_get_agent` (identity, readiness and the live remaining
+budget in one call) or `haven_get_allowances`. The Haven dashboard should show recent
 agent activity / last activity after tool calls. Those timestamps and audit
 rows are informational; the on-chain policy is still the spend gate — the
 signed budget delegation's caveat enforcers. (A legacy Safe account cannot pay
@@ -378,6 +381,18 @@ call answered 401); and Connect Agent 2's registration names its non-secret
 setup metadata. Re-checked without change: the package tags, the signer flags
 and variables, the production URL default, the tool names, the erc7710
 `haven_submit` header, the hosted boot refusal, step 2, and the rest of steps 3–4.
+
+Re-verified 2026-10-24 (#4372 part E, at dev `ee7fdd27`), a full re-read.
+Changed: Connect Agent 2's registration now also names the one-time setup token
+and challenge id that authenticate it and its `connector_context` labels
+(`packages/connect/src/api.ts`, `registerSetup`); the identity/authority/
+enforcement line names the delegation's caveat enforcers instead of the retired
+module; and step 5 names `haven_get_agent`, which the hosted server's
+instructions tell every session to call first, alongside `haven_get_allowances`.
+Re-checked without change: the package tags, the signer tool list and flags,
+the hosted URL handout and variables table, the production URL default, the
+erc7710 `haven_submit` header, the #3495 compact result, the custody
+invariant, and the troubleshooting entries.
 
 ## Related Docs
 

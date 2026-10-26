@@ -3,7 +3,9 @@ owner: "@d-hinders"
 status: current
 covers:
   - packages/backend/src/openapi/**
-last-verified: "2026-09-30"
+  - scripts/db-mock-ratchet.mjs
+  - packages/backend/src/infra/__tests__/helpers/db-harness.ts
+last-verified: "2026-10-24"
 ---
 
 # Backend / API playbook
@@ -30,7 +32,7 @@ Loaded by `ship-next` for `area:backend` issues.
 - **Package gate.** `npm run typecheck -w packages/backend` and `npm run test -w packages/backend` must pass. **Run `typecheck` as the LAST step, after every test file is written or edited** — `vitest`/`tsx` strip types and do NOT type-check, so a green test run says nothing about type errors in the test itself. `tsc` is the only thing that checks `*.test.ts`; a type error there (a wrong config field, a stale mock shape) fails CI's typecheck but never the test run (#781, the #776 miss).
 - **SQL schema drift.** When the diff adds or changes a money-path query, add it to the curated list in `packages/backend/scripts/db-schema-smoke.ts` — CI applies the migrations and `PREPARE`s each query against a real Postgres, so a column/type mismatch fails in CI instead of dev (mocked route tests never validate SQL against the schema — how `agents.safe_address` reached dev, #757). Run locally against a throwaway DB with `DATABASE_URL=… npm run db:schema-smoke -w packages/backend`. Since epic #1219 the smoke is no longer the only real-database check: repository *behaviour* (idempotency, locking, transactions) is proven on the real-DB harness — see [`testing-strategy.md`](../testing-strategy.md) for which check owns what.
 - **Migrations run in a transaction — unless one says otherwise (#2150).** The runner wraps every migration in `BEGIN`/`COMMIT`, which is what makes a failed migration a non-event: the work and its `schema_migrations` row roll back together. Postgres refuses a few statements there (`CREATE INDEX CONCURRENTLY` and friends, SQLSTATE `25001`), so a migration may declare `export const transactional = false` plus a required `nonTransactionalReason` and run outside it — using `createIndexConcurrently()` from `db/concurrent-index.ts` for index builds, which handles the INVALID index a failed `CONCURRENTLY` build leaves behind. **Read `packages/backend/src/db/migrate.ts`'s header before writing one.** It is not a convenience: outside the transaction there is no rollback, so the runner substitutes *detection* (a `status = 'running'` bookkeeping row written before `up()`) and a boot that refuses rather than retries. Default to the transactional lane; the opt-out is for statements that genuinely cannot run in one.
-- **Query mocks.** For **new** route tests, mock the DB by **matching on SQL content**, not by positional order. A long `mockQuery.mockResolvedValueOnce(...).mockResolvedValueOnce(...)` chain breaks the moment an unrelated query is inserted upstream — one read-only SELECT on the authorize path once shifted 12 sequences across 3 files (#775). Prefer `mockQuery.mockImplementation((sql) => …)` dispatching on a fragment (`/FROM agent_allowances/`, `/INSERT INTO payment_intents/`), returning the right rows per pattern and a safe default otherwise. Existing positional tests migrate opportunistically when you're already editing them, not wholesale.
+- **Query mocks.** For **new** route tests, mock the DB by **matching on SQL content**, not by positional order. A long `mockQuery.mockResolvedValueOnce(...).mockResolvedValueOnce(...)` chain breaks the moment an unrelated query is inserted upstream — one read-only SELECT on the authorize path once shifted 12 sequences across 3 files (#775). Prefer `mockQuery.mockImplementation((sql) => …)` dispatching on a fragment (`/FROM agent_delegations/`, `/INSERT INTO payment_intents/`), returning the right rows per pattern and a safe default otherwise. Existing positional tests migrate opportunistically when you're already editing them, not wholesale. `npm run lint:db-mocks` (#1227, a step in CI's *Backend checks*) holds the per-file counts of `vi.mock('…/db.js')` and `mockResolvedValueOnce` to a shrink-only baseline, and database behaviour itself belongs in a repository test on the real-Postgres harness (`packages/backend/src/infra/__tests__/helpers/db-harness.ts`).
 - **Money path.** If the change carries the `money-path` label or touches any file matched by [`.github/money-path-globs.json`](../../../.github/money-path-globs.json) — the **authoritative, CI-enforced perimeter** (`scripts/ci/money-path.test.mjs` keeps the labeler in lockstep with it; e.g. `modules/x402/`, `modules/mpp/`, `routes/payments.ts`, the `rails/` files, `middleware/agentAuth.ts`, `db/migrations/`) — also load [`money.md`](money.md): characterization tests first, CASP guardrails. This playbook deliberately does **not** restate the file list; a second copy drifts the moment a refactor moves a file (this bullet named the dissolved `routes/machine-payments.ts` for a week after #997 dissolved it, #1168). The canonical skill's [perimeter reference](../../../.agents/skills/ship-next/references/money-path-perimeter.md) keeps an annotated list for the *why* behind each group — that copy is test-enforced to **equal** the JSON (`money-path.test.mjs`, #4177); this one had no such guard, hence the pointer. It was a one-way subset check until #1892, which is how `routes/agent-rekey.ts` sat in neither list: subset in one direction is not agreement. Since #1024 the classification no longer pauses the merge.
 - **Dependency boundaries (#982, absolute since #999).** `npm run lint:deps` is a **blocking** step in CI's *Backend checks*. It enforces the module-boundary rules in [`10-module-boundaries.md`](../../architecture/10-module-boundaries.md) **unconditionally** — the ratcheting baseline was driven to zero and retired by #999, so the linter simply passes or fails and new code complies from its first commit. New SQL goes in `infra/repositories/` (convention: that directory's `README.md`). **The fix is the boundary** — the only escape hatch is an inline `// dep-lint-exempt: <concrete reason>` comment on the offending import, reserved for a reviewed, deliberate exception ("bootstraps the pool before repositories exist"), never "legacy"/"TODO" (reasons under 20 chars are rejected). `no-circular` can never be waived: a cycle must be broken, not grandfathered. The lint also gauges inline-SQL call sites (`.query(` outside `infra/repositories/`) and fails if the count grows past the shrink-only ceiling in `packages/backend/dep-lint-callsite-ceiling.json` (#1166) — lock in a shrink with `node scripts/dep-lint.mjs --update-ceiling` (it refuses to raise). Rules live in `.dependency-cruiser.cjs`, which is **authoritative over the prose** in the architecture doc.
 - **Docs.** If the diff touches code a doc's `covers:` maps to, the coupling gate flags it; update those docs (see [`docs.md`](docs.md)).
@@ -52,3 +54,21 @@ and the openapi/ commits since the last verification (#3479, #3461, #3471,
 #3469, #3470, #3444, #3452, #3453) each carried their spec/route-module
 regeneration with the code, which is exactly the workflow this playbook
 prescribes.
+
+Re-verified 2026-10-24 (#4372 part D, at dev `f590d946c`). Changed: the
+query-mock bullet's example fragment named `agent_allowances`, a table
+migration `075_drop_inert_safe_rail_schema.ts` dropped; it now names
+`agent_delegations`, and the bullet states the `lint:db-mocks` ratchet
+(`scripts/db-mock-ratchet.mjs`, run in *Backend checks*) and the real-Postgres
+harness; both join `covers:`. Re-checked without change: the seven `AGENT_PAYMENT_ROUTE_FILES` in
+`spec.test.ts`, `route-coverage.test.ts` deriving its scope from
+`registeredRouteModules()`, both lists under ceilings of 1
+(`MAX_UNDOCUMENTED_ROUTES`, `MAX_UNDOCUMENTED_MODULES`), `expectMatchesSpec`
+in `response-shape.ts`, `openapi/__tests__/route-modules.generated.test.ts` and
+the `generate:`/`check:route-modules` and `generate:`/`check:api-types` scripts
+(`check:api-types` runs in CI), `db:schema-smoke`, `migrate.ts`'s
+`transactional = false` / `nonTransactionalReason` and its `'running'` row,
+`createIndexConcurrently()` in `db/concurrent-index.ts`, the money-path globs'
+examples and `money-path.test.mjs`'s labeler and perimeter-doc checks, and
+`dep-lint.mjs` (`UNWAIVABLE_RULES` = `no-circular`, the 20-character reason
+floor, `--update-ceiling` refusing to raise).

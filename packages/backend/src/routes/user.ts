@@ -10,10 +10,12 @@ import {
   updateUserWalletAddress,
 } from '../infra/repositories/users.js'
 import {
+  acknowledgeAgentItem,
+  acknowledgeUserItem,
   dismissBackupSigner,
   dismissNeedsSetup,
   listAttentionDismissals,
-  type AttentionDismissalKind,
+  type AttentionDismissalRow,
 } from '../infra/repositories/attention-dismissals.js'
 import { listAccountsForUser } from '../infra/repositories/smart-accounts.js'
 import { listAccountPasskeys, passkeyEnrollmentDates } from '../infra/repositories/hybrid-signers.js'
@@ -201,18 +203,18 @@ export default async function userRoutes(app: FastifyInstance): Promise<void> {
   // recommendation on the account page, a budget-less agent on the agent
   // page. Dismissals gate dashboard presentation only; nothing here is on
   // the payment path.
-  const toWireDismissal = (row: {
-    id: string
-    item_kind: AttentionDismissalKind
-    account_id: string | null
-    agent_id: string | null
-    created_at: string
-  }) => ({
+  //
+  // #4324 adds ACKNOWLEDGEMENTS for the event-driven kinds (migration 118):
+  // a row says the user has seen the item up to `acknowledged_at`, and the
+  // dashboard re-shows it when a newer event of that kind arrives.
+  const toWireDismissal = (row: AttentionDismissalRow) => ({
     id: row.id,
     item_kind: row.item_kind,
     account_id: row.account_id,
     agent_id: row.agent_id,
     created_at: row.created_at,
+    acknowledged_at: row.acknowledged_at,
+    acknowledged_period_end: row.acknowledged_period_end,
   })
 
   // GET /user/attention-dismissals — the caller's whole dismissal list; the
@@ -225,26 +227,54 @@ export default async function userRoutes(app: FastifyInstance): Promise<void> {
   })
 
   interface AttentionDismissalBody {
-    item_kind: AttentionDismissalKind
+    item_kind: string
     account_id?: string
     agent_id?: string
+    period_end?: string
   }
 
-  // POST /user/attention-dismissals — idempotent (a re-dismiss answers the
-  // same 201 as the first write). The kind decides which id the body must
+  // POST /user/attention-dismissals — idempotent for the permanent kinds (a
+  // re-dismiss answers the same 201 as the first write); an acknowledgement
+  // moves `acknowledged_at` forward. The kind decides which id the body must
   // carry; the shape is the spec's, refused before the handler (#3030), and
-  // the kind/shape pairing the repository's CHECK enforces again at the
-  // table edge. A foreign or unknown account/agent is a 404, never a 403 —
-  // the route does not confirm that an id exists (the same convention as
-  // contacts).
+  // the kind/shape pairing the table's CHECK enforces again. The dispatch is
+  // PER KIND (#4324 S1): before it, every kind other than `no-backup` was
+  // written as `needs-setup`, so a new kind would have hidden an agent's
+  // "Needs setup" item. A kind this switch does not know is refused. A
+  // foreign or unknown account/agent is a 404, never a 403 — the route does
+  // not confirm that an id exists (the same convention as contacts).
   app.post<{ Body: AttentionDismissalBody }>('/attention-dismissals', async (request, reply) => {
     const { sub } = request.user as { sub: string }
-    const { item_kind, account_id, agent_id } = request.body
+    const { item_kind, account_id, agent_id, period_end } = request.body
 
-    const dismissed =
-      item_kind === 'no-backup'
-        ? await dismissBackupSigner(sub, account_id as string)
-        : await dismissNeedsSetup(sub, agent_id as string)
+    let dismissed: AttentionDismissalRow | null
+    switch (item_kind) {
+      case 'no-backup':
+        dismissed = await dismissBackupSigner(sub, account_id as string)
+        break
+      case 'needs-setup':
+        dismissed = await dismissNeedsSetup(sub, agent_id as string)
+        break
+      case 'budget-reached':
+      case 'budget-scope':
+        dismissed = await acknowledgeAgentItem(sub, item_kind, agent_id as string, null)
+        break
+      case 'budget-usage':
+        dismissed = await acknowledgeAgentItem(sub, item_kind, agent_id as string, period_end as string)
+        break
+      case 'payments-failed':
+        // Per agent when the body names one; otherwise the unattributed item.
+        dismissed =
+          agent_id !== undefined
+            ? await acknowledgeAgentItem(sub, item_kind, agent_id, null)
+            : await acknowledgeUserItem(sub, item_kind)
+        break
+      case 'haven-paused':
+        dismissed = await acknowledgeUserItem(sub, item_kind)
+        break
+      default:
+        return reply.code(400).send({ error: 'Unknown item_kind' })
+    }
 
     if (!dismissed) return reply.code(404).send({ error: 'Not found' })
     return reply.code(201).send(toWireDismissal(dismissed))

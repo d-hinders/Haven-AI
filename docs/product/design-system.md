@@ -104,7 +104,8 @@ covers:
   - packages/frontend/src/components/connect-agent/CopyBlock.tsx
   - packages/frontend/src/components/connect-agent/SetupStates.tsx
   - packages/frontend/src/components/haven/DirectionMark.tsx
-last-verified: 2026-10-21
+  - packages/frontend/src/components/settings/ProfileNameEditor.tsx
+last-verified: 2026-10-25
 ---
 
 # Haven Design System
@@ -204,7 +205,7 @@ Dark brand is **lightened and desaturated**, not inverted: `#4f46e5` is ~3.9:1 o
 
 Use `.v2-brand-gradient-text` for the production app wordmark. In product UI, do not use the gradient for buttons, badges, large panels, or repeated decoration.
 
-**Four tokens leave the stylesheet ([#2729](https://github.com/d-hinders/Haven-AI/issues/2729), [#2763](https://github.com/d-hinders/Haven-AI/issues/2763)): `--v2-brand` from this table, `--v2-bg` from § *Surfaces*, `--v2-warning` from § *Semantic*, and `--v2-ink-on-brand` from § *Ink hierarchy*.** The installed-app shell — `/manifest.webmanifest`, the `<meta name="theme-color">` the root layout emits, and the generated home-screen icon routes `APP_ICONS` in `packages/frontend/src/lib/installed-app.ts` names — carries `--v2-brand` as `theme_color` and `--v2-bg` as `background_color`, with `--v2-warning` painting the badge on the dev install's icon. `--v2-ink-on-brand` paints the icon's H and badge label, separately from the splash background so a future background change cannot make either disappear. A manifest is JSON and a `<meta>` is an attribute, so those values exist as strings in `packages/frontend/src/lib/brand-colours.ts`; that file is not a second source of truth, because `src/lib/__tests__/installed-app.test.ts` parses `globals.css` and fails on any drift between the two. `BRAND_COLOURS.brand` also supplies RainbowKit's accent and the first WalletButton identicon palette stop, so those consumers cannot quietly diverge from the same token. Change the token here and in the CSS, and let that test tell you the copy moved with it — never edit the copy first.
+**Four tokens leave the stylesheet ([#2729](https://github.com/d-hinders/Haven-AI/issues/2729), [#2763](https://github.com/d-hinders/Haven-AI/issues/2763)): `--v2-brand` from this table, `--v2-bg` from § *Surfaces*, `--v2-warning` from § *Semantic*, and `--v2-ink-on-brand` from § *Ink hierarchy*.** The installed-app shell — `/manifest.webmanifest`, the `<meta name="theme-color">` the root layout emits, and the generated home-screen icon routes `APP_ICONS` in `packages/frontend/src/lib/installed-app.ts` names — carries `--v2-brand` as `theme_color` and `--v2-bg` as `background_color`, with `--v2-warning` painting the badge on the dev install's icon. `--v2-ink-on-brand` paints the icon's H and badge label, separately from the splash background so a future background change cannot make either disappear. A manifest is JSON and a `<meta>` is an attribute, so those values exist as strings in `packages/frontend/src/lib/brand-colours.ts`; that file is not a second source of truth, because `src/lib/__tests__/installed-app.test.ts` parses `packages/ui/src/tokens.css` and fails on any drift between the two. `BRAND_COLOURS.brand` also supplies RainbowKit's accent and the first WalletButton identicon palette stop, so those consumers cannot quietly diverge from the same token. Change the token here and in the CSS, and let that test tell you the copy moved with it — never edit the copy first.
 
 ### Semantic
 
@@ -217,7 +218,7 @@ Use `.v2-brand-gradient-text` for the production app wordmark. In product UI, do
 
 Same rule as v1: **never repurpose a semantic color**.
 
-**Contrast guarantee:** every ink and semantic text token meets WCAG AA (≥4.5:1) against white, its own `-soft` background, and the tinted surfaces (`--v2-surface`, `--v2-surface-2`, hover) — in BOTH themes since [#2927](https://github.com/d-hinders/Haven-AI/issues/2927) (every `ink*`-on-ground pair ≥ 4.5:1, `ink-on-brand` on brand ≥ 4.5:1, each `-soft` tint vs its foreground ≥ 3:1). Guarded per theme by `packages/frontend/scripts/contrast-check.mjs` (run in the unit suite via `src/lib/__tests__/theme-tokens.test.ts`, table on `/design-system`) on top of `packages/frontend/src/__tests__/token-contrast.test.ts` — if you change a token, the tests tell you whether it still clears the bar, in both palettes.
+**Contrast guarantee:** every ink and semantic text token meets WCAG AA (≥4.5:1) against white, its own `-soft` background, and the tinted surfaces (`--v2-surface`, `--v2-surface-2`, hover) — in BOTH themes since [#2927](https://github.com/d-hinders/Haven-AI/issues/2927) (every `ink*`-on-ground pair ≥ 4.5:1, `ink-on-brand` on brand ≥ 4.5:1, each `-soft` tint vs its foreground ≥ 3:1). Guarded per theme by `packages/frontend/scripts/contrast-check.mjs` (run in the unit suite via `src/lib/__tests__/theme-tokens.test.ts`, table on `/design-system`) on top of `packages/frontend/src/__tests__/token-contrast.test.ts` — if you change a token, the tests tell you whether it still clears the bar, in both palettes, for the pairs they hold. One set is in neither guard: the semantic text tokens on the tinted surfaces (`--v2-surface`, `--v2-surface-2`, hover). Computed by hand at `fb2da6b92` they still clear 4.5:1 (lowest: light `--v2-warning` on `--v2-surface-2`, 4.83:1; dark `--v2-danger` on hover, 5.31:1), but a token change there is not caught.
 
 ### Categorical data-viz series ([#2948](https://github.com/d-hinders/Haven-AI/issues/2948))
 
@@ -280,8 +281,8 @@ the utility from the output with no error, no warning and no class. That is how
 rendering blue-500/50 instead of brand indigo.
 
 The mechanism: every `--v2-<name>: #RRGGBB` above is paired with a channel form
-`--v2-<name>-rgb: R G B`, and `tailwind.config.js` reads the channels through an
-`<alpha-value>` placeholder. One theme entry then serves both the solid
+`--v2-<name>-rgb: R G B`, and the shared preset `packages/ui/tailwind.preset.js`
+reads the channels through an `<alpha-value>` placeholder. One theme entry then serves both the solid
 (`bg-brand`) and the translucent (`ring-brand/80`) use. Two rules follow, and
 `src/__tests__/design-token-alpha.test.ts` enforces both against the **compiled
 CSS** — source-level checking cannot see this defect, which is the whole reason
@@ -317,7 +318,8 @@ byte-identical.
 
 So the check that binds is not a spelling rule. `src/__tests__/compiled-colour-utilities.test.ts`
 reads every opacity-modified colour utility out of the product source, compiles
-it through the real `tailwind.config.js`, and asserts a colour declaration came
+it through the real Tailwind preset (`packages/ui/tailwind.preset.js`, which
+`tailwind.config.js` consumes), and asserts a colour declaration came
 out — indifferent to which shape the next one wears.
 
 **Its `KNOWN_DEAD` map is now empty, and that is the enforcement**
@@ -331,9 +333,11 @@ to quiet a failure trips a second assertion that the map stays empty. The
 escape hatch is guarded rather than merely absent.
 
 **Why this is not also a design-lint rule.** #1710 originally specified one.
-Two things ruled it out, both measurable: `design-lint.mjs` scans only
-`src/app` and `src/components` while this guard walks all of `src/`, and every
-design-lint rule takes `exempt: isMarketingSurface` — so a rule built to
+Two things ruled it out, both measurable: `design-lint.mjs` scans
+`src/app`, `src/components`, `../ui/src` and `../ops/src` (`SCAN_DIRS`), not the
+rest of the frontend's `src/`, while this guard walks all of `src/` and
+`packages/ui/src`, and every design-lint rule's exemption starts from
+`isMarketingSurface` — so a rule built to
 match the other rules' exemptions would have been blind to
 `components/marketing/`, where two of the dead call-sites it was meant to catch
 actually lived. A text rule also cannot strip comments: in #1709 an explanatory
@@ -375,7 +379,8 @@ modifier (`/75`), or the arbitrary form when the exact value matters (`/[0.78]`)
 | `--v2-shadow-modal` | `shadow-modal` |
 | `--v2-shadow-popover` | `shadow-popover` |
 
-Each is one entry in `tailwind.config.js` → `boxShadow`, and variants work
+Each is one entry in the shared preset's `boxShadow`
+(`packages/ui/tailwind.preset.js`), and variants work
 normally (`hover:shadow-card-raised`).
 
 `shadow-[var(--v2-shadow-card)]` **paints nothing** and is forbidden. A bare
@@ -397,13 +402,16 @@ every convention says it should be. So the fix is the same shape #1708 used for
 the palette — promote the token into the Tailwind theme and delete the
 arbitrary-value syntax — and the guard is the same shape too:
 `src/__tests__/shadow-token.test.ts` boots the real compiler, resolves each
-utility back to a literal shadow list in `globals.css`, and fails on any
+utility back to a literal shadow list in `packages/ui/src/tokens.css`, and fails on any
 `shadow-[var(…)]` in product source. It carries a positive control
-(`.v2-modal-backdrop`, plus `shadow-card` on the compile side) so that a "paints
+(`.v2-modal-backdrop` in `globals.css`, plus `shadow-card` on the compile side) so that a "paints
 nothing" verdict is a measurement rather than a broken reader.
 
-Cards on hover get a brand‑tinted lift only when interactive:
-`hover:shadow-[0_8px_24px_-12px_rgba(16,24,40,0.12)]` (neutral) or `hover:shadow-[0_12px_32px_-16px_rgba(79,70,229,0.30)]` (protocol cards, navigational). These are literal values rather than tokens, so they were never affected — an arbitrary value that carries its own shadow list is unambiguous and compiles fine. It is only a bare `var()` that Tailwind cannot type.
+Cards on hover get a lift only when interactive: `Card`'s
+`hover:shadow-[0_8px_24px_-12px_rgba(16,24,40,0.12)]` (`packages/ui/src/Card.tsx`)
+or the entity cards' `hover:shadow-[0_16px_34px_-28px_rgba(42,51,90,0.35)]`
+(`ui/entityCardStyles.ts`: agent, account and merchant cards). The
+brand-tinted protocol-card lift went with the protocols page (#3579). These are literal values rather than tokens, so they were never affected — an arbitrary value that carries its own shadow list is unambiguous and compiles fine. It is only a bare `var()` that Tailwind cannot type.
 
 Raised card elevation is reserved for the few surfaces that anchor a page, such as the dashboard money card and account balance card. Popover shadow is for floating menus, tooltips, and toasts.
 
@@ -430,11 +438,14 @@ five tiers above are **redeclared** in both dark blocks of
 `packages/ui/src/tokens.css`, and a call site never needs to know which theme it is in — write `shadow-card`, never
 a theme-conditional shadow.
 
-The dark form of every tier leads with a translucent **white hairline**
-(`0 0 0 1px rgba(255,255,255,.04…)`) — the border the light theme gets for free
-against a white page — and carries its ambient shadow at a much lower alpha
-than the light tier's. `--v2-inset-highlight` is the dark companion to the light
-`--v2-shadow-button` inset. The two dark declaration blocks stay byte-identical;
+The dark forms of the two card tiers lead with a translucent **white hairline**
+(`0 0 0 1px rgba(255,255,255,.04)` / `.06`) — the border the light theme gets
+for free against a white page; `card` is that hairline alone, and
+`card-raised` adds one black drop shadow. The floating tiers (button, modal,
+popover) drop the hairline and carry one black drop shadow at alpha 0.30–0.50,
+higher than the light tiers' grey (0.04–0.12), because black on near-black
+needs it. `--v2-inset-highlight` is declared in light (`.6`) and redeclared in
+both dark blocks at `.04`. The two dark declaration blocks stay byte-identical;
 `src/lib/__tests__/theme-tokens.test.ts` holds them so.
 
 The rule for a primitive choosing its dark form: prefer the hairline for
@@ -457,9 +468,11 @@ does not flip either.
 | Code blocks | `--v2-surface-code` (fixed near-black in both themes) | The code palette was authored dark; inverting the surface inverts the syntax colours |
 | Address avatar (`WalletButton`) | `.v2-avatar-chrome` | Its gradient is a hash-fixed identity palette, identical in both themes; a themed rim would vanish on one ground |
 
-The two utilities live in `globals.css` and carry `color-scheme: light` with a
-**fixed** white ground and hairline (`#ffffff` / `#e6ebf1`) — not
-`var(--v2-bg)`, which would flip to the dark ground exactly where the class
+The two utilities live in `globals.css` and both carry `color-scheme: light`.
+`.v2-light-surface` paints a **fixed** white ground and hairline
+(`#ffffff` / `#e6ebf1`), and `.v2-avatar-chrome` a fixed translucent-white rim
+(`rgba(255,255,255,0.70)` border, `0.35` inset ring) — not `var(--v2-bg)` or a
+themed token, which would flip to the dark ground exactly where the class
 exists to keep the content light. The fixed-dark code-surface rule is also why
 `design:lint`'s white/black rule exempts `ui/CodeBlock.tsx`: its `text-white/…`
 chrome is content-colour on a surface that never inverts.
@@ -667,7 +680,7 @@ in the same PR (Pattern Absorption, #901).
 
 The authenticated app uses one stable product shell:
 
-- Sidebar: 240px desktop rail at `lg` and above, white surface, subtle active tint, and a 2px brand accent bar on the active route. Below `lg` the rail is `hidden` (still in the DOM — the visual specs wait on its `User menu` kebab as a "shell has mounted" signal).
+- Sidebar: 240px desktop rail at `lg` and above, on `--v2-surface`, subtle active tint, and a 2px brand accent bar on the active route. Below `lg` the rail is `hidden` (still in the DOM — the visual specs wait on its `User menu` kebab as a "shell has mounted" signal).
 - **Below `lg`, navigation is the floating tab bar plus the More sheet** ([#2731](https://github.com/d-hinders/Haven-AI/issues/2731), [#4053](https://github.com/d-hinders/Haven-AI/issues/4053), [#4058](https://github.com/d-hinders/Haven-AI/issues/4058), [#4237](https://github.com/d-hinders/Haven-AI/issues/4237)). Primary is a five-cell pill — Home (the bar's label for `/dashboard`; the rail, the page `h1` and the route keep "Dashboard"), Agents, Activity (the bar's label for `/transactions`; the rail and the page keep "Transactions"), Accounts, and More, which opens a floating card holding everything else. Properties worth knowing before touching it:
   - **A floating pill** (#4058, dark lift #4063, concentric capsule #4237): `rounded-full`, a 1px token edge and `shadow-popover`, inset `max(12px, inset)` from the sides, `--v2-tab-bar-bottom` (`max(12px, inset)`) above the bottom edge, capped at `max-w-md` and centred. The pill paints from its own token pair, `--v2-tab-bar-bg` / `--v2-tab-bar-border` — **solid** and opaque, with no `backdrop-filter`: the owner chose near-solid over glass, and at 95% opacity page text ghosted through behind the labels. In light mode the pair aliases `--v2-bg` / `--v2-border` exactly and the popover shadow lifts the pill. In dark mode both blocks redeclare it — fill `--v2-surface-2` (`#20252f`) and edge `--v2-border-strong` (`#3a4152`) — because the dark shadow is black on near-black: against `--v2-bg` the dark edge measures **1.79:1** (up from `--v2-border`'s 1.41:1) and the fill 1.19:1, so the pill reads as a distinct surface. `--v2-tab-bar-h` is its outer height (62px): 52px cells, `p-1` (4px) on every side and the 1px border. It stays the `fixed` `<nav data-mobile-tab-bar>` itself — specs select it that way. Each cell is a full rectangle for hit-testing (Chromium hit-tests `border-radius`, so a rounded cell has dead corners); the active shape is painted by an inner `[data-tab-indicator]` span — a full capsule, concentric with the pill: it is set in by the same 5px on every side (the `p-1` padding plus the border), so its 26px radius follows the pill's 31px curve. #4058 had it `rounded-2xl` because a capsule crossed the letters of "Dashboard"; #4237 pairs the capsule with the bar-only "Home" label (`TAB_LABELS`), which keeps the curved ends off the landing tab's label instead.
   - **Tabs are selected from `baseNavItems` by ROUTE, never by index.** The bar's order differs from the rail's, so a positional read reorders the bar the next time an entry is inserted.
@@ -677,7 +690,7 @@ The authenticated app uses one stable product shell:
   - **Geometry:** a card `max(8px, inset)` in from the sides and the bottom, `rounded-3xl`, capped at `max-w-lg` and centred; it covers the tab bar. Sized to its content up to a max height, scrolling inside beyond that. Its scrim dims everything from below the status-bar band (§ *Safe areas*) to the viewport **bottom**, edge to edge — no scrim edge across the pill, no undimmed strip.
   - **Content:** a drag handle; the logo band (wordmark — not a link here — and the environment badge) beside the sheet's ✕ (44px, *Close sidebar*); the account row (name and email, #4358 — no longer a link, `/profile` is gone); one compact list of only the destinations the tab bar lacks, derived from `TAB_ROUTES` (Analytics, Accounting when shown, Marketplace, Contacts, Settings); the theme control as a three-way `SegmentedControl`; and a visible **Log out** row — no kebab.
   - **Behaviour:** a modal `role="dialog"` (`aria-modal`, #4058): while it is open the tab bar and `<main>` are `inert` and Tab cycles inside the card. Closes on the ✕, scrim tap, Escape, a downward swipe on the handle (`SWIPE_DISMISS_PX`), a destination tap and any route change; focus moves in on open and back to More on a dismissal — not on a destination tap or route change, which is why `useFocusTrap` (restore on every close) is not reused. It exists in the DOM only while open, and `data-state="open"` marks the end of its enter animation (`.v2-sheet-enter`, motion-gated) — the e2e helpers key on both.
-- Sidebar nav: 36px row height, 16px icon box, 13px medium label. (The Approvals item and its live actionable-count badge were the nav's only dynamic entry; both are deleted with the Safe rail, [#1989](https://github.com/d-hinders/Haven-AI/issues/1989) — every nav item is static now.)
+- Sidebar nav: 36px row height, 16px icon box, 13px medium label. (The Approvals item and its live actionable-count badge were deleted with the Safe rail, [#1989](https://github.com/d-hinders/Haven-AI/issues/1989). The one dynamic entry left is Accounting ([#2869](https://github.com/d-hinders/Haven-AI/issues/2869)): a muted "Coming soon" badge when hosted but not enabled, an attention dot when the feed needs attention, and hidden on self-hosted.)
 - Brand: the wordmark may use `.v2-brand-gradient-text`; do not repeat the gradient elsewhere in nav.
 - User menu: two-line user card with a kebab menu using popover shadow; destructive menu items use danger styling.
 - **No top bar** ([#4029](https://github.com/d-hinders/Haven-AI/issues/4029), epic #4027): the authenticated chrome above the scroll region is the `SafeAreaBand` — the opaque status-bar strip — and nothing else; the 2px non-production warning line #4029 added was removed the next day, because on a phone, with no label in view, it read as a rendering bug. There is no `banner` landmark; `nav` and `main` remain. Page-level CTAs go in the `PageHeader` actions, and detail pages carry their own back link above the title (#4028). The environment badge lives beside the wordmark in the logo band (rail and More sheet), with a gap between them — the app's only environment marker. Each width shows exactly one theme control: the rail footer's two-state flip at `lg` and above, the More sheet's three-way choice below it (#4053, superseding #2953 for the phone).
@@ -698,6 +711,11 @@ Use `components/ui/PageHeader.tsx` on authenticated pages instead of hand-rolled
   a quiet identity line is text that can break, not a control that must stay
   whole.
   Additive — a `PageHeader` without `meta` renders exactly as before.
+- A wrapping actions row (`actions`): `flex flex-wrap`, so two or more
+  controls drop to a second line at phone width. **Pass them as a fragment**
+  — a wrapper of the page's own without `flex-wrap` makes them one unbreakable
+  child, which is how `/analytics` ran 420 px wide at 390
+  ([#4401](https://github.com/d-hinders/Haven-AI/issues/4401)).
 - Optional `back` link above the title
   ([#4028](https://github.com/d-hinders/Haven-AI/issues/4028)): `{ href, label }`,
   naming the parent only ("Agents"). It renders `BackLink`
@@ -806,7 +824,9 @@ follows without edits.
 
 `components/haven/BudgetMeter` is the ONE progress bar for a budget
 measurement — "how much of a delegation's own period is spent". An `h-1.5`
-`--v2-surface-2` track with a `--v2-brand` fill; `role="progressbar"` with the
+`--v2-surface-2` track with a `--v2-brand` fill by default (`tone`: `warning`
+paints `bg-warning` and `muted` `--v2-ink-3`, which the agent Spending hero
+uses at 90 % used and for a paused agent, #4226); `role="progressbar"` with the
 full ARIA contract (`aria-valuemin`, `aria-valuemax`, `aria-valuenow`,
 `aria-label`). It takes `usedPercent` — **clamped to 0–100**, so an overdrawn
 or malformed read can never push the fill past its track or the ARIA value
@@ -832,8 +852,9 @@ Agents card and the account page's Agents tab) asks for the compact
 `style: 'row'` wording (#3908), and passes **no rate** (#4165, owner decision
 2026-10-20: budgets read in USDC wherever one is set): the period word in
 place of "used this period" ("1.20 of 3.00 USDC · per day · refills in 5h"),
-with an extra-budget count riding in the same line ("· +1 budget"); every
-other surface keeps the full wording. In token mode the row joins the cap and
+with an extra-budget count riding in the same line ("· +1 budget"). The agent
+page's Spending hero (#4226) and the analytics agents table (#4426) ask for
+the same `style: 'row'` caption. In token mode the row joins the cap and
 its symbol with a no-break space (#3910), so "3.00 USDC" never splits. The
 caption line can also carry an optional `trailing` node (#3989) — the
 dashboard agent row's labelled "Last paid" time: a SIBLING of the caption
@@ -846,9 +867,10 @@ three-track grid (icon, body, chevron) at every width: the bar and its
 caption line span the row between the icon and the chevron, with no time
 column and no `time` area, and the row renders no counterparty or merchant —
 the last payment shows as the time only (the wire's `lastCounterparty` is
-unchanged). The label row above the bar (token value,
-percentage) belongs to the caller: it is the caller's tabular typography, not
-part of the measurement. The fill is a token surface colour, never a series
+unchanged). A label row above the bar (token value, percentage), where a
+caller prints one, belongs to the caller: it is the caller's tabular
+typography, not part of the measurement. The analytics agents table prints
+none since #4426; its row caption carries the figures once. The fill is a token surface colour, never a series
 colour — a budget bar measures one delegation against its own period, it is
 not a category to be keyed against a legend. Recorded on
 `/design-system` → *BudgetMeter*; the analytics agents table renders through
@@ -888,6 +910,15 @@ pre-formatted, unsigned string (`value`) with an optional `symbol`, the sign
 coming only from `direction` — callers own formatting, so a `+`/`-` can never
 disagree with the tone.
 
+**A money figure never wraps (#4400).** `Amount`'s own span is
+`whitespace-nowrap`, in both modes and at every size, so the rule holds for
+every caller, not only list cells: "≈ 1 748,50 kr" never breaks into "≈" /
+"1 748,50" / "kr". The layout gives the figure room instead — a grid that
+stacks below `sm`, a row that wraps between figures — and an `Amount` must
+never sit in a track too narrow for its longest realistic figure. The rule
+covers `Amount`; a raw `formatFiat` string placed outside it is the caller's
+to keep whole.
+
 The **currency mode** (#3805) is for a figure that is already a fiat
 valuation server-side (book-time `convertedAmount`, or `approxAmount`): pass
 the unsigned magnitude (`amount`), the currency it is IN (`currency: 'SEK' |
@@ -923,8 +954,8 @@ rate AND the conversion changed the number:
 
 - **A list row never carries it** (#3950) — the transactions ledger, the
   account page's ledger and the dashboard's activity rows alike. Rows render
-  the figure plain inside a `whitespace-nowrap` cell, so a money figure never
-  wraps or truncates.
+  the figure plain, and never truncate it; `Amount` itself never wraps
+  (#4400, "A money figure never wraps" above).
 - **A booked figure never carries it** — book-time `convertedAmount` is the
   value struck when the payment happened.
 - **A token shown in the currency it is pegged to never carries it** — USDC in
@@ -965,7 +996,8 @@ colour alone is not a channel. Tones: `neutral` (which includes a budget
 reached — the banner ladder above says the same), `brand`, `warning`, and
 `danger` for real failures only. The dismiss is a button labelled
 `Dismiss: {title}` calling `onDismiss(id)`; the list holds no dismissal
-state (persistence is #3813's), and after a dismiss focus moves to the next
+state (persistence is #3813's permanent dismissals and #4324's
+acknowledgements), and after a dismiss focus moves to the next
 dismissible item's dismiss button (the last remaining one when the dismissed
 row was the last dismissible row) — counted among dismissible rows only, so
 non-dismissible rows above it never push focus past it — or to the caller's
@@ -1075,7 +1107,12 @@ by hand rather than from `StatTile`, deliberately: `StatTile.value` is a
 `string` and cannot carry an `Amount` (its "≈" and currency mode), and
 `StatTile` lives in `packages/ui`, shared with ops. Its values sit at the
 secondary-figure size (20px, `Amount size="md"`), not the inline tile's
-`text-base`; a long value wraps inside its cell, never truncates.
+`text-base`; a money figure never wraps (#4400, `Amount` is nowrap), so the
+layout gives it room: below `sm` Spent takes the whole first row and Payments
+and Last paid share the second; from `sm` the three sit across in equal
+thirds, and Spent's track widens past its third
+(`minmax(max-content, 1fr)`) only when a larger figure needs it. Nothing
+truncates.
 
 ### Money panel (#3807)
 
@@ -1113,7 +1150,17 @@ zero and while the card is "Get started". With nothing listed it shows
 "You're all caught up" — the title alone, no reason line (#3908) — only when
 the runway and budget-room facts were measured and hold
 (`attentionEmptyState`, #3902); otherwise a neutral line
-that claims nothing, and nothing at all while the budget reads load. That total — and the per-agent split below it —
+that claims nothing, and nothing at all while the budget reads load. Since
+#4324 every item except low balance and zero USDC (and #4353's "Budget
+ending", below) carries the list's dismiss control (`Dismiss: {title}`, no new `AttentionList` prop): the backup and
+"Needs setup" items are dismissed for good, the budget, scope, sponsorship
+and failure items are acknowledged until something new happens (the rules
+are `lib/dashboard-attention.ts`'s, and the recipe is in
+`screen-recipes.md` § First-Run Dashboard). An acknowledged stop counts as
+reviewed for "You're all caught up". #4353 adds two budget end-date items
+in the same list and tone (neutral): "Budget ending" (7 days ahead, Renew,
+no dismiss control) and "Budget ended", which replaces "has no budget" and
+is acknowledged until the next end date — no new `AttentionList` prop. That total — and the per-agent split below it —
 renders through § Amount: currency mode with `approx` from the
 wire's per-currency `spend.d30.approxByCurrency` (#4165) — the server applies
 the one "≈" rule, so a total re-priced at today's rate carries the `≈` only
@@ -1148,7 +1195,8 @@ alike.
 
 **`Button` has four variants, and that is the whole set — but read the next sentence before
 trusting it.** The four below were enumerated *from the source*, not from this list: the
-`Variant` union at the top of `packages/frontend/src/components/ui/Button.tsx` and the
+`Variant` union at the top of `packages/ui/src/Button.tsx` (since #3508;
+`packages/frontend/src/components/ui/Button.tsx` re-exports it) and the
 `VARIANT_CLASS` record beneath it, which cannot disagree with each other because
 `Record<Variant, string>` makes TypeScript reject a missing or extra key. **That pair is the
 authority; this section is a copy of it.** Enumerate from there whenever you need to know
@@ -1185,10 +1233,10 @@ rather than repeated per entry:
   differently again.
 - **`trailingIcon`** renders a 14px lucide `ArrowRight` after the label, at the base
   `gap-1.5`. It is available on **every** variant and on **both** elements. In
-  `ReceiveDialog.tsx` (since #4094) the `onClick` call sites are the dialog's own
-  controls — Copy address, the QR toggle, Buy with card, and the refusal state's
-  Refresh page; the link-style affordances, including the faucet card's Open
-  Circle's faucet and the explorer link, are the `href`/`<a>` form. **It does
+  `ReceiveDialog.tsx` (since #4094, cleaned by #4167) the `onClick` call sites
+  are the dialog's own controls — Copy address, Buy with card, and the refusal
+  states' Refresh page; the faucet card's Open Circle's faucet is the
+  `href`/`<a>` form. (The QR toggle and the explorer link went with #4167.) **It does
   not animate.**
   (Through #1829 this section claimed the icon "slides 2px on hover via wrapper
   `group-hover:gap-2`". It never did: `Button` sets no `group` class and no call site wraps
@@ -1213,20 +1261,21 @@ nodes.
 #### The four variants
 
 Primary — **variant**, `variant="primary"`, and the default when `variant` is omitted:
-- `bg-[var(--v2-brand)] text-white hover:bg-[var(--v2-brand-strong)]`
+- `bg-[var(--v2-brand)] text-[var(--v2-ink-on-brand)] hover:bg-[var(--v2-brand-strong)]`
 - `shadow-button`
 - focus ring `focus-visible:ring-brand/80`
 
 Ghost — **variant**, `variant="ghost"`. By a wide margin the most-used variant (see the
 distribution note below):
-- `bg-white text-[var(--v2-ink)] border border-[var(--v2-border-strong)] hover:bg-[var(--v2-surface)]`
+- `bg-[var(--v2-bg)] text-[var(--v2-ink)] border border-[var(--v2-border-strong)] hover:bg-[var(--v2-surface)]`
 - focus ring `focus-visible:ring-brand/80`
 
 Tertiary — **variant**, `variant="tertiary"`
 ([#1830](https://github.com/d-hinders/Haven-AI/issues/1830)). The *quiet* action: dismiss,
 cancel, "not now" — the escape hatch beside a committing action, never the committing action
 itself. Live at many product call sites plus the `/design-system` showcase — among them
-`ConfirmDialog`'s cancel, `ProfileClient`'s cancel edit and the dashboard's "Hide for
+`ConfirmDialog`'s cancel, `ProfileNameEditor`'s cancel edit (Settings → General,
+#4358) and the dashboard's "Hide for
 now" (in the "Needs attention" card's header since #3897; the guide
 renders inside that card, and its finished state is a one-line `SetupCompleteLine` with
 its own tertiary Dismiss). (It was eight until [#1989](https://github.com/d-hinders/Haven-AI/issues/1989)
@@ -1236,7 +1285,7 @@ deleted `settings/ManageApprovers`, which held three of them.):
 
 **Tertiary is not a quieter ghost — it is a different shape.** The two are worth
 distinguishing explicitly, because "subtle neutral button" describes both and the choice
-between them is made wrongly by default. Ghost paints a **box**: a white fill and a
+between them is made wrongly by default. Ghost paints a **box**: a `--v2-bg` fill and a
 `--v2-border-strong` outline, so at rest it reads as a control. Tertiary paints **no box at
 all**: transparent fill, no border, and dimmed `--v2-ink-2` label, so at rest it reads as
 text and only resolves into a control on hover — which is also the only variant that shifts
@@ -1254,18 +1303,19 @@ the control has to announce itself; tertiary when its context already has.
 
 Danger — **variant**, `variant="danger"`, used for destructive confirmations (agent
 revoke/remove, delete contact):
-- `bg-[var(--v2-danger)] text-white hover:bg-danger/90 shadow-button`
+- `bg-[var(--v2-danger)] text-[var(--v2-ink-on-brand)] hover:bg-danger/90 shadow-button`
 - focus ring `focus-visible:ring-danger/80` — its own tone, per *Focus rings* below
 - Note the hover is the **semantic token** `bg-danger/90`, not `bg-[var(--v2-danger)]/90`.
   The two look interchangeable and are not: an opacity modifier on a bare `var()` compiles to
   nothing, which is the whole subject of *Opacity on a token colour* above. This section
   quoted the dead form until #1830. The resting fill is safe in arbitrary-value form only
-  because it carries **no** alpha modifier; `bg-danger` is defined in `tailwind.config.js`
-  and would work there too. The mixed spelling in one class string is the tell — where the
+  because it carries **no** alpha modifier; `bg-danger` is defined in the shared preset
+  (`packages/ui/tailwind.preset.js`) and would work there too. The mixed spelling in one class string is the tell — where the
   two forms sit side by side, the one with a modifier is the one that has to be semantic.
 
-**Distribution, with the command that produced it.** Ghost dominates: 155 ghost, 31 tertiary,
-7 danger, 0 primary — 193 literal occurrences, from `packages/frontend`:
+**Distribution, with the command that produced it.** Ghost dominates: 182 ghost, 30 tertiary,
+8 primary, 5 danger — 225 literal occurrences, from `packages/frontend` (re-derived
+2026-10-25 at `fb2da6b92`):
 
 ```bash
 grep -rhoE 'variant="(primary|ghost|tertiary|danger)"' src --include='*.tsx' | sort | uniq -c
@@ -1274,11 +1324,12 @@ grep -rhoE 'variant="(primary|ghost|tertiary|danger)"' src --include='*.tsx' | s
 The command is published because it has to be: during review of #1830 two reasonable
 counting methods disagreed by roughly a factor of two, and a call-site number without its
 command is not reproducible. It misses two things by construction. **`variant` is optional**,
-so every unadorned `<Button>` is an uncounted `primary` — which is why primary shows 0 and is
+so every unadorned `<Button>` is an uncounted `primary` — which is why primary shows only 8 and is
 nonetheless the most common button in the product. And it cannot see the dynamic call
-sites (`DashboardClient.tsx:361`, `ConfirmDialog.tsx:60`, `agent-panel/ReplaceSigningKeyModal.tsx:904`;
-a fourth, `connect-agent/CopyBlock.tsx`, became a literal `ghost` in #4065 when its `primary`
-prop lost its last caller). The shape of the distribution is the point, not the integer.
+sites — ten at `fb2da6b92` (`grep -rnE 'variant=\{' src --include='*.tsx' | grep -v __tests__`),
+e.g. `dashboard/MoneyPanel.tsx`, `ConfirmDialog.tsx` and
+`agent-panel/ReplaceSigningKeyModal.tsx` (`connect-agent/CopyBlock.tsx` became a literal
+`ghost` in #4065 when its `primary` prop lost its last caller). The shape of the distribution is the point, not the integer.
 Re-derived 2026-09-30 for #3195 by running the published command: the previous figure
 (112/11/5/1 — 129, derived by #2203 at `ba4e045b`) had drifted through merged work to
 155/31/7/0 — 193, the same shape (ghost dominates, primary lives in the unadorned call
@@ -1302,9 +1353,9 @@ exact failure the opening paragraph warns about, so the enumeration is a command
 rather than a number you have to trust. From `packages/frontend`:
 
 ```bash
-# Controls that hand-copy Button's base class string.
-grep -rn "rounded-md font-medium tracking-tight" src --include='*.tsx' \
-  | grep -v 'src/components/ui/Button.tsx'
+# Controls that hand-copy Button's base class string. (Button's own string
+# lives in packages/ui/src/Button.tsx since #3508, outside this scan.)
+grep -rn "rounded-md font-medium tracking-tight" src --include='*.tsx'
 ```
 
 **Clean output today is 2 lines** — the surviving `BrandBandButton` primitive at
@@ -1356,9 +1407,10 @@ White‑on‑brand — **`BrandBandButton`, a marketing component**
 (`components/marketing/BrandBandButton.tsx`, [#1867](https://github.com/d-hinders/Haven-AI/issues/1867)).
 Still **not** a `Button` variant — there is no `variant="white"` — but no longer three
 hand-copies either. Used inside the dark CTA band, with two fills:
-- `variant="solid"` (the default) — `bg-white text-[var(--v2-ink)] hover:bg-white/95` for the
-  leading action
-- `variant="translucent"` — `bg-white/10 text-white border border-white/20 backdrop-blur` for
+- `variant="solid"` (the default) — `bg-white text-[#1a1f36] hover:bg-white/95 shadow-[0_1px_2px_rgba(16,24,40,0.06)]`
+  for the leading action (a fixed deep ink, not `var(--v2-ink)`, which flips near-white in
+  the dark palette, #3139)
+- `variant="translucent"` — `bg-white/10 hover:bg-white/15 text-white border border-white/20 backdrop-blur` for
   the trailing one
 
 `href` picks its own element: scheme-bearing targets such as a `mailto:` render a bare
@@ -1444,8 +1496,10 @@ Consequences worth knowing:
 A control that is not a `Button` inherits none of the above automatically, and the
 first one to need it was the mobile sidebar toggle — a hand-rolled 32px square that
 #1749 had just made reachable, so an undersized target went from moot to load-bearing
-on the entry point to primary navigation. It borrows the same mechanism (transparent
-`::after`, paint unchanged) with two deviations worth knowing before you copy it:
+on the entry point to primary navigation. It borrowed the same mechanism (transparent
+`::after`, paint unchanged) with two deviations worth knowing before you copy it. (Its
+successor, the tab bar's More cell, needs no overlay: every cell paints at least 44px,
+which `e2e/mobile-nav-tap-target.mobile.spec.ts` asserts.)
 
 - **An icon-only square grows in BOTH axes.** "Vertical only" is not the rule; it is a
   consequence of a labelled `sm` Button's width already clearing 44px. A 32px square
@@ -1514,9 +1568,10 @@ short, and an icon-only square grows in both axes. Two rules generalise from it:
   the name. (`e2e/mobile-nav-tap-target.mobile.spec.ts` measured the rendered label width
   and the name together until #3825 took the pill out of the top bar.)
 
-A collapsed control also takes its neighbour's radius (`rounded-xl` here, the
-notification bell's), because two adjacent 40px squares in one band read as a row
-only if they are the same shape.
+A collapsed control also took its neighbour's radius (`rounded-xl`, the 40px
+notification bell's, deleted with `ApprovalNotifications` in #1989), because two
+adjacent 40px squares in one band read as a row only if they are the same shape.
+`WalletButton` keeps the `rounded-xl` square; it has no neighbour left.
 
 **Since [#3825](https://github.com/d-hinders/Haven-AI/issues/3825) no global chrome
 carries a wallet pill** — and the top bar that used to host it is gone entirely
@@ -1636,7 +1691,7 @@ check; its geometry checks left with the control. Its body tap point is the head
 balance figure — the #4021 card no longer renders a token row for a single-holding account
 to tap. `/accounts` DOES carry committed pixel baselines now (the #4021 correction of the
 sentence this one replaced): `accounts-mobile` (the one-account layout plus the create
-tile), `accounts-multi` (the two-or-more grid, priced distinctly per #2225),
+tile), `accounts-multi-desktop` (the two-or-more grid, priced distinctly per #2225),
 `currency-sek-accounts-{desktop,mobile}` and `balance-freshness-accounts-overview-desktop`.
 
 **Current account-card interaction (#3550, #4021).** The card container is not itself a link
@@ -1653,7 +1708,7 @@ renders no network marker). One action DID return to the card under #4021, on th
 empty-balance state only: an **Add funds** link — the task wording stays (owner
 decision on #4094: wording that names a task, not a button, keeps its words) —
 that opens the Receive dialog, the exact
-sibling-above-the-overlay shape this section has always demanded: `relative z-[content]`,
+sibling-above-the-overlay shape this section has always demanded: `relative z-[var(--v2-z-content)]`,
 its own `min-h-[44px]` vertical hit area, no propagation guards, and a LINK rather than a
 button so the card still holds no buttons. A second holding area — the "Create another
 account" tile beside the one-account card — is NOT on the card at all; it is a page-level
@@ -1670,10 +1725,11 @@ returns the border box and reports 32×32 even when the overlay works perfectly.
 
 `ui/Tabs` — in `@haven_ai/ui` since #4096 (moved with the shared primitives in #3508),
 re-exported through the `components/ui/Tabs.tsx` shim — is the switch between views of
-one surface. Before #4096 the app had no tabs at all; the first consumer is the account
-page's Overview / Agents / Activity sections (epic
-[#4093](https://github.com/d-hinders/Haven-AI/issues/4093)), shown on `/design-system`
-with a count and a warning dot.
+one surface. Before #4096 the app had no tabs at all; the first consumer was the account
+page (epic [#4093](https://github.com/d-hinders/Haven-AI/issues/4093); today Activity /
+Agents / Security & details), and the agent page (Activity / Tool calls / Settings,
+#4226) and Settings (General / Security / Business, #4357) use it too. It is shown on
+`/design-system` with a count and a warning dot.
 
 - **Controlled, URL-blind.** `value` / `onChange` — the caller owns the selection, and
   the primitive re-renders nothing on its own. `packages/ui` is also consumed by the ops
@@ -1686,7 +1742,8 @@ with a count and a warning dot.
 - **The underline.** The selected tab carries a 2px brand underline that overlaps the
   list's 1px border by 1px (`-mb-px`), so the two read as one continuous rule rather
   than a floating dash. Unselected tabs are ink-3, brand ink when selected.
-- **Hit area.** Every tab paints 36px and extends its hit area to 44px vertically —
+- **Hit area.** Every tab paints 38px by its class string (`py-2` around a 20px
+  `text-sm` line, plus the 2px `border-b-2`) and extends its hit area to 44px vertically —
   never sideways, the tabs abut — the same transparent-pseudo-element mechanism as
   `SegmentedControl` ([#4056](https://github.com/d-hinders/Haven-AI/issues/4056)); the
   § Tap targets rules above apply.
@@ -1702,7 +1759,7 @@ The dashboard's agent row, lifted out of `AgentsSection` into
 dashboard does: a name-hashed `Monogram` (`xs`, decorative) as the leading mark,
 the BudgetMeter with its caption, the labelled "Last paid" time on the
 caption line ([#3989](https://github.com/d-hinders/Haven-AI/issues/3989)), the badge
-(`agentBadge`: Needs setup / Paused / N% used), and the received-sub-budget or "No
+(`agentBadge`: Needs setup / Budget ended (#4353) / Paused / N% used), and the received-sub-budget or "No
 budget" line ([#3803](https://github.com/d-hinders/Haven-AI/issues/3803)).
 
 The props deliberately stay the dashboard-overview wire shapes (`DashboardAgent`,
@@ -1741,8 +1798,9 @@ into one "×N" row; a full ledger needs one row per transaction, and gets it:
   along the row's top edge, starting at the text column (padding + direction mark +
   gap) and ending at the row's padding. Day groups keep their full-width `--v2-border`
   separation (`divide-y` on the list) — and since #4225 the day band itself ends in
-  the same hairline — so a day still reads stronger than a row. Both
-  ledgers draw it: the account page's Activity tab and the dashboard's Activity card.
+  the same hairline — so a day still reads stronger than a row. Every day-grouped list draws it: the
+  account and agent Activity tabs, the agent Tool calls tab, `/transactions` and the
+  dashboard's Activity card.
 
 ### Direction marks — `DirectionMark` ([#4197](https://github.com/d-hinders/Haven-AI/issues/4197))
 
@@ -1790,12 +1848,13 @@ component** — a native `<details>`/`<summary>`, closed by default:
 
 The hand-rolled `<details>` uses that predate the pattern (`ErrorBoundary`,
 `settings/SignersSection.tsx`, `marketplace/OffersTable.tsx`, `connect-agent/*`, and
-the account signers card's text-only "Show address" toggle, which has no marker and
-does not match) are NOT migrated here. A new technical disclosure is written this way.
+the account signers card's text-only "Show address" toggle, which keeps the
+browser's native disclosure triangle instead of a `ChevronDown` and does not match) are NOT migrated here. A new technical disclosure is written this way.
 
 ### Cards (`Card`)
 
-`bg-white border border-[var(--v2-border)] rounded-[10px] shadow-card`. Padding by use: `p-7` standard, `p-5` compact, `p-7 md:p-10` hero‑adjacent.
+`bg-[var(--v2-bg)] border border-[var(--v2-border)] rounded-[10px] shadow-card` (the `flat`
+default; `anchor` swaps in the anchor surface and border tokens). Padding by use: `p-7` standard, `p-5` compact, `p-7 md:p-10` hero‑adjacent.
 
 Interactive cards (linked) add hover lift — see Shadows above.
 
@@ -1918,9 +1977,12 @@ network warning. Showcased on `/design-system` → *Receive dialog*.
 
 ### Modal (`ui/Modal`)
 
-Every dialog in the app is this one shell — eleven direct importers, three of
-which (`ConfirmDialog`, `InfoModal`, `ComingSoonModal`) are themselves wrappers
-with many call sites. Anything changed here is changed everywhere, so the
+`ui/Modal` is the shared dialog shell — fifteen product files import it
+directly (sixteen with `/design-system`), three of which (`ConfirmDialog`,
+`InfoModal`, `ComingSoonModal`) are themselves wrappers with many call sites.
+Not every dialog uses it yet: about ten older dialogs, `ReceiveDialog` among
+them (below), are still bespoke `role="dialog"` shells. A new dialog uses
+`Modal`. Anything changed here is changed everywhere, so the
 structure is worth stating rather than re-deriving from the file.
 
 **Three boxes, and only one of them scrolls.** This is the fact that makes most
@@ -1929,7 +1991,7 @@ guesses about `Modal` wrong:
 | Box | What it is | Scrolls? |
 |---|---|---|
 | The wrapper | `fixed inset-0 … v2-safe-overlay` with a `1rem` gutter (`p-4` until #2730; still 1rem a side wherever the safe-area insets are 0), and it carries `role="dialog"` | **No.** `overflow: visible`, `position: fixed`. It reports ~4px of `scrollHeight` overflow from its own padding that `scrollTop` can never consume |
-| The panel | `max-h-[calc(100vh-max(1rem,var(--v2-safe-top))-max(1rem,var(--v2-safe-bottom)))]` — exactly `100vh-2rem` wherever the insets are 0, and more taken off on a notched device — `overflow-hidden`, `flex flex-col` | No |
+| The panel | `max-h-[calc(100vh-max(1rem,var(--v2-safe-top))-max(1rem,var(--v2-safe-bottom)))]` — exactly `100vh-2rem` wherever the insets are 0, and more taken off on a notched device (the `default` `maxHeight`; `maxHeight="tight"`, used only by the Connect agent modal, keeps a 12px gutter instead) — `overflow-hidden`, `flex flex-col` | No |
 | The body | `[data-modal-body]` — `min-h-0 flex-1 overflow-y-auto` | **Yes. This is the only scroller**, pinned by [`packages/frontend/src/components/ui/__tests__/modal-single-scroller.test.ts`](../../packages/frontend/src/components/ui/__tests__/modal-single-scroller.test.ts) (#2680). |
 
 Two consequences, both of which have already cost real time:
@@ -2176,9 +2238,9 @@ Rules:
   its height from the old content to the new (200ms, none under
   `prefers-reduced-motion: reduce`), which is how #1377's no-jump intent is
   kept for the body now that a short sub-state no longer sits in a 340px band.
-  The dialog itself is still vertically centred by `Modal`, so a height change
-  also slides its header and band; the ease turns that into motion rather than
-  a jump, but it is not a still header.
+  The Connect agent modal passes `placement="top"` (§ Modal), so a height
+  change grows the panel downward and the header and band hold one y; a
+  centred dialog would slide them instead.
 - Once the step is finished (budget approved) the band reads all-done
   (`currentStep={totalSteps}`), not Connect in progress over a success screen.
 
@@ -2193,14 +2255,16 @@ A **known but not-preferred** fact, stated beside the thing it qualifies:
 icon-led label row (lucide `Info` at `h-3.5 w-3.5 flex-shrink-0`, `text-xs
 font-medium text-[var(--v2-ink-2)]`). One call site so far —
 `WalletButton.tsx`'s "No passkey enrolled on this device", shown in both states
-on `/design-system` → *Signing credential (wallet menu)*; since #3825 that is the
+on `/design-system` → *Approving credential (wallet menu)* (renamed by #4049); since #3825 that is the
 only place it renders (the pill no longer opens for a ready user).
 
 **Reach for it instead of a semantic tone when nothing has failed.** There is no
-`--v2-info` family, and `--v2-warning` is scoped to 402/pending-review, to
-environment identity — the `DEV` chip and the dev install's icon badge (§ 1) —
-and to a paused agent's status MARKER, the "Paused" badge on the agent row and
-`AgentCard` (#4209). It is not for a paused agent's prose: the tone belongs on a
+`--v2-info` family, and `--v2-warning` means something needs attention: the
+§ 1 uses (402/pending-review, environment identity — the `DEV` chip and the dev
+install's icon badge — and a paused agent's status MARKER, the "Paused" badge on
+the agent row and `AgentCard`, #4209), plus the `warning` tier of the banner
+ladder (a half-revoked credential, stranded funds) and the attention dots
+(`Tabs`' `warningDot`). It is not for a paused agent's prose: the tone belongs on a
 marker rather than a paragraph, which is why the card's paused notice is the
 neutral `ApprovalRequiredBanner` (#2764). So
 the honest options for "legible but not alarming" are this or plain muted text.
@@ -2231,7 +2295,7 @@ Use `components/ui/Input.tsx` for product forms. Inputs have visible borders, to
 
 Amount fields should use `.v2-tabular`. Paste handlers should trim pasted whitespace. Do not rely on toast alone for validation; field errors belong next to the field.
 
-`Input`, `Select`, `Textarea` and `Checkbox` are **one family**: same radius, surface, padding, focus ring, and `invalid`/`disabled` treatment, so a mixed form row aligns and nothing looks bolted on. Reach for the primitive — a hand-rolled control drifts from the family the moment either side changes, which is what [#1410](https://github.com/d-hinders/Haven-AI/issues/1410) had to undo.
+`Input`, `Select` and `Textarea` are **one family**: same radius, surface, padding, focus ring and disabled treatment, and `Input`/`Textarea` share `invalid` + `helperText` (`Select` has no `invalid`), so a mixed form row aligns and nothing looks bolted on. `Checkbox` joins the family by focus ring and colour only: it is the native box (§ Checkbox), with an offset ring and `disabled:opacity-50`. Reach for the primitive — a hand-rolled control drifts from the family the moment either side changes, which is what [#1410](https://github.com/d-hinders/Haven-AI/issues/1410) had to undo.
 
 ### Inline alerts
 
@@ -2319,7 +2383,7 @@ primitives on their own.
 
 #### Anatomy
 
-One card (`rounded-[10px]`, `p-4`, `shadow-card`), then one line, directly
+One card (`rounded-[10px]`, `p-3 sm:p-4`, `shadow-card`), then one line, directly
 above the list; the card is never repeated inside a parent card.
 
 1. **Search**, then the **actions slot**: actions on the *filtered list* —
@@ -2458,7 +2522,14 @@ header is the documented list-controls PLACEMENT outside a `ListToolbar`: a
 `PeriodPicker`, exactly as a toolbar would — single-select, "All agents"
 first, the trigger tinting while a filter is set. A page that has no list
 summary line may mount the two chips directly; the toolbar is for pages that
-have one.
+have one. The two go in as a fragment, so at 390 the picker wraps under the
+facet (#4401). From `sm` the actions row sizes to max-content while it fits
+beside a readable title, and shrinks — its own wrap dropping the picker under
+the facet — when it would not (PR #4409, for #3963's red dev run: a rigid
+max-content row squeezed the title column to 59px at 640, under the title's
+own text width). The facet
+trigger is bounded (`sm:max-w-[20rem]`) so a long selected name truncates,
+the full name staying in the trigger's accessible name.
 
 #### Behaviour
 
@@ -2492,12 +2563,15 @@ have one.
   through the same vertical `::after` overlay `Button` uses — the drawn status
   row does not change (#4150). A trigger whose SELECTED label is longer than
   the facet row truncates inside it (`max-w-full` on the trigger) instead of
-  stretching it.
+  stretching it; from `sm` the trigger is also capped at 20rem, so it
+  truncates there in a max-content row too (#4401) — a row that gives way and
+  wraps, rather than squeezing the title, when the two chips would not fit
+  beside it (#4409).
 
 #### Paging (#4196)
 
-One rule for every paged list (today the account Activity tab and
-Transactions, both 25 per page):
+One rule for every paged list (today the account and agent Activity tabs,
+the agent Tool calls tab and Transactions, all 25 per page):
 
 - the list card ends with its last row — no button, divider or footer band
   inside it;
@@ -2693,9 +2767,9 @@ pattern, and it leads with the answer:
 
 ### Table column collapse
 
-The generic `Table` primitive (`components/ui/Table.tsx`) collapses secondary columns in a narrow container. No transaction surface renders one any more (per #4266); the rules below stay for the tables that do.
+The generic `Table` primitive (`packages/ui/src/Table.tsx` since #3508; `components/ui/Table.tsx` re-exports it) collapses secondary columns in a narrow container. No transaction surface renders one any more (per #4266); the rules below stay for the tables that do.
 
-A collapsing table has to **fit** at mobile widths, not scroll: the `overflow-x-auto` wrapper the `Table` primitive recommends for dense admin tables is mutually exclusive with `Table.Head sticky`, because `overflow-x: auto` forces the computed `overflow-y` to `auto` and the wrapper then becomes the sticky scroll ancestor. When such a table overflows, the cause is usually a `truncate`d cell — `truncate` is `white-space: nowrap`, and an auto-layout column can never be narrower than its min-content, so the untruncated text widens the table instead of ellipsising. Put `max-w-0` on the one flexible cell. Both findings, with their measured numbers, live in `components/ui/Table.tsx`'s docstring ([#1772](https://github.com/d-hinders/Haven-AI/issues/1772)).
+A collapsing table has to **fit** at mobile widths, not scroll: the `overflow-x-auto` wrapper the `Table` primitive recommends for dense admin tables is mutually exclusive with `Table.Head sticky`, because `overflow-x: auto` forces the computed `overflow-y` to `auto` and the wrapper then becomes the sticky scroll ancestor. When such a table overflows, the cause is usually a `truncate`d cell — `truncate` is `white-space: nowrap`, and an auto-layout column can never be narrower than its min-content, so the untruncated text widens the table instead of ellipsising. Put `max-w-0` on the one flexible cell. Both findings, with their measured numbers, live in `packages/ui/src/Table.tsx`'s docstring ([#1772](https://github.com/d-hinders/Haven-AI/issues/1772)).
 
 **Column collapse is keyed on the table's CONTAINER, not on the viewport, and it still takes more than one stage.** Two things step at `lg` and both take width: the sidebar rail goes from `hidden` to an in-flow column at `w-[240px]` (#4053; before that, a `fixed` drawer going `lg:static`) — border-box, so its 1px `border-r` is *inside* the 240 (`main` measures 784px at a 1024px viewport) — and the authenticated layout's `main` steps `p-6` to `lg:p-8`, 16px more across the pair. **240 + 16 = 256px** handed back in a single breakpoint, so the content available to a table is a **sawtooth** in viewport width, not a ramp. Attributing it to the sidebar alone is wrong and invites a reader who checks `Sidebar.tsx`, finds 240px, and discards the whole claim. Measured in real Chromium on `/design-system`, `/transactions`, `/accounts/:id` and `/agents/:id` — the same numbers on all four, because they share the shell:
 
@@ -2776,7 +2850,7 @@ The public website (epic [#3572](https://github.com/d-hinders/Haven-AI/issues/35
 
 ## 5. Iconography
 
-- One family: **lucide-react**, rendered through the shared `Icon` wrapper (`components/ui/Icon.tsx`) — never a hand-rolled inline `<svg>`. Exemptions: brand marks in `components/brand` and marketing pages.
+- One family: **lucide-react**, rendered through the shared `Icon` wrapper (`components/ui/Icon.tsx`) — never a hand-rolled inline `<svg>`. Exemptions: brand marks in `components/brand`, marketing pages, and the two chart primitives (`ui/StackedBarChart`, `ui/AreaChart`), whose token-driven SVG is the primitive (#2948; `raw-svg`'s exemption list in `design-lint.mjs`).
 - Size: **12 / 14 / 16 / 20 / 24 / 28 px**, square, no arbitrary values — see [Size](#size) below, which is the rule and is gated.
 - `stroke-width` 1.5 everywhere, currentColor. Overrides require a call-site comment (see `/design-system` → Icons).
 - Decorative by default (`aria-hidden`); pass `label` only when the icon is the sole carrier of meaning.
@@ -2797,13 +2871,13 @@ The public website (epic [#3572](https://github.com/d-hinders/Haven-AI/issues/35
 | 28 | `h-7 w-7` | The icon inside a **56 px** (`h-14 w-14`) status medallion |
 
 
-**The 12 px row cites buttons that do not meet the 44 px tap target, and that is a debt it inherits rather than endorses.** The shared `ui/CopyButton.tsx:63`/`:65` (a bare `h-5 w-5`, and so every `Address`, `McpServerName` and account-detail copy control that renders it) hosts this rung without the invisible `::after` hit area. The legacy hand-rolled controls were removed with the retired Safe agent surfaces; Address, MCP-server and account-detail copy controls route through the shared primitive, while the code-block control remains the documented local 14px exception below. Nothing here changes those boxes. Naming it so the table is not read as blessing sub-44 px targets: an icon-only button owes its own tap-target treatment whatever size glyph it holds.
+**The 12 px row is not a licence for sub-44 px targets.** The shared `CopyButton` (`packages/ui/src/CopyButton.tsx`, re-exported by `components/ui/CopyButton.tsx`) hosts this rung's copy glyph inside an `inline-flex min-h-11 min-w-11` box, so every `Address`, `McpServerName` and account-detail copy control that renders it meets the 44 px target; its labelled variant renders the glyph at 14. The legacy hand-rolled controls were removed with the retired Safe agent surfaces, while the code-block control remains the documented local 14px exception below. An icon-only button owes its own tap-target treatment whatever size glyph it holds.
 
 **A small icon-only button's GEOMETRY does not pick its rung — what the glyph is doing does ([#1923](https://github.com/d-hinders/Haven-AI/issues/1923)).** The legacy Safe budget-row examples that motivated this rule were retired with the Safe agent-management surface in [#2258](https://github.com/d-hinders/Haven-AI/issues/2258). The live delegation budget card uses a labelled `Stop budget` action rather than an icon-only remove control. The general rule still applies to any future remove or dismiss control: decide its glyph size from its role, then add the live call site to the design-system review and coverage test.
 
 **The decision, scoped to what was actually measured:** a **remove / dismiss control on a data row** takes **14**, whichever way its box is built. The retired budget-row examples are no longer live; remaining copy and dismiss controls retain their own role-based precedents. **The row's own type does not pull it back to 12** — re-derive the choice when adding a new data-row control rather than reviving the removed legacy examples.
 
-**What #1923 did NOT settle, said out loud so the row above is not over-read.** The *copy glyph after a mono address* is split for the same job and stays split: the shared `ui/CopyButton.tsx` primitive (#1878, extracted from `Address`) renders it at **12** in an `h-5 w-5` box, nested in the address run — the precedent the 12 px row cites — while `ui/CodeBlock.tsx` still hand-rolls its own copy control at **14** in an `h-6 w-6` box, beside comparable text. Account-detail copy now uses the shared primitive as well. That is a second which-rung judgement with two live answers; it is recorded here rather than converged, because unlike remove-budget the two are not the same control in the same place, and picking one blind would repeat the coin flip this section is trying to end. What is true after #1923 and checkable is narrower: **no icon-only remove/dismiss control sits at 12**, and every remaining 12 px call site is a chevron, caret, arrow, status dot or copy glyph inside a run of type. Re-derive it — do not trust this sentence past its date — with `node packages/frontend/scripts/design-lint.mjs --icons` and by reading the `h-3 w-3` sites it counts.
+**What #1923 did NOT settle, said out loud so the row above is not over-read.** The *copy glyph after a mono address* is split for the same job and stays split: the shared `CopyButton` primitive (#1878, extracted from `Address`) renders it at **12** in a `min-h-11 min-w-11` box, nested in the address run — the precedent the 12 px row cites — while `ui/CodeBlock.tsx` still hand-rolls its own copy control at **14** in an `h-6 w-6` box, beside comparable text. Account-detail copy now uses the shared primitive as well. That is a second which-rung judgement with two live answers; it is recorded here rather than converged, because unlike remove-budget the two are not the same control in the same place, and picking one blind would repeat the coin flip this section is trying to end. What is checkable is narrower, and it is not a clean universal: the census counts 15 `h-3 w-3` sites at `fb2da6b92`, mostly chevrons, carets, arrows and copy glyphs inside a run of type. Four are not: the list toolbar's filter-chip remove `X` (`ui/ListToolbar.tsx`, an icon-only remove control at 12 in a 24 px chip button, so not a data-row control in #1923's sense), `FacetMenu`'s checkbox-mark check, and the glyphs in two 20 px medallions (`AgentPanel.tsx`'s toast alert, `DashboardOnboardingGuide.tsx`'s done step). Re-derive it — do not trust this sentence past its date — with `node packages/frontend/scripts/design-lint.mjs --icons` and by reading the `h-3 w-3` sites it counts.
 
 **Always square.** lucide's `viewBox` is `0 0 24 24` with the SVG default `preserveAspectRatio`, so a non-square box does not stretch the glyph — it **letterboxes** it and leaves dead space on the long axis. `h-3 w-5` renders a 12 px arrow in a 20 px-wide hole; it looks like a sizing decision and is actually padding in the wrong place.
 
@@ -2814,7 +2888,7 @@ The public website (epic [#3572](https://github.com/d-hinders/Haven-AI/issues/35
 
 **Why six and not the three this section used to claim.** The old rule said 14/16/20 "exactly" and was [verified false](https://github.com/d-hinders/Haven-AI/issues/1858): 34 of 119 sized call sites were off it. Crucially the discrepancy resolved **both ways**, and assuming the code had to bend to the doc would have destroyed real work:
 
-- **12 px was never drift.** Nineteen call sites, and they are not scattered — every one is a chevron, caret, copy glyph or trailing arrow in the app's densest controls, the great majority of them in a `text-xs` run. Three rungs simply had no step for type that small, so authors took a fourth without the doc admitting it existed. **Stated carefully, because the first draft of this line was checkably false**: "every one sits in `text-xs`" is not true — `NetworkSwitcher.tsx:96` (deleted by #3719) sat in `text-[13px]`, `ui/Table.tsx:157` in a `text-[11px]` header, and `transactions/FilterBar.tsx:329` in `text-sm`. The rung is real; the tidy single-class story about it was not, and replacing a false absolute with the measured spread is the whole habit this section is trying to build.
+- **12 px was never drift.** Nineteen call sites, and they are not scattered — every one is a chevron, caret, copy glyph or trailing arrow in the app's densest controls, the great majority of them in a `text-xs` run. Three rungs simply had no step for type that small, so authors took a fourth without the doc admitting it existed. **Stated carefully, because the first draft of this line was checkably false**: "every one sits in `text-xs`" is not true — `NetworkSwitcher.tsx:96` (deleted by #3719) sat in `text-[13px]`, `ui/Table.tsx:157` (now `packages/ui/src/Table.tsx`) in a `text-[11px]` header, and `transactions/FilterBar.tsx:329` (deleted by #4162) in `text-sm`. The rung is real; the tidy single-class story about it was not, and replacing a false absolute with the measured spread is the whole habit this section is trying to build.
 - **24 and 28 were not drift either.** Four sites, two apiece, and each pair is the icon at half its status medallion (48→24, 56→28). `EmptyState` had independently hard-coded the same ratio — a 20 px slot in a 40 px ring, 16 in a 32 — so "half the container" was already built into a primitive before it was ever written down.
 - **Eleven sites WERE drift**, and all eight arbitrary values were among them. They were corrected to the nearest rung: 10→12, 11→12, 13→14 (×3), 17→16, 18→20, 22→20, 22→24, and both non-square pairs→12.
 
@@ -2822,7 +2896,7 @@ The two 18/22 sites are the clearest case in the set: they are the **same slot i
 
 **What is enforced, and what is honestly not.** Be precise here, because this section's history is four rounds of rules that forbade nothing:
 
-- **Enforced, mechanically:** *membership*. `design-lint`'s `icon-size` rule fails any `<Icon>` whose size is not one of the six pairs — off-scale, non-square, single-axis, arbitrary-value, or a literal `size={n}` off the scale. Every one of the eleven defects above was a membership violation, so this catches the whole class that actually occurred.
+- **Enforced, mechanically:** *membership*. `design-lint`'s `icon-size` rule fails any sized `<Icon>` whose size is not one of the six pairs — off-scale, non-square, single-axis, arbitrary-value, or a literal `size={n}` off the scale. (`h-full`/`w-full` container sizing is skipped on purpose, and an `<Icon>` with no size at all is not failed; see below.) Every one of the eleven defects above was a membership violation, so this catches the whole class that actually occurred.
 - **NOT enforced, and not enforceable cheaply:** *which rung*. No gate can know that a chevron belongs at 12 rather than 14. That part is the table above — precedents keyed to the container, so a reviewer and an author can at least argue about the same thing. Saying this plainly is the point: the previous two attempts at this section died by pretending a judgement was a rule.
 - **The scale itself is closed.** "Half the container" tells you *which* of the six to use; it cannot mint a seventh. A 64 px medallion does not get a 32 px icon — it gets an edit to this table. That is deliberate, and it is the same posture as the one-file arrow allowlist below.
 
@@ -2835,11 +2909,12 @@ npm run design:lint -w packages/frontend            # the gate: 0 icon-size viol
 node packages/frontend/scripts/design-lint.mjs --icons   # the census behind it
 ```
 
-Clean output of the census today is **`UNCLASSIFIED: 0`** and **`OFF-SCALE: 0`**, over **140** call sites (141 until the walk learned that `/design-system`'s own usage EXAMPLE — `{'<Icon icon={Check} className="h-4 w-4" />'}`, a string — is not a call site). `UNCLASSIFIED` is the load-bearing line, not the totals: a non-zero bucket means a call site was silently dropped and every figure beside it is a guess rather than a measurement. That is the whole reason this section states a rule and ships a command instead of pasting counts, the same as [Arrows](#arrows) below.
+Clean output of the census at `fb2da6b92` is **`UNCLASSIFIED: 0`** and **`OFF-SCALE: 0`**, over **162** call sites (the figure moves with every change; 141 until the walk learned that `/design-system`'s own usage EXAMPLE — `{'<Icon icon={Check} className="h-4 w-4" />'}`, a string — is not a call site). `UNCLASSIFIED` is the load-bearing line, not the totals: a non-zero bucket means a call site was silently dropped and every figure beside it is a guess rather than a measurement. That is the whole reason this section states a rule and ships a command instead of pasting counts, the same as [Arrows](#arrows) below.
 
 **What the gate cannot see** — so a clean run is not over-trusted:
 
-- `size={someVariable}`, and classNames assembled wholly at runtime (2 call sites today);
+- `size={someVariable}`, and classNames assembled wholly at runtime (2 call sites at `fb2da6b92`);
+- an `<Icon>` sized `h-full`/`w-full` (container sizing, skipped on purpose), and an `<Icon>` with no size class at all;
 - a size arriving from a `cva`/lookup table in another file, or threaded in as a `className` prop by a wrapper component. A wrapper threading a **numeric** size is no longer in this list — `IconSize` closes it, and `BotIcon` is the worked example — but a wrapper passing a `className` string still is;
 - a usage EXAMPLE written as a string with padding inside the quotes (`{'  <Icon … '}`) is still counted. The rejection test is one character of adjacency, deliberately: a whole-file string scanner is what you reach for first and it is wrong here, because bare apostrophes in JSX body text (`its own primitive's home file`) open strings that never close and mask every element after them — that version silently dropped two live call sites. This blind spot fails **loudly**, on the line, and the escape marker clears it;
 - marketing surfaces, which are exempt from every rule in this section by the first bullet — correctly, and unlike the [opacity rule](#opacity-on-a-token-colour-1708), that exemption costs nothing here because no icon rule applies there anyway.
@@ -2894,25 +2969,25 @@ Clean output of the census today is **`UNCLASSIFIED: 0`** and **`OFF-SCALE: 0`**
 
 **Authoritative copy source: `docs/product/copy-guidelines.md`.** Read it before writing any user‑facing string — landing page, onboarding, dashboard, error message, anything.
 
-It supersedes the terminology table in `docs/product/README.md` section 1 and the voice rules in section 6. Where the two conflict, **the copy guidelines win.** Specifically:
+It is the one terminology source: `docs/product/README.md` § 2 (Language) defers to it and keeps only high-level voice rules. Where the two conflict, **the copy guidelines win.** The mapping, for reference (the copy guidelines' own *Technical term mapping* is the authority):
 
-| Old (product/README.md) | New (copy-guidelines.md) |
+| Old term | New (copy-guidelines.md) |
 |---|---|
 | "Account" / "Safe smart account" | **"Haven account"** (and "Haven wallet" for funds) |
 | "Signing wallet" | **"Sign‑in method"** in onboarding; "your wallet" elsewhere |
 | "Policy" / "Policy engine" / "Spending policy" | **"Agent rules"** or **"Agent budget"** in product surfaces; "spending policies" only in advanced/dev contexts |
 | "Generate credentials" / "Hand the credential" | **"Connect your agent"**; "Add your Haven credential to your agent" |
-| "Allowance module" / "Session key" | **"Rules"** / **"Haven credential"** |
+| "Allowance module" / "Session key" | **"Rules"** / **"Private signing key"** (advanced setup and recovery copy) |
 | "Smart account" / "Smart wallet" | **"Haven account"** / **"Haven wallet"** |
 | "Safe deployed" | **"Your Haven account is ready"** |
 | "Owner" / "Signer" / "Enroll signer" | **"Approve actions"** / **"Sign‑in method"** / **"Save your sign‑in method"** |
 | "Relayer", "Metadata" | **avoid mentioning** |
 
-What survives unchanged from `docs/product/README.md`: the **product doctrine** (section 0), **information architecture** rules (section 2 — collection routes, no dead ends), **accessibility** (section 7), and the **voice principles** that don't conflict (sentences not jargon, no exclamation marks, no emoji in product UI, error copy is the user's friend).
+What survives unchanged from `docs/product/README.md`: the **product doctrine** (§ 1), **information architecture** rules (§ 3 — collection routes, no dead ends), **accessibility** (§ 7), and the **voice principles** in § 2 that don't conflict (sentences not jargon, no exclamation marks, no emoji in product UI, error copy is the user's friend).
 
 Tonally: marketing copy can be **slightly more inviting** to match the more energetic visual; product UI stays quiet. Confidence over over‑explanation. Lead with the user outcome, not the infrastructure.
 
-**Voice exception flagged in the copy guidelines:** Haven *is* built on Safe and on smart‑account infrastructure. The technical disclosure surfaces (account details, transaction details, advanced settings, developer documentation) can use the technical terms — `Safe`, `passkey-backed signer`, `module`, `relayer`, `transaction hash`. But the default surface is product‑facing.
+**Voice exception flagged in the copy guidelines:** Haven is built on smart‑account infrastructure (a MetaMask Hybrid DeleGator on the live rail). The technical disclosure surfaces (account details, transaction details, advanced settings, developer documentation) can use the technical terms — smart account, delegation, relayer, transaction hash. Safe is retired (epic #1440) and is not introduced as the account's name. The default surface is product‑facing.
 
 Accessibility expectations for production primitives:
 
@@ -3028,7 +3103,11 @@ Three parts, each decided rather than inherited:
   `brand` (or `danger` on a destructive control). **On a dark fill it is
   `white`** — brand indigo reaches only 2.99:1 on `--v2-surface-code` and 2.58:1
   on `--v2-ink` at *full* opacity, so no alpha can rescue it. That is why
-  `CodeBlock`'s copy button and the shell's skip-link pill use `ring-white/80`.
+  `CodeBlock`'s copy button uses `ring-white/80`. The shell's skip-link pill
+  sits on an `--v2-ink` fill and uses `ring-bg/80`, which inverts with the theme
+  (#2927); it is also the one control on `focus:` rather than `focus-visible:`
+  (it is `sr-only` until focused), exempted in `focus-ring.test.ts`
+  (`FOCUS_SELECTOR_EXEMPT`).
 
 **Offset is contextual, its size is not.** Use `focus-visible:ring-offset-2
 focus-visible:ring-offset-[var(--v2-bg)]` whenever the ring would otherwise abut
@@ -3047,11 +3126,13 @@ legible because of the offset — the ring lands on the page at 4.64:1 with a
 white moat reading 6.57:1 against the fill. **So never copy a tone fix without
 its offset**, and never drop an offset on the grounds that the tones now match.
 
-`Input`, `Select`, `Textarea` and `Checkbox` share this ring, so the "one family"
-claim under *Inputs* is now true on focus ring as well as on radius and padding.
+`Input`, `Select` and `Textarea` share this ring, so the "one family"
+claim under *Inputs* is true on focus ring as well as on radius and padding;
+`Checkbox` wears the same ring with a `ring-offset-2`, which keeps it off the
+checked box's brand fill (#1741).
 
 `src/__tests__/focus-ring.test.ts` enforces all of the above against the
-**compiled** CSS and re-derives every ratio from `globals.css` — a class-string
+**compiled** CSS and re-derives every ratio from `packages/ui/src/tokens.css` — a class-string
 check cannot see a ring that compiles to nothing, which is how both
 `ring-[var(--v2-brand)]/30` (#1708) and `ring-current/30` (#1741) rendered
 Tailwind's default blue for months.
@@ -3085,13 +3166,13 @@ element-scoped capture clips the very thing it photographs (#1873).
 |---|---|
 | Tokens | CSS vars in `packages/ui/src/tokens.css` at `:root` (#3508); core aliases in the shared preset `packages/ui/tailwind.preset.js` |
 | Header/Footer | `packages/frontend/src/components/marketing/site/Header.tsx`, `Footer.tsx` |
-| UI primitives | `packages/frontend/src/components/ui/Button.tsx`, `Card.tsx`, `CodeBlock.tsx`, `InlineAlert.tsx`, `Input.tsx`, `Modal.tsx`, `PageHeader.tsx`, `Skeleton.tsx`, `Toast.tsx`, `Tooltip.tsx` |
+| UI primitives | `packages/ui/src/` (`Button.tsx`, `Card.tsx`, `InlineAlert.tsx`, `Input.tsx`, `PageHeader.tsx`, `Skeleton.tsx`, `Tooltip.tsx` and the other moved primitives, #3508), imported through re-export shims in `packages/frontend/src/components/ui/`; `CodeBlock.tsx`, `Modal.tsx` and `Toast.tsx` are still real files in `packages/frontend/src/components/ui/` |
 | Marketing components | `packages/frontend/src/components/marketing/site/**` (the public site), `marketing/Section.tsx`, `BrandBandButton.tsx`, `TrailingArrow.tsx` |
 | Marketing pages | `packages/frontend/src/app/page.tsx`, `app/how-it-works/page.tsx`, `app/how-it-works/protocols/page.tsx`, `app/developers/page.tsx`, `app/for-agents/page.tsx` |
 | Authenticated shell | `packages/frontend/src/components/AuthenticatedShell.tsx`, `packages/frontend/src/components/sidebar/Sidebar.tsx`, authenticated routes under `packages/frontend/src/app/(authenticated)` |
 | Live product reference | `packages/frontend/src/app/(authenticated)/design-system/page.tsx` |
 | App entity cards | `packages/frontend/src/components/ui/entityCardStyles.ts` shared by Accounts and Agents; linked cards use a stretched semantic name link with sibling controls above its overlay |
-| App modals | `packages/frontend/src/components/ui/Modal.tsx` plus Send, Receive, Add funds, and agent modals in `packages/frontend/src/components` |
+| App modals | `packages/frontend/src/components/ui/Modal.tsx` plus the Send modal, the Receive dialog (which replaced the Add funds modal, #4094) and the agent modals in `packages/frontend/src/components` |
 | Agent & transaction activity rows | `packages/frontend/src/components/haven/TransactionActivityRow.tsx` |
 | Transaction previews | `packages/frontend/src/components/haven/TransactionActivityRow.tsx`, `packages/frontend/src/components/haven/TransactionMovement.tsx` |
 | Full transaction history | `packages/frontend/src/app/(authenticated)/transactions/TransactionsClient.tsx`, `packages/frontend/src/components/haven/TransactionActivityRow.tsx` |
@@ -3127,7 +3208,7 @@ This system is enforced by automated gates (epic [#904](https://github.com/d-hin
 
 | Gate | Catches | Posture |
 |---|---|---|
-| **design-lint** (`npm run design:lint -w packages/frontend`) | Token bypass (raw palette classes, hex colours, micro-fonts), structural bypass (hand-rolled header bands, raw `<table>`/`<svg>`, address slices) **and** off-scale `<Icon>` sizing (#1858 — the only rule scanned per element rather than per line; the busy-tolerant capture surface is pinned by [`packages/frontend/src/__tests__/busy-tolerant-captures-pin.test.ts`](../../packages/frontend/src/__tests__/busy-tolerant-captures-pin.test.ts), #2680) | Blocking CI; shrink-only baseline |
+| **design-lint** (`npm run design:lint -w packages/frontend`) | Token bypass (raw palette classes, hex colours, micro-fonts, white/black colour classes #2927), structural bypass (hand-rolled header bands, raw `<table>`/`<svg>`, address slices, hand-built list controls outside the `ListToolbar` family #4129) **and** off-scale `<Icon>` sizing (#1858 — the only rule scanned per element rather than per line; the busy-tolerant capture surface is pinned by [`packages/frontend/src/__tests__/busy-tolerant-captures-pin.test.ts`](../../packages/frontend/src/__tests__/busy-tolerant-captures-pin.test.ts), #2680) | Blocking CI; shrink-only baseline |
 | **Visual regression** (every `e2e/**/*.visual.spec.ts`, #2318) | Unreviewed pixel drift in any shared primitive, and whole-screen drift on the routes that have a baseline | Blocking CI; Linux baselines. Scope is `frontend.md` §4's table, not this row — the job prints the baselines it compared into its own summary, and a screen absent from that list is not covered |
 | **Design-system coupling** (`npm run design:coupling:strict -w packages/frontend`) | A new `ui/`/`haven/` primitive missing from `/design-system` | **Blocking** on every PR (*Design-system coupling (strict)*, #1023); a sticky comment explains the finding |
 | **copy-lint** (`npm run lint:copy`) | Banned multi-word technical terms in user-facing copy | Blocking CI; shrink-only baseline |
@@ -3138,7 +3219,7 @@ because both describe a class that lints clean and emits nothing:
 `src/__tests__/focus-ring.test.ts` (a ring utility that compiles to no colour,
 #1708/#1818) and `src/__tests__/shadow-token.test.ts` (an elevation utility that
 compiles to no `box-shadow`, #1945). Neither is a spelling rule — each boots
-real Tailwind over `tailwind.config.js` and reads the OUTPUT — and each carries a
+real Tailwind over the shared preset (`packages/ui/tailwind.preset.js`) and reads the OUTPUT — and each carries a
 positive control so a "paints nothing" verdict cannot come from a broken reader.
 
 
@@ -3147,9 +3228,9 @@ One design rule is also enforced by the **type system**: `Icon`'s `size` prop is
 design-lint ever runs — and a wrapper that threads a size through to `<Icon>` closes the
 gate's one-level-indirection blind spot by adopting that type (#1858).
 
-Marketing/landing surfaces are exempt from the lint gates (intentionally bespoke); the product app and `/design-system` stay fully gated.
+Marketing/landing surfaces are exempt from the lint gates (intentionally bespoke). The product app is gated; `/design-system` is gated too except for two design-lint exemptions: `white-or-black-class` exempts `design-system/page.tsx`, and `hand-built-list-control` exempts the `/design-system` demos.
 
-**Escape markers (reviewed exceptions).** One placement rule for the line-scanning gates: put the marker on the offending line **or the line directly above** — `design-lint-disable-line` (design-lint) and `// copy-lint-ignore` (copy-lint) both work either way (shared helper: `scripts/lib/lint-escapes.mjs`). The coupling gate's `// design-system-exempt: <reason>` is different by design — it exempts an *export*, sits as a trailing comment on the export line, and requires the colon + reason. Use escapes sparingly; each one is a standing reviewed exception.
+**Escape markers (reviewed exceptions).** One placement rule for the line-scanning gates: put the marker on the offending line **or the line directly above** — `design-lint-disable-line` (design-lint) and `// copy-lint-ignore` (copy-lint) both work either way (shared helper: `scripts/lib/lint-escapes.mjs`) — except design-lint's `hand-built-list-control`, which ignores the marker on purpose (`ignoreEscapes`): only a reviewed baseline edit carries its debt (#4129). The coupling gate's `// design-system-exempt: <reason>` is different by design — it exempts an *export*, sits as a trailing comment on the export line, and requires the colon + reason. Use escapes sparingly; each one is a standing reviewed exception.
 
 Re-verified 2026-09-21 (weekly docs audit #3206, at dev `7f17c9f3`): the
 token table was checked mechanically against `globals.css`: all 16 rows match

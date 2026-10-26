@@ -51,7 +51,7 @@ export interface PaymentReceiptRow extends Partial<BuyerJoinColumns> {
    * #3770: the owning agent's evidence-only delivery verdict, joined from
    * `machine_payment_delivery_reports`. Null while unreported; additive on
    * the receipt (`payment.deliveryQuality`) and ignored by the verifier,
-   * which reads only `authorization`.
+   * which reads only the bundle's `authorization` and `onChain.chainId`.
    */
   delivery_quality?: string | null
   delivery_note?: string | null
@@ -74,7 +74,8 @@ export interface PaymentReceiptRow extends Partial<BuyerJoinColumns> {
  * about what a signature covers.
  *
  * #2960: `payment.parties` is additive the same way — `verifyPaymentReceipt`
- * reads only `receipt.authorization`, never `payment`, so this changes
+ * reads only `receipt.authorization` and the `receipt.onChain.chainId` that
+ * selects the delegation digest's chain, never `payment`, so this changes
  * nothing about what is verified. `delegate_account` is `row.delegate_account_address`
  * (`machine_metadata.delegate_account_address`, written at authorize on both
  * delegation-rail legs) — null on rows authorized before #2960.
@@ -118,7 +119,8 @@ export function buildPaymentReceipt(row: PaymentReceiptRow): PaymentReceipt {
         settledAt: row.confirmed_at,
         resourceUrl: row.resource_url,
         // #3770: additive — the agent's own delivery verdict, when reported.
-        // `verifyPaymentReceipt` reads only `authorization`, so this changes
+        // `verifyPaymentReceipt` reads only `authorization` (plus
+        // `onChain.chainId` for the delegation digests), so this changes
         // nothing about what a signature covers (same rule as `parties`).
         // camelCase like the rest of the bundle; null while unreported.
         deliveryQuality:

@@ -20,6 +20,7 @@
  */
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import { stripComments } from '@haven_ai/core/comment-stripper'
 import { describe, expect, it } from 'vitest'
 
 const INDEX = readFileSync(
@@ -35,8 +36,15 @@ const INDEX = readFileSync(
  * and a #1758 mutation confirmed it — commenting out `setRevocationProbe(...)`
  * left every assertion here green. The separate import check catches a deleted
  * import, not a commented-out call, so this is the half that was missing.
+ *
+ * The stripping is the shared core helper (#4411), not a regex pair: a
+ * block-comment regex run first opened a fake block at the
+ * `/accounting/connections/*` text inside a line comment and swallowed the
+ * `registerConnector(...)` region below it, so a guard here could pass while
+ * the wiring had changed. The sanity assertion below pins a statement from
+ * that exact region so a swallowed window fails red.
  */
-const CODE = INDEX.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
+const CODE = stripComments(INDEX)
 
 function callsWith(fn: string, arg: string): boolean {
   return new RegExp(`\\b${fn}\\s*\\(\\s*${arg}\\s*\\)`).test(CODE)
@@ -73,11 +81,28 @@ describe('passport anchor seams are wired in index.ts', () => {
     // The mutation that found this: `// setRevocationProbe(readRevocationAnchor)`
     // used to satisfy every assertion above. Proven on a synthetic source
     // rather than by editing the real file, so the guard is pinned even if
-    // `index.ts` is later reformatted.
-    const commented = '// setAnchorLiveness(classifyAnchorTxLiveness)\n/* setAnchor(anchorOnChain) */'
-    const stripped = commented.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
+    // `index.ts` is later reformatted. The trailing `/*` is the #4411 shape:
+    // the old regex pair turned a line comment ending like that into a fake
+    // block that swallowed the real wiring BELOW it instead.
+    const commented =
+      '// setAnchorLiveness(classifyAnchorTxLiveness) /* see /x/* */\n/* setAnchor(anchorOnChain) */\nconst after = stillHere()'
+    const stripped = stripComments(commented)
     expect(/\bsetAnchorLiveness\s*\(\s*classifyAnchorTxLiveness\s*\)/.test(stripped)).toBe(false)
     expect(/\bsetAnchor\s*\(\s*anchorOnChain\s*\)/.test(stripped)).toBe(false)
+    // The fake-block regression: real code AFTER the trap comment must survive.
+    expect(stripped).toContain('stillHere()')
+  })
+
+  it('the stripper keeps real code: the registerConnector region survives (#4411)', () => {
+    // A statement from the exact stretch the old regex pair swallowed (the
+    // window between the `/accounting/connections/*` line comment and the
+    // CATALOG_INGEST_INTERVAL_MS jsdoc). If any stripper ever eats a region
+    // of index.ts again, this goes red before the wiring assertions can
+    // read a false silence.
+    expect(CODE).toMatch(/registerConnector\(new AccountedConnector\(\)\)/)
+    expect(CODE).toMatch(/registerConnector\(new FortnoxConnector\(\)\)/)
+    expect(CODE).toMatch(/await app\.register\(accountingConnectionsRoutes/)
+    expect(CODE).toMatch(/const CATALOG_INGEST_INTERVAL_MS\s*=/)
   })
 
   it('the helper itself can fail — a seam that is NOT wired reads as false', () => {

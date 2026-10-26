@@ -65,7 +65,7 @@ It exposes five stdio MCP tools, all sign-only:
 
 | Tool | Does | Emits |
 |---|---|---|
-| `haven_sign` | Sign one payment, or (#3329) one task-budget open/close, or (#3330, #3506) one sub-budget open/close. Preferred form is `{ payment_id }` alone for a payment, `{ task_budget_id }` alone for a task-budget open/close, or `{ sub_budget_id }` alone for a sub-budget this agent delegates (its own parent-child and the grant to another agent of the same account) — exactly one of the three; the signer fetches the exact payload itself. Signs only Haven-prepared payloads (#3272, #3281, #3329): a direct-payment `PackedUserOperation` from this signer's own delegate account whose only call redeems a delegation made to that account EITHER directly OR through a self-delegated task-budget child under it (the two-link `[task child, budget]` chain), or — against a Haven-signed context, which it records and binds — an EIP-3009 funding leg of that same shape paying this signer's own delegate EOA, or an erc7710 settlement child from this signer's own account; a self-delegated task-budget child `Delegation` from this signer's own account (`assertOwnTaskChild`); a sub-budget child `Delegation` from this signer's own account narrowing its budget for another agent of the same account (`assertOwnSubBudgetChild`); or a task-budget or sub-budget close — a `disableDelegation` UserOp from this signer's own account revoking that child (`assertOwnTaskBudgetCloseUserOp`, `assertOwnSubBudgetCloseUserOp`); other typed data is refused (`TYPED_DATA_NOT_ALLOWED`) | `{ signature }`, `{ signature, x402_binding }`, `{ signature, task_budget_id, purpose }`, or `{ signature, sub_budget_id, purpose }` (then `haven_submit` with that id) |
+| `haven_sign` | Sign one payment, or (#3329) one task-budget open/close, or (#3330, #3506) one sub-budget open/close. Preferred form is `{ payment_id }` alone for a payment, `{ task_budget_id }` alone for a task-budget open/close, or `{ sub_budget_id }` alone for a sub-budget this agent delegates (its own parent-child and the grant to another agent of the same account) — exactly one of the three; the signer fetches the exact payload itself. Signs only Haven-prepared payloads (#3272, #3281, #3329): a direct-payment `PackedUserOperation` from this signer's own delegate account whose only call redeems a delegation made to that account directly, through a self-delegated task-budget child under it (the two-link `[task child, budget]` chain), or as a sub-budget grant from another agent of the same account redeemed under that agent's self-narrowing (the three-link `[sub grant, parent child, budget]` chain, #3330), or — against a Haven-signed context, which it records and binds — an EIP-3009 funding leg of that same shape paying this signer's own delegate EOA, or an erc7710 settlement child from this signer's own account; a self-delegated task-budget child `Delegation` from this signer's own account (`assertOwnTaskChild`); a sub-budget child `Delegation` from this signer's own account narrowing its budget for another agent of the same account (`assertOwnSubBudgetChild`); or a task-budget or sub-budget close — a `disableDelegation` UserOp from this signer's own account revoking that child (`assertOwnTaskBudgetCloseUserOp`, `assertOwnSubBudgetCloseUserOp`); other typed data is refused (`TYPED_DATA_NOT_ALLOWED`) | `{ signature }`, `{ signature, x402_binding }`, `{ signature, task_budget_id, purpose }`, or `{ signature, sub_budget_id, purpose }` (then `haven_submit` with that id) |
 | `haven_sign_x402` | One-shot x402: funding signature **and** the merchant header in a single local call (`haven_sign` + `haven_x402_sign_header`). `{ payment_id }` alone is the preferred call | `{ signature, x402_binding, payment_header, accepted }` |
 | `haven_x402_sign_header` | Build + sign the EIP-3009 merchant payment header, only when the fresh merchant `payment_required` matches the recorded `x402_binding` | `{ payment_header, accepted }` |
 | `haven_sign_sweep_delegate` | Sign a Haven-prepared gasless EIP-3009 sweep that recovers stranded funds from the delegate wallet back to your own account. Never broadcasts | `{ signature }` |
@@ -138,9 +138,11 @@ sender is THIS signer's own delegate account (the counterfactual
 HybridDeleGator for the delegate key, derived offline — `delegate-account.ts` in `@haven_ai/sdk`);
 and its `callData` is a single `execute` to the DelegationManager calling
 `redeemDelegations`, whose arguments are decoded too (`redemption-guard.ts` in `@haven_ai/sdk`):
-exactly one of two chain shapes (#3329) — a single grant made to this signer's own account by a
-different account, or a two-link `[task child, budget]` chain whose leaf is self-delegated by this
-signer's own account — never an empty chain or any other multi-link shape,
+exactly one of three chain shapes (#3329, #3330) — a single grant made to this signer's own account by a
+different account, a two-link `[task child, budget]` chain whose leaf is self-delegated by this
+signer's own account, or a three-link `[sub grant, parent child, budget]` chain whose leaf is granted
+to this signer's own account by another account and whose middle link is that account's
+self-delegation — never an empty chain or any other multi-link shape,
 `SingleDefault` mode, and canonical
 encoding at every level. The argument check matters: an EMPTY permission
 context makes the DelegationManager run the execution as the account itself,
@@ -200,7 +202,7 @@ refused with one stderr line naming `--help` and exit code 2 — before #3173 an
 unknown flag was silently ignored, so `--ack-local-tools` (the connector's
 flag, which the connector's doctor tells you to pass to the *connector*)
 produced only the consent wall. `--help` lists every registered tool (pinned
-against `toolSchemas`, so a fifth tool cannot drift out of the text) and names
+against `toolSchemas`, so a newly registered tool cannot drift out of the text) and names
 `npx @haven_ai/connect --doctor`.
 
 **Consent screen.** The first-launch block summarises each tool in one
@@ -239,16 +241,20 @@ the line is advisory: what the signer refuses to sign is unchanged.
 Direct payment:
 
 ```
-hosted:  haven_pay                -> { payment_id, payload to sign }
-local:   haven_sign               -> { signature }
+hosted:  haven_pay                -> { payment_id, payload_hash, idempotency_key, ... }
+local:   haven_sign { payment_id } -> { signature }
 hosted:  haven_submit             -> { status, tx_hash }
 ```
 
 On the delegation rail the payload is the EIP-712 typed data the account
-validates, not the bare ERC-4337 hash. Note the trust-model asymmetry: this
-direct leg has no Haven-signed expected context to verify against, so the
-authority boundary is the account's on-chain caveat enforcers rather than a
-client-side gate — unlike the x402 legs below.
+validates, not the bare ERC-4337 hash; since #3495 the `haven_pay` result is
+compact and withholds that typed data, so the signer fetches it by
+`payment_id`. Note the trust-model asymmetry: this direct leg has no
+Haven-signed expected context to verify against. The signer's local check is
+the shape allowlist and the #3271 hash binding above, which prove the
+operation redeems this agent's own delegation and is uncorrupted, not what it
+pays; the authority boundary on amount and recipient is the account's on-chain
+caveat enforcers — unlike the x402 legs below.
 
 x402 — **erc7710 direct settlement**, the preferred scheme when the account is
 on the delegation rail and the merchant advertises
@@ -453,7 +459,7 @@ malformed body) is structured the same way, not just prose — see
 [Sign-context refusal codes](#sign-context-refusal-codes) below.
 Nothing else in the package reaches the
 network: `haven_x402_sign_header` and `haven_sign_sweep_delegate` never fetch,
-the library surface above (`createEdgeSigner` and its six signing methods, over
+the library surface above (`createEdgeSigner` and its five methods, over
 the network-free `src/core.ts`) never fetches, and passing the payload as
 `typed_data_b64` instead of `payment_id` keeps even the two fetching tools
 offline. It never relays, submits, or broadcasts.
@@ -474,9 +480,18 @@ same digest re-derivation and Haven-binding verification apply, because what
 makes them safe is the verification, not where they came from.
 
 Connect Agent 2 may create the signer credential file locally during setup. In
-that flow Haven receives the public signing address, proof, API-key hash/prefix,
-and install status only; the plaintext API key and delegate key stay in local
-protected storage/runtime config.
+that flow the connector's register call (`registerSetup` in
+`packages/connect/src/api.ts`) sends Haven the setup token and challenge id,
+the public signing address and its proof, the API-key hash and prefix, the
+runtime labels (runtime, connector version, MCP server name, run mode,
+connector context) and the install capabilities. Its other calls in the same
+file — `resolveSetup`, the `/install-status` and `/retired-agents` reports,
+and the `/connector-status` read — carry the setup token or setup id, install
+status, runtime labels and agent ids; all but `resolveSetup` authenticate with
+the new API key. (The `/machine-payments/agent` identity read in the same file
+belongs to re-key, which calls it with the current and then the new key.) The
+plaintext API key is sent only as the bearer credential on those calls, and
+Haven stores only its hash; the delegate key never leaves the machine.
 
 ## Local audit
 

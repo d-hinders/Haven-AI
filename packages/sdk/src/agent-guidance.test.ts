@@ -131,12 +131,13 @@ describe('the settled agent vocabulary across the artifacts (#2533)', () => {
   })
 })
 
-describe('§ How to verify: needs_approval names its two causes (#4355)', () => {
-  it('tells "no rows: nobody approved" apart from "rows spent: refills at budgetRefillsAt"', () => {
+describe('§ How to verify: needs_approval names its three causes (#4355, #4352)', () => {
+  it('tells "ended: budgetEndedAt" apart from "no rows: nobody approved" and "rows spent: refills at budgetRefillsAt"', () => {
     expect(HAVEN_AGENT_RUNBOOK_MD).toContain(
-      '- `needs_approval` — no budget can pay. `allowances[]` empty: nobody approved one yet; ' +
-        'ask your user again, in their Haven tab — there is no queue. Rows, all spent: it refills at ' +
-        '`budgetRefillsAt`; tell your user, then wait or ask them to raise it',
+      '- `needs_approval` — no budget can pay. `allowances[]` empty with `budgetEndedAt` set: ' +
+        'your budget ENDED on that date; waiting will not help — ask your user to set a new one in ' +
+        'their Haven tab. `allowances[]` empty with `budgetEndedAt` null: nobody approved one yet; ' +
+        'ask your user again — there is no queue. Rows, all spent: it refills at `budgetRefillsAt`',
     )
     expect(HAVEN_AGENT_RUNBOOK_MD).not.toContain('the connector finished, nobody approved yet')
   })

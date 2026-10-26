@@ -40,7 +40,7 @@ covers:
   - packages/core/src/machine-payment-lifecycle.ts
   - packages/sdk/src/payment-mappers.ts
   - docs/bug-reports/quality-scan-2026-09-17-agent-surface.md
-last-verified: "2026-09-30"
+last-verified: "2026-10-25"
 ---
 
 # Quality scan 2026-09-21 — agent surface, third pass
@@ -272,3 +272,21 @@ are in the tree at this head; none is open:
   nothing measured here — the findings were about absence (a missing
   resolution, a missing step, a missing covers entry), and each absence is
   filled.
+
+## 8. Dispositions re-checked 2026-10-25 (weekly docs audit #3645, at dev `615686369`)
+
+The report body, §5 and §7 above are left as written. Every standing "in
+code" claim still holds at this head: the `token` schema describes the
+ERC-20 address or allowance symbol (`tools/contracts.ts`), the symbol
+resolves against the agent's allowances (`state-direct-recovery.ts`
+`resolveTokenAddressFromAllowances`), `tools/support/errors.ts`'s generic
+branches carry next steps spread through `nextStepWireFields` (the 5xx
+transient step, `UNKNOWN_ERROR` and rail-unavailable omitted reasons), the
+runtime doc's `covers:` block reaches all seven C1 paths, and the
+check-funds success step is still prose-shaped (N4 stays a decision, not a
+debt). The signer claims hold: `sign-context.ts` names
+`haven_get_payment_status` for a non-410 refusal and
+`next-step-characterization.test.ts` pins it. The intervening covered
+commits (#4372 parts A–I, #4405 agent-dir paths, x402 proof-header
+settlement #4075) changed the covered files but supersede nothing measured
+here — the findings were about absences, and each absence is filled.

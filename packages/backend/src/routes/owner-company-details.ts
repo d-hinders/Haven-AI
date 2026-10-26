@@ -53,8 +53,9 @@ function toWireRow(row: OwnerCompanyDetailsRow) {
 }
 
 /**
- * Behind the flag, GET/PUT/POST all answer 404 — not just the Settings →
- * Company details screen built on top of them. #3332 gates the feature
+ * Behind the flag, GET/PUT/POST all answer 404 — not just the Company
+ * details card on the Settings → Business tab built on top of them. #3332
+ * gates the feature
  * itself: a deployment with the flag off must behave as though
  * `parties.buyer` and this whole surface do not exist.
  *

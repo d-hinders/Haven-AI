@@ -4749,9 +4749,9 @@ export const openapiSpec = {
       get: {
         tags: ['Dashboard'],
         operationId: 'listAttentionDismissals',
-        summary: 'The caller\u2019s saved "Needs you" dismissals.',
+        summary: 'The caller\u2019s saved "Needs attention" dismissals and acknowledgements.',
         description:
-          'Server-saved dismissals for the recurring "Needs you" items (#3813), stored per account (backup) and per agent (needs setup) — permanent, and visible from every device of the same user. Presentation-only: nothing here is on the payment path, and there is no undismiss — the backup recommendation stays visible on the account page and a budget-less agent on the agent page.',
+          'Server-saved dismissals for the recurring "Needs attention" items (#3813), stored per account (backup) and per agent (needs setup) — permanent, and visible from every device of the same user — plus #4324\u2019s acknowledgements of the event-driven items, which return when something newer happens. Presentation-only: nothing here is on the payment path, and there is no undismiss — the backup recommendation stays visible on the account page and a budget-less agent on the agent page.',
         security: [{ DashboardJwt: [] }],
         responses: {
           '200': {
@@ -4766,9 +4766,9 @@ export const openapiSpec = {
       post: {
         tags: ['Dashboard'],
         operationId: 'createAttentionDismissal',
-        summary: 'Dismiss one recurring "Needs you" item.',
+        summary: 'Dismiss or acknowledge one "Needs attention" item.',
         description:
-          'Idempotent: re-dismissing answers the same 201 as the first write. `item_kind` decides which id the body must carry — `no-backup` requires `account_id` (the backup item is per account), `needs-setup` requires `agent_id` (per agent within its account). A foreign or unknown id is a 404, never a 403 — the route does not confirm that an id exists.',
+          'Idempotent for the permanent kinds: re-dismissing answers the same 201 as the first write. An acknowledgement (#4324) moves `acknowledged_at` to now. `item_kind` decides which ids the body must carry — `no-backup` requires `account_id` (the backup item is per account); `needs-setup`, `budget-reached`, `budget-scope` and an attributed `payments-failed` require `agent_id`; `budget-usage` requires `agent_id` and the firing budget\u2019s `period_end`; `haven-paused` and the unattributed `payments-failed` carry no id. A foreign or unknown id is a 404, never a 403 — the route does not confirm that an id exists.',
         security: [{ DashboardJwt: [] }],
         requestBody: {
           required: true,
@@ -6448,7 +6448,7 @@ export const openapiSpec = {
         operationId: 'getAnalyticsOverview',
         summary: 'One range-scoped aggregate: spend, refusals, fees, gas, budgets and balance.',
         description:
-          "Everything the `/analytics` page renders in one round trip, so the page has one loading state and one \"based on N payments\" basis (#2946, epic #2944 slice B). Sums are over `payment_intents` rows with `status = 'confirmed'` ONLY — fiat values are booked by the confirm UPDATE, so `pending_signature`/`submitted`/`failed`/`expired` rows carry NULL and never count. Spend figures are additionally NET of `delegate_sweeps` clawbacks (#3755): per (agent, token, chain) group, gross × (1 − min(1, swept_atomic/confirmed_atomic)) over sweeps that actually returned funds (`status = 'submitted'` with a `tx_hash`, anchored on `submitted_at` in the same window) — a merchant-refused funding leg whose stranded amount was swept back to the treasury does not count as spent. `payments`/`payments_counted` and `last_payment_at` stay gross: they count funding legs made, not money kept. `basis.unsettled_submitted` separately counts `submitted` rows in range so the page can say how many payments are awaiting settlement evidence. Fees are Haven's own fee (`payment_fees.fee_amount_atomic`), valued with the intent's booked fiat, `0` honestly while the flag is off. Gas is a sponsored-operation COUNT on value-bearing chains only — never a fiat figure. Budget-used is read from the chain per active delegation, never summed from intents. `tz` (default UTC) buckets `by_day` server-side, using the same zone Postgres and this validator agree on (an IANA name only — `tz` rejects UTC offsets and fixed abbreviations, which Postgres and JavaScript can interpret with opposite sign conventions); `range.from`/`to` are UTC instants regardless of `tz`. Because `range.from`/`to` are fixed UTC instants, `by_day`'s FIRST and LAST buckets can be PARTIAL under a non-UTC `tz` (they cover less than a full local day) — this is expected, not a bug, and the page should treat the edge buckets as partial. `balance_by_day` is unaffected: `user_daily_portfolio_snapshots` is a UTC-dated daily snapshot, produced once per day regardless of the caller's `tz` — except under `currency=sek`, where days snapshotted before the `total_sek` column existed (#3127, migration 090) carry no SEK figure and are OMITTED from the series rather than zeroed. The same honesty applies to the SEK SUMS under `currency=sek` (#3127, round-2 review): the totals, per-agent, top-merchant and fees figures sum `sek_value`, which is NULL for a confirmed row whose book-time SEK could not be captured or backfilled — those rows are still counted in `basis.payments_counted` but contribute nothing to any SEK sum, so a SEK total can sit below the basis it is computed over. USD and EUR are unaffected (their booking predates the capture gate). Delegation-rail accounts only.",
+          "Everything the `/analytics` page renders in one round trip, so the page has one loading state and one payment basis (`basis.payments_counted`, the figure the Payments tile shows) (#2946, epic #2944 slice B). Sums are over `payment_intents` rows with `status = 'confirmed'` ONLY — fiat values are booked by the confirm UPDATE, so `pending_signature`/`submitted`/`failed`/`expired` rows carry NULL and never count. Spend figures are additionally NET of `delegate_sweeps` clawbacks (#3755): per (agent, token, chain) group, gross × (1 − min(1, swept_atomic/confirmed_atomic)) over sweeps that actually returned funds (`status = 'submitted'` with a `tx_hash`, anchored on `submitted_at` in the same window) — a merchant-refused funding leg whose stranded amount was swept back to the treasury does not count as spent. `payments`/`payments_counted` and `last_payment_at` stay gross: they count funding legs made, not money kept. `basis.unsettled_submitted` separately counts `submitted` rows in range so the page can say how many payments are awaiting settlement evidence. Fees are Haven's own fee (`payment_fees.fee_amount_atomic`), valued with the intent's booked fiat, `0` honestly while the flag is off. Gas is a sponsored-operation COUNT on value-bearing chains only — never a fiat figure. Budget-used is read from the chain per active delegation, never summed from intents. `tz` (default UTC) buckets `by_day` server-side, using the same zone Postgres and this validator agree on (an IANA name only — `tz` rejects UTC offsets and fixed abbreviations, which Postgres and JavaScript can interpret with opposite sign conventions); `range.from`/`to` are UTC instants regardless of `tz`. Because `range.from`/`to` are fixed UTC instants, `by_day`'s FIRST and LAST buckets can be PARTIAL under a non-UTC `tz` (they cover less than a full local day) — this is expected, not a bug, and the page should treat the edge buckets as partial. `balance_by_day` is unaffected: `user_daily_portfolio_snapshots` is a UTC-dated daily snapshot, produced once per day regardless of the caller's `tz` — except under `currency=sek`, where days snapshotted before the `total_sek` column existed (#3127, migration 090) carry no SEK figure and are OMITTED from the series rather than zeroed. The same honesty applies to the SEK SUMS under `currency=sek` (#3127, round-2 review): the totals, per-agent, top-merchant and fees figures sum `sek_value`, which is NULL for a confirmed row whose book-time SEK could not be captured or backfilled — those rows are still counted in `basis.payments_counted` but contribute nothing to any SEK sum, so a SEK total can sit below the basis it is computed over. USD and EUR are unaffected (their booking predates the capture gate). Delegation-rail accounts only.",
         security: [{ DashboardJwt: [] }],
         parameters: [
           {
@@ -8293,10 +8293,13 @@ export const openapiSpec = {
           '403': {
             ...errorResponse,
             description:
-              'The amount exceeds the agent\'s remaining delegation budget — decided here and ' +
-              'recorded in the payment_refusals ledger (source "hosted_prepare"). Carries ' +
-              'error_code "delegation_budget_exceeded", phase "insufficient_funds", next_action ' +
-              '"fund_account_or_raise_allowance", plus remaining/remaining_atomic, ' +
+              'The agent has no spend authority that can pay this. Since #4352 there are two shapes: ' +
+              'the amount exceeds a LIVE budget\u2019s remaining period figure — error_code ' +
+              '"delegation_budget_exceeded", recorded in the payment_refusals ledger (source ' +
+              '"hosted_prepare") — or the only budget row for the token has ENDED — error_code ' +
+              '"delegation_expired", with budget_ended_at and the end-date prose ("this budget ended ' +
+              'on <date>; ask the owner to set a new one"). Both carry phase "insufficient_funds", ' +
+              'next_action "fund_account_or_raise_allowance", plus remaining/remaining_atomic, ' +
               'amount/amount_atomic and shortfall/shortfall_atomic, and resource_url / ' +
               'merchant_address when the request carried them.',
           },
@@ -10045,14 +10048,19 @@ export const openapiSpec = {
       AttentionDismissal: {
         type: 'object',
         description:
-          'One server-saved "Needs you" dismissal (#3813). `no-backup` rows carry `account_id` (the backup item is per account); `needs-setup` rows carry `agent_id` (per agent within its account). Permanent — there is no undismiss.',
-        required: ['id', 'item_kind', 'account_id', 'agent_id', 'created_at'],
+          'One server-saved "Needs attention" dismissal or acknowledgement. Permanent dismissals (#3813): `no-backup` rows carry `account_id` (per account), `needs-setup` rows carry `agent_id` (per agent within its account). Acknowledgements (#4324): `budget-reached`, `budget-usage`, `budget-scope` and `payments-failed` carry `agent_id`; `haven-paused` and the unattributed `payments-failed` carry neither id. An acknowledged item comes back when an event of its kind is newer than `acknowledged_at` (`budget-usage`: when the budget\u2019s period has moved past `acknowledged_period_end`). There is no undismiss.',
+        required: ['id', 'item_kind', 'account_id', 'agent_id', 'created_at', 'acknowledged_at', 'acknowledged_period_end'],
         properties: {
           id: uuid,
-          item_kind: { type: 'string', enum: ['no-backup', 'needs-setup'] },
+          item_kind: {
+            type: 'string',
+            enum: ['no-backup', 'needs-setup', 'budget-reached', 'budget-usage', 'budget-scope', 'haven-paused', 'payments-failed'],
+          },
           account_id: { ...uuid, nullable: true, description: 'Set on `no-backup` rows; null otherwise.' },
-          agent_id: { ...uuid, nullable: true, description: 'Set on `needs-setup` rows; null otherwise.' },
+          agent_id: { ...uuid, nullable: true, description: 'Set on per-agent rows (`needs-setup`, `budget-reached`, `budget-usage`, `budget-scope`, an attributed `payments-failed`); null otherwise.' },
           created_at: isoDateTime,
+          acknowledged_at: { ...isoDateTime, description: '#4324 — when the user last dismissed or acknowledged the item. Re-acknowledging moves it forward; for the permanent kinds it is the first dismissal\u2019s time.' },
+          acknowledged_period_end: { ...isoDateTime, nullable: true, description: '#4324 — `budget-usage` only: the firing budget\u2019s `period_end` when it was acknowledged. Null on every other kind.' },
         },
         additionalProperties: false,
       },
@@ -10066,7 +10074,7 @@ export const openapiSpec = {
       },
       AttentionDismissalInput: {
         description:
-          'The kind decides which id the body carries; any other pairing is refused before the handler.',
+          'The kind decides which ids the body carries; any other pairing is refused before the handler.',
         oneOf: [
           {
             type: 'object',
@@ -10081,8 +10089,26 @@ export const openapiSpec = {
             type: 'object',
             required: ['item_kind', 'agent_id'],
             properties: {
-              item_kind: { type: 'string', enum: ['needs-setup'] },
+              item_kind: { type: 'string', enum: ['needs-setup', 'budget-reached', 'budget-scope', 'payments-failed'] },
               agent_id: uuid,
+            },
+            additionalProperties: false,
+          },
+          {
+            type: 'object',
+            required: ['item_kind', 'agent_id', 'period_end'],
+            properties: {
+              item_kind: { type: 'string', enum: ['budget-usage'] },
+              agent_id: uuid,
+              period_end: { ...isoDateTime, description: 'The firing budget\u2019s `period_end` (from `/dashboard/budget-remaining`); the item re-arms once that budget\u2019s period has moved past it.' },
+            },
+            additionalProperties: false,
+          },
+          {
+            type: 'object',
+            required: ['item_kind'],
+            properties: {
+              item_kind: { type: 'string', enum: ['haven-paused', 'payments-failed'], description: 'User-level: `haven-paused`, or the unattributed `payments-failed` item.' },
             },
             additionalProperties: false,
           },
@@ -12950,6 +12976,16 @@ export const openapiSpec = {
           delegate_address: address,
           chain_id: { type: 'integer' },
           superseded_by: { $ref: '#/components/schemas/AgentSupersession' },
+          budget_ended_at: {
+            type: ['string', 'null'],
+            format: 'date-time',
+            description:
+              '#4352 (decision 5, additive): when the agent\u2019s only budgets for this chain have ENDED, ' +
+              'the latest ended budget\u2019s expiry (ISO 8601) — read by the same narrow expired-row query ' +
+              'the refusal answers use. `null` when no expired row exists; the field NEVER reports a ' +
+              'live budget. Lets an agent whose `allowances[]` is empty tell \u201cnobody approved yet\u201d from ' +
+              '\u201cthe budget ended on this date\u201d. Optional on the schema so an older backend that omits it stays valid.',
+          },
           allowances: {
             type: 'array',
             items: {
@@ -13737,7 +13773,7 @@ export const openapiSpec = {
       },
       DashboardAgentPreview: {
         type: 'object',
-        required: ['id', 'name', 'status', 'accountId', 'accountName', 'accountChainId', 'allowances', 'budgets', 'receivedSubBudgets', 'stats'],
+        required: ['id', 'name', 'status', 'accountId', 'accountName', 'accountChainId', 'allowances', 'budgets', 'budgetEndedAt', 'receivedSubBudgets', 'stats'],
         properties: {
           id: uuid,
           name: { type: 'string' },
@@ -13754,6 +13790,7 @@ export const openapiSpec = {
           // "Finish setup" when the setup expired or failed (owner decision 2).
           setupStatus: { type: 'string', description: "Present only when status is 'pending_approval': the agent's newest connection setup status (e.g. 'awaiting_connection', 'expired', 'failed')." },
           budgets: { type: 'array', items: { $ref: '#/components/schemas/DashboardAgentBudget' }, description: '#3803: every live budget from the active delegation set — expired rows follow the #3802 predicate and are absent.' },
+          budgetEndedAt: { type: ['string', 'null'], format: 'date-time', description: "#4353 — when this agent's latest budget ENDED: the latest `expires_at` among its `active` delegation rows on its own account's chain whose window has closed (the rows the live `budgets` read drops, #3802). `null` when it has none; a revoked row never counts. Always sent. Display-only — it feeds the \"Budget ended\" Needs-attention item and authorises nothing." },
           receivedSubBudgets: { type: 'array', items: { $ref: '#/components/schemas/DashboardReceivedSubBudget' }, description: '#3803: sub-budget grants this agent RECEIVED, so an agent whose only authority is a received sub-budget does not read "No budget".' },
           stats: { $ref: '#/components/schemas/DashboardAgentStats' },
         },
@@ -13855,7 +13892,7 @@ export const openapiSpec = {
           },
           payments: { type: 'integer', description: 'Confirmed payment rows in the window — activity, never netted.' },
           distinctMerchants: { type: 'integer', description: 'DISTINCT merchants over the window — merchant = the x402 resource host, else the recipient address. A user-level figure, never a sum of per-agent counts.' },
-          budgetStops: { type: 'integer', description: 'Refusal rows whose reason was delegation_budget_exceeded or delegation_expired — a budget stopped a payment.' },
+          budgetStops: { type: 'integer', description: 'Refusal rows whose reason was delegation_budget_exceeded or delegation_expired — a budget stopped a payment. Stays the COMBINED figure (#4353): the per-agent `refusals.budget` and `refusals.expired` buckets are separate, this is their sum.' },
         },
         additionalProperties: false,
       },
@@ -13899,12 +13936,18 @@ export const openapiSpec = {
       DashboardRefusalBuckets: {
         type: 'object',
         description: '#3803 — refusal ROW counts per bucket (not distinct reasons — #3815). relayer_budget is Haven\u2019s own cap and is never shown as the user\u2019s budget.',
-        required: ['budget', 'scope', 'failed', 'haven'],
+        required: ['budget', 'expired', 'scope', 'failed', 'haven'],
         properties: {
-          budget: { type: 'integer', description: 'delegation_budget_exceeded + delegation_expired.' },
+          budget: { type: 'integer', description: 'delegation_budget_exceeded only (#4353 split delegation_expired out into `expired`).' },
+          expired: { type: 'integer', description: '#4353 — delegation_expired: the agent tried to pay after its budget ended. Its own "Budget ended" Needs-attention item.' },
           scope: { type: 'integer', description: 'no_delegation_for_target.' },
           failed: { type: 'integer', description: 'onchain_revert.' },
           haven: { type: 'integer', description: 'relayer_budget.' },
+          lastBudgetAt: { type: 'string', format: 'date-time', description: '#4324 — the latest `budget` refusal in the window. Sent on `d7` only, and only when the bucket has a row: the "Needs attention" items fire on the 7-day counts and re-arm an acknowledgement when this is after it. Absent never hides an item.' },
+          lastExpiredAt: { type: 'string', format: 'date-time', description: '#4353 — the latest `expired` refusal in the window. `d7` only; absent when the bucket has no row (same rule as `lastBudgetAt`).' },
+          lastScopeAt: { type: 'string', format: 'date-time', description: '#4324 — the latest `scope` refusal in the window. `d7` only; absent when the bucket is empty.' },
+          lastFailedAt: { type: 'string', format: 'date-time', description: '#4324 — the latest `failed` (onchain_revert) refusal in the window. `d7` only; absent when the bucket is empty.' },
+          lastHavenAt: { type: 'string', format: 'date-time', description: '#4324 — the latest `haven` (relayer_budget) refusal in the window. `d7` only; absent when the bucket is empty.' },
         },
         additionalProperties: false,
       },
@@ -14077,6 +14120,7 @@ export const openapiSpec = {
                 additionalProperties: false,
               },
               failedIntents7d: { type: 'integer', description: 'Payment intents with status failed in the 7-day window.' },
+              lastFailedIntentAt: { type: 'string', format: 'date-time', description: '#4324/#4378 — the latest failure time of any failed intent in the window: `failed_at`, the time the intent became `failed` (stamped by the failure writers); rows with no stamp fall back to the latest recorded step (`created_at`, `signed_at` or `submitted_at`). Absent when the window has none. The unattributed "Payments failed" acknowledgement re-arms when this is after it.' },
               balance_by_day: {
                 type: 'array',
                 description: '30 days of portfolio totals, shared with analytics\u2019 BALANCE_BY_DAY_SQL. Days with no snapshot are ABSENT, not zero; totalSek is null on pre-migration-090 days.',

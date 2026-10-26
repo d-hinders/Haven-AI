@@ -31,7 +31,8 @@ import { privateKeyToAccount } from 'viem/accounts'
 import { addressFromKey, buildSweepAuthorizationMessage, buildX402ExpectedMessage, deriveDelegateAccountAddress } from '@haven_ai/sdk'
 import { buildBoundDirectUserOp, buildFundingLegUserOp } from '@haven_ai/sdk/test-support'
 import { createEdgeSigner } from './core.js'
-import { createToolHandlers, type ToolPayload } from './tools.js'
+import { createToolHandlers, toolDescriptions, type ToolPayload } from './tools.js'
+import { NO_FUNDING_LEG_MESSAGE } from './no-funding-leg.js'
 import { SIGNER_HOSTED_HANDOFF_SHAPES } from './next-step.js'
 import { SUPPORTED_DIRECT_SIGN_CONTEXT_VERSIONS } from './sign-context.js'
 
@@ -497,4 +498,47 @@ describe('signer success wire — every success site names its exact next step (
       expect('safe_to_continue' in out).toBe(false)
     })
   }
+})
+
+// ── the settlement-child guidance, pinned whole ─────────────────────────────
+// The bare substring `haven_settle_mcp_tool` already occurs in
+// SIGN_X402_DESCRIPTION, so a substring check would pass without the new
+// sentence. Each sentence below is asserted whole, as it appears in the
+// description the tool publishes.
+
+describe('settlement-child guidance names both settle routes, pinned whole (#4449)', () => {
+  it('haven_sign: the plain-HTTP route, the MCP route, and the retired binding', () => {
+    expect(toolDescriptions.haven_sign).toContain(
+      "child has no header step (#4242): on a plain-HTTP merchant, haven_submit with settlement_scheme 'erc7710' " +
+        'returns the header; on an MCP merchant reached through haven_prepare_catalog_purchase or ' +
+        'haven_pay_mcp_tool, call mcp__haven__haven_settle_mcp_tool with payment_id and signature and NO ' +
+        'payment_header — Haven assembles it at settle. haven_x402_sign_header refuses that binding, and the ' +
+        'x402_binding this result carries for a settlement child is ALREADY RETIRED (#4256), so it is unusable.',
+    )
+  })
+
+  it('haven_sign_x402: the plain-HTTP route and the MCP route', () => {
+    expect(toolDescriptions.haven_sign_x402).toContain(
+      'An erc7710 settlement child is refused before anything is signed (#4242): sign it with haven_sign, then on a ' +
+        "plain-HTTP merchant pass settlement_scheme 'erc7710' to haven_submit, and on an MCP merchant call " +
+        'haven_settle_mcp_tool with payment_id and signature and NO payment_header — Haven assembles it at settle.',
+    )
+  })
+
+  it('haven_x402_sign_header: the plain-HTTP route and the MCP route', () => {
+    expect(toolDescriptions.haven_x402_sign_header).toContain(
+      'It refuses a binding minted for an erc7710 settlement child (#4242): that payment has no funding leg, so no ' +
+        'EIP-3009 header exists for it — on a plain-HTTP merchant, haven_submit with settlement_scheme ' +
+        "'erc7710' returns the header, and on an MCP merchant haven_settle_mcp_tool settles with no payment_header at all.",
+    )
+  })
+
+  it('NO_FUNDING_LEG_MESSAGE: the plain-HTTP route and the MCP route', () => {
+    expect(NO_FUNDING_LEG_MESSAGE).toContain(
+      'On a plain-HTTP merchant, submit the child signature from haven_sign with haven_submit and settlement_scheme ' +
+        "'erc7710', and retry the merchant with the payment_header haven_submit returns. On an MCP merchant reached " +
+        'through haven_prepare_catalog_purchase or haven_pay_mcp_tool, call haven_settle_mcp_tool with payment_id and ' +
+        'signature and NO payment_header — Haven assembles it at settle.',
+    )
+  })
 })

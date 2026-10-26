@@ -26,9 +26,10 @@ import type { AnalyticsAgentRow, AnalyticsDayBucket, AnalyticsRange } from '@/ty
  * - Agent NAMES come from `agents[]`; the series colour comes from the ONE
  *   map the page builds in `lib/analytics-series.ts`
  *   (`seriesColorByAgent` — the agent's own avatar tint, #4331) and hands
- *   to this section. The fill is keyed on the agent's NAME, so it holds
- *   across periods and rank moves; two agents that hash to the same tint
- *   are told apart by name in the legend and tooltip.
+ *   to this section. The fill is the agent's STORED tint (#4428), so it holds
+ *   across periods and rank moves and two agents whose names hash alike are
+ *   drawn in different colours; two agents that share a tint are told apart
+ *   by name in the legend and tooltip.
  * - **A continuous day axis (#4334).** The window is
  *   `[now − N×24h, now)` bucketed by local day, so it touches N local dates
  *   when `now` is local midnight and N+1 otherwise; the section enumerates
@@ -169,8 +170,9 @@ export function toStackedBarDays(
   // in the order it was met (the sort is stable).
   const position = new Map(agents.map((agent, index) => [agent.id, index]))
   const orderOf = (agentId: string): number => position.get(agentId) ?? agents.length
-  // The fill is the agent's avatar tint (`seriesColorByAgent`, #4331) —
-  // name-hashed, so it survives re-ranking. An id the map does not carry
+  // The fill is the agent's avatar tint (`seriesColorByAgent`, #4331) — its
+  // stored tint (#4428), so it survives re-ranking and two agents whose names
+  // hash alike are drawn in different colours. An id the map does not carry
   // (not producible by this endpoint) gets the neutral ink rather than a
   // silent fall-through to the first series token.
   const buckets = new Map(byDay.map((day) => [day.date, day]))

@@ -36,12 +36,13 @@
  * ink mark and not a red one — red is `--v2-danger`'s job when a row states a
  * failure, and this is a count of events. An AGENT-keyed series does not
  * read this palette at all (#4331): it carries `color` — the agent's avatar
- * tint from `seriesColorForAgent`, name-hashed, so one agent wears one
- * colour on every chart, in every period, matching its monogram. Two agents
- * can share a tint (six tints, unbounded agents); the legend and tooltip
- * tell them apart by name. Callers assign `seriesIndex` only for series that
- * are not an agent, and hold it stable so the bar, the legend, and any
- * companion table read one colour per series.
+ * tint from `seriesColorForAgent`, its STORED tint when it has one (#4428)
+ * and the name hash otherwise — so one agent wears one colour on every chart,
+ * in every period, matching its monogram. Two agents can share a tint (six
+ * tints, unbounded agents; past the first six the stored tint repeats); the
+ * legend and tooltip tell them apart by name. Callers assign `seriesIndex`
+ * only for series that are not an agent, and hold it stable so the bar, the
+ * legend, and any companion table read one colour per series.
  *
  * ## Why the labels are HTML over the drawing rather than SVG <text>
  *
@@ -194,9 +195,10 @@ export interface StackedBarSeries {
    *  table beside it. An AGENT-keyed series carries `color` instead
    *  (#4331) — its avatar tint — and omits this. */
   seriesIndex?: number
-  /** Explicit fill for an agent-keyed series (#4331): `seriesColorForAgent(name)`
+  /** Explicit fill for an agent-keyed series (#4331): `seriesColorForAgent({ name, avatarTint })`
    *  — the agent's avatar tint, the same token its `Monogram` wears, stable
-   *  under re-ranking. Wins over `seriesIndex` when both are set. */
+   *  under re-ranking and, since #4428, its own stored tint rather than a
+   *  name hash. Wins over `seriesIndex` when both are set. */
   color?: string
   /** Stable key; the tooltip's per-row identity and the React key. */
   id: string

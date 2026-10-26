@@ -35,6 +35,7 @@ named where they belong below.
 
 | Date | Decision | Refs |
 |---|---|---|
+| 2026-10-26 | Agents carry a stored tint, unique among a user's first six; merchants and contacts keep the name hash | #4428 |
 | 2026-10-21 | The pending-promotion digest issue is retired; pending work is the `main...dev` compare | #666 |
 | 2026-10-17 | Phone navigation floats: the tab bar is a floating pill, and the More sheet a floating card that covers it with its own ✕; the bar labels `/transactions` "Activity" | #4058 (supersedes #4053's "stops at the bar's top edge") |
 | 2026-10-17 | The phone More menu is a bottom sheet over the tab bar; its theme control is three-way (Light / Dark / System), superseding #2953 for the phone | #4053 (supersedes #2820's drawer) |
@@ -57,6 +58,59 @@ named where they belong below.
 | 2026-07-12 | Session rail retired outright; AllowanceModule import-only | #834 (AllowanceModule half superseded) |
 | — | Approval-queue history readability waived | #2021, #2055 |
 | — | Historical: POC scope and phased roadmap | — |
+
+---
+
+## 2026-10-26 — agents carry a stored tint, unique among a user's first six (#4428)
+
+Owner decision, 2026-10-26: an agent's colour is **assigned when the agent is
+created and stored**, not hashed from its name. Until this, an agent's tint was
+`avatarTint(name)` — djb2 mod 6 over the trimmed name — so two agents collided
+with a 17% chance at two agents, 44% at three and 72% at four, and two agents
+that shared a tint looked identical in the charts, the legend, the dashboard
+spending bar and their monograms. The design system accepted that ("No
+workaround is attempted in the colour"); this entry retires the acceptance.
+
+The rule now:
+
+- **Scope is per user.** The dashboard and Analytics show all of a user's
+  agents together, across their accounts, so uniqueness is among the user's
+  agents, not per account.
+- **Assignment at creation.** The first of tints 1–6 that none of the user's
+  tint-holding agents holds. It is done by a database trigger on insert
+  (migration 121, #4429), so every insert path gets one. An agent's tint never
+  changes once assigned.
+- **Visible agents hold a tint; hidden ones release it.** Active, paused,
+  needs-setup and revoked agents hold theirs; archived (`archived_at`) and
+  superseded (`superseded_by_agent_id`) agents release theirs, so a new agent
+  can take it. A replacement takes over its predecessor's tint when the
+  supersession is recorded.
+- **More than six agents.** The tint held by the fewest of the user's agents,
+  lowest number on ties. Repeats are unavoidable past six, and the name stays
+  in the legend and tooltip.
+- **Backfill.** Existing agents are assigned once, per user, oldest first by
+  `created_at`. Some existing monograms change colour once.
+- **Merchants and contacts keep the name hash.** Only agents have a stored
+  tint; `Monogram` takes an optional `tint` and falls back to the hash, and
+  `seriesColorForAgent({ name, avatarTint })` prefers the stored tint.
+
+Declined alternatives, compared in session: marking collisions (a stroke or a
+legend marker), pattern fills, and adding more tints. Storing the assignment
+was chosen because it removes the collision for the agents a user actually
+sees rather than making it legible.
+
+The rule was restated in several places and all of them were rewritten in the
+design-system slice (#4430): `docs/product/design-system.md` (the series
+palette paragraph, the avatar-tints section and its Collisions paragraph, the
+`PageHeader` leading note, the shared agent row),
+`docs/product/screen-recipes.md` § Agent Detail, `lib/avatar-tint.ts`,
+`components/ui/Monogram.tsx`, `lib/analytics-series.ts`,
+`components/ui/StackedBarChart.tsx`, `components/analytics/SpendSection.tsx`,
+`dashboard/MoneyPanel.tsx`, `haven/AgentRow.tsx`,
+`components/analytics/AgentsTable.tsx`, `packages/ui/src/tokens.css` and the
+`/design-system` specimens. Two sentences flipped with it: "renaming an agent
+changes its colour" is now false, and "two agents can hash to the same tint" is
+true only past a user's first six.
 
 ---
 

@@ -6,7 +6,7 @@ import {
   bergetAi,
   havenDemoStore,
 } from '../../../e2e/fixtures/marketplace'
-import { avatarTint, seriesColorForAgent } from '../avatar-tint'
+import { avatarTint, resolveAvatarTint, seriesColorForAgent } from '../avatar-tint'
 
 /**
  * The showcase names, read out of the page's source rather than imported:
@@ -25,7 +25,9 @@ const SHOWCASE_NAMES = (
 /**
  * The avatar tint rule (#4066): a pure function of the trimmed name, landing
  * the three marketplace fixture merchants on three different tints so the
- * `/marketplace` grid reads as three distinct circles.
+ * `/marketplace` grid reads as three distinct circles. Since #4428 this hash
+ * is the MERCHANT and CONTACT rule — an agent carries a stored tint instead
+ * (see `resolveAvatarTint` below).
  */
 describe('avatarTint', () => {
   it('is deterministic — the same name always gives the same tint', () => {
@@ -73,8 +75,43 @@ describe('avatarTint', () => {
 })
 
 /**
+ * The tint an entity wears (#4428): the STORED tint when it has one (an
+ * agent), the name hash otherwise (a merchant or a contact). One rule, read by
+ * both `Monogram` and `seriesColorForAgent`.
+ */
+describe('resolveAvatarTint', () => {
+  it('prefers the stored tint over the name hash', () => {
+    // 'Research agent' hashes to 6; the stored tint wins.
+    expect(avatarTint('Research agent')).toBe(6)
+    expect(resolveAvatarTint({ name: 'Research agent', avatarTint: 2 })).toBe(2)
+  })
+
+  it('falls back to the hash when there is no stored tint — merchants and contacts', () => {
+    expect(resolveAvatarTint({ name: 'Berget AI' })).toBe(avatarTint('Berget AI'))
+    expect(resolveAvatarTint({ name: 'Berget AI', avatarTint: null })).toBe(avatarTint('Berget AI'))
+    expect(resolveAvatarTint({ name: 'Berget AI', avatarTint: undefined })).toBe(avatarTint('Berget AI'))
+  })
+
+  it('ignores a stored value outside 1..6 — a wire-shape guard, not a policy', () => {
+    for (const bad of [0, 7, -1, 2.5, Number.NaN]) {
+      expect(resolveAvatarTint({ name: 'Research agent', avatarTint: bad })).toBe(6)
+    }
+  })
+
+  it('gives two hash-alike agents different tints when each carries its own', () => {
+    // Both hash to 6 under djb2 mod 6 — the collision the epic removed.
+    expect(avatarTint('Research agent')).toBe(avatarTint('Data-feed agent'))
+    expect(resolveAvatarTint({ name: 'Research agent', avatarTint: 6 })).not.toBe(
+      resolveAvatarTint({ name: 'Data-feed agent', avatarTint: 2 }),
+    )
+  })
+})
+
+/**
  * One colour per agent (#4331): the tint the `Monogram` wears is the SAME
  * token the agent's chart series is filled with, via `seriesColorForAgent`.
+ * Since #4428 the helper takes the AGENT, not a bare name, so the stored tint
+ * can win over the hash.
  */
 describe('seriesColorForAgent', () => {
   it('gives a name the var() of the very tint its monogram wears', () => {
@@ -86,23 +123,44 @@ describe('seriesColorForAgent', () => {
       'Berget AI',
       'Zoé Lambert',
     ]) {
-      expect(seriesColorForAgent(name)).toBe(`var(--v2-avatar-${avatarTint(name)})`)
+      expect(seriesColorForAgent({ name })).toBe(`var(--v2-avatar-${avatarTint(name)})`)
     }
   })
 
-  it('is rank-independent — a pure function of the name, unmoved by any other agent', () => {
-    // The colour does not consult an ordering: the same call, with or without
-    // a second agent "queued" ahead of it, reads the same token.
-    expect(seriesColorForAgent('Research agent')).toBe(seriesColorForAgent('Research agent'))
-    expect(seriesColorForAgent('Research agent')).toBe('var(--v2-avatar-6)')
-    expect(seriesColorForAgent('Ops agent')).toBe('var(--v2-avatar-5)')
+  it('prefers the agent’s stored tint over the name hash', () => {
+    expect(seriesColorForAgent({ name: 'Research agent', avatarTint: 2 })).toBe('var(--v2-avatar-2)')
+    expect(seriesColorForAgent({ name: 'Research agent' })).toBe('var(--v2-avatar-6)')
   })
 
-  it('lands the /design-system showcase pair on two different tints, so the monogram-beside-swatch row reads', () => {
-    expect(avatarTint('Research agent')).not.toBe(avatarTint('Ops agent'))
+  it('draws two hash-alike agents in different colours — the rule #4428 changed', () => {
+    const research = seriesColorForAgent({ name: 'Research agent', avatarTint: 6 })
+    const dataFeed = seriesColorForAgent({ name: 'Data-feed agent', avatarTint: 2 })
+    expect(avatarTint('Research agent')).toBe(avatarTint('Data-feed agent'))
+    expect(research).not.toBe(dataFeed)
   })
 
-  it('normalises like avatarTint — trim and collapsed whitespace', () => {
-    expect(seriesColorForAgent('  Research \t agent ')).toBe(seriesColorForAgent('Research agent'))
+  it('is rank-independent — a pure function of the name for a merchant, unmoved by any other entity', () => {
+    // A merchant or a contact has no stored tint, so the colour does not
+    // consult an ordering: the same call, with or without a second entity
+    // "queued" ahead of it, reads the same token. (An agent's colour is its
+    // stored tint, which is equally unmoved by rank — see the test above.)
+    expect(seriesColorForAgent({ name: 'Research agent' })).toBe(seriesColorForAgent({ name: 'Research agent' }))
+    expect(seriesColorForAgent({ name: 'Research agent' })).toBe('var(--v2-avatar-6)')
+    expect(seriesColorForAgent({ name: 'Ops agent' })).toBe('var(--v2-avatar-5)')
+  })
+
+  it('lands the /design-system showcase pair on two different colours, so the monogram-beside-swatch row reads', () => {
+    // The pair hashes ALIKE (both tint 6) and is separated by the stored tint
+    // each agent carries — the specimen exists to show exactly that.
+    expect(avatarTint('Research agent')).toBe(avatarTint('Data-feed agent'))
+    expect(seriesColorForAgent({ name: 'Research agent', avatarTint: 6 })).not.toBe(
+      seriesColorForAgent({ name: 'Data-feed agent', avatarTint: 2 }),
+    )
+  })
+
+  it('normalises like avatarTint when it falls back to the hash', () => {
+    expect(seriesColorForAgent({ name: '  Research \t agent ' })).toBe(
+      seriesColorForAgent({ name: 'Research agent' }),
+    )
   })
 })

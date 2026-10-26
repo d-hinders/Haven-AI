@@ -544,33 +544,33 @@ test.describe('design-system visual regression', () => {
       await page.waitForLoadState('networkidle')
 
       // Named cause 3 — the swatches: one per agent, in order, each wearing
-      // the agent's OWN avatar tint (`seriesColorForAgent`, #4331 —
-      // 'Research agent' hashes to --v2-avatar-6, 'Ops agent' to
-      // --v2-avatar-5, pinned in `src/lib/__tests__/avatar-tint.test.ts`),
-      // with the agent's Monogram beside it — the pairing the list exists to
-      // show, not a rank-assigned series index the bars paint with.
+      // the agent's OWN STORED tint (`seriesColorForAgent`, #4331/#4428 —
+      // 'Research agent' carries tint 6, 'Data-feed agent' tint 2, and both
+      // names hash to 6, so the pair is the rule the epic changed), with the
+      // agent's Monogram beside it — the pairing the list exists to show, not
+      // a rank-assigned series index the bars paint with.
       const swatchList = page.getByTestId('ds-stacked-bar-swatch-list')
       await expect(swatchList).toHaveCount(1)
       const rows = swatchList.locator('li')
       await expect(rows).toHaveCount(2)
       await expect(swatchList.getByTestId('series-swatch')).toHaveCount(2)
       const researchRow = rows.filter({ hasText: 'Research agent' })
-      const opsRow = rows.filter({ hasText: 'Ops agent' })
+      const dataFeedRow = rows.filter({ hasText: 'Data-feed agent' })
       await expect(researchRow).toHaveCount(1)
-      await expect(opsRow).toHaveCount(1)
+      await expect(dataFeedRow).toHaveCount(1)
       await expect(researchRow.getByTestId('series-swatch')).toHaveAttribute(
         'style',
         /var\(--v2-avatar-6\)/,
       )
-      await expect(opsRow.getByTestId('series-swatch')).toHaveAttribute(
+      await expect(dataFeedRow.getByTestId('series-swatch')).toHaveAttribute(
         'style',
-        /var\(--v2-avatar-5\)/,
+        /var\(--v2-avatar-2\)/,
       )
       // The agent's own Monogram sits beside its swatch: the same aria-hidden
       // 32px mark the Monogram agent-row sample below asserts on — the #4331
       // pairing, one colour per agent.
       await expect(researchRow.locator('[aria-hidden="true"].h-8.w-8')).toHaveCount(1)
-      await expect(opsRow.locator('[aria-hidden="true"].h-8.w-8')).toHaveCount(1)
+      await expect(dataFeedRow.locator('[aria-hidden="true"].h-8.w-8')).toHaveCount(1)
 
       await expectShowcaseClip(swatchList, vp.height, 'the swatch list', `design-system-stacked-bar-swatch-list-${vp.name}${schemeSuffix}.png`, STACKED_BAR_MAX_DIFF_PIXELS)
     })
@@ -707,8 +707,16 @@ test.describe('design-system visual regression', () => {
 
       const sample = page.getByTestId('ds-monogram')
       await expect(sample).toHaveCount(1)
-      await expect(sample.locator('[aria-hidden="true"].h-8.w-8')).toHaveCount(2)
+      // Three xs marks: the agent-row sample, the hash-alike pair #4428
+      // added, and the emoji sample.
+      await expect(sample.locator('[aria-hidden="true"].h-8.w-8')).toHaveCount(3)
       await expect(sample.getByText('Research agent', { exact: true })).toBeVisible()
+      // #4428: the pair whose names hash alike (both tint 6) wears two
+      // different STORED tints — the rule the epic changed, on the page.
+      const researchMark = sample.locator('[aria-hidden="true"].h-8.w-8').nth(0)
+      const dataFeedMark = sample.locator('[aria-hidden="true"].h-8.w-8').nth(1)
+      await expect(researchMark).toHaveClass(/bg-\[var\(--v2-avatar-6-soft\)\]/)
+      await expect(dataFeedMark).toHaveClass(/bg-\[var\(--v2-avatar-2-soft\)\]/)
       await expectShowcaseClip(sample, vp.height, 'the Monogram sample', `design-system-monogram-${vp.name}${schemeSuffix}.png`, SAMPLE_MAX_DIFF_PIXELS)
     })
 

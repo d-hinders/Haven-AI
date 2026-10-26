@@ -48,13 +48,14 @@ describe('seriesColorByAgent', () => {
   it('maps every rostered agent to its own avatar tint — the colour its monogram wears', () => {
     const ordered = orderAgentsForDisplay([agent('b', '5.00'), agent('c', '10.00'), agent('a', '5.00'), agent('z', '0')])
     const map = seriesColorByAgent(ordered, days)
-    expect(map.get('c')).toBe(seriesColorForAgent('c'))
-    expect(map.get('a')).toBe(seriesColorForAgent('a'))
+    expect(map.get('c')).toBe(seriesColorForAgent({ name: 'c' }))
+    expect(map.get('a')).toBe(seriesColorForAgent({ name: 'a' }))
     // Whether an agent appears in `by_day` no longer decides its colour
-    // (#4331): the tints hash-wrap instead of running out, so b and z carry
-    // theirs too (they plot on other pages and periods).
-    expect(map.get('b')).toBe(seriesColorForAgent('b'))
-    expect(map.get('z')).toBe(seriesColorForAgent('z'))
+    // (#4331): the tint is stored on the agent (#4428) and repeats past the
+    // first six rather than running out, so b and z carry theirs too (they
+    // plot on other pages and periods).
+    expect(map.get('b')).toBe(seriesColorForAgent({ name: 'b' }))
+    expect(map.get('z')).toBe(seriesColorForAgent({ name: 'z' }))
   })
 
   it('is rank-independent: the same agent keeps its colour under any display order', () => {
@@ -62,21 +63,29 @@ describe('seriesColorByAgent', () => {
     const forward = seriesColorByAgent(orderAgentsForDisplay(rows), days)
     const reversed = seriesColorByAgent([...orderAgentsForDisplay(rows)].reverse(), days)
     expect(forward.get('a')).toBe(reversed.get('a'))
-    expect(forward.get('a')).toBe(seriesColorForAgent('a'))
+    expect(forward.get('a')).toBe(seriesColorForAgent({ name: 'a' }))
   })
 
   it('gives an id the roster does not carry the neutral ink, named rather than dropped', () => {
     const map = seriesColorByAgent([agent('c', '10.00')], [{ date: '2026-07-07', spent_by_agent: { c: '1', ghost: '2' }, refusals: 0 }])
-    expect(map.get('c')).toBe(seriesColorForAgent('c'))
+    expect(map.get('c')).toBe(seriesColorForAgent({ name: 'c' }))
     // No name to hash → no invented hue: the neutral ink MoneyPanel gives
     // unattributed money (#3897).
     expect(map.get('ghost')).toBe('var(--v2-ink-3)')
   })
 
-  it('wraps at six tints: two names always share one — the documented collision', () => {
-    // Pigeonhole with seven names; charts tell same-tint agents apart by
-    // name (legend, tooltip), never by colour.
+  it('the name hash still wraps at six tints — merchants and contacts keep it; agents no longer rely on it', () => {
+    // Pigeonhole with seven names: the HASH collides, which is why an agent
+    // carries a stored tint instead (#4428). Two agents whose names hash alike
+    // are drawn in different colours once each has its own tint; past a user's
+    // first six a tint repeats and the legend and tooltip tell them apart by
+    // name.
     const names = Array.from({ length: 7 }, (_, i) => `agent-${i}`)
     expect(new Set(names.map((n) => avatarTint(n))).size).toBeLessThan(names.length)
+    const collided = names.filter((n) => avatarTint(n) === avatarTint(names[0]!))
+    expect(collided.length).toBeGreaterThan(1)
+    expect(seriesColorForAgent({ name: collided[0]!, avatarTint: 1 })).not.toBe(
+      seriesColorForAgent({ name: collided[1]!, avatarTint: 2 }),
+    )
   })
 })

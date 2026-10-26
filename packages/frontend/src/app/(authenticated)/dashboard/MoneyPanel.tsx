@@ -129,7 +129,8 @@ function balanceSparkPoints(
 }
 
 // The agent's chart colour (#4331) is `seriesColorForAgent` (lib/avatar-tint.ts)
-// — the agent's own avatar tint, name-hashed — used at both call sites below.
+// — the agent's own avatar tint, its stored tint when it has one (#4428) and
+// the name hash otherwise — used at both call sites below.
 
 function sparklineAriaLabel(points: SparklinePoint[], currency: 'USD' | 'EUR' | 'SEK'): string {
   // #3977: the series is UTC-dated — the aria-label names what it measures
@@ -316,7 +317,7 @@ export default function MoneyPanel({
           ...topAgents.map((row) => ({
             key: row.id,
             share: (row.value / splitTotal) * 100,
-            color: seriesColorForAgent(row.name),
+            color: seriesColorForAgent({ name: row.name }),
           })),
           ...(restValue > 0
             ? [{ key: 'rest', share: (restValue / splitTotal) * 100, color: 'var(--v2-ink-3)' }]
@@ -391,7 +392,7 @@ export default function MoneyPanel({
           {topAgents.map((row) => (
             <div key={row.id} className="flex items-baseline justify-between gap-4">
               <dt className="flex min-w-0 items-center gap-2 text-sm text-[var(--v2-ink-2)]">
-                <SeriesSwatch color={seriesColorForAgent(row.name)} size="sm" shape="square" />
+                <SeriesSwatch color={seriesColorForAgent({ name: row.name })} size="sm" shape="square" />
                 <span className="min-w-0 truncate">{row.name}</span>
               </dt>
               <dd className="v2-tabular shrink-0">

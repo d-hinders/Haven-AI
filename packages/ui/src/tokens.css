@@ -75,22 +75,27 @@
   --v2-danger-soft: #fef2f2;
 
   /* ── Avatar tints (#4066, chart fills since #4331) ─────────────────────
-     Six muted tints for the `Monogram` initials avatar, assigned by hashing
-     the entity's NAME (`lib/avatar-tint.ts` on the frontend) — the same
-     entity keeps the same tint everywhere, light and dark. Since #4331 the
-     ink also fills the agent's chart series: one colour per agent, the
-     chart swatch matches the monogram (`seriesColorForAgent`). Assignment is
-     still by name, never by index — an agent's colour must not move because
-     its spend rank did — so there is deliberately NO order contract, and the
-     family stays disjoint from every status colour and from the
-     `--v2-series-*` stops themselves (asserted in `theme-tokens.test.ts`).
+     Six muted tints for the `Monogram` initials avatar. An AGENT wears its
+     STORED tint (`agents.avatar_tint`, migration 121, #4428) — assigned at
+     creation and unique among the user's first six agents, so two agents
+     whose names hash alike still wear different colours. A MERCHANT or a
+     CONTACT has no stored tint and keeps the hash of its name
+     (`lib/avatar-tint.ts` on the frontend), so the same entity keeps the
+     same tint everywhere, light and dark. Since #4331 the ink also fills the
+     agent's chart series: one colour per agent, the chart swatch matches the
+     monogram (`seriesColorForAgent`). Assignment is never by index — an
+     agent's colour must not move because its spend rank did — so there is
+     deliberately NO order contract, and the family stays disjoint from every
+     status colour and from the `--v2-series-*` stops themselves (asserted in
+     `theme-tokens.test.ts`).
 
      Each tint is a `-soft` ground with a darker ink, following the
      `brand-soft` precedent; the pair clears 4.5:1 in its own theme, the ink
      clears 3:1 on both card grounds as a chart fill (`CONTRAST_PAIRS` in
      `theme-tokens.ts`), and the six stay pairwise separable (a minimum ΔE is
-     pinned in the same test — only claim what a test holds). Two agents can
-     hash to the same tint; charts tell them apart by name. */
+     pinned in the same test — only claim what a test holds). Past a user's
+     first six agents a tint repeats; charts tell same-tint agents apart by
+     name. */
   --v2-avatar-1: #8a3a1a;
   --v2-avatar-1-soft: #f8e6d8;
   --v2-avatar-2: #0c6b5a;
@@ -230,12 +235,14 @@
 
      Order is the contract for the series that are NOT an agent. An
      AGENT-keyed series does not come from this palette at all: since #4331
-     it is filled with the agent's own avatar tint (`seriesColorForAgent`,
-     name-hashed), so the agent keeps one colour across periods and pages
-     instead of losing it whenever its spend rank moves. Those avatar inks
-     are measured under their own acceptance pairs. Within THIS palette,
-     still assign by index, never by hash or by name. Series 1 deliberately
-     opens on `--v2-brand`.
+     it is filled with the agent's own avatar tint (`seriesColorForAgent`),
+     and since #4428 that tint is STORED on the agent rather than hashed from
+     its name — so the agent keeps one colour across periods and pages
+     instead of losing it whenever its spend rank moves, and two agents whose
+     names hash alike are drawn in different colours. Those avatar inks are
+     measured under their own acceptance pairs. Within THIS palette, still
+     assign by index, never by hash or by name. Series 1 deliberately opens
+     on `--v2-brand`.
 
      Both palettes are measured, not eyeballed (`theme-tokens.test.ts`
      re-derives the ratios from these very declarations): every stop clears

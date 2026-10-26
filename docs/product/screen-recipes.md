@@ -718,7 +718,8 @@ falling back to Activity, no counts on the tab row; switching tabs writes only
 the tab into the URL, which clears the tab's filters (the account page's
 rule). `?grant=` keeps working alongside `?tab=`. Sections, in order:
 
-1. `PageHeader` with a decorative, name-hashed `Monogram` before the agent name,
+1. `PageHeader` with a decorative `Monogram` before the agent name — the
+   agent's stored tint (#4428), the same colour its chart series fills with —
    the description as `subtitle`, and the
    `meta` line — wallet · network · Created {age} · Last activity {age} (or
    "No activity yet"; last activity is `mcp_last_seen_at`). Labels sit under

@@ -241,8 +241,9 @@ export function AgentsTable({
                 <td className={`${COLUMN_PAD} text-right`}>
                   {/* #4331: no series swatch here any more — the agent's
                       colour lives on its monogram, the same tint the spend
-                      chart fills the agent with, so the table carries one
-                      colour per agent without a second mark in this cell. */}
+                      chart fills the agent with (its stored tint since
+                      #4428), so the table carries one colour per agent
+                      without a second mark in this cell. */}
                   <span className="v2-tabular block text-sm font-medium text-[var(--v2-ink)]">
                     {formatAnalyticsAmount(agent.spent, currency)}
                   </span>

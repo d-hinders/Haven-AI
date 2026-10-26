@@ -44,3 +44,50 @@ describe('Monogram (#4210)', () => {
     expect(container.textContent).toBe('HS')
   })
 })
+
+/**
+ * The stored tint (#4428): an agent passes its own tint and the mark wears it;
+ * a merchant or a contact passes nothing and keeps the name hash. The two
+ * names below hash to the SAME tint (6 under djb2 mod 6), so the pair is the
+ * rule the epic changed — before it, they were indistinguishable circles.
+ */
+describe('Monogram tint (#4428)', () => {
+  const classesOf = (name: string, tint?: number) => {
+    const root = render(<Monogram name={name} tint={tint} />).container.firstElementChild!
+    const ink = root.querySelector('span')!
+    return { bg: root.className, ink: ink.className }
+  }
+
+  it('renders the given tint over the name hash', () => {
+    // 'Research agent' hashes to tint 6; the stored tint 2 wins.
+    const stored = classesOf('Research agent', 2)
+    expect(stored.bg).toContain('bg-[var(--v2-avatar-2-soft)]')
+    expect(stored.ink).toContain('text-[var(--v2-avatar-2)]')
+    expect(stored.bg).not.toContain('avatar-6')
+  })
+
+  it('renders the name hash when no tint is given — merchants and contacts', () => {
+    const hashed = classesOf('Research agent')
+    expect(hashed.bg).toContain('bg-[var(--v2-avatar-6-soft)]')
+    expect(hashed.ink).toContain('text-[var(--v2-avatar-6)]')
+  })
+
+  it('draws two hash-alike agents in different colours when each carries its own tint', () => {
+    const research = classesOf('Research agent', 6)
+    const dataFeed = classesOf('Data-feed agent', 2)
+    expect(research.bg).not.toBe(dataFeed.bg)
+    expect(research.ink).not.toBe(dataFeed.ink)
+  })
+
+  it('falls back to the hash for a tint outside 1..6 rather than rendering no class', () => {
+    for (const bad of [0, 7, 2.5]) {
+      const classes = classesOf('Research agent', bad)
+      expect(classes.bg).toContain('bg-[var(--v2-avatar-6-soft)]')
+    }
+  })
+
+  it('leaves a logo untinted — the tint is the initials variant only', () => {
+    const { container } = render(<Monogram name="Research agent" tint={2} logoUrl="https://e.x/l.png" />)
+    expect(container.innerHTML).toBe(BEFORE.smLogo)
+  })
+})

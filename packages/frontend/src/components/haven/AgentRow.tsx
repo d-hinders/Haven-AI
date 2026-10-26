@@ -263,7 +263,8 @@ export function AgentRow({
       href={`/agents/${agent.id}`}
       className="grid grid-cols-[2rem_minmax(0,1fr)_1rem] items-center gap-x-3 px-5 py-3.5 transition-colors hover:bg-[var(--v2-surface-hover)] [grid-template-areas:'icon_name_chev'_'icon_body_chev'] [&>:first-child]:[grid-area:icon]"
     >
-      {/* A specific agent carries its name-hashed identity mark; category-level
+      {/* A specific agent carries its own identity mark — its stored tint
+          (#4428), the same colour its chart series wears; category-level
           "agents" surfaces keep the robot icon (#4208). Keep this as the direct
           first child: the money-card layout guard locates rows through it. */}
       <Monogram name={agent.name} size="xs" decorative />

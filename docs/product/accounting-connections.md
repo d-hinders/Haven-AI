@@ -198,14 +198,14 @@ has the evidence — independent confirmation, on top of the upload proof, that
 your accountant can see it.
 
 One thing the feed deliberately does **not** show for Accounted is *booked*.
-Whether Accounted tells Haven anything useful about a booking is not yet
-known — the confirmation events Haven receives are recorded, and only when a
-real booking event has been seen on the sandbox can Haven say what it carries.
-If it turns out to name the documents a booking covers, a later update adds a
-*Booked* badge like Fortnox's; if it does not, this page will say plainly
-that booking is not observable for Accounted. Until then: *Evidence archived*
-means the document is there, and the booking itself is visible only in
-Accounted.
+The sandbox probe (2026-10-26) committed a journal entry linked to a Haven
+underlag and recorded the delivered `journal_entry.committed` payload: it
+names the entry, voucher number and series, status, date and lines, but
+carries **no document reference** — `attachment_urls` is null even when the
+document is linked, and there is no document id on the entry or its lines.
+Accounted therefore does not tell Haven which document a booking covers, and
+booking is not observable for Accounted. *Evidence archived* means the
+document is there; the booking itself is visible only in Accounted.
 
 ## What to include: the backfill choice
 

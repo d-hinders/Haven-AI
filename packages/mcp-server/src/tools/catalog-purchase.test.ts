@@ -881,6 +881,52 @@ describe('haven_prepare_catalog_purchase', () => {
     expect(payload.suggested_tool).toBe('haven_get_allowances')
   })
 
+  // #4458: the same preflight, one reason further — the agent's only budget
+  // for the token has ENDED. The preflight decides `sufficient: false` (not
+  // the `null` degrade, which would proceed to authorize) and step 6 throws
+  // its own DELEGATION_EXPIRED refusal with the budget-ended words.
+  it('#4458 — delegation rail: an ENDED budget REFUSES at prepare with DELEGATION_EXPIRED, naming the end date and the owner step', async () => {
+    stubFetch({
+      ...baseRoutes,
+      'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
+      'POST /machine-payments/budget-precheck': {
+        status: 403,
+        body: {
+          error:
+            'This payment of 1.5 USDC cannot proceed — this budget ended on 2026-10-23; ' +
+            'ask the owner to set a new one.',
+          error_code: 'delegation_expired',
+          phase: 'insufficient_funds',
+          next_action: 'fund_account_or_raise_allowance',
+          remaining_atomic: '0',
+          amount_atomic: '1500000',
+          budget_ended_at: '2026-10-23T00:00:00.000Z',
+        },
+      },
+    })
+
+    const payload = await handlers().haven_prepare_catalog_purchase({
+      catalog_id: 'cat_1',
+      max_amount: '2000000',
+    })
+
+    expect(payload.success).toBe(false)
+    if (payload.success) throw new Error('expected failure')
+    expect(payload.code).toBe('DELEGATION_EXPIRED')
+    expect(payload.next_action).toBe(AgentPaymentNextAction.FundAccountOrRaiseAllowance)
+    expect(payload.suggested_tool).toBe('haven_get_allowances')
+    // The same words the quote surfaces emit: the end date and the owner's
+    // next step, never the over-budget "grant or raise the budget".
+    expect(payload.message).toContain('2026-10-23')
+    expect(payload.message).toContain('set a new budget')
+    expect(payload.message).not.toContain('grant or raise the budget')
+    expect(String(payload.next_tool_omitted_reason)).toContain('ask the owner to set a new one')
+    expect(String(payload.next_tool_omitted_reason)).not.toContain('period to reset')
+    // sufficient: false, NOT the null degrade: a degraded preflight would
+    // have proceeded to authorize. Nothing was created.
+    expect(recordedCalls().find((c) => c.url.endsWith('/x402'))).toBeUndefined()
+  })
+
   // #3492: a keyed twin of the test above. A FRESH idempotency key that has
   // never settled anything must still be refused exactly as before — the
   // key is forwarded, but the backend answers 403 for this shape (no prior

@@ -17,6 +17,19 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ### Added
 
+- **A quote stops on an ENDED budget, with its own warning code (#4458).**
+  `AgentPaymentWarningCode` gains `QUOTE_BUDGET_ENDED`. When the quote-time
+  budget pre-check answers the typed 403 `delegation_expired` — the agent's
+  only budget for the token has ENDED — the quote now reports
+  `budget_check.sufficient: false` (so `safe_to_continue` is false on
+  `haven_quote_x402`) with a warning naming the end date and the owner's next
+  step, instead of failing open as an unavailable check. The catalog prepare
+  preflight answers the same condition as `sufficient: false` with the same
+  words, and the shared error normaliser maps it to `DELEGATION_EXPIRED` with
+  the owner-sets-a-new-budget reason rather than the over-budget "wait for the
+  period to reset" one. Additive: an older backend never emits the code, and
+  the on-chain policy remains the actual gate. No update needed.
+
 - **`getAgentSummary()` names the ENDED budget, not just the spent one (#4352).**
   The allowances read gains `budget_ended_at` (the latest ended budget's
   expiry, ISO 8601; `null` when no budget has ended or on an older backend)

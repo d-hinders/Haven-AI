@@ -535,7 +535,18 @@ refused as `BARE_HASH_REFUSED` (`packages/signer/src/bare-hash.ts`).
 > budget and answers `403 delegation_budget_exceeded`
 > ([#2082](https://github.com/d-hinders/Haven-AI/issues/2082)); the legacy rail
 > answers `410` (#1986). None of the three writes anything, and none produces a
-> `payment_id` to poll. The `pending_approval` branch retained in the hosted
+> `payment_id` to poll. **An ENDED budget is its own answer on both delegation
+> legs** ([#4458](https://github.com/d-hinders/Haven-AI/issues/4458)): when the
+> only budget row for the token has expired, authorize answers `403
+> delegation_expired` with `phase: insufficient_funds`, `next_action:
+> fund_account_or_raise_allowance`, `budget_ended_at` (ISO 8601), `remaining`/
+> `remaining_atomic` `"0"`, the amount and shortfall figures, and — on the
+> EIP-3009 funding leg — `merchant_address` naming `merchantPayTo` (the real
+> merchant), never `payTo`, which there is the agent's own funding EOA. Same
+> decision as the over-budget refusal (403, one `payment_refusals` row with
+> `reason: delegation_expired`, nothing created or signed); the remedy differs,
+> because waiting for a period to reset cannot help — the owner sets a new
+> budget. The `pending_approval` branch retained in the hosted
 > tool code is fail-closed cover for a row stored before the retirement
 > (#2101/#2113) — its verdict is `stop_and_tell_user`, and no live rail mints
 > the status that reaches it.
@@ -1563,6 +1574,17 @@ The flow is a two-call variant of `/x402/authorize`:
    performs (#1145) — and answers `403` `delegation_budget_exceeded` with
    `phase: insufficient_funds`, `next_action: fund_account_or_raise_allowance` and
    the shortfall, writing nothing and deploying nothing.
+
+   **An ENDED budget is refused the same way, with its own reason**
+   ([#4458](https://github.com/d-hinders/Haven-AI/issues/4458)). When the only
+   budget row for the token has expired — the live read hides it by design
+   (#3802) — authorize answers `403` `delegation_expired` with the same
+   `phase`/`next_action`, `budget_ended_at` (ISO 8601), `remaining`/
+   `remaining_atomic` `"0"` and the amount/shortfall figures, plus `rail`,
+   `network`, `resource_url` and `merchant_address` (`payTo` on this leg,
+   `merchantPayTo` on the EIP-3009 funding leg). Same decision — one
+   `payment_refusals` row, nothing created or signed — but the remedy is the
+   owner setting a NEW budget: waiting for a period to reset cannot help.
 
    Read this as a fail-fast convenience, **not a policy boundary**, and the
    distinction is the whole point. The caveat stack is still the gate: it

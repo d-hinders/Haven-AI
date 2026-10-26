@@ -966,3 +966,34 @@ describe('retired-rail residue in the published contract (#2105)', () => {
     expect(kind.description).toMatch(/Do not write a branch on it/i)
   })
 })
+
+/**
+ * #4458: the `/x402/authorize` 403 documents the typed expired body.
+ *
+ * The response-shape round trip is NOT the instrument here: the 403 is
+ * `errorResponse`, whose schema is `additionalProperties: true`, so a body
+ * that gained `error_code` / `budget_ended_at` would pass it either way. The
+ * pre-check precedent (#4352, `/machine-payments/budget-precheck`) documents
+ * its two shapes in the `description` only, and this pins the same for the
+ * authorize 403 — by content, so a reworded description that drops either
+ * field reddens.
+ */
+describe('/x402/authorize 403 documents the typed expired body (#4458)', () => {
+  const description = (openapiSpec.paths['/x402/authorize'] as Record<string, any>).post.responses['403']
+    .description as string
+
+  it('names delegation_expired and budget_ended_at', () => {
+    expect(description).toContain('delegation_expired')
+    expect(description).toContain('budget_ended_at')
+  })
+
+  it('keeps the over-budget shape it already documented', () => {
+    expect(description).toContain('delegation_budget_exceeded')
+    expect(description).toContain('task_budget_exceeded')
+  })
+
+  it('says the funding leg names merchantPayTo, never payTo', () => {
+    expect(description).toContain('merchantPayTo')
+    expect(description).toMatch(/merchantPayTo on the funding leg/)
+  })
+})

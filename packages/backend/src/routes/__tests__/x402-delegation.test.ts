@@ -1175,8 +1175,23 @@ describe('x402 delegation-rail settlement (#830)', () => {
       payload: authorizeBody(),
     })
     expect(res.statusCode).toBe(403)
-    expect(res.json().error).toContain('this budget ended on 20') // #4352 words
-    expect(res.json().error).toContain('ask the owner to set a new one')
+    const body = res.json()
+    expect(body.error).toContain('this budget ended on 20') // #4352 words
+    expect(body.error).toContain('ask the owner to set a new one')
+    // #4458: the typed expired body on the WIRE, the same parity the hosted
+    // pre-check's test pins (budget-precheck.test.ts) — not just the ledger.
+    expect(body.error_code).toBe('delegation_expired')
+    expect(body.phase).toBe('insufficient_funds')
+    expect(body.next_action).toBe('fund_account_or_raise_allowance')
+    expect(body.budget_ended_at).toMatch(/^\d{4}-\d{2}-\d{2}T/)
+    expect(body.remaining_atomic).toBe('0')
+    expect(body.amount_atomic).toBe('100000')
+    expect(body.amount).toBe('0.10')
+    expect(body.rail).toBe('x402')
+    expect(body.network).toBe('eip155:84532')
+    expect(body.resource_url).toBe('https://merchant.example/resource')
+    // On this leg payTo IS the merchant.
+    expect(body.merchant_address).toBe(MERCHANT.toLowerCase())
     expect(mockRecordRefusal).toHaveBeenCalledTimes(1)
     const ask = mockRecordRefusal.mock.calls[0][0] as Record<string, unknown>
     expect(ask).toMatchObject({ reason: 'delegation_expired', source: 'x402_authorize' })
@@ -1194,8 +1209,26 @@ describe('x402 delegation-rail settlement (#830)', () => {
       payload: authorizeBody({ payTo: DELEGATE_SIGNER.address, merchantPayTo: MERCHANT }),
     })
     expect(res.statusCode).toBe(403)
-    expect(res.json().error).toContain('this budget ended on 20') // #4352 words
-    expect(res.json().error).toContain('ask the owner to set a new one')
+    const body = res.json()
+    expect(body.error).toContain('this budget ended on 20') // #4352 words
+    expect(body.error).toContain('ask the owner to set a new one')
+    // #4458: the typed expired body on the WIRE, same parity as the erc7710
+    // leg above.
+    expect(body.error_code).toBe('delegation_expired')
+    expect(body.phase).toBe('insufficient_funds')
+    expect(body.next_action).toBe('fund_account_or_raise_allowance')
+    expect(body.budget_ended_at).toMatch(/^\d{4}-\d{2}-\d{2}T/)
+    expect(body.remaining_atomic).toBe('0')
+    expect(body.amount_atomic).toBe('100000')
+    expect(body.amount).toBe('0.10')
+    expect(body.rail).toBe('x402')
+    expect(body.network).toBe('eip155:84532')
+    // #4458 money-path gate: on the EIP-3009 funding leg merchant_address is
+    // merchantPayTo (the real merchant), NEVER payTo — which here is the
+    // agent's own funding EOA. Recording the funding address as the merchant
+    // is the account confusion the 086 allowlist exists to prevent.
+    expect(body.merchant_address).toBe(MERCHANT.toLowerCase())
+    expect(body.merchant_address).not.toBe(DELEGATE_SIGNER.address.toLowerCase())
     expect(mockRecordRefusal).toHaveBeenCalledTimes(1)
     const ask = mockRecordRefusal.mock.calls[0][0] as Record<string, unknown>
     expect(ask).toMatchObject({ reason: 'delegation_expired', source: 'x402_authorize' })

@@ -61,7 +61,7 @@ import {
 } from './support/cap-price.js'
 import { getUsableCatalogMcpEntry } from './support/catalog-entry.js'
 import { resolveCatalogCallArguments } from './support/catalog-arguments.js'
-import { HostedToolError, runTool } from './support/errors.js'
+import { DELEGATION_EXPIRED_OMITTED_REASON, HostedToolError, runTool } from './support/errors.js'
 import {
   buildAgentGuidance,
   catchSettledReplay,
@@ -75,6 +75,7 @@ import {
   serializeMcpTransport,
 } from './support/mcp-context.js'
 import {
+  budgetEndedWarningMessage,
   buildMcpToolQuoteResponse,
   isPendingApproval,
   runQuoteBudgetPrecheck,
@@ -737,6 +738,8 @@ export function createCatalogPurchaseHandlers(
             source: 'active_delegations'
             /** #3464: canonical camelCase names — the SAME spelling `haven_get_agent`'s `allowances[]` rows report. */
             remainingAtomic?: string
+            /** #4458: the backend's ISO 8601 `budget_ended_at` when the refusal was `delegation_expired`. */
+            budgetEndedAt?: string
           } | null
           if (rail !== 'delegation') {
             allowanceBlock = null
@@ -839,26 +842,53 @@ export function createCatalogPurchaseHandlers(
             // and has already recorded it (refuse(), source
             // 'hosted_prepare'). It lands here as sufficient: false and step
             // 6 below throws the byte-identical DELEGATION_BUDGET_EXCEEDED
-            // refusal the local compare used to produce. Every other failure
+            // refusal the local compare used to produce. #4458 adds its
+            // sibling: a typed 403 delegation_expired — the agent's only
+            // budget for the token has ENDED — also a decision, also
+            // sufficient: false, but with the owner-sets-a-new-budget remedy
+            // (step 6 throws DELEGATION_EXPIRED for it). Every other failure
             // — transport down, a retired rail's 410, an older backend
             // without the route — degrades exactly as the failed allowances
             // read did: sufficient: null, a warning, never a refusal.
+            const refusalBody =
+              err instanceof HavenApiError
+                ? (err.body as
+                    | { error_code?: string; remaining_atomic?: string; budget_ended_at?: string }
+                    | undefined)
+                : undefined
             const decided =
               err instanceof HavenApiError &&
               err.statusCode === 403 &&
-              (err.body as { error_code?: string } | undefined)?.error_code ===
-                'delegation_budget_exceeded'
+              refusalBody?.error_code === 'delegation_budget_exceeded'
+            const expired =
+              err instanceof HavenApiError &&
+              err.statusCode === 403 &&
+              refusalBody?.error_code === 'delegation_expired'
             if (decided) {
               allowanceBlock = {
                 rail,
                 sufficient: false,
-                remaining_atomic:
-                  (err.body as { remaining_atomic?: string } | undefined)?.remaining_atomic ?? '0',
+                remaining_atomic: refusalBody?.remaining_atomic ?? '0',
                 source,
-                remainingAtomic:
-                  ((err.body as { remaining_atomic?: string } | undefined)?.remaining_atomic ??
-                    '0') as string,
+                remainingAtomic: (refusalBody?.remaining_atomic ?? '0') as string,
               }
+            } else if (expired) {
+              // #4458: an ended budget has no remaining figure to report —
+              // '0' is the honest one — and the warning carries the end date
+              // and the owner's next step, the same words the quote surfaces
+              // emit (budgetEndedWarningMessage).
+              allowanceBlock = {
+                rail,
+                sufficient: false,
+                remaining_atomic: '0',
+                source,
+                remainingAtomic: '0',
+                budgetEndedAt: refusalBody?.budget_ended_at,
+              }
+              warnings.push({
+                code: AgentPaymentWarningCode.QuoteBudgetEnded,
+                message: budgetEndedWarningMessage(refusalBody?.budget_ended_at),
+              })
             } else {
               allowanceBlock = { rail, sufficient: null, source }
               warnings.push({
@@ -881,6 +911,26 @@ export function createCatalogPurchaseHandlers(
           // is the RELAY of that decision — byte-identical to the refusal
           // the local compare used to throw, characterized below.
           if (rail === 'delegation' && allowanceBlock?.sufficient === false) {
+            // #4458: an ENDED budget is its own refusal. The over-budget
+            // wording below ("grant or raise the budget") is wrong for it —
+            // there is no period left to wait for — so the ended case names
+            // the end date and the owner's next step, with its own code and
+            // omitted reason (the backend's next_action is the same
+            // fund_account_or_raise_allowance: the taxonomy has no renewal
+            // action).
+            if (allowanceBlock.budgetEndedAt !== undefined) {
+              throw new HostedToolError({
+                code: 'DELEGATION_EXPIRED',
+                message: budgetEndedWarningMessage(allowanceBlock.budgetEndedAt),
+                statusCode: 403,
+                nextStep: refusalNextStep({
+                  nextAction: AgentPaymentNextAction.FundAccountOrRaiseAllowance,
+                  nextTool: null,
+                  nextToolOmittedReason: DELEGATION_EXPIRED_OMITTED_REASON,
+                }),
+                suggestedTool: 'haven_get_allowances',
+              })
+            }
             throw new HostedToolError({
               code: 'DELEGATION_BUDGET_EXCEEDED',
               message:

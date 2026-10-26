@@ -220,6 +220,19 @@ const DELEGATION_BUDGET_EXCEEDED_OMITTED_REASON =
   "the agent's period budget is spent and is enforced on-chain, so retrying cannot succeed; the wallet owner can raise the budget in Haven or wait for the period to reset; tell the user the remaining and shortfall figures on this failure"
 
 /**
+ * #4458: the backend's `error_code` for an agent whose only budget for the
+ * token has ENDED. The same taxonomy step as the over-budget refusal
+ * (`fund_account_or_raise_allowance` — the taxonomy has no renewal action),
+ * but the remedy is the owner setting a NEW budget: waiting for a period to
+ * reset cannot help, so the reason must never say it. Exported because the
+ * catalog prepare preflight throws its own typed refusal for the same
+ * condition and must use the same words.
+ */
+const DELEGATION_EXPIRED_ERROR_CODE = 'delegation_expired'
+export const DELEGATION_EXPIRED_OMITTED_REASON =
+  "the agent's budget for this token has ENDED and is enforced on-chain, so retrying cannot succeed and waiting will not help; ask the owner to set a new one in Haven; tell the user the end date on this failure"
+
+/**
  * #3494: the backend's `error_code` when the delegate account rejected the
  * UserOperation signature during on-chain validation (`POST
  * /payments/:id/sign`, ERC-4337 `AA24 signature error` — the ONE AA2x code
@@ -502,6 +515,42 @@ export function normalizeError(err: unknown): ToolFailure {
       paymentId: err.paymentId,
       ...(body.remaining_atomic !== undefined ? { remaining_atomic: body.remaining_atomic } : {}),
       ...(body.shortfall_atomic !== undefined ? { shortfall_atomic: body.shortfall_atomic } : {}),
+      ...(body.phase !== undefined ? { phase: body.phase } : {}),
+      ...(body.rail !== undefined ? { rail: body.rail } : {}),
+      next_action: step.next_action,
+      ...nextStepWireFields(step),
+    }
+  }
+  // #4458: the same 403 family, one reason further — the agent's only budget
+  // for the token has ENDED. The backend's next_action is the same
+  // fund_account_or_raise_allowance (the taxonomy has no renewal action), but
+  // the remedy is the owner setting a NEW budget: "wait for the period to
+  // reset" is the over-budget remedy and is false here, so this branch has
+  // its own code and its own omitted reason.
+  if (
+    err instanceof HavenApiError &&
+    err.statusCode === 403 &&
+    (err.body as { error_code?: string } | undefined)?.error_code === DELEGATION_EXPIRED_ERROR_CODE
+  ) {
+    const body = err.body as {
+      budget_ended_at?: string | null
+      phase?: string
+      rail?: string
+    }
+    const step = refusalNextStep({
+      nextAction: AgentPaymentNextAction.FundAccountOrRaiseAllowance,
+      nextTool: null,
+      nextToolOmittedReason: DELEGATION_EXPIRED_OMITTED_REASON,
+    })
+    return {
+      success: false,
+      code: 'DELEGATION_EXPIRED',
+      message: err.message,
+      statusCode: err.statusCode,
+      paymentId: err.paymentId,
+      ...(body.budget_ended_at !== undefined && body.budget_ended_at !== null
+        ? { budget_ended_at: body.budget_ended_at }
+        : {}),
       ...(body.phase !== undefined ? { phase: body.phase } : {}),
       ...(body.rail !== undefined ? { rail: body.rail } : {}),
       next_action: step.next_action,

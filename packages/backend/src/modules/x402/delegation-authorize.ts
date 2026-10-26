@@ -42,6 +42,7 @@ import { delegationReplay } from './replay.js'
 import type { X402HandlerResult, X402McpCallContextInput } from './types.js'
 import { checkTaskBudgetCap, taskBudgetExceededBody } from '../task-budgets/index.js'
 import {
+  buildExpiredBudgetBody,
   buildPeriodExceededBody,
   evaluatePeriodPrecheck,
   expiredBudgetLedgerDetail,
@@ -477,11 +478,28 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
         return refuse(
           {
             code: 403,
-            body: {
-              error:
-                `Agent has no delegation able to fund EIP-3009 settlement for ${tokenConfig.symbol} — ` +
-                `this budget ended on ${expired.endedOnDate}; ask the owner to set a new one.`,
-            },
+            // #4458: the typed expired body, the same builder the hosted
+            // pre-check answers with — `error_code`, `phase`, `next_action`,
+            // `budget_ended_at` and the atomic figures on the wire, not a
+            // one-line `{ error }`. `merchant_address` is `merchantPayTo`
+            // (the real merchant), NEVER `payTo`, which on this leg is the
+            // agent's own funding EOA — the account confusion the 086
+            // allowlist exists to prevent, and the same address this leg's
+            // ledger row and over-budget body already carry.
+            body: buildExpiredBudgetBody({
+              flavor: 'x402',
+              chainId: agent.chain_id,
+              tokenSymbol: tokenConfig.symbol,
+              tokenAddress,
+              decimals: tokenConfig.decimals,
+              amountAtomic: amountRaw.toString(),
+              amount: amountHuman,
+              endedAtIso: expired.endedAtIso,
+              endedOnDate: expired.endedOnDate,
+              network,
+              resourceUrl: url,
+              merchantAddress: merchantPayTo.toLowerCase(),
+            }),
           },
           {
             userId: agent.user_id,
@@ -693,11 +711,22 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
       return refuse(
         {
           code: 403,
-          body: {
-            error:
-              `Agent has no active budget delegation for ${tokenConfig.symbol} to this merchant — ` +
-              `this budget ended on ${expired.endedOnDate}; ask the owner to set a new one.`,
-          },
+          // #4458: the typed expired body, shared with the funding leg and
+          // the hosted pre-check. On this leg `payTo` IS the merchant.
+          body: buildExpiredBudgetBody({
+            flavor: 'x402',
+            chainId: agent.chain_id,
+            tokenSymbol: tokenConfig.symbol,
+            tokenAddress,
+            decimals: tokenConfig.decimals,
+            amountAtomic: amountRaw.toString(),
+            amount: amountHuman,
+            endedAtIso: expired.endedAtIso,
+            endedOnDate: expired.endedOnDate,
+            network,
+            resourceUrl: url,
+            merchantAddress: payTo.toLowerCase(),
+          }),
         },
         {
           userId: agent.user_id,

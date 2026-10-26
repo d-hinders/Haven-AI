@@ -26,13 +26,9 @@ export function orderAgentsForDisplay(agents: AnalyticsAgentRow[]): AnalyticsAge
  * avatar tint (`seriesColorForAgent`) — the same token its `Monogram` wears —
  * so an agent keeps one colour across periods, pages and rank moves. Whether
  * an agent appears in `by_day` no longer matters to its colour: the tint is
- * stored on the agent (#4428), and past the first six it repeats rather than
- * running out; two agents that share a tint are told apart by name in the
- * legend and tooltip.
- *
- * The stored tint is threaded in by the surface slice (#4431); this helper
- * builds the map, and reads the name hash until then — which is what every
- * agent wore before #4428.
+ * stored on the agent (#4428) and passed through here since #4431, and past
+ * the first six it repeats rather than running out; two agents that share a
+ * tint are told apart by name in the legend and tooltip.
  *
  * An id in `by_day` that the roster does not carry (not producible by this
  * endpoint — both statements share the tenant + rail scope — but named
@@ -43,7 +39,12 @@ export function seriesColorByAgent(
   orderedAgents: AnalyticsAgentRow[],
   byDay: AnalyticsDayBucket[],
 ): Map<string, string> {
-  const map = new Map(orderedAgents.map((agent) => [agent.id, seriesColorForAgent({ name: agent.name })]))
+  const map = new Map(
+    orderedAgents.map((agent) => [
+      agent.id,
+      seriesColorForAgent({ name: agent.name, avatarTint: agent.avatar_tint }),
+    ]),
+  )
   for (const day of byDay) {
     for (const id of Object.keys(day.spent_by_agent)) {
       if (!map.has(id)) map.set(id, 'var(--v2-ink-3)')

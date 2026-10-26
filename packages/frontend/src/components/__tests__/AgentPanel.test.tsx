@@ -101,6 +101,9 @@ function overviewAgent(id: string, budgets: unknown[] = []) {
     id,
     name: 'Research agent',
     status: 'active',
+    // #4431: the overview always carries the agent's stored tint; the row's
+    // Monogram and the money card's split bar read it.
+    avatarTint: 1,
     accountId: 'safe-1',
     accountName: 'Main account',
     accountChainId: 100,
@@ -152,6 +155,8 @@ function agent(overrides: Record<string, unknown> = {}) {
     created_at: '2026-05-01T00:00:00Z',
     allowances: [],
     labels: [],
+    // #4431: the stored display tint every agent read carries.
+    avatar_tint: 1,
     ...overrides,
   }
 }

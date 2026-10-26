@@ -267,7 +267,7 @@ export function AgentRow({
           (#4428), the same colour its chart series wears; category-level
           "agents" surfaces keep the robot icon (#4208). Keep this as the direct
           first child: the money-card layout guard locates rows through it. */}
-      <Monogram name={agent.name} size="xs" decorative />
+      <Monogram name={agent.name} tint={agent.avatarTint} size="xs" decorative />
       {/* flex-wrap (#3908): on a narrow row the badge drops under the name
           rather than squeezing the name to a few letters. */}
       <p className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-sm font-medium text-[var(--v2-ink)] [grid-area:name]">

@@ -42,8 +42,8 @@ describe('toStackedBarDays — the wire becomes the primitive input', () => {
     // its stored tint when it has one (#4428), the name hash otherwise — not
     // a rank index, so it is stable across periods, pages and re-rankings.
     expect(first.series.map((s) => s.color)).toEqual([
-      seriesColorForAgent({ name: 'Research agent' }),
-      seriesColorForAgent({ name: 'Data-feed agent' }),
+      seriesColorForAgent({ name: 'Research agent', avatarTint: 1 }),
+      seriesColorForAgent({ name: 'Data-feed agent', avatarTint: 2 }),
     ])
     // The one string→number parse, at the row: "85.75" → 85.75, not a
     // re-typed wire.
@@ -68,8 +68,8 @@ describe('toStackedBarDays — the wire becomes the primitive input', () => {
     // Rank-independence (#4331): the reverse-order wire changes the STACK
     // order to the display order but not either agent's colour.
     expect(day!.series.map((s) => s.color)).toEqual([
-      seriesColorForAgent({ name: 'Research agent' }),
-      seriesColorForAgent({ name: 'Data-feed agent' }),
+      seriesColorForAgent({ name: 'Research agent', avatarTint: 1 }),
+      seriesColorForAgent({ name: 'Data-feed agent', avatarTint: 2 }),
     ])
   })
 
@@ -228,16 +228,16 @@ describe('SpendSection — on the page', () => {
     const chart = container.querySelector('[data-testid="stacked-bar-chart"]')!
     const firstDay = within(chart as HTMLElement).getAllByTestId('chart-day')[0]!
     const segments = firstDay.querySelectorAll('[data-testid="chart-segment"]')
-    expect(segments[0]!.getAttribute('fill')).toBe(seriesColorForAgent({ name: 'Research agent' }))
-    expect(segments[1]!.getAttribute('fill')).toBe(seriesColorForAgent({ name: 'Data-feed agent' }))
-    // Both fixture agents hash to tint 6, and neither carries a stored tint
-    // yet, so both fall back to the hash — two agents, one chart, one tint,
-    // told apart by NAME in the legend and tooltip. The pin is deliberate:
-    // rank-based assignment would have silently "re-painted" an agent. The
-    // surface slice (#4431) gives each fixture agent its own stored tint and
-    // inverts this pin to two different colours.
-    expect(segments[0]!.getAttribute('fill')).toBe('var(--v2-avatar-6)')
-    expect(segments[1]!.getAttribute('fill')).toBe('var(--v2-avatar-6)')
+    expect(segments[0]!.getAttribute('fill')).toBe(seriesColorForAgent({ name: 'Research agent', avatarTint: 1 }))
+    expect(segments[1]!.getAttribute('fill')).toBe(seriesColorForAgent({ name: 'Data-feed agent', avatarTint: 2 }))
+    // Both fixture agents hash to tint 6, and each carries its OWN stored tint
+    // (#4429/#4431), so the pair is drawn in two different colours — the rule
+    // the epic changed. The pin is deliberate: rank-based assignment would
+    // have silently "re-painted" an agent, and the hash fallback would have
+    // collapsed the pair into one colour.
+    expect(segments[0]!.getAttribute('fill')).toBe('var(--v2-avatar-1)')
+    expect(segments[1]!.getAttribute('fill')).toBe('var(--v2-avatar-2)')
+    expect(segments[0]!.getAttribute('fill')).not.toBe(segments[1]!.getAttribute('fill'))
   })
 
   it('says on the face of the card when the edge bars are partial, and stays quiet when they are not', () => {

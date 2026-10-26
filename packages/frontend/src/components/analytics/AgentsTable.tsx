@@ -90,7 +90,7 @@ function StatusCell({ agent }: { agent: AnalyticsAgentRow }) {
   const revoked = agent.status === 'revoked'
   return (
     <span className="inline-flex items-center gap-2 min-w-0">
-      <Monogram name={agent.name} size="xs" decorative />
+      <Monogram name={agent.name} tint={agent.avatar_tint} size="xs" decorative />
       <span className="truncate text-sm font-medium text-[var(--v2-ink)]">{agent.name}</span>
       {/* A revoked agent stays in the table rather than dropping out of it: it
           had activity in this range, or still holds a budget, and hiding the
@@ -338,7 +338,7 @@ function MobileAgentRow({
       <Row
         title={
           <span className="inline-flex items-center gap-2 min-w-0">
-            <Monogram name={agent.name} size="xs" decorative />
+            <Monogram name={agent.name} tint={agent.avatar_tint} size="xs" decorative />
             <span className="truncate">{agent.name}</span>
             {agent.status === 'revoked' && <StatusBadge tone={presentation.tone}>{presentation.label}</StatusBadge>}
           </span>

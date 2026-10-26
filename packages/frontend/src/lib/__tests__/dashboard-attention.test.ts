@@ -66,6 +66,8 @@ function makeOverview(
       id: agent.id,
       name: agent.name,
       status: agent.status,
+      // #4431: the overview always carries the agent's stored tint.
+      avatarTint: 1,
       accountId: agent.accountId ?? null,
       accountName: agent.accountName ?? null,
       accountChainId: null,

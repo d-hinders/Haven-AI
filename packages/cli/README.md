@@ -335,7 +335,7 @@ exits **4** with the run object (`setup_id`, `approval_url`,
 `connector_command`, `connector_exit_code`, `outcome`, `relay`), and the
 connector's own error (`code`, `next_action`) is under `outcome.error`.
 
-The second is a device login that is still waiting for approval
+The second is a device login the user has not confirmed in the browser yet
 (`haven login --json` past its wait, or `haven login --poll <code> --json`). It
 exits **3** with `{ "status": "pending", "device_code": …, "retry_after": … }`
 and no `ok` or `error` (see the login section above).

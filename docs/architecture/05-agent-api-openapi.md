@@ -43,7 +43,7 @@ covers:
   - packages/backend/src/middleware/auth.ts
   - packages/backend/src/middleware/agentAuth.ts
   - packages/frontend/next.config.ts
-last-verified: "2026-10-23"
+last-verified: "2026-10-26"
 ---
 
 # Haven Agent API OpenAPI Contract
@@ -722,3 +722,27 @@ alias, the resume union, the empty `KNOWN_UNDOCUMENTED_ROUTES` and the
 1/1 ceilings (`openapi/route-coverage.ts`), the three `allOf` components,
 the five human-decimal emitters (`rails/delegation-budget-view.ts`
 importers), and `RefusalActivityEntry` (#4323).
+
+Re-verified 2026-10-26 (weekly docs audit #4438, at dev `ebf567f1c`), a
+targeted re-read of the counts and the discoverability claims rather than a
+second full pass. Re-derived with the coverage gate's own extractor
+(`openapi/route-inventory.ts`): **211 declared routes across 49 registered
+modules**, one undocumented (`safe-deploy.ts`), `KNOWN_UNDOCUMENTED_ROUTES`
+empty and `MAX_UNDOCUMENTED_MODULES`/`MAX_UNDOCUMENTED_ROUTES` both 1 — the
+same figures the 2026-10-23 pass recorded. `AgentApiKey` is still the security
+scheme on **46** operations, with **5** of those also accepting `DashboardJwt`
+or `SetupToken`, and the four schemes are unchanged. Re-checked without change:
+`servers[0]`'s derivation from `domain/request-origin.ts` (including the
+`TRUST_PROXY_HOPS` gating and the leftmost-scheme residue), the root document's
+thinness, `PUBLIC_CATALOG_FIELDS` and the eight-word `search`, the
+`GET /payments/{id}/sign-context` / `GET /x402/{id}/sign-context` /
+`GET /x402/by-idempotency-key/{key}` / `GET /payments/{id}/resume_state` reads,
+`POST /machine-payments/budget-precheck` and `GET /machine-payments/balance-coverage`,
+the `/task-budgets/*` and `/sub-budgets/*` families with their owner routes, the
+`/labels` family and `PUT /agents/{id}/labels`, `BUILT_IN_FACETS` plus the
+account (#3719) and organization facets, and the catalog's
+`tool_arguments_schema` / `http_method` / `body_type` / `body_example` shapes.
+The 21 covered commits since 2026-10-23 — #4404's `payment_intents.failed_at`
+(a one-line spec description change), #4434's money-path globs, the analytics
+and token fixes, and the #4372 doc sweeps — moved no operation, scheme or route
+count.

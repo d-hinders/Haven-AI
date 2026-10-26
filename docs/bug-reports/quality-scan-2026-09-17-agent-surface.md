@@ -19,7 +19,7 @@ covers:
   - packages/signer/src/tools.ts
   - scripts/ci/safe-account-rename-census.mjs
   - scripts/retired-rail-prose-ratchet.mjs
-last-verified: "2026-09-30"
+last-verified: "2026-10-26"
 ---
 
 # Quality scan 2026-09-17 — agent surface, second pass (safe-retirement, hosted + local MCP, signer, demo merchant)
@@ -298,3 +298,47 @@ verified against the tree at this head:
   proposal; that proposal remains owner-pending (not re-decided here).
 - The §7 probe numbers and §5 safe-retirement census were not re-run; §2's
   F2 and §1's live observations are historical records of that run.
+
+## 10. Dispositions re-checked 2026-10-26 (weekly docs audit #4438, at dev `ebf567f1c`)
+
+The report body and §9 above are left as written. Every finding and candidate
+now has a landed remedy, re-read at this head:
+
+- **F1 (the next step named but never spelled)** — slices 2 and 4 shipped.
+  `suggested_arguments` is now emitted by both discovery hints
+  (`mcp-server/src/tools/catalog-purchase.ts`, `mcp/src/tools.ts`) and typed in
+  `sdk/src/tool-descriptions.ts`; `next_arguments` has a corpus
+  (`mcp-server/src/next-arguments-corpus.json`) with characterization and
+  signer-parity suites (`next-step-characterization.test.ts`,
+  `next-step-signer-parity.test.ts`, `next-step-refusal.test.ts`). Slice 1's
+  typed `NextStep` builder and slice 3's schema-derived refusals were not
+  re-derived here.
+- **C1 (two money-path perimeters, one hand-maintained)** — closed. The demo
+  merchant joined the classifier's globs: `.github/money-path-globs.json:309`
+  lists `packages/demo-merchant-mcp/src/**`, with the addition and its
+  reasoning recorded in the file's own history block (#3098).
+- **C2 (the demo merchant's settled-cache cleanup was unguarded)** — closed
+  (#3099). The unreachable `&& !settled.has(productKey)` clause is gone from
+  `demo-merchant-mcp/src/x402.ts:711-719`, replaced by a comment that proves
+  the unreachability, and the observable delete is mutation-pinned.
+- **D1 (the paid retry adopted a merchant-declared `http://` resource)** —
+  closed. The SDK now has one retry-target rule (its header cites this scan's
+  live 2026-09-17 observation), and the hosted tool descriptions now say *"The
+  paid retry goes to url, never the declared resource_url; public http:// is
+  refused"* (`mcp-server/src/tools-list.snapshot.json`).
+- **D2 (discovery hands out `resource_url`, the tool takes `url`)** — closed by
+  F1's `suggested_arguments`: the hint now carries the key the suggested tool
+  accepts.
+- **D3 (`haven_signer_status`)** — still owner-pending, unchanged.
+- **§5 safe-retirement census** — re-run at this head:
+  `node scripts/retired-rail-prose-ratchet.mjs` → 32 phrase hits across 30
+  files (was 33 / 31; shrink-only, green), and
+  `node scripts/ci/safe-account-rename-census.mjs origin/dev` → 790 surviving
+  hits, every one in an allowed path class, no allow-listed file grew (was
+  752). The count rose while the prose ratchet fell; both are within their
+  gates.
+
+All 17 covered paths in `covers:` still exist. The 78 covered commits since
+2026-09-30 — the #4372 doc sweeps, the 0.11.0-alpha.0 release, and the catalog
+and signer fixes — changed the covered files but supersede nothing measured
+here.

@@ -29,7 +29,7 @@ covers:
   - packages/mcp/src/tools.ts
   - scripts/docs/coupling-gate.mjs
   - .agents/skills/quality-scan/references/dimensions.md
-last-verified: "2026-10-19"
+last-verified: "2026-10-26"
 ---
 
 # Quality scan 2026-10-19 — whole repo, weighted to the landings since 2026-10-13
@@ -493,3 +493,38 @@ defect is tracked.
 
 Nothing was filed. On approval the ledger decision goes in a **separate**
 pull request and the handoff is `new-task`, per the skill.
+
+## 8. Dispositions re-checked 2026-10-26 (weekly docs audit #4438, at dev `ebf567f1c`)
+
+The report body and §7 above are left as written. All four candidates have
+since been remediated, re-read at this head:
+
+- **C1 (the RPC conformance probe did not check `eth_getLogs` range)** —
+  closed (#4118). `scripts/ci/rpc-conformance.mjs` now runs a sixth check,
+  `logs <R>`: `eth_getLogs` over the last R blocks must answer, with
+  `--logs-range` defaulting to the sweepers' widest batch and pinned to their
+  constants by the self-test (`:62`), and the runbook line added. The check
+  reports the provider's refusal text when it fails (`:165-169`).
+- **C2 (qa-dev's EIP-3009 legs never proved Haven recorded the merchant
+  settlement)** — closed. The scenarios now read the record back: the guided
+  catalog-purchase leg reads `merchant_settlement_recorded` from the payment
+  status and calls `haven_report_settlement_evidence` when it is absent,
+  failing with the refusal reason; the 3009 grace-resume leg carries the same
+  fixture. The docblock's "Haven never observes the merchant's settlement
+  itself" claim is gone.
+- **C3 (the SDK made the post-funding merchant-answer decision twice)** —
+  closed (#4120). `decidePostFundingMerchantAnswer` is now ONE shared decision
+  in the SDK (with `plainToolErrorAfterFunding` at `:132`), imported by both
+  `client.ts:151` and `merchant-completion.ts:23`; `client-boundaries.test.ts:170`
+  pins the shared module as a boundary.
+- **C4 (the eval graders' tool lists were hand copies, and the drift test
+  compared each copy to its own length)** — closed (#4121).
+  `packages/qa-agent/src/evals/tools.ts:1-20` states the rule and
+  `tools.test.ts` now compares the lists with their upstream sources by set
+  equality — it reads `tools-list.snapshot.json` and imports `toolSchemas` from
+  the built `@haven_ai/signer`.
+
+All 27 covered paths in `covers:` still exist. The 37 covered commits since
+2026-10-19 — the #4372 doc sweeps, the 0.11.0-alpha.0 release and the
+settlement-evidence landings — changed the covered files but supersede nothing
+measured here.

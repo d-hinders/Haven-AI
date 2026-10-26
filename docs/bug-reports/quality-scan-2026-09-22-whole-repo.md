@@ -31,7 +31,7 @@ covers:
   - .github/workflows/update-visual-baselines.yml
   - packages/frontend/e2e/product-routes.visual.spec.ts
   - packages/mcp-server/src/tools-contracts.test.ts
-last-verified: "2026-09-22"
+last-verified: "2026-10-26"
 ---
 
 # Quality scan 2026-09-22 — whole repo, weighted to the least recently scanned surfaces
@@ -623,3 +623,59 @@ Each is a reading that would have entered this report wrong.
 3. Should the §5 instrument lessons (the gate on a non-existent path, the
    `any` regex) go into the quality-scan reference in the ledger PR, or
    separately?
+
+## 7. Dispositions re-checked 2026-10-26 (weekly docs audit #4438, at dev `ebf567f1c`)
+
+The report body and §6 above are left as written. Every finding and candidate
+has since been remediated, re-read at this head:
+
+- **F1 (the visual-baseline net cannot tell an intended change from a
+  re-bless)** — all four slices shipped.
+  - Slice 1: the baseline verdict gate reads the audit trailer and the
+    `design-review verdict: … -- baselines: …` line, and blocks a moved
+    baseline with no verdict naming it.
+  - Slice 2: `scripts/ci/baseline-push-followup.mjs` no longer asserts the
+    images are correct; its test now asserts the ABSENCE of both sentences
+    (`baseline-push-followup.test.mjs:138-142,593`).
+  - Slice 3: the regeneration run now publishes a `baseline-before-after`
+    artifact through an `upload-artifact` step
+    (`update-visual-baselines.yml:260-276`).
+  - Slice 4: `.agents/skills/haven-agent-workflow/references/design-reviewer.md`
+    § *Changed baselines — open every one (#3235)* is now a numbered step of
+    the role, including the merge-base image and the verdict line the gate
+    reads.
+- **C1 (three repository writes took `userId` but scoped only by row id)** —
+  closed. `SET_ACCOUNT_DEFAULT_SQL` now binds `[accountId, userId]`
+  (`smart-accounts.ts:265,284`) and `DELETE_USER_ACCOUNT_SQL` carries
+  `AND user_id = $2` (`:296,373`).
+- **C2 (two of #3019's acceptance criteria were met by tests that cannot
+  fail)** — the trailing-slash half is closed: `post()` takes a `suffix` and
+  threads it into the URL (`accounting-webhooks.test.ts:157-158`), with the
+  old bug recorded in the comment above it. The dedupe half is closed at the
+  criterion the issue names — a real-DB test now rejects a replayed
+  `(provider, delivery_id)` with `23505` after a restart
+  (`092_accounting_webhook_deliveries.test.ts:54-83`). The narrower
+  "by import, never by paste" concern remains: that test still pastes its own
+  `INSERT` rather than importing `INSERT_WEBHOOK_DELIVERY_SQL`. #3019 is still
+  open.
+- **C3 (`branch-hygiene.mjs` measured a history that no longer records what it
+  counts)** — closed (#3228). The script now reads the commits of every PR
+  merged into `dev` in the window, refuses a window with no merged PR, and
+  refuses the `--since <date>` space form; its header states the squash-only
+  ruleset as the reason.
+- **C4 (files a gated job reads but the change classifier routes nowhere)** —
+  closed. `classifyChangedFiles` at this head routes all five to the surfaces
+  that read them: `.env.example` → backend; both `lint-*-baseline.json` →
+  backend (and the next-steps one also connect/mcp/mcp-server/signer/qa-agent);
+  `scripts/vitest/assert-fresh-dist.mjs` → connect/mcp-server/qa-agent;
+  `scripts/lib/lint-escapes.mjs` → frontend/ops.
+- **C5 (two required-job ratchets passed when their scan targets disappeared)**
+  — closed (#3230). `scripts/lint-next-steps.mjs:265-277` and
+  `scripts/lint-wire-types.mjs:181-242` both refuse a scan that read zero files
+  in a `SCAN_DIRS` entry, naming the starved directory, and each self-test pins
+  the refusal.
+
+All 29 covered paths in `covers:` still exist. The 68 covered commits since
+2026-09-22 — the #4372 doc sweeps, the 0.11.0-alpha.0 release and the
+settings/transaction landings — changed the covered files but supersede nothing
+measured here.

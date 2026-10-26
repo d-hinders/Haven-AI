@@ -11,7 +11,7 @@ covers:
   - docs/operations/package-dev-channel.md
   - packages/backend/src/openapi/spec.test.ts
   - docs/quality/issue-classification-2026-09.csv
-last-verified: "2026-09-21"
+last-verified: "2026-10-26"
 ---
 
 # The 600-issue retrospective (2026-09-03)
@@ -266,3 +266,27 @@ change to a covered file (#3182's coordination-hygiene rewrite of
 `ship-next/SKILL.md`, the #3193 channel rotation) renamed coordination
 surfaces inside the skill; the retrospective's own text quotes no channel
 number, so nothing here went stale with it.
+
+Re-verified 2026-10-26 (weekly docs audit #4438, at dev `ebf567f1c`): still a
+dated analysis of a fixed window, so the figures remain records rather than
+live claims — but every one of them was re-derived from the CSV at this head
+and reproduces exactly. 600 rows; 455 defects (`feature` 139, `other` 6);
+primary-category counts 99 `logic-bug` / 85 `false-instrument` / 81 `copy-ux` /
+62 `rail-retirement` / 39 `process` / 34 `stale-doc` / 25 `flake` /
+16 `contract-drift` / 14 `security`; 26 multi-category rows; the five-category
+group is 237 distinct issues of 455 (52.1%) on the any-category reading and 236
+(51.9%) on the primary one, differing by exactly #2012 as stated; 36 titles
+contain "still"; 62 rows are primary `rail-retirement`. The instrument pointers
+all still land: the three skills and their cited sections (`ship-next`
+*Implement* / *Acceptance Gate* / *Independent Review* / *Commit And Pull
+Request* / *Merge Gate* / *Closeout* / *Proportionality lane*, `quality-scan`
+blocks 1/3/4/6, `doc-reviewer` §1/§2.3/§4/§5), `reviewer.md`'s must-check list,
+`scripts/ci/review-isolation.mjs`, `docs/operations/package-dev-channel.md`,
+`packages/backend/src/openapi/spec.test.ts`, `ai-review-patterns.md` §
+*Instrument Self-Reference And Staleness*, the Captain Self-Check Preflight in
+`ai-agent-workflow.md`, and the classification CSV beside this document. E2's
+retirement still holds: `chain-integrity.mjs` is absent from the tree. The 86
+covered commits since 2026-09-21 — the #4372 doc sweeps, #4396's agent-dir
+default path, #4379's dep-lint widening and #4387's stale-comment sweep — edited
+skill and reference text; none of them moves a figure, a pointer or a guideline
+row here.

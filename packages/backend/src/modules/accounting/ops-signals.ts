@@ -57,6 +57,16 @@ export const ACCOUNTING_EVENT = {
   sweepFailed: 'accounting.sweep.failed',
   /** A reconnect could not delete (some of) the previous webhook subscriptions at the provider — `api-key-flow.ts`, always at `warn`. The reconnect still proceeds; the orphans dispatch to a retired token until the provider retires them (runbook: dead subscriptions). */
   webhookTeardownFailed: 'accounting.webhook.teardown_failed',
+  /**
+   * #3019 delta: the endpoint-verification handshake failed for one
+   * subscription at connect — `api-key-flow.ts`, always at `warn`. Best
+   * effort by contract: the connect succeeds and the connection status is
+   * untouched (the feed still works; the subscription's own
+   * `verification_status` is the source of truth, and the provider retries
+   * the handshake on its own 8-attempt schedule). The line carries the
+   * provider's error CODE only — never a secret, never the key.
+   */
+  webhookVerificationFailed: 'accounting.webhook.verification_failed',
 } as const
 
 export type OpsEventLevel = 'info' | 'warn'
@@ -158,6 +168,13 @@ export interface AccountingWebhookCounters {
   feature_off: number
   unknown_type: number
   confirmed: number
+  /**
+   * #3019 delta: `webhook.verification` deliveries answered with the
+   * challenge echo (or without one, when the delivery carried none). Counted
+   * on EVERY attempt — the provider retries the handshake, and the echo must
+   * survive the duplicate short-circuit, so this counter is not deduped.
+   */
+  verification: number
 }
 
 /**
@@ -176,6 +193,7 @@ const webhookCounters: AccountingWebhookCounters = {
   feature_off: 0,
   unknown_type: 0,
   confirmed: 0,
+  verification: 0,
 }
 
 export function incrementAccountingWebhookCounter(name: keyof AccountingWebhookCounters): number {

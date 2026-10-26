@@ -21,10 +21,11 @@ covers:
   - packages/backend/src/routes/agent-tax-declaration.ts
   - packages/backend/src/modules/agents/tax-declaration.ts
   - packages/sdk/src/client-tax-declaration.ts
+  - packages/sdk/src/tax-declaration.ts
   - packages/frontend/src/components/agent-panel/TaxDeclarationToggle.tsx
   - packages/mcp/src/server.ts
   - packages/sdk/src/merchant-completion.ts
-last-verified: "2026-10-25"
+last-verified: "2026-10-26"
 ---
 
 # Owner company details
@@ -230,9 +231,40 @@ A developer's own SDK client built with the delegate key carries it too.
 through `fetch`, `payX402Quote` and `resumeX402Payment`. An erc7710 payment
 never carries one, and neither the hosted server nor the edge signer builds
 one. So with an agent opted in, each EIP-3009 paid retry it makes through
-such a client carries the country and VAT number to the merchant, whether or
-not a receipt is ever handed over. The legal name and organisation number
-are not in it.
+such a client carries the country, the VAT number, the taxable-person status
+and a signed link to the agent's wallet address to the merchant, whether or
+not a receipt is ever handed over. The link is the declaration's
+`principalId` (`did:pkh:<network>:<delegate EOA>`) plus its
+`principalAttributionHash`, signed with the same delegate key that signs the
+payment (`packages/sdk/src/tax-declaration.ts`). The legal name and
+organisation number are not in it.
+
+The agent Settings tab's toggle says the same thing in the owner's words
+(#4416): the declaration travels only when the agent pays through a client
+that holds its own signing key, the default setup sends none, and the merchant
+receives the country, the VAT number, the taxable-person status and the signed
+link to the agent's wallet address when it accepts the declaration. The card
+does not name the payment rail — the owner's copy review of 2026-09-30
+(PR #3490) removed that sentence, and the rail stays stated here instead.
+
+The toggle is **disabled** for an agent whose most recent connector setup
+reported `hosted_plus_signer` — the default setup, a hosted server with a
+separate signer — because that client cannot attach a declaration to a
+payment, so an opt-in there would do nothing (#4435). The reason renders as a
+paragraph BELOW the checkbox row, never as the checkbox's helper text: a
+disabled checkbox is not focusable and its helper text sits inside the
+`<label>`, so a reason placed there is never announced. Every other value
+stays enabled, deliberately: `local_stdio` (the local MCP server holds the
+delegate key), `manual` (a developer's own SDK client with a delegate key can
+send one, and Haven cannot know), and unknown — no setup row, an `agent_id`
+set to NULL by a delete, or a setup that never reported the key. "Cannot tell"
+is not "cannot send", and disabling every agent that predates the signal would
+be a user-visible regression on deploy. An agent whose bit is already ON stays
+interactive even on that setup, so the owner can still switch it off; the PUT
+is never gated on OFF. The signal is display-only: `runtime_mcp_mode` on the
+agents list read, taken from the sanitized `install_status` of the agent's
+latest setup, and nothing in the delegation, budget, enforcement or
+client-compat path reads it.
 
 ## The settings screen
 

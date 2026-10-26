@@ -1,10 +1,8 @@
 import { timeAgo, truncate, currencyLocale } from '@/lib/format'
-import { formatAllowanceForToken } from '@/lib/allowance-format'
 // #3844: the instant voice is the budget caption helper's (#3806) — the same
 // three-distance phrasing a budget meter's "refills …" line uses, so a period
 // end can no longer be rendered in a private date dialect.
 import { formatNextEvent } from '@/lib/budget-caption'
-import type { AnalyticsDelegationBudget } from '@/types/analytics'
 
 /**
  * Presentation-only formatters for the Analytics surface (#2947, epic #2944
@@ -18,8 +16,9 @@ import type { AnalyticsDelegationBudget } from '@/types/analytics'
  * converting it again here would put arithmetic between the reader and the
  * number the money path actually wrote. If a figure is missing from the
  * response, the fix is to add it to the endpoint, never to derive it client-
- * side. The one computation performed here is budget percentage of two atomic
- * strings on the same token — a ratio, not a currency conversion.
+ * side. (The budget percentage this file used to compute is gone with the
+ * phone row's own budget line, #4432: a budget renders through the shared
+ * caption helper, `lib/budget-caption.ts`.)
  */
 
 /** The display currency the Settings surface owns (`usePreferences().currency`). */
@@ -74,37 +73,14 @@ export function formatSharePercent(share: number): string {
 }
 
 /**
- * A budget position in the delegation's own token units ("180 of 250 USDC").
- *
- * Token units, not fiat: a budget is what the owner-signed delegation permits
- * on that token over its own period, so the only honest denominator is the
- * token the delegation is written in. The atomic strings divide down to
- * decimal places (`1800000` at 6 decimals → `1.8`).
+ * An agent's refused count, with its attempts when they differ ("1 · 2
+ * attempts"). Rows and attempts can differ — a dedupe upstream folds retries
+ * of one refusal into one row — so the attempts ride the count only when they
+ * say something the count does not. One home for the string (#4426): the
+ * desktop Refused cell and the phone row's disclosure both print it.
  */
-export function formatBudgetTokenValue(
-  budget: Pick<AnalyticsDelegationBudget, 'token' | 'used_atomic' | 'budget_atomic'>,
-): string {
-  // `chainId: null` on purpose: the response carries the token's SYMBOL, not
-  // its address or chain, so the symbol-based decimals table is the only one
-  // that can be consulted, and `formatAllowanceForToken` already owns that
-  // table plus its unknown-token fallback.
-  const used = formatAllowanceForToken(budget.used_atomic, null, budget.token)
-  const total = formatAllowanceForToken(budget.budget_atomic, null, budget.token)
-  return `${used} of ${total} ${budget.token}`
-}
-
-/**
- * Used/budget as a 0–100 percentage. A zero or malformed budget reports `0`
- * rather than `Infinity` or `NaN` — a delegation whose budget reads as zero is
- * a state that exists (an approval revoked down to nothing), and the bar must
- * render flat rather than produce a nonsense figure.
- */
-export function budgetUsedPercent(usedAtomic: string, budgetAtomic: string): number {
-  const budget = Number.parseFloat(budgetAtomic)
-  if (!Number.isFinite(budget) || budget <= 0) return 0
-  const used = Number.parseFloat(usedAtomic)
-  if (!Number.isFinite(used) || used <= 0) return 0
-  return Math.min(100, Math.round((used / budget) * 100))
+export function formatRefusedCount(refusals: number, attempts: number): string {
+  return attempts === refusals ? String(refusals) : `${refusals} · ${attempts} attempts`
 }
 
 /**

@@ -397,7 +397,7 @@ function ToolCallRow({
               {' · '}
               <button
                 type="button"
-                className="text-xs font-medium text-[var(--v2-ink)] underline underline-offset-4 hover:text-[var(--v2-ink-strong)]"
+                className="text-xs font-medium text-[var(--v2-ink)] underline underline-offset-4 hover:decoration-2"
                 onClick={() => onOpenPayment(item.payment_id as string)}
                 data-testid="tool-call-payment-link"
               >

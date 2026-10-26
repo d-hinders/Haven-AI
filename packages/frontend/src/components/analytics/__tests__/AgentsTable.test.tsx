@@ -55,6 +55,33 @@ function mobileOf(container: HTMLElement): HTMLElement | null {
   return container.querySelector('[class*="lg:hidden"]')
 }
 
+/** One phone row per agent, in display order. */
+function phoneRowsOf(container: HTMLElement): HTMLElement[] {
+  return Array.from(mobileOf(container)!.querySelectorAll(':scope > div')) as HTMLElement[]
+}
+
+/** A phone row's budget lines, one per budget (#4432). */
+function phoneBudgetLines(row: HTMLElement): string[] {
+  return Array.from(row.querySelectorAll('[data-testid="phone-budget-line"]')).map((p) => p.textContent ?? '')
+}
+
+/** The desktop Budget cell of the nth row, one entry per budget. */
+function desktopBudgetCaptions(container: HTMLElement, rowIndex = 0): string[] {
+  const cell = container.querySelectorAll('tbody tr')[rowIndex].querySelectorAll('td')[4]
+  return Array.from(cell.querySelectorAll(':scope > div > div')).map((d) => d.textContent ?? '')
+}
+
+/** A budget whose read is readable at 2026-07-12T09:00Z: the period ends after that clock. */
+const READABLE_BUDGET: AnalyticsAgentRow['budgets'][number] = {
+  token: 'USDC',
+  recipient: null,
+  used_atomic: '0',
+  budget_atomic: '1000000',
+  remaining_from_chain: true,
+  period_start: '2026-07-10T00:00:00.000Z',
+  period_end: '2026-07-13T00:00:00.000Z',
+}
+
 describe('AgentsTable — the desktop table (#4333 columns)', () => {
   it('names every column the rebuild defines, in the order the reader scans them', () => {
     const { container } = mount()
@@ -93,7 +120,6 @@ describe('AgentsTable — the desktop table (#4333 columns)', () => {
     const cells = row.querySelectorAll('td')
     expect(cells[2].textContent).toBe('4') // payments, as the integer it is
     expect(text).toContain('1 · 2 attempts') // refusals plus the attempts behind them
-    expect(text).toContain('214.00 of 250.00 USDC') // the delegation's own units
     expect(text).toContain('NordShield VPN') // a label the API resolved, not this table
   })
 
@@ -139,6 +165,33 @@ describe('AgentsTable — the desktop table (#4333 columns)', () => {
     expect(link?.textContent).toContain('2 attempts')
   })
 
+  it('keeps "1 · 2 attempts" on one line, built by the one formatter the phone row uses too (#4426)', async () => {
+    // The desktop link wrapped at 1280 ("1 · 2" over "attempts"), and the
+    // string was built twice — once here, once in the phone disclosure. Both
+    // now read `formatRefusedCount`, so the two renderings print the same
+    // bytes. Mutations: drop `whitespace-nowrap` from the link → red; build
+    // either half inline with a different separator → red.
+    const { container } = mount()
+    const link = container.querySelectorAll('tbody tr')[0].querySelectorAll('td')[3].querySelector('a')!
+    expect(link.textContent).toBe('1 · 2 attempts')
+    expect(link.className.split(/\s+/)).toContain('whitespace-nowrap')
+    const firstRow = mobileOf(container)!.querySelector('div') as HTMLElement
+    await userEvent.click(within(firstRow).getByRole('button', { name: 'More' }))
+    const term = within(firstRow).getByText('Refused')
+    expect(term.nextElementSibling?.textContent).toBe('1 · 2 attempts')
+  })
+
+  it('prints the phone row\u2019s Refused as the bare count when the attempts agree (#4426)', async () => {
+    // The other half of the one formatter on the phone: one refusal, one
+    // attempt → "1", no attempts clause. Mutation: an inline copy that
+    // always appends "· N attempts" → "1 · 1 attempts" → red.
+    const { container } = mount()
+    const retiredRow = mobileOf(container)!.querySelectorAll(':scope > div')[1] as HTMLElement
+    await userEvent.click(within(retiredRow).getByRole('button', { name: 'More' }))
+    const term = within(retiredRow).getByText('Refused')
+    expect(term.nextElementSibling?.textContent).toBe('1')
+  })
+
   it('does not pad the refusals cell with an attempts clause when the two agree', () => {
     // A dedupe upstream makes rows and attempts usually equal, and spelling
     // the pair every time would train the reader to stop parsing the cell.
@@ -163,17 +216,39 @@ describe('AgentsTable — the desktop table (#4333 columns)', () => {
       expect(rows[0]).toMatch(/couldn.t be read/)
       expect(rows[1]).toMatch(/couldn.t be read/)
       for (const text of rows) expect(text).not.toMatch(/last snapshot/)
+      // #4432: the phone half, on the same fixture and clock. It prints the
+      // same caption the desktop cell does — the stale read (Research,
+      // refilled-updating) and the failed one (Data-feed, unknown) alike —
+      // and no figure or percentage. Mutation: restore the old
+      // `figure · N%` budget line → red.
+      const phone = phoneRowsOf(container)
+      expect(phone).toHaveLength(2)
+      expect(phoneBudgetLines(phone[0])).toEqual(['Usage this period couldn\u2019t be read'])
+      expect(phoneBudgetLines(phone[1])).toEqual(['Usage this period couldn\u2019t be read'])
+      expect(phoneBudgetLines(phone[0])).toEqual(desktopBudgetCaptions(container, 0))
+      expect(phoneBudgetLines(phone[1])).toEqual(desktopBudgetCaptions(container, 1))
+      for (const row of phone) {
+        const text = row.textContent ?? ''
+        expect(text).not.toMatch(/\d%/)
+        expect(text).not.toMatch(/ of \d/)
+        expect(text).not.toMatch(/last snapshot/)
+      }
     } finally {
       vi.useRealTimers()
     }
   })
 
-  it('the budget caption agrees with the figure above it: a 1.00 USDC budget never reads 0.00 of 0.00 (#4333)', () => {
+  it('states the budget figures once, through the shared row caption — never 0.00 of 0.00 (#4333, #4426)', () => {
     // The #4333 root cause: the caption helper divided a symbol-only row
     // (chainId null — the analytics read carries the SYMBOL, not the chain)
-    // by 18 decimals, so a 1.00 USDC budget read "0.00 of 0.00" under a
-    // "1.00 of 1.00" figure. Asserted as the FULL caption style — the exact
-    // string, spaces included — so a decimals regression cannot hide behind a
+    // by 18 decimals, so a 1.00 USDC budget read "0.00 of 0.00". #4426: the
+    // cell printed its own figure line ("0.00 of 1.00 USDC", 0%) above the
+    // meter and then the caption said the same figures again. Now the cell
+    // asks for the compact `style: 'row'` caption the dashboard agent row and
+    // the agent hero use, and prints no figure line. Asserted as the EXACT
+    // caption — the period word in place of "used this period", the no-break
+    // space between the cap and its symbol — and as one occurrence, so a
+    // returning figure line or a `'full'` caption cannot hide behind a
     // partial match.
     const agent: AnalyticsAgentRow = {
       ...RESEARCH,
@@ -197,12 +272,52 @@ describe('AgentsTable — the desktop table (#4333 columns)', () => {
     vi.setSystemTime(new Date('2026-07-12T09:00:00Z'))
     try {
       const { container } = render(<AgentsTable agents={[agent]} currency="USD" />)
-      const text = (container.querySelector('tbody tr') as HTMLElement).textContent ?? ''
-      // The figure line and the caption AGREE — both divide by the symbol's
-      // 6 decimals — and the caption is the exact full-style string, so a
-      // decimals regression cannot hide behind a partial match.
-      expect(text).toContain('0.00 of 1.00 USDC used this period · refills in 15h')
+      const cell = (container.querySelector('tbody tr') as HTMLElement).querySelectorAll('td')[4]
+      const text = cell.textContent ?? ''
+      expect(text).toBe('0.00 of 1.00\u00a0USDC · every 3 days · refills in 15h')
+      expect(text.match(/of 1\.00/g)).toHaveLength(1)
+      expect(text).not.toContain('used this period')
       expect(text).not.toContain('0.00 of 0.00')
+      expect(text).not.toMatch(/\d%/)
+      expect(cell.querySelectorAll('[role="progressbar"]')).toHaveLength(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('says a budget that has not started yet in the helper\u2019s words, rather than an empty cell (#4426)', () => {
+    // With no figure line above the meter, a caption kind that draws no bar
+    // must still say something: the helper's own words, not a blank cell.
+    // The analytics read carries no `expires_at`, so the reachable kinds
+    // without a bar are unknown, refilled-updating (both UNREAD_CAPTION,
+    // pinned above) and not-started — a period that begins after the clock.
+    // Mutation: render the unread kinds only → the cell is empty → red.
+    const agent: AnalyticsAgentRow = {
+      ...RESEARCH,
+      budgets: [
+        {
+          token: 'USDC',
+          recipient: null,
+          used_atomic: '0',
+          budget_atomic: '1000000',
+          remaining_from_chain: true,
+          period_start: '2026-07-10T00:00:00.000Z',
+          period_end: '2026-07-13T00:00:00.000Z',
+        },
+      ],
+    }
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-07-09T09:00:00Z'))
+    try {
+      const { container } = render(<AgentsTable agents={[agent]} currency="USD" />)
+      const cell = (container.querySelector('tbody tr') as HTMLElement).querySelectorAll('td')[4]
+      expect(cell.textContent).toMatch(/^Starts /)
+      expect(cell.querySelectorAll('[role="progressbar"]')).toHaveLength(0)
+      // #4432: the phone row says the same words, not the figures. Mutation:
+      // drop not-started from the phone row → red.
+      const [phone] = phoneRowsOf(container as HTMLElement)
+      expect(phoneBudgetLines(phone)).toEqual([cell.textContent])
+      expect(phone.textContent ?? '').not.toMatch(/\d%/)
     } finally {
       vi.useRealTimers()
     }
@@ -272,6 +387,60 @@ describe('AgentsTable — one colour per agent (#4331)', () => {
   })
 })
 
+describe('AgentsTable — the phone row\u2019s budget lines (#4432)', () => {
+  // The phone row prints the SAME caption the desktop Budget cell does,
+  // through the one caption-row projection both halves call — so the two
+  // layouts cannot disagree about a budget. Text only: the phone row draws
+  // no meter.
+  it('prints a readable budget as exactly the desktop cell\u2019s row caption, and no bar', () => {
+    // Mutation: the phone row projects its own figures (`style: 'full'`, or
+    // its own atomic arithmetic) instead of the shared projection → red.
+    const agent: AnalyticsAgentRow = { ...RESEARCH, budgets: [READABLE_BUDGET] }
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-07-12T09:00:00Z'))
+    try {
+      const { container } = render(<AgentsTable agents={[agent]} currency="USD" />)
+      const [phone] = phoneRowsOf(container as HTMLElement)
+      expect(phoneBudgetLines(phone)).toEqual(['0.00 of 1.00\u00a0USDC · every 3 days · refills in 15h'])
+      expect(phoneBudgetLines(phone)).toEqual(desktopBudgetCaptions(container as HTMLElement))
+      expect(phone.querySelectorAll('[role="progressbar"]')).toHaveLength(0)
+      expect(phone.textContent ?? '').not.toMatch(/\d%/)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('renders one line per budget, not one joined line', () => {
+    // Mutation: join the budgets into one line again → red.
+    const agent: AnalyticsAgentRow = {
+      ...RESEARCH,
+      budgets: [
+        READABLE_BUDGET,
+        { ...READABLE_BUDGET, recipient: '0x00000000000000000000000000000000000000aa', used_atomic: '500000', budget_atomic: '2000000' },
+      ],
+    }
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-07-12T09:00:00Z'))
+    try {
+      const { container } = render(<AgentsTable agents={[agent]} currency="USD" />)
+      const [phone] = phoneRowsOf(container as HTMLElement)
+      expect(phoneBudgetLines(phone)).toEqual([
+        '0.00 of 1.00\u00a0USDC · every 3 days · refills in 15h',
+        '0.50 of 2.00\u00a0USDC · every 3 days · refills in 15h',
+      ])
+      expect(phoneBudgetLines(phone)).toEqual(desktopBudgetCaptions(container as HTMLElement))
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps "No budget" for an agent with none', () => {
+    const view = render(<AgentsTable agents={[{ ...RETIRED, budgets: [] }]} currency="USD" />)
+    const [phone] = phoneRowsOf(view.container as HTMLElement)
+    expect(phoneBudgetLines(phone)).toEqual(['No budget'])
+  })
+})
+
 describe('AgentsTable — the mobile rows', () => {
   it('carries the complementary breakpoint classes that make the pair one table', () => {
     // The structural half of the two-renderings rule, and the only half jsdom
@@ -292,14 +461,26 @@ describe('AgentsTable — the mobile rows', () => {
 
   it('keeps spend, refusals and the budget on the face of the row', () => {
     // The three a reader at a bus stop is most likely asking about. They are
-    // NOT behind the disclosure, and they are the same fields the desktop
-    // table renders, so the two layouts cannot disagree about a figure.
-    const text = mobileOf(mount().container)?.textContent ?? ''
-    expect(text).toContain('Research agent')
-    expect(text).toContain('$312.25 spent') // compacted for the narrow column
-    expect(text).toContain('1 refused')
-    expect(text).toContain('214.00 of 250.00 USDC')
-    expect(text).toContain('86%')
+    // NOT behind the disclosure (it stays closed here). The budget line is
+    // the desktop cell's own caption (#4432): on the shared fixture the read
+    // is stale, so it says the usage couldn't be read — and no `%` figure is
+    // on the face of the row, the finished period's percentage included.
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-07-12T09:00:00Z'))
+    try {
+      const { container } = mount()
+      const [first] = phoneRowsOf(container)
+      expect(first.querySelector('dl')).toBeNull()
+      const text = first.textContent ?? ''
+      expect(text).toContain('Research agent')
+      expect(text).toContain('$312.25 spent') // compacted for the narrow column
+      expect(text).toContain('1 refused')
+      expect(text).toContain('Usage this period couldn\u2019t be read')
+      expect(text).not.toContain('214.00 of 250.00')
+      expect(text).not.toMatch(/\d%/)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('puts the rest of the columns in a disclosure that opens, and is not a second source', async () => {

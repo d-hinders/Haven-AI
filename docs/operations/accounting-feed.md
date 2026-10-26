@@ -36,7 +36,7 @@ covers:
   - packages/frontend/src/components/accounting/ConnectionRow.tsx
   - packages/frontend/src/components/accounting/ConnectionSettings.tsx
   - packages/frontend/src/components/accounting/BackfillDialog.tsx
-last-verified: "2026-10-24"
+last-verified: "2026-10-26"
 ---
 
 # Accounting feed — operations runbook
@@ -303,7 +303,7 @@ lands on `connect=error&reason=feature_off` instead of a bare 404, with the
 | session + `requireAccountingFeed` (entitlement) | `GET /accounting/feed/verify/:paymentId` | live read-back through the active connection's connector: `registered` / `booked` (+ voucher) / `cancelled` / `missing` |
 | session + `requireAccountingFeed` (entitlement) | `POST /accounting/feed/reopen/:paymentId` | verification-gated reopen: flips `pushed → failed` ONLY when the provider confirms the record is gone; 409 otherwise, 409 `previous_company` for a row pushed under a previous company |
 | session | `POST /accounting/fortnox/push` | LEGACY asserting voucher push (`accounting/legacy/`); 410 unless `HAVEN_LEGACY_BOOKKEEPING_ENABLED` |
-| public (capability URL) | `POST /accounting/webhooks/accounted/:token` | the Accounted provider's callback (#3019) — the ONE route in this table authenticated by neither a session nor an entitlement: the per-connection capability token in the path plus the HMAC signature (`X-Gnubok-Signature`, raw body, 5-minute timestamp window) are the credentials. **200 `feature_off` when the flag is off** (after the signature verdict — unlike every other row here, which 404s), 200 for `webhook.test`, unknown types, duplicates and success; 400 on a bad/malformed signature or stale timestamp; 404 on an unknown token; never 410, never a 3xx (the provider auto-disables on both). Rate-limited 600/min per IP; body capped at 256 KB |
+| public (capability URL) | `POST /accounting/webhooks/accounted/:token` | the Accounted provider's callback (#3019) — the ONE route in this table authenticated by neither a session nor an entitlement: the per-connection capability token in the path plus the HMAC signature (`X-Gnubok-Signature`, raw body, 5-minute timestamp window) are the credentials. **200 `feature_off` when the flag is off** (after the signature verdict — unlike every other row here, which 404s), 200 for `webhook.test`, unknown types, duplicates and success; 400 on a bad/malformed signature or stale timestamp; 404 on an unknown token; never 410, never a 3xx (the provider auto-disables on both). A `webhook.verification` delivery answers 200 with `{"challenge": "<data.object.challenge>"}` at the top level — the endpoint-verification handshake (#3019 delta), echoed on every attempt including a duplicate retry; with no challenge it answers 200 without one. Rate-limited 600/min per IP; body capped at 256 KB |
 
 "feature gate" above is `requireAccountingFeature` (#2918): `config.hosted &&
 config.accountingEnabled`, no entitlement check. "`requireAccountingFeed`
@@ -324,7 +324,7 @@ which is what `missingScopes` on the API reads.
 | `needs_reauthorisation` | the token endpoint refused the refresh with a verdict on the GRANT: `invalid_grant`; a 400/403 with no readable code; or a 400/403 carrying any code that is NOT one of the client-side ones (`isGrantRefusal`, `oauth-flow.ts`). NOT on 401 / `invalid_client` and the other client-side codes — those are Haven's credentials — and not on 429 / 408 / 5xx / network, which leave the row untouched with the refresh token unconsumed | still the destination; every payment is recorded `skipped` with `connection needs_reauthorisation: <reason>`; nothing is refreshed, nothing pushed; the sweep leaves its rows alone | the user's **Reconnect** (the same connect-url + callback on the same row); then the skipped rows are re-claimed by the sweep or Sync now |
 | `scope_missing` | (1) at the callback, the echoed scope string is short of `requiredScopes`; (2) at connect, the company read was refused for scope; (3) PRE-push, the create call itself was refused for scope — the sync row is `skipped` (`scope refused before the invoice was created: …`), nothing exists at the provider; (4) POST-push, the attachment step was refused — the sync row stays **`pushed`** with the note, never re-pushed | no destination: no new rows, `syncUser` feeds nothing, the sweep's `c.status = 'connected'` leaves its rows alone | **Reconnect**; the callback UPDATEs the row and keeps settings, floor, flag and history. If it comes straight back `scope_missing`: the provider app registration lacks that scope (Fortnox: the developer-portal permissions must include every entry of `FORTNOX_SCOPE`) |
 | `revoked_at_provider` | reserved for a provider that reports a revocation to Haven (Fortnox has a consent-revoked webhook; Haven does not receive it). **No code path sets it today**; a revocation inside Fortnox surfaces as `needs_reauthorisation` at the next refresh | as `needs_reauthorisation` | Reconnect |
-| `needs_attention` (#3019) | Accounted only: the WEBHOOK half of a connect failed — the three event subscriptions could not be created at the provider (`webhook subscription failed — …` in `status_reason`), or the deployment states no public API origin (`no public API origin configured` — nothing was registered; fail-closed, PR #3196 review). The key validated and the feed works; the push confirmations do not arrive | still the destination; the feed keeps feeding — only the push confirmations are missing | **Reconnect** (paste the key again): connect re-issues the capability token and re-runs the registration; for the missing-origin reason, state `HAVEN_API_URL` on the backend deployment first |
+| `needs_attention` (#3019) | Accounted only: the WEBHOOK half of a connect failed — the three event subscriptions could not be created at the provider (`webhook subscription failed — …` in `status_reason`), or the deployment states no public API origin (`no public API origin configured` — nothing was registered; fail-closed, PR #3196 review). The key validated and the feed works; the push confirmations do not arrive. A failed endpoint-VERIFICATION handshake does NOT land here (#3019 delta): it is best effort, logged as `accounting.webhook.verification_failed`, and the provider retries it on its own | still the destination; the feed keeps feeding — only the push confirmations are missing | **Reconnect** (paste the key again): connect re-issues the capability token and re-runs the registration; for the missing-origin reason, state `HAVEN_API_URL` on the backend deployment first |
 | `disconnected` | the user's Disconnect; secrets NULL, `secrets_key_version = 0`, flag dropped, `status_reason = user disconnected [(grant revoked at provider)]` | nothing; history kept | **Connect** (the same row is reused; settings survive) |
 
 A `connected` row with a non-empty `missingScopes` is a grant that predates a
@@ -610,6 +610,7 @@ goes through `setOpsEventSink`, which `index.ts` points at the same logger
 | `accounting.sync.exhausted` | `warn` | the sweep wrote a row's terminal reason (only when the guarded write took) | `userId`, `provider`, `paymentId`, `attempts` (8), `reason` (the last provider message) |
 | `accounting.connection.needs_attention` | `warn` | a connection was written `needs_reauthorisation`, `scope_missing`, `revoked_at_provider` or `needs_attention` — every write site goes through `flagConnectionStatus` (`ops-signals.ts`) | `userId`, `provider`, `status`, `reasonPrefix` (the head of the row's `status_reason` before its ` — ` separator — `missing scopes: a, b`, `refresh refused: <OAuth error code>`, `webhook subscription failed`, or `no public API origin configured` — capped at 120 characters), `missingScopes` (the parsed list; empty unless the prefix names scopes). The line never carries the connector's free-text detail: on the `scope_missing` paths the row's full `status_reason` embeds the provider's message and the refused request path (a supplier-lookup refusal includes the recipient's name), so read that from the row, not the log. Never token material |
 | `accounting.sweep.failed` | `warn`, always logged | the sweep's tick threw outside a run — leader election or the query layer, not a push (`Accounting retry sweep failed`) | `err` |
+| `accounting.webhook.verification_failed` (#3019 delta) | `warn` | the endpoint-verification handshake failed for ONE subscription at connect (`api-key-flow.ts`). Best effort: the connect succeeds and the connection status is untouched — the feed still works, and the provider retries the handshake on its own 8-attempt schedule | `userId`, `provider`, `eventType`, `code` (the provider's error code — `WEBHOOK_VERIFICATION_FAILED`, or `HTTP <status>` when it sent none; the error's NAME for a non-provider failure). Never the key, never a signing secret, never the provider's free-text message |
 
 `accounting_company_switch` (`info`, JSON on `console`) is the #2864
 company-switch line.
@@ -622,7 +623,7 @@ only after the token passes), under `accounting`:
 |---|---|---|
 | `exhaustedSyncs` | `COUNT(*) FROM accounting_feed_syncs WHERE status = 'failed' AND attempts >= 8` (`COUNT_EXHAUSTED_SYNCS_SQL`) | rows the sweep has given up on, deployment-wide — the same predicate as the per-user `counts.exhausted`, never the reason prefix |
 | `connectionsNeedingAttention` | `COUNT(*) FROM accounting_connections WHERE status IN ('needs_reauthorisation', 'scope_missing', 'revoked_at_provider', 'needs_attention')` (`COUNT_CONNECTIONS_NEEDING_ATTENTION_SQL` over `NEEDS_ATTENTION_STATUSES`) | connections only a reconnect resolves; `disconnected` is the user's choice and is not counted |
-| `webhookCounters` (#3019) | in-process (`getAccountingWebhookCounters()`), reset on restart | the Accounted webhook receiver's per-answer-class counts: `received`, `bad_signature`, `stale`, `unknown_token`, `duplicate`, `processed`, `feature_off`, `unknown_type`, `confirmed`. The durable facts are the `accounting_webhook_deliveries` rows — read those, not these, for "what did we receive" |
+| `webhookCounters` (#3019) | in-process (`getAccountingWebhookCounters()`), reset on restart | the Accounted webhook receiver's per-answer-class counts: `received`, `bad_signature`, `stale`, `unknown_token`, `duplicate`, `processed`, `feature_off`, `unknown_type`, `confirmed`, `verification`. The durable facts are the `accounting_webhook_deliveries` rows — read those, not these, for "what did we receive" |
 
 `exhaustedSyncs` and `connectionsNeedingAttention` are read live, one
 aggregate query each, no per-user data on the wire; `webhookCounters` is the
@@ -994,6 +995,74 @@ hands it a URL the subscription was never registered with. The route is
 registered on both the exact path and its trailing-slash twin so Fastify's
 redirect never fires. Tests enumerate the whole matrix on both spellings.
 
+**The endpoint-verification handshake (#3019 delta).** A subscription that has
+not passed the handshake receives **nothing** — the provider dispatches no
+event to an endpoint whose `verification_status` is `pending` or `paused`. The
+four states are `pending | grace_period | paused | verified`; only `verified`
+and `grace_period` receive events. This is why the document push landed in
+Accounted while `journal_entry.committed` never arrived: the receiver answered
+the verification delivery with a generic `{status:'ok'}` instead of echoing the
+challenge, the handshake failed with `challenge_missing`, and the three
+subscriptions stayed unverified.
+
+The handshake has two halves, and both are now in code:
+
+1. **The receiver echoes the challenge.** The provider's verification delivery
+   is a normal signed envelope whose `type` is `webhook.verification` and whose
+   `data.object.challenge` must come back at the TOP LEVEL of the 200 body:
+
+   ```json
+   {"challenge": "<data.object.challenge>"}
+   ```
+
+   The route answers that before the dedupe short-circuit, so a **retry of the
+   same delivery id still echoes** (the provider retries the handshake). The
+   delivery is still recorded in `accounting_webhook_deliveries` for audit and
+   counted as `verification`. A verification delivery with **no** challenge
+   answers 200 without one — the provider's own `challenge_missing` verdict is
+   then the correct outcome, and a 400 would be retried for ~87 h over a
+   delivery we will never accept.
+
+2. **The connect flow runs `POST …/verify`.** After the three triples are
+   stored, `api-key-flow.ts` calls
+   `POST /api/v1/companies/{companyId}/webhooks/{webhookId}/verify` once per
+   subscription, in creation order (`accountedVerifyWebhook`,
+   `accounted-client.ts`; a fresh `Idempotency-Key` rides it like every write).
+   A pass answers 200 with `verification_status: "verified"`; a failure answers
+   **422 `WEBHOOK_VERIFICATION_FAILED`** with `details.reason`
+   (`challenge_missing`, `http_401`).
+
+   The verify call is **best effort**: a failure does **not** fail the connect
+   and does **not** change the connection status. The feed still works, the
+   subscription's own `verification_status` is the source of truth, and the
+   provider retries the handshake on its own schedule — **1 m, 5 m, 30 m, 2 h,
+   12 h, then daily, 8 attempts**. Each failure emits one
+   `accounting.webhook.verification_failed` `warn` line carrying the provider's
+   error code only.
+
+**The verify verb needs a LIVE key.** A test key (`gnubok_sk_test_`) cannot run
+it — the provider refuses the write, so a connect made with a test key logs
+`WEBHOOK_VERIFICATION_FAILED` (or `TEST_KEY_WRITE_BLOCKED`) and the
+subscriptions stay unverified until a live key is used.
+
+**Verifying an EXISTING subscription by hand** (the owner step after a deploy —
+the receiver must be live first, or the handshake fails `challenge_missing`):
+
+```bash
+curl -sS -X POST \
+  -H "Authorization: Bearer $ACCOUNTED_API_KEY" \
+  -H "Idempotency-Key: $(uuidgen)" \
+  "https://app.accounted.se/api/v1/companies/$COMPANY_ID/webhooks/$WEBHOOK_ID/verify"
+```
+
+Expect `data.verification_status: "verified"`. The three subscription ids and
+the company id are in the connection row's encrypted secrets blob
+(`webhooks[]` beside `apiKey`); `GET /api/v1/companies/{companyId}/webhooks`
+lists them without secrets. A 422 names the reason in `error.details.reason`:
+`challenge_missing` means the receiver did not echo (the fix is not deployed, or
+the callback URL points at a deployment that predates it); `http_401` means the
+provider's dispatch was refused at the callback.
+
 **The dedupe ledger.** Every delivery is recorded in
 `accounting_webhook_deliveries` (migration 092) keyed
 `UNIQUE (provider, delivery_id)` BEFORE the 2xx — the provider retries a
@@ -1005,7 +1074,7 @@ keys dropped, 16 KB cap) — the probe's raw material for deciding whether a
 *booked* state is derivable (#3019 item 5). The counters under
 `accounting.webhookCounters` on `GET /health/ops` — received /
 bad_signature / stale / unknown_token / duplicate / processed /
-feature_off / unknown_type / confirmed — are process-lifetime; the rows are
+feature_off / unknown_type / confirmed / verification — are process-lifetime; the rows are
 the durable facts. Rate limiting: the route carries its own 600/min ceiling —
 the shared limiter keys on `Authorization`/`X-API-Key`, which a webhook lacks,
 so it degrades to per-IP; 600/min dwarfs a 7-retry storm and keeps the

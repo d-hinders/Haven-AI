@@ -22,6 +22,7 @@ covers:
   - packages/sdk/src/account-reads.ts
   - packages/sdk/src/agent-guidance.ts
   - packages/sdk/src/client.ts
+  - packages/sdk/src/node-version.ts
   - packages/sdk/src/connector-channel.ts
   - packages/sdk/src/mcp-merchant-transport.ts
   - packages/sdk/src/merchant-egress.ts
@@ -84,7 +85,7 @@ covers:
   - scripts/ci/check-stale-client-compat.mjs
   - packages/mcp-server/src/next-arguments-corpus.json
   - packages/mcp-server/src/tool-contract-snapshot.test.ts
-last-verified: "2026-10-23"
+last-verified: "2026-10-26"
 ---
 
 > **Re-verified #4415 (2026-10-25, stale comment sweep):** the only covered
@@ -1046,6 +1047,25 @@ last-verified: "2026-10-23"
 > is bumped to 2026-09-30 for this note: the candidate selection that decides
 > which directory `--doctor` reports on is part of this document's subject, and
 > that behavior moved.
+
+> **Re-verified #4438 (2026-10-26, weekly docs audit):** the 17 covered commits
+> since the 2026-10-23 pass were read against this document's subject. The
+> Supported Runtime Manifest table is correct at this head: all four
+> `@haven_ai/*` rows read `0.11.0-alpha.0`, matching each package's
+> `package.json` and `packages/connect/src/runtime-manifest.ts`, and the Node
+> floor is still `>=22.0.0` (`packages/sdk/src/node-version.ts:36`) with
+> `.nvmrc` at 24. Three of the intervening changes had already been recorded
+> here by their own PRs: #4304 re-pinned the table (the 0.11.0-alpha.0 note
+> above), #4368 added `next_refill_at` / `budgetRefillsAt` to the
+> `haven_get_agent` guidance, and #4405 corrected the agent-dir default path
+> (`~/.haven/agents/<slug>/bin/haven-mcp`). One had not: **#4376** changed a
+> refusal reason on the hosted prepare and both x402 legs, and is now written
+> up in § *An expired-only budget is refused as `delegation_expired`, with the
+> end date (#4352)*. The remainder — #4381's dep-lint widening, #4325's census
+> ceilings, #4374's and #4417's doc corrections, and the analytics and token
+> fixes — moved no tool, schema, version constant, consent hash, channel,
+> dist-tag or package-resolution rule. `last-verified` is bumped to 2026-10-26
+> for this note.
 
 # MCP Runtime Compatibility
 
@@ -4636,6 +4656,33 @@ Message text and one next-step reason only. When a merchant refuses with `reason
 - Haven's wording is keyed on `reason_code`; it does not read the merchant's `recovery` field.
 
 No tool, schema, refusal code or consent-hash change. A local client on an older `@haven_ai/mcp` keeps the old "retry after" text until it updates.
+
+### An expired-only budget is refused as `delegation_expired`, with the end date (#4352)
+
+Backend and hosted text. When the ONLY delegation row for a token has expired,
+the live reads hide it (#3802), so the refusal sites answered the generic
+over-budget refusal — "wait for the period to reset" — which never resets. The
+DECISION is unchanged: the same 403, nothing created and nothing signed. What
+moved is the reason and the words:
+
+- `POST /machine-payments/budget-precheck` and both x402 legs (erc7710 and the
+  EIP-3009 funding leg) now answer `delegation_expired` with *"this budget ended
+  on `<YYYY-MM-DD>`; ask the owner to set a new one"*
+  (`modules/budget-scope/refusal-body.ts:257-272`,
+  `modules/x402/delegation-authorize.ts:483,699`).
+- The expired-row read is narrow and lives in
+  `modules/budget-scope/expired-budget.ts`; it is consulted ONLY on paths that
+  were already refusing, never on a live one (#3919).
+- Migration `119_payment_refusals_budget_ended_at.ts` widens the
+  `payment_refusals` detail allowlist with `budget_ended_at`, so the ledger row
+  carries the provenance marker.
+- `delegation_expired` therefore has TWO producers: the timestamp-caveat revert
+  it always meant, and this pre-check refusal. A client that branched on the
+  code alone sees the same code; the prose and the `budget_ended_at` detail are
+  what distinguish them.
+
+No tool, schema shape or consent-hash change. An older client keeps working and
+simply surfaces the new prose.
 
 ### erc7710 authorize refuses a `merchantPayTo` that differs from `payTo` (#4243)
 

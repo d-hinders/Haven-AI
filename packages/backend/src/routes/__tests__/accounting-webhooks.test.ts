@@ -326,6 +326,116 @@ describe('POST /accounting/webhooks/accounted/:token — the answer matrix', () 
   })
 })
 
+describe('the endpoint-verification handshake (#3019 delta) — echo the challenge', () => {
+  /**
+   * The provider's verification delivery: a normal signed envelope whose
+   * `type` is `webhook.verification` and whose `data.object.challenge` must
+   * come back at the TOP LEVEL of the 200 body. Until it does, the
+   * subscription stays `pending`/`paused` and receives NOTHING — the bug
+   * Emil reported on 2026-10-26.
+   */
+  function verificationDelivery(input: {
+    challenge?: unknown
+    secret?: string
+    deliveryId?: string
+    event?: string | null
+  }): { payload: string; headers: Record<string, string> } {
+    const object: Record<string, unknown> = {}
+    if (input.challenge !== undefined) object.challenge = input.challenge
+    const payload = JSON.stringify({
+      id: input.deliveryId ?? 'evt_verify_1',
+      type: 'webhook.verification',
+      data: { object },
+    })
+    const headers: Record<string, string> = {
+      'content-type': 'application/json',
+      'x-gnubok-signature': signedHeader(payload, input.secret ?? SECRET),
+      'x-gnubok-delivery': input.deliveryId ?? 'evt_verify_1',
+    }
+    if (input.event !== null) headers['x-gnubok-event'] = input.event ?? 'webhook.verification'
+    return { payload, headers }
+  }
+
+  it('echoes data.object.challenge at the top level of the 200 body — signed with EACH of the three stored secrets', async () => {
+    // `webhook.verification` is not one of the three subscribed event types,
+    // so the candidate loop falls through to EVERY stored secret. Whichever
+    // subscription dispatched the handshake, the echo must come back.
+    for (const triple of TRIPLES) {
+      vi.clearAllMocks()
+      connectionRepo.getConnectionByWebhookToken.mockResolvedValue(row())
+      deliveriesRepo.recordWebhookDelivery.mockResolvedValue({ inserted: true })
+      const d = verificationDelivery({ challenge: 'abc', secret: triple.secret })
+      const res = await post(d.payload, d.headers)
+      expect(res.statusCode, `signed with ${triple.eventType}'s secret`).toBe(200)
+      expect(res.json()).toEqual({ challenge: 'abc' })
+      expect(countedNames()).toEqual(['received', 'verification'])
+    }
+  })
+
+  it('a duplicate retry of the same verification delivery id still echoes the challenge (not the duplicate short-circuit body)', async () => {
+    // The provider RETRIES the handshake. The dedupe short-circuit answers
+    // `{status:'ok', counted:'duplicate'}` — no challenge — so the handshake
+    // branch must run BEFORE it.
+    connectionRepo.getConnectionByWebhookToken.mockResolvedValue(row())
+    deliveriesRepo.recordWebhookDelivery.mockResolvedValue({ inserted: false })
+    const d = verificationDelivery({ challenge: 'retry-me', deliveryId: 'evt_verify_dup' })
+    const res = await post(d.payload, d.headers)
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toEqual({ challenge: 'retry-me' })
+    expect(countedNames()).toEqual(['received', 'verification'])
+  })
+
+  it('a verification delivery with no challenge answers 200 without one — never 400/410/3xx', async () => {
+    // The provider's own `challenge_missing` verdict is the correct outcome
+    // here; a 400 would be retried for ~87 h over a delivery we will never
+    // accept.
+    connectionRepo.getConnectionByWebhookToken.mockResolvedValue(row())
+    const d = verificationDelivery({ deliveryId: 'evt_verify_none' })
+    const res = await post(d.payload, d.headers)
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toEqual({ status: 'ok', counted: 'verification' })
+    expect(res.json()).not.toHaveProperty('challenge')
+  })
+
+  it('a challenge that is not a non-empty string is not echoed', async () => {
+    connectionRepo.getConnectionByWebhookToken.mockResolvedValue(row())
+    for (const challenge of [42, '', null, { nested: 'x' }]) {
+      vi.clearAllMocks()
+      connectionRepo.getConnectionByWebhookToken.mockResolvedValue(row())
+      const d = verificationDelivery({ challenge, deliveryId: `evt_verify_${String(challenge)}` })
+      const res = await post(d.payload, d.headers)
+      expect(res.statusCode).toBe(200)
+      expect(res.json()).not.toHaveProperty('challenge')
+    }
+  })
+
+  it('records the verification delivery in the ledger for audit, with no stored payload', async () => {
+    connectionRepo.getConnectionByWebhookToken.mockResolvedValue(row())
+    const d = verificationDelivery({ challenge: 'audit-me', deliveryId: 'evt_verify_audit' })
+    await post(d.payload, d.headers)
+    expect(deliveriesRepo.recordWebhookDelivery).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'accounted',
+        deliveryId: 'evt_verify_audit',
+        userId: 'user_1',
+        eventType: 'webhook.verification',
+        payload: null,
+        processed: true,
+      }),
+    )
+  })
+
+  it('the feature-off check still wins: a verification delivery with the flag off answers feature_off', async () => {
+    configMock.accountingEnabled = false
+    connectionRepo.getConnectionByWebhookToken.mockResolvedValue(row())
+    const d = verificationDelivery({ challenge: 'abc', deliveryId: 'evt_verify_off' })
+    const res = await post(d.payload, d.headers)
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toEqual({ status: 'ok', counted: 'feature_off' })
+    expect(deliveriesRepo.recordWebhookDelivery).not.toHaveBeenCalled()
+  })
+})
+
 describe('the no-410 / no-3xx invariant — every path, both path spellings', () => {
   /** Every scenario the route can answer with, signed where the matrix says so; each requests the given path spelling. */
   function scenarios(): { name: string; fn: (suffix: '' | '/') => Promise<number> }[] {
@@ -437,6 +547,21 @@ describe('the no-410 / no-3xx invariant — every path, both path spellings', ()
         deliveriesRepo.recordWebhookDelivery.mockResolvedValue({ inserted: true })
         const body = JSON.stringify({ id: `evt_c_${randomBytes(4).toString('hex')}`, type: 'document.uploaded', data: { object: { document_id: 'doc' } } })
         const d = delivery({ body, deliveryId: `evt_c_${randomBytes(4).toString('hex')}`, event: 'document.uploaded' })
+        return (await post(d.payload, d.headers, suffix)).statusCode
+      },
+    })
+    cases.push({
+      name: 'webhook.verification with a challenge',
+      fn: async (suffix) => {
+        configMock.accountingEnabled = true
+        connectionRepo.getConnectionByWebhookToken.mockResolvedValue(row())
+        deliveriesRepo.recordWebhookDelivery.mockResolvedValue({ inserted: true })
+        const body = JSON.stringify({
+          id: `evt_v_${randomBytes(4).toString('hex')}`,
+          type: 'webhook.verification',
+          data: { object: { challenge: 'abc' } },
+        })
+        const d = delivery({ body, deliveryId: `evt_v_${randomBytes(4).toString('hex')}`, event: 'webhook.verification' })
         return (await post(d.payload, d.headers, suffix)).statusCode
       },
     })

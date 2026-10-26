@@ -70,6 +70,21 @@ export function webhookApiOrigin(): string {
   throw new NoPublicApiOriginError()
 }
 
+/**
+ * The provider's own error CODE from a failed call, for a log line (#3019
+ * delta). Never the message: a provider message can carry request detail, and
+ * the verify path holds a live key. `HTTP <status>` when the provider sent no
+ * code, the error's NAME when it was not a provider error at all.
+ */
+function providerErrorCode(err: unknown): string {
+  if (err instanceof ProviderError) {
+    const code = (err as ProviderError & { providerCode?: string }).providerCode
+    if (typeof code === 'string' && code.length > 0) return code
+    return `HTTP ${err.status}`
+  }
+  return err instanceof Error ? err.name : 'Error'
+}
+
 /** What the secrets blob carries for an api_key provider. */
 export interface ApiKeySecrets {
   apiKey: string
@@ -91,6 +106,16 @@ export interface ProviderWebhookRegistration {
    * registering an unroutable callback.
    */
   register(input: { secrets: ApiKeySecrets; companyId: string; token: string; apiOrigin: string }): Promise<AccountedWebhookSubscriptionSecret[]>
+  /**
+   * #3019 delta: run the endpoint-verification handshake for ONE subscription
+   * (`POST …/webhooks/{id}/verify`). The provider dispatches a
+   * `webhook.verification` delivery to the callback URL and expects the
+   * challenge echoed; until it passes, the subscription is `pending`/`paused`
+   * and receives NOTHING. Called once per subscription, in creation order,
+   * AFTER the triples are stored — best effort: a failure never fails the
+   * connect and never changes the connection status.
+   */
+  verify(input: { apiKey: string; companyId: string; webhookId: string }): Promise<{ verificationStatus: string }>
 }
 
 export class InvalidApiKeyError extends Error {
@@ -131,9 +156,7 @@ export async function connectWithApiKey(input: {
   userId: string
   apiKey: string
   /** #3019: the webhook registration for this provider, when it has one. */
-  webhooks?: {
-    register: (reg: { secrets: ApiKeySecrets; companyId: string; token: string; apiOrigin: string }) => Promise<AccountedWebhookSubscriptionSecret[]>
-  }
+  webhooks?: ProviderWebhookRegistration
   /** #3019: test seam — the provider HTTP double the registration uses. */
   fetchImpl?: typeof fetch
 }): Promise<AccountingConnectionRow> {
@@ -237,8 +260,14 @@ export async function connectWithApiKey(input: {
     }
     const token = newWebhookToken()
     await setWebhookToken(input.userId, input.provider.id, token)
+    const webhooks = input.webhooks
+    let subscriptions: AccountedWebhookSubscriptionSecret[] = []
+    // The handshake runs ONLY when the triples actually landed: verifying a
+    // subscription whose signing secret Haven failed to store would make the
+    // provider dispatch events we could never verify (400 bad_signature).
+    let secretsStored = false
     try {
-      const subscriptions = await input.webhooks.register({
+      subscriptions = await webhooks.register({
         secrets,
         companyId: info.externalCompanyId,
         token,
@@ -253,6 +282,7 @@ export async function connectWithApiKey(input: {
         secretsKeyVersion: wv,
         tokenExpiresAt: null,
       })
+      secretsStored = true
     } catch (err) {
       // All-or-nothing held at the provider (registerAccountedWebhooks rolled
       // its creates back); the local row stays connected but is flagged — the
@@ -262,6 +292,38 @@ export async function connectWithApiKey(input: {
         : `webhook subscription failed — ${err instanceof Error ? err.name : 'Error'}`
       await flagConnectionStatus(input.userId, input.provider.id, 'needs_attention', reason)
     }
+
+    // #3019 delta: the endpoint-verification handshake, once per subscription
+    // in creation order, AFTER the triples are stored (the stored triples are
+    // the record of what to verify, and the receiver must already answer the
+    // callback URL before the provider dispatches the challenge).
+    //
+    // BEST EFFORT by contract: a verify failure does NOT fail the connect and
+    // does NOT change the connection status. The feed still works; the
+    // subscription's own `verification_status` is the source of truth, and the
+    // provider retries the handshake on its own schedule (1m, 5m, 30m, 2h,
+    // 12h, then daily — 8 attempts). One `warn` line per failure, carrying the
+    // provider's error CODE only: never the key, never a signing secret.
+    if (secretsStored) {
+      for (const subscription of subscriptions) {
+        try {
+          await webhooks.verify({
+            apiKey: secrets.apiKey,
+            companyId: info.externalCompanyId,
+            webhookId: subscription.subscriptionId,
+          })
+        } catch (err) {
+          emitOpsEvent('warn', {
+            event: ACCOUNTING_EVENT.webhookVerificationFailed,
+            userId: input.userId,
+            provider: input.provider.id,
+            eventType: subscription.eventType,
+            code: providerErrorCode(err),
+          })
+        }
+      }
+    }
+
     const updated = await getConnection(input.userId, input.provider.id)
     if (updated) row = updated
   }

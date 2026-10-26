@@ -785,7 +785,7 @@ follows without edits.
   **above** its `Card`, not inside it — on detail pages **and on settings
   pages**. On settings the shared `SettingsSection` enforces the shape: the
   heading is sentence case `v2-text-h3` (never the old uppercase band), the
-  description is `mt-0.5 mb-3 text-sm text-[var(--v2-ink-muted)]` and any
+  description is `mt-0.5 mb-3 text-sm text-[var(--v2-ink-2)]` and any
   note rides under it in `text-xs text-[var(--v2-ink-3)]`, all above the
   card; the card holds only the hairline-divided rows. The card can load,
   swap or be replaced without moving its heading, and a skimming reader gets
@@ -852,8 +852,9 @@ Agents card and the account page's Agents tab) asks for the compact
 `style: 'row'` wording (#3908), and passes **no rate** (#4165, owner decision
 2026-10-20: budgets read in USDC wherever one is set): the period word in
 place of "used this period" ("1.20 of 3.00 USDC · per day · refills in 5h"),
-with an extra-budget count riding in the same line ("· +1 budget"); every
-other surface keeps the full wording. In token mode the row joins the cap and
+with an extra-budget count riding in the same line ("· +1 budget"). The agent
+page's Spending hero (#4226) and the analytics agents table (#4426) ask for
+the same `style: 'row'` caption. In token mode the row joins the cap and
 its symbol with a no-break space (#3910), so "3.00 USDC" never splits. The
 caption line can also carry an optional `trailing` node (#3989) — the
 dashboard agent row's labelled "Last paid" time: a SIBLING of the caption
@@ -866,9 +867,10 @@ three-track grid (icon, body, chevron) at every width: the bar and its
 caption line span the row between the icon and the chevron, with no time
 column and no `time` area, and the row renders no counterparty or merchant —
 the last payment shows as the time only (the wire's `lastCounterparty` is
-unchanged). The label row above the bar (token value,
-percentage) belongs to the caller: it is the caller's tabular typography, not
-part of the measurement. The fill is a token surface colour, never a series
+unchanged). A label row above the bar (token value, percentage), where a
+caller prints one, belongs to the caller: it is the caller's tabular
+typography, not part of the measurement. The analytics agents table prints
+none since #4426; its row caption carries the figures once. The fill is a token surface colour, never a series
 colour — a budget bar measures one delegation against its own period, it is
 not a category to be keyed against a legend. Recorded on
 `/design-system` → *BudgetMeter*; the analytics agents table renders through

@@ -12,9 +12,9 @@ covers:
   - packages/mcp-server/src/tools/plain-http-x402.ts
   - packages/mcp/src/tools.ts
   - scripts/docs/coupling-gate.mjs
-last-verified: "2026-10-03"
+last-verified: "2026-10-26"
 ---
-> **Recovered 2026-10-14 (#3926).** This report was written on 2026-10-03 by the scan session and was never committed; the ledger's 2026-10-03 entry named this path. It is restored verbatim from that session's record of the write, with two changes only: the local checkout path is removed, and the two figures the #3621 review corrected carry a one-line note beside them (the numbers themselves are as measured at `b00d75bd7`). `last-verified` is the scan date: every figure below describes `b00d75bd7`, not today.
+> **Recovered 2026-10-14 (#3926).** This report was written on 2026-10-03 by the scan session and was never committed; the ledger's 2026-10-03 entry named this path. It is restored verbatim from that session's record of the write, with two changes only: the local checkout path is removed, and the two figures the #3621 review corrected carry a one-line note beside them (the numbers themselves are as measured at `b00d75bd7`). Every figure below describes `b00d75bd7`, not today; `last-verified` was the scan date until the weekly docs audit re-read the report on 2026-10-26 (§ *Dispositions re-checked*), which is what the date now records.
 
 # Quality scan 2026-10-03: whole repository
 
@@ -232,3 +232,38 @@ Block 1 mutations:
 | M3 | `payments-period-budget.test.ts` | sub-budget min-of-links → last link | 11 → **11 passed: survivor**, *not load-bearing at the tested condition* (single-link file); sibling `payments-sub-budget.test.ts` **3 failed / 16** |
 | M4 | `x402-task-budget.test.ts` | erc7710 `if (capRefusal) return capRefusal` → `void capRefusal` | 11 → **1 failed** |
 | M5 | `mcp-server/src/next-step-refusal.test.ts` | `PREPARE_REVERTED_ERROR_CODE` renamed | 20 → **1 failed** |
+
+## Dispositions re-checked 2026-10-26 (weekly docs audit #4438, at dev `ebf567f1c`)
+
+The report body, its figures and the mutation table above are left as written —
+they describe `b00d75bd7`. What was re-read at this head is whether each
+finding and candidate still stands:
+
+- **S1 (a budget decision re-implemented at each payment entrypoint)** — closed
+  by epic #3615. `packages/backend/src/modules/budget-scope/` is the shared
+  resolver the scan asked for: `resolver.ts` (the redemption links and the
+  links the period pre-check reads), `precheck.ts`, `refusal-body.ts` (one
+  builder for the `delegation_budget_exceeded` body) and `expired-budget.ts`
+  (the #4352 expired-only read). The three entrypoints the scan named now
+  consume it, and the hosted/local tool matrix no longer disagrees on
+  `sub_budget_id`: #3617 settled it by removing the dead forwarding and stating
+  the scope in the description (`plain-http-x402.ts:1303,1382`).
+- **C1 (the #3609 source-scan guard was key-shaped)** — closed. The guard's
+  pattern now covers the cast form, `String(...)`, `instanceof Error` and
+  `.message` (`no-raw-error-details.test.ts:26`), and a second check binds a
+  named raw-error variable to a `details:` that carries it verbatim
+  (`:55-88`). The `accounting.ts:157` shape the scan observed is unchanged and
+  still unproven as a leak: it is a `failures[]` entry under `error:`, not a
+  `details:` key, so the widened guard does not reach it.
+- **C2 (the ops on-chain view's single-flight test was timing-flaky)** —
+  closed (#3624). `modules/ops/__tests__/onchain.test.ts:239-247` pins the
+  clock, with the reason recorded in the comment.
+- **C3 (hosted `haven_pay_x402_quote` refused `sub_budget_id`)** — closed
+  (#3617), by the second of the two options the scan offered: the forwarding is
+  deleted and the scope is stated in the tool description, rather than the key
+  being declared.
+
+All 10 covered paths in `covers:` still exist. The 28 covered commits since
+2026-10-03 — the #4372 doc sweeps, the 0.11.0-alpha.0 release and the
+budget-scope consolidation — changed the covered files but supersede nothing
+measured here.

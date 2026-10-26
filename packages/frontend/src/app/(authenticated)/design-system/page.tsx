@@ -3093,7 +3093,7 @@ export default function DesignSystemPage() {
       >
         <Card hover={false} className="max-w-xl p-5">
           <div className="space-y-3">
-            <p className="text-sm text-[var(--v2-ink-muted)]">
+            <p className="text-sm text-[var(--v2-ink-2)]">
               Send from this account with one approval. No network fee for you.
             </p>
             <div className="flex flex-col gap-2 sm:flex-row">
@@ -3397,14 +3397,14 @@ export default function DesignSystemPage() {
         <div className="grid gap-5 lg:grid-cols-2">
           <div>
             <h3 className="v2-text-h3 text-[var(--v2-ink)]">Spending</h3>
-            <p className="mt-0.5 mb-3 text-sm text-[var(--v2-ink-muted)]">
+            <p className="mt-0.5 mb-3 text-sm text-[var(--v2-ink-2)]">
               What this agent can spend each period. Budgets are enforced on-chain: a payment over budget is declined before any money moves.
             </p>
             <Card hover={false} className="p-5 md:p-6">
               <div className="flex items-start justify-between gap-3 py-3">
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium text-[var(--v2-ink)]">250 USDC per week</p>
-                  <p className="truncate text-xs text-[var(--v2-ink-muted)]">to any recipient</p>
+                  <p className="truncate text-xs text-[var(--v2-ink-3)]">to any recipient</p>
                   <div className="mt-2">
                     <BudgetMeter
                       usedPercent={25}
@@ -3434,11 +3434,11 @@ export default function DesignSystemPage() {
           </div>
           <div>
             <h3 className="v2-text-h3 text-[var(--v2-ink)]">Spending</h3>
-            <p className="mt-0.5 mb-3 text-sm text-[var(--v2-ink-muted)]">
+            <p className="mt-0.5 mb-3 text-sm text-[var(--v2-ink-2)]">
               What this agent can spend each period. Budgets are enforced on-chain: a payment over budget is declined before any money moves.
             </p>
             <Card hover={false} className="p-5 md:p-6">
-              <p className="text-sm text-[var(--v2-ink-muted)]">No budget yet.</p>
+              <p className="text-sm text-[var(--v2-ink-2)]">No budget yet.</p>
               <Button size="sm" variant="ghost" className="mt-2">Set budget</Button>
             </Card>
           </div>

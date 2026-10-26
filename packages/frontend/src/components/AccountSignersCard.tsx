@@ -131,7 +131,7 @@ export default function AccountSignersCard({ accountAddress, chainId, userEmail 
                     </summary>
                     <p className="mt-1 break-all font-mono text-xs text-[var(--v2-ink-2)]">{signers.owner_address}</p>
                   </details>
-                  <p className="mt-0.5 text-xs text-[var(--v2-ink-muted)]">
+                  <p className="mt-0.5 text-xs text-[var(--v2-ink-3)]">
                     {/* #3845: never promise passkeys the account does not have. */}
                     {signers.passkeys.length > 0
                       ? 'If you remove it, your passkeys become the only ways to approve — and to recover this account.'
@@ -186,7 +186,7 @@ export default function AccountSignersCard({ accountAddress, chainId, userEmail 
                 </Button>
               ) : null}
             </div>
-            <p className="mt-2 text-xs text-[var(--v2-ink-muted)]">
+            <p className="mt-2 text-xs text-[var(--v2-ink-3)]">
               Approve with your passkey (usually your device&rsquo;s screen lock).
             </p>
           </div>
@@ -232,7 +232,7 @@ export default function AccountSignersCard({ accountAddress, chainId, userEmail 
             // `ready` true, so this state only occurs for owner-only
             // accounts — the wallet really is the blocker.
             <div className="mt-3 space-y-2">
-              <p className="text-xs text-[var(--v2-ink-muted)]">
+              <p className="text-xs text-[var(--v2-ink-3)]">
                 Connect your account owner wallet to change how this account is approved.
               </p>
               {/* #3812: connect or switch in place (the header pill is gone since #3825). */}

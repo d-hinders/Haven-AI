@@ -35,7 +35,7 @@ export interface HealthPassportReadiness {
   unverifiableChainIds: number[]
 }
 
-/** The webhook receiver's nine per-answer-class counters (#3019). */
+/** The webhook receiver's ten per-answer-class counters (#3019, + `verification` in the #3019 delta). */
 export interface HealthWebhookCounters {
   received: number
   bad_signature: number
@@ -46,6 +46,8 @@ export interface HealthWebhookCounters {
   feature_off: number
   unknown_type: number
   confirmed: number
+  /** `webhook.verification` deliveries answered with the challenge echo (or without one). */
+  verification: number
 }
 
 /** What the `/health/ops` route reports for `accounting`. */

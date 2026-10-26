@@ -197,10 +197,14 @@ export default function AgentSettingsTab({
           </Card.Section>
 
           {/* 4. Tax declaration — the toggle owns its row, divider and
-              visibility rule (VIES-valid only); absent otherwise. */}
+              visibility rule (VIES-valid only); absent otherwise. #4435: it
+              also owns the disabled state for an agent whose setup cannot
+              carry a declaration, so the list read's `runtime_mcp_mode` is
+              passed straight through. */}
           <TaxDeclarationToggle
             agentId={agent.id}
             taxDeclarationEnabled={agent.tax_declaration_enabled}
+            runtimeMcpMode={agent.runtime_mcp_mode}
             onAgentsChanged={onAgentsChanged}
           />
 

@@ -888,7 +888,13 @@ rule). `?grant=` keeps working alongside `?tab=`. Sections, in order:
       revoked).
    4. **Tax declaration**: `TaxDeclarationToggle`, rendered only when the
       company details are VIES-valid (the toggle owns its row and divider;
-      the row is absent otherwise).
+      the row is absent otherwise). The toggle is **disabled**, with a
+      one-line reason as a sibling paragraph below the checkbox row, when the
+      agent's most recent connector setup is `hosted_plus_signer` — the
+      default setup, a hosted server with a separate signer, cannot attach a
+      declaration to a payment. `local_stdio`, `manual` and an unknown setup
+      leave it enabled, and an agent whose opt-in is already ON stays
+      interactive so the owner can switch it off (#4435).
    5. **Agent Passport**: `AgentPassportCard`'s content as a row. Its own
       revoked-only gate stands — archived agents are not newly gated.
 
@@ -1277,14 +1283,17 @@ Structure:
    shared `StatusBadge` "Revoked", not a truncated row), Spent with "N% of
    spend" under it (the Share column merged in), Payments, Refused as a link
    to that agent's refused attempts, Budget captioned by the shared
-   budget-caption helper (#3806 — whose symbol-decimals fallback, #4333,
-   makes a 1.00 USDC budget read "0.00 of 1.00 USDC used this period ·
-   refills …", never "0.00 of 0.00"), Top merchant by name, as text with no
+   budget-caption helper's compact `style: 'row'` caption (#3806, #4426 —
+   whose symbol-decimals fallback, #4333, makes a 1.00 USDC budget read
+   "0.00 of 1.00 USDC · per day · refills …", never "0.00 of 0.00"),
+   Top merchant by name, as text with no
    monogram (an unresolved one reads "Unknown recipient", the full address in
    the tooltip — no cell renders a `0x…` address AS a label; "None in this
    range" when there is none), and Last paid.
    The whole row links to the agent. There is no `expires_at` on this
-   endpoint, so no "expires" branch.
+   endpoint, so no "expires" branch. Below `lg` the same rows render as phone
+   rows, whose budget line is the desktop cell's caption text, one line per
+   budget, text only (#4432).
 5. Below the table: the spend-over-time chart (one slot for every local
    calendar day of the window, empty days included, #4334; stacked by agent,
    refusals as a marker series, partial edge days striped; #3051), then the

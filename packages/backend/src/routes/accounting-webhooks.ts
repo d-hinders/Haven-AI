@@ -3,6 +3,7 @@ import { config } from '../config.js'
 import {
   processAccountedWebhook,
   readAccountedWebhookContext,
+  readAccountedVerificationChallenge,
   verifyAccountedSignature,
   incrementAccountingWebhookCounter,
   prepareStoredPayload,
@@ -155,6 +156,45 @@ export default async function accountingWebhookRoutes(app: FastifyInstance): Pro
     // decided in the module (`readAccountedWebhookContext`), read here.
     const deliveryId = context.deliveryHeader ?? context.envelopeId
     const eventType = context.eventTypeHeader ?? context.envelopeType
+
+    // ── 3b. The endpoint-verification handshake (#3019 delta). ─────────────
+    // The provider will not dispatch ANY event to an unverified endpoint, and
+    // its verification delivery is a normal signed envelope whose
+    // `data.object.challenge` must come back at the TOP LEVEL of the 200 body
+    // (`{"challenge": "<value>"}`). A generic `{status:'ok'}` answer fails the
+    // handshake with `challenge_missing`, the subscription stays
+    // `pending`/`paused`, and nothing is ever delivered — the bug this branch
+    // fixes.
+    //
+    // It runs BEFORE the dedupe short-circuit on purpose: the provider RETRIES
+    // the handshake, and a retry of the same delivery id must still echo the
+    // challenge (the duplicate body carries no `challenge`, so the handshake
+    // would fail on the second attempt). The delivery is still recorded in the
+    // ledger for audit — `recordWebhookDelivery` is idempotent on
+    // `(provider, delivery_id)`, so a retry writes nothing new.
+    //
+    // A verification delivery with NO challenge answers 200 without one: the
+    // provider's own `challenge_missing` verdict is then the correct outcome,
+    // and a 400 would be retried for ~87 h over a delivery we will never
+    // accept.
+    if (eventType === 'webhook.verification') {
+      if (context.envelope && deliveryId) {
+        await recordWebhookDelivery({
+          provider: 'accounted',
+          deliveryId,
+          userId: row.user_id,
+          eventType,
+          apiVersion: context.apiVersion,
+          requestId: context.requestId,
+          payload: null,
+          processed: true,
+        })
+      }
+      incrementAccountingWebhookCounter('verification')
+      const challenge = readAccountedVerificationChallenge(context.rawObject)
+      return challenge ? { challenge } : { status: 'ok', counted: 'verification' }
+    }
+
     if (!context.envelope || !deliveryId) {
       incrementAccountingWebhookCounter('unknown_type')
       return { status: 'ok', counted: 'unknown_type' }

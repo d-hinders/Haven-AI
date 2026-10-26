@@ -36,7 +36,7 @@ export function SettingsSection({
     <section className={className}>
       <h2 className="v2-text-h3 text-[var(--v2-ink)]">{title}</h2>
       {description ? (
-        <p className="mt-0.5 mb-3 text-sm text-[var(--v2-ink-muted)]">{description}</p>
+        <p className="mt-0.5 mb-3 text-sm text-[var(--v2-ink-2)]">{description}</p>
       ) : null}
       {note ? <p className="mt-0.5 mb-3 text-xs text-[var(--v2-ink-3)]">{note}</p> : null}
       <Card hover={false}>

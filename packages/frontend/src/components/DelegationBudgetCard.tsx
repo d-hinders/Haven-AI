@@ -693,7 +693,7 @@ export default function DelegationBudgetCard({
           </div>
         ) : active.length === 0 ? (
           retired ? (
-            <p className="py-3 text-sm text-[var(--v2-ink-muted)]">No active budget.</p>
+            <p className="py-3 text-sm text-[var(--v2-ink-2)]">No active budget.</p>
           ) : null
         ) : (
           active.map((b) => (
@@ -720,7 +720,7 @@ export default function DelegationBudgetCard({
           the page's own empty state explains the retired agent. */}
       {retired ? (
         active.length > 0 && !budgetsError ? (
-          <p className="mt-4 text-sm text-[var(--v2-ink-muted)]">
+          <p className="mt-4 text-sm text-[var(--v2-ink-2)]">
             {retired === 'revoked'
               ? 'This agent has been revoked, so its budgets can only be stopped.'
               : 'This agent has been removed, so its budgets can only be stopped.'}
@@ -734,7 +734,7 @@ export default function DelegationBudgetCard({
           // form's own line when it opens. #4261: with an active budget
           // there is NO control here — Add budget is the rows' ⋯ menu item.
           <div className="mt-3">
-            <p className="text-sm text-[var(--v2-ink-muted)]">No budget yet.</p>
+            <p className="text-sm text-[var(--v2-ink-2)]">No budget yet.</p>
             <Button
               ref={addBudgetRef}
               size="sm"
@@ -758,7 +758,7 @@ export default function DelegationBudgetCard({
               <p className="text-sm font-medium text-[var(--v2-ink)]">
                 {budgetsError ? 'Set a budget' : 'Set its first budget'}
               </p>
-              <p className="mt-0.5 text-sm text-[var(--v2-ink-muted)]">
+              <p className="mt-0.5 text-sm text-[var(--v2-ink-2)]">
                 {/* #3988: a grant holder CAN pay — through the received
                     budgets listed below. The line must never imply it
                     cannot. */}
@@ -784,7 +784,7 @@ export default function DelegationBudgetCard({
                 ))}
               </Select>
             ) : (
-              <span className="self-center text-sm text-[var(--v2-ink-muted)]">{tokenCfg?.symbol}</span>
+              <span className="self-center text-sm text-[var(--v2-ink-2)]">{tokenCfg?.symbol}</span>
             )}
             <Select value={String(period)} onChange={(e) => setPeriod(Number(e.target.value))} aria-label="Period" className="sm:w-36">
               {periodOptions.map((p) => (
@@ -867,7 +867,7 @@ export default function DelegationBudgetCard({
               there). */}
           {subBudgetParents.length > 0 && !budgetsError ? (
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-xs text-[var(--v2-ink-muted)]">
+              <p className="text-xs text-[var(--v2-ink-3)]">
                 Or share part of an existing budget with another agent
               </p>
               <Button variant="tertiary" onClick={openSubBudget}>
@@ -877,7 +877,7 @@ export default function DelegationBudgetCard({
           ) : null}
         </div>
       ) : (
-        <p className="mt-4 text-sm text-[var(--v2-ink-muted)]">
+        <p className="mt-4 text-sm text-[var(--v2-ink-2)]">
           Budgets aren&rsquo;t available for this network yet.
         </p>
       )}
@@ -890,7 +890,7 @@ export default function DelegationBudgetCard({
         <Card.Section divided className="mt-4">
           <div className="py-2">
             <p className="text-sm font-medium text-[var(--v2-ink)]">Task budgets</p>
-            <p className="mt-0.5 text-xs text-[var(--v2-ink-muted)]">
+            <p className="mt-0.5 text-xs text-[var(--v2-ink-3)]">
               Short spending limits your agent opened for a single task, taken from the budget above. Each ends by
               itself; stopping the budget above stops them too.
             </p>
@@ -915,7 +915,7 @@ export default function DelegationBudgetCard({
         <Card.Section divided className="mt-4">
           <div className="py-2">
             <p className="text-sm font-medium text-[var(--v2-ink)]">Received budgets</p>
-            <p className="mt-0.5 text-xs text-[var(--v2-ink-muted)]">
+            <p className="mt-0.5 text-xs text-[var(--v2-ink-3)]">
               Slices of another agent&rsquo;s budget that this agent spends through. Each stays inside its
               slice and inside the budget it comes from; stopping the budget above stops them too.
             </p>
@@ -930,7 +930,7 @@ export default function DelegationBudgetCard({
         <Card.Section divided className="mt-4">
           <div className="py-2">
             <p className="text-sm font-medium text-[var(--v2-ink)]">Sub-agent budgets</p>
-            <p className="mt-0.5 text-xs text-[var(--v2-ink-muted)]">
+            <p className="mt-0.5 text-xs text-[var(--v2-ink-3)]">
               Slices of the budget above that another of your agents spends through. Each stays inside the slice and
               inside the budget above it; stopping the budget above stops them too.
             </p>
@@ -1027,7 +1027,7 @@ function SpendingHeading({
       <h2 ref={headingRef} tabIndex={-1} className="v2-text-h3 text-[var(--v2-ink)] outline-none">
         Spending
       </h2>
-      <p className="mt-0.5 text-sm text-[var(--v2-ink-muted)]">
+      <p className="mt-0.5 text-sm text-[var(--v2-ink-2)]">
         {retired
           ? 'What this agent can still spend each period.'
           : 'What this agent can spend each period. Budgets are enforced on-chain: a payment over budget is declined before any money moves.'}
@@ -1213,7 +1213,7 @@ function BudgetRow({
         <p className="text-sm font-medium text-[var(--v2-ink)]">
           {amount} {t?.symbol ?? ''} {periodLabel}
         </p>
-        <p className="truncate text-xs text-[var(--v2-ink-muted)]">
+        <p className="truncate text-xs text-[var(--v2-ink-3)]">
           {/* #3331: a merchant-locked budget names the merchant it pays,
               rather than only the address it happens to be pinned to. */}
           {budget.merchant_name

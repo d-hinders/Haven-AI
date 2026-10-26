@@ -1697,3 +1697,21 @@ project owner — collaborators have Viewer access, not env-var write access.
 > specs". No config value, project, `testIgnore` entry or matcher changed.
 > Scope of this note: those two comments. Nothing else in this document was
 > re-read for it, and `last-verified` is not bumped.
+
+> **Re-verified unchanged (#3019 delta, 2026-10-26 — the Accounted
+> endpoint-verification handshake).** `modules/accounting/api-key-flow.ts` and
+> `routes/accounting-webhooks.ts` are in this document's coverage list, and
+> both changed: the receiver now echoes `data.object.challenge` for a
+> `webhook.verification` delivery, and the connect flow runs
+> `POST …/webhooks/{id}/verify` once per subscription after the triples are
+> stored. Nothing this document describes moved. `HAVEN_API_URL` (fallback
+> `PUBLIC_API_URL`) is still the only source of the callback origin and still
+> fails closed with `no public API origin configured`; the route is still
+> registered on both the exact path and its trailing-slash twin, so the
+> route-modules table is unchanged; the module is still outside
+> `enforcedModules`, so the request-validation posture is unchanged; no
+> environment variable, start command, health probe or boot check was added.
+> The verify call is best effort and never changes a connection status, so the
+> dev-environment statements about connection states still hold. Scope of this
+> note: those two files. Nothing else in this document was re-read for it, and
+> `last-verified` is not bumped.

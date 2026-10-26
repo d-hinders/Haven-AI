@@ -75,6 +75,26 @@ export interface AgentRow {
    * budget, or enforcement path reads it.
    */
   avatar_tint: number
+  /**
+   * #4435: the payment client the agent's MOST RECENT connector setup
+   * reported — `agent_connection_setups.install_status.runtime_mcp_mode`,
+   * one of `'local_stdio' | 'hosted_plus_signer' | 'manual'` (the connector's
+   * closed set, `packages/connect/src/config-writers.ts:10`).
+   *
+   * DISPLAY ONLY, the same boundary as `tax_declaration_enabled` above: the
+   * agent Settings tab uses it to disable the tax-declaration toggle for
+   * `hosted_plus_signer` (a hosted server with a separate signer cannot
+   * attach a declaration to a payment). Nothing in the delegation, budget,
+   * enforcement or client-compat path may read it.
+   *
+   * OPTIONAL because only the LIST read selects it (issue #4435 decision 1:
+   * the Settings tab reads the agent from the list response, so the
+   * single-agent read does not need it). `null`/absent means "cannot tell" —
+   * no setup row, an `agent_id` set to NULL by a delete, or a setup whose
+   * `install_status` never carried the key — and the UI treats that as
+   * enabled, never as "cannot send".
+   */
+  runtime_mcp_mode?: string | null
   has_stranded_funds: boolean
   /**
    * #3542: how many of this agent's delegations are live (pending, active or
@@ -318,6 +338,24 @@ export const LIST_AGENTS_FOR_USER_ALL_STATUSES_SQL = `SELECT a.id, a.name, a.des
               -- #4429: the stored display colour (1..6), assigned by the
               -- database on insert. DISPLAY ONLY, like the fields above.
               a.avatar_tint,
+              -- #4435: the payment client the agent's MOST RECENT connector
+              -- setup reported, so the Settings tab can disable the
+              -- tax-declaration toggle for the default setup (a hosted server
+              -- with a separate signer cannot attach a declaration to a
+              -- payment). DISPLAY ONLY — nothing in the delegation, budget,
+              -- enforcement or client-compat path may read it.
+              --
+              -- agent_id is ON DELETE SET NULL (migration 017), so a deleted
+              -- setup leaves no row here and the field reads NULL — "cannot
+              -- tell", which the UI treats as enabled. The key is read out of
+              -- the sanitized install_status JSONB (the closed allowlist in
+              -- modules/agents/agent-connection-setup.ts:124), never the raw
+              -- connector report.
+              (SELECT s.install_status->>'runtime_mcp_mode'
+                 FROM agent_connection_setups s
+                WHERE s.agent_id = a.id
+                ORDER BY s.created_at DESC
+                LIMIT 1) AS runtime_mcp_mode,
               (SELECT MAX(ati.created_at) FROM agent_tool_invocations ati WHERE ati.agent_id = a.id) AS mcp_last_seen_at,
               EXISTS(
                 SELECT 1 FROM machine_payment_reconciliation_events mpre

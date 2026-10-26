@@ -4564,16 +4564,76 @@ export const SCENARIOS = {
       return undefined
     },
     async run({ page, vp, shoot }) {
-      await page.goto(`${BASE_URL}/agents/agent-research`, { waitUntil: 'networkidle', timeout: 60_000 })
+      // #4226 made the agent detail page tabbed with `activity` as the default,
+      // so the Settings tab (and the toggle inside it) only renders at
+      // `?tab=settings`. Without the param this scenario waited on a heading
+      // that could never appear.
+      await page.goto(`${BASE_URL}/agents/agent-research?tab=settings`, { waitUntil: 'networkidle', timeout: 60_000 })
       await dismissMobileSidebar(page, vp)
 
       // Both halves of the card, not just any rendered text: the heading
       // names the card and the checkbox names the control — a capture that
       // waited on one string could "prove" visibility with the wrong subtree.
       await page.getByRole('heading', { name: 'Tax declaration', exact: true }).waitFor({ timeout: 20_000 })
-      await page.getByRole('checkbox', { name: 'Send a tax declaration with payments' }).waitFor({ timeout: 20_000 })
+      await page.getByRole('checkbox', { name: 'Allow this agent to send a tax declaration' }).waitFor({ timeout: 20_000 })
 
       await shoot(page.locator('main').first(), 'visible')
+    },
+  },
+
+  'agent-tax-declaration-disabled': {
+    description:
+      'Agent detail with the per-agent tax-declaration opt-in VISIBLE but DISABLED — the state #4435 adds for an agent whose most recent connector setup is `hosted_plus_signer` (the default setup: a hosted server with a separate signer, which cannot attach a declaration to a payment). The reason line renders as a sibling paragraph below the checkbox row, never inside the disabled label. The `agent-tax-declaration` scenario photographs the enabled, opted-in state; this one photographs the disabled one.',
+    api(apiPath) {
+      if (apiPath === '/user/company-details') {
+        // Same VIES-valid row as `agent-tax-declaration`: the toggle renders
+        // only under it.
+        return {
+          legal_name: 'KOMMANDITBOLAGET TESTAREN 3',
+          country: 'SE',
+          org_number: '556677-8899',
+          vat_number: 'SE556677889901',
+          vies_status: 'valid',
+          vies_checked_at: '2026-09-28T09:12:00.000Z',
+          created_at: '2026-09-20T10:00:00.000Z',
+          updated_at: '2026-09-28T09:12:00.000Z',
+        }
+      }
+      if (apiPath === '/agents') {
+        // The agent-detail view reads the agent from the LIST response, so the
+        // setup signal rides here: `runtime_mcp_mode: 'hosted_plus_signer'`
+        // with the opt-in OFF is the one combination that disables the
+        // checkbox (#4435). The bit stays OFF deliberately — an agent whose
+        // bit is already ON stays interactive so the owner can withdraw it.
+        return {
+          agents: FIXTURE_AGENTS.map((a) =>
+            a.id === 'agent-research'
+              ? { ...a, tax_declaration_enabled: false, runtime_mcp_mode: 'hosted_plus_signer' }
+              : a,
+          ),
+          organizations: FIXTURE_ORGANIZATIONS,
+        }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/agents/agent-research?tab=settings`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+
+      await page.getByRole('heading', { name: 'Tax declaration', exact: true }).waitFor({ timeout: 20_000 })
+      const checkbox = page.getByRole('checkbox', { name: 'Allow this agent to send a tax declaration' })
+      await checkbox.waitFor({ timeout: 20_000 })
+      // The capture must prove the DISABLED state, not merely that the card
+      // rendered: a scenario that waited on the heading alone would photograph
+      // the enabled state and look identical to `agent-tax-declaration`.
+      if (!(await checkbox.isDisabled())) {
+        throw new Error('agent-tax-declaration-disabled: the checkbox is not disabled — the fixture did not reach the hosted_plus_signer state')
+      }
+      await page
+        .getByText('This agent pays through the default setup, a hosted server with a separate signer, so no declaration is sent.')
+        .waitFor({ timeout: 20_000 })
+
+      await shoot(page.locator('main').first(), 'disabled')
     },
   },
   'design-system-buttons': {
@@ -6920,11 +6980,13 @@ export const SCENARIOS = {
       await page.getByRole('region', { name: 'Balance' }).waitFor({ timeout: 20_000 })
       await page.getByText('136 050,75 kr').first().waitFor({ timeout: 20_000 })
       // The change line renders the SEK swing, not the quiet caption. The
-      // percent renders in sv-SE through Intl (#3195 round-2 finding b):
-      // decimal comma, NBSP before `%` — `\s` rather than literal spaces,
-      // sv-SE's separators are NBSPs and a regex is tested against the
-      // node's raw text (string needles normalize, this does not).
-      await page.getByText(/2\s*285,40\s*kr\s*\(\+1,70\s*%\)\s*today/).first().waitFor({ timeout: 20_000 })
+      // wait is on the FIGURE alone (#4426): the line's words are inline JSX
+      // this script cannot import, and restating them here broke the
+      // scenario when "today" became "since yesterday (UTC)" (#3986) — the
+      // wait timed out and nothing was captured. `\s` rather than literal
+      // spaces: sv-SE's separators are NBSPs and a regex is tested against
+      // the node's raw text (string needles normalize, this does not).
+      await page.getByText(/2\s*285,40\s*kr/).first().waitFor({ timeout: 20_000 })
       await shoot(page.locator('main').first(), 'dashboard')
 
       // ── Settings → Preferences: the kr SEK radio active ──────────────────
@@ -6953,9 +7015,11 @@ export const SCENARIOS = {
       await shoot(page.locator('main').first(), 'accounts-overview')
 
       // ── /accounts/<id>: the account priced in SEK ────────────────────────
+      // The wait is on the figure alone (#4426): the "Value (SEK)" column
+      // header it also waited on left with the holdings table in #4097
+      // (#4142), and that copy wait timed out the scenario's last capture.
       await page.goto(`${BASE_URL}/accounts/safe-fixture`, { waitUntil: 'networkidle', timeout: 60_000 })
       await dismissMobileSidebar(page, vp)
-      await page.getByText('Value (SEK)').waitFor({ timeout: 20_000 })
       await page.getByText('136 050,75 kr').first().waitFor({ timeout: 20_000 })
       await shoot(page.locator('main').first(), 'account-detail')
     },

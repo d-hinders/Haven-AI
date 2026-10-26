@@ -98,7 +98,7 @@ export default function AgentPassportCard({ agentId, agentRevoked = false }: Pro
     return (
       <div data-testid="agent-passport-row" className={ROW_CLASS}>
         <h3 className="text-base font-semibold text-[var(--v2-ink)]">Agent Passport</h3>
-        <p className="mt-2 text-sm text-[var(--v2-ink-muted)]">
+        <p className="mt-2 text-sm text-[var(--v2-ink-2)]">
           Couldn&apos;t load passport status.{' '}
           <button
             type="button"
@@ -124,7 +124,7 @@ export default function AgentPassportCard({ agentId, agentRevoked = false }: Pro
       <div className="flex items-start justify-between gap-3">
         <div>
           <h3 className="text-base font-semibold text-[var(--v2-ink)]">Agent Passport</h3>
-          <p className="mt-0.5 text-sm text-[var(--v2-ink-muted)]">
+          <p className="mt-0.5 text-sm text-[var(--v2-ink-2)]">
             A signed record that this agent was issued by Haven, bound to this wallet, and
             revocable at any time.
           </p>

@@ -11232,8 +11232,8 @@ export const openapiSpec = {
               'attempt cap) — fix the cause, then the user presses Sync now. `connectionsNeedingAttention`: ' +
               'connections in `needs_reauthorisation`, `scope_missing`, `revoked_at_provider` or `needs_attention` — only the ' +
               "user's re-consent (or, for `needs_attention`, a reconnect after the deployment fix) resolves them. `webhookCounters`: " +
-              'the Accounted webhook receiver\u2019s nine per-answer-class counters (received / bad_signature / stale / unknown_token / duplicate / ' +
-              'processed / feature_off / unknown_type / confirmed) — IN-PROCESS, process-lifetime, reset on restart; the durable facts are the ' +
+              'the Accounted webhook receiver\u2019s ten per-answer-class counters (received / bad_signature / stale / unknown_token / duplicate / ' +
+              'processed / feature_off / unknown_type / confirmed / verification) — IN-PROCESS, process-lifetime, reset on restart; the durable facts are the ' +
               '`accounting_webhook_deliveries` rows, not these. Thresholds: docs/operations/accounting-feed.md. ' +
               'The two integer counters are the one database read on this payload: when the queries throw, both ' +
               'are `null` (and `webhookCounters` with them) and `unavailable` is `true` while the in-memory siblings still answer.',
@@ -11245,7 +11245,7 @@ export const openapiSpec = {
                 anyOf: [
                   {
                     type: 'object',
-                    required: ['received', 'bad_signature', 'stale', 'unknown_token', 'duplicate', 'processed', 'feature_off', 'unknown_type', 'confirmed'],
+                    required: ['received', 'bad_signature', 'stale', 'unknown_token', 'duplicate', 'processed', 'feature_off', 'unknown_type', 'confirmed', 'verification'],
                     properties: {
                       received: { type: 'integer', minimum: 0 },
                       bad_signature: { type: 'integer', minimum: 0 },
@@ -11256,6 +11256,7 @@ export const openapiSpec = {
                       feature_off: { type: 'integer', minimum: 0 },
                       unknown_type: { type: 'integer', minimum: 0 },
                       confirmed: { type: 'integer', minimum: 0 },
+                      verification: { type: 'integer', minimum: 0 },
                     },
                     additionalProperties: false,
                   },
@@ -12171,6 +12172,28 @@ export const openapiSpec = {
            * Always present: the column is NOT NULL and every read selects it.
            */
           avatar_tint: { type: 'integer', minimum: 1, maximum: 6 },
+          /**
+           * #4435: the payment client the agent's MOST RECENT connector setup
+           * reported — `agent_connection_setups.install_status.runtime_mcp_mode`,
+           * one of `local_stdio`, `hosted_plus_signer` or `manual` (the
+           * connector's closed set). The agent Settings tab uses it to disable
+           * the tax-declaration toggle for `hosted_plus_signer`: a hosted
+           * server with a separate signer cannot attach a declaration to a
+           * payment, so an opt-in there would do nothing.
+           *
+           * DISPLAY ONLY — the same boundary as `tax_declaration_enabled`:
+           * nothing in the delegation, budget, enforcement or client-compat
+           * path may read it.
+           *
+           * NOT required, and null/absent means "cannot tell" rather than
+           * "cannot send": no setup row, an `agent_id` set to NULL by a
+           * delete, or a setup whose `install_status` never carried the key.
+           * The UI treats that as enabled — disabling every agent that
+           * predates the signal would be a user-visible regression. Only the
+           * LIST read selects it (the Settings tab reads the agent from the
+           * list response); the single-agent read omits it.
+           */
+          runtime_mcp_mode: { type: ['string', 'null'] },
           /** Timestamp of the most recent MCP tool call from this agent. Null until first call. */
           mcp_last_seen_at: { anyOf: [isoDateTime, { type: 'null' }] },
           /**

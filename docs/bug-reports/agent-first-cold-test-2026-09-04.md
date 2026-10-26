@@ -7,7 +7,7 @@ covers:
   - packages/frontend/public/402.md
   - packages/frontend/public/402/**
   - packages/backend/src/routes/agent-connection-setups.ts
-last-verified: "2026-09-04"
+last-verified: "2026-10-26"
 ---
 
 # Cold-agent onboarding test — 2026-09-04
@@ -353,3 +353,37 @@ hostname is reproduced because it is already public in
 - [`dev-environment.md`](../operations/dev-environment.md) — the dev target the run used
 - [`_run-report-template.md`](_run-report-template.md) — the template for ordinary QA run reports (this
   file is a one-off research record, not a run of a scripted scenario)
+
+## Dispositions re-checked 2026-10-26 (weekly docs audit #4438, at dev `ebf567f1c`)
+
+The run record above is left as written — it describes 2026-09-04 and is the A0
+baseline later runs score against, so its observations are history, not live
+claims. What was re-read at this head is whether the artifacts it cites still
+exist and whether the wishlist it maps in §6 is closed:
+
+- **The four covered artifacts still exist**: `packages/frontend/public/llms.txt`,
+  `llms-full.txt`, `402.md` and `402/index.html`, plus
+  `packages/backend/src/routes/agent-connection-setups.ts`.
+- **Every issue in §6's wishlist map is CLOSED** — #2519 (the epic) and
+  #2520–#2540, plus #2542 (the `/api/health` relayer-address observation). The
+  map is therefore a record of what was filed, not a queue.
+- **The highest-impact finding is fixed at the source.** §3 item 1 and
+  Confusion #2 were "the docs point off a cliff": every link in `llms.txt`
+  named `haven.xyz` / `app.haven.xyz`, which do not resolve. `llms.txt` now
+  opens with *"Links below are paths on this same host: resolve them against
+  the URL you fetched this file from"* and every Start-here link is a relative
+  path (`/for-agents.md`, `/402.md`, `/releases`, `/`).
+- **Discovery is no longer a guess** (§3 item 2): the landing HTML carries the
+  `<link rel="alternate">` hook (`layout.tsx:65`), and `robots.txt` and
+  `sitemap.xml` are served routes with their own tests.
+- **The backend question** (§3 item 3) is answered by the root document and
+  `GET /discovery`, which derive `servers[0]` from the request rather than
+  naming production first.
+- **`/.well-known/ai-plugin.json` is still absent** — it was a 404 probe
+  result, not a claim that the file exists; the machine-readable manifest that
+  replaced it is `/.well-known/haven.json` (#2531, closed).
+
+All 5 covered paths in `covers:` still exist (the fifth is the `402/**` glob).
+The 31 covered commits since 2026-09-04 — the #2519 epic's slices, the
+discovery and manifest work, the passkey copy change (#4178) and the #4372 doc
+sweeps — changed the covered files but supersede nothing measured here.

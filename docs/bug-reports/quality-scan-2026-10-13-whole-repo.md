@@ -1,6 +1,6 @@
 ---
 owner: "@d-hinders"
-status: current
+status: record
 covers:
   - packages/backend/src/infra/repositories/delegation-budgets.ts
   - packages/backend/src/infra/repositories/agents.ts

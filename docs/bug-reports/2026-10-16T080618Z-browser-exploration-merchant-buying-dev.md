@@ -1,6 +1,6 @@
 ---
 owner: "@d-hinders"
-status: current
+status: record
 covers:
   - packages/frontend/src/components/marketplace/HowToBuyPanel.tsx
   - packages/frontend/src/components/marketplace/MerchantHeader.tsx

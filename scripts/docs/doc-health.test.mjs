@@ -59,17 +59,23 @@ test('unverified-90d is strictly more than 90 days before generatedAt', () => {
   assert.deepEqual(flagsOf(r, 'docs/day91.md'), ['unverified-90d'])
 })
 
-test('archived and research docs are never unverified-90d', () => {
+test('archived, research and record docs are never unverified-90d', () => {
   const r = buildDocHealth({
     generatedAt: AT,
     packageDocs: [],
     docs: [
       { path: 'docs/research/spike.md', raw: fm({ status: 'research', lastVerified: '2025-01-01' }) },
       { path: 'docs/legacy.md', raw: fm({ status: 'archived', lastVerified: '2025-01-01' }) },
+      { path: 'docs/bug-reports/old-run.md', raw: fm({ status: 'record', lastVerified: '2025-01-01' }) },
+      { path: 'docs/current-old.md', raw: fm({ lastVerified: '2025-01-01' }) },
     ],
   })
   assert.deepEqual(flagsOf(r, 'docs/research/spike.md'), [])
   assert.deepEqual(flagsOf(r, 'docs/legacy.md'), [])
+  // #4459: a dated record is never asked to be re-verified; the `current` doc
+  // with the same date is the positive control.
+  assert.deepEqual(flagsOf(r, 'docs/bug-reports/old-run.md'), [])
+  assert.deepEqual(flagsOf(r, 'docs/current-old.md'), ['unverified-90d'])
 })
 
 test('docs/archive/** is outside the population', () => {

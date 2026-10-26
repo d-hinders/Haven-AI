@@ -1,6 +1,6 @@
 ---
 owner: "@AntonioSaaranen"
-status: current
+status: record
 covers:
   - packages/backend/src/routes/analytics-overview.ts
   - packages/backend/src/modules/payments/refusal-ledger.ts

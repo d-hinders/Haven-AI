@@ -7,7 +7,7 @@
 //
 //   ---
 //   owner: "@handle"
-//   status: current | research | archived
+//   status: current            # or research, archived, record
 //   covers:
 //     - packages/backend/src/routes/payments.ts
 //   last-verified: "2026-06-28"
@@ -26,7 +26,7 @@ import { fileURLToPath } from 'node:url'
 
 export const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 
-const STATUSES = new Set(['current', 'research', 'archived'])
+const STATUSES = new Set(['current', 'research', 'archived', 'record'])
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 
 // Root-level docs that are part of the doc surface even though they live

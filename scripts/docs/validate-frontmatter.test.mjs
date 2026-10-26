@@ -343,16 +343,16 @@ test("CLI (#4459): an unknown status exits 1 and names the accepted vocabulary",
     files: baseFixture({ "docs/area/thing.md": withStatus("bogus") }),
   })
   assert.equal(status, 1)
-  assert.match(out, /docs\/area\/thing\.md: invalid status "bogus" \(expected current \| research \| archived\)/)
+  assert.match(out, /docs\/area\/thing\.md: invalid status "bogus" \(expected current \| research \| archived \| record\)/)
 })
 
-test("CLI (#4459): `record` is not yet a status", () => {
+test("CLI (#4459): `record` is a status", () => {
   const { status, out } = runGuard("docs/validate-frontmatter.mjs", {
     ...OPTS,
     files: baseFixture({ "docs/area/thing.md": withStatus("record") }),
   })
-  assert.equal(status, 1)
-  assert.match(out, /docs\/area\/thing\.md: invalid status "record"/)
+  assert.equal(status, 0)
+  assert.match(out, /✓ Front-matter valid across 5 docs\./)
 })
 
 test("CLI (#4459): the archive/ and research/ folder rules hold", () => {

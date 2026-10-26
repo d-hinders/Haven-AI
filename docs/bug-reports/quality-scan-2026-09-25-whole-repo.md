@@ -1,6 +1,6 @@
 ---
 owner: "@AntonioSaaranen"
-status: current
+status: record
 covers:
   - .github/workflows/qa-dev.yml
   - scripts/ci/qa-failure-issue.mjs

@@ -1,6 +1,6 @@
 ---
 owner: "@AntonioSaaranen"
-status: current
+status: record
 covers:
   - .github/money-path-globs.json
   - docs/regulatory/casp-risk-guardrails.md

@@ -41,7 +41,7 @@
 import { globToRegExp } from './validate-frontmatter.mjs'
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
-const STATUSES = new Set(['current', 'research', 'archived'])
+const STATUSES = new Set(['current', 'research', 'archived', 'record'])
 
 /**
  * Package Markdown brought INTO the docs-quality system.

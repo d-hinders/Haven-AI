@@ -1,6 +1,6 @@
 ---
 owner: "@d-hinders"
-status: current
+status: record
 covers:
   - packages/sdk/src/merchant-completion.ts
   - packages/sdk/src/client.ts

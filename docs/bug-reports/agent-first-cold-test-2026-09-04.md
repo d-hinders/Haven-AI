@@ -1,6 +1,6 @@
 ---
 owner: "@d-hinders"
-status: current
+status: record
 covers:
   - packages/frontend/public/llms.txt
   - packages/frontend/public/llms-full.txt

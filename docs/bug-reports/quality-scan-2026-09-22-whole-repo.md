@@ -1,6 +1,6 @@
 ---
 owner: "@AntonioSaaranen"
-status: current
+status: record
 covers:
   - packages/backend/src/infra/repositories/smart-accounts.ts
   - packages/backend/src/infra/repositories/agent-labels.ts

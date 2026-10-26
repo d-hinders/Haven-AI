@@ -1,6 +1,6 @@
 ---
 owner: "@AntonioSaaranen"
-status: current
+status: record
 covers:
   - packages/backend/src/__tests__/no-raw-error-details.test.ts
   - packages/backend/src/modules/mpp/budget-precheck.ts

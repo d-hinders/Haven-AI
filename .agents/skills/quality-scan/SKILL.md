@@ -258,7 +258,9 @@ If tracking cannot be checked, disclose that limit and mark novelty unverified.
    five) using the fields above. Include the coverage record and qualify
    conclusions to the sample actually examined.
 7. Append the run to the ledger and open the report and the entry as a pull
-   request. **Run its independent review before presenting anything for
+   request. The report's front-matter reads `status: record` (#4459): it is a
+   dated record of the scan, so the staleness audit never ranks it, while its
+   `covers:` still route it. The ledger stays `current`. **Run its independent review before presenting anything for
    decision** — the `haven-reviewer` pass `CLAUDE.md` § *How shipping is
    governed* makes mandatory on every pull request, briefed explicitly to
    re-derive every figure and every claim about a past event from its

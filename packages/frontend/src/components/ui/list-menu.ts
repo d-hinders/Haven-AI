@@ -57,8 +57,15 @@ export function listTriggerClasses(active: boolean): string {
 export const listMenuPanelClasses =
   'absolute top-full z-[calc(var(--v2-z-sticky)+1)] mt-1.5 flex max-h-[min(24rem,70vh)] w-max min-w-[13rem] max-w-[calc(100vw-1rem)] flex-col overflow-y-auto rounded-lg border border-[var(--v2-border)] bg-[var(--v2-bg)] p-1 shadow-modal sm:max-w-[22rem]'
 
-/** One option row inside a menu panel. 44px below `sm`. */
-export const listMenuItemClasses = `grid min-h-11 w-full grid-cols-[1rem_minmax(0,1fr)_auto] items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm text-[var(--v2-ink)] hover:bg-[var(--v2-surface)] focus-visible:bg-[var(--v2-surface)] sm:min-h-0 ${listFocusRing}`
+/**
+ * One option row inside a menu panel. 44px below `sm`.
+ *
+ * `shrink-0` (#4451): the panel is a capped flex column, and `sm:min-h-0`
+ * removes the flex item's automatic minimum height, so without this a menu
+ * longer than `max-h` shrank every row equally and nothing ever scrolled.
+ * The row keeps its natural height; the panel scrolls instead.
+ */
+export const listMenuItemClasses = `grid min-h-11 w-full shrink-0 grid-cols-[1rem_minmax(0,1fr)_auto] items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm text-[var(--v2-ink)] hover:bg-[var(--v2-surface)] focus-visible:bg-[var(--v2-surface)] sm:min-h-0 ${listFocusRing}`
 
 export const menuViewportMargin = 8
 

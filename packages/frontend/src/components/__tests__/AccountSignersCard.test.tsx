@@ -42,11 +42,78 @@ function base(overrides: Record<string, unknown> = {}) {
 beforeEach(() => mockUseSigners.mockReset())
 
 describe('AccountSignersCard (#888)', () => {
-  it('warns when there is only one way to approve, and Remove is disabled there', async () => {
+  it('warns when there is only one way to approve, and Remove is absent there (#4474)', async () => {
     mockUseSigners.mockReturnValue(base())
     render(<AccountSignersCard {...PROPS} />)
-    await waitFor(() => expect(screen.getByText(/only one way to approve/)).toBeTruthy())
-    expect((screen.getByText('Remove') as HTMLButtonElement).disabled).toBe(true)
+    await waitFor(() =>
+      expect(screen.getByText('Only one passkey can approve this account')).toBeTruthy(),
+    )
+    expect(
+      screen.getByText(/If you lose it, you lose the account and the money in it\. Add a backup now\./),
+    ).toBeTruthy()
+    // #4474: removing the last signer is refused on-chain anyway, so the
+    // control is ABSENT rather than disabled — a disabled Remove on the only
+    // row reads as a broken button.
+    expect(screen.queryByText('Remove')).toBeNull()
+  })
+
+  it('names the WALLET when a wallet is the only way to approve (#4474)', () => {
+    mockUseSigners.mockReturnValue(
+      base({
+        signers: {
+          account_address: '0x' + 'aa'.repeat(20),
+          chain_id: 84532,
+          owner_address: '0x' + 'ee'.repeat(20),
+          passkeys: [],
+        },
+      }),
+    )
+    render(<AccountSignersCard {...PROPS} />)
+    expect(screen.getByText('Only one wallet can approve this account')).toBeTruthy()
+    expect(screen.queryByText(/Only one passkey/)).toBeNull()
+  })
+
+  it('shows Remove on every row once two signers can approve (#4474)', () => {
+    mockUseSigners.mockReturnValue(
+      base({
+        signers: {
+          account_address: '0x' + 'aa'.repeat(20),
+          chain_id: 84532,
+          owner_address: '0x' + 'ee'.repeat(20),
+          passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' }],
+        },
+      }),
+    )
+    render(<AccountSignersCard {...PROPS} />)
+    // Pinned so deleting Remove outright fails: with two ways to approve,
+    // removing one stays possible as long as one remains.
+    expect(screen.getAllByText('Remove')).toHaveLength(2)
+    expect(screen.queryByText(/Only one (passkey|wallet) can approve/)).toBeNull()
+  })
+
+  it('renders ONE footer row: both add actions and the recovery-help link (#4474)', () => {
+    mockUseSigners.mockReturnValue(base())
+    render(<AccountSignersCard {...PROPS} />)
+    expect(screen.getByRole('button', { name: /Add a backup passkey/ })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Add a wallet/ })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Lost a device\?/ })).toBeTruthy()
+    // The screen-lock helper line the mockup dropped is gone.
+    expect(screen.queryByText(/Approve with your passkey/)).toBeNull()
+  })
+
+  it('hides Add a wallet once the account has one (#4474)', () => {
+    mockUseSigners.mockReturnValue(
+      base({
+        signers: {
+          account_address: '0x' + 'aa'.repeat(20),
+          chain_id: 84532,
+          owner_address: '0x' + 'ee'.repeat(20),
+          passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' }],
+        },
+      }),
+    )
+    render(<AccountSignersCard {...PROPS} />)
+    expect(screen.queryByRole('button', { name: /Add a wallet/ })).toBeNull()
   })
 
   it('enrolls a backup passkey via one action', async () => {
@@ -225,8 +292,8 @@ describe('AccountSignersCard (#888)', () => {
       }),
     )
     render(<AccountSignersCard {...PROPS} />)
-    const [ownerRemove] = screen.getAllByText('Remove') as HTMLButtonElement[]
-    expect(ownerRemove.disabled).toBe(true)
+    // #4474: no Remove at all while the wallet is the only way to approve.
+    expect(screen.queryByText('Remove')).toBeNull()
     // #3845: the row promises no passkeys the account does not have, and says
     // why Remove is unavailable.
     expect(screen.queryByText(/your passkeys become/)).toBeNull()
@@ -312,8 +379,9 @@ describe('AccountSignersCard (#888)', () => {
     expect(screen.queryByText(/may be on another device/)).toBeNull()
   })
 
-  // ── #1679: credential naming — "Passkey · added {date}", never positional ──
-  it('labels every passkey row "Passkey · added {date}" and the EOA row "Browser wallet"', () => {
+  // ── #1679 / #4474: credential naming — the kind on line 1, "Added {date}"
+  // on line 2, never positional in the old sense ──
+  it('labels every passkey row with the kind on line 1 and "Added {date}" on line 2, and the EOA row "Browser wallet"', () => {
     mockUseSigners.mockReturnValue(
       base({
         signers: {
@@ -328,8 +396,11 @@ describe('AccountSignersCard (#888)', () => {
       }),
     )
     render(<AccountSignersCard {...PROPS} />)
-    expect(screen.getByText('Passkey · added 3 March 2026')).toBeTruthy()
-    expect(screen.getByText('Passkey · added 10 May 2026')).toBeTruthy()
+    // Two passkeys → the ordinal tells them apart, in enrollment order.
+    expect(screen.getByText('Passkey 1')).toBeTruthy()
+    expect(screen.getByText('Passkey 2')).toBeTruthy()
+    expect(screen.getByText('Added 3 March 2026')).toBeTruthy()
+    expect(screen.getByText('Added 10 May 2026')).toBeTruthy()
     expect(screen.getByText('Browser wallet')).toBeTruthy()
     // The banned platform-brand label and role words never render as names:
     expect(document.body.textContent).not.toMatch(/Face ID \/ Touch ID|External owner/)
@@ -337,7 +408,7 @@ describe('AccountSignersCard (#888)', () => {
 
   // #3825: who your signers are is Settings → Signers' job; the account card
   // shows which signers approve THIS account, with no address or key id.
-  it('shows no owner address or passkey key id, and links to Settings → Signers', () => {
+  it('shows no owner address or passkey key id', () => {
     const owner = '0x' + 'ee'.repeat(20)
     const keyId = '0x' + '11'.repeat(32)
     mockUseSigners.mockReturnValue(
@@ -353,7 +424,8 @@ describe('AccountSignersCard (#888)', () => {
     render(<AccountSignersCard {...PROPS} />)
     // Positive control: both signer rows rendered.
     expect(screen.getByText('Browser wallet')).toBeTruthy()
-    expect(screen.getByText('Passkey · added 3 March 2026')).toBeTruthy()
+    expect(screen.getByText('Passkey')).toBeTruthy()
+    expect(screen.getByText('Added 3 March 2026')).toBeTruthy()
     // The key id never renders; the owner address only inside a CLOSED
     // "Show address" disclosure (#3825 design review: the card asks for THE
     // owner wallet, so the user must be able to tell which one).
@@ -363,15 +435,13 @@ describe('AccountSignersCard (#888)', () => {
     expect(details.textContent).toContain(owner)
     const outside = Array.from(document.body.querySelectorAll('p')).filter((p) => !p.closest('details'))
     expect(outside.some((p) => /0xeeee/i.test(p.textContent ?? ''))).toBe(false)
-    const link = screen.getByRole('link', { name: /All your passkeys and wallets in Settings/ })
-    expect(link.getAttribute('href')).toBe('/settings?tab=security#signers')
   })
 
   it('REGRESSION (#1679): after a recovery removes the original key, the surviving backup keeps ITS OWN label', () => {
     // The old positional rule (`i === 0 ? 'Face ID / Touch ID' : 'Backup N'`)
     // relabeled the surviving backup as the primary the moment the original
     // key was removed. With date-based labels the row is stable: the same
-    // credential carries the same label whatever its position.
+    // credential carries the same date whatever its position.
     const backupOnly = {
       account_address: '0x' + 'aa'.repeat(20),
       chain_id: 84532,
@@ -381,7 +451,9 @@ describe('AccountSignersCard (#888)', () => {
     }
     mockUseSigners.mockReturnValue(base({ signers: backupOnly }))
     render(<AccountSignersCard {...PROPS} />)
-    expect(screen.getByText('Passkey · added 10 May 2026')).toBeTruthy()
+    // One passkey left → no ordinal, and the date is the surviving key's own.
+    expect(screen.getByText('Passkey')).toBeTruthy()
+    expect(screen.getByText('Added 10 May 2026')).toBeTruthy()
     expect(document.body.textContent).not.toContain('Face ID / Touch ID')
   })
 

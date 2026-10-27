@@ -760,10 +760,10 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
     })
 
     it('serves the healthy multi-signer set the card layout has to render (#1693)', () => {
-      // The shared fixture is one passkey and no wallet — the "only one way to
-      // approve" state. That shows neither the Wallet row nor a second passkey,
-      // so the row layout this capture exists to evidence is not reachable
-      // through it.
+      // The shared fixture is one passkey and no wallet — the single-signer
+      // warning state (#4474). That shows neither the Wallet row nor a second
+      // passkey, so the row layout this capture exists to evidence is not
+      // reachable through it.
       const signers = backupRecovery.api('/accounts/hybrid/0x111/signers', 'GET') as {
         owner_address: string
         passkeys: { key_id: string; created_at: string }[]
@@ -810,7 +810,7 @@ describe('screenshot populated fixture (#896 follow-up)', () => {
     })
 
     it('serves exactly ONE way to approve for the warning capture (#1725)', () => {
-      // `AccountSignersCard` renders the amber banner on
+      // `AccountSignersCard` renders the single-signer warning callout on
       // `wayCount < 2`, where `wayCount = passkeys.length + (owner_address ? 1 : 0)`.
       // Asserting that arithmetic rather than the shape it happens to take, so
       // a fixture that grew a second passkey fails HERE instead of quietly

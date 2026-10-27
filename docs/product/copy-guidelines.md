@@ -185,7 +185,6 @@ live on a security key, a password manager or another phone.
 
 Preferred:
 - “Use a passkey”
-- “Approve with your passkey (usually your device's screen lock).”
 - “One passkey prompt”
 - “Create a secure passkey to approve actions in your Haven account”
 - “Fastest option. Creates a secure passkey.”
@@ -212,10 +211,17 @@ removes the original.
 
 Credential rows (signer lists, “ways to approve”):
 
-- A passkey row is **“Passkey · added {date}”** — the kind plus when it was
-  enrolled, e.g. “Passkey · added March 3, 2026”. When a credential has no
-  stored date (it predates timestamp exposure), fall back to **“Passkey 1”**,
-  “Passkey 2”, … in enrollment order — never to a platform name.
+- A passkey row is **two lines** (#4474, mockup v9): the kind on line 1 and
+  **“Added {date}”** on line 2, e.g. “Passkey” over “Added 3 March 2026”. The
+  kind is **“Passkey”** when the account has exactly one passkey, and
+  **“Passkey 1”**, “Passkey 2”, … in enrollment order when it has two or more
+  — an ordinal is only worth the words when there is more than one to tell
+  apart. With no stored date (a credential that predates timestamp exposure)
+  there is no line 2, and the ordinal still shows. Never a platform name.
+  `lib/passkeyLabels.ts` is the one source: `passkeyRowParts` returns the
+  split form, and `passkeyRowLabel` derives the one-line
+  “Passkey · added {date}” for surfaces with no second line (the wallet
+  popover's “signing with” phrase, Settings' signer list).
 - An EOA row is **“Browser wallet”** — not “External owner”, “signer”, or
   “owner” (the sign-in rule above already bans those). Its address is hidden
   by default and revealed behind a **“Show address”** disclosure (#3825): most
@@ -224,11 +230,11 @@ Credential rows (signer lists, “ways to approve”):
   which one. When the wallet is the one connected on this device, the row may
   name the connector: “Browser wallet · MetaMask”.
 
-Action copy names the passkey, with the screen-lock anchor as subtext when one
-helps:
+Action copy names the passkey. The screen-lock anchor is a hedge for prose
+(“usually your device's screen lock”), not a button subtext — the account
+card's “Add a backup passkey” button carries no subtext since #4474:
 
-- Button “Add a backup passkey” with subtext “Approve with your passkey
-  (usually your device's screen lock).”
+- Button “Add a backup passkey”
 - “Create account with a passkey”
 - “Waiting for your passkey…” / “The passkey prompt was cancelled.”
 

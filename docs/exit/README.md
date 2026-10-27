@@ -105,7 +105,7 @@ Haven site's hostname as that relying party
 the passkey only on that site, so an owner whose **only** signer is a passkey
 can produce the owner signature for 2a only through Haven's site — and not at
 all if that site is gone. To keep a signer that works without Haven, add a
-wallet to the account (**Or add a wallet**, next to **Add a backup passkey** in
+wallet to the account (**Add a wallet**, next to **Add a backup passkey** in
 the **Security & details** tab on your account page, shown while the account
 has no wallet; see [account recovery](../product/account-recovery.md)). A wallet
 signs the UserOp from anywhere.

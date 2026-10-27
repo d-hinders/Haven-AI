@@ -468,6 +468,15 @@ const SCENARIOS: Scenario[] = [
       await expect(balance.getByTestId('area-chart')).toHaveCount(2)
       await expect(balance.getByTestId('area-chart').filter({ visible: true })).toHaveCount(1)
 
+      // #4480: the fixture's balance RISES (12,342.12 → 12,640.55), so the
+      // visible "Net change" wears the success token. Asserted before the
+      // pixels, so a capture that silently lost the tone fails by name rather
+      // than as an unattributable diff.
+      const delta = balance.getByTestId('area-delta').filter({ visible: true })
+      await expect(delta).toHaveCount(1)
+      await expect(delta).toHaveText(/^Net change \+/)
+      await expect(delta).toHaveClass(/text-\[var\(--v2-success\)\]/)
+
       // ── The frozen clock, where it is on screen ───────────────────────────
       // Desktop only: on mobile the "Last payment" value lives in the row's
       // collapsed disclosure, which is closed, so the strings are not in the

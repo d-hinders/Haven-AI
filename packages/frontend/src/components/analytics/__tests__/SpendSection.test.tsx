@@ -275,10 +275,14 @@ describe('SpendSection — on the page', () => {
     expect(desktop.className).toContain('hidden')
     expect(desktop.className).toContain('lg:block')
     expect(narrow.className).toContain('lg:hidden')
-    // The narrow rendering is the one with the dot legend (a wrapping row);
-    // the desktop one lists the legend as a column — the primitive's own tell.
-    expect(within(narrow as HTMLElement).getByTestId('chart-legend').className).toContain('flex-wrap')
-    expect(within(desktop as HTMLElement).getByTestId('chart-legend').className).toContain('flex-col')
+    // Both mounts list the legend as ONE wrapping row (#4480, owner decision
+    // 2026-10-27). The desktop one used to be a column, which read as a second
+    // list beside the chart rather than as its key.
+    for (const mount of [narrow, desktop]) {
+      const legend = within(mount as HTMLElement).getByTestId('chart-legend')
+      expect(legend.className).toContain('flex-wrap')
+      expect(legend.className).not.toContain('flex-col')
+    }
   })
 
   it('renders the section empty state when the window has NO activity at all (#4334)', () => {

@@ -756,11 +756,16 @@ Do not use marketing hero typography for normal authenticated pages.
 entity's logo when it has one — merchants and contacts today, agents from
 #4208. Sizes:
 
+- `xxs` — 24px, the overlapping agent avatar stack's mark
+  ([#4480](https://github.com/d-hinders/Haven-AI/issues/4480)).
 - `xs` — 32px, used by the shared agent row's `2rem` mark track, the width
   `DirectionMark compact` shares
   ([#4210](https://github.com/d-hinders/Haven-AI/issues/4210)).
 - `sm` (default) — 36px, for lists and cards.
 - `md` — 48px, for a page header.
+
+The initials stay `text-xs` at every size below `md`: design-lint's
+`micro-font` rule rejects a smaller step, and 12px is the ramp's floor.
 
 The initials variant is readable to a screen reader by default; the logo is
 `alt=""`. Pass `decorative` (`aria-hidden` on the root) where the name always
@@ -770,6 +775,39 @@ or a flag never renders half of one (where the browser has `Intl.Segmenter`,
 as every current one does; the fallback still never splits a surrogate pair).
 A name that starts with an emoji shows that emoji alone, never an emoji beside
 a letter ([owner decision on #4210](https://github.com/d-hinders/Haven-AI/issues/4210#issuecomment-6315168790), 2026-10-21). Tints are the avatar family above.
+
+#### Agent avatar stack (#4480)
+
+`components/ui/AgentAvatarStack.tsx` is the overlapping row of agent
+monograms — the "Paid by" column's marks, as one shared piece rather than a
+per-table arrangement. **Owner-approved as a new design-system pattern on
+2026-10-27.** It is generic over agents: the caller passes
+`{ id, name, avatarTint }` and a cap (default 3), and nothing in it knows what
+an agent is beyond those three fields.
+
+- **Colour is not invented here.** Each mark is a 24px (`xxs`) `Monogram`
+  wearing the agent's STORED tint, resolved through `resolveAvatarTint` — the
+  same tint `seriesColorForAgent` fills the agent's chart series with, so a
+  stack mark and its chart fill are one colour. Past the cap there is ONE `+N`
+  overflow mark in neutral ink (`--v2-surface-2` ground, `--v2-ink-2` figure),
+  never a tint: it counts agents, it is not one.
+- **One focus stop, not one per mark.** A standalone `Tooltip` makes its
+  wrapper `tabIndex=0`, so a tooltip per mark would add three tab stops per row
+  (up to thirty in the merchants table), each wrapped around `aria-hidden`
+  content. Instead every monogram and the `+N` mark is `decorative`, the stack
+  carries ONE accessible name in the roster's words ("Atlas, Data agent and 1
+  more"), and ONE shared `Tooltip` shows the same names on hover or focus.
+  Never a bare `title=`.
+- **Overlap and its ground.** The marks overlap by a negative inline margin
+  with a ring in the ground they sit on, so two marks stay separable in both
+  themes. The **supported ground is the default `Card`** (`--v2-bg`). Not
+  supported: the `anchor` card (`--v2-surface-anchor`) and table header bands,
+  where the ring would read as a light halo. On a hovered table row the ring
+  stays `--v2-bg` and reads as a thin outline on the hover tint. No new token.
+- **Edge inputs.** Zero agents renders nothing (`null`) and the caller keeps
+  its own text for that case. An agent whose name is unknown is passed with the
+  caller's fallback label as `name` and `avatarTint: null` (the name hash); the
+  stack never invents a name.
 
 ### Detail-page section rule (#3692)
 
@@ -1057,9 +1095,17 @@ until its cause is gone.
 
 The full chart's endpoint delta reads "**Net change**" with a SIGNED amount —
 "Net change -120.00" — not "gained"/"spent" (#4333): a fall in the balance is
-not a spend and a rise is not a gain, the balance being per-user and moving
-for reasons the spend chart does not draw. Zero is still "unchanged",
-unsigned.
+not a spend, the balance being per-user and moving for reasons the spend chart
+does not draw. Zero is still "unchanged", unsigned.
+
+Its TONE follows the direction (#4480, owner decision 2026-10-27, reversing
+#4333's all-neutral choice): a rise wears the quiet `--v2-success` the
+`Amount` incoming tone uses, and a fall or an unchanged range stays neutral
+ink (`--v2-ink-3`) — a fall is never red. The sign stays the carrier, so
+nothing depends on seeing the colour (WCAG 1.4.1), and the annotation is
+`aria-hidden` because the chart's summary sentence already announces the
+signed figure. `--v2-success` as text on the card grounds is pinned at 4.5:1
+in `CONTRAST_PAIRS` (`success` on `bg` and on `surface`).
 
 `variant="sparkline"` inside `ui/AreaChart.tsx` (no new file, so the chart
 home's design-lint `raw-svg` exemption already covers it): the balance line

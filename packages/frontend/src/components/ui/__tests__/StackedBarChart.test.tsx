@@ -1011,3 +1011,23 @@ describe('StackedBarChart — one legend swatch (#4426)', () => {
     }
   })
 })
+
+describe('StackedBarChart — the legend is one wrapping row at every width (#4480)', () => {
+  it('wraps on the WIDE mount, with no column', () => {
+    // Owner decision 2026-10-27: the legend is a horizontal wrapping row at
+    // every width. The wide mount used to pick `flex-col`, which read as a
+    // second list beside the chart rather than as its key.
+    // Mutation: restore `flex-col` on the wide mount → red.
+    const { container } = renderChart()
+    const legend = container.querySelector('[data-testid="chart-legend"]') as HTMLElement
+    expect(legend.className.split(/\s+/)).toContain('flex-wrap')
+    expect(legend.className).not.toContain('flex-col')
+  })
+
+  it('wraps on the NARROW mount too — the row is not a wide-only treatment', () => {
+    const { container } = renderChart({ narrow: true })
+    const legend = container.querySelector('[data-testid="chart-legend"]') as HTMLElement
+    expect(legend.className.split(/\s+/)).toContain('flex-wrap')
+    expect(legend.className).not.toContain('flex-col')
+  })
+})

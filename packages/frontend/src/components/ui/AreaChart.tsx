@@ -4,7 +4,11 @@
  * One line, a faint area beneath it, and the range's net change annotated as
  * the signed delta between the two endpoints (#4333: "Net change +$X", not
  * "gained"/"spent" — the balance moves for reasons the spend chart does not
- * draw, so the movement is named, not judged). Built on the same scale maths
+ * draw, so the movement is named, not judged). Since #4480 the annotation's
+ * TONE follows the direction: a rise wears the quiet `--v2-success` the
+ * `Amount` incoming tone uses, a fall or an unchanged range stays neutral ink
+ * (owner decision 2026-10-27, reversing #4333's all-neutral choice). Built on
+ * the same scale maths
  * and the
  * same house pattern as `ui/StackedBarChart`: a hand-drawn SVG inside the
  * primitive's home file (the design-lint `raw-svg` exemption the two chart
@@ -26,9 +30,10 @@
  * The issue fixes it: "the range's spend annotated as the endpoint delta".
  * A second series for cumulative spend would ask the reader to subtract two
  * lines by eye; the delta is computed from the same two points the line
- * already passes through, so the chart states the fact once, in words. It
- * prints in neutral ink — colour here is for series, never for meaning, and
- * a balance that fell is not an error state.
+ * already passes through, so the chart states the fact once, in words. Its
+ * tone is the direction's (#4480): success green for a rise, neutral ink for
+ * a fall or an unchanged range — a balance that fell is not an error state,
+ * and the series colours stay for series.
  *
  * ## The scale
  *
@@ -664,13 +669,20 @@ function AreaChartFull({
           </span>
         ))}
         {/* The endpoint delta: the range's net change, annotated (see header).
-            Neutral ink — a fall is not a failure, and the series colours are
-            for series. The amount is SIGNED (#4333): "Net change -180.00"
-            states the movement once, in one voice, whichever way it went. */}
+            The tone follows the direction (#4480, owner decision 2026-10-27,
+            reversing #4333's all-neutral choice): a RISE wears the quiet
+            `--v2-success` the `Amount` incoming tone uses, a fall or an
+            unchanged range stays neutral ink — a fall is never red. Colour is
+            never the only carrier: the amount is SIGNED (#4333), so the `+`
+            states the direction in text (WCAG 1.4.1), and the span is
+            `aria-hidden` because the chart's summary sentence already
+            announces the signed figure. */}
         <span
           data-testid="area-delta"
           aria-hidden="true"
-          className="absolute block text-right text-xs leading-none text-[var(--v2-ink-3)]"
+          className={`absolute block text-right text-xs leading-none ${
+            plot.delta > 0 ? 'text-[var(--v2-success)]' : 'text-[var(--v2-ink-3)]'
+          }`}
           style={{ right: pct(plot.pad.right, VIEW_W), top: pct(plot.pad.top - 2, VIEW_H) }}
         >
           {deltaLabel(plot.delta)} {signedDelta(plot.delta, formatValue)}
@@ -741,9 +753,10 @@ function AreaChartFull({
  * pair): both directions are the same fact — the range's NET CHANGE — so both
  * read "Net change", and the direction lives in the amount's sign, which the
  * caller renders beside it (`signedDelta`). A fall in the balance is not a
- * spend and a rise is not a gain; the balance is per-user and moves for
- * reasons the spend chart does not draw. Zero is still "unchanged", which is
- * not a direction to sign.
+ * spend; the balance is per-user and moves for reasons the spend chart does
+ * not draw. Since #4480 the direction also carries a TONE (success green for a
+ * rise, neutral ink otherwise) — the sign stays the carrier, the colour only
+ * agrees with it. Zero is still "unchanged", which is not a direction to sign.
  */
 export function deltaLabel(delta: number): string {
   if (delta === 0) return 'unchanged'

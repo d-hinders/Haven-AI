@@ -218,6 +218,38 @@ describe('AreaChart — the line, the area, and the scale under them', () => {
     expect(signedDelta(0, (v) => v.toFixed(2))).toBe('0.00')
   })
 
+  it('tones the delta by direction: success green for a rise, neutral ink for a fall or zero (#4480)', () => {
+    // Owner decision 2026-10-27, reversing #4333's all-neutral choice: a rise
+    // wears the quiet `--v2-success` the `Amount` incoming tone uses; a fall or
+    // an unchanged range stays neutral ink, and a fall is never red. The sign
+    // stays the carrier (WCAG 1.4.1) — the colour only agrees with it.
+    // Mutation: drop the branch → the positive case goes red.
+    const deltaClass = (container: HTMLElement) =>
+      container.querySelector('[data-testid="area-delta"]')!.className
+
+    const rising = renderChart({}, [
+      { label: 'Mon 8', value: 100 },
+      { label: 'Tue 9', value: 160 },
+      { label: 'Wed 10', value: 210 },
+    ])
+    expect(deltaClass(rising.container)).toContain('text-[var(--v2-success)]')
+    expect(deltaClass(rising.container)).not.toContain('text-[var(--v2-ink-3)]')
+    rising.unmount()
+
+    const falling = renderChart()
+    expect(deltaClass(falling.container)).toContain('text-[var(--v2-ink-3)]')
+    expect(deltaClass(falling.container)).not.toContain('text-[var(--v2-success)]')
+    falling.unmount()
+
+    const flat = renderChart({}, [
+      { label: 'Mon 8', value: 100 },
+      { label: 'Tue 9', value: 100 },
+      { label: 'Wed 10', value: 100 },
+    ])
+    expect(deltaClass(flat.container)).toContain('text-[var(--v2-ink-3)]')
+    expect(deltaClass(flat.container)).not.toContain('text-[var(--v2-success)]')
+  })
+
   it('prints the 30-day right edge as one label: the two right-most label boxes do not intersect (#3037)', () => {
     // The shipped defect, asserted on the geometry it is: the balance
     // chart's 30-bucket fixture put the stride's last slot ("10 Jul") one

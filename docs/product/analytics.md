@@ -229,8 +229,11 @@ set it adds "Balance isn't filtered by agent": the series is per-user and is
 deliberately not narrowed (#4333). This is a record of what was held, not a
 live portfolio valuation. The endpoint's delta annotation reads "**Net
 change**" with a SIGNED amount ("Net change +298,43 kr") — a fall is not a
-spend and a rise is not a gain; the balance moves for reasons the spend chart
-does not draw (#4333).
+spend; the balance moves for reasons the spend chart does not draw (#4333).
+Its tone follows the direction (#4480, owner decision 2026-10-27): a rise is
+the quiet success green, a fall or an unchanged range stays neutral ink, and a
+fall is never red. The sign carries the direction, so the colour is never the
+only cue.
 Under the SEK display currency, days snapshotted before the SEK column
 existed (migration 090) are omitted from the series rather than drawn as
 zero — the page distinguishes a day with no SEK figure from a day that was

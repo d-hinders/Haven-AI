@@ -13,7 +13,8 @@ import type { AnalyticsCurrency } from '@/lib/analytics-format'
 import { Card } from '@/components/ui/Card'
 import { Row } from '@/components/ui/Row'
 import { Tooltip } from '@/components/ui/Tooltip'
-import { rosterLine } from '@/components/ui/AgentAvatarStack'
+import { AgentAvatarStack, rosterLine } from '@/components/ui/AgentAvatarStack'
+import type { StackedAgent } from '@/components/ui/AgentAvatarStack'
 import { Address } from '@/components/haven/Address'
 import { Table, tableColumnClass } from '@/components/ui/Table'
 import type { AnalyticsAgentRow, AnalyticsMerchantRow, AnalyticsRangeValue } from '@/types/analytics'
@@ -37,10 +38,27 @@ import type { AnalyticsAgentRow, AnalyticsMerchantRow, AnalyticsRangeValue } fro
  * no kind line: the name already says what resolved it. The Address COLUMN is
  * gone — an address is metadata, shown in the mobile disclosure and the
  * unknown recipient's tooltip, never as a label. Spent, Payments, "Paid by"
- * as TEXT (the roster line; the shared `AgentAvatarStack` that replaces it
- * lands in #4480 and mounts here in #4481), Last
- * paid, and "View in Transactions" linking to the history pre-filtered to
- * that recipient.
+ * as the shared `AgentAvatarStack` (#4480, mounted here in #4481: overlapping
+ * monograms in each agent's stored tint, capped at three with a `+N` mark),
+ * Last paid, and "View in Transactions" linking to the history pre-filtered
+ * to that recipient.
+ *
+ * ── Why "Paid by" is marks and not a sentence ───────────────────────────────
+ *
+ * The desktop column is scanned, not read: a reader comparing rows wants to
+ * see WHICH agents paid whom at a glance, and three overlapping monograms do
+ * that in the width one name took. The names are not lost — the stack is one
+ * `role="img"` with one `aria-label` and one `Tooltip` naming them in the
+ * roster's words ("Atlas, Data agent and 1 more"), so it is one tab stop per
+ * row, not one per mark. The phone disclosure keeps the TEXT roster: it is a
+ * term/value definition line where the names are read, not scanned, and a
+ * stack there would be a picture where a sentence belongs.
+ *
+ * The column's stage is `md` (a 718px table), not `xl` (974px): the stack is
+ * narrower than the roster line it replaced, and at the `lg` viewport the
+ * table is 720px wide (1024 − 240px sidebar − 64px page padding), so `md`
+ * reveals it exactly where the phone disclosure stops — no width where
+ * neither surface shows paying agents (#4481).
  *
  * The money fields arrive as numeric STRINGS (`spent`, and every other fiat
  * field on this response, #2946). They are handed to the shared formatters
@@ -77,9 +95,11 @@ import type { AnalyticsAgentRow, AnalyticsMerchantRow, AnalyticsRangeValue } fro
 
 const COLUMN_PAD = 'px-4 py-3'
 
-/** The roster cap the desktop column and the mobile disclosure both honour:
- *  three paying agents named, the rest counted ("and N more"). Three is the
- *  issue's number, not this component's opinion of it. */
+/** The cap both surfaces honour: three paying agents named, the rest counted
+ *  ("and N more"). The desktop column hands it to the stack as `cap` (so the
+ *  `+N` mark counts the same three), the phone disclosure slices the roster
+ *  line with it. Three is the issue's number, not this component's opinion of
+ *  it. */
 const MAX_AGENT_NAMES = 3
 
 /**
@@ -98,18 +118,21 @@ export function merchantsLinkTarget(
 }
 
 /** The roster the `agent_ids` of a merchant row are looked up in: the SAME
- *  response's `agents` array, keyed by id. An id the roster does not name
- *  renders as the raw id — the endpoint draws both arrays from one query, so
- *  an unknown id means the response disagreed with itself, and an invented
- *  name would hide the disagreement. */
-function agentNamesFor(agentIds: string[], roster: Map<string, string>): {
-  names: string[]
-  total: number
-} {
-  return {
-    names: agentIds.slice(0, MAX_AGENT_NAMES).map((id) => roster.get(id) ?? id),
-    total: agentIds.length,
-  }
+ *  response's `agents` array, keyed by id, carrying the name AND the stored
+ *  tint the stack's marks wear. An id the roster does not name renders as the
+ *  raw id with no stored tint (the name hash) — the endpoint draws both arrays
+ *  from one query, so an unknown id means the response disagreed with itself,
+ *  and an invented name would hide the disagreement. */
+type AgentRosterEntry = { name: string; avatarTint: number | null }
+
+/** Every paying agent of one merchant row, in the wire's order, as the stack's
+ *  own shape. The cap is the stack's (`cap={MAX_AGENT_NAMES}`), so the `+N`
+ *  mark counts the agents this list holds past it — the caller never slices. */
+function payingAgentsFor(agentIds: string[], roster: Map<string, AgentRosterEntry>): StackedAgent[] {
+  return agentIds.map((id) => {
+    const known = roster.get(id)
+    return { id, name: known?.name ?? id, avatarTint: known?.avatarTint ?? null }
+  })
 }
 
 /** The zero case's copy: the shared `rosterLine` names agents, and the stack
@@ -119,8 +142,13 @@ function payingAgentsLine(names: string[], total: number): string {
   return total === 0 ? 'No paying agents reported' : rosterLine(names, total)
 }
 
-function PayingAgentsCell({ names, total }: { names: string[]; total: number }) {
-  return <span className="text-sm text-[var(--v2-ink-2)]">{payingAgentsLine(names, total)}</span>
+/** The desktop "Paid by" cell: the shared avatar stack, or the sentence when
+ *  the endpoint reported a merchant no agent paid (there is no empty stack). */
+function PayingAgentsCell({ agents }: { agents: StackedAgent[] }) {
+  if (agents.length === 0) {
+    return <span className="text-sm text-[var(--v2-ink-2)]">No paying agents reported</span>
+  }
+  return <AgentAvatarStack agents={agents} cap={MAX_AGENT_NAMES} />
 }
 
 /**
@@ -175,8 +203,9 @@ export function MerchantsTable({
 }: {
   merchants: AnalyticsMerchantRow[]
   /** The response's own `agents` array, read only to turn the ids in
-   *  `agent_ids` into the names the reader already met in the agents table.
-   *  It is not re-sorted, re-filtered, or used to derive a figure. */
+   *  `agent_ids` into the names and stored tints the reader already met in the
+   *  agents table. It is not re-sorted, re-filtered, or used to derive a
+   *  figure. */
   agents: AnalyticsAgentRow[]
   currency: AnalyticsCurrency
   /** The page's current window, carried onto the link's `period` key. */
@@ -184,7 +213,9 @@ export function MerchantsTable({
   /** The Agent facet's selection, carried onto the link when set. */
   agentId?: string | null
 }) {
-  const roster = new Map(agents.map((agent) => [agent.id, agent.name] as const))
+  const roster = new Map(
+    agents.map((agent) => [agent.id, { name: agent.name, avatarTint: agent.avatar_tint }] as const),
+  )
 
   return (
     <Card hover={false} className="overflow-hidden">
@@ -201,7 +232,7 @@ export function MerchantsTable({
               <Table.HeaderCell align="left">Paid to</Table.HeaderCell>
               <Table.HeaderCell align="right">Spent</Table.HeaderCell>
               <Table.HeaderCell align="right">Payments</Table.HeaderCell>
-              <Table.HeaderCell align="left" revealAt="xl">
+              <Table.HeaderCell align="left" revealAt="md">
                 Paid by
               </Table.HeaderCell>
               <Table.HeaderCell align="left">Last paid</Table.HeaderCell>
@@ -212,7 +243,7 @@ export function MerchantsTable({
           </Table.Head>
           <Table.Body>
             {merchants.map((merchant) => {
-              const { names, total } = agentNamesFor(merchant.agent_ids, roster)
+              const payingAgents = payingAgentsFor(merchant.agent_ids, roster)
               return (
                 <tr
                   key={merchant.address}
@@ -234,8 +265,8 @@ export function MerchantsTable({
                   <td className={`${COLUMN_PAD} text-right`}>
                     <span className="v2-tabular text-sm text-[var(--v2-ink-2)]">{merchant.payments}</span>
                   </td>
-                  <td className={`${COLUMN_PAD} ${tableColumnClass('xl')}`}>
-                    <PayingAgentsCell names={names} total={total} />
+                  <td className={`${COLUMN_PAD} ${tableColumnClass('md')}`}>
+                    <PayingAgentsCell agents={payingAgents} />
                   </td>
                   <td className={COLUMN_PAD}>
                     <LastPaidCell iso={merchant.last_seen} />
@@ -286,13 +317,17 @@ function MobileMerchantRow({
   agentId,
 }: {
   merchant: AnalyticsMerchantRow
-  roster: Map<string, string>
+  roster: Map<string, AgentRosterEntry>
   currency: AnalyticsCurrency
   period: AnalyticsRangeValue
   agentId: string | null
 }) {
   const [open, setOpen] = useState(false)
-  const { names, total } = agentNamesFor(merchant.agent_ids, roster)
+  // The phone keeps the TEXT roster: a definition line is read, not scanned,
+  // and the stack's marks would be a picture where a sentence belongs.
+  const payingAgents = payingAgentsFor(merchant.agent_ids, roster)
+  const names = payingAgents.slice(0, MAX_AGENT_NAMES).map((agent) => agent.name)
+  const total = payingAgents.length
   const known = merchant.label !== null
   const name = merchant.label ?? 'Unknown recipient'
   const kind = kindLine(merchant)

@@ -1283,7 +1283,19 @@ Structure:
    `packages/ui/src/StatTile.tsx`; these are the card variant. The redesigned
    dashboard's hero figures use the `inline` variant — no card chrome,
    `text-base` value, no delta chip — #3805.)
-4. The agents table: the agent's `Monogram` and name (revoked agents get the
+4. The spend-over-time chart, ABOVE the agents table (owner decision
+   2026-10-27, #4481 — it reverses the earlier "table first" order): one slot
+   for every local calendar day of the window, empty days included (#4334;
+   stacked by agent, refusals as a marker series, partial edge days striped;
+   #3051). The chart is the page's headline reading — what the money did over
+   the window — and the table below it is the per-agent breakdown of the same
+   figures. The former page-level sparse band is GONE (#4333): sections render
+   whenever the window has any activity, each keeping its own guard — the
+   balance chart declines to draw below `MIN_CHARTABLE_DAYS` points, the spend
+   chart shows its own empty state only for a window with no activity (its
+   `MIN_CHARTABLE_DAYS` floor is unreachable from a 7/30/90-day window), and
+   the tiles and tables stay.
+5. The agents table: the agent's `Monogram` and name (revoked agents get the
    shared `StatusBadge` "Revoked", not a truncated row), Spent with "N% of
    spend" under it (the Share column merged in), Payments, Refused as a link
    to that agent's refused attempts, Budget captioned by the shared
@@ -1298,21 +1310,15 @@ Structure:
    endpoint, so no "expires" branch. Below `lg` the same rows render as phone
    rows, whose budget line is the desktop cell's caption text, one line per
    budget, text only (#4432).
-5. Below the table: the spend-over-time chart (one slot for every local
-   calendar day of the window, empty days included, #4334; stacked by agent,
-   refusals as a marker series, partial edge days striped; #3051), then the
-   top-merchants table, then the balance-over-time chart (#2949). The table
-   stays on the first screen; the charts are the same figures over time. The
-   former page-level sparse band is GONE (#4333): sections render whenever
-   the window has any activity, each keeping its own guard — the balance
-   chart declines to draw below `MIN_CHARTABLE_DAYS` points, the spend chart
-   shows its own empty state only for a window with no activity (its
-   `MIN_CHARTABLE_DAYS` floor is unreachable from a 7/30/90-day window), and
-   the tiles and tables stay. The merchants table's "Paid to" carries the kind line ("Your
+   Then the top-merchants table, then the balance-over-time chart (#2949).
+   The merchants table's "Paid to" carries the kind line ("Your
    account", "Paid API", or the short address for an unknown recipient), the
    Address column is gone, and "View in Transactions" links to
    `/transactions?search=<filter_address>&direction=out&period=<current>`
-   (plus `&agentId=` when filtered). Balance reads "Net change" with a signed
+   (plus `&agentId=` when filtered). Its "Paid by" column is the agent avatar
+   stack — overlapping monograms in each agent's stored tint, capped at three
+   with a "+N" mark (#4480, mounted here in #4481) — while the phone
+   disclosure keeps the text roster. Balance reads "Net change" with a signed
    amount, says "all your accounts", and adds "Balance isn't filtered by
    agent" when the facet is set (#4333). The amount is success green when the
    balance rises and neutral ink when it falls or is unchanged — a fall is

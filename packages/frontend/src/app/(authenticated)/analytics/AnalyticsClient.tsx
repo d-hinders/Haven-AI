@@ -417,21 +417,18 @@ export default function AnalyticsClient() {
           agentId={agentId}
           agentName={agentName}
         />
-        {agents.length > 0 && (
-          <div className="mt-4" data-testid="analytics-agents-section">
-            <AgentsTable agents={agents} currency={currency} />
-          </div>
-        )}
-        {/* Below the table, per screen-recipes.md § Analytics item 5
-            (table first, then the spend chart, merchants, balance): the
-            table is the page's primary reading surface and stays on the
-            first screen; the chart is the same figures over time. Each
-            section keeps its own guard (#4333 removed the page-level sparse
-            band that hid all of them together): the balance chart declines
-            to draw through fewer than MIN_CHARTABLE_DAYS points, and the
-            spend chart draws every calendar day of the window (#4334) — its
-            own floor is a period with no activity at all, which renders the
-            section's empty state. */}
+        {/* Above the table, per screen-recipes.md § Analytics item 4 and the
+            owner's 2026-10-27 decision: the spend chart is the page's
+            headline reading — what the money did over the window — and the
+            agents table below it is the per-agent breakdown of the same
+            figures. Order after the tiles: spend, agents, merchants,
+            balance. Each section keeps its own guard (#4333 removed the
+            page-level sparse band that hid all of them together): the
+            balance chart declines to draw through fewer than
+            MIN_CHARTABLE_DAYS points, and the spend chart draws every
+            calendar day of the window (#4334) — its own floor is a period
+            with no activity at all, which renders the section's empty
+            state. */}
         <div className="mt-4">
           <SpendSection
             byDay={data.by_day}
@@ -443,6 +440,11 @@ export default function AnalyticsClient() {
             rangeDays={rangeDays}
           />
         </div>
+        {agents.length > 0 && (
+          <div className="mt-4" data-testid="analytics-agents-section">
+            <AgentsTable agents={agents} currency={currency} />
+          </div>
+        )}
         {/* ── Merchants and balance (slice E, #2949) ────────────────────────
             Mounted off THIS same response — one request still owns the whole
             page. Each guards on its own array rather than on the other's: a

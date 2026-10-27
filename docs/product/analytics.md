@@ -172,7 +172,7 @@ labels days 1, 15 and 31 rather than printing "8 Jul" against "10 Jul"
 (#4426); on 90 days the
 bars are thin, and that is accepted — the chart never scrolls horizontally.
 Agents are ordered by spend, then id, and an agent's fill is its own
-avatar tint — the colour of its monogram in the agents table above the
+avatar tint — the colour of its monogram in the agents table below the
 chart — so it holds across ranges and ranks (#4331). The window starts and ends at the
 moment the page loads, not at midnight, so a bar on the window's first or
 last local day covers part of a day: it is striped and named as partial (the
@@ -218,8 +218,9 @@ address the transaction history's search matches: the "View in Transactions"
 link targets `/transactions?search=<filter_address>&direction=out&period=<
 current>` — plus `&agentId=<id>` when the Agent facet is set (#4333) — so the
 history opens already narrowed to that recipient. Each row also shows
-payments, paying agents as TEXT (up to three, then "and N more"; a monogram
-stack would be a new pattern where one line reads fine), and **Last paid**
+payments, paying agents as the shared avatar stack (overlapping monograms in
+each agent's stored tint, up to three, then a "+N" mark; the phone disclosure
+keeps the text roster — up to three names, then "and N more"), and **Last paid**
 in the same relative voice the agents table uses.
 
 **Balance over time.** The total value of the tokens in all your accounts,

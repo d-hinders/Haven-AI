@@ -132,9 +132,13 @@ function CardSection({
  * band (`TransactionActivityDayHeader`) is the second sanctioned band — for
  * day-grouped lists, not card titles (#4225).
  *
- * Assumes the parent Card has no top padding and `overflow-hidden` (so the
- * band's corners clip to the card radius). For a standalone header on a card
- * without `overflow-hidden`, add `rounded-t-[10px]` via className.
+ * Assumes the parent Card has no top padding. The band's corners clip to the
+ * card radius when the Card sets `overflow-hidden` — but **a Card that hosts a
+ * `DropdownMenu` (or any in-flow popover) must not clip** (#4491): the menu
+ * panel is `absolute`, not portalled, so a clipping ancestor cuts it off. On
+ * such a card, leave the Card's overflow `visible` and add `rounded-t-[10px]`
+ * to the header via className instead. See `docs/product/design-system.md`
+ * § Cards.
  *
  * Slots: `title` (rendered in a heading — `as` picks the level; `titleId`
  * gives that heading an id, so a landmark can name itself with

@@ -9,6 +9,7 @@
  */
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { expectMenuNotClipped } from '@/__tests__/menu-clip'
 import type { ReactNode } from 'react'
 
 const mockUseAuth = vi.fn()
@@ -187,6 +188,15 @@ function overview(
     spotRates: {},
     ...overrides,
   } as DashboardOverviewResponse
+}
+
+/**
+ * #4491: opens the account header's ⋯ menu and asserts nothing above it clips
+ * the panel — the account page's menu host is the header, not a Card.
+ */
+function openAccountMenu() {
+  fireEvent.click(screen.getByLabelText('Account options'))
+  expectMenuNotClipped(screen.getByRole('menu'))
 }
 
 describe('AccountDetailClient', () => {
@@ -898,7 +908,7 @@ describe('AccountDetailClient', () => {
 
     render(<AccountDetailClient />)
 
-    fireEvent.click(screen.getByLabelText('Account options'))
+    openAccountMenu()
     fireEvent.click(screen.getByRole('menuitem', { name: 'Remove account' }))
     expect(screen.getByRole('heading', { name: 'Remove Main account?' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Remove account' }))
@@ -934,7 +944,7 @@ describe('AccountDetailClient', () => {
     render(<AccountDetailClient />)
 
     const openDialog = () => {
-      fireEvent.click(screen.getByLabelText('Account options'))
+      openAccountMenu()
       fireEvent.click(screen.getByRole('menuitem', { name: 'Remove account' }))
     }
 
@@ -956,7 +966,7 @@ describe('AccountDetailClient', () => {
 
     render(<AccountDetailClient />)
 
-    fireEvent.click(screen.getByLabelText('Account options'))
+    openAccountMenu()
     fireEvent.click(screen.getByRole('menuitem', { name: 'Remove account' }))
     fireEvent.click(screen.getByRole('button', { name: 'Remove account' }))
 
@@ -977,7 +987,7 @@ describe('AccountDetailClient', () => {
 
     render(<AccountDetailClient />)
 
-    fireEvent.click(screen.getByLabelText('Account options'))
+    openAccountMenu()
     fireEvent.click(screen.getByRole('menuitem', { name: 'Remove account' }))
     fireEvent.click(screen.getByRole('button', { name: 'Remove account' }))
 

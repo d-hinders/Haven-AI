@@ -87,6 +87,26 @@ covers:
 last-verified: "2026-10-27"
 ---
 
+> **Re-verified #4492 (2026-10-27, the shared select primitive draws its own chevron).**
+> The covered file this diff touches is one, `components/DelegationSendModal.tsx`,
+> and the change is presentation-only: its raw `<select>` for the token symbol
+> becomes the shared select primitive, so the field gains the family's
+> `py-2`/focus ring and a lucide `ChevronDown` inside the right edge, and its
+> border moves from `--v2-border-strong` to the family's `--v2-border`. The
+> wrapper is pinned `w-28 shrink-0` so the amount `Input` beside it keeps the
+> row's layout. Nothing else in the file moves: `tokenSymbol` is still the same
+> `useState`, the same `tokens` list from `getChainTokens(chainId)` feeds the
+> same `<option>`s, and `send()` still reads the same symbol to pick the token
+> address and decimals. No handler, fetch, signer call, key read, caveat value,
+> allowance, budget pre-check or settlement path changes, and no user-visible
+> claim about who signs, what may be spent, or when revocation bites changes —
+> a border token and a decorative, `aria-hidden`, `pointer-events-none` glyph
+> are not a semantics change. The rest of the diff (the select primitive itself,
+> its new test, the `/design-system` specimen copy and `docs/product/design-system.md`)
+> is outside this document's coverage. Scope of this note: the modal diff above.
+> Nothing else in this document was re-verified for it, and `last-verified` is
+> bumped to 2026-10-27 for exactly this coverage.
+
 > **Re-verified #4425 (2026-10-26, undefined `--v2-*` tokens mapped onto the
 > existing ink tiers):** the only covered file this diff touches is
 > `packages/frontend/src/components/PasskeyElsewhereHint.tsx`, and only one

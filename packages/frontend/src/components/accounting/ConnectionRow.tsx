@@ -48,6 +48,7 @@
  * neighbours at every width. No mobile-specific layout is added; the row
  * behaves as the rest of the page does.
  */
+import type { ReactNode } from 'react'
 import { useLocale, useT } from '@/context/LocaleContext'
 import { Button } from '@/components/ui/Button'
 import { StatusBadge, type StatusTone } from '@/components/ui/StatusBadge'
@@ -113,6 +114,12 @@ export interface ConnectionRowProps {
   onConnectWithApiKey?: () => void
   onDisconnect: () => void
   onToggleSettings: () => void
+  /**
+   * Full-width content under the row (#4478) — the inline feed settings, which
+   * `ConnectionsCard` renders through `SettingsRow`'s `below` slot instead of a
+   * hand-written sibling wrapper.
+   */
+  below?: ReactNode
 }
 
 export function ConnectionRow({
@@ -124,6 +131,7 @@ export function ConnectionRow({
   onConnectWithApiKey,
   onDisconnect,
   onToggleSettings,
+  below,
 }: ConnectionRowProps) {
   const t = useT()
   const { locale } = useLocale()
@@ -141,6 +149,7 @@ export function ConnectionRow({
           </span>
         }
         detail={copy.comingSoonDescription[provider.id]}
+        below={below}
         action={
           <span className="flex items-center gap-2" data-testid={`connection-actions-${provider.id}`}>
             <Button size="sm" variant="ghost" disabled>
@@ -227,6 +236,7 @@ export function ConnectionRow({
         </span>
       }
       detail={detail}
+      below={below}
       action={
         <span
           className="flex items-center gap-2"

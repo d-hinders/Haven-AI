@@ -127,6 +127,70 @@ describe('SettingsSection', () => {
     expect(getByText('Disconnect').tagName).toBe('BUTTON')
   })
 
+  it('renders the no-slot row byte-identically — the label/action line IS the row root (#4478)', () => {
+    // The optional full-width slot (#4478) must not change a caller that does
+    // not pass it. This snapshot is today's DOM, committed BEFORE the slot was
+    // added: the row root is the flex line itself, with no wrapper div and no
+    // `order-*` class. Mutation: wrap the line in an inner div unconditionally,
+    // move the padding onto a wrapper, or add an `order-*` utility → red.
+    const { container } = render(
+      <SettingsRow
+        label="Fortnox"
+        detail="Connected to ACME AB."
+        value="Connected"
+        action={<button type="button">Disconnect</button>}
+        data-testid="connection-row-fortnox"
+        data-status="connected"
+      />,
+    )
+    expect((container.firstElementChild as HTMLElement).outerHTML).toMatchInlineSnapshot(`"<div class="flex flex-col gap-3 px-6 py-4 sm:flex-row sm:items-center sm:justify-between " data-testid="connection-row-fortnox" data-status="connected"><div class="min-w-0"><p class="text-sm font-medium text-[var(--v2-ink)]">Fortnox</p><div class="mt-1 text-sm text-[var(--v2-ink-3)]">Connected to ACME AB.</div></div><div class="flex shrink-0 items-center gap-3"><div class="text-sm text-[var(--v2-ink-2)]">Connected</div><button type="button">Disconnect</button></div></div>"`)
+  })
+
+  it('renders the full-width slot after the label/action line, spanning the row (#4478)', () => {
+    // The slot is the row's second child: the label/action line first, the slot
+    // beneath it. It carries no horizontal padding of its own, so a divided
+    // section can meet the card edge; the line keeps the row's `px-6 py-4`.
+    // Mutation: render the slot inside the left text column (the `detail`
+    // position), or give the slot `px-6` → red.
+    const { container } = render(
+      <SettingsRow
+        label="Tax declaration"
+        detail="Required before your agent can pay for tax software."
+        action={<button type="button">Edit</button>}
+        below={<p>What gets sent</p>}
+      />,
+    )
+    const root = container.firstElementChild as HTMLElement
+    const [line, slot] = Array.from(root.children) as HTMLElement[]
+    expect(root.children).toHaveLength(2)
+    expect(line.textContent).toContain('Tax declaration')
+    expect(line.textContent).toContain('Edit')
+    expect(slot.textContent).toBe('What gets sent')
+    // The slot is a direct child of the row root, after the line — it spans the
+    // row rather than sitting in the left text column.
+    expect(slot.parentElement).toBe(root)
+    expect(line.contains(slot)).toBe(false)
+    // Full-bleed: no horizontal padding on the slot container.
+    expect(slot.className).not.toMatch(/\bpx-/)
+    // The line owns the row's padding now.
+    expect(line.className).toMatch(/\bpx-6\b/)
+    expect(line.className).toMatch(/\bpy-4\b/)
+    // No `order-*` utility anywhere in the row: the slot is after the line in
+    // DOM order at every breakpoint. jsdom has no breakpoints, so the 390px
+    // capture in the PR is the rendered evidence for the control's position.
+    expect(root.outerHTML).not.toMatch(/\border-/)
+  })
+
+  it('omits the slot entirely when `below` is not passed (#4478)', () => {
+    // The slot changes the structure only when it is present: without it the
+    // root is still the flex line and owns the row's padding.
+    const { container } = render(<SettingsRow label="Fortnox" detail="Connected." />)
+    const root = container.firstElementChild as HTMLElement
+    expect(root.children).toHaveLength(2)
+    expect(root.className).toMatch(/\bpx-6\b/)
+    expect(root.className).toMatch(/\bpy-4\b/)
+  })
+
   it('renders the card without the old Card.Header band — no tinted header surface', () => {
     // Mutation: re-add `<Card.Header padding="spacious">` (the grey band) →
     // red: the card must contain only the divided row list.

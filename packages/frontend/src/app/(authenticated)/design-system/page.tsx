@@ -2823,7 +2823,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="Technical details disclosure"
-        description="A markup pattern, not a component (#4264): a native <details>/<summary>, closed by default, for the technical disclosure surfaces (§ Vocabulary, voice, accessibility). The summary is a full-width row — label leading, a lucide ChevronDown trailing, rotating 180° on open via group-open:rotate-180, the same group-open rotation rule as § Arrows — and the default marker is suppressed. The content uses the panel's own detail rows (ink-3 dt label, ink-2 dd value), so the opened block reads as part of the panel. The hand-rolled <details> uses that predate the pattern (ErrorBoundary, SignersSection, OffersTable, connect-agent/*, the signers card's text-only Show address toggle) are not migrated; a new technical disclosure is written this way. Specimen content — the module address, the relayer hash, the token standard — is exactly the vocabulary this pattern exists to keep behind a deliberate fold."
+        description="A markup pattern, not a component (#4264): a native <details>/<summary>, closed by default, for the technical disclosure surfaces (§ Vocabulary, voice, accessibility). The summary is a full-width row — label leading, a lucide ChevronDown trailing, rotating 180° on open via group-open:rotate-180, the same group-open rotation rule as § Arrows — and the default marker is suppressed. The content uses the panel's own detail rows (ink-3 dt label, ink-2 dd value), so the opened block reads as part of the panel. The hand-rolled <details> uses that predate the pattern (ErrorBoundary, SignersSection, OffersTable, connect-agent/*, the signers card's text-only Show address toggle) are not migrated; a new technical disclosure is written this way. Specimen content — the module address, the relayer hash, the token standard — is exactly the vocabulary this pattern exists to keep behind a deliberate fold. The plain-language variant (#4478) keeps the same markup, the same closed-by-default state and the same ChevronDown rotation, but its label names the content in plain words (never a bare Show/Hide), its content is a text-sm text-[var(--v2-ink-2)] prose paragraph, and it may sit inside a settings row — for a long explanation a row's one-line description cannot hold. It does not license technical terms: the § Vocabulary exception covers technical disclosure surfaces only."
       >
         <div className="grid gap-5 lg:grid-cols-2">
           <Card hover={false} className="p-5">
@@ -2877,6 +2877,24 @@ export default function DesignSystemPage() {
                 </dl>
               </details>
             </div>
+          </Card>
+          <Card hover={false} className="p-5 lg:col-span-2">
+            <p className="mb-3 text-xs text-[var(--v2-ink-3)]">
+              Plain-language variant — the label names the content, the content is prose
+            </p>
+            <details className="group">
+              <summary className="flex w-full cursor-pointer select-none list-none items-center justify-between rounded text-sm text-[var(--v2-ink)] [&::-webkit-details-marker]:hidden">
+                What gets sent
+                <Icon
+                  icon={ChevronDown}
+                  className="h-4 w-4 flex-shrink-0 text-[var(--v2-ink-3)] transition-transform group-open:rotate-180"
+                />
+              </summary>
+              <p className="mt-3 border-t border-[var(--v2-border)] pt-3 text-sm text-[var(--v2-ink-2)]">
+                Haven sends your agent&apos;s name, its spending limit and the payments it made to your tax
+                software. It does not send your passkeys, your wallet keys or your balance.
+              </p>
+            </details>
           </Card>
         </div>
       </Section>
@@ -3586,7 +3604,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="Settings section (heading above the card)"
-        description="Settings pages follow the detail-page section rule (#4357, owner decision 2026-10-23): the shared `SettingsSection` (`components/ui/SettingsSection.tsx`) renders the sentence-case `v2-text-h3` heading ABOVE the card, with an optional description and any note under it; the card holds only the hairline-divided rows. The description is optional (#4476) — it appears only when it tells the reader something the heading and the card don't, and the heading keeps its gap to the card when neither a description nor a note is present (the Data specimen on the right). Unlike the Manage pattern above — which does NOT extend to settings — a settings row keeps its visible actions (Connect / Settings), not a ⋯ menu. Callers never hand-write the shape; the component's props (title, description, note, children) stay identical wherever the section is used."
+        description="Settings pages follow the detail-page section rule (#4357, owner decision 2026-10-23): the shared `SettingsSection` (`components/ui/SettingsSection.tsx`) renders the sentence-case `v2-text-h3` heading ABOVE the card, with an optional description and any note under it; the card holds only the hairline-divided rows. The description is optional (#4476) — it appears only when it tells the reader something the heading and the card don't, and the heading keeps its gap to the card when neither a description nor a note is present (the Data specimen on the right). Unlike the Manage pattern above — which does NOT extend to settings — a settings row keeps its visible actions (Connect / Settings), not a ⋯ menu. Callers never hand-write the shape; the component's props (title, description, note, children) stay identical wherever the section is used. A row can also carry content under its label/action line through the optional `below` slot (#4478): a disclosure, an inline alert or a state note that belongs to the whole row. The slot is full-bleed, so a divided section can meet the card edge; content that should align with the row's text wraps itself in `px-6`. The Agent specimen shows the plain-language disclosure variant inside it."
       >
         <div className="grid gap-5 lg:grid-cols-2">
           <SettingsSection
@@ -3603,6 +3621,33 @@ export default function DesignSystemPage() {
           </SettingsSection>
           <SettingsSection title="Data">
             <SettingsRow label="Export data" detail="Download everything as CSV." />
+          </SettingsSection>
+          <SettingsSection
+            title="Agent"
+            description="The agent Settings tab's Tax declaration row (#4477) is the first consumer of the row's full-width slot."
+          >
+            <SettingsRow
+              label="Tax declaration"
+              detail="Required before your agent can pay for tax software."
+              action={<Button size="sm" variant="ghost">Edit</Button>}
+              below={
+                <div className="px-6 pb-4">
+                  <details className="group">
+                    <summary className="flex w-full cursor-pointer select-none list-none items-center justify-between rounded text-sm text-[var(--v2-ink)] [&::-webkit-details-marker]:hidden">
+                      What gets sent
+                      <Icon
+                        icon={ChevronDown}
+                        className="h-4 w-4 flex-shrink-0 text-[var(--v2-ink-3)] transition-transform group-open:rotate-180"
+                      />
+                    </summary>
+                    <p className="mt-3 border-t border-[var(--v2-border)] pt-3 text-sm text-[var(--v2-ink-2)]">
+                      Haven sends your agent&apos;s name, its spending limit and the payments it made to your
+                      tax software. It does not send your passkeys, your wallet keys or your balance.
+                    </p>
+                  </details>
+                </div>
+              }
+            />
           </SettingsSection>
         </div>
       </Section>

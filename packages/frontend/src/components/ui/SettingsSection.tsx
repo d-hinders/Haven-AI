@@ -65,12 +65,24 @@ export function SettingsSection({
  * label, the state sentence as the detail and Connect / Reconnect /
  * Disconnect / Settings as the action. `label` is a `ReactNode` for that
  * chip; every existing call site passes a string.
+ *
+ * `below` (#4478, owner decision 2026-10-27) is the optional full-width slot
+ * under the label/action line: a disclosure, an inline alert, or a state note
+ * that belongs to the whole row. `detail` cannot carry those — it lives in the
+ * left text column, so below `sm` the action stacks after it and a disclosure
+ * there pushes the control under the opened explanation; on desktop
+ * `sm:items-center` re-centres the control as the column grows. The slot is
+ * full-bleed (no horizontal padding) so a divided section can meet the card
+ * edge; content that should align with the row's text wraps itself in `px-6`.
+ * With the slot absent the row renders exactly as it did before — the root IS
+ * the label/action line, pinned by an `outerHTML` snapshot in the test.
  */
 export function SettingsRow({
   label,
   value,
   detail,
   action,
+  below,
   className = '',
   ...rest
 }: {
@@ -78,15 +90,14 @@ export function SettingsRow({
   value?: ReactNode
   detail?: ReactNode
   action?: ReactNode
+  /** Full-width content under the label/action line (#4478). */
+  below?: ReactNode
   className?: string
   'data-testid'?: string
   'data-status'?: string
 }) {
-  return (
-    <div
-      className={`flex flex-col gap-3 px-6 py-4 sm:flex-row sm:items-center sm:justify-between ${className}`}
-      {...rest}
-    >
+  const line = (
+    <>
       <div className="min-w-0">
         <p className="text-sm font-medium text-[var(--v2-ink)]">{label}</p>
         {detail ? (
@@ -97,6 +108,31 @@ export function SettingsRow({
         {value ? <div className="text-sm text-[var(--v2-ink-2)]">{value}</div> : null}
         {action}
       </div>
+    </>
+  )
+
+  // No slot: the row root IS the label/action line — byte-identical to the
+  // pre-#4478 markup.
+  if (below === undefined || below === null) {
+    return (
+      <div
+        className={`flex flex-col gap-3 px-6 py-4 sm:flex-row sm:items-center sm:justify-between ${className}`}
+        {...rest}
+      >
+        {line}
+      </div>
+    )
+  }
+
+  // With the slot the root becomes a block: the line keeps its own padding and
+  // the slot spans the row's full width beneath it. The slot is after the line
+  // in DOM order at every breakpoint — no `order-*` anywhere.
+  return (
+    <div className={className} {...rest}>
+      <div className="flex flex-col gap-3 px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
+        {line}
+      </div>
+      <div>{below}</div>
     </div>
   )
 }

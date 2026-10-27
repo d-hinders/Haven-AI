@@ -277,31 +277,34 @@ export function ConnectionsCard() {
             const connection = byProvider.get(provider.id) ?? null
             const settingsOpen = openSettings === provider.id && connection?.status === 'connected'
             return (
-              <div key={provider.id}>
-                <ConnectionRow
-                  provider={provider}
-                  connection={connection}
-                  busy={busyProvider === provider.id}
-                  settingsOpen={settingsOpen}
-                  onConnect={() => void run(provider.id, () => connect(provider.id), copy.connectError(provider.displayName))}
-                  onConnectWithApiKey={
-                    provider.authKind === 'api_key' ? () => setApiKeyConnectFor(provider) : undefined
-                  }
-                  onDisconnect={() => setPendingDisconnect(provider)}
-                  onToggleSettings={() => setOpenSettings((open) => (open === provider.id ? null : provider.id))}
-                />
-                {settingsOpen && connection ? (
-                  // `Card.Section divided`: a hairline above the inline form so
-                  // it reads as the row's own subsection — white on white, never
-                  // a nested filled card.
-                  <Card.Section divided>
-                    <ConnectionSettings
-                      connection={connection}
-                      onSave={(patch) => updateSettings(provider.id, patch)}
-                    />
-                  </Card.Section>
-                ) : null}
-              </div>
+              <ConnectionRow
+                key={provider.id}
+                provider={provider}
+                connection={connection}
+                busy={busyProvider === provider.id}
+                settingsOpen={settingsOpen}
+                onConnect={() => void run(provider.id, () => connect(provider.id), copy.connectError(provider.displayName))}
+                onConnectWithApiKey={
+                  provider.authKind === 'api_key' ? () => setApiKeyConnectFor(provider) : undefined
+                }
+                onDisconnect={() => setPendingDisconnect(provider)}
+                onToggleSettings={() => setOpenSettings((open) => (open === provider.id ? null : provider.id))}
+                below={
+                  settingsOpen && connection ? (
+                    // `Card.Section divided`: a hairline above the inline form so
+                    // it reads as the row's own subsection — white on white, never
+                    // a nested filled card. Rendered through `SettingsRow`'s
+                    // full-width slot (#4478), so the row and its settings are one
+                    // shape instead of a hand-written sibling wrapper.
+                    <Card.Section divided>
+                      <ConnectionSettings
+                        connection={connection}
+                        onSave={(patch) => updateSettings(provider.id, patch)}
+                      />
+                    </Card.Section>
+                  ) : undefined
+                }
+              />
             )
           })}
           </div>

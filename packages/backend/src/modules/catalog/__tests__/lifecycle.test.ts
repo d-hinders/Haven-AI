@@ -410,9 +410,17 @@ describeDb('catalog ingestion lifecycle (#1714)', () => {
       expect((await monitor.tick()).probedVerified).toBe(1)
 
       // A day later the merchant stops answering and the entry is due again.
-      await db.query(`UPDATE catalog_submissions SET last_verified_at = now() - interval '2 days' WHERE id = $1`, [claim.submissionId])
-      server = brokenMcp()
+      // Backdate from the FAKE clock, never `now()`: the due query compares
+      // `last_verified_at` against `fake now - cadence`, so a real-clock seed
+      // silently stops being due once real time passes T0 + 2 days and the
+      // skip sequence below collapses (#4482 — this reddened `dev` for every
+      // PR from 2026-10-27T10:00Z).
       const T = T0 + 24 * 60 * MIN
+      await db.query(
+        `UPDATE catalog_submissions SET last_verified_at = $2::timestamptz WHERE id = $1`,
+        [claim.submissionId, new Date(T - 2 * 24 * 60 * MIN)],
+      )
+      server = brokenMcp()
       const skipped: number[] = []
       const statuses: unknown[] = []
       for (let i = 0; i <= 6; i += 1) {

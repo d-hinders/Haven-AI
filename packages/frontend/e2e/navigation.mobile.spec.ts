@@ -500,7 +500,8 @@ test.describe('one theme control per screen (#4029, #4053)', () => {
       [box.x + box.width / 2, box.y - 4] as const,
     )
     expect(hit, 'the tap 4px above the painted option still reaches it').toBe('Light')
-    // And the bottom edge, at the full 6px overhang (1px past the track).
+    // And the bottom edge, at the full 6px overhang — 5px past the group's
+    // border since #4496 dropped the `p-1` track (the group is 34px now).
     const below = await page.evaluate(
       ([x, y]) => document.elementFromPoint(x, y)?.closest('[role="radio"]')?.textContent ?? null,
       [box.x + box.width / 2, box.y + box.height + 5.5] as const,

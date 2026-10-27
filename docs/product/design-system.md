@@ -129,6 +129,12 @@ last-verified: 2026-10-27
 > (44px hit area, inset brand outline on the selected option). This note covers
 > that passage only.
 
+> Re-verified 2026-10-27 for #4496: § Tap targets' `SegmentedControl` passage
+> (44px hit area, the 5px overhang past the group's border, the outlined/divided
+> look and the selected segment's brand-soft fill + brand ink + semibold with no
+> outline), and § *Below `lg`*'s tab-bar bullet, where `SegmentedControl`'s
+> selected option is named. This note covers those passages only.
+
 > Re-verified 2026-09-03 for #2468: the investor-briefing route, its tap-target
 > borrower, and its marketing exemption were retired; the surviving focus-ring
 > census intentionally keeps a one-member anti-vacuity floor. This note covers
@@ -684,7 +690,7 @@ The authenticated app uses one stable product shell:
 - **Below `lg`, navigation is the floating tab bar plus the More sheet** ([#2731](https://github.com/d-hinders/Haven-AI/issues/2731), [#4053](https://github.com/d-hinders/Haven-AI/issues/4053), [#4058](https://github.com/d-hinders/Haven-AI/issues/4058), [#4237](https://github.com/d-hinders/Haven-AI/issues/4237)). Primary is a five-cell pill — Home (the bar's label for `/dashboard`; the rail, the page `h1` and the route keep "Dashboard"), Agents, Activity (the bar's label for `/transactions`; the rail and the page keep "Transactions"), Accounts, and More, which opens a floating card holding everything else. Properties worth knowing before touching it:
   - **A floating pill** (#4058, dark lift #4063, concentric capsule #4237): `rounded-full`, a 1px token edge and `shadow-popover`, inset `max(12px, inset)` from the sides, `--v2-tab-bar-bottom` (`max(12px, inset)`) above the bottom edge, capped at `max-w-md` and centred. The pill paints from its own token pair, `--v2-tab-bar-bg` / `--v2-tab-bar-border` — **solid** and opaque, with no `backdrop-filter`: the owner chose near-solid over glass, and at 95% opacity page text ghosted through behind the labels. In light mode the pair aliases `--v2-bg` / `--v2-border` exactly and the popover shadow lifts the pill. In dark mode both blocks redeclare it — fill `--v2-surface-2` (`#20252f`) and edge `--v2-border-strong` (`#3a4152`) — because the dark shadow is black on near-black: against `--v2-bg` the dark edge measures **1.79:1** (up from `--v2-border`'s 1.41:1) and the fill 1.19:1, so the pill reads as a distinct surface. `--v2-tab-bar-h` is its outer height (62px): 52px cells, `p-1` (4px) on every side and the 1px border. It stays the `fixed` `<nav data-mobile-tab-bar>` itself — specs select it that way. Each cell is a full rectangle for hit-testing (Chromium hit-tests `border-radius`, so a rounded cell has dead corners); the active shape is painted by an inner `[data-tab-indicator]` span — a full capsule, concentric with the pill: it is set in by the same 5px on every side (the `p-1` padding plus the border), so its 26px radius follows the pill's 31px curve. #4058 had it `rounded-2xl` because a capsule crossed the letters of "Dashboard"; #4237 pairs the capsule with the bar-only "Home" label (`TAB_LABELS`), which keeps the curved ends off the landing tab's label instead.
   - **Tabs are selected from `baseNavItems` by ROUTE, never by index.** The bar's order differs from the rail's, so a positional read reorders the bar the next time an entry is inserted.
-  - **The bar's active idiom is its own: a neutral concentric capsule** ([#4237](https://github.com/d-hinders/Haven-AI/issues/4237), owner decision 2026-10-21, Revolut-style). The active cell is `--v2-ink` + semibold on a `rounded-full` `--v2-tab-bar-indicator` fill with NO outline; inactive cells and More stay `--v2-ink-3` + medium. This deliberately relaxes the **one active idiom** rule ([#2818](https://github.com/d-hinders/Haven-AI/issues/2818)) for the bar: the More sheet's rows keep their `--v2-brand-soft` + brand ink, and `SegmentedControl`'s selected option is untouched. The two idioms are never on screen together — the sheet covers the bar while open (`design-system.md` § *More sheet*) — and co-visibility was #2818's failure case. The fill is a SUPPLEMENTARY cue, recorded here with its measured ratios: it reads 1.12:1 on the light pill (`#eef2f7` on `#ffffff`) and 1.18:1 on the dark pill (`#2b3140` on `#20252f`) — a subtle neutral fill cannot reach WCAG 1.4.11's 3:1 without becoming the heavy block the owner declined (and dark `--v2-surface-2` equals the pill fill outright, 1.00:1). Selection is carried by three cues on the cell: `--v2-ink` vs `--v2-ink-3` (3.05:1 light, 2.50:1 dark — in dark mode the 600-vs-500 weight is load-bearing), the weight step, and `aria-current="page"`. Both text states clear 4.5:1 on their grounds (`CONTRAST_PAIRS`: ink on `tab-bar-indicator` 14.44 light / 11.68 dark; ink-3 on `tab-bar-bg` 5.32 light / 5.52 dark). The focus ring stays the outset `ring-2 ring-brand/80` on the indicator.
+  - **The bar's active idiom is its own: a neutral concentric capsule** ([#4237](https://github.com/d-hinders/Haven-AI/issues/4237), owner decision 2026-10-21, Revolut-style). The active cell is `--v2-ink` + semibold on a `rounded-full` `--v2-tab-bar-indicator` fill with NO outline; inactive cells and More stay `--v2-ink-3` + medium. This deliberately relaxes the **one active idiom** rule ([#2818](https://github.com/d-hinders/Haven-AI/issues/2818)) for the bar: the More sheet's rows keep their `--v2-brand-soft` + brand ink, and `SegmentedControl`'s selected option keeps its own — since [#4496](https://github.com/d-hinders/Haven-AI/issues/4496) it is brand-soft fill + brand ink + semibold with **no outline**, so it and the nav share the fill and the ink but not the outline. The two idioms are never on screen together — the sheet covers the bar while open (`design-system.md` § *More sheet*) — and co-visibility was #2818's failure case. The fill is a SUPPLEMENTARY cue, recorded here with its measured ratios: it reads 1.12:1 on the light pill (`#eef2f7` on `#ffffff`) and 1.18:1 on the dark pill (`#2b3140` on `#20252f`) — a subtle neutral fill cannot reach WCAG 1.4.11's 3:1 without becoming the heavy block the owner declined (and dark `--v2-surface-2` equals the pill fill outright, 1.00:1). Selection is carried by three cues on the cell: `--v2-ink` vs `--v2-ink-3` (3.05:1 light, 2.50:1 dark — in dark mode the 600-vs-500 weight is load-bearing), the weight step, and `aria-current="page"`. Both text states clear 4.5:1 on their grounds (`CONTRAST_PAIRS`: ink on `tab-bar-indicator` 14.44 light / 11.68 dark; ink-3 on `tab-bar-bg` 5.32 light / 5.52 dark). The focus ring stays the outset `ring-2 ring-brand/80` on the indicator.
   - **More is a cell of the bar, and only opens** (#4053, #4058). Until #4053 it was a sibling painted over the bar on `--v2-z-nav-toggle`, because #2820's full-screen drawer covered the bar. Since #4058 its name is the constant *Open sidebar* (with `aria-expanded`) and its label always "More": the sheet covers the cell, and *Close sidebar* belongs to the sheet's ✕ alone — two buttons with that name would break the harness under Playwright's strict mode.
 - **The More sheet** (#4053, `components/sidebar/MoreSheet.tsx`) replaced #2820's full-screen drawer — the desktop rail stretched to the screen. Since #4058 it is a floating card over the floating bar.
   - **Geometry:** a card `max(8px, inset)` in from the sides and the bottom, `rounded-3xl`, capped at `max-w-lg` and centred; it covers the tab bar. Sized to its content up to a max height, scrolling inside beyond that. Its scrim dims everything from below the status-bar band (§ *Safe areas*) to the viewport **bottom**, edge to edge — no scrim edge across the pill, no undimmed strip.
@@ -1486,17 +1492,45 @@ Consequences worth knowing:
   2px on `md`, so at the 8px (`gap-2`) spacing this system typically uses between stacked
   controls, adjacent targets meet but never overlap. Tighter than that and two buttons
   fight over the same pixels — this is the one new constraint the mechanism introduces.
+  `SegmentedControl`'s options overhang **5px** past the group's border since #4496, so that
+  control needs **≥ 12px** to a stacked neighbour — see its passage below.
 - Choosing `size` therefore stays a **density** decision, not an ergonomics one.
 - **`SegmentedControl` carries the same mechanism** ([#4056](https://github.com/d-hinders/Haven-AI/issues/4056)).
   Each option paints 32px and extends its hit area to 44px vertically (never sideways —
-  the options abut). The overhang is 6px per edge from the option, 1px past the track, so
-  the 8px rule above applies to whatever is stacked above or below the control. Its
-  selected option is brand ink on `--v2-brand-soft` inside a 1px inset brand outline
-  (`-outline-offset-1`, not `ring-inset`, which would leak into the focus ring and
-  leave the selected option's focus a 1px thickening; focus stays the outset
-  `ring-2`): the outline is the component boundary, 5.95:1 (light) / 7.99:1 (dark) against the
-  `--v2-surface` track, where the old `--v2-surface-2` thumb measured 1.06:1 / 1.10:1 and
-  read as sunken in light. It is a **settings-type** control — theme, appearance, any
+  the options abut). The overhang is 6px per edge from the option; since #4496 dropped the
+  `p-1` track the group is 34px, so the overhang sits **5px past the group's border** (it was
+  1px). The 8px rule above assumes ≤ 4px overhangs, so this control needs **≥ 12px** to a
+  stacked neighbour — every consumer already has it (e.g. the More sheet's `pt-3`).
+
+  Since the owner's 2026-10-27 decision ([#4496](https://github.com/d-hinders/Haven-AI/issues/4496))
+  it is an **outlined, divided** control: a 1px `--v2-border` around content-width segments
+  with hairline `--v2-border` dividers, no tinted track and no padding. The selected segment
+  is `--v2-brand-soft` fill + `--v2-brand` ink + **semibold**, with **no outline** — the
+  #4056 inset brand outline is relaxed the same way the mobile tab bar's was (#4237), and the
+  record is the same shape: selection is carried by the fill, the ink, the weight step and
+  `aria-checked`. Measured from the tokens:
+
+  | Pair | Light | Dark | Role |
+  |---|---|---|---|
+  | `brand` on `brand-soft` (selected text) | 5.62 | 6.63 | text, ≥ 4.5 ✔ |
+  | `ink-2` on `bg` (unselected text, Card ground) | 6.36 | 9.63 | text, ≥ 4.5 ✔ |
+  | `ink-2` on `surface` (unselected text, More sheet ground) | 6.02 | 8.90 | text, ≥ 4.5 ✔ |
+  | `brand-soft` vs `bg` (selected fill vs Card) | 1.12 | 1.30 | supplementary |
+  | `brand-soft` vs `surface` (fill vs More sheet) | 1.06 | 1.20 | supplementary |
+  | `brand` vs `ink-2` (selected vs unselected ink) | 1.01 | 1.11 | hue only — **no luminance cue** |
+  | `border` vs `bg` / `surface` (group outline) | 1.20 / 1.13 | 1.41 / 1.30 | supplementary (labels identify the control) |
+
+  Unlike the tab bar (ink vs ink-3, 3.05 / 2.50), the selected-vs-unselected ink difference
+  here is hue only, and the ink-3 → ink-2 swap removes the small step today's pairing had
+  (brand vs ink-3 is 1.18 / 1.32 — neither is a real cue). So the **semibold-vs-medium weight
+  step is the load-bearing non-colour cue** (WCAG 1.4.1), with the fill and `aria-checked`.
+  The group is `inline-flex` — content-width, because a block parent would stretch it and the
+  dividers would read as an empty trailing segment — and carries no `overflow-hidden`, which
+  would clip the options' hit-area overhang in paint *and* hit-testing; the outer segments are
+  rounded instead (`first:rounded-l-[5px] last:rounded-r-[5px]`, `rounded-md` minus the 1px
+  border). Focus stays the outset `ring-2 ring-brand/80`, with `focus-visible:z-10` so the
+  next segment's fill cannot paint over it; no option uses `ring-inset`, which would leak into
+  the focus ring and leave the selected option's focus a 1px thickening. It is a **settings-type** control — theme, appearance, any
   persisted preference — never a list or period filter: filtering is the list controls'
   job, and the period is `PeriodPicker`'s (#4116).
 

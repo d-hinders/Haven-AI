@@ -734,6 +734,31 @@ test.describe('design-system visual regression', () => {
       await expect(sample.locator('[aria-hidden="true"].h-12.w-12')).toHaveCount(1)
       await expectShowcaseClip(sample, vp.height, 'the PageHeader leading sample', `design-system-pageheader-leading-${vp.name}${schemeSuffix}.png`, SAMPLE_MAX_DIFF_PIXELS)
     })
+
+    // #4496: the SegmentedControl's outlined, divided look — the selected
+    // segment is brand-soft fill + brand ink + semibold with NO outline, and
+    // the group is a 1px border with hairline dividers and no tinted track.
+    // No other baseline covers the specimen, and the dark project is the only
+    // place the selected state's dark palette is photographed at all (the
+    // currency and More-sheet baselines capture it in situ, not as a specimen).
+    // The clip is the controls row, so it carries the enabled three-way control
+    // and the disabled two-way one side by side.
+    test(`/design-system SegmentedControl sample renders pixel-stable (${vp.name})`, async ({ page }, testInfo) => {
+      const scheme = schemeOf(testInfo)
+      const schemeSuffix = scheme === 'dark' ? '-dark' : ''
+      await page.setViewportSize({ width: vp.width, height: vp.height })
+      await page.goto('/design-system')
+      await page.evaluate(() => document.fonts.ready)
+      await page.waitForLoadState('networkidle')
+
+      const sample = page.getByTestId('ds-segmented-control')
+      await expect(sample).toHaveCount(1)
+      // Two controls: the enabled three-way theme one and the disabled pair.
+      await expect(sample.getByRole('radiogroup')).toHaveCount(2)
+      await expect(sample.getByRole('radio', { name: 'System' })).toHaveAttribute('aria-checked', 'true')
+      await expect(sample.getByRole('radio', { name: '$ USD' })).toBeDisabled()
+      await expectShowcaseClip(sample, vp.height, 'the SegmentedControl sample', `design-system-segmented-control-${vp.name}${schemeSuffix}.png`, SAMPLE_MAX_DIFF_PIXELS)
+    })
   }
 
   // #4288: the day-grouped ledger — the same-day inset divider is the one
@@ -801,6 +826,7 @@ test.describe('design-system visual regression', () => {
     ['StatTile inline sample', (p) => p.getByTestId('ds-stat-tile-inline')],
     ['Monogram sample', (p) => p.getByTestId('ds-monogram')],
     ['PageHeader leading sample', (p) => p.getByTestId('ds-pageheader-leading')],
+    ['SegmentedControl sample', (p) => p.getByTestId('ds-segmented-control')],
   ]
 
   const FRACTIONAL_SPACERS_PX = [0.25, 0.5, 0.75]

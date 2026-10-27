@@ -196,16 +196,18 @@ export function MobileTabBar({
           >
             {/* The bar's selection idiom is its own (#4237, owner decision —
                 Revolut's tab bar): a neutral concentric CAPSULE
-                (`--v2-tab-bar-indicator`), not the brand-soft + outline idiom
-                the rest of the app's selections use. The "one active idiom"
-                rule (#2818) is deliberately relaxed for the bar: the More
-                sheet's rows keep their brand tint (`MoreSheet`), and since the
-                sheet covers the bar while open the two idioms are never on
-                screen together — co-visibility was #2818's failure case.
-                `SegmentedControl` itself is untouched. It replaced a 2px rail
-                across the cell's top edge, which an edge-less floating pill
-                has nowhere to hang (and then the #4058 brand-soft+outline
-                indicator).
+                (`--v2-tab-bar-indicator`), not the brand-soft + brand-ink
+                idiom the rest of the app's selections use. The "one active
+                idiom" rule (#2818) is deliberately relaxed for the bar: the
+                More sheet's rows keep their brand tint (`MoreSheet`), and
+                since the sheet covers the bar while open the two idioms are
+                never on screen together — co-visibility was #2818's failure
+                case. `SegmentedControl` is untouched by this decision: since
+                #4496 it is brand-soft + brand ink + semibold with NO outline,
+                so it and the nav share the fill and the ink but not the
+                outline. It replaced a 2px rail across the cell's top edge,
+                which an edge-less floating pill has nowhere to hang (and then
+                the #4058 brand-soft+outline indicator).
 
                 The fill is NOT the carrier of the selection — see the
                 accessibility position on `indicatorClass`: a subtle neutral

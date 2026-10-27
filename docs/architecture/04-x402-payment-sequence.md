@@ -2758,15 +2758,17 @@ itself redeems `[grant, parent-child, budget]` (three links).
 3. Agent B names the budget: `sub_budget_id` on `POST /payments`,
    `subBudgetId` on `POST /x402/authorize`. The backend refuses before
    building the chain when the grant or its parent-child row is not open
-   (`sub_budget_not_open` — A revoked its grant, A's own budget delegation
-   was revoked, or expiry), the token or pinned recipient disagrees, or the
-   grant was not carved from the budget delegation selected for the payment
-   (`sub_budget_parent_mismatch`) — the parent delegation is then used
+   (`sub_budget_not_open` — A revoked its grant, or expiry), the token or
+   pinned recipient disagrees, or the grant was not carved from the budget
+   delegation selected for the payment, or A's own budget delegation was
+   revoked (`sub_budget_parent_mismatch`) — the parent delegation is then used
    VERBATIM by hash, the #3329 review-finding-E rule applied twice. Revoking
    B's child leaves A intact; revoking A's budget delegation strands B's
    child (its chain root no longer resolves active by hash, and reverts
    on-chain once the owner's disable lands) — surfaced as the structured 409
-   above.
+   above. (#4468 corrected this attribution: a revoked A budget delegation
+   fails the parent-child lookup by hash, which answers
+   `sub_budget_parent_mismatch`, never `sub_budget_not_open`.)
    On `POST /x402/authorize` both legs resolve the scope through
    `modules/budget-scope` (#3617) and pre-check the links the redemption
    carries (`periodPrecheckLinks`): B's grant, A's parent-child and A's budget,

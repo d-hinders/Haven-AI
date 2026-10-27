@@ -849,7 +849,7 @@ rule). `?grant=` keeps working alongside `?tab=`. Sections, in order:
    former "Out" + server total repeated the count and, beside the account
    tab's money In/Out, read as an amount; the count alone is the List
    controls default for a page with no totals, #4196),
-   `ListShowMore` sits below the card, and a row opens the shared
+   `ListShowMore` is the card's footer row, and a row opens the shared
    transaction detail panel. No link to `/transactions` under the list
    (#4327): the tab is a full ledger, like the account Activity tab. Empty
    states: "No payments yet" — and for
@@ -957,7 +957,7 @@ Structure:
    adapted by `activityToTransaction`. The parameter is consumed — stripped
    once the panel is open — so a re-render or filter write cannot re-open
    it.
-6. `ListShowMore` sits below the card, paging with #4229's `hasMore` and
+6. `ListShowMore` is the card's footer row, paging with #4229's `hasMore` and
    `total`.
 
 Empty state: an agent with no tool calls gets "No tool calls" and a one-line
@@ -1008,8 +1008,8 @@ Structure:
    the empty state is "No refused attempts". The deep link
    `/agents/{id}?tab=activity&status=refused` reproduces the view.
 4. The toolbar's count alone on the summary line (#4274, owner decision
-   (a)) and `ListShowMore` below
-   the card; no link to `/transactions` under it (#4327).
+   (a)) and `ListShowMore` as the card's footer row; no link to
+   `/transactions` under it (#4327).
 5. Empty state with the next useful action ("No payments yet"; for an agent
    still in setup, the budget pointer).
 
@@ -1112,9 +1112,9 @@ Structure:
    summary line below the card (#4196) carries the standard count on the
    right — "{n} transactions", or "{shown} of {total} transactions" filtered,
    both server figures — and the "In <total> · Out <total>" money totals on
-   the left (per #4266; a Direction filter shows only its half). The next page is "Show N more" below the ledger card
-   (the pattern's paging rule); nothing renders under the list once every
-   page is loaded. The URL keeps the keys it had before #4111 except search,
+   the left (per #4266; a Direction filter shows only its half). The next page is "Show N more" as the ledger card's footer row
+   (the pattern's paging rule); once every page is loaded the footer is gone
+   and the card ends with its last row. The URL keeps the keys it had before #4111 except search,
    written as `q` with the old `search` still read; the export request builds its API
    parameters with the list's own `transactionFilterParams`, apart from the
    URL codec. Order is newest first by date, fixed —
@@ -1397,7 +1397,7 @@ it):
      final shape), on the list-controls pattern: "In · Out" for the filtered
      set (sr-only "Money in" / "Money out" before each figure) on the left of
      the list summary line, the count on the right (#4196), and "Show N more"
-     below the ledger card.
+     as the ledger card's footer row.
    - **Agents** — one budget-snapshot summary line, then every active agent
      drawn with the shared agent row (#4096). Revoked agents are not listed;
      one line says how many are hidden and links to the Agents page's

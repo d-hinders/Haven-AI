@@ -1088,4 +1088,40 @@ test.describe('driven focus-state visual regression', () => {
       })
     })
   }
+
+  /**
+   * #4495: the paging row's focus ring is INSET, so it paints inside the row's
+   * own box — and the row is the card's footer, so the capture is the card, not
+   * a padded crop around the button: the point is that the ring follows the
+   * card's bottom corners (`rounded-b-[10px]`) and is not clipped by the card's
+   * `overflow-hidden`. A padded button crop would show the ring but not the
+   * clipping it exists to prove.
+   */
+  test('list controls — paging row focus indicator', async ({ page }) => {
+    await gotoDesktop(page, '/design-system')
+    const section = page.getByTestId('ds-list-controls-paging')
+    await section.scrollIntoViewIfNeeded()
+    const target = section.getByRole('button', { name: 'Show 24 more' })
+    await expect(target).toHaveCount(1)
+    // The specimen has no text input to start from, so the documented
+    // button drive applies: script-focus, then one Shift+Tab / Tab pair to put
+    // the document back in keyboard modality on the same control.
+    await target.focus()
+    await page.keyboard.press('Shift+Tab')
+    await page.keyboard.press('Tab')
+    await expectFocusedAndIndicated(page, target, 'List controls · paging')
+    const card = section.locator('.shadow-card')
+    await expect(card).toHaveCount(1)
+    const box = await card.boundingBox()
+    if (!box) throw new Error('List controls · paging: the card has no box')
+    await expect(page).toHaveScreenshot('focus-list-controls-paging-desktop.png', {
+      ...SNAPSHOT_OPTIONS,
+      clip: {
+        x: box.x - RING_CLIP_PADDING,
+        y: box.y - RING_CLIP_PADDING,
+        width: box.width + 2 * RING_CLIP_PADDING,
+        height: box.height + 2 * RING_CLIP_PADDING,
+      },
+    })
+  })
 })

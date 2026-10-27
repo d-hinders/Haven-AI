@@ -496,7 +496,12 @@ describe('TransactionsClient — URL and export params (#4111)', () => {
     feedState.hasMore = true
     feedState.total = 60
     const { unmount } = render(<TransactionsClient />)
-    fireEvent.click(screen.getByRole('button', { name: 'Show 25 more' }))
+    const button = screen.getByRole('button', { name: 'Show 25 more' })
+    // Inside the card: the footer row is the card's last child (#4495).
+    const card = screen.getByTestId('transactions-ledger').closest('.shadow-card')
+    expect(card).not.toBeNull()
+    expect(card).toContainElement(button)
+    fireEvent.click(button)
     expect(feedState.loadMore).toHaveBeenCalledTimes(1)
     unmount()
 

@@ -520,6 +520,16 @@ export default function TransactionsClient() {
               ))}
             </div>
           )}
+          {!loadingInitial && !error && (
+            <ListShowMore
+              loaded={transactions.length}
+              total={total}
+              pageSize={TRANSACTIONS_PAGE_SIZE}
+              hasMore={hasMore}
+              loading={loadingMore}
+              onShowMore={() => void loadMore()}
+            />
+          )}
         </Card>
       )}
 
@@ -530,17 +540,6 @@ export default function TransactionsClient() {
         resolveAddress={resolveAddress}
         accountNamesByAddress={accountNamesByAddress}
       />
-
-      {!showNoMatch && !loadingInitial && !error && (
-        <ListShowMore
-          loaded={transactions.length}
-          total={total}
-          pageSize={TRANSACTIONS_PAGE_SIZE}
-          hasMore={hasMore}
-          loading={loadingMore}
-          onShowMore={() => void loadMore()}
-        />
-      )}
     </div>
   )
 }

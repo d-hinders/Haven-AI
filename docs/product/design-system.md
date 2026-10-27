@@ -2601,21 +2601,27 @@ the full name staying in the trigger's accessible name.
 One rule for every paged list (today the account and agent Activity tabs,
 the agent Tool calls tab and Transactions, all 25 per page):
 
-- the list card ends with its last row — no button, divider or footer band
-  inside it;
-- the next page is `ListShowMore`: a default-size ghost button centred below
-  the card, labelled "Show {n} more", where n is what the next page adds,
-  min(page size, total − loaded), from the feed's own loaded rows and server
-  total;
+- while pages remain, the list card ends with its **footer row**: a hairline
+  (`Card.Section divided`), then one centred "Show {n} more" row in
+  `--v2-ink-2` that spans the card's width and is at least 44 px tall;
+- n is what the next page adds, min(page size, total − loaded), from the
+  feed's own loaded rows and server total;
 - "Show more" when the server still reports more but the totals leave nothing
   to count (a poll moved the total between reads); "Loading…", disabled, while
   the page fetches;
-- once every page is loaded, nothing renders below the list. A truncated read
-  is said by its hedge under the summary line, not here.
+- once every page is loaded the footer is gone and the card ends with its last
+  row. A truncated read is said by its hedge under the summary line, not here.
 
-The dashboard's **Needs attention** expand (`NeedsYou.tsx`) is a local
-disclosure over rows already loaded, not a paged list, and is out of this
-rule's scope.
+The footer is a text row, not a `Button`: `Button` hard-codes `rounded-md` and
+an outset `ring-offset-2` that an `overflow-hidden` card clips. Its focus ring
+is the in-card row treatment — `ring-2 ring-inset ring-brand/80` with
+`rounded-b-[10px]`, so the ring follows the card's bottom corners.
+
+Two other in-card footers are deliberately separate, not copies of this one:
+the dashboard's **Needs attention** expand (`NeedsYou.tsx`) is a local
+disclosure over rows already loaded, not a paged list, and the dashboard
+agents "View all N agents" link (`AgentsSection.tsx`) is navigation, not
+paging. Unifying the three looks is a candidate follow-up, not this rule.
 
 #### URL state
 

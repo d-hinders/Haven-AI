@@ -694,6 +694,26 @@ test.describe('design-system visual regression', () => {
       await expectShowcaseClip(sample, vp.height, 'the StatTile inline sample', `design-system-stat-tile-inline-${vp.name}${schemeSuffix}.png`, SAMPLE_MAX_DIFF_PIXELS)
     })
 
+    // #4495: the paging footer row — the hairline, the centred ink-2 text and
+    // the 44px row are one layout no unit test sees, and no committed baseline
+    // covered `ListShowMore` before this (the transactions route baselines use
+    // a two-row fixture with no next page). Idle state only: the specimen's
+    // "Show 24 more" starts a 600ms loading timer, and this gate photographs
+    // the resting page.
+    test(`/design-system list-controls paging sample renders pixel-stable (${vp.name})`, async ({ page }, testInfo) => {
+      const scheme = schemeOf(testInfo)
+      const schemeSuffix = scheme === 'dark' ? '-dark' : ''
+      await page.setViewportSize({ width: vp.width, height: vp.height })
+      await page.goto('/design-system')
+      await page.evaluate(() => document.fonts.ready)
+      await page.waitForLoadState('networkidle')
+
+      const sample = page.getByTestId('ds-list-controls-paging')
+      await expect(sample).toHaveCount(1)
+      await expect(sample.getByTestId('list-show-more')).toBeVisible()
+      await expectShowcaseClip(sample, vp.height, 'the list-controls paging sample', `design-system-list-controls-paging-${vp.name}${schemeSuffix}.png`, SAMPLE_MAX_DIFF_PIXELS)
+    })
+
     // #4208: these are the two standing examples for the agent identity mark.
     // The first protects the compact row-sized Monogram, including the emoji
     // grapheme case; the second protects its title alignment in PageHeader.
@@ -801,6 +821,7 @@ test.describe('design-system visual regression', () => {
     ['StatTile inline sample', (p) => p.getByTestId('ds-stat-tile-inline')],
     ['Monogram sample', (p) => p.getByTestId('ds-monogram')],
     ['PageHeader leading sample', (p) => p.getByTestId('ds-pageheader-leading')],
+    ['list-controls paging sample', (p) => p.getByTestId('ds-list-controls-paging')],
   ]
 
   const FRACTIONAL_SPACERS_PX = [0.25, 0.5, 0.75]

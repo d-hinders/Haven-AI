@@ -127,6 +127,25 @@ describe('SettingsSection', () => {
     expect(getByText('Disconnect').tagName).toBe('BUTTON')
   })
 
+  it('renders the no-slot row byte-identically — the label/action line IS the row root (#4478)', () => {
+    // The optional full-width slot (#4478) must not change a caller that does
+    // not pass it. This snapshot is today's DOM, committed BEFORE the slot was
+    // added: the row root is the flex line itself, with no wrapper div and no
+    // `order-*` class. Mutation: wrap the line in an inner div unconditionally,
+    // move the padding onto a wrapper, or add an `order-*` utility → red.
+    const { container } = render(
+      <SettingsRow
+        label="Fortnox"
+        detail="Connected to ACME AB."
+        value="Connected"
+        action={<button type="button">Disconnect</button>}
+        data-testid="connection-row-fortnox"
+        data-status="connected"
+      />,
+    )
+    expect((container.firstElementChild as HTMLElement).outerHTML).toMatchInlineSnapshot(`"<div class="flex flex-col gap-3 px-6 py-4 sm:flex-row sm:items-center sm:justify-between " data-testid="connection-row-fortnox" data-status="connected"><div class="min-w-0"><p class="text-sm font-medium text-[var(--v2-ink)]">Fortnox</p><div class="mt-1 text-sm text-[var(--v2-ink-3)]">Connected to ACME AB.</div></div><div class="flex shrink-0 items-center gap-3"><div class="text-sm text-[var(--v2-ink-2)]">Connected</div><button type="button">Disconnect</button></div></div>"`)
+  })
+
   it('renders the card without the old Card.Header band — no tinted header surface', () => {
     // Mutation: re-add `<Card.Header padding="spacious">` (the grey band) →
     // red: the card must contain only the divided row list.

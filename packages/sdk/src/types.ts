@@ -1559,6 +1559,23 @@ export interface HavenPaymentReceipt {
   paymentIntentId?: string | null
   approvalRequestId?: string | null
   /**
+   * #4469: which settlement branch moved the money (`eip3009` | `erc7710`),
+   * from the intent (#946). The receipts wire declares this as raw text with
+   * no enum (`packages/backend/src/openapi/spec.ts`), so it is typed
+   * `string | null` here rather than narrowed: a value this SDK does not know
+   * is still the backend's record, and narrowing it to `null` would erase it.
+   * Absent on an older backend; `null` when the backend states no scheme
+   * (legacy-rail receipts).
+   */
+  settlementScheme?: string | null
+  /**
+   * #4469: the budget delegation that METERED this payment (#3518), uniform
+   * across schemes. `string | null` on receipts — the backend sends
+   * `?? null` — unlike {@link PaymentStatusResult.budgetDelegationHash}, which
+   * is `string` and absent when unknown. Absent on an older backend.
+   */
+  budgetDelegationHash?: string | null
+  /**
    * #3134: the payment protocol this receipt settled on — one of the
    * evidence-eligible rails (`x402`, `mpp_demo`, `mpp_crypto`, `spt`) — under the
    * name the transactions feed uses for the same concept. Distinct from
@@ -1633,6 +1650,23 @@ export interface HavenPaymentReceipt {
    */
   protocolReceiptPayload?: Record<string, unknown> | null
   merchantStatus: number | null
+  /**
+   * #4469: the paying agent's own delivery verdict (#3770), when it reported
+   * one — `ok` | `unusable` | `partial`. Evidence only: it never gates
+   * anything and the payment itself is unchanged. Absent on an older backend;
+   * `null` when the backend states "not reported".
+   */
+  deliveryQuality?: 'ok' | 'unusable' | 'partial' | null
+  /** #4469: the agent's optional note (max 2000 chars) saying what was wrong. Absent on an older backend. */
+  deliveryNote?: string | null
+  /** #4469: when the agent reported the verdict (ISO 8601). Absent on an older backend. */
+  deliveryReportedAt?: string | null
+  /**
+   * #4469: the NON-SECRET pointer to a delivered good (#3778) — merchant,
+   * product, value, order id. Never a redemption code or other credential:
+   * those are refused at write. Absent on an older backend.
+   */
+  deliveryReference?: string | null
   confirmedAt: string | null
   createdAt: string
   updatedAt: string
@@ -2681,6 +2715,10 @@ export interface RawHavenPaymentReceipt {
   payment_intent_id?: string | null
   approval_request_id?: string | null
   rail: string
+  /** #4469: raw text with no enum on the receipts wire; absent on an older backend. */
+  settlement_scheme?: string | null
+  /** #4469: the metering budget delegation (#3518); the backend sends `?? null`. Absent on an older backend. */
+  budget_delegation_hash?: string | null
   proof_status: string
   /** @deprecated (#2998) — see `funding_tx_hash` / `settlement_tx_hash`. */
   tx_hash: string
@@ -2705,6 +2743,14 @@ export interface RawHavenPaymentReceipt {
   protocol_receipt_header_name: string | null
   protocol_receipt_payload?: Record<string, unknown> | null
   merchant_status: number | null
+  /** #4469: the agent's delivery verdict (#3770); absent on an older backend. */
+  delivery_quality?: 'ok' | 'unusable' | 'partial' | null
+  /** #4469: the agent's note on the verdict; absent on an older backend. */
+  delivery_note?: string | null
+  /** #4469: when the verdict was reported; absent on an older backend. */
+  delivery_reported_at?: string | null
+  /** #4469: the NON-SECRET delivery pointer (#3778); absent on an older backend. */
+  delivery_reference?: string | null
   confirmed_at: string | null
   created_at: string
   updated_at: string

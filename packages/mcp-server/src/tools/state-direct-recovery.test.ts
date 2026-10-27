@@ -712,6 +712,42 @@ describe('haven_list_receipts', () => {
     )
     expect(result.data).toEqual({ receipts: [], total: null, hasMore: null, nextCursor: null })
   })
+
+  it('#4469: a row carrying a reported delivery verdict reaches the agent through the hosted tool', async () => {
+    // The hosted tool returns the SDK's `listReceiptsPage`, so this drives the
+    // whole chain: stubbed backend page -> mapPaymentReceipt -> the agent's
+    // result. Before #4469 the mapper read none of the six, so every value
+    // below was absent from the tool's answer.
+    stubFetch({
+      'GET /machine-payments/receipts': {
+        status: 200,
+        body: {
+          receipts: [{
+            id: 'rcpt_1', payment_id: 'pay_1', rail: 'x402', amount_human: '0.01',
+            settlement_scheme: 'eip3009',
+            budget_delegation_hash: '0xbudget',
+            delivery_quality: 'unusable',
+            delivery_note: 'the paid call returned an empty body',
+            delivery_reported_at: '2026-10-27T09:00:00.000Z',
+            delivery_reference: 'Bik Bok 5 SEK, order 6ac7',
+          }],
+          total: 1,
+          has_more: false,
+          next_cursor: null,
+        },
+      },
+    })
+
+    const result = ok<{ receipts: Array<Record<string, unknown>> }>(await handlers().haven_list_receipts({}))
+    expect(result.data.receipts[0]).toMatchObject({
+      settlementScheme: 'eip3009',
+      budgetDelegationHash: '0xbudget',
+      deliveryQuality: 'unusable',
+      deliveryNote: 'the paid call returned an empty body',
+      deliveryReportedAt: '2026-10-27T09:00:00.000Z',
+      deliveryReference: 'Bik Bok 5 SEK, order 6ac7',
+    })
+  })
 })
 
 // ── haven_verify_receipt (#3418) ──────────────────────────────────────────────

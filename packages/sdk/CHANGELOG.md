@@ -17,6 +17,18 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ### Added
 
+- **`haven_list_receipts` rows carry the delivery verdict, the settlement
+  scheme and the budget hash (#4469).** `HavenPaymentReceipt` gains six
+  optional fields the receipts wire already carried and the SDK mapper used to
+  drop: `settlementScheme` (`string | null` — raw text on the wire, no enum, so
+  an unknown value is kept rather than erased), `budgetDelegationHash`
+  (`string | null`), `deliveryQuality` (`'ok' | 'unusable' | 'partial' | null`),
+  `deliveryNote`, `deliveryReportedAt` and `deliveryReference`. Each is set
+  only when the backend sends the key, so a row from an older backend maps
+  without it — absent stays absent, and a stated `null` stays `null`. Additive
+  on a type that is only returned, so existing consumers keep compiling. No
+  update needed.
+
 - **A quote stops on an ENDED budget, with its own warning code (#4458).**
   `AgentPaymentWarningCode` gains `QUOTE_BUDGET_ENDED`. When the quote-time
   budget pre-check answers the typed 403 `delegation_expired` — the agent's

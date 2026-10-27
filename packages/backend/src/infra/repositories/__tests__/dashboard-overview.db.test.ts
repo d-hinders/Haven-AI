@@ -527,10 +527,15 @@ describeDb('#3803 overview statements', () => {
     await db.query(`UPDATE payment_intents SET status = 'submitted' WHERE id = $1`, [intentId])
     await bookSubmittedOutcomePending({ userOpHash: `0x${'4378'.repeat(16)}`, intentId, agentId: seed.agentId })
 
-    // The owner acknowledges the unattributed item NOW.
+    // The owner acknowledges the unattributed item — stamped a second in the
+    // past. Both stamps are `now()` defaults read back at millisecond
+    // precision, so two back-to-back statements can land in the SAME
+    // millisecond and a strict `>` between two live stamps is a flake
+    // (#4494). One second of separation makes the ordering unambiguous
+    // without weakening what the assertion proves.
     const ack = await db.query<{ acknowledged_at: Date }>(
-      `INSERT INTO attention_dismissals (user_id, item_kind, agent_id, account_id)
-       VALUES ($1, 'payments-failed', NULL, NULL) RETURNING acknowledged_at`,
+      `INSERT INTO attention_dismissals (user_id, item_kind, agent_id, account_id, acknowledged_at)
+       VALUES ($1, 'payments-failed', NULL, NULL, NOW() - INTERVAL '1 second') RETURNING acknowledged_at`,
       [userId],
     )
     const ackAt = new Date(ack.rows[0].acknowledged_at)
@@ -541,9 +546,13 @@ describeDb('#3803 overview statements', () => {
 
     const read = await countFailedIntents7d(userId, [84532], from7, to)
     expect(read.count).toBe(1)
-    // Re-armed: lastFailedIntentAt is the reconcile time, AFTER the ack —
-    // not the 3 h-old submitted_at the #4370 fallback would have answered.
-    expect((read.lastAt as Date).getTime()).toBeGreaterThan(ackAt.getTime())
+    const lastMs = (read.lastAt as Date).getTime()
+    // Re-armed: lastFailedIntentAt is the reconcile time, AFTER the ack — not
+    // the 3 h-old submitted_at the #4370 fallback would have answered.
+    expect(lastMs).toBeGreaterThan(ackAt.getTime())
+    // The real discriminator against the #4370 fallback: the answer is the
+    // reconcile stamp (now), not the intent's 3 h-old last recorded step.
+    expect(lastMs).toBeGreaterThan(Date.now() - 60_000)
   })
 
   it('#4378: a stamped failed_at wins over the recorded steps; an unstamped row keeps the #4370 fallback', async () => {

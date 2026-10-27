@@ -240,20 +240,36 @@ payment (`packages/sdk/src/tax-declaration.ts`). The legal name and
 organisation number are not in it.
 
 The agent Settings tab's toggle says the same thing in the owner's words
-(#4416): the declaration travels only when the agent pays through a client
-that holds its own signing key, the default setup sends none, and the merchant
-receives the country, the VAT number, the taxable-person status and the signed
-link to the agent's wallet address when it accepts the declaration. The card
-does not name the payment rail — the owner's copy review of 2026-09-30
-(PR #3490) removed that sentence, and the rail stays stated here instead.
+(#4416, reshaped by #4477): the declaration travels only when the agent pays
+through a client that holds its own signing key, the default setup sends none,
+and the merchant receives the country, the VAT number, the taxable-person
+status and the signed link to the agent's wallet address when it accepts the
+declaration. The card does not name the payment rail — the owner's copy review
+of 2026-09-30 (PR #3490) removed that sentence, and the rail stays stated here
+instead.
+
+The row is a `SettingsRow` in the agent Settings tab (#4477). Its one-line
+description is always visible and keeps the client condition — "Sends your
+VIES-checked VAT number with payments made through a client that holds its own
+key." — because the sentence that says the default setup sends none now sits
+behind a fold. The long explanation (what the merchant receives, the default
+setup sending none, that nothing is submitted to an authority, and that the
+owner can switch it off at any time) lives in a closed-by-default **What gets
+sent** disclosure in the row's full-width slot. The `Checkbox` sits in the
+action slot with a short visible label ("Allow") and the full accessible name
+through `aria-label`; it points at the one-line description through
+`aria-describedby`, since moving the explanation out of the checkbox's helper
+text took it out of the input's accessible description.
 
 The toggle is **disabled** for an agent whose most recent connector setup
 reported `hosted_plus_signer` — the default setup, a hosted server with a
 separate signer — because that client cannot attach a declaration to a
-payment, so an opt-in there would do nothing (#4435). The reason renders as a
-paragraph BELOW the checkbox row, never as the checkbox's helper text: a
-disabled checkbox is not focusable and its helper text sits inside the
-`<label>`, so a reason placed there is never announced. Every other value
+payment, so an opt-in there would do nothing (#4435). The reason renders in the
+row's full-width slot, OUTSIDE the disclosure and never as the checkbox's
+helper text: a disabled checkbox is not focusable and its helper text sits
+inside the `<label>`, so a reason placed there is never announced. It stays
+visible without opening anything because it tells the owner the control they
+can see has no effect. Every other value
 stays enabled, deliberately: `local_stdio` (the local MCP server holds the
 delegate key), `manual` (a developer's own SDK client with a delegate key can
 send one, and Haven cannot know), and unknown — no setup row, an `agent_id`

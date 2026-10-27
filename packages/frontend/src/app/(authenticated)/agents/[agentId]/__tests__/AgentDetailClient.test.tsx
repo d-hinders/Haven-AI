@@ -1250,7 +1250,7 @@ describe('AgentDetailClient last-activity metadata', () => {
     expect(cards.length).toBe(2)
     const card = cards[0] as HTMLElement
 
-    expect(card.textContent).toContain('This agent')
+    expect(screen.getByRole('heading', { name: 'This agent' })).toBeInTheDocument()
     expect(within(card).getByTestId('mcp-server-name-row')).toBeTruthy()
     expect(within(card).getByTestId('payment-credentials-row')).toBeTruthy()
     expect(within(card).getByTestId('labels-row')).toBeTruthy()
@@ -1329,13 +1329,15 @@ describe('AgentDetailClient last-activity metadata', () => {
     renderOnSettingsTab(<AgentDetailClient agentId="agent-1" />)
 
     expect(screen.queryByTestId('tax-declaration-row')).not.toBeInTheDocument()
-    // The agent card's direct children: the connection row, the credentials
-    // row, the labels row and the passport section — exactly four, so the
-    // tax row's divider left no orphan and no gap.
+    // #4477: `SettingsSection` wraps the rows in a `divide-y` list, so the
+    // card's only child is that list. The rows are ITS children: the
+    // connection row, the credentials row, the labels row and the passport
+    // row — exactly four, so the tax row's divider left no orphan and no gap.
     const card = screen
       .getByTestId('agent-settings-section')
       .querySelector('.rounded-\\[10px\\]') as HTMLElement
-    expect(card.children.length).toBe(4)
+    const list = card.querySelector('.divide-y') as HTMLElement
+    expect(list.children.length).toBe(4)
     expect(card.textContent).not.toContain('Tax declaration')
 
     // ...and the non-valid VIES state hides it too.

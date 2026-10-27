@@ -13,17 +13,35 @@
  * opt an agent into, and a hidden control cannot be hovered, wondered
  * about, or tried.
  *
+ * ── Shape (#4477) ────────────────────────────────────────────────────────
+ * The toggle is ONE `SettingsRow` in the agent Settings tab's "This agent"
+ * section, in the mockup v2 shape: title and a one-line description on the
+ * left, the `Checkbox` in the action slot. The nine-line explanation that
+ * used to sit in the checkbox's `helperText` moves into a closed-by-default
+ * plain-language disclosure (§ Technical details disclosure, plain-language
+ * variant, #4478) in the row's full-width `below` slot, labelled "What gets
+ * sent". The row no longer owns a `Card.Section divided` wrapper: inside
+ * `SettingsSection`'s `divide-y` list that wrapper would draw a second
+ * hairline (#3697's wrapper, inverted by #4477).
+ *
+ * The one-line description keeps the CLIENT condition, because the sentence
+ * that says the default setup sends none now sits behind the fold: a line
+ * that dropped it ("…travel with this agent's payments") would overclaim in
+ * exactly the direction #4416 fixed. It is wired to the input through
+ * `aria-describedby`, since moving the explanation out of `helperText`
+ * removes it from the input's accessible description.
+ *
  * ── Copy discipline ──────────────────────────────────────────────────────
- * The help text must not overclaim in EITHER direction (#4416, owner
- * decision 2026-10-26, option A: the behaviour stays, the copy moves).
- * "merchants that ask" was false — nothing in the SDK reads the merchant's
- * 402 for an ask — and "every payment" would be false the other way, since
- * the default setup sends nothing. So the card names the CLIENT condition
- * instead of the payment rail: the declaration rides only when the agent
- * pays through a client that holds its own signing key (the Haven SDK with
- * a delegate key, or the local `@haven_ai/mcp`), and only to a merchant that
- * accepts it. The acceptance half is not decoration: the SDK attaches
- * `X-Tax-Declaration` only on the EIP-3009 paid retry
+ * The copy must not overclaim in EITHER direction (#4416, owner decision
+ * 2026-10-26, option A: the behaviour stays, the copy moves). "merchants
+ * that ask" was false — nothing in the SDK reads the merchant's 402 for an
+ * ask — and "every payment" would be false the other way, since the default
+ * setup sends nothing. So the card names the CLIENT condition instead of the
+ * payment rail: the declaration rides only when the agent pays through a
+ * client that holds its own signing key (the Haven SDK with a delegate key,
+ * or the local `@haven_ai/mcp`), and only to a merchant that accepts it. The
+ * acceptance half is not decoration: the SDK attaches `X-Tax-Declaration`
+ * only on the EIP-3009 paid retry
  * (`packages/sdk/src/merchant-completion.ts:189,200-203`), so an erc7710
  * merchant receives nothing at all — and recipient-pinned agents are
  * erc7710-only (`docs/security/delegation-rail-security-model.md:2111`), so
@@ -32,7 +50,7 @@
  * keeps its `not.toContain('settle by EIP-3009')` guard. The rail and the
  * full recipient set are stated in docs/product/agent-passport.md and
  * docs/product/owner-company-details.md § A second reader.
- * The card also lists what the merchant receives — country, VAT number,
+ * The disclosure lists what the merchant receives — country, VAT number,
  * taxable-person status and a signed link to the agent's wallet address —
  * because "a tax declaration" alone does not tell an owner what leaves the
  * account. "checked" is the strongest word used: VIES `valid` says the VAT
@@ -44,10 +62,12 @@
  * The toggle is DISABLED for an agent whose most recent connector setup
  * reported `runtime_mcp_mode = 'hosted_plus_signer'` — the default setup, a
  * hosted server with a separate signer, which cannot attach a declaration to
- * a payment. The reason renders as a SIBLING paragraph below the checkbox
- * row, never as the checkbox's `helperText`: a disabled checkbox is not
- * focusable and `helperText` sits inside the `<label>`, so a reason placed
- * there is never announced.
+ * a payment. The reason renders in the row's `below` slot, a SIBLING of the
+ * checkbox's `<label>`, never as the checkbox's `helperText`: a disabled
+ * checkbox is not focusable and `helperText` sits inside the `<label>`, so a
+ * reason placed there is never announced. It stays OUTSIDE the disclosure
+ * too — it tells the owner the control has no effect, so it must be visible
+ * without opening anything.
  *
  * Every other value stays ENABLED, deliberately:
  * - `local_stdio` — the local MCP server holds the delegate key and attaches
@@ -67,12 +87,37 @@
  * inline (never a silent revert, never an optimistic flip): the agent list
  * reloads after a success, and the opt-in state is whatever the server says.
  */
-import { useState } from 'react'
+import { useId, useState } from 'react'
+import { ChevronDown } from 'lucide-react'
 import { Checkbox } from '@/components/ui/Checkbox'
+import { Icon } from '@/components/ui/Icon'
 import { InlineAlert } from '@/components/ui/InlineAlert'
-import { Card } from '@/components/ui/Card'
+import { SettingsRow } from '@/components/ui/SettingsSection'
 import { api, ApiRequestError } from '@/lib/api'
 import { useCompanyDetails } from '@/hooks/useCompanyDetails'
+
+/**
+ * The row's one-line description (#4477). It keeps the client condition —
+ * the "default setup sends none" sentence lives in the disclosure below, so
+ * a line without it would overclaim (#4416). Guards pinned by the test:
+ * never "verified", never "every payment", never "merchants that ask", never
+ * "settle by EIP-3009".
+ */
+export const TAX_DECLARATION_DESCRIPTION =
+  'Sends your VIES-checked VAT number with payments made through a client that holds its own key.'
+
+/**
+ * The long explanation, behind the "What gets sent" disclosure. Unchanged in
+ * substance from the `helperText` it replaces (#4477): the client condition,
+ * what the merchant receives, the default setup sending none, that nothing
+ * is submitted to an authority, and that the owner can withdraw at any time.
+ */
+export const TAX_DECLARATION_EXPLANATION =
+  "When this is on, your saved VAT number, checked against the EU's VIES register, can travel with payments your agent makes through a client that holds its own signing key: the Haven SDK with a delegate key, or the local Haven MCP server. The merchant your agent pays, when it accepts the declaration, receives your country, the VAT number, your taxable-person status and a signed link to the agent's wallet address. The default setup, a hosted server with a separate signer, sends none. Nothing is submitted to an authority, and you can switch it off here at any time."
+
+/** The disabled-state reason (#4435) — visible, outside the label and the disclosure. */
+export const TAX_DECLARATION_DISABLED_REASON =
+  'This agent pays through the default setup, a hosted server with a separate signer, so no declaration is sent.'
 
 interface TaxDeclarationToggleProps {
   agentId: string
@@ -97,6 +142,10 @@ export function TaxDeclarationToggle({
   const { status, details } = useCompanyDetails()
   const [saving, setSaving] = useState(false)
   const [saveFailed, setSaveFailed] = useState(false)
+  // The description is the input's accessible description (#4477): moving the
+  // explanation out of `helperText` took it out of the `<label>`, so the
+  // input points at the one-line description instead.
+  const descriptionId = useId()
 
   // The visibility rule IS the component: anything but a VIES-valid row
   // renders nothing, including while the first read is in flight and on a
@@ -132,58 +181,70 @@ export function TaxDeclarationToggle({
   }
 
   return (
-    // #3697: the toggle OWNS its row and its divider in the "Identity and
-    // settings" card — the wrapper is a `Card.Section divided` (hairline top
-    // border, content padded by the inner block). When the visibility rule
-    // hides the toggle (above), nothing renders: no orphan divider, no empty
-    // gap, and the row below it keeps its own divider.
-    <Card.Section divided>
-      <div className="px-4 py-4 md:px-6 md:py-5" data-testid="tax-declaration-row">
-        <h3 className="text-base font-semibold text-[var(--v2-ink)]">Tax declaration</h3>
+    // #4477: the row is a direct child of `SettingsSection`'s `divide-y` list
+    // and owns no divider of its own — the section draws the hairline. When
+    // the visibility rule hides the toggle (above), nothing renders: no
+    // orphan divider, no empty gap.
+    <SettingsRow
+      data-testid="tax-declaration-row"
+      label="Tax declaration"
+      detail={<p id={descriptionId}>{TAX_DECLARATION_DESCRIPTION}</p>}
+      action={
         <Checkbox
-          label="Allow this agent to send a tax declaration"
-          helperText={
-            <>
-              When this is on, your saved VAT number, checked against the
-              EU&apos;s VIES register, can travel with payments your agent makes
-              through a client that holds its own signing key: the Haven SDK with
-              a delegate key, or the local Haven MCP server. The merchant your
-              agent pays, when it accepts the declaration, receives your country,
-              the VAT number, your taxable-person status and a signed link to the
-              agent&apos;s wallet address. The default setup, a hosted server with
-              a separate signer, sends none. Nothing is submitted to an authority,
-              and you can switch it off here at any time.
-            </>
-          }
+          // `Checkbox` requires a visible label (#1410), so the box carries a
+          // short one and the full accessible name rides `aria-label`, which
+          // `...props` forwards to the `<input>`.
+          label="Allow"
+          aria-label="Allow this agent to send a tax declaration"
+          aria-describedby={descriptionId}
           disabled={saving || cannotCarryDeclaration}
           checked={taxDeclarationEnabled}
           onChange={(event) => {
             void setTaxDeclaration(event.target.checked)
           }}
         />
-        {/* #4435: the reason is a SIBLING of the checkbox row, not its
-            `helperText` — a disabled checkbox is not focusable and helperText
-            sits inside the `<label>`, so a reason placed there is never
-            announced. It renders only in the disabled state. */}
-        {cannotCarryDeclaration ? (
-          <p
-            className="mt-2 text-sm text-[var(--v2-ink-3)]"
-            data-testid="tax-declaration-disabled-reason"
-          >
-            This agent pays through the default setup, a hosted server with a
-            separate signer, so no declaration is sent.
-          </p>
-        ) : null}
-        {saveFailed ? (
-          <div className="mt-3">
-            <InlineAlert>
-              The tax declaration setting could not be saved. The state shown now
-              is what the server has — try again in a moment.
-            </InlineAlert>
+      }
+      below={
+        <>
+          {/* #4435: the reason is a SIBLING of the checkbox's `<label>` and
+              sits OUTSIDE the disclosure — a disabled checkbox is not
+              focusable, and the reason tells the owner the control has no
+              effect, so it must be visible without opening anything. */}
+          {cannotCarryDeclaration ? (
+            <p
+              className="px-6 pb-4 text-sm text-[var(--v2-ink-3)]"
+              data-testid="tax-declaration-disabled-reason"
+            >
+              {TAX_DECLARATION_DISABLED_REASON}
+            </p>
+          ) : null}
+          {/* The plain-language disclosure variant (#4478): closed by default,
+              a label that names the content, prose inside. */}
+          <div className="px-6 pb-4">
+            <details className="group">
+              <summary className="flex w-full cursor-pointer select-none list-none items-center justify-between rounded text-sm text-[var(--v2-ink)] [&::-webkit-details-marker]:hidden">
+                What gets sent
+                <Icon
+                  icon={ChevronDown}
+                  className="h-4 w-4 flex-shrink-0 text-[var(--v2-ink-3)] transition-transform group-open:rotate-180"
+                />
+              </summary>
+              <p className="mt-3 border-t border-[var(--v2-border)] pt-3 text-sm text-[var(--v2-ink-2)]">
+                {TAX_DECLARATION_EXPLANATION}
+              </p>
+            </details>
           </div>
-        ) : null}
-      </div>
-    </Card.Section>
+          {saveFailed ? (
+            <div className="px-6 pb-4">
+              <InlineAlert>
+                The tax declaration setting could not be saved. The state shown now
+                is what the server has — try again in a moment.
+              </InlineAlert>
+            </div>
+          ) : null}
+        </>
+      }
+    />
   )
 }
 

@@ -42,7 +42,8 @@ vi.mock('@/lib/api', () => ({
   },
 }))
 
-import { TaxDeclarationToggle } from '../TaxDeclarationToggle'
+import { TaxDeclarationToggle, TAX_DECLARATION_DESCRIPTION } from '../TaxDeclarationToggle'
+import { SettingsSection } from '@/components/ui/SettingsSection'
 
 const VIES_VALID_ROW = {
   legal_name: 'Acme AB',
@@ -312,12 +313,33 @@ describe('TaxDeclarationToggle disabled state (#4435)', () => {
     // A disabled checkbox is not focusable and `helperText` sits inside the
     // `<label>`, so a reason placed there is never announced. The paragraph is
     // a sibling of the row: reachable by role, and not inside any label.
-    const reason = screen.getByRole('paragraph')
+    const reason = screen.getByTestId('tax-declaration-disabled-reason')
+    expect(reason.tagName).toBe('P')
     expect(reason.textContent).toBe(REASON)
     expect(reason.closest('label')).toBeNull()
     // The checkbox's own label carries the helper text, never the reason.
     const label = screen.getByRole('checkbox').closest('label')
     expect(label?.textContent ?? '').not.toContain('no declaration is sent')
+  })
+
+  it('keeps the default-setup reason OUTSIDE the disclosure (#4477)', () => {
+    // The reason tells the owner the control they can see has no effect, so it
+    // must be readable without opening anything. The long explanation is the
+    // only thing behind the fold.
+    render(
+      <TaxDeclarationToggle
+        agentId="agent-1"
+        taxDeclarationEnabled={false}
+        runtimeMcpMode="hosted_plus_signer"
+        onAgentsChanged={() => {}}
+      />,
+    )
+    const reason = screen.getByTestId('tax-declaration-disabled-reason')
+    expect(reason.closest('details')).toBeNull()
+    // ...and the disclosure itself is closed by default.
+    const disclosure = screen.getByText('What gets sent').closest('details')
+    expect(disclosure).not.toBeNull()
+    expect(disclosure?.open).toBe(false)
   })
 
   it('keeps the toggle enabled and PUTs the same body for local_stdio', async () => {
@@ -400,16 +422,46 @@ describe('TaxDeclarationToggle disabled state (#4435)', () => {
   })
 })
 
-describe('TaxDeclarationToggle row wrapper (#3697)', () => {
+describe('TaxDeclarationToggle row wrapper (#3697, inverted by #4477)', () => {
   beforeEach(() => {
     mockUseCompanyDetails.mockReturnValue({ status: 'ready', details: VIES_VALID_ROW })
   })
 
-  it('renders inside a Card.Section divided row — the divider travels WITH the toggle', () => {
-    // The wrapper IS the divider owner: when the visibility rule hides the
-    // toggle, the wrapper (and its hairline) disappear with it — the page
-    // test pins the no-orphan-divider case from the outside; this pins the
-    // visible case's own geometry (the closeout's style-assertion rule).
+  it('is a DIRECT child of the section list and draws no hairline of its own', () => {
+    // #3697 pinned a `Card.Section divided` wrapper around the toggle. Inside
+    // `SettingsSection`'s `divide-y` list that wrapper would draw a SECOND
+    // hairline, so #4477 drops it: the row is a direct child of the list and
+    // the section owns the divider. The old assertion (`parentElement` has
+    // `border-t`) would still pass with the wrapper in place, which is why it
+    // is inverted rather than deleted.
+    render(
+      <SettingsSection title="This agent">
+        <TaxDeclarationToggle
+          agentId="agent-1"
+          taxDeclarationEnabled={false}
+          onAgentsChanged={() => {}}
+        />
+      </SettingsSection>,
+    )
+    const row = screen.getByTestId('tax-declaration-row')
+    // The parent IS the section's `divide-y` list — no wrapper between them.
+    expect(row.parentElement?.className).toContain('divide-y')
+    // ...and the row carries no top border of its own.
+    expect(row.className).not.toContain('border-t')
+    expect(row.className).not.toContain('rounded')
+  })
+})
+
+describe('TaxDeclarationToggle description (#4477)', () => {
+  beforeEach(() => {
+    mockUseCompanyDetails.mockReturnValue({ status: 'ready', details: VIES_VALID_ROW })
+  })
+
+  it('keeps the client condition and the four copy guards on the one-line description', () => {
+    // The "default setup sends none" sentence moved behind the fold, so the
+    // visible line must carry the client condition itself or it overclaims in
+    // exactly the direction #4416 fixed. The guards are aimed at THIS line:
+    // the existing ones query the disclosure's text and never reach it.
     render(
       <TaxDeclarationToggle
         agentId="agent-1"
@@ -417,11 +469,32 @@ describe('TaxDeclarationToggle row wrapper (#3697)', () => {
         onAgentsChanged={() => {}}
       />,
     )
-    const row = screen.getByTestId('tax-declaration-row')
-    // `Card.Section divided` geometry: hairline top border + per-child
-    // dividers, no card chrome of its own (no radius, no shadow).
-    expect(row.parentElement?.className).toContain('border-t')
-    expect(row.parentElement?.className).toContain('divide-y')
-    expect(row.parentElement?.className).not.toContain('rounded')
+    const description = screen.getByText(TAX_DECLARATION_DESCRIPTION)
+    const text = description.textContent ?? ''
+    expect(text).toContain('client that holds its own key')
+    expect(text.toLowerCase()).not.toContain('verified')
+    expect(text.toLowerCase()).not.toContain('every payment')
+    expect(text).not.toContain('merchants that ask')
+    expect(text).not.toContain('settle by EIP-3009')
+  })
+
+  it('wires the description to the input as its accessible description', () => {
+    // Moving the explanation out of `helperText` took it out of the `<label>`,
+    // so the input points at the one-line description instead.
+    render(
+      <TaxDeclarationToggle
+        agentId="agent-1"
+        taxDeclarationEnabled={false}
+        onAgentsChanged={() => {}}
+      />,
+    )
+    const checkbox = screen.getByRole('checkbox')
+    expect(checkbox).toHaveAccessibleName('Allow this agent to send a tax declaration')
+    const describedBy = checkbox.getAttribute('aria-describedby')
+    expect(describedBy).toBeTruthy()
+    expect(document.getElementById(describedBy as string)?.textContent).toBe(
+      TAX_DECLARATION_DESCRIPTION,
+    )
   })
 })
+

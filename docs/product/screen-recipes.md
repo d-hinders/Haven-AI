@@ -865,20 +865,27 @@ rule). `?grant=` keeps working alongside `?tab=`. Sections, in order:
    would say Sent (#4249).
    **Tool calls** is the agent's MCP audit log (see **Agent Tool Calls**
    below).
-6. Settings (#4228): the tab is two sections, mirroring the account page's
-   Security & details tab. Under a small **This agent** label, ONE `Card` of
-   `Card.Section divided` rows —
-   1. **Connection**: the **MCP server name** (#4209, moved here from the
-      `/agents` card) with its copy button and a tooltip naming the
-      hosted+signer pair, plus **Last active** (`mcp_last_seen_at`). The
-      `not recorded` label keeps #2043's rule: its explanation is visible
-      text beside it, never a tooltip. An agent with no name AND no
-      `mcp_last_seen_at` reads "**No MCP connection recorded**" — and does
-      NOT say "API key": a null name alone also means an MCP agent connected
-      before names were recorded. An agent with an API-key prefix gets an
-      **API key** line (the visible prefix half of the credential; the full
-      key is shown once at creation and in the credentials modal), in every
-      connection state.
+6. Settings (#4228, rebuilt on the shared settings rows by #4477): the tab is
+   two `SettingsSection`s, mirroring the account page's Security & details
+   tab. Each section is a sentence-case `v2-text-h3` heading ABOVE its card,
+   and each row is a `SettingsRow` in the mockup v2 shape — title and a
+   one-line description on the left, the value and/or control on the right.
+   There is no uppercase section band and no hand-rolled row class (§
+   Detail-page section rule, `docs/product/design-system.md`).
+   Under **This agent** —
+   1. **MCP server name** (#4209, moved here from the `/agents` card): the
+      name with its copy button and a tooltip naming the hosted+signer pair,
+      plus **Last active** (`mcp_last_seen_at`). The `not recorded` label
+      keeps #2043's rule: its explanation is visible text beside it, never a
+      tooltip. An agent with no name AND no `mcp_last_seen_at` reads
+      "**No MCP connection recorded**" — and does NOT say "API key": a null
+      name alone also means an MCP agent connected before names were
+      recorded. The **API key** prefix line (the visible prefix half of the
+      credential; the full key is shown once at creation and in the
+      credentials modal) lives on THIS row's value slot, beside the server
+      name, in every connection state. It did not move to Payment
+      credentials because that row is hidden for revoked and archived
+      agents, while the prefix must stay visible on the tab in every state.
    2. **Payment credentials**: **View** (opens `PaymentCredentialsModal`) and
       **Replace signing key** (`ReplaceSigningKeyModal`) — hidden for
       revoked and archived agents, matching the header ⋮ menu's
@@ -888,24 +895,35 @@ rule). `?grant=` keeps working alongside `?tab=`. Sections, in order:
    3. **Labels**: the chips plus **Edit**, which opens `EditAgentModal`
       (where the agent's labels are set, #3167). `LabelsManagerModal`
       manages the vocabulary itself and stays in the ⋮ menu. Readable in
-      every state; Edit follows the editor's own gate (not mounted when
-      revoked).
+      every state; the empty state reads "No labels yet."; Edit follows the
+      editor's own gate (not mounted when revoked).
    4. **Tax declaration**: `TaxDeclarationToggle`, rendered only when the
-      company details are VIES-valid (the toggle owns its row and divider;
-      the row is absent otherwise). The toggle is **disabled**, with a
-      one-line reason as a sibling paragraph below the checkbox row, when the
-      agent's most recent connector setup is `hosted_plus_signer` — the
-      default setup, a hosted server with a separate signer, cannot attach a
-      declaration to a payment. `local_stdio`, `manual` and an unknown setup
-      leave it enabled, and an agent whose opt-in is already ON stays
-      interactive so the owner can switch it off (#4435).
-   5. **Agent Passport**: `AgentPassportCard`'s content as a row. Its own
-      revoked-only gate stands — archived agents are not newly gated.
+      company details are VIES-valid (the row is absent otherwise, with no
+      orphan divider). The row is a title, a one-line description that keeps
+      the client condition ("Sends your VIES-checked VAT number with payments
+      made through a client that holds its own key."), the `Checkbox` in the
+      action slot, and a closed-by-default **What gets sent** disclosure in
+      the row's full-width slot holding the long explanation. The checkbox
+      carries a short visible label ("Allow") and the full accessible name
+      through `aria-label`, and points at the description through
+      `aria-describedby`. The toggle is **disabled**, with a one-line reason
+      visible in the row and OUTSIDE the disclosure, when the agent's most
+      recent connector setup is `hosted_plus_signer` — the default setup, a
+      hosted server with a separate signer, cannot attach a declaration to a
+      payment. `local_stdio`, `manual` and an unknown setup leave it enabled,
+      and an agent whose opt-in is already ON stays interactive so the owner
+      can switch it off (#4435).
+   5. **Agent Passport**: `AgentPassportCard` renders the row itself — the
+      title and status badge, the one-line description, Issue a passport or
+      Try again, and the issued state's `dl` grid in the full-width slot. Its
+      own revoked-only gate stands — archived agents are not newly gated.
 
    Under **On {account name}**, a linked row, **Who can approve** ("Managed
    on {account}: it covers every agent on it"), to the account's Security &
    details tab (`?tab=security`), whose section has the same heading. A
-   pointer, not a second copy (#1089). The old standalone "Identity and
+   pointer, not a second copy (#1089). The row is the existing `Row` with
+   `href`, not a `SettingsRow` with a trailing chevron, so the whole row is
+   one link target and one focus stop. The old standalone "Identity and
    settings" section is gone; its tests moved with the rows.
 
 Money and risk clarity:

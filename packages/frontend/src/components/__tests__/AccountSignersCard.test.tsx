@@ -297,11 +297,34 @@ describe('AccountSignersCard (#888)', () => {
     // #3845: the row promises no passkeys the account does not have, and says
     // why Remove is unavailable.
     expect(screen.queryByText(/your passkeys become/)).toBeNull()
+    // #4474 rework: `Row`'s subtitle is a single-line `truncate` by default,
+    // which clipped this 95-character consequence sentence to ~37 characters
+    // at 390px. jsdom cannot measure layout, so the class IS the assertion —
+    // without it the next `Row` refactor silently re-clips the sentence that
+    // explains why Remove is unavailable.
     expect(
       screen.getByText(
         "This wallet is the only way to approve this account, so it can't be removed until you add a backup.",
       ),
-    ).toBeTruthy()
+    ).toHaveClass('whitespace-normal')
+  })
+
+  it('wraps the browser-wallet consequence sentence instead of truncating it (#4474)', () => {
+    mockUseSigners.mockReturnValue(
+      base({
+        signers: {
+          account_address: '0x' + 'aa'.repeat(20),
+          chain_id: 84532,
+          owner_address: '0x' + 'ee'.repeat(20),
+          passkeys: [{ key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' }],
+        },
+      }),
+    )
+    render(<AccountSignersCard {...PROPS} />)
+    // The passkeys variant of the same sentence — same clipping risk, same
+    // opt-out. Both variants are pinned because the ternary picks one at a
+    // time and a fix applied to only one arm would pass a single assertion.
+    expect(screen.getByText(/your passkeys become/)).toHaveClass('whitespace-normal')
   })
 
   it('surfaces the honest "Lost a device?" recovery explainer behind a help modal', async () => {

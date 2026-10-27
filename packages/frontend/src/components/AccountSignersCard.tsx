@@ -146,6 +146,15 @@ export default function AccountSignersCard({ accountAddress, chainId, userEmail 
                       ? 'If you remove it, your passkeys become the only ways to approve — and to recover this account.'
                       : "This wallet is the only way to approve this account, so it can't be removed until you add a backup."
                   }
+                  /* #4474: `Row`'s subtitle is a single-line `truncate` by
+                     default, which clipped this consequence sentence to ~37
+                     characters at 390px — and it is the sentence that says why
+                     Remove is dangerous, so a clipped one is a safety-copy
+                     loss, not cosmetics. `whitespace-normal` wins over
+                     `truncate`'s `nowrap` (Tailwind emits whitespace utilities
+                     after `truncate`); the row is `items-center`, so the
+                     leading icon stays centred against the taller body. */
+                  subtitleClassName="whitespace-normal"
                   trailing={
                     canRemove ? (
                       <Button

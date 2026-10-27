@@ -39,6 +39,17 @@ const REPO = resolve(HERE, '../..')
 const RECORDING = join(HERE, 'fixtures/refusal-census/recording.fixture.ndjson')
 const rows = readRecording(RECORDING)
 
+// The six receipt keys #4469 added to `mapPaymentReceipt` in block form. They
+// are the fixture's own wire names, so the join must see them as read.
+const RECEIPT_KEYS = [
+  'settlement_scheme',
+  'budget_delegation_hash',
+  'delivery_quality',
+  'delivery_note',
+  'delivery_reported_at',
+  'delivery_reference',
+]
+
 test('transportError transcribes the transport: error: details, full body kept', () => {
   const row = {
     method: 'POST',
@@ -144,7 +155,12 @@ test('mapperReadKeys reads the receipt mapper through scanReceiptSurface', () =>
   const keys = mapperReadKeys(source, 'mapPaymentReceipt')
   assert.ok(keys.has('payment_id'))
   assert.ok(keys.has('scope'), 'the conditional tail is read')
-  assert.ok(!keys.has('delivery_verdict'), 'the six dropped fields are not read at this SHA (#4469)')
+  // #4469 landed: the six keys the mapper used to drop are read in block form
+  // (`if ('settlement_scheme' in raw) receipt.settlementScheme = …`), which is
+  // the shape `scanReceiptSurface` sees.
+  for (const key of RECEIPT_KEYS) {
+    assert.ok(keys.has(key), `${key} is read by mapPaymentReceipt (#4469)`)
+  }
 })
 
 test('block 9 reports emitted-but-never-read keys', () => {
@@ -154,8 +170,11 @@ test('block 9 reports emitted-but-never-read keys', () => {
     emits: () => true,
   })
   const receiptKeys = result.emittedNeverRead.filter((row) => row.mapper === 'mapPaymentReceipt').map((row) => row.key)
-  for (const key of ['settlement_scheme', 'budget_delegation_hash', 'delivery_verdict', 'delivery_note', 'delivery_reported_at', 'delivery_reference']) {
-    assert.ok(receiptKeys.includes(key), `${key} is emitted and unread (#4469)`)
+  // #4469 landed, so the six receipt keys are read and must not be reported.
+  // The direction still says yes — `mpp` below and the seeded control — so this
+  // is a re-pin to the post-#4469 tree, not a deletion of the direction.
+  for (const key of RECEIPT_KEYS) {
+    assert.ok(!receiptKeys.includes(key), `${key} is read by mapPaymentReceipt (#4469)`)
   }
   assert.ok(!receiptKeys.includes('scope'), 'scope is read by the mapper')
   const statusKeys = result.emittedNeverRead.filter((row) => row.mapper === 'mapPaymentStatusResult').map((row) => row.key)

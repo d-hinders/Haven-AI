@@ -591,3 +591,11 @@ four the wider mapper set reaches: `spent_display` and `remaining_display`
 `submitted_at`, `expires_at`), all emitted in `routes/payments.ts` in states the
 recorded tests did not reach. Both halves of the positive control passed.
 
+**The block's own finding, closed.** Re-running the join on that same recording
+against the tree after #4469 merged (PR #4479, squash `8cdcf8811`) reports
+**5** emitted-but-never-read keys instead of 11: `mapPaymentReceipt` now reads
+all six receipt keys in block form (`payment-mappers.ts:190-211`), so the five
+that remain are `mpp`, `spent_display`, `remaining_display`, `is_live` and
+`endpoint_host`. Read but never emitted is unchanged at 12. The recording is
+unchanged — only the mapper moved — which is what makes the join a measurement
+rather than a snapshot.

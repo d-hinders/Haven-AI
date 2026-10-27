@@ -85,8 +85,46 @@ covers:
   - scripts/ci/check-stale-client-compat.mjs
   - packages/mcp-server/src/next-arguments-corpus.json
   - packages/mcp-server/src/tool-contract-snapshot.test.ts
-last-verified: "2026-10-26"
+last-verified: "2026-10-27"
 ---
+
+> **Re-verified #4468 (2026-10-27, the ten typed task-/sub-budget
+> payment-scope refusals and three siblings):** covered surfaces change
+> additively, and one wire field changes VALUE for ten codes. (1)
+> `packages/mcp-server/src/tools/support/errors.ts` — `normalizeError` gains
+> one table-driven branch ahead of the generic `HavenApiError` pair, keyed on
+> the shared `@haven_ai/core` code list. The ten codes (`task_budget_` and
+> `sub_budget_` × `not_found`, `not_open`, `token_mismatch`,
+> `recipient_mismatch`, `parent_mismatch`) now answer their own hosted `code`
+> (the backend code upper-cased), the backend's `error_code` at the top level,
+> `next_action: stop_and_tell_user` and a reason naming that code's remedy.
+> Before, all ten fell into the generic 4xx branch as `code: "API_ERROR"` with
+> no `error_code`, so the typed reason survived only as English in `message`.
+> (2) The same file gains a branch for `task_budget_exceeds_remaining` (409)
+> relaying `remaining_atomic`, `reserved_atomic` and `requested_atomic`. (3)
+> `packages/mcp-server/src/tools/state-direct-recovery.ts` — `haven_submit`'s
+> task-budget path now maps `close_needs_reprepare` (409) and
+> `close_outcome_unconfirmed` (502) to typed refusals naming
+> `haven_close_task_budget` with `task_budget_id`, the shape the sub-budget
+> path has had since #3506. (4) `packages/mcp-server/src/tools/contracts.ts` —
+> `ToolFailure` gains an optional `error_code`. (5)
+> `packages/core/src/budget-refusal-codes.ts` (new) holds the code unions and
+> their status tables; the backend's `modules/budget-scope/resolver.ts`
+> re-exports them, so the backend's wire statuses are unchanged. (6)
+> `packages/mcp-server/src/test-support/next-step-fixtures.ts` and
+> `next-arguments-corpus.json` — the census moves to 78 refusal fixtures and
+> 79 `refusalNextStep` calls, and the corpus golden gains the thirteen rows.
+>
+> **Wire effect.** `code` is a wire field, so an agent on an older hosted
+> server still sees `API_ERROR` for these ten codes; a new hosted server
+> against an older backend sees the same bodies (the codes and statuses are
+> unchanged) and answers them typed. `error_code` is additive: absent on every
+> other branch, and the generic branch deliberately does not relay it (that
+> decision belongs to #4470, which edits the same branch). No tool name, input
+> schema, strict-input list, expected-context version, consent hash or
+> `tools-list.snapshot.json` entry changes — the tools/list golden is
+> byte-identical. Nothing else in this document was re-verified, and
+> `last-verified` is re-stamped to 2026-10-27 for this note.
 
 > **Contract change, additive (#4449, 2026-10-26): the edge signer's SUCCESS
 > results carry the next-step family.** Covered files: `packages/signer/**`

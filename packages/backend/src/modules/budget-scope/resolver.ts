@@ -54,15 +54,18 @@ import type { DelegationForPaymentRow } from '../../infra/repositories/delegatio
 import type { Delegation } from '../../rails/delegation-policy.js'
 import { resolveTaskBudgetChildForPayment, type TaskBudgetPaymentRefusal } from '../task-budgets/index.js'
 import { resolveSubBudgetForPayment, type SubBudgetPaymentRefusal } from '../sub-budgets/index.js'
+import { SUB_BUDGET_REFUSAL_STATUS, TASK_BUDGET_REFUSAL_STATUS } from '@haven_ai/core'
 
-/** #3329 §3: the task-budget refusal table's HTTP status per code. */
-export const TASK_BUDGET_REFUSAL_STATUS: Record<TaskBudgetPaymentRefusal, number> = {
-  task_budget_not_found: 404,
-  task_budget_not_open: 409,
-  task_budget_token_mismatch: 409,
-  task_budget_recipient_mismatch: 409,
-  task_budget_parent_mismatch: 409,
-}
+/**
+ * #3329 §3 / #3330 §3: the refusal tables' HTTP status per code.
+ *
+ * #4468: both tables live in `@haven_ai/core` beside the code unions, because
+ * the hosted MCP's `normalizeError` answers these codes and its test builds
+ * each refusal with the status the backend actually sends. One artifact, two
+ * readers — a member added to either union cannot be answered on one side
+ * alone. Re-exported here so every existing importer keeps its path.
+ */
+export { SUB_BUDGET_REFUSAL_STATUS, TASK_BUDGET_REFUSAL_STATUS }
 
 /** #3329 §3: the task-budget refusal messages, verbatim from both former copies. */
 export const TASK_BUDGET_REFUSAL_MESSAGE: Record<TaskBudgetPaymentRefusal, string> = {
@@ -71,15 +74,6 @@ export const TASK_BUDGET_REFUSAL_MESSAGE: Record<TaskBudgetPaymentRefusal, strin
   task_budget_token_mismatch: "This payment's token does not match the task budget's token",
   task_budget_recipient_mismatch: "This payment's recipient does not match the task budget's pinned recipient",
   task_budget_parent_mismatch: 'The task budget was not carved from the budget delegation selected for this payment',
-}
-
-/** #3330 §3: the sub-budget refusal table's HTTP status per code. */
-export const SUB_BUDGET_REFUSAL_STATUS: Record<SubBudgetPaymentRefusal, number> = {
-  sub_budget_not_found: 404,
-  sub_budget_not_open: 409,
-  sub_budget_token_mismatch: 409,
-  sub_budget_recipient_mismatch: 409,
-  sub_budget_parent_mismatch: 409,
 }
 
 /** #3330 §3: the sub-budget refusal messages, verbatim from both former copies. */

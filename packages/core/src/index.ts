@@ -81,6 +81,22 @@ export {
   type MachinePaymentLifecycle,
 } from './machine-payment-lifecycle.js'
 
+// The payment-scope refusal contract (#4468) — the ten task-/sub-budget refusal
+// codes and their statuses, the ONE artifact the backend's resolver and the
+// hosted MCP's `normalizeError` both read. Before it, each side kept its own
+// literal list and a new member reached the agent as a generic `API_ERROR`.
+export {
+  TASK_BUDGET_PAYMENT_REFUSALS,
+  SUB_BUDGET_PAYMENT_REFUSALS,
+  PAYMENT_SCOPE_REFUSAL_CODES,
+  TASK_BUDGET_REFUSAL_STATUS,
+  SUB_BUDGET_REFUSAL_STATUS,
+  PAYMENT_SCOPE_REFUSAL_STATUS,
+  type TaskBudgetPaymentRefusal,
+  type SubBudgetPaymentRefusal,
+  type PaymentScopeRefusalCode,
+} from './budget-refusal-codes.js'
+
 // #3778 — the delivery_reference guard: shared semantic validator for the
 // non-secret delivery pointer agents report with an x402 outcome. Refuses
 // credential-shaped values (JWTs, API-key tokens, grouped gift codes) from

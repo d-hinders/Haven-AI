@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { AgentPaymentNextAction, HavenApiError, HavenError, HavenPaymentStateError } from '@haven_ai/sdk'
+import { PAYMENT_SCOPE_REFUSAL_CODES, PAYMENT_SCOPE_REFUSAL_STATUS, type PaymentScopeRefusalCode } from '@haven_ai/core'
 import { HostedToolError, normalizeError } from './tools/support/errors.js'
 import { buildAgentGuidance, refusalNextStep } from './tools/support/guidance.js'
+import { PAYMENT_SCOPE_REFUSAL_REASONS } from './test-support/next-step-fixtures.js'
 
 /** #3101 (decision 7): a refusal carries the same typed next step a success does. */
 describe('a payment-state refusal carries a typed step from the default table (#3102)', () => {
@@ -290,5 +292,130 @@ describe('the typed prepare 502s split on whether the simulation reverted (#3609
     ) as unknown as Record<string, unknown>
     expect(out.next_action).toBe(AgentPaymentNextAction.RetryWithExplicitContext)
     expect(out.revert_reason).toBeUndefined()
+  })
+})
+
+/**
+ * #4468: the ten payment-scope refusals — a payment that names a task budget
+ * or a sub-budget the backend cannot use. Before this change every one of them
+ * fell into the generic 4xx `API_ERROR` stop, so the backend's typed reason
+ * survived only as English in `message` and the agent could not tell a wrong
+ * id from a spent cap.
+ *
+ * The list walked here is the shared `@haven_ai/core` artifact, NOT a literal
+ * in this file: a member added to `TaskBudgetPaymentRefusal` or
+ * `SubBudgetPaymentRefusal` without an answer in `normalizeError` fails this
+ * test. The reasons are pinned verbatim in `next-step-fixtures.ts`, so a
+ * reworded reason reddens it too.
+ */
+describe('the ten payment-scope refusals answer with their own typed code (#4468)', () => {
+  /** Built the way the SDK transport builds it: message = the backend's `error`, the table's status, body `{ error, error_code }`. */
+  const refusal = (errorCode: PaymentScopeRefusalCode) =>
+    new HavenApiError(`backend message for ${errorCode}`, PAYMENT_SCOPE_REFUSAL_STATUS[errorCode], {
+      error: `backend message for ${errorCode}`,
+      error_code: errorCode,
+    })
+
+  it('the shared artifact is exactly the ten codes the issue names', () => {
+    expect(PAYMENT_SCOPE_REFUSAL_CODES).toHaveLength(10)
+    expect(new Set(PAYMENT_SCOPE_REFUSAL_CODES).size).toBe(10)
+  })
+
+  for (const errorCode of PAYMENT_SCOPE_REFUSAL_CODES) {
+    it(`${errorCode}: typed code, the backend's error_code, stop_and_tell_user, its own reason`, () => {
+      const out = normalizeError(refusal(errorCode)) as unknown as Record<string, unknown>
+      expect(out.success).toBe(false)
+      // The hosted code is the backend's code upper-cased — never API_ERROR.
+      expect(out.code).toBe(errorCode.toUpperCase())
+      expect(out.code).not.toBe('API_ERROR')
+      expect(out.error_code).toBe(errorCode)
+      expect(out.statusCode).toBe(PAYMENT_SCOPE_REFUSAL_STATUS[errorCode])
+      expect(out.next_action).toBe(AgentPaymentNextAction.StopAndTellUser)
+      expect(out.next_tool).toBeUndefined()
+      expect(out.next_tool_omitted_reason).toBe(PAYMENT_SCOPE_REFUSAL_REASONS[errorCode])
+    })
+  }
+
+  it('task_budget_not_open names haven_get_task_budget and both of its states', () => {
+    const reason = String(normalizeError(refusal('task_budget_not_open')).next_tool_omitted_reason)
+    expect(reason).toMatch(/haven_get_task_budget/)
+    expect(reason).toMatch(/pending/)
+    expect(reason).toMatch(/sign it and submit it/)
+    expect(reason).toMatch(/closed or expired/)
+    expect(reason).toMatch(/new task budget/)
+    // The criterion's closed/expired remedy carries the qualifier itself: the
+    // new budget is opened AFTER telling the user. The trailing "after telling
+    // the user" on the pay-without-it clause does not satisfy it.
+    expect(reason).toMatch(/new task budget[^;]*after telling the user/)
+  })
+
+  it('every reason that suggests paying without the id ends "after telling the user"', () => {
+    for (const errorCode of PAYMENT_SCOPE_REFUSAL_CODES) {
+      const reason = PAYMENT_SCOPE_REFUSAL_REASONS[errorCode]
+      if (/pay without/.test(reason)) expect(reason.endsWith('after telling the user'), errorCode).toBe(true)
+    }
+  })
+
+  it('an unrelated error_code still takes the generic 4xx API_ERROR stop, with no error_code relayed', () => {
+    const out = normalizeError(
+      new HavenApiError('refused', 409, { error: 'refused', error_code: 'some_other_rule' }),
+    ) as unknown as Record<string, unknown>
+    expect(out.code).toBe('API_ERROR')
+    expect(out.error_code).toBeUndefined()
+    expect(out.next_action).toBe(AgentPaymentNextAction.StopAndTellUser)
+  })
+
+  it('an Object.prototype key is not a payment-scope answer, so it takes the same generic stop', () => {
+    // The answer table is a plain object, so a bare cast lookup would resolve
+    // `constructor` / `toString` / `valueOf` / `hasOwnProperty` / `__proto__`
+    // off the prototype chain and emit a failure with `code: undefined`.
+    for (const errorCode of ['constructor', 'toString', 'valueOf', 'hasOwnProperty', '__proto__']) {
+      const out = normalizeError(
+        new HavenApiError('refused', 409, { error: 'refused', error_code: errorCode }),
+      ) as unknown as Record<string, unknown>
+      expect(out.code, errorCode).toBe('API_ERROR')
+      expect(typeof out.code, errorCode).toBe('string')
+      expect(out.error_code, errorCode).toBeUndefined()
+      expect(out.next_action, errorCode).toBe(AgentPaymentNextAction.StopAndTellUser)
+    }
+  })
+})
+
+/**
+ * #4468 sibling: `task_budget_exceeds_remaining` — a NEW task budget whose cap
+ * exceeds the parent budget's remaining, unreserved amount. It reached the
+ * generic 4xx branch from `haven_open_task_budget`, which dropped the three
+ * atomic figures the backend sends.
+ */
+describe('the task_budget_exceeds_remaining sibling relays its three figures (#4468)', () => {
+  const exceedsRemaining = () =>
+    new HavenApiError(
+      "This task budget's cap exceeds the parent budget's remaining, unreserved amount (remaining 500, already reserved by open task budgets 200).",
+      409,
+      {
+        error: "This task budget's cap exceeds the parent budget's remaining, unreserved amount",
+        error_code: 'task_budget_exceeds_remaining',
+        remaining_atomic: '500',
+        reserved_atomic: '200',
+        requested_atomic: '1000',
+      },
+    )
+
+  it('carries TASK_BUDGET_EXCEEDS_REMAINING with the three atomic figures, not API_ERROR', () => {
+    const out = normalizeError(exceedsRemaining()) as unknown as Record<string, unknown>
+    expect(out.code).toBe('TASK_BUDGET_EXCEEDS_REMAINING')
+    expect(out.error_code).toBe('task_budget_exceeds_remaining')
+    expect(out.statusCode).toBe(409)
+    expect(out.remaining_atomic).toBe('500')
+    expect(out.reserved_atomic).toBe('200')
+    expect(out.requested_atomic).toBe('1000')
+  })
+
+  it('keeps stop_and_tell_user and names the remedy, never a retry', () => {
+    const out = normalizeError(exceedsRemaining()) as unknown as Record<string, unknown>
+    expect(out.next_action).toBe(AgentPaymentNextAction.StopAndTellUser)
+    const reason = String(out.next_tool_omitted_reason)
+    expect(reason).toMatch(/open a smaller one/)
+    expect(reason).toMatch(/after telling the user/)
   })
 })

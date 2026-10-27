@@ -1548,6 +1548,15 @@ export interface ToolFailure {
   /** Structured hint pointing the agent at the correct tool for this operation. */
   suggested_tool?: string
   statusCode?: number
+  /**
+   * #4468: the backend's own `error_code`, relayed verbatim on the branches
+   * that answer a typed backend refusal with a typed hosted `code`. Before it,
+   * the machine-readable reason survived only as English in `message`. Absent
+   * on every other branch — the generic `HavenApiError` branch deliberately
+   * does not relay it (that decision belongs to #4470, which edits the same
+   * branch).
+   */
+  error_code?: string
   paymentId?: string
   status?: string
   phase?: string

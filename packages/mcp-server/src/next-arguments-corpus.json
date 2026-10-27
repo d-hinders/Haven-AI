@@ -189,6 +189,20 @@
       }
     },
     {
+      "site": "state-direct-recovery.ts haven_submit task budget: close needs reprepare",
+      "tool": "haven_close_task_budget",
+      "arguments": {
+        "task_budget_id": "tb_1"
+      }
+    },
+    {
+      "site": "state-direct-recovery.ts haven_submit task budget: close outcome unconfirmed",
+      "tool": "haven_close_task_budget",
+      "arguments": {
+        "task_budget_id": "tb_1"
+      }
+    },
+    {
       "site": "state-direct-recovery.ts no-sign-data replay: still resolving",
       "tool": "haven_get_payment_status",
       "arguments": {

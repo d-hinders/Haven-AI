@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { expectMenuNotClipped } from '@/__tests__/menu-clip'
 
 const mockUseAuth = vi.hoisted(() => vi.fn())
 const mockUseAgents = vi.hoisted(() => vi.fn())
@@ -303,6 +304,8 @@ describe('AgentPanel rail affordances', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Show archived' }))
 
     fireEvent.click(screen.getByRole('button', { name: 'Actions for Old agent' }))
+    // #4491: the agent card hosts this menu — nothing above it may clip.
+    expectMenuNotClipped(screen.getByRole('menu'))
     expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Restore to list'])
   })
 
@@ -616,6 +619,8 @@ describe('AgentPanel page header (#4209)', () => {
     expect(screen.queryByRole('button', { name: 'Labels' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Organizations' })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'More agent actions' }))
+    // #4491: the page header hosts this menu — nothing above it may clip.
+    expectMenuNotClipped(screen.getByRole('menu'))
     expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Labels', 'Organizations'])
   })
 
@@ -649,6 +654,7 @@ describe('AgentPanel page header (#4209)', () => {
     render(<AgentPanel />)
 
     fireEvent.click(screen.getByRole('button', { name: 'More agent actions' }))
+    expectMenuNotClipped(screen.getByRole('menu'))
     fireEvent.click(screen.getByRole('menuitem', { name: 'Labels' }))
     expect(screen.getByRole('dialog', { name: 'Manage labels' })).toBeInTheDocument()
   })

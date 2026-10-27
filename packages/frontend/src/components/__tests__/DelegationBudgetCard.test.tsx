@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest'
+import { expectMenuNotClipped } from '@/__tests__/menu-clip'
 import { budgetCaption } from '@/lib/budget-caption'
 import { AGENT_PAUSED_SHORT } from '@/lib/agent-pause-copy'
 import { timeAgo } from '@/lib/format'
@@ -121,11 +122,16 @@ function taskBudget(overrides: Record<string, unknown> = {}) {
  * #4261: every row action lives in the per-budget ⋯ menu — Edit budget,
  * Add budget, then Stop budget… behind its confirm. Opens the row's menu;
  * the item-specific helpers below click the item inside it.
+ *
+ * #4491: the card that hosts this menu must not clip it — the panel is in
+ * flow, not portalled, so an `overflow-hidden` Card cut it off at the card's
+ * bottom edge. Asserted here so every menu-opening test in this file covers it.
  */
 async function openRowMenu(label: string) {
   fireEvent.click(
     await waitFor(() => screen.getByRole('button', { name: new RegExp(`^Budget options ${label}$`) })),
   )
+  expectMenuNotClipped(await waitFor(() => screen.getByRole('menu')))
 }
 
 async function clickMenuItem(name: string) {

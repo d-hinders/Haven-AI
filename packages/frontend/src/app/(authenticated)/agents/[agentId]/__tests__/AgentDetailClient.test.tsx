@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { expectMenuNotClipped } from '@/__tests__/menu-clip'
 
 const { budgetCardTokens, budgetCardRetired } = vi.hoisted(() => ({
   budgetCardTokens: [] as Array<Array<{ address: string; symbol: string; decimals: number }>>,
@@ -201,8 +202,10 @@ const SAFE = {
 
 // #3694: Remove, Restore and the rest live in the ⋮ menu. Opens it and
 // returns the item labels in render order — the order is part of the claim.
+// #4491: also asserts nothing above the panel clips it.
 function openAgentMenu(): string[] {
   fireEvent.click(screen.getByRole('button', { name: 'Agent options' }))
+  expectMenuNotClipped(screen.getByRole('menu'))
   return screen.getAllByRole('menuitem').map((item) => item.textContent ?? '')
 }
 

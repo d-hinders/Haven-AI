@@ -20,6 +20,7 @@ import { Button } from './ui/Button'
 import WalletConnectAction from './WalletConnectAction'
 import PasskeyElsewhereHint from './PasskeyElsewhereHint'
 import { Input } from './ui/Input'
+import { Select } from './ui/Select'
 import { useToast } from './ui/Toast'
 
 interface Props {
@@ -112,18 +113,18 @@ export default function DelegationSendModal({ open, onClose, accountAddress, cha
             aria-label="Amount"
             inputMode="decimal"
           />
-          <select
+          <Select
             value={tokenSymbol}
             onChange={(e) => setTokenSymbol(e.target.value)}
             aria-label="Token"
-            className="rounded-md border border-[var(--v2-border-strong)] bg-[var(--v2-bg)] px-3 text-sm text-[var(--v2-ink)]"
+            className="w-28 shrink-0"
           >
             {tokens.map((t) => (
               <option key={t.symbol} value={t.symbol}>
                 {t.symbol}
               </option>
             ))}
-          </select>
+          </Select>
         </div>
         {otherOwnAccounts.length > 0 ? (
           <div className="space-y-1.5">

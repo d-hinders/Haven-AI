@@ -45,6 +45,36 @@ test.describe('budget ⋯ menu focus (#4261)', () => {
     await expect(menuTrigger(page)).toBeVisible()
   }
 
+  test('the open ⋯ menu is not clipped by the card that hosts it (#4491)', async ({ page }) => {
+    await openAgentPage(page)
+    await menuTrigger(page).click()
+
+    // The panel is in flow, not portalled, so an `overflow-hidden` ancestor
+    // clips it at the card's bottom edge — and an `overflow:hidden` box is
+    // still programmatically scrollable, which is why the focus tests above
+    // passed over the bug: focus/click-scroll can reveal a clipped item. The
+    // box alone is therefore not enough; the hit test is what proves the item
+    // is actually painted where it claims to be.
+    const last = page.getByRole('menuitem').last()
+    await expect(last).toBeVisible()
+
+    const box = await last.boundingBox()
+    expect(box, 'the last menu item has a box').not.toBeNull()
+    const viewport = page.viewportSize()
+    expect(viewport, 'the run has a viewport').not.toBeNull()
+    expect(box!.x, 'left edge inside the viewport').toBeGreaterThanOrEqual(0)
+    expect(box!.y, 'top edge inside the viewport').toBeGreaterThanOrEqual(0)
+    expect(box!.x + box!.width, 'right edge inside the viewport').toBeLessThanOrEqual(viewport!.width)
+    expect(box!.y + box!.height, 'bottom edge inside the viewport').toBeLessThanOrEqual(viewport!.height)
+
+    const hit = await last.evaluate((el) => {
+      const rect = el.getBoundingClientRect()
+      const at = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)
+      return at === el || el.contains(at)
+    })
+    expect(hit, 'the last menu item is the topmost element at its own centre').toBe(true)
+  })
+
   test('Add budget moves focus to the amount field; Cancel returns it to the opening trigger', async ({
     page,
   }) => {

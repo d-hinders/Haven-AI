@@ -139,10 +139,17 @@ export default function BudgetAmountRow({
     // shrink-0: a pinned width that flex could shrink is not a pin, and the
     // row must overflow visibly rather than silently narrow the amount box.
     // The input fills the wrapper.
+    //
+    // #4492: the multi-token row's token `Select` is `w-24` (6rem), not `w-20`.
+    // The shared `Select` now reserves `pr-9` for its own chevron, which at
+    // 80 px left 30 px of text box for a 39 px "USDC" — the symbol clipped.
+    // 96 px leaves 46 px. The `6.5rem` below is that 6rem select plus the
+    // row's `gap-2` (0.5rem); change both together or the amount field
+    // overlaps the select.
     <div
       className={
         multiToken
-          ? 'w-[calc(100%-5.5rem)] min-w-32 flex-1 sm:w-auto sm:flex-none'
+          ? 'w-[calc(100%-6.5rem)] min-w-32 flex-1 sm:w-auto sm:flex-none'
           : `${inputClassName} sm:shrink-0`
       }
     >
@@ -187,7 +194,7 @@ export default function BudgetAmountRow({
             value={selectedTokenAddress ?? ''}
             onChange={(e) => onTokenChange(e.target.value)}
             aria-label="Token"
-            className="w-20 shrink-0"
+            className="w-24 shrink-0"
           >
             {tokens.map((t) => (
               <option key={t.address} value={t.address}>

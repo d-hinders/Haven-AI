@@ -1876,7 +1876,7 @@ export default function DesignSystemPage() {
 
           <Card hover={false} className="p-5">
             <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Segmented control</h3>
-            <div className="mt-4 flex flex-wrap items-center gap-3">
+            <div data-testid="ds-segmented-control" className="mt-4 flex flex-wrap items-center gap-3">
               <SegmentedControl
                 ariaLabel="Theme"
                 value={segmented}
@@ -1907,11 +1907,13 @@ export default function DesignSystemPage() {
               <code className="rounded bg-[var(--v2-surface)] px-1">aria-checked</code> options, because the
               choices are mutually exclusive. The group carries <code className="rounded bg-[var(--v2-surface)] px-1">aria-label</code>{' '}
               so a screen reader names the question first; options are real buttons, so keyboard
-              works without extra wiring. The selected option uses the app&rsquo;s active idiom —
-              brand ink on brand-soft inside an inset brand outline, a boundary of at least 3:1 against
-              the track in both themes — and every option&rsquo;s hit area is 44px tall while it
-              paints 32px (#4056, the same mechanism as Button). Never hand-roll a second control
-              of this shape.
+              works without extra wiring. The group is an outlined, divided control — a 1px border
+              around content-width segments with hairline dividers, no tinted track. The selected
+              option is brand ink on brand-soft at semibold with no outline (5.62:1 light / 6.63:1
+              dark, text), so selection rides on the fill, the ink, the weight step and
+              <code className="rounded bg-[var(--v2-surface)] px-1">aria-checked</code>; every
+              option&rsquo;s hit area is 44px tall while it paints 32px (#4056, the same mechanism as
+              Button). Never hand-roll a second control of this shape.
             </p>
           </Card>
 
@@ -2342,7 +2344,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="Card.Header — the titled grey band"
-        description="Give a Card a titled header with Card.Header — never hand-roll the border-b + bg-surface band. Slots: `title` (heading level via `as`, default h3), optional `description`, optional right-aligned `actions`. Pass `children` instead for bespoke content (badges, balances). Padding: default (px-5 py-4), `spacious` (px-6 py-5) for page-level section cards, `none` when the caller owns padding. Parent Card needs `overflow-hidden` (or add `rounded-t-[10px]` via className)."
+        description="Give a Card a titled header with Card.Header — never hand-roll the border-b + bg-surface band. Slots: `title` (heading level via `as`, default h3), optional `description`, optional right-aligned `actions`. Pass `children` instead for bespoke content (badges, balances). Padding: default (px-5 py-4), `spacious` (px-6 py-5) for page-level section cards, `none` when the caller owns padding. The band's corners clip to the card radius when the parent Card sets `overflow-hidden` — but a Card that hosts a ⋯ menu must NOT clip (the menu is in flow, not portalled): leave the Card's overflow visible and add `rounded-t-[10px]` to the header instead (design-system.md § Cards)."
       >
         <Card hover={false} className="max-w-xl overflow-hidden">
           <Card.Header
@@ -2499,7 +2501,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="Dropdown menu (kebab)"
-        description="Overflow menu used for account-, agent-, or row-level settings that shouldn't compete with the page's primary CTAs. The trigger is usually a `⋮` icon button (10×10 / h-10 to match Button md). Items support a `tone='danger'` for destructive actions and a `<DropdownMenuSeparator />` between groups."
+        description="Overflow menu used for account-, agent-, or row-level settings that shouldn't compete with the page's primary CTAs. The trigger is usually a `⋮` icon button (10×10 / h-10 to match Button md). Items support a `tone='danger'` for destructive actions and a `<DropdownMenuSeparator />` between groups. The panel is in flow, not portalled — a container that hosts it must not clip (`overflow-hidden`/`clip`/`auto`/`scroll`, `truncate`, `line-clamp-*`); round its children instead (design-system.md § Cards)."
       >
         <Card hover={false} className="p-5">
           <div className="flex flex-wrap items-center gap-6">
@@ -2536,7 +2538,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="Select"
-        description="The styled native <select>. Same height, radius, border and focus ring as Input so mixed form rows align. Passes through all native select attributes."
+        description="The styled native <select>. Same height, radius, border and focus ring as Input so mixed form rows align, plus a lucide ChevronDown inside the right edge — the browser's own arrow is off (appearance-none) and pr-9 reserves the room, so never add padding or an arrow of your own. className lands on the wrapper, not the select. Passes through all native select attributes."
       >
         <Card hover={false} className="max-w-sm p-5">
           <div className="space-y-3">

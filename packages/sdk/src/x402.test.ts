@@ -1345,7 +1345,7 @@ describe('x402 helpers', () => {
       .mockResolvedValueOnce(new Response(JSON.stringify({ evidence: { id: 'evidence-123' } }), { status: 202 }))
       // #4470: the settlement report's own answer. Unmocked, this 6th call went
       // to the real network and its failure was classed `refused`; a
-      // non-answer is now retried on the evidence schedule.
+      // non-answer now classes `retryable` (still one post).
       .mockResolvedValueOnce(new Response(JSON.stringify({ evidence: { id: 'evidence-124' } }), { status: 202 }))
 
     const haven = new HavenClient({
@@ -2549,7 +2549,7 @@ describe('#3764 — the local retry reports the merchant settlement beside the f
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(X402_TAX_UNAVAILABLE), { status: 200 }))
     fetchMock.mockResolvedValueOnce(new Response('paid content', { status: 200, headers: retryHeaders }))
     // A fresh Response per call: one shared instance answers its first read
-    // and then throws "Body already used", a non-answer #4470 now retries.
+    // and then throws "Body already used", a non-answer #4470 classes `retryable`.
     fetchMock.mockImplementation(async () => new Response('{}', { status: 200 }))
     return { fetchMock }
   }
@@ -2834,8 +2834,15 @@ describe('#4215 — the local retry retries the settlement report on a retryable
   ]
 
   it.each(noVerdictCases)('%s — exactly ONE settlement post, not re-attempted', async (_label: string, answer: SettlementAnswer) => {
-    const { fetchMock } = flowWithSettlementAnswers([answer])
-    const res = await runFlow()
+    // Fake timers, and enough answers for every scheduled attempt, so a loop
+    // that re-attempted a non-answer fails on the post count below rather
+    // than on vitest's timeout (#4470 review N2).
+    vi.useFakeTimers()
+    const again = () => (typeof answer === 'function' ? answer : answer.clone())
+    const { fetchMock } = flowWithSettlementAnswers([again(), again(), again(), again()])
+    const flow = runFlow()
+    await vi.advanceTimersByTimeAsync(10_000)
+    const res = await flow
 
     expect(settlementPosts(fetchMock)).toHaveLength(1)
     expect(res.status).toBe(200)

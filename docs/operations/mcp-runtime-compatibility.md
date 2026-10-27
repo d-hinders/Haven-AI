@@ -6762,6 +6762,9 @@ to call next in structured fields, and those fields are typed end to end
 >   `statusCode` are unchanged, so the local MCP (`packages/mcp/src/tools.ts`)
 >   relays it as before. The funding wait throws two new `HavenApiError`
 >   subclasses, `FundingConfirmationUnknownError` and `FundingRevertedError`.
+>   The local MCP reaches that wait through `haven.fetch` and `payX402Quote`
+>   and relays the two with their new status (504 / 502, was 500) and message;
+>   its step is unchanged.
 >   A settlement report that got no answer is `retryable`, not `refused`.
 > - **The hosted MCP.** `normalizeError`'s generic `HavenApiError` branch
 >   reads the cause first:
@@ -6771,8 +6774,9 @@ to call next in structured fields, and those fields are typed end to end
 >   - only an unmarked status falls through to the 4xx and 5xx steps, and
 >     their reasons are byte-identical.
 >
->   `haven_submit`, on both schemes, answers a non-answer with the new code
->   `NO_ANSWER_OUTCOME_UNKNOWN` and the status read for its `payment_id`.
+>   `haven_submit`, on both schemes, and `haven_settle_mcp_tool`'s erc7710
+>   settle answer a non-answer with the new code `NO_ANSWER_OUTCOME_UNKNOWN`
+>   and the status read for its `payment_id`.
 >   The eip3009 delivery step answers the funding wait with the new codes
 >   `FUNDING_CONFIRMATION_UNKNOWN` (check status) and `FUNDING_REVERTED`
 >   (stop), before any merchant call. The settlement-report pending texts now

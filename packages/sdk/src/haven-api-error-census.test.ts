@@ -38,7 +38,7 @@ const UNMARKED_5XX_ALLOWLIST: Array<{ file: string; match: string; reason: strin
   },
   {
     file: 'client-tax-declaration.ts',
-    match: '',
+    match: 'neither the §2.1 content nor a named unavailability reason',
     reason: 'unreachable from any hosted step: swallowed by its only caller, which falls back to no declaration',
   },
 ]
@@ -122,6 +122,8 @@ describe('HavenApiError 5xx census (#4470)', () => {
     for (const entry of UNMARKED_5XX_ALLOWLIST) {
       expect(literal5xx.some((s) => s.file === entry.file && s.call.includes(entry.match)), entry.file + ': ' + entry.match).toBe(true)
       expect(entry.reason.length).toBeGreaterThan(0)
+      // An empty match would excuse every call in the file (#4470 review S2).
+      expect(entry.match.length, entry.file).toBeGreaterThan(10)
     }
   })
 

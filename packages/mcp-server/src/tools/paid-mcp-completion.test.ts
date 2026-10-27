@@ -264,6 +264,8 @@ describe('haven_settle_mcp_tool', () => {
     })
     const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
     vi.spyOn(haven, 'ensureFundingConfirmed').mockRejectedValue(
+      // A plain Error, not the typed #4470 funding errors: the control for
+      // the fallthrough rethrow in ensureFundingConfirmedOrRefuse.
       new Error('Funding tx did not confirm on-chain within the timeout window.'),
     )
     const completeSpy = vi.spyOn(haven, 'completeX402MerchantCall')

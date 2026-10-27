@@ -87,6 +87,7 @@ import {
 import {
   parseMcpTransport,
   serializeMcpTransport,
+  submitErc7710WithExpiryMapping,
   submitSignatureWithExpiryMapping,
   MERCHANT_OUT_OF_GAS_REASON,
 } from './support/mcp-context.js'
@@ -199,7 +200,7 @@ function settlementEvidenceReason(outcome: EvidenceReportOutcome | undefined): s
   if (outcome.outcome === 'retryable') {
     return (
       'The purchase is complete and the merchant settlement was reported, but Haven could not ' +
-      'verify it on-chain just yet (the chain was unreachable or the transaction is not mined). ' +
+      'verify it on-chain just yet (Haven did not answer, the chain was unreachable, or the transaction is not mined). ' +
       'Call next_tool (haven_report_settlement_evidence) shortly with next_arguments, adding ' +
       'payment_header: the exact payment_header you passed to this call.'
     )
@@ -1415,8 +1416,10 @@ export function createPaidMcpCompletionHandlers(
         // `payment_header` is what tells the two schemes apart, because the
         // 3009 path always carries one built by the local signer.
         if (!args.payment_header) {
-          const submitted = await haven
-            .submitX402Erc7710(args.payment_id, args.signature)
+          // #4470 review S1: through the same wrapper as haven_submit, so a
+          // settle that got no answer reads the status for this payment id
+          // instead of a generic stop (and an expired child maps the same way).
+          const submitted = await submitErc7710WithExpiryMapping(haven, args.payment_id, args.signature)
             .catch(catchSettledResettle)
           // #3423: a second settle of a payment that already settled answers
           // with the original settlement as a done state (the #3417 helper),

@@ -17,7 +17,7 @@ import type { AddressInfo } from 'node:net'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { HavenApiError, HavenClient } from '@haven_ai/sdk'
 import { normalizeError } from './tools/support/errors.js'
-import { withDiscoveryGuidance } from './tools/support/mcp-context.js'
+import { quoteMcpToolCall, withDiscoveryGuidance } from './tools/support/mcp-context.js'
 import { requireAgentIdentity } from './tools/identity-gate.js'
 import { createToolHandlers, type ToolPayload } from './tools.js'
 import { AGENT_RESPONSE, PAYMENT_REQUIRED } from './test-support/hosted-mcp.js'
@@ -439,5 +439,35 @@ describe('Part 2 — a deterministic SDK failure is not transient (#4470)', () =
     const out = normalizeError(err)
     expect(out.next_action).toBe('retry_with_explicit_context')
     expect(out.next_tool_omitted_reason).toBe(RETRY_5XX)
+  })
+})
+
+describe('#4470 review — the paths round 1 left untested', () => {
+  it('haven_settle_mcp_tool\'s erc7710 settle answers a hang with the status read for args.payment_id (S1)', async () => {
+    stubBackend({ 'POST /x402/pay_7710/settle': 'hang' })
+    const out = failure(
+      await createToolHandlers(client()).haven_settle_mcp_tool({
+        payment_id: 'pay_7710',
+        signature: '0x' + '22'.repeat(65),
+        merchant_url: 'https://merchant.test/mcp',
+        tool_name: 'create_text',
+        arguments: {},
+      }),
+    )
+    expect(out.code).toBe('NO_ANSWER_OUTCOME_UNKNOWN')
+    expect(out.next_action).toBe('check_status_later')
+    expect(out.next_tool_name).toBe('haven_get_payment_status')
+    expect(out.next_arguments).toEqual({ payment_id: 'pay_7710' })
+  })
+
+  it('the discovered-endpoint rebuild in quoteMcpToolCall keeps the cause (S4)', async () => {
+    stubBackend({ 'GET /.well-known/haven-demo-merchant': { status: 200, json: { mcp_url: 'https://merchant.test/mcp' } } })
+    const haven = client()
+    vi.spyOn(haven, 'quoteMcpX402')
+      .mockRejectedValueOnce(new HavenApiError('Expected an x402 quote response with HTTP 402, got HTTP 404.', 404))
+      .mockRejectedValueOnce(HavenApiError.deterministic('No sign_hash returned from x402/authorize', 500))
+    const err = await caught(quoteMcpToolCall(haven, { merchantUrl: 'https://merchant.test/base', toolName: 't', toolArguments: {} }))
+    expect((err as Error).message).toContain('DISCOVERED endpoint')
+    expect(normalizeError(err).next_tool_omitted_reason).toBe(DETERMINISTIC)
   })
 })

@@ -335,8 +335,9 @@ export class MerchantCompletion {
     // reuse goes through `reportEvidence`, so the bounded
     // `EVIDENCE_RETRY_DELAYS_MS` schedule applies: four attempts over ~7 s,
     // well inside the legs' 45 s window. Any refusal — a 409, a proof-header
-    // refusal, a validation error, a transport failure with no status — ends
-    // the loop, exactly as everywhere else this endpoint is called.
+    // refusal, a validation error — ends the loop, exactly as everywhere else
+    // this endpoint is called; so does a non-answer, which classes
+    // `retryable` since #4470 but is not re-attempted inside the loop.
     const settlementCandidate = merchantSettlement.settlementTxHash
     if (
       settlementCandidate &&

@@ -2997,6 +2997,12 @@ export class HavenApiError extends HavenError {
  * already submitted the funding leg, so funds may have reached the delegate:
  * the answer is check-status, never "tell the user it failed" and never a new
  * payment. The merchant was not called.
+ *
+ * Deliberately carries no `failureCause`: it is not a transport non-answer
+ * (no Haven request went unanswered) and not deterministic (a later read may
+ * see the receipt). Callers answer the class itself — the hosted delivery
+ * step does in `ensureFundingConfirmedOrRefuse`; unwrapped, its 504 reads
+ * "re-call once", which re-runs the same wait.
  */
 export class FundingConfirmationUnknownError extends HavenApiError {
   readonly fundingErrorCode = 'funding_confirmation_unknown' as const

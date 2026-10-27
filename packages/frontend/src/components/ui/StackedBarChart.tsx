@@ -763,14 +763,14 @@ export function StackedBarChart({
         })}
       </div>
 
-      {/* The legend: the same colours, read by name. A column on a wide
-          screen, a wrapping row of dots and names on a narrow one. */}
+      {/* The legend: the same colours, read by name. One wrapping row of dots
+          and names at every width (#4480, owner decision 2026-10-27) — a
+          column on a wide screen read as a second list beside the chart
+          rather than as its key. */}
       <ul
         data-testid="chart-legend"
         aria-hidden="true"
-        className={`mt-3 gap-x-4 gap-y-1.5 text-xs text-[var(--v2-ink-2)] ${
-          narrow ? 'flex flex-wrap' : 'flex flex-col'
-        }`}
+        className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-[var(--v2-ink-2)]"
       >
         {legend.map((row) => (
           <li

@@ -740,6 +740,56 @@ test.describe('design-system visual regression', () => {
       await expectShowcaseClip(sample, vp.height, 'the Monogram sample', `design-system-monogram-${vp.name}${schemeSuffix}.png`, SAMPLE_MAX_DIFF_PIXELS)
     })
 
+    // #4480: the overlapping agent avatar stack, owner-approved 2026-10-27.
+    // Two stacks — the cap (three marks, no overflow) and the overflow case
+    // (three marks plus a `+2` mark) — so the clip pins both the overlap and
+    // the neutral overflow mark.
+    test(`/design-system agent avatar stack sample renders pixel-stable (${vp.name})`, async ({ page }, testInfo) => {
+      const scheme = schemeOf(testInfo)
+      const schemeSuffix = scheme === 'dark' ? '-dark' : ''
+      await page.setViewportSize({ width: vp.width, height: vp.height })
+      await page.goto('/design-system')
+      await page.evaluate(() => document.fonts.ready)
+      await page.waitForLoadState('networkidle')
+
+      const sample = page.getByTestId('ds-agent-avatar-stack')
+      await expect(sample).toHaveCount(1)
+      const stacks = sample.getByTestId('agent-avatar-stack')
+      await expect(stacks).toHaveCount(2)
+      // The cap: three marks, no overflow mark.
+      await expect(stacks.nth(0).getByTestId('agent-avatar-stack-mark')).toHaveCount(3)
+      await expect(stacks.nth(0).getByTestId('agent-avatar-stack-overflow')).toHaveCount(0)
+      // Past the cap: three marks and ONE `+2` mark.
+      await expect(stacks.nth(1).getByTestId('agent-avatar-stack-mark')).toHaveCount(3)
+      await expect(stacks.nth(1).getByTestId('agent-avatar-stack-overflow')).toHaveText('+2')
+      // One focus stop per stack, not one per mark (#4480): the shared
+      // Tooltip's wrapper is the only tab stop in the section.
+      await expect(sample.locator('[tabindex="0"]')).toHaveCount(2)
+      await expectShowcaseClip(sample, vp.height, 'the agent avatar stack sample', `design-system-agent-avatar-stack-${vp.name}${schemeSuffix}.png`, SAMPLE_MAX_DIFF_PIXELS)
+    })
+
+    // #4480: the full AreaChart had no visual pin at all. The rising sample is
+    // the one that shows the success-green "Net change"; the falling sample
+    // above it stays neutral ink.
+    test(`/design-system AreaChart rising sample renders pixel-stable (${vp.name})`, async ({ page }, testInfo) => {
+      const scheme = schemeOf(testInfo)
+      const schemeSuffix = scheme === 'dark' ? '-dark' : ''
+      await page.setViewportSize({ width: vp.width, height: vp.height })
+      await page.goto('/design-system')
+      await page.evaluate(() => document.fonts.ready)
+      await page.waitForLoadState('networkidle')
+
+      const sample = page.getByTestId('ds-area-chart-rising')
+      await expect(sample).toHaveCount(1)
+      // Assert the state before the pixels: the delta is the signed rise and
+      // it wears the success token, so a capture that silently lost the tone
+      // fails by name rather than as an unattributable diff.
+      const delta = sample.getByTestId('area-delta')
+      await expect(delta).toHaveText('Net change +180.00')
+      await expect(delta).toHaveClass(/text-\[var\(--v2-success\)\]/)
+      await expectShowcaseClip(sample, vp.height, 'the AreaChart rising sample', `design-system-area-chart-rising-${vp.name}${schemeSuffix}.png`, SAMPLE_MAX_DIFF_PIXELS)
+    })
+
     test(`/design-system PageHeader leading sample renders pixel-stable (${vp.name})`, async ({ page }, testInfo) => {
       const scheme = schemeOf(testInfo)
       const schemeSuffix = scheme === 'dark' ? '-dark' : ''
@@ -845,6 +895,8 @@ test.describe('design-system visual regression', () => {
     ['AreaChart sparkline sample', (p) => p.getByTestId('ds-area-chart-sparkline')],
     ['StatTile inline sample', (p) => p.getByTestId('ds-stat-tile-inline')],
     ['Monogram sample', (p) => p.getByTestId('ds-monogram')],
+    ['agent avatar stack sample', (p) => p.getByTestId('ds-agent-avatar-stack')],
+    ['AreaChart rising sample', (p) => p.getByTestId('ds-area-chart-rising')],
     ['PageHeader leading sample', (p) => p.getByTestId('ds-pageheader-leading')],
     ['SegmentedControl sample', (p) => p.getByTestId('ds-segmented-control')],
     ['list-controls paging sample', (p) => p.getByTestId('ds-list-controls-paging')],

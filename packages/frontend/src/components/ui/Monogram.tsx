@@ -54,11 +54,14 @@ export function Monogram({
   name: string
   logoUrl?: string | null
   /**
-   * `xs` — a 32px avatar sized for the agent row's `2rem` mark track, the width
-   * `DirectionMark compact` shares (#4210); `sm` — a 36px list/card avatar;
-   * `md` — a 48px page-header avatar.
+   * `xxs` — a 24px avatar for the overlapping agent avatar stack (#4480),
+   * where three marks share one table cell; `xs` — a 32px avatar sized for the
+   * agent row's `2rem` mark track, the width `DirectionMark compact` shares
+   * (#4210); `sm` — a 36px list/card avatar; `md` — a 48px page-header avatar.
+   * The initials stay `text-xs` at every size below `md` — design-lint's
+   * `micro-font` rule rejects a smaller step, and 12px is the ramp's floor.
    */
-  size?: 'xs' | 'sm' | 'md'
+  size?: 'xxs' | 'xs' | 'sm' | 'md'
   /**
    * The entity's STORED tint (an agent's `avatarTint`, 1..6). Overrides the
    * name hash; omit it for a merchant or a contact, which keep the hash.
@@ -67,7 +70,8 @@ export function Monogram({
   /** Hide the mark from assistive tech: the caller prints the name beside it. */
   decorative?: boolean
 }) {
-  const box = size === 'md' ? 'h-12 w-12' : size === 'xs' ? 'h-8 w-8' : 'h-9 w-9'
+  const box =
+    size === 'md' ? 'h-12 w-12' : size === 'xs' ? 'h-8 w-8' : size === 'xxs' ? 'h-6 w-6' : 'h-9 w-9'
   if (logoUrl) {
     return (
       // eslint-disable-next-line @next/next/no-img-element -- see the docblock

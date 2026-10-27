@@ -1314,7 +1314,9 @@ Structure:
    `/transactions?search=<filter_address>&direction=out&period=<current>`
    (plus `&agentId=` when filtered). Balance reads "Net change" with a signed
    amount, says "all your accounts", and adds "Balance isn't filtered by
-   agent" when the facet is set (#4333).
+   agent" when the facet is set (#4333). The amount is success green when the
+   balance rises and neutral ink when it falls or is unchanged — a fall is
+   never red, and the sign carries the direction (#4480).
 
 A user with NO agents at all (revoked included) gets one empty state instead
 of the zero tiles and empty sections: "No agent activity yet", a line on what

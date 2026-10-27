@@ -162,6 +162,12 @@ export const CONTRAST_PAIRS: ContrastPair[] = [
   // contrast table keys its rows by `${fg}-${bg}`.
   { fg: 'brand', bg: 'brand-soft', min: 4.5 },
   { fg: 'success', bg: 'success-soft', min: 3 },
+  // The success ink as TEXT on the two card grounds (#4480): the balance
+  // chart's "Net change" annotation wears it when the range rises, and it is
+  // `text-xs` — 4.5:1, not the 3:1 a chart fill is held to. Measured light
+  // 5.5:1 on `bg` / 5.2:1 on `surface`, dark 9.5:1 / 8.8:1.
+  { fg: 'success', bg: 'bg', min: 4.5 },
+  { fg: 'success', bg: 'surface', min: 4.5 },
   { fg: 'debit', bg: 'debit-soft', min: 3 },
   { fg: 'warning', bg: 'warning-soft', min: 3 },
   { fg: 'danger', bg: 'danger-soft', min: 3 },

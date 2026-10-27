@@ -13,6 +13,7 @@ import type { AnalyticsCurrency } from '@/lib/analytics-format'
 import { Card } from '@/components/ui/Card'
 import { Row } from '@/components/ui/Row'
 import { Tooltip } from '@/components/ui/Tooltip'
+import { rosterLine } from '@/components/ui/AgentAvatarStack'
 import { Address } from '@/components/haven/Address'
 import { Table, tableColumnClass } from '@/components/ui/Table'
 import type { AnalyticsAgentRow, AnalyticsMerchantRow, AnalyticsRangeValue } from '@/types/analytics'
@@ -36,7 +37,8 @@ import type { AnalyticsAgentRow, AnalyticsMerchantRow, AnalyticsRangeValue } fro
  * no kind line: the name already says what resolved it. The Address COLUMN is
  * gone — an address is metadata, shown in the mobile disclosure and the
  * unknown recipient's tooltip, never as a label. Spent, Payments, "Paid by"
- * as TEXT (the roster line, not a monogram stack — no new pattern), Last
+ * as TEXT (the roster line; the shared `AgentAvatarStack` that replaces it
+ * lands in #4480 and mounts here in #4481), Last
  * paid, and "View in Transactions" linking to the history pre-filtered to
  * that recipient.
  *
@@ -110,14 +112,15 @@ function agentNamesFor(agentIds: string[], roster: Map<string, string>): {
   }
 }
 
-function rosterLine(names: string[], total: number): string {
-  if (total === 0) return 'No paying agents reported'
-  const rest = total - names.length
-  return rest > 0 ? `${names.join(', ')} and ${rest} more` : names.join(', ')
+/** The zero case's copy: the shared `rosterLine` names agents, and the stack
+ *  renders nothing for none — so the sentence for "no paying agents" belongs
+ *  to the caller that prints it. */
+function payingAgentsLine(names: string[], total: number): string {
+  return total === 0 ? 'No paying agents reported' : rosterLine(names, total)
 }
 
 function PayingAgentsCell({ names, total }: { names: string[]; total: number }) {
-  return <span className="text-sm text-[var(--v2-ink-2)]">{rosterLine(names, total)}</span>
+  return <span className="text-sm text-[var(--v2-ink-2)]">{payingAgentsLine(names, total)}</span>
 }
 
 /**
@@ -329,7 +332,7 @@ function MobileMerchantRow({
               <Address value={merchant.address} className="text-[var(--v2-ink)]" />
             </dd>
           </div>
-          <DisclosureLine term="Paying agents" value={rosterLine(names, total)} />
+          <DisclosureLine term="Paying agents" value={payingAgentsLine(names, total)} />
           <DisclosureLine
             term="First seen"
             value={formatAnalyticsDay(merchant.first_seen.slice(0, 10))}

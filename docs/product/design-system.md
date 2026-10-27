@@ -34,6 +34,7 @@ covers:
   - packages/frontend/src/components/haven/TransactionActivityRow.tsx
   - packages/frontend/src/components/accounting/ConnectionRow.tsx
   - packages/frontend/src/components/accounting/AccountingBadge.tsx
+  - packages/frontend/src/components/accounting/ConnectionsCard.tsx
   - packages/frontend/src/components/haven/AgentRow.tsx
   - packages/frontend/src/app/(authenticated)/agents/[agentId]/AgentDetailClient.tsx
   - packages/frontend/src/app/(authenticated)/dashboard/AgentsSection.tsx
@@ -872,6 +873,22 @@ follows without edits.
   only**: settings sections are exempt — a `SettingsRow` keeps its visible
   actions (`ConnectionRow`'s Connect / Reconnect / Disconnect and Settings
   buttons stay compliant; owner decision 2026-10-23, #4357).
+- **`SettingsRow`'s full-width slot (#4478, owner decision 2026-10-27).** A row
+  can carry content under its label/action line through the optional `below`
+  prop: a disclosure, an inline alert, or a state note that belongs to the whole
+  row. `detail` cannot hold those — it lives in the left text column, so below
+  `sm` the action stacks after it and a disclosure there pushes the control
+  under the opened explanation, while on desktop `sm:items-center` re-centres
+  the control as the column grows. The slot is full-bleed (no horizontal
+  padding), so a divided section can meet the card edge; content that should
+  align with the row's text wraps itself in `px-6`. With the slot absent the row
+  renders exactly as it did before — the root IS the label/action line, pinned
+  by an `outerHTML` snapshot in `SettingsSection.test.tsx`; with the slot the
+  line moves into an inner div and the slot spans the row beneath it, in DOM
+  order at every breakpoint (no `order-*`). Consumers: the agent Settings tab's
+  Tax declaration row and the agent Passport row's issued-state `dl` (#4477),
+  and `ConnectionsCard.tsx`, which renders its inline feed settings through the
+  slot instead of a hand-written sibling wrapper (#4478).
 
 ### BudgetMeter (#3692)
 
@@ -1940,6 +1957,26 @@ The hand-rolled `<details>` uses that predate the pattern (`ErrorBoundary`,
 `settings/SignersSection.tsx`, `marketplace/OffersTable.tsx`, `connect-agent/*`, and
 the account signers card's text-only "Show address" toggle, which keeps the
 browser's native disclosure triangle instead of a `ChevronDown` and does not match) are NOT migrated here. A new technical disclosure is written this way.
+
+**Plain-language variant (#4478, owner decision 2026-10-27).** The same markup —
+`<details className="group">`, closed by default, the same `ChevronDown` with
+`group-open:rotate-180` — for a long explanation that a row's one-line
+description cannot hold. It differs in four ways:
+
+- the label names the content in plain words and still carries the affordance
+  ("What gets sent", never a bare "Show"/"Hide");
+- the content is prose — a `text-sm text-[var(--v2-ink-2)]` paragraph — not the
+  panel's `dl` detail rows;
+- its scope is an explanation, not a set of technical values;
+- it may sit inside a settings row, in `SettingsRow`'s full-width slot (§
+  Detail-page section rule).
+
+Use it when the reader needs the explanation before deciding and the row's
+detail line cannot carry it. The agent Settings tab's Tax declaration row
+(#4477) is the first consumer: "What gets sent" opens the declaration's
+explanation. The variant does **not** license technical terms — the § Vocabulary
+exception applies to technical disclosure surfaces only, and a plain-language
+disclosure is not one.
 
 ### Cards (`Card`)
 

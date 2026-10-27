@@ -226,6 +226,12 @@ describe('ConnectionsCard', () => {
     renderCard()
     fireEvent.click(await within(await screen.findByTestId('connection-actions-fortnox')).findByRole('button', { name: 'Settings' }))
     const form = screen.getByTestId('connection-settings-fortnox')
+    // #4478: the form renders through `SettingsRow`'s full-width slot, so it is
+    // a descendant of the row root — not a hand-written sibling wrapper. The
+    // `Card.Section divided` hairline still sits directly above it.
+    const row = screen.getByTestId('connection-row-fortnox')
+    expect(row.contains(form)).toBe(true)
+    expect(form.parentElement?.className).toMatch(/\bborder-t\b/)
     fireEvent.change(within(form).getByLabelText('Suggested account'), { target: { value: '6540' } })
     fireEvent.click(within(form).getByRole('button', { name: 'Save' }))
     await waitFor(() =>

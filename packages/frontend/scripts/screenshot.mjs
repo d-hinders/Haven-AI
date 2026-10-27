@@ -2189,7 +2189,7 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
   }
   if (pathname.startsWith('/accounts/hybrid/') && pathname.endsWith('/signers')) {
     // The account-scoped signer set (#1081/#1089) — one passkey, so the
-    // Who can approve section renders its "only one way to approve" state.
+    // Who can approve section renders its single-signer warning (#4474).
     return {
       account_address: FIXTURE_ACCOUNT.account_address,
       chain_id: FIXTURE_ACCOUNT.chain_id,
@@ -4889,7 +4889,7 @@ export const SCENARIOS = {
   },
   'account-backup-recovery': {
     description:
-      'Who can approve card at both viewports, in all three of its rendered states — the healthy multi-signer layout, the one-way-to-approve warning, and the load failure',
+      'Who can approve section at both viewports, in all three of its rendered states — the healthy multi-signer layout, the one-way-to-approve warning, and the load failure',
     // ── The three states, and why they are one scenario (#1693, #1725) ───────
     //
     // #1693 evidenced the HEALTHY layout only, and #1725's review found the
@@ -4899,10 +4899,12 @@ export const SCENARIOS = {
     // reloading between shots, the way `connect-agent` holds one dialog at
     // three stages.
     //
-    //   healthy    wallet + two dated passkeys. The row layout, the labels that
-    //              WRAP at 390px (#1679), the enrolment button and its subtext.
-    //   one-way    one passkey, no wallet — the amber "only one way to approve"
-    //              banner. This is a money-adjacent safety affordance: it is
+    //   healthy    wallet + two dated passkeys. The row layout, the two-line
+    //              labels that WRAP at 390px (#1679, split #4474), the footer
+    //              row's two add actions and the "Lost a device?" link.
+    //   one-way    one passkey, no wallet — the amber "Only one passkey can
+    //              approve this account" callout. This is a money-adjacent
+    //              safety affordance: it is
     //              the ONLY thing telling a user their account has no recovery.
     //              The shared fixture has served exactly this shape all along
     //              and nothing ever shot it, which is the cheaper and more
@@ -4992,21 +4994,36 @@ export const SCENARIOS = {
         }),
       )
 
-      // The Card root that owns the heading. Card does not forward props, so
-      // there is no testid to target without changing a shared primitive;
-      // this couples to Card's own radius class instead. If that changes the
-      // locator finds nothing and the run FAILS — which is the behaviour you
-      // want from a capture whose entire purpose is trustworthy evidence.
-      const card = page.locator('div.rounded-\\[10px\\]', { has: heading })
+      // #4474: the heading now sits ABOVE the card (the detail-page section
+      // rule), so the card can no longer be located by CONTAINING it — that
+      // locator resolves to nothing and every wait below silently times out.
+      // The section wrapper holds both, and the card is its first
+      // `rounded-[10px]` child, which exists in all three states (the
+      // load-error branch renders inside the same card).
+      const section = page.locator('section', { has: heading })
+      const card = section.locator('div.rounded-\\[10px\\]').first()
+
+      // #4474: the SHOT is the section, not the card. The slice added the
+      // "Who can approve" heading row and its "All signers in Settings" link
+      // above the card, and a card-only capture evidences neither — the two
+      // things the diff is judged on would be the two things the PNG omits.
+      // All three states shoot the same wrapper so the framing cannot read as
+      // a layout difference between them. `card` stays the scope for the
+      // presence/absence assertions below: they are about the card's branch,
+      // and widening them to the section would let the heading satisfy a wait
+      // the card itself has to satisfy.
 
       // The three states' distinguishing copy, as locators. Regexes, not exact
       // strings: the banner and the confirmations are authored across several
       // JSX lines, so the rendered text carries collapsed whitespace that an
       // exact match would have to reproduce by hand. Each fragment is long
       // enough to belong to exactly one state.
-      const oneWayBanner = card.getByText(/only one way to approve\. Add a backup now/)
+      const oneWayBanner = card.getByText(/Only one passkey can approve this account/)
       const loadErrorCopy = card.getByText(/Haven could not load how this account is approved/)
-      const walletRow = card.getByText('Wallet', { exact: true })
+      // #4474: the row reads "Browser wallet", never "Wallet" — the old
+      // `getByText('Wallet', { exact: true })` matched nothing, so its
+      // `refuseIfPresent` checks were vacuous.
+      const walletRow = card.getByText('Browser wallet', { exact: true })
       const addBackup = card.getByRole('button', { name: 'Add a backup passkey' })
 
       /** Re-serve `/signers` at `stage` and reload the page onto it. */
@@ -5030,8 +5047,8 @@ export const SCENARIOS = {
       // alongside a healthy signer set, every wait above would still pass.
       await refuseIfPresent(oneWayBanner, 'account-backup-recovery · healthy · one-way banner')
       await refuseIfPresent(loadErrorCopy, 'account-backup-recovery · healthy · load-error copy')
-      await card.scrollIntoViewIfNeeded()
-      await shoot(card, 'card')
+      await section.scrollIntoViewIfNeeded()
+      await shoot(section, 'section')
 
       // ── one way to approve ────────────────────────────────────────────────
       await openStage('one-way')
@@ -5043,8 +5060,8 @@ export const SCENARIOS = {
       await addBackup.waitFor({ timeout: 15_000 })
       await refuseIfPresent(walletRow, 'account-backup-recovery · one-way · wallet row')
       await refuseIfPresent(loadErrorCopy, 'account-backup-recovery · one-way · load-error copy')
-      await card.scrollIntoViewIfNeeded()
-      await shoot(card, 'one-way')
+      await section.scrollIntoViewIfNeeded()
+      await shoot(section, 'one-way')
 
       // ── load failure ──────────────────────────────────────────────────────
       await openStage('load-error')
@@ -5058,8 +5075,8 @@ export const SCENARIOS = {
       await refuseIfPresent(addBackup, 'account-backup-recovery · load-error · enrolment button')
       await refuseIfPresent(walletRow, 'account-backup-recovery · load-error · wallet row')
       await refuseIfPresent(oneWayBanner, 'account-backup-recovery · load-error · one-way banner')
-      await card.scrollIntoViewIfNeeded()
-      await shoot(card, 'load-error')
+      await section.scrollIntoViewIfNeeded()
+      await shoot(section, 'load-error')
     },
   },
   'passport-reanchoring': {

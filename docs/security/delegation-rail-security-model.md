@@ -4245,3 +4245,25 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > no custody change (Red Line #4: the chain remains the only spend authority).
 > Scope of this note: the card diff above. Nothing else in this document was
 > re-verified for it, and `last-verified` already reads 2026-10-27.
+
+> **Re-verified unchanged (#4474, 2026-10-27 — the account Security tab's
+> layout, copy and which controls show).** The covered file this diff touches
+> is one, display-layer: `components/AccountSignersCard.tsx`. The card loses
+> its heading, intro sentence and in-card Settings row (they move to the page's
+> shared section heading), the single-signer warning becomes the shared warning
+> banner naming the kind of the one signer, each signer row becomes a two-line
+> `Row` (kind over "Added {date}"), and the two add actions plus "Lost a
+> device?" share one divided footer row. **Remove is now ABSENT
+> rather than disabled while one signer remains** — the same refusal the chain
+> already enforced (`CannotRemoveLastSigner`), expressed by not rendering the
+> control; with two or more signers every row still carries it, and the
+> existing drop-to-one confirmations still stand between the click and the
+> signature. No call to `useAccountSigners` changes: `enrollBackupPasskey`,
+> `enrollOwnerWallet`, `removePasskey` and `removeOwner` are invoked exactly as
+> before, with the same `busy` / `ready` gates. No fetch or write is added or
+> removed; no delegation, caveat, enforcer term, budget pre-check, allowance,
+> settlement window or refusal reads the layout. No new spender, no new
+> authority grant, no custody change (Red Line #4: the chain remains the only
+> spend authority). Scope of this note: the card diff above and the page's
+> Security-tab section headings. Nothing else in this document was re-verified
+> for it, and `last-verified` already reads 2026-10-27.

@@ -2,8 +2,9 @@
 // Contrast acceptance for both palettes (#2927).
 //
 // Measures the WCAG pairs the issue fixes as acceptance — every `ink*` on
-// `bg`/`surface`/`surface-2` ≥ 4.5:1, `ink-on-brand` on `brand` ≥ 4.5:1, and
-// each `-soft` tint vs its foreground ≥ 3:1 — against the REAL values in
+// `bg`/`surface`/`surface-2` ≥ 4.5:1, `ink-on-brand` on `brand` ≥ 4.5:1,
+// `brand` on `brand-soft` ≥ 4.5:1 (text since #4496), and each remaining
+// `-soft` tint vs its foreground ≥ 3:1 — against the REAL values in
 // `src/app/globals.css`, in BOTH themes. The pair list and the ratio math
 // come from `src/lib/theme-tokens.ts`; the VALUES come from the CSS. The two
 // are cross-checked: a token whose data-table entry drifts from the CSS

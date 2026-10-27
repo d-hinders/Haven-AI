@@ -122,8 +122,10 @@ export const THEME_TOKENS: TokenSpec[] = [
 
 /**
  * The acceptance pairs (#2927): every `ink*` on the three grounds ≥ 4.5:1,
- * ink-on-brand on brand ≥ 4.5:1, each `-soft` tint vs its foreground ≥ 3:1,
- * and the table header band ≥ 4.5:1 — asserted in BOTH themes.
+ * ink-on-brand on brand ≥ 4.5:1, the brand ink on brand-soft ≥ 4.5:1 (the
+ * `SegmentedControl`'s selected segment since #4496 — it is text, not a
+ * boundary), the remaining `-soft` tints vs their foreground ≥ 3:1, and the
+ * table header band ≥ 4.5:1 — asserted in BOTH themes.
  */
 export interface ContrastPair {
   /** Token name (no prefix) of the foreground. */
@@ -153,7 +155,12 @@ export const CONTRAST_PAIRS: ContrastPair[] = [
   // the heavy block the owner declined.)
   { fg: 'ink', bg: 'tab-bar-indicator', min: 4.5 },
   { fg: 'ink-3', bg: 'tab-bar-bg', min: 4.5 },
-  { fg: 'brand', bg: 'brand-soft', min: 3 },
+  // #4496: brand on brand-soft is TEXT, not a boundary — the SegmentedControl's
+  // selected segment paints brand ink on the soft fill with no outline, so the
+  // pair is held to the 4.5:1 text bar (5.62 light / 6.63 dark) rather than the
+  // 3:1 non-text one. Raised in place, not duplicated: the /design-system
+  // contrast table keys its rows by `${fg}-${bg}`.
+  { fg: 'brand', bg: 'brand-soft', min: 4.5 },
   { fg: 'success', bg: 'success-soft', min: 3 },
   { fg: 'debit', bg: 'debit-soft', min: 3 },
   { fg: 'warning', bg: 'warning-soft', min: 3 },

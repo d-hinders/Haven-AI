@@ -1874,7 +1874,7 @@ export default function DesignSystemPage() {
 
           <Card hover={false} className="p-5">
             <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Segmented control</h3>
-            <div className="mt-4 flex flex-wrap items-center gap-3">
+            <div data-testid="ds-segmented-control" className="mt-4 flex flex-wrap items-center gap-3">
               <SegmentedControl
                 ariaLabel="Theme"
                 value={segmented}
@@ -1905,11 +1905,13 @@ export default function DesignSystemPage() {
               <code className="rounded bg-[var(--v2-surface)] px-1">aria-checked</code> options, because the
               choices are mutually exclusive. The group carries <code className="rounded bg-[var(--v2-surface)] px-1">aria-label</code>{' '}
               so a screen reader names the question first; options are real buttons, so keyboard
-              works without extra wiring. The selected option uses the app&rsquo;s active idiom —
-              brand ink on brand-soft inside an inset brand outline, a boundary of at least 3:1 against
-              the track in both themes — and every option&rsquo;s hit area is 44px tall while it
-              paints 32px (#4056, the same mechanism as Button). Never hand-roll a second control
-              of this shape.
+              works without extra wiring. The group is an outlined, divided control — a 1px border
+              around content-width segments with hairline dividers, no tinted track. The selected
+              option is brand ink on brand-soft at semibold with no outline (5.62:1 light / 6.63:1
+              dark, text), so selection rides on the fill, the ink, the weight step and
+              <code className="rounded bg-[var(--v2-surface)] px-1">aria-checked</code>; every
+              option&rsquo;s hit area is 44px tall while it paints 32px (#4056, the same mechanism as
+              Button). Never hand-roll a second control of this shape.
             </p>
           </Card>
 

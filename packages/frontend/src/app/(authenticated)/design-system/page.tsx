@@ -8,6 +8,9 @@ import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Button } from '@/components/ui/Button'
 import { SettingsSection, SettingsRow } from '@/components/ui/SettingsSection'
+import { SectionHeading } from '@/components/ui/SectionHeading'
+import { DetailList } from '@/components/ui/DetailList'
+import Link from 'next/link'
 import { Card } from '@/components/ui/Card'
 import {
   DropdownMenu,
@@ -3586,7 +3589,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="Settings section (heading above the card)"
-        description="Settings pages follow the detail-page section rule (#4357, owner decision 2026-10-23): the shared `SettingsSection` (`components/ui/SettingsSection.tsx`) renders the sentence-case `v2-text-h3` heading ABOVE the card, with an optional description and any note under it; the card holds only the hairline-divided rows. The description is optional (#4476) — it appears only when it tells the reader something the heading and the card don't, and the heading keeps its gap to the card when neither a description nor a note is present (the Data specimen on the right). Unlike the Manage pattern above — which does NOT extend to settings — a settings row keeps its visible actions (Connect / Settings), not a ⋯ menu. Callers never hand-write the shape; the component's props (title, description, note, children) stay identical wherever the section is used."
+        description="Settings pages follow the detail-page section rule (#4357, owner decision 2026-10-23): the shared `SettingsSection` (`components/ui/SettingsSection.tsx`) renders the sentence-case `v2-text-h3` heading ABOVE the card, with an optional description and any note under it; the card holds only the hairline-divided rows. The description is optional (#4476) — it appears only when it tells the reader something the heading and the card don't, and the heading keeps its gap to the card when neither a description nor a note is present (the Data specimen on the right). Unlike the Manage pattern above — which does NOT extend to settings — a settings row keeps its visible actions (Connect / Settings), not a ⋯ menu. Callers never hand-write the shape; the component's props (title, description, note, action, children) stay identical wherever the section is used — `action` is the optional trailing link added by #4475, shown in the next section."
       >
         <div className="grid gap-5 lg:grid-cols-2">
           <SettingsSection
@@ -3604,6 +3607,94 @@ export default function DesignSystemPage() {
           <SettingsSection title="Data">
             <SettingsRow label="Export data" detail="Download everything as CSV." />
           </SettingsSection>
+        </div>
+      </Section>
+
+      <Section
+        title="Section heading with a trailing link"
+        description="The detail-page section rule's heading, with one optional trailing link (#4475, owner-approved 2026-10-27). The heading and the link share one baseline-aligned row: the heading leads, the link trails, and the link is a LINK — a Next Link styled as a text link (brand ink, underline on hover, the one focus ring) that navigates to the fuller surface. It is never a button, because it never acts on the section's content; a row action stays in the row, and a section-level action that changes state stays a Button in the card. Below sm — or whenever the heading fills the row — the link wraps onto its own line under the heading, left aligned, so a phone never squeezes the heading to make room. The heading keeps its gap to the card when there is no description (right), and the description supplies it when there is one (left). SettingsSection composes the same heading block, so a settings section gets the slot without a second shape; every existing settings caller passes no action and is unchanged."
+      >
+        <div data-testid="ds-section-heading-action" className="grid gap-5 lg:grid-cols-2">
+          {/* The detail-page shape: SectionHeading above a Card, no SettingsSection. */}
+          <div>
+            <SectionHeading
+              title="Signers"
+              description="Accounts that can approve payments from this Haven account."
+              action={
+                <Link
+                  href="/accounts"
+                  className="rounded-sm text-sm font-medium text-[var(--v2-brand)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
+                >
+                  View all
+                </Link>
+              }
+            />
+            <Card hover={false}>
+              <Card.Section divided>
+                <Row title="Operating account" subtitle="Approved 12 Oct 2026" />
+                <Row title="Treasury account" subtitle="Approved 3 Nov 2026" />
+              </Card.Section>
+            </Card>
+          </div>
+          {/* The settings shape: the same heading block through SettingsSection. */}
+          <SettingsSection
+            title="Passkeys and wallets"
+            action={
+              <Link
+                href="/settings"
+                className="rounded-sm text-sm font-medium text-[var(--v2-brand)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
+              >
+                View all
+              </Link>
+            }
+          >
+            <SettingsRow label="MacBook Pro" detail="Added 2 Sept 2026." />
+            <SettingsRow label="Ledger Nano X" detail="Added 14 Oct 2026." />
+          </SettingsSection>
+        </div>
+      </Section>
+
+      <Section
+        title="Detail list"
+        description="The divided label/value list (#4475): rows of label, value and optional trailing actions, hairline-divided, with the label column stacking over the value below sm. It is an EXTRACTION, not a new pattern — AgentRulesSummary already shipped exactly this dl (160px label track, 120px when compact, ink-3 label over an ink value with an optional ink-3 helper), and the account Security tab needs the same list with a trailing-actions column. AgentRulesSummary now renders through it, so the connect flow's approval step and the agent-rules specimen below are the same component. The trailing-actions column is the one addition: a third auto track at sm and up, right aligned, so a Remove or Edit sits on the value's line; below sm the row is one column and the actions stack under the value. The list owns no outer margin — the caller spaces it."
+      >
+        <div data-testid="ds-detail-list" className="grid gap-5 lg:grid-cols-2">
+          <Card hover={false} className="p-5">
+            <DetailList
+              items={[
+                {
+                  label: 'Account',
+                  value: 'Operating account',
+                  helper: 'The Haven account this passkey approves.',
+                  actions: (
+                    <Button size="sm" variant="ghost">
+                      Remove
+                    </Button>
+                  ),
+                },
+                {
+                  label: 'Added',
+                  value: '2 Sept 2026',
+                  actions: (
+                    <Button size="sm" variant="ghost">
+                      Remove
+                    </Button>
+                  ),
+                },
+                { label: 'Last used', value: 'Yesterday, 14:02' },
+              ]}
+            />
+          </Card>
+          <Card hover={false} className="p-4">
+            <DetailList
+              density="compact"
+              items={[
+                { label: 'Agent name', value: 'Research assistant', helper: 'This agent can request payments using its Haven credential.' },
+                { label: 'Spend from', value: 'Operating wallet' },
+                { label: 'Budget', value: '250 USDC per day' },
+              ]}
+            />
+          </Card>
         </div>
       </Section>
 

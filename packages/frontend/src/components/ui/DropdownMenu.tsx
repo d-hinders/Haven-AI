@@ -41,6 +41,15 @@ function useDropdownMenu() {
  * + Escape to dismiss. Keep it minimal — anything richer (submenus, search,
  * portals) belongs in a dedicated component.
  *
+ * **Not portalled.** The panel is `absolute` inside the trigger's `relative`
+ * wrapper, so it is clipped by any ancestor whose `overflow` is not `visible`
+ * (`overflow-hidden`, `overflow-clip`, `overflow-auto`, `overflow-scroll`, and
+ * the `truncate` / `line-clamp-*` utilities that imply one). A container that
+ * hosts this menu must therefore not clip — round its children instead. See
+ * `docs/product/design-system.md` § Cards. Portalling is the alternative and
+ * was rejected for #4491: it would change positioning, focus return and
+ * scroll behaviour for every host to fix one call site.
+ *
  * Usage:
  *   <DropdownMenu>
  *     <DropdownMenuTrigger aria-label="Account options">

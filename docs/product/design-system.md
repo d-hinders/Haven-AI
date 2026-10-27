@@ -105,7 +105,7 @@ covers:
   - packages/frontend/src/components/connect-agent/SetupStates.tsx
   - packages/frontend/src/components/haven/DirectionMark.tsx
   - packages/frontend/src/components/settings/ProfileNameEditor.tsx
-last-verified: 2026-10-25
+last-verified: 2026-10-27
 ---
 
 # Haven Design System
@@ -1886,6 +1886,8 @@ intact. Prove body and control hit targets with a real browser at desktop and 39
 jsdom cannot evaluate the pseudo-element's stacking or hit testing.
 
 `Card` supports `elevation="flat" | "raised" | "anchor"` and `hover={false}`. Use `raised` only for the page's single most prominent surface (the dashboard money card, #3897), `anchor` for a second focal point where a page has one (the sweep page's "How to recover" card; the dashboard has none since #3910, when "Needs attention" became a normal card), and keep nested or data-dense cards flat.
+
+**A container that hosts a menu must not clip ([#4491](https://github.com/d-hinders/Haven-AI/issues/4491)).** `DropdownMenu` renders its panel in flow — `absolute top-full z-50` inside the trigger's `relative` wrapper (`components/ui/DropdownMenu.tsx`) — and is **not portalled**, so any ancestor whose `overflow` is not `visible` cuts the panel off at that ancestor's edge. That covers `overflow-hidden`, `overflow-clip`, `overflow-auto`, `overflow-scroll`, `overflow-x-auto` table wrappers, and the `truncate` / `line-clamp-*` utilities, which imply one. The rule is not specific to `DropdownMenu`: it covers every in-flow popover — the `list-menu` family (`FacetMenu`, `PeriodPicker`, `ListToolbar`), `WalletButton`'s popover and `Sidebar`'s. **Round the children instead of clipping the container:** a `Card.Header` on a non-clipping Card takes `rounded-t-[10px]` via className (its JSDoc names this as the menu-safe option), and a tinted child that has to meet the card edge gets its own radius. The page shell's `overflow-hidden` / `overflow-y-auto` scroller (`AuthenticatedShell.tsx`) is not a violation — a menu scrolls with the page there rather than being clipped. Portalling the panel into `document.body` would make every clip impossible by construction, and was rejected for #4491: it changes a shared primitive's positioning, focus return and scroll behaviour for all six hosts to fix one call site, and needs collision handling the in-flow version gets free. Revisit it if a second clip appears or a menu has to live inside a scroll container. Proven in a real browser by `e2e/budget-menu-focus.spec.ts` — after opening, the last item's box is fully inside the viewport and `document.elementFromPoint` at its centre returns that item — and in jsdom by the `expectMenuNotClipped` helper the menu-host tests call (a class proxy: jsdom applies no Tailwind CSS).
 
 **A card in a grid has to fit its track, and by default it cannot ([#2251](https://github.com/d-hinders/Haven-AI/issues/2251)).** This is the card sibling of the `truncate`d-table-cell rule under *Table column collapse* below, and it has the same shape: a `truncate` descendant is `white-space: nowrap`, so its min-content is the whole string, and a container that is never allowed to go below its min-content grows instead of ellipsising.
 

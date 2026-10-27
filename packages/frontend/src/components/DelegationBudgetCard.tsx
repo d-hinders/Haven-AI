@@ -611,8 +611,15 @@ export default function DelegationBudgetCard({
       {/* #4226: the dashboard money-card pattern (design-system.md, #3897) —
           budgets on the left, Last 30 days on the right as a divided section,
           stacked below `lg`. The card itself carries no padding: the halves
-          own it, so the right hairline runs edge-to-edge at `lg`. */}
-      <Card hover={false} className="overflow-hidden">
+          own it, so the right hairline runs edge-to-edge at `lg`.
+          #4491: no `overflow-hidden` here. The budget row's ⋯ menu is an
+          in-flow `absolute` panel (DropdownMenu is not portalled), so a
+          clipping ancestor cuts it off at the card's bottom edge. Nothing
+          paints into the corners — both halves are padded and the divided
+          section draws borders only — so the card's own `rounded-[10px]`
+          is enough. See design-system.md § Cards: a container that hosts a
+          menu must not clip. */}
+      <Card hover={false}>
         <div className="grid lg:grid-cols-2">
           <section aria-label="Budgets" className="min-w-0 p-5 sm:p-6">
 

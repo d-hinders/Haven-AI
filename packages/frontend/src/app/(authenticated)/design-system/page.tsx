@@ -2340,7 +2340,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="Card.Header — the titled grey band"
-        description="Give a Card a titled header with Card.Header — never hand-roll the border-b + bg-surface band. Slots: `title` (heading level via `as`, default h3), optional `description`, optional right-aligned `actions`. Pass `children` instead for bespoke content (badges, balances). Padding: default (px-5 py-4), `spacious` (px-6 py-5) for page-level section cards, `none` when the caller owns padding. Parent Card needs `overflow-hidden` (or add `rounded-t-[10px]` via className)."
+        description="Give a Card a titled header with Card.Header — never hand-roll the border-b + bg-surface band. Slots: `title` (heading level via `as`, default h3), optional `description`, optional right-aligned `actions`. Pass `children` instead for bespoke content (badges, balances). Padding: default (px-5 py-4), `spacious` (px-6 py-5) for page-level section cards, `none` when the caller owns padding. The band's corners clip to the card radius when the parent Card sets `overflow-hidden` — but a Card that hosts a ⋯ menu must NOT clip (the menu is in flow, not portalled): leave the Card's overflow visible and add `rounded-t-[10px]` to the header instead (design-system.md § Cards)."
       >
         <Card hover={false} className="max-w-xl overflow-hidden">
           <Card.Header
@@ -2497,7 +2497,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="Dropdown menu (kebab)"
-        description="Overflow menu used for account-, agent-, or row-level settings that shouldn't compete with the page's primary CTAs. The trigger is usually a `⋮` icon button (10×10 / h-10 to match Button md). Items support a `tone='danger'` for destructive actions and a `<DropdownMenuSeparator />` between groups."
+        description="Overflow menu used for account-, agent-, or row-level settings that shouldn't compete with the page's primary CTAs. The trigger is usually a `⋮` icon button (10×10 / h-10 to match Button md). Items support a `tone='danger'` for destructive actions and a `<DropdownMenuSeparator />` between groups. The panel is in flow, not portalled — a container that hosts it must not clip (`overflow-hidden`/`clip`/`auto`/`scroll`, `truncate`, `line-clamp-*`); round its children instead (design-system.md § Cards)."
       >
         <Card hover={false} className="p-5">
           <div className="flex flex-wrap items-center gap-6">

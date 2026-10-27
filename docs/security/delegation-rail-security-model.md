@@ -4210,3 +4210,18 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > no custody change. Scope of this note: the card diff above. Nothing else in
 > this document was re-verified for it, and `last-verified` is bumped to
 > 2026-10-27 for exactly this coverage.
+
+> **Re-verified unchanged (#4491, 2026-10-27 — the budget card stops clipping
+> its ⋯ menu).** The covered file this diff touches is one, display-layer:
+> `components/DelegationBudgetCard.tsx`. The card root loses its
+> `overflow-hidden` class so the per-budget ⋯ menu — an in-flow `absolute`
+> panel, not portalled — is no longer cut off at the card's bottom edge. That
+> is a paint change and nothing else: the menu's items, their handlers
+> (`onEdit`, `onAdd`, `setConfirmOpen(true)`), the #3717 confirm between the
+> click and the signature, the trigger's `busy` gate, and every signing, edit
+> and revoke path are untouched. No fetch or write is added or removed; no
+> delegation, caveat, enforcer term, budget pre-check, allowance, settlement
+> window or refusal reads the class. No new spender, no new authority grant,
+> no custody change (Red Line #4: the chain remains the only spend authority).
+> Scope of this note: the card diff above. Nothing else in this document was
+> re-verified for it, and `last-verified` already reads 2026-10-27.

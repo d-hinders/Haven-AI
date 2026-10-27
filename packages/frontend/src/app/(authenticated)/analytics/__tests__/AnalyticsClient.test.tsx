@@ -342,6 +342,7 @@ describe('Analytics — the new user (#4333)', () => {
     expect(screen.getByText('No agent activity yet')).toBeTruthy()
     expect(screen.queryByTestId('analytics-tiles')).toBeNull()
     expect(screen.queryByTestId('stat-tile-spent')).toBeNull()
+    expect(screen.queryByTestId('analytics-spend-section')).toBeNull()
     expect(screen.queryByTestId('analytics-agents-section')).toBeNull()
     expect(screen.queryByTestId('analytics-merchants-section')).toBeNull()
     expect(screen.queryByTestId('analytics-balance-section')).toBeNull()
@@ -390,6 +391,10 @@ describe('Analytics — the empty window', () => {
     // layout of a working page is the screen-shape an outage passes for free.
     expect(screen.queryByTestId('analytics-tiles')).toBeNull()
     expect(screen.queryByTestId('stat-tile-spent')).toBeNull()
+    // Neither of the two sections the reorder touches renders in this state:
+    // the empty state replaces them, not just the tiles (#4481).
+    expect(screen.queryByTestId('analytics-spend-section')).toBeNull()
+    expect(screen.queryByTestId('analytics-agents-section')).toBeNull()
   })
 
   it('is not an alert, because the endpoint did answer', () => {
@@ -534,7 +539,7 @@ describe('Analytics — the populated page (#4333 tiles)', () => {
     expect(tile.textContent).toMatch(/Haven sponsored 7 operations' gas/)
   })
 
-  it('mounts the spend chart off the same response, below the agents table and above merchants (#3051; recipe item 5)', () => {
+  it('mounts the spend chart off the same response, ABOVE the agents table and above merchants (#4481; owner decision 2026-10-27)', () => {
     render(<AnalyticsClient />)
     const spend = screen.getByTestId('analytics-spend-section')
     expect(within(spend).getByRole('heading', { name: 'Spend over time' })).toBeTruthy()
@@ -542,8 +547,23 @@ describe('Analytics — the populated page (#4333 tiles)', () => {
     expect(within(spend).getAllByTestId('chart-refusal-marker')).toHaveLength(4)
     const table = screen.getByTestId('analytics-agents-section')
     const merchants = screen.getByTestId('analytics-merchants-section')
-    expect(table.compareDocumentPosition(spend) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(spend.compareDocumentPosition(merchants) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    // The order the owner asked for: spend, agents, merchants, balance.
+    expect(spend.compareDocumentPosition(table) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(table.compareDocumentPosition(merchants) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('keeps that order for a one-agent account: spend above the agents table (#4481)', () => {
+    // No one-agent overview fixture exists, so it is derived from POPULATED:
+    // one agent row, and the chart's series list follows `agents`.
+    mockUseAnalyticsOverview.mockReturnValue(
+      settled({ data: { ...POPULATED, agents: POPULATED.agents.slice(0, 1) } }),
+    )
+    render(<AnalyticsClient />)
+    const spend = screen.getByTestId('analytics-spend-section')
+    const table = screen.getByTestId('analytics-agents-section')
+    expect(spend.compareDocumentPosition(table) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(within(table).getAllByText('Research agent')).toHaveLength(2)
+    expect(within(table).queryAllByText('Data-feed agent')).toHaveLength(0)
   })
 
   it('shows the trend figures and the agents table once there is data', () => {

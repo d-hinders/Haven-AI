@@ -5,6 +5,7 @@ import type { ReactNode } from 'react'
 import { MerchantsTable, merchantsLinkTarget } from '../MerchantsTable'
 import type { AnalyticsAgentRow, AnalyticsMerchantRow } from '@/types/analytics'
 import { formatAnalyticsAmount } from '@/lib/analytics-format'
+import { seriesColorForAgent } from '@/lib/avatar-tint'
 import { FIXTURE_ANALYTICS_OVERVIEW } from '../../../../scripts/screenshot.mjs'
 
 /**
@@ -132,33 +133,81 @@ describe('MerchantsTable — the desktop table (#4333 columns)', () => {
     expect(nameSpan?.textContent).toBe('Unknown recipient')
   })
 
-  it('names at most three paying agents and counts the rest', () => {
+  it('renders the paying agents as the shared avatar stack, capped at three with a +N mark', () => {
     // Three is the issue's number. The fixture's rows are all one-agent, so
     // the cap is exercised on a row derived FROM the fixture.
     const five = { ...RECEIPT_ROW, agent_ids: ['agent-research', 'agent-retired', 'a', 'b', 'c'] }
     const { container } = mount([five])
     const cell = desktopRows(container)[0].querySelectorAll('td')[3]
-    expect(cell.textContent).toBe('Research agent, Data-feed agent, a and 2 more')
+    const stack = cell.querySelector('[data-testid="agent-avatar-stack"]')
+    expect(stack).not.toBeNull()
+    expect(cell.querySelectorAll('[data-testid="agent-avatar-stack-mark"]')).toHaveLength(3)
+    expect(cell.querySelector('[data-testid="agent-avatar-stack-overflow"]')?.textContent).toBe('+2')
+    // The names live in the stack's accessible name, never as visible text.
+    expect(stack!.getAttribute('aria-label')).toBe('Research agent, Data-feed agent, a and 2 more')
+    expect(cell.textContent).not.toContain('Research agent')
   })
 
   it('keeps a one-agent row a one-agent row, with no counting clause', () => {
     const { container } = mount()
-    expect(desktopRows(container)[0].querySelectorAll('td')[3].textContent).toBe('Research agent')
+    const cell = desktopRows(container)[0].querySelectorAll('td')[3]
+    expect(cell.querySelectorAll('[data-testid="agent-avatar-stack-mark"]')).toHaveLength(1)
+    expect(cell.querySelector('[data-testid="agent-avatar-stack-overflow"]')).toBeNull()
+    expect(cell.querySelector('[data-testid="agent-avatar-stack"]')?.getAttribute('aria-label')).toBe(
+      'Research agent',
+    )
+  })
+
+  it('renders a three-agent row as three marks and no overflow', () => {
+    // The cap's boundary: three is still three marks, not two and a "+1".
+    const three = { ...RECEIPT_ROW, agent_ids: ['agent-research', 'agent-retired', 'agent-ghost'] }
+    const { container } = mount([three])
+    const cell = desktopRows(container)[0].querySelectorAll('td')[3]
+    expect(cell.querySelectorAll('[data-testid="agent-avatar-stack-mark"]')).toHaveLength(3)
+    expect(cell.querySelector('[data-testid="agent-avatar-stack-overflow"]')).toBeNull()
+    expect(cell.querySelector('[data-testid="agent-avatar-stack"]')?.getAttribute('aria-label')).toBe(
+      'Research agent, Data-feed agent, agent-ghost',
+    )
+  })
+
+  it('wears each agent’s STORED tint, so two names that hash alike still differ — and each equals its chart series colour', () => {
+    // 'Research agent' and 'Data-feed agent' hash to the SAME tint (6), so a
+    // hash-only stack would paint them one colour. The fixture stores 1 and 2,
+    // and the marks must wear those — the same tokens `seriesColorForAgent`
+    // fills their chart series with (#4331/#4428). `Monogram` carries no data
+    // attribute, so the tint is read from its ink class.
+    const { container } = mount([{ ...RECEIPT_ROW, agent_ids: ['agent-research', 'agent-retired'] }])
+    const cell = desktopRows(container)[0].querySelectorAll('td')[3]
+    const marks = Array.from(cell.querySelectorAll('[data-testid="agent-avatar-stack-mark"]'))
+    const inks = marks.map((mark) => mark.querySelector('span')?.className ?? '')
+    const research = seriesColorForAgent({ name: 'Research agent', avatarTint: 1 })
+    const dataFeed = seriesColorForAgent({ name: 'Data-feed agent', avatarTint: 2 })
+    expect(research).not.toBe(dataFeed)
+    expect(inks[0]).toContain(`text-[${research}]`)
+    expect(inks[1]).toContain(`text-[${dataFeed}]`)
   })
 
   it('prints an agent id the roster does not name rather than inventing a name for it', () => {
     // `agents` and `merchants` come off the same query, so an id missing from
     // the roster means the response disagreed with itself. A made-up name
-    // would hide the disagreement; the raw id reports it.
+    // would hide the disagreement; the raw id reports it — as the mark's
+    // accessible name, with no stored tint (the name hash).
     const { container } = mount([{ ...RECEIPT_ROW, agent_ids: ['agent-ghost'] }])
-    expect(desktopRows(container)[0].querySelectorAll('td')[3].textContent).toBe('agent-ghost')
+    const cell = desktopRows(container)[0].querySelectorAll('td')[3]
+    expect(cell.querySelector('[data-testid="agent-avatar-stack"]')?.getAttribute('aria-label')).toBe(
+      'agent-ghost',
+    )
+    expect(cell.textContent).not.toContain('Research agent')
+    const ink = cell.querySelector('[data-testid="agent-avatar-stack-mark"] span')?.className ?? ''
+    expect(ink).toContain(`text-[${seriesColorForAgent({ name: 'agent-ghost' })}]`)
   })
 
   it('says so when the endpoint reports a merchant no agent paid', () => {
+    // There is no empty stack: the sentence is the caller's, and it stays.
     const { container } = mount([{ ...RECEIPT_ROW, agent_ids: [] }])
-    expect(desktopRows(container)[0].querySelectorAll('td')[3].textContent).toBe(
-      'No paying agents reported',
-    )
+    const cell = desktopRows(container)[0].querySelectorAll('td')[3]
+    expect(cell.textContent).toBe('No paying agents reported')
+    expect(cell.querySelector('[data-testid="agent-avatar-stack"]')).toBeNull()
   })
 
   it('states last paid through the same relative voice the agents table uses', () => {
@@ -169,15 +218,19 @@ describe('MerchantsTable — the desktop table (#4333 columns)', () => {
     expect(rows[0].querySelectorAll('td')[4].textContent).toMatch(/ago|Never|No payments/)
   })
 
-  it('stages the two phone-least columns behind the shell’s own breakpoint', () => {
-    // Paid by (the roster) and View in Transactions (an action) are the ones
-    // the primitive's stage ladder retires first — the same token every table
-    // in the app uses.
+  it('stages Paid by at the md container width and the action at xl', () => {
+    // Paid by moved from `xl` (974px) to `md` (718px) in #4481: the stack is
+    // narrower than the roster line it replaced, and at the `lg` viewport the
+    // table is 720px wide (1024 − 240px sidebar − 64px page padding), so `md`
+    // reveals it exactly where the phone disclosure stops — no width where
+    // neither surface shows paying agents. View in Transactions stays at `xl`:
+    // it is an action, not a figure.
     const { container } = mount()
-    const staged = Array.from(container.querySelectorAll('thead th')).filter((th) =>
-      th.className.includes('min-width:974px'),
-    )
-    expect(staged.map((th) => th.textContent)).toEqual(['Paid by', 'View in Transactions'])
+    const heads = Array.from(container.querySelectorAll('thead th'))
+    const stagedAt = (px: string) =>
+      heads.filter((th) => th.className.includes(`min-width:${px}px`)).map((th) => th.textContent)
+    expect(stagedAt('718')).toEqual(['Paid by'])
+    expect(stagedAt('974')).toEqual(['View in Transactions'])
   })
 })
 
@@ -216,6 +269,8 @@ describe('MerchantsTable — the mobile rows', () => {
       expect(within(firstRow).getByText(term)).toBeTruthy()
     }
     expect(within(firstRow).getByText('Research agent')).toBeTruthy()
+    // The phone keeps the TEXT roster (#4481): no stack in the disclosure.
+    expect(firstRow.querySelector('[data-testid="agent-avatar-stack"]')).toBeNull()
   })
 
   it('names the merchant once on the face of the row, not once per open section', () => {

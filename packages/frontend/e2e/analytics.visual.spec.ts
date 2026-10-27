@@ -40,7 +40,9 @@
  * `product-routes.visual.spec.ts` captures whole pages (`/dashboard`,
  * `/transactions`); `settings-accounting.visual.spec.ts` clips one card. This
  * page is the former's shape — the thing at risk is the composition of the
- * whole report (four tiles, the agents table, the spend chart, the merchants table, the balance chart, in that order), not a card
+ * whole report (four tiles, the spend chart, the agents table, the merchants
+ * table, the balance chart, in that order — the spend chart moved above the
+ * table in #4481), not a card
  * isolated from its neighbours — so it is captured with `fullPage: true`,
  * un-clipped (#1738) and proven non-blank before it is allowed to stand as a
  * baseline (#1936/#1943).
@@ -420,6 +422,14 @@ const SCENARIOS: Scenario[] = [
       // ── The agents table ───────────────────────────────────────────────────
       const agents = section(page, 'analytics-agents-section')
       await expect(agents).toHaveCount(1)
+      // #4481: the spend chart sits ABOVE the table (owner decision
+      // 2026-10-27). Asserted on the rendered DOM, not just in vitest — the
+      // reorder is the whole point of the slice, and a baseline alone cannot
+      // say which section is which.
+      const spendBox = await spend.boundingBox()
+      const agentsBox = await agents.boundingBox()
+      expect(spendBox && agentsBox).toBeTruthy()
+      expect(spendBox!.y).toBeLessThan(agentsBox!.y)
       await expect(agents.getByText(COPY.agentResearch)).toHaveCount(2)
       await expect(agents.getByText(COPY.agentRetired)).toHaveCount(2)
       await expectExactlyOneVisible(agents, COPY.agentResearch)
@@ -529,6 +539,7 @@ const SCENARIOS: Scenario[] = [
         await expect(page.getByTestId(testId)).toHaveCount(0)
       }
       await expect(page.getByTestId('stat-tile-fees-paid-to-haven')).toHaveCount(0)
+      await expect(page.getByTestId('analytics-spend-section')).toHaveCount(0)
       await expect(page.getByTestId('analytics-agents-section')).toHaveCount(0)
       await expect(page.getByTestId('analytics-merchants-section')).toHaveCount(0)
       await expect(page.getByTestId('analytics-balance-section')).toHaveCount(0)
@@ -600,6 +611,7 @@ const SCENARIOS: Scenario[] = [
       // A page of honest zeros is exactly what a failure is mistaken for, so
       // the figures must not be on screen while the request has failed.
       await expect(page.getByTestId('analytics-tiles')).toHaveCount(0)
+      await expect(page.getByTestId('analytics-spend-section')).toHaveCount(0)
       await expect(page.getByTestId('analytics-agents-section')).toHaveCount(0)
       await expect(page.getByTestId('analytics-merchants-section')).toHaveCount(0)
       await expect(page.getByTestId('analytics-balance-section')).toHaveCount(0)

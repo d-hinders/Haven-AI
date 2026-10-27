@@ -915,6 +915,26 @@ describe('DelegationBudgetCard Spending section (#3695)', () => {
     expect(card!.contains(heading)).toBe(false)
   })
 
+  it.each([
+    ['live', undefined],
+    ['revoked', 'revoked'],
+    ['archived', 'archived'],
+  ] as const)('renders no description beside the "Spending" heading (%s agent) (#4476)', (_label, retired) => {
+    mockGet.mockReturnValue([])
+    render(<DelegationBudgetCard {...PROPS} retired={retired} />)
+    const heading = screen.getByRole('heading', { name: 'Spending' })
+    // #4476: the description repeated what the heading and the card already
+    // say, so the section rule makes descriptions optional and this section
+    // has none — for a live agent and for a retired one alike. Mutation:
+    // re-add a <p> beside the heading → red. The grep for the old sentence
+    // would also pass on a reworded one, which is why this asserts absence.
+    const section = heading.closest('section') as HTMLElement
+    expect(section).not.toBeNull()
+    expect(Array.from(section.children).filter((el) => el.tagName === 'P')).toHaveLength(0)
+    // Nothing sits between the heading and the card it introduces.
+    expect(heading.nextElementSibling?.className).toMatch(/rounded-\[10px\]/)
+  })
+
   it('draws a meter from remaining_atomic: used = budget − remaining, with the refill', () => {
     mockGet.mockReturnValue([
       budget({

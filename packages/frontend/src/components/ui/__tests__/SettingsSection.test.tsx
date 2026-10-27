@@ -4,11 +4,11 @@ import { SettingsSection, SettingsRow } from '../SettingsSection'
 
 describe('SettingsSection', () => {
   it('renders the heading OUTSIDE the card, inside a section root that wraps both (#4357)', () => {
-    // The detail-page section rule applied to settings: the heading and its
-    // description sit ABOVE the card so the card can load, swap or be
-    // replaced without moving its heading. Mutation: wrap the h2 inside the
-    // Card (or drop the section root) → red. The `<section>` root with the
-    // heading in it is also what the settings e2e specs and
+    // The detail-page section rule applied to settings: the heading sits ABOVE
+    // the card so the card can load, swap or be replaced without moving its
+    // heading (the description is optional, #4476). Mutation: wrap the h2
+    // inside the Card (or drop the section root) → red. The `<section>` root
+    // with the heading in it is also what the settings e2e specs and
     // `screenshot.mjs` locate by — `page.locator('section', { has: heading })`.
     const { container } = render(
       <SettingsSection title="Accounting" description="Connect your accounting provider.">
@@ -43,6 +43,39 @@ describe('SettingsSection', () => {
     expect(heading.className).toMatch(/\bv2-text-h3\b/)
     expect(heading.className).not.toMatch(/\buppercase\b/)
     expect(heading.className).not.toMatch(/\btracking-widest\b/)
+  })
+
+  it('keeps the heading-to-card gap when there is no description or note (#4476)', () => {
+    // The description is optional under the detail-page section rule, so the
+    // gap can no longer ride on the description's `mb-3`. Mutation: drop the
+    // heading's `mb-3` (or leave the gap only on the paragraphs) → red: the
+    // heading renders flush against the card. The "Data" specimen on
+    // `/design-system` is this shape.
+    const { container } = render(
+      <SettingsSection title="Data">
+        <SettingsRow label="Export data" detail="Download everything as CSV." />
+      </SettingsSection>,
+    )
+    const section = container.firstElementChild as HTMLElement
+    const heading = section.querySelector('h2') as HTMLElement
+    const card = section.querySelector('.rounded-\\[10px\\]') as HTMLElement
+    expect(heading.className).toMatch(/\bmb-3\b/)
+    // Nothing sits between the heading and the card — no description paragraph.
+    expect(heading.nextElementSibling).toBe(card)
+    expect(Array.from(section.children).filter((el) => el.tagName === 'P')).toHaveLength(0)
+  })
+
+  it('does not double the gap when a description is present (#4476)', () => {
+    // Every existing caller passes a description, and their layout must not
+    // change: the paragraph's own `mb-3` supplies the gap, so the heading
+    // carries no margin of its own in that case.
+    const { container } = render(
+      <SettingsSection title="Accounting" description="Connect your accounting provider.">
+        <SettingsRow label="Fortnox" />
+      </SettingsSection>,
+    )
+    const heading = container.querySelector('h2') as HTMLElement
+    expect(heading.className).not.toMatch(/\bmb-3\b/)
   })
 
   it('renders the description and note ABOVE the card, with the card holding only the divided rows', () => {

@@ -3456,14 +3456,11 @@ export default function DesignSystemPage() {
 
       <Section
         title="Section with row actions in ⋯ (manage pattern)"
-        description="How a detail-page section manages a list (#3695; owner decision 4 on #4258, 2026-10-22, landed in the design system by #4259 and to be adopted by the agent page's Spending section in #4261). The heading and one-line description sit ABOVE the card. Each row's ⋯ menu holds that row's actions (Edit budget, then Stop budget… under a separator, danger tone) AND the section's add (Add budget) — no visible Edit, Stop or Add buttons compete with the rows, and the row's identity rides on the trigger's aria-label. Choosing Add opens the form in place. A section with no rows has no menu to hold the add, so it keeps a visible add (Set budget, a ghost button). This replaced the action-footer pattern, and then the visible row buttons it gave way to."
+        description="How a detail-page section manages a list (#3695; owner decision 4 on #4258, 2026-10-22, landed in the design system by #4259 and to be adopted by the agent page's Spending section in #4261). The heading sits ABOVE the card; a description is optional and appears only when it tells the reader something the heading and the card don't (#4476) — this specimen has none, and the heading carries the gap to the card. Each row's ⋯ menu holds that row's actions (Edit budget, then Stop budget… under a separator, danger tone) AND the section's add (Add budget) — no visible Edit, Stop or Add buttons compete with the rows, and the row's identity rides on the trigger's aria-label. Choosing Add opens the form in place. A section with no rows has no menu to hold the add, so it keeps a visible add (Set budget, a ghost button). This replaced the action-footer pattern, and then the visible row buttons it gave way to."
       >
         <div className="grid gap-5 lg:grid-cols-2">
           <div>
-            <h3 className="v2-text-h3 text-[var(--v2-ink)]">Spending</h3>
-            <p className="mt-0.5 mb-3 text-sm text-[var(--v2-ink-2)]">
-              What this agent can spend each period. Budgets are enforced on-chain: a payment over budget is declined before any money moves.
-            </p>
+            <h3 className="v2-text-h3 mb-3 text-[var(--v2-ink)]">Spending</h3>
             <Card hover={false} className="p-5 md:p-6">
               <div className="flex items-start justify-between gap-3 py-3">
                 <div className="min-w-0 flex-1">
@@ -3497,10 +3494,7 @@ export default function DesignSystemPage() {
             </Card>
           </div>
           <div>
-            <h3 className="v2-text-h3 text-[var(--v2-ink)]">Spending</h3>
-            <p className="mt-0.5 mb-3 text-sm text-[var(--v2-ink-2)]">
-              What this agent can spend each period. Budgets are enforced on-chain: a payment over budget is declined before any money moves.
-            </p>
+            <h3 className="v2-text-h3 mb-3 text-[var(--v2-ink)]">Spending</h3>
             <Card hover={false} className="p-5 md:p-6">
               <p className="text-sm text-[var(--v2-ink-2)]">No budget yet.</p>
               <Button size="sm" variant="ghost" className="mt-2">Set budget</Button>
@@ -3511,7 +3505,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="Settings section (heading above the card)"
-        description="Settings pages follow the detail-page section rule (#4357, owner decision 2026-10-23): the shared `SettingsSection` (`components/ui/SettingsSection.tsx`) renders the sentence-case `v2-text-h3` heading, the one-line description and any note ABOVE the card; the card holds only the hairline-divided rows. Unlike the Manage pattern above — which does NOT extend to settings — a settings row keeps its visible actions (Connect / Settings), not a ⋯ menu. Callers never hand-write the shape; the component's props (title, description, note, children) stay identical wherever the section is used."
+        description="Settings pages follow the detail-page section rule (#4357, owner decision 2026-10-23): the shared `SettingsSection` (`components/ui/SettingsSection.tsx`) renders the sentence-case `v2-text-h3` heading ABOVE the card, with an optional description and any note under it; the card holds only the hairline-divided rows. The description is optional (#4476) — it appears only when it tells the reader something the heading and the card don't, and the heading keeps its gap to the card when neither a description nor a note is present (the Data specimen on the right). Unlike the Manage pattern above — which does NOT extend to settings — a settings row keeps its visible actions (Connect / Settings), not a ⋯ menu. Callers never hand-write the shape; the component's props (title, description, note, children) stay identical wherever the section is used."
       >
         <div className="grid gap-5 lg:grid-cols-2">
           <SettingsSection

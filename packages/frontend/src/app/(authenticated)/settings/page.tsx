@@ -23,8 +23,8 @@ const SettingsClient = dynamic(() => import('./SettingsClient'), {
         <Skeleton className="h-32 rounded-[10px]" />
       </div>
       {/* Settings sections follow the detail-page section rule (#4357): the
-          heading and description sit ABOVE the card; the card holds only the
-          divided rows. */}
+          heading sits ABOVE the card, with an optional description under it
+          (#4476); the card holds only the divided rows. */}
       <div className="space-y-2">
         <Skeleton variant="text" className="h-4 w-32" />
         <Skeleton variant="text" className="h-4 w-full max-w-sm" />

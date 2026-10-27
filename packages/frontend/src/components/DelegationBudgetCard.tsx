@@ -544,7 +544,7 @@ export default function DelegationBudgetCard({
   if (budgets === null && !budgetsError) {
     return (
       <section className="mt-6">
-        <SpendingHeading retired={retired} />
+        <SpendingHeading />
         <Card hover={false} className="p-5 md:p-6">
           <div className="py-3"><Skeleton className="h-5 w-48" /></div>
           {/* #3549: no form-shaped placeholder for a card that will have no form. */}
@@ -607,7 +607,7 @@ export default function DelegationBudgetCard({
 
   return (
     <section ref={budgetCardRef} className="mt-6">
-      <SpendingHeading retired={retired} headingRef={headingRef} />
+      <SpendingHeading headingRef={headingRef} />
       {/* #4226: the dashboard money-card pattern (design-system.md, #3897) —
           budgets on the left, Last 30 days on the right as a divided section,
           stacked below `lg`. The card itself carries no padding: the halves
@@ -1011,28 +1011,26 @@ export default function DelegationBudgetCard({
 }
 
 /**
- * The section's heading and one-line description, ABOVE its card — the
- * detail-page section rule (design-system.md, #3692).
+ * The section's heading, ABOVE its card — the detail-page section rule
+ * (design-system.md, #3692). No description: the heading and the card already
+ * say what the section is, and a description is optional under the rule
+ * (#4476). The `mb-3` is the heading-to-card gap the description used to
+ * carry.
  */
 function SpendingHeading({
-  retired,
   headingRef,
 }: {
-  retired?: 'revoked' | 'archived'
   /** #4261: the collapse-focus chain's last resort when every trigger is gone. */
   headingRef?: React.Ref<HTMLHeadingElement>
 }) {
   return (
-    <div className="mb-3">
-      <h2 ref={headingRef} tabIndex={-1} className="v2-text-h3 text-[var(--v2-ink)] outline-none">
-        Spending
-      </h2>
-      <p className="mt-0.5 text-sm text-[var(--v2-ink-2)]">
-        {retired
-          ? 'What this agent can still spend each period.'
-          : 'What this agent can spend each period. Budgets are enforced on-chain: a payment over budget is declined before any money moves.'}
-      </p>
-    </div>
+    <h2
+      ref={headingRef}
+      tabIndex={-1}
+      className="v2-text-h3 mb-3 text-[var(--v2-ink)] outline-none"
+    >
+      Spending
+    </h2>
   )
 }
 

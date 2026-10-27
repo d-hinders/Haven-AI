@@ -84,7 +84,7 @@ covers:
   - packages/backend/src/middleware/ops-auth.ts
   - packages/ops/**
   - packages/frontend/scripts/check-kit-analytics-define.mjs
-last-verified: "2026-10-26"
+last-verified: "2026-10-27"
 ---
 
 > **Re-verified #4425 (2026-10-26, undefined `--v2-*` tokens mapped onto the
@@ -4191,3 +4191,22 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > `SUPPORTED_X402_EXPECTED_VERSIONS` is untouched and no field is removed.
 > Scope of this note: those two files. Nothing else in this document was
 > re-verified for it, and `last-verified` already reads 2026-10-26.
+
+> **Re-verified unchanged (#4476, 2026-10-27 — the Spending section's
+> description is removed).** The covered file this diff touches is one,
+> display-layer: `components/DelegationBudgetCard.tsx`. The private
+> `SpendingHeading` loses its description paragraph (and the `retired` prop
+> that only chose between two sentences); the heading stays above the card
+> with the same `mb-3` gap, and the `headingRef` focus target (#4261) is
+> untouched. The removed sentence ("Budgets are enforced on-chain: a payment
+> over budget is declined before any money moves") was display copy, not a
+> control: no delegation, caveat, enforcer term, budget pre-check, allowance,
+> settlement window or refusal reads it, and the enforcement it described is
+> unchanged — the chain remains the only spend authority (Red Line #4). The
+> outcome is still stated where it happens, in the Activity tab's refusal row
+> (`lib/refusal-reasons.ts`: "Over its budget · No money moved"). No budget
+> row, caption, meter, menu, confirm, signing, edit or revoke path moves; no
+> fetch or write is added or removed; no new spender, no new authority grant,
+> no custody change. Scope of this note: the card diff above. Nothing else in
+> this document was re-verified for it, and `last-verified` is bumped to
+> 2026-10-27 for exactly this coverage.

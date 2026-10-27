@@ -19,7 +19,8 @@
  *   (currency + theme, unchanged) and Your data (one row linking to
  *   `/transactions`, where the CSV export lives).
  * - **Security.** "Passkeys and wallets" (`SignersSection`) — each
- *   approved account links to its `/accounts/<id>?tab=security` — plus
+ *   approved account is an outline pill link to its
+ *   `/accounts/<id>?tab=security` (#4472) — plus
  *   "If something goes wrong": the exit path and what Haven cannot
  *   recover.
  * - **Business.** Company details and the accounting connections
@@ -300,8 +301,9 @@ function SettingsTabs() {
             {/*
               Passkeys and wallets (#3825): every passkey and wallet that
               approves the user's accounts, once each. Each approved
-              account links to its own `/accounts/<id>?tab=security`, where
-              the add / remove / recovery flows live.
+              account is an outline pill link (`LinkChip`, #4472) to its own
+              `/accounts/<id>?tab=security`, where the add / remove /
+              recovery flows live.
             */}
             <SignersSection />
 

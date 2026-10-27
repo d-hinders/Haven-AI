@@ -393,12 +393,17 @@ describe('SettingsClient', () => {
       expect(headings.indexOf('If something goes wrong')).toBeGreaterThan(headings.indexOf('Passkeys and wallets'))
     })
 
-    it('renders each approved account as a link to its ?tab=security', async () => {
+    it('renders each approved account as a pill link to its ?tab=security', async () => {
       setTabParam('security')
       renderSettings()
 
+      // #4472: the fixture's accounts span Base and Base Sepolia, so the
+      // section appends the network to EVERY pill (owner decision
+      // 2026-10-27) — the suffix is decided for the section, not per row.
       const operations = await screen.findByRole('link', { name: 'Operations (Base)' })
       expect(operations).toHaveAttribute('href', '/accounts/acc-1?tab=security')
+      // The pill's shape comes from the shared primitive, never re-created here.
+      expect(operations.className).toContain('rounded-full')
       // A null account name falls back to the shared fallback label.
       expect(screen.getByRole('link', { name: 'Account (Base Sepolia)' })).toHaveAttribute(
         'href',
@@ -408,6 +413,44 @@ describe('SettingsClient', () => {
         'href',
         '/accounts/acc-3?tab=security',
       )
+      // The comma-joined "Approves …" run is gone.
+      expect(screen.queryByText(/Approves/)).toBeNull()
+    })
+
+    it('drops the network suffix when every approved account is on one chain', async () => {
+      setTabParam('security')
+      mockApi.get.mockImplementation((url: string) => {
+        if (url === '/accounting/providers') return Promise.resolve({ providers: [FORTNOX, ...COMING_SOON] })
+        if (url === '/accounting/connections') return Promise.resolve({ connections: [] })
+        if (url === '/accounting/feed/status') return Promise.resolve(FEED_ON)
+        if (url === '/user/company-details') {
+          return Promise.reject(new ApiRequestError('Not found', 404, { error: 'Not found' }))
+        }
+        if (url === '/user/signers') {
+          return Promise.resolve({
+            signers: [
+              {
+                kind: 'passkey',
+                key_id: 'key-1',
+                created_at: '2026-10-16T08:00:00.000Z',
+                accounts: [
+                  { account_id: 'acc-1', account_address: '0x1', account_name: 'Operations', chain_id: 8453 },
+                  { account_id: 'acc-3', account_address: '0x3', account_name: 'Treasury', chain_id: 8453 },
+                ],
+              },
+            ],
+          })
+        }
+        return Promise.reject(new Error(`unexpected GET ${url}`))
+      })
+      renderSettings()
+
+      expect(await screen.findByRole('link', { name: 'Operations' })).toHaveAttribute(
+        'href',
+        '/accounts/acc-1?tab=security',
+      )
+      expect(screen.getByRole('link', { name: 'Treasury' })).toBeInTheDocument()
+      expect(screen.queryByRole('link', { name: 'Operations (Base)' })).toBeNull()
     })
 
     it('offers the exit path and what Haven cannot recover, with the backup line', () => {

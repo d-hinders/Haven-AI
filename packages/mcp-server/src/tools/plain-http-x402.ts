@@ -429,7 +429,7 @@ function evidenceReason(reported: ReportedSettlementEvidence): string {
   }
   if (reported.outcome === 'retryable') {
     return (
-      'Recorded. The settlement hash could not be verified yet (the chain read failed, or the ' +
+      'Recorded. The settlement hash could not be verified yet (Haven did not answer, the chain read failed, or the ' +
       'transaction is not mined). Call next_tool (haven_report_settlement_evidence) shortly ' +
       'with next_arguments, adding payment_header: the exact payment_header you sent the merchant.'
     )

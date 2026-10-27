@@ -165,10 +165,10 @@ export class MerchantCompletion {
     receipt: X402Receipt,
   ): Promise<Response> {
     if (!receipt.accepted) {
-      throw new HavenApiError('No accepted x402 option was recorded for payment retry', 500)
+      throw HavenApiError.deterministic('No accepted x402 option was recorded for payment retry', 500)
     }
     if (!receipt.paymentHeader) {
-      throw new HavenApiError('No x402 payment header was returned for payment retry', 500)
+      throw HavenApiError.deterministic('No x402 payment header was returned for payment retry', 500)
     }
 
     // #3427: the buyer-side tax declaration rides the PAID retry only, and
@@ -799,9 +799,18 @@ export class MerchantCompletion {
     // decide whether `settled: true` is honest — a caller that only awaited
     // this for its side effect (the local retryRequest path, #1620) is
     // unaffected: the resolved value is simply ignored there.
+    //
+    // #4470: only the backend's own 503 is re-attempted here. A non-answer is
+    // `retryable` too, but it is handed back at once: each attempt can cost a
+    // whole request timeout, and the caller already says to report again
+    // shortly.
     for (let attempt = 0; ; attempt += 1) {
       const result = await this.postEvidenceOnce(body)
-      if (result.outcome !== 'retryable' || attempt >= EVIDENCE_RETRY_DELAYS_MS.length) {
+      if (
+        result.outcome !== 'retryable' ||
+        result.statusCode !== EVIDENCE_RETRYABLE_STATUS ||
+        attempt >= EVIDENCE_RETRY_DELAYS_MS.length
+      ) {
         return result
       }
       await this.sleep(EVIDENCE_RETRY_DELAYS_MS[attempt])
@@ -809,8 +818,9 @@ export class MerchantCompletion {
   }
 
   /**
-   * ONE evidence attempt — the body of `reportEvidence`'s loop above. A 503
-   * answers `retryable` immediately; the caller decides whether to sleep and
+   * ONE evidence attempt — the body of `reportEvidence`'s loop above. A 503,
+   * or no verdict at all (a non-answer or a 408, #4470), answers `retryable`
+   * immediately; the caller decides whether to sleep and
    * re-attempt (`reportEvidence`, and — #4215 — the local settlement report
    * in `retryRequest`) or hand the outcome to its consumer (#3764 D2, the
    * hosted settlement report).
@@ -821,7 +831,13 @@ export class MerchantCompletion {
       return { outcome: 'confirmed' }
     } catch (err) {
       const statusCode = err instanceof HavenApiError ? err.statusCode : undefined
-      if (statusCode !== EVIDENCE_RETRYABLE_STATUS) {
+      // #4470: a timeout, an unreachable backend or an unreadable body is no
+      // verdict on the hash, so it is retryable like the backend's own 503 —
+      // never `refused`, which the hosted tools word as an on-chain mismatch.
+      // A 408 the server sent itself is a timeout too, so it is included.
+      const noVerdict =
+        statusCode === 408 || (err instanceof HavenApiError && err.failureCause?.kind === 'no_answer')
+      if (statusCode !== EVIDENCE_RETRYABLE_STATUS && !noVerdict) {
         // #3529: the backend relays a refusal `reason` on the evidence 409/503
         // body (modules/mpp/evidence.ts) — but ONLY on the eip3009
         // settlement-report refusal (`SettlementReportRefusal`): a plain 409

@@ -4267,3 +4267,20 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > spend authority). Scope of this note: the card diff above and the page's
 > Security-tab section headings. Nothing else in this document was re-verified
 > for it, and `last-verified` already reads 2026-10-27.
+
+> **Re-verified unchanged (#4470, 2026-10-27 — failure causes and the funding
+> wait's outcomes).** The covered files this diff touches are
+> `packages/sdk/src/client.ts`, `x402-erc7710.ts` and `x402-funding-leg.ts`.
+> In the first two, the change is the error each refusal throws: the same
+> guards fire on the same answers, and nothing is signed after them, but the
+> errors now carry `{ kind: 'deterministic' }` through
+> `HavenApiError.deterministic(...)`, so the hosted step stops instead of
+> saying "re-call once". In `x402-funding-leg.ts`, the funding wait still runs
+> before any merchant retry and still throws when the funding leg is not
+> confirmed. A wait that times out or cannot read the chain now throws
+> `FundingConfirmationUnknownError`, and a reverted receipt throws
+> `FundingRevertedError`; the merchant is still never called after either.
+> No signing decision, typed-data check, recipient pin, allowlist, binding,
+> delegation, caveat, enforcer term, budget pre-check, settlement window,
+> funding leg or sweep changes. Scope of this note: those three files.
+> Nothing else in this document was re-verified for it.

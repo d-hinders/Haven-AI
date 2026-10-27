@@ -8,7 +8,7 @@
  */
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { HavenClient } from './client.js'
-import { HavenApiError } from './types.js'
+import { FundingConfirmationUnknownError, FundingRevertedError, HavenApiError } from './types.js'
 import { buildFundingLegSignData } from './__fixtures__/valid-userop.js'
 
 // The live funding-leg wire shape (#946): every sign_data the backend emits
@@ -168,8 +168,15 @@ describe('x402 funding tx confirmation wait (#321)', () => {
     expect(mockWaitForTransaction).toHaveBeenCalledTimes(1)
   })
 
-  it('throws HavenApiError when the funding tx times out (waitForTransaction returns null)', async () => {
-    mockWaitForTransaction.mockResolvedValue(null)
+  // #4470: ethers 6 `waitForTransaction` REJECTS on its timeout — it resolves
+  // only with a receipt — so the rejection is the live timeout path, and it is
+  // typed as an unknown confirmation (funding may have moved), not a failure.
+  it.each([
+    ['ethers rejects with its TIMEOUT error', () => mockWaitForTransaction.mockRejectedValue(Object.assign(new Error('timeout'), { code: 'TIMEOUT' }))],
+    ['the RPC call fails', () => mockWaitForTransaction.mockRejectedValue(new Error('could not detect network'))],
+    ['a null receipt (the defensive arm)', () => mockWaitForTransaction.mockResolvedValue(null)],
+  ])('throws FundingConfirmationUnknownError when %s', async (_label: string, arrange: () => void) => {
+    arrange()
 
     vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(new Response(JSON.stringify(paymentRequired), {
@@ -180,13 +187,19 @@ describe('x402 funding tx confirmation wait (#321)', () => {
       .mockResolvedValueOnce(signResponse())
 
     const haven = makeHaven()
-    await expect(haven.fetch(paymentRequired.resource.url, { method: 'GET' })).rejects.toMatchObject({
-      message: 'Funding tx did not confirm on-chain within the timeout window.',
-      statusCode: 500,
+    const err = await haven.fetch(paymentRequired.resource.url, { method: 'GET' }).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(FundingConfirmationUnknownError)
+    expect(err).toBeInstanceOf(HavenApiError)
+    expect(err).toMatchObject({
+      name: 'FundingConfirmationUnknownError',
+      fundingErrorCode: 'funding_confirmation_unknown',
+      statusCode: 504,
+      txHash: expect.stringMatching(/^0x/),
+      chainId: expect.any(Number),
     })
   })
 
-  it('throws HavenApiError when the funding tx reverts on-chain (receipt.status === 0)', async () => {
+  it('throws FundingRevertedError when the funding tx reverts on-chain (receipt.status === 0)', async () => {
     mockWaitForTransaction.mockResolvedValue({ status: 0 })
 
     vi.spyOn(globalThis, 'fetch')
@@ -198,9 +211,13 @@ describe('x402 funding tx confirmation wait (#321)', () => {
       .mockResolvedValueOnce(signResponse())
 
     const haven = makeHaven()
-    await expect(haven.fetch(paymentRequired.resource.url, { method: 'GET' })).rejects.toMatchObject({
-      message: 'Funding tx did not confirm on-chain within the timeout window.',
-      statusCode: 500,
+    const err = await haven.fetch(paymentRequired.resource.url, { method: 'GET' }).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(FundingRevertedError)
+    expect(err).toMatchObject({
+      name: 'FundingRevertedError',
+      fundingErrorCode: 'funding_reverted',
+      statusCode: 502,
+      failureCause: { kind: 'deterministic' },
     })
   })
 
@@ -275,11 +292,9 @@ describe('ensureFundingConfirmed (hosted x402 completion path)', () => {
   })
 
   it('throws when the funding tx never confirms (so the merchant is never contacted)', async () => {
-    mockWaitForTransaction.mockResolvedValue(null)
+    mockWaitForTransaction.mockRejectedValue(Object.assign(new Error('timeout'), { code: 'TIMEOUT' }))
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(statusResponse())
 
-    await expect(makeHaven().ensureFundingConfirmed('pay_321')).rejects.toMatchObject({
-      message: 'Funding tx did not confirm on-chain within the timeout window.',
-    })
+    await expect(makeHaven().ensureFundingConfirmed('pay_321')).rejects.toBeInstanceOf(FundingConfirmationUnknownError)
   })
 })

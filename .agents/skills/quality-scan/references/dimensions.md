@@ -1,14 +1,19 @@
-# Quality-scan — wave-dimension measurement blocks (#2501)
+# Quality-scan — measurement blocks (#2501, #4471)
 
 Loaded by [`quality-scan`](../SKILL.md) § *Method* step 3. Each block states
 the **command**, the **sample** and **what clean looks like**; the figures
 under each block are the run in which the command last produced a number —
 its positive control until the ledger supersedes them.
 
-The 2026-09-03 retrospective over the 600-issue wave measured what the wave
-was made of; these are its measured classes, one block each, so a reader can
-re-take any of them and the ledger can tell "no finding" from "did not look".
-Four rules hold for every block:
+Blocks 1–6 are the classes the 2026-09-03 retrospective measured the 600-issue
+wave to consist of. Blocks 8 and 9 are not: they come from the 2026-10-27
+measurement of the 537 non-epic issues created 2026-09-20..2026-10-26 by
+discovery channel, which found that two classes came mostly from live
+purchases — a refusal labelled "transient, retry once" or left untyped (8 of 9
+by title pattern), and one tool's output lost or refused across a hop (8 of
+10). They are numbered 8 and 9, not 7 and 8: the ledger already uses "block 7"
+for the retired *Chain health* block (#2775, `e91bca463`), and its delta rule
+compares blocks by number. Four rules hold for every block:
 
 - **Use the instrument that exists; never re-implement it.** The money-path
   matcher is `scripts/ci/qa-freshness.mjs`'s `matchesGlob` (the one
@@ -18,9 +23,11 @@ Four rules hold for every block:
   A second copy of a matcher is a second thing that can lie.
 - **A number needs a positive control before it counts.** Block 4 carries one
   by construction; for the others, quote the run in which the command has
-  produced a non-zero — the figures under each block, taken on
+  produced a non-zero — the figures under blocks 1–6, taken on
   `origin/dev@893d74f6` (2026-09-03), are that control until a later run
-  supersedes them in the ledger.
+  supersedes them in the ledger. Blocks 8 and 9 carry a seeded control of their
+  own and their figures were taken at `aad313ad9` (2026-10-27), not at
+  `893d74f6`.
 - **Run each instrument the way CI runs it, and prove the tools resolve.**
   A gate CI invokes with a flag answers a different question without it:
   `coupling-gate.mjs` runs `--strict` in `docs-coupling.yml`, and strict mode
@@ -378,3 +385,170 @@ documented false-positive class); money path 29 verb files, 20 outside the
 perimeter (qa-agent pilots, backend scripts, `sdk/src/sweep.ts`,
 `frontend/src/lib/hybridAccountOps.ts`); visual gate 4 of 24 app routes
 shot; 36 Markdown files outside both docs-quality boundaries.
+
+**8. Refusal census — what the backend suite's own answers become at the hosted
+mapper.** The 2026-10-27 channel measurement found the refusal class came
+mostly from live purchases (8 of 9 by title pattern), and the scan had found
+refusal-family defects too (#3213, #3214, #4458). This block asks the question
+from the tree: when a backend route refuses, does the hosted mapper
+(`normalizeError`, `packages/mcp-server/src/tools/support/errors.ts`) answer it
+with a step the agent can follow, or does it fall through to the generic
+`API_ERROR` branch? A trial of this block on 2026-10-27 produced #4468 (task-
+and sub-budget refusal mapping) and #4470 (retry class).
+
+```bash
+# Prerequisites: the core and SDK builds (the mapper's imports resolve to their
+# dist), and the backend suite's own database.
+npm run build -w packages/core && npm run build -w packages/mcp-server
+docker compose up -d postgres
+# 1. Record. The recorder is a vitest setup file that wraps the `fastify`
+#    factory with an `onSend` hook. It is inert unless HAVEN_RESPONSE_RECORDING
+#    is set, truncates its file at the start of each run, writes a seeded
+#    control row, and is never part of the backend's own config.
+node scripts/ci/refusal-census.mjs record --out "$SCRATCH/recording.ndjson"
+# 2. Join. Every distinct error row is fed to the built `normalizeError` the way
+#    the SDK transport hands it over: the full body (bounded), and the message
+#    built as `error: details` (haven-api-transport.ts:123-137). The dedupe key
+#    keeps the decorating fields the mapper reads — payment_id, revert_cause,
+#    task_budget_id — so two rows that answer differently are not collapsed.
+node scripts/ci/refusal-census.mjs block8 --recording "$SCRATCH/recording.ndjson"
+```
+
+**Sample: backend route tests only** — the test files that call `Fastify(`
+themselves (134 at `aad313ad9`). The shared `buildApp()` helper
+(`packages/backend/src/__tests__/helpers.ts:9`) mounts none of the payment
+routes, so hooking it would record almost nothing. The local MCP, the CLI and
+the signer's own refusals are **outside** this sample.
+
+**Route set.** The agent payment routes are a rule, not a hand list: every
+`POST` under `/payments`, `/x402` or `/machine-payments`
+(`AGENT_PAYMENT_ROUTE_RE` in the instrument). The trial's named three
+(`POST /payments`, `POST /x402`, `POST /x402/authorize`) are a subset; the 5xx
+section adds `POST /payments/:id/sign`, which the rule already covers.
+
+**Clean:** no unmarked typed code on an agent payment route reaches
+`API_ERROR`; every 5xx on those routes either answers a typed non-transient
+step or is marked `deliberately-transient` in
+`scripts/ci/refusal-census-allowlist.json`; no non-answer (timeout,
+unreachable, non-JSON) reads as a refusal. Report the marked and unmarked rows
+apart, so a new unmarked code is visible rather than absorbed.
+
+**Positive control:** a seeded synthetic unmapped code next to a known mapped
+one — `delegation_expired` must be answered and `refusal_census_control` must
+be reported. A checkout of `bffb8dc97^` would rot as sibling modules move, and
+it would edit `packages/mcp-server/src`, which this file's first rule allows
+only in an isolated tree.
+
+**False-positive classes.**
+- *A refusal answered before `normalizeError` by a tool-level handler* — the
+  census cannot observe the answer, so a row it reports may already be handled:
+  `state-direct-recovery.ts:809-847` (`close_needs_reprepare` /
+  `close_outcome_unconfirmed` on the sub-budget path),
+  `catalog-purchase.ts:862-866`, `quote-response.ts:442-453`.
+- *Test stub routes* — a route a test registers to answer a fixed error is not
+  a backend refusal: `GET /contacts/boom`, `GET /boom`, and
+  `client-compat.test.ts`'s own `/payments/:id`.
+
+**Baseline (`aad313ad9`, 2026-10-27).** Backend suite: 543 files, 542 green,
+287.99 s wall; the red file is `ops-readonly-role.test.ts`, whose 20 failing
+tests all say `permission denied to create role` (the local database grant).
+Recording: 1,972 rows from 120 test files; 1,613 error rows (1,504 4xx, 109
+5xx) from 116 test files; 563 distinct `(method, route, status, code)` keys.
+Typed rows: 174 distinct, 157 of them reach the generic `API_ERROR` branch,
+most on owner routes. On the payment routes: 20 typed rows (13 distinct codes)
+reach `API_ERROR`; three are deliberately generic or answered elsewhere —
+`client_outdated` 426 (the body carries its own step, and the generic branch
+drops it), `invalid_request` 400, `prepare_failed` 502 (deliberately
+transient); the other 10 are #4468's. 5xx: 46 distinct keys in all; of the 14
+on `POST /x402/authorize`, `POST /payments` and `POST /payments/:id/sign`, 10
+get a typed non-transient answer, 3 get the generic transient step correctly
+(`prepare_failed` ×2, a delegate-account deploy failure), and 1 is a test's own
+control (`allowance-rail-retired.test.ts`, 500). SDK sites: 41
+`new HavenApiError(` sites in non-test `packages/sdk/src` — 35 with a literal
+status (15 at 500/502, `408`, `0`, and 18 at 4xx), 6 with a variable status
+(listed with its source; `merchant-completion.ts:271` carries the merchant's
+own status); 14 of the 15 5xx sites were executed and all answer transient,
+#4470 judges nine of them deterministic; the two transport non-answers (`408`,
+`0`) answer "refused as made (4xx)" (#4470).
+
+**Re-run with this block's own instrument (2026-10-27, `origin/dev@2b82a465b`).**
+543 files, 543 green, 29.28 s wall; 2,206 rows; 1,614 error rows; 574 distinct
+keys; 156 typed rows reach `API_ERROR`; SDK sites 41 (36 literal, 5 variable —
+the transport's own `res.status` site is the sixth the trial counted as
+literal); non-answers: 2 recorded rows plus the `408` and `0` SDK sites; both
+halves of the positive control passed. The deltas against the trial are the
+recording's own (a different database, a different run), not a different
+question. The trial's red file (`ops-readonly-role.test.ts`) is green here
+because this run's database grants the role; the trial's figures stand as the
+first baseline.
+
+**9. Field round-trip — what the backend emits vs what each SDK mapper reads.**
+The hop class (8 of 10 by title pattern) is a field that one side writes and
+the other never reads. This block compares the 2xx bodies of the agent's read
+routes, from the same recording, with the `raw.<key>` set each SDK mapper reads.
+A trial on 2026-10-27 produced #4469 (receipt-list fields).
+
+```bash
+# Same recording as block 8 — one `record` run feeds both blocks.
+node scripts/ci/refusal-census.mjs block9 --recording "$SCRATCH/recording.ndjson"
+```
+
+**Sample: backend route tests only** — the 2xx bodies those tests produced. A
+route with no recorded 2xx body is reported as partial, never as clean.
+
+**Route set and mapper set.** The mapper set is every SDK mapper file, not only
+`payment-mappers.ts`: `account-reads.ts` (`mapTaskBudget`, `mapSubBudget`,
+`mapSupersession`), `client.ts` (`mapCatalogEntry`) and `payment-state.ts` are
+in it. The instrument's `MAPPERS` table names, per mapper, the route whose body
+it reads and the backend file that builds that body. The receipt mapper is read
+through `scripts/ci/vocabulary-divergence.mjs`'s exported `scanReceiptSurface`
+(the same 31 receipt keys), with `readBlock` and `stripCommentsAndStrings` for
+the others — not a second key extractor.
+
+**Clean:** every emitted key is read by the route's mapper or named in
+`READ_OUTSIDE_MAPPER`; every read key is emitted in the recording, or its
+builder emits it in a state the recorded tests did not reach (reported, with
+that flag).
+
+**Positive control:** a seeded control key that nothing emits must be reported,
+and a key the recording does emit (`payment_id` on the receipt route) must not
+be.
+
+**False-positive classes.**
+- *Read-never-emitted* — a key counts only after a grep scoped to the route's
+  body builder (non-test `src`, excluding migrations and `openapi/spec.ts`)
+  finds no emitter. A key that is also a column or a spec property would
+  otherwise always grep non-zero. The seeded control key is the check that the
+  grep can say no.
+- *Emitted-never-read* — keys read outside the mapper: `client_update`
+  (`haven-api-transport.ts:121`, spliced in by `client-compat.ts:353`), and
+  `total` / `has_more` / `next_cursor` in `listReceiptsPage`. Stub routes are
+  the same class as block 8's.
+
+**Recorder ordering.** The recorder's `onSend` is registered inside the factory,
+before any route or middleware, so it runs **before** `client-compat.ts:353`
+splices `client_update` into a body. A recorded 2xx body therefore does not
+carry `client_update`, which is why that key is in `READ_OUTSIDE_MAPPER` rather
+than reported as emitted-but-unread.
+
+**Baseline (`aad313ad9`, 2026-10-27).** Emitted but never read:
+`GET /machine-payments/receipts` — 6 keys `mapPaymentReceipt` never reads
+(#4469); `GET /machine-payments/:id/status` — `mpp`, which
+`PaymentStatusResult` and `RawPaymentStatusResult` declare
+(`packages/sdk/src/types.ts:2329`, `:2607`) but `mapPaymentStatusResult` never
+sets. Read but never emitted: `GET /machine-payments/:id/status` — 5 keys, all
+emitted in backend source (`modules/payments/agent-payment-status.ts`) in states
+the recorded tests did not reach; that is this direction's known
+false-positive class.
+
+**Re-run with this block's own instrument (2026-10-27, `origin/dev@2b82a465b`).**
+Emitted but never read: 11 keys — the trial's 7 (the six receipt keys, with
+`delivery_quality` as the wire name of the delivery verdict, and `mpp`), plus
+four the wider mapper set reaches: `spent_display` and `remaining_display`
+(`mapTaskBudget`), `is_live` (`mapSubBudget`), `endpoint_host`
+(`mapCatalogEntry`). Read but never emitted: 12 keys — the trial's 5 on
+`GET /machine-payments/:id/status`, plus 7 on `GET /payments`
+(`error_message`, `explorer_url`, `chain_id`, `fee`, `signed_at`,
+`submitted_at`, `expires_at`), all emitted in `routes/payments.ts` in states the
+recorded tests did not reach. Both halves of the positive control passed.
+

@@ -1,0 +1,41 @@
+{
+  "$comment": [
+    "Codes the refusal census (quality-scan block 8, #4471) must NOT report as",
+    "unanswered, with the reason each one is deliberately left to a branch other",
+    "than a typed one. Shape follows scripts/ci/vocabulary-map.json: one entry per",
+    "code, a `reason` a person can read, and a `disposition` the instrument counts.",
+    "",
+    "`disposition` values:",
+    "  deliberately-generic  — the generic API_ERROR branch is the intended answer",
+    "                          (the code is a catch-all, or the body's own step is",
+    "                          not the one the agent should follow).",
+    "  answered-elsewhere    — a tool-level handler answers it before normalizeError",
+    "                          sees it, so the census cannot observe the answer.",
+    "  deliberately-transient — a 5xx whose cause a retry CAN change; the generic",
+    "                          retry-once step is correct.",
+    "",
+    "An entry here is a decision, not a fact. Adding one is how a reviewer sees",
+    "that a code was considered; the census prints marked and unmarked rows apart",
+    "so a new unmarked code is visible rather than absorbed."
+  ],
+  "codes": [
+    {
+      "code": "client_outdated",
+      "status": 426,
+      "disposition": "deliberately-generic",
+      "reason": "The 426 body carries its own next step (next_action, next_tool_omitted_reason, client_update) and the generic branch drops all three. Left generic on purpose: the upgrade instruction is the client's, not a payment refusal, and the SDK transport surfaces client_update separately. A typed branch here would duplicate the client-compat hook's job."
+    },
+    {
+      "code": "invalid_request",
+      "status": 400,
+      "disposition": "deliberately-generic",
+      "reason": "A request-shape refusal. The generic 4xx branch already says 'refused as made; re-calling it the same way cannot succeed', which is the whole answer; a typed code would add a name without adding a step."
+    },
+    {
+      "code": "prepare_failed",
+      "status": 502,
+      "disposition": "deliberately-transient",
+      "reason": "A bundler, RPC or transport failure during prepare — not a revert. The same payment can succeed on a retry, so the generic 5xx retry-once step is correct. Its deterministic sibling prepare_reverted has its own typed branch in errors.ts."
+    }
+  ]
+}

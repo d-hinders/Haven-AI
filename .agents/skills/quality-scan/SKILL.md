@@ -20,8 +20,12 @@ Approval to file is not approval to implement or ship.
 
 ## References
 
-- [`references/dimensions.md`](references/dimensions.md) — the numbered wave
-  dimensions a run probes, numbered. `Probed clean:` cites these by number.
+- [`references/dimensions.md`](references/dimensions.md) — the numbered
+  measurement blocks a run probes. `Probed clean:` cites these by number.
+  Blocks 1–6 are the classes the 2026-09-03 retrospective measured the
+  600-issue wave to consist of; blocks 8 and 9 come from the 2026-10-27
+  measurement of the 537 non-epic issues created 2026-09-20..2026-10-26 by
+  discovery channel.
 - [`references/discovery-method.md`](references/discovery-method.md) — the
   code-quality discovery method: how to run a pass, the discovery prompts, the
   coverage summary and the verification baseline. Moved here from
@@ -85,7 +89,7 @@ also records a fourth — disposition upkeep — owned by
   result → sample boundaries → missing verification and reason`. Do not invent
   a zero for an unexecuted check. `examined` means the declared sample was
   actually inspected; it never means the whole repository was proven clean.
-- **Wave-dimension coverage (#2501).** Name every current numbered block in
+- **Block coverage (#2501, #4471).** Name every current numbered block in
   [the dimensions reference](references/dimensions.md), including blocks that
   produced a finding or candidate. Record other probes in the same format.
   Partial and unexamined areas remain visible in the final report. In
@@ -191,11 +195,15 @@ If tracking cannot be checked, disclose that limit and mark novelty unverified.
    attempts can fail differently: classify each from its own
    `• <leg> … PASS|FAIL` lines, never from the job as a whole (`gh api repos/{owner}/{repo}/actions/jobs/<job>/logs | grep -nE 'money-flow attempt [12]/2|• .* … (PASS|FAIL)'`).
    In job `116876251507` attempt 1/2 failed only `x402-catalog-guided-purchase`;
-   attempt 2/2 failed four legs, `x402-hosted-mcp-signer` among them. Runtime-UX stays
-   out of scope: that class surfaces through external testing (epic #1585's
-   origin), not repo scanning. Then take the numbered **wave dimensions** — the
-   classes the 600-issue wave was measured to consist of — each as its
-   numbered block in [`references/dimensions.md`](references/dimensions.md),
+   attempt 2/2 failed four legs, `x402-hosted-mcp-signer` among them. Runtime-UX
+   stays out of scope as a *live exercise*: that class surfaces through external
+   testing (epic #1585's origin), not by clicking through a product. Block 8 is
+   not that — it finds agent-UX defects from the tree, by asking what the
+   backend's own recorded answers become at the hosted mapper. Then take the
+   numbered **measurement blocks** — blocks 1–6 are the classes the 600-issue
+   wave was measured to consist of, blocks 8 and 9 the two classes the
+   2026-10-27 channel measurement found came mostly from live purchases — each
+   as its numbered block in [`references/dimensions.md`](references/dimensions.md),
    which states the command, the sample and what clean looks like, so the
    number is quotable as evidence or as a `Probed clean` baseline:
    1. **Guard falsifiability by execution** — mutate what a sampled guard
@@ -218,6 +226,14 @@ If tracking cannot be checked, disclose that limit and mark novelty unverified.
       checks, and each gate's green-without-running exit branches. This is
       the *CI gate coverage vs. what is actually exercised* dimension made
       concrete (#2317, #2088, #2300, #1044).
+   8. **Refusal census** — record what the backend suite's own `app.inject`
+      calls return, feed each distinct error to the hosted `normalizeError`,
+      and report typed codes it does not answer, 5xx read as transient, and
+      non-answers read as refusals (#4468, #4470).
+   9. **Field round-trip** — from the same recording, compare the 2xx bodies of
+      the agent's read routes with the `raw.<key>` set each SDK mapper reads;
+      report keys emitted but never read and keys read but never emitted
+      (#4469).
 
    **When the scope asks for a live exercise.** "Runtime-UX stays out of
    scope" above means the scan does not hunt UX defects by clicking through a

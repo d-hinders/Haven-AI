@@ -53,6 +53,8 @@ covers:
   - packages/backend/src/rails/sweep.ts
   - packages/backend/src/routes/machine-payments.ts
   - packages/sdk/src/sweep.ts
+  - packages/frontend/src/components/ui/SettingsSection.tsx
+  - packages/frontend/src/components/ui/Checkbox.tsx
 last-verified: "2026-10-25"
 ---
 

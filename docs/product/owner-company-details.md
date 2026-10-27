@@ -25,6 +25,7 @@ covers:
   - packages/frontend/src/components/agent-panel/TaxDeclarationToggle.tsx
   - packages/mcp/src/server.ts
   - packages/sdk/src/merchant-completion.ts
+  - packages/frontend/src/components/ui/Checkbox.tsx
 last-verified: "2026-10-26"
 ---
 

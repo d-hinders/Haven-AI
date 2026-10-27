@@ -4136,7 +4136,7 @@ export default function DesignSystemPage() {
       <Section
         title="Monogram"
         testId="ds-monogram"
-        description="Initials-in-a-circle avatar, or the entity's logo when it has one. Promoted to components/ui on its third copy (#3079). xxs (24px) for the overlapping agent avatar stack (#4480), xs (32px) for the agent row's 2rem mark track (#4208), sm (36px) for lists and cards, md (48px) for a page header. The initials stay text-xs below md — the typography ramp's floor. `decorative` sets aria-hidden for a caller that prints the name beside the mark; a name that starts with an emoji shows that emoji alone. Since #4066 the initials are tinted from one of six muted avatar tints, never a status or semantic colour and never by index. An AGENT passes its STORED tint (`tint`, 1..6 — `agents.avatar_tint`, unique among the user's first six agents, #4428), so two agents whose names hash alike still wear different colours and renaming an agent no longer changes its colour. A MERCHANT or a CONTACT passes nothing and keeps the hash of its trimmed name. Since #4331 the tint is also the agent's chart fill (seriesColorForAgent) — one colour per agent."
+        description="Initials-in-a-circle avatar, or the entity's logo when it has one (#3079). Sizes: xxs (24px) for the overlapping agent avatar stack (#4480), xs (32px) for the agent row's 2rem mark track (#4208), sm (36px) for lists and cards, md (48px) for a page header; the initials stay text-xs below md. `decorative` sets aria-hidden for a caller that prints the name beside the mark; an emoji name shows that emoji alone. The initials wear one of six muted avatar tints, never a status colour and never by index: an AGENT passes its STORED tint (`tint`, 1..6 — `agents.avatar_tint`, unique among the user's first six agents, #4428), so names that hash alike still differ; a MERCHANT or CONTACT keeps the hash of its trimmed name. Since #4331 that tint is also the agent's chart fill."
       >
         <div className="flex flex-wrap items-center gap-4">
           {MONOGRAM_TINT_EXAMPLES.map((name) => (
@@ -4149,7 +4149,7 @@ export default function DesignSystemPage() {
           <Monogram name="Research agent" tint={DS_RESEARCH_TINT} size="xxs" decorative />
           <Monogram name="Data-feed agent" tint={DS_DATAFEED_TINT} size="xxs" decorative />
           <Monogram name="Haven Demo Store" size="xxs" decorative />
-          <span className="text-xs text-[var(--v2-ink-3)]">xxs — 24px, the avatar stack&apos;s mark</span>
+          <span className="text-xs text-[var(--v2-ink-3)]">xxs — 24px, the stack&apos;s mark</span>
         </div>
         {/* The last two are the rule #4428 changed, shown rather than
             described: 'Research agent' and 'Data-feed agent' hash to the SAME
@@ -4157,15 +4157,15 @@ export default function DesignSystemPage() {
             agent carries its own stored tint. Before the epic they were
             indistinguishable circles. */}
         <div className="mt-4 flex flex-wrap items-center gap-4">
-          <span className="flex items-center gap-3">
+          <span className="flex items-center gap-2">
             <Monogram name="Research agent" tint={DS_RESEARCH_TINT} size="xs" decorative />
             <span className="v2-text-body text-[var(--v2-ink)]">Research agent</span>
           </span>
-          <span className="flex items-center gap-3">
+          <span className="flex items-center gap-2">
             <Monogram name="Data-feed agent" tint={DS_DATAFEED_TINT} size="xs" decorative />
             <span className="v2-text-body text-[var(--v2-ink)]">Data-feed agent</span>
           </span>
-          <span className="flex items-center gap-3">
+          <span className="flex items-center gap-2">
             <Monogram name="🤖 Shopping bot" size="xs" decorative />
             <span className="v2-text-body text-[var(--v2-ink)]">🤖 Shopping bot</span>
           </span>
@@ -4175,20 +4175,18 @@ export default function DesignSystemPage() {
       <Section
         title="Agent avatar stack"
         testId="ds-agent-avatar-stack"
-        description="The overlapping agent monograms (#4480, owner-approved 2026-10-27) — the 'Paid by' column's marks, as one shared piece. Each mark is a 24px Monogram wearing the agent's STORED tint, the same colour its chart series fills with, so the stack invents no colour logic. The cap defaults to three; past it there is ONE +N overflow mark in neutral ink, never a tint. The marks overlap by a negative inline margin with a ring in the ground they sit on, so two marks stay separable in both themes: the supported ground is the default Card (--v2-bg). NOT supported: the anchor card and table header bands, where the ring would read as a light halo; on a hovered table row the ring stays --v2-bg and reads as a thin outline on the hover tint. Assistive tech and keyboard: the stack is ONE focus stop, not one per mark — every monogram and the +N mark is decorative, the stack carries one accessible name in the roster's words ('Research agent, Data-feed agent, Ops agent and 2 more'), and ONE shared Tooltip shows the same names on hover or focus. Zero agents renders nothing; the caller keeps its own text for that case. Hover or focus the second stack to read its names."
+        description="The overlapping agent monograms (#4480, owner-approved) — the 'Paid by' column's marks. Each mark is a 24px Monogram wearing the agent's STORED tint, the same colour its chart series fills with. The cap defaults to three; past it there is ONE +N overflow mark in neutral ink, never a tint. The marks overlap by a negative inline margin with a ring in the ground they sit on, so two marks stay separable in both themes: the supported ground is the default Card (--v2-bg). NOT supported: the anchor card and table header bands, where the ring would read as a light halo. Assistive tech: the stack is ONE focus stop, not one per mark — every mark is decorative, the stack carries one accessible name in the roster's words ('Research agent, Data-feed agent, Ops agent and 2 more'), and ONE shared Tooltip shows the same names on hover or focus. Zero agents renders nothing; the caller keeps its own text."
       >
         <Card hover={false} className="p-5">
           <div className="space-y-4">
             <div className="flex flex-wrap items-center gap-3">
               <AgentAvatarStack agents={DS_STACK_AGENTS} />
-              <span className="text-sm text-[var(--v2-ink-2)]">
-                Three agents — the cap, no overflow mark
-              </span>
+              <span className="text-sm text-[var(--v2-ink-2)]">Three agents — the cap</span>
             </div>
             <div className="flex flex-wrap items-center gap-3">
               <AgentAvatarStack agents={DS_STACK_AGENTS_OVERFLOW} />
               <span className="text-sm text-[var(--v2-ink-2)]">
-                Five agents — three marks and a +2 overflow mark
+                Five agents — three marks, +2 overflow
               </span>
             </div>
           </div>

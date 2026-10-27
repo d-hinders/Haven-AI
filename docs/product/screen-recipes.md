@@ -745,11 +745,13 @@ rule). `?grant=` keeps working alongside `?tab=`. Sections, in order:
    one quiet status line under the header instead ("This agent no longer has
    access through Haven.").
 3. No separate "About this agent" card: its facts are the header's `meta`.
-4. Spending — the ONE budget surface (#3695): heading "Spending" and a
-   one-line description (budgets are enforced on-chain) ABOVE the card (see
-   the detail-page section rule in design-system.md). The hero is the
-   dashboard money-card pattern (#4226): a `Card` with `Card.Section divided` —
-   budgets on the left, **Last 30 days** on the right, stacked below `lg`.
+4. Spending — the ONE budget surface (#3695): heading "Spending" ABOVE the
+   card, with **no description** — the card already names each budget, its
+   period and its meter, so a description would only repeat it (#4476; the
+   detail-page section rule in design-system.md makes descriptions optional).
+   The hero is the dashboard money-card pattern (#4226): a `Card` with
+   `Card.Section divided` — budgets on the left, **Last 30 days** on the
+   right, stacked below `lg`.
    Each budget is one row — amount, period, recipient or merchant and a
    per-budget ⋯ menu whose items are **Edit budget**, **Add budget** and
    **Stop budget** (the first two open their controls; the irreversible action

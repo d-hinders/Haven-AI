@@ -782,18 +782,25 @@ does not touch). The Settings page assembles its sections with the shared
 `components/ui/SettingsSection.tsx`, which renders this shape so every caller
 follows without edits.
 
-- Each section's heading (`v2-text-h3`) and its one-line description sit
-  **above** its `Card`, not inside it — on detail pages **and on settings
-  pages**. On settings the shared `SettingsSection` enforces the shape: the
-  heading is sentence case `v2-text-h3` (never the old uppercase band), the
-  description is `mt-0.5 mb-3 text-sm text-[var(--v2-ink-2)]` and any
-  note rides under it in `text-xs text-[var(--v2-ink-3)]`, all above the
-  card; the card holds only the hairline-divided rows. The card can load,
-  swap or be replaced without moving its heading, and a skimming reader gets
-  every section name from the heading scan alone. (This retires the mix the
-  agent page had: "Agent budgets" was headed from inside its card while
-  "Recent activity" was headed from above — epic #3691's later slices apply
-  the rule there.)
+- Each section's heading (`v2-text-h3`) sits **above** its `Card`, not inside
+  it — on detail pages **and on settings pages**. A description is
+  **optional** (#4476; owner decision 2026-10-27 on the #4224 walk): it
+  appears only when it tells the reader something the heading and the card
+  don't. The agent page's **Spending** section is the example of a section
+  with none — "Spending" over a card that already names each budget, its
+  period and its meter; the sentence that used to sit there ("Budgets are
+  enforced on-chain…") repeated the card and is gone. On settings the shared
+  `SettingsSection` enforces the shape: the heading is sentence case
+  `v2-text-h3` (never the old uppercase band) and carries the heading-to-card
+  gap (`mb-3`) when there is no description or note; a description that IS
+  present is `mt-0.5 mb-3 text-sm text-[var(--v2-ink-2)]` and any note rides
+  under it in `text-xs text-[var(--v2-ink-3)]`, all above the card; the card
+  holds only the hairline-divided rows. The card can load, swap or be
+  replaced without moving its heading, and a skimming reader gets every
+  section name from the heading scan alone. (This retires the mix the agent
+  page had: "Agent budgets" was headed from inside its card while "Recent
+  activity" was headed from above — epic #3691's later slices apply the rule
+  there.)
 - State banners (`ApprovalRequiredBanner`) do not scatter through the page.
   They stack in ONE slot directly under the `PageHeader`, ordered by severity:
   `danger` first (the next action cannot be undone), then `warning` (something

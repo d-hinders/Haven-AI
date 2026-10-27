@@ -8,7 +8,7 @@
  */
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ComponentProps } from 'react'
+import type { ComponentProps, ReactNode } from 'react'
 import { ApiRequestError } from '@/lib/api'
 
 const { mockGetText, mockDownloadCsv, buttonProps } = vi.hoisted(() => ({
@@ -31,7 +31,7 @@ vi.mock('@/components/ui/Button', () => ({
   Button: (props: Record<string, unknown>) => {
     buttonProps.push(props)
     const { children, ...rest } = props
-    return <button {...rest}>{children as string}</button>
+    return <button {...rest}>{children as ReactNode}</button>
   },
 }))
 
@@ -56,6 +56,19 @@ function Probe(props: ListExportOptions) {
 
 type ProbeProps = ComponentProps<typeof Probe>
 
+/**
+ * The leading `Download` glyph (#4473): decorative (`aria-hidden`, so it adds
+ * nothing to the accessible name), at the `sm` label's 14px step, and the
+ * button's FIRST child — the glyph reads before the label, not after it.
+ */
+function expectDownloadGlyph(button: HTMLElement) {
+  const glyph = button.querySelector('svg')
+  expect(glyph, 'the export button draws no glyph').not.toBeNull()
+  expect(glyph).toHaveAttribute('aria-hidden', 'true')
+  expect(glyph).toHaveClass('h-3.5', 'w-3.5')
+  expect(button.firstElementChild).toBe(glyph)
+}
+
 beforeEach(() => {
   mockGetText.mockReset()
   mockDownloadCsv.mockReset()
@@ -65,16 +78,21 @@ beforeEach(() => {
 describe('ListExportAction — the Button', () => {
   const base: ProbeProps = { request: request(), exportable: true, filenamePrefix: 'haven-transactions', emptyNotice: PLAIN_EMPTY }
 
-  it('renders the idle state: enabled, labelled Export CSV, not busy', () => {
+  it('renders the idle state: enabled, labelled Export CSV, not busy, with the download glyph', () => {
     render(<Probe {...base} />)
     const button = screen.getByRole('button', { name: 'Export CSV' })
     expect(button).toBeEnabled()
     expect(button).not.toHaveAttribute('aria-busy')
+    // The glyph is decorative: the accessible name is the label alone.
+    expect(button).toHaveAccessibleName('Export CSV')
+    expectDownloadGlyph(button)
   })
 
-  it('disables the action while the list loads or holds nothing', () => {
+  it('disables the action while the list loads or holds nothing, glyph included', () => {
     render(<Probe {...base} exportable={false} />)
-    expect(screen.getByRole('button', { name: 'Export CSV' })).toBeDisabled()
+    const button = screen.getByRole('button', { name: 'Export CSV' })
+    expect(button).toBeDisabled()
+    expectDownloadGlyph(button)
   })
 
   it('marks the control busy and disabled while the request is in flight', async () => {
@@ -88,6 +106,10 @@ describe('ListExportAction — the Button', () => {
     const busy = screen.getByRole('button', { name: 'Preparing…' })
     expect(busy).toBeDisabled()
     expect(busy).toHaveAttribute('aria-busy', 'true')
+    // No spinner replaces the glyph while busy (design-system.md § Button):
+    // it stays `Download` and dims with the button.
+    expect(busy).toHaveAccessibleName('Preparing…')
+    expectDownloadGlyph(busy)
 
     release('\uFEFFsettled_at\r\n"x"')
     await waitFor(() => expect(screen.getByRole('button', { name: 'Export CSV' })).toBeEnabled())

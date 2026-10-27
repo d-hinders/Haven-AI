@@ -320,14 +320,17 @@ describe('ListToolbar — facets, chips and count', () => {
     expect(summaryCount()).toHaveTextContent('2 of 3 agents')
   })
 
-  it('the summary slot draws the page totals on the left of the count; without it the count stands alone (#4196)', () => {
+  it('the summary slot draws the page totals on the right of the count; without it the count stands alone (#4196, #4473)', () => {
     const { rerender } = render(
       <ListToolbar noun={noun} state={EMPTY} onChange={() => {}} filtering="server" count={{ shown: 3, total: 3 }} summary={<span>Money in $10.00</span>} />,
     )
     const line = screen.getByTestId('list-summary')
-    expect(line.textContent).toBe('Money in $10.003 agents')
-    expect(line.firstElementChild).toHaveTextContent('Money in $10.00')
-    expect(line.lastElementChild).toBe(screen.getByTestId('list-toolbar-count'))
+    expect(line.textContent).toBe('3 agentsMoney in $10.00')
+    expect(line.firstElementChild).toBe(screen.getByTestId('list-toolbar-count'))
+    expect(line.lastElementChild).toHaveTextContent('Money in $10.00')
+    // The totals take the right edge; the count no longer claims it.
+    expect(line.lastElementChild).toHaveClass('ml-auto', 'text-right')
+    expect(screen.getByTestId('list-toolbar-count')).not.toHaveClass('ml-auto')
     rerender(<ListToolbar noun={noun} state={EMPTY} onChange={() => {}} filtering="server" count={{ shown: 3, total: 3 }} />)
     expect(screen.getByTestId('list-summary').children).toHaveLength(1)
     expect(screen.getByTestId('list-summary').textContent).toBe('3 agents')

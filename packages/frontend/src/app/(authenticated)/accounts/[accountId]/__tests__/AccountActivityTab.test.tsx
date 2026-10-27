@@ -529,7 +529,7 @@ describe('AccountActivityTab — rows and the detail panel (#4098)', () => {
     expect(screen.getByText(/Money out/)).toBeInTheDocument()
   })
 
-  it('draws the totals on the left of the list summary line, the count on the right (#4196)', () => {
+  it('draws the count on the left of the list summary line, the totals on the right (#4196, #4473)', () => {
     renderTab()
 
     const line = screen.getByTestId('list-summary')
@@ -542,8 +542,8 @@ describe('AccountActivityTab — rows and the detail panel (#4098)', () => {
     expect(within(moneyOut).getByText('Money out')).toHaveClass('sr-only')
     // The sr-only name comes before the figure it names.
     expect(moneyIn.textContent).toMatch(/^InMoney in \$/)
-    expect(line.firstElementChild).toContainElement(within(line).getByTestId('activity-totals'))
-    expect(line.lastElementChild).toBe(screen.getByTestId('list-toolbar-count'))
+    expect(line.firstElementChild).toBe(screen.getByTestId('list-toolbar-count'))
+    expect(line.lastElementChild).toContainElement(within(line).getByTestId('activity-totals'))
     expect(within(screen.getByTestId('list-summary')).getByTestId('list-toolbar-count')).toHaveTextContent('2 transactions')
     // Unfiltered: the toolbar draws no status row.
     expect(screen.queryByTestId('list-toolbar-status')).not.toBeInTheDocument()

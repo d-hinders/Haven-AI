@@ -189,6 +189,36 @@ test.describe('transactions list controls — 375px', () => {
     expect(exportBox!.y, 'Export CSV shares the search row').toBeGreaterThan(filtersBox!.y + filtersBox!.height)
     expect(exportBox!.width, 'Export CSV is full-width on phone').toBeLessThan(150)
     await expectHitTarget(page, exportCsv, 'Export CSV')
+
+    // The list summary line (#4473): the count on the left, the page's totals
+    // on the right — right-aligned at the line's right edge, which is where
+    // the rows' amounts end. jsdom cannot measure this, and the 375px wrap is
+    // the case that matters: the totals wrap under the count and stay right.
+    const summaryLine = page.getByTestId('list-summary')
+    const count = summaryLine.getByTestId('list-toolbar-count')
+    const totals = summaryLine.getByTestId('transactions-totals')
+    await expect(count).toBeVisible()
+    await expect(totals).toBeVisible()
+    expect(
+      await summaryLine.evaluate((el) => el.firstElementChild?.getAttribute('data-testid')),
+      'the count is not the first child of the summary line',
+    ).toBe('list-toolbar-count')
+    expect(
+      await summaryLine.evaluate((el) => {
+        const last = el.lastElementChild
+        return last !== null && last.contains(el.querySelector('[data-testid="transactions-totals"]'))
+      }),
+      'the totals are not the last child of the summary line',
+    ).toBe(true)
+    const countBox = await count.boundingBox()
+    const totalsBox = await totals.boundingBox()
+    expect(
+      totalsBox!.x + totalsBox!.width,
+      `the totals end at ${totalsBox!.x + totalsBox!.width}px, left of the count's right edge ${countBox!.x + countBox!.width}px`,
+    ).toBeGreaterThanOrEqual(countBox!.x + countBox!.width)
+    await expectInsideViewport(page, totals, 'Summary totals')
+    await evidence(page, 'summary-375')
+
     expect(await expectNoHorizontalOverflow(page)).toMatchObject({ hasOverflow: false })
     await evidence(page, 'toolbar-375')
 

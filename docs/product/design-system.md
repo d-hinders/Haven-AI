@@ -2565,15 +2565,18 @@ above the list; the card is never repeated inside a parent card.
    active filter and **Clear filters**. With no active filter there is no row
    and no divider. Sort is a view choice, not a filter: it gets no chip and
    Clear filters keeps it.
-4. **List summary line**, outside the card (#4196): the count on the right,
-   and the page's own totals, when it has any, on the left — the account
-   Activity tab's "In · Out" (short visible labels, so the line fits a phone
-   beside the count; sr-only "Money in" / "Money out" before each figure),
-   and Transactions' "In · Out" too (#4266; a Direction filter shows only its
-   half). The page passes
+4. **List summary line**, outside the card (#4196): the count on the left,
+   and the page's own totals, when it has any, on the right (#4473) — the
+   account Activity tab's "In · Out" (short visible labels, so the line fits a
+   phone beside the count; sr-only "Money in" / "Money out" before each
+   figure), and Transactions' "In · Out" too (#4266; a Direction filter shows
+   only its half). The totals are right-aligned at the line's right edge,
+   which is where the rows' amounts end — no padding-matching to the amount
+   column. The page passes
    its figures in the toolbar's `summary` slot and never builds the line, so
-   "filtered" is decided once, inside the toolbar. The count keeps one place
-   whether or not a filter is active.
+   "filtered" is decided once, inside the toolbar. The count keeps one place —
+   the left — whether or not a filter is active, and when the line wraps on a
+   phone the totals wrap under the count and stay right-aligned.
 
 Under the summary line, in this order: the hedges that qualify it
 (`UNPRICED_TOTALS_NOTE` for the totals, then the `truncated` note for the
@@ -2615,12 +2618,16 @@ decided client-side, because `fetch` + `Blob` ignores the server's
 the page places it.
 
 The Button is bare ghost `sm`: no width or height classes — the pattern owns
-the sizing. Its states:
+the sizing. It carries a leading lucide `Download` glyph through the shared
+`Icon` wrapper at `h-3.5 w-3.5` (the `sm` label's 14px step), decorative
+(`aria-hidden`), so the accessible name stays the label alone. Its states:
 
 - **idle** — "Export CSV", enabled while the list has rows;
 - **disabled** — while the list loads, or the server says there is nothing
   to export;
-- **preparing** — "Preparing…", with `aria-busy` (§ Button, the busy state);
+- **preparing** — "Preparing…", with `aria-busy` (§ Button, the busy state).
+  The glyph stays `Download` and dims with the button: no spinner replaces it
+  (§ Button, "Busy state: no spinner");
 - **empty notice** — a `role="status"` block: "Nothing to export." with the
   widen-the-filters line, or "Nothing to export yet." when an explorer
   outage is the likelier cause — the page arms that choice on its own state;
@@ -2806,7 +2813,7 @@ backend.
 |---|---|
 | Search placeholder | "Search {things}". What it matches goes in `searchDescription`, read to screen readers, not in the placeholder |
 | Facet trigger | "{Label}: {value}", "All" when unset |
-| Count (summary line, right) | "{n} {things}" unfiltered; "{shown} of {total} {things}" filtered; "Showing the first {n} {things}" when the server capped the read |
+| Count (summary line, left) | "{n} {things}" unfiltered; "{shown} of {total} {things}" filtered; "Showing the first {n} {things}" when the server capped the read |
 | Paging | "Show {n} more", n = min(page size, total − loaded); "Show more" when the server reports more but the totals leave nothing; "Loading…" while fetching |
 | No match | "No {things} match these filters" / "Try a different search, or clear filters to see everything." + Clear filters |
 | Period | "Last 7 days", "Last 30 days", "Last 90 days", "All time", "Custom range" |

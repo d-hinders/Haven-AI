@@ -434,6 +434,48 @@ describe('agent info helpers', () => {
     expect(compact).toMatchObject({ total: 1, hasMore: false, nextCursor: null })
   })
 
+  it('#4469: compact keeps the six receipt fields the mapper now reads, with their values', async () => {
+    // The #3423 test above asserts the three payload echoes are GONE. This one
+    // asserts the six #4469 fields are still THERE and still carry their
+    // values: `toHaveProperty` on a null fixture would pass without the fix.
+    const receipt = {
+      id: 'receipt-1', payment_id: 'payment-1', rail: 'x402', proof_status: 'payment_confirmed', tx_hash: `0x${'ab'.repeat(32)}`,
+      chain_id: 84532, resource_url: 'https://paid.example/data', merchant_address: '0xMerchant', payer_address: '0xTreasury',
+      settlement_address: '0xMerchant', token_symbol: 'USDC', token_address: '0xToken', amount_raw: '1000', amount_human: '0.001',
+      challenge_id: null, idempotency_key: 'x402:test',
+      challenge_payload: { payment_required: { accepts: [{ amount: '1000' }] } },
+      selected_payment: { scheme: 'exact' },
+      protocol_receipt_payload: { success: true },
+      payment_proof_header_name: 'PAYMENT-SIGNATURE', protocol_receipt_header_name: 'PAYMENT-RESPONSE', merchant_status: 200,
+      settlement_scheme: 'eip3009',
+      budget_delegation_hash: '0xbudget',
+      delivery_quality: 'unusable',
+      delivery_note: 'the paid call returned an empty body',
+      delivery_reported_at: '2026-10-27T09:00:00.000Z',
+      delivery_reference: 'Bik Bok 5 SEK, order 6ac7',
+      confirmed_at: '2026-09-28T12:00:00.000Z', created_at: '2026-09-28T12:00:01.000Z', updated_at: '2026-09-28T12:00:01.000Z',
+    }
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+      new Response(JSON.stringify({ receipts: [receipt], total: 1, has_more: false, next_cursor: null }), {
+        status: 200, headers: { 'content-type': 'application/json' },
+      }),
+    )
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl })
+    const compact = await haven.listReceiptsPage({ compact: true })
+    expect(compact.receipts[0]).toMatchObject({
+      settlementScheme: 'eip3009',
+      budgetDelegationHash: '0xbudget',
+      deliveryQuality: 'unusable',
+      deliveryNote: 'the paid call returned an empty body',
+      deliveryReportedAt: '2026-10-27T09:00:00.000Z',
+      deliveryReference: 'Bik Bok 5 SEK, order 6ac7',
+    })
+    // The three payload echoes are still dropped, so this is the compact row.
+    for (const key of ['challengePayload', 'selectedPayment', 'protocolReceiptPayload']) {
+      expect(compact.receipts[0]).not.toHaveProperty(key)
+    }
+  })
+
   it('#3128: against a backend without the page fields, total / hasMore / nextCursor are null (unknown), never 0 / false', async () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
       new Response(JSON.stringify({ receipts: [] }), { status: 200, headers: { 'content-type': 'application/json' } }),

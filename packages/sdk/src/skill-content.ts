@@ -554,8 +554,8 @@ only part of it was usable), and an optional \`note\` (max 2000 characters)
 saying what was wrong. It is evidence only: it moves no money, never changes
 \`settled\` or any money field, and works only on your own settled
 payments — another agent's payment is refused. A re-report replaces your
-earlier verdict; the receipt then carries it beside the payment, so the
-owner does not read a junk delivery as a success.
+earlier verdict; the receipt then carries it beside the payment, so a junk
+delivery does not read as a success.
 ### Relay a delivered code or credential to the owner — immediately, verbatim
 
 If a merchant response carries what the user PAID FOR — a redemption code, gift

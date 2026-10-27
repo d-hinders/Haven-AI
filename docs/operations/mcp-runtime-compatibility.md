@@ -6733,3 +6733,22 @@ to call next in structured fields, and those fields are typed end to end
 > published version changed. Scope of this note: those README sentences.
 > Nothing else in this document was re-read for it, and `last-verified` is
 > not bumped.
+
+> **Re-verified (#4469, 2026-10-27 — `haven_list_receipts` rows gain six
+> additive fields).** Both surfaces return the SDK's `listReceiptsPage`, and
+> `mapPaymentReceipt` now reads six keys the receipts wire already carried:
+> `settlementScheme`, `budgetDelegationHash`, `deliveryQuality`,
+> `deliveryNote`, `deliveryReportedAt` and `deliveryReference`. Each is set
+> only when the raw key is present, so a row from an older backend maps
+> without it — absent stays absent, and the wire itself is unchanged. Version
+> skew is silent in both directions: a hosted server or a local
+> `@haven_ai/mcp` older than this change returns rows without the six (the
+> mapper drops them), and no input schema, tool name or consent surface
+> changes, so nothing is refused and no new acknowledgement is asked for. The
+> `haven_report_delivery_quality` description also changed — it drops "and the
+> dashboard" and no longer claims the owner reads the verdict, because no owner
+> surface reads it. That is served prose, not a compatibility surface; the
+> tool's input schema is byte-identical. No version constant, pin or published
+> version changed. Scope of this note: the receipt row shape and that one
+> description. Nothing else in this document was re-read for it, and
+> `last-verified` is not bumped.

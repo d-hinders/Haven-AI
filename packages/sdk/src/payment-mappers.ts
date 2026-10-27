@@ -182,6 +182,29 @@ export function mapPaymentReceipt(raw: RawHavenPaymentReceipt): HavenPaymentRece
   if ('approval_request_id' in raw) {
     receipt.approvalRequestId = raw.approval_request_id ?? null
   }
+  // #4469: the six fields the receipts wire carries and this mapper used to
+  // drop. Additive and per-row: a key an older backend does not send stays
+  // ABSENT, never a fabricated null. Block form, not a spread — the vocabulary
+  // guard (`scripts/ci/vocabulary-divergence.mjs`) reads `receipt.x = …` lines
+  // and cannot see a spread, so a spread would hide these from it.
+  if ('settlement_scheme' in raw) {
+    receipt.settlementScheme = raw.settlement_scheme ?? null
+  }
+  if ('budget_delegation_hash' in raw) {
+    receipt.budgetDelegationHash = raw.budget_delegation_hash ?? null
+  }
+  if ('delivery_quality' in raw) {
+    receipt.deliveryQuality = raw.delivery_quality ?? null
+  }
+  if ('delivery_note' in raw) {
+    receipt.deliveryNote = raw.delivery_note ?? null
+  }
+  if ('delivery_reported_at' in raw) {
+    receipt.deliveryReportedAt = raw.delivery_reported_at ?? null
+  }
+  if ('delivery_reference' in raw) {
+    receipt.deliveryReference = raw.delivery_reference ?? null
+  }
 
   return receipt
 }

@@ -570,6 +570,21 @@ describe('#3774: the step after the merchant retry is split by scheme', () => {
   })
 })
 
+describe('#4469: the delivery-verdict guidance claims only what ships', () => {
+  // The receipt read carries the verdict (haven_list_receipts / haven_get_receipt
+  // after #4469), but NO owner surface reads it: no file under
+  // packages/frontend/src reads delivery_quality/deliveryQuality other than this
+  // skill text. So the sentence must not say the owner sees it. Pinned WHOLE,
+  // not only by the frontend↔SDK parity assertion, so a reword on both copies
+  // still has to pass this.
+  it('pins the whole sentence, and never claims the owner reads the verdict', () => {
+    expect(HAVEN_SKILL_MD).toContain(
+      'A re-report replaces your\nearlier verdict; the receipt then carries it beside the payment, so a junk\ndelivery does not read as a success.',
+    )
+    expect(HAVEN_SKILL_MD).not.toContain('the owner does not read a junk delivery as a success')
+  })
+})
+
 describe('#3778: the relay rule for delivered codes and credentials', () => {
   // Sliced the #3735 way: the section's own heading up to the next heading,
   // so every assertion is about THIS section and not a phrase elsewhere.

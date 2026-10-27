@@ -482,6 +482,13 @@ question. The trial's red file (`ops-readonly-role.test.ts`) is green here
 because this run's database grants the role; the trial's figures stand as the
 first baseline.
 
+**The block's own finding, closed.** Re-running the join on that same recording
+against the tree after #4468 merged (PR #4483) reads **142** typed rows instead
+of 156, and no task- or sub-budget code remains unmarked: the ten codes the
+trial found are answered by their own branches. The recording is unchanged —
+only the mapper moved — which is what makes the join a measurement rather than
+a snapshot.
+
 **9. Field round-trip — what the backend emits vs what each SDK mapper reads.**
 The hop class (8 of 10 by title pattern) is a field that one side writes and
 the other never reads. This block compares the 2xx bodies of the agent's read

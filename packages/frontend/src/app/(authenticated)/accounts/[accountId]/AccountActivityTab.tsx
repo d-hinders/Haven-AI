@@ -25,8 +25,8 @@
  *   `showAccount={false}` — #4307), merchant-first row titles with the
  *   initiator as the subtitle, the shared
  *   `TransactionDetailPanel` on row open — click or Enter/Space, the row is
- *   a whole-row button — and "Show N more" below the card for the next page
- *   (#4196, `ListShowMore`);
+ *   a whole-row button — and "Show N more" as the card's footer row for the
+ *   next page (#4196, `ListShowMore`);
  * - two distinct empty states: the standard no-match state when a filter
  *   matches nothing, and "No activity yet" with a Receive button for an
  *   account with no history.
@@ -538,18 +538,17 @@ export default function AccountActivityTab({
               ))}
             </div>
           )}
+          {!loadingInitial && !error && (
+            <ListShowMore
+              loaded={transactions.length}
+              total={total}
+              pageSize={ACTIVITY_PAGE_SIZE}
+              hasMore={hasMore}
+              loading={loadingMore}
+              onShowMore={() => void loadMore()}
+            />
+          )}
         </Card>
-      )}
-
-      {!showNoMatch && !loadingInitial && !error && (
-        <ListShowMore
-          loaded={transactions.length}
-          total={total}
-          pageSize={ACTIVITY_PAGE_SIZE}
-          hasMore={hasMore}
-          loading={loadingMore}
-          onShowMore={() => void loadMore()}
-        />
       )}
 
       <TransactionDetailPanel

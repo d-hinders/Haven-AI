@@ -3,6 +3,7 @@
 import { SearchX, Search, SlidersHorizontal, X, ChevronDown } from 'lucide-react'
 import { Fragment, useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { Button } from '@/components/ui/Button'
+import { Card } from '@/components/ui/Card'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Icon } from '@/components/ui/Icon'
 import { useBodyScrollLock } from '@/hooks/useBodyScrollLock'
@@ -843,11 +844,18 @@ export function ListNoMatch({ noun, onClear }: { noun: ListNoun; onClear: () => 
 }
 
 /**
- * The paging rule (#4196): a paged list's card ends with its last row, and
- * the next page is one ghost button centred below the card — "Show 25 more",
- * N being what the next page adds. Nothing renders once every page is loaded:
- * the list ending is the end. A truncated read keeps the page's own hedge
- * under the summary line; this button says nothing about it.
+ * The paging rule (#4196, restyled 2026-10-27): a paged list's card ends with
+ * its footer row while pages remain — a hairline above, then one centred
+ * "Show 25 more" row, N being what the next page adds. Once every page is
+ * loaded the footer is gone and the card ends with its last row: the list
+ * ending is the end. A truncated read keeps the page's own hedge under the
+ * summary line; this row says nothing about it.
+ *
+ * The row is `Card.Section divided` (the canonical in-card hairline) around a
+ * raw `<button>`, not `Button`: `Button` hard-codes `rounded-md` and an
+ * outset `ring-offset-2` that an `overflow-hidden` card clips, and it takes no
+ * caller ring. The row's own inset ring follows the card's bottom corners via
+ * `rounded-b-[10px]`, the `Card.Header` docblock's precedent.
  *
  * `loaded` and `total` must be one source's figures (the feed's loaded rows
  * and its server total), so N never mixes two reads.
@@ -869,10 +877,17 @@ export function ListShowMore({
 }) {
   if (!hasMore) return null
   return (
-    <div className="mt-4 flex justify-center" data-testid="list-show-more">
-      <Button variant="ghost" onClick={onShowMore} disabled={loading} aria-busy={loading || undefined}>
+    <Card.Section divided>
+      <button
+        type="button"
+        onClick={onShowMore}
+        disabled={loading}
+        aria-busy={loading || undefined}
+        data-testid="list-show-more"
+        className="flex min-h-11 w-full items-center justify-center rounded-b-[10px] px-5 py-3 text-sm font-medium text-[var(--v2-ink-2)] transition-colors hover:bg-[var(--v2-surface-hover)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/80 disabled:cursor-not-allowed disabled:opacity-60"
+      >
         {loading ? loadingMoreLabel : showMoreLabel(total - loaded, pageSize)}
-      </Button>
-    </div>
+      </button>
+    </Card.Section>
   )
 }

@@ -636,7 +636,7 @@ export default function AgentActivityTab({
           />
         </div>
       ) : (
-        <Card hover={false} className="mt-3">
+        <Card hover={false} className="mt-3 overflow-hidden">
           {activeLoading ? (
             <div
               className="divide-y divide-[var(--v2-border)]"
@@ -727,18 +727,17 @@ export default function AgentActivityTab({
               )}
             </div>
           )}
+          {!activeLoading && !activeError && (
+            <ListShowMore
+              loaded={refusedSelected ? refusalRows.length : rows.length}
+              total={activeTotal}
+              pageSize={AGENT_PAYMENT_LEDGER_PAGE_SIZE}
+              hasMore={activeHasMore}
+              loading={activeLoadingMore}
+              onShowMore={() => void activeLoadMore()}
+            />
+          )}
         </Card>
-      )}
-
-      {!showNoMatch && !activeLoading && !activeError && (
-        <ListShowMore
-          loaded={refusedSelected ? refusalRows.length : rows.length}
-          total={activeTotal}
-          pageSize={AGENT_PAYMENT_LEDGER_PAGE_SIZE}
-          hasMore={activeHasMore}
-          loading={activeLoadingMore}
-          onShowMore={() => void activeLoadMore()}
-        />
       )}
 
       <TransactionDetailPanel

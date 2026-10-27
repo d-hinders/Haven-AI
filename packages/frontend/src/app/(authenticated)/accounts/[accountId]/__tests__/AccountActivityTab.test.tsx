@@ -3,7 +3,7 @@
  * written to the URL next to the page's `tab` through the list-controls
  * codec, the standard `ListToolbar` (with the Account facet absent — the
  * page fixes the account), the standard count and no-match copy, paging
- * through "Show N more" below the card (#4196), the row-to-panel open by mouse and keyboard, the
+ * through "Show N more" as the card's footer row (#4196), the row-to-panel open by mouse and keyboard, the
  * truncated-history honesty, and the CSV export carrying the fixed account
  * plus the active filters.
  *
@@ -489,7 +489,7 @@ describe('AccountActivityTab — rows and the detail panel (#4098)', () => {
     expect(screen.getByTestId('detail-panel')).toHaveTextContent('panel:0xdef')
   })
 
-  it('pages with "Show N more" below the list card, N being what the next page adds (#4196)', () => {
+  it('pages with "Show N more" inside the list card, N being what the next page adds (#4196)', () => {
     const loadMore = vi.fn()
     feedMock.mockImplementation(() => ({
       ...DEFAULT_FEED,
@@ -502,10 +502,10 @@ describe('AccountActivityTab — rows and the detail panel (#4098)', () => {
 
     // 2 loaded of 5: the next page adds 3.
     const button = screen.getByRole('button', { name: 'Show 3 more' })
-    // Outside the card: the card ends with its last row.
+    // Inside the card: the footer row is the card's last child (#4495).
     const card = ledgerRows()[0].closest('.shadow-card')
     expect(card).not.toBeNull()
-    expect(card).not.toContainElement(button)
+    expect(card).toContainElement(button)
     fireEvent.click(button)
     expect(loadMore).toHaveBeenCalledTimes(1)
   })

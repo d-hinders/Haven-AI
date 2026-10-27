@@ -808,4 +808,26 @@ describe('ListShowMore (#4196)', () => {
     const { container } = renderMore({ loaded: 49, total: 49, hasMore: false })
     expect(container).toBeEmptyDOMElement()
   })
+
+  // #4495: the positive shape, not just the absence of the old one. Red on the
+  // pre-#4495 markup (a `mt-4` wrapper around a ghost `Button`) and red on an
+  // edit that only drops `mt-4` — the hairline, the ink-2 text and the inset
+  // ring are what the owner's mockup asks for.
+  it('is an in-card footer row: hairline above, centred ink-2 text, inset ring (#4495)', () => {
+    renderMore()
+    const button = screen.getByTestId('list-show-more')
+    // The hairline is the `Card.Section divided` wrapper's. The testid sits on
+    // the row's button because `Card.Section` takes no test hook and
+    // `packages/ui` is outside this issue's scope.
+    const row = button.parentElement
+    expect(row).not.toBeNull()
+    expect(row!.className).toContain('border-t')
+    expect(button.className).toContain('text-[var(--v2-ink-2)]')
+    expect(button.className).toContain('focus-visible:ring-inset')
+    // The row itself is 44px tall, not just its hit area.
+    expect(button.className).toContain('min-h-11')
+    // The ghost Button's chrome and the gap below the card are gone.
+    expect(button.className).not.toContain('border-[var(--v2-border-strong)]')
+    expect(button.className).not.toContain('mt-4')
+  })
 })

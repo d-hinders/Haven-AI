@@ -1030,8 +1030,10 @@ function ExportActionStatesExample() {
 }
 
 /**
- * The paging rule (#4196): the card ends with its last row and "Show N more"
- * sits centred below it. Drawn with three rows standing in for a page of 25.
+ * The paging rule (#4196, restyled 2026-10-27): the card ends with its footer
+ * row — a hairline, then a centred "Show N more" — while pages remain, and
+ * with its last row once every page is loaded. Drawn with three rows standing
+ * in for a page of 25.
  */
 function PagedListExample() {
   const total = 49
@@ -1049,21 +1051,21 @@ function PagedListExample() {
             <Row key={name} title={name} subtitle="Has a budget" />
           ))}
         </div>
+        <ListShowMore
+          loaded={loaded}
+          total={total}
+          pageSize={25}
+          hasMore={loaded < total}
+          loading={loading}
+          onShowMore={() => {
+            setLoading(true)
+            timer.current = setTimeout(() => {
+              setLoaded((n) => Math.min(total, n + 25))
+              setLoading(false)
+            }, 600)
+          }}
+        />
       </Card>
-      <ListShowMore
-        loaded={loaded}
-        total={total}
-        pageSize={25}
-        hasMore={loaded < total}
-        loading={loading}
-        onShowMore={() => {
-          setLoading(true)
-          timer.current = setTimeout(() => {
-            setLoaded((n) => Math.min(total, n + 25))
-            setLoading(false)
-          }, 600)
-        }}
-      />
       <p className="mt-3 text-xs text-[var(--v2-ink-3)]">
         Loaded {loaded} of {total}.{' '}
         {loaded >= total ? (
@@ -3441,7 +3443,7 @@ export default function DesignSystemPage() {
           <ListControlsState label="The export action (#4328) — the actions slot's Export CSV is one shared piece (ListExportAction + useListExport): the page supplies the request, the enabled gate, the empty copy and the filename prefix; the action owns busy, fetch, download and notices. Drawn here in its states — idle, preparing (aria-busy), disabled, the two empty notices and a refusal. Demo state; nothing is wired to a request. Export on any list page goes through it.">
             <ExportActionStatesExample />
           </ListControlsState>
-          <ListControlsState label="Paging — a paged list's card ends with its last row; “Show N more” (N = what the next page adds, at most the page size) is a ghost button centred below the card, “Loading…” while it fetches, and nothing once every page is loaded.">
+          <ListControlsState label="Paging — a paged list's card ends with its footer row while pages remain: a hairline, then a centred “Show N more” (N = what the next page adds, at most the page size) in ink-2, “Loading…” while it fetches. Once every page is loaded the footer is gone and the card ends with its last row.">
             <PagedListExample />
           </ListControlsState>
           <ListControlsState label="FacetMenu and PeriodPicker on their own — a pill facet (toggle buttons, aria-pressed) for a short category list, a single-select menu whose page default is not All (untinted at its default; tinted once changed), and the Analytics period: presets only, no All time, untinted at its 30-day default. Menu rows draw RadioMark (menuitemradio) or CheckboxMark (menuitemcheckbox).">

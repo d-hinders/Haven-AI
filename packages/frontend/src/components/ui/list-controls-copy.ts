@@ -48,8 +48,8 @@ export function countLabel(noun: ListNoun, count: ListCount, filtered: boolean):
 }
 
 /**
- * The paging button below a paged list (#4196): "Show 25 more", where N is
- * what the next page adds — the page size, or fewer on the last page. When
+ * The paging row inside a paged list's card (#4196): "Show 25 more", where N
+ * is what the next page adds — the page size, or fewer on the last page. When
  * the server still reports more but the totals say nothing is left (a poll
  * moved the total between reads), it says "Show more" rather than "Show 0
  * more".

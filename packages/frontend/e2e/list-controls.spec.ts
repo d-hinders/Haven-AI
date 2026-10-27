@@ -205,9 +205,14 @@ test.describe('list controls — layout', () => {
     await expect(
       page.getByTestId('ds-list-controls-filtered').getByTestId('list-summary').getByTestId('list-toolbar-count'),
     ).toHaveText('1 of 5 agents')
-    // #4196: no filter, no status row; the paging button sits below its card.
+    // #4196/#4495: no filter, no status row; the paging row is the card's
+    // footer — inside the card, not below it.
     await expect(page.getByTestId('ds-list-controls-default').getByTestId('list-toolbar-status')).toHaveCount(0)
-    await expect(page.getByTestId('ds-list-controls-paging').getByRole('button', { name: 'Show 24 more' })).toBeVisible()
+    const paging = page.getByTestId('ds-list-controls-paging')
+    const pagingCard = paging.locator('.shadow-card')
+    await expect(pagingCard).toHaveCount(1)
+    await expect(pagingCard.getByTestId('list-show-more')).toBeVisible()
+    await expect(pagingCard.getByRole('button', { name: 'Show 24 more' })).toBeVisible()
     if (EVIDENCE) {
       for (const state of ['default', 'filtered', 'no-match', 'loading', 'phone', 'server', 'paging', 'primitives']) {
         await evidence(page.getByTestId(`ds-list-controls-${state}`), `${state}-desktop`)

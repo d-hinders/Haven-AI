@@ -343,6 +343,10 @@ describe('the ten payment-scope refusals answer with their own typed code (#4468
     expect(reason).toMatch(/sign it and submit it/)
     expect(reason).toMatch(/closed or expired/)
     expect(reason).toMatch(/new task budget/)
+    // The criterion's closed/expired remedy carries the qualifier itself: the
+    // new budget is opened AFTER telling the user. The trailing "after telling
+    // the user" on the pay-without-it clause does not satisfy it.
+    expect(reason).toMatch(/new task budget[^;]*after telling the user/)
   })
 
   it('every reason that suggests paying without the id ends "after telling the user"', () => {
@@ -359,6 +363,21 @@ describe('the ten payment-scope refusals answer with their own typed code (#4468
     expect(out.code).toBe('API_ERROR')
     expect(out.error_code).toBeUndefined()
     expect(out.next_action).toBe(AgentPaymentNextAction.StopAndTellUser)
+  })
+
+  it('an Object.prototype key is not a payment-scope answer, so it takes the same generic stop', () => {
+    // The answer table is a plain object, so a bare cast lookup would resolve
+    // `constructor` / `toString` / `valueOf` / `hasOwnProperty` / `__proto__`
+    // off the prototype chain and emit a failure with `code: undefined`.
+    for (const errorCode of ['constructor', 'toString', 'valueOf', 'hasOwnProperty', '__proto__']) {
+      const out = normalizeError(
+        new HavenApiError('refused', 409, { error: 'refused', error_code: errorCode }),
+      ) as unknown as Record<string, unknown>
+      expect(out.code, errorCode).toBe('API_ERROR')
+      expect(typeof out.code, errorCode).toBe('string')
+      expect(out.error_code, errorCode).toBeUndefined()
+      expect(out.next_action, errorCode).toBe(AgentPaymentNextAction.StopAndTellUser)
+    }
   })
 })
 

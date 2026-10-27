@@ -247,7 +247,7 @@ const PAYMENT_SCOPE_REFUSAL_ANSWERS: Record<PaymentScopeRefusalCode, { code: str
   task_budget_not_open: {
     code: 'TASK_BUDGET_NOT_OPEN',
     reason:
-      'the task budget is not open — a pending one is your own unsigned row (sign it and submit it with haven_submit), while a closed or expired one needs a new task budget; haven_get_task_budget says which, and paying without it is allowed only after telling the user',
+      'the task budget is not open — a pending one is your own unsigned row (sign it and submit it with haven_submit), while a closed or expired one needs a new task budget, opened after telling the user; haven_get_task_budget says which, and paying without it is allowed only after telling the user',
   },
   task_budget_token_mismatch: {
     code: 'TASK_BUDGET_TOKEN_MISMATCH',
@@ -295,9 +295,17 @@ const PAYMENT_SCOPE_REFUSAL_ANSWERS: Record<PaymentScopeRefusalCode, { code: str
  * #4468: the answer for a payment-scope refusal code, or `undefined` for any
  * other `error_code`. The cast is the lookup's whole job: the table is keyed by
  * the shared union, and the body's `error_code` is an arbitrary string.
+ *
+ * The `Object.hasOwn` guard is load-bearing, not defensive noise: the cast
+ * inherits `Object.prototype`, so a body carrying `error_code: "constructor"`
+ * (or `toString`, `valueOf`, `hasOwnProperty`, `__proto__`) would otherwise
+ * return a truthy non-answer and the branch would emit a failure with
+ * `code: undefined` — breaking `ToolFailure.code: string` and the typed-code
+ * contract this whole change exists to uphold.
  */
 function paymentScopeRefusalAnswer(errorCode: string | undefined): { code: string; reason: string } | undefined {
   if (!errorCode) return undefined
+  if (!Object.hasOwn(PAYMENT_SCOPE_REFUSAL_ANSWERS, errorCode)) return undefined
   return (PAYMENT_SCOPE_REFUSAL_ANSWERS as Record<string, { code: string; reason: string } | undefined>)[errorCode]
 }
 

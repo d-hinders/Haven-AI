@@ -188,7 +188,7 @@ export const PAYMENT_SCOPE_REFUSAL_REASONS: Record<PaymentScopeRefusalCode, stri
   task_budget_not_found:
     'no task budget with this id belongs to this agent, so the payment was refused before anything moved; check the id with haven_get_task_budget, and pay without it only after telling the user',
   task_budget_not_open:
-    'the task budget is not open — a pending one is your own unsigned row (sign it and submit it with haven_submit), while a closed or expired one needs a new task budget; haven_get_task_budget says which, and paying without it is allowed only after telling the user',
+    'the task budget is not open — a pending one is your own unsigned row (sign it and submit it with haven_submit), while a closed or expired one needs a new task budget, opened after telling the user; haven_get_task_budget says which, and paying without it is allowed only after telling the user',
   task_budget_token_mismatch:
     "the payment's token differs from the token the task budget was opened for, so it cannot be charged to it; pay in the task budget's token, or pay without it only after telling the user",
   task_budget_recipient_mismatch:

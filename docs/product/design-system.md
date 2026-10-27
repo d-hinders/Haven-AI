@@ -926,6 +926,20 @@ link are one shape everywhere.
   Tax declaration row and the agent Passport row's issued-state `dl` (#4477),
   and `ConnectionsCard.tsx`, which renders its inline feed settings through the
   slot instead of a hand-written sibling wrapper (#4478).
+- **The agent Settings tab is a settings page (#4477).** The agent detail
+  page's Settings tab (`app/(authenticated)/agents/[agentId]/AgentSettingsTab.tsx`)
+  renders its sections with `SettingsSection` and its rows with `SettingsRow`,
+  exactly like the Settings page — it is not a detail-page section that
+  hand-rolls its own bands and rows. It was rebuilt onto the shared shape
+  because the rule already put settings pages under it and the tab had drifted:
+  an uppercase `v2-text-meta` band over a `Card` of hand-padded
+  `Card.Section divided` rows, each repeating its own `ROW_CLASS` and `h3`.
+  Neither `AgentSettingsTab.tsx` nor `AgentPassportCard.tsx` defines
+  `ROW_CLASS` or `ROW_TITLE_CLASS`, and the tab has no uppercase section band.
+  A new row on that tab is a `SettingsRow`; a new section is a
+  `SettingsSection`. The one exception is the linked pointer to the account's
+  Who can approve section, which is the existing `Row` with `href` so the whole
+  row is one link target and one focus stop.
 
 ### Detail list (`DetailList`, #4475)
 

@@ -4571,10 +4571,13 @@ export const SCENARIOS = {
       await page.goto(`${BASE_URL}/agents/agent-research?tab=settings`, { waitUntil: 'networkidle', timeout: 60_000 })
       await dismissMobileSidebar(page, vp)
 
-      // Both halves of the card, not just any rendered text: the heading
-      // names the card and the checkbox names the control — a capture that
+      // Both halves of the row, not just any rendered text: the row testid
+      // names the row and the checkbox names the control — a capture that
       // waited on one string could "prove" visibility with the wrong subtree.
-      await page.getByRole('heading', { name: 'Tax declaration', exact: true }).waitFor({ timeout: 20_000 })
+      // #4477: the row label is a `<p>` inside `SettingsRow`, not an `h3`, so
+      // the wait is on the row's testid (the layout contract) rather than a
+      // heading role.
+      await page.getByTestId('tax-declaration-row').waitFor({ timeout: 20_000 })
       await page.getByRole('checkbox', { name: 'Allow this agent to send a tax declaration' }).waitFor({ timeout: 20_000 })
 
       await shoot(page.locator('main').first(), 'visible')
@@ -4620,7 +4623,7 @@ export const SCENARIOS = {
       await page.goto(`${BASE_URL}/agents/agent-research?tab=settings`, { waitUntil: 'networkidle', timeout: 60_000 })
       await dismissMobileSidebar(page, vp)
 
-      await page.getByRole('heading', { name: 'Tax declaration', exact: true }).waitFor({ timeout: 20_000 })
+      await page.getByTestId('tax-declaration-row').waitFor({ timeout: 20_000 })
       const checkbox = page.getByRole('checkbox', { name: 'Allow this agent to send a tax declaration' })
       await checkbox.waitFor({ timeout: 20_000 })
       // The capture must prove the DISABLED state, not merely that the card
@@ -5061,7 +5064,7 @@ export const SCENARIOS = {
   },
   'passport-reanchoring': {
     description:
-      'Agent Passport row in the Identity and settings card during the re-key window (#1699) — the anchor names the retired key while standing stays Active',
+      'Agent Passport row in the Settings tab\'s "This agent" section during the re-key window (#1699) — the anchor names the retired key while standing stays Active',
     // No URL reaches this: `re_anchoring` is a transient backend state between
     // the retire and the re-issue, so nothing a route-based capture can wait
     // for produces it. Without a fixture the state has ZERO rendered evidence,
@@ -5097,44 +5100,39 @@ export const SCENARIOS = {
       return undefined
     },
     async run({ page, vp, shoot }) {
-      await page.goto(`${BASE_URL}/agents/${FIXTURE_AGENTS[0].id}`, {
+      // #4477: the passport is a row in the Settings tab's "This agent"
+      // section, and the tab only renders at `?tab=settings`. The old
+      // "Identity and settings" heading this scenario waited on no longer
+      // exists in `src`, so the wait is on the section's testid.
+      await page.goto(`${BASE_URL}/agents/${FIXTURE_AGENTS[0].id}?tab=settings`, {
         waitUntil: 'networkidle',
         timeout: 30_000,
       })
       await dismissMobileSidebar(page, vp)
 
-      // #3697: the passport is a ROW inside the "Identity and settings" card,
-      // not a standalone card — capture the card that holds it.
-      const heading = page.getByRole('heading', { name: 'Identity and settings' })
-      await heading.waitFor({ timeout: 15_000 })
-      // The heading sits ABOVE the card (#3692's section rule: heading, then
-      // card), so the Card root cannot be located by containing it — that
-      // locator resolves to nothing and every wait below silently times out.
-      // The card is the one that CONTAINS the passport row.
-      const card = page.locator('div.rounded-\\[10px\\]', {
-        has: page.getByTestId('agent-passport-row'),
-      })
+      const section = page.getByTestId('agent-settings-card-section')
+      await section.waitFor({ timeout: 15_000 })
       // Wait for the passport ROW's badge and note, not just the section
-      // heading. The row's own heading renders in the loading skeleton and the
-      // load-error branch too, so waiting on it alone would happily accept
-      // either as the evidence — the same trap the account-backup-recovery
-      // scenario documents above.
-      await card.getByText('Agent Passport').waitFor({ timeout: 15_000 })
-      await card.getByText('Updating on-chain').waitFor({ timeout: 15_000 })
-      await card.getByText(/signing key was replaced/).waitFor({ timeout: 15_000 })
+      // heading. The row renders in the loading skeleton and the load-error
+      // branch too, so waiting on the label alone would happily accept either
+      // as the evidence — the same trap the account-backup-recovery scenario
+      // documents above.
+      const row = page.getByTestId('agent-passport-row')
+      await row.getByText('Agent Passport').waitFor({ timeout: 15_000 })
+      await row.getByText('Updating on-chain').waitFor({ timeout: 15_000 })
+      await row.getByText(/signing key was replaced/).waitFor({ timeout: 15_000 })
 
       // Shoot the SECTION (heading + card), not the Card root: the reviewer
       // judges the title AND the card, and the title sits above the card by
       // design (#3692) — a card-only capture would crop it off.
-      const section = page.getByTestId('identity-settings-section')
       await section.scrollIntoViewIfNeeded()
       await shoot(section, 'card')
     },
   },
   'identity-settings-not-issued': {
     description:
-      'The Identity and settings card with the passport NOT issued — the opt-in row and the Who can approve pointer, no tax row (flag off)',
-    // No URL reaches a clean not-issued capture of the card: agent-research
+      'The Settings tab with the passport NOT issued — the opt-in row and the Who can approve pointer, no tax row (flag off)',
+    // No URL reaches a clean not-issued capture of the tab: agent-research
     // carries an anchored passport, so the only fixture agent without one is
     // the revoked one — which is exactly the state worth photographing, since
     // a revoked agent shows the row WITHOUT the issue action.
@@ -5145,32 +5143,32 @@ export const SCENARIOS = {
       return undefined
     },
     async run({ page, vp, shoot }) {
-      await page.goto(`${BASE_URL}/agents/agent-retired`, {
+      // #4477: `?tab=settings` — the tab is not the default, and the old
+      // "Identity and settings" heading no longer exists.
+      await page.goto(`${BASE_URL}/agents/agent-retired?tab=settings`, {
         waitUntil: 'networkidle',
         timeout: 30_000,
       })
       await dismissMobileSidebar(page, vp)
 
-      const heading = page.getByRole('heading', { name: 'Identity and settings' })
-      await heading.waitFor({ timeout: 15_000 })
-      // Same #3692 geometry: the heading is above the card, so the Card root
-      // is the one that CONTAINS the passport row.
-      const card = page.locator('div.rounded-\\[10px\\]', {
-        has: page.getByTestId('agent-passport-row'),
-      })
-      // Both rows: the passport row reads its opt-in state, the backup row
-      // carries the account pointer. The tax row must NOT render (the shared
-      // fixture answers /user/company-details with a 404 — flag off).
-      await card.getByText('Not issued').waitFor({ timeout: 15_000 })
-      await card.getByText(/This agent has no passport/).waitFor({ timeout: 15_000 })
-      await card.getByText(/Managed on /).waitFor({ timeout: 15_000 })
-      await card.getByText('Tax declaration').waitFor({ state: 'detached', timeout: 5_000 }).catch(() => {
+      const section = page.getByTestId('agent-settings-section')
+      await section.waitFor({ timeout: 15_000 })
+      // Both rows: the passport row reads its opt-in state, the account
+      // section carries the Who can approve pointer.
+      const passportRow = page.getByTestId('agent-passport-row')
+      await passportRow.getByText('Not issued').waitFor({ timeout: 15_000 })
+      await passportRow.getByText(/This agent has no passport/).waitFor({ timeout: 15_000 })
+      await page.getByTestId('agent-account-section').getByText(/Managed on /).waitFor({ timeout: 15_000 })
+      // The tax row must NOT render (the shared fixture answers
+      // /user/company-details with a 404 — flag off). `count()` is the real
+      // check: the old `waitFor({ state: 'detached' })` resolved immediately
+      // on an element that never existed, so it could not fail.
+      if ((await page.getByTestId('tax-declaration-row').count()) !== 0) {
         throw new Error('tax row rendered with the flag off — the visibility rule broke')
-      })
+      }
 
       // Shoot the SECTION (heading + card) for the same reason as above: the
       // title is part of the evidence.
-      const section = page.getByTestId('identity-settings-section')
       await section.scrollIntoViewIfNeeded()
       await shoot(section, 'card')
     },

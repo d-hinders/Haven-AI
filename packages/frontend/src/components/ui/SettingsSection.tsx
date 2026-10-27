@@ -32,6 +32,7 @@ export function SettingsSection({
   action,
   children,
   className = '',
+  ...rest
 }: {
   title: string
   description?: string
@@ -45,9 +46,17 @@ export function SettingsSection({
   action?: ReactNode
   children: ReactNode
   className?: string
+  /**
+   * Passthrough for the section root (#4477). The agent Settings tab's two
+   * sections are layout contracts its page tests select on
+   * (`agent-settings-card-section`, `agent-account-section`), and the testid
+   * has to sit on the `<section>` itself — a wrapper div would move it off
+   * the element the rule is about. Nothing else about the shape changes.
+   */
+  'data-testid'?: string
 }) {
   return (
-    <section className={className}>
+    <section className={className} {...rest}>
       <SectionHeading title={title} description={description} note={note} action={action} />
       <Card hover={false}>
         <div className="divide-y divide-[var(--v2-border)]">{children}</div>
@@ -97,6 +106,14 @@ export function SettingsRow({
   className?: string
   'data-testid'?: string
   'data-status'?: string
+  /**
+   * Passthroughs for the row root (#4477). `AgentPassportCard`'s loading state
+   * is a `role="status"` row with an `aria-label`, and the row root is the
+   * element that has to carry them — a wrapper would put the live region
+   * around the row instead of on it.
+   */
+  role?: string
+  'aria-label'?: string
 }) {
   const line = (
     <>

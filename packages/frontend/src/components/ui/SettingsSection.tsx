@@ -2,12 +2,13 @@ import type { ReactNode } from 'react'
 import { Card } from '@/components/ui/Card'
 
 /**
- * One titled section on the Settings page — a `v2-text-h3` heading and its
- * description sit ABOVE the card, and the card holds the hairline-divided
- * row list (settings pages follow the detail-page section rule, owner
- * decision 2026-10-23 on #4357). The card can load, swap or be replaced
- * without moving its heading, and a skimming reader gets every section name
- * from the heading scan alone.
+ * One titled section on the Settings page — a `v2-text-h3` heading sits ABOVE
+ * the card, and the card holds the hairline-divided row list (settings pages
+ * follow the detail-page section rule, owner decision 2026-10-23 on #4357).
+ * The description is optional (#4476): it appears only when it tells the
+ * reader something the heading and the card don't. The card can load, swap or
+ * be replaced without moving its heading, and a skimming reader gets every
+ * section name from the heading scan alone.
  *
  * Moved here from `app/(authenticated)/settings/SettingsSection.tsx` (#4357)
  * so the design-system coupling gate watches it; screen recipe:
@@ -32,9 +33,16 @@ export function SettingsSection({
   children: ReactNode
   className?: string
 }) {
+  // #4476: the description is optional under the detail-page section rule. The
+  // heading-to-card gap used to ride on the description/note `mb-3`, so a
+  // section with neither rendered its heading flush against the card. The
+  // heading carries the gap when there is no prose; when there is, the
+  // paragraph's own `mb-3` still supplies it (and the heading keeps its 2px
+  // `mt-0.5` lead-in), so every existing caller's layout is unchanged.
+  const hasProse = Boolean(description || note)
   return (
     <section className={className}>
-      <h2 className="v2-text-h3 text-[var(--v2-ink)]">{title}</h2>
+      <h2 className={`v2-text-h3 text-[var(--v2-ink)]${hasProse ? '' : ' mb-3'}`}>{title}</h2>
       {description ? (
         <p className="mt-0.5 mb-3 text-sm text-[var(--v2-ink-2)]">{description}</p>
       ) : null}

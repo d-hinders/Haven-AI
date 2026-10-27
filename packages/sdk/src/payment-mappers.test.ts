@@ -325,6 +325,62 @@ describe('list scope survives the receipt mapper (#3132)', () => {
   })
 })
 
+describe('#4469: the receipt mapper reads the six fields the receipts wire carries', () => {
+  // The six keys `mapEvidence` emits and `LIST_EVIDENCE_RECEIPTS_SQL` supplies:
+  // settlement_scheme, budget_delegation_hash, delivery_quality, delivery_note,
+  // delivery_reported_at, delivery_reference. Before #4469 the mapper read none
+  // of them, so `haven_list_receipts` lost all six on the way to the agent.
+  const SIX = [
+    'settlementScheme',
+    'budgetDelegationHash',
+    'deliveryQuality',
+    'deliveryNote',
+    'deliveryReportedAt',
+    'deliveryReference',
+  ] as const
+
+  it('carries each value when the backend sends it', () => {
+    const receipt = mapPaymentReceipt(rawReceipt({
+      settlement_scheme: 'eip3009',
+      budget_delegation_hash: '0xbudget',
+      delivery_quality: 'unusable',
+      delivery_note: 'the paid call returned an empty body',
+      delivery_reported_at: '2026-10-27T09:00:00.000Z',
+      delivery_reference: 'Bik Bok 5 SEK, order 6ac7',
+    }))
+    expect(receipt.settlementScheme).toBe('eip3009')
+    expect(receipt.budgetDelegationHash).toBe('0xbudget')
+    expect(receipt.deliveryQuality).toBe('unusable')
+    expect(receipt.deliveryNote).toBe('the paid call returned an empty body')
+    expect(receipt.deliveryReportedAt).toBe('2026-10-27T09:00:00.000Z')
+    expect(receipt.deliveryReference).toBe('Bik Bok 5 SEK, order 6ac7')
+    // Control: a field the mapper already read still survives, so a mapper
+    // returning `{}` cannot pass this test.
+    expect(receipt.amount).toBe('0.01')
+  })
+
+  it('leaves all six absent on an older backend that does not send them — absent stays absent', () => {
+    const receipt = mapPaymentReceipt(rawReceipt())
+    for (const key of SIX) {
+      expect(receipt).not.toHaveProperty(key)
+    }
+  })
+
+  it('carries a stated null as null — "not reported" is a value the backend states', () => {
+    const receipt = mapPaymentReceipt(rawReceipt({
+      settlement_scheme: null,
+      budget_delegation_hash: null,
+      delivery_quality: null,
+      delivery_note: null,
+      delivery_reported_at: null,
+      delivery_reference: null,
+    }))
+    for (const key of SIX) {
+      expect(receipt).toHaveProperty(key, null)
+    }
+  })
+})
+
 describe('receipt vocabulary converges on the transaction names (#3134)', () => {
   // Each pair is asserted from the RAW column, not from another mapped key: a
   // test that compared two mapped keys would pass if the mapper pointed both at

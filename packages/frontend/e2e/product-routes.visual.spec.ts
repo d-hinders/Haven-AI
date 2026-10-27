@@ -459,7 +459,13 @@ const ROUTES: ProductRoute[] = [
   {
     path: '/agents/agent-research',
     slug: 'agent-detail-research',
-    minChars: 700,
+    // #4476: the Spending section's description was removed (the section rule
+    // makes descriptions optional), so the floor drops from 700 to the
+    // re-measured content — 694 characters at desktop, 673 at 390. Headroom
+    // stays ~45 characters, which is still far under a half-rendered page
+    // (the failure this floor exists to catch renders a few hundred).
+    minChars: 650,
+    minCharsMobile: 630,
     // #4260: desktop too — the Spending hero's two halves sit side by side
     // only at `lg`, the composition the mobile stack never shows.
     viewports: ['mobile', 'desktop'],

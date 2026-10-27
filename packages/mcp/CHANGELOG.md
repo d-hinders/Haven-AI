@@ -15,6 +15,18 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+### Added
+
+- **The local `haven_list_receipts` rows carry the delivery verdict, the
+  settlement scheme and the budget hash (#4469).** The embedded SDK's receipt
+  mapper now reads six fields the receipts wire already carried:
+  `settlementScheme`, `budgetDelegationHash`, `deliveryQuality`,
+  `deliveryNote`, `deliveryReportedAt` and `deliveryReference`. Each is set
+  only when the backend sends the key, so a row from an older backend maps
+  without it. This ships with the next `@haven_ai/mcp` release, which pins
+  `@haven_ai/sdk` exactly; the hosted server gains the same fields through the
+  SDK. Additive; no update needed.
+
 ## 0.11.0-alpha.0 — 2026-10-23
 
 ### Changed

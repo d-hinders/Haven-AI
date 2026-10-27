@@ -216,6 +216,9 @@ test.describe('transactions list controls — 375px', () => {
       await expectTapTarget(row, `Sheet row "${text}"`)
       await expectInsideViewport(page, row, `Sheet row "${text}"`)
     }
+    // #4453: the revoked agent now sits behind the Initiator facet's inactive
+    // group, so its row is only in the DOM once the disclosure is opened.
+    await sheet.getByRole('button', { name: 'Show 1 inactive' }).click()
     // The meta slot (#4150): the revoked agent's status shows beside its
     // long name — the row wraps, the status never truncates away.
     const revokedRow = sheet.locator('label').filter({ hasText: 'Lovable Dev preview deployment helper' })
@@ -228,7 +231,9 @@ test.describe('transactions list controls — 375px', () => {
     // Live, as on desktop: the tap applies and reaches the URL at once.
     await sheet.getByRole('group', { name: 'Direction' }).getByRole('radio', { name: 'Outgoing' }).check()
     await expect(page).toHaveURL(/direction=out/)
-    await sheet.getByRole('button', { name: /^Show / }).click()
+    // The sheet's submit button ("Show 2 transactions"), not the inactive
+    // group's disclosure row — both start with "Show" (#4453).
+    await sheet.getByRole('button', { name: /^Show \d+ (agents?|transactions?)$/ }).click()
     await expect(sheet).toBeHidden()
     await expect(toolbar.getByRole('button', { name: 'Remove Direction: Outgoing' })).toBeVisible()
     await expect(toolbar.getByRole('button', { name: 'Filters (1)' })).toBeFocused()
@@ -325,6 +330,8 @@ test.describe('transactions list controls — desktop menus', () => {
     const toolbar = page.getByTestId('list-toolbar')
     const initiator = toolbar.getByRole('button', { name: /^Initiator:/ })
     await initiator.click()
+    // #4453: the revoked agent sits behind the inactive group's disclosure row.
+    await page.getByRole('menuitem', { name: 'Show 1 inactive' }).click()
     await page.getByRole('menuitemradio', { name: /Lovable Dev preview deployment helper/ }).click()
     await expect(initiator).toBeFocused()
     // The trigger with the long selected label either fits the facet row or

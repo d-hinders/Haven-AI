@@ -439,6 +439,20 @@ be reported. A checkout of `bffb8dc97^` would rot as sibling modules move, and
 it would edit `packages/mcp-server/src`, which this file's first rule allows
 only in an isolated tree.
 
+**Self-test and empty-run refusal.** `scripts/ci/refusal-census.test.mjs` runs
+in the always-run *Repo CI config checks* job (`node --test
+scripts/ci/*.test.mjs`, `.github/workflows/ci.yml:91`), so it needs no `npm ci`
+and no build. On a fixture recording and fixture `normalizeError` results it
+proves the join can say yes and no: a code the fixture mapper answers is not
+reported as unmapped, a seeded unmapped code is reported, and a mapper that
+answers nothing fails the control. It covers the join only — not the real
+`normalizeError`, which is the block command's job against the built package.
+The block command refuses an empty run before it reads anything: `assertPlausible`
+rejects a recording below the 200-row floor (`MIN_ROWS`) or one that carries no
+`/__refusal-census-control` row with `refusal_census_control` — the row the
+recorder writes once at truncate time, so a file left over from an earlier run
+is refused rather than measured.
+
 **False-positive classes.**
 - *A refusal answered before `normalizeError` by a tool-level handler* — the
   census cannot observe the answer, so a row it reports may already be handled:
@@ -503,14 +517,32 @@ node scripts/ci/refusal-census.mjs block9 --recording "$SCRATCH/recording.ndjson
 **Sample: backend route tests only** — the 2xx bodies those tests produced. A
 route with no recorded 2xx body is reported as partial, never as clean.
 
-**Route set and mapper set.** The mapper set is every SDK mapper file, not only
-`payment-mappers.ts`: `account-reads.ts` (`mapTaskBudget`, `mapSubBudget`,
-`mapSupersession`), `client.ts` (`mapCatalogEntry`) and `payment-state.ts` are
-in it. The instrument's `MAPPERS` table names, per mapper, the route whose body
-it reads and the backend file that builds that body. The receipt mapper is read
-through `scripts/ci/vocabulary-divergence.mjs`'s exported `scanReceiptSurface`
+**Route set and mapper set.** The route set is the six agent read routes the
+SDK maps, one per `MAPPERS` entry: `GET /machine-payments/receipts`
+(`mapPaymentReceipt`), `GET /machine-payments/:id/status`
+(`mapPaymentStatusResult`), `GET /payments` (`mapPaymentResult`),
+`GET /agents/:id/task-budgets` (`mapTaskBudget`), `GET /agents/:id/sub-budgets`
+(`mapSubBudget`) and `GET /catalog` (`mapCatalogEntry`). The instrument's
+`MAPPERS` table names, per mapper, the route whose body it reads and the
+backend file that builds that body. Two mappers in the SDK's mapper files are
+**partial, not measured**, so the table is the measured subset:
+`mapSupersession` (`account-reads.ts:138`) maps the nested `superseded_by`
+object of `GET /machine-payments/allowances` (`account-reads.ts:471`) and
+destructures `{ agent_id, superseded_at }` rather than reading `raw.<key>` on
+the route body, so the top-level-key join cannot see it — `mapperReadKeys`
+would return an empty set and report every emitted key on that route as unread;
+`paymentStateFromRaw` (`payment-state.ts:136`) maps the bodies of the write
+routes the SDK calls (`POST /payments` 201, `POST /x402`,
+`POST /payments/:id/sign`), not a read route, so this block's read-route join
+does not measure it. The receipt mapper is read through
+`scripts/ci/vocabulary-divergence.mjs`'s exported `scanReceiptSurface`
 (the same 31 receipt keys), with `readBlock` and `stripCommentsAndStrings` for
 the others — not a second key extractor.
+
+**Self-test and empty-run refusal.** Block 8's paragraph covers both, and the
+same file covers this join: `roundTrip` runs on the fixture recording and both
+control halves must pass, and `assertPlausible` refuses the same short or
+control-less recording before either block reads it.
 
 **Clean:** every emitted key is read by the route's mapper or named in
 `READ_OUTSIDE_MAPPER`; every read key is emitted in the recording, or its

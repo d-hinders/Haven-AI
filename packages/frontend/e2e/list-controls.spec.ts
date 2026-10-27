@@ -135,6 +135,10 @@ test.describe('list controls — layout', () => {
     const sheet = page.getByRole('dialog', { name: 'Filters' })
     await expect(sheet).toBeVisible()
 
+    // #4453: the revoked agent now sits behind the Initiator facet's inactive
+    // group, so its row is only in the DOM once the disclosure is opened.
+    await sheet.getByRole('button', { name: 'Show 1 inactive' }).click()
+
     // The long Initiator row: the label wraps (line-clamped), the meta slot
     // shows the status in full — nothing reveals by hover.
     const row = sheet.locator('label').filter({ hasText: 'Lovable Dev preview deployment helper' })
@@ -148,7 +152,9 @@ test.describe('list controls — layout', () => {
 
     // Selecting it puts the full label + status on the status-row chip.
     await row.getByRole('radio').check()
-    await sheet.getByRole('button', { name: /^Show / }).click()
+    // The sheet's submit button ("Show 4 agents"), not the inactive group's
+    // disclosure row — both start with "Show" (#4453).
+    await sheet.getByRole('button', { name: /^Show \d+ (agents?|transactions?)$/ }).click()
     await expect(sheet).toBeHidden()
     const chipLabel = phone.getByText('Initiator: Lovable Dev preview deployment helper (Revoked)')
     await expect(chipLabel).toBeVisible()

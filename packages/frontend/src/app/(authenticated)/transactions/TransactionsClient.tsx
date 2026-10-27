@@ -5,7 +5,7 @@ import { useSearchParams } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext'
 import { usePreferences } from '@/hooks/usePreferences'
 import { useContacts } from '@/hooks/useContacts'
-import { agentStatusPresentation } from '@/lib/payment-status'
+import { agentFacetOptions } from '@/lib/agent-facet'
 import { useActivityMoneyTotals } from '@/hooks/useActivityMoneyTotals'
 import { useTransactionFilters } from '@/hooks/useTransactionFilters'
 import {
@@ -190,13 +190,11 @@ export default function TransactionsClient() {
   const chainIds = Array.from(new Set(userAccounts.map((s) => s.chain_id))).sort((a, b) => a - b)
   const accountChainCount = new Set(accounts.map((account) => account.chainId)).size
 
-  // Agents in the order `FilterBar` listed them: active, paused, the rest;
-  // a status other than Active is named, since a revoked agent's history
-  // still lives here.
-  const agentRank = (status: string) => (status === 'active' ? 0 : status === 'paused' ? 1 : 2)
-  const sortedAgents = [...agents].sort(
-    (a, b) => agentRank(a.status) - agentRank(b.status) || a.name.localeCompare(b.name),
-  )
+  // Agents in the order `FilterBar` listed them: active, paused, needs setup,
+  // the rest; a status other than Active rides in the option's `meta` slot
+  // (#4150), since a revoked agent's history still lives here. The order, the
+  // status suffix and the inactive group are one shared decision (#4453).
+  const agentOptions = agentFacetOptions(agents, [{ value: 'user', label: 'User (manual)' }])
   const facets: ListFacet[] = [
     {
       id: 'accountId',
@@ -211,17 +209,7 @@ export default function TransactionsClient() {
     {
       id: 'agentId',
       label: 'Initiator',
-      options: [
-        { value: 'user', label: 'User (manual)' },
-        ...sortedAgents.map((agent) => ({
-          value: agent.id,
-          label: agent.name,
-          // The status is the option's `meta` slot (#4150), not part of the
-          // label: the menu row, phone-sheet row and chip always show it,
-          // even where the name alone loses its tail to truncation.
-          ...(agent.status === 'active' ? {} : { meta: agentStatusPresentation(agent.status).label }),
-        })),
-      ],
+      options: agentOptions,
     },
     {
       id: 'tokenKey',

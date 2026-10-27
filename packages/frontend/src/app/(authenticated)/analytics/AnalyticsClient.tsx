@@ -11,6 +11,7 @@ import {
   paymentsAgentsCaption,
   spentComparisonCaption,
 } from '@/lib/analytics-format'
+import { agentFacetOptions } from '@/lib/agent-facet'
 import type { AnalyticsOverviewResponse, AnalyticsRangeValue } from '@/types/analytics'
 import {
   isAnalyticsRangeValue,
@@ -304,14 +305,11 @@ function AnalyticsSkeleton() {
 
 type AnalyticsData = NonNullable<ReturnType<typeof useAnalyticsOverview>>['data']
 
-/** The agents the facet offers, in the list's own order: active, paused, the
- *  rest, then name — the same rank `/transactions` uses for its Initiator
- *  facet, so the two menus order one user's agents identically. Options come
- *  from the agents LIST (`useAgents`), not the overview's filtered response:
- *  `FacetMenu` hides itself at one option or fewer, so a list drawn from the
- *  FILTERED response would make the facet vanish the moment an agent is
- *  picked. */
-const agentRank = (status: string) => (status === 'active' ? 0 : status === 'paused' ? 1 : 2)
+/** The agents the facet offers come from the agents LIST (`useAgents`), not
+ *  the overview's filtered response: `FacetMenu` hides itself at one option or
+ *  fewer, so a list drawn from the FILTERED response would make the facet
+ *  vanish the moment an agent is picked. The order, the status `meta` and the
+ *  inactive group are the shared builder's (#4453). */
 
 export default function AnalyticsClient() {
   const { currency } = usePreferences()
@@ -479,17 +477,15 @@ export default function AnalyticsClient() {
     )
   }
 
-  // The facet's options: every agent the list names, names only —
-  // `ListFacetOption` has no monogram slot, and a name is the whole answer.
-  const sortedAgents = [...allAgents].sort(
-    (a, b) => agentRank(a.status) - agentRank(b.status) || a.name.localeCompare(b.name),
-  )
+  // The facet's options: every agent the list names, names only — the status
+  // rides in `meta` and the unusable ones collapse into the inactive group,
+  // both from the shared builder (#4453).
   const agentFacet: ListFacet = {
     id: 'agentId',
     label: 'Agent',
     selection: 'single',
     allLabel: 'All agents',
-    options: sortedAgents.map((agent) => ({ value: agent.id, label: agent.name })),
+    options: agentFacetOptions(allAgents),
   }
 
   return (

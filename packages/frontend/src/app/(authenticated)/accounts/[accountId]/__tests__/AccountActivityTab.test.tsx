@@ -626,6 +626,37 @@ describe('AccountActivityTab — the facet set (#4130)', () => {
     expect(screen.queryByRole('button', { name: /^Network:/ })).not.toBeInTheDocument()
   })
 
+  it('names a revoked agent in `meta`, never in the label, and the chip reads the status through it (#4453)', () => {
+    filtersMock.mockImplementation(() => ({
+      ...DEFAULT_FILTERS,
+      agents: [
+        { id: 'agent-active', name: 'Research agent', status: 'active' },
+        { id: 'agent-revoked', name: 'Data-feed agent', status: 'revoked' },
+      ] as never,
+    }))
+    renderTab()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Initiator: All' }))
+    // The revoked agent is not gone — it sits behind the inactive group's
+    // disclosure row, which names the count.
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Show 1 inactive' }))
+
+    const row = screen.getByRole('menuitemradio', { name: /Data-feed agent/ })
+    // The label is the name alone. "Data-feed agent (Revoked)" was this page's
+    // own invention, and it lost the status to truncation.
+    expect(row).toHaveTextContent('Data-feed agent')
+    expect(row).not.toHaveTextContent('(Revoked)')
+    // The status is the option's `meta` slot, which never truncates.
+    expect(row).toHaveTextContent('Revoked')
+
+    fireEvent.click(row)
+    // The chip spells the applied filter out in full, status included — the
+    // chip is where a filter is named, so it passes `includeMeta`.
+    expect(
+      screen.getByRole('button', { name: 'Remove Initiator: Data-feed agent (Revoked)' }),
+    ).toBeInTheDocument()
+  })
+
   it('#4166: the row leads with who was paid and carries the agent as the subtitle — no "Agent payment by", no movement line', () => {
     feedMock.mockImplementation(() => ({
       ...DEFAULT_FEED,

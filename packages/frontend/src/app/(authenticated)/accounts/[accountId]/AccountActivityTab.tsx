@@ -58,7 +58,7 @@ import { useActivityMoneyTotals } from '@/hooks/useActivityMoneyTotals'
 import { useUnfilteredTransactionTotal } from '@/hooks/useUnfilteredTransactionTotal'
 import { useTransactionFilters } from '@/hooks/useTransactionFilters'
 import { browserTimeZone, transactionFilterParams, useTransactionsFeed } from '@/hooks/useTransactionsFeed'
-import { agentStatusPresentation } from '@/lib/payment-status'
+import { agentFacetOptions } from '@/lib/agent-facet'
 import {
   transactionChainName,
   transactionTokenLabel,
@@ -282,12 +282,10 @@ export default function AccountActivityTab({
   })
 
   // Agents in the order the bar has listed them since #4095: active, paused,
-  // the rest; a status other than Active is named, since a revoked agent's
-  // history still lives here.
-  const agentRank = (status: string) => (status === 'active' ? 0 : status === 'paused' ? 1 : 2)
-  const sortedAgents = [...agents].sort(
-    (a, b) => agentRank(a.status) - agentRank(b.status) || a.name.localeCompare(b.name),
-  )
+  // needs setup, the rest. The status rides in the option's `meta` slot, never
+  // in the label — "Name (Revoked)" was this page's own invention and it lost
+  // the status to truncation (#4453).
+  const agentOptions = agentFacetOptions(agents, [{ value: 'user', label: 'User (manual)' }])
 
   // The Transactions page's facets (#4111) WITHOUT Account: the page fixes
   // the account, so there is no Account facet to hide — a filter that could
@@ -297,16 +295,7 @@ export default function AccountActivityTab({
     {
       id: 'agentId',
       label: 'Initiator',
-      options: [
-        { value: 'user', label: 'User (manual)' },
-        ...sortedAgents.map((agent) => ({
-          value: agent.id,
-          label:
-            agent.status === 'active'
-              ? agent.name
-              : `${agent.name} (${agentStatusPresentation(agent.status).label})`,
-        })),
-      ],
+      options: agentOptions,
     },
     {
       id: 'tokenKey',

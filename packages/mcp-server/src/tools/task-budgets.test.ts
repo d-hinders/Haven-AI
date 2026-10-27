@@ -11,7 +11,7 @@
  * through a real `HavenClient` over a mocked HTTP transport.
  */
 import { describe, expect, it, vi } from 'vitest'
-import { TASK_SIGN_CONTEXT_VERSION } from '@haven_ai/sdk'
+import { HavenApiError, TASK_SIGN_CONTEXT_VERSION } from '@haven_ai/sdk'
 import type { HavenClient } from '@haven_ai/sdk'
 import { createToolHandlers, toolSchemas } from '../tools.js'
 import { hostedConnectorUpgradeCommand } from '../connector-channel.js'
@@ -249,5 +249,66 @@ describe('haven_submit — task_budget_id branch (#3329, owned by state-direct-r
     expect(calls.submitTaskBudget).toEqual(['tb_1', SIG])
     if (!result.success) throw new Error('expected success')
     expect(result.data).toMatchObject({ task_budget: { id: 'tb_1' }, status: 'open' })
+  })
+})
+
+/**
+ * #4468: the two close codes on `haven_submit`'s TASK-budget path. The
+ * sub-budget path has mapped them since #3506; the task-budget path had no
+ * catch at all, so a close whose outcome is unconfirmed read as the generic
+ * 5xx "retry once" and a stale close op read as a generic 4xx stop. The
+ * backend names the remedy on both — call close again — and this handler is
+ * the one that knows the id, so the step names `haven_close_task_budget` with
+ * `task_budget_id`.
+ */
+describe('haven_submit — task_budget_id close refusals (#4468)', () => {
+  const SIG = `0x${'ab'.repeat(65)}`
+  const backendRefusal = (errorCode: string, status: number) =>
+    new HavenApiError('backend message', status, { error: 'backend message', error_code: errorCode })
+
+  it('close_needs_reprepare names haven_close_task_budget with the id', async () => {
+    const { haven } = stubHaven({
+      submitTaskBudget: vi.fn(async () => {
+        throw backendRefusal('close_needs_reprepare', 409)
+      }),
+    })
+    const result = await createToolHandlers(haven).haven_submit({ task_budget_id: 'tb_1', signature: SIG })
+    expect(result.success).toBe(false)
+    if (result.success) throw new Error('expected failure')
+    expect(result.code).toBe('CLOSE_NEEDS_REPREPARE')
+    expect(result.statusCode).toBe(409)
+    expect(result.next_action).toBe('sign_and_submit_payment')
+    expect(result.next_tool_name).toBe('haven_close_task_budget')
+    expect(result.next_arguments).toEqual({ task_budget_id: 'tb_1' })
+  })
+
+  it('close_outcome_unconfirmed names haven_close_task_budget with the id and says to wait', async () => {
+    const { haven } = stubHaven({
+      submitTaskBudget: vi.fn(async () => {
+        throw backendRefusal('close_outcome_unconfirmed', 502)
+      }),
+    })
+    const result = await createToolHandlers(haven).haven_submit({ task_budget_id: 'tb_1', signature: SIG })
+    expect(result.success).toBe(false)
+    if (result.success) throw new Error('expected failure')
+    expect(result.code).toBe('CLOSE_OUTCOME_UNCONFIRMED')
+    expect(result.statusCode).toBe(502)
+    expect(result.next_action).toBe('check_status_later')
+    expect(result.next_tool_name).toBe('haven_close_task_budget')
+    expect(result.next_arguments).toEqual({ task_budget_id: 'tb_1' })
+    expect(result.message).toMatch(/not confirmed yet/)
+  })
+
+  it('any other submit failure is relayed unchanged', async () => {
+    const { haven } = stubHaven({
+      submitTaskBudget: vi.fn(async () => {
+        throw backendRefusal('something_else', 500)
+      }),
+    })
+    const result = await createToolHandlers(haven).haven_submit({ task_budget_id: 'tb_1', signature: SIG })
+    expect(result.success).toBe(false)
+    if (result.success) throw new Error('expected failure')
+    expect(result.code).toBe('API_ERROR')
+    expect(result.next_tool_name).toBeUndefined()
   })
 })

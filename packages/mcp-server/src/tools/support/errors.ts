@@ -30,6 +30,7 @@ import {
   type NextStep,
 } from '@haven_ai/sdk'
 import { refusalNextStep } from './guidance.js'
+import type { PaymentScopeRefusalCode } from '@haven_ai/core'
 import type { ToolFailure, ToolPayload } from '../contracts.js'
 
 export class HostedToolError extends Error {
@@ -208,6 +209,117 @@ const RAIL_UNAVAILABLE_OMITTED_REASON =
 const TASK_BUDGET_EXCEEDED_ERROR_CODE = 'task_budget_exceeded'
 const TASK_BUDGET_EXCEEDED_OMITTED_REASON =
   "the task budget's cap is spent and is enforced on-chain, so retrying cannot succeed; close it and open a new one, or pay without it, after telling the user"
+
+/**
+ * #4468: the ten payment-scope refusals — a payment that names a task budget
+ * or a sub-budget the backend cannot use. The codes and their statuses are the
+ * shared `@haven_ai/core` artifact (`PAYMENT_SCOPE_REFUSAL_CODES`), the same
+ * one the backend's scope resolver answers from, so a member added on either
+ * side cannot go unanswered here without a test going red.
+ *
+ * Every one of them keeps `stop_and_tell_user`. Re-making the payment without
+ * `task_budget_id` / `sub_budget_id` draws from the agent's WHOLE budget
+ * instead of the scope the caller chose — the silent re-scoping #3378 fixed
+ * (`state-direct-recovery.ts`: the handler "dropped it, so the payment was
+ * charged to the whole budget"). The agent may never do that on its own, so
+ * each reason that mentions paying without the id ends "after telling the
+ * user", and none of them names a tool: the remedy is a decision the user
+ * makes, not a call the agent can make for them.
+ *
+ * The reasons follow what each code means in PRODUCTION, which differs in
+ * places from what the names suggest:
+ * - `task_budget_parent_mismatch` comes only from the resolver's parent
+ *   lookup by the row's OWN `parent_delegation_hash`; the parent is not
+ *   active or is outside its window, so there is no "right id" to offer.
+ * - `task_budget_not_open` covers `pending` too — the agent's own unsigned
+ *   row, whose remedy is to sign and submit it, not to open a new one. The
+ *   body cannot tell pending from closed or expired; `haven_get_task_budget`
+ *   can, so the reason names that read.
+ * - The sub-budget codes are about a grant the ISSUER holds, not the paying
+ *   agent.
+ */
+const PAYMENT_SCOPE_REFUSAL_ANSWERS: Record<PaymentScopeRefusalCode, { code: string; reason: string }> = {
+  task_budget_not_found: {
+    code: 'TASK_BUDGET_NOT_FOUND',
+    reason:
+      'no task budget with this id belongs to this agent, so the payment was refused before anything moved; check the id with haven_get_task_budget, and pay without it only after telling the user',
+  },
+  task_budget_not_open: {
+    code: 'TASK_BUDGET_NOT_OPEN',
+    reason:
+      'the task budget is not open — a pending one is your own unsigned row (sign it and submit it with haven_submit), while a closed or expired one needs a new task budget, opened after telling the user; haven_get_task_budget says which, and paying without it is allowed only after telling the user',
+  },
+  task_budget_token_mismatch: {
+    code: 'TASK_BUDGET_TOKEN_MISMATCH',
+    reason:
+      "the payment's token differs from the token the task budget was opened for, so it cannot be charged to it; pay in the task budget's token, or pay without it only after telling the user",
+  },
+  task_budget_recipient_mismatch: {
+    code: 'TASK_BUDGET_RECIPIENT_MISMATCH',
+    reason:
+      'the payment recipient differs from the recipient pinned on the task budget, so it cannot be charged to it; pay the pinned recipient, or pay without it only after telling the user',
+  },
+  task_budget_parent_mismatch: {
+    code: 'TASK_BUDGET_PARENT_MISMATCH',
+    reason:
+      'the budget delegation this task budget was carved from is not active or is outside its window, so the task budget cannot authorize a payment and there is no other id to offer; the wallet owner has to restore that delegation, and paying without the task budget is allowed only after telling the user',
+  },
+  sub_budget_not_found: {
+    code: 'SUB_BUDGET_NOT_FOUND',
+    reason:
+      "no sub-budget with this id belongs to this agent, so the payment was refused before anything moved; the grant is the issuer's — ask the issuer for the right id, and pay without it only after telling the user",
+  },
+  sub_budget_not_open: {
+    code: 'SUB_BUDGET_NOT_OPEN',
+    reason:
+      "the sub-budget is not open (closed, closing, pending or expired), so it cannot authorize a payment; the grant is the issuer's, not yours — ask the issuer to open it, and pay without it only after telling the user",
+  },
+  sub_budget_token_mismatch: {
+    code: 'SUB_BUDGET_TOKEN_MISMATCH',
+    reason:
+      "the payment's token differs from the token the sub-budget was granted for, so it cannot be charged to it; pay in the granted token, or pay without it only after telling the user",
+  },
+  sub_budget_recipient_mismatch: {
+    code: 'SUB_BUDGET_RECIPIENT_MISMATCH',
+    reason:
+      'the payment recipient differs from the recipient pinned on the sub-budget, so it cannot be charged to it; pay the pinned recipient, or pay without it only after telling the user',
+  },
+  sub_budget_parent_mismatch: {
+    code: 'SUB_BUDGET_PARENT_MISMATCH',
+    reason:
+      "the sub-budget's chain is broken — its parent-child link is closed, or it was not carved from the budget delegation selected for this payment; the grant is the issuer's, so ask the issuer to re-grant it, and pay without it only after telling the user",
+  },
+}
+
+/**
+ * #4468: the answer for a payment-scope refusal code, or `undefined` for any
+ * other `error_code`. The cast is the lookup's whole job: the table is keyed by
+ * the shared union, and the body's `error_code` is an arbitrary string.
+ *
+ * The `Object.hasOwn` guard is load-bearing, not defensive noise: the cast
+ * inherits `Object.prototype`, so a body carrying `error_code: "constructor"`
+ * (or `toString`, `valueOf`, `hasOwnProperty`, `__proto__`) would otherwise
+ * return a truthy non-answer and the branch would emit a failure with
+ * `code: undefined` — breaking `ToolFailure.code: string` and the typed-code
+ * contract this whole change exists to uphold.
+ */
+function paymentScopeRefusalAnswer(errorCode: string | undefined): { code: string; reason: string } | undefined {
+  if (!errorCode) return undefined
+  if (!Object.hasOwn(PAYMENT_SCOPE_REFUSAL_ANSWERS, errorCode)) return undefined
+  return (PAYMENT_SCOPE_REFUSAL_ANSWERS as Record<string, { code: string; reason: string } | undefined>)[errorCode]
+}
+
+/**
+ * #4468 sibling: the backend's `error_code` when a NEW task budget's cap
+ * exceeds what the parent budget has left unreserved
+ * (`packages/backend/src/routes/task-budgets.ts`). It reaches the generic 4xx
+ * branch from `haven_open_task_budget`, which drops the three atomic figures
+ * the backend sends. Nothing was opened, so this is a stop — the agent must
+ * not shrink the cap on its own.
+ */
+const TASK_BUDGET_EXCEEDS_REMAINING_ERROR_CODE = 'task_budget_exceeds_remaining'
+const TASK_BUDGET_EXCEEDS_REMAINING_OMITTED_REASON =
+  "the requested cap exceeds the parent budget's remaining, unreserved amount, so no task budget was opened; open a smaller one, or close the open task budgets that reserve it, after telling the user"
 
 /** #3564 (the #3494 mapping follow-through): the backend's `error_code` for a submit whose receipt was never confirmed. */
 const SUBMISSION_OUTCOME_UNKNOWN_ERROR_CODE = 'submission_outcome_unknown'
@@ -478,6 +590,73 @@ export function normalizeError(err: unknown): ToolFailure {
       paymentId: err.paymentId,
       ...(body.task_budget_id ? { task_budget_id: body.task_budget_id } : {}),
       ...(body.remaining_atomic !== undefined ? { remaining_atomic: body.remaining_atomic } : {}),
+      next_action: step.next_action,
+      ...nextStepWireFields(step),
+    }
+  }
+  // #4468: the ten payment-scope refusals — a payment naming a task budget or
+  // a sub-budget the backend cannot use. Before this branch every one of them
+  // fell into the generic 4xx `API_ERROR` stop below, so the backend's typed
+  // reason survived only as English in `message` and the agent could not tell
+  // a wrong id from a spent cap. The answer table is keyed by the shared
+  // `@haven_ai/core` union, so a member added on either side cannot go
+  // unanswered here without a test going red.
+  //
+  // No status guard, by decision: `error_code` is the discriminator the
+  // backend sends on both payment routes, and the status table is the
+  // backend's own (`PAYMENT_SCOPE_REFUSAL_STATUS`). Re-checking it here would
+  // duplicate that table across packages and silently degrade a refusal to
+  // `API_ERROR` if the backend ever moved a status — the guidance is the same
+  // whichever status carried the code.
+  if (err instanceof HavenApiError) {
+    const errorCode = (err.body as { error_code?: string } | undefined)?.error_code
+    const answer = paymentScopeRefusalAnswer(errorCode)
+    if (answer) {
+      const step = refusalNextStep({
+        nextAction: AgentPaymentNextAction.StopAndTellUser,
+        nextTool: null,
+        nextToolOmittedReason: answer.reason,
+      })
+      return {
+        success: false,
+        code: answer.code,
+        message: err.message,
+        statusCode: err.statusCode,
+        paymentId: err.paymentId,
+        error_code: errorCode,
+        next_action: step.next_action,
+        ...nextStepWireFields(step),
+      }
+    }
+  }
+  // #4468 sibling: a NEW task budget whose cap exceeds the parent budget's
+  // remaining, unreserved amount. The backend sends the three atomic figures;
+  // the generic 4xx branch dropped them, leaving the agent unable to say how
+  // much smaller the cap has to be. Nothing was opened, so this is a stop.
+  if (
+    err instanceof HavenApiError &&
+    (err.body as { error_code?: string } | undefined)?.error_code === TASK_BUDGET_EXCEEDS_REMAINING_ERROR_CODE
+  ) {
+    const body = err.body as {
+      remaining_atomic?: string | null
+      reserved_atomic?: string | null
+      requested_atomic?: string | null
+    }
+    const step = refusalNextStep({
+      nextAction: AgentPaymentNextAction.StopAndTellUser,
+      nextTool: null,
+      nextToolOmittedReason: TASK_BUDGET_EXCEEDS_REMAINING_OMITTED_REASON,
+    })
+    return {
+      success: false,
+      code: 'TASK_BUDGET_EXCEEDS_REMAINING',
+      message: err.message,
+      statusCode: err.statusCode,
+      paymentId: err.paymentId,
+      error_code: TASK_BUDGET_EXCEEDS_REMAINING_ERROR_CODE,
+      ...(body.remaining_atomic !== undefined ? { remaining_atomic: body.remaining_atomic } : {}),
+      ...(body.reserved_atomic !== undefined ? { reserved_atomic: body.reserved_atomic } : {}),
+      ...(body.requested_atomic !== undefined ? { requested_atomic: body.requested_atomic } : {}),
       next_action: step.next_action,
       ...nextStepWireFields(step),
     }

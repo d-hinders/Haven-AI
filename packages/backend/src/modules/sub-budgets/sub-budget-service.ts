@@ -143,13 +143,16 @@ export async function buildSubBudgetChildren(input: BuildChildrenInput): Promise
   }
 }
 
-/** Reasons a sub-budget cannot authorize a payment (#3330 refusal table). */
-export type SubBudgetPaymentRefusal =
-  | 'sub_budget_not_found'
-  | 'sub_budget_not_open'
-  | 'sub_budget_token_mismatch'
-  | 'sub_budget_recipient_mismatch'
-  | 'sub_budget_parent_mismatch'
+/**
+ * Reasons a sub-budget cannot authorize a payment (#3330 §3 refusal table).
+ *
+ * #4468: the union lives in `@haven_ai/core` — the ONE artifact the hosted
+ * MCP's `normalizeError` also reads, so a member added here cannot reach an
+ * agent as a generic `API_ERROR` without a hosted test going red. Re-exported
+ * from this module so every existing importer keeps its path.
+ */
+import type { SubBudgetPaymentRefusal } from '@haven_ai/core'
+export type { SubBudgetPaymentRefusal }
 
 export interface SubBudgetPaymentResolution {
   ok: boolean

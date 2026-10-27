@@ -1,4 +1,5 @@
 import { AgentPaymentFailureCode, AgentPaymentNextAction, HavenApiError, HavenError } from '@haven_ai/sdk'
+import { PAYMENT_SCOPE_REFUSAL_STATUS, type PaymentScopeRefusalCode } from '@haven_ai/core'
 import type { HostedToolError } from '../tools/support/errors.js'
 import { paymentStatusHandoff, refusalNextStep } from '../tools/support/guidance.js'
 
@@ -173,6 +174,41 @@ const RAIL_UNAVAILABLE_OMITTED_REASON =
 /** #3500: pinned verbatim, not imported, so a reworded reason reddens the fixture. */
 const TASK_BUDGET_EXCEEDED_OMITTED_REASON =
   "the task budget's cap is spent and is enforced on-chain, so retrying cannot succeed; close it and open a new one, or pay without it, after telling the user"
+/**
+ * #4468: the ten payment-scope refusal reasons, pinned verbatim (not imported)
+ * so a reworded reason reddens the fixture. Each names the remedy for its own
+ * code; each one that mentions paying without the id ends "after telling the
+ * user", because dropping `task_budget_id` / `sub_budget_id` silently re-scopes
+ * the payment to the agent's whole budget (#3378).
+ *
+ * Exported because the dedicated per-code test in `next-step-refusal.test.ts`
+ * pins the same strings: one pinned copy, two readers.
+ */
+export const PAYMENT_SCOPE_REFUSAL_REASONS: Record<PaymentScopeRefusalCode, string> = {
+  task_budget_not_found:
+    'no task budget with this id belongs to this agent, so the payment was refused before anything moved; check the id with haven_get_task_budget, and pay without it only after telling the user',
+  task_budget_not_open:
+    'the task budget is not open — a pending one is your own unsigned row (sign it and submit it with haven_submit), while a closed or expired one needs a new task budget, opened after telling the user; haven_get_task_budget says which, and paying without it is allowed only after telling the user',
+  task_budget_token_mismatch:
+    "the payment's token differs from the token the task budget was opened for, so it cannot be charged to it; pay in the task budget's token, or pay without it only after telling the user",
+  task_budget_recipient_mismatch:
+    'the payment recipient differs from the recipient pinned on the task budget, so it cannot be charged to it; pay the pinned recipient, or pay without it only after telling the user',
+  task_budget_parent_mismatch:
+    'the budget delegation this task budget was carved from is not active or is outside its window, so the task budget cannot authorize a payment and there is no other id to offer; the wallet owner has to restore that delegation, and paying without the task budget is allowed only after telling the user',
+  sub_budget_not_found:
+    "no sub-budget with this id belongs to this agent, so the payment was refused before anything moved; the grant is the issuer's — ask the issuer for the right id, and pay without it only after telling the user",
+  sub_budget_not_open:
+    "the sub-budget is not open (closed, closing, pending or expired), so it cannot authorize a payment; the grant is the issuer's, not yours — ask the issuer to open it, and pay without it only after telling the user",
+  sub_budget_token_mismatch:
+    "the payment's token differs from the token the sub-budget was granted for, so it cannot be charged to it; pay in the granted token, or pay without it only after telling the user",
+  sub_budget_recipient_mismatch:
+    'the payment recipient differs from the recipient pinned on the sub-budget, so it cannot be charged to it; pay the pinned recipient, or pay without it only after telling the user',
+  sub_budget_parent_mismatch:
+    "the sub-budget's chain is broken — its parent-child link is closed, or it was not carved from the budget delegation selected for this payment; the grant is the issuer's, so ask the issuer to re-grant it, and pay without it only after telling the user",
+}
+/** #4468 sibling: pinned verbatim, not imported, so a reworded reason reddens the fixture. */
+const TASK_BUDGET_EXCEEDS_REMAINING_OMITTED_REASON =
+  "the requested cap exceeds the parent budget's remaining, unreserved amount, so no task budget was opened; open a smaller one, or close the open task budgets that reserve it, after telling the user"
 /** #3504: pinned verbatim, not imported, so a reworded reason reddens the fixture. */
 const DELEGATION_BUDGET_EXCEEDED_OMITTED_REASON =
   "the agent's period budget is spent and is enforced on-chain, so retrying cannot succeed; the wallet owner can raise the budget in Haven or wait for the period to reset; tell the user the remaining and shortfall figures on this failure"
@@ -207,6 +243,13 @@ const STOP_HAVEN = 'the client failed before an upstream answer (code and messag
 const STOP_UNKNOWN = 'the failure had no recognizable shape (no code, no status); re-calling it the same way will fail the same way, so tell the user'
 const STATUS = (id: string) => ({ next_tool: 'mcp__haven__haven_get_payment_status', next_tool_server: 'haven', next_tool_name: 'haven_get_payment_status', next_tool_server_role: 'hosted', next_arguments: { payment_id: id } })
 const OMIT = (reason: string) => ({ next_tool_omitted_reason: reason })
+/**
+ * #4468: a payment-scope refusal built the way the SDK transport builds it
+ * (`packages/sdk/src/haven-api-transport.ts`): message = the backend's `error`,
+ * the shared status table's status, body `{ error, error_code }`.
+ */
+const paymentScopeRefusal = (errorCode: PaymentScopeRefusalCode, error: string) =>
+  new HavenApiError(error, PAYMENT_SCOPE_REFUSAL_STATUS[errorCode], { error, error_code: errorCode })
 
 type Base = Omit<ConstructorParameters<typeof HostedToolError>[0], 'nextStep'>
 type Site = {
@@ -233,8 +276,11 @@ type Site = {
  * `HavenApiError` the branch reads).
  * #3475 follow-up review round 1 (S3): the missing-settlement-hash case is a
  * SUCCESS no-op, not a refusal — its fixture moved to `EMISSION_SITES`.
+ * #4468 adds THIRTEEN: the ten payment-scope refusals (one fixture per code,
+ * each thrown as the SDK transport builds it), the `task_budget_exceeds_remaining`
+ * sibling, and the two close codes on `haven_submit`'s task-budget path.
  */
-export const REFUSAL_SITE_COUNT = 65
+export const REFUSAL_SITE_COUNT = 78
 /** `refusalNextStep(` calls in the hosted source: 30 inline site steps + rejectedAfterFundingStep's 3 + stateErrorNextStep's 5 (round 3 of #3126 migrated the three check_funds cap refusals onto the builder; #3213 added the symbol-resolution refusal) + #3214's 4 in normalizeError (the HavenApiError 4xx/5xx pair, HavenError, UNKNOWN_ERROR) + #3329's 3 (task-budgets.ts's unresolvable-token and over-precise-amount refusals, and state-direct-recovery.ts's haven_submit payment_id/task_budget_id/sub_budget_id exactly-one refusal (#3506 widened it to three ids; still one refusalNextStep site)) + #3423's 1 (catalog-entry.ts's http-row refusal, split out of the combined mcp-row check) + #3416's 1 in normalizeError (the typed rail_unavailable_for_chain 503) + #3500's 1 in normalizeError (the typed task_budget_exceeded 403) + #3504's 1 in normalizeError (the typed delegation_budget_exceeded 403). + #3506 review S2's 2 (state-direct-recovery.ts haven_submit sub_budget_id: the close_needs_reprepare and close_outcome_unconfirmed recovery refusals). + #3494's 2 in normalizeError (the typed signature_rejected and onchain_execution_failed 502s on `POST /payments/:id/sign`) + #3494 review round 1's 1 more in normalizeError (the typed account_validation_failed 502 on the same route). + #3564's 2 in normalizeError (the typed submission_outcome_unknown 502, replacing #3494 round 2's one stop-only arm: the payment_id arm names the status read, the no-id arm stops — no id to poll, so check_status_later's default tool is uncallable). + #3609's 1 in normalizeError (the typed prepare_reverted 502 on `POST /payments` and the x402 funding leg). + #3731's 1 more in the same branch (the insufficient-balance arm of the typed prepare_reverted 502 — the funding step beside the caveat stop). + #3747's 7 (the merchant-egress refusal sites: mcp-context's pre-intent quote/probe refusal, plain-http-x402's pre-funding refusal, and paid-mcp-completion's delivery-time refusal branches). + #3739's 2 in plain-http-x402.ts (request mode's url-required refusal, and `probeRefusal`, the one builder behind the probe's redirect, timeout, size and not-payable refusals). + #3774's 2 in plain-http-x402.ts (`erc7710OutcomeRefusal`'s settlement-evidence and rejected arms). + 1 in identity-gate.ts (the hosted dispatch gate's rejected-key refusal). */
 // #3769: 72 = 70 + 2 — the catalog argument-resolution support
 // (`tools/support/catalog-arguments.ts`) adds two refusalNextStep sites: the
@@ -247,7 +293,12 @@ export const REFUSAL_SITE_COUNT = 65
 // normalizeError branch (the owner-sets-a-new-budget reason, never "wait for
 // the period to reset"), and the catalog prepare preflight throws its own
 // DELEGATION_EXPIRED refusal at step 6 for the same condition.
-export const REFUSAL_STEP_CALLS = 75
+// #4468: 79 = 75 + 4 — the ten payment-scope refusals share ONE table-driven
+// normalizeError branch (one `refusalNextStep` call, ten codes), the
+// task_budget_exceeds_remaining sibling gets its own branch, and
+// haven_submit's task-budget path gains the two close-code steps the
+// sub-budget path already had (#3506's shape).
+export const REFUSAL_STEP_CALLS = 79
 
 export const REFUSAL_SITES: Site[] = [
   { site: 'catalog-purchase.ts prepare: allowance short', base: { code: 'INSUFFICIENT_ALLOWANCE', message: 'm', statusCode: 402, suggestedTool: 'haven_get_allowances' }, step: { nextAction: A.FundAccountOrRaiseAllowance, nextTool: null, nextToolOmittedReason: 'the account needs funds or a higher allowance first; haven_get_allowances shows the numbers' }, expect: { next_action: 'fund_account_or_raise_allowance', suggested_tool: 'haven_get_allowances', ...OMIT('the account needs funds or a higher allowance first; haven_get_allowances shows the numbers') } },
@@ -309,6 +360,24 @@ export const REFUSAL_SITES: Site[] = [
   { site: 'errors.ts normalizeError: rail unavailable for chain (typed 503)', base: { code: 'RAIL_UNAVAILABLE_FOR_CHAIN', message: 'cannot serve chain 84532', statusCode: 503 }, step: { nextAction: A.StopAndTellUser, nextTool: null, nextToolOmittedReason: RAIL_UNAVAILABLE_OMITTED_REASON }, thrown: new HavenApiError('cannot serve chain 84532', 503, { error_code: 'rail_unavailable_for_chain', chain_id: 84532 }), expect: { next_action: 'stop_and_tell_user', ...OMIT(RAIL_UNAVAILABLE_OMITTED_REASON) } },
   // #3500: the typed task-budget 403 names its own code and reason, not the generic 4xx API_ERROR below.
   { site: 'errors.ts normalizeError: task budget exceeded (typed 403)', base: { code: 'TASK_BUDGET_EXCEEDED', message: 'task budget spent', statusCode: 403 }, step: { nextAction: A.StopAndTellUser, nextTool: null, nextToolOmittedReason: TASK_BUDGET_EXCEEDED_OMITTED_REASON }, thrown: new HavenApiError('task budget spent', 403, { error_code: 'task_budget_exceeded', task_budget_id: 'tb_1', remaining_atomic: '0' }), expect: { next_action: 'stop_and_tell_user', ...OMIT(TASK_BUDGET_EXCEEDED_OMITTED_REASON) } },
+  // #4468: the ten payment-scope refusals. Each is its own typed code with the
+  // backend's `error_code` relayed and `stop_and_tell_user` kept — the agent
+  // may never re-make the payment without the id on its own (#3378).
+  { site: 'errors.ts normalizeError: task budget not found (typed 404)', base: { code: 'TASK_BUDGET_NOT_FOUND', message: 'Task budget not found', statusCode: 404 }, step: { nextAction: A.StopAndTellUser, nextTool: null, nextToolOmittedReason: PAYMENT_SCOPE_REFUSAL_REASONS.task_budget_not_found }, thrown: paymentScopeRefusal('task_budget_not_found', 'Task budget not found'), expect: { next_action: 'stop_and_tell_user', ...OMIT(PAYMENT_SCOPE_REFUSAL_REASONS.task_budget_not_found) } },
+  { site: 'errors.ts normalizeError: task budget not open (typed 409)', base: { code: 'TASK_BUDGET_NOT_OPEN', message: 'Task budget is not open (closed, closing, pending, or expired)', statusCode: 409 }, step: { nextAction: A.StopAndTellUser, nextTool: null, nextToolOmittedReason: PAYMENT_SCOPE_REFUSAL_REASONS.task_budget_not_open }, thrown: paymentScopeRefusal('task_budget_not_open', 'Task budget is not open (closed, closing, pending, or expired)'), expect: { next_action: 'stop_and_tell_user', ...OMIT(PAYMENT_SCOPE_REFUSAL_REASONS.task_budget_not_open) } },
+  { site: 'errors.ts normalizeError: task budget token mismatch (typed 409)', base: { code: 'TASK_BUDGET_TOKEN_MISMATCH', message: "This payment's token does not match the task budget's token", statusCode: 409 }, step: { nextAction: A.StopAndTellUser, nextTool: null, nextToolOmittedReason: PAYMENT_SCOPE_REFUSAL_REASONS.task_budget_token_mismatch }, thrown: paymentScopeRefusal('task_budget_token_mismatch', "This payment's token does not match the task budget's token"), expect: { next_action: 'stop_and_tell_user', ...OMIT(PAYMENT_SCOPE_REFUSAL_REASONS.task_budget_token_mismatch) } },
+  { site: 'errors.ts normalizeError: task budget recipient mismatch (typed 409)', base: { code: 'TASK_BUDGET_RECIPIENT_MISMATCH', message: "This payment's recipient does not match the task budget's pinned recipient", statusCode: 409 }, step: { nextAction: A.StopAndTellUser, nextTool: null, nextToolOmittedReason: PAYMENT_SCOPE_REFUSAL_REASONS.task_budget_recipient_mismatch }, thrown: paymentScopeRefusal('task_budget_recipient_mismatch', "This payment's recipient does not match the task budget's pinned recipient"), expect: { next_action: 'stop_and_tell_user', ...OMIT(PAYMENT_SCOPE_REFUSAL_REASONS.task_budget_recipient_mismatch) } },
+  { site: 'errors.ts normalizeError: task budget parent mismatch (typed 409)', base: { code: 'TASK_BUDGET_PARENT_MISMATCH', message: 'The task budget was not carved from the budget delegation selected for this payment', statusCode: 409 }, step: { nextAction: A.StopAndTellUser, nextTool: null, nextToolOmittedReason: PAYMENT_SCOPE_REFUSAL_REASONS.task_budget_parent_mismatch }, thrown: paymentScopeRefusal('task_budget_parent_mismatch', 'The task budget was not carved from the budget delegation selected for this payment'), expect: { next_action: 'stop_and_tell_user', ...OMIT(PAYMENT_SCOPE_REFUSAL_REASONS.task_budget_parent_mismatch) } },
+  { site: 'errors.ts normalizeError: sub-budget not found (typed 404)', base: { code: 'SUB_BUDGET_NOT_FOUND', message: 'Sub-budget not found', statusCode: 404 }, step: { nextAction: A.StopAndTellUser, nextTool: null, nextToolOmittedReason: PAYMENT_SCOPE_REFUSAL_REASONS.sub_budget_not_found }, thrown: paymentScopeRefusal('sub_budget_not_found', 'Sub-budget not found'), expect: { next_action: 'stop_and_tell_user', ...OMIT(PAYMENT_SCOPE_REFUSAL_REASONS.sub_budget_not_found) } },
+  { site: 'errors.ts normalizeError: sub-budget not open (typed 409)', base: { code: 'SUB_BUDGET_NOT_OPEN', message: 'Sub-budget is not open (closed, closing, pending, or expired)', statusCode: 409 }, step: { nextAction: A.StopAndTellUser, nextTool: null, nextToolOmittedReason: PAYMENT_SCOPE_REFUSAL_REASONS.sub_budget_not_open }, thrown: paymentScopeRefusal('sub_budget_not_open', 'Sub-budget is not open (closed, closing, pending, or expired)'), expect: { next_action: 'stop_and_tell_user', ...OMIT(PAYMENT_SCOPE_REFUSAL_REASONS.sub_budget_not_open) } },
+  { site: 'errors.ts normalizeError: sub-budget token mismatch (typed 409)', base: { code: 'SUB_BUDGET_TOKEN_MISMATCH', message: "This payment's token does not match the sub-budget's token", statusCode: 409 }, step: { nextAction: A.StopAndTellUser, nextTool: null, nextToolOmittedReason: PAYMENT_SCOPE_REFUSAL_REASONS.sub_budget_token_mismatch }, thrown: paymentScopeRefusal('sub_budget_token_mismatch', "This payment's token does not match the sub-budget's token"), expect: { next_action: 'stop_and_tell_user', ...OMIT(PAYMENT_SCOPE_REFUSAL_REASONS.sub_budget_token_mismatch) } },
+  { site: 'errors.ts normalizeError: sub-budget recipient mismatch (typed 409)', base: { code: 'SUB_BUDGET_RECIPIENT_MISMATCH', message: "This payment's recipient does not match the sub-budget's pinned recipient", statusCode: 409 }, step: { nextAction: A.StopAndTellUser, nextTool: null, nextToolOmittedReason: PAYMENT_SCOPE_REFUSAL_REASONS.sub_budget_recipient_mismatch }, thrown: paymentScopeRefusal('sub_budget_recipient_mismatch', "This payment's recipient does not match the sub-budget's pinned recipient"), expect: { next_action: 'stop_and_tell_user', ...OMIT(PAYMENT_SCOPE_REFUSAL_REASONS.sub_budget_recipient_mismatch) } },
+  { site: 'errors.ts normalizeError: sub-budget parent mismatch (typed 409)', base: { code: 'SUB_BUDGET_PARENT_MISMATCH', message: "The sub-budget's chain is broken", statusCode: 409 }, step: { nextAction: A.StopAndTellUser, nextTool: null, nextToolOmittedReason: PAYMENT_SCOPE_REFUSAL_REASONS.sub_budget_parent_mismatch }, thrown: paymentScopeRefusal('sub_budget_parent_mismatch', "The sub-budget's chain is broken"), expect: { next_action: 'stop_and_tell_user', ...OMIT(PAYMENT_SCOPE_REFUSAL_REASONS.sub_budget_parent_mismatch) } },
+  // #4468 sibling: a new task budget whose cap exceeds the parent's remaining, unreserved amount — the three atomic figures ride the refusal.
+  { site: 'errors.ts normalizeError: task budget exceeds remaining (typed 409)', base: { code: 'TASK_BUDGET_EXCEEDS_REMAINING', message: "This task budget's cap exceeds the parent budget's remaining, unreserved amount", statusCode: 409 }, step: { nextAction: A.StopAndTellUser, nextTool: null, nextToolOmittedReason: TASK_BUDGET_EXCEEDS_REMAINING_OMITTED_REASON }, thrown: new HavenApiError("This task budget's cap exceeds the parent budget's remaining, unreserved amount", 409, { error_code: 'task_budget_exceeds_remaining', remaining_atomic: '500', reserved_atomic: '200', requested_atomic: '1000' }), expect: { next_action: 'stop_and_tell_user', ...OMIT(TASK_BUDGET_EXCEEDS_REMAINING_OMITTED_REASON) } },
+  // #4468: the two close codes on haven_submit's TASK-budget path — the handler knows the id, so the step names haven_close_task_budget with it (the sub-budget path's #3506 shape).
+  { site: 'state-direct-recovery.ts haven_submit task budget: close needs reprepare', base: { code: 'CLOSE_NEEDS_REPREPARE', message: 'm', statusCode: 409 }, step: { nextAction: A.SignAndSubmitPayment, nextTool: 'haven_close_task_budget', nextArguments: { task_budget_id: 'tb_1' } }, expect: { next_action: 'sign_and_submit_payment', ...HOSTED('haven_close_task_budget'), next_arguments: { task_budget_id: 'tb_1' } } },
+  { site: 'state-direct-recovery.ts haven_submit task budget: close outcome unconfirmed', base: { code: 'CLOSE_OUTCOME_UNCONFIRMED', message: 'm', statusCode: 502 }, step: { nextAction: A.CheckStatusLater, nextTool: 'haven_close_task_budget', nextArguments: { task_budget_id: 'tb_1' } }, expect: { next_action: 'check_status_later', ...HOSTED('haven_close_task_budget'), next_arguments: { task_budget_id: 'tb_1' } } },
   // #3504: the typed delegation-budget 403 keeps the backend's own fund_account_or_raise_allowance step and figures, not the generic 4xx API_ERROR below.
   { site: 'errors.ts normalizeError: delegation budget exceeded (typed 403)', base: { code: 'DELEGATION_BUDGET_EXCEEDED', message: 'period budget exceeded', statusCode: 403 }, step: { nextAction: A.FundAccountOrRaiseAllowance, nextTool: null, nextToolOmittedReason: DELEGATION_BUDGET_EXCEEDED_OMITTED_REASON }, thrown: new HavenApiError('period budget exceeded', 403, { error_code: 'delegation_budget_exceeded', phase: 'insufficient_funds', next_action: 'fund_account_or_raise_allowance', rail: 'x402', remaining_atomic: '500', shortfall_atomic: '500' }), expect: { next_action: 'fund_account_or_raise_allowance', ...OMIT(DELEGATION_BUDGET_EXCEEDED_OMITTED_REASON) } },
   // #4458: the typed delegation-EXPIRED 403 — the same taxonomy step, but the owner sets a NEW budget; the reason never says "wait for the period to reset".

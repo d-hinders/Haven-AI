@@ -1394,10 +1394,10 @@ it):
    Security & details). Only the Agents tab carries a count; Security &
    details carries a warning dot when only one signer can approve.
    - **Activity** — the account's transaction feed (#4098 owns this tab's
-     final shape), on the list-controls pattern: "In · Out" for the filtered
-     set (sr-only "Money in" / "Money out" before each figure) on the left of
-     the list summary line, the count on the right (#4196), and "Show N more"
-     as the ledger card's footer row.
+     final shape), on the list-controls pattern: the count on the left of the
+     list summary line, "In · Out" for the filtered set (sr-only "Money in" /
+     "Money out" before each figure) on the right (#4196, sides swapped
+     #4473), and "Show N more" as the ledger card's footer row.
    - **Agents** — one budget-snapshot summary line, then every active agent
      drawn with the shared agent row (#4096). Revoked agents are not listed;
      one line says how many are hidden and links to the Agents page's

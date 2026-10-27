@@ -972,8 +972,8 @@ function ServerListControlsExample() {
           />
         }
         count={{ shown: 12, total: 60 }}
-        // The page's totals join the list summary line, left of the count
-        // (#4196) — the account Activity tab's shape.
+        // The page's totals join the list summary line, right of the count
+        // (#4196, sides swapped #4473) — the account Activity tab's shape.
         summary={
           <>
             {/* The account Activity tab's markup (`TotalFigure`): short visible
@@ -3437,7 +3437,7 @@ export default function DesignSystemPage() {
               />
             </div>
           </ListControlsState>
-          <ListControlsState label="Server-filtered, with totals — the search commits once per 300ms pause (Enter at once, Escape clears), so one request per pause. Export CSV sits in the actions slot; Period offers a custom range. The page's totals (summary) sit on the left of the summary line, the count on the right.">
+          <ListControlsState label="Server-filtered, with totals — the search commits once per 300ms pause (Enter at once, Escape clears), so one request per pause. Export CSV sits in the actions slot; Period offers a custom range. The count sits on the left of the summary line, the page's totals (summary) on the right.">
             <ServerListControlsExample />
           </ListControlsState>
           <ListControlsState label="The export action (#4328) — the actions slot's Export CSV is one shared piece (ListExportAction + useListExport): the page supplies the request, the enabled gate, the empty copy and the filename prefix; the action owns busy, fetch, download and notices. Drawn here in its states — idle, preparing (aria-busy), disabled, the two empty notices and a refusal. Demo state; nothing is wired to a request. Export on any list page goes through it.">

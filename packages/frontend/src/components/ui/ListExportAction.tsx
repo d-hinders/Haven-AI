@@ -23,7 +23,9 @@
  * instruction of 2026-10-23 (#4328).
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { Download } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
+import { Icon } from '@/components/ui/Icon'
 import { api } from '@/lib/api'
 import {
   buildCsvFilename,
@@ -118,8 +120,12 @@ export function useListExport({
 /**
  * The actions-slot Button: bare ghost `sm` — the pattern owns the sizing, so
  * no width or height classes are passed (its 44px phone target comes from
- * `Button`'s tap-target overlay). "Preparing…" is the busy label, with
- * `aria-busy` exposing the state to assistive tech.
+ * `Button`'s tap-target overlay). A leading lucide `Download` glyph at the
+ * `sm` label's 14px step (#4473) — decorative, so `Icon` marks it
+ * `aria-hidden` and the accessible name stays the label alone. "Preparing…"
+ * is the busy label, with `aria-busy` exposing the state to assistive tech;
+ * the glyph stays `Download` while busy and dims with the button (no spinner,
+ * design-system.md § Button).
  */
 export function ListExportAction({ state }: { state: ListExportState }) {
   return (
@@ -130,6 +136,7 @@ export function ListExportAction({ state }: { state: ListExportState }) {
       disabled={!state.exportable || state.exporting}
       aria-busy={state.exporting || undefined}
     >
+      <Icon icon={Download} className="h-3.5 w-3.5" />
       {state.exporting ? 'Preparing…' : 'Export CSV'}
     </Button>
   )

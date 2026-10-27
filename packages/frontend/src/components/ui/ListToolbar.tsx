@@ -98,8 +98,8 @@ export interface ListToolbarProps {
   /**
    * The page's totals for the list summary line (#4196) — the account
    * Activity tab's "In · Out", and Transactions' too (#4266) — drawn
-   * on the left of the line, the count on the right. Pass the figures only;
-   * the toolbar owns the line, so "filtered" is decided once, here.
+   * on the right of the line, the count on the left (#4473). Pass the figures
+   * only; the toolbar owns the line, so "filtered" is decided once, here.
    */
   summary?: ReactNode
   /**
@@ -137,8 +137,8 @@ function schemaOf(facets: ListFacet[], sort: ListToolbarSort | undefined, period
  * 2. facets, then Sort and Period on the right; a pill facet gets its own row;
  * 3. the status row, only while a filter is active: removable chips for each
  *    active filter and Clear filters;
- * 4. outside the card, the list summary line (#4196): the page's `summary`
- *    totals on the left, the count on the right, announced politely.
+ * 4. outside the card, the list summary line (#4196): the count on the left,
+ *    the page's `summary` totals on the right (#4473), announced politely.
  *
  * Below `sm` (640px) the facet row collapses into a "Filters (n)" button
  * that opens a bottom sheet with 44px rows. **Filters in the sheet apply
@@ -364,19 +364,19 @@ export function ListToolbar({
         )}
       </div>
 
-      {/* The list summary line (#4196): outside the search card, directly
-          above the list. The count keeps one place whether or not a filter is
-          active; `ml-auto` holds it right when the totals wrap or are absent. */}
+      {/* The list summary line (#4196, sides swapped #4473): outside the search
+          card, directly above the list. The count keeps one place — the left —
+          whether or not a filter is active; `ml-auto` holds the page's totals
+          right when they wrap under it or are absent. */}
       <div
         data-testid="list-summary"
         className="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-0.5 text-[13px] text-[var(--v2-ink-2)]"
       >
-        {summary ? <div className="min-w-0">{summary}</div> : null}
         <span
           role="status"
           aria-live="polite"
           data-testid="list-toolbar-count"
-          className="ml-auto tabular-nums text-[var(--v2-ink-3)]"
+          className="tabular-nums text-[var(--v2-ink-3)]"
         >
           {count ? (
             countLabel(noun, count, filtered)
@@ -384,6 +384,7 @@ export function ListToolbar({
             <span className="inline-block h-3 w-24 animate-pulse rounded bg-[var(--v2-surface-2)]" aria-label={`Loading ${noun.other}`} />
           )}
         </span>
+        {summary ? <div className="ml-auto min-w-0 text-right">{summary}</div> : null}
       </div>
     </div>
   )

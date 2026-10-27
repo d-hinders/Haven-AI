@@ -82,9 +82,10 @@ describe('SignersSection (#3825)', () => {
     const links = within(first).getAllByRole('link')
     expect(links).toHaveLength(2)
     for (const link of links) {
-      // The pill's shape lives in the primitive, never re-created here.
-      expect(link.className).toContain('rounded-full')
-      expect(link.className).toContain('border')
+      // The pill's shape lives in the primitive, never re-created here: the
+      // section renders `LinkChip`, which stamps its own test id. The shape
+      // itself is asserted in LinkChip.test.tsx.
+      expect(link).toHaveAttribute('data-testid', 'link-chip')
       // The trailing arrow is lucide through `Icon`, decorative.
       expect(link.querySelector('svg')).toHaveAttribute('aria-hidden', 'true')
     }
@@ -93,17 +94,33 @@ describe('SignersSection (#3825)', () => {
   })
 
   it('appends the network to every pill only when the accounts span more than one chain', async () => {
+    // One chain across the whole section: the name alone, on every row.
     mockGet.mockResolvedValue({
       signers: [
         { kind: 'passkey', key_id: '0x01', created_at: null, accounts: [BASE_MAIN] },
         { kind: 'wallet', address: WALLET, accounts: [{ ...BASE_MAIN, account_id: 'a3', account_name: 'Reserve' }] },
       ],
     })
-    renderSection()
-    // One chain across the whole section: the name alone, on every row.
+    const singleChain = renderSection()
     expect(await screen.findByRole('link', { name: 'Main' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Reserve' })).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: 'Main (Base)' })).toBeNull()
+    singleChain.unmount()
+
+    // Two chains: EVERY pill carries its network, on every row — the rule is
+    // decided for the section, not per signer, so the wallet's Base account
+    // is suffixed too even though that row alone spans one chain.
+    mockGet.mockResolvedValue({
+      signers: [
+        { kind: 'passkey', key_id: '0x01', created_at: null, accounts: [BASE_MAIN, SEPOLIA_MAIN] },
+        { kind: 'wallet', address: WALLET, accounts: [{ ...BASE_MAIN, account_id: 'a3', account_name: 'Reserve' }] },
+      ],
+    })
+    renderSection()
+    expect(await screen.findByRole('link', { name: 'Main (Base)' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Main (Base Sepolia)' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Reserve (Base)' })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Main' })).toBeNull()
   })
 
   it('names passkeys by enrollment date, numbering the fallback across the list, never a platform brand', async () => {

@@ -28,19 +28,12 @@ import { Icon } from '@haven_ai/ui/Icon'
  * turning the stadium into a wrapped blob — the same rule `StatusBadge`
  * carries (#2147) — and the icon is `shrink-0` so it never collapses.
  */
-export function LinkChip({
-  href,
-  children,
-  className = '',
-}: {
-  href: string
-  children: ReactNode
-  className?: string
-}) {
+export function LinkChip({ href, children }: { href: string; children: ReactNode }) {
   return (
     <Link
       href={href}
-      className={`inline-flex max-w-full items-center gap-1 truncate rounded-full border border-[var(--v2-border)] px-2.5 py-1 text-xs font-medium text-[var(--v2-ink-2)] transition-colors hover:border-[var(--v2-border-strong)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 ${className}`}
+      data-testid="link-chip"
+      className="inline-flex max-w-full items-center gap-1 truncate rounded-full border border-[var(--v2-border)] px-2.5 py-1 text-xs font-medium text-[var(--v2-ink-2)] transition-colors hover:border-[var(--v2-border-strong)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
     >
       {children}
       <Icon icon={ArrowRight} className="h-3 w-3 shrink-0" />

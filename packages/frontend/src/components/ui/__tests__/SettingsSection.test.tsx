@@ -203,4 +203,48 @@ describe('SettingsSection', () => {
     expect(card.className).not.toMatch(/bg-\[var\(--v2-surface\)\]/)
     expect(card.textContent).not.toContain('Accounting')
   })
+
+  it('puts an optional trailing link on the heading’s line, above the card (#4475)', () => {
+    // The account Security tab's "View all" slot. Mutation: render the action
+    // inside the card (a Card.Header action) → red: the link would sit in the
+    // card's band, not on the section heading.
+    const { container, getByText } = render(
+      <SettingsSection
+        title="Passkeys and wallets"
+        action={<a href="/settings">View all</a>}
+      >
+        <SettingsRow label="MacBook Pro" />
+      </SettingsSection>,
+    )
+    const section = container.firstElementChild as HTMLElement
+    const heading = section.querySelector('h2') as HTMLElement
+    const card = section.querySelector('.rounded-\\[10px\\]') as HTMLElement
+    const action = getByText('View all')
+
+    expect(heading.textContent).toBe('Passkeys and wallets')
+    // The link shares the heading's row, which sits above the card.
+    const row = heading.parentElement as HTMLElement
+    expect(row.className).toMatch(/\bflex-wrap\b/)
+    expect(row.contains(action)).toBe(true)
+    expect(card.contains(action)).toBe(false)
+    expect(section.contains(row)).toBe(true)
+    expect(row.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    // The heading keeps its gap to the card — no description here.
+    expect(heading.className).toMatch(/\bmb-3\b/)
+  })
+
+  it('renders no action row at all when no action is passed — every settings caller today', () => {
+    // Mutation: always wrap the heading in the flex row → red: the heading
+    // stops being the section's first element and `nextElementSibling` stops
+    // being the card.
+    const { container } = render(
+      <SettingsSection title="Data">
+        <SettingsRow label="Export data" />
+      </SettingsSection>,
+    )
+    const section = container.firstElementChild as HTMLElement
+    const heading = section.querySelector('h2') as HTMLElement
+    expect(heading.parentElement).toBe(section)
+    expect(heading.nextElementSibling).toBe(section.querySelector('.rounded-\\[10px\\]'))
+  })
 })

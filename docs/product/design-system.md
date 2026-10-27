@@ -48,6 +48,7 @@ covers:
   - packages/frontend/src/components/haven/NoticeRow.tsx
   - packages/frontend/src/components/transactions/**
   - packages/frontend/src/components/haven/LabelChip.tsx
+  - packages/frontend/src/components/haven/AgentRulesSummary.tsx
   - packages/frontend/src/__tests__/capture-viewports.test.ts
   - packages/frontend/src/__tests__/design-system-arrows-allowlist.test.ts
   - packages/frontend/src/__tests__/showcase-permanently-open-pin.test.ts
@@ -826,7 +827,11 @@ scoped to entity detail pages and **settings pages** (owner decision
 callout vocabulary — see #3690's in-modal neutral callout, which this rule
 does not touch). The Settings page assembles its sections with the shared
 `components/ui/SettingsSection.tsx`, which renders this shape so every caller
-follows without edits.
+follows without edits. The heading block itself is
+`components/ui/SectionHeading.tsx` (#4475), which `SettingsSection` composes —
+a detail page that does not use `SettingsSection` renders it directly above
+its card, so the heading, its optional description and its optional trailing
+link are one shape everywhere.
 
 - Each section's heading (`v2-text-h3`) sits **above** its `Card`, not inside
   it — on detail pages **and on settings pages**. A description is
@@ -847,6 +852,25 @@ follows without edits.
   page had: "Agent budgets" was headed from inside its card while "Recent
   activity" was headed from above — epic #3691's later slices apply the rule
   there.)
+- **An optional trailing link on the heading's line** (#4475; owner-approved
+  2026-10-27 as a new design-system pattern). A section whose content has a
+  fuller surface elsewhere — the account Security tab's signer list, whose
+  full list lives on the accounts page — may carry ONE link at the end of its
+  heading's line, above the card. It is a **link, not a button**: it navigates
+  to the fuller surface and never acts on the section's content, so it is a
+  Next `Link` styled as a text link (`text-sm font-medium
+  text-[var(--v2-brand)] hover:underline`, plus the one focus ring from
+  § *Focus rings*) — never a `Button`, and never a `Card.Header` action, which
+  sits INSIDE the card and belongs to the card's own content. The heading and
+  the link share one baseline-aligned `flex-wrap` row with the link trailing;
+  below `sm` — or whenever the heading fills the row — the link wraps onto its
+  own line under the heading, left aligned, so a phone never squeezes the
+  heading to make room. The heading keeps its heading-to-card gap in that row
+  (its `mb-3` is part of the row's height). `SectionHeading` takes the slot as
+  `action`; `SettingsSection` forwards it, so a settings section gets the same
+  shape without a second implementation, and every existing settings caller
+  passes none and is unchanged. Recorded on `/design-system` → *Section
+  heading with a trailing link*.
 - State banners (`ApprovalRequiredBanner`) do not scatter through the page.
   They stack in ONE slot directly under the `PageHeader`, ordered by severity:
   `danger` first (the next action cannot be undone), then `warning` (something
@@ -856,6 +880,14 @@ follows without edits.
   decision 2026-10-09, #3805). Within a
   tone, the banner that asks the user for a decision comes first. The slot
   opens the page on the thing that needs doing, before any content card.
+  **One exemption, decided by the owner on 2026-10-27 (#4475):** a warning
+  about **one section's own content** may sit at the top of that section's
+  card. The one-slot rule is about page-level state — the things that need
+  doing before any content — and a warning that qualifies a single section's
+  rows (the account Security tab's signer list, when a signer's approval is
+  stale) is that section's content, not the page's state. It stays inside the
+  card, above the rows it qualifies, and it does not move to the page slot.
+  A warning that concerns the page as a whole still goes in the slot.
 - The `PageHeader`'s own `meta` line (above) carries the entity's quiet
   identity row — account, network, created, last activity — so the section
   headings below stay about their sections.
@@ -872,7 +904,12 @@ follows without edits.
   `/design-system` specimen shows both states. This bullet is **detail-page
   only**: settings sections are exempt — a `SettingsRow` keeps its visible
   actions (`ConnectionRow`'s Connect / Reconnect / Disconnect and Settings
-  buttons stay compliant; owner decision 2026-10-23, #4357).
+  buttons stay compliant; owner decision 2026-10-23, #4357). **The account
+  signer list is exempt too, decided by the owner on 2026-10-27 (#4475):** it
+  keeps its visible **Remove** and **Add** actions, exactly as settings
+  sections do (#4357). A signer row's Remove is the control that revokes an
+  approval, and the account Security tab is a settings-shaped surface — the
+  ⋯ menu would hide the one action a reader comes to that list to take.
 - **`SettingsRow`'s full-width slot (#4478, owner decision 2026-10-27).** A row
   can carry content under its label/action line through the optional `below`
   prop: a disclosure, an inline alert, or a state note that belongs to the whole
@@ -889,6 +926,44 @@ follows without edits.
   Tax declaration row and the agent Passport row's issued-state `dl` (#4477),
   and `ConnectionsCard.tsx`, which renders its inline feed settings through the
   slot instead of a hand-written sibling wrapper (#4478).
+
+### Detail list (`DetailList`, #4475)
+
+`components/ui/DetailList.tsx` is the ONE divided label/value list: rows of
+label, value and optional trailing actions, hairline-divided, with the label
+column stacking over the value below `sm`. It is an **extraction, not a new
+pattern** — `components/haven/AgentRulesSummary.tsx` already shipped exactly
+this `dl`, and the account Security tab (#4474) needs the same list with a
+trailing-actions column. The owner rule is build once, consume: a third
+hand-rolled `dl` is not an option, and `AgentRulesSummary` now renders through
+this component (its rendered output for the connect flow's approval step and
+the `/design-system` specimen is unchanged).
+
+- **Rows.** `items` is `{ label, value, helper?, actions? }[]`. The label is
+  the `dt` — `text-xs font-medium text-[var(--v2-ink-3)]`, one tier quieter
+  than the value. The value is the `dd` — `text-sm font-medium
+  text-[var(--v2-ink)]`. An optional `helper` sits under the value in
+  `text-xs leading-relaxed text-[var(--v2-ink-3)]` — the form steps'
+  field-helper tier (#1431), never the description's ink-2.
+- **The grid.** Each row is `grid gap-1` (one column, so the label stacks over
+  the value on a phone) with the label track arriving at `sm`:
+  `sm:grid-cols-[160px_1fr]`, or `[120px_1fr]` when `density="compact"` (the
+  connect flow's approval step inside a modal). Rows are `py-3` (`py-2`
+  compact) with `first:pt-0 last:pb-0`, so the list's own edges carry no
+  padding, and the `dl` is `divide-y divide-[var(--v2-border)]`.
+- **The trailing-actions column** is the one thing the extraction adds: a
+  third `auto` track at `sm` and up (`sm:grid-cols-[160px_1fr_auto]`,
+  `[120px_1fr_auto]` compact), right aligned, so a Remove or Edit sits on the
+  value's line. Below `sm` the row is one column and the actions stack under
+  the value. A row with no actions renders no third cell — the value keeps the
+  full width. Emit ONE `grid-cols` utility per row: two `sm:grid-cols-[…]`
+  classes on one element resolve by their order in the compiled stylesheet,
+  not in the class string, so the compact track would silently lose.
+- **No outer margin.** The list owns none; the caller spaces it (`className`),
+  because the same list sits under a card title in `AgentRulesSummary` and
+  directly in a card elsewhere.
+
+Recorded on `/design-system` → *Detail list*.
 
 ### BudgetMeter (#3692)
 
@@ -3367,6 +3442,7 @@ element-scoped capture clips the very thing it photographs (#1873).
 | Authenticated shell | `packages/frontend/src/components/AuthenticatedShell.tsx`, `packages/frontend/src/components/sidebar/Sidebar.tsx`, authenticated routes under `packages/frontend/src/app/(authenticated)` |
 | Live product reference | `packages/frontend/src/app/(authenticated)/design-system/page.tsx` |
 | App entity cards | `packages/frontend/src/components/ui/entityCardStyles.ts` shared by Accounts and Agents; linked cards use a stretched semantic name link with sibling controls above its overlay |
+| Section headings & detail lists | `packages/frontend/src/components/ui/SectionHeading.tsx` — the detail-page section heading block, with the optional trailing link (#4475), composed by `SettingsSection`; `packages/frontend/src/components/ui/DetailList.tsx` — the divided label/value list with optional trailing actions (#4475), rendered by `AgentRulesSummary` |
 | App modals | `packages/frontend/src/components/ui/Modal.tsx` plus the Send modal, the Receive dialog (which replaced the Add funds modal, #4094) and the agent modals in `packages/frontend/src/components` |
 | Agent & transaction activity rows | `packages/frontend/src/components/haven/TransactionActivityRow.tsx` |
 | Transaction previews | `packages/frontend/src/components/haven/TransactionActivityRow.tsx`, `packages/frontend/src/components/haven/TransactionMovement.tsx` |

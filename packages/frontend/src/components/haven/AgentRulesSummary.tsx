@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { Card } from '@/components/ui/Card'
+import { DetailList } from '@/components/ui/DetailList'
 
 export type AgentRuleSummaryItem = {
   label: string
@@ -7,6 +8,21 @@ export type AgentRuleSummaryItem = {
   helper?: string
 }
 
+/**
+ * The agent-rules card: a title, one description line, and the policy rows.
+ *
+ * The rows are the shared `components/ui/DetailList` (#4475) — this component
+ * used to hand-roll the same hairline-divided `dl`, and the account Security
+ * tab (#4474) needs that list with a trailing-actions column. The extraction
+ * is a move, not a redesign: the rendered output for every consumer
+ * (`connect-agent/PolicyStep.tsx`, `connect-agent/DelegationApprovalStep.tsx`
+ * and the `/design-system` specimen) is unchanged, including the compact
+ * density's 120px label track and the ink-3 helper tier (#1431).
+ *
+ * The title and description stay INSIDE the card here: this card is a summary
+ * block in a modal or a page section, not a detail-page section heading (that
+ * shape is `SectionHeading` / `SettingsSection`).
+ */
 export function AgentRulesSummary({
   title = 'Agent rules',
   description = 'These rules define what the agent can do automatically.',
@@ -47,28 +63,7 @@ export function AgentRulesSummary({
         </p>
       </div>
 
-      <dl className={`${compact ? 'mt-3' : 'mt-5'} divide-y divide-[var(--v2-border)]`}>
-        {items.map((item) => (
-          <div
-            key={item.label}
-            className={`${compact ? 'py-2 sm:grid-cols-[120px_1fr]' : 'py-3 sm:grid-cols-[160px_1fr]'} grid gap-1 first:pt-0 last:pb-0 sm:gap-4`}
-          >
-            <dt className="text-xs font-medium text-[var(--v2-ink-3)]">{item.label}</dt>
-            <dd>
-              <div className="text-sm font-medium text-[var(--v2-ink)]">{item.value}</div>
-              {/* Row helpers are ink-3, matching the form steps' field-helper
-                  tier (#1431) — the connect Review screen renders both one
-                  screen apart. The top DESCRIPTION paragraph stays ink-2:
-                  that is body copy, not a helper. */}
-              {item.helper && (
-                <p className={`${compact ? 'mt-0.5' : 'mt-1'} text-xs leading-relaxed text-[var(--v2-ink-3)]`}>
-                  {item.helper}
-                </p>
-              )}
-            </dd>
-          </div>
-        ))}
-      </dl>
+      <DetailList items={items} density={density} className={compact ? 'mt-3' : 'mt-5'} />
 
       {footer ? (
         <div className={`${compact ? 'mt-3 pt-3' : 'mt-5 pt-4'} border-t border-[var(--v2-border)]`}>

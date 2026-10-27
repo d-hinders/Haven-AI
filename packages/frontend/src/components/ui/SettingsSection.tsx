@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { Card } from '@/components/ui/Card'
+import { SectionHeading } from '@/components/ui/SectionHeading'
 
 /**
  * One titled section on the Settings page — a `v2-text-h3` heading sits ABOVE
@@ -9,6 +10,11 @@ import { Card } from '@/components/ui/Card'
  * reader something the heading and the card don't. The card can load, swap or
  * be replaced without moving its heading, and a skimming reader gets every
  * section name from the heading scan alone.
+ *
+ * The heading block itself is `components/ui/SectionHeading.tsx` (#4475), so
+ * the same shape — including the optional trailing link — serves detail pages
+ * that do not use `SettingsSection`. This component adds the `<section>` root
+ * and the card; every existing caller's props and layout are unchanged.
  *
  * Moved here from `app/(authenticated)/settings/SettingsSection.tsx` (#4357)
  * so the design-system coupling gate watches it; screen recipe:
@@ -23,6 +29,7 @@ export function SettingsSection({
   title,
   description,
   note,
+  action,
   children,
   className = '',
 }: {
@@ -30,23 +37,18 @@ export function SettingsSection({
   description?: string
   /** A quieter second paragraph under the description — a responsibility line, not a second description. */
   note?: string
+  /**
+   * An optional trailing link on the heading's line (#4475) — navigation to
+   * the fuller surface ("View all"), never a button. Omitted by every settings
+   * caller today; the account Security tab (#4474) is the first consumer.
+   */
+  action?: ReactNode
   children: ReactNode
   className?: string
 }) {
-  // #4476: the description is optional under the detail-page section rule. The
-  // heading-to-card gap used to ride on the description/note `mb-3`, so a
-  // section with neither rendered its heading flush against the card. The
-  // heading carries the gap when there is no prose; when there is, the
-  // paragraph's own `mb-3` still supplies it (and the heading keeps its 2px
-  // `mt-0.5` lead-in), so every existing caller's layout is unchanged.
-  const hasProse = Boolean(description || note)
   return (
     <section className={className}>
-      <h2 className={`v2-text-h3 text-[var(--v2-ink)]${hasProse ? '' : ' mb-3'}`}>{title}</h2>
-      {description ? (
-        <p className="mt-0.5 mb-3 text-sm text-[var(--v2-ink-2)]">{description}</p>
-      ) : null}
-      {note ? <p className="mt-0.5 mb-3 text-xs text-[var(--v2-ink-3)]">{note}</p> : null}
+      <SectionHeading title={title} description={description} note={note} action={action} />
       <Card hover={false}>
         <div className="divide-y divide-[var(--v2-border)]">{children}</div>
       </Card>

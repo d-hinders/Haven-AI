@@ -714,6 +714,47 @@ test.describe('design-system visual regression', () => {
       await expectShowcaseClip(sample, vp.height, 'the list-controls paging sample', `design-system-list-controls-paging-${vp.name}${schemeSuffix}.png`, SAMPLE_MAX_DIFF_PIXELS)
     })
 
+    // #4475: the section heading's optional trailing link — the heading and the
+    // link on one baseline-aligned row, above the card, wrapping under the
+    // heading on a phone. No unit test sees that layout, and no committed
+    // baseline covered it before this. The clip is the specimen GRID, not the
+    // section: the section's own prose is documentation, and clipping it would
+    // put the sample's height at the mercy of a paragraph edit.
+    test(`/design-system section heading with a trailing link renders pixel-stable (${vp.name})`, async ({ page }, testInfo) => {
+      const scheme = schemeOf(testInfo)
+      const schemeSuffix = scheme === 'dark' ? '-dark' : ''
+      await page.setViewportSize({ width: vp.width, height: vp.height })
+      await page.goto('/design-system')
+      await page.evaluate(() => document.fonts.ready)
+      await page.waitForLoadState('networkidle')
+
+      const sample = page.getByTestId('ds-section-heading-action')
+      await expect(sample).toHaveCount(1)
+      // Two specimens, two links: the detail-page shape and the settings shape.
+      await expect(sample.getByRole('link', { name: 'View all' })).toHaveCount(2)
+      await expectShowcaseClip(sample, vp.height, 'the section heading with a trailing link sample', `design-system-section-heading-action-${vp.name}${schemeSuffix}.png`, SAMPLE_MAX_DIFF_PIXELS)
+    })
+
+    // #4475: the shared detail list — the trailing-actions column at `sm` and
+    // up, the label stacking over the value below it, and the compact density's
+    // 120px track. The connect flow's approval step renders the same component,
+    // so this clip is the one place the two densities sit side by side.
+    test(`/design-system detail list sample renders pixel-stable (${vp.name})`, async ({ page }, testInfo) => {
+      const scheme = schemeOf(testInfo)
+      const schemeSuffix = scheme === 'dark' ? '-dark' : ''
+      await page.setViewportSize({ width: vp.width, height: vp.height })
+      await page.goto('/design-system')
+      await page.evaluate(() => document.fonts.ready)
+      await page.waitForLoadState('networkidle')
+
+      const sample = page.getByTestId('ds-detail-list')
+      await expect(sample).toHaveCount(1)
+      // Normal density with trailing actions, compact density without.
+      await expect(sample.locator('dl')).toHaveCount(2)
+      await expect(sample.getByRole('button', { name: 'Remove' })).toHaveCount(2)
+      await expectShowcaseClip(sample, vp.height, 'the detail list sample', `design-system-detail-list-${vp.name}${schemeSuffix}.png`, SAMPLE_MAX_DIFF_PIXELS)
+    })
+
     // #4208: these are the two standing examples for the agent identity mark.
     // The first protects the compact row-sized Monogram, including the emoji
     // grapheme case; the second protects its title alignment in PageHeader.

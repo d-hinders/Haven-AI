@@ -2534,7 +2534,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="Select"
-        description="The styled native <select>. Same height, radius, border and focus ring as Input so mixed form rows align. Passes through all native select attributes."
+        description="The styled native <select>. Same height, radius, border and focus ring as Input so mixed form rows align, plus a lucide ChevronDown inside the right edge — the browser's own arrow is off (appearance-none) and pr-9 reserves the room, so never add padding or an arrow of your own. className lands on the wrapper, not the select. Passes through all native select attributes."
       >
         <Card hover={false} className="max-w-sm p-5">
           <div className="space-y-3">

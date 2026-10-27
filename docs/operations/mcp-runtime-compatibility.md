@@ -33,6 +33,7 @@ covers:
   - packages/sdk/src/client-identity.ts
   - packages/core/src/client-compat.ts
   - packages/core/src/client-releases.ts
+  - packages/core/src/budget-refusal-codes.ts
   - packages/backend/src/middleware/client-compat.ts
   - packages/sdk/src/haven-api-transport.ts
   - packages/cli/src/api.ts

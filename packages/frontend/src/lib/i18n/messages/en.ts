@@ -239,7 +239,12 @@ export const en = {
         'The passkeys and wallets that can approve actions on your accounts. One passkey or wallet can approve several accounts.',
       walletLabel: 'Browser wallet',
       walletLabelConnected: (connector: string) => `Browser wallet · ${connector}`,
-      approves: 'Approves',
+      /**
+       * #4472: the neutral badge beside a passkey whose credential this
+       * device holds. The "Approves" prefix is gone — each approved account
+       * is its own pill link now, so the row needs no verb.
+       */
+      thisDevice: 'This device',
       noAccounts: 'Approves no account yet.',
       accountFallbackName: 'Account',
       showAddress: 'Show address',

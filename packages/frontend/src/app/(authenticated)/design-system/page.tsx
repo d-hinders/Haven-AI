@@ -18,6 +18,7 @@ import {
 } from '@/components/ui/DropdownMenu'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { FilterPill } from '@/components/ui/FilterPill'
+import { LinkChip } from '@/components/ui/LinkChip'
 import { FacetMenu, type ListFacet } from '@/components/ui/FacetMenu'
 import { ListNoMatch, ListShowMore, ListToolbar } from '@/components/ui/ListToolbar'
 import { ListExportAction, ListExportNotice } from '@/components/ui/ListExportAction'
@@ -1829,6 +1830,44 @@ export default function DesignSystemPage() {
                 checked
                 onToggle={() => {}}
               />
+            </div>
+          </Card>
+
+          <Card hover={false} className="p-5" data-testid="ds-link-chips">
+            <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Account link pills</h3>
+            <p className="mt-3 text-[13px] leading-relaxed text-[var(--v2-ink-2)]">
+              <code className="rounded bg-[var(--v2-surface)] px-1">LinkChip</code> is an outline
+              navigation pill (#4472): a <code className="rounded bg-[var(--v2-surface)] px-1">rounded-full</code>{' '}
+              link with a trailing lucide arrow, used where a row points at an object. It is the one
+              pill that navigates — <code className="rounded bg-[var(--v2-surface)] px-1">LabelChip</code>{' '}
+              is a filled categorisation pill and never a control,{' '}
+              <code className="rounded bg-[var(--v2-surface)] px-1">FilterPill</code> and the
+              ListToolbar chips are filter toggles, and{' '}
+              <code className="rounded bg-[var(--v2-surface)] px-1">AccountingBadge</code> wraps a
+              filled <em>status</em> badge. It takes only{' '}
+              <code className="rounded bg-[var(--v2-surface)] px-1">href</code> and its label, so the
+              accessible name is exactly the visible text.
+            </p>
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <LinkChip href="/accounts/ds-1?tab=security">My account</LinkChip>
+              <LinkChip href="/accounts/ds-2?tab=security">Reserve (4024)</LinkChip>
+              <LinkChip href="/accounts/ds-3?tab=security">Operations (Base Sepolia)</LinkChip>
+            </div>
+            <p className="mt-4 text-[13px] leading-relaxed text-[var(--v2-ink-2)]">
+              In Settings, on the Security tab, the pills sit in a wrapping row
+              under the signer&rsquo;s label, and a passkey whose credential this device holds carries
+              a neutral <code className="rounded bg-[var(--v2-surface)] px-1">StatusBadge</code> beside
+              that label:
+            </p>
+            <div className="mt-3 rounded-md border border-[var(--v2-border)] px-4 py-3">
+              <p className="flex flex-wrap items-center gap-2 text-sm font-medium text-[var(--v2-ink)]">
+                <span>Passkey · added 9 October 2026</span>
+                <StatusBadge tone="neutral">This device</StatusBadge>
+              </p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <LinkChip href="/accounts/ds-1?tab=security">My account</LinkChip>
+                <LinkChip href="/accounts/ds-2?tab=security">Reserve (4024)</LinkChip>
+              </div>
             </div>
           </Card>
 

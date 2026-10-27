@@ -33,6 +33,7 @@ covers:
   - packages/frontend/src/components/sidebar/**
   - packages/frontend/src/components/haven/TransactionActivityRow.tsx
   - packages/frontend/src/components/accounting/ConnectionRow.tsx
+  - packages/frontend/src/components/accounting/AccountingBadge.tsx
   - packages/frontend/src/components/haven/AgentRow.tsx
   - packages/frontend/src/app/(authenticated)/agents/[agentId]/AgentDetailClient.tsx
   - packages/frontend/src/app/(authenticated)/dashboard/AgentsSection.tsx
@@ -1944,6 +1945,40 @@ is the picker line: the shared `Checkbox` owns the row and the chip rides in as
 its label node, so a picker row reads exactly like the chip the agent will
 carry. A label is the user's own ad-hoc word ("prod", "finance") — it never
 borrows status language, and it never encodes authority. Recorded on `/design-system` → *Agent label chips*.
+
+### Account link pill (`LinkChip`, #4472)
+
+`LinkChip` is an **outline navigation pill**: a `rounded-full` pill with a 1px
+`--v2-border` edge, `--v2-ink-2` text, and a trailing lucide `ArrowRight`
+rendered through `Icon` (never a raw `→` — § *Arrows*). It wraps a Next `Link`,
+so it is a control, and it takes only `href` and `children`: the primitive holds
+no copy, and its accessible name is exactly the visible text, because the arrow
+is decorative (`aria-hidden`). Hover lifts the edge to `--v2-border-strong` and
+the text to `--v2-ink`; focus is the one treatment from § *Focus rings*
+(`ring-2 ring-brand/80`). `truncate` keeps a long name inside the stadium
+instead of wrapping it into an over-rounded blob — the same one-line rule
+`StatusBadge` carries (#2147) — and the icon is `shrink-0` so it never
+collapses.
+
+**How it differs from every other pill in the system**, which is why it is a
+new pattern rather than a reuse:
+
+- `LabelChip` (§ *Agent label chips*) is a **filled categorisation** pill and is
+  never a control — it says what an agent is tagged as.
+- `FilterPill` and `ListToolbar`'s status-row chips are **filter toggles** — they
+  change what a list shows, and their selected state is the point.
+- `AccountingBadge` (`components/accounting/AccountingBadge.tsx`) is the nearest
+  precedent — a pill-shaped `Link` — but it wraps a **filled status**
+  `StatusBadge`: the tint carries the payment's state, and it is not a
+  documented pattern.
+
+`LinkChip` is the one **outline pill that navigates to an object**, and it
+carries no status at all. First consumer: Settings → Security → *Passkeys and
+wallets* (#4472), where each account a passkey approves is one pill linking to
+`/accounts/<id>?tab=security`. The owner approved the pattern on 2026-10-27
+(CLAUDE.md *UI Surface Hierarchy*); the entry and the `/design-system` specimen
+land ahead of the consumer in the same PR. Recorded on `/design-system` →
+*Account link pills*.
 
 ### The Receive dialog (`ReceiveDialog.tsx`, #4094, mockup note 9 via #4167)
 

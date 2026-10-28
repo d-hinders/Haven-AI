@@ -22,9 +22,9 @@ import { config } from '../../config.js'
  * **Manual grant/revoke (v1, until billing exists):**
  *   how an account becomes entitled (#2861):
  *     HAVEN_ACCOUNTING_ENTITLEMENT_MODE=all      every account on the deployment
- *                                               (dev; no row needed, none written)
+ *                                               (no row needed, none written)
  *     HAVEN_ACCOUNTING_ENTITLEMENT_MODE=granted  the account must hold a row
- *                                               (the default; what prod runs)
+ *                                               (the default, also when unset)
  *   In `granted` mode a row is written with grantEntitlement(userId,
  *   'accounting_feed') — there is deliberately no route for it yet; a paid
  *   tier will own that. The hand-written INSERT this comment used to carry is
@@ -53,10 +53,11 @@ export async function revokeEntitlement(userId: string, entitlement: string): Pr
  * entitled. Env alone can never enable it on a self-hosted box.
  *
  * #2861: "entitled" is decided by `config.accountingEntitlementMode`. In
- * `granted` mode (the default, and what prod runs) the account must hold the
- * entitlement row — today's gate, unchanged. In `all` mode every account on the
- * deployment is entitled and the row is not consulted; that is what dev runs so
- * a new user can connect without anyone inserting a row by hand. The
+ * `granted` mode (the default) the account must hold the entitlement row —
+ * today's gate, unchanged. In `all` mode every account on the deployment is
+ * entitled and the row is not consulted, so a new user can connect without
+ * anyone inserting a row by hand. Which deployment runs which mode is in the
+ * Configuration table of docs/operations/accounting-feed.md. The
  * hosted + flag checks come FIRST either way, so `all` on a self-hosted box or
  * with the flag off still answers false.
  */

@@ -518,8 +518,10 @@ export const config = {
   // Who is entitled to the accounting feed once it is on (#2861):
   //   granted — the account must hold the entitlement row (today's behaviour;
   //             the default, so prod is unchanged by this variable's absence)
-  //   all     — every account on this deployment is entitled. Dev only. The
-  //             entitlement table stays for the tiers that come later.
+  //   all     — every account on this deployment is entitled; no row is read
+  //             or written. The entitlement table stays for the tiers that
+  //             come later. Which deployment runs which mode is in the
+  //             Configuration table of docs/operations/accounting-feed.md.
   // An invalid non-empty value refuses the boot, on the same reasoning as
   // HAVEN_CONNECTOR_CHANNEL above: a typo must not silently fall back to
   // "granted" and look like the feature is off when it is merely misspelled.
@@ -626,7 +628,7 @@ export function parseAccountingEntitlementMode(raw: string | undefined | null): 
   throw new Error(
     `HAVEN_ACCOUNTING_ENTITLEMENT_MODE is set to ${JSON.stringify(raw)}; it must be "granted" ` +
       '(the account holds an entitlement row) or "all" (every account on this deployment). ' +
-      'Refusing to start rather than falling back, because a misspelled "all" on dev would ' +
+      'Refusing to start rather than falling back, because a misspelled "all" would ' +
       'silently mean "granted" and look like the feed is off for everyone.',
   )
 }

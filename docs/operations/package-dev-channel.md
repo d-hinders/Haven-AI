@@ -1179,3 +1179,14 @@ compatibility contract — the manifest table, version skew, `--doctor`'s checks
 > states. Comment only: no step, guard, channel resolution or dist-tag behaviour
 > changes. Scope of this note: that comment. Nothing else in this document was
 > re-verified.
+
+> **Re-verified unchanged (#4514, 2026-10-28 — descriptive text in
+> `packages/backend/src/config.ts`).** The comment over
+> `accountingEntitlementMode` and the text of the
+> `parseAccountingEntitlementMode` boot-refusal message no longer name a
+> deployment as the one that runs mode `all`. The parser still accepts exactly
+> `granted` and `all` and still refuses the boot on any other non-empty value,
+> so step 5's "the same refuse-the-boot shape for its own two values" still
+> holds. `parseConnectorChannel` and `HAVEN_CONNECTOR_CHANNEL` are untouched.
+> Scope of this note: confirming that. Nothing else in this document was
+> re-verified.

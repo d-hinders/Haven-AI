@@ -64,8 +64,15 @@ export const listMenuPanelClasses =
  * removes the flex item's automatic minimum height, so without this a menu
  * longer than `max-h` shrank every row equally and nothing ever scrolled.
  * The row keeps its natural height; the panel scrolls instead.
+ *
+ * The `aria-disabled:` variants (#4512) are the locked disclosure row's
+ * treatment: ink-3 text, no hover fill, a default cursor, and the focus ring
+ * kept. They are inert on every other row — and on `PeriodPicker`, which
+ * shares this string and sets no `aria-disabled`. `aria-disabled` rather than
+ * `disabled` is deliberate: `ITEM_SELECTOR` skips `[disabled]`, so a native
+ * disabled row would drop out of the arrow/Home/End walk.
  */
-export const listMenuItemClasses = `grid min-h-11 w-full shrink-0 grid-cols-[1rem_minmax(0,1fr)_auto] items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm text-[var(--v2-ink)] hover:bg-[var(--v2-surface)] focus-visible:bg-[var(--v2-surface)] sm:min-h-0 ${listFocusRing}`
+export const listMenuItemClasses = `grid min-h-11 w-full shrink-0 grid-cols-[1rem_minmax(0,1fr)_auto] items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm text-[var(--v2-ink)] hover:bg-[var(--v2-surface)] focus-visible:bg-[var(--v2-surface)] aria-disabled:text-[var(--v2-ink-3)] aria-disabled:hover:bg-transparent aria-disabled:cursor-default sm:min-h-0 ${listFocusRing}`
 
 export const menuViewportMargin = 8
 

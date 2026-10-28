@@ -525,8 +525,14 @@ const SHEET_INPUT_CLASSES = 'h-4 w-4 shrink-0 accent-[var(--v2-brand)] focus-vis
  * A collapsed option group's disclosure row in the phone sheet (#4452). A
  * plain `<button>` with `aria-expanded`, reached by Tab: the sheet is a dialog
  * of form controls, not a menu, so it takes no menu roles.
+ *
+ * The `aria-disabled:` variants (#4512) are the locked row's treatment —
+ * ink-3 text, no hover fill, a default cursor, focus ring kept — and are inert
+ * on every other row. `aria-disabled` rather than `disabled`: a native
+ * disabled button leaves the Tab order, and the locked row must stay
+ * reachable.
  */
-const SHEET_GROUP_TOGGLE_CLASSES = `flex min-h-11 w-full items-center gap-2 rounded-md px-2.5 text-left text-sm text-[var(--v2-ink-2)] hover:bg-[var(--v2-surface)] ${listFocusRing}`
+const SHEET_GROUP_TOGGLE_CLASSES = `flex min-h-11 w-full items-center gap-2 rounded-md px-2.5 text-left text-sm text-[var(--v2-ink-2)] hover:bg-[var(--v2-surface)] aria-disabled:text-[var(--v2-ink-3)] aria-disabled:hover:bg-transparent aria-disabled:cursor-default ${listFocusRing}`
 
 /**
  * The phone sheet. Native radios and checkboxes in fieldsets — a dialog of
@@ -567,6 +573,29 @@ function FilterSheet({
   // is derived on every render by `planFacetOptions`, so a selected grouped
   // value is never hidden behind a collapsed row.
   const [expandedGroups, setExpandedGroups] = useState<Record<string, string[]>>({})
+  // The group the user just expanded (#4512), set in the toggle's click
+  // handler and consumed once by the effect below. A ref, not state: it must
+  // not cause a render of its own, and it must survive the re-render the
+  // expansion does.
+  const justExpanded = useRef<{ facetId: string; groupId: string } | null>(null)
+  // Each group's disclosure row, so the effect can find the row it revealed:
+  // the first revealed row is the toggle's next element sibling.
+  const toggleRefs = useRef(new Map<string, HTMLButtonElement>())
+  // Expanding scrolls the first revealed row into view (#4512), in the sheet
+  // as in the menu: the sheet scrolls in its own `overflow-y-auto` body, and
+  // with a long active-agent list the toggle starts at or below the fold, so
+  // the rows it reveals are off-screen too. Runs only for a group the user
+  // just expanded — never on collapse, never on the locked toggle, and never
+  // for a group open because it holds the selection.
+  useEffect(() => {
+    const target = justExpanded.current
+    if (!target) return
+    justExpanded.current = null
+    const toggle = toggleRefs.current.get(`${target.facetId}:${target.groupId}`)
+    // The optional call is deliberate: jsdom has no `scrollIntoView`.
+    const first = toggle?.nextElementSibling as HTMLElement | null | undefined
+    first?.scrollIntoView?.({ block: 'nearest' })
+  }, [expandedGroups])
   useFocusTrap(panelRef, true)
   useEscapeToClose(true, onClose)
   useBodyScrollLock(true)
@@ -658,16 +687,29 @@ function FilterSheet({
                   <Fragment key={`group-${group.group.id}`}>
                     {/* The same split as the menu, as a disclosure button
                         (#4452): the sheet is not a menu, so this is reached by
-                        Tab and carries `aria-expanded` rather than a menu role. */}
+                        Tab and carries `aria-expanded` rather than a menu role.
+                        A group holding the selection is locked (#4512):
+                        `aria-disabled` and never `disabled`, so it stays in
+                        the Tab order, and clicking it stays a no-op. */}
                     <button
+                      ref={(el) => {
+                        const key = `${facet.id}:${group.group.id}`
+                        if (el) toggleRefs.current.set(key, el)
+                        else toggleRefs.current.delete(key)
+                      }}
                       type="button"
                       aria-expanded={group.open}
-                      onClick={() =>
+                      aria-disabled={group.holdsSelection || undefined}
+                      onClick={() => {
+                        // Only a group the user is OPENING scrolls its rows
+                        // into view: not a collapse, not the locked toggle.
+                        justExpanded.current =
+                          !group.holdsSelection && !group.open ? { facetId: facet.id, groupId: group.group.id } : null
                         setExpandedGroups((prev) => ({
                           ...prev,
                           [facet.id]: toggleFacetGroup(prev[facet.id] ?? [], group),
                         }))
-                      }
+                      }}
                       className={SHEET_GROUP_TOGGLE_CLASSES}
                     >
                       <Icon

@@ -18,9 +18,23 @@ describe('planFacetOptions — the split both renderers share (#4452)', () => {
     expect(plan.groups[1].options.map((o) => o.value)).toEqual(['revoked'])
   })
 
-  it('names each toggle with its own count and label', () => {
-    const plan = planFacetOptions(OPTIONS, [])
-    expect(plan.groups.map((g) => g.toggleLabel)).toEqual(['Show 2 inactive', 'Show 1 revoked'])
+  it('names each toggle with its own count and label, and the label carries the state (#4512)', () => {
+    const collapsed = planFacetOptions(OPTIONS, [])
+    expect(collapsed.groups.map((g) => g.toggleLabel)).toEqual(['Show 2 inactive', 'Show 1 revoked'])
+
+    // Open because the user expanded it: the row now closes it.
+    const expanded = planFacetOptions(OPTIONS, [], ['inactive'])
+    expect(expanded.groups.map((g) => g.toggleLabel)).toEqual(['Hide 2 inactive', 'Show 1 revoked'])
+
+    // Open because it holds the selection: locked, so it names no action.
+    const locked = planFacetOptions(OPTIONS, ['archived'])
+    expect(locked.groups.map((g) => g.toggleLabel)).toEqual(['2 inactive', 'Show 1 revoked'])
+
+    // `holdsSelection` wins over `expanded`: the id being in the user's
+    // expanded list does not make a locked group read as an action.
+    const both = planFacetOptions(OPTIONS, ['archived'], ['inactive'])
+    expect(both.groups[0].holdsSelection).toBe(true)
+    expect(both.groups[0].toggleLabel).toBe('2 inactive')
   })
 
   it('is closed by default, open when the user expanded it, and open when it holds the selection', () => {

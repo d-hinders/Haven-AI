@@ -2748,18 +2748,47 @@ through this action**: a new export surface consumes it, it does not copy it
   the **chip includes it** (the chip spells the filter out in full). A page
   moves a status out of its option label and into `meta`; the label is then
   the plain name.
-- A facet option may carry a **`group`** (#4452): `{ id, label }` collapses a
-  long tail of options behind one disclosure row. Options stay one flat array,
-  so the URL codec, the chip summary and value clearing are unchanged.
-  Ungrouped rows come first, then one toggle per group reading "Show 14
-  inactive" (`facetGroupToggleLabel`); the group's rows appear when it is open.
+- A facet option may carry a **`group`** (#4452, #4512): `{ id, label }`
+  collapses a long tail of options behind one disclosure row. Options stay one
+  flat array, so the URL codec, the chip summary and value clearing are
+  unchanged. Ungrouped rows come first, then one toggle per group.
+  **The toggle's text carries the group's state** (`facetGroupToggleLabel`):
+  "Show 14 inactive" when collapsed, "Hide 14 inactive" when open, and
+  "14 inactive" when locked. The group's rows appear when it is open.
   In the menu the toggle is a `menuitem` with `aria-expanded`, so arrows, Home
   and End reach it, and it **stays mounted** when the group expands — focus is
   not lost and the next arrow key continues from it. In the phone sheet it is a
   disclosure `<button>` with `aria-expanded`, reached by Tab, because the sheet
-  is not a menu. A group holding the selected value is **open on every render**
-  (the URL value loads after mount, and `focusItem('checked')` must find the
-  row) and cannot be collapsed; any other group opens and closes on its toggle.
+  is not a menu.
+  **Expanding scrolls the first revealed row into view**, in the menu and in
+  the sheet: the toggle is the menu's last row for every production facet, and
+  the sheet scrolls in its own `overflow-y-auto` body, so without the scroll a
+  click looks like it did nothing. The call is
+  `firstRevealedRow.scrollIntoView?.({ block: 'nearest' })` — optional because
+  jsdom has no `scrollIntoView` — and it runs after the re-render, only for a
+  group the user just expanded: never on collapse, never on the locked toggle,
+  and never for a group open because it holds the selection
+  (`focusItem('checked')` already focuses and scrolls to that row). Focus stays
+  on the toggle. `nearest` also scrolls the page when the panel sits below the
+  fold; that is accepted, because it brings the rows the user asked for into
+  view.
+  A group holding the selected value is **open on every render** (the URL value
+  loads after mount, and `focusItem('checked')` must find the row) and cannot
+  be collapsed; any other group opens and closes on its toggle. `holdsSelection`
+  **is** the locked flag — there is no separate field. The locked toggle is a
+  state, not an action: it carries `aria-disabled="true"` and
+  `aria-expanded="true"` and **never the `disabled` attribute**, because
+  `ITEM_SELECTOR` skips `[disabled]` and a native `disabled` would take the
+  sheet button out of the Tab order. It stays reachable by arrows, Home and End
+  in the menu and by Tab in the sheet, and clicking it stays a no-op. Its
+  treatment rides on `aria-disabled:` variants of the existing class strings
+  (`aria-disabled:text-[var(--v2-ink-3)] aria-disabled:hover:bg-transparent
+  aria-disabled:cursor-default`), not a second class constant: ink-3 text, the
+  chevron still pointing down, a default cursor, no hover fill, and the focus
+  ring kept. `listMenuItemClasses` is shared with `PeriodPicker`, where the
+  variants are inert because it sets no `aria-disabled`.
+  In the sheet, picking an inactive agent live changes the toggle's text from
+  "Hide 1 inactive" to "1 inactive" as the group becomes locked.
   No `role="group"` wraps the grouped radios — that would split one radio set
   for screen readers. The split itself is one shared helper
   (`list-facet-groups.ts`), imported by both renderers.

@@ -663,6 +663,7 @@ describe('ListToolbar — a collapsed option group in the phone sheet (#4452)', 
     const toggle = within(sheet).getByRole('button', { name: 'Show 2 inactive' })
     expect(toggle.tagName).toBe('BUTTON')
     expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    expect(toggle).not.toHaveAttribute('aria-disabled')
     expect(within(sheet).getByRole('checkbox', { name: /^Active/ })).toBeInTheDocument()
     expect(within(sheet).queryByRole('checkbox', { name: /^Inactive/ })).not.toBeInTheDocument()
 
@@ -676,7 +677,8 @@ describe('ListToolbar — a collapsed option group in the phone sheet (#4452)', 
     expect(toggle).toHaveFocus()
 
     await user.click(toggle)
-    expect(within(sheet).getByRole('button', { name: 'Show 2 inactive' })).toHaveAttribute('aria-expanded', 'true')
+    // The text carries the state now (#4512): open reads "Hide".
+    expect(within(sheet).getByRole('button', { name: 'Hide 2 inactive' })).toHaveAttribute('aria-expanded', 'true')
     expect(within(sheet).getByRole('checkbox', { name: /^Inactive/ })).toBeInTheDocument()
     expect(within(sheet).getByRole('checkbox', { name: /^Archived/ })).toBeInTheDocument()
   })
@@ -690,8 +692,143 @@ describe('ListToolbar — a collapsed option group in the phone sheet (#4452)', 
 
     await user.click(screen.getByRole('button', { name: 'Filters (1)' }))
     const sheet = screen.getByRole('dialog', { name: 'Filters' })
-    expect(within(sheet).getByRole('button', { name: 'Show 2 inactive' })).toHaveAttribute('aria-expanded', 'true')
+    // Locked (#4512): open because it holds the selection, so it names no
+    // action — and it is `aria-disabled`, never `disabled`.
+    const locked = within(sheet).getByRole('button', { name: '2 inactive' })
+    expect(locked).toHaveAttribute('aria-expanded', 'true')
+    expect(locked).toHaveAttribute('aria-disabled', 'true')
+    expect(locked).not.toHaveAttribute('disabled')
+    expect(locked).not.toBeDisabled()
     expect(within(sheet).getByRole('checkbox', { name: /^Inactive/ })).toBeChecked()
+  })
+
+  it('the locked toggle stays in the Tab order and clicking it does not collapse the group (#4512)', async () => {
+    const user = userEvent.setup()
+    renderSheet({ ...GROUPED_EMPTY, facets: { status: ['inactive'] } })
+    await user.click(screen.getByRole('button', { name: 'Filters (1)' }))
+    const sheet = screen.getByRole('dialog', { name: 'Filters' })
+    const locked = within(sheet).getByRole('button', { name: '2 inactive' })
+
+    // A native `disabled` would take the row out of the Tab order.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    })
+    within(sheet).getByRole('checkbox', { name: /^Paused/ }).focus()
+    await user.tab()
+    expect(locked).toHaveFocus()
+
+    await user.click(locked)
+    expect(within(sheet).getByRole('button', { name: '2 inactive' })).toHaveAttribute('aria-expanded', 'true')
+    expect(within(sheet).getByRole('checkbox', { name: /^Inactive/ })).toBeInTheDocument()
+  })
+})
+
+describe('ListToolbar — expanding a group scrolls the revealed rows into view (#4512)', () => {
+  const GROUPED_FACETS: ListFacet[] = [
+    {
+      id: 'status',
+      label: 'Status',
+      selection: 'multi',
+      options: [
+        { value: 'active', label: 'Active', count: 2 },
+        { value: 'paused', label: 'Paused', count: 1 },
+        { value: 'inactive', label: 'Inactive', count: 14, group: { id: 'inactive', label: 'inactive' } },
+        { value: 'archived', label: 'Archived', count: 3, group: { id: 'inactive', label: 'inactive' } },
+      ],
+    },
+  ]
+  const GROUPED_EMPTY: ListState = { q: '', facets: { status: [] }, period: {} }
+
+  function renderSheet(initial: ListState = GROUPED_EMPTY) {
+    return render(
+      <ListToolbar
+        noun={noun}
+        state={initial}
+        onChange={() => {}}
+        filtering="browser"
+        facets={GROUPED_FACETS}
+        layout="phone"
+        count={{ shown: 3, total: 3 }}
+      />,
+    )
+  }
+
+  // jsdom has no `scrollIntoView` and `src/__tests__/setup.ts` does not stub
+  // it, so each test that asserts the scroll installs its own stub and
+  // restores it here — never a never-restored assignment.
+  const original = HTMLElement.prototype.scrollIntoView
+  afterEach(() => {
+    if (original) HTMLElement.prototype.scrollIntoView = original
+    else delete (HTMLElement.prototype as Partial<HTMLElement>).scrollIntoView
+  })
+
+  function stubScroll() {
+    const targets: HTMLElement[] = []
+    const spy = vi.fn(function (this: HTMLElement) {
+      targets.push(this)
+    })
+    HTMLElement.prototype.scrollIntoView = spy
+    return { spy, targets }
+  }
+
+  it('expanding calls it once, on the first revealed row, and focus stays on the toggle', async () => {
+    const user = userEvent.setup()
+    const { spy, targets } = stubScroll()
+    renderSheet()
+    await user.click(screen.getByRole('button', { name: 'Filters' }))
+    const sheet = screen.getByRole('dialog', { name: 'Filters' })
+    // The focus trap moves focus in on the next frame; let it settle before
+    // the click, so the assertion below is about the toggle and not the trap.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    })
+    const toggle = within(sheet).getByRole('button', { name: 'Show 2 inactive' })
+    await user.click(toggle)
+
+    expect(spy).toHaveBeenCalledTimes(1)
+    expect(spy).toHaveBeenCalledWith({ block: 'nearest' })
+    // The first revealed row is the toggle's next element sibling: the
+    // Inactive label.
+    expect(targets).toHaveLength(1)
+    expect(targets[0].tagName).toBe('LABEL')
+    expect(targets[0]).toHaveTextContent('Inactive')
+    expect(within(sheet).getByRole('button', { name: 'Hide 2 inactive' })).toHaveFocus()
+  })
+
+  it('collapsing does not call it', async () => {
+    const user = userEvent.setup()
+    const { spy } = stubScroll()
+    renderSheet()
+    await user.click(screen.getByRole('button', { name: 'Filters' }))
+    const sheet = screen.getByRole('dialog', { name: 'Filters' })
+    await user.click(within(sheet).getByRole('button', { name: 'Show 2 inactive' }))
+    spy.mockClear()
+
+    await user.click(within(sheet).getByRole('button', { name: 'Hide 2 inactive' }))
+    expect(within(sheet).getByRole('button', { name: 'Show 2 inactive' })).toHaveAttribute('aria-expanded', 'false')
+    expect(spy).not.toHaveBeenCalled()
+  })
+
+  it('clicking the locked toggle does not call it', async () => {
+    const user = userEvent.setup()
+    const { spy } = stubScroll()
+    renderSheet({ ...GROUPED_EMPTY, facets: { status: ['inactive'] } })
+    await user.click(screen.getByRole('button', { name: 'Filters (1)' }))
+    const sheet = screen.getByRole('dialog', { name: 'Filters' })
+    spy.mockClear()
+
+    await user.click(within(sheet).getByRole('button', { name: '2 inactive' }))
+    expect(spy).not.toHaveBeenCalled()
+  })
+
+  it('opening the sheet with a selection-holding group does not call it', async () => {
+    const user = userEvent.setup()
+    const { spy } = stubScroll()
+    renderSheet({ ...GROUPED_EMPTY, facets: { status: ['inactive'] } })
+    await user.click(screen.getByRole('button', { name: 'Filters (1)' }))
+    const sheet = screen.getByRole('dialog', { name: 'Filters' })
+    expect(within(sheet).getByRole('button', { name: '2 inactive' })).toHaveAttribute('aria-expanded', 'true')
+    expect(spy).not.toHaveBeenCalled()
   })
 })
 

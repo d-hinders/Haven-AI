@@ -55,7 +55,7 @@ export async function revokeEntitlement(userId: string, entitlement: string): Pr
  * #2861: "entitled" is decided by `config.accountingEntitlementMode`. In
  * `granted` mode (the default) the account must hold the entitlement row —
  * today's gate, unchanged. In `all` mode every account on the deployment is
- * entitled and the row is not consulted, so a new user can connect without
+ * entitled and the row is not consulted, so a new user's feed works without
  * anyone inserting a row by hand. Which deployment runs which mode is in the
  * Configuration table of docs/operations/accounting-feed.md. The
  * hosted + flag checks come FIRST either way, so `all` on a self-hosted box or

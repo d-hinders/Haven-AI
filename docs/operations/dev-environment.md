@@ -1715,3 +1715,15 @@ project owner — collaborators have Viewer access, not env-var write access.
 > dev-environment statements about connection states still hold. Scope of this
 > note: those two files. Nothing else in this document was re-read for it, and
 > `last-verified` is not bumped.
+
+> **Re-verified unchanged (#4514, 2026-10-28 — descriptive text in
+> `packages/backend/src/config.ts`).** The comment over
+> `accountingEntitlementMode` and the text of the
+> `parseAccountingEntitlementMode` boot-refusal message no longer name a
+> deployment as the one that runs mode `all`. The comment points at the
+> Configuration table in `docs/operations/accounting-feed.md` instead. The
+> parser, its two accepted values, its default and the condition that throws
+> are unchanged. This document does not name
+> `HAVEN_ACCOUNTING_ENTITLEMENT_MODE` or quote that message. Scope of this
+> note: those two passages. Nothing else in this document was re-read for it,
+> and `last-verified` is not bumped.

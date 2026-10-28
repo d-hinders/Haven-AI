@@ -14275,7 +14275,7 @@ export interface operations {
                         /** @description #2861: whether THIS account passes the entitlement check — in mode `granted` it holds the row, in mode `all` every account does. Always false when `hosted` or `enabled` is false, so the UI can tell "feature off" from "not entitled" without a second call. */
                         entitled: boolean;
                         /**
-                         * @description How entitlement is decided on this deployment (`HAVEN_ACCOUNTING_ENTITLEMENT_MODE`). `all` is the dev setting; production runs `granted`.
+                         * @description How entitlement is decided on this deployment (`HAVEN_ACCOUNTING_ENTITLEMENT_MODE`). `granted` (the default): the account must hold an entitlement row. `all`: every account on this deployment is entitled.
                          * @enum {string}
                          */
                         entitlementMode: "granted" | "all";

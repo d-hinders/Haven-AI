@@ -5005,7 +5005,7 @@ export const openapiSpec = {
                     entitlementMode: {
                       type: 'string',
                       enum: ['granted', 'all'],
-                      description: 'How entitlement is decided on this deployment (`HAVEN_ACCOUNTING_ENTITLEMENT_MODE`). `all` is the dev setting; production runs `granted`.',
+                      description: 'How entitlement is decided on this deployment (`HAVEN_ACCOUNTING_ENTITLEMENT_MODE`). `granted` (the default): the account must hold an entitlement row. `all`: every account on this deployment is entitled.',
                     },
                     available: { type: 'boolean', description: 'hosted AND enabled AND entitled — the one field a caller needs to decide whether to render the feed.' },
                     connected: { type: 'boolean', description: 'The caller has a live provider connection.' },

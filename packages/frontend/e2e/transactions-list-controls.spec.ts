@@ -261,8 +261,9 @@ test.describe('transactions list controls — 375px', () => {
     // Live, as on desktop: the tap applies and reaches the URL at once.
     await sheet.getByRole('group', { name: 'Direction' }).getByRole('radio', { name: 'Outgoing' }).check()
     await expect(page).toHaveURL(/direction=out/)
-    // The sheet's submit button ("Show 2 transactions"), not the inactive
-    // group's disclosure row — both start with "Show" (#4453).
+    // The sheet's submit button ("Show 2 transactions"). The inactive group's
+    // disclosure row no longer collides with it: once open it reads
+    // "Hide 1 inactive" (#4512).
     await sheet.getByRole('button', { name: /^Show \d+ (agents?|transactions?)$/ }).click()
     await expect(sheet).toBeHidden()
     await expect(toolbar.getByRole('button', { name: 'Remove Direction: Outgoing' })).toBeVisible()

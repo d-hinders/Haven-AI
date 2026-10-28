@@ -35,7 +35,14 @@ export interface FacetGroupPlan<O extends GroupableFacetOption> {
    * after mount, and `focusItem('checked')` must find the selected row.
    */
   open: boolean
-  /** The disclosure row's text: "Show 14 inactive". */
+  /**
+   * The disclosure row's text, carrying the group's state (#4512): "Show 14
+   * inactive" collapsed, "Hide 14 inactive" open, "14 inactive" locked.
+   *
+   * `holdsSelection` IS the locked flag — there is no separate field. A group
+   * open because it holds the selection cannot be collapsed, so its row names
+   * no action.
+   */
   toggleLabel: string
 }
 
@@ -78,7 +85,13 @@ export function planFacetOptions<O extends GroupableFacetOption>(
   for (const plan of groups) {
     plan.holdsSelection = plan.options.some((option) => selected.includes(option.value))
     plan.open = plan.holdsSelection || expanded.includes(plan.group.id)
-    plan.toggleLabel = facetGroupToggleLabel(plan.options.length, plan.group.label)
+    // `holdsSelection` wins over `expanded`: a group that holds the selection
+    // is locked even when its id is also in the user's expanded list.
+    plan.toggleLabel = facetGroupToggleLabel(
+      plan.options.length,
+      plan.group.label,
+      plan.holdsSelection ? 'locked' : plan.open ? 'open' : 'collapsed',
+    )
   }
 
   return { ungrouped, groups }

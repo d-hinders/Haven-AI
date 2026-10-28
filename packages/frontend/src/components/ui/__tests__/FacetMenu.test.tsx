@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { FacetMenu, type ListFacet } from '../FacetMenu'
 import { listMenuItemClasses, listMenuPanelClasses, menuShift } from '../list-menu'
 import { PeriodPicker } from '../PeriodPicker'
@@ -210,7 +210,11 @@ describe('FacetMenu — a collapsed option group (#4452)', () => {
     ],
   }
 
-  const toggle = () => screen.getByRole('menuitem', { name: 'Show 2 inactive' })
+  // One helper per state (#4512): the row's text carries the group's state, so
+  // a single "Show 2 inactive" lookup would only ever find the collapsed row.
+  const collapsedToggle = () => screen.getByRole('menuitem', { name: 'Show 2 inactive' })
+  const openToggle = () => screen.getByRole('menuitem', { name: 'Hide 2 inactive' })
+  const lockedToggle = () => screen.getByRole('menuitem', { name: '2 inactive' })
 
   it('hides the group until its toggle is used, and the toggle names the count', async () => {
     const user = userEvent.setup()
@@ -221,7 +225,8 @@ describe('FacetMenu — a collapsed option group (#4452)', () => {
     expect(screen.getAllByRole('menuitemcheckbox').map((r) => r.getAttribute('aria-checked'))).toEqual(['false', 'false'])
     expect(screen.getByRole('menuitemcheckbox', { name: /^Active/ })).toBeInTheDocument()
     expect(screen.getByRole('menuitemcheckbox', { name: /^Paused/ })).toBeInTheDocument()
-    expect(toggle()).toHaveAttribute('aria-expanded', 'false')
+    expect(collapsedToggle()).toHaveAttribute('aria-expanded', 'false')
+    expect(collapsedToggle()).not.toHaveAttribute('aria-disabled')
     expect(screen.queryByRole('menuitemcheckbox', { name: /^Inactive/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('menuitemcheckbox', { name: /^Archived/ })).not.toBeInTheDocument()
   })
@@ -236,34 +241,57 @@ describe('FacetMenu — a collapsed option group (#4452)', () => {
     await user.keyboard('{ArrowDown}')
     expect(screen.getByRole('menuitemcheckbox', { name: /^Paused/ })).toHaveFocus()
     await user.keyboard('{ArrowDown}')
-    expect(toggle()).toHaveFocus()
+    expect(collapsedToggle()).toHaveFocus()
     await user.keyboard('{Home}')
     expect(screen.getByRole('menuitemcheckbox', { name: /^Active/ })).toHaveFocus()
     await user.keyboard('{End}')
-    expect(toggle()).toHaveFocus()
+    expect(collapsedToggle()).toHaveFocus()
+  })
+
+  it('End and the arrows reach the LOCKED toggle too — `aria-disabled`, never `disabled` (#4512)', async () => {
+    const user = userEvent.setup()
+    render(<Controlled facet={GROUPED} initial={['inactive']} />)
+    const trigger = screen.getByRole('button', { name: 'Status: Inactive' })
+    trigger.focus()
+    await user.keyboard('{ArrowDown}')
+    // `focusItem('checked')` lands on the selected row inside the open group.
+    expect(screen.getByRole('menuitemcheckbox', { name: /^Inactive/ })).toHaveFocus()
+    // The revealed rows are in the walk, so End reaches the last of them...
+    await user.keyboard('{End}')
+    expect(screen.getByRole('menuitemcheckbox', { name: /^Archived/ })).toHaveFocus()
+    // ...and the arrows walk back onto the locked toggle, which a native
+    // `disabled` would have removed from `ITEM_SELECTOR`.
+    await user.keyboard('{ArrowUp}')
+    expect(screen.getByRole('menuitemcheckbox', { name: /^Inactive/ })).toHaveFocus()
+    await user.keyboard('{ArrowUp}')
+    expect(lockedToggle()).toHaveFocus()
+    await user.keyboard('{ArrowDown}')
+    expect(screen.getByRole('menuitemcheckbox', { name: /^Inactive/ })).toHaveFocus()
+    await user.keyboard('{Home}')
+    expect(screen.getByRole('menuitemcheckbox', { name: /^Active/ })).toHaveFocus()
   })
 
   it('Enter and Space expand it, focus stays on it, and the next arrow continues from it', async () => {
     const user = userEvent.setup()
     render(<Controlled facet={GROUPED} />)
     await user.click(screen.getByRole('button', { name: 'Status: All' }))
-    toggle().focus()
+    collapsedToggle().focus()
 
     await user.keyboard('{Enter}')
-    // Still mounted, still focused, now expanded.
-    expect(toggle()).toHaveAttribute('aria-expanded', 'true')
-    expect(toggle()).toHaveFocus()
+    // Still mounted, still focused, now expanded — and the text says so.
+    expect(openToggle()).toHaveAttribute('aria-expanded', 'true')
+    expect(openToggle()).toHaveFocus()
     expect(screen.getByRole('menuitemcheckbox', { name: /^Inactive/ })).toBeInTheDocument()
     expect(screen.getByRole('menuitemcheckbox', { name: /^Archived/ })).toBeInTheDocument()
 
     await user.keyboard('{ArrowDown}')
     expect(screen.getByRole('menuitemcheckbox', { name: /^Inactive/ })).toHaveFocus()
     await user.keyboard('{ArrowUp}')
-    expect(toggle()).toHaveFocus()
+    expect(openToggle()).toHaveFocus()
 
     await user.keyboard(' ')
-    expect(toggle()).toHaveAttribute('aria-expanded', 'false')
-    expect(toggle()).toHaveFocus()
+    expect(collapsedToggle()).toHaveAttribute('aria-expanded', 'false')
+    expect(collapsedToggle()).toHaveFocus()
     expect(screen.queryByRole('menuitemcheckbox', { name: /^Inactive/ })).not.toBeInTheDocument()
   })
 
@@ -273,7 +301,7 @@ describe('FacetMenu — a collapsed option group (#4452)', () => {
     const trigger = screen.getByRole('button', { name: 'Status: Inactive' })
     trigger.focus()
     await user.keyboard('{ArrowDown}')
-    expect(toggle()).toHaveAttribute('aria-expanded', 'true')
+    expect(lockedToggle()).toHaveAttribute('aria-expanded', 'true')
     expect(screen.getByRole('menuitemcheckbox', { name: /^Inactive/ })).toHaveAttribute('aria-checked', 'true')
     expect(screen.getByRole('menuitemcheckbox', { name: /^Inactive/ })).toHaveFocus()
   })
@@ -286,17 +314,29 @@ describe('FacetMenu — a collapsed option group (#4452)', () => {
     const trigger = screen.getByRole('button', { name: 'Status: Archived' })
     trigger.focus()
     await user.keyboard('{ArrowDown}')
-    expect(toggle()).toHaveAttribute('aria-expanded', 'true')
+    expect(lockedToggle()).toHaveAttribute('aria-expanded', 'true')
     expect(screen.getByRole('menuitemcheckbox', { name: /^Archived/ })).toHaveFocus()
   })
 
-  it('a group holding the selection cannot be collapsed', async () => {
+  it('a group holding the selection is locked: it reads as a state, carries aria-disabled and never disabled (#4512)', async () => {
     const user = userEvent.setup()
     render(<Controlled facet={GROUPED} initial={['inactive']} />)
     await user.click(screen.getByRole('button', { name: 'Status: Inactive' }))
-    expect(toggle()).toHaveAttribute('aria-expanded', 'true')
-    await user.click(toggle())
-    expect(toggle()).toHaveAttribute('aria-expanded', 'true')
+    expect(lockedToggle()).toHaveAttribute('aria-expanded', 'true')
+    expect(lockedToggle()).toHaveAttribute('aria-disabled', 'true')
+    // `disabled` would drop the row out of `ITEM_SELECTOR`'s arrow walk.
+    expect(lockedToggle()).not.toHaveAttribute('disabled')
+    expect(lockedToggle()).not.toBeDisabled()
+    // The locked treatment rides on the shared class string, not a second one.
+    expect(lockedToggle().className).toBe(listMenuItemClasses)
+    expect(lockedToggle().className.split(/\s+/)).toEqual(
+      expect.arrayContaining(['aria-disabled:text-[var(--v2-ink-3)]', 'aria-disabled:hover:bg-transparent', 'aria-disabled:cursor-default']),
+    )
+    // The chevron stays, pointing down: the group is open.
+    expect(lockedToggle().querySelector('svg')?.getAttribute('class')).not.toContain('-rotate-90')
+
+    await user.click(lockedToggle())
+    expect(lockedToggle()).toHaveAttribute('aria-expanded', 'true')
     expect(screen.getByRole('menuitemcheckbox', { name: /^Inactive/ })).toBeInTheDocument()
   })
 
@@ -315,7 +355,7 @@ describe('FacetMenu — a collapsed option group (#4452)', () => {
     const user = userEvent.setup()
     render(<Controlled facet={{ ...GROUPED, selection: 'single' }} />)
     await user.click(screen.getByRole('button', { name: 'Status: All' }))
-    await user.click(toggle())
+    await user.click(collapsedToggle())
     expect(screen.queryByRole('group')).not.toBeInTheDocument()
     // The toggle is a plain `menuitem`, not a radio: it never joins the set.
     expect(screen.getAllByRole('menuitemradio').map((r) => r.textContent)).toEqual([
@@ -325,7 +365,90 @@ describe('FacetMenu — a collapsed option group (#4452)', () => {
       'Inactive14',
       'Archived3',
     ])
-    expect(screen.getAllByRole('menuitem').map((r) => r.textContent)).toEqual(['Show 2 inactive'])
+    expect(screen.getAllByRole('menuitem').map((r) => r.textContent)).toEqual(['Hide 2 inactive'])
+  })
+})
+
+describe('FacetMenu — expanding scrolls the revealed rows into view (#4512)', () => {
+  const GROUPED: ListFacet = {
+    id: 'status',
+    label: 'Status',
+    selection: 'multi',
+    options: [
+      { value: 'active', label: 'Active', count: 2 },
+      { value: 'paused', label: 'Paused', count: 1 },
+      { value: 'inactive', label: 'Inactive', count: 14, group: { id: 'inactive', label: 'inactive' } },
+      { value: 'archived', label: 'Archived', count: 3, group: { id: 'inactive', label: 'inactive' } },
+    ],
+  }
+
+  // jsdom has no `scrollIntoView` and `src/__tests__/setup.ts` does not stub
+  // it, so each test that asserts the scroll installs its own stub and
+  // restores it here — never a never-restored assignment.
+  const original = HTMLElement.prototype.scrollIntoView
+  afterEach(() => {
+    if (original) HTMLElement.prototype.scrollIntoView = original
+    else delete (HTMLElement.prototype as Partial<HTMLElement>).scrollIntoView
+  })
+
+  function stubScroll() {
+    // Record the element the call ran on: `scrollIntoView` is called as a
+    // method, so `this` is the row.
+    const targets: HTMLElement[] = []
+    const spy = vi.fn(function (this: HTMLElement) {
+      targets.push(this)
+    })
+    HTMLElement.prototype.scrollIntoView = spy
+    return { spy, targets }
+  }
+
+  it('expanding a collapsed group calls it once, on the first revealed row, and focus stays on the toggle', async () => {
+    const user = userEvent.setup()
+    const { spy, targets } = stubScroll()
+    render(<Controlled facet={GROUPED} />)
+    await user.click(screen.getByRole('button', { name: 'Status: All' }))
+    const toggle = screen.getByRole('menuitem', { name: 'Show 2 inactive' })
+    await user.click(toggle)
+
+    expect(spy).toHaveBeenCalledTimes(1)
+    expect(spy).toHaveBeenCalledWith({ block: 'nearest' })
+    expect(targets).toEqual([screen.getByRole('menuitemcheckbox', { name: /^Inactive/ })])
+    expect(screen.getByRole('menuitem', { name: 'Hide 2 inactive' })).toHaveFocus()
+  })
+
+  it('collapsing does not call it', async () => {
+    const user = userEvent.setup()
+    const { spy } = stubScroll()
+    render(<Controlled facet={GROUPED} />)
+    await user.click(screen.getByRole('button', { name: 'Status: All' }))
+    await user.click(screen.getByRole('menuitem', { name: 'Show 2 inactive' }))
+    spy.mockClear()
+
+    await user.click(screen.getByRole('menuitem', { name: 'Hide 2 inactive' }))
+    expect(screen.getByRole('menuitem', { name: 'Show 2 inactive' })).toHaveAttribute('aria-expanded', 'false')
+    expect(spy).not.toHaveBeenCalled()
+  })
+
+  it('clicking the locked toggle does not call it', async () => {
+    const user = userEvent.setup()
+    const { spy } = stubScroll()
+    render(<Controlled facet={GROUPED} initial={['inactive']} />)
+    await user.click(screen.getByRole('button', { name: 'Status: Inactive' }))
+    spy.mockClear()
+
+    await user.click(screen.getByRole('menuitem', { name: '2 inactive' }))
+    expect(spy).not.toHaveBeenCalled()
+  })
+
+  it('opening a menu whose group holds the selection does not call it — focusItem("checked") already lands there', async () => {
+    const user = userEvent.setup()
+    const { spy } = stubScroll()
+    render(<Controlled facet={GROUPED} initial={['inactive']} />)
+    const trigger = screen.getByRole('button', { name: 'Status: Inactive' })
+    trigger.focus()
+    await user.keyboard('{ArrowDown}')
+    expect(screen.getByRole('menuitemcheckbox', { name: /^Inactive/ })).toHaveFocus()
+    expect(spy).not.toHaveBeenCalled()
   })
 })
 

@@ -1163,40 +1163,47 @@ function FacetPrimitivesExample() {
 }
 
 /**
- * A collapsed option group (#4452): a long facet whose inactive tail hides
- * behind one disclosure row, "Show 4 inactive". Ungrouped rows come first; the
+ * A collapsed option group (#4452, #4512): a long facet whose inactive tail
+ * hides behind one disclosure row. The row's text carries the group's state —
+ * "Show 4 inactive" collapsed, "Hide 4 inactive" open, "4 inactive" locked —
+ * and the locked variant (a group open because it holds the selected value)
+ * carries `aria-disabled`, never `disabled`. Ungrouped rows come first; the
  * toggle is a `menuitem` with `aria-expanded`, so arrows, Home and End reach
- * it, and it stays mounted when the group expands.
+ * it, and it stays mounted when the group expands. Expanding scrolls the first
+ * revealed row into view.
  */
 function GroupedFacetExample() {
   const [agent, setAgent] = useState<string[]>([])
+  // The locked state (#4512): the selected value sits in the group, so the
+  // group is open on every render and its toggle names no action.
+  const [lockedAgent, setLockedAgent] = useState<string[]>(['a4'])
+  const options = [
+    { value: 'a1', label: 'Agent naming' },
+    { value: 'a2', label: 'Atlas' },
+    { value: 'a3', label: 'Demo agent', group: { id: 'inactive', label: 'inactive' } },
+    { value: 'a4', label: 'Lovable Dev', group: { id: 'inactive', label: 'inactive' } },
+    {
+      value: 'a5',
+      label: 'Lovable Dev preview deployment helper',
+      meta: 'Revoked',
+      group: { id: 'inactive', label: 'inactive' },
+    },
+    {
+      value: 'a6',
+      label: 'Quarterly procurement research agent',
+      meta: 'Paused',
+      group: { id: 'inactive', label: 'inactive' },
+    },
+  ]
   return (
     <div className="flex flex-wrap items-center gap-2" data-testid="ds-list-controls-grouped">
+      <FacetMenu facet={{ id: 'agent', label: 'Initiator', options }} value={agent} onChange={setAgent} />
+      {/* The locked render: the group holds the selection, so its toggle reads
+          "4 inactive" and is `aria-disabled` — reachable, but not an action. */}
       <FacetMenu
-        facet={{
-          id: 'agent',
-          label: 'Initiator',
-          options: [
-            { value: 'a1', label: 'Agent naming' },
-            { value: 'a2', label: 'Atlas' },
-            { value: 'a3', label: 'Demo agent', group: { id: 'inactive', label: 'inactive' } },
-            { value: 'a4', label: 'Lovable Dev', group: { id: 'inactive', label: 'inactive' } },
-            {
-              value: 'a5',
-              label: 'Lovable Dev preview deployment helper',
-              meta: 'Revoked',
-              group: { id: 'inactive', label: 'inactive' },
-            },
-            {
-              value: 'a6',
-              label: 'Quarterly procurement research agent',
-              meta: 'Paused',
-              group: { id: 'inactive', label: 'inactive' },
-            },
-          ],
-        }}
-        value={agent}
-        onChange={setAgent}
+        facet={{ id: 'agentLocked', label: 'Initiator (locked)', options }}
+        value={lockedAgent}
+        onChange={setLockedAgent}
       />
     </div>
   )
@@ -3550,7 +3557,7 @@ export default function DesignSystemPage() {
           <ListControlsState label="No All row — a single-select facet whose every value is a real choice (allLabel: null): Agents' Archived, Hidden by default. The default is untinted and raises no chip; Shown is a filter, and removing its chip returns to Hidden. A string allLabel renames the All row instead.">
             <NoAllFacetExample />
           </ListControlsState>
-          <ListControlsState label="A collapsed option group (#4452) — a facet's long tail hides behind one disclosure row, “Show 4 inactive”. Ungrouped rows come first, then one toggle per group. The toggle is a menuitem with aria-expanded, so arrows, Home and End reach it, and it stays mounted when the group expands: focus is not lost and the next arrow continues from it. A group holding the selected value is open on every render and cannot be collapsed. The phone sheet draws the same split as a Tab-reachable disclosure button.">
+          <ListControlsState label="A collapsed option group (#4452, #4512) — a facet's long tail hides behind one disclosure row whose text carries the group's state: “Show 4 inactive” collapsed, “Hide 4 inactive” open, “4 inactive” locked. Ungrouped rows come first, then one toggle per group. The toggle is a menuitem with aria-expanded, so arrows, Home and End reach it, and it stays mounted when the group expands: focus is not lost and the next arrow continues from it. Expanding scrolls the first revealed row into view. A group holding the selected value is open on every render and cannot be collapsed: it reads as a state, carries aria-disabled (never disabled, which would drop it out of the arrow walk) and keeps its focus ring. The second menu is that locked render. The phone sheet draws the same split as a Tab-reachable disclosure button.">
             <GroupedFacetExample />
           </ListControlsState>
         </div>

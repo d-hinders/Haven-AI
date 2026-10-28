@@ -1,6 +1,6 @@
 'use client'
 
-import { Fragment, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import { Check, ChevronDown } from 'lucide-react'
 import { FilterPill } from '@haven_ai/ui/FilterPill'
 import { Icon } from '@/components/ui/Icon'
@@ -23,8 +23,9 @@ export interface ListFacetOption {
   count?: number
   /**
    * A collapsed option group (#4452): a long tail of options behind one
-   * disclosure row ("Show 14 inactive"). Options stay one flat array, so the
-   * URL codec, the chip summary and value clearing are unchanged.
+   * disclosure row ("Show 14 inactive" collapsed, "Hide 14 inactive" open,
+   * "14 inactive" locked). Options stay one flat array, so the URL codec, the
+   * chip summary and value clearing are unchanged.
    */
   group?: FacetOptionGroup
 }
@@ -67,13 +68,16 @@ export interface FacetMenuProps {
  * - **Pills**: the same facet drawn as a row of toggle buttons
  *   (`aria-pressed`, the `FilterPill` primitive) for a short category list.
  *   Pills are not menu items.
- * - **Collapsed option groups** (#4452): an option may carry a `group`, and a
- *   facet's long tail collapses behind one `menuitem` reading "Show 14
- *   inactive" with `aria-expanded`. Ungrouped rows come first. The toggle
- *   stays mounted when the group expands, so focus is not lost and the next
- *   arrow key continues from it; a group holding the selection is open on
- *   every render and cannot be collapsed. The split itself lives in
- *   `list-facet-groups.ts`, shared with the phone sheet.
+ * - **Collapsed option groups** (#4452, #4512): an option may carry a `group`,
+ *   and a facet's long tail collapses behind one `menuitem` whose text carries
+ *   the group's state — "Show 14 inactive" collapsed, "Hide 14 inactive" open,
+ *   "14 inactive" locked — with `aria-expanded`. Ungrouped rows come first. The
+ *   toggle stays mounted when the group expands, so focus is not lost and the
+ *   next arrow key continues from it; expanding scrolls the first revealed row
+ *   into view. A group holding the selection is open on every render and cannot
+ *   be collapsed: it carries `aria-disabled` (never `disabled`, which would
+ *   drop it out of the arrow walk) and reads as a state, not an action. The
+ *   split itself lives in `list-facet-groups.ts`, shared with the phone sheet.
  * - A facet with one possible value is hidden — there is nothing to choose.
  * - `facet.allLabel` renames the "no filter" row, or (`null`, #4113) drops
  *   it for a single-select facet whose every value is a real choice
@@ -94,6 +98,29 @@ export function FacetMenu({ facet, value, onChange, allLabel: allLabelOverride, 
   // because the URL value loads after mount and a selected grouped row must
   // exist for `focusItem('checked')`.
   const [expandedGroups, setExpandedGroups] = useState<string[]>([])
+  // The group the user just expanded (#4512), set in the toggle's click
+  // handler and consumed once by the effect below. A ref, not state: it must
+  // not cause a render of its own, and it must survive the re-render the
+  // expansion does.
+  const justExpanded = useRef<string | null>(null)
+  // Each group's disclosure row, so the effect can find the row it revealed:
+  // the first revealed row is the toggle's next element sibling.
+  const toggleRefs = useRef(new Map<string, HTMLButtonElement>())
+  // Expanding scrolls the first revealed row into view (#4512). The toggle is
+  // the menu's last row for every production facet, so the rows it reveals
+  // land below the panel's scroll edge and a click otherwise looks inert.
+  // Runs only for a group the user just expanded: never on collapse, never on
+  // the locked toggle, and never for a group open because it holds the
+  // selection (`focusItem('checked')` already focuses and scrolls to that row).
+  useEffect(() => {
+    const id = justExpanded.current
+    if (!id) return
+    justExpanded.current = null
+    const toggle = toggleRefs.current.get(id)
+    // The optional call is deliberate: jsdom has no `scrollIntoView`.
+    const first = toggle?.nextElementSibling as HTMLElement | null | undefined
+    first?.scrollIntoView?.({ block: 'nearest' })
+  }, [expandedGroups])
   const multi = facet.selection === 'multi'
   const viewChoice = allLabelOverride === null
   const allLabel = allLabelOverride !== undefined ? allLabelOverride : facet.allLabel !== undefined ? facet.allLabel : allOptionLabel
@@ -216,11 +243,25 @@ export function FacetMenu({ facet, value, onChange, allLabel: allLabelOverride, 
                   it. It STAYS MOUNTED when the group expands: focus is not
                   lost, and the next arrow key continues from it. */}
               <button
+                ref={(el) => {
+                  if (el) toggleRefs.current.set(group.group.id, el)
+                  else toggleRefs.current.delete(group.group.id)
+                }}
                 type="button"
                 role="menuitem"
                 aria-expanded={group.open}
+                // The locked row (#4512) is a state, not an action:
+                // `aria-disabled` and NEVER `disabled`, because `ITEM_SELECTOR`
+                // skips `[disabled]` and the row would drop out of the
+                // arrow/Home/End walk. Clicking it stays a no-op.
+                aria-disabled={group.holdsSelection || undefined}
                 tabIndex={-1}
-                onClick={() => setExpandedGroups((ids) => toggleFacetGroup(ids, group))}
+                onClick={() => {
+                  // Only a group the user is OPENING scrolls its rows into
+                  // view: not a collapse, not the locked toggle.
+                  justExpanded.current = !group.holdsSelection && !group.open ? group.group.id : null
+                  setExpandedGroups((ids) => toggleFacetGroup(ids, group))
+                }}
                 className={listMenuItemClasses}
               >
                 <Icon

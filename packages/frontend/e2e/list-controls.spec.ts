@@ -152,8 +152,9 @@ test.describe('list controls — layout', () => {
 
     // Selecting it puts the full label + status on the status-row chip.
     await row.getByRole('radio').check()
-    // The sheet's submit button ("Show 4 agents"), not the inactive group's
-    // disclosure row — both start with "Show" (#4453).
+    // The sheet's submit button ("Show 4 agents"). The inactive group's
+    // disclosure row no longer collides with it: once open it reads
+    // "Hide 1 inactive" (#4512).
     await sheet.getByRole('button', { name: /^Show \d+ (agents?|transactions?)$/ }).click()
     await expect(sheet).toBeHidden()
     const chipLabel = phone.getByText('Initiator: Lovable Dev preview deployment helper (Revoked)')

@@ -15,6 +15,8 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+## 0.12.0-alpha.0 — 2026-10-29
+
 ### Changed
 
 - **`haven guide`'s runbook gives `needs_approval` its three causes (#4352).**
@@ -26,6 +28,15 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 - **`haven guide`'s runbook gives `needs_approval` its two causes (#4355).**
   No `allowances[]` rows: nobody approved a budget yet. Rows, all spent: the
   budget refills at `budgetRefillsAt`. Wording only. No update needed.
+
+- **`haven budget grant --expires` refuses a date more than 365 days out
+  (#4351).** The backend's build route refuses the same bound, so the CLI now
+  says why before the request is sent. An expiry within 365 days is unchanged.
+  No update needed.
+
+- **`haven guide`'s runbook says a budget ends on a date (#4350).** Its copy of
+  the agent runbook gains the end-date paragraph, regenerated from the SDK
+  runbook. Wording only; no update needed.
 
 ## 0.11.0-alpha.0 — 2026-10-23
 

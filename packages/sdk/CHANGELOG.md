@@ -15,6 +15,8 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+## 0.12.0-alpha.0 — 2026-10-29
+
 ### Added
 
 - **`haven_list_receipts` rows carry the delivery verdict, the settlement
@@ -47,8 +49,10 @@ required") is refused — reword to "no update needed", or quote it in a code sp
   reverted funding transaction is `FundingRevertedError` (502). Both extend
   `HavenApiError`.
 
-- **A quote stops on an ENDED budget, with its own warning code (#4458).**
-  `AgentPaymentWarningCode` gains `QUOTE_BUDGET_ENDED`. When the quote-time
+- **A warning code for a quote on an ENDED budget (#4458).** In this package,
+  `AgentPaymentWarningCode` gains `QUOTE_BUDGET_ENDED`. The hosted server
+  (`@haven_ai/mcp-server`, deployed rather than published) is what emits it, as
+  follows. When the quote-time
   budget pre-check answers the typed 403 `delegation_expired` — the agent's
   only budget for the token has ENDED — the quote now reports
   `budget_check.sufficient: false` (so `safe_to_continue` is false on
@@ -96,6 +100,29 @@ required") is refused — reword to "no update needed", or quote it in a code sp
   `haven_quote_x402` does. The local `@haven_ai/mcp` quote checks only a price
   the agent states (`expected_amount`), and the budget is checked when the
   agent pays. Wording only; no API change. No update needed.
+
+- **The agent runbook says a budget ends on a date (#4350).**
+  `HAVEN_AGENT_RUNBOOK_MD` now tells the agent that its budget ends on a date the
+  user chose (30, 90 by default, 180 or 365 days out), that the end is enforced
+  on-chain, and that the agent should ask its user to renew the budget once it
+  ends. Wording only; no update needed.
+
+- **The skill text names the agent folder by its wiring slug (#4396).** The
+  local-runtime paragraph of `HAVEN_SKILL_MD` now names
+  `~/.haven/agents/<slug>/agent.json`, where `<slug>` is the wiring name of the
+  `haven-<slug>` pair. Only a `--bare` run, or a `--replace` without `--name`,
+  names the folder by the agent id. Wording only; no update needed.
+
+- **Type-level changes for code that builds SDK objects by hand (#4352,
+  #4355, #4458). BREAKING only for TypeScript code that constructs these types
+  itself or switches exhaustively over the code union.** New required
+  fields: `nextRefillAt` on `HavenAllowance` and `HavenAgentAllowanceSummary`;
+  `budgetEndedAt` on `HavenAllowanceSummary` and `HavenAgentSummary`; and
+  `budgetRefillsAt` on `HavenAgentSummary`. Also,
+  `AgentPaymentWarningCode` gains `QUOTE_BUDGET_ENDED`. Code that only reads
+  them is unaffected. A hand-built object (a test mock) adds the fields as
+  `null`; an exhaustive `switch` adds the case. No update needed to keep
+  paying.
 
 ## 0.11.0-alpha.0 — 2026-10-23
 

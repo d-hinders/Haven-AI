@@ -15,6 +15,8 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+## 0.12.0-alpha.0 — 2026-10-29
+
 ### Added
 
 - **The local `haven_list_receipts` rows carry the delivery verdict, the
@@ -29,10 +31,24 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ### Changed
 
+- **The local `haven_get_agent` names an ended budget and tells a spent budget
+  from no budget (#4352, #4355, via `@haven_ai/sdk`).** Its description comes
+  from the SDK's shared tool descriptions, and its result is the embedded SDK's
+  `getAgentSummary()`. The result now carries `budgetEndedAt`,
+  `budgetRefillsAt` and a per-row `nextRefillAt`, and the description explains
+  the readiness causes. The tool list is unchanged, so this triggers no
+  re-consent prompt; the consent hash covers tool names only. Additive; no
+  update needed.
+
+- The README names the agent folder by its wiring slug,
+  `~/.haven/agents/<slug>/`, as the connector writes it (#4396). Docs only.
+
 - **A funding wait that fails now reports its cause (#4470, via `@haven_ai/sdk`).**
   When the funding transaction's confirmation cannot be read in time, or the
   transaction reverted, the local tools relay the SDK's new typed errors: status
-  504 or 502 (was 500) with a message that says which. The step the agent is
+  504 (a timeout, which was an unrecognised error with no status, code
+  `UNKNOWN_ERROR`) or 502 (a revert, which was 500), with a message that says
+  which. The step the agent is
   given is unchanged. No update needed.
 
 ## 0.11.0-alpha.0 — 2026-10-23

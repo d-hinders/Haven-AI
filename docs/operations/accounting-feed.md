@@ -242,8 +242,8 @@ a `remedy` field, the other two carry a `reason`. A fourth, chain-level line
 
 The two off states read differently, and they describe a deployment that has
 the feed switched off — a rollback, or a hosted box that never enabled it.
-**Neither of Haven's two deployments is in the flag-off state today:** dev and
-production both run with `HAVEN_ACCOUNTING_ENABLED=true` since 2026-10-29
+**Neither of Haven's two deployments is in the flag-off state today:** dev runs
+with `HAVEN_ACCOUNTING_ENABLED=true`, and production has since 2026-10-29
 (#4497). The 2026-09-11 owner decision that the feed is *visible in production
 while switched off* is superseded for every provider except Fortnox, which is
 not configured on production until #2876. Exposure (flipping the flag) remains

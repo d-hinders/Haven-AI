@@ -116,7 +116,7 @@ accounts. `GET /accounting/providers` lists `accounted` `configured: true` and
 `PROVIDER_NOT_CONFIGURED`. One Accounted connection is `connected` and the
 active destination, with `base_currency` null (it books in SEK by the default),
 and its three webhook subscriptions are `verified`. The Bitrefill rehearsal
-(step 8 of #4497) is recorded on the issue, not here.
+(step 8 of #4497) is still pending; its record lives on the issue, not here.
 
 **Rollback.** Unset `HAVEN_ACCOUNTING_ENABLED` and redeploy: the feed, the
 connection routes and the retry sweep all switch off. Never unset or change

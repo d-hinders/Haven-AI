@@ -11,7 +11,18 @@
  */
 import { createHash } from 'node:crypto'
 import { describe, expect, it, vi } from 'vitest'
-import { buildAuthorizeUrl, exchangeCode, type OAuth2ProviderConfig } from '../oauth-flow.js'
+
+// The connect lifecycle refuses before the exchange without a secrets key;
+// these cases stop at the company read (a throw), so nothing is encrypted
+// or stored and no database is reached.
+vi.mock('../../../infra/secrets.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../infra/secrets.js')>()),
+  secretsKeyConfigured: () => true,
+}))
+
+import { buildAuthorizeUrl, completeOAuth2Connect, exchangeCode, type OAuth2ProviderConfig } from '../oauth-flow.js'
+import type { AccountingConnector } from '../connector.js'
+import type { AccountingProvider } from '../provider.js'
 import { pkceChallengeFor, pkceVerifierFor } from '../oauth-pkce.js'
 
 const BASE: OAuth2ProviderConfig = {
@@ -112,5 +123,28 @@ describe('exchangeCode with PKCE', () => {
     expect(String((fetchImpl.mock.calls[0] as unknown as [string, RequestInit])[1].body)).toBe(
       'grant_type=authorization_code&code=auth-code&redirect_uri=https%3A%2F%2Fapi.test%2Faccounting%2Fconnections%2Fpkce-provider%2Fcallback',
     )
+  })
+})
+
+describe('completeOAuth2Connect with PKCE', () => {
+  const PROVIDER: AccountingProvider = {
+    id: 'pkce-provider',
+    displayName: 'PKCE Provider',
+    authKind: 'oauth2',
+    capabilities: { attachments: false, verify: false, revoke: false, companyInfo: true },
+    availability: 'live',
+    requiredScopes: [],
+  }
+  const STOP = new Error('stop after the exchange')
+  const connector = { getCompanyInfo: async () => { throw STOP } } as unknown as AccountingConnector
+
+  it('the connect lifecycle hands the verifier to the code exchange', async () => {
+    const verifier = pkceVerifierFor(JTI, KEY)
+    const fetchImpl = tokenFetch()
+    await expect(
+      completeOAuth2Connect({ provider: PROVIDER, cfg: PKCE, connector, userId: 'u1', code: 'auth-code', pkceVerifier: verifier, fetchImpl: fetchImpl as unknown as typeof fetch }),
+    ).rejects.toBe(STOP)
+    const body = new URLSearchParams(String((fetchImpl.mock.calls[0] as unknown as [string, RequestInit])[1].body))
+    expect(body.get('code_verifier')).toBe(verifier)
   })
 })

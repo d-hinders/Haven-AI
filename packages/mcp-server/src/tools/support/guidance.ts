@@ -27,7 +27,7 @@ import {
   X402Erc7710AlreadySettledError,
 } from '@haven_ai/sdk'
 import { z } from 'zod'
-import { toolSchemas } from '../contracts.js'
+import { SETTLEMENT_PROOF_HEADER_MAX_LENGTH, toolSchemas } from '../contracts.js'
 
 /**
  * The argument shapes the hosted server hands to the SIGNER's tools. Declared
@@ -188,6 +188,27 @@ export function paymentStatusHandoff(paymentId: string | undefined | null): Host
           'no payment_id is known for this refusal, so haven_get_payment_status cannot be named; ' +
           'nothing was funded or signed',
       }
+}
+
+/**
+ * #4530: the agent's own `payment_header`, prefilled into a report tool's
+ * `next_arguments` — but only when the report tool's schema can take it.
+ *
+ * `haven_settle_mcp_tool` and `haven_complete_mcp_tool` accept the header with
+ * no maximum (the SDK admits 65,536 characters, `packages/sdk/src/x402.ts`),
+ * while both report tools cap it at `SETTLEMENT_PROOF_HEADER_MAX_LENGTH`. A
+ * longer header is therefore OMITTED rather than emitted: a `next_arguments`
+ * the named tool would refuse is worse than the prose alone, which still names
+ * `payment_header` for a client holding a stale list.
+ *
+ * Returns a spreadable fragment, so an emission reads
+ * `{ payment_id, ...prefillablePaymentHeader(header) }` and carries no
+ * `payment_header` key at all when there is nothing to prefill.
+ */
+export function prefillablePaymentHeader(paymentHeader: string | undefined | null): { payment_header?: string } {
+  return paymentHeader && paymentHeader.length <= SETTLEMENT_PROOF_HEADER_MAX_LENGTH
+    ? { payment_header: paymentHeader }
+    : {}
 }
 
 /**

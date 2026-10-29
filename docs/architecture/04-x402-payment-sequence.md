@@ -1381,6 +1381,22 @@ predicate permanently rather than until the window elapses.
 > `haven_report_settlement_evidence` again with the hash prefilled. The
 > agent adds `payment_header`; the hash was not judged. Every other refusal
 > keeps its terminal answer. `last-verified` unchanged.
+>
+> **The header is prefilled where the arm holds it (#4530, passage only).**
+> "The agent adds `payment_header`" is no longer the whole story. On the arms
+> that already hold the agent's header — the retryable settlement-evidence
+> handoff of `haven_complete_mcp_tool` / `haven_settle_mcp_tool`, the report
+> tool's own status-unreadable arm, and the plain-HTTP outcome report's
+> folded-evidence retryable and offer arms — `next_arguments` now carries
+> `payment_header` beside the hash, so the agent re-supplies nothing. The
+> plain-HTTP retryable arm prefills what the call FORWARDED as `proofHeader`,
+> never the raw argument. The prefill is omitted when the header exceeds the
+> report tools' 16,384-character cap, and the prose still names the header for
+> a client holding a stale tool list. The missing-header arms stay prose-only:
+> there the call carried no header, so there is nothing to prefill. The status
+> read also names the recorded transaction now
+> (`merchant_settlement_tx_hash`), so an agent can confirm on that read which
+> settlement Haven recorded. `last-verified` unchanged.
 
 The report is caller-**asserted**, and the boundary is drawn the way #2092/#2096
 drew it for a caller-asserted settlement hash:

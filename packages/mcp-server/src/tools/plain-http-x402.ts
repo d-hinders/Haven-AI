@@ -104,6 +104,7 @@ import {
   catchSettledReplay,
   paymentStatusHandoff,
   type HostedHandoff,
+  prefillablePaymentHeader,
   refusalNextStep,
   taskBudgetNextStep,
 } from './support/guidance.js'
@@ -209,15 +210,25 @@ function reportOutcomeHandoff(
   // re-names the evidence tool with the hash prefilled, and a refused one
   // names NO tool (re-reporting the same hash re-refuses).
   settlementEvidence?: ReportedSettlementEvidence | null,
+  // #4530: the header this call forwarded as the #3925 nonce proof, when it
+  // forwarded one — prefilled into the report tool's `next_arguments` on the
+  // arms that hold it (see `prefillablePaymentHeader`).
+  paymentHeader?: string,
 ): HostedHandoff {
   if (outcome === 'rejected') {
     return { nextTool: 'haven_sweep_delegate', nextArguments: {} }
   }
-  if (settlementEvidence) return evidenceHandoff(settlementEvidence, paymentId)
+  if (settlementEvidence) return evidenceHandoff(settlementEvidence, paymentId, paymentHeader)
   if (offerSettlementEvidence) {
-    // #4061: payment_header is the agent's own value — Haven never saw it —
-    // so it cannot be prefilled; the reason names it.
-    return { nextTool: 'haven_report_settlement_evidence', nextArguments: { payment_id: paymentId } }
+    // #4061: payment_header is the agent's own value — Haven never saw it on
+    // this path. #4530: the CALL carried it, though, so it is prefilled here
+    // when it did; the reason still names it for a client holding a stale
+    // list. `haven_report_settlement_evidence` accepts `payment_header`
+    // without evidence, so the agent only has to add the hash.
+    return {
+      nextTool: 'haven_report_settlement_evidence',
+      nextArguments: { payment_id: paymentId, ...prefillablePaymentHeader(paymentHeader) },
+    }
   }
   return { nextTool: null, nextToolOmittedReason: 'the merchant accepted the paid retry; the purchase is complete and no Haven tool follows' }
 }
@@ -379,6 +390,7 @@ const EVIDENCE_RECORDED_OMITTED_REASON =
 function evidenceHandoff(
   reported: ReportedSettlementEvidence,
   paymentId: string,
+  paymentHeader?: string,
 ): HostedHandoff {
   if (reported.recorded) {
     return { nextTool: null, nextToolOmittedReason: EVIDENCE_RECORDED_OMITTED_REASON }
@@ -386,12 +398,21 @@ function evidenceHandoff(
   if (reported.outcome === 'retryable') {
     return {
       nextTool: 'haven_report_settlement_evidence',
-      nextArguments: { payment_id: paymentId, settlement_tx_hash: reported.settlement_tx_hash },
+      nextArguments: {
+        payment_id: paymentId,
+        settlement_tx_hash: reported.settlement_tx_hash,
+        // #4530: the header this call FORWARDED as the #3925 nonce proof —
+        // `proofHeader`, not the raw argument, so a header the handler
+        // deliberately withheld is never handed back to the agent.
+        ...prefillablePaymentHeader(paymentHeader),
+      },
     }
   }
   // #4061: refused for want of the proof header — the hash was never judged,
-  // so the evidence tool follows, the hash prefilled; the agent adds the
-  // payment_header it holds (Haven never saw it, so it cannot be prefilled).
+  // so the evidence tool follows, the hash prefilled. #4530: this arm cannot
+  // prefill the header — the report carried none, which is why it was
+  // refused — so the prose names it; the retryable arm above prefills the
+  // header it forwarded.
   if (reported.code === SETTLEMENT_PROOF_HEADER_MISSING_CODE) {
     return {
       nextTool: 'haven_report_settlement_evidence',
@@ -419,8 +440,10 @@ function evidenceHandoff(
 // eip3009 branch, while the confirmed-erc7710 attach path answers 202/409.
 // Either way — a non-answer or a stray 503 — it leaves
 // the text harmless: the named report tool drops the header on any
-// non-eip3009 payment (`settlementProofHeaderFor`). next_arguments stay
-// unchanged.
+// non-eip3009 payment (`settlementProofHeaderFor`).
+// #4530: the retryable arm now ALSO prefills the header it forwarded in
+// `next_arguments` (`evidenceHandoff`); the prose stays because it is still
+// the instruction a client holding a stale tool list needs.
 function evidenceReason(reported: ReportedSettlementEvidence): string {
   if (reported.recorded) {
     return (
@@ -1635,6 +1658,11 @@ export function createPlainHttpX402Handlers(
         // / `refused`) is that tool's; a refused hash names the same
         // on-chain mismatch it always did.
         let settlementEvidence: ReportedSettlementEvidence | null = null
+        // #4530: the header this call actually FORWARDED as the #3925 nonce
+        // proof — undefined when it forwarded none. The retryable handoff
+        // prefills THIS, never the raw argument, so a header the handler
+        // deliberately withheld is never handed back to the agent.
+        let forwardedProofHeader: string | undefined
         if (evidence && report.outcome === 'accepted') {
           // #4061: forwarded with the payment header the agent retried
           // with — the #3925 nonce proof — exactly as the SDK forwards its
@@ -1651,6 +1679,7 @@ export function createPlainHttpX402Handlers(
             report.txHash.toLowerCase() !== evidence.settlementTxHash.toLowerCase()
               ? args.payment_header
               : undefined
+          forwardedProofHeader = proofHeader
           const evidenceOutcome = await haven.reportSettlementEvidence(
             report.paymentId,
             evidence.settlementTxHash,
@@ -1743,6 +1772,12 @@ export function createPlainHttpX402Handlers(
               offerSettlementEvidence,
               report.paymentId,
               settlementEvidence,
+              // #4530: the folded-evidence retryable arm prefills ONLY the
+              // header this call forwarded (`forwardedProofHeader`, possibly
+              // undefined when the handler withheld it); the offer arm — no
+              // evidence supplied, so nothing was forwarded — prefills the
+              // header the call carried.
+              settlementEvidence ? forwardedProofHeader : args.payment_header,
             ),
             safeToContinue: true,
             reason:

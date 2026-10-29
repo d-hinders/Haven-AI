@@ -377,6 +377,29 @@ describe('haven_report_x402_outcome', () => {
       )
     })
 
+    it('accepted + eip3009 + no recorded settlement, with payment_header passed: prefills the header beside payment_id (#4530)', async () => {
+      const PAYMENT_HEADER = encodeBase64Json({ x402Version: 1, scheme: 'exact', payload: { signature: '0x' + '5a'.repeat(65) } })
+      stubFetch({
+        ...HAPPY_ROUTES,
+        'GET /machine-payments/pay_x402/status': {
+          body: statusBody({ settlement_scheme: 'eip3009' }),
+        },
+      })
+      const result = ok<{ next_tool?: string; next_arguments?: Record<string, unknown> }>(
+        await handlers().haven_report_x402_outcome({
+          payment_id: 'pay_x402',
+          outcome: 'accepted',
+          merchant_status: 200,
+          payment_header: PAYMENT_HEADER,
+        }),
+      )
+      expect(result.data.next_tool).toBe('mcp__haven__haven_report_settlement_evidence')
+      // The offer arm holds the header the call carried, and the report tool
+      // accepts `payment_header` without evidence — so it is prefilled and the
+      // agent only has to add the hash.
+      expect(result.data.next_arguments).toEqual({ payment_id: 'pay_x402', payment_header: PAYMENT_HEADER })
+    })
+
     it('accepted + eip3009 + settlement ALREADY recorded: no tool follows (unchanged answer)', async () => {
       stubFetch({
         ...HAPPY_ROUTES,
@@ -782,10 +805,15 @@ describe('haven_report_x402_outcome', () => {
         // The header reached the settlement report it proves.
         const settlementPost = evidencePosts().find((c) => c.body?.txHash === MERCHANT_TX)
         expect(settlementPost?.body?.paymentProofHeader).toBe(PAYMENT_HEADER)
-        // next_arguments byte-identical to the header-less case: the header
-        // is the agent's to add, never prefilled.
+        // #4530: the retryable arm now PREFILLS the header it forwarded, so
+        // the agent does not have to re-supply a value it already sent. The
+        // header-less case above still emits no `payment_header` key.
         expect(result.data.next_tool).toBe('mcp__haven__haven_report_settlement_evidence')
-        expect(result.data.next_arguments).toEqual({ payment_id: 'pay_x402', settlement_tx_hash: MERCHANT_TX })
+        expect(result.data.next_arguments).toEqual({
+          payment_id: 'pay_x402',
+          settlement_tx_hash: MERCHANT_TX,
+          payment_header: PAYMENT_HEADER,
+        })
         // The whole reason, so the instruction's polarity is pinned too.
         expect(result.data.reason).toBe(
           'Recorded. The settlement hash could not be verified yet (Haven did not answer, the chain read failed, or the ' +

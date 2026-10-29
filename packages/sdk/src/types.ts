@@ -2326,6 +2326,16 @@ export interface PaymentStatusResult {
    */
   merchantSettlementRecorded?: boolean
   /**
+   * #4530: the merchant settlement transaction Haven recorded and verified
+   * on-chain — the transaction `merchantSettlementRecorded` reports, named so
+   * a status read can confirm WHICH one was recorded (the settlement sweep
+   * records one the agent never reported). Present only when
+   * `merchantSettlementRecorded` is; absent otherwise, and never the
+   * merchant's unverified echo. A public on-chain transaction id, not a
+   * secret.
+   */
+  merchantSettlementTxHash?: string
+  /**
    * #3494: a bounded, redacted cause for a `failed` payment — present
    * (possibly `null`, when no message was recorded) only when `status` is
    * `'failed'`; absent on every other status.
@@ -2616,6 +2626,16 @@ export interface RawPaymentStatusResult {
    * `delivered`'s own honesty rule.
    */
   merchant_settlement_recorded?: boolean
+  /**
+   * #4530: the merchant settlement transaction Haven recorded and verified
+   * on-chain — the transaction `merchant_settlement_recorded` reports, named
+   * so a status read can confirm WHICH one was recorded (the settlement sweep
+   * records one the agent never reported). Present only when
+   * `merchant_settlement_recorded` is; absent otherwise, and never the
+   * merchant's unverified echo. A public on-chain transaction id, not a
+   * secret.
+   */
+  merchant_settlement_tx_hash?: string
   /** #3494: see `PaymentStatusResult.failureReason`'s doc. */
   failure_reason?: string | null
   /**

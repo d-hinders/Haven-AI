@@ -30,11 +30,12 @@
       }
     },
     {
-      "site": "paid-mcp-completion.ts complete eip3009: settlement evidence retryable (hash prefilled)",
+      "site": "paid-mcp-completion.ts complete eip3009: settlement evidence retryable (hash + header prefilled)",
       "tool": "haven_report_settlement_evidence",
       "arguments": {
         "payment_id": "pay_1",
-        "settlement_tx_hash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        "settlement_tx_hash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "payment_header": "eyJ4NDAyVmVyc2lvbiI6MSwic2NoZW1lIjoiZXhhY3QiLCJuZXR3b3JrIjoiYmFzZSIsInBheWxvYWQiOnsic2lnbmF0dXJlIjoiMHg1YTU5In19"
       }
     },
     {
@@ -95,7 +96,17 @@
       "tool": "haven_report_settlement_evidence",
       "arguments": {
         "payment_id": "pay_1",
-        "settlement_tx_hash": "0xbebebebebebebebebebebebebebebebebebebebebebebebebebebebebebebebe"
+        "settlement_tx_hash": "0xbebebebebebebebebebebebebebebebebebebebebebebebebebebebebebebebe",
+        "payment_header": "eyJ4NDAyVmVyc2lvbiI6MSwic2NoZW1lIjoiZXhhY3QiLCJuZXR3b3JrIjoiYmFzZSIsInBheWxvYWQiOnsic2lnbmF0dXJlIjoiMHg1YTU5In19"
+      }
+    },
+    {
+      "site": "paid-mcp-completion.ts settle eip3009: settlement evidence retryable (hash + header prefilled)",
+      "tool": "haven_report_settlement_evidence",
+      "arguments": {
+        "payment_id": "pay_1",
+        "settlement_tx_hash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "payment_header": "eyJ4NDAyVmVyc2lvbiI6MSwic2NoZW1lIjoiZXhhY3QiLCJuZXR3b3JrIjoiYmFzZSIsInBheWxvYWQiOnsic2lnbmF0dXJlIjoiMHg1YTU5In19"
       }
     },
     {
@@ -159,7 +170,8 @@
       "site": "plain-http-x402.ts report outcome accepted, eip3009 unsettled (offer settlement evidence)",
       "tool": "haven_report_settlement_evidence",
       "arguments": {
-        "payment_id": "pay_1"
+        "payment_id": "pay_1",
+        "payment_header": "eyJ4NDAyVmVyc2lvbiI6MSwic2NoZW1lIjoiZXhhY3QiLCJuZXR3b3JrIjoiYmFzZSIsInBheWxvYWQiOnsic2lnbmF0dXJlIjoiMHg1YTU5In19"
       }
     },
     {
@@ -168,6 +180,15 @@
       "arguments": {
         "payment_id": "pay_1",
         "settlement_tx_hash": "0xbebebebebebebebebebebebebebebebebebebebebebebebebebebebebebebebe"
+      }
+    },
+    {
+      "site": "plain-http-x402.ts report outcome accepted: folded evidence retryable (hash + forwarded header prefilled)",
+      "tool": "haven_report_settlement_evidence",
+      "arguments": {
+        "payment_id": "pay_1",
+        "settlement_tx_hash": "0xbebebebebebebebebebebebebebebebebebebebebebebebebebebebebebebebe",
+        "payment_header": "eyJ4NDAyVmVyc2lvbiI6MSwic2NoZW1lIjoiZXhhY3QiLCJuZXR3b3JrIjoiYmFzZSIsInBheWxvYWQiOnsic2lnbmF0dXJlIjoiMHg1YTU5In19"
       }
     },
     {

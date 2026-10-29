@@ -166,6 +166,11 @@ const HELPER_OWNERSHIP: Record<string, { module: string; slices: Slice[] }> = {
   paymentStatusHandoff: { module: 'guidance', slices: ['s2809', 's2810', 's2811'] },
   // #3102: the refusal-side builder — every HostedToolError that names an action.
   refusalNextStep: { module: 'guidance', slices: ['s2810', 's2811', 's2812'] },
+  // #4530: the agent's own payment_header, prefilled into a report tool's
+  // next_arguments — the plain-HTTP slice's two arms (folded-evidence
+  // retryable, offer) and the paid-MCP slice's three (complete/settle
+  // retryable, the report tool's status-unreadable arm).
+  prefillablePaymentHeader: { module: 'guidance', slices: ['s2811', 's2812'] },
   // #3329: the success-side counterpart — a task budget's signer hand-off,
   // which is not a payment and so cannot go through buildAgentGuidance's
   // AgentPaymentSummary. #3506: a sub-budget row's hand-off (haven_get_agent's
@@ -490,6 +495,9 @@ const SUPPORT_MODULE_EXPORTS: Record<string, string[]> = {
     'catchSettledResettle',
     'eip3009ConfirmedReplayResponse',
     'paymentStatusHandoff',
+    // #4530: the agent's own payment_header, prefilled into a report tool's
+    // next_arguments where the arm holds it.
+    'prefillablePaymentHeader',
     'refusalNextStep',
     'taskBudgetNextStep',
   ],

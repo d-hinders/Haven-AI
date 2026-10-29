@@ -36,6 +36,7 @@ named where they belong below.
 | Date | Decision | Refs |
 |---|---|---|
 | 2026-10-29 | Accounting enabled in production for every account; Accounted first, Fortnox later | #4497 (supersedes #2858's dev-only exposure, except Fortnox) |
+| 2026-10-29 | A superseded agent keeps its tint until it is archived, and a replacement is never recoloured — reverses the inheritance half of #4428 (a) | #4448 (supersedes #4428's inheritance half) |
 | 2026-10-26 | Agents carry a stored tint, unique among a user's first six; merchants and contacts keep the name hash | #4428 |
 | 2026-10-21 | The pending-promotion digest issue is retired; pending work is the `main...dev` compare | #666 |
 | 2026-10-17 | Phone navigation floats: the tab bar is a floating pill, and the More sheet a floating card that covers it with its own ✕; the bar labels `/transactions` "Activity" | #4058 (supersedes #4053's "stops at the bar's top edge") |
@@ -130,6 +131,58 @@ and `.env.dev.example`.
 
 ---
 
+## 2026-10-29 — a superseded agent keeps its tint until it is archived (#4448)
+
+Owner decision, 2026-10-29, on finding B1 of the second spec review on #4428.
+It **reverses the inheritance half** of the 2026-10-26 decision above; the rest
+of that decision stands.
+
+The 2026-10-26 rule treated a superseded agent (`superseded_by_agent_id IS NOT
+NULL`) as having released its tint, and handed that tint to the replacement.
+Both halves rested on a premise that does not hold: **a superseded agent is not
+hidden anywhere.** Outside migrations and tests the column is read in two
+places only — the writer (`MARK_AGENTS_SUPERSEDED_SQL`) and
+`FIND_AGENT_SUPERSESSION_SQL`, which serves the `superseded_by` warning to the
+stale agent on its own agent-authenticated reads. No agent list read filters on
+it: the dashboard preview filters by status only, `GET /agents` has no filter,
+and the analytics overview filters by `user_id` only. The frontend never reads
+it. Supersession is warning-only: `--replace` revokes nothing, and the
+superseded agent keeps its key, status and on-chain budget until the owner
+removes it.
+
+So after `POST /agent-connection-setups/{setupId}/retired-agents` the
+replacement and its still-visible predecessor wore the same colour side by
+side — on the dashboard, on `/agents`, in the account Agents tab and in
+analytics. That is exactly the collision epic #4428 exists to remove.
+
+The rule now:
+
+- **A superseded agent holds its tint.** Held means `archived_at IS NULL`;
+  there is no supersession term. Only archiving releases a tint. Nothing is
+  hidden, so the old agent stays easy to find and revoke.
+- **No inheritance.** The replacement keeps the tint it got at creation and is
+  never recoloured. Inheritance would recolour an agent while it is visible,
+  which is the rule the whole decision rests on.
+- **History exception, accepted.** An archived agent that still appears in a
+  historical view (Analytics with activity in the range, `/agents` with
+  Archived shown, the agent panel's removed list) may repeat a released tint
+  next to the agent that took it. Documented in
+  `docs/product/design-system.md`; no code changes for it.
+- **Backfill.** Migration 122 removes the collisions 121 left behind — an
+  inherited pair, and a predecessor whose released tint a later agent took —
+  among the non-archived agents of every user with six or fewer such agents,
+  recolouring the newer agent of each pair.
+- **Unarchive.** If the agent's stored tint is now held by another
+  non-archived agent of the same user, it gets a free tint on unarchive;
+  otherwise it keeps its tint. Only an agent that was hidden is recoloured.
+
+Direction (i) — hiding superseded agents — was not taken. One reason is the
+installed CLI: `@haven_ai/cli` reads `GET /agents` for `haven agents list` and
+for `secret-check`'s key-backed addresses, and hiding a superseded agent there
+would be a silent false negative in a shipped security check.
+
+---
+
 ## 2026-10-26 — agents carry a stored tint, unique among a user's first six (#4428)
 
 Owner decision, 2026-10-26: an agent's colour is **assigned when the agent is
@@ -153,7 +206,9 @@ The rule now:
   needs-setup and revoked agents hold theirs; archived (`archived_at`) and
   superseded (`superseded_by_agent_id`) agents release theirs, so a new agent
   can take it. A replacement takes over its predecessor's tint when the
-  supersession is recorded.
+  supersession is recorded. *(Superseded 2026-10-29 by #4448 — see the entry
+  above: a superseded agent holds its tint until it is archived, and there is
+  no inheritance.)*
 - **More than six agents.** The tint held by the fewest of the user's agents,
   lowest number on ties. Repeats are unavoidable past six, and the name stays
   in the legend and tooltip.

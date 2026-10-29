@@ -280,4 +280,4 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   main()
 }
 
-export { Refusal, EXCLUDED_LABELS, MINUS }
+export { Refusal, MINUS }

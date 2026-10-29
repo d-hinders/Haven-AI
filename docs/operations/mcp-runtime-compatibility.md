@@ -2931,22 +2931,26 @@ and `@haven_ai/connect` its own `CONNECTOR_VERSION`).
 > - `AgentPaymentWarningCode` gains `QUOTE_BUDGET_ENDED`.
 >
 > Code that only reads these types is unaffected. The `.d.ts` comparison against
-> the published `0.11.0-alpha.0` (`sdk`, `signer`, `mcp`) removes and adds no
-> declaration name.
+> the published `0.11.0-alpha.0` (`sdk`, `signer`, `mcp`) removes no declaration
+> name and adds three, all in `sdk`: `FundingConfirmationUnknownError`,
+> `FundingRevertedError` and `HavenApiFailureCause` (#4470).
 >
 > **Surfaces this release moves:**
 > - **SDK.** An ended budget is named apart from a spent one:
 >   `delegation_expired` with the end date (#4352, #4458), the quote warning
 >   `QUOTE_BUDGET_ENDED`, and spent-for-the-period told apart from no budget
 >   (#4355). `haven_list_receipts` rows carry the six delivery fields the mapper
->   dropped (#4469). Runbook and skill wording: budget end dates (#4350),
+>   dropped (#4469). Retry or stop follows the failure's cause:
+>   `HavenApiError.failureCause`, and a typed failed funding wait (504 or 502,
+>   was 500) (#4470). Runbook and skill wording: budget end dates (#4350),
 >   which quote checks the budget (#4345), and the agent folder named by its
 >   wiring slug (#4396).
 > - **Signer.** Success results name their next step, and the settlement-child
 >   guidance names the MCP route (#4449). Guidance only; no new signing path.
 > - **Local MCP.** Embedded-SDK changes only: `haven_get_agent`'s description
 >   and result name an ended budget and tell a spent budget from no budget
->   (#4352, #4355), and receipt rows carry their delivery fields (#4469). The
+>   (#4352, #4355), receipt rows carry their delivery fields (#4469), and a
+>   failed funding wait reports its cause as 504 or 502 instead of 500 (#4470). The
 >   tool list is unchanged, so there is no re-consent prompt. `README` wording
 >   (#4396).
 > - **Connect.** The installed skill names the ended budget (#4352), tells a

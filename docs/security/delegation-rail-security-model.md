@@ -3205,7 +3205,7 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > covered-file edit is the `SIGNER_VERSION` literal in `packages/signer/src/tools.ts`
 > (`0.12.0-alpha.0`). No signing check, refusal or allowlist moves in that edit.
 > Two commits in the range change signer source (`git log origin/main..origin/dev
-> -- packages/signer/src` at `b9c1d64b`), and both were read again for this
+> -- packages/signer/src` at `feda1617`), and both were read again for this
 > release:
 > - #4449 (#4462): success results name their next step, and the settlement-child
 >   guidance names the MCP route. Recorded below where it merged ("Re-verified

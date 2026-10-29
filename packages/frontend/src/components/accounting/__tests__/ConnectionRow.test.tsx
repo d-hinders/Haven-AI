@@ -99,6 +99,10 @@ describe('ConnectionRow states', () => {
     ['supplierinvoice', 'supplier invoices'],
     ['supplier', 'suppliers'],
     ['bookkeeping', 'bookkeeping'],
+    // #4520: Igdrasil's scopes are `resource:action` pairs — a shortfall must
+    // read as words, not as the raw identifier.
+    ['companies:read', 'company information'],
+    ['vouchers:write', 'voucher uploads'],
   ])('scope label: %s → %s', (id, label) => {
     renderRow({ connection: connection({ status: 'scope_missing', missingScopes: [id] }) })
     expect(screen.getByText(new RegExp(`\\(${label}\\)`))).toBeInTheDocument()

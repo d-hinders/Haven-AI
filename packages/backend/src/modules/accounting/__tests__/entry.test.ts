@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { ethers } from 'ethers'
 import {
+  ledgerRatesFromFiatValues,
   normalizeLedgerRates,
   toAccountingEntry,
   type AccountingEntrySourceRow,
@@ -213,6 +214,62 @@ describe('normalizeLedgerRates (#2877)', () => {
 
   it('a partially bad map keeps its good half', () => {
     expect(normalizeLedgerRates({ SEK: 10.42, EUR: -1, DKK: 6.87 })).toEqual({ SEK: 10.42, DKK: 6.87 })
+  })
+})
+
+/**
+ * #4533: a direct payment has no `machine_payment_evidence` row, so it has no
+ * `fx_rates` map — but `confirmSubmittedIntent` froze the same three fiat
+ * values on the intent. Recovering the rate map from them is what lets a
+ * non-SEK ledger book a direct payment exactly as it books an x402 one.
+ */
+describe('ledgerRatesFromFiatValues (#4533)', () => {
+  it('recovers the token→currency rates the settlement capture was computed from', () => {
+    const rates = ledgerRatesFromFiatValues({
+      amount_human: '0.01',
+      sek_value: '0.104200',
+      usd_value: '0.010000',
+      eur_value: '0.009200',
+    })
+    expect(rates?.SEK).toBeCloseTo(10.42, 6)
+    expect(rates?.USD).toBeCloseTo(1, 6)
+    expect(rates?.EUR).toBeCloseTo(0.92, 6)
+  })
+
+  it('keeps only the currencies that were actually captured', () => {
+    expect(
+      ledgerRatesFromFiatValues({ amount_human: '2', sek_value: '20', usd_value: null, eur_value: null }),
+    ).toEqual({ SEK: 10 })
+  })
+
+  it.each([
+    ['no capture at all', { amount_human: '1', sek_value: null, usd_value: null, eur_value: null }],
+    ['a zero token amount', { amount_human: '0', sek_value: '10', usd_value: null, eur_value: null }],
+    ['an unparseable token amount', { amount_human: 'n/a', sek_value: '10', usd_value: null, eur_value: null }],
+    ['a zero value', { amount_human: '1', sek_value: '0', usd_value: null, eur_value: null }],
+    ['a negative value', { amount_human: '1', sek_value: '-10', usd_value: null, eur_value: null }],
+  ])('returns null for %s, so the feed reads not-ready rather than booking a bad rate', (_label, input) => {
+    expect(ledgerRatesFromFiatValues(input)).toBeNull()
+  })
+
+  it('is the fallback only: a stored fx_rates map wins', () => {
+    const entry = toAccountingEntry(
+      row({ fx_rates: { SEK: 11 }, sek_value: '0.104200', usd_value: '0.01', eur_value: '0.0092' }),
+    )
+    expect(entry.fxRates).toEqual({ SEK: 11 })
+  })
+
+  it('fills fxRates from the intent capture when the evidence map is absent', () => {
+    const entry = toAccountingEntry(
+      row({
+        fx_rates: null,
+        amount_human: '0.01',
+        sek_value: '0.104200',
+        usd_value: '0.01',
+        eur_value: '0.0092',
+      }),
+    )
+    expect(entry.fxRates?.SEK).toBeCloseTo(10.42, 6)
   })
 })
 

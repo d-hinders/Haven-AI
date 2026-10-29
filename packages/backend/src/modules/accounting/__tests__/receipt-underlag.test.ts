@@ -171,6 +171,32 @@ describe('underlagFromData', () => {
     }).pdf.toString('latin1')
     expect(purchase).not.toBe(fee)
   })
+
+  /**
+   * #4533: a direct payment is a TRANSFER, not the purchase of a resource.
+   * The receipt must still render (the Accounted connector skips a payment
+   * with no underlag, so a null here means no document at all), name the
+   * recipient as the counterparty, and omit the Resource line rather than
+   * print "n/a" on a document an accountant files.
+   */
+  it('renders a transfer: recipient as counterparty, no Resource line when there is no resource URL', () => {
+    const pdf = underlagFromData({
+      ...DATA,
+      merchantName: null,
+      merchantAddress: DATA.merchantAddress,
+      resourceUrl: null,
+    }).pdf.toString('latin1')
+    expect(pdf).toContain(`Counterparty   ${DATA.merchantAddress}`)
+    // The PDF's own object dictionary carries `/Resources`; the assertion is
+    // about the RENDERED line, which starts with `(Resource`.
+    expect(pdf).not.toContain('(Resource')
+    expect(pdf).toContain('ON-CHAIN SETTLEMENT')
+  })
+
+  it('CONTROL: a merchant payment still renders its Resource line', () => {
+    const pdf = underlagFromData(DATA).pdf.toString('latin1')
+    expect(pdf).toContain(`Resource       ${DATA.resourceUrl}`)
+  })
 })
 
 describe('loadReceiptUnderlag', () => {

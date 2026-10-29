@@ -31,16 +31,12 @@ describe('ApiClient', () => {
   }
 
   /**
-   * A real bodyless success: `json()` rejects exactly as the browser does on an
-   * empty body, so a client that still parses fails the test rather than
-   * silently passing (#4538).
+   * A real bodyless success: a genuine `Response` whose `json()` rejects exactly
+   * as the browser's does on an empty body, so a client that still parses fails
+   * the test rather than silently passing (#4538).
    */
   function mockFetchNoContent(status: number) {
-    ;(fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
-      ok: true,
-      status,
-      json: () => Promise.reject(new SyntaxError('Unexpected end of JSON input')),
-    })
+    ;(fetch as ReturnType<typeof vi.fn>).mockResolvedValue(new Response(null, { status }))
   }
 
   describe('get()', () => {
@@ -237,6 +233,20 @@ describe('ApiClient', () => {
       expect(e.body).toBeUndefined()
       expect(e.message).toBe('boom')
       expect(e.status).toBe(500)
+    })
+
+    /**
+     * The non-ok path is unchanged by #4538: a bodyless failure still falls back
+     * to the generic message rather than surfacing a parse error.
+     */
+    it('falls back to a generic message when a non-ok response has no body', async () => {
+      ;(fetch as ReturnType<typeof vi.fn>).mockResolvedValue(new Response(null, { status: 500 }))
+
+      await expect(api.get('/secret')).rejects.toMatchObject({
+        name: 'ApiRequestError',
+        message: 'An unexpected error occurred',
+        status: 500,
+      })
     })
 
     it('clears the persisted override when apiBaseUrl=default is provided', async () => {

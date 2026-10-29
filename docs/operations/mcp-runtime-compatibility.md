@@ -2941,8 +2941,8 @@ and `@haven_ai/connect` its own `CONNECTOR_VERSION`).
 >   `QUOTE_BUDGET_ENDED`, and spent-for-the-period told apart from no budget
 >   (#4355). `haven_list_receipts` rows carry the six delivery fields the mapper
 >   dropped (#4469). Retry or stop follows the failure's cause:
->   `HavenApiError.failureCause`, and a typed failed funding wait (504 or 502,
->   was 500) (#4470). Runbook and skill wording: budget end dates (#4350),
+>   `HavenApiError.failureCause`, and a typed failed funding wait (504 for a timeout,
+>   which was an untyped error; 502 for a revert, which was 500) (#4470). Runbook and skill wording: budget end dates (#4350),
 >   which quote checks the budget (#4345), and the agent folder named by its
 >   wiring slug (#4396).
 > - **Signer.** Success results name their next step, and the settlement-child
@@ -2950,7 +2950,8 @@ and `@haven_ai/connect` its own `CONNECTOR_VERSION`).
 > - **Local MCP.** Embedded-SDK changes only: `haven_get_agent`'s description
 >   and result name an ended budget and tell a spent budget from no budget
 >   (#4352, #4355), receipt rows carry their delivery fields (#4469), and a
->   failed funding wait reports its cause as 504 or 502 instead of 500 (#4470). The
+>   failed funding wait reports its cause: 504 for a timeout, which was an
+>   untyped `UNKNOWN_ERROR`, and 502 for a revert, which was 500 (#4470). The
 >   tool list is unchanged, so there is no re-consent prompt. `README` wording
 >   (#4396).
 > - **Connect.** The installed skill names the ended budget (#4352), tells a

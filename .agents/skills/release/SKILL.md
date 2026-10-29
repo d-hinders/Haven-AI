@@ -346,6 +346,15 @@ clears them); the other two are cleared by the shard you write anyway:
    declare `satisfied-by: docs/regulatory/casp-changelog/**`. That is why
    neither needs an edit of its own.
 
+**The shard's Shipped delta figures come from `npm run release:records`, not
+from you.** It prints the file count, the `+/−` line counts, the per-package
+split and the excluded breakdown from `release:scope --json`, labelled with the
+range it measured (`--label=cut` here, `--label=door` at the promotion). The
+prose around the numbers — what the release carries and why — stays hand-written
+and reviewed; the script owns only the numbers, so a scope change is a re-run
+rather than a re-type. `scripts/README.md` § *`ci/release-records.mjs`* has its
+exit codes and what it does with the payload's edge buckets.
+
 **Do not take this list on faith either.** Run the command above at the top of
 the release: it is the gate's own reckoning against the current front matter,
 and it is what a sixth doc joining the set would show first.
@@ -528,16 +537,17 @@ What it leaves to you:
 
   ```sh
   npm run build                # the shipped set is read out of dist/
-  npm run release:scope        # origin/main..origin/dev
+  npm run release:records -- --label=door   # the shard's figures, from release:scope --json
   ```
 
   Build first — it refuses outright on an unbuilt package rather than guessing.
-  Compare its shipped delta against what the shard claims and amend the shard
+  Compare the block it prints against what the shard claims and amend the shard
   when they disagree. **Never hand-count the diff** — that is the judgement this
   step exists to enforce, and on 0.1.36-alpha.0 hand-counting got the scope wrong
   four separate ways. The script's semantics, its exit codes and what it refuses
-  are `scripts/README.md` § *`release-scope.mjs`*; the operator checklist is
-  `promoting-dev-to-main.md`. Read them there rather than from here (#2724).
+  are `scripts/README.md` § *`release-scope.mjs`* and § *`ci/release-records.mjs`*;
+  the operator checklist is `promoting-dev-to-main.md`. Read them there rather
+  than from here (#2724).
 
 - It calls the promotion a human step; it does not say whose. **Confirm the user
   wants it** before opening one — cutting the release and shipping it to

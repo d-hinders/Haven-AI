@@ -683,3 +683,77 @@ an addition to the other. Measured on `84bd719a`, where `skill-content.ts` moved
 exactly why the net is +13/−9 rather than nothing. The content answer is the
 right one for a record of what changed; it is not an answer about what each
 tarball did.
+
+---
+
+## `ci/release-records.mjs` — Drafting the CASP shard's shipped-delta figures
+
+```sh
+npm run release:records -- --label=cut     # at the bump
+npm run release:records -- --label=door    # at the promotion
+npm run release:records -- --label=door --base=<ref> --head=<ref>
+```
+
+Prints the three lines a CASP shard carries under **Shipped delta**, from
+`release:scope --json`:
+
+```
+Shipped delta — door (range origin/main (be1eee32) .. origin/dev (7b2cca38))
+26 files, +1309/−238, over 216 commits from `origin/main` `be1eee32`
+- Per package: `@haven_ai/sdk` **12**, `@haven_ai/signer` **5**, `@haven_ai/cli` **4**, `@haven_ai/mcp` **4**, `@haven_ai/connect` **1**, which sums to 26.
+- Excluded: 1111 files (1087 outside a published package, 18 unreachable test files, 6 in a package but outside the tarball).
+```
+
+**It owns the numbers, not the prose.** What the release carries and why stays
+hand-written and reviewed; the script only turns the measurement into the figures
+so a scope change is a re-run rather than a re-type. It never rewrites a
+historical shard — past shards stay as written.
+
+**The range is stated, not assumed.** The first line names the refs and the
+8-character SHAs it measured, and `--label` names the run. The shard's "N at the
+cut, M at the door" needs **two** runs: both past shards measured `origin/dev`
+before the release PR merged (0.11.0 at `7b2cca38`, 0.12.0 at `feda1617`), while
+the door step runs after, with the bump's files in range. Run it once at each
+point and paste each block; the prose that reconciles them is yours.
+
+**Build first.** `release-scope` reads the shipped set out of `dist/` and refuses
+on an unbuilt package, so `npm run build` before measuring — the same rule as
+`release-scope.mjs` above.
+
+**Exit codes, inherited from `release-scope.mjs`.**
+
+| Code | Meaning | What is printed |
+|---|---|---|
+| `0` | measured cleanly | the block |
+| `1` | measured, but at least one source file could not be classified | the block **plus** an `UNRESOLVED:` warning naming each file |
+| `2` | refused, nothing measured | `release-scope`'s own message, verbatim, on stderr; nothing on stdout |
+
+Exit `1` is a measurement, not a failure of the instrument: the figures are
+usable but must not be quoted as complete, so the warning travels with them and
+the run exits non-zero. Exit `2` is relayed rather than paraphrased — the message
+names the cause and the fix, and a second copy here could drift from it.
+
+**What it does with the payload's edge buckets.**
+
+- `shipped.inferred` (deleted sources) is **inside** the headline count, because
+  `release-scope` counts a deleted module's removal as shipped. When it is
+  non-zero the block adds an `of which attributed, not measured:` line, so a
+  shard author can see how much of the delta rests on inference rather than on
+  the head tree's sourcemaps.
+- `shipped.binary` is counted as files and never as lines; when non-empty the
+  block says so, rather than leaving the reader to notice the arithmetic does not
+  close.
+- `unresolved` is the exit-`1` case above.
+- The per-package split is **derived** from `shipped.files[].pkg` and the
+  excluded breakdown from `excluded[].reason`. Neither list is written down in
+  the script: a sixth published package, a rename, or a fourth exclusion reason
+  shows up without an edit. A reason the formatter does not recognise is printed
+  verbatim rather than dropped.
+
+**The minus sign is U+2212** (`−`), matching the shards, so the block is pasted
+rather than retyped.
+
+Its self-test is `scripts/ci/release-records.test.mjs`, collected by the
+`ci_config_checks` job's `node --test scripts/ci/*.test.mjs` glob. It pins a
+fixture payload to specific per-package and excluded values — a sum check alone
+would pass on a formatter that grouped the right total from the wrong buckets.

@@ -56,6 +56,7 @@ import {
 import { flagConnectionStatus } from './ops-signals.js'
 import { SecretsKeyMissingError, decryptSecrets, encryptSecrets, secretsKeyConfigured } from '../../infra/secrets.js'
 import { applyCompanyInfo } from './company-info.js'
+import { pkceChallengeFor } from './oauth-pkce.js'
 import type { AccountingConnector } from './connector.js'
 import {
   ProviderError,
@@ -79,6 +80,14 @@ export interface OAuth2ProviderConfig {
   extraAuthorizeParams?: Record<string, string>
   /** RFC 7009 revocation endpoint; required when the descriptor declares `capabilities.revoke`. */
   revokeUrl?: string
+  /**
+   * RFC 7636 PKCE (#4517). `'S256'` puts a `code_challenge` on the consent
+   * URL and the matching `code_verifier` on the code exchange; both then
+   * REFUSE without a verifier rather than send a request the provider would
+   * reject. Unset (Fortnox), neither parameter is sent. The verifier comes
+   * from `oauth-pkce.ts`.
+   */
+  pkce?: 'S256'
 }
 
 export interface OAuth2Tokens {
@@ -106,10 +115,15 @@ interface TokenResponse {
   expires_in: number
 }
 
-/** Build the consent URL the customer is redirected to (pure). */
+/**
+ * Build the consent URL the customer is redirected to (pure). A PKCE
+ * provider gets the challenge appended — after every other parameter, so a
+ * provider without PKCE gets exactly the URL it always did.
+ */
 export function buildAuthorizeUrl(
-  cfg: Pick<OAuth2ProviderConfig, 'authorizeUrl' | 'clientId' | 'redirectUri' | 'scope' | 'extraAuthorizeParams'>,
+  cfg: Pick<OAuth2ProviderConfig, 'providerId' | 'authorizeUrl' | 'clientId' | 'redirectUri' | 'scope' | 'extraAuthorizeParams' | 'pkce'>,
   state: string,
+  pkceVerifier?: string,
 ): string {
   const params = new URLSearchParams({
     client_id: cfg.clientId,
@@ -119,7 +133,16 @@ export function buildAuthorizeUrl(
     response_type: 'code',
     ...(cfg.extraAuthorizeParams ?? {}),
   })
+  if (cfg.pkce) {
+    params.set('code_challenge', pkceChallengeFor(requirePkceVerifier(cfg, pkceVerifier)))
+    params.set('code_challenge_method', cfg.pkce)
+  }
   return `${cfg.authorizeUrl}?${params.toString()}`
+}
+
+function requirePkceVerifier(cfg: Pick<OAuth2ProviderConfig, 'providerId'>, verifier: string | undefined): string {
+  if (!verifier) throw new Error(`${cfg.providerId} requires PKCE, and no code verifier was given.`)
+  return verifier
 }
 
 function basicAuthHeader(cfg: Pick<OAuth2ProviderConfig, 'clientId' | 'clientSecret'>): string {
@@ -242,17 +265,22 @@ export async function revokeToken(
   }
 }
 
-/** Exchange an authorization code for tokens. */
-export function exchangeCode(
+/**
+ * Exchange an authorization code for tokens. A PKCE provider's exchange
+ * carries the verifier, and is refused here — before any request — without
+ * one.
+ */
+export async function exchangeCode(
   cfg: OAuth2ProviderConfig,
   code: string,
   fetchImpl: typeof fetch = fetch,
+  pkceVerifier?: string,
 ): Promise<OAuth2Tokens> {
-  return postToken(
-    cfg,
-    new URLSearchParams({ grant_type: 'authorization_code', code, redirect_uri: cfg.redirectUri }),
-    fetchImpl,
-  )
+  const body = new URLSearchParams({ grant_type: 'authorization_code', code, redirect_uri: cfg.redirectUri })
+  // MUTATION TARGET (oauth-pkce.test.ts "exchange carries the verifier"):
+  // dropping it sends an exchange a PKCE provider refuses.
+  if (cfg.pkce) body.set('code_verifier', requirePkceVerifier(cfg, pkceVerifier))
+  return postToken(cfg, body, fetchImpl)
 }
 
 /** Refresh an expired access token. Consumes the refresh token at the provider. */
@@ -336,6 +364,8 @@ export async function completeOAuth2Connect(input: {
   connector: AccountingConnector
   userId: string
   code: string
+  /** The state's PKCE verifier (`oauth-pkce.ts`); required when `cfg.pkce` is set. */
+  pkceVerifier?: string
   fetchImpl?: typeof fetch
 }): Promise<AccountingConnectionRow> {
   const fetchImpl = input.fetchImpl ?? fetch
@@ -343,7 +373,7 @@ export async function completeOAuth2Connect(input: {
   // consumed at the provider — same reasoning as the refresh order below.
   if (!secretsKeyConfigured()) throw new SecretsKeyMissingError()
 
-  const tokens = await exchangeCode(input.cfg, input.code, fetchImpl)
+  const tokens = await exchangeCode(input.cfg, input.code, fetchImpl, input.pkceVerifier)
   const freshSecrets = tokensToSecrets(tokens) as unknown as Record<string, unknown>
   let info: ProviderCompanyInfo
   try {

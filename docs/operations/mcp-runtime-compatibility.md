@@ -90,16 +90,15 @@ last-verified: "2026-10-29"
 ---
 
 > **Re-verified #4541 (2026-10-29, the release-records shipped-delta drafter):**
-> no covered runtime surface changes. The diff adds
-> `scripts/ci/release-records.mjs` and its `node --test` suite, a
-> `release:records` entry in `package.json`, and a section in the covered
-> `scripts/README.md` describing them. The script reads `release:scope --json`
-> and prints the CASP shard's shipped-delta figures; it touches no package
-> source, no tool name, input schema, strict-input list, expected-context
-> version, consent hash or `tools-list.snapshot.json` entry, and no version
-> literal the Supported Runtime Manifest table pins. Nothing else in this
-> document was re-verified, and `last-verified` is re-stamped to 2026-10-29 for
-> this note.
+> no covered runtime surface changes. The diff adds a new measurement script
+> under `scripts/ci` and its `node --test` suite, a `release:records` entry in
+> `package.json`, and a section in the covered `scripts/README.md` describing
+> them. The script reads `release:scope --json` and prints the CASP shard's
+> shipped-delta figures; it touches no package source, no tool name, input
+> schema, strict-input list, expected-context version, consent hash or
+> `tools-list.snapshot.json` entry, and no version literal the Supported
+> Runtime Manifest table pins. Nothing else in this document was re-verified,
+> and `last-verified` is re-stamped to 2026-10-29 for this note.
 
 > **Re-verified #4468 (2026-10-27, the ten typed task-/sub-budget
 > payment-scope refusals and three siblings):** covered surfaces change

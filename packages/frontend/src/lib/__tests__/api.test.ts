@@ -30,6 +30,15 @@ describe('ApiClient', () => {
     })
   }
 
+  /**
+   * A real bodyless success: a genuine `Response` whose `json()` rejects exactly
+   * as the browser's does on an empty body, so a client that still parses fails
+   * the test rather than silently passing (#4538).
+   */
+  function mockFetchNoContent(status: number) {
+    ;(fetch as ReturnType<typeof vi.fn>).mockResolvedValue(new Response(null, { status }))
+  }
+
   describe('get()', () => {
     it('calls fetch with correct URL and auth header when token exists', async () => {
       localStorage.setItem('haven_token', 'test-token')
@@ -137,6 +146,45 @@ describe('ApiClient', () => {
       })
       expect(result).toEqual({ success: true })
     })
+
+    /**
+     * #4538: `DELETE /accounting/connections/:provider` answers `204 No
+     * Content`. Parsing that empty body threw `SyntaxError: Unexpected end of
+     * JSON input`, which reached the user as a raw engine string on Disconnect
+     * and skipped the refetch. A bodyless success must resolve.
+     */
+    it('resolves without parsing a body on 204 No Content', async () => {
+      mockFetchNoContent(204)
+
+      await expect(api.delete('/accounting/connections/fortnox')).resolves.toBeUndefined()
+
+      expect(fetch).toHaveBeenCalledWith('/api/accounting/connections/fortnox', {
+        method: 'DELETE',
+        headers: {},
+      })
+    })
+
+    it('resolves without parsing a body on 205 Reset Content', async () => {
+      mockFetchNoContent(205)
+
+      await expect(api.delete('/accounting/categories?resourceUrl=x')).resolves.toBeUndefined()
+    })
+
+    it('still parses a JSON body on a 200', async () => {
+      mockFetchOk({ success: true })
+
+      await expect(api.delete('/agents/1')).resolves.toEqual({ success: true })
+    })
+
+    it('still throws ApiRequestError with the parsed message on a non-ok delete', async () => {
+      mockFetchError(404, { error: 'connection_not_found' })
+
+      await expect(api.delete('/accounting/connections/fortnox')).rejects.toMatchObject({
+        name: 'ApiRequestError',
+        message: 'connection_not_found',
+        status: 404,
+      })
+    })
   })
 
   describe('error handling', () => {
@@ -185,6 +233,20 @@ describe('ApiClient', () => {
       expect(e.body).toBeUndefined()
       expect(e.message).toBe('boom')
       expect(e.status).toBe(500)
+    })
+
+    /**
+     * The non-ok path is unchanged by #4538: a bodyless failure still falls back
+     * to the generic message rather than surfacing a parse error.
+     */
+    it('falls back to a generic message when a non-ok response has no body', async () => {
+      ;(fetch as ReturnType<typeof vi.fn>).mockResolvedValue(new Response(null, { status: 500 }))
+
+      await expect(api.get('/secret')).rejects.toMatchObject({
+        name: 'ApiRequestError',
+        message: 'An unexpected error occurred',
+        status: 500,
+      })
     })
 
     it('clears the persisted override when apiBaseUrl=default is provided', async () => {

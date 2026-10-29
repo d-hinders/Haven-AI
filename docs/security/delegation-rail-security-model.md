@@ -4315,3 +4315,20 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > delegation, caveat, enforcer term, budget pre-check, settlement window,
 > funding leg or sweep changes. Scope of this note: those three files.
 > Nothing else in this document was re-verified for it.
+
+> **Re-verified unchanged (#4534, 2026-10-29 — the purchase correlation key):**
+> this diff touched one file in this document's coverage list,
+> `packages/sdk/src/client.ts`, and none of its authority, custody or signing
+> surfaces. The change rides the same seam #3778's note scopes — the ACCEPTED
+> arm's `/machine-payments/evidence` report — plus the
+> `reportX402MerchantOutcome` pass-through: two new OPTIONAL inputs,
+> `purchaseGroupId` (≤ 128 chars, the merchant's own invoice/order id or a
+> caller-chosen group key) and `merchantResponse` (the merchant's paid
+> response body, read by a small explicit per-merchant map on the backend and
+> never stored — only the derived id is). Both are spread into the evidence
+> payload only when present, and only on an accepted outcome. They authorize
+> nothing, produce or consume no signature, and no spend decision reads their
+> value; the backend writes them first-write-wins onto the evidence row and
+> never touches `payment_intents`, settlement or custody. A caller that
+> supplies neither is byte-identical to before. Scope of this note: that one
+> file. Nothing else in this document was re-verified for it.

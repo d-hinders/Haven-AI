@@ -482,6 +482,119 @@ export async function setEvidenceDeliveryReference(
   )
 }
 
+// ── Purchase correlation key (#4534) ─────────────────────────────────────────
+
+/**
+ * #4534: write the correlation key onto an EXISTING evidence row. Scoped to
+ * the payment + agent exactly like every other evidence write.
+ *
+ * Both columns are FIRST-WRITE-WINS (`COALESCE`), the same discipline the
+ * evidence row applies to every other piece of source material: a later
+ * report never rewrites what the document already says, and a re-attach that
+ * carries no correlation never clears one that was recorded. `parentPaymentId`
+ * is null for the purchase leg itself and for a payment whose group has no
+ * known purchase member yet — the backfill below fills it in when one lands.
+ */
+export const SET_EVIDENCE_PURCHASE_GROUP_SQL = `UPDATE machine_payment_evidence
+   SET purchase_group_id = COALESCE(machine_payment_evidence.purchase_group_id, $3),
+       parent_payment_id = COALESCE(machine_payment_evidence.parent_payment_id, $4),
+       updated_at = NOW()
+ WHERE payment_intent_id = $1
+   AND agent_id = $2
+ RETURNING id, purchase_group_id, parent_payment_id`
+
+export interface EvidencePurchaseGroupRow {
+  id: string
+  purchase_group_id: string | null
+  parent_payment_id: string | null
+}
+
+export async function setEvidencePurchaseGroup(
+  input: {
+    paymentIntentId: string
+    agentId: string
+    purchaseGroupId: string
+    parentPaymentId: string | null
+  },
+  db: Executor = pool,
+): Promise<EvidencePurchaseGroupRow | null> {
+  const result = await db.query<EvidencePurchaseGroupRow>(SET_EVIDENCE_PURCHASE_GROUP_SQL, [
+    input.paymentIntentId,
+    input.agentId,
+    input.purchaseGroupId,
+    input.parentPaymentId,
+  ])
+  return result.rows[0] ?? null
+}
+
+/**
+ * #4534: every evidence row of one purchase group, oldest first. The caller
+ * classifies each member's route to find the purchase leg — the merchant's own
+ * route is the only fact that distinguishes `invoice/pay` from
+ * `invoice/create` and `invoice/status`.
+ */
+export const FIND_PURCHASE_GROUP_MEMBERS_SQL = `SELECT id, resource_url, purchase_group_id, parent_payment_id
+   FROM machine_payment_evidence
+  WHERE purchase_group_id = $1
+    AND user_id = $2
+  ORDER BY COALESCE(confirmed_at, created_at) ASC, id ASC`
+
+export interface PurchaseGroupMemberRow {
+  id: string
+  resource_url: string | null
+  purchase_group_id: string | null
+  parent_payment_id: string | null
+}
+
+export async function findPurchaseGroupMembers(
+  purchaseGroupId: string,
+  userId: string,
+  db: Executor = pool,
+): Promise<PurchaseGroupMemberRow[]> {
+  const result = await db.query<PurchaseGroupMemberRow>(FIND_PURCHASE_GROUP_MEMBERS_SQL, [
+    purchaseGroupId,
+    userId,
+  ])
+  return result.rows
+}
+
+/**
+ * #4534: when the PURCHASE leg lands, point the group's FEE legs that have no
+ * parent yet at it. This is what makes the link independent of settlement
+ * order: `invoice/create` settles before `invoice/pay`, so the fee row is
+ * written first and its parent is filled in here.
+ *
+ * The caller passes the ids it classified as fee legs, rather than the SQL
+ * excluding only the purchase row. Two reasons, both about never guessing:
+ * a member whose merchant route the map does not recognise is not linked (its
+ * leg is unknown), and a SECOND purchase leg in the same group (a retried
+ * `invoice/pay`) never becomes a child of the first — a purchase's parent is
+ * null by definition.
+ */
+export const BACKFILL_PURCHASE_GROUP_PARENT_SQL = `UPDATE machine_payment_evidence
+   SET parent_payment_id = $3,
+       updated_at = NOW()
+ WHERE purchase_group_id = $1
+   AND user_id = $2
+   AND id = ANY($4::uuid[])
+   AND parent_payment_id IS NULL`
+
+export async function backfillPurchaseGroupParent(
+  purchaseGroupId: string,
+  userId: string,
+  parentPaymentId: string,
+  feeMemberIds: string[],
+  db: Executor = pool,
+): Promise<void> {
+  if (feeMemberIds.length === 0) return
+  await db.query(BACKFILL_PURCHASE_GROUP_PARENT_SQL, [
+    purchaseGroupId,
+    userId,
+    parentPaymentId,
+    feeMemberIds,
+  ])
+}
+
 // ── Receipts list + evidence echo (routes/machine-payments.ts) ───────────────
 
 // #2960: `intent_delegate_address` / `intent_delegate_account_address` are

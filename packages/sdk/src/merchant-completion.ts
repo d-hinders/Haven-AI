@@ -660,6 +660,18 @@ export class MerchantCompletion {
      * secret to the owner directly; report only the pointer.
      */
     deliveryReference?: string
+    /**
+     * #4534: the purchase correlation key — an agent-supplied group key for a
+     * purchase that spans several paid calls. Its own field, never the
+     * idempotency key. Recorded on the evidence row (accepted outcomes only).
+     */
+    purchaseGroupId?: string
+    /**
+     * #4534: the merchant's PAID response body, when it carries the merchant's
+     * own invoice/order id. The backend reads it through a small explicit
+     * per-merchant map and stores only the derived id — never the body.
+     */
+    merchantResponse?: Record<string, unknown>
   }): Promise<X402MerchantOutcomeReport> {
     if (!Number.isInteger(input.merchantStatus) || input.merchantStatus < 100 || input.merchantStatus > 599) {
       throw new HavenApiError(
@@ -736,6 +748,10 @@ export class MerchantCompletion {
       // #3778: accepted outcomes only — a rejection delivered nothing, so
       // there is no deliverable to point at.
       ...(input.deliveryReference ? { deliveryReference: input.deliveryReference } : {}),
+      // #4534: the purchase correlation key — accepted outcomes only, for the
+      // same reason: a rejected retry bought nothing to group.
+      ...(input.purchaseGroupId ? { purchaseGroupId: input.purchaseGroupId } : {}),
+      ...(input.merchantResponse ? { merchantResponse: input.merchantResponse } : {}),
     })
     return { paymentId: status.paymentId, outcome: 'accepted', txHash, resourceUrl, recorded: 'evidence' }
   }

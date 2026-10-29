@@ -131,6 +131,15 @@ export interface AccountingEntry {
    * underlag and carried on the feed payload beside the kind.
    */
   transactionDescription: string
+  /**
+   * #4534: the purchase correlation key. `purchaseGroupId` is the merchant's
+   * own invoice/order id (or an agent-supplied group key) shared by every
+   * payment of one purchase; `parentPaymentId` is the purchase payment a fee
+   * call paid for. Both null on an ungrouped payment — which is fed exactly as
+   * before, never withheld.
+   */
+  purchaseGroupId: string | null
+  parentPaymentId: string | null
   /** The merchant's OWN receipt when the agent captured one (#956); absent/null = none. */
   merchantReceipt?: { url: string | null; inlineJson: unknown | null } | null
 }
@@ -157,6 +166,9 @@ export interface AccountingEntrySourceRow {
   resource_url: string | null
   confirmed_at: string | null
   created_at: string
+  /** #4534: the purchase correlation key (migration 123). */
+  purchase_group_id?: string | null
+  parent_payment_id?: string | null
   /** From the merchant catalog (LEFT JOIN). */
   category: string | null
   /** Supplier country (ISO-2) from the merchant catalog; drives VAT treatment. */
@@ -357,6 +369,9 @@ export function toAccountingEntry(row: AccountingEntrySourceRow): AccountingEntr
     // resource host renders, the same host on every receipt of one merchant.
     transactionKind: kind.kind,
     transactionDescription: transactionDescription(kind.kind, null, row.resource_url, kind.route),
+    // #4534: the purchase correlation key, read straight off the evidence row.
+    purchaseGroupId: row.purchase_group_id ?? null,
+    parentPaymentId: row.parent_payment_id ?? null,
     merchantReceipt:
       row.merchant_receipt_url != null || row.merchant_receipt_json != null
         ? { url: row.merchant_receipt_url ?? null, inlineJson: row.merchant_receipt_json ?? null }
@@ -393,6 +408,7 @@ const ENTRY_SOURCE_SQL = `
     mpe.amount_sek, mpe.fx_rate_sek, mpe.fx_source, mpe.fx_at, mpe.fx_rates,
     mpe.resource_url, mpe.confirmed_at, mpe.created_at,
     mpe.delivery_reference,
+    mpe.purchase_group_id, mpe.parent_payment_id,
     pi.machine_metadata->>'settlement_scheme' AS settlement_scheme,
     pi.machine_metadata->>'merchant_settlement_tx_hash' AS verified_settlement_tx_hash,
     pi.machine_metadata->>'accounting_booked_tx_hash' AS pinned_booked_tx_hash,
@@ -445,6 +461,12 @@ const ENTRY_SOURCE_SQL = `
     pi.confirmed_at, pi.created_at,
     -- No evidence row, so no delivery reference (#4532's signal).
     NULL::TEXT AS delivery_reference,
+    -- #4534: the purchase correlation key lives on machine_payment_evidence
+    -- only (migration 123), so a direct payment is ungrouped by construction.
+    -- Typed NULLs, not bare ones: the UNION resolves against the evidence
+    -- branch, where parent_payment_id is UUID.
+    NULL::TEXT AS purchase_group_id,
+    NULL::UUID AS parent_payment_id,
     pi.machine_metadata->>'settlement_scheme' AS settlement_scheme,
     pi.machine_metadata->>'merchant_settlement_tx_hash' AS verified_settlement_tx_hash,
     pi.machine_metadata->>'accounting_booked_tx_hash' AS pinned_booked_tx_hash,

@@ -15,6 +15,21 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+### Added
+
+- **`PaymentStatusResult.merchantSettlementTxHash` names the recorded
+  settlement transaction (#4530).** `haven_get_payment_status` already
+  reported `merchantSettlementRecorded: true` when an EIP-3009 payment's
+  merchant settlement was recorded and verified on-chain, but not WHICH
+  transaction it recorded — so an agent could not confirm on that read that
+  the hash it held was the one Haven had (the settlement sweep records one the
+  agent never reported). The status read now carries
+  `merchant_settlement_tx_hash`, mapped to `merchantSettlementTxHash`, under
+  the same presence rule as the flag: present only when recorded, absent
+  otherwise, never `null` and never the merchant's unverified echo. Additive
+  and optional on a type that is only returned, so existing consumers keep
+  compiling. No update needed.
+
 ## 0.12.0-alpha.0 — 2026-10-29
 
 ### Added

@@ -18,9 +18,13 @@ unclear; this page is the order, not the reasoning.
 1. **Ask an agent session to release** (or run the `release` skill yourself):
    it cuts the version bump, opens the release PR **into `dev`** and runs the
    preflight. Confirm you actually want the release — cutting and shipping are
-   two decisions.
+   two decisions. Before the bump is cut, decide **once** which open PRs into
+   `dev` that touch a published package are in or out — the scope freeze,
+   announced on the release PR and #3193.
 2. **Approve the release PR** (or have the agent session's independent
-   reviewer do it). Merge it into `dev` — a squash, like every `dev` PR.
+   reviewer do it). Merge it into `dev` — a squash, like every `dev` PR. If the
+   `Haven AI / dev` deployment for the merge SHA is not live 8 minutes after
+   the merge, it looks stalled — a Railway redeploy is the remedy.
 3. **Hold `dev` while the promotion PR is open.** No merges to `dev` until the
    promotion lands: its head is the `dev` branch, and every merge moves it,
    dismisses approvals and re-runs checks.

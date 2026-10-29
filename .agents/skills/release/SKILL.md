@@ -104,6 +104,39 @@ So, before any merge and before reporting any state:
   allowlist, which looks identical to a service being down. Check
   `$HTTPS_PROXY/__agentproxy/status` before reading anything into it.
 
+## Report Each Milestone
+
+**Post one line at each milestone, naming the next one.** A release runs for
+hours and the owner cannot see inside it. During the 0.12.0-alpha.0 run the
+owner had to ask "where is QA now?", "Why does this take so long?" and "Is QA
+running?" — three questions the run should have answered unprompted. Silence
+reads as a stall, and the owner's only recourse is to interrupt you.
+
+The milestones, in order:
+
+1. **release PR opened** — number, head SHA, and what it carries.
+2. **merged** — the merge SHA.
+3. **dev deploy live** — the live time read as *The Release PR* says, or
+   "check Railway" when it cannot be told.
+4. **QA green** — the `money-flow` run finished, and the `qa-freshness`
+   **check** re-run green. The check, not the run: a green run does not turn
+   the check green (*Preflight* step 4). The check is re-run on the promotion
+   PR, so say which of the two you are reporting — "run green, check owed"
+   before that PR exists, "check green" after.
+5. **promotion opened** — number and head.
+6. **merged** — the merge SHA.
+7. **prod deploy live** — Railway and Vercel.
+8. **closeout done** — what published, what did not, and the canary's state.
+
+Each line names the next milestone, so the owner knows what to expect and when
+to worry. A milestone that is late is itself worth a line: say it is late and
+what you are doing about it, rather than going quiet.
+
+**Record the phase timings in the promotion PR body after closeout** — the
+merge-to-live time for `dev` and for prod, and the QA wait. That is the input
+to the epic's promotion-checklist box (#4539), and the only place the next
+release can learn where its own hours went.
+
 ## Preflight
 
 Establish facts before touching anything. Each of these has cost a real release.
@@ -159,7 +192,10 @@ because `release-scope.mjs` counts `package.json` as a tarball member, so once a
 bump exists the shipped delta can never read zero again.
 
 **3. Write down what it carries.** That commit list becomes the PR body and the
-CASP shard. Name the issues.
+CASP shard. Name the issues. **Decide the open PRs into `dev` in the same
+pass** — the scope freeze under *The Release PR* — because a published-package
+PR that merges after the bump is cut costs a re-measure, a re-review and CI
+again.
 
 **4. Start the money-flow QA run NOW if the freshness signal is stale.** The
 gate's semantics, the #2164 version-bump exemption and the `qa-override` escape
@@ -439,6 +475,89 @@ gh pr list --base main --state open      # or the GitHub MCP: list_pull_requests
 Non-empty means a promotion is already open. Say so before merging, and if you
 merge anyway: re-run `qa-freshness` at the new head, re-measure the scope, and
 tell that PR's author what changed underneath them.
+
+**Freeze the scope at the cut, and decide the open PRs once.** The listing
+above asks what is already open into `main`; this asks what should still be
+allowed to join the release you are about to cut. Nothing else in this skill
+decides it, and deciding late is measured rather than argued: #4516, a
+published-package PR open since 07:45Z — before the 08:05 start — was not
+decided at the cut, and after the release PR opened at 08:46:50Z it cost four
+commits (one merge `0cd702cf4`, one figure re-measure `f8adbf63a`, two wording
+corrections `3e09df875` and `af4fd8f36`) plus their review and CI, through
+09:43:57. #4523, frontend only, was allowed under this rule and touched no
+release-branch file.
+
+List the open PRs into `dev` that touch a published package directory:
+
+```sh
+gh pr list --base dev --state open --json number,title,files \
+  --jq '.[] | select(.files[]?.path | test("^packages/(sdk|signer|mcp|connect|cli)/")) | "\(.number) \(.title)"'
+# or the GitHub MCP: list_pull_requests
+```
+
+- **The owner decides in or out, once.** "In" PRs merge **before** the bump is
+  cut. Anything decided "out" waits for the next release — unless the owner
+  explicitly re-opens scope and accepts the re-cut cost: re-measure the scope,
+  re-review, and CI again.
+- **Announce the freeze where other sessions and people look.** Put it in the
+  release PR body and on #3193, the shared surface `AGENTS.md` § *Cross-session
+  agent coordination* names for release trains. Lift it on the same two
+  surfaces. A freeze nobody announced binds only the session running the
+  release — the same gap `promoting-dev-to-main.md` § *The promotion window*
+  names for the hold.
+- **PRs that touch no published package may still land on `dev`** until the
+  promotion PR opens. Backend, frontend and ops changes reach no tarball, so
+  they are outside the freeze. The shard's hand-written *Deploys with this
+  promotion* section must still name them, and the door re-measure under
+  *Promotion To Production* catches only their count.
+
+**After the merge, bound the dev deploy wait.** The release PR merging to `dev`
+starts a Railway deployment, and the promotion's `qa-freshness` check reads
+that deployment — so a deploy that never lands stalls the release silently.
+Give it **8 minutes** from the merge, then act.
+
+Read the deployment for the merge SHA. `gh` is unavailable in the remote
+environment (the note in *Preflight* step 4), so use the unauthenticated `curl`
+this skill already uses for the rules check under *Promotion To Production* —
+same access path, different endpoint:
+
+```sh
+curl -sS "https://api.github.com/repos/d-hinders/Haven-AI/deployments?environment=Haven%20AI%20%2F%20dev&per_page=10"
+# then, for the deployment whose "sha" is the merge SHA:
+curl -sS "https://api.github.com/repos/d-hinders/Haven-AI/deployments/<id>/statuses"
+```
+
+`Haven AI / dev` is `RAILWAY_DEV_ENVIRONMENT` in `scripts/ci/qa-freshness.mjs` —
+read the constant there rather than retyping the literal, and note the
+environment name is URL-encoded in the query.
+
+**Which reading counts as live.** The statuses list is newest-first and one
+deployment carries several unlabelled `success` entries, so the reading is not
+obvious:
+
+- The **earliest `success`** on the deployment whose `sha` is the merge SHA —
+  the last `success` in that newest-first list — is when it went live. That is
+  the reading that counts.
+- Later `success` entries on the same deployment are **not** the live time.
+  Railway re-states "N is still the live one" when the next deployment starts
+  building and again when it goes live (`docs/operations/agent-qa.md` §
+  *Automation & gating*, the de-duplication rule), and a redeploy of the same
+  deployment emits its own `in_progress` → `success` pair. Reading the newest
+  `success` instead reads a re-statement: on 2026-10-29 deployment 7421777793
+  went live at 19:16:10Z and its newest `success` reads 19:25:11Z, and
+  7412333353's newest reads 2 h 10 min after it went live.
+- **When it cannot be told, say "check Railway".** No deployment for the merge
+  SHA, no `success` in its statuses, or more than one deployment carrying that
+  SHA with no way to tell which is serving — report that and point at the
+  Railway project rather than guessing a live time.
+
+**The bound.** The last 15 `Haven AI / dev` deployments reached their first
+`success` in **2 min 20 s to 5 min 37 s** after creation. The release commit
+`3243d58f4` took **19 min 27 s**. So at 8 minutes past the merge, a deployment
+that has not reported `success` is outside the measured normal range: tell the
+user it looks stalled and that a **Railway redeploy** is the remedy. Do not
+wait indefinitely, and never report the deploy as live off an `in_progress`
+status.
 
 ## Promotion To Production
 

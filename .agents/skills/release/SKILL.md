@@ -506,7 +506,7 @@ publishes nothing"; paste `npm run release:scope` output>
 ## After merge
 
 - [ ] `npm view @haven_ai/<pkg> dist-tags` — all five on `alpha` and `latest`
-- [ ] Migrations confirmed applied in the Railway log
+- [ ] Closeout log check passed — deployment identity = the merge SHA, both boot markers present, no unset-public-RPC warning (or the manual check recorded)
 - [ ] Real-payment canary
 ```
 
@@ -553,12 +553,32 @@ not disappear.
 The merge is not the finish. `promoting-dev-to-main.md` § *Merge, deploy, and
 verify prod* and § *Run the prod smoke on the right hostname* own the post-merge
 checklist; work them there rather than from here. They cover watching the
-Railway and Vercel deploys land, confirming migrations applied cleanly and how
-to recover a non-transactional one that died part-way, reading the boot log for
-the unset-public-RPC warnings (the evidence is the **absence** of that line in
-the deploy log, not the presence of a variable in a dashboard), the prod smoke
-itself, which Vercel hostnames are production and which is the trap, and the
-rollback path.
+Railway and Vercel deploys land, the closeout log check, the prod smoke itself,
+which Vercel hostnames are production and which is the trap, and the rollback
+path.
+
+**The two log checks are machine-read, and bound to the merge SHA.** Run
+
+```sh
+node scripts/ci/release-closeout-log.mjs --pr <promotion PR number>
+```
+
+and paste its block onto the promotion PR. It anchors the promotion's merge SHA
+in GitHub's `deployment_status` stream for `Haven AI / production`, finds the
+Railway deployment of that commit, reads **that deployment's** boot log, and
+fails unless the deployment's identity equals the SHA and both boot markers
+(`Database migrations complete`, `Haven backend running on port`) are present.
+Only then does it count the unset-public-RPC warnings — the evidence is the
+**absence** of that line in the deploy log, not the presence of a variable in a
+dashboard. The binding is the point: `runMigrations()` runs before `listen()`,
+so a failed migration means the new process never serves while Railway keeps the
+previous deployment live, and an unbound log read can pass on the OLD process.
+
+Exit 0 is a pass, 1 a failed check (it says what failed), 2 means it could not
+run — it then prints a one-line pointer to the **manual check in the Railway web
+UI** in `promoting-dev-to-main.md`, which reaches the same verdict with the same
+strings. A non-transactional migration that died part-way names its own recovery
+statements; do not restart hoping it clears.
 
 **A green deploy status is not the prod smoke.** The deploy platform reporting
 success says a process started; it says nothing about whether a user can log in,

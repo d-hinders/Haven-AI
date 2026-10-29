@@ -1,0 +1,4 @@
+{"message":"Starting Container","timestamp":"2026-10-23T12:28:30.000000000Z","level":"info"}
+{"hostname":"21ba869518b2","timestamp":"2026-10-23T12:28:32.423064632Z","level":"info","time":1792758511405,"message":"Database migrations complete","pid":1}
+{"message":"[migrate] applied 117_merchant_catalog_source","timestamp":"2026-10-23T12:28:32.423060723Z","level":"info"}
+{"hostname":"21ba869518b2","timestamp":"2026-10-23T12:28:32.423079734Z","time":1792758511659,"message":"Haven backend running on port 8080","pid":1,"level":"info"}

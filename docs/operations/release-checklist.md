@@ -2,7 +2,7 @@
 owner: "@d-hinders"
 status: current
 covers: []  # narrative — list the code paths this doc describes, one per line
-last-verified: "2026-10-13"
+last-verified: "2026-10-29"
 ---
 
 # Release checklist
@@ -60,13 +60,19 @@ unclear; this page is the order, not the reasoning.
 
    A green publish with `latest` unmoved is a red `promote-tags` job — re-run
    that one job, never cut another version.
-8. **Confirm the migrations applied** in the Railway deploy log (and watch the
-   Vercel frontend deploy). A non-transactional migration that died part-way
-   names its own recovery statements — do not restart hoping it clears.
+8. **Run the closeout log check** and paste its block onto the promotion PR.
+   It binds the evidence to the promotion's merge SHA: the deployment's
+   identity must equal that SHA, both boot markers (`Database migrations
+   complete`, `Haven backend running on port`) must be present in that
+   deployment's log, and the unset-public-RPC warning must be absent. A
+   non-transactional migration that died part-way names its own recovery
+   statements — do not restart hoping it clears. If the script cannot run for
+   you, the manual check in `promoting-dev-to-main.md` § *Merge, deploy, and
+   verify prod* reaches the same verdict in the Railway web UI.
 9. **Real-payment canary.** The prod smoke's canary is a real payment through
    the funded prod wallet — an operator step, never reported done while
    outstanding.
 
-The full prod smoke (boot-log check, error-log watch, rollback path) is
-`promoting-dev-to-main.md` § *Merge, deploy, and verify prod* — the merge is
-not the finish.
+The full prod smoke (the closeout log check and its manual fallback, the
+error-log watch, the rollback path) is `promoting-dev-to-main.md` § *Merge,
+deploy, and verify prod* — the merge is not the finish.

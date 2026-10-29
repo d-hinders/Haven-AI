@@ -1,0 +1,7 @@
+{"message":"Starting Container","timestamp":"2026-10-29T14:48:03.428082091Z","level":"info"}
+{"hostname":"da7999ece317","timestamp":"2026-10-29T14:48:04.660655386Z","level":"info","time":1793285283802,"message":"Database migrations complete","pid":1}
+{"message":"[migrate] applied 116_owner_transfers","timestamp":"2026-10-29T14:48:04.660657706Z","level":"info"}
+{"message":"[migrate] applied 117_merchant_catalog_source","timestamp":"2026-10-29T14:48:04.660659956Z","level":"info"}
+{"message":"Server listening at http://127.0.0.1:8080","pid":1,"time":1793285283980,"timestamp":"2026-10-29T14:48:04.660661000Z","level":"info","hostname":"da7999ece317"}
+{"message":"Haven backend running on port 8080","pid":1,"time":1793285283980,"hostname":"da7999ece317","timestamp":"2026-10-29T14:48:04.660662746Z","level":"info"}
+{"hostname":"da7999ece317","reqId":"req-1","pid":1,"level":"info","timestamp":"2026-10-29T14:49:00.000000000Z","time":1793285340000,"message":"incoming request","req":{"method":"GET","url":"/agents"}}

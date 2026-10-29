@@ -483,7 +483,7 @@ export class HavenClient {
     // agent in this flow passes delegateAddress and skips the duplicate fetch.
     const fundingTo = options.delegateAddress ?? (await this.getAgent()).delegateAddress
     if (!fundingTo) {
-      throw new HavenApiError('Authenticated agent has no delegate address registered.', 502)
+      throw HavenApiError.deterministic('Authenticated agent has no delegate address registered.', 502)
     }
 
     const idempotencyKey = options.idempotencyKey ?? buildX402IdempotencyKey(paymentRequired, option)
@@ -527,7 +527,7 @@ export class HavenClient {
       throwPaymentStateError('x402 payment', raw)
     }
     if (!raw.sign_data?.hash) {
-      throw new HavenApiError('No sign_hash returned from x402/authorize', 500, raw)
+      throw HavenApiError.deterministic('No sign_hash returned from x402/authorize', 500, raw)
     }
     // #946/#1138: a delegation-rail funding intent signs the ACCOUNT's EIP-712
     // typed data, not the bare hash. This path is keyless by construction, so
@@ -545,7 +545,7 @@ export class HavenClient {
       )
     }
     if (!raw.x402_expected_auth) {
-      throw new HavenApiError('No x402 expected-context binding returned from x402/authorize', 500, raw)
+      throw HavenApiError.deterministic('No x402 expected-context binding returned from x402/authorize', 500, raw)
     }
 
     return {

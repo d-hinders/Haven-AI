@@ -2950,15 +2950,90 @@ export class HavenError extends Error {
   }
 }
 
+/**
+ * #4470: why a `HavenApiError` happened, where its status alone cannot say.
+ *
+ * - `no_answer` — the transport got no usable answer: the request timed out
+ *   (status 408), `fetch` threw, or the body was not JSON (status 0). Whether
+ *   the call took effect is unknown, so a `GET` may be retried and a `POST`
+ *   must not be; `method` says which it was.
+ * - `deterministic` — the SDK refused an answer it cannot use (a missing
+ *   field, the wrong shape). Repeating the same call gets the same answer,
+ *   whatever the status says.
+ *
+ * Absent on every other error, which keeps the status rule. A readonly field
+ * rather than a subclass, so `name`, `code` and `statusCode` stay what
+ * consumers already match on.
+ */
+export type HavenApiFailureCause =
+  | { readonly kind: 'no_answer'; readonly method: 'GET' | 'POST' }
+  | { readonly kind: 'deterministic' }
+
 export class HavenApiError extends HavenError {
   constructor(
     message: string,
     statusCode: number,
     public readonly body?: unknown,
     paymentId?: string,
+    public readonly failureCause?: HavenApiFailureCause,
   ) {
     super(message, 'API_ERROR', statusCode, paymentId)
     this.name = 'HavenApiError'
+  }
+
+  /**
+   * #4470: an error a retry cannot change. The census in
+   * `haven-api-error-census.test.ts` requires every literal 5xx site to use
+   * this or be allowlisted there with a reason.
+   */
+  static deterministic(message: string, statusCode: number, body?: unknown, paymentId?: string): HavenApiError {
+    return new HavenApiError(message, statusCode, body, paymentId, { kind: 'deterministic' })
+  }
+}
+
+/**
+ * #4470: the funding transaction's confirmation could not be read — ethers'
+ * `waitForTransaction` rejected (its `TIMEOUT`, or an RPC failure). Haven had
+ * already submitted the funding leg, so funds may have reached the delegate:
+ * the answer is check-status, never "tell the user it failed" and never a new
+ * payment. The merchant was not called.
+ *
+ * Deliberately carries no `failureCause`: it is not a transport non-answer
+ * (no Haven request went unanswered) and not deterministic (a later read may
+ * see the receipt). Callers answer the class itself — the hosted delivery
+ * step does in `ensureFundingConfirmedOrRefuse`; unwrapped, its 504 reads
+ * "re-call once", which re-runs the same wait.
+ */
+export class FundingConfirmationUnknownError extends HavenApiError {
+  readonly fundingErrorCode = 'funding_confirmation_unknown' as const
+  constructor(
+    public readonly txHash: string,
+    public readonly chainId: number,
+    reason: string,
+  ) {
+    super(
+      `Funding tx ${txHash} was submitted, but its on-chain confirmation could not be read (${reason}).`,
+      504,
+      { txHash, chainId },
+    )
+    this.name = 'FundingConfirmationUnknownError'
+  }
+}
+
+/**
+ * #4470: the funding transaction was mined and reverted, so nothing reached
+ * the delegate. Repeating the wait gets the same receipt.
+ */
+export class FundingRevertedError extends HavenApiError {
+  readonly fundingErrorCode = 'funding_reverted' as const
+  constructor(
+    public readonly txHash: string,
+    public readonly chainId: number,
+  ) {
+    super(`Funding tx ${txHash} reverted on-chain; nothing reached the delegate.`, 502, { txHash, chainId }, undefined, {
+      kind: 'deterministic',
+    })
+    this.name = 'FundingRevertedError'
   }
 }
 

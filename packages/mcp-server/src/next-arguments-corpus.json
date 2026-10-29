@@ -23,11 +23,25 @@
       }
     },
     {
+      "site": "mcp-context.ts submit: no answer, outcome unknown (#4470)",
+      "tool": "haven_get_payment_status",
+      "arguments": {
+        "payment_id": "pay_1"
+      }
+    },
+    {
       "site": "paid-mcp-completion.ts complete eip3009: settlement evidence retryable (hash prefilled)",
       "tool": "haven_report_settlement_evidence",
       "arguments": {
         "payment_id": "pay_1",
         "settlement_tx_hash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    {
+      "site": "paid-mcp-completion.ts funding confirmation unknown (#4470)",
+      "tool": "haven_get_payment_status",
+      "arguments": {
+        "payment_id": "pay_1"
       }
     },
     {

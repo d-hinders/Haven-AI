@@ -281,7 +281,7 @@ export class X402Erc7710 {
     })
 
     if (!raw.payment_id) {
-      throw new HavenApiError('No payment_id returned from x402/authorize', 500, raw)
+      throw HavenApiError.deterministic('No payment_id returned from x402/authorize', 500, raw)
     }
     // #3417: an idempotent replay of a key whose payment is already confirmed.
     // The backend answers with the stored intent and no `sign_data` — there is
@@ -316,7 +316,7 @@ export class X402Erc7710 {
       // The backend chose a different scheme than the shape asked for. Refuse
       // loudly: signing whatever came back would be exactly the "silent
       // reroute" this path exists to make impossible.
-      throw new HavenApiError(
+      throw HavenApiError.deterministic(
         'x402/authorize did not return an erc7710 settlement child ' +
           `(signature_scheme was ${JSON.stringify(signData?.signature_scheme)}). ` +
           'Refusing to sign a payload this path did not ask for.',
@@ -373,7 +373,7 @@ export class X402Erc7710 {
       throw err
     }
     if (!settled.payment_header) {
-      throw new HavenApiError(
+      throw HavenApiError.deterministic(
         'x402 settle returned no payment_header — the merchant cannot be retried.',
         500,
         settled,

@@ -2183,7 +2183,7 @@ describe('hosted haven_report_settlement_evidence (#2972)', () => {
       // this arm too (the backend's erc7710 seam 503s), and records no header.
       // The whole reason, so the instruction's polarity is pinned too.
       expect(res.data.reason).toBe(
-        'Haven could not yet verify this transaction on-chain — the RPC was unreachable, or ' +
+        'Haven could not yet verify this transaction on-chain — Haven did not answer, the RPC was unreachable, or ' +
           'the transaction is not mined yet. Report it again shortly with ' +
           'haven_report_settlement_evidence and the same hash — on an EIP-3009 payment adding ' +
           'payment_header: the exact payment_header you sent the merchant — or poll next_tool.',
@@ -2481,7 +2481,7 @@ describe('#3764 — the merchant settlement evidence maps to next steps (eip3009
   // beside it (these tools sent the merchant the header the agent passed).
   const RETRYABLE_REASON =
     'The purchase is complete and the merchant settlement was reported, but Haven could not ' +
-    'verify it on-chain just yet (the chain was unreachable or the transaction is not mined). ' +
+    'verify it on-chain just yet (Haven did not answer, the chain was unreachable, or the transaction is not mined). ' +
     'Call next_tool (haven_report_settlement_evidence) shortly with next_arguments, adding ' +
     'payment_header: the exact payment_header you passed to this call.'
 

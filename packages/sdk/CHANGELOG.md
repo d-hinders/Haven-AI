@@ -29,6 +29,24 @@ required") is refused — reword to "no update needed", or quote it in a code sp
   on a type that is only returned, so existing consumers keep compiling. No
   update needed.
 
+- **`HavenApiError.failureCause` says why, where the status cannot (#4470).**
+  The transport's own timeout (408) and status-0 errors — `fetch` threw, or
+  the body was not JSON — carry `{ kind: 'no_answer', method }`. Nine sites
+  that refused an answer they cannot use (no delegate address, no `sign_hash`,
+  no expected-context binding, no `payment_id`, not an erc7710 settlement
+  child, settle returned no `payment_header`, and the three retry-receipt and
+  funding-leg `sign_hash` guards) and two payment-state throws carry
+  `{ kind: 'deterministic' }`, through the new `HavenApiError.deterministic()`.
+  `name`, `code` and `statusCode` are unchanged, so existing `instanceof` and
+  status checks behave as before. The type is exported as
+  `HavenApiFailureCause`.
+- **The funding wait's two outcomes are typed (#4470).** ethers 6's
+  `waitForTransaction` rejects on its timeout instead of resolving null, so
+  that rejection escaped as a plain `Error`. It is now
+  `FundingConfirmationUnknownError` (504: funding may have moved), and a
+  reverted funding transaction is `FundingRevertedError` (502). Both extend
+  `HavenApiError`.
+
 - **A quote stops on an ENDED budget, with its own warning code (#4458).**
   `AgentPaymentWarningCode` gains `QUOTE_BUDGET_ENDED`. When the quote-time
   budget pre-check answers the typed 403 `delegation_expired` — the agent's
@@ -64,6 +82,14 @@ required") is refused — reword to "no update needed", or quote it in a code sp
   instead of "nobody approved yet" for both. No update needed.
 
 ### Changed
+
+- **A settlement report that got no answer is `retryable`, not `refused`
+  (#4470).** `reportSettlementEvidence` (and the local retry's settlement
+  report) classed a timeout, a `fetch` failure, a non-JSON body and any 408 as
+  `refused` — which the hosted tools word as "the hash does not match this
+  payment on-chain", a claim nothing checked. They are now
+  `{ outcome: 'retryable', statusCode }`. Only the backend's own 503 is
+  re-attempted inside the call; a non-answer is returned at once.
 
 - **The skill text says which quote checks the budget (#4345).** It used to
   tell every agent that the quote checks its remaining budget; only the hosted

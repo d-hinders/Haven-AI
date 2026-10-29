@@ -468,6 +468,8 @@ describe('HavenClient structural boundary', () => {
       'DISCOVERY_MAX_BYTES',
       'ENTRY_POINT_V07', // #3271
       'ERC7710_ASSET_TRANSFER_METHOD',
+      'FundingConfirmationUnknownError', // #4470
+      'FundingRevertedError', // #4470
       'HAVEN_AGENT_RUNBOOK_MD',
       'HAVEN_CLIENT_HEADER', // #3303
       'HAVEN_CONNECTOR_CHANNEL',
@@ -658,6 +660,7 @@ describe('HavenClient structural boundary', () => {
       'HavenAgentSupersession', // #3772
       'HavenAllowance',
       'HavenAllowanceSummary',
+      'HavenApiFailureCause', // #4470
       'HavenBalanceCoverage', // #3126
       'HavenCatalogEntry',
       'HavenCatalogMerchant', // #3078

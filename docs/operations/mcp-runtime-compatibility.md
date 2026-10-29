@@ -6752,3 +6752,40 @@ to call next in structured fields, and those fields are typed end to end
 > version changed. Scope of this note: the receipt row shape and that one
 > description. Nothing else in this document was re-read for it, and
 > `last-verified` is not bumped.
+
+> **Re-verified (#4470, 2026-10-27 — retry or stop by cause, not status).**
+> Additive on the wire.
+> - **The SDK.** `HavenApiError` gains an optional `failureCause`: the
+>   transport's own 408 and status-0 errors carry `{ kind: 'no_answer',
+>   method }`, and nine deterministic SDK throws plus two payment-state throws
+>   carry `{ kind: 'deterministic' }`. Its `name`, `code` (`API_ERROR`) and
+>   `statusCode` are unchanged, so the local MCP (`packages/mcp/src/tools.ts`)
+>   relays it as before. The funding wait throws two new `HavenApiError`
+>   subclasses, `FundingConfirmationUnknownError` and `FundingRevertedError`.
+>   The local MCP reaches that wait through `haven.fetch` and `payX402Quote`
+>   and relays the two with their new status (504 / 502, was 500) and message;
+>   its step is unchanged.
+>   A settlement report that got no answer is `retryable`, not `refused`.
+> - **The hosted MCP.** `normalizeError`'s generic `HavenApiError` branch
+>   reads the cause first:
+>   - a non-answer on a read re-calls once;
+>   - a non-answer on a write stops without re-calling;
+>   - a deterministic failure stops;
+>   - only an unmarked status falls through to the 4xx and 5xx steps, and
+>     their reasons are byte-identical.
+>
+>   `haven_submit`, on both schemes, and `haven_settle_mcp_tool`'s erc7710
+>   settle answer a non-answer with the new code `NO_ANSWER_OUTCOME_UNKNOWN`
+>   and the status read for its `payment_id`.
+>   The eip3009 delivery step answers the funding wait with the new codes
+>   `FUNDING_CONFIRMATION_UNKNOWN` (check status) and `FUNDING_REVERTED`
+>   (stop), before any merchant call. The settlement-report pending texts now
+>   name "Haven did not answer" as a cause.
+> - **What does not change.** No `haven_*` tool name, input schema,
+>   strict-input list, tool description, expected-context version or signer
+>   contract changes, and `tools-list.snapshot.json` does not move. Every
+>   step names a tool through `refusalNextStep` or says why none follows, and
+>   `lint:next-steps` stays at zero.
+>
+> Scope of this note: those fields and texts. Nothing else in this document
+> was re-verified.

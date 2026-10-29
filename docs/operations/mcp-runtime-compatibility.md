@@ -4273,15 +4273,22 @@ published `haven-pay` skill carries the same rule.
 > `SETTLEMENT_PROOF_HEADER_MISSING`, and was told to add a key its own schema
 > said it could not send.
 >
-> **Reproduction status.** Not reproduced in this build environment — Claude
-> Code desktop is not available here, so the cache behaviour across app
-> restarts is **not independently verified**. What the production run does
-> establish: the stale list survived **two full app restarts**, and the client
-> *did* accept and send the undeclared key once the agent passed it, so the
-> cache is in the client's tool-list layer, not in Haven. Treat "restart did
-> not clear it" as observed, and "Claude Code caches `tools/list` across
-> restarts" as the best explanation consistent with that observation rather
-> than a proven mechanism.
+> **Reproduction status.** Reproduced by the owner on their own machine
+> (2026-10-29, Claude Code in the desktop app), not in this build environment.
+> Two full app restarts did **not** refresh the cached `tools/list`:
+> `haven_report_settlement_evidence` stayed
+> `{payment_id, settlement_tx_hash}` with no EIP-3009 sentence. `claude mcp
+> remove haven-claude-cloud -s user`, then `claude mcp add` with the same URL
+> and header, then a restart **did** refresh it — the tool then listed
+> `payment_header` and its description carried "On EIP-3009 also pass
+> payment_header". The server was `0.12.0-alpha.0` with
+> `contract_fingerprint` `9f6a89fa545a01c3` before and after, so the
+> fingerprint was correct throughout: the case is exactly current
+> instructions and current results beside a cached pre-0.11 tool list, which
+> the fingerprint comparison cannot see. The cache therefore lives in the
+> client's tool-list layer, not in Haven — the client also accepted and sent
+> the undeclared key once the agent passed it — and remove/re-add is the
+> working remedy, which is what the owner decision below records.
 >
 > **The owner's ruling (2026-10-29, option 2), now in the server
 > instructions.** Two sentences were added to `HOSTED_INSTRUCTIONS`

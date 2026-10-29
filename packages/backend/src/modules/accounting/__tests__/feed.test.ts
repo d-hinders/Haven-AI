@@ -39,6 +39,9 @@ function entry(over: Partial<AccountingEntry> = {}): AccountingEntry {
     vatTreatment: 'reverse_charge',
     resourceUrl: 'https://api.example/r',
     receiptRef: 'ev1',
+    // #4532: the kind and its line. A fixture, not a derivation.
+    transactionKind: 'purchase',
+    transactionDescription: 'api.example - r (purchase)',
     ...over,
   }
 }
@@ -70,6 +73,23 @@ describe('toFeedTransaction', () => {
   it('surfaces a per-merchant override only as a suggestion', () => {
     expect(toFeedTransaction(entry(), { ledgerCurrency: 'SEK' }).suggestedAccount).toBeNull()
     expect(toFeedTransaction(entry({ account: '6550' }), { ledgerCurrency: 'SEK' }).suggestedAccount).toBe('6550')
+  })
+
+  // #4532: the feed payload carries the kind and its line beside the existing
+  // fields, from the same two values the receipt underlag renders.
+  it('carries the transaction kind and description (#4532)', () => {
+    const tx = toFeedTransaction(entry(), { ledgerCurrency: 'SEK' })
+    expect(tx.transactionKind).toBe('purchase')
+    expect(tx.description).toBe('api.example - r (purchase)')
+  })
+
+  it('CONTROL: the payload really does read the entry, not a constant', () => {
+    const fee = toFeedTransaction(
+      entry({ transactionKind: 'api_fee', transactionDescription: 'api.example - r (API fee)' }),
+      { ledgerCurrency: 'SEK' },
+    )
+    expect(fee.transactionKind).toBe('api_fee')
+    expect(fee.description).toBe('api.example - r (API fee)')
   })
 })
 

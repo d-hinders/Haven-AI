@@ -162,7 +162,8 @@ Two Accounted specifics worth knowing:
 
 A settled payment is delivered as **one document**: Haven renders the verifiable
 receipt underlag (payment id, settled time, book value, merchant, resource,
-chain, transaction hash) and uploads it to your Accounted company. The upload
+chain, transaction hash, and since #4532 the transaction kind and its
+description) and uploads it to your Accounted company. The upload
 is append-only — Accounted stores a document once and it cannot be edited
 afterwards — so a retry of the same payment never creates a second document.
 Haven only marks the payment delivered when Accounted confirms it stored

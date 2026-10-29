@@ -1,6 +1,7 @@
 import { loadReceiptUnderlagSource } from '../../infra/repositories/machine-payments.js'
 import { safeGetBinary, type SafeFetchOptions, type SsrfRefusal } from '../../infra/http/ssrf-guard.js'
 import type { FeedTransaction } from './feed-transaction.js'
+import type { TransactionKind } from './transaction-kind.js'
 
 /**
  * Receipt underlag for the reporting feed (epic #491, P2 #498).
@@ -59,6 +60,14 @@ export interface ReceiptUnderlagData {
   merchantVatNo: string | null
   merchantOrgNo: string | null
   resourceUrl: string | null
+  /**
+   * #4532: what KIND of transaction this document is, and the one-line
+   * description that carries it. Derived server-side from the payment record
+   * (`transaction-kind.ts`) — the document never states a kind an agent chose,
+   * and a payment with no derivable signal says `unknown` rather than guessing.
+   */
+  transactionKind: TransactionKind
+  description: string
   chainId: number | null
   /**
    * #3767: the hash the surface BOOKS — the verified merchant settlement when
@@ -160,6 +169,12 @@ export function underlagFromData(data: ReceiptUnderlagData): ReceiptUnderlag {
     ...(data.merchantVatNo ? [`VAT reg no     ${data.merchantVatNo}`] : []),
     ...(data.merchantOrgNo ? [`Org no         ${data.merchantOrgNo}`] : []),
     `Resource       ${data.resourceUrl ?? 'n/a'}`,
+    // #4532: what kind of transaction this is. Before this line the three
+    // receipts of one Bitrefill purchase (invoice/create, invoice/pay,
+    // invoice/status) were byte-for-byte the same shape and an accountant
+    // could not tell the purchase from the merchant's per-call API fees.
+    `Transaction    ${data.transactionKind}`,
+    `Description    ${data.description}`,
     '',
     'ON-CHAIN SETTLEMENT',
     `Chain id       ${data.chainId ?? 'n/a'}`,
@@ -374,6 +389,10 @@ export async function loadReceiptUnderlag(
     merchantVatNo: seller.vatNo,
     merchantOrgNo: seller.orgNo,
     resourceUrl: tx.resourceUrl,
+    // #4532: the kind and its line, decided once in `toAccountingEntry` — the
+    // same two values the feed payload carries.
+    transactionKind: tx.transactionKind,
+    description: tx.description,
     chainId: row.chain_id,
     // #3767: the BOOKED hash — the settlement when available/pinned, the
     // funding hash labelled as funding after the window, null (raw

@@ -32,6 +32,9 @@ function entry(over: Partial<AccountingEntry> = {}): AccountingEntry {
     vatTreatment: 'reverse_charge',
     resourceUrl: 'https://api.example/resource',
     receiptRef: 'ev1',
+    // #4532: the kind and its line. A fixture, not a derivation.
+    transactionKind: 'purchase',
+    transactionDescription: 'api.example - r (purchase)',
     ...over,
   }
 }

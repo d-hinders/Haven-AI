@@ -160,6 +160,12 @@ export class AccountedConnector implements AccountingConnector {
    * added (the upload takes exactly the `file` and `upload_source` parts —
    * `additionalProperties: false`).
    *
+   * #4532: the transaction kind and its description ride the underlag PDF.
+   * Accounted's upload takes exactly `file` + `upload_source`, so there is no
+   * metadata field to carry them — the document is the carrier, which is what
+   * the issue's acceptance allows ("where their APIs allow it; where they do
+   * not, the receipt PDF is the carrier").
+   *
    * #3918 (the follow-up slice #3016 deferred): when the agent captured the
    * merchant's OWN invoice/ receipt, it is uploaded as a SECOND document on
    * the same sync — the seller's own verification is what the consultant

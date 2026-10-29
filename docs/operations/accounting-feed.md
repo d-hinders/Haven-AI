@@ -419,6 +419,52 @@ The `Merchant` line is on every underlag (falling back to the merchant address,
 then `unknown`); `Country`, `VAT reg no` and `Org no` render only when their
 value is known, so the document never states an empty-looking fact.
 
+**What kind of transaction it is (#4532).** Every underlag also carries
+`Transaction` — a closed enum, `purchase` | `api_fee` | `transfer` | `refund` |
+`unknown` — and `Description`, one line for the accountant, e.g.
+`api.bitrefill.com - invoice/pay (purchase)` beside
+`api.bitrefill.com - invoice/create (API fee)`. The same two values ride the
+feed payload (`FeedTransaction.transactionKind` / `.description`), so the
+payload and the attached document cannot disagree.
+
+The kind is DERIVED server-side from the stored payment record
+(`modules/accounting/transaction-kind.ts`); no route accepts it and an agent
+cannot set it. The ladder, strongest signal first:
+
+1. `direction` — `in` is income/refund, so `refund`.
+2. the merchant's own document (`merchant_receipts.inline_json`, #956) — an
+   invoice-shaped body (invoice/order number, line items, seller block) is a
+   `purchase`; a body with none of those markers is a bare acknowledgement, so
+   `api_fee`.
+3. `machine_payment_evidence.delivery_reference` (#3778) — the agent named a
+   deliverable, so `purchase`.
+4. `machine_metadata.mcp_call_context.toolName` (#1307) — an MCP tool call IS
+   the paid deliverable, so `purchase`.
+5. the x402 route — the last path segment of `resource_url` against three
+   closed vocabularies: purchase verbs (`pay`, `purchase`, `buy`, `order`, …),
+   fee verbs (`create`, `status`, `search`, `detail`, `quote`, …) and transfer
+   verbs (`send`, `transfer`, `withdraw`, …).
+
+A route verb outside those sets is `unknown`, never a guess — `price` is
+deliberately absent, because `https://api.anchor-x402.com/v1/price/token` is a
+paid data call whose OUTPUT is the price. A payment with no derivable signal
+renders `unknown` and does not fail the feed.
+
+**Why it exists.** One BikBok gift-card purchase through Bitrefill's
+plain-HTTP x402 route settled three payments on production 2026-10-29 —
+`POST /x402/invoice/create` (0.002 USDC), `POST /x402/invoice/pay` (0.010) and
+`GET /x402/invoice/status` (0.001) — and all three receipts rendered the same
+field set. Only the middle one is the purchase; the other two are the
+merchant's per-call API fees. The three routes are pinned by a test to
+`api_fee`, `purchase`, `api_fee`.
+
+**Where the connectors carry it.** Fortnox has a free-text `Comments` field, so
+the description rides there (with `/` folded to `-`, because the field refuses
+it — error 2000359). Accounted's document upload takes exactly `file` +
+`upload_source` (`additionalProperties: false`), so there is no metadata field
+to carry them: the PDF is the carrier. Existing stored receipts are untouched —
+the kind renders at push time and nothing re-renders a delivered document.
+
 **A USD ledger records the quoted rate, not an assumed 1:1.** A USDC payment into
 a USD-booking company carries the rate the source actually quoted, with its
 provenance. Haven asserts no parity between a stablecoin and the currency it is
@@ -817,7 +863,9 @@ needed (`fortnoxScopeForPath`, five entries: `/supplierinvoicefileconnections`
 Fortnox does not say which; a bare 403 counts as scope, a 403 with another code
 (a licence error such as `[2003295]`) is a plain `failed`. `[2000359]`
 non-ASCII in Comments/Name (middle dots, `://`, `…`) — the connector sanitises;
-a new occurrence is a new field that slipped through. Rate limit: 25 requests /
+a new occurrence is a new field that slipped through. Since #4532 the
+`Comments` field also carries the transaction description, whose route
+separator `/` is folded to `-` for exactly this reason. Rate limit: 25 requests /
 5 s per client-id + tenant, HTTP 429 with no `Retry-After`.
 
 **What the accountant sees.** *Meny → Leverantörsfakturor*: an unbooked
@@ -1203,3 +1251,14 @@ receiver is reachable and verifying, before the first real commit.
 > `base_currency` null, three verified subscriptions) and against the code
 > claims the changed sentences rest on. Nothing else in this document was
 > re-verified, and `last-verified` is not bumped.
+
+> **Re-verified #4532 (2026-10-29, receipt transaction kind).** Added: the
+> "What kind of transaction it is" block under *What the accountant sees on the
+> attachment* — the closed enum, the derivation ladder, the three pinned
+> Bitrefill routes, and where each connector carries the fields. Changed: the
+> Fortnox provider note's description of the `Comments` field now names the
+> description part and its `/` → `-` fold. Re-checked against
+> `modules/accounting/transaction-kind.ts`, `entry.ts`, `feed-transaction.ts`,
+> `receipt-underlag.ts`, `fortnox-connector.ts` and `accounted-connector.ts`.
+> Nothing else in this document was re-verified, and `last-verified` is not
+> bumped.

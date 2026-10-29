@@ -32,6 +32,9 @@ const DATA = {
   merchantVatNo: 'SE559412345601',
   merchantOrgNo: '559412-3456',
   resourceUrl: 'https://merchant.example/vpn',
+  // #4532: the kind and the line that carries it.
+  transactionKind: 'purchase' as const,
+  description: 'merchant.example - vpn (purchase)',
   chainId: 84532,
   txHash: '0x' + 'cd'.repeat(32),
   txHashIsFunding: false,
@@ -75,6 +78,9 @@ const TX = {
   txHash: '0x' + 'cd'.repeat(32),
   txHashIsFunding: false,
   fundingTxHash: null,
+  // #4532: the kind and the line that carries it.
+  transactionKind: 'purchase' as const,
+  description: 'merchant.example - vpn (purchase)',
   suggestedAccount: null,
 }
 
@@ -134,6 +140,37 @@ describe('underlagFromData', () => {
     const { filename } = underlagFromData({ ...DATA, paymentId: 'a/b:c d' })
     expect(filename).toBe('haven-receipt-a_b_c_d.pdf')
   })
+
+  // #4532: the document says WHAT it is. Before this the three receipts of one
+  // Bitrefill purchase (invoice/create, invoice/pay, invoice/status) rendered
+  // the same field set and an accountant could not tell the purchase from the
+  // merchant's per-call API fees.
+  it('renders the transaction kind and its description (#4532)', () => {
+    const s = underlagFromData(DATA).pdf.toString('latin1')
+    expect(s).toContain('Transaction    purchase')
+    // Parens are PDF-escaped in the content stream (see pdfEscape).
+    expect(s).toContain('Description    merchant.example - vpn \\(purchase\\)')
+  })
+
+  it('renders `unknown` rather than guessing when no signal was derivable (#4532)', () => {
+    const s = underlagFromData({
+      ...DATA,
+      transactionKind: 'unknown',
+      description: 'Unknown merchant (unclassified)',
+    }).pdf.toString('latin1')
+    expect(s).toContain('Transaction    unknown')
+    expect(s).toContain('Description    Unknown merchant \\(unclassified\\)')
+  })
+
+  it('CONTROL: the two kinds render different bytes, so the assertion above can fail', () => {
+    const purchase = underlagFromData(DATA).pdf.toString('latin1')
+    const fee = underlagFromData({
+      ...DATA,
+      transactionKind: 'api_fee',
+      description: 'merchant.example - vpn (API fee)',
+    }).pdf.toString('latin1')
+    expect(purchase).not.toBe(fee)
+  })
 })
 
 describe('loadReceiptUnderlag', () => {
@@ -158,6 +195,10 @@ describe('loadReceiptUnderlag', () => {
     expect(text).toContain('VAT reg no     SE559412345601')
     expect(text).toContain('Org no         559412-3456')
     expect(text).toContain('Country        SE')
+    // #4532: the kind and its line come from the feed transaction, so the
+    // payload and the attached document cannot disagree.
+    expect(text).toContain('Transaction    purchase')
+    expect(text).toContain('Description    merchant.example - vpn \\(purchase\\)')
     const [sql, params] = mockQuery.mock.calls[0] as [string, unknown[]]
     expect(sql).toContain('mpe.user_id = $2')
     expect(params).toEqual(['evidence-1', 'u1'])

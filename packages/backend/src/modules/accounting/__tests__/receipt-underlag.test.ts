@@ -193,9 +193,19 @@ describe('underlagFromData', () => {
     expect(pdf).toContain('ON-CHAIN SETTLEMENT')
   })
 
-  it('CONTROL: a merchant payment still renders its Resource line', () => {
+  /**
+   * #4533: the label is scoped to the direct payment. A protocol payment
+   * (x402/mpp/spt) always has a resource URL, so its document keeps the
+   * `Merchant` / `Merchant addr` lines and stays byte-identical to before
+   * this change — the review card's "must not change existing output".
+   */
+  it('CONTROL: a protocol payment keeps the Merchant labels and its Resource line', () => {
     const pdf = underlagFromData(DATA).pdf.toString('latin1')
+    expect(pdf).toContain(`Merchant       ${DATA.merchantName}`)
+    expect(pdf).toContain(`Merchant addr  ${DATA.merchantAddress}`)
     expect(pdf).toContain(`Resource       ${DATA.resourceUrl}`)
+    expect(pdf).not.toContain('Counterparty')
+    expect(pdf).not.toContain('(Address')
   })
 })
 

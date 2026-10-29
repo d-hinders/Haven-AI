@@ -439,12 +439,24 @@ figure on the record it backs: `Book value` in the invoiced currency, with the
 SEK capture kept below it as `Haven SEK ref` when they differ. One document,
 two clearly-labelled figures — never a DKK invoice backed by a receipt quoting
 kronor. When the merchant's own invoice is captured (#956), the underlag also
-carries the SELLER BLOCK (#3918): the seller's legal name on the `Merchant`
+carries the SELLER BLOCK (#3918): the seller's legal name on the counterparty
 line, the catalog's supplier `Country`, and the invoice's `VAT reg no` /
 `Org no` — the fields a Swedish consultant needs to code omvänd (reverse) VAT.
-The `Merchant` line is on every underlag (falling back to the merchant address,
-then `unknown`); `Country`, `VAT reg no` and `Org no` render only when their
-value is known, so the document never states an empty-looking fact.
+The counterparty line is on every underlag (falling back to the address, then
+`unknown`); `Country`, `VAT reg no` and `Org no` render only when their value
+is known, so the document never states an empty-looking fact.
+
+The counterparty line's LABEL follows the payment (#4533). A protocol payment
+(x402/mpp/spt) renders `Merchant <seller>` — the address on a second
+`Merchant addr <address>` line when both are known — and its `Resource` line
+names the paid resource. A **direct payment** (`POST /payments`, `haven_send`)
+is a transfer to an address that may be a contact rather than a merchant, so
+the same line renders `Counterparty <recipient>` (the recipient's name when
+known, else the address, else `unknown`), with the address on a second
+`Address <address>` line when both are known; and it has **no `Resource`
+line** — there is no resource, and the document does not print `n/a` for one.
+The label is chosen by whether the payment carries a resource URL, so an x402
+underlag is byte-identical to before #4533.
 
 **What kind of transaction it is (#4532).** Every underlag also carries
 `Transaction` — a closed enum, `purchase` | `api_fee` | `transfer` | `refund` |

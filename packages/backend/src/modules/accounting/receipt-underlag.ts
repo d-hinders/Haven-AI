@@ -159,11 +159,20 @@ export function underlagFromData(data: ReceiptUnderlagData): ReceiptUnderlag {
     ...(data.ledgerCurrency !== 'SEK' && data.amountSek != null
       ? [`Haven SEK ref  ${data.amountSek} SEK (rate ${data.fxRate ?? 'n/a'}, same capture)`]
       : []),
-    // #4533: "Counterparty", not "Merchant" — a direct payment is a transfer
-    // to an address, which may be a contact rather than a merchant. One label
-    // for both, so the document never calls a person's wallet a merchant.
-    `Counterparty   ${data.merchantName ?? data.merchantAddress ?? 'unknown'}`,
-    ...(data.merchantName && data.merchantAddress ? [`Address        ${data.merchantAddress}`] : []),
+    // #4533: a direct payment is a transfer to an address, which may be a
+    // contact rather than a merchant — so it renders `Counterparty` /
+    // `Address`. A protocol payment (x402/mpp/spt) always carries a resource
+    // URL (the evidence row requires one) and keeps `Merchant` /
+    // `Merchant addr`, so its document stays byte-identical to before #4533.
+    ...(data.resourceUrl == null
+      ? [
+          `Counterparty   ${data.merchantName ?? data.merchantAddress ?? 'unknown'}`,
+          ...(data.merchantName && data.merchantAddress ? [`Address        ${data.merchantAddress}`] : []),
+        ]
+      : [
+          `Merchant       ${data.merchantName ?? data.merchantAddress ?? 'unknown'}`,
+          ...(data.merchantName && data.merchantAddress ? [`Merchant addr  ${data.merchantAddress}`] : []),
+        ]),
     // #3918: the seller block, from the merchant's own invoice and the
     // catalog country — the reverse-VAT fields (Emil, our Accounted contact:
     // country + VAT reg no decide the omvand coding). Lines appear only when

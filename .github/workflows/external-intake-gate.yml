@@ -36,7 +36,8 @@ name: External intake gate
 #
 # `labeled` / `unlabeled` are triggers so accepting the PR itself re-runs the
 # check. Accepting an ISSUE does not re-trigger the PRs that close it; the
-# failure text says to re-run the check or edit the PR.
+# failure text says to re-run the NEWEST gate run or edit the PR (an older
+# run's re-run does not reach the merge box — see below).
 #
 # ## Fail closed, and the exit code is the verdict
 #
@@ -68,14 +69,18 @@ permissions:
 # suite with no check run at all. On PR #4516 (open plus four labels in one
 # second) two such empty suites were the newest on the head, and the merge box
 # showed this check as "Expected — Waiting for status to be reported" until a
-# label change started one uncontested run. Re-running the older runs did not
-# clear it: the merge box reads the newest suite, not the newest green run.
+# label change started one uncontested run.
 #
-# Without the group, runs on one head overlap, and that is safe: each reads
-# standing live (never from the payload), and the run for the latest event is
-# in the newest suite, so it judges the latest state. An older run finishing
-# later does not change the merge box (#4516: a re-run success at 09:22:03Z in
-# an older suite left the PR blocked).
+# Without the group, runs on one head overlap. That is safe because the merge
+# box judges a required Actions check by the workflow's NEWEST check suite on
+# the head. GitHub does not document that rule; #4516 is the evidence: a
+# re-run success at 09:22:03Z — the newest check run by start and completion —
+# sat in an older suite and left the PR blocked, and it cleared only when the
+# highest-id suite went green. Each run reads standing live (never from the
+# payload), and the run for the latest event owns the newest suite, so the
+# latest state decides. If GitHub ever judges by the newest COMPLETED run
+# instead, an older green finishing after a revoke's red would fail open: the
+# fallback is `cancel-in-progress: false` + `queue: max` (#4524 owner Q1).
 #
 # Never filter label events with an `if:` (job or step) or soften the judging
 # step with `continue-on-error`: a skipped job or step reports Success, so any

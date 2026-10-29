@@ -69,7 +69,7 @@ describe('the PR itself (#4200 acceptance)', () => {
     test(`a NONE PR fails ${labelled ? 'carrying' : 'WITHOUT'} the label — the label is not the control`, async () => {
       const r = await verdict({ items: { [PR]: { login: 'rezearcher', assoc: 'NONE', pr: true, events: labelled ? [botLabel] : [] } } })
       assert.equal(r.verdict, 'fail')
-      assert.ok(r.report.includes(`- This pull request (#${PR}) is by @rezearcher (NONE), not a maintainer, and no maintainer has accepted it — a maintainer removes \`external\` from #${PR}, then re-runs this check or edits the PR.`), r.report)
+      assert.ok(r.report.includes(`- This pull request (#${PR}) is by @rezearcher (NONE), not a maintainer, and no maintainer has accepted it — a maintainer removes \`external\` from #${PR}, then re-runs the newest External intake gate run or edits the PR.`), r.report)
     })
   }
 
@@ -126,7 +126,7 @@ describe('the issues the PR closes', () => {
     test(`a maintainer PR closing an open NONE issue fails ${labelled ? 'labelled' : 'unlabelled'}, and passes after acceptance`, async () => {
       const before = await verdict({ items: { 4107: ext(labelled ? [botLabel] : []) }, pr: { closing: [4107] } })
       assert.equal(before.verdict, 'fail')
-      assert.ok(before.report.includes('- It closes #4107, opened by @rezearcher (NONE), not a maintainer, and not accepted — a maintainer removes `external` from #4107, then re-runs this check or edits the PR.'), before.report)
+      assert.ok(before.report.includes('- It closes #4107, opened by @rezearcher (NONE), not a maintainer, and not accepted — a maintainer removes `external` from #4107, then re-runs the newest External intake gate run or edits the PR.'), before.report)
       const after = await verdict({ items: { 4107: ext([botLabel, unlabel('d-hinders')]) }, pr: { closing: [4107] } })
       assert.equal(after.verdict, 'pass')
     })
@@ -267,7 +267,7 @@ describe('the workflow shape', () => {
   // blocks the merge box. Checked over YAML lines, not comments.
   test('no concurrency group: no run is ever cancelled (#4524)', () => {
     const code = yml.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n')
-    assert.doesNotMatch(code, /^\s*concurrency:/m)
+    assert.doesNotMatch(code, /^[ \t]*(?:-[ \t]+)?['"]?concurrency['"]?[ \t]*:/m)
     assert.doesNotMatch(code, /cancel-in-progress/)
   })
 
@@ -275,7 +275,7 @@ describe('the workflow shape', () => {
   // error-tolerated judge would let a label mint a passing suite (fail open).
   test('the only if: is the repository guard; nothing tolerates a failed judge (#4524)', () => {
     const code = yml.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n')
-    assert.deepEqual(code.match(/^\s*if:.*$/gm), ["    if: github.repository == 'd-hinders/Haven-AI'"])
+    assert.deepEqual(code.match(/^[ \t]*(?:-[ \t]+)?['"]?if['"]?[ \t]*:.*$/gm), ["    if: github.repository == 'd-hinders/Haven-AI'"])
     assert.doesNotMatch(code, /continue-on-error/)
   })
 

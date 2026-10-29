@@ -41,11 +41,14 @@ Do not burn fixed-timeout `sleep` loops against `gh pr checks`.
   reads the workflow's **newest** check suite on the head, and that suite has
   no check run, or only a cancelled one — `gh api
   "repos/<owner>/<repo>/actions/runs?head_sha=<sha>"`, highest
-  `check_suite_id` for that workflow. Re-running an older run never clears it.
-  Start one fresh run with nothing to cancel it: remove a label **other than
-  `external`** (removing that one is a maintainer's acceptance), let its run
-  finish, then re-add it. `External intake gate` no longer has a concurrency
-  group, so this should only recur on a workflow that still cancels.
+  `check_suite_id` for that workflow. It is not an infra flake, so the rerun
+  rule below does not apply: re-running an older run never clears it. Start one
+  fresh run with nothing to cancel it, using an event that workflow triggers
+  on. For `Docs front-matter & agent skills` (`docs.yml`, which still cancels)
+  that is a PR-body edit. For a label-triggered workflow, remove a non-gating
+  label — never `external` (removing it is a maintainer's acceptance) and not
+  `money-path` — let its run finish, then re-add it. `External intake gate`
+  has no concurrency group since #4524, so it should not get stuck this way.
 - **Known infra flakes:** a required check failing with a known infrastructure
   signature gets **one rerun before any diagnosis** (`gh run rerun <id> --failed`).
   The signature list lives in

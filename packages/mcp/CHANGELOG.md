@@ -29,6 +29,20 @@ required") is refused — reword to "no update needed", or quote it in a code sp
   `@haven_ai/sdk` exactly; the hosted server gains the same fields through the
   SDK. Additive; no update needed.
 
+### Changed
+
+- **The local `haven_get_agent` names an ended budget and tells a spent budget
+  from no budget (#4352, #4355, via `@haven_ai/sdk`).** Its description comes
+  from the SDK's shared tool descriptions, and its result is the embedded SDK's
+  `getAgentSummary()`. The result now carries `budgetEndedAt`,
+  `budgetRefillsAt` and a per-row `nextRefillAt`, and the description explains
+  the readiness causes. The tool list is unchanged, so this triggers no
+  re-consent prompt; the consent hash covers tool names only. Additive; no
+  update needed.
+
+- The README names the agent folder by its wiring slug,
+  `~/.haven/agents/<slug>/`, as the connector writes it (#4396). Docs only.
+
 ## 0.11.0-alpha.0 — 2026-10-23
 
 ### Changed

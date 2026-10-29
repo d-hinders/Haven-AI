@@ -3208,9 +3208,10 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > -- packages/signer/src` at `b9c1d64b`), and both were read again for this
 > release:
 > - #4449 (#4462): success results name their next step, and the settlement-child
->   guidance names the MCP route. Recorded above where it merged ("Re-verified
+>   guidance names the MCP route. Recorded below where it merged ("Re-verified
 >   unchanged (#4449 …)"); the change is guidance text and next-step fields only.
-> - #4415 (#4417): stale comments only.
+> - #4415 (#4417): a test title and assertion floor in `cli-args.test.ts`;
+>   test-only, not shipped.
 >
 > Neither adds a signing path or widens a check. Nothing else in this document
 > was re-verified.

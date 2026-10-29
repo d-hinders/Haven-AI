@@ -2944,7 +2944,11 @@ and `@haven_ai/connect` its own `CONNECTOR_VERSION`).
 >   wiring slug (#4396).
 > - **Signer.** Success results name their next step, and the settlement-child
 >   guidance names the MCP route (#4449). Guidance only; no new signing path.
-> - **Local MCP.** Embedded-SDK changes only (#4469); `README` wording (#4396).
+> - **Local MCP.** Embedded-SDK changes only: `haven_get_agent`'s description
+>   and result name an ended budget and tell a spent budget from no budget
+>   (#4352, #4355), and receipt rows carry their delivery fields (#4469). The
+>   tool list is unchanged, so there is no re-consent prompt. `README` wording
+>   (#4396).
 > - **Connect.** The installed skill names the ended budget (#4352), tells a
 >   spent budget from no budget (#4355), says which quote checks the budget
 >   (#4345), and names the agent folder by its slug (#4396). Existing installs

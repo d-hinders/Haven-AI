@@ -31,8 +31,10 @@ required") is refused — reword to "no update needed", or quote it in a code sp
   on a type that is only returned, so existing consumers keep compiling. No
   update needed.
 
-- **A quote stops on an ENDED budget, with its own warning code (#4458).**
-  `AgentPaymentWarningCode` gains `QUOTE_BUDGET_ENDED`. When the quote-time
+- **A warning code for a quote on an ENDED budget (#4458).** In this package,
+  `AgentPaymentWarningCode` gains `QUOTE_BUDGET_ENDED`. The hosted server
+  (`@haven_ai/mcp-server`, deployed rather than published) is what emits it, as
+  follows. When the quote-time
   budget pre-check answers the typed 403 `delegation_expired` — the agent's
   only budget for the token has ENDED — the quote now reports
   `budget_check.sufficient: false` (so `safe_to_continue` is false on

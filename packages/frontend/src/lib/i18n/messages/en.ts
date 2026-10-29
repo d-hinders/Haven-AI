@@ -84,12 +84,14 @@ export const en = {
     },
     /**
      * The row's identity line (#3018): the delivered record, named per
-     * provider. Fortnox rows carry an invoice number; Accounted rows carry
-     * a document id from the namespaced ref.
+     * provider. Fortnox rows carry an invoice number; a record-only provider
+     * (Accounted, Igdrasil) carries a document id from the namespaced ref —
+     * the provider name is passed in, so the line never says "Accounted" for
+     * an Igdrasil row (#4520).
      */
     rowIdentity: {
       invoice: (number: string) => `Fortnox invoice ${number}`,
-      document: (id: string) => `Accounted document ${id}`,
+      document: (provider: string, id: string) => `${provider} document ${id}`,
     },
     /**
      * The verify result sentences (#1362), provider-conditional since #3018:
@@ -109,12 +111,16 @@ export const en = {
         registered: (number: string) => `Registered in Fortnox as invoice ${number} — awaiting booking by your accountant.`,
       },
       /**
-       * Accounted — answered from Haven's own record (the descriptor says
-       * `verify: false`): the sentence says what Haven knows, not what the
-       * provider answered. `document` is the short document id.
+       * A record-only provider — answered from Haven's own record (the
+       * descriptor says `verify: false`): the sentence says what Haven knows,
+       * not what the provider answered. `provider` is the display name
+       * (Accounted, Igdrasil); `document` is the short document id. One
+       * sentence for every record-only connector, so a new one needs no copy
+       * (#4520).
        */
-      accounted: {
-        registered: (document: string) => `Evidence archived in Accounted — document ${document}. Your accountant books from it.`,
+      recordOnly: {
+        registered: (provider: string, document: string) =>
+          `Evidence archived in ${provider} — document ${document}. Your accountant books from it.`,
       },
       /** The two verdicts the record-only connector can still surface — generic. */
       foreign: 'Not found under this payment — the record belongs to another one.',
@@ -161,12 +167,45 @@ export const en = {
   },
   settings: {
     title: 'Settings',
-    subtitle: 'Manage preferences, account access, notifications, and data controls.',
-    viewProfile: 'View profile',
+    // Does not promise business details: the Business tab's visibility rule
+    // is #4359's, and until that lands the tab simply always shows.
+    subtitle: 'Your profile, preferences and security.',
+
+    /** The `?tab=` values and their labels (General is the default). */
+    tab: {
+      general: 'General',
+      security: 'Security',
+      business: 'Business',
+      ariaLabel: 'Settings sections',
+    },
+
+    /**
+     * General → Profile (#4358): the name editor, the read-only email and
+     * Member since — the rows `/profile` carried, moved into Settings.
+     */
+    profile: {
+      title: 'Profile',
+      description: 'The personal details shown on your Haven account.',
+      nameLabel: 'Name',
+      edit: 'Edit',
+      cancel: 'Cancel',
+      save: 'Save',
+      saving: 'Saving...',
+      saved: 'Name updated.',
+      helperText: 'Use the name you want shown in Haven.',
+      errorEmpty: 'Enter a name for your Haven account.',
+      errorControlChar: 'Remove unsupported characters before saving.',
+      errorTooLong: 'Use 80 characters or fewer.',
+      errorGeneric: 'We could not save your name. Please try again.',
+      email: 'Email',
+      emailDetail: 'Used to sign in and for account recovery support',
+      memberSince: 'Member since',
+      notAvailable: 'Not available',
+    },
 
     preferences: {
       title: 'Preferences',
-      description: 'Choose how Haven displays values and future alerts.',
+      description: 'Choose how Haven displays values.',
     },
     currency: {
       label: 'Preferred currency',
@@ -174,7 +213,7 @@ export const en = {
     },
     theme: {
       label: 'Theme',
-      detail: 'System follows your device',
+      detail: 'System follows your device. The toggle in the sidebar changes the same setting.',
       light: 'Light',
       dark: 'Dark',
       system: 'System',
@@ -193,28 +232,25 @@ export const en = {
       label: 'Theme',
       ariaLabel: (current: string, next: string) => `Theme: ${current}. Switch to ${next}`,
     },
-    agentSpendAlerts: {
-      label: 'Agent spend alerts',
-      detail: 'Receive updates when agents use their budget.',
-    },
-
-    access: {
-      title: 'Access',
-      description: 'How you sign in to Haven.',
-    },
     /**
-     * Settings → Signers (#3825). A signer is its own object, not part of an
+     * Settings → Security → "Passkeys and wallets" (#4358, renamed from
+     * plain "Signers"). A signer is its own object, not part of an
      * account (owner decision 2026-10-09): one passkey can approve accounts
      * on several networks. No address by default; "passkey", never a
      * platform brand (#1679).
      */
     signers: {
-      title: 'Signers',
+      title: 'Passkeys and wallets',
       description:
         'The passkeys and wallets that can approve actions on your accounts. One passkey or wallet can approve several accounts.',
       walletLabel: 'Browser wallet',
       walletLabelConnected: (connector: string) => `Browser wallet · ${connector}`,
-      approves: 'Approves',
+      /**
+       * #4472: the neutral badge beside a passkey whose credential this
+       * device holds. The "Approves" prefix is gone — each approved account
+       * is its own pill link now, so the row needs no verb.
+       */
+      thisDevice: 'This device',
       noAccounts: 'Approves no account yet.',
       accountFallbackName: 'Account',
       showAddress: 'Show address',
@@ -227,19 +263,18 @@ export const en = {
       connect: 'Connect wallet',
       disconnect: 'Disconnect',
     },
-    password: {
-      label: 'Password',
-      detail: 'Password changes are not available yet.',
-    },
-
+    /**
+     * Security → "If something goes wrong" (#4358): the exit path and what
+     * Haven cannot recover. The backup line is part of the recovery note —
+     * the one place outside the "Passkeys and wallets" section name where
+     * "signer" would otherwise be tempting (`copy-guidelines.md`).
+     */
     recovery: {
-      title: 'Recovery and safety',
+      title: 'If something goes wrong',
       description: 'Know what Haven can and cannot recover.',
-      limitationsLabel: 'Recovery limitations',
+      limitationsLabel: "What Haven can't recover",
       limitationsDetail:
-        'Haven can help you find account details, but it cannot bypass your wallets or passkeys or recover funds sent on the wrong network.',
-      sessionsLabel: 'Active sessions',
-      sessionsDetail: 'Review signed-in devices and revoke sessions.',
+        'Haven can help you find account details, but it cannot bypass your wallets or passkeys or recover funds sent on the wrong network. Keep a backup passkey or wallet on each funded account.',
       exitPathLabel: 'Your exit path',
       exitPathDetail: 'Inspect and revoke your agent budgets directly on-chain — without Haven. Opens the independent exit page.',
     },
@@ -263,6 +298,9 @@ export const en = {
       disclaimer:
         'Haven provides data tooling, not accounting or tax advice. Payments are fed as drafts — you and your accountant remain responsible for coding, correctness, and filing.',
       loadError: 'We could not load accounting connections. Try again in a moment.',
+      // #4359: the card's footer link — the feed page keeps the sync rows;
+      // the link is only rendered when at least one connector shows.
+      seeSyncedPayments: 'See synced payments on Accounting',
       /**
        * One line per coming-soon provider — listed, never endorsed. The chip
        * and the disabled action already say it is not connectable, so the
@@ -275,9 +313,9 @@ export const en = {
       } as Record<string, string>,
       /**
        * Human labels for the provider scope identifiers `missingScopes`
-       * carries (Fortnox's, today). An identifier without a label is shown
-       * raw rather than hidden — the sentence must still name what a
-       * reconnect adds.
+       * carries. Fortnox's are bare names; Igdrasil's are `resource:action`
+       * pairs (#4518). An identifier without a label is shown raw rather than
+       * hidden — the sentence must still name what a reconnect adds.
        */
       scopeLabels: {
         companyinformation: 'company information',
@@ -287,6 +325,8 @@ export const en = {
         supplier: 'suppliers',
         archive: 'archive',
         bookkeeping: 'bookkeeping',
+        'companies:read': 'company information',
+        'vouchers:write': 'voucher uploads',
       } as Record<string, string>,
       notConfigured: 'Not available on this deployment yet.',
       status: {
@@ -434,17 +474,28 @@ export const en = {
           'Haven feeds ledgers that book in SEK, EUR, USD, DKK, NOK or GBP. Choose a company that books in one of those and try again.',
         featureOff: (provider: string) =>
           `Accounting connections are switched off on this deployment, so the ${provider} sign-in was not kept. Nothing was connected.`,
+        /**
+         * #4520: the consent let the person pick several companies, and the
+         * feed has no per-push company choice — so the grant is refused at
+         * connect (#4518's callback emits `reason=multi_company`). The advice
+         * is the user's own action: reconnect and pick one.
+         */
+        multiCompany: (provider: string) =>
+          `${provider} was given access to more than one company. Haven feeds one company per connection, so reconnect and choose a single company.`,
         error: (provider: string) => `We could not connect ${provider}. Try again in a moment.`,
       },
     },
 
+    /**
+     * General → "Your data" (#4358): one row. The CSV itself lives on
+     * `/transactions` (its Export CSV) — this row only links there.
+     */
     data: {
-      title: 'Data and privacy',
-      description: 'Controls for activity history and product preferences.',
+      title: 'Your data',
+      description: 'Where your records live and how to take them with you.',
       exportLabel: 'Export transactions',
-      exportDetail: 'Download a CSV of account and agent activity.',
-      privacyLabel: 'Privacy controls',
-      privacyDetail: 'Manage analytics and product improvement preferences.',
+      exportDetail: 'Download a CSV of account and agent activity from the transactions page.',
+      openTransactions: 'Open Transactions',
     },
 
     /**
@@ -460,7 +511,7 @@ export const en = {
     companyDetails: {
       title: 'Company details',
       description:
-        'Add your legal name, country, organisation number and VAT number so they can appear on receipts your agents hand to merchants.',
+        'Add your legal name, country, organisation number and VAT number so they can appear on receipts your agents hand to merchants and feed the per-agent tax declaration an agent opts into.',
       // History: #3332's review rounds shaped a longer paragraph (VIES named,
       // the SE VAT encoding, a support-erasure sentence), and the "receipts"
       // sentence stays in `description` above.
@@ -478,12 +529,18 @@ export const en = {
       loadError: 'We could not load your company details. Try again in a moment.',
       retry: 'Try again',
 
+      // #4359: the "Not added yet" state — one line, then the reveal.
+      empty: {
+        line: 'No company details',
+        add: 'Add company details',
+      },
+
       fields: {
         legalName: 'Legal name',
         legalNamePlaceholder: 'e.g. Ada Lovelace AB',
         country: 'Country',
-        countryPlaceholder: 'e.g. SE',
-        countryHelp: 'Two-letter country code (ISO 3166-1), e.g. "SE" for Sweden.',
+        // #4359: the picker starts on a placeholder, not an example.
+        countryPlaceholder: 'Choose a country',
         orgNumber: 'Organisation number',
         orgNumberPlaceholder: 'e.g. 556677-8899',
         orgNumberHelp: 'For a sole trader, this is your personal identity number.',
@@ -538,34 +595,30 @@ export const en = {
 
       /**
        * VIES states (product doc § "The VIES states, and why an outage is
-       * never invalid"). `not_verifiable` covers every failure to check —
-       * including a VAT prefix that is not a VIES member country — never
-       * read as "the number is wrong". The wire `CompanyDetails` shape
-       * carries no machine-readable reason for `not_verifiable` (the
-       * backend's `reason` is log-only, see `modules/owner-profile/service.ts`),
-       * so this stays one neutral line rather than a reason this screen
-       * cannot actually tell apart.
+       * never invalid"), rendered as a StatusBadge per state with the tone
+       * table from #4359's spec review: valid = success, invalid =
+       * warning, everything else neutral. `not_verifiable` covers every
+       * failure to check — including a VAT prefix that is not a VIES
+       * member country — and is NEUTRAL, never danger or warning: "VIES
+       * couldn't check this" must never read as "the number is wrong".
+       * The wire `CompanyDetails` shape carries no machine-readable reason
+       * for `not_verifiable` (the backend's `reason` is log-only, see
+       * `modules/owner-profile/service.ts`), so this stays one neutral
+       * badge rather than a reason this screen cannot actually tell
+       * apart. Only `valid` says "Checked against VIES" — never
+       * "verified", that word is reserved for a passport tier that does
+       * not exist yet (`docs/product/agent-passport.md:71`).
        */
       vies: {
-        pending: 'Checking the VAT number with VIES…',
+        pending: 'Checking with VIES…',
         // #3332 review round 2, design 4: once the poll's bound has elapsed,
         // "Checking…" next to a "Check again" button read as still in
-        // progress — this names the actual state (VIES has not answered in
-        // the time this screen waits) instead.
-        pendingTimedOut: 'VIES has not answered yet.',
-        valid: (date: string) => `VAT number checked against VIES on ${date}`,
-        // #3332 review round 2, n1: the backend always writes a `checked_at`
-        // timestamp alongside any result (`setViesResult` in
-        // `infra/repositories/owner-company-details.ts` is always called with
-        // `new Date().toISOString()`), so a `valid` row with no
-        // `vies_checked_at` should not occur in practice. This stays only as
-        // a defensive fallback for a row shape this screen cannot otherwise
-        // rule out, and never claims a specific date it does not have.
-        validNoDate: 'VAT number checked against VIES.',
-        // Design review 8: names the next step rather than leaving the owner
-        // to guess one.
-        invalid: 'VIES says this VAT number is not valid. Check the number and save it again.',
-        notVerifiable: 'VIES could not check this number right now.',
+        // progress — this names the actual state (the check is still
+        // pending) instead.
+        pendingTimedOut: 'VIES check pending',
+        valid: 'Checked against VIES',
+        invalid: 'Not found in VIES',
+        notVerifiable: "VIES couldn't check this",
         checkAgain: 'Check again',
         checking: 'Checking…',
         checkError: 'We could not check the VAT number with VIES. Try again in a moment.',

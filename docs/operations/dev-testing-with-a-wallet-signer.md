@@ -6,8 +6,9 @@ covers:
   - packages/frontend/src/hooks/useDelegationBudget.ts
   - packages/frontend/src/hooks/useAccountSigners.ts
   - packages/frontend/src/components/AccountSignersCard.tsx
+  - packages/frontend/src/components/PasskeyElsewhereHint.tsx
   - packages/backend/src/rails/hybrid-signer-actions.ts
-last-verified: "2026-08-26"
+last-verified: "2026-10-24"
 ---
 
 # Dev testing with a wallet signer
@@ -31,9 +32,12 @@ which is production.)
 
 1. **Sign up** with email + password, then create your account with a passkey
    (usually approved with your device's screen lock).
-2. **Account page → Backup & recovery → add a wallet.** Paste your wallet's
-   address and approve with your passkey. You supply the address only — the wallet
-   doesn't need to be connected, and you pay no gas.
+2. **Account page → Security & details tab → *Who can approve* → Add a
+   wallet** (the tab and the *Who can approve* heading since #4142; #4166
+   removed the card's second "Backup & recovery" heading; #4474 moved the
+   heading above the card and renamed the button from *Or add a wallet*). Paste your wallet's
+   address, choose *Add wallet* and approve with your passkey. You supply the
+   address only — the wallet doesn't need to be connected, and you pay no gas.
 3. **Check the card now lists two ways to approve:** your wallet (labeled
    "Browser wallet", its address behind "Show address", #3825), and your
    passkey (labeled "Passkey · added {date}", #1679).
@@ -42,8 +46,9 @@ which is production.)
 
 1. **Sign in** with email + password — same account, same data, every preview
    points at the same dev backend.
-2. **Connect your wallet before anything else:** Settings → Signers → Connect
-   wallet (the top bar has no wallet button since #3825), or the in-flow
+2. **Connect your wallet before anything else:** Settings → Security →
+   Passkeys and wallets → Connect wallet (#4358; the top bar has no wallet
+   button since #3825), or the in-flow
    Connect wallet a signing screen offers.
 3. Set budgets, revoke, manage signers, run agents. Each action pops a MetaMask
    signature instead of a passkey prompt.
@@ -67,10 +72,11 @@ on the passkey path). Connect the enrolled wallet and retry.
 
 ## Testing passkeys on a preview
 
-You don't need a new account. Sign in, connect your wallet (Settings → Signers),
-then **Backup &
-recovery → add a backup passkey** — the wallet signs the change and the new
-passkey is created on that domain. Only onboarding itself still needs a
+You don't need a new account. Sign in, connect your wallet (Settings → Security
+→ Passkeys and wallets),
+then on the account page's **Security & details** tab choose **Add a backup
+passkey** — the wallet signs the change and the new passkey is created on
+that domain. Only onboarding itself still needs a
 throwaway account.
 
 ## Notes
@@ -94,3 +100,43 @@ See [`dev-environment.md`](dev-environment.md) for the rest of the dev stack.
 > of sending the route into the ErrorBoundary. No endpoint, flow or
 > behaviour this document describes changes. Scope of this note: those
 > expressions. Nothing else in this document was re-verified.
+
+> **Re-verified 2026-10-24 (#4372 part F, at dev `6d87ddf95`), a full re-read.**
+> Changed: the add-a-wallet and add-a-backup-passkey steps name where the card
+> lives now — the account page's *Security & details* tab, under *Who can
+> approve* (both #4142), with its *Or add a wallet* / *Add wallet* and *Add a
+> backup passkey* buttons (`components/AccountSignersCard.tsx`) — instead of a
+> "Backup & recovery" card heading the page no longer renders (#4166, PR #4190,
+> removed it). Re-checked
+> without change: the stable dev URL (`dev-environment.md`), the opt-in PR
+> previews (#3821), the "Browser wallet" / "Show address" (#3825) and
+> "Passkey · added {date}" (#1679, `lib/passkeyLabels.ts`) labels, Settings →
+> Security → *Passkeys and wallets* → *Connect wallet*
+> (`components/settings/SignersSection.tsx`), the #2068 client-side owner
+> check (`lib/signer.ts`), the "passkey may be on another device" line
+> (`PasskeyElsewhereHint`, shown on the owner-signing flows when the passkey
+> path signs), the single `transferOwnership` owner slot
+> (`rails/hybrid-signer-actions.ts`), removal disabled below two signers, and
+> #1153.
+>
+> **Re-verified 2026-10-27 (#4474, mockup v9).** Changed, and superseding the
+> two phrases above: the add-a-wallet button reads **Add a wallet** (not *Or
+> add a wallet*), and **Remove is absent, not disabled, while one signer
+> remains** — with two or more, every row carries it. The *Who can approve*
+> heading now sits ABOVE the card with **All signers in Settings** as a link on
+> its heading row, each signer row is two lines (the kind over "Added {date}"),
+> and the card's ONE footer row holds *Add a backup passkey*, *Add a wallet*
+> and *Lost a device?*. Re-checked without change: the stable dev URL, the
+> opt-in PR previews (#3821), the "Browser wallet" / "Show address" (#3825)
+> labels, Settings → Security → *Passkeys and wallets* → *Connect wallet*
+> (`components/settings/SignersSection.tsx`, untouched by #4474), the #2068
+> client-side owner check (`lib/signer.ts`), the "passkey may be on another
+> device" line (`PasskeyElsewhereHint`), the single `transferOwnership` owner
+> slot (`rails/hybrid-signer-actions.ts`), and #1153's drop-to-one
+> confirmation.
+>
+> **Review round 1 (haven-doc-reviewer @ `344d7ea91`).** The attribution was
+> wrong: *Who can approve* came with #4142 (`git log -S'Who can approve</h2>' -- packages/frontend` →
+> `fa1c20399`), and #4166 (PR #4190, `37ec8b7ba`) removed the card's
+> duplicate "Backup & recovery" heading (`git log -S "Backup & recovery"` on
+> `AccountSignersCard.tsx`).

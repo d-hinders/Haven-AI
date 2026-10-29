@@ -265,6 +265,35 @@ describe('useDelegationBudget passkey dispatch (#887)', () => {
     expect(Object.keys(build[1])).not.toContain('merchant_slug')
   })
 
+  it('#4350: a grant sends the chosen expires_at on the build body — the mutation cell fails if the field is dropped', async () => {
+    mockApi(PASSKEY_SIGNERS)
+    const message = { delegate: '0xd', delegator: '0xa', authority: '0x0', caveats: [], salt: '1' }
+    mockPost.mockImplementation((url: string) => {
+      if (url.endsWith('/build')) {
+        return Promise.resolve({ delegation_hash: '0xhash', version: 1, signing_payload: { domain: {}, types: {}, primaryType: 'Delegation', message } })
+      }
+      return Promise.resolve({ activated: true })
+    })
+    mockSignDelegation.mockResolvedValue('0x' + 'ab'.repeat(200))
+
+    const EXPIRES_AT = Date.UTC(2027, 0, 21, 23, 59, 59) / 1000
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    await act(async () => {
+      const res = await result.current.grant({
+        tokenAddress: ('0x' + 'cc'.repeat(20)) as never,
+        budgetAtomic: '1000',
+        periodSeconds: 86400,
+        expiresAt: EXPIRES_AT,
+      })
+      expect(res.ok).toBe(true)
+    })
+    const build = mockPost.mock.calls.find((c) => String(c[0]).endsWith('/build'))!
+    // The chosen end rides the existing field, verbatim — dropping it would
+    // silently hand the grant the server's 90-day default again (#4350).
+    expect(build[1]).toMatchObject({ expires_at: EXPIRES_AT })
+  })
+
   it('a merchant-locked build refusal (#3331) reports refused with the backend sentence, not the generic failure', async () => {
     mockApi(PASSKEY_SIGNERS)
     mockPost.mockImplementation((url: string) => {

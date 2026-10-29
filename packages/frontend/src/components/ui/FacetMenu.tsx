@@ -1,9 +1,11 @@
 'use client'
 
+import { Fragment, useEffect, useRef, useState } from 'react'
 import { Check, ChevronDown } from 'lucide-react'
 import { FilterPill } from '@haven_ai/ui/FilterPill'
 import { Icon } from '@/components/ui/Icon'
 import { allOptionLabel, facetValueLabel } from './list-controls-copy'
+import { planFacetOptions, toggleFacetGroup, type FacetOptionGroup } from './list-facet-groups'
 import { listMenuItemClasses, listMenuPanelClasses, listTriggerClasses, useListMenu } from './list-menu'
 import { sameValues, type FacetUrlSpec } from './list-url-codec'
 
@@ -19,6 +21,13 @@ export interface ListFacetOption {
   meta?: string
   /** Rows matching this value; shown on the right of a multi-select row. */
   count?: number
+  /**
+   * A collapsed option group (#4452): a long tail of options behind one
+   * disclosure row ("Show 14 inactive" collapsed, "Hide 14 inactive" open,
+   * "14 inactive" locked). Options stay one flat array, so the URL codec, the
+   * chip summary and value clearing are unchanged.
+   */
+  group?: FacetOptionGroup
 }
 
 /**
@@ -59,6 +68,16 @@ export interface FacetMenuProps {
  * - **Pills**: the same facet drawn as a row of toggle buttons
  *   (`aria-pressed`, the `FilterPill` primitive) for a short category list.
  *   Pills are not menu items.
+ * - **Collapsed option groups** (#4452, #4512): an option may carry a `group`,
+ *   and a facet's long tail collapses behind one `menuitem` whose text carries
+ *   the group's state — "Show 14 inactive" collapsed, "Hide 14 inactive" open,
+ *   "14 inactive" locked — with `aria-expanded`. Ungrouped rows come first. The
+ *   toggle stays mounted when the group expands, so focus is not lost and the
+ *   next arrow key continues from it; expanding scrolls the first revealed row
+ *   into view. A group holding the selection is open on every render and cannot
+ *   be collapsed: it carries `aria-disabled` (never `disabled`, which would
+ *   drop it out of the arrow walk) and reads as a state, not an action. The
+ *   split itself lives in `list-facet-groups.ts`, shared with the phone sheet.
  * - A facet with one possible value is hidden — there is nothing to choose.
  * - `facet.allLabel` renames the "no filter" row, or (`null`, #4113) drops
  *   it for a single-select facet whose every value is a real choice
@@ -73,6 +92,35 @@ export interface FacetMenuProps {
  */
 export function FacetMenu({ facet, value, onChange, allLabel: allLabelOverride, align = 'left' }: FacetMenuProps) {
   const menu = useListMenu()
+  // The user's own group expansions (#4452). Declared before the early
+  // returns below, so the hook order never depends on the facet's shape. The
+  // open state itself is derived on every render by `planFacetOptions`,
+  // because the URL value loads after mount and a selected grouped row must
+  // exist for `focusItem('checked')`.
+  const [expandedGroups, setExpandedGroups] = useState<string[]>([])
+  // The group the user just expanded (#4512), set in the toggle's click
+  // handler and consumed once by the effect below. A ref, not state: it must
+  // not cause a render of its own, and it must survive the re-render the
+  // expansion does.
+  const justExpanded = useRef<string | null>(null)
+  // Each group's disclosure row, so the effect can find the row it revealed:
+  // the first revealed row is the toggle's next element sibling.
+  const toggleRefs = useRef(new Map<string, HTMLButtonElement>())
+  // Expanding scrolls the first revealed row into view (#4512). The toggle is
+  // the menu's last row for every production facet, so the rows it reveals
+  // land below the panel's scroll edge and a click otherwise looks inert.
+  // Runs only for a group the user just expanded: never on collapse, never on
+  // the locked toggle, and never for a group open because it holds the
+  // selection (`focusItem('checked')` already focuses and scrolls to that row).
+  useEffect(() => {
+    const id = justExpanded.current
+    if (!id) return
+    justExpanded.current = null
+    const toggle = toggleRefs.current.get(id)
+    // The optional call is deliberate: jsdom has no `scrollIntoView`.
+    const first = toggle?.nextElementSibling as HTMLElement | null | undefined
+    first?.scrollIntoView?.({ block: 'nearest' })
+  }, [expandedGroups])
   const multi = facet.selection === 'multi'
   const viewChoice = allLabelOverride === null
   const allLabel = allLabelOverride !== undefined ? allLabelOverride : facet.allLabel !== undefined ? facet.allLabel : allOptionLabel
@@ -111,20 +159,50 @@ export function FacetMenu({ facet, value, onChange, allLabel: allLabelOverride, 
     if (!multi) menu.close(true)
   }
 
-  const rows: { value: string | null; label: string; meta?: string; count?: number; checked: boolean }[] = []
-  if (!multi && allLabel !== null) rows.push({ value: null, label: allLabel, checked: value.length === 0 })
-  for (const option of facet.options) {
-    rows.push({ value: option.value, label: option.label, meta: option.meta, count: option.count, checked: value.includes(option.value) })
+  // The user's own expansions feed the derived plan below.
+  const plan = planFacetOptions(facet.options, value, expandedGroups)
+
+  const optionRow = (option: ListFacetOption) => {
+    const checked = value.includes(option.value)
+    return (
+      <button
+        key={option.value}
+        type="button"
+        role={multi ? 'menuitemcheckbox' : 'menuitemradio'}
+        aria-checked={checked}
+        tabIndex={-1}
+        onClick={() => {
+          if (!multi) return choose([option.value])
+          choose(checked ? value.filter((v) => v !== option.value) : [...value, option.value])
+        }}
+        className={listMenuItemClasses}
+      >
+        {multi ? <CheckboxMark checked={checked} /> : <RadioMark checked={checked} />}
+        <span className="truncate" title={option.label}>
+          {option.label}
+        </span>
+        {/* `meta` (#4150) is the non-truncating detail slot: a status
+            suffix the label's `truncate` may not leave room for. */}
+        <span className="flex items-center gap-2 text-xs text-[var(--v2-ink-3)]">
+          {option.meta && <span className="whitespace-nowrap">{option.meta}</span>}
+          <span className="tabular-nums">{option.count ?? ''}</span>
+        </span>
+      </button>
+    )
   }
 
   return (
-    <div ref={menu.wrapperRef} className="relative inline-flex min-w-0 max-w-full">
+    // `sm:max-w-[20rem]` (#4401): from `sm` a header's actions row sizes to
+    // max-content, so `max-w-full` alone lets a long selected name push the
+    // header wide; the bound makes the summary below truncate there too. The
+    // full name stays in the trigger's text, so its accessible name keeps it.
+    <div ref={menu.wrapperRef} className="relative inline-flex min-w-0 max-w-full sm:max-w-[20rem]">
       <button {...menu.triggerProps} data-active={active} className={listTriggerClasses(active)}>
         <span className={active ? '' : 'text-[var(--v2-ink-3)]'}>{facet.label}:</span>
         {' '}
         {/* `min-w-0 truncate`: a long SELECTED label truncates inside the
             facet row instead of stretching the trigger past it (#4150). */}
-        <span className="min-w-0 truncate font-medium">{summary}</span>
+        <span className="min-w-0 truncate font-medium" title={summary}>{summary}</span>
         <Icon
           icon={ChevronDown}
           className={`h-3.5 w-3.5 shrink-0 motion-safe:transition-transform ${menu.open ? 'rotate-180' : ''}`}
@@ -140,31 +218,62 @@ export function FacetMenu({ facet, value, onChange, allLabel: allLabelOverride, 
           style={menu.panelStyle}
           className={`${listMenuPanelClasses} ${align === 'right' ? 'right-0' : 'left-0'}`}
         >
-          {rows.map((row) => (
+          {!multi && allLabel !== null && (
             <button
-              key={row.value ?? '__all'}
+              key="__all"
               type="button"
-              role={multi ? 'menuitemcheckbox' : 'menuitemradio'}
-              aria-checked={row.checked}
+              role="menuitemradio"
+              aria-checked={value.length === 0}
               tabIndex={-1}
-              onClick={() => {
-                if (row.value === null) return choose([])
-                if (!multi) return choose([row.value])
-                choose(row.checked ? value.filter((v) => v !== row.value) : [...value, row.value])
-              }}
+              onClick={() => choose([])}
               className={listMenuItemClasses}
             >
-              {multi ? <CheckboxMark checked={row.checked} /> : <RadioMark checked={row.checked} />}
-              <span className="truncate" title={row.label}>
-                {row.label}
+              <RadioMark checked={value.length === 0} />
+              <span className="truncate" title={allLabel}>
+                {allLabel}
               </span>
-              {/* `meta` (#4150) is the non-truncating detail slot: a status
-                  suffix the label's `truncate` may not leave room for. */}
-              <span className="flex items-center gap-2 text-xs text-[var(--v2-ink-3)]">
-                {row.meta && <span className="whitespace-nowrap">{row.meta}</span>}
-                <span className="tabular-nums">{row.count ?? ''}</span>
-              </span>
+              <span className="flex items-center gap-2 text-xs text-[var(--v2-ink-3)]" />
             </button>
+          )}
+          {plan.ungrouped.map(optionRow)}
+          {plan.groups.map((group) => (
+            <Fragment key={`group-${group.group.id}`}>
+              {/* The disclosure row (#4452) is a `menuitem`, which
+                  `ITEM_SELECTOR` already counts, so arrows, Home and End reach
+                  it. It STAYS MOUNTED when the group expands: focus is not
+                  lost, and the next arrow key continues from it. */}
+              <button
+                ref={(el) => {
+                  if (el) toggleRefs.current.set(group.group.id, el)
+                  else toggleRefs.current.delete(group.group.id)
+                }}
+                type="button"
+                role="menuitem"
+                aria-expanded={group.open}
+                // The locked row (#4512) is a state, not an action:
+                // `aria-disabled` and NEVER `disabled`, because `ITEM_SELECTOR`
+                // skips `[disabled]` and the row would drop out of the
+                // arrow/Home/End walk. Clicking it stays a no-op.
+                aria-disabled={group.holdsSelection || undefined}
+                tabIndex={-1}
+                onClick={() => {
+                  // Only a group the user is OPENING scrolls its rows into
+                  // view: not a collapse, not the locked toggle.
+                  justExpanded.current = !group.holdsSelection && !group.open ? group.group.id : null
+                  setExpandedGroups((ids) => toggleFacetGroup(ids, group))
+                }}
+                className={listMenuItemClasses}
+              >
+                <Icon
+                  icon={ChevronDown}
+                  className={`h-3.5 w-3.5 text-[var(--v2-ink-3)] motion-safe:transition-transform ${group.open ? '' : '-rotate-90'}`}
+                />
+                <span className="truncate">{group.toggleLabel}</span>
+              </button>
+              {/* No `role="group"` around these rows: it would split one radio
+                  set for screen readers. */}
+              {group.open && group.options.map(optionRow)}
+            </Fragment>
           ))}
         </div>
       )}

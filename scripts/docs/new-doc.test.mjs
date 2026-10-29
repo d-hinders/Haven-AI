@@ -18,6 +18,7 @@ import { parseFrontMatter, emptyCoversNote } from './validate-frontmatter.mjs'
 test('inferStatus derives status from the path', () => {
   assert.equal(inferStatus('docs/archive/old.md'), 'archived')
   assert.equal(inferStatus('docs/research/idea.md'), 'research')
+  assert.equal(inferStatus('docs/bug-reports/2026-10-26-qa-run.md'), 'record')
   assert.equal(inferStatus('docs/operations/thing.md'), 'current')
   assert.equal(inferStatus('README.md'), 'current')
 })
@@ -42,6 +43,13 @@ test('buildDoc emits front-matter that passes the validator', () => {
   assert.deepEqual(parsed.data.covers, [])
   assert.equal(parsed.data['last-verified'], '2026-07-01')
   assert.match(doc, /^# New Thing$/m)
+})
+
+test('buildDoc scaffolds a bug report as a record that passes the validator (#4459)', () => {
+  const doc = buildDoc({ relPath: 'docs/bug-reports/2026-10-26-qa-run.md', today: '2026-10-26' })
+  const parsed = parseFrontMatter(doc)
+  assert.equal(parsed.ok, true)
+  assert.equal(parsed.data.status, 'record')
 })
 
 test('buildDoc respects --owner, --title, and inferred archived status', () => {

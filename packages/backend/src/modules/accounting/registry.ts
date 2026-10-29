@@ -2,10 +2,12 @@
  * Accounting provider registry (#2862, epic #2858).
  *
  * The list of providers Haven knows about, as descriptors (`provider.ts`).
- * Owner decision 2026-09-11: Accounted, Light and Igdrasil are LISTED now as
- * *Coming soon* — listing is a product decision, and the dashboard shows
- * them before any code for them exists. Only a `live` provider accepts a
- * connect; the generic routes enforce that through `assertConnectable`.
+ * Owner decision 2026-09-11: a provider can be LISTED as *Coming soon*
+ * before any code for it exists — listing is a product decision, and the
+ * dashboard shows it. Light and Igdrasil are the two listed that way today
+ * (Accounted joined them the same way and has been `live` since #3017).
+ * Only a `live` provider accepts a connect; the generic routes enforce
+ * that through `assertConnectable`.
  *
  * `registerConnector` (connector.ts) is the OTHER registry — the instances
  * that actually talk to a provider. A provider can be listed here without an
@@ -50,12 +52,14 @@ export const ACCOUNTED: AccountingProvider = {
   // only (the product doc says so). `companyInfo` is the connect-time
   // validation: the key is proven by reading the company it belongs to.
   capabilities: { attachments: false, verify: false, revoke: false, companyInfo: true },
-  // A constant, as Fortnox's is: there is no per-provider dev gate. The
-  // per-ACCOUNT feature gate (`requireAccountingFeature` /
-  // `HAVEN_ACCOUNTING_ENTITLEMENT_MODE`) is what keeps the whole accounting
-  // feature off production, and Accounted's connector registers
-  // unconditionally (`index.ts`) because keys are per user — unlike Fortnox,
-  // whose instance is credential-gated.
+  // A constant, as Fortnox's is: there is no per-provider gate. Whether the
+  // accounting feature is on is decided by three checks, none of them per
+  // provider: the deployment is hosted (`HAVEN_HOSTED`) and the global flag
+  // is on (`HAVEN_ACCOUNTING_ENABLED`) — the two `requireAccountingFeature`
+  // applies to the connection routes — and, for the feed itself, the account
+  // is entitled (`HAVEN_ACCOUNTING_ENTITLEMENT_MODE`, `requireAccountingFeed`).
+  // Accounted's connector registers unconditionally (`index.ts`) because keys
+  // are per user — unlike Fortnox, whose instance is credential-gated.
   availability: 'live',
   // Per `provider.ts`: empty for api_key providers. `grantedScope` is stored
   // as null for this kind, so a non-empty list would make

@@ -29,8 +29,19 @@ vi.mock('@/lib/api', () => ({
   api: {
     get: (...args: unknown[]) => mockApiGet(...args),
   },
+  // The real class, so the 404-shape test throws the SAME error the client
+  // throws — a plain Error with a status property would test a shape the
+  // hook does not branch on.
+  ApiRequestError: class ApiRequestError extends Error {
+    status: number
+    constructor(message: string, status: number) {
+      super(message)
+      this.status = status
+    }
+  },
 }))
 
+import { ApiRequestError } from '@/lib/api'
 import { useAnalyticsOverview } from '@/hooks/useAnalyticsOverview'
 import { browserTimeZone } from '@/lib/analytics-range'
 import { FIXTURE_ANALYTICS_OVERVIEW } from '../../../scripts/screenshot.mjs'
@@ -169,5 +180,52 @@ describe('useAnalyticsOverview', () => {
     unmount()
     expect(() => flight.resolve(OVERVIEW)).not.toThrow()
     await waitFor(() => expect(mockApiGet).toHaveBeenCalledTimes(1))
+  })
+
+  describe('the agent filter (#4333)', () => {
+    it('rides the SAME request when set, and stays off the wire when absent', async () => {
+      mockApiGet.mockResolvedValue(OVERVIEW)
+      const { result } = renderHook(() => useAnalyticsOverview('30d', 'usd', 'agent-research'))
+      await waitFor(() => expect(result.current.loading).toBe(false))
+
+      const params = query(mockApiGet.mock.calls[0][0] as string)
+      expect(params.get('agentId')).toBe('agent-research')
+
+      mockApiGet.mockResolvedValue(OVERVIEW)
+      renderHook(() => useAnalyticsOverview('30d', 'usd', null))
+      await waitFor(() => expect(mockApiGet).toHaveBeenCalledTimes(2))
+      expect(query(mockApiGet.mock.calls[1][0] as string).get('agentId')).toBeNull()
+    })
+
+    it('re-asks when the agent changes: the path memo includes agentId', async () => {
+      mockApiGet.mockResolvedValue(OVERVIEW)
+      const { result, rerender } = renderHook(
+        ({ agentId }: { agentId: string | null }) => useAnalyticsOverview('30d', 'usd', agentId),
+        { initialProps: { agentId: null as string | null } },
+      )
+      await waitFor(() => expect(result.current.loading).toBe(false))
+      rerender({ agentId: 'agent-research' })
+      await waitFor(() => expect(mockApiGet).toHaveBeenCalledTimes(2))
+      expect(query(mockApiGet.mock.calls[1][0] as string).get('agentId')).toBe('agent-research')
+    })
+
+    it('surfaces a 404 as agentNotFound, not as a failed page (#4333)', async () => {
+      // The endpoint answers 404 for a foreign agentId (#4332). That is not an
+      // outage: the page clears the filter with a notice, so the hook reports
+      // it as its own flag and leaves `failed` — the page error state — alone.
+      mockApiGet.mockRejectedValueOnce(new ApiRequestError('Not Found', 404))
+      const { result } = renderHook(() => useAnalyticsOverview('30d', 'usd', 'agent-ghost'))
+      await waitFor(() => expect(result.current.loading).toBe(false))
+      expect(result.current.agentNotFound).toBe(true)
+      expect(result.current.failed).toBe(false)
+    })
+
+    it('reports every other failure as failed, not agentNotFound', async () => {
+      mockApiGet.mockRejectedValueOnce(new ApiRequestError('Service Unavailable', 503))
+      const { result } = renderHook(() => useAnalyticsOverview('30d', 'usd', 'agent-research'))
+      await waitFor(() => expect(result.current.loading).toBe(false))
+      expect(result.current.failed).toBe(true)
+      expect(result.current.agentNotFound).toBe(false)
+    })
   })
 })

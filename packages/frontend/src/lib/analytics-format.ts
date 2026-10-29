@@ -1,10 +1,8 @@
-import { timeAgo, truncate, isValidAddress, currencyLocale } from '@/lib/format'
-import { formatAllowanceForToken } from '@/lib/allowance-format'
+import { timeAgo, truncate, currencyLocale } from '@/lib/format'
 // #3844: the instant voice is the budget caption helper's (#3806) — the same
 // three-distance phrasing a budget meter's "refills …" line uses, so a period
 // end can no longer be rendered in a private date dialect.
 import { formatNextEvent } from '@/lib/budget-caption'
-import type { AnalyticsDelegationBudget } from '@/types/analytics'
 
 /**
  * Presentation-only formatters for the Analytics surface (#2947, epic #2944
@@ -18,8 +16,9 @@ import type { AnalyticsDelegationBudget } from '@/types/analytics'
  * converting it again here would put arithmetic between the reader and the
  * number the money path actually wrote. If a figure is missing from the
  * response, the fix is to add it to the endpoint, never to derive it client-
- * side. The one computation performed here is budget percentage of two atomic
- * strings on the same token — a ratio, not a currency conversion.
+ * side. (The budget percentage this file used to compute is gone with the
+ * phone row's own budget line, #4432: a budget renders through the shared
+ * caption helper, `lib/budget-caption.ts`.)
  */
 
 /** The display currency the Settings surface owns (`usePreferences().currency`). */
@@ -74,37 +73,14 @@ export function formatSharePercent(share: number): string {
 }
 
 /**
- * A budget position in the delegation's own token units ("180 of 250 USDC").
- *
- * Token units, not fiat: a budget is what the owner-signed delegation permits
- * on that token over its own period, so the only honest denominator is the
- * token the delegation is written in. The atomic strings divide down to
- * decimal places (`1800000` at 6 decimals → `1.8`).
+ * An agent's refused count, with its attempts when they differ ("1 · 2
+ * attempts"). Rows and attempts can differ — a dedupe upstream folds retries
+ * of one refusal into one row — so the attempts ride the count only when they
+ * say something the count does not. One home for the string (#4426): the
+ * desktop Refused cell and the phone row's disclosure both print it.
  */
-export function formatBudgetTokenValue(
-  budget: Pick<AnalyticsDelegationBudget, 'token' | 'used_atomic' | 'budget_atomic'>,
-): string {
-  // `chainId: null` on purpose: the response carries the token's SYMBOL, not
-  // its address or chain, so the symbol-based decimals table is the only one
-  // that can be consulted, and `formatAllowanceForToken` already owns that
-  // table plus its unknown-token fallback.
-  const used = formatAllowanceForToken(budget.used_atomic, null, budget.token)
-  const total = formatAllowanceForToken(budget.budget_atomic, null, budget.token)
-  return `${used} of ${total} ${budget.token}`
-}
-
-/**
- * Used/budget as a 0–100 percentage. A zero or malformed budget reports `0`
- * rather than `Infinity` or `NaN` — a delegation whose budget reads as zero is
- * a state that exists (an approval revoked down to nothing), and the bar must
- * render flat rather than produce a nonsense figure.
- */
-export function budgetUsedPercent(usedAtomic: string, budgetAtomic: string): number {
-  const budget = Number.parseFloat(budgetAtomic)
-  if (!Number.isFinite(budget) || budget <= 0) return 0
-  const used = Number.parseFloat(usedAtomic)
-  if (!Number.isFinite(used) || used <= 0) return 0
-  return Math.min(100, Math.round((used / budget) * 100))
+export function formatRefusedCount(refusals: number, attempts: number): string {
+  return attempts === refusals ? String(refusals) : `${refusals} · ${attempts} attempts`
 }
 
 /**
@@ -142,17 +118,35 @@ export function budgetBandsCaption(above75: number, agentsWithBudget: number): s
 }
 
 /**
- * A one- or two-word label for the window the figures cover. A caption that
- * restates the endpoint's own numbers ("30 days of data, 12 payments") adds a
- * second place for a count to be wrong, so the range stays a shape word and
- * the counts stay in their tiles.
+ * "by 2 of 3 agents" — the Payments tile's caption (#4333): the agents the
+ * window's payments came from, out of the agents the table lists. Both counts
+ * are read off the response's own `agents[]` rows (each carries its
+ * `payments`), so the caption counts what the endpoint reported and invents
+ * nothing; when the page is filtered to one agent the caller renders that
+ * agent's name instead and this caption is not used.
  */
-export function rangeCaption(rangeDays: 7 | 30 | 90): string {
-  return `Last ${rangeDays} days`
+export function paymentsAgentsCaption(agentsWithPayments: number, agentsListed: number): string {
+  return `by ${agentsWithPayments} of ${agentsListed} agents`
 }
 
 /**
- * The "last payment" cell, built from the one piece the response offers:
+ * The Spent tile's comparison (#4333): the previous window's spent, as an
+ * AMOUNT rather than a percentage — "$280.10 the 30 days before". A ratio of
+ * two booked totals is a derivation the response did not make (`percentChange`
+ * is gone with the delta pills); the endpoint reports both windows' figures
+ * and the tile puts them side by side, which is the one comparison it can
+ * make without inventing a number.
+ */
+export function spentComparisonCaption(
+  previousSpent: string,
+  days: number,
+  currency: AnalyticsCurrency,
+): string {
+  return `vs ${formatAnalyticsAmount(previousSpent, currency)} the ${days} days before`
+}
+
+/**
+ * The "last payment" cell, from the one piece the response offers:
  * `last_payment_at` (null → never). Relative form keeps the column comparable
  * across rows at a glance — "2h ago" answers the question the column is for,
  * how recently has this agent spent — and reuses the app's own `timeAgo` so
@@ -165,70 +159,14 @@ export function lastPaymentCaption(iso: string | null): string {
 }
 
 /**
- * The change of a figure against the same figure in the previous window, as
- * a percentage of the previous window (2.4 = +2.4%), or `null` when there is
- * no previous figure to compare against.
- *
- * It takes a STRING as well as a number because the two fields it is called
- * with on the overview response (`spent`/`spent_previous`) are numeric
- * strings — B books fiat via `::text` and the route passes them through — and
- * a helper that refused them would push every caller into coercing at the
- * render boundary, the one thing the note above this file forbids. The parse
- * happens here, at the edge, exactly where the formatters parse.
- *
- * `null` rather than `Infinity`/`NaN` for a zero or absent previous figure is
- * deliberate: "up from zero" is not a percentage of zero, and the first window
- * an account has data has no previous window at all. A tile given a `null`
- * delta renders no chip; a tile given a made-up one would be a figure the
- * endpoint never reported.
+ * The short address an UNKNOWN recipient shows under its "Unknown recipient"
+ * label (#4333): the one truncation rule in the app (#853) — "0x71C2…7128".
+ * Since #4332 the overview's `label` is either a resolved NAME or null — it
+ * is never an address — so the address appears only where the issue puts it:
+ * the kind line and the tooltip of an unknown recipient, never AS the label.
  */
-export function percentChange(current: string | number, previous: string | number): number | null {
-  const now = typeof current === 'number' ? current : Number.parseFloat(current)
-  const before = typeof previous === 'number' ? previous : Number.parseFloat(previous)
-  if (!Number.isFinite(now) || !Number.isFinite(before) || before <= 0) return null
-  return ((now - before) / before) * 100
-}
-
-/**
- * Refused-count with the attempts only when they differ, as one line:
- * "2 refused payments · across 3 attempts". A dedupe upstream means rows and
- * attempts are usually equal, and spelling out "3 · 3 attempts" every time
- * would train the reader to stop parsing that cell.
- */
-export function refusalsCaption(refusedCount: number, refusedAttempts: number): string {
-  const payments = refusedCount === 1 ? 'refused payment' : 'refused payments'
-  if (refusedAttempts === refusedCount) return `${refusedCount} ${payments}`
-  return `${refusedCount} ${payments} · across ${refusedAttempts} attempts`
-}
-
-/**
- * How a merchant label that is still an address is DISPLAYED (#2949).
- *
- * This decides nobody's identity — the label is the API's (contact, else
- * receipt name, else address), and neither of the two tables that use it
- * re-resolves, because a second resolution is a second place the same merchant
- * can be named two ways. What it does is the display half only: such a label
- * goes through `lib/format.truncate`, the one truncation rule in the app
- * (#853), because an un-truncated `0x…` at table width clips mid-glyph with no
- * ellipsis and no way to read the whole thing. The full string rides in the
- * returned `title` so the reader can still get it; contacts and receipt names
- * are not addresses, keep their own characters, and get no title.
- *
- * `isValidAddress` is `@haven_ai/core`'s (re-exported through `lib/format`),
- * deliberately not viem's, which validates the EIP-55 checksum and so would
- * reject a lowercase address into the non-address branch.
- *
- * It lives here rather than beside either table because BOTH tables use it —
- * the agents table's top-merchant cell and slice E's merchants table render
- * the same field — and a truncation that exists on one side and not the other
- * is a disagreement between them, exactly the class this module exists to
- * prevent.
- */
-export function merchantLabel(label: string): { value: string; title?: string } {
-  if (isValidAddress(label)) {
-    return { value: truncate(label), title: label }
-  }
-  return { value: label }
+export function unknownRecipientShortAddress(address: string): string {
+  return truncate(address)
 }
 
 /**
@@ -269,15 +207,20 @@ export function formatAnalyticsValue(value: number, currency: AnalyticsCurrency)
 
 /**
  * The y-axis tick: the same currency voice as `formatAnalyticsValue`, with
- * NO fraction digits — an axis needs no more precision than its grid, and a
- * `$100.00` tick overran the 390 gutter and sat on the first bar (#3051
- * design review). Values are the scale's own round ticks, never a figure.
+ * the fraction digits the TICK STEP chooses (#4334) — 0 for a whole-unit
+ * step, 2 otherwise, and 4 when the step is under a cent, so a sub-cent
+ * scale's ticks stay distinct instead of printing "$0, $0". The decimals
+ * come from the STEP and not from each value (S5 on #4334): per-value
+ * formatting would print "$0.0020, $0.0040, $0.01, $0.01" up one axis —
+ * the two coarse ticks rounding away the very distinction the fine ones
+ * carry. Values are the scale's own round ticks, never a figure.
  */
-export function formatAnalyticsTick(value: number, currency: AnalyticsCurrency): string {
+export function formatAnalyticsTick(value: number, step: number, currency: AnalyticsCurrency): string {
+  const decimals = step >= 1 ? 0 : step > 0 && step < 0.01 ? 4 : 2
   return new Intl.NumberFormat(analyticsCurrencyLocale(currency), {
     style: 'currency',
     currency,
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
   }).format(value)
 }

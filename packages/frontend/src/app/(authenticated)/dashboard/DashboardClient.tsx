@@ -26,6 +26,7 @@ import { resolveDefaultAccount } from '@/lib/default-account'
 import {
   attentionEmptyState,
   computeAttentionItems,
+  DISMISSIBLE_ATTENTION_KINDS,
   firstRunSetupState,
   type AttentionRuleItem,
 } from '@/lib/dashboard-attention'
@@ -107,7 +108,7 @@ export default function DashboardClient() {
   // dismissal key survives as the backup items' dismissal until #3813 owns
   // per-item persistence.
 
-  // The DELEGATION-rail nudge above is untouched — `Backup & recovery` is live
+  // The DELEGATION-rail nudge above is untouched — `Who can approve` is live
   // and this is still the rail where new accounts land.
   // #3818: the first-run guide's facts come from the overview through the
   // shared rules module — the same per-account USDC (#3803) and agent list the
@@ -363,7 +364,7 @@ export default function DashboardClient() {
   // RecoveryNudge's legacy global key. The hook receives the accounts only
   // once the overview has loaded — a failed load never decides what was
   // "funded at that moment".
-  const { dismissedIds: serverDismissedIds, dismiss: dismissOnServer } = useAttentionDismissals({
+  const { acknowledgements, dismiss: dismissOnServer } = useAttentionDismissals({
     accounts: overview?.accounts,
   })
   // Session-only dismissal for everything the rules will re-fire on the next
@@ -375,19 +376,18 @@ export default function DashboardClient() {
   )
   const attentionItems = useMemo(() => {
     if (!overview) return []
-    const dismissedIds = new Set(sessionDismissedIds)
-    for (const id of serverDismissedIds) dismissedIds.add(id)
     return computeAttentionItems({
       overview,
       budgetRemaining: budgetRemaining ?? null,
       accountNames,
-      dismissedIds,
+      acknowledgements,
+      dismissedIds: sessionDismissedIds,
       // While the setup guide's "Add USDC" step is open, the guide IS the
       // funds ask — the low-balance and zero-USDC items step aside (#3808).
       // The zero-USDC warning waits while step 1 is open: the step says it.
       holdBackLowBalance: showSetupSteps && usdcFunded !== true,
     })
-  }, [overview, budgetRemaining, accountNames, serverDismissedIds, sessionDismissedIds, showSetupSteps, usdcFunded])
+  }, [overview, budgetRemaining, accountNames, acknowledgements, sessionDismissedIds, showSetupSteps, usdcFunded])
   // #3902: what the card says with no items — decided from measured facts,
   // never from the list being empty, and held back while the budget reads
   // load (an unknown read must not become "agents have room").
@@ -398,9 +398,10 @@ export default function DashboardClient() {
             overview,
             budgetRemaining: budgetRemaining ?? null,
             budgetRemainingLoading,
+            acknowledgements,
           })
         : null,
-    [overview, budgetRemaining, budgetRemainingLoading],
+    [overview, budgetRemaining, budgetRemainingLoading, acknowledgements],
   )
   // The agent step 2 names is not listed twice: while the steps show AND step
   // 2 is open, its "Needs setup" row drops. Other waiting agents keep theirs.
@@ -490,10 +491,11 @@ export default function DashboardClient() {
   }
 
   function handleDismissAttention(item: AttentionRuleItem) {
-    if (item.kind === 'no-backup' || item.kind === 'needs-setup') {
-      // #3813: server-saved — permanent, per account / per agent, visible
-      // from every device of the same user. The hook is optimistic: the
-      // item hides now, and comes back on a failed write.
+    if (DISMISSIBLE_ATTENTION_KINDS.has(item.kind)) {
+      // #3813/#4324: server-saved — a permanent dismissal or an
+      // acknowledgement, visible from every device of the same user. The
+      // hook is optimistic: the item hides now, and comes back on a failed
+      // write.
       dismissOnServer(item)
       return
     }

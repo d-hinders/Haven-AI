@@ -214,6 +214,36 @@
       },
       "disposition": "converged",
       "reason": "CONVERGED by #3134 on the transaction's name: both sides resolve payment_rail then source (one axis, measured by #3131/#3132), the transactions wire is frozen, and `source` beside a nested `scope.source` is exactly the pair every transaction row already carries -- so the receipt mirrors it rather than inventing a third spelling. `rail` was the better word for a protocol in isolation; the survivor rule (transaction name, wire frozen) decides. The old receipt key `rail` was dual-emitted as a deprecated twin for one release and removed by #3306. The transaction side's 'direct' substitution for a non-protocol intent is unchanged and still recorded here as `defaulted`."
+    },
+    {
+      "concept": "settlement scheme",
+      "receipt": {
+        "field": "settlementScheme",
+        "column": "settlement_scheme",
+        "value": "recorded"
+      },
+      "transaction": {
+        "field": "settlementScheme",
+        "column": "settlement_scheme",
+        "value": "recorded"
+      },
+      "disposition": "converged",
+      "reason": "CONVERGED by #4469: the receipt mapper now reads `settlement_scheme` off the receipts wire, so both surfaces report WHICH settlement branch moved the money under one name. Same column, same recorded-or-null value. The receipt side is raw text with no enum on the wire (backend openapi/spec.ts declares `type: ['string','null']` with no enum), so the SDK types it `string | null` rather than narrowing an unknown value to null; the transaction side keeps its `eip3009 | erc7710 | null` enum. The three axes #1705 keeps unmerged -- this, `source` (the payment protocol) and the ACCOUNT's `execution_rail` (account architecture) -- stay unmerged."
+    },
+    {
+      "concept": "delivery reference",
+      "receipt": {
+        "field": "deliveryReference",
+        "column": "delivery_reference",
+        "value": "recorded"
+      },
+      "transaction": {
+        "field": "deliveryReference",
+        "column": "delivery_reference",
+        "value": "recorded"
+      },
+      "disposition": "converged",
+      "reason": "CONVERGED by #4469: the receipt mapper now reads `delivery_reference` off the receipts wire, so the SDK receipt restates the NON-SECRET delivery pointer (#3778) the transaction detail drawer and activity feed already show. Same column (machine_payment_evidence.delivery_reference, migration 107), same recorded-or-null value. Credential-shaped values are refused at the handler, semantic and recognizer layers, so the pointer is never the deliverable itself."
     }
   ],
   "singleSurface": {
@@ -245,7 +275,11 @@
       "updatedAt": "Evidence-row lifecycle.",
       "paymentIntentId": "Conditional key, present only when the raw row carries it. Links evidence to intent; no transfer-level counterpart.",
       "approvalRequestId": "Conditional key. Approval requests were dropped with the table (#2055); the field survives on the raw shape.",
-      "scope": "#3132 per-row list scope `{ source, filter }`. Its counterpart is `scope` on the enriched Transaction schema, not on transactionBaseProperties (the surface this guard reads) -- same key, same ListScope shape, so the pair is converged by construction; recorded here for the same reason `chainId` is."
+      "scope": "#3132 per-row list scope `{ source, filter }`. Its counterpart is `scope` on the enriched Transaction schema, not on transactionBaseProperties (the surface this guard reads) -- same key, same ListScope shape, so the pair is converged by construction; recorded here for the same reason `chainId` is.",
+      "budgetDelegationHash": "#4469: the budget delegation that METERED this payment (#3518), uniform across schemes. No transaction counterpart: the wallet feed reports the settled transfer, not which budget metered it. `string | null` here (the backend sends `?? null`), unlike the status read's `string`.",
+      "deliveryQuality": "#4469: the paying agent's own delivery verdict (#3770) -- `ok` | `unusable` | `partial`, or null when not reported. No transaction counterpart: the wallet feed reports the transfer, not the agent's judgement about what it got. Evidence only; it gates nothing.",
+      "deliveryNote": "#4469: the agent's optional note (max 2000 chars) on its delivery verdict (#3770). No transaction counterpart, same reason as deliveryQuality.",
+      "deliveryReportedAt": "#4469: when the agent reported its delivery verdict (#3770). No transaction counterpart, same reason as deliveryQuality."
     },
     "transaction": {
       "type": "native / erc20 / internal -- a transfer classification. Receipts are always payments.",
@@ -261,7 +295,6 @@
       "activityType": "delegate_sweep marker. Sweeps are not payments and have no receipt.",
       "agentName": "Attribution joined onto the history row. The receipt surface is agent-scoped already, so the agent is the principal rather than a field.",
       "initiatedBy": "#2097 initiator classification for any history row. Every receipt is agent-initiated by construction.",
-      "settlementScheme": "eip3009 / erc7710 -- WHICH settlement branch moved the money (#1705). The three axes #1705 keeps unmerged are this, `source` (the payment protocol) and the ACCOUNT's `execution_rail` (account architecture) -- not the old receipt `rail` (removed by #3306), which was the same axis as `source`.",
       "fundingTxHash": "#3763: the EIP-3009 funding leg, named -- Haven's sponsored UserOp (account -> delegate). Equal by copy to `hash` on the rows that carry it (the framing `to` uses), and a DIFFERENT CONCEPT from the receipt's fundingTxHash: there it is scheme-dependent (#2998), here it exists only on x402-synthesized rows and is null on every other row class (explorer-derived, sweeps), so no concept pair can claim convergence.",
       "settlementTxHash": "#3763: the merchant's settlement transaction (delegate -> merchant) when an agent reported it or the backend's settlement sweep detected it on-chain (#3888) and it verified on-chain (#3475); null is 'not recorded', never 'failed' -- the SDK's default evidence post reports the FUNDING hash, which the writer refuses, so many eip3009 rows legitimately never get one. Equal by copy to the receipt's settlementTxHash on rows that carry one, but only x402-synthesized rows carry the field at all, so it stays unpaired.",
       "amountSek": "Book-time SEK value (#463) for the accounting feed.",
@@ -276,7 +309,6 @@
  "approxCurrency": "#3824: which currency approxAmount is denominated in -- the user's preference, SEK when none is set. No receipt counterpart, same reason as approxAmount.",
       "timestamp": "The row's non-null unix-seconds SORT KEY: the block timestamp on explorer rows, `confirmed_at ?? created_at` on x402-synthesized rows. Its counterpart for 'when did this settle' is `confirmedAt` (paired above, #3132); on the JSON rows the fallback is marked by `timestampSource` -- the CSV export's settled_at projection of it is not (see the settled-at reason).",
       "timestampSource": "#3132: which column produced `timestamp` ('block' | 'confirmed_at' | 'created_at') -- the mark that turns the sort key's fallback from a silent substitution into a stated one. A receipt has no sort-key fallback to mark.",
-      "deliveryReference": "#3778: the NON-SECRET pointer to a delivered good (machine_payment_evidence.delivery_reference, migration 107) -- what was bought and where to recover it, on the transaction detail drawer and the activity feed. No receipt counterpart: the SDK receipt is the settlement's own protocol proof and does not restate the delivery pointer, and the write-side echo lives on the evidence POST, not the receipt surface (mapPaymentReceipt is untouched). Credential-shaped values are refused at the handler, semantic and recognizer layers.",
       "settlementTracking": "#4319: the settlement proof-ladder state ('verified' | 'checking' | 'untracked') on x402-synthesized rows, derived from stored state on the API/feed read. No receipt counterpart: the receipt surface (mapPaymentReceipt) carries the settled payment itself -- the hash and the verdict -- not the ladder's tracking state. The snake_case twin (settlement_tracking) lives on the agent-activity read (infra/repositories/agent-activity.ts), a hand-mapped route this guard does not scan, not on the receipt surface.",
       "settlementProof": "#4319: which proof the recorded settlement carries ('nonce' | 'signed_header' | 'receipt' | 'legacy'), derived from stored state alongside settlementTracking on the API/feed read. No receipt counterpart for the same reason: a receipt reports the settled payment, not which ladder tier proved it. The snake_case twin (settlement_proof) sits beside settlement_tracking on the agent-activity read, outside the surfaces this guard scans."
     }

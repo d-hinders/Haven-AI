@@ -667,7 +667,12 @@ describe('EditBudgetModal — a re-key pair and a recipient change (#3933 review
     fireEvent.click(screen.getByRole('button', { name: 'Review changes' }))
     fireEvent.click(screen.getByRole('button', { name: 'Approve new budget' }))
     await waitFor(() => expect(mockEditBudget).toHaveBeenCalled())
-    expect(mockEditBudget.mock.calls[0][2]).toEqual({ oldSlot: { tokenAddress: USDC, recipientAddress: RECIPIENT } })
+    // #4350: the edit ALWAYS carries an end date — untouched select sends the
+    // budget's own `expires_at`, never a silent restart of the server default.
+    expect(mockEditBudget.mock.calls[0][2]).toEqual({
+      oldSlot: { tokenAddress: USDC, recipientAddress: RECIPIENT },
+      expiresAt: 9_999_999_999,
+    })
   })
 
   it('a recipient change into an occupied slot is caught on the form, before any signature', () => {
@@ -727,5 +732,66 @@ describe('EditBudgetModal — a re-key pair and a recipient change (#3933 review
     expect(
       screen.getByText(/budget pays a different recipient, so it keeps working, in Haven and outside it, until it is stopped\./),
     ).toBeInTheDocument()
+  })
+})
+
+describe('EditBudgetModal (#4350) — the end date', () => {
+  /** Open → pick a preset on the end-date select (180 days) → Review. */
+  function toReviewWithNewEnd() {
+    renderModal({ budget: budget({ expires_at: 9_999_999_999 }) }) // 20 Nov 2286
+    fireEvent.change(screen.getByLabelText('Ends'), { target: { value: '180' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Review changes' }))
+  }
+
+  it('an end-date-only edit IS a change — the mutation cell fails if `changed` ignores it', () => {
+    renderModal({ budget: budget({ expires_at: 9_999_999_999 }) })
+    expect((screen.getByRole('button', { name: 'Review changes' }) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.change(screen.getByLabelText('Ends'), { target: { value: '180' } })
+    expect((screen.getByRole('button', { name: 'Review changes' }) as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('shows the old and the new end date in review, before anything is signed', () => {
+    toReviewWithNewEnd()
+    // Now: the budget's own end (deterministic). After: a preset from this
+    // clock — asserted as a changed absolute date on the "After you approve"
+    // paragraph, with the budget's old date nowhere on it.
+    expect(screen.getByText(/· ends 20 Nov 2286/)).toBeInTheDocument()
+    const after = screen.getByText(/After you approve/).nextElementSibling as HTMLElement
+    expect(after.textContent).toMatch(/· ends /)
+    expect(after.textContent).not.toMatch(/20 Nov 2286/)
+  })
+
+  it('the renewal sends opts.expiresAt with the chosen preset — the mutation cell fails if the option never reaches the hook', async () => {
+    toReviewWithNewEnd()
+    fireEvent.click(screen.getByRole('button', { name: 'Approve new budget' }))
+    await waitFor(() => expect(mockEditBudget).toHaveBeenCalledTimes(1))
+    const opts = mockEditBudget.mock.calls[0][2] as { expiresAt?: number }
+    expect(opts.expiresAt).toBeDefined()
+    // 180 days from THIS render's clock, end of that UTC day — a wide window
+    // around it is exact enough to kill a dropped or defaulted field.
+    const nowSec = Date.now() / 1000
+    expect(opts.expiresAt!).toBeGreaterThan(nowSec + 178 * 86_400)
+    expect(opts.expiresAt!).toBeLessThan(nowSec + 182 * 86_400)
+  })
+
+  it("an untouched select keeps the current end: the edit sends the budget's own expires_at, never a restart", async () => {
+    renderModal({ budget: budget({ expires_at: 9_999_999_999 }) })
+    fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '10' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Review changes' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Approve new budget' }))
+    await waitFor(() => expect(mockEditBudget).toHaveBeenCalledTimes(1))
+    expect(mockEditBudget.mock.calls[0][2]).toMatchObject({ expiresAt: 9_999_999_999 })
+  })
+
+  it('the end-date select offers "keep current" dated to the budget, and the presets', () => {
+    renderModal({ budget: budget({ expires_at: 9_999_999_999 }) })
+    const select = screen.getByLabelText('Ends') as HTMLSelectElement
+    const options = [...select.options].map((o) => o.text)
+    expect(options[0]).toMatch(/Keep current end · 20 Nov 2286/)
+    expect(options).toContain('30 days')
+    expect(options).toContain('90 days')
+    expect(options).toContain('180 days')
+    expect(options).toContain('365 days')
+    expect(select.value).toBe('keep')
   })
 })

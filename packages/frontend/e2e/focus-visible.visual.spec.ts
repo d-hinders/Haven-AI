@@ -69,7 +69,7 @@
  * removed Details from the footer and added the link-focused card capture, so
  * the total remains nine.
  *
- *   Sidebar kebab popover   Profile · Settings · Log out          3/3  captured
+ *   Sidebar kebab popover   Settings · Log out                     2/2  captured
  *   AgentCard action row    Edit · Pause · Revoke                 3/8  captured  (as #1863 measured it)
  *
  * `AgentCard` NEVER renders all six card controls at once — `isOperational`,
@@ -114,13 +114,14 @@
  * ── Where the four synthetic states live, and why it matters ─────────────────
  *
  * In THIS FILE's own route override (`seedAgents` below), never in the shared
- * `mockHavenApi` fixture. Measured rather than assumed: **twelve other specs
+ * `mockHavenApi` fixture. Measured rather than assumed: **58 other specs
  * call `mockHavenApi`** — including `design-system.visual.spec.ts`, the
- * resting-state half of this same pixel gate — and **four of them navigate to
- * `/agents`** (`connect-agent`, `hosted-mcp`, `navigation.mobile`,
- * `mobile-nav-layering.mobile`). Adding a paused, revoked, delegation and
- * archived agent to the shared fixture changes the payload all twelve receive
- * and the rendered output of those four, none of which is about focus. The
+ * resting-state half of this same pixel gate — and **many of them navigate to
+ * `/agents` or an agent page** (among them `connect-agent`, `hosted-mcp`,
+ * `navigation.mobile`, `mobile-nav-layering.mobile`). Adding a paused,
+ * revoked, delegation and archived agent to the shared fixture changes the
+ * payload all of them receive and the rendered output of those, none of
+ * which is about focus. The
  * override is registered per test, AFTER `mockHavenApi`, so Playwright matches
  * it first, and it defers to the shared fixture for every other route via
  * `route.fallback()`.
@@ -577,9 +578,9 @@ async function openUserMenuByKeyboard(page: Page) {
   await expect(popover).toHaveCount(1)
   await expect(popover).toBeVisible()
 
-  const profile = popover.getByRole('menuitem', { name: 'Profile' })
+  const firstItem = popover.getByRole('menuitem', { name: 'Settings' })
   await expect(
-    profile,
+    firstItem,
     'Sidebar auto-focuses its first menu item on open (#1831) — that stopped being true',
   ).toBeFocused()
   return popover
@@ -833,14 +834,15 @@ test.describe('driven focus-state visual regression', () => {
     await seedAuthenticatedSession(page)
   })
 
-  // ── Sidebar kebab user menu — three current indicators ────────────────────
+  // ── Sidebar kebab user menu — two current indicators ──────────────────────
   //
   // Captured on `/design-system` rather than on `/agents`, so the sidebar's
   // pixel evidence stays on one route — the same route #1820's resting-state
   // sidebar capture uses. The popover contains no nav item, so the route's
   // active-nav highlight cannot leak into these baselines either way.
+  // #4358: the Profile item is gone with /profile — Settings and Log out
+  // remain, and the popover's baselines move with the shorter menu.
   const menuItems = [
-    { slug: 'profile', name: 'Profile', tone: 'brand' },
     { slug: 'settings', name: 'Settings', tone: 'brand' },
     { slug: 'logout', name: 'Log out', tone: 'danger' },
   ] as const
@@ -852,9 +854,10 @@ test.describe('driven focus-state visual regression', () => {
 
       const target = popover.getByRole('menuitem', { name: item.name })
       await expect(target).toHaveCount(1)
-      // Profile already holds focus from the open; the other two are tabbed to
-      // from wherever the previous step left off, which is the real traversal.
-      if (item.slug !== 'profile') {
+      // Settings already holds focus from the open (it is the popover's
+      // first — now only non-danger — item); Log out is tabbed to from
+      // wherever the previous step left off, which is the real traversal.
+      if (item.slug !== 'settings') {
         await tabToTarget(page, target, `Sidebar user menu · ${item.name}`)
       }
       await expectFocusedAndIndicated(page, target, `Sidebar user menu · ${item.name}`)
@@ -1085,4 +1088,40 @@ test.describe('driven focus-state visual regression', () => {
       })
     })
   }
+
+  /**
+   * #4495: the paging row's focus ring is INSET, so it paints inside the row's
+   * own box — and the row is the card's footer, so the capture is the card, not
+   * a padded crop around the button: the point is that the ring follows the
+   * card's bottom corners (`rounded-b-[10px]`) and is not clipped by the card's
+   * `overflow-hidden`. A padded button crop would show the ring but not the
+   * clipping it exists to prove.
+   */
+  test('list controls — paging row focus indicator', async ({ page }) => {
+    await gotoDesktop(page, '/design-system')
+    const section = page.getByTestId('ds-list-controls-paging')
+    await section.scrollIntoViewIfNeeded()
+    const target = section.getByRole('button', { name: 'Show 24 more' })
+    await expect(target).toHaveCount(1)
+    // The specimen has no text input to start from, so the documented
+    // button drive applies: script-focus, then one Shift+Tab / Tab pair to put
+    // the document back in keyboard modality on the same control.
+    await target.focus()
+    await page.keyboard.press('Shift+Tab')
+    await page.keyboard.press('Tab')
+    await expectFocusedAndIndicated(page, target, 'List controls · paging')
+    const card = section.locator('.shadow-card')
+    await expect(card).toHaveCount(1)
+    const box = await card.boundingBox()
+    if (!box) throw new Error('List controls · paging: the card has no box')
+    await expect(page).toHaveScreenshot('focus-list-controls-paging-desktop.png', {
+      ...SNAPSHOT_OPTIONS,
+      clip: {
+        x: box.x - RING_CLIP_PADDING,
+        y: box.y - RING_CLIP_PADDING,
+        width: box.width + 2 * RING_CLIP_PADDING,
+        height: box.height + 2 * RING_CLIP_PADDING,
+      },
+    })
+  })
 })

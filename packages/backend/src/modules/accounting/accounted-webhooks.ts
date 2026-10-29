@@ -341,6 +341,35 @@ function extractDocumentId(object: Record<string, unknown> | null): string | nul
   return typeof candidate === 'string' && candidate.length > 0 ? candidate : null
 }
 
+// ── The endpoint-verification handshake (#3019 delta) ────────────────────────
+//
+// The provider will not dispatch a single event to an unverified endpoint. Its
+// verification delivery is a normal signed envelope whose `type` is
+// `webhook.verification` and whose `data.object.challenge` is a value the
+// receiver must echo back at the TOP LEVEL of the 200 body:
+//
+//   {"challenge": "<data.object.challenge>"}
+//
+// A receiver that answers a generic `{status:'ok'}` fails the handshake with
+// `challenge_missing`, the subscription stays `pending`/`paused`, and nothing
+// is ever delivered — which is exactly what happened before this fix. The
+// echo is read here (not in the route) so the route file carries no
+// hand-rolled type ladder for the request-schemas gauge to count.
+
+/**
+ * The `data.object.challenge` a `webhook.verification` delivery carries, or
+ * null when it carries none (or carries something that is not a non-empty
+ * string). A null answer is NOT an error: the provider's own
+ * `challenge_missing` verdict is the correct outcome, and the route still
+ * answers 200 — a 400 would be retried for ~87 h over a delivery we will
+ * never accept.
+ */
+export function readAccountedVerificationChallenge(object: Record<string, unknown> | null): string | null {
+  if (!object) return null
+  const challenge = object.challenge
+  return typeof challenge === 'string' && challenge.length > 0 ? challenge : null
+}
+
 // ── The delivery context the route reads (#3019 item 3) ──────────────────────
 //
 // Header coercion and envelope interpretation live HERE, not in the route

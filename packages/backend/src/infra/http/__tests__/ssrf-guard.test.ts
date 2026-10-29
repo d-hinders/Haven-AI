@@ -395,6 +395,34 @@ describe('safeGetBinary (#4309)', () => {
     expect(privateSpace).toMatchObject({ ok: false, reason: 'address_not_public' })
     expect(transport).not.toHaveBeenCalled()
   })
+
+  // Reviewer cell that survived on #4317: `binary` dropped on an
+  // address-fallback attempt. The fallback attempt must carry the same
+  // request shape as the first one — a utf8 body there is corruption on the
+  // accountant's desk, exactly what #4309 exists to stop.
+  it('keeps the binary shape on an address-fallback attempt (#4317 reviewer cell)', async () => {
+    const bytes = Buffer.from([0x25, 0x50, 0x44, 0x46, 0xff, 0xfe, 0x00, 0x01]) // not valid utf8
+    const calls: PinnedRequest[] = []
+    // Behaves like the real transport: bodyBytes only when the request asked
+    // for binary; otherwise the lossy utf8 decode.
+    const transport: PinnedTransport = async (req) => {
+      calls.push(req)
+      if (req.address === '2606:2800:220:1:248:1893:25c8:1946') {
+        return { ok: false, reason: 'connect_error', detail: 'ENETUNREACH' }
+      }
+      return req.binary === true
+        ? { status: 200, location: null, body: '', bodyBytes: bytes, headers: {} }
+        : { status: 200, location: null, body: bytes.toString('utf8'), headers: {} }
+    }
+    const resolver = async (): Promise<ResolvedAddress[]> => [
+      { address: '2606:2800:220:1:248:1893:25c8:1946', family: 6 },
+      { address: '93.184.216.34', family: 4 },
+    ]
+    const result = await safeGetBinary('https://dual.example/invoice.pdf', { resolver, transport })
+    expect(calls.map((c) => c.address)).toEqual(['2606:2800:220:1:248:1893:25c8:1946', '93.184.216.34'])
+    expect(result).toMatchObject({ ok: true, status: 200 })
+    expect((result as { body: Buffer }).body.equals(bytes)).toBe(true)
+  })
 })
 
 describe('safePostJson (#1713)', () => {

@@ -270,7 +270,7 @@ export default function AgentToolCallsTab({
           />
         </div>
       ) : (
-        <Card hover={false} className="mt-3">
+        <Card hover={false} className="mt-3 overflow-hidden">
           {loading ? (
             <div
               className="divide-y divide-[var(--v2-border)]"
@@ -327,18 +327,17 @@ export default function AgentToolCallsTab({
               ))}
             </div>
           )}
+          {!loading && !error && (
+            <ListShowMore
+              loaded={items.length}
+              total={total}
+              pageSize={AGENT_TOOL_CALL_PAGE_SIZE}
+              hasMore={hasMore}
+              loading={loadingMore}
+              onShowMore={() => void loadMore()}
+            />
+          )}
         </Card>
-      )}
-
-      {!showNoMatch && !loading && !error && (
-        <ListShowMore
-          loaded={items.length}
-          total={total}
-          pageSize={AGENT_TOOL_CALL_PAGE_SIZE}
-          hasMore={hasMore}
-          loading={loadingMore}
-          onShowMore={() => void loadMore()}
-        />
       )}
     </div>
   )
@@ -397,7 +396,7 @@ function ToolCallRow({
               {' · '}
               <button
                 type="button"
-                className="text-xs font-medium text-[var(--v2-ink)] underline underline-offset-4 hover:text-[var(--v2-ink-strong)]"
+                className="text-xs font-medium text-[var(--v2-ink)] underline underline-offset-4 hover:decoration-2"
                 onClick={() => onOpenPayment(item.payment_id as string)}
                 data-testid="tool-call-payment-link"
               >

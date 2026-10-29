@@ -95,13 +95,16 @@ export async function buildTaskBudgetChild(
   return { ...built, delegateAccountAddress }
 }
 
-/** Reasons a task budget cannot authorize a payment (#3329 §3 refusal table). */
-export type TaskBudgetPaymentRefusal =
-  | 'task_budget_not_found'
-  | 'task_budget_not_open'
-  | 'task_budget_token_mismatch'
-  | 'task_budget_recipient_mismatch'
-  | 'task_budget_parent_mismatch'
+/**
+ * Reasons a task budget cannot authorize a payment (#3329 §3 refusal table).
+ *
+ * #4468: the union lives in `@haven_ai/core` — the ONE artifact the hosted
+ * MCP's `normalizeError` also reads, so a member added here cannot reach an
+ * agent as a generic `API_ERROR` without a hosted test going red. Re-exported
+ * from this module so every existing importer keeps its path.
+ */
+import type { TaskBudgetPaymentRefusal } from '@haven_ai/core'
+export type { TaskBudgetPaymentRefusal }
 
 export interface TaskBudgetPaymentResolution {
   ok: boolean

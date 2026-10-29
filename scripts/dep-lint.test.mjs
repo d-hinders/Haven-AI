@@ -307,6 +307,44 @@ test('the live scan detects real violations and reports zero cycles', async () =
   )
 })
 
+test('module-to-module: a deep import into ANOTHER module fires; its barrel and own-module files do not (#4379)', async () => {
+  // Rule 6's first arm excludes modules/** from its `from` side, so before
+  // #4379 one module reaching into another module's private file was
+  // invisible. Three planted files prove the second arm through the FULL
+  // pipeline: a deep import into another module fires, the same import
+  // through that module's index.ts does not, and a module importing its OWN
+  // private file does not. normalize.ts is a zero-import leaf, so none of the
+  // three can introduce a cycle.
+  const modules = join(REPO_ROOT, 'packages', 'backend', 'src', 'modules')
+  const fixtures = {
+    deep: join(modules, 'fee', '__dep_lint_m2m_deep_fixture__.ts'),
+    barrel: join(modules, 'fee', '__dep_lint_m2m_barrel_fixture__.ts'),
+    own: join(modules, 'transactions', '__dep_lint_m2m_own_fixture__.ts'),
+  }
+  writeFileSync(fixtures.deep, "import { toCanonicalAddress } from '../transactions/normalize.js'\nexport const _fixture = toCanonicalAddress\n")
+  writeFileSync(fixtures.barrel, "import { toCanonicalAddress } from '../transactions/index.js'\nexport const _fixture = toCanonicalAddress\n")
+  writeFileSync(fixtures.own, "import { toCanonicalAddress } from './normalize.js'\nexport const _fixture = toCanonicalAddress\n")
+
+  let details
+  try {
+    ;({ details } = await scanAll())
+  } finally {
+    for (const f of Object.values(fixtures)) rmSync(f, { force: true })
+  }
+
+  const rel = (abs) => abs.slice(REPO_ROOT.length + 1).split('\\').join('/')
+  const firing = (file) =>
+    details.filter((d) => d.file === rel(file) && d.rule === 'no-deep-module-to-module-import')
+
+  assert.deepEqual(
+    firing(fixtures.deep).map((d) => d.to),
+    ['packages/backend/src/modules/transactions/normalize.ts'],
+    'a module importing another module\'s private file must trip no-deep-module-to-module-import',
+  )
+  assert.deepEqual(firing(fixtures.barrel), [], 'an import through the target module\'s index.ts is allowed')
+  assert.deepEqual(firing(fixtures.own), [], 'a module importing its own private file is allowed')
+})
+
 test('the scan actually reaches packages/core (else core-stays-pure is vacuous)', async () => {
   const { scannedFiles } = await scanAll()
   assert.ok(

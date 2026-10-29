@@ -47,7 +47,10 @@ Stop and report on the **first failed step** rather than pressing on (a failed m
 ## Phase 4 — Report
 
 10. Copy `docs/bug-reports/_run-report-template.md` to a unique UTC/run-id path
-    such as `docs/bug-reports/2026-07-01T143022Z-manual-qa-dev-claude-code.md`.
+    such as `docs/bug-reports/2026-07-01T143022Z-manual-qa-dev-claude-code.md`,
+    and set `status: record` in the copy's front-matter (the template itself
+    stays `current`; a dated report is a record the staleness audit never
+    ranks, #4459).
 11. Fill in run metadata, exact command/exit, per-goal pass/fail/skip, public
     evidence, artifacts, cleanup, secret review, versions, and concrete
     friction/bugs. A required skip makes the result partial/blocked.

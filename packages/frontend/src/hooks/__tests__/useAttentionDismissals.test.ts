@@ -10,6 +10,7 @@ vi.mock('@/lib/api', () => ({
 
 import { api } from '@/lib/api'
 import {
+  dismissalBodyFor,
   LEGACY_DISMISS_KEY,
   ruleItemIdForDismissal,
   useAttentionDismissals,
@@ -28,7 +29,7 @@ function account(overrides: {
   return overrides
 }
 
-describe('useAttentionDismissals (#3813)', () => {
+describe('useAttentionDismissals (#3813, #4324)', () => {
   beforeEach(() => {
     window.localStorage.clear()
     mockApiGet.mockReset()
@@ -48,10 +49,10 @@ describe('useAttentionDismissals (#3813)', () => {
     const { result } = renderHook(() => useAttentionDismissals())
 
     await waitFor(() => {
-      expect(result.current.dismissedIds.has('no-backup:safe-1')).toBe(true)
-      expect(result.current.dismissedIds.has('needs-setup:agent-1')).toBe(true)
+      expect(result.current.acknowledgements.has('no-backup:safe-1')).toBe(true)
+      expect(result.current.acknowledgements.has('needs-setup:agent-1')).toBe(true)
     })
-    expect(result.current.dismissedIds.size).toBe(2)
+    expect(result.current.acknowledgements.size).toBe(2)
   })
 
   it('a failed read hides nothing — the dismissed set stays empty', async () => {
@@ -60,7 +61,7 @@ describe('useAttentionDismissals (#3813)', () => {
     const { result } = renderHook(() => useAttentionDismissals())
 
     await waitFor(() => expect(mockApiGet).toHaveBeenCalledOnce())
-    expect(result.current.dismissedIds.size).toBe(0)
+    expect(result.current.acknowledgements.size).toBe(0)
   })
 
   it('a malformed body hides nothing and does not throw — the read resolves to a body without dismissals (#4288)', async () => {
@@ -76,17 +77,17 @@ describe('useAttentionDismissals (#3813)', () => {
     await waitFor(() => expect(mockApiGet).toHaveBeenCalledOnce())
     // The hook RENDERS — the crash used to take the whole page down — and
     // hides nothing: a body the hook cannot read dismisses nothing.
-    expect(result.current.dismissedIds.size).toBe(0)
+    expect(result.current.acknowledgements.size).toBe(0)
   })
 
   it('dismiss writes through for the backup item and hides it optimistically', async () => {
     const { result } = renderHook(() => useAttentionDismissals())
 
     act(() => {
-      result.current.dismiss({ kind: 'no-backup', accountId: 'safe-1' })
+      result.current.dismiss({ id: 'no-backup:safe-1', kind: 'no-backup', accountId: 'safe-1' })
     })
 
-    expect(result.current.dismissedIds.has('no-backup:safe-1')).toBe(true)
+    expect(result.current.acknowledgements.has('no-backup:safe-1')).toBe(true)
     await waitFor(() =>
       expect(mockApiPost).toHaveBeenCalledWith('/user/attention-dismissals', {
         item_kind: 'no-backup',
@@ -99,10 +100,10 @@ describe('useAttentionDismissals (#3813)', () => {
     const { result } = renderHook(() => useAttentionDismissals())
 
     act(() => {
-      result.current.dismiss({ kind: 'needs-setup', agentId: 'agent-1' })
+      result.current.dismiss({ id: 'needs-setup:agent-1', kind: 'needs-setup', agentId: 'agent-1' })
     })
 
-    expect(result.current.dismissedIds.has('needs-setup:agent-1')).toBe(true)
+    expect(result.current.acknowledgements.has('needs-setup:agent-1')).toBe(true)
     await waitFor(() =>
       expect(mockApiPost).toHaveBeenCalledWith('/user/attention-dismissals', {
         item_kind: 'needs-setup',
@@ -117,35 +118,164 @@ describe('useAttentionDismissals (#3813)', () => {
     const { result } = renderHook(() => useAttentionDismissals())
 
     act(() => {
-      result.current.dismiss({ kind: 'no-backup', accountId: 'safe-1' })
+      result.current.dismiss({ id: 'no-backup:safe-1', kind: 'no-backup', accountId: 'safe-1' })
     })
-    expect(result.current.dismissedIds.has('no-backup:safe-1')).toBe(true)
+    expect(result.current.acknowledgements.has('no-backup:safe-1')).toBe(true)
 
-    await waitFor(() => expect(result.current.dismissedIds.has('no-backup:safe-1')).toBe(false))
+    await waitFor(() => expect(result.current.acknowledgements.has('no-backup:safe-1')).toBe(false))
   })
 
-  it('ignores a dismiss for a non-dismissible kind — those have no persistence', () => {
+  it('ignores a dismiss for a non-dismissible kind — low balance and zero USDC have no persistence', () => {
     const { result } = renderHook(() => useAttentionDismissals())
 
     act(() => {
-      result.current.dismiss({ kind: 'low-balance', accountId: 'safe-1' })
-      result.current.dismiss({ kind: 'budget-reached', agentId: 'agent-1' })
-      result.current.dismiss({ kind: 'payments-failed' })
+      result.current.dismiss({ id: 'low-balance:safe-1', kind: 'low-balance', accountId: 'safe-1' })
+      result.current.dismiss({ id: 'zero-usdc:safe-1', kind: 'zero-usdc', accountId: 'safe-1' })
     })
 
     expect(mockApiPost).not.toHaveBeenCalled()
-    expect(result.current.dismissedIds.size).toBe(0)
+    expect(result.current.acknowledgements.size).toBe(0)
   })
 
   it('a dismissible-kind item without its id is ignored, not POSTed', () => {
     const { result } = renderHook(() => useAttentionDismissals())
 
     act(() => {
-      result.current.dismiss({ kind: 'no-backup' })
-      result.current.dismiss({ kind: 'needs-setup' })
+      result.current.dismiss({ id: 'no-backup:', kind: 'no-backup' })
+      result.current.dismiss({ id: 'needs-setup:', kind: 'needs-setup' })
+      result.current.dismiss({ id: 'budget-reached:', kind: 'budget-reached' })
+      // budget-usage needs the firing budget's period end too.
+      result.current.dismiss({ id: 'budget-usage:agent-1', kind: 'budget-usage', agentId: 'agent-1' })
+      // An agent-less payments-failed item is only ever the unattributed one.
+      result.current.dismiss({ id: 'payments-failed:agent-1', kind: 'payments-failed' })
     })
 
     expect(mockApiPost).not.toHaveBeenCalled()
+  })
+
+  // ── #4324: acknowledgements ────────────────────────────────────────────────
+
+  it('#4324: acknowledging writes the per-kind body for every new kind', async () => {
+    const { result } = renderHook(() => useAttentionDismissals())
+
+    act(() => {
+      result.current.dismiss({ id: 'budget-reached:agent-1', kind: 'budget-reached', agentId: 'agent-1' })
+      result.current.dismiss({ id: 'budget-scope:agent-1', kind: 'budget-scope', agentId: 'agent-1' })
+      result.current.dismiss({
+        id: 'budget-usage:agent-1',
+        kind: 'budget-usage',
+        agentId: 'agent-1',
+        periodEnd: '2026-11-01T00:00:00.000Z',
+      })
+      result.current.dismiss({ id: 'payments-failed:agent-1', kind: 'payments-failed', agentId: 'agent-1' })
+      result.current.dismiss({ id: 'payments-failed:unattributed', kind: 'payments-failed' })
+      result.current.dismiss({ id: 'haven-paused', kind: 'haven-paused' })
+    })
+
+    await waitFor(() => expect(mockApiPost).toHaveBeenCalledTimes(6))
+    expect(mockApiPost.mock.calls.map(([, body]) => body)).toEqual([
+      { item_kind: 'budget-reached', agent_id: 'agent-1' },
+      { item_kind: 'budget-scope', agent_id: 'agent-1' },
+      { item_kind: 'budget-usage', agent_id: 'agent-1', period_end: '2026-11-01T00:00:00.000Z' },
+      { item_kind: 'payments-failed', agent_id: 'agent-1' },
+      { item_kind: 'payments-failed' },
+      { item_kind: 'haven-paused' },
+    ])
+    expect(result.current.acknowledgements.get('budget-usage:agent-1')?.acknowledgedPeriodEnd).toBe(
+      '2026-11-01T00:00:00.000Z',
+    )
+  })
+
+  it('#4324: the server row replaces the optimistic acknowledgement time', async () => {
+    mockApiPost.mockResolvedValueOnce({
+      id: 'd9',
+      item_kind: 'budget-reached',
+      account_id: null,
+      agent_id: 'agent-1',
+      created_at: '2026-10-20T00:00:00.000Z',
+      acknowledged_at: '2026-10-23T09:00:00.000Z',
+      acknowledged_period_end: null,
+    })
+    const { result } = renderHook(() => useAttentionDismissals())
+
+    act(() => {
+      result.current.dismiss({ id: 'budget-reached:agent-1', kind: 'budget-reached', agentId: 'agent-1' })
+    })
+
+    await waitFor(() =>
+      expect(result.current.acknowledgements.get('budget-reached:agent-1')?.acknowledgedAt).toBe(
+        '2026-10-23T09:00:00.000Z',
+      ),
+    )
+  })
+
+  it('#4324: a failed re-acknowledgement restores the older acknowledgement, not nothing', async () => {
+    mockApiGet.mockResolvedValue({
+      dismissals: [
+        {
+          id: 'd1',
+          item_kind: 'budget-reached',
+          account_id: null,
+          agent_id: 'agent-1',
+          created_at: '2026-10-01T00:00:00.000Z',
+          acknowledged_at: '2026-10-01T00:00:00.000Z',
+          acknowledged_period_end: null,
+        },
+      ],
+    })
+    mockApiPost.mockRejectedValueOnce(new Error('offline'))
+    const { result } = renderHook(() => useAttentionDismissals())
+    await waitFor(() => expect(result.current.acknowledgements.has('budget-reached:agent-1')).toBe(true))
+
+    act(() => {
+      result.current.dismiss({ id: 'budget-reached:agent-1', kind: 'budget-reached', agentId: 'agent-1' })
+    })
+
+    await waitFor(() =>
+      expect(result.current.acknowledgements.get('budget-reached:agent-1')?.acknowledgedAt).toBe(
+        '2026-10-01T00:00:00.000Z',
+      ),
+    )
+  })
+
+  it('#4324: loads acknowledged_at and acknowledged_period_end; an old row without acknowledged_at falls back to created_at', async () => {
+    mockApiGet.mockResolvedValue({
+      dismissals: [
+        {
+          id: 'd1',
+          item_kind: 'budget-usage',
+          account_id: null,
+          agent_id: 'agent-1',
+          created_at: '2026-10-01T00:00:00.000Z',
+          acknowledged_at: '2026-10-20T00:00:00.000Z',
+          acknowledged_period_end: '2026-11-01T00:00:00.000Z',
+        },
+        { id: 'd2', item_kind: 'no-backup', account_id: 'safe-1', agent_id: null, created_at: '2026-10-09T00:00:00.000Z' },
+      ],
+    })
+    const { result } = renderHook(() => useAttentionDismissals())
+    await waitFor(() => expect(result.current.acknowledgements.size).toBe(2))
+    expect(result.current.acknowledgements.get('budget-usage:agent-1')).toEqual({
+      acknowledgedAt: '2026-10-20T00:00:00.000Z',
+      acknowledgedPeriodEnd: '2026-11-01T00:00:00.000Z',
+    })
+    expect(result.current.acknowledgements.get('no-backup:safe-1')).toEqual({
+      acknowledgedAt: '2026-10-09T00:00:00.000Z',
+      acknowledgedPeriodEnd: null,
+    })
+  })
+
+  it('#4324 S1: a row of an unknown kind is ignored — it never hides an agent\'s Needs setup item', async () => {
+    mockApiGet.mockResolvedValue({
+      dismissals: [
+        { id: 'd1', item_kind: 'some-future-kind', account_id: null, agent_id: 'agent-1', created_at: '2026-10-09T00:00:00.000Z' },
+      ],
+    })
+    const { result } = renderHook(() => useAttentionDismissals())
+    await waitFor(() => expect(mockApiGet).toHaveBeenCalledOnce())
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(result.current.acknowledgements.has('needs-setup:agent-1')).toBe(false)
+    expect(result.current.acknowledgements.size).toBe(0)
   })
 
   // ── The legacy key migration (owner decision 4, #3813) ────────────────────
@@ -184,9 +314,9 @@ describe('useAttentionDismissals (#3813)', () => {
       // The migrated account is hidden this session, without waiting for
       // the next server read; the accounts that were not raising the item
       // are not.
-      expect(result.current.dismissedIds.has('no-backup:safe-1')).toBe(true)
-      expect(result.current.dismissedIds.has('no-backup:safe-norec')).toBe(false)
-      expect(result.current.dismissedIds.has('no-backup:safe-testnet')).toBe(false)
+      expect(result.current.acknowledgements.has('no-backup:safe-1')).toBe(true)
+      expect(result.current.acknowledgements.has('no-backup:safe-norec')).toBe(false)
+      expect(result.current.acknowledgements.has('no-backup:safe-testnet')).toBe(false)
     })
 
     it('an account funded AFTER the migration still raises its own item', async () => {
@@ -206,10 +336,10 @@ describe('useAttentionDismissals (#3813)', () => {
 
       await waitFor(() => expect(mockApiPost).toHaveBeenCalledOnce())
 
-      expect(result.current.dismissedIds.has('no-backup:safe-1')).toBe(true)
+      expect(result.current.acknowledgements.has('no-backup:safe-1')).toBe(true)
       // The later-funded account is NOT dismissed — when it becomes funded,
       // `computeAttentionItems` raises its own backup item.
-      expect(result.current.dismissedIds.has('no-backup:safe-later')).toBe(false)
+      expect(result.current.acknowledgements.has('no-backup:safe-later')).toBe(false)
     })
 
     it('a failed write leaves the key for the next load to retry', async () => {
@@ -246,5 +376,30 @@ describe('useAttentionDismissals (#3813)', () => {
     expect(
       ruleItemIdForDismissal({ item_kind: 'needs-setup', account_id: null, agent_id: 'g' }),
     ).toBe('needs-setup:g')
+    // #4324: per kind, for every new kind.
+    for (const kind of ['budget-reached', 'budget-usage', 'budget-scope', 'payments-failed']) {
+      expect(ruleItemIdForDismissal({ item_kind: kind, account_id: null, agent_id: 'g' })).toBe(`${kind}:g`)
+    }
+    expect(ruleItemIdForDismissal({ item_kind: 'payments-failed', account_id: null, agent_id: null })).toBe(
+      'payments-failed:unattributed',
+    )
+    expect(ruleItemIdForDismissal({ item_kind: 'haven-paused', account_id: null, agent_id: null })).toBe('haven-paused')
+    // An unknown kind, or a known kind missing its id, maps to nothing.
+    expect(ruleItemIdForDismissal({ item_kind: 'low-balance', account_id: 'a', agent_id: null })).toBeNull()
+    expect(ruleItemIdForDismissal({ item_kind: 'some-future-kind', account_id: null, agent_id: 'g' })).toBeNull()
+    expect(ruleItemIdForDismissal({ item_kind: 'budget-reached', account_id: null, agent_id: null })).toBeNull()
+    expect(ruleItemIdForDismissal({ item_kind: 'no-backup', account_id: null, agent_id: null })).toBeNull()
+  })
+})
+
+describe('dismissalBodyFor — budget ended (#4353)', () => {
+  it('stores "Budget ended" in the budget item slot, and the row maps back to the same id', () => {
+    const body = dismissalBodyFor({ id: 'budget-reached:a1', kind: 'budget-ended', agentId: 'a1' })
+    expect(body).toEqual({ item_kind: 'budget-reached', agent_id: 'a1' })
+    expect(ruleItemIdForDismissal({ item_kind: 'budget-reached', agent_id: 'a1', account_id: null })).toBe('budget-reached:a1')
+  })
+
+  it('"Budget ending" has no stored form', () => {
+    expect(dismissalBodyFor({ id: 'budget-ending:a1', kind: 'budget-ending', agentId: 'a1' })).toBeNull()
   })
 })

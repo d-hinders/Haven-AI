@@ -37,6 +37,10 @@
  *   (Settings' `SignersSection` lists signers without add/remove flows).
  *   With one signer the tab carries the warning dot and the card its
  *   warning; Account details (address, network, created date) sit below.
+ *   #4474 (mockup v9): both sections are headed ABOVE their card by the
+ *   shared `SectionHeading` — "Who can approve" carries the "All signers in
+ *   Settings" link on its heading line, and "Account details" is a divided
+ *   label/value list (`DetailList`) rather than a two-column grid.
  *
  * ## Removed with this slice (#4097)
  *
@@ -91,6 +95,8 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/DropdownMenu'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { SectionHeading } from '@/components/ui/SectionHeading'
+import { DetailList, type DetailListItem } from '@/components/ui/DetailList'
 import { Tabs } from '@/components/ui/Tabs'
 import { BackLink } from '@haven_ai/ui/BackLink'
 import { EmptyState } from '@/components/ui/EmptyState'
@@ -141,13 +147,20 @@ export default function AccountDetailClient() {
   const { data: overview, loading: overviewLoading, error: overviewError, refetch: refetchOverview } =
     useDashboardOverview()
   const { data: budgetRemaining, loading: budgetRemainingLoading } = useBudgetRemaining()
-  const { dismissedIds: serverDismissedIds } = useAttentionDismissals({ accounts: overview?.accounts })
+  const { acknowledgements } = useAttentionDismissals({ accounts: overview?.accounts })
 
   // Find this account from user's list
   const account = user?.accounts?.find((s) => s.id === accountId)
   const accountAddress = account?.account_address ?? null
   const chainId = account?.chain_id ?? DEFAULT_CHAIN_ID
   const accountExplorerHref = accountAddress ? getExplorerUrlOrNull(chainId, 'address', accountAddress) : null
+  // #4474: the Account details list names the network the way the page
+  // header's "Test network" badge does — the chain name, plus " (test
+  // network)" on a testnet. The repetition is accepted: the badge is page
+  // state, the row is the account's own record. An unresolved chain keeps
+  // today's `Chain {id}`.
+  const chainName = resolveChainOrNull(chainId)?.name ?? `Chain ${chainId}`
+  const networkLabel = isTestnetChain(chainId) ? `${chainName} (test network)` : chainName
 
   const accountNamesByAddress = new Map<string, string>()
   for (const acct of user?.accounts ?? []) {
@@ -202,7 +215,7 @@ export default function AccountDetailClient() {
           overview,
           budgetRemaining: budgetRemaining ?? null,
           accountNames,
-          dismissedIds: new Set(serverDismissedIds),
+          acknowledgements,
         })
       : []
 
@@ -752,58 +765,70 @@ export default function AccountDetailClient() {
           set, plus the account's own details (#4097). */}
       {activeTab === 'security' ? (
         <div className="space-y-6">
-          <div>
-            <h2 className="text-base font-semibold text-[var(--v2-ink)]">Who can approve</h2>
-            <p className="mt-1 max-w-2xl text-sm leading-relaxed text-[var(--v2-ink-2)]">
-              The ways this account can be approved. Keep at least two, so a lost device never
-              means a lost account.
-            </p>
-          </div>
-          {/* #1089: backup & recovery is an account capability, not an agent
-              one — it works from the moment the account exists, with no agent
-              required. Every flow the card owns (add a backup passkey, add a
-              wallet, remove a signer, "Lost a device?") is reachable here and
-              nowhere else; Settings' SignersSection lists without acting. */}
-          <AccountSignersCard
-            accountAddress={account.account_address}
-            chainId={chainId}
-            userEmail={user?.email ?? ''}
-          />
+          {/* #4474 (mockup v9): the section heading sits ABOVE its card per
+              the detail-page section rule, and carries the link to the fuller
+              surface on its own line. The intro sentence and the in-card
+              Settings row are gone — the heading and the rows say it. */}
+          <section>
+            <SectionHeading
+              title="Who can approve"
+              action={
+                <Link
+                  href="/settings?tab=security#signers"
+                  className="rounded-sm text-sm font-medium text-[var(--v2-brand)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
+                >
+                  All signers in Settings
+                </Link>
+              }
+            />
+            {/* #1089: backup & recovery is an account capability, not an agent
+                one — it works from the moment the account exists, with no agent
+                required. Every flow the card owns (add a backup passkey, add a
+                wallet, remove a signer, "Lost a device?") is reachable here and
+                nowhere else; Settings' SignersSection lists without acting. */}
+            <AccountSignersCard
+              accountAddress={account.account_address}
+              chainId={chainId}
+              userEmail={user?.email ?? ''}
+            />
+          </section>
 
-          {/* Account details */}
-          <Card hover={false} className="p-5 sm:p-6">
-            <h2 className="mb-5 text-base font-semibold text-[var(--v2-ink)]">Account details</h2>
-            <div className="grid gap-6 sm:grid-cols-2">
-              <div>
-                <p className="text-xs text-[var(--v2-ink-3)] mb-1">Haven wallet address</p>
-                <div className="flex items-center gap-3">
-                  {accountAddress ? (
-                    <Tooltip label={accountAddress} mono>
-                      <span className="text-sm font-mono text-[var(--v2-ink)]">
-                        {truncate(accountAddress)}
-                      </span>
-                    </Tooltip>
-                  ) : (
-                    <span className="text-sm font-mono text-[var(--v2-ink)]">—</span>
-                  )}
-                  {accountAddress && <CopyButton value={accountAddress} label="address" />}
-                  {accountExplorerHref && (
-                    <ExternalDetailsLink href={accountExplorerHref} label="Open wallet address externally" />
-                  )}
-                </div>
-              </div>
-              <div>
-                <p className="text-xs text-[var(--v2-ink-3)] mb-1">Network</p>
-                <p className="text-sm text-[var(--v2-ink)]">
-                  {resolveChainOrNull(chainId)?.name ?? `Chain ${chainId}`}
-                </p>
-              </div>
-              <div>
-                <p className="text-xs text-[var(--v2-ink-3)] mb-1">Created</p>
-                <p className="text-sm text-[var(--v2-ink)]">{formatLongDate(account.created_at)}</p>
-              </div>
-            </div>
-          </Card>
+          {/* Account details (#4474): heading above the card, then the shared
+              divided label/value list — Address with its copy and explorer
+              actions at the row's end, Network, Created. */}
+          <section>
+            <SectionHeading title="Account details" />
+            <Card hover={false} className="p-5 sm:p-6">
+              <DetailList
+                items={[
+                  {
+                    label: 'Address',
+                    value: accountAddress ? (
+                      <Tooltip label={accountAddress} mono>
+                        <span className="font-mono">{truncate(accountAddress)}</span>
+                      </Tooltip>
+                    ) : (
+                      <span className="font-mono">—</span>
+                    ),
+                    actions:
+                      accountAddress || accountExplorerHref ? (
+                        <>
+                          {accountAddress && <CopyButton value={accountAddress} label="address" />}
+                          {accountExplorerHref && (
+                            <ExternalDetailsLink
+                              href={accountExplorerHref}
+                              label="Open wallet address externally"
+                            />
+                          )}
+                        </>
+                      ) : undefined,
+                  },
+                  { label: 'Network', value: networkLabel },
+                  { label: 'Created', value: formatLongDate(account.created_at) },
+                ]}
+              />
+            </Card>
+          </section>
         </div>
       ) : null}
 

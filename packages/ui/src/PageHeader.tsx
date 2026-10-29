@@ -63,7 +63,13 @@ export function PageHeader({
   }`
   const row = (
     <>
-      <div className="min-w-0">
+      {/* `min-w-min`, not `min-w-0` (#3963): the column may shrink, but never
+          below its own longest word. With `min-w-0` a fat actions row could
+          flex the title column under the title's own text width — at 640 the
+          Analytics header left it 59px for a 124px word, and the subtitle
+          wrapped one word per line. The floor makes the SHRINK land on the
+          actions row instead, whose own wrap then absorbs it. */}
+      <div className="min-w-min">
         {eyebrow && (
           <p className="v2-text-meta text-[var(--v2-ink-3)] uppercase tracking-wider mb-1">{eyebrow}</p>
         )}
@@ -81,7 +87,15 @@ export function PageHeader({
         {meta && <p className="mt-2 v2-text-meta text-[var(--v2-ink-3)] max-w-2xl">{meta}</p>}
       </div>
       {actions && (
-        <div className="flex flex-wrap items-center gap-2 flex-shrink-0">{actions}</div>
+        // No `flex-shrink-0` (#3963): a rigid max-content row and a
+        // shrinkable title column meant the title ALWAYS lost — from `sm` up
+        // to where the row fit, the title column was squeezed to the
+        // remainder (59px at 640 on Linux metrics). The row already wraps;
+        // allowed to shrink, it drops its own children to a second line
+        // while it fits (`min-content` is its widest child), and keeps
+        // max-content wherever it did fit. Below `sm` the header is a
+        // column, so shrink never applies there.
+        <div className="flex flex-wrap items-center gap-2">{actions}</div>
       )}
     </>
   )

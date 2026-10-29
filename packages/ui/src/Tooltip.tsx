@@ -105,7 +105,7 @@ const INTERACTIVE_ANCESTOR = `${FOCUSABLE}, [role="link"], [role="button"], [rol
  * `WalletPopover` clamps vertically against it, and there is one place to
  * change if the gutter ever moves.
  */
-export const VIEWPORT_MARGIN = 8 // design-system-exempt: a shared px constant, not a primitive — nothing to showcase
+export const VIEWPORT_MARGIN = 8
 
 /**
  * How long a touch suppresses the mouse path, in ms.

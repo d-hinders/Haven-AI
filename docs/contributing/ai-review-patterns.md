@@ -9,11 +9,13 @@ covers:
   - packages/frontend/src/lib/signer.ts
   - packages/frontend/src/hooks/useAccountOperationGate.ts
   - packages/frontend/src/app/globals.css
+  - packages/frontend/tailwind.config.js
+  - packages/ui/tailwind.preset.js
   - packages/frontend/src/components/OnchainActionGate.tsx
   - packages/frontend/src/components/NetworkGate.tsx
   - packages/frontend/src/components/EditAgentModal.tsx
   - docs/contributing/session-retrospective-2026-09-06.md
-last-verified: "2026-09-07"
+last-verified: "2026-10-24"
 ---
 
 # AI Review Patterns
@@ -26,7 +28,7 @@ The patterns below are also the items checked by the **Captain Self-Check Prefli
 
 - Keep raw and formatted values separate. Raw amounts, ids, hashes, timestamps, and addresses should not be replaced with display strings.
 - Treat totals, counts, pagination, and dashboard summaries as derived contracts. If rows are merged, filtered, or deduped on the client, verify that counts still mean what the UI says they mean.
-- Do not render fallback activity rows with missing safe, wallet, chain, recipient, or source identifiers unless the empty value is intentional and explained in the UI.
+- Do not render fallback activity rows with missing account, wallet, chain, recipient, or source identifiers unless the empty value is intentional and explained in the UI.
 
 ## Status And State Transitions
 
@@ -68,7 +70,7 @@ The patterns below are also the items checked by the **Captain Self-Check Prefli
 
 - If the same movement, transaction row, status badge, contact row, or money summary appears in multiple places, prefer one shared component or utility.
 - **Pattern absorption (2nd occurrence, not the 12th).** When a diff writes the same markup shape a *second* time — a header band, badge, row, empty-state, inline `<svg>`, address slice — or re-creates something a `ui/`/`haven/` primitive already covers, extract it into a primitive and add a `/design-system` entry in that same PR. Catching the second occurrence is what prevents the debt clusters #859 cleaned retroactively; the new primitive trips the design-system coupling gate (#898) by design. Flag a diff that duplicates a shape instead of absorbing it — unless the author states the two uses will genuinely diverge. Absorption is not a **new pattern**: a composition with no shipped instance and no [`/design-system`](../product/design-system.md#patterns) entry needs its own earlier, owner-approved design-system slice (#4109), so flag a page that introduces one inline.
-- **A bare `var()` inside a Tailwind arbitrary value compiles to the wrong thing, silently.** Tailwind cannot infer what a variable holds, so `shadow-[var(--v2-shadow-card)]` takes the *colour* branch and emits `--tw-shadow: var(--tw-shadow-colored)` against a variable nothing sets — computed `box-shadow: none`. The same shape drops an opacity modifier it cannot re-compose (`ring-[var(--v2-brand)]/30`, `ring-current/30`). **Three instances, all found by looking at rendered output rather than at source:** #1708 (68 focus rings falling back to preflight blue), #1818 (the generalisation — the defect is the OUTPUT, not the arbitrary-value *shape*, so `currentColor` and an off-scale numeric modifier fail identically), #1945 (four elevation tokens, 67 call sites, every Card/Modal panel/popover flat). Flag the spelling on sight, and note what makes this class expensive: **it lints clean and reads correctly.** `design:lint` exists to catch a *bypassed* token, and here the token is referenced exactly as convention says. The fix in all three cases is to promote the token into `tailwind.config.js`'s theme and use the named utility (`ring-brand/80`, `shadow-card`), and the guard is a compiled-CSS test with a positive control — never a regex over class strings, which #1818 measured as too narrow the first time.
+- **A bare `var()` inside a Tailwind arbitrary value compiles to the wrong thing, silently.** Tailwind cannot infer what a variable holds, so `shadow-[var(--v2-shadow-card)]` takes the *colour* branch and emits `--tw-shadow: var(--tw-shadow-colored)` against a variable nothing sets — computed `box-shadow: none`. The same shape drops an opacity modifier it cannot re-compose (`ring-[var(--v2-brand)]/30`, `ring-current/30`). **Three instances, all found by looking at rendered output rather than at source:** #1708 (68 focus rings falling back to preflight blue), #1818 (the generalisation — the defect is the OUTPUT, not the arbitrary-value *shape*, so `currentColor` and an off-scale numeric modifier fail identically), #1945 (four elevation tokens, 67 call sites, every Card/Modal panel/popover flat). Flag the spelling on sight, and note what makes this class expensive: **it lints clean and reads correctly.** `design:lint` exists to catch a *bypassed* token, and here the token is referenced exactly as convention says. The fix in all three cases is to promote the token into the Tailwind theme and use the named utility (`ring-brand/80`, `shadow-card`). Since #3508 that theme is the shared preset `packages/ui/tailwind.preset.js`; `packages/frontend/tailwind.config.js` keeps only its content globs. The guard is a compiled-CSS test with a positive control — never a regex over class strings, which #1818 measured as too narrow the first time.
 - Keep dashboard, account detail, agent detail, transaction history, live delegation actions, and design-system examples aligned after changing shared presentation. Treat approval-queue examples as historical unless they are explicitly marked retired.
 - If a temporary frontend shim or preview backfill is added, label it clearly and avoid letting it redefine backend-owned totals or durable semantics.
 
@@ -77,7 +79,7 @@ The patterns below are also the items checked by the **Captain Self-Check Prefli
 - Treat generated Markdown, `.env` examples, SDK quickstarts, demo scripts, and agent skill bundles as product surfaces. They should be reviewed when payment capabilities, credential semantics, or SDK APIs change.
 - Credential handoffs should include the current payment paths the agent can use, such as direct payments, x402, and Haven machine-payment flows when supported.
 - Generated artifacts should explain declined-payment behavior — budget, recipient, and expiry are enforced on-chain before any money moves — and avoid implying the agent can spend beyond the user's rules or that a payment can be queued for later approval (#2063: no live rail queues; out-of-policy payments are declined during prepare).
-- Keep developer-facing details accurate without leaking stale primary-UX vocabulary. Prefer `Haven wallet`, `credential address`, `agent rules`, and `agent budget`; mention Safe/module details only when they are necessary for advanced integration clarity.
+- Keep developer-facing details accurate without leaking stale primary-UX vocabulary. Prefer `Haven wallet`, `credential address`, `agent rules`, and `agent budget`; mention smart-account or delegation details (the account contract, the caveat enforcers) only when they are necessary for advanced integration clarity. The Safe rail and its AllowanceModule are retired (#1440): no account onboards or pays on them, so Safe or module vocabulary describes no live payment path. Transaction history can still show retired-rail rows, read from Blockscout (#2669, `modules/transactions/aggregate.ts`).
 - Do not remove established env vars from generated files without a compatibility plan. Add clearer aliases alongside older names when external integrations may already rely on them.
 
 ## Numeric Formatters
@@ -157,8 +159,10 @@ The patterns below are also the items checked by the **Captain Self-Check Prefli
 
 - When using a separate `<OnchainActionNotice />`, render it **above** the action
   row and set `showNotice={false}` on `OnchainActionGate` so the gate does not
-  double-render it. Do not put the notice inside the `flex-1` action wrapper;
-  `EditAgentModal` is the canonical hoisted-notice pattern.
+  double-render it. Do not put the notice inside the `flex-1` action wrapper.
+  No product surface renders a separate notice today: `EditAgentModal`'s
+  hoisted notice, the layout this item used to point at, went with #2331, so
+  there is no in-tree copy to match.
 - `NetworkGate` is intentionally different: its mismatch hint and replacement
   network action render in place around the gated action. Do not force that
   replacement UI into the separate-notice pattern.
@@ -259,3 +263,28 @@ copied out of the very `--help` output the work existed to fix.
 - Add tests for changed non-happy states: loading, empty, error, proposed/submitted, approved-but-not-executed, expired, cancelled, and duplicate cases.
 - For money movement, test the selected account, selected chain, selected token, recipient, and signer context rather than only the happy path rendering.
 - If review feedback finds a bug that survived tests, add or update the smallest regression test that would have caught it.
+
+> **Re-verified 2026-10-24 (#4372 part G, at dev `b79b112ec`), a full re-read.**
+> Changed: *Inline Gate Placement* no longer names `EditAgentModal` as the
+> canonical hoisted notice (#2331 removed it; `git grep OnchainActionNotice --
+> packages/frontend/src` finds only `OnchainActionGate.tsx` and tests). The
+> Tailwind fix names the shared preset `packages/ui/tailwind.preset.js`
+> (#3508), where `boxShadow.card` and the `brand` colour now live. Two Safe
+> leftovers became account and smart-account wording (#1440). No rule was
+> added or weakened.
+> Re-checked without change: the *Captain Self-Check Preflight* heading in
+> `ai-agent-workflow.md` and the *Recurring traps* list in `reviewer.md`;
+> `useActiveSigner`'s `address && walletClient` EOA rung (`lib/signer.ts`);
+> #2413's notice deletion (PR #2460 removed `RetiredRailNotice.tsx`); the
+> `#patterns` anchor in `design-system.md`; `design:lint`; the
+> `focus-ring`, `shadow-token` and `compiled-colour-utilities` tests;
+> `humanAmountToAtomic`, `formatTokenValue` and the `allowanceHumanAmount`
+> pattern `^(0|[0-9]+\.[0-9]{2,6})$` (`openapi/spec.ts:332`); the coupling
+> gate exiting 0 without `--strict` and `docs:coupling` being the `--strict`
+> form CI runs (`docs-coupling.yml`); ship-next *Implement* step 5; the four
+> 2026-10-20 PRs (#4131, #4133, #4144, #4145, all merged that day) and the
+> five cited commits, each a commit of the PR it is listed under; the
+> `SETTLEMENT_PENDING` negative case in `x402-hosted-mcp-signer.test.ts`.
+> Not changed here: `reviewer.md:139` still names `EditAgentModal`, so the
+> three lists this doc keeps in sync now disagree on that one item (see the
+> PR's *Not filed* list).

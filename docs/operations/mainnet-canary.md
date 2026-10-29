@@ -334,9 +334,11 @@ redeem in one op.
 **Rail-level:** if the rail itself must stop, disabling the Pimlico policy
 pauses ALL sponsored operations (payments AND revokes still needing gas
 sponsorship — so do per-agent revokes FIRST, then disable). Independent of
-Haven entirely: the public exit tool (`docs/exit/README.md`) enumerates and
-disables delegations against the pinned DelegationManager with nothing but
-the owner's signer.
+Haven entirely: the public exit tool (`docs/exit/README.md`) enumerates
+delegations and reads their revoke status against the pinned DelegationManager;
+disabling one is the owner-signed `disableDelegation` UserOp its §2 describes,
+which needs nothing but the owner's signer (a wallet signer, since a passkey
+works only on Haven's site).
 
 **Evidence discipline:** whatever triggered the rollback, capture the
 reconciliation-check output and the relevant Basescan links in the incident

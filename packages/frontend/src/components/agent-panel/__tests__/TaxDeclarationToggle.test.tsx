@@ -5,13 +5,19 @@
  * - the toggle renders ONLY when `GET /user/company-details` answers a row
  *   with VIES `valid` — a 404 (flag off), `null`, a non-valid status, a
  *   loading state and an error all render NOTHING;
- * - the copy does not overclaim: the declaration is only on EIP-3009
- *   payments, pinned-merchant payments never carry one, nothing is signed
- *   or submitted to an authority, and "checked" is the strongest word used
- *   (never "verified");
+ * - the copy does not overclaim in either direction (#4416): it names the
+ *   client condition (a client that holds its own signing key) rather than
+ *   the payment rail, says the default setup sends none, lists what the
+ *   merchant receives, and "checked" is the strongest word used (never
+ *   "verified");
  * - a successful toggle PUTs exactly the wire shape; a failed one keeps the
  *   checkbox's server-truth state and surfaces the error inline (never an
- *   optimistic flip).
+ *   optimistic flip);
+ * - #4435: the toggle is DISABLED for an agent whose most recent setup is
+ *   `hosted_plus_signer` with the bit OFF, with the reason as a sibling
+ *   paragraph (outside the checkbox's label, reachable by role); every other
+ *   value — `local_stdio`, `manual`, unknown — stays enabled, and an agent
+ *   whose bit is already ON stays interactive so withdrawal is reachable.
  */
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
@@ -36,7 +42,8 @@ vi.mock('@/lib/api', () => ({
   },
 }))
 
-import { TaxDeclarationToggle } from '../TaxDeclarationToggle'
+import { TaxDeclarationToggle, TAX_DECLARATION_DESCRIPTION } from '../TaxDeclarationToggle'
+import { SettingsSection } from '@/components/ui/SettingsSection'
 
 const VIES_VALID_ROW = {
   legal_name: 'Acme AB',
@@ -138,7 +145,29 @@ describe('TaxDeclarationToggle copy', () => {
     mockUseCompanyDetails.mockReturnValue({ status: 'ready', details: VIES_VALID_ROW })
   })
 
-  it('does not overclaim: "can be declared", nothing submitted, never "verified"', () => {
+  // #4416 (owner decision 2026-10-26, option A): the behaviour did not move,
+  // the copy did. The old sentence said "can be declared to merchants that
+  // ask" — nothing in the SDK reads the merchant's 402 for an ask, so a local
+  // key-holding client sends the declaration to every merchant it pays. The
+  // new copy names the CLIENT condition instead of the payment rail (the
+  // owner's 2026-09-30 review, PR #3490, still stands: no rail on this card),
+  // names the merchant-acceptance half of the owner decision ("and only to
+  // merchants that accept it"), and lists what the merchant receives.
+  //
+  // Pinned WHOLE with `toBe`, not `toContain`: a substring pin passes a
+  // rewrite that reverses the meaning, which is exactly the defect #4416 is
+  // about. Every sentence below maps to a line that makes it true —
+  // `packages/sdk/src/client.ts:329-343` (resolver bound only with a delegate
+  // key), `packages/mcp/src/server.ts:83-85` (the local MCP passes one),
+  // `packages/sdk/src/merchant-completion.ts:187-203` (attached on the paid
+  // retry of an EIP-3009 payment only; the erc7710 branch attaches nothing),
+  // `packages/backend/src/modules/agents/tax-declaration.ts:34,138`
+  // (taxable status, country) and `packages/sdk/src/tax-declaration.ts:240-254`
+  // (principalId + attribution hash, signed by the delegate key).
+  const HELPER_TEXT =
+    "When this is on, your saved VAT number, checked against the EU's VIES register, can travel with payments your agent makes through a client that holds its own signing key: the Haven SDK with a delegate key, or the local Haven MCP server. The merchant your agent pays, when it accepts the declaration, receives your country, the VAT number, your taxable-person status and a signed link to the agent's wallet address. The default setup, a hosted server with a separate signer, sends none. Nothing is submitted to an authority, and you can switch it off here at any time."
+
+  it('pins the whole helper text: who receives the declaration and what it contains', () => {
     render(
       <TaxDeclarationToggle
         agentId="agent-1"
@@ -147,17 +176,32 @@ describe('TaxDeclarationToggle copy', () => {
       />,
     )
     const help = screen.getByText(/checked against the EU's VIES register/).textContent ?? ''
-    // Owner copy review, 2026-09-30: the EIP-3009-only / pinned-merchant
-    // sentence #3426 asked for was dropped from the card. The scope stays
-    // stated in docs/product/agent-passport.md (the EIP-3009-only
-    // declaration); the card keeps "can be declared", never a promise that
-    // every payment carries one (guarded below).
-    expect(help).toContain('can be declared to merchants that ask')
+    expect(help).toBe(HELPER_TEXT)
+  })
+
+  it('does not overclaim in either direction: no "merchants that ask", no "every payment", never "verified"', () => {
+    render(
+      <TaxDeclarationToggle
+        agentId="agent-1"
+        taxDeclarationEnabled={false}
+        onAgentsChanged={() => {}}
+      />,
+    )
+    const help = screen.getByText(/checked against the EU's VIES register/).textContent ?? ''
+    // The old claim, false in the direction the SDK actually behaves: nothing
+    // reads the merchant's 402 for an ask (option B would ship that; it did
+    // not). The other direction is guarded below.
+    expect(help).not.toContain('merchants that ask')
+    // Owner copy review, 2026-09-30 (PR #3490): the card does not name the
+    // payment rail. The rail and the full recipient set stay stated in
+    // docs/product/agent-passport.md and docs/product/owner-company-details.md.
     expect(help).not.toContain('settle by EIP-3009')
     expect(help).toContain('Nothing is submitted to an authority')
     // The overclaim guard: the strongest word about the VAT number is
     // "checked" — never "verified" (docs/product/owner-company-details.md).
     expect(help.toLowerCase()).not.toContain('verified')
+    // The default setup (hosted server plus separate signer) sends nothing,
+    // so the card must not promise a declaration on every payment.
     expect(help.toLowerCase()).not.toContain('every payment')
   })
 
@@ -233,16 +277,191 @@ describe('TaxDeclarationToggle interaction', () => {
   })
 })
 
-describe('TaxDeclarationToggle row wrapper (#3697)', () => {
+describe('TaxDeclarationToggle disabled state (#4435)', () => {
+  beforeEach(() => {
+    mockUseCompanyDetails.mockReturnValue({ status: 'ready', details: VIES_VALID_ROW })
+    mockApiPut.mockReset()
+  })
+
+  // The literal the issue pins, whole. `toBe`, not `toContain`: the reason is
+  // the only thing telling an owner why the control they can see is dead.
+  const REASON =
+    'This agent pays through the default setup, a hosted server with a separate signer, so no declaration is sent.'
+
+  it('disables the toggle for hosted_plus_signer with the bit OFF and states the reason', () => {
+    render(
+      <TaxDeclarationToggle
+        agentId="agent-1"
+        taxDeclarationEnabled={false}
+        runtimeMcpMode="hosted_plus_signer"
+        onAgentsChanged={() => {}}
+      />,
+    )
+    expect(screen.getByRole('checkbox')).toBeDisabled()
+    expect(screen.getByTestId('tax-declaration-disabled-reason').textContent).toBe(REASON)
+  })
+
+  it('renders the reason OUTSIDE the checkbox label, reachable by role', () => {
+    render(
+      <TaxDeclarationToggle
+        agentId="agent-1"
+        taxDeclarationEnabled={false}
+        runtimeMcpMode="hosted_plus_signer"
+        onAgentsChanged={() => {}}
+      />,
+    )
+    // A disabled checkbox is not focusable and `helperText` sits inside the
+    // `<label>`, so a reason placed there is never announced. The paragraph is
+    // a sibling of the row: reachable by role, and not inside any label.
+    const reason = screen.getByTestId('tax-declaration-disabled-reason')
+    expect(reason.tagName).toBe('P')
+    expect(reason.textContent).toBe(REASON)
+    expect(reason.closest('label')).toBeNull()
+    // The checkbox's own label carries the helper text, never the reason.
+    const label = screen.getByRole('checkbox').closest('label')
+    expect(label?.textContent ?? '').not.toContain('no declaration is sent')
+  })
+
+  it('keeps the default-setup reason OUTSIDE the disclosure (#4477)', () => {
+    // The reason tells the owner the control they can see has no effect, so it
+    // must be readable without opening anything. The long explanation is the
+    // only thing behind the fold.
+    render(
+      <TaxDeclarationToggle
+        agentId="agent-1"
+        taxDeclarationEnabled={false}
+        runtimeMcpMode="hosted_plus_signer"
+        onAgentsChanged={() => {}}
+      />,
+    )
+    const reason = screen.getByTestId('tax-declaration-disabled-reason')
+    expect(reason.closest('details')).toBeNull()
+    // ...and the disclosure itself is closed by default.
+    const disclosure = screen.getByText('What gets sent').closest('details')
+    expect(disclosure).not.toBeNull()
+    expect(disclosure?.open).toBe(false)
+  })
+
+  it('keeps the toggle enabled and PUTs the same body for local_stdio', async () => {
+    mockApiPut.mockResolvedValue({ id: 'agent-1', tax_declaration_enabled: true })
+    render(
+      <TaxDeclarationToggle
+        agentId="agent-1"
+        taxDeclarationEnabled={false}
+        runtimeMcpMode="local_stdio"
+        onAgentsChanged={() => {}}
+      />,
+    )
+    const checkbox = screen.getByRole('checkbox')
+    expect(checkbox).not.toBeDisabled()
+    expect(screen.queryByTestId('tax-declaration-disabled-reason')).not.toBeInTheDocument()
+    fireEvent.click(checkbox)
+    await waitFor(() => {
+      expect(mockApiPut).toHaveBeenCalledWith('/agents/agent-1/tax-declaration', {
+        tax_declaration_enabled: true,
+      })
+    })
+  })
+
+  it('keeps the toggle enabled for manual — a developer client with a delegate key can send one', () => {
+    render(
+      <TaxDeclarationToggle
+        agentId="agent-1"
+        taxDeclarationEnabled={false}
+        runtimeMcpMode="manual"
+        onAgentsChanged={() => {}}
+      />,
+    )
+    expect(screen.getByRole('checkbox')).not.toBeDisabled()
+    expect(screen.queryByTestId('tax-declaration-disabled-reason')).not.toBeInTheDocument()
+  })
+
+  it('keeps the toggle enabled when the signal is unknown — null, absent, or an unrecognised value', () => {
+    // "Cannot tell" is not "cannot send": no setup row, an agent_id NULLed by
+    // a delete, or a setup whose install_status never carried the key all read
+    // as null/absent. Disabling every agent that predates the signal would be
+    // a user-visible regression on deploy.
+    for (const runtimeMcpMode of [null, undefined, 'something_else'] as const) {
+      const { unmount } = render(
+        <TaxDeclarationToggle
+          agentId="agent-1"
+          taxDeclarationEnabled={false}
+          runtimeMcpMode={runtimeMcpMode}
+          onAgentsChanged={() => {}}
+        />,
+      )
+      expect(screen.getByRole('checkbox')).not.toBeDisabled()
+      expect(screen.queryByTestId('tax-declaration-disabled-reason')).not.toBeInTheDocument()
+      unmount()
+    }
+  })
+
+  it('keeps the toggle INTERACTIVE when the bit is already ON on hosted_plus_signer, so withdrawal is reachable', async () => {
+    // The PUT is deliberately never gated on OFF
+    // (routes/agent-tax-declaration.ts:118-121). A disabled control here would
+    // trap an opt-in the owner cannot undo.
+    mockApiPut.mockResolvedValue({ id: 'agent-1', tax_declaration_enabled: false })
+    render(
+      <TaxDeclarationToggle
+        agentId="agent-1"
+        taxDeclarationEnabled
+        runtimeMcpMode="hosted_plus_signer"
+        onAgentsChanged={() => {}}
+      />,
+    )
+    const checkbox = screen.getByRole('checkbox')
+    expect(checkbox).not.toBeDisabled()
+    expect(checkbox).toBeChecked()
+    expect(screen.queryByTestId('tax-declaration-disabled-reason')).not.toBeInTheDocument()
+    fireEvent.click(checkbox)
+    await waitFor(() => {
+      expect(mockApiPut).toHaveBeenCalledWith('/agents/agent-1/tax-declaration', {
+        tax_declaration_enabled: false,
+      })
+    })
+  })
+})
+
+describe('TaxDeclarationToggle row wrapper (#3697, inverted by #4477)', () => {
   beforeEach(() => {
     mockUseCompanyDetails.mockReturnValue({ status: 'ready', details: VIES_VALID_ROW })
   })
 
-  it('renders inside a Card.Section divided row — the divider travels WITH the toggle', () => {
-    // The wrapper IS the divider owner: when the visibility rule hides the
-    // toggle, the wrapper (and its hairline) disappear with it — the page
-    // test pins the no-orphan-divider case from the outside; this pins the
-    // visible case's own geometry (the closeout's style-assertion rule).
+  it('is a DIRECT child of the section list and draws no hairline of its own', () => {
+    // #3697 pinned a `Card.Section divided` wrapper around the toggle. Inside
+    // `SettingsSection`'s `divide-y` list that wrapper would draw a SECOND
+    // hairline, so #4477 drops it: the row is a direct child of the list and
+    // the section owns the divider. The old assertion (`parentElement` has
+    // `border-t`) would still pass with the wrapper in place, which is why it
+    // is inverted rather than deleted.
+    render(
+      <SettingsSection title="This agent">
+        <TaxDeclarationToggle
+          agentId="agent-1"
+          taxDeclarationEnabled={false}
+          onAgentsChanged={() => {}}
+        />
+      </SettingsSection>,
+    )
+    const row = screen.getByTestId('tax-declaration-row')
+    // The parent IS the section's `divide-y` list — no wrapper between them.
+    expect(row.parentElement?.className).toContain('divide-y')
+    // ...and the row carries no top border of its own.
+    expect(row.className).not.toContain('border-t')
+    expect(row.className).not.toContain('rounded')
+  })
+})
+
+describe('TaxDeclarationToggle description (#4477)', () => {
+  beforeEach(() => {
+    mockUseCompanyDetails.mockReturnValue({ status: 'ready', details: VIES_VALID_ROW })
+  })
+
+  it('keeps the client condition and the four copy guards on the one-line description', () => {
+    // The "default setup sends none" sentence moved behind the fold, so the
+    // visible line must carry the client condition itself or it overclaims in
+    // exactly the direction #4416 fixed. The guards are aimed at THIS line:
+    // the existing ones query the disclosure's text and never reach it.
     render(
       <TaxDeclarationToggle
         agentId="agent-1"
@@ -250,11 +469,32 @@ describe('TaxDeclarationToggle row wrapper (#3697)', () => {
         onAgentsChanged={() => {}}
       />,
     )
-    const row = screen.getByTestId('tax-declaration-row')
-    // `Card.Section divided` geometry: hairline top border + per-child
-    // dividers, no card chrome of its own (no radius, no shadow).
-    expect(row.parentElement?.className).toContain('border-t')
-    expect(row.parentElement?.className).toContain('divide-y')
-    expect(row.parentElement?.className).not.toContain('rounded')
+    const description = screen.getByText(TAX_DECLARATION_DESCRIPTION)
+    const text = description.textContent ?? ''
+    expect(text).toContain('client that holds its own key')
+    expect(text.toLowerCase()).not.toContain('verified')
+    expect(text.toLowerCase()).not.toContain('every payment')
+    expect(text).not.toContain('merchants that ask')
+    expect(text).not.toContain('settle by EIP-3009')
+  })
+
+  it('wires the description to the input as its accessible description', () => {
+    // Moving the explanation out of `helperText` took it out of the `<label>`,
+    // so the input points at the one-line description instead.
+    render(
+      <TaxDeclarationToggle
+        agentId="agent-1"
+        taxDeclarationEnabled={false}
+        onAgentsChanged={() => {}}
+      />,
+    )
+    const checkbox = screen.getByRole('checkbox')
+    expect(checkbox).toHaveAccessibleName('Allow this agent to send a tax declaration')
+    const describedBy = checkbox.getAttribute('aria-describedby')
+    expect(describedBy).toBeTruthy()
+    expect(document.getElementById(describedBy as string)?.textContent).toBe(
+      TAX_DECLARATION_DESCRIPTION,
+    )
   })
 })
+

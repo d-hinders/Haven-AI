@@ -1,15 +1,17 @@
 'use client'
 
-import { SearchX, Search, SlidersHorizontal, X } from 'lucide-react'
-import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react'
+import { SearchX, Search, SlidersHorizontal, X, ChevronDown } from 'lucide-react'
+import { Fragment, useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { Button } from '@/components/ui/Button'
+import { Card } from '@/components/ui/Card'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Icon } from '@/components/ui/Icon'
 import { useBodyScrollLock } from '@/hooks/useBodyScrollLock'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import { useFocusTrap } from '@/hooks/useFocusTrap'
-import { FacetMenu, type ListFacet } from './FacetMenu'
+import { FacetMenu, type ListFacet, type ListFacetOption } from './FacetMenu'
 import { PeriodPicker, isValidRange } from './PeriodPicker'
+import { planFacetOptions, toggleFacetGroup } from './list-facet-groups'
 import {
   allOptionLabel,
   allTimeLabel,
@@ -96,8 +98,8 @@ export interface ListToolbarProps {
   /**
    * The page's totals for the list summary line (#4196) — the account
    * Activity tab's "In · Out", and Transactions' too (#4266) — drawn
-   * on the left of the line, the count on the right. Pass the figures only;
-   * the toolbar owns the line, so "filtered" is decided once, here.
+   * on the right of the line, the count on the left (#4473). Pass the figures
+   * only; the toolbar owns the line, so "filtered" is decided once, here.
    */
   summary?: ReactNode
   /**
@@ -135,8 +137,8 @@ function schemaOf(facets: ListFacet[], sort: ListToolbarSort | undefined, period
  * 2. facets, then Sort and Period on the right; a pill facet gets its own row;
  * 3. the status row, only while a filter is active: removable chips for each
  *    active filter and Clear filters;
- * 4. outside the card, the list summary line (#4196): the page's `summary`
- *    totals on the left, the count on the right, announced politely.
+ * 4. outside the card, the list summary line (#4196): the count on the left,
+ *    the page's `summary` totals on the right (#4473), announced politely.
  *
  * Below `sm` (640px) the facet row collapses into a "Filters (n)" button
  * that opens a bottom sheet with 44px rows. **Filters in the sheet apply
@@ -362,19 +364,19 @@ export function ListToolbar({
         )}
       </div>
 
-      {/* The list summary line (#4196): outside the search card, directly
-          above the list. The count keeps one place whether or not a filter is
-          active; `ml-auto` holds it right when the totals wrap or are absent. */}
+      {/* The list summary line (#4196, sides swapped #4473): outside the search
+          card, directly above the list. The count keeps one place — the left —
+          whether or not a filter is active; `ml-auto` holds the page's totals
+          right when they wrap under it or are absent. */}
       <div
         data-testid="list-summary"
         className="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-0.5 text-[13px] text-[var(--v2-ink-2)]"
       >
-        {summary ? <div className="min-w-0">{summary}</div> : null}
         <span
           role="status"
           aria-live="polite"
           data-testid="list-toolbar-count"
-          className="ml-auto tabular-nums text-[var(--v2-ink-3)]"
+          className="tabular-nums text-[var(--v2-ink-3)]"
         >
           {count ? (
             countLabel(noun, count, filtered)
@@ -382,6 +384,7 @@ export function ListToolbar({
             <span className="inline-block h-3 w-24 animate-pulse rounded bg-[var(--v2-surface-2)]" aria-label={`Loading ${noun.other}`} />
           )}
         </span>
+        {summary ? <div className="ml-auto min-w-0 text-right">{summary}</div> : null}
       </div>
     </div>
   )
@@ -519,6 +522,19 @@ const SHEET_ROW_CLASSES =
 const SHEET_INPUT_CLASSES = 'h-4 w-4 shrink-0 accent-[var(--v2-brand)] focus-visible:outline-none'
 
 /**
+ * A collapsed option group's disclosure row in the phone sheet (#4452). A
+ * plain `<button>` with `aria-expanded`, reached by Tab: the sheet is a dialog
+ * of form controls, not a menu, so it takes no menu roles.
+ *
+ * The `aria-disabled:` variants (#4512) are the locked row's treatment —
+ * ink-3 text, no hover fill, a default cursor, focus ring kept — and are inert
+ * on every other row. `aria-disabled` rather than `disabled`: a native
+ * disabled button leaves the Tab order, and the locked row must stay
+ * reachable.
+ */
+const SHEET_GROUP_TOGGLE_CLASSES = `flex min-h-11 w-full items-center gap-2 rounded-md px-2.5 text-left text-sm text-[var(--v2-ink-2)] hover:bg-[var(--v2-surface)] aria-disabled:text-[var(--v2-ink-3)] aria-disabled:hover:bg-transparent aria-disabled:cursor-default ${listFocusRing}`
+
+/**
  * The phone sheet. Native radios and checkboxes in fieldsets — a dialog of
  * form controls, not menus — each change applied as it happens. Escape, the
  * backdrop and the footer close it; focus returns to the Filters button.
@@ -553,6 +569,33 @@ function FilterSheet({
   const panelRef = useRef<HTMLDivElement>(null)
   const titleId = useId()
   const name = useId()
+  // The user's own group expansions, per facet (#4452). The open state itself
+  // is derived on every render by `planFacetOptions`, so a selected grouped
+  // value is never hidden behind a collapsed row.
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, string[]>>({})
+  // The group the user just expanded (#4512), set in the toggle's click
+  // handler and consumed once by the effect below. A ref, not state: it must
+  // not cause a render of its own, and it must survive the re-render the
+  // expansion does.
+  const justExpanded = useRef<{ facetId: string; groupId: string } | null>(null)
+  // Each group's disclosure row, so the effect can find the row it revealed:
+  // the first revealed row is the toggle's next element sibling.
+  const toggleRefs = useRef(new Map<string, HTMLButtonElement>())
+  // Expanding scrolls the first revealed row into view (#4512), in the sheet
+  // as in the menu: the sheet scrolls in its own `overflow-y-auto` body, and
+  // with a long active-agent list the toggle starts at or below the fold, so
+  // the rows it reveals are off-screen too. Runs only for a group the user
+  // just expanded — never on collapse, never on the locked toggle, and never
+  // for a group open because it holds the selection.
+  useEffect(() => {
+    const target = justExpanded.current
+    if (!target) return
+    justExpanded.current = null
+    const toggle = toggleRefs.current.get(`${target.facetId}:${target.groupId}`)
+    // The optional call is deliberate: jsdom has no `scrollIntoView`.
+    const first = toggle?.nextElementSibling as HTMLElement | null | undefined
+    first?.scrollIntoView?.({ block: 'nearest' })
+  }, [expandedGroups])
   useFocusTrap(panelRef, true)
   useEscapeToClose(true, onClose)
   useBodyScrollLock(true)
@@ -591,6 +634,40 @@ function FilterSheet({
           {facets.map((facet) => {
             const values = state.facets[facet.id] ?? []
             const multi = facet.selection === 'multi'
+            const plan = planFacetOptions(facet.options, values, expandedGroups[facet.id] ?? [])
+            const optionRow = (option: ListFacetOption) => {
+              const checked = values.includes(option.value)
+              return (
+                <label key={option.value} className={SHEET_ROW_CLASSES}>
+                  <input
+                    type={multi ? 'checkbox' : 'radio'}
+                    name={`${name}-${facet.id}`}
+                    checked={checked}
+                    onChange={() =>
+                      onFacet(
+                        facet.id,
+                        multi
+                          ? checked
+                            ? values.filter((v) => v !== option.value)
+                            : [...values, option.value]
+                          : [option.value],
+                      )
+                    }
+                    className={SHEET_INPUT_CLASSES}
+                  />
+                  {/* `line-clamp-2` + the `meta` slot (#4150): the row
+                      wraps and the status suffix always shows — no
+                      hover on a touch device. */}
+                  <span className="line-clamp-2 flex-1 text-ellipsis" title={option.label}>
+                    {option.label}
+                  </span>
+                  {option.meta && <span className="shrink-0 text-xs text-[var(--v2-ink-3)]">{option.meta}</span>}
+                  {option.count !== undefined && (
+                    <span className="text-xs tabular-nums text-[var(--v2-ink-3)]">{option.count}</span>
+                  )}
+                </label>
+              )
+            }
             return (
               <SheetGroup key={facet.id} legend={facet.label}>
                 {!multi && facet.allLabel !== null && (
@@ -605,39 +682,45 @@ function FilterSheet({
                     <span className="flex-1">{facet.allLabel ?? allOptionLabel}</span>
                   </label>
                 )}
-                {facet.options.map((option) => {
-                  const checked = values.includes(option.value)
-                  return (
-                    <label key={option.value} className={SHEET_ROW_CLASSES}>
-                      <input
-                        type={multi ? 'checkbox' : 'radio'}
-                        name={`${name}-${facet.id}`}
-                        checked={checked}
-                        onChange={() =>
-                          onFacet(
-                            facet.id,
-                            multi
-                              ? checked
-                                ? values.filter((v) => v !== option.value)
-                                : [...values, option.value]
-                              : [option.value],
-                          )
-                        }
-                        className={SHEET_INPUT_CLASSES}
+                {plan.ungrouped.map(optionRow)}
+                {plan.groups.map((group) => (
+                  <Fragment key={`group-${group.group.id}`}>
+                    {/* The same split as the menu, as a disclosure button
+                        (#4452): the sheet is not a menu, so this is reached by
+                        Tab and carries `aria-expanded` rather than a menu role.
+                        A group holding the selection is locked (#4512):
+                        `aria-disabled` and never `disabled`, so it stays in
+                        the Tab order, and clicking it stays a no-op. */}
+                    <button
+                      ref={(el) => {
+                        const key = `${facet.id}:${group.group.id}`
+                        if (el) toggleRefs.current.set(key, el)
+                        else toggleRefs.current.delete(key)
+                      }}
+                      type="button"
+                      aria-expanded={group.open}
+                      aria-disabled={group.holdsSelection || undefined}
+                      onClick={() => {
+                        // Only a group the user is OPENING scrolls its rows
+                        // into view: not a collapse, not the locked toggle.
+                        justExpanded.current =
+                          !group.holdsSelection && !group.open ? { facetId: facet.id, groupId: group.group.id } : null
+                        setExpandedGroups((prev) => ({
+                          ...prev,
+                          [facet.id]: toggleFacetGroup(prev[facet.id] ?? [], group),
+                        }))
+                      }}
+                      className={SHEET_GROUP_TOGGLE_CLASSES}
+                    >
+                      <Icon
+                        icon={ChevronDown}
+                        className={`h-3.5 w-3.5 shrink-0 text-[var(--v2-ink-3)] motion-safe:transition-transform ${group.open ? '' : '-rotate-90'}`}
                       />
-                      {/* `line-clamp-2` + the `meta` slot (#4150): the row
-                          wraps and the status suffix always shows — no
-                          hover on a touch device. */}
-                      <span className="line-clamp-2 flex-1 text-ellipsis" title={option.label}>
-                        {option.label}
-                      </span>
-                      {option.meta && <span className="shrink-0 text-xs text-[var(--v2-ink-3)]">{option.meta}</span>}
-                      {option.count !== undefined && (
-                        <span className="text-xs tabular-nums text-[var(--v2-ink-3)]">{option.count}</span>
-                      )}
-                    </label>
-                  )
-                })}
+                      <span className="flex-1 text-left">{group.toggleLabel}</span>
+                    </button>
+                    {group.open && group.options.map(optionRow)}
+                  </Fragment>
+                ))}
               </SheetGroup>
             )
           })}
@@ -804,11 +887,18 @@ export function ListNoMatch({ noun, onClear }: { noun: ListNoun; onClear: () => 
 }
 
 /**
- * The paging rule (#4196): a paged list's card ends with its last row, and
- * the next page is one ghost button centred below the card — "Show 25 more",
- * N being what the next page adds. Nothing renders once every page is loaded:
- * the list ending is the end. A truncated read keeps the page's own hedge
- * under the summary line; this button says nothing about it.
+ * The paging rule (#4196, restyled 2026-10-27): a paged list's card ends with
+ * its footer row while pages remain — a hairline above, then one centred
+ * "Show 25 more" row, N being what the next page adds. Once every page is
+ * loaded the footer is gone and the card ends with its last row: the list
+ * ending is the end. A truncated read keeps the page's own hedge under the
+ * summary line; this row says nothing about it.
+ *
+ * The row is `Card.Section divided` (the canonical in-card hairline) around a
+ * raw `<button>`, not `Button`: `Button` hard-codes `rounded-md` and an
+ * outset `ring-offset-2` that an `overflow-hidden` card clips, and it takes no
+ * caller ring. The row's own inset ring follows the card's bottom corners via
+ * `rounded-b-[10px]`, the `Card.Header` docblock's precedent.
  *
  * `loaded` and `total` must be one source's figures (the feed's loaded rows
  * and its server total), so N never mixes two reads.
@@ -830,10 +920,17 @@ export function ListShowMore({
 }) {
   if (!hasMore) return null
   return (
-    <div className="mt-4 flex justify-center" data-testid="list-show-more">
-      <Button variant="ghost" onClick={onShowMore} disabled={loading} aria-busy={loading || undefined}>
+    <Card.Section divided>
+      <button
+        type="button"
+        onClick={onShowMore}
+        disabled={loading}
+        aria-busy={loading || undefined}
+        data-testid="list-show-more"
+        className="flex min-h-11 w-full items-center justify-center rounded-b-[10px] px-5 py-3 text-sm font-medium text-[var(--v2-ink-2)] transition-colors hover:bg-[var(--v2-surface-hover)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/80 disabled:cursor-not-allowed disabled:opacity-60"
+      >
         {loading ? loadingMoreLabel : showMoreLabel(total - loaded, pageSize)}
-      </Button>
-    </div>
+      </button>
+    </Card.Section>
   )
 }

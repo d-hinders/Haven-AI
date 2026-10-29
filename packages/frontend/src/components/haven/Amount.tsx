@@ -130,7 +130,9 @@ export function Amount(props: AmountProps) {
   }
 
   return (
-    <span className={`v2-tabular font-semibold ${SIZE_CLASS[size]} ${tone} ${className}`.trim()}>
+    // #4400: a money figure never wraps, whatever its container — the rule
+    // lives here, not in each caller's cell; the layout gives the figure room.
+    <span className={`v2-tabular whitespace-nowrap font-semibold ${SIZE_CLASS[size]} ${tone} ${className}`.trim()}>
       {approxMark}
       {unknown ? null : sign}
       {body}

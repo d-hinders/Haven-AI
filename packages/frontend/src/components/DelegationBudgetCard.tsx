@@ -46,9 +46,10 @@ import {
 } from './ui/DropdownMenu'
 import { useToast } from './ui/Toast'
 import { Amount, type AmountCurrency } from '@/components/haven/Amount'
-import { BudgetMeter, NoticeRow, truncateAddress } from '@/components/haven'
+import { BudgetEndDateSelect, BudgetMeter, NoticeRow, truncateAddress } from '@/components/haven'
 import { timeAgo, timeUntil } from '@/lib/format'
 import { budgetCaption, budgetPeriodWords, budgetReservedNote, type BudgetCaption } from '@/lib/budget-caption'
+import { BUDGET_END_DEFAULT_DAYS, budgetEndsAt, formatBudgetEndDate } from '@/lib/budget-end'
 import type { DashboardAgentStats } from '@/types/dashboard'
 
 interface TokenOption {
@@ -219,6 +220,11 @@ export default function DelegationBudgetCard({
   const [amount, setAmount] = useState('')
   const [period, setPeriod] = useState(86_400)
   const [recipient, setRecipient] = useState('')
+  // #4350: the end date the owner picks for a NEW budget — 30/90/180/365
+  // days, 90 the default (owner decision 1 on #4349). Rides the build as
+  // `expires_at`; the select renders the resulting date before anything is
+  // signed.
+  const [endDays, setEndDays] = useState(BUDGET_END_DEFAULT_DAYS)
 
   // ── ?grant=<delegation hash> prefill (#2539) ──
   // The #2539 CLI's signing link lands here: the backend built a pending
@@ -238,6 +244,16 @@ export default function DelegationBudgetCard({
     return g && /^0x[0-9a-fA-F]{64}$/.test(g) ? g : null
   }, [])
   const [prefill, setPrefill] = useState<{ hash: string; periodSeconds: number } | null>(null)
+  // #4353: "Budget ending"'s Renew links `?renew=<delegationHash>` — open
+  // that live budget's Edit, prefilled with its own limits (the end date is
+  // the field to change, #4350). Applied once, then the URL is tidied; an
+  // unknown, foreign or no-longer-live hash opens nothing, like `?grant=`.
+  const renewHash = useMemo(() => {
+    if (typeof window === 'undefined') return null
+    const r = new URLSearchParams(window.location.search).get('renew')
+    return r && /^0x[0-9a-fA-F]{64}$/.test(r) ? r : null
+  }, [])
+  const renewApplied = useRef(false)
   // #3695: once a budget exists, the grant form is collapsed behind "Add
   // budget" — a permanent second form made "Set budget" the strongest element
   // on the page. With no active budget the form is the section's content and
@@ -367,6 +383,22 @@ export default function DelegationBudgetCard({
     }
   }, [retired, grantHash, budgets, tokens, agentId, prefill])
 
+  useEffect(() => {
+    if (retired || !renewHash || budgets === null || renewApplied.current) return
+    renewApplied.current = true
+    const nowSec = Math.floor(Date.now() / 1000)
+    const row = budgets.find(
+      // The same liveness the routed-edit lookup uses (`occupiesSlot`).
+      (b) => b.delegation_hash.toLowerCase() === renewHash.toLowerCase() && occupiesSlot(b, nowSec),
+    )
+    if (row) setEditing(row)
+    try {
+      window.history.replaceState(null, '', `/agents/${agentId}`)
+    } catch {
+      // A URL that stays untidy is not worth a thrown render.
+    }
+  }, [retired, renewHash, budgets, agentId])
+
   // The period picker offers the day/week/month rhythm; a prefilled build may
   // carry any period the CLI chose (an hour, a minute-floor of 60s), so the
   // prefilled value gets its own option instead of silently desyncing the
@@ -399,13 +431,17 @@ export default function DelegationBudgetCard({
     } catch {
       return null
     }
+    // #4350: the chosen end date rides the build. The presets are always far
+    // enough ahead that the conversion is never null on a sane clock.
+    const expiresAt = budgetEndsAt(endDays, Math.floor(Date.now() / 1000))
     return {
       tokenAddress: tokenCfg.address as Address,
       recipientAddress: recipient.trim() ? (recipient.trim() as Address) : null,
       budgetAtomic,
       periodSeconds: period,
+      ...(expiresAt !== null ? { expiresAt } : {}),
     }
-  }, [amount, amountValid, period, recipient, recipientValid, tokenCfg])
+  }, [amount, amountValid, endDays, period, recipient, recipientValid, tokenCfg])
 
   // #3933: a submit whose (token, recipient) slot already holds a live budget
   // is never signed as a plain grant — the backend refuses it, because the old
@@ -508,7 +544,7 @@ export default function DelegationBudgetCard({
   if (budgets === null && !budgetsError) {
     return (
       <section className="mt-6">
-        <SpendingHeading retired={retired} />
+        <SpendingHeading />
         <Card hover={false} className="p-5 md:p-6">
           <div className="py-3"><Skeleton className="h-5 w-48" /></div>
           {/* #3549: no form-shaped placeholder for a card that will have no form. */}
@@ -571,12 +607,19 @@ export default function DelegationBudgetCard({
 
   return (
     <section ref={budgetCardRef} className="mt-6">
-      <SpendingHeading retired={retired} headingRef={headingRef} />
+      <SpendingHeading headingRef={headingRef} />
       {/* #4226: the dashboard money-card pattern (design-system.md, #3897) —
           budgets on the left, Last 30 days on the right as a divided section,
           stacked below `lg`. The card itself carries no padding: the halves
-          own it, so the right hairline runs edge-to-edge at `lg`. */}
-      <Card hover={false} className="overflow-hidden">
+          own it, so the right hairline runs edge-to-edge at `lg`.
+          #4491: no `overflow-hidden` here. The budget row's ⋯ menu is an
+          in-flow `absolute` panel (DropdownMenu is not portalled), so a
+          clipping ancestor cuts it off at the card's bottom edge. Nothing
+          paints into the corners — both halves are padded and the divided
+          section draws borders only — so the card's own `rounded-[10px]`
+          is enough. See design-system.md § Cards: a container that hosts a
+          menu must not clip. */}
+      <Card hover={false}>
         <div className="grid lg:grid-cols-2">
           <section aria-label="Budgets" className="min-w-0 p-5 sm:p-6">
 
@@ -657,7 +700,7 @@ export default function DelegationBudgetCard({
           </div>
         ) : active.length === 0 ? (
           retired ? (
-            <p className="py-3 text-sm text-[var(--v2-ink-muted)]">No active budget.</p>
+            <p className="py-3 text-sm text-[var(--v2-ink-2)]">No active budget.</p>
           ) : null
         ) : (
           active.map((b) => (
@@ -684,7 +727,7 @@ export default function DelegationBudgetCard({
           the page's own empty state explains the retired agent. */}
       {retired ? (
         active.length > 0 && !budgetsError ? (
-          <p className="mt-4 text-sm text-[var(--v2-ink-muted)]">
+          <p className="mt-4 text-sm text-[var(--v2-ink-2)]">
             {retired === 'revoked'
               ? 'This agent has been revoked, so its budgets can only be stopped.'
               : 'This agent has been removed, so its budgets can only be stopped.'}
@@ -698,7 +741,7 @@ export default function DelegationBudgetCard({
           // form's own line when it opens. #4261: with an active budget
           // there is NO control here — Add budget is the rows' ⋯ menu item.
           <div className="mt-3">
-            <p className="text-sm text-[var(--v2-ink-muted)]">No budget yet.</p>
+            <p className="text-sm text-[var(--v2-ink-2)]">No budget yet.</p>
             <Button
               ref={addBudgetRef}
               size="sm"
@@ -722,7 +765,7 @@ export default function DelegationBudgetCard({
               <p className="text-sm font-medium text-[var(--v2-ink)]">
                 {budgetsError ? 'Set a budget' : 'Set its first budget'}
               </p>
-              <p className="mt-0.5 text-sm text-[var(--v2-ink-muted)]">
+              <p className="mt-0.5 text-sm text-[var(--v2-ink-2)]">
                 {/* #3988: a grant holder CAN pay — through the received
                     budgets listed below. The line must never imply it
                     cannot. */}
@@ -748,7 +791,7 @@ export default function DelegationBudgetCard({
                 ))}
               </Select>
             ) : (
-              <span className="self-center text-sm text-[var(--v2-ink-muted)]">{tokenCfg?.symbol}</span>
+              <span className="self-center text-sm text-[var(--v2-ink-2)]">{tokenCfg?.symbol}</span>
             )}
             <Select value={String(period)} onChange={(e) => setPeriod(Number(e.target.value))} aria-label="Period" className="sm:w-36">
               {periodOptions.map((p) => (
@@ -763,6 +806,15 @@ export default function DelegationBudgetCard({
             helperText="Optional — leave blank for any recipient."
             className="font-mono"
             aria-label="Recipient"
+          />
+          {/* #4350: the end date is a choice, shown with its resulting day —
+              the same control the connect flow's approval step and the edit
+              modal use, so all three surfaces cannot drift. */}
+          <BudgetEndDateSelect
+            id="grant-budget-end"
+            days={endDays}
+            onDaysChange={(d) => setEndDays(d ?? BUDGET_END_DEFAULT_DAYS)}
+            nowSec={nowSec}
           />
           {/* #2473 (money-path review): a grant REPLACES the active budget in
               the same (token, recipient) slot, server-side and silently. In
@@ -786,7 +838,15 @@ export default function DelegationBudgetCard({
                 ? 'Reload the current budgets before setting one — a budget for a token and recipient that already has one is edited, not added.'
                 : formSlotMatch
                   ? 'This agent already has a budget for this token and recipient, so you edit it: you approve the new budget, then approve once more to stop the old one. The review step shows how many approvals that takes. Stopping it ends any open task budget or sub-budget taken from it.'
-                  : 'One approval. Refills every period automatically.'
+                  : // #4350: the pre-sign copy names the chosen end date — the
+                    // "One approval." line may never again hide when the
+                    // budget ends (the issue's copy rule).
+                    (() => {
+                      const endsAt = budgetEndsAt(endDays, nowSec)
+                      return endsAt != null
+                        ? `One approval. Refills every period automatically until ${formatBudgetEndDate(endsAt)}.`
+                        : 'One approval. Refills every period automatically.'
+                    })()
             }
             onSlotOccupied={handleSlotOccupied}
             onGranted={handleGranted}
@@ -814,7 +874,7 @@ export default function DelegationBudgetCard({
               there). */}
           {subBudgetParents.length > 0 && !budgetsError ? (
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-xs text-[var(--v2-ink-muted)]">
+              <p className="text-xs text-[var(--v2-ink-3)]">
                 Or share part of an existing budget with another agent
               </p>
               <Button variant="tertiary" onClick={openSubBudget}>
@@ -824,7 +884,7 @@ export default function DelegationBudgetCard({
           ) : null}
         </div>
       ) : (
-        <p className="mt-4 text-sm text-[var(--v2-ink-muted)]">
+        <p className="mt-4 text-sm text-[var(--v2-ink-2)]">
           Budgets aren&rsquo;t available for this network yet.
         </p>
       )}
@@ -837,7 +897,7 @@ export default function DelegationBudgetCard({
         <Card.Section divided className="mt-4">
           <div className="py-2">
             <p className="text-sm font-medium text-[var(--v2-ink)]">Task budgets</p>
-            <p className="mt-0.5 text-xs text-[var(--v2-ink-muted)]">
+            <p className="mt-0.5 text-xs text-[var(--v2-ink-3)]">
               Short spending limits your agent opened for a single task, taken from the budget above. Each ends by
               itself; stopping the budget above stops them too.
             </p>
@@ -862,7 +922,7 @@ export default function DelegationBudgetCard({
         <Card.Section divided className="mt-4">
           <div className="py-2">
             <p className="text-sm font-medium text-[var(--v2-ink)]">Received budgets</p>
-            <p className="mt-0.5 text-xs text-[var(--v2-ink-muted)]">
+            <p className="mt-0.5 text-xs text-[var(--v2-ink-3)]">
               Slices of another agent&rsquo;s budget that this agent spends through. Each stays inside its
               slice and inside the budget it comes from; stopping the budget above stops them too.
             </p>
@@ -877,7 +937,7 @@ export default function DelegationBudgetCard({
         <Card.Section divided className="mt-4">
           <div className="py-2">
             <p className="text-sm font-medium text-[var(--v2-ink)]">Sub-agent budgets</p>
-            <p className="mt-0.5 text-xs text-[var(--v2-ink-muted)]">
+            <p className="mt-0.5 text-xs text-[var(--v2-ink-3)]">
               Slices of the budget above that another of your agents spends through. Each stays inside the slice and
               inside the budget above it; stopping the budget above stops them too.
             </p>
@@ -902,10 +962,11 @@ export default function DelegationBudgetCard({
             ) : (
               <div role="status" aria-busy="true" aria-label="Loading the last 30 days">
                 <Skeleton className="h-4 w-24" />
-                {/* #4260: three label-and-value pairs, the shape of the figures. */}
-                <div className="mt-2.5 grid grid-cols-3 gap-3">
+                {/* #4260: three label-and-value pairs, the shape of the figures —
+                    #4400: in the loaded layout's two rows below `sm`. */}
+                <div className="mt-2.5 grid grid-cols-2 gap-3 sm:grid-cols-3">
                   {[0, 1, 2].map((i) => (
-                    <div key={i} className="space-y-1.5">
+                    <div key={i} className={`space-y-1.5${i === 0 ? ' col-span-2 sm:col-span-1' : ''}`}>
                       <Skeleton className="h-3 w-12" />
                       <Skeleton className="h-6 w-16" />
                     </div>
@@ -957,28 +1018,26 @@ export default function DelegationBudgetCard({
 }
 
 /**
- * The section's heading and one-line description, ABOVE its card — the
- * detail-page section rule (design-system.md, #3692).
+ * The section's heading, ABOVE its card — the detail-page section rule
+ * (design-system.md, #3692). No description: the heading and the card already
+ * say what the section is, and a description is optional under the rule
+ * (#4476). The `mb-3` is the heading-to-card gap the description used to
+ * carry.
  */
 function SpendingHeading({
-  retired,
   headingRef,
 }: {
-  retired?: 'revoked' | 'archived'
   /** #4261: the collapse-focus chain's last resort when every trigger is gone. */
   headingRef?: React.Ref<HTMLHeadingElement>
 }) {
   return (
-    <div className="mb-3">
-      <h2 ref={headingRef} tabIndex={-1} className="v2-text-h3 text-[var(--v2-ink)] outline-none">
-        Spending
-      </h2>
-      <p className="mt-0.5 text-sm text-[var(--v2-ink-muted)]">
-        {retired
-          ? 'What this agent can still spend each period.'
-          : 'What this agent can spend each period. Budgets are enforced on-chain: a payment over budget is declined before any money moves.'}
-      </p>
-    </div>
+    <h2
+      ref={headingRef}
+      tabIndex={-1}
+      className="v2-text-h3 mb-3 text-[var(--v2-ink)] outline-none"
+    >
+      Spending
+    </h2>
   )
 }
 
@@ -1159,7 +1218,7 @@ function BudgetRow({
         <p className="text-sm font-medium text-[var(--v2-ink)]">
           {amount} {t?.symbol ?? ''} {periodLabel}
         </p>
-        <p className="truncate text-xs text-[var(--v2-ink-muted)]">
+        <p className="truncate text-xs text-[var(--v2-ink-3)]">
           {/* #3331: a merchant-locked budget names the merchant it pays,
               rather than only the address it happens to be pinned to. */}
           {budget.merchant_name
@@ -1267,7 +1326,11 @@ function BudgetRow({
  * row built by hand — `StatTile.value` is a `string` and cannot carry an
  * `Amount` (its "≈" and currency mode), and `StatTile` lives in
  * `packages/ui`, shared with ops. The merchant sits on its own line below,
- * with no divider. A long figure wraps inside its cell; nothing truncates.
+ * with no divider. A money figure never wraps (#4400, `Amount` is
+ * `whitespace-nowrap`); the layout gives it room: below `sm` Spent takes the
+ * whole first row and Payments and Last paid share the second; from `sm` the
+ * three sit across, Spent's track never narrower than its figure. Nothing
+ * truncates.
  */
 function LastThirtyDays({
   stats,
@@ -1306,10 +1369,13 @@ function LastThirtyDays({
         </>
       ) : (
         <>
-          <dl className="mt-2.5 grid grid-cols-3 gap-3">
-            <div className="min-w-0">
+          {/* #4400: from `sm`, three across — equal thirds while Spent fits
+              its third, and Spent widens (the short Payments and Last paid
+              give way) when a larger figure needs the room. */}
+          <dl className="mt-2.5 grid grid-cols-2 gap-3 sm:grid-cols-[minmax(max-content,1fr)_minmax(0,1fr)_minmax(0,1fr)]">
+            <div className="col-span-2 min-w-0 sm:col-span-1">
               <dt className="text-xs text-[var(--v2-ink-3)]">Spent</dt>
-              <dd className="mt-0.5 break-words text-[var(--v2-ink)]">
+              <dd className="mt-0.5 text-[var(--v2-ink)]">
                 <Amount amount={unpriced && net === 0 ? null : net} currency={currency} approx={approx} size="md" />
               </dd>
             </div>

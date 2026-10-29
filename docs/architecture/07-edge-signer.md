@@ -45,7 +45,7 @@ covers:
   - packages/mcp-server/src/tools/plain-http-x402.ts
   - packages/mcp-server/src/tools/contracts.ts
   - packages/backend/src/modules/mpp/sweep.ts
-last-verified: "2026-10-19"
+last-verified: "2026-10-25"
 ---
 
 # Haven — Edge Signer
@@ -109,18 +109,22 @@ The edge signer ships as **`@haven_ai/signer`** in two layers:
      gets the unknown-binding refusal, which also builds nothing.
      `NO_FUNDING_LEG` carries `next_action: sign_and_submit_payment`, no tool, and a
      `next_tool_omitted_reason` per site: here, submit the child signature the
-     agent already holds to `haven_submit` with `settlement_scheme: 'erc7710'`;
-     on `haven_sign_x402`, sign the child with `haven_sign` first. No tool is
-     named because the signer's own next-step targets declare only `haven_get_payment_status`, and the refusal does not hold the signature argument a `haven_submit` step would need. Reuses the SDK's `selectStandardPaymentOption` +
+     agent already holds to `haven_submit` with `settlement_scheme: 'erc7710'`
+     on a plain-HTTP merchant, or to `haven_settle_mcp_tool` with no
+     `payment_header` on an MCP merchant; on `haven_sign_x402`, sign the child
+     with `haven_sign` first. No tool is named because the refusal does not hold
+     the signature argument a `haven_submit` / `haven_settle_mcp_tool` step would
+     need, and because the signer cannot tell the two merchant transports apart
+     (#4449). Reuses the SDK's `selectStandardPaymentOption` +
      `toStandardPaymentRequirements` + the `x402` library. Since #3888 the
      authorization's nonce is not the library's random draw: the signer
      overwrites it with `deriveX402PaymentNonce(expected.paymentId)` on the
      unsigned payload `preparePaymentHeader` built, then lets the library's
-     `signPaymentHeader` sign it (`packages/signer/src/core.ts:448-454`). That
+     signPaymentHeader` sign it (`packages/signer/src/core.ts:496-503`). That
      ties the merchant's on-chain `AuthorizationUsed(delegate, nonce)` to the
      Haven payment, so the backend's settlement sweeper can attribute a
      settlement the agent never reported
-     (`packages/backend/src/modules/x402/eip3009-settlement-sweeper.ts:464`, the nonce the scan looks up).
+     (`packages/backend/src/modules/x402/eip3009-settlement-sweeper.ts:472`, the nonce the scan looks up).
      Signers older than #3888 still send a random nonce. Why this is safe is in
      the [delegation-rail security model](../security/delegation-rail-security-model.md)
      ("Since #3888 the 3009 header's nonce is derived, not random"); the
@@ -220,6 +224,39 @@ The edge signer ships as **`@haven_ai/signer`** in two layers:
    that only ever reads MCP `instructions` still learns the refusal carries
    `code` / `supported_versions` / `received_version` / `fallback` as data,
    not just a message to pattern-match.
+
+   **Success results name their next step too (#4449).** Until #4449 only the
+   signer's REFUSALS carried the next-step family (#3103); a successful
+   signature said nothing about what to call next, so `CLAUDE.md`'s "every MCP
+   payment-flow response names its next tool" was false for the six success
+   sites. Each now carries either `next_tool_name` +
+   `next_tool_server_role: 'hosted'` + `next_arguments`, or a literal
+   `next_tool_omitted_reason` — the `next_tool` family only, never
+   `next_action` / `safe_to_continue`, which stay on refusals (the task-budget
+   and sub-budget successes have never carried them either). Where the signer
+   KNOWS the next tool it names it through the SDK builder: a direct-payment
+   `haven_sign` hands off to `haven_submit` with `{ payment_id, signature }`
+   (the `haven_submit#payment` variant beside `#task_budget` / `#sub_budget`),
+   and `haven_sign_sweep_delegate` hands its signature back to
+   `haven_sweep_delegate` with `{ authorization, signature }` (the
+   `haven_sweep_delegate#sweep` variant). Where it cannot know, it says why
+   instead of guessing: the three x402 success sites (`haven_sign` on an x402
+   context, `haven_sign_x402`, `haven_x402_sign_header`) cannot tell an MCP
+   merchant from a plain-HTTP one, nor a fresh signature from a funded-retry
+   resume — the fetched sign context keeps only `paymentId`, `payloadHash`,
+   `typedData`, `x402Expected`, `paymentRequired` and `clientUpdate`, and the
+   caller-supplied `x402_expected` path has no context at all — so each reason
+   names BOTH settle routes (`haven_submit` with `settlement_scheme: 'erc7710'`
+   for a plain-HTTP merchant, `haven_settle_mcp_tool` with no `payment_header`
+   for an MCP merchant). A guessed `haven_submit` would be wrong on an MCP
+   merchant and on the resume path. `haven_sign_siwx` names no tool because no
+   hosted tool follows a sign-in. The erc7710 `haven_sign` result still carries
+   `x402_binding` (the change is additive), and the tool description now says
+   that id is already retired (#4256), so it is unusable. No signing decision
+   changes and `SUPPORTED_X402_EXPECTED_VERSIONS` is untouched. The success
+   walk (`packages/signer/src/next-step-success.test.ts`) is these sites' only
+   guard — `lint:next-steps` counts emission blocks that carry a `next_action`
+   decision, and a success result carries none.
 
    **MCP `instructions` on the two payment-brain servers (agent-prompt audit,
    items A/B).** Since #1306–#1311 shipped the guided catalog-purchase flow
@@ -639,11 +676,14 @@ account is permanently out of scope.
   can complete, and nothing here is a path that still exists server-side.
   Delegation-rail payments (#829/#830) sign the account's EIP-712 typed data
   verbatim via the SDK — `HavenClient` dispatches on
-  `sign_data.signature_scheme` (`eip712_userop` for payments,
-  `eip712_delegation` for x402 settlement) to
-  `signUserOpTypedDataForDelegation` — and are not exposed as edge-signer or
-  hosted-MCP tools today. The retired session rail's `eip191_userop` scheme is
-  refused (#834).
+  `sign_data.signature_scheme`: `eip712_userop` (payments) to
+  `signUserOpTypedDataForDelegation`, `eip712_delegation` (x402 settlement)
+  to `signSettlementDelegationTypedData` after `assertOwnSettlementChild`
+  (`packages/sdk/src/client.ts:668-697`). In the hosted topology this
+  signer's `haven_sign` signs both: the `eip712_userop` typed data (by
+  `payment_id` since #3271, under the #3272 allowlist; see Regular payment
+  above) and the erc7710 settlement child, after `verifySettlementChild`
+  (#3281). The retired session rail's `eip191_userop` scheme is refused (#834).
 - Regular payment signing is chain-neutral; the backend-provided payload and
   on-chain wallet rules define the transfer (AllowanceModule-hash signing:
   removed, #3169).
@@ -685,3 +725,36 @@ account is permanently out of scope.
 > the `core.ts:448-454` and sweeper `:464` line anchors, the tool set and
 > `--help` / unknown-option exit 2 (run), the consent and ack paths, the audit
 > rotation constants, the SIWX grammar limits, and the 300 s delivery default.
+
+> **Re-verified 2026-10-23 (#4372 part A, at dev `1579908a4`):** the whole
+> document was re-read. Changed: the nonce line anchors (`core.ts:495-501`,
+> sweeper `:472`), and the scope note no longer says delegation-rail payments
+> are not exposed as signer tools — `haven_sign` signs their `eip712_userop`
+> typed data (#3271/#3272) and the erc7710 settlement child — and names the
+> SDK's `eip712_delegation` target, `signSettlementDelegationTypedData`. Re-checked without change: `RETIRED_BINDING_MEMORY`
+> (64), the handshake version fields, the egress deadlines (5 s discovery, 15 s
+> quote and session, 300 s delivery, ≤3 GET redirects), the sweep chains
+> (`isSweepableChain`: Base, Base Sepolia), `X402_BINDING_PRIVATE_KEY` with no
+> fallback, `HAVEN_SIGNER_ACK` and the ack sidecar, and the 8 MiB audit rotation.
+
+> **Re-verified 2026-10-25 (weekly docs audit #3645, at dev `615686369`):**
+> the whole document's standing claims were re-spot-checked at this head.
+> Changed: the derived-nonce line anchor is now `core.ts:496-503` (the
+> overwrite and the library's `signPaymentHeader` call moved down three
+> lines); the sweeper's `:472` nonce anchor still lands exactly. Checked and
+> accurate: `RETIRED_BINDING_MEMORY` (64, `core.ts:270`), the
+> `client.ts:668-697` scheme dispatch, the 8 MiB audit rotation
+> (`AUDIT_ROTATE_BYTES`), the SIWX 300 s window plus pinned skew tolerance
+> (`SIWX_MAX_AGE_SECONDS`, `siwx.ts`), the dedicated binding key still read
+> from `X402_BINDING_PRIVATE_KEY` with a throw (never the relayer key — it
+> lives in `infra/chain/x402-binding-signer.ts:90`), and
+> `isSweepableChain` in `packages/sdk/src/sweep.ts`. The week's covered
+> drift (x402 proof-header settlement reports #4075, expired-only budgets
+> #4376) changed what reports carry and refuse, not any signer boundary.
+
+> **Re-verified 2026-10-26 (#4449, the signer's success next-step family):** the
+> six success sites and the settlement-child guidance were re-read against
+> `packages/signer/src/tools.ts`, `next-step.ts` and `no-funding-leg.ts` at
+> `origin/dev` `b9f9f1e47`. Scope of this note: the success-result paragraph and
+> the `NO_FUNDING_LEG` bullet. The rest of this document was not re-read for it,
+> and `last-verified` is not bumped.

@@ -2,8 +2,8 @@
 
 Internal x402 demo merchant MCP server for Haven. It exposes a small fake
 merchant catalog, gates purchases with standard x402 `PAYMENT-SIGNATURE`,
-supports ERC-7710 and EIP-3009 settlement options for Base USDC, and returns
-Swedish invoice-style output.
+supports ERC-7710 and EIP-3009 settlement options for Base USDC, and returns a
+Swedish-style invoice.
 
 This package is a technical demo for a merchant-controlled wallet, not a Haven
 custody, facilitator, acquiring, fiat/card, third-party merchant settlement, or
@@ -30,27 +30,39 @@ merchant-of-record product. Funds do not flow through Haven.
   handlers run.
 - The x402 v2 extensions echo, advertised in every challenge and enforced on
   every payment (see [Extensions echo](#extensions-echo-x402-v2-enforced)).
-- Swedish invoice text and JSON output after a settled purchase.
+- An invoice after a settled purchase: Swedish bookkeeping JSON (also sent as
+  the `x-receipt-json` header) and a rendered text, English by default and
+  Swedish with `locale: 'sv'` (#1550).
 
 ## Products
 
 | Product | Tool | Price |
 |---|---|---|
 | NordShield VPN Basic | `buy_vpn` | 0.001 USDC |
+| NordShield VPN Legacy | `buy_vpn` | 0.001 USDC, EIP-3009 only |
 | NordShield VPN Pro | `buy_vpn` | 0.003 USDC |
 | NordShield VPN Ultra | `buy_vpn` | 0.005 USDC |
 | CloudNest 50 GB | `buy_cloud_storage` | 0.0005 USDC |
 | CloudNest 200 GB | `buy_cloud_storage` | 0.0015 USDC |
 | CloudNest 1 TB | `buy_cloud_storage` | 0.004 USDC |
 
-Every product advertises x402 capability metadata through `list_products`:
+`vpn_legacy` (`plan: "legacy"`) is the one EIP-3009-only product (#1441): the QA
+harness's hosted funding-leg scenario needs a merchant offer the erc7710
+preference cannot pick. Every other product supports both methods.
 
-- `network`: `eip155:8453` on prod/mainnet, or `eip155:84532` when configured for dev/testnet
-- `asset`: USDC
-- `settlement_methods`: `eip3009`, `erc7710` when both are enabled
-- `default_settlement_method`: `eip3009`
-- `resource_url`: the configured merchant MCP URL
-- `hosted_urls`: the canonical dev and prod MCP URLs
+Every product's x402 capability shows in `list_products`, in its text line and
+in its `structuredContent.products` record:
+
+- the network: `eip155:8453` on prod/mainnet, or `eip155:84532` when configured for dev/testnet
+- the asset: USDC
+- the settlement methods it supports: `eip3009`, plus `erc7710` when the
+  merchant enabled it and the product supports it
+- the default settlement method: the first supported one, which is `eip3009`
+- the merchant MCP URL, and in the text line the hosted dev and prod routing
+  targets
+
+The discovery document (`GET /`, below) carries the same per-product methods
+plus `hosted_urls` and `routing` for both deployments.
 
 `list_products` also returns a `structuredContent.products` array — one stable,
 machine-readable record per product (`product_id`, `display_name`,
@@ -76,16 +88,26 @@ the invoice, or on-chain settlement state as the source of truth for
 bookkeeping/reconciliation, and every field is read off the already-settled
 payment (never re-derived from the quoted catalog price).
 
-Purchase tools accept an optional `settlement_method` argument:
+Purchase tools accept an optional `settlement_method` argument. It decides
+which option comes FIRST in the 402's `accepts`; every other method the product
+and the merchant support is still offered after it:
 
-- omitted: uses `eip3009`, which keeps current Haven SDK and generic x402 clients compatible
-- `erc7710`: pays directly from a smart account through the configured DelegationManager
-- `eip3009`: uses the EIP-3009 fallback path
+- omitted: `eip3009` first, which keeps generic x402 clients compatible
+- `erc7710`: the smart-account option first, paid through the configured
+  DelegationManager
+- `eip3009`: the EIP-3009 option first
 
-Default payment requirements keep the EIP-3009 option first because existing
-Haven SDK clients select the first matching Base USDC `exact` option and do not
-yet inspect `extra.assetTransferMethod`. ERC-7710-aware clients should select
-the option tagged with `assetTransferMethod: "erc7710"` explicitly.
+A method the merchant has not enabled, or the product does not support, is
+refused. The tools also take `locale` (`sv` for Swedish text) and
+`result_detail` (`summary` drops the rendered invoice and the bookkeeping JSON
+from the text; the structured content, including `summary`, and the
+`x-receipt-json` header are the same either way).
+
+A generic client that takes the first matching Base USDC `exact` option gets
+EIP-3009 by default. Haven's clients read `extra.assetTransferMethod`: under
+the #1450 preference rule, whose selector came with #1453, they prefer the option tagged `assetTransferMethod: "erc7710"` when the
+account is on the delegation rail and fall back to EIP-3009 otherwise
+(`selectX402SettlementScheme` in `packages/sdk/src/x402.ts`).
 
 ## Extensions echo (x402 v2, enforced)
 
@@ -151,7 +173,8 @@ inventing one. After decoding the challenge as `pr`, the in-repo test helpers
 all echo it with
 `...(pr.extensions ? { extensions: pr.extensions } : {})`: `signedHeader` in
 `src/x402.test.ts`, `src/http.test.ts` and `src/http-session-restart.test.ts`,
-and `erc7710Header` in `src/erc7710.test.ts`. The rule's own tests are
+`erc7710Header` in `src/erc7710.test.ts`, and `signSkipSettleHeader` in
+`src/skip-settle-guard.test.ts`. The rule's own tests are
 `describe('extensions echo rule (#2361)')` in `src/x402.test.ts`, one per
 branch of `assertExtensionsEchoed`: the version cross-check (with a dropped
 echo, and with a perfect one), an absent or non-object echo, a dropped key
@@ -188,9 +211,9 @@ current environment, chain, MCP URL, and both hosted routing targets.
 This standalone MCP service is the CloudNest/NordShield x402 demo merchant.
 Do not confuse it with backend demo surfaces:
 
-- Backend `/demo/mpp/*` is the internal Machine Payment Protocol smoke-test
-  resource. It is not the CloudNest/NordShield merchant and does not expose the
-  `buy_cloud_storage` or `buy_vpn` tools.
+- The retired backend `/demo/mpp/*` surface was the internal Machine Payment
+  Protocol smoke-test resource, never the CloudNest/NordShield merchant. #1328
+  deleted it, and the dev backend answers 404 there.
 - The retired backend `/x402/resources/*` surface was an experimental x402
   resource registry/API, not the hosted MCP merchant deployment agents should
   use for demo product purchases. It is no longer registered; this package is

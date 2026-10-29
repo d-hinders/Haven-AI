@@ -157,8 +157,10 @@ export async function insertCatalogSubmission(
 // statements with guarded transitions (`... WHERE status = <expected>`), so
 // the once-only property of each move is a database fact, not a caller
 // convention. The lifecycle module (`modules/catalog/lifecycle.ts`) holds the
-// policy — cadence, failure thresholds, retention, alarm thresholds — and a
-// concurrency-safe cooldown is enforced up-stack by `runProbeBatch`.
+// policy — cadence, failure thresholds, retention, alarm thresholds. The
+// per-host probe cooldown is enforced up-stack: `runProbeBatch` records it
+// before dispatch (so a burst cannot slip past it), and the monitor
+// (`createCatalogIngestMonitor`) holds one instance across ticks (#4407).
 // ---------------------------------------------------------------------------
 
 export interface CatalogLifecycleRow {

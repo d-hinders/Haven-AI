@@ -135,6 +135,10 @@ test.describe('list controls — layout', () => {
     const sheet = page.getByRole('dialog', { name: 'Filters' })
     await expect(sheet).toBeVisible()
 
+    // #4453: the revoked agent now sits behind the Initiator facet's inactive
+    // group, so its row is only in the DOM once the disclosure is opened.
+    await sheet.getByRole('button', { name: 'Show 1 inactive' }).click()
+
     // The long Initiator row: the label wraps (line-clamped), the meta slot
     // shows the status in full — nothing reveals by hover.
     const row = sheet.locator('label').filter({ hasText: 'Lovable Dev preview deployment helper' })
@@ -148,7 +152,10 @@ test.describe('list controls — layout', () => {
 
     // Selecting it puts the full label + status on the status-row chip.
     await row.getByRole('radio').check()
-    await sheet.getByRole('button', { name: /^Show / }).click()
+    // The sheet's submit button ("Show 4 agents"). The inactive group's
+    // disclosure row no longer collides with it: once open it reads
+    // "Hide 1 inactive" (#4512).
+    await sheet.getByRole('button', { name: /^Show \d+ (agents?|transactions?)$/ }).click()
     await expect(sheet).toBeHidden()
     const chipLabel = phone.getByText('Initiator: Lovable Dev preview deployment helper (Revoked)')
     await expect(chipLabel).toBeVisible()
@@ -199,9 +206,14 @@ test.describe('list controls — layout', () => {
     await expect(
       page.getByTestId('ds-list-controls-filtered').getByTestId('list-summary').getByTestId('list-toolbar-count'),
     ).toHaveText('1 of 5 agents')
-    // #4196: no filter, no status row; the paging button sits below its card.
+    // #4196/#4495: no filter, no status row; the paging row is the card's
+    // footer — inside the card, not below it.
     await expect(page.getByTestId('ds-list-controls-default').getByTestId('list-toolbar-status')).toHaveCount(0)
-    await expect(page.getByTestId('ds-list-controls-paging').getByRole('button', { name: 'Show 24 more' })).toBeVisible()
+    const paging = page.getByTestId('ds-list-controls-paging')
+    const pagingCard = paging.locator('.shadow-card')
+    await expect(pagingCard).toHaveCount(1)
+    await expect(pagingCard.getByTestId('list-show-more')).toBeVisible()
+    await expect(pagingCard.getByRole('button', { name: 'Show 24 more' })).toBeVisible()
     if (EVIDENCE) {
       for (const state of ['default', 'filtered', 'no-match', 'loading', 'phone', 'server', 'paging', 'primitives']) {
         await evidence(page.getByTestId(`ds-list-controls-${state}`), `${state}-desktop`)

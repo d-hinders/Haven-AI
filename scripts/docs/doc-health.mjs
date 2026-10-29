@@ -38,7 +38,7 @@ export const FLAGS = ['no-front-matter', 'no-owner', 'empty-covers', 'unverified
 // the repo's commit-based staleness signal.
 export const NOTES = [
   '`no-front-matter` and `no-owner` cannot fire on a governed doc: validate-frontmatter.mjs is a hard CI gate (docs:check), so an empty column is the expected state, not a broken instrument.',
-  '`unverified-90d` is age only: `last-verified` more than 90 days before `generatedAt`, excluding `status: archived|research`. It is NOT the commit-based staleness signal (audit-staleness.mjs, the weekly "Docs staleness audit (weekly)" issue), which counts commits to a doc\'s `covers` since it was verified and cannot be computed at build time on a shallow clone.',
+  '`unverified-90d` is age only: `last-verified` more than 90 days before `generatedAt`, excluding `status: archived`, `research` and `record`. It is NOT the commit-based staleness signal (audit-staleness.mjs, the weekly "Docs staleness audit (weekly)" issue), which counts commits to a doc\'s `covers` since it was verified and cannot be computed at build time on a shallow clone.',
   '`empty-covers` is a doc with `covers: []`. The validator requires an inline reason for it, so it is a deliberately uncoupled doc that no coupling gate can implicate, not an error.',
 ]
 
@@ -70,6 +70,7 @@ export function docEntry(path, fm, generatedAt) {
   if (
     status !== 'archived' &&
     status !== 'research' &&
+    status !== 'record' &&
     lastVerified &&
     DATE_RE.test(lastVerified) &&
     daysSince(lastVerified, generatedAt) > UNVERIFIED_DAYS

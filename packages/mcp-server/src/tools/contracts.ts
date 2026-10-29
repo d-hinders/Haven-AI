@@ -1438,11 +1438,11 @@ const REPORT_DELIVERY_QUALITY_DESCRIPTION = [
   '"partial" (only part of it usable), plus an optional note (max 2000 chars) saying what was',
   'wrong. Use it after a Haven-completed MCP purchase (haven_settle_mcp_tool /',
   'haven_complete_mcp_tool) or a plain-HTTP retry whose output disappointed — especially when',
-  'a paid call returned an error body, empty content or gibberish, so the owner does not read',
-  'the receipt as a success. Evidence only: it moves no money, never changes settled or any',
+  'a paid call returned an error body, empty content or gibberish, so the receipt does not read',
+  'as a success. Evidence only: it moves no money, never changes settled or any',
   'money field, and works only on your OWN settled payments (another agent\'s payment is',
-  'refused). A re-report replaces your earlier verdict; receipts and the dashboard carry it',
-  'beside the payment.',
+  'refused). A re-report replaces your earlier verdict; the receipt carries it beside the',
+  'payment.',
 ].join(' ')
 
 const SWEEP_DELEGATE_DESCRIPTION = [
@@ -1548,6 +1548,15 @@ export interface ToolFailure {
   /** Structured hint pointing the agent at the correct tool for this operation. */
   suggested_tool?: string
   statusCode?: number
+  /**
+   * #4468: the backend's own `error_code`, relayed verbatim on the branches
+   * that answer a typed backend refusal with a typed hosted `code`. Before it,
+   * the machine-readable reason survived only as English in `message`. Absent
+   * on every other branch — the generic `HavenApiError` branch deliberately
+   * does not relay it (that decision belongs to #4470, which edits the same
+   * branch).
+   */
+  error_code?: string
   paymentId?: string
   status?: string
   phase?: string

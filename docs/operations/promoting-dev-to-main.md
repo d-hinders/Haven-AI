@@ -10,7 +10,7 @@ covers:
   - docs/operations/dev-environment.md
   - packages/backend/src/index.ts
   - scripts/release-scope.mjs
-last-verified: "2026-10-19"
+last-verified: "2026-10-25"
 ---
 
 # Promoting `dev → main` (production release)
@@ -131,8 +131,14 @@ so this is a rule to point at rather than a question to ask the release runner.
       and is a green tick that is not coverage. The one-line check is in
       [`agent-qa.md` § *Automation & gating*](./agent-qa.md#automation--gating).
 - [ ] **Migrations:** list every migration included since the last promotion.
-      Confirm each is **forward-only / safe on existing rows**, and that a
-      **prod DB snapshot** exists before they run on deploy.
+      Confirm each is **forward-only / safe on existing rows**. A **prod DB
+      snapshot** before they run on deploy is **recommended, not required**
+      (owner decision, 2026-10-23: the current Railway plan cannot create
+      backups). Record on the PR whether one was taken. When none is, the
+      review above carries the risk of a migration that applies and writes
+      wrong data, and you run any data precondition a migration states
+      against prod before merging, for example a duplicate check before a new
+      unique index.
 - [ ] **Migration availability:** does any migration build an index, rewrite a
       table, or otherwise hold a lock on a hot table? If so, record the expected
       lock duration and mitigation. Since #2150 the first choice is in the repo,
@@ -208,7 +214,7 @@ so this is a rule to point at rather than a question to ask the release runner.
       The per-branch inventory and the `gh api` command that produced it are in
       [`../contributing/autonomous-pr-loop.md`](../contributing/autonomous-pr-loop.md#one-time-github-setup-required)
       step 3.
-- [ ] **Sweep the docs staleness audit** (the open "Docs staleness audit (weekly)" issue, [#3645](https://github.com/d-hinders/Haven-AI/issues/3645) at this writing — `docs-audit.yml` rewrites the open one every Monday, and opens a new one when the last was closed). Open it and give every `current`-status doc it ranks one of three dispositions: **fix** it in a follow-up, **file** it, or **accept** it with a reason recorded in this promotion PR. Contract docs cannot reach here — the coupling gate blocks them on the PR that made them stale — so what this sweeps is the *non-contract* drift that is allowed to accumulate on `dev` between promotions, which is exactly the class no per-PR gate is watching. `archived` and `research` docs are not ranked and need no disposition (#2638). An empty or unchanged report is a valid outcome; say so rather than leaving the item silently unticked.
+- [ ] **Sweep the docs staleness audit** (the open "Docs staleness audit (weekly)" issue, [#3645](https://github.com/d-hinders/Haven-AI/issues/3645) at this writing — `docs-audit.yml` rewrites the open one every Monday, and opens a new one when the last was closed). Open it and give every `current`-status doc it ranks one of three dispositions: **fix** it in a follow-up, **file** it, or **accept** it with a reason recorded in this promotion PR. Contract docs cannot reach here — the coupling gate blocks them on the PR that made them stale — so what this sweeps is the *non-contract* drift that is allowed to accumulate on `dev` between promotions, which is exactly the class no per-PR gate is watching. `archived`, `research` and `record` docs are not ranked and need no disposition (#2638, #4459). An empty or unchanged report is a valid outcome; say so rather than leaving the item silently unticked.
 - [ ] **The request-validation rollout's named residue (`#3223`, epic #3028) is expected here.** `POST /machine-payments/reconciliation-events` is intentionally NOT enforced — the shadow reading did not cover it and CANNOT have: the route is only posted on a genuine merchant rejection after a confirmed payment, and driving it synthetically would write a false record into a payment's ledger (owner decision 2026-09-24 on epic #3028). Do not read its `NOT PROVEN` row in a shadow table, or its entry in `lint-request-schemas-baseline.json` (`routes/machine-payments-reconciliation-events.ts`), as unfinished slice work; it is the standing residue until a real rejection — or a QA scenario that produces one — gives the reading traffic to prove it, at which point its file joins `enforcedModules` and its handler rungs delete like every other flip.
 - [ ] A code-owner approval, from an owner other than the PR author, is present
       if the batch touches an owned path — today only migration files:
@@ -217,7 +223,10 @@ so this is a rule to point at rather than a question to ask the release runner.
 ## Merge, deploy, and verify prod
 
 - [ ] Merge the promotion PR **with a merge commit** (`gh pr merge --merge`),
-      never squash. A squash-promotion puts a history-less copy of the batch on
+      never squash. The *Dev gate* ruleset on `main` now allows only the
+      `merge` method, so GitHub refuses a squash or rebase there (`gh api
+      repos/d-hinders/Haven-AI/rulesets/18134280`, `allowed_merge_methods`).
+      A squash-promotion puts a history-less copy of the batch on
       `main`; the moment `dev` refactors any of those files, the next promotion
       PR goes DIRTY with mass conflicts (this happened with #1152 → #1172, and
       took a `-s ours` reconcile merge, #1173, to repair).
@@ -333,7 +342,8 @@ so this is a rule to point at rather than a question to ask the release runner.
       and run one small real payment / x402 happy path as a canary.
 - [ ] Watch prod error logs for a few minutes. If anything is off, **roll back**
       (Railway redeploy-previous / Vercel instant rollback) and, if a migration is
-      implicated, restore from the pre-deploy snapshot.
+      implicated, restore from the pre-deploy snapshot if one was taken;
+      otherwise fix forward with a new migration.
 
 ## Run the prod smoke on the right hostname
 
@@ -375,7 +385,7 @@ deployment holding a confusing name.
 Separately: when this section was written (2026-08-06), `main` had not moved
 since **2026-06-26**. That was a promotion backlog, not a deploy bug, and
 promotions have run since: the latest at this doc's last verification is
-#3934, merged to `main` on 2026-10-14.
+#4338 (0.11.0-alpha.0), merged to `main` on 2026-10-23 with a merge commit.
 
 > **Re-verified 2026-10-19 (weekly docs audit #3645, at dev `cf88627c`):**
 > the whole checklist was re-read. Changed: the npm item names the #3797
@@ -389,3 +399,17 @@ promotions have run since: the latest at this doc's last verification is
 > RPC probe's defaults (batch 10, burst 20, cap 50), the public RPC defaults,
 > `SWEEP_MIN_USDC`'s `0.01` default, and the `enforce` default. Not checkable
 > from the repo: the npm token's expiry date.
+
+> **Re-verified 2026-10-25 (#4372 part H, at dev `e778da444`):** the whole
+> checklist was re-read. Changed: the merge item records that *Dev gate* now
+> allows only the `merge` method on `main`, and the closing note names #4338
+> as the latest promotion. Checked and accurate: the 19 required contexts (15
+> on *Haven automerge rules* for `main` and `dev`, plus `gate`, `qa-freshness`,
+> *Design visual regression* and *Frontend browser smoke* on *Dev gate*), the
+> strict up-to-date rule on `main` only, `dismiss_stale_reviews_on_push`, the
+> one CODEOWNERS rule (migration files), *External intake gate* required on
+> `dev` only, the workflow names, `publish.yml`'s `promote-tags` job and its
+> FAILED rows, `release:scope`'s exit codes 2 and 1, the RPC probe's defaults
+> (batch 10, burst 20, cap 50, logs range 500), `SWEEP_MIN_USDC`'s `0.01`
+> default, the `enforce` default, and every link anchor. Not checkable from the
+> repo: the npm token's expiry date.

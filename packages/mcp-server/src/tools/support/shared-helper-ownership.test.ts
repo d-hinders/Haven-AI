@@ -140,6 +140,10 @@ const HELPER_OWNERSHIP: Record<string, { module: string; slices: Slice[] }> = {
   // haven_report_settlement_evidence (s2812).
   SETTLEMENT_PROOF_HEADER_MISSING_CODE: { module: 'errors', slices: ['s2811', 's2812'] },
   isMissingProofHeaderRefusal: { module: 'errors', slices: ['s2811', 's2812'] },
+  // #4458: the omitted reason for an ENDED budget — the normaliser's own
+  // branch (every slice reaches it) and the catalog prepare preflight's
+  // DELEGATION_EXPIRED refusal (s2810), which must use the same words.
+  DELEGATION_EXPIRED_OMITTED_REASON: { module: 'errors', slices: ['s2809', 's2810', 's2811', 's2812'] },
   // tools/support/guidance.ts — agent guidance and purchase summaries.
   buildAgentGuidance: { module: 'guidance', slices: ['s2809', 's2810', 's2811', 's2812'] },
   buildPurchaseSummary: { module: 'guidance', slices: ['s2810', 's2812'] },
@@ -249,6 +253,9 @@ const HELPER_OWNERSHIP: Record<string, { module: string; slices: Slice[] }> = {
   // quote surfaces (s2810's two MCP quote tools and s2811's haven_quote_x402).
   selectedSettlement: { module: 'quote-response', slices: ['s2810', 's2811'] },
   quoteBudgetCheckFields: { module: 'quote-response', slices: ['s2810', 's2811'] },
+  // #4458: the words for an ENDED budget, shared by the quote warning (all
+  // three quote surfaces) and the catalog prepare preflight's refusal (s2810).
+  budgetEndedWarningMessage: { module: 'quote-response', slices: ['s2810', 's2811'] },
   runQuoteBudgetPrecheck: { module: 'quote-response', slices: ['s2810', 's2811'] },
   merchantDenialWarnings: { module: 'quote-response', slices: ['s2810', 's2811'] },
   // tools/support/catalog-entry.ts — catalog refusal contract, shared by the
@@ -474,6 +481,7 @@ const SUPPORT_MODULE_EXPORTS: Record<string, string[]> = {
     'egressRefusalBeforeIntent', // #3747
     'SETTLEMENT_PROOF_HEADER_MISSING_CODE', // #4061
     'isMissingProofHeaderRefusal', // #4061
+    'DELEGATION_EXPIRED_OMITTED_REASON', // #4458
   ],
   guidance: [
     'buildAgentGuidance',
@@ -522,6 +530,7 @@ const SUPPORT_MODULE_EXPORTS: Record<string, string[]> = {
     'quoteBudgetCheckFields',
     'runQuoteBudgetPrecheck',
     'merchantDenialWarnings',
+    'budgetEndedWarningMessage', // #4458
   ],
   // #3419: the task-budget twin rides s3329's two handoff sites; the min-version
   // constant is reported on those results and pinned cross-package.

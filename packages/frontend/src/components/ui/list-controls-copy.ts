@@ -48,8 +48,8 @@ export function countLabel(noun: ListNoun, count: ListCount, filtered: boolean):
 }
 
 /**
- * The paging button below a paged list (#4196): "Show 25 more", where N is
- * what the next page adds — the page size, or fewer on the last page. When
+ * The paging row inside a paged list's card (#4196): "Show 25 more", where N
+ * is what the next page adds — the page size, or fewer on the last page. When
  * the server still reports more but the totals say nothing is left (a poll
  * moved the total between reads), it says "Show more" rather than "Show 0
  * more".
@@ -68,6 +68,27 @@ export function showResultsLabel(noun: ListNoun, count: ListCount | null | undef
 }
 
 export const filtersButtonLabel = (active: number): string => (active > 0 ? `Filters (${active})` : 'Filters')
+
+/**
+ * An option group's disclosure row (#4452, #4512). The label carries the
+ * group's STATE, not just its size:
+ *
+ * - `collapsed`: "Show 14 inactive" — the rows are hidden, the row opens them;
+ * - `open`: "Hide 14 inactive" — the rows are showing, the row closes them;
+ * - `locked`: "14 inactive" — the group is open because it holds the selected
+ *   value and cannot be collapsed, so the row names no action at all.
+ *
+ * The group's `label` is the page's own noun phrase ("inactive", "archived
+ * agents"), so it is not pluralised here — the count carries the number, and
+ * the label reads the same at 1 and at 14.
+ */
+export type FacetGroupToggleState = 'collapsed' | 'open' | 'locked'
+
+export function facetGroupToggleLabel(count: number, label: string, state: FacetGroupToggleState): string {
+  if (state === 'collapsed') return `Show ${count} ${label}`
+  if (state === 'open') return `Hide ${count} ${label}`
+  return `${count} ${label}`
+}
 
 /**
  * A facet's value as the trigger and its chip read it: "All", one option's

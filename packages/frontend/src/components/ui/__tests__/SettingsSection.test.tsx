@@ -1,0 +1,250 @@
+import { render } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
+import { SettingsSection, SettingsRow } from '../SettingsSection'
+
+describe('SettingsSection', () => {
+  it('renders the heading OUTSIDE the card, inside a section root that wraps both (#4357)', () => {
+    // The detail-page section rule applied to settings: the heading sits ABOVE
+    // the card so the card can load, swap or be replaced without moving its
+    // heading (the description is optional, #4476). Mutation: wrap the h2
+    // inside the Card (or drop the section root) → red. The `<section>` root
+    // with the heading in it is also what the settings e2e specs and
+    // `screenshot.mjs` locate by — `page.locator('section', { has: heading })`.
+    const { container } = render(
+      <SettingsSection title="Accounting" description="Connect your accounting provider.">
+        <SettingsRow label="Fortnox" detail="Connected." />
+      </SettingsSection>,
+    )
+    const section = container.firstElementChild as HTMLElement
+    expect(section.tagName).toBe('SECTION')
+
+    const heading = section.querySelector('h2')
+    expect(heading).not.toBeNull()
+    expect(heading?.textContent).toBe('Accounting')
+
+    const card = section.querySelector('.rounded-\\[10px\\]')
+    expect(card).not.toBeNull()
+    // The heading is not a descendant of the card.
+    expect(card?.contains(heading as Node)).toBe(false)
+    // The section root wraps both — heading and card are siblings' ancestors.
+    expect(section.contains(heading as Node)).toBe(true)
+    expect(section.contains(card as Node)).toBe(true)
+  })
+
+  it('uses the sentence-case v2-text-h3 heading — no uppercase band (#4357)', () => {
+    // Mutation: keep the old `text-[13px] uppercase tracking-widest` band
+    // title → red.
+    const { container } = render(
+      <SettingsSection title="Preferences">
+        <SettingsRow label="Currency" />
+      </SettingsSection>,
+    )
+    const heading = container.querySelector('h2') as HTMLElement
+    expect(heading.className).toMatch(/\bv2-text-h3\b/)
+    expect(heading.className).not.toMatch(/\buppercase\b/)
+    expect(heading.className).not.toMatch(/\btracking-widest\b/)
+  })
+
+  it('keeps the heading-to-card gap when there is no description or note (#4476)', () => {
+    // The description is optional under the detail-page section rule, so the
+    // gap can no longer ride on the description's `mb-3`. Mutation: drop the
+    // heading's `mb-3` (or leave the gap only on the paragraphs) → red: the
+    // heading renders flush against the card. The "Data" specimen on
+    // `/design-system` is this shape.
+    const { container } = render(
+      <SettingsSection title="Data">
+        <SettingsRow label="Export data" detail="Download everything as CSV." />
+      </SettingsSection>,
+    )
+    const section = container.firstElementChild as HTMLElement
+    const heading = section.querySelector('h2') as HTMLElement
+    const card = section.querySelector('.rounded-\\[10px\\]') as HTMLElement
+    expect(heading.className).toMatch(/\bmb-3\b/)
+    // Nothing sits between the heading and the card — no description paragraph.
+    expect(heading.nextElementSibling).toBe(card)
+    expect(Array.from(section.children).filter((el) => el.tagName === 'P')).toHaveLength(0)
+  })
+
+  it('does not double the gap when a description is present (#4476)', () => {
+    // Every existing caller passes a description, and their layout must not
+    // change: the paragraph's own `mb-3` supplies the gap, so the heading
+    // carries no margin of its own in that case.
+    const { container } = render(
+      <SettingsSection title="Accounting" description="Connect your accounting provider.">
+        <SettingsRow label="Fortnox" />
+      </SettingsSection>,
+    )
+    const heading = container.querySelector('h2') as HTMLElement
+    expect(heading.className).not.toMatch(/\bmb-3\b/)
+  })
+
+  it('renders the description and note ABOVE the card, with the card holding only the divided rows', () => {
+    const { container } = render(
+      <SettingsSection
+        title="Accounting"
+        description="Connect your accounting provider."
+        note="Fortnox and Accounted are live."
+      >
+        <SettingsRow label="Fortnox" />
+      </SettingsSection>,
+    )
+    const section = container.firstElementChild as HTMLElement
+    const card = section.querySelector('.rounded-\\[10px\\]') as HTMLElement
+    const description = Array.from(section.querySelectorAll('p')).find((p) =>
+      p.textContent?.includes('Connect your accounting'),
+    ) as HTMLElement
+    const note = Array.from(section.querySelectorAll('p')).find((p) =>
+      p.textContent?.includes('Fortnox and Accounted are live'),
+    ) as HTMLElement
+    expect(description).toBeTruthy()
+    expect(card.contains(description)).toBe(false)
+    expect(note).toBeTruthy()
+    expect(card.contains(note)).toBe(false)
+    // The description uses the detail-page classes (manage-pattern specimen).
+    expect(description.className).toMatch(/\bmt-0\.5\b/)
+    expect(description.className).toMatch(/\bmb-3\b/)
+    expect(description.className).toMatch(/\btext-sm\b/)
+    expect(description.className).toMatch(/text-\[var\(--v2-ink-2\)\]/)
+    // The note is quieter still.
+    expect(note.className).toMatch(/\btext-xs\b/)
+    expect(note.className).toMatch(/text-\[var\(--v2-ink-3\)\]/)
+  })
+
+  it('keeps SettingsRow unchanged — label, detail, action, and the testid/status passthrough', () => {
+    const { getByTestId, getByText } = render(
+      <SettingsSection title="Accounting">
+        <SettingsRow
+          label="Fortnox"
+          detail="Connected to ACME AB."
+          action={<button type="button">Disconnect</button>}
+          data-testid="connection-actions-fortnox"
+          data-status="connected"
+        />
+      </SettingsSection>,
+    )
+    expect(getByTestId('connection-actions-fortnox').getAttribute('data-status')).toBe('connected')
+    expect(getByText('Fortnox').tagName).toBe('P')
+    expect(getByText('Disconnect').tagName).toBe('BUTTON')
+  })
+
+  it('renders the no-slot row byte-identically — the label/action line IS the row root (#4478)', () => {
+    // The optional full-width slot (#4478) must not change a caller that does
+    // not pass it. This snapshot is today's DOM, committed BEFORE the slot was
+    // added: the row root is the flex line itself, with no wrapper div and no
+    // `order-*` class. Mutation: wrap the line in an inner div unconditionally,
+    // move the padding onto a wrapper, or add an `order-*` utility → red.
+    const { container } = render(
+      <SettingsRow
+        label="Fortnox"
+        detail="Connected to ACME AB."
+        value="Connected"
+        action={<button type="button">Disconnect</button>}
+        data-testid="connection-row-fortnox"
+        data-status="connected"
+      />,
+    )
+    expect((container.firstElementChild as HTMLElement).outerHTML).toMatchInlineSnapshot(`"<div class="flex flex-col gap-3 px-6 py-4 sm:flex-row sm:items-center sm:justify-between " data-testid="connection-row-fortnox" data-status="connected"><div class="min-w-0"><p class="text-sm font-medium text-[var(--v2-ink)]">Fortnox</p><div class="mt-1 text-sm text-[var(--v2-ink-3)]">Connected to ACME AB.</div></div><div class="flex shrink-0 items-center gap-3"><div class="text-sm text-[var(--v2-ink-2)]">Connected</div><button type="button">Disconnect</button></div></div>"`)
+  })
+
+  it('renders the full-width slot after the label/action line, spanning the row (#4478)', () => {
+    // The slot is the row's second child: the label/action line first, the slot
+    // beneath it. It carries no horizontal padding of its own, so a divided
+    // section can meet the card edge; the line keeps the row's `px-6 py-4`.
+    // Mutation: render the slot inside the left text column (the `detail`
+    // position), or give the slot `px-6` → red.
+    const { container } = render(
+      <SettingsRow
+        label="Tax declaration"
+        detail="Required before your agent can pay for tax software."
+        action={<button type="button">Edit</button>}
+        below={<p>What gets sent</p>}
+      />,
+    )
+    const root = container.firstElementChild as HTMLElement
+    const [line, slot] = Array.from(root.children) as HTMLElement[]
+    expect(root.children).toHaveLength(2)
+    expect(line.textContent).toContain('Tax declaration')
+    expect(line.textContent).toContain('Edit')
+    expect(slot.textContent).toBe('What gets sent')
+    // The slot is a direct child of the row root, after the line — it spans the
+    // row rather than sitting in the left text column.
+    expect(slot.parentElement).toBe(root)
+    expect(line.contains(slot)).toBe(false)
+    // Full-bleed: no horizontal padding on the slot container.
+    expect(slot.className).not.toMatch(/\bpx-/)
+    // The line owns the row's padding now.
+    expect(line.className).toMatch(/\bpx-6\b/)
+    expect(line.className).toMatch(/\bpy-4\b/)
+    // No `order-*` utility anywhere in the row: the slot is after the line in
+    // DOM order at every breakpoint. jsdom has no breakpoints, so the 390px
+    // capture in the PR is the rendered evidence for the control's position.
+    expect(root.outerHTML).not.toMatch(/\border-/)
+  })
+
+  it('omits the slot entirely when `below` is not passed (#4478)', () => {
+    // The slot changes the structure only when it is present: without it the
+    // root is still the flex line and owns the row's padding.
+    const { container } = render(<SettingsRow label="Fortnox" detail="Connected." />)
+    const root = container.firstElementChild as HTMLElement
+    expect(root.children).toHaveLength(2)
+    expect(root.className).toMatch(/\bpx-6\b/)
+    expect(root.className).toMatch(/\bpy-4\b/)
+  })
+
+  it('renders the card without the old Card.Header band — no tinted header surface', () => {
+    // Mutation: re-add `<Card.Header padding="spacious">` (the grey band) →
+    // red: the card must contain only the divided row list.
+    const { container } = render(
+      <SettingsSection title="Accounting">
+        <SettingsRow label="Fortnox" />
+      </SettingsSection>,
+    )
+    const card = container.querySelector('.rounded-\\[10px\\]') as HTMLElement
+    expect(card.className).not.toMatch(/bg-\[var\(--v2-surface\)\]/)
+    expect(card.textContent).not.toContain('Accounting')
+  })
+
+  it('puts an optional trailing link on the heading’s line, above the card (#4475)', () => {
+    // The account Security tab's "View all" slot. Mutation: render the action
+    // inside the card (a Card.Header action) → red: the link would sit in the
+    // card's band, not on the section heading.
+    const { container, getByText } = render(
+      <SettingsSection
+        title="Passkeys and wallets"
+        action={<a href="/settings">View all</a>}
+      >
+        <SettingsRow label="MacBook Pro" />
+      </SettingsSection>,
+    )
+    const section = container.firstElementChild as HTMLElement
+    const heading = section.querySelector('h2') as HTMLElement
+    const card = section.querySelector('.rounded-\\[10px\\]') as HTMLElement
+    const action = getByText('View all')
+
+    expect(heading.textContent).toBe('Passkeys and wallets')
+    // The link shares the heading's row, which sits above the card.
+    const row = heading.parentElement as HTMLElement
+    expect(row.className).toMatch(/\bflex-wrap\b/)
+    expect(row.contains(action)).toBe(true)
+    expect(card.contains(action)).toBe(false)
+    expect(section.contains(row)).toBe(true)
+    expect(row.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    // The heading keeps its gap to the card — no description here.
+    expect(heading.className).toMatch(/\bmb-3\b/)
+  })
+
+  it('renders no action row at all when no action is passed — every settings caller today', () => {
+    // Mutation: always wrap the heading in the flex row → red: the heading
+    // stops being the section's first element and `nextElementSibling` stops
+    // being the card.
+    const { container } = render(
+      <SettingsSection title="Data">
+        <SettingsRow label="Export data" />
+      </SettingsSection>,
+    )
+    const section = container.firstElementChild as HTMLElement
+    const heading = section.querySelector('h2') as HTMLElement
+    expect(heading.parentElement).toBe(section)
+    expect(heading.nextElementSibling).toBe(section.querySelector('.rounded-\\[10px\\]'))
+  })
+})

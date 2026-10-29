@@ -20,6 +20,8 @@ import { sumOpenReservedAtomic } from '../../infra/repositories/task-budgets.js'
 import { sumOpenReservedForBudgetDelegation } from '../../infra/repositories/sub-budgets.js'
 import { readRemainingBudget } from '../../infra/chain/delegation-budget-reader.js'
 import { getChainClient } from '../../infra/chain/index.js'
+import { currentPeriodBounds } from '@haven_ai/core'
+import { findExpiredBudgetForToken } from '../budget-scope/index.js'
 import { toCanonicalAddress } from '../transactions/index.js'
 import type { AgentContext } from '../../middleware/agentAuth.js'
 import type { MppHandlerResult } from './types.js'
@@ -134,6 +136,18 @@ export async function handleGetAllowances(agent: AgentContext): Promise<MppHandl
         account_address: toCanonicalAddress(agent.account_address),
         delegate_address: toCanonicalAddress(agent.delegate_address),
         chain_id: agent.chain_id,
+        // #4352 (decision 5, additive): when the agent's only budgets for
+        // this chain have ENDED, the live `allowances[]` above is empty and
+        // `needs_approval` used to read "nobody approved yet". The latest
+        // ended budget's expiry rides here — the same narrow expired-row
+        // query the refusal answers use — so the SDK's `budgetEndedAt` (and
+        // every copy of the `needs_approval` guidance) can say "your budget
+        // ended on <date>; ask the owner to set a new one". null when no
+        // expired row exists: the field NEVER reports a live budget, and a
+        // live row for any token keeps this null (the readiness above is
+        // 'ready' then anyway). Optional on the schema so an older backend
+        // that omits it stays valid.
+        budget_ended_at: (await findExpiredBudgetForToken(agent.id, agent.chain_id, null))?.endedAtIso ?? null,
         allowances: await Promise.all(budgets.map(async (b) => {
           const { remainingAtomic, fromChain } = remainingById.get(b.id) ?? {
             remainingAtomic: b.budget_atomic,
@@ -170,12 +184,14 @@ export async function handleGetAllowances(agent: AgentContext): Promise<MppHandl
           // #1319: the provenance IS on the wire now (`remaining_is_from_chain`,
           // additive/optional — the legacy branch below never sets it). An
           // agent still cannot act on it directly (no new refusal, no new
-          // authority), but the #1306 preflight uses it to warn when the
-          // number it is reporting is the #1145 fallback rather than a live
+          // authority), but a reader of `GET /machine-payments/allowances`
+          // can tell when the number is the #1145 fallback rather than a live
           // read, instead of silently presenting an optimistic number as
-          // certain. The fallback IS the pre-#1145 answer, never a fabricated
-          // zero that would stop a funded agent — this only makes it visibly
-          // optimistic. Still logged for operators too.
+          // certain. (The catalog preflight's warning reads the same
+          // provenance from `budget-precheck` since #3054.) The fallback IS
+          // the pre-#1145 answer, never a fabricated zero that would stop a
+          // funded agent — this only makes it visibly optimistic. Still
+          // logged for operators too.
           if (!fromChain) {
             console.warn(
               `delegation-budget: on-chain remaining unavailable for delegation ${b.id} ` +
@@ -200,6 +216,28 @@ export async function handleGetAllowances(agent: AgentContext): Promise<MppHandl
               : !fromChain || balance === undefined || balance === null
                 ? null
                 : balance >= BigInt(remainingAtomic)
+          // #4355: when THIS budget next refills — the end of its current
+          // period, from the row's own start/period (the same
+          // `currentPeriodBounds` the dashboard's "refills …" caption uses).
+          // null when it never refills again: the period boundary falls at or
+          // after `expires_at` (the budget ends first), or there is no period.
+          // A not-yet-started row (the dormant rotation "steady" grant)
+          // reports its start instead: that is when its authority first arms.
+          // Lets an agent at remaining 0 tell "spent for this period" from
+          // "nobody approved a budget" without a second read.
+          const nowSecForRefill = Math.floor(Date.now() / 1000)
+          const startSec = Number(b.start_date)
+          const expiresSec = Number(b.expires_at)
+          const refillSec =
+            nowSecForRefill < startSec
+              ? startSec
+              : b.period_seconds > 0
+                ? currentPeriodBounds(startSec, b.period_seconds, nowSecForRefill).end
+                : null
+          const nextRefillAt =
+            refillSec !== null && Number.isFinite(refillSec) && refillSec < expiresSec && refillSec * 1000 <= 8.64e15
+              ? new Date(refillSec * 1000).toISOString()
+              : null
           return {
             id: b.id,
             // #3319: checksummed at the response boundary like the
@@ -242,6 +280,9 @@ export async function handleGetAllowances(agent: AgentContext): Promise<MppHandl
             // balance itself never does (the #3126 posture). Each row is
             // compared ALONE: rows for one token do not add up.
             ...(fundsCoverRemaining === undefined ? {} : { funds_cover_remaining: fundsCoverRemaining }),
+            // #4355: additive — ISO time of the next period refill, or null
+            // when the budget ends before it would refill (see above).
+            next_refill_at: nextRefillAt,
             onchain: {
               amount: b.budget_atomic,
               spent: spentAtomic,

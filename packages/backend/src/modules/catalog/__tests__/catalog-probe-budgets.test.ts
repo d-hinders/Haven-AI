@@ -51,7 +51,7 @@ describe('catalog probe budgets (#4281)', () => {
     const indexFetch = vi.fn(async () => {
       pages += 1
       const items = pages === 1
-        ? [{ resource: candidate, type: 'http', accepts: [{ scheme: 'exact', network: 'eip155:8453', amount: '1' }] }]
+        ? [{ resource: candidate, type: 'http', accepts: [{ scheme: 'exact', network: 'eip155:8453', asset: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', amount: '1', payTo: '0x' + '11'.repeat(20) }] }]
         : []
       return new Response(JSON.stringify({ items }), { status: 200, headers: { 'content-type': 'application/json' } })
     })

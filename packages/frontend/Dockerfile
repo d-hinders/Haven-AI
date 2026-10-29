@@ -20,7 +20,8 @@ RUN npm run build -w packages/core
 COPY packages/ui ./packages/ui
 COPY packages/frontend ./packages/frontend
 
-# The four product docs the frontend serves as Markdown under /docs/ (#2532).
+# The docs the frontend serves as Markdown under /docs/ (#2532; the list is
+# `ALLOWLIST` in scripts/serve-docs.mjs — three product docs and the security model).
 # `next.config.ts` generates them at build time by READING these sources, so a
 # build context without them fails hard with ENOENT — not a soft 404. Build
 # stage only: the runtime image copies `.next/standalone`, `.next/static` and

@@ -124,7 +124,7 @@ const CENTRE_TOLERANCE_PX = 1
 
 const CENTRED_ROWS = [
   { name: 'a badge-and-dismiss row', id: 'budget-reached', hasAction: false },
-  { name: 'the action row', id: 'reapproval', hasAction: true },
+  { name: 'the action row', id: 'payment-failed', hasAction: true },
 ] as const
 
 test.describe('AttentionList centred in the row (#4019)', () => {
@@ -296,8 +296,10 @@ test.describe('AttentionList one trailing column', () => {
 })
 
 /**
- * A row with nothing visible to align (#4033) — the dashboard's `haven-paused`
- * shape: no badge, no action, not dismissible. It used to render a trailing
+ * A row with nothing visible to align (#4033): no badge, no action, not
+ * dismissible. (It was the dashboard's `haven-paused` shape until #4324 made
+ * that item dismissible and gave it a "Review" action; the sample keeps the
+ * shape so the no-trailing path stays guarded.) It used to render a trailing
  * wrapper holding only the sr-only tone word: a 0px flex line that still took
  * `Row`'s 12px row gap below `sm` (and a 12px column gap from `sm` up), so
  * the row read as ~12px above the text and ~24px below. It renders no
@@ -316,7 +318,7 @@ test.describe('AttentionList row with nothing to align (#4033)', () => {
       await page.goto('/design-system')
       const sample = page.getByTestId('ds-attention-list')
       await expect(sample.getByTestId(/^attention-dismiss-/)).toHaveCount(3)
-      const li = sample.locator('li').filter({ hasText: 'Haven paused sponsored payments' })
+      const li = sample.locator('li').filter({ hasText: 'No summary this week' })
       await expect(li).toHaveCount(1)
       const m = await li.evaluate((li) => {
         const root = li.querySelector(':scope > div') as HTMLElement
@@ -338,10 +340,12 @@ test.describe('AttentionList row with nothing to align (#4033)', () => {
   }
 
   // The dismiss-only shape — a badge-less, dismissible row with no action —
-  // put a lone × on its own line below `sm`. No product kind has that shape
-  // (both dismissible kinds carry a badge), so the sample renders only shapes
-  // the product does: at 390px no row's trailing line holds nothing visible
-  // but the dismiss.
+  // put a lone × on its own line below `sm`. Since #4324 one product case has
+  // it: `haven-paused` when the latest sponsorship refusal's agent is unknown
+  // (an old response), which drops its "Review" action and stays
+  // dismissible. That is accepted for the old-response fallback; the sample
+  // does not draw it, so at 390px no row's trailing line holds nothing
+  // visible but the dismiss.
   test('mobile width: no row renders a trailing line whose only visible content is the dismiss', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 })
     await page.goto('/design-system')

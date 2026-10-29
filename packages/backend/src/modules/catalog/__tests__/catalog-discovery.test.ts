@@ -286,4 +286,51 @@ describe('ingestDiscoveredCatalog', () => {
     await ingestDiscoveredCatalog(db, fetchMock as unknown as typeof fetch, undefined, stubMerchants().merchants, fetchMock as unknown as typeof fetch)
     expect(inserts[0]?.[0]).toBe('search.example')
   })
+
+  // #4341: a candidate whose write fails (the reviewer's repro: an index
+  // entry whose name carries a NUL byte — Postgres rejects 0x00 in text)
+  // must not stop discovery from reaching later candidates.
+  it('reaches later candidates past one whose write fails, and counts the failure (#4341)', async () => {
+    const probedUrls: string[] = []
+    const inserts: unknown[][] = []
+    // Faithful to real Postgres: a text parameter containing NUL is rejected.
+    const db = {
+      query: async (sql: string, values?: unknown[]) => {
+        if (sql.includes('SELECT resource_url')) return { rows: [] }
+        if (sql.startsWith('INSERT')) {
+          if ((values ?? []).some((v) => typeof v === 'string' && v.includes('\0'))) {
+            throw new Error('invalid byte sequence for encoding "UTF8": 0x00')
+          }
+          inserts.push(values ?? [])
+        }
+        return { rows: [] }
+      },
+    }
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input)
+      if (url.includes('/discovery/resources')) {
+        return bazaarPage([
+          // The NUL rides in the index entry's own name…
+          { resource: 'https://api.nulls.example/paid', type: 'http', accepts: X402_BODY.accepts, serviceName: 'US\u0000DC API' },
+          // …and the clean candidate after it must still be probed and inserted.
+          { resource: 'https://api.clean.example/paid', type: 'http', accepts: X402_BODY.accepts, serviceName: 'Clean API' },
+        ])
+      }
+      probedUrls.push(url)
+      return paid402()
+    })
+
+    const result = await ingestDiscoveredCatalog(db, fetchMock as unknown as typeof fetch, undefined, stubMerchants().merchants, fetchMock as unknown as typeof fetch).catch((err: unknown) => ({ threw: String(err) }))
+    // An escaping throw (the pre-#4341 behaviour) reads as `threw`, not as a result.
+    expect(result).not.toHaveProperty('threw')
+    // Both candidates were probed…
+    expect(probedUrls).toContain('https://api.nulls.example/paid')
+    expect(probedUrls).toContain('https://api.clean.example/paid')
+    // …the failed write is counted, not swallowed silently…
+    expect(result).toMatchObject({ candidates: 2, ingested: 1, failedWrite: 1 })
+    // …and the clean candidate's insert landed.
+    expect(inserts).toHaveLength(1)
+    expect(inserts[0]?.[0]).toBe('Clean API')
+    expect(inserts[0]?.[3]).toBe('https://api.clean.example/paid')
+  })
 })

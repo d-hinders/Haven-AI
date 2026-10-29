@@ -576,6 +576,61 @@ describe('money-path list stays in one piece', () => {
     )
   })
 
+  test('the two catalog pay_to writers are CONTROL money-path — a change to either is labelled and owes the perimeter analysis (#4394)', () => {
+    // Both files write merchant_catalog.pay_to, the value the server fills a
+    // merchant-locked budget's recipient_address from
+    // (routes/agent-delegations.ts:578). Neither matched any glob: #4389
+    // assumed modules/catalog/** was on the list and it was not, and PR #4393
+    // classified 0 of 12 files at its head ea8b8210. The miss had already
+    // happened — #4348 changed both write paths and merged with
+    // area:backend,area:docs only. merchant-catalog.ts is the hourly refresh's
+    // persistVerified (the UPDATE at :621-645); catalog-discovery.ts is the
+    // Bazaar ingest INSERT (:326-345), which records the same probe's payTo
+    // the refresh records (#3331).
+    //
+    // CONTROL, not runtime (owner decision 2026-10-26): a change to either is
+    // money-path and owes the CASP shard and this analysis, but it must not
+    // count toward qa-freshness — the refresh's output is exercised in qa-dev
+    // only by the merchant-locked-budget scenario, discovery has no qa-dev
+    // scenario at all, and the churn is 13 and 10 first-parent commits in 90
+    // days. The labeler reads the UNION of both lists, so without this test a
+    // glob could drift into `globs` silently and start holding promotion.
+    //
+    // Mutation cell, executed rather than described: drop either file's glob
+    // from a copy of controlGlobs and the same predicate must go red for that
+    // file. That is what proves the pin is sensitive to the glob it names and
+    // not to some other entry that happens to match.
+    const control = loadMoneyPathControlGlobs()
+    const runtime = loadMoneyPathGlobs()
+    const files = [
+      'packages/backend/src/modules/catalog/merchant-catalog.ts',
+      'packages/backend/src/modules/catalog/catalog-discovery.ts',
+    ]
+    const tracked = new Set(trackedFiles())
+    for (const f of files) {
+      assert.ok(tracked.has(f), `${f} no longer exists — repoint this pin`)
+      assert.ok(
+        moneyPathFiles([f], control).length === 1,
+        `${f} must be matched by a CONTROL money-path glob — it writes the pay_to the ` +
+          'server pins a merchant-locked budget to, so a change to it is money-path and owes ' +
+          'the perimeter analysis (#4394)',
+      )
+      assert.deepEqual(
+        moneyPathFiles([f], runtime),
+        [],
+        `${f} must be a CONTROL glob, not a runtime one: a catalog metadata write must not ` +
+          'hold promotion on a real-payment QA run (#4394)',
+      )
+      const mutated = control.filter((g) => !matchesGlob(f, g))
+      assert.notEqual(
+        moneyPathFiles([f], mutated).length,
+        1,
+        `removing ${f}'s glob from controlGlobs left it matched — the pin above is not ` +
+          'sensitive to the glob it names (#4394)',
+      )
+    }
+  })
+
   test('the SDK client stays off the money-path list — it only wires the guards in (#3283, #4122)', () => {
     // A deliberate decision, recorded by #3283 and re-taken by the owner on
     // #4120 (2026-10-20): client.ts calls the listed guards and

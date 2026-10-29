@@ -563,9 +563,9 @@ export function WalletPopover({
                   No passkey enrolled on this device
                 </p>
               )}
-              <p className="text-xs text-[var(--v2-ink-muted)]">Approving with</p>
+              <p className="text-xs text-[var(--v2-ink-3)]">Approving with</p>
               <p className="text-sm font-medium text-[var(--v2-ink)]">{signingWith.label}</p>
-              <p className="truncate font-mono text-xs text-[var(--v2-ink-muted)]">
+              <p className="truncate font-mono text-xs text-[var(--v2-ink-3)]">
                 {truncateAddress(signingWith.keyId)}
               </p>
               {signingWith.onThisDevice ? null : (

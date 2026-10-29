@@ -6,8 +6,9 @@
  * Only a 401 is mapped to {@link AGENT_IDENTITY_UNVERIFIED}. Any other
  * failure is rethrown unchanged, so `normalizeError` relays the backend's own
  * answer as it did before the gate: a 403 for a valid key on a paused or
- * pending-approval agent keeps its reason, and a 5xx keeps its retry step.
- * Either way the handler does not run. Per dispatch, not memoized: a revoked
+ * pending-approval agent keeps its reason, a 5xx keeps its retry step, and a
+ * read that got no answer (a timeout or an unreachable backend) is told to
+ * re-call once (#4470). Either way the handler does not run. Per dispatch, not memoized: a revoked
  * key stops at its next call.
  */
 import { AgentPaymentNextAction, HavenApiError, type HavenClient } from '@haven_ai/sdk'

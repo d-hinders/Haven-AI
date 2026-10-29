@@ -594,6 +594,39 @@ describe('GET /transactions/export.csv', () => {
     expect(response.headers['x-export-row-count']).toBe('10000')
   })
 
+  // #4327: characterization, written before the response plumbing moved into
+  // the shared `domain/csv.ts` helper — the 413 body word for word and the
+  // success headers exactly, so the move is proven to change neither.
+  it('pins the exact 413 body and the exact success headers (#4327)', async () => {
+    stubExplorers()
+    routeDbQueries({ smart_accounts: [BOTH_SAFES[0]], payment_intents: x402Rows(10_001) })
+
+    const refused = await get('?fresh=1')
+
+    expect(refused.statusCode).toBe(413)
+    expect(refused.json()).toEqual({
+      error: 'Export too large',
+      statusCode: 413,
+      details:
+        'This export would contain 10,002 rows; the limit is 10,000. Narrow the filters — ' +
+        'by account, agent, token, network, direction, search or period — and export again.',
+    })
+
+    stubExplorers()
+    routeDbQueries({ smart_accounts: BOTH_SAFES })
+
+    const ok = await get('?fresh=1')
+
+    expect(ok.statusCode).toBe(200)
+    expect(ok.headers['content-type']).toBe('text/csv; charset=utf-8')
+    expect(ok.headers['content-disposition']).toMatch(
+      /^attachment; filename="haven-transactions-\d{8}\.csv"$/,
+    )
+    expect(ok.headers['x-export-row-count']).toBe('2')
+    expect(ok.body.charCodeAt(0)).toBe(0xfeff)
+    expect(ok.body.charCodeAt(1)).not.toBe(0xfeff)
+  }, 30_000)
+
   // #3030: the SHAPE refusals are the spec's (uuid, `user`-or-uuid,
   // `<chain>:<address|native>`, the `direction` enum, a positive integer),
   // answered as the 400 envelope by the enforced module before the handler;

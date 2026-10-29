@@ -38,13 +38,16 @@ import { getTokenBalance } from '../../infra/chain/relayer-reads.js'
 import { quoteFee, recordSettledFee } from '../fee/index.js'
 import { feedSettledPaymentBestEffort } from '../accounting/index.js'
 import { isProtocolPaymentRail } from './rail-dispatch.js'
+// dep-lint-exempt: the x402 barrel re-exports settlement-sweeper.ts, which imports the mpp barrel (and so this file), so importing through it closes an mpp ↔ x402 cycle; this x402 leaf imports nothing from mpp (#4379)
 import { observeErc7710Settlement } from '../x402/settlement-observed.js'
+// dep-lint-exempt: the x402 barrel re-exports settlement-sweeper.ts, which imports the mpp barrel (and so this file), so importing through it closes an mpp ↔ x402 cycle; this x402 leaf imports nothing from mpp (#4379)
 import {
   isFundedEip3009Payment,
   observeEip3009MerchantSettlement,
   eip3009SettlementProofFromHeader,
   type SettlementProofErrorCode,
 } from '../x402/eip3009-settlement-evidence.js'
+// dep-lint-exempt: the x402 barrel re-exports settlement-sweeper.ts, which imports the mpp barrel (and so this file), so importing through it closes an mpp ↔ x402 cycle; this x402 leaf imports nothing from mpp (#4379)
 import {
   observeEip3009ReceiptSettlement,
   receiptPayloadTransaction,

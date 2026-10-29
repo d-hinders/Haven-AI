@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import db from '../../../db.js'
 import { describeDb, initDbHarness, resetDb } from '../../__tests__/helpers/db-harness.js'
@@ -519,5 +520,145 @@ describeDb('agents archive (#1401, real DB)', () => {
     // makes the null below evidence of the filter rather than of the bug.
     expect(await listAgentsForUserAllStatuses(userId)).toEqual([])
     expect(await findAgentForUserAllStatuses(agentId, userId)).toBeNull()
+  })
+})
+
+/**
+ * #4435: the agents LIST read exposes the payment client the agent's most
+ * recent connector setup reported, so the Settings tab can disable the
+ * tax-declaration toggle for the default setup (`hosted_plus_signer`).
+ *
+ * The signal is `agent_connection_setups.install_status.runtime_mcp_mode`,
+ * written by the connector at register/install-status time and sanitized into
+ * a closed key list (`modules/agents/agent-connection-setup.ts:124`). No new
+ * column: the list read joins the LATEST setup row.
+ *
+ * Pinned here, per the issue's acceptance list:
+ * - `local_stdio` and `hosted_plus_signer` agents read DIFFERENT values;
+ * - the MOST RECENT setup wins (`ORDER BY created_at DESC LIMIT 1`);
+ * - no setup row, and a setup whose `agent_id` went NULL on delete, both read
+ *   NULL — "cannot tell", which the UI treats as enabled.
+ */
+describeDb('the agents list read exposes the latest setup runtime_mcp_mode (#4435)', () => {
+  beforeAll(async () => {
+    await initDbHarness()
+  })
+
+  beforeEach(async () => {
+    await resetDb()
+  })
+
+  /** One connector setup row, as the register/install-status write leaves it. */
+  async function insertSetup(
+    userId: string,
+    accountId: string,
+    agentId: string | null,
+    installStatus: Record<string, unknown>,
+    createdAt?: string,
+  ): Promise<void> {
+    await db.query(
+      `INSERT INTO agent_connection_setups
+         (user_id, account_id, agent_id, name, setup_token_hash, setup_token_prefix,
+          setup_token_expires_at, challenge_id, challenge_message, challenge_expires_at,
+          install_status, created_at)
+       VALUES ($1, $2, $3, 'Setup', $4, 'hvn_setup', NOW() + interval '1 hour',
+               gen_random_uuid(), 'challenge', NOW() + interval '1 hour',
+               $5::jsonb, COALESCE($6::timestamptz, NOW()))`,
+      [
+        userId,
+        accountId,
+        agentId,
+        randomUUID().replace(/-/g, ''),
+        JSON.stringify(installStatus),
+        createdAt ?? null,
+      ],
+    )
+  }
+
+  it('pins local_stdio and hosted_plus_signer to different values, and unknown to NULL', async () => {
+    const user = await db.query<{ id: string }>(
+      `INSERT INTO users (email, password_hash) VALUES ($1, 'x') RETURNING id`,
+      [`runtime-mcp-mode-${Date.now()}@test.example`],
+    )
+    const userId = user.rows[0].id
+    const account = await db.query<{ id: string }>(
+      `INSERT INTO smart_accounts (user_id, account_address, name, is_default, account_type)
+       VALUES ($1, '0x2222222222222222222222222222222222222222', 'Delegation account', true, 'delegator_hybrid')
+       RETURNING id`,
+      [userId],
+    )
+    const accountId = account.rows[0].id
+
+    const seedAgent = async (name: string): Promise<string> => {
+      const result = await db.query<{ id: string }>(
+        `INSERT INTO agents (user_id, account_id, name, status) VALUES ($1, $2, $3, 'active') RETURNING id`,
+        [userId, accountId, name],
+      )
+      return result.rows[0].id
+    }
+
+    const localAgent = await seedAgent('Local stdio agent')
+    const hostedAgent = await seedAgent('Hosted plus signer agent')
+    const manualAgent = await seedAgent('Manual agent')
+    const noSetupAgent = await seedAgent('No setup agent')
+    const twoSetupsAgent = await seedAgent('Two setups agent')
+    const deletedSetupAgent = await seedAgent('Deleted setup agent')
+
+    await insertSetup(userId, accountId, localAgent, { runtime_mcp_mode: 'local_stdio' })
+    await insertSetup(userId, accountId, hostedAgent, { runtime_mcp_mode: 'hosted_plus_signer' })
+    await insertSetup(userId, accountId, manualAgent, { runtime_mcp_mode: 'manual' })
+    // The MOST RECENT setup wins: an older local_stdio row must not mask the
+    // newer hosted_plus_signer one.
+    await insertSetup(
+      userId, accountId, twoSetupsAgent,
+      { runtime_mcp_mode: 'local_stdio' },
+      '2026-10-01T10:00:00.000Z',
+    )
+    await insertSetup(
+      userId, accountId, twoSetupsAgent,
+      { runtime_mcp_mode: 'hosted_plus_signer' },
+      '2026-10-02T10:00:00.000Z',
+    )
+    // `agent_id` is ON DELETE SET NULL (migration 017): a setup whose agent was
+    // deleted carries no agent, so it must not answer for anyone.
+    await insertSetup(userId, accountId, null, { runtime_mcp_mode: 'hosted_plus_signer' })
+
+    const rows = await listAgentsForUserAllStatuses(userId)
+    const byId = new Map(rows.map((row) => [row.id, row.runtime_mcp_mode]))
+
+    expect(byId.get(localAgent)).toBe('local_stdio')
+    expect(byId.get(hostedAgent)).toBe('hosted_plus_signer')
+    // The acceptance criterion in one line: the two setups read DIFFERENTLY.
+    expect(byId.get(localAgent)).not.toBe(byId.get(hostedAgent))
+    expect(byId.get(manualAgent)).toBe('manual')
+    expect(byId.get(twoSetupsAgent)).toBe('hosted_plus_signer')
+    // Unknown is NULL, never a guess: no setup row at all, and a setup whose
+    // agent_id went NULL on delete.
+    expect(byId.get(noSetupAgent)).toBeNull()
+    expect(byId.get(deletedSetupAgent)).toBeNull()
+  })
+
+  it('reads NULL when the setup row exists but install_status never carried the key', async () => {
+    const user = await db.query<{ id: string }>(
+      `INSERT INTO users (email, password_hash) VALUES ($1, 'x') RETURNING id`,
+      [`runtime-mcp-mode-absent-${Date.now()}@test.example`],
+    )
+    const userId = user.rows[0].id
+    const account = await db.query<{ id: string }>(
+      `INSERT INTO smart_accounts (user_id, account_address, name, is_default, account_type)
+       VALUES ($1, '0x3333333333333333333333333333333333333333', 'Delegation account', true, 'delegator_hybrid')
+       RETURNING id`,
+      [userId],
+    )
+    const agent = await db.query<{ id: string }>(
+      `INSERT INTO agents (user_id, account_id, name, status) VALUES ($1, $2, 'Older connector agent', 'active') RETURNING id`,
+      [userId, account.rows[0].id],
+    )
+    // A connector older than the signal reports other keys only.
+    await insertSetup(userId, account.rows[0].id, agent.rows[0].id, { runtime: 'node', connector_version: '0.4.0' })
+
+    const rows = await listAgentsForUserAllStatuses(userId)
+    expect(rows).toHaveLength(1)
+    expect(rows[0].runtime_mcp_mode).toBeNull()
   })
 })

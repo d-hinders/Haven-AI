@@ -17,21 +17,41 @@
   1. DISCOVER the delegations issued FROM your account by scanning the
      DelegationManager's public RedeemedDelegation events (each carries the
      full delegation object — no Haven decoding needed).
-  2. Show each delegation's on-chain STATUS.
+  2. Show each delegation's on-chain STATUS: its delegation hash (computed the
+     way the DelegationManager does, exit-core.mjs) and disabledDelegations(hash).
   3. Give you the exact delegation object + hash to REVOKE. Revocation itself
      is a DELEGATOR-ACCOUNT operation (disableDelegation runs as a UserOp your
      owner signs, because the manager checks msg.sender == delegator) — the
      docs give the exact steps; this single file does not embed a UserOp
-     signer. Your account's own signers are the universal backstop.
+     signer. With a wallet signer on the account, your account's own signers
+     are the universal backstop. A scan also finds CHILD delegations (your
+     agent's settlement, task and sub-budget delegations, issued under one of
+     your budgets); the page marks them and points to the budget to revoke.
 
-  Honest limitation (documented): a delegation Haven issued but that has NEVER
+  Base (8453) and Base Sepolia (84532). The logic lives in exit-core.mjs and
+  ethers is vendored in vendor/ (byte for byte the npm build), so this page
+  loads no third-party script (#4390).
+
+  Honest limitations (documented):
+  - Public Base RPCs cap eth_getLogs at a few hundred blocks per query, which
+    makes a full history scan from a browser impractical. The page scans
+    newest first in chunks up to a cap and tells you how far back it got; use
+    an RPC that allows wider log queries, a later "from block", the explorer's
+    event log, or paste the delegation to check it by hash.
+  - Before any read the page asks the RPC for its chain id and refuses one that
+    serves another chain (both chains share the manager address).
+  - A passkey is bound to the website it was created on (WebAuthn relying
+    party = the Haven site's hostname, packages/frontend/src/lib/passkey.ts).
+    An owner whose ONLY signer is a passkey can sign a revocation only on
+    Haven's site; add a wallet signer to keep a Haven-independent signer.
+  - A delegation Haven issued but that has NEVER
   been redeemed is an off-chain object no third party can discover until first
   use. Revocation does not depend on discovery — you can revoke any delegation
-  you can reconstruct, and your account's signers can always rotate keys or
-  move funds. See docs/exit/README.md.
+  you can reconstruct, and with a wallet signer on the account your account's
+  signers can always rotate keys or move funds. See docs/exit/README.md.
 -->
 <style>
-  :root { color-scheme: light dark; --fg:#1a2332; --muted:#5a6472; --line:#cdd5e0; --brand:#2457a7; --bg:#fff; --card:#f7f9fc; --ok:#1e7d4e; --bad:#b23a3a; }
+  :root { color-scheme: light dark; --fg:#1a2332; --muted:#5a6472; --line:#cdd5e0; --brand:#2457a7; --bg:#fff; --card:#f7f9fc; --warn:#a86400; --bad:#b23a3a; }
   @media (prefers-color-scheme: dark){ :root{ --fg:#e8edf4; --muted:#9aa6b6; --line:#2b3547; --brand:#6ea0ff; --bg:#12161d; --card:#1a2029; } }
   * { box-sizing: border-box; }
   body { margin:0; font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; color:var(--fg); background:var(--bg); }
@@ -48,7 +68,8 @@
   .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
   .mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px; word-break:break-all; }
   .pill { font-size:12px; padding:2px 8px; border-radius:999px; font-weight:600; }
-  .pill.active { background:color-mix(in srgb, var(--ok) 18%, transparent); color:var(--ok); }
+  .pill.active { background:color-mix(in srgb, var(--warn) 18%, transparent); color:var(--warn); }
+  .pill.unknown { background:color-mix(in srgb, var(--muted) 18%, transparent); color:var(--muted); }
   .pill.revoked { background:color-mix(in srgb, var(--bad) 18%, transparent); color:var(--bad); }
   .del { border-top:1px solid var(--line); padding:12px 0; }
   .del:first-child { border-top:0; }
@@ -68,15 +89,20 @@
       <button id="connect">Connect wallet</button>
       <span id="acct" class="mono muted"></span>
     </div>
-    <label>Network</label>
+    <label for="chain">Network</label>
     <div class="row">
       <select id="chain">
+        <option value="8453" selected>Base (8453)</option>
         <option value="84532">Base Sepolia (84532)</option>
       </select>
-      <span class="muted">DelegationManager: <span id="mgr" class="mono"></span></span>
+      <span class="muted">DelegationManager: <a id="mgrLink" class="mono" target="_blank" rel="noopener"><span id="mgr"></span></a></span>
     </div>
-    <label>Your account address (the delegator — the account your agent spends from)</label>
+    <label for="rpc">RPC URL (a public endpoint by default; any Base RPC works)</label>
+    <input id="rpc" class="mono" />
+    <label for="account">Your account address (the delegator — the smart account your agent spends from, not your wallet's address)</label>
     <input id="account" placeholder="0x…" />
+    <label for="fromBlock">Scan back to block (the manager's first block by default; the scan starts at the newest block)</label>
+    <input id="fromBlock" class="mono" />
     <div class="row" style="margin-top:12px">
       <button id="scan" class="ghost">Find my delegations</button>
       <span id="scanStatus" class="muted"></span>
@@ -86,118 +112,120 @@
   <div id="list"></div>
 
   <div class="card">
-    <strong>Revoke a specific delegation</strong>
-    <p class="muted">Paste a delegation object Haven gave you (or one found above). Revoking it is an operation your ACCOUNT signs (a UserOp calling disableDelegation) — the docs show the exact steps, or your account's own signers can always rotate keys / move funds as the universal backstop.</p>
-    <label>Delegation JSON</label>
+    <strong>Check or revoke a specific delegation</strong>
+    <p class="muted">Paste a delegation object Haven gave you (or one found above). The page computes its delegation hash and reads its status from the DelegationManager. Revoking it is an operation your ACCOUNT signs (a UserOp calling disableDelegation) — the docs show the exact steps, or, with a wallet signer on the account, your account's own signers can always rotate keys / move funds as the universal backstop.</p>
+    <label for="delJson">Delegation JSON</label>
     <textarea id="delJson" placeholder='{ "delegate":"0x…", "delegator":"0x…", "authority":"0x…", "caveats":[…], "salt":"…", "signature":"0x…" }'></textarea>
     <div class="row" style="margin-top:10px">
-      <button id="revokePasted">Show revocation details</button>
+      <button id="checkPasted">Check status and show revocation details</button>
       <span id="revStatus" class="muted"></span>
     </div>
+    <div id="pasted"></div>
   </div>
 
   <p class="muted warn" style="margin-top:22px">
     A delegation that was issued but never used is an off-chain object no one can
     discover until first use — that is by design. Your revocation guarantee does
     not depend on finding it: you can revoke any delegation you can reconstruct
-    (paste it above), and your account's own signers can always rotate keys or
-    move funds. The step-by-step manual path (Etherscan + the contract ABI) is in
+    (paste it above), and, with a wallet signer on the account, your account's
+    own signers can always rotate keys or move funds. The step-by-step manual path (Etherscan + the contract ABI) is in
     Haven's public docs and works without this page.
+  </p>
+  <p class="muted warn">
+    <strong>If your account's only signer is a passkey:</strong> a passkey is bound
+    to the website it was created on — Haven's passkeys belong to Haven's site
+    (WebAuthn), so a browser offers them only there. You can sign a revocation with
+    a passkey only through Haven. To keep a signer that works without Haven, add a
+    wallet to your account (Security &amp; details on your account page); a wallet
+    can sign the revocation from anywhere.
   </p>
 </div>
 
 <script type="module">
-import { BrowserProvider, Contract, JsonRpcProvider } from 'https://esm.sh/ethers@6.13.4'
-
-// Pinned, audited contracts (must match Haven's lib/delegation-contracts.ts).
-// A different address here would be a red flag — verify against Haven's docs.
-const MANAGERS = { 84532: '0xdb9B1e94B5b69Df7e401DDbedE43491141047dB3' }
-const RPCS = { 84532: 'https://sepolia.base.org' }
-
-const DELEGATION_TUPLE =
-  'tuple(address delegate, address delegator, bytes32 authority, tuple(address enforcer, bytes terms, bytes args)[] caveats, uint256 salt, bytes signature)'
-const ABI = [
-  `function disableDelegation(${DELEGATION_TUPLE} _delegation)`,
-  'function disabledDelegations(bytes32 delegationHash) view returns (bool)',
-  `event RedeemedDelegation(address indexed rootDelegator, address indexed redeemer, ${DELEGATION_TUPLE} delegation)`,
-]
+import { BrowserProvider, Interface, JsonRpcProvider } from './vendor/ethers-6.16.0.min.js'
+import { CHAINS, DEFAULT_CHAIN_ID, MANAGER_ABI, checkedManager, delegationHash, disableDelegationCalldata, rootFirst, scanEvents, scanSummary, showDelegation, toPlainDelegation } from './exit-core.mjs'
 
 const $ = (id) => document.getElementById(id)
+const iface = new Interface(MANAGER_ABI)
 let signer = null, ownerAddr = null
 
 function chainId() { return Number($('chain').value) }
-$('mgr').textContent = MANAGERS[84532]
+function chain() { return CHAINS[chainId()] }
+function provider() { return new JsonRpcProvider($('rpc').value.trim() || chain().rpc, chainId(), { staticNetwork: true }) }
+
+function showChain() {
+  const c = chain()
+  $('mgr').textContent = c.manager
+  $('mgrLink').href = `${c.explorer}/address/${c.manager}#events`
+  $('rpc').value = c.rpc
+  $('fromBlock').value = String(c.deployBlock)
+}
+$('chain').value = String(DEFAULT_CHAIN_ID)
+showChain()
+$('chain').onchange = showChain
 
 $('connect').onclick = async () => {
   if (!window.ethereum) { alert('No injected wallet found. Use the manual Etherscan path in the docs.'); return }
-  const provider = new BrowserProvider(window.ethereum)
-  signer = await provider.getSigner()
+  const bp = new BrowserProvider(window.ethereum)
+  signer = await bp.getSigner()
   ownerAddr = await signer.getAddress()
-  $('acct').textContent = ownerAddr
-  if (!$('account').value) $('account').value = ownerAddr
+  // The wallet is a signer of the account, not the account: a Haven account is
+  // a smart account with its own address, so the account field is not filled in.
+  $('acct').textContent = `Connected signer ${ownerAddr} (enter your account's own address below)`
 }
 
 $('scan').onclick = async () => {
   const account = $('account').value.trim()
   if (!/^0x[0-9a-fA-F]{40}$/.test(account)) { $('scanStatus').textContent = 'Enter a valid account address.'; return }
-  $('scanStatus').textContent = 'Scanning public redemption events…'
-  $('list').innerHTML = ''
+  const from = Number($('fromBlock').value.trim() || chain().deployBlock)
+  if (!Number.isInteger(from) || from < 0) { $('scanStatus').textContent = 'Enter a valid block number.'; return }
+  $('list').replaceChildren()
   try {
-    const ro = new JsonRpcProvider(RPCS[chainId()])
-    const mgr = new Contract(MANAGERS[chainId()], ABI, ro)
-    // Discover via RedeemedDelegation where rootDelegator = your account.
-    const events = await mgr.queryFilter(mgr.filters.RedeemedDelegation(account), 0, 'latest')
+    const mgr = await checkedManager(provider(), chainId())
+    const latest = await mgr.runner.provider.getBlockNumber()
+    $('scanStatus').textContent = 'Scanning public redemption events, newest first…'
+    const filter = mgr.filters.RedeemedDelegation(account)
+    const result = await scanEvents({ queryRange: (a, b) => mgr.queryFilter(filter, a, b), fromBlock: from, toBlock: latest })
     const seen = new Map()
-    for (const ev of events) {
-      const d = ev.args.delegation
-      const del = { delegate: d.delegate, delegator: d.delegator, authority: d.authority,
-        caveats: d.caveats.map(c => ({ enforcer: c.enforcer, terms: c.terms, args: c.args })),
-        salt: d.salt.toString(), signature: d.signature }
-      const hash = hashKey(del)
-      if (!seen.has(hash)) seen.set(hash, del)
+    for (const ev of result.events) {
+      const del = toPlainDelegation(ev.args.delegation)
+      seen.set(delegationHash(del), del)
     }
-    if (seen.size === 0) { $('scanStatus').textContent = 'No redeemed delegations found for this account. Un-used delegations must be revoked by pasting them below.'; return }
-    $('scanStatus').textContent = `${seen.size} delegation(s) found.`
-    for (const [key, del] of seen) renderDelegation(del, mgr)
-  } catch (e) { $('scanStatus').textContent = 'Scan failed: ' + (e.message || e) }
-}
-
-function hashKey(del) { return del.delegate + ':' + del.salt } // display key only
-
-async function renderDelegation(del, roMgr) {
-  const box = document.createElement('div')
-  box.className = 'del'
-  box.innerHTML = `<div class="row" style="justify-content:space-between">
-      <div class="mono">delegate ${del.delegate}</div><span class="pill" data-pill>…</span></div>
-    <div class="muted mono">salt ${del.salt} · ${del.caveats.length} caveat(s)</div>
-    <div class="row" style="margin-top:8px"><button data-revoke class="ghost">Revoke</button><span class="muted" data-st></span></div>`
-  $('list').appendChild(box)
-  // Status: derive the hash the way the contract does is non-trivial off-chain;
-  // we show "active unless you just revoked" and let disableDelegation be
-  // idempotent. (disabledDelegations needs the exact struct hash; the paste
-  // path below is authoritative.)
-  box.querySelector('[data-pill]').textContent = 'redeemed'
-  box.querySelector('[data-pill]').className = 'pill active'
-  box.querySelector('[data-revoke]').onclick = () => revoke(del, box.querySelector('[data-st]'))
+    $('scanStatus').textContent = scanSummary(result, latest, seen.size)
+    for (const del of rootFirst(seen.values())) {
+      await showDelegation($('list'), del, { manager: mgr, account, onDetails: revocationDetails })
+    }
+  } catch (e) { $('scanStatus').textContent = 'Scan failed: ' + (e.shortMessage || e.message || e) }
 }
 
 // Revocation is a DELEGATOR-ACCOUNT operation: DelegationManager checks
 // msg.sender == delegator, so disableDelegation must run as a UserOp signed by
 // your account's owner and submitted through the EntryPoint — a bare wallet
 // call reverts. A robust in-browser UserOp signer is out of scope for this
-// single file; the guarantee lives in the account's own signers. This page
-// gives you the two things it can do standalone — DISCOVER and read STATUS of
-// your budgets, and the exact delegation object + hash to revoke — then hands
-// off to the documented account path.
-async function revoke(del, statusEl) {
-  statusEl.innerHTML = 'To revoke, your ACCOUNT calls disableDelegation (a UserOp your owner signs — see the docs). ' +
-    'This delegation:<br><code>' + JSON.stringify(del) + '</code>'
+// single page; the guarantee lives in the account's own signers. This page
+// gives you what it can do standalone — DISCOVER your budgets, read their
+// STATUS, and the exact delegation object, hash and disableDelegation calldata
+// to revoke — then hands off to the documented account path. showDelegation
+// offers this for root budgets only.
+function revocationDetails(del, hash, statusEl) {
+  const calldata = disableDelegationCalldata(iface, del)
+  statusEl.innerHTML = "To revoke, the delegation's delegator ACCOUNT calls disableDelegation (a UserOp that account's owner signs — see the docs)." +
+    '<br>Delegation hash: <code></code><br>disableDelegation calldata (to the DelegationManager): <code></code><br>Delegation: <code></code>'
+  const codes = statusEl.querySelectorAll('code')
+  codes[0].textContent = hash
+  codes[1].textContent = calldata
+  codes[2].textContent = JSON.stringify(del)
 }
 
-$('revokePasted').onclick = async () => {
+$('checkPasted').onclick = async () => {
+  $('pasted').replaceChildren()
   let del
-  try { del = JSON.parse($('delJson').value) } catch { $('revStatus').textContent = 'Not valid JSON.'; return }
-  await revoke(del, $('revStatus'))
+  try { del = toPlainDelegation(JSON.parse($('delJson').value)) } catch (e) { $('revStatus').textContent = 'Not a valid delegation object' + (e instanceof SyntaxError ? '.' : `: ${e.message}.`); return }
+  $('revStatus').textContent = ''
+  try {
+    const mgr = await checkedManager(provider(), chainId())
+    await showDelegation($('pasted'), del, { manager: mgr, account: $('account').value.trim(), onDetails: revocationDetails, source: 'paste' })
+  } catch (e) { $('revStatus').textContent = 'Could not check it: ' + (e.message || e) }
 }
 </script>
 </body>

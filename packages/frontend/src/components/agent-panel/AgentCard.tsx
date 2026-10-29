@@ -255,7 +255,7 @@ export function AgentCard({
       className={`${entityCardClassName({ muted: (isRevoked || isArchived) && !halfRevoked, linked: true })} flex min-w-0 flex-col has-[[aria-expanded=true]]:z-[var(--v2-z-content)]`}
     >
       <div className="flex items-start gap-3">
-        <Monogram name={agent.name} size="sm" decorative />
+        <Monogram name={agent.name} tint={agent.avatar_tint} size="sm" decorative />
         <div className="min-w-0 flex-1">
           {/* #2237: the title row wraps, so a long name never pays for the
               badge — the badge drops under it instead. */}

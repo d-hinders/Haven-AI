@@ -3,33 +3,25 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
 import { AgentsTable } from '../AgentsTable'
-import { seriesColor } from '@/components/ui/StackedBarChart'
-import { orderAgentsForDisplay, seriesIndexByAgent } from '@/lib/analytics-series'
-import type { AnalyticsDayBucket } from '@/types/analytics'
+import { orderAgentsForDisplay } from '@/lib/analytics-series'
 import type { AnalyticsAgentRow } from '@/types/analytics'
 import { FIXTURE_ANALYTICS_OVERVIEW } from '../../../../scripts/screenshot.mjs'
 
 /**
- * The agents table's two-renderings rule (#2947, slice C).
+ * The agents table's two-renderings rule (#2947, slice C; #4333 columns).
  *
- * Below `lg` there is no width for seven columns, and the collapse primitive
+ * Below `lg` there is no width for the columns, and the collapse primitive
  * inside `Table` would keep two or three of them and drop the rest — silently
  * deleting exactly the figures the row exists to show. So the desktop table
  * and the mobile row list are the SAME data in two layouts, and the pair is
  * complements by construction: one container carries `hidden lg:block`, the
  * other `lg:hidden`, so exactly one is displayed at any width.
  *
- * The mobile rendering is the one that needs the hard assertion. jsdom applies
- * no stylesheet, so CSS visibility is invisible to a DOM query, and the honest
- * thing this file can pin is therefore STRUCTURE rather than appearance: that
- * the desktop half carries every column for every row, that the mobile half
- * keeps spend, refusals and budget on the face of the row and carries the rest
- * in a disclosure that OPENS, and that the two containers carry the
- * complementary breakpoint classes that make them one table and not two.
- *
- * Cell text is matched with `toMatch` against the row rather than by exact
- * equality per cell, because a composite cell (the budget cell is a value, a
- * percentage, a bar, and a reset date) has one text node run, not three.
+ * #4333 reshapes the columns: the Share column merges into Spent ("N% of
+ * spend" under the figure), Refused becomes the link to that agent's refused
+ * attempts (#4323), the Agent cell carries the monogram, the WHOLE row links
+ * to the agent, and an unresolved top merchant reads "Unknown recipient" —
+ * never a `0x…` address as a label.
  *
  * Fixtures are the capture harness's own rows, imported the way
  * `screenshot-fixture.test.ts` imports them, so the unit assertions and the
@@ -40,6 +32,10 @@ vi.mock('next/link', () => ({
   default: ({ href, children, ...rest }: { href: string; children: ReactNode }) => (
     <a href={href} {...rest}>{children}</a>
   ),
+}))
+
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn(), prefetch: vi.fn() }),
 }))
 
 const [RESEARCH, RETIRED] = FIXTURE_ANALYTICS_OVERVIEW.agents as unknown as AnalyticsAgentRow[]
@@ -59,28 +55,56 @@ function mobileOf(container: HTMLElement): HTMLElement | null {
   return container.querySelector('[class*="lg:hidden"]')
 }
 
-describe('AgentsTable — the desktop table', () => {
-  it('names every column the aggregate reports, in the order the reader scans them', () => {
+/** One phone row per agent, in display order. */
+function phoneRowsOf(container: HTMLElement): HTMLElement[] {
+  return Array.from(mobileOf(container)!.querySelectorAll(':scope > div')) as HTMLElement[]
+}
+
+/** A phone row's budget lines, one per budget (#4432). */
+function phoneBudgetLines(row: HTMLElement): string[] {
+  return Array.from(row.querySelectorAll('[data-testid="phone-budget-line"]')).map((p) => p.textContent ?? '')
+}
+
+/** The desktop Budget cell of the nth row, one entry per budget. */
+function desktopBudgetCaptions(container: HTMLElement, rowIndex = 0): string[] {
+  const cell = container.querySelectorAll('tbody tr')[rowIndex].querySelectorAll('td')[4]
+  return Array.from(cell.querySelectorAll(':scope > div > div')).map((d) => d.textContent ?? '')
+}
+
+/** A budget whose read is readable at 2026-07-12T09:00Z: the period ends after that clock. */
+const READABLE_BUDGET: AnalyticsAgentRow['budgets'][number] = {
+  token: 'USDC',
+  recipient: null,
+  used_atomic: '0',
+  budget_atomic: '1000000',
+  remaining_from_chain: true,
+  period_start: '2026-07-10T00:00:00.000Z',
+  period_end: '2026-07-13T00:00:00.000Z',
+}
+
+describe('AgentsTable — the desktop table (#4333 columns)', () => {
+  it('names every column the rebuild defines, in the order the reader scans them', () => {
     const { container } = mount()
     const heads = Array.from(container.querySelectorAll('thead th')).map((th) => th.textContent)
     expect(heads).toEqual([
       'Agent',
-      'Spend',
-      'Share',
+      'Spent',
       'Payments',
-      'Refusals',
-      'Budget used',
+      'Refused',
+      'Budget',
       'Top merchant',
-      'Last payment',
+      'Last paid',
     ])
   })
 
   it('renders one row per agent the endpoint lists, in the order it sent them', () => {
     // The endpoint ranks by spend; the table inherits that ranking. Choosing a
     // second order here would be a second answer to "which agent spent most".
+    // The Agent cell opens with the monogram's initials, so the NAME span is
+    // what the order is asserted on.
     const { container } = mount()
     const firstCells = Array.from(container.querySelectorAll('tbody tr > td:first-child')).map(
-      (td) => td.textContent,
+      (td) => td.querySelector('span.truncate')?.textContent,
     )
     expect(firstCells).toEqual(['Research agent', 'Data-feed agent'])
   })
@@ -89,48 +113,25 @@ describe('AgentsTable — the desktop table', () => {
     const { container } = mount()
     const row = container.querySelectorAll('tbody tr')[0]
     const text = row.textContent ?? ''
-    expect(text).toMatch(/\$312\.25/) // spent, via the money formatter
-    expect(text).toMatch(/96%/) // share, rounded
+    expect(text).toContain('$312.25') // spent, via the money formatter
+    // The former Share column, merged in (#4333): the slice of the window's
+    // spend under its own figure.
+    expect(text).toContain('96% of spend')
     const cells = row.querySelectorAll('td')
-    expect(cells[3].textContent).toBe('4') // payments, as the integer it is
-    expect(text).toMatch(/1 · 2 attempts/) // refusals plus the attempts behind them
-    expect(text).toMatch(/214\.00 of 250\.00 USDC/) // the delegation's own units
-    expect(text).toMatch(/NordShield VPN/) // a label the API resolved, not this table
+    expect(cells[2].textContent).toBe('4') // payments, as the integer it is
+    expect(text).toContain('1 · 2 attempts') // refusals plus the attempts behind them
+    expect(text).toContain('NordShield VPN') // a label the API resolved, not this table
   })
 
-  it('truncates a merchant whose label never resolved to a name, and keeps the whole thing readable', () => {
-    // The endpoint returns the address itself when there is no contact and no
-    // receipt name behind it. At table width an un-truncated `0x…` clipped
-    // mid-glyph: no ellipsis, no way to read the whole thing. So it goes through
-    // `lib/format.truncate` — the app's one address rule (#853) — and the full
-    // string rides in the title so the reader can still get it. NordShield VPN
-    // is pinned un-truncated by the formatter test above, which is what keeps
-    // this from passing if the address branch inverts.
-    const { container } = mount()
-    const retired = container.querySelectorAll('tbody tr')[1]
-    const cell = retired.querySelectorAll('td')[6]
-    expect(cell.textContent).toBe('0x71C2…7128')
-    expect(cell.querySelector('span[title]')?.getAttribute('title')).toBe(
-      '0x71C2E8a4D5f6093b1a7C8e2F4B6D0A9C3E5F7128',
-    )
-  })
-
-  it('does not pad the refusals cell with an attempts clause when the two agree', () => {
-    // A dedupe upstream makes rows and attempts usually equal, and spelling
-    // the pair every time would train the reader to stop parsing the cell.
-    const { container } = mount()
-    const retired = container.querySelectorAll('tbody tr')[1]
-    expect(retired.querySelectorAll('td')[4].textContent).toBe('1') // refusals: one row, no attempts clause
-    expect(retired.textContent ?? '').not.toMatch(/1 · 1 attempts/)
-  })
-
-  it('keeps a closed-out agent in the table and marks it, rather than hiding the spending', () => {
-    // An agent that has been revoked still spent what it spent in this range,
-    // and dropping the row would drop the history along with the account. The
-    // badge says the status; the row stays because the money happened.
-    const revokedRow = { ...RETIRED, status: 'revoked' }
+  it('carries the agent monogram beside the name, and the revoked badge instead of a truncation', () => {
+    const revokedRow = { ...RETIRED, status: 'revoked' as const }
     const view = render(<AgentsTable agents={[revokedRow]} currency="USD" />)
     const container = view.container as HTMLElement
+    // The monogram is the same tinted mark the spend chart keys the agent by
+    // (#4331) — one colour per agent, in the table too.
+    expect(container.querySelector('[data-testid="analytics-agents-section"]')).toBeNull()
+    const nameCell = container.querySelectorAll('tbody tr td')[0]
+    expect(nameCell.querySelector('img, [class*="rounded-full"]')).not.toBeNull()
     expect(container.textContent).toContain('Data-feed agent')
     const badge = Array.from(container.querySelectorAll('[class*="rounded-full"]')).find(
       (el) => el.textContent === 'Revoked',
@@ -139,14 +140,73 @@ describe('AgentsTable — the desktop table', () => {
     expect(badge!.className).toContain('text-[var(--v2-danger)]')
   })
 
+  it('never renders a 0x… address AS the label: an unresolved merchant reads Unknown recipient', () => {
+    // #4332 made `top_merchant.label` nullable; #4333 replaces the shim that
+    // rendered the address with "Unknown recipient". The address survives as
+    // the tooltip — elaboration on a name, the one thing a tooltip is for —
+    // and the full string is reachable, but the NAME cell is never a hex
+    // string.
+    const { container } = mount()
+    const retired = container.querySelectorAll('tbody tr')[1]
+    const cell = retired.querySelectorAll('td')[5]
+    expect(cell.textContent).toBe('Unknown recipient')
+    const trigger = cell.querySelector('span[aria-describedby]') ?? cell.querySelector('span')
+    expect(trigger?.textContent).toBe('Unknown recipient')
+    expect(cell.textContent).not.toMatch(/0x/)
+    // The monogram keys on the name either way, so an unknown keeps a tint.
+  })
+
+  it('refused is a link to that agent\u2019s refused attempts (#4323/#4333)', () => {
+    const { container } = mount()
+    const refused = container.querySelectorAll('tbody tr')[0].querySelectorAll('td')[3]
+    const link = refused.querySelector('a')
+    expect(link?.getAttribute('href')).toBe('/agents/agent-research?tab=activity&status=refused')
+    expect(link?.textContent).toContain('1')
+    expect(link?.textContent).toContain('2 attempts')
+  })
+
+  it('keeps "1 · 2 attempts" on one line, built by the one formatter the phone row uses too (#4426)', async () => {
+    // The desktop link wrapped at 1280 ("1 · 2" over "attempts"), and the
+    // string was built twice — once here, once in the phone disclosure. Both
+    // now read `formatRefusedCount`, so the two renderings print the same
+    // bytes. Mutations: drop `whitespace-nowrap` from the link → red; build
+    // either half inline with a different separator → red.
+    const { container } = mount()
+    const link = container.querySelectorAll('tbody tr')[0].querySelectorAll('td')[3].querySelector('a')!
+    expect(link.textContent).toBe('1 · 2 attempts')
+    expect(link.className.split(/\s+/)).toContain('whitespace-nowrap')
+    const firstRow = mobileOf(container)!.querySelector('div') as HTMLElement
+    await userEvent.click(within(firstRow).getByRole('button', { name: 'More' }))
+    const term = within(firstRow).getByText('Refused')
+    expect(term.nextElementSibling?.textContent).toBe('1 · 2 attempts')
+  })
+
+  it('prints the phone row\u2019s Refused as the bare count when the attempts agree (#4426)', async () => {
+    // The other half of the one formatter on the phone: one refusal, one
+    // attempt → "1", no attempts clause. Mutation: an inline copy that
+    // always appends "· N attempts" → "1 · 1 attempts" → red.
+    const { container } = mount()
+    const retiredRow = mobileOf(container)!.querySelectorAll(':scope > div')[1] as HTMLElement
+    await userEvent.click(within(retiredRow).getByRole('button', { name: 'More' }))
+    const term = within(retiredRow).getByText('Refused')
+    expect(term.nextElementSibling?.textContent).toBe('1')
+  })
+
+  it('does not pad the refusals cell with an attempts clause when the two agree', () => {
+    // A dedupe upstream makes rows and attempts usually equal, and spelling
+    // the pair every time would train the reader to stop parsing the cell.
+    const { container } = mount()
+    const retired = container.querySelectorAll('tbody tr')[1]
+    expect(retired.querySelectorAll('td')[3].textContent).toBe('1') // refusals: one row, no attempts clause
+    expect(retired.textContent ?? '').not.toMatch(/1 · 1 attempts/)
+  })
+
   it('renders a stale or failed read as unknown — no bar, never a snapshot claim (#3806)', () => {
     // Frozen at the capture instant the e2e fixture was built for: the
     // response's period bounds end the day BEFORE the clock, so even the
     // successful read describes a finished period (refilled-updating) and the
     // failed read was never a measurement (unknown). Neither row renders a
-    // bar — a 0 % bar would claim "nothing used" and a "read from Haven's
-    // last snapshot" suffix no longer exists to soften a fallback into a
-    // measurement.
+    // bar — a 0 % bar would claim "nothing used".
     vi.useFakeTimers({ toFake: ['Date'] })
     vi.setSystemTime(new Date('2026-07-12T09:00:00Z'))
     try {
@@ -156,6 +216,108 @@ describe('AgentsTable — the desktop table', () => {
       expect(rows[0]).toMatch(/couldn.t be read/)
       expect(rows[1]).toMatch(/couldn.t be read/)
       for (const text of rows) expect(text).not.toMatch(/last snapshot/)
+      // #4432: the phone half, on the same fixture and clock. It prints the
+      // same caption the desktop cell does — the stale read (Research,
+      // refilled-updating) and the failed one (Data-feed, unknown) alike —
+      // and no figure or percentage. Mutation: restore the old
+      // `figure · N%` budget line → red.
+      const phone = phoneRowsOf(container)
+      expect(phone).toHaveLength(2)
+      expect(phoneBudgetLines(phone[0])).toEqual(['Usage this period couldn\u2019t be read'])
+      expect(phoneBudgetLines(phone[1])).toEqual(['Usage this period couldn\u2019t be read'])
+      expect(phoneBudgetLines(phone[0])).toEqual(desktopBudgetCaptions(container, 0))
+      expect(phoneBudgetLines(phone[1])).toEqual(desktopBudgetCaptions(container, 1))
+      for (const row of phone) {
+        const text = row.textContent ?? ''
+        expect(text).not.toMatch(/\d%/)
+        expect(text).not.toMatch(/ of \d/)
+        expect(text).not.toMatch(/last snapshot/)
+      }
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('states the budget figures once, through the shared row caption — never 0.00 of 0.00 (#4333, #4426)', () => {
+    // The #4333 root cause: the caption helper divided a symbol-only row
+    // (chainId null — the analytics read carries the SYMBOL, not the chain)
+    // by 18 decimals, so a 1.00 USDC budget read "0.00 of 0.00". #4426: the
+    // cell printed its own figure line ("0.00 of 1.00 USDC", 0%) above the
+    // meter and then the caption said the same figures again. Now the cell
+    // asks for the compact `style: 'row'` caption the dashboard agent row and
+    // the agent hero use, and prints no figure line. Asserted as the EXACT
+    // caption — the period word in place of "used this period", the no-break
+    // space between the cap and its symbol — and as one occurrence, so a
+    // returning figure line or a `'full'` caption cannot hide behind a
+    // partial match.
+    const agent: AnalyticsAgentRow = {
+      ...RESEARCH,
+      budgets: [
+        {
+          token: 'USDC',
+          recipient: null,
+          used_atomic: '0',
+          budget_atomic: '1000000',
+          remaining_from_chain: true,
+          period_start: '2026-07-10T00:00:00.000Z',
+          period_end: '2026-07-13T00:00:00.000Z',
+          // No `chain_id` on the wire row — the analytics read carries the
+          // token's SYMBOL only, which is exactly the shape the caption fix
+          // addresses. (The generated type makes it optional-undefined; the
+          // component itself projects `chainId: null` onto the caption.)
+        },
+      ],
+    }
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-07-12T09:00:00Z'))
+    try {
+      const { container } = render(<AgentsTable agents={[agent]} currency="USD" />)
+      const cell = (container.querySelector('tbody tr') as HTMLElement).querySelectorAll('td')[4]
+      const text = cell.textContent ?? ''
+      expect(text).toBe('0.00 of 1.00\u00a0USDC · every 3 days · refills in 15h')
+      expect(text.match(/of 1\.00/g)).toHaveLength(1)
+      expect(text).not.toContain('used this period')
+      expect(text).not.toContain('0.00 of 0.00')
+      expect(text).not.toMatch(/\d%/)
+      expect(cell.querySelectorAll('[role="progressbar"]')).toHaveLength(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('says a budget that has not started yet in the helper\u2019s words, rather than an empty cell (#4426)', () => {
+    // With no figure line above the meter, a caption kind that draws no bar
+    // must still say something: the helper's own words, not a blank cell.
+    // The analytics read carries no `expires_at`, so the reachable kinds
+    // without a bar are unknown, refilled-updating (both UNREAD_CAPTION,
+    // pinned above) and not-started — a period that begins after the clock.
+    // Mutation: render the unread kinds only → the cell is empty → red.
+    const agent: AnalyticsAgentRow = {
+      ...RESEARCH,
+      budgets: [
+        {
+          token: 'USDC',
+          recipient: null,
+          used_atomic: '0',
+          budget_atomic: '1000000',
+          remaining_from_chain: true,
+          period_start: '2026-07-10T00:00:00.000Z',
+          period_end: '2026-07-13T00:00:00.000Z',
+        },
+      ],
+    }
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-07-09T09:00:00Z'))
+    try {
+      const { container } = render(<AgentsTable agents={[agent]} currency="USD" />)
+      const cell = (container.querySelector('tbody tr') as HTMLElement).querySelectorAll('td')[4]
+      expect(cell.textContent).toMatch(/^Starts /)
+      expect(cell.querySelectorAll('[role="progressbar"]')).toHaveLength(0)
+      // #4432: the phone row says the same words, not the figures. Mutation:
+      // drop not-started from the phone row → red.
+      const [phone] = phoneRowsOf(container as HTMLElement)
+      expect(phoneBudgetLines(phone)).toEqual([cell.textContent])
+      expect(phone.textContent ?? '').not.toMatch(/\d%/)
     } finally {
       vi.useRealTimers()
     }
@@ -182,63 +344,100 @@ describe('AgentsTable — the desktop table', () => {
     expect(text).toContain('No payments in this range')
   })
 
-  it('links each row to the agent, so a column of names is a column of ways in', () => {
+  it('links the whole row to the agent, with the Agent cell\u2019s link as the keyboard half', () => {
     const { container } = mount()
-    const links = Array.from(container.querySelectorAll('tbody a')).map((a) => a.getAttribute('href'))
-    expect(links).toEqual(['/agents/agent-research', '/agents/agent-retired'])
+    const row = container.querySelectorAll('tbody tr')[0] as HTMLElement
+    // The pointer half: the row itself navigates (client-side), so any cell
+    // click is a way in.
+    expect(row.className).toContain('cursor-pointer')
+    expect(row.getAttribute('onclick') ?? '').toBe('')
+    // The keyboard half: the Agent cell's Link carries the destination for
+    // focus and AT.
+    const cellLink = row.querySelector('td:first-child a')
+    expect(cellLink?.getAttribute('href')).toBe('/agents/agent-research')
   })
 
-  it('stages the two widest columns behind the shell’s own breakpoint', () => {
-    // Share and top merchant are the `revealAt="xl"` pair. Their cells carry
-    // the primitive's own stage token rather than a hand-written breakpoint,
-    // which is what keeps this table's narrow behaviour the same as every other
-    // table in the app instead of a second invention of it.
+  it('stages the widest column behind the shell\u2019s own breakpoint', () => {
+    // Top merchant is the `revealAt="xl"` column. Its cell carries the
+    // primitive's own stage token rather than a hand-written breakpoint,
+    // which is what keeps this table's narrow behaviour the same as every
+    // other table in the app — and what `table-container-collapse.spec.ts`
+    // anchors on.
     const { container } = mount()
     const staged = Array.from(container.querySelectorAll('thead th')).filter((th) =>
       th.className.includes('min-width:974px'),
     )
-    expect(staged.map((th) => th.textContent)).toEqual(['Share', 'Top merchant'])
+    expect(staged.map((th) => th.textContent)).toEqual(['Top merchant'])
   })
 })
 
-describe('AgentsTable — one colour per agent, shared with the spend chart (#3051)', () => {
-  it('puts the series swatch beside each plotted agent\'s SPEND figure, in both renderings, from the one shared map — never beside the name', () => {
+describe('AgentsTable — one colour per agent (#4331)', () => {
+  it('carries no series swatch in either rendering: the monogram is the colour key', () => {
+    // Since #4331 the agent's colour lives on its monogram (the same avatar
+    // tint `seriesColorForAgent` feeds the spend chart) — a second coloured
+    // dot in the spend cell would read as a status light and duplicate it.
     const agents = orderAgentsForDisplay([RESEARCH, RETIRED])
-    const map = seriesIndexByAgent(agents, FIXTURE_ANALYTICS_OVERVIEW.by_day as AnalyticsDayBucket[])
-    const { container } = render(<AgentsTable agents={agents} currency="USD" seriesIndexById={map} />)
+    const { container } = render(<AgentsTable agents={agents} currency="USD" />)
     const desktop = desktopOf(container)!
     const mobile = mobileOf(container)!
-    const desktopSwatches = desktop.querySelectorAll('[data-testid="series-swatch"]')
-    const mobileSwatches = mobile.querySelectorAll('[data-testid="series-swatch"]')
-    expect(desktopSwatches).toHaveLength(2)
-    expect(mobileSwatches).toHaveLength(2)
-    expect(Array.from(desktopSwatches).map((el) => el.getAttribute('data-series-index'))).toEqual(['0', '1'])
-    expect(Array.from(mobileSwatches).map((el) => el.getAttribute('data-series-index'))).toEqual(['0', '1'])
-    // Desktop: the swatch shares a cell with the spend figure, not the name
-    // link (a dot beside a name is the status-light idiom).
-    const spendCell = desktopSwatches[0]!.closest('td')!
-    expect(spendCell.textContent).toContain('$')
-    expect(spendCell.querySelector('a')).toBeNull()
-    expect(desktop.querySelector('a [data-testid="series-swatch"]')).toBeNull()
-    // The swatch sits in a fixed slot BEFORE the figure, so the figure's
-    // right edge stays on the header's like every other numeric column.
-    const figure = spendCell.querySelector('.v2-tabular')!
-    expect(desktopSwatches[0]!.compareDocumentPosition(figure) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    // The colour is the chart's own token by index — the same
-    // `seriesColor(0)` the first stacked segment is filled with.
-    expect((desktopSwatches[0] as HTMLElement).style.backgroundColor).toBe(seriesColor(0))
+    expect(desktop.querySelectorAll('[data-testid="series-swatch"]')).toHaveLength(0)
+    expect(mobile.querySelectorAll('[data-testid="series-swatch"]')).toHaveLength(0)
+    expect(desktop.querySelectorAll('[data-testid="series-swatch-slot"]')).toHaveLength(0)
+    expect(container.textContent).toContain('$')
+  })
+})
+
+describe('AgentsTable — the phone row\u2019s budget lines (#4432)', () => {
+  // The phone row prints the SAME caption the desktop Budget cell does,
+  // through the one caption-row projection both halves call — so the two
+  // layouts cannot disagree about a budget. Text only: the phone row draws
+  // no meter.
+  it('prints a readable budget as exactly the desktop cell\u2019s row caption, and no bar', () => {
+    // Mutation: the phone row projects its own figures (`style: 'full'`, or
+    // its own atomic arithmetic) instead of the shared projection → red.
+    const agent: AnalyticsAgentRow = { ...RESEARCH, budgets: [READABLE_BUDGET] }
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-07-12T09:00:00Z'))
+    try {
+      const { container } = render(<AgentsTable agents={[agent]} currency="USD" />)
+      const [phone] = phoneRowsOf(container as HTMLElement)
+      expect(phoneBudgetLines(phone)).toEqual(['0.00 of 1.00\u00a0USDC · every 3 days · refills in 15h'])
+      expect(phoneBudgetLines(phone)).toEqual(desktopBudgetCaptions(container as HTMLElement))
+      expect(phone.querySelectorAll('[role="progressbar"]')).toHaveLength(0)
+      expect(phone.textContent ?? '').not.toMatch(/\d%/)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
-  it('renders no swatch for an agent the chart does not plot, and none at all without the map', () => {
-    const agents = orderAgentsForDisplay([RESEARCH, RETIRED])
-    const onlyResearch = seriesIndexByAgent(agents, [{ date: '2026-07-07', spent_by_agent: { [RESEARCH.id]: '1.00' }, refusals: 0 }])
-    const one = render(<AgentsTable agents={agents} currency="USD" seriesIndexById={onlyResearch} />)
-    expect(desktopOf(one.container)!.querySelectorAll('[data-testid="series-swatch"]')).toHaveLength(1)
-    // The unplotted agent keeps the EMPTY slot, so its figure lines up too.
-    expect(desktopOf(one.container)!.querySelectorAll('[data-testid="series-swatch-slot"]')).toHaveLength(2)
-    one.unmount()
-    const none = mount()
-    expect(none.container.querySelectorAll('[data-testid="series-swatch"]')).toHaveLength(0)
+  it('renders one line per budget, not one joined line', () => {
+    // Mutation: join the budgets into one line again → red.
+    const agent: AnalyticsAgentRow = {
+      ...RESEARCH,
+      budgets: [
+        READABLE_BUDGET,
+        { ...READABLE_BUDGET, recipient: '0x00000000000000000000000000000000000000aa', used_atomic: '500000', budget_atomic: '2000000' },
+      ],
+    }
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-07-12T09:00:00Z'))
+    try {
+      const { container } = render(<AgentsTable agents={[agent]} currency="USD" />)
+      const [phone] = phoneRowsOf(container as HTMLElement)
+      expect(phoneBudgetLines(phone)).toEqual([
+        '0.00 of 1.00\u00a0USDC · every 3 days · refills in 15h',
+        '0.50 of 2.00\u00a0USDC · every 3 days · refills in 15h',
+      ])
+      expect(phoneBudgetLines(phone)).toEqual(desktopBudgetCaptions(container as HTMLElement))
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps "No budget" for an agent with none', () => {
+    const view = render(<AgentsTable agents={[{ ...RETIRED, budgets: [] }]} currency="USD" />)
+    const [phone] = phoneRowsOf(view.container as HTMLElement)
+    expect(phoneBudgetLines(phone)).toEqual(['No budget'])
   })
 })
 
@@ -262,49 +461,56 @@ describe('AgentsTable — the mobile rows', () => {
 
   it('keeps spend, refusals and the budget on the face of the row', () => {
     // The three a reader at a bus stop is most likely asking about. They are
-    // NOT behind the disclosure, and they are the same fields the desktop
-    // table renders, so the two layouts cannot disagree about a figure.
-    const text = mobileOf(mount().container)?.textContent ?? ''
-    expect(text).toContain('Research agent')
-    expect(text).toContain('$312.25 spent') // compacted for the narrow column
-    expect(text).toContain('1 refused')
-    expect(text).toContain('214.00 of 250.00 USDC')
-    expect(text).toContain('86%')
+    // NOT behind the disclosure (it stays closed here). The budget line is
+    // the desktop cell's own caption (#4432): on the shared fixture the read
+    // is stale, so it says the usage couldn't be read — and no `%` figure is
+    // on the face of the row, the finished period's percentage included.
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-07-12T09:00:00Z'))
+    try {
+      const { container } = mount()
+      const [first] = phoneRowsOf(container)
+      expect(first.querySelector('dl')).toBeNull()
+      const text = first.textContent ?? ''
+      expect(text).toContain('Research agent')
+      expect(text).toContain('$312.25 spent') // compacted for the narrow column
+      expect(text).toContain('1 refused')
+      expect(text).toContain('Usage this period couldn\u2019t be read')
+      expect(text).not.toContain('214.00 of 250.00')
+      expect(text).not.toMatch(/\d%/)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('puts the rest of the columns in a disclosure that opens, and is not a second source', async () => {
-    // Every line the disclosure reveals is a field the desktop table already
-    // renders; the disclosure is where the columns a phone had no room for
-    // went, not a second place a value can be wrong.
     const mobile = mobileOf(mount().container)!
     const firstRow = mobile.querySelector('div') as HTMLElement
 
-    // Closed by default: a row that is always open is a row that is always
-    // too tall for a phone.
     expect(within(firstRow).queryByText('Top merchant')).toBeNull()
     const toggle = within(firstRow).getByRole('button', { name: 'More' })
     expect(toggle.getAttribute('aria-expanded')).toBe('false')
 
     await userEvent.click(toggle)
     expect(toggle.getAttribute('aria-expanded')).toBe('true')
-    for (const term of ['Payments', 'Refusals', 'Share', 'Spend', 'Top merchant', 'Last payment']) {
+    for (const term of ['Payments', 'Refused', 'Share of spend', 'Spend', 'Top merchant', 'Last payment']) {
       expect(within(firstRow).getByText(term)).toBeTruthy()
     }
     expect(within(firstRow).getByText('NordShield VPN')).toBeTruthy()
   })
 
   it('names the agent once on the face of the row, not once per open section', () => {
-    // The title is the row's identity; a second copy inside the disclosure
-    // would be a second thing to keep in step with the first.
     const mobile = mobileOf(mount().container)!
     const firstRow = mobile.querySelector('div') as HTMLElement
     expect(within(firstRow).getAllByText('Research agent').length).toBe(1)
   })
 
-  it('links each row to the agent there too, because a row without a way in is a dead end', () => {
+  it('links the row to the agent and the refusals to the refused attempts', () => {
     const mobile = mobileOf(mount().container)!
-    const links = Array.from(mobile.querySelectorAll('a')).map((a) => a.getAttribute('href'))
-    expect(links).toEqual(['/agents/agent-research', '/agents/agent-retired'])
+    const firstRow = mobile.querySelector('div') as HTMLElement
+    const hrefs = Array.from(firstRow.querySelectorAll('a')).map((a) => a.getAttribute('href'))
+    expect(hrefs).toContain('/agents/agent-research')
+    expect(hrefs).toContain('/agents/agent-research?tab=activity&status=refused')
   })
 })
 

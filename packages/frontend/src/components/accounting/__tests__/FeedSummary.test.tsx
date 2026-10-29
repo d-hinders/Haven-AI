@@ -62,7 +62,7 @@ describe('FeedSummary', () => {
     expect(screen.getByText(chip)).toBeInTheDocument()
     expect(screen.getByText(sentence)).toBeInTheDocument()
     const fix = screen.getByRole('link', { name: en.accountingPage.summary.fixInSettings })
-    expect(fix).toHaveAttribute('href', '/settings')
+    expect(fix).toHaveAttribute('href', '/settings?tab=business')
     // The one action that resolves the state is the primary one (#2869 design review).
     expect(fix.className).toContain('bg-[var(--v2-brand)]')
   })
@@ -95,7 +95,7 @@ describe('FeedSummary', () => {
     const line = screen.getByTestId('feed-summary')
     expect(line).toHaveAttribute('data-status', 'disconnected')
     expect(screen.getByText(en.accountingPage.summary.notConnected)).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: en.accountingPage.openSettings })).toHaveAttribute('href', '/settings')
+    expect(screen.getByRole('link', { name: en.accountingPage.openSettings })).toHaveAttribute('href', '/settings?tab=business')
     expect(screen.queryByRole('button', { name: /^connect$/i })).toBeNull()
     // "Settings" once in the line and once on the action — not a third time
     // as a detail (#2869 design review).

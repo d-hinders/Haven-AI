@@ -369,13 +369,17 @@ export function candidateHostname(resourceUrl: string): string | null {
 }
 
 /**
- * Per-hostname cooldown, held across batches by the caller.
+ * Per-hostname cooldown, held across batches by the caller. In production
+ * that caller is `createCatalogIngestMonitor` (lifecycle.ts), which keeps one
+ * instance for the monitor's lifetime (#4407).
  *
  * In-process on purpose. It is a politeness budget, not a security control —
  * the security controls are the ownership gate and the SSRF guard, both of
- * which hold regardless. A replica-local cooldown is off by at most the
- * replica count, and the probe runs under a leader lock anyway, so in
- * practice there is one.
+ * which hold regardless. The cooldown is per process: a restart starts it
+ * empty, and since the leader lock is taken per tick, each replica that wins
+ * a tick consults its own window. With more than one replica a host can be
+ * probed once per window per replica, so the rate is off by at most the
+ * replica count.
  */
 export class HostCooldown {
   private readonly nextEligibleAt = new Map<string, number>()
@@ -389,6 +393,23 @@ export class HostCooldown {
 
   record(hostname: string, now: number): void {
     this.nextEligibleAt.set(hostname, now + this.cooldownMs)
+  }
+
+  /**
+   * Drop every host whose window has passed. A lifetime instance (#4407)
+   * would otherwise keep one entry per host ever probed; pruned at each
+   * batch, it holds only the hosts probed in the last window, which the
+   * per-tick candidate set already bounds.
+   */
+  prune(now: number): void {
+    for (const [hostname, next] of this.nextEligibleAt) {
+      if (now >= next) this.nextEligibleAt.delete(hostname)
+    }
+  }
+
+  /** Hosts currently tracked — for tests of the prune. */
+  get size(): number {
+    return this.nextEligibleAt.size
   }
 }
 
@@ -419,6 +440,7 @@ export async function runProbeBatch(
 
   // Admission is sequential and happens up front, so the cooldown decision is
   // never made concurrently with itself.
+  cooldown.prune(now().getTime())
   for (const candidate of candidates) {
     const hostname = candidateHostname(candidate.resourceUrl)
     if (hostname === null) {

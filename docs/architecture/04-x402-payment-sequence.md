@@ -238,12 +238,15 @@ on-chain transaction. Every quote is informational rather than a price
 reservation or payment authority.
 
 Since #3967 every quote ALSO carries what Haven can already know about the
-price before any payment exists: a quote-time budget pre-check against the
-agent's remaining delegation budget (asked about the option pay will actually
-select, with `record_refusal: false` so a quote writes no refusal row), an
-optional agent-stated `expected_amount`, and the merchant's own denial hints
-from `accepts[].extra`. An over-budget or mismatched quote stops the agent —
-`safe_to_continue: false`, no prefilled cap, no next tool — but the quote data
+price before any payment exists: an optional agent-stated `expected_amount`,
+the merchant's own denial hints from `accepts[].extra`, and, on the **hosted**
+quote only, a quote-time budget pre-check against the agent's remaining
+delegation budget (asked about the option pay will actually select, with
+`record_refusal: false` so a quote writes no refusal row). The SDK's
+`quoteX402()` and the local `@haven_ai/mcp` `haven_quote_x402` run no budget
+pre-check (#4345); there the budget is checked when the agent pays. An
+over-budget or mismatched quote stops the agent — `safe_to_continue: false`,
+no prefilled cap, no next tool — but the quote data
 itself is still returned, an unavailable pre-check fails OPEN with a warning
 (the on-chain policy remains the actual gate), and nothing about the payment
 path's own checks changes.
@@ -532,7 +535,18 @@ refused as `BARE_HASH_REFUSED` (`packages/signer/src/bare-hash.ts`).
 > budget and answers `403 delegation_budget_exceeded`
 > ([#2082](https://github.com/d-hinders/Haven-AI/issues/2082)); the legacy rail
 > answers `410` (#1986). None of the three writes anything, and none produces a
-> `payment_id` to poll. The `pending_approval` branch retained in the hosted
+> `payment_id` to poll. **An ENDED budget is its own answer on both delegation
+> legs** ([#4458](https://github.com/d-hinders/Haven-AI/issues/4458)): when the
+> only budget row for the token has expired, authorize answers `403
+> delegation_expired` with `phase: insufficient_funds`, `next_action:
+> fund_account_or_raise_allowance`, `budget_ended_at` (ISO 8601), `remaining`/
+> `remaining_atomic` `"0"`, the amount and shortfall figures, and — on the
+> EIP-3009 funding leg — `merchant_address` naming `merchantPayTo` (the real
+> merchant), never `payTo`, which there is the agent's own funding EOA. Same
+> decision as the over-budget refusal (403, one `payment_refusals` row with
+> `reason: delegation_expired`, nothing created or signed); the remedy differs,
+> because waiting for a period to reset cannot help — the owner sets a new
+> budget. The `pending_approval` branch retained in the hosted
 > tool code is fail-closed cover for a row stored before the retirement
 > (#2101/#2113) — its verdict is `stop_and_tell_user`, and no live rail mints
 > the status that reaches it.
@@ -575,6 +589,31 @@ structured `NO_FUNDING_LEG`. After that, or after a signer restart, the id gets
 the unknown-binding refusal, which also builds nothing. `haven_sign_x402`
 refuses a settlement child before signing anything. The invariant that always
 holds is the shorter one: only a funding-leg binding can build a header.
+
+**The signer's success results name their next step too (#4449).** Until
+#4449 only the signer's refusals carried the next-step family (#3103), so a
+successful signature said nothing about what to call next. Each of the six
+success sites now carries either `next_tool_name` +
+`next_tool_server_role: 'hosted'` + `next_arguments`, or a literal
+`next_tool_omitted_reason` — the `next_tool` family only, never `next_action` /
+`safe_to_continue`, which stay on refusals. Where the signer knows the tool it
+names it: a direct-payment `haven_sign` hands off to `haven_submit` with
+`{ payment_id, signature }` (the `haven_submit#payment` variant), and
+`haven_sign_sweep_delegate` hands its signature back to `haven_sweep_delegate`
+with `{ authorization, signature }`. Where it cannot know, it says why instead
+of guessing: `haven_sign` on an x402 context, `haven_sign_x402` and
+`haven_x402_sign_header` cannot tell an MCP merchant from a plain-HTTP one, nor
+a fresh signature from a funded-retry resume, so each reason names BOTH settle
+routes — `haven_submit` with `settlement_scheme: 'erc7710'` for a plain-HTTP
+merchant, `haven_settle_mcp_tool` with no `payment_header` for an MCP merchant.
+A guessed `haven_submit` would be wrong on an MCP merchant and on the resume
+path. `haven_sign_siwx` names no tool because no hosted tool follows a sign-in.
+The change is additive: no field is removed (including `x402_binding`, whose
+retirement for a settlement child the `haven_sign` description now states), no
+signing decision changes, and `SUPPORTED_X402_EXPECTED_VERSIONS` is untouched.
+Installed signers (`0.10.0-alpha.0`, `0.8.1-alpha.0`, observed live 2026-10-26)
+never emit these steps, so the hosted prepare and pay guidance stays
+authoritative and must not be trimmed in favour of the signer step.
 
 Before signing the funding payload, the edge signer checks the typed-data
 digest against Haven's committed `typedDataHash`, reconstructs the canonical payment/resource/merchant/amount/asset/network/expiry
@@ -1560,6 +1599,17 @@ The flow is a two-call variant of `/x402/authorize`:
    performs (#1145) — and answers `403` `delegation_budget_exceeded` with
    `phase: insufficient_funds`, `next_action: fund_account_or_raise_allowance` and
    the shortfall, writing nothing and deploying nothing.
+
+   **An ENDED budget is refused the same way, with its own reason**
+   ([#4458](https://github.com/d-hinders/Haven-AI/issues/4458)). When the only
+   budget row for the token has expired — the live read hides it by design
+   (#3802) — authorize answers `403` `delegation_expired` with the same
+   `phase`/`next_action`, `budget_ended_at` (ISO 8601), `remaining`/
+   `remaining_atomic` `"0"` and the amount/shortfall figures, plus `rail`,
+   `network`, `resource_url` and `merchant_address` (`payTo` on this leg,
+   `merchantPayTo` on the EIP-3009 funding leg). Same decision — one
+   `payment_refusals` row, nothing created or signed — but the remedy is the
+   owner setting a NEW budget: waiting for a period to reset cannot help.
 
    Read this as a fail-fast convenience, **not a policy boundary**, and the
    distinction is the whole point. The caveat stack is still the gate: it
@@ -2708,15 +2758,17 @@ itself redeems `[grant, parent-child, budget]` (three links).
 3. Agent B names the budget: `sub_budget_id` on `POST /payments`,
    `subBudgetId` on `POST /x402/authorize`. The backend refuses before
    building the chain when the grant or its parent-child row is not open
-   (`sub_budget_not_open` — A revoked its grant, A's own budget delegation
-   was revoked, or expiry), the token or pinned recipient disagrees, or the
-   grant was not carved from the budget delegation selected for the payment
-   (`sub_budget_parent_mismatch`) — the parent delegation is then used
+   (`sub_budget_not_open` — A revoked its grant, or expiry), the token or
+   pinned recipient disagrees, or the grant was not carved from the budget
+   delegation selected for the payment, or A's own budget delegation was
+   revoked (`sub_budget_parent_mismatch`) — the parent delegation is then used
    VERBATIM by hash, the #3329 review-finding-E rule applied twice. Revoking
    B's child leaves A intact; revoking A's budget delegation strands B's
    child (its chain root no longer resolves active by hash, and reverts
    on-chain once the owner's disable lands) — surfaced as the structured 409
-   above.
+   above. (#4468 corrected this attribution: a revoked A budget delegation
+   fails the parent-child lookup by hash, which answers
+   `sub_budget_parent_mismatch`, never `sub_budget_not_open`.)
    On `POST /x402/authorize` both legs resolve the scope through
    `modules/budget-scope` (#3617) and pre-check the links the redemption
    carries (`periodPrecheckLinks`): B's grant, A's parent-child and A's budget,
@@ -2995,3 +3047,10 @@ which the characterization tests enforce.
 > read, and a forward reference to #3102 that the shipped slice did not
 > fulfil; both are corrected, and the #3054 fact family was swept with the
 > wrapped lines joined. `last-verified` is bumped for this re-read.
+
+> **Re-verified 2026-10-26 (#4449, the signer's success next-step family):** the
+> signer's six success results and the settlement-child guidance were re-read
+> against `packages/signer/src/tools.ts`, `next-step.ts` and
+> `no-funding-leg.ts` at `origin/dev` `b9f9f1e47`. Scope of this note: the
+> paragraph added above. The rest of this document was not re-read for it, and
+> `last-verified` is not bumped.

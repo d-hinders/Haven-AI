@@ -1522,6 +1522,56 @@ describe('haven_quote_x402 #3967 — over-budget / expected_amount / denial stop
     expect((precheckCall?.body as Record<string, unknown>).idempotencyKey).toBeUndefined()
   })
 
+  it('#4458 — an ENDED budget (403 delegation_expired) stops the quote with QUOTE_BUDGET_ENDED, naming the end date and the owner step', async () => {
+    stubQuote(
+      OVERBUDGET_PAYMENT_REQUIRED,
+      DELEGATION_AGENT,
+      {
+        // The decided refusal the backend answers when the agent's only
+        // budget for the token has ENDED (#4458).
+        'POST /machine-payments/budget-precheck': {
+          status: 403,
+          body: {
+            error:
+              'This x402 payment of 1000 USDC cannot proceed — this budget ended on 2026-10-23; ' +
+              'ask the owner to set a new one.',
+            error_code: 'delegation_expired',
+            phase: 'insufficient_funds',
+            next_action: 'fund_account_or_raise_allowance',
+            budget_ended_at: '2026-10-23T00:00:00.000Z',
+            remaining_atomic: '0',
+          },
+        },
+      },
+    )
+    const result = ok<Record<string, any>>(
+      await handlers().haven_quote_x402({ url: 'http://merchant.test/paid' }),
+    )
+    // A decided refusal, not a degrade: the agent is STOPPED.
+    expect(result.data.safe_to_continue).toBe(false)
+    expect(result.data.next_action).toBe(AgentPaymentNextAction.StopAndTellUser)
+    expect(result.data.next_tool).toBeUndefined()
+    expect(result.data.budget_check).toEqual({
+      sufficient: false,
+      remaining_atomic: '0',
+      requested_atomic: '1000000000',
+    })
+    // The budget-ended warning, NOT the over-budget one.
+    const codes = (result.data.warnings as Array<{ code: string }>).map((w) => w.code)
+    expect(codes).toContain('QUOTE_BUDGET_ENDED')
+    expect(codes).not.toContain('QUOTE_EXCEEDS_REMAINING_BUDGET')
+    const warning = (result.data.warnings as Array<{ code: string; message: string }>).find(
+      (w) => w.code === 'QUOTE_BUDGET_ENDED',
+    )!
+    // The end date and the owner's next step — never "wait for the period to
+    // reset", which is the over-budget remedy and is false here.
+    expect(warning.message).toContain('2026-10-23')
+    expect(warning.message).toContain('set a new budget')
+    expect(warning.message).toContain('Waiting will not help')
+    expect(warning.message).not.toContain('grant or raise the budget')
+    expect(warning.message).not.toContain('period to reset')
+  })
+
   it('expected_amount mismatch ALONE stops the agent with no cap and no pre-check call', async () => {
     stubQuote(
       PAYMENT_REQUIRED, // 1 USDC on the wire

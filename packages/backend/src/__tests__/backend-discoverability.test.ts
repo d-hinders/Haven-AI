@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { apiBaseUrl } from '../domain/request-origin.js'
 import { config } from '../config.js'
 import { authMiddleware, OWNER_UNAUTHORIZED_BODY } from '../middleware/auth.js'
+import { OAUTH_STATE_PURPOSE } from '../modules/accounting/oauth-state.js'
 import { AGENT_MISSING_KEY_BODY, AGENT_INVALID_KEY_BODY } from '../middleware/agentAuth.js'
 import { PUBLIC_CATALOG_FIELDS, toPublicListing, endpointHost } from '../routes/catalog.js'
 import { fastifyPathToOpenApi } from '../openapi/route-inventory.js'
@@ -155,7 +156,7 @@ describe('401 hints', () => {
     app.get('/guarded', { preHandler: authMiddleware }, async () => ({ ok: true }))
 
     const garbage = await app.inject({ method: 'GET', url: '/guarded', headers: { authorization: 'Bearer nonsense' } })
-    const purposeToken = app.jwt.sign({ sub: 'u1', purpose: 'fortnox_oauth' } as unknown as { sub: string; email: string })
+    const purposeToken = app.jwt.sign({ sub: 'u1', purpose: OAUTH_STATE_PURPOSE } as unknown as { sub: string; email: string })
     const scoped = await app.inject({ method: 'GET', url: '/guarded', headers: { authorization: `Bearer ${purposeToken}` } })
 
     expect(garbage.statusCode).toBe(401)

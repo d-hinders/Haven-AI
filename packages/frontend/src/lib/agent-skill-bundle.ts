@@ -151,8 +151,10 @@ Do not guess the wallet address, network, or budget.
 
 For instant orientation at the start of a session, read the non-secret
 \`agent.json\` the connector wrote to your Haven credential directory (typically
-\`~/.haven/agents/<agent-id>/agent.json\` — if you don't know the agent id, list
-\`~/.haven/agents/\` to find the folder). It
+\`~/.haven/agents/<slug>/agent.json\`, where \`<slug>\` is the wiring name of the
+\`haven-<slug>\` pair — only a \`--bare\` run, or a \`--replace\` without \`--name\`,
+names the directory by the agent id instead; if you don't know the folder, list
+\`~/.haven/agents/\` to find it). It
 holds your agent id, Haven wallet address, network, and *configured* per-token
 budget, and contains no keys — the fastest way to answer "who am I and what may
 I spend" with no round trip. If that file is absent (some setups don't write
@@ -173,7 +175,13 @@ spending:
   the user, not a refusal — a budget above the balance is a normal setup, so
   still try the payment; \`null\` means the coverage read failed or the remaining
   figure was not read live; the key is absent when the remaining is 0. Rows for
-  one token are compared alone.
+  one token are compared alone. \`needs_approval\` with no \`allowances[]\`
+  rows and \`budgetEndedAt\` set means the budget ENDED on that date — waiting
+  will not help, ask the owner to set a new one; with no rows and no
+  \`budgetEndedAt\`, nobody approved a budget yet; with rows (all at remaining 0) the
+  budget is spent for this period, and \`budgetRefillsAt\` says when it refills
+  (\`null\`: it ends before it refills) — tell the user, then wait or ask them
+  to raise it.
 - \`mcp__haven__haven_get_allowances\` — detailed per-token breakdown
   (configured, spent, reset window) when you need more than the summary.
 - \`mcp__haven__haven_check_funds\` — whether the account actually HOLDS at
@@ -387,8 +395,10 @@ for example, an invoice carrying an \`x402_payment_url\` to POST with its
   report it, the merchant's settlement evidence. (A deposit transfer is bound
   to its payee and amount on-chain too; the difference is the record, not
   the binding.)
-- **If the quote says stop, stop.** The quote checks the agent's remaining
-  budget at quote time, and it can check a price you state (\`expected_amount\`).
+- **If the quote says stop, stop.** The hosted quote checks the agent's
+  remaining budget at quote time, and it can check a price you state
+  (\`expected_amount\`). On the local runtime (\`@haven_ai/mcp\`) the quote
+  checks only a price you state; the budget is checked when you pay.
   When it returns \`safe_to_continue: false\` — the amount exceeds the budget, or
   the price does not match what you expected — it prefills no cap and names no
   next tool: stop and tell the user. If the x402 challenge itself is wrong (a
@@ -533,8 +543,8 @@ only part of it was usable), and an optional \`note\` (max 2000 characters)
 saying what was wrong. It is evidence only: it moves no money, never changes
 \`settled\` or any money field, and works only on your own settled
 payments — another agent's payment is refused. A re-report replaces your
-earlier verdict; the receipt then carries it beside the payment, so the
-owner does not read a junk delivery as a success.
+earlier verdict; the receipt then carries it beside the payment, so a junk
+delivery does not read as a success.
 ### Relay a delivered code or credential to the owner — immediately, verbatim
 
 If a merchant response carries what the user PAID FOR — a redemption code, gift

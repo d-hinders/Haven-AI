@@ -4,8 +4,10 @@ import { activityToTransaction } from '../AgentActivityTab'
 
 /**
  * #4267: the agent feed's eip3009 legs reach the shared detail panel by name,
- * so an agent-tab row with a recorded settlement reads "Recorded (verified)"
- * and lists both transactions, exactly as on /transactions.
+ * so an agent-tab row with a recorded settlement reads "Settled (verified)"
+ * (#4320) and lists both transactions, exactly as on /transactions. The
+ * activity read's snake_case settlement state maps to the wire's camelCase
+ * fields here (#4319).
  */
 const FUNDING = `0x${'cd'.repeat(32)}`
 const SETTLEMENT = `0x${'ef'.repeat(32)}`
@@ -36,6 +38,20 @@ describe('activityToTransaction — the eip3009 legs (#4267)', () => {
     expect(row.settlementScheme).toBe('eip3009')
     expect(row.settlementTxHash).toBe(SETTLEMENT)
     expect(row.fundingTxHash).toBe(FUNDING)
+  })
+
+  it('maps the snake_case settlement state to the wire fields (#4320)', () => {
+    const row = activityToTransaction(
+      item({ settlement_tracking: 'verified', settlement_proof: 'receipt' }),
+      'Atlas',
+      'Main',
+    )
+    expect(row.settlementTracking).toBe('verified')
+    expect(row.settlementProof).toBe('receipt')
+    // Absent on an older backend's payload — never an invented state.
+    const bare = activityToTransaction(item({ settlement_tracking: undefined }), 'Atlas', 'Main')
+    expect(bare.settlementTracking).toBeNull()
+    expect(bare.settlementProof).toBeNull()
   })
 
   it('carries erc7710 too — one transaction, so no settlement hash', () => {

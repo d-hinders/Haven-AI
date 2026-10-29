@@ -20,6 +20,7 @@ import { Button } from './ui/Button'
 import WalletConnectAction from './WalletConnectAction'
 import PasskeyElsewhereHint from './PasskeyElsewhereHint'
 import { Input } from './ui/Input'
+import { Select } from './ui/Select'
 import { useToast } from './ui/Toast'
 
 interface Props {
@@ -101,7 +102,7 @@ export default function DelegationSendModal({ open, onClose, accountAddress, cha
   return (
     <Modal open={open} onClose={onClose} title="Send">
       <div className="space-y-3">
-        <p className="text-sm text-[var(--v2-ink-muted)]">
+        <p className="text-sm text-[var(--v2-ink-2)]">
           Send from this account with one approval. No network fee for you.
         </p>
         <div className="flex gap-2">
@@ -112,22 +113,22 @@ export default function DelegationSendModal({ open, onClose, accountAddress, cha
             aria-label="Amount"
             inputMode="decimal"
           />
-          <select
+          <Select
             value={tokenSymbol}
             onChange={(e) => setTokenSymbol(e.target.value)}
             aria-label="Token"
-            className="rounded-md border border-[var(--v2-border-strong)] bg-[var(--v2-bg)] px-3 text-sm text-[var(--v2-ink)]"
+            className="w-28 shrink-0"
           >
             {tokens.map((t) => (
               <option key={t.symbol} value={t.symbol}>
                 {t.symbol}
               </option>
             ))}
-          </select>
+          </Select>
         </div>
         {otherOwnAccounts.length > 0 ? (
           <div className="space-y-1.5">
-            <p className="text-xs text-[var(--v2-ink-muted)]">Or send to another Haven account</p>
+            <p className="text-xs text-[var(--v2-ink-3)]">Or send to another Haven account</p>
             <div className="flex flex-wrap gap-2">
               {otherOwnAccounts.map((a) => (
                 <Button
@@ -151,7 +152,7 @@ export default function DelegationSendModal({ open, onClose, accountAddress, cha
           className="font-mono"
         />
         {loadError ? (
-          <p className="text-xs text-[var(--v2-ink-muted)]">
+          <p className="text-xs text-[var(--v2-ink-3)]">
             Haven could not load how this account approves.{' '}
             <button type="button" className="underline" onClick={() => void reload()}>
               Try again
@@ -163,7 +164,7 @@ export default function DelegationSendModal({ open, onClose, accountAddress, cha
           // owner-only accounts (the optimistic passkey fallback keeps
           // `ready` true otherwise) — the wallet really is the blocker.
           <div className="space-y-2">
-            <p className="text-xs text-[var(--v2-ink-muted)]">
+            <p className="text-xs text-[var(--v2-ink-3)]">
               Connect your account owner wallet to send.
             </p>
             {/* #3812: connect or switch in place (the header pill is gone since #3825). */}

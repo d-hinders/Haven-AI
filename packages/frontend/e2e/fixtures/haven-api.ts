@@ -163,6 +163,10 @@ export const testAgent = {
   // schema-checked against `ApiSchema<'Agent'>`, so the new required boolean
   // cannot be dropped silently here).
   tax_declaration_enabled: false,
+  // #4429: the stored display colour (1..6), assigned by the database on
+  // insert. DISPLAY ONLY — the fixture is schema-checked against
+  // `ApiSchema<'Agent'>`, so the new required field cannot be dropped here.
+  avatar_tint: 1,
   // #2264: the DERIVED delegation-budget projection, which is what fills this
   // array on the live rail (`rails/delegation-budget-view.ts`): 250 USDC per
   // 30 days, `allowance_amount` HUMAN-formatted and `reset_period_min` in
@@ -304,10 +308,13 @@ export const dashboardTransaction = {
   // transaction that left the account, which the drawer's footer links
   // (#4267); the recorded settlement — the transaction the MERCHANT names —
   // has its own "Settlement transaction" row under Technical details, and the
-  // drawer's Details read "Settlement: Recorded (verified)".
+  // drawer's Details read "Settlement: Settled (verified)" (#4320), matched
+  // by the sweep standard's derived payment nonce.
   fundingTxHash: `0x${'ab'.repeat(32)}`,
   settlementTxHash: `0x${'22'.repeat(32)}`,
   settlementScheme: 'eip3009' as const,
+  settlementTracking: 'verified' as const,
+  settlementProof: 'nonce' as const,
   type: 'erc20' as const,
   from: testSafeAddress,
   to: testRecipientAddress,
@@ -355,8 +362,9 @@ export const dashboardTransaction = {
 
 /**
  * #3763: the OTHER eip3009 state — a synthesized x402 payment with NO
- * recorded settlement. The drawer reads "Settlement: Not recorded yet" with
- * what the record proves (never a promise the merchant confirmed it), and
+ * recorded settlement. The drawer reads "Settlement: Not tracked" (#4320) —
+ * no hash is recorded and no source can produce one — with what the record
+ * proves (never a promise the merchant confirmed it, never "failed"), and
  * links the funding leg as the account's transaction (#4267). Served as the SECOND `/transactions` row so the
  * regenerated baselines photograph both states' rows; every other route that
  * serves `dashboardTransaction` alone is unchanged.
@@ -366,6 +374,8 @@ export const x402UnrecordedSettlementTransaction = {
   fundingTxHash: `0x${'cd'.repeat(32)}`,
   settlementTxHash: null,
   settlementScheme: 'eip3009' as const,
+  settlementTracking: 'untracked' as const,
+  settlementProof: null,
   type: 'erc20' as const,
   from: testSafeAddress,
   to: testRecipientAddress,
@@ -664,6 +674,8 @@ export const dashboardOverview = {
       merchantName: null,
     },
     failedIntents7d: 1,
+    // #4324: the latest recorded step of any failed intent in the window (sent when there is one).
+    lastFailedIntentAt: '2026-10-08T14:20:00.000Z',
     // 30 days, most recent last — days WITHOUT a snapshot are ABSENT from the
     // real wire; the harness generates a dense series so a gap never renders.
     balance_by_day: Array.from({ length: 30 }, (_, i) => {
@@ -681,9 +693,11 @@ export const dashboardOverview = {
       id: testAgent.id,
       name: testAgent.name,
       status: testAgent.status,
+      // #4429: the stored display colour (1..6). DISPLAY ONLY.
+      avatarTint: 1,
       accountId: testSafe.id,
       accountName: testSafe.name,
-      accountChainId: testSafe.chain_id,
+      accountChainId: testSafe.chain_id, budgetEndedAt: null,
       // #2264: same derived projection as `testAgent.allowances`, in the
       // dashboard route's camelCase wire shape (`routes/dashboard.ts`).
       allowances: [
@@ -723,7 +737,8 @@ export const dashboardOverview = {
           net: { usd: 7.5, eur: 6.83, sek: 80.7 },
           approx: false,
           payments: 4,
-          refusals: { budget: 1, scope: 0, failed: 0, haven: 0 },
+          // #4324: d7 carries the latest refusal time of each non-empty bucket.
+          refusals: { budget: 1, expired: 0, scope: 0, failed: 0, haven: 0, lastBudgetAt: '2026-10-08T11:05:00.000Z' },
         },
         d30: {
           gross: { usd: 50.0, eur: 45.5, sek: 538.0 },
@@ -732,7 +747,7 @@ export const dashboardOverview = {
           approxByCurrency: { usd: false, eur: true, sek: true },
           unpricedByCurrency: { usd: false, eur: false, sek: false },
           payments: 14,
-          refusals: { budget: 2, scope: 1, failed: 1, haven: 0 },
+          refusals: { budget: 2, expired: 0, scope: 1, failed: 1, haven: 0 },
         },
         lastPaymentAt: '2026-10-09T09:41:00.000Z',
         lastCounterparty: {
@@ -747,9 +762,11 @@ export const dashboardOverview = {
       id: 'agent-e2e-watcher',
       name: 'Watcher agent',
       status: 'paused' as const,
+      // #4429: the stored display colour (1..6). DISPLAY ONLY.
+      avatarTint: 2,
       accountId: testSafe.id,
       accountName: testSafe.name,
-      accountChainId: testSafe.chain_id,
+      accountChainId: testSafe.chain_id, budgetEndedAt: null,
       allowances: [],
       budgets: [
         {
@@ -777,14 +794,22 @@ export const dashboardOverview = {
           net: { usd: 3.6, eur: 3.28, sek: 38.76 },
           approx: false,
           payments: 2,
-          refusals: { budget: 0, scope: 0, failed: 1, haven: 1 },
+          refusals: {
+            budget: 0,
+            expired: 0,
+            scope: 0,
+            failed: 1,
+            haven: 1,
+            lastFailedAt: '2026-10-07T16:40:00.000Z',
+            lastHavenAt: '2026-10-07T17:15:00.000Z',
+          },
         },
         d30: {
           gross: { usd: 24.0, eur: 21.84, sek: 258.4 },
           net: { usd: 15.6, eur: 14.2, sek: 167.96 },
           approx: false,
           payments: 7,
-          refusals: { budget: 1, scope: 0, failed: 1, haven: 2 },
+          refusals: { budget: 1, expired: 0, scope: 0, failed: 1, haven: 2 },
         },
         lastPaymentAt: '2026-10-07T18:02:00.000Z',
         lastCounterparty: {
@@ -802,9 +827,11 @@ export const dashboardOverview = {
       id: 'agent-e2e-pending',
       name: 'Connecting agent',
       status: 'pending_approval' as const,
+      // #4429: the stored display colour (1..6). DISPLAY ONLY.
+      avatarTint: 3,
       accountId: 'safe-sepolia',
       accountName: 'Showcase account',
-      accountChainId: 84532,
+      accountChainId: 84532, budgetEndedAt: null,
       setupStatus: 'awaiting_connection',
       allowances: [],
       budgets: [],
@@ -815,14 +842,14 @@ export const dashboardOverview = {
           net: { usd: 0, eur: 0, sek: 0 },
           approx: false,
           payments: 0,
-          refusals: { budget: 0, scope: 0, failed: 0, haven: 0 },
+          refusals: { budget: 0, expired: 0, scope: 0, failed: 0, haven: 0 },
         },
         d30: {
           gross: { usd: 0, eur: 0, sek: 0 },
           net: { usd: 0, eur: 0, sek: 0 },
           approx: false,
           payments: 0,
-          refusals: { budget: 0, scope: 0, failed: 0, haven: 0 },
+          refusals: { budget: 0, expired: 0, scope: 0, failed: 0, haven: 0 },
         },
         lastPaymentAt: null,
         lastCounterparty: null,
@@ -1192,13 +1219,18 @@ export async function mockHavenApi(page: Page) {
         item_kind: string
         account_id?: string
         agent_id?: string
+        period_end?: string
       }
+      // #4324: the stored shape carries the acknowledgement time, and the
+      // firing budget's period end on a `budget-usage` row.
       await fulfillJson(route, {
         id: '00000000-0000-4000-8000-000000000000',
         item_kind: body.item_kind,
         account_id: body.account_id ?? null,
         agent_id: body.agent_id ?? null,
         created_at: '2026-10-09T00:00:00.000Z',
+        acknowledged_at: '2026-10-09T00:00:00.000Z',
+        acknowledged_period_end: body.period_end ?? null,
       })
       return
     }

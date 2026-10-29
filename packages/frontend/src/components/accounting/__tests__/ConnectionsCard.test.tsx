@@ -30,6 +30,7 @@ vi.mock('next/navigation', () => ({
 vi.mock('@/hooks/useScrollEdgeCue', () => ({ useScrollEdgeCue: () => false }))
 
 import { ConnectionsCard, readConnectOutcome } from '@/components/accounting/ConnectionsCard'
+import { BusinessDataProvider } from '@/components/settings/BusinessDataContext'
 import { apiMock } from '../../../../e2e/fixtures/api-mock'
 
 // #3027 acceptance criteria: a wrong field in an `apiMock()` override is a
@@ -67,7 +68,12 @@ function serve(connections: ReturnType<typeof connection>[], status = feedStatus
 function renderCard() {
   return render(
     <LocaleProvider>
-      <ConnectionsCard />
+      {/* #4359: the providers + feed-status reads are hoisted into the shared
+          provider (the ONE place Settings mounts them); the card consumes
+          them through context and keeps its own connections read. */}
+      <BusinessDataProvider>
+        <ConnectionsCard />
+      </BusinessDataProvider>
     </LocaleProvider>,
   )
 }
@@ -98,15 +104,16 @@ describe('ConnectionsCard', () => {
     searchParamsRef.current = new URLSearchParams()
   })
 
-  it('lists every provider: Fortnox with its state, the rest Coming soon', async () => {
+  it('lists every connector the user can act on: Fortnox — coming-soon providers are HIDDEN (#4359)', async () => {
     serve([connection()])
     renderCard()
     expect(await screen.findByText(/Connected to Ada Lovelace AB/)).toBeInTheDocument()
+    // Coming-soon providers never render — not in the flag-on state either
+    // (#4359, superseding the 2026-09-11 decision to list them).
     for (const p of COMING_SOON) {
-      const row = screen.getByTestId(`connection-row-${p.id}`)
-      expect(within(row).getByText('Coming soon')).toBeInTheDocument()
-      expect(within(row).getByRole('button', { name: 'Connect' })).toBeDisabled()
+      expect(screen.queryByTestId(`connection-row-${p.id}`)).not.toBeInTheDocument()
     }
+    expect(screen.queryByText(en.common.comingSoon)).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Accounting' })).toBeInTheDocument()
     expect(screen.getByText(/appear there with payment evidence attached; your accountant books them/)).toBeInTheDocument()
     // The responsibility line the feed page's connect card carried, kept
@@ -114,6 +121,28 @@ describe('ConnectionsCard', () => {
     expect(
       screen.getByText(/Haven provides data tooling, not accounting or tax advice\..*you and your accountant remain responsible for coding, correctness, and filing/),
     ).toBeInTheDocument()
+    // The footer link to the feed page (#4359) — rendered when at least one
+    // connector shows.
+    expect(screen.getByTestId('accounting-see-synced')).toHaveAttribute('href', '/accounting')
+  })
+
+  it('hides a LIVE provider that is not configured on this deployment (#4359)', async () => {
+    const { api } = apiMock({
+      '/accounting/providers': {
+        providers: [provider({ configured: false }), ...COMING_SOON],
+      },
+      '/accounting/connections': { connections: [] },
+      '/accounting/feed/status': feedStatus(),
+    })
+    mockApi.get.mockImplementation(api.get)
+    renderCard()
+    await waitFor(() => expect(mockApi.get).toHaveBeenCalledWith('/accounting/providers'))
+    await waitFor(() => expect(mockApi.get).toHaveBeenCalledWith('/accounting/connections'))
+    // Every provider is either coming soon or unconfigured — the card
+    // renders NOTHING at all.
+    await waitFor(() => expect(screen.queryByRole('heading', { name: 'Accounting' })).not.toBeInTheDocument())
+    expect(screen.queryByTestId('connection-row-fortnox')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Connect' })).not.toBeInTheDocument()
   })
 
   it('keeps the rows rendered during a refetch — the skeleton is for the first load only (#2903)', async () => {
@@ -139,7 +168,7 @@ describe('ConnectionsCard', () => {
     await waitFor(() => expect(releaseRelist).not.toBeNull())
     // Mid-refetch: the rows are still there, no skeleton, and the region says it is busy.
     expect(screen.getByTestId('connection-row-fortnox')).toBeInTheDocument()
-    expect(screen.getByTestId('connection-row-igdrasil')).toBeInTheDocument()
+    expect(screen.queryByTestId('connection-row-igdrasil')).not.toBeInTheDocument() // #4359: coming soon never renders
     expect(screen.queryByRole('status', { busy: true })).toBeNull()
     expect(screen.getByTestId('connection-list')).toHaveAttribute('aria-busy', 'true')
     releaseRelist!()
@@ -197,6 +226,12 @@ describe('ConnectionsCard', () => {
     renderCard()
     fireEvent.click(await within(await screen.findByTestId('connection-actions-fortnox')).findByRole('button', { name: 'Settings' }))
     const form = screen.getByTestId('connection-settings-fortnox')
+    // #4478: the form renders through `SettingsRow`'s full-width slot, so it is
+    // a descendant of the row root — not a hand-written sibling wrapper. The
+    // `Card.Section divided` hairline still sits directly above it.
+    const row = screen.getByTestId('connection-row-fortnox')
+    expect(row.contains(form)).toBe(true)
+    expect(form.parentElement?.className).toMatch(/\bborder-t\b/)
     fireEvent.change(within(form).getByLabelText('Suggested account'), { target: { value: '6540' } })
     fireEvent.click(within(form).getByRole('button', { name: 'Save' }))
     await waitFor(() =>
@@ -292,6 +327,17 @@ describe('ConnectionsCard', () => {
       expect(alert).not.toHaveTextContent('Try again')
     })
 
+    it('connect=error&reason=multi_company names the one-company rule and the fix (#4520)', async () => {
+      searchParamsRef.current = new URLSearchParams('provider=igdrasil&connect=error&reason=multi_company')
+      serve([])
+      renderCard()
+      const alert = await screen.findByRole('alert')
+      expect(alert).toHaveTextContent('Igdrasil was given access to more than one company')
+      expect(alert).toHaveTextContent('reconnect and choose a single company')
+      // Not the generic "try again" sentence: retrying the same grant fails again.
+      expect(alert).not.toHaveTextContent('We could not connect Igdrasil')
+    })
+
     it('connect=error without a reason is the generic sentence', async () => {
       searchParamsRef.current = new URLSearchParams('provider=fortnox&connect=error')
       serve([])
@@ -323,28 +369,45 @@ describe('ConnectionsCard', () => {
     mockApi.get.mockImplementation(api.get)
   }
 
-  describe('the feed is off (#2869)', () => {
+  describe('the feed is off (#2869, retargeted by #4359)', () => {
     it('the gated connections read (404 since #2918) is absorbed by the off state — no load error', async () => {
       serveOff(feedStatus({ enabled: false, flagEnabled: false, available: false, entitled: false, connected: false, destination: null }))
       renderCard()
-      expect(await screen.findByTestId('accounting-coming-soon')).toBeInTheDocument()
+      // Every provider is coming soon under the flag-off state, and
+      // coming-soon providers render NOTHING (#4359) — the card is gone,
+      // not an empty shell.
+      await waitFor(() => expect(screen.queryByRole('heading', { name: 'Accounting' })).not.toBeInTheDocument())
       expect(screen.queryByRole('alert')).toBeNull()
       expect(screen.queryByText(en.settings.accounting.loadError)).toBeNull()
+      expect(screen.queryByTestId('accounting-coming-soon')).toBeNull()
     })
 
-    it('hosted with the flag off: providers listed as Coming soon, with no action at all', async () => {
+    it('hosted with the flag off: the card renders nothing — coming-soon providers are hidden (#4359)', async () => {
       serve([], feedStatus({ enabled: false, flagEnabled: false, available: false, entitled: false, connected: false, destination: null }))
       renderCard()
-      expect(await screen.findByTestId('accounting-coming-soon')).toBeInTheDocument()
-      expect(screen.getByText(en.accountingPage.comingSoon.notYet)).toBeInTheDocument()
-      expect(screen.getByTestId('connection-row-fortnox')).toBeInTheDocument()
+      await waitFor(() => expect(screen.queryByRole('heading', { name: 'Accounting' })).not.toBeInTheDocument())
+      expect(screen.queryByTestId('connection-row-fortnox')).not.toBeInTheDocument()
       for (const name of [/^connect$/i, /reconnect/i, /disconnect/i, /^settings$/i]) {
         expect(screen.queryByRole('button', { name })).toBeNull()
       }
-      // The neutral description, not "Connect the accounting tool your
-      // company uses" above "Nothing can be connected yet." (#2869 design review).
-      expect(screen.getByText(en.settings.accounting.descriptionOff)).toBeInTheDocument()
-      expect(screen.queryByText(en.settings.accounting.description)).toBeNull()
+      // Nothing at all: no "Coming soon" line, no rows, no neutral shell.
+      expect(screen.queryByTestId('accounting-coming-soon')).toBeNull()
+      expect(screen.queryByText(en.accountingPage.comingSoon.notYet)).toBeNull()
+    })
+
+    /**
+     * #2918: the outcome sentence is CONTENT even where no provider row
+     * shows (#4359) — a connect return that lands on a flag-off deployment
+     * still gets its sentence.
+     */
+    it('hosted with the flag off: a feature_off outcome sentence still shows (#2918, #4359)', async () => {
+      searchParamsRef.current = new URLSearchParams('provider=fortnox&connect=error&reason=feature_off')
+      serve([], feedStatus({ enabled: false, flagEnabled: false, available: false, entitled: false, connected: false, destination: null }))
+      renderCard()
+      const alert = await screen.findByRole('alert')
+      expect(alert).toHaveTextContent('switched off on this deployment')
+      expect(screen.queryByRole('heading', { name: 'Accounting' })).toBeInTheDocument()
+      expect(screen.queryByTestId('connection-row-fortnox')).not.toBeInTheDocument()
     })
 
     it('self-hosted: the not-available copy, no providers, and never the coming-soon string', async () => {
@@ -369,9 +432,9 @@ describe('ConnectionsCard', () => {
 
     /**
      * Fail CLOSED (#2869 review): a failed status read cannot tell a
-     * flagged-off deployment from a hosted one, and the connection routes
-     * answer either way until #2918 gates them — so no controls, not the
-     * full Connect UI.
+     * flagged-off deployment from a hosted one. The connection routes 404
+     * when the feature is off (#2918), and the card still shows no controls,
+     * not the full Connect UI.
      */
     it('a failed feed-status read shows the load error and NO controls, even though the listings answered', async () => {
       mockApi.get.mockImplementation((url: string) => {

@@ -15,6 +15,7 @@ import { render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import MoneyPanel from '../MoneyPanel'
+import { seriesColorForAgent } from '@/lib/avatar-tint'
 import type { DashboardAgentPreview, DashboardOverviewResponse } from '@/types/dashboard'
 
 const baseProps = {
@@ -37,14 +38,17 @@ const baseProps = {
   onSend: vi.fn(),
 }
 
-function agent(id: string, name: string, d30NetUsd: number): DashboardAgentPreview {
+function agent(id: string, name: string, d30NetUsd: number, tint = 1): DashboardAgentPreview {
   return {
     id,
     name,
     status: 'active',
+    // #4431: the overview always carries the agent's stored tint; the split
+    // bar and the legend dot read it.
+    avatarTint: tint,
     accountId: null,
     accountName: null,
-    accountChainId: 8453,
+    accountChainId: 8453, budgetEndedAt: null,
     allowances: [],
     budgets: [],
     receivedSubBudgets: [],
@@ -54,14 +58,14 @@ function agent(id: string, name: string, d30NetUsd: number): DashboardAgentPrevi
         net: { usd: 0, eur: 0, sek: 0 },
         approx: false,
         payments: 0,
-        refusals: { budget: 0, scope: 0, failed: 0, haven: 0 },
+        refusals: { budget: 0, expired: 0, scope: 0, failed: 0, haven: 0 },
       },
       d30: {
         gross: { usd: 0, eur: 0, sek: 0 },
         net: { usd: d30NetUsd, eur: 0, sek: 0 },
         approx: false,
         payments: 0,
-        refusals: { budget: 0, scope: 0, failed: 0, haven: 0 },
+        refusals: { budget: 0, expired: 0, scope: 0, failed: 0, haven: 0 },
       },
       lastPaymentAt: null,
       lastCounterparty: null,
@@ -393,5 +397,65 @@ describe('MoneyPanel — the ONE primary-button rule (#4167)', () => {
     expect(receive()).toHaveClass('border-[var(--v2-border-strong)]')
     expect(receive()).not.toHaveClass('bg-[var(--v2-brand)]')
     expect(send()).toBeDisabled()
+  })
+})
+
+describe('MoneyPanel — the legend dots are the chart SeriesSwatch (#4426)', () => {
+  // The money card hand-built its list dots beside the chart's own
+  // `SeriesSwatch`. They are `SeriesSwatch` now, keeping the agreed
+  // mockup's small SQUARE (#3901, Refs #3897) through `shape="square"`, so
+  // the card's pixels do not move. Mutation: hand-build any row's dot again
+  // → that row has no `series-swatch` → red; drop `shape="square"` → the
+  // row's swatch is round → red.
+  const expectSquareSwatch = (dt: Element, background: string) => {
+    const swatch = within(dt as HTMLElement).getByTestId('series-swatch')
+    expect(swatch.className.split(/\s+/)).toEqual(expect.arrayContaining(['h-2', 'w-2', 'rounded-sm']))
+    expect(swatch.className).not.toContain('rounded-full')
+    expect(swatch.style.backgroundColor).toBe(background)
+  }
+
+  it('keys each agent row, and the removed-agents remainder, with a small square SeriesSwatch', () => {
+    render(
+      <MoneyPanel
+        {...baseProps}
+        overview={overview({
+          d30NetUsd: 51.76,
+          agents: [agent('a1', 'Research agent', 17.485, 1), agent('a2', 'Data-feed agent', 17.485, 2)],
+        })}
+      />,
+    )
+    const spending = screen.getByRole('region', { name: 'Spending' })
+    const terms = spending.querySelectorAll('dl dt')
+    expect(terms.length).toBe(3) // two agents + "Agents since removed"
+    // #4431: each dot wears the agent's STORED tint. The two fixture names
+    // hash alike (both 6), so the pair being two different colours is the
+    // rule the epic changed.
+    expectSquareSwatch(terms[0]!, seriesColorForAgent({ name: 'Research agent', avatarTint: 1 }))
+    expectSquareSwatch(terms[1]!, seriesColorForAgent({ name: 'Data-feed agent', avatarTint: 2 }))
+    expect(terms[0]!.querySelector('[data-testid="series-swatch"]')!.getAttribute('style')).not.toBe(
+      terms[1]!.querySelector('[data-testid="series-swatch"]')!.getAttribute('style'),
+    )
+    expect(terms[2]).toHaveTextContent('Agents since removed')
+    expectSquareSwatch(terms[2]!, 'var(--v2-ink-3)')
+  })
+
+  it('keys the "N other agents" row past the top three with the same square SeriesSwatch', () => {
+    // Five spending agents: the list names the top three and folds the rest
+    // into one "2 other agents" row — the branch the two-agent fixture above
+    // never reaches.
+    const agents = [
+      agent('a1', 'Research agent', 20),
+      agent('a2', 'Data-feed agent', 15),
+      agent('a3', 'Ops agent', 10),
+      agent('a4', 'Billing agent', 5),
+      agent('a5', 'Support agent', 2),
+    ]
+    render(<MoneyPanel {...baseProps} overview={overview({ d30NetUsd: 52, agents })} />)
+    const spending = screen.getByRole('region', { name: 'Spending' })
+    const other = Array.from(spending.querySelectorAll('dl dt')).find((dt) =>
+      /2 other agents/.test(dt.textContent ?? ''),
+    )
+    expect(other, 'no "2 other agents" row').toBeDefined()
+    expectSquareSwatch(other!, 'var(--v2-ink-3)')
   })
 })

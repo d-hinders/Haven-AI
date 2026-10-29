@@ -16,7 +16,7 @@
 // `typecheck -w` and `test -w` — but it covers NONE of the 21 ratchets, and the
 // ratchets are what these four incidents reddened on. Not even the covered part
 // is total: root `build` is not `--workspaces`, it is a hand-written
-// nine-package chain that omits two of the eleven packages with a build script
+// ten-package chain that omits two of the twelve packages with a build script
 // (`demo-merchant-mcp`, which IS a CI gate, and `qa-agent`, which is not) — a
 // second copy of the workspace list, drifted, which is this file's own thesis
 // one level down. So every builder assembles the

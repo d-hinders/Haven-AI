@@ -3,7 +3,7 @@
  *
  * One aggregate: `accounting_feed_syncs` — what has been fed to which
  * bookkeeping provider (epic #491, P1 #497), keyed uniquely on
- * (provider, payment_id, user_id). Extracted verbatim from
+ * (provider, payment_id, user_id, document_kind) since migration 113. Extracted verbatim from
  * `modules/accounting/feed-sync.ts` (which re-exports these functions) and
  * `feed-orchestrator.ts`. Convention: `README.md` in this directory.
  *

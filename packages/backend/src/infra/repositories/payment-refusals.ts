@@ -25,6 +25,7 @@
 
 import pool from '../../db.js'
 import type { Executor } from '../transaction.js'
+import { escapeLikeContains } from '../sql-like.js'
 
 /** The closed `reason` set — mirrors migration 086's CHECK exactly. */
 export type PaymentRefusalReason =
@@ -37,13 +38,18 @@ export type PaymentRefusalReason =
 /** The closed `source` set — mirrors migration 087's CHECK exactly. */
 export type PaymentRefusalSource = 'x402_authorize' | 'payment' | 'redeem' | 'hosted_prepare'
 
-/** The `detail` allowlist — mirrors migration 086's CHECK exactly. */
+/**
+ * The `detail` allowlist — mirrors migration 086's CHECK as widened by 118
+ * (#4352): `budget_ended_at` marks a PRE-FLIGHT expired-budget refusal (the
+ * revert-detected rows never carry it), per #4349 decision 6 option 1.
+ */
 export const REFUSAL_DETAIL_KEYS = [
   'error_code',
   'phase',
   'next_action',
   'remaining_atomic',
   'budget_atomic',
+  'budget_ended_at',
 ] as const
 
 export type PaymentRefusalDetail = Partial<Record<(typeof REFUSAL_DETAIL_KEYS)[number], string>>
@@ -278,8 +284,8 @@ export const LIST_AGENT_REFUSALS_FILTERED_SQL = `SELECT id, agent_id, chain_id, 
        WHERE agent_id = $1
          AND ($2::text IS NULL OR created_at >= $2::timestamptz)
          AND ($3::text IS NULL OR created_at < $3::timestamptz)
-         AND ($4::text IS NULL OR resource_url ILIKE '%' || $4 || '%'
-              OR merchant_to ILIKE '%' || $4 || '%')
+         AND ($4::text IS NULL OR resource_url ILIKE '%' || $4 || '%' ESCAPE '\\'
+              OR merchant_to ILIKE '%' || $4 || '%' ESCAPE '\\')
        ORDER BY created_at DESC
        LIMIT $5 OFFSET $6`
 
@@ -294,8 +300,8 @@ export const COUNT_AGENT_REFUSALS_FILTERED_SQL = `SELECT COUNT(*)
        WHERE agent_id = $1
          AND ($2::text IS NULL OR created_at >= $2::timestamptz)
          AND ($3::text IS NULL OR created_at < $3::timestamptz)
-         AND ($4::text IS NULL OR resource_url ILIKE '%' || $4 || '%'
-              OR merchant_to ILIKE '%' || $4 || '%')`
+         AND ($4::text IS NULL OR resource_url ILIKE '%' || $4 || '%' ESCAPE '\\'
+              OR merchant_to ILIKE '%' || $4 || '%' ESCAPE '\\')`
 
 /**
  * NOT tenant-scoped — the caller must have confirmed the agent belongs to the
@@ -313,7 +319,7 @@ export async function listAgentRefusalsFiltered(
     agentId,
     filter.from,
     filter.to,
-    filter.q,
+    escapeLikeContains(filter.q),
     limit,
     offset,
   ])
@@ -330,7 +336,7 @@ export async function countAgentRefusalsFiltered(
     agentId,
     filter.from,
     filter.to,
-    filter.q,
+    escapeLikeContains(filter.q),
   ])
   return Number(result.rows[0]?.count ?? 0)
 }

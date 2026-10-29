@@ -923,7 +923,55 @@ export function createStateDirectRecoveryHandlers(
           }
         }
         if (hasTaskBudgetId) {
-          const result = await haven.submitTaskBudget(args.task_budget_id, args.signature)
+          const taskBudgetId = args.task_budget_id as string
+          let result: Awaited<ReturnType<HavenClient['submitTaskBudget']>>
+          try {
+            result = await haven.submitTaskBudget(taskBudgetId, args.signature)
+          } catch (err) {
+            // #4468: the same two close codes the sub-budget path above maps
+            // (#3506), on the task-budget path — which had no catch at all, so
+            // a close whose outcome is unconfirmed read as the generic 5xx
+            // "retry once" and a stale close op read as a generic 4xx stop.
+            // The backend names the remedy on both: call close again — it
+            // reports closed once the chain finalises the disable, or prepares
+            // a fresh operation to sign. `haven_close_task_budget` IS that
+            // call, and this handler is the one that knows the id, so the step
+            // names it with `task_budget_id` rather than leaving the agent to
+            // guess which budget the message is about.
+            const code =
+              err instanceof HavenApiError ? (err.body as { error_code?: string } | undefined)?.error_code : undefined
+            if (code === 'close_needs_reprepare') {
+              throw new HostedToolError({
+                code: 'CLOSE_NEEDS_REPREPARE',
+                message:
+                  'The stored close operation for this task budget was stale, so nothing was relayed. Call ' +
+                  'haven_close_task_budget again for a fresh one: it reports closed if the budget is already ' +
+                  'closed, or hands back a new operation to sign and submit.',
+                statusCode: 409,
+                nextStep: refusalNextStep({
+                  nextAction: AgentPaymentNextAction.SignAndSubmitPayment,
+                  nextTool: 'haven_close_task_budget',
+                  nextArguments: { task_budget_id: taskBudgetId },
+                }),
+              })
+            }
+            if (code === 'close_outcome_unconfirmed') {
+              throw new HostedToolError({
+                code: 'CLOSE_OUTCOME_UNCONFIRMED',
+                message:
+                  'The close operation was sent but its outcome is not confirmed yet (on Base that can take tens ' +
+                  'of minutes). Wait, then call haven_close_task_budget again: it reports closed once the chain ' +
+                  'has finalised the disable, or prepares a fresh operation to sign if the earlier one did not land.',
+                statusCode: 502,
+                nextStep: refusalNextStep({
+                  nextAction: AgentPaymentNextAction.CheckStatusLater,
+                  nextTool: 'haven_close_task_budget',
+                  nextArguments: { task_budget_id: taskBudgetId },
+                }),
+              })
+            }
+            throw err
+          }
           return {
             task_budget: result.taskBudget,
             status: result.status,

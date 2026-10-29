@@ -245,7 +245,7 @@ export default function BudgetGrantAction({
             {busy ? busyLabel : label}
           </Button>
           {trailingAction}
-          {helper && <span className="text-xs text-[var(--v2-ink-muted)] sm:ml-auto">{helper}</span>}
+          {helper && <span className="text-xs text-[var(--v2-ink-3)] sm:ml-auto">{helper}</span>}
         </div>
       )}
     </div>

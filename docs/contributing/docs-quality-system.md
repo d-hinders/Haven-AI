@@ -24,7 +24,8 @@ covers:
   - scripts/ci/routing-matrix.mjs
   - scripts/frontend-copy-lint.mjs
   - scripts/lib/ratchet.mjs
-last-verified: "2026-09-26"
+  - scripts/ci/operator-verify-close-guard.mjs
+last-verified: "2026-10-24"
 ---
 
 # Documentation-quality system
@@ -44,7 +45,7 @@ Every doc under `docs/` plus the root gravity files (`CLAUDE.md`, `AGENTS.md`,
 ```yaml
 ---
 owner: "@handle"           # who keeps this doc honest
-status: current            # current | research | archived
+status: current            # current | research | archived | record
 contract: true             # OPTIONAL (Phase 4): promotes the coupling gate
                            # from advisory to BLOCKING for this doc
 covers:                    # repo globs of the code this doc describes
@@ -143,6 +144,7 @@ backend vitest job, so a PR touching no backend surface never runs it.
 | Archive integrity | `retire-verified-chains.mjs verify()`, driven by the docs unit tests | **Blocking** (a hash mismatch fails the required job) |
 | Doc/config drift | `packages/backend/src/openapi/spec.test.ts`, `packages/backend/src/docs-drift/*.test.ts`, which pins `.env.example` in **both** directions — every variable the backend reads is listed, every listed key is read somewhere; the values and comments beside a key are prose the test does not check | **Blocking** (vitest) |
 | Queue-framing census ([#2107](https://github.com/d-hinders/Haven-AI/issues/2107)) | `scripts/ci/queue-framing-census.test.mjs`, in `ci_config_checks` | **Blocking** (zero-tolerance: a guarded file either has no hit or cannot join the list) |
+| Operator-verify close-keyword guard ([#2276](https://github.com/d-hinders/Haven-AI/issues/2276)) | `scripts/ci/operator-verify-close-guard.mjs`, a step of `docs.yml`'s required job; it reads the PR body, title and commit messages, and re-runs on `edited` ([#2839](https://github.com/d-hinders/Haven-AI/issues/2839)) | **Blocking** when a closing keyword names an issue labelled `operator-verify`, or one the pull request itself says stays open |
 | Coupling gate — contract docs ([#644](https://github.com/d-hinders/Haven-AI/issues/644)) | `scripts/docs/coupling-gate.mjs --strict`, `.github/workflows/docs-coupling.yml` | **Blocking** for `contract: true` docs |
 | Coupling gate — advisory comment | `scripts/docs/coupling-gate.mjs` | Advisory (always exits 0) |
 | Link health | lychee (`.lychee.toml`) | Advisory (`continue-on-error`) |
@@ -167,11 +169,20 @@ filter — is what makes the blocking column above true (the haven-doc-reviewer 
 
 ## Rules the gates apply
 
-- **Only `current` docs are governed (#2638).** `archived` and `research` docs
-  are skipped by the coupling gate in both directions and by the staleness
-  audit. A doc with **no** `status` is treated as governed — a missing field is a
-  broken doc, not an exemption. The predicate is `isGoverned(status)` in
-  `coupling-gate.mjs`, inlined in `audit-staleness.mjs`.
+- **`archived` and `research` docs are not governed (#2638).** They are
+  skipped by the coupling gate in both directions and by the staleness audit. A
+  doc with **no** `status` is treated as governed — a missing field is a broken
+  doc, not an exemption. The predicate is `isGoverned(status)` in
+  `coupling-gate.mjs`.
+- **A `record` doc is governed but never ranked stale (#4459).** A dated bug
+  report, QA run or retrospective carries `status: record`. The coupling gate
+  and `docs:covers-gaps` still treat it as governed: its `covers:` route it on a
+  PR and its claims are checked. The staleness audit (`audit-staleness.mjs`) and
+  doc-health's `unverified-90d` skip it, beside `archived` and `research`. A
+  reviewer who finds a `record` doc implicated dispositions it "historical
+  record, correct as written": never append a re-check section, never bump its
+  `last-verified`. `npm run docs:new` scaffolds a path under `docs/bug-reports/`
+  as `record`; the run-report template there stays `current`.
 - **Test and generated files are incidental.** `__tests__/`, `*.test.*`,
   `*.spec.*`, `__screenshots__/` and `packages/core/src/api-types.ts` implicate a
   doc only when `covers` names the path exactly. Two carve-outs, in this order:
@@ -215,7 +226,7 @@ enumerates what the boundary does not reach, so a green run cannot be over-read.
 
 ## Docs served to agents (#2532)
 
-Four product docs are also served from the frontend as Markdown, so an agent
+Four docs — three product docs and the security model — are also served from the frontend as Markdown, so an agent
 reading `llms.txt` can follow a link to the product answer without leaving the
 origin it is reading:
 
@@ -230,7 +241,10 @@ origin it is reading:
   `packages/frontend/scripts/serve-docs.mjs` regenerates the served files,
   `packages/frontend/public/docs/` is gitignored, and the invariant is pinned by
   [`served-docs.test.ts`](../../packages/frontend/src/lib/__tests__/served-docs.test.ts)
-  (#2680).
+  (#2680). That test also asserts a served copy contains neither `last-verified:` nor
+  `covers:` once its front matter is stripped, so a source's body must not
+  write either key literally — a re-verification note that did turned *Frontend checks* red on
+  PR #4381 while every docs gate stayed green.
 - **The generator is invoked from `next.config.ts`**, not an npm `prebuild`
   hook, and is phase-gated to build and dev — a server does not generate.
   `packages/frontend/Dockerfile` copies `docs/` into its builder stage, and a
@@ -273,3 +287,20 @@ corpus and chain mass, the derivable-claim census, the `covers:` gaps (the same
 implementation `docs:check` runs, so the gate and the measurement cannot
 disagree), and the correction rate. Each script prints the epic's own figure
 next to its own and says which reproduce. They gate nothing and write nothing.
+
+Re-verified 2026-10-24 (#4372 part D, at dev `f590d946c`). Changed: the
+gates table gains the operator-verify close-keyword guard (a step of the
+required *Docs front-matter & agent skills* job since #2276, on `edited` since
+#2839); *Docs served to agents* says four docs (three product docs and the
+security model) rather than four product docs, and records that
+`served-docs.test.ts` forbids a literal `last-verified:` or `covers:` in a served
+body; `covers:`
+gains `scripts/ci/operator-verify-close-guard.mjs` for the new row. Re-checked
+without change: every script the table names (`chain-integrity.mjs` absent, as
+"Retired" says), the `docs:*` scripts, `docs.yml`'s unfiltered `pull_request`
+trigger and its advisory lychee step, the Monday 06:00 UTC audit through
+`standing-issue-upsert.mjs`, `doc-health.mjs`'s four flags, the
+`doc-reviewer.md` custody rule (#4174), the required check names on `dev`,
+`isGoverned()`, the three control globs, the `package-docs.mjs` sets, the
+served-doc `ALLOWLIST` and its build wiring, the classifier's `--no-renames`
+and `ALLOWLIST` import, and the four `scripts/docs/measure/` scripts.

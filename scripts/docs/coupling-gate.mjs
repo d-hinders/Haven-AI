@@ -271,11 +271,11 @@ export function reverseImplications(changed, docs) {
 }
 
 /**
- * #2638: only `current` docs are governed by this gate.
+ * #2638: `research` and `archived` docs are not governed by this gate.
  *
- * A doc's `status` is one of `current | research | archived`
- * (`validate-frontmatter.mjs`). The other two cannot be stale in the sense this
- * gate measures, and they mean different things:
+ * A doc's `status` is `current`, `research`, `archived` or `record`
+ * (`validate-frontmatter.mjs`). `research` and `archived` cannot be stale in
+ * the sense this gate measures, and they mean different things:
  *
  * - **`archived`** — superseded. It describes how something USED to work, so
  *   "the code moved on" is its condition, not its defect. `audit-staleness.mjs`
@@ -291,6 +291,11 @@ export function reverseImplications(changed, docs) {
  * work is in the **research** half — nine research docs declare 30 `covers:`
  * globs between them, and every one of them was a potential finding on a diff
  * that touched the covered code.
+ *
+ * **`record`** (#4459) — a dated bug report, QA run or retrospective — IS
+ * governed: its `covers:` still route it on a PR and covers-gaps still checks
+ * its claims. Only the staleness audit and doc-health skip it; a reviewer
+ * dispositions an implicated record "historical record, correct as written".
  *
  * A doc with no `status` is treated as governed. That is deliberate: the
  * validator requires the field, so a missing one is a broken doc rather than an

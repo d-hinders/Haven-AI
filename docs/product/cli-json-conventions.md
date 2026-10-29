@@ -9,7 +9,7 @@ covers:
   - scripts/ci/vocabulary-map.json
   - scripts/ci/vocabulary-divergence.mjs
   - packages/sdk/src/payment-mappers.ts
-last-verified: "2026-10-19"
+last-verified: "2026-10-25"
 ---
 
 # CLI `--json` conventions
@@ -65,11 +65,12 @@ be audited rather than re-litigated.
 **non-exhaustive subset the CLI happens to read**. The emitted JSON carries
 every key the backend sends, including several that appear in no interface —
 `paymentProofStatus`, `x402MerchantAddress`, `amountSek`, `settlementScheme`,
-`initiatedBy` among them. Five more reached the `Transaction` schema since the
-last full read, none of them in `interface Txn`: `fundingTxHash` and
-`settlementTxHash` on x402 rows (#3763), `deliveryReference` (#3778), and
-`approxAmount` / `approxCurrency`, the amount at today's rate for a row with no
-book-time fiat (#3824).
+`initiatedBy` among them. Seven more reached the `Transaction` schema between
+the 2026-09-30 and 2026-10-25 reads, none of them in `interface Txn`:
+`fundingTxHash` and `settlementTxHash` on x402 rows (#3763),
+`deliveryReference` (#3778), `approxAmount` / `approxCurrency`, the amount at
+today's rate for a row with no book-time fiat (#3824), and `settlementTracking`
+/ `settlementProof`, the settlement proof-ladder state on x402 rows (#4319).
 
 So: to know what `activity list --json` can contain, read the `Transaction`
 schema, not `interface Txn`. Scripting against the interface will miss fields
@@ -332,3 +333,14 @@ Run here: `haven guide --json` (the `{ ok, format, content }` envelope) and
 3). Re-read in code and unchanged: the `wallets balances` re-map, the auth
 literals, the grant/revoke key sets, the CSV header row, and the doctor's
 `safe_address` fallback.
+
+Re-verified 2026-10-25 (#4372 part H, at dev `e778da444`). `npm run
+lint:vocabulary` is green with 31 receipt fields, 42 transaction fields, 11
+declared concepts, 0 open and 18 CLI envelope emitters. Changed: the two
+`Transaction` fields #4319 added (`settlementTracking`, `settlementProof`) are
+named, so the count above is seven. Since `cf88627c` the only change to
+`commands.ts` is the `CLI_VERSION` constant, and `output.ts` and `doctor.ts`
+are unchanged, so every envelope, key set, the CSV header row, the
+`wallets balances` re-map and the doctor's `safe_address` fallback stand as
+the 2026-10-19 read left them. The seven no-`ok` emitters were re-counted
+from the map's `cliConventions.envelopes`.

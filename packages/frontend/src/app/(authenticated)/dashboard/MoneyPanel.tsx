@@ -35,6 +35,8 @@ import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { StatTile } from '@/components/ui/StatTile'
 import { AreaChart, type SparklinePoint } from '@/components/ui/AreaChart'
+import { SeriesSwatch } from '@/components/ui/StackedBarChart'
+import { seriesColorForAgent } from '@/lib/avatar-tint'
 import { Amount } from '@/components/haven'
 import { BalanceFreshnessIndicator } from '@/components/haven'
 import PasskeyOtherDeviceNotice from '@/components/PasskeyOtherDeviceNotice'
@@ -126,10 +128,9 @@ function balanceSparkPoints(
   return measured.length >= 3 ? dense : measured
 }
 
-/** The `--v2-series-*` colour for a ranked agent — the analytics palette's order. */
-function seriesColor(index: number): string {
-  return `var(--v2-series-${(index % 6) + 1})`
-}
+// The agent's chart colour (#4331) is `seriesColorForAgent` (lib/avatar-tint.ts)
+// — the agent's own avatar tint, its stored tint when it has one (#4428) and
+// the name hash otherwise — used at both call sites below.
 
 function sparklineAriaLabel(points: SparklinePoint[], currency: 'USD' | 'EUR' | 'SEK'): string {
   // #3977: the series is UTC-dated — the aria-label names what it measures
@@ -283,6 +284,9 @@ export default function MoneyPanel({
     .map((agent: DashboardAgentPreview) => ({
       id: agent.id,
       name: agent.name,
+      // #4431: the agent's STORED tint, so the split bar and the legend dot
+      // wear the same colour its monogram does — not the name hash.
+      avatarTint: agent.avatarTint,
       value: agent.stats.d30.net[bucket],
       approx: agent.stats.d30.approxByCurrency?.[bucket] ?? agent.stats.d30.approx,
     }))
@@ -303,18 +307,20 @@ export default function MoneyPanel({
     d30 && perAgentSpend.length > 0 ? d30.net[bucket] - attributedValue : 0
   const showUnattributed = d30 !== null && unattributedValue >= SUB_CENT_THRESHOLD
 
-  // The split bar's segments (#3897): the named agents in series colours,
-  // then everything else (other agents, agents since removed) in one
-  // neutral segment, as shares of what the list itself adds up to.
+  // The split bar's segments (#3897): the named agents in their own avatar
+  // tints (#4331 — the same colour their monogram wears, stable across
+  // periods and rank moves), then everything else (other agents, agents
+  // since removed) in one neutral segment, as shares of what the list
+  // itself adds up to.
   const restValue = otherAgentValue + (showUnattributed ? unattributedValue : 0)
   const splitTotal = topAgents.reduce((sum, row) => sum + row.value, 0) + restValue
   const splitSegments =
     splitTotal > 0
       ? [
-          ...topAgents.map((row, index) => ({
+          ...topAgents.map((row) => ({
             key: row.id,
             share: (row.value / splitTotal) * 100,
-            color: seriesColor(index),
+            color: seriesColorForAgent({ name: row.name, avatarTint: row.avatarTint }),
           })),
           ...(restValue > 0
             ? [{ key: 'rest', share: (restValue / splitTotal) * 100, color: 'var(--v2-ink-3)' }]
@@ -372,9 +378,10 @@ export default function MoneyPanel({
       {!loading && !unavailable && topAgents.length > 0 ? (
         <>
         {/* #3897: the mockup's split bar — one segment per named agent in
-            its `--v2-series-*` colour (colour identifies the series, never
-            the meaning), the rest in neutral ink. Decorative: the list
-            below carries every figure, so the bar is aria-hidden. */}
+            its chart colour, the avatar tint `seriesColorForAgent` gives it
+            (#4331; colour identifies the series, never the meaning), the
+            rest in neutral ink. Decorative: the list below carries every
+            figure, so the bar is aria-hidden. */}
         <div aria-hidden="true" data-testid="spending-split-bar" className="mt-4 flex h-2.5 gap-0.5 overflow-hidden rounded-full bg-[var(--v2-surface-2)]">
           {splitSegments.map((segment) => (
             <span
@@ -385,14 +392,10 @@ export default function MoneyPanel({
           ))}
         </div>
         <dl className="mt-3 space-y-1.5">
-          {topAgents.map((row, index) => (
+          {topAgents.map((row) => (
             <div key={row.id} className="flex items-baseline justify-between gap-4">
               <dt className="flex min-w-0 items-center gap-2 text-sm text-[var(--v2-ink-2)]">
-                <span
-                  aria-hidden="true"
-                  className="h-2 w-2 flex-shrink-0 rounded-sm"
-                  style={{ background: seriesColor(index) }}
-                />
+                <SeriesSwatch color={seriesColorForAgent({ name: row.name, avatarTint: row.avatarTint })} size="sm" shape="square" />
                 <span className="min-w-0 truncate">{row.name}</span>
               </dt>
               <dd className="v2-tabular shrink-0">
@@ -403,7 +406,7 @@ export default function MoneyPanel({
           {otherAgentCount > 0 ? (
             <div className="flex items-baseline justify-between gap-4">
               <dt className="flex min-w-0 items-center gap-2 text-sm text-[var(--v2-ink-3)]">
-                <span aria-hidden="true" className="h-2 w-2 flex-shrink-0 rounded-sm bg-[var(--v2-ink-3)]" />
+                <SeriesSwatch color="var(--v2-ink-3)" size="sm" shape="square" />
                 <span className="min-w-0 truncate">
                   {otherAgentCount} other agent{otherAgentCount === 1 ? '' : 's'}
                 </span>
@@ -416,7 +419,7 @@ export default function MoneyPanel({
           {showUnattributed ? (
             <div className="flex items-baseline justify-between gap-4">
               <dt className="flex min-w-0 items-center gap-2 text-sm text-[var(--v2-ink-3)]">
-                <span aria-hidden="true" className="h-2 w-2 flex-shrink-0 rounded-sm bg-[var(--v2-ink-3)]" />
+                <SeriesSwatch color="var(--v2-ink-3)" size="sm" shape="square" />
                 <span className="min-w-0 truncate">Agents since removed</span>
               </dt>
               <dd className="v2-tabular shrink-0">

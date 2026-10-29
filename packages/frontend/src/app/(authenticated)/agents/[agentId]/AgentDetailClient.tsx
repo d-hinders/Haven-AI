@@ -431,7 +431,7 @@ export default function AgentDetailClient({ agentId }: Props) {
     <div className="max-w-5xl">
       <PageHeader
         back={{ href: '/agents', label: 'Agents' }}
-        leading={<Monogram name={currentAgent.name} size="md" decorative />}
+        leading={<Monogram name={currentAgent.name} tint={currentAgent.avatar_tint} size="md" decorative />}
         title={currentAgent.name}
         subtitle={currentAgent.description || undefined}
         // #3694: the identity row that was the "About this agent" card —
@@ -719,7 +719,7 @@ export default function AgentDetailClient({ agentId }: Props) {
           there. The opt-in is settings, not authority: it changes no budget,
           no rule, and no key. */}
 
-      {/* #1089: the Backup & recovery pointer lives on the Settings tab
+      {/* #1089: the Who can approve pointer lives on the Settings tab
           (#4228) — an account capability, pointed at, not copied. */}
 
       {/* #3696: the two stat cards ("All-time transactions" / "Today") are
@@ -784,7 +784,7 @@ export default function AgentDetailClient({ agentId }: Props) {
 
       {/* ── Settings tab (#4228): one Card of divided rows — connection,
           credentials, labels, tax, passport — plus the account-level
-          Backup & recovery pointer. The modals stay page-owned so the ⋮
+          Who can approve pointer. The modals stay page-owned so the ⋮
           menu opens the same flows. */}
       {activeTab === 'settings' ? (
         <div className="mt-6" data-testid="agent-settings-section">

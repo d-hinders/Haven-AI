@@ -32,14 +32,17 @@ export function todayIso(date = new Date()) {
 }
 
 /**
- * Infer `status` from the doc's repo-relative path, matching the structural
- * rules validate-frontmatter enforces: docs/archive/** → archived,
- * docs/research/** → research, everything else → current.
+ * Infer `status` from the doc's repo-relative path: docs/archive/** →
+ * archived and docs/research/** → research (the structural rules
+ * validate-frontmatter enforces); docs/bug-reports/** → record (#4459, a
+ * convention, not an enforced rule — the run-report template there stays
+ * `current`); everything else → current.
  */
 export function inferStatus(relPath) {
   const posix = relPath.split(sep).join('/')
   if (posix.startsWith('docs/archive/')) return 'archived'
   if (posix.startsWith('docs/research/')) return 'research'
+  if (posix.startsWith('docs/bug-reports/')) return 'record'
   return 'current'
 }
 

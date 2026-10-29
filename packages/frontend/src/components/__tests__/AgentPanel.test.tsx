@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { expectMenuNotClipped } from '@/__tests__/menu-clip'
 
 const mockUseAuth = vi.hoisted(() => vi.fn())
 const mockUseAgents = vi.hoisted(() => vi.fn())
@@ -31,7 +32,7 @@ vi.mock('@/hooks/useBudgetRemaining', () => ({
   useBudgetRemaining: () => mockUseBudgetRemaining(),
 }))
 vi.mock('@/hooks/useAttentionDismissals', () => ({
-  useAttentionDismissals: () => ({ dismissedIds: new Set<string>(), dismiss: vi.fn() }),
+  useAttentionDismissals: () => ({ acknowledgements: new Map(), dismiss: vi.fn() }),
 }))
 
 vi.mock('next/navigation', () => ({
@@ -101,6 +102,9 @@ function overviewAgent(id: string, budgets: unknown[] = []) {
     id,
     name: 'Research agent',
     status: 'active',
+    // #4431: the overview always carries the agent's stored tint; the row's
+    // Monogram and the money card's split bar read it.
+    avatarTint: 1,
     accountId: 'safe-1',
     accountName: 'Main account',
     accountChainId: 100,
@@ -152,6 +156,8 @@ function agent(overrides: Record<string, unknown> = {}) {
     created_at: '2026-05-01T00:00:00Z',
     allowances: [],
     labels: [],
+    // #4431: the stored display tint every agent read carries.
+    avatar_tint: 1,
     ...overrides,
   }
 }
@@ -298,6 +304,8 @@ describe('AgentPanel rail affordances', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Show archived' }))
 
     fireEvent.click(screen.getByRole('button', { name: 'Actions for Old agent' }))
+    // #4491: the agent card hosts this menu — nothing above it may clip.
+    expectMenuNotClipped(screen.getByRole('menu'))
     expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Restore to list'])
   })
 
@@ -611,7 +619,24 @@ describe('AgentPanel page header (#4209)', () => {
     expect(screen.queryByRole('button', { name: 'Labels' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Organizations' })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'More agent actions' }))
+    // #4491: the page header hosts this menu — nothing above it may clip.
+    expectMenuNotClipped(screen.getByRole('menu'))
     expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Labels', 'Organizations'])
+  })
+
+  it("passes Connect agent and the ⋯ trigger straight to PageHeader's wrapping actions row (#4401)", () => {
+    setAgents([agent()])
+    render(<AgentPanel />)
+
+    const connect = screen.getByRole('button', { name: 'Connect agent' })
+    const row = connect.parentElement as HTMLElement
+    expect(row.className.split(/\s+/)).toContain('flex-wrap')
+    expect(row.parentElement?.tagName).toBe('HEADER')
+    // The ⋯ menu's own root is the row's second child: its own item, not
+    // sharing a wrapper with Connect agent.
+    expect(row.children).toHaveLength(2)
+    expect(row.children[0]).toBe(connect)
+    expect(row.children[1].contains(screen.getByRole('button', { name: 'More agent actions' }))).toBe(true)
   })
 
   it('has no "Agents N" count chip: the summary line owns the count', () => {
@@ -629,6 +654,7 @@ describe('AgentPanel page header (#4209)', () => {
     render(<AgentPanel />)
 
     fireEvent.click(screen.getByRole('button', { name: 'More agent actions' }))
+    expectMenuNotClipped(screen.getByRole('menu'))
     fireEvent.click(screen.getByRole('menuitem', { name: 'Labels' }))
     expect(screen.getByRole('dialog', { name: 'Manage labels' })).toBeInTheDocument()
   })

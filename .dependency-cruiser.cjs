@@ -120,9 +120,11 @@ module.exports = {
       // `modules/mpp/` (#997) already had a public index.ts; #998 gave every
       // remaining modules/** directory one too (accounts/, agents/, payments/,
       // catalog/, accounting/, reporting/, fee/, passport/) and fixed every
-      // external call site to import through it. The rule now covers ALL of
-      // modules/** at its intended end state — zero violations, and it must
-      // never gain a waiver for any of them. `platform/`,
+      // external call site to import through it. This arm polices every
+      // import INTO modules/** from outside it — zero violations, with a few
+      // reviewed inline waivers (`npm run lint:deps` prints each with its
+      // reason); the module-to-module arm below (#4379) polices imports
+      // between modules. `platform/`,
       // `domain/`, `infra/` and `rails/` are LAYERS, not domain-capability
       // modules (see the architecture doc's "what belongs where" table), and
       // deliberately do not get barrels — they hold multiple files each with
@@ -140,6 +142,29 @@ module.exports = {
       to: {
         path: '^packages/backend/src/modules/[^/]+/',
         pathNot: '^packages/backend/src/modules/[^/]+/index\\.ts$',
+      },
+    },
+    {
+      // Rule 6, the module-to-module arm (#4379). The rule above excludes
+      // modules/** from its `from` side, so it never saw one module reaching
+      // into ANOTHER module's private file — the case module boundaries exist
+      // for. 14 such edges were live when this arm landed; each now goes
+      // through the target's index.ts or carries a waiver naming the cycle a
+      // barrel import would create. A module's own files (`$1`) stay free to
+      // import each other.
+      name: 'no-deep-module-to-module-import',
+      severity: 'error',
+      comment:
+        "Import another module through its public index.ts, not a private file. " +
+        'If the barrel import would form a cycle, move the shared piece down into domain/ ' +
+        'or platform/, or waive the edge naming the cycle.',
+      from: { path: '^packages/backend/src/modules/([^/]+)/' },
+      to: {
+        path: '^packages/backend/src/modules/[^/]+/',
+        pathNot: [
+          '^packages/backend/src/modules/$1/',
+          '^packages/backend/src/modules/[^/]+/index\\.ts$',
+        ],
       },
     },
   ],

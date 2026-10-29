@@ -29,17 +29,24 @@ import { x402Description } from '../../domain/x402-description.js'
 import { formatTokenValue } from '../../domain/tokens.js'
 import { type ResolvePaymentTokenResult } from '../../domain/payment-token.js'
 import { agentHourlyX402CapExceeded, normaliseAddress, ZERO_ADDRESS } from './helpers.js'
-import { classifyRevertForLedger, isTransferCapRevert } from '../payments/refusal-ledger.js'
-import { refuse } from '../payments/refuse.js'
-import { boundedErrorDetails, prepareFailureBody } from '../payments/prepare-failure.js'
+import {
+  boundedErrorDetails,
+  classifyRevertForLedger,
+  isTransferCapRevert,
+  prepareFailureBody,
+  refuse,
+} from '../payments/index.js'
 import { redactVendorSecrets } from '../../domain/redact-vendor-secrets.js'
 import { deriveFundingShape, validateDelegationSchemeShape } from './scheme-selection.js'
 import { delegationReplay } from './replay.js'
 import type { X402HandlerResult, X402McpCallContextInput } from './types.js'
 import { checkTaskBudgetCap, taskBudgetExceededBody } from '../task-budgets/index.js'
 import {
+  buildExpiredBudgetBody,
   buildPeriodExceededBody,
   evaluatePeriodPrecheck,
+  expiredBudgetLedgerDetail,
+  findExpiredBudgetForToken,
   periodExceededLedgerDetail,
   periodPrecheckLinks,
   refuseBothScopeIds,
@@ -459,6 +466,56 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
       )
     }
     if (!fundingAuth) {
+      // #4352: `null` here covers "no live row" AND "the only row has expired"
+      // (the #3802 read hides expired rows). When the only row for the token
+      // has ENDED, name it: `delegation_expired` with the end date, not a
+      // no-delegation refusal that sends the agent to ask for an approval
+      // that already happened. The decision is unchanged (same 403, nothing
+      // created or signed) — only the reason and the words differ. The
+      // expired row is never live (`budget-scope/expired-budget.ts`).
+      const expired = await findExpiredBudgetForToken(agent.id, agent.chain_id, tokenAddress)
+      if (expired) {
+        return refuse(
+          {
+            code: 403,
+            // #4458: the typed expired body, the same builder the hosted
+            // pre-check answers with — `error_code`, `phase`, `next_action`,
+            // `budget_ended_at` and the atomic figures on the wire, not a
+            // one-line `{ error }`. `merchant_address` is `merchantPayTo`
+            // (the real merchant), NEVER `payTo`, which on this leg is the
+            // agent's own funding EOA — the account confusion the 086
+            // allowlist exists to prevent, and the same address this leg's
+            // ledger row and over-budget body already carry.
+            body: buildExpiredBudgetBody({
+              flavor: 'x402',
+              chainId: agent.chain_id,
+              tokenSymbol: tokenConfig.symbol,
+              tokenAddress,
+              decimals: tokenConfig.decimals,
+              amountAtomic: amountRaw.toString(),
+              amount: amountHuman,
+              endedAtIso: expired.endedAtIso,
+              endedOnDate: expired.endedOnDate,
+              network,
+              resourceUrl: url,
+              merchantAddress: merchantPayTo.toLowerCase(),
+            }),
+          },
+          {
+            userId: agent.user_id,
+            agentId: agent.id,
+            chainId: agent.chain_id,
+            tokenSymbol: tokenConfig.symbol,
+            amountAtomic: amountRaw.toString(),
+            accountAddress: agent.account_address,
+            merchantTo: merchantPayTo.toLowerCase(),
+            resourceUrl: url,
+            reason: 'delegation_expired',
+            source: 'x402_authorize',
+            detail: expiredBudgetLedgerDetail(expired.endedAtIso),
+          },
+        )
+      }
       // #3052: the sibling writers for this condition — the erc7710
       // no-delegation 403 below and the funding-leg 403 on POST /payments —
       // already recorded it; this leg answered the same refusal with nothing
@@ -644,6 +701,48 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
   const budget =
     erc7710Scope.subBudget?.parentDelegation ?? erc7710Scope.taskBudget?.parentDelegation ?? erc7710Scope.delegation
   if (!budget) {
+    // #4352: the only row for the token may have EXPIRED (the #3802 read hides
+    // it) — answer `delegation_expired` with the end date instead of a
+    // no-delegation refusal. Same decision (403, fire-and-forget row through
+    // the choke point, nothing created), only the reason and the words
+    // change. The expired row is never live (`budget-scope/expired-budget.ts`).
+    const expired = await findExpiredBudgetForToken(agent.id, agent.chain_id, tokenAddress)
+    if (expired) {
+      return refuse(
+        {
+          code: 403,
+          // #4458: the typed expired body, shared with the funding leg and
+          // the hosted pre-check. On this leg `payTo` IS the merchant.
+          body: buildExpiredBudgetBody({
+            flavor: 'x402',
+            chainId: agent.chain_id,
+            tokenSymbol: tokenConfig.symbol,
+            tokenAddress,
+            decimals: tokenConfig.decimals,
+            amountAtomic: amountRaw.toString(),
+            amount: amountHuman,
+            endedAtIso: expired.endedAtIso,
+            endedOnDate: expired.endedOnDate,
+            network,
+            resourceUrl: url,
+            merchantAddress: payTo.toLowerCase(),
+          }),
+        },
+        {
+          userId: agent.user_id,
+          agentId: agent.id,
+          chainId: agent.chain_id,
+          tokenSymbol: tokenConfig.symbol,
+          amountAtomic: amountRaw.toString(),
+          accountAddress: agent.account_address,
+          merchantTo: payTo.toLowerCase(),
+          resourceUrl: url,
+          reason: 'delegation_expired',
+          source: 'x402_authorize',
+          detail: expiredBudgetLedgerDetail(expired.endedAtIso),
+        },
+      )
+    }
     // #2945: this 403 is how a recipient pin refuses on this rail — named
     // for what it is, not distinguishable from no-delegation. Fire-and-forget.
     // #3053: through the shared choke point.

@@ -397,7 +397,7 @@ function NewAccountDialogBody({
         <p className="text-sm font-medium text-[var(--v2-ink)]">A new account needs a passkey</p>
         <p className="text-sm text-[var(--v2-ink-2)]">
           A new account is secured by a passkey from one of your accounts, and none of yours has one yet. Add a
-          passkey from Backup &amp; recovery on an account&rsquo;s page, then come back here.
+          passkey from the Who can approve section on an account&rsquo;s page, then come back here.
         </p>
       </div>
     )

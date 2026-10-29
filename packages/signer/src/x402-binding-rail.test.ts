@@ -310,11 +310,11 @@ describe('x402 binding rail (#4242)', () => {
       for (const [refusal, reason] of [
         [
           viaHeader,
-          "submit the settlement-child signature you already hold from haven_sign to haven_submit with settlement_scheme 'erc7710' — it returns the payment_header; do not sign again unless you no longer hold it (haven_sign { payment_id } re-signs the same child), and an erc7710 payment has no EIP-3009 header step",
+          "submit the settlement-child signature you already hold from haven_sign to haven_submit with settlement_scheme 'erc7710' — it returns the payment_header — on a plain-HTTP merchant, or to haven_settle_mcp_tool with payment_id and signature and no payment_header on an MCP merchant; do not sign again unless you no longer hold it (haven_sign { payment_id } re-signs the same child), and an erc7710 payment has no EIP-3009 header step",
         ],
         [
           viaOneShot,
-          "sign the settlement child with haven_sign { payment_id }, then call haven_submit with that signature and settlement_scheme 'erc7710' — it returns the payment_header; an erc7710 payment has no EIP-3009 header step",
+          "sign the settlement child with haven_sign { payment_id }, then on a plain-HTTP merchant call haven_submit with that signature and settlement_scheme 'erc7710' — it returns the payment_header — and on an MCP merchant call haven_settle_mcp_tool with payment_id and signature and no payment_header; an erc7710 payment has no EIP-3009 header step",
         ],
       ] as const) {
         expect(refusal.code).toBe('NO_FUNDING_LEG')

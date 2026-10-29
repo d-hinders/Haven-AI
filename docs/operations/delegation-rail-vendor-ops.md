@@ -10,7 +10,7 @@ covers:
   - packages/backend/src/routes/x402.ts
   - packages/backend/scripts/check-delegation-contracts.ts
   - packages/backend/scripts/check-bundler.ts
-last-verified: "2026-09-04"
+last-verified: "2026-10-24"
 ---
 
 # Delegation rail — vendor & gas operations (#826, epic #821)
@@ -44,22 +44,25 @@ only one:
 
 - **Paymaster (Pimlico)** — every redemption UserOp: `/payments` on the rail,
   treasury ops (revoke), and the EIP-3009 funding leg below.
-- **Haven's relayer** — the delegator/treasury Hybrid's **one-time** factory
-  deploy (#860, `ensureHybridDeployed`). Two trigger sites, not one: grant
-  activation (`routes/agent-delegations.ts`) and — since #1667 — the **first
-  erc7710 authorize** for an account that is still counterfactual
-  (`modules/x402/delegation-authorize.ts`). The authorize call exists because
-  the erc7710 path has no 3009 funding leg to deploy the account as an
-  initCode side effect, and a recipient-pinned agent never can have one (those
-  budgets are erc7710-only). A 4337 factory call is permissionless, so this is
+- **Haven's relayer** — **one-time** Hybrid factory deploys of a delegator
+  that is still counterfactual. Two deploys, not one: the treasury Hybrid at
+  grant activation (#860, `ensureHybridDeployed` in
+  `routes/agent-delegations.ts`) and — since #1667 — the agent's delegate
+  Hybrid, the settlement child's delegator, at its **first erc7710
+  authorize** (`ensureDelegateHybridDeployed` since #4023, in
+  `modules/x402/delegation-authorize.ts`). The authorize call exists because
+  the erc7710 path has no 3009 funding leg to deploy the delegate account as
+  an initCode side effect, and a recipient-pinned agent never can have one
+  (those budgets are erc7710-only). A 4337 factory call is permissionless, so this is
   a plain relayer transaction, NOT a sponsored op: it draws relayer gas
   balance. Same alerting as every other relayer chain.
 
   **Blast radius of a drained relayer**: it blocks **grant activation** *and*
-  **the first erc7710 payment of any not-yet-deployed account** — not payments
-  in general. Payments on an already-deployed account are unaffected, which is
-  what keeps the exposure bounded: the deploy is once per account, ever, and
-  `ensureHybridDeployed` short-circuits afterwards on a single `getBytecode`.
+  **the first erc7710 payment of any agent whose delegate account is not yet
+  deployed** — not payments in general. Payments through already-deployed
+  accounts are unaffected, which is what keeps the exposure bounded: each
+  deploy is once per account, ever, and both functions short-circuit
+  afterwards on a single `getBytecode`.
   Match the symptom by status code on `POST /x402/authorize`: **502**
   ("Could not deploy the delegate account for erc7710 settlement — retry the
   authorize") when the relayer transaction itself fails, e.g. an empty gas
@@ -81,8 +84,9 @@ and recorded in `machine_metadata.settlement_scheme`:
 - **`erc7710`** (default and destination) — Haven sponsors **no gas through
   the paymaster**. Authorize builds a narrowed child delegation and runs no
   bundler estimation; the merchant redeems `[child, budget]` and pays that
-  gas. It is not free to Haven on the *first* payment of a counterfactual
-  account, though: that authorize pays the one-time factory deploy out of
+  gas. It is not free to Haven on the *first* payment of an agent whose
+  delegate account is still counterfactual, though: that authorize pays the
+  one-time factory deploy out of
   **relayer** gas (#1667, above). That cost is a relayer line, not a
   sponsorship line — it is bounded at once per account and it does not scale
   with erc7710 volume.
@@ -109,8 +113,9 @@ run no estimation, so recovery retries cost nothing.
   once both deployed envs migrated (#882), so an unset var throws
   ("delegation rail unavailable") instead of silently borrowing the retired
   rail's credential. The `SESSION_RAIL_*` variables and
-  `SCHEDULE_RENEWAL_WEBHOOK_URL` are dead everywhere except the
-  `ops:check-bundler` probe (§3). Read in exactly ONE place
+  `SCHEDULE_RENEWAL_WEBHOOK_URL` are read nowhere in the code any more (the
+  `ops:check-bundler` probe stopped reading `SESSION_RAIL_BUNDLER_URL` on
+  2026-07-25, §3). Read in exactly ONE place
   (`delegationRailBundlerUrl`); every error surface passes
   `redactVendorSecrets` (bundler errors echo the URL — the #764 incident).
   Since #3371 the same holds for RPC endpoint URLs (`RPC_URL_*`): the failover
@@ -160,9 +165,9 @@ may be added (red line — see the security model).
 Blast radius since #946: `/payments` and **3009-mode** x402 pause; **erc7710
 x402 keeps working**, because it prepares no sponsored op — the merchant
 redeems. A separate outage class is a **drained relayer**, which pauses grant
-activation *and* the first erc7710 payment of any not-yet-deployed account
-(the delegator deploy, §1 — both trigger sites since #1667), while payments
-on already-deployed accounts continue. Symptoms: authorize 502
+activation *and* the first erc7710 payment of any agent whose delegate
+account is not yet deployed (the two deploys in §1, since #1667), while
+payments through already-deployed accounts continue. Symptoms: authorize 502
 ("Could not deploy the delegate account…") on an empty relayer balance, or
 429 when the `hybrid_deploy` budget cap refuses first.
 
@@ -350,7 +355,7 @@ Probes:
   nothing about the deployed env — fixed by pointing it at the resolver so the
   probe cannot drift from the rail again.)
 - `ops:check-delegation` — every PINNED contract (manager, entry point,
-  factory, Hybrid impl, 8 enforcers) is live bytecode on every enabled
+  factory, Hybrid impl, 9 enforcers) is live bytecode on every enabled
   chain. Run on deploy and daily; exit 1 = stop before any rail use.
 - `ops:check-mainnet-reconciliation` — the read-only 8453 probe (#1067):
   public `/health`, authenticated `/health/ops` relayer-monitor liveness +
@@ -368,8 +373,9 @@ before pinning) — with audit
 provenance. Pins NEVER move on a package upgrade — adding a chain or a new
 manager version is a reviewed change with its own verification run.
 
-**SDK (`@metamask/smart-accounts-kit`):** pinned to a known version in
-`package.json`. If the package is deprecated, breaks compatibility, or its
+**SDK (`@metamask/smart-accounts-kit`):** the root `package-lock.json` pins
+the resolved version (1.6.0 at this re-read); every `package.json` that
+declares it says `^1.6.0`, so a lockfile refresh can move it within 1.x. If the package is deprecated, breaks compatibility, or its
 license changes: fork the repo at the pinned tag into the org and point the
 dependency at the fork — the deployed contracts don't care what SDK built
 the calldata. Budget for this is small by design: Haven touches only
@@ -380,8 +386,8 @@ delegation building, signing typed-data, and `redeemDelegations` encoding.
    or a critical advisory lands without a fix.
 2. An alternative ERC-7710 manager implementation reaches production with
    independent audits (portability option appears).
-3. Facilitator adoption signal (CDP `erc7710` support) — tracked in #830;
-   raises the value of the whole posture rather than threatening it.
+3. Facilitator adoption signal (CDP `erc7710` support) — raised under #830
+   (closed); raises the value of the whole posture rather than threatening it.
 4. MetaMask Agent Wallet's consumer product begins to overlap Haven's B2B
    control-plane lane (positioning, not technical, review).
 
@@ -395,3 +401,24 @@ silently serves the LAST healthy build (symptom: new routes 404 while
 `src/**` must be declared in the backend's own `package.json`. When
 debugging "route missing on dev", check WHICH build generation is live by
 probing a route from each recent merge before suspecting the code.
+
+> **Re-verified 2026-10-24 (#4372 part F, at dev `6d87ddf95`), a full re-read.**
+> Changed: the relayer bullet names the two deploys — the treasury at grant
+> activation (`ensureHybridDeployed`) and the agent's delegate Hybrid at its
+> first erc7710 authorize (`ensureDelegateHybridDeployed`, #4023) — instead
+> of one "delegator/treasury" deploy, and the blast-radius lines follow; the
+> `SESSION_RAIL_*` variables are read nowhere, not "except the probe"; the
+> pinned set has 9 enforcers (the `redeemer`, #1058), not 8; the SDK is
+> pinned by the lockfile, its `package.json` ranges are `^1.6.0`; #830 is
+> closed. Re-checked without change: the 502 and 429 deploy answers
+> (`modules/x402/delegation-authorize.ts`), `max_x402_per_hour` default 100
+> with replays exempt, the per-chain resolver and its chain guard
+> (`delegationRailBundlerUrl`), the typed 503 on `/payments` and the funding
+> leg, `prepare_failed` (#3609) and the hosted MCP mapping, the #3371 RPC
+> scrub, every consumer passing `DELEGATION_RAIL_SPONSORSHIP_POLICY_ID`, the
+> 120 s deploy and attest waits (#1722, #1735), the bump worker's three log
+> lines and its cap of 3, the rebroadcast-safe set, migration 061's partial
+> index, the `ops:cancel-stuck-*` scripts and their built form in the
+> `--omit=dev` image, the probes' exit codes and `CHECK_BUNDLER_CHAIN_ID`,
+> the #908 mainnet pins, and `dependency-parity.test.ts`. Every cited issue
+> was read with `gh api`; all are closed.

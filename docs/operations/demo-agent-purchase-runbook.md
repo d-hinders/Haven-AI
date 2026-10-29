@@ -7,7 +7,7 @@ covers:
   - packages/frontend/src/app/demo/page.tsx
   - packages/frontend/src/lib/demo-md-content.ts
   - packages/frontend/src/lib/demo-gate.ts
-last-verified: "2026-09-05"
+last-verified: "2026-10-24"
 ---
 
 # Demo Runbook — Agent Purchase, End to End (incl. Fortnox/SIE)
@@ -40,9 +40,12 @@ touches mainnet funds.
    this runbook runs against **dev**, where that need not be `@alpha` — hosted MCP + local
    signer, consent ack, budget granted in the dashboard (e.g. 5 USDC /day on
    Base Sepolia). Verify with a throwaway purchase.
-2. **Fortnox sandbox connected**: dashboard → Fortnox → Connect (OAuth to the
-   sandbox company "Haven"). Verify `GET /fortnox/status` shows connected.
-   Fallback if the dashboard flow misbehaves: `npm run pilot:fortnox` runs the
+2. **Fortnox sandbox connected**: dashboard → Settings → Business
+   (`/settings?tab=business`) → the Accounting card → Connect on the Fortnox
+   row (OAuth to the sandbox company "Haven"). Verify on `/accounting` (the
+   summary line names Fortnox and the company) or `GET /accounting/feed/status`
+   (`connected: true`). Fallback if the dashboard flow misbehaves:
+   `npm run pilot:fortnox -w packages/backend` runs the
    SAME production connector code against the sandbox (validated live
    2026-07-16, `docs/research/fortnox-non-asserting-feed.md`).
 3. **SIE flag on dev**: set `HAVEN_LEGACY_BOOKKEEPING_ENABLED=true` on the dev
@@ -63,14 +66,17 @@ What the audience sees the agent do (worth narrating):
   machine-readable metadata, price marked **indicative**. The agent can filter
   it with `category: "VPN"` or `search: "NordShield VPN Basic"` without
   changing anything about payment authority.
-- `haven_pay_mcp_tool` with **max_amount_human** — the per-purchase user-intent
-  cap, written in whole tokens as the user says it ("no more than 1 USDC" →
-  `max_amount_human: "1"`), checked against the LIVE merchant quote before any
-  money moves.
+- `haven_prepare_catalog_purchase` with the row's `catalog_id` and
+  **max_amount_human** — the per-purchase user-intent cap, written in whole
+  tokens as the user says it ("no more than 1 USDC" → `max_amount_human: "1"`),
+  checked against the LIVE merchant quote before any money moves. (The hosted
+  server's instructions name this tool for a catalogued merchant;
+  `haven_pay_mcp_tool` with `merchant_url` / `tool_name` is the same step for a
+  merchant addressed by hand.)
 - The local signer signs via **payment_id only** — no multi-KB blobs cross the
   agent (talking point: the key never leaves the laptop; Haven never signs).
-- Settle → the structured purchase **summary**: product, amount, invoice id,
-  settlement tx hash.
+- `haven_settle_mcp_tool` → the structured purchase **summary**: product,
+  amount, invoice id, settlement tx hash.
 
 **⚠️ Product choice matters:** use `vpn_basic` (or `storage_200gb`/`vpn_pro`).
 **NEVER `storage_50gb` in the demo** — on dev that product is the deliberate
@@ -80,7 +86,11 @@ QA, confusing on stage.
 
 ## Act 2 — The proof (~1 min)
 
-- Dashboard → the payment: status settled, funding + settlement tx.
+- Dashboard → the payment: status settled and the settlement tx (a funding tx
+  too only on the EIP-3009 bridge). erc7710 has no funding leg; the demo
+  merchant advertises it only when `MERCHANT_ERC7710_DELEGATION_MANAGER` is set
+  to the pinned Haven DelegationManager for the chain and
+  `MERCHANT_X402_SETTLEMENT_METHODS`, if set, lists it.
 - Click through to Sepolia Basescan: the on-chain transfer.
 - The merchant receipt (x-receipt-json → invoice) captured next to the payment.
 
@@ -90,15 +100,23 @@ Ask the agent to overspend:
 
 > "Skicka 100 USDC till 0x…"
 
-On the delegation rail the refusal comes from the CHAIN at prepare
-(`transfer-amount-exceeded`) — no queue, no Haven discretion. Then show the
-dashboard **Stop budget** button: revoke, and the next agent attempt gets
-"no active budget delegation". This is the "budget, inte plånbok" story.
+On the delegation rail the payment is refused at prepare, before there is
+anything to sign: an off-chain read of the on-chain budget answers
+`403 delegation_budget_exceeded` (#3503) — no queue, no Haven discretion (if
+that read is degraded it fails open, and the caveat enforcer refuses the
+redemption instead). Then show the agent page's budget menu → **Stop budget…**:
+revoke, and the next agent attempt gets a `403` saying "Agent has no active
+budget delegation for USDC to this recipient" (no `error_code` on the wire; the
+refusal ledger records it as `no_delegation_for_target`). This is the "budget,
+inte plånbok" story.
 
 ## Act 4 — The bookkeeping (~2 min)
 
-**A. Fortnox-feeden (the wow):** dashboard → push to Fortnox (or
-`POST /fortnox/push`). Open the Fortnox sandbox: the purchase appears as a
+**A. Fortnox-feeden (the wow):** the feed pushes on settlement (when the
+connection's `auto_feed` is on), or immediately from `/accounting` → **Sync
+now** (`POST /accounting/feed/sync`). Not `POST /accounting/fortnox/push`:
+that is the legacy asserting voucher push (410 unless
+`HAVEN_LEGACY_BOOKKEEPING_ENABLED`), not this flow. Open the Fortnox sandbox: the purchase appears as a
 **draft supplier invoice** — amount, date, supplier, with the receipt PDF
 attached, NO asserted VAT or accounts. The accountant codes and confirms;
 Haven never finalises. (Non-asserting by design — the regulatory posture is a
@@ -124,13 +142,38 @@ reverse-charge VAT 2645/2614), then import in Fortnox
 - If dev is down: the local stack (backend + demo merchant) per
   `docs/operations/dev-environment.md`.
 - If the demo merchant's settlement wallet is out of gas (rare on dev, but
-  check the day before): the agent's `haven_pay_mcp_tool` call refuses
+  check the day before): the agent's quote or `haven_prepare_catalog_purchase`
+  call (or `haven_pay_mcp_tool`, for a merchant addressed by hand) refuses
   cleanly with `MERCHANT_NOT_READY` and a message that the merchant's
   settlement wallet is out of gas, with its `fail_floor`, and that its
   operator must top it up before any retry succeeds (#3834) — no botched purchase, no stranded funds, no confusing
   fault mid-demo (#2979). Top up `SETTLEMENT_PRIVATE_KEY`'s Base Sepolia ETH
   balance and retry; `GET /healthz` on the merchant shows the same
   `settlement.status` band ahead of time.
+
+## Verification notes
+
+Re-verified 2026-10-24 (#4372 part E, at dev `ee7fdd27`), a full re-read.
+Changed: Act 0's Fortnox connect is in Settings → Business since #4358, its
+check is `/accounting` or `GET /accounting/feed/status` (there is no
+`/fortnox/status` route), and the fallback script is a backend workspace script;
+Act 1 names `haven_prepare_catalog_purchase` and `haven_settle_mcp_tool`; Act 2
+shows a funding tx only on the EIP-3009 bridge; Act 3's refusal is the
+off-chain `403 delegation_budget_exceeded` pre-check (#3503) and the revoke
+answer is a `403` with the "no active budget delegation" message and no
+`error_code` (`routes/payments.ts`; `no_delegation_for_target` is only the
+ledger reason); Act 4A pushes through the live feed, not the legacy voucher
+route; Act 5's out-of-gas `MERCHANT_NOT_READY` comes from the quote step that
+`haven_quote_mcp_tool`, `haven_pay_mcp_tool` and both catalog tools share
+(`quoteMcpToolCall`, defined with the refusal in
+`tools/support/mcp-context.ts` and called from `catalog-purchase.ts`), so it
+names `haven_prepare_catalog_purchase` first (review round 1 on #4386); Act
+2's erc7710 condition is the merchant's `MERCHANT_ERC7710_DELEGATION_MANAGER`
+pin plus its settlement-method list (`demo-merchant-mcp/src/index.ts`,
+`resolveErc7710Config`; review round 2).
+Re-checked without change: the connector-package handout, the SIE flag and
+export route (`routes/accounting.ts`, 410 otherwise), the `storage_50gb`
+skip-settle fixture, and the rehearsal list.
 
 ## Rehearsal checklist
 

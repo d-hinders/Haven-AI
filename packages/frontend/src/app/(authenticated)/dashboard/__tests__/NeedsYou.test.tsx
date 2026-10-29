@@ -297,33 +297,43 @@ describe('NeedsYou', () => {
     expect(screen.getByTestId('attention-dismiss-no-backup:acct-1')).toBeInTheDocument()
   })
 
-  it('offers no dismiss control on low balance, budget reached and payments failed', () => {
+  it('offers no dismiss control on low balance and zero USDC — money is at stake', () => {
     render(
       <NeedsYou
         items={[
           item({ id: 'low-balance:acct-1', kind: 'low-balance', tone: 'warning', badge: 'Low balance', title: "Main's USDC is running low", accountId: 'acct-1' }),
-          item({ id: 'budget-reached:a1', kind: 'budget-reached', title: 'Scout reached its budget' }),
-          item({ id: 'budget-scope:a1', kind: 'budget-scope', title: 'Scout tried to pay outside its rules' }),
-          item({ id: 'zero-usdc:acct-1', kind: 'zero-usdc', tone: 'warning', badge: 'Low balance', title: 'Main is out of USDC', accountId: 'acct-1' }),
-          item({ id: 'haven-paused', kind: 'haven-paused', title: 'Haven paused sponsored payments' }),
-          item({ id: 'payments-failed:a1', kind: 'payments-failed', tone: 'danger', badge: 'Failed', title: 'Scout had a failed payment' }),
+          item({ id: 'zero-usdc:acct-1', kind: 'zero-usdc', tone: 'warning', badge: 'No USDC', title: 'Main is out of USDC', accountId: 'acct-1' }),
         ]}
         hasOverviewError={false}
         onRetry={() => {}}
         onDismiss={() => {}}
       />,
     )
-    for (const id of [
-      'low-balance:acct-1',
-      'budget-reached:a1',
-      'budget-scope:a1',
-      'zero-usdc:acct-1',
-      'haven-paused',
-      'payments-failed:a1',
-    ]) {
+    for (const id of ['low-balance:acct-1', 'zero-usdc:acct-1']) {
       expect(screen.queryByTestId(`attention-dismiss-${id}`)).not.toBeInTheDocument()
     }
     expect(document.querySelector('[data-attention-dismiss]')).toBeNull()
+  })
+
+  it('#4324: offers the dismiss control on budget, scope, sponsorship and failure items, labelled with the title', async () => {
+    const user = userEvent.setup()
+    const onDismiss = vi.fn()
+    const acknowledgeable = [
+      item({ id: 'budget-reached:a1', kind: 'budget-reached', title: 'Scout reached its budget' }),
+      item({ id: 'budget-usage:a1', kind: 'budget-usage', title: 'Scout has used 90% of its budget' }),
+      item({ id: 'budget-scope:a1', kind: 'budget-scope', badge: 'Outside its rules', title: 'Scout tried to pay outside its rules' }),
+      item({ id: 'haven-paused', kind: 'haven-paused', title: 'Haven paused sponsored payments' }),
+      item({ id: 'payments-failed:a1', kind: 'payments-failed', badge: 'Failed', title: 'Scout had a failed payment' }),
+    ]
+    render(<NeedsYou items={acknowledgeable} hasOverviewError={false} onRetry={() => {}} onDismiss={onDismiss} />)
+    // Five items: the fifth sits behind "Show 1 more".
+    await user.click(screen.getByRole('button', { name: /Show 1 more/ }))
+    for (const entry of acknowledgeable) {
+      // The dismiss label stays `Dismiss: {title}` (#4324 S7: no new AttentionList prop).
+      expect(screen.getByTestId(`attention-dismiss-${entry.id}`)).toHaveAccessibleName(`Dismiss: ${entry.title}`)
+    }
+    await user.click(screen.getByTestId('attention-dismiss-budget-usage:a1'))
+    expect(onDismiss).toHaveBeenCalledWith(expect.objectContaining({ id: 'budget-usage:a1', kind: 'budget-usage' }))
   })
 
   it('routes the Add-funds action through the account callback', async () => {

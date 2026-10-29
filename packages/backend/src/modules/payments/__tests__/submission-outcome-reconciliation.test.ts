@@ -97,7 +97,7 @@ async function seedIntent(
 
 async function readRow(id: string): Promise<Record<string, unknown>> {
   const result = await db.query(
-    `SELECT status, tx_hash, error_message, confirmed_at, machine_metadata FROM payment_intents WHERE id = $1`,
+    `SELECT status, tx_hash, error_message, confirmed_at, failed_at, machine_metadata FROM payment_intents WHERE id = $1`,
     [id],
   )
   return result.rows[0] as unknown as Record<string, unknown>
@@ -182,6 +182,8 @@ describeDb('#3564 — outcome-pending booking and chain reconciliation', () => {
     const row = await readRow(id)
     expect(row.status).toBe('confirmed')
     expect(row.tx_hash).toBe(txHash)
+    // A confirm is not a failure — the failed arm's stamp is not written here (#4378).
+    expect(row.failed_at).toBeNull()
   })
 
   it('a landed-but-reverted receipt fails the row with the cause and the recorded hash', async () => {
@@ -198,6 +200,11 @@ describeDb('#3564 — outcome-pending booking and chain reconciliation', () => {
     expect(String(row.error_message)).toContain(hash)
     expect(String(row.error_message)).toContain('was included but reverted')
     expect((row.machine_metadata as Record<string, unknown>).submission_outcome).toBe('resolved')
+    // #4378: the failed arm stamps the failure time in the same UPDATE —
+    // this is what re-arms the unattributed "A payment failed" item when the
+    // reconcile lands long after the owner acknowledged it.
+    expect(row.failed_at).not.toBeNull()
+    expect(new Date(row.failed_at as string).getTime()).toBeGreaterThan(Date.now() - 60_000)
   })
 
   it('a window-elapsed not-found resolves failed with that cause', async () => {
@@ -211,6 +218,8 @@ describeDb('#3564 — outcome-pending booking and chain reconciliation', () => {
     expect(row.status).toBe('failed')
     expect(String(row.error_message)).toContain('was never seen on chain after the bounded reconciliation window')
     expect((row.machine_metadata as Record<string, unknown>).submission_outcome).toBe('resolved')
+    // Same stamp on the window-elapsed arm — both arms are the one writer (#4378).
+    expect(row.failed_at).not.toBeNull()
   })
 
   describe('findOutcomePendingIntents — the candidate scan', () => {

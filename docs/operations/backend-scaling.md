@@ -5,7 +5,7 @@ covers:
   - packages/backend/src/platform/leader-lock.ts
   - packages/backend/src/rails/hybrid-provisioning.ts
   - packages/backend/src/infra/relayer.ts
-last-verified: "2026-09-24"
+last-verified: "2026-10-25"
 ---
 
 # Backend Scaling
@@ -16,7 +16,9 @@ may now run more than one, and the relayer is what still caps throughput.**
 ## What multiple replicas already handle
 
 - **Periodic monitors** — every replica starts the same `setInterval` ticks, so
-  every tick but one is wrapped in `runIfLeader` (`platform/leader-lock.ts`). A
+  every periodic scan but one is wrapped in `runIfLeader` (`platform/leader-lock.ts`).
+  (The in-memory caches' own eviction timers, `platform/cache.ts`, are
+  per-process by nature and are not scans.) A
   Postgres advisory lock elects one executor per tick; the losers skip rather
   than queue. Without it, an N-replica deployment runs every scan N times and
   sends up to N copies of each alert. The exception is the relayer balance
@@ -29,10 +31,13 @@ may now run more than one, and the relayer is what still caps throughput.**
   blocking sibling, `withKeyedAdvisoryLock`, serialises the callers that must
   WAIT and then observe what the winner did — a monitor tick that loses the
   race should be skipped, but an account deploy that loses still owes its
-  caller an answer. `ensureHybridDeployed` holds it per `(chain, address)` from
-  the bytecode check through to the mined receipt, so two concurrent first
-  payments from a brand-new agent cannot both pass the check and both broadcast
-  a deploy to the same CREATE2 address. Fail-open by construction: an
+  caller an answer. The shared deploy path holds it per `(chain, address)` from
+  the bytecode check through to the mined receipt. Since #4023 that path has
+  two entry points (`rails/hybrid-provisioning.ts`): `ensureHybridDeployed`
+  for the owner's account, with its stored deploy salt, and
+  `ensureDelegateHybridDeployed` for the agent's delegate account. So two
+  concurrent first payments from a brand-new agent cannot both pass the check
+  and both broadcast a deploy to the same CREATE2 address. Fail-open by construction: an
   unavailable lock degrades to the pre-#1673 duplicate deploy, which costs a
   second relayer gas spend rather than correctness. Read that as scoped to the
   lock — the *request* can still fail, because whatever made the lock
@@ -246,9 +251,10 @@ few accounts can re-enter concurrently, and the number of *distinct* accounts
 needed to threaten the pool is lower than the headline figure suggests. Treat
 "on the order of 20" as the optimistic end of the range, not the bar.
 
-**Why this is accepted rather than fixed.** Both call sites
-(`modules/x402/delegation-authorize.ts`, `routes/agent-delegations.ts`) pass
-`expectedAddress`, so the pre-lock `getBytecode` fast path short-circuits
+**Why this is accepted rather than fixed.** Both call sites pass
+`expectedAddress`: `modules/x402/delegation-authorize.ts` through
+`ensureDelegateHybridDeployed`, and `routes/agent-delegations.ts` through
+`ensureHybridDeployed`. So the pre-lock `getBytecode` fast path short-circuits
 permanently once an account exists. The lock is therefore reached about **once
 per account** — never on the payment hot path. ("Ever" would overstate it: a
 deploy that reverts leaves bytecode absent, so a legitimate retry re-enters the

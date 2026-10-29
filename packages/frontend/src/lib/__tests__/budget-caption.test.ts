@@ -142,6 +142,32 @@ describe('states', () => {
     })
   })
 
+  // #4333: the analytics read projects a symbol-only row — `chainId: null` —
+  // because the overview carries the token's SYMBOL, not its chain. The
+  // caption must divide by the SYMBOL's decimals (the same table
+  // `formatAllowanceForToken` consults), not a blind 18: a 1.00 USDC budget
+  // is 1_000_000 atomic, and at 18 decimals it read "0.00 of 0.00".
+  it('a symbol-only row (chainId null) divides by the symbol\u2019s decimals, so 1.00 USDC reads 0.00 of 1.00 (#4333)', () => {
+    const caption = budgetCaption(
+      row({
+        budgetAtomic: '1000000',
+        usedAtomic: '0',
+        chainId: null,
+        // A period end after now, so the caption is the meter and its refill
+        // phrase is the deterministic relative band.
+        periodEndMs: ANCHOR_NOW + 3_600_000,
+      }),
+      { nowMs: ANCHOR_NOW, timeZone: 'UTC' },
+    )
+    expect(caption.kind).toBe('meter')
+    if (caption.kind !== 'meter') return
+    // Full style joins the figures and the symbol with a plain space; the
+    // " · " separators are the caption's own. Asserted as the whole string so
+    // a decimals regression cannot hide behind a partial match.
+    expect(caption.caption).toBe('0.00 of 1.00 USDC used this period · refills in 3h')
+    expect(caption.caption).not.toContain('0.00 of 0.00')
+  })
+
   it('expired: no meter, no countdown', () => {
     const caption = budgetCaption(row({ expiresSec: Math.floor(ANCHOR_NOW / 1000) - 60 }), { nowMs: ANCHOR_NOW })
     expect(caption).toEqual({ kind: 'expired', caption: 'This budget has expired and can no longer be spent.' })
@@ -189,6 +215,7 @@ describe('states', () => {
   it('"does not refill" is never keyed on a period length — the earlier of refill and expiry wins', () => {
     // A re-key carry row: expires AT its period boundary, so it reads as an
     // expiry — while a shorter-lived budget with room after it still refills.
+    // #4350: the expiry phrase is the absolute "ends <date>" — always shown.
     const carry = budgetCaption(row({ expiresSec: Math.floor(ANCHOR_NOW / 1000) + 3 * 3_600 }), {
       nowMs: ANCHOR_NOW,
       timeZone: 'UTC',
@@ -198,9 +225,37 @@ describe('states', () => {
       usedPercent: 25,
       label: 'USDC budget used',
       // 2026-10-09T12:00Z is at the boundary — expiry ties the refill — and
-      // 3h out it reads relative, like any next event under a day.
-      caption: '1.25 of 5.00 USDC used this period · expires in 3h',
+      // the end date is stated as an absolute day, not a countdown.
+      caption: '1.25 of 5.00 USDC used this period · ends 9 Oct 2026',
     })
+  })
+
+  it('#4350: the caption shows the end date for a daily budget 89 days out', () => {
+    // The acceptance case: a daily budget whose expiry sits far past the next
+    // refill. The old wording read a bare "refills …" for 89 days; the end
+    // date must be named anyway, as an absolute day.
+    const caption = budgetCaption(row({ expiresSec: Math.floor(ANCHOR_NOW / 1000) + 89 * 86_400 }), {
+      nowMs: ANCHOR_NOW,
+      timeZone: 'UTC',
+    })
+    expect(caption.kind).toBe('meter')
+    if (caption.kind !== 'meter') return
+    expect(caption.caption).toBe('1.25 of 5.00 USDC used this period · refills in 3h · ends 6 Jan 2027')
+  })
+
+  it('#4350: the end date rides the compact row wording too, and a row with no expiry names none', () => {
+    const withEnd = budgetCaption(row({ expiresSec: Math.floor(ANCHOR_NOW / 1000) + 89 * 86_400 }), {
+      nowMs: ANCHOR_NOW,
+      timeZone: 'UTC',
+      style: 'row',
+    })
+    if (withEnd.kind !== 'meter') throw new Error('expected a meter')
+    expect(withEnd.caption).toBe('1.25 of 5.00\u00a0USDC · per day · refills in 3h · ends 6 Jan 2027')
+    // No `expires_at` (the analytics read): no "ends" segment — the pin at
+    // the meter test above is exactly this row.
+    const noEnd = budgetCaption(row(), { nowMs: ANCHOR_NOW, timeZone: 'UTC', style: 'row' })
+    if (noEnd.kind !== 'meter') throw new Error('expected a meter')
+    expect(noEnd.caption).not.toMatch(/ends/)
   })
 
   it('currency mode: USDC in USD is dollars — no ≈ (#4165)', () => {

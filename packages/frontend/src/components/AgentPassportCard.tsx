@@ -23,17 +23,27 @@
  * automatic and derived (agent revoke -> passport revoke), so there is
  * nothing here for a button to do.
  *
- * #4228: this is a ROW in the agent page's Settings tab, not
- * a standalone Card — the caller owns the card and the dividers between rows,
- * so every state below (loading, load error, issued, not issued) renders
- * inside one padded row block. `data-testid="agent-passport-row"` is the
- * layout contract the page tests select on.
+ * #4228 made this a ROW in the agent page's Settings tab rather than a
+ * standalone Card; #4477 reshaped it onto the shared `SettingsRow` slots:
+ *
+ * - **label** — "Agent Passport" and the headline status badge;
+ * - **detail** — the one-line description (or, in the not-issued state, the
+ *   opt-in sentence);
+ * - **action** — Issue a passport, or Try again on a failed lookup;
+ * - **below** — the issued state's `dl` grid and its notes, in #4478's
+ *   full-width slot. They do not go in `detail`: that column is the left text
+ *   block, so below `sm` the action stacks after it and the grid would push
+ *   the control under itself.
+ *
+ * `data-testid="agent-passport-row"` is the layout contract the page tests
+ * select on, and it stays on the row root in every state.
  */
 
 import { useAgentPassport, type PassportAnchorState } from '@/hooks/useAgentPassport'
 import { getExplorerUrlOrNull } from '@/lib/chains'
 import { timeAgo } from '@/lib/format'
 import { Button } from './ui/Button'
+import { SettingsRow } from './ui/SettingsSection'
 import { StatusBadge, type StatusTone } from './ui/StatusBadge'
 import { Skeleton } from './ui/Skeleton'
 
@@ -76,18 +86,23 @@ function standingBadge(standing: 'active' | 'suspended' | 'revoked' | 'unknown')
   return { label: 'Unknown', tone: 'neutral' }
 }
 
-/** The row's shared geometry — the divided-row padding the card's rows align on. */
-const ROW_CLASS = 'px-4 py-4 md:px-6 md:py-5'
+/** The row's one-line description, in every state that has one. */
+const DESCRIPTION =
+  'A signed record that this agent was issued by Haven, bound to this wallet, and revocable at any time.'
 
 export default function AgentPassportCard({ agentId, agentRevoked = false }: Props) {
   const { passport, standing, loading, loadError, issuing, issueError, issuePassport, refetch } = useAgentPassport(agentId)
 
   if (loading && !passport && !standing) {
     return (
-      <div data-testid="agent-passport-row" className={ROW_CLASS} role="status" aria-label="Loading passport status">
-        <Skeleton variant="text" className="h-5 w-32" />
-        <Skeleton className="mt-3 h-16 rounded-lg" />
-      </div>
+      <SettingsRow
+        data-testid="agent-passport-row"
+        role="status"
+        aria-label="Loading passport status"
+        label="Agent Passport"
+        detail={<Skeleton variant="text" className="h-4 w-64" />}
+        action={<Skeleton variant="text" className="h-5 w-20" />}
+      />
     )
   }
 
@@ -96,10 +111,11 @@ export default function AgentPassportCard({ agentId, agentRevoked = false }: Pro
   // offer a retry.
   if (loadError && !passport && !standing) {
     return (
-      <div data-testid="agent-passport-row" className={ROW_CLASS}>
-        <h3 className="text-base font-semibold text-[var(--v2-ink)]">Agent Passport</h3>
-        <p className="mt-2 text-sm text-[var(--v2-ink-muted)]">
-          Couldn&apos;t load passport status.{' '}
+      <SettingsRow
+        data-testid="agent-passport-row"
+        label="Agent Passport"
+        detail="Couldn't load passport status."
+        action={
           <button
             type="button"
             className="rounded-sm font-medium text-[var(--v2-brand)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
@@ -107,8 +123,8 @@ export default function AgentPassportCard({ agentId, agentRevoked = false }: Pro
           >
             Try again
           </button>
-        </p>
-      </div>
+        }
+      />
     )
   }
 
@@ -120,101 +136,104 @@ export default function AgentPassportCard({ agentId, agentRevoked = false }: Pro
     passport?.tx_hash ? getExplorerUrlOrNull(passport.chain_id, 'tx', passport.tx_hash) : null
 
   return (
-    <div data-testid="agent-passport-row" className={ROW_CLASS}>
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h3 className="text-base font-semibold text-[var(--v2-ink)]">Agent Passport</h3>
-          <p className="mt-0.5 text-sm text-[var(--v2-ink-muted)]">
-            A signed record that this agent was issued by Haven, bound to this wallet, and
-            revocable at any time.
-          </p>
-        </div>
-        <StatusBadge tone={headline.tone} className="shrink-0">
-          {headline.label}
-        </StatusBadge>
-      </div>
-
-      {passport ? (
-        <div className="mt-4">
-          <dl className="grid gap-3 text-sm sm:grid-cols-2">
-            {standing ? (
-              <div>
-                <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Standing</dt>
-                <dd className="mt-1">
-                  <StatusBadge tone={standingBadge(standing.standing).tone}>
-                    {standingBadge(standing.standing).label}
-                  </StatusBadge>
-                </dd>
-              </div>
-            ) : null}
-            <div>
-              <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Assurance level</dt>
-              <dd className="mt-1 font-medium text-[var(--v2-ink)]">L{passport.assurance_level} · Governance</dd>
-            </div>
-            <div>
-              <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Requested</dt>
-              <dd className="mt-1 font-medium text-[var(--v2-ink)]">{timeAgo(passport.requested_at)}</dd>
-            </div>
-            {explorerHref ? (
-              <div>
-                <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Attestation</dt>
-                <dd className="mt-1">
-                  <a
-                    href={explorerHref}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="rounded-sm font-medium text-[var(--v2-brand)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
-                  >
-                    View transaction
-                  </a>
-                  {/* The caveat has to travel WITH the link. The note below
-                      explains the whole state, but a reader who clicks
-                      straight from the grid lands on an explorer showing the
-                      retired key with no on-page context. */}
-                  {standing?.anchor === 're_anchoring' ? (
-                    <span className="block text-xs text-[var(--v2-ink-3)]">Names the previous key</span>
+    <SettingsRow
+      data-testid="agent-passport-row"
+      label={
+        <span className="flex flex-wrap items-center gap-2">
+          Agent Passport
+          <StatusBadge tone={headline.tone} className="shrink-0">
+            {headline.label}
+          </StatusBadge>
+        </span>
+      }
+      detail={
+        passport
+          ? DESCRIPTION
+          : 'This agent has no passport. Issuing one is optional and does not change what it can spend.'
+      }
+      action={
+        passport || agentRevoked ? undefined : (
+          <Button size="sm" variant="ghost" onClick={() => void issuePassport()} disabled={issuing}>
+            {issuing ? 'Issuing…' : 'Issue a passport'}
+          </Button>
+        )
+      }
+      below={
+        passport || issueError ? (
+          <>
+            {passport ? (
+              <div className="px-6 pb-4">
+                <dl className="grid gap-3 text-sm sm:grid-cols-2">
+                  {standing ? (
+                    <div>
+                      <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Standing</dt>
+                      <dd className="mt-1">
+                        <StatusBadge tone={standingBadge(standing.standing).tone}>
+                          {standingBadge(standing.standing).label}
+                        </StatusBadge>
+                      </dd>
+                    </div>
                   ) : null}
-                </dd>
+                  <div>
+                    <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Assurance level</dt>
+                    <dd className="mt-1 font-medium text-[var(--v2-ink)]">L{passport.assurance_level} · Governance</dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Requested</dt>
+                    <dd className="mt-1 font-medium text-[var(--v2-ink)]">{timeAgo(passport.requested_at)}</dd>
+                  </div>
+                  {explorerHref ? (
+                    <div>
+                      <dt className="text-xs font-medium text-[var(--v2-ink-3)]">Attestation</dt>
+                      <dd className="mt-1">
+                        <a
+                          href={explorerHref}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="rounded-sm font-medium text-[var(--v2-brand)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
+                        >
+                          View transaction
+                        </a>
+                        {/* The caveat has to travel WITH the link. The note below
+                            explains the whole state, but a reader who clicks
+                            straight from the grid lands on an explorer showing the
+                            retired key with no on-page context. */}
+                        {standing?.anchor === 're_anchoring' ? (
+                          <span className="block text-xs text-[var(--v2-ink-3)]">Names the previous key</span>
+                        ) : null}
+                      </dd>
+                    </div>
+                  ) : null}
+                </dl>
+                {passport.status === 'failed' && passport.last_error ? (
+                  <p className="mt-3 text-xs text-[var(--v2-danger)]">{passport.last_error}</p>
+                ) : null}
+                {/* An `else if`, not a second `if`. The two notes contradict each
+                    other outright — "treat the agent as revoked now" against "the
+                    agent stays active the whole time" — so rendering both would be
+                    worse than rendering neither. The backend makes them mutually
+                    exclusive (`chainLagging` requires standing `revoked`;
+                    `re_anchoring` is only ever produced for a live agent), and this
+                    encodes that rather than depending on it holding forever. */}
+                {standing?.chainLagging ? (
+                  <p className="mt-3 text-xs text-[var(--v2-ink-3)]">
+                    Revoked in Haven; the on-chain record has not caught up yet. Treat the agent as
+                    revoked now.
+                  </p>
+                ) : standing?.anchor === 're_anchoring' ? (
+                  <p className="mt-3 text-xs text-[var(--v2-ink-3)]">
+                    This agent&apos;s signing key was replaced. The on-chain record still names the old
+                    key until it is reissued. The agent stays active the whole time.
+                  </p>
+                ) : null}
               </div>
             ) : null}
-          </dl>
-          {passport.status === 'failed' && passport.last_error ? (
-            <p className="mt-3 text-xs text-[var(--v2-danger)]">{passport.last_error}</p>
-          ) : null}
-          {/* An `else if`, not a second `if`. The two notes contradict each
-              other outright — "treat the agent as revoked now" against "the
-              agent stays active the whole time" — so rendering both would be
-              worse than rendering neither. The backend makes them mutually
-              exclusive (`chainLagging` requires standing `revoked`;
-              `re_anchoring` is only ever produced for a live agent), and this
-              encodes that rather than depending on it holding forever. */}
-          {standing?.chainLagging ? (
-            <p className="mt-3 text-xs text-[var(--v2-ink-3)]">
-              Revoked in Haven; the on-chain record has not caught up yet. Treat the agent as
-              revoked now.
-            </p>
-          ) : standing?.anchor === 're_anchoring' ? (
-            <p className="mt-3 text-xs text-[var(--v2-ink-3)]">
-              This agent&apos;s signing key was replaced. The on-chain record still names the old
-              key until it is reissued. The agent stays active the whole time.
-            </p>
-          ) : null}
-        </div>
-      ) : (
-        <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-sm text-[var(--v2-ink-2)]">
-            This agent has no passport. Issuing one is optional and does not change what it can
-            spend.
-          </p>
-          {!agentRevoked ? (
-            <Button size="sm" variant="ghost" onClick={() => void issuePassport()} disabled={issuing}>
-              {issuing ? 'Issuing…' : 'Issue a passport'}
-            </Button>
-          ) : null}
-        </div>
-      )}
-
-      {issueError ? <p className="mt-3 text-xs text-[var(--v2-danger)]">{issueError}</p> : null}
-    </div>
+            {issueError ? (
+              <p className="px-6 pb-4 text-xs text-[var(--v2-danger)]">{issueError}</p>
+            ) : null}
+          </>
+        ) : undefined
+      }
+    />
   )
 }

@@ -215,7 +215,25 @@ describe('/for-agents.md (#2523)', () => {
     // prints the delegation hash `haven budget revoke` needs, instead of
     // `haven agents show <agentId>`, which prints none (+9 bytes). Nothing
     // unrelated was trimmed to fit.
-    expect(Buffer.byteLength(served, 'utf8')).toBeLessThan(11800)
+    //
+    // 11800 -> 12000 for #4350 (2026-10-23; the page is 11942 bytes at this
+    // commit, 11703 before it): the "What Haven is" paragraph names the
+    // owner-chosen end date — 30/90/180/365 days, on-chain, renewal a new
+    // approval (+239 bytes). Nothing unrelated was trimmed to fit.
+    //
+    // 12000 -> 12200 for #4355 (2026-10-23; the page is 12102 bytes at this
+    // commit, 11942 before it): the "How to verify" `needs_approval` bullet
+    // stops saying "nobody approved yet" for an agent whose budget is merely
+    // spent for the period — it names both causes (no rows vs spent rows) and
+    // `budgetRefillsAt` (+160 bytes, after cutting the first draft by ~110).
+    // Nothing unrelated was trimmed to fit.
+    //
+    // 12200 -> 12400 for #4352 (2026-10-23; the page is 12264 bytes at this
+    // commit, 12102 before it): the same bullet now names THREE causes —
+    // `budgetEndedAt` set (the budget ended; waiting will not help), no rows
+    // without it (nobody approved), spent rows (`budgetRefillsAt`) —
+    // +162 bytes. Nothing unrelated was trimmed to fit.
+    expect(Buffer.byteLength(served, 'utf8')).toBeLessThan(12400)
   })
 
   it('treats chains.default as expected only and confirms funding after login', () => {

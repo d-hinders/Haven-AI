@@ -3,7 +3,7 @@
  * written to the URL next to the page's `tab` through the list-controls
  * codec, the standard `ListToolbar` (with the Account facet absent — the
  * page fixes the account), the standard count and no-match copy, paging
- * through "Show N more" below the card (#4196), the row-to-panel open by mouse and keyboard, the
+ * through "Show N more" as the card's footer row (#4196), the row-to-panel open by mouse and keyboard, the
  * truncated-history honesty, and the CSV export carrying the fixed account
  * plus the active filters.
  *
@@ -57,8 +57,8 @@ vi.mock('@/lib/api', async () => {
   }
 })
 
-vi.mock('@/lib/transaction-csv', async () => {
-  const actual = await vi.importActual<typeof import('@/lib/transaction-csv')>('@/lib/transaction-csv')
+vi.mock('@/lib/csv-export', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/csv-export')>('@/lib/csv-export')
   return { ...actual, downloadCsv: (...a: unknown[]) => mockDownloadCsv(...a) }
 })
 
@@ -489,7 +489,7 @@ describe('AccountActivityTab — rows and the detail panel (#4098)', () => {
     expect(screen.getByTestId('detail-panel')).toHaveTextContent('panel:0xdef')
   })
 
-  it('pages with "Show N more" below the list card, N being what the next page adds (#4196)', () => {
+  it('pages with "Show N more" inside the list card, N being what the next page adds (#4196)', () => {
     const loadMore = vi.fn()
     feedMock.mockImplementation(() => ({
       ...DEFAULT_FEED,
@@ -502,10 +502,10 @@ describe('AccountActivityTab — rows and the detail panel (#4098)', () => {
 
     // 2 loaded of 5: the next page adds 3.
     const button = screen.getByRole('button', { name: 'Show 3 more' })
-    // Outside the card: the card ends with its last row.
+    // Inside the card: the footer row is the card's last child (#4495).
     const card = ledgerRows()[0].closest('.shadow-card')
     expect(card).not.toBeNull()
-    expect(card).not.toContainElement(button)
+    expect(card).toContainElement(button)
     fireEvent.click(button)
     expect(loadMore).toHaveBeenCalledTimes(1)
   })
@@ -529,7 +529,7 @@ describe('AccountActivityTab — rows and the detail panel (#4098)', () => {
     expect(screen.getByText(/Money out/)).toBeInTheDocument()
   })
 
-  it('draws the totals on the left of the list summary line, the count on the right (#4196)', () => {
+  it('draws the count on the left of the list summary line, the totals on the right (#4196, #4473)', () => {
     renderTab()
 
     const line = screen.getByTestId('list-summary')
@@ -542,8 +542,8 @@ describe('AccountActivityTab — rows and the detail panel (#4098)', () => {
     expect(within(moneyOut).getByText('Money out')).toHaveClass('sr-only')
     // The sr-only name comes before the figure it names.
     expect(moneyIn.textContent).toMatch(/^InMoney in \$/)
-    expect(line.firstElementChild).toContainElement(within(line).getByTestId('activity-totals'))
-    expect(line.lastElementChild).toBe(screen.getByTestId('list-toolbar-count'))
+    expect(line.firstElementChild).toBe(screen.getByTestId('list-toolbar-count'))
+    expect(line.lastElementChild).toContainElement(within(line).getByTestId('activity-totals'))
     expect(within(screen.getByTestId('list-summary')).getByTestId('list-toolbar-count')).toHaveTextContent('2 transactions')
     // Unfiltered: the toolbar draws no status row.
     expect(screen.queryByTestId('list-toolbar-status')).not.toBeInTheDocument()
@@ -624,6 +624,37 @@ describe('AccountActivityTab — the facet set (#4130)', () => {
     renderTab()
 
     expect(screen.queryByRole('button', { name: /^Network:/ })).not.toBeInTheDocument()
+  })
+
+  it('names a revoked agent in `meta`, never in the label, and the chip reads the status through it (#4453)', () => {
+    filtersMock.mockImplementation(() => ({
+      ...DEFAULT_FILTERS,
+      agents: [
+        { id: 'agent-active', name: 'Research agent', status: 'active' },
+        { id: 'agent-revoked', name: 'Data-feed agent', status: 'revoked' },
+      ] as never,
+    }))
+    renderTab()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Initiator: All' }))
+    // The revoked agent is not gone — it sits behind the inactive group's
+    // disclosure row, which names the count.
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Show 1 inactive' }))
+
+    const row = screen.getByRole('menuitemradio', { name: /Data-feed agent/ })
+    // The label is the name alone. "Data-feed agent (Revoked)" was this page's
+    // own invention, and it lost the status to truncation.
+    expect(row).toHaveTextContent('Data-feed agent')
+    expect(row).not.toHaveTextContent('(Revoked)')
+    // The status is the option's `meta` slot, which never truncates.
+    expect(row).toHaveTextContent('Revoked')
+
+    fireEvent.click(row)
+    // The chip spells the applied filter out in full, status included — the
+    // chip is where a filter is named, so it passes `includeMeta`.
+    expect(
+      screen.getByRole('button', { name: 'Remove Initiator: Data-feed agent (Revoked)' }),
+    ).toBeInTheDocument()
   })
 
   it('#4166: the row leads with who was paid and carries the agent as the subtitle — no "Agent payment by", no movement line', () => {
@@ -713,6 +744,11 @@ describe('AccountActivityTab — CSV export (#4098)', () => {
     expect(mockGetText).toHaveBeenCalledWith(expect.stringContaining('accountId=safe-1'))
     // The API's own spelling: the URL writes `q`, the backend reads `search`.
     expect(mockGetText).toHaveBeenCalledWith(expect.stringContaining('search=coffee'))
+    // The page owns the prefix; the UTC stamp is the shared helper's.
+    expect(mockDownloadCsv).toHaveBeenCalledWith(
+      '﻿hash\r\n"0xabc"',
+      expect.stringMatching(/^haven-transactions-\d{8}\.csv$/),
+    )
   })
 
   it('stays disabled while the server says there is nothing to export', () => {

@@ -320,14 +320,17 @@ describe('ListToolbar — facets, chips and count', () => {
     expect(summaryCount()).toHaveTextContent('2 of 3 agents')
   })
 
-  it('the summary slot draws the page totals on the left of the count; without it the count stands alone (#4196)', () => {
+  it('the summary slot draws the page totals on the right of the count; without it the count stands alone (#4196, #4473)', () => {
     const { rerender } = render(
       <ListToolbar noun={noun} state={EMPTY} onChange={() => {}} filtering="server" count={{ shown: 3, total: 3 }} summary={<span>Money in $10.00</span>} />,
     )
     const line = screen.getByTestId('list-summary')
-    expect(line.textContent).toBe('Money in $10.003 agents')
-    expect(line.firstElementChild).toHaveTextContent('Money in $10.00')
-    expect(line.lastElementChild).toBe(screen.getByTestId('list-toolbar-count'))
+    expect(line.textContent).toBe('3 agentsMoney in $10.00')
+    expect(line.firstElementChild).toBe(screen.getByTestId('list-toolbar-count'))
+    expect(line.lastElementChild).toHaveTextContent('Money in $10.00')
+    // The totals take the right edge; the count no longer claims it.
+    expect(line.lastElementChild).toHaveClass('ml-auto', 'text-right')
+    expect(screen.getByTestId('list-toolbar-count')).not.toHaveClass('ml-auto')
     rerender(<ListToolbar noun={noun} state={EMPTY} onChange={() => {}} filtering="server" count={{ shown: 3, total: 3 }} />)
     expect(screen.getByTestId('list-summary').children).toHaveLength(1)
     expect(screen.getByTestId('list-summary').textContent).toBe('3 agents')
@@ -621,6 +624,214 @@ describe('ListToolbar — phone sheet', () => {
   })
 })
 
+describe('ListToolbar — a collapsed option group in the phone sheet (#4452)', () => {
+  const GROUPED_FACETS: ListFacet[] = [
+    {
+      id: 'status',
+      label: 'Status',
+      selection: 'multi',
+      options: [
+        { value: 'active', label: 'Active', count: 2 },
+        { value: 'paused', label: 'Paused', count: 1 },
+        { value: 'inactive', label: 'Inactive', meta: 'Revoked', count: 14, group: { id: 'inactive', label: 'inactive' } },
+        { value: 'archived', label: 'Archived', count: 3, group: { id: 'inactive', label: 'inactive' } },
+      ],
+    },
+  ]
+  const GROUPED_EMPTY: ListState = { q: '', facets: { status: [] }, period: {} }
+
+  function renderSheet(initial: ListState = GROUPED_EMPTY) {
+    return render(
+      <ListToolbar
+        noun={noun}
+        state={initial}
+        onChange={() => {}}
+        filtering="browser"
+        facets={GROUPED_FACETS}
+        layout="phone"
+        count={{ shown: 3, total: 3 }}
+      />,
+    )
+  }
+
+  it('hides the group behind a Tab-reachable disclosure button with aria-expanded', async () => {
+    const user = userEvent.setup()
+    renderSheet()
+    await user.click(screen.getByRole('button', { name: 'Filters' }))
+    const sheet = screen.getByRole('dialog', { name: 'Filters' })
+
+    const toggle = within(sheet).getByRole('button', { name: 'Show 2 inactive' })
+    expect(toggle.tagName).toBe('BUTTON')
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    expect(toggle).not.toHaveAttribute('aria-disabled')
+    expect(within(sheet).getByRole('checkbox', { name: /^Active/ })).toBeInTheDocument()
+    expect(within(sheet).queryByRole('checkbox', { name: /^Inactive/ })).not.toBeInTheDocument()
+
+    // The sheet is not a menu: the disclosure is reached by Tab, not arrows.
+    // The focus trap moves focus in on the next frame; let it settle first.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    })
+    within(sheet).getByRole('checkbox', { name: /^Paused/ }).focus()
+    await user.tab()
+    expect(toggle).toHaveFocus()
+
+    await user.click(toggle)
+    // The text carries the state now (#4512): open reads "Hide".
+    expect(within(sheet).getByRole('button', { name: 'Hide 2 inactive' })).toHaveAttribute('aria-expanded', 'true')
+    expect(within(sheet).getByRole('checkbox', { name: /^Inactive/ })).toBeInTheDocument()
+    expect(within(sheet).getByRole('checkbox', { name: /^Archived/ })).toBeInTheDocument()
+  })
+
+  it('opens the group holding the selected value, and the chip still names it with its meta', async () => {
+    const user = userEvent.setup()
+    renderSheet({ ...GROUPED_EMPTY, facets: { status: ['inactive'] } })
+
+    // The chip is unchanged by grouping: it spells the filter out in full.
+    expect(screen.getByText('Status: Inactive (Revoked)')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Filters (1)' }))
+    const sheet = screen.getByRole('dialog', { name: 'Filters' })
+    // Locked (#4512): open because it holds the selection, so it names no
+    // action — and it is `aria-disabled`, never `disabled`.
+    const locked = within(sheet).getByRole('button', { name: '2 inactive' })
+    expect(locked).toHaveAttribute('aria-expanded', 'true')
+    expect(locked).toHaveAttribute('aria-disabled', 'true')
+    expect(locked).not.toHaveAttribute('disabled')
+    expect(locked).not.toBeDisabled()
+    expect(within(sheet).getByRole('checkbox', { name: /^Inactive/ })).toBeChecked()
+  })
+
+  it('the locked toggle stays in the Tab order and clicking it does not collapse the group (#4512)', async () => {
+    const user = userEvent.setup()
+    renderSheet({ ...GROUPED_EMPTY, facets: { status: ['inactive'] } })
+    await user.click(screen.getByRole('button', { name: 'Filters (1)' }))
+    const sheet = screen.getByRole('dialog', { name: 'Filters' })
+    const locked = within(sheet).getByRole('button', { name: '2 inactive' })
+
+    // A native `disabled` would take the row out of the Tab order.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    })
+    within(sheet).getByRole('checkbox', { name: /^Paused/ }).focus()
+    await user.tab()
+    expect(locked).toHaveFocus()
+
+    await user.click(locked)
+    expect(within(sheet).getByRole('button', { name: '2 inactive' })).toHaveAttribute('aria-expanded', 'true')
+    expect(within(sheet).getByRole('checkbox', { name: /^Inactive/ })).toBeInTheDocument()
+  })
+})
+
+describe('ListToolbar — expanding a group scrolls the revealed rows into view (#4512)', () => {
+  const GROUPED_FACETS: ListFacet[] = [
+    {
+      id: 'status',
+      label: 'Status',
+      selection: 'multi',
+      options: [
+        { value: 'active', label: 'Active', count: 2 },
+        { value: 'paused', label: 'Paused', count: 1 },
+        { value: 'inactive', label: 'Inactive', count: 14, group: { id: 'inactive', label: 'inactive' } },
+        { value: 'archived', label: 'Archived', count: 3, group: { id: 'inactive', label: 'inactive' } },
+      ],
+    },
+  ]
+  const GROUPED_EMPTY: ListState = { q: '', facets: { status: [] }, period: {} }
+
+  function renderSheet(initial: ListState = GROUPED_EMPTY) {
+    return render(
+      <ListToolbar
+        noun={noun}
+        state={initial}
+        onChange={() => {}}
+        filtering="browser"
+        facets={GROUPED_FACETS}
+        layout="phone"
+        count={{ shown: 3, total: 3 }}
+      />,
+    )
+  }
+
+  // jsdom has no `scrollIntoView` and `src/__tests__/setup.ts` does not stub
+  // it, so each test that asserts the scroll installs its own stub and
+  // restores it here — never a never-restored assignment.
+  const original = HTMLElement.prototype.scrollIntoView
+  afterEach(() => {
+    if (original) HTMLElement.prototype.scrollIntoView = original
+    else delete (HTMLElement.prototype as Partial<HTMLElement>).scrollIntoView
+  })
+
+  function stubScroll() {
+    const targets: HTMLElement[] = []
+    const spy = vi.fn(function (this: HTMLElement) {
+      targets.push(this)
+    })
+    HTMLElement.prototype.scrollIntoView = spy
+    return { spy, targets }
+  }
+
+  it('expanding calls it once, on the first revealed row, and focus stays on the toggle', async () => {
+    const user = userEvent.setup()
+    const { spy, targets } = stubScroll()
+    renderSheet()
+    await user.click(screen.getByRole('button', { name: 'Filters' }))
+    const sheet = screen.getByRole('dialog', { name: 'Filters' })
+    // The focus trap moves focus in on the next frame; let it settle before
+    // the click, so the assertion below is about the toggle and not the trap.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    })
+    const toggle = within(sheet).getByRole('button', { name: 'Show 2 inactive' })
+    await user.click(toggle)
+
+    expect(spy).toHaveBeenCalledTimes(1)
+    expect(spy).toHaveBeenCalledWith({ block: 'nearest' })
+    // The first revealed row is the toggle's next element sibling: the
+    // Inactive label.
+    expect(targets).toHaveLength(1)
+    expect(targets[0].tagName).toBe('LABEL')
+    expect(targets[0]).toHaveTextContent('Inactive')
+    expect(within(sheet).getByRole('button', { name: 'Hide 2 inactive' })).toHaveFocus()
+  })
+
+  it('collapsing does not call it', async () => {
+    const user = userEvent.setup()
+    const { spy } = stubScroll()
+    renderSheet()
+    await user.click(screen.getByRole('button', { name: 'Filters' }))
+    const sheet = screen.getByRole('dialog', { name: 'Filters' })
+    await user.click(within(sheet).getByRole('button', { name: 'Show 2 inactive' }))
+    spy.mockClear()
+
+    await user.click(within(sheet).getByRole('button', { name: 'Hide 2 inactive' }))
+    expect(within(sheet).getByRole('button', { name: 'Show 2 inactive' })).toHaveAttribute('aria-expanded', 'false')
+    expect(spy).not.toHaveBeenCalled()
+  })
+
+  it('clicking the locked toggle does not call it', async () => {
+    const user = userEvent.setup()
+    const { spy } = stubScroll()
+    renderSheet({ ...GROUPED_EMPTY, facets: { status: ['inactive'] } })
+    await user.click(screen.getByRole('button', { name: 'Filters (1)' }))
+    const sheet = screen.getByRole('dialog', { name: 'Filters' })
+    spy.mockClear()
+
+    await user.click(within(sheet).getByRole('button', { name: '2 inactive' }))
+    expect(spy).not.toHaveBeenCalled()
+  })
+
+  it('opening the sheet with a selection-holding group does not call it', async () => {
+    const user = userEvent.setup()
+    const { spy } = stubScroll()
+    renderSheet({ ...GROUPED_EMPTY, facets: { status: ['inactive'] } })
+    await user.click(screen.getByRole('button', { name: 'Filters (1)' }))
+    const sheet = screen.getByRole('dialog', { name: 'Filters' })
+    expect(within(sheet).getByRole('button', { name: '2 inactive' })).toHaveAttribute('aria-expanded', 'true')
+    expect(spy).not.toHaveBeenCalled()
+  })
+})
+
 describe('ListToolbar — long labels and the meta slot (#4150)', () => {
   const LONG = 'Lovable Dev preview deployment helper'
   const META_FACETS: ListFacet[] = [
@@ -736,5 +947,27 @@ describe('ListShowMore (#4196)', () => {
   it('renders nothing once every page is loaded', () => {
     const { container } = renderMore({ loaded: 49, total: 49, hasMore: false })
     expect(container).toBeEmptyDOMElement()
+  })
+
+  // #4495: the positive shape, not just the absence of the old one. Red on the
+  // pre-#4495 markup (a `mt-4` wrapper around a ghost `Button`) and red on an
+  // edit that only drops `mt-4` — the hairline, the ink-2 text and the inset
+  // ring are what the owner's mockup asks for.
+  it('is an in-card footer row: hairline above, centred ink-2 text, inset ring (#4495)', () => {
+    renderMore()
+    const button = screen.getByTestId('list-show-more')
+    // The hairline is the `Card.Section divided` wrapper's. The testid sits on
+    // the row's button because `Card.Section` takes no test hook and
+    // `packages/ui` is outside this issue's scope.
+    const row = button.parentElement
+    expect(row).not.toBeNull()
+    expect(row!.className).toContain('border-t')
+    expect(button.className).toContain('text-[var(--v2-ink-2)]')
+    expect(button.className).toContain('focus-visible:ring-inset')
+    // The row itself is 44px tall, not just its hit area.
+    expect(button.className).toContain('min-h-11')
+    // The ghost Button's chrome and the gap below the card are gone.
+    expect(button.className).not.toContain('border-[var(--v2-border-strong)]')
+    expect(button.className).not.toContain('mt-4')
   })
 })

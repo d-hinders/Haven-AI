@@ -4,7 +4,7 @@ status: current
 covers:
   - .agents/skills/ship-next/SKILL.md
   - .github/labels.yml
-last-verified: "2026-09-08"
+last-verified: "2026-10-24"
 ---
 
 # Ship-next playbooks
@@ -71,3 +71,11 @@ Surface routing and all five playbook files are live and complete
 cross-surface closeout — the Captain Self-Check Preflight before review, the
 standard doc-accuracy step, and a PR body filled from the template — is wired in.
 New checks land **advisory** first, then graduate to blocking once trusted.
+
+Re-verified 2026-10-24 (#4372 part D, at dev `f590d946c`): read end to end,
+nothing changed. Checked: the five playbook files exist; `ship-next`'s
+*Prepare* section routes `area:frontend`, `area:backend`, `area:sdk`/`area:mcp`,
+`area:docs` and `money-path` to them; `.github/workflows/labeler.yml` runs
+`actions/labeler` with `sync-labels: false`; `.github/labels.yml` and its sync
+workflow exist; `.github/CODEOWNERS`' single-star migrations pattern does not
+reach `__tests__/`; #651, #1024 and #1025 are closed.

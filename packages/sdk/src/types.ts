@@ -762,6 +762,14 @@ export interface HavenAllowance {
    */
   fundsCoverRemaining: boolean | null
   /**
+   * #4355: when THIS budget next refills — the end of its current period
+   * (ISO 8601), or its start for a budget not yet started. `null` when it
+   * never refills again (it ends first), and on a backend that predates the
+   * field. With a remaining of 0 it says the budget is spent for this period
+   * and when it comes back — not that nobody approved one.
+   */
+  nextRefillAt: string | null
+  /**
    * #3518: this budget's SCOPE, so an agent holding more than one budget
    * for a token can name the merchant-locked one before paying. The
    * recipient pin is null for an open budget; `merchantId` is set only on a
@@ -816,6 +824,14 @@ export interface HavenAllowanceSummary {
   delegateAddress: string
   chainId: number
   allowances: HavenAllowance[]
+  /**
+   * #4352 (additive, decision 5): when the agent's only budgets for this
+   * chain have ENDED, the latest ended budget's expiry (ISO 8601) — read by
+   * the same narrow expired-row query the refusal answers use. `null` when no
+   * expired row exists; the field NEVER reports a live budget. `null` on a
+   * backend that predates the field.
+   */
+  budgetEndedAt: string | null
   /** #3772: see {@link HavenAgent.supersededBy}. */
   supersededBy: HavenAgentSupersession | null
 }
@@ -1032,6 +1048,8 @@ export interface HavenAgentAllowanceSummary {
    * read: any non-boolean wire value maps to `null`, never `undefined`.
    */
   fundsCoverRemaining: boolean | null
+  /** #4355: the {@link HavenAllowance.nextRefillAt} projection. */
+  nextRefillAt: string | null
 }
 
 /**
@@ -1056,6 +1074,27 @@ export interface HavenAgentSummary extends HavenAgent {
    * renders from `HAVEN_CONNECTOR_CHANNEL` — see `connector-channel.ts`).
    */
   spend_authority_readiness: HavenAgentReadiness
+  /**
+   * #4355 (additive; the readiness values are unchanged — #4349 decision 5):
+   * set only when readiness is `needs_approval` BECAUSE every live budget is
+   * spent for its period — `allowances[]` has rows, all at remaining 0. It is
+   * the earliest {@link HavenAgentAllowanceSummary.nextRefillAt} among them:
+   * wait until then, or ask the owner to raise the budget. `null` otherwise:
+   * ready, revoked, no budget approved (`allowances[]` empty), or a spent
+   * budget that ends before it would refill.
+   */
+  budgetRefillsAt: string | null
+  /**
+   * #4352 (additive; the readiness values are unchanged — #4349 decision 5):
+   * set only when readiness is `needs_approval` BECAUSE the agent's only
+   * budget(s) have ENDED — `allowances[]` is empty and the server's
+   * expired-row read found one. The ended budget's expiry (ISO 8601): waiting
+   * will not help; ask the owner to set a new one. `null` otherwise — ready,
+   * revoked, no budget approved at all, live rows present (whether spendable
+   * or all spent — the latter is {@link HavenAgentSummary.budgetRefillsAt}'s
+   * case), or a backend that predates the field.
+   */
+  budgetEndedAt: string | null
   allowances: HavenAgentAllowanceSummary[]
   /**
    * #3329: open, unexpired task budgets — a derived VIEW, same discipline as
@@ -1520,6 +1559,23 @@ export interface HavenPaymentReceipt {
   paymentIntentId?: string | null
   approvalRequestId?: string | null
   /**
+   * #4469: which settlement branch moved the money (`eip3009` | `erc7710`),
+   * from the intent (#946). The receipts wire declares this as raw text with
+   * no enum (`packages/backend/src/openapi/spec.ts`), so it is typed
+   * `string | null` here rather than narrowed: a value this SDK does not know
+   * is still the backend's record, and narrowing it to `null` would erase it.
+   * Absent on an older backend; `null` when the backend states no scheme
+   * (legacy-rail receipts).
+   */
+  settlementScheme?: string | null
+  /**
+   * #4469: the budget delegation that METERED this payment (#3518), uniform
+   * across schemes. `string | null` on receipts — the backend sends
+   * `?? null` — unlike {@link PaymentStatusResult.budgetDelegationHash}, which
+   * is `string` and absent when unknown. Absent on an older backend.
+   */
+  budgetDelegationHash?: string | null
+  /**
    * #3134: the payment protocol this receipt settled on — one of the
    * evidence-eligible rails (`x402`, `mpp_demo`, `mpp_crypto`, `spt`) — under the
    * name the transactions feed uses for the same concept. Distinct from
@@ -1594,6 +1650,23 @@ export interface HavenPaymentReceipt {
    */
   protocolReceiptPayload?: Record<string, unknown> | null
   merchantStatus: number | null
+  /**
+   * #4469: the paying agent's own delivery verdict (#3770), when it reported
+   * one — `ok` | `unusable` | `partial`. Evidence only: it never gates
+   * anything and the payment itself is unchanged. Absent on an older backend;
+   * `null` when the backend states "not reported".
+   */
+  deliveryQuality?: 'ok' | 'unusable' | 'partial' | null
+  /** #4469: the agent's optional note (max 2000 chars) saying what was wrong. Absent on an older backend. */
+  deliveryNote?: string | null
+  /** #4469: when the agent reported the verdict (ISO 8601). Absent on an older backend. */
+  deliveryReportedAt?: string | null
+  /**
+   * #4469: the NON-SECRET pointer to a delivered good (#3778) — merchant,
+   * product, value, order id. Never a redemption code or other credential:
+   * those are refused at write. Absent on an older backend.
+   */
+  deliveryReference?: string | null
   confirmedAt: string | null
   createdAt: string
   updatedAt: string
@@ -2050,6 +2123,18 @@ export const AgentPaymentWarningCode = {
    * remains the actual gate either way.
    */
   QuoteExceedsRemainingBudget: 'QUOTE_EXCEEDS_REMAINING_BUDGET',
+  /**
+   * #4458: the agent's only budget for the token has ENDED — the quote-time
+   * pre-check answered the typed 403 `delegation_expired`, not an over-budget
+   * compare. Travels beside `budget_check.sufficient: false` and, on
+   * `haven_quote_x402`, `safe_to_continue: false` with no prefilled cap. The
+   * remedy is the owner setting a NEW budget: waiting for a period to reset
+   * cannot help, which is why this is its own code rather than
+   * {@link AgentPaymentWarningCode.QuoteExceedsRemainingBudget}. Additive: an
+   * older backend never emits it, and the on-chain policy remains the actual
+   * gate either way.
+   */
+  QuoteBudgetEnded: 'QUOTE_BUDGET_ENDED',
   /**
    * #3967: the MERCHANT reported a denial on one of its x402 payment options —
    * a known denial key (starting with `issuanceDenied`) in `accepts[].extra`.
@@ -2592,6 +2677,8 @@ export interface RawHavenAllowance {
    * the mapping turns any non-boolean into `null`.
    */
   funds_cover_remaining?: boolean | null
+  /** #4355: see {@link HavenAllowance.nextRefillAt}; absent on an older backend. */
+  next_refill_at?: string | null
   onchain: {
     amount: string
     spent: string
@@ -2615,6 +2702,8 @@ export interface RawHavenAllowanceSummary {
   allowances: RawHavenAllowance[]
   /** #3772: absent on an older backend. */
   superseded_by?: { agent_id: string; superseded_at: string } | null
+  /** #4352: see {@link HavenAllowanceSummary.budgetEndedAt}; absent on an older backend. */
+  budget_ended_at?: string | null
 }
 
 /** @internal */
@@ -2626,6 +2715,10 @@ export interface RawHavenPaymentReceipt {
   payment_intent_id?: string | null
   approval_request_id?: string | null
   rail: string
+  /** #4469: raw text with no enum on the receipts wire; absent on an older backend. */
+  settlement_scheme?: string | null
+  /** #4469: the metering budget delegation (#3518); the backend sends `?? null`. Absent on an older backend. */
+  budget_delegation_hash?: string | null
   proof_status: string
   /** @deprecated (#2998) — see `funding_tx_hash` / `settlement_tx_hash`. */
   tx_hash: string
@@ -2650,6 +2743,14 @@ export interface RawHavenPaymentReceipt {
   protocol_receipt_header_name: string | null
   protocol_receipt_payload?: Record<string, unknown> | null
   merchant_status: number | null
+  /** #4469: the agent's delivery verdict (#3770); absent on an older backend. */
+  delivery_quality?: 'ok' | 'unusable' | 'partial' | null
+  /** #4469: the agent's note on the verdict; absent on an older backend. */
+  delivery_note?: string | null
+  /** #4469: when the verdict was reported; absent on an older backend. */
+  delivery_reported_at?: string | null
+  /** #4469: the NON-SECRET delivery pointer (#3778); absent on an older backend. */
+  delivery_reference?: string | null
   confirmed_at: string | null
   created_at: string
   updated_at: string
@@ -2849,15 +2950,90 @@ export class HavenError extends Error {
   }
 }
 
+/**
+ * #4470: why a `HavenApiError` happened, where its status alone cannot say.
+ *
+ * - `no_answer` — the transport got no usable answer: the request timed out
+ *   (status 408), `fetch` threw, or the body was not JSON (status 0). Whether
+ *   the call took effect is unknown, so a `GET` may be retried and a `POST`
+ *   must not be; `method` says which it was.
+ * - `deterministic` — the SDK refused an answer it cannot use (a missing
+ *   field, the wrong shape). Repeating the same call gets the same answer,
+ *   whatever the status says.
+ *
+ * Absent on every other error, which keeps the status rule. A readonly field
+ * rather than a subclass, so `name`, `code` and `statusCode` stay what
+ * consumers already match on.
+ */
+export type HavenApiFailureCause =
+  | { readonly kind: 'no_answer'; readonly method: 'GET' | 'POST' }
+  | { readonly kind: 'deterministic' }
+
 export class HavenApiError extends HavenError {
   constructor(
     message: string,
     statusCode: number,
     public readonly body?: unknown,
     paymentId?: string,
+    public readonly failureCause?: HavenApiFailureCause,
   ) {
     super(message, 'API_ERROR', statusCode, paymentId)
     this.name = 'HavenApiError'
+  }
+
+  /**
+   * #4470: an error a retry cannot change. The census in
+   * `haven-api-error-census.test.ts` requires every literal 5xx site to use
+   * this or be allowlisted there with a reason.
+   */
+  static deterministic(message: string, statusCode: number, body?: unknown, paymentId?: string): HavenApiError {
+    return new HavenApiError(message, statusCode, body, paymentId, { kind: 'deterministic' })
+  }
+}
+
+/**
+ * #4470: the funding transaction's confirmation could not be read — ethers'
+ * `waitForTransaction` rejected (its `TIMEOUT`, or an RPC failure). Haven had
+ * already submitted the funding leg, so funds may have reached the delegate:
+ * the answer is check-status, never "tell the user it failed" and never a new
+ * payment. The merchant was not called.
+ *
+ * Deliberately carries no `failureCause`: it is not a transport non-answer
+ * (no Haven request went unanswered) and not deterministic (a later read may
+ * see the receipt). Callers answer the class itself — the hosted delivery
+ * step does in `ensureFundingConfirmedOrRefuse`; unwrapped, its 504 reads
+ * "re-call once", which re-runs the same wait.
+ */
+export class FundingConfirmationUnknownError extends HavenApiError {
+  readonly fundingErrorCode = 'funding_confirmation_unknown' as const
+  constructor(
+    public readonly txHash: string,
+    public readonly chainId: number,
+    reason: string,
+  ) {
+    super(
+      `Funding tx ${txHash} was submitted, but its on-chain confirmation could not be read (${reason}).`,
+      504,
+      { txHash, chainId },
+    )
+    this.name = 'FundingConfirmationUnknownError'
+  }
+}
+
+/**
+ * #4470: the funding transaction was mined and reverted, so nothing reached
+ * the delegate. Repeating the wait gets the same receipt.
+ */
+export class FundingRevertedError extends HavenApiError {
+  readonly fundingErrorCode = 'funding_reverted' as const
+  constructor(
+    public readonly txHash: string,
+    public readonly chainId: number,
+  ) {
+    super(`Funding tx ${txHash} reverted on-chain; nothing reached the delegate.`, 502, { txHash, chainId }, undefined, {
+      kind: 'deterministic',
+    })
+    this.name = 'FundingRevertedError'
   }
 }
 

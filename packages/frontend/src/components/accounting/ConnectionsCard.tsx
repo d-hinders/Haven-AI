@@ -16,7 +16,8 @@
  * forwards that query to `/settings` untouched, so this card is the one
  * place that reads it: `connected` opens the backfill choice, `denied` and
  * `error` become a sentence beside the card, and `reason=unsupported_currency`
- * gets its own (the supported ledger currencies, named — #2877). The query is then
+ * gets its own (the supported ledger currencies, named — #2877), as does
+ * `reason=multi_company` (#4520). The query is then
  * stripped with `router.replace` so a reload does not replay the outcome.
  *
  * "First successful connect" is inferred, not signalled: the callback does
@@ -33,29 +34,30 @@
  * re-open the dialog after "Feed from now" the moment Settings was saved.
  * `askedRef` remembers which outcome the dialog was opened for.
  *
- * Surface hierarchy: the card is a `SettingsSection` (white, grey header
- * band) whose body is a hairline-divided row list; the inline settings are
- * a padded block under their row, never a nested filled card.
+ * Surface hierarchy: the card is a `SettingsSection` (heading above the
+ * card, per the detail-page section rule) whose body is a hairline-divided
+ * row list; the inline settings are a padded block under their row, never a
+ * nested filled card.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { ArrowRight } from 'lucide-react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useT } from '@/context/LocaleContext'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
+import { Icon } from '@/components/ui/Icon'
 import { InlineAlert } from '@/components/ui/InlineAlert'
 import { Modal } from '@/components/ui/Modal'
 import { Skeleton } from '@/components/ui/Skeleton'
-import { SettingsSection } from '@/app/(authenticated)/settings/SettingsSection'
+import { SettingsSection } from '@/components/ui/SettingsSection'
 import {
   accountingRefusal,
   useAccountingConnections,
-  useAccountingProviders,
   type AccountingConnection,
   type AccountingProvider,
 } from '@/hooks/useAccounting'
-import { accountingFeedOffState, useAccountingFeed } from '@/hooks/useAccountingFeed'
-import { StatusBadge } from '@/components/ui/StatusBadge'
-import { SettingsRow } from '@/app/(authenticated)/settings/SettingsSection'
+import { accountingFeedOffState } from '@/hooks/useAccountingFeed'
+import { useBusinessData } from '@/components/settings/BusinessDataContext'
 import { BackfillDialog } from './BackfillDialog'
 import { ConnectionRow } from './ConnectionRow'
 import { ConnectionSettings } from './ConnectionSettings'
@@ -88,16 +90,26 @@ export function ConnectionsCard() {
   const copy = t.settings.accounting
   const router = useRouter()
   const searchParams = useSearchParams()
-  const { providers, loading: providersLoading, error: providersError } = useAccountingProviders()
+  // #4359: the providers and feed-status reads are hoisted into
+  // `BusinessDataProvider` (SettingsClient) so the card and the Business
+  // tab's visibility rule share them — they are called ONCE, never polled
+  // twice. The connections listing stays here: it is not part of the
+  // visibility rule and the card owns its own refetch lifecycle (#2903).
+  const {
+    providers,
+    loading: providersLoading,
+    error: providersError,
+  } = useBusinessData().providers
+  const { status: feedStatus, loading: feedLoading } = useBusinessData().feed
   // #2869: the card renders its providers in the feed's OFF state too. The
   // connection routes are not behind the feed flag, so without this read the
   // card would offer Connect on a deployment whose feed is switched off.
-  const { status: feedStatus, loading: feedLoading } = useAccountingFeed()
   const feedOff = accountingFeedOffState(feedStatus)
   // Fail CLOSED (#2869 review): with no status answer the card cannot tell a
-  // flagged-off deployment from a hosted one, and the connection routes are
-  // reachable either way until #2918 gates them server-side — so a failed
-  // read shows the load error and NO controls, never the Connect UI.
+  // flagged-off deployment from a hosted one. Since #2918 the connection
+  // routes themselves answer 404 when the feature is off, so this is defence
+  // in depth: a failed read shows the load error and NO controls, never the
+  // Connect UI.
   const feedUnknown = !feedLoading && !feedStatus
   const {
     connections,
@@ -127,6 +139,14 @@ export function ConnectionsCard() {
   // to a skeleton.
   const loading = providersLoading || connectionsLoading || feedLoading
   const byProvider = useMemo(() => new Map(connections.map((c) => [c.provider, c])), [connections])
+  // #4359: only connectors the user can connect or has connected render.
+  // Coming-soon providers (flag on AND off) and a live provider that is not
+  // configured on this deployment are hidden — the rows are the card, so the
+  // card renders NOTHING when none qualify.
+  const visibleProviders = useMemo(
+    () => providers.filter((p) => p.availability === 'live' && p.configured),
+    [providers],
+  )
 
   // Read the callback's outcome ONCE per query string, then strip it from the
   // URL. Keyed on the string, not the `URLSearchParams` object or the router
@@ -176,12 +196,33 @@ export function ConnectionsCard() {
     if (outcome.connect === 'connected') return { tone: 'ok' as const, text: copy.outcome.connected(name) }
     if (outcome.connect === 'denied') return { tone: 'error' as const, text: copy.outcome.denied(name) }
     if (outcome.reason === 'unsupported_currency') return { tone: 'error' as const, text: copy.outcome.unsupportedCurrency }
+    // #4520: the grant covered several companies and the feed has no per-push
+    // company choice, so the callback refuses it (#4518) — the user's own fix
+    // is to reconnect and pick one.
+    if (outcome.reason === 'multi_company') return { tone: 'error' as const, text: copy.outcome.multiCompany(name) }
     // #2918: the backend consumed the state and kept nothing — "try again" would be the wrong advice.
     if (outcome.reason === 'feature_off') return { tone: 'error' as const, text: copy.outcome.featureOff(name) }
     return { tone: 'error' as const, text: copy.outcome.error(name) }
   })()
 
   const listError = providersError || connectionsError || feedUnknown ? copy.loadError : null
+
+  // #4359: with nothing to show the card renders NOTHING — not a heading
+  // over an empty box. In the feed's coming-soon state every provider is
+  // coming soon, so the card is empty there too — EXCEPT for the OAuth
+  // outcome sentence (#2918): if a connect return just landed, its outcome
+  // is worth showing even where no provider row is. The self-hosted
+  // explanation is information, not a placeholder — the card renders it
+  // whenever it is mounted; whether the Business TAB is visible (and so
+  // whether the card mounts at all) is SettingsClient's tri-state rule,
+  // which does NOT count self-hosted as content (#4359).
+  const hasContent =
+    feedOff === 'self_hosted'
+      ? true
+      : feedOff == null
+        ? Boolean(listError) || Boolean(outcomeLine) || visibleProviders.length > 0
+        : Boolean(outcomeLine)
+  if (!loading && !hasContent) return null
 
   return (
     <SettingsSection
@@ -221,63 +262,73 @@ export function ConnectionsCard() {
           <p className="mt-1 text-sm text-[var(--v2-ink-3)]">{t.accountingPage.selfHosted.body}</p>
         </div>
       ) : feedOff === 'coming_soon' ? (
-        // Hosted, flag off: every provider listed as Coming soon, with NO
-        // action — not even a disabled Connect, which would suggest a
-        // control exists (#2869).
-        <div className="divide-y divide-[var(--v2-border)]" data-testid="accounting-coming-soon">
-          <p className="px-6 py-3 text-sm text-[var(--v2-ink-3)]">{t.accountingPage.comingSoon.notYet}</p>
-          {(providersError ? [] : providers).map((provider) => (
-            <SettingsRow
-              key={provider.id}
-              data-testid={`connection-row-${provider.id}`}
-              label={provider.displayName}
-              detail={copy.comingSoonDescription[provider.id]}
-              value={<StatusBadge tone="neutral">{t.common.comingSoon}</StatusBadge>}
-            />
-          ))}
-        </div>
+        // Hosted, flag off: NO provider renders — coming-soon rows in either
+        // flag state, and the connection routes 404 under the flag (#2918),
+        // so not even a disabled Connect (#2869). The outcome sentence above
+        // is the one thing that can show here (#4359).
+        null
       ) : listError ? (
         <div className="px-6 py-4">
           <InlineAlert>{listError}</InlineAlert>
         </div>
       ) : (
-        <div
-          className="divide-y divide-[var(--v2-border)]"
-          data-testid="connection-list"
-          aria-busy={connectionsRefreshing || undefined}
-        >
-          {providers.map((provider) => {
+        <>
+          <div
+            className="divide-y divide-[var(--v2-border)]"
+            data-testid="connection-list"
+            aria-busy={connectionsRefreshing || undefined}
+          >
+            {visibleProviders.map((provider) => {
             const connection = byProvider.get(provider.id) ?? null
             const settingsOpen = openSettings === provider.id && connection?.status === 'connected'
             return (
-              <div key={provider.id}>
-                <ConnectionRow
-                  provider={provider}
-                  connection={connection}
-                  busy={busyProvider === provider.id}
-                  settingsOpen={settingsOpen}
-                  onConnect={() => void run(provider.id, () => connect(provider.id), copy.connectError(provider.displayName))}
-                  onConnectWithApiKey={
-                    provider.authKind === 'api_key' ? () => setApiKeyConnectFor(provider) : undefined
-                  }
-                  onDisconnect={() => setPendingDisconnect(provider)}
-                  onToggleSettings={() => setOpenSettings((open) => (open === provider.id ? null : provider.id))}
-                />
-                {settingsOpen && connection ? (
-                  // `Card.Section divided`: a hairline above the inline form so
-                  // it reads as the row's own subsection — white on white, never
-                  // a nested filled card.
-                  <Card.Section divided>
-                    <ConnectionSettings
-                      connection={connection}
-                      onSave={(patch) => updateSettings(provider.id, patch)}
-                    />
-                  </Card.Section>
-                ) : null}
-              </div>
+              <ConnectionRow
+                key={provider.id}
+                provider={provider}
+                connection={connection}
+                busy={busyProvider === provider.id}
+                settingsOpen={settingsOpen}
+                onConnect={() => void run(provider.id, () => connect(provider.id), copy.connectError(provider.displayName))}
+                onConnectWithApiKey={
+                  provider.authKind === 'api_key' ? () => setApiKeyConnectFor(provider) : undefined
+                }
+                onDisconnect={() => setPendingDisconnect(provider)}
+                onToggleSettings={() => setOpenSettings((open) => (open === provider.id ? null : provider.id))}
+                below={
+                  settingsOpen && connection ? (
+                    // `Card.Section divided`: a hairline above the inline form so
+                    // it reads as the row's own subsection — white on white, never
+                    // a nested filled card. Rendered through `SettingsRow`'s
+                    // full-width slot (#4478), so the row and its settings are one
+                    // shape instead of a hand-written sibling wrapper.
+                    <Card.Section divided>
+                      <ConnectionSettings
+                        connection={connection}
+                        onSave={(patch) => updateSettings(provider.id, patch)}
+                      />
+                    </Card.Section>
+                  ) : undefined
+                }
+              />
             )
           })}
-        </div>
+          </div>
+
+          {/* #4359: the feed page keeps the sync rows — when at least one
+              connector shows, the card points there. Built as a plain href
+              constant, never appended onto `ACCOUNTING_SETTINGS_HREF` (the
+              shared constant the OAuth forwarder also uses). */}
+          <div className="px-6 py-4">
+            <a
+              href="/accounting"
+              data-testid="accounting-see-synced"
+              className="inline-flex items-center gap-1 text-sm font-medium text-[var(--v2-brand)] hover:underline"
+            >
+              {copy.seeSyncedPayments}
+              <Icon icon={ArrowRight} className="h-3.5 w-3.5" />
+            </a>
+          </div>
+        </>
       )}
 
       {pendingDisconnect ? (

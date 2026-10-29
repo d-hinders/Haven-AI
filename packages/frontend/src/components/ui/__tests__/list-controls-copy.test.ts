@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   countLabel,
+  facetGroupToggleLabel,
   facetValueLabel,
   filtersButtonLabel,
   noMatchTitle,
@@ -72,5 +73,15 @@ describe('list-controls copy', () => {
     expect(periodLabel({})).toBe('All time')
     expect(periodLabel({ preset: '30d' })).toBe('Last 30 days')
     expect(periodLabel({ from: '2026-09-01', to: '2026-10-20' })).toBe('2026-09-01 to 2026-10-20')
+  })
+
+  it('a group toggle carries its state: Show when collapsed, Hide when open, no verb when locked (#4512)', () => {
+    expect(facetGroupToggleLabel(14, 'inactive', 'collapsed')).toBe('Show 14 inactive')
+    expect(facetGroupToggleLabel(14, 'inactive', 'open')).toBe('Hide 14 inactive')
+    expect(facetGroupToggleLabel(14, 'inactive', 'locked')).toBe('14 inactive')
+    // The count carries the number; the label is the page's own noun phrase,
+    // so it reads the same at 1 and at 14.
+    expect(facetGroupToggleLabel(1, 'inactive', 'collapsed')).toBe('Show 1 inactive')
+    expect(facetGroupToggleLabel(1, 'inactive', 'locked')).toBe('1 inactive')
   })
 })

@@ -31,6 +31,15 @@ covers:
 last-verified: "2026-10-23"
 ---
 
+> **Re-verified #4415 (2026-10-25, stale comment sweep):** the only covered
+> file this diff touches is `packages/backend/src/config.ts` — one COMMENT
+> renames the screen it cites (the Company details card has lived on the
+> Settings → Business tab since #4359). No flag, env scalar, parser call or
+> default changes: `ownerCompanyDetailsEnabled` and every other entry keep
+> their values. Every other file in the diff is outside this document's
+> coverage. Nothing else in this document was re-verified, and
+> `last-verified` is not bumped.
+
 > **Re-verified unchanged (#4319, 2026-10-23, one added backend feature flag
 > in `packages/backend/src/config.ts`).** The only covered file this PR
 > touches is `config.ts`: it adds `eip3009ReceiptAttribution`, a
@@ -357,6 +366,22 @@ and the `release` skill.
 >   commits. The bump's own diff touches none of them.
 > - **Live dist-tags read during this release.** `dev` =
 >   `0.0.0-dev.202610051128.d0e0c97`, below `alpha`/`latest` = `0.7.0-alpha.0`.
+>
+> `last-verified` is not bumped.
+
+> **Re-verification (0.12.0-alpha.0 release, 2026-10-29):** coupled because the
+> bump rewrites `CONNECTOR_VERSION` (`packages/connect/src/runtime.ts`), now
+> `0.11.0-alpha.0` → `0.12.0-alpha.0`, a MINOR step. `HAVEN_CONNECTOR_CHANNEL`
+> stays `alpha`.
+> - **Publish path.** Re-measured at `origin/dev` `feda1617`: `git log
+>   origin/main..origin/dev` over `publish.yml`, `release-channel.mjs`,
+>   `release-snapshot-version.mjs` and `release-version-order.mjs` returns **1**
+>   commit, #4371 (#4374), which corrects a header comment in `publish.yml`
+>   ("four" places to "five") and changes no step. The bump's own diff touches
+>   none of these files.
+> - **Live dist-tags read during this release** (registry over HTTP). `dev` =
+>   `0.0.0-dev.202610271239.8cdcf88`, below `alpha`/`latest` = `0.11.0-alpha.0`
+>   for all five packages.
 >
 > `last-verified` is not bumped.
 
@@ -1162,3 +1187,22 @@ compatibility contract — the manifest table, version skew, `--doctor`'s checks
 > field this document names; nothing about channel selection, dist-tag
 > resolution, the snapshot path or publish behaviour moves. Scope of this
 > note: confirming that. Nothing else in this document was re-verified.
+
+> **Re-verified unchanged (#4371, 2026-10-23 — `publish.yml`'s invariant
+> comment).** The comment over the dev-tag invariant in
+> `.github/workflows/publish.yml` now says five enforcement places, matching the
+> five it lists and the "**Five** independent guards" this document already
+> states. Comment only: no step, guard, channel resolution or dist-tag behaviour
+> changes. Scope of this note: that comment. Nothing else in this document was
+> re-verified.
+
+> **Re-verified unchanged (#4514, 2026-10-28 — descriptive text in
+> `packages/backend/src/config.ts`).** The comment over
+> `accountingEntitlementMode` and the text of the
+> `parseAccountingEntitlementMode` boot-refusal message no longer name a
+> deployment as the one that runs mode `all`. The parser still accepts exactly
+> `granted` and `all` and still refuses the boot on any other non-empty value,
+> so step 5's "the same refuse-the-boot shape for its own two values" still
+> holds. `parseConnectorChannel` and `HAVEN_CONNECTOR_CHANNEL` are untouched.
+> Scope of this note: confirming that. Nothing else in this document was
+> re-verified.

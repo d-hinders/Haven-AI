@@ -15,8 +15,24 @@
 
 export const CLIENT_RELEASE_DATA = {
   "@haven_ai/sdk": {
-    "released_version": "0.11.0-alpha.0",
+    "released_version": "0.12.0-alpha.0",
     "notes": [
+      {
+        "version": "0.12.0-alpha.0",
+        "date": "2026-10-29",
+        "summary": "haven_list_receipts rows carry the delivery verdict, the settlement scheme and the budget hash. (+10 more in the changelog)",
+        "summary_segments": [
+          {
+            "text": "haven_list_receipts",
+            "code": true
+          },
+          {
+            "text": " rows carry the delivery verdict, the settlement scheme and the budget hash. (+10 more in the changelog)",
+            "code": false
+          }
+        ],
+        "action_required": false
+      },
       {
         "version": "0.11.0-alpha.0",
         "date": "2026-10-23",
@@ -36,40 +52,24 @@ export const CLIENT_RELEASE_DATA = {
           }
         ],
         "action_required": false
-      },
-      {
-        "version": "0.10.0-alpha.0",
-        "date": "2026-10-14",
-        "summary": "EIP-3009 merchant headers minted by the SDK now carry an EIP-3009 nonce derived from the Haven payment id — keccak256(utf8(\"haven-x402-payment-nonce:\") || utf8(payment_id)), the shared deriveX402PaymentNonce on the edge surface — instead of the x402 library's random draw. (+6 more in the changelog)",
-        "summary_segments": [
-          {
-            "text": "EIP-3009 merchant headers minted by the SDK now carry an EIP-3009 nonce derived from the Haven payment id — ",
-            "code": false
-          },
-          {
-            "text": "keccak256(utf8(\"haven-x402-payment-nonce:\") || utf8(payment_id))",
-            "code": true
-          },
-          {
-            "text": ", the shared ",
-            "code": false
-          },
-          {
-            "text": "deriveX402PaymentNonce",
-            "code": true
-          },
-          {
-            "text": " on the edge surface — instead of the x402 library's random draw. (+6 more in the changelog)",
-            "code": false
-          }
-        ],
-        "action_required": false
       }
     ]
   },
   "@haven_ai/signer": {
-    "released_version": "0.11.0-alpha.0",
+    "released_version": "0.12.0-alpha.0",
     "notes": [
+      {
+        "version": "0.12.0-alpha.0",
+        "date": "2026-10-29",
+        "summary": "Every successful signature now names the agent's next step. (+1 more in the changelog)",
+        "summary_segments": [
+          {
+            "text": "Every successful signature now names the agent's next step. (+1 more in the changelog)",
+            "code": false
+          }
+        ],
+        "action_required": false
+      },
       {
         "version": "0.11.0-alpha.0",
         "date": "2026-10-23",
@@ -89,48 +89,32 @@ export const CLIENT_RELEASE_DATA = {
           }
         ],
         "action_required": false
-      },
-      {
-        "version": "0.10.0-alpha.0",
-        "date": "2026-10-14",
-        "summary": "The EIP-3009 merchant header the signer builds now carries an EIP-3009 nonce derived from the Haven payment id inside the verified binding — keccak256(utf8(\"haven-x402-payment-nonce:\") || utf8(payment_id)), the shared deriveX402PaymentNonce from @haven_ai/sdk/edge — instead of the x402 library's random draw.",
-        "summary_segments": [
-          {
-            "text": "The EIP-3009 merchant header the signer builds now carries an EIP-3009 nonce derived from the Haven payment id inside the verified binding — ",
-            "code": false
-          },
-          {
-            "text": "keccak256(utf8(\"haven-x402-payment-nonce:\") || utf8(payment_id))",
-            "code": true
-          },
-          {
-            "text": ", the shared ",
-            "code": false
-          },
-          {
-            "text": "deriveX402PaymentNonce",
-            "code": true
-          },
-          {
-            "text": " from ",
-            "code": false
-          },
-          {
-            "text": "@haven_ai/sdk/edge",
-            "code": true
-          },
-          {
-            "text": " — instead of the x402 library's random draw.",
-            "code": false
-          }
-        ],
-        "action_required": false
       }
     ]
   },
   "@haven_ai/mcp": {
-    "released_version": "0.11.0-alpha.0",
+    "released_version": "0.12.0-alpha.0",
     "notes": [
+      {
+        "version": "0.12.0-alpha.0",
+        "date": "2026-10-29",
+        "summary": "The local haven_list_receipts rows carry the delivery verdict, the settlement scheme and the budget hash. (+3 more in the changelog)",
+        "summary_segments": [
+          {
+            "text": "The local ",
+            "code": false
+          },
+          {
+            "text": "haven_list_receipts",
+            "code": true
+          },
+          {
+            "text": " rows carry the delivery verdict, the settlement scheme and the budget hash. (+3 more in the changelog)",
+            "code": false
+          }
+        ],
+        "action_required": false
+      },
       {
         "version": "0.11.0-alpha.0",
         "date": "2026-10-23",
@@ -142,68 +126,56 @@ export const CLIENT_RELEASE_DATA = {
           }
         ],
         "action_required": false
-      },
-      {
-        "version": "0.10.0-alpha.0",
-        "date": "2026-10-14",
-        "summary": "haven_get_agent and haven_get_allowances warn a replaced agent. When a Connect --replace retired this agent on its machine, both outputs carry supersededBy with a warning to restart the session and have the user remove the old agent; otherwise supersededBy is null. (+2 more in the changelog)",
-        "summary_segments": [
-          {
-            "text": "haven_get_agent",
-            "code": true
-          },
-          {
-            "text": " and ",
-            "code": false
-          },
-          {
-            "text": "haven_get_allowances",
-            "code": true
-          },
-          {
-            "text": " warn a replaced agent. When a Connect ",
-            "code": false
-          },
-          {
-            "text": "--replace",
-            "code": true
-          },
-          {
-            "text": " retired this agent on its machine, both outputs carry ",
-            "code": false
-          },
-          {
-            "text": "supersededBy",
-            "code": true
-          },
-          {
-            "text": " with a warning to restart the session and have the user remove the old agent; otherwise ",
-            "code": false
-          },
-          {
-            "text": "supersededBy",
-            "code": true
-          },
-          {
-            "text": " is ",
-            "code": false
-          },
-          {
-            "text": "null",
-            "code": true
-          },
-          {
-            "text": ". (+2 more in the changelog)",
-            "code": false
-          }
-        ],
-        "action_required": false
       }
     ]
   },
   "@haven_ai/connect": {
-    "released_version": "0.11.0-alpha.0",
+    "released_version": "0.12.0-alpha.0",
     "notes": [
+      {
+        "version": "0.12.0-alpha.0",
+        "date": "2026-10-29",
+        "summary": "The installed skill names the ended budget. needs_approval with no allowances[] rows and budgetEndedAt set means the budget ENDED on that date — waiting will not help, ask the owner to set a new one; with no rows and no budgetEndedAt, nobody approved a budget yet. (+3 more in the changelog)",
+        "summary_segments": [
+          {
+            "text": "The installed skill names the ended budget. ",
+            "code": false
+          },
+          {
+            "text": "needs_approval",
+            "code": true
+          },
+          {
+            "text": " with no ",
+            "code": false
+          },
+          {
+            "text": "allowances[]",
+            "code": true
+          },
+          {
+            "text": " rows and ",
+            "code": false
+          },
+          {
+            "text": "budgetEndedAt",
+            "code": true
+          },
+          {
+            "text": " set means the budget ENDED on that date — waiting will not help, ask the owner to set a new one; with no rows and no ",
+            "code": false
+          },
+          {
+            "text": "budgetEndedAt",
+            "code": true
+          },
+          {
+            "text": ", nobody approved a budget yet. (+3 more in the changelog)",
+            "code": false
+          }
+        ],
+        "action_required": false
+      },
       {
         "version": "0.11.0-alpha.0",
         "date": "2026-10-23",
@@ -239,40 +211,52 @@ export const CLIENT_RELEASE_DATA = {
           }
         ],
         "action_required": false
-      },
-      {
-        "version": "0.10.0-alpha.0",
-        "date": "2026-10-14",
-        "summary": "After a --replace whose install completed, the connector tells Haven which agents the run retired on this machine, using the NEW agent's key. Only the retired directories are reported — never the coexisting agents superseded_agent_ids lists. (+5 more in the changelog)",
-        "summary_segments": [
-          {
-            "text": "After a ",
-            "code": false
-          },
-          {
-            "text": "--replace",
-            "code": true
-          },
-          {
-            "text": " whose install completed, the connector tells Haven which agents the run retired on this machine, using the NEW agent's key. Only the retired directories are reported — never the coexisting agents ",
-            "code": false
-          },
-          {
-            "text": "superseded_agent_ids",
-            "code": true
-          },
-          {
-            "text": " lists. (+5 more in the changelog)",
-            "code": false
-          }
-        ],
-        "action_required": false
       }
     ]
   },
   "@haven_ai/cli": {
-    "released_version": "0.11.0-alpha.0",
+    "released_version": "0.12.0-alpha.0",
     "notes": [
+      {
+        "version": "0.12.0-alpha.0",
+        "date": "2026-10-29",
+        "summary": "haven guide's runbook gives needs_approval its three causes. No allowances[] rows with budgetEndedAt set: the budget ENDED on that date — waiting will not help, ask the owner to set a new one. (+3 more in the changelog)",
+        "summary_segments": [
+          {
+            "text": "haven guide",
+            "code": true
+          },
+          {
+            "text": "'s runbook gives ",
+            "code": false
+          },
+          {
+            "text": "needs_approval",
+            "code": true
+          },
+          {
+            "text": " its three causes. No ",
+            "code": false
+          },
+          {
+            "text": "allowances[]",
+            "code": true
+          },
+          {
+            "text": " rows with ",
+            "code": false
+          },
+          {
+            "text": "budgetEndedAt",
+            "code": true
+          },
+          {
+            "text": " set: the budget ENDED on that date — waiting will not help, ask the owner to set a new one. (+3 more in the changelog)",
+            "code": false
+          }
+        ],
+        "action_required": false
+      },
       {
         "version": "0.11.0-alpha.0",
         "date": "2026-10-23",
@@ -308,42 +292,6 @@ export const CLIENT_RELEASE_DATA = {
           },
           {
             "text": ", and a hint to edit that budget on the agent's page, which replaces it and stops the old one on-chain. (+3 more in the changelog)",
-            "code": false
-          }
-        ],
-        "action_required": false
-      },
-      {
-        "version": "0.10.0-alpha.0",
-        "date": "2026-10-14",
-        "summary": "Agent runbook text: the revoke hash is read from haven budget show <agentId> --hashes, and a connector upgrade_command may name the pair with --name <slug>. Text only; no update needed.",
-        "summary_segments": [
-          {
-            "text": "Agent runbook text: the revoke hash is read from ",
-            "code": false
-          },
-          {
-            "text": "haven budget show <agentId> --hashes",
-            "code": true
-          },
-          {
-            "text": ", and a connector ",
-            "code": false
-          },
-          {
-            "text": "upgrade_command",
-            "code": true
-          },
-          {
-            "text": " may name the pair with ",
-            "code": false
-          },
-          {
-            "text": "--name <slug>",
-            "code": true
-          },
-          {
-            "text": ". Text only; no update needed.",
             "code": false
           }
         ],

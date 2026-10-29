@@ -1,7 +1,7 @@
 'use client'
 
 /**
- * Backup & recovery signers for a delegation-rail account (#888, epic #836).
+ * The Who can approve section for a delegation-rail account (#888, epic #836).
  *
  * Outcome-language signer management: see the ways this account can be
  * approved, add a backup (so a lost device isn't a lost account), remove one.
@@ -12,23 +12,32 @@
  * Account-scoped (#1089) — works from the moment an account exists, with no
  * agent required. This is the single home for backup & recovery; it no
  * longer renders on the agent page.
+ *
+ * #4474 (mockup v9): the card is the section's CONTENT only. Its heading
+ * ("Who can approve") and the "All signers in Settings" link live on the page
+ * above it (`SectionHeading`, #4475), so the card carries no heading, no intro
+ * sentence and no in-card Settings row. Inside: the single-signer warning
+ * (owner decision 2026-10-27 — a warning about one section's own content may
+ * sit at the top of that section's card), the signer rows as two-line `Row`s,
+ * and ONE footer row holding both add actions and the recovery-help link.
  */
 
 import { useCallback, useMemo, useState } from 'react'
 import { isAddress } from 'viem'
-import Link from 'next/link'
-import { ArrowRight, CircleHelp } from 'lucide-react'
+import { KeyRound, Wallet } from 'lucide-react'
 import { useAccountSigners } from '@/hooks/useAccountSigners'
 import { Card } from './ui/Card'
 import { Button } from './ui/Button'
 import { Input } from './ui/Input'
 import { Modal } from './ui/Modal'
+import { Row } from './ui/Row'
 import ConfirmDialog from './ConfirmDialog'
 import WalletConnectAction from './WalletConnectAction'
 import PasskeyElsewhereHint from './PasskeyElsewhereHint'
+import { ApprovalRequiredBanner } from './haven/ApprovalRequiredBanner'
 import { Icon } from './ui/Icon'
 import { useToast } from './ui/Toast'
-import { passkeyRowLabel } from '@/lib/passkeyLabels'
+import { passkeyRowParts } from '@/lib/passkeyLabels'
 
 interface Props {
   accountAddress: string
@@ -84,16 +93,23 @@ export default function AccountSignersCard({ accountAddress, chainId, userEmail 
   if (signers === null && !loadError) return null
 
   const onlyOneWay = wayCount < 2
+  // #4474: the warning names the KIND of the one signer, so a wallet-only
+  // account is never told about a passkey it does not have.
+  const onlyOneWayTitle = signers?.owner_address
+    ? 'Only one wallet can approve this account'
+    : 'Only one passkey can approve this account'
+  // #4474: removing the last signer is refused on-chain anyway
+  // (`CannotRemoveLastSigner`), so Remove is ABSENT rather than disabled while
+  // one signer remains — a disabled Remove on the only row reads as a broken
+  // control. With two or more, every row can be removed (down to one).
+  const canRemove = wayCount >= 2
 
   return (
-    // #4166: the section's ONE heading and intro ("Who can approve" and the
-    // keep-at-least-two sentence) live on the page above this card — the card
-    // used to repeat both under a second "Backup & recovery" heading. Every
-    // flow the card owns is unchanged; only the duplicated chrome is gone.
+    // #4166: the section's heading lives on the page above this card.
     // #4307: the card reads warning first (the one thing that asks for
-    // action), then the signers and their actions, then the Settings link —
-    // which no longer leads the card — and the helper text no longer sits
-    // tight under the buttons.
+    // action), then the signers, then their actions.
+    // #4474: the Settings link moved up to the heading row, and the two add
+    // actions plus "Lost a device?" share ONE divided footer row.
     <Card hover={false} className="p-5 md:p-6">
       {loadError ? (
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-danger/20 bg-[var(--v2-danger-soft)] px-4 py-3">
@@ -106,102 +122,134 @@ export default function AccountSignersCard({ accountAddress, chainId, userEmail 
         </div>
       ) : signers ? (
         <>
-          {/* #4307: the one-signer warning LEADS the card — it is the one
-              thing here that asks for action, and it no longer sits under
-              the Settings link. */}
+          {/* #4474: the one-signer warning LEADS the card — it is the one
+              thing here that asks for action. It qualifies this section's own
+              rows, so it stays inside the card rather than in the page's
+              banner slot (owner decision 2026-10-27, design-system.md
+              § Detail-page section rule). */}
           {onlyOneWay ? (
-            <div className="rounded-lg border border-warning/25 bg-[var(--v2-warning-soft)] px-4 py-3 text-sm text-[var(--v2-ink)]">
-              This account has only one way to approve. Add a backup now — without it, losing this device
-              means losing the account.
-            </div>
+            <ApprovalRequiredBanner tone="warning" density="compact" title={onlyOneWayTitle}>
+              If you lose it, you lose the account and the money in it. Add a backup now.
+            </ApprovalRequiredBanner>
           ) : null}
 
           <Card.Section divided className="mt-4">
             {signers.owner_address ? (
-              <div className="flex items-center justify-between gap-3 py-3">
-                <div className="min-w-0">
-                  {/* #3825: no address by default, but revealable here — this
-                      card asks the user to connect THE owner wallet, and they
-                      must be able to tell which one without leaving the task
-                      (#3825 design review). */}
-                  <p className="text-sm font-medium text-[var(--v2-ink)]">Browser wallet</p>
-                  <details className="mt-0.5">
-                    <summary className="cursor-pointer rounded-sm text-xs text-[var(--v2-ink-3)] hover:text-[var(--v2-ink-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80">
-                      Show address
-                    </summary>
-                    <p className="mt-1 break-all font-mono text-xs text-[var(--v2-ink-2)]">{signers.owner_address}</p>
-                  </details>
-                  <p className="mt-0.5 text-xs text-[var(--v2-ink-muted)]">
-                    {/* #3845: never promise passkeys the account does not have. */}
-                    {signers.passkeys.length > 0
+              <div>
+                <Row
+                  leading={<Icon icon={Wallet} className="h-4 w-4" />}
+                  leadingTone="neutral"
+                  title="Browser wallet"
+                  subtitle={
+                    /* #3845: never promise passkeys the account does not have. */
+                    signers.passkeys.length > 0
                       ? 'If you remove it, your passkeys become the only ways to approve — and to recover this account.'
-                      : "This wallet is the only way to approve this account, so it can't be removed until you add a backup."}
-                  </p>
-                </div>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  disabled={busy || !ready || wayCount < 2}
-                  onClick={() =>
-                    removingOwnerLeavesOneSigner
-                      ? setShowRemoveOwnerConfirm(true)
-                      : void handle(removeOwner(), 'Wallet removed.')
+                      : "This wallet is the only way to approve this account, so it can't be removed until you add a backup."
                   }
-                >
-                  Remove
-                </Button>
+                  /* #4474: `Row`'s subtitle is a single-line `truncate` by
+                     default, which clipped this consequence sentence to ~37
+                     characters at 390px — and it is the sentence that says why
+                     Remove is dangerous, so a clipped one is a safety-copy
+                     loss, not cosmetics. `whitespace-normal` wins over
+                     `truncate`'s `nowrap` (Tailwind emits whitespace utilities
+                     after `truncate`); the row is `items-center`, so the
+                     leading icon stays centred against the taller body. */
+                  subtitleClassName="whitespace-normal"
+                  trailing={
+                    canRemove ? (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={busy || !ready}
+                        onClick={() =>
+                          removingOwnerLeavesOneSigner
+                            ? setShowRemoveOwnerConfirm(true)
+                            : void handle(removeOwner(), 'Wallet removed.')
+                        }
+                      >
+                        Remove
+                      </Button>
+                    ) : undefined
+                  }
+                  density="flush"
+                  className="py-3"
+                />
+                {/* #3825: no address by default, but revealable here — this
+                    card asks the user to connect THE owner wallet, and they
+                    must be able to tell which one without leaving the task
+                    (#3825 design review). */}
+                <details className="pb-3">
+                  <summary className="cursor-pointer rounded-sm text-xs text-[var(--v2-ink-3)] hover:text-[var(--v2-ink-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80">
+                    Show address
+                  </summary>
+                  <p className="mt-1 break-all font-mono text-xs text-[var(--v2-ink-2)]">{signers.owner_address}</p>
+                </details>
               </div>
             ) : null}
-            {signers.passkeys.map((pk, i) => (
-              <div key={pk.key_id} className="flex items-center justify-between gap-3 py-3">
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-[var(--v2-ink)]">
-                    {passkeyRowLabel(pk.created_at, i)}
-                  </p>
-                </div>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  disabled={busy || !ready || wayCount < 2}
-                  onClick={() =>
-                    removingPasskeyLeavesOneSigner
-                      ? setPasskeyToRemove(pk.key_id)
-                      : void handle(removePasskey(pk.key_id), 'Removed.')
+            {signers.passkeys.map((pk, i) => {
+              // #4474: the split form — the kind on line 1, "Added {date}" on
+              // line 2. The ordinal appears only when there is more than one
+              // passkey to tell apart; `passkeyRowLabel` derives its one-line
+              // string from the same source.
+              const parts = passkeyRowParts(pk.created_at, i, signers.passkeys.length)
+              return (
+                <Row
+                  key={pk.key_id}
+                  leading={<Icon icon={KeyRound} className="h-4 w-4" />}
+                  leadingTone="neutral"
+                  title={parts.kind}
+                  subtitle={parts.added ?? undefined}
+                  trailing={
+                    canRemove ? (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={busy || !ready}
+                        onClick={() =>
+                          removingPasskeyLeavesOneSigner
+                            ? setPasskeyToRemove(pk.key_id)
+                            : void handle(removePasskey(pk.key_id), 'Removed.')
+                        }
+                      >
+                        Remove
+                      </Button>
+                    ) : undefined
                   }
-                >
-                  Remove
-                </Button>
-              </div>
-            ))}
+                  density="flush"
+                  className="py-3"
+                />
+              )
+            })}
           </Card.Section>
 
-          <div className="mt-4">
-            <div className="flex flex-wrap items-center gap-3">
-              <Button disabled={busy || !ready} onClick={() => void handle(enrollBackupPasskey(), 'Backup added.')}>
+          {/* #4474: ONE footer row — both add actions and the recovery-help
+              link, divided from the rows above. The helper line ("Approve
+              with your passkey…") is gone: the button names the passkey, and
+              the screen-lock anchor was subtext the mockup dropped. */}
+          <Card.Section divided className="mt-4">
+            <div className="flex flex-wrap items-center gap-3 py-3">
+              <Button
+                variant={onlyOneWay ? 'primary' : 'ghost'}
+                disabled={busy || !ready}
+                onClick={() => void handle(enrollBackupPasskey(), 'Backup added.')}
+              >
+                <Icon icon={KeyRound} className="h-4 w-4" />
                 {busy ? 'Working…' : 'Add a backup passkey'}
               </Button>
               {!signers.owner_address ? (
                 <Button variant="ghost" disabled={busy || !ready} onClick={() => setShowWallet((v) => !v)}>
-                  Or add a wallet
+                  <Icon icon={Wallet} className="h-4 w-4" />
+                  Add a wallet
                 </Button>
               ) : null}
+              <button
+                type="button"
+                onClick={() => setShowRecoveryHelp(true)}
+                className="ml-auto rounded-sm text-sm font-medium text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
+              >
+                Lost a device?
+              </button>
             </div>
-            <p className="mt-2 text-xs text-[var(--v2-ink-muted)]">
-              Approve with your passkey (usually your device&rsquo;s screen lock).
-            </p>
-          </div>
-
-          {/* #4307: the Settings link follows the signers and their actions —
-              #3825's object note stands, it just no longer leads the card —
-              on the same Card.Section rhythm as "Lost a device?" below. */}
-          <Card.Section className="mt-4">
-            <Link
-              href="/settings#signers"
-              className="inline-flex items-center gap-1 text-sm font-medium text-[var(--v2-brand)] hover:underline"
-            >
-              All your passkeys and wallets in Settings
-              <Icon icon={ArrowRight} className="h-3.5 w-3.5" />
-            </Link>
           </Card.Section>
 
           {showWallet && !signers.owner_address ? (
@@ -232,7 +280,7 @@ export default function AccountSignersCard({ accountAddress, chainId, userEmail 
             // `ready` true, so this state only occurs for owner-only
             // accounts — the wallet really is the blocker.
             <div className="mt-3 space-y-2">
-              <p className="text-xs text-[var(--v2-ink-muted)]">
+              <p className="text-xs text-[var(--v2-ink-3)]">
                 Connect your account owner wallet to change how this account is approved.
               </p>
               {/* #3812: connect or switch in place (the header pill is gone since #3825). */}
@@ -245,17 +293,6 @@ export default function AccountSignersCard({ accountAddress, chainId, userEmail 
             // QR dialog surprises them.
             <PasskeyElsewhereHint className="mt-3" />
           ) : null}
-
-          <Card.Section className="mt-4">
-            <button
-              type="button"
-              onClick={() => setShowRecoveryHelp(true)}
-              className="inline-flex items-center gap-1.5 py-3 text-sm font-medium text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)]"
-            >
-              <Icon icon={CircleHelp} className="h-4 w-4" />
-              Lost a device?
-            </button>
-          </Card.Section>
         </>
       ) : null}
 

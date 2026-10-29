@@ -18,15 +18,19 @@ import { readdirSync, readFileSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { authMiddleware } from '../auth.js'
+import { newOAuthStateClaims } from '../../modules/accounting/oauth-state.js'
 
 const SECRET = 'test-secret'
 
 /**
- * The exact claim shape routes/fortnox.ts signs for the OAuth handshake.
- * The cast mirrors the route's own: @fastify/jwt pins the payload type to
- * { sub, email }, so a purpose-carrying token needs it in both places.
+ * The exact claim shape routes/accounting-connections.ts signs for the OAuth
+ * handshake — minted by `newOAuthStateClaims`, so the token carries the REAL
+ * `OAUTH_STATE_PURPOSE` purpose (`accounting_oauth`), the provider id and a
+ * single-use `jti`. The cast mirrors the route's own: @fastify/jwt pins the
+ * payload type to { sub, email }, so a purpose-carrying token needs it in
+ * both places.
  */
-const OAUTH_STATE = { sub: 'user-1', purpose: 'fortnox_oauth' } as unknown as {
+const OAUTH_STATE = newOAuthStateClaims('user-1', 'fortnox') as unknown as {
   sub: string
   email: string
 }
@@ -74,9 +78,9 @@ describe('authMiddleware refuses purpose-scoped tokens (#1640)', () => {
   })
 
   it('refuses ANY purpose, not just the one that exists today', async () => {
-    // The guard is written as "carries a purpose" rather than "carries
-    // fortnox_oauth", so the next single-purpose token is safe by default
-    // instead of by someone remembering to add it here.
+    // The guard is written as "carries a purpose" rather than
+    // "purpose === OAUTH_STATE_PURPOSE", so the next single-purpose token is
+    // safe by default instead of by someone remembering to add it here.
     const future = app.jwt.sign(
       { sub: 'user-1', purpose: 'some_future_flow' } as unknown as { sub: string; email: string },
       { expiresIn: '5m' },

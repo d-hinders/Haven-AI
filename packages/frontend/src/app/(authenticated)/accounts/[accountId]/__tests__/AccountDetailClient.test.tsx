@@ -9,6 +9,7 @@
  */
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { expectMenuNotClipped } from '@/__tests__/menu-clip'
 import type { ReactNode } from 'react'
 
 const mockUseAuth = vi.fn()
@@ -136,7 +137,7 @@ vi.mock('@/components/ConfirmDialog', () => ({
 vi.mock('@/components/AccountSignersCard', () => ({
   default: (props: { accountAddress?: string }) => (
     <div data-testid="account-signers-card" data-safe-address={props.accountAddress}>
-      Backup &amp; recovery
+      Who can approve
     </div>
   ),
 }))
@@ -178,8 +179,8 @@ function overview(
     accounts: [],
     spend: {
       scope: 'mainnet',
-      d7: { ...zeroWindow, refusals: { budget: 0, scope: 0, failed: 0, haven: 0 } },
-      d30: { ...zeroWindow, refusals: { budget: 0, scope: 0, failed: 0, haven: 0 } },
+      d7: { ...zeroWindow, refusals: { budget: 0, expired: 0, scope: 0, failed: 0, haven: 0 } },
+      d30: { ...zeroWindow, refusals: { budget: 0, expired: 0, scope: 0, failed: 0, haven: 0 } },
       topMerchant7d: null,
       failedIntents7d: 0,
       balance_by_day: [],
@@ -187,6 +188,15 @@ function overview(
     spotRates: {},
     ...overrides,
   } as DashboardOverviewResponse
+}
+
+/**
+ * #4491: opens the account header's ⋯ menu and asserts nothing above it clips
+ * the panel — the account page's menu host is the header, not a Card.
+ */
+function openAccountMenu() {
+  fireEvent.click(screen.getByLabelText('Account options'))
+  expectMenuNotClipped(screen.getByRole('menu'))
 }
 
 describe('AccountDetailClient', () => {
@@ -256,7 +266,7 @@ describe('AccountDetailClient', () => {
       refetch: vi.fn(),
     })
     mockUseBudgetRemaining.mockReturnValue({ data: null, loading: false })
-    mockUseAttentionDismissals.mockReturnValue({ dismissedIds: [], dismiss: vi.fn() })
+    mockUseAttentionDismissals.mockReturnValue({ acknowledgements: new Map(), dismiss: vi.fn() })
     mockUseAccountSigners.mockReturnValue({
       signers: { account_address: SAFE.account_address, passkeys: [{ key_id: 'k1', created_at: '2026-05-12T00:00:00Z' }], owner_address: null },
       loadError: false,
@@ -495,7 +505,7 @@ describe('AccountDetailClient', () => {
       })
     })
 
-    it('the Security & details tab carries ONE heading and ONE intro sentence', () => {
+    it('the Security & details tab carries ONE heading and no intro sentence (#4474)', () => {
       tabParam = 'security'
       render(<AccountDetailClient />)
       // The section's only heading is the page's; the card's repeated
@@ -504,8 +514,9 @@ describe('AccountDetailClient', () => {
       const headings = screen.getAllByRole('heading').map((h) => h.textContent)
       expect(headings).toContain('Who can approve')
       expect(headings).not.toContain('Backup & recovery')
-      // The intro sentence renders exactly once.
-      expect(screen.getAllByText(/Keep at least two, so a lost device never/).length).toBe(1)
+      // #4474 (mockup v9): the intro sentence is gone entirely — the heading
+      // and the rows say it, and the heading row carries the Settings link.
+      expect(screen.queryByText(/Keep at least two, so a lost device never/)).not.toBeInTheDocument()
     })
   })
 
@@ -619,9 +630,10 @@ describe('AccountDetailClient', () => {
             id: 'agent-1',
             name: 'Research agent',
             status: 'active',
+            avatarTint: 1,
             accountId: 'safe-1',
             accountName: 'Main account',
-            accountChainId: 8453,
+            accountChainId: 8453, budgetEndedAt: null,
             allowances: [],
             budgets: [
               {
@@ -640,8 +652,8 @@ describe('AccountDetailClient', () => {
             ],
             receivedSubBudgets: [],
             stats: {
-              d7: { gross: { usd: 0, eur: 0, sek: 0 }, net: { usd: 0, eur: 0, sek: 0 }, approx: false, payments: 0, refusals: { budget: 0, scope: 0, failed: 0, haven: 0 } },
-              d30: { gross: { usd: 0, eur: 0, sek: 0 }, net: { usd: 0, eur: 0, sek: 0 }, approx: false, payments: 0, refusals: { budget: 0, scope: 0, failed: 0, haven: 0 } },
+              d7: { gross: { usd: 0, eur: 0, sek: 0 }, net: { usd: 0, eur: 0, sek: 0 }, approx: false, payments: 0, refusals: { budget: 0, expired: 0, scope: 0, failed: 0, haven: 0 } },
+              d30: { gross: { usd: 0, eur: 0, sek: 0 }, net: { usd: 0, eur: 0, sek: 0 }, approx: false, payments: 0, refusals: { budget: 0, expired: 0, scope: 0, failed: 0, haven: 0 } },
               lastPaymentAt: null,
               lastCounterparty: null,
             },
@@ -767,6 +779,37 @@ describe('AccountDetailClient', () => {
       expect(screen.getByText('0x1111…1111')).toBeInTheDocument()
       expect(screen.getByText('Base')).toBeInTheDocument()
       expect(screen.getByText('12 May 2026')).toBeInTheDocument()
+    })
+
+    // #4474 (mockup v9): the heading carries the link to the fuller surface,
+    // the intro sentence and the in-card Settings row are gone, and Account
+    // details is a divided label/value list rather than a two-column grid.
+    it('heads the signer section with the Settings link and lists the details (#4474)', () => {
+      tabParam = 'security'
+      render(<AccountDetailClient />)
+
+      const link = screen.getByRole('link', { name: 'All signers in Settings' })
+      expect(link).toHaveAttribute('href', '/settings?tab=security#signers')
+      expect(screen.queryByText(/The ways this account can be approved/)).not.toBeInTheDocument()
+      expect(screen.queryByText(/All your passkeys and wallets in Settings/)).not.toBeInTheDocument()
+
+      // The shared detail list's labels, and the address label the mockup
+      // renamed from "Haven wallet address" to "Address".
+      expect(screen.getByText('Address')).toBeInTheDocument()
+      expect(screen.getByText('Network')).toBeInTheDocument()
+      expect(screen.getByText('Created')).toBeInTheDocument()
+      expect(screen.queryByText('Haven wallet address')).not.toBeInTheDocument()
+    })
+
+    it('names a test network in the details list (#4474)', () => {
+      mockUseAuth.mockReturnValue({
+        ...mockUseAuth(),
+        user: { ...mockUseAuth().user, accounts: [{ ...SAFE, chain_id: 84532 }] },
+      })
+      tabParam = 'security'
+      render(<AccountDetailClient />)
+
+      expect(screen.getByText('Base Sepolia (test network)')).toBeInTheDocument()
     })
 
     it('one signer: the Security tab carries the warning dot', () => {
@@ -897,7 +940,7 @@ describe('AccountDetailClient', () => {
 
     render(<AccountDetailClient />)
 
-    fireEvent.click(screen.getByLabelText('Account options'))
+    openAccountMenu()
     fireEvent.click(screen.getByRole('menuitem', { name: 'Remove account' }))
     expect(screen.getByRole('heading', { name: 'Remove Main account?' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Remove account' }))
@@ -933,7 +976,7 @@ describe('AccountDetailClient', () => {
     render(<AccountDetailClient />)
 
     const openDialog = () => {
-      fireEvent.click(screen.getByLabelText('Account options'))
+      openAccountMenu()
       fireEvent.click(screen.getByRole('menuitem', { name: 'Remove account' }))
     }
 
@@ -955,7 +998,7 @@ describe('AccountDetailClient', () => {
 
     render(<AccountDetailClient />)
 
-    fireEvent.click(screen.getByLabelText('Account options'))
+    openAccountMenu()
     fireEvent.click(screen.getByRole('menuitem', { name: 'Remove account' }))
     fireEvent.click(screen.getByRole('button', { name: 'Remove account' }))
 
@@ -976,7 +1019,7 @@ describe('AccountDetailClient', () => {
 
     render(<AccountDetailClient />)
 
-    fireEvent.click(screen.getByLabelText('Account options'))
+    openAccountMenu()
     fireEvent.click(screen.getByRole('menuitem', { name: 'Remove account' }))
     fireEvent.click(screen.getByRole('button', { name: 'Remove account' }))
 

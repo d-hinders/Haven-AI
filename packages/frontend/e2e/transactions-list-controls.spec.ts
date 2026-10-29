@@ -65,8 +65,32 @@ const filterOptions = {
   ],
 }
 
+/**
+ * Twelve agents, none grouped (#4451): the Initiator menu is longer than the
+ * panel's `min(24rem, 70vh)` cap, so the panel has to scroll. The shared
+ * fixture's three agents fit, which is why nothing caught the rows shrinking.
+ * All active, so every row is the same shape (no `meta` slot).
+ */
+const longAgentList = {
+  ...filterOptions,
+  agents: [
+    'Quarterly procurement and vendor reconciliation agent',
+    'Atlas',
+    'Lovable Dev preview deployment helper',
+    'Nordic payroll research assistant',
+    'Invoice matching agent',
+    'Treasury rebalancing agent',
+    'Subscription audit agent',
+    'Contract renewal watcher',
+    'Expense categoriser',
+    'Supplier onboarding agent',
+    'Refund reconciliation agent',
+    'Travel spend reviewer',
+  ].map((name, i) => ({ id: `agent-${i + 1}`, name, status: 'active' })),
+}
+
 /** Registered after `mockHavenApi`, so it wins for the two reads it answers. */
-async function serveTwoNetworkAccounts(page: Page) {
+async function serveTwoNetworkAccounts(page: Page, filters: typeof filterOptions = filterOptions) {
   await page.route('**/api/**', async (route) => {
     const request = route.request()
     const path = new URL(request.url()).pathname.replace(/^\/api/, '')
@@ -75,16 +99,16 @@ async function serveTwoNetworkAccounts(page: Page) {
       return
     }
     if (request.method() === 'GET' && path === '/transactions/filters') {
-      await route.fulfill({ json: filterOptions })
+      await route.fulfill({ json: filters })
       return
     }
     await route.fallback()
   })
 }
 
-async function open(page: Page, width: number, height: number, query = '') {
+async function open(page: Page, width: number, height: number, query = '', filters: typeof filterOptions = filterOptions) {
   await mockHavenApi(page)
-  await serveTwoNetworkAccounts(page)
+  await serveTwoNetworkAccounts(page, filters)
   await seedAuthenticatedSession(page)
   await page.emulateMedia({ colorScheme: SCHEME })
   await page.setViewportSize({ width, height })
@@ -165,6 +189,36 @@ test.describe('transactions list controls — 375px', () => {
     expect(exportBox!.y, 'Export CSV shares the search row').toBeGreaterThan(filtersBox!.y + filtersBox!.height)
     expect(exportBox!.width, 'Export CSV is full-width on phone').toBeLessThan(150)
     await expectHitTarget(page, exportCsv, 'Export CSV')
+
+    // The list summary line (#4473): the count on the left, the page's totals
+    // on the right — right-aligned at the line's right edge, which is where
+    // the rows' amounts end. jsdom cannot measure this, and the 375px wrap is
+    // the case that matters: the totals wrap under the count and stay right.
+    const summaryLine = page.getByTestId('list-summary')
+    const count = summaryLine.getByTestId('list-toolbar-count')
+    const totals = summaryLine.getByTestId('transactions-totals')
+    await expect(count).toBeVisible()
+    await expect(totals).toBeVisible()
+    expect(
+      await summaryLine.evaluate((el) => el.firstElementChild?.getAttribute('data-testid')),
+      'the count is not the first child of the summary line',
+    ).toBe('list-toolbar-count')
+    expect(
+      await summaryLine.evaluate((el) => {
+        const last = el.lastElementChild
+        return last !== null && last.contains(el.querySelector('[data-testid="transactions-totals"]'))
+      }),
+      'the totals are not the last child of the summary line',
+    ).toBe(true)
+    const countBox = await count.boundingBox()
+    const totalsBox = await totals.boundingBox()
+    expect(
+      totalsBox!.x + totalsBox!.width,
+      `the totals end at ${totalsBox!.x + totalsBox!.width}px, left of the count's right edge ${countBox!.x + countBox!.width}px`,
+    ).toBeGreaterThanOrEqual(countBox!.x + countBox!.width)
+    await expectInsideViewport(page, totals, 'Summary totals')
+    await evidence(page, 'summary-375')
+
     expect(await expectNoHorizontalOverflow(page)).toMatchObject({ hasOverflow: false })
     await evidence(page, 'toolbar-375')
 
@@ -192,6 +246,9 @@ test.describe('transactions list controls — 375px', () => {
       await expectTapTarget(row, `Sheet row "${text}"`)
       await expectInsideViewport(page, row, `Sheet row "${text}"`)
     }
+    // #4453: the revoked agent now sits behind the Initiator facet's inactive
+    // group, so its row is only in the DOM once the disclosure is opened.
+    await sheet.getByRole('button', { name: 'Show 1 inactive' }).click()
     // The meta slot (#4150): the revoked agent's status shows beside its
     // long name — the row wraps, the status never truncates away.
     const revokedRow = sheet.locator('label').filter({ hasText: 'Lovable Dev preview deployment helper' })
@@ -204,7 +261,10 @@ test.describe('transactions list controls — 375px', () => {
     // Live, as on desktop: the tap applies and reaches the URL at once.
     await sheet.getByRole('group', { name: 'Direction' }).getByRole('radio', { name: 'Outgoing' }).check()
     await expect(page).toHaveURL(/direction=out/)
-    await sheet.getByRole('button', { name: /^Show / }).click()
+    // The sheet's submit button ("Show 2 transactions"). The inactive group's
+    // disclosure row no longer collides with it: once open it reads
+    // "Hide 1 inactive" (#4512).
+    await sheet.getByRole('button', { name: /^Show \d+ (agents?|transactions?)$/ }).click()
     await expect(sheet).toBeHidden()
     await expect(toolbar.getByRole('button', { name: 'Remove Direction: Outgoing' })).toBeVisible()
     await expect(toolbar.getByRole('button', { name: 'Filters (1)' })).toBeFocused()
@@ -236,11 +296,73 @@ test.describe('transactions list controls — desktop menus', () => {
     }
   })
 
+  test('a long Initiator menu scrolls instead of squashing its rows (#4451)', async ({ page }) => {
+    await open(page, 1280, 900, '', longAgentList)
+    const toolbar = page.getByTestId('list-toolbar')
+
+    // The natural row height, measured where nothing can shrink: the Account
+    // menu has three rows, well inside the panel's cap, and the same row
+    // classes as the Initiator menu.
+    const account = toolbar.getByRole('button', { name: /^Account:/ })
+    await account.click()
+    const accountPanel = page.locator(`[id="${await account.getAttribute('aria-controls')}"]`)
+    await expect(accountPanel).toBeVisible()
+    const natural = await accountPanel.getByRole('menuitemradio').first().evaluate((el) => el.getBoundingClientRect().height)
+    expect(natural, 'the three-row Account menu is itself squashed').toBeGreaterThan(0)
+    await page.keyboard.press('Escape')
+    await expect(accountPanel).toBeHidden()
+
+    const initiator = toolbar.getByRole('button', { name: /^Initiator:/ })
+    await initiator.click()
+    const panel = page.locator(`[id="${await initiator.getAttribute('aria-controls')}"]`)
+    await expect(panel).toBeVisible()
+
+    // All + User (manual) + twelve agents: more rows than the panel's cap holds.
+    const rows = panel.getByRole('menuitemradio')
+    await expect(rows).toHaveCount(14)
+
+    const box = await panel.evaluate((el) => ({
+      scrollHeight: el.scrollHeight,
+      clientHeight: el.clientHeight,
+      overflowY: getComputedStyle(el).overflowY,
+    }))
+    expect(box.overflowY, 'the panel is the scroll container').toBe('auto')
+    expect(
+      box.scrollHeight,
+      `the panel's ${box.scrollHeight}px of rows fit in ${box.clientHeight}px — nothing scrolls`,
+    ).toBeGreaterThan(box.clientHeight)
+
+    // Every row keeps its natural height: no row's content is taller than its
+    // box, and no row is shorter than the same row renders with three options.
+    // "All rows are equal height" would pass on the bug — they shrink equally.
+    const count = await rows.count()
+    for (let i = 0; i < count; i++) {
+      const row = rows.nth(i)
+      const text = (await row.innerText()).trim()
+      const measured = await row.evaluate((el) => ({
+        scrollHeight: el.scrollHeight,
+        clientHeight: el.clientHeight,
+        height: el.getBoundingClientRect().height,
+      }))
+      expect(
+        measured.scrollHeight,
+        `row "${text}" is squashed: ${measured.scrollHeight}px of content in a ${measured.clientHeight}px box`,
+      ).toBeLessThanOrEqual(measured.clientHeight + 1)
+      expect(
+        measured.height,
+        `row "${text}" is ${measured.height}px tall, under the natural ${natural}px`,
+      ).toBeGreaterThanOrEqual(natural - 1)
+    }
+    await evidence(page, 'initiator-menu-long-1280')
+  })
+
   test('a long selected label stays inside the facet row at 640px (#4150)', async ({ page }) => {
     await open(page, 640, 900)
     const toolbar = page.getByTestId('list-toolbar')
     const initiator = toolbar.getByRole('button', { name: /^Initiator:/ })
     await initiator.click()
+    // #4453: the revoked agent sits behind the inactive group's disclosure row.
+    await page.getByRole('menuitem', { name: 'Show 1 inactive' }).click()
     await page.getByRole('menuitemradio', { name: /Lovable Dev preview deployment helper/ }).click()
     await expect(initiator).toBeFocused()
     // The trigger with the long selected label either fits the facet row or

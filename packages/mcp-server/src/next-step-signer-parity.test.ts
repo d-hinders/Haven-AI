@@ -62,12 +62,24 @@ describe('the signer\'s declared hosted handoffs parse under the hosted schemas 
    * shape. A signature is `0x` + hex, an `*_id` is a UUID-shaped string, and
    * anything else keeps the plain placeholder.
    */
-  const sampleFor = (key: string): string =>
+  const sampleFor = (key: string): unknown =>
     key === 'signature'
       ? `0x${'ab'.repeat(65)}`
-      : key.endsWith('_id')
-        ? '0b1f6c1e-3d52-4c5b-9a3e-7c2a5f0e1d44'
-        : 'pay_1'
+      : key === 'authorization'
+        ? {
+            // #4449: the hosted `haven_sweep_delegate` phase-2 authorization.
+            from: `0x${'11'.repeat(20)}`,
+            to: `0x${'22'.repeat(20)}`,
+            value: '40000',
+            validAfter: '0',
+            validBefore: '2000000000',
+            nonce: `0x${'ab'.repeat(32)}`,
+            token: `0x${'33'.repeat(20)}`,
+            chainId: 8453,
+          }
+        : key.endsWith('_id')
+          ? '0b1f6c1e-3d52-4c5b-9a3e-7c2a5f0e1d44'
+          : 'pay_1'
   // An entry may name a hosted tool with a `#variant` suffix when one tool
   // takes several argument shapes (`haven_submit#sub_budget`): the part before
   // the `#` is the hosted tool the entry is checked against.
@@ -93,6 +105,19 @@ describe('the signer\'s declared hosted handoffs parse under the hosted schemas 
     expect(submitShapes).toEqual(
       expect.arrayContaining([['signature', 'task_budget_id'], ['signature', 'sub_budget_id']]),
     )
+  })
+
+  it('declares the #4449 success handoffs: haven_submit#payment and haven_sweep_delegate#sweep', () => {
+    // A direct payment's signed UserOp, and a sweep signature handed back to
+    // the hosted phase-2 call. Both are variant keys, so neither adds a bare
+    // `haven_submit` / `haven_sweep_delegate` entry with a union shape.
+    expect(Object.keys(SIGNER_HOSTED_HANDOFF_SHAPES)).toEqual(
+      expect.arrayContaining(['haven_submit#payment', 'haven_sweep_delegate#sweep']),
+    )
+    expect(Object.keys(SIGNER_HOSTED_HANDOFF_SHAPES['haven_submit#payment']).sort()).toEqual(['payment_id', 'signature'])
+    expect(Object.keys(SIGNER_HOSTED_HANDOFF_SHAPES['haven_sweep_delegate#sweep']).sort()).toEqual(['authorization', 'signature'])
+    expect('haven_submit' in SIGNER_HOSTED_HANDOFF_SHAPES).toBe(false)
+    expect('haven_sweep_delegate' in SIGNER_HOSTED_HANDOFF_SHAPES).toBe(false)
   })
 })
 

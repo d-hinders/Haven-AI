@@ -183,12 +183,12 @@ test.describe('detail panel polish — settlement note alignment (C)', () => {
       const dialog = await openPanel(page, width, 'api.example.dev')
       const edges = await dialog.evaluate((root) => {
         const dd = Array.from(root.querySelectorAll('dd')).find((el) =>
-          (el.textContent ?? '').includes('The payment left your account'),
+          (el.textContent ?? '').includes('This payment left your account'),
         )
         if (!dd) return null
         const value = dd.querySelector<HTMLDivElement>(':scope > div')
         const note = Array.from(dd.querySelectorAll('p')).find((el) =>
-          (el.textContent ?? '').includes('The payment left your account'),
+          (el.textContent ?? '').includes('This payment left your account'),
         )
         if (!value || !note) return null
         const rightOf = (el: HTMLElement) => {

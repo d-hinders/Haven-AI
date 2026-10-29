@@ -584,9 +584,10 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
     // `budget_atomic` (digits-only), `period_seconds` (integer ≥ 60), the
     // null-or-address `recipient_address` (#3082), and the integer
     // `expires_at`. What stays here is what JSON Schema cannot state: the
-    // budget's `> 0` half (digits-only accepts `'0'`) and its uint96 ceiling
-    // (the enforcer's word size, a chain constant), and the expiry's
-    // must-be-in-the-future half (`expires_at <= now` needs the clock).
+    // budget's `> 0` half (digits-only accepts `'0'`), its uint96 ceiling
+    // (the enforcer's word size, a chain constant), and the expiry's two
+    // clock-relative halves — must-be-in-the-future (`expires_at <= now`
+    // needs the clock) and, #4351, no-more-than-365-days-out.
     if (BigInt(budget_atomic) <= 0n || BigInt(budget_atomic) > MAX_UINT96) {
       return reply.code(400).send({ error: 'budget_atomic must be a positive atomic amount' })
     }
@@ -594,6 +595,18 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
     const expiry = expires_at ?? nowSec + 90 * 86_400
     if (expiry <= nowSec) {
       return reply.code(400).send({ error: 'expires_at must be in the future' })
+    }
+    // #4351: the expiry's upper bound. `docs/regulatory/casp-risk-guardrails.md`
+    // lists "No expiry" among the permissions to avoid, and an uncapped
+    // `--expires` let an API or CLI caller mint a budget that effectively
+    // never ends. The cap lives HERE in the build route — never in a shared
+    // policy builder: the re-key path (`agent-rekey.ts`) carries the OLD
+    // row's `expires_at` into rotation without passing through this route,
+    // and a legacy row past this cap must STAY rotatable, because rotation
+    // is the response to a suspected key exposure. The edit flow
+    // (`replaces`) builds through this route, so it is capped the same way.
+    if (expiry > nowSec + 365 * 86_400) {
+      return reply.code(400).send({ error: 'expires_at must be at most 365 days in the future' })
     }
 
     // ── The delegate account address, derived BEFORE the slot lock (#2613) ──

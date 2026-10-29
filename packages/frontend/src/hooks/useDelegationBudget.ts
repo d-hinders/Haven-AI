@@ -154,6 +154,16 @@ export interface GrantInput {
    * Left omitted (or null), the server derives the recipient itself.
    */
   merchantSlug?: string
+  /**
+   * #4350: when the budget ends — Unix seconds. The owner picks it as a
+   * preset (30, 90, 180 or 365 days; default 90, owner decision 1 on
+   * #4349) and it rides the existing `expires_at` on the build POST.
+   * Omitted, the server applies its own default (90 days as of #4349's
+   * measurement; the ceiling is the route's, #4351) — never send `undefined`
+   * from a surface that SHOWS an end date: a dropped field silently
+   * restarts the server default.
+   */
+  expiresAt?: number
 }
 
 /**
@@ -677,6 +687,9 @@ export function useDelegationBudget(
             recipient_address: input.recipientAddress ?? null,
             budget_atomic: input.budgetAtomic,
             period_seconds: input.periodSeconds,
+            // #4350: the owner's chosen end date. Absent, the server applies
+            // its own default — a surface that showed one must never drop it.
+            ...(input.expiresAt !== undefined ? { expires_at: input.expiresAt } : {}),
             ...(input.merchantSlug ? { merchant_slug: input.merchantSlug } : {}),
           })
         } catch (err) {

@@ -54,8 +54,12 @@ the whole difference between the two paragraphs.
 The Haven connector may also write split credentials:
 
 ```sh
-npx @haven_ai/mcp@alpha --identity ~/.haven/agents/<agent-id>/identity.json --signer ~/.haven/agents/<agent-id>/signer.json
+npx @haven_ai/mcp@alpha --identity ~/.haven/agents/<slug>/identity.json --signer ~/.haven/agents/<slug>/signer.json
 ```
+
+A default setup names that directory from the wiring slug (the `haven-<slug>`
+pair, #3737); only a `--bare` run, or a `--replace` without `--name`, names it
+by the agent id instead.
 
 `identity.json` holds the local API key and setup metadata. `signer.json` holds
 the delegate key. Both files stay on the user's machine.

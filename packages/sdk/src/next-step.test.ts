@@ -61,6 +61,19 @@ describe('next-step builder (#3101)', () => {
     expect(parseNextTool('haven_pay')).toBeNull()
   })
 
+  it('a `<tool>#<variant>` key selects the shape and `name` renders the bare tool (#4449)', () => {
+    const variant = createNextStepBuilder({
+      'haven_submit#payment': { ...target<{ payment_id: string }>('hosted', ['payment_id']), name: 'haven_submit' },
+    })
+    const out = variant({ ...base, nextTool: 'haven_submit#payment', nextArguments: { payment_id: 'p' } })
+    expect(out.next_tool).toBe('mcp__haven__haven_submit')
+    expect(out.next_tool_name).toBe('haven_submit')
+    expect(out.next_tool_server_role).toBe('hosted')
+    // The key still names the shape in the fail-safe reason.
+    const bad = variant({ ...base, nextTool: 'haven_submit#payment', nextArguments: {} } as unknown as Parameters<typeof variant>[0])
+    expect(bad.next_tool_omitted_reason).toBe('next_arguments do not parse under haven_submit#payment: payment_id: Required')
+  })
+
   it('the per-action default table names one tool for the unambiguous actions only', () => {
     expect(DEFAULT_NEXT_TOOL_BY_ACTION).toEqual({
       check_status_later: 'haven_get_payment_status',

@@ -41,6 +41,8 @@ const X402_BODY = {
   }],
 }
 
+const BASE_SEPOLIA_USDC = '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
+
 describe('probeCatalogEntry', () => {
   it('verifies an x402 merchant from the PAYMENT-REQUIRED header', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(null, {
@@ -106,16 +108,17 @@ describe('probeCatalogEntry', () => {
     expect(result.assetTransferMethods).toEqual(['erc7710'])
   })
 
-  it('#3386 scopes assetTransferMethods to the recorded network — the accepts[0] network', async () => {
-    // A challenge naming EIP-3009 on 84532 (accepts[0], the recorded network)
-    // and ERC-7710 only on 8453: before #3386 this recorded the union
-    // (['eip3009', 'erc7710']) on the 84532 row, which could issue a
-    // merchant-locked budget for a network the merchant never accepts
-    // ERC-7710 on.
+  it('#3386 scopes assetTransferMethods to the recorded network — the selected option\'s (#4389)', async () => {
+    // A challenge naming EIP-3009 on 84532 and ERC-7710 only on 8453: before
+    // #3386 this recorded the union (['eip3009', 'erc7710']) on one row, which
+    // could issue a merchant-locked budget for a network the merchant never
+    // accepts ERC-7710 on. Since #4389 the row records the option the pay
+    // path selects for a delegation-rail account (erc7710, on 8453), and the
+    // methods are those payable on THAT network only.
     const body = {
       x402Version: 2,
       accepts: [
-        { ...X402_BODY.accepts[0], network: 'eip155:84532' },
+        { ...X402_BODY.accepts[0], network: 'eip155:84532', asset: BASE_SEPOLIA_USDC },
         { ...X402_BODY.accepts[0], network: 'eip155:8453', extra: { assetTransferMethod: 'erc7710' } },
       ],
     }
@@ -125,16 +128,18 @@ describe('probeCatalogEntry', () => {
     }))
 
     const result = await probeCatalogEntry(X402_ENTRY, fetchMock as typeof fetch)
-    expect(result.network).toBe('eip155:84532')
-    expect(result.assetTransferMethods).toEqual(['eip3009'])
+    expect(result.network).toBe('eip155:8453')
+    expect(result.assetTransferMethods).toEqual(['erc7710'])
   })
 
-  it('#3386 still scans every option ON the recorded network, not just accepts[0]', async () => {
+  it('#3386 still scans every option ON the recorded network, not just the selected one', async () => {
     const body = {
       x402Version: 2,
       accepts: [
-        { ...X402_BODY.accepts[0], network: 'eip155:84532' },
-        { ...X402_BODY.accepts[0], network: 'eip155:84532', extra: { assetTransferMethod: 'erc7710' } },
+        // Base Sepolia USDC on the 84532 options: since #4389 the asset is
+        // labelled on the option's own chain only, and Base USDC there is a miss.
+        { ...X402_BODY.accepts[0], network: 'eip155:84532', asset: BASE_SEPOLIA_USDC },
+        { ...X402_BODY.accepts[0], network: 'eip155:84532', asset: BASE_SEPOLIA_USDC, extra: { assetTransferMethod: 'erc7710' } },
         { ...X402_BODY.accepts[0], network: 'eip155:8453', extra: { assetTransferMethod: 'erc7710' } },
       ],
     }
@@ -303,7 +308,7 @@ describe('probeCatalogEntry', () => {
       return probeCatalogEntry(X402_ENTRY, fetchMock as typeof fetch)
     }
     const option = (payTo: unknown, extra?: Record<string, unknown>) => ({
-      scheme: 'exact', network: 'eip155:84532', amount: '1000', payTo, ...(extra ? { extra } : {}),
+      scheme: 'exact', network: 'eip155:84532', asset: BASE_SEPOLIA_USDC, amount: '1000', payTo, ...(extra ? { extra } : {}),
     })
 
     it('records the one payTo every option names, lowercased', async () => {
@@ -323,7 +328,7 @@ describe('probeCatalogEntry', () => {
       expect((await probeWith([option(undefined), option(A)])).payTo).toBeUndefined()
     })
 
-    it('agrees only across options on the recorded network (the first option\'s)', async () => {
+    it('agrees only across options on the recorded network (the selected option\'s)', async () => {
       // A Base + Solana merchant: the Solana option's base58 payTo is not a
       // disagreement about where it is paid on Base.
       const solana = { scheme: 'exact', network: 'solana:mainnet', amount: '1000', payTo: 'So1anaPayToBase58xxxxxxxxxxxxxxxxxxxxxxxx' }
@@ -457,8 +462,18 @@ describe('refreshCatalog', () => {
         return { rows: [] }
       },
     }
-    const { payTo: _dropped, ...acceptWithoutPayTo } = X402_BODY.accepts[0]
-    const body = { ...X402_BODY, accepts: [acceptWithoutPayTo] }
+    // Two options on the same chain naming different payTo addresses: the
+    // challenge is verified, but it names no single payTo. (Since #4389 an
+    // option with no payTo at all is dropped, as the pay path drops it, so a
+    // challenge whose only option lacks one is a miss rather than a row with
+    // a cleared pay_to.)
+    const body = {
+      ...X402_BODY,
+      accepts: [
+        { ...X402_BODY.accepts[0], payTo: '0x' + '44'.repeat(20) },
+        { ...X402_BODY.accepts[0], payTo: '0x' + '55'.repeat(20) },
+      ],
+    }
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(null, { status: 402, headers: { 'PAYMENT-REQUIRED': b64(body) } }),
     )
@@ -522,5 +537,104 @@ describe('refreshCatalog', () => {
     }
     const result = await refreshCatalog(db, vi.fn() as unknown as typeof fetch)
     expect(result).toEqual({ verified: 0, degraded: 0, deferred: 0 })
+  })
+
+  // #4341: a probe result the database cannot store (the reviewer's repro: a
+  // well-formed 402 whose string field carries a NUL byte — Postgres rejects
+  // 0x00 in text) must not leave the row unchanged forever. It is recorded
+  // as a miss, so the row degrades after the usual streak.
+  it('records a miss when the verified write fails, and counts the degrade it causes (#4341)', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const queries: Array<[string, unknown[] | undefined]> = []
+    const db = {
+      query: async (sql: string, values?: unknown[]) => {
+        queries.push([sql, values])
+        if (sql.includes(`status = 'active'`)) {
+          // The verified write (the only statement naming the status literal)
+          // fails, the way a real Postgres write of a NUL-bearing string does.
+          throw new Error('invalid byte sequence for encoding "UTF8": 0x00')
+        }
+        if (sql.startsWith('SELECT')) {
+          return { rows: [rowFor({ id: 'cat-1', consecutive_failures: 2 })] }
+        }
+        return { rows: [] as CatalogRow[] }
+      },
+    }
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(null, { status: 402, headers: { 'PAYMENT-REQUIRED': b64(X402_BODY) } }),
+    )
+
+    const result = await refreshCatalog(db, fetchMock as typeof fetch)
+    // The verified write is never counted, and the fallback miss — the row
+    // had already missed twice — moves the row to `degraded` this run.
+    expect(result).toEqual({ verified: 0, degraded: 1, deferred: 0 })
+    const miss = queries.find(([sql, v]) => sql.includes('consecutive_failures = $2') && v?.[0] === 'cat-1')
+    expect(miss?.[1]).toEqual(['cat-1', 3, 'degraded'])
+    // The failure is logged with the row's URL, like every other write failure.
+    expect(warnSpy).toHaveBeenCalledTimes(1)
+    expect(String(warnSpy.mock.calls[0]?.[0])).toContain('https://api.merchant.example/paid')
+    expect(String(warnSpy.mock.calls[0]?.[0])).toContain('0x00')
+    warnSpy.mockRestore()
+  })
+
+  // Reviewer cell that survived on #4317: `degraded` counted even when the
+  // miss write fails. The count may only move when the write DID land.
+  it('does not count degraded when the miss write itself fails (#4317 reviewer cell)', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const db = {
+      query: async (sql: string) => {
+        if (sql.startsWith('SELECT')) {
+          return { rows: [rowFor({ id: 'cat-dead', resource_url: 'https://dead.example/x' })] }
+        }
+        // The miss write fails, the way a real Postgres write under an
+        // unreachable database does.
+        throw new Error('connection terminated unexpectedly')
+      },
+    }
+    const fetchMock = vi.fn().mockResolvedValue(new Response('gone', { status: 404 }))
+
+    const result = await refreshCatalog(db, fetchMock as typeof fetch)
+    expect(result).toEqual({ verified: 0, degraded: 0, deferred: 0 })
+    expect(warnSpy).toHaveBeenCalledTimes(1)
+    expect(String(warnSpy.mock.calls[0]?.[0])).toContain('https://dead.example/x')
+    warnSpy.mockRestore()
+  })
+})
+
+describe('probe parse-error surfacing (#4341)', () => {
+  // Since #4389 the challenge's own field types no longer throw (an option
+  // whose amount is a number is simply not an option), so the throw comes
+  // from the response the probe reads: a header accessor that throws, the
+  // shape of a broken transport object. The catch path is what is pinned.
+  it('logs a thrown parse error with the resource URL and the message, and nothing from the payload', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const body = { accepts: [{ amount: 1000, network: 'eip155:8453', secretMerchantField: 'must-not-be-logged' }] }
+    const brokenResponse = {
+      status: 402,
+      headers: { get: () => { throw new Error('header accessor exploded') } },
+      json: async () => body,
+    } as unknown as Response
+    const fetchMock = vi.fn().mockResolvedValue(brokenResponse)
+
+    const result = await probeCatalogEntry(X402_ENTRY, fetchMock as typeof fetch)
+    expect(result.ok).toBe(false)
+    expect(warnSpy).toHaveBeenCalledTimes(1)
+    const logged = String(warnSpy.mock.calls[0]?.[0])
+    expect(logged).toContain('https://api.merchant.example/paid')
+    expect(logged).toContain('header accessor exploded')
+    // Nothing from the merchant payload reaches the log.
+    expect(logged).not.toContain('must-not-be-logged')
+    expect(logged).not.toContain(JSON.stringify(body))
+    warnSpy.mockRestore()
+  })
+
+  it('logs nothing when the challenge parses (no spurious warnings)', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(null, { status: 402, headers: { 'PAYMENT-REQUIRED': b64(X402_BODY) } }),
+    )
+    await probeCatalogEntry(X402_ENTRY, fetchMock as typeof fetch)
+    expect(warnSpy).not.toHaveBeenCalled()
+    warnSpy.mockRestore()
   })
 })

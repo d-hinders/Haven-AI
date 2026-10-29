@@ -9,7 +9,7 @@
  * enrollment, then wallets), so "Passkey N" numbering is stable here.
  *
  * Read-only: adding, replacing and removing a signer stay on the account
- * page's Backup & recovery card.
+ * page's Who can approve section.
  */
 
 import { useCallback, useEffect, useState } from 'react'

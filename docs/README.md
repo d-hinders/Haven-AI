@@ -3,7 +3,7 @@ owner: "@d-hinders"
 status: current
 covers:
   - docs/contributing/docs-quality-system.md
-last-verified: "2026-09-08"
+last-verified: "2026-10-25"
 ---
 
 # Haven Documentation
@@ -20,11 +20,16 @@ describe how the system is actually built and how we work on it.
 
 | Folder | What lives here | Authoritative for |
 |---|---|---|
-| [`architecture/`](architecture/README.md) | System diagrams and contracts (Mermaid is canonical). | How identity, custody, payments, x402, and MCP actually flow through the code. |
+| [`architecture/`](architecture/README.md) | System diagrams and contracts (Mermaid is canonical where a doc carries it). | How identity, custody, payments, x402, and MCP actually flow through the code. |
 | [`product/`](product/README.md) | UX doctrine, design system, copy guidelines, screen recipes, review checklist. | Anything user-facing — visual system, terminology, and product UX rules. |
-| [`contributing/`](contributing/ai-agent-workflow.md) | How we build: agentic workflow, review patterns, PR checklist, code-quality program. | Process for shipping changes and keeping PRs reviewable. |
-| [`operations/`](operations/hosted-mcp.md) | Deploying and running the hosted MCP server, runtime compatibility, and the local→hosted migration. | Production deployment and runtime setup. |
-| [`regulatory/`](regulatory/casp-risk-guardrails.md) | CASP / MiCA non-custodial guardrails and the payment-code merge checklist. | The compliance perimeter every payment change must respect. |
+| [`contributing/`](contributing/ai-agent-workflow.md) | How we build: agentic workflow, the autonomous PR loop and its ship playbooks, review patterns, PR checklist, the docs-quality system and the testing strategy. | Process for shipping changes and keeping PRs reviewable. |
+| [`operations/`](operations/hosted-mcp.md) | Runbooks for deploying and running Haven: the hosted MCP server and runtime compatibility, the dev environment and Railway, QA and evals, promotion and release, and the operator jobs (accounting feed, catalog ingestion, alarms). | Production deployment, runtime setup and operator procedures. |
+| [`regulatory/`](regulatory/casp-risk-guardrails.md) | CASP / MiCA non-custodial guardrails, the payment-code merge checklist, and the dated CASP changelog (`casp-changelog/`). | The compliance perimeter every payment change must respect. |
+| [`security/`](security/delegation-rail-security-model.md) | The delegation rail's security model and the hosted merchant-egress policy. | What the rail and the hosted server do and do not protect against. |
+| [`exit/`](exit/README.md) | How an account holder inspects and revokes agent budgets without Haven. | The non-custody exit guarantee. |
+| [`quality/`](quality/scan-ledger.md) | The append-only `quality-scan` ledger, and the per-issue classification behind the 2026-09 issue retrospective. | What each quality scan found and how it was disposed of. |
+| [`bug-reports/`](bug-reports/_run-report-template.md) | Dated QA run reports and quality-scan reports, plus the run-report template. | What a run observed on the day — a record, not current state. |
+| [`backlogs/`](backlogs/README.md) | A redirect (the loop's backlog moved to GitHub Issues) and one retired YAML track kept as a record. | Nothing current — see the autonomous PR loop. |
 | [`research/`](research/README.md) | Forward-looking investigations and decision aids, often with a prototype spec. | Where a part of the system *could* go — options and recommendations, not current contracts. |
 | [`archive/`](archive/README.md) | Shipped designs and point-in-time artifacts, frozen for context. | Historical rationale only — never current state. |
 
@@ -74,9 +79,12 @@ describe how the system is actually built and how we work on it.
 
 ## Conventions
 
-- File and folder names are lowercase `kebab-case`. The exception is each
-  folder's `README.md` index.
-- Architecture diagrams are authored in Mermaid inside the markdown; PNG/SVG
-  exports are regenerated from it (see [architecture/README.md](architecture/README.md)).
+- File and folder names are lowercase `kebab-case`. The exceptions are each
+  folder's `README.md` index and `bug-reports/`, where some run reports carry a UTC
+  timestamp prefix (`2026-10-14T135237Z-…`) and the template is
+  `_run-report-template.md`.
+- Where an architecture doc carries a diagram in Mermaid, the Mermaid inside the
+  markdown is canonical and the PNG/SVG exports are regenerated from it (see
+  [architecture/README.md](architecture/README.md)).
 - When work ships, move its point-in-time plan/handoff into `archive/` with an
   `ARCHIVED` banner rather than leaving it beside current docs.

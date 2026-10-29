@@ -37,12 +37,13 @@
  * day and swatch order), joined later by one clip per showcase sample from
  * #3805 (four), #3845 (NoticeRow) and #3810 (activity row);
  * everything else below the shell on that page is still compared against
- * nothing. `product-routes.visual.spec.ts`'s whole-page
- * `/dashboard` and `/transactions` baselines remain the only whole-page pixel
- * coverage in the suite. The scoped sidebar and showcase-sample clips below are
- * what is left of this spec; the top-bar clip that shared the file was removed
- * with the bar itself (#4029), and the authenticated whole-page baselines carry
- * the rest of the shell.
+ * nothing. Whole-page pixel coverage lives in `product-routes.visual.spec.ts`
+ * and seven other specs that capture `fullPage: true` (analytics, demo,
+ * dev-agent-pages, home, how-it-works, marketplace, releases). The scoped
+ * sidebar and showcase-sample clips below are what is left of this spec;
+ * the top-bar clip that shared the file was removed with the bar itself
+ * (#4029), and the authenticated whole-page baselines carry the rest of the
+ * shell.
  *
  * BASELINES ARE LINUX-RENDERED (committed under e2e/__screenshots__/<spec>/,
  * one directory per spec file — there is no platform segment in the path, which
@@ -450,7 +451,8 @@ test.describe('design-system visual regression', () => {
    *   - the NARROW sample → `...-stacked-bar-chart-narrow-<vp>[-dark].png`,
    *     the `PAD_NARROW` gutter treatment whose tick voice #3057 changed;
    *   - the SWATCH LIST   → `...-stacked-bar-swatch-list-<vp>[-dark].png`,
-   *     one `series-swatch` per series in order.
+   *     one `series-swatch` per agent in order, each wearing the agent's own
+   *     avatar tint with its Monogram beside it (#4331).
    *
    * ── The assertions are the named causes for any pixel diff ──────────────────
    *
@@ -460,8 +462,9 @@ test.describe('design-system visual regression', () => {
    * step to 200, and `formatAnalyticsTick` renders integers); exactly one day
    * carries `data-partial`, it is the LAST day, and the chart defines a hatch
    * pattern per series for it; the swatch list holds one `series-swatch` per
-   * series, IN ORDER (`data-series-index` 0 then 1, the same indexes the bars
-   * paint with). A diff with none of these having moved is a paint/token
+   * agent, IN ORDER, each wearing the agent's OWN avatar tint
+   * (`seriesColorForAgent`) with its Monogram beside it (#4331). A diff with
+   * none of these having moved is a paint/token
    * drift; a diff WITH one of them moved names its own cause.
    *
    * The budget is the same 100-px absolute slack every clip in this file
@@ -540,14 +543,34 @@ test.describe('design-system visual regression', () => {
       await page.evaluate(() => document.fonts.ready)
       await page.waitForLoadState('networkidle')
 
-      // Named cause 3 — the swatches: one per series, in order, the same
-      // `seriesColor(index)` the bars paint with.
+      // Named cause 3 — the swatches: one per agent, in order, each wearing
+      // the agent's OWN STORED tint (`seriesColorForAgent`, #4331/#4428 —
+      // 'Research agent' carries tint 6, 'Data-feed agent' tint 2, and both
+      // names hash to 6, so the pair is the rule the epic changed), with the
+      // agent's Monogram beside it — the pairing the list exists to show, not
+      // a rank-assigned series index the bars paint with.
       const swatchList = page.getByTestId('ds-stacked-bar-swatch-list')
       await expect(swatchList).toHaveCount(1)
-      const swatches = swatchList.getByTestId('series-swatch')
-      await expect(swatches).toHaveCount(2)
-      await expect(swatches.nth(0)).toHaveAttribute('data-series-index', '0')
-      await expect(swatches.nth(1)).toHaveAttribute('data-series-index', '1')
+      const rows = swatchList.locator('li')
+      await expect(rows).toHaveCount(2)
+      await expect(swatchList.getByTestId('series-swatch')).toHaveCount(2)
+      const researchRow = rows.filter({ hasText: 'Research agent' })
+      const dataFeedRow = rows.filter({ hasText: 'Data-feed agent' })
+      await expect(researchRow).toHaveCount(1)
+      await expect(dataFeedRow).toHaveCount(1)
+      await expect(researchRow.getByTestId('series-swatch')).toHaveAttribute(
+        'style',
+        /var\(--v2-avatar-6\)/,
+      )
+      await expect(dataFeedRow.getByTestId('series-swatch')).toHaveAttribute(
+        'style',
+        /var\(--v2-avatar-2\)/,
+      )
+      // The agent's own Monogram sits beside its swatch: the same aria-hidden
+      // 32px mark the Monogram agent-row sample below asserts on — the #4331
+      // pairing, one colour per agent.
+      await expect(researchRow.locator('[aria-hidden="true"].h-8.w-8')).toHaveCount(1)
+      await expect(dataFeedRow.locator('[aria-hidden="true"].h-8.w-8')).toHaveCount(1)
 
       await expectShowcaseClip(swatchList, vp.height, 'the swatch list', `design-system-stacked-bar-swatch-list-${vp.name}${schemeSuffix}.png`, STACKED_BAR_MAX_DIFF_PIXELS)
     })
@@ -598,9 +621,10 @@ test.describe('design-system visual regression', () => {
       await expect(sample).toHaveCount(1)
       // All five tone items rendered — a dismiss here is interaction state,
       // and this gate photographs the resting page only. Still exactly three
-      // dismiss controls: the badge-less summary stays dismissible, the
-      // failure row keeps only the reserved slot, and the haven-paused row
-      // (#4033) has no dismiss at all — nothing visible to align.
+      // dismiss controls: budget reached, the badge-less summary and the
+      // failure row (#4324: failures are acknowledged). The low-balance row
+      // keeps only the reserved slot, and the nothing-to-align row (#4033)
+      // has no dismiss at all.
       await expect(sample.locator('li')).toHaveCount(5)
       await expect(sample.getByTestId(/^attention-dismiss-/)).toHaveCount(3)
       await expectShowcaseClip(sample, vp.height, 'the AttentionList sample', `design-system-attention-list-${vp.name}${schemeSuffix}.png`, SAMPLE_MAX_DIFF_PIXELS)
@@ -670,6 +694,67 @@ test.describe('design-system visual regression', () => {
       await expectShowcaseClip(sample, vp.height, 'the StatTile inline sample', `design-system-stat-tile-inline-${vp.name}${schemeSuffix}.png`, SAMPLE_MAX_DIFF_PIXELS)
     })
 
+    // #4495: the paging footer row — the hairline, the centred ink-2 text and
+    // the 44px row are one layout no unit test sees, and no committed baseline
+    // covered `ListShowMore` before this (the transactions route baselines use
+    // a two-row fixture with no next page). Idle state only: the specimen's
+    // "Show 24 more" starts a 600ms loading timer, and this gate photographs
+    // the resting page.
+    test(`/design-system list-controls paging sample renders pixel-stable (${vp.name})`, async ({ page }, testInfo) => {
+      const scheme = schemeOf(testInfo)
+      const schemeSuffix = scheme === 'dark' ? '-dark' : ''
+      await page.setViewportSize({ width: vp.width, height: vp.height })
+      await page.goto('/design-system')
+      await page.evaluate(() => document.fonts.ready)
+      await page.waitForLoadState('networkidle')
+
+      const sample = page.getByTestId('ds-list-controls-paging')
+      await expect(sample).toHaveCount(1)
+      await expect(sample.getByTestId('list-show-more')).toBeVisible()
+      await expectShowcaseClip(sample, vp.height, 'the list-controls paging sample', `design-system-list-controls-paging-${vp.name}${schemeSuffix}.png`, SAMPLE_MAX_DIFF_PIXELS)
+    })
+
+    // #4475: the section heading's optional trailing link — the heading and the
+    // link on one baseline-aligned row, above the card, wrapping under the
+    // heading on a phone. No unit test sees that layout, and no committed
+    // baseline covered it before this. The clip is the specimen GRID, not the
+    // section: the section's own prose is documentation, and clipping it would
+    // put the sample's height at the mercy of a paragraph edit.
+    test(`/design-system section heading with a trailing link renders pixel-stable (${vp.name})`, async ({ page }, testInfo) => {
+      const scheme = schemeOf(testInfo)
+      const schemeSuffix = scheme === 'dark' ? '-dark' : ''
+      await page.setViewportSize({ width: vp.width, height: vp.height })
+      await page.goto('/design-system')
+      await page.evaluate(() => document.fonts.ready)
+      await page.waitForLoadState('networkidle')
+
+      const sample = page.getByTestId('ds-section-heading-action')
+      await expect(sample).toHaveCount(1)
+      // Two specimens, two links: the detail-page shape and the settings shape.
+      await expect(sample.getByRole('link', { name: 'View all' })).toHaveCount(2)
+      await expectShowcaseClip(sample, vp.height, 'the section heading with a trailing link sample', `design-system-section-heading-action-${vp.name}${schemeSuffix}.png`, SAMPLE_MAX_DIFF_PIXELS)
+    })
+
+    // #4475: the shared detail list — the trailing-actions column at `sm` and
+    // up, the label stacking over the value below it, and the compact density's
+    // 120px track. The connect flow's approval step renders the same component,
+    // so this clip is the one place the two densities sit side by side.
+    test(`/design-system detail list sample renders pixel-stable (${vp.name})`, async ({ page }, testInfo) => {
+      const scheme = schemeOf(testInfo)
+      const schemeSuffix = scheme === 'dark' ? '-dark' : ''
+      await page.setViewportSize({ width: vp.width, height: vp.height })
+      await page.goto('/design-system')
+      await page.evaluate(() => document.fonts.ready)
+      await page.waitForLoadState('networkidle')
+
+      const sample = page.getByTestId('ds-detail-list')
+      await expect(sample).toHaveCount(1)
+      // Normal density with trailing actions, compact density without.
+      await expect(sample.locator('dl')).toHaveCount(2)
+      await expect(sample.getByRole('button', { name: 'Remove' })).toHaveCount(2)
+      await expectShowcaseClip(sample, vp.height, 'the detail list sample', `design-system-detail-list-${vp.name}${schemeSuffix}.png`, SAMPLE_MAX_DIFF_PIXELS)
+    })
+
     // #4208: these are the two standing examples for the agent identity mark.
     // The first protects the compact row-sized Monogram, including the emoji
     // grapheme case; the second protects its title alignment in PageHeader.
@@ -683,9 +768,67 @@ test.describe('design-system visual regression', () => {
 
       const sample = page.getByTestId('ds-monogram')
       await expect(sample).toHaveCount(1)
-      await expect(sample.locator('[aria-hidden="true"].h-8.w-8')).toHaveCount(2)
+      // Three xs marks: the agent-row sample, the hash-alike pair #4428
+      // added, and the emoji sample.
+      await expect(sample.locator('[aria-hidden="true"].h-8.w-8')).toHaveCount(3)
       await expect(sample.getByText('Research agent', { exact: true })).toBeVisible()
+      // #4428: the pair whose names hash alike (both tint 6) wears two
+      // different STORED tints — the rule the epic changed, on the page.
+      const researchMark = sample.locator('[aria-hidden="true"].h-8.w-8').nth(0)
+      const dataFeedMark = sample.locator('[aria-hidden="true"].h-8.w-8').nth(1)
+      await expect(researchMark).toHaveClass(/bg-\[var\(--v2-avatar-6-soft\)\]/)
+      await expect(dataFeedMark).toHaveClass(/bg-\[var\(--v2-avatar-2-soft\)\]/)
       await expectShowcaseClip(sample, vp.height, 'the Monogram sample', `design-system-monogram-${vp.name}${schemeSuffix}.png`, SAMPLE_MAX_DIFF_PIXELS)
+    })
+
+    // #4480: the overlapping agent avatar stack, owner-approved 2026-10-27.
+    // Two stacks — the cap (three marks, no overflow) and the overflow case
+    // (three marks plus a `+2` mark) — so the clip pins both the overlap and
+    // the neutral overflow mark.
+    test(`/design-system agent avatar stack sample renders pixel-stable (${vp.name})`, async ({ page }, testInfo) => {
+      const scheme = schemeOf(testInfo)
+      const schemeSuffix = scheme === 'dark' ? '-dark' : ''
+      await page.setViewportSize({ width: vp.width, height: vp.height })
+      await page.goto('/design-system')
+      await page.evaluate(() => document.fonts.ready)
+      await page.waitForLoadState('networkidle')
+
+      const sample = page.getByTestId('ds-agent-avatar-stack')
+      await expect(sample).toHaveCount(1)
+      const stacks = sample.getByTestId('agent-avatar-stack')
+      await expect(stacks).toHaveCount(2)
+      // The cap: three marks, no overflow mark.
+      await expect(stacks.nth(0).getByTestId('agent-avatar-stack-mark')).toHaveCount(3)
+      await expect(stacks.nth(0).getByTestId('agent-avatar-stack-overflow')).toHaveCount(0)
+      // Past the cap: three marks and ONE `+2` mark.
+      await expect(stacks.nth(1).getByTestId('agent-avatar-stack-mark')).toHaveCount(3)
+      await expect(stacks.nth(1).getByTestId('agent-avatar-stack-overflow')).toHaveText('+2')
+      // One focus stop per stack, not one per mark (#4480): the shared
+      // Tooltip's wrapper is the only tab stop in the section.
+      await expect(sample.locator('[tabindex="0"]')).toHaveCount(2)
+      await expectShowcaseClip(sample, vp.height, 'the agent avatar stack sample', `design-system-agent-avatar-stack-${vp.name}${schemeSuffix}.png`, SAMPLE_MAX_DIFF_PIXELS)
+    })
+
+    // #4480: the full AreaChart had no visual pin at all. The rising sample is
+    // the one that shows the success-green "Net change"; the falling sample
+    // above it stays neutral ink.
+    test(`/design-system AreaChart rising sample renders pixel-stable (${vp.name})`, async ({ page }, testInfo) => {
+      const scheme = schemeOf(testInfo)
+      const schemeSuffix = scheme === 'dark' ? '-dark' : ''
+      await page.setViewportSize({ width: vp.width, height: vp.height })
+      await page.goto('/design-system')
+      await page.evaluate(() => document.fonts.ready)
+      await page.waitForLoadState('networkidle')
+
+      const sample = page.getByTestId('ds-area-chart-rising')
+      await expect(sample).toHaveCount(1)
+      // Assert the state before the pixels: the delta is the signed rise and
+      // it wears the success token, so a capture that silently lost the tone
+      // fails by name rather than as an unattributable diff.
+      const delta = sample.getByTestId('area-delta')
+      await expect(delta).toHaveText('Net change +180.00')
+      await expect(delta).toHaveClass(/text-\[var\(--v2-success\)\]/)
+      await expectShowcaseClip(sample, vp.height, 'the AreaChart rising sample', `design-system-area-chart-rising-${vp.name}${schemeSuffix}.png`, SAMPLE_MAX_DIFF_PIXELS)
     })
 
     test(`/design-system PageHeader leading sample renders pixel-stable (${vp.name})`, async ({ page }, testInfo) => {
@@ -701,6 +844,31 @@ test.describe('design-system visual regression', () => {
       await expect(sample.getByRole('heading', { name: 'Research agent', exact: true })).toHaveCount(1)
       await expect(sample.locator('[aria-hidden="true"].h-12.w-12')).toHaveCount(1)
       await expectShowcaseClip(sample, vp.height, 'the PageHeader leading sample', `design-system-pageheader-leading-${vp.name}${schemeSuffix}.png`, SAMPLE_MAX_DIFF_PIXELS)
+    })
+
+    // #4496: the SegmentedControl's outlined, divided look — the selected
+    // segment is brand-soft fill + brand ink + semibold with NO outline, and
+    // the group is a 1px border with hairline dividers and no tinted track.
+    // No other baseline covers the specimen, and the dark project is the only
+    // place the selected state's dark palette is photographed at all (the
+    // currency and More-sheet baselines capture it in situ, not as a specimen).
+    // The clip is the controls row, so it carries the enabled three-way control
+    // and the disabled two-way one side by side.
+    test(`/design-system SegmentedControl sample renders pixel-stable (${vp.name})`, async ({ page }, testInfo) => {
+      const scheme = schemeOf(testInfo)
+      const schemeSuffix = scheme === 'dark' ? '-dark' : ''
+      await page.setViewportSize({ width: vp.width, height: vp.height })
+      await page.goto('/design-system')
+      await page.evaluate(() => document.fonts.ready)
+      await page.waitForLoadState('networkidle')
+
+      const sample = page.getByTestId('ds-segmented-control')
+      await expect(sample).toHaveCount(1)
+      // Two controls: the enabled three-way theme one and the disabled pair.
+      await expect(sample.getByRole('radiogroup')).toHaveCount(2)
+      await expect(sample.getByRole('radio', { name: 'System' })).toHaveAttribute('aria-checked', 'true')
+      await expect(sample.getByRole('radio', { name: '$ USD' })).toBeDisabled()
+      await expectShowcaseClip(sample, vp.height, 'the SegmentedControl sample', `design-system-segmented-control-${vp.name}${schemeSuffix}.png`, SAMPLE_MAX_DIFF_PIXELS)
     })
   }
 
@@ -768,7 +936,11 @@ test.describe('design-system visual regression', () => {
     ['AreaChart sparkline sample', (p) => p.getByTestId('ds-area-chart-sparkline')],
     ['StatTile inline sample', (p) => p.getByTestId('ds-stat-tile-inline')],
     ['Monogram sample', (p) => p.getByTestId('ds-monogram')],
+    ['agent avatar stack sample', (p) => p.getByTestId('ds-agent-avatar-stack')],
+    ['AreaChart rising sample', (p) => p.getByTestId('ds-area-chart-rising')],
     ['PageHeader leading sample', (p) => p.getByTestId('ds-pageheader-leading')],
+    ['SegmentedControl sample', (p) => p.getByTestId('ds-segmented-control')],
+    ['list-controls paging sample', (p) => p.getByTestId('ds-list-controls-paging')],
   ]
 
   const FRACTIONAL_SPACERS_PX = [0.25, 0.5, 0.75]

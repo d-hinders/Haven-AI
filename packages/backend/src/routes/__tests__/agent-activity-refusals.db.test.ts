@@ -85,8 +85,9 @@ async function seedRefusal(
       seed.userId,
       seed.agentId,
       opts.amountAtomic ?? '25000',
-      opts.merchantTo ?? '0x0000000000000000000000000000000000000009',
-      opts.resourceUrl ?? 'https://research.example/report',
+      // `in`, not `??`: an explicit null seeds a NULL column (both are nullable).
+      'merchantTo' in opts ? opts.merchantTo : '0x0000000000000000000000000000000000000009',
+      'resourceUrl' in opts ? opts.resourceUrl : 'https://research.example/report',
       opts.reason ?? 'delegation_budget_exceeded',
       opts.createdAt,
     ],
@@ -216,6 +217,29 @@ describeDb('GET /agent-activity/:id/activity?kind=refusals — the refusal read 
     expect(byMerchant.json().activity[0].merchant_to).toBe('0x00000000000000000000000000000000000000bb')
   })
 
+  // #4346: `q` is a substring search, so `%`, `_` and `\` are literal. The
+  // repository's list and COUNT statements are separate texts, so each case
+  // checks both: `total`/`hasMore` must agree with the page.
+  it('q matches `%`, `_` and `\\` literally — page and count agree (#4346)', async () => {
+    const seed = await seedUserWithAgent()
+    const underscore = await seedRefusal(seed, { createdAt: '2026-07-10T08:00:00Z', resourceUrl: 'https://r.example/a_b' })
+    await seedRefusal(seed, { createdAt: '2026-07-10T07:00:00Z', resourceUrl: 'https://r.example/axb' })
+    const backslash = await seedRefusal(seed, { createdAt: '2026-07-10T06:00:00Z', resourceUrl: 'https://r.example/a\\b' })
+    // Two `ab` rows: a raw `a\\b` term matches both, so the count tells raw from escaped.
+    await seedRefusal(seed, { createdAt: '2026-07-10T05:00:00Z', resourceUrl: 'https://r.example/ab' })
+    await seedRefusal(seed, { createdAt: '2026-07-10T04:00:00Z', resourceUrl: 'https://r.example/ab-2' })
+    const filter = (q: string) => ({ from: null, to: null, q })
+
+    expect((await listAgentRefusalsFiltered(seed.agentId, filter('a_b'), 30, 0, db)).map((r) => r.id)).toEqual([underscore])
+    expect(await countAgentRefusalsFiltered(seed.agentId, filter('a_b'), db)).toBe(1)
+
+    expect((await listAgentRefusalsFiltered(seed.agentId, filter('a\\b'), 30, 0, db)).map((r) => r.id)).toEqual([backslash])
+    expect(await countAgentRefusalsFiltered(seed.agentId, filter('a\\b'), db)).toBe(1)
+
+    expect(await listAgentRefusalsFiltered(seed.agentId, filter('%'), 30, 0, db)).toEqual([])
+    expect(await countAgentRefusalsFiltered(seed.agentId, filter('%'), db)).toBe(0)
+  })
+
   it('pages with total and hasMore — an offset past the end still reports the total', async () => {
     const seed = await seedUserWithAgent()
     await seedRefusal(seed, { createdAt: '2026-07-10T08:00:00Z' })
@@ -340,8 +364,14 @@ describeDb('the refusal repository reads (#4323, real DB)', () => {
   it('an empty filter set filters nothing; an unknown q matches nothing', async () => {
     const seed = await seedUserWithAgent()
     await seedRefusal(seed, { createdAt: '2026-07-10T08:00:00Z' })
+    // #4346: a refusal with neither a resource URL nor a merchant value. With
+    // no q it is listed and counted; were a null q bound as '' instead, every
+    // ILIKE arm would be NULL for this row and it would drop out.
+    const bare = await seedRefusal(seed, { createdAt: '2026-07-09T08:00:00Z', resourceUrl: null, merchantTo: null })
 
-    expect(await countAgentRefusalsFiltered(seed.agentId, { from: null, to: null, q: null })).toBe(1)
+    const all = await listAgentRefusalsFiltered(seed.agentId, { from: null, to: null, q: null }, 30, 0)
+    expect(all.map((r) => r.id)).toContain(bare)
+    expect(await countAgentRefusalsFiltered(seed.agentId, { from: null, to: null, q: null })).toBe(2)
     expect(await countAgentRefusalsFiltered(seed.agentId, { from: null, to: null, q: 'nomatch' })).toBe(0)
     expect(await countAgentRefusalsFiltered(seed.agentId, { from: '2026-07-11T00:00:00Z', to: null, q: null })).toBe(0)
   })

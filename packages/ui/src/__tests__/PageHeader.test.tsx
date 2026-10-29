@@ -94,9 +94,11 @@ describe('PageHeader leading slot (#4210)', () => {
     const { container } = render(
       <PageHeader title="Agents" subtitle="All agents." actions={<button type="button">New</button>} />,
     )
-    // pinned whole from origin/dev @ e44a7a79a, before the slot existed
+    // pinned whole from origin/dev @ e44a7a79a, before the slot existed;
+    // #3963 changed the title column's floor (min-w-min) and let the actions
+    // row shrink, so the pin carries those two class deltas.
     expect(container.innerHTML).toBe(
-      '<header class="mb-6 flex gap-4 sm:flex-row sm:items-center sm:justify-between flex-col"><div class="min-w-0"><h1 class="v2-text-h1 text-[var(--v2-ink)]">Agents</h1><p class="mt-2 v2-text-body text-[var(--v2-ink-2)] max-w-2xl">All agents.</p></div><div class="flex flex-wrap items-center gap-2 flex-shrink-0"><button type="button">New</button></div></header>',
+      '<header class="mb-6 flex gap-4 sm:flex-row sm:items-center sm:justify-between flex-col"><div class="min-w-min"><h1 class="v2-text-h1 text-[var(--v2-ink)]">Agents</h1><p class="mt-2 v2-text-body text-[var(--v2-ink-2)] max-w-2xl">All agents.</p></div><div class="flex flex-wrap items-center gap-2"><button type="button">New</button></div></header>',
     )
   })
 })

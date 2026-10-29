@@ -88,7 +88,6 @@
     ".github/workflows/update-visual-baselines.yml",
     "packages/frontend/copy-lint-baseline.json",
     "packages/frontend/src/app/(authenticated)/agents/[agentId]/AgentDetailClient.tsx",
-    "packages/frontend/src/app/(authenticated)/profile/ProfileClient.tsx",
     "packages/frontend/src/components/AgentPanel.tsx",
     "packages/frontend/src/components/BudgetGrantAction.tsx",
     "packages/frontend/src/components/CatalogSubmitModal.tsx",
@@ -115,8 +114,7 @@
     "scripts/frontend-copy-lint.mjs"
   ],
   "docs/contributing/ship-playbooks/money.md": [
-    "scripts/ci/money-path-restatement-scan.mjs",
-    "scripts/ci/money-path.test.mjs"
+    "scripts/ci/money-path-restatement-scan.mjs"
   ],
   "docs/contributing/ship-playbooks/README.md": [
     ".github/labeler.yml",

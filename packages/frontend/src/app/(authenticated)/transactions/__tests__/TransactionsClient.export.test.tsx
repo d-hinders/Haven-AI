@@ -30,12 +30,11 @@ vi.mock('@/lib/api', async () => {
     },
   }
 })
-vi.mock('@/lib/transaction-csv', async () => {
-  const actual = await vi.importActual<typeof import('@/lib/transaction-csv')>('@/lib/transaction-csv')
+vi.mock('@/lib/csv-export', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/csv-export')>('@/lib/csv-export')
   return {
     ...actual,
     downloadCsv: (...a: unknown[]) => mockDownloadCsv(...a),
-    buildCsvFilename: () => 'haven-transactions-20260911.csv',
   }
 })
 vi.mock('next/navigation', () => ({
@@ -163,7 +162,8 @@ describe('TransactionsClient — CSV export (#2871)', () => {
     expect(mockGetText).toHaveBeenCalledWith(expect.stringContaining('accountId=safe-1'))
     expect(mockDownloadCsv).toHaveBeenCalledWith(
       '﻿settled_at\r\n"x"',
-      'haven-transactions-20260911.csv',
+      // The page owns the prefix; the UTC stamp is the shared helper's.
+      expect.stringMatching(/^haven-transactions-\d{8}\.csv$/),
     )
   })
 
@@ -455,25 +455,28 @@ describe('TransactionsClient — URL and export params (#4111)', () => {
     expect(totals).not.toHaveTextContent(/Money in/)
   })
 
-  it('puts the filtered totals on the left of the list summary line, the count on the right (#4196)', async () => {
+  it('puts the count on the left of the list summary line, the filtered totals on the right (#4196, #4473)', async () => {
     urlState.query = 'accountId=safe-1'
     render(<TransactionsClient />)
 
     const line = screen.getByTestId('list-summary')
     expect(await within(line).findByTestId('transactions-totals')).toHaveTextContent(/In.*Out/)
-    expect(line.lastElementChild).toBe(screen.getByTestId('list-toolbar-count'))
+    // Both ends: the count first, the totals last and right-aligned.
+    expect(line.firstElementChild).toBe(screen.getByTestId('list-toolbar-count'))
+    expect(line.lastElementChild).toContainElement(within(line).getByTestId('transactions-totals'))
+    expect(line.lastElementChild).toHaveClass('ml-auto', 'text-right')
     await waitFor(() =>
       expect(within(screen.getByTestId('list-summary')).getByTestId('list-toolbar-count')).toHaveTextContent(/^1 of 40 transactions$/),
     )
   })
 
-  it('unfiltered, the summary line holds In and Out beside the count, and no status row (#4196, #4266)', async () => {
+  it('unfiltered, the summary line holds the count first and In and Out beside it, and no status row (#4196, #4266)', async () => {
     urlState.query = ''
     render(<TransactionsClient />)
 
     const totals = await screen.findByTestId('transactions-totals')
     expect(within(totals).getAllByTestId('transactions-total')).toHaveLength(2)
-    expect(screen.getByTestId('list-summary').lastElementChild).toHaveTextContent('1 transaction')
+    expect(screen.getByTestId('list-summary').firstElementChild).toHaveTextContent('1 transaction')
     expect(screen.queryByTestId('list-toolbar-status')).not.toBeInTheDocument()
   })
 
@@ -496,7 +499,12 @@ describe('TransactionsClient — URL and export params (#4111)', () => {
     feedState.hasMore = true
     feedState.total = 60
     const { unmount } = render(<TransactionsClient />)
-    fireEvent.click(screen.getByRole('button', { name: 'Show 25 more' }))
+    const button = screen.getByRole('button', { name: 'Show 25 more' })
+    // Inside the card: the footer row is the card's last child (#4495).
+    const card = screen.getByTestId('transactions-ledger').closest('.shadow-card')
+    expect(card).not.toBeNull()
+    expect(card).toContainElement(button)
+    fireEvent.click(button)
     expect(feedState.loadMore).toHaveBeenCalledTimes(1)
     unmount()
 

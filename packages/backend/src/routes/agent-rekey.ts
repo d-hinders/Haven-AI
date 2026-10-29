@@ -54,10 +54,10 @@
  * Not here. Every query this flow needs lives in
  * `infra/repositories/agent-rekeys.ts`, so the route reads as a sequence of
  * decisions and every statement is reachable from the real-DB harness without
- * standing up Fastify. The one exception is the completion transaction, which
- * takes a dedicated client so the credential swap, the intent invalidation
- * and the stage advance commit or roll back together — the same shape the
- * grant lifecycle uses, and the reason for the `dep-lint-exempt` below.
+ * standing up Fastify. That includes the completion: `completeRekey` runs
+ * its writes — among them the credential swap, the intent invalidation and
+ * the stage advance — in one `withTransaction`, so they commit or roll back
+ * together, and the route needs no `dep-lint-exempt` waiver for it.
  */
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import crypto from 'crypto'

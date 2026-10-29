@@ -23,10 +23,11 @@
  *
  * A button labelled `Dismiss: {title}` (icon-only, so the label is the whole
  * accessible name) calling `onDismiss(id)` — rendered only when the item is
- * `dismissible` (default true; #3813's dashboard passes the rules layer's
- * `DISMISSIBLE_ATTENTION_KINDS`, so only "No backup signer" and "Needs
- * setup" offer the control). The list holds NO dismissal state — #3813 owns
- * persistence; this component renders what it is given.
+ * `dismissible` (default true; the dashboard passes the rules layer's
+ * `DISMISSIBLE_ATTENTION_KINDS` — since #4324 every kind except low balance
+ * and zero USDC). The list holds NO dismissal state — #3813 and #4324 own
+ * persistence (permanent dismissals and acknowledgements); this component
+ * renders what it is given.
  * What it does own is where focus lands: after a dismiss it moves to the
  * next dismissible item's dismiss button, or the last remaining one when the
  * dismissed row was the last dismissible row (the caller re-renders without

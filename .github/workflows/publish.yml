@@ -36,8 +36,10 @@ name: Publish packages
 #
 # THE INVARIANT, stated once: a snapshot may reach only the `dev` dist-tag, and
 # the prod channel may never publish a 0.0.0-dev.* version. It is enforced in
-# four independent places, because they fail differently (#2536 added the
-# fourth and left this sentence saying three — corrected by #2580):
+# five independent places, because they fail differently (#2536 added the
+# fourth and left this sentence saying three — corrected by #2580; #2647 added
+# the fifth, the `promote-tags` job, and left it saying four — corrected by
+# #4371):
 #
 #   1. "Resolve the publish channel" refuses a ref/channel mismatch. This is the
 #      only route by which dev-branch code could be published under `alpha`: a

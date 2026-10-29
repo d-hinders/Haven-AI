@@ -1,29 +1,30 @@
 'use client'
 
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
+import { useState } from 'react'
 import {
-  budgetUsedPercent,
   formatAnalyticsAmount,
   formatAnalyticsAmountCompact,
-  formatBudgetTokenValue,
+  formatRefusedCount,
   formatSharePercent,
   lastPaymentCaption,
-  merchantLabel,
 } from '@/lib/analytics-format'
 import type { AnalyticsCurrency } from '@/lib/analytics-format'
 import { agentStatusPresentation } from '@/lib/payment-status'
-import { budgetCaption, UNREAD_CAPTION } from '@/lib/budget-caption'
-import { useState } from 'react'
-import { BudgetMeter } from '@/components/haven'
+import { budgetCaption } from '@/lib/budget-caption'
+import type { BudgetCaption } from '@/lib/budget-caption'
+import { BudgetMeter } from '@/components/haven/BudgetMeter'
 import { Card } from '@/components/ui/Card'
+import { Monogram } from '@/components/ui/Monogram'
 import { Row } from '@/components/ui/Row'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Table, tableColumnClass } from '@/components/ui/Table'
-import { SeriesSwatch } from '@/components/ui/StackedBarChart'
-import type { AnalyticsAgentRow } from '@/types/analytics'
+import { Tooltip } from '@/components/ui/Tooltip'
+import type { AnalyticsAgentRow, AnalyticsDelegationBudget } from '@/types/analytics'
 
 /**
- * The agents table (#2947, epic #2944 slice C).
+ * The agents table (#2947, epic #2944 slice C; the #4333 rebuild).
  *
  * One row per agent the endpoint lists (#3540: every non-revoked agent, plus
  * a revoked one that had activity in range or still holds a budget), in the
@@ -34,6 +35,18 @@ import type { AnalyticsAgentRow } from '@/types/analytics'
  * rather than choosing its own (two orders would be two answers to "which
  * agent spent most"). Every column is a field on one agent in the
  * response; the table computes nothing about the money.
+ *
+ * ── The columns (#4333) ─────────────────────────────────────────────────────
+ *
+ * Agent (Monogram, name, the revoked badge), Spent with "N% of spend" under
+ * it — the former Share column merged into the figure it was a share OF —
+ * Payments, Refused as a link to that agent's refused attempts
+ * (`/agents/<id>?tab=activity&status=refused`, #4323), Budget (the shared
+ * caption helper's meter), Top merchant by name with a merchant monogram (an
+ * unresolved one reads "Unknown recipient", the address riding the tooltip —
+ * no cell renders a `0x…` AS a label), and Last paid. The WHOLE row links to
+ * the agent: the row carries the pointer and the navigation, the Agent cell's
+ * `Link` stays the keyboard-reachable half of it.
  *
  * ── Why there are two renderings ────────────────────────────────────────────
  *
@@ -46,7 +59,11 @@ import type { AnalyticsAgentRow } from '@/types/analytics'
  * BUDGET visible on every mobile device and carries what the table would have
  * hidden — share, top merchant, payments, last payment — in a disclosure that
  * opens under the row. Two renderings, one row data, no column silently
- * omitted from the screen you are actually on.
+ * omitted from the screen you are actually on. The budget is one projection
+ * too (#4432): both halves read the shared caption helper through
+ * `budgetCaptionOf`, so the phone row's budget line is the desktop cell's
+ * caption text — a stale or failed read says it couldn't be read in both,
+ * never a figure and a percentage on one of them.
  *
  * The gate is `hidden lg:block` against `lg:hidden` on the two containers
  * (the viewport-keyed split the theme row used to carry before #4029). They are complements by construction: the same `lg:` prefix, one
@@ -56,17 +73,24 @@ import type { AnalyticsAgentRow } from '@/types/analytics'
  * Columns the table itself drops (`revealAt="xl"`) are the ones that survive
  * the narrow-desktop case: below a 974px container — the shell's own `xl`
  * tooth — there is not room for seven columns and a sidebar, and losing
- * share/top-merchant first is the choice the primitive's stage ladder already
- * makes for every table in the app.
+ * top merchant first is the choice the primitive's stage ladder already
+ * makes for every table in the app (`e2e/table-container-collapse.spec.ts`
+ * anchors on it).
  */
 
 const COLUMN_PAD = 'px-4 py-3'
+
+/** The refused-attempts route (#4323): the agent's activity tab, pre-filtered. */
+function refusedAttemptsHref(agentId: string): string {
+  return `/agents/${agentId}?tab=activity&status=refused`
+}
 
 function StatusCell({ agent }: { agent: AnalyticsAgentRow }) {
   const presentation = agentStatusPresentation(agent.status)
   const revoked = agent.status === 'revoked'
   return (
     <span className="inline-flex items-center gap-2 min-w-0">
+      <Monogram name={agent.name} tint={agent.avatar_tint} size="xs" decorative />
       <span className="truncate text-sm font-medium text-[var(--v2-ink)]">{agent.name}</span>
       {/* A revoked agent stays in the table rather than dropping out of it: it
           had activity in this range, or still holds a budget, and hiding the
@@ -76,50 +100,68 @@ function StatusCell({ agent }: { agent: AnalyticsAgentRow }) {
   )
 }
 
+/**
+ * The ONE caption-row projection both halves render a budget through (#3806,
+ * hoisted in #4432 so the phone row cannot drift from the desktop cell).
+ *
+ * The row projects onto the shared helper: the period length is derived from
+ * the response's own bounds (period_end − period_start), the anchor is the
+ * bounds' start, and there is no `expires_at` on this endpoint — no
+ * "expires" branch. #4333 fixed the helper itself: a symbol-only row
+ * (chainId null) divides by the SYMBOL's decimals, so a token budget reads in
+ * its own units instead of "0.00 of 0.00". #4426: the compact `style: 'row'`
+ * caption, as the dashboard agent row and the agent hero use it.
+ *
+ * `nowMs` is the caller's: each half reads `Date.now()` once per render.
+ */
+function budgetCaptionOf(budget: AnalyticsDelegationBudget, nowMs: number): BudgetCaption {
+  return budgetCaption(
+    {
+      token: budget.token,
+      recipient: budget.recipient,
+      startSec: Math.floor(Date.parse(budget.period_start) / 1000),
+      periodSeconds: Math.round((Date.parse(budget.period_end) - Date.parse(budget.period_start)) / 1000),
+      expiresSec: null,
+      budgetAtomic: budget.budget_atomic,
+      usedAtomic: budget.used_atomic,
+      readFromChain: budget.remaining_from_chain,
+      periodEndMs: Date.parse(budget.period_end),
+      symbol: budget.token,
+      chainId: null,
+    },
+    { nowMs, style: 'row' },
+  )
+}
+
+/** One budget's React key, shared by both halves. */
+function budgetKey(budget: AnalyticsDelegationBudget): string {
+  return `${budget.token}:${budget.recipient ?? 'any'}`
+}
+
 function BudgetCell({ agent }: { agent: AnalyticsAgentRow }) {
   if (agent.budgets.length === 0) {
     return <span className="text-sm text-[var(--v2-ink-3)]">No budget</span>
   }
+  const nowMs = Date.now()
   return (
     <div className="space-y-2">
       {agent.budgets.map((budget) => {
-        const used = budgetUsedPercent(budget.used_atomic, budget.budget_atomic)
-        // #3806: the caption is the shared helper's. The row projects onto it:
-        // the period length is derived from the response's own bounds
-        // (period_end − period_start), the anchor is the bounds' start, and
-        // there is no `expires_at` on this endpoint — no "expires" branch.
-        const caption = budgetCaption(
-          {
-            token: budget.token,
-            recipient: budget.recipient,
-            startSec: Math.floor(Date.parse(budget.period_start) / 1000),
-            periodSeconds: Math.round((Date.parse(budget.period_end) - Date.parse(budget.period_start)) / 1000),
-            expiresSec: null,
-            budgetAtomic: budget.budget_atomic,
-            usedAtomic: budget.used_atomic,
-            readFromChain: budget.remaining_from_chain,
-            periodEndMs: Date.parse(budget.period_end),
-            symbol: budget.token,
-            chainId: null,
-          },
-          { nowMs: Date.now() },
-        )
+        // #4426: no figure line above the meter — the caption already states
+        // "214.00 of 250.00 USDC", and the cell used to print it twice.
+        const caption = budgetCaptionOf(budget, nowMs)
         return (
-          <div key={`${budget.token}:${budget.recipient ?? 'any'}`}>
-            <div className="flex items-center justify-between gap-2">
-              <span className="v2-tabular text-xs font-medium text-[var(--v2-ink)]">
-                {formatBudgetTokenValue(budget)}
-              </span>
-              <span className="v2-tabular text-xs text-[var(--v2-ink-3)]">{used}%</span>
-            </div>
+          <div key={budgetKey(budget)}>
             {caption.kind === 'meter' ? (
               <BudgetMeter usedPercent={caption.usedPercent} label={caption.label} caption={caption.caption} />
-            ) : caption.kind === 'unknown' || caption.kind === 'refilled-updating' ? (
+            ) : caption.kind !== 'none' ? (
               // A failed read is not a 0 % bar — the used amount the endpoint
               // reports is a fallback, so the cell says the reading is missing
-              // instead of rendering a measurement it does not have. The old
-              // "read from Haven's last snapshot" suffix is gone with it.
-              <p className="text-xs text-[var(--v2-ink-3)]">{UNREAD_CAPTION}</p>
+              // (`UNREAD_CAPTION`) instead of rendering a measurement it does
+              // not have. The old "read from Haven's last snapshot" suffix is
+              // gone with it. An expired or not-yet-started budget says so in
+              // the helper's own words: with no figure line above the meter
+              // (#4426) the cell would otherwise be empty.
+              <p className="text-xs text-[var(--v2-ink-3)]">{caption.caption}</p>
             ) : null}
           </div>
         )
@@ -129,40 +171,35 @@ function BudgetCell({ agent }: { agent: AnalyticsAgentRow }) {
 }
 
 /**
- * The ONE merchant-label rule lives in `lib/analytics-format.merchantLabel`
- * (shared with slice E's MerchantsTable, so the two tables cannot diverge on
- * how an unresolved address reads). It is imported, not restated here.
+ * The top-merchant cell. `top_merchant.label` is nullable since #4332 (null =
+ * nothing resolved — no contact, no receipt name, no x402 host), and #4333
+ * renders that as "Unknown recipient": the NAME cell never shows an address.
+ * The full address rides the tooltip (elaboration on a truncated form — the
+ * one thing a tooltip is for), and the monogram is keyed on the name either
+ * way so an unknown keeps a stable tint.
  */
-
 function MerchantCell({ agent }: { agent: AnalyticsAgentRow }) {
   if (agent.top_merchant === null) {
     return <span className="text-sm text-[var(--v2-ink-3)]">None in this range</span>
   }
-  const { value, title } = merchantLabel(agent.top_merchant.label)
+  const name = agent.top_merchant.label ?? 'Unknown recipient'
+  const known = agent.top_merchant.label !== null
   return (
-    <span
-      // Tabular numerals only on the address branch: a hexadecimal string is a
-      // measurement of identity, not of quantity, and the tabular ramp is what
-      // keeps two rows' addresses from jittering. A name keeps normal spacing.
-      className={`text-sm text-[var(--v2-ink)]${title ? ' v2-tabular' : ''}`}
-      title={title}
-    >
-      {value}
-    </span>
+    <Tooltip label={agent.top_merchant.address} mono={!known}>
+      <span className={`text-sm text-[var(--v2-ink)]${known ? '' : ' v2-tabular'}`}>{name}</span>
+    </Tooltip>
   )
 }
 
 export function AgentsTable({
   agents,
   currency,
-  seriesIndexById,
 }: {
   /** In display order — the page sorts once (`orderAgentsForDisplay`). */
   agents: AnalyticsAgentRow[]
   currency: AnalyticsCurrency
-  /** `seriesIndexByAgent(agents, byDay)`; absent → no swatches (the table alone). */
-  seriesIndexById?: Map<string, number>
 }) {
+  const router = useRouter()
   return (
     <Card hover={false} className="overflow-hidden">
       <Card.Header as="h2" title="Agents" />
@@ -172,22 +209,27 @@ export function AgentsTable({
           <Table.Head collapseWhenNarrow={false}>
             <tr>
               <Table.HeaderCell align="left">Agent</Table.HeaderCell>
-              <Table.HeaderCell align="right">Spend</Table.HeaderCell>
-              <Table.HeaderCell align="right" revealAt="xl">
-                Share
-              </Table.HeaderCell>
+              <Table.HeaderCell align="right">Spent</Table.HeaderCell>
               <Table.HeaderCell align="right">Payments</Table.HeaderCell>
-              <Table.HeaderCell align="right">Refusals</Table.HeaderCell>
-              <Table.HeaderCell align="left">Budget used</Table.HeaderCell>
+              <Table.HeaderCell align="right">Refused</Table.HeaderCell>
+              <Table.HeaderCell align="left">Budget</Table.HeaderCell>
               <Table.HeaderCell align="left" revealAt="xl">
                 Top merchant
               </Table.HeaderCell>
-              <Table.HeaderCell align="left">Last payment</Table.HeaderCell>
+              <Table.HeaderCell align="left">Last paid</Table.HeaderCell>
             </tr>
           </Table.Head>
           <Table.Body>
             {agents.map((agent) => (
-              <tr key={agent.id} className="hover:bg-[var(--v2-surface-hover)] transition-colors duration-150">
+              <tr
+                key={agent.id}
+                className="cursor-pointer hover:bg-[var(--v2-surface-hover)] transition-colors duration-150"
+                // The whole row is a way in (#4333). The navigation itself is
+                // client-side so the hover state never flashes a full reload;
+                // the Agent cell's Link is the keyboard/AT half of the same
+                // destination, so a pointer-less reader loses nothing.
+                onClick={() => router.push(`/agents/${agent.id}`)}
+              >
                 <td className={COLUMN_PAD}>
                   <Link
                     href={`/agents/${agent.id}`}
@@ -197,45 +239,35 @@ export function AgentsTable({
                   </Link>
                 </td>
                 <td className={`${COLUMN_PAD} text-right`}>
-                  {/* #3051: the series token the spend chart paints this agent
-                      with, from the ONE map the page builds
-                      (`lib/analytics-series.ts`), beside the SPEND figure —
-                      the money the bar is made of — and never beside the
-                      name, where a coloured dot reads as a status light. An
-                      agent with no bar gets no swatch. */}
-                  <span className="inline-flex items-center justify-end gap-2">
-                    {/* A fixed-width slot BEFORE the figure: the dots form one
-                        column whatever the figure's width, and the figure's
-                        right edge stays on the SPEND header's like every other
-                        numeric column — an unplotted agent keeps the empty
-                        slot so its figure lines up too. */}
-                    <span className="inline-flex w-2.5 shrink-0 justify-center" data-testid="series-swatch-slot">
-                      {seriesIndexById?.get(agent.id) !== undefined && (
-                        <SeriesSwatch seriesIndex={seriesIndexById.get(agent.id) as number} />
-                      )}
-                    </span>
-                    <span className="v2-tabular text-sm font-medium text-[var(--v2-ink)]">
-                      {formatAnalyticsAmount(agent.spent, currency)}
-                    </span>
+                  {/* #4331: no series swatch here any more — the agent's
+                      colour lives on its monogram, the same tint the spend
+                      chart fills the agent with (its stored tint since
+                      #4428), so the table carries one colour per agent
+                      without a second mark in this cell. */}
+                  <span className="v2-tabular block text-sm font-medium text-[var(--v2-ink)]">
+                    {formatAnalyticsAmount(agent.spent, currency)}
                   </span>
-                </td>
-                <td className={`${COLUMN_PAD} text-right ${tableColumnClass('xl')}`}>
-                  <span className="v2-tabular text-sm text-[var(--v2-ink-2)]">
-                    {formatSharePercent(agent.share)}
+                  {/* The former Share column, merged into the figure it was a
+                      share of (#4333): one cell, the amount leading and its
+                      slice of the window's spend under it. */}
+                  <span className="v2-tabular block text-xs text-[var(--v2-ink-3)]">
+                    {formatSharePercent(agent.share)} of spend
                   </span>
                 </td>
                 <td className={`${COLUMN_PAD} text-right`}>
                   <span className="v2-tabular text-sm text-[var(--v2-ink-2)]">{agent.payments}</span>
                 </td>
                 <td className={`${COLUMN_PAD} text-right`}>
-                  {/* Refusals and the attempts behind them: one cell, because
-                      the pair is one fact (a dedupe upstream makes rows and
-                      attempts differ), and two columns would double the
-                      width of the loudest zero. */}
-                  <span className="v2-tabular text-sm text-[var(--v2-ink-2)]">
-                    {agent.refusals}
-                    {agent.refusal_attempts !== agent.refusals && ` · ${agent.refusal_attempts} attempts`}
-                  </span>
+                  {/* Refused attempts as a way in (#4333): the count links to
+                      the agent's activity tab, pre-filtered to its refusals
+                      (#4323 has landed). Rows and attempts can differ (a
+                      dedupe upstream), so the attempts ride the cell. */}
+                  <Link
+                    href={refusedAttemptsHref(agent.id)}
+                    className="v2-tabular whitespace-nowrap text-sm text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 rounded"
+                  >
+                    {formatRefusedCount(agent.refusals, agent.refusal_attempts)}
+                  </Link>
                 </td>
                 <td className={COLUMN_PAD}>
                   <BudgetCell agent={agent} />
@@ -259,7 +291,7 @@ export function AgentsTable({
 
       <div className="lg:hidden divide-y divide-[var(--v2-table-row-border)]">
         {agents.map((agent) => (
-          <MobileAgentRow key={agent.id} agent={agent} currency={currency} seriesIndex={seriesIndexById?.get(agent.id)} />
+          <MobileAgentRow key={agent.id} agent={agent} currency={currency} />
         ))}
       </div>
     </Card>
@@ -273,35 +305,46 @@ export function AgentsTable({
  * did it get refused, how much budget is left"); the disclosure is where the
  * table's remaining columns went, not a second source of truth — every line
  * is the same field the desktop table renders.
+ *
+ * The budget is one line per budget, and each line is the caption text the
+ * desktop Budget cell shows, from the same `budgetCaptionOf` projection
+ * (#4432): the figures and the period for a readable read, "Usage this period
+ * couldn't be read" for a failed or stale one, "Starts …" for one that has not
+ * started. Text only — the phone row draws no meter — and never a percentage.
  */
 function MobileAgentRow({
   agent,
   currency,
-  seriesIndex,
 }: {
   agent: AnalyticsAgentRow
   currency: AnalyticsCurrency
-  seriesIndex: number | undefined
 }) {
   const [open, setOpen] = useState(false)
   const presentation = agentStatusPresentation(agent.status)
-  const budgetLine =
+  const nowMs = Date.now()
+  const budgetLines =
     agent.budgets.length === 0
-      ? 'No budget'
-      : agent.budgets.map((b) => `${formatBudgetTokenValue(b)} · ${budgetUsedPercent(b.used_atomic, b.budget_atomic)}%`).join(' · ')
+      ? [{ key: 'none', text: 'No budget' }]
+      : agent.budgets.flatMap((budget) => {
+          // The desktop cell's rule, kind for kind: every kind but `none`
+          // prints the helper's caption (a meter's figures included), `none`
+          // prints nothing.
+          const caption = budgetCaptionOf(budget, nowMs)
+          return caption.kind === 'none' ? [] : [{ key: budgetKey(budget), text: caption.caption }]
+        })
 
   return (
     <div className="px-4 py-3">
       <Row
         title={
           <span className="inline-flex items-center gap-2 min-w-0">
+            <Monogram name={agent.name} tint={agent.avatar_tint} size="xs" decorative />
             <span className="truncate">{agent.name}</span>
             {agent.status === 'revoked' && <StatusBadge tone={presentation.tone}>{presentation.label}</StatusBadge>}
           </span>
         }
         subtitle={
           <span className="v2-tabular inline-flex items-center gap-1.5">
-            {seriesIndex !== undefined && <SeriesSwatch seriesIndex={seriesIndex} />}
             <span>
               {formatAnalyticsAmountCompact(agent.spent, currency)} spent · {agent.refusals} refused
             </span>
@@ -319,19 +362,28 @@ function MobileAgentRow({
         }
         density="flush"
       />
-      <p className="v2-tabular mt-1 text-xs text-[var(--v2-ink-3)]">{budgetLine}</p>
+      <div className="mt-1 space-y-0.5">
+        {budgetLines.map((line) => (
+          <p key={line.key} data-testid="phone-budget-line" className="v2-tabular text-xs text-[var(--v2-ink-3)]">
+            {line.text}
+          </p>
+        ))}
+      </div>
       {open && (
         <dl className="mt-2 space-y-1.5 rounded-md bg-[var(--v2-surface)] p-3 text-xs">
           <DisclosureLine term="Payments" value={String(agent.payments)} />
           <DisclosureLine
-            term="Refusals"
-            value={`${agent.refusals}${agent.refusal_attempts !== agent.refusals ? ` · ${agent.refusal_attempts} attempts` : ''}`}
+            term="Share of spend"
+            value={formatSharePercent(agent.share)}
           />
-          <DisclosureLine term="Share" value={formatSharePercent(agent.share)} />
+          <DisclosureLine
+            term="Refused"
+            value={formatRefusedCount(agent.refusals, agent.refusal_attempts)}
+          />
           <DisclosureLine term="Spend" value={formatAnalyticsAmount(agent.spent, currency)} />
           <DisclosureLine
             term="Top merchant"
-            {...merchantLabel(agent.top_merchant?.label ?? 'None in this range')}
+            value={agent.top_merchant?.label ?? (agent.top_merchant ? 'Unknown recipient' : 'None in this range')}
           />
           <DisclosureLine
             term="Last payment"
@@ -340,12 +392,20 @@ function MobileAgentRow({
           />
         </dl>
       )}
-      <Link
-        href={`/agents/${agent.id}`}
-        className="mt-2 inline-block text-xs font-medium text-[var(--v2-brand)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 rounded"
-      >
-        Open agent
-      </Link>
+      <div className="mt-2 flex items-center gap-3">
+        <Link
+          href={`/agents/${agent.id}`}
+          className="inline-block text-xs font-medium text-[var(--v2-brand)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 rounded"
+        >
+          Open agent
+        </Link>
+        <Link
+          href={refusedAttemptsHref(agent.id)}
+          className="inline-block text-xs font-medium text-[var(--v2-brand)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 rounded"
+        >
+          View refusals
+        </Link>
+      </div>
     </div>
   )
 }

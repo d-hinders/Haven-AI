@@ -356,7 +356,9 @@ second branch:
   signs in again — use it when an allowlist removal is not enough (a lost
   laptop, a suspected token leak).
 - Sign-in itself requires the GitHub account to have 2FA enabled; the
-  backend refuses `two_factor_enabled: false`.
+  backend refuses an explicit `two_factor_authentication: false`
+  (`modules/ops/github.ts`, `routes/ops.ts`) — a response without the field
+  is not refused.
 - Per-PR previews never hold a sign-in path, so a leaked preview link is
   inert. Since #3681 the console deploys from `dev` only, so no new ones
   are created; the preview defences stay as defence in depth.

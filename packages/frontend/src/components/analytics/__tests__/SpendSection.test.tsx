@@ -1,8 +1,8 @@
 import { render, screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
-import { SpendSection, partialEdgeDates, partialEdges, partialNote, spendSummary, toStackedBarDays } from '../SpendSection'
-import { orderAgentsForDisplay, seriesIndexByAgent } from '@/lib/analytics-series'
-import { seriesColor } from '@/components/ui/StackedBarChart'
+import { SpendSection, partialEdgeDates, partialEdges, partialNote, spendSummary, toStackedBarDays, windowDates } from '../SpendSection'
+import { orderAgentsForDisplay, seriesColorByAgent } from '@/lib/analytics-series'
+import { seriesColorForAgent } from '@/lib/avatar-tint'
 import { formatAnalyticsValue } from '@/lib/analytics-format'
 import { FIXTURE_ANALYTICS_OVERVIEW } from '../../../../scripts/screenshot.mjs'
 import type { AnalyticsAgentRow, AnalyticsDayBucket, AnalyticsOverviewResponse } from '@/types/analytics'
@@ -12,29 +12,39 @@ import type { AnalyticsAgentRow, AnalyticsDayBucket, AnalyticsOverviewResponse }
  * `StackedBarChart` (#3051). The fixture is the harness's own populated
  * overview: two agents, four days, refusals on the last two — the dataset
  * the visual baselines are captured from, so what is pinned here is what a
- * reader of the capture sees.
+ * reader of the capture sees. Since #4334 the section turns those four
+ * activity days into a CONTINUOUS axis: every local date the window
+ * touches gets a slot, empty days included.
  */
 const POPULATED = FIXTURE_ANALYTICS_OVERVIEW as AnalyticsOverviewResponse
 const AGENTS = orderAgentsForDisplay(POPULATED.agents as AnalyticsAgentRow[])
 const BY_DAY = POPULATED.by_day as AnalyticsDayBucket[]
-const SERIES = seriesIndexByAgent(AGENTS, BY_DAY)
+const SERIES = seriesColorByAgent(AGENTS, BY_DAY)
 const render6 = (byDay: AnalyticsDayBucket[], range: { from: string; to: string }, tz: string) =>
   render(
-    <SpendSection byDay={byDay} agents={AGENTS} seriesIndexById={seriesIndexByAgent(AGENTS, byDay)} range={range} tz={tz} currency="USD" rangeDays={30} />,
+    <SpendSection byDay={byDay} agents={AGENTS} agentColors={seriesColorByAgent(AGENTS, byDay)} range={range} tz={tz} currency="USD" rangeDays={30} />,
   )
 
 /** A window whose edges are NOT midnight in Stockholm: 07 Jul 09:30 → 10 Jul 09:30 UTC. */
 const CUT_RANGE = { from: '2026-07-07T09:30:00.000Z', to: '2026-07-10T09:30:00.000Z' }
 /** The same dates, but the window starts and ends exactly at Stockholm midnight (UTC+2). */
 const ALIGNED_RANGE = { from: '2026-07-06T22:00:00.000Z', to: '2026-07-10T22:00:00.000Z' }
+/** The fixture's own 30-day window (14:30Z edges): 31 local dates, UTC. */
+const THIRTY_DAY_CUT = { from: '2026-06-10T14:30:00.000Z', to: '2026-07-10T14:30:00.000Z' }
 
 describe('toStackedBarDays — the wire becomes the primitive input', () => {
-  it('keys every segment to the agent name and its index in agents[], the order the endpoint sent', () => {
+  it('keys every segment to the agent name and its own avatar tint, the colour its monogram wears', () => {
     const days = toStackedBarDays(BY_DAY, AGENTS, SERIES, ALIGNED_RANGE, 'Europe/Stockholm')
     expect(days).toHaveLength(BY_DAY.length)
     const first = days[0]!
     expect(first.series.map((s) => s.name)).toEqual(['Research agent', 'Data-feed agent'])
-    expect(first.series.map((s) => s.seriesIndex)).toEqual([0, 1])
+    // One colour per agent (#4331): the fill is the agent's avatar tint —
+    // its stored tint when it has one (#4428), the name hash otherwise — not
+    // a rank index, so it is stable across periods, pages and re-rankings.
+    expect(first.series.map((s) => s.color)).toEqual([
+      seriesColorForAgent({ name: 'Research agent', avatarTint: 1 }),
+      seriesColorForAgent({ name: 'Data-feed agent', avatarTint: 2 }),
+    ])
     // The one string→number parse, at the row: "85.75" → 85.75, not a
     // re-typed wire.
     expect(first.series[0]!.amount).toBe(85.75)
@@ -53,25 +63,31 @@ describe('toStackedBarDays — the wire becomes the primitive input', () => {
     const reversed: AnalyticsDayBucket[] = [
       { date: '2026-07-07', spent_by_agent: { 'agent-retired': '12.50', 'agent-research': '85.75' }, refusals: 0 },
     ]
-    const [day] = toStackedBarDays(reversed, AGENTS, seriesIndexByAgent(AGENTS, reversed), ALIGNED_RANGE, 'UTC')
-    expect(day!.series.map((s) => [s.id, s.seriesIndex])).toEqual([
-      ['agent-research', 0],
-      ['agent-retired', 1],
+    const [day] = toStackedBarDays(reversed, AGENTS, seriesColorByAgent(AGENTS, reversed), CUT_RANGE, 'UTC')
+    expect(day!.series.map((s) => s.id)).toEqual(['agent-research', 'agent-retired'])
+    // Rank-independence (#4331): the reverse-order wire changes the STACK
+    // order to the display order but not either agent's colour.
+    expect(day!.series.map((s) => s.color)).toEqual([
+      seriesColorForAgent({ name: 'Research agent', avatarTint: 1 }),
+      seriesColorForAgent({ name: 'Data-feed agent', avatarTint: 2 }),
     ])
   })
 
-  it('gives two stray ids two different colours', () => {
+  it('gives ids the roster does not carry the neutral ink, named rather than dropped', () => {
     const stray: AnalyticsDayBucket[] = [{ date: '2026-07-07', spent_by_agent: { x: '1', y: '2' }, refusals: 0 }]
-    const [day] = toStackedBarDays(stray, AGENTS, new Map([['c', 0]]), ALIGNED_RANGE, 'UTC')
-    expect(day!.series.map((s) => s.seriesIndex)).toEqual([1, 2])
+    const [day] = toStackedBarDays(stray, AGENTS, new Map(), CUT_RANGE, 'UTC')
+    // No name to hash → no invented hue; the neutral ink MoneyPanel gives
+    // unattributed money (#3897). The legend and tooltip still NAME them.
+    expect(day!.series.map((s) => s.color)).toEqual(['var(--v2-ink-3)', 'var(--v2-ink-3)'])
+    expect(day!.series.map((s) => s.name)).toEqual(['x', 'y'])
   })
 
-  it('names an agent id the roster does not carry rather than dropping its money, on a colour past the roster', () => {
+  it('names an agent id the roster does not carry rather than dropping its money, on the neutral ink', () => {
     const stray: AnalyticsDayBucket[] = [
       { date: '2026-07-07', spent_by_agent: { 'agent-ghost': '3.00' }, refusals: 0 },
     ]
-    const [day] = toStackedBarDays(stray, AGENTS, seriesIndexByAgent(AGENTS, stray), ALIGNED_RANGE, 'UTC')
-    expect(day!.series[0]).toMatchObject({ name: 'agent-ghost', seriesIndex: 0, amount: 3 })
+    const [day] = toStackedBarDays(stray, AGENTS, seriesColorByAgent(AGENTS, stray), CUT_RANGE, 'UTC')
+    expect(day!.series[0]).toMatchObject({ name: 'agent-ghost', color: 'var(--v2-ink-3)', amount: 3 })
   })
 })
 
@@ -107,6 +123,79 @@ describe('partial edge buckets — the window cuts its first and last day', () =
     // Only the LAST bucket flagged when the window's first day had no activity.
     const lastOnly = toStackedBarDays(BY_DAY, AGENTS, SERIES, { from: '2026-06-10T14:30:00.000Z', to: '2026-07-10T14:30:00.000Z' }, 'UTC')
     expect(partialEdges(lastOnly)).toEqual({ first: false, last: true })
+    // The note describes stripes that are DRAWN (#4334): a partial edge day
+    // with no spend is an empty slot — flagged partial in the tooltip and
+    // the table, but with no bar to stripe it does not claim to be striped.
+    const firstEmptyPartial = partialEdges(lastOnly)
+    expect(firstEmptyPartial.first).toBe(false)
+    expect(lastOnly[0]!.partial).toBe(true)
+    expect(lastOnly[0]!.series).toEqual([])
+  })
+})
+
+describe('windowDates — the continuous day axis (#4334)', () => {
+  /** A 7-day window whose edges cut their UTC days. */
+  const DAYS_7_CUT = { from: '2026-07-04T09:30:00.000Z', to: '2026-07-11T09:30:00.000Z' }
+  /** The same length, aligned to UTC midnight: the excluded endpoint owns no part of its date. */
+  const DAYS_7_ALIGNED = { from: '2026-07-04T00:00:00.000Z', to: '2026-07-11T00:00:00.000Z' }
+
+  it('yields N+1 dates for a window whose end cuts its day — 7, 30 and 90 days', () => {
+    expect(windowDates(DAYS_7_CUT, 'UTC')).toHaveLength(8)
+    expect(windowDates(DAYS_7_CUT, 'UTC')[0]).toBe('2026-07-04')
+    expect(windowDates(DAYS_7_CUT, 'UTC')[7]).toBe('2026-07-11')
+    // The fixture's own 30-day window: Jun 10 .. Jul 10 inclusive.
+    expect(windowDates(THIRTY_DAY_CUT, 'UTC')).toHaveLength(31)
+    expect(windowDates(THIRTY_DAY_CUT, 'UTC')[0]).toBe('2026-06-10')
+    expect(windowDates(THIRTY_DAY_CUT, 'UTC')[30]).toBe('2026-07-10')
+    // 90 days: Apr 11 .. Jul 10.
+    const days90 = { from: '2026-04-11T09:30:00.000Z', to: '2026-07-10T09:30:00.000Z' }
+    expect(windowDates(days90, 'UTC')).toHaveLength(91)
+  })
+
+  it('yields N dates when now is exactly local midnight — in THAT zone alone', () => {
+    expect(windowDates(DAYS_7_ALIGNED, 'UTC')).toHaveLength(7)
+    expect(windowDates(DAYS_7_ALIGNED, 'UTC')[6]).toBe('2026-07-10')
+    // 00:00Z is 02:00 in Stockholm: the same window cuts both its edge days
+    // there, so the zone, not the instant alone, decides the count.
+    expect(windowDates(DAYS_7_ALIGNED, 'Europe/Stockholm')).toHaveLength(8)
+  })
+
+  it('crosses month edges and a DST spring-forward without skipping or repeating a date', () => {
+    // The steps are absolute 24h; a local calendar day is 23–25h wide, so
+    // each step crosses exactly one midnight — the Europe/Stockholm switch
+    // to CEST on 2026-03-29 02:00 local cannot double a date or drop one.
+    expect(windowDates({ from: '2026-06-29T09:30:00.000Z', to: '2026-07-02T09:30:00.000Z' }, 'UTC')).toEqual([
+      '2026-06-29',
+      '2026-06-30',
+      '2026-07-01',
+      '2026-07-02',
+    ])
+    expect(
+      windowDates({ from: '2026-03-28T09:30:00.000Z', to: '2026-03-31T09:30:00.000Z' }, 'Europe/Stockholm'),
+    ).toEqual(['2026-03-28', '2026-03-29', '2026-03-30', '2026-03-31'])
+  })
+
+  it('falls back to the response dates for a zone this runtime cannot resolve', () => {
+    expect(windowDates(DAYS_7_CUT, 'Mars/Olympus_Mons', BY_DAY)).toEqual(BY_DAY.map((d) => d.date).sort())
+  })
+})
+
+describe('toStackedBarDays — the continuous axis fills the calendar (#4334)', () => {
+  it('hands the primitive a slot for EVERY local date the window touches, empty days included', () => {
+    const days = toStackedBarDays(BY_DAY, AGENTS, SERIES, THIRTY_DAY_CUT, 'UTC')
+    expect(days).toHaveLength(31)
+    // An empty slot: the day exists, nothing was booked or refused on it.
+    expect(days[0]).toMatchObject({ label: '10 Jun', series: [], refusals: 0 })
+    // The four activity days carry their rows unchanged, in calendar order.
+    const populated = days.filter((d) => d.series.length > 0)
+    expect(populated.map((d) => d.label)).toEqual(['7 Jul', '8 Jul', '9 Jul', '10 Jul'])
+    expect(populated[0]!.series.map((s) => s.id)).toEqual(['agent-research', 'agent-retired'])
+    // Both edge dates are drawn, and both are partial — the window's 14:30Z
+    // edges cut their UTC days; the 29 interior dates are full days.
+    const partials = days.map((d) => d.partial)
+    expect(partials[0]).toBe(true)
+    expect(partials[30]).toBe(true)
+    expect(partials.filter(Boolean)).toHaveLength(2)
   })
 })
 
@@ -118,7 +207,7 @@ describe('spendSummary — the accessible sentence in the primitive shape', () =
 
   it('singularises', () => {
     const oneDay = [{ date: '2026-07-07', spent_by_agent: { 'agent-research': '10.00' }, refusals: 1 }]
-    const one = toStackedBarDays(oneDay, AGENTS, seriesIndexByAgent(AGENTS, oneDay), ALIGNED_RANGE, 'UTC')
+    const one = toStackedBarDays(oneDay, AGENTS, seriesColorByAgent(AGENTS, oneDay), ALIGNED_RANGE, 'UTC')
     // `formatAnalyticsValue` owns the de-DE spacing (a non-breaking space before €); the sentence around it is what this pins.
     expect(spendSummary(one, 'EUR', 7)).toBe(`Spend over 7 days: ${formatAnalyticsValue(10, 'EUR')} across 1 agent, 1 refusal.`)
   })
@@ -132,13 +221,23 @@ describe('SpendSection — on the page', () => {
     expect(screen.getAllByRole('img', { name: /Spend over 30 days: \$324\.75 across 2 agents, 2 refusals\./ })).toHaveLength(2)
   })
 
-  it('paints agent i in the same series token the agents table swatch reads for row i', () => {
-    const { container } = render6(BY_DAY, ALIGNED_RANGE, 'UTC')
+  it('paints each agent in its own avatar tint — the same fill its monogram wears (#4331)', () => {
+    // Aligned to Stockholm midnight so no day is partial: a partial day is
+    // hatched (a url(#…) pattern), and this test reads the raw token.
+    const { container } = render6(BY_DAY, ALIGNED_RANGE, 'Europe/Stockholm')
     const chart = container.querySelector('[data-testid="stacked-bar-chart"]')!
     const firstDay = within(chart as HTMLElement).getAllByTestId('chart-day')[0]!
     const segments = firstDay.querySelectorAll('[data-testid="chart-segment"]')
-    expect(segments[0]!.getAttribute('fill')).toBe(seriesColor(0))
-    expect(segments[1]!.getAttribute('fill')).toBe(seriesColor(1))
+    expect(segments[0]!.getAttribute('fill')).toBe(seriesColorForAgent({ name: 'Research agent', avatarTint: 1 }))
+    expect(segments[1]!.getAttribute('fill')).toBe(seriesColorForAgent({ name: 'Data-feed agent', avatarTint: 2 }))
+    // Both fixture agents hash to tint 6, and each carries its OWN stored tint
+    // (#4429/#4431), so the pair is drawn in two different colours — the rule
+    // the epic changed. The pin is deliberate: rank-based assignment would
+    // have silently "re-painted" an agent, and the hash fallback would have
+    // collapsed the pair into one colour.
+    expect(segments[0]!.getAttribute('fill')).toBe('var(--v2-avatar-1)')
+    expect(segments[1]!.getAttribute('fill')).toBe('var(--v2-avatar-2)')
+    expect(segments[0]!.getAttribute('fill')).not.toBe(segments[1]!.getAttribute('fill'))
   })
 
   it('says on the face of the card when the edge bars are partial, and stays quiet when they are not', () => {
@@ -150,6 +249,25 @@ describe('SpendSection — on the page', () => {
     expect(aligned.container.querySelector('[data-testid="analytics-spend-partial-note"]')).toBeNull()
   })
 
+  it('draws a slot for every calendar day of the window, empty days included (#4334)', () => {
+    const { container } = render6(BY_DAY, THIRTY_DAY_CUT, 'UTC')
+    for (const chart of container.querySelectorAll('[data-testid="stacked-bar-chart"]')) {
+      expect(chart.querySelectorAll('[data-testid="chart-day"]')).toHaveLength(31)
+    }
+    // The first chart-day is the EMPTY Jun 10 slot: no segments to draw.
+    const charts = container.querySelectorAll('[data-testid="stacked-bar-chart"]')
+    const firstSlot = charts[0]!.querySelector('[data-testid="chart-day"]')!
+    expect(firstSlot.querySelectorAll('[data-testid="chart-segment"]')).toHaveLength(0)
+  })
+
+  it('lists every day in the screen-reader table, empty days reading $0.00 (#4334)', () => {
+    const { container } = render6(BY_DAY, THIRTY_DAY_CUT, 'UTC')
+    const table = container.querySelector('[data-testid="chart-data-table"]')!
+    expect(table.querySelectorAll('tbody tr')).toHaveLength(31)
+    expect(table.textContent).toContain('10 Jun')
+    expect(table.textContent).toContain('7 Jul')
+  })
+
   it('keeps the desktop chart in the lg-only wrapper and the narrow chart in the below-lg wrapper (the pair is one chart)', () => {
     const { container } = render6(BY_DAY, ALIGNED_RANGE, 'UTC')
     const desktop = container.querySelector('[data-testid="analytics-spend-desktop"]')!
@@ -157,14 +275,29 @@ describe('SpendSection — on the page', () => {
     expect(desktop.className).toContain('hidden')
     expect(desktop.className).toContain('lg:block')
     expect(narrow.className).toContain('lg:hidden')
-    // The narrow rendering is the one with the dot legend (a wrapping row);
-    // the desktop one lists the legend as a column — the primitive's own tell.
-    expect(within(narrow as HTMLElement).getByTestId('chart-legend').className).toContain('flex-wrap')
-    expect(within(desktop as HTMLElement).getByTestId('chart-legend').className).toContain('flex-col')
+    // Both mounts list the legend as ONE wrapping row (#4480, owner decision
+    // 2026-10-27). The desktop one used to be a column, which read as a second
+    // list beside the chart rather than as its key.
+    for (const mount of [narrow, desktop]) {
+      const legend = within(mount as HTMLElement).getByTestId('chart-legend')
+      expect(legend.className).toContain('flex-wrap')
+      expect(legend.className).not.toContain('flex-col')
+    }
   })
 
-  it('renders nothing below the chartable floor, so no card wraps an empty plot', () => {
-    const { container } = render6(BY_DAY.slice(0, 2), ALIGNED_RANGE, 'UTC')
-    expect(container.innerHTML).toBe('')
+  it('renders the section empty state when the window has NO activity at all (#4334)', () => {
+    // The sparse rule is now only the no-activity one: the old
+    // `MIN_CHARTABLE_DAYS` null-return drew nothing below a couple of
+    // activity days; the calendar now draws them. A period with nothing —
+    // an agent-scoped response's empty `by_day` — renders the empty state
+    // instead of a card around an empty plot.
+    const { container } = render6([], CUT_RANGE, 'UTC')
+    expect(screen.getByText('No spend in this window')).toBeTruthy()
+    expect(container.querySelectorAll('[data-testid="stacked-bar-chart"]')).toHaveLength(0)
+    // A window with only a COUPLE of activity days still draws the calendar.
+    const sparse = render6(BY_DAY.slice(0, 2), THIRTY_DAY_CUT, 'UTC')
+    for (const chart of sparse.container.querySelectorAll('[data-testid="stacked-bar-chart"]')) {
+      expect(chart.querySelectorAll('[data-testid="chart-day"]')).toHaveLength(31)
+    }
   })
 })

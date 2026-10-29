@@ -2,11 +2,21 @@
  * The stacked-bar chart primitive (#2948, analytics slice D).
  *
  * Daily bars stacked by agent for a range, with refusals as a marker series:
- * a small cap drawn ABOVE the bar, not a second axis. A second axis is the
- * shape this refuses on purpose — a refusal count has no scale comparable to
- * a money total, and two y-scales in one view invite reading a tall bar as
- * "many refusals" or the other way round. A cap over a bar says exactly one
- * thing: that day refused something.
+ * a small grey mark drawn UNDER the day's slot, not a second axis and not a
+ * cap on the bar (#4334). A second axis is the shape this refuses on
+ * purpose — a refusal count has no scale comparable to a money total, and
+ * two y-scales in one view invite reading a tall bar as "many refusals" or
+ * the other way round. A cap over a bar could only sit on a day that SPENT;
+ * a mark under the slot says exactly one thing about any day, spent or not:
+ * that day refused something.
+ *
+ * ## The axis is whatever the caller hands it — slots, not activity
+ *
+ * The primitive draws one slot per `days` entry, in order; a day with an
+ * empty `series` is an EMPTY slot (no bar, its refusal mark still drawn) so
+ * a caller that hands it every calendar day in a window (#4334) gets a
+ * continuous time axis, not a scatter of the days that happened to carry a
+ * figure. Nothing here invents or drops days.
  *
  * ## The house pattern this is, and what it means for the lint gates
  *
@@ -23,10 +33,16 @@
  *
  * `--v2-series-*` (#2948) is an ordered categorical set: colour identifies
  * the SERIES, never the meaning of a value. A refusal is therefore a neutral
- * ink cap and not a red one — red is `--v2-danger`'s job when a row states a
- * failure, and this is a count of events. Callers assign a series index per
- * agent and hold it stable so the bar, the legend, and the agents table's
- * share column all read one colour per agent.
+ * ink mark and not a red one — red is `--v2-danger`'s job when a row states a
+ * failure, and this is a count of events. An AGENT-keyed series does not
+ * read this palette at all (#4331): it carries `color` — the agent's avatar
+ * tint from `seriesColorForAgent`, its STORED tint when it has one (#4428)
+ * and the name hash otherwise — so one agent wears one colour on every chart,
+ * in every period, matching its monogram. Two agents can share a tint (six
+ * tints, unbounded agents; past the first six the stored tint repeats); the
+ * legend and tooltip tell them apart by name. Callers assign `seriesIndex`
+ * only for series that are not an agent, and hold it stable so the bar, the
+ * legend, and any companion table read one colour per series.
  *
  * ## Why the labels are HTML over the drawing rather than SVG <text>
  *
@@ -86,7 +102,13 @@
 
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent } from 'react'
-import { chartScale, MIN_CHARTABLE_DAYS, xLabelIndices } from '@/components/charts/chart-scale'
+import {
+  chartScale,
+  MIN_CHARTABLE_DAYS,
+  xLabelEdge,
+  xLabelIndices,
+  type XLabelAnchoring,
+} from '@/components/charts/chart-scale'
 
 /**
  * The viewBox coordinate space. The svg stretches its whole drawing through
@@ -98,11 +120,23 @@ const VIEW_H = 220
 const PAD = { top: 14, right: 10, bottom: 30, left: 48 }
 /** The narrow treatment widens the tick gutter: at 390 the desktop 48/640
  *  is ~21 CSS px, and a currency tick painted over the first bar (#3051
- *  design review). Ticks also go through `formatTick`, which callers keep
- *  compact (no cents) for the same reason. */
-const PAD_NARROW = { ...PAD, left: 78 }
-/** The cap above a bar that refused something, in viewBox units. */
-const REFUSAL_MARKER_H = 7
+ *  design review). Since #4334 a sub-cent scale's ticks carry 4 decimals —
+ *  a SEK "0,0040 kr" needs ~55 CSS px of `text-xs` — so the narrow gutter
+ *  grew again: 100/640 at the 350px plot a 390 phone leaves (~54px) fits
+ *  the longest served tick with margin, where the old 78 (~43px) clipped it. */
+const PAD_NARROW = { ...PAD, left: 100 }
+/** The x axis pins only its END label, to the last bar's right edge, growing
+ *  left inside the plot (#4426). The start label stays centred on its bar:
+ *  the y gutter gives it room, and anchoring it costs the phone chart a label
+ *  that never collided (#3204 round 4). One declaration, read by both the
+ *  label spacing (`xLabelIndices`) and the label rendering (`xLabelEdge`). */
+const X_LABEL_ANCHORING: XLabelAnchoring = { endAnchoredRight: true }
+/** The refusal mark under a day's slot, in viewBox units: a 3px dash
+ *  `REFUSAL_MARKER_GAP` below the axis baseline — under the slot, so a day
+ *  with refusals and NO spend still shows (#4334). The x labels start 8
+ *  units under the baseline, clear of the dash. */
+const REFUSAL_MARKER_H = 3
+const REFUSAL_MARKER_GAP = 3
 /** The desktop callout's resting offset under the wrapper's top edge — the
  *  CSS px behind its `top-3`; the clearance it keeps from the bar's highest
  *  mark (resting) or the axis baseline (dropped, #3063); and the least of a
@@ -132,7 +166,7 @@ export interface StackedBarDay {
   /** The per-agent amounts making up this bar. `tokens` is per-denomination
    *  detail for the tooltip only — the bar itself is one display currency. */
   series: StackedBarSeries[]
-  /** Refusals recorded that day; `0` or absent draws no cap. */
+  /** Refusals recorded that day; `0` or absent draws no mark. */
   refusals?: number
   /**
    * The bucket covers less than a full local day (#3051): the endpoint's
@@ -155,10 +189,17 @@ export interface StackedBarSeries {
   /** The display-currency amount this agent spent that day — the stack's
    *  height contributor. */
   amount: number
-  /** Index into the six `--v2-series-*` tokens; wraps past six. Assign per
-   *  agent and HOLD IT STABLE across renders, or an agent silently changes
-   *  colour between the chart and the table beside it. */
-  seriesIndex: number
+  /** Index into the six `--v2-series-*` tokens; wraps past six. For series
+   *  that are NOT an agent. Assign per series and HOLD IT STABLE across
+   *  renders, or a series silently changes colour between the chart and the
+   *  table beside it. An AGENT-keyed series carries `color` instead
+   *  (#4331) — its avatar tint — and omits this. */
+  seriesIndex?: number
+  /** Explicit fill for an agent-keyed series (#4331): `seriesColorForAgent({ name, avatarTint })`
+   *  — the agent's avatar tint, the same token its `Monogram` wears, stable
+   *  under re-ranking and, since #4428, its own stored tint rather than a
+   *  name hash. Wins over `seriesIndex` when both are set. */
+  color?: string
   /** Stable key; the tooltip's per-row identity and the React key. */
   id: string
   /** Per-denomination breakdown, e.g. `[['USDC', 900.4], ['PYUSD', 340]]`.
@@ -180,9 +221,12 @@ export interface StackedBarChartProps {
    *  fraction digits) — the same callback the tiles and the agents table
    *  print with, so one voice reads the page. */
   formatValue: (amount: number) => string
-  /** The y-axis tick formatter; defaults to `formatValue`. Callers pass a
-   *  compact form (no cents) so a tick fits the gutter at 390 (#3051). */
-  formatTick?: (amount: number) => string
+  /** The y-axis tick formatter; defaults to `formatValue`. Receives the
+   *  scale's own tick STEP as its second argument (#4334) so the caller can
+   *  choose the tick label's fraction digits from it — 4 decimals under a
+   *  cent, none for whole steps. Callers pass a compact form so a tick fits
+   *  the gutter at 390 (#3051). */
+  formatTick?: (amount: number, step: number) => string
   /** Fewer x ticks, a dot legend, a tap-to-pin panel: the 390px treatment,
    *  decided by the caller's breakpoint (see the file's header). */
   narrow?: boolean
@@ -193,10 +237,21 @@ export interface StackedBarChartProps {
 interface StackedBarSegment {
   seriesId: string
   name: string
-  seriesIndex: number
+  seriesIndex?: number
+  color?: string
   /** The amount this segment represents, in the display currency. */
   amount: number
   tokens?: Array<[symbol: string, amount: number]>
+}
+
+/**
+ * The fill for one segment (#4331): an agent-keyed series paints its own
+ * avatar tint; every other series paints the ordered `--v2-series-*` token
+ * its `seriesIndex` names. One home so the bar, the legend dot, the tooltip
+ * swatch and the exported `SeriesSwatch` cannot disagree.
+ */
+function seriesFill(s: Pick<StackedBarSegment, 'color' | 'seriesIndex'>): string {
+  return s.color ?? seriesColor(s.seriesIndex ?? 0)
 }
 
 /** The whole of one day, as the plot and the tooltip read it. */
@@ -205,7 +260,7 @@ interface StackedBarEntry {
   /** Total height of the stacked bar, display currency. */
   total: number
   segments: StackedBarSegment[]
-  /** Number of refused payments recorded that day; draws the cap. */
+  /** Number of refused payments recorded that day; draws the mark. */
   refusals: number
   partial: boolean
 }
@@ -233,20 +288,56 @@ function legendRows(entries: StackedBarEntry[]): StackedBarSegment[] {
   return [...seen.values()]
 }
 
+/** Every box `SeriesSwatch` can draw, written out whole so each is greppable. */
+const SWATCH_BOX = {
+  sm: {
+    circle: 'h-2 w-2 flex-shrink-0 rounded-full',
+    square: 'h-2 w-2 flex-shrink-0 rounded-sm',
+  },
+  md: {
+    circle: 'h-2.5 w-2.5 flex-shrink-0 rounded-full',
+    square: 'h-2.5 w-2.5 flex-shrink-0 rounded-sm',
+  },
+} as const
+
 /**
- * The legend dot as a component, exported so a table beside the chart can
- * key a row to the same series token (#3051: the agents table's name cell).
- * One home for "what colour is agent i": the chart's segments, its legend,
- * its tooltip and the table all read `seriesColor(seriesIndex)`.
+ * The legend dot as a component, exported so a showcase beside the chart can
+ * key a row to the same fill the chart paints (#3051; #4331 added `color` for
+ * agent-keyed series — an agent's monogram beside its chart swatch). One home
+ * for "what colour is this series": the chart's segments, its legend and its
+ * tooltip all read `seriesFill`; a caller passes the same `color` the series
+ * carries (or the same `seriesIndex` for a non-agent series).
  */
-export function SeriesSwatch({ seriesIndex, className = '' }: { seriesIndex: number; className?: string }) {
+export function SeriesSwatch({
+  seriesIndex,
+  color,
+  size = 'md',
+  shape = 'circle',
+  className = '',
+}: {
+  seriesIndex?: number
+  color?: string
+  /** `md` (10px) beside a legend name; `sm` (8px) inside a tooltip row. */
+  size?: 'sm' | 'md'
+  /**
+   * `circle` is the chart's own key (legend, tooltip, `/design-system`);
+   * `square` is the dashboard money card's list key beside its split bar
+   * (#3901, the agreed #3897 mockup).
+   */
+  shape?: 'circle' | 'square'
+  className?: string
+}) {
+  // Size and shape are props, not className overrides: two height or radius
+  // utilities on one element resolve by stylesheet order, not by the order
+  // they are written, so `className="h-2 w-2"` would not reliably shrink it.
+  const box = SWATCH_BOX[size][shape]
   return (
     <span
       aria-hidden="true"
       data-testid="series-swatch"
       data-series-index={seriesIndex}
-      className={`inline-block h-2.5 w-2.5 flex-shrink-0 rounded-full ${className}`.trim()}
-      style={{ backgroundColor: seriesColor(seriesIndex) }}
+      className={`inline-block ${box} ${className}`.trim()}
+      style={{ backgroundColor: color ?? seriesColor(seriesIndex ?? 0) }}
     />
   )
 }
@@ -283,8 +374,9 @@ export function StackedBarChart({
   // The callout's top, in CSS px from the wrapper's top, when the bar it
   // describes is tall enough to reach under the resting `top-3` position:
   // then the callout drops to sit just above the axis baseline instead, so
-  // the bar's top — its height against the neighbours, and the refusal cap
-  // the callout itself mentions — stays visible while the callout is open
+  // the bar's top — its height against the neighbours; the refusal mark now
+  // lives under the slot (#4334), out of any callout's reach but the legend
+  // slot's, and is scored below.
   // (#3063). `null` is the resting position. Measured after paint like the
   // half-width; in jsdom nothing has a height and the resting position stands.
   const [tipTop, setTipTop] = useState<number | null>(null)
@@ -307,6 +399,7 @@ export function StackedBarChart({
           seriesId: s.id,
           name: s.name,
           seriesIndex: s.seriesIndex,
+          color: s.color,
           amount: s.amount,
           tokens: s.tokens,
         }))
@@ -323,7 +416,7 @@ export function StackedBarChart({
 
   const { scale, labelIdx } = useMemo(() => {
     const dataMax = Math.max(0, ...entries.map((e) => e.total))
-    return { scale: chartScale(dataMax), labelIdx: xLabelIndices(entries.length, { narrow }) }
+    return { scale: chartScale(dataMax), labelIdx: xLabelIndices(entries.length, { narrow, ...X_LABEL_ANCHORING }) }
   }, [entries, narrow])
 
   // The sparse-data decision, held as a value and ACTED ON after the last
@@ -341,12 +434,16 @@ export function StackedBarChart({
 
   const yOf = (value: number) => baseY - (scale.max === 0 ? 0 : value / scale.max) * plotH
   const xOf = (index: number) => pad.left + band * index + (band - barW) / 2
-  // The series indexes that need a hatch pattern: only partial days use one.
+  // The fills that need a hatch pattern: only partial days use one. Keyed by
+  // the fill itself (an avatar tint can be shared by two agents — one
+  // pattern per colour is then exactly right), so the id has to be derived
+  // from position in the de-duped list.
   const hatched = useMemo(() => {
-    const set = new Set<number>()
-    for (const e of entries) if (e.partial) for (const s of e.segments) set.add(s.seriesIndex)
+    const set = new Set<string>()
+    for (const e of entries) if (e.partial) for (const s of e.segments) set.add(seriesFill(s))
     return [...set]
   }, [entries])
+  const hatchId = useMemo(() => new Map(hatched.map((fill, i) => [fill, `${patternId}-hatch-${i}`])), [hatched, patternId])
 
   // A pin or caret outlives the data it pointed at otherwise: a shorter
   // range would leave `active` on an index with no entry — no callout, and
@@ -392,10 +489,9 @@ export function StackedBarChart({
   )
 
   // The vertical drop (#3063). The resting callout hangs 12px (`top-3`) under
-  // the wrapper's top edge; if the described bar's top — or its refusal cap
-  // — would sit under the callout's box, the callout drops below the bar's
-  // top, but only where that leaves at least `TIP_MIN_VISIBLE` of the bar
-  // in view above it: its bottom `TIP_GAP` above the axis baseline when the
+  // the wrapper's top edge; if the described bar's top would sit under the
+  // callout's box, the callout drops below the bar's top, but only where that
+  // leaves at least `TIP_MIN_VISIBLE` of the bar in view: its bottom `TIP_GAP` above the axis baseline when the
   // bar is tall enough to hold it, else its bottom just above the legend
   // — over the axis labels beneath it (whole, never half of one; the day's
   // own it repeats) and never over a legend row. A bar too short for either (the
@@ -404,7 +500,7 @@ export function StackedBarChart({
   // instead. Between the two slots, the one that hides the fewest
   // NEIGHBOURS' tops wins (#3076): a 62px band above the baseline covers
   // the top of every bar shorter than ~68px within the callout's span,
-  // leaving a refusal cap floating over a hidden bar, while the same
+  // leaving a refusal mark floating over a hidden bar, while the same
   // callout above the legend clears them at the cost of the date labels it
   // partly repeats. Ties go to the baseline slot. The svg scales the
   // viewBox to its CSS box without preserving the ratio, so a viewBox y
@@ -425,26 +521,27 @@ export function StackedBarChart({
     }
     const cssY = (y: number) => (y / VIEW_H) * svg.clientHeight
     const barTop = cssY(yOf(entry.total))
-    // The highest mark the day draws: its refusal cap when it has one.
-    const markTop = cssY(yOf(entry.total) - (entry.refusals > 0 ? REFUSAL_MARKER_H + 3 : 0))
+    // The highest mark the day draws above the baseline is its bar top: the
+    // refusal mark lives UNDER the slot (#4334), below the axis, where no
+    // resting-or-dropped callout can sit.
+    const markTop = barTop
     const restingBottom = TIP_REST_TOP + tip.offsetHeight + TIP_GAP
     if (restingBottom <= markTop) {
       setTipTop(null)
       return
     }
     // Both candidates leave `TIP_MIN_VISIBLE` of the day's marks in view and
-    // clear the BAR's top edge by `TIP_GAP` — a cap counts towards the marks
-    // but never stands in for the bar's own top.
+    // clear the BAR's top edge by `TIP_GAP`.
     const least = Math.max(barTop + TIP_GAP, markTop + TIP_MIN_VISIBLE)
     const aboveBaseline = cssY(baseY) - tip.offsetHeight - TIP_GAP
     const onLegendTop = svg.clientHeight + LEGEND_GAP - TIP_GAP - tip.offsetHeight
     // The callout's horizontal span, in the wrapper's CSS px (the box its
     // `left: %` resolves against — the same one the half-width effect
     // measures): the same centre-and-clamp the `left` style uses, half its
-    // measured width each side. A neighbour whose bar top — or whose
-    // refusal cap — lies inside a slot's box has its top hidden by that
-    // slot (a cap just above the box over a hidden bar top is the floating
-    // cap the review saw).
+    // measured width each side. A neighbour whose bar top — or whose refusal
+    // mark under the slot — lies inside a slot's box has its mark hidden by
+    // that slot (the legend slot is the only one that reaches below the
+    // baseline, where the marks now live, #4334).
     const width = tip.parentElement?.clientWidth ?? 0
     const cssX = (x: number) => (x / VIEW_W) * width
     const centre =
@@ -462,11 +559,13 @@ export function StackedBarChart({
         // A day with nothing spent draws no bar: its "top" is the baseline
         // and must not score (it only ever falls in the legend slot's box,
         // which would bias the choice toward the baseline slot — review).
-        // Its cap, if it has one, still counts.
+        // Its refusal mark, if it has one, still counts: the dash sits under
+        // the slot (#4334), and the legend slot — the only one that reaches
+        // below the baseline — can cover it.
         const inside = (y: number) => y > slotTop && y < slotTop + tip.offsetHeight
         const barHidden = e.total > 0 && inside(cssY(yOf(e.total)))
-        const capHidden = e.refusals > 0 && inside(cssY(yOf(e.total) - REFUSAL_MARKER_H - 3))
-        if (barHidden || capHidden) n += 1
+        const markHidden = e.refusals > 0 && inside(cssY(baseY + REFUSAL_MARKER_GAP))
+        if (barHidden || markHidden) n += 1
       })
       return n
     }
@@ -521,12 +620,12 @@ export function StackedBarChart({
               strokeWidth={1}
             />
           ))}
-          {/* Hatch patterns for partial days: the series token at full
+          {/* Hatch patterns for partial days: the series fill at full
               strength with diagonal ground-coloured stripes, so the mark is
-              the same on both themes and the token's contrast survives. */}
+              the same on both themes and the fill's contrast survives. */}
           {hatched.length > 0 && (
             <defs>
-              {hatched.map((i) => (
+              {hatched.map((fill, i) => (
                 <pattern
                   key={`hatch-${i}`}
                   id={`${patternId}-hatch-${i}`}
@@ -536,7 +635,7 @@ export function StackedBarChart({
                   height="6"
                   patternTransform="rotate(45)"
                 >
-                  <rect width="6" height="6" fill={seriesColor(i)} />
+                  <rect width="6" height="6" fill={fill} />
                   <line x1="0" y1="0" x2="0" y2="6" stroke="var(--v2-bg)" strokeWidth="2" />
                 </pattern>
               ))}
@@ -595,22 +694,24 @@ export function StackedBarChart({
                       height={Math.max(0, height)}
                       // A partial day is hatched so a cut day does not read
                       // as a quiet one (see `StackedBarDay.partial`).
-                      fill={e.partial ? `url(#${patternId}-hatch-${s.seriesIndex})` : seriesColor(s.seriesIndex)}
+                      fill={e.partial ? `url(#${hatchId.get(seriesFill(s))})` : seriesFill(s)}
                       data-hatched={e.partial ? 'true' : undefined}
                       fillOpacity={isHl ? 1 : 0.88}
                     />
                   )
                 })}
-                {/* Refusals: the marker series. A cap above the bar, never a
-                    second axis (see the header for why). */}
+                {/* Refusals: the marker series. A grey dash UNDER the day's
+                    slot, never a second axis (see the header for why) and
+                    never a cap on the bar — a day with refusals and no spend
+                    has no bar to cap, and its refusals are still a fact. */}
                 {e.refusals > 0 && (
                   <rect
                     data-testid="chart-refusal-marker"
                     x={xOf(dayIdx)}
-                    y={yOf(e.total) - REFUSAL_MARKER_H - 3}
+                    y={baseY + REFUSAL_MARKER_GAP}
                     width={barW}
                     height={REFUSAL_MARKER_H}
-                    rx={2}
+                    rx={1.5}
                     fill={INK}
                     fillOpacity={isHl ? 0.85 : 0.55}
                   />
@@ -635,34 +736,41 @@ export function StackedBarChart({
               transform: 'translateY(-50%)',
             }}
           >
-            {formatTick(tick)}
+            {formatTick(tick, scale.step)}
           </span>
         ))}
-        {labelIdx.map((i) => (
-          <span
-            key={`x-${i}`}
-            data-testid="chart-x-label"
-            aria-hidden="true"
-            className="absolute block text-center text-xs leading-none text-[var(--v2-ink-3)]"
-            style={{
-              left: pct(xOf(i) + barW / 2, VIEW_W),
-              top: pct(baseY + 8, VIEW_H),
-              transform: 'translateX(-50%)',
-            }}
-          >
-            {entries[i]?.label}
-          </span>
-        ))}
+        {labelIdx.map((i) => {
+          // One line always (#4426): an absolutely positioned label with no
+          // width shrinks to the room left of the card's edge, so the last
+          // day wrapped ("10 Jul" on two lines). The end label is pinned to
+          // its bar's right edge and grows left, inside the plot.
+          const at = xLabelEdge(i, entries.length, X_LABEL_ANCHORING)
+          return (
+            <span
+              key={`x-${i}`}
+              data-testid="chart-x-label"
+              aria-hidden="true"
+              className="absolute block whitespace-nowrap text-xs leading-none text-[var(--v2-ink-3)]"
+              style={{
+                left: pct(xOf(i) + barW * at.bandOffset, VIEW_W),
+                top: pct(baseY + 8, VIEW_H),
+                transform: at.transform,
+              }}
+            >
+              {entries[i]?.label}
+            </span>
+          )
+        })}
       </div>
 
-      {/* The legend: the same colours, read by name. A column on a wide
-          screen, a wrapping row of dots and names on a narrow one. */}
+      {/* The legend: the same colours, read by name. One wrapping row of dots
+          and names at every width (#4480, owner decision 2026-10-27) — a
+          column on a wide screen read as a second list beside the chart
+          rather than as its key. */}
       <ul
         data-testid="chart-legend"
         aria-hidden="true"
-        className={`mt-3 gap-x-4 gap-y-1.5 text-xs text-[var(--v2-ink-2)] ${
-          narrow ? 'flex flex-wrap' : 'flex flex-col'
-        }`}
+        className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-[var(--v2-ink-2)]"
       >
         {legend.map((row) => (
           <li
@@ -670,17 +778,13 @@ export function StackedBarChart({
             data-testid="chart-legend-item"
             className="inline-flex items-center gap-1.5"
           >
-            <span
-              aria-hidden="true"
-              className="inline-block h-2.5 w-2.5 flex-shrink-0 rounded-full"
-              style={{ backgroundColor: seriesColor(row.seriesIndex) }}
-            />
+            <SeriesSwatch color={seriesFill(row)} seriesIndex={row.seriesIndex} />
             <span className="truncate">{row.name}</span>
           </li>
         ))}
         {entries.some((d) => d.refusals > 0) && (
-          // The one mark the series rows do not explain: the ink cap over a
-          // day that refused something. Named here, in the legend that names
+          // The one mark the series rows do not explain: the grey dash under
+          // a day that refused something. Named here, in the legend that names
           // everything else, rather than only in the card's prose (#3204).
           <li data-testid="chart-legend-refusal" className="inline-flex items-center gap-1.5">
             <span
@@ -688,7 +792,7 @@ export function StackedBarChart({
               className="inline-block h-[3px] w-2.5 flex-shrink-0 rounded-sm"
               style={{ backgroundColor: INK, opacity: 0.55 }}
             />
-            <span className="truncate">Refused (cap)</span>
+            <span className="truncate">Refused</span>
           </li>
         )}
       </ul>
@@ -794,11 +898,7 @@ export function StackedBarChart({
                       truncates against the amount; only the token breakdown
                       folds to the chip's next line. */}
                   <span data-testid="chart-tooltip-figure" className="inline-flex min-w-0 max-w-full items-baseline gap-1.5">
-                    <span
-                      aria-hidden="true"
-                      className="inline-block h-2 w-2 flex-shrink-0 self-center rounded-full"
-                      style={{ backgroundColor: seriesColor(s.seriesIndex) }}
-                    />
+                    <SeriesSwatch color={seriesFill(s)} seriesIndex={s.seriesIndex} size="sm" className="self-center" />
                     <span data-testid="chart-tooltip-name" className="min-w-0 truncate text-[var(--v2-ink-2)]">{s.name}</span>
                     <span data-testid="chart-tooltip-amount" className="v2-tabular flex-shrink-0 whitespace-nowrap text-[var(--v2-ink)]">
                       {formatValue(s.amount)}

@@ -152,7 +152,7 @@ function SponsoredGasView({ client }: { client: ReturnType<typeof useOpsClient> 
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg border border-[var(--v2-line)] p-4">
+    <div className="rounded-lg border border-[var(--v2-border)] p-4">
       <div className="text-xs text-[var(--v2-ink-3)]">{label}</div>
       <div className="v2-tabular mt-1 text-lg font-semibold text-[var(--v2-ink)]">{value}</div>
     </div>

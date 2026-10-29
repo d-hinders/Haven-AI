@@ -56,6 +56,10 @@ async function serveOwnTransfer(page: Page) {
     hash: `0x${'e1'.repeat(32)}`,
     fundingTxHash: `0x${'e1'.repeat(32)}`,
     settlementTxHash: null,
+    // #4320: a non-x402 row carries no settlement state — null, so the panel
+    // never reads a tracking state off a move.
+    settlementTracking: null,
+    settlementProof: null,
     source: 'explorer',
     x402ResourceUrl: undefined,
     x402MerchantAddress: undefined,

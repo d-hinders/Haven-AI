@@ -52,6 +52,8 @@ export const OPS_READONLY_GRANTS: Readonly<Record<string, readonly string[]>> = 
     'id', 'user_id', 'name', 'type', 'status', 'created_at', 'updated_at', 'description',
     'delegate_address', 'max_x402_per_hour', 'account_id', 'last_seen_at', 'archived_at',
     'mcp_server_name', 'organization_id', 'tax_declaration_enabled',
+    // #4429: the stored display colour (1..6) — harmless display data.
+    'avatar_tint',
   ],
   // `delegation_json` granted by owner decision (2026-09-30, #3510): a signed
   // delegation to a named delegate confers no spend authority without that

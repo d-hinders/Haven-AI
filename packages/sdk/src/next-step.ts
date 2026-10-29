@@ -59,6 +59,14 @@ export function parseNextTool(literal: string): { server: string; name: string; 
 export interface NextStepTarget<TArgs> {
   role: NextToolServerRole
   validate: (input: unknown) => string | null
+  /**
+   * #4449: the bare tool name to render, when the target-map key is not it.
+   * One hosted tool that takes several argument shapes is declared once per
+   * shape under `<tool>#<variant>` keys (the signer's `haven_submit#payment`
+   * beside `#task_budget` / `#sub_budget`): the key selects the shape, this
+   * names the tool. Absent → the key IS the name, which is every other target.
+   */
+  name?: string
   /** Phantom carrier for the argument type; never read at runtime. */
   readonly _args?: TArgs
 }
@@ -143,11 +151,13 @@ export function createNextStepBuilder<Targets extends NextStepTargets>(targets: 
     if (problem) {
       return { ...base, next_tool_omitted_reason: `next_arguments do not parse under ${i.nextTool}: ${problem}` }
     }
+    // #4449: a `<tool>#<variant>` key selects the shape; `name` names the tool.
+    const name = target.name ?? i.nextTool
     return {
       ...base,
-      next_tool: renderNextTool(target.role, i.nextTool),
+      next_tool: renderNextTool(target.role, name),
       next_tool_server: NEXT_TOOL_SERVER_NAMES[target.role],
-      next_tool_name: i.nextTool,
+      next_tool_name: name,
       next_tool_server_role: target.role,
       next_arguments: i.nextArguments as Record<string, unknown>,
     }

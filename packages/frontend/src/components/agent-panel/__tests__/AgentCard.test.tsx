@@ -66,6 +66,8 @@ function agentFixture(overrides: Partial<Agent> = {}): Agent {
     allowances: [],
     labels: [],
     organization_id: null,
+    // #4431: the stored display tint every agent read carries.
+    avatar_tint: 1,
     ...overrides,
   } as Agent
 }
@@ -75,7 +77,7 @@ const ZERO_WINDOW = {
   net: { usd: 0, eur: 0, sek: 0 },
   approx: false,
   payments: 0,
-  refusals: { budget: 0, scope: 0, failed: 0, haven: 0 },
+  refusals: { budget: 0, expired: 0, scope: 0, failed: 0, haven: 0 },
 }
 
 function makeBudget(
@@ -102,9 +104,11 @@ function overviewAgent(overrides: Partial<DashboardAgent> = {}): DashboardAgent 
     id: 'agent-1',
     name: 'Research agent',
     status: 'active',
+    // #4431: the overview always carries the agent's stored tint.
+    avatarTint: 1,
     accountId: 'safe-1',
     accountName: 'Main account',
-    accountChainId: 84532,
+    accountChainId: 84532, budgetEndedAt: null,
     allowances: [],
     budgets: [makeBudget()],
     receivedSubBudgets: [],

@@ -61,6 +61,15 @@ describe('generic skill content', () => {
     expect(HAVEN_SKILL_MD).toContain('needs_approval')
   })
 
+  it('splits needs_approval into "ended", "never approved" and "spent for this period" (#4355, #4352)', () => {
+    expect(HAVEN_SKILL_MD).toContain(
+      '`needs_approval` with no `allowances[]`\n' +
+        '  rows and `budgetEndedAt` set means the budget ENDED on that date — waiting\n' +
+        '  will not help, ask the owner to set a new one; with no rows and no\n' +
+        '  `budgetEndedAt`, nobody approved a budget yet; with rows (all at remaining 0) the',
+    )
+  })
+
   it('carries the stale-tool-list reconnect rule with the in-flight carve-out (#3816)', () => {
     // The hosted surface is stateless: a client that loaded tools/list before
     // a deploy is never told the schema moved. The skill is the agent's own
@@ -129,6 +138,15 @@ describe('generic skill content', () => {
     expect(HAVEN_SKILL_MD).toContain('next_arguments')
     expect(HAVEN_SKILL_MD).toMatch(/follow those fields first/i)
     expect(HAVEN_SKILL_MD).toContain('safe_to_continue')
+  })
+
+  it('says only the hosted quote checks the remaining budget; the local quote checks only a stated price (#4345)', () => {
+    expect(HAVEN_SKILL_MD).toContain(
+      "- **If the quote says stop, stop.** The hosted quote checks the agent's\n" +
+        '  remaining budget at quote time, and it can check a price you state\n' +
+        '  (`expected_amount`). On the local runtime (`@haven_ai/mcp`) the quote\n' +
+        '  checks only a price you state; the budget is checked when you pay.\n',
+    )
   })
 
   it('signs and settles by payment_id only, never a bare merchant_url/tool_name pass', () => {
@@ -549,6 +567,21 @@ describe('#3774: the step after the merchant retry is split by scheme', () => {
     expect(HAVEN_SKILL_MD).toMatch(/\*\*erc7710\*\* scheme[\s\S]*?mcp__haven__haven_report_settlement_evidence/)
     expect(HAVEN_SKILL_MD).toMatch(/`mcp__haven__haven_report_x402_outcome`\s+does not apply on erc7710/)
     expect(HAVEN_SKILL_MD).toMatch(/do not re-quote at once/)
+  })
+})
+
+describe('#4469: the delivery-verdict guidance claims only what ships', () => {
+  // The receipt read carries the verdict (haven_list_receipts / haven_get_receipt
+  // after #4469), but NO owner surface reads it: no file under
+  // packages/frontend/src reads delivery_quality/deliveryQuality other than this
+  // skill text. So the sentence must not say the owner sees it. Pinned WHOLE,
+  // not only by the frontend↔SDK parity assertion, so a reword on both copies
+  // still has to pass this.
+  it('pins the whole sentence, and never claims the owner reads the verdict', () => {
+    expect(HAVEN_SKILL_MD).toContain(
+      'A re-report replaces your\nearlier verdict; the receipt then carries it beside the payment, so a junk\ndelivery does not read as a success.',
+    )
+    expect(HAVEN_SKILL_MD).not.toContain('the owner does not read a junk delivery as a success')
   })
 })
 

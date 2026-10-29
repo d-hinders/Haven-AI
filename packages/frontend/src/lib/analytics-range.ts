@@ -45,6 +45,57 @@ export const ANALYTICS_RANGE_OPTIONS: ReadonlyArray<{ value: AnalyticsRangeValue
 export const ANALYTICS_PERIOD_URL_PARAM = 'period'
 
 /**
+ * The URL key the Agent facet mirrors its selection onto (#4333) — the same
+ * `agentId` key `/transactions` reads (`parseTransactionFilters`), so an agent
+ * page can link `/analytics?agentId=<id>` and the filter lands already set.
+ * Unlike the period, the agent filter is NOT persisted to localStorage: it is
+ * a linkable state, not a device preference.
+ */
+export const ANALYTICS_AGENT_URL_PARAM = 'agentId'
+
+/**
+ * The `?agentId=` on the address bar, or `null` when there is none. Only
+ * shape-checked here (non-empty): whether the id names one of the user's
+ * agents is the page's question — a stale or foreign id is answered by the
+ * endpoint's 404 (#4332) and cleared with a notice, not silently dropped,
+ * because dropping it would show the unfiltered page as if the link had
+ * worked.
+ */
+export function readUrlAnalyticsAgentId(): string | null {
+  if (typeof window === 'undefined') return null
+  try {
+    const value = new URLSearchParams(window.location.search).get(ANALYTICS_AGENT_URL_PARAM)
+    return value && value.length > 0 ? value : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Mirror the agent selection onto the address bar with `replaceState` — the
+ * same posture `writeUrlAnalyticsRange` uses, and `null` DELETES the key
+ * rather than writing an empty value (an `agentId=` in a shared link would
+ * read as a filter that names nothing). Other params are preserved: the range
+ * keeps its `period` key, and keys this page does not own are untouched.
+ */
+export function writeUrlAnalyticsAgentId(value: string | null): void {
+  if (typeof window === 'undefined') return
+  try {
+    const params = new URLSearchParams(window.location.search)
+    if (value === null) params.delete(ANALYTICS_AGENT_URL_PARAM)
+    else params.set(ANALYTICS_AGENT_URL_PARAM, value)
+    const search = params.toString()
+    window.history.replaceState(
+      null,
+      '',
+      `${window.location.pathname}${search ? `?${search}` : ''}${window.location.hash}`,
+    )
+  } catch {
+    // See `writeUrlAnalyticsRange`: the URL mirrors the choice, it is not the source of it.
+  }
+}
+
+/**
  * The range a `?period=` on the address bar asks for, or `null` when there is
  * none or it is not a value the endpoint accepts.
  *

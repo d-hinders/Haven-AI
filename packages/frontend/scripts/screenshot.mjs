@@ -16,8 +16,9 @@
  * ── Looking at a width outside the committed set (#2006) ─────────────────────
  * `--viewport=<W>[xH]` (repeatable/comma-separated, or `SCREENSHOT_VIEWPORTS`)
  * shoots the requested widths INSTEAD OF the committed pair, for that run only.
- * Nothing a gate compares changes: the four gate consumers import `VIEWPORTS`
- * from `evidence-viewports.mjs` and never the override. Overridden viewports
+ * Nothing a gate compares changes: every gate consumer (24 e2e files — 23 of
+ * the 24 visual specs and `capture-integrity`) imports `VIEWPORTS` from
+ * `evidence-viewports.mjs` and never the override. Overridden viewports
  * are named after their dimensions, so the PNG filenames and the manifest's
  * `viewports` / `viewport_source` state the widths the run actually used.
  * The reasoning — and why 320 is deliberately NOT in the committed set — is in
@@ -732,7 +733,7 @@ export const FIXTURE_USER = {
   wallet_address: null,
   account_address: FIXTURE_ACCOUNT.account_address,
   // Delegation-rail on the `/auth/me`-shaped safes list only — so the account
-  // page's Backup & recovery card (#1089) has something real to render,
+  // page's Who can approve section (#1089) has something real to render,
   // without perturbing FIXTURE_ACCOUNT's identity shape (pinned against the e2e
   // fixture by fixture-shape-parity.test.ts).
   //
@@ -945,6 +946,8 @@ export const FIXTURE_AGENTS = [
     // #3426: the opt-in defaults OFF; the /agents screenshot photographs the
     // unchecked state.
     tax_declaration_enabled: false,
+    // #4429: the stored display colour (1..6). DISPLAY ONLY.
+    avatar_tint: 1,
   },
   {
     id: 'agent-retired', name: 'Data-feed agent',
@@ -983,6 +986,8 @@ export const FIXTURE_AGENTS = [
     organization_id: 'org-devops',
     // #3426: the opt-in defaults OFF on every agent.
     tax_declaration_enabled: false,
+    // #4429: the stored display colour (1..6). DISPLAY ONLY.
+    avatar_tint: 2,
   },
 ]
 
@@ -1164,6 +1169,8 @@ export const FIXTURE_OVERVIEW = {
       merchantName: null,
     },
     failedIntents7d: 1,
+    // #4324: the latest recorded step of any failed intent in the window (sent when there is one).
+    lastFailedIntentAt: '2026-10-08T14:20:00.000Z',
     balance_by_day: Array.from({ length: 30 }, (_, i) => {
       const day = new Date(Date.UTC(2026, 8, 10 + i))
       return {
@@ -1176,7 +1183,9 @@ export const FIXTURE_OVERVIEW = {
   },
   agents: FIXTURE_AGENTS.map((a) => ({
     id: a.id, name: a.name, status: a.status, accountId: a.account_id,
-    accountName: a.account_name, accountChainId: a.account_chain_id,
+    // #4429: the stored display colour (1..6). DISPLAY ONLY.
+    avatarTint: a.avatar_tint,
+    accountName: a.account_name, accountChainId: a.account_chain_id, budgetEndedAt: null,
     ...(a.status === 'pending_approval' ? { setupStatus: 'awaiting_connection' } : {}),
     allowances: a.allowances.map((x) => ({
       tokenSymbol: x.token_symbol, allowanceAmount: x.allowance_amount, resetPeriodMin: x.reset_period_min,
@@ -1209,14 +1218,15 @@ export const FIXTURE_OVERVIEW = {
         net: { usd: 37.5, eur: 34.43, sek: 403.5 },
         approx: false,
         payments: 4,
-        refusals: { budget: 1, scope: 0, failed: 0, haven: 0 },
+        // #4324: d7 carries the latest refusal time of each non-empty bucket.
+        refusals: { budget: 1, expired: 0, scope: 0, failed: 0, haven: 0, lastBudgetAt: '2026-10-08T11:05:00.000Z' },
       },
       d30: {
         gross: { usd: 250.0, eur: 229.5, sek: 2690.0 },
         net: { usd: 162.5, eur: 149.18, sek: 1748.5 },
         approx: true,
         payments: 14,
-        refusals: { budget: 2, scope: 1, failed: 1, haven: 0 },
+        refusals: { budget: 2, expired: 0, scope: 1, failed: 1, haven: 0 },
       },
       lastPaymentAt: '2026-10-09T09:41:00.000Z',
       lastCounterparty: a.status === 'pending_approval' ? null : {
@@ -1799,8 +1809,8 @@ export const FIXTURE_TXS_ACCOUNTED_BADGE = FIXTURE_TXS.map((t, i) =>
 // `GET /analytics/overview` is analytics slice B (#2946, PR #2957 — review at
 // the time of writing). The fixture pins the response shape THAT PR specifies:
 // one range-scoped aggregate whose sums cover confirmed `payment_intents`
-// only, with `basis` carrying the counts the page quotes ("based on N
-// payments", "M awaiting settlement evidence are not counted", the refusal
+// only, with `basis` carrying the counts the page reads (`payments_counted`,
+// the Payments tile's figure since #4333; `unsettled_submitted`; the refusal
 // ledger's coverage window). Keyed here so the `analytics-*` scenarios below
 // and C's page (#2947) read ONE declared shape.
 //
@@ -1835,18 +1845,25 @@ export const ANALYTICS_RANGE = {
 }
 export const FIXTURE_ANALYTICS_MERCHANTS = [
   {
-    label: 'NordShield VPN', address: ADDR.merchant,
+    // #4332: `kind` names the naming step that produced `label`; the address-only
+    // third row's label is NULL now (the client renders "Unknown recipient" in
+    // #4333 — until then the shim renders the address, pixel-neutral).
+    label: 'NordShield VPN', kind: 'contact',
+    filter_address: ADDR.merchant, address: ADDR.merchant,
     spent: '225.00', payments: 3, agent_ids: ['agent-research'],
     first_seen: '2026-07-08T09:15:00.000Z', last_seen: '2026-07-10T08:12:00.000Z',
   },
   {
-    label: 'Klara Data AB', address: '0xC0dA5fA2b7E1d3418c6b9A0fD2e3B4C5D6E7F809',
+    label: 'Klara Data AB', kind: 'receipt',
+    filter_address: '0xC0dA5fA2b7E1d3418c6b9A0fD2e3B4C5D6E7F809',
+    address: '0xC0dA5fA2b7E1d3418c6b9A0fD2e3B4C5D6E7F809',
     spent: '87.25', payments: 1, agent_ids: ['agent-research'],
     first_seen: '2026-07-09T10:00:00.000Z', last_seen: '2026-07-09T10:00:00.000Z',
   },
   {
-    // Address-only: no contact, no receipt name — the label IS the address.
-    label: '0x71C2E8a4D5f6093b1a7C8e2F4B6D0A9C3E5F7128',
+    // Nothing resolves: label null, kind unknown.
+    label: null, kind: 'unknown',
+    filter_address: '0x71C2E8a4D5f6093b1a7C8e2F4B6D0A9C3E5F7128',
     address: '0x71C2E8a4D5f6093b1a7C8e2F4B6D0A9C3E5F7128',
     spent: '12.50', payments: 1, agent_ids: ['agent-retired'],
     first_seen: '2026-07-10T12:30:00.000Z', last_seen: '2026-07-10T12:30:00.000Z',
@@ -1905,6 +1922,8 @@ export const FIXTURE_ANALYTICS_OVERVIEW = {
     gas_sponsored_ops: 7,
   },
   by_day: FIXTURE_ANALYTICS_BY_DAY,
+  // #4332: balance is stored per USER and is deliberately NOT agent-scoped.
+  balance_scope: 'all_accounts',
   // Wire shape (B #2946): `spent` numeric strings; `share` is B's one
   // number-typed money-adjacent field, DERIVED here (not hand-typed) so the
   // ratios cannot drift from the sums they are shares of.
@@ -1912,6 +1931,8 @@ export const FIXTURE_ANALYTICS_OVERVIEW = {
     const raw = [
       {
         id: 'agent-research', name: 'Research agent', status: 'active',
+        // #4429: the stored display colour (1..6). DISPLAY ONLY.
+        avatar_tint: 1,
         spent: '312.25', payments: 4, refusals: 1, refusal_attempts: 2,
         budgets: [{
           token: 'USDC', recipient: null,
@@ -1925,6 +1946,8 @@ export const FIXTURE_ANALYTICS_OVERVIEW = {
       },
       {
         id: 'agent-retired', name: 'Data-feed agent', status: 'paused',
+        // #4429: the stored display colour (1..6). DISPLAY ONLY.
+        avatar_tint: 2,
         spent: '12.50', payments: 1, refusals: 1, refusal_attempts: 1,
         budgets: [{
           token: 'USDC', recipient: '0x9995F3aB1e2C4d6087A1b3E5f6C7D890aB1244E2',
@@ -1934,7 +1957,7 @@ export const FIXTURE_ANALYTICS_OVERVIEW = {
           remaining_from_chain: false,
           period_start: '2026-07-10T00:00:00.000Z', period_end: '2026-07-11T00:00:00.000Z',
         }],
-        top_merchant: { label: '0x71C2E8a4D5f6093b1a7C8e2F4B6D0A9C3E5F7128', address: '0x71C2E8a4D5f6093b1a7C8e2F4B6D0A9C3E5F7128' },
+        top_merchant: { label: null, address: '0x71C2E8a4D5f6093b1a7C8e2F4B6D0A9C3E5F7128' },
         last_payment_at: '2026-07-10T12:30:00.000Z',
       },
     ]
@@ -1971,6 +1994,7 @@ export const FIXTURE_ANALYTICS_OVERVIEW_EMPTY = {
   by_day: [],
   agents: [],
   merchants: [],
+  balance_scope: 'all_accounts',
   balance_by_day: [],
 }
 
@@ -2165,7 +2189,7 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
   }
   if (pathname.startsWith('/accounts/hybrid/') && pathname.endsWith('/signers')) {
     // The account-scoped signer set (#1081/#1089) — one passkey, so the
-    // Backup & recovery card renders its "only one way to approve" state.
+    // Who can approve section renders its single-signer warning (#4474).
     return {
       account_address: FIXTURE_ACCOUNT.account_address,
       chain_id: FIXTURE_ACCOUNT.chain_id,
@@ -2956,9 +2980,10 @@ async function newFixtureContext(browser, vp, scenario, { signedOut = false, col
     // frontend origin (pages, `/_next` assets) loads normally.
     const api = pathname.startsWith('/api/') ? pathname.slice(4) : null
     if (api === null) {
-      // Chain reads leave the browser as JSON-RPC POSTs to a public node, not
-      // through `/api/*` — so they land here, in the `route.continue()` branch
-      // that used to let them onto the real internet (#1935).
+      // Everything else passes through untouched, including any JSON-RPC a
+      // page sends to a public node: the route handler answers no JSON-RPC. The
+      // allowance chain reads this branch once had to fence (#1935) went
+      // with the legacy rail (#2331).
         return route.continue()
     }
 
@@ -3491,15 +3516,14 @@ const SETTINGS_ACCOUNTING_STAGES = {
   // #3017: the Accounted row — not connected, waiting for a pasted key. The
   // paste modal opens from THIS row's Connect.
   'api-key-modal': null,
-  // The card's two OFF states (#2869): no connection row at all, and the
-  // FEED STATUS answer is what makes the state — `hosted && !enabled` lists
-  // every provider as Coming soon with no action; `!hosted` lists none.
-  'coming-soon': null,
+  // The card's OFF state (#2869 → #4359): no connection row at all, and the
+  // FEED STATUS answer is what makes the state — `!hosted` lists none. The
+  // hosted flag-off "coming-soon" stage is GONE with #4359: the card renders
+  // nothing there, so there is nothing left to photograph.
   'self-hosted': null,
 }
 /** The feed-status answer per OFF stage; every other stage falls through to the ON fixture. */
 const SETTINGS_ACCOUNTING_FEED_STAGES = {
-  'coming-soon': FIXTURE_ACCOUNTING_FEED_COMING_SOON,
   'self-hosted': FIXTURE_ACCOUNTING_FEED_SELF_HOSTED,
 }
 let settingsAccountingStage = 'connected'
@@ -3864,7 +3888,7 @@ export const SCENARIOS = {
 
   'settings-accounting': {
     description:
-      'Settings → Accounting card in each of the five connection states, plus the inline feed settings and the backfill choice on a first connect (#2868), the Accounted paste modal (#3017), and the two feed OFF states — Coming soon and self-hosted (#2869)',
+      'Settings → Accounting card in each of the five connection states, plus the inline feed settings and the backfill choice on a first connect (#2868), the Accounted paste modal (#3017), and the self-hosted OFF state (#2869) — the hosted flag-off capture is retired with #4359, where the card renders nothing',
     stages: SETTINGS_ACCOUNTING_STAGES,
     /** Exposed so the fixture-contract test can pin each stage. */
     stage: setSettingsAccountingStage,
@@ -3874,6 +3898,12 @@ export const SCENARIOS = {
         return { connections: row ? [row] : [] }
       }
       if (apiPath === '/accounting/feed/status') return SETTINGS_ACCOUNTING_FEED_STAGES[settingsAccountingStage]
+      // #4359: the Business tab is visible only when a card has content — in
+      // every stage here the ACCOUNTING card is the content, but the
+      // company-details read must still settle: 200 `null` (flag on, nothing
+      // saved) keeps the tab visible without adding a second card's pixels
+      // (the sections clip independently).
+      if (apiPath === '/user/company-details') return null
       return undefined
     },
     async run({ page, vp, shoot }) {
@@ -3882,7 +3912,8 @@ export const SCENARIOS = {
 
       const heading = page.getByRole('heading', { name: 'Accounting', exact: true })
       // The section root that owns the heading (`SettingsSection` renders
-      // `<section>`; the heading is its `Card.Header` h2). Rows are
+      // `<section>`; the heading is its `v2-text-h3` h2, ABOVE the card).
+      // Rows are
       // `SettingsRow`s, which stack their actions under the text below `sm`
       // — the mobile capture shows that stacking, not a mobile layout.
       const card = page.locator('section', { has: heading })
@@ -3900,10 +3931,13 @@ export const SCENARIOS = {
       }
       const openStage = async (stage, query = '') => {
         setSettingsAccountingStage(stage)
-        await settle(() => page.goto(`${BASE_URL}/settings${query}`, { waitUntil: 'domcontentloaded', timeout: 30_000 }))
+        // #4358: the accounting card lives on the Business tab — join
+        // `tab=business` with any forwarded outcome query, never append to
+        // a constant already holding `?tab=…`.
+        await settle(() => page.goto(`${BASE_URL}/settings?tab=business${query ? `&${query.replace(/^\?/, '')}` : ''}`, { waitUntil: 'domcontentloaded', timeout: 30_000 }))
       }
 
-      await settle(() => page.goto(`${BASE_URL}/settings`, { waitUntil: 'networkidle', timeout: 30_000 }))
+      await settle(() => page.goto(`${BASE_URL}/settings?tab=business`, { waitUntil: 'networkidle', timeout: 30_000 }))
 
       // Each stage waits on its own distinguishing copy AND its action, and
       // refuses the neighbouring states' actions — a stage that quietly
@@ -3917,8 +3951,8 @@ export const SCENARIOS = {
         for (const name of refused) {
           await refuseIfPresent(fortnoxActions.getByRole('button', { name, exact: true }), `settings-accounting · ${stage} · ${name}`)
         }
-        // The coming-soon rows are part of every state.
-        await card.getByTestId('connection-row-igdrasil').getByText('Coming soon').waitFor({ timeout: 15_000 })
+        // The coming-soon rows are HIDDEN (#4359) — the igdrasil wait that
+        // used to pin them here is gone with them.
         await card.scrollIntoViewIfNeeded()
         await shoot(card, stage)
       }
@@ -3987,12 +4021,14 @@ export const SCENARIOS = {
       await dialog.getByRole('button', { name: 'Not now', exact: true }).waitFor({ timeout: 15_000 })
       await shoot(dialog, 'backfill-dialog')
 
-      // ── the two OFF states (#2869) ────────────────────────────────────────
+      // ── the self-hosted OFF state (#2869 → #4359) ─────────────────────────
       // No `fortnoxActions` to wait on here — the whole point is that no
-      // action renders — so these settle on the state's own test id.
+      // action renders — so this settles on the state's own test id. (The
+      // hosted flag-off "coming-soon" capture is retired with #4359: the card
+      // renders nothing there.)
       const settleOff = async (stage, testId) => {
         setSettingsAccountingStage(stage)
-        await page.goto(`${BASE_URL}/settings`, { waitUntil: 'domcontentloaded', timeout: 30_000 })
+        await page.goto(`${BASE_URL}/settings?tab=business`, { waitUntil: 'domcontentloaded', timeout: 30_000 })
         await page.evaluate(() => document.fonts.ready)
         await page.locator('button[aria-label="User menu"]').waitFor({ state: 'attached', timeout: 15_000 })
         await dismissMobileSidebar(page, vp)
@@ -4001,15 +4037,9 @@ export const SCENARIOS = {
         for (const name of ['Connect', 'Reconnect', 'Disconnect', 'Settings']) {
           await refuseIfPresent(card.getByRole('button', { name, exact: true }), `settings-accounting · ${stage} · ${name}`)
         }
-        // The neutral description, never the product sentence above "Nothing can be connected yet."
-        await card.getByText("Your company's accounting tool.", { exact: true }).waitFor({ timeout: 15_000 })
-        await refuseIfPresent(card.getByText(/Connect the accounting tool your company uses/), `settings-accounting · ${stage} · product description`)
         await card.scrollIntoViewIfNeeded()
         await shoot(card, stage)
       }
-      await settleOff('coming-soon', 'accounting-coming-soon')
-      await card.getByText('Nothing can be connected yet.', { exact: true }).waitFor({ timeout: 15_000 })
-      await card.getByTestId('connection-row-fortnox').getByText('Coming soon').waitFor({ timeout: 15_000 })
       await settleOff('self-hosted', 'accounting-self-hosted')
       await card.getByText('Not available on self-hosted', { exact: true }).waitFor({ timeout: 15_000 })
       await refuseIfPresent(card.getByTestId('connection-row-fortnox'), 'settings-accounting · self-hosted · provider row')
@@ -4534,16 +4564,79 @@ export const SCENARIOS = {
       return undefined
     },
     async run({ page, vp, shoot }) {
-      await page.goto(`${BASE_URL}/agents/agent-research`, { waitUntil: 'networkidle', timeout: 60_000 })
+      // #4226 made the agent detail page tabbed with `activity` as the default,
+      // so the Settings tab (and the toggle inside it) only renders at
+      // `?tab=settings`. Without the param this scenario waited on a heading
+      // that could never appear.
+      await page.goto(`${BASE_URL}/agents/agent-research?tab=settings`, { waitUntil: 'networkidle', timeout: 60_000 })
       await dismissMobileSidebar(page, vp)
 
-      // Both halves of the card, not just any rendered text: the heading
-      // names the card and the checkbox names the control — a capture that
+      // Both halves of the row, not just any rendered text: the row testid
+      // names the row and the checkbox names the control — a capture that
       // waited on one string could "prove" visibility with the wrong subtree.
-      await page.getByRole('heading', { name: 'Tax declaration', exact: true }).waitFor({ timeout: 20_000 })
-      await page.getByRole('checkbox', { name: 'Send a tax declaration with payments' }).waitFor({ timeout: 20_000 })
+      // #4477: the row label is a `<p>` inside `SettingsRow`, not an `h3`, so
+      // the wait is on the row's testid (the layout contract) rather than a
+      // heading role.
+      await page.getByTestId('tax-declaration-row').waitFor({ timeout: 20_000 })
+      await page.getByRole('checkbox', { name: 'Allow this agent to send a tax declaration' }).waitFor({ timeout: 20_000 })
 
       await shoot(page.locator('main').first(), 'visible')
+    },
+  },
+
+  'agent-tax-declaration-disabled': {
+    description:
+      'Agent detail with the per-agent tax-declaration opt-in VISIBLE but DISABLED — the state #4435 adds for an agent whose most recent connector setup is `hosted_plus_signer` (the default setup: a hosted server with a separate signer, which cannot attach a declaration to a payment). The reason line renders as a sibling paragraph below the checkbox row, never inside the disabled label. The `agent-tax-declaration` scenario photographs the enabled, opted-in state; this one photographs the disabled one.',
+    api(apiPath) {
+      if (apiPath === '/user/company-details') {
+        // Same VIES-valid row as `agent-tax-declaration`: the toggle renders
+        // only under it.
+        return {
+          legal_name: 'KOMMANDITBOLAGET TESTAREN 3',
+          country: 'SE',
+          org_number: '556677-8899',
+          vat_number: 'SE556677889901',
+          vies_status: 'valid',
+          vies_checked_at: '2026-09-28T09:12:00.000Z',
+          created_at: '2026-09-20T10:00:00.000Z',
+          updated_at: '2026-09-28T09:12:00.000Z',
+        }
+      }
+      if (apiPath === '/agents') {
+        // The agent-detail view reads the agent from the LIST response, so the
+        // setup signal rides here: `runtime_mcp_mode: 'hosted_plus_signer'`
+        // with the opt-in OFF is the one combination that disables the
+        // checkbox (#4435). The bit stays OFF deliberately — an agent whose
+        // bit is already ON stays interactive so the owner can withdraw it.
+        return {
+          agents: FIXTURE_AGENTS.map((a) =>
+            a.id === 'agent-research'
+              ? { ...a, tax_declaration_enabled: false, runtime_mcp_mode: 'hosted_plus_signer' }
+              : a,
+          ),
+          organizations: FIXTURE_ORGANIZATIONS,
+        }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/agents/agent-research?tab=settings`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+
+      await page.getByTestId('tax-declaration-row').waitFor({ timeout: 20_000 })
+      const checkbox = page.getByRole('checkbox', { name: 'Allow this agent to send a tax declaration' })
+      await checkbox.waitFor({ timeout: 20_000 })
+      // The capture must prove the DISABLED state, not merely that the card
+      // rendered: a scenario that waited on the heading alone would photograph
+      // the enabled state and look identical to `agent-tax-declaration`.
+      if (!(await checkbox.isDisabled())) {
+        throw new Error('agent-tax-declaration-disabled: the checkbox is not disabled — the fixture did not reach the hosted_plus_signer state')
+      }
+      await page
+        .getByText('This agent pays through the default setup, a hosted server with a separate signer, so no declaration is sent.')
+        .waitFor({ timeout: 20_000 })
+
+      await shoot(page.locator('main').first(), 'disabled')
     },
   },
   'design-system-buttons': {
@@ -4770,9 +4863,9 @@ export const SCENARIOS = {
         await dismissMobileSidebar(page, vp)
       }
 
-      // ── account page: Backup & recovery ──────────────────────────────────
+      // ── account page: Who can approve ────────────────────────────────────
       await settle(`${BASE_URL}/accounts/${FIXTURE_ACCOUNT.id}`)
-      const signersHeading = page.getByRole('heading', { name: 'Backup & recovery' })
+      const signersHeading = page.getByRole('heading', { name: 'Who can approve' })
       await signersHeading.waitFor({ timeout: 15_000 })
       const signersCard = page.locator('div.rounded-\\[10px\\]', { has: signersHeading })
       await signersCard.getByRole('button', { name: 'Connect wallet' }).waitFor({ timeout: 15_000 })
@@ -4796,7 +4889,7 @@ export const SCENARIOS = {
   },
   'account-backup-recovery': {
     description:
-      'Backup & recovery card at both viewports, in all three of its rendered states — the healthy multi-signer layout, the one-way-to-approve warning, and the load failure',
+      'Who can approve section at both viewports, in all three of its rendered states — the healthy multi-signer layout, the one-way-to-approve warning, and the load failure',
     // ── The three states, and why they are one scenario (#1693, #1725) ───────
     //
     // #1693 evidenced the HEALTHY layout only, and #1725's review found the
@@ -4806,10 +4899,12 @@ export const SCENARIOS = {
     // reloading between shots, the way `connect-agent` holds one dialog at
     // three stages.
     //
-    //   healthy    wallet + two dated passkeys. The row layout, the labels that
-    //              WRAP at 390px (#1679), the enrolment button and its subtext.
-    //   one-way    one passkey, no wallet — the amber "only one way to approve"
-    //              banner. This is a money-adjacent safety affordance: it is
+    //   healthy    wallet + two dated passkeys. The row layout, the two-line
+    //              labels that WRAP at 390px (#1679, split #4474), the footer
+    //              row's two add actions and the "Lost a device?" link.
+    //   one-way    one passkey, no wallet — the amber "Only one passkey can
+    //              approve this account" callout. This is a money-adjacent
+    //              safety affordance: it is
     //              the ONLY thing telling a user their account has no recovery.
     //              The shared fixture has served exactly this shape all along
     //              and nothing ever shot it, which is the cheaper and more
@@ -4847,7 +4942,7 @@ export const SCENARIOS = {
       // shoot a failure under the healthy capture's name.
       setBackupRecoveryStage('healthy')
 
-      const heading = page.getByRole('heading', { name: 'Backup & recovery' })
+      const heading = page.getByRole('heading', { name: 'Who can approve' })
 
       /**
        * Get the account page onto the currently-served stage and let it settle.
@@ -4899,21 +4994,36 @@ export const SCENARIOS = {
         }),
       )
 
-      // The Card root that owns the heading. Card does not forward props, so
-      // there is no testid to target without changing a shared primitive;
-      // this couples to Card's own radius class instead. If that changes the
-      // locator finds nothing and the run FAILS — which is the behaviour you
-      // want from a capture whose entire purpose is trustworthy evidence.
-      const card = page.locator('div.rounded-\\[10px\\]', { has: heading })
+      // #4474: the heading now sits ABOVE the card (the detail-page section
+      // rule), so the card can no longer be located by CONTAINING it — that
+      // locator resolves to nothing and every wait below silently times out.
+      // The section wrapper holds both, and the card is its first
+      // `rounded-[10px]` child, which exists in all three states (the
+      // load-error branch renders inside the same card).
+      const section = page.locator('section', { has: heading })
+      const card = section.locator('div.rounded-\\[10px\\]').first()
+
+      // #4474: the SHOT is the section, not the card. The slice added the
+      // "Who can approve" heading row and its "All signers in Settings" link
+      // above the card, and a card-only capture evidences neither — the two
+      // things the diff is judged on would be the two things the PNG omits.
+      // All three states shoot the same wrapper so the framing cannot read as
+      // a layout difference between them. `card` stays the scope for the
+      // presence/absence assertions below: they are about the card's branch,
+      // and widening them to the section would let the heading satisfy a wait
+      // the card itself has to satisfy.
 
       // The three states' distinguishing copy, as locators. Regexes, not exact
       // strings: the banner and the confirmations are authored across several
       // JSX lines, so the rendered text carries collapsed whitespace that an
       // exact match would have to reproduce by hand. Each fragment is long
       // enough to belong to exactly one state.
-      const oneWayBanner = card.getByText(/only one way to approve\. Add a backup now/)
+      const oneWayBanner = card.getByText(/Only one passkey can approve this account/)
       const loadErrorCopy = card.getByText(/Haven could not load how this account is approved/)
-      const walletRow = card.getByText('Wallet', { exact: true })
+      // #4474: the row reads "Browser wallet", never "Wallet" — the old
+      // `getByText('Wallet', { exact: true })` matched nothing, so its
+      // `refuseIfPresent` checks were vacuous.
+      const walletRow = card.getByText('Browser wallet', { exact: true })
       const addBackup = card.getByRole('button', { name: 'Add a backup passkey' })
 
       /** Re-serve `/signers` at `stage` and reload the page onto it. */
@@ -4937,8 +5047,8 @@ export const SCENARIOS = {
       // alongside a healthy signer set, every wait above would still pass.
       await refuseIfPresent(oneWayBanner, 'account-backup-recovery · healthy · one-way banner')
       await refuseIfPresent(loadErrorCopy, 'account-backup-recovery · healthy · load-error copy')
-      await card.scrollIntoViewIfNeeded()
-      await shoot(card, 'card')
+      await section.scrollIntoViewIfNeeded()
+      await shoot(section, 'section')
 
       // ── one way to approve ────────────────────────────────────────────────
       await openStage('one-way')
@@ -4950,8 +5060,8 @@ export const SCENARIOS = {
       await addBackup.waitFor({ timeout: 15_000 })
       await refuseIfPresent(walletRow, 'account-backup-recovery · one-way · wallet row')
       await refuseIfPresent(loadErrorCopy, 'account-backup-recovery · one-way · load-error copy')
-      await card.scrollIntoViewIfNeeded()
-      await shoot(card, 'one-way')
+      await section.scrollIntoViewIfNeeded()
+      await shoot(section, 'one-way')
 
       // ── load failure ──────────────────────────────────────────────────────
       await openStage('load-error')
@@ -4965,13 +5075,13 @@ export const SCENARIOS = {
       await refuseIfPresent(addBackup, 'account-backup-recovery · load-error · enrolment button')
       await refuseIfPresent(walletRow, 'account-backup-recovery · load-error · wallet row')
       await refuseIfPresent(oneWayBanner, 'account-backup-recovery · load-error · one-way banner')
-      await card.scrollIntoViewIfNeeded()
-      await shoot(card, 'load-error')
+      await section.scrollIntoViewIfNeeded()
+      await shoot(section, 'load-error')
     },
   },
   'passport-reanchoring': {
     description:
-      'Agent Passport row in the Identity and settings card during the re-key window (#1699) — the anchor names the retired key while standing stays Active',
+      'Agent Passport row in the Settings tab\'s "This agent" section during the re-key window (#1699) — the anchor names the retired key while standing stays Active',
     // No URL reaches this: `re_anchoring` is a transient backend state between
     // the retire and the re-issue, so nothing a route-based capture can wait
     // for produces it. Without a fixture the state has ZERO rendered evidence,
@@ -5007,44 +5117,39 @@ export const SCENARIOS = {
       return undefined
     },
     async run({ page, vp, shoot }) {
-      await page.goto(`${BASE_URL}/agents/${FIXTURE_AGENTS[0].id}`, {
+      // #4477: the passport is a row in the Settings tab's "This agent"
+      // section, and the tab only renders at `?tab=settings`. The old
+      // "Identity and settings" heading this scenario waited on no longer
+      // exists in `src`, so the wait is on the section's testid.
+      await page.goto(`${BASE_URL}/agents/${FIXTURE_AGENTS[0].id}?tab=settings`, {
         waitUntil: 'networkidle',
         timeout: 30_000,
       })
       await dismissMobileSidebar(page, vp)
 
-      // #3697: the passport is a ROW inside the "Identity and settings" card,
-      // not a standalone card — capture the card that holds it.
-      const heading = page.getByRole('heading', { name: 'Identity and settings' })
-      await heading.waitFor({ timeout: 15_000 })
-      // The heading sits ABOVE the card (#3692's section rule: heading, then
-      // card), so the Card root cannot be located by containing it — that
-      // locator resolves to nothing and every wait below silently times out.
-      // The card is the one that CONTAINS the passport row.
-      const card = page.locator('div.rounded-\\[10px\\]', {
-        has: page.getByTestId('agent-passport-row'),
-      })
+      const section = page.getByTestId('agent-settings-card-section')
+      await section.waitFor({ timeout: 15_000 })
       // Wait for the passport ROW's badge and note, not just the section
-      // heading. The row's own heading renders in the loading skeleton and the
-      // load-error branch too, so waiting on it alone would happily accept
-      // either as the evidence — the same trap the Backup & recovery scenario
+      // heading. The row renders in the loading skeleton and the load-error
+      // branch too, so waiting on the label alone would happily accept either
+      // as the evidence — the same trap the account-backup-recovery scenario
       // documents above.
-      await card.getByText('Agent Passport').waitFor({ timeout: 15_000 })
-      await card.getByText('Updating on-chain').waitFor({ timeout: 15_000 })
-      await card.getByText(/signing key was replaced/).waitFor({ timeout: 15_000 })
+      const row = page.getByTestId('agent-passport-row')
+      await row.getByText('Agent Passport').waitFor({ timeout: 15_000 })
+      await row.getByText('Updating on-chain').waitFor({ timeout: 15_000 })
+      await row.getByText(/signing key was replaced/).waitFor({ timeout: 15_000 })
 
       // Shoot the SECTION (heading + card), not the Card root: the reviewer
       // judges the title AND the card, and the title sits above the card by
       // design (#3692) — a card-only capture would crop it off.
-      const section = page.getByTestId('identity-settings-section')
       await section.scrollIntoViewIfNeeded()
       await shoot(section, 'card')
     },
   },
   'identity-settings-not-issued': {
     description:
-      'The Identity and settings card with the passport NOT issued — the opt-in row and the Backup & recovery pointer, no tax row (flag off)',
-    // No URL reaches a clean not-issued capture of the card: agent-research
+      'The Settings tab with the passport NOT issued — the opt-in row and the Who can approve pointer, no tax row (flag off)',
+    // No URL reaches a clean not-issued capture of the tab: agent-research
     // carries an anchored passport, so the only fixture agent without one is
     // the revoked one — which is exactly the state worth photographing, since
     // a revoked agent shows the row WITHOUT the issue action.
@@ -5055,32 +5160,32 @@ export const SCENARIOS = {
       return undefined
     },
     async run({ page, vp, shoot }) {
-      await page.goto(`${BASE_URL}/agents/agent-retired`, {
+      // #4477: `?tab=settings` — the tab is not the default, and the old
+      // "Identity and settings" heading no longer exists.
+      await page.goto(`${BASE_URL}/agents/agent-retired?tab=settings`, {
         waitUntil: 'networkidle',
         timeout: 30_000,
       })
       await dismissMobileSidebar(page, vp)
 
-      const heading = page.getByRole('heading', { name: 'Identity and settings' })
-      await heading.waitFor({ timeout: 15_000 })
-      // Same #3692 geometry: the heading is above the card, so the Card root
-      // is the one that CONTAINS the passport row.
-      const card = page.locator('div.rounded-\\[10px\\]', {
-        has: page.getByTestId('agent-passport-row'),
-      })
-      // Both rows: the passport row reads its opt-in state, the backup row
-      // carries the account pointer. The tax row must NOT render (the shared
-      // fixture answers /user/company-details with a 404 — flag off).
-      await card.getByText('Not issued').waitFor({ timeout: 15_000 })
-      await card.getByText(/This agent has no passport/).waitFor({ timeout: 15_000 })
-      await card.getByText(/Managed on /).waitFor({ timeout: 15_000 })
-      await card.getByText('Tax declaration').waitFor({ state: 'detached', timeout: 5_000 }).catch(() => {
+      const section = page.getByTestId('agent-settings-section')
+      await section.waitFor({ timeout: 15_000 })
+      // Both rows: the passport row reads its opt-in state, the account
+      // section carries the Who can approve pointer.
+      const passportRow = page.getByTestId('agent-passport-row')
+      await passportRow.getByText('Not issued').waitFor({ timeout: 15_000 })
+      await passportRow.getByText(/This agent has no passport/).waitFor({ timeout: 15_000 })
+      await page.getByTestId('agent-account-section').getByText(/Managed on /).waitFor({ timeout: 15_000 })
+      // The tax row must NOT render (the shared fixture answers
+      // /user/company-details with a 404 — flag off). `count()` is the real
+      // check: the old `waitFor({ state: 'detached' })` resolved immediately
+      // on an element that never existed, so it could not fail.
+      if ((await page.getByTestId('tax-declaration-row').count()) !== 0) {
         throw new Error('tax row rendered with the flag off — the visibility rule broke')
-      })
+      }
 
       // Shoot the SECTION (heading + card) for the same reason as above: the
       // title is part of the evidence.
-      const section = page.getByTestId('identity-settings-section')
       await section.scrollIntoViewIfNeeded()
       await shoot(section, 'card')
     },
@@ -5258,7 +5363,7 @@ export const SCENARIOS = {
       await page.goto(`${BASE_URL}/accounts/${FIXTURE_ACCOUNT.id}`, { waitUntil: 'networkidle', timeout: 30_000 })
       await dismissMobileSidebar(page, vp)
 
-      await page.getByRole('heading', { name: 'Backup & recovery' }).waitFor({ timeout: 15_000 })
+      await page.getByRole('heading', { name: 'Who can approve' }).waitFor({ timeout: 15_000 })
       // The wallet row is first; this opens the confirmation for the remaining
       // passkey without executing any signer change.
       await page.getByRole('button', { name: 'Remove', exact: true }).nth(1).click()
@@ -5987,7 +6092,7 @@ export const SCENARIOS = {
 
   'wrong-wallet': {
     description:
-      'The wrong-wallet gate state (#2073): a hydrated hybrid signer set naming an EOA owner, a connected wallet that is NOT it — the account page Backup & recovery card offering Switch wallet in place (the header pill left the top bar in #3825)',
+      'The wrong-wallet gate state (#2073): a hydrated hybrid signer set naming an EOA owner, a connected wallet that is NOT it — the account page Who can approve section offering Switch wallet in place (the header pill left the top bar in #3825)',
     // ── Why this scenario exists ─────────────────────────────────────────────
     //
     // #2068 made the signer gate fail closed for an unrelated wallet, and
@@ -6018,7 +6123,7 @@ export const SCENARIOS = {
     },
     async run({ page, vp, shoot }) {
       // #3825: the header pill is gone; the mismatch is now named where it
-      // blocks — the account's Backup & recovery card, whose in-flow
+      // blocks — the account's Who can approve section, whose in-flow
       // `WalletConnectAction` (#3812) reads "Switch wallet" for a connected
       // wallet that is not the owner. Waiting on that name pins the state
       // through the real path — reconnect, hydration, gate — and a run where
@@ -6028,7 +6133,7 @@ export const SCENARIOS = {
         timeout: 60_000,
       })
       await dismissMobileSidebar(page, vp)
-      const heading = page.getByRole('heading', { name: 'Backup & recovery' })
+      const heading = page.getByRole('heading', { name: 'Who can approve' })
       await heading.waitFor({ timeout: 30_000 })
       const card = page.locator('div.rounded-\\[10px\\]', { has: heading })
       await card.getByRole('button', { name: 'Switch wallet' }).waitFor({ timeout: 30_000 })
@@ -6058,10 +6163,10 @@ export const SCENARIOS = {
       return undefined
     },
     async run({ page, vp, shoot }) {
-      await page.goto(`${BASE_URL}/settings#signers`, { waitUntil: 'networkidle', timeout: 30_000 })
+      await page.goto(`${BASE_URL}/settings?tab=security#signers`, { waitUntil: 'networkidle', timeout: 30_000 })
       await page.evaluate(() => document.fonts.ready)
       await dismissMobileSidebar(page, vp)
-      const heading = page.getByRole('heading', { name: 'Signers' })
+      const heading = page.getByRole('heading', { name: 'Passkeys and wallets' })
       await heading.waitFor({ timeout: 15_000 })
       const section = page.locator('#signers')
       await section.getByText('Passkey 2').waitFor({ timeout: 15_000 })
@@ -6685,7 +6790,7 @@ export const SCENARIOS = {
     api(apiPath) {
       if (apiPath === '/dashboard/overview') {
         const research = FIXTURE_OVERVIEW.agents.find((agent) => agent.id === 'agent-research')
-        const calm = (window) => ({ ...window, refusals: { budget: 0, scope: 0, failed: 0, haven: 0 } })
+        const calm = (window) => ({ ...window, refusals: { budget: 0, expired: 0, scope: 0, failed: 0, haven: 0 } })
         return {
           ...FIXTURE_OVERVIEW,
           agentCount: { active: 1, paused: 0, pending_approval: 0 },
@@ -6716,6 +6821,53 @@ export const SCENARIOS = {
       await page.goto(`${BASE_URL}/dashboard`, { waitUntil: 'networkidle', timeout: 60_000 })
       await dismissMobileSidebar(page, vp)
       await page.getByRole('heading', { name: "You're all caught up" }).waitFor({ timeout: 30_000 })
+      await shoot(page.locator('main').first(), 'page')
+    },
+  },
+  'dashboard-budget-end-dates': {
+    description:
+      '#4353: the two budget end-date items in Needs attention — "Budget ending" (Research agent\'s live budget ends in 3 days, Renew) and "Budget ended <date>" (Data-feed agent, active, its only budget ended 2 days ago), which replaces "has no budget"',
+    api(apiPath) {
+      if (apiPath === '/dashboard/overview') {
+        const now = Date.now()
+        const calm = (window) => ({ ...window, refusals: { budget: 0, expired: 0, scope: 0, failed: 0, haven: 0 } })
+        const quiet = (agent) => ({ ...agent, stats: { ...agent.stats, d7: calm(agent.stats.d7), d30: calm(agent.stats.d30) } })
+        const research = FIXTURE_OVERVIEW.agents.find((agent) => agent.id === 'agent-research')
+        const dataFeed = FIXTURE_OVERVIEW.agents.find((agent) => agent.id === 'agent-retired')
+        return {
+          ...FIXTURE_OVERVIEW,
+          agentCount: { active: 2, paused: 0, pending_approval: 0 },
+          accounts: FIXTURE_OVERVIEW.accounts.slice(0, 1).map((account) => ({ ...account, usdcBalanceFreshness: undefined })),
+          spend: { ...FIXTURE_OVERVIEW.spend, failedIntents7d: 0 },
+          agents: [
+            quiet({
+              ...research,
+              budgets: research.budgets.map((budget) => ({ ...budget, expiresAt: new Date(now + 3 * 86_400_000).toISOString() })),
+            }),
+            // No live budget and no open sub-budget: its only budget ended.
+            quiet({
+              ...dataFeed,
+              status: 'active',
+              budgets: [],
+              receivedSubBudgets: [],
+              budgetEndedAt: new Date(now - 2 * 86_400_000).toISOString(),
+            }),
+          ],
+        }
+      }
+      if (apiPath === '/dashboard/budget-remaining') {
+        return { budgets: FIXTURE_BUDGET_REMAINING.budgets.filter((row) => row.agent_id === 'agent-research') }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.addInitScript((userId) => {
+        window.localStorage.setItem(`haven-onboarding-complete-dismissed:${userId}`, '1')
+      }, FIXTURE_USER.id)
+      await page.goto(`${BASE_URL}/dashboard`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+      await page.getByText(/budget ended /).first().waitFor({ timeout: 30_000 })
+      await page.getByText(/budget ends /).first().waitFor({ timeout: 30_000 })
       await shoot(page.locator('main').first(), 'page')
     },
   },
@@ -6843,11 +6995,13 @@ export const SCENARIOS = {
       await page.getByRole('region', { name: 'Balance' }).waitFor({ timeout: 20_000 })
       await page.getByText('136 050,75 kr').first().waitFor({ timeout: 20_000 })
       // The change line renders the SEK swing, not the quiet caption. The
-      // percent renders in sv-SE through Intl (#3195 round-2 finding b):
-      // decimal comma, NBSP before `%` — `\s` rather than literal spaces,
-      // sv-SE's separators are NBSPs and a regex is tested against the
-      // node's raw text (string needles normalize, this does not).
-      await page.getByText(/2\s*285,40\s*kr\s*\(\+1,70\s*%\)\s*today/).first().waitFor({ timeout: 20_000 })
+      // wait is on the FIGURE alone (#4426): the line's words are inline JSX
+      // this script cannot import, and restating them here broke the
+      // scenario when "today" became "since yesterday (UTC)" (#3986) — the
+      // wait timed out and nothing was captured. `\s` rather than literal
+      // spaces: sv-SE's separators are NBSPs and a regex is tested against
+      // the node's raw text (string needles normalize, this does not).
+      await page.getByText(/2\s*285,40\s*kr/).first().waitFor({ timeout: 20_000 })
       await shoot(page.locator('main').first(), 'dashboard')
 
       // ── Settings → Preferences: the kr SEK radio active ──────────────────
@@ -6876,9 +7030,11 @@ export const SCENARIOS = {
       await shoot(page.locator('main').first(), 'accounts-overview')
 
       // ── /accounts/<id>: the account priced in SEK ────────────────────────
+      // The wait is on the figure alone (#4426): the "Value (SEK)" column
+      // header it also waited on left with the holdings table in #4097
+      // (#4142), and that copy wait timed out the scenario's last capture.
       await page.goto(`${BASE_URL}/accounts/safe-fixture`, { waitUntil: 'networkidle', timeout: 60_000 })
       await dismissMobileSidebar(page, vp)
-      await page.getByText('Value (SEK)').waitFor({ timeout: 20_000 })
       await page.getByText('136 050,75 kr').first().waitFor({ timeout: 20_000 })
       await shoot(page.locator('main').first(), 'account-detail')
     },

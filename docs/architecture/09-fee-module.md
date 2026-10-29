@@ -11,7 +11,7 @@ covers:
   - packages/sdk/src/payment-mappers.ts
   - packages/sdk/src/types.ts
   - packages/sdk/src/payment-fee.test.ts
-last-verified: "2026-09-30"
+last-verified: "2026-10-23"
 ---
 
 # Haven — Platform fee scaffold and target design
@@ -36,8 +36,8 @@ on-chain transfers today.
 
 ## Deferred target
 
-Epic #386 describes a possible future rail-agnostic policy and accounting
-module with rail-specific settlement executors. Before non-zero fees can be
+Epic #386 (closed 2026-06-17) describes a possible future rail-agnostic policy
+and accounting module with rail-specific settlement executors. Before non-zero fees can be
 enabled, an implementation and review must establish all of these:
 
 - The user sees the gross payment, fee, and total before authorization.
@@ -74,3 +74,13 @@ commits that did move (`routes/payments.ts`, `modules/mpp/`,
 terminal delivered-unsettled status, #3479 settlement recording) changed
 payment status and settlement handling around the scaffold, not the fee
 shape or the zero-fee path.
+
+Re-verified 2026-10-23 (#4372 part B, at dev `2d0713dad`), a full re-read. Changed:
+epic #386 is named as closed (2026-06-17). Re-checked without change:
+`quoteFee` returns the zero quote at both flag states (`fee-module.ts`); the
+one ledger writer is `recordSettledFee`, called best-effort from
+`modules/mpp/evidence.ts` after settlement and idempotent through
+`ON CONFLICT (payment_id) DO NOTHING` (`infra/repositories/payment-fees.ts`);
+no `RailFeeExecutor` implementation exists; `routes/payments.ts` and
+`modules/payments/agent-payment-status.ts` surface the zero fee and the SDK
+maps it (`payment-mappers.ts`); `HAVEN_FEE_ENABLED` is read in `config.ts`.

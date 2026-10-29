@@ -1,6 +1,6 @@
 ---
 owner: "@d-hinders"
-status: current
+status: record
 covers:
   - packages/frontend/src/app/(authenticated)/dashboard/ActivitySection.tsx
   - packages/frontend/src/components/agent-panel/AgentCard.tsx

@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { expectMenuNotClipped } from '@/__tests__/menu-clip'
 
 const { budgetCardTokens, budgetCardRetired } = vi.hoisted(() => ({
   budgetCardTokens: [] as Array<Array<{ address: string; symbol: string; decimals: number }>>,
@@ -201,8 +202,10 @@ const SAFE = {
 
 // #3694: Remove, Restore and the rest live in the ⋮ menu. Opens it and
 // returns the item labels in render order — the order is part of the claim.
+// #4491: also asserts nothing above the panel clips it.
 function openAgentMenu(): string[] {
   fireEvent.click(screen.getByRole('button', { name: 'Agent options' }))
+  expectMenuNotClipped(screen.getByRole('menu'))
   return screen.getAllByRole('menuitem').map((item) => item.textContent ?? '')
 }
 
@@ -259,6 +262,10 @@ describe('AgentDetailClient last-activity metadata', () => {
           allowances: [],
           labels: [],
           account_type: 'delegator_hybrid',
+          // #4431: the stored display tint every agent read carries. Tint 1
+          // is deliberately NOT the name hash ('Research agent' hashes to 6),
+          // so the header/row tint test proves the STORED tint is read.
+          avatar_tint: 1,
         },
       ],
       loading: false,
@@ -388,11 +395,14 @@ describe('AgentDetailClient last-activity metadata', () => {
     expect(screen.queryByText('Out')).not.toBeInTheDocument()
   })
 
-  it('links under the list to the agent-filtered transactions view (#4226)', () => {
+  it('carries no "see elsewhere" link to /transactions — the tab is a full ledger (#4327)', () => {
     render(<AgentDetailClient agentId="agent-1" />)
 
-    const link = screen.getByRole('link', { name: 'See in Transactions' })
-    expect(link).toHaveAttribute('href', '/transactions?agentId=agent-1')
+    // #4226 put a transactions link under the list; #4327 removes it, as
+    // the account tab and /transactions have none. Export CSV is the tab's
+    // own action instead.
+    expect(screen.queryByRole('link', { name: /in Transactions/ })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Export CSV' })).toBeInTheDocument()
   })
 
   /**
@@ -496,9 +506,10 @@ describe('AgentDetailClient last-activity metadata', () => {
       id: 'agent-1',
       name: 'Research agent',
       status: 'active',
+      avatarTint: 1,
       accountId: 'safe-1',
       accountName: 'Main account',
-      accountChainId: 8453,
+      accountChainId: 8453, budgetEndedAt: null,
       allowances: [],
       budgets: [],
       receivedSubBudgets: [],
@@ -508,14 +519,14 @@ describe('AgentDetailClient last-activity metadata', () => {
           net: { usd: 0, eur: 0, sek: 0 },
           approx: false,
           payments: 0,
-          refusals: { budget: 0, scope: 0, failed: 0, haven: 0 },
+          refusals: { budget: 0, expired: 0, scope: 0, failed: 0, haven: 0 },
         },
         d30: {
           gross: { usd: 0, eur: 0, sek: 0 },
           net: { usd: 0, eur: 0, sek: 0 },
           approx: false,
           payments: 0,
-          refusals: { budget: 0, scope: 0, failed: 0, haven: 0 },
+          refusals: { budget: 0, expired: 0, scope: 0, failed: 0, haven: 0 },
         },
         lastPaymentAt: null,
         lastCounterparty: null,
@@ -554,6 +565,12 @@ describe('AgentDetailClient last-activity metadata', () => {
     expect(headerMark?.firstElementChild?.className.match(/text-\[var\(--v2-avatar-[^)]+\)\]/)?.[0]).toBe(
       rowMark.firstElementChild?.className.match(/text-\[var\(--v2-avatar-[^)]+\)\]/)?.[0],
     )
+    // #4431: both marks wear the agent's STORED tint (1), not the name hash
+    // ('Research agent' hashes to 6) — the header and the row read the same
+    // field, so they cannot disagree.
+    expect(headerMark?.className).toContain('bg-[var(--v2-avatar-1-soft)]')
+    expect(rowMark.className).toContain('bg-[var(--v2-avatar-1-soft)]')
+    expect(headerMark?.className).not.toContain('bg-[var(--v2-avatar-6-soft)]')
     expect(screen.getAllByRole('heading', { level: 1, name: 'Research agent' })).toHaveLength(1)
   })
 
@@ -1203,13 +1220,13 @@ describe('AgentDetailClient last-activity metadata', () => {
     expect(openAgentMenu()).not.toContain('Update budget')
   })
 
-  // ── Backup & recovery pointer, not a second copy (#1089) ────────────────
+  // ── Who can approve pointer, not a second copy (#1089) ──────────────────
 
   it('points a delegation agent at the account page instead of rendering signer controls', () => {
     mockDelegationAgent()
     renderOnSettingsTab(<AgentDetailClient agentId="agent-1" />)
 
-    const link = screen.getByRole('link', { name: /Backup & recovery/ })
+    const link = screen.getByRole('link', { name: /Who can approve/ })
     // #4228: the pointer targets the account's Security & details tab.
     expect(link).toHaveAttribute('href', '/accounts/safe-1?tab=security')
     // No enrollment controls on the agent page — those live only on the account page now.
@@ -1233,20 +1250,20 @@ describe('AgentDetailClient last-activity metadata', () => {
     expect(cards.length).toBe(2)
     const card = cards[0] as HTMLElement
 
-    expect(card.textContent).toContain('This agent')
+    expect(screen.getByRole('heading', { name: 'This agent' })).toBeInTheDocument()
     expect(within(card).getByTestId('mcp-server-name-row')).toBeTruthy()
     expect(within(card).getByTestId('payment-credentials-row')).toBeTruthy()
     expect(within(card).getByTestId('labels-row')).toBeTruthy()
     expect(within(card).getByTestId('tax-declaration-row')).toBeTruthy()
     expect(within(card).getByTestId('agent-passport-row')).toBeTruthy()
 
-    // The account-level section carries the Backup & recovery pointer under
+    // The account-level section carries the Who can approve pointer under
     // its own "On {account name}" label — the label sits ABOVE the card, so
     // the assertion scopes to the section, not the card.
     const accountSection = screen.getByTestId('agent-account-section')
     expect(accountSection.textContent).toContain('On Main account')
     expect(
-      within(accountSection).getByRole('link', { name: /Backup & recovery/ }),
+      within(accountSection).getByRole('link', { name: /Who can approve/ }),
     ).toHaveAttribute('href', '/accounts/safe-1?tab=security')
   })
 
@@ -1312,13 +1329,15 @@ describe('AgentDetailClient last-activity metadata', () => {
     renderOnSettingsTab(<AgentDetailClient agentId="agent-1" />)
 
     expect(screen.queryByTestId('tax-declaration-row')).not.toBeInTheDocument()
-    // The agent card's direct children: the connection row, the credentials
-    // row, the labels row and the passport section — exactly four, so the
-    // tax row's divider left no orphan and no gap.
+    // #4477: `SettingsSection` wraps the rows in a `divide-y` list, so the
+    // card's only child is that list. The rows are ITS children: the
+    // connection row, the credentials row, the labels row and the passport
+    // row — exactly four, so the tax row's divider left no orphan and no gap.
     const card = screen
       .getByTestId('agent-settings-section')
       .querySelector('.rounded-\\[10px\\]') as HTMLElement
-    expect(card.children.length).toBe(4)
+    const list = card.querySelector('.divide-y') as HTMLElement
+    expect(list.children.length).toBe(4)
     expect(card.textContent).not.toContain('Tax declaration')
 
     // ...and the non-valid VIES state hides it too.
@@ -1977,6 +1996,10 @@ describe('AgentDetailClient tabs and the Activity tab (#4226)', () => {
           allowances: [],
           labels: [],
           account_type: 'delegator_hybrid',
+          // #4431: the stored display tint every agent read carries. Tint 1
+          // is deliberately NOT the name hash ('Research agent' hashes to 6),
+          // so the header/row tint test proves the STORED tint is read.
+          avatar_tint: 1,
         },
       ],
       loading: false,

@@ -122,6 +122,8 @@ const AGENT = {
   id: 'agent-1',
   name: 'Research agent',
   status: 'active',
+  // #4429: the stored display colour, required on DashboardAgentPreview.
+  avatar_tint: 1,
   account_id: SAFE.id,
   account_name: SAFE.name,
   account_chain_id: SAFE.chain_id,
@@ -204,9 +206,6 @@ describe('dashboard routes', () => {
       }
       if (sql.includes('FROM agents a')) {
         return Promise.resolve({ rows: [AGENT] })
-      }
-      if (sql.includes('FROM agent_allowances')) {
-        return Promise.resolve({ rows: [] })
       }
       if (sql.includes('FROM user_daily_portfolio_snapshots')) {
         return Promise.resolve({ rows: [] })

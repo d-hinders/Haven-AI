@@ -157,12 +157,15 @@ export type {
 } from './types.js'
 
 export type { ClaudeTool, OpenAITool } from './tools.js'
+export type { HavenApiFailureCause } from './types.js'
 
 export {
   HavenError,
   HavenApiError,
   AgentPaymentWarningCode,
   MerchantTimeoutError,
+  FundingConfirmationUnknownError,
+  FundingRevertedError,
   X402Erc7710AlreadySettledError,
   X402UnexpectedStatusError,
   X402AlreadySettledError,

@@ -1,12 +1,11 @@
-export function parseX402Hostname(resourceUrl?: string | null): string | null {
-  if (!resourceUrl) return null
-
-  try {
-    return new URL(resourceUrl).hostname
-  } catch {
-    return null
-  }
-}
+/**
+ * The x402 resource-hostname parser now lives in `@haven_ai/core` (#4332) —
+ * the backend's analytics naming module parses the SAME resource URL
+ * server-side, so both sides import one definition. This module re-exports it
+ * for the frontend's existing import paths (`AgentActivityTab`,
+ * `transaction-presentation.tsx`); its behavior is unchanged.
+ */
+export { parseX402Hostname } from '@haven_ai/core'
 
 export function isMachinePaymentSource(source?: string | null): boolean {
   return source === 'x402' || source === 'mpp_demo'

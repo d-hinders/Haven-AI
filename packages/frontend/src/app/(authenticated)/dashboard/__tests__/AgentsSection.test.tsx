@@ -21,7 +21,7 @@ const ZERO_WINDOW = {
   net: { usd: 0, eur: 0, sek: 0 },
   approx: false,
   payments: 0,
-  refusals: { budget: 0, scope: 0, failed: 0, haven: 0 },
+  refusals: { budget: 0, expired: 0, scope: 0, failed: 0, haven: 0 },
 }
 
 const AGENT_IDS = {
@@ -67,9 +67,10 @@ function makeAgent(overrides: Partial<DashboardAgentPreview> = {}): DashboardAge
     id: AGENT_IDS.research,
     name: 'Research agent',
     status: 'active',
+    avatarTint: 1,
     accountId: 'acct-1',
     accountName: 'Main account',
-    accountChainId: 8453,
+    accountChainId: 8453, budgetEndedAt: null,
     allowances: [],
     budgets: [],
     receivedSubBudgets: [],

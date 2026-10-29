@@ -22,7 +22,7 @@ import {
   findIntentStatusRow,
   expirePendingIntent,
 } from '../../infra/repositories/payment-intents.js'
-import { isFundedX402AwaitingMerchantLeg } from '../payments/agent-payment-status.js'
+import { isFundedX402AwaitingMerchantLeg } from '../payments/index.js'
 import { rebuildDelegationSignContext } from './replay.js'
 import type { X402HandlerResult } from './types.js'
 

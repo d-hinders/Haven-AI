@@ -13,10 +13,7 @@ import { getChain, isKnownChain } from '../domain/chains.js'
 import {
   aggregateAccountTransactions,
   buildAccountTransactionsPage,
-  EXPORT_ROW_CAP,
-  buildTransactionCsvFilename,
   enrichTransactionsWithAccounting,
-  exceedsExportRowCap,
   filterEnrichedTransactions,
   foldOwnAccountTransfers,
   mergeSortDedupeAndEnrich,
@@ -32,7 +29,7 @@ import {
   type TransactionSearchIndex,
 } from '../modules/transactions/index.js'
 import type { ListScope } from '../modules/transactions/index.js'
-import { CSV_BOM } from '../domain/csv.js'
+import { refuseCsvExportOverCap, sendCsvExport } from '../domain/csv.js'
 import { ETH_ADDRESS_RE } from '@haven_ai/core'
 
 /** Own-account name lookup key — address is case-insensitive, chain is not. */
@@ -472,19 +469,14 @@ export default async function transactionRoutes(
       })
     }
 
-    if (exceedsExportRowCap(filtered.length)) {
-      return reply.code(413).send({
-        error: 'Export too large',
-        statusCode: 413,
-        // Grouped digits: `10001` and `10000` are near-indistinguishable at a
-        // glance, which defeats the sentence's job of conveying how far over
-        // the export is.
-        details:
-          `This export would contain ${filtered.length.toLocaleString('en-US')} rows; ` +
-          `the limit is ${EXPORT_ROW_CAP.toLocaleString('en-US')}. Narrow the filters — ` +
-          'by account, agent, token, network, direction, search or period — and export again.',
-      })
-    }
+    // #4327: the shared cap check, BEFORE the projection below. The cap is
+    // reachable here: the x402 leg carries no LIMIT, so a user with more than
+    // `EXPORT_ROW_CAP` confirmed x402 intents crosses it on an unfiltered
+    // export (the route test seeds that case).
+    const overCap = refuseCsvExportOverCap(reply, filtered.length, {
+      narrowBy: 'account, agent, token, network, direction, search or period',
+    })
+    if (overCap) return overCap
 
     // The address book is chain-agnostic (`contacts` has no chain_id), the
     // user's own accounts are not — the same two-step resolution, in the same
@@ -512,14 +504,11 @@ export default async function transactionRoutes(
       request.query.foldOwnTransfers === '1' && !accountFilterId,
     )
 
-    return reply
-      .header('Content-Type', 'text/csv; charset=utf-8')
-      .header(
-        'Content-Disposition',
-        `attachment; filename="${buildTransactionCsvFilename(new Date())}"`,
-      )
-      .header('X-Export-Row-Count', String(filtered.length))
-      .send(`${CSV_BOM}${csv}`)
+    return sendCsvExport(reply, {
+      csv,
+      rowCount: filtered.length,
+      filenamePrefix: 'haven-transactions',
+    })
   })
 
   app.get<{ Querystring: { fresh?: string } }>('/filters', async (request) => {

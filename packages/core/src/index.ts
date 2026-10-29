@@ -17,6 +17,10 @@
 
 export { ETH_ADDRESS_RE, UUID_RE, isAddress } from './address.js'
 
+// The shared x402 resource-hostname parser (#4332) — step 1 of the analytics
+// naming order and the frontend ledger's title, from one definition.
+export { parseX402Hostname } from './x402-hostname.js'
+
 // Pure atomic<->decimal token amount conversion (#994) — the shared
 // definition ethers.formatUnits/parseUnits usage in routes substitutes to.
 export { formatTokenAmount, parseTokenAmount } from './amount.js'
@@ -77,6 +81,22 @@ export {
   type MachinePaymentLifecycle,
 } from './machine-payment-lifecycle.js'
 
+// The payment-scope refusal contract (#4468) — the ten task-/sub-budget refusal
+// codes and their statuses, the ONE artifact the backend's resolver and the
+// hosted MCP's `normalizeError` both read. Before it, each side kept its own
+// literal list and a new member reached the agent as a generic `API_ERROR`.
+export {
+  TASK_BUDGET_PAYMENT_REFUSALS,
+  SUB_BUDGET_PAYMENT_REFUSALS,
+  PAYMENT_SCOPE_REFUSAL_CODES,
+  TASK_BUDGET_REFUSAL_STATUS,
+  SUB_BUDGET_REFUSAL_STATUS,
+  PAYMENT_SCOPE_REFUSAL_STATUS,
+  type TaskBudgetPaymentRefusal,
+  type SubBudgetPaymentRefusal,
+  type PaymentScopeRefusalCode,
+} from './budget-refusal-codes.js'
+
 // #3778 — the delivery_reference guard: shared semantic validator for the
 // non-secret delivery pointer agents report with an x402 outcome. Refuses
 // credential-shaped values (JWTs, API-key tokens, grouped gift codes) from
@@ -130,3 +150,9 @@ export {
   type PackageReleaseCompat,
   type BuildReleaseCompatOptions,
 } from './client-releases.js'
+// #4411's comment stripper is NOT exported here: it imports `typescript`, and
+// packages that bundle this barrel (mcp-server's tsup build inlines
+// @haven_ai/core, a devDependency there) would inline the whole compiler. That
+// is what #4413 did: the hosted MCP bundle grew to ~9.8 MB and crashed at boot
+// on "Dynamic require of fs". Test code imports the stripper from the
+// `@haven_ai/core/comment-stripper` subpath instead.

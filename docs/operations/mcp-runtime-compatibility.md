@@ -22,6 +22,7 @@ covers:
   - packages/sdk/src/account-reads.ts
   - packages/sdk/src/agent-guidance.ts
   - packages/sdk/src/client.ts
+  - packages/sdk/src/node-version.ts
   - packages/sdk/src/connector-channel.ts
   - packages/sdk/src/mcp-merchant-transport.ts
   - packages/sdk/src/merchant-egress.ts
@@ -32,6 +33,7 @@ covers:
   - packages/sdk/src/client-identity.ts
   - packages/core/src/client-compat.ts
   - packages/core/src/client-releases.ts
+  - packages/core/src/budget-refusal-codes.ts
   - packages/backend/src/middleware/client-compat.ts
   - packages/sdk/src/haven-api-transport.ts
   - packages/cli/src/api.ts
@@ -62,8 +64,10 @@ covers:
   - packages/backend/src/routes/agents.ts
   - packages/backend/src/routes/agent-connection-setups.ts
   - packages/backend/src/domain/agent-payment-taxonomy.ts
+  - packages/backend/src/domain/x402-settlement-timing.ts
   - packages/backend/src/modules/payments/agent-payment-status.ts
   - packages/backend/src/modules/transactions/csv-export.ts
+  - packages/backend/src/domain/csv.ts
   - packages/sdk/src/types.ts
   - packages/sdk/src/payment-mappers.ts
   - packages/sdk/src/x402.ts
@@ -82,8 +86,160 @@ covers:
   - scripts/ci/check-stale-client-compat.mjs
   - packages/mcp-server/src/next-arguments-corpus.json
   - packages/mcp-server/src/tool-contract-snapshot.test.ts
-last-verified: "2026-10-23"
+last-verified: "2026-10-27"
 ---
+
+> **Re-verified #4468 (2026-10-27, the ten typed task-/sub-budget
+> payment-scope refusals and three siblings):** covered surfaces change
+> additively, and one wire field changes VALUE for ten codes. (1)
+> `packages/mcp-server/src/tools/support/errors.ts` — `normalizeError` gains
+> one table-driven branch ahead of the generic `HavenApiError` pair, keyed on
+> the shared `@haven_ai/core` code list. The ten codes (`task_budget_` and
+> `sub_budget_` × `not_found`, `not_open`, `token_mismatch`,
+> `recipient_mismatch`, `parent_mismatch`) now answer their own hosted `code`
+> (the backend code upper-cased), the backend's `error_code` at the top level,
+> `next_action: stop_and_tell_user` and a reason naming that code's remedy.
+> Before, all ten fell into the generic 4xx branch as `code: "API_ERROR"` with
+> no `error_code`, so the typed reason survived only as English in `message`.
+> (2) The same file gains a branch for `task_budget_exceeds_remaining` (409)
+> relaying `remaining_atomic`, `reserved_atomic` and `requested_atomic`. (3)
+> `packages/mcp-server/src/tools/state-direct-recovery.ts` — `haven_submit`'s
+> task-budget path now maps `close_needs_reprepare` (409) and
+> `close_outcome_unconfirmed` (502) to typed refusals naming
+> `haven_close_task_budget` with `task_budget_id`, the shape the sub-budget
+> path has had since #3506. (4) `packages/mcp-server/src/tools/contracts.ts` —
+> `ToolFailure` gains an optional `error_code`. (5)
+> `packages/core/src/budget-refusal-codes.ts` (new) holds the code unions and
+> their status tables; the backend's `modules/budget-scope/resolver.ts`
+> re-exports them, so the backend's wire statuses are unchanged. (6)
+> `packages/mcp-server/src/test-support/next-step-fixtures.ts` and
+> `next-arguments-corpus.json` — the census moves to 78 refusal fixtures and
+> 79 `refusalNextStep` calls, and the corpus golden gains the thirteen rows.
+>
+> **Wire effect.** `code` is a wire field, so an agent on an older hosted
+> server still sees `API_ERROR` for these ten codes; a new hosted server
+> against an older backend sees the same bodies (the codes and statuses are
+> unchanged) and answers them typed. `error_code` is additive: absent on every
+> other branch, and the generic branch deliberately does not relay it (that
+> decision belongs to #4470, which edits the same branch). No tool name, input
+> schema, strict-input list, expected-context version, consent hash or
+> `tools-list.snapshot.json` entry changes — the tools/list golden is
+> byte-identical. Nothing else in this document was re-verified, and
+> `last-verified` is re-stamped to 2026-10-27 for this note.
+
+> **Contract change, additive (#4449, 2026-10-26): the edge signer's SUCCESS
+> results carry the next-step family.** Covered files: `packages/signer/**`
+> (`tools.ts`, `next-step.ts`, `no-funding-leg.ts`), `packages/sdk/src/next-step.ts`
+> (an optional `name` on `NextStepTarget`, so a `<tool>#<variant>` target key
+> renders the bare tool name) and
+> `packages/mcp-server/src/next-step-signer-parity.test.ts` (the two new
+> variants pinned to the hosted schemas).
+>
+> Each of the six signer success sites now carries either `next_tool_name` +
+> `next_tool_server_role: 'hosted'` + `next_arguments`, or a literal
+> `next_tool_omitted_reason`. The `next_tool` family only: no success result
+> gains `next_action` or `safe_to_continue`, which stay on refusals.
+>
+> **Installed runtimes do not emit the step.** The signers observed live on
+> 2026-10-26 (`0.10.0-alpha.0`, `0.8.1-alpha.0`) return the same results they
+> always did, so an agent on either runtime sees no `next_tool*` field on a
+> successful signature. **The hosted prepare and pay guidance stays
+> authoritative** and must not be trimmed in favour of the signer step: it is
+> the only next-step source those runtimes have, and it is the only one that
+> knows the merchant transport.
+>
+> Nothing else moves. No tool name, argument, input schema, strict-input list,
+> expected-context version, consent hash, `tools-list.snapshot.json` entry or
+> `next-arguments-corpus.json` row changes — no signer description is mirrored
+> in the hosted snapshot, and the consent hash ignores descriptions
+> (`packages/signer/src/consent.ts`). `SUPPORTED_X402_EXPECTED_VERSIONS` is
+> untouched and no signing decision changes. `last-verified` already reads
+> 2026-10-26 and is left as is. Nothing else in this document was re-verified.
+
+> **Re-verified #4415 (2026-10-25, stale comment sweep):** the only covered
+> file this diff touches is `packages/signer/src/cli-args.test.ts` — one test
+> TITLE now says "a sixth tool" (the signer library exposes five tools, so a
+> new one is the sixth), and the `:35` floor assertion is raised from
+> `toBeGreaterThanOrEqual(4)` to `toBeGreaterThanOrEqual(5)` — the one test
+> change that is not a title. The `:38` `toHaveLength(registered.length)`
+> bullet-count pin is unchanged and still pins `--help` against
+> `Object.keys(toolSchemas)`. No signer source, help text, consent
+> input or protocol surface changes. Every other file in the diff is outside
+> this document's coverage. Nothing else in this document was re-verified,
+> and `last-verified` is not bumped.
+
+> **Re-verified #4352 (2026-10-23, the additive `budget_ended_at` /
+> `budgetEndedAt` read):** two covered surfaces change. The backend
+> machine-payments allowances read adds ONE top-level response field (the
+> latest ended budget's expiry, null unless an expired row exists — the
+> same narrow query the refusal answers use), and
+> `packages/sdk/src/account-reads.ts` maps it and derives `budgetEndedAt`
+> on `getAgentSummary()` for an agent whose only budgets have ended. Additive both ways: an older backend's
+> rows omit the key and map to `null`; the readiness values, the
+> tools/list shape (one description sentence) and every other response
+> field are unchanged, so local and hosted surfaces stay in lockstep — the
+> hosted `haven_get_agent` description moves with the SDK's
+> `tool-descriptions.ts` in the same commit, and the
+> `tools-list.snapshot.json` golden is regenerated in the same commit.
+> Description budget round 30: the new sentence is offset inside the same
+> description, total unchanged at 31,812. Nothing else in this document was
+> re-verified, and `last-verified` is re-stamped to 2026-10-23 for this
+> note.
+
+> **Re-verified #4458 (2026-10-26, the typed `delegation_expired` body and the
+> hosted readers that branch on it):** four covered surfaces change, all
+> additively. (1) `packages/backend/src/modules/x402/delegation-authorize.ts`
+> — both authorize legs now answer an expired-only budget with the typed 403
+> body (`error_code: "delegation_expired"`, `phase`, `next_action`,
+> `budget_ended_at`, `remaining`/`remaining_atomic` `"0"`, amount/shortfall,
+> `rail`, `network`, `resource_url`, `merchant_address`) instead of a one-line
+> `{ error }`; the decision is unchanged (403, one `payment_refusals` row,
+> nothing created or signed), and on the EIP-3009 funding leg
+> `merchant_address` is `merchantPayTo`, never `payTo`. (2)
+> `packages/mcp-server/src/tools/**` — the quote pre-check, the catalog prepare
+> preflight and the shared error normaliser recognise a 403 with that code and
+> stop with the owner-sets-a-new-budget remedy; the quote warning is the new
+> additive `QUOTE_BUDGET_ENDED` code. (3) `packages/sdk/src/types.ts` gains
+> that one `AgentPaymentWarningCode` member — additive, so a client that
+> switches over the enum keeps compiling and an older backend never emits it.
+> (4) `packages/mcp-server/src/server.ts`'s instructions gain the ended-budget
+> cause for `safe_to_continue: false`; the `tools/list` payload is unchanged,
+> so `tools-list.snapshot.json` and the description budget do not move. An
+> older hosted server against a new backend ignores the extra body fields and
+> keeps its previous (fail-open) behaviour; a new hosted server against an
+> older backend never sees the code and degrades exactly as before. Nothing
+> else in this document was re-verified, and `last-verified` stays
+> 2026-10-26.
+
+> **Re-verified unchanged (#4327, 2026-10-23, the CSV export's response
+> plumbing moves into `packages/backend/src/domain/csv.ts`).** Two covered
+> files change: `packages/backend/src/routes/transactions.ts` and
+> `packages/backend/src/modules/transactions/csv-export.ts`. The export row
+> cap, the 413 body, the CSV headers, the BOM and the dated filename leave
+> them for one shared helper, which a second export (the agent Activity
+> ledger, `GET /agent-activity/{id}/activity/export.csv`) also uses.
+> `GET /transactions/export.csv` answers the same bytes: a characterization
+> test written before the move pins its exact 413 body and its exact success
+> headers, and the route's existing tests pass unchanged; the column set and
+> quoting are untouched. No runtime package (`packages/cli`, `packages/mcp`,
+> `packages/mcp-server`, `packages/sdk`, `packages/signer`,
+> `packages/connect`) calls either export. No tool, argument, input schema,
+> expected-context version, consent surface or runtime channel moves.
+> `last-verified` is not re-stamped: this block is the scope. Nothing else in
+> this document was re-verified.
+
+> **Re-verified unchanged (#4328, 2026-10-23, a comment-only path reference in
+> `packages/backend/src/modules/transactions/csv-export.ts`).** The only
+> covered file this PR touches is
+> `packages/backend/src/modules/transactions/csv-export.ts`: its doc comment
+> named the frontend helper module by its old path (`lib/transaction-csv.ts`)
+> and now names the moved one (`lib/csv-export.ts`, part of the #4328 shared
+> export action slice). The CSV column contract, the quoting rules and every
+> byte of the generated file are unchanged — the CLI and MCP consumers read
+> the same output. No tool, argument, input schema, expected-context version,
+> consent surface or runtime channel moves. Scope: the comment-only edit
+> only; `last-verified` is re-stamped to 2026-10-23 for this note. Nothing
+> else in this document was re-verified.
 
 > **Re-verified unchanged (#4319, 2026-10-23, a comment-only doc comment in
 > `packages/backend/src/modules/payments/agent-payment-status.ts`).** The only
@@ -854,6 +1010,16 @@ last-verified: "2026-10-23"
 > moves — the runtime manifest, connector channel, dist-tag and setup-prompt
 > rule sentences are byte-identical to before. `last-verified` stays
 > 2026-10-02. Nothing else in this document was re-verified.
+>
+> **Re-verified #4350 (2026-10-23, the budget end date):** the diff touches
+> `packages/sdk/src/agent-guidance.ts`, a covered file — the runbook's
+> "What Haven is" paragraph gains one sentence (the budget ends on a
+> user-chosen date — 30/90/180/365 days — enforced on-chain, and renewal is
+> a new approval on the agent's page). The served `for-agents.md`, the CLI
+> copy and the `what-haven-is` step file are regenerated from it; no
+> sentence constant, tool, schema, version-skew or consent-hash contract
+> moves. `last-verified` stays as recorded in the scope section. Nothing
+> else in this document was re-verified.
 
 > **Re-verified #3756 (2026-10-07, superseded-agent wording):** this diff
 > touches covered connect files in their human-readable output only:
@@ -974,6 +1140,25 @@ last-verified: "2026-10-23"
 > is bumped to 2026-09-30 for this note: the candidate selection that decides
 > which directory `--doctor` reports on is part of this document's subject, and
 > that behavior moved.
+
+> **Re-verified #4438 (2026-10-26, weekly docs audit):** the 17 covered commits
+> since the 2026-10-23 pass were read against this document's subject. The
+> Supported Runtime Manifest table is correct at this head: all four
+> `@haven_ai/*` rows read `0.11.0-alpha.0`, matching each package's
+> `package.json` and `packages/connect/src/runtime-manifest.ts`, and the Node
+> floor is still `>=22.0.0` (`packages/sdk/src/node-version.ts:36`) with
+> `.nvmrc` at 24. Three of the intervening changes had already been recorded
+> here by their own PRs: #4304 re-pinned the table (the 0.11.0-alpha.0 note
+> above), #4368 added `next_refill_at` / `budgetRefillsAt` to the
+> `haven_get_agent` guidance, and #4405 corrected the agent-dir default path
+> (`~/.haven/agents/<slug>/bin/haven-mcp`). One had not: **#4376** changed a
+> refusal reason on the hosted prepare and both x402 legs, and is now written
+> up in § *An expired-only budget is refused as `delegation_expired`, with the
+> end date (#4352)*. The remainder — #4381's dep-lint widening, #4325's census
+> ceilings, #4374's and #4417's doc corrections, and the analytics and token
+> fixes — moved no tool, schema, version constant, consent hash, channel,
+> dist-tag or package-resolution rule. `last-verified` is bumped to 2026-10-26
+> for this note.
 
 # MCP Runtime Compatibility
 
@@ -2600,8 +2785,12 @@ plus the read-only quote probe still gate any listing on the backend.
 > block degrades to `sufficient: null` with the warning).
 
 ```text
-~/.haven/agents/<agent-id>/bin/haven-mcp
+~/.haven/agents/<slug>/bin/haven-mcp
 ```
+
+The wrapper lives in the agent's credential directory, named from the wiring
+slug (`haven-<slug>` pair) by default; only a `--bare` run, or a `--replace`
+without `--name`, names the directory by the agent id instead (#3737).
 
 ## Supported Runtime Manifest
 
@@ -2726,6 +2915,59 @@ and `@haven_ai/connect` its own `CONNECTOR_VERSION`).
 >
 > **Re-read, not rubber-stamped:** the Node floor and the Codex and Claude Code
 > rows are unchanged. `last-verified` is not bumped.
+
+> **Re-verification (0.12.0-alpha.0 release, 2026-10-29):** the manifest table
+> above is re-pinned by the bump to `0.12.0-alpha.0` for `connect`, `mcp`, `sdk`
+> and `signer`, with `SDK_VERSION` rewritten beside it. The step from
+> `0.11.0-alpha.0` is **MINOR**: the range adds surfaces and removes none, and
+> no CHANGELOG entry is marked **Update required**.
+>
+> Type-level changes for SDK consumers that build objects by hand:
+> - `nextRefillAt` is now required on `HavenAllowance` and
+>   `HavenAgentAllowanceSummary`;
+> - `budgetEndedAt` is now required on `HavenAllowanceSummary` and
+>   `HavenAgentSummary`;
+> - `budgetRefillsAt` is now required on `HavenAgentSummary`;
+> - `AgentPaymentWarningCode` gains `QUOTE_BUDGET_ENDED`.
+>
+> Code that only reads these types is unaffected. The `.d.ts` comparison against
+> the published `0.11.0-alpha.0` (`sdk`, `signer`, `mcp`) removes no declaration
+> name and adds three, all in `sdk`: `FundingConfirmationUnknownError`,
+> `FundingRevertedError` and `HavenApiFailureCause` (#4470).
+>
+> **Surfaces this release moves:**
+> - **SDK.** An ended budget is named apart from a spent one:
+>   `delegation_expired` with the end date (#4352, #4458), the quote warning
+>   `QUOTE_BUDGET_ENDED`, and spent-for-the-period told apart from no budget
+>   (#4355). `haven_list_receipts` rows carry the six delivery fields the mapper
+>   dropped (#4469). Retry or stop follows the failure's cause:
+>   `HavenApiError.failureCause`, and a typed failed funding wait (504 for a timeout,
+>   which was an untyped error; 502 for a revert, which was 500) (#4470). Runbook and skill wording: budget end dates (#4350),
+>   which quote checks the budget (#4345), and the agent folder named by its
+>   wiring slug (#4396).
+> - **Signer.** Success results name their next step, and the settlement-child
+>   guidance names the MCP route (#4449). Guidance only; no new signing path.
+> - **Local MCP.** Embedded-SDK changes only: `haven_get_agent`'s description
+>   and result name an ended budget and tell a spent budget from no budget
+>   (#4352, #4355), receipt rows carry their delivery fields (#4469), and a
+>   failed funding wait reports its cause: 504 for a timeout, which was an
+>   untyped `UNKNOWN_ERROR`, and 502 for a revert, which was 500 (#4470). The
+>   tool list is unchanged, so there is no re-consent prompt. `README` wording
+>   (#4396).
+> - **Connect.** The installed skill names the ended budget (#4352), tells a
+>   spent budget from no budget (#4355), says which quote checks the budget
+>   (#4345), and names the agent folder by its slug (#4396). Existing installs
+>   keep their `SKILL.md` until reinstalled.
+> - **CLI.** `budget grant --expires` refuses a date more than 365 days out
+>   (#4351), and `haven guide`'s runbook gains the end-date and
+>   `needs_approval` wording (#4350, #4352, #4355).
+> - **Not moved.** `CLIENT_COMPAT` is unchanged (`git diff origin/main
+>   origin/dev -- packages/core/src/client-compat.ts` is empty), so no installed
+>   client is forced to update.
+>
+> **Re-read, not rubber-stamped:** the Node floor and the Codex and Claude Code
+> rows are unchanged. `last-verified` already reads 2026-10-27 from an earlier
+> change and is not bumped.
 
 > **Re-verification (0.11.0-alpha.0 release, 2026-10-23):** the manifest table
 > above is re-pinned by the bump to `0.11.0-alpha.0` for `connect`, `mcp`, `sdk`
@@ -3110,10 +3352,10 @@ doc that carries an argument rather than a number.
 | Component | Supported version |
 | --- | --- |
 | Node.js | >= 22.0.0 (`engines` floor; repo development and CI pin LTS 24 via `.nvmrc`) |
-| `@haven_ai/connect` | `0.11.0-alpha.0` |
-| `@haven_ai/mcp` | `0.11.0-alpha.0` |
-| `@haven_ai/sdk` | `0.11.0-alpha.0` |
-| `@haven_ai/signer` | `0.11.0-alpha.0` |
+| `@haven_ai/connect` | `0.12.0-alpha.0` |
+| `@haven_ai/mcp` | `0.12.0-alpha.0` |
+| `@haven_ai/sdk` | `0.12.0-alpha.0` |
+| `@haven_ai/signer` | `0.12.0-alpha.0` |
 | Codex Desktop / Codex CLI | local stdio MCP via `~/.codex/config.toml` |
 | Claude Code | local stdio MCP via `claude mcp add-json --scope user` |
 
@@ -4561,6 +4803,33 @@ Message text and one next-step reason only. When a merchant refuses with `reason
 
 No tool, schema, refusal code or consent-hash change. A local client on an older `@haven_ai/mcp` keeps the old "retry after" text until it updates.
 
+### An expired-only budget is refused as `delegation_expired`, with the end date (#4352)
+
+Backend and hosted text. When the ONLY delegation row for a token has expired,
+the live reads hide it (#3802), so the refusal sites answered the generic
+over-budget refusal — "wait for the period to reset" — which never resets. The
+DECISION is unchanged: the same 403, nothing created and nothing signed. What
+moved is the reason and the words:
+
+- `POST /machine-payments/budget-precheck` and both x402 legs (erc7710 and the
+  EIP-3009 funding leg) now answer `delegation_expired` with *"this budget ended
+  on `<YYYY-MM-DD>`; ask the owner to set a new one"*
+  (`modules/budget-scope/refusal-body.ts:257-272`,
+  `modules/x402/delegation-authorize.ts:483,699`).
+- The expired-row read is narrow and lives in
+  `modules/budget-scope/expired-budget.ts`; it is consulted ONLY on paths that
+  were already refusing, never on a live one (#3919).
+- Migration `119_payment_refusals_budget_ended_at.ts` widens the
+  `payment_refusals` detail allowlist with `budget_ended_at`, so the ledger row
+  carries the provenance marker.
+- `delegation_expired` therefore has TWO producers: the timestamp-caveat revert
+  it always meant, and this pre-check refusal. A client that branched on the
+  code alone sees the same code; the prose and the `budget_ended_at` detail are
+  what distinguish them.
+
+No tool, schema shape or consent-hash change. An older client keeps working and
+simply surfaces the new prose.
+
 ### erc7710 authorize refuses a `merchantPayTo` that differs from `payTo` (#4243)
 
 Backend only. On the erc7710 shape (`payTo` = the merchant) `POST /x402/authorize` now answers 400 when the body carries a `merchantPayTo` that differs from `payTo`, and the intent records `payTo` as the merchant. No current client is affected: `@haven_ai/sdk`'s erc7710 path, the hosted MCP tools and the local runtime send the merchant as `payTo` and no `merchantPayTo`, and the EIP-3009 funding leg (`payTo` = the delegate EOA, `merchantPayTo` = the merchant) is unchanged. The one skewed caller it reaches is a pre-#1360 SDK that sends a stale delegate address as `payTo` with `merchantPayTo` and no `settlementScheme`: it used to fall through to the erc7710 selector and now gets the 400 before anything is built. No tool, schema shape, refusal code or consent-hash change.
@@ -5463,8 +5732,10 @@ to call next in structured fields, and those fields are typed end to end
   or lacks tools reports `local_signer_probe_<status>` with a re-run
   instruction — setup can no longer exit 0 on an unstartable signer.
 - **Credential safety:** private signing keys live only in the agent's own
-  credential directory — `~/.haven/agents/<agent-id>/signer.json`, or
-  `~/.haven/agents/<slug>/signer.json` for a `--name`d agent (#1696). During a
+  credential directory — `~/.haven/agents/<slug>/signer.json` for a default
+  setup, or `~/.haven/agents/<agent-id>/signer.json` when the pair is unnamed
+  (a `--bare` run, or a `--replace` without `--name`; #1696, default
+  re-derived in #3737). During a
   re-key there is a SECOND, transient private key in that same directory:
   `rekey-pending.json` holds the newly generated key between `--rekey` and
   `--rekey-finish`, at the same `0600` mode, and is deleted once the rewrite
@@ -6424,3 +6695,150 @@ to call next in structured fields, and those fields are typed end to end
 > `lint:runbook-parity` (11 of 11 at `10762fb`); `/for-agents.md` was edited
 > to match. Scope of this note: those two sentences. Nothing else in this
 > document was re-verified.
+
+> **Re-verified unchanged (#4345, 2026-10-23 — the skill says which quote
+> checks the budget).** The diff touches the haven-pay skill text that connect
+> installs (`HAVEN_SKILL_MD`, `packages/sdk/src/skill-content.ts`, with its
+> byte-identical frontend copy): two sentences now say the hosted quote checks
+> the remaining budget, and the local `@haven_ai/mcp` `haven_quote_x402` checks
+> only a stated `expected_amount`, the budget being checked at pay time. Wording
+> only: no `haven_*` tool, schema, strict-input list, `next_tool` value,
+> expected-context version or signer contract changes; an installed `SKILL.md`
+> stays stale until reinstalled. Scope of this note: those two sentences. Nothing
+> else in this document was re-verified.
+
+> **Re-verified (#4355, 2026-10-23 — `haven_get_agent` tells a spent budget
+> from no budget).** Additive only. Each `/machine-payments/allowances` row
+> gains `next_refill_at` (ISO, or null when the budget ends before it would
+> refill), mapped by the SDK to `nextRefillAt`; `getAgentSummary()` — which
+> both the hosted and the local `haven_get_agent` return as-is — gains
+> `budgetRefillsAt`, set only when readiness is `needs_approval` because every
+> live budget is spent for its period. `HavenAgentReadiness` keeps its three
+> values (#4349 decision 5, additive), so a client that switches over them is
+> unaffected and an older backend simply yields `null` for both fields. The
+> runbook (`haven guide`, the agent-skills step file, `/for-agents.md`), the
+> skill text and the `haven_get_agent` description now give `needs_approval`
+> its two causes. No `haven_*` tool name, input schema, strict-input list,
+> `next_tool` value, expected-context version or signer contract changes —
+> but the `haven_get_agent` DESCRIPTION does, so `tools-list.snapshot.json`
+> and the hosted contract fingerprint move: an already-connected hosted
+> client gets the stale-list reconnect hint after deploy, as for any
+> description change. Scope of this note: those fields and that wording. Nothing else in this
+> document was re-verified.
+
+> **Re-verified unchanged (#4371, 2026-10-23 — four stale comments and README
+> lines).** The diff touches covered files only in prose: `packages/signer/README.md`
+> (the bridge flow's `haven_sign` step now names `{ payment_id }` as preferred, and
+> `payload_hash` + `x402_expected` with `typed_data_b64` as the decomposed form),
+> two comments in `packages/mcp-server/src/tools/catalog-purchase.test.ts`
+> (the budget read is `budget-precheck`, as the tests stub), and the comment in
+> `.github/workflows/publish.yml` (five enforcement places, as listed). No
+> `haven_*` tool, input schema, strict-input list, `next_tool` value,
+> expected-context version, signer contract or publish step changes. Scope of
+> this note: those lines. Nothing else in this document was re-verified.
+
+> **Re-verified unchanged (#4379, 2026-10-23 — import paths only).** The diff
+> touches covered files only in their import lines:
+> `modules/x402/sign-context.ts`, `modules/x402/delegation-authorize.ts` and
+> `modules/mpp/budget-precheck.ts` now import from `../payments/index.js`
+> instead of private payments files, and `modules/payments/agent-payment-status.ts`
+> reads `MAX_SETTLEMENT_WINDOW_SECONDS` and `CLOCK_SKEW_SECONDS` from the new
+> zero-import `domain/x402-settlement-timing.ts` (same values, 600 and 120)
+> instead of `modules/x402/`; that file joins this document's `covers:`. No
+> `haven_*` tool, input schema, refusal,
+> `next_tool` value, status projection or expected-context version changes.
+> Scope of this note: those import lines. Nothing else in this document was
+> re-verified.
+
+> **Re-verified unchanged (#4387, 2026-10-24 — one sentence in
+> `packages/connect/README.md`).** The README now says agents connected
+> before the MCP server name was recorded show **not recorded** in the *MCP
+> server name* row of their Settings tab, instead of quoting a "MCP name not
+> recorded" label the dashboard does not render. No connector behaviour,
+> flag or published version changed. Scope of this note: that sentence.
+> Nothing else in this document was re-read for it, and `last-verified` is
+> not bumped.
+
+> **Re-verified unchanged (#4372 part G, 2026-10-24 — prose in
+> `packages/connect/README.md`).** The README is the only covered file this PR
+> touches, and it changes prose only: the default credential directory is
+> `~/.haven/agents/<slug>/` (#3737), the intro names each field of the
+> register body (`registerSetup` in `packages/connect/src/api.ts`) and the
+> `X-Haven-Client` header, the doctor table lists `parked`, the runtime-unknown detail is quoted as
+> `doctor.ts` writes it, the multi-agent `--repair` refusal accepts `--name`
+> (#3799), and the setup screen is no longer said to offer a revoke (#3830).
+> No connector code, flag, pin, tool, consent surface or published version
+> changed. Scope of this note: those README sentences. Nothing else in this
+> document was re-read for it, and `last-verified` is not bumped. Two passages
+> here still say `<agent-id>` where #3737 made `<slug>` the default
+> (`:2645`, `:5508`); follow-up #4396 covers them.
+
+> **Re-verified unchanged (#4372 part I, 2026-10-25 — prose in
+> `packages/signer/README.md`).** The README is the only covered file this PR
+> touches, and it changes prose only: the redemption allowlist names the
+> third chain shape, `[sub grant, parent child, budget]` (#3330, as
+> `redemption-guard.ts` in `@haven_ai/sdk` already enforces); the library
+> surface is five methods on `createEdgeSigner`'s object; the direct-payment
+> diagram shows the compact `haven_pay` result (#3495); the trust-model note
+> says the local checks prove shape and integrity, not amount or recipient;
+> and the Connect Agent 2 paragraph lists the register body as `registerSetup`
+> sends it. No signer code, tool, version constant, consent surface or
+> published version changed. Scope of this note: those README sentences.
+> Nothing else in this document was re-read for it, and `last-verified` is
+> not bumped.
+
+> **Re-verified (#4469, 2026-10-27 — `haven_list_receipts` rows gain six
+> additive fields).** Both surfaces return the SDK's `listReceiptsPage`, and
+> `mapPaymentReceipt` now reads six keys the receipts wire already carried:
+> `settlementScheme`, `budgetDelegationHash`, `deliveryQuality`,
+> `deliveryNote`, `deliveryReportedAt` and `deliveryReference`. Each is set
+> only when the raw key is present, so a row from an older backend maps
+> without it — absent stays absent, and the wire itself is unchanged. Version
+> skew is silent in both directions: a hosted server or a local
+> `@haven_ai/mcp` older than this change returns rows without the six (the
+> mapper drops them), and no input schema, tool name or consent surface
+> changes, so nothing is refused and no new acknowledgement is asked for. The
+> `haven_report_delivery_quality` description also changed — it drops "and the
+> dashboard" and no longer claims the owner reads the verdict, because no owner
+> surface reads it. That is served prose, not a compatibility surface; the
+> tool's input schema is byte-identical. No version constant, pin or published
+> version changed. Scope of this note: the receipt row shape and that one
+> description. Nothing else in this document was re-read for it, and
+> `last-verified` is not bumped.
+
+> **Re-verified (#4470, 2026-10-27 — retry or stop by cause, not status).**
+> Additive on the wire.
+> - **The SDK.** `HavenApiError` gains an optional `failureCause`: the
+>   transport's own 408 and status-0 errors carry `{ kind: 'no_answer',
+>   method }`, and nine deterministic SDK throws plus two payment-state throws
+>   carry `{ kind: 'deterministic' }`. Its `name`, `code` (`API_ERROR`) and
+>   `statusCode` are unchanged, so the local MCP (`packages/mcp/src/tools.ts`)
+>   relays it as before. The funding wait throws two new `HavenApiError`
+>   subclasses, `FundingConfirmationUnknownError` and `FundingRevertedError`.
+>   The local MCP reaches that wait through `haven.fetch` and `payX402Quote`
+>   and relays the two with their new status (504 / 502, was 500) and message;
+>   its step is unchanged.
+>   A settlement report that got no answer is `retryable`, not `refused`.
+> - **The hosted MCP.** `normalizeError`'s generic `HavenApiError` branch
+>   reads the cause first:
+>   - a non-answer on a read re-calls once;
+>   - a non-answer on a write stops without re-calling;
+>   - a deterministic failure stops;
+>   - only an unmarked status falls through to the 4xx and 5xx steps, and
+>     their reasons are byte-identical.
+>
+>   `haven_submit`, on both schemes, and `haven_settle_mcp_tool`'s erc7710
+>   settle answer a non-answer with the new code `NO_ANSWER_OUTCOME_UNKNOWN`
+>   and the status read for its `payment_id`.
+>   The eip3009 delivery step answers the funding wait with the new codes
+>   `FUNDING_CONFIRMATION_UNKNOWN` (check status) and `FUNDING_REVERTED`
+>   (stop), before any merchant call. The settlement-report pending texts now
+>   name "Haven did not answer" as a cause.
+> - **What does not change.** No `haven_*` tool name, input schema,
+>   strict-input list, tool description, expected-context version or signer
+>   contract changes, and `tools-list.snapshot.json` does not move. Every
+>   step names a tool through `refusalNextStep` or says why none follows, and
+>   `lint:next-steps` stays at zero.
+>
+> Scope of this note: those fields and texts. Nothing else in this document
+> was re-verified.

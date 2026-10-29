@@ -13,7 +13,7 @@
  */
 export default function PasskeyElsewhereHint({ className = '' }: { className?: string }) {
   return (
-    <p className={`text-xs text-[var(--v2-ink-muted)] ${className}`.trim()}>
+    <p className={`text-xs text-[var(--v2-ink-3)] ${className}`.trim()}>
       This account&apos;s passkey may be on another device — your browser will guide you there
       when you approve.
     </p>

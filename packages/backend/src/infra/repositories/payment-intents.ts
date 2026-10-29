@@ -636,7 +636,7 @@ export async function releaseSubmittedClaim(intentId: string, db: Executor = poo
 }
 
 export const FAIL_SUBMITTED_INTENT_SQL = `UPDATE payment_intents
-         SET status = 'failed', error_message = $1
+         SET status = 'failed', error_message = $1, failed_at = NOW()
          WHERE id = $2 AND agent_id = $3 AND status = 'submitted'`
 
 /** Record an execution failure on a claimed intent (error message pre-redacted). */
@@ -749,7 +749,8 @@ export async function reconcileOutcomeConfirmed(
 export const RECONCILE_OUTCOME_FAILED_SQL = `UPDATE payment_intents
          SET status = 'failed',
              error_message = COALESCE(error_message, '') || ' | reconciled from chain: redemption UserOp ' || (machine_metadata->>'user_op_hash') || $1::text,
-             machine_metadata = machine_metadata || jsonb_build_object('submission_outcome', 'resolved')
+             machine_metadata = machine_metadata || jsonb_build_object('submission_outcome', 'resolved'),
+             failed_at = NOW()
          WHERE id = $2 AND status = 'submitted' AND tx_hash IS NULL
          RETURNING id`
 
@@ -831,7 +832,7 @@ export const CONFIRM_MACHINE_INTENT_SQL = `UPDATE payment_intents
 
 
 export const FAIL_MACHINE_INTENT_SQL = `UPDATE payment_intents
-       SET status = 'failed', error_message = $1
+       SET status = 'failed', error_message = $1, failed_at = NOW()
        WHERE id = $2
          AND agent_id = $3
          AND payment_rail = $4

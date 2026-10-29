@@ -23,13 +23,15 @@ covers:
   - .claude/commands/qa-dev.md
   - .claude/commands/qa-explore-ui.md
   - .claude/commands/qa-explore-agent-onboarding.md
-last-verified: "2026-09-30"
+last-verified: "2026-10-25"
 ---
 
 <!--
 Per-run QA report.
 Copy to `<yyyy-mm-ddThhmmssZ>-<mode>-<flow>-<env>.md` using a slugged UTC
 timestamp, or include the CI run id/short SHA so concurrent runs cannot collide.
+In the copy's front-matter set `status: record`: a dated report is a record the
+staleness audit never ranks (#4459). This template itself stays `current`.
 File concrete bugs as separate GitHub issues and link them here.
 Procedures: ../operations/e2e-qa-runbook.md and ../operations/agent-qa.md.
 -->
@@ -108,15 +110,14 @@ npm run qa:dev -w packages/qa-agent
 ```
 
 The commands and artifact paths in this template were re-verified against the
-repos on 2026-09-30 (weekly docs audit #3413, at dev `5b5bd059`; previous
-verification 2026-09-21, audit #3206 at `7f17c9f3`): the five script names
+repos on 2026-10-25 (weekly docs audit #3645, at dev `615686369`; previous
+verification 2026-09-30, audit #3413 at `5b5bd059`): the five script names
 above in `packages/frontend/package.json` and
 `packages/qa-agent/package.json`, and both Playwright `outputDir` values in
 `playwright.config.ts` / `playwright.live.config.ts` — all unchanged as
-documented (the `output/playwright*/` paths are gitignored working dirs). The
-intervening commits (#3484 /demo page env wiring, #3455 CLI manifest command,
-#3448 verify-receipt, #3435 company details, #3394 releases visual spec,
-#3377 failure classes, #3374/#3373 qa-freshness) changed the suites and
+documented (the `output/playwright*/` paths are gitignored working dirs).
+The intervening commits (#4372 parts A–I, #4405 agent-dir paths, #4407
+catalog probe cooldown, #4352 expired-only budgets) changed the suites and
 covered code, not the template's fields, tables or artifact layout. The
 scenario table's over-budget claims still match the code: the typed HTTP 403
 `delegation_budget_exceeded` pre-check covers both the EIP-3009 leg and the

@@ -1,13 +1,16 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
+  ANALYTICS_AGENT_URL_PARAM,
   ANALYTICS_PERIOD_URL_PARAM,
   ANALYTICS_RANGE_STORAGE_KEY,
   DEFAULT_ANALYTICS_RANGE,
   browserTimeZone,
   isAnalyticsRangeValue,
   readStoredAnalyticsRange,
+  readUrlAnalyticsAgentId,
   readUrlAnalyticsRange,
   writeStoredAnalyticsRange,
+  writeUrlAnalyticsAgentId,
   writeUrlAnalyticsRange,
 } from '../analytics-range'
 
@@ -192,6 +195,43 @@ describe('writeUrlAnalyticsRange', () => {
     window.history.replaceState(null, '', '/analytics?period=7d')
     writeUrlAnalyticsRange('180d' as never)
     expect(new URLSearchParams(window.location.search).get(ANALYTICS_PERIOD_URL_PARAM)).toBe('7d')
+  })
+})
+
+describe('readUrlAnalyticsAgentId / writeUrlAnalyticsAgentId (#4333)', () => {
+  it('round-trips an agent selection through the address bar', () => {
+    window.history.replaceState(null, '', '/analytics')
+    writeUrlAnalyticsAgentId('agent-research')
+    expect(new URLSearchParams(window.location.search).get(ANALYTICS_AGENT_URL_PARAM)).toBe(
+      'agent-research',
+    )
+    expect(readUrlAnalyticsAgentId()).toBe('agent-research')
+  })
+
+  it('deletes the key on clear rather than writing an empty value', () => {
+    window.history.replaceState(null, '', '/analytics?agentId=agent-research&period=7d')
+    writeUrlAnalyticsAgentId(null)
+    const params = new URLSearchParams(window.location.search)
+    expect(params.get(ANALYTICS_AGENT_URL_PARAM)).toBeNull()
+    // An `agentId=` in a shared link would read as a filter that names
+    // nothing; the period key the page also owns is preserved.
+    expect(params.get(ANALYTICS_PERIOD_URL_PARAM)).toBe('7d')
+  })
+
+  it('preserves params the page does not own, and replaces rather than pushes', () => {
+    window.history.replaceState(null, '', '/analytics?foo=1')
+    const before = window.history.length
+    writeUrlAnalyticsAgentId('agent-x')
+    const params = new URLSearchParams(window.location.search)
+    expect(params.get('foo')).toBe('1')
+    expect(window.history.length).toBe(before)
+  })
+
+  it('reads null when there is no id or an empty one', () => {
+    window.history.replaceState(null, '', '/analytics')
+    expect(readUrlAnalyticsAgentId()).toBeNull()
+    window.history.replaceState(null, '', '/analytics?agentId=')
+    expect(readUrlAnalyticsAgentId()).toBeNull()
   })
 })
 

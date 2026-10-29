@@ -7,7 +7,6 @@ import {
   ArrowLeftRight,
   Bot,
   ChartColumn,
-  CircleUserRound,
   EllipsisVertical,
   FileText,
   LayoutGrid,
@@ -65,7 +64,6 @@ const icons = {
   agents: <Icon icon={Bot} className="w-full h-full" />,
   marketplace: <Icon icon={Store} className="w-full h-full" />,
   contacts: <Icon icon={Users} className="w-full h-full" />,
-  profile: <Icon icon={CircleUserRound} className="w-full h-full" />,
   settings: <Icon icon={Settings} className="w-full h-full" />,
   logout: <Icon icon={LogOut} className="w-full h-full" />,
   dotsVertical: <Icon icon={EllipsisVertical} className="w-full h-full" />,
@@ -197,7 +195,9 @@ export default function Sidebar() {
   const emailLine = user?.email ?? ''
   // Avoid showing the same value twice — if displayName resolves to email, hide the second line
   const showEmailLine = emailLine !== '' && name !== emailLine
-  const profileActive = pathname === '/profile'
+  // #4358: /profile is gone (it redirects to /settings), so the identity
+  // card links to Settings and no longer double-highlights beside the
+  // Settings NavLink — no `profileActive` state.
 
   // #1989 (epic #1440): the Approvals entry is GONE for every user, not hidden
   // per-account as #1079 had it. The approval queue was a legacy-rail
@@ -407,7 +407,7 @@ export default function Sidebar() {
         onClose={closeMore}
         items={sheetItems}
         isActive={(href) => isActiveRoute(pathname, href)}
-        account={{ name, email: showEmailLine ? emailLine : null, initial: userInitial, active: profileActive }}
+        account={{ name, email: showEmailLine ? emailLine : null, initial: userInitial }}
         onLogout={() => {
           setMoreOpen(false)
           logout()
@@ -478,23 +478,15 @@ export default function Sidebar() {
             />
           </div>
 
-          {/* User card with kebab */}
+          {/* User card with kebab (#4358): the card links to /settings with
+              the aria-label "Open settings for <name>" — /profile redirects
+              there now, and the Settings NavLink above means the card must
+              not carry a second active highlight. */}
           <div className="px-3 pb-4 pt-1">
-            <div className={`relative flex items-center gap-2 rounded-md transition-colors duration-150 ${
-              profileActive
-                ? 'bg-[var(--v2-brand-soft)]'
-                : 'hover:bg-[var(--v2-surface-hover)]'
-            }`}>
-              {profileActive && (
-                <span
-                  aria-hidden="true"
-                  className="absolute left-0 top-0 h-full w-0.5 rounded-r-full bg-[var(--v2-brand)]"
-                />
-              )}
+            <div className="relative flex items-center gap-2 rounded-md transition-colors duration-150 hover:bg-[var(--v2-surface-hover)]">
               <Link
-                href="/profile"
-                aria-label={`Open profile for ${name}`}
-                aria-current={profileActive ? 'page' : undefined}
+                href="/settings"
+                aria-label={`Open settings for ${name}`}
                 className="flex min-w-0 flex-1 items-center gap-3 rounded-md px-3 py-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 focus-visible:ring-offset-2"
               >
                 {/* Avatar */}
@@ -541,17 +533,8 @@ export default function Sidebar() {
                     aria-label="User menu"
                     className="absolute bottom-full right-0 mb-2 w-44 bg-[var(--v2-bg)] border border-[var(--v2-border)] rounded-lg shadow-popover px-1 py-1 z-[var(--v2-z-chrome-popover)]"
                   >
-                    <Link
-                      href="/profile"
-                      role="menuitem"
-                      onClick={() => setMenuOpen(false)}
-                      className="flex items-center gap-2 px-3 py-2 text-[13px] text-[var(--v2-ink)] hover:bg-[var(--v2-surface)] w-full text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/80"
-                    >
-                      <span className="inline-flex w-3.5 h-3.5 items-center justify-center flex-shrink-0">
-                        {icons.profile}
-                      </span>
-                      Profile
-                    </Link>
+                  {/* #4358: the Profile item is gone with /profile —
+                      Settings (this card's own href) and Log out remain. */}
                     <Link
                       href="/settings"
                       role="menuitem"

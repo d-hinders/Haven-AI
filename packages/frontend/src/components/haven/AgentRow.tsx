@@ -43,7 +43,7 @@ export type DashboardAgent = DashboardOverview['agents'][number]
 /** The user's display currency, as the #3803 spend keys are spelled. */
 export type DashboardCurrency = 'USD' | 'EUR' | 'SEK'
 
-export const CURRENCY_KEY: Record<DashboardCurrency, 'usd' | 'eur' | 'sek'> = { // design-system-exempt: a currency-to-wire-key lookup map (#4103), not a component; AgentRow is the registered primitive
+export const CURRENCY_KEY: Record<DashboardCurrency, 'usd' | 'eur' | 'sek'> = {
   USD: 'usd',
   EUR: 'eur',
   SEK: 'sek',
@@ -63,6 +63,12 @@ export function agentBadge(
 ): { label: string; tone: StatusTone } | null {
   if (attentionItems.some((item) => item.kind === 'needs-setup' && item.agentId === agent.id)) {
     return { label: 'Needs setup', tone: 'brand' }
+  }
+  // #4353: the ended item replaces "Needs setup" for an agent whose only
+  // budget ended, so its row says why it cannot spend. Same coupling as
+  // needs-setup: acknowledging the item clears the badge.
+  if (attentionItems.some((item) => item.kind === 'budget-ended' && item.agentId === agent.id)) {
+    return { label: 'Budget ended', tone: 'neutral' }
   }
   if (agent.status === 'paused') {
     return { label: 'Paused', tone: 'warning' }
@@ -257,10 +263,11 @@ export function AgentRow({
       href={`/agents/${agent.id}`}
       className="grid grid-cols-[2rem_minmax(0,1fr)_1rem] items-center gap-x-3 px-5 py-3.5 transition-colors hover:bg-[var(--v2-surface-hover)] [grid-template-areas:'icon_name_chev'_'icon_body_chev'] [&>:first-child]:[grid-area:icon]"
     >
-      {/* A specific agent carries its name-hashed identity mark; category-level
+      {/* A specific agent carries its own identity mark — its stored tint
+          (#4428), the same colour its chart series wears; category-level
           "agents" surfaces keep the robot icon (#4208). Keep this as the direct
           first child: the money-card layout guard locates rows through it. */}
-      <Monogram name={agent.name} size="xs" decorative />
+      <Monogram name={agent.name} tint={agent.avatarTint} size="xs" decorative />
       {/* flex-wrap (#3908): on a narrow row the badge drops under the name
           rather than squeezing the name to a few letters. */}
       <p className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-sm font-medium text-[var(--v2-ink)] [grid-area:name]">

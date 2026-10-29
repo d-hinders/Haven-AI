@@ -63,7 +63,8 @@ export interface ParsedArgs {
     /**
      * #2539: optional expiry (unix seconds) for `budget grant`. Absent lets
      * the backend default (now + 90 days), the same default the dashboard's
-     * builds get.
+     * builds get. #4351: capped at 365 days out, the same bound the build
+     * route enforces — the parse refuses past-cap values with that text.
      */
     expires?: number
     /**
@@ -151,6 +152,12 @@ export function parseArgs(argv: string[]): ParsedArgs {
       } else if (arg === '--expires') {
         const n = Number(value)
         if (!Number.isInteger(n) || n <= 0) throw new Error('--expires must be a unix timestamp in seconds')
+        // #4351: the build route refuses an expiry more than 365 days out
+        // (the "No expiry" permission in the CASP guardrails). Refuse it HERE
+        // with the same bound, so the CLI says why before a 400 ever does.
+        if (n > Math.floor(Date.now() / 1000) + 365 * 86_400) {
+          throw new Error('--expires must be at most 365 days from now')
+        }
         flags.expires = n
       } else if (arg === '--format') {
         if (value !== 'csv' && value !== 'sie') throw new Error('--format must be "csv" or "sie"')

@@ -23,11 +23,25 @@
       }
     },
     {
+      "site": "mcp-context.ts submit: no answer, outcome unknown (#4470)",
+      "tool": "haven_get_payment_status",
+      "arguments": {
+        "payment_id": "pay_1"
+      }
+    },
+    {
       "site": "paid-mcp-completion.ts complete eip3009: settlement evidence retryable (hash prefilled)",
       "tool": "haven_report_settlement_evidence",
       "arguments": {
         "payment_id": "pay_1",
         "settlement_tx_hash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    {
+      "site": "paid-mcp-completion.ts funding confirmation unknown (#4470)",
+      "tool": "haven_get_payment_status",
+      "arguments": {
+        "payment_id": "pay_1"
       }
     },
     {
@@ -186,6 +200,20 @@
       "tool": "haven_report_settlement_evidence",
       "arguments": {
         "payment_id": "pay_1"
+      }
+    },
+    {
+      "site": "state-direct-recovery.ts haven_submit task budget: close needs reprepare",
+      "tool": "haven_close_task_budget",
+      "arguments": {
+        "task_budget_id": "tb_1"
+      }
+    },
+    {
+      "site": "state-direct-recovery.ts haven_submit task budget: close outcome unconfirmed",
+      "tool": "haven_close_task_budget",
+      "arguments": {
+        "task_budget_id": "tb_1"
       }
     },
     {

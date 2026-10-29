@@ -551,7 +551,9 @@ test.describe('mobile navigation toggle tap target (#1766)', () => {
               : 'nothing',
           }
         }
-        const account = document.querySelector('[data-more-sheet] a[href="/profile"]')!
+        // #4358: the account row is no longer a link — the identity stays,
+        // the sheet's Settings row is the tap target.
+        const account = document.querySelector('[data-more-sheet] [data-account-row]')!
         const close = document.querySelector('[data-more-sheet-close]')!
         const more = document.querySelector('[data-more-toggle]')!
         const mb = more.getBoundingClientRect()

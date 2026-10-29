@@ -1,12 +1,16 @@
 'use client'
 
-import { ArrowDown, ArrowLeftRight, ArrowUp, Bot, Check, ChevronDown, Circle, CirclePause, CreditCard, EllipsisVertical, Info, OctagonAlert, Sparkles, TriangleAlert, X } from 'lucide-react'
+import { ArrowDown, ArrowLeftRight, ArrowUp, Bot, Check, ChevronDown, Circle, CreditCard, EllipsisVertical, Info, OctagonAlert, Sparkles, TriangleAlert, X } from 'lucide-react'
 import { MobileTabBar } from '@/components/sidebar/MobileTabBar'
 import { baseNavItems } from '@/components/sidebar/Sidebar'
 import { Icon } from '@/components/ui/Icon'
 import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Button } from '@/components/ui/Button'
+import { SettingsSection, SettingsRow } from '@/components/ui/SettingsSection'
+import { SectionHeading } from '@/components/ui/SectionHeading'
+import { DetailList } from '@/components/ui/DetailList'
+import Link from 'next/link'
 import { Card } from '@/components/ui/Card'
 import {
   DropdownMenu,
@@ -17,11 +21,14 @@ import {
 } from '@/components/ui/DropdownMenu'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { FilterPill } from '@/components/ui/FilterPill'
+import { LinkChip } from '@/components/ui/LinkChip'
 import { FacetMenu, type ListFacet } from '@/components/ui/FacetMenu'
 import { ListNoMatch, ListShowMore, ListToolbar } from '@/components/ui/ListToolbar'
+import { ListExportAction, ListExportNotice } from '@/components/ui/ListExportAction'
 import { PeriodPicker } from '@/components/ui/PeriodPicker'
 import { clearedListState, type ListState, type PeriodValue } from '@/components/ui/list-url-codec'
 import { Monogram } from '@/components/ui/Monogram'
+import { AgentAvatarStack, type StackedAgent } from '@/components/ui/AgentAvatarStack'
 import { MerchantCard } from '@/components/marketplace/MerchantCard'
 import { ComingSoonMerchants } from '@/components/marketplace/ComingSoonMerchants'
 import { Input, MaxButton, PasteButton } from '@/components/ui/Input'
@@ -35,9 +42,13 @@ import { ThemeToggle } from '@/components/ui/ThemeToggle'
 import { Textarea } from '@/components/ui/Textarea'
 import { Table } from '@/components/ui/Table'
 import { SidePanel } from '@/components/ui/SidePanel'
+import TransactionDetailPanel from '@/components/transactions/TransactionDetailPanel'
+import type { AggregatedTransaction } from '@/types/transactions'
 import { StepProgress } from '@/components/ui/StepProgress'
 import { DialogActions } from '@/components/ui/DialogActions'
 import { SeriesSwatch, StackedBarChart } from '@/components/ui/StackedBarChart'
+import { seriesColorForAgent } from '@/lib/avatar-tint'
+import { agentFacetOptions } from '@/lib/agent-facet'
 import type { StackedBarDay } from '@/components/ui/StackedBarChart'
 import { AreaChart } from '@/components/ui/AreaChart'
 import type { AreaPoint, SparklinePoint } from '@/components/ui/AreaChart'
@@ -94,6 +105,7 @@ import {
   BalanceFreshnessIndicator,
   WhenBalanceDegraded,
   BudgetAmountRow,
+  BudgetEndDateSelect,
   BudgetMeter,
 } from '@/components/haven'
 
@@ -252,13 +264,53 @@ const NOOP = () => {}
 const dsMoney = (n: number) =>
   n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
+/**
+ * The two showcase agents' fills (#4331, #4428): their own STORED tints, read
+ * through the same `seriesColorForAgent` the charts use — so the swatch list
+ * under the chart and the `Monogram` section show the SAME colour for the
+ * SAME name, by construction. The pair is chosen to show the rule the epic
+ * changed: 'Research agent' and 'Data-feed agent' both hash to tint 6 under
+ * djb2 mod 6, and wear different colours because each carries its own stored
+ * tint (6 and 2). Before #4428 they were indistinguishable in a chart.
+ */
+const DS_RESEARCH_TINT = 6
+const DS_DATAFEED_TINT = 2
+const DS_RESEARCH_COLOR = seriesColorForAgent({ name: 'Research agent', avatarTint: DS_RESEARCH_TINT })
+const DS_DATAFEED_COLOR = seriesColorForAgent({ name: 'Data-feed agent', avatarTint: DS_DATAFEED_TINT })
+
+/**
+ * The stored tint per showcase agent, so the swatch list's `Monogram` wears
+ * the same colour as the chart fill beside it — the pairing the specimen
+ * exists to show. A merchant or a contact would pass no tint at all.
+ */
+const DS_AGENT_TINTS: Record<string, number> = {
+  'Research agent': DS_RESEARCH_TINT,
+  'Data-feed agent': DS_DATAFEED_TINT,
+}
+
+/**
+ * The avatar stack's showcase agents (#4480): the same two showcase agents,
+ * carrying their STORED tints, so the stack and the chart beside it agree by
+ * construction — plus a third for the cap and two more for the overflow case.
+ */
+const DS_STACK_AGENTS: StackedAgent[] = [
+  { id: 'research', name: 'Research agent', avatarTint: DS_RESEARCH_TINT },
+  { id: 'data-feed', name: 'Data-feed agent', avatarTint: DS_DATAFEED_TINT },
+  { id: 'ops', name: 'Ops agent', avatarTint: 4 },
+]
+const DS_STACK_AGENTS_OVERFLOW: StackedAgent[] = [
+  ...DS_STACK_AGENTS,
+  { id: 'shopping', name: 'Shopping bot', avatarTint: 1 },
+  { id: 'treasury', name: 'Treasury agent', avatarTint: 5 },
+]
+
 const DS_CHART_DAYS: StackedBarDay[] = [
   {
     label: 'Mon 1',
     refusals: 0,
     series: [
-      { id: 'research', name: 'Research agent', amount: 140, seriesIndex: 0, tokens: [['USDC', 140]] },
-      { id: 'ops', name: 'Ops agent', amount: 60, seriesIndex: 1 },
+      { id: 'research', name: 'Research agent', amount: 140, color: DS_RESEARCH_COLOR, tokens: [['USDC', 140]] },
+      { id: 'data-feed', name: 'Data-feed agent', amount: 60, color: DS_DATAFEED_COLOR },
     ],
   },
   {
@@ -269,53 +321,54 @@ const DS_CHART_DAYS: StackedBarDay[] = [
         id: 'research',
         name: 'Research agent',
         amount: 220,
-        seriesIndex: 0,
+        color: DS_RESEARCH_COLOR,
         tokens: [
           ['USDC', 160.4],
           ['PYUSD', 59.6],
         ],
       },
-      { id: 'ops', name: 'Ops agent', amount: 45, seriesIndex: 1 },
+      { id: 'data-feed', name: 'Data-feed agent', amount: 45, color: DS_DATAFEED_COLOR },
     ],
   },
   {
     label: 'Wed 3',
     refusals: 0,
     series: [
-      { id: 'research', name: 'Research agent', amount: 95, seriesIndex: 0 },
-      { id: 'ops', name: 'Ops agent', amount: 310, seriesIndex: 1 },
+      { id: 'research', name: 'Research agent', amount: 95, color: DS_RESEARCH_COLOR },
+      { id: 'data-feed', name: 'Data-feed agent', amount: 310, color: DS_DATAFEED_COLOR },
     ],
   },
   {
     label: 'Thu 4',
     refusals: 2,
-    series: [
-      { id: 'research', name: 'Research agent', amount: 180, seriesIndex: 0 },
-      { id: 'ops', name: 'Ops agent', amount: 70, seriesIndex: 1 },
-    ],
+    // The continuous axis (#4334), shown not described: a day with NO spend
+    // is an empty slot — no segments at all — and its refusals still draw,
+    // as the grey dash under the slot that a cap-on-the-bar could never
+    // have shown on a barless day.
+    series: [],
   },
   {
     label: 'Fri 5',
     refusals: 0,
     series: [
-      { id: 'research', name: 'Research agent', amount: 260, seriesIndex: 0 },
-      { id: 'ops', name: 'Ops agent', amount: 55, seriesIndex: 1 },
+      { id: 'research', name: 'Research agent', amount: 260, color: DS_RESEARCH_COLOR },
+      { id: 'data-feed', name: 'Data-feed agent', amount: 55, color: DS_DATAFEED_COLOR },
     ],
   },
   {
     label: 'Sat 6',
     refusals: 0,
     series: [
-      { id: 'research', name: 'Research agent', amount: 60, seriesIndex: 0 },
-      { id: 'ops', name: 'Ops agent', amount: 40, seriesIndex: 1 },
+      { id: 'research', name: 'Research agent', amount: 60, color: DS_RESEARCH_COLOR },
+      { id: 'data-feed', name: 'Data-feed agent', amount: 40, color: DS_DATAFEED_COLOR },
     ],
   },
   {
     label: 'Sun 7',
     refusals: 0,
     series: [
-      { id: 'research', name: 'Research agent', amount: 150, seriesIndex: 0 },
-      { id: 'ops', name: 'Ops agent', amount: 90, seriesIndex: 1 },
+      { id: 'research', name: 'Research agent', amount: 150, color: DS_RESEARCH_COLOR },
+      { id: 'data-feed', name: 'Data-feed agent', amount: 90, color: DS_DATAFEED_COLOR },
     ],
   },
 ]
@@ -335,9 +388,30 @@ const DS_BALANCE_POINTS: AreaPoint[] = [
   { label: 'Sat 6', value: 1090 },
   { label: 'Sun 7', value: 1120 },
 ]
+const DS_BALANCE_START = DS_BALANCE_POINTS[0].value
 const DS_BALANCE_END = DS_BALANCE_POINTS[DS_BALANCE_POINTS.length - 1].value
-const DS_BALANCE_SPENT = DS_BALANCE_POINTS[0].value - DS_BALANCE_END
-const DS_BALANCE_SUMMARY = `Balance over 7 days: ends at ${dsMoney(DS_BALANCE_END)} USD, ${dsMoney(DS_BALANCE_SPENT)} USD spent across the range`
+const DS_BALANCE_DELTA = DS_BALANCE_END - DS_BALANCE_START
+/** The summary sentence the chart's `ariaLabel` carries, in the same words the
+ *  analytics page's `balanceSummary` uses (#4333): the signed NET CHANGE, not
+ *  "spent across the range". */
+const DS_BALANCE_SUMMARY = `Balance over 7 days: started at ${dsMoney(DS_BALANCE_START)} USD and ended at ${dsMoney(DS_BALANCE_END)} USD, Net change ${DS_BALANCE_DELTA > 0 ? '+' : '-'}${dsMoney(Math.abs(DS_BALANCE_DELTA))} across the range.`
+
+/** The rising sample (#4480): the same shape, ending higher than it started,
+ *  so the specimen shows the success-green "Net change" as well as the neutral
+ *  one. The delta is +$180.00. */
+const DS_BALANCE_RISING_POINTS: AreaPoint[] = [
+  { label: 'Mon 1', value: 1120 },
+  { label: 'Tue 2', value: 1180 },
+  { label: 'Wed 3', value: 1150 },
+  { label: 'Thu 4', value: 1240 },
+  { label: 'Fri 5', value: 1210 },
+  { label: 'Sat 6', value: 1270 },
+  { label: 'Sun 7', value: 1300 },
+]
+const DS_BALANCE_RISING_START = DS_BALANCE_RISING_POINTS[0].value
+const DS_BALANCE_RISING_END = DS_BALANCE_RISING_POINTS[DS_BALANCE_RISING_POINTS.length - 1].value
+const DS_BALANCE_RISING_DELTA = DS_BALANCE_RISING_END - DS_BALANCE_RISING_START
+const DS_BALANCE_RISING_SUMMARY = `Balance over 7 days: started at ${dsMoney(DS_BALANCE_RISING_START)} USD and ended at ${dsMoney(DS_BALANCE_RISING_END)} USD, Net change +${dsMoney(DS_BALANCE_RISING_DELTA)} across the range.`
 
 /**
  * Sparkline sample data (#3805). Two of the fourteen days carry no snapshot —
@@ -366,13 +440,17 @@ const DS_SPARKLINE_SUMMARY =
 
 /**
  * The AttentionList sample's items — one per tone, one of them without a badge
- * label, and one (the failure) without the dismiss, so the reserved slot and
- * the one trailing column are on show. The badge-less item carries an action:
- * the product's only badge-less kind (`haven-paused`) has neither badge nor
- * action and is not dismissible, so a badge-less dismiss-only row would render
- * a shape no product kind has — a lone × on its own line below `sm` (#4033).
- * The `haven-paused`-shaped row shows that shape: nothing visible to align,
- * so it renders no trailing slot at all and its tone word rides in the body.
+ * label, and one without the dismiss, so the reserved slot and the one
+ * trailing column are on show. The row without a dismiss is the low-balance
+ * shape: low balance and zero USDC are the product kinds that stay
+ * non-dismissible (#4324 — money is at stake, and "Add funds" is the action).
+ * The failure row is dismissible, as in the product since #4324 (failures are
+ * acknowledged until the next one). The badge-less item carries an action:
+ * a badge-less dismiss-only row would put a lone × on its own line below `sm`
+ * (#4033), so the sample does not draw one. The last row has nothing visible
+ * to align — no badge, no action, no dismiss — so it renders no trailing slot
+ * at all and its tone word rides in the body; it keeps #4033's guard on that
+ * path.
  */
 const DS_ATTENTION_ITEMS: AttentionListItem[] = [
   {
@@ -385,15 +463,19 @@ const DS_ATTENTION_ITEMS: AttentionListItem[] = [
     icon: Info,
   },
   {
-    id: 'reapproval',
-    title: 'Re-approval needed',
-    subtitle: 'Spending paused while Travel planner awaits your approval of the new agent rules.',
+    id: 'low-balance',
+    title: "Main account's USDC is running low",
+    subtitle: 'At the current pace, its USDC lasts under 7 days.',
     tone: 'warning',
-    badge: 'Review needed',
+    badge: 'Low balance',
     icon: TriangleAlert,
+    // As on the dashboard: low balance is resolved by adding funds, not
+    // dismissed — so this row shows the reserved dismiss slot that keeps the
+    // trailing column aligned.
+    dismissible: false,
     action: (
       <Button size="sm" variant="ghost">
-        Review
+        Add funds
       </Button>
     ),
   },
@@ -411,33 +493,26 @@ const DS_ATTENTION_ITEMS: AttentionListItem[] = [
   },
   {
     id: 'payment-failed',
-    title: 'Payment failed',
-    subtitle: 'The payment to acme.dev failed at signing. Nothing was spent.',
+    title: 'Travel planner had 3 failed payments',
+    subtitle: 'Payments keep failing — check the agent.',
     tone: 'danger',
     badge: 'Failed',
     icon: OctagonAlert,
-    // As on the dashboard: a failure is resolved, not dismissed — so this row
-    // shows the reserved dismiss slot that keeps the trailing column aligned.
-    dismissible: false,
     action: (
       <Button size="sm" variant="ghost">
-        View activity
+        Review
       </Button>
     ),
   },
   {
-    // The `haven-paused` shape (#4033): no badge, no action, not dismissible —
-    // nothing visible to align, so the row renders no trailing slot and the
-    // sr-only tone word rides in the body. Equal space above and below the
-    // body at every width.
-    id: 'haven-paused',
-    title: 'Haven paused sponsored payments',
-    subtitle: "Your budgets are untouched. Haven's own cap stopped a payment.",
+    // Nothing visible to align (#4033): no badge, no action, not dismissible —
+    // the row renders no trailing slot and the sr-only tone word rides in the
+    // body. Equal space above and below the body at every width.
+    id: 'nothing-to-align',
+    title: 'No summary this week',
+    subtitle: 'There were no payments in the week ending Sunday, so there is nothing to summarise.',
     tone: 'neutral',
-    icon: CirclePause,
-    // As in the product: `haven-paused` is not in DISMISSIBLE_ATTENTION_KINDS,
-    // so the default-true dismissible would hang a fourth × on the list —
-    // and this row's whole point is having nothing visible to align.
+    icon: Info,
     dismissible: false,
   },
 ]
@@ -512,9 +587,13 @@ const DS_AGENT: DashboardAgentPreview = {
   id: '11111111-1111-4111-8111-111111111111',
   name: 'Research agent',
   status: 'active',
+  // #4431: the specimen's stored tint is the SAME one the Monogram and chart
+  // sections above give 'Research agent' (6), so the row, the header mark and
+  // the swatch list cannot disagree about the colour.
+  avatarTint: DS_RESEARCH_TINT,
   accountId: 'acct-1',
   accountName: 'Main account',
-  accountChainId: 8453,
+  accountChainId: 8453, budgetEndedAt: null,
   allowances: [],
   budgets: [
     {
@@ -533,8 +612,8 @@ const DS_AGENT: DashboardAgentPreview = {
   ],
   receivedSubBudgets: [],
   stats: {
-    d7: { gross: { usd: 12, eur: 0, sek: 0 }, net: { usd: 12, eur: 0, sek: 0 }, approx: false, payments: 1, refusals: { budget: 0, scope: 0, failed: 0, haven: 0 } },
-    d30: { gross: { usd: 120, eur: 0, sek: 0 }, net: { usd: 120, eur: 0, sek: 0 }, approx: false, payments: 6, refusals: { budget: 0, scope: 0, failed: 0, haven: 0 } },
+    d7: { gross: { usd: 12, eur: 0, sek: 0 }, net: { usd: 12, eur: 0, sek: 0 }, approx: false, payments: 1, refusals: { budget: 0, expired: 0, scope: 0, failed: 0, haven: 0 } },
+    d30: { gross: { usd: 120, eur: 0, sek: 0 }, net: { usd: 120, eur: 0, sek: 0 }, approx: false, payments: 6, refusals: { budget: 0, expired: 0, scope: 0, failed: 0, haven: 0 } },
     lastPaymentAt: new Date(DS_AGENT_NOW - 6 * 3_600_000).toISOString(),
     lastCounterparty: { source: 'api.vendor.com', x402ResourceUrl: null, to: null, merchantName: null },
   },
@@ -561,15 +640,19 @@ const DS_AGENT_BUDGET_REMAINING: DashboardBudgetRemaining = {
   ],
 }
 // A second agent with NO budget and no payments — the "No budget" + "No
-// payments yet" arms of the row, exactly as the dashboard draws them.
+// payments yet" arms of the row, exactly as the dashboard draws them. It is
+// the OTHER half of the collision pair (#4431): 'Data-feed agent' hashes to
+// the same tint as 'Research agent' (6), and wears tint 2 because that is
+// what it stores — the rule the epic changed, visible in one card.
 const DS_AGENT_NO_BUDGET: DashboardAgentPreview = {
   ...DS_AGENT,
   id: '22222222-2222-4222-8222-222222222222',
-  name: 'Watchtower',
+  name: 'Data-feed agent',
+  avatarTint: DS_DATAFEED_TINT,
   budgets: [],
   stats: {
-    d7: { gross: { usd: 0, eur: 0, sek: 0 }, net: { usd: 0, eur: 0, sek: 0 }, approx: false, payments: 0, refusals: { budget: 0, scope: 0, failed: 0, haven: 0 } },
-    d30: { gross: { usd: 0, eur: 0, sek: 0 }, net: { usd: 0, eur: 0, sek: 0 }, approx: false, payments: 0, refusals: { budget: 0, scope: 0, failed: 0, haven: 0 } },
+    d7: { gross: { usd: 0, eur: 0, sek: 0 }, net: { usd: 0, eur: 0, sek: 0 }, approx: false, payments: 0, refusals: { budget: 0, expired: 0, scope: 0, failed: 0, haven: 0 } },
+    d30: { gross: { usd: 0, eur: 0, sek: 0 }, net: { usd: 0, eur: 0, sek: 0 }, approx: false, payments: 0, refusals: { budget: 0, expired: 0, scope: 0, failed: 0, haven: 0 } },
     lastPaymentAt: null,
     lastCounterparty: null,
   },
@@ -593,11 +676,17 @@ const DS_CARD_AGENT = {
   labels: [{ id: 'ds-label-research', name: 'research', color: 'blue' }],
   organization_id: null,
   tax_declaration_enabled: false,
+  // #4431: the card's mark reads the agent's STORED tint, the same one the
+  // row and the chart give it.
+  avatar_tint: DS_RESEARCH_TINT,
 } as unknown as Agent
 const DS_CARD_ARCHIVED = {
   ...DS_CARD_AGENT,
   id: '33333333-3333-4333-8333-333333333333',
-  name: 'gate-3028',
+  // The collision pair's other half (#4431): same name hash, different
+  // stored tint, so the two cards are told apart by colour.
+  name: 'Data-feed agent',
+  avatar_tint: DS_DATAFEED_TINT,
   status: 'revoked',
   archived_at: new Date(DS_AGENT_NOW - 30 * 86_400_000).toISOString(),
   labels: [],
@@ -657,6 +746,70 @@ const DS_LEDGER_ACCOUNTING = {
   error: null,
 }
 
+// ── The transaction detail panel's settlement states (#4320) ───────────────
+// The REAL shared panel (the SidePanel section above shows the primitive's
+// slots with specimen content; this shows the product's own drawer) mounted
+// over three production-shaped eip3009 settlement rows, one per
+// `settlementTracking` state — settled (verified), checking and not tracked.
+// The wording lives in `TransactionDetailPanel.tsx`; nothing here re-states it.
+const DS_SETTLEMENT_HASH = `0x${'ef'.repeat(32)}`
+const DS_SETTLEMENT_BASE = {
+  hash: `0x${'ab'.repeat(32)}`,
+  type: 'erc20',
+  from: '0x4444444444444444444444444444444444444444',
+  to: '0x5555555555555555555555555555555555555555',
+  value: '12500000',
+  valueFormatted: '12.50',
+  asset: 'USDC',
+  decimals: 6,
+  direction: 'out',
+  timestamp: 1_779_000_000,
+  blockNumber: null,
+  isError: false,
+  chainId: 8453,
+  accountId: 'acc-operations',
+  accountAddress: '0x4444444444444444444444444444444444444444',
+  accountName: 'Operations',
+  agentName: 'Research agent',
+  initiatedBy: 'agent',
+  source: 'x402',
+  x402ResourceUrl: 'https://api.vendor.com/search?q=1',
+  x402MerchantAddress: '0x5555555555555555555555555555555555555555',
+  paymentId: 'pay_ds_settlement',
+  settlementScheme: 'eip3009',
+  fundingTxHash: `0x${'ab'.repeat(32)}`,
+  deliveryReference: null,
+} satisfies Partial<AggregatedTransaction>
+
+const DS_SETTLEMENT_ROWS: Record<'verified' | 'checking' | 'untracked', AggregatedTransaction> = {
+  verified: {
+    ...DS_SETTLEMENT_BASE,
+    settlementTxHash: DS_SETTLEMENT_HASH,
+    settlementTracking: 'verified',
+    settlementProof: 'nonce',
+  },
+  // Still looking: inside the 24-hour sweep window with a derivable nonce.
+  checking: {
+    ...DS_SETTLEMENT_BASE,
+    hash: `0x${'cd'.repeat(32)}`,
+    fundingTxHash: `0x${'cd'.repeat(32)}`,
+    settlementTxHash: null,
+    settlementTracking: 'checking',
+    settlementProof: null,
+  },
+  // No hash and no source can produce one — outside the window.
+  untracked: {
+    ...DS_SETTLEMENT_BASE,
+    hash: `0x${'cd'.repeat(32)}`,
+    fundingTxHash: `0x${'cd'.repeat(32)}`,
+    settlementTxHash: null,
+    settlementTracking: 'untracked',
+    settlementProof: null,
+  },
+}
+
+type DsSettlementState = keyof typeof DS_SETTLEMENT_ROWS
+
 // ── List controls (#4110, epic #4108) ─────────────────────────────────────
 // Sample data for the ListToolbar showcase. Rows are filtered in memory, so
 // the count is the applied result exactly as a browser-filtered page wires it.
@@ -705,19 +858,13 @@ function dsListFacets(rows: typeof DS_LIST_AGENTS): ListFacet[] {
         { value: 'none', label: 'No budget' },
       ],
     },
-    // The meta slot (#4150): a non-active agent's status rides in `meta`,
-    // the way Transactions moves its agent status out of the label.
+    // The meta slot (#4150) and the inactive group (#4452), through the same
+    // builder the three product pages call (#4453): a non-active agent's
+    // status rides in `meta`, and the unusable ones collapse behind one row.
     {
       id: 'initiator',
       label: 'Initiator',
-      options: [
-        { value: 'user', label: 'User (manual)' },
-        ...rows.map((r) => ({
-          value: r.id,
-          label: r.name,
-          ...(r.status === 'active' ? {} : { meta: r.status[0].toUpperCase() + r.status.slice(1) }),
-        })),
-      ],
+      options: agentFacetOptions(rows, [{ value: 'user', label: 'User (manual)' }]),
     },
     // One account: a single possible value, so the facet is hidden.
     { id: 'account', label: 'Account', options: [{ value: 'acc-1', label: 'My account' }] },
@@ -813,13 +960,13 @@ function ListControlsExample({
   )
 }
 
-/** The phone actions slot's drawing (#4150): a bare ghost `sm` Export CSV, no sizing classes. */
+/** The phone actions slot's drawing (#4150): the shared export action — the real `ListExportAction`, demo state, not wired to a request here. */
 function ExportCsvDrawing() {
   const { toast } = useToast()
   return (
-    <Button variant="ghost" size="sm" onClick={() => toast.info('Exports the filtered list')}>
-      Export CSV
-    </Button>
+    <ListExportAction
+      state={{ exporting: false, exportable: true, onExport: () => toast.info('Exports the filtered list') }}
+    />
   )
 }
 
@@ -862,13 +1009,13 @@ function ServerListControlsExample() {
         ]}
         period={{ allowCustom: true }}
         actions={
-          <Button variant="ghost" size="sm" onClick={() => toast.info('Exports the filtered list')}>
-            Export CSV
-          </Button>
+          <ListExportAction
+            state={{ exporting: false, exportable: true, onExport: () => toast.info('Exports the filtered list') }}
+          />
         }
         count={{ shown: 12, total: 60 }}
-        // The page's totals join the list summary line, left of the count
-        // (#4196) — the account Activity tab's shape.
+        // The page's totals join the list summary line, right of the count
+        // (#4196, sides swapped #4473) — the account Activity tab's shape.
         summary={
           <>
             {/* The account Activity tab's markup (`TotalFigure`): short visible
@@ -888,8 +1035,47 @@ function ServerListControlsExample() {
 }
 
 /**
- * The paging rule (#4196): the card ends with its last row and "Show N more"
- * sits centred below it. Drawn with three rows standing in for a page of 25.
+ * The export action's states (#4328): the real components with demo state —
+ * nothing here is wired to a request. Idle, preparing (`aria-busy`),
+ * disabled, and the two notice tones the flow can report.
+ */
+function ExportActionStatesExample() {
+  const { toast } = useToast()
+  return (
+    <div className="flex flex-col items-start gap-2" data-testid="ds-list-export-states">
+      <div className="flex items-center gap-4">
+        <span className="w-24 shrink-0 text-xs text-[var(--v2-ink-3)]">Idle</span>
+        <ListExportAction state={{ exporting: false, exportable: true, onExport: () => toast.info('Exports the filtered list') }} />
+      </div>
+      <div className="flex items-center gap-4">
+        <span className="w-24 shrink-0 text-xs text-[var(--v2-ink-3)]">Preparing</span>
+        <ListExportAction state={{ exporting: true, exportable: true, onExport: () => undefined }} />
+      </div>
+      <div className="flex items-center gap-4">
+        <span className="w-24 shrink-0 text-xs text-[var(--v2-ink-3)]">Disabled</span>
+        <ListExportAction state={{ exporting: false, exportable: false, onExport: () => undefined }} />
+      </div>
+      <ListExportNotice
+        notice={{ tone: 'info', headline: 'Nothing to export.', detail: 'No transactions match these filters. Widen them and try again.' }}
+        className="w-full"
+      />
+      <ListExportNotice
+        notice={{ tone: 'info', headline: 'Nothing to export yet.', detail: 'Some account history failed to load, so there was nothing to write. Reload the page and try again.' }}
+        className="w-full"
+      />
+      <ListExportNotice
+        notice={{ tone: 'error', headline: 'Export too large.', detail: 'This export would contain 10,001 rows; the limit is 10,000. Narrow the filters — by account, agent, token, network or direction — and export again.' }}
+        className="w-full"
+      />
+    </div>
+  )
+}
+
+/**
+ * The paging rule (#4196, restyled 2026-10-27): the card ends with its footer
+ * row — a hairline, then a centred "Show N more" — while pages remain, and
+ * with its last row once every page is loaded. Drawn with three rows standing
+ * in for a page of 25.
  */
 function PagedListExample() {
   const total = 49
@@ -907,21 +1093,21 @@ function PagedListExample() {
             <Row key={name} title={name} subtitle="Has a budget" />
           ))}
         </div>
+        <ListShowMore
+          loaded={loaded}
+          total={total}
+          pageSize={25}
+          hasMore={loaded < total}
+          loading={loading}
+          onShowMore={() => {
+            setLoading(true)
+            timer.current = setTimeout(() => {
+              setLoaded((n) => Math.min(total, n + 25))
+              setLoading(false)
+            }, 600)
+          }}
+        />
       </Card>
-      <ListShowMore
-        loaded={loaded}
-        total={total}
-        pageSize={25}
-        hasMore={loaded < total}
-        loading={loading}
-        onShowMore={() => {
-          setLoading(true)
-          timer.current = setTimeout(() => {
-            setLoaded((n) => Math.min(total, n + 25))
-            setLoading(false)
-          }, 600)
-        }}
-      />
       <p className="mt-3 text-xs text-[var(--v2-ink-3)]">
         Loaded {loaded} of {total}.{' '}
         {loaded >= total ? (
@@ -972,6 +1158,53 @@ function FacetPrimitivesExample() {
         />
         <PeriodPicker value={period} onChange={setPeriod} allowAllTime={false} defaultValue={{ preset: '30d' }} align="left" />
       </div>
+    </div>
+  )
+}
+
+/**
+ * A collapsed option group (#4452, #4512): a long facet whose inactive tail
+ * hides behind one disclosure row. The row's text carries the group's state —
+ * "Show 4 inactive" collapsed, "Hide 4 inactive" open, "4 inactive" locked —
+ * and the locked variant (a group open because it holds the selected value)
+ * carries `aria-disabled`, never `disabled`. Ungrouped rows come first; the
+ * toggle is a `menuitem` with `aria-expanded`, so arrows, Home and End reach
+ * it, and it stays mounted when the group expands. Expanding scrolls the first
+ * revealed row into view.
+ */
+function GroupedFacetExample() {
+  const [agent, setAgent] = useState<string[]>([])
+  // The locked state (#4512): the selected value sits in the group, so the
+  // group is open on every render and its toggle names no action.
+  const [lockedAgent, setLockedAgent] = useState<string[]>(['a4'])
+  const options = [
+    { value: 'a1', label: 'Agent naming' },
+    { value: 'a2', label: 'Atlas' },
+    { value: 'a3', label: 'Demo agent', group: { id: 'inactive', label: 'inactive' } },
+    { value: 'a4', label: 'Lovable Dev', group: { id: 'inactive', label: 'inactive' } },
+    {
+      value: 'a5',
+      label: 'Lovable Dev preview deployment helper',
+      meta: 'Revoked',
+      group: { id: 'inactive', label: 'inactive' },
+    },
+    {
+      value: 'a6',
+      label: 'Quarterly procurement research agent',
+      meta: 'Paused',
+      group: { id: 'inactive', label: 'inactive' },
+    },
+  ]
+  return (
+    <div className="flex flex-wrap items-center gap-2" data-testid="ds-list-controls-grouped">
+      <FacetMenu facet={{ id: 'agent', label: 'Initiator', options }} value={agent} onChange={setAgent} />
+      {/* The locked render: the group holds the selection, so its toggle reads
+          "4 inactive" and is `aria-disabled` — reachable, but not an action. */}
+      <FacetMenu
+        facet={{ id: 'agentLocked', label: 'Initiator (locked)', options }}
+        value={lockedAgent}
+        onChange={setLockedAgent}
+      />
     </div>
   )
 }
@@ -1114,12 +1347,16 @@ export default function DesignSystemPage() {
     }
   }, [])
   const [panelOpen, setPanelOpen] = useState(false)
+  // #4320: which settlement state the REAL detail panel (below the primitive's
+  // slot demo) is mounted over — null while closed.
+  const [dsSettlement, setDsSettlement] = useState<DsSettlementState | null>(null)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [topModalOpen, setTopModalOpen] = useState(false)
   const [topModalTall, setTopModalTall] = useState(false)
   const [checkboxOn, setCheckboxOn] = useState(true)
   const [sampleAmount, setSampleAmount] = useState('')
   const [dsBudgetAmount, setDsBudgetAmount] = useState('')
+  const [dsBudgetEndDays, setDsBudgetEndDays] = useState<number | null>(90)
   const [segmented, setSegmented] = useState<'light' | 'dark' | 'system'>('system')
   // #4096: the Tabs showcase is a controlled primitive (the caller owns the
   // value), and a ledger row's click stands in for the account page opening
@@ -1688,7 +1925,7 @@ export default function DesignSystemPage() {
 
           <Card hover={false} className="p-5">
             <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Segmented control</h3>
-            <div className="mt-4 flex flex-wrap items-center gap-3">
+            <div data-testid="ds-segmented-control" className="mt-4 flex flex-wrap items-center gap-3">
               <SegmentedControl
                 ariaLabel="Theme"
                 value={segmented}
@@ -1719,11 +1956,13 @@ export default function DesignSystemPage() {
               <code className="rounded bg-[var(--v2-surface)] px-1">aria-checked</code> options, because the
               choices are mutually exclusive. The group carries <code className="rounded bg-[var(--v2-surface)] px-1">aria-label</code>{' '}
               so a screen reader names the question first; options are real buttons, so keyboard
-              works without extra wiring. The selected option uses the app&rsquo;s active idiom —
-              brand ink on brand-soft inside an inset brand outline, a boundary of at least 3:1 against
-              the track in both themes — and every option&rsquo;s hit area is 44px tall while it
-              paints 32px (#4056, the same mechanism as Button). Never hand-roll a second control
-              of this shape.
+              works without extra wiring. The group is an outlined, divided control — a 1px border
+              around content-width segments with hairline dividers, no tinted track. The selected
+              option is brand ink on brand-soft at semibold with no outline (5.62:1 light / 6.63:1
+              dark, text), so selection rides on the fill, the ink, the weight step and
+              <code className="rounded bg-[var(--v2-surface)] px-1">aria-checked</code>; every
+              option&rsquo;s hit area is 44px tall while it paints 32px (#4056, the same mechanism as
+              Button). Never hand-roll a second control of this shape.
             </p>
           </Card>
 
@@ -1779,7 +2018,7 @@ export default function DesignSystemPage() {
                 polarity="neutral"
                 delta={15.9}
                 deltaCaption="vs previous 30 days"
-                footnote="based on 5 payments · 1 awaiting settlement evidence is not counted"
+                footnote="based on 5 payments"
               />
               <StatTile
                 label="Refused"
@@ -1788,6 +2027,13 @@ export default function DesignSystemPage() {
                 delta={100}
                 deltaCaption="vs previous 30 days"
                 footnote="2 refused payments · across 3 attempts · $3.00 attempted"
+                hint={
+                  <Tooltip label="Price-cap refusals in your agent's runtime are not recorded." side="bottom">
+                    <span tabIndex={0} role="button" aria-label="What the refused count records">
+                      <Icon icon={Info} className="h-3.5 w-3.5" />
+                    </span>
+                  </Tooltip>
+                }
               />
               <StatTile
                 label="Budget used"
@@ -1899,6 +2145,44 @@ export default function DesignSystemPage() {
               field- or dialog-level failure. It owns the alert role and danger text; the surrounding
               field or content stack owns spacing. Use a dedicated panel or toast for larger failed states.
             </p>
+          </Card>
+
+          <Card hover={false} className="p-5" data-testid="ds-link-chips">
+            <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Account link pills</h3>
+            <p className="mt-3 text-[13px] leading-relaxed text-[var(--v2-ink-2)]">
+              <code className="rounded bg-[var(--v2-surface)] px-1">LinkChip</code> is an outline
+              navigation pill (#4472): a <code className="rounded bg-[var(--v2-surface)] px-1">rounded-full</code>{' '}
+              link with a trailing lucide arrow, used where a row points at an object. It is the one
+              pill that navigates — <code className="rounded bg-[var(--v2-surface)] px-1">LabelChip</code>{' '}
+              is a filled categorisation pill and never a control,{' '}
+              <code className="rounded bg-[var(--v2-surface)] px-1">FilterPill</code> and the
+              ListToolbar chips are filter toggles, and{' '}
+              <code className="rounded bg-[var(--v2-surface)] px-1">AccountingBadge</code> wraps a
+              filled <em>status</em> badge. It takes only{' '}
+              <code className="rounded bg-[var(--v2-surface)] px-1">href</code> and its label, so the
+              accessible name is exactly the visible text.
+            </p>
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <LinkChip href="/accounts/ds-1?tab=security">My account</LinkChip>
+              <LinkChip href="/accounts/ds-2?tab=security">Reserve (4024)</LinkChip>
+              <LinkChip href="/accounts/ds-3?tab=security">Operations (Base Sepolia)</LinkChip>
+            </div>
+            <p className="mt-4 text-[13px] leading-relaxed text-[var(--v2-ink-2)]">
+              In Settings, on the Security tab, the pills sit in a wrapping row
+              under the signer&rsquo;s label, and a passkey whose credential this device holds carries
+              a neutral <code className="rounded bg-[var(--v2-surface)] px-1">StatusBadge</code> beside
+              that label:
+            </p>
+            <div className="mt-3 rounded-md border border-[var(--v2-border)] px-4 py-3">
+              <p className="flex flex-wrap items-center gap-2 text-sm font-medium text-[var(--v2-ink)]">
+                <span>Passkey · added 9 October 2026</span>
+                <StatusBadge tone="neutral">This device</StatusBadge>
+              </p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <LinkChip href="/accounts/ds-1?tab=security">My account</LinkChip>
+                <LinkChip href="/accounts/ds-2?tab=security">Reserve (4024)</LinkChip>
+              </div>
+            </div>
           </Card>
         </div>
 
@@ -2147,7 +2431,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="Card.Header — the titled grey band"
-        description="Give a Card a titled header with Card.Header — never hand-roll the border-b + bg-surface band. Slots: `title` (heading level via `as`, default h3), optional `description`, optional right-aligned `actions`. Pass `children` instead for bespoke content (badges, balances). Padding: default (px-5 py-4), `spacious` (px-6 py-5) for page-level section cards, `none` when the caller owns padding. Parent Card needs `overflow-hidden` (or add `rounded-t-[10px]` via className)."
+        description="Give a Card a titled header with Card.Header — never hand-roll the border-b + bg-surface band. Slots: `title` (heading level via `as`, default h3), optional `description`, optional right-aligned `actions`. Pass `children` instead for bespoke content (badges, balances). Padding: default (px-5 py-4), `spacious` (px-6 py-5) for page-level section cards, `none` when the caller owns padding. The band's corners clip to the card radius when the parent Card sets `overflow-hidden` — but a Card that hosts a ⋯ menu must NOT clip (the menu is in flow, not portalled): leave the Card's overflow visible and add `rounded-t-[10px]` to the header instead (design-system.md § Cards)."
       >
         <Card hover={false} className="max-w-xl overflow-hidden">
           <Card.Header
@@ -2304,7 +2588,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="Dropdown menu (kebab)"
-        description="Overflow menu used for account-, agent-, or row-level settings that shouldn't compete with the page's primary CTAs. The trigger is usually a `⋮` icon button (10×10 / h-10 to match Button md). Items support a `tone='danger'` for destructive actions and a `<DropdownMenuSeparator />` between groups."
+        description="Overflow menu used for account-, agent-, or row-level settings that shouldn't compete with the page's primary CTAs. The trigger is usually a `⋮` icon button (10×10 / h-10 to match Button md). Items support a `tone='danger'` for destructive actions and a `<DropdownMenuSeparator />` between groups. The panel is in flow, not portalled — a container that hosts it must not clip (`overflow-hidden`/`clip`/`auto`/`scroll`, `truncate`, `line-clamp-*`); round its children instead (design-system.md § Cards)."
       >
         <Card hover={false} className="p-5">
           <div className="flex flex-wrap items-center gap-6">
@@ -2341,7 +2625,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="Select"
-        description="The styled native <select>. Same height, radius, border and focus ring as Input so mixed form rows align. Passes through all native select attributes."
+        description="The styled native <select>. Same height, radius, border and focus ring as Input so mixed form rows align, plus a lucide ChevronDown inside the right edge — the browser's own arrow is off (appearance-none) and pr-9 reserves the room, so never add padding or an arrow of your own. className lands on the wrapper, not the select. Passes through all native select attributes."
       >
         <Card hover={false} className="max-w-sm p-5">
           <div className="space-y-3">
@@ -2399,10 +2683,23 @@ export default function DesignSystemPage() {
 
       <Section
         title="SidePanel"
-        description="Right-hand detail drawer — used for transaction details. Title + optional subtitle header, Escape/backdrop dismiss, focus trapped while open. Reach for it when a Row click needs more detail than a modal question."
+        description="Right-hand detail drawer — used for transaction details. Title + optional subtitle header, Escape/backdrop dismiss, focus trapped while open. Reach for it when a Row click needs more detail than a modal question. The specimen below is the primitive with its two optional slots filled; the REAL shared drawer — the transaction routes' own TransactionDetailPanel — is mounted under it, one button per settlementTracking state of an eip3009 settlement row (#4320)."
       >
         <Card hover={false} className="p-5">
           <Button variant="ghost" onClick={() => setPanelOpen(true)}>Open side panel</Button>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            {/* Each opens the shared `TransactionDetailPanel` over a
+                production-shaped row in that `settlementTracking` state. */}
+            <Button variant="ghost" size="sm" onClick={() => setDsSettlement('verified')}>
+              Detail panel — Settled (verified)
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setDsSettlement('checking')}>
+              Detail panel — Checking
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setDsSettlement('untracked')}>
+              Detail panel — Not tracked
+            </Button>
+          </div>
         </Card>
       </Section>
 
@@ -2536,7 +2833,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="Technical details disclosure"
-        description="A markup pattern, not a component (#4264): a native <details>/<summary>, closed by default, for the technical disclosure surfaces (§ Vocabulary, voice, accessibility). The summary is a full-width row — label leading, a lucide ChevronDown trailing, rotating 180° on open via group-open:rotate-180, the same group-open rotation rule as § Arrows — and the default marker is suppressed. The content uses the panel's own detail rows (ink-3 dt label, ink-2 dd value), so the opened block reads as part of the panel. The hand-rolled <details> uses that predate the pattern (ErrorBoundary, SignersSection, OffersTable, connect-agent/*, the signers card's text-only Show address toggle) are not migrated; a new technical disclosure is written this way. Specimen content — the module address, the relayer hash, the token standard — is exactly the vocabulary this pattern exists to keep behind a deliberate fold."
+        description="A markup pattern, not a component (#4264): a native <details>/<summary>, closed by default, for the technical disclosure surfaces (§ Vocabulary, voice, accessibility). The summary is a full-width row — label leading, a lucide ChevronDown trailing, rotating 180° on open via group-open:rotate-180, the same group-open rotation rule as § Arrows — and the default marker is suppressed. The content uses the panel's own detail rows (ink-3 dt label, ink-2 dd value), so the opened block reads as part of the panel. The hand-rolled <details> uses that predate the pattern (ErrorBoundary, SignersSection, OffersTable, connect-agent/*, the signers card's text-only Show address toggle) are not migrated; a new technical disclosure is written this way. Specimen content — the module address, the relayer hash, the token standard — is exactly the vocabulary this pattern exists to keep behind a deliberate fold. The plain-language variant (#4478) keeps the same markup, the same closed-by-default state and the same ChevronDown rotation, but its label names the content in plain words (never a bare Show/Hide), its content is a text-sm text-[var(--v2-ink-2)] prose paragraph, and it may sit inside a settings row — for a long explanation a row's one-line description cannot hold. It does not license technical terms: the § Vocabulary exception covers technical disclosure surfaces only."
       >
         <div className="grid gap-5 lg:grid-cols-2">
           <Card hover={false} className="p-5">
@@ -2590,6 +2887,24 @@ export default function DesignSystemPage() {
                 </dl>
               </details>
             </div>
+          </Card>
+          <Card hover={false} className="p-5 lg:col-span-2">
+            <p className="mb-3 text-xs text-[var(--v2-ink-3)]">
+              Plain-language variant — the label names the content, the content is prose
+            </p>
+            <details className="group">
+              <summary className="flex w-full cursor-pointer select-none list-none items-center justify-between rounded text-sm text-[var(--v2-ink)] [&::-webkit-details-marker]:hidden">
+                What gets sent
+                <Icon
+                  icon={ChevronDown}
+                  className="h-4 w-4 flex-shrink-0 text-[var(--v2-ink-3)] transition-transform group-open:rotate-180"
+                />
+              </summary>
+              <p className="mt-3 border-t border-[var(--v2-border)] pt-3 text-sm text-[var(--v2-ink-2)]">
+                Haven sends your agent&apos;s name, its spending limit and the payments it made to your tax
+                software. It does not send your passkeys, your wallet keys or your balance.
+              </p>
+            </details>
           </Card>
         </div>
       </Section>
@@ -2814,6 +3129,50 @@ export default function DesignSystemPage() {
             </p>
           </div>
         </div>
+        {/* #4350: the budget end-date choice, absorbed here on its second
+            use (grant form, connect approval step, EditBudgetModal). The
+            presets are the owner decision on #4349; the day under the select
+            is the chosen term, computed through the sub-budget conversion. */}
+        <div className="mt-5 grid gap-5 lg:grid-cols-[1fr_1fr]">
+          <div className="space-y-2">
+            <p className="text-xs font-medium uppercase tracking-wide text-[var(--v2-ink-3)]">
+              BudgetEndDateSelect
+            </p>
+            <div className="rounded-[10px] border border-[var(--v2-border)] p-4">
+              {/* The frozen DS clock (#3806): a capture must always render the
+                  same day, never the machine's today. */}
+              <BudgetEndDateSelect
+                id="ds-budget-end"
+                days={dsBudgetEndDays}
+                onDaysChange={setDsBudgetEndDays}
+                nowSec={Math.floor(DS_BUDGET_NOW / 1000)}
+              />
+            </div>
+            <p className="text-xs text-[var(--v2-ink-3)]">
+              The grant form, the connect approval step and EditBudgetModal share this control. A
+              null day (the edit&apos;s &quot;Keep current end&quot;) is offered by the caller via
+              keepUntilSec.
+            </p>
+          </div>
+          <div className="space-y-2">
+            <p className="text-xs font-medium uppercase tracking-wide text-[var(--v2-ink-3)]">
+              BudgetEndDateSelect — edit variant
+            </p>
+            <div className="rounded-[10px] border border-[var(--v2-border)] p-4">
+              <BudgetEndDateSelect
+                id="ds-budget-end-edit"
+                days={null}
+                onDaysChange={() => undefined}
+                nowSec={Math.floor(DS_BUDGET_NOW / 1000)}
+                keepUntilSec={Math.floor(DS_BUDGET_NOW / 1000) + 90 * 86_400}
+              />
+            </div>
+            <p className="text-xs text-[var(--v2-ink-3)]">
+              The edit modal&apos;s default: keep the budget&apos;s current end — an untouched select
+              never moves the date an approval would set.
+            </p>
+          </div>
+        </div>
       </Section>
 
       <Section
@@ -2904,7 +3263,7 @@ export default function DesignSystemPage() {
       >
         <Card hover={false} className="max-w-xl p-5">
           <div className="space-y-3">
-            <p className="text-sm text-[var(--v2-ink-muted)]">
+            <p className="text-sm text-[var(--v2-ink-2)]">
               Send from this account with one approval. No network fee for you.
             </p>
             <div className="flex flex-col gap-2 sm:flex-row">
@@ -3173,7 +3532,7 @@ export default function DesignSystemPage() {
           <ListControlsState label="Loading — the count is a placeholder until the list answers.">
             <ListControlsExample testId="ds-list-controls-loading" loading />
           </ListControlsState>
-          <ListControlsState label="Phone — below 640px (forced here with layout=&quot;phone&quot;) the facets collapse into “Filters (n)”. The bottom sheet applies each tap live; its footer only closes and names the applied count. The actions slot keeps its own row after search and Filters, hugging its content (#4150) — Export CSV here is a drawing, not a wired export.">
+          <ListControlsState label="Phone — below 640px (forced here with layout=&quot;phone&quot;) the facets collapse into “Filters (n)”. The bottom sheet applies each tap live; its footer only closes and names the applied count. The actions slot keeps its own row after search and Filters, hugging its content (#4150) — the shared export action in demo state.">
             <div className="max-w-[375px]">
               <ListControlsExample
                 testId="ds-list-controls-phone"
@@ -3183,10 +3542,13 @@ export default function DesignSystemPage() {
               />
             </div>
           </ListControlsState>
-          <ListControlsState label="Server-filtered, with totals — the search commits once per 300ms pause (Enter at once, Escape clears), so one request per pause. Export CSV sits in the actions slot; Period offers a custom range. The page's totals (summary) sit on the left of the summary line, the count on the right.">
+          <ListControlsState label="Server-filtered, with totals — the search commits once per 300ms pause (Enter at once, Escape clears), so one request per pause. Export CSV sits in the actions slot; Period offers a custom range. The count sits on the left of the summary line, the page's totals (summary) on the right.">
             <ServerListControlsExample />
           </ListControlsState>
-          <ListControlsState label="Paging — a paged list's card ends with its last row; “Show N more” (N = what the next page adds, at most the page size) is a ghost button centred below the card, “Loading…” while it fetches, and nothing once every page is loaded.">
+          <ListControlsState label="The export action (#4328) — the actions slot's Export CSV is one shared piece (ListExportAction + useListExport): the page supplies the request, the enabled gate, the empty copy and the filename prefix; the action owns busy, fetch, download and notices. Drawn here in its states — idle, preparing (aria-busy), disabled, the two empty notices and a refusal. Demo state; nothing is wired to a request. Export on any list page goes through it.">
+            <ExportActionStatesExample />
+          </ListControlsState>
+          <ListControlsState label="Paging — a paged list's card ends with its footer row while pages remain: a hairline, then a centred “Show N more” (N = what the next page adds, at most the page size) in ink-2, “Loading…” while it fetches. Once every page is loaded the footer is gone and the card ends with its last row.">
             <PagedListExample />
           </ListControlsState>
           <ListControlsState label="FacetMenu and PeriodPicker on their own — a pill facet (toggle buttons, aria-pressed) for a short category list, a single-select menu whose page default is not All (untinted at its default; tinted once changed), and the Analytics period: presets only, no All time, untinted at its 30-day default. Menu rows draw RadioMark (menuitemradio) or CheckboxMark (menuitemcheckbox).">
@@ -3195,24 +3557,24 @@ export default function DesignSystemPage() {
           <ListControlsState label="No All row — a single-select facet whose every value is a real choice (allLabel: null): Agents' Archived, Hidden by default. The default is untinted and raises no chip; Shown is a filter, and removing its chip returns to Hidden. A string allLabel renames the All row instead.">
             <NoAllFacetExample />
           </ListControlsState>
+          <ListControlsState label="A collapsed option group (#4452, #4512) — a facet's long tail hides behind one disclosure row whose text carries the group's state: “Show 4 inactive” collapsed, “Hide 4 inactive” open, “4 inactive” locked. Ungrouped rows come first, then one toggle per group. The toggle is a menuitem with aria-expanded, so arrows, Home and End reach it, and it stays mounted when the group expands: focus is not lost and the next arrow continues from it. Expanding scrolls the first revealed row into view. A group holding the selected value is open on every render and cannot be collapsed: it reads as a state, carries aria-disabled (never disabled, which would drop it out of the arrow walk) and keeps its focus ring. The second menu is that locked render. The phone sheet draws the same split as a Tab-reachable disclosure button.">
+            <GroupedFacetExample />
+          </ListControlsState>
         </div>
       </Section>
 
       <Section
         title="Section with row actions in ⋯ (manage pattern)"
-        description="How a detail-page section manages a list (#3695; owner decision 4 on #4258, 2026-10-22, landed in the design system by #4259 and to be adopted by the agent page's Spending section in #4261). The heading and one-line description sit ABOVE the card. Each row's ⋯ menu holds that row's actions (Edit budget, then Stop budget… under a separator, danger tone) AND the section's add (Add budget) — no visible Edit, Stop or Add buttons compete with the rows, and the row's identity rides on the trigger's aria-label. Choosing Add opens the form in place. A section with no rows has no menu to hold the add, so it keeps a visible add (Set budget, a ghost button). This replaced the action-footer pattern, and then the visible row buttons it gave way to."
+        description="How a detail-page section manages a list (#3695; owner decision 4 on #4258, 2026-10-22, landed in the design system by #4259 and to be adopted by the agent page's Spending section in #4261). The heading sits ABOVE the card; a description is optional and appears only when it tells the reader something the heading and the card don't (#4476) — this specimen has none, and the heading carries the gap to the card. Each row's ⋯ menu holds that row's actions (Edit budget, then Stop budget… under a separator, danger tone) AND the section's add (Add budget) — no visible Edit, Stop or Add buttons compete with the rows, and the row's identity rides on the trigger's aria-label. Choosing Add opens the form in place. A section with no rows has no menu to hold the add, so it keeps a visible add (Set budget, a ghost button). This replaced the action-footer pattern, and then the visible row buttons it gave way to."
       >
         <div className="grid gap-5 lg:grid-cols-2">
           <div>
-            <h3 className="v2-text-h3 text-[var(--v2-ink)]">Spending</h3>
-            <p className="mt-0.5 mb-3 text-sm text-[var(--v2-ink-muted)]">
-              What this agent can spend each period. Budgets are enforced on-chain: a payment over budget is declined before any money moves.
-            </p>
+            <h3 className="v2-text-h3 mb-3 text-[var(--v2-ink)]">Spending</h3>
             <Card hover={false} className="p-5 md:p-6">
               <div className="flex items-start justify-between gap-3 py-3">
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium text-[var(--v2-ink)]">250 USDC per week</p>
-                  <p className="truncate text-xs text-[var(--v2-ink-muted)]">to any recipient</p>
+                  <p className="truncate text-xs text-[var(--v2-ink-3)]">to any recipient</p>
                   <div className="mt-2">
                     <BudgetMeter
                       usedPercent={25}
@@ -3241,15 +3603,150 @@ export default function DesignSystemPage() {
             </Card>
           </div>
           <div>
-            <h3 className="v2-text-h3 text-[var(--v2-ink)]">Spending</h3>
-            <p className="mt-0.5 mb-3 text-sm text-[var(--v2-ink-muted)]">
-              What this agent can spend each period. Budgets are enforced on-chain: a payment over budget is declined before any money moves.
-            </p>
+            <h3 className="v2-text-h3 mb-3 text-[var(--v2-ink)]">Spending</h3>
             <Card hover={false} className="p-5 md:p-6">
-              <p className="text-sm text-[var(--v2-ink-muted)]">No budget yet.</p>
+              <p className="text-sm text-[var(--v2-ink-2)]">No budget yet.</p>
               <Button size="sm" variant="ghost" className="mt-2">Set budget</Button>
             </Card>
           </div>
+        </div>
+      </Section>
+
+      <Section
+        title="Settings section (heading above the card)"
+        description="Settings pages follow the detail-page section rule (#4357, owner decision 2026-10-23): the shared `SettingsSection` (`components/ui/SettingsSection.tsx`) renders the sentence-case `v2-text-h3` heading ABOVE the card, with an optional description and any note under it; the card holds only the hairline-divided rows. The description is optional (#4476) — it appears only when it tells the reader something the heading and the card don't, and the heading keeps its gap to the card when neither a description nor a note is present (the Data specimen on the right). Unlike the Manage pattern above — which does NOT extend to settings — a settings row keeps its visible actions (Connect / Settings), not a ⋯ menu. Callers never hand-write the shape; the component's props (title, description, note, action, children) stay identical wherever the section is used — `action` is the optional trailing link added by #4475, shown in the next section. A row can also carry content under its label/action line through the optional `below` slot (#4478): a disclosure, an inline alert or a state note that belongs to the whole row. The slot is full-bleed, so a divided section can meet the card edge; content that should align with the row's text wraps itself in `px-6`. The Agent specimen shows the plain-language disclosure variant inside it."
+      >
+        <div className="grid gap-5 lg:grid-cols-2">
+          <SettingsSection
+            title="Accounting"
+            description="Connect your accounting provider."
+            note="Fortnox and Accounted are live today."
+          >
+            <SettingsRow
+              label="Fortnox"
+              detail="Connected to ACME AB."
+              action={<Button size="sm" variant="ghost">Settings</Button>}
+            />
+            <SettingsRow label="Visma eAccounting" detail="Coming soon." />
+          </SettingsSection>
+          <SettingsSection title="Data">
+            <SettingsRow label="Export data" detail="Download everything as CSV." />
+          </SettingsSection>
+          <SettingsSection
+            title="Agent"
+            description="The agent Settings tab's Tax declaration row (#4477) is the first consumer of the row's full-width slot."
+          >
+            <SettingsRow
+              label="Tax declaration"
+              detail="Required before your agent can pay for tax software."
+              action={<Button size="sm" variant="ghost">Edit</Button>}
+              below={
+                <div className="px-6 pb-4">
+                  <details className="group">
+                    <summary className="flex w-full cursor-pointer select-none list-none items-center justify-between rounded text-sm text-[var(--v2-ink)] [&::-webkit-details-marker]:hidden">
+                      What gets sent
+                      <Icon
+                        icon={ChevronDown}
+                        className="h-4 w-4 flex-shrink-0 text-[var(--v2-ink-3)] transition-transform group-open:rotate-180"
+                      />
+                    </summary>
+                    <p className="mt-3 border-t border-[var(--v2-border)] pt-3 text-sm text-[var(--v2-ink-2)]">
+                      Haven sends your agent&apos;s name, its spending limit and the payments it made to your
+                      tax software. It does not send your passkeys, your wallet keys or your balance.
+                    </p>
+                  </details>
+                </div>
+              }
+            />
+          </SettingsSection>
+        </div>
+      </Section>
+
+      <Section
+        title="Section heading with a trailing link"
+        description="The detail-page section rule's heading, with one optional trailing link (#4475, owner-approved 2026-10-27). The heading and the link share one baseline-aligned row: the heading leads, the link trails, and the link is a LINK — a Next Link styled as a text link (brand ink, underline on hover, the one focus ring) that navigates to the fuller surface. It is never a button, because it never acts on the section's content; a row action stays in the row, and a section-level action that changes state stays a Button in the card. Below sm — or whenever the heading fills the row — the link wraps onto its own line under the heading, left aligned, so a phone never squeezes the heading to make room. The heading keeps its gap to the card when there is no description (right), and the description supplies it when there is one (left). SettingsSection composes the same heading block, so a settings section gets the slot without a second shape; every existing settings caller passes no action and is unchanged."
+      >
+        <div data-testid="ds-section-heading-action" className="grid gap-5 lg:grid-cols-2">
+          {/* The detail-page shape: SectionHeading above a Card, no SettingsSection. */}
+          <div>
+            <SectionHeading
+              title="Signers"
+              description="Accounts that can approve payments from this Haven account."
+              action={
+                <Link
+                  href="/accounts"
+                  className="rounded-sm text-sm font-medium text-[var(--v2-brand)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
+                >
+                  View all
+                </Link>
+              }
+            />
+            <Card hover={false}>
+              <Card.Section divided>
+                <Row title="Operating account" subtitle="Approved 12 Oct 2026" />
+                <Row title="Treasury account" subtitle="Approved 3 Nov 2026" />
+              </Card.Section>
+            </Card>
+          </div>
+          {/* The settings shape: the same heading block through SettingsSection. */}
+          <SettingsSection
+            title="Passkeys and wallets"
+            action={
+              <Link
+                href="/settings"
+                className="rounded-sm text-sm font-medium text-[var(--v2-brand)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
+              >
+                View all
+              </Link>
+            }
+          >
+            <SettingsRow label="MacBook Pro" detail="Added 2 Sept 2026." />
+            <SettingsRow label="Ledger Nano X" detail="Added 14 Oct 2026." />
+          </SettingsSection>
+        </div>
+      </Section>
+
+      <Section
+        title="Detail list"
+        description="The divided label/value list (#4475): rows of label, value and optional trailing actions, hairline-divided, with the label column stacking over the value below sm. It is an EXTRACTION, not a new pattern — AgentRulesSummary already shipped exactly this dl (160px label track, 120px when compact, ink-3 label over an ink value with an optional ink-3 helper), and the account Security tab needs the same list with a trailing-actions column. AgentRulesSummary now renders through it, so the connect flow's approval step and the agent-rules specimen below are the same component. The trailing-actions column is the one addition: a third auto track at sm and up, right aligned, so a Remove or Edit sits on the value's line; below sm the row is one column and the actions stack under the value. The list owns no outer margin — the caller spaces it."
+      >
+        <div data-testid="ds-detail-list" className="grid gap-5 lg:grid-cols-2">
+          <Card hover={false} className="p-5">
+            <DetailList
+              items={[
+                {
+                  label: 'Account',
+                  value: 'Operating account',
+                  helper: 'The Haven account this passkey approves.',
+                  actions: (
+                    <Button size="sm" variant="ghost">
+                      Remove
+                    </Button>
+                  ),
+                },
+                {
+                  label: 'Added',
+                  value: '2 Sept 2026',
+                  actions: (
+                    <Button size="sm" variant="ghost">
+                      Remove
+                    </Button>
+                  ),
+                },
+                { label: 'Last used', value: 'Yesterday, 14:02' },
+              ]}
+            />
+          </Card>
+          <Card hover={false} className="p-4">
+            <DetailList
+              density="compact"
+              items={[
+                { label: 'Agent name', value: 'Research assistant', helper: 'This agent can request payments using its Haven credential.' },
+                { label: 'Spend from', value: 'Operating wallet' },
+                { label: 'Budget', value: '250 USDC per day' },
+              ]}
+            />
+          </Card>
         </div>
       </Section>
 
@@ -3519,7 +4016,7 @@ export default function DesignSystemPage() {
       <Section
         title="StackedBarChart"
         testId="ds-stacked-bar-chart"
-        description="Daily bars stacked by agent for a spend range, refusals as a marker cap above the bar (a refusal count has no money scale, so never a second axis). Colour reads the ordered --v2-series-* tokens by index, so an agent keeps one colour across the chart, the legend, and the swatch beside its spend figure in the agents table (SeriesSwatch, exported from this file — the table reads the same index the chart paints with; never beside a name, where a dot reads as a status light). A partial day — the window's cut first or last day — is striped with the series token at full strength (not faded: an opacity blend would read lighter on the light ground and darker on the dark one, and drop under 3:1). Below three days it renders nothing; the page shows tiles instead (#2948). Focus the figure and use the arrow keys for a day's detail: a two-line callout (day, refusal count and total, then the agents as wrapping swatch·name·amount chips, capped at 24rem so a token breakdown wraps inside its chip instead of stretching the callout — #3067, so it fits above or below almost any bar) anchored over the day, clamped inside the plot by its own measured width, and dropped below the described bar's top when the bar or its cap would otherwise hide under it — bottom just above the axis when the bar can hold it, else just above the legend over the date labels beneath it — whichever of the two hides the fewest neighbouring tops (#3076) — and not at all for a bar the drop would swallow (#3063 — the bar's top and its refusal cap stay visible; on this sample the days whose bars reach under the resting callout drop, the rest keep it). The callout takes no pointer: hover the next bar through it and the detail moves on; a tap pins a day, a second tap or Escape releases it (#3066). On a narrow screen the tooltip becomes a panel pinned below the plot."
+        description="Daily bars stacked by agent for a spend range. Since #4334 the axis is CONTINUOUS — the caller hands it every calendar day in the window, and a day with no spend is an empty slot (Thu 4 below), not a skipped column; refusals are the marker series, a small grey dash UNDER the day's slot (never a second axis, never a cap on the bar — a barless day's refusals would be undrawable as a cap), named 'Refused' in the legend. A tick label's fraction digits come from the tick STEP (#4334): whole steps print none, a sub-cent step prints 4, so '$0.0010 … $0.0040' reads instead of '$0, $0'. Since #4331 an agent's fill is its own avatar tint (seriesColorForAgent), and since #4428 that tint is STORED on the agent rather than hashed from its name: the chart, the legend, the tooltip and the agent's monogram all wear one colour, in every period and on every page, no matter how its spend ranks. The two agents below are the proof — 'Research agent' and 'Data-feed agent' both hash to tint 6, and wear different colours because each carries its own stored tint. Past a user's first six agents a tint repeats, and the legend and tooltip tell same-tint agents apart by name. A partial day — the window's cut first or last day — is striped with the series fill at full strength (not faded: an opacity blend would read lighter on the light ground and darker on the dark one, and drop under 3:1). Below three days it renders nothing; the page shows tiles instead (#2948). Focus the figure and use the arrow keys for a day's detail: a two-line callout (day, refusal count and total, then the agents as wrapping swatch·name·amount chips, capped at 24rem so a token breakdown wraps inside its chip instead of stretching the callout — #3067, so it fits above or below almost any bar) anchored over the day, clamped inside the plot by its own measured width, and dropped below the described bar's top when the bar would otherwise hide under it — bottom just above the axis when the bar can hold it, else just above the legend over the date labels beneath it — whichever of the two hides the fewest neighbouring tops or refusal marks (#3076) — and not at all for a bar the drop would swallow (#3063 — the bar's top stays visible; on this sample the days whose bars reach under the resting callout drop, the rest keep it). The callout takes no pointer: hover the next bar through it and the detail moves on; a tap pins a day, a second tap or Escape releases it (#3066). On a narrow screen the tooltip becomes a panel pinned below the plot."
       >
         <Card hover={false} className="p-5">
           <StackedBarChart
@@ -3527,7 +4024,7 @@ export default function DesignSystemPage() {
             currency="USD"
             ariaLabel={DS_CHART_SUMMARY}
             formatValue={dsMoney}
-            formatTick={(n) => formatAnalyticsTick(n, 'USD')}
+            formatTick={(n, step) => formatAnalyticsTick(n, step, 'USD')}
           />
           {/* The narrow treatment, as the page mounts it below `lg`: wider
               tick gutter, dot legend, tap-to-pin panel. */}
@@ -3537,20 +4034,25 @@ export default function DesignSystemPage() {
               currency="USD"
               ariaLabel={DS_CHART_SUMMARY}
               formatValue={dsMoney}
-              formatTick={(n) => formatAnalyticsTick(n, 'USD')}
+              formatTick={(n, step) => formatAnalyticsTick(n, step, 'USD')}
               narrow
             />
           </div>
-          {/* The swatch a table row carries to key itself to the chart above —
-              the same `seriesColor(index)` the segments and the legend read. */}
+          {/* One colour per agent (#4331, #4428): the monogram and the chart
+              swatch read the same STORED tint for the same agent —
+              `seriesColorForAgent` — so this list is the pairing the rule
+              promises, not a mock-up. The two names hash alike (both tint 6)
+              and still read as two colours. (The agents table no longer
+              carries a swatch; the monogram in its row IS the colour key.) */}
           <ul
             data-testid="ds-stacked-bar-swatch-list"
             className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-[var(--v2-ink-2)]"
           >
             {DS_CHART_DAYS[0]?.series.map((s) => (
               <li key={s.id} className="inline-flex items-center gap-1.5">
-                <SeriesSwatch seriesIndex={s.seriesIndex} />
-                <span>{s.name} — table row swatch</span>
+                <Monogram name={s.name} tint={DS_AGENT_TINTS[s.name]} size="xs" decorative />
+                <SeriesSwatch color={s.color} />
+                <span>{s.name} — one colour: monogram and chart fill</span>
               </li>
             ))}
           </ul>
@@ -3559,7 +4061,8 @@ export default function DesignSystemPage() {
 
       <Section
         title="AreaChart"
-        description="Balance over time (#2948): one line on the first series token with a faint area beneath it, and the range's spend annotated as the endpoint delta. The y-scale runs from the data with headroom rather than from zero, so a quiet range still reads as a range. The point dots are HTML spans positioned like the labels — a `<circle>` in the stretched svg would render as an oval wherever the box's aspect differs from the viewBox's (#3903). Below three points it renders nothing. Same keyboard treatment and narrow-screen panel as StackedBarChart, and the same pointer treatment too: the callout takes no pointer, a tap pins a day, and a second tap on the pinned day or Escape releases it (#3070)."
+        testId="ds-area-chart"
+        description="Balance over time (#2948): one line on the first series token with a faint area beneath it, and the range's net change annotated as the signed endpoint delta — 'Net change +$X' (#4333). Since #4480 the annotation's TONE follows the direction (owner decision 2026-10-27, reversing #4333's all-neutral choice): a rise wears the quiet success green the Amount incoming tone uses, a fall or an unchanged range stays neutral ink, and a fall is never red. The sign stays the carrier — colour only agrees with it, so nothing depends on seeing the colour. The first sample falls (neutral), the second rises (green). The y-scale runs from the data with headroom rather than from zero, so a quiet range still reads as a range. The point dots are HTML spans positioned like the labels — a `<circle>` in the stretched svg would render as an oval wherever the box's aspect differs from the viewBox's (#3903). Below three points it renders nothing. Same keyboard treatment and narrow-screen panel as StackedBarChart, and the same pointer treatment too: the callout takes no pointer, a tap pins a day, and a second tap on the pinned day or Escape releases it (#3070)."
       >
         <Card hover={false} className="p-5">
           <AreaChart
@@ -3569,6 +4072,19 @@ export default function DesignSystemPage() {
             formatValue={dsMoney}
           />
         </Card>
+        {/* The rising case (#4480): the same chart ending higher than it
+            started, so the success-green "Net change" is shown rather than
+            only described. Its own clip in the visual spec. */}
+        <div data-testid="ds-area-chart-rising">
+          <Card hover={false} className="p-5">
+            <AreaChart
+              points={DS_BALANCE_RISING_POINTS}
+              currency="USD"
+              ariaLabel={DS_BALANCE_RISING_SUMMARY}
+              formatValue={dsMoney}
+            />
+          </Card>
+        </div>
       </Section>
 
       <Section
@@ -3806,7 +4322,7 @@ export default function DesignSystemPage() {
       <Section
         title="Monogram"
         testId="ds-monogram"
-        description="Initials-in-a-circle avatar, or the entity's logo when it has one. Promoted to components/ui on its third copy (#3079): the /contacts Initials avatar, the marketplace card and the merchant header all drew the same circle. xs (32px) for the agent row's 2rem mark track (#4208), sm (36px) for lists and cards, md (48px) for a page header. `decorative` sets aria-hidden for a caller that prints the name beside the mark; without it the initials stay readable. Initials are taken by visible character, so a flag or a joined emoji never renders half of one; a name that starts with an emoji shows that emoji alone. Since #4066 the initials variant is tinted from the entity's NAME — one of six muted avatar tints picked by a pure hash of the trimmed name, so the same entity keeps the same colour everywhere and neighbouring rows are told apart at a glance. Assigned by name, never by index, and never from a status or --v2-series-* chart colour (the hexes are disjoint from both)."
+        description="Initials-in-a-circle avatar, or the entity's logo when it has one (#3079). Sizes: xxs (24px) for the overlapping agent avatar stack (#4480), xs (32px) for the agent row's 2rem mark track (#4208), sm (36px) for lists and cards, md (48px) for a page header; the initials stay text-xs below md. `decorative` sets aria-hidden for a caller that prints the name beside the mark; an emoji name shows that emoji alone. The initials wear one of six muted avatar tints, never a status colour and never by index: an AGENT passes its STORED tint (`tint`, 1..6 — `agents.avatar_tint`, unique among the user's first six agents, #4428), so names that hash alike still differ; a MERCHANT or CONTACT keeps the hash of its trimmed name. Since #4331 that tint is also the agent's chart fill."
       >
         <div className="flex flex-wrap items-center gap-4">
           {MONOGRAM_TINT_EXAMPLES.map((name) => (
@@ -3814,16 +4330,53 @@ export default function DesignSystemPage() {
           ))}
           <Monogram name="Haven Demo Store" size="md" />
         </div>
+        {/* The 24px step (#4480): the size the avatar stack's marks wear. */}
         <div className="mt-4 flex flex-wrap items-center gap-4">
-          <span className="flex items-center gap-3">
-            <Monogram name="Research agent" size="xs" decorative />
+          <Monogram name="Research agent" tint={DS_RESEARCH_TINT} size="xxs" decorative />
+          <Monogram name="Data-feed agent" tint={DS_DATAFEED_TINT} size="xxs" decorative />
+          <Monogram name="Haven Demo Store" size="xxs" decorative />
+          <span className="text-xs text-[var(--v2-ink-3)]">xxs — 24px, the stack&apos;s mark</span>
+        </div>
+        {/* The last two are the rule #4428 changed, shown rather than
+            described: 'Research agent' and 'Data-feed agent' hash to the SAME
+            tint (6 under djb2 mod 6) and wear different colours because each
+            agent carries its own stored tint. Before the epic they were
+            indistinguishable circles. */}
+        <div className="mt-4 flex flex-wrap items-center gap-4">
+          <span className="flex items-center gap-2">
+            <Monogram name="Research agent" tint={DS_RESEARCH_TINT} size="xs" decorative />
             <span className="v2-text-body text-[var(--v2-ink)]">Research agent</span>
           </span>
-          <span className="flex items-center gap-3">
+          <span className="flex items-center gap-2">
+            <Monogram name="Data-feed agent" tint={DS_DATAFEED_TINT} size="xs" decorative />
+            <span className="v2-text-body text-[var(--v2-ink)]">Data-feed agent</span>
+          </span>
+          <span className="flex items-center gap-2">
             <Monogram name="🤖 Shopping bot" size="xs" decorative />
             <span className="v2-text-body text-[var(--v2-ink)]">🤖 Shopping bot</span>
           </span>
         </div>
+      </Section>
+
+      <Section
+        title="Agent avatar stack"
+        testId="ds-agent-avatar-stack"
+        description="The overlapping agent monograms (#4480, owner-approved) — the 'Paid by' column's marks. Each mark is a 24px Monogram wearing the agent's STORED tint, the same colour its chart series fills with. The cap defaults to three; past it there is ONE +N overflow mark in neutral ink, never a tint. The marks overlap by a negative inline margin with a ring in the ground they sit on, so two marks stay separable in both themes: the supported ground is the default Card (--v2-bg). NOT supported: the anchor card and table header bands, where the ring would read as a light halo. Assistive tech: the stack is ONE focus stop, not one per mark — every mark is decorative, the stack carries one accessible name in the roster's words ('Research agent, Data-feed agent, Ops agent and 2 more'), and ONE shared Tooltip shows the same names on hover or focus. Zero agents renders nothing; the caller keeps its own text."
+      >
+        <Card hover={false} className="p-5">
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-center gap-3">
+              <AgentAvatarStack agents={DS_STACK_AGENTS} />
+              <span className="text-sm text-[var(--v2-ink-2)]">Three agents — the cap</span>
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <AgentAvatarStack agents={DS_STACK_AGENTS_OVERFLOW} />
+              <span className="text-sm text-[var(--v2-ink-2)]">
+                Five agents — three marks, +2 overflow
+              </span>
+            </div>
+          </div>
+        </Card>
       </Section>
 
       <Section
@@ -3961,7 +4514,7 @@ export default function DesignSystemPage() {
           account page will pass from the same overview. */}
       <Section
         title="Agent row (shared)"
-        description="The dashboard's agent row (#4096, epic #4093), lifted out of AgentsSection into haven/AgentRow: a name-hashed xs Monogram leading mark (#4208), the BudgetMeter with its caption, the labelled “Last paid” time on the caption line (#3989), the badge (agentBadge: Needs setup / Paused / N% used), and the received-sub-budget or “No budget” line (#3803). Its props are the dashboard wire shapes (DashboardAgent, DashboardBudgetRemaining) and the budget caption reads in the budget's own token, “1.20 of 3.00 USDC” (#4165: no rate, no “≈”) — the account page reads the SAME overview (it lists all agents) and passes its slices straight through, so both surfaces draw the identical row. AgentBudget is exported beside it for a caller that wants the budget block without the row chrome."
+        description="The dashboard's agent row (#4096, epic #4093), lifted out of AgentsSection into haven/AgentRow: a `Monogram` (`xs`, decorative) as the leading mark — an agent's mark wears its STORED tint (#4428), the same colour its chart series fills with, so two agents whose names hash alike are still told apart — the BudgetMeter with its caption, the labelled “Last paid” time on the caption line (#3989), the badge (agentBadge: Needs setup / Paused / N% used), and the received-sub-budget or “No budget” line (#3803). Its props are the dashboard wire shapes (DashboardAgent, DashboardBudgetRemaining) and the budget caption reads in the budget's own token, “1.20 of 3.00 USDC” (#4165: no rate, no “≈”) — the account page reads the SAME overview (it lists all agents) and passes its slices straight through, so both surfaces draw the identical row. AgentBudget is exported beside it for a caller that wants the budget block without the row chrome."
       >
         <div className="max-w-xl space-y-4">
           <Card hover={false} className="overflow-hidden">
@@ -4041,12 +4594,12 @@ export default function DesignSystemPage() {
       <Section
         title="PageHeader leading"
         testId="ds-pageheader-leading"
-        description="A mark before the title, centred on it (#4210, epic #4207). Agent detail passes the same name-hashed Monogram as the shared agent row (#4208). The title prints beside it, so the mark is passed `decorative`. Optional and additive — a PageHeader without `leading` renders exactly as before."
+        description="A mark before the title, centred on it (#4210, epic #4207). Agent detail passes the same `Monogram` as the shared agent row — the agent's STORED tint (#4428), so the header mark and the row mark are one colour. The title prints beside it, so the mark is passed `decorative`. Optional and additive — a PageHeader without `leading` renders exactly as before."
       >
         <div className="max-w-2xl">
           <PageHeader
             back={{ href: '/agents', label: 'Agents' }}
-            leading={<Monogram name="Research agent" size="md" decorative />}
+            leading={<Monogram name="Research agent" tint={DS_RESEARCH_TINT} size="md" decorative />}
             title="Research agent"
             meta="My account · Created 3 weeks ago · Active 2h ago"
             inlineActions
@@ -4212,6 +4765,16 @@ export default function DesignSystemPage() {
           disclosure.
         </p>
       </SidePanel>
+
+      {/* #4320: the REAL shared drawer, one mount per open — the transaction
+          routes mount exactly this component; the three buttons above feed it
+          a production-shaped row per `settlementTracking` state. Closed
+          renders null, so nothing here enters the resting page. */}
+      <TransactionDetailPanel
+        transaction={dsSettlement ? DS_SETTLEMENT_ROWS[dsSettlement] : null}
+        open={dsSettlement !== null}
+        onClose={() => setDsSettlement(null)}
+      />
 
       {confirmOpen ? (
         <ConfirmDialog

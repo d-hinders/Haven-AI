@@ -15,6 +15,32 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+## 0.12.0-alpha.0 — 2026-10-29
+
+- **The installed skill names the ended budget (#4352).** `needs_approval`
+  with no `allowances[]` rows and `budgetEndedAt` set means the budget ENDED
+  on that date — waiting will not help, ask the owner to set a new one; with
+  no rows and no `budgetEndedAt`, nobody approved a budget yet. An already
+  installed `SKILL.md` stays stale until reinstalled. No update needed.
+
+- **The installed skill tells a spent budget from no budget (#4355).**
+  `needs_approval` with no `allowances[]` rows means nobody approved a budget
+  yet; with rows, the budget is spent for this period and `budgetRefillsAt`
+  says when it refills. An already installed `SKILL.md` stays stale until
+  reinstalled. No update needed.
+
+- **The installed skill says which quote checks the budget (#4345).** Only
+  the hosted quote checks the agent's remaining budget; on the local runtime
+  (`@haven_ai/mcp`) the quote checks only a stated price, and the budget is
+  checked at pay time. An already installed `SKILL.md` stays stale until
+  reinstalled. No update needed.
+
+- **The installed skill names the agent folder by its wiring slug (#4396).**
+  It points a local agent at `~/.haven/agents/<slug>/agent.json` rather than a
+  folder named by the agent id, which only `--bare` or a `--replace` without
+  `--name` produces. An already installed `SKILL.md` stays stale until
+  reinstalled. No update needed.
+
 ## 0.11.0-alpha.0 — 2026-10-23
 
 ### Changed

@@ -14,6 +14,7 @@
 
 import pool from '../../db.js'
 import type { Executor } from '../transaction.js'
+import { escapeLikeContains } from '../sql-like.js'
 
 export type { Executor }
 
@@ -98,8 +99,8 @@ export const LIST_TOOL_INVOCATIONS_FOR_AGENT_FILTERED_SQL = `SELECT id, tool_nam
          AND ($2::text IS NULL OR result_status = $2)
          AND ($3::text IS NULL OR created_at >= $3::timestamptz)
          AND ($4::text IS NULL OR created_at < $4::timestamptz)
-         AND ($5::text IS NULL OR tool_name ILIKE '%' || $5 || '%'
-              OR error_code ILIKE '%' || $5 || '%')
+         AND ($5::text IS NULL OR tool_name ILIKE '%' || $5 || '%' ESCAPE '\\'
+              OR error_code ILIKE '%' || $5 || '%' ESCAPE '\\')
          AND ($6::uuid IS NULL OR payment_id = $6::uuid)
        ORDER BY created_at DESC
        LIMIT $7 OFFSET $8`
@@ -117,8 +118,8 @@ export const COUNT_TOOL_INVOCATIONS_FOR_AGENT_FILTERED_SQL = `SELECT COUNT(*) FI
        WHERE agent_id = $1
          AND ($3::text IS NULL OR created_at >= $3::timestamptz)
          AND ($4::text IS NULL OR created_at < $4::timestamptz)
-         AND ($5::text IS NULL OR tool_name ILIKE '%' || $5 || '%'
-              OR error_code ILIKE '%' || $5 || '%')
+         AND ($5::text IS NULL OR tool_name ILIKE '%' || $5 || '%' ESCAPE '\\'
+              OR error_code ILIKE '%' || $5 || '%' ESCAPE '\\')
          AND ($6::uuid IS NULL OR payment_id = $6::uuid)`
 
 /**
@@ -136,7 +137,7 @@ export interface AgentToolInvocationFilter {
 }
 
 function filteredInvocationArgs(agentId: string, filter: AgentToolInvocationFilter): unknown[] {
-  return [agentId, filter.status, filter.from, filter.to, filter.q, filter.paymentId]
+  return [agentId, filter.status, filter.from, filter.to, escapeLikeContains(filter.q), filter.paymentId]
 }
 
 /** The count statement has no WHERE status arm — $2 is the status FILTER for the page total. */

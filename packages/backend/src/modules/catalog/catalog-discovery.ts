@@ -20,6 +20,7 @@ import {
   CATALOG_DISCOVERY_PROBE_TIMEOUT_MS,
   guardedDiscoveryProbeFetch,
   probeCatalogEntry,
+  selectCatalogPaymentOption,
   type CatalogRow,
   type QueryableLike,
 } from './merchant-catalog.js'
@@ -133,18 +134,29 @@ interface BazaarPage {
 export interface DiscoveryResult {
   /** Resources returned by the Bazaar (after the maxItems cap). */
   scanned: number
-  /** On a supported network and not already in the catalog. */
+  /** Payable by the catalog's verdict on a supported network (#4389), and not already in the catalog. */
   candidates: number
   /** Probed OK and inserted. */
   ingested: number
   /** Already present in the catalog (any status — respects operator delisting). */
   skippedExisting: number
-  /** On an unsupported network (e.g. Solana) — can't pay, never probed. */
+  /**
+   * No option the index lists is payable on a supported network (#4389: the
+   * same verdict the probe applies, over every option) — e.g. Solana-only, a
+   * scheme Haven cannot settle, a non-USDC asset. Never probed.
+   */
   skippedUnsupported: number
   /** #3078: a resource whose URL host the merchant rule cannot read — never inserted. */
   skippedUnparseableHost: number
   /** A candidate that did not answer a parsable 402. */
   failedProbe: number
+  /**
+   * #4341: a candidate the run could not WRITE (the merchant upsert or the
+   * insert threw — e.g. an index entry whose name carries a NUL byte, which
+   * Postgres rejects in text). The run moves on to the later candidates
+   * instead of stopping at this one; the next run considers it again.
+   */
+  failedWrite: number
   /** #4300: a candidate the run budget did not reach; the next run considers it again. */
   deferred: number
 }
@@ -232,6 +244,7 @@ export async function ingestDiscoveredCatalog(
     skippedUnsupported: 0,
     skippedUnparseableHost: 0,
     failedProbe: 0,
+    failedWrite: 0,
     deferred: 0,
   }
 
@@ -250,8 +263,13 @@ export async function ingestDiscoveredCatalog(
     const resourceUrl = item.resource
     if (!resourceUrl) continue
 
-    const network = item.accepts?.[0]?.network
-    if (!network || !SUPPORTED_NETWORKS.has(network)) {
+    // #4389: the same payability verdict the probe applies, over every
+    // option the index lists. Before, only `accepts[0].network` was read, so
+    // a payable Base option listed second was never probed and an
+    // unsettleable first option on Base was. The live 402 is judged again by
+    // the probe below; this only decides whether to spend a probe on it.
+    const indexed = selectCatalogPaymentOption({ accepts: item.accepts })
+    if (!indexed || !SUPPORTED_NETWORKS.has(indexed.network)) {
       result.skippedUnsupported += 1
       continue
     }
@@ -292,33 +310,47 @@ export async function ingestDiscoveredCatalog(
       result.skippedUnparseableHost += 1
       continue
     }
-    const merchant = await merchants.findOrCreateMerchantByHost(host, { name, description, category }, db)
+    // #4341: a candidate whose write fails (the reviewer's repro: an index
+    // entry whose name carries a NUL byte — Postgres rejects 0x00 in text)
+    // must not stop the run from reaching later candidates. Before, the
+    // throw escaped `ingestDiscoveredCatalog` and every run after it died at
+    // the same candidate. Count it and go on; the next run considers it
+    // again.
+    try {
+      const merchant = await merchants.findOrCreateMerchantByHost(host, { name, description, category }, db)
 
-    await db.query(
-      // #4245: `source = 'bazaar'` — the row's name and description are the
-      // seller's own words, and the listing must not present them as an
-      // operator's. Every other writer gets the column's `'operator'` default.
-      `INSERT INTO merchant_catalog
-         (name, description, category, resource_url, rail, protocol, tool_name,
-          price_display, price_atomic, asset, network, asset_transfer_methods, status, verified_at, merchant_id,
-          pay_to, source)
-       VALUES ($1, $2, $3, $4, 'x402', 'http', NULL, $5, $6, $7, $8, $9, 'active', now(), $10, $11, 'bazaar')
-       ON CONFLICT DO NOTHING`,
-      [
-        name,
-        description,
-        category,
-        resourceUrl,
-        probe.priceDisplay ?? null,
-        probe.priceAtomic ?? null,
-        probe.asset ?? null,
-        probe.network ?? network,
-        probe.assetTransferMethods?.join(',') ?? null,
-        merchant.id,
-        // #3331: the same probe's payTo the hourly refresh records.
-        probe.payTo ?? null,
-      ],
-    )
+      await db.query(
+        // #4245: `source = 'bazaar'` — the row's name and description are the
+        // seller's own words, and the listing must not present them as an
+        // operator's. Every other writer gets the column's `'operator'` default.
+        `INSERT INTO merchant_catalog
+           (name, description, category, resource_url, rail, protocol, tool_name,
+            price_display, price_atomic, asset, network, asset_transfer_methods, status, verified_at, merchant_id,
+            pay_to, source)
+         VALUES ($1, $2, $3, $4, 'x402', 'http', NULL, $5, $6, $7, $8, $9, 'active', now(), $10, $11, 'bazaar')
+         ON CONFLICT DO NOTHING`,
+        [
+          name,
+          description,
+          category,
+          resourceUrl,
+          probe.priceDisplay ?? null,
+          probe.priceAtomic ?? null,
+          probe.asset ?? null,
+          probe.network ?? indexed.network,
+          probe.assetTransferMethods?.join(',') ?? null,
+          merchant.id,
+          // #3331: the same probe's payTo the hourly refresh records.
+          probe.payTo ?? null,
+        ],
+      )
+    } catch (err) {
+      console.warn(
+        `[catalog] discovery could not record ${resourceUrl}; skipping it for this run: ${err instanceof Error ? err.message : String(err)}`,
+      )
+      result.failedWrite += 1
+      continue
+    }
     known.add(resourceUrl)
     result.ingested += 1
   }

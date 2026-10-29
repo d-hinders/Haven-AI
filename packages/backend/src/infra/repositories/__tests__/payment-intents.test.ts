@@ -20,6 +20,7 @@ import {
   expireOverdueIntent,
   expireOverdueIntentsForAgent,
   expirePendingIntentReturningStatus,
+  FAIL_MACHINE_INTENT_SQL,
   failSubmittedIntent,
   findIntentForAgent,
   findMachineIntentByKeyOrChallenge,
@@ -229,12 +230,44 @@ describeDb('payment-intents repository (#1223)', () => {
     const intent = await insertDelegationIntent(delegationInput(agentId, userId))
     await failSubmittedIntent('too early', intent.id, agentId)
     expect(await getIntentStatus(intent.id, agentId)).toBe('pending_signature')
+    // The CAS miss writes nothing — no failure, no stamp (#4378).
+    const unclaimed = await db.query<{ failed_at: Date | null }>(
+      `SELECT failed_at FROM payment_intents WHERE id = $1`, [intent.id])
+    expect(unclaimed.rows[0].failed_at).toBeNull()
 
     await claimIntentForSubmission('0xsig', intent.id, agentId)
     await failSubmittedIntent('execution reverted', intent.id, agentId)
     const row = await findIntentForAgent(intent.id, agentId)
     expect(row!.status).toBe('failed')
     expect(row!.error_message).toBe('execution reverted')
+    // #4378: the failure time is stamped by the same UPDATE that flips the
+    // status — this is what a late failure re-arms the unattributed
+    // "A payment failed" item on.
+    const stamped = await db.query<{ failed_at: Date | null }>(
+      `SELECT failed_at FROM payment_intents WHERE id = $1`, [intent.id])
+    expect(stamped.rows[0].failed_at).not.toBeNull()
+    expect(new Date(stamped.rows[0].failed_at as unknown as string).getTime())
+      .toBeGreaterThan(Date.now() - 60_000)
+  })
+
+  it('#4378: FAIL_MACHINE_INTENT_SQL stamps failed_at on the guarded row only', async () => {
+    const { agentId, userId } = await seedAgent()
+    const intent = await insertMachineIntent(machineInput({ agentId, userId }))
+
+    // Guard miss — wrong rail: no failure, no stamp.
+    await db.query(FAIL_MACHINE_INTENT_SQL, ['challenge failed', intent!.id, agentId, 'x402'])
+    expect(await db.query<{ failed_at: Date | null }>(
+      `SELECT status, failed_at FROM payment_intents WHERE id = $1`, [intent!.id],
+    ).then((r) => r.rows[0])).toEqual({ status: 'pending_signature', failed_at: null })
+
+    // Guard hit — the row's own rail: failure + stamp in the same UPDATE.
+    await db.query(FAIL_MACHINE_INTENT_SQL, ['challenge failed', intent!.id, agentId, 'mpp'])
+    const row = await db.query<{ status: string; failed_at: Date | null }>(
+      `SELECT status, failed_at FROM payment_intents WHERE id = $1`, [intent!.id])
+    expect(row.rows[0].status).toBe('failed')
+    expect(row.rows[0].failed_at).not.toBeNull()
+    expect(new Date(row.rows[0].failed_at as unknown as string).getTime())
+      .toBeGreaterThan(Date.now() - 60_000)
   })
 
   // ── Expiry semantics at the boundary ───────────────────────────────────

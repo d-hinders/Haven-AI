@@ -740,7 +740,7 @@ describeDb('analytics-overview repository (#2946)', () => {
 
       const totalsExplain = await db.query(
         `EXPLAIN ${TOTALS_SPEND_SQL}`,
-        [userId, range.from, range.to, rangeOfDays(180).from],
+        [userId, range.from, range.to, rangeOfDays(180).from, null],
       )
       const perAgentExplain = await db.query(
         `EXPLAIN ${PER_AGENT_SPEND_SQL}`,
@@ -748,7 +748,7 @@ describeDb('analytics-overview repository (#2946)', () => {
       )
       const byDayExplain = await db.query(
         `EXPLAIN ${BY_DAY_SPEND_SQL}`,
-        [userId, 'UTC', range.from, range.to],
+        [userId, 'UTC', range.from, range.to, null],
       )
       // EXPLAIN succeeding on the verbatim exported constant with these
       // params IS the proof that this is a single PREPAREable statement —
@@ -924,6 +924,7 @@ describeDb('analytics-overview repository (#2946)', () => {
     function view(agentId: string, ratio: number): DelegationBudgetView {
       return {
         agent_id: agentId,
+        chain_id: 84532,
         token: 'USDC',
         recipient: null,
         used_atomic: '0',
@@ -1282,7 +1283,7 @@ describeDb('analytics-overview repository (#2946)', () => {
       }
 
       calls = 0
-      await sumTotalsSpendForUser(userId, range, rangeOfDays(180), countingDb)
+      await sumTotalsSpendForUser(userId, range, rangeOfDays(180), null, countingDb)
       expect(calls).toBe(1)
 
       calls = 0
@@ -1290,7 +1291,7 @@ describeDb('analytics-overview repository (#2946)', () => {
       expect(calls).toBe(1)
 
       calls = 0
-      await listByDaySpendForUser(userId, 'UTC', range, countingDb)
+      await listByDaySpendForUser(userId, 'UTC', range, null, countingDb)
       expect(calls).toBe(1)
 
       calls = 0
@@ -1298,11 +1299,11 @@ describeDb('analytics-overview repository (#2946)', () => {
       expect(calls).toBe(1)
 
       calls = 0
-      await listTopMerchantsForUser(userId, range, countingDb)
+      await listTopMerchantsForUser(userId, range, null, countingDb)
       expect(calls).toBe(1)
 
       calls = 0
-      await sumFeesTotalsForUser(userId, range, rangeOfDays(180), countingDb)
+      await sumFeesTotalsForUser(userId, range, rangeOfDays(180), null, countingDb)
       expect(calls).toBe(1)
 
       calls = 0

@@ -189,7 +189,7 @@ You are an AI agent whose user has no Haven account yet, or has one but has not 
 
 ## What Haven is, in three sentences
 
-Your user gives you a **budget on their own account** — not their wallet, and not a key to their funds. The budget is a delegation they sign, enforced on-chain: a payment over it, to the wrong recipient, or past its expiry is refused at execution time, not by a dashboard promise. Haven constructs and relays the payments; you get an agent credential and a signing key made on your machine, and your user can revoke the budget without you and without Haven.
+Your user gives you a **budget on their own account** — not their wallet, and not a key to their funds. The budget is a delegation they sign, enforced on-chain: a payment over it, to the wrong recipient, or past its expiry is refused at execution time, not by a dashboard promise. The budget also ENDS on a date your user chooses — 30, 90 (default), 180 or 365 days out — and that day is enforced on-chain too. When the budget ends, your authority to pay ends with it; ask your user to renew it (a new approval on the agent's page, or a new \`budget grant\`). Haven constructs and relays the payments; you get an agent credential and a signing key made on your machine, and your user can revoke the budget without you and without Haven.
 
 ## The sequence
 
@@ -262,7 +262,7 @@ If the approval wait times out, nothing is lost — your agent is registered and
 Call \`haven_get_agent\`, one of the Haven MCP tools the connector wires into your runtime in step 4. It returns identity plus \`spend_authority_readiness\`:
 
 - \`ready\` — a budget is live: you have the authority to pay. It does not say the account holds funds — the \`allowances[]\` rows carry \`funds_cover_remaining\`, and \`false\` there is a heads-up to mention to your user, not a refusal.
-- \`needs_approval\` — the connector finished, nobody approved yet. Ask your user again, in their Haven tab; there is no queue to wait in.
+- \`needs_approval\` — no budget can pay. \`allowances[]\` empty with \`budgetEndedAt\` set: your budget ENDED on that date; waiting will not help — ask your user to set a new one in their Haven tab. \`allowances[]\` empty with \`budgetEndedAt\` null: nobody approved one yet; ask your user again — there is no queue. Rows, all spent: it refills at \`budgetRefillsAt\`; tell your user, then wait or ask them to raise it (\`null\`: it ends first; ask them to renew it).
 - \`revoked\` — the credential is not active; ask your user to create a new agent.
 
 \`ready\` covers hosted identity and the budget only, not your local signer. Check that with \`npx -y @haven_ai/connect@<channel> --doctor\`, the same tag your prompt named — a separate command, so the command-modification rule does not bind it.
@@ -368,7 +368,7 @@ Then:
 1. Run \`<packages.cli.one_liner> login\`. That command is the manifest's \`packages.cli.one_liner\` (\`/.well-known/haven.json\`) — run it as given: \`packages.cli.channel\` serves the full spec. It prints a link and a code and does not need my password — it must never ask for it. Give me the link straight away and wait for me to approve it in my browser.
 2. Once I have approved, run \`haven agents connect --name <a name you choose> --budget <amount> --token USDC --period <minutes>\` with the budget I tell you. If I have not given you one, ask me before running it. Add \`--run\` to complete the connection in the same step.
 3. ${AGENT_APPROVAL_RELAY_JSON_SENTENCE}
-4. Once I have approved the budget, verify with the \`haven_get_agent\` tool: \`ready\` means I have given you the authority to pay — it does not confirm the account holds funds, so if its allowances rows carry \`funds_cover_remaining: false\`, tell me and still try the payment; \`needs_approval\` means my approval has not landed yet.
+4. Once I have approved the budget, verify with the \`haven_get_agent\` tool: \`ready\` means I have given you the authority to pay — it does not confirm the account holds funds, so if its allowances rows carry \`funds_cover_remaining: false\`, tell me and still try the payment; \`needs_approval\` with no allowances rows and \`budgetEndedAt\` set means my budget ended on that date — tell me, and I will set a new one; with no rows and no \`budgetEndedAt\`, my approval has not landed yet; with rows, the budget is spent — it refills at \`budgetRefillsAt\` (\`null\`: it ends first), so tell me, and I can raise or renew it.
 
 Two things only I can do: approving that budget with my passkey, and funding the account with USDC — no ETH, Haven sponsors the gas. Tell me if either is missing rather than working around it.
 

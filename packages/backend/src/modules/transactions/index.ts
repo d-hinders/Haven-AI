@@ -25,11 +25,10 @@ export type {
 } from './types.js'
 
 export { buildTransactionCacheKey } from './cache-key.js'
+// #4327: the export row cap and the dated filename moved to `domain/csv.ts`
+// with the rest of the CSV-export response; only the projection stays here.
 export {
-  EXPORT_ROW_CAP,
   TRANSACTION_CSV_COLUMNS,
-  exceedsExportRowCap,
-  buildTransactionCsvFilename,
   transactionCsvRow,
   transactionsToCsv,
   type TransactionCsvColumn,
@@ -110,3 +109,14 @@ export {
   type TransactionFilterResult,
   type TransactionFilterTokenOption,
 } from './orchestration.js'
+
+// The counterparty-name module (#4332): the analytics route names merchants
+// through the module's public surface, per the module-boundary rule —
+// imports of `modules/` go through `index.ts`, never a private file.
+export {
+  ownAccountNameForAddress,
+  resolveCounterpartyName,
+  type CounterpartyKind,
+  type CounterpartyName,
+  type CounterpartyNameInputs,
+} from './counterparty-name.js'

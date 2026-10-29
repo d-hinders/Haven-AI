@@ -15,6 +15,115 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+## 0.12.0-alpha.0 — 2026-10-29
+
+### Added
+
+- **`haven_list_receipts` rows carry the delivery verdict, the settlement
+  scheme and the budget hash (#4469).** `HavenPaymentReceipt` gains six
+  optional fields the receipts wire already carried and the SDK mapper used to
+  drop: `settlementScheme` (`string | null` — raw text on the wire, no enum, so
+  an unknown value is kept rather than erased), `budgetDelegationHash`
+  (`string | null`), `deliveryQuality` (`'ok' | 'unusable' | 'partial' | null`),
+  `deliveryNote`, `deliveryReportedAt` and `deliveryReference`. Each is set
+  only when the backend sends the key, so a row from an older backend maps
+  without it — absent stays absent, and a stated `null` stays `null`. Additive
+  on a type that is only returned, so existing consumers keep compiling. No
+  update needed.
+
+- **`HavenApiError.failureCause` says why, where the status cannot (#4470).**
+  The transport's own timeout (408) and status-0 errors — `fetch` threw, or
+  the body was not JSON — carry `{ kind: 'no_answer', method }`. Nine sites
+  that refused an answer they cannot use (no delegate address, no `sign_hash`,
+  no expected-context binding, no `payment_id`, not an erc7710 settlement
+  child, settle returned no `payment_header`, and the three retry-receipt and
+  funding-leg `sign_hash` guards) and two payment-state throws carry
+  `{ kind: 'deterministic' }`, through the new `HavenApiError.deterministic()`.
+  `name`, `code` and `statusCode` are unchanged, so existing `instanceof` and
+  status checks behave as before. The type is exported as
+  `HavenApiFailureCause`.
+- **The funding wait's two outcomes are typed (#4470).** ethers 6's
+  `waitForTransaction` rejects on its timeout instead of resolving null, so
+  that rejection escaped as a plain `Error`. It is now
+  `FundingConfirmationUnknownError` (504: funding may have moved), and a
+  reverted funding transaction is `FundingRevertedError` (502). Both extend
+  `HavenApiError`.
+
+- **A warning code for a quote on an ENDED budget (#4458).** In this package,
+  `AgentPaymentWarningCode` gains `QUOTE_BUDGET_ENDED`. The hosted server
+  (`@haven_ai/mcp-server`, deployed rather than published) is what emits it, as
+  follows. When the quote-time
+  budget pre-check answers the typed 403 `delegation_expired` — the agent's
+  only budget for the token has ENDED — the quote now reports
+  `budget_check.sufficient: false` (so `safe_to_continue` is false on
+  `haven_quote_x402`) with a warning naming the end date and the owner's next
+  step, instead of failing open as an unavailable check. The catalog prepare
+  preflight answers the same condition as `sufficient: false` with the same
+  words, and the shared error normaliser maps it to `DELEGATION_EXPIRED` with
+  the owner-sets-a-new-budget reason rather than the over-budget "wait for the
+  period to reset" one. Additive: an older backend never emits the code, and
+  the on-chain policy remains the actual gate. No update needed.
+
+- **`getAgentSummary()` names the ENDED budget, not just the spent one (#4352).**
+  The allowances read gains `budget_ended_at` (the latest ended budget's
+  expiry, ISO 8601; `null` when no budget has ended or on an older backend)
+  and the summary gains `budgetEndedAt`: set only when readiness is
+  `needs_approval` because the agent's only budget(s) have ENDED — waiting
+  will not help, the guidance says to ask the owner to set a new one. The
+  readiness values are unchanged (`ready` / `needs_approval` / `revoked`), so
+  nothing that switches over them breaks. The runbook, skill text and
+  `haven_get_agent` description now give `needs_approval` its three causes.
+  No update needed.
+
+- **`getAgentSummary()` tells a spent budget from no budget (#4355).** Each
+  allowance row gains `nextRefillAt` (ISO time of the next period refill;
+  `null` when the budget ends before it would refill, or on an older backend),
+  and the summary gains `budgetRefillsAt`: set only when readiness is
+  `needs_approval` because every live budget is spent for its period. The
+  readiness values are unchanged (`ready` / `needs_approval` / `revoked`), so
+  nothing that switches over them breaks. The runbook, skill text and
+  `haven_get_agent` description now give `needs_approval` its two causes
+  instead of "nobody approved yet" for both. No update needed.
+
+### Changed
+
+- **A settlement report that got no answer is `retryable`, not `refused`
+  (#4470).** `reportSettlementEvidence` (and the local retry's settlement
+  report) classed a timeout, a `fetch` failure, a non-JSON body and any 408 as
+  `refused` — which the hosted tools word as "the hash does not match this
+  payment on-chain", a claim nothing checked. They are now
+  `{ outcome: 'retryable', statusCode }`. Only the backend's own 503 is
+  re-attempted inside the call; a non-answer is returned at once.
+
+- **The skill text says which quote checks the budget (#4345).** It used to
+  tell every agent that the quote checks its remaining budget; only the hosted
+  `haven_quote_x402` does. The local `@haven_ai/mcp` quote checks only a price
+  the agent states (`expected_amount`), and the budget is checked when the
+  agent pays. Wording only; no API change. No update needed.
+
+- **The agent runbook says a budget ends on a date (#4350).**
+  `HAVEN_AGENT_RUNBOOK_MD` now tells the agent that its budget ends on a date the
+  user chose (30, 90 by default, 180 or 365 days out), that the end is enforced
+  on-chain, and that the agent should ask its user to renew the budget once it
+  ends. Wording only; no update needed.
+
+- **The skill text names the agent folder by its wiring slug (#4396).** The
+  local-runtime paragraph of `HAVEN_SKILL_MD` now names
+  `~/.haven/agents/<slug>/agent.json`, where `<slug>` is the wiring name of the
+  `haven-<slug>` pair. Only a `--bare` run, or a `--replace` without `--name`,
+  names the folder by the agent id. Wording only; no update needed.
+
+- **Type-level changes for code that builds SDK objects by hand (#4352,
+  #4355, #4458). BREAKING only for TypeScript code that constructs these types
+  itself or switches exhaustively over the code union.** New required
+  fields: `nextRefillAt` on `HavenAllowance` and `HavenAgentAllowanceSummary`;
+  `budgetEndedAt` on `HavenAllowanceSummary` and `HavenAgentSummary`; and
+  `budgetRefillsAt` on `HavenAgentSummary`. Also,
+  `AgentPaymentWarningCode` gains `QUOTE_BUDGET_ENDED`. Code that only reads
+  them is unaffected. A hand-built object (a test mock) adds the fields as
+  `null`; an exhaustive `switch` adds the case. No update needed to keep
+  paying.
+
 ## 0.11.0-alpha.0 — 2026-10-23
 
 ### Changed

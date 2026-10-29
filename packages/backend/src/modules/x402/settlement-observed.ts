@@ -41,22 +41,14 @@ import {
 } from '../../infra/repositories/x402-authorizations.js'
 import { verifySettlementTransferTx } from '../../infra/chain/settlement-transfer-verifier.js'
 import { getFiatValuesForTokenAmount } from '../../infra/fiat-values.js'
+import { emitFirstPaymentSettled } from '../../infra/repositories/onboarding-funnel.js'
 import { MAX_SETTLEMENT_WINDOW_SECONDS } from './x402-delegation.js'
+import { CLOCK_SKEW_SECONDS } from '../../domain/x402-settlement-timing.js'
 
-/**
- * Clock-skew allowance between Postgres' `created_at` and the chain's block
- * timestamps. Generous on purpose: this bound exists to EXCLUDE settlements
- * from unrelated windows, so widening it costs a little precision, while
- * narrowing it could reject a genuine payment — which on this path means
- * silently dropping it out of the user's bookkeeping.
- *
- * #3420: exported — the agent-facing status projection
- * (`agent-payment-status.ts`) derives its terminal cutover from THIS constant
- * rather than restating 120: the instant past which no verification is
- * possible is the verifier's own `notAfterSec`, and a second copy of the
- * number would let the two disagree silently.
- */
-export const CLOCK_SKEW_SECONDS = 120
+// The clock-skew allowance between Postgres' `created_at` and the chain's
+// block timestamps is defined in `domain/x402-settlement-timing.ts` (#4379),
+// where `agent-payment-status.ts` reads it too, and re-exported here unchanged.
+export { CLOCK_SKEW_SECONDS }
 
 /**
  * How far apart two intents' `created_at` values can be and still have
@@ -305,6 +297,13 @@ export async function observeErc7710Settlement(
         'means this settlement cannot be attributed unambiguously',
     }
   }
+
+  // #4354: the funnel's last step. Haven submits nothing on erc7710, so this
+  // confirm is the only place the payment settles; the sign route's emission
+  // never runs for it. Fire-and-forget on the pool, after the CAS won. Both
+  // callers (the evidence seam and the sweeper) pass no transaction, so the
+  // read inside the helper sees the committed `confirmed` row.
+  emitFirstPaymentSettled(intent.id)
 
   return { outcome: 'confirmed', delegationBound: verification.delegationBound }
 }

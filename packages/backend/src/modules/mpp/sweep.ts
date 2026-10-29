@@ -40,7 +40,7 @@ import {
 import { formatTokenAmount, parseTokenAmount } from '@haven_ai/core'
 import type { AgentContext } from '../../middleware/agentAuth.js'
 import type { MppHandlerResult } from './types.js'
-import { boundedErrorDetails } from '../payments/prepare-failure.js'
+import { boundedErrorDetails } from '../payments/index.js'
 
 const USDC_DECIMALS = 6
 

@@ -23,6 +23,7 @@ import {
 } from '../index.js'
 import {
   catalogAlerts,
+  createCatalogIngestMonitor,
   deliverCatalogAlerts,
   resetCatalogAlertStateForTests,
   runCatalogIngestTick,
@@ -323,7 +324,10 @@ describeDb('catalog ingestion lifecycle (#1714)', () => {
     expect(post.mock.calls.length).toBeGreaterThan(callsAfterVerify)
   })
 
-  it('respects the per-hostname cooldown across consecutive ticks', async () => {
+  // The seam test: a cooldown handed in is the one the probe stage consults.
+  // It injects the cooldown, so on its own it says nothing about production;
+  // the monitor tests below drive the entry point index.ts uses (#4407).
+  it('threads an injected cooldown through to the probe stage', async () => {
     const claim = await seed('cooldown.example.com')
     const post = vi.fn(mcpServer())
     const cooldown = new HostCooldown()
@@ -339,6 +343,100 @@ describeDb('catalog ingestion lifecycle (#1714)', () => {
     expect(report.skippedCooldown).toBe(1)
     expect(report.probedVerified).toBe(0)
     expect(post.mock.calls.length).toBe(callsAfterFirst)
+  })
+
+  describe('the monitor index.ts drives holds the cooldown across ticks (#4407)', () => {
+    const MIN = 60 * 1000
+    const T0 = new Date('2026-10-25T10:00:00Z').getTime()
+
+    it('characterization: a bare tick builds a fresh cooldown, so it spans nothing', async () => {
+      // The pre-#4407 production call shape: `runCatalogIngestTick()` with no
+      // cooldown. Two ticks five minutes apart both probe the failing host.
+      // This is why index.ts must go through the monitor.
+      const claim = await seed('bare.example.com')
+      const post = vi.fn(brokenMcp())
+      let clock = T0
+      const deps = tickDeps({ fetchText: wellKnownServer(claim, SECRET), post, now: () => new Date(clock) })
+
+      await runCatalogIngestTick(deps)
+      const callsAfterFirst = post.mock.calls.length
+      expect(callsAfterFirst).toBeGreaterThan(0)
+      clock = T0 + 5 * MIN
+      const second = await runCatalogIngestTick(deps)
+      expect(second.skippedCooldown).toBe(0)
+      expect(post.mock.calls.length).toBeGreaterThan(callsAfterFirst)
+    })
+
+    it('skips a failing host on the next tick inside the window, and probes it again after', async () => {
+      const claim = await seed('cooldown.example.com')
+      const post = vi.fn(brokenMcp())
+      let clock = T0
+      const monitor = createCatalogIngestMonitor(
+        tickDeps({ fetchText: wellKnownServer(claim, SECRET), post, now: () => new Date(clock) }),
+      )
+
+      const first = await monitor.tick()
+      expect(first.ownershipVerified).toBe(1)
+      expect(first.skippedCooldown).toBe(0)
+      const callsAfterFirst = post.mock.calls.length
+      expect(callsAfterFirst).toBeGreaterThan(0)
+      expect((await row(claim.submissionId)).consecutive_failures).toBe(1)
+
+      // Next 5-minute tick, inside the 15-minute window: no probe.
+      clock = T0 + 5 * MIN
+      const second = await monitor.tick()
+      expect(second.skippedCooldown).toBe(1)
+      expect(post.mock.calls.length).toBe(callsAfterFirst)
+      expect((await row(claim.submissionId)).consecutive_failures).toBe(1)
+
+      // The window has passed: the host is probed again.
+      clock = T0 + 15 * MIN
+      const third = await monitor.tick()
+      expect(third.skippedCooldown).toBe(0)
+      expect(post.mock.calls.length).toBeGreaterThan(callsAfterFirst)
+      expect((await row(claim.submissionId)).consecutive_failures).toBe(2)
+    })
+
+    it('a failing re-verification degrades on the third probe, at T+30, not T+10', async () => {
+      // The timing the runbook states: probes at T, T+15 and T+30 on 5-minute
+      // ticks, so the row degrades about 30 minutes after the first failure.
+      const claim = await seed('stale-monitor.example.com')
+      let server = mcpServer()
+      const post = vi.fn((url: string, payload: unknown) => server(url, payload))
+      let clock = T0
+      const monitor = createCatalogIngestMonitor(
+        tickDeps({ fetchText: wellKnownServer(claim, SECRET), post, now: () => new Date(clock) }),
+      )
+      expect((await monitor.tick()).probedVerified).toBe(1)
+
+      // A day later the merchant stops answering and the entry is due again.
+      // Backdate from the FAKE clock, never `now()`: the due query compares
+      // `last_verified_at` against `fake now - cadence`, so a real-clock seed
+      // silently stops being due once real time passes T0 + 2 days and the
+      // skip sequence below collapses (#4482 — this reddened `dev` for every
+      // PR from 2026-10-27T10:00Z).
+      const T = T0 + 24 * 60 * MIN
+      await db.query(
+        `UPDATE catalog_submissions SET last_verified_at = $2::timestamptz WHERE id = $1`,
+        [claim.submissionId, new Date(T - 2 * 24 * 60 * MIN)],
+      )
+      server = brokenMcp()
+      const skipped: number[] = []
+      const statuses: unknown[] = []
+      for (let i = 0; i <= 6; i += 1) {
+        clock = T + i * 5 * MIN
+        resetCatalogAlertStateForTests()
+        const report = await monitor.tick()
+        skipped.push(report.skippedCooldown)
+        statuses.push((await row(claim.submissionId)).status)
+      }
+      expect(skipped).toEqual([0, 1, 1, 0, 1, 1, 0])
+      expect(statuses).toEqual([
+        'verified_payable', 'verified_payable', 'verified_payable',
+        'verified_payable', 'verified_payable', 'verified_payable',
+        'failed',
+      ])
+    })
   })
 
   it('purges terminal rows past the retention TTL', async () => {

@@ -303,7 +303,7 @@ describe('catalog routes', () => {
       .find(([sql]) => String(sql).includes('FROM merchant_catalog'))
     for (const parameter of [2, 3, 4]) {
       expect(String(catalogCall?.[0])).toContain(
-        `(mc.name ILIKE '%' || $${parameter} || '%' OR mc.description ILIKE '%' || $${parameter} || '%' OR mc.category ILIKE '%' || $${parameter} || '%')`,
+        `(mc.name ILIKE '%' || $${parameter} || '%' ESCAPE '\\' OR mc.description ILIKE '%' || $${parameter} || '%' ESCAPE '\\' OR mc.category ILIKE '%' || $${parameter} || '%' ESCAPE '\\')`,
       )
     }
     expect(String(catalogCall?.[0])).toContain(`rail = $1`)
@@ -333,7 +333,7 @@ describe('catalog routes', () => {
     ])
     const [sql, values] = mockQuery.mock.calls[0]
     expect(String(sql)).toContain(
-      `(mc.name ILIKE '%' || $1 || '%' OR mc.description ILIKE '%' || $1 || '%' OR mc.category ILIKE '%' || $1 || '%')`,
+      `(mc.name ILIKE '%' || $1 || '%' ESCAPE '\\' OR mc.description ILIKE '%' || $1 || '%' ESCAPE '\\' OR mc.category ILIKE '%' || $1 || '%' ESCAPE '\\')`,
     )
     expect(values).toEqual(['VPN'])
   })

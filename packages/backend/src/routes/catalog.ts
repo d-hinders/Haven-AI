@@ -41,6 +41,7 @@ import {
 } from '../infra/repositories/catalog-submissions.js'
 import { marketplaceChainIds } from '../modules/catalog/index.js'
 import { CATALOG_ROW_WITH_MERCHANT_SELECT, type CatalogRowWithMerchant } from '../infra/repositories/merchants.js'
+import { escapeLikeContains } from '../infra/sql-like.js'
 
 /** Exported for the test that pins the spec's `rail` enum to this set (#3030). */
 export const VALID_RAILS = new Set(['x402', 'mpp'])
@@ -320,12 +321,15 @@ export default async function catalogRoutes(app: FastifyInstance): Promise<void>
         values.push(rail)
         conditions.push(`mc.rail = $${values.length}`)
       }
+      // #4346: a word is a literal substring. Only the bound SQL value is
+      // escaped; `searchWords` stays raw for the ingestion half below, whose
+      // JS `includes` is already literal.
       for (const word of searchWords) {
-        values.push(word)
+        values.push(escapeLikeContains(word))
         conditions.push(
-          `(mc.name ILIKE '%' || $${values.length} || '%' OR ` +
-            `mc.description ILIKE '%' || $${values.length} || '%' OR ` +
-            `mc.category ILIKE '%' || $${values.length} || '%')`,
+          `(mc.name ILIKE '%' || $${values.length} || '%' ESCAPE '\\' OR ` +
+            `mc.description ILIKE '%' || $${values.length} || '%' ESCAPE '\\' OR ` +
+            `mc.category ILIKE '%' || $${values.length} || '%' ESCAPE '\\')`,
         )
       }
       if (request.agent) {

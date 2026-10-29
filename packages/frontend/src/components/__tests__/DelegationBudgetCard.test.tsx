@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest'
+import { expectMenuNotClipped } from '@/__tests__/menu-clip'
 import { budgetCaption } from '@/lib/budget-caption'
 import { AGENT_PAUSED_SHORT } from '@/lib/agent-pause-copy'
 import { timeAgo } from '@/lib/format'
@@ -121,11 +122,16 @@ function taskBudget(overrides: Record<string, unknown> = {}) {
  * #4261: every row action lives in the per-budget ⋯ menu — Edit budget,
  * Add budget, then Stop budget… behind its confirm. Opens the row's menu;
  * the item-specific helpers below click the item inside it.
+ *
+ * #4491: the card that hosts this menu must not clip it — the panel is in
+ * flow, not portalled, so an `overflow-hidden` Card cut it off at the card's
+ * bottom edge. Asserted here so every menu-opening test in this file covers it.
  */
 async function openRowMenu(label: string) {
   fireEvent.click(
     await waitFor(() => screen.getByRole('button', { name: new RegExp(`^Budget options ${label}$`) })),
   )
+  expectMenuNotClipped(await waitFor(() => screen.getByRole('menu')))
 }
 
 async function clickMenuItem(name: string) {
@@ -524,6 +530,41 @@ describe('DelegationBudgetCard (#833)', () => {
     }
   })
 
+  // #4353: "Budget ending"'s Renew links `?renew=<hash>`, which opens that
+  // live budget's Edit, prefilled with its own limits, and tidies the URL.
+  it('?renew= opens the live budget\'s Edit and tidies the URL (#4353)', async () => {
+    const restore = withSearch(`?renew=${'0x' + 'ab'.repeat(32)}`)
+    const replace = vi.spyOn(window.history, 'replaceState')
+    try {
+      mockGet.mockReturnValue([budget()])
+      render(<DelegationBudgetCard {...PROPS} />)
+      expect(await screen.findByRole('dialog', { name: 'Edit budget' })).toBeTruthy()
+      expect(replace).toHaveBeenCalledWith(null, '', '/agents/agent-1')
+    } finally {
+      replace.mockRestore()
+      restore()
+    }
+  })
+
+  it('?renew= with an unknown or no-longer-active hash opens nothing (#4353)', async () => {
+    for (const [hash, rows] of [
+      ['0x' + 'ef'.repeat(32), [budget()]],
+      ['0x' + 'ab'.repeat(32), [budget({ status: 'revoked', is_live: false })]],
+    ] as const) {
+      const restore = withSearch(`?renew=${hash}`)
+      try {
+        mockGet.mockReturnValue([...rows])
+        const { unmount } = render(<DelegationBudgetCard {...PROPS} />)
+        await waitFor(() => expect(mockGet).toHaveBeenCalled())
+        await act(async () => {})
+        expect(screen.queryByRole('dialog', { name: 'Edit budget' })).toBeNull()
+        unmount()
+      } finally {
+        restore()
+      }
+    }
+  })
+
   // #3695 (B3): the grant form is collapsed once a budget exists — but a
   // `?grant=` link must still land on the build it carries, prefilled.
   it('?grant= opens the collapsed form prefilled even with an active budget present (#3695)', async () => {
@@ -880,6 +921,26 @@ describe('DelegationBudgetCard Spending section (#3695)', () => {
     expect(card!.contains(heading)).toBe(false)
   })
 
+  it.each([
+    ['live', undefined],
+    ['revoked', 'revoked'],
+    ['archived', 'archived'],
+  ] as const)('renders no description beside the "Spending" heading (%s agent) (#4476)', (_label, retired) => {
+    mockGet.mockReturnValue([])
+    render(<DelegationBudgetCard {...PROPS} retired={retired} />)
+    const heading = screen.getByRole('heading', { name: 'Spending' })
+    // #4476: the description repeated what the heading and the card already
+    // say, so the section rule makes descriptions optional and this section
+    // has none — for a live agent and for a retired one alike. Mutation:
+    // re-add a <p> beside the heading → red. The grep for the old sentence
+    // would also pass on a reworded one, which is why this asserts absence.
+    const section = heading.closest('section') as HTMLElement
+    expect(section).not.toBeNull()
+    expect(Array.from(section.children).filter((el) => el.tagName === 'P')).toHaveLength(0)
+    // Nothing sits between the heading and the card it introduces.
+    expect(heading.nextElementSibling?.className).toMatch(/rounded-\[10px\]/)
+  })
+
   it('draws a meter from remaining_atomic: used = budget − remaining, with the refill', () => {
     mockGet.mockReturnValue([
       budget({
@@ -891,23 +952,24 @@ describe('DelegationBudgetCard Spending section (#3695)', () => {
     render(<DelegationBudgetCard {...PROPS} />)
     const meter = screen.getByRole('progressbar', { name: 'USDC budget used' })
     expect(meter.getAttribute('aria-valuenow')).toBe('25')
-    // #3806: amounts are always two decimals.
-    expect(screen.getByText('1.25 of 5.00 USDC · per day · refills in 14h')).toBeTruthy()
+    // #3806: amounts are always two decimals. #4350: the end date is always named.
+    expect(screen.getByText('1.25 of 5.00 USDC · per day · refills in 14h · ends 20 Nov 2286')).toBeTruthy()
   })
 
-  it('says "expires" when the budget ends before its period does', () => {
+  it('names the end date when the budget ends before its period does (#4350)', () => {
     mockGet.mockReturnValue([
       budget({
         remaining_atomic: '5000000',
         remaining_from_chain: true,
         period_end: '2026-09-08T12:00:00Z',
         // Ends 2h after the frozen clock — before the 02:00Z boundary would
-        // refill it, so "expires" is the next event.
+        // refill it, so the expiry is the next event, phrased as the absolute
+        // "ends <date>" (#4350; was the relative "expires in 2h").
         expires_at: Math.floor(Date.parse('2026-09-01T14:00:00Z') / 1000),
       }),
     ])
     render(<DelegationBudgetCard {...PROPS} />)
-    expect(screen.getByText('0.00 of 5.00 USDC · per day · expires in 2h')).toBeTruthy()
+    expect(screen.getByText('0.00 of 5.00 USDC · per day · ends 1 Sept 2026')).toBeTruthy()
   })
 
   it('a read whose period has already ended shows unknown — the old amount is never paired with the next refill', () => {
@@ -1287,7 +1349,8 @@ describe('DelegationBudgetCard — occupied slot and replaced-but-enabled budget
     mockGrant.mockResolvedValue({ ok: true })
     render(<DelegationBudgetCard {...PROPS} />)
     await openFormAndType('10', OTHER)
-    expect(screen.getByText('One approval. Refills every period automatically.')).toBeTruthy()
+    // #4350: the pre-sign helper names the chosen end date (90-day default).
+    expect(screen.getByText(/One approval\. Refills every period automatically until \d{1,2} \w{3} \d{4}\./)).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Set budget' }))
     await waitFor(() => expect(mockGrant).toHaveBeenCalled())
     expect(screen.queryByRole('dialog', { name: 'Edit budget' })).toBeNull()
@@ -1734,7 +1797,7 @@ describe('DelegationBudgetCard hero states (#4226)', () => {
     net: { usd: netUsd, eur: netUsd, sek: netUsd * 10 },
     approx: false,
     payments,
-    refusals: { budget: 0, scope: 0, failed: 0, haven: 0 },
+    refusals: { budget: 0, expired: 0, scope: 0, failed: 0, haven: 0 },
   })
 
   const stats: DashboardAgentStats = {
@@ -1784,7 +1847,7 @@ describe('DelegationBudgetCard hero states (#4226)', () => {
     const fill = screen.getByRole('progressbar', { name: 'USDC budget used' }).querySelector('div')
     expect(fill?.className).toContain('bg-[var(--v2-ink-3)]')
     expect(screen.getByText(AGENT_PAUSED_SHORT)).toBeTruthy()
-    expect(screen.getByText('1.25 of 5.00 USDC · per day · refills in 14h')).toBeTruthy()
+    expect(screen.getByText('1.25 of 5.00 USDC · per day · refills in 14h · ends 20 Nov 2286')).toBeTruthy()
   })
 
   it("an active agent's hero caption is the dashboard row's caption, verbatim", () => {
@@ -1832,8 +1895,15 @@ describe('DelegationBudgetCard hero states (#4226)', () => {
     expect(screen.getByText('Last 30 days')).toBeTruthy()
     const grid = screen.getByText('Spent', { selector: 'dt' }).closest('dl')!
     // Plain matchers over the class list, so a miss is an AssertionError.
-    expect([...grid.classList]).toEqual(expect.arrayContaining(['grid', 'grid-cols-3']))
+    // #4400: two rows below `sm` (Spent alone, then Payments and Last paid),
+    // three across from `sm` — changed on purpose from #4260's grid-cols-3.
+    expect([...grid.classList]).toEqual(expect.arrayContaining(['grid', 'grid-cols-2', 'sm:grid-cols-[minmax(max-content,1fr)_minmax(0,1fr)_minmax(0,1fr)]']))
+    expect([...grid.classList]).not.toContain('grid-cols-3')
     expect(grid.querySelectorAll(':scope > div')).toHaveLength(3)
+    const spentCell = grid.querySelector(':scope > div') as HTMLElement
+    expect([...spentCell.classList]).toEqual(expect.arrayContaining(['col-span-2', 'sm:col-span-1']))
+    // #4400: no break-words on the Spent cell — the figure never wraps.
+    expect([...figure('Spent').classList]).not.toContain('break-words')
     // Spent is Amount size="md": text-xl on the Amount span itself (#4259).
     // #4274: the figure is d30's NET — 8.25, never the 12.50 gross the hero
     // used to read and the dashboard does not show.
@@ -1948,8 +2018,12 @@ describe('DelegationBudgetCard hero states (#4226)', () => {
     mockGet.mockReturnValue([heroBudget()])
     render(<DelegationBudgetCard {...PROPS} statsLoading />)
     const skeleton = screen.getByLabelText('Loading the last 30 days')
-    // #4260: three label-and-value bar pairs, the shape of the figures.
-    expect(skeleton.querySelector('.grid-cols-3')?.children).toHaveLength(3)
+    // #4260: three label-and-value bar pairs, the shape of the figures —
+    // #4400: in the loaded layout's grid (two rows below `sm`).
+    const bars = skeleton.querySelector('.grid-cols-2')
+    expect([...(bars?.classList ?? [])]).toContain('sm:grid-cols-3')
+    expect(bars?.children).toHaveLength(3)
+    expect([...(bars?.children[0]?.classList ?? [])]).toEqual(expect.arrayContaining(['col-span-2', 'sm:col-span-1']))
   })
 
   it('a retired agent renders no Last 30 days column, even when handed stats', () => {

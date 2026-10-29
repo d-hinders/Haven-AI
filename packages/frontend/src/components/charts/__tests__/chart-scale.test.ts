@@ -1,16 +1,19 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { stripComments } from '@haven_ai/core/comment-stripper'
 import { describe, expect, it } from 'vitest'
 import {
   chartScale,
   chartScaleRange,
   MAX_X_LABELS_DESKTOP,
+  END_X_LABEL_SEPARATION_FACTOR,
   FIRST_X_LABEL_SEPARATION_FACTOR,
   MAX_X_LABELS_MOBILE,
   MIN_CHARTABLE_DAYS,
   MIN_X_LABEL_SEPARATION_NARROW,
   MIN_X_LABEL_SEPARATION_WIDE,
   roundNiceStep,
+  xLabelEdge,
   xLabelIndices,
 } from '../chart-scale'
 
@@ -33,12 +36,14 @@ import {
  * maxima so a single lucky number cannot be what makes the suite green.
  */
 
-/** The module under test is pure; this is how its doc comment reads above. */
+/**
+ * Comments stripped with the shared core `stripComments` (#4411) — the old
+ * regex chain ran a block-comment regex first, which a `/*` inside a line
+ * comment could turn into a fake block swallowing the code the assertions
+ * below scan. Only the parser knows where a comment starts.
+ */
 function codeOf(source: string): string {
-  return source
-    .replace(/\/\*[\s\S]*?\*\//g, ' ') // JSDoc is prose about the code, not code
-    .replace(/^\s*\*.*$/gm, '') // a block-comment gutter, likewise
-    .replace(/(?<!:)\/\/.*$/gm, '') // line comments; keep `://` intact
+  return stripComments(source, 'chart-scale.ts')
 }
 
 describe('chartScale — ticks hit values the data reaches, never beyond the max', () => {
@@ -64,12 +69,12 @@ describe('chartScale — ticks hit values the data reaches, never beyond the max
     // The failure the nice steps prevent: a 743-tall range split four ways
     // is 185.75 / 371.5 / 557.25, and no day ever spent those amounts. The
     // snapped scale is the one whose ticks the data can be said to reach.
-    expect(chartScale(743)).toEqual({ max: 800, ticks: [200, 400, 600] })
+    expect(chartScale(743)).toEqual({ max: 800, ticks: [200, 400, 600], step: 200 })
     // 1240 → step roundNiceStep(310): the 3.1 unit snaps up to the 5, so the
     // step is 500 and the scale reads 500 / 1000 under a 1500 ceiling.
-    expect(chartScale(1240)).toEqual({ max: 1500, ticks: [500, 1000] })
+    expect(chartScale(1240)).toEqual({ max: 1500, ticks: [500, 1000], step: 500 })
     // 2.5 is on the family, so 99 reaches it: 25 / 50 / 75 under 100.
-    expect(chartScale(99)).toEqual({ max: 100, ticks: [25, 50, 75] })
+    expect(chartScale(99)).toEqual({ max: 100, ticks: [25, 50, 75], step: 25 })
   })
 
   it('lifts the ceiling past a data max that is already a round step', () => {
@@ -105,14 +110,37 @@ describe('chartScale — ticks hit values the data reaches, never beyond the max
     }
   })
 
+  it('keeps the step with the scale, so a sub-cent peak yields a sub-cent step (#4334)', () => {
+    // The tick formatter reads its fraction digits from `step` — the three
+    // peaks #4334 names, and the steps the nice family gives them: a 0.004
+    // peak steps by 0.001, a 0.008 peak by 0.002, a 0.025 peak by 0.005 —
+    // each under a cent, each needing 4 decimals to stay distinct. (Compared
+    // field-by-field: the binary floats carry dust a toEqual would trip on.)
+    const s4 = chartScale(0.004)
+    expect(s4.step).toBe(0.001)
+    expect(s4.max).toBeCloseTo(0.005, 12)
+    expect(s4.ticks.map((t) => Number(t.toFixed(4)))).toEqual([0.001, 0.002, 0.003, 0.004])
+    const s8 = chartScale(0.008)
+    expect(s8.step).toBe(0.002)
+    expect(s8.max).toBeCloseTo(0.01, 12)
+    expect(s8.ticks.map((t) => Number(t.toFixed(4)))).toEqual([0.002, 0.004, 0.006, 0.008])
+    const s25 = chartScale(0.025)
+    // 0.025/4 = 0.00625: the unit 6.25 snaps UP to the 10, so a peak of two
+    // and a half cents steps by a whole cent — 2-decimal ticks, still
+    // distinct ($0.01 / $0.02).
+    expect(s25.step).toBe(0.01)
+    expect(s25.max).toBeCloseTo(0.03, 12)
+    expect(s25.ticks.map((t) => Number(t.toFixed(4)))).toEqual([0.01, 0.02])
+  })
+
   it('degenerates honestly on an empty range instead of inventing headroom', () => {
     // A chart with nothing plotted has nothing to tick. The alternative — a
     // scale of 0..10 — is a lie in a serif face: it shows a y-axis with
     // values on it, for a chart about nothing.
-    expect(chartScale(0)).toEqual({ max: 0, ticks: [] })
-    expect(chartScale(-5)).toEqual({ max: 0, ticks: [] })
-    expect(chartScale(Number.NaN)).toEqual({ max: 0, ticks: [] })
-    expect(chartScale(Number.POSITIVE_INFINITY)).toEqual({ max: 0, ticks: [] })
+    expect(chartScale(0)).toEqual({ max: 0, ticks: [], step: 0 })
+    expect(chartScale(-5)).toEqual({ max: 0, ticks: [], step: 0 })
+    expect(chartScale(Number.NaN)).toEqual({ max: 0, ticks: [], step: 0 })
+    expect(chartScale(Number.POSITIVE_INFINITY)).toEqual({ max: 0, ticks: [], step: 0 })
   })
 
   it('honours a coarser interval when asked for fewer gridlines', () => {
@@ -121,8 +149,8 @@ describe('chartScale — ticks hit values the data reaches, never beyond the max
     const two = chartScale(1240, 2)
     const four = chartScale(1240, 4)
     expect(two.ticks.length).toBeLessThanOrEqual(four.ticks.length)
-    expect(two).toEqual({ max: 2000, ticks: [1000] })
-    expect(four).toEqual({ max: 1500, ticks: [500, 1000] })
+    expect(two).toEqual({ max: 2000, ticks: [1000], step: 1000 })
+    expect(four).toEqual({ max: 1500, ticks: [500, 1000], step: 500 })
   })
 })
 
@@ -326,6 +354,74 @@ describe('xLabelIndices — the density the issue fixes for 7d, 30d, 90d', () =>
   })
 })
 
+describe('xLabelIndices — an end label pinned at its right edge (#4426)', () => {
+  it('drops the label before a pinned end label that would crowd it, never the last day or day 0', () => {
+    // The analytics fixture's 31-day window (June 10 – July 10) printed day
+    // 28 ("8 Jul") two days from day 30 ("10 Jul"): 2/30 of the plot is
+    // past the one-label-width rule (6%) but inside the one and a half a
+    // right-anchored end label needs. Mutations: factor 1 → day 28 stays;
+    // the option ignored → day 28 stays; drop day 30 instead → red.
+    expect(END_X_LABEL_SEPARATION_FACTOR).toBe(1.5)
+    expect(xLabelIndices(31)).toEqual([0, 14, 28, 30])
+    expect(xLabelIndices(31, { endAnchoredRight: true })).toEqual([0, 14, 30])
+    expect(xLabelIndices(31, { narrow: true, endAnchoredRight: true })).toEqual([0, 14, 30])
+    for (const count of [3, 4, 5, 8, 12, 31, 45, 60, 74, 120, 365]) {
+      for (const narrow of [false, true]) {
+        const idx = xLabelIndices(count, { narrow, endAnchoredRight: true, startAnchoredLeft: true })
+        expect(idx[0]).toBe(0)
+        expect(idx[idx.length - 1]).toBe(count - 1)
+        if (idx.length > 2) {
+          const sep = narrow ? MIN_X_LABEL_SEPARATION_NARROW : MIN_X_LABEL_SEPARATION_WIDE
+          expect(
+            (count - 1 - idx[idx.length - 2]) / (count - 1),
+            `the end pair of ${count}${narrow ? ' narrow' : ''} crowds the pinned end label`,
+          ).toBeGreaterThanOrEqual(sep * END_X_LABEL_SEPARATION_FACTOR)
+        }
+      }
+    }
+  })
+
+  it('leaves the product ranges (7d, 30d, 90d) exactly as they were, in both treatments', () => {
+    // The lists the #4330 design reviews passed: the end option only thins
+    // a pair that collides. A factor of two would drop the phone's day 21
+    // on the 30-day range — a label 8/29 of the plot from the end that
+    // never collided. Mutation: factor 2 → the narrow 30-day lists are red.
+    for (const count of [7, 30, 90]) {
+      for (const narrow of [false, true]) {
+        expect(xLabelIndices(count, { narrow, endAnchoredRight: true })).toEqual(xLabelIndices(count, { narrow }))
+        expect(xLabelIndices(count, { narrow, startAnchoredLeft: true, endAnchoredRight: true })).toEqual(
+          xLabelIndices(count, { narrow, startAnchoredLeft: true }),
+        )
+      }
+    }
+  })
+})
+
+describe('xLabelEdge — the one edge-anchoring helper both charts read (#4426)', () => {
+  it('centres every label when nothing is anchored', () => {
+    for (const i of [0, 3, 6]) {
+      expect(xLabelEdge(i, 7)).toEqual({ transform: 'translateX(-50%)', bandOffset: 0.5 })
+    }
+  })
+
+  it('pins the first label left and the last right only where the caller anchors them', () => {
+    const both = { startAnchoredLeft: true, endAnchoredRight: true }
+    expect(xLabelEdge(0, 7, both)).toEqual({ transform: 'translateX(0)', bandOffset: 0 })
+    expect(xLabelEdge(3, 7, both)).toEqual({ transform: 'translateX(-50%)', bandOffset: 0.5 })
+    expect(xLabelEdge(6, 7, both)).toEqual({ transform: 'translateX(-100%)', bandOffset: 1 })
+    // End only (the bar chart): day 0 stays centred on its bar.
+    expect(xLabelEdge(0, 7, { endAnchoredRight: true })).toEqual({ transform: 'translateX(-50%)', bandOffset: 0.5 })
+    expect(xLabelEdge(6, 7, { endAnchoredRight: true })).toEqual({ transform: 'translateX(-100%)', bandOffset: 1 })
+    // Start only: the last day stays centred.
+    expect(xLabelEdge(6, 7, { startAnchoredLeft: true })).toEqual({ transform: 'translateX(-50%)', bandOffset: 0.5 })
+  })
+
+  it('treats a one-point range as a start, never as both edges at once', () => {
+    expect(xLabelEdge(0, 1, { startAnchoredLeft: true, endAnchoredRight: true }).transform).toBe('translateX(0)')
+    expect(xLabelEdge(0, 1, { endAnchoredRight: true }).transform).toBe('translateX(-50%)')
+  })
+})
+
 describe('the scale module is the shared arithmetic it claims to be', () => {
   it('imports neither React nor the DOM', () => {
     // Both charts read this file, and the tests above read it directly, so
@@ -378,7 +474,7 @@ describe('chartScaleRange — a scale for a chart that does not start at zero (#
   })
 
   it('a degenerate range returns the bounds and no ticks', () => {
-    expect(chartScaleRange(5, 5)).toEqual({ min: 5, max: 5, ticks: [] })
+    expect(chartScaleRange(5, 5)).toEqual({ min: 5, max: 5, ticks: [], step: 0 })
     expect(chartScaleRange(Number.NaN, 1).ticks).toEqual([])
   })
 

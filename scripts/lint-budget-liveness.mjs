@@ -163,6 +163,8 @@ export const NAMED_PREDICATE_EXPORTS = [
   // Slice A (#3920) — delegation spendable / still-enabled SQL builders.
   'spendableDelegationSql',
   'stillEnabledDelegationSql',
+  // #4353 — the ended-window complement, display-only.
+  'endedDelegationSql',
   // Slice B (#3921) — per-table SQL builders and their JS mirrors.
   'openSubBudgetSql',
   'isOpenSubBudget',

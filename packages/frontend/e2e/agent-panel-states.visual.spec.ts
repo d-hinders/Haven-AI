@@ -282,20 +282,24 @@ test.describe('agent panel empty states and card banners', () => {
     await page.clock.setFixedTime(FROZEN_NOW)
     await page.setViewportSize({ width: 1280, height: 2200 })
     const a = {
-      atlas: agentState({ id: 'agent-atlas', name: 'claude-eval', labels: [{ id: 'l1', name: 'research', color: 'blue' }] }),
-      spent: agentState({ id: 'agent-spent', name: 'Lovable Dev' }),
-      setup: agentState({ id: 'agent-setup', name: 'Demo agent', status: 'pending_approval', mcp_last_seen_at: '2026-09-01T10:00:00.000Z' }),
-      paused: agentState({ id: 'agent-paused', name: 'Siri', status: 'paused' }),
+      // #4431: each card carries its own STORED tint, so the capture shows
+      // the rule the epic changed — the mark's colour is the agent's, not a
+      // hash of its name.
+      atlas: agentState({ id: 'agent-atlas', name: 'claude-eval', avatar_tint: 1, labels: [{ id: 'l1', name: 'research', color: 'blue' }] }),
+      spent: agentState({ id: 'agent-spent', name: 'Lovable Dev', avatar_tint: 2 }),
+      setup: agentState({ id: 'agent-setup', name: 'Demo agent', avatar_tint: 3, status: 'pending_approval', mcp_last_seen_at: '2026-09-01T10:00:00.000Z' }),
+      paused: agentState({ id: 'agent-paused', name: 'Siri', avatar_tint: 4, status: 'paused' }),
       travel: agentState({
         id: 'agent-travel',
         name: 'Travel agent',
+        avatar_tint: 5,
         labels: ['travel', 'ops', 'q4', 'eu'].map((name, i) => ({ id: `t${i}`, name, color: 'green' })),
       }),
-      stranded: agentState({ id: 'agent-stranded', name: 'Atlas', has_stranded_funds: true }),
-      helper: agentState({ id: 'agent-helper', name: 'Helper' }),
-      revoked: agentState({ id: 'agent-revoked', name: 'Codex test agent 1', status: 'revoked' }),
-      halfRemoved: agentState({ id: 'agent-half', name: 'sub-3328', status: 'revoked', archived_at: '2026-06-01T00:00:00Z', live_delegation_count: 1 }),
-      archived: agentState({ id: 'agent-archived', name: 'gate-3028', status: 'revoked', archived_at: '2026-06-01T00:00:00Z' }),
+      stranded: agentState({ id: 'agent-stranded', name: 'Atlas', avatar_tint: 6, has_stranded_funds: true }),
+      helper: agentState({ id: 'agent-helper', name: 'Helper', avatar_tint: 1 }),
+      revoked: agentState({ id: 'agent-revoked', name: 'Codex test agent 1', avatar_tint: 2, status: 'revoked' }),
+      halfRemoved: agentState({ id: 'agent-half', name: 'sub-3328', avatar_tint: 3, status: 'revoked', archived_at: '2026-06-01T00:00:00Z', live_delegation_count: 1 }),
+      archived: agentState({ id: 'agent-archived', name: 'gate-3028', avatar_tint: 4, status: 'revoked', archived_at: '2026-06-01T00:00:00Z' }),
     }
     await seedAgents(page, Object.values(a), {
       overviewAgents: [
@@ -374,9 +378,9 @@ test.describe('agent panel empty states and card banners', () => {
     test(`agents list toolbar — ${viewport.slug}`, async ({ page }) => {
       await page.setViewportSize({ width: viewport.width, height: viewport.height })
       await seedAgents(page, [
-        agentState({ id: 'agent-a', name: 'Atlas' }),
-        agentState({ id: 'agent-b', name: 'Research assistant', status: 'paused' }),
-        agentState({ id: 'agent-c', name: 'Old agent', status: 'revoked', archived_at: '2026-06-01T00:00:00Z' }),
+        agentState({ id: 'agent-a', name: 'Atlas', avatar_tint: 1 }),
+        agentState({ id: 'agent-b', name: 'Research assistant', avatar_tint: 2, status: 'paused' }),
+        agentState({ id: 'agent-c', name: 'Old agent', avatar_tint: 3, status: 'revoked', archived_at: '2026-06-01T00:00:00Z' }),
       ])
       await page.goto('/agents?status=active')
       // Not `settle`: the User menu it waits on is desktop chrome, absent at 375px.

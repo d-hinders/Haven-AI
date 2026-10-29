@@ -15,7 +15,7 @@ export const version = '066_catalog_submissions'
  *   ownership_verified → the seller served the .well-known proof token (#1712)
  *   verified_payable → the leader-locked probe watched a real x402 quote (#1713)
  *   failed           → ownership proof or probe could not be satisfied
- *   delisted         → operator action, or lifecycle expiry (#1714)
+ *   delisted         → operator SQL (no lifecycle path sets it)
  *
  * The partial unique index is the anti-spam core of the whole ingestion
  * pipeline: one pending/active submission per hostname, where "pending/active"

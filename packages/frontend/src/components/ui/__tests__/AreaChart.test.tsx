@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { AreaChart, deltaLabel } from '../AreaChart'
+import { AreaChart, deltaLabel, signedDelta } from '../AreaChart'
 import type { AreaPoint, FullChartProps } from '../AreaChart'
 
 /**
@@ -188,31 +188,66 @@ describe('AreaChart — the line, the area, and the scale under them', () => {
     expect(lastY).toBeCloseTo(190, 2)
   })
 
-  it('annotates the range as what it is: the spend between the endpoints', () => {
+  it('annotates the range as what it is: the net change between the endpoints (#4333)', () => {
     renderChart()
-    // The delta is endpoint-to-endpoint, not the sum of movements, and it
-    // reads as a spent figure rather than a signed number: the balance fell
-    // by 120, and a range of payments spent 120.
-    // Exact, not a substring: the formatter already carries the currency, and
-    // "spent 120.00 USD" (or "298,43 kr SEK") is the #3204 double-currency
-    // defect. Mutation: append `{currency}` again → red.
-    expect(screen.getByTestId('area-delta').textContent?.trim()).toBe('spent 120.00')
+    // The delta is endpoint-to-endpoint, not the sum of movements, and it is
+    // a SIGNED net change: "Net change -120.00". A fall is not a spend — the
+    // balance is per-user and moves for reasons the spend chart does not
+    // draw. Exact, not a substring: the formatter already carries the
+    // currency, and "Net change 120.00 USD" (or "298,43 kr SEK") is the
+    // #3204 double-currency defect. Mutation: append `{currency}` again → red.
+    expect(screen.getByTestId('area-delta').textContent?.trim()).toBe('Net change -120.00')
   })
 
-  it('names the direction of the delta, including the two edges', () => {
-    expect(deltaLabel(-120)).toBe('spent')
+  it('names the delta and signs the amount, including the two edges (#4333)', () => {
+    expect(deltaLabel(-120)).toBe('Net change')
     expect(deltaLabel(0)).toBe('unchanged')
-    expect(deltaLabel(120)).toBe('gained')
-    // A range that rises is not called a spend, and an empty one is not a
-    // delta at all.
+    expect(deltaLabel(120)).toBe('Net change')
+    // A range that rises reads as a signed rise, not a spend; zero stays
+    // unsigned, because "unchanged" is not a direction to sign.
     const { container } = renderChart({}, [
       { label: 'Mon 8', value: 100 },
       { label: 'Tue 9', value: 160 },
       { label: 'Wed 10', value: 210 },
     ])
     expect(container.querySelector('[data-testid="area-delta"]')).toHaveTextContent(
-      'gained 110.00',
+      'Net change +110.00',
     )
+    expect(signedDelta(-120, (v) => v.toFixed(2))).toBe('-120.00')
+    expect(signedDelta(120, (v) => v.toFixed(2))).toBe('+120.00')
+    expect(signedDelta(0, (v) => v.toFixed(2))).toBe('0.00')
+  })
+
+  it('tones the delta by direction: success green for a rise, neutral ink for a fall or zero (#4480)', () => {
+    // Owner decision 2026-10-27, reversing #4333's all-neutral choice: a rise
+    // wears the quiet `--v2-success` the `Amount` incoming tone uses; a fall or
+    // an unchanged range stays neutral ink, and a fall is never red. The sign
+    // stays the carrier (WCAG 1.4.1) — the colour only agrees with it.
+    // Mutation: drop the branch → the positive case goes red.
+    const deltaClass = (container: HTMLElement) =>
+      container.querySelector('[data-testid="area-delta"]')!.className
+
+    const rising = renderChart({}, [
+      { label: 'Mon 8', value: 100 },
+      { label: 'Tue 9', value: 160 },
+      { label: 'Wed 10', value: 210 },
+    ])
+    expect(deltaClass(rising.container)).toContain('text-[var(--v2-success)]')
+    expect(deltaClass(rising.container)).not.toContain('text-[var(--v2-ink-3)]')
+    rising.unmount()
+
+    const falling = renderChart()
+    expect(deltaClass(falling.container)).toContain('text-[var(--v2-ink-3)]')
+    expect(deltaClass(falling.container)).not.toContain('text-[var(--v2-success)]')
+    falling.unmount()
+
+    const flat = renderChart({}, [
+      { label: 'Mon 8', value: 100 },
+      { label: 'Tue 9', value: 100 },
+      { label: 'Wed 10', value: 100 },
+    ])
+    expect(deltaClass(flat.container)).toContain('text-[var(--v2-ink-3)]')
+    expect(deltaClass(flat.container)).not.toContain('text-[var(--v2-success)]')
   })
 
   it('prints the 30-day right edge as one label: the two right-most label boxes do not intersect (#3037)', () => {
@@ -467,5 +502,25 @@ describe('AreaChart — the reveal, the mobile half, the sparse half', () => {
     // the test to one of them.
     const pathLen = line.getAttribute('pathLength') ?? line.getAttribute('pathlength')
     expect(pathLen).toBe('1')
+  })
+})
+
+describe('AreaChart — both edge labels pinned through the shared helper (#4426)', () => {
+  it('anchors day 0 left and the last day right, and spaces the end pair for it on a 31-day range', () => {
+    // The transform used to be an inline copy here; it is now
+    // `xLabelEdge` in chart-scale, read with the same anchoring the spacing
+    // reads. A 31-day range left day 28 two days from the pinned day 30.
+    // Mutations: drop `endAnchoredRight` from the chart's anchoring → day 28
+    // returns and the transform of d30 centres → red.
+    const points = Array.from({ length: 31 }, (_, i) => ({ label: `d${i}`, value: 1000 + i }))
+    renderChart({}, points)
+    const labels = screen.getAllByTestId('chart-x-label') as HTMLElement[]
+    expect(labels.map((el) => el.textContent)).toEqual(['d0', 'd14', 'd30'])
+    expect(labels.map((el) => el.style.transform)).toEqual([
+      'translateX(0)',
+      'translateX(-50%)',
+      'translateX(-100%)',
+    ])
+    for (const el of labels) expect(el.className.split(/\s+/)).toContain('whitespace-nowrap')
   })
 })

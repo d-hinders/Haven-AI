@@ -498,7 +498,7 @@ publishes nothing"; paste `npm run release:scope` output>
 ## Preflight
 
 - [ ] `dev` held while this PR is open (no merges to `dev`)
-- [ ] Migrations in range: <list, or "none"> → prod DB snapshot taken before deploy
+- [ ] Migrations in range: <list, or "none"> → prod DB snapshot taken before deploy, or "not taken" with any data precondition a migration states run against prod (recommended, not a gate)
 - [ ] Code-owner approval (someone other than the PR author) — migrations in range
 - [ ] Money-flow QA green at this head, or `qa-override` applied at open
 - [ ] Docs staleness audit dispositions recorded on this PR

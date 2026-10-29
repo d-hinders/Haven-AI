@@ -88,8 +88,14 @@ the VAT number was checked against VIES, on that date, nothing more.
 **The buyer-side x402 tax declaration (#3426) is separate from the passport
 too.** An owner can opt an individual agent in to carrying a buyer-side tax
 declaration on EIP-3009 payments; the declaration is computed at read time
-from the owner's company details, signed by the SDK, sent only when the agent
-pays, and never written into the EAS passport schema or anchored on-chain.
+from the owner's company details, signed by the SDK, and never written into
+the EAS passport schema or anchored on-chain. It is sent only when the agent
+pays through a client that holds its own signing key — the Haven SDK with a
+delegate key, or the local `@haven_ai/mcp` — and only to the merchant it
+pays; the default setup (hosted server plus separate signer) sends none. What
+the merchant receives is the country, the VAT number, the taxable-person
+status and a signed link to the agent's wallet address, never the legal name
+or the organisation number.
 
 ## The assurance ladder
 

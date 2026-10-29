@@ -19,7 +19,7 @@ const SIZE_CLASS: Record<Size, string> = {
  * `sm` renders 36px tall and `md` 40px — both under the ~44px commonly cited as
  * a comfortable touch target. (Neither is an accessibility failure: WCAG 2.2 AA
  * *Target Size (Minimum)* has a 24px floor. This is comfort and mis-tap rate,
- * which matters most in row lists of destructive actions — the Backup & recovery
+ * which matters most in row lists of destructive actions — the Who can approve
  * card's stacked `Remove` buttons at 390px are the case that surfaced it.)
  *
  * Rather than raise the rendered heights — which would move the density of every

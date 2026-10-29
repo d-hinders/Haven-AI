@@ -37,6 +37,7 @@
 import { DEFAULT_CHAIN_ID } from '@haven_ai/core'
 import pool from '../../db.js'
 import type { Executor } from '../transaction.js'
+import { escapeLikeContains } from '../sql-like.js'
 
 export type { Executor }
 
@@ -214,13 +215,13 @@ export const LIST_AGENT_PAYMENTS_FILTERED_SQL = `SELECT pi.id,
                   AND pi.status IN ('confirmed', 'executed')))
          AND ($4::text IS NULL OR pi.created_at >= $4::timestamptz)
          AND ($5::text IS NULL OR pi.created_at < $5::timestamptz)
-         AND ($6::text IS NULL OR pi.x402_resource_url ILIKE '%' || $6 || '%'
-              OR pi.merchant_address ILIKE '%' || $6 || '%'
-              OR pi.to_address ILIKE '%' || $6 || '%'
+         AND ($6::text IS NULL OR pi.x402_resource_url ILIKE '%' || $6 || '%' ESCAPE '\\'
+              OR pi.merchant_address ILIKE '%' || $6 || '%' ESCAPE '\\'
+              OR pi.to_address ILIKE '%' || $6 || '%' ESCAPE '\\'
               OR EXISTS (SELECT 1 FROM contacts c
                          WHERE c.user_id = pi.user_id
                            AND LOWER(c.address) = LOWER(pi.to_address)
-                           AND c.name ILIKE '%' || $6 || '%'))
+                           AND c.name ILIKE '%' || $6 || '%' ESCAPE '\\'))
          AND ($7::uuid IS NULL OR pi.id = $7::uuid)
          AND ($8::text IS NULL OR LOWER(pi.token_address) = LOWER($8::text))
        ORDER BY pi.created_at DESC
@@ -249,13 +250,13 @@ export const COUNT_AGENT_PAYMENTS_FILTERED_SQL = `SELECT COUNT(*)
                   AND pi.status IN ('confirmed', 'executed')))
          AND ($4::text IS NULL OR pi.created_at >= $4::timestamptz)
          AND ($5::text IS NULL OR pi.created_at < $5::timestamptz)
-         AND ($6::text IS NULL OR pi.x402_resource_url ILIKE '%' || $6 || '%'
-              OR pi.merchant_address ILIKE '%' || $6 || '%'
-              OR pi.to_address ILIKE '%' || $6 || '%'
+         AND ($6::text IS NULL OR pi.x402_resource_url ILIKE '%' || $6 || '%' ESCAPE '\\'
+              OR pi.merchant_address ILIKE '%' || $6 || '%' ESCAPE '\\'
+              OR pi.to_address ILIKE '%' || $6 || '%' ESCAPE '\\'
               OR EXISTS (SELECT 1 FROM contacts c
                          WHERE c.user_id = pi.user_id
                            AND LOWER(c.address) = LOWER(pi.to_address)
-                           AND c.name ILIKE '%' || $6 || '%'))
+                           AND c.name ILIKE '%' || $6 || '%' ESCAPE '\\'))
          AND ($7::uuid IS NULL OR pi.id = $7::uuid)
          AND ($8::text IS NULL OR LOWER(pi.token_address) = LOWER($8::text))`
 
@@ -288,7 +289,7 @@ function filteredPaymentArgs(agentId: string, filter: AgentPaymentActivityFilter
     filter.rails,
     filter.from,
     filter.to,
-    filter.q,
+    escapeLikeContains(filter.q),
     filter.paymentId,
     filter.token,
   ]
@@ -323,6 +324,27 @@ export async function countAgentPaymentsFiltered(
     ...filteredPaymentArgs(agentId, filter),
   ])
   return Number(result.rows[0]?.count ?? 0)
+}
+
+/**
+ * The agent ledger export's read (#4327): the SAME filtered population and
+ * order as `listAgentPaymentsFiltered` — the file is the rows the tab shows —
+ * unpaged, and capped. It reads `cap + 1` rows from the top, so a caller
+ * holding more than `cap` rows knows the export is over the cap without a
+ * second, unbounded count: the extra row is the signal, never a row of the
+ * file. The filtered list read caps `limit` at 100 at the route, so the export
+ * cannot page through it.
+ *
+ * Same gating contract as `listAgentPaymentsFiltered`: NOT tenant-scoped; the
+ * caller confirms the agent belongs to the requesting user first.
+ */
+export async function listAgentPaymentsForExport(
+  agentId: string,
+  filter: AgentPaymentActivityFilter,
+  cap: number,
+  db: Executor = pool,
+): Promise<ActivityPaymentRow[]> {
+  return listAgentPaymentsFiltered(agentId, filter, cap + 1, 0, db)
 }
 
 // #2055: `LIST_AGENT_APPROVALS_SQL` / `listAgentApprovals` are gone with

@@ -483,7 +483,7 @@ export class HavenClient {
     // agent in this flow passes delegateAddress and skips the duplicate fetch.
     const fundingTo = options.delegateAddress ?? (await this.getAgent()).delegateAddress
     if (!fundingTo) {
-      throw new HavenApiError('Authenticated agent has no delegate address registered.', 502)
+      throw HavenApiError.deterministic('Authenticated agent has no delegate address registered.', 502)
     }
 
     const idempotencyKey = options.idempotencyKey ?? buildX402IdempotencyKey(paymentRequired, option)
@@ -527,7 +527,7 @@ export class HavenClient {
       throwPaymentStateError('x402 payment', raw)
     }
     if (!raw.sign_data?.hash) {
-      throw new HavenApiError('No sign_hash returned from x402/authorize', 500, raw)
+      throw HavenApiError.deterministic('No sign_hash returned from x402/authorize', 500, raw)
     }
     // #946/#1138: a delegation-rail funding intent signs the ACCOUNT's EIP-712
     // typed data, not the bare hash. This path is keyless by construction, so
@@ -545,7 +545,7 @@ export class HavenClient {
       )
     }
     if (!raw.x402_expected_auth) {
-      throw new HavenApiError('No x402 expected-context binding returned from x402/authorize', 500, raw)
+      throw HavenApiError.deterministic('No x402 expected-context binding returned from x402/authorize', 500, raw)
     }
 
     return {
@@ -844,6 +844,12 @@ export class HavenClient {
    * degrade-to-warning path and the ledger row would still land while the
    * purchase proceeded.
    *
+   * #4458: an agent whose only budget for the token has ENDED is refused the
+   * same way with `error_code: 'delegation_expired'` and `budget_ended_at`
+   * (ISO 8601) — also thrown, also recorded (`source: 'hosted_prepare'`).
+   * The remedy differs: the owner sets a NEW budget, waiting for a period to
+   * reset cannot help.
+   *
    * #3518: without `merchantTo`, an agent whose budgets for the token are all
    * merchant-locked gets 409 `budget_requires_recipient` (thrown, nothing
    * recorded) naming the pins in `budget_recipient_addresses` — repeat the
@@ -892,12 +898,13 @@ export class HavenClient {
   /**
    * Post-purchase allowance/budget summary for a settled payment (#1310).
    *
-   * Reuses the EXACT rail-aware read path {@link getAllowances} / #1306's
-   * catalog-purchase preflight `allowance` block use — `GET
-   * /machine-payments/allowances`, with delegation-rail values coming from
-   * the #1090 `deriveDelegationBudgets`-backed enforcer read, never
+   * Reuses the EXACT rail-aware read path {@link getAllowances} uses —
+   * `GET /machine-payments/allowances`, with delegation-rail values coming
+   * from the #1090 `deriveDelegationBudgets`-backed enforcer read, never
    * `agent_allowances` — so this can never disagree with
-   * {@link getAllowances} for the same fixture. The settled token is
+   * {@link getAllowances} for the same fixture. (#1306's catalog-purchase
+   * preflight read the same path until #3054; it now calls
+   * `POST /machine-payments/budget-precheck` instead.) The settled token is
    * resolved from {@link getPaymentStatus} so callers pass only
    * `paymentId`, never a second haven_get_agent-style round trip.
    *

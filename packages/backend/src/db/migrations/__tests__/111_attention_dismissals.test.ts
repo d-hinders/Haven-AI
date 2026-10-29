@@ -21,6 +21,7 @@ import {
   resetDb,
 } from '../../../infra/__tests__/helpers/db-harness.js'
 import { down, up, version } from '../111_attention_dismissals.js'
+import { down as down118, up as up118 } from '../118_attention_acknowledgements.js'
 
 async function run(step: typeof up): Promise<void> {
   const client = await db.connect()
@@ -192,6 +193,9 @@ describeDb('migration 111 — attention_dismissals (#3813)', () => {
   it('up() is idempotent and down() drops exactly what up() created', async () => {
     await run(up) // already applied at head — a second run must be a no-op
 
+    // 118 builds on this table (#4324): revert it first, and re-apply it
+    // after, so the worker schema is back at head for later files.
+    await run(down118)
     await run(down)
     const table = await db.query(
       `SELECT 1 FROM information_schema.tables
@@ -205,5 +209,7 @@ describeDb('migration 111 — attention_dismissals (#3813)', () => {
         WHERE table_schema = current_schema() AND table_name = 'attention_dismissals'`,
     )
     expect(restored.rowCount).toBe(1)
+    await run(up118)
+    await assertWorkerSchemaAtHead()
   })
 })

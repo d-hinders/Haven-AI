@@ -107,7 +107,9 @@ A command that is nearly right is wrong here: the user pastes it.
 
 ## Report
 
-Write `docs/bug-reports/qa-explore-agent-onboarding-<YYYY-MM-DD>.md` with:
+Write `docs/bug-reports/qa-explore-agent-onboarding-<YYYY-MM-DD>.md`, with
+`status: record` in its front-matter (a dated report is a record the staleness
+audit never ranks, #4459), containing:
 
 1. The four scores, each beside **the previous run's score and the A0 baseline**. A bare
    score is not a finding; a moved score is.

@@ -112,6 +112,17 @@ class ApiClient {
       throw new ApiRequestError(body.error, response.status, body)
     }
 
+    // A successful response may carry no body at all. `204 No Content` is the
+    // correct answer for a bodyless delete (`DELETE /accounting/connections/:provider`,
+    // `DELETE /accounting/categories`), and `205 Reset Content` is the same shape.
+    // `Response.json()` on an empty body throws `SyntaxError: Unexpected end of
+    // JSON input` — which reached the user as a raw engine string on Disconnect
+    // and skipped the refetch (#4538). Resolve `undefined` instead; every 2xx
+    // that does carry a body still parses below.
+    if (response.status === 204 || response.status === 205) {
+      return undefined as T
+    }
+
     return response.json() as Promise<T>
   }
 
